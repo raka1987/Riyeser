@@ -108,3 +108,38 @@ test('extracts text from PDF and Word files', async () => {
   const docx = await extractText(path.join(__dirname, 'fixtures', 'acme-bathroom-quote.docx'));
   assert.equal(classify({ fileName: 'acme-bathroom-quote.docx', ext: '.docx', text: docx }, settings).docType, 'Quotes');
 });
+
+test('reads date, reference and amount and suggests a clean name', () => {
+  const { extractDetails, suggestName, typeMismatch } = require('../src/core/details');
+  const text = 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-1042\nInvoice Date: 03/11/2026\nDue Date: 20/11/2026\nTotal due $1,200.00';
+  const d = extractDetails(text, 'scan0042.pdf');
+  assert.deepEqual(d, { date: '2026-11-03', reference: 'INV-1042', amount: '$1,200.00' });
+  assert.equal(extractDetails('Invoice Date: 03/11/2026', 'x', { dayFirst: false }).date, '2026-03-11');
+  const c = classify({ fileName: 'scan0042.pdf', ext: '.pdf', text }, settings);
+  assert.equal(suggestName({ fileName: 'scan0042.pdf', ext: '.pdf', classification: c, details: d }), '2026-11-03 Acme Plumbing Invoice INV-1042.pdf');
+  assert.equal(suggestName({ fileName: 'IMG_1.jpg', ext: '.jpg', classification: { category: 'Media', docType: 'Images' }, details: {} }), null);
+  assert.match(typeMismatch('invoice-acme.pdf', 'QUOTATION\nThis quote is valid until 30 Dec. Estimate for works. Quote number 5'), /contents read like Quote/);
+  assert.equal(typeMismatch('acme-invoice.pdf', text), null);
+});
+
+test('organise plan renames, groups by year and flags mismatches', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const inbox = path.join(tmp, 'Downloads'); fs.mkdirSync(inbox);
+  const root = path.join(tmp, 'Organised');
+  fs.writeFileSync(path.join(inbox, 'scan0042.txt'), 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-1042\nInvoice Date: 03/11/2026\nTotal due $1,200.00');
+  fs.writeFileSync(path.join(inbox, 'acme invoice.txt'), 'QUOTATION for Acme Plumbing. This quote is valid until 30 Dec 2026. Estimate total $8,400.00. Quote number QU-77');
+  const { plan } = await planOrganise({ ...settings, watchFolders: [inbox], organisedRoot: root, groupByYear: true }, { minAgeMs: 0 });
+  const inv = plan.find((p) => p.name === 'scan0042.txt');
+  assert.equal(inv.to, path.join(root, 'Clients', 'Acme Plumbing', 'Invoices', '2026', '2026-11-03 Acme Plumbing Invoice INV-1042.txt'));
+  const q = plan.find((p) => p.name === 'acme invoice.txt');
+  assert.equal(q.docType, 'Quotes');
+  assert.match(q.warning, /Quote/);
+  assert.match(q.newName, /Acme Plumbing Quote QU-77\.txt$/);
+});
+
+test('does not mistake "Nov2026" or expiry dates for document facts', () => {
+  const { extractDetails } = require('../src/core/details');
+  assert.equal(extractDetails('ASB Bank Statement', 'Statement Nov2026.pdf').reference, null);
+  assert.equal(extractDetails('Quote. Valid until 30 Dec 2026.', 'q.docx').date, null);
+  assert.equal(extractDetails('Invoice No. 553 Due date 20/11/2026 Date 01/11/2026', 'x').date, '2026-11-01');
+});

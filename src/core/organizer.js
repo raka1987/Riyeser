@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { extractText } = require('./extract');
 const { classify } = require('./classifier');
+const { extractDetails, suggestName, typeMismatch } = require('./details');
 
 const SKIP_EXT = new Set(['.crdownload', '.part', '.tmp', '.download', '.partial', '.lnk', '.ini']);
 
@@ -75,11 +76,21 @@ async function planOrganise(settings, { ai = null, onProgress = () => {}, minAge
     let stat;
     try { stat = fs.statSync(file); } catch { continue; }
     if (Date.now() - stat.mtimeMs < minAgeMs) continue;
-    const { c } = await classifyFile(file, settings, ai);
-    const dir = targetDir(root, c);
-    const item = { from: file, name: path.basename(file), size: stat.size, ...c };
+    const { c, text } = await classifyFile(file, settings, ai);
+    const name = path.basename(file);
+    const ext = path.extname(file);
+    const details = extractDetails(text, name, { dayFirst: settings.dayFirstDates !== false });
+    const fileDate = new Date(stat.mtimeMs).toISOString().slice(0, 10);
+    const newName = settings.renameFiles === false ? null : suggestName({ fileName: name, ext, classification: c, details, fallbackDate: fileDate });
+    const warning = c.category === 'Media' ? null : typeMismatch(name, text);
+    let dir = targetDir(root, c);
+    if (dir && settings.groupByYear) dir = path.join(dir, (details.date || fileDate).slice(0, 4));
+    const item = {
+      from: file, name, size: stat.size, ...c, details, newName, warning,
+      preview: (text || '').replace(/\s+/g, ' ').trim().slice(0, 400),
+    };
     if (!dir || (c.confidence === 'low' && c.category !== 'Media')) review.push({ ...item, suggestedDir: dir });
-    else plan.push({ ...item, to: path.join(dir, path.basename(file)) });
+    else plan.push({ ...item, dir, to: path.join(dir, newName || name) });
   }
   return { plan, review, scanned: files.length };
 }

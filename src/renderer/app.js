@@ -65,11 +65,17 @@ const pages = {
       const key = p.company ? `${p.companyType} › ${p.company}` : p.category === 'Media' ? 'Photos, videos & other media' : 'General documents';
       (groups[key] = groups[key] || []).push(p);
     }
+    const facts = (p) => [p.details?.date && `📅 ${esc(p.details.date)}`, p.details?.reference && `# ${esc(p.details.reference)}`, p.details?.amount && `💲 ${esc(p.details.amount)}`].filter(Boolean).map((f) => `<span class="pill">${f}</span>`).join(' ');
+    const readBox = (p) => p.preview ? `<details class="small"><summary class="muted">What I read</summary><div class="readbox">${esc(p.preview)}…</div></details>` : '';
     const rows = (items) => items.map((p) => `<tr>
       <td><input type="checkbox" data-sel="${esc(p.from)}" ${selected.has(p.from) ? 'checked' : ''}></td>
-      <td><b>${esc(p.name)}</b><div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div></td>
-      <td>${esc(p.docType)}</td><td>${confPill(p.confidence)}</td>
-      <td class="path">${esc(short(p.to))}</td>
+      <td><b>${esc(p.name)}</b>
+        ${p.newName ? `<div class="row small" style="margin-top:4px"><span class="muted">rename to</span><input class="rename" data-rename="${esc(p.from)}" value="${esc(p.to.split(/[\\/]/).pop())}" title="Edit the new name if you like"></div>` : ''}
+        ${p.warning ? `<div class="small" style="color:var(--warn);margin-top:4px">⚠ ${esc(p.warning)}</div>` : ''}
+        <div style="margin-top:4px">${facts(p)}</div>
+        <div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div>${readBox(p)}</td>
+      <td>${esc(p.docType)}</td><td>${confPill(p.warning ? 'low' : p.confidence)}</td>
+      <td class="path">${esc(short(p.dir || p.to))}</td>
       <td><button class="link" data-act="open" data-path="${esc(p.from)}">Open</button></td></tr>`).join('');
     page.innerHTML = `
       <div class="row"><div><h1>Organise files</h1><p class="sub">Scans ${settings.watchFolders.map((f) => esc(short(f))).join(', ') || '(add folders in Settings)'} and files everything into <span class="path">${esc(short(settings.organisedRoot))}</span> by company and document type. Nothing moves until you approve it, and every batch can be undone.</p></div></div>
@@ -88,7 +94,7 @@ const pages = {
       </div>
       <div class="card"><h2>Needs your help (${plan.review.length})</h2>
         <p class="muted small">I couldn't tell who these are for. Open one to check, or add the company in <a href="#companies">Companies</a> and scan again so I recognise it next time.</p>
-        ${plan.review.length ? `<table><tr><th>File</th><th>Best guess</th><th></th></tr>${plan.review.map((r) => `<tr><td><b>${esc(r.name)}</b><div class="path">${esc(short(r.from))}</div></td>
+        ${plan.review.length ? `<table><tr><th>File</th><th>Best guess</th><th></th></tr>${plan.review.map((r) => `<tr><td><b>${esc(r.name)}</b><div class="path">${esc(short(r.from))}</div>${r.warning ? `<div class="small" style="color:var(--warn)">⚠ ${esc(r.warning)}</div>` : ''}${readBox(r)}</td>
           <td>${esc(r.docType)}${r.company ? ` · ${esc(r.company)}` : ''}</td>
           <td class="row"><button class="link" data-act="open" data-path="${esc(r.from)}">Open</button>${r.company ? `<button class="link" data-act="addco" data-name="${esc(r.company)}">Add “${esc(r.company)}” as a company</button>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">None.</div>'}
       </div>`}
@@ -203,6 +209,9 @@ const pages = {
       <div class="grid">
       <div class="card"><h2>Folders to tidy</h2><p class="muted small">Where new files land: Downloads, Desktop, and your phone's synced folder (e.g. OneDrive / Google Drive / iCloud “Camera Roll” or “Scans”).</p>${folderList('watchFolders')}
         <label class="row small" style="margin-top:10px"><input type="checkbox" id="recursive" ${s.recursiveScan ? 'checked' : ''}> Include sub-folders</label>
+        <label class="row small"><input type="checkbox" id="rename" ${s.renameFiles ? 'checked' : ''}> Rename files from their contents (e.g. “2026-11-03 Acme Plumbing Invoice 1042.pdf”)</label>
+        <label class="row small"><input type="checkbox" id="byyear" ${s.groupByYear ? 'checked' : ''}> Put files in a folder for each year (…/Invoices/2026/)</label>
+        <label class="row small">Dates like 03/04/2026 mean <select id="datefmt"><option value="1" ${s.dayFirstDates ? 'selected' : ''}>3 April (NZ/AU/UK)</option><option value="0" ${s.dayFirstDates ? '' : 'selected'}>March 4 (US)</option></select></label>
         <label class="row small"><input type="checkbox" id="auto" ${s.autoOrganise ? 'checked' : ''}> Tidy automatically every hour (only files I'm sure about)</label></div>
       <div class="card"><h2>Organised folder</h2><p class="muted small">Where sorted files go.</p><div class="path">${esc(s.organisedRoot)}</div><button style="margin-top:8px" data-act="setroot">Change…</button>
         <h2 style="margin-top:18px">Folders to search</h2>${folderList('searchFolders')}</div>
@@ -225,6 +234,9 @@ const pages = {
       </div>`;
     const bindCheck = (id, fn) => $(id).addEventListener('change', async (e) => { await saveSettings(fn(e.target.checked)); toast('Saved'); });
     bindCheck('#recursive', (v) => ({ recursiveScan: v }));
+    bindCheck('#rename', (v) => ({ renameFiles: v }));
+    bindCheck('#byyear', (v) => ({ groupByYear: v }));
+    $('#datefmt').addEventListener('change', async (e) => { await saveSettings({ dayFirstDates: e.target.value === '1' }); toast('Saved'); });
     bindCheck('#auto', (v) => ({ autoOrganise: v }));
     bindCheck('#login', (v) => ({ openAtLogin: v }));
     $('#remind').addEventListener('change', async (e) => { await saveSettings({ reminderMinutes: Math.max(1, +e.target.value || 10) }); toast('Saved'); });
@@ -273,11 +285,11 @@ const actions = {
   scan: async (el) => {
     el.disabled = true; $('#scan-status').textContent = 'Scanning…';
     const p = await bridge.call('organise:scan');
-    selected = new Set(p.plan.filter((x) => x.confidence === 'high' || x.category === 'Media').map((x) => x.from));
+    selected = new Set(p.plan.filter((x) => (x.confidence === 'high' && !x.warning) || x.category === 'Media').map((x) => x.from));
     render();
   },
   selall: () => { selected = new Set(plan.plan.map((p) => p.from)); render(); },
-  selsure: () => { selected = new Set(plan.plan.filter((p) => p.confidence === 'high' || p.category === 'Media').map((p) => p.from)); render(); },
+  selsure: () => { selected = new Set(plan.plan.filter((p) => (p.confidence === 'high' && !p.warning) || p.category === 'Media').map((p) => p.from)); render(); },
   selnone: () => { selected = new Set(); render(); },
   apply: async () => {
     const items = plan.plan.filter((p) => selected.has(p.from));
@@ -339,6 +351,14 @@ document.addEventListener('change', (e) => {
     e.target.checked ? selected.add(e.target.dataset.sel) : selected.delete(e.target.dataset.sel);
     const btn = page.querySelector('[data-act="apply"]');
     if (btn) { btn.disabled = !selected.size; btn.textContent = `Move ${selected.size} selected`; }
+  }
+  if (e.target.dataset.rename !== undefined && plan) {
+    const item = plan.plan.find((p) => p.from === e.target.dataset.rename);
+    const ext = item.name.includes('.') ? item.name.slice(item.name.lastIndexOf('.')) : '';
+    let v = e.target.value.trim().replace(/[<>:"/\\|?*]/g, '-') || item.name;
+    if (ext && !v.toLowerCase().endsWith(ext.toLowerCase())) v += ext;
+    e.target.value = v;
+    item.to = `${item.dir}${item.dir.includes('\\') ? '\\' : '/'}${v}`;
   }
   if (e.target.dataset.task) safe(async () => { await bridge.call('tasks:toggle', e.target.dataset.task); if (current === 'tasks') render(); });
 });
