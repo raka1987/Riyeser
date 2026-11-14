@@ -1,0 +1,59 @@
+{
+  "name": "desk-assistant",
+  "version": "0.1.0",
+  "description": "A personal desktop assistant that sorts your files by company and type, tracks meetings and to-dos, finds anything instantly and sorts email.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
+    "imapflow": "^2.11.0",
+    "mailparser": "^3.14.3",
+    "mammoth": "^1.13.0",
+    "node-ical": "^0.27.6",
+    "unpdf": "^1.9.1"
+  },
+  "productName": "Desk Assistant",
+  "build": {
+    "appId": "com.deskassistant.app",
+    "productName": "Desk Assistant",
+    "directories": {
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.png",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "private": true
+}
