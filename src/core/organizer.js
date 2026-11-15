@@ -142,7 +142,10 @@ function scanFolders(settings) {
       if (!e.isDirectory() || e.name.startsWith('.') || e.name.startsWith('$')) continue;
       const full = path.join(root, e.name);
       if (settings.organisedRoot && (full === settings.organisedRoot || settings.organisedRoot.startsWith(full + path.sep))) continue;
-      out.push({ path: full, name: e.name, parent: root, isRoot: false, files: listFiles(full, { recursive: true, maxDepth: 6, maxFiles: 500 }).length, checked: full in sel ? !!sel[full] : !!settings.recursiveScan });
+      // What to do with a sub-folder: 'leave' it, 'sort' the files inside, or 'move' the whole folder into Organised.
+      const v = full in sel ? sel[full] : (settings.recursiveScan ? 'sort' : 'leave');
+      const mode = v === 'move' ? 'move' : (v === true || v === 'sort') ? 'sort' : 'leave';
+      out.push({ path: full, name: e.name, parent: root, isRoot: false, files: listFiles(full, { recursive: true, maxDepth: 6, maxFiles: 500 }).length, mode, checked: mode === 'sort' });
     }
   }
   return out;
@@ -172,7 +175,44 @@ async function planOrganise(settings, { ai = null, onProgress = () => {}, minAge
     if (unsure) review.push({ ...item, suggestedDir: dir });
     else plan.push({ ...item, dir, to });
   }
+  // Whole folders the user chose to move as they are.
+  for (const f of scanFolders(settings).filter((x) => x.mode === 'move')) {
+    onProgress(i, files.length, f.path);
+    plan.push(await proposeFolder(f.path, settings, ai));
+  }
   return { mode: 'tidy', plan, review, scanned: files.length, emptyFolderCleanup: chosen.filter((f) => !f.isRoot).map((f) => f.path) };
+}
+
+/** Where should a whole folder go? Under a company if most of its documents belong to one, otherwise Organised\Folders. */
+async function proposeFolder(dir, settings, ai) {
+  const files = listFiles(dir, { recursive: true, maxDepth: 6, maxFiles: 400 });
+  const size = files.reduce((n, f) => { try { return n + fs.statSync(f).size; } catch { return n; } }, 0);
+  const counts = new Map();
+  let known = 0;
+  for (const f of files.slice(0, 25)) {
+    let st; try { st = fs.statSync(f); } catch { continue; }
+    const it = await analyseFile(f, st, settings, ai);
+    if (it.category === 'Media' || !it.company) continue;
+    known++;
+    const k = it.company;
+    if (!counts.has(k)) counts.set(k, { n: 0, type: it.companyType });
+    counts.get(k).n++;
+  }
+  const top = [...counts].sort((a, b) => b[1].n - a[1].n)[0];
+  const name = path.basename(dir);
+  let destDir = path.join(settings.organisedRoot, 'Folders');
+  let company = null; let companyType = null; const reasons = [`whole folder, ${files.length} file${files.length === 1 ? '' : 's'}`];
+  if (top && top[1].n >= 2 && top[1].n / known >= 0.6) {
+    company = top[0];
+    const knownCo = (settings.companies || []).find((c) => c.name.toLowerCase() === company.toLowerCase());
+    companyType = knownCo ? (knownCo.type || 'Companies') : (top[1].type || 'Companies');
+    destDir = path.join(settings.organisedRoot, safeName(companyType), safeName(company));
+    reasons.push(`${top[1].n} of the documents inside are for ${company}`);
+  }
+  return {
+    from: dir, name, isFolder: true, files: files.length, size, category: 'Folder', docType: 'Folder',
+    company, companyType, confidence: 'high', reasons, details: {}, keys: [], dir: destDir, to: path.join(destDir, name),
+  };
 }
 
 /**
@@ -208,8 +248,8 @@ function moveFile(from, to) {
   try { fs.renameSync(from, dest); }
   catch (e) {
     if (e.code !== 'EXDEV') throw e; // different drive: copy then delete
-    fs.copyFileSync(from, dest);
-    fs.unlinkSync(from);
+    if (fs.statSync(from).isDirectory()) { fs.cpSync(from, dest, { recursive: true }); fs.rmSync(from, { recursive: true, force: true }); }
+    else { fs.copyFileSync(from, dest); fs.unlinkSync(from); }
   }
   return dest;
 }

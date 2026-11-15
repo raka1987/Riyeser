@@ -83,3 +83,16 @@ td.path { word-break: break-all; min-width: 180px; }
 .dirgrid .d:hover { border-color: var(--accent); }
 .filetable tr.f { cursor: default; }
 .filetable tr.f:hover td { background: var(--bg); }
+
+/* Organise table fits the window - no sideways scrolling */
+main { overflow-x: hidden; }
+.plantable { table-layout: fixed; width: 100%; }
+.plantable td, .plantable th { overflow-wrap: anywhere; }
+.plantable .rename { min-width: 0; width: 100%; box-sizing: border-box; }
+.plantable .fname { word-break: break-word; }
+.route { font-size: 12.5px; line-height: 1.6; }
+.route .seg { white-space: nowrap; }
+.route .sep { color: var(--muted); margin: 0 4px; }
+.readbox { max-width: 100% !important; }
+.folderlist .fsub { padding-left: 26px; gap: 10px; }
+.folderlist .fsub select { padding: 3px 6px; }

@@ -284,3 +284,28 @@ test('never tidies the home folder or a whole drive', () => {
   const list = scanFolders({ watchFolders: [os.homedir(), path.parse(process.cwd()).root], organisedRoot: '/nowhere' });
   assert.equal(list.length, 0);
 });
+
+test('desktop folders: leave, sort inside, or move the whole folder (under the company if it is theirs)', async () => {
+  const { planOrganise, scanFolders, undoBatch } = require('../src/core/organizer');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const desk = path.join(tmp, 'Desktop'); const root = path.join(tmp, 'Organised');
+  const job = path.join(desk, 'Acme job'); fs.mkdirSync(path.join(job, 'photos'), { recursive: true });
+  fs.writeFileSync(path.join(job, 'quote.txt'), 'Quote for Acme Plumbing QU-1');
+  fs.writeFileSync(path.join(job, 'invoice.txt'), 'Invoice for Acme Plumbing INV-2 amount due $5');
+  fs.writeFileSync(path.join(job, 'photos', 'site.jpg'), 'x');
+  const misc = path.join(desk, 'Holiday ideas'); fs.mkdirSync(misc); fs.writeFileSync(path.join(misc, 'list.txt'), 'beach');
+  const keep = path.join(desk, 'Current work'); fs.mkdirSync(keep); fs.writeFileSync(path.join(keep, 'draft.txt'), 'wip');
+  const s2 = { ...settings, watchFolders: [desk], organisedRoot: root, scanSelection: { [desk]: true, [job]: 'move', [misc]: 'move', [keep]: 'leave' } };
+  assert.deepEqual(scanFolders(s2).filter((f) => !f.isRoot).map((f) => [f.name, f.mode]).sort(), [['Acme job', 'move'], ['Current work', 'leave'], ['Holiday ideas', 'move']]);
+  const { plan } = await planOrganise(s2, { minAgeMs: 0 });
+  const folderItems = plan.filter((p) => p.isFolder);
+  assert.equal(folderItems.length, 2);
+  assert.equal(folderItems.find((p) => p.name === 'Acme job').to, path.join(root, 'Clients', 'Acme Plumbing', 'Acme job'));
+  assert.equal(folderItems.find((p) => p.name === 'Holiday ideas').to, path.join(root, 'Folders', 'Holiday ideas'));
+  assert.ok(!plan.some((p) => p.from.startsWith(keep)));
+  const batch = applyPlan(folderItems);
+  assert.ok(fs.existsSync(path.join(root, 'Clients', 'Acme Plumbing', 'Acme job', 'photos', 'site.jpg')));
+  assert.ok(!fs.existsSync(job));
+  undoBatch(batch);
+  assert.ok(fs.existsSync(path.join(job, 'photos', 'site.jpg')));
+});

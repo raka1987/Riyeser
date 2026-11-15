@@ -23,6 +23,15 @@ const saveExpanded = () => { try { localStorage.setItem('da-expanded', JSON.stri
 const fileIcon = (ext) => ext === '.pdf' ? '📕' : /\.(docx?|odt|rtf)$/.test(ext) ? '📘' : /\.(xlsx?|csv|ods)$/.test(ext) ? '📗' : /\.(pptx?|key)$/.test(ext) ? '📙'
   : /\.(jpe?g|png|gif|heic|webp|bmp|tiff?)$/.test(ext) ? '🖼' : /\.(mp4|mov|avi|mkv)$/.test(ext) ? '🎞' : /\.(mp3|wav|m4a)$/.test(ext) ? '🎵' : /\.(zip|rar|7z|gz)$/.test(ext) ? '🗜' : /\.(exe|msi|dmg)$/.test(ext) ? '⚙' : /\.(eml|msg)$/.test(ext) ? '✉' : '📄';
 const folderHash = (p) => `#folder:${encodeURIComponent(p)}`;
+/** A short, readable route instead of a long path: "Organised › Clients › Acme Plumbing › Invoices". */
+function route(p) {
+  if (!p) return '';
+  const root = settings.organisedRoot;
+  const parts = p.startsWith(root) ? ['Organised', ...p.slice(root.length).split(/[\\/]/).filter(Boolean)] : short(p).split(/[\\/]/).filter(Boolean);
+  return parts.map((x) => `<span class="seg">${esc(x)}</span>`).join('<span class="sep">›</span>');
+}
+let platform = '';
+bridge.call('app:platform').then((p) => { platform = p; }).catch(() => {});
 
 // ---------------- folder tree (side panel) ----------------
 let treeRoots = [];
@@ -118,7 +127,7 @@ const pages = {
     const readBox = (p) => p.preview ? `<details class="small"><summary class="muted">What I read</summary><div class="readbox">${esc(p.preview)}…</div></details>` : '';
     const rows = (items) => items.map((p) => `<tr>
       <td><input type="checkbox" data-sel="${esc(p.from)}" ${selected.has(p.from) ? 'checked' : ''}></td>
-      <td><b>${esc(p.name)}</b>
+      <td><b class="fname">${p.isFolder ? '📁 ' : ''}${esc(p.name)}</b>
         ${p.newName ? `<div class="row small" style="margin-top:4px"><span class="muted">rename to</span><input class="rename" data-rename="${esc(p.from)}" value="${esc(p.to.split(/[\\/]/).pop())}" title="Edit the new name if you like"></div>` : ''}
         ${p.warning ? `<div class="small" style="color:var(--warn);margin-top:4px">⚠ ${esc(p.warning)}</div>` : ''}
         ${p.fallback ? `<div class="small muted" style="margin-top:3px">Filed by type for now. ${p.company ? `<button class="link small" data-act="addco" data-name="${esc(p.company)}">Add “${esc(p.company)}” as a company</button>` : 'Add the sender in <a href="#companies">Companies</a>'}, then use Re-check to file it under them.</div>` : ''}
@@ -126,14 +135,18 @@ const pages = {
         ${p.group ? `<div class="small" style="color:var(--good);margin-top:3px">🔗 Kept with ${p.group.size - 1} related document${p.group.size > 2 ? 's' : ''} — they share ${esc(p.group.because.join(', '))}${p.companyFromGroup ? ` (that's how I know it's for ${esc(p.company)})` : ''}</div>` : ''}
         <div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div>${readBox(p)}</td>
       <td>${esc(p.docType)}</td><td>${confPill(p.warning ? 'low' : p.confidence)}</td>
-      <td class="path">${p.currentDir ? `<span class="pill ${p.change === 'rename' ? '' : 'warn'}">${esc(p.change)}</span><div class="muted">now in ${esc(short(p.currentDir))}</div>${p.change === 'rename' ? '' : `→ ${esc(short(p.dir))}`}` : esc(short(p.dir || p.to))}</td>
-      <td><button class="link" data-act="open" data-path="${esc(p.from)}">Open</button></td></tr>`).join('');
+      <td class="route" title="${esc(p.to || p.dir)}">${p.currentDir ? `<span class="pill ${p.change === 'rename' ? '' : 'warn'}">${esc(p.change)}</span><div class="muted small">now in ${route(p.currentDir)}</div>${p.change === 'rename' ? '' : `<div>→ ${route(p.dir)}</div>`}` : route(p.dir || p.to)}</td>
+      <td><button class="link" data-act="${p.isFolder ? 'reveal' : 'open'}" data-path="${esc(p.from)}">${p.isFolder ? 'Show' : 'Open'}</button></td></tr>`).join('');
     page.innerHTML = `
-      <div class="row"><div><h1>Organise files</h1><p class="sub">Scans ${settings.watchFolders.map((f) => esc(short(f))).join(', ') || '(add folders in Settings)'} and files everything into <span class="path">${esc(short(settings.organisedRoot))}</span> by company and document type. Nothing moves until you approve it, and every batch can be undone.</p></div></div>
+      <div class="row"><div><h1>Organise files</h1><p class="sub">Sorts ${settings.watchFolders.map((f) => `<b>${esc(f.split(/[\\/]/).pop())}</b>`).join(' and ') || '(add folders in Settings)'} into your <b title="${esc(settings.organisedRoot)}">Organised</b> folder by company and document type. Nothing moves until you approve it, and every batch can be undone.</p></div></div>
       <div class="card"><h2>Folders to tidy</h2>
-        <p class="muted small">Tick what to sort. A ticked sub-folder is emptied completely, including any folders inside it, and removed once it's empty. Unticked folders are left exactly as they are.</p>
-        ${folders.length ? `<div class="folderlist">${folders.map((f) => `<label class="row small ${f.isRoot ? 'froot' : 'fsub'}"><input type="checkbox" data-folder="${esc(f.path)}" ${f.checked ? 'checked' : ''}>
-          ${f.isRoot ? `<b>${esc(f.name)}</b> <span class="muted">— loose files (${f.files})</span>` : `📁 ${esc(f.name)} <span class="muted">(${f.files >= 500 ? '500+' : f.files} file${f.files === 1 ? '' : 's'})</span>`}</label>`).join('')}</div>` : '<div class="empty">Add folders to tidy in <a href="#settings">Settings</a>.</div>'}
+        <p class="muted small">Tick the loose files to sort, and choose what happens to each folder: <b>Leave</b> it alone, <b>Sort files inside</b> (each file is filed separately and the empty folder is removed), or <b>Move whole folder</b> (kept together, moved into Organised — under the company if most of it is theirs).</p>
+        ${folders.length ? `<div class="folderlist">${folders.map((f) => f.isRoot
+          ? `<label class="row small froot"><input type="checkbox" data-folder="${esc(f.path)}" ${f.checked ? 'checked' : ''}> <b>${esc(f.name)}</b> <span class="muted">— loose files (${f.files})</span></label>`
+          : `<div class="row small fsub"><span class="grow ellipsis">📁 ${esc(f.name)} <span class="muted">(${f.files >= 500 ? '500+' : f.files} file${f.files === 1 ? '' : 's'})</span></span>
+              <select data-foldermode="${esc(f.path)}" class="small"><option value="leave" ${f.mode === 'leave' ? 'selected' : ''}>Leave</option><option value="sort" ${f.mode === 'sort' ? 'selected' : ''}>Sort files inside</option><option value="move" ${f.mode === 'move' ? 'selected' : ''}>Move whole folder</option></select></div>`).join('')}</div>` : '<div class="empty">Add folders to tidy in <a href="#settings">Settings</a>.</div>'}
+        ${platform === 'win32' ? `<div class="row" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><div class="grow small"><b>Desktop icons</b><div class="muted">Line up everything left on your desktop neatly in a grid, sorted by name. Your screen blinks for a second while Windows refreshes the desktop.</div></div>
+          <button data-act="arrangedesk">Tidy desktop icons</button><button class="link small" data-act="unarrangedesk" title="Turn auto-arrange off again">Undo</button></div>` : ''}
       </div>
       <div class="row" style="margin-bottom:16px">
         <button class="primary" data-act="scan">${plan?.mode === 'tidy' ? 'Scan again' : 'Scan my folders'}</button>
@@ -147,7 +160,7 @@ const pages = {
           <button class="link" data-act="selall">Select all</button><button class="link" data-act="selsure">Select only “sure”</button><button class="link" data-act="selnone">Clear</button>
           <button class="primary" data-act="apply" ${selected.size ? '' : 'disabled'}>Move ${selected.size} selected</button></div>
         ${plan.plan.length ? Object.entries(groups).map(([g, items]) => `<h3 style="margin:18px 0 4px;font-size:14px">${esc(g)} <span class="muted small">(${items.length})</span></h3>
-          <table><tr><th></th><th>File</th><th>Type</th><th>Confidence</th><th>${plan.mode === 'recheck' ? 'Change' : 'Will go to'}</th><th></th></tr>${rows(items)}</table>`).join('') : `<div class="empty">${plan.mode === 'recheck' ? 'Everything in your Organised folder already has a good name and is in the right place. 👍' : 'Nothing to file — your folders are tidy.'}</div>`}
+          <table class="plantable"><colgroup><col style="width:34px"><col style="width:42%"><col style="width:110px"><col style="width:92px"><col><col style="width:64px"></colgroup><tr><th></th><th>File</th><th>Type</th><th>Confidence</th><th>${plan.mode === 'recheck' ? 'Change' : 'Will go to'}</th><th></th></tr>${rows(items)}</table>`).join('') : `<div class="empty">${plan.mode === 'recheck' ? 'Everything in your Organised folder already has a good name and is in the right place. 👍' : 'Nothing to file — your folders are tidy.'}</div>`}
       </div>
       ${plan.mode === 'recheck' ? '' : `<div class="card"><h2>Needs your help (${plan.review.length})</h2>
         <p class="muted small">I couldn't tell who these are for. Open one to check, or add the company in <a href="#companies">Companies</a> and scan again so I recognise it next time.</p>
@@ -449,6 +462,12 @@ const actions = {
   },
   cleanselall: (el) => { cleanup.items.filter((i) => i.verdict === el.dataset.v).forEach((i) => cleanSel.add(i.path)); render(); },
   cleansetfolder: async () => { const f = await bridge.call('dialog:folder'); if (f) { await saveSettings({ cleanupFolder: f }); cleanup = null; render(); } },
+  arrangedesk: async (el) => {
+    el.disabled = true; el.textContent = 'Arranging…';
+    try { await bridge.call('desktop:arrange'); toast('Desktop icons lined up. (Right-click the desktop → View to change this any time.)'); }
+    finally { el.disabled = false; el.textContent = 'Tidy desktop icons'; }
+  },
+  unarrangedesk: async () => { await bridge.call('desktop:undoArrange'); toast('Auto-arrange is off again — you can place icons wherever you like.'); },
   gofolder: (el) => { folderFilter = ''; location.hash = folderHash(el.dataset.path); },
   pdfopen: async () => { const f = await bridge.call('pdf:openDialog', false); if (f) await bridge.call('pdf:edit', f); },
   pdfedit: (el) => bridge.call('pdf:edit', el.dataset.path),
@@ -541,6 +560,7 @@ document.addEventListener('change', (e) => {
     item.to = `${item.dir}${item.dir.includes('\\') ? '\\' : '/'}${v}`;
   }
   if (e.target.dataset.folder !== undefined) safe(() => bridge.call('organise:setFolder', e.target.dataset.folder, e.target.checked));
+  if (e.target.dataset.foldermode !== undefined) safe(() => bridge.call('organise:setFolder', e.target.dataset.foldermode, e.target.value));
   if (e.target.dataset.csel !== undefined) {
     e.target.checked ? cleanSel.add(e.target.dataset.csel) : cleanSel.delete(e.target.dataset.csel);
     const btn = page.querySelector('[data-act="cleantrash"]');
@@ -578,6 +598,7 @@ bridge.on('scan-progress', ({ i, n }) => { const s = $('#scan-status'); if (s) s
 
 (async () => {
   settings = await bridge.call('settings:get');
+  platform = await bridge.call('app:platform').catch(() => '');
   if (navigator.platform.startsWith('Mac')) $('#hotkey').textContent = '⌘';
   if (!settings.onboarded) { await saveSettings({ onboarded: true }); location.hash = 'companies'; toast('Welcome! Start by adding your own business name and the companies you work with.'); }
   render();

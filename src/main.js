@@ -353,9 +353,30 @@ function registerIpc() {
     return { dir, dirs: dirs.sort(byName), files: files.sort(byName) };
   });
   handle('organise:folders', () => organizer.scanFolders(getSettings()));
+  // Line up the icons on the Windows desktop: turns on "Auto arrange" + "Align to grid" and refreshes the desktop.
+  handle('desktop:arrange', async () => {
+    if (process.platform !== 'win32') throw new Error('Arranging desktop icons is only available on Windows.');
+    const script = [
+      "$k = 'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Bags\\1\\Desktop'",
+      'if (-not (Test-Path $k)) { New-Item -Path $k -Force | Out-Null }',
+      "Set-ItemProperty -Path $k -Name FFlags -Value 1075839525 -Type DWord",  // auto-arrange + align to grid
+      'Stop-Process -Name explorer -Force',
+      'Start-Sleep -Seconds 3',
+      'if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }',
+    ].join('; ');
+    await new Promise((resolve, reject) => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }, (err) => (err ? reject(err) : resolve())));
+    return true;
+  });
+  handle('desktop:undoArrange', async () => {
+    if (process.platform !== 'win32') return false;
+    const script = "Set-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Bags\\1\\Desktop' -Name FFlags -Value 1075839520 -Type DWord; Stop-Process -Name explorer -Force; Start-Sleep -Seconds 3; if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { Start-Process explorer.exe }";
+    await new Promise((resolve, reject) => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true }, (err) => (err ? reject(err) : resolve())));
+    return true;
+  });
   handle('organise:setFolder', (p, checked) => {
     const s = getSettings();
-    setSettings({ ...s, scanSelection: { ...(s.scanSelection || {}), [p]: !!checked } });
+    const value = typeof checked === 'string' ? checked : !!checked; // true/false for top folders, 'leave'|'sort'|'move' for sub-folders
+    setSettings({ ...s, scanSelection: { ...(s.scanSelection || {}), [p]: value } });
     return true;
   });
   handle('organise:recheck', async () => {
