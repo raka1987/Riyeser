@@ -926,6 +926,10 @@ const commands = {
   sigclear: resetPad,
   sigplace: placeSignature,
   sigupload: async () => { const d = await bridge.call('image:openDialog'); if (d) { sigUpload = await knockOutWhite(d); $('#sigimg').src = sigUpload; } },
+  makedefault: async () => {
+    const name = await bridge.call('pdf:makeDefault');
+    toast(`Windows Settings is opening: choose “${name}” for .pdf and you're done.`);
+  },
   image: async () => { if (!st.doc) return toast('Open a PDF first.'); const d = await bridge.call('image:openDialog'); if (d) placeImage(d, 220); },
 };
 document.addEventListener('click', (e) => {
@@ -959,5 +963,6 @@ window.addEventListener('beforeunload', (e) => {
 
 // ---------------- start ----------------
 window.__editor = { st, buildPdf, openFile, setTool, commands }; // used by automated tests
+bridge.call('app:platform').then((p) => { if (p === 'win32') $$('.windows-only').forEach((el) => { el.hidden = false; }); });
 const file = new URLSearchParams(location.search).get('file');
 if (file) openFile(file);

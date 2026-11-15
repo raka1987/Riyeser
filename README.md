@@ -71,3 +71,15 @@ test/                npm test
 ```
 
 Your data (settings, index, to-dos, undo history) is stored in the app's own data folder. The email password and API key are encrypted with the operating system's keychain.
+
+## Desk PDF (stand-alone PDF editor)
+
+The PDF viewer/editor is also available as its own small app, **Desk PDF**, without the rest of Desk Assistant.
+Both share the same editor code (`src/pdf-ipc.js`, `src/renderer/editor.*`).
+
+```bash
+npm run dist:pdf     # builds Desk PDF for Windows into dist-pdf/
+```
+
+Use **Set as my PDF app** in either app so PDFs from email, browsers and File Explorer open in it
+(Windows asks you to confirm the choice in Settings → Default apps).

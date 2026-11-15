@@ -138,7 +138,8 @@ const pages = {
       <div class="grid">
         <div class="card"><h2>Open a PDF</h2><p class="muted small">Add or edit text, highlight, draw, white-out, tick boxes, sign, fill forms, and rotate, delete, reorder or extract pages.</p>
           <button class="primary" data-act="pdfopen">Open PDF…</button>
-          <p class="muted small" style="margin-top:12px">Tip: in File Explorer, right-click a PDF → <b>Open with</b> → <b>Desk Assistant</b>.</p></div>
+          <p class="muted small" style="margin-top:12px">Want PDFs from email, your browser and File Explorer to open here?</p>
+          <button data-act="pdfdefault">Set as my PDF app</button></div>
         <div class="card"><h2>Combine PDFs</h2><p class="muted small">Join several PDFs into one, in the order shown.</p>
           <ul class="list" id="combinelist">${combine.map((f, i) => `<li><div class="grow path ellipsis">${esc(short(f))}</div><button class="link" data-act="cmbup" data-i="${i}">▲</button><button class="link" data-act="cmbrm" data-i="${i}">✕</button></li>`).join('') || '<li class="muted small">No files chosen yet.</li>'}</ul>
           <div class="row" style="margin-top:8px"><button data-act="cmbadd">Add PDFs…</button><button class="primary" data-act="cmbgo" ${combine.length > 1 ? '' : 'disabled'}>Combine &amp; save</button></div></div>
@@ -359,6 +360,7 @@ const actions = {
   cleansetfolder: async () => { const f = await bridge.call('dialog:folder'); if (f) { await saveSettings({ cleanupFolder: f }); cleanup = null; render(); } },
   pdfopen: async () => { const f = await bridge.call('pdf:openDialog', false); if (f) await bridge.call('pdf:edit', f); },
   pdfedit: (el) => bridge.call('pdf:edit', el.dataset.path),
+  pdfdefault: async () => { const name = await bridge.call('pdf:makeDefault'); toast(`Windows Settings is opening: choose “${name}” for .pdf.`); },
   pdfbackups: () => bridge.call('pdf:backups'),
   cmbadd: async () => { const fs = await bridge.call('pdf:openDialog', true); if (fs) { combine = [...combine, ...fs]; render(); } },
   cmbrm: (el) => { combine.splice(+el.dataset.i, 1); render(); },

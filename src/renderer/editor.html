@@ -24,6 +24,7 @@
       <span class="sep"></span>
       <span id="pageinfo" class="muted small"></span>
       <span class="spacer"></span>
+      <button class="windows-only small" hidden data-cmd="makedefault" title="Make this the app that opens PDFs everywhere on your PC">Set as PDF app</button>
       <span id="docname" class="small ellipsis" style="max-width:340px"></span>
       <span id="dirty" class="pill warn" hidden>unsaved</span>
     </div>
@@ -78,7 +79,8 @@
       </div>
     </aside>
     <main id="viewer"><div id="pages"></div>
-      <div id="empty" class="emptystate"><h2>PDF Editor</h2><p class="muted">Open a PDF to view, edit, fill in or sign it.</p><button class="primary" data-cmd="open">Open a PDF…</button></div>
+      <div id="empty" class="emptystate"><h2>PDF Editor</h2><p class="muted">Open a PDF to view, edit, fill in or sign it.</p><button class="primary" data-cmd="open">Open a PDF…</button>
+        <div class="windows-only" hidden style="margin-top:22px;text-align:center"><button data-cmd="makedefault">Set as my PDF app</button><p class="muted small">So PDFs from email, your browser and File Explorer open here.</p></div></div>
     </main>
   </div>
 
