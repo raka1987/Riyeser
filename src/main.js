@@ -33,6 +33,7 @@ function defaults() {
     groupByYear: false,
     dayFirstDates: true,
     staleDays: 90,
+    groupRelated: true,
     autoOrganise: false,
     calendars: [],
     reminderMinutes: 10,
@@ -237,6 +238,12 @@ function registerIpc() {
 
   handle('organise:scan', () => scanInbox());
   handle('organise:last', () => state.lastPlan);
+  handle('organise:folders', () => organizer.scanFolders(getSettings()));
+  handle('organise:setFolder', (p, checked) => {
+    const s = getSettings();
+    setSettings({ ...s, scanSelection: { ...(s.scanSelection || {}), [p]: !!checked } });
+    return true;
+  });
   handle('organise:recheck', async () => {
     state.lastPlan = await organizer.planRecheck(getSettings(), { ai: ai(), onProgress: (i, n) => send('scan-progress', { i, n }) });
     return state.lastPlan;
@@ -269,6 +276,8 @@ function registerIpc() {
   handle('organise:apply', (items) => {
     const batch = organizer.applyPlan(items);
     if (state.lastPlan?.mode === 'recheck') organizer.removeEmptyDirs(getSettings().organisedRoot);
+    // Sub-folders that were ticked for clean-up and are now empty get removed (undo recreates them).
+    for (const sub of state.lastPlan?.emptyFolderCleanup || []) organizer.removeEmptyDirs(sub, { includeRoot: true });
     store.update('history', [], (h) => [batch, ...h].slice(0, 50));
     refreshIndex().catch(() => {});
     return batch;

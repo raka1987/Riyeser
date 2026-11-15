@@ -194,3 +194,57 @@ test('downloads clean-up sorts items into delete / review / keep', async () => {
   assert.equal(v['acme invoice.txt'], 'keep');
   assert.equal(v['new-thing.txt'], 'keep');
 });
+
+test('finds related documents by reference, address or project', () => {
+  const { extractKeys, linkRelated } = require('../src/core/related');
+  const k = extractKeys('Quote QU-0077 for works at 12 Smith Street, Henderson\nProject: Bathroom renovation');
+  assert.deepEqual(k.map((x) => x.key).sort(), ['addr:12 smith st', 'proj:bathroom renovation', 'ref:QU0077']);
+  const items = [
+    { name: 'quote', company: 'Acme Plumbing', keys: extractKeys('Quote QU-0077. Site: 12 Smith Street') },
+    { name: 'invoice', company: 'Acme Plumbing', keys: extractKeys('Invoice INV-1042. As per quote QU-0077') },
+    { name: 'receipt', company: null, keys: extractKeys('Payment received for invoice INV-1042, thank you') },
+    { name: 'other', company: 'Acme Plumbing', keys: extractKeys('Invoice INV-2000 for 99 Other Road') },
+    { name: 'spark', company: 'Spark', keys: extractKeys('Invoice INV-1042 electricity') },
+  ];
+  linkRelated(items);
+  const [q, inv, rec, other, spark] = items;
+  assert.equal(q.group.size, 3);
+  assert.equal(q.group.name, '12 Smith Street');
+  assert.equal(inv.group.name, '12 Smith Street');
+  assert.equal(rec.group.name, '12 Smith Street');
+  assert.equal(rec.company, 'Acme Plumbing'); // picked up from the group
+  assert.equal(other.group, undefined);
+  assert.equal(spark.group, undefined);       // different company, never joined
+});
+
+test('desktop clean-up: ticked sub-folders, related project folder, empty folders removed', async () => {
+  const { planOrganise, scanFolders, removeEmptyDirs } = require('../src/core/organizer');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const desk = path.join(tmp, 'Desktop'); const root = path.join(tmp, 'Organised');
+  const old = path.join(desk, 'Old stuff', 'more'); fs.mkdirSync(old, { recursive: true });
+  const keep = path.join(desk, 'Keep me'); fs.mkdirSync(keep);
+  fs.writeFileSync(path.join(desk, 'quote.txt'), 'QUOTATION for Acme Plumbing\nQuote number QU-0077\nDate: 1 October 2026\nSite: 12 Smith Street\nEstimate total $8,400.00');
+  fs.writeFileSync(path.join(old, 'inv.txt'), 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-1042\nInvoice Date: 03/11/2026\nRe quote QU-0077, 12 Smith Street\nTotal due $8,400.00');
+  fs.writeFileSync(path.join(desk, 'Old stuff', 'paid.txt'), 'Receipt\nPayment received for invoice INV-1042\nDate: 10/11/2026\nThank you for your purchase');
+  fs.writeFileSync(path.join(keep, 'acme invoice.txt'), 'Invoice for Acme Plumbing INV-1042');
+  const settings2 = { ...settings, watchFolders: [desk], organisedRoot: root, scanSelection: { [path.join(desk, 'Old stuff')]: true } };
+  const folders = scanFolders(settings2);
+  assert.deepEqual(folders.map((f) => [f.name, f.checked]).sort(), [['Desktop', true], ['Keep me', false], ['Old stuff', true]]);
+  const { plan, emptyFolderCleanup } = await planOrganise(settings2, { minAgeMs: 0 });
+  const project = path.join(root, 'Clients', 'Acme Plumbing', 'Projects', '12 Smith Street');
+  assert.equal(plan.length, 3);
+  for (const p of plan) assert.equal(path.dirname(p.to), project);
+  assert.ok(plan.find((p) => p.name === 'paid.txt').to.endsWith('2026-11-10 Acme Plumbing Receipt INV-1042.txt'));
+  assert.ok(!plan.some((p) => p.from.startsWith(keep)));
+  applyPlan(plan);
+  for (const sub of emptyFolderCleanup) removeEmptyDirs(sub, { includeRoot: true });
+  assert.ok(!fs.existsSync(path.join(desk, 'Old stuff')));
+  assert.ok(fs.existsSync(path.join(keep, 'acme invoice.txt')));
+});
+
+test('address reading is not fooled by reference numbers', () => {
+  const { extractKeys } = require('../src/core/related');
+  const addr = (t) => extractKeys(t).filter((k) => k.key.startsWith('addr:')).map((k) => k.label);
+  assert.deepEqual(addr('As per quote QU-0077 - 12 Smith Street'), ['12 Smith Street']);
+  assert.deepEqual(addr('Site: 2/14 Queen St, Auckland'), ['2/14 Queen St']);
+});

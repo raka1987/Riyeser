@@ -62,3 +62,7 @@ th { color: var(--muted); font-weight: 600; font-size: 12px; border-top: none; }
 details summary { cursor: pointer; margin-top: 4px; }
 .readbox { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 4px; max-width: 520px; white-space: pre-wrap; }
 td.path { word-break: break-all; min-width: 180px; }
+.folderlist { display: flex; flex-direction: column; gap: 4px; }
+.folderlist .froot { margin-top: 6px; }
+.folderlist .fsub { padding-left: 26px; }
+[hidden] { display: none !important; }
