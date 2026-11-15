@@ -13,6 +13,8 @@ let settings = null;
 let plan = null;      // last organise plan
 let selected = new Set();
 let emailFilter = 'All';
+let cleanup = null;   // last clean-up check
+let cleanSel = new Set();
 
 function toast(msg) {
   const t = $('#toast');
@@ -75,31 +77,58 @@ const pages = {
         <div style="margin-top:4px">${facts(p)}</div>
         <div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div>${readBox(p)}</td>
       <td>${esc(p.docType)}</td><td>${confPill(p.warning ? 'low' : p.confidence)}</td>
-      <td class="path">${esc(short(p.dir || p.to))}</td>
+      <td class="path">${p.currentDir ? `<span class="pill ${p.change === 'rename' ? '' : 'warn'}">${esc(p.change)}</span><div class="muted">now in ${esc(short(p.currentDir))}</div>${p.change === 'rename' ? '' : `→ ${esc(short(p.dir))}`}` : esc(short(p.dir || p.to))}</td>
       <td><button class="link" data-act="open" data-path="${esc(p.from)}">Open</button></td></tr>`).join('');
     page.innerHTML = `
       <div class="row"><div><h1>Organise files</h1><p class="sub">Scans ${settings.watchFolders.map((f) => esc(short(f))).join(', ') || '(add folders in Settings)'} and files everything into <span class="path">${esc(short(settings.organisedRoot))}</span> by company and document type. Nothing moves until you approve it, and every batch can be undone.</p></div></div>
       <div class="row" style="margin-bottom:16px">
-        <button class="primary" data-act="scan">${plan ? 'Scan again' : 'Scan my folders'}</button>
+        <button class="primary" data-act="scan">${plan?.mode === 'tidy' ? 'Scan again' : 'Scan my folders'}</button>
+        <button data-act="recheck" title="Go through files already in your Organised folder and suggest better names and folders">Re-check my Organised folder</button>
         <span id="scan-status" class="muted small"></span><span class="spacer"></span>
         <button data-act="dupes">Find duplicate files</button>
       </div>
       ${!plan ? '<div class="card empty">Press “Scan my folders” to see what can be tidied.</div>' : `
       <div class="card">
-        <div class="row"><h2 style="margin:0">Ready to file (${plan.plan.length})</h2><span class="spacer"></span>
+        <div class="row"><h2 style="margin:0">${plan.mode === 'recheck' ? `Re-check: suggested fixes (${plan.plan.length} of ${plan.scanned} filed items)` : `Ready to file (${plan.plan.length})`}</h2><span class="spacer"></span>
           <button class="link" data-act="selall">Select all</button><button class="link" data-act="selsure">Select only “sure”</button><button class="link" data-act="selnone">Clear</button>
           <button class="primary" data-act="apply" ${selected.size ? '' : 'disabled'}>Move ${selected.size} selected</button></div>
         ${plan.plan.length ? Object.entries(groups).map(([g, items]) => `<h3 style="margin:18px 0 4px;font-size:14px">${esc(g)} <span class="muted small">(${items.length})</span></h3>
-          <table><tr><th></th><th>File</th><th>Type</th><th>Confidence</th><th>Will go to</th><th></th></tr>${rows(items)}</table>`).join('') : '<div class="empty">Nothing to file — your folders are tidy.</div>'}
+          <table><tr><th></th><th>File</th><th>Type</th><th>Confidence</th><th>${plan.mode === 'recheck' ? 'Change' : 'Will go to'}</th><th></th></tr>${rows(items)}</table>`).join('') : `<div class="empty">${plan.mode === 'recheck' ? 'Everything in your Organised folder already has a good name and is in the right place. 👍' : 'Nothing to file — your folders are tidy.'}</div>`}
       </div>
-      <div class="card"><h2>Needs your help (${plan.review.length})</h2>
+      ${plan.mode === 'recheck' ? '' : `<div class="card"><h2>Needs your help (${plan.review.length})</h2>
         <p class="muted small">I couldn't tell who these are for. Open one to check, or add the company in <a href="#companies">Companies</a> and scan again so I recognise it next time.</p>
         ${plan.review.length ? `<table><tr><th>File</th><th>Best guess</th><th></th></tr>${plan.review.map((r) => `<tr><td><b>${esc(r.name)}</b><div class="path">${esc(short(r.from))}</div>${r.warning ? `<div class="small" style="color:var(--warn)">⚠ ${esc(r.warning)}</div>` : ''}${readBox(r)}</td>
           <td>${esc(r.docType)}${r.company ? ` · ${esc(r.company)}` : ''}</td>
           <td class="row"><button class="link" data-act="open" data-path="${esc(r.from)}">Open</button>${r.company ? `<button class="link" data-act="addco" data-name="${esc(r.company)}">Add “${esc(r.company)}” as a company</button>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">None.</div>'}
-      </div>`}
+      </div>`}`}
       <div id="dupes"></div>
       <div class="card"><h2>Recent tidy-ups</h2>${history.length ? `<ul class="list">${history.slice(0, 10).map((b) => `<li><div class="grow">${new Date(b.at).toLocaleString()} — moved ${b.moves.length} file(s)${b.errors.length ? `, <span style="color:var(--bad)">${b.errors.length} failed</span>` : ''}</div><button data-act="undo" data-id="${esc(b.id)}">Undo</button></li>`).join('')}</ul>` : '<div class="empty">No tidy-ups yet.</div>'}</div>`;
+  },
+
+  async cleanup() {
+    const folder = settings.cleanupFolder || settings.watchFolders.find((f) => /downloads$/i.test(f)) || 'Downloads';
+    const groups = { delete: [], review: [], keep: [] };
+    for (const it of cleanup?.items || []) groups[it.verdict].push(it);
+    const total = (list) => fmtSize(list.reduce((n, i) => n + i.size, 0));
+    const selSize = (cleanup?.items || []).filter((i) => cleanSel.has(i.path)).reduce((n, i) => n + i.size, 0);
+    const ago = (d) => d === 0 ? 'today' : d === 1 ? 'yesterday' : d < 60 ? `${d} days ago` : d < 730 ? `${Math.round(d / 30)} months ago` : `${Math.round(d / 365)} years ago`;
+    const rows = (list, canSelect) => list.length ? `<table><tr>${canSelect ? '<th></th>' : ''}<th>Item</th><th>Size</th><th>Last used</th><th>Why</th><th></th></tr>${list.map((i) => `<tr>
+      ${canSelect ? `<td><input type="checkbox" data-csel="${esc(i.path)}" ${cleanSel.has(i.path) ? 'checked' : ''}></td>` : ''}
+      <td><b>${i.isDir ? '📁 ' : ''}${esc(i.name)}</b>${i.copyOf ? `<div class="path">already at ${esc(short(i.copyOf))}</div>` : ''}</td>
+      <td>${fmtSize(i.size)}</td><td>${ago(i.ageDays)}</td><td class="small">${esc(i.reason)}</td>
+      <td class="row" style="flex-wrap:nowrap"><button class="link" data-act="${i.isDir ? 'reveal' : 'open'}" data-path="${esc(i.path)}">${i.isDir ? 'Show' : 'Open'}</button>${canSelect ? `<button class="link" data-act="cleankeep" data-path="${esc(i.path)}">Keep</button>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">None.</div>';
+    page.innerHTML = `<h1>Clean up Downloads</h1>
+      <p class="sub">Checks <span class="path">${esc(short(folder))}</span> <button class="link" data-act="cleansetfolder">change</button> for things you probably don't need. Nothing is deleted without your OK, and anything you remove goes to the <b>Recycle Bin</b>, so you can get it back.</p>
+      <div class="row" style="margin-bottom:16px"><button class="primary" data-act="cleanscan">${cleanup ? 'Check again' : 'Check my Downloads'}</button>
+        <span class="small muted">Treat as unused after</span><select id="stale">${[30, 60, 90, 180, 365].map((d) => `<option value="${d}" ${d === (settings.staleDays || 90) ? 'selected' : ''}>${d} days</option>`).join('')}</select>
+        <span class="spacer"></span>${cleanup ? `<button class="primary" data-act="cleantrash" ${cleanSel.size ? '' : 'disabled'}>Move ${cleanSel.size} to Recycle Bin (${fmtSize(selSize)})</button>` : ''}</div>
+      ${!cleanup ? '<div class="card empty">Press “Check my Downloads” to start.</div>' : `
+      <div class="card"><div class="row"><h2 style="margin:0">Safe to delete (${groups.delete.length} · ${total(groups.delete)})</h2><span class="spacer"></span><button class="link" data-act="cleanselall" data-v="delete">Select all</button></div>
+        <p class="muted small">Old installers, zips you've already unzipped, unfinished downloads and exact copies of files already in your Organised folder.</p>${rows(groups.delete, true)}</div>
+      <div class="card"><div class="row"><h2 style="margin:0">Not used in a while — your call (${groups.review.length} · ${total(groups.review)})</h2><span class="spacer"></span><button class="link" data-act="cleanselall" data-v="review">Select all</button></div>
+        <p class="muted small">Not opened or changed for a long time. Open anything you're not sure about first. Click <b>Keep</b> and I won't ask about it again.</p>${rows(groups.review, true)}</div>
+      <div class="card"><h2>Keeping (${groups.keep.length})</h2><p class="muted small">Recently used, or looks important (invoices, contracts, statements…). Important documents are better filed than deleted — use <a href="#organise">Organise files</a>.</p>${rows(groups.keep, false)}</div>`}`;
+    $('#stale').addEventListener('change', (e) => saveSettings({ staleDays: +e.target.value }));
   },
 
   async search() {
@@ -282,6 +311,36 @@ const actions = {
   open: (el) => bridge.call('file:open', el.dataset.path),
   reveal: (el) => bridge.call('file:reveal', el.dataset.path),
   reindex: async () => { toast('Re-scanning files in the background…'); await bridge.call('index:rebuild'); toast('Search index updated'); render(); },
+  recheck: async (el) => {
+    el.disabled = true; $('#scan-status').textContent = 'Re-checking filed items…';
+    const p = await bridge.call('organise:recheck');
+    selected = new Set(p.plan.filter((x) => x.confidence === 'high' && !x.warning).map((x) => x.from));
+    render();
+  },
+  cleanscan: async (el) => {
+    el.disabled = true; el.textContent = 'Checking…';
+    cleanup = await bridge.call('cleanup:scan', +$('#stale').value || 90);
+    cleanSel = new Set(cleanup.items.filter((i) => i.verdict === 'delete').map((i) => i.path));
+    render();
+  },
+  cleantrash: async () => {
+    const paths = [...cleanSel];
+    const size = cleanup.items.filter((i) => cleanSel.has(i.path)).reduce((n, i) => n + i.size, 0);
+    if (!confirm(`Move ${paths.length} item(s) (${fmtSize(size)}) to the Recycle Bin?\n\nYou can restore them from the Recycle Bin if you change your mind.`)) return;
+    const r = await bridge.call('cleanup:trash', paths);
+    cleanup.items = cleanup.items.filter((i) => !r.done.includes(i.path));
+    cleanSel = new Set();
+    toast(`Moved ${r.done.length} item(s) to the Recycle Bin${r.failed.length ? `, ${r.failed.length} couldn't be moved (in use?)` : ''}`);
+    render();
+  },
+  cleankeep: async (el) => {
+    await bridge.call('cleanup:keep', el.dataset.path);
+    cleanup.items = cleanup.items.filter((i) => i.path !== el.dataset.path);
+    cleanSel.delete(el.dataset.path);
+    toast('OK — I won\'t suggest that one again'); render();
+  },
+  cleanselall: (el) => { cleanup.items.filter((i) => i.verdict === el.dataset.v).forEach((i) => cleanSel.add(i.path)); render(); },
+  cleansetfolder: async () => { const f = await bridge.call('dialog:folder'); if (f) { await saveSettings({ cleanupFolder: f }); cleanup = null; render(); } },
   scan: async (el) => {
     el.disabled = true; $('#scan-status').textContent = 'Scanning…';
     const p = await bridge.call('organise:scan');
@@ -296,7 +355,7 @@ const actions = {
     const batch = await bridge.call('organise:apply', items);
     toast(`Moved ${batch.moves.length} file(s)${batch.errors.length ? `, ${batch.errors.length} failed` : ''}. You can undo below.`);
     selected = new Set();
-    await bridge.call('organise:scan');
+    await bridge.call(plan.mode === 'recheck' ? 'organise:recheck' : 'organise:scan');
     render();
   },
   undo: async (el) => { const r = await bridge.call('organise:undo', el.dataset.id); toast(r.errors.length ? `Undone, but ${r.errors.length} file(s) couldn't be moved back` : 'Undone — files are back where they were'); render(); },
@@ -359,6 +418,12 @@ document.addEventListener('change', (e) => {
     if (ext && !v.toLowerCase().endsWith(ext.toLowerCase())) v += ext;
     e.target.value = v;
     item.to = `${item.dir}${item.dir.includes('\\') ? '\\' : '/'}${v}`;
+  }
+  if (e.target.dataset.csel !== undefined) {
+    e.target.checked ? cleanSel.add(e.target.dataset.csel) : cleanSel.delete(e.target.dataset.csel);
+    const btn = page.querySelector('[data-act="cleantrash"]');
+    const size = cleanup.items.filter((i) => cleanSel.has(i.path)).reduce((n, i) => n + i.size, 0);
+    if (btn) { btn.disabled = !cleanSel.size; btn.textContent = `Move ${cleanSel.size} to Recycle Bin (${fmtSize(size)})`; }
   }
   if (e.target.dataset.task) safe(async () => { await bridge.call('tasks:toggle', e.target.dataset.task); if (current === 'tasks') render(); });
 });

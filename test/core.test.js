@@ -143,3 +143,54 @@ test('does not mistake "Nov2026" or expiry dates for document facts', () => {
   assert.equal(extractDetails('Quote. Valid until 30 Dec 2026.', 'q.docx').date, null);
   assert.equal(extractDetails('Invoice No. 553 Due date 20/11/2026 Date 01/11/2026', 'x').date, '2026-11-01');
 });
+
+test('re-check suggests fixes for already-filed items and leaves good ones alone', async () => {
+  const { planRecheck, removeEmptyDirs } = require('../src/core/organizer');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const root = path.join(tmp, 'Organised');
+  const wrong = path.join(root, 'Companies', 'Acme Plumbing', 'Invoices'); fs.mkdirSync(wrong, { recursive: true });
+  fs.writeFileSync(path.join(wrong, 'scan0042.txt'), 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-1042\nInvoice Date: 03/11/2026\nTotal due $1,200.00');
+  const good = path.join(root, 'Clients', 'Acme Plumbing', 'Invoices'); fs.mkdirSync(good, { recursive: true });
+  fs.writeFileSync(path.join(good, '2026-10-01 Acme Plumbing Invoice INV-1000.txt'), 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-1000\nInvoice Date: 01/10/2026');
+  const mine = path.join(root, 'My stuff'); fs.mkdirSync(mine);
+  fs.writeFileSync(path.join(mine, 'ideas.txt'), 'random thoughts');
+  const { plan, scanned } = await planRecheck({ ...settings, organisedRoot: root });
+  assert.equal(scanned, 3);
+  assert.equal(plan.length, 1);
+  assert.equal(plan[0].to, path.join(root, 'Clients', 'Acme Plumbing', 'Invoices', '2026-11-03 Acme Plumbing Invoice INV-1042.txt'));
+  assert.equal(plan[0].change, 'move + rename');
+  applyPlan(plan);
+  removeEmptyDirs(root);
+  assert.ok(!fs.existsSync(path.join(root, 'Companies')));
+  assert.ok(fs.existsSync(path.join(mine, 'ideas.txt')));
+});
+
+test('downloads clean-up sorts items into delete / review / keep', async () => {
+  const { analyseFolder } = require('../src/core/cleanup');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const dl = path.join(tmp, 'Downloads'); fs.mkdirSync(dl);
+  const root = path.join(tmp, 'Organised'); fs.mkdirSync(root);
+  // Pretend "now" is 200 days in the future; files written today are therefore 200 days old.
+  const now = Date.now() + 200 * 86400_000;
+  const mk = (name, body, isOld = true) => {
+    const f = path.join(dl, name); fs.writeFileSync(f, body);
+    if (!isOld) { const t = new Date(now - 86400_000); fs.utimesSync(f, t, t); }
+    return f;
+  };
+  mk('ChromeSetup.exe', 'x'.repeat(5000));
+  mk('photos.zip', 'zipdata'); fs.mkdirSync(path.join(dl, 'photos'));
+  mk('movie.mp4.crdownload', 'partial');
+  fs.writeFileSync(path.join(root, 'filed.pdf'), 'SAME CONTENT'); mk('filed (1).pdf', 'SAME CONTENT');
+  mk('old-meme.png', 'png');
+  mk('acme invoice.txt', 'Invoice for Acme Plumbing. Invoice number 77. Amount due $300');
+  mk('new-thing.txt', 'hello', false);
+  const items = await analyseFolder(dl, { organisedRoot: root, staleDays: 90, settings, now });
+  const v = Object.fromEntries(items.map((i) => [i.name, i.verdict]));
+  assert.equal(v['ChromeSetup.exe'], 'delete');
+  assert.equal(v['photos.zip'], 'delete');
+  assert.equal(v['movie.mp4.crdownload'], 'delete');
+  assert.equal(v['filed (1).pdf'], 'delete');
+  assert.equal(v['old-meme.png'], 'review');
+  assert.equal(v['acme invoice.txt'], 'keep');
+  assert.equal(v['new-thing.txt'], 'keep');
+});

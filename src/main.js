@@ -10,6 +10,7 @@ const { upcomingMeetings, companiesInMeeting } = require('./core/calendar');
 const { fetchAndSort } = require('./core/email');
 const { extractActionItems } = require('./core/actions');
 const { createAI } = require('./core/ai');
+const { analyseFolder } = require('./core/cleanup');
 
 const HOTKEY = 'CommandOrControl+Shift+Space';
 let store, index, mainWin, searchWin, tray;
@@ -30,6 +31,7 @@ function defaults() {
     renameFiles: true,
     groupByYear: false,
     dayFirstDates: true,
+    staleDays: 90,
     autoOrganise: false,
     calendars: [],
     reminderMinutes: 10,
@@ -231,8 +233,38 @@ function registerIpc() {
 
   handle('organise:scan', () => scanInbox());
   handle('organise:last', () => state.lastPlan);
+  handle('organise:recheck', async () => {
+    state.lastPlan = await organizer.planRecheck(getSettings(), { ai: ai(), onProgress: (i, n) => send('scan-progress', { i, n }) });
+    return state.lastPlan;
+  });
+
+  // Downloads clean-up
+  const cleanupFolder = () => {
+    const s = getSettings();
+    return s.cleanupFolder || s.watchFolders.find((f) => /downloads$/i.test(f)) || path.join(os.homedir(), 'Downloads');
+  };
+  handle('cleanup:scan', async (staleDays) => {
+    const s = getSettings();
+    const folder = cleanupFolder();
+    const items = await analyseFolder(folder, {
+      organisedRoot: s.organisedRoot, staleDays: staleDays || s.staleDays || 90, ignore: store.get('cleanupKeep', []), settings: s,
+      onProgress: (i, n) => send('scan-progress', { i, n }),
+    });
+    return { folder, items };
+  });
+  handle('cleanup:trash', async (paths) => {
+    const done = []; const failed = [];
+    for (const p of paths) {
+      try { await shell.trashItem(p); done.push(p); index.remove(p); } catch (e) { failed.push({ path: p, error: e.message }); }
+    }
+    store.update('cleanupLog', [], (l) => [{ at: new Date().toISOString(), binned: done }, ...l].slice(0, 50));
+    return { done, failed };
+  });
+  handle('cleanup:keep', (p) => { store.update('cleanupKeep', [], (k) => [...new Set([...k, p])]); return true; });
+  handle('cleanup:resetKept', () => { store.set('cleanupKeep', []); return true; });
   handle('organise:apply', (items) => {
     const batch = organizer.applyPlan(items);
+    if (state.lastPlan?.mode === 'recheck') organizer.removeEmptyDirs(getSettings().organisedRoot);
     store.update('history', [], (h) => [batch, ...h].slice(0, 50));
     refreshIndex().catch(() => {});
     return batch;

@@ -30,7 +30,7 @@ function uniquePath(p) {
   return path.join(dir, `${name}-${Date.now()}${ext}`);
 }
 
-function listFiles(folder, { recursive = false, maxFiles = 2000 } = {}) {
+function listFiles(folder, { recursive = false, maxFiles = 2000, maxDepth = 4 } = {}) {
   const out = [];
   const walk = (dir, depth) => {
     let entries;
@@ -39,7 +39,7 @@ function listFiles(folder, { recursive = false, maxFiles = 2000 } = {}) {
       if (out.length >= maxFiles) return;
       if (e.name.startsWith('.') || e.name.startsWith('~$')) continue;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (recursive && depth < 4) walk(full, depth + 1); continue; }
+      if (e.isDirectory()) { if (recursive && depth < maxDepth) walk(full, depth + 1); continue; }
       if (!e.isFile()) continue;
       if (SKIP_EXT.has(path.extname(e.name).toLowerCase())) continue;
       out.push(full);
@@ -62,6 +62,26 @@ async function classifyFile(file, settings, ai) {
   return { c, text };
 }
 
+/** Work out where one file should live and what it should be called. */
+async function proposeFor(file, stat, settings, ai) {
+  const root = settings.organisedRoot;
+  const { c, text } = await classifyFile(file, settings, ai);
+  const name = path.basename(file);
+  const ext = path.extname(file);
+  const details = extractDetails(text, name, { dayFirst: settings.dayFirstDates !== false });
+  const fileDate = new Date(stat.mtimeMs).toISOString().slice(0, 10);
+  const newName = settings.renameFiles === false ? null : suggestName({ fileName: name, ext, classification: c, details, fallbackDate: fileDate });
+  const warning = c.category === 'Media' ? null : typeMismatch(name, text);
+  let dir = targetDir(root, c);
+  if (dir && settings.groupByYear) dir = path.join(dir, (details.date || fileDate).slice(0, 4));
+  const item = {
+    from: file, name, size: stat.size, ...c, details, newName, warning,
+    preview: (text || '').replace(/\s+/g, ' ').trim().slice(0, 400),
+  };
+  const unsure = !dir || (c.confidence === 'low' && c.category !== 'Media');
+  return { item, dir, unsure, to: dir ? path.join(dir, newName || name) : null };
+}
+
 /** Build a plan of proposed moves. Files younger than `minAgeMs` are skipped (probably still downloading/in use). */
 async function planOrganise(settings, { ai = null, onProgress = () => {}, minAgeMs = 60_000 } = {}) {
   const root = settings.organisedRoot;
@@ -76,23 +96,33 @@ async function planOrganise(settings, { ai = null, onProgress = () => {}, minAge
     let stat;
     try { stat = fs.statSync(file); } catch { continue; }
     if (Date.now() - stat.mtimeMs < minAgeMs) continue;
-    const { c, text } = await classifyFile(file, settings, ai);
-    const name = path.basename(file);
-    const ext = path.extname(file);
-    const details = extractDetails(text, name, { dayFirst: settings.dayFirstDates !== false });
-    const fileDate = new Date(stat.mtimeMs).toISOString().slice(0, 10);
-    const newName = settings.renameFiles === false ? null : suggestName({ fileName: name, ext, classification: c, details, fallbackDate: fileDate });
-    const warning = c.category === 'Media' ? null : typeMismatch(name, text);
-    let dir = targetDir(root, c);
-    if (dir && settings.groupByYear) dir = path.join(dir, (details.date || fileDate).slice(0, 4));
-    const item = {
-      from: file, name, size: stat.size, ...c, details, newName, warning,
-      preview: (text || '').replace(/\s+/g, ' ').trim().slice(0, 400),
-    };
-    if (!dir || (c.confidence === 'low' && c.category !== 'Media')) review.push({ ...item, suggestedDir: dir });
-    else plan.push({ ...item, dir, to: path.join(dir, newName || name) });
+    const { item, dir, unsure, to } = await proposeFor(file, stat, settings, ai);
+    if (unsure) review.push({ ...item, suggestedDir: dir });
+    else plan.push({ ...item, dir, to });
   }
-  return { plan, review, scanned: files.length };
+  return { mode: 'tidy', plan, review, scanned: files.length };
+}
+
+/**
+ * Re-check files that are already in the Organised folder: suggest better names and fix anything in the wrong place.
+ * Files we're unsure about are left alone - you may have put them there on purpose.
+ */
+async function planRecheck(settings, { ai = null, onProgress = () => {} } = {}) {
+  const root = settings.organisedRoot;
+  const plan = [];
+  const files = fs.existsSync(root) ? listFiles(root, { recursive: true, maxDepth: 8, maxFiles: 20000 }) : [];
+  let i = 0;
+  for (const file of files) {
+    onProgress(++i, files.length, file);
+    let stat;
+    try { stat = fs.statSync(file); } catch { continue; }
+    const { item, dir, unsure, to } = await proposeFor(file, stat, settings, ai);
+    if (unsure || !to) continue;
+    if (path.resolve(to).toLowerCase() === path.resolve(file).toLowerCase()) continue;
+    const sameFolder = path.resolve(dir).toLowerCase() === path.resolve(path.dirname(file)).toLowerCase();
+    plan.push({ ...item, dir, to, change: sameFolder ? 'rename' : (item.newName ? 'move + rename' : 'move'), currentDir: path.dirname(file) });
+  }
+  return { mode: 'recheck', plan, review: [], scanned: files.length };
 }
 
 function moveFile(from, to) {
@@ -118,6 +148,22 @@ function applyPlan(items) {
     } catch (e) { batch.errors.push({ from: it.from, error: e.message }); }
   }
   return batch;
+}
+
+/** Delete folders left empty after files were moved out (never the root itself). */
+function removeEmptyDirs(root) {
+  const walk = (dir) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
+    let empty = true;
+    for (const e of entries) {
+      if (e.isDirectory()) { if (!walk(path.join(dir, e.name))) empty = false; }
+      else empty = false;
+    }
+    if (empty && dir !== root) { try { fs.rmdirSync(dir); } catch { return false; } }
+    return empty;
+  };
+  if (fs.existsSync(root)) walk(root);
 }
 
 function undoBatch(batch) {
@@ -156,4 +202,4 @@ function findDuplicates(folders) {
   return groups.sort((a, b) => b.size * b.files.length - a.size * a.files.length);
 }
 
-module.exports = { planOrganise, applyPlan, undoBatch, findDuplicates, listFiles, targetDir, classifyFile, moveFile };
+module.exports = { planOrganise, planRecheck, removeEmptyDirs, applyPlan, undoBatch, findDuplicates, listFiles, targetDir, classifyFile, moveFile };
