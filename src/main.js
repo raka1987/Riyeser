@@ -274,6 +274,47 @@ function toggleSearch() {
   else { searchWin.center(); searchWin.show(); searchWin.focus(); searchWin.webContents.send('search-focus'); }
 }
 
+function folderRoots() {
+  const s = getSettings();
+  const list = [
+    { path: s.organisedRoot, name: 'Organised', icon: '🗂' },
+    ...s.watchFolders.map((f) => ({ path: f, name: path.basename(f), icon: /desktop$/i.test(f) ? '🖥' : /downloads$/i.test(f) ? '⬇' : '📁' })),
+    ...(s.libraryFolders || []).map((f) => ({ path: f, name: path.basename(f), icon: /documents$/i.test(f) ? '📄' : /pictures$/i.test(f) ? '🖼' : /videos$/i.test(f) ? '🎞' : /music$/i.test(f) ? '🎵' : '📁' })),
+    ...s.searchFolders.map((f) => ({ path: f, name: path.basename(f), icon: '📁' })),
+  ];
+  const seen = new Set();
+  return list.filter((r) => r.path && fs.existsSync(r.path) && !safety.isSystemPath(r.path) && !seen.has(r.path) && seen.add(r.path))
+    .map((r) => ({ ...r, hasDirs: hasSubfolders(r.path) }));
+}
+/** Every folder under the roots (cached for a minute so typing in the search box stays fast). */
+let folderCache = { at: 0, key: '', list: [] };
+function allFolders(roots) {
+  const key = roots.map((r) => r.path).join('|');
+  if (folderCache.key === key && Date.now() - folderCache.at < 60_000) return folderCache.list;
+  const list = [];
+  const seen = new Set(roots.map((r) => path.resolve(r.path).toLowerCase())); // a root inside another root (Organised in Documents) is listed once
+  for (const r of roots) {
+    const walk = (dir, depth, rel) => {
+      if (depth > 10 || list.length > 40000) return;
+      let entries; try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (!e.isDirectory() || e.name.startsWith('.') || e.name.startsWith('$')) continue;
+        const full = path.join(dir, e.name);
+        if (safety.isSystemPath(full)) continue;
+        const key = path.resolve(full).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const r2 = `${rel} › ${e.name}`;
+        list.push({ name: e.name, path: full, rel: r2, parent: rel, depth, root: r.name });
+        walk(full, depth + 1, r2);
+      }
+    };
+    walk(r.path, 0, r.name);
+  }
+  folderCache = { at: Date.now(), key, list };
+  return list;
+}
+
 function hasSubfolders(dir) {
   try { return fs.readdirSync(dir, { withFileTypes: true }).some((e) => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('$')); } catch { return false; }
 }
@@ -389,18 +430,27 @@ function registerIpc() {
   handle('ocr:readFile', (file) => new Uint8Array(fs.readFileSync(file)));
 
   // Folder browser in the side panel
-  handle('folder:roots', () => {
-    const s = getSettings();
-    const home = os.homedir();
-    const list = [
-      { path: s.organisedRoot, name: 'Organised', icon: '🗂' },
-      ...s.watchFolders.map((f) => ({ path: f, name: path.basename(f), icon: /desktop$/i.test(f) ? '🖥' : /downloads$/i.test(f) ? '⬇' : '📁' })),
-      { path: path.join(home, 'Documents'), name: 'Documents', icon: '📄' },
-      ...s.searchFolders.map((f) => ({ path: f, name: path.basename(f), icon: '📁' })),
-    ];
-    const seen = new Set();
-    return list.filter((r) => r.path && fs.existsSync(r.path) && !seen.has(r.path) && seen.add(r.path))
-      .map((r) => ({ ...r, hasDirs: hasSubfolders(r.path) }));
+  handle('folder:roots', () => folderRoots());
+  // Deep search through every folder and file under the roots (folders by name; files by name and contents).
+  handle('folder:find', (q) => {
+    const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    if (!terms.length) return { folders: [], files: [] };
+    const roots = folderRoots();
+    const dirs = allFolders(roots);
+    // Each word must match the START of a word somewhere in the folder's path ("ark" finds "Ark project", not "Spark"),
+    // and at least one word must match the folder's own name (so its sub-folders don't all show up too).
+    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const res = terms.map((t) => new RegExp(`(^|[^a-z0-9])${esc(t)}`, 'i'));
+    const folders = [];
+    for (const d of dirs) {
+      if (!res.every((r) => r.test(d.rel))) continue;
+      const inName = res.filter((r) => r.test(d.name)).length;
+      if (!inName) continue;
+      folders.push({ ...d, score: inName * 10 + (res[0].test(d.name) ? 3 : 0) - d.depth });
+    }
+    folders.sort((a, b) => b.score - a.score || a.rel.length - b.rel.length);
+    const files = index.search(q, 25).map((f) => ({ name: f.name, path: f.path, dir: f.dir, company: f.company, docType: f.docType }));
+    return { folders: folders.slice(0, 40), files, total: folders.length };
   });
   handle('folder:list', (dir) => {
     const dirs = []; const files = [];

@@ -16,6 +16,7 @@ let emailFilter = 'All';
 let cleanup = null;   // last clean-up check
 let combine = [];     // PDFs chosen for combining
 let everythingDone = null; // last "tidy everything" batch
+let appVersion = '';
 let scanning = false;
 let currentFolder = null;
 let folderFilter = '';
@@ -35,12 +36,15 @@ function route(p) {
 let platform = '';
 bridge.call('app:platform').then((p) => { platform = p; }).catch(() => {});
 
-// ---------------- folder tree (side panel) ----------------
+// ---------------- Folders page: tree on the left (with deep search), contents on the right ----------------
 let treeRoots = [];
+let folderSearch = '';
 async function renderTree() {
   const box = $('#ftree');
+  if (!box) return;
   try { treeRoots = await bridge.call('folder:roots'); } catch { return; }
-  const node = async (n, depth) => {
+  if (folderSearch.trim()) return renderFind();
+  const node = async (n) => {
     const open = expanded.has(n.path);
     let html = `<div class="node ${currentFolder === n.path ? 'active' : ''}" data-folder-open="${esc(n.path)}" title="${esc(n.path)}">
       ${n.hasDirs ? `<button class="caret" data-folder-toggle="${esc(n.path)}" title="${open ? 'Collapse' : 'Expand'}">${open ? '▾' : '▸'}</button>` : '<span class="caret"></span>'}
@@ -48,13 +52,46 @@ async function renderTree() {
     if (open && n.hasDirs) {
       let kids = [];
       try { kids = (await bridge.call('folder:list', n.path)).dirs; } catch { /* folder gone */ }
-      html += `<div class="kids">${(await Promise.all(kids.map((k) => node(k, depth + 1)))).join('')}</div>`;
+      html += `<div class="kids">${(await Promise.all(kids.map((k) => node(k)))).join('')}</div>`;
     }
     return html;
   };
-  box.innerHTML = (await Promise.all(treeRoots.map((r) => node(r, 0)))).join('') || '<div class="muted small" style="padding:4px 12px">No folders yet</div>';
+  const html = (await Promise.all(treeRoots.map((r) => node(r)))).join('') || '<div class="muted small" style="padding:4px 12px">No folders yet</div>';
+  if (!folderSearch.trim() && $('#ftree')) $('#ftree').innerHTML = html;
 }
-$('#ftree').addEventListener('click', (e) => {
+/** Deep search: every folder and file under your folders, as you type. */
+let findToken = 0;
+async function renderFind() {
+  const q = folderSearch.trim();
+  const token = ++findToken;
+  const r = await bridge.call('folder:find', q).catch(() => ({ folders: [], files: [] }));
+  if (token !== findToken || !$('#ftree')) return;
+  const routeOf = (rel) => rel.split(' › ').map((x) => `<span class="seg">${esc(x)}</span>`).join('<span class="sep">›</span>');
+  // "Organised › Suppliers › Dynamix" instead of a long path
+  const relRoute = (dir) => {
+    const root = treeRoots.filter((t) => dir === t.path || dir.startsWith(t.path)).sort((a, b) => b.path.length - a.path.length)[0];
+    if (!root) return esc(short(dir));
+    return routeOf([root.name, ...dir.slice(root.path.length).split(/[\\/]/).filter(Boolean)].join(' › '));
+  };
+  $('#ftree').innerHTML = `
+    <div class="fres-h">Folders ${r.total > r.folders.length ? `(top ${r.folders.length} of ${r.total})` : `(${r.folders.length})`}</div>
+    ${r.folders.map((f) => `<div class="fres ${currentFolder === f.path ? 'active' : ''}" data-folder-open="${esc(f.path)}" title="${esc(f.path)}"><span class="ficon">📁</span><div class="grow"><div class="ellipsis"><b>${esc(f.name)}</b></div><div class="route small muted">${routeOf(f.parent)}</div></div></div>`).join('') || '<div class="muted small fres-empty">No folders match.</div>'}
+    <div class="fres-h">Files (${r.files.length})</div>
+    ${r.files.map((f) => `<div class="fres" data-file="${esc(f.path)}" data-dir="${esc(f.dir)}" data-name="${esc(f.name)}" title="${esc(f.path)} — double-click to open"><span class="ficon">${fileIcon((f.name.match(/\.[^.]+$/) || [''])[0].toLowerCase())}</span><div class="grow"><div class="ellipsis"><b>${esc(f.name)}</b></div><div class="route small muted">${f.company ? `${esc(f.company)} · ` : ''}${relRoute(f.dir)}</div></div></div>`).join('') || '<div class="muted small fres-empty">No files match.</div>'}`;
+}
+/** Open a folder, and expand the tree down to it so it's visible when the search is cleared. */
+function goToFolder(p) {
+  const root = treeRoots.filter((r) => p === r.path || p.startsWith(r.path)).sort((a, b) => b.path.length - a.path.length)[0];
+  if (root) {
+    const sep = p.includes('\\') ? '\\' : '/';
+    let acc = root.path; expanded.add(acc);
+    for (const part of p.slice(root.path.length).split(sep).filter(Boolean)) { acc += sep + part; expanded.add(acc); }
+    saveExpanded();
+  }
+  location.hash = folderHash(p);
+}
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#ftree')) return;
   const t = e.target.closest('[data-folder-toggle]');
   if (t) {
     e.stopPropagation();
@@ -63,15 +100,35 @@ $('#ftree').addEventListener('click', (e) => {
     saveExpanded(); renderTree();
     return;
   }
+  const file = e.target.closest('[data-file]');
+  if (file) { folderFilter = file.dataset.name; goToFolder(file.dataset.dir); return; }
   const n = e.target.closest('[data-folder-open]');
-  if (n) {
-    const p = n.dataset.folderOpen;
-    if (!expanded.has(p)) { expanded.add(p); saveExpanded(); }
-    location.hash = folderHash(p);
-  }
+  if (n) { folderFilter = ''; goToFolder(n.dataset.folderOpen); }
 });
-$('#ftree-refresh').addEventListener('click', () => renderTree());
-$('#ftree-collapse').addEventListener('click', () => { expanded = new Set(); saveExpanded(); renderTree(); });
+document.addEventListener('dblclick', (e) => { const f = e.target.closest('#ftree [data-file]'); if (f) safe(() => bridge.call('file:open', f.dataset.file)); });
+
+/** The two-pane layout of the Folders page. The right side is filled by `fill`. */
+async function folderShell(fill) {
+  if (!$('#fsplit')) {
+    page.innerHTML = `<div class="fsplit" id="fsplit">
+      <aside class="fpane">
+        <div class="fsearch"><input id="fsearch" placeholder="🔍  Find a folder or file…" value="${esc(folderSearch)}" autocomplete="off"><button class="iconbtn" data-act="fsearchclear" title="Clear" ${folderSearch ? '' : 'hidden'}>✕</button></div>
+        <div class="fpane-tools"><span class="muted small">${folderSearch ? 'Search results' : 'All folders'}</span><span class="spacer"></span><button class="iconbtn" data-act="treecollapse" title="Collapse all">⊟</button><button class="iconbtn" data-act="treerefresh" title="Refresh">⟳</button></div>
+        <div id="ftree" class="ftree"></div>
+      </aside>
+      <section class="fmain" id="fmain"></section></div>`;
+    let timer;
+    $('#fsearch').addEventListener('input', (e) => {
+      folderSearch = e.target.value;
+      $('[data-act="fsearchclear"]').hidden = !folderSearch;
+      $('.fpane-tools .muted').textContent = folderSearch ? 'Search results' : 'All folders';
+      clearTimeout(timer); timer = setTimeout(renderTree, 180);
+    });
+    $('#fsearch').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.target.value = ''; e.target.dispatchEvent(new Event('input')); } });
+  }
+  await renderTree();
+  await fill($('#fmain'));
+}
 // Menu sections ("Tidy up", "Work") can be collapsed to give the folder list more room (remembered).
 document.querySelectorAll('.navsec').forEach((b) => {
   const g = document.querySelector(`.navgroup[data-group="${b.dataset.sec}"]`);
@@ -80,12 +137,7 @@ document.querySelectorAll('.navsec').forEach((b) => {
   try { apply(localStorage.getItem(`da-sec-${b.dataset.sec}`) === '1'); } catch { /* ignore */ }
   b.addEventListener('click', () => { const closed = !g.classList.contains('collapsed'); apply(closed); try { localStorage.setItem(`da-sec-${b.dataset.sec}`, closed ? '1' : '0'); } catch { /* ignore */ } });
 });
-(() => {
-  const t = $('#ftree-toggle'); const box = $('#ftree');
-  const apply = (hide) => { box.classList.toggle('hidden', hide); t.textContent = `${hide ? '▸' : '▾'} Folders`; };
-  try { apply(localStorage.getItem('da-tree-hidden') === '1'); } catch { /* ignore */ }
-  t.addEventListener('click', () => { const hide = !box.classList.contains('hidden'); apply(hide); try { localStorage.setItem('da-tree-hidden', hide ? '1' : '0'); } catch { /* ignore */ } });
-})();
+
 
 // Drag the edge of the side panel to make it wider or narrower (remembered).
 (() => {
@@ -297,7 +349,21 @@ const pages = {
     if (c) { c.scrollIntoView({ block: 'start' }); c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 1400); }
   },
 
+  async folders() {
+    await folderShell(async (main) => {
+      main.innerHTML = `<h1>Folders</h1><p class="sub">Browse everything on the left, or type in <b>Find a folder or file</b> to search through every folder and sub-folder at once.</p>
+        <div class="dirgrid">${treeRoots.map((r) => `<div class="d" data-act="gofolder" data-path="${esc(r.path)}"><span style="font-size:22px">${r.icon || '📁'}</span><div style="min-width:0"><div class="ellipsis"><b>${esc(r.name)}</b></div><div class="small muted ellipsis">${esc(short(r.path))}</div></div></div>`).join('')}</div>`;
+    });
+  },
+
   async folder() {
+    await folderShell((main) => renderFolderMain(main));
+  },
+};
+
+async function renderFolderMain(main) {
+  {
+    const page = main; // the right-hand side of the Folders page
     const dir = currentFolder;
     let data;
     try { data = await bridge.call('folder:list', dir); }
@@ -315,8 +381,9 @@ const pages = {
     const dirs = data.dirs.filter((d) => !q || d.name.toLowerCase().includes(q));
     page.innerHTML = `
       <div class="crumbs">${crumbs.map((c, i) => `${i ? '<span>›</span>' : ''}<button data-act="gofolder" data-path="${esc(c.path)}">${esc(c.name)}</button>`).join('')}</div>
-      <div class="row" style="margin-bottom:14px"><h1 class="foldertitle">${esc(crumbs[crumbs.length - 1].name)}</h1><span class="spacer"></span>
-        <input id="ffilter" placeholder="Filter this folder…" value="${esc(folderFilter)}" style="width:200px">
+      <h1 class="foldertitle">${esc(crumbs[crumbs.length - 1].name)}</h1>
+      <div class="row foldertools"><input id="ffilter" placeholder="Filter this folder…" value="${esc(folderFilter)}">
+        ${folderFilter ? '<button class="link" data-act="clearffilter">Show all</button>' : ''}<span class="spacer"></span>
         <button data-act="open" data-path="${esc(dir)}">Open in File Explorer</button></div>
       ${dirs.length ? `<div class="dirgrid" style="margin-bottom:18px">${dirs.map((d) => `<div class="d" data-act="gofolder" data-path="${esc(d.path)}"><span style="font-size:20px">📁</span><div style="min-width:0"><div class="ellipsis"><b>${esc(d.name)}</b></div><div class="small muted">${d.count} item${d.count === 1 ? '' : 's'}</div></div></div>`).join('')}</div>` : ''}
       <div class="card">${files.length ? `<table class="filetable"><colgroup><col style="width:30px"><col><col style="width:96px"><col style="width:72px"><col style="width:176px"></colgroup><tr><th></th><th>Name</th><th>Modified</th><th>Size</th><th></th></tr>${files.map((f) => `<tr class="f" data-dbl="${esc(f.path)}">
@@ -324,8 +391,11 @@ const pages = {
           <td class="factions"><button class="link" data-act="open" data-path="${esc(f.path)}">Open</button>${f.ext === '.pdf' ? `<button class="link" data-act="pdfedit" data-path="${esc(f.path)}">Edit</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(f.path)}" title="Show in File Explorer">Show</button></td></tr>`).join('')}</table>`
         : `<div class="empty">${q ? 'Nothing matches that filter.' : dirs.length ? 'No loose files here — open one of the folders above.' : 'This folder is empty.'}</div>`}</div>`;
     const fl = $('#ffilter');
-    fl.addEventListener('input', () => { folderFilter = fl.value; const pos = fl.selectionStart; pages.folder().then(() => { const n = $('#ffilter'); n.focus(); n.setSelectionRange(pos, pos); }); });
-  },
+    fl.addEventListener('input', () => { folderFilter = fl.value; const pos = fl.selectionStart; renderFolderMain($('#fmain')).then(() => { const n = $('#ffilter'); n.focus(); n.setSelectionRange(pos, pos); }); });
+  }
+}
+
+Object.assign(pages, {
 
   async search() {
     page.innerHTML = `<h1>Search</h1><p class="sub">Searches file names, folder names, companies and the text inside PDFs, Word docs, emails and text files. Tip: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> from anywhere.</p>
@@ -472,7 +542,8 @@ const pages = {
         ${learned.length ? `<ul class="list">${learned.slice(0, 60).map((l, i) => `<li><div class="grow"><div class="small">${l.docType && l.docType !== 'Other' ? `<b>${esc(l.docType)}</b> ` : ''}${l.company ? `from <b>${esc(l.company)}</b> ` : ''}${l.words.length ? `like “${esc(l.words.join(' '))}”` : ''}</div>
           <div class="route small">→ ${l.inRoot ? `<span class="seg">Organised</span><span class="sep">›</span>` : ''}${l.template.split('/').map((x) => `<span class="seg">${esc(x === '{year}' ? '(year)' : x)}</span>`).join('<span class="sep">›</span>')}</div></div>
           <button class="link small" data-act="forgetlearned" data-i="${i}">Forget</button></li>`).join('')}</ul>` : '<div class="empty small">Nothing yet — use “Change folder…” on the Organise or Tidy everything pages.</div>'}</div>
-      <div class="card" id="s-general"><h2>General</h2><label class="row"><input type="checkbox" id="login" ${s.openAtLogin ? 'checked' : ''}> Start when I log in (runs quietly in the tray)</label></div>
+      <div class="card" id="s-general"><h2>General</h2><label class="row"><input type="checkbox" id="login" ${s.openAtLogin ? 'checked' : ''}> Start when I log in (runs quietly in the tray)</label>
+        <p class="small muted" style="margin-top:12px">Desk Assistant <b>${esc(appVersion)}</b> · Quick search from anywhere: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd></p></div>
       <div class="card" id="s-uninstall"><h2>Uninstall</h2><p class="muted small">Removes Desk Assistant and its settings from this PC. Your own files — including everything in your Organised folder — are kept. You can also uninstall from Windows <b>Settings → Apps → Installed apps</b>.</p>
         <button data-act="uninstall">Uninstall Desk Assistant…</button></div>
       </div>`;
@@ -510,7 +581,7 @@ const pages = {
       await saveSettings({ aiKey: k }); toast('AI key saved'); render();
     });
   },
-};
+});
 
 function taskRow(t) {
   const src = t.source === 'meeting' ? 'meeting' : t.source === 'email' ? `email${t.from ? ' from ' + t.from : ''}` : t.source === 'notes' ? 'meeting notes' : 'added by you';
@@ -595,7 +666,11 @@ const actions = {
     } finally { scanning = false; render(); }
   },
   evcancel: () => bridge.call('everything:cancel'),
-  gofolder: (el) => { folderFilter = ''; location.hash = folderHash(el.dataset.path); },
+  gofolder: (el) => { folderFilter = ''; goToFolder(el.dataset.path); },
+  clearffilter: () => { folderFilter = ''; renderFolderMain($('#fmain')); },
+  fsearchclear: () => { const i = $('#fsearch'); i.value = ''; i.dispatchEvent(new Event('input')); i.focus(); },
+  treecollapse: () => { expanded = new Set(); saveExpanded(); renderTree(); },
+  treerefresh: () => renderTree(),
   pdfopen: async () => { const f = await bridge.call('pdf:openDialog', false); if (f) await bridge.call('pdf:edit', f); },
   pdfedit: (el) => bridge.call('pdf:edit', el.dataset.path),
   pdfdefault: async () => { const name = await bridge.call('pdf:makeDefault'); toast(`Windows Settings is opening: choose “${name}” for .pdf.`); },
@@ -703,8 +778,8 @@ async function render() {
   const h = decodeURIComponent((location.hash || '#today').slice(1));
   if (h.startsWith('folder:')) { current = 'folder'; currentFolder = h.slice(7); } else { current = h; currentFolder = null; }
   if (!pages[current]) current = 'today';
-  renderTree();
-  document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === current));
+  if (current !== 'folder' && current !== 'folders') { /* leaving the Folders page */ }
+  document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (current === 'folder' ? 'folders' : current)));
   await safe(() => pages[current]());
   updateBadges();
 }
@@ -737,7 +812,7 @@ bridge.on('scan-progress', ({ i, n }) => { const s = $('#scan-status'); if (s) s
     toast(next === 'system' ? 'Appearance: same as Windows' : next === 'light' ? 'Light mode' : 'Dark mode');
     if (current === 'settings') render();
   });
-  bridge.call('app:version').then((v) => { $("#appversion").textContent = `Version ${v}`; document.title = `Desk Assistant ${v}`; }).catch(() => {});
+  bridge.call('app:version').then((v) => { appVersion = v; document.title = `Desk Assistant ${v}`; }).catch(() => {});
   if (navigator.platform.startsWith('Mac')) $('#hotkey').textContent = '⌘';
   if (!settings.onboarded) { await saveSettings({ onboarded: true }); location.hash = 'companies'; toast('Welcome! Start by adding your own business name and the companies you work with.'); }
   render();

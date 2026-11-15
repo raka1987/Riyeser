@@ -425,3 +425,13 @@ test('learns where you file things: your folder choices and your own filing are 
   const other = { name: 'Ark FHF comments.txt', company: 'Acme Plumbing', docType: 'Commissioning', ext: '.txt', nameTokens: ['ark', 'fhf', 'comments'], textTokens: ['commissioning'] };
   assert.equal(learnedDestination(other, examples.slice(1), root), null);
 });
+
+test('search matches the start of words ("ark" finds Ark, not Spark)', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  fs.writeFileSync(path.join(tmp, 'Ark commissioning plan.txt'), 'commissioning');
+  fs.writeFileSync(path.join(tmp, 'Spark bill.txt'), 'Spark Energy invoice');
+  const idx = new Index(new Store(path.join(tmp, 'data')));
+  await idx.rebuild([tmp], settings);
+  assert.deepEqual(idx.search('ark').map((r) => r.name), ['Ark commissioning plan.txt']);
+  assert.deepEqual(idx.search('commission').map((r) => r.name), ['Ark commissioning plan.txt']); // start of a word still works
+});

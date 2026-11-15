@@ -61,6 +61,9 @@ class Index {
   search(query, limit = 30) {
     const terms = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
+    // match the start of words: "ark" finds "Ark project" but not "Spark"
+    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const res = terms.map((t) => new RegExp(`(^|[^a-z0-9])${esc(t)}`));
     const results = [];
     for (const [p, d] of Object.entries(this.docs)) {
       const name = d.name.toLowerCase();
@@ -69,11 +72,13 @@ class Index {
       let score = 0;
       let ok = true;
       let snippetAt = -1;
-      for (const t of terms) {
-        if (name.includes(t)) score += name.startsWith(t) ? 12 : 8;
-        else if (meta.includes(t)) score += 5;
+      for (const [k, t] of terms.entries()) {
+        const re = res[k];
+        if (re.test(name)) score += name.startsWith(t) ? 12 : 8;
+        else if (re.test(meta)) score += 5;
         else {
-          const at = text.indexOf(t);
+          const m = re.exec(text);
+          const at = m ? m.index + m[1].length : -1;
           if (at < 0) { ok = false; break; }
           score += 2;
           if (snippetAt < 0) snippetAt = at;
