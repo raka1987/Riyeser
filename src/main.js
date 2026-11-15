@@ -1,5 +1,7 @@
 // Electron main process: windows, tray icon, global search shortcut, background jobs and reminders.
-const { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu, Notification, shell, dialog, safeStorage, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu, Notification, shell, dialog, safeStorage, nativeImage, nativeTheme } = require('electron');
+const { registerInstalledApp, runUninstall } = require('./uninstall');
+const APP_INFO = { id: 'DeskAssistant', name: 'Desk Assistant', pdfProgId: 'DeskAssistant.PDF', description: 'Sorts your files, tracks meetings and edits PDFs' };
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -310,8 +312,10 @@ function registerIpc() {
     if (typeof s.aiKey === 'string') { if (s.aiKey === '__clear__') setSecret('aiKey', ''); else if (s.aiKey) setSecret('aiKey', s.aiKey); }
     const saved = setSettings({ ...getSettings(), ...s });
     app.setLoginItemSettings({ openAtLogin: !!saved.openAtLogin, args: ['--hidden'] });
+    applyTheme(saved.theme);
     return saved;
   });
+  handle('app:uninstall', () => runUninstall(APP_INFO));
   handle('dialog:folder', async () => {
     const r = await dialog.showOpenDialog(mainWin, { properties: ['openDirectory', 'createDirectory'] });
     return r.canceled ? null : r.filePaths[0];
@@ -441,7 +445,7 @@ function registerIpc() {
   handle('email:get', () => state.emails);
   handle('link:open', (url) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); });
 
-  registerPdfIpc({ handle, store, openEditor });
+  registerPdfIpc({ handle, store, openEditor, getTheme: () => getSettings().theme || 'system', setTheme: (t) => { setSettings({ ...getSettings(), theme: t }); applyTheme(t); } });
 
   handle('tasks:get', () => store.get('tasks', []));
   handle('tasks:add', (input) => {
@@ -466,13 +470,23 @@ function registerIpc() {
 }
 
 // ---------- app lifecycle ----------
+// Light / dark / follow Windows. Every window follows this (the pages use the system colour scheme).
+function applyTheme(theme) { nativeTheme.themeSource = ['light', 'dark'].includes(theme) ? theme : 'system'; }
+
+const uninstalling = process.argv.includes('--uninstall');
 if (!app.requestSingleInstanceLock()) app.quit();
-app.on('second-instance', (_e, argv) => { const pdf = pdfArg(argv); if (pdf) openEditor(pdf); else showMain(); });
+app.on('second-instance', (_e, argv) => {
+  if (argv.includes('--uninstall')) { runUninstall(APP_INFO); return; }
+  const pdf = pdfArg(argv); if (pdf) openEditor(pdf); else showMain();
+});
 
 app.whenReady().then(async () => {
+  if (uninstalling) { await runUninstall(APP_INFO); app.quit(); return; }
   store = new Store(path.join(app.getPath('userData'), 'data'));
   index = new Index(store);
   fixFolderLocations();
+  applyTheme(getSettings().theme);
+  registerInstalledApp(APP_INFO).catch(() => {});
   ocr.configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });
   registerIpc();
   const startPdf = pdfArg(process.argv);

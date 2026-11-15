@@ -1,6 +1,6 @@
 {
   "name": "desk-assistant",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "A personal desktop assistant that sorts your files by company and type, tracks meetings and to-dos, finds anything instantly and sorts email.",
   "main": "src/main.js",
   "scripts": {

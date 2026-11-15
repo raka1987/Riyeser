@@ -44,8 +44,10 @@ function createEditorWindow(file, { store, icon }) {
   return w;
 }
 
-function registerPdfIpc({ handle, store, openEditor }) {
+function registerPdfIpc({ handle, store, openEditor, getTheme = () => 'system', setTheme = () => {} }) {
   handle('app:platform', () => process.platform);
+  handle('theme:get', () => getTheme());
+  handle('theme:set', (t) => { setTheme(t); return t; });
   // OCR one page image (PNG data URL) for the editor's "Recognise text".
   handle('ocr:image', async (dataUrl) => require('./core/ocr').recognize(Buffer.from(dataUrl.split(',')[1], 'base64')));
   handle('pdf:makeDefault', registerAsPdfApp);

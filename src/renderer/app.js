@@ -69,6 +69,22 @@ $('#ftree').addEventListener('click', (e) => {
   }
 });
 $('#ftree-refresh').addEventListener('click', () => renderTree());
+
+// Drag the edge of the side panel to make it wider or narrower (remembered).
+(() => {
+  const setW = (w) => document.documentElement.style.setProperty('--nav-w', `${Math.min(480, Math.max(200, w))}px`);
+  try { const w = +localStorage.getItem('da-navw'); if (w) setW(w); } catch { /* ignore */ }
+  const handle = $('#navresize');
+  handle.addEventListener('pointerdown', (e) => {
+    handle.setPointerCapture(e.pointerId);
+    const move = (ev) => setW(ev.clientX);
+    const up = () => {
+      handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up);
+      try { localStorage.setItem('da-navw', parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-w'), 10)); } catch { /* ignore */ }
+    };
+    handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', up);
+  });
+})();
 let cleanSel = new Set();
 
 function toast(msg) {
@@ -232,13 +248,13 @@ const pages = {
     const dirs = data.dirs.filter((d) => !q || d.name.toLowerCase().includes(q));
     page.innerHTML = `
       <div class="crumbs">${crumbs.map((c, i) => `${i ? '<span>›</span>' : ''}<button data-act="gofolder" data-path="${esc(c.path)}">${esc(c.name)}</button>`).join('')}</div>
-      <div class="row" style="margin-bottom:14px"><h1 style="margin:0">${esc(crumbs[crumbs.length - 1].name)}</h1><span class="spacer"></span>
+      <div class="row" style="margin-bottom:14px"><h1 class="foldertitle">${esc(crumbs[crumbs.length - 1].name)}</h1><span class="spacer"></span>
         <input id="ffilter" placeholder="Filter this folder…" value="${esc(folderFilter)}" style="width:200px">
         <button data-act="open" data-path="${esc(dir)}">Open in File Explorer</button></div>
       ${dirs.length ? `<div class="dirgrid" style="margin-bottom:18px">${dirs.map((d) => `<div class="d" data-act="gofolder" data-path="${esc(d.path)}"><span style="font-size:20px">📁</span><div style="min-width:0"><div class="ellipsis"><b>${esc(d.name)}</b></div><div class="small muted">${d.count} item${d.count === 1 ? '' : 's'}</div></div></div>`).join('')}</div>` : ''}
-      <div class="card">${files.length ? `<table class="filetable"><tr><th></th><th>Name</th><th>Modified</th><th>Size</th><th></th></tr>${files.map((f) => `<tr class="f" data-dbl="${esc(f.path)}">
+      <div class="card">${files.length ? `<table class="filetable"><colgroup><col style="width:30px"><col><col style="width:96px"><col style="width:72px"><col style="width:176px"></colgroup><tr><th></th><th>Name</th><th>Modified</th><th>Size</th><th></th></tr>${files.map((f) => `<tr class="f" data-dbl="${esc(f.path)}">
           <td style="width:26px">${fileIcon(f.ext)}</td><td><b>${esc(f.name)}</b></td><td class="small muted">${fmtDay(f.mtime)}</td><td class="small muted">${fmtSize(f.size)}</td>
-          <td class="row" style="flex-wrap:nowrap;justify-content:flex-end"><button class="link" data-act="open" data-path="${esc(f.path)}">Open</button>${f.ext === '.pdf' ? `<button class="link" data-act="pdfedit" data-path="${esc(f.path)}">Edit PDF</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(f.path)}">Show in Explorer</button></td></tr>`).join('')}</table>`
+          <td class="factions"><button class="link" data-act="open" data-path="${esc(f.path)}">Open</button>${f.ext === '.pdf' ? `<button class="link" data-act="pdfedit" data-path="${esc(f.path)}">Edit</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(f.path)}" title="Show in File Explorer">Show</button></td></tr>`).join('')}</table>`
         : `<div class="empty">${q ? 'Nothing matches that filter.' : dirs.length ? 'No loose files here — open one of the folders above.' : 'This folder is empty.'}</div>`}</div>`;
     const fl = $('#ffilter');
     fl.addEventListener('input', () => { folderFilter = fl.value; const pos = fl.selectionStart; pages.folder().then(() => { const n = $('#ffilter'); n.focus(); n.setSelectionRange(pos, pos); }); });
@@ -376,7 +392,12 @@ const pages = {
           <button class="primary" style="margin-top:8px">Save email settings</button></form></div>
       <div class="card"><h2>Smarter sorting with AI (optional)</h2><p class="muted small">Add an Anthropic API key and files I'm unsure about are sent to Claude to identify (first ~4,000 characters of text only). Leave blank to keep everything 100% offline.</p>
         <form id="aiform" class="row"><input id="aikey" type="password" style="flex:1" placeholder="${s.hasAiKey ? 'Key saved (type to replace)' : 'sk-ant-…'}"><button>Save</button>${s.hasAiKey ? '<button type="button" data-act="clearai">Remove key</button>' : ''}</form></div>
+      <div class="card"><h2>Appearance</h2>
+        <div class="row">${['system', 'light', 'dark'].map((t) => `<label class="themeopt ${(s.theme || 'system') === t ? 'on' : ''}"><input type="radio" name="theme" value="${t}" ${(s.theme || 'system') === t ? 'checked' : ''}><span class="swatch ${t}"></span>${t === 'system' ? 'Same as Windows' : t === 'light' ? 'Light' : 'Dark'}</label>`).join('')}</div>
+        <p class="muted small">Applies to the PDF editor too.</p></div>
       <div class="card"><h2>General</h2><label class="row"><input type="checkbox" id="login" ${s.openAtLogin ? 'checked' : ''}> Start when I log in (runs quietly in the tray)</label></div>
+      <div class="card"><h2>Uninstall</h2><p class="muted small">Removes Desk Assistant and its settings from this PC. Your own files — including everything in your Organised folder — are kept. You can also uninstall from Windows <b>Settings → Apps → Installed apps</b>.</p>
+        <button data-act="uninstall">Uninstall Desk Assistant…</button></div>
       </div>`;
     const bindCheck = (id, fn) => $(id).addEventListener('change', async (e) => { await saveSettings(fn(e.target.checked)); toast('Saved'); });
     bindCheck('#recursive', (v) => ({ recursiveScan: v }));
@@ -389,6 +410,7 @@ const pages = {
     $('#datefmt').addEventListener('change', async (e) => { await saveSettings({ dayFirstDates: e.target.value === '1' }); toast('Saved'); });
     bindCheck('#auto', (v) => ({ autoOrganise: v }));
     bindCheck('#login', (v) => ({ openAtLogin: v }));
+    page.querySelectorAll('input[name="theme"]').forEach((r) => r.addEventListener('change', async () => { await saveSettings({ theme: r.value }); render(); }));
     $('#remind').addEventListener('change', async (e) => { await saveSettings({ reminderMinutes: Math.max(1, +e.target.value || 10) }); toast('Saved'); });
     $('#addcal').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -462,6 +484,7 @@ const actions = {
   },
   cleanselall: (el) => { cleanup.items.filter((i) => i.verdict === el.dataset.v).forEach((i) => cleanSel.add(i.path)); render(); },
   cleansetfolder: async () => { const f = await bridge.call('dialog:folder'); if (f) { await saveSettings({ cleanupFolder: f }); cleanup = null; render(); } },
+  uninstall: () => bridge.call('app:uninstall'),
   arrangedesk: async (el) => {
     el.disabled = true; el.textContent = 'Arranging…';
     try { await bridge.call('desktop:arrange'); toast('Desktop icons lined up. (Right-click the desktop → View to change this any time.)'); }

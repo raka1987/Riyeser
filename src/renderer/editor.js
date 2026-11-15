@@ -278,7 +278,9 @@ $('#thumbs').addEventListener('click', (e) => {
 });
 
 // ---------------- zoom ----------------
-function setZoom(z) {
+let fitMode = true; // keep fitting the page to the window until the user zooms by hand
+function setZoom(z, { fromFit = false } = {}) {
+  if (!fromFit) fitMode = false;
   st.zoom = Math.min(4, Math.max(0.25, z));
   $('#zoomlabel').textContent = `${Math.round(st.zoom * 100)}%`;
   if (st.doc) { const cur = st.current; buildPages().then(() => scrollToPage(cur)); }
@@ -288,8 +290,11 @@ async function fitWidth() {
   const entry = st.order[st.current] || st.order[0];
   const page = await st.doc.getPage(entry.src + 1);
   const w = page.getViewport({ scale: PX_PER_PT, rotation: (st.baseRot[entry.src] + entry.rot) % 360 }).width;
-  setZoom(Math.min(2, ($('#viewer').clientWidth - 60) / w));
+  fitMode = true;
+  setZoom(Math.min(2, ($('#viewer').clientWidth - 60) / w), { fromFit: true });
 }
+let resizeTimer;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (fitMode && st.doc) fitWidth(); }, 250); });
 
 // ---------------- annotations ----------------
 function findAnn(id) {
@@ -1045,6 +1050,8 @@ window.addEventListener('beforeunload', (e) => {
 
 // ---------------- start ----------------
 window.__editor = { st, buildPdf, openFile, setTool, commands }; // used by automated tests
+bridge.call('theme:get').then((t) => { $('#theme').value = t || 'system'; }).catch(() => {});
+$('#theme').addEventListener('change', (e) => bridge.call('theme:set', e.target.value));
 bridge.call('app:platform').then((p) => { if (p === 'win32') $$('.windows-only').forEach((el) => { el.hidden = false; }); });
 const file = new URLSearchParams(location.search).get('file');
 if (file) openFile(file);

@@ -13,7 +13,7 @@ button.link { border: none; background: none; color: var(--accent); padding: 0 4
 button:disabled { opacity: .5; cursor: default; }
 input, select, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
 input[type=checkbox] { width: 16px; height: 16px; }
-.app { display: grid; grid-template-columns: 240px 1fr; height: 100vh; }
+.app { display: grid; grid-template-columns: var(--nav-w, 250px) 1fr; height: 100vh; position: relative; }
 nav { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
 nav .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; padding: 0 10px 18px; }
 nav .brand img { width: 28px; height: 28px; }
@@ -96,3 +96,30 @@ main { overflow-x: hidden; }
 .readbox { max-width: 100% !important; }
 .folderlist .fsub { padding-left: 26px; gap: 10px; }
 .folderlist .fsub select { padding: 3px 6px; }
+
+/* side panel: never wider than itself, long names shortened with "…" (full name on hover) */
+nav { overflow-x: hidden; }
+.ftree .node { min-width: 0; }
+.ftree .label { min-width: 0; }
+.ftree .kids { padding-left: 10px; }
+.navresize { position: absolute; top: 0; bottom: 0; left: calc(var(--nav-w, 250px) - 3px); width: 6px; cursor: col-resize; z-index: 5; }
+.navresize:hover, .navresize:active { background: var(--accent); opacity: .35; }
+/* folder pages fit the window */
+.filetable { table-layout: fixed; width: 100%; }
+.filetable td { overflow-wrap: anywhere; }
+.filetable .factions { text-align: right; white-space: nowrap; }
+.foldertitle { margin: 0; min-width: 0; overflow-wrap: anywhere; flex: 1 1 260px; }
+.dirgrid .d > div { min-width: 0; }
+.crumbs button { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* appearance picker */
+.themeopt { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+.themeopt.on { border-color: var(--accent); background: var(--accent-soft); }
+.themeopt input { display: none; }
+.swatch { width: 26px; height: 18px; border-radius: 5px; border: 1px solid var(--line); }
+.swatch.light { background: #f6f7f9; }
+.swatch.dark { background: #14161b; }
+.swatch.system { background: linear-gradient(135deg, #f6f7f9 50%, #14161b 50%); }
+
+/* checkbox labels: keep the box next to its text */
+label.row { flex-wrap: nowrap; align-items: flex-start; }
+label.row > input[type=checkbox], label.row > input[type=radio] { margin-top: 2px; flex: none; }
