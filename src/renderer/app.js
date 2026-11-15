@@ -14,6 +14,7 @@ let plan = null;      // last organise plan
 let selected = new Set();
 let emailFilter = 'All';
 let cleanup = null;   // last clean-up check
+let combine = [];     // PDFs chosen for combining
 let cleanSel = new Set();
 
 function toast(msg) {
@@ -131,6 +132,21 @@ const pages = {
     $('#stale').addEventListener('change', (e) => saveSettings({ staleDays: +e.target.value }));
   },
 
+  async pdf() {
+    const recent = await bridge.call('pdf:recent');
+    page.innerHTML = `<h1>PDF editor</h1><p class="sub">View, edit, fill in and sign PDFs, all on your computer. Every time you save, the previous version is backed up automatically.</p>
+      <div class="grid">
+        <div class="card"><h2>Open a PDF</h2><p class="muted small">Add or edit text, highlight, draw, white-out, tick boxes, sign, fill forms, and rotate, delete, reorder or extract pages.</p>
+          <button class="primary" data-act="pdfopen">Open PDF…</button>
+          <p class="muted small" style="margin-top:12px">Tip: in File Explorer, right-click a PDF → <b>Open with</b> → <b>Desk Assistant</b>.</p></div>
+        <div class="card"><h2>Combine PDFs</h2><p class="muted small">Join several PDFs into one, in the order shown.</p>
+          <ul class="list" id="combinelist">${combine.map((f, i) => `<li><div class="grow path ellipsis">${esc(short(f))}</div><button class="link" data-act="cmbup" data-i="${i}">▲</button><button class="link" data-act="cmbrm" data-i="${i}">✕</button></li>`).join('') || '<li class="muted small">No files chosen yet.</li>'}</ul>
+          <div class="row" style="margin-top:8px"><button data-act="cmbadd">Add PDFs…</button><button class="primary" data-act="cmbgo" ${combine.length > 1 ? '' : 'disabled'}>Combine &amp; save</button></div></div>
+      </div>
+      <div class="card"><div class="row"><h2 style="margin:0">Recent</h2><span class="spacer"></span><button class="link" data-act="pdfbackups">Open backups folder</button></div>
+        ${recent.length ? `<ul class="list">${recent.map((f) => `<li><div class="grow"><b>${esc(f.split(/[\\/]/).pop())}</b><div class="path">${esc(short(f))}</div></div><button class="link" data-act="pdfedit" data-path="${esc(f)}">Edit</button><button class="link" data-act="open" data-path="${esc(f)}">Open in default app</button></li>`).join('')}</ul>` : '<div class="empty">No PDFs opened yet.</div>'}</div>`;
+  },
+
   async search() {
     page.innerHTML = `<h1>Search</h1><p class="sub">Searches file names, folder names, companies and the text inside PDFs, Word docs, emails and text files. Tip: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> from anywhere.</p>
       <input id="sq" style="width:100%;font-size:17px;padding:11px 14px" placeholder="e.g. acme invoice october" autofocus>
@@ -141,7 +157,7 @@ const pages = {
       $('#sres').innerHTML = !e.target.value.trim() ? '<div class="empty">Start typing…</div>' : res.length ? `<ul class="list">${res.map((r) => `<li><div class="grow">
         <div class="row"><b>${esc(r.name)}</b>${r.company ? `<span class="pill">${esc(r.company)}</span>` : ''}${r.docType ? `<span class="pill good">${esc(r.docType)}</span>` : ''}<span class="small muted">${fmtDay(r.mtime)} · ${fmtSize(r.size)}</span></div>
         <div class="path">${esc(short(r.dir))}</div>${r.snippet ? `<div class="small muted">…${esc(r.snippet)}…</div>` : ''}</div>
-        <button class="link" data-act="open" data-path="${esc(r.path)}">Open</button><button class="link" data-act="reveal" data-path="${esc(r.path)}">Show in folder</button></li>`).join('')}</ul>` : '<div class="empty">No matches.</div>';
+        <button class="link" data-act="open" data-path="${esc(r.path)}">Open</button>${/\.pdf$/i.test(r.name) ? `<button class="link" data-act="pdfedit" data-path="${esc(r.path)}">Edit PDF</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(r.path)}">Show in folder</button></li>`).join('')}</ul>` : '<div class="empty">No matches.</div>';
     }, 150); });
     $('#sq').focus();
   },
@@ -341,6 +357,13 @@ const actions = {
   },
   cleanselall: (el) => { cleanup.items.filter((i) => i.verdict === el.dataset.v).forEach((i) => cleanSel.add(i.path)); render(); },
   cleansetfolder: async () => { const f = await bridge.call('dialog:folder'); if (f) { await saveSettings({ cleanupFolder: f }); cleanup = null; render(); } },
+  pdfopen: async () => { const f = await bridge.call('pdf:openDialog', false); if (f) await bridge.call('pdf:edit', f); },
+  pdfedit: (el) => bridge.call('pdf:edit', el.dataset.path),
+  pdfbackups: () => bridge.call('pdf:backups'),
+  cmbadd: async () => { const fs = await bridge.call('pdf:openDialog', true); if (fs) { combine = [...combine, ...fs]; render(); } },
+  cmbrm: (el) => { combine.splice(+el.dataset.i, 1); render(); },
+  cmbup: (el) => { const i = +el.dataset.i; if (i > 0) { [combine[i - 1], combine[i]] = [combine[i], combine[i - 1]]; render(); } },
+  cmbgo: async () => { const out = await bridge.call('pdf:combine', combine); if (out) { toast(`Saved ${out}`); combine = []; await bridge.call('pdf:edit', out); render(); } },
   scan: async (el) => {
     el.disabled = true; $('#scan-status').textContent = 'Scanning…';
     const p = await bridge.call('organise:scan');

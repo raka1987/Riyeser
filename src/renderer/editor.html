@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' data: blob:">
+  <title>PDF Editor</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="row">
+      <button data-cmd="open" title="Open a PDF (Ctrl+O)">Open</button>
+      <button class="primary" data-cmd="save" title="Save (Ctrl+S)">Save</button>
+      <button data-cmd="saveas">Save as…</button>
+      <span class="sep"></span>
+      <button data-cmd="undo" title="Undo (Ctrl+Z)">↶</button>
+      <button data-cmd="redo" title="Redo (Ctrl+Y)">↷</button>
+      <span class="sep"></span>
+      <button data-cmd="zoomout" title="Zoom out">−</button>
+      <span id="zoomlabel" class="muted small">100%</span>
+      <button data-cmd="zoomin" title="Zoom in">+</button>
+      <button data-cmd="fitwidth" title="Fit width">Fit</button>
+      <span class="sep"></span>
+      <span id="pageinfo" class="muted small"></span>
+      <span class="spacer"></span>
+      <span id="docname" class="small ellipsis" style="max-width:340px"></span>
+      <span id="dirty" class="pill warn" hidden>unsaved</span>
+    </div>
+    <div class="row tools" id="tools">
+      <button data-tool="select" class="active" title="Select / move (V)">↖ Select</button>
+      <button data-tool="text" title="Add text (T)">T Add text</button>
+      <button data-tool="edittext" title="Click existing text to change it (E)">✎ Edit text</button>
+      <button data-tool="highlight" title="Highlight (H)">▮ Highlight</button>
+      <button data-tool="draw" title="Pen (P)">✐ Draw</button>
+      <button data-tool="rect" title="Rectangle">▭ Box</button>
+      <button data-tool="whiteout" title="White-out: covers things up (the original stays in the file underneath)">◻ White-out</button>
+      <button data-tool="check" title="Tick">✓ Tick</button>
+      <button data-tool="cross" title="Cross">✗ Cross</button>
+      <button data-cmd="date" title="Today's date">📅 Date</button>
+      <button data-cmd="signature" title="Add a signature">✍ Sign</button>
+      <button data-cmd="image" title="Add a picture">🖼 Image</button>
+      <span class="sep"></span>
+      <label class="small muted" title="Colour"><input type="color" id="color" value="#1d4ed8"></label>
+      <label class="small muted" title="Text size"><select id="fontsize"><option>8</option><option>10</option><option selected>12</option><option>14</option><option>18</option><option>24</option><option>36</option></select></label>
+      <select id="font" class="small"><option value="Helvetica">Sans</option><option value="TimesRoman">Serif</option><option value="Courier">Mono</option></select>
+      <button id="boldbtn" class="small" title="Bold"><b>B</b></button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side">
+      <div class="tabs">
+        <button data-panel="pages" class="active">Pages</button>
+        <button data-panel="find">Find</button>
+        <button data-panel="forms">Form <span id="formcount"></span></button>
+      </div>
+      <div id="panel-pages" class="panel">
+        <div class="row small pageops">
+          <button data-cmd="rotl" title="Rotate left">⟲</button>
+          <button data-cmd="rotr" title="Rotate right">⟳</button>
+          <button data-cmd="up" title="Move page up">▲</button>
+          <button data-cmd="down" title="Move page down">▼</button>
+          <button data-cmd="delpage" title="Delete page">🗑</button>
+        </div>
+        <div class="row small pageops">
+          <button data-cmd="insert" title="Insert pages from another PDF after this page">+ Insert PDF</button>
+          <button data-cmd="extract" title="Save the selected pages as a new PDF">Extract</button>
+        </div>
+        <p class="muted small" style="margin:6px 0">Ctrl+click to select several pages.</p>
+        <div id="thumbs"></div>
+      </div>
+      <div id="panel-find" class="panel" hidden>
+        <input id="findq" placeholder="Search this PDF…" style="width:100%">
+        <div id="findres" class="small"></div>
+      </div>
+      <div id="panel-forms" class="panel" hidden>
+        <div id="formfields" class="small"></div>
+      </div>
+    </aside>
+    <main id="viewer"><div id="pages"></div>
+      <div id="empty" class="emptystate"><h2>PDF Editor</h2><p class="muted">Open a PDF to view, edit, fill in or sign it.</p><button class="primary" data-cmd="open">Open a PDF…</button></div>
+    </main>
+  </div>
+
+  <div id="sigmodal" class="modal" hidden>
+    <div class="modalbox">
+      <div class="row"><h2 style="margin:0">Signature</h2><span class="spacer"></span><button data-cmd="sigclose">✕</button></div>
+      <div id="sigsaved" class="sigsaved"></div>
+      <div class="tabs" style="margin-top:10px"><button data-sigtab="draw" class="active">Draw</button><button data-sigtab="type">Type</button><button data-sigtab="upload">Upload image</button></div>
+      <div data-sigpane="draw"><canvas id="sigpad" width="900" height="260"></canvas><div class="row"><button data-cmd="sigclear">Clear</button><span class="muted small">Sign with your mouse, trackpad or touch screen.</span></div></div>
+      <div data-sigpane="type" hidden><input id="sigtext" placeholder="Type your name" style="width:100%;font-size:18px"><canvas id="sigtyped" width="900" height="200"></canvas>
+        <div class="row small">Style <select id="sigfont"><option value="'Segoe Script','Brush Script MT','Lucida Handwriting',cursive">Script</option><option value="'Lucida Handwriting','Segoe Print','Bradley Hand',cursive">Handwriting</option><option value="Georgia,serif">Formal</option></select></div></div>
+      <div data-sigpane="upload" hidden><button data-cmd="sigupload">Choose image…</button><p class="muted small">A photo or scan of your signature on white paper works best.</p><img id="sigimg" alt="" style="max-width:100%;max-height:200px"></div>
+      <div class="row" style="margin-top:12px"><label class="small"><input type="checkbox" id="sigremember" checked> Remember this signature</label><span class="spacer"></span><button class="primary" data-cmd="sigplace">Place signature</button></div>
+    </div>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="vendor/pdf-lib.min.js"></script>
+  <script type="module" src="editor.js"></script>
+</body>
+</html>
