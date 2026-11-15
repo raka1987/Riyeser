@@ -13,6 +13,9 @@ const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.heic', '.webp', '.bmp', '.
 // provider = { pdf: async (file) => text, image: async (file) => text | null }
 let ocr = null;
 function setOcrProvider(provider) { ocr = provider; }
+// Optional: text already read before (e.g. by the search index), keyed by file + modified time - avoids reading it twice.
+let textCache = null;
+function setTextCache(fn) { textCache = fn; }
 
 function clip(s) {
   return (s || '').replace(/\u0000/g, '').replace(/[ \t]+/g, ' ').slice(0, MAX_CHARS);
@@ -28,6 +31,7 @@ async function extractText(file) {
   let stat;
   try { stat = fs.statSync(file); } catch { return ''; }
   if (!stat.isFile() || stat.size > MAX_BYTES) return '';
+  if (textCache) { const cached = textCache(file, stat.mtimeMs); if (typeof cached === 'string') return cached; }
   try {
     if (TEXT_EXT.has(ext)) return clip(fs.readFileSync(file, 'utf8'));
     if (HTML_EXT.has(ext)) return clip(fs.readFileSync(file, 'utf8').replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' '));
@@ -66,4 +70,4 @@ async function extractText(file) {
   return '';
 }
 
-module.exports = { extractText, canExtract, setOcrProvider, IMAGE_EXT };
+module.exports = { extractText, canExtract, setOcrProvider, setTextCache, IMAGE_EXT };

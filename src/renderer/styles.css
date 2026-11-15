@@ -137,3 +137,7 @@ label.row > input[type=checkbox], label.row > input[type=radio] { margin-top: 2p
 .settingsnav button { border-radius: 99px; padding: 5px 12px; font-size: 13px; }
 .card { scroll-margin-top: 70px; }
 .card.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .3s; }
+.evgroup { border-top: 1px solid var(--line); padding: 8px 0; }
+.evgroup summary { cursor: pointer; padding: 4px 0; }
+.evgroup table { margin-top: 6px; }
+.chip { max-width: 100%; overflow-wrap: anywhere; }

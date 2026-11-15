@@ -337,3 +337,63 @@ test('safety: never touches system folders, system files or shortcuts', async ()
   assert.match(batch.errors[0].error, /protected/);
   assert.ok(fs.existsSync(path.join(desk, 'helper.dll')));
 });
+
+test('tidy everything: files all personal folders by company/type/year, keeps program folders and never-touch folders', async () => {
+  const { planEverything, removeEmptiedFolders } = require('../src/core/everything');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const docs = path.join(tmp, 'Documents'); const pics = path.join(tmp, 'Pictures'); const dl = path.join(tmp, 'Downloads');
+  const root = path.join(docs, 'Organised');
+  const old = new Date(Date.now() - 5 * 86400_000);
+  const put = (p, body) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, body); fs.utimesSync(p, old, old); };
+  const jpeg = (p, when) => { // tiny JPEG with a "taken" date inside
+    const { execFileSync } = require('child_process');
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    execFileSync('python3', ['-c', `from PIL import Image\nim=Image.new('RGB',(8,8));e=im.getexif();e[0x0132]='${when}';im.save(r'''${p}''',exif=e)`]);
+    fs.utimesSync(p, old, old);
+  };
+  put(path.join(docs, 'Ark project', 'plan.txt'), 'Dynamix Limited commissioning plan. Agreement between the parties. Date: 03/10/2026');
+  put(path.join(docs, 'Ark project', 'quote.txt'), 'Quotation from Dynamix Limited. Quote number QD-552. Date: 01/09/2026');
+  put(path.join(docs, 'Ark project', 'notes.txt'), 'Site notes for Dynamix job');
+  for (let i = 1; i <= 4; i++) jpeg(path.join(docs, 'Smith wedding', `IMG_00${i}.jpg`), '2023:02:18 14:00:00');
+  put(path.join(docs, 'New folder (3)', 'doc1.txt'), 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-3001\nInvoice Date: 05/03/2025\nTotal due $90.00');
+  put(path.join(docs, 'New folder (3)', 'shopping.txt'), 'milk and eggs');
+  put(path.join(docs, 'Work', 'Acme Plumbing', 'q.txt'), 'Quote for Acme Plumbing. Quote number QU-7781. Date: 12 June 2024');
+  put(path.join(docs, 'Work', 'Acme Plumbing', 'i.txt'), 'Invoice for Acme Plumbing. Invoice number INV-9001. Invoice date: 20/07/2024. Amount due $50.00');
+  put(path.join(docs, 'My Games', 'Skyrim', 'save1.txt'), 'game save');
+  put(path.join(docs, 'website', 'package.json'), '{}'); put(path.join(docs, 'website', 'index.html'), '<p>hi</p>');
+  put(path.join(docs, 'Outlook Files', 'archive.pst'), 'pst');
+  put(path.join(docs, 'Private', 'diary.txt'), 'secret');
+  put(path.join(root, 'already filed.txt'), 'x');
+  jpeg(path.join(pics, 'Camera Roll', 'IMG_9001.jpg'), '2022:08:01 09:30:00');
+  put(path.join(dl, 'SomeTool', 'tool.exe'), 'MZ'); put(path.join(dl, 'SomeTool', 'helper.dll'), 'MZ'); put(path.join(dl, 'SomeTool', 'readme.txt'), 'tool');
+  const s = { ...settings, organisedRoot: root, libraryFolders: [docs, pics, dl], neverTouch: [path.join(docs, 'Private')],
+    companies: [...settings.companies, { name: 'Dynamix', aliases: ['dynamix limited'], type: 'Suppliers' }] };
+  const r = await planEverything(s);
+  const where = (name) => { const p = r.plan.find((x) => x.name === name); return p && path.relative(root, p.to); };
+  assert.equal(where('Ark project'), path.join('Suppliers', 'Dynamix', 'Projects', 'Ark project'));
+  assert.equal(where('Smith wedding'), path.join('Media', 'Images', '2023', 'Smith wedding'));
+  assert.equal(where('IMG_9001.jpg'), path.join('Media', 'Images', '2022', 'IMG_9001.jpg'));
+  assert.equal(where('doc1.txt'), path.join('Clients', 'Acme Plumbing', 'Invoices', '2025', '2025-03-05 Acme Plumbing Invoice INV-3001.txt'));
+  assert.equal(where('shopping.txt'), path.join('Other', 'Text files', new Date(old).getFullYear().toString(), 'shopping.txt'));
+  assert.ok(where('q.txt').startsWith(path.join('Clients', 'Acme Plumbing', 'Quotes', '2024')));   // "Acme Plumbing" folder is sorted, not kept whole
+  assert.ok(where('i.txt').startsWith(path.join('Clients', 'Acme Plumbing', 'Invoices', '2024')));
+  const keptReasons = Object.fromEntries(r.kept.map((k) => [path.basename(k.path), k.reason]));
+  assert.match(keptReasons['My Games'], /program/);
+  assert.match(keptReasons.website, /project/);
+  assert.match(keptReasons['Outlook Files'], /program|data/);
+  assert.match(keptReasons.Private, /asked/);
+  assert.match(keptReasons.SomeTool, /program/);
+  for (const p of r.plan) {
+    assert.ok(!p.from.includes(`${path.sep}My Games`) && !p.from.includes(`${path.sep}Private`) && !p.from.includes(`${path.sep}website`) && !p.from.includes('SomeTool'), p.from);
+    assert.ok(!p.from.startsWith(root), 'already-filed items are left alone');
+  }
+  const batch = applyPlan(r.plan);
+  assert.equal(batch.errors.length, 0);
+  removeEmptiedFolders(batch, r.libraries);
+  assert.ok(!fs.existsSync(path.join(docs, 'New folder (3)')));
+  assert.ok(!fs.existsSync(path.join(docs, 'Work')));
+  assert.ok(fs.existsSync(path.join(docs, 'My Games', 'Skyrim', 'save1.txt')));
+  assert.ok(fs.existsSync(pics) && fs.existsSync(docs), 'personal folders themselves are never removed');
+  undoBatch(batch);
+  assert.ok(fs.existsSync(path.join(docs, 'Work', 'Acme Plumbing', 'q.txt')));
+});

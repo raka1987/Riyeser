@@ -15,6 +15,8 @@ let selected = new Set();
 let emailFilter = 'All';
 let cleanup = null;   // last clean-up check
 let combine = [];     // PDFs chosen for combining
+let everythingDone = null; // last "tidy everything" batch
+let scanning = false;
 let currentFolder = null;
 let folderFilter = '';
 let expanded = new Set();
@@ -99,6 +101,24 @@ async function safe(fn) {
 
 const confPill = (c) => c === 'high' ? '<span class="pill good">sure</span>' : c === 'medium' ? '<span class="pill">likely</span>' : '<span class="pill warn">unsure</span>';
 
+// ---------------- plan rows (shared by Organise and Tidy everything) ----------------
+  const facts = (p) => [p.details?.date && `📅 ${esc(p.details.date)}`, p.details?.reference && `# ${esc(p.details.reference)}`, p.details?.amount && `💲 ${esc(p.details.amount)}`].filter(Boolean).map((f) => `<span class="pill">${f}</span>`).join(' ');
+  const readBox = (p) => p.preview ? `<details class="small"><summary class="muted">What I read</summary><div class="readbox">${esc(p.preview)}…</div></details>` : '';
+  const rows = (items) => items.map((p) => `<tr>
+    <td><input type="checkbox" data-sel="${esc(p.from)}" ${selected.has(p.from) ? 'checked' : ''}></td>
+    <td><b class="fname">${p.isFolder ? '📁 ' : ''}${esc(p.name)}</b>
+      <div class="dest route" title="${esc(p.to || p.dir)}">${p.currentDir
+        ? `<span class="pill ${p.change === 'rename' ? '' : 'warn'}">${esc(p.change)}</span> ${p.change === 'rename' ? `in ${route(p.dir)}` : `<span class="muted">from</span> ${route(p.currentDir)} <span class="muted">to</span> ${route(p.dir)}`}`
+        : `<span class="arrow">→</span> ${route(p.dir || p.to)}`}</div>
+      ${p.newName ? `<div class="row small" style="margin-top:4px"><span class="muted">rename to</span><input class="rename" data-rename="${esc(p.from)}" value="${esc(p.to.split(/[\\/]/).pop())}" title="Edit the new name if you like"></div>` : ''}
+      ${p.warning ? `<div class="small" style="color:var(--warn);margin-top:4px">⚠ ${esc(p.warning)}</div>` : ''}
+      ${p.fallback ? `<div class="small muted" style="margin-top:3px">Filed by type for now. ${p.company ? `<button class="link small" data-act="addco" data-name="${esc(p.company)}">Add “${esc(p.company)}” as a company</button>` : 'Add the sender in <a href="#companies">Companies</a>'}, then use Re-check to file it under them.</div>` : ''}
+      <div style="margin-top:4px">${facts(p)}</div>
+      ${p.group ? `<div class="small" style="color:var(--good);margin-top:3px">🔗 Kept with ${p.group.size - 1} related document${p.group.size > 2 ? 's' : ''} — they share ${esc(p.group.because.join(', '))}${p.companyFromGroup ? ` (that's how I know it's for ${esc(p.company)})` : ''}</div>` : ''}
+      <div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div>${readBox(p)}</td>
+    <td><div class="small">${esc(p.docType)}</div><div style="margin-top:4px">${confPill(p.warning ? 'low' : p.confidence)}</div></td>
+    <td><button class="link" data-act="${p.isFolder ? 'reveal' : 'open'}" data-path="${esc(p.from)}">${p.isFolder ? 'Show' : 'Open'}</button></td></tr>`).join('');
+
 // ---------------- pages ----------------
 const pages = {
   async today() {
@@ -139,22 +159,6 @@ const pages = {
       const key = p.fallback ? `Couldn't tell who it's from › ${p.dir.split(/[\\/]/).slice(-2).join(' › ')}` : p.company ? `${p.companyType} › ${p.company}${p.group && /[\\/]Projects[\\/]/.test(p.dir) ? ` › 🔗 ${p.group.name}` : ''}` : p.category === 'Media' ? 'Photos, videos & other media' : 'General documents';
       (groups[key] = groups[key] || []).push(p);
     }
-    const facts = (p) => [p.details?.date && `📅 ${esc(p.details.date)}`, p.details?.reference && `# ${esc(p.details.reference)}`, p.details?.amount && `💲 ${esc(p.details.amount)}`].filter(Boolean).map((f) => `<span class="pill">${f}</span>`).join(' ');
-    const readBox = (p) => p.preview ? `<details class="small"><summary class="muted">What I read</summary><div class="readbox">${esc(p.preview)}…</div></details>` : '';
-    const rows = (items) => items.map((p) => `<tr>
-      <td><input type="checkbox" data-sel="${esc(p.from)}" ${selected.has(p.from) ? 'checked' : ''}></td>
-      <td><b class="fname">${p.isFolder ? '📁 ' : ''}${esc(p.name)}</b>
-        <div class="dest route" title="${esc(p.to || p.dir)}">${p.currentDir
-          ? `<span class="pill ${p.change === 'rename' ? '' : 'warn'}">${esc(p.change)}</span> ${p.change === 'rename' ? `in ${route(p.dir)}` : `<span class="muted">from</span> ${route(p.currentDir)} <span class="muted">to</span> ${route(p.dir)}`}`
-          : `<span class="arrow">→</span> ${route(p.dir || p.to)}`}</div>
-        ${p.newName ? `<div class="row small" style="margin-top:4px"><span class="muted">rename to</span><input class="rename" data-rename="${esc(p.from)}" value="${esc(p.to.split(/[\\/]/).pop())}" title="Edit the new name if you like"></div>` : ''}
-        ${p.warning ? `<div class="small" style="color:var(--warn);margin-top:4px">⚠ ${esc(p.warning)}</div>` : ''}
-        ${p.fallback ? `<div class="small muted" style="margin-top:3px">Filed by type for now. ${p.company ? `<button class="link small" data-act="addco" data-name="${esc(p.company)}">Add “${esc(p.company)}” as a company</button>` : 'Add the sender in <a href="#companies">Companies</a>'}, then use Re-check to file it under them.</div>` : ''}
-        <div style="margin-top:4px">${facts(p)}</div>
-        ${p.group ? `<div class="small" style="color:var(--good);margin-top:3px">🔗 Kept with ${p.group.size - 1} related document${p.group.size > 2 ? 's' : ''} — they share ${esc(p.group.because.join(', '))}${p.companyFromGroup ? ` (that's how I know it's for ${esc(p.company)})` : ''}</div>` : ''}
-        <div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div>${readBox(p)}</td>
-      <td><div class="small">${esc(p.docType)}</div><div style="margin-top:4px">${confPill(p.warning ? 'low' : p.confidence)}</div></td>
-      <td><button class="link" data-act="${p.isFolder ? 'reveal' : 'open'}" data-path="${esc(p.from)}">${p.isFolder ? 'Show' : 'Open'}</button></td></tr>`).join('');
     page.innerHTML = `
       <div class="row"><div><h1>Organise files</h1><p class="sub">Sorts ${settings.watchFolders.map((f) => `<b>${esc(f.split(/[\\/]/).pop())}</b>`).join(' and ') || '(add folders in Settings)'} into your <b title="${esc(settings.organisedRoot)}">Organised</b> folder by company and document type. Nothing moves until you approve it, and every batch can be undone.</p></div></div>
       <div class="card" id="foldercard"><h2>Folders to tidy</h2>
@@ -230,6 +234,44 @@ const pages = {
       </div>
       <div class="card"><div class="row"><h2 style="margin:0">Recent</h2><span class="spacer"></span><button class="link" data-act="pdfbackups">Open backups folder</button></div>
         ${recent.length ? `<ul class="list">${recent.map((f) => `<li><div class="grow"><b>${esc(f.split(/[\\/]/).pop())}</b><div class="path">${esc(short(f))}</div></div><button class="link" data-act="pdfedit" data-path="${esc(f)}">Edit</button><button class="link" data-act="open" data-path="${esc(f)}">Open in default app</button></li>`).join('')}</ul>` : '<div class="empty">No PDFs opened yet.</div>'}</div>`;
+  },
+
+  // "Tidy everything": every personal folder and sub-folder, filed like an assistant would - by company, type and year.
+  async everything() {
+    const last = await bridge.call('organise:last');
+    plan = last && last.mode === 'everything' ? last : null;
+    const libs = settings.libraryFolders || [];
+    const never = settings.neverTouch || [];
+    const list = (key, items, empty) => `<div class="chips">${items.map((f, i) => `<span class="chip" title="${esc(f)}">📁 ${esc(f.split(/[\\/]/).filter(Boolean).pop() || f)}<button data-act="evdel" data-key="${key}" data-i="${i}" title="Remove">×</button></span>`).join('') || `<span class="muted small">${empty}</span>`}</div>`;
+    const groups = {};
+    for (const p of plan?.plan || []) {
+      const segs = p.dir.slice(settings.organisedRoot.length).split(/[\\/]/).filter(Boolean);
+      const key = p.isFolder ? 'Folders kept together' : segs.slice(0, segs[0] === 'Media' || segs[0] === 'Other' || segs[0] === 'General' ? 2 : 2).join(' › ') || 'Organised';
+      (groups[key] = groups[key] || []).push(p);
+    }
+    const order = Object.keys(groups).sort((a, b) => (a === 'Folders kept together' ? -1 : b === 'Folders kept together' ? 1 : a.localeCompare(b)));
+    const nFiles = (plan?.plan || []).reduce((n, p) => n + (p.isFolder ? p.files : 1), 0);
+    page.innerHTML = `<h1>Tidy everything</h1>
+      <p class="sub">Goes through all your personal folders <b>and every sub-folder</b>, and files everything like an assistant would: by company, by type and by year — e.g. <b>Clients › Acme Plumbing › Invoices › 2026</b> or <b>Media › Images › 2024</b>. Named folders whose contents belong together (like “Ark project” or “Smith wedding”) are kept together. Nothing moves until you approve it, and Undo puts everything back.</p>
+      <div class="grid">
+        <div class="card"><h2>Folders to go through</h2>${list('libraryFolders', libs, 'None — add a folder')}<button style="margin-top:8px" data-act="evadd" data-key="libraryFolders">+ Add folder</button></div>
+        <div class="card"><h2>Never touch</h2><p class="muted small">Anything in these folders stays exactly where it is.</p>${list('neverTouch', never, 'Nothing yet')}<button style="margin-top:8px" data-act="evadd" data-key="neverTouch">+ Add folder</button>
+          <p class="muted small" style="margin-top:10px">Always left alone automatically: Windows and program folders, folders programs rely on (Outlook data, accounting files like QuickBooks/MYOB, OneNote, game saves, photo-library catalogues), code projects, installed programs, shortcuts and system files.</p></div>
+      </div>
+      <div class="row" style="margin:6px 0 16px"><button class="primary" data-act="evscan" ${scanning ? 'disabled' : ''}>${scanning ? 'Looking…' : plan ? 'Look through everything again' : 'Look through everything'}</button>
+        ${scanning ? '<button data-act="evcancel">Stop</button>' : ''}<span id="scan-status" class="muted small"></span></div>
+      ${everythingDone ? `<div class="card" style="border-color:var(--good)"><b>Done — moved ${everythingDone.moves.length} item(s)${everythingDone.errors.length ? `, ${everythingDone.errors.length} couldn't be moved` : ''}.</b> <span class="muted">Changed your mind? <button class="link" data-act="undo" data-id="${esc(everythingDone.id)}">Undo all of it</button></span></div>` : ''}
+      ${!plan ? '' : `
+      <div class="card"><div class="row"><h2 style="margin:0">Ready to file: ${nFiles} file(s)${groups['Folders kept together'] ? `, including ${groups['Folders kept together'].length} folder(s) kept together` : ''}</h2><span class="spacer"></span>
+          <button class="link" data-act="selall">Select all</button><button class="link" data-act="selnone">Clear</button>
+          <button class="primary" data-act="apply" ${selected.size ? '' : 'disabled'}>Move ${selected.size} selected</button></div>
+        <p class="muted small">Grouped by where things will go. Open a group to see (and untick) individual items.</p>
+        ${order.map((g) => `<details class="evgroup" ${g === 'Folders kept together' ? 'open' : ''}><summary><b>${esc(g)}</b> <span class="muted">— ${groups[g].length} item(s)</span></summary>
+          <table class="plantable"><colgroup><col style="width:34px"><col><col style="width:104px"><col style="width:58px"></colgroup>${rows(groups[g].slice(0, 300))}</table>${groups[g].length > 300 ? `<p class="muted small">…and ${groups[g].length - 300} more (all included).</p>` : ''}</details>`).join('')}
+      </div>
+      <div class="card"><details><summary><b>Kept as they are (${plan.kept.length})</b> <span class="muted small">— folders and files I left alone, and why</span></summary>
+        <ul class="list">${plan.kept.slice(0, 400).map((k) => `<li><div class="grow" title="${esc(k.path)}"><b>${esc(k.path.split(/[\\/]/).pop())}</b> <span class="small muted">— ${esc(k.reason)}</span><div class="path ellipsis">in ${esc(short(k.path.split(/[\\/]/).slice(0, -1).join(k.path.includes('\\') ? '\\' : '/')))}</div></div><button class="link" data-act="reveal" data-path="${esc(k.path)}">Show</button></li>`).join('') || '<li class="muted">Nothing.</li>'}</ul></details></div>
+      ${plan.review.length ? `<div class="card"><h2>Needs your help (${plan.review.length})</h2><p class="muted small">I couldn't tell where these belong, so they stay where they are.</p><ul class="list">${plan.review.slice(0, 200).map((r) => `<li><div class="grow"><b>${esc(r.name)}</b><div class="path">${esc(short(r.from))}</div></div><button class="link" data-act="open" data-path="${esc(r.from)}">Open</button></li>`).join('')}</ul></div>` : ''}`}`;
   },
 
   // "Tidy Desktop": the Organise page, opened at the folder choices and desktop-icon tidy-up.
@@ -505,6 +547,21 @@ const actions = {
     finally { el.disabled = false; el.textContent = 'Tidy desktop icons'; }
   },
   unarrangedesk: async () => { await bridge.call('desktop:undoArrange'); toast('Auto-arrange is off again — you can place icons wherever you like.'); },
+  evadd: async (el) => {
+    const f = await bridge.call('dialog:folder');
+    const key = el.dataset.key;
+    if (f && !(settings[key] || []).includes(f)) { await saveSettings({ [key]: [...(settings[key] || []), f] }); render(); }
+  },
+  evdel: async (el) => { const key = el.dataset.key; await saveSettings({ [key]: (settings[key] || []).filter((_, i) => i !== +el.dataset.i) }); render(); },
+  evscan: async () => {
+    scanning = true; everythingDone = null; render();
+    try {
+      const p = await bridge.call('everything:scan');
+      selected = new Set(p.plan.filter((x) => !x.warning).map((x) => x.from));
+      toast(`Looked through ${p.scanned} file(s).`);
+    } finally { scanning = false; render(); }
+  },
+  evcancel: () => bridge.call('everything:cancel'),
   gofolder: (el) => { folderFilter = ''; location.hash = folderHash(el.dataset.path); },
   pdfopen: async () => { const f = await bridge.call('pdf:openDialog', false); if (f) await bridge.call('pdf:edit', f); },
   pdfedit: (el) => bridge.call('pdf:edit', el.dataset.path),
@@ -528,6 +585,7 @@ const actions = {
     const batch = await bridge.call('organise:apply', items);
     toast(`Moved ${batch.moves.length} file(s)${batch.errors.length ? `, ${batch.errors.length} failed` : ''}. You can undo below.`);
     selected = new Set();
+    if (plan.mode === 'everything') { everythingDone = batch; plan = null; render(); return; }
     await bridge.call(plan.mode === 'recheck' ? 'organise:recheck' : 'organise:scan');
     render();
   },

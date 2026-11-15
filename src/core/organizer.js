@@ -321,4 +321,4 @@ function findDuplicates(folders) {
   return groups.sort((a, b) => b.size * b.files.length - a.size * a.files.length);
 }
 
-module.exports = { planOrganise, planRecheck, scanFolders, removeEmptyDirs, applyPlan, undoBatch, findDuplicates, listFiles, targetDir, classifyFile, moveFile };
+module.exports = { analyseFile, placeItem, safeName, planOrganise, planRecheck, scanFolders, removeEmptyDirs, applyPlan, undoBatch, findDuplicates, listFiles, targetDir, classifyFile, moveFile };

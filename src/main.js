@@ -14,8 +14,9 @@ const { extractActionItems } = require('./core/actions');
 const { createAI } = require('./core/ai');
 const { analyseFolder } = require('./core/cleanup');
 const safety = require('./core/safety');
+const { planEverything, removeEmptiedFolders } = require('./core/everything');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
-const { setOcrProvider } = require('./core/extract');
+const { setOcrProvider, setTextCache } = require('./core/extract');
 const ocr = require('./core/ocr');
 
 const HOTKEY = 'CommandOrControl+Shift+Space';
@@ -43,6 +44,8 @@ function defaults() {
     organisedRoot: path.join(documents, 'Organised'),
     searchFolders: [...existing(documents), ...existing(downloads), ...existing(desktop)],
     sortEverything: true,
+    libraryFolders: [desktop, downloads, documents, knownFolder('pictures'), knownFolder('videos'), knownFolder('music')].filter((f, i, a) => fs.existsSync(f) && a.indexOf(f) === i),
+    neverTouch: [],
     recursiveScan: false,
     renameFiles: true,
     groupByYear: false,
@@ -313,7 +316,7 @@ function registerIpc() {
     if (typeof s.emailPassword === 'string' && s.emailPassword) setSecret('emailPassword', s.emailPassword);
     if (typeof s.aiKey === 'string') { if (s.aiKey === '__clear__') setSecret('aiKey', ''); else if (s.aiKey) setSecret('aiKey', s.aiKey); }
     // Only personal folders can be chosen - never Windows/program folders or a whole drive.
-    for (const key of ['watchFolders', 'searchFolders']) {
+    for (const key of ['watchFolders', 'searchFolders', 'libraryFolders']) {
       for (const f of s[key] || []) { const why = safety.folderProblem(f); if (why) throw new Error(`${f}: ${why}`); }
     }
     for (const key of ['organisedRoot', 'cleanupFolder']) {
@@ -366,6 +369,13 @@ function registerIpc() {
     return { dir, dirs: dirs.sort(byName), files: files.sort(byName) };
   });
   handle('organise:folders', () => organizer.scanFolders(getSettings()));
+  handle('everything:scan', async () => {
+    state.cancel = false;
+    state.lastPlan = await planEverything(getSettings(), { ai: ai(), onProgress: (i, n) => send('scan-progress', { i, n }), isCancelled: () => state.cancel });
+    send('plan-changed');
+    return state.lastPlan;
+  });
+  handle('everything:cancel', () => { state.cancel = true; return true; });
   // Line up the icons on the Windows desktop: turns on "Auto arrange" + "Align to grid" and refreshes the desktop.
   handle('desktop:arrange', async () => {
     if (process.platform !== 'win32') throw new Error('Arranging desktop icons is only available on Windows.');
@@ -429,6 +439,7 @@ function registerIpc() {
     if (state.lastPlan?.mode === 'recheck') organizer.removeEmptyDirs(getSettings().organisedRoot);
     // Sub-folders that were ticked for clean-up and are now empty get removed (undo recreates them).
     for (const sub of state.lastPlan?.emptyFolderCleanup || []) organizer.removeEmptyDirs(sub, { includeRoot: true });
+    if (state.lastPlan?.mode === 'everything') { removeEmptiedFolders(batch, state.lastPlan.libraries || []); state.lastPlan = null; }
     store.update('history', [], (h) => [batch, ...h].slice(0, 50));
     refreshIndex().catch(() => {});
     return batch;
@@ -514,6 +525,7 @@ app.whenReady().then(async () => {
   applyTheme(getSettings().theme);
   registerInstalledApp(APP_INFO).catch(() => {});
   ocr.configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });
+  setTextCache((file, mtime) => { const d = index.docs[file]; return d && d.mtime === mtime && d.text ? d.text : undefined; });
   registerIpc();
   const startPdf = pdfArg(process.argv);
   if (startPdf) openEditor(startPdf);
