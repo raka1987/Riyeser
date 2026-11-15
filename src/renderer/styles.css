@@ -13,8 +13,8 @@ button.link { border: none; background: none; color: var(--accent); padding: 0 4
 button:disabled { opacity: .5; cursor: default; }
 input, select, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
 input[type=checkbox] { width: 16px; height: 16px; }
-.app { display: grid; grid-template-columns: 210px 1fr; height: 100vh; }
-nav { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 10px; display: flex; flex-direction: column; gap: 2px; }
+.app { display: grid; grid-template-columns: 240px 1fr; height: 100vh; }
+nav { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; min-height: 0; }
 nav .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; padding: 0 10px 18px; }
 nav .brand img { width: 28px; height: 28px; }
 nav a { padding: 8px 12px; border-radius: 8px; color: var(--text); text-decoration: none; display: flex; justify-content: space-between; }
@@ -66,3 +66,20 @@ td.path { word-break: break-all; min-width: 180px; }
 .folderlist .froot { margin-top: 6px; }
 .folderlist .fsub { padding-left: 26px; }
 [hidden] { display: none !important; }
+
+.ftree-head { display: flex; justify-content: space-between; align-items: center; margin: 16px 12px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.ftree { font-size: 13px; }
+.ftree .node { display: flex; align-items: center; gap: 2px; border-radius: 6px; padding: 2px 4px; cursor: pointer; white-space: nowrap; }
+.ftree .node:hover { background: var(--bg); }
+.ftree .node.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.ftree .caret { width: 18px; flex: none; border: none; background: none; padding: 0; color: var(--muted); font-size: 10px; cursor: pointer; }
+.ftree .label { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.ftree .kids { padding-left: 12px; }
+.crumbs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-bottom: 4px; }
+.crumbs button { border: none; background: none; padding: 2px 4px; color: var(--accent); }
+.crumbs span { color: var(--muted); }
+.dirgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.dirgrid .d { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; cursor: pointer; background: var(--panel); display: flex; gap: 8px; align-items: center; }
+.dirgrid .d:hover { border-color: var(--accent); }
+.filetable tr.f { cursor: default; }
+.filetable tr.f:hover td { background: var(--bg); }

@@ -50,7 +50,13 @@ test('plans, applies and undoes moves', async () => {
   fs.writeFileSync(path.join(inbox, 'acme invoice march.txt'), 'Invoice for Acme Plumbing. Amount due $300');
   fs.writeFileSync(path.join(inbox, 'holiday.jpg'), 'x');
   fs.writeFileSync(path.join(inbox, 'random.txt'), 'hello world');
-  const { plan, review } = await planOrganise({ ...settings, watchFolders: [inbox], organisedRoot: root }, { minAgeMs: 0 });
+  // "sort everything" (default): the unidentifiable file still gets a tidy home
+  const all = await planOrganise({ ...settings, watchFolders: [inbox], organisedRoot: root }, { minAgeMs: 0 });
+  assert.equal(all.plan.length, 3);
+  assert.equal(all.review.length, 0);
+  assert.equal(all.plan.find((p) => p.name === 'random.txt').to, path.join(root, 'Other', 'Text files', 'random.txt'));
+  // with it switched off, unsure files wait for you instead
+  const { plan, review } = await planOrganise({ ...settings, watchFolders: [inbox], organisedRoot: root, sortEverything: false }, { minAgeMs: 0 });
   assert.equal(plan.length, 2);
   assert.equal(review.length, 1);
   const inv = plan.find((p) => p.name.startsWith('acme'));
@@ -271,4 +277,10 @@ test('scanned PDFs are read with OCR and then sorted like any other document', a
   const r = await ocr.recognize(img);
   assert.match(r.text, /INV-2050/);
   assert.ok(r.lines.length >= 5);
+});
+
+test('never tidies the home folder or a whole drive', () => {
+  const { scanFolders } = require('../src/core/organizer');
+  const list = scanFolders({ watchFolders: [os.homedir(), path.parse(process.cwd()).root], organisedRoot: '/nowhere' });
+  assert.equal(list.length, 0);
 });

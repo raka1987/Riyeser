@@ -10,6 +10,19 @@ const { extractKeys, linkRelated } = require('./related');
 
 const SKIP_EXT = new Set(['.crdownload', '.part', '.tmp', '.download', '.partial', '.lnk', '.ini']);
 
+const MEDIA_KINDS = new Set(['Images', 'Videos', 'Audio', 'Installers', 'Archives', 'Spreadsheets', 'Presentations']);
+function kindOf(ext) {
+  const e = (ext || '').toLowerCase();
+  if (e === '.pdf') return 'PDFs';
+  if (/^\.(docx?|odt|rtf|pages)$/.test(e)) return 'Word documents';
+  if (/^\.(xlsx?|ods|csv|numbers)$/.test(e)) return 'Spreadsheets';
+  if (/^\.(pptx?|odp|key)$/.test(e)) return 'Presentations';
+  if (/^\.(txt|md|log|json|xml)$/.test(e)) return 'Text files';
+  if (/^\.(eml|msg)$/.test(e)) return 'Emails';
+  if (/^\.(url|webloc)$/.test(e)) return 'Web links';
+  return 'Other files';
+}
+
 function safeName(s) {
   return String(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Unknown';
 }
@@ -96,10 +109,23 @@ function placeItem(item, settings) {
     dir = targetDir(root, item);
     if (dir && settings.groupByYear) dir = path.join(dir, (item.details.date || item.fileDate).slice(0, 4));
   }
+  // "Sort everything": files we can't pin to a company still get a tidy home instead of being left behind.
+  if ((!dir || (!grouped && item.confidence === 'low' && item.category !== 'Media')) && settings.sortEverything !== false) {
+    dir = item.docType && item.docType !== 'Other' && !MEDIA_KINDS.has(item.docType)
+      ? path.join(root, 'General', safeName(item.docType))
+      : path.join(root, 'Other', kindOf(item.ext));
+    item.fallback = true;
+  }
   item.newName = settings.renameFiles === false ? null
     : suggestName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, fallbackDate: item.fileDate });
-  const unsure = !dir || (!grouped && item.confidence === 'low' && item.category !== 'Media');
+  const unsure = !dir || (!item.fallback && !grouped && item.confidence === 'low' && item.category !== 'Media');
   return { dir, unsure, to: dir ? path.join(dir, item.newName || item.name) : null };
+}
+
+/** Never tidy a whole drive (C:\) or the home folder itself - only folders like Desktop and Downloads. */
+function isTooBroad(dir) {
+  const r = path.resolve(dir);
+  return r === path.resolve(require('os').homedir()) || r === path.parse(r).root;
 }
 
 /** The folders the user can tick: each watched folder (its loose files) and the sub-folders inside it. */
@@ -107,7 +133,7 @@ function scanFolders(settings) {
   const sel = settings.scanSelection || {};
   const out = [];
   for (const root of settings.watchFolders || []) {
-    if (!fs.existsSync(root)) continue;
+    if (!fs.existsSync(root) || isTooBroad(root)) continue;
     const loose = listFiles(root).length;
     out.push({ path: root, name: path.basename(root), isRoot: true, files: loose, checked: sel[root] !== false });
     let entries = [];
@@ -168,7 +194,7 @@ async function planRecheck(settings, { ai = null, onProgress = () => {} } = {}) 
   if (settings.groupRelated !== false) linkRelated(items);
   for (const item of items) {
     const { dir, unsure, to } = placeItem(item, settings);
-    if (unsure || !to) continue;
+    if (unsure || !to || item.fallback) continue; // never override your own folders with a guess
     if (path.resolve(to).toLowerCase() === path.resolve(item.from).toLowerCase()) continue;
     const sameFolder = path.resolve(dir).toLowerCase() === path.resolve(path.dirname(item.from)).toLowerCase();
     plan.push({ ...item, dir, to, change: sameFolder ? 'rename' : (item.newName ? 'move + rename' : 'move'), currentDir: path.dirname(item.from) });

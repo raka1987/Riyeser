@@ -15,6 +15,51 @@ let selected = new Set();
 let emailFilter = 'All';
 let cleanup = null;   // last clean-up check
 let combine = [];     // PDFs chosen for combining
+let currentFolder = null;
+let folderFilter = '';
+let expanded = new Set();
+try { expanded = new Set(JSON.parse(localStorage.getItem('da-expanded') || '[]')); } catch { /* storage unavailable */ }
+const saveExpanded = () => { try { localStorage.setItem('da-expanded', JSON.stringify([...expanded])); } catch { /* ignore */ } };
+const fileIcon = (ext) => ext === '.pdf' ? '📕' : /\.(docx?|odt|rtf)$/.test(ext) ? '📘' : /\.(xlsx?|csv|ods)$/.test(ext) ? '📗' : /\.(pptx?|key)$/.test(ext) ? '📙'
+  : /\.(jpe?g|png|gif|heic|webp|bmp|tiff?)$/.test(ext) ? '🖼' : /\.(mp4|mov|avi|mkv)$/.test(ext) ? '🎞' : /\.(mp3|wav|m4a)$/.test(ext) ? '🎵' : /\.(zip|rar|7z|gz)$/.test(ext) ? '🗜' : /\.(exe|msi|dmg)$/.test(ext) ? '⚙' : /\.(eml|msg)$/.test(ext) ? '✉' : '📄';
+const folderHash = (p) => `#folder:${encodeURIComponent(p)}`;
+
+// ---------------- folder tree (side panel) ----------------
+let treeRoots = [];
+async function renderTree() {
+  const box = $('#ftree');
+  try { treeRoots = await bridge.call('folder:roots'); } catch { return; }
+  const node = async (n, depth) => {
+    const open = expanded.has(n.path);
+    let html = `<div class="node ${currentFolder === n.path ? 'active' : ''}" data-folder-open="${esc(n.path)}" title="${esc(n.path)}" style="padding-left:${4 + depth * 2}px">
+      ${n.hasDirs ? `<button class="caret" data-folder-toggle="${esc(n.path)}">${open ? '▾' : '▸'}</button>` : '<span class="caret"></span>'}
+      <span class="label">${n.icon ? n.icon + ' ' : ''}${esc(n.name)}</span></div>`;
+    if (open && n.hasDirs) {
+      let kids = [];
+      try { kids = (await bridge.call('folder:list', n.path)).dirs; } catch { /* folder gone */ }
+      html += `<div class="kids">${(await Promise.all(kids.map((k) => node(k, depth + 1)))).join('')}</div>`;
+    }
+    return html;
+  };
+  box.innerHTML = (await Promise.all(treeRoots.map((r) => node(r, 0)))).join('') || '<div class="muted small" style="padding:4px 12px">No folders yet</div>';
+}
+$('#ftree').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-folder-toggle]');
+  if (t) {
+    e.stopPropagation();
+    const p = t.dataset.folderToggle;
+    expanded.has(p) ? expanded.delete(p) : expanded.add(p);
+    saveExpanded(); renderTree();
+    return;
+  }
+  const n = e.target.closest('[data-folder-open]');
+  if (n) {
+    const p = n.dataset.folderOpen;
+    if (!expanded.has(p)) { expanded.add(p); saveExpanded(); }
+    location.hash = folderHash(p);
+  }
+});
+$('#ftree-refresh').addEventListener('click', () => renderTree());
 let cleanSel = new Set();
 
 function toast(msg) {
@@ -66,7 +111,7 @@ const pages = {
     const folders = await bridge.call('organise:folders');
     const groups = {};
     for (const p of plan?.plan || []) {
-      const key = p.company ? `${p.companyType} › ${p.company}${p.group && /[\\/]Projects[\\/]/.test(p.dir) ? ` › 🔗 ${p.group.name}` : ''}` : p.category === 'Media' ? 'Photos, videos & other media' : 'General documents';
+      const key = p.fallback ? `Couldn't tell who it's from › ${p.dir.split(/[\\/]/).slice(-2).join(' › ')}` : p.company ? `${p.companyType} › ${p.company}${p.group && /[\\/]Projects[\\/]/.test(p.dir) ? ` › 🔗 ${p.group.name}` : ''}` : p.category === 'Media' ? 'Photos, videos & other media' : 'General documents';
       (groups[key] = groups[key] || []).push(p);
     }
     const facts = (p) => [p.details?.date && `📅 ${esc(p.details.date)}`, p.details?.reference && `# ${esc(p.details.reference)}`, p.details?.amount && `💲 ${esc(p.details.amount)}`].filter(Boolean).map((f) => `<span class="pill">${f}</span>`).join(' ');
@@ -76,6 +121,7 @@ const pages = {
       <td><b>${esc(p.name)}</b>
         ${p.newName ? `<div class="row small" style="margin-top:4px"><span class="muted">rename to</span><input class="rename" data-rename="${esc(p.from)}" value="${esc(p.to.split(/[\\/]/).pop())}" title="Edit the new name if you like"></div>` : ''}
         ${p.warning ? `<div class="small" style="color:var(--warn);margin-top:4px">⚠ ${esc(p.warning)}</div>` : ''}
+        ${p.fallback ? `<div class="small muted" style="margin-top:3px">Filed by type for now. ${p.company ? `<button class="link small" data-act="addco" data-name="${esc(p.company)}">Add “${esc(p.company)}” as a company</button>` : 'Add the sender in <a href="#companies">Companies</a>'}, then use Re-check to file it under them.</div>` : ''}
         <div style="margin-top:4px">${facts(p)}</div>
         ${p.group ? `<div class="small" style="color:var(--good);margin-top:3px">🔗 Kept with ${p.group.size - 1} related document${p.group.size > 2 ? 's' : ''} — they share ${esc(p.group.because.join(', '))}${p.companyFromGroup ? ` (that's how I know it's for ${esc(p.company)})` : ''}</div>` : ''}
         <div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div>${readBox(p)}</td>
@@ -153,6 +199,36 @@ const pages = {
       </div>
       <div class="card"><div class="row"><h2 style="margin:0">Recent</h2><span class="spacer"></span><button class="link" data-act="pdfbackups">Open backups folder</button></div>
         ${recent.length ? `<ul class="list">${recent.map((f) => `<li><div class="grow"><b>${esc(f.split(/[\\/]/).pop())}</b><div class="path">${esc(short(f))}</div></div><button class="link" data-act="pdfedit" data-path="${esc(f)}">Edit</button><button class="link" data-act="open" data-path="${esc(f)}">Open in default app</button></li>`).join('')}</ul>` : '<div class="empty">No PDFs opened yet.</div>'}</div>`;
+  },
+
+  async folder() {
+    const dir = currentFolder;
+    let data;
+    try { data = await bridge.call('folder:list', dir); }
+    catch { page.innerHTML = `<h1>Folder not found</h1><p class="sub">${esc(dir)} no longer exists — it may have been moved or renamed.</p>`; return; }
+    const sep = dir.includes('\\') ? '\\' : '/';
+    const root = treeRoots.filter((r) => dir === r.path || dir.startsWith(r.path + sep)).sort((a, b) => b.path.length - a.path.length)[0];
+    const crumbs = [];
+    if (root) {
+      crumbs.push({ name: root.name, path: root.path });
+      let acc = root.path;
+      for (const part of dir.slice(root.path.length).split(sep).filter(Boolean)) { acc += sep + part; crumbs.push({ name: part, path: acc }); }
+    } else crumbs.push({ name: dir, path: dir });
+    const q = folderFilter.toLowerCase();
+    const files = data.files.filter((f) => !q || f.name.toLowerCase().includes(q));
+    const dirs = data.dirs.filter((d) => !q || d.name.toLowerCase().includes(q));
+    page.innerHTML = `
+      <div class="crumbs">${crumbs.map((c, i) => `${i ? '<span>›</span>' : ''}<button data-act="gofolder" data-path="${esc(c.path)}">${esc(c.name)}</button>`).join('')}</div>
+      <div class="row" style="margin-bottom:14px"><h1 style="margin:0">${esc(crumbs[crumbs.length - 1].name)}</h1><span class="spacer"></span>
+        <input id="ffilter" placeholder="Filter this folder…" value="${esc(folderFilter)}" style="width:200px">
+        <button data-act="open" data-path="${esc(dir)}">Open in File Explorer</button></div>
+      ${dirs.length ? `<div class="dirgrid" style="margin-bottom:18px">${dirs.map((d) => `<div class="d" data-act="gofolder" data-path="${esc(d.path)}"><span style="font-size:20px">📁</span><div style="min-width:0"><div class="ellipsis"><b>${esc(d.name)}</b></div><div class="small muted">${d.count} item${d.count === 1 ? '' : 's'}</div></div></div>`).join('')}</div>` : ''}
+      <div class="card">${files.length ? `<table class="filetable"><tr><th></th><th>Name</th><th>Modified</th><th>Size</th><th></th></tr>${files.map((f) => `<tr class="f" data-dbl="${esc(f.path)}">
+          <td style="width:26px">${fileIcon(f.ext)}</td><td><b>${esc(f.name)}</b></td><td class="small muted">${fmtDay(f.mtime)}</td><td class="small muted">${fmtSize(f.size)}</td>
+          <td class="row" style="flex-wrap:nowrap;justify-content:flex-end"><button class="link" data-act="open" data-path="${esc(f.path)}">Open</button>${f.ext === '.pdf' ? `<button class="link" data-act="pdfedit" data-path="${esc(f.path)}">Edit PDF</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(f.path)}">Show in Explorer</button></td></tr>`).join('')}</table>`
+        : `<div class="empty">${q ? 'Nothing matches that filter.' : dirs.length ? 'No loose files here — open one of the folders above.' : 'This folder is empty.'}</div>`}</div>`;
+    const fl = $('#ffilter');
+    fl.addEventListener('input', () => { folderFilter = fl.value; const pos = fl.selectionStart; pages.folder().then(() => { const n = $('#ffilter'); n.focus(); n.setSelectionRange(pos, pos); }); });
   },
 
   async search() {
@@ -264,6 +340,7 @@ const pages = {
         <label class="row small" style="margin-top:10px"><input type="checkbox" id="recursive" ${s.recursiveScan ? 'checked' : ''}> Tick new sub-folders automatically (you can untick them on the Organise page)</label>
         <label class="row small"><input type="checkbox" id="rename" ${s.renameFiles ? 'checked' : ''}> Rename files from their contents (e.g. “2026-11-03 Acme Plumbing Invoice 1042.pdf”)</label>
         <label class="row small"><input type="checkbox" id="byyear" ${s.groupByYear ? 'checked' : ''}> Put files in a folder for each year (…/Invoices/2026/)</label>
+        <label class="row small"><input type="checkbox" id="sortall" ${s.sortEverything !== false ? 'checked' : ''}> File everything — things I can't identify go into Organised\\Other (by type) instead of being left behind</label>
         <label class="row small"><input type="checkbox" id="ocrpdf" ${s.ocrPdfs !== false ? 'checked' : ''}> Read scanned PDFs with text recognition (OCR) — a few seconds per document, done once</label>
         <label class="row small"><input type="checkbox" id="ocrimg" ${s.ocrImages ? 'checked' : ''}> Also read photos and screenshots (finds receipts you've photographed; slower)</label>
         <label class="row small"><input type="checkbox" id="related" ${s.groupRelated !== false ? 'checked' : ''}> Keep related documents together (e.g. the quote, invoice and receipt for one job go in …/Projects/12 Smith Street/)</label>
@@ -294,6 +371,7 @@ const pages = {
     bindCheck('#byyear', (v) => ({ groupByYear: v }));
     bindCheck('#related', (v) => ({ groupRelated: v }));
     bindCheck('#ocrpdf', (v) => ({ ocrPdfs: v }));
+    bindCheck('#sortall', (v) => ({ sortEverything: v }));
     bindCheck('#ocrimg', (v) => ({ ocrImages: v }));
     $('#datefmt').addEventListener('change', async (e) => { await saveSettings({ dayFirstDates: e.target.value === '1' }); toast('Saved'); });
     bindCheck('#auto', (v) => ({ autoOrganise: v }));
@@ -344,7 +422,7 @@ const actions = {
   recheck: async (el) => {
     el.disabled = true; $('#scan-status').textContent = 'Re-checking filed items…';
     const p = await bridge.call('organise:recheck');
-    selected = new Set(p.plan.filter((x) => x.confidence === 'high' && !x.warning).map((x) => x.from));
+    selected = new Set(p.plan.filter((x) => !x.warning).map((x) => x.from));
     render();
   },
   cleanscan: async (el) => {
@@ -371,6 +449,7 @@ const actions = {
   },
   cleanselall: (el) => { cleanup.items.filter((i) => i.verdict === el.dataset.v).forEach((i) => cleanSel.add(i.path)); render(); },
   cleansetfolder: async () => { const f = await bridge.call('dialog:folder'); if (f) { await saveSettings({ cleanupFolder: f }); cleanup = null; render(); } },
+  gofolder: (el) => { folderFilter = ''; location.hash = folderHash(el.dataset.path); },
   pdfopen: async () => { const f = await bridge.call('pdf:openDialog', false); if (f) await bridge.call('pdf:edit', f); },
   pdfedit: (el) => bridge.call('pdf:edit', el.dataset.path),
   pdfdefault: async () => { const name = await bridge.call('pdf:makeDefault'); toast(`Windows Settings is opening: choose “${name}” for .pdf.`); },
@@ -382,7 +461,7 @@ const actions = {
   scan: async (el) => {
     el.disabled = true; $('#scan-status').textContent = 'Scanning…';
     const p = await bridge.call('organise:scan');
-    selected = new Set(p.plan.filter((x) => (x.confidence === 'high' && !x.warning) || x.category === 'Media').map((x) => x.from));
+    selected = new Set(p.plan.filter((x) => !x.warning).map((x) => x.from));
     render();
   },
   selall: () => { selected = new Set(plan.plan.map((p) => p.from)); render(); },
@@ -437,6 +516,10 @@ const actions = {
   clearai: async () => { await saveSettings({ aiKey: '__clear__' }); toast('AI key removed'); render(); },
 };
 
+document.addEventListener('dblclick', (e) => {
+  const row = e.target.closest('[data-dbl]');
+  if (row && !e.target.closest('button')) safe(() => bridge.call('file:open', row.dataset.dbl));
+});
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');
   if (!el) return;
@@ -469,8 +552,10 @@ document.addEventListener('change', (e) => {
 
 // ---------------- routing ----------------
 async function render() {
-  current = (location.hash || '#today').slice(1);
+  const h = decodeURIComponent((location.hash || '#today').slice(1));
+  if (h.startsWith('folder:')) { current = 'folder'; currentFolder = h.slice(7); } else { current = h; currentFolder = null; }
   if (!pages[current]) current = 'today';
+  renderTree();
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === current));
   await safe(() => pages[current]());
   updateBadges();

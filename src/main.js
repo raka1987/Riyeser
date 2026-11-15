@@ -20,16 +20,26 @@ let store, index, mainWin, searchWin, tray;
 const state = { meetings: [], meetingErrors: [], emails: [], lastPlan: null, notified: new Set(), busy: {} };
 
 // ---------- settings ----------
+// Windows often moves Desktop/Documents into OneDrive (C:\Users\you\OneDrive\Desktop). Ask Windows for the real locations.
+function knownFolder(name) {
+  const fallback = path.join(os.homedir(), name[0].toUpperCase() + name.slice(1));
+  let real;
+  try { real = app.getPath(name); } catch { return fallback; }
+  // Never treat the whole home folder (or a missing folder) as Desktop/Downloads/Documents.
+  if (!real || path.resolve(real) === path.resolve(os.homedir()) || !fs.existsSync(real)) return fallback;
+  return real;
+}
 function defaults() {
-  const home = os.homedir();
   const existing = (p) => fs.existsSync(p) ? [p] : [];
+  const desktop = knownFolder('desktop'); const downloads = knownFolder('downloads'); const documents = knownFolder('documents');
   return {
     ownCompanyNames: [],
     companies: [],
     companyTypes: ['Clients', 'Suppliers', 'Government', 'Banks', 'Utilities', 'Personal'],
-    watchFolders: [...existing(path.join(home, 'Downloads')), ...existing(path.join(home, 'Desktop'))],
-    organisedRoot: path.join(home, 'Documents', 'Organised'),
-    searchFolders: [...existing(path.join(home, 'Documents')), ...existing(path.join(home, 'Downloads')), ...existing(path.join(home, 'Desktop'))],
+    watchFolders: [...existing(downloads), ...existing(desktop)],
+    organisedRoot: path.join(documents, 'Organised'),
+    searchFolders: [...existing(documents), ...existing(downloads), ...existing(desktop)],
+    sortEverything: true,
     recursiveScan: false,
     renameFiles: true,
     groupByYear: false,
@@ -46,6 +56,32 @@ function defaults() {
     onboarded: false,
   };
 }
+/** Earlier versions assumed C:\Users\you\Desktop etc. If Windows keeps them elsewhere (OneDrive), switch to the real ones. */
+function fixFolderLocations() {
+  const saved = store.get('settings', null);
+  if (!saved) return;
+  const home = os.homedir();
+  const swap = {};
+  for (const name of ['desktop', 'downloads', 'documents']) {
+    const naive = path.join(home, name[0].toUpperCase() + name.slice(1));
+    const real = knownFolder(name);
+    if (real && real !== naive) swap[naive] = real;
+  }
+  if (!Object.keys(swap).length) return;
+  const fix = (p) => {
+    for (const [from, to] of Object.entries(swap)) if (p === from || p.startsWith(from + path.sep)) return to + p.slice(from.length);
+    return p;
+  };
+  const uniq = (a) => [...new Set(a)];
+  store.set('settings', {
+    ...saved,
+    watchFolders: uniq((saved.watchFolders || []).map(fix)),
+    searchFolders: uniq((saved.searchFolders || []).map(fix)),
+    // keep the Organised folder where it is if files were already filed there
+    organisedRoot: saved.organisedRoot && fs.existsSync(saved.organisedRoot) ? saved.organisedRoot : fix(saved.organisedRoot || ''),
+  });
+}
+
 const getSettings = () => ({ ...defaults(), ...store.get('settings', {}) });
 function setSettings(s) {
   const clean = { ...s };
@@ -209,6 +245,10 @@ function toggleSearch() {
   else { searchWin.center(); searchWin.show(); searchWin.focus(); searchWin.webContents.send('search-focus'); }
 }
 
+function hasSubfolders(dir) {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).some((e) => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('$')); } catch { return false; }
+}
+
 // ---------- OCR for scanned documents ----------
 let ocrWin = null;
 const dbg = process.env.DA_DEBUG ? (...a) => console.log('[ocr]', ...a) : () => {};
@@ -284,6 +324,34 @@ function registerIpc() {
   handle('organise:scan', () => scanInbox());
   handle('organise:last', () => state.lastPlan);
   handle('ocr:readFile', (file) => new Uint8Array(fs.readFileSync(file)));
+
+  // Folder browser in the side panel
+  handle('folder:roots', () => {
+    const s = getSettings();
+    const home = os.homedir();
+    const list = [
+      { path: s.organisedRoot, name: 'Organised', icon: '🗂' },
+      ...s.watchFolders.map((f) => ({ path: f, name: path.basename(f), icon: /desktop$/i.test(f) ? '🖥' : /downloads$/i.test(f) ? '⬇' : '📁' })),
+      { path: path.join(home, 'Documents'), name: 'Documents', icon: '📄' },
+      ...s.searchFolders.map((f) => ({ path: f, name: path.basename(f), icon: '📁' })),
+    ];
+    const seen = new Set();
+    return list.filter((r) => r.path && fs.existsSync(r.path) && !seen.has(r.path) && seen.add(r.path))
+      .map((r) => ({ ...r, hasDirs: hasSubfolders(r.path) }));
+  });
+  handle('folder:list', (dir) => {
+    const dirs = []; const files = [];
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name.startsWith('.') || e.name.startsWith('~$') || /^(desktop\.ini|thumbs\.db|\$recycle\.bin)$/i.test(e.name)) continue;
+      const full = path.join(dir, e.name);
+      try {
+        if (e.isDirectory()) dirs.push({ name: e.name, path: full, hasDirs: hasSubfolders(full), count: fs.readdirSync(full).filter((n) => !n.startsWith('.')).length });
+        else if (e.isFile() && files.length < 3000) { const st = fs.statSync(full); files.push({ name: e.name, path: full, size: st.size, mtime: st.mtimeMs, ext: path.extname(e.name).toLowerCase() }); }
+      } catch { /* no access */ }
+    }
+    const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    return { dir, dirs: dirs.sort(byName), files: files.sort(byName) };
+  });
   handle('organise:folders', () => organizer.scanFolders(getSettings()));
   handle('organise:setFolder', (p, checked) => {
     const s = getSettings();
@@ -383,6 +451,7 @@ app.on('second-instance', (_e, argv) => { const pdf = pdfArg(argv); if (pdf) ope
 app.whenReady().then(async () => {
   store = new Store(path.join(app.getPath('userData'), 'data'));
   index = new Index(store);
+  fixFolderLocations();
   ocr.configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });
   registerIpc();
   const startPdf = pdfArg(process.argv);
