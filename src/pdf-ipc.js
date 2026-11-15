@@ -46,6 +46,7 @@ function createEditorWindow(file, { store, icon }) {
 
 function registerPdfIpc({ handle, store, openEditor, getTheme = () => 'system', setTheme = () => {} }) {
   handle('app:platform', () => process.platform);
+  handle('app:version', () => app.getVersion());
   handle('theme:get', () => getTheme());
   handle('theme:set', (t) => { setTheme(t); return t; });
   // OCR one page image (PNG data URL) for the editor's "Recognise text".

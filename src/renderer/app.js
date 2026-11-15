@@ -646,7 +646,7 @@ bridge.on('scan-progress', ({ i, n }) => { const s = $('#scan-status'); if (s) s
     toast(next === 'system' ? 'Appearance: same as Windows' : next === 'light' ? 'Light mode' : 'Dark mode');
     if (current === 'settings') render();
   });
-  bridge.call('app:version').then((v) => { $('#appversion').textContent = `Version ${v}`; }).catch(() => {});
+  bridge.call('app:version').then((v) => { $('#appversion').textContent = `Version ${v}`; document.title = `Desk Assistant ${v}`; }).catch(() => {});
   if (navigator.platform.startsWith('Mac')) $('#hotkey').textContent = '⌘';
   if (!settings.onboarded) { await saveSettings({ onboarded: true }); location.hash = 'companies'; toast('Welcome! Start by adding your own business name and the companies you work with.'); }
   render();

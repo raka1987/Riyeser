@@ -26,19 +26,18 @@ npm install
 npm start
 ```
 
-## Build an installer
+## Build the Windows installers
 
 ```bash
-npm run dist:win     # Desk Assistant for Windows (zip, with our icon/name on the .exe) -> dist/
-npm run dist:pdf     # Desk PDF for Windows -> dist-pdf/
+npm run dist:win     # Desk Assistant -> dist/DeskAssistant-Setup-<version>.exe
+npm run dist:pdf     # Desk PDF       -> dist-pdf/DeskPDF-Setup-<version>.exe
 npm run dist:all     # both
-npm run dist:mac     # macOS .dmg (build on a Mac)
-npm run dist:linux   # Linux AppImage
 ```
 
-Icons live in `build/` (Desk Assistant) and `build/pdf/` (Desk PDF); `scripts/brand-exe.js` stamps them onto the .exe.
-
-The finished installer is in `dist/`.
+The installers are one-click, per-user (no admin rights needed), add Start menu and desktop shortcuts, show
+in Windows "Installed apps" with their version, and update an existing install in place.
+On Linux/macOS, building them needs Wine. Icons live in `build/` and `build/pdf/`
+(`scripts/make-ico.py` makes the .ico files in the format Windows expects).
 
 ## First-time setup (about 2 minutes)
 

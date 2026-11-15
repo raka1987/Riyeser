@@ -17,6 +17,12 @@ const EXPECTED = new Set(['locales', 'resources', 'license.electron.txt', 'licen
 
 function installDir() { return path.dirname(process.execPath); }
 
+/** Installed with the Setup.exe installer? Then Windows already knows about the app and has a proper uninstaller. */
+function installerUninstaller(name) {
+  const u = path.join(installDir(), `Uninstall ${name}.exe`);
+  return fs.existsSync(u) ? u : null;
+}
+
 /** Is it safe to delete the whole app folder? Only if it clearly is just this app. */
 function safeToDeleteDir(dir) {
   const r = path.resolve(dir);
@@ -30,6 +36,7 @@ function safeToDeleteDir(dir) {
 /** Called on every start (Windows, packaged): keep the "Installed apps" entry up to date. */
 async function registerInstalledApp({ id, name, description }) {
   if (process.platform !== 'win32' || !app.isPackaged) return;
+  if (installerUninstaller(name)) { await reg('delete', regKey(id), '/f'); return; } // the installer's own entry is used
   const key = regKey(id);
   const exe = process.execPath;
   let sizeKb = 150000;
@@ -48,6 +55,20 @@ async function registerInstalledApp({ id, name, description }) {
  * the app's own data (settings, search index, saved signatures, PDF backups if chosen) and the program folder.
  */
 async function runUninstall({ id, name, pdfProgId }) {
+  const official = process.platform === 'win32' && installerUninstaller(name);
+  if (official) {
+    // Clean up our extra Windows registrations, then hand over to the installer's uninstaller.
+    if (pdfProgId) {
+      await reg('delete', `HKCU\\Software\\Classes\\${pdfProgId}`, '/f');
+      await reg('delete', 'HKCU\\Software\\Classes\\.pdf\\OpenWithProgids', '/v', pdfProgId, '/f');
+      await reg('delete', `HKCU\\Software\\${name}`, '/f');
+      await reg('delete', 'HKCU\\Software\\RegisteredApplications', '/v', name, '/f');
+    }
+    app.setLoginItemSettings({ openAtLogin: false });
+    spawn(official, [], { detached: true, stdio: 'ignore' }).unref();
+    app.exit(0);
+    return true;
+  }
   const { response, checkboxChecked } = await dialog.showMessageBox({
     type: 'question', buttons: ['Cancel', 'Uninstall'], defaultId: 1, cancelId: 0, title: `Uninstall ${name}`,
     message: `Uninstall ${name}?`,

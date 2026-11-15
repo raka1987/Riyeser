@@ -5,6 +5,12 @@ import * as pdfjsLib from './vendor/pdf.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 const { PDFDocument, StandardFonts, rgb, degrees, BlendMode, LineCapStyle, pushGraphicsState, popGraphicsState, beginText, endText, setFontAndSize, setTextMatrix, showText, setTextRenderingMode, TextRenderingMode } = window.PDFLib;
 const bridge = window.api;
+let appTitle = 'PDF Editor';
+bridge.call('app:version').then(async (v) => {
+  const info = await bridge.call('app:info').catch(() => null);
+  appTitle = `${info?.standalone ? 'Desk PDF' : 'PDF Editor'} ${v}`;
+  if (!st.file) document.title = appTitle; else document.title = `${st.file.split(/[\\/]/).pop()} — ${appTitle}`;
+}).catch(() => {});
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -80,7 +86,7 @@ async function openFile(file) {
     const bytes = await bridge.call('pdf:read', file);
     st.file = file;
     st.bytes = bytes;
-    document.title = `${file.split(/[\\/]/).pop()} - PDF Editor`;
+    document.title = `${file.split(/[\\/]/).pop()} — ${appTitle}`;
     $('#docname').textContent = file.split(/[\\/]/).pop();
     $('#docname').title = file;
     await readForm();
@@ -908,7 +914,7 @@ async function save(saveAs = false) {
     st.file = target;
     st.bytes = out;
     $('#docname').textContent = target.split(/[\\/]/).pop();
-    document.title = `${target.split(/[\\/]/).pop()} - PDF Editor`;
+    document.title = `${target.split(/[\\/]/).pop()} — ${appTitle}`;
     await readForm();
     await loadBytes(out);
     setDirty(false);

@@ -317,7 +317,6 @@ function registerIpc() {
     return saved;
   });
   handle('app:uninstall', () => runUninstall(APP_INFO));
-  handle('app:version', () => app.getVersion());
   handle('dialog:folder', async () => {
     const r = await dialog.showOpenDialog(mainWin, { properties: ['openDirectory', 'createDirectory'] });
     return r.canceled ? null : r.filePaths[0];
