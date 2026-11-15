@@ -309,3 +309,31 @@ test('desktop folders: leave, sort inside, or move the whole folder (under the c
   undoBatch(batch);
   assert.ok(fs.existsSync(path.join(job, 'photos', 'site.jpg')));
 });
+
+test('safety: never touches system folders, system files or shortcuts', async () => {
+  const safety = require('../src/core/safety');
+  const { scanFolders, listFiles } = require('../src/core/organizer');
+  const { analyseFolder } = require('../src/core/cleanup');
+  // system folders and whole drives / the user folder
+  for (const p of ['/etc', '/etc/hosts', '/usr/lib', path.join(os.homedir(), '.config', 'x')]) assert.ok(safety.isSystemPath(p), p);
+  assert.ok(safety.isTooBroad(os.homedir()));
+  assert.ok(safety.isTooBroad('/'));
+  assert.match(safety.folderProblem('/usr'), /Windows or program folder/);
+  assert.equal(safety.folderProblem(path.join(os.tmpdir(), 'Desktop')), null);
+  // protected file types
+  for (const f of ['desktop.ini', 'Thumbs.db', 'Google Chrome.lnk', 'Website.url', '.hidden', '~$draft.docx', 'driver.sys', 'thing.dll']) assert.ok(safety.isProtectedFile(path.join(os.tmpdir(), f)), f);
+  assert.ok(!safety.isProtectedFile(path.join(os.tmpdir(), 'invoice.pdf')));
+  // a Desktop full of shortcuts and system files: only the personal file is offered for sorting
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const desk = path.join(tmp, 'Desktop'); fs.mkdirSync(desk);
+  for (const f of ['desktop.ini', 'Google Chrome.lnk', 'Bank login.url', 'helper.dll', 'invoice.txt']) fs.writeFileSync(path.join(desk, f), 'x');
+  assert.deepEqual(listFiles(desk).map((f) => path.basename(f)), ['invoice.txt']);
+  // system folders can't be tidied or cleaned up even if they end up in the settings
+  assert.equal(scanFolders({ watchFolders: ['/usr', '/etc', desk], organisedRoot: path.join(tmp, 'Organised') }).filter((f) => f.isRoot).length, 1);
+  assert.deepEqual(await analyseFolder('/etc', {}), []);
+  // and the final check before moving refuses protected files
+  const batch = applyPlan([{ from: path.join(desk, 'helper.dll'), to: path.join(tmp, 'Organised', 'helper.dll') }, { from: path.join(desk, 'invoice.txt'), to: path.join(tmp, 'Organised', 'invoice.txt') }]);
+  assert.equal(batch.moves.length, 1);
+  assert.match(batch.errors[0].error, /protected/);
+  assert.ok(fs.existsSync(path.join(desk, 'helper.dll')));
+});

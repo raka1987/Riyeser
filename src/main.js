@@ -13,6 +13,7 @@ const { fetchAndSort } = require('./core/email');
 const { extractActionItems } = require('./core/actions');
 const { createAI } = require('./core/ai');
 const { analyseFolder } = require('./core/cleanup');
+const safety = require('./core/safety');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
 const { setOcrProvider } = require('./core/extract');
 const ocr = require('./core/ocr');
@@ -311,6 +312,13 @@ function registerIpc() {
   handle('settings:set', (s) => {
     if (typeof s.emailPassword === 'string' && s.emailPassword) setSecret('emailPassword', s.emailPassword);
     if (typeof s.aiKey === 'string') { if (s.aiKey === '__clear__') setSecret('aiKey', ''); else if (s.aiKey) setSecret('aiKey', s.aiKey); }
+    // Only personal folders can be chosen - never Windows/program folders or a whole drive.
+    for (const key of ['watchFolders', 'searchFolders']) {
+      for (const f of s[key] || []) { const why = safety.folderProblem(f); if (why) throw new Error(`${f}: ${why}`); }
+    }
+    for (const key of ['organisedRoot', 'cleanupFolder']) {
+      if (s[key]) { const why = safety.folderProblem(s[key]); if (why) throw new Error(`${s[key]}: ${why}`); }
+    }
     const saved = setSettings({ ...getSettings(), ...s });
     app.setLoginItemSettings({ openAtLogin: !!saved.openAtLogin, args: ['--hidden'] });
     applyTheme(saved.theme);
@@ -406,7 +414,10 @@ function registerIpc() {
   handle('cleanup:trash', async (paths) => {
     const done = []; const failed = [];
     for (const p of paths) {
-      try { await shell.trashItem(p); done.push(p); index.remove(p); } catch (e) { failed.push({ path: p, error: e.message }); }
+      try {
+        if (safety.isSystemPath(p) || safety.isTooBroad(p) || (fs.statSync(p).isFile() && safety.isProtectedFile(p))) throw new Error('protected system file');
+        await shell.trashItem(p); done.push(p); index.remove(p);
+      } catch (e) { failed.push({ path: p, error: e.message }); }
     }
     store.update('cleanupLog', [], (l) => [{ at: new Date().toISOString(), binned: done }, ...l].slice(0, 50));
     return { done, failed };
@@ -432,7 +443,10 @@ function registerIpc() {
     return { errors };
   });
   handle('organise:duplicates', () => { const s = getSettings(); return organizer.findDuplicates([...new Set([...s.watchFolders, s.organisedRoot])].filter((f) => fs.existsSync(f))); });
-  handle('file:trash', async (p) => { await shell.trashItem(p); index.remove(p); return true; });
+  handle('file:trash', async (p) => {
+    if (safety.isSystemPath(p) || safety.isTooBroad(p) || safety.isProtectedFile(p)) throw new Error('That is a protected system file, so it was not deleted.');
+    await shell.trashItem(p); index.remove(p); return true;
+  });
 
   handle('search', (q) => index.search(q));
   handle('index:rebuild', () => refreshIndex());

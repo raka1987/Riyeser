@@ -5,6 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { extractText, canExtract } = require('./extract');
 const { classify } = require('./classifier');
+const { folderProblem, isProtectedFile, isSystemPath } = require('./safety');
 
 const DAY = 86400_000;
 const INSTALLER = new Set(['.exe', '.msi', '.dmg', '.pkg', '.deb', '.rpm', '.appimage', '.apk', '.msix']);
@@ -70,9 +71,14 @@ function organisedFingerprints(root) {
  * - keep:   looks important (invoice, contract...) or recently used
  */
 async function analyseFolder(folder, { organisedRoot, staleDays = 90, ignore = [], settings = {}, now = Date.now(), onProgress = () => {} } = {}) {
+  if (folderProblem(folder)) return []; // never clean up Windows/program folders
   let entries;
   try { entries = fs.readdirSync(folder, { withFileTypes: true }); } catch { return []; }
-  entries = entries.filter((e) => !e.name.startsWith('.') && e.name !== 'desktop.ini' && !ignore.includes(path.join(folder, e.name)));
+  entries = entries.filter((e) => {
+    const full = path.join(folder, e.name);
+    if (ignore.includes(full)) return false;
+    return e.isDirectory() ? !e.name.startsWith('.') && !isSystemPath(full) : !isProtectedFile(full);
+  });
   const names = new Set(entries.map((e) => e.name.toLowerCase()));
   const filed = organisedFingerprints(organisedRoot);
   const out = [];

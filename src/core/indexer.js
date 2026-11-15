@@ -36,6 +36,7 @@ class Index {
       try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
       for (const e of entries) {
         if (e.name.startsWith('.') || SKIP_DIRS.has(e.name)) continue;
+        if (e.isDirectory() && require('./safety').isSystemPath(path.join(dir, e.name))) continue;
         const full = path.join(dir, e.name);
         if (e.isDirectory()) walk(full, depth + 1);
         else if (e.isFile()) files.push(full);

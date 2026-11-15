@@ -7,6 +7,7 @@ const { extractText } = require('./extract');
 const { classify } = require('./classifier');
 const { extractDetails, suggestName, typeMismatch } = require('./details');
 const { extractKeys, linkRelated } = require('./related');
+const { isSystemPath, isTooBroad, isProtectedFile } = require('./safety');
 
 const SKIP_EXT = new Set(['.crdownload', '.part', '.tmp', '.download', '.partial', '.lnk', '.ini']);
 
@@ -53,9 +54,10 @@ function listFiles(folder, { recursive = false, maxFiles = 2000, maxDepth = 4 } 
       if (out.length >= maxFiles) return;
       if (e.name.startsWith('.') || e.name.startsWith('~$')) continue;
       const full = path.join(dir, e.name);
-      if (e.isDirectory()) { if (recursive && depth < maxDepth) walk(full, depth + 1); continue; }
+      if (e.isDirectory()) { if (recursive && depth < maxDepth && !isSystemPath(full)) walk(full, depth + 1); continue; }
       if (!e.isFile()) continue;
       if (SKIP_EXT.has(path.extname(e.name).toLowerCase())) continue;
+      if (isProtectedFile(full)) continue; // system files, shortcuts, hidden files: never touched
       out.push(full);
     }
   };
@@ -123,17 +125,13 @@ function placeItem(item, settings) {
 }
 
 /** Never tidy a whole drive (C:\) or the home folder itself - only folders like Desktop and Downloads. */
-function isTooBroad(dir) {
-  const r = path.resolve(dir);
-  return r === path.resolve(require('os').homedir()) || r === path.parse(r).root;
-}
 
 /** The folders the user can tick: each watched folder (its loose files) and the sub-folders inside it. */
 function scanFolders(settings) {
   const sel = settings.scanSelection || {};
   const out = [];
   for (const root of settings.watchFolders || []) {
-    if (!fs.existsSync(root) || isTooBroad(root)) continue;
+    if (!fs.existsSync(root) || isTooBroad(root) || isSystemPath(root)) continue;
     const loose = listFiles(root).length;
     out.push({ path: root, name: path.basename(root), isRoot: true, files: loose, checked: sel[root] !== false });
     let entries = [];
@@ -141,6 +139,7 @@ function scanFolders(settings) {
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith('.') || e.name.startsWith('$')) continue;
       const full = path.join(root, e.name);
+      if (isSystemPath(full)) continue;
       if (settings.organisedRoot && (full === settings.organisedRoot || settings.organisedRoot.startsWith(full + path.sep))) continue;
       // What to do with a sub-folder: 'leave' it, 'sort' the files inside, or 'move' the whole folder into Organised.
       const v = full in sel ? sel[full] : (settings.recursiveScan ? 'sort' : 'leave');
@@ -260,6 +259,8 @@ function applyPlan(items) {
   for (const it of items) {
     try {
       if (!fs.existsSync(it.from)) throw new Error('file no longer exists');
+      // Final safety check right before moving: never system files/folders, never into a system folder.
+      if (isSystemPath(it.from) || isSystemPath(it.to) || isTooBroad(it.from) || (!it.isFolder && isProtectedFile(it.from))) throw new Error('protected system file - not moved');
       const dest = moveFile(it.from, it.to);
       batch.moves.push({ from: it.from, to: dest });
     } catch (e) { batch.errors.push({ from: it.from, error: e.message }); }
@@ -269,6 +270,7 @@ function applyPlan(items) {
 
 /** Delete folders left empty after files were moved out (never the root itself). */
 function removeEmptyDirs(root, { includeRoot = false } = {}) {
+  if (!root || isSystemPath(root) || isTooBroad(root)) return;
   const walk = (dir) => {
     let entries;
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return false; }
