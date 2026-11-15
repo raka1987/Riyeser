@@ -21,9 +21,48 @@ function clip(s) {
   return (s || '').replace(/\u0000/g, '').replace(/[ \t]+/g, ' ').slice(0, MAX_CHARS);
 }
 
+// Office files are zip archives of XML: Excel (.xlsx), PowerPoint (.pptx), OpenDocument (.ods/.odt/.odp)
+const OFFICE_ZIP = new Set(['.xlsx', '.xlsm', '.pptx', '.ods', '.odt', '.odp']);
+const xmlText = (xml) => xml.replace(/<\/(a:p|w:p|text:p|row|si|c|text:h)>/g, '\n').replace(/<[^>]+>/g, ' ')
+  .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n));
+
+async function officeText(file, ext) {
+  const JSZip = require('jszip');
+  const zip = await JSZip.loadAsync(fs.readFileSync(file));
+  const read = async (name) => (zip.file(name) ? zip.file(name).async('string') : '');
+  if (ext === '.xlsx' || ext === '.xlsm') {
+    // Sheet names, shared strings (the text in cells) and the cells of the first few sheets, row by row.
+    const parts = [];
+    const wb = await read('xl/workbook.xml');
+    parts.push([...wb.matchAll(/<sheet [^>]*name="([^"]+)"/g)].map((m) => `Sheet: ${m[1]}`).join('\n'));
+    const shared = [...(await read('xl/sharedStrings.xml')).matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => xmlText(m[1]).replace(/\s+/g, ' ').trim());
+    const sheets = Object.keys(zip.files).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort().slice(0, 3);
+    for (const sh of sheets) {
+      const xml = await read(sh);
+      for (const row of xml.match(/<row[\s\S]*?<\/row>/g) || []) {
+        const cells = [...row.matchAll(/<c ([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)].map((c) => {
+          const v = (c[2] || '').match(/<v>([\s\S]*?)<\/v>/); const inline = (c[2] || '').match(/<is>([\s\S]*?)<\/is>/);
+          if (/t="s"/.test(c[1]) && v) return shared[+v[1]] || '';
+          if (inline) return xmlText(inline[1]).trim();
+          return v ? v[1] : '';
+        }).filter(Boolean);
+        if (cells.length) parts.push(cells.join(' | '));
+        if (parts.length > 400) break;
+      }
+    }
+    return parts.join('\n');
+  }
+  if (ext === '.pptx') {
+    const slides = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+      .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10)).slice(0, 15);
+    return (await Promise.all(slides.map(read))).map(xmlText).join('\n');
+  }
+  return xmlText(await read('content.xml')); // OpenDocument
+}
+
 function canExtract(file) {
   const ext = path.extname(file).toLowerCase();
-  return TEXT_EXT.has(ext) || HTML_EXT.has(ext) || ['.pdf', '.docx', '.eml'].includes(ext) || (IMAGE_EXT.has(ext) && !!ocr?.image);
+  return TEXT_EXT.has(ext) || HTML_EXT.has(ext) || OFFICE_ZIP.has(ext) || ['.pdf', '.docx', '.eml'].includes(ext) || (IMAGE_EXT.has(ext) && !!ocr?.image);
 }
 
 async function extractText(file) {
@@ -53,6 +92,7 @@ async function extractText(file) {
       }
       return clip(text);
     }
+    if (OFFICE_ZIP.has(ext)) return clip((await officeText(file, ext)).replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n'));
     if (ext === '.docx') {
       const mammoth = require('mammoth');
       const r = await mammoth.extractRawText({ path: file });

@@ -15,6 +15,7 @@ const { createAI } = require('./core/ai');
 const { analyseFolder } = require('./core/cleanup');
 const safety = require('./core/safety');
 const { planEverything, removeEmptiedFolders } = require('./core/everything');
+const learn = require('./core/learn');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
 const { setOcrProvider, setTextCache } = require('./core/extract');
 const ocr = require('./core/ocr');
@@ -178,8 +179,30 @@ function checkReminders() {
   }
 }
 
+// ---------- learning where you file things ----------
+// Paths the app itself moved files to. Anything else in your Organised folder, you put there yourself.
+function placedByApp() {
+  let placed = store.get('placedByApp', null);
+  if (!placed) placed = store.set('placedByApp', store.get('history', []).flatMap((b) => b.moves.map((m) => m.to)));
+  return new Set(placed);
+}
+/** Examples of where you like things: folders you chose + files you put in Organised yourself (read from the search index). */
+function buildExamples(s) {
+  const examples = [...store.get('learned', [])];
+  const root = s.organisedRoot;
+  const placed = placedByApp();
+  let n = 0;
+  for (const [p, d] of Object.entries(index.docs)) {
+    if (!p.startsWith(root + path.sep) || placed.has(p) || n > 4000) continue;
+    examples.push(learn.makeExample({ name: d.name, text: d.text, company: d.company, docType: d.docType, ext: d.ext }, path.dirname(p), root));
+    n++;
+  }
+  return examples;
+}
+const planSettings = () => { const s = getSettings(); return { ...s, _examples: buildExamples(s), _placedByApp: placedByApp() }; };
+
 async function scanInbox({ quiet = false } = {}) {
-  const s = getSettings();
+  const s = planSettings();
   const result = await organizer.planOrganise(s, { ai: ai(), onProgress: (i, n) => send('scan-progress', { i, n }) });
   state.lastPlan = result;
   if (s.autoOrganise) {
@@ -328,10 +351,34 @@ function registerIpc() {
     return saved;
   });
   handle('app:uninstall', () => runUninstall(APP_INFO));
-  handle('dialog:folder', async () => {
-    const r = await dialog.showOpenDialog(mainWin, { properties: ['openDirectory', 'createDirectory'] });
+  handle('dialog:folder', async (startIn) => {
+    const r = await dialog.showOpenDialog(mainWin, { properties: ['openDirectory', 'createDirectory'], defaultPath: startIn && fs.existsSync(startIn) ? startIn : undefined });
     return r.canceled ? null : r.filePaths[0];
   });
+  // You picked a different folder for a file: remember it, and move similar files in the current list there too.
+  handle('learn:choose', (from, folder) => {
+    const why = safety.folderProblem(folder);
+    if (why) throw new Error(why);
+    const s = getSettings();
+    const item = state.lastPlan?.plan.find((p) => p.from === from);
+    if (!item) throw new Error('That file is no longer in the list.');
+    const example = learn.makeExample(item, folder, s.organisedRoot, true);
+    // the chosen folder is used as-is (including its year folder) for this file
+    item.dir = folder; item.to = path.join(folder, path.basename(item.to)); item.learned = 'you chose this folder'; item.fallback = false; item.confidence = 'high';
+    store.update('learned', [], (l) => [example, ...l.filter((e) => !(e.template === example.template && e.nameTokens.join() === example.nameTokens.join()))].slice(0, 2000));
+    let alsoMoved = 0;
+    for (const other of state.lastPlan.plan) {
+      if (other === item || other.isFolder) continue;
+      const d = learn.learnedDestination(other, [example], s.organisedRoot); // only clearly similar files follow
+      if (d && d.dir !== other.dir) {
+        other.dir = d.dir; other.to = path.join(d.dir, path.basename(other.to)); other.learned = 'similar to a file you just placed'; other.fallback = false; other.confidence = 'high';
+        alsoMoved++;
+      }
+    }
+    return { plan: state.lastPlan, alsoMoved };
+  });
+  handle('learn:list', () => store.get('learned', []).map((e) => ({ template: e.template, inRoot: e.inRoot, docType: e.docType, company: e.company, words: e.nameTokens.slice(0, 5), at: e.at })));
+  handle('learn:forget', (i) => { store.update('learned', [], (l) => l.filter((_, k) => k !== i)); return true; });
   handle('dialog:ics', async () => {
     const r = await dialog.showOpenDialog(mainWin, { properties: ['openFile'], filters: [{ name: 'Calendar', extensions: ['ics'] }] });
     return r.canceled ? null : r.filePaths[0];
@@ -371,7 +418,7 @@ function registerIpc() {
   handle('organise:folders', () => organizer.scanFolders(getSettings()));
   handle('everything:scan', async () => {
     state.cancel = false;
-    state.lastPlan = await planEverything(getSettings(), { ai: ai(), onProgress: (i, n) => send('scan-progress', { i, n }), isCancelled: () => state.cancel });
+    state.lastPlan = await planEverything(planSettings(), { ai: ai(), onProgress: (i, n) => send('scan-progress', { i, n }), isCancelled: () => state.cancel });
     send('plan-changed');
     return state.lastPlan;
   });
@@ -403,7 +450,7 @@ function registerIpc() {
     return true;
   });
   handle('organise:recheck', async () => {
-    state.lastPlan = await organizer.planRecheck(getSettings(), { ai: ai(), onProgress: (i, n) => send('scan-progress', { i, n }) });
+    state.lastPlan = await organizer.planRecheck(planSettings(), { ai: ai(), onProgress: (i, n) => send('scan-progress', { i, n }) });
     return state.lastPlan;
   });
 
@@ -441,6 +488,7 @@ function registerIpc() {
     for (const sub of state.lastPlan?.emptyFolderCleanup || []) organizer.removeEmptyDirs(sub, { includeRoot: true });
     if (state.lastPlan?.mode === 'everything') { removeEmptiedFolders(batch, state.lastPlan.libraries || []); state.lastPlan = null; }
     store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+    store.set('placedByApp', [...placedByApp(), ...batch.moves.map((m) => m.to)].slice(-50000));
     refreshIndex().catch(() => {});
     return batch;
   });
@@ -451,6 +499,8 @@ function registerIpc() {
     if (!batch) throw new Error('Nothing to undo');
     const errors = organizer.undoBatch(batch);
     store.set('history', hist.filter((b) => b.id !== id));
+    const undone = new Set(batch.moves.map((m) => m.to));
+    store.set('placedByApp', [...placedByApp()].filter((p) => !undone.has(p)));
     return { errors };
   });
   handle('organise:duplicates', () => { const s = getSettings(); return organizer.findDuplicates([...new Set([...s.watchFolders, s.organisedRoot])].filter((f) => fs.existsSync(f))); });

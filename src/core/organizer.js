@@ -4,10 +4,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { extractText } = require('./extract');
-const { classify } = require('./classifier');
+const { classify, folderFor } = require('./classifier');
 const { extractDetails, suggestName, typeMismatch } = require('./details');
 const { extractKeys, linkRelated } = require('./related');
 const { isSystemPath, isTooBroad, isProtectedFile } = require('./safety');
+const { featureTokens, learnedDestination } = require('./learn');
 
 const SKIP_EXT = new Set(['.crdownload', '.part', '.tmp', '.download', '.partial', '.lnk', '.ini']);
 
@@ -30,8 +31,9 @@ function safeName(s) {
 
 function targetDir(root, c) {
   if (c.category === 'Media') return path.join(root, 'Media', c.docType);
-  if (c.company) return path.join(root, safeName(c.companyType || 'Companies'), safeName(c.company), safeName(c.docType));
-  if (c.category === 'General') return path.join(root, 'General', safeName(c.docType));
+  const typeDir = folderFor(c.docType).split('/').map(safeName);
+  if (c.company) return path.join(root, safeName(c.companyType || 'Companies'), safeName(c.company), ...typeDir);
+  if (c.category === 'General') return path.join(root, 'General', ...typeDir);
   return null; // unsure -> leave it where it is and ask the user
 }
 
@@ -69,10 +71,11 @@ async function classifyFile(file, settings, ai) {
   const ext = path.extname(file).toLowerCase();
   const text = await extractText(file);
   let c = classify({ fileName: path.basename(file), ext, text }, settings);
-  if (ai && c.confidence !== 'high' && c.category !== 'Media' && text) {
+  // AI second opinion: for files the rules are unsure about - or for every document if "double-check everything" is on.
+  if (ai && (c.confidence !== 'high' || settings.aiCheckAll) && c.category !== 'Media' && text) {
     try {
       const better = await ai.classify(path.basename(file), text, settings);
-      if (better) c = { ...c, ...better, reasons: [...(better.reasons || []), 'refined by AI'] };
+      if (better) c = { ...c, ...better, companyKnown: !!better.company, aiChecked: true, reasons: [...(better.reasons || []), ...(c.reasons || []).slice(0, 1)] };
     } catch (e) { c.reasons.push(`AI unavailable: ${e.message}`); }
   }
   return { c, text };
@@ -88,6 +91,7 @@ async function analyseFile(file, stat, settings, ai) {
     fileDate: new Date(stat.mtimeMs).toISOString().slice(0, 10),
     warning: c.category === 'Media' ? null : typeMismatch(name, text),
     keys: c.category === 'Media' ? [] : extractKeys(text, name),
+    ...(c.category === 'Media' ? { nameTokens: [], textTokens: [] } : featureTokens(name, text)),
     preview: (text || '').replace(/\s+/g, ' ').trim().slice(0, 400),
   };
 }
@@ -103,6 +107,17 @@ function placeItem(item, settings) {
   if (item.companyFromGroup && item.confidence === 'low') {
     item.confidence = 'medium';
     item.reasons = [...(item.reasons || []), `linked to other ${item.company} documents`];
+  }
+  // Where you've put similar files before wins over the general rules.
+  const learned = settings._examples ? learnedDestination(item, settings._examples, root) : null;
+  if (learned) {
+    item.learned = learned.because;
+    item.fallback = false;
+    if (item.confidence !== 'high') item.confidence = learned.support >= 2 ? 'high' : 'medium';
+    item.reasons = [`${learned.because}`, ...(item.reasons || [])];
+    item.newName = settings.renameFiles === false ? null
+      : suggestName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, fallbackDate: item.fileDate });
+    return { dir: learned.dir, unsure: false, to: path.join(learned.dir, item.newName || item.name) };
   }
   const grouped = item.group && item.company && settings.groupRelated !== false;
   let dir;
@@ -234,6 +249,7 @@ async function planRecheck(settings, { ai = null, onProgress = () => {} } = {}) 
   for (const item of items) {
     const { dir, unsure, to } = placeItem(item, settings);
     if (unsure || !to || item.fallback) continue; // never override your own folders with a guess
+    if (settings._placedByApp && !settings._placedByApp.has(item.from)) continue; // you put it there yourself - leave it
     if (path.resolve(to).toLowerCase() === path.resolve(item.from).toLowerCase()) continue;
     const sameFolder = path.resolve(dir).toLowerCase() === path.resolve(path.dirname(item.from)).toLowerCase();
     plan.push({ ...item, dir, to, change: sameFolder ? 'rename' : (item.newName ? 'move + rename' : 'move'), currentDir: path.dirname(item.from) });

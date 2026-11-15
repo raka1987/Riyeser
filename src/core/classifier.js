@@ -1,20 +1,35 @@
 // Works out WHAT a document is (invoice, contract...) and WHO it is for (company name).
 // Rule-based so it works offline and for free; an optional AI pass can refine it (see ai.js).
 
+// Document types. `folder` is where that type lives (sub-folders allowed, e.g. Payroll/Timesheets).
+// Words found in the file NAME count more than words in the text.
 const DOC_TYPES = [
-  { type: 'Invoices', words: ['invoice', 'tax invoice', 'amount due', 'invoice number', 'invoice no', 'inv-', 'bill to', 'payment terms', 'due date', 'balance due'] },
-  { type: 'Receipts', words: ['receipt', 'payment received', 'paid with', 'thank you for your purchase', 'order confirmation', 'transaction id'] },
-  { type: 'Quotes', words: ['quote', 'quotation', 'estimate', 'valid until', 'proposal price'] },
-  { type: 'Purchase Orders', words: ['purchase order', 'po number', 'p.o.'] },
-  { type: 'Contracts', words: ['agreement', 'contract', 'terms and conditions', 'hereby', 'signed', 'signature', 'party', 'parties', 'nda', 'non-disclosure', 'engagement letter'] },
-  { type: 'Statements', words: ['statement', 'account summary', 'opening balance', 'closing balance', 'bank statement'] },
-  { type: 'Payslips', words: ['payslip', 'pay slip', 'gross pay', 'net pay', 'paye', 'pay period'] },
-  { type: 'Tax', words: ['tax return', 'gst return', 'vat return', 'ird', 'irs', 'hmrc', 'ato', 'w-2', '1099', 'tax year'] },
-  { type: 'Insurance', words: ['policy number', 'insurance', 'insured', 'premium', 'claim number'] },
-  { type: 'Proposals', words: ['proposal', 'scope of work', 'statement of work', 'sow'] },
-  { type: 'Meeting Notes', words: ['meeting notes', 'minutes', 'attendees', 'agenda', 'action items', 'next steps'] },
-  { type: 'Reports', words: ['report', 'summary', 'analysis', 'quarterly', 'annual report'] },
-  { type: 'Correspondence', words: ['dear', 'kind regards', 'yours sincerely', 'letter'] },
+  { type: 'Invoices', words: ['invoice', 'tax invoice', 'amount due', 'invoice number', 'invoice no', 'inv-', 'bill to', 'payment terms', 'due date', 'balance due', 'please pay'] },
+  { type: 'Credit Notes', words: ['credit note', 'credit memo', 'adjustment note', 'credit adjustment'] },
+  { type: 'Receipts', words: ['receipt', 'payment received', 'paid with', 'thank you for your purchase', 'order confirmation', 'transaction id', 'amount paid'] },
+  { type: 'Remittances', words: ['remittance', 'remittance advice', 'payment advice', 'eft payment', 'we have paid', 'payment notification'] },
+  { type: 'Quotes', words: ['quote', 'quotation', 'estimate', 'valid until', 'pricing proposal', 'quote number'] },
+  { type: 'Purchase Orders', words: ['purchase order', 'po number', 'p.o.', 'order number'] },
+  { type: 'Delivery Dockets', words: ['delivery docket', 'packing slip', 'delivery note', 'consignment note', 'proof of delivery', 'goods received'] },
+  { type: 'Statements', words: ['statement', 'account summary', 'opening balance', 'closing balance', 'bank statement', 'statement of account'] },
+  { type: 'Timesheets', folder: 'Payroll/Timesheets', words: ['timesheet', 'time sheet', 'hours worked', 'total hours', 'week ending', 'start time', 'finish time', 'clock in', 'ordinary hours', 'overtime'] },
+  { type: 'Payslips', folder: 'Payroll/Payslips', words: ['payslip', 'pay slip', 'gross pay', 'net pay', 'pay period', 'ytd earnings', 'earnings statement'] },
+  { type: 'Payroll', folder: 'Payroll', words: ['payroll', 'paye', 'kiwisaver', 'superannuation', 'pay run', 'wages', 'employer deductions', 'employment information', 'payday filing'] },
+  { type: 'Tax', words: ['tax return', 'gst return', 'vat return', 'ird', 'irs', 'hmrc', 'ato', 'w-2', '1099', 'tax year', 'provisional tax', 'income tax', 'gst'] },
+  { type: 'Insurance', words: ['policy number', 'insurance', 'insured', 'premium', 'claim number', 'certificate of currency', 'policy schedule'] },
+  { type: 'Contracts', words: ['agreement', 'contract', 'terms and conditions', 'hereby', 'signature', 'the parties', 'nda', 'non-disclosure', 'engagement letter', 'subcontract'] },
+  { type: 'Variations', words: ['variation', 'variation order', 'change order', 'site instruction', 'variation request'] },
+  { type: 'Proposals', words: ['proposal', 'scope of work', 'statement of work', 'sow', 'tender', 'request for proposal', 'rfp'] },
+  { type: 'Plans & Drawings', words: ['drawing', 'drawings', 'dwg', 'floor plan', 'site plan', 'elevation', 'drawing number', 'drawing no', 'scale 1:', 'layout plan', 'as built drawing'] },
+  { type: 'Specifications', words: ['specification', 'specifications', 'data sheet', 'datasheet', 'technical data', 'product data', 'submittal'] },
+  { type: 'Commissioning', words: ['commissioning', 'commissioning plan', 'pre-commissioning', 'testing and commissioning', 'o&m manual', 'operation and maintenance', 'as-built', 'handover'] },
+  { type: 'Certificates', words: ['certificate', 'certificate of compliance', 'coc', 'producer statement', 'ps3', 'ps4', 'code compliance', 'warrant of fitness', 'test certificate', 'compliance schedule'] },
+  { type: 'Health & Safety', words: ['health and safety', 'h&s', 'swms', 'jsa', 'job safety analysis', 'risk assessment', 'incident report', 'hazard register', 'toolbox meeting', 'site safety'] },
+  { type: 'Meeting Notes', words: ['meeting notes', 'minutes', 'attendees', 'agenda', 'action items', 'next steps', 'apologies'] },
+  { type: 'Price Lists', words: ['price list', 'pricelist', 'schedule of rates', 'rate card', 'unit price', 'trade price'] },
+  { type: 'Staff & HR', folder: 'Staff & HR', words: ['employment agreement', 'leave application', 'annual leave', 'sick leave', 'job description', 'resume', 'curriculum vitae', 'induction', 'performance review', 'letter of offer'] },
+  { type: 'Reports', words: ['report', 'analysis', 'quarterly', 'annual report', 'progress report', 'monthly report'] },
+  { type: 'Correspondence', words: ['dear', 'kind regards', 'yours sincerely', 'yours faithfully', 'letter'] },
 ];
 
 const MEDIA = {
@@ -23,8 +38,6 @@ const MEDIA = {
   Audio: ['.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'],
   Installers: ['.exe', '.msi', '.dmg', '.pkg', '.deb', '.rpm', '.appimage', '.apk'],
   Archives: ['.zip', '.rar', '.7z', '.tar', '.gz', '.tgz'],
-  Spreadsheets: ['.xlsx', '.xls', '.ods', '.numbers'],
-  Presentations: ['.pptx', '.ppt', '.key', '.odp'],
 };
 
 const LEGAL_SUFFIX = '(?:Ltd|Limited|LLC|L\\.L\\.C\\.|Inc|Incorporated|Corp|Corporation|PLC|Pty Ltd|Pty|GmbH|LLP|Co\\.|Company|Group|Holdings|Trust|AG|SA|BV)';
@@ -144,7 +157,14 @@ function classify({ fileName, ext, text }, settings = {}) {
   ext = (ext || '').toLowerCase();
 
   const dt = detectDocType(fileName, text || '');
-  const co = detectCompany(fileName, text || '', companies, ownNames);
+  let co = detectCompany(fileName, text || '', companies, ownNames);
+  // Only your own business is mentioned (payroll, your tax, staff files...): file it under your business.
+  const OWN_TYPES = ['Payroll', 'Timesheets', 'Payslips', 'Tax', 'Staff & HR', 'Insurance', 'Statements', 'Health & Safety'];
+  if (!co && dt && OWN_TYPES.includes(dt.type) && ownNames.length) {
+    const hay = norm(`${fileName} ${(text || '').slice(0, 10000)}`);
+    const own = ownNames.find((o) => norm(o) && hay.includes(norm(o)));
+    if (own) co = { company: own, companyType: 'My business', score: 3, known: true };
+  }
   const media = mediaCategory(ext);
 
   // Images/videos etc. with no business meaning just get tidied by kind.
@@ -173,4 +193,10 @@ function classify({ fileName, ext, text }, settings = {}) {
   };
 }
 
-module.exports = { classify, detectDocType, detectCompany, DOC_TYPES, MEDIA };
+/** Folder (relative, may contain '/') for a document type. */
+function folderFor(docType) {
+  const d = DOC_TYPES.find((x) => x.type === docType);
+  return (d && d.folder) || docType;
+}
+
+module.exports = { classify, detectDocType, detectCompany, folderFor, DOC_TYPES, MEDIA };

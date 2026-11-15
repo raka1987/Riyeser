@@ -397,3 +397,31 @@ test('tidy everything: files all personal folders by company/type/year, keeps pr
   undoBatch(batch);
   assert.ok(fs.existsSync(path.join(docs, 'Work', 'Acme Plumbing', 'q.txt')));
 });
+
+test('learns where you file things: your folder choices and your own filing are followed for similar files', async () => {
+  const { makeExample, learnedDestination } = require('../src/core/learn');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const desk = path.join(tmp, 'Desktop'); fs.mkdirSync(desk);
+  const root = path.join(tmp, 'Organised');
+  // 1. You once chose a folder for a timesheet...
+  const chosen = path.join(root, 'Staff', 'Timesheets', '2025');
+  const examples = [makeExample({ name: 'Timesheet wk45 Jo.txt', text: 'Timesheet week ending 08/11/2025 total hours 40 ordinary hours', docType: 'Timesheets', ext: '.txt' }, chosen, root, true)];
+  // 2. ...and you keep the Ark comment files together in your own folder.
+  const site = path.join(root, 'Site docs', 'Ark');
+  for (const r of ['A', 'B']) examples.push(makeExample({ name: `Ark FHF comments rev ${r}.txt`, text: 'Dynamix commissioning plan FHF comments services coordination', company: 'Dynamix', docType: 'Commissioning', ext: '.txt' }, site, root));
+  const old = new Date(Date.now() - 3 * 86400_000);
+  const put = (n, body) => { fs.writeFileSync(path.join(desk, n), body); fs.utimesSync(path.join(desk, n), old, old); };
+  put('Timesheet wk46 Sam.txt', 'Timesheet week ending 14/11/2026 total hours 38 ordinary hours overtime');
+  put('Ark FHF comments rev C.txt', 'Dynamix Limited commissioning plan FHF comments services coordination');
+  put('Acme invoice.txt', 'Invoice for Acme Plumbing. Invoice number INV-77. Amount due $10');
+  const s = { ...settings, watchFolders: [desk], organisedRoot: root, groupByYear: true, companies: [...settings.companies, { name: 'Dynamix', aliases: ['dynamix limited'], type: 'Suppliers' }], _examples: examples };
+  const { plan } = await planOrganise(s, { minAgeMs: 0 });
+  const to = (n) => path.dirname(plan.find((p) => p.name === n).to);
+  assert.equal(to('Timesheet wk46 Sam.txt'), path.join(root, 'Staff', 'Timesheets', '2026')); // same place, this year's folder
+  assert.equal(to('Ark FHF comments rev C.txt'), site);
+  assert.equal(to('Acme invoice.txt'), path.join(root, 'Clients', 'Acme Plumbing', 'Invoices', '2026')); // unrelated file: normal rules
+  assert.match(plan.find((p) => p.name === 'Ark FHF comments rev C.txt').learned, /you keep 2 similar files here/);
+  // a different company's document is never pulled into another company's folder
+  const other = { name: 'Ark FHF comments.txt', company: 'Acme Plumbing', docType: 'Commissioning', ext: '.txt', nameTokens: ['ark', 'fhf', 'comments'], textTokens: ['commissioning'] };
+  assert.equal(learnedDestination(other, examples.slice(1), root), null);
+});

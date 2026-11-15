@@ -8,6 +8,9 @@ const SINGULAR = {
   Invoices: 'Invoice', Receipts: 'Receipt', Quotes: 'Quote', 'Purchase Orders': 'Purchase Order', Contracts: 'Contract',
   Statements: 'Statement', Payslips: 'Payslip', Tax: 'Tax', Insurance: 'Insurance', Proposals: 'Proposal',
   'Meeting Notes': 'Meeting Notes', Reports: 'Report', Correspondence: 'Letter',
+  'Credit Notes': 'Credit Note', Remittances: 'Remittance', 'Delivery Dockets': 'Delivery Docket', Timesheets: 'Timesheet', Payroll: 'Payroll',
+  Variations: 'Variation', 'Plans & Drawings': 'Drawing', Specifications: 'Specification', Commissioning: 'Commissioning', Certificates: 'Certificate',
+  'Health & Safety': 'Health and Safety', 'Price Lists': 'Price List', 'Staff & HR': 'HR',
 };
 
 function validDate(y, m, d) {

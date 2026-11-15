@@ -141,3 +141,51 @@ label.row > input[type=checkbox], label.row > input[type=radio] { margin-top: 2p
 .evgroup summary { cursor: pointer; padding: 4px 0; }
 .evgroup table { margin-top: 6px; }
 .chip { max-width: 100%; overflow-wrap: anywhere; }
+.changefolder { margin-left: 6px; font-size: 12px; }
+.learnednote { color: var(--good); margin-top: 2px; }
+
+/* ================= refreshed look: fonts, side panel ================= */
+:root { --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif; }
+body { font-family: var(--font); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+h1 { font-family: "Segoe UI Variable Display", var(--font); font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 6px; }
+h2 { font-family: "Segoe UI Variable Display", var(--font); font-size: 16px; font-weight: 650; }
+.small, small { font-size: 12.5px; }
+button, input, select, textarea { font-family: var(--font); }
+.path, .rename, kbd { font-family: "Cascadia Mono", "Consolas", ui-monospace, Menlo, monospace; }
+
+/* side panel: menu on top, folders get their own scroll area, footer always visible */
+nav { padding: 14px 10px 10px; gap: 0; overflow: hidden; display: flex; flex-direction: column; }
+nav .brand { padding: 0 6px 12px 8px; font-size: 15px; }
+.navlinks { display: flex; flex-direction: column; gap: 1px; flex: none; }
+.navlinks a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; font-size: 14px; font-weight: 500; color: var(--text); }
+.navlinks a:hover { background: var(--bg); }
+.navlinks a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.navlinks .ni { width: 20px; text-align: center; font-size: 15px; flex: none; }
+.navlinks .nl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.navsec { margin: 12px 10px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.ftree-wrap { flex: 1; min-height: 120px; display: flex; flex-direction: column; margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+.ftree-head { display: flex; align-items: center; gap: 2px; margin: 0 2px 4px 4px; text-transform: none; letter-spacing: 0; }
+.ftree-title { border: none; background: none; padding: 2px 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.iconbtn { border: none; background: none; padding: 2px 6px; color: var(--muted); font-size: 14px; border-radius: 6px; }
+.iconbtn:hover, .ftree-title:hover { background: var(--bg); color: var(--text); }
+.ftree { flex: 1; overflow-y: auto; overflow-x: hidden; padding-right: 2px; font-size: 13.5px; }
+.ftree.hidden { display: none; }
+.ftree .node { min-height: 30px; padding: 3px 6px 3px 2px; border-radius: 7px; gap: 4px; }
+.ftree .caret { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; font-size: 11px; }
+.ftree .caret:hover { background: var(--line); color: var(--text); }
+.ftree .ficon { flex: none; width: 18px; text-align: center; }
+.ftree .kids { padding-left: 0; margin-left: 13px; border-left: 1px solid var(--line); }
+.ftree .kids .node { padding-left: 4px; }
+.hint { margin-top: 8px; padding: 8px 8px 0; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--muted); }
+.hint kbd { font-size: 10.5px; }
+
+:root { color-scheme: light dark; }
+:root[data-theme-dark] { color-scheme: dark; }
+.navlinks a { padding: 6px 10px; font-size: 13.5px; }
+.navsec { display: block; width: 100%; text-align: left; border: none; background: none; margin: 8px 0 2px; padding: 3px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); border-radius: 6px; }
+.navsec:hover { background: var(--bg); color: var(--text); }
+.navgroup.collapsed { display: none; }
+.navgroup { display: flex; flex-direction: column; gap: 1px; }
+.ftree-wrap { min-height: 180px; }
+nav { overflow-y: auto; }
+.plantable td:nth-child(3) { overflow-wrap: normal; word-break: normal; hyphens: auto; }

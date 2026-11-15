@@ -10,21 +10,30 @@
   <div class="app">
     <nav id="nav">
       <div class="brand"><img src="icon.png" alt=""> <span class="grow">Desk Assistant</span><button id="themetoggle" class="themetoggle" title="Light / dark mode">◐</button></div>
-      <a href="#today" data-page="today">Today</a>
-      <a href="#organise" data-page="organise">Organise files <span id="badge-organise" class="pill" hidden></span></a>
-      <a href="#desktop" data-page="desktop">Tidy Desktop</a>
-      <a href="#everything" data-page="everything">Tidy everything</a>
-      <a href="#cleanup" data-page="cleanup">Clean up Downloads</a>
-      <a href="#search" data-page="search">Search</a>
-      <a href="#pdf" data-page="pdf">PDF editor</a>
-      <a href="#meetings" data-page="meetings">Meetings</a>
-      <a href="#tasks" data-page="tasks">To-do <span id="badge-tasks" class="pill" hidden></span></a>
-      <a href="#email" data-page="email">Email</a>
-      <a href="#companies" data-page="companies">Companies</a>
-      <a href="#settings" data-page="settings">Settings</a>
-      <div class="ftree-head"><span>Folders</span><button class="link small" id="ftree-refresh" title="Refresh">⟳</button></div>
-      <div id="ftree" class="ftree"></div>
-      <div class="hint"><span id="appversion"></span><br>Quick search anywhere:<br><kbd id="hotkey">Ctrl</kbd> <kbd>Shift</kbd> <kbd>Space</kbd></div>
+      <div class="navlinks">
+        <a href="#today" data-page="today"><span class="ni">🏠</span><span class="nl">Today</span></a>
+        <a href="#search" data-page="search"><span class="ni">🔍</span><span class="nl">Search</span></a>
+        <button class="navsec" data-sec="tidy">▾ Tidy up</button><div class="navgroup" data-group="tidy">
+        <a href="#organise" data-page="organise"><span class="ni">🗂</span><span class="nl">Organise files</span><span id="badge-organise" class="pill" hidden></span></a>
+        <a href="#desktop" data-page="desktop"><span class="ni">🖥</span><span class="nl">Tidy Desktop</span></a>
+        <a href="#everything" data-page="everything"><span class="ni">🧹</span><span class="nl">Tidy everything</span></a>
+        <a href="#cleanup" data-page="cleanup"><span class="ni">⬇</span><span class="nl">Clean up Downloads</span></a>
+        </div>
+        <button class="navsec" data-sec="work">▾ Work</button><div class="navgroup" data-group="work">
+        <a href="#pdf" data-page="pdf"><span class="ni">📕</span><span class="nl">PDF editor</span></a>
+        <a href="#meetings" data-page="meetings"><span class="ni">📅</span><span class="nl">Meetings</span></a>
+        <a href="#tasks" data-page="tasks"><span class="ni">✅</span><span class="nl">To-do</span><span id="badge-tasks" class="pill" hidden></span></a>
+        <a href="#email" data-page="email"><span class="ni">✉</span><span class="nl">Email</span></a>
+        <a href="#companies" data-page="companies"><span class="ni">🏢</span><span class="nl">Companies</span></a>
+        </div>
+        <a href="#settings" data-page="settings"><span class="ni">⚙</span><span class="nl">Settings</span></a>
+      </div>
+      <div class="ftree-wrap">
+        <div class="ftree-head"><button class="ftree-title" id="ftree-toggle" title="Show or hide folders">▾ Folders</button><span class="spacer"></span>
+          <button class="iconbtn" id="ftree-collapse" title="Collapse all">⊟</button><button class="iconbtn" id="ftree-refresh" title="Refresh">⟳</button></div>
+        <div id="ftree" class="ftree"></div>
+      </div>
+      <div class="hint"><span id="appversion"></span> · Search: <kbd id="hotkey">Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd></div>
     </nav>
     <div id="navresize" class="navresize" title="Drag to resize"></div>
     <main id="page"></main>

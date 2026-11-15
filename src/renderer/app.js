@@ -42,9 +42,9 @@ async function renderTree() {
   try { treeRoots = await bridge.call('folder:roots'); } catch { return; }
   const node = async (n, depth) => {
     const open = expanded.has(n.path);
-    let html = `<div class="node ${currentFolder === n.path ? 'active' : ''}" data-folder-open="${esc(n.path)}" title="${esc(n.path)}" style="padding-left:${4 + depth * 2}px">
-      ${n.hasDirs ? `<button class="caret" data-folder-toggle="${esc(n.path)}">${open ? '▾' : '▸'}</button>` : '<span class="caret"></span>'}
-      <span class="label">${n.icon ? n.icon + ' ' : ''}${esc(n.name)}</span></div>`;
+    let html = `<div class="node ${currentFolder === n.path ? 'active' : ''}" data-folder-open="${esc(n.path)}" title="${esc(n.path)}">
+      ${n.hasDirs ? `<button class="caret" data-folder-toggle="${esc(n.path)}" title="${open ? 'Collapse' : 'Expand'}">${open ? '▾' : '▸'}</button>` : '<span class="caret"></span>'}
+      <span class="ficon">${n.icon || (open ? '📂' : '📁')}</span><span class="label">${esc(n.name)}</span></div>`;
     if (open && n.hasDirs) {
       let kids = [];
       try { kids = (await bridge.call('folder:list', n.path)).dirs; } catch { /* folder gone */ }
@@ -71,6 +71,21 @@ $('#ftree').addEventListener('click', (e) => {
   }
 });
 $('#ftree-refresh').addEventListener('click', () => renderTree());
+$('#ftree-collapse').addEventListener('click', () => { expanded = new Set(); saveExpanded(); renderTree(); });
+// Menu sections ("Tidy up", "Work") can be collapsed to give the folder list more room (remembered).
+document.querySelectorAll('.navsec').forEach((b) => {
+  const g = document.querySelector(`.navgroup[data-group="${b.dataset.sec}"]`);
+  const label = b.textContent.slice(2);
+  const apply = (closed) => { g.classList.toggle('collapsed', closed); b.textContent = `${closed ? '▸' : '▾'} ${label}`; };
+  try { apply(localStorage.getItem(`da-sec-${b.dataset.sec}`) === '1'); } catch { /* ignore */ }
+  b.addEventListener('click', () => { const closed = !g.classList.contains('collapsed'); apply(closed); try { localStorage.setItem(`da-sec-${b.dataset.sec}`, closed ? '1' : '0'); } catch { /* ignore */ } });
+});
+(() => {
+  const t = $('#ftree-toggle'); const box = $('#ftree');
+  const apply = (hide) => { box.classList.toggle('hidden', hide); t.textContent = `${hide ? '▸' : '▾'} Folders`; };
+  try { apply(localStorage.getItem('da-tree-hidden') === '1'); } catch { /* ignore */ }
+  t.addEventListener('click', () => { const hide = !box.classList.contains('hidden'); apply(hide); try { localStorage.setItem('da-tree-hidden', hide ? '1' : '0'); } catch { /* ignore */ } });
+})();
 
 // Drag the edge of the side panel to make it wider or narrower (remembered).
 (() => {
@@ -109,7 +124,8 @@ const confPill = (c) => c === 'high' ? '<span class="pill good">sure</span>' : c
     <td><b class="fname">${p.isFolder ? '📁 ' : ''}${esc(p.name)}</b>
       <div class="dest route" title="${esc(p.to || p.dir)}">${p.currentDir
         ? `<span class="pill ${p.change === 'rename' ? '' : 'warn'}">${esc(p.change)}</span> ${p.change === 'rename' ? `in ${route(p.dir)}` : `<span class="muted">from</span> ${route(p.currentDir)} <span class="muted">to</span> ${route(p.dir)}`}`
-        : `<span class="arrow">→</span> ${route(p.dir || p.to)}`}</div>
+        : `<span class="arrow">→</span> ${route(p.dir || p.to)}`} <button class="link small changefolder" data-act="choosefolder" data-from="${esc(p.from)}" title="Pick a different folder - I'll remember it for similar files">Change folder…</button></div>
+      ${p.learned ? `<div class="small learnednote">🧠 ${esc(p.learned)}</div>` : ''}
       ${p.newName ? `<div class="row small" style="margin-top:4px"><span class="muted">rename to</span><input class="rename" data-rename="${esc(p.from)}" value="${esc(p.to.split(/[\\/]/).pop())}" title="Edit the new name if you like"></div>` : ''}
       ${p.warning ? `<div class="small" style="color:var(--warn);margin-top:4px">⚠ ${esc(p.warning)}</div>` : ''}
       ${p.fallback ? `<div class="small muted" style="margin-top:3px">Filed by type for now. ${p.company ? `<button class="link small" data-act="addco" data-name="${esc(p.company)}">Add “${esc(p.company)}” as a company</button>` : 'Add the sender in <a href="#companies">Companies</a>'}, then use Re-check to file it under them.</div>` : ''}
@@ -182,7 +198,7 @@ const pages = {
           <button class="link" data-act="selall">Select all</button><button class="link" data-act="selsure">Select only “sure”</button><button class="link" data-act="selnone">Clear</button>
           <button class="primary" data-act="apply" ${selected.size ? '' : 'disabled'}>Move ${selected.size} selected</button></div>
         ${plan.plan.length ? Object.entries(groups).map(([g, items]) => `<h3 style="margin:18px 0 4px;font-size:14px">${esc(g)} <span class="muted small">(${items.length})</span></h3>
-          <table class="plantable"><colgroup><col style="width:34px"><col><col style="width:104px"><col style="width:58px"></colgroup><tr><th></th><th>File → ${plan.mode === 'recheck' ? 'change' : 'where it will go'}</th><th>Type</th><th></th></tr>${rows(items)}</table>`).join('') : `<div class="empty">${plan.mode === 'recheck' ? 'Everything in your Organised folder already has a good name and is in the right place. 👍' : 'Nothing to file — your folders are tidy.'}</div>`}
+          <table class="plantable"><colgroup><col style="width:34px"><col><col style="width:128px"><col style="width:58px"></colgroup><tr><th></th><th>File → ${plan.mode === 'recheck' ? 'change' : 'where it will go'}</th><th>Type</th><th></th></tr>${rows(items)}</table>`).join('') : `<div class="empty">${plan.mode === 'recheck' ? 'Everything in your Organised folder already has a good name and is in the right place. 👍' : 'Nothing to file — your folders are tidy.'}</div>`}
       </div>
       ${plan.mode === 'recheck' ? '' : `<div class="card"><h2>Needs your help (${plan.review.length})</h2>
         <p class="muted small">I couldn't tell who these are for. Open one to check, or add the company in <a href="#companies">Companies</a> and scan again so I recognise it next time.</p>
@@ -267,7 +283,7 @@ const pages = {
           <button class="primary" data-act="apply" ${selected.size ? '' : 'disabled'}>Move ${selected.size} selected</button></div>
         <p class="muted small">Grouped by where things will go. Open a group to see (and untick) individual items.</p>
         ${order.map((g) => `<details class="evgroup" ${g === 'Folders kept together' ? 'open' : ''}><summary><b>${esc(g)}</b> <span class="muted">— ${groups[g].length} item(s)</span></summary>
-          <table class="plantable"><colgroup><col style="width:34px"><col><col style="width:104px"><col style="width:58px"></colgroup>${rows(groups[g].slice(0, 300))}</table>${groups[g].length > 300 ? `<p class="muted small">…and ${groups[g].length - 300} more (all included).</p>` : ''}</details>`).join('')}
+          <table class="plantable"><colgroup><col style="width:34px"><col><col style="width:128px"><col style="width:58px"></colgroup>${rows(groups[g].slice(0, 300))}</table>${groups[g].length > 300 ? `<p class="muted small">…and ${groups[g].length - 300} more (all included).</p>` : ''}</details>`).join('')}
       </div>
       <div class="card"><details><summary><b>Kept as they are (${plan.kept.length})</b> <span class="muted small">— folders and files I left alone, and why</span></summary>
         <ul class="list">${plan.kept.slice(0, 400).map((k) => `<li><div class="grow" title="${esc(k.path)}"><b>${esc(k.path.split(/[\\/]/).pop())}</b> <span class="small muted">— ${esc(k.reason)}</span><div class="path ellipsis">in ${esc(short(k.path.split(/[\\/]/).slice(0, -1).join(k.path.includes('\\') ? '\\' : '/')))}</div></div><button class="link" data-act="reveal" data-path="${esc(k.path)}">Show</button></li>`).join('') || '<li class="muted">Nothing.</li>'}</ul></details></div>
@@ -414,7 +430,8 @@ const pages = {
     const s = settings;
     const folderList = (key) => `<div class="chips">${s[key].map((f, i) => `<span class="chip path">${esc(short(f))}<button data-act="delfolder" data-key="${key}" data-i="${i}">×</button></span>`).join('') || '<span class="muted small">None</span>'}</div>
       <button style="margin-top:8px" data-act="addfolder" data-key="${key}">+ Add folder</button>`;
-    const sections = [['s-sorting', '🗂 Sorting'], ['s-appearance', '🎨 Appearance'], ['s-calendars', '📅 Calendars'], ['s-email', '✉ Email'], ['s-pdf', '📕 PDF'], ['s-ai', '✨ AI'], ['s-general', '⚙ General'], ['s-uninstall', '🗑 Uninstall']];
+    const learned = await bridge.call('learn:list').catch(() => []);
+    const sections = [['s-sorting', '🗂 Sorting'], ['s-learned', '🧠 Learned'], ['s-appearance', '🎨 Appearance'], ['s-calendars', '📅 Calendars'], ['s-email', '✉ Email'], ['s-pdf', '📕 PDF'], ['s-ai', '✨ AI'], ['s-general', '⚙ General'], ['s-uninstall', '🗑 Uninstall']];
     page.innerHTML = `<h1>Settings</h1><p class="sub">Everything stays on this computer. Passwords and keys are encrypted with your system keychain.</p>
       <div class="settingsnav">${sections.map(([id, label]) => `<button data-act="jump" data-id="${id}">${label}</button>`).join('')}</div>
       <div class="grid">
@@ -446,10 +463,15 @@ const pages = {
       <div class="card" id="s-pdf"><h2>PDF editor</h2><p class="muted small">Open, edit, fill in and sign PDFs. Every save keeps a backup of the previous version.</p>
         <div class="row"><button data-act="go" data-page="pdf">Open the PDF editor</button>${platform === 'win32' ? '<button data-act="pdfdefault">Set as my PDF app</button>' : ''}<button data-act="pdfbackups">Open PDF backups folder</button></div></div>
       <div class="card" id="s-ai"><h2>Smarter sorting with AI (optional)</h2><p class="muted small">Add an Anthropic API key and files I'm unsure about are sent to Claude to identify (first ~4,000 characters of text only). Leave blank to keep everything 100% offline.</p>
+        <label class="row small" style="margin-bottom:8px"><input type="checkbox" id="aiall" ${s.aiCheckAll ? 'checked' : ''} ${s.hasAiKey ? '' : 'disabled'}> Double-check <b>every</b> document with AI, not just the ones I'm unsure about (slower; uses your API credit)</label>
         <form id="aiform" class="row"><input id="aikey" type="password" style="flex:1" placeholder="${s.hasAiKey ? 'Key saved (type to replace)' : 'sk-ant-…'}"><button>Save</button>${s.hasAiKey ? '<button type="button" data-act="clearai">Remove key</button>' : ''}</form></div>
       <div class="card" id="s-appearance"><h2>Appearance</h2>
         <div class="row">${['system', 'light', 'dark'].map((t) => `<label class="themeopt ${(s.theme || 'system') === t ? 'on' : ''}"><input type="radio" name="theme" value="${t}" ${(s.theme || 'system') === t ? 'checked' : ''}><span class="swatch ${t}"></span>${t === 'system' ? 'Same as Windows' : t === 'light' ? 'Light' : 'Dark'}</label>`).join('')}</div>
         <p class="muted small">Applies to the PDF editor too.</p></div>
+      <div class="card" id="s-learned"><h2>What I've learned</h2><p class="muted small">Folders you chose for files with <b>Change folder…</b>. Similar files go to the same place automatically. I also follow how you've arranged your Organised folder yourself.</p>
+        ${learned.length ? `<ul class="list">${learned.slice(0, 60).map((l, i) => `<li><div class="grow"><div class="small">${l.docType && l.docType !== 'Other' ? `<b>${esc(l.docType)}</b> ` : ''}${l.company ? `from <b>${esc(l.company)}</b> ` : ''}${l.words.length ? `like “${esc(l.words.join(' '))}”` : ''}</div>
+          <div class="route small">→ ${l.inRoot ? `<span class="seg">Organised</span><span class="sep">›</span>` : ''}${l.template.split('/').map((x) => `<span class="seg">${esc(x === '{year}' ? '(year)' : x)}</span>`).join('<span class="sep">›</span>')}</div></div>
+          <button class="link small" data-act="forgetlearned" data-i="${i}">Forget</button></li>`).join('')}</ul>` : '<div class="empty small">Nothing yet — use “Change folder…” on the Organise or Tidy everything pages.</div>'}</div>
       <div class="card" id="s-general"><h2>General</h2><label class="row"><input type="checkbox" id="login" ${s.openAtLogin ? 'checked' : ''}> Start when I log in (runs quietly in the tray)</label></div>
       <div class="card" id="s-uninstall"><h2>Uninstall</h2><p class="muted small">Removes Desk Assistant and its settings from this PC. Your own files — including everything in your Organised folder — are kept. You can also uninstall from Windows <b>Settings → Apps → Installed apps</b>.</p>
         <button data-act="uninstall">Uninstall Desk Assistant…</button></div>
@@ -461,6 +483,7 @@ const pages = {
     bindCheck('#related', (v) => ({ groupRelated: v }));
     bindCheck('#ocrpdf', (v) => ({ ocrPdfs: v }));
     bindCheck('#sortall', (v) => ({ sortEverything: v }));
+    bindCheck('#aiall', (v) => ({ aiCheckAll: v }));
     bindCheck('#ocrimg', (v) => ({ ocrImages: v }));
     $('#datefmt').addEventListener('change', async (e) => { await saveSettings({ dayFirstDates: e.target.value === '1' }); toast('Saved'); });
     bindCheck('#auto', (v) => ({ autoOrganise: v }));
@@ -547,6 +570,16 @@ const actions = {
     finally { el.disabled = false; el.textContent = 'Tidy desktop icons'; }
   },
   unarrangedesk: async () => { await bridge.call('desktop:undoArrange'); toast('Auto-arrange is off again — you can place icons wherever you like.'); },
+  choosefolder: async (el) => {
+    const item = plan.plan.find((p) => p.from === el.dataset.from);
+    const f = await bridge.call('dialog:folder', item?.dir || settings.organisedRoot);
+    if (!f) return;
+    const r = await bridge.call('learn:choose', el.dataset.from, f);
+    plan = r.plan;
+    toast(r.alsoMoved ? `Got it — and ${r.alsoMoved} similar file(s) in this list will go there too. I'll remember this next time.` : 'Got it — I\'ll file similar files there from now on.');
+    render();
+  },
+  forgetlearned: async (el) => { await bridge.call('learn:forget', +el.dataset.i); render(); },
   evadd: async (el) => {
     const f = await bridge.call('dialog:folder');
     const key = el.dataset.key;
@@ -704,7 +737,7 @@ bridge.on('scan-progress', ({ i, n }) => { const s = $('#scan-status'); if (s) s
     toast(next === 'system' ? 'Appearance: same as Windows' : next === 'light' ? 'Light mode' : 'Dark mode');
     if (current === 'settings') render();
   });
-  bridge.call('app:version').then((v) => { $('#appversion').textContent = `Version ${v}`; document.title = `Desk Assistant ${v}`; }).catch(() => {});
+  bridge.call('app:version').then((v) => { $("#appversion").textContent = `Version ${v}`; document.title = `Desk Assistant ${v}`; }).catch(() => {});
   if (navigator.platform.startsWith('Mac')) $('#hotkey').textContent = '⌘';
   if (!settings.onboarded) { await saveSettings({ onboarded: true }); location.hash = 'companies'; toast('Welcome! Start by adding your own business name and the companies you work with.'); }
   render();
