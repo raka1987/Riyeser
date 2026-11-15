@@ -144,18 +144,20 @@ const pages = {
     const rows = (items) => items.map((p) => `<tr>
       <td><input type="checkbox" data-sel="${esc(p.from)}" ${selected.has(p.from) ? 'checked' : ''}></td>
       <td><b class="fname">${p.isFolder ? '📁 ' : ''}${esc(p.name)}</b>
+        <div class="dest route" title="${esc(p.to || p.dir)}">${p.currentDir
+          ? `<span class="pill ${p.change === 'rename' ? '' : 'warn'}">${esc(p.change)}</span> ${p.change === 'rename' ? `in ${route(p.dir)}` : `<span class="muted">from</span> ${route(p.currentDir)} <span class="muted">to</span> ${route(p.dir)}`}`
+          : `<span class="arrow">→</span> ${route(p.dir || p.to)}`}</div>
         ${p.newName ? `<div class="row small" style="margin-top:4px"><span class="muted">rename to</span><input class="rename" data-rename="${esc(p.from)}" value="${esc(p.to.split(/[\\/]/).pop())}" title="Edit the new name if you like"></div>` : ''}
         ${p.warning ? `<div class="small" style="color:var(--warn);margin-top:4px">⚠ ${esc(p.warning)}</div>` : ''}
         ${p.fallback ? `<div class="small muted" style="margin-top:3px">Filed by type for now. ${p.company ? `<button class="link small" data-act="addco" data-name="${esc(p.company)}">Add “${esc(p.company)}” as a company</button>` : 'Add the sender in <a href="#companies">Companies</a>'}, then use Re-check to file it under them.</div>` : ''}
         <div style="margin-top:4px">${facts(p)}</div>
         ${p.group ? `<div class="small" style="color:var(--good);margin-top:3px">🔗 Kept with ${p.group.size - 1} related document${p.group.size > 2 ? 's' : ''} — they share ${esc(p.group.because.join(', '))}${p.companyFromGroup ? ` (that's how I know it's for ${esc(p.company)})` : ''}</div>` : ''}
         <div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div>${readBox(p)}</td>
-      <td>${esc(p.docType)}</td><td>${confPill(p.warning ? 'low' : p.confidence)}</td>
-      <td class="route" title="${esc(p.to || p.dir)}">${p.currentDir ? `<span class="pill ${p.change === 'rename' ? '' : 'warn'}">${esc(p.change)}</span><div class="muted small">now in ${route(p.currentDir)}</div>${p.change === 'rename' ? '' : `<div>→ ${route(p.dir)}</div>`}` : route(p.dir || p.to)}</td>
+      <td><div class="small">${esc(p.docType)}</div><div style="margin-top:4px">${confPill(p.warning ? 'low' : p.confidence)}</div></td>
       <td><button class="link" data-act="${p.isFolder ? 'reveal' : 'open'}" data-path="${esc(p.from)}">${p.isFolder ? 'Show' : 'Open'}</button></td></tr>`).join('');
     page.innerHTML = `
       <div class="row"><div><h1>Organise files</h1><p class="sub">Sorts ${settings.watchFolders.map((f) => `<b>${esc(f.split(/[\\/]/).pop())}</b>`).join(' and ') || '(add folders in Settings)'} into your <b title="${esc(settings.organisedRoot)}">Organised</b> folder by company and document type. Nothing moves until you approve it, and every batch can be undone.</p></div></div>
-      <div class="card"><h2>Folders to tidy</h2>
+      <div class="card" id="foldercard"><h2>Folders to tidy</h2>
         <p class="muted small">Tick the loose files to sort, and choose what happens to each folder: <b>Leave</b> it alone, <b>Sort files inside</b> (each file is filed separately and the empty folder is removed), or <b>Move whole folder</b> (kept together, moved into Organised — under the company if most of it is theirs).</p>
         ${folders.length ? `<div class="folderlist">${folders.map((f) => f.isRoot
           ? `<label class="row small froot"><input type="checkbox" data-folder="${esc(f.path)}" ${f.checked ? 'checked' : ''}> <b>${esc(f.name)}</b> <span class="muted">— loose files (${f.files})</span></label>`
@@ -176,7 +178,7 @@ const pages = {
           <button class="link" data-act="selall">Select all</button><button class="link" data-act="selsure">Select only “sure”</button><button class="link" data-act="selnone">Clear</button>
           <button class="primary" data-act="apply" ${selected.size ? '' : 'disabled'}>Move ${selected.size} selected</button></div>
         ${plan.plan.length ? Object.entries(groups).map(([g, items]) => `<h3 style="margin:18px 0 4px;font-size:14px">${esc(g)} <span class="muted small">(${items.length})</span></h3>
-          <table class="plantable"><colgroup><col style="width:34px"><col style="width:42%"><col style="width:110px"><col style="width:92px"><col><col style="width:64px"></colgroup><tr><th></th><th>File</th><th>Type</th><th>Confidence</th><th>${plan.mode === 'recheck' ? 'Change' : 'Will go to'}</th><th></th></tr>${rows(items)}</table>`).join('') : `<div class="empty">${plan.mode === 'recheck' ? 'Everything in your Organised folder already has a good name and is in the right place. 👍' : 'Nothing to file — your folders are tidy.'}</div>`}
+          <table class="plantable"><colgroup><col style="width:34px"><col><col style="width:104px"><col style="width:58px"></colgroup><tr><th></th><th>File → ${plan.mode === 'recheck' ? 'change' : 'where it will go'}</th><th>Type</th><th></th></tr>${rows(items)}</table>`).join('') : `<div class="empty">${plan.mode === 'recheck' ? 'Everything in your Organised folder already has a good name and is in the right place. 👍' : 'Nothing to file — your folders are tidy.'}</div>`}
       </div>
       ${plan.mode === 'recheck' ? '' : `<div class="card"><h2>Needs your help (${plan.review.length})</h2>
         <p class="muted small">I couldn't tell who these are for. Open one to check, or add the company in <a href="#companies">Companies</a> and scan again so I recognise it next time.</p>
@@ -228,6 +230,13 @@ const pages = {
       </div>
       <div class="card"><div class="row"><h2 style="margin:0">Recent</h2><span class="spacer"></span><button class="link" data-act="pdfbackups">Open backups folder</button></div>
         ${recent.length ? `<ul class="list">${recent.map((f) => `<li><div class="grow"><b>${esc(f.split(/[\\/]/).pop())}</b><div class="path">${esc(short(f))}</div></div><button class="link" data-act="pdfedit" data-path="${esc(f)}">Edit</button><button class="link" data-act="open" data-path="${esc(f)}">Open in default app</button></li>`).join('')}</ul>` : '<div class="empty">No PDFs opened yet.</div>'}</div>`;
+  },
+
+  // "Tidy Desktop": the Organise page, opened at the folder choices and desktop-icon tidy-up.
+  async desktop() {
+    await pages.organise();
+    const c = $('#foldercard');
+    if (c) { c.scrollIntoView({ block: 'start' }); c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 1400); }
   },
 
   async folder() {
@@ -363,9 +372,11 @@ const pages = {
     const s = settings;
     const folderList = (key) => `<div class="chips">${s[key].map((f, i) => `<span class="chip path">${esc(short(f))}<button data-act="delfolder" data-key="${key}" data-i="${i}">×</button></span>`).join('') || '<span class="muted small">None</span>'}</div>
       <button style="margin-top:8px" data-act="addfolder" data-key="${key}">+ Add folder</button>`;
+    const sections = [['s-sorting', '🗂 Sorting'], ['s-appearance', '🎨 Appearance'], ['s-calendars', '📅 Calendars'], ['s-email', '✉ Email'], ['s-pdf', '📕 PDF'], ['s-ai', '✨ AI'], ['s-general', '⚙ General'], ['s-uninstall', '🗑 Uninstall']];
     page.innerHTML = `<h1>Settings</h1><p class="sub">Everything stays on this computer. Passwords and keys are encrypted with your system keychain.</p>
+      <div class="settingsnav">${sections.map(([id, label]) => `<button data-act="jump" data-id="${id}">${label}</button>`).join('')}</div>
       <div class="grid">
-      <div class="card"><h2>Folders to tidy</h2><p class="muted small">Where new files land: Downloads, Desktop, and your phone's synced folder (e.g. OneDrive / Google Drive / iCloud “Camera Roll” or “Scans”).</p>${folderList('watchFolders')}
+      <div class="card" id="s-sorting"><h2>Folders to tidy</h2><p class="muted small">Where new files land: Downloads, Desktop, and your phone's synced folder (e.g. OneDrive / Google Drive / iCloud “Camera Roll” or “Scans”).</p>${folderList('watchFolders')}
         <label class="row small" style="margin-top:10px"><input type="checkbox" id="recursive" ${s.recursiveScan ? 'checked' : ''}> Tick new sub-folders automatically (you can untick them on the Organise page)</label>
         <label class="row small"><input type="checkbox" id="rename" ${s.renameFiles ? 'checked' : ''}> Rename files from their contents (e.g. “2026-11-03 Acme Plumbing Invoice 1042.pdf”)</label>
         <label class="row small"><input type="checkbox" id="byyear" ${s.groupByYear ? 'checked' : ''}> Put files in a folder for each year (…/Invoices/2026/)</label>
@@ -377,12 +388,12 @@ const pages = {
         <label class="row small"><input type="checkbox" id="auto" ${s.autoOrganise ? 'checked' : ''}> Tidy automatically every hour (only files I'm sure about)</label></div>
       <div class="card"><h2>Organised folder</h2><p class="muted small">Where sorted files go.</p><div class="path">${esc(s.organisedRoot)}</div><button style="margin-top:8px" data-act="setroot">Change…</button>
         <h2 style="margin-top:18px">Folders to search</h2>${folderList('searchFolders')}</div>
-      <div class="card"><h2>Calendars</h2><p class="muted small">Paste your calendar's secret iCal address — Google Calendar: Settings → your calendar → “Secret address in iCal format”. Outlook: Settings → Calendar → Shared calendars → Publish → ICS link. Or import an .ics file.</p>
+      <div class="card" id="s-calendars"><h2>Calendars</h2><p class="muted small">Paste your calendar's secret iCal address — Google Calendar: Settings → your calendar → “Secret address in iCal format”. Outlook: Settings → Calendar → Shared calendars → Publish → ICS link. Or import an .ics file.</p>
         <ul class="list">${s.calendars.map((c, i) => `<li><div class="grow"><b>${esc(c.name)}</b><div class="path ellipsis">${esc(c.url ? c.url.replace(/(private-|secret)[^/]*/i, '$1…') : short(c.path))}</div></div><button class="link" data-act="delcal" data-i="${i}">Remove</button></li>`).join('')}</ul>
         <form id="addcal" class="row"><input id="calname" placeholder="Name" style="width:110px"><input id="calurl" placeholder="https://… .ics" style="flex:1"><button>Add</button></form>
         <button class="link" style="margin-top:6px" data-act="addics">or import an .ics file…</button>
         <div class="field" style="margin-top:12px"><label>Remind me before meetings (minutes)</label><input id="remind" type="number" min="1" max="120" value="${s.reminderMinutes}" style="width:90px"></div></div>
-      <div class="card"><h2>Email (optional)</h2><p class="muted small">Any IMAP mailbox. For Gmail/Outlook/iCloud create an “app password” in your account security settings and use it here. Gmail: imap.gmail.com · Outlook: outlook.office365.com · iCloud: imap.mail.me.com</p>
+      <div class="card" id="s-email"><h2>Email (optional)</h2><p class="muted small">Any IMAP mailbox. For Gmail/Outlook/iCloud create an “app password” in your account security settings and use it here. Gmail: imap.gmail.com · Outlook: outlook.office365.com · iCloud: imap.mail.me.com</p>
         <form id="emailform">
           <div class="row"><input id="ehost" placeholder="IMAP server" value="${esc(s.email.host)}" style="flex:1"><input id="eport" type="number" value="${esc(s.email.port)}" style="width:80px"></div>
           <div class="row" style="margin-top:8px"><input id="euser" placeholder="Email address" value="${esc(s.email.user)}" style="flex:1"></div>
@@ -390,13 +401,15 @@ const pages = {
           <label class="row small" style="margin-top:8px"><input type="checkbox" id="eatt" ${s.email.saveAttachments ? 'checked' : ''}> Save invoice & receipt attachments into company folders</label>
           <label class="row small"><input type="checkbox" id="eauto" ${s.email.autoCheck ? 'checked' : ''}> Check automatically every 20 minutes</label>
           <button class="primary" style="margin-top:8px">Save email settings</button></form></div>
-      <div class="card"><h2>Smarter sorting with AI (optional)</h2><p class="muted small">Add an Anthropic API key and files I'm unsure about are sent to Claude to identify (first ~4,000 characters of text only). Leave blank to keep everything 100% offline.</p>
+      <div class="card" id="s-pdf"><h2>PDF editor</h2><p class="muted small">Open, edit, fill in and sign PDFs. Every save keeps a backup of the previous version.</p>
+        <div class="row"><button data-act="go" data-page="pdf">Open the PDF editor</button>${platform === 'win32' ? '<button data-act="pdfdefault">Set as my PDF app</button>' : ''}<button data-act="pdfbackups">Open PDF backups folder</button></div></div>
+      <div class="card" id="s-ai"><h2>Smarter sorting with AI (optional)</h2><p class="muted small">Add an Anthropic API key and files I'm unsure about are sent to Claude to identify (first ~4,000 characters of text only). Leave blank to keep everything 100% offline.</p>
         <form id="aiform" class="row"><input id="aikey" type="password" style="flex:1" placeholder="${s.hasAiKey ? 'Key saved (type to replace)' : 'sk-ant-…'}"><button>Save</button>${s.hasAiKey ? '<button type="button" data-act="clearai">Remove key</button>' : ''}</form></div>
-      <div class="card"><h2>Appearance</h2>
+      <div class="card" id="s-appearance"><h2>Appearance</h2>
         <div class="row">${['system', 'light', 'dark'].map((t) => `<label class="themeopt ${(s.theme || 'system') === t ? 'on' : ''}"><input type="radio" name="theme" value="${t}" ${(s.theme || 'system') === t ? 'checked' : ''}><span class="swatch ${t}"></span>${t === 'system' ? 'Same as Windows' : t === 'light' ? 'Light' : 'Dark'}</label>`).join('')}</div>
         <p class="muted small">Applies to the PDF editor too.</p></div>
-      <div class="card"><h2>General</h2><label class="row"><input type="checkbox" id="login" ${s.openAtLogin ? 'checked' : ''}> Start when I log in (runs quietly in the tray)</label></div>
-      <div class="card"><h2>Uninstall</h2><p class="muted small">Removes Desk Assistant and its settings from this PC. Your own files — including everything in your Organised folder — are kept. You can also uninstall from Windows <b>Settings → Apps → Installed apps</b>.</p>
+      <div class="card" id="s-general"><h2>General</h2><label class="row"><input type="checkbox" id="login" ${s.openAtLogin ? 'checked' : ''}> Start when I log in (runs quietly in the tray)</label></div>
+      <div class="card" id="s-uninstall"><h2>Uninstall</h2><p class="muted small">Removes Desk Assistant and its settings from this PC. Your own files — including everything in your Organised folder — are kept. You can also uninstall from Windows <b>Settings → Apps → Installed apps</b>.</p>
         <button data-act="uninstall">Uninstall Desk Assistant…</button></div>
       </div>`;
     const bindCheck = (id, fn) => $(id).addEventListener('change', async (e) => { await saveSettings(fn(e.target.checked)); toast('Saved'); });
@@ -485,6 +498,7 @@ const actions = {
   cleanselall: (el) => { cleanup.items.filter((i) => i.verdict === el.dataset.v).forEach((i) => cleanSel.add(i.path)); render(); },
   cleansetfolder: async () => { const f = await bridge.call('dialog:folder'); if (f) { await saveSettings({ cleanupFolder: f }); cleanup = null; render(); } },
   uninstall: () => bridge.call('app:uninstall'),
+  jump: (el) => { const t = document.getElementById(el.dataset.id); if (t) { t.scrollIntoView({ behavior: 'smooth', block: 'start' }); t.classList.add('flash'); setTimeout(() => t.classList.remove('flash'), 1200); } },
   arrangedesk: async (el) => {
     el.disabled = true; el.textContent = 'Arranging…';
     try { await bridge.call('desktop:arrange'); toast('Desktop icons lined up. (Right-click the desktop → View to change this any time.)'); }
@@ -622,6 +636,17 @@ bridge.on('scan-progress', ({ i, n }) => { const s = $('#scan-status'); if (s) s
 (async () => {
   settings = await bridge.call('settings:get');
   platform = await bridge.call('app:platform').catch(() => '');
+  const themeIcon = () => { const t = settings.theme || 'system'; $('#themetoggle').textContent = t === 'dark' ? '☾' : t === 'light' ? '☀' : '◐'; $('#themetoggle').title = `Appearance: ${t === 'system' ? 'same as Windows' : t} (click to change)`; };
+  themeIcon();
+  $('#themetoggle').addEventListener('click', async () => {
+    const order = ['system', 'light', 'dark'];
+    const next = order[(order.indexOf(settings.theme || 'system') + 1) % 3];
+    await saveSettings({ theme: next });
+    themeIcon();
+    toast(next === 'system' ? 'Appearance: same as Windows' : next === 'light' ? 'Light mode' : 'Dark mode');
+    if (current === 'settings') render();
+  });
+  bridge.call('app:version').then((v) => { $('#appversion').textContent = `Version ${v}`; }).catch(() => {});
   if (navigator.platform.startsWith('Mac')) $('#hotkey').textContent = '⌘';
   if (!settings.onboarded) { await saveSettings({ onboarded: true }); location.hash = 'companies'; toast('Welcome! Start by adding your own business name and the companies you work with.'); }
   render();

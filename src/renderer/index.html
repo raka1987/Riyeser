@@ -9,9 +9,10 @@
 <body>
   <div class="app">
     <nav id="nav">
-      <div class="brand"><img src="icon.png" alt=""> Desk Assistant</div>
+      <div class="brand"><img src="icon.png" alt=""> <span class="grow">Desk Assistant</span><button id="themetoggle" class="themetoggle" title="Light / dark mode">◐</button></div>
       <a href="#today" data-page="today">Today</a>
       <a href="#organise" data-page="organise">Organise files <span id="badge-organise" class="pill" hidden></span></a>
+      <a href="#desktop" data-page="desktop">Tidy Desktop</a>
       <a href="#cleanup" data-page="cleanup">Clean up Downloads</a>
       <a href="#search" data-page="search">Search</a>
       <a href="#pdf" data-page="pdf">PDF editor</a>
@@ -22,7 +23,7 @@
       <a href="#settings" data-page="settings">Settings</a>
       <div class="ftree-head"><span>Folders</span><button class="link small" id="ftree-refresh" title="Refresh">⟳</button></div>
       <div id="ftree" class="ftree"></div>
-      <div class="hint">Quick search anywhere:<br><kbd id="hotkey">Ctrl</kbd> <kbd>Shift</kbd> <kbd>Space</kbd></div>
+      <div class="hint"><span id="appversion"></span><br>Quick search anywhere:<br><kbd id="hotkey">Ctrl</kbd> <kbd>Shift</kbd> <kbd>Space</kbd></div>
     </nav>
     <div id="navresize" class="navresize" title="Drag to resize"></div>
     <main id="page"></main>

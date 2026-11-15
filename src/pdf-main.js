@@ -19,10 +19,24 @@ function handle(name, fn) {
 }
 
 const applyTheme = (t) => { nativeTheme.themeSource = ['light', 'dark'].includes(t) ? t : 'system'; };
+// Only one copy runs at a time. If a *different* copy (e.g. a newer version you just downloaded) is started
+// while this one is running, this one steps aside and starts that one instead - so updates always take effect.
+function handOverTo(data) {
+  if (!data || !data.exe || path.resolve(data.exe).toLowerCase() === path.resolve(process.execPath).toLowerCase()) return false;
+  try { require('child_process').spawn(data.exe, data.args || [], { detached: true, stdio: 'ignore', cwd: path.dirname(data.exe) }).unref(); } catch { return false; }
+  app.isQuitting = true;
+  setTimeout(() => app.exit(0), 300);
+  return true;
+}
+const instanceData = { exe: process.execPath, version: app.getVersion(), args: process.argv.slice(1).filter((a) => a !== '--hidden') };
 const uninstalling = process.argv.includes('--uninstall');
-if (!app.requestSingleInstanceLock()) app.quit();
+if (!app.requestSingleInstanceLock(instanceData)) app.exit(0);
 // Opening another PDF while Desk PDF is running opens it in a new window.
-app.on('second-instance', (_e, argv) => { if (argv.includes('--uninstall')) runUninstall(APP_INFO); else openEditor(pdfArg(argv) || null); });
+app.on('second-instance', (_e, argv, _cwd, data) => {
+  if (argv.includes('--uninstall')) { runUninstall(APP_INFO); return; }
+  if (app.isPackaged && handOverTo(data)) return;
+  openEditor(pdfArg(argv) || null);
+});
 
 app.whenReady().then(async () => {
   if (uninstalling) { await runUninstall(APP_INFO); app.quit(); return; }
