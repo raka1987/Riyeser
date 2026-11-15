@@ -12,6 +12,8 @@ const { extractActionItems } = require('./core/actions');
 const { createAI } = require('./core/ai');
 const { analyseFolder } = require('./core/cleanup');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
+const { setOcrProvider } = require('./core/extract');
+const ocr = require('./core/ocr');
 
 const HOTKEY = 'CommandOrControl+Shift+Space';
 let store, index, mainWin, searchWin, tray;
@@ -34,6 +36,8 @@ function defaults() {
     dayFirstDates: true,
     staleDays: 90,
     groupRelated: true,
+    ocrPdfs: true,
+    ocrImages: false,
     autoOrganise: false,
     calendars: [],
     reminderMinutes: 10,
@@ -205,6 +209,47 @@ function toggleSearch() {
   else { searchWin.center(); searchWin.show(); searchWin.focus(); searchWin.webContents.send('search-focus'); }
 }
 
+// ---------- OCR for scanned documents ----------
+let ocrWin = null;
+const dbg = process.env.DA_DEBUG ? (...a) => console.log('[ocr]', ...a) : () => {};
+async function ocrRenderer() {
+  if (ocrWin && !ocrWin.isDestroyed()) return ocrWin;
+  ocrWin = new BrowserWindow({ show: false, webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } });
+  await ocrWin.loadFile(path.join(__dirname, 'renderer', 'ocr-render.html'));
+  for (let i = 0; i < 50 && !(await ocrWin.webContents.executeJavaScript('!!window.ocrReady')); i++) await new Promise((r) => setTimeout(r, 100));
+  return ocrWin;
+}
+function ocrCacheKey(file) { const st = fs.statSync(file); return `${file}|${st.size}|${st.mtimeMs}`; }
+async function cachedOcr(file, run) {
+  const key = ocrCacheKey(file);
+  const cache = store.get('ocrCache', {});
+  if (key in cache) return cache[key];
+  const text = await run();
+  store.update('ocrCache', {}, (c) => {
+    c[key] = text;
+    const keys = Object.keys(c);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 3000))) delete c[k];
+    return c;
+  });
+  return text;
+}
+setOcrProvider({
+  pdf: (file) => (getSettings().ocrPdfs === false ? Promise.resolve('') : cachedOcr(file, async () => {
+    dbg('start', file);
+    const win = await ocrRenderer();
+    dbg('renderer ready');
+    const pages = await win.webContents.executeJavaScript(`window.renderPdf(${JSON.stringify(file)}, 3)`);
+    dbg('rendered', pages.length);
+    const texts = [];
+    for (const dataUrl of pages) { texts.push((await ocr.recognize(Buffer.from(dataUrl.split(',')[1], 'base64'))).text); dbg('page done'); }
+    return texts.join('\n');
+  })),
+  image: (file) => {
+    if (!getSettings().ocrImages || /\.(heic|webp)$/i.test(file)) return Promise.resolve('');
+    return cachedOcr(file, async () => (await ocr.recognize(fs.readFileSync(file))).text);
+  },
+});
+
 // ---------- PDF editor ----------
 const openEditor = (file) => createEditorWindow(file, { store, icon: iconPath() });
 
@@ -238,6 +283,7 @@ function registerIpc() {
 
   handle('organise:scan', () => scanInbox());
   handle('organise:last', () => state.lastPlan);
+  handle('ocr:readFile', (file) => new Uint8Array(fs.readFileSync(file)));
   handle('organise:folders', () => organizer.scanFolders(getSettings()));
   handle('organise:setFolder', (p, checked) => {
     const s = getSettings();
@@ -337,6 +383,7 @@ app.on('second-instance', (_e, argv) => { const pdf = pdfArg(argv); if (pdf) ope
 app.whenReady().then(async () => {
   store = new Store(path.join(app.getPath('userData'), 'data'));
   index = new Index(store);
+  ocr.configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });
   registerIpc();
   const startPdf = pdfArg(process.argv);
   if (startPdf) openEditor(startPdf);

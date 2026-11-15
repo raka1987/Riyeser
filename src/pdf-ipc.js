@@ -46,6 +46,8 @@ function createEditorWindow(file, { store, icon }) {
 
 function registerPdfIpc({ handle, store, openEditor }) {
   handle('app:platform', () => process.platform);
+  // OCR one page image (PNG data URL) for the editor's "Recognise text".
+  handle('ocr:image', async (dataUrl) => require('./core/ocr').recognize(Buffer.from(dataUrl.split(',')[1], 'base64')));
   handle('pdf:makeDefault', registerAsPdfApp);
   handle('pdf:edit', (file) => { openEditor(file || null); return true; });
   handle('pdf:recent', () => store.get('recentPdfs', []).filter((f) => fs.existsSync(f)));

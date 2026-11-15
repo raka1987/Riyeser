@@ -264,6 +264,8 @@ const pages = {
         <label class="row small" style="margin-top:10px"><input type="checkbox" id="recursive" ${s.recursiveScan ? 'checked' : ''}> Tick new sub-folders automatically (you can untick them on the Organise page)</label>
         <label class="row small"><input type="checkbox" id="rename" ${s.renameFiles ? 'checked' : ''}> Rename files from their contents (e.g. “2026-11-03 Acme Plumbing Invoice 1042.pdf”)</label>
         <label class="row small"><input type="checkbox" id="byyear" ${s.groupByYear ? 'checked' : ''}> Put files in a folder for each year (…/Invoices/2026/)</label>
+        <label class="row small"><input type="checkbox" id="ocrpdf" ${s.ocrPdfs !== false ? 'checked' : ''}> Read scanned PDFs with text recognition (OCR) — a few seconds per document, done once</label>
+        <label class="row small"><input type="checkbox" id="ocrimg" ${s.ocrImages ? 'checked' : ''}> Also read photos and screenshots (finds receipts you've photographed; slower)</label>
         <label class="row small"><input type="checkbox" id="related" ${s.groupRelated !== false ? 'checked' : ''}> Keep related documents together (e.g. the quote, invoice and receipt for one job go in …/Projects/12 Smith Street/)</label>
         <label class="row small">Dates like 03/04/2026 mean <select id="datefmt"><option value="1" ${s.dayFirstDates ? 'selected' : ''}>3 April (NZ/AU/UK)</option><option value="0" ${s.dayFirstDates ? '' : 'selected'}>March 4 (US)</option></select></label>
         <label class="row small"><input type="checkbox" id="auto" ${s.autoOrganise ? 'checked' : ''}> Tidy automatically every hour (only files I'm sure about)</label></div>
@@ -291,6 +293,8 @@ const pages = {
     bindCheck('#rename', (v) => ({ renameFiles: v }));
     bindCheck('#byyear', (v) => ({ groupByYear: v }));
     bindCheck('#related', (v) => ({ groupRelated: v }));
+    bindCheck('#ocrpdf', (v) => ({ ocrPdfs: v }));
+    bindCheck('#ocrimg', (v) => ({ ocrImages: v }));
     $('#datefmt').addEventListener('change', async (e) => { await saveSettings({ dayFirstDates: e.target.value === '1' }); toast('Saved'); });
     bindCheck('#auto', (v) => ({ autoOrganise: v }));
     bindCheck('#login', (v) => ({ openAtLogin: v }));

@@ -248,3 +248,27 @@ test('address reading is not fooled by reference numbers', () => {
   assert.deepEqual(addr('As per quote QU-0077 - 12 Smith Street'), ['12 Smith Street']);
   assert.deepEqual(addr('Site: 2/14 Queen St, Auckland'), ['2/14 Queen St']);
 });
+
+test('scanned PDFs are read with OCR and then sorted like any other document', async () => {
+  const ex = require('../src/core/extract');
+  const ocr = require('../src/core/ocr');
+  const scan = path.join(__dirname, 'fixtures', 'scanned-invoice.pdf');
+  ex.setOcrProvider(null);
+  assert.equal((await ex.extractText(scan)).trim(), ''); // just a picture
+  let asked = 0;
+  ex.setOcrProvider({ pdf: async () => { asked++; return 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-2050\nInvoice Date: 05/11/2026'; } });
+  const text = await ex.extractText(scan);
+  assert.equal(asked, 1);
+  const c = classify({ fileName: 'scanned-invoice.pdf', ext: '.pdf', text }, settings);
+  assert.equal(c.docType, 'Invoices');
+  assert.equal(c.company, 'Acme Plumbing');
+  // a normal PDF with real text never goes to OCR
+  await ex.extractText(path.join(__dirname, 'fixtures', 'Statement_Nov2026.pdf'));
+  assert.equal(asked, 1);
+  ex.setOcrProvider(null);
+  // the OCR engine itself reads a real scan image
+  const img = fs.readFileSync(path.join(__dirname, 'fixtures', 'scan.jpg'));
+  const r = await ocr.recognize(img);
+  assert.match(r.text, /INV-2050/);
+  assert.ok(r.lines.length >= 5);
+});

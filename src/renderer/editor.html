@@ -41,6 +41,7 @@
       <button data-cmd="date" title="Today's date">📅 Date</button>
       <button data-cmd="signature" title="Add a signature">✍ Sign</button>
       <button data-cmd="image" title="Add a picture">🖼 Image</button>
+      <button data-cmd="ocr" title="Read the text in a scanned PDF so you can search, copy and edit it">🔍 Recognise text</button>
       <span class="sep"></span>
       <label class="small muted" title="Colour"><input type="color" id="color" value="#1d4ed8"></label>
       <label class="small muted" title="Text size"><select id="fontsize"><option>8</option><option>10</option><option selected>12</option><option>14</option><option>18</option><option>24</option><option>36</option></select></label>
@@ -78,7 +79,7 @@
         <div id="formfields" class="small"></div>
       </div>
     </aside>
-    <main id="viewer"><div id="pages"></div>
+    <main id="viewer"><div id="scanbanner" class="scanbanner" hidden>📷 This looks like a scanned document — the words are a picture, so you can't search or edit them yet. <button class="primary" data-cmd="ocr">Recognise text</button></div><div id="pages"></div>
       <div id="empty" class="emptystate"><h2>PDF Editor</h2><p class="muted">Open a PDF to view, edit, fill in or sign it.</p><button class="primary" data-cmd="open">Open a PDF…</button>
         <div class="windows-only" hidden style="margin-top:22px;text-align:center"><button data-cmd="makedefault">Set as my PDF app</button><p class="muted small">So PDFs from email, your browser and File Explorer open here.</p></div></div>
     </main>

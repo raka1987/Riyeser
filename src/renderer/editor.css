@@ -55,3 +55,5 @@ body { overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
 .tools { gap: 5px; }
 .tools button { padding: 4px 8px; font-size: 13px; }
 .tools select, .tools input[type=color] { padding: 2px 4px; }
+.scanbanner { position: sticky; top: 0; z-index: 5; background: var(--warn-soft); color: var(--text); border-bottom: 1px solid var(--line); padding: 8px 14px; display: flex; gap: 12px; align-items: center; font-size: 13px; }
+.scanbanner[hidden] { display: none; }

@@ -3,7 +3,7 @@
 import * as pdfjsLib from './vendor/pdf.min.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
-const { PDFDocument, StandardFonts, rgb, degrees, BlendMode, LineCapStyle } = window.PDFLib;
+const { PDFDocument, StandardFonts, rgb, degrees, BlendMode, LineCapStyle, pushGraphicsState, popGraphicsState, beginText, endText, setFontAndSize, setTextMatrix, showText, setTextRenderingMode, TextRenderingMode } = window.PDFLib;
 const bridge = window.api;
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -87,6 +87,7 @@ async function openFile(file) {
     await loadBytes(bytes);
     setDirty(false);
     if (st.encrypted) toast('This PDF is password-protected. You can view it, but saving changes may not work.');
+    checkIfScanned().catch(() => {});
     requestAnimationFrame(fitWidth);
   } catch (e) {
     toast(`Couldn't open this PDF: ${e.message}`);
@@ -182,6 +183,7 @@ function drawOverlay(src) {
   }
 
   for (const a of st.anns[src] || []) {
+    if (a.type === 'ocr') continue; // invisible text layer
     if (a.type === 'ink') {
       const pts = a.points.map(([x, y]) => toView(src, x, y).map((n) => n.toFixed(1)).join(',')).join(' ');
       const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
@@ -429,6 +431,11 @@ $('#pages').addEventListener('pointerdown', (e) => {
     e.preventDefault();
     const t = st.text[src][+box.dataset.ti];
     pushUndo();
+    // Text we recognised ourselves: drop the old words from the hidden text layer so only the new ones remain.
+    if (t.ocrLine) {
+      const layer = (st.anns[src] || []).find((a) => a.type === 'ocr');
+      if (layer) layer.lines = layer.lines.filter((l) => !(l.text === t.ocrLine.text && Math.abs(l.ax - t.ocrLine.ax) < 0.5 && Math.abs(l.ay - t.ocrLine.ay) < 0.5));
+    }
     const family = /serif/i.test(t.family) && !/sans/i.test(t.family) ? 'TimesRoman' : /mono/i.test(t.family) ? 'Courier' : 'Helvetica';
     addAnn(src, { id: newId(), type: 'whiteout', ax: t.x - 1, ay: t.y + 0.95 * t.h + 1, w: t.w + 2, h: 1.2 * t.h + 2, rot: 0 });
     const size = Math.round(t.h * 10) / 10;
@@ -813,6 +820,26 @@ async function buildPdf(orderList = st.order) {
     const page = pages[+srcStr];
     if (!page) continue;
     for (const a of list) {
+      if (a.type === 'ocr') {
+        // Invisible text placed exactly over the words in the scan, so the PDF becomes searchable and selectable.
+        const f = await font('Helvetica', false);
+        const fontKey = page.node.newFontDictionary(f.name, f.ref);
+        const ops = [pushGraphicsState(), beginText(), setTextRenderingMode(TextRenderingMode.Invisible)];
+        for (const l of a.lines) {
+          const safe = [...l.text].map((ch) => { try { f.encodeText(ch); return ch; } catch { return ' '; } }).join('');
+          if (!safe.trim()) continue;
+          const size = Math.max(4, l.h * 0.85);
+          const natural = f.widthOfTextAtSize(safe, size) || 1;
+          const sx = l.w / natural;
+          const R = (l.rot * Math.PI) / 180;
+          const down = [Math.sin(R), -Math.cos(R)];
+          const ox = l.ax + down[0] * l.h * 0.8; const oy = l.ay + down[1] * l.h * 0.8; // baseline start
+          ops.push(setFontAndSize(fontKey, size), setTextMatrix(sx * Math.cos(R), sx * Math.sin(R), -Math.sin(R), Math.cos(R), ox, oy), showText(f.encodeText(safe)));
+        }
+        ops.push(endText(), popGraphicsState());
+        page.pushOperators(...ops);
+        continue;
+      }
       if (a.type === 'ink') {
         for (let k = 1; k < a.points.length; k++) {
           page.drawLine({ start: { x: a.points[k - 1][0], y: a.points[k - 1][1] }, end: { x: a.points[k][0], y: a.points[k][1] }, thickness: a.width, color: hexToRgb(a.color), lineCap: LineCapStyle.Round });
@@ -895,6 +922,60 @@ async function extractPages() {
   if (target) toast(`Saved ${idx.length} page(s) to ${target}`);
 }
 
+// ---------------- OCR (recognise text in scanned pages) ----------------
+let ocrBusy = false;
+async function recognisePages() {
+  if (!st.doc || ocrBusy) return;
+  const todo = st.order.map((o, i) => ({ ...o, i })).filter((o) => !(st.text[o.src] || []).length || (st.anns[o.src] || []).some((a) => a.type === 'ocr'));
+  if (!todo.length) { toast('This PDF already contains text — nothing to recognise.'); return; }
+  ocrBusy = true;
+  $('#scanbanner').hidden = true;
+  const btn = $('[data-cmd="ocr"]'); btn.disabled = true;
+  pushUndo();
+  let lines = 0;
+  try {
+    for (const [n, o] of todo.entries()) {
+      btn.textContent = `Reading page ${n + 1} of ${todo.length}…`;
+      const page = await st.doc.getPage(o.src + 1);
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.min(200 / 72, 3000 / Math.max(base.width, base.height));
+      const vp = page.getViewport({ scale, rotation: (st.baseRot[o.src] + o.rot) % 360 });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(vp.width); canvas.height = Math.floor(vp.height);
+      const ctx = canvas.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Render without our own additions so only the original page is read.
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const r = await bridge.call('ocr:image', canvas.toDataURL('image/png'));
+      const found = r.lines.map((l) => {
+        const [ax, ay] = vp.convertToPdfPoint(l.x0, l.y0);
+        return { text: l.text, ax, ay, w: (l.x1 - l.x0) / scale, h: (l.y1 - l.y0) / scale, rot: vp.rotation };
+      });
+      st.anns[o.src] = (st.anns[o.src] || []).filter((a) => a.type !== 'ocr');
+      const annId = newId();
+      if (found.length) addAnn(o.src, { id: annId, type: 'ocr', lines: found });
+      // Make the new text usable straight away for Find and Edit text.
+      st.text[o.src] = found.map((l) => ({ str: l.text, x: l.ax, y: l.ay - l.h * 0.8, w: l.w, h: l.h * 0.9, upright: l.rot === 0, family: 'sans-serif', ocrLine: l }));
+      lines += found.length;
+    }
+    setDirty();
+    toast(`Recognised ${lines} line(s) of text on ${todo.length} page(s). Save to keep it — the PDF will then be searchable and copyable in any PDF app.`);
+  } catch (e) {
+    toast(`Text recognition failed: ${e.message}`);
+  } finally {
+    ocrBusy = false; btn.disabled = false; btn.textContent = '🔍 Recognise text';
+  }
+}
+
+async function checkIfScanned() {
+  let empty = 0;
+  const n = Math.min(st.doc.numPages, 3);
+  for (let i = 1; i <= n; i++) {
+    const tc = await (await st.doc.getPage(i)).getTextContent();
+    if (!tc.items.some((it) => it.str && it.str.trim())) empty++;
+  }
+  $('#scanbanner').hidden = empty === 0;
+}
+
 // ---------------- commands ----------------
 const commands = {
   open: async () => { if (st.dirty && !(await bridge.call('confirm', 'Discard unsaved changes?'))) return; const f = await bridge.call('pdf:openDialog', false); if (f) openFile(f); },
@@ -926,6 +1007,7 @@ const commands = {
   sigclear: resetPad,
   sigplace: placeSignature,
   sigupload: async () => { const d = await bridge.call('image:openDialog'); if (d) { sigUpload = await knockOutWhite(d); $('#sigimg').src = sigUpload; } },
+  ocr: recognisePages,
   makedefault: async () => {
     const name = await bridge.call('pdf:makeDefault');
     toast(`Windows Settings is opening: choose “${name}” for .pdf and you're done.`);

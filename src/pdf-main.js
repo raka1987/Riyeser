@@ -22,6 +22,7 @@ app.on('second-instance', (_e, argv) => openEditor(pdfArg(argv) || null));
 
 app.whenReady().then(() => {
   store = new Store(path.join(app.getPath('userData'), 'data'));
+  require('./core/ocr').configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });
   registerPdfIpc({ handle, store, openEditor });
   handle('app:info', () => ({ standalone: true }));
   openEditor(pdfArg(process.argv) || null);
