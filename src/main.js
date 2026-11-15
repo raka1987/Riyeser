@@ -427,7 +427,6 @@ function registerIpc() {
 
   handle('organise:scan', () => scanInbox());
   handle('organise:last', () => state.lastPlan);
-  handle('ocr:readFile', (file) => new Uint8Array(fs.readFileSync(file)));
 
   // Folder browser in the side panel
   handle('folder:roots', () => folderRoots());

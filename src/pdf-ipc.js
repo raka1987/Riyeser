@@ -48,6 +48,31 @@ function registerPdfIpc({ handle, store, openEditor, getTheme = () => 'system', 
   handle('app:platform', () => process.platform);
   handle('app:version', () => app.getVersion());
   handle('theme:get', () => getTheme());
+  handle('ocr:readFile', (file) => new Uint8Array(fs.readFileSync(file)));
+
+  // ----- conversions -----
+  const convert = require('./convert');
+  const ocrLines = (img) => require('./core/ocr').recognize(img);
+  handle('files:pick', async (kind) => {
+    const filters = kind === 'convert'
+      ? [{ name: 'Pictures, Word, Excel, PowerPoint, text', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif', 'docx', 'doc', 'rtf', 'odt', 'xlsx', 'xls', 'xlsm', 'ods', 'csv', 'pptx', 'ppt', 'odp', 'txt', 'md', 'html', 'htm'] }]
+      : kind === 'images' ? [{ name: 'Pictures', extensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp', 'gif'] }] : [{ name: 'PDF', extensions: ['pdf'] }];
+    const r = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow(), { properties: ['openFile', 'multiSelections'], filters });
+    return r.canceled ? null : r.filePaths;
+  });
+  handle('convert:toPdf', (files, opts) => convert.convertToPdf(files, opts || {}));
+  handle('convert:pdfToWord', (file) => convert.pdfToWord(file, { ocr: ocrLines }));
+  handle('convert:pdfToImages', (file, opts) => convert.pdfToImages(file, opts || {}));
+  handle('file:openPath', (p) => shell.openPath(p));
+  handle('file:showPath', (p) => shell.showItemInFolder(p));
+  // Save several PDFs (e.g. "split into separate files") into a folder you choose.
+  handle('pdf:saveMany', async (suggestedFolder, items) => {
+    const r = await dialog.showOpenDialog(BrowserWindow.getFocusedWindow(), { title: 'Choose where to save the files', defaultPath: suggestedFolder, properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled) return null;
+    const dir = r.filePaths[0];
+    const saved = items.map((it) => { const dest = convert.uniquePath(path.join(dir, it.name)); fs.writeFileSync(dest, Buffer.from(it.bytes)); return dest; });
+    return { folder: dir, saved };
+  });
   handle('theme:set', (t) => { setTheme(t); return t; });
   // OCR one page image (PNG data URL) for the editor's "Recognise text".
   handle('ocr:image', async (dataUrl) => require('./core/ocr').recognize(Buffer.from(dataUrl.split(',')[1], 'base64')));

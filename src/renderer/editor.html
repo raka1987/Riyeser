@@ -34,15 +34,37 @@
       <button data-tool="text" title="Add text (T)">T Add text</button>
       <button data-tool="edittext" title="Click existing text to change it (E)">✎ Edit text</button>
       <button data-tool="highlight" title="Highlight (H)">▮ Highlight</button>
+      <button data-tool="underline" title="Underline">U̲ Underline</button>
+      <button data-tool="strike" title="Strike through">S̶ Strike</button>
       <button data-tool="draw" title="Pen (P)">✐ Draw</button>
       <button data-tool="rect" title="Rectangle">▭ Box</button>
+      <button data-tool="ellipse" title="Circle / ellipse">◯ Circle</button>
+      <button data-tool="line" title="Line">╱ Line</button>
+      <button data-tool="arrow" title="Arrow">➚ Arrow</button>
       <button data-tool="whiteout" title="White-out: covers things up (the original stays in the file underneath)">◻ White-out</button>
+      <button data-tool="redact" title="Redact: blacks out and permanently REMOVES what's underneath when you save">■ Redact</button>
       <button data-tool="check" title="Tick">✓ Tick</button>
       <button data-tool="cross" title="Cross">✗ Cross</button>
       <button data-cmd="date" title="Today's date">📅 Date</button>
       <button data-cmd="signature" title="Add a signature">✍ Sign</button>
       <button data-cmd="image" title="Add a picture">🖼 Image</button>
       <button data-cmd="ocr" title="Read the text in a scanned PDF so you can search, copy and edit it">🔍 Recognise text</button>
+      <button data-cmd="stamp" title="Add a stamp: Approved, Paid, Received…">🔖 Stamp</button>
+      <div class="menuwrap"><button data-cmd="toolsmenu" id="toolsbtn" title="More tools">🧰 Tools ▾</button>
+        <div class="menu" id="toolsmenu" hidden>
+          <div class="mh">Convert</div>
+          <button data-cmd="createpdf">📄 Create PDF from pictures, Word, Excel…</button>
+          <button data-cmd="toword">📝 Convert to Word (edit the whole document)</button>
+          <button data-cmd="exportimages">🖼 Save pages as pictures</button>
+          <div class="mh">Pages</div>
+          <button data-cmd="blankpage">➕ Insert blank page after this one</button>
+          <button data-cmd="split">✂ Split into separate files</button>
+          <button data-cmd="pagenumbers">#️⃣ Page numbers…</button>
+          <div class="mh">Mark</div>
+          <button data-cmd="watermark">💧 Watermark…</button>
+          <div class="mh">File</div>
+          <button data-cmd="compress">🗜 Make smaller (compress)…</button>
+        </div></div>
       <span class="sep"></span>
       <label class="small muted" title="Colour"><input type="color" id="color" value="#1d4ed8"></label>
       <label class="small muted" title="Text size"><select id="fontsize"><option>8</option><option>10</option><option selected>12</option><option>14</option><option>18</option><option>24</option><option>36</option></select></label>
@@ -98,6 +120,7 @@
       <div class="row" style="margin-top:12px"><label class="small"><input type="checkbox" id="sigremember" checked> Remember this signature</label><span class="spacer"></span><button class="primary" data-cmd="sigplace">Place signature</button></div>
     </div>
   </div>
+  <div id="dlg" class="modal" hidden><div class="modalbox" id="dlgbox"></div></div>
   <div id="toast" class="toast"></div>
   <script src="vendor/pdf-lib.min.js"></script>
   <script type="module" src="editor.js"></script>

@@ -296,6 +296,8 @@ const pages = {
           <button class="primary" data-act="pdfopen">Open PDF…</button>
           <p class="muted small" style="margin-top:12px">Want PDFs from email, your browser and File Explorer to open here?</p>
           <button data-act="pdfdefault">Set as my PDF app</button></div>
+        <div class="card"><h2>Convert</h2><p class="muted small">Turn pictures, Word, Excel, PowerPoint or text files into a PDF — or turn a PDF into an editable Word document. Uses Microsoft Office when it's installed for an exact match.</p>
+          <div class="row"><button class="primary" data-act="convtopdf">Create PDF from files…</button><button data-act="convtoword">PDF → Word…</button></div></div>
         <div class="card"><h2>Combine PDFs</h2><p class="muted small">Join several PDFs into one, in the order shown.</p>
           <ul class="list" id="combinelist">${combine.map((f, i) => `<li><div class="grow path ellipsis">${esc(short(f))}</div><button class="link" data-act="cmbup" data-i="${i}">▲</button><button class="link" data-act="cmbrm" data-i="${i}">✕</button></li>`).join('') || '<li class="muted small">No files chosen yet.</li>'}</ul>
           <div class="row" style="margin-top:8px"><button data-act="cmbadd">Add PDFs…</button><button class="primary" data-act="cmbgo" ${combine.length > 1 ? '' : 'disabled'}>Combine &amp; save</button></div></div>
@@ -672,6 +674,23 @@ const actions = {
   treecollapse: () => { expanded = new Set(); saveExpanded(); renderTree(); },
   treerefresh: () => renderTree(),
   pdfopen: async () => { const f = await bridge.call('pdf:openDialog', false); if (f) await bridge.call('pdf:edit', f); },
+  convtopdf: async () => {
+    const files = await bridge.call('files:pick', 'convert');
+    if (!files || !files.length) return;
+    const combine = files.length > 1 ? await bridge.call('confirm', `Combine the ${files.length} files into ONE PDF?`, 'Choose Cancel to make a separate PDF for each file.') : false;
+    toast('Converting…');
+    const r = await bridge.call('convert:toPdf', files, { combine });
+    toast(`Created ${r.outputs.length} PDF(s)${r.usedOffice ? ' using Microsoft Office' : ''}.`);
+    await bridge.call('pdf:edit', r.outputs[0]);
+  },
+  convtoword: async () => {
+    const f = await bridge.call('pdf:openDialog', false);
+    if (!f) return;
+    toast('Converting to Word…');
+    const r = await bridge.call('convert:pdfToWord', f);
+    toast(`Created ${r.output.split(/[\\/]/).pop()}${r.usedOffice ? ' using Microsoft Word' : ''}.`);
+    bridge.call('file:openPath', r.output);
+  },
   pdfedit: (el) => bridge.call('pdf:edit', el.dataset.path),
   pdfdefault: async () => { const name = await bridge.call('pdf:makeDefault'); toast(`Windows Settings is opening: choose “${name}” for .pdf.`); },
   pdfbackups: () => bridge.call('pdf:backups'),

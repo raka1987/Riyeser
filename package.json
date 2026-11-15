@@ -1,6 +1,6 @@
 {
   "name": "desk-assistant",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "A personal desktop assistant that sorts your files by company and type, tracks meetings and to-dos, finds anything instantly and sorts email.",
   "main": "src/main.js",
   "scripts": {
@@ -27,6 +27,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
     "@tesseract.js-data/eng": "^1.0.0",
+    "docx": "^8.5.0",
     "exifr": "^7.1.3",
     "imapflow": "^2.11.0",
     "jszip": "^3.10.2",
