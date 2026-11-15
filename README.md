@@ -29,10 +29,14 @@ npm start
 ## Build an installer
 
 ```bash
-npm run dist:win     # Windows .exe installer (build on Windows)
+npm run dist:win     # Desk Assistant for Windows (zip, with our icon/name on the .exe) -> dist/
+npm run dist:pdf     # Desk PDF for Windows -> dist-pdf/
+npm run dist:all     # both
 npm run dist:mac     # macOS .dmg (build on a Mac)
 npm run dist:linux   # Linux AppImage
 ```
+
+Icons live in `build/` (Desk Assistant) and `build/pdf/` (Desk PDF); `scripts/brand-exe.js` stamps them onto the .exe.
 
 The finished installer is in `dist/`.
 

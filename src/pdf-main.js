@@ -6,7 +6,7 @@ const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
 
 app.setName('Desk PDF');
 let store;
-const icon = path.join(__dirname, 'renderer', 'icon.png');
+const icon = path.join(__dirname, 'renderer', 'icon-pdf.png');
 const openEditor = (file) => createEditorWindow(file, { store, icon });
 
 function handle(name, fn) {
