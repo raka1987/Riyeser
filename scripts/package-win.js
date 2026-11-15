@@ -14,6 +14,12 @@ const apps = [
 ];
 const only = process.argv[2];
 run('node', ['scripts/vendor.js']);
+// Make sure the .ico files are in the format Windows expects (BMP small sizes + PNG 256) if Python is available.
+for (const [src, out] of [['build/icon.png', 'build/icon.ico'], ['build/pdf/icon.png', 'build/pdf/icon.ico']]) {
+  try { run(process.platform === 'win32' ? 'python' : 'python3', ['scripts/make-ico.py', src, out]); } catch { console.warn('Python not found - using the existing .ico files'); }
+}
+fs.copyFileSync(path.join(root, 'build/icon.ico'), path.join(root, 'src/renderer/icon.ico'));
+fs.copyFileSync(path.join(root, 'build/pdf/icon.ico'), path.join(root, 'src/renderer/icon-pdf.ico'));
 for (const a of apps.filter((x) => !only || x.key === only)) {
   fs.rmSync(path.join(root, a.out), { recursive: true, force: true });
   run('npx', ['electron-builder', '--win', 'dir', '--x64', '-c.win.signAndEditExecutable=false', `-c.win.icon=${a.ico}`, `-c.directories.output=${a.out}`, ...a.extra]);

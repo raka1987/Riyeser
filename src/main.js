@@ -293,9 +293,10 @@ setOcrProvider({
 });
 
 // ---------- PDF editor ----------
-const openEditor = (file) => createEditorWindow(file, { store, icon: path.join(__dirname, 'renderer', 'icon-pdf.png') });
+const openEditor = (file) => createEditorWindow(file, { store, icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-pdf.ico' : 'icon-pdf.png') });
 
-function iconPath() { return path.join(__dirname, 'renderer', 'icon.png'); }
+// Windows shows a multi-size .ico most crisply (taskbar, Alt+Tab); other systems use the PNG.
+function iconPath() { return path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon.ico' : 'icon.png'); }
 
 // ---------- IPC ----------
 function handle(name, fn) {
@@ -495,8 +496,8 @@ app.whenReady().then(async () => {
 
   if (!globalShortcut.register(HOTKEY, toggleSearch)) console.warn(`Could not register ${HOTKEY}`);
 
-  const img = nativeImage.createFromPath(path.join(__dirname, 'renderer', process.platform === 'darwin' ? 'tray.png' : 'icon.png'));
-  tray = new Tray(img.isEmpty() ? img : img.resize({ width: process.platform === 'win32' ? 16 : 18, height: process.platform === 'win32' ? 16 : 18, quality: 'best' }));
+  if (process.platform === 'win32') tray = new Tray(path.join(__dirname, 'renderer', 'icon.ico')); // Windows picks the right size from the .ico
+  else { const img = nativeImage.createFromPath(path.join(__dirname, 'renderer', process.platform === 'darwin' ? 'tray.png' : 'icon.png')); tray = new Tray(img.isEmpty() ? img : img.resize({ width: 18, height: 18, quality: 'best' })); }
   tray.setToolTip('Desk Assistant');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Desk Assistant', click: () => showMain() },
