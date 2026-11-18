@@ -16,6 +16,7 @@ const { analyseFolder } = require('./core/cleanup');
 const safety = require('./core/safety');
 const { planEverything, removeEmptiedFolders } = require('./core/everything');
 const learn = require('./core/learn');
+const { reviewFiles } = require('./core/review');
 const rules = require('./core/rules');
 const { extractDetails } = require('./core/details');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
@@ -559,6 +560,59 @@ function registerIpc() {
     return state.lastPlan;
   });
   handle('everything:cancel', () => { state.cancel = true; return true; });
+  // ----- Smart review: label, rename and date every file in a pool of folders; find duplicates -----
+  handle('review:pool', () => {
+    const s = getSettings();
+    const saved = store.get('reviewPool', null);
+    const pool = (saved || [s.organisedRoot, ...s.watchFolders]).filter((f) => f && fs.existsSync(f) && !safety.folderProblem(f));
+    return { pool: [...new Set(pool)], hasAiKey: !!getSecret('aiKey') };
+  });
+  handle('review:setPool', (folders) => {
+    const ok = [...new Set((folders || []).filter((f) => typeof f === 'string' && fs.existsSync(f)))];
+    for (const f of ok) { const why = safety.folderProblem(f); if (why) throw new Error(`${f}: ${why}`); }
+    store.set('reviewPool', ok); return ok;
+  });
+  handle('review:scan', async ({ folders, useAI } = {}) => {
+    state.cancel = false;
+    const s = planSettings();
+    const pool = (folders || []).filter((f) => !safety.folderProblem(f));
+    if (!pool.length) throw new Error('Choose at least one folder to review.');
+    const brain = useAI ? ai() : null;
+    if (useAI && !brain) throw new Error('Add your AI key in Settings → AI first, or turn off "Use AI".');
+    state.lastPlan = await reviewFiles(pool, s, { ai: brain, onProgress: (i, n, file) => send('scan-progress', { i, n, file: path.basename(file) }), isCancelled: () => state.cancel });
+    send('plan-changed');
+    return state.lastPlan;
+  });
+  // Decide what happens to duplicates: keep, archive (moved to Organised\Archive\Duplicates\<date>, can be undone) or Recycle Bin.
+  handle('dupes:resolve', async (actions) => {
+    const s = getSettings();
+    const day = new Date().toISOString().slice(0, 10);
+    const archiveDir = path.join(s.organisedRoot, 'Archive', 'Duplicates', day);
+    const toArchive = []; const binned = []; const failed = [];
+    for (const a of actions || []) {
+      const p = a.path;
+      if (!p || !fs.existsSync(p)) { failed.push({ path: p, error: 'file no longer exists' }); continue; }
+      if (safety.isSystemPath(p) || safety.isTooBroad(p) || safety.isProtectedFile(p)) { failed.push({ path: p, error: 'protected system file' }); continue; }
+      if (a.action === 'archive') toArchive.push({ from: p, to: path.join(archiveDir, path.basename(p)) });
+      else if (a.action === 'bin') { try { await shell.trashItem(p); index.remove(p); binned.push(p); } catch (e) { failed.push({ path: p, error: e.message }); } }
+    }
+    let batch = null;
+    if (toArchive.length) {
+      batch = organizer.applyPlan(toArchive);
+      batch.label = `Archived ${batch.moves.length} duplicate${batch.moves.length === 1 ? '' : 's'}`;
+      store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+      failed.push(...batch.errors.map((e) => ({ path: e.from, error: e.error })));
+    }
+    if (binned.length) store.update('cleanupLog', [], (l) => [{ at: new Date().toISOString(), binned }, ...l].slice(0, 50));
+    // Files that were archived or binned drop out of the rename list.
+    const gone = new Set([...binned, ...(batch ? batch.moves.map((m) => m.from) : [])]);
+    if (state.lastPlan?.mode === 'review') {
+      state.lastPlan.plan = state.lastPlan.plan.filter((p) => !gone.has(p.from));
+      state.lastPlan.dupes = (state.lastPlan.dupes || []).map((g) => ({ ...g, files: g.files.filter((f) => !gone.has(f.path)) })).filter((g) => g.files.length > 1);
+    }
+    refreshIndex().catch(() => {});
+    return { archived: batch ? batch.moves.length : 0, binned: binned.length, failed, archiveDir, batchId: batch && batch.id, plan: state.lastPlan };
+  });
   // Line up the icons on the Windows desktop: turns on "Auto arrange" + "Align to grid" and refreshes the desktop.
   handle('desktop:arrange', async () => {
     if (process.platform !== 'win32') throw new Error('Arranging desktop icons is only available on Windows.');
@@ -623,6 +677,12 @@ function registerIpc() {
     // Sub-folders that were ticked for clean-up and are now empty get removed (undo recreates them).
     for (const sub of state.lastPlan?.emptyFolderCleanup || []) organizer.removeEmptyDirs(sub, { includeRoot: true });
     if (state.lastPlan?.mode === 'everything') { removeEmptiedFolders(batch, state.lastPlan.libraries || []); state.lastPlan = null; }
+    if (state.lastPlan?.mode === 'review') {
+      // Moved/renamed files leave the list; duplicates follow their new location.
+      const moved = new Map(batch.moves.map((m) => [m.from, m.to]));
+      state.lastPlan.plan = state.lastPlan.plan.filter((p) => !moved.has(p.from));
+      for (const g of state.lastPlan.dupes || []) for (const f of g.files) if (moved.has(f.path)) { f.path = moved.get(f.path); f.name = path.basename(f.path); }
+    }
     store.update('history', [], (h) => [batch, ...h].slice(0, 50));
     store.set('placedByApp', [...placedByApp(), ...batch.moves.map((m) => m.to)].slice(-50000));
     refreshIndex().catch(() => {});

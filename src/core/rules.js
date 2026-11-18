@@ -37,7 +37,7 @@ function ruleMatches(rule, item) {
 
 /** The folder a matching file should go to (with this year's folder if the rule uses years). */
 function ruleFolder(rule, item, root) {
-  const year = (item.details?.date || item.fileDate || '').slice(0, 4) || String(new Date().getFullYear());
+  const year = (item.details?.date || item.aiDate || item.details?.month || item.fileDate || '').slice(0, 4) || String(new Date().getFullYear());
   return folderFromTemplate(rule.dest, root, year);
 }
 

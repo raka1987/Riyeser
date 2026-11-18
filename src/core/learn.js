@@ -75,7 +75,7 @@ function learnedDestination(item, examples, root) {
   const top = [...votes.values()].sort((a, b) => b.weight - a.weight)[0];
   if (!top || top.weight / total < 0.6) return null;
   if (top.count < 2 && !(top.explicit && top.best >= 3.5)) return null;
-  const year = (item.details?.date || item.fileDate || '').slice(0, 4);
+  const year = (item.details?.date || item.aiDate || item.details?.month || item.fileDate || '').slice(0, 4);
   return {
     dir: folderFromTemplate(top.ex, root, year),
     because: top.explicit ? 'you chose this folder for similar files' : `you keep ${top.count} similar file${top.count === 1 ? '' : 's'} here`,

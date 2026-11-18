@@ -249,3 +249,13 @@ nav { overflow-y: auto; }
 .fsplit.notree { grid-template-columns: minmax(0, 1fr); }
 .fsplit.notree .fpane { display: none; }
 .fsplit.notree .treeshow { display: inline-block; position: fixed; left: calc(var(--nav-w, 250px) + 12px); bottom: 14px; z-index: 5; border-radius: 99px; padding: 5px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
+
+/* Smart review: duplicate sets */
+.dupegroup .list li.dupefile { align-items: center; gap: 10px; flex-wrap: wrap; }
+.dupegroup .grow { min-width: 220px; }
+.seg3 { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+.seg3 label { padding: 4px 10px; font-size: 12px; cursor: pointer; border-right: 1px solid var(--line); white-space: nowrap; }
+.seg3 label:last-child { border-right: none; }
+.seg3 label.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.seg3 input { position: absolute; opacity: 0; pointer-events: none; }
+.row.wrap { flex-wrap: wrap; }

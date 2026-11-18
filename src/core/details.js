@@ -72,13 +72,63 @@ function findAmount(text) {
 }
 
 /** Facts read from the document. */
+/** A month without a day, e.g. "April 2026", "Nov-2026", "04/2026", "2026-04" -> "2026-04". Looks in the name first. */
+function findMonth(text, fileName) {
+  for (const src of [String(fileName || '').replace(/[_]/g, ' '), String(text || '').slice(0, 4000)]) {
+    let m = src.match(new RegExp(`\\b${MONTH_RE}\\.?[\\s,-]*(\\d{4})\\b`, 'i'));
+    if (m) { const y = +m[2]; if (y >= 1990 && y <= 2100) return `${y}-${String(MONTHS[m[1].slice(0, 3).toLowerCase()]).padStart(2, '0')}`; }
+    // a month word and a year anywhere in a file name: "Aug Wage 2026"
+    if (src === String(fileName || '').replace(/[_]/g, ' ')) {
+      const mw = src.match(new RegExp(`\\b${MONTH_RE}\\b`, 'i')); const yr = src.match(/\b(19|20)\d{2}\b/);
+      if (mw && yr) return `${yr[0]}-${String(MONTHS[mw[1].slice(0, 3).toLowerCase()]).padStart(2, '0')}`;
+    }
+    m = src.match(/\b(\d{4})[-_. ](0[1-9]|1[0-2])\b(?![-_. ]\d)/) || null;
+    if (m && +m[1] >= 1990 && +m[1] <= 2100) return `${m[1]}-${m[2]}`;
+    m = src.match(/\b(0?[1-9]|1[0-2])[/.-](\d{4})\b/);
+    if (m && +m[2] >= 1990 && +m[2] <= 2100) return `${m[2]}-${String(+m[1]).padStart(2, '0')}`;
+  }
+  return null;
+}
+
 function extractDetails(text, fileName, { dayFirst = true } = {}) {
   const t = text || '';
+  const date = findDocDate(t, dayFirst);
   return {
-    date: findDocDate(t, dayFirst),
+    date,
+    month: date ? date.slice(0, 7) : findMonth(t, fileName),
     reference: findReference(t, fileName || ''),
     amount: findAmount(t),
   };
+}
+
+// Words in a file name that say nothing about the document.
+const NOISE = new Set(('copy final new scan scanned document doc file files untitled book img image dsc pdf docx xlsx version ver rev draft updated update ' +
+  'v1 v2 v3 the and for from of to a an my our with signed sign print printed edit edited fixed latest old backup temp tmp test misc').split(' '));
+
+/**
+ * A clear, consistent name for a file: "2026-04 Riki Consulting Ltd Payroll Wage.xlsx".
+ * Date (or month) first, then company, document type, reference, and a few useful words from the old name.
+ * aiTitle (optional) replaces the words from the old name.
+ */
+function smartName({ fileName, ext, classification: c, details: d, aiTitle, aiDate, fallbackDate }) {
+  if (!c || c.category === 'Media') return null;
+  const type = SINGULAR[c.docType] || null;
+  const when = aiDate || d.date || d.month || null;
+  const lower = (x) => String(x || '').toLowerCase();
+  const already = `${lower(c.company)} ${lower(type)} ${lower(c.docType)} ${lower(d.reference)}`;
+  let title = aiTitle || '';
+  if (!title) {
+    const base = String(fileName).replace(/\.[a-z0-9]+$/i, '').replace(/[_]+/g, ' ');
+    const words = (base.match(/[A-Za-z][A-Za-z'&]*/g) || []).filter((w) => {
+      const l = w.toLowerCase();
+      return l.length > 1 && !NOISE.has(l) && !MONTHS[l.slice(0, 3)] && !already.includes(l) && !/^(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*$/i.test(l);
+    });
+    title = [...new Set(words)].slice(0, 4).join(' ');
+  }
+  const parts = [when, c.company, type, d.reference, title].filter(Boolean).map(clean);
+  if (parts.length < 2 || (!when && !type)) return null; // not enough to improve on the original name
+  const name = parts.join(' ').replace(/\s+/g, ' ').slice(0, 150) + (ext || '');
+  return name.toLowerCase() === String(fileName).toLowerCase() ? null : name;
 }
 
 /** Warn when the file name says one thing but the contents say another (e.g. "invoice.pdf" that is really a quote). */
@@ -110,4 +160,4 @@ function suggestName({ fileName, ext, classification: c, details: d, fallbackDat
   return name.toLowerCase() === String(fileName).toLowerCase() ? null : name;
 }
 
-module.exports = { extractDetails, suggestName, typeMismatch, findDates, SINGULAR };
+module.exports = { extractDetails, suggestName, smartName, typeMismatch, findDates, findMonth, SINGULAR };

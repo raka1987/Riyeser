@@ -14,7 +14,7 @@ const DOC_TYPES = [
   { type: 'Statements', words: ['statement', 'account summary', 'opening balance', 'closing balance', 'bank statement', 'statement of account'] },
   { type: 'Timesheets', folder: 'Payroll/Timesheets', words: ['timesheet', 'time sheet', 'hours worked', 'total hours', 'week ending', 'start time', 'finish time', 'clock in', 'ordinary hours', 'overtime'] },
   { type: 'Payslips', folder: 'Payroll/Payslips', words: ['payslip', 'pay slip', 'gross pay', 'net pay', 'pay period', 'ytd earnings', 'earnings statement'] },
-  { type: 'Payroll', folder: 'Payroll', words: ['payroll', 'paye', 'kiwisaver', 'superannuation', 'pay run', 'wages', 'employer deductions', 'employment information', 'payday filing'] },
+  { type: 'Payroll', folder: 'Payroll', words: ['payroll', 'paye', 'kiwisaver', 'superannuation', 'pay run', 'wages', 'wage', 'wage sheet', 'wage book', 'employer deductions', 'employment information', 'payday filing'] },
   { type: 'Tax', words: ['tax return', 'gst return', 'vat return', 'ird', 'irs', 'hmrc', 'ato', 'w-2', '1099', 'tax year', 'provisional tax', 'income tax', 'gst'] },
   { type: 'Insurance', words: ['policy number', 'insurance', 'insured', 'premium', 'claim number', 'certificate of currency', 'policy schedule'] },
   { type: 'Contracts', words: ['agreement', 'contract', 'terms and conditions', 'hereby', 'signature', 'the parties', 'nda', 'non-disclosure', 'engagement letter', 'subcontract'] },

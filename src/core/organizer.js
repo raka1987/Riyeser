@@ -83,7 +83,7 @@ async function classifyFile(file, settings, ai) {
 }
 
 /** Read and classify one file (no decision yet about where it goes). */
-async function analyseFile(file, stat, settings, ai) {
+async function analyseFile(file, stat, settings, ai, { keepText = false } = {}) {
   const { c, text } = await classifyFile(file, settings, ai);
   const name = path.basename(file);
   return {
@@ -94,6 +94,7 @@ async function analyseFile(file, stat, settings, ai) {
     keys: c.category === 'Media' ? [] : extractKeys(text, name),
     ...(c.category === 'Media' ? { nameTokens: [], textTokens: [] } : featureTokens(name, text)),
     preview: (text || '').replace(/\s+/g, ' ').trim().slice(0, 400),
+    ...(keepText ? { _text: text || '' } : {}),
   };
 }
 
@@ -134,7 +135,7 @@ function placeItem(item, settings) {
   if (grouped) dir = path.join(root, safeName(item.companyType), safeName(item.company), 'Projects', safeName(item.group.name));
   else {
     dir = targetDir(root, item);
-    if (dir && settings.groupByYear) dir = path.join(dir, (item.details.date || item.fileDate).slice(0, 4));
+    if (dir && settings.groupByYear) dir = path.join(dir, (item.details.date || item.aiDate || item.details.month || item.fileDate).slice(0, 4));
   }
   // "Sort everything": files we can't pin to a company still get a tidy home instead of being left behind.
   if ((!dir || (!grouped && item.confidence === 'low' && item.category !== 'Media')) && settings.sortEverything !== false) {

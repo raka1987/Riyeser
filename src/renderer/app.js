@@ -16,6 +16,8 @@ let emailFilter = 'All';
 let cleanup = null;   // last clean-up check
 let combine = [];     // PDFs chosen for combining
 let everythingDone = null; // last "tidy everything" batch
+let review = { tab: 'labels', pool: null, hasAiKey: false, useAI: false, done: null, dupeDone: null, only: 'all' };
+let dupeChoice = new Map(); // duplicate file path -> 'keep' | 'archive' | 'bin'
 let appVersion = '';
 let folderSel = new Set(); // files ticked on the Folders page
 let folderSelDir = null;
@@ -316,6 +318,7 @@ const pages = {
 
   async organise() {
     plan = await bridge.call('organise:last');
+    if (plan?.mode === 'review') plan = null; // Smart review results live on their own page
     const history = await bridge.call('organise:history');
     const folders = await bridge.call('organise:folders');
     const groups = {};
@@ -438,6 +441,71 @@ const pages = {
       <div class="card"><details><summary><b>Kept as they are (${plan.kept.length})</b> <span class="muted small">— folders and files I left alone, and why</span></summary>
         <ul class="list">${plan.kept.slice(0, 400).map((k) => `<li><div class="grow" title="${esc(k.path)}"><b>${esc(k.path.split(/[\\/]/).pop())}</b> <span class="small muted">— ${esc(k.reason)}</span><div class="path ellipsis">in ${esc(short(k.path.split(/[\\/]/).slice(0, -1).join(k.path.includes('\\') ? '\\' : '/')))}</div></div><button class="link" data-act="reveal" data-path="${esc(k.path)}">Show</button></li>`).join('') || '<li class="muted">Nothing.</li>'}</ul></details></div>
       ${plan.review.length ? `<div class="card"><h2>Needs your help (${plan.review.length})</h2><p class="muted small">I couldn't tell where these belong, so they stay where they are.</p><ul class="list">${plan.review.slice(0, 200).map((r) => `<li><div class="grow"><b>${esc(r.name)}</b><div class="path">${esc(short(r.from))}</div></div><button class="link" data-act="open" data-path="${esc(r.from)}">Open</button></li>`).join('')}</ul></div>` : ''}`}`;
+  },
+
+  // "Smart review": reads every file in the chosen folders, suggests a label, a dated name and a folder, and finds duplicates.
+  async review() {
+    const last = await bridge.call('organise:last');
+    plan = last && last.mode === 'review' ? last : null;
+    if (!review.pool) { const r = await bridge.call('review:pool'); review.pool = r.pool; review.hasAiKey = r.hasAiKey; review.useAI = r.hasAiKey && !!settings.reviewUseAI; }
+    const nm = (f) => f.split(/[\\/]/).filter(Boolean).pop() || f;
+    const items = (plan?.plan || []).filter((p) => review.only === 'all' || (review.only === 'renames' ? p.renamed : p.moved));
+    const dupes = plan?.dupes || [];
+    const tabBtn = (t, label) => `<button class="${review.tab === t ? 'active' : ''}" data-act="rvtab" data-t="${t}">${label}</button>`;
+    const pills = (p) => [
+      p.label.type ? `<span class="pill">${esc(p.label.type)}</span>` : '<span class="pill warn">type unknown</span>',
+      p.label.company ? `<span class="pill">${esc(p.label.company)}</span>` : '',
+      p.label.date ? `<span class="pill" title="Date taken from the ${esc(p.label.dateFrom)}">📅 ${esc(p.label.date)}</span>` : '<span class="pill warn" title="No date found in the document">no date</span>',
+      p.details?.reference ? `<span class="pill"># ${esc(p.details.reference)}</span>` : '',
+      p.details?.amount ? `<span class="pill">💲 ${esc(p.details.amount)}</span>` : '',
+      p.aiChecked ? '<span class="pill good">✨ AI checked</span>' : '',
+      confPill(p.warning ? 'low' : p.confidence),
+    ].filter(Boolean).join(' ');
+    const rvRows = items.slice(0, 500).map((p) => `<tr>
+      <td><input type="checkbox" data-sel="${esc(p.from)}" ${selected.has(p.from) ? 'checked' : ''}></td>
+      <td><div class="small muted">Now</div><b class="fname">${esc(p.name)}</b>
+        <div style="margin:5px 0">${pills(p)}</div>
+        ${p.renamed ? `<div class="row small"><span class="muted">Rename to</span><input class="rename" data-rename="${esc(p.from)}" value="${esc(p.to.split(/[\\/]/).pop())}" title="Edit the new name if you like"></div>` : '<div class="small muted">Name is fine — keeping it</div>'}
+        <div class="dest route small" title="${esc(p.dir)}">${p.moved ? `<span class="arrow">→</span> ${route(p.dir)}` : `<span class="muted">Stays in</span> ${route(p.dir)}${p.keptFolder ? ' <span class="muted">(you filed it here)</span>' : ''}`}
+          <button class="link small changefolder" data-act="choosefolder" data-from="${esc(p.from)}" title="Pick a different folder - I'll remember it for similar files">Change folder…</button></div>
+        ${p.warning ? `<div class="small" style="color:var(--warn);margin-top:4px">⚠ ${esc(p.warning)}</div>` : ''}
+        <div class="small muted" style="margin-top:3px">${esc((p.reasons || []).slice(0, 2).join(' · '))}</div>
+        ${p.preview ? `<details class="small"><summary class="muted">What I read</summary><div class="readbox">${esc(p.preview)}…</div></details>` : ''}</td>
+      <td><button class="link" data-act="open" data-path="${esc(p.from)}">Open</button></td></tr>`).join('');
+    const choice = (f) => dupeChoice.get(f.path) || f.recommend;
+    const dupeCards = dupes.map((g, gi) => `<div class="card dupegroup">
+      <div class="row"><b>${g.kind === 'exact' ? `Exact copies (${g.files.length})` : `Same document, different ${g.differentFormats ? 'format' : 'name or version'} — ${g.similarity >= 99 ? 'almost word-for-word the same' : `${g.similarity}% match`}`}</b><span class="spacer"></span>
+        <button class="link small" data-act="dupeall" data-g="${gi}" data-v="keep">Keep all</button><button class="link small" data-act="dupeall" data-g="${gi}" data-v="rec">Use my suggestion</button></div>
+      <ul class="list">${g.files.map((f) => `<li class="dupefile"><div class="grow"><b class="fname">${esc(f.name)}</b>
+          <div class="small muted">${fmtSize(f.size)} · changed ${esc(new Date(f.mtime).toLocaleDateString())} · ${f.recommend === 'keep' ? '<span style="color:var(--good)">suggest keep</span>' : 'suggest archive'}: ${esc(f.why)}</div>
+          <div class="route small" title="${esc(f.path)}">${route(f.path.split(/[\\/]/).slice(0, -1).join(f.path.includes('\\') ? '\\' : '/'))}</div></div>
+        <div class="seg3" role="radiogroup">${[['keep', 'Keep'], ['archive', 'Archive'], ['bin', 'Recycle Bin']].map(([v, l]) => `<label class="${choice(f) === v ? 'on' : ''}"><input type="radio" name="d${gi}-${esc(f.path)}" data-dupe="${esc(f.path)}" value="${v}" ${choice(f) === v ? 'checked' : ''}>${l}</label>`).join('')}</div>
+        <button class="link" data-act="open" data-path="${esc(f.path)}">Open</button></li>`).join('')}</ul></div>`).join('');
+    const nChange = dupes.reduce((n, g) => n + g.files.filter((f) => choice(f) !== 'keep').length, 0);
+    page.innerHTML = `<h1>Smart review</h1>
+      <p class="sub">I read every file in the folders below and suggest <b>what it is</b> (type, company, date), <b>a clear name that starts with its date</b> — e.g. <b>2026-11-03 Acme Plumbing Invoice INV-1042.pdf</b> — and <b>where it belongs</b>. I also find <b>duplicates</b>, even when they have different names or one is a Word file and the other a PDF, and ask what you'd like to do. Nothing changes until you approve it.</p>
+      <div class="card"><h2>Folders to review</h2>
+        <div class="chips">${(review.pool || []).map((f, i) => `<span class="chip" title="${esc(f)}">📁 ${esc(nm(f))}<button data-act="rvdel" data-i="${i}" title="Remove">×</button></span>`).join('') || '<span class="muted small">None — add a folder</span>'}</div>
+        <button style="margin-top:8px" data-act="rvadd">+ Add folder</button>
+        <label class="row small" style="margin-top:12px"><input type="checkbox" id="rvai" ${review.useAI ? 'checked' : ''} ${review.hasAiKey ? '' : 'disabled'}>
+          <span><b>✨ Use AI to read each file</b> — better labels, titles and dates. ${review.hasAiKey ? 'Sends the start of each document’s text to Claude, and costs a little per file on your Anthropic account.' : 'Add an AI key in <a href="#settings">Settings → AI</a> to turn this on. Without it I use my built-in rules (works offline).'}</span></label></div>
+      <div class="row" style="margin:6px 0 16px"><button class="primary" data-act="rvscan" ${scanning || !(review.pool || []).length ? 'disabled' : ''}>${scanning ? 'Reading your files…' : plan ? 'Review again' : 'Start review'}</button>
+        ${scanning ? '<button data-act="evcancel">Stop</button>' : ''}<span id="scan-status" class="muted small"></span></div>
+      ${review.done ? `<div class="card" style="border-color:var(--good)"><b>Done — ${review.done.moves.length} file(s) renamed or moved${review.done.errors.length ? `, ${review.done.errors.length} couldn't be` : ''}.</b> <button class="link" data-act="rvundo" data-id="${esc(review.done.id)}">Undo</button></div>` : ''}
+      ${review.dupeDone ? `<div class="card" style="border-color:var(--good)"><b>Duplicates: ${review.dupeDone.archived} archived${review.dupeDone.binned ? `, ${review.dupeDone.binned} moved to the Recycle Bin` : ''}${review.dupeDone.failed.length ? `, ${review.dupeDone.failed.length} couldn't be` : ''}.</b>
+        ${review.dupeDone.archived ? `<span class="muted small">Archived files are in <button class="link" data-act="reveal" data-path="${esc(review.dupeDone.archiveDir)}">Organised › Archive › Duplicates</button>.</span> <button class="link" data-act="rvundo" data-id="${esc(review.dupeDone.batchId)}">Undo archive</button>` : ''}</div>` : ''}
+      ${!plan ? '' : `
+      <p class="muted small">Read ${plan.scanned} file(s)${plan.stopped ? ' (stopped early)' : ''} · ${plan.fine} already well named and in the right place.</p>
+      <div class="tabs">${tabBtn('labels', `Labels &amp; names (${plan.plan.length})`)}${tabBtn('dupes', `Duplicates (${dupes.length} set${dupes.length === 1 ? '' : 's'})`)}</div>
+      ${review.tab === 'labels' ? `<div class="card"><div class="row wrap"><span class="small muted">Show</span>
+          <select id="rvonly"><option value="all" ${review.only === 'all' ? 'selected' : ''}>Everything</option><option value="renames" ${review.only === 'renames' ? 'selected' : ''}>Only renames</option><option value="moves" ${review.only === 'moves' ? 'selected' : ''}>Only moves</option></select>
+          <span class="spacer"></span><button class="link" data-act="rvselall">Select all</button><button class="link" data-act="selsure">Only sure ones</button><button class="link" data-act="selnone">Clear</button>
+          <button class="primary" data-act="apply" ${selected.size ? '' : 'disabled'}>Apply ${selected.size} selected</button></div>
+        ${items.length ? `<table class="plantable"><colgroup><col style="width:34px"><col><col style="width:58px"></colgroup>${rvRows}</table>${items.length > 500 ? `<p class="muted small">Showing the first 500 of ${items.length}. Apply these, then review again for the rest.</p>` : ''}` : '<div class="empty">Nothing to change here — everything is well named and filed. 🎉</div>'}</div>`
+      : `${dupes.length ? `<div class="card"><div class="row wrap"><div class="grow small muted"><b>Archive</b> moves that file into Organised › Archive › Duplicates — out of the way, but not deleted (and you can undo it). <b>Recycle Bin</b> can be restored from the bin. I've picked a suggestion for each set — change any you like.</div>
+          <button class="primary" data-act="dupeapply" ${nChange ? '' : 'disabled'}>Apply ${nChange} change${nChange === 1 ? '' : 's'}</button></div></div>${dupeCards}` : '<div class="card"><div class="empty">No duplicates found. 🎉</div></div>'}`}`}`;
+    const ai = $('#rvai'); if (ai) ai.addEventListener('change', () => { review.useAI = ai.checked; saveSettings({ reviewUseAI: ai.checked }); });
+    const only = $('#rvonly'); if (only) only.addEventListener('change', () => { review.only = only.value; render(); });
   },
 
   // "Tidy Desktop": the Organise page, opened at the folder choices and desktop-icon tidy-up.
@@ -774,6 +842,32 @@ const actions = {
     } finally { scanning = false; render(); }
   },
   evcancel: () => bridge.call('everything:cancel'),
+  rvtab: (el) => { review.tab = el.dataset.t; render(); },
+  rvadd: async () => { const f = await bridge.call('dialog:folder'); if (f && !review.pool.includes(f)) { review.pool = await bridge.call('review:setPool', [...review.pool, f]); render(); } },
+  rvdel: async (el) => { review.pool = await bridge.call('review:setPool', review.pool.filter((_, i) => i !== +el.dataset.i)); render(); },
+  rvscan: async () => {
+    scanning = true; review.done = null; review.dupeDone = null; dupeChoice = new Map(); render();
+    try {
+      const p = await bridge.call('review:scan', { folders: review.pool, useAI: review.useAI });
+      selected = new Set(p.plan.filter((x) => !x.warning && x.confidence !== 'low').map((x) => x.from));
+      toast(`Read ${p.scanned} file(s): ${p.plan.length} suggestion(s), ${p.dupes.length} duplicate set(s).`);
+    } finally { scanning = false; render(); }
+  },
+  rvselall: () => { selected = new Set(plan.plan.map((p) => p.from)); render(); },
+  rvundo: async (el) => { const r = await bridge.call('organise:undo', el.dataset.id); toast(r.errors.length ? `Undone, but ${r.errors.length} file(s) couldn't be moved back` : 'Undone — files are back where they were'); review.done = null; review.dupeDone = null; render(); },
+  dupeall: (el) => { const g = plan.dupes[+el.dataset.g]; for (const f of g.files) dupeChoice.set(f.path, el.dataset.v === 'keep' ? 'keep' : f.recommend); render(); },
+  dupeapply: async () => {
+    const acts = plan.dupes.flatMap((g) => g.files.map((f) => ({ path: f.path, action: dupeChoice.get(f.path) || f.recommend }))).filter((a) => a.action !== 'keep');
+    const bin = acts.filter((a) => a.action === 'bin').length;
+    if (plan.dupes.some((g) => g.files.every((f) => (dupeChoice.get(f.path) || f.recommend) !== 'keep'))
+      && !(await bridge.call('confirm', 'Some sets have no copy kept', 'In at least one set every copy will be archived or binned. Continue?'))) return;
+    if (bin && !(await bridge.call('confirm', `Move ${bin} file(s) to the Recycle Bin?`, 'You can restore them from the Recycle Bin.'))) return;
+    const r = await bridge.call('dupes:resolve', acts);
+    review.dupeDone = r; dupeChoice = new Map();
+    toast(`Archived ${r.archived}${r.binned ? `, binned ${r.binned}` : ''}.`);
+    render();
+  },
+
   gofolder: (el) => { folderFilter = ''; goToFolder(el.dataset.path); },
   clearffilter: () => { folderFilter = ''; renderFolderMain($('#fmain')); },
   fsearchclear: () => { const i = $('#fsearch'); i.value = ''; i.dispatchEvent(new Event('input')); i.focus(); },
@@ -821,6 +915,7 @@ const actions = {
     toast(`Moved ${batch.moves.length} file(s)${batch.errors.length ? `, ${batch.errors.length} failed` : ''}. You can undo below.`);
     selected = new Set();
     if (plan.mode === 'everything') { everythingDone = batch; plan = null; render(); return; }
+    if (plan.mode === 'review') { review.done = batch; render(); return; }
     await bridge.call(plan.mode === 'recheck' ? 'organise:recheck' : 'organise:scan');
     render();
   },
@@ -879,7 +974,7 @@ document.addEventListener('change', (e) => {
   if (e.target.dataset.sel !== undefined) {
     e.target.checked ? selected.add(e.target.dataset.sel) : selected.delete(e.target.dataset.sel);
     const btn = page.querySelector('[data-act="apply"]');
-    if (btn) { btn.disabled = !selected.size; btn.textContent = `Move ${selected.size} selected`; }
+    if (btn) { btn.disabled = !selected.size; btn.textContent = `${plan?.mode === 'review' ? 'Apply' : 'Move'} ${selected.size} selected`; }
   }
   if (e.target.dataset.rename !== undefined && plan) {
     const item = plan.plan.find((p) => p.from === e.target.dataset.rename);
@@ -897,6 +992,7 @@ document.addEventListener('change', (e) => {
     const size = cleanup.items.filter((i) => cleanSel.has(i.path)).reduce((n, i) => n + i.size, 0);
     if (btn) { btn.disabled = !cleanSel.size; btn.textContent = `Move ${cleanSel.size} to Recycle Bin (${fmtSize(size)})`; }
   }
+  if (e.target.dataset.dupe !== undefined) { dupeChoice.set(e.target.dataset.dupe, e.target.value); render(); }
   if (e.target.dataset.task) safe(async () => { await bridge.call('tasks:toggle', e.target.dataset.task); if (current === 'tasks') render(); });
 });
 
@@ -915,7 +1011,7 @@ async function updateBadges() {
   const tasks = (await bridge.call('tasks:get').catch(() => [])).filter((t) => !t.done).length;
   const b = $('#badge-tasks'); b.hidden = !tasks; b.textContent = tasks;
   const p = plan || await bridge.call('organise:last').catch(() => null);
-  const n = p ? p.plan.length + p.review.length : 0;
+  const n = p && p.mode !== 'review' ? p.plan.length + p.review.length : 0;
   const o = $('#badge-organise'); o.hidden = !n; o.textContent = n;
 }
 
@@ -924,7 +1020,7 @@ bridge.on('navigate', (p) => { location.hash = p; });
 bridge.on('tasks-changed', () => { if (current === 'tasks' || current === 'today') render(); else updateBadges(); });
 bridge.on('meetings-changed', () => { if (current === 'today') render(); });
 bridge.on('plan-changed', () => { if (current === 'today') render(); else updateBadges(); });
-bridge.on('scan-progress', ({ i, n }) => { const s = $('#scan-status'); if (s) s.textContent = `Checking ${i} of ${n}…`; });
+bridge.on('scan-progress', ({ i, n, file }) => { const s = $('#scan-status'); if (s) s.textContent = `Reading ${i} of ${n}${file ? ` — ${file}` : ''}…`; });
 
 (async () => {
   settings = await bridge.call('settings:get');

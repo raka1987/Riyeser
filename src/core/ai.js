@@ -11,8 +11,10 @@ const SCHEMA = {
     companyType: { type: 'string', description: 'e.g. Clients, Suppliers, Government, Banks, Utilities, Personal, or "My business" for the owner\'s own business' },
     confident: { type: 'boolean' },
     reason: { type: 'string', description: 'One short sentence a person can read: what the document is and who it is from/for.' },
+    title: { type: 'string', description: 'A short title for the file name, 2-6 words, without the date, company or document type (e.g. "Ark project FHF comments", "Jo Bloggs week 45"). Empty if nothing useful to add.' },
+    date: { type: ['string', 'null'], description: 'The document\'s own date as YYYY-MM-DD, or YYYY-MM if only the month is known; null if there is none.' },
   },
-  required: ['docType', 'company', 'companyType', 'confident', 'reason'],
+  required: ['docType', 'company', 'companyType', 'confident', 'reason', 'title', 'date'],
   additionalProperties: false,
 };
 
@@ -47,6 +49,8 @@ function createAI(apiKey, model = 'claude-opus-5-5') {
         category: r.company ? 'Company' : 'General',
         confidence: r.confident ? 'high' : 'medium',
         reasons: [`AI checked: ${r.reason}`],
+        aiTitle: (r.title || '').replace(/[<>:"/\\|?*]/g, '').trim().slice(0, 60) || null,
+        aiDate: /^\d{4}-\d{2}(-\d{2})?$/.test(r.date || '') ? r.date : null,
       };
     },
   };

@@ -119,7 +119,7 @@ test('reads date, reference and amount and suggests a clean name', () => {
   const { extractDetails, suggestName, typeMismatch } = require('../src/core/details');
   const text = 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-1042\nInvoice Date: 03/11/2026\nDue Date: 20/11/2026\nTotal due $1,200.00';
   const d = extractDetails(text, 'scan0042.pdf');
-  assert.deepEqual(d, { date: '2026-11-03', reference: 'INV-1042', amount: '$1,200.00' });
+  assert.deepEqual(d, { date: '2026-11-03', month: '2026-11', reference: 'INV-1042', amount: '$1,200.00' });
   assert.equal(extractDetails('Invoice Date: 03/11/2026', 'x', { dayFirst: false }).date, '2026-03-11');
   const c = classify({ fileName: 'scan0042.pdf', ext: '.pdf', text }, settings);
   assert.equal(suggestName({ fileName: 'scan0042.pdf', ext: '.pdf', classification: c, details: d }), '2026-11-03 Acme Plumbing Invoice INV-1042.pdf');
@@ -459,4 +459,34 @@ test('your filing rules win, match on company/type/words/kind, and file by year'
   assert.equal(rules.ruleMatches(byWords, { name: 'Spark fhf.txt', text: '' }), false);
   assert.equal(rules.ruleMatches({ ...rule, enabled: false }, { docType: 'Timesheets' }), false);
   assert.equal(rules.kindOf('.xlsx'), 'Excel');
+});
+
+test('smart review: labels, dated names, and duplicates with different names or formats', async () => {
+  const { reviewFiles } = require('../src/core/review');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'review-'));
+  const pool = path.join(tmp, 'Desktop'); fs.mkdirSync(pool);
+  const org = path.join(tmp, 'Organised');
+  const body = 'TAX INVOICE\nAcme Plumbing\nInvoice Number INV-1042\nInvoice Date: 3 November 2026\n' +
+    Array.from({ length: 60 }, (_, i) => `Line ${i} labour and materials for the bathroom renovation at 12 Smith Street item ${i}`).join('\n') + '\nTotal $1,200.00';
+  fs.writeFileSync(path.join(pool, 'scan0042.txt'), body);
+  fs.writeFileSync(path.join(pool, 'scan0042 - Copy (2).txt'), body);                 // exact copy, other name
+  fs.writeFileSync(path.join(pool, 'acme thing.md'), body.replace('Total $1,200.00', 'Total $1,200.00 thank you'));  // same doc, other format
+  fs.writeFileSync(path.join(pool, 'notes.txt'), 'Shopping list: milk, bread');
+  const old = Date.now() - 86400000; for (const f of fs.readdirSync(pool)) fs.utimesSync(path.join(pool, f), old / 1000, old / 1000);
+  const r = await reviewFiles([pool], { ...settings, organisedRoot: org });
+  const inv = r.plan.find((p) => p.name === 'scan0042.txt');
+  assert.equal(inv.label.type, 'Invoices');
+  assert.equal(inv.label.company, 'Acme Plumbing');
+  assert.equal(inv.label.date, '2026-11-03');
+  assert.match(inv.newName, /^2026-11-03 Acme Plumbing Invoice INV-1042/);
+  assert.ok(inv.to.includes(path.join('Clients', 'Acme Plumbing')));
+  assert.ok(!('_text' in inv));
+  assert.equal(r.dupes.length, 1);
+  const g = r.dupes[0];
+  assert.equal(g.files.length, 3);
+  assert.equal(g.kind, 'similar');
+  const copy = g.files.find((f) => f.name.includes('Copy (2)'));
+  assert.equal(copy.recommend, 'archive');
+  assert.ok(g.files.some((f) => f.recommend === 'keep'));
+  assert.ok(!r.dupes.some((d) => d.files.some((f) => f.name === 'notes.txt')));
 });
