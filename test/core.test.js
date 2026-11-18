@@ -68,7 +68,7 @@ test('plans, applies and undoes moves', async () => {
   assert.ok(fs.existsSync(path.join(inbox, 'acme invoice march.txt')));
   fs.writeFileSync(path.join(inbox, 'a.bin'), Buffer.alloc(4096, 1));
   fs.writeFileSync(path.join(inbox, 'b.bin'), Buffer.alloc(4096, 1));
-  assert.equal(findDuplicates([inbox]).length, 1);
+  assert.equal((await findDuplicates([inbox])).length, 1);
 });
 
 test('search finds by content and name', async () => {

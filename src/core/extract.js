@@ -65,6 +65,50 @@ function canExtract(file) {
   return TEXT_EXT.has(ext) || HTML_EXT.has(ext) || OFFICE_ZIP.has(ext) || ['.pdf', '.docx', '.eml'].includes(ext) || (IMAGE_EXT.has(ext) && !!ocr?.image);
 }
 
+/**
+ * Read the text of one file without OCR or caching. Safe to run in a separate process.
+ * Returns { text, pages } - pages is set for PDFs so the caller can decide whether it looks scanned.
+ */
+async function extractRaw(file) {
+  const ext = path.extname(file).toLowerCase();
+  if (TEXT_EXT.has(ext)) return { text: clip(readStart(file)) };
+  if (HTML_EXT.has(ext)) return { text: clip(readStart(file).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' ')) };
+  if (ext === '.pdf') {
+    const { getDocumentProxy } = await import('unpdf');
+    const doc = await getDocumentProxy(new Uint8Array(fs.readFileSync(file)));
+    const parts = [];
+    for (let i = 1; i <= Math.min(doc.numPages, 5); i++) { // first 5 pages is plenty to classify
+      const content = await (await doc.getPage(i)).getTextContent();
+      parts.push(content.items.map((it) => it.str + (it.hasEOL ? '\n' : ' ')).join(''));
+      if (parts.join('').length > MAX_CHARS) break;
+    }
+    const pages = doc.numPages;
+    try { await (doc.destroy || doc.cleanup)?.call(doc); } catch { /* ignore */ }
+    return { text: clip(parts.join('\n')), pages };
+  }
+  if (OFFICE_ZIP.has(ext)) return { text: clip((await officeText(file, ext)).replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n')) };
+  if (ext === '.docx') {
+    const mammoth = require('mammoth');
+    const r = await mammoth.extractRawText({ path: file });
+    return { text: clip(r.value) };
+  }
+  if (ext === '.eml') {
+    const { simpleParser } = require('mailparser');
+    const m = await simpleParser(fs.readFileSync(file));
+    return { text: clip(`From: ${m.from?.text || ''}\nSubject: ${m.subject || ''}\n\n${m.text || ''}`) };
+  }
+  return { text: '' };
+}
+// Only the start of big text files is needed.
+function readStart(file) {
+  const fd = fs.openSync(file, 'r');
+  try { const buf = Buffer.alloc(Math.min(fs.fstatSync(fd).size, MAX_CHARS * 4)); fs.readSync(fd, buf, 0, buf.length, 0); return buf.toString('utf8'); } finally { fs.closeSync(fd); }
+}
+
+// The app runs extractRaw in a background process (so a heavy PDF can never freeze the window); tests run it here.
+let rawExtractor = extractRaw;
+function setRawExtractor(fn) { rawExtractor = fn || extractRaw; }
+
 async function extractText(file) {
   const ext = path.extname(file).toLowerCase();
   let stat;
@@ -72,42 +116,18 @@ async function extractText(file) {
   if (!stat.isFile() || stat.size > MAX_BYTES) return '';
   if (textCache) { const cached = textCache(file, stat.mtimeMs); if (typeof cached === 'string') return cached; }
   try {
-    if (TEXT_EXT.has(ext)) return clip(fs.readFileSync(file, 'utf8'));
-    if (HTML_EXT.has(ext)) return clip(fs.readFileSync(file, 'utf8').replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]+>/g, ' '));
-    if (ext === '.pdf') {
-      const { getDocumentProxy } = await import('unpdf');
-      const doc = await getDocumentProxy(new Uint8Array(fs.readFileSync(file)));
-      const parts = [];
-      for (let i = 1; i <= Math.min(doc.numPages, 5); i++) { // first 5 pages is plenty to classify
-        const content = await (await doc.getPage(i)).getTextContent();
-        parts.push(content.items.map((it) => it.str + (it.hasEOL ? '\n' : ' ')).join(''));
-      }
-      const pages = doc.numPages;
-      try { await (doc.destroy || doc.cleanup)?.call(doc); } catch { /* ignore */ }
-      const text = parts.join('\n');
-      // Hardly any text? It's probably a scan - read it with OCR instead.
-      if (ocr?.pdf && text.replace(/\s/g, '').length < 25 * Math.min(pages, 5)) {
-        const scanned = await ocr.pdf(file).catch(() => '');
-        if (scanned && scanned.trim()) return clip(scanned);
-      }
-      return clip(text);
+    if (IMAGE_EXT.has(ext)) return ocr?.image ? clip((await ocr.image(file).catch(() => '')) || '') : '';
+    if (!canExtract(file)) return '';
+    const { text, pages } = await rawExtractor(file);
+    // Hardly any text in a PDF? It's probably a scan - read it with OCR instead.
+    if (ext === '.pdf' && ocr?.pdf && (text || '').replace(/\s/g, '').length < 25 * Math.min(pages || 1, 5)) {
+      const scanned = await ocr.pdf(file).catch(() => '');
+      if (scanned && scanned.trim()) return clip(scanned);
     }
-    if (OFFICE_ZIP.has(ext)) return clip((await officeText(file, ext)).replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n'));
-    if (ext === '.docx') {
-      const mammoth = require('mammoth');
-      const r = await mammoth.extractRawText({ path: file });
-      return clip(r.value);
-    }
-    if (IMAGE_EXT.has(ext) && ocr?.image) return clip((await ocr.image(file).catch(() => '')) || '');
-    if (ext === '.eml') {
-      const { simpleParser } = require('mailparser');
-      const m = await simpleParser(fs.readFileSync(file));
-      return clip(`From: ${m.from?.text || ''}\nSubject: ${m.subject || ''}\n\n${m.text || ''}`);
-    }
+    return text || '';
   } catch {
     return '';
   }
-  return '';
 }
 
-module.exports = { extractText, canExtract, setOcrProvider, setTextCache, IMAGE_EXT };
+module.exports = { extractText, extractRaw, canExtract, setOcrProvider, setTextCache, setRawExtractor, IMAGE_EXT };

@@ -23,7 +23,27 @@ function signature(text) {
   return sig;
 }
 const estimate = (a, b) => a.reduce((n, v, i) => n + (v === b[i] ? 1 : 0), 0) / a.length;
-function fileHash(file) { try { return crypto.createHash('sha1').update(fs.readFileSync(file)).digest('hex'); } catch { return null; } }
+// Read in pieces (never the whole file at once) so big videos/installers don't stall anything.
+function fileHash(file) {
+  return new Promise((resolve) => {
+    const h = crypto.createHash('sha1');
+    const st = fs.createReadStream(file, { highWaterMark: 1 << 20 });
+    st.on('data', (d) => h.update(d)); st.on('end', () => resolve(h.digest('hex'))); st.on('error', () => resolve(null));
+  });
+}
+// Quick check first: the start, middle and end of the file. Only files that match here get fully compared.
+async function sampleHash(file, size) {
+  let fh;
+  try {
+    fh = await fs.promises.open(file, 'r');
+    const h = crypto.createHash('sha1'); const n = Math.min(65536, size);
+    for (const at of [0, Math.max(0, Math.floor(size / 2) - n / 2), Math.max(0, size - n)]) {
+      const buf = Buffer.alloc(n); await fh.read(buf, 0, n, at); h.update(buf);
+    }
+    return h.digest('hex');
+  } catch { return null; } finally { if (fh) await fh.close().catch(() => {}); }
+}
+const tick = () => new Promise((r) => setImmediate(r));
 
 const COPYISH = /(\bcopy\b|\(\d+\)|- copy|\bfinal final\b|\bduplicate\b|~\d+)/i;
 
@@ -31,25 +51,32 @@ const COPYISH = /(\bcopy\b|\(\d+\)|- copy|\bfinal final\b|\bduplicate\b|~\d+)/i;
  * items: [{ from, name, size, mtime, _text }]
  * Returns groups: [{ kind: 'exact'|'similar', similarity, differentFormats, files: [{ path, name, size, mtime, recommend: 'keep'|'archive', why }] }]
  */
-function findDuplicateGroups(items, { organisedRoot = '' } = {}) {
+async function findDuplicateGroups(items, { organisedRoot = '', isCancelled = () => false } = {}) {
   const parent = items.map((_, i) => i);
   const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
   const join = (a, b) => { const ra = find(a); const rb = find(b); if (ra !== rb) parent[rb] = ra; };
   const exactPair = new Set(); const simScore = new Map(); const hashes = new Map();
-  const hashOf = (i) => { if (!hashes.has(i)) hashes.set(i, fileHash(items[i].from)); return hashes.get(i); };
+  const hashOf = (i) => hashes.get(i) || null;
 
   // 1. exact copies: same size, then same content hash
   const bySize = new Map();
   items.forEach((it, i) => { if (it.size > 0) { if (!bySize.has(it.size)) bySize.set(it.size, []); bySize.get(it.size).push(i); } });
   for (const idx of bySize.values()) {
     if (idx.length < 2) continue;
+    if (isCancelled()) break;
+    const bySample = new Map();
+    for (const i of idx) { const h = await sampleHash(items[i].from, items[i].size); if (!h) continue; if (!bySample.has(h)) bySample.set(h, []); bySample.get(h).push(i); }
     const byHash = new Map();
-    for (const i of idx) { const h = hashOf(i); if (!h) continue; if (!byHash.has(h)) byHash.set(h, []); byHash.get(h).push(i); }
+    for (const same of bySample.values()) {
+      if (same.length < 2) continue;
+      for (const i of same) { const h = await fileHash(items[i].from); if (!h) continue; hashes.set(i, h); if (!byHash.has(h)) byHash.set(h, []); byHash.get(h).push(i); }
+    }
     for (const g of byHash.values()) for (let k = 1; k < g.length; k++) { join(g[0], g[k]); exactPair.add(`${g[0]}|${g[k]}`); }
   }
 
   // 2. same document with different bytes: compare wording; only compare files that share a band of the fingerprint
-  const sigs = items.map((it) => signature(it._text));
+  const sigs = [];
+  for (let i = 0; i < items.length; i++) { sigs.push(signature(items[i]._text)); if (i % 25 === 24) await tick(); }
   const buckets = new Map();
   sigs.forEach((sig, i) => { if (!sig) return; for (let b = 0; b < 8; b++) { const key = `${b}:${sig.slice(b * 4, b * 4 + 4).join(',')}`; if (!buckets.has(key)) buckets.set(key, []); buckets.get(key).push(i); } });
   const tried = new Set();
@@ -69,6 +96,7 @@ function findDuplicateGroups(items, { organisedRoot = '' } = {}) {
   const out = [];
   for (const idx of groups.values()) {
     if (idx.length < 2) continue;
+    await tick();
     const allExact = idx.every((i) => items[i].size === items[idx[0]].size) && idx.every((i) => hashOf(i) && hashOf(i) === hashOf(idx[0]));
     const exts = new Set(idx.map((i) => path.extname(items[i].name).toLowerCase()));
     const differentFormats = exts.size > 1;
@@ -87,7 +115,7 @@ function findDuplicateGroups(items, { organisedRoot = '' } = {}) {
         const keep = !seenExt.has(ext); seenExt.add(ext);
         const why = keep
           ? (k === 0 ? (inOrganised(f.from) ? 'already filed' : allExact ? 'the original' : 'the latest version') : `the same document as a ${ext.slice(1).toUpperCase()} - kept in case you need both formats`)
-          : (COPYISH.test(f.name) ? 'looks like a copy' : allExact || hashOf(items.indexOf(f)) === hashOf(items.indexOf(files.find((x) => path.extname(x.name).toLowerCase() === ext))) ? 'identical copy' : 'older or near-identical version');
+          : (COPYISH.test(f.name) ? 'looks like a copy' : allExact || (hashOf(items.indexOf(f)) && hashOf(items.indexOf(f)) === hashOf(items.indexOf(files.find((x) => path.extname(x.name).toLowerCase() === ext)))) ? 'identical copy' : 'older or near-identical version');
         return { path: f.from, name: f.name, size: f.size, mtime: f.mtime, recommend: keep ? 'keep' : 'archive', why };
       }),
     });
@@ -95,4 +123,4 @@ function findDuplicateGroups(items, { organisedRoot = '' } = {}) {
   return out.sort((a, b) => b.files.length - a.files.length);
 }
 
-module.exports = { findDuplicateGroups, signature };
+module.exports = { findDuplicateGroups, signature, fileHash, sampleHash };

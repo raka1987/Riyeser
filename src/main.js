@@ -20,7 +20,9 @@ const { reviewFiles } = require('./core/review');
 const rules = require('./core/rules');
 const { extractDetails } = require('./core/details');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
-const { setOcrProvider, setTextCache } = require('./core/extract');
+const { setOcrProvider, setTextCache, setRawExtractor } = require('./core/extract');
+const { createTextPool } = require('./text-pool');
+let textPool = null;
 const ocr = require('./core/ocr');
 
 const HOTKEY = 'CommandOrControl+Shift+Space';
@@ -369,6 +371,20 @@ async function cachedOcr(file, run) {
   });
   return text;
 }
+/**
+ * Files OneDrive keeps online only (not downloaded to this PC). Reading them would make Windows download them,
+ * so the Smart review leaves their contents alone. Windows only; elsewhere returns an empty list.
+ */
+function cloudOnlyFiles(folders) {
+  if (process.platform !== 'win32' || !folders.length) return Promise.resolve(new Set());
+  const script = "$ErrorActionPreference='SilentlyContinue'; [Console]::OutputEncoding=[Text.Encoding]::UTF8; " +
+    "foreach ($f in ($env:DA_PATHS | ConvertFrom-Json)) { Get-ChildItem -LiteralPath $f -Recurse -File -Force | " +
+    "Where-Object { ($_.Attributes -band 0x400000) -or ($_.Attributes -band 0x1000) } | ForEach-Object { $_.FullName } }";
+  return new Promise((resolve) => require('child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+    { windowsHide: true, maxBuffer: 64 * 1024 * 1024, timeout: 120_000, env: { ...process.env, DA_PATHS: JSON.stringify(folders) } },
+    (err, out) => resolve(new Set(String(out || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)))));
+}
+
 setOcrProvider({
   pdf: (file) => (getSettings().ocrPdfs === false ? Promise.resolve('') : cachedOcr(file, async () => {
     dbg('start', file);
@@ -382,7 +398,7 @@ setOcrProvider({
   })),
   image: (file) => {
     if (!getSettings().ocrImages || /\.(heic|webp)$/i.test(file)) return Promise.resolve('');
-    return cachedOcr(file, async () => (await ocr.recognize(fs.readFileSync(file))).text);
+    return cachedOcr(file, async () => (await ocr.recognize(await fs.promises.readFile(file))).text);
   },
 });
 
@@ -579,7 +595,15 @@ function registerIpc() {
     if (!pool.length) throw new Error('Choose at least one folder to review.');
     const brain = useAI ? ai() : null;
     if (useAI && !brain) throw new Error('Add your AI key in Settings → AI first, or turn off "Use AI".');
-    state.lastPlan = await reviewFiles(pool, s, { ai: brain, onProgress: (i, n, file) => send('scan-progress', { i, n, file: path.basename(file) }), isCancelled: () => state.cancel });
+    const logFile = path.join(app.getPath('userData'), 'smart-review.log');
+    const log = (m) => { try { fs.appendFileSync(logFile, `${new Date().toISOString()} ${m}\n`); } catch { /* ignore */ } };
+    try { if (fs.statSync(logFile).size > 2e6) fs.unlinkSync(logFile); } catch { /* none yet */ }
+    log(`--- review of ${pool.length} folder(s)${brain ? ' with AI' : ''}`);
+    send('scan-progress', { i: 0, n: 0, file: 'checking which files are only in OneDrive online…' });
+    const cloudOnly = await cloudOnlyFiles(pool);
+    if (cloudOnly.size) log(`${cloudOnly.size} online-only OneDrive file(s) left alone`);
+    state.lastPlan = await reviewFiles(pool, s, { ai: brain, log, cloudOnly, onProgress: (i, n, file) => send('scan-progress', { i, n, file: path.basename(file) }), isCancelled: () => state.cancel });
+    log(`done: ${state.lastPlan.plan.length} suggestions`);
     send('plan-changed');
     return state.lastPlan;
   });
@@ -771,6 +795,8 @@ app.whenReady().then(async () => {
   applyTheme(getSettings().theme);
   registerInstalledApp(APP_INFO).catch(() => {});
   ocr.configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });
+  // Read documents in a background process so a heavy file can never freeze the window.
+  try { textPool = createTextPool({ log: (m) => console.warn(m) }); setRawExtractor(textPool.extract); } catch (e) { console.warn('file reader unavailable', e.message); }
   setTextCache((file, mtime) => { const d = index.docs[file]; return d && d.mtime === mtime && d.text ? d.text : undefined; });
   registerIpc();
   const startPdf = pdfArg(process.argv);
@@ -805,4 +831,4 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', (e) => e.preventDefault()); // keep running in the tray
 app.on('before-quit', () => { app.isQuitting = true; });
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => { globalShortcut.unregisterAll(); if (textPool) textPool.stop(); });

@@ -48,7 +48,7 @@ function registerPdfIpc({ handle, store, openEditor, getTheme = () => 'system', 
   handle('app:platform', () => process.platform);
   handle('app:version', () => app.getVersion());
   handle('theme:get', () => getTheme());
-  handle('ocr:readFile', (file) => new Uint8Array(fs.readFileSync(file)));
+  handle('ocr:readFile', async (file) => new Uint8Array(await fs.promises.readFile(file)));
 
   // ----- conversions -----
   const convert = require('./convert');

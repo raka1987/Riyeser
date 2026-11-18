@@ -322,7 +322,8 @@ function undoBatch(batch) {
 }
 
 /** Find exact duplicate files (same size + same content hash). */
-function findDuplicates(folders) {
+async function findDuplicates(folders) {
+  const { fileHash, sampleHash } = require('./dupes');
   const bySize = new Map();
   for (const f of folders.flatMap((d) => listFiles(d, { recursive: true, maxFiles: 20000 }))) {
     try {
@@ -335,13 +336,12 @@ function findDuplicates(folders) {
   const groups = [];
   for (const [size, files] of bySize) {
     if (files.length < 2) continue;
+    const bySample = new Map();
+    for (const f of files) { const h = await sampleHash(f, size); if (h) { if (!bySample.has(h)) bySample.set(h, []); bySample.get(h).push(f); } }
     const byHash = new Map();
-    for (const f of files) {
-      try {
-        const h = crypto.createHash('sha1').update(fs.readFileSync(f)).digest('hex');
-        if (!byHash.has(h)) byHash.set(h, []);
-        byHash.get(h).push(f);
-      } catch { /* ignore */ }
+    for (const same of bySample.values()) {
+      if (same.length < 2) continue;
+      for (const f of same) { const h = await fileHash(f); if (h) { if (!byHash.has(h)) byHash.set(h, []); byHash.get(h).push(f); } }
     }
     for (const g of byHash.values()) if (g.length > 1) groups.push({ size, files: g });
   }

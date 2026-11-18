@@ -496,6 +496,9 @@ const pages = {
         ${review.dupeDone.archived ? `<span class="muted small">Archived files are in <button class="link" data-act="reveal" data-path="${esc(review.dupeDone.archiveDir)}">Organised › Archive › Duplicates</button>.</span> <button class="link" data-act="rvundo" data-id="${esc(review.dupeDone.batchId)}">Undo archive</button>` : ''}</div>` : ''}
       ${!plan ? '' : `
       <p class="muted small">Read ${plan.scanned} file(s)${plan.stopped ? ' (stopped early)' : ''} · ${plan.fine} already well named and in the right place.</p>
+      ${(() => { const cloud = (plan.skipped || []).filter((k) => k.cloud).length; return cloud ? `<p class="muted small">☁ ${cloud} file(s) are stored in OneDrive online only, so I didn't open them (that would download them all to this PC). To include one, right-click it in File Explorer → <b>Always keep on this device</b>, then review again.</p>` : ''; })()}
+      ${(plan.skipped || []).filter((k) => !k.cloud).length ? `<details class="card small"><summary><b>${plan.skipped.filter((k) => !k.cloud).length} file(s) skipped</b> <span class="muted">— they took too long to read or couldn't be opened, so they were left exactly as they are</span></summary>
+        <ul class="list">${plan.skipped.filter((k) => !k.cloud).slice(0, 200).map((k) => `<li><div class="grow"><b class="fname">${esc(k.name)}</b><div class="route small">${route(k.path.split(/[\\/]/).slice(0, -1).join(k.path.includes('\\') ? '\\' : '/'))}</div></div><button class="link" data-act="open" data-path="${esc(k.path)}">Open</button></li>`).join('')}</ul></details>` : ''}
       <div class="tabs">${tabBtn('labels', `Labels &amp; names (${plan.plan.length})`)}${tabBtn('dupes', `Duplicates (${dupes.length} set${dupes.length === 1 ? '' : 's'})`)}</div>
       ${review.tab === 'labels' ? `<div class="card"><div class="row wrap"><span class="small muted">Show</span>
           <select id="rvonly"><option value="all" ${review.only === 'all' ? 'selected' : ''}>Everything</option><option value="renames" ${review.only === 'renames' ? 'selected' : ''}>Only renames</option><option value="moves" ${review.only === 'moves' ? 'selected' : ''}>Only moves</option></select>
@@ -1020,7 +1023,10 @@ bridge.on('navigate', (p) => { location.hash = p; });
 bridge.on('tasks-changed', () => { if (current === 'tasks' || current === 'today') render(); else updateBadges(); });
 bridge.on('meetings-changed', () => { if (current === 'today') render(); });
 bridge.on('plan-changed', () => { if (current === 'today') render(); else updateBadges(); });
-bridge.on('scan-progress', ({ i, n, file }) => { const s = $('#scan-status'); if (s) s.textContent = `Reading ${i} of ${n}${file ? ` — ${file}` : ''}…`; });
+bridge.on('scan-progress', ({ i, n, file }) => {
+  const s = $('#scan-status'); if (!s) return;
+  s.textContent = file && file.endsWith('…') ? (n ? `Read ${n} file(s) — now ${file}` : `Getting ready — ${file}`) : `Reading ${i} of ${n}${file ? ` — ${file}` : ''}…`;
+});
 
 (async () => {
   settings = await bridge.call('settings:get');
