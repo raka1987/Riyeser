@@ -223,3 +223,29 @@ nav { overflow-y: auto; }
 .matchlist { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px 10px; margin-top: 6px; }
 .mrow { padding: 6px 0; border-top: 1px solid var(--line); align-items: flex-start !important; }
 .mrow:first-child { border-top: none; }
+
+/* folder file list: the name gets all the spare room and wraps between words, never letter by letter */
+.filetable { table-layout: auto; width: 100%; }
+.filetable td, .filetable th { overflow-wrap: normal; word-break: normal; vertical-align: top; }
+.filetable .fcheck { width: 28px; padding-right: 0; }
+.filetable .ficn { width: 26px; padding-left: 4px; padding-right: 2px; font-size: 16px; }
+.filetable .fnamecell { width: auto; min-width: 140px; }
+.filetable .fname { font-weight: 600; font-size: 14px; line-height: 1.35; overflow-wrap: break-word; word-break: normal; hyphens: none; }
+.filetable .factions { width: 1%; white-space: nowrap; text-align: right; }
+.filetable .factions .link { padding: 0 5px; }
+.fsplit { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); }
+@media (max-width: 1100px) { .fsplit { gap: 16px; } }
+
+/* narrow space: buttons go under the file name so the name keeps the full width */
+.fmain { container-type: inline-size; }
+.rowactions { display: none; margin-top: 2px; }
+.rowactions .link { padding: 0 8px 0 0; font-size: 13px; }
+@container (max-width: 600px) {
+  .filetable .factions { display: none; }
+  .rowactions { display: block; }
+}
+/* hide / show the folder list */
+.treeshow { display: none; }
+.fsplit.notree { grid-template-columns: minmax(0, 1fr); }
+.fsplit.notree .fpane { display: none; }
+.fsplit.notree .treeshow { display: inline-block; position: fixed; left: calc(var(--nav-w, 250px) + 12px); bottom: 14px; z-index: 5; border-radius: 99px; padding: 5px 12px; box-shadow: 0 2px 10px rgba(0,0,0,.2); }

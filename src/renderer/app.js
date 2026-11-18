@@ -115,10 +115,11 @@ async function folderShell(fill) {
     page.innerHTML = `<div class="fsplit" id="fsplit">
       <aside class="fpane">
         <div class="fsearch"><input id="fsearch" placeholder="🔍  Find a folder or file…" value="${esc(folderSearch)}" autocomplete="off"><button class="iconbtn" data-act="fsearchclear" title="Clear" ${folderSearch ? '' : 'hidden'}>✕</button></div>
-        <div class="fpane-tools"><span class="muted small">${folderSearch ? 'Search results' : 'All folders'}</span><span class="spacer"></span><button class="iconbtn" data-act="treecollapse" title="Collapse all">⊟</button><button class="iconbtn" data-act="treerefresh" title="Refresh">⟳</button></div>
+        <div class="fpane-tools"><span class="muted small">${folderSearch ? 'Search results' : 'All folders'}</span><span class="spacer"></span><button class="iconbtn" data-act="treehide" title="Hide the folder list (more room)">◀</button><button class="iconbtn" data-act="treecollapse" title="Collapse all">⊟</button><button class="iconbtn" data-act="treerefresh" title="Refresh">⟳</button></div>
         <div id="ftree" class="ftree"></div>
       </aside>
-      <section class="fmain" id="fmain"></section></div>`;
+      <section class="fmain" id="fmain"></section><button class="treeshow" data-act="treeshow" title="Show the folder list">▶ Folders</button></div>`;
+    try { if (localStorage.getItem('da-tree-hidden') === '1') $('#fsplit').classList.add('notree'); } catch { /* ignore */ }
     let timer;
     $('#fsearch').addEventListener('input', (e) => {
       folderSearch = e.target.value;
@@ -485,8 +486,10 @@ async function renderFolderMain(main) {
         <button class="primary" data-act="rulemove" id="movesel" hidden>Move / Rule…</button>
         <button data-act="open" data-path="${esc(dir)}">Open in File Explorer</button></div>
       ${dirs.length ? `<div class="dirgrid" style="margin-bottom:18px">${dirs.map((d) => `<div class="d" data-act="gofolder" data-path="${esc(d.path)}"><span style="font-size:20px">📁</span><div style="min-width:0"><div class="ellipsis"><b>${esc(d.name)}</b></div><div class="small muted">${d.count} item${d.count === 1 ? '' : 's'}</div></div></div>`).join('')}</div>` : ''}
-      <div class="card">${files.length ? `<table class="filetable"><colgroup><col style="width:30px"><col style="width:30px"><col><col style="width:96px"><col style="width:72px"><col style="width:236px"></colgroup><tr><th><input type="checkbox" id="fselall" title="Select all"></th><th></th><th>Name</th><th>Modified</th><th>Size</th><th></th></tr>${files.map((f) => `<tr class="f" data-dbl="${esc(f.path)}">
-          <td><input type="checkbox" data-fsel="${esc(f.path)}" ${folderSel.has(f.path) ? 'checked' : ''}></td><td style="width:26px">${fileIcon(f.ext)}</td><td><b>${esc(f.name)}</b></td><td class="small muted">${fmtDay(f.mtime)}</td><td class="small muted">${fmtSize(f.size)}</td>
+      <div class="card">${files.length ? `<table class="filetable"><tr><th class="fcheck"><input type="checkbox" id="fselall" title="Select all"></th><th class="ficn"></th><th>Name</th><th></th></tr>${files.map((f) => `<tr class="f" data-dbl="${esc(f.path)}">
+          <td class="fcheck"><input type="checkbox" data-fsel="${esc(f.path)}" ${folderSel.has(f.path) ? 'checked' : ''}></td><td class="ficn">${fileIcon(f.ext)}</td>
+          <td class="fnamecell"><div class="fname">${esc(f.name)}</div><div class="small muted">${fmtDay(f.mtime)} · ${fmtSize(f.size)}</div>
+            <div class="rowactions"><button class="link" data-act="open" data-path="${esc(f.path)}">Open</button>${f.ext === '.pdf' ? `<button class="link" data-act="pdfedit" data-path="${esc(f.path)}">Edit</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(f.path)}">Show</button><button class="link" data-act="rulemove" data-path="${esc(f.path)}">Move…</button></div></td>
           <td class="factions"><button class="link" data-act="open" data-path="${esc(f.path)}">Open</button>${f.ext === '.pdf' ? `<button class="link" data-act="pdfedit" data-path="${esc(f.path)}">Edit</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(f.path)}" title="Show in File Explorer">Show</button><button class="link" data-act="rulemove" data-path="${esc(f.path)}" title="Move this file and optionally make a rule for files like it">Move…</button></td></tr>`).join('')}</table>`
         : `<div class="empty">${q ? 'Nothing matches that filter.' : dirs.length ? 'No loose files here — open one of the folders above.' : 'This folder is empty.'}</div>`}</div>`;
     const showMoveSel = () => { const b = $('#movesel'); if (b) { b.hidden = !folderSel.size; b.textContent = `Move / Rule… (${folderSel.size})`; } };
@@ -774,6 +777,8 @@ const actions = {
   gofolder: (el) => { folderFilter = ''; goToFolder(el.dataset.path); },
   clearffilter: () => { folderFilter = ''; renderFolderMain($('#fmain')); },
   fsearchclear: () => { const i = $('#fsearch'); i.value = ''; i.dispatchEvent(new Event('input')); i.focus(); },
+  treehide: () => { $('#fsplit').classList.add('notree'); try { localStorage.setItem('da-tree-hidden', '1'); } catch { /* ignore */ } },
+  treeshow: () => { $('#fsplit').classList.remove('notree'); try { localStorage.setItem('da-tree-hidden', '0'); } catch { /* ignore */ } },
   treecollapse: () => { expanded = new Set(); saveExpanded(); renderTree(); },
   treerefresh: () => renderTree(),
   pdfopen: async () => { const f = await bridge.call('pdf:openDialog', false); if (f) await bridge.call('pdf:edit', f); },
