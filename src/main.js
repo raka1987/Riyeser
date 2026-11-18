@@ -607,6 +607,29 @@ function registerIpc() {
     send('plan-changed');
     return state.lastPlan;
   });
+  handle('review:types', () => require('./core/classifier').DOC_TYPES.map((d) => d.type));
+  // Correct the type of one file in the review list: its name and folder are worked out again.
+  handle('review:setType', (from, docType) => {
+    const item = state.lastPlan?.mode === 'review' && state.lastPlan.plan.find((p) => p.from === from);
+    if (!item) throw new Error('That file is no longer in the list.');
+    const { DOC_TYPES } = require('./core/classifier');
+    if (!DOC_TYPES.some((d) => d.type === docType) && docType !== 'Other') throw new Error('Unknown type');
+    const s = { ...planSettings(), groupByYear: true, renameFiles: true };
+    item.docType = docType; item.confidence = 'high'; item.fallback = false; item.group = null;
+    item.reasons = [`you set the type to ${docType}`, ...(item.reasons || []).filter((r) => !/^you set the type/.test(r))];
+    if (!item.company && item.category !== 'Media') item.category = 'General';
+    const { dir } = organizer.placeItem(item, s);
+    const keep = item.keptFolder;
+    item.dir = keep || !dir ? path.dirname(from) : dir;
+    const { smartName } = require('./core/details');
+    item.newName = smartName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, aiTitle: item.aiTitle, aiDate: item.aiDate, fallbackDate: item.fileDate });
+    item.renamed = !!item.newName;
+    item.to = path.join(item.dir, item.newName || item.name);
+    item.moved = path.resolve(item.dir) !== path.resolve(path.dirname(from));
+    item.label = { ...item.label, type: docType === 'Other' ? null : docType };
+    item.warning = null;
+    return item;
+  });
   // Decide what happens to duplicates: keep, archive (moved to Organised\Archive\Duplicates\<date>, can be undone) or Recycle Bin.
   handle('dupes:resolve', async (actions) => {
     const s = getSettings();

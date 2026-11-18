@@ -17,6 +17,7 @@ let cleanup = null;   // last clean-up check
 let combine = [];     // PDFs chosen for combining
 let everythingDone = null; // last "tidy everything" batch
 let review = { tab: 'labels', pool: null, hasAiKey: false, useAI: false, done: null, dupeDone: null, only: 'all' };
+let docTypes = [];
 let dupeChoice = new Map(); // duplicate file path -> 'keep' | 'archive' | 'bin'
 let appVersion = '';
 let folderSel = new Set(); // files ticked on the Folders page
@@ -447,13 +448,14 @@ const pages = {
   async review() {
     const last = await bridge.call('organise:last');
     plan = last && last.mode === 'review' ? last : null;
+    if (!docTypes.length) docTypes = await bridge.call('review:types').catch(() => []);
     if (!review.pool) { const r = await bridge.call('review:pool'); review.pool = r.pool; review.hasAiKey = r.hasAiKey; review.useAI = r.hasAiKey && !!settings.reviewUseAI; }
     const nm = (f) => f.split(/[\\/]/).filter(Boolean).pop() || f;
     const items = (plan?.plan || []).filter((p) => review.only === 'all' || (review.only === 'renames' ? p.renamed : p.moved));
     const dupes = plan?.dupes || [];
     const tabBtn = (t, label) => `<button class="${review.tab === t ? 'active' : ''}" data-act="rvtab" data-t="${t}">${label}</button>`;
     const pills = (p) => [
-      p.label.type ? `<span class="pill">${esc(p.label.type)}</span>` : '<span class="pill warn">type unknown</span>',
+      `<select class="typesel ${p.label.type ? '' : 'unknown'}" data-settype="${esc(p.from)}" title="Wrong type? Pick the right one - the name and folder update to match">${p.label.type ? '' : '<option value="" selected>Type unknown…</option>'}${docTypes.map((t) => `<option ${t === p.label.type ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="Other">Other</option></select>`,
       p.label.company ? `<span class="pill">${esc(p.label.company)}</span>` : '',
       p.label.date ? `<span class="pill" title="Date taken from the ${esc(p.label.dateFrom)}">📅 ${esc(p.label.date)}</span>` : '<span class="pill warn" title="No date found in the document">no date</span>',
       p.details?.reference ? `<span class="pill"># ${esc(p.details.reference)}</span>` : '',
@@ -995,6 +997,11 @@ document.addEventListener('change', (e) => {
     const size = cleanup.items.filter((i) => cleanSel.has(i.path)).reduce((n, i) => n + i.size, 0);
     if (btn) { btn.disabled = !cleanSel.size; btn.textContent = `Move ${cleanSel.size} to Recycle Bin (${fmtSize(size)})`; }
   }
+  if (e.target.dataset.settype !== undefined && e.target.value) safe(async () => {
+    const it = await bridge.call('review:setType', e.target.dataset.settype, e.target.value);
+    const i = plan.plan.findIndex((p) => p.from === it.from); if (i >= 0) plan.plan[i] = it;
+    selected.add(it.from); render();
+  });
   if (e.target.dataset.dupe !== undefined) { dupeChoice.set(e.target.dataset.dupe, e.target.value); render(); }
   if (e.target.dataset.task) safe(async () => { await bridge.call('tasks:toggle', e.target.dataset.task); if (current === 'tasks') render(); });
 });

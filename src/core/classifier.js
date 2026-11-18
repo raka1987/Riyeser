@@ -69,10 +69,30 @@ function isOwnCompany(name, ownNames) {
   return ownNames.some((o) => { const on = norm(o); return on && (n === on || n.includes(on) || on.includes(n)); });
 }
 
+// Money documents (quotes, invoices...) always show prices. Without any, a stray word like "quote" in a note isn't enough.
+const MONEY_TYPES = new Set(['Invoices', 'Quotes', 'Purchase Orders', 'Price Lists']);
+const MONEY_RE = /([$€£]\s?\d)|\b(nzd|aud|usd|gbp|eur)\s?\d|\b\d{1,3}(,\d{3})*\.\d{2}\b|\b(sub ?total|total|gst|vat|amount|excl|incl)\b/i;
+// What the title block and notes of a technical drawing look like (architectural, services, structural...).
+const DRAWING_CUES = ['drawing title', 'drawing no', 'drawing number', 'dwg no', 'dwg', 'drg', 'drawn', 'drawn by', 'checked', 'checked by', 'approved',
+  'designed', 'do not scale', 'scale', 'sheet', 'sheet no', 'revision', 'rev', 'amendment', 'for construction', 'issued for construction',
+  'not for construction', 'for tender', 'for consent', 'building consent', 'preliminary', 'project no', 'job no', 'north', 'legend', 'general arrangement',
+  'layout', 'schematic', 'single line diagram', 'riser diagram', 'reflected ceiling plan', 'ceiling plan', 'floor plan', 'section', 'detail', 'elevation',
+  'mechanical services', 'electrical services', 'hydraulic services', 'fire services', 'plumbing and drainage', 'services layout', 'ductwork', 'cable tray',
+  'lighting layout', 'power layout', 'switchboard', 'ground floor', 'first floor', 'level 1', 'level 2', 'a0', 'a1', 'a3', 'nts', 'dimensions in mm'];
+// Cues that only appear on drawings (a contract or report can mention "section" or "approved", but not these).
+const DRAWING_STRONG = new Set(['drawing title', 'drawing no', 'drawing number', 'dwg no', 'dwg', 'drg', 'drawn by', 'checked by', 'do not scale',
+  'for construction', 'issued for construction', 'not for construction', 'for tender', 'for consent', 'sheet no', 'nts', 'dimensions in mm',
+  'general arrangement', 'schematic', 'single line diagram', 'riser diagram', 'reflected ceiling plan', 'mechanical services', 'electrical services',
+  'hydraulic services', 'fire services', 'services layout', 'lighting layout', 'power layout', 'ductwork', 'cable tray', 'a0', 'a1']);
+// File names like "M-201 Rev C", "E101", "ARK-MS-DWG-004", "H-100_B".
+const DRAWING_NAME_RE = /(\b(dwg|drg|drawings?|plans?|layout|schematic|ga)\b)|(^|[\s_-])[a-z]{1,3}[-_ ]?\d{2,4}([\s_-]*(rev|r)?[\s_-]*[a-z0-9]{1,2})?($|[\s_.-])/i;
+
 function detectDocType(fileName, text) {
   const name = norm(fileName);
   const body = norm(text).slice(0, 8000);
-  let best = null;
+  const raw = String(text || '').slice(0, 8000);
+  const hasMoney = MONEY_RE.test(raw);
+  const scores = [];
   for (const dt of DOC_TYPES) {
     let score = 0;
     const hits = [];
@@ -83,8 +103,22 @@ function detectDocType(fileName, text) {
       if (inName) { score += 4; hits.push(`"${w}" in file name`); }
       if (inBody) { score += inBody; hits.push(`"${w}" in text`); }
     }
-    if (score > 0 && (!best || score > best.score)) best = { type: dt.type, score, hits };
+    if (dt.type === 'Plans & Drawings') {
+      const cues = DRAWING_CUES.filter((c) => countMatches(body, norm(c)));
+      const strong = cues.filter((c) => DRAWING_STRONG.has(c)).length;
+      if (cues.length >= 4 && strong >= 2) { score += Math.min(cues.length, 10); hits.unshift(`looks like a drawing (${cues.slice(0, 4).join(', ')}…)`); }
+      if (DRAWING_NAME_RE.test(String(fileName || '').replace(/\.[a-z0-9]+$/i, '')) && (strong >= 1 || /\b(dwg|drg|drawings?)\b/i.test(fileName))) { score += 4; hits.unshift('file name looks like a drawing number'); }
+    }
+    if (MONEY_TYPES.has(dt.type) && score > 0 && !hasMoney && !hits.some((h) => h.endsWith('in file name') || /^"[^"]+ [^"]+" in text$/.test(h))) {
+      score = Math.floor(score / 2);
+      if (score < 2) continue; // just a passing mention ("we need to quote") - not evidence of what the document is
+      hits.push('no prices or totals found');
+    }
+    if (score > 0) scores.push({ type: dt.type, score, hits });
   }
+  scores.sort((a, b) => b.score - a.score);
+  const best = scores[0] || null;
+  if (best) best.runnerUp = scores[1] || null;
   return best;
 }
 
@@ -177,7 +211,8 @@ function classify({ fileName, ext, text }, settings = {}) {
   if (co) reasons.push(co.known ? `mentions ${co.company} (your company list)` : `looks like it's from/for ${co.company}`);
 
   let confidence = 'low';
-  const typeStrong = dt && dt.score >= 4;
+  const typeStrong = dt && dt.score >= 4 && !(dt.runnerUp && dt.runnerUp.score >= dt.score - 1);
+  if (dt && dt.runnerUp && dt.runnerUp.score >= dt.score - 1) reasons.push(`could also be ${dt.runnerUp.type}`);
   if (co && co.known && dt) confidence = typeStrong ? 'high' : 'medium';
   else if (co && dt && typeStrong) confidence = 'medium';
   else if (co || typeStrong) confidence = 'low';

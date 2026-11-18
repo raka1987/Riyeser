@@ -490,3 +490,10 @@ test('smart review: labels, dated names, and duplicates with different names or 
   assert.ok(g.files.some((f) => f.recommend === 'keep'));
   assert.ok(!r.dupes.some((d) => d.files.some((f) => f.name === 'notes.txt')));
 });
+
+test('a services drawing that mentions "quote" in its notes is a drawing, not a quote', () => {
+  const drawing = classify({ fileName: 'Ark Mechanical Services M-201 Rev C.pdf', ext: '.pdf', text: 'MECHANICAL SERVICES\nLEVEL 1 DUCTWORK LAYOUT\nNOTES: CONTRACTOR TO INCLUDE ALL FITTINGS IN QUOTE. REFER TO QUOTATION Q-1123.\nDRAWN: JB CHECKED: RM SCALE 1:100 @ A1\nDRAWING NO: M-201 REV: C\nSTATUS: FOR CONSTRUCTION\nDO NOT SCALE' }, settings);
+  assert.equal(drawing.docType, 'Plans & Drawings');
+  const quote = classify({ fileName: 'Q-1123.pdf', ext: '.pdf', text: 'QUOTATION\nAcme Plumbing\nQuote number Q-1123\nSupply and install ductwork\nSubtotal $12,400.00\nTotal $14,260.00\nValid until 30/12/2026' }, settings);
+  assert.equal(quote.docType, 'Quotes');
+});

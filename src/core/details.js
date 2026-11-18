@@ -101,6 +101,19 @@ function extractDetails(text, fileName, { dayFirst = true } = {}) {
   };
 }
 
+/** A drawing's number and revision, e.g. "M-201 Rev C" - from the title block or the file name. */
+function drawingNumber(text, fileName) {
+  const t = String(text || '').slice(0, 8000);
+  const base = String(fileName || '').replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ');
+  let num = null;
+  const m = t.match(/\b(?:drawing|dwg|drg|sheet)\s*(?:no\b\.?|number\b|#)?\s*[:#.]?\s*([A-Z]{0,6}[-.]?\d[A-Z0-9]{0,6}(?:[-.][A-Z0-9]{1,6}){0,4})\b/i);
+  if (m && /\d/.test(m[1])) num = m[1];
+  if (!num) num = base.split(/\s+/).find((w) => /^[A-Z0-9]+(-[A-Z0-9]+)*$/i.test(w) && /\d/.test(w) && /[A-Z]/i.test(w) && w.length >= 3 && !/^rev/i.test(w)) || null;
+  if (!num) return null;
+  const r = t.match(/\brev(?:ision)?\b\.?\s*[:#]?\s*([A-Z]{1,2}\d{0,2}|\d{1,2})\b/i) || base.match(/\brev\.?\s*([A-Z]{1,2}\d{0,2}|\d{1,2})\b/i);
+  return `${num.toUpperCase()}${r ? ` Rev ${r[1].toUpperCase()}` : ''}`;
+}
+
 // Words in a file name that say nothing about the document.
 const NOISE = new Set(('copy final new scan scanned document doc file files untitled book img image dsc pdf docx xlsx version ver rev draft updated update ' +
   'v1 v2 v3 the and for from of to a an my our with signed sign print printed edit edited fixed latest old backup temp tmp test misc').split(' '));
@@ -110,12 +123,13 @@ const NOISE = new Set(('copy final new scan scanned document doc file files unti
  * Date (or month) first, then company, document type, reference, and a few useful words from the old name.
  * aiTitle (optional) replaces the words from the old name.
  */
-function smartName({ fileName, ext, classification: c, details: d, aiTitle, aiDate, fallbackDate }) {
+function smartName({ fileName, ext, classification: c, details: d, aiTitle, aiDate, fallbackDate, text = '' }) {
   if (!c || c.category === 'Media') return null;
   const type = SINGULAR[c.docType] || null;
   const when = aiDate || d.date || d.month || null;
   const lower = (x) => String(x || '').toLowerCase();
-  const already = `${lower(c.company)} ${lower(type)} ${lower(c.docType)} ${lower(d.reference)}`;
+  const ref = c.docType === 'Plans & Drawings' ? (d.drawing || drawingNumber(text, fileName) || d.reference) : d.reference;
+  const already = `${lower(c.company)} ${lower(type)} ${lower(c.docType)} ${lower(ref)}`;
   let title = aiTitle || '';
   if (!title) {
     const base = String(fileName).replace(/\.[a-z0-9]+$/i, '').replace(/[_]+/g, ' ');
@@ -125,7 +139,7 @@ function smartName({ fileName, ext, classification: c, details: d, aiTitle, aiDa
     });
     title = [...new Set(words)].slice(0, 4).join(' ');
   }
-  const parts = [when, c.company, type, d.reference, title].filter(Boolean).map(clean);
+  const parts = [when, c.company, type, ref, title].filter(Boolean).map(clean);
   if (parts.length < 2 || (!when && !type)) return null; // not enough to improve on the original name
   const name = parts.join(' ').replace(/\s+/g, ' ').slice(0, 150) + (ext || '');
   return name.toLowerCase() === String(fileName).toLowerCase() ? null : name;
@@ -160,4 +174,4 @@ function suggestName({ fileName, ext, classification: c, details: d, fallbackDat
   return name.toLowerCase() === String(fileName).toLowerCase() ? null : name;
 }
 
-module.exports = { extractDetails, suggestName, smartName, typeMismatch, findDates, findMonth, SINGULAR };
+module.exports = { extractDetails, suggestName, smartName, drawingNumber, typeMismatch, findDates, findMonth, SINGULAR };

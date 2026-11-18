@@ -7,7 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { analyseFile, placeItem, listFiles } = require('./organizer');
 const { linkRelated } = require('./related');
-const { smartName } = require('./details');
+const { smartName, drawingNumber } = require('./details');
 const { findDuplicateGroups } = require('./dupes');
 const { isSystemPath, isTooBroad } = require('./safety');
 
@@ -57,6 +57,7 @@ async function reviewFiles(folders, settings, { ai = null, onProgress = () => {}
     // A file you filed yourself inside Organised stays in its folder - only its name is reviewed.
     const keepFolder = inside(item.from, root) && !placed.has(item.from);
     const destDir = keepFolder || !dir ? path.dirname(item.from) : dir;
+    item.details = { ...item.details, drawing: drawingNumber(item._text, item.name) };
     const suggested = smartName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, aiTitle: item.aiTitle, aiDate: item.aiDate, fallbackDate: item.fileDate });
     const newName = suggested || item.name;
     const to = path.join(destDir, newName);
