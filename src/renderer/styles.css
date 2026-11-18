@@ -213,3 +213,13 @@ nav { overflow-y: auto; }
 .foldertools #ffilter { flex: 1 1 220px; max-width: 360px; }
 .foldertitle { flex: none; margin-bottom: 0; }
 .fres .route .seg { white-space: nowrap; }
+
+/* modal dialogs (main window) */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 80; }
+.modal[hidden] { display: none; }
+.modalbox { background: var(--panel); border-radius: 14px; padding: 18px 20px; width: min(640px, 94vw); max-height: 88vh; overflow: auto; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+.rulebox { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 12px; background: var(--bg); }
+.rulebox label.row { margin: 4px 0; align-items: center; }
+.matchlist { max-height: 46vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px 10px; margin-top: 6px; }
+.mrow { padding: 6px 0; border-top: 1px solid var(--line); align-items: flex-start !important; }
+.mrow:first-child { border-top: none; }

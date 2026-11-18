@@ -9,6 +9,7 @@ const { extractDetails, suggestName, typeMismatch } = require('./details');
 const { extractKeys, linkRelated } = require('./related');
 const { isSystemPath, isTooBroad, isProtectedFile } = require('./safety');
 const { featureTokens, learnedDestination } = require('./learn');
+const rules = require('./rules');
 
 const SKIP_EXT = new Set(['.crdownload', '.part', '.tmp', '.download', '.partial', '.lnk', '.ini']);
 
@@ -107,6 +108,15 @@ function placeItem(item, settings) {
   if (item.companyFromGroup && item.confidence === 'low') {
     item.confidence = 'medium';
     item.reasons = [...(item.reasons || []), `linked to other ${item.company} documents`];
+  }
+  // Your own filing rules come first.
+  const rule = rules.firstMatch(settings._rules, item);
+  if (rule) {
+    const dir = rules.ruleFolder(rule, item, root);
+    item.ruled = rule.name; item.learned = `your rule: ${rule.name}`; item.fallback = false; item.confidence = 'high';
+    item.newName = settings.renameFiles === false ? null
+      : suggestName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, fallbackDate: item.fileDate });
+    return { dir, unsure: false, to: path.join(dir, item.newName || item.name) };
   }
   // Where you've put similar files before wins over the general rules.
   const learned = settings._examples ? learnedDestination(item, settings._examples, root) : null;

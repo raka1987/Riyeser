@@ -17,6 +17,8 @@ let cleanup = null;   // last clean-up check
 let combine = [];     // PDFs chosen for combining
 let everythingDone = null; // last "tidy everything" batch
 let appVersion = '';
+let folderSel = new Set(); // files ticked on the Folders page
+let folderSelDir = null;
 let scanning = false;
 let currentFolder = null;
 let folderFilter = '';
@@ -167,6 +169,99 @@ async function safe(fn) {
 }
 
 const confPill = (c) => c === 'high' ? '<span class="pill good">sure</span>' : c === 'medium' ? '<span class="pill">likely</span>' : '<span class="pill warn">unsure</span>';
+
+// ---------------- small modal dialogs ----------------
+function modal(html, onOpen) {
+  return new Promise((resolve) => {
+    let box = $('#modal');
+    if (!box) { document.body.insertAdjacentHTML('beforeend', '<div id="modal" class="modal"></div>'); box = $('#modal'); }
+    box.innerHTML = `<div class="modalbox" id="modalbox">${html}</div>`; // fresh element each time: no leftover click handlers
+    box.hidden = false;
+    const done = (v) => { box.hidden = true; resolve(v); };
+    $('#modalbox').onclick = (e) => { const b = e.target.closest('[data-m]'); if (b) done(b.dataset.m === 'cancel' ? null : b.dataset.m); };
+    box.onkeydown = (e) => { if (e.key === 'Escape') done(null); };
+    if (onOpen) onOpen(done);
+  });
+}
+const routeHtml = (p) => (p ? `<span class="route">${route(p)}</span>` : '<span class="muted">No folder chosen yet</span>');
+
+/**
+ * Move file(s) to a folder you pick, and optionally make a rule so files like them always go there.
+ * mode 'files': move now (Folders page). mode 'plan': change where a file in the Organise/Tidy list will go.
+ */
+async function ruleDialog(files, mode = 'files') {
+  const sug = await bridge.call('rules:suggest', files[0]);
+  let folder = mode === 'plan' ? (plan.plan.find((p) => p.from === files[0])?.dir || '') : '';
+  const isYear = (f) => /^(19|20)\d{2}$/.test((f || '').split(/[\\/]/).pop());
+  const html = `<div class="row"><h2 style="margin:0">${files.length > 1 ? `Move ${files.length} files` : `Where does “${esc(sug.name)}” belong?`}</h2><span class="spacer"></span><button class="iconbtn" data-m="cancel">✕</button></div>
+    <div class="rulebox"><div class="small muted">Move to</div><div class="row" style="margin-top:4px"><div class="grow" id="rfolder">${routeHtml(folder)}</div><button data-act="rpick">Choose folder…</button></div>
+      <label class="row small" style="margin-top:8px"><input type="checkbox" id="ryear" ${isYear(folder) ? 'checked' : ''}> Put into a folder for each year (…/2026)</label></div>
+    <label class="row" style="margin-top:14px"><input type="checkbox" id="rmake" checked> <b>Make a rule</b> — from now on, files like this go here automatically</label>
+    <div class="rulebox" id="rconds"><div class="small muted" style="margin-bottom:6px">Files that match ALL of these:</div>
+      ${sug.company ? `<label class="row small"><input type="checkbox" id="rc-company" checked> From/for company <b>${esc(sug.company)}</b></label>` : ''}
+      ${sug.docType ? `<label class="row small"><input type="checkbox" id="rc-type" checked> Document type <b>${esc(sug.docType)}</b></label>` : ''}
+      <label class="row small"><input type="checkbox" id="rc-words" ${!sug.company && !sug.docType && sug.words.length ? 'checked' : ''}> Name or text contains <input id="rc-wordlist" value="${esc(sug.words.join(' '))}" placeholder="e.g. timesheet" style="flex:1;min-width:120px;padding:3px 8px"></label>
+      ${sug.kind ? `<label class="row small"><input type="checkbox" id="rc-kind" ${!sug.company && !sug.docType && !sug.words.length ? 'checked' : ''}> File type <b>${esc(sug.kind)}</b></label>` : ''}
+      <label class="row small" style="margin-top:6px">Rule name <input id="rc-name" placeholder="(automatic)" style="flex:1;padding:3px 8px"></label></div>
+    <div class="row" style="margin-top:16px"><span class="spacer"></span><button data-m="cancel">Cancel</button><button class="primary" data-m="ok">${mode === 'plan' ? 'Use this folder' : 'Move'}</button></div>`;
+  const result = await modal(html, () => {
+    $('#rmake').addEventListener('change', (e) => { $('#rconds').style.opacity = e.target.checked ? 1 : 0.45; });
+    $('#modalbox').addEventListener('click', async (e) => {
+      if (!e.target.closest('[data-act="rpick"]')) return;
+      e.stopPropagation();
+      const f = await bridge.call('dialog:folder', folder || sug.organisedRoot);
+      if (f) { folder = f; $('#rfolder').innerHTML = routeHtml(f); if (isYear(f)) $('#ryear').checked = true; }
+    });
+  });
+  if (result !== 'ok') return;
+  if (!folder) { toast('Choose a folder first.'); return; }
+  const useYear = $('#ryear').checked;
+  const makeIt = $('#rmake').checked;
+  const conditions = {
+    company: $('#rc-company')?.checked ? sug.company : null,
+    docType: $('#rc-type')?.checked ? sug.docType : null,
+    words: $('#rc-words')?.checked ? $('#rc-wordlist').value.toLowerCase().split(/[\s,]+/).filter(Boolean) : [],
+    kind: $('#rc-kind')?.checked ? sug.kind : null,
+  };
+  let rule = null;
+  if (makeIt) {
+    const r = await bridge.call('rules:save', { folder, conditions, useYear, name: $('#rc-name').value.trim() || undefined });
+    rule = r.rule;
+  }
+  if (mode === 'plan') {
+    const r = await bridge.call('learn:choose', files[0], folder);
+    plan = r.plan;
+    if (rule) plan = await bridge.call('organise:last');
+    toast(rule ? `Rule saved: “${rule.name}” → ${rule.where}. Files in this list that match now go there too.` : 'Got it — I\'ll file similar files there from now on.');
+    render();
+    return;
+  }
+  const batch = await bridge.call('files:moveInto', files, folder, useYear);
+  folderSel = new Set();
+  toast(`Moved ${batch.moves.length} file(s)${batch.errors.length ? ` (${batch.errors.length} couldn't be moved)` : ''}.${rule ? ` Rule saved: “${rule.name}”.` : ''}`);
+  if (rule) await offerMatches(rule);
+  render();
+}
+
+/** After making a rule: show other files that match it but are somewhere else, and move the ones you tick. */
+async function offerMatches(rule) {
+  const matches = await bridge.call('rules:matches', rule.id);
+  if (!matches.length) { toast(`Rule “${rule.name}” saved — no other files need moving.`); return; }
+  const r = await modal(`<div class="row"><h2 style="margin:0">${matches.length} other file(s) match “${esc(rule.name)}”</h2><span class="spacer"></span><button class="iconbtn" data-m="cancel">✕</button></div>
+    <p class="muted small">They're in other folders. Tick the ones to move to <b>${esc(rule.where)}</b>.</p>
+    <div class="row small"><button class="link" data-act="mall">Select all</button><button class="link" data-act="mnone">Clear</button></div>
+    <div class="matchlist">${matches.map((m, i) => `<label class="row small mrow"><input type="checkbox" data-mi="${i}" checked><div class="grow"><b>${esc(m.name)}</b><div class="muted">${routeHtml(m.currentDir)} → ${routeHtml(m.dir)}</div></div></label>`).join('')}</div>
+    <div class="row" style="margin-top:14px"><span class="spacer"></span><button data-m="cancel">Not now</button><button class="primary" data-m="ok">Move ticked files</button></div>`, () => {
+    $('#modalbox').addEventListener('click', (e) => {
+      const a = e.target.closest('[data-act="mall"],[data-act="mnone"]');
+      if (a) { e.stopPropagation(); document.querySelectorAll('[data-mi]').forEach((c) => { c.checked = a.dataset.act === 'mall'; }); }
+    });
+  });
+  if (r !== 'ok') return;
+  const picked = matches.filter((_, i) => document.querySelector(`[data-mi="${i}"]`)?.checked);
+  const batch = await bridge.call('files:moveTo', picked);
+  toast(`Moved ${batch.moves.length} file(s) to ${rule.where}. You can undo this on the Organise page.`);
+}
 
 // ---------------- plan rows (shared by Organise and Tidy everything) ----------------
   const facts = (p) => [p.details?.date && `📅 ${esc(p.details.date)}`, p.details?.reference && `# ${esc(p.details.reference)}`, p.details?.amount && `💲 ${esc(p.details.amount)}`].filter(Boolean).map((f) => `<span class="pill">${f}</span>`).join(' ');
@@ -367,6 +462,7 @@ async function renderFolderMain(main) {
   {
     const page = main; // the right-hand side of the Folders page
     const dir = currentFolder;
+    if (folderSelDir !== dir) { folderSel = new Set(); folderSelDir = dir; }
     let data;
     try { data = await bridge.call('folder:list', dir); }
     catch { page.innerHTML = `<h1>Folder not found</h1><p class="sub">${esc(dir)} no longer exists — it may have been moved or renamed.</p>`; return; }
@@ -386,12 +482,17 @@ async function renderFolderMain(main) {
       <h1 class="foldertitle">${esc(crumbs[crumbs.length - 1].name)}</h1>
       <div class="row foldertools"><input id="ffilter" placeholder="Filter this folder…" value="${esc(folderFilter)}">
         ${folderFilter ? '<button class="link" data-act="clearffilter">Show all</button>' : ''}<span class="spacer"></span>
+        <button class="primary" data-act="rulemove" id="movesel" hidden>Move / Rule…</button>
         <button data-act="open" data-path="${esc(dir)}">Open in File Explorer</button></div>
       ${dirs.length ? `<div class="dirgrid" style="margin-bottom:18px">${dirs.map((d) => `<div class="d" data-act="gofolder" data-path="${esc(d.path)}"><span style="font-size:20px">📁</span><div style="min-width:0"><div class="ellipsis"><b>${esc(d.name)}</b></div><div class="small muted">${d.count} item${d.count === 1 ? '' : 's'}</div></div></div>`).join('')}</div>` : ''}
-      <div class="card">${files.length ? `<table class="filetable"><colgroup><col style="width:30px"><col><col style="width:96px"><col style="width:72px"><col style="width:176px"></colgroup><tr><th></th><th>Name</th><th>Modified</th><th>Size</th><th></th></tr>${files.map((f) => `<tr class="f" data-dbl="${esc(f.path)}">
-          <td style="width:26px">${fileIcon(f.ext)}</td><td><b>${esc(f.name)}</b></td><td class="small muted">${fmtDay(f.mtime)}</td><td class="small muted">${fmtSize(f.size)}</td>
-          <td class="factions"><button class="link" data-act="open" data-path="${esc(f.path)}">Open</button>${f.ext === '.pdf' ? `<button class="link" data-act="pdfedit" data-path="${esc(f.path)}">Edit</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(f.path)}" title="Show in File Explorer">Show</button></td></tr>`).join('')}</table>`
+      <div class="card">${files.length ? `<table class="filetable"><colgroup><col style="width:30px"><col style="width:30px"><col><col style="width:96px"><col style="width:72px"><col style="width:236px"></colgroup><tr><th><input type="checkbox" id="fselall" title="Select all"></th><th></th><th>Name</th><th>Modified</th><th>Size</th><th></th></tr>${files.map((f) => `<tr class="f" data-dbl="${esc(f.path)}">
+          <td><input type="checkbox" data-fsel="${esc(f.path)}" ${folderSel.has(f.path) ? 'checked' : ''}></td><td style="width:26px">${fileIcon(f.ext)}</td><td><b>${esc(f.name)}</b></td><td class="small muted">${fmtDay(f.mtime)}</td><td class="small muted">${fmtSize(f.size)}</td>
+          <td class="factions"><button class="link" data-act="open" data-path="${esc(f.path)}">Open</button>${f.ext === '.pdf' ? `<button class="link" data-act="pdfedit" data-path="${esc(f.path)}">Edit</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(f.path)}" title="Show in File Explorer">Show</button><button class="link" data-act="rulemove" data-path="${esc(f.path)}" title="Move this file and optionally make a rule for files like it">Move…</button></td></tr>`).join('')}</table>`
         : `<div class="empty">${q ? 'Nothing matches that filter.' : dirs.length ? 'No loose files here — open one of the folders above.' : 'This folder is empty.'}</div>`}</div>`;
+    const showMoveSel = () => { const b = $('#movesel'); if (b) { b.hidden = !folderSel.size; b.textContent = `Move / Rule… (${folderSel.size})`; } };
+    showMoveSel();
+    main.querySelectorAll('[data-fsel]').forEach((c) => c.addEventListener('change', () => { c.checked ? folderSel.add(c.dataset.fsel) : folderSel.delete(c.dataset.fsel); showMoveSel(); }));
+    $('#fselall')?.addEventListener('change', (e) => { main.querySelectorAll('[data-fsel]').forEach((c) => { c.checked = e.target.checked; e.target.checked ? folderSel.add(c.dataset.fsel) : folderSel.delete(c.dataset.fsel); }); showMoveSel(); });
     const fl = $('#ffilter');
     fl.addEventListener('input', () => { folderFilter = fl.value; const pos = fl.selectionStart; renderFolderMain($('#fmain')).then(() => { const n = $('#ffilter'); n.focus(); n.setSelectionRange(pos, pos); }); });
   }
@@ -503,7 +604,8 @@ Object.assign(pages, {
     const folderList = (key) => `<div class="chips">${s[key].map((f, i) => `<span class="chip path">${esc(short(f))}<button data-act="delfolder" data-key="${key}" data-i="${i}">×</button></span>`).join('') || '<span class="muted small">None</span>'}</div>
       <button style="margin-top:8px" data-act="addfolder" data-key="${key}">+ Add folder</button>`;
     const learned = await bridge.call('learn:list').catch(() => []);
-    const sections = [['s-sorting', '🗂 Sorting'], ['s-learned', '🧠 Learned'], ['s-appearance', '🎨 Appearance'], ['s-calendars', '📅 Calendars'], ['s-email', '✉ Email'], ['s-pdf', '📕 PDF'], ['s-ai', '✨ AI'], ['s-general', '⚙ General'], ['s-uninstall', '🗑 Uninstall']];
+    const myRules = await bridge.call('rules:list').catch(() => []);
+    const sections = [['s-sorting', '🗂 Sorting'], ['s-rules', '📐 Rules'], ['s-learned', '🧠 Learned'], ['s-appearance', '🎨 Appearance'], ['s-calendars', '📅 Calendars'], ['s-email', '✉ Email'], ['s-pdf', '📕 PDF'], ['s-ai', '✨ AI'], ['s-general', '⚙ General'], ['s-uninstall', '🗑 Uninstall']];
     page.innerHTML = `<h1>Settings</h1><p class="sub">Everything stays on this computer. Passwords and keys are encrypted with your system keychain.</p>
       <div class="settingsnav">${sections.map(([id, label]) => `<button data-act="jump" data-id="${id}">${label}</button>`).join('')}</div>
       <div class="grid">
@@ -540,6 +642,11 @@ Object.assign(pages, {
       <div class="card" id="s-appearance"><h2>Appearance</h2>
         <div class="row">${['system', 'light', 'dark'].map((t) => `<label class="themeopt ${(s.theme || 'system') === t ? 'on' : ''}"><input type="radio" name="theme" value="${t}" ${(s.theme || 'system') === t ? 'checked' : ''}><span class="swatch ${t}"></span>${t === 'system' ? 'Same as Windows' : t === 'light' ? 'Light' : 'Dark'}</label>`).join('')}</div>
         <p class="muted small">Applies to the PDF editor too.</p></div>
+      <div class="card" id="s-rules"><h2>Filing rules</h2><p class="muted small">Your rules always win. Make one from the <b>Folders</b> page (tick files → <b>Move / Rule…</b>) or with <b>Change folder…</b> when organising.</p>
+        ${myRules.length ? `<ul class="list">${myRules.map((r) => `<li><div class="grow"><div><b>${esc(r.name)}</b> ${r.enabled === false ? '<span class="pill warn">off</span>' : ''}</div>
+          <div class="small muted">${[r.conditions.docType && `type ${esc(r.conditions.docType)}`, r.conditions.company && `from ${esc(r.conditions.company)}`, r.conditions.words?.length && `contains “${esc(r.conditions.words.join(' '))}”`, r.conditions.kind && `${esc(r.conditions.kind)} files`].filter(Boolean).join(' · ')}</div>
+          <div class="small">→ ${esc(r.where)}</div></div>
+          <div class="row" style="flex-wrap:nowrap"><button class="link small" data-act="ruleapply" data-id="${esc(r.id)}">Apply now</button><button class="link small" data-act="ruletoggle" data-id="${esc(r.id)}">${r.enabled === false ? 'Turn on' : 'Turn off'}</button><button class="link small" data-act="ruledelete" data-id="${esc(r.id)}">Delete</button></div></li>`).join('')}</ul>` : '<div class="empty small">No rules yet.</div>'}</div>
       <div class="card" id="s-learned"><h2>What I've learned</h2><p class="muted small">Folders you chose for files with <b>Change folder…</b>. Similar files go to the same place automatically. I also follow how you've arranged your Organised folder yourself.</p>
         ${learned.length ? `<ul class="list">${learned.slice(0, 60).map((l, i) => `<li><div class="grow"><div class="small">${l.docType && l.docType !== 'Other' ? `<b>${esc(l.docType)}</b> ` : ''}${l.company ? `from <b>${esc(l.company)}</b> ` : ''}${l.words.length ? `like “${esc(l.words.join(' '))}”` : ''}</div>
           <div class="route small">→ ${l.inRoot ? `<span class="seg">Organised</span><span class="sep">›</span>` : ''}${l.template.split('/').map((x) => `<span class="seg">${esc(x === '{year}' ? '(year)' : x)}</span>`).join('<span class="sep">›</span>')}</div></div>
@@ -643,15 +750,11 @@ const actions = {
     finally { el.disabled = false; el.textContent = 'Tidy desktop icons'; }
   },
   unarrangedesk: async () => { await bridge.call('desktop:undoArrange'); toast('Auto-arrange is off again — you can place icons wherever you like.'); },
-  choosefolder: async (el) => {
-    const item = plan.plan.find((p) => p.from === el.dataset.from);
-    const f = await bridge.call('dialog:folder', item?.dir || settings.organisedRoot);
-    if (!f) return;
-    const r = await bridge.call('learn:choose', el.dataset.from, f);
-    plan = r.plan;
-    toast(r.alsoMoved ? `Got it — and ${r.alsoMoved} similar file(s) in this list will go there too. I'll remember this next time.` : 'Got it — I\'ll file similar files there from now on.');
-    render();
-  },
+  choosefolder: (el) => ruleDialog([el.dataset.from], 'plan'),
+  rulemove: (el) => ruleDialog(el.dataset.path ? [el.dataset.path] : [...folderSel], 'files'),
+  ruletoggle: async (el) => { await bridge.call('rules:toggle', el.dataset.id); render(); },
+  ruledelete: async (el) => { if (await bridge.call('confirm', 'Delete this rule?', 'Files already moved stay where they are.')) { await bridge.call('rules:delete', el.dataset.id); render(); } },
+  ruleapply: async (el) => { const r = (await bridge.call('rules:list')).find((x) => x.id === el.dataset.id); if (r) { await offerMatches(r); render(); } },
   forgetlearned: async (el) => { await bridge.call('learn:forget', +el.dataset.i); render(); },
   evadd: async (el) => {
     const f = await bridge.call('dialog:folder');

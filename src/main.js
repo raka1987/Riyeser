@@ -16,6 +16,8 @@ const { analyseFolder } = require('./core/cleanup');
 const safety = require('./core/safety');
 const { planEverything, removeEmptiedFolders } = require('./core/everything');
 const learn = require('./core/learn');
+const rules = require('./core/rules');
+const { extractDetails } = require('./core/details');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
 const { setOcrProvider, setTextCache } = require('./core/extract');
 const ocr = require('./core/ocr');
@@ -199,7 +201,30 @@ function buildExamples(s) {
   }
   return examples;
 }
-const planSettings = () => { const s = getSettings(); return { ...s, _examples: buildExamples(s), _placedByApp: placedByApp() }; };
+const planSettings = () => { const s = getSettings(); return { ...s, _examples: buildExamples(s), _placedByApp: placedByApp(), _rules: store.get('rules', []).filter((r) => r.enabled !== false) }; };
+
+/** Remove folders left empty by a move (never your main folders themselves; Undo recreates them). */
+function tidyEmptied(batch) {
+  const s = getSettings();
+  removeEmptiedFolders(batch, [s.organisedRoot, ...s.watchFolders, ...(s.libraryFolders || []), ...s.searchFolders]);
+}
+
+/** Files (from the search index) that match a rule but aren't in its folder yet. */
+function filesMatchingRule(rule) {
+  const s = getSettings();
+  const out = [];
+  for (const [p, d] of Object.entries(index.docs)) {
+    if (!fs.existsSync(p) || safety.isProtectedFile(p)) continue;
+    const item = { name: d.name, text: d.text, company: d.company, docType: d.docType, ext: d.ext,
+      details: extractDetails(d.text || '', d.name, { dayFirst: s.dayFirstDates !== false }), fileDate: new Date(d.mtime).toISOString().slice(0, 10) };
+    if (!rules.ruleMatches(rule, item)) continue;
+    const dir = rules.ruleFolder(rule, item, s.organisedRoot);
+    if (path.resolve(dir).toLowerCase() === path.resolve(path.dirname(p)).toLowerCase()) continue;
+    out.push({ from: p, name: d.name, currentDir: path.dirname(p), dir, to: path.join(dir, d.name) });
+    if (out.length >= 2000) break;
+  }
+  return out;
+}
 
 async function scanInbox({ quiet = false } = {}) {
   const s = planSettings();
@@ -417,6 +442,68 @@ function registerIpc() {
       }
     }
     return { plan: state.lastPlan, alsoMoved };
+  });
+  // ----- your filing rules -----
+  handle('rules:suggest', async (file) => {
+    const s = getSettings();
+    const st = fs.statSync(file);
+    const it = await organizer.analyseFile(file, st, s, null);
+    const words = [...new Set(it.nameTokens || [])].filter((w) => w.length >= 4 && !(it.company || '').toLowerCase().includes(w) && !(it.docType || '').toLowerCase().includes(w)).slice(0, 3);
+    return { name: it.name, company: it.company, docType: it.docType && it.docType !== 'Other' ? it.docType : null, kind: rules.kindOf(it.ext), words, currentDir: path.dirname(file), organisedRoot: s.organisedRoot };
+  });
+  handle('rules:list', () => store.get('rules', []).map((r) => ({ ...r, where: rules.describeDest(r) })));
+  handle('rules:save', ({ folder, conditions, useYear, name }) => {
+    const why = safety.folderProblem(folder);
+    if (why) throw new Error(why);
+    const c = Object.fromEntries(Object.entries(conditions || {}).filter(([, v]) => v && (!Array.isArray(v) || v.length)));
+    if (!Object.keys(c).length) throw new Error('Tick at least one thing the rule should look for.');
+    const rule = rules.makeRule({ folder, root: getSettings().organisedRoot, conditions: c, useYear, name });
+    store.update('rules', [], (l) => [rule, ...l]);
+    // re-file anything in the current Organise/Tidy list that this rule now covers
+    let inList = 0;
+    for (const item of state.lastPlan?.plan || []) {
+      if (item.isFolder || !rules.ruleMatches(rule, item)) continue;
+      const dir = rules.ruleFolder(rule, item, getSettings().organisedRoot);
+      item.dir = dir; item.to = path.join(dir, path.basename(item.to)); item.learned = `your rule: ${rule.name}`; item.fallback = false; item.confidence = 'high';
+      inList++;
+    }
+    return { rule: { ...rule, where: rules.describeDest(rule) }, inList };
+  });
+  handle('rules:delete', (id) => { store.update('rules', [], (l) => l.filter((r) => r.id !== id)); return true; });
+  handle('rules:toggle', (id) => { store.update('rules', [], (l) => l.map((r) => (r.id === id ? { ...r, enabled: r.enabled === false } : r))); return true; });
+  handle('rules:matches', (id) => {
+    const rule = store.get('rules', []).find((r) => r.id === id);
+    if (!rule) throw new Error('That rule no longer exists.');
+    return filesMatchingRule({ ...rule, enabled: true });
+  });
+  // Move the files you selected into a folder (each into its own year's sub-folder when "by year" is ticked).
+  handle('files:moveInto', (files, folder, useYear) => {
+    const why = safety.folderProblem(folder);
+    if (why) throw new Error(why);
+    const s = getSettings();
+    const isYear = /^(19|20)\d{2}$/.test(path.basename(folder));
+    const items = files.map((f) => {
+      let dir = folder;
+      if (useYear) {
+        const d = index.docs[f];
+        const year = ((d && extractDetails(d.text || '', d.name, { dayFirst: s.dayFirstDates !== false }).date) || new Date(fs.statSync(f).mtimeMs).toISOString()).slice(0, 4);
+        dir = isYear ? path.join(path.dirname(folder), year) : path.join(folder, year);
+      }
+      return { from: f, to: path.join(dir, path.basename(f)) };
+    }).filter((i) => path.resolve(path.dirname(i.from)).toLowerCase() !== path.resolve(path.dirname(i.to)).toLowerCase());
+    const batch = organizer.applyPlan(items);
+    tidyEmptied(batch);
+    store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+    refreshIndex().catch(() => {});
+    return batch;
+  });
+  // Move files you picked yourself (Folders page). Recorded for Undo; treated as YOUR filing (Re-check leaves them alone).
+  handle('files:moveTo', (items) => {
+    const batch = organizer.applyPlan(items.map((i) => ({ from: i.from, to: i.to })));
+    tidyEmptied(batch);
+    store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+    refreshIndex().catch(() => {});
+    return batch;
   });
   handle('learn:list', () => store.get('learned', []).map((e) => ({ template: e.template, inRoot: e.inRoot, docType: e.docType, company: e.company, words: e.nameTokens.slice(0, 5), at: e.at })));
   handle('learn:forget', (i) => { store.update('learned', [], (l) => l.filter((_, k) => k !== i)); return true; });

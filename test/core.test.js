@@ -435,3 +435,28 @@ test('search matches the start of words ("ark" finds Ark, not Spark)', async () 
   assert.deepEqual(idx.search('ark').map((r) => r.name), ['Ark commissioning plan.txt']);
   assert.deepEqual(idx.search('commission').map((r) => r.name), ['Ark commissioning plan.txt']); // start of a word still works
 });
+
+test('your filing rules win, match on company/type/words/kind, and file by year', async () => {
+  const rules = require('../src/core/rules');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
+  const desk = path.join(tmp, 'Desktop'); fs.mkdirSync(desk);
+  const root = path.join(tmp, 'Organised');
+  const rule = rules.makeRule({ folder: path.join(root, 'Staff', 'Timesheets'), root, conditions: { docType: 'Timesheets' }, useYear: true });
+  const byWords = rules.makeRule({ folder: path.join(root, 'Site docs', 'Ark'), root, conditions: { words: ['ark', 'fhf'] }, useYear: false });
+  assert.equal(rules.describeDest(rule), 'Organised/Staff/Timesheets/(year)');
+  const old = new Date(Date.now() - 3 * 86400_000);
+  const put = (n, body) => { fs.writeFileSync(path.join(desk, n), body); fs.utimesSync(path.join(desk, n), old, old); };
+  put('Book1.txt', 'Timesheet\nWeek ending 07/11/2025\nTotal hours 40');
+  put('notes.txt', 'Ark project FHF comments on the commissioning plan');
+  put('Spark.txt', 'Invoice for Acme Plumbing. Invoice number INV-1. Amount due $5');
+  const { plan } = await planOrganise({ ...settings, watchFolders: [desk], organisedRoot: root, _rules: [rule, byWords] }, { minAgeMs: 0 });
+  const dir = (n) => path.dirname(plan.find((p) => p.name === n).to);
+  assert.equal(dir('Book1.txt'), path.join(root, 'Staff', 'Timesheets', '2025'));   // the file's own year
+  assert.equal(dir('notes.txt'), path.join(root, 'Site docs', 'Ark'));
+  assert.equal(dir('Spark.txt'), path.join(root, 'Clients', 'Acme Plumbing', 'Invoices')); // no rule: normal filing
+  assert.match(plan.find((p) => p.name === 'Book1.txt').learned, /your rule/);
+  // "ark" must match a whole word start: "Spark" doesn't count; a turned-off rule does nothing
+  assert.equal(rules.ruleMatches(byWords, { name: 'Spark fhf.txt', text: '' }), false);
+  assert.equal(rules.ruleMatches({ ...rule, enabled: false }, { docType: 'Timesheets' }), false);
+  assert.equal(rules.kindOf('.xlsx'), 'Excel');
+});
