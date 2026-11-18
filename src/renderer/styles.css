@@ -262,3 +262,5 @@ nav { overflow-y: auto; }
 
 .typesel { font-size: 11px; padding: 1px 6px; border-radius: 99px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); max-width: 180px; }
 .typesel.unknown { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+
+#layout, #namestyle { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; text-overflow: ellipsis; }

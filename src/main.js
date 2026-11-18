@@ -55,6 +55,8 @@ function defaults() {
     recursiveScan: false,
     renameFiles: true,
     groupByYear: false,
+    filingLayout: 'typeYear', // 'typeYear': Invoices\2026 · 'company': Clients\Acme\Invoices
+    nameStyle: 'full',        // 'keep' | 'date' | 'full'
     dayFirstDates: true,
     staleDays: 90,
     groupRelated: true,
@@ -284,7 +286,7 @@ async function scanInbox({ quiet = false } = {}) {
     const sure = result.plan.filter((p) => p.confidence === 'high' || p.category === 'Media');
     if (sure.length) {
       const batch = organizer.applyPlan(sure);
-      store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+      store.update('history', [], (h) => [batch, ...h].slice(0, 2000));
       recordMoves(batch);
       if (!quiet || batch.moves.length) notify('Files tidied', `Filed ${batch.moves.length} file(s). Open the app to review or undo.`, () => showMain('organise'));
       state.lastPlan = { ...result, plan: result.plan.filter((p) => !sure.includes(p)) };
@@ -558,7 +560,7 @@ function registerIpc() {
     }).filter((i) => path.resolve(path.dirname(i.from)).toLowerCase() !== path.resolve(path.dirname(i.to)).toLowerCase());
     const batch = organizer.applyPlan(items);
     tidyEmptied(batch);
-    store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+    store.update('history', [], (h) => [batch, ...h].slice(0, 2000));
     recordMoves(batch, { byApp: false }); // your own filing choices
     refreshIndex().catch(() => {});
     return batch;
@@ -567,7 +569,7 @@ function registerIpc() {
   handle('files:moveTo', (items) => {
     const batch = organizer.applyPlan(items.map((i) => ({ from: i.from, to: i.to })));
     tidyEmptied(batch);
-    store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+    store.update('history', [], (h) => [batch, ...h].slice(0, 2000));
     recordMoves(batch, { byApp: false }); // your own filing choices
     refreshIndex().catch(() => {});
     return batch;
@@ -706,7 +708,7 @@ function registerIpc() {
     if (toArchive.length) {
       batch = organizer.applyPlan(toArchive);
       batch.label = `Archived ${batch.moves.length} duplicate${batch.moves.length === 1 ? '' : 's'}`;
-      store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+      store.update('history', [], (h) => [batch, ...h].slice(0, 2000));
       recordMoves(batch); // archived by the app - never learned from
       failed.push(...batch.errors.map((e) => ({ path: e.from, error: e.error })));
     }
@@ -790,12 +792,90 @@ function registerIpc() {
       state.lastPlan.plan = state.lastPlan.plan.filter((p) => !moved.has(p.from));
       for (const g of state.lastPlan.dupes || []) for (const f of g.files) if (moved.has(f.path)) { f.path = moved.get(f.path); f.name = path.basename(f.path); }
     }
-    store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+    store.update('history', [], (h) => [batch, ...h].slice(0, 2000));
     recordMoves(batch);
     refreshIndex().catch(() => {});
     return batch;
   });
   handle('organise:history', () => store.get('history', []));
+  // ----- Where are my files? / Put everything back -----
+  // Every file the app has moved or renamed: where it was, and where it is now.
+  const chronological = (moves) => {
+    const byBatch = new Map();
+    for (const m of moves) { if (!byBatch.has(m.batch)) byBatch.set(m.batch, []); byBatch.get(m.batch).push(m); }
+    return [...byBatch.values()].reverse().flat();
+  };
+  const allMoves = () => {
+    const out = [];
+    for (const b of store.get('history', [])) for (const m of b.moves) out.push({ from: m.from, to: m.to, at: b.at, batch: b.id, label: b.label || null });
+    return out;
+  };
+  const fileJourneys = () => {
+    const moves = allMoves();
+    // One row per file: follow each file's moves (oldest first) from where it ORIGINALLY was to where it is now.
+    const journeys = new Map();
+    for (const m of chronological(moves)) {
+      const j = journeys.get(m.from) || { was: m.from, steps: 0 };
+      journeys.delete(m.from);
+      journeys.set(m.to, { ...j, at: m.at, steps: j.steps + 1 });
+    }
+    return [...journeys].map(([last, j]) => {
+      const now = whereNow(last);
+      return { name: path.basename(j.was), was: j.was, now, at: j.at, steps: j.steps, back: !!(now && path.resolve(now) === path.resolve(j.was)) };
+    }).filter((f) => !f.back || f.steps > 0);
+  };
+  handle('restore:summary', () => {
+    const moves = allMoves();
+    const traced = new Set(moves.map((m) => m.to));
+    const untraceable = [...placedByApp()].filter((p) => !traced.has(p) && fs.existsSync(p));
+    const binned = store.get('cleanupLog', []).flatMap((l) => l.binned.map((p) => ({ path: p, at: l.at })));
+    const files = fileJourneys();
+    return { files, batches: store.get('history', []).length, untraceable, binned };
+  });
+  // A spreadsheet of every move, saved in Documents, so there's always a record you can open.
+  function writeMovesReport(rows, name) {
+    const s = getSettings();
+    const dir = fs.existsSync(path.dirname(s.organisedRoot)) ? path.dirname(s.organisedRoot) : app.getPath('documents');
+    const file = path.join(dir, `${name} ${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.csv`);
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    fs.writeFileSync(file, '﻿' + ['File,Was in,Now at,When moved', ...rows.map((r) => [r.name, r.was, r.now || '(not found)', r.at].map(q).join(','))].join('\r\n'));
+    return file;
+  }
+  handle('restore:report', () => {
+    const file = writeMovesReport(fileJourneys(), 'Desk Assistant - where my files went');
+    shell.showItemInFolder(file);
+    return file;
+  });
+  // Put every file back where it was before the app moved or renamed it (newest move first, so chains unwind correctly).
+  handle('restore:all', async () => {
+    const s = getSettings();
+    const hist = store.get('history', []);
+    const report = writeMovesReport(fileJourneys(), 'Desk Assistant - before putting files back');
+    let restored = 0; const problems = [];
+    let i = 0;
+    for (const batch of hist) { // newest first
+      send('scan-progress', { i: ++i, n: hist.length, file: 'putting files back…' });
+      for (const m of [...batch.moves].reverse()) {
+        try {
+          if (fs.existsSync(m.from) && !fs.existsSync(m.to)) continue; // already back
+          if (!fs.existsSync(m.to)) { const now = whereNow(m.to); if (now && now !== m.to) { organizer.moveFile(now, m.from); restored++; continue; } problems.push({ file: m.from, error: 'not found where I left it' }); continue; }
+          if (safety.isSystemPath(m.from)) { problems.push({ file: m.from, error: 'protected location' }); continue; }
+          const dest = organizer.moveFile(m.to, m.from); // keeps both if something new now has that name
+          if (path.resolve(dest) !== path.resolve(m.from)) problems.push({ file: m.from, error: `a different file now has that name, so it was put back as “${path.basename(dest)}”` });
+          restored++;
+        } catch (e) { problems.push({ file: m.from, error: e.message }); }
+      }
+      await new Promise((r) => setImmediate(r));
+    }
+    store.set('history', []);
+    store.set('placedByApp', []);
+    store.set('movedLog', {});
+    state.lastPlan = null;
+    if (s.organisedRoot && fs.existsSync(s.organisedRoot)) organizer.removeEmptyDirs(s.organisedRoot); // folders the app made and left empty
+    setSettings({ ...getSettings(), autoOrganise: false });
+    refreshIndex().catch(() => {});
+    return { restored, problems, report };
+  });
   handle('organise:undo', (id) => {
     const hist = store.get('history', []);
     const batch = hist.find((b) => b.id === id);

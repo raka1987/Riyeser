@@ -18,6 +18,8 @@ let combine = [];     // PDFs chosen for combining
 let everythingDone = null; // last "tidy everything" batch
 let review = { tab: 'labels', pool: null, hasAiKey: false, useAI: false, done: null, dupeDone: null, only: 'all' };
 let docTypes = [];
+let restoreFilter = '';
+let restoreDone = null;
 let dupeChoice = new Map(); // duplicate file path -> 'keep' | 'archive' | 'bin'
 let appVersion = '';
 let folderSel = new Set(); // files ticked on the Folders page
@@ -330,11 +332,13 @@ const pages = {
     const folders = await bridge.call('organise:folders');
     const groups = {};
     for (const p of plan?.plan || []) {
-      const key = p.fallback ? `Couldn't tell who it's from › ${p.dir.split(/[\\/]/).slice(-2).join(' › ')}` : p.company ? `${p.companyType} › ${p.company}${p.group && /[\\/]Projects[\\/]/.test(p.dir) ? ` › 🔗 ${p.group.name}` : ''}` : p.category === 'Media' ? 'Photos, videos & other media' : 'General documents';
+      const key = (settings.filingLayout || 'typeYear') === 'typeYear' && p.dir && p.dir.startsWith(settings.organisedRoot)
+        ? p.dir.slice(settings.organisedRoot.length).split(/[\\/]/).filter(Boolean).join(' › ') + (p.fallback ? ' (type unknown — filed by format)' : '')
+        : p.fallback ? `Couldn't tell who it's from › ${p.dir.split(/[\\/]/).slice(-2).join(' › ')}` : p.company ? `${p.companyType} › ${p.company}${p.group && /[\\/]Projects[\\/]/.test(p.dir) ? ` › 🔗 ${p.group.name}` : ''}` : p.category === 'Media' ? 'Photos, videos & other media' : 'General documents';
       (groups[key] = groups[key] || []).push(p);
     }
     page.innerHTML = `
-      <div class="row"><div><h1>Organise files</h1><p class="sub">Sorts ${settings.watchFolders.map((f) => `<b>${esc(f.split(/[\\/]/).pop())}</b>`).join(' and ') || '(add folders in Settings)'} into your <b title="${esc(settings.organisedRoot)}">Organised</b> folder by company and document type. Nothing moves until you approve it, and every batch can be undone.</p></div></div>
+      <div class="row"><div><h1>Organise files</h1><p class="sub">Sorts ${settings.watchFolders.map((f) => `<b>${esc(f.split(/[\\/]/).pop())}</b>`).join(' and ') || '(add folders in Settings)'} into your <b title="${esc(settings.organisedRoot)}">Organised</b> folder ${(settings.filingLayout || 'typeYear') === 'typeYear' ? 'by type and year (e.g. <b>Invoices › 2026</b>)' : 'by company and document type'}. Nothing moves until you approve it, and every batch can be undone.</p></div></div>
       <div class="card" id="foldercard"><h2>Folders to tidy</h2>
         <p class="muted small">Tick the loose files to sort, and choose what happens to each folder: <b>Leave</b> it alone, <b>Sort files inside</b> (each file is filed separately and the empty folder is removed), or <b>Move whole folder</b> (kept together, moved into Organised — under the company if most of it is theirs).</p>
         ${folders.length ? `<div class="folderlist">${folders.map((f) => f.isRoot
@@ -428,7 +432,7 @@ const pages = {
     const order = Object.keys(groups).sort((a, b) => (a === 'Folders kept together' ? -1 : b === 'Folders kept together' ? 1 : a.localeCompare(b)));
     const nFiles = (plan?.plan || []).reduce((n, p) => n + (p.isFolder ? p.files : 1), 0);
     page.innerHTML = `<h1>Tidy everything</h1>
-      <p class="sub">Goes through all your personal folders <b>and every sub-folder</b>, and files everything like an assistant would: by company, by type and by year — e.g. <b>Clients › Acme Plumbing › Invoices › 2026</b> or <b>Media › Images › 2024</b>. Named folders whose contents belong together (like “Ark project” or “Smith wedding”) are kept together. Nothing moves until you approve it, and Undo puts everything back.</p>
+      <p class="sub">Goes through all your personal folders <b>and every sub-folder</b>, and files everything like an assistant would: ${(settings.filingLayout || 'typeYear') === 'typeYear' ? 'by type and by year — e.g. <b>Invoices › 2026</b>, <b>Drawings › 2026</b> or <b>Pictures › 2024</b>' : 'by company, by type and by year — e.g. <b>Clients › Acme Plumbing › Invoices › 2026</b> or <b>Media › Images › 2024</b>'}. Named folders whose contents belong together (like “Ark project” or “Smith wedding”) are kept together. Nothing moves until you approve it, and Undo puts everything back.</p>
       <div class="grid">
         <div class="card"><h2>Folders to go through</h2>${list('libraryFolders', libs, 'None — add a folder')}<button style="margin-top:8px" data-act="evadd" data-key="libraryFolders">+ Add folder</button></div>
         <div class="card"><h2>Never touch</h2><p class="muted small">Anything in these folders stays exactly where it is.</p>${list('neverTouch', never, 'Nothing yet')}<button style="margin-top:8px" data-act="evadd" data-key="neverTouch">+ Add folder</button>
@@ -450,6 +454,36 @@ const pages = {
       ${plan.review.length ? `<div class="card"><h2>Needs your help (${plan.review.length})</h2><p class="muted small">I couldn't tell where these belong, so they stay where they are.</p><ul class="list">${plan.review.slice(0, 200).map((r) => `<li><div class="grow"><b>${esc(r.name)}</b><div class="path">${esc(short(r.from))}</div></div><button class="link" data-act="open" data-path="${esc(r.from)}">Open</button></li>`).join('')}</ul></div>` : ''}`}`;
   },
 
+  // "Where are my files?": every file the app moved, where it is now, and one button to put everything back.
+  async restore() {
+    const r = await bridge.call('restore:summary');
+    const q = restoreFilter.trim().toLowerCase();
+    const rows = r.files.filter((f) => !q || `${f.name} ${f.was} ${f.now || ''}`.toLowerCase().includes(q));
+    const dirOf = (p) => p.split(/[\\/]/).slice(0, -1).join(p.includes('\\') ? '\\' : '/');
+    const away = r.files.filter((f) => !f.back).length;
+    page.innerHTML = `<h1>Where are my files?</h1>
+      <p class="sub">Every file Desk Assistant has moved or renamed, where it used to be, and where it is now. Search by its old or new name.</p>
+      ${restoreDone ? `<div class="card" style="border-color:var(--good)"><b>Put back ${restoreDone.restored} file(s) where they were.</b>
+        ${restoreDone.problems.length ? `<details class="small" style="margin-top:6px"><summary>${restoreDone.problems.length} need a look</summary><ul class="list">${restoreDone.problems.map((p) => `<li><div class="grow"><b class="fname">${esc(p.file.split(/[\\/]/).pop())}</b><div class="small muted">${esc(p.error)}</div><div class="route small">${route(dirOf(p.file))}</div></div></li>`).join('')}</ul></details>` : ''}
+        <div class="small muted" style="margin-top:6px">A list of where everything was is saved at <button class="link small" data-act="reveal" data-path="${esc(restoreDone.report)}">${esc(restoreDone.report.split(/[\\/]/).pop())}</button>. Automatic tidying is switched off.</div></div>` : ''}
+      <div class="card"><div class="row wrap"><div class="grow"><h2 style="margin:0">Put everything back</h2>
+          <p class="muted small" style="margin:4px 0 0">Moves <b>${away}</b> file(s) back to the folder they were in, with their original names, from before Desk Assistant touched them. If something new has taken a name, both are kept. Nothing is deleted.</p></div>
+        <button class="primary" data-act="restoreall" ${away ? '' : 'disabled'}>Put everything back</button>
+        <button data-act="restorereport" ${r.files.length ? '' : 'disabled'}>Save list as spreadsheet</button></div>
+        ${r.untraceable.length ? `<details class="small" style="margin-top:10px"><summary><b>${r.untraceable.length} file(s) I moved but can't trace back</b> <span class="muted">— their old location is no longer recorded, so they'll stay where they are</span></summary>
+          <ul class="list">${r.untraceable.slice(0, 300).map((p) => `<li><div class="grow"><b class="fname">${esc(p.split(/[\\/]/).pop())}</b><div class="route small">${route(dirOf(p))}</div></div><button class="link" data-act="reveal" data-path="${esc(p)}">Show</button></li>`).join('')}</ul></details>` : ''}
+        ${r.binned.length ? `<details class="small" style="margin-top:6px"><summary><b>${r.binned.length} file(s) were moved to the Recycle Bin</b> <span class="muted">— open the Recycle Bin on your desktop, right-click one → Restore</span></summary>
+          <ul class="list">${r.binned.slice(0, 300).map((b) => `<li><div class="grow"><b class="fname">${esc(b.path.split(/[\\/]/).pop())}</b><div class="route small">from ${route(dirOf(b.path))}</div></div></li>`).join('')}</ul></details>` : ''}</div>
+      <div class="card"><div class="row wrap"><h2 style="margin:0" class="grow">Files moved or renamed (${r.files.length})</h2>
+        <input id="rsearch" placeholder="Search by old or new name…" value="${esc(restoreFilter)}" style="min-width:220px"></div>
+        ${rows.length ? `<ul class="list">${rows.slice(0, 500).map((f) => `<li><div class="grow"><b class="fname">${esc(f.now ? f.now.split(/[\\/]/).pop() : f.name)}</b>${f.now && f.now.split(/[\\/]/).pop() !== f.name ? `<div class="small muted">was called ${esc(f.name)}</div>` : ''}
+            <div class="route small"><span class="muted">was in</span> ${route(dirOf(f.was))}</div>
+            <div class="route small">${f.back ? '<span style="color:var(--good)">back where it was</span>' : f.now ? `<span class="muted">now in</span> ${route(dirOf(f.now))}` : '<span style="color:var(--warn)">not found — it may have been moved or deleted outside the app</span>'}</div>
+            <div class="small muted">moved ${esc(new Date(f.at).toLocaleString())}</div></div>
+            ${f.now ? `<button class="link" data-act="open" data-path="${esc(f.now)}">Open</button><button class="link" data-act="reveal" data-path="${esc(f.now)}">Show</button>` : ''}</li>`).join('')}</ul>${rows.length > 500 ? `<p class="muted small">Showing 500 of ${rows.length} — search to narrow it down.</p>` : ''}` : `<div class="empty">${r.files.length ? 'No matches.' : 'Desk Assistant hasn’t moved any files (or they’ve all been put back).'}</div>`}</div>`;
+    const inp = $('#rsearch');
+    if (inp) inp.addEventListener('input', () => { restoreFilter = inp.value; clearTimeout(inp._t); inp._t = setTimeout(async () => { await pages.restore(); const i = $('#rsearch'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250); });
+  },
   // "Smart review": reads every file in the chosen folders, suggests a label, a dated name and a folder, and finds duplicates.
   async review() {
     const last = await bridge.call('organise:last');
@@ -693,12 +727,18 @@ Object.assign(pages, {
       <div class="grid">
       <div class="card" id="s-sorting"><h2>Folders to tidy</h2><p class="muted small">Where new files land: Downloads, Desktop, and your phone's synced folder (e.g. OneDrive / Google Drive / iCloud “Camera Roll” or “Scans”).</p>${folderList('watchFolders')}
         <label class="row small" style="margin-top:10px"><input type="checkbox" id="recursive" ${s.recursiveScan ? 'checked' : ''}> Tick new sub-folders automatically (you can untick them on the Organise page)</label>
-        <label class="row small"><input type="checkbox" id="rename" ${s.renameFiles ? 'checked' : ''}> Rename files from their contents (e.g. “2026-11-03 Acme Plumbing Invoice 1042.pdf”)</label>
-        <label class="row small"><input type="checkbox" id="byyear" ${s.groupByYear ? 'checked' : ''}> Put files in a folder for each year (…/Invoices/2026/)</label>
-        <label class="row small"><input type="checkbox" id="sortall" ${s.sortEverything !== false ? 'checked' : ''}> File everything — things I can't identify go into Organised\\Other (by type) instead of being left behind</label>
+        <div class="row small wrap" style="margin:4px 0"><b>Folder layout</b>
+          <select id="layout"><option value="typeYear" ${(s.filingLayout || 'typeYear') === 'typeYear' ? 'selected' : ''}>Type › Year — Invoices › 2026, Drawings › 2026</option>
+            <option value="company" ${s.filingLayout === 'company' ? 'selected' : ''}>Company › Type — Clients › Acme Plumbing › Invoices</option></select></div>
+        <div class="row small wrap" style="margin:4px 0"><b>File names</b>
+          <select id="namestyle"><option value="full" ${(s.nameStyle || 'full') === 'full' ? 'selected' : ''}>Full tidy name — 2026-11-03 Acme Plumbing Invoice INV-1042.pdf</option>
+            <option value="date" ${s.nameStyle === 'date' ? 'selected' : ''}>Add the date in front — 2026-11-03 scan0042.pdf</option>
+            <option value="keep" ${s.nameStyle === 'keep' ? 'selected' : ''}>Keep my names</option></select></div>
+        ${s.filingLayout === 'company' ? `<label class="row small"><input type="checkbox" id="byyear" ${s.groupByYear ? 'checked' : ''}> Put files in a folder for each year (…/Invoices/2026/)</label>` : ''}
+        ${s.filingLayout === 'company' ? `<label class="row small"><input type="checkbox" id="sortall" ${s.sortEverything !== false ? 'checked' : ''}> File everything — things I can't identify go into Organised\\Other (by type) instead of being left behind</label>` : ''}
         <label class="row small"><input type="checkbox" id="ocrpdf" ${s.ocrPdfs !== false ? 'checked' : ''}> Read scanned PDFs with text recognition (OCR) — a few seconds per document, done once</label>
         <label class="row small"><input type="checkbox" id="ocrimg" ${s.ocrImages ? 'checked' : ''}> Also read photos and screenshots (finds receipts you've photographed; slower)</label>
-        <label class="row small"><input type="checkbox" id="related" ${s.groupRelated !== false ? 'checked' : ''}> Keep related documents together (e.g. the quote, invoice and receipt for one job go in …/Projects/12 Smith Street/)</label>
+        ${s.filingLayout === 'company' ? `<label class="row small"><input type="checkbox" id="related" ${s.groupRelated !== false ? 'checked' : ''}> Keep related documents together (e.g. the quote, invoice and receipt for one job go in …/Projects/12 Smith Street/)</label>` : ''}
         <label class="row small">Dates like 03/04/2026 mean <select id="datefmt"><option value="1" ${s.dayFirstDates ? 'selected' : ''}>3 April (NZ/AU/UK)</option><option value="0" ${s.dayFirstDates ? '' : 'selected'}>March 4 (US)</option></select></label>
         <label class="row small"><input type="checkbox" id="auto" ${s.autoOrganise ? 'checked' : ''}> Tidy automatically every hour (only files I'm sure about)</label></div>
       <div class="card"><h2>Organised folder</h2><p class="muted small">Where sorted files go.</p><div class="path">${esc(s.organisedRoot)}</div><button style="margin-top:8px" data-act="setroot">Change…</button>
@@ -740,11 +780,12 @@ Object.assign(pages, {
       </div>`;
     const bindCheck = (id, fn) => $(id).addEventListener('change', async (e) => { await saveSettings(fn(e.target.checked)); toast('Saved'); });
     bindCheck('#recursive', (v) => ({ recursiveScan: v }));
-    bindCheck('#rename', (v) => ({ renameFiles: v }));
-    bindCheck('#byyear', (v) => ({ groupByYear: v }));
-    bindCheck('#related', (v) => ({ groupRelated: v }));
+    if ($('#byyear')) bindCheck('#byyear', (v) => ({ groupByYear: v }));
+    $('#layout')?.addEventListener('change', async (e) => { await saveSettings({ filingLayout: e.target.value }); toast('Folder layout saved'); render(); });
+    $('#namestyle')?.addEventListener('change', async (e) => { await saveSettings({ nameStyle: e.target.value, renameFiles: e.target.value !== 'keep' }); toast('File names setting saved'); });
+    if ($('#related')) bindCheck('#related', (v) => ({ groupRelated: v }));
     bindCheck('#ocrpdf', (v) => ({ ocrPdfs: v }));
-    bindCheck('#sortall', (v) => ({ sortEverything: v }));
+    if ($('#sortall')) bindCheck('#sortall', (v) => ({ sortEverything: v }));
     bindCheck('#aiall', (v) => ({ aiCheckAll: v }));
     bindCheck('#ocrimg', (v) => ({ ocrImages: v }));
     $('#datefmt').addEventListener('change', async (e) => { await saveSettings({ dayFirstDates: e.target.value === '1' }); toast('Saved'); });
@@ -853,6 +894,14 @@ const actions = {
     } finally { scanning = false; render(); }
   },
   evcancel: () => bridge.call('everything:cancel'),
+  restoreall: async (el) => {
+    if (!(await bridge.call('confirm', 'Put every file back where it was?', 'Every file Desk Assistant moved or renamed goes back to its original folder and name. Nothing is deleted. A list of where everything was is saved first.'))) return;
+    el.disabled = true; el.textContent = 'Putting files back…';
+    restoreDone = await bridge.call('restore:all');
+    toast(`Put back ${restoreDone.restored} file(s).`);
+    plan = null; render();
+  },
+  restorereport: async () => { const f = await bridge.call('restore:report'); toast(`Saved ${f.split(/[\\/]/).pop()}`); },
   rvtab: (el) => { review.tab = el.dataset.t; render(); },
   rvadd: async () => { const f = await bridge.call('dialog:folder'); if (f && !review.pool.includes(f)) { review.pool = await bridge.call('review:setPool', [...review.pool, f]); render(); } },
   rvdel: async (el) => { review.pool = await bridge.call('review:setPool', review.pool.filter((_, i) => i !== +el.dataset.i)); render(); },

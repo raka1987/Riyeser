@@ -5,7 +5,7 @@
 // - Everything is filed by year as well: Clients > Acme Plumbing > Invoices > 2026, Media > Images > 2024.
 const fs = require('fs');
 const path = require('path');
-const { analyseFile, placeItem, safeName } = require('./organizer');
+const { analyseFile, placeItem, safeName, usesTypeYear, typeFolder, MEDIA_FOLDER } = require('./organizer');
 const { linkRelated } = require('./related');
 const { isSystemPath, isTooBroad, isProtectedFile } = require('./safety');
 
@@ -102,6 +102,23 @@ function folderDestination(node, items, settings) {
   const companyNames = (settings.companies || []).flatMap((c) => [c.name, ...(c.aliases || [])]).map((x) => x.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()).filter(Boolean);
   if (companyNames.some((c) => n === c || n.startsWith(c + ' ') && n.split(' ').length <= c.split(' ').length + 1)) return null;
   const root = settings.organisedRoot;
+  if (usesTypeYear(settings)) {
+    // Type › Year: a folder that belongs together goes inside its type and year, e.g. Drawings\2026\Ark project.
+    const docsT = items.filter((i) => i.category !== 'Media');
+    const mediaT = items.filter((i) => i.category === 'Media');
+    const yr = (majority(items.map(yearOf)) || {}).value || 'Undated';
+    const nm = safeName(node.name);
+    if (mediaT.length / items.length >= 0.8) {
+      const kind = MEDIA_FOLDER[(majority(mediaT.map((i) => i.docType)) || {}).value] || 'Pictures';
+      return { dir: path.join(root, kind, yr), to: path.join(root, kind, yr, nm), why: `an album of ${mediaT.length} ${kind.toLowerCase()}` };
+    }
+    const t = majority(docsT.map((i) => (i.docType && i.docType !== 'Other' ? i.docType : null)));
+    if (docsT.length >= 2 && t && t.share >= 0.6) {
+      const tf = typeFolder({ docType: t.value }).map(safeName);
+      return { dir: path.join(root, ...tf, yr), to: path.join(root, ...tf, yr, nm), why: `mostly ${t.value.toLowerCase()}` };
+    }
+    return null; // mixed contents: each file goes to its own type and year
+  }
   const docs = items.filter((i) => i.category !== 'Media');
   const media = items.filter((i) => i.category === 'Media');
   const year = (majority(items.map(yearOf)) || {}).value || new Date().getFullYear().toString();
@@ -180,7 +197,7 @@ async function planEverything(settings, { ai = null, onProgress = () => {}, isCa
     const { dir, unsure, to } = placeItem(item, yearly);
     if (!dir || unsure) { review.push({ ...item, suggestedDir: dir }); continue; }
     let finalDir = dir;
-    if (item.fallback) finalDir = path.join(dir, yearOf(item) || 'Undated');
+    if (item.fallback && !usesTypeYear(settings)) finalDir = path.join(dir, yearOf(item) || 'Undated');
     const dest = path.join(finalDir, path.basename(to));
     if (path.resolve(dest).toLowerCase() === path.resolve(item.from).toLowerCase()) continue;
     plan.push({ ...item, dir: finalDir, to: dest });

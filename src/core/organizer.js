@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { extractText } = require('./extract');
 const { classify, folderFor } = require('./classifier');
-const { extractDetails, suggestName, typeMismatch } = require('./details');
+const { extractDetails, suggestName, smartName, typeMismatch, drawingNumber } = require('./details');
 const { extractKeys, linkRelated } = require('./related');
 const { isSystemPath, isTooBroad, isProtectedFile } = require('./safety');
 const { featureTokens, learnedDestination } = require('./learn');
@@ -95,7 +95,7 @@ async function analyseFile(file, stat, settings, ai, { keepText = false } = {}) 
   const name = path.basename(file);
   return {
     from: file, name, ext: path.extname(file), size: stat.size, ...c,
-    details: extractDetails(text, name, { dayFirst: settings.dayFirstDates !== false }),
+    details: { ...extractDetails(text, name, { dayFirst: settings.dayFirstDates !== false }), ...(c.docType === 'Plans & Drawings' ? { drawing: drawingNumber(text, name) } : {}) },
     fileDate: new Date(stat.mtimeMs).toISOString().slice(0, 10),
     warning: c.category === 'Media' ? null : typeMismatch(name, text),
     keys: c.category === 'Media' ? [] : extractKeys(text, name),
@@ -105,7 +105,34 @@ async function analyseFile(file, stat, settings, ai, { keepText = false } = {}) 
   };
 }
 
-/** Decide the folder and name for an analysed file. Related documents get their own project folder. */
+// ---- "Type › Year" filing (the default): Organised\Invoices\2026, Organised\Drawings\2026, Organised\Pictures\2024 ----
+const TYPE_FOLDER = { 'Plans & Drawings': 'Drawings' };
+const MEDIA_FOLDER = { Images: 'Pictures', Videos: 'Videos', Audio: 'Music & audio', Installers: 'Installers', Archives: 'Zip files' };
+const yearOfItem = (item) => (item.details?.date || item.aiDate || item.details?.month || item.fileDate || '').slice(0, 4) || 'Undated';
+function typeFolder(item) {
+  if (item.category === 'Media') return [MEDIA_FOLDER[item.docType] || item.docType || 'Other'];
+  if (item.docType && item.docType !== 'Other' && !MEDIA_KINDS.has(item.docType)) {
+    return TYPE_FOLDER[item.docType] ? [TYPE_FOLDER[item.docType]] : folderFor(item.docType).split('/');
+  }
+  return [kindOf(item.ext)]; // can't tell what it is: file it by its format (PDFs, Spreadsheets...)
+}
+const typeYearDir = (root, item) => path.join(root, ...typeFolder(item).map(safeName), yearOfItem(item));
+const usesTypeYear = (settings) => (settings.filingLayout || 'typeYear') === 'typeYear';
+
+/** The file's new name, following the chosen style: keep it, put the date in front, or a full tidy name. */
+function nameFor(item, settings) {
+  if (settings.renameFiles === false || settings.nameStyle === 'keep') return null;
+  if (item.category === 'Media') return null;
+  if (settings.nameStyle === 'date') {
+    const when = item.aiDate || item.details?.date || item.details?.month;
+    if (!when || item.name.startsWith(when)) return null;
+    return `${when} ${item.name}`;
+  }
+  if (!usesTypeYear(settings) && settings.nameStyle !== 'full') return suggestName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, fallbackDate: item.fileDate });
+  return smartName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, aiTitle: item.aiTitle, aiDate: item.aiDate, fallbackDate: item.fileDate });
+}
+
+/** Decide the folder and name for an analysed file. */
 function placeItem(item, settings) {
   const root = settings.organisedRoot;
   if (item.company && !item.companyType) {
@@ -122,21 +149,27 @@ function placeItem(item, settings) {
   if (rule) {
     const dir = rules.ruleFolder(rule, item, root);
     item.ruled = rule.name; item.learned = `your rule: ${rule.name}`; item.fallback = false; item.confidence = 'high';
-    item.newName = settings.renameFiles === false ? null
-      : suggestName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, fallbackDate: item.fileDate });
+    item.newName = nameFor(item, settings);
     return { dir, unsure: false, to: path.join(dir, item.newName || item.name) };
   }
-  // Where you've put similar files before wins over the general rules.
-  let learned = settings._examples ? learnedDestination(item, settings._examples, root) : null;
+  // Where you've chosen to put similar files before wins over the general layout.
+  // With Type › Year, only folders you picked yourself ("Change folder…") count - not guesses from where files happen to be.
+  const examples = usesTypeYear(settings) ? (settings._examples || []).filter((e) => e.explicit) : settings._examples;
+  let learned = examples && examples.length ? learnedDestination(item, examples, root) : null;
   if (learned && inArchive(learned.dir, root)) learned = null;
   if (learned) {
     item.learned = learned.because;
     item.fallback = false;
     if (item.confidence !== 'high') item.confidence = learned.support >= 2 ? 'high' : 'medium';
     item.reasons = [`${learned.because}`, ...(item.reasons || [])];
-    item.newName = settings.renameFiles === false ? null
-      : suggestName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, fallbackDate: item.fileDate });
+    item.newName = nameFor(item, settings);
     return { dir: learned.dir, unsure: false, to: path.join(learned.dir, item.newName || item.name) };
+  }
+  if (usesTypeYear(settings)) {
+    const dir = typeYearDir(root, item);
+    item.fallback = !(item.docType && item.docType !== 'Other') && item.category !== 'Media'; // filed by format only
+    item.newName = nameFor(item, settings);
+    return { dir, unsure: false, to: path.join(dir, item.newName || item.name) };
   }
   const grouped = item.group && item.company && settings.groupRelated !== false;
   let dir;
@@ -152,8 +185,7 @@ function placeItem(item, settings) {
       : path.join(root, 'Other', kindOf(item.ext));
     item.fallback = true;
   }
-  item.newName = settings.renameFiles === false ? null
-    : suggestName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, fallbackDate: item.fileDate });
+  item.newName = nameFor(item, settings);
   const unsure = !dir || (!item.fallback && !grouped && item.confidence === 'low' && item.category !== 'Media');
   return { dir, unsure, to: dir ? path.join(dir, item.newName || item.name) : null };
 }
@@ -357,4 +389,4 @@ async function findDuplicates(folders) {
   return groups.sort((a, b) => b.size * b.files.length - a.size * a.files.length);
 }
 
-module.exports = { inArchive, analyseFile, placeItem, safeName, planOrganise, planRecheck, scanFolders, removeEmptyDirs, applyPlan, undoBatch, findDuplicates, listFiles, targetDir, classifyFile, moveFile };
+module.exports = { usesTypeYear, typeFolder, typeYearDir, yearOfItem, MEDIA_FOLDER, inArchive, analyseFile, placeItem, safeName, planOrganise, planRecheck, scanFolders, removeEmptyDirs, applyPlan, undoBatch, findDuplicates, listFiles, targetDir, classifyFile, moveFile };

@@ -12,6 +12,7 @@ const { upcomingMeetings, companiesInMeeting } = require('../src/core/calendar')
 const { categorise } = require('../src/core/email');
 
 const settings = {
+  filingLayout: 'company', // the older Company › Type layout (Type › Year is tested separately)
   ownCompanyNames: ['Riki Consulting Ltd'],
   companies: [{ name: 'Acme Plumbing', aliases: ['acme'], type: 'Clients' }, { name: 'Spark', aliases: [], type: 'Utilities' }],
 };
@@ -496,4 +497,24 @@ test('a services drawing that mentions "quote" in its notes is a drawing, not a 
   assert.equal(drawing.docType, 'Plans & Drawings');
   const quote = classify({ fileName: 'Q-1123.pdf', ext: '.pdf', text: 'QUOTATION\nAcme Plumbing\nQuote number Q-1123\nSupply and install ductwork\nSubtotal $12,400.00\nTotal $14,260.00\nValid until 30/12/2026' }, settings);
   assert.equal(quote.docType, 'Quotes');
+});
+
+test('Type › Year filing with full tidy names (the default layout)', async () => {
+  const { reviewFiles } = require('../src/core/review');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'typeyear-'));
+  const pool = path.join(tmp, 'Desktop'); fs.mkdirSync(pool);
+  const org = path.join(tmp, 'Organised');
+  fs.writeFileSync(path.join(pool, 'scan0042.txt'), 'TAX INVOICE\nAcme Plumbing\nInvoice Number INV-1042\nInvoice Date: 3 November 2025\nTotal $1,200.00');
+  fs.writeFileSync(path.join(pool, 'Westin Data schematic.txt'), 'ELECTRICAL SERVICES\nDATA SCHEMATIC\nDRAWN BY AB CHECKED BY CD\nDRAWING NO E-301 REVISION B\nNOT FOR CONSTRUCTION DO NOT SCALE\nWestin Hotel\nDate: 6/11/2026');
+  fs.writeFileSync(path.join(pool, 'random thoughts.txt'), 'hello world');
+  const old = new Date('2024-05-01').getTime() / 1000; for (const f of fs.readdirSync(pool)) fs.utimesSync(path.join(pool, f), old, old);
+  const s = { ...settings, filingLayout: undefined, nameStyle: 'full', organisedRoot: org };
+  const r = await reviewFiles([pool], s);
+  const to = (n) => path.relative(org, r.plan.find((p) => p.name === n).to);
+  assert.equal(to('scan0042.txt'), path.join('Invoices', '2025', '2025-11-03 Acme Plumbing Invoice INV-1042.txt'));
+  assert.match(to('Westin Data schematic.txt'), /^Drawings[\\/]2026[\\/]2026-11-06 .*Drawing E-301 Rev B/);
+  assert.equal(path.dirname(to('random thoughts.txt')), path.join('Text files', '2024')); // unknown type: by format, by year
+  // keep names
+  const k = await reviewFiles([pool], { ...s, nameStyle: 'keep' });
+  assert.equal(path.relative(org, k.plan.find((p) => p.name === 'scan0042.txt').to), path.join('Invoices', '2025', 'scan0042.txt'));
 });

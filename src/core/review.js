@@ -30,7 +30,7 @@ async function reviewFiles(folders, settings, { ai = null, onProgress = () => {}
   }
   const files = [...seen];
   // With AI switched on, every document gets a second opinion (not only the unsure ones).
-  const s = { ...settings, groupByYear: true, renameFiles: true, aiCheckAll: !!ai || settings.aiCheckAll };
+  const s = { ...settings, groupByYear: true, aiCheckAll: !!ai || settings.aiCheckAll };
   const items = []; const skipped = [];
   let i = 0;
   for (const file of files.slice(0, maxFiles)) {
@@ -53,12 +53,12 @@ async function reviewFiles(folders, settings, { ai = null, onProgress = () => {}
 
   const plan = []; let fine = 0;
   for (const item of items) {
+    item.details = { ...item.details, drawing: drawingNumber(item._text, item.name) };
     const { dir } = placeItem(item, s);
     // A file you filed yourself inside Organised stays in its folder - only its name is reviewed.
     const keepFolder = inside(item.from, root) && !placed.has(item.from);
     const destDir = keepFolder || !dir ? path.dirname(item.from) : dir;
-    item.details = { ...item.details, drawing: drawingNumber(item._text, item.name) };
-    const suggested = smartName({ fileName: item.name, ext: item.ext, classification: item, details: item.details, aiTitle: item.aiTitle, aiDate: item.aiDate, fallbackDate: item.fileDate });
+    const suggested = item.newName;
     const newName = suggested || item.name;
     const to = path.join(destDir, newName);
     const label = {
