@@ -191,6 +191,53 @@ function placedByApp() {
   if (!placed) placed = store.set('placedByApp', store.get('history', []).flatMap((b) => b.moves.map((m) => m.to)));
   return new Set(placed);
 }
+/**
+ * Remember every move the app makes (old address -> new address), so a file can always be found from its old address:
+ * from a list that's out of date, or by searching its old name.
+ */
+function recordMoves(batch, { byApp = true } = {}) {
+  const moves = (batch && batch.moves) || [];
+  if (!moves.length) return;
+  store.update('movedLog', {}, (log) => {
+    for (const m of moves) log[m.from] = m.to;
+    const keys = Object.keys(log);
+    for (const k of keys.slice(0, Math.max(0, keys.length - 30000))) delete log[k];
+    return log;
+  });
+  if (byApp) store.set('placedByApp', [...placedByApp(), ...moves.map((m) => m.to)].slice(-50000));
+  if (index) {
+    for (const m of moves) {
+      const d = index.docs[m.from];
+      if (!d) continue;
+      delete index.docs[m.from];
+      const formerNames = [...new Set([...(d.formerNames || []), d.name])].filter((n) => n !== path.basename(m.to)).slice(-5);
+      index.docs[m.to] = { ...d, name: path.basename(m.to), dir: path.dirname(m.to), formerNames };
+    }
+    index.save();
+  }
+}
+/** Where is this file now? Follows the app's own moves (including whole folders that were moved). */
+function whereNow(p) {
+  if (!p || fs.existsSync(p)) return p;
+  // Undo history (oldest first, so the latest move wins), then the full move log on top.
+  const log = {};
+  for (const b of [...store.get('history', [])].reverse()) for (const m of b.moves) log[m.from] = m.to;
+  Object.assign(log, store.get('movedLog', {}));
+  let cur = p;
+  for (let hop = 0; hop < 25 && !fs.existsSync(cur); hop++) {
+    if (log[cur]) { cur = log[cur]; continue; }
+    // the file may have been inside a folder that moved
+    let dir = path.dirname(cur); let rest = path.basename(cur); let found = false;
+    while (dir && dir !== path.dirname(dir)) {
+      if (log[dir]) { cur = path.join(log[dir], rest); found = true; break; }
+      rest = path.join(path.basename(dir), rest); dir = path.dirname(dir);
+    }
+    if (!found) break;
+  }
+  return fs.existsSync(cur) ? cur : null;
+}
+const movedMessage = (p) => `“${path.basename(p)}” isn't at that address any more and I couldn't find where it went. Try searching for it (Ctrl+Shift+Space) - old names work too.`;
+
 /** Examples of where you like things: folders you chose + files you put in Organised yourself (read from the search index). */
 function buildExamples(s) {
   const examples = [...store.get('learned', [])];
@@ -198,7 +245,7 @@ function buildExamples(s) {
   const placed = placedByApp();
   let n = 0;
   for (const [p, d] of Object.entries(index.docs)) {
-    if (!p.startsWith(root + path.sep) || placed.has(p) || n > 4000) continue;
+    if (!p.startsWith(root + path.sep) || placed.has(p) || organizer.inArchive(p, root) || n > 4000) continue;
     examples.push(learn.makeExample({ name: d.name, text: d.text, company: d.company, docType: d.docType, ext: d.ext }, path.dirname(p), root));
     n++;
   }
@@ -238,6 +285,7 @@ async function scanInbox({ quiet = false } = {}) {
     if (sure.length) {
       const batch = organizer.applyPlan(sure);
       store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+      recordMoves(batch);
       if (!quiet || batch.moves.length) notify('Files tidied', `Filed ${batch.moves.length} file(s). Open the app to review or undo.`, () => showMain('organise'));
       state.lastPlan = { ...result, plan: result.plan.filter((p) => !sure.includes(p)) };
     }
@@ -511,6 +559,7 @@ function registerIpc() {
     const batch = organizer.applyPlan(items);
     tidyEmptied(batch);
     store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+    recordMoves(batch, { byApp: false }); // your own filing choices
     refreshIndex().catch(() => {});
     return batch;
   });
@@ -519,6 +568,7 @@ function registerIpc() {
     const batch = organizer.applyPlan(items.map((i) => ({ from: i.from, to: i.to })));
     tidyEmptied(batch);
     store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+    recordMoves(batch, { byApp: false }); // your own filing choices
     refreshIndex().catch(() => {});
     return batch;
   });
@@ -530,7 +580,16 @@ function registerIpc() {
   });
 
   handle('organise:scan', () => scanInbox());
-  handle('organise:last', () => state.lastPlan);
+  handle('organise:last', () => {
+    // Drop files that have been moved since the list was made (by you or another page), so nothing points at an old address.
+    const lp = state.lastPlan;
+    if (lp && lp.plan) {
+      lp.plan = lp.plan.filter((p) => fs.existsSync(p.from));
+      if (lp.review) lp.review = lp.review.filter((p) => fs.existsSync(p.from));
+      if (lp.dupes) lp.dupes = lp.dupes.map((g) => ({ ...g, files: g.files.map((f) => ({ ...f, path: whereNow(f.path) || f.path })).filter((f) => fs.existsSync(f.path)) })).filter((g) => g.files.length > 1);
+    }
+    return lp;
+  });
 
   // Folder browser in the side panel
   handle('folder:roots', () => folderRoots());
@@ -648,6 +707,7 @@ function registerIpc() {
       batch = organizer.applyPlan(toArchive);
       batch.label = `Archived ${batch.moves.length} duplicate${batch.moves.length === 1 ? '' : 's'}`;
       store.update('history', [], (h) => [batch, ...h].slice(0, 50));
+      recordMoves(batch); // archived by the app - never learned from
       failed.push(...batch.errors.map((e) => ({ path: e.from, error: e.error })));
     }
     if (binned.length) store.update('cleanupLog', [], (l) => [{ at: new Date().toISOString(), binned }, ...l].slice(0, 50));
@@ -731,7 +791,7 @@ function registerIpc() {
       for (const g of state.lastPlan.dupes || []) for (const f of g.files) if (moved.has(f.path)) { f.path = moved.get(f.path); f.name = path.basename(f.path); }
     }
     store.update('history', [], (h) => [batch, ...h].slice(0, 50));
-    store.set('placedByApp', [...placedByApp(), ...batch.moves.map((m) => m.to)].slice(-50000));
+    recordMoves(batch);
     refreshIndex().catch(() => {});
     return batch;
   });
@@ -744,6 +804,7 @@ function registerIpc() {
     store.set('history', hist.filter((b) => b.id !== id));
     const undone = new Set(batch.moves.map((m) => m.to));
     store.set('placedByApp', [...placedByApp()].filter((p) => !undone.has(p)));
+    recordMoves({ moves: batch.moves.filter((m) => fs.existsSync(m.from)).map((m) => ({ from: m.to, to: m.from })) }, { byApp: false });
     return { errors };
   });
   handle('organise:duplicates', () => { const s = getSettings(); return organizer.findDuplicates([...new Set([...s.watchFolders, s.organisedRoot])].filter((f) => fs.existsSync(f))); });
@@ -755,8 +816,21 @@ function registerIpc() {
   handle('search', (q) => index.search(q));
   handle('index:rebuild', () => refreshIndex());
   handle('index:stats', () => ({ size: index.size, busy: !!state.busy.index }));
-  handle('file:open', (p) => shell.openPath(p));
-  handle('file:reveal', (p) => shell.showItemInFolder(p));
+  // Opening a file from a list that's out of date: follow it to where it was moved.
+  handle('file:open', async (p) => {
+    const now = whereNow(p);
+    if (!now) throw new Error(movedMessage(p));
+    const err = await shell.openPath(now);
+    if (err) throw new Error(err);
+    return now === p ? null : now;
+  });
+  handle('file:reveal', (p) => {
+    const now = whereNow(p);
+    if (!now) throw new Error(movedMessage(p));
+    shell.showItemInFolder(now);
+    return now === p ? null : now;
+  });
+  handle('file:whereNow', (p) => whereNow(p));
   handle('search:hide', () => searchWin && searchWin.hide());
 
   handle('meetings:get', async (force) => { if (force || !state.meetings.length) await refreshMeetings(); return { meetings: state.meetings, errors: state.meetingErrors }; });

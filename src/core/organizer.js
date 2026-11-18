@@ -30,6 +30,13 @@ function safeName(s) {
   return String(s).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'Unknown';
 }
 
+/** Organised\Archive holds files you've put aside (e.g. archived duplicates). The app never files, renames or learns from them. */
+function inArchive(p, root) {
+  if (!root || !p) return false;
+  const a = path.resolve(root, 'Archive').toLowerCase(); const r = path.resolve(p).toLowerCase();
+  return r === a || r.startsWith(a + path.sep);
+}
+
 function targetDir(root, c) {
   if (c.category === 'Media') return path.join(root, 'Media', c.docType);
   const typeDir = folderFor(c.docType).split('/').map(safeName);
@@ -120,7 +127,8 @@ function placeItem(item, settings) {
     return { dir, unsure: false, to: path.join(dir, item.newName || item.name) };
   }
   // Where you've put similar files before wins over the general rules.
-  const learned = settings._examples ? learnedDestination(item, settings._examples, root) : null;
+  let learned = settings._examples ? learnedDestination(item, settings._examples, root) : null;
+  if (learned && inArchive(learned.dir, root)) learned = null;
   if (learned) {
     item.learned = learned.because;
     item.fallback = false;
@@ -247,7 +255,7 @@ async function proposeFolder(dir, settings, ai) {
 async function planRecheck(settings, { ai = null, onProgress = () => {} } = {}) {
   const root = settings.organisedRoot;
   const plan = [];
-  const files = fs.existsSync(root) ? listFiles(root, { recursive: true, maxDepth: 8, maxFiles: 20000 }) : [];
+  const files = fs.existsSync(root) ? listFiles(root, { recursive: true, maxDepth: 8, maxFiles: 20000 }).filter((f) => !inArchive(f, root)) : [];
   const items = [];
   let i = 0;
   for (const file of files) {
@@ -262,6 +270,7 @@ async function planRecheck(settings, { ai = null, onProgress = () => {} } = {}) 
     if (unsure || !to || item.fallback) continue; // never override your own folders with a guess
     if (settings._placedByApp && !settings._placedByApp.has(item.from)) continue; // you put it there yourself - leave it
     if (path.resolve(to).toLowerCase() === path.resolve(item.from).toLowerCase()) continue;
+    if (inArchive(to, root)) continue; // never suggest moving a working file into the Archive
     const sameFolder = path.resolve(dir).toLowerCase() === path.resolve(path.dirname(item.from)).toLowerCase();
     plan.push({ ...item, dir, to, change: sameFolder ? 'rename' : (item.newName ? 'move + rename' : 'move'), currentDir: path.dirname(item.from) });
   }
@@ -348,4 +357,4 @@ async function findDuplicates(folders) {
   return groups.sort((a, b) => b.size * b.files.length - a.size * a.files.length);
 }
 
-module.exports = { analyseFile, placeItem, safeName, planOrganise, planRecheck, scanFolders, removeEmptyDirs, applyPlan, undoBatch, findDuplicates, listFiles, targetDir, classifyFile, moveFile };
+module.exports = { inArchive, analyseFile, placeItem, safeName, planOrganise, planRecheck, scanFolders, removeEmptyDirs, applyPlan, undoBatch, findDuplicates, listFiles, targetDir, classifyFile, moveFile };

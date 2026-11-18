@@ -110,7 +110,7 @@ document.addEventListener('click', (e) => {
   const n = e.target.closest('[data-folder-open]');
   if (n) { folderFilter = ''; goToFolder(n.dataset.folderOpen); }
 });
-document.addEventListener('dblclick', (e) => { const f = e.target.closest('#ftree [data-file]'); if (f) safe(() => bridge.call('file:open', f.dataset.file)); });
+document.addEventListener('dblclick', (e) => { const f = e.target.closest('#ftree [data-file]'); if (f) safe(async () => { const now = await bridge.call('file:open', f.dataset.file); if (now) movedNote(now); }); });
 
 /** The two-pane layout of the Folders page. The right side is filled by `fill`. */
 async function folderShell(fill) {
@@ -285,6 +285,12 @@ async function offerMatches(rule) {
       <div class="small muted">${esc(p.reasons.slice(0, 2).join(' · '))}</div>${readBox(p)}</td>
     <td><div class="small">${esc(p.docType)}</div><div style="margin-top:4px">${confPill(p.warning ? 'low' : p.confidence)}</div></td>
     <td><button class="link" data-act="${p.isFolder ? 'reveal' : 'open'}" data-path="${esc(p.from)}">${p.isFolder ? 'Show' : 'Open'}</button></td></tr>`).join('');
+
+// A list was out of date: the file had been moved, so it was opened from its new place. Refresh the list.
+function movedNote(now) {
+  toast(`That file had moved — opened it from ${now.split(/[\\/]/).slice(-3, -1).join(' › ')}`);
+  setTimeout(() => render(), 300);
+}
 
 // ---------------- pages ----------------
 const pages = {
@@ -785,8 +791,8 @@ async function saveSettings(patch) {
 const actions = {
   go: (el) => { location.hash = el.dataset.page; },
   link: (el) => bridge.call('link:open', el.dataset.url),
-  open: (el) => bridge.call('file:open', el.dataset.path),
-  reveal: (el) => bridge.call('file:reveal', el.dataset.path),
+  open: async (el) => { const now = await bridge.call('file:open', el.dataset.path); if (now) movedNote(now); },
+  reveal: async (el) => { const now = await bridge.call('file:reveal', el.dataset.path); if (now) movedNote(now); },
   reindex: async () => { toast('Re-scanning files in the background…'); await bridge.call('index:rebuild'); toast('Search index updated'); render(); },
   recheck: async (el) => {
     el.disabled = true; $('#scan-status').textContent = 'Re-checking filed items…';
@@ -967,7 +973,7 @@ const actions = {
 
 document.addEventListener('dblclick', (e) => {
   const row = e.target.closest('[data-dbl]');
-  if (row && !e.target.closest('button')) safe(() => bridge.call('file:open', row.dataset.dbl));
+  if (row && !e.target.closest('button')) safe(async () => { const now = await bridge.call('file:open', row.dataset.dbl); if (now) movedNote(now); });
 });
 document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]');

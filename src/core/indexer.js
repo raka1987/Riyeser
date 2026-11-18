@@ -25,6 +25,7 @@ class Index {
     this.docs[file] = {
       name: path.basename(file), dir: path.dirname(file), ext, mtime: st.mtimeMs, size: st.size,
       text: text.slice(0, 6000), company: c.company, docType: c.docType,
+      ...(prev && prev.formerNames ? { formerNames: prev.formerNames } : {}),
     };
   }
 
@@ -67,7 +68,7 @@ class Index {
     const results = [];
     for (const [p, d] of Object.entries(this.docs)) {
       const name = d.name.toLowerCase();
-      const meta = `${d.company || ''} ${d.docType || ''} ${d.dir}`.toLowerCase();
+      const meta = `${d.company || ''} ${d.docType || ''} ${d.dir} ${(d.formerNames || []).join(' ')}`.toLowerCase(); // old names still find it
       const text = (d.text || '').toLowerCase();
       let score = 0;
       let ok = true;
@@ -87,7 +88,7 @@ class Index {
       if (!ok) continue;
       score += Math.max(0, 3 - (Date.now() - d.mtime) / (1000 * 60 * 60 * 24 * 60)); // slight boost for recent files
       const snippet = snippetAt >= 0 ? d.text.slice(Math.max(0, snippetAt - 60), snippetAt + 100).replace(/\s+/g, ' ') : '';
-      results.push({ path: p, name: d.name, dir: d.dir, company: d.company, docType: d.docType, mtime: d.mtime, size: d.size, score, snippet });
+      results.push({ path: p, name: d.name, formerNames: d.formerNames || [], dir: d.dir, company: d.company, docType: d.docType, mtime: d.mtime, size: d.size, score, snippet });
     }
     return results.sort((a, b) => b.score - a.score).slice(0, limit);
   }

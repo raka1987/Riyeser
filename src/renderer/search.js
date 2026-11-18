@@ -10,7 +10,7 @@ function render() {
   if (!results.length) { list.innerHTML = '<li class="muted">No matches.</li>'; return; }
   list.innerHTML = results.map((r, i) => `<li class="${i === sel ? 'sel' : ''}" data-i="${i}">
     <div class="row"><span class="name ellipsis">${esc(r.name)}</span>${r.company ? `<span class="pill">${esc(r.company)}</span>` : ''}${r.docType ? `<span class="pill good">${esc(r.docType)}</span>` : ''}</div>
-    <div class="path ellipsis">${esc(r.dir)}</div>${r.snippet ? `<div class="small muted ellipsis">…${esc(r.snippet)}…</div>` : ''}</li>`).join('');
+    <div class="path ellipsis">${esc(r.dir)}</div>${(r.formerNames || []).length ? `<div class="small muted ellipsis">used to be called ${esc(r.formerNames[r.formerNames.length - 1])}</div>` : ''}${r.snippet ? `<div class="small muted ellipsis">…${esc(r.snippet)}…</div>` : ''}</li>`).join('');
   list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
 }
 

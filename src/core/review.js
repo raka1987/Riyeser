@@ -5,7 +5,7 @@
 // and finds duplicates (even with different names or formats). Nothing changes until the user approves.
 const fs = require('fs');
 const path = require('path');
-const { analyseFile, placeItem, listFiles } = require('./organizer');
+const { analyseFile, placeItem, listFiles, inArchive } = require('./organizer');
 const { linkRelated } = require('./related');
 const { smartName, drawingNumber } = require('./details');
 const { findDuplicateGroups } = require('./dupes');
@@ -26,7 +26,7 @@ async function reviewFiles(folders, settings, { ai = null, onProgress = () => {}
   const seen = new Set();
   for (const f of folders) {
     if (!f || !fs.existsSync(f) || isSystemPath(f) || isTooBroad(f)) continue;
-    for (const file of listFiles(f, { recursive: true, maxDepth: 8, maxFiles })) seen.add(file);
+    for (const file of listFiles(f, { recursive: true, maxDepth: 8, maxFiles })) if (!inArchive(file, settings.organisedRoot)) seen.add(file); // archived files are left alone
   }
   const files = [...seen];
   // With AI switched on, every document gets a second opinion (not only the unsure ones).

@@ -64,6 +64,7 @@ function learnedDestination(item, examples, root) {
   const votes = new Map();
   let total = 0;
   for (const ex of examples) {
+    if (ex.inRoot && /^Archive(\/|$)/i.test(ex.template)) continue; // archived copies say nothing about where things belong
     const s = similarity(item, ex);
     if (s < 3) continue;
     const w = s * (ex.explicit ? 2 : 1);
