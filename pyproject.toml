@@ -12,9 +12,11 @@ dependencies = ["flask>=3.0", "waitress>=3.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+desktop = ["pywebview>=5"]
 
 [project.scripts]
 riyser = "riyser.cli:main"
+riyser-desktop = "riyser.desktop:main"
 
 [tool.setuptools]
 packages = ["riyser", "riyser.views"]

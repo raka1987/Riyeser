@@ -25,6 +25,18 @@ By default the company file is `~/.riyser/company.db`. You can change this with 
 
 To build a distributable wheel for your own install packages, run `pip wheel . -w dist --no-deps`.
 
+## Desktop app
+
+Riyser also runs as a normal desktop app in its own window, with no Python needed. It keeps the company file in `~/.riyser`.
+
+* **Download:** after each push to `main`, GitHub Actions ("Build desktop app") builds
+  `Riyser Accounting.exe` (Windows), `Riyser Accounting.app` (macOS, zipped) and `riyser-accounting` (Linux).
+  Get them from the workflow run's **Artifacts**. Pushing a tag such as `v1.0.0` also attaches them to a GitHub Release.
+* **Build it yourself:** run `pip install ".[desktop]" pyinstaller`, then `python packaging/build_desktop.py`. The app lands in `dist/`.
+* **Run from source:** run `pip install ".[desktop]"`, then `riyser-desktop`.
+
+The builds are unsigned. Windows SmartScreen will warn ("More info → Run anyway"). On macOS, right-click the app → **Open** the first time.
+
 ## Features
 
 **Accounts**
