@@ -1,5 +1,5 @@
 """Development entry point: python run.py"""
-from riyser import create_app
+from riyeser import create_app
 
 app = create_app()
 

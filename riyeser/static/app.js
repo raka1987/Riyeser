@@ -1,4 +1,4 @@
-// Riyser Accounting - line item tables, live totals, row links.
+// Riyeser Accounting - line item tables, live totals, row links.
 (function () {
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -34,7 +34,7 @@
 
   // ---- Sales / purchase document form
   const docForm = $("#doc-form");
-  const ITEMS = window.RIYSER_ITEMS || {}, CONTACTS = window.RIYSER_CONTACTS || {}, TAX = window.RIYSER_TAX || {};
+  const ITEMS = window.RIYESER_ITEMS || {}, CONTACTS = window.RIYESER_CONTACTS || {}, TAX = window.RIYESER_TAX || {};
 
   function recalc() {
     if (docForm) {
@@ -73,7 +73,7 @@
       $("#p-total").textContent = money(t);
     }
   }
-  window.riyserRecalc = recalc;
+  window.riyeserRecalc = recalc;
   document.addEventListener("input", recalc);
   document.addEventListener("change", e => {
     if (e.target.name === "line_item") {

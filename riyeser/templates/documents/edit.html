@@ -35,4 +35,4 @@
 <button class="btn pri">Save</button> <a class="btn" href="{{ url_for('documents.index', side=side) }}">Cancel</a>
 </form>
 {% endblock %}
-{% block scripts %}<script>window.RIYSER_ITEMS={{ item_json|safe }};window.RIYSER_CONTACTS={{ contact_json|safe }};window.RIYSER_TAX={{ tax_json|safe }};</script>{% endblock %}
+{% block scripts %}<script>window.RIYESER_ITEMS={{ item_json|safe }};window.RIYESER_CONTACTS={{ contact_json|safe }};window.RIYESER_TAX={{ tax_json|safe }};</script>{% endblock %}

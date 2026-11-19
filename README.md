@@ -1,6 +1,6 @@
-# Riyser Accounting
+# Riyeser Accounting
 
-Double-entry business accounting for Australian small and medium businesses. It runs in your browser and keeps everything in one local company file (SQLite). It works the way desktop accounting suites like MYOB AccountRight do, but Riyser is an original product.
+Double-entry business accounting for Australian small and medium businesses. It runs in your browser and keeps everything in one local company file (SQLite). It works the way desktop accounting suites like MYOB AccountRight do, but Riyeser is an original product.
 
 ## Install
 
@@ -10,30 +10,30 @@ You need **Python 3.10 or newer**.
 |---|---|
 | macOS / Linux | `./install.sh` |
 | Windows (PowerShell) | `powershell -ExecutionPolicy Bypass -File install.ps1` (also adds a desktop shortcut) |
-| Any (pip) | `pip install .` (or `pip install riyser-accounting-1.0.0-py3-none-any.whl`) |
+| Any (pip) | `pip install .` (or `pip install riyeser-accounting-1.0.0-py3-none-any.whl`) |
 
 Then run:
 
 ```bash
-riyser                                    # opens http://127.0.0.1:8080
-riyser init --name "Acme Pty Ltd" --demo  # optional: create a company file with sample data
-riyser serve --host 0.0.0.0 --port 8080   # multi-user on your office network
-riyser backup                             # safe hot backup of the company file
+riyeser                                    # opens http://127.0.0.1:8080
+riyeser init --name "Acme Pty Ltd" --demo  # optional: create a company file with sample data
+riyeser serve --host 0.0.0.0 --port 8080   # multi-user on your office network
+riyeser backup                             # safe hot backup of the company file
 ```
 
-By default the company file is `~/.riyser/company.db`. You can change this with `--data-dir`, `--db` or the `RIYSER_HOME` environment variable. The first time you run it with no company file, a setup screen opens in the browser. On a new company file you sign in as **admin** with the password you chose (`admin` if you created it with `riyser init`).
+By default the company file is `~/.riyeser/company.db`. You can change this with `--data-dir`, `--db` or the `RIYESER_HOME` environment variable. The first time you run it with no company file, a setup screen opens in the browser. On a new company file you sign in as **admin** with the password you chose (`admin` if you created it with `riyeser init`).
 
 To build a distributable wheel for your own install packages, run `pip wheel . -w dist --no-deps`.
 
 ## Desktop app
 
-Riyser also runs as a normal desktop app in its own window, with no Python needed. It keeps the company file in `~/.riyser`.
+Riyeser also runs as a normal desktop app in its own window, with no Python needed. It keeps the company file in `~/.riyeser`.
 
 * **Download:** after each push to `main`, GitHub Actions ("Build desktop app") builds
-  `Riyser Accounting.exe` (Windows), `Riyser Accounting.app` (macOS, zipped) and `riyser-accounting` (Linux).
+  `Riyeser Accounting.exe` (Windows), `Riyeser Accounting.app` (macOS, zipped) and `riyeser-accounting` (Linux).
   Get them from the workflow run's **Artifacts**. Pushing a tag such as `v1.0.0` also attaches them to a GitHub Release.
 * **Build it yourself:** run `pip install ".[desktop]" pyinstaller`, then `python packaging/build_desktop.py`. The app lands in `dist/`.
-* **Run from source:** run `pip install ".[desktop]"`, then `riyser-desktop`.
+* **Run from source:** run `pip install ".[desktop]"`, then `riyeser-desktop`.
 
 The builds are unsigned. Windows SmartScreen will warn ("More info → Run anyway"). On macOS, right-click the app → **Open** the first time.
 
@@ -105,16 +105,16 @@ The builds are unsigned. Windows SmartScreen will warn ("More info → Run anywa
 
 ## How it works
 
-Every business transaction (invoice, bill, payment, pay run, stock adjustment…) becomes a balanced journal entry through `riyser/ledger.py`. All reports read only from the general ledger, so the trial balance and balance sheet always reconcile. Money is stored as integer cents.
+Every business transaction (invoice, bill, payment, pay run, stock adjustment…) becomes a balanced journal entry through `riyeser/ledger.py`. All reports read only from the general ledger, so the trial balance and balance sheet always reconcile. Money is stored as integer cents.
 
 ```
-riyser/
+riyeser/
   ledger.py        posting engine and business transactions
   payroll_calc.py  PAYG / super / leave calculations
   schema.sql       database schema
   views/           web screens (accounts, banking, sales/purchases, inventory, payroll, reports)
   templates/       HTML
-  cli.py           the `riyser` command
+  cli.py           the `riyeser` command
 tests/             pytest suite (run: pytest)
 ```
 

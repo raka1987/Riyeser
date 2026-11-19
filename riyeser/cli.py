@@ -1,9 +1,10 @@
-"""`riyser` command - installed by `pip install riyser-accounting`.
+"""`riyeser` command - installed by `pip install riyeser-accounting`.
 
-    riyser serve                 # run the web app on http://127.0.0.1:8080
-    riyser serve --host 0.0.0.0  # share on your network (multi-user)
-    riyser init --name "Acme Pty Ltd" [--demo] [--force]
-    riyser backup [path]
+    riyeser                       # open Riyeser Accounting in its own desktop window
+    riyeser serve                 # run it in the browser on http://127.0.0.1:8080
+    riyeser serve --host 0.0.0.0  # share on your network (multi-user)
+    riyeser init --name "Acme Pty Ltd" [--demo] [--force]
+    riyeser backup [path]
 """
 import argparse
 import os
@@ -16,14 +17,14 @@ from pathlib import Path
 
 
 def data_dir(arg=None) -> Path:
-    d = Path(arg or os.environ.get("RIYSER_HOME") or Path.home() / ".riyser")
+    d = Path(arg or os.environ.get("RIYESER_HOME") or Path.home() / ".riyeser")
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def _configure(args):
     d = data_dir(args.data_dir)
-    os.environ.setdefault("RIYSER_DB", str(Path(args.db) if args.db else d / "company.db"))
+    os.environ.setdefault("RIYESER_DB", str(Path(args.db) if args.db else d / "company.db"))
     key_file = d / "secret.key"
     if not key_file.exists():
         key_file.write_text(secrets.token_hex(32))
@@ -31,8 +32,8 @@ def _configure(args):
             key_file.chmod(0o600)
         except OSError:
             pass
-    os.environ.setdefault("RIYSER_SECRET", key_file.read_text().strip())
-    return os.environ["RIYSER_DB"]
+    os.environ.setdefault("RIYESER_SECRET", key_file.read_text().strip())
+    return os.environ["RIYESER_DB"]
 
 
 def cmd_serve(args):
@@ -40,7 +41,7 @@ def cmd_serve(args):
     from . import create_app
     app = create_app()
     url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '') else args.host}:{args.port}"
-    print(f"Riyser Accounting\n  company file: {db_path}\n  open: {url}\n  (Ctrl+C to stop)")
+    print(f"Riyeser Accounting\n  company file: {db_path}\n  open: {url}\n  (Ctrl+C to stop)")
     if not os.path.exists(db_path):
         print("  No company file yet - the browser will show the setup screen.")
     if not args.no_browser:
@@ -87,11 +88,26 @@ def cmd_backup(args):
     print(f"Backed up to {dest}")
 
 
+def cmd_desktop(args):
+    from .desktop import main as desktop_main
+    extra = []
+    if args.data_dir:
+        extra += ["--data-dir", args.data_dir]
+    if args.db:
+        os.environ.setdefault("RIYESER_DB", args.db)
+    if getattr(args, "no_window", False):
+        extra.append("--no-window")
+    desktop_main(extra)
+
+
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="riyser", description="Riyser Accounting")
-    p.add_argument("--data-dir", help="folder for the company file (default ~/.riyser)")
+    p = argparse.ArgumentParser(prog="riyeser", description="Riyeser Accounting")
+    p.add_argument("--data-dir", help="folder for the company file (default ~/.riyeser)")
     p.add_argument("--db", help="path to a specific company file (.db)")
     sub = p.add_subparsers(dest="cmd")
+    w = sub.add_parser("desktop", help="open in a desktop window (default)")
+    w.add_argument("--no-window", action="store_true")
+    w.set_defaults(fn=cmd_desktop)
     s = sub.add_parser("serve", help="run the web application")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8080)
@@ -108,8 +124,8 @@ def main(argv=None):
     b.set_defaults(fn=cmd_backup)
     argv = list(sys.argv[1:] if argv is None else argv)
     args = p.parse_args(argv)
-    if not args.cmd:  # plain `riyser` = serve with defaults
-        args = p.parse_args(argv + ["serve"])
+    if not args.cmd:  # plain `riyeser` = the desktop app
+        args = p.parse_args(argv + ["desktop"])
     args.fn(args)
 
 

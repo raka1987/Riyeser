@@ -1,4 +1,4 @@
--- Riyser Accounting schema. All money is stored as INTEGER cents.
+-- Riyeser Accounting schema. All money is stored as INTEGER cents.
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE company (

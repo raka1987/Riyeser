@@ -3,10 +3,10 @@ from datetime import date
 
 import pytest
 
-from riyser import create_app
-from riyser.db import get_db, init_db, linked, to_cents
-from riyser import ledger as L
-from riyser.views.reports import gst_figures
+from riyeser import create_app
+from riyeser.db import get_db, init_db, linked, to_cents
+from riyeser import ledger as L
+from riyeser.views.reports import gst_figures
 
 
 @pytest.fixture
@@ -129,7 +129,7 @@ def test_tax_inclusive_and_spend_money_and_bas(app):
 
 
 def test_payroll_and_reversal(app):
-    from riyser.payroll_calc import compute_pay
+    from riyeser.payroll_calc import compute_pay
     emp = dict(pay_basis="salary", annual_salary=to_cents(78000), std_hours=38, hourly_rate=0,
                tax_free_threshold=1, super_rate=12.0)
     p = compute_pay(emp, "fortnightly")
@@ -141,7 +141,7 @@ def test_payroll_and_reversal(app):
 
 
 def test_balance_sheet_balances_after_demo(tmp_path):
-    from riyser.demo import seed_demo
+    from riyeser.demo import seed_demo
     app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "d.db")})
     with app.app_context():
         init_db("Demo")

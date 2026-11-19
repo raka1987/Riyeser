@@ -1,10 +1,10 @@
-"""Build the Riyser Accounting desktop app for the current OS.
+"""Build the Riyeser Accounting desktop app for the current OS.
 
-    pip install ".[desktop]" pyinstaller
+    pip install . pyinstaller
     python packaging/build_desktop.py
 
-Output: dist/Riyser Accounting.exe (Windows), dist/Riyser Accounting.app (macOS),
-        dist/riyser-accounting (Linux)
+Output: dist/Riyeser Accounting.exe (Windows), dist/Riyeser Accounting.app (macOS),
+        dist/riyeser-accounting (Linux)
 """
 import os
 import platform
@@ -14,26 +14,26 @@ from pathlib import Path
 import PyInstaller.__main__
 
 ROOT = Path(__file__).resolve().parent.parent
-PKG = ROOT / "riyser"
+PKG = ROOT / "riyeser"
 sep = os.pathsep
 system = platform.system()
 
 args = [
-    str(ROOT / "packaging" / "riyser_desktop.py"),
+    str(ROOT / "packaging" / "riyeser_desktop.py"),
     "--noconfirm", "--clean",
-    "--name", "riyser-accounting" if system == "Linux" else "Riyser Accounting",
+    "--name", "riyeser-accounting" if system == "Linux" else "Riyeser Accounting",
     "--paths", str(ROOT),
-    "--add-data", f"{PKG / 'templates'}{sep}riyser/templates",
-    "--add-data", f"{PKG / 'static'}{sep}riyser/static",
-    "--add-data", f"{PKG / 'schema.sql'}{sep}riyser",
-    "--hidden-import", "riyser.demo",
-    "--collect-submodules", "riyser",
+    "--add-data", f"{PKG / 'templates'}{sep}riyeser/templates",
+    "--add-data", f"{PKG / 'static'}{sep}riyeser/static",
+    "--add-data", f"{PKG / 'schema.sql'}{sep}riyeser",
+    "--hidden-import", "riyeser.demo",
+    "--collect-submodules", "riyeser",
     "--distpath", str(ROOT / "dist"),
     "--workpath", str(ROOT / "build"),
     "--specpath", str(ROOT / "build"),
 ]
 if system == "Darwin":
-    args += ["--windowed", "--osx-bundle-identifier", "com.riyser.accounting"]
+    args += ["--windowed", "--osx-bundle-identifier", "com.riyeser.accounting"]
 elif system == "Windows":
     args += ["--windowed", "--onefile"]
 else:

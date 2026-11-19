@@ -10,8 +10,8 @@ from .db import fmt_money, cents_str, get_db
 def create_app(test_config=None):
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_mapping(
-        SECRET_KEY=os.environ.get("RIYSER_SECRET", "dev-change-me"),
-        DATABASE=os.environ.get("RIYSER_DB", os.path.join(app.instance_path, "company.db")),
+        SECRET_KEY=os.environ.get("RIYESER_SECRET", "dev-change-me"),
+        DATABASE=os.environ.get("RIYESER_DB", os.path.join(app.instance_path, "company.db")),
     )
     if test_config:
         app.config.update(test_config)

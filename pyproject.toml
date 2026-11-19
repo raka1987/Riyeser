@@ -3,27 +3,28 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "riyser-accounting"
+name = "riyeser-accounting"
 version = "1.0.0"
-description = "Riyser Accounting - double-entry business accounting (sales, purchases, banking, inventory, payroll, GST/BAS, reports)"
+description = "Riyeser Accounting - double-entry business accounting (sales, purchases, banking, inventory, payroll, GST/BAS, reports)"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["flask>=3.0", "waitress>=3.0"]
+dependencies = ["flask>=3.0", "waitress>=3.0", "pywebview>=5"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-desktop = ["pywebview>=5"]
+
+[project.gui-scripts]
+riyeser-accounting = "riyeser.desktop:main"
 
 [project.scripts]
-riyser = "riyser.cli:main"
-riyser-desktop = "riyser.desktop:main"
+riyeser = "riyeser.cli:main"
 
 [tool.setuptools]
-packages = ["riyser", "riyser.views"]
+packages = ["riyeser", "riyeser.views"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-riyser = ["schema.sql", "static/*", "templates/*.html", "templates/*/*.html"]
+riyeser = ["schema.sql", "static/*", "templates/*.html", "templates/*/*.html"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

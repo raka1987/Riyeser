@@ -1,4 +1,4 @@
-"""Riyser Accounting desktop app.
+"""Riyeser Accounting desktop app.
 
 Runs the accounting server privately on this computer and shows it in its
 own application window (via pywebview).  If no window toolkit is available
@@ -32,11 +32,15 @@ def _wait_until_up(url, timeout=30):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="Riyser Accounting")
-    p.add_argument("--data-dir", help="folder for the company file (default ~/.riyser)")
+    p = argparse.ArgumentParser(prog="Riyeser Accounting")
+    p.add_argument("--data-dir", help="folder for the company file (default ~/.riyeser)")
     p.add_argument("--port", type=int, default=0)
     p.add_argument("--no-window", action="store_true", help="run the server only (for testing)")
-    args = p.parse_args(argv)
+    p.add_argument("command", nargs="?", help="init / serve / backup - same as the riyeser command")
+    args, rest = p.parse_known_args(argv)
+    if args.command:  # the desktop build doubles as the full riyeser command
+        from .cli import main as cli_main
+        return cli_main(([] if not args.data_dir else ["--data-dir", args.data_dir]) + [args.command] + rest)
 
     from .cli import data_dir, _configure
     ns = argparse.Namespace(data_dir=args.data_dir, db=None)
@@ -51,9 +55,9 @@ def main(argv=None):
                                                                 _quiet=True), daemon=True)
     t.start()
     if not _wait_until_up(url):
-        print("Riyser Accounting failed to start.", file=sys.stderr)
+        print("Riyeser Accounting failed to start.", file=sys.stderr)
         sys.exit(1)
-    print(f"Riyser Accounting running at {url}  (company file: {os.environ['RIYSER_DB']})", flush=True)
+    print(f"Riyeser Accounting running at {url}  (company file: {os.environ['RIYESER_DB']})", flush=True)
 
     if args.no_window:
         try:
@@ -63,7 +67,7 @@ def main(argv=None):
             return
     try:
         import webview
-        webview.create_window("Riyser Accounting", url, width=1360, height=860, min_size=(1000, 650))
+        webview.create_window("Riyeser Accounting", url, width=1360, height=860, min_size=(1000, 650))
         webview.start()
     except Exception as e:  # no GUI toolkit - use the browser instead
         print(f"(No app window available: {e}; opening your browser instead. Close this window to quit.)")
