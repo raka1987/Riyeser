@@ -5,3 +5,4 @@ src/renderer/vendor/
 build/python-win/
 build/accounting/
 build/cache/
+dist-ci/
