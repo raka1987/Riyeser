@@ -94,6 +94,16 @@ function registerPdfIpc({ handle, store, openEditor, getTheme = () => 'system', 
     store.update('recentPdfs', [], (r) => [file, ...r.filter((x) => x !== file)].slice(0, 12));
     return new Uint8Array(fs.readFileSync(file));
   });
+  // Backup viewer: the PDF engine built into Windows' web view (the same one Edge uses). View-only, but it copes with
+  // unusual PDFs that the editor's engine can't draw.
+  handle('pdf:basicView', (file) => {
+    if (!file || !fs.existsSync(file)) throw new Error('That PDF could not be found.');
+    const w = new BrowserWindow({ width: 1000, height: 1000, title: `${path.basename(file)} (basic viewer)`, autoHideMenuBar: true,
+      webPreferences: { plugins: true, contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    w.on('page-title-updated', (e) => e.preventDefault()); // keep "(basic viewer)" in the title
+    w.loadURL(require('url').pathToFileURL(file).href);
+    return true;
+  });
   handle('pdf:save', async (file, bytes, saveAs) => {
     let target = file;
     if (saveAs || !file) {

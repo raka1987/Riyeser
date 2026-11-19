@@ -90,15 +90,42 @@ async function openFile(file) {
     document.title = `${file.split(/[\\/]/).pop()} — ${appTitle}`;
     $('#docname').textContent = file.split(/[\\/]/).pop();
     $('#docname').title = file;
-    await readForm();
-    await loadBytes(bytes);
+    // A PDF the engine gets stuck on must not leave a grey window: give up after a while and use the backup viewer.
+    const limit = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} took too long`)), ms))]);
+    await limit(readForm(), 15000, 'Reading the form');
+    await limit(loadBytes(bytes), 20000, 'Opening the pages');
     setDirty(false);
+    watchFirstPage(file);
     if (st.encrypted) toast('This PDF is password-protected. You can view it, but saving changes may not work.');
     checkIfScanned().catch(() => {});
     requestAnimationFrame(fitWidth);
   } catch (e) {
-    toast(`Couldn't open this PDF: ${e.message}`);
+    toast(`This PDF couldn't be drawn here (${e.message}), so it's open in the basic viewer.`);
+    bridge.call('pdf:basicView', file).catch(() => {});
   }
+}
+
+/** If the first page comes out empty or fails to draw, show the PDF in the backup viewer as well. */
+function watchFirstPage(file) {
+  st.firstPageCheck = { file, done: false };
+  setTimeout(() => {
+    const c = st.firstPageCheck;
+    if (!c || c.done || c.file !== st.file) return;
+    c.done = true;
+    if (c.failed || !$('.page canvas') || !pageHasInk($('.page canvas'))) offerBasicViewer(file, c.failed ? 'couldn\'t be drawn' : 'looks blank');
+  }, 6000);
+}
+function pageHasInk(canvas) {
+  try {
+    const { width, height } = canvas; if (!width || !height) return false;
+    const d = canvas.getContext('2d').getImageData(0, 0, width, height).data;
+    for (let i = 0; i < d.length; i += 4 * 7) if (d[i + 3] > 0 && (d[i] < 235 || d[i + 1] < 235 || d[i + 2] < 235)) return true;
+    return false;
+  } catch { return true; }
+}
+function offerBasicViewer(file, why) {
+  toast(`This page ${why} here. Showing it in the basic viewer too — use that to read it.`);
+  bridge.call('pdf:basicView', file).catch(() => {});
 }
 
 // ---------------- page layout & drawing ----------------
@@ -147,7 +174,8 @@ async function drawPage(el) {
   canvas.style.width = `${vp.width}px`; canvas.style.height = `${vp.height}px`;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  try { await page.render({ canvasContext: ctx, viewport: vp }).promise; } catch { /* re-render cancelled */ }
+  try { await page.render({ canvasContext: ctx, viewport: vp }).promise; }
+  catch (e) { if (!/cancel/i.test(e?.name || e?.message || '') && src === 0 && st.firstPageCheck) st.firstPageCheck.failed = true; }
   if (!st.text[src]) {
     const tc = await page.getTextContent();
     st.text[src] = tc.items.filter((it) => it.str && it.str.trim()).map((it) => {
@@ -1198,6 +1226,7 @@ function placeBox(ann, wPt, hPt) {
 }
 
 const tools = {
+  basicview: async () => { if (!st.file) throw new Error('Open a PDF first.'); await bridge.call('pdf:basicView', st.file); },
   async stamp() {
     if (!st.doc) return;
     const presets = [['Approved', '#15803d'], ['Paid', '#15803d'], ['Received', '#1d4ed8'], ['Checked', '#1d4ed8'], ['Draft', '#b91c1c'], ['Rejected', '#b91c1c'], ['Confidential', '#b91c1c'], ['Copy', '#6b7280'], ['Void', '#6b7280']];
