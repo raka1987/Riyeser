@@ -1,7 +1,7 @@
 // Electron main process: windows, tray icon, global search shortcut, background jobs and reminders.
 const { app, BrowserWindow, ipcMain, globalShortcut, Tray, Menu, Notification, shell, dialog, safeStorage, nativeImage, nativeTheme } = require('electron');
 const { registerInstalledApp, runUninstall } = require('./uninstall');
-const APP_INFO = { id: 'DeskAssistant', name: 'Riyeser Desk Assistant', publisher: 'Riyeser Group', pdfProgId: 'DeskAssistant.PDF', description: 'Riyeser Group: files, meetings, PDFs and accounting in one place' };
+const APP_INFO = { id: 'DeskAssistant', name: 'Riyeser Desk Assistant', publisher: 'Riyeser Group', pdfProgId: 'DeskAssistant.PDF', description: 'Riyeser Group: your files, folders, meetings and PDFs' };
 const path = require('path');
 // Keep using the data folder from before the Riyeser name (settings, move history, learned folders), so nothing is lost.
 app.setPath('userData', path.join(app.getPath('appData'), 'Desk Assistant'));
@@ -24,8 +24,6 @@ const { extractDetails } = require('./core/details');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
 const { setOcrProvider, setTextCache, setRawExtractor } = require('./core/extract');
 const { createTextPool } = require('./text-pool');
-const { createAccountingModule } = require('./modules/accounting');
-let accounting = null;
 let textPool = null;
 const ocr = require('./core/ocr');
 
@@ -672,15 +670,6 @@ function registerIpc() {
     send('plan-changed');
     return state.lastPlan;
   });
-  // ----- Riyeser modules -----
-  handle('accounting:show', (bounds) => accounting.show(bounds));
-  handle('accounting:bounds', (bounds) => { accounting.setBounds(bounds); return true; });
-  handle('accounting:hide', () => { accounting.hide(); return true; });
-  handle('accounting:back', () => { accounting.back(); return true; });
-  handle('accounting:reload', () => { accounting.reload(); return true; });
-  handle('accounting:home', () => { accounting.home(); return true; });
-  handle('accounting:popout', () => accounting.popOut());
-  handle('accounting:status', () => accounting.status());
   handle('review:types', () => require('./core/classifier').DOC_TYPES.map((d) => d.type));
   // Correct the type of one file in the review list: its name and folder are worked out again.
   handle('review:setType', (from, docType) => {
@@ -988,7 +977,6 @@ app.whenReady().then(async () => {
   // Read documents in a background process so a heavy file can never freeze the window.
   try { textPool = createTextPool({ log: (m) => console.warn(m) }); setRawExtractor(textPool.extract); } catch (e) { console.warn('file reader unavailable', e.message); }
   setTextCache((file, mtime) => { const d = index.docs[file]; return d && d.mtime === mtime && d.text ? d.text : undefined; });
-  accounting = createAccountingModule({ getWindow: () => (mainWin && !mainWin.isDestroyed() ? mainWin : null), log: (m) => console.log(m) });
   registerIpc();
   const startPdf = pdfArg(process.argv);
   if (startPdf) openEditor(startPdf);
@@ -1001,7 +989,6 @@ app.whenReady().then(async () => {
   tray.setToolTip('Riyeser Desk Assistant');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Riyeser Desk Assistant', click: () => showMain() },
-    { label: 'Open Accounting', click: () => showMain('accounting') },
     { label: `Quick search (${HOTKEY.replace('CommandOrControl', process.platform === 'darwin' ? 'Cmd' : 'Ctrl')})`, click: toggleSearch },
     { label: 'Tidy my folders now', click: () => showMain('organise') },
     { type: 'separator' },
@@ -1023,4 +1010,4 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', (e) => e.preventDefault()); // keep running in the tray
 app.on('before-quit', () => { app.isQuitting = true; });
-app.on('will-quit', () => { globalShortcut.unregisterAll(); if (textPool) textPool.stop(); if (accounting) accounting.stop(); });
+app.on('will-quit', () => { globalShortcut.unregisterAll(); if (textPool) textPool.stop(); });

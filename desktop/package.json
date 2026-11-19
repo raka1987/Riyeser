@@ -1,7 +1,7 @@
 {
   "name": "desk-assistant",
-  "version": "0.20.0",
-  "description": "Riyeser Desk Assistant (Riyeser Group): sorts your files, tracks meetings and to-dos, edits PDFs, and runs Riyeser Accounting as a module.",
+  "version": "0.21.0",
+  "description": "Riyeser Desk Assistant (Riyeser Group): sorts your files, tracks meetings and to-dos, and edits PDFs.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -13,8 +13,7 @@
     "postinstall": "node scripts/vendor.js",
     "predist": "node scripts/vendor.js",
     "dist:pdf": "node scripts/package-win.js pdf",
-    "dist:all": "node scripts/package-win.js",
-    "prepare:python": "python scripts/prepare_python.py"
+    "dist:all": "node scripts/package-win.js"
   },
   "author": {
     "name": "Riyeser Group"

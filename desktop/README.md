@@ -1,18 +1,7 @@
 # Riyeser Desk Assistant
 
-*A Riyeser Group module. Windows desktop app (Electron) that also runs Riyeser Accounting inside it.*
+*A Riyeser Group product. Opened from the Riyeser hub. Build the Windows installers with `npm ci` then `npm run dist:all` (Riyeser Desk Assistant + Riyeser PDF).*
 
-- **Desk Assistant**: files, Smart review, PDF editor, meetings, to-dos, email (this folder).
-- **Accounting module**: the Python app at the repository root (`../riyeser`). The installer ships its own private
-  Windows Python (`scripts/prepare_python.py`), starts the accounting server on 127.0.0.1 when you open
-  *Riyeser modules → Accounting*, and shows its screens in the main window. It uses the same company file as the
-  stand-alone app (`~/.riyeser/company.db`).
-
-Build the Windows installer: `npm ci`, then `npm run dist:win` (runs `prepare_python.py` if needed) →
-`dist/RiyeserDeskAssistant-Setup-<version>.exe`. GitHub Actions builds, installs and smoke-tests it on Windows
-(`.github/workflows/desk-assistant-windows.yml`).
-
-## Desk Assistant
 
 A personal assistant that runs on your computer and helps keep it tidy. It:
 

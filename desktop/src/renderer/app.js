@@ -18,7 +18,6 @@ let combine = [];     // PDFs chosen for combining
 let everythingDone = null; // last "tidy everything" batch
 let review = { tab: 'labels', pool: null, hasAiKey: false, useAI: false, done: null, dupeDone: null, only: 'all' };
 let docTypes = [];
-let accResize = null;
 let restoreFilter = '';
 let restoreDone = null;
 let dupeChoice = new Map(); // duplicate file path -> 'keep' | 'archive' | 'bin'
@@ -455,27 +454,6 @@ const pages = {
       ${plan.review.length ? `<div class="card"><h2>Needs your help (${plan.review.length})</h2><p class="muted small">I couldn't tell where these belong, so they stay where they are.</p><ul class="list">${plan.review.slice(0, 200).map((r) => `<li><div class="grow"><b>${esc(r.name)}</b><div class="path">${esc(short(r.from))}</div></div><button class="link" data-act="open" data-path="${esc(r.from)}">Open</button></li>`).join('')}</ul></div>` : ''}`}`;
   },
 
-  // Riyeser Accounting, running inside the app. Its screens are drawn by the main process in the #modhost area.
-  async accounting() {
-    page.classList.add('modpage');
-    page.innerHTML = `<div class="modbar"><b>📒 Riyeser Accounting</b><span class="muted small">a Riyeser Group module</span><span class="spacer"></span>
-        <button data-act="acchome" title="Dashboard">⌂ Home</button><button data-act="accback" title="Back">← Back</button><button data-act="accreload" title="Reload">⟳</button>
-        <button data-act="accpop" title="Open in a window of its own">⧉ Own window</button></div>
-      <div id="modhost" class="modhost"><div class="modmsg" id="modmsg"><div class="spinner"></div><div>Starting Riyeser Accounting…</div><div class="muted small">The first start can take a few seconds.</div></div></div>`;
-    const host = $('#modhost');
-    const rect = () => { const r = host.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; };
-    try {
-      await bridge.call('accounting:show', rect());
-      if (current !== 'accounting') { bridge.call('accounting:hide'); return; }
-      $('#modmsg').innerHTML = '';
-    } catch (e) {
-      $('#modmsg').innerHTML = `<div style="font-size:28px">⚠</div><div><b>Riyeser Accounting couldn't start.</b></div><div class="muted small" style="max-width:520px">${esc(e.message)}</div><button data-act="accretry">Try again</button>`;
-      return;
-    }
-    if (accResize) accResize.disconnect();
-    accResize = new ResizeObserver(() => { if (current === 'accounting') bridge.call('accounting:bounds', rect()); });
-    accResize.observe(host);
-  },
   // "Where are my files?": every file the app moved, where it is now, and one button to put everything back.
   async restore() {
     const r = await bridge.call('restore:summary');
@@ -924,11 +902,6 @@ const actions = {
     plan = null; render();
   },
   restorereport: async () => { const f = await bridge.call('restore:report'); toast(`Saved ${f.split(/[\\/]/).pop()}`); },
-  acchome: () => bridge.call('accounting:home'),
-  accback: () => bridge.call('accounting:back'),
-  accreload: () => bridge.call('accounting:reload'),
-  accpop: () => bridge.call('accounting:popout'),
-  accretry: () => render(),
   rvtab: (el) => { review.tab = el.dataset.t; render(); },
   rvadd: async () => { const f = await bridge.call('dialog:folder'); if (f && !review.pool.includes(f)) { review.pool = await bridge.call('review:setPool', [...review.pool, f]); render(); } },
   rvdel: async (el) => { review.pool = await bridge.call('review:setPool', review.pool.filter((_, i) => i !== +el.dataset.i)); render(); },
@@ -1093,7 +1066,6 @@ async function render() {
   const h = decodeURIComponent((location.hash || '#today').slice(1));
   if (h.startsWith('folder:')) { current = 'folder'; currentFolder = h.slice(7); } else { current = h; currentFolder = null; }
   if (!pages[current]) current = 'today';
-  if (current !== 'accounting') { page.classList.remove('modpage'); if (accResize) { accResize.disconnect(); accResize = null; } bridge.call('accounting:hide').catch(() => {}); }
   if (current !== 'folder' && current !== 'folders') { /* leaving the Folders page */ }
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === (current === 'folder' ? 'folders' : current)));
   await safe(() => pages[current]());

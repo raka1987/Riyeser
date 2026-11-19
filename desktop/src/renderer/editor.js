@@ -8,7 +8,7 @@ const bridge = window.api;
 let appTitle = 'PDF Editor';
 bridge.call('app:version').then(async (v) => {
   const info = await bridge.call('app:info').catch(() => null);
-  appTitle = `${info?.standalone ? 'Desk PDF' : 'PDF Editor'} ${v}`;
+  appTitle = `${info?.standalone ? 'Riyeser PDF' : 'PDF Editor'} ${v}`;
   if (!st.file) document.title = appTitle; else document.title = `${st.file.split(/[\\/]/).pop()} — ${appTitle}`;
 }).catch(() => {});
 const $ = (s, el = document) => el.querySelector(s);

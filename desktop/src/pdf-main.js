@@ -1,12 +1,14 @@
-// Desk PDF: the stand-alone PDF viewer/editor. Same editor as inside Desk Assistant, without the rest of the app.
+// Riyeser PDF (formerly Desk PDF): the stand-alone PDF viewer/editor. Same editor as inside Riyeser Desk Assistant, without the rest of the app.
 const { app, ipcMain, nativeTheme } = require('electron');
 const { registerInstalledApp, runUninstall } = require('./uninstall');
-const APP_INFO = { id: 'DeskPDF', name: 'Desk PDF', pdfProgId: 'DeskPDF.PDF', description: 'View, edit, fill in and sign PDFs' };
+const APP_INFO = { id: 'DeskPDF', name: 'Riyeser PDF', publisher: 'Riyeser Group', pdfProgId: 'DeskPDF.PDF', description: 'View, edit, fill in and sign PDFs' };
 const path = require('path');
 const { Store } = require('./core/store');
 const { registerPdfIpc, createEditorWindow, pdfArg } = require('./pdf-ipc');
 
-app.setName('Desk PDF');
+app.setName('Riyeser PDF');
+// Keep the data folder from before the rename (recent files, saved signatures).
+app.setPath('userData', require('path').join(app.getPath('appData'), 'Desk PDF'));
 let store;
 const icon = path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-pdf.ico' : 'icon-pdf.png');
 const openEditor = (file) => createEditorWindow(file, { store, icon });
@@ -31,7 +33,7 @@ function handOverTo(data) {
 const instanceData = { exe: process.execPath, version: app.getVersion(), args: process.argv.slice(1).filter((a) => a !== '--hidden') };
 const uninstalling = process.argv.includes('--uninstall');
 if (!app.requestSingleInstanceLock(instanceData)) app.exit(0);
-// Opening another PDF while Desk PDF is running opens it in a new window.
+// Opening another PDF while Riyeser PDF is running opens it in a new window.
 app.on('second-instance', (_e, argv, _cwd, data) => {
   if (argv.includes('--uninstall')) { runUninstall(APP_INFO); return; }
   if (app.isPackaged && handOverTo(data)) return;
