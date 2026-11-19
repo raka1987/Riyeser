@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
+  <title>Desk Assistant</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <nav id="nav">
+      <div class="brand"><img src="icon.png" alt=""> <span class="grow">Desk Assistant</span><button id="themetoggle" class="themetoggle" title="Light / dark mode">◐</button></div>
+      <div class="navlinks">
+        <a href="#today" data-page="today"><span class="ni">🏠</span><span class="nl">Today</span></a>
+        <a href="#search" data-page="search"><span class="ni">🔍</span><span class="nl">Search</span></a>
+        <a href="#folders" data-page="folders"><span class="ni">📁</span><span class="nl">Folders</span></a>
+        <button class="navsec" data-sec="tidy">▾ Tidy up</button><div class="navgroup" data-group="tidy">
+        <a href="#restore" data-page="restore"><span class="ni">↩</span><span class="nl">Where are my files?</span></a>
+        <a href="#organise" data-page="organise"><span class="ni">🗂</span><span class="nl">Organise files</span><span id="badge-organise" class="pill" hidden></span></a>
+        <a href="#desktop" data-page="desktop"><span class="ni">🖥</span><span class="nl">Tidy Desktop</span></a>
+        <a href="#review" data-page="review"><span class="ni">✨</span><span class="nl">Smart review</span></a>
+        <a href="#everything" data-page="everything"><span class="ni">🧹</span><span class="nl">Tidy everything</span></a>
+        <a href="#cleanup" data-page="cleanup"><span class="ni">⬇</span><span class="nl">Clean up Downloads</span></a>
+        </div>
+        <button class="navsec" data-sec="work">▾ Work</button><div class="navgroup" data-group="work">
+        <a href="#pdf" data-page="pdf"><span class="ni">📕</span><span class="nl">PDF editor</span></a>
+        <a href="#meetings" data-page="meetings"><span class="ni">📅</span><span class="nl">Meetings</span></a>
+        <a href="#tasks" data-page="tasks"><span class="ni">✅</span><span class="nl">To-do</span><span id="badge-tasks" class="pill" hidden></span></a>
+        <a href="#email" data-page="email"><span class="ni">✉</span><span class="nl">Email</span></a>
+        <a href="#companies" data-page="companies"><span class="ni">🏢</span><span class="nl">Companies</span></a>
+        </div>
+        <a href="#settings" data-page="settings"><span class="ni">⚙</span><span class="nl">Settings</span></a>
+      </div>
+    </nav>
+    <div id="navresize" class="navresize" title="Drag to resize"></div>
+    <main id="page"></main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

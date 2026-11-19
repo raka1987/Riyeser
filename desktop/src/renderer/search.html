@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>Quick search</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { background: var(--panel); overflow: hidden; }
+    .wrap { padding: 14px; height: 100vh; display: flex; flex-direction: column; border: 1px solid var(--line); }
+    #q { font-size: 20px; padding: 12px 14px; width: 100%; border-radius: 10px; }
+    #results { list-style: none; margin: 10px 0 0; padding: 0; overflow: auto; flex: 1; }
+    #results li { padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+    #results li.sel { background: var(--accent-soft); }
+    .name { font-weight: 600; }
+    .foot { color: var(--muted); font-size: 12px; padding-top: 8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <input id="q" placeholder="Search files by name, company or contents…" autofocus>
+    <ul id="results"></ul>
+    <div class="foot"><kbd>Enter</kbd> open · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> show in folder · <kbd>Esc</kbd> close</div>
+  </div>
+  <script src="search.js"></script>
+</body>
+</html>
