@@ -230,7 +230,7 @@ async function planOrganise(settings, { ai = null, onProgress = () => {}, minAge
     onProgress(++i, files.length, file);
     let stat;
     try { stat = fs.statSync(file); } catch { continue; }
-    if (Date.now() - stat.mtimeMs < minAgeMs) continue;
+    if (minAgeMs > 0 && Date.now() - stat.mtimeMs < minAgeMs) continue; // still downloading or being saved
     items.push(await analyseFile(file, stat, settings, ai));
   }
   // Keep related documents (quote + invoice + receipt for the same job...) together.
