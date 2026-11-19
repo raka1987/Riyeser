@@ -31,6 +31,9 @@ To build a distributable wheel for your own install packages, run `pip wheel . -
 
 Riyeser also runs as a normal desktop app in its own window, with no Python needed. It keeps the company file in `~/.riyeser`.
 
+* **Windows installer:** `RiyeserAccounting-Setup-<version>.exe` installs it for your Windows user (no admin needed), with a
+  desktop icon, a Start menu entry under *Riyeser Group* and an *Installed apps* listing. It works completely offline:
+  it opens in its own window and everything stays on your PC. Uninstalling keeps your company file (`%USERPROFILE%\.riyeser`).
 * **Download:** after each push to `main`, GitHub Actions ("Build desktop app") builds
   `Riyeser Accounting.exe` (Windows), `Riyeser Accounting.app` (macOS, zipped) and `riyeser-accounting` (Linux).
   Get them from the workflow run's **Artifacts**. Pushing a tag such as `v1.0.0` also attaches them to a GitHub Release.

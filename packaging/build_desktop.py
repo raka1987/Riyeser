@@ -35,7 +35,9 @@ args = [
 if system == "Darwin":
     args += ["--windowed", "--osx-bundle-identifier", "com.riyeser.accounting"]
 elif system == "Windows":
-    args += ["--windowed", "--onefile"]
+    # Its own app window (pywebview on Microsoft Edge WebView2, which Windows 10/11 already has) - never the web browser.
+    args += ["--windowed", "--onefile", "--icon", str(ROOT / "packaging" / "riyeser.ico"),
+             "--collect-all", "webview", "--collect-all", "clr_loader", "--collect-all", "pythonnet", "--hidden-import", "clr"]
 else:
     args += ["--onefile"]
 PyInstaller.__main__.run(args)
