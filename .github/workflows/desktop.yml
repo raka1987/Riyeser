@@ -61,11 +61,16 @@ jobs:
           if (-not $entry) { throw "Not listed in Installed apps" }
           Write-Host "Listed as:" $entry.DisplayName "by" $entry.Publisher
           $env:RIYESER_HOME = "$env:RUNNER_TEMP\rh-installed"
-          $p = Start-Process $exe -PassThru
+          Start-Process $exe
+          # The one-file program starts a second copy of itself, which opens the window: check every copy.
           $title = ""
-          for ($i = 0; $i -lt 90 -and -not $title; $i++) { Start-Sleep 1; $p.Refresh(); $title = (Get-Process -Id $p.Id).MainWindowTitle }
-          $browsers = Get-Process msedge, chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle }
-          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          for ($i = 0; $i -lt 120 -and -not $title; $i++) {
+            Start-Sleep 1
+            $title = (Get-Process -Name "Riyeser Accounting" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | Select-Object -First 1).MainWindowTitle
+          }
+          $browsers = Get-Process msedge, chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle -notlike "*Riyeser*" }
+          Get-Process -Name "Riyeser Accounting" -ErrorAction SilentlyContinue | Format-Table Id, MainWindowTitle -AutoSize | Out-String | Write-Host
+          Get-Process -Name "Riyeser Accounting" -ErrorAction SilentlyContinue | Stop-Process -Force
           if (-not $title) { throw "No app window appeared" }
           Write-Host "App window:" $title
           if ($browsers) { throw "It opened a web browser instead of its own window" }
