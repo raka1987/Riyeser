@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}Process Payroll{% endblock %}
+{% from "_macros.html" import account_select %}
+{% block content %}
+<div class="head"><div><h1>Process Payroll</h1><p class="sub">Edit hours and click <b>Recalculate</b>, then <b>Process</b>.</p></div></div>
+<form method="post" class="card">
+<div class="fields"><div><label>Frequency</label><select name="frequency" onchange="location='?frequency='+this.value">{% for f in frequencies %}<option {{ 'selected' if f==freq }}>{{ f }}</option>{% endfor %}</select></div>
+<div><label>Period start</label><input type="date" name="period_start" value="{{ start }}"></div><div><label>Period end</label><input type="date" name="period_end" value="{{ end }}"></div>
+<div><label>Payment date</label><input type="date" name="pay_date" value="{{ pay_date }}"></div>
+<div><label>Pay from</label>{{ account_select('bank_account_id', bank_accounts, default_bank, blank=False) }}</div></div>
+<table style="margin-top:14px"><tr><th></th><th>Employee</th><th class="n">Hours</th><th class="n">Gross</th><th class="n">PAYG</th><th class="n">Super</th><th class="n">Net pay</th></tr>
+{% for e, p, inc in previews %}<tr><td><input type="checkbox" name="inc_{{ e.id }}" value="1" {{ 'checked' if inc }}></td><td>{{ e.first_name }} {{ e.last_name }} <span class="muted">({{ e.pay_basis }})</span></td>
+<td><input name="hours_{{ e.id }}" value="{{ p.hours }}" class="right" style="width:90px"></td><td class="n">{{ p.gross|money }}</td><td class="n">{{ p.tax|money }}</td><td class="n">{{ p.super|money }}</td><td class="n">{{ p.net|money }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">No active {{ freq }} employees.</td></tr>{% endfor %}
+{% set ns = namespace(g=0,t=0,s=0,n=0) %}{% for e, p, inc in previews if inc %}{% set ns.g=ns.g+p.gross %}{% set ns.t=ns.t+p.tax %}{% set ns.s=ns.s+p.super %}{% set ns.n=ns.n+p.net %}{% endfor %}
+<tr class="grand"><td colspan="3">Totals (selected)</td><td class="n">{{ ns.g|money }}</td><td class="n">{{ ns.t|money }}</td><td class="n">{{ ns.s|money }}</td><td class="n">{{ ns.n|money }}</td></tr></table>
+<p><button class="btn" name="action" value="preview">Recalculate</button> <button class="btn pri" name="action" value="process">Process pay run</button></p></form>
+{% endblock %}

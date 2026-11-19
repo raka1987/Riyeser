@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Payslip</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body><div class="doc-print">
+<div class="hdr"><div><h1>Payslip</h1><div class="muted">Period {{ s.period_start }} – {{ s.period_end }} · Paid {{ s.pay_date }}</div></div>
+<div class="right"><b>{{ company.name }}</b><br>{% if company.abn %}ABN {{ company.abn }}{% endif %}</div></div>
+<p><b>{{ s.first_name }} {{ s.last_name }}</b><br><span class="muted">{{ s.pay_basis|title }} · {{ s.pay_frequency }}{% if s.bank_bsb %} · Paid to BSB {{ s.bank_bsb }} Acc {{ s.bank_account }}{% endif %}</span></p>
+<table><tr><th></th><th class="n">This pay</th><th class="n">Year to date</th></tr>
+<tr><td>Hours</td><td class="n">{{ s.hours }}</td><td></td></tr>
+<tr><td>Gross earnings</td><td class="n">{{ s.gross|money }}</td><td class="n">{{ ytd.g|money }}</td></tr>
+<tr><td>PAYG tax withheld</td><td class="n">{{ s.tax|money }}</td><td class="n">{{ ytd.t|money }}</td></tr>
+<tr class="grand"><td>Net pay</td><td class="n">{{ s.net|money }}</td><td class="n">{{ ytd.n|money }}</td></tr>
+<tr><td>Superannuation ({{ s.super_rate }}%) {{ s.super_fund or '' }}</td><td class="n">{{ s.super|money }}</td><td class="n">{{ ytd.s|money }}</td></tr>
+<tr><td>Annual leave accrued</td><td class="n">{{ '%.2f'|format(s.leave_accrued) }} hrs</td><td class="n">balance {{ '%.2f'|format(s.leave_hours) }} hrs</td></tr></table>
+<p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print / Save PDF</button></p>
+</div></body></html>

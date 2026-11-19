@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}Users{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Users &amp; Roles</h1><p class="sub">Admin: full access · Accountant: all transactions, no user management · Viewer: read-only</p></div></div>
+<div class="tbl"><table><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th><th>Password</th><th></th></tr>
+{% for u in users %}<tr>
+<td><b>{{ u.username }}</b></td><td><input form="u{{ u.id }}" name="full_name" value="{{ u.full_name or '' }}"></td>
+<td><select form="u{{ u.id }}" name="role">{% for r in ['admin','accountant','viewer'] %}<option {{ 'selected' if u.role==r }}>{{ r }}</option>{% endfor %}</select></td>
+<td><input form="u{{ u.id }}" type="checkbox" name="active" value="1" {{ 'checked' if u.active }}></td>
+<td><input form="u{{ u.id }}" name="password" type="password" placeholder="New password (optional)"></td>
+<td><form id="u{{ u.id }}" method="post" action="{{ url_for('auth.save_user') }}"><input type="hidden" name="id" value="{{ u.id }}"><button class="btn sm">Save</button></form></td></tr>{% endfor %}
+</table></div>
+<div class="card" style="margin-top:18px"><h3>Add user</h3>
+<form method="post" action="{{ url_for('auth.save_user') }}" class="fields">
+<div><label>Username</label><input name="username" required></div><div><label>Full name</label><input name="full_name"></div>
+<div><label>Password</label><input name="password" type="password" required></div>
+<div><label>Role</label><select name="role"><option>accountant</option><option>viewer</option><option>admin</option></select></div>
+<div><label>&nbsp;</label><button class="btn pri">Add user</button></div></form></div>
+{% endblock %}

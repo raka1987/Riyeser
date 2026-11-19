@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}{{ item.sku }}{% endblock %}
+{% from "_macros.html" import account_select %}
+{% block content %}
+<div class="head"><div><h1>{{ item.sku }} {{ item.name }}</h1><p class="sub">{{ item.description or '' }}</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('inventory.edit', iid=item.id) }}">Edit</a></div></div>
+<div class="grid g4">
+<div class="card kpi"><div class="lbl">On hand</div><div class="val">{{ '%g'|format(item.qty_on_hand) if item.is_inventoried else '—' }}</div></div>
+<div class="card kpi"><div class="lbl">Average cost</div><div class="val">{{ item.avg_cost|money if item.is_inventoried else '—' }}</div></div>
+<div class="card kpi"><div class="lbl">Sell price</div><div class="val">{{ item.sell_price|money }}</div></div>
+<div class="card kpi"><div class="lbl">Sold (all time)</div><div class="val">{{ sales.v|money }}</div><div class="note">{{ '%g'|format(sales.q) }} units</div></div></div>
+{% if item.is_inventoried %}
+<div class="card"><h3>Adjust inventory</h3><form method="post" action="{{ url_for('inventory.adjust', iid=item.id) }}" class="fields">
+<div><label>Date</label><input type="date" name="date" value="{{ today() }}"></div><div><label>Qty change (+/-)</label><input name="qty" required></div>
+<div><label>Unit cost (for increases)</label><input name="unit_cost" placeholder="{{ item.avg_cost|cents }}"></div>
+<div><label>Adjustment account</label>{{ account_select('account_id', accounts) }}</div>
+<div><label>Memo</label><input name="memo" placeholder="Damaged stock"></div><div><label>&nbsp;</label><button class="btn pri">Post adjustment</button></div></form></div>
+<h2>Stock movements</h2>
+<div class="tbl"><table><tr><th>Date</th><th>Source</th><th>Memo</th><th class="n">Qty</th><th class="n">Unit cost</th><th class="n">Value</th></tr>
+{% for m in moves %}<tr><td>{{ m.date }}</td><td><span class="badge">{{ m.source_type }}</span></td><td>{{ m.memo or '' }}</td><td class="n">{{ '%+g'|format(m.qty) }}</td><td class="n">{{ m.unit_cost|money }}</td><td class="n">{{ (m.qty*m.unit_cost)|money }}</td></tr>{% endfor %}</table></div>{% endif %}
+{% endblock %}

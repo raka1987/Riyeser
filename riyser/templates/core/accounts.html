@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% block title %}Chart of Accounts{% endblock %}
+{% from "_macros.html" import tax_select %}
+{% block content %}
+<div class="head"><div><h1>Chart of Accounts</h1><p class="sub">Balances include all posted transactions to date.</p></div></div>
+<div class="tabs">{% for k, v in TYPE_LABELS.items() %}<a href="#{{ k }}">{{ v }}</a>{% endfor %}</div>
+<div class="tbl"><table><tr><th>Code</th><th>Name</th><th>Type</th><th>Tax</th><th class="n">Balance</th><th></th></tr>
+{% for t, lbl in TYPE_LABELS.items() %}<tr class="header" id="{{ t }}"><td colspan="6">{{ lbl }}</td></tr>
+{% for a in rows if a.type == t %}
+{% set b = bal.get(a.id, 0) %}{% set b = -b if t in ('liability','equity','income','other_income') else b %}
+<tr class="click {{ 'muted' if not a.active }}" data-href="{{ url_for('core.account_ledger', aid=a.id) }}"><td>{{ a.code }}</td><td>{{ a.name }}{% if a.is_bank %} <span class="badge">bank</span>{% endif %}{% if not a.active %} <span class="badge">inactive</span>{% endif %}</td>
+<td>{{ lbl }}</td><td>{{ a.tcode or '' }}</td><td class="n">{{ b|money }}</td>
+<td><button class="btn sm" onclick='editAcct({{ {"id":a.id,"code":a.code,"name":a.name,"type":a.type,"is_bank":a.is_bank,"tax":a.tax_code_id,"desc":a.description or "","active":a.active}|tojson }})'>Edit</button></td></tr>
+{% endfor %}{% endfor %}</table></div>
+<div class="card" style="margin-top:18px" id="acct-form"><h3 id="af-title">New account</h3>
+<form method="post" action="{{ url_for('core.save_account') }}" class="fields">
+<input type="hidden" name="id" id="af-id">
+<div><label>Code</label><input name="code" id="af-code" placeholder="6-2300" required></div>
+<div><label>Name</label><input name="name" id="af-name" required></div>
+<div><label>Type</label><select name="type" id="af-type">{% for k, v in TYPE_LABELS.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+<div><label>Default tax code</label><span id="af-tax">{{ tax_select('tax_code_id', tax_codes) }}</span></div>
+<div class="nb"><label>Opening balance</label><input name="opening_balance" placeholder="0.00"></div>
+<div class="nb"><label>Opening balance date</label><input type="date" name="opening_date"></div>
+<div class="wide"><label>Description</label><input name="description" id="af-desc"></div>
+<label class="check"><input type="checkbox" name="is_bank" value="1" id="af-bank"> Bank / credit card account</label>
+<label class="check"><input type="checkbox" name="active" value="1" id="af-active" checked> Active</label>
+<div><button class="btn pri">Save account</button> <a class="btn" href="{{ url_for('core.accounts') }}">Clear</a></div>
+</form></div>
+{% endblock %}
+{% block scripts %}<script>
+function editAcct(a){document.getElementById('af-title').textContent='Edit '+a.code;
+['id','code','name','type'].forEach(k=>document.getElementById('af-'+k).value=a[k]);
+document.getElementById('af-desc').value=a.desc;document.querySelector('#af-tax select').value=a.tax||'';
+document.getElementById('af-bank').checked=!!a.is_bank;document.getElementById('af-active').checked=!!a.active;
+document.querySelectorAll('.nb').forEach(e=>e.style.display='none');
+document.getElementById('acct-form').scrollIntoView({behavior:'smooth'});}
+</script>{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block title %}{{ doc.number }}{% endblock %}
+{% from "_macros.html" import status %}
+{% block content %}
+<div class="head"><div><h1>{{ {'quote':'Quote','order':'Order'}.get(doc.status, L.doc) }} {{ doc.number }} {{ status(doc, today()) }}</h1>
+<p class="sub"><a href="{{ url_for('contacts.view', cid=doc.contact_id) }}">{{ doc.cname }}</a> · {{ doc.date }}{% if doc.due_date %} · due {{ doc.due_date }}{% endif %}{% if doc.reference %} · Ref {{ doc.reference }}{% endif %}</p></div>
+<div class="actions">
+<a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, print=1) }}" target="_blank">Print / PDF</a>
+{% if doc.status in ('quote','order') %}
+<a class="btn" href="{{ url_for('documents.edit', side=doc.side, doc_id=doc.id) }}">Edit</a>
+{% if doc.status=='quote' %}<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="order"><button class="btn">Convert to order</button></form>{% endif %}
+<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="open"><button class="btn pri">Convert to {{ L.doc|lower }}</button></form>
+<form method="post" class="inline" action="{{ url_for('documents.delete', doc_id=doc.id) }}" data-confirm="Delete this {{ doc.status }}?"><button class="btn danger">Delete</button></form>
+{% endif %}
+{% if doc.status=='open' %}<a class="btn pri" href="{{ url_for('documents.pay', side=doc.side, contact=doc.contact_id) }}">{{ L.pay }}</a>{% endif %}
+{% if doc.status=='open' and not doc.amount_paid %}<form method="post" class="inline" action="{{ url_for('documents.void', doc_id=doc.id) }}" data-confirm="Void {{ doc.number }}? A reversing entry will be posted."><button class="btn danger">Void</button></form>{% endif %}
+{% if doc.entry_id %}<a class="btn" href="{{ url_for('core.entry', eid=doc.entry_id) }}">Journal #{{ doc.entry_id }}</a>{% endif %}
+</div></div>
+<div class="tbl"><table><tr><th>Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th>Account</th><th>Tax</th><th>Job</th><th class="n">Net</th><th class="n">GST</th></tr>
+{% for l in lines %}<tr><td>{{ l.sku or '' }}</td><td>{{ l.description or '' }}</td><td class="n">{{ '%g'|format(l.qty) }}</td><td class="n">{{ l.unit_price|money }}</td>
+<td class="n">{{ '%g%%'|format(l.discount_pct) if l.discount_pct }}</td><td>{{ l.acode }}</td><td>{{ l.tcode or '' }}</td><td>{{ l.jcode or '' }}</td><td class="n">{{ l.net_amount|money }}</td><td class="n">{{ l.tax_amount|money }}</td></tr>{% endfor %}
+</table></div>
+<div style="display:flex;gap:20px;margin-top:16px;flex-wrap:wrap"><div style="flex:1">{% if doc.notes %}<div class="card"><h3>Notes</h3>{{ doc.notes }}</div>{% endif %}
+{% if pays %}<div class="card"><h3>Payments applied</h3><table>{% for p in pays %}<tr><td>{{ p.date }}</td><td>{{ p.reference or '' }}</td><td class="n">{{ p.alloc|money }}</td><td>{% if p.voided %}<span class="badge void">void</span>{% endif %}</td></tr>{% endfor %}</table></div>{% endif %}</div>
+<table class="totals"><tr><td>Subtotal</td><td class="n">{{ doc.subtotal|money }}</td></tr><tr><td>GST</td><td class="n">{{ doc.tax_total|money }}</td></tr>
+<tr><td>Total</td><td class="n">{{ doc.total|money }}</td></tr><tr><td>Paid</td><td class="n">{{ doc.amount_paid|money }}</td></tr><tr><td>Balance due</td><td class="n">{{ (doc.total-doc.amount_paid)|money if doc.status != 'void' else '—' }}</td></tr></table></div>
+{% endblock %}

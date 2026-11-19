@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}{{ kind|title }}s{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{{ kind|title }}s</h1><p class="sub">Card file</p></div>
+<div class="actions"><a class="btn pri" href="{{ url_for('contacts.edit', kind=kind) }}">+ New {{ kind }}</a></div></div>
+<form class="filters"><div><label>Search</label><input name="q" value="{{ q }}"></div><div><button class="btn">Search</button></div></form>
+<div class="tbl"><table><tr><th>Name</th><th>Contact</th><th>Email</th><th>Phone</th><th>Terms</th><th class="n">Balance owing</th></tr>
+{% for c in rows %}<tr class="click {{ 'muted' if not c.active }}" data-href="{{ url_for('contacts.view', cid=c.id) }}"><td><b>{{ c.name }}</b></td><td>{{ c.contact_person or '' }}</td><td>{{ c.email or '' }}</td>
+<td>{{ c.phone or '' }}</td><td>{{ c.terms_days ~ ' days' if c.terms_days is not none }}</td><td class="n">{{ c.balance|money0 }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No {{ kind }}s yet.</td></tr>{% endfor %}</table></div>
+{% endblock %}

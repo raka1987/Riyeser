@@ -1,0 +1,6 @@
+{% extends "base.html" %}{% block title %}Audit Trail{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Audit Trail</h1><p class="sub">Last 500 recorded actions.</p></div></div>
+<div class="tbl"><table><tr><th>When (UTC)</th><th>User</th><th>Action</th><th>Details</th></tr>
+{% for r in rows %}<tr><td>{{ r.at }}</td><td>{{ r.username or 'system' }}</td><td><span class="badge">{{ r.action }}</span></td><td>{{ r.details }}</td></tr>{% endfor %}</table></div>
+{% endblock %}

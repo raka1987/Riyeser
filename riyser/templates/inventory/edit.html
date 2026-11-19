@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}{{ item.sku if item else 'New item' }}{% endblock %}
+{% from "_macros.html" import account_select, tax_select %}
+{% block content %}
+<div class="head"><div><h1>{{ item.sku ~ ' ' ~ item.name if item else 'New item' }}</h1></div></div>
+<form method="post" class="card"><div class="fields">
+<div><label>SKU / item number</label><input name="sku" value="{{ item.sku if item }}" required></div>
+<div><label>Name</label><input name="name" value="{{ item.name if item }}" required></div>
+<div class="wide"><label>Description</label><input name="description" value="{{ item.description or '' if item }}"></div>
+<label class="check"><input type="checkbox" name="is_sold" value="1" {{ 'checked' if not item or item.is_sold }}> I sell this item</label>
+<label class="check"><input type="checkbox" name="is_bought" value="1" {{ 'checked' if not item or item.is_bought }}> I buy this item</label>
+<label class="check"><input type="checkbox" name="is_inventoried" value="1" {{ 'checked' if item and item.is_inventoried }}> I inventory this item (track quantity &amp; cost)</label>
+<label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not item or item.active }}> Active</label>
+<div><label>Selling price (ex GST)</label><input name="sell_price" value="{{ item.sell_price|cents if item }}"></div>
+<div><label>Buying price (ex GST)</label><input name="buy_price" value="{{ item.buy_price|cents if item }}"></div>
+<div><label>Income account</label>{{ account_select('income_account_id', accounts, item.income_account_id if item else defaults.income) }}</div>
+<div><label>Expense / COGS account</label>{{ account_select('expense_account_id', accounts, item.expense_account_id if item else defaults.cogs) }}</div>
+<div><label>Inventory asset account</label>{{ account_select('asset_account_id', accounts, item.asset_account_id if item and item.asset_account_id else defaults.asset) }}</div>
+<div><label>Tax code when sold</label>{{ tax_select('sale_tax_code_id', tax_codes, item.sale_tax_code_id if item else (tax_codes|selectattr('code','equalto','GST')|first).id) }}</div>
+<div><label>Tax code when bought</label>{{ tax_select('purchase_tax_code_id', tax_codes, item.purchase_tax_code_id if item else (tax_codes|selectattr('code','equalto','GST')|first).id) }}</div>
+<div><label>Reorder level</label><input name="reorder_level" value="{{ '%g'|format(item.reorder_level) if item else 0 }}"></div>
+{% if not item %}<div><label>Opening quantity</label><input name="opening_qty"></div><div><label>Opening unit cost</label><input name="opening_cost"></div>
+<div><label>Opening date</label><input type="date" name="opening_date" value="{{ today() }}"></div>{% endif %}
+</div><p><button class="btn pri">Save item</button></p></form>
+{% endblock %}

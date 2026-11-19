@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block title %}{{ c.name if c else 'New ' ~ kind }}{% endblock %}
+{% from "_macros.html" import account_select, tax_select %}
+{% block content %}
+<div class="head"><div><h1>{{ c.name if c else 'New ' ~ kind }}</h1></div></div>
+<form method="post" class="card"><div class="fields">
+<div><label>Name</label><input name="name" value="{{ c.name if c }}" required></div>
+<div><label>ABN</label><input name="abn" value="{{ c.abn or '' if c }}"></div>
+<div><label>Contact person</label><input name="contact_person" value="{{ c.contact_person or '' if c }}"></div>
+<div><label>Email</label><input type="email" name="email" value="{{ c.email or '' if c }}"></div>
+<div><label>Phone</label><input name="phone" value="{{ c.phone or '' if c }}"></div>
+<div><label>Credit terms (days)</label><input type="number" name="terms_days" value="{{ c.terms_days if c and c.terms_days is not none else company.default_terms_days }}"></div>
+<div><label>Credit limit</label><input name="credit_limit" value="{{ c.credit_limit|cents if c and c.credit_limit }}"></div>
+<div><label>Default {{ 'income' if kind=='customer' else 'expense' }} account</label>{{ account_select('default_account_id', accounts, c.default_account_id if c) }}</div>
+<div><label>Default tax code</label>{{ tax_select('tax_code_id', tax_codes, c.tax_code_id if c) }}</div>
+<div class="wide"><label>Address</label><textarea name="address" rows="2">{{ c.address or '' if c }}</textarea></div>
+<div class="wide"><label>Notes</label><textarea name="notes" rows="2">{{ c.notes or '' if c }}</textarea></div>
+<label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not c or c.active }}> Active</label>
+</div><p><button class="btn pri">Save</button></p></form>
+{% endblock %}

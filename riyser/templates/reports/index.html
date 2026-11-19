@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block title %}Reports{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Reports</h1><p class="sub">All reports can be filtered, printed and exported to CSV.</p></div></div>
+<div class="cat">{% for group, items in catalog %}<div class="card"><h3>{{ group }}</h3>{% for k, t in items %}<a href="{{ url_for('reports.show', name=k) }}">{{ t }}</a>{% endfor %}</div>{% endfor %}</div>
+{% endblock %}

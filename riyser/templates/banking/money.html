@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block title %}{{ kind|title }} Money{% endblock %}
+{% from "_macros.html" import account_select, tax_select, job_select %}
+{% macro row() -%}<tr><td>{{ account_select('line_account', accounts) }}</td><td><input name="line_amount" class="right" style="width:120px"></td>
+<td>{{ tax_select('line_tax', tax_codes) }}</td><td>{{ job_select('line_job', jobs) }}</td><td><input name="line_memo"></td><td><button type="button" class="btn sm del-row">✕</button></td></tr>{%- endmacro %}
+{% block content %}
+<div class="head"><div><h1>{{ 'Spend Money' if kind=='spend' else 'Receive Money' }}</h1><p class="sub">Direct {{ 'payments' if kind=='spend' else 'deposits' }} not linked to a bill or invoice.</p></div></div>
+<form method="post" id="money-form" class="card"><input type="hidden" name="feed_id" value="{{ request.args.feed or '' }}">
+<div class="fields"><div><label>{{ 'Pay from' if kind=='spend' else 'Deposit to' }}</label>{{ account_select('bank_account_id', bank_accounts, request.args.account|int if request.args.account else default_bank, blank=False) }}</div>
+<div><label>Date</label><input type="date" name="date" value="{{ request.args.date or today() }}" required></div>
+<div><label>Card (optional)</label><select name="contact_id"><option value="">—</option>{% for c in contacts %}<option value="{{ c.id }}">{{ c.name }} ({{ c.kind }})</option>{% endfor %}</select></div>
+<div><label>{{ 'Payee' if kind=='spend' else 'Payor' }}</label><input name="payee" value="{{ request.args.payee or '' }}"></div>
+<div><label>Reference</label><input name="reference"></div><div><label>Memo</label><input name="memo"></div>
+<label class="check"><input type="checkbox" name="tax_inclusive" value="1" checked> Amounts include GST</label></div>
+<h2>Allocation</h2>
+<table class="lines" id="ml"><thead><tr><th style="width:34%">Account</th><th class="n">Amount</th><th>Tax</th><th>Job</th><th>Memo</th><th></th></tr></thead>
+<tbody>{{ row() }}{{ row() }}</tbody><tfoot><tr><td class="right">Total</td><td class="n" id="m-total"></td><td colspan="4"></td></tr></tfoot></table>
+<template>{{ row() }}</template><p><button type="button" class="btn sm" data-add-row="#ml">+ Add line</button></p>
+<button class="btn pri">Record</button></form>
+{% endblock %}

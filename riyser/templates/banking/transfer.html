@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Transfer Money{% endblock %}
+{% from "_macros.html" import account_select %}
+{% block content %}
+<div class="head"><div><h1>Transfer Money</h1></div></div>
+<form method="post" class="card"><div class="fields">
+<div><label>From</label>{{ account_select('from_id', bank_accounts, blank=False) }}</div>
+<div><label>To</label>{{ account_select('to_id', bank_accounts, blank=False) }}</div>
+<div><label>Amount</label><input name="amount" required></div><div><label>Date</label><input type="date" name="date" value="{{ today() }}"></div>
+<div class="wide"><label>Memo</label><input name="memo"></div></div><p><button class="btn pri">Record transfer</button></p></form>
+{% endblock %}

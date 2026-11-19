@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block title %}{{ acct.code }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{{ acct.code }} {{ acct.name }}</h1><p class="sub">{{ TYPE_LABELS[acct.type] }} account register</p></div>
+<div class="actions">{% if acct.is_bank %}<a class="btn" href="{{ url_for('banking.reconcile', account=acct.id) }}">Reconcile</a>{% endif %}</div></div>
+<form class="filters"><div><label>From</label><input type="date" name="start" value="{{ start }}"></div>
+<div><label>To</label><input type="date" name="end" value="{{ end }}"></div><div><button class="btn">Apply</button></div></form>
+<div class="tbl"><table><tr><th>Date</th><th>ID</th><th>Source</th><th>Ref</th><th>Memo</th><th class="n">Debit</th><th class="n">Credit</th><th class="n">Balance</th>{% if acct.is_bank %}<th>Rec</th>{% endif %}</tr>
+<tr class="header"><td colspan="7">Opening balance</td><td class="n">{{ opening|money }}</td>{% if acct.is_bank %}<td></td>{% endif %}</tr>
+{% set ns = namespace(b=opening, dr=0, cr=0) %}
+{% for r in rows %}{% set ns.b = ns.b + r.debit - r.credit %}{% set ns.dr = ns.dr + r.debit %}{% set ns.cr = ns.cr + r.credit %}
+<tr class="click" data-href="{{ url_for('core.entry', eid=r.eid) }}"><td>{{ r.date }}</td><td>#{{ r.eid }}</td><td><span class="badge">{{ r.source_type }}</span></td><td>{{ r.reference or '' }}</td>
+<td>{{ r.memo or r.emo or '' }}</td><td class="n">{{ r.debit|money0 }}</td><td class="n">{{ r.credit|money0 }}</td><td class="n">{{ ns.b|money }}</td>
+{% if acct.is_bank %}<td>{{ '✓' if r.reconciliation_id }}</td>{% endif %}</tr>{% endfor %}
+<tr class="grand"><td colspan="5">Closing balance</td><td class="n">{{ ns.dr|money }}</td><td class="n">{{ ns.cr|money }}</td><td class="n">{{ ns.b|money }}</td>{% if acct.is_bank %}<td></td>{% endif %}</tr>
+</table></div>
+{% endblock %}

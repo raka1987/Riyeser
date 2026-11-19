@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block title %}{{ (e.first_name ~ ' ' ~ e.last_name) if e else 'New employee' }}{% endblock %}
+{% from "_macros.html" import job_select %}
+{% block content %}
+<div class="head"><div><h1>{{ (e.first_name ~ ' ' ~ e.last_name) if e else 'New employee' }}</h1>{% if e %}<p class="sub">Leave balance {{ '%.2f'|format(e.leave_hours) }} hours</p>{% endif %}</div></div>
+<form method="post" class="card"><div class="fields">
+<div><label>First name</label><input name="first_name" value="{{ e.first_name if e }}" required></div>
+<div><label>Last name</label><input name="last_name" value="{{ e.last_name if e }}" required></div>
+<div><label>Email</label><input name="email" value="{{ e.email or '' if e }}"></div>
+<div><label>Tax file number</label><input name="tfn" value="{{ e.tfn or '' if e }}"></div>
+<div><label>Start date</label><input type="date" name="start_date" value="{{ e.start_date or '' if e }}"></div>
+<div><label>Pay basis</label><select name="pay_basis">{% for b in ['hourly','salary'] %}<option {{ 'selected' if e and e.pay_basis==b }}>{{ b }}</option>{% endfor %}</select></div>
+<div><label>Hourly rate</label><input name="hourly_rate" value="{{ e.hourly_rate|cents if e }}"></div>
+<div><label>Annual salary</label><input name="annual_salary" value="{{ e.annual_salary|cents if e }}"></div>
+<div><label>Standard hours / week</label><input name="std_hours" value="{{ e.std_hours if e else 38 }}"></div>
+<div><label>Pay frequency</label><select name="pay_frequency">{% for f in ['weekly','fortnightly','monthly'] %}<option {{ 'selected' if e and e.pay_frequency==f }}>{{ f }}</option>{% endfor %}</select></div>
+<div><label>Super guarantee %</label><input name="super_rate" value="{{ e.super_rate if e else 12 }}"></div>
+<div><label>Super fund</label><input name="super_fund" value="{{ e.super_fund or '' if e }}"></div>
+<div><label>BSB</label><input name="bank_bsb" value="{{ e.bank_bsb or '' if e }}"></div>
+<div><label>Account number</label><input name="bank_account" value="{{ e.bank_account or '' if e }}"></div>
+<div><label>Default job</label>{{ job_select('job_id', jobs, e.job_id if e) }}</div>
+<label class="check"><input type="checkbox" name="tax_free_threshold" value="1" {{ 'checked' if not e or e.tax_free_threshold }}> Claims tax-free threshold</label>
+<label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not e or e.active }}> Active</label>
+</div><p><button class="btn pri">Save employee</button></p></form>
+{% if slips %}<h2>Pay history</h2><div class="tbl"><table><tr><th>Pay date</th><th class="n">Hours</th><th class="n">Gross</th><th class="n">PAYG</th><th class="n">Super</th><th class="n">Net</th></tr>
+{% for s in slips %}<tr class="click" data-href="{{ url_for('payroll.payslip', sid=s.id) }}"><td>{{ s.pay_date }}</td><td class="n">{{ s.hours }}</td><td class="n">{{ s.gross|money }}</td><td class="n">{{ s.tax|money }}</td><td class="n">{{ s.super|money }}</td><td class="n">{{ s.net|money }}</td></tr>{% endfor %}</table></div>{% endif %}
+{% endblock %}

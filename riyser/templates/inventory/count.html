@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block title %}Stocktake{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Stocktake</h1><p class="sub">Enter counted quantities; differences post to Inventory Adjustments. Leave blank to skip.</p></div></div>
+<form method="post" class="card"><div class="fields"><div><label>Count date</label><input type="date" name="date" value="{{ today() }}"></div></div>
+<table><tr><th>SKU</th><th>Name</th><th class="n">On hand</th><th class="n">Avg cost</th><th class="n" style="width:140px">Counted</th></tr>
+{% for i in items %}<tr><td>{{ i.sku }}</td><td>{{ i.name }}</td><td class="n">{{ '%g'|format(i.qty_on_hand) }}</td><td class="n">{{ i.avg_cost|money }}</td><td><input name="count_{{ i.id }}" class="right"></td></tr>{% endfor %}</table>
+<p><button class="btn pri">Post stocktake</button></p></form>
+{% endblock %}

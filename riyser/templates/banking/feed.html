@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}Bank Statement{% endblock %}
+{% from "_macros.html" import account_select, tax_select %}
+{% block content %}
+<div class="head"><div><h1>Bank Statement Import</h1><p class="sub">Import a CSV (date, description, amount) and allocate each line to an account.</p></div></div>
+<form class="filters"><div style="min-width:260px"><label>Account</label>{{ account_select('account', bank_accounts, aid, blank=False) }}</div><div><button class="btn">Show</button></div></form>
+<form method="post" enctype="multipart/form-data" class="card"><input type="hidden" name="account_id" value="{{ aid }}">
+<div class="fields"><div><label>Statement CSV</label><input type="file" name="file" accept=".csv,text/csv"></div><div><label>&nbsp;</label><button class="btn pri">Import</button></div></div>
+<p class="muted">Columns: Date (YYYY-MM-DD or DD/MM/YYYY), Description, Amount (negative = withdrawal). A header row is skipped automatically.</p></form>
+<div class="tbl"><table><tr><th>Date</th><th>Description</th><th class="n">Amount</th><th>Allocate to</th><th>Tax</th><th></th></tr>
+{% for r in rows %}<tr><td>{{ r.date }}</td><td>{{ r.description }}</td><td class="n {{ 'neg' if r.amount < 0 }}">{{ r.amount|money }}</td>
+{% if r.entry_id %}<td colspan="3"><a href="{{ url_for('core.entry', eid=r.entry_id) }}">Allocated → #{{ r.entry_id }}</a></td>
+{% else %}<td>{{ account_select('account_id', accounts)|replace('<select', '<select form="f' ~ r.id ~ '" required') }}</td><td>{{ tax_select('tax_code_id', tax_codes)|replace('<select', '<select form="f' ~ r.id ~ '"') }}</td>
+<td style="white-space:nowrap"><form id="f{{ r.id }}" method="post" class="inline" action="{{ url_for('banking.allocate', fid=r.id) }}"><button class="btn sm pri">Allocate</button></form>
+<a class="btn sm" href="{{ url_for('banking.money', kind='receive' if r.amount > 0 else 'spend', feed=r.id, account=aid, date=r.date, payee=r.description) }}">Split…</a>
+<form method="post" class="inline" action="{{ url_for('banking.feed_delete', fid=r.id) }}"><button class="btn sm danger">✕</button></form></td>{% endif %}</tr>
+{% else %}<tr><td colspan="6" class="muted">No statement lines.</td></tr>{% endfor %}</table></div>
+{% endblock %}

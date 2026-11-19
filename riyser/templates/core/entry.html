@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}Entry #{{ e.id }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Transaction #{{ e.id }} {% if e.voided %}<span class="badge void">{{ 'Reversal' if e.reverses_id else 'Reversed' }}</span>{% endif %}</h1>
+<p class="sub">{{ e.date }} · <span class="badge">{{ e.source_type }}</span> · {{ e.memo or '' }}{% if e.reference %} · Ref {{ e.reference }}{% endif %} · entered by {{ e.username or 'system' }} at {{ e.created_at }}</p></div>
+<div class="actions">
+{% if e.source_type in ('invoice','bill') %}<a class="btn" href="{{ url_for('documents.view', doc_id=e.source_id) }}">Open document</a>{% endif %}
+{% if e.source_type == 'payrun' %}<a class="btn" href="{{ url_for('payroll.payrun', rid=e.source_id) }}">Open pay run</a>{% endif %}
+{% if e.reverses_id %}<a class="btn" href="{{ url_for('core.entry', eid=e.reverses_id) }}">Original #{{ e.reverses_id }}</a>{% endif %}
+{% if reversal %}<a class="btn" href="{{ url_for('core.entry', eid=reversal.id) }}">Reversal #{{ reversal.id }}</a>{% endif %}
+{% if not e.voided and e.source_type in ('journal','spend','receive','transfer','stock_adj') %}
+<form method="post" class="inline" action="{{ url_for('core.reverse', eid=e.id) }}" data-confirm="Post a reversing entry?"><button class="btn danger">Reverse</button></form>{% endif %}
+</div></div>
+<div class="tbl"><table><tr><th>Account</th><th>Memo</th><th>Tax</th><th>Job</th><th class="n">Debit</th><th class="n">Credit</th></tr>
+{% for l in lines %}<tr><td><a href="{{ url_for('core.account_ledger', aid=l.account_id) }}">{{ l.code }} {{ l.name }}</a></td><td>{{ l.memo or '' }}</td><td>{{ l.tcode or '' }}</td><td>{{ l.jcode or '' }}</td>
+<td class="n">{{ l.debit|money0 }}</td><td class="n">{{ l.credit|money0 }}</td></tr>{% endfor %}
+<tr class="grand"><td colspan="4">Total</td><td class="n">{{ lines|sum(attribute='debit')|money }}</td><td class="n">{{ lines|sum(attribute='credit')|money }}</td></tr></table></div>
+{% endblock %}

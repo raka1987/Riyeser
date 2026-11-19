@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Budgets{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Budgets</h1><p class="sub">Monthly budget per profit &amp; loss account for FY starting {{ months[0] }}.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('core.budgets', fy=year-1) }}">← FY {{ year-1 }}</a><a class="btn" href="{{ url_for('core.budgets', fy=year+1) }}">FY {{ year+1 }} →</a>
+<a class="btn" href="{{ url_for('reports.show', name='budget') }}">Budget vs Actual</a></div></div>
+<form method="post"><input type="hidden" name="fy" value="{{ year }}">
+<div class="tbl"><table class="lines"><tr><th>Account</th>{% for m in months %}<th class="n">{{ m }}</th>{% endfor %}</tr>
+{% for a in accts %}<tr><td style="white-space:nowrap">{{ a.code }} {{ a.name }}</td>
+{% for m in months %}<td><input name="b_{{ a.id }}_{{ m }}" value="{{ (data.get((a.id, m)) or 0)|cents if data.get((a.id, m)) }}" style="width:84px" class="right"></td>{% endfor %}</tr>{% endfor %}
+</table></div><p><button class="btn pri">Save budgets</button></p></form>
+{% endblock %}

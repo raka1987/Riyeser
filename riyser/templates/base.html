@@ -1,0 +1,55 @@
+{% from "_macros.html" import flashes %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Riyser Accounting{% endblock %} · Riyser Accounting</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+{% set ep = request.endpoint or '' %}
+{% macro nav(endpoint, label) -%}
+<a href="{{ url_for(endpoint, **kwargs) }}" class="{{ 'on' if request.path == url_for(endpoint, **kwargs) }}">{{ label }}</a>
+{%- endmacro %}
+<div class="layout">
+  <aside class="side">
+    <div class="brand"><div class="logo">R</div><div>Riyser<small>Accounting Enterprise</small></div></div>
+    <div class="nav-sec">{{ nav('core.dashboard', 'Dashboard') }}</div>
+    <div class="nav-sec"><h4>Accounts</h4>
+      {{ nav('core.accounts', 'Chart of Accounts') }}{{ nav('core.journal_new', 'General Journal') }}
+      {{ nav('core.journal_list', 'Find Transactions') }}</div>
+    <div class="nav-sec"><h4>Banking</h4>
+      {{ nav('banking.index', 'Bank Accounts') }}{{ nav('banking.money', 'Spend Money', kind='spend') }}
+      {{ nav('banking.money', 'Receive Money', kind='receive') }}{{ nav('banking.transfer_money', 'Transfer Money') }}
+      {{ nav('banking.reconcile', 'Reconcile Accounts') }}{{ nav('banking.feed', 'Bank Statement Import') }}</div>
+    <div class="nav-sec"><h4>Sales</h4>
+      {{ nav('documents.edit', 'New Invoice', side='sale') }}{{ nav('documents.index', 'Sales Register', side='sale') }}
+      {{ nav('documents.pay', 'Receive Payments', side='sale') }}{{ nav('contacts.index', 'Customers', kind='customer') }}</div>
+    <div class="nav-sec"><h4>Purchases</h4>
+      {{ nav('documents.edit', 'Enter Bill', side='purchase') }}{{ nav('documents.index', 'Purchases Register', side='purchase') }}
+      {{ nav('documents.pay', 'Pay Bills', side='purchase') }}{{ nav('contacts.index', 'Suppliers', kind='supplier') }}</div>
+    <div class="nav-sec"><h4>Inventory</h4>
+      {{ nav('inventory.index', 'Items List') }}{{ nav('inventory.count', 'Stocktake') }}</div>
+    <div class="nav-sec"><h4>Payroll</h4>
+      {{ nav('payroll.index', 'Employees & Pay Runs') }}{{ nav('payroll.run', 'Process Payroll') }}</div>
+    <div class="nav-sec"><h4>Reports</h4>
+      {{ nav('reports.index', 'All Reports') }}{{ nav('reports.show', 'Profit & Loss', name='pnl') }}
+      {{ nav('reports.show', 'Balance Sheet', name='balance_sheet') }}{{ nav('reports.show', 'BAS / GST', name='gst') }}</div>
+    <div class="nav-sec"><h4>Setup</h4>
+      {{ nav('core.company', 'Company & Linked Accounts') }}{{ nav('core.tax_codes', 'Tax Codes') }}
+      {{ nav('core.jobs', 'Jobs') }}{{ nav('core.budgets', 'Budgets') }}
+      {% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & Roles') }}{% endif %}
+      {{ nav('core.audit_log', 'Audit Trail') }}</div>
+  </aside>
+  <div class="main">
+    <div class="top">
+      <div class="co">{{ company.name if company }}<small>{% if company and company.lock_date %}Locked to {{ company.lock_date }}{% endif %}</small></div>
+      <div class="who">{{ user.full_name or user.username }} · {{ user.role|title }} · <a href="{{ url_for('auth.logout') }}">Sign out</a></div>
+    </div>
+    <div class="content">{{ flashes() }}{% block content %}{% endblock %}</div>
+  </div>
+</div>
+{% block scripts %}{% endblock %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

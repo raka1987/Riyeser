@@ -1,0 +1,13 @@
+{% from "_macros.html" import flashes %}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create company file · Riyser Accounting</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body><div class="login">
+<div class="brand" style="color:var(--ink);padding:0 0 10px"><div class="logo" style="color:#fff">R</div><div>Riyser Accounting<small>New company file</small></div></div>
+<p class="muted">Creates a company file with an Australian chart of accounts, GST tax codes and an <b>admin</b> user.</p>
+{{ flashes() }}
+<form method="post">
+  <label>Company name</label><input name="name" placeholder="My Company Pty Ltd" required>
+  <label style="margin-top:12px">Admin password</label><input name="password" type="password" required minlength="4">
+  <label class="check" style="margin-top:14px"><input type="checkbox" name="demo" value="1"> Load demo data (sample customers, invoices, payroll)</label>
+  <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Create company file</button>
+</form></div></body></html>

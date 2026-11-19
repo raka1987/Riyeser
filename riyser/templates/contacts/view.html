@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}{{ c.name }}{% endblock %}
+{% from "_macros.html" import status %}
+{% block content %}
+{% set side = 'sale' if c.kind=='customer' else 'purchase' %}
+<div class="head"><div><h1>{{ c.name }}</h1><p class="sub">{{ c.kind|title }}{% if c.abn %} · ABN {{ c.abn }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}{% if c.phone %} · {{ c.phone }}{% endif %}</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('contacts.edit', kind=c.kind, cid=c.id) }}">Edit</a>
+<a class="btn pri" href="{{ url_for('documents.edit', side=side, contact=c.id) }}">+ New {{ 'invoice' if side=='sale' else 'bill' }}</a>
+<a class="btn" href="{{ url_for('documents.pay', side=side, contact=c.id) }}">{{ 'Receive payment' if side=='sale' else 'Pay bills' }}</a>
+{% if side=='sale' %}<a class="btn" href="{{ url_for('contacts.statement', cid=c.id) }}">Statement</a>{% endif %}</div></div>
+<div class="grid g3"><div class="card kpi"><div class="lbl">Balance owing</div><div class="val">{{ balance|money }}</div></div>
+<div class="card kpi"><div class="lbl">Credit terms</div><div class="val">{{ c.terms_days if c.terms_days is not none else company.default_terms_days }} days</div></div>
+<div class="card kpi"><div class="lbl">Credit limit</div><div class="val">{{ c.credit_limit|money if c.credit_limit else '—' }}</div>
+{% if c.credit_limit and balance > c.credit_limit %}<div class="note neg">Over limit</div>{% endif %}</div></div>
+<h2>Documents</h2>
+<div class="tbl"><table><tr><th>Number</th><th>Date</th><th>Due</th><th>Status</th><th class="n">Total</th><th class="n">Balance</th></tr>
+{% for d in docs %}<tr class="click" data-href="{{ url_for('documents.view', doc_id=d.id) }}"><td>{{ d.number }}</td><td>{{ d.date }}</td><td>{{ d.due_date or '' }}</td><td>{{ status(d, today()) }}</td>
+<td class="n">{{ d.total|money }}</td><td class="n">{{ (d.total-d.amount_paid)|money0 if d.status=='open' }}</td></tr>{% else %}<tr><td colspan="6" class="muted">None.</td></tr>{% endfor %}</table></div>
+<h2>Payments</h2>
+<div class="tbl"><table><tr><th>Date</th><th>Bank</th><th>Reference</th><th class="n">Amount</th><th></th></tr>
+{% for p in pays %}<tr><td>{{ p.date }}</td><td>{{ p.bank }}</td><td>{{ p.reference or '' }}</td><td class="n">{{ p.amount|money }}</td><td>{% if p.voided %}<span class="badge void">void</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">None.</td></tr>{% endfor %}</table></div>
+{% endblock %}

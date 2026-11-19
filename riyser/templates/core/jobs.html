@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block title %}Jobs{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Jobs</h1><p class="sub">Tag invoice, bill, journal and payroll lines with a job to track job profitability.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('reports.show', name='jobs') }}">Job P&amp;L report</a></div></div>
+<div class="tbl"><table><tr><th>Code</th><th>Name</th><th>Customer</th><th>Active</th><th></th></tr>
+{% for j in rows %}<tr><td><input form="j{{ j.id }}" name="code" value="{{ j.code }}"></td><td><input form="j{{ j.id }}" name="name" value="{{ j.name }}"></td>
+<td><select form="j{{ j.id }}" name="contact_id"><option value="">—</option>{% for c in customers %}<option value="{{ c.id }}" {{ 'selected' if c.id==j.contact_id }}>{{ c.name }}</option>{% endfor %}</select></td>
+<td><input form="j{{ j.id }}" type="checkbox" name="active" value="1" {{ 'checked' if j.active }}></td>
+<td><form id="j{{ j.id }}" method="post"><input type="hidden" name="id" value="{{ j.id }}"><button class="btn sm">Save</button>
+<a class="btn sm" href="{{ url_for('reports.show', name='pnl', job=j.id) }}">P&amp;L</a></form></td></tr>{% else %}<tr><td colspan="5" class="muted">No jobs yet.</td></tr>{% endfor %}</table></div>
+<div class="card" style="margin-top:18px"><h3>New job</h3><form method="post" class="fields">
+<div><label>Code</label><input name="code" required></div><div><label>Name</label><input name="name" required></div>
+<div><label>Customer</label><select name="contact_id"><option value="">—</option>{% for c in customers %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+<div><label>&nbsp;</label><button class="btn pri">Add job</button></div></form></div>
+{% endblock %}

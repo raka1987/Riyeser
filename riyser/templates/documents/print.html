@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"><title>{{ doc.number }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body><div class="doc-print">
+<div class="hdr"><div><h1>{% if doc.side=='sale' %}{{ {'quote':'Quote','order':'Sales Order'}.get(doc.status, 'Tax Invoice') }}{% else %}{{ {'quote':'Request for Quote','order':'Purchase Order'}.get(doc.status, 'Bill') }}{% endif %}</h1>
+<div><b>{{ doc.number }}</b></div><div class="muted">Date {{ doc.date }}{% if doc.due_date and doc.status not in ('quote',) %} · Due {{ doc.due_date }}{% endif %}</div></div>
+<div class="right"><b>{{ company.name }}</b><br>{{ company.address or '' }}<br>{% if company.abn %}ABN {{ company.abn }}<br>{% endif %}{{ company.email or '' }}</div></div>
+<p><span class="muted">{{ 'Bill to' if doc.side=='sale' else 'Supplier' }}</span><br><b>{{ doc.cname }}</b><br>{{ doc.caddress or '' }}{% if doc.cabn %}<br>ABN {{ doc.cabn }}{% endif %}</p>
+<table><tr><th>Description</th><th class="n">Qty</th><th class="n">Unit price</th><th class="n">Disc</th><th class="n">GST</th><th class="n">Amount</th></tr>
+{% for l in lines %}<tr><td>{{ l.description }}</td><td class="n">{{ '%g'|format(l.qty) }}</td><td class="n">{{ l.unit_price|money }}</td><td class="n">{{ '%g%%'|format(l.discount_pct) if l.discount_pct }}</td>
+<td class="n">{{ l.tax_amount|money }}</td><td class="n">{{ (l.net_amount + (l.tax_amount if doc.tax_inclusive else 0))|money }}</td></tr>{% endfor %}</table>
+<table class="totals" style="margin-top:14px"><tr><td>Subtotal (ex GST)</td><td class="n">{{ doc.subtotal|money }}</td></tr><tr><td>GST</td><td class="n">{{ doc.tax_total|money }}</td></tr>
+<tr><td>Total{% if doc.amount_paid %} (paid {{ doc.amount_paid|money }}){% endif %}</td><td class="n">{{ (doc.total - doc.amount_paid)|money }}</td></tr></table>
+{% if doc.notes %}<p style="margin-top:24px">{{ doc.notes }}</p>{% endif %}
+<p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print / Save PDF</button></p>
+</div></body></html>

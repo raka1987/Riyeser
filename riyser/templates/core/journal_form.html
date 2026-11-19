@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}General Journal{% endblock %}
+{% from "_macros.html" import account_select, tax_select, job_select %}
+{% block content %}
+<div class="head"><div><h1>Record Journal Entry</h1><p class="sub">Debits must equal credits.</p></div></div>
+<form method="post" id="journal-form" class="card">
+<div class="fields"><div><label>Date</label><input type="date" name="date" value="{{ today() }}" required></div>
+<div><label>Reference</label><input name="reference" placeholder="GJ0001"></div>
+<div class="wide"><label>Memo</label><input name="memo" required placeholder="e.g. Depreciation for quarter"></div></div>
+<h2>Lines</h2>
+<table class="lines" id="jl"><thead><tr><th style="width:32%">Account</th><th class="n">Debit</th><th class="n">Credit</th><th>Tax</th><th>Job</th><th>Memo</th><th></th></tr></thead>
+<tbody>{% for i in range(4) %}<tr><td>{{ account_select('line_account', accounts) }}</td><td><input name="line_debit" class="right"></td><td><input name="line_credit" class="right"></td>
+<td>{{ tax_select('line_tax', tax_codes) }}</td><td>{{ job_select('line_job', jobs) }}</td><td><input name="line_memo"></td><td><button type="button" class="btn sm del-row">✕</button></td></tr>{% endfor %}</tbody>
+<tfoot><tr><td class="right">Totals</td><td class="n" id="j-dr"></td><td class="n" id="j-cr"></td><td colspan="4"><span id="j-diff"></span></td></tr></tfoot></table>
+<template><tr><td>{{ account_select('line_account', accounts) }}</td><td><input name="line_debit" class="right"></td><td><input name="line_credit" class="right"></td>
+<td>{{ tax_select('line_tax', tax_codes) }}</td><td>{{ job_select('line_job', jobs) }}</td><td><input name="line_memo"></td><td><button type="button" class="btn sm del-row">✕</button></td></tr></template>
+<p><button type="button" class="btn sm" data-add-row="#jl">+ Add line</button></p>
+<button class="btn pri">Record</button></form>
+{% endblock %}

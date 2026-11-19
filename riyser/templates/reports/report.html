@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block title %}{{ rep.title }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{{ rep.title }}</h1><p class="sub">{{ company.name }} · {{ rep.subtitle }}</p></div>
+<div class="actions"><button class="btn" onclick="print()">Print</button><a class="btn" href="{{ request.full_path }}&format=csv">Export CSV</a></div></div>
+{% if rep.filters %}<form class="filters">
+{% if 'start' in rep.filters %}<div><label>From</label><input type="date" name="start" value="{{ p.start }}"></div><div><label>To</label><input type="date" name="end" value="{{ p.end }}"></div>{% endif %}
+{% if 'asof' in rep.filters %}<div><label>As at</label><input type="date" name="asof" value="{{ p.asof }}"></div>{% endif %}
+{% if 'job' in rep.filters %}<div><label>Job</label><select name="job"><option value="">All</option>{% for j in jobs %}<option value="{{ j.id }}" {{ 'selected' if p.job==j.id }}>{{ j.code }} {{ j.name }}</option>{% endfor %}</select></div>{% endif %}
+<div><button class="btn pri">Run report</button></div></form>{% endif %}
+<div class="tbl"><table><tr>{% for c in rep.columns %}<th class="{{ 'n' if not loop.first }}">{{ c }}</th>{% endfor %}</tr>
+{% for r in rep.rows %}<tr class="{{ r.kind }} {{ 'click' if r.link }}" {% if r.link %}data-href="{{ r.link }}"{% endif %}>
+{% for c in r.cells %}{% if c is number %}<td class="n {{ 'neg' if c < 0 }}">{{ c|money }}</td>{% else %}<td class="{{ 'i1' if loop.first and r.indent }}">{{ c }}</td>{% endif %}{% endfor %}</tr>
+{% else %}<tr><td class="muted" colspan="{{ rep.columns|length }}">No data for this period.</td></tr>{% endfor %}</table></div>
+{% endblock %}

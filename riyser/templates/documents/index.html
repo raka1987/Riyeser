@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}{{ L.title }}{% endblock %}
+{% from "_macros.html" import status as st %}
+{% block content %}
+<div class="head"><div><h1>{{ L.title }} Register</h1></div>
+<div class="actions"><a class="btn pri" href="{{ url_for('documents.edit', side=side) }}">+ New {{ L.doc|lower }}</a>
+<a class="btn" href="{{ url_for('documents.edit', side=side, status='quote') }}">+ Quote</a>
+<a class="btn" href="{{ url_for('documents.edit', side=side, status='order') }}">+ Order</a>
+<a class="btn" href="{{ url_for('documents.pay', side=side) }}">{{ L.pay }}</a>
+<a class="btn" href="{{ url_for('documents.payments', side=side) }}">Payments</a></div></div>
+<div class="tabs">{% for k, v in [('open','Open'),('quote','Quotes'),('order','Orders'),('paid','Closed'),('void','Void'),('all','All')] %}
+<a class="{{ 'on' if status==k }}" href="{{ url_for('documents.index', side=side, status=k) }}">{{ v }}</a>{% endfor %}</div>
+<form class="filters"><input type="hidden" name="status" value="{{ status }}"><div><label>Search</label><input name="q" value="{{ q }}" placeholder="Number or {{ L.contact|lower }}"></div><div><button class="btn">Search</button></div></form>
+<div class="tbl"><table><tr><th>Number</th><th>Date</th><th>{{ L.contact }}</th><th>Reference</th><th>Due</th><th>Status</th><th class="n">Total</th><th class="n">Balance due</th></tr>
+{% for d in rows %}<tr class="click" data-href="{{ url_for('documents.view', doc_id=d.id) }}"><td><b>{{ d.number }}</b></td><td>{{ d.date }}</td><td>{{ d.cname }}</td><td>{{ d.reference or '' }}</td>
+<td>{{ d.due_date or '' }}</td><td>{{ st(d, today) }}</td><td class="n">{{ d.total|money }}</td><td class="n">{{ (d.total-d.amount_paid)|money0 if d.status=='open' }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">Nothing here.</td></tr>{% endfor %}
+{% if rows %}<tr class="grand"><td colspan="6">{{ rows|length }} documents</td><td class="n">{{ rows|sum(attribute='total')|money }}</td><td></td></tr>{% endif %}</table></div>
+{% endblock %}

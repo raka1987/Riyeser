@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block title %}Payroll{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Payroll</h1><p class="sub">PAYG is an approximation of ATO withholding — verify before lodging.</p></div>
+<div class="actions"><a class="btn pri" href="{{ url_for('payroll.run') }}">Process payroll</a><a class="btn" href="{{ url_for('payroll.employee') }}">+ Employee</a>
+<a class="btn" href="{{ url_for('reports.show', name='payroll_summary') }}">Payroll summary</a></div></div>
+<h2>Employees</h2>
+<div class="tbl"><table><tr><th>Name</th><th>Basis</th><th>Frequency</th><th class="n">Rate</th><th class="n">Super %</th><th class="n">Leave hrs</th></tr>
+{% for e in emps %}<tr class="click {{ 'muted' if not e.active }}" data-href="{{ url_for('payroll.employee', eid=e.id) }}"><td><b>{{ e.first_name }} {{ e.last_name }}</b></td><td>{{ e.pay_basis }}</td><td>{{ e.pay_frequency }}</td>
+<td class="n">{{ (e.annual_salary|money ~ ' p.a.') if e.pay_basis=='salary' else (e.hourly_rate|money ~ '/hr') }}</td><td class="n">{{ e.super_rate }}</td><td class="n">{{ '%.1f'|format(e.leave_hours) }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No employees.</td></tr>{% endfor %}</table></div>
+<h2>Pay runs</h2>
+<div class="tbl"><table><tr><th>Pay date</th><th>Period</th><th>Frequency</th><th class="n">Employees</th><th class="n">Gross</th><th class="n">Net</th><th></th></tr>
+{% for r in runs %}<tr class="click" data-href="{{ url_for('payroll.payrun', rid=r.id) }}"><td>{{ r.pay_date }}</td><td>{{ r.period_start }} – {{ r.period_end }}</td><td>{{ r.frequency }}</td>
+<td class="n">{{ r.n }}</td><td class="n">{{ r.gross|money }}</td><td class="n">{{ r.net|money }}</td><td>{% if r.voided %}<span class="badge void">reversed</span>{% endif %}</td></tr>{% else %}<tr><td colspan="7" class="muted">No pay runs.</td></tr>{% endfor %}</table></div>
+{% endblock %}

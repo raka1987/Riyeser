@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Company Settings{% endblock %}
+{% from "_macros.html" import account_select %}
+{% block content %}
+<div class="head"><div><h1>Company Information &amp; Preferences</h1><p class="sub">Only administrators can change these settings.</p></div></div>
+<form method="post">
+<div class="card"><h3>Company</h3><div class="fields">
+<div><label>Company name</label><input name="name" value="{{ company.name }}" required></div>
+<div><label>ABN</label><input name="abn" value="{{ company.abn or '' }}"></div>
+<div><label>Phone</label><input name="phone" value="{{ company.phone or '' }}"></div>
+<div><label>Email</label><input name="email" value="{{ company.email or '' }}"></div>
+<div class="wide"><label>Address</label><input name="address" value="{{ company.address or '' }}"></div></div></div>
+<div class="card"><h3>Accounting preferences</h3><div class="fields">
+<div><label>Financial year starts (month)</label><select name="fy_start_month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if company.fy_start_month==m }}>{{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1] }}</option>{% endfor %}</select></div>
+<div><label>Lock periods up to (inclusive)</label><input type="date" name="lock_date" value="{{ company.lock_date or '' }}"></div>
+<div><label>Default credit terms (days)</label><input type="number" name="default_terms_days" value="{{ company.default_terms_days }}"></div>
+<label class="check"><input type="checkbox" name="gst_registered" value="1" {{ 'checked' if company.gst_registered }}> Registered for GST</label>
+<div><label>Invoice prefix</label><input name="invoice_prefix" value="{{ company.invoice_prefix }}"></div>
+<div><label>Next invoice no.</label><input type="number" name="next_invoice_no" value="{{ company.next_invoice_no }}"></div>
+<div><label>Bill / PO prefix</label><input name="bill_prefix" value="{{ company.bill_prefix }}"></div>
+<div><label>Next bill no.</label><input type="number" name="next_bill_no" value="{{ company.next_bill_no }}"></div></div></div>
+<div class="card"><h3>Linked accounts</h3><p class="muted">Control accounts used automatically by sales, purchases, inventory and payroll.</p><div class="fields">
+{% for l in linked_rows %}<div><label>{{ l.key.replace('_',' ')|title }}</label>{{ account_select('linked_' ~ l.key, accounts, l.account_id, blank=False) }}</div>{% endfor %}</div></div>
+<button class="btn pri">Save settings</button></form>
+{% endblock %}

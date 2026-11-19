@@ -1,0 +1,182 @@
+"""Populate a company file with realistic demo data."""
+from datetime import date, timedelta
+
+from .db import linked, to_cents
+from . import ledger as L
+
+
+def seed_demo(db):
+    today = date.today()
+
+    def d(days_ago):
+        return (today - timedelta(days=days_ago)).isoformat()
+
+    acc = {r["code"]: r["id"] for r in db.execute("SELECT id, code FROM accounts")}
+    tc = {r["code"]: r["id"] for r in db.execute("SELECT id, code FROM tax_codes")}
+    db.execute("UPDATE company SET abn='51 824 753 556', address='12 Harbour St, Sydney NSW 2000',"
+               " phone='02 9000 1234', email='accounts@clearwater.example' WHERE id=1")
+
+    def contact(kind, name, terms=30, account=None, email=None):
+        return db.execute("INSERT INTO contacts (kind, name, terms_days, default_account_id, tax_code_id, email)"
+                          " VALUES (?,?,?,?,?,?)", (kind, name, terms, acc.get(account), tc["GST"], email)).lastrowid
+
+    cust = [contact("customer", n, t, "4-1000", e) for n, t, e in [
+        ("Bayside Cafe Group", 14, "ap@bayside.example"), ("Northshore Fitness", 30, None),
+        ("Greenleaf Landscaping", 30, None), ("Harper & Co Architects", 7, None)]]
+    supp = [contact("supplier", n, t, a) for n, t, a in [
+        ("Pacific Wholesale Supplies", 30, "5-1000"), ("CityPower Energy", 14, "6-1300"),
+        ("Metro Office Leasing", 7, "6-1600"), ("Swift Freight Logistics", 30, "5-1100")]]
+
+    jobs = []
+    for code, name, c in [("J100", "Bayside fit-out", cust[0]), ("J200", "Northshore maintenance", cust[1])]:
+        jobs.append(db.execute("INSERT INTO jobs (code, name, contact_id) VALUES (?,?,?)", (code, name, c)).lastrowid)
+
+    def item(sku, name, sell, buy, inv=True, reorder=5):
+        return db.execute(
+            "INSERT INTO items (sku, name, sell_price, buy_price, is_inventoried, income_account_id,"
+            " expense_account_id, asset_account_id, sale_tax_code_id, purchase_tax_code_id, reorder_level)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (sku, name, to_cents(sell), to_cents(buy), 1 if inv else 0,
+             acc["4-1000"] if inv else acc["4-2000"], acc["5-1000"] if inv else acc["5-1300"],
+             acc["1-1300"] if inv else None, tc["GST"], tc["GST"], reorder)).lastrowid
+
+    items = [item("FLT-100", "Water filter cartridge", 89, 38), item("PMP-200", "Pressure pump 240V", 649, 310, reorder=2),
+             item("TAP-300", "Filtered water tap", 199, 82), item("SVC-HR", "Service labour (hour)", 120, 0, inv=False)]
+
+    # Opening capital and loan
+    L.general_journal(db, d(140), "Owner capital contribution",
+                      [dict(account_id=acc["1-1110"], debit=to_cents(60000)),
+                       dict(account_id=acc["3-1000"], credit=to_cents(60000))])
+    L.general_journal(db, d(138), "Business loan drawdown",
+                      [dict(account_id=acc["1-1110"], debit=to_cents(25000)),
+                       dict(account_id=acc["2-2100"], credit=to_cents(25000))])
+
+    # Stock purchases (bills)
+    hdr = lambda c, days, ref=None: dict(contact_id=c, date=d(days), due_date=d(days - 30), reference=ref)
+    b1 = L.save_document(db, "purchase", hdr(supp[0], 135, "PW-8841"), [
+        dict(item_id=items[0], qty=250, unit_price=to_cents(38), tax_code_id=tc["GST"]),
+        dict(item_id=items[1], qty=40, unit_price=to_cents(310), tax_code_id=tc["GST"]),
+        dict(item_id=items[2], qty=80, unit_price=to_cents(82), tax_code_id=tc["GST"])], "open")
+    b2 = L.save_document(db, "purchase", hdr(supp[3], 118, "SF-221"), [
+        dict(description="Freight inwards", qty=1, unit_price=to_cents(385), account_id=acc["5-1100"],
+             tax_code_id=tc["GST"])], "open")
+    L.record_payment(db, "out", supp[0], acc["1-1110"], d(95), [(b1, _total(db, b1))], "EFT 1001")
+    L.record_payment(db, "out", supp[3], acc["1-1110"], d(90), [(b2, _total(db, b2))], "EFT 1002")
+    L.save_document(db, "purchase", hdr(supp[0], 70, "PW-9120"), [
+        dict(item_id=items[0], qty=200, unit_price=to_cents(39.5), tax_code_id=tc["GST"]),
+        dict(item_id=items[1], qty=25, unit_price=to_cents(315), tax_code_id=tc["GST"])], "open")
+
+    # Equipment (capital)
+    L.bank_transaction(db, "spend", acc["1-1110"], d(110), [
+        dict(account_id=acc["1-2100"], amount=to_cents(4290), tax_code_id=tc["CAP"], memo="Laptops x3")],
+        payee="TechWorld")
+
+    # Sales invoices across months
+    sales = [
+        (cust[0], 100, jobs[0], [(items[1], 3), (items[2], 6), (items[3], 12)]),
+        (cust[1], 85, jobs[1], [(items[0], 20), (items[3], 6)]),
+        (cust[2], 70, None, [(items[0], 10), (items[2], 4)]),
+        (cust[3], 55, None, [(items[3], 18)]),
+        (cust[0], 40, jobs[0], [(items[1], 2), (items[0], 8)]),
+        (cust[1], 25, jobs[1], [(items[3], 10), (items[0], 6)]),
+        (cust[2], 10, None, [(items[2], 5), (items[3], 4)]),
+        (cust[3], 3, None, [(items[1], 1), (items[3], 3)]),
+    ]
+    invs = []
+    for c, days, job, lines in sales:
+        invs.append(L.save_document(db, "sale", dict(contact_id=c, date=d(days), due_date=d(days - 14)),
+                                    [dict(item_id=i, qty=q * 3, unit_price=_price(db, i), tax_code_id=tc["GST"],
+                                          job_id=job) for i, q in lines], "open"))
+    for inv, days in zip(invs[:5], (80, 60, 45, 50, 20)):
+        L.record_payment(db, "in", _contact(db, inv), acc["1-1110"], d(days), [(inv, _total(db, inv))])
+    L.record_payment(db, "in", _contact(db, invs[5]), acc["1-1110"], d(5), [(invs[5], to_cents(500))], "Part pmt")
+    # Steady weekly trade
+    for k in range(16):
+        days = 125 - k * 8
+        c = cust[k % len(cust)]
+        inv = L.save_document(db, "sale", dict(contact_id=c, date=d(days), due_date=d(days - 14)), [
+            dict(item_id=items[0], qty=15, unit_price=_price(db, items[0]), tax_code_id=tc["GST"]),
+            dict(item_id=items[1], qty=2, unit_price=_price(db, items[1]), tax_code_id=tc["GST"]),
+            dict(item_id=items[3], qty=10, unit_price=_price(db, items[3]), tax_code_id=tc["GST"],
+                 job_id=jobs[k % 2] if k % 3 == 0 else None)], "open")
+        if days > 35:
+            L.record_payment(db, "in", c, acc["1-1110"], d(days - 12), [(inv, _total(db, inv))])
+    L.save_document(db, "sale", dict(contact_id=cust[2], date=d(2), due_date=d(-28), notes="Valid 30 days"),
+                    [dict(item_id=items[1], qty=2, unit_price=_price(db, items[1]), tax_code_id=tc["GST"])], "quote")
+
+    # Monthly overheads
+    for m in (120, 90, 60, 30):
+        r = L.save_document(db, "purchase", hdr(supp[2], m, f"RENT-{m}"), [
+            dict(description="Warehouse rent", qty=1, unit_price=to_cents(3200), account_id=acc["6-1600"],
+                 tax_code_id=tc["GST"])], "open")
+        L.record_payment(db, "out", supp[2], acc["1-1110"], d(m - 2), [(r, _total(db, r))])
+        e = L.save_document(db, "purchase", hdr(supp[1], m - 5, f"CP-{m}"), [
+            dict(description="Electricity", qty=1, unit_price=to_cents(410 + m), account_id=acc["6-1300"],
+                 tax_code_id=tc["GST"])], "open")
+        if m > 30:
+            L.record_payment(db, "out", supp[1], acc["1-1110"], d(m - 15), [(e, _total(db, e))])
+        L.bank_transaction(db, "spend", acc["2-1100"], d(m - 3), [
+            dict(account_id=acc["6-2100"], amount=to_cents(165), tax_code_id=tc["GST"], memo="Accounting software"),
+            dict(account_id=acc["6-1700"], amount=to_cents(129), tax_code_id=tc["GST"], memo="Internet")],
+            payee="Card purchases")
+        L.bank_transaction(db, "spend", acc["1-1110"], d(m - 1), [
+            dict(account_id=acc["6-1100"], amount=to_cents(22), tax_code_id=tc["FRE"])], payee="Bank fees")
+    L.bank_transaction(db, "receive", acc["1-1120"], d(15), [
+        dict(account_id=acc["8-1000"], amount=to_cents(212.40), tax_code_id=tc["INP"])], payee="Interest")
+    L.transfer(db, acc["1-1110"], acc["1-1120"], d(60), to_cents(15000), "Move surplus to savings")
+
+    # Employees and pay runs
+    from .payroll_calc import compute_pay
+    emps = []
+    for fn, ln, basis, rate, sal in [("Mia", "Thompson", "salary", 0, 78000), ("Leo", "Nguyen", "hourly", 34.5, 0),
+                                     ("Ava", "Patel", "hourly", 31, 0)]:
+        std = 20 if fn == "Ava" else 38
+        emps.append(db.execute(
+            "INSERT INTO employees (first_name, last_name, pay_basis, hourly_rate, annual_salary, pay_frequency,"
+            " start_date, super_fund, std_hours) VALUES (?,?,?,?,?,?,?,?,?)",
+            (fn, ln, basis, to_cents(rate), to_cents(sal), "fortnightly", d(200), "AustralianSuper", std)).lastrowid)
+    for days in (84, 70, 56, 42, 28, 14):
+        rid = db.execute("INSERT INTO payruns (pay_date, period_start, period_end, frequency, bank_account_id)"
+                         " VALUES (?,?,?,?,?)", (d(days), d(days + 13), d(days), "fortnightly", acc["1-1110"])).lastrowid
+        lines = []
+        for eid in emps:
+            e = db.execute("SELECT * FROM employees WHERE id=?", (eid,)).fetchone()
+            p = compute_pay(e, "fortnightly")
+            db.execute("INSERT INTO payslips (payrun_id, employee_id, hours, gross, tax, super, net, leave_accrued)"
+                       " VALUES (?,?,?,?,?,?,?,?)", (rid, eid, p["hours"], p["gross"], p["tax"], p["super"], p["net"],
+                                                     p["leave"]))
+            db.execute("UPDATE employees SET leave_hours=leave_hours+? WHERE id=?", (p["leave"], eid))
+            lines += [dict(account_id=linked(db, "wages"), debit=p["gross"]),
+                      dict(account_id=linked(db, "super_expense"), debit=p["super"]),
+                      dict(account_id=linked(db, "payg_payable"), credit=p["tax"]),
+                      dict(account_id=linked(db, "super_payable"), credit=p["super"]),
+                      dict(account_id=acc["1-1110"], credit=p["net"])]
+        en = L.post_entry(db, d(days), f"Pay run to {d(days)}", "payrun", lines, source_id=rid)
+        db.execute("UPDATE payruns SET entry_id=? WHERE id=?", (en, rid))
+
+    # Budgets for the FY: modest monthly targets
+    fys = date.fromisoformat(L.fy_start(db))
+    for i in range(12):
+        y, m = fys.year + (fys.month + i - 1) // 12, (fys.month + i - 1) % 12 + 1
+        for code, amt in (("4-1000", 9000), ("4-2000", 3500), ("6-1600", 3200), ("6-1300", 450), ("6-5000", 14000)):
+            db.execute("INSERT INTO budgets (account_id, month, amount) VALUES (?,?,?)",
+                       (acc[code], f"{y}-{m:02d}", to_cents(amt)))
+
+    # A few unallocated bank statement lines to demo the bank feed
+    for days, desc, amt in ((1, "EFTPOS SETTLEMENT", 1240.00), (1, "OFFICEWORKS SYDNEY", -86.90),
+                            (0, "AMPOL FUEL", -94.15)):
+        db.execute("INSERT INTO bank_feed_lines (account_id, date, description, amount) VALUES (?,?,?,?)",
+                   (acc["1-1110"], d(days), desc, to_cents(amt)))
+    db.commit()
+
+
+def _total(db, doc_id):
+    return db.execute("SELECT total FROM documents WHERE id=?", (doc_id,)).fetchone()["total"]
+
+
+def _contact(db, doc_id):
+    return db.execute("SELECT contact_id FROM documents WHERE id=?", (doc_id,)).fetchone()["contact_id"]
+
+
+def _price(db, item_id):
+    return db.execute("SELECT sell_price FROM items WHERE id=?", (item_id,)).fetchone()["sell_price"]

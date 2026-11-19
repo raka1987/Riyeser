@@ -1,0 +1,44 @@
+{% extends "base.html" %}{% block title %}Dashboard{% endblock %}
+{% from "_macros.html" import status %}
+{% block content %}
+<div class="head"><div><h1>Dashboard</h1><p class="sub">Financial year from {{ fy_start }} · as at {{ today }}</p></div>
+<div class="actions"><a class="btn pri" href="{{ url_for('documents.edit', side='sale') }}">+ Invoice</a>
+<a class="btn" href="{{ url_for('documents.edit', side='purchase') }}">+ Bill</a>
+<a class="btn" href="{{ url_for('banking.money', kind='spend') }}">Spend money</a>
+<a class="btn" href="{{ url_for('banking.money', kind='receive') }}">Receive money</a></div></div>
+<div class="grid g4">
+  <div class="card kpi"><div class="lbl">Income YTD</div><div class="val">{{ income|money }}</div></div>
+  <div class="card kpi"><div class="lbl">Expenses YTD</div><div class="val">{{ expenses|money }}</div></div>
+  <div class="card kpi"><div class="lbl">Net profit YTD</div><div class="val {{ 'neg' if income-expenses < 0 }}">{{ (income-expenses)|money }}</div></div>
+  <div class="card kpi"><div class="lbl">Cash at bank</div><div class="val">{{ banks|sum(attribute=1)|money }}</div></div>
+</div>
+<div class="grid g3">
+  <div class="card"><h3>Income vs expenses (by month)</h3>
+    {% set mx = [1] %}{% for m in months %}{% if mx.append(m.inc) %}{% endif %}{% if mx.append(m.exp) %}{% endif %}{% endfor %}
+    {% set top = mx|max %}
+    <div class="bars">{% for m in months %}<div class="m"><div class="pair">
+      <div class="b inc" style="height:{{ (m.inc/top*120)|round|int if m.inc > 0 else 0 }}px" title="Income {{ m.inc|money }}"></div>
+      <div class="b exp" style="height:{{ (m.exp/top*120)|round|int if m.exp > 0 else 0 }}px" title="Expenses {{ m.exp|money }}"></div>
+    </div><div class="lab">{{ m.m }}</div></div>{% else %}<p class="muted">No activity yet.</p>{% endfor %}</div>
+    <div class="legend" style="margin-top:8px"><span><i style="background:#14b8a6"></i>Income</span><span><i style="background:#f79009"></i>Expenses</span></div>
+  </div>
+  <div class="card"><h3>Bank accounts</h3><table>{% for a, b in banks %}
+    <tr class="click" data-href="{{ url_for('core.account_ledger', aid=a.id) }}"><td>{{ a.name }}</td><td class="n {{ 'neg' if b < 0 }}">{{ b|money }}</td></tr>{% endfor %}</table></div>
+  <div class="card"><h3>Owed</h3>
+    <div class="kpi"><div class="lbl">Customers owe you</div><div class="val">{{ ar.s|money }}</div><div class="note">{{ ar.n }} open invoices</div></div><br>
+    <div class="kpi"><div class="lbl">You owe suppliers</div><div class="val">{{ ap.s|money }}</div><div class="note">{{ ap.n }} open bills</div></div></div>
+</div>
+<div class="grid g3">
+  <div class="card"><h3>Overdue invoices</h3><table>{% for d in overdue %}
+    <tr class="click" data-href="{{ url_for('documents.view', doc_id=d.id) }}"><td>{{ d.number }}<br><span class="muted">{{ d.cname }}</span></td><td class="muted">due {{ d.due_date }}</td><td class="n">{{ (d.total-d.amount_paid)|money }}</td></tr>
+    {% else %}<tr><td class="muted">Nothing overdue 🎉</td></tr>{% endfor %}</table></div>
+  <div class="card"><h3>Bills to pay</h3><table>{% for d in bills_due %}
+    <tr class="click" data-href="{{ url_for('documents.view', doc_id=d.id) }}"><td>{{ d.number }}<br><span class="muted">{{ d.cname }}</span></td><td>{{ status(d, today) }}</td><td class="n">{{ (d.total-d.amount_paid)|money }}</td></tr>
+    {% else %}<tr><td class="muted">No open bills.</td></tr>{% endfor %}</table></div>
+  <div class="card"><h3>Low stock</h3><table>{% for i in low_stock %}
+    <tr class="click" data-href="{{ url_for('inventory.view', iid=i.id) }}"><td>{{ i.sku }}</td><td>{{ i.name }}</td><td class="n">{{ '%g'|format(i.qty_on_hand) }}</td></tr>
+    {% else %}<tr><td class="muted">All items above reorder level.</td></tr>{% endfor %}</table></div>
+</div>
+<div class="card"><h3>Recent transactions</h3><table>{% for e in recent %}
+<tr class="click" data-href="{{ url_for('core.entry', eid=e.id) }}"><td>#{{ e.id }}</td><td>{{ e.date }}</td><td><span class="badge">{{ e.source_type }}</span></td><td>{{ e.memo }}</td></tr>{% endfor %}</table></div>
+{% endblock %}
