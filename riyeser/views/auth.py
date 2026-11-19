@@ -43,6 +43,42 @@ def login():
     return render_template("auth/login.html")
 
 
+def _local_reset_allowed():
+    """Password reset without signing in is only allowed in the desktop app, from this
+    computer itself (the desktop server only listens on 127.0.0.1)."""
+    return bool(current_app.config.get("LOCAL_RESET")) and request.remote_addr in ("127.0.0.1", "::1")
+
+
+@bp.route("/forgot", methods=["GET", "POST"])
+def forgot():
+    db = get_db()
+    allowed = _local_reset_allowed()
+    if request.method == "POST":
+        if not allowed:
+            flash("Password reset is only available in the Riyeser desktop app on the computer "
+                  "that holds the company file.", "error")
+            return redirect(url_for("auth.forgot"))
+        username = request.form.get("username", "").strip()
+        pw = request.form.get("password", "")
+        u = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+        if not u:
+            flash("No user with that username.", "error")
+        elif len(pw) < 4:
+            flash("Choose a password of at least 4 characters.", "error")
+        elif pw != request.form.get("confirm", ""):
+            flash("The two passwords don't match.", "error")
+        else:
+            db.execute("UPDATE users SET password_hash=?, active=1 WHERE id=?", (generate_password_hash(pw), u["id"]))
+            db.execute("INSERT INTO audit_log (user_id, action, details) VALUES (?,?,?)",
+                       (u["id"], "password_reset", f"{username} reset on this computer"))
+            db.commit()
+            flash(f"Password for '{username}' has been changed. You can sign in now.", "ok")
+            return redirect(url_for("auth.login"))
+    users = db.execute("SELECT username, full_name, role FROM users ORDER BY role='admin' DESC, username").fetchall() \
+        if allowed else []
+    return render_template("auth/forgot.html", allowed=allowed, users=users)
+
+
 @bp.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()

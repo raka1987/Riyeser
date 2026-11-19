@@ -205,3 +205,30 @@ def test_reconcile(client, app):
     with app.app_context():
         assert get_db().execute("SELECT reconciliation_id FROM journal_lines WHERE id=?",
                                 (line,)).fetchone()["reconciliation_id"]
+
+
+def test_forgot_password_only_in_desktop_mode(tmp_path):
+    for local in (False, True):
+        app = create_app({"TESTING": True, "DATABASE": str(tmp_path / f"f{local}.db"), "LOCAL_RESET": local})
+        with app.app_context():
+            init_db("Co", "oldpw")
+        c = app.test_client()
+        page = c.get("/forgot").get_data(as_text=True)
+        assert ("Set new password" in page) == local
+        c.post("/forgot", data={"username": "admin", "password": "newpw", "confirm": "newpw"})
+        r = c.post("/login", data={"username": "admin", "password": "newpw"})
+        assert (r.status_code == 302) == local
+        # a remote computer can never reset, even in desktop mode
+        r = c.post("/forgot", data={"username": "admin", "password": "hack", "confirm": "hack"},
+                   environ_base={"REMOTE_ADDR": "192.168.1.50"})
+        assert c.post("/login", data={"username": "admin", "password": "hack"}).status_code == 200
+
+
+def test_cli_reset_password(tmp_path):
+    from riyeser.cli import main
+    db = str(tmp_path / "c.db")
+    main(["--db", db, "init", "--password", "orig"])
+    main(["--db", db, "reset-password", "admin", "--password", "fresh"])
+    app = create_app({"TESTING": True, "DATABASE": db})
+    r = app.test_client().post("/login", data={"username": "admin", "password": "fresh"})
+    assert r.status_code == 302

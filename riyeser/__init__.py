@@ -41,11 +41,11 @@ def create_app(test_config=None):
         if uid:
             g.user = db.execute("SELECT * FROM users WHERE id=? AND active=1", (uid,)).fetchone()
         g.company = db.execute("SELECT * FROM company WHERE id=1").fetchone()
-        public = ("auth.login", "auth.setup_company", "static")
+        public = ("auth.login", "auth.setup_company", "auth.forgot", "static")
         if g.user is None and request.endpoint not in public:
             return redirect(url_for("auth.login", next=request.path))
         if g.user is not None and request.method == "POST" and g.user["role"] == "viewer" \
-                and request.endpoint not in ("auth.logout", "auth.login"):
+                and request.endpoint not in ("auth.logout", "auth.login", "auth.forgot"):
             abort(403)
 
     @app.context_processor

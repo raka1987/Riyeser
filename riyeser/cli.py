@@ -24,7 +24,10 @@ def data_dir(arg=None) -> Path:
 
 def _configure(args):
     d = data_dir(args.data_dir)
-    os.environ.setdefault("RIYESER_DB", str(Path(args.db) if args.db else d / "company.db"))
+    if args.db:
+        os.environ["RIYESER_DB"] = str(Path(args.db))
+    else:
+        os.environ.setdefault("RIYESER_DB", str(d / "company.db"))
     key_file = d / "secret.key"
     if not key_file.exists():
         key_file.write_text(secrets.token_hex(32))
@@ -88,13 +91,35 @@ def cmd_backup(args):
     print(f"Backed up to {dest}")
 
 
+def cmd_reset_password(args):
+    import getpass
+    db_path = _configure(args)
+    if not os.path.exists(db_path):
+        sys.exit(f"No company file at {db_path}.")
+    import sqlite3
+    from werkzeug.security import generate_password_hash
+    con = sqlite3.connect(db_path)
+    if not con.execute("SELECT 1 FROM users WHERE username=?", (args.username,)).fetchone():
+        names = ", ".join(r[0] for r in con.execute("SELECT username FROM users"))
+        sys.exit(f"No user '{args.username}'. Users in this file: {names}")
+    pw = args.password or getpass.getpass(f"New password for {args.username}: ")
+    if not args.password and pw != getpass.getpass("Confirm: "):
+        sys.exit("Passwords don't match.")
+    if len(pw) < 4:
+        sys.exit("Password must be at least 4 characters.")
+    con.execute("UPDATE users SET password_hash=?, active=1 WHERE username=?", (generate_password_hash(pw), args.username))
+    con.execute("INSERT INTO audit_log (action, details) VALUES ('password_reset', ?)", (f"{args.username} via command line",))
+    con.commit()
+    print(f"Password for '{args.username}' changed.")
+
+
 def cmd_desktop(args):
     from .desktop import main as desktop_main
     extra = []
     if args.data_dir:
         extra += ["--data-dir", args.data_dir]
     if args.db:
-        os.environ.setdefault("RIYESER_DB", args.db)
+        os.environ["RIYESER_DB"] = args.db
     if getattr(args, "no_window", False):
         extra.append("--no-window")
     desktop_main(extra)
@@ -119,6 +144,10 @@ def main(argv=None):
     i.add_argument("--demo", action="store_true", help="load demo data")
     i.add_argument("--force", action="store_true")
     i.set_defaults(fn=cmd_init)
+    r = sub.add_parser("reset-password", help="set a new password for a user (default admin)")
+    r.add_argument("username", nargs="?", default="admin")
+    r.add_argument("--password", help="new password (prompted if omitted)")
+    r.set_defaults(fn=cmd_reset_password)
     b = sub.add_parser("backup", help="back up the company file")
     b.add_argument("path", nargs="?")
     b.set_defaults(fn=cmd_backup)

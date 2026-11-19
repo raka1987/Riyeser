@@ -37,6 +37,12 @@ Riyeser also runs as a normal desktop app in its own window, with no Python need
 
 The builds are unsigned. Windows SmartScreen will warn ("More info → Run anyway"). On macOS, right-click the app → **Open** the first time.
 
+## Forgot your password?
+
+* **Desktop app:** click **Forgot password?** on the sign-in screen. This works only in the desktop app on the computer that holds the company file, so nobody else on the network can use it.
+* **Other users:** an administrator can set a new password under **Setup → Users & Roles**.
+* **Command line:** run `riyeser reset-password admin` on the computer that holds the company file.
+
 ## Features
 
 **Accounts**

@@ -46,7 +46,7 @@ def main(argv=None):
     ns = argparse.Namespace(data_dir=args.data_dir, db=None)
     _configure(ns)
     from . import create_app
-    app = create_app()
+    app = create_app({"LOCAL_RESET": True})
 
     port = args.port or _free_port()
     url = f"http://127.0.0.1:{port}"

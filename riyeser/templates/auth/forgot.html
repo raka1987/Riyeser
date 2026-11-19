@@ -1,0 +1,22 @@
+{% from "_macros.html" import flashes %}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset password · Riyeser Accounting</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body><div class="login">
+<div class="brand" style="color:var(--ink);padding:0 0 10px"><div class="logo" style="color:#fff">R</div><div>Reset password<small>{{ company.name if company }}</small></div></div>
+{{ flashes() }}
+{% if allowed %}
+<p class="muted">You're using Riyeser on the computer that holds this company file, so you can set a new password here.</p>
+<form method="post">
+  <label>Username</label>
+  <select name="username">{% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.full_name %} ({{ u.full_name }}){% endif %} · {{ u.role }}</option>{% endfor %}</select>
+  <label style="margin-top:12px">New password</label><input name="password" type="password" required minlength="4" autocomplete="new-password">
+  <label style="margin-top:12px">Confirm new password</label><input name="confirm" type="password" required minlength="4" autocomplete="new-password">
+  <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Set new password</button>
+</form>
+{% else %}
+<p>Ask your Riyeser administrator to reset it for you under <b>Setup → Users &amp; Roles</b>.</p>
+<p class="muted">If you are the administrator, open the <b>Riyeser Accounting desktop app</b> on the computer that holds the company file and click <b>Forgot password?</b> there. Or run this on that computer:</p>
+<pre style="background:#f2f4f7;padding:10px;border-radius:6px">riyeser reset-password admin</pre>
+{% endif %}
+<p style="text-align:center;margin:16px 0 0"><a href="{{ url_for('auth.login') }}">Back to sign in</a></p>
+</div></body></html>
