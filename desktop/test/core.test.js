@@ -316,10 +316,14 @@ test('safety: never touches system folders, system files or shortcuts', async ()
   const { scanFolders, listFiles } = require('../src/core/organizer');
   const { analyseFolder } = require('../src/core/cleanup');
   // system folders and whole drives / the user folder
-  for (const p of ['/etc', '/etc/hosts', '/usr/lib', path.join(os.homedir(), '.config', 'x')]) assert.ok(safety.isSystemPath(p), p);
+  const win = process.platform === 'win32';
+  const sys = win ? ['C:\\Windows', 'C:\\Windows\\System32\\drivers\\etc\\hosts', 'C:\\Program Files\\App', path.join(os.homedir(), 'AppData', 'Roaming', 'x')]
+    : ['/etc', '/etc/hosts', '/usr/lib', path.join(os.homedir(), '.config', 'x')];
+  const [sysA, , sysB] = sys;
+  for (const p of sys) assert.ok(safety.isSystemPath(p), p);
   assert.ok(safety.isTooBroad(os.homedir()));
-  assert.ok(safety.isTooBroad('/'));
-  assert.match(safety.folderProblem('/usr'), /Windows or program folder/);
+  assert.ok(safety.isTooBroad(win ? 'C:\\' : '/'));
+  assert.match(safety.folderProblem(sysB), /Windows or program folder/);
   assert.equal(safety.folderProblem(path.join(os.tmpdir(), 'Desktop')), null);
   // protected file types
   for (const f of ['desktop.ini', 'Thumbs.db', 'Google Chrome.lnk', 'Website.url', '.hidden', '~$draft.docx', 'driver.sys', 'thing.dll']) assert.ok(safety.isProtectedFile(path.join(os.tmpdir(), f)), f);
@@ -330,8 +334,8 @@ test('safety: never touches system folders, system files or shortcuts', async ()
   for (const f of ['desktop.ini', 'Google Chrome.lnk', 'Bank login.url', 'helper.dll', 'invoice.txt']) fs.writeFileSync(path.join(desk, f), 'x');
   assert.deepEqual(listFiles(desk).map((f) => path.basename(f)), ['invoice.txt']);
   // system folders can't be tidied or cleaned up even if they end up in the settings
-  assert.equal(scanFolders({ watchFolders: ['/usr', '/etc', desk], organisedRoot: path.join(tmp, 'Organised') }).filter((f) => f.isRoot).length, 1);
-  assert.deepEqual(await analyseFolder('/etc', {}), []);
+  assert.equal(scanFolders({ watchFolders: [sysB, sysA, desk], organisedRoot: path.join(tmp, 'Organised') }).filter((f) => f.isRoot).length, 1);
+  assert.deepEqual(await analyseFolder(sysA, {}), []);
   // and the final check before moving refuses protected files
   const batch = applyPlan([{ from: path.join(desk, 'helper.dll'), to: path.join(tmp, 'Organised', 'helper.dll') }, { from: path.join(desk, 'invoice.txt'), to: path.join(tmp, 'Organised', 'invoice.txt') }]);
   assert.equal(batch.moves.length, 1);
