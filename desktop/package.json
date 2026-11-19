@@ -1,7 +1,7 @@
 {
   "name": "desk-assistant",
-  "version": "0.19.0",
-  "description": "A personal desktop assistant that sorts your files by company and type, tracks meetings and to-dos, finds anything instantly and sorts email.",
+  "version": "0.20.0",
+  "description": "Riyeser Desk Assistant (Riyeser Group): sorts your files, tracks meetings and to-dos, edits PDFs, and runs Riyeser Accounting as a module.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -13,9 +13,12 @@
     "postinstall": "node scripts/vendor.js",
     "predist": "node scripts/vendor.js",
     "dist:pdf": "node scripts/package-win.js pdf",
-    "dist:all": "node scripts/package-win.js"
+    "dist:all": "node scripts/package-win.js",
+    "prepare:python": "python scripts/prepare_python.py"
   },
-  "author": "",
+  "author": {
+    "name": "Riyeser Group"
+  },
   "license": "UNLICENSED",
   "devDependencies": {
     "electron": "^33.4.11",
@@ -38,10 +41,10 @@
     "tesseract.js": "^5.1.1",
     "unpdf": "^1.9.1"
   },
-  "productName": "Desk Assistant",
+  "productName": "Riyeser Desk Assistant",
   "build": {
     "appId": "com.deskassistant.app",
-    "productName": "Desk Assistant",
+    "productName": "Riyeser Desk Assistant",
     "directories": {
       "buildResources": "build"
     },

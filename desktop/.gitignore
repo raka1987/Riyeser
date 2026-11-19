@@ -2,3 +2,6 @@ node_modules/
 dist/
 dist-pdf/
 src/renderer/vendor/
+build/python-win/
+build/accounting/
+build/cache/

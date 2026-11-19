@@ -16,6 +16,10 @@ fs.copyFileSync(path.join(root, 'build/icon.ico'), path.join(root, 'src/renderer
 fs.copyFileSync(path.join(root, 'build/pdf/icon.ico'), path.join(root, 'src/renderer/icon-pdf.ico'));
 
 const only = process.argv[2];
+// Riyeser Accounting's private Python (downloaded once; see scripts/prepare_python.py).
+if (only !== 'pdf' && !fs.existsSync(path.join(root, 'build/python-win/python.exe'))) {
+  run(process.platform === 'win32' ? 'python' : 'python3', ['scripts/prepare_python.py']);
+}
 for (const app of ['assistant', 'pdf'].filter((a) => !only || a === only)) {
   const out = app === 'pdf' ? 'dist-pdf' : 'dist';
   fs.rmSync(path.join(root, out), { recursive: true, force: true });

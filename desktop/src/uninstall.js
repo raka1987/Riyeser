@@ -34,7 +34,7 @@ function safeToDeleteDir(dir) {
 }
 
 /** Called on every start (Windows, packaged): keep the "Installed apps" entry up to date. */
-async function registerInstalledApp({ id, name, description }) {
+async function registerInstalledApp({ id, name, description, publisher }) {
   if (process.platform !== 'win32' || !app.isPackaged) return;
   if (installerUninstaller(name)) { await reg('delete', regKey(id), '/f'); return; } // the installer's own entry is used
   const key = regKey(id);
@@ -43,7 +43,7 @@ async function registerInstalledApp({ id, name, description }) {
   try { sizeKb = Math.round(fs.readdirSync(installDir()).reduce((n, f) => { try { return n + fs.statSync(path.join(installDir(), f)).size; } catch { return n; } }, 0) / 1024) + 140000; } catch { /* estimate */ }
   const values = [
     ['DisplayName', 'REG_SZ', name], ['DisplayIcon', 'REG_SZ', `${exe},0`], ['DisplayVersion', 'REG_SZ', app.getVersion()],
-    ['Publisher', 'REG_SZ', name], ['Comments', 'REG_SZ', description], ['InstallLocation', 'REG_SZ', installDir()],
+    ['Publisher', 'REG_SZ', publisher || name], ['Comments', 'REG_SZ', description], ['InstallLocation', 'REG_SZ', installDir()],
     ['UninstallString', 'REG_SZ', `"${exe}" --uninstall`], ['NoModify', 'REG_DWORD', '1'], ['NoRepair', 'REG_DWORD', '1'],
     ['EstimatedSize', 'REG_DWORD', String(sizeKb)],
   ];
