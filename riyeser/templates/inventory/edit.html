@@ -5,6 +5,8 @@
 <form method="post" class="card"><div class="fields">
 <div><label>SKU / item number</label><input name="sku" value="{{ item.sku if item }}" required></div>
 <div><label>Name</label><input name="name" value="{{ item.name if item }}" required></div>
+<div><label>Category (POS tab)</label><input name="category" list="cats" value="{{ item.category or '' if item }}" placeholder="e.g. Coffee, Mains, Hardware">
+<datalist id="cats">{% for c in categories %}<option value="{{ c }}">{% endfor %}</datalist></div>
 <div class="wide"><label>Description</label><input name="description" value="{{ item.description or '' if item }}"></div>
 <label class="check"><input type="checkbox" name="is_sold" value="1" {{ 'checked' if not item or item.is_sold }}> I sell this item</label>
 <label class="check"><input type="checkbox" name="is_bought" value="1" {{ 'checked' if not item or item.is_bought }}> I buy this item</label>

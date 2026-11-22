@@ -161,6 +161,19 @@ def migrate(db):
     cols = {r["name"] for r in db.execute("PRAGMA table_info(company)")}
     if "edition" not in cols:
         db.execute("ALTER TABLE company ADD COLUMN edition TEXT NOT NULL DEFAULT 'enterprise'")
+    if "pos_mode" not in cols:
+        db.execute("ALTER TABLE company ADD COLUMN pos_mode TEXT NOT NULL DEFAULT 'retail'")
+    if "category" not in {r["name"] for r in db.execute("PRAGMA table_info(items)")}:
+        db.execute("ALTER TABLE items ADD COLUMN category TEXT")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_orders (
+        id INTEGER PRIMARY KEY,
+        order_type TEXT NOT NULL DEFAULT 'retail',   -- retail (parked sale), dine_in, takeaway
+        table_no TEXT, customer_id INTEGER REFERENCES contacts(id), lines TEXT NOT NULL, note TEXT,
+        status TEXT NOT NULL DEFAULT 'open',          -- open, paid, cancelled
+        sale_id INTEGER REFERENCES pos_sales(id), user_id INTEGER REFERENCES users(id),
+        kitchen_sent_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
     if "auto_pdf" not in cols:
         db.execute("ALTER TABLE company ADD COLUMN auto_pdf INTEGER NOT NULL DEFAULT 0")
     db.execute("""CREATE TABLE IF NOT EXISTS pos_sales (

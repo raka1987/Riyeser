@@ -43,6 +43,20 @@ def seed_demo(db):
     items = [item("FLT-100", "Water filter cartridge", 89, 38), item("PMP-200", "Pressure pump 240V", 649, 310, reorder=2),
              item("TAP-300", "Filtered water tap", 199, 82), item("SVC-HR", "Service labour (hour)", 120, 0, inv=False)]
 
+    for sku, cat in (("FLT-100", "Filters"), ("PMP-200", "Pumps"), ("TAP-300", "Taps"), ("SVC-HR", "Services")):
+        db.execute("UPDATE items SET category=? WHERE sku=?", (cat, sku))
+
+    # A small café menu so Riyeser POS restaurant mode has something to sell
+    for sku, name, cat, price in [("CAF-FW", "Flat White", "Coffee", 4.5), ("CAF-LT", "Latte", "Coffee", 4.5),
+                                  ("CAF-LB", "Long Black", "Coffee", 4.0), ("CAF-CH", "Hot Chocolate", "Coffee", 5.0),
+                                  ("FD-BRK", "Big Breakfast", "Food", 19.0), ("FD-AVO", "Smashed Avo Toast", "Food", 16.5),
+                                  ("FD-BUR", "Chicken Burger", "Food", 18.0), ("FD-CHP", "Bowl of Chips", "Food", 8.0),
+                                  ("DR-OJ", "Orange Juice", "Drinks", 6.0), ("DR-WTR", "Sparkling Water", "Drinks", 4.0),
+                                  ("DS-CAK", "Carrot Cake", "Desserts", 7.5)]:
+        db.execute("INSERT INTO items (sku, name, category, is_bought, sell_price, income_account_id,"
+                   " sale_tax_code_id) VALUES (?,?,?,0,?,?,?)",
+                   (sku, name, cat, to_cents(price / 1.1), acc["4-1000"], tc["GST"]))
+
     # Opening capital and loan
     L.general_journal(db, d(140), "Owner capital contribution",
                       [dict(account_id=acc["1-1110"], debit=to_cents(60000)),

@@ -391,3 +391,43 @@ def test_import_payroll_payrun(client, app, tmp_path, monkeypatch):
     client.post("/links/payroll", data={"bank_account_id": acc["1-1110"], "name": "again.json"})
     with app.app_context():
         assert get_db().execute("SELECT COUNT(*) FROM imported_payruns").fetchone()[0] == 1
+
+
+def test_pos_restaurant_tables_kitchen_and_pay(client, app):
+    item, acc = _pos_setup(app)
+    client.post("/pos/mode", data={"mode": "restaurant"})
+    page = client.get("/pos/").get_data(as_text=True)
+    assert "Send to kitchen" in page and "Dine in" in page
+    # dine-in needs a table
+    r = client.post("/pos/order", json={"order_type": "dine_in", "lines": [{"item_id": item, "qty": 1}]})
+    assert r.status_code == 400
+    r = client.post("/pos/order", json={"order_type": "dine_in", "table_no": "7", "kitchen": True,
+                                        "lines": [{"item_id": item, "qty": 2, "note": "no sugar"}]}).get_json()
+    assert r["ok"]
+    docket = client.get(r["docket_url"]).get_data(as_text=True)
+    assert "TABLE 7" in docket and "no sugar" in docket
+    open_orders = client.get("/pos/orders").get_json()
+    assert len(open_orders) == 1 and open_orders[0]["total"] == 2200
+    # add to the table's order, then pay the bill
+    client.post("/pos/order", json={"id": r["id"], "order_type": "dine_in", "table_no": "7",
+                                    "lines": [{"item_id": item, "qty": 3, "note": "no sugar"}]})
+    d = client.post("/pos/sale", json={"order_id": r["id"], "order_type": "dine_in", "table_no": "7", "method": "card",
+                                       "lines": [{"item_id": item, "qty": 3, "note": "no sugar"}]}).get_json()
+    assert d["ok"] and d["total"] == 3300
+    assert client.get("/pos/orders").get_json() == []
+    with app.app_context():
+        db = get_db()
+        doc = db.execute("SELECT * FROM documents ORDER BY id DESC").fetchone()
+        assert doc["reference"] == "POS Table 7"
+        assert "no sugar" in db.execute("SELECT description FROM document_lines WHERE document_id=?",
+                                        (doc["id"],)).fetchone()[0]
+
+
+def test_pos_retail_park_and_cancel(client, app):
+    item, _ = _pos_setup(app)
+    page = client.get("/pos/").get_data(as_text=True)
+    assert "Park sale" in page and "Coffee cup" in page
+    r = client.post("/pos/order", json={"order_type": "retail", "lines": [{"item_id": item, "qty": 1}]}).get_json()
+    assert len(client.get("/pos/orders").get_json()) == 1
+    client.post(f"/pos/order/{r['id']}/cancel")
+    assert client.get("/pos/orders").get_json() == []

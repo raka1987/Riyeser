@@ -26,7 +26,8 @@ def edit(iid=None):
         return _save(iid)
     item = db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone() if iid else None
     defaults = dict(income=linked(db, "default_income"), cogs=linked(db, "cogs"), asset=linked(db, "inventory"))
-    return render_template("inventory/edit.html", item=item, defaults=defaults, **lookups(db))
+    cats = [r[0] for r in db.execute("SELECT DISTINCT category FROM items WHERE category IS NOT NULL ORDER BY 1")]
+    return render_template("inventory/edit.html", item=item, defaults=defaults, categories=cats, **lookups(db))
 
 
 @guarded
@@ -55,6 +56,7 @@ def _save(iid):
             stock_adjust(db, iid, f.get("opening_date") or __import__("datetime").date.today().isoformat(), oq,
                          to_cents(f.get("opening_cost") or f.get("buy_price")), "Opening stock",
                          account_id=linked(db, "historical_balancing"))
+    db.execute("UPDATE items SET category=? WHERE id=?", ((f.get("category") or "").strip() or None, iid))
     audit(db, "save_item", vals[0])
     flash(f"Item {vals[0]} saved.", "ok")
     return redirect(url_for("inventory.view", iid=iid))

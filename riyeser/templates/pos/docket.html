@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Kitchen docket #{{ o.id }}</title>
+<style>body{font:15px/1.45 "Courier New",monospace;margin:0;background:#fff;color:#000}.r{width:72mm;margin:0 auto;padding:10px 4px}
+h1{font-size:22px;text-align:center;margin:0}.c{text-align:center}hr{border:0;border-top:2px dashed #000;margin:8px 0}
+.l{font-size:18px;font-weight:bold;margin:6px 0 0}.n{margin-left:24px;font-style:italic}
+@media print{.np{display:none}@page{size:80mm auto;margin:0}}</style></head>
+<body onload="setTimeout(()=>window.print(),300)"><div class="r">
+<h1>{{ 'TABLE ' ~ o.table_no if o.order_type == 'dine_in' else ('TAKEAWAY #' ~ o.id if o.order_type == 'takeaway' else 'ORDER #' ~ o.id) }}</h1>
+<div class="c">Order #{{ o.id }} · {{ (o.kitchen_sent_at or o.updated_at)[11:16] }} · {{ user.full_name or user.username }}</div><hr>
+{% for l in o.lines %}<div class="l">{{ '%g'|format(l.qty) }} x {{ l.name }}</div>{% if l.note %}<div class="n">** {{ l.note }}</div>{% endif %}{% endfor %}
+{% if o.note %}<hr><div>{{ o.note }}</div>{% endif %}<hr>
+<p class="c np"><button onclick="print()">Print</button> <button onclick="close()">Close</button></p></div></body></html>
