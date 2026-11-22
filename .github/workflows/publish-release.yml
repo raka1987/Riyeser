@@ -115,11 +115,13 @@ jobs:
           $setup = Get-ChildItem desktop\dist\RiyeserPayroll-Setup-*.exe | Select-Object -First 1
           if (-not $setup) { throw "No Payroll installer was built" }
           Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
-          $exe = "$env:LOCALAPPDATA\Programs\riyeser-payroll\Riyeser Payroll.exe"
-          if (-not (Test-Path $exe)) { throw "Riyeser Payroll.exe not installed where Riyeser Central looks: $exe" }
-          $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Payroll*"
+          $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue | Where-Object DisplayName -like "Riyeser Payroll*" | Select-Object -First 1
           if (-not $entry) { throw "Riyeser Payroll is not listed in Installed apps" }
-          Write-Host "OK:" $entry.DisplayName
+          Write-Host "OK:" $entry.DisplayName "installed in" $entry.InstallLocation
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs", "$env:ProgramFiles" -Recurse -Filter "Riyeser Payroll.exe" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exe) { throw "Riyeser Payroll.exe not found after installing" }
+          Write-Host "Program:" $exe
+          if ($exe -notlike "$env:LOCALAPPDATA\Programs\*") { throw "Riyeser Payroll installed outside the user's Programs folder: $exe" }
           $p = Start-Process -FilePath $exe -PassThru
           $ok = $false
           for ($i = 0; $i -lt 40; $i++) { Start-Sleep 2; try { $r = Invoke-RestMethod http://127.0.0.1:37421/api/public/setup; if ($r) { $ok = $true; break } } catch {} }
