@@ -13,8 +13,30 @@
 {%- endmacro %}
 <div class="layout">
   <aside class="side">
-    <div class="brand"><div class="logo">R</div><div>Riyeser Group<small>Accounting module</small></div></div>
+    {% set basic = company and company.edition == 'basic' %}
+    <div class="brand"><div class="logo">R</div><div>Riyeser Group<small>Accounting {{ 'Basic' if basic else 'Enterprise' }}</small></div></div>
     <div class="nav-sec">{{ nav('core.dashboard', 'Dashboard') }}</div>
+    {% if basic %}
+    <div class="nav-sec"><h4>Sales</h4>
+      {{ nav('documents.edit', 'New Invoice', side='sale') }}{{ nav('documents.edit', 'New Quote', side='sale', status='quote') }}
+      {{ nav('documents.index', 'Invoices', side='sale') }}{{ nav('documents.pay', 'Receive Payments', side='sale') }}
+      {{ nav('contacts.index', 'Customers', kind='customer') }}</div>
+    <div class="nav-sec"><h4>Stock</h4>
+      {{ nav('inventory.index', 'Stock Items') }}{{ nav('inventory.edit', 'New Item') }}
+      {{ nav('documents.edit', 'Receive Stock (Bill)', side='purchase') }}{{ nav('documents.pay', 'Pay Bills', side='purchase') }}
+      {{ nav('contacts.index', 'Suppliers', kind='supplier') }}{{ nav('inventory.count', 'Stocktake') }}</div>
+    <div class="nav-sec"><h4>Money</h4>
+      {{ nav('banking.index', 'Bank Accounts') }}{{ nav('banking.money', 'Spend Money', kind='spend') }}
+      {{ nav('banking.money', 'Receive Money', kind='receive') }}</div>
+    <div class="nav-sec"><h4>Reports</h4>
+      {{ nav('reports.index', 'All Reports') }}{{ nav('reports.show', 'Inventory Report', name='inventory_valuation') }}
+      {{ nav('reports.show', 'Sales by Item', name='sales_item') }}{{ nav('reports.show', 'Who Owes Me', name='aged_receivables') }}
+      {{ nav('reports.show', 'Profit & Loss', name='pnl') }}{{ nav('reports.show', 'GST Summary', name='gst') }}</div>
+    <div class="nav-sec"><h4>Setup</h4>
+      {{ nav('core.company', 'Company & Preferences') }}{{ nav('core.accounts', 'Accounts List') }}
+      {% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & Roles') }}{% endif %}
+      {{ nav('core.audit_log', 'Audit Trail') }}</div>
+    {% else %}
     <div class="nav-sec"><h4>Accounts</h4>
       {{ nav('core.accounts', 'Chart of Accounts') }}{{ nav('core.journal_new', 'General Journal') }}
       {{ nav('core.journal_list', 'Find Transactions') }}</div>
@@ -40,6 +62,7 @@
       {{ nav('core.jobs', 'Jobs') }}{{ nav('core.budgets', 'Budgets') }}
       {% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & Roles') }}{% endif %}
       {{ nav('core.audit_log', 'Audit Trail') }}</div>
+    {% endif %}
   </aside>
   <div class="main">
     <div class="top">

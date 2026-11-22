@@ -232,3 +232,49 @@ def test_cli_reset_password(tmp_path):
     app = create_app({"TESTING": True, "DATABASE": db})
     r = app.test_client().post("/login", data={"username": "admin", "password": "fresh"})
     assert r.status_code == 302
+
+
+def test_basic_edition_menus_and_guard(tmp_path):
+    app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "b.db")})
+    with app.app_context():
+        init_db("Shop", "pw", "basic")
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "password": "pw"})
+    home = c.get("/").get_data(as_text=True)
+    assert "Accounting Basic" in home and "Stock Items" in home and "Process Payroll" not in home
+    # enterprise-only screens redirect to the dashboard
+    for url in ("/payroll/", "/journal/new", "/banking/reconcile", "/setup/budgets"):
+        r = c.get(url)
+        assert r.status_code == 302 and r.location.endswith("/"), url
+    assert c.get("/reports/inventory_valuation").status_code == 200
+    assert c.get("/reports/trial_balance").status_code == 404
+    reports = c.get("/reports/").get_data(as_text=True)
+    assert "Inventory Valuation" in reports and "Payroll Activity" not in reports
+    # invoicing still works in Basic
+    assert c.get("/sale/new").status_code == 200
+    # upgrade keeps data and unlocks everything
+    with app.app_context():
+        db = get_db()
+        f = {k: v for k, v in dict(db.execute("SELECT * FROM company").fetchone()).items() if v is not None}
+    f.update(edition="enterprise", gst_registered="1")
+    c.post("/setup/company", data=f)
+    assert c.get("/payroll/").status_code == 200
+
+
+def test_migrates_old_company_file(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    app = create_app({"TESTING": True, "DATABASE": str(path)})
+    with app.app_context():
+        init_db("Old Co", "pw")
+    con = sqlite3.connect(path)  # simulate a file made before editions and POS existed
+    con.executescript("ALTER TABLE company DROP COLUMN edition; DROP TABLE pos_sales;"
+                      " DELETE FROM linked_accounts WHERE key LIKE 'pos_%';")
+    con.commit(); con.close()
+    app2 = create_app({"TESTING": True, "DATABASE": str(path)})
+    c = app2.test_client()
+    c.post("/login", data={"username": "admin", "password": "pw"})
+    assert c.get("/").status_code == 200
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT edition FROM company").fetchone()[0] == "enterprise"
+    assert con.execute("SELECT COUNT(*) FROM linked_accounts WHERE key LIKE 'pos_%'").fetchone()[0] == 2

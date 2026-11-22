@@ -38,6 +38,9 @@ def create_app(test_config=None):
             return
         uid = session.get("uid")
         db = get_db()
+        if app.config.get("_migrated_db") != app.config["DATABASE"]:
+            dbmod.migrate(db)
+            app.config["_migrated_db"] = app.config["DATABASE"]
         if uid:
             g.user = db.execute("SELECT * FROM users WHERE id=? AND active=1", (uid,)).fetchone()
         g.company = db.execute("SELECT * FROM company WHERE id=1").fetchone()
@@ -47,6 +50,10 @@ def create_app(test_config=None):
         if g.user is not None and request.method == "POST" and g.user["role"] == "viewer" \
                 and request.endpoint not in ("auth.logout", "auth.login", "auth.forgot"):
             abort(403)
+        if g.user is not None and g.company["edition"] == "basic" and _enterprise_only(request.endpoint):
+            flash("That's part of Riyeser Accounting Enterprise. An administrator can upgrade under "
+                  "Setup → Company (your data stays as it is).", "error")
+            return redirect(url_for("core.dashboard"))
 
     @app.context_processor
     def inject():
@@ -57,7 +64,7 @@ def create_app(test_config=None):
         flash("You do not have permission to do that (read-only role).", "error")
         return redirect(request.referrer or url_for("core.dashboard"))
 
-    from .views import auth, core, contacts, documents, banking, inventory, payroll, reports
+    from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos
     app.register_blueprint(auth.bp)
     app.register_blueprint(core.bp)
     app.register_blueprint(contacts.bp)
@@ -66,7 +73,17 @@ def create_app(test_config=None):
     app.register_blueprint(inventory.bp)
     app.register_blueprint(payroll.bp)
     app.register_blueprint(reports.bp)
+    app.register_blueprint(pos.bp)
     return app
+
+
+ENTERPRISE_ONLY = {"core.journal_new", "core.journal_list", "core.budgets", "core.jobs", "core.reverse",
+                   "banking.reconcile", "banking.feed", "banking.allocate", "banking.feed_delete",
+                   "banking.transfer_money"}
+
+
+def _enterprise_only(endpoint):
+    return bool(endpoint) and (endpoint in ENTERPRISE_ONLY or endpoint.startswith("payroll."))
 
 
 def admin_required():

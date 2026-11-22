@@ -156,7 +156,34 @@ LINKED = {
 }
 
 
-def init_db(company_name="My Company Pty Ltd", admin_password="admin"):
+def migrate(db):
+    """Bring an older company file up to date. Safe to run repeatedly."""
+    cols = {r["name"] for r in db.execute("PRAGMA table_info(company)")}
+    if "edition" not in cols:
+        db.execute("ALTER TABLE company ADD COLUMN edition TEXT NOT NULL DEFAULT 'enterprise'")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_sales (
+        id INTEGER PRIMARY KEY,
+        document_id INTEGER NOT NULL REFERENCES documents(id),
+        payment_id INTEGER REFERENCES payments(id),
+        method TEXT NOT NULL,
+        tendered INTEGER NOT NULL DEFAULT 0,
+        change_given INTEGER NOT NULL DEFAULT 0,
+        user_id INTEGER REFERENCES users(id),
+        voided INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    for key, code in (("pos_cash", "1-1190"), ("pos_card", "1-1110")):
+        if not db.execute("SELECT 1 FROM linked_accounts WHERE key=?", (key,)).fetchone():
+            row = db.execute("SELECT id FROM accounts WHERE code=?", (code,)).fetchone() or \
+                db.execute("SELECT account_id id FROM linked_accounts WHERE key='default_bank'").fetchone()
+            if row:
+                db.execute("INSERT INTO linked_accounts (key, account_id) VALUES (?,?)", (key, row["id"]))
+    db.commit()
+
+
+EDITIONS = {"basic": "Basic", "enterprise": "Enterprise"}
+
+
+def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition="enterprise"):
     db = get_db()
     with current_app.open_resource("schema.sql") as f:
         db.executescript(f.read().decode("utf8"))
@@ -174,6 +201,9 @@ def init_db(company_name="My Company Pty Ltd", admin_password="admin"):
                (acc["2-1310"], acc["2-1330"]))
     db.execute("INSERT INTO users (username, password_hash, full_name, role) VALUES (?,?,?,?)",
                ("admin", generate_password_hash(admin_password), "Administrator", "admin"))
+    db.commit()
+    migrate(db)
+    db.execute("UPDATE company SET edition=? WHERE id=1", (edition if edition in EDITIONS else "enterprise",))
     db.commit()
 
 

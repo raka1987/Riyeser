@@ -192,6 +192,8 @@ def _save_company():
                 int(f.get("fy_start_month") or 7), f.get("lock_date") or None, 1 if f.get("gst_registered") else 0,
                 f.get("invoice_prefix") or "INV", f.get("bill_prefix") or "PO", int(f.get("next_invoice_no") or 1),
                 int(f.get("next_bill_no") or 1), int(f.get("default_terms_days") or 30)))
+    if f.get("edition") in ("basic", "enterprise"):
+        db.execute("UPDATE company SET edition=? WHERE id=1", (f["edition"],))
     for key in [r["key"] for r in db.execute("SELECT key FROM linked_accounts")]:
         v = opt_int(f.get(f"linked_{key}"))
         if v:

@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block title %}POS sales{% endblock %}
+{% block content %}
+<div class="head"><div><h1>POS sales · {{ day }}</h1><p class="sub">End-of-day summary for the register.</p></div>
+<div class="actions"><a class="btn pri" href="{{ url_for('pos.register') }}">Open register</a><button class="btn" onclick="print()">Print summary</button></div></div>
+<form class="filters"><div><label>Day</label><input type="date" name="date" value="{{ day }}"></div><div><button class="btn">Show</button></div></form>
+<div class="grid g4">
+<div class="card kpi"><div class="lbl">Sales</div><div class="val">{{ total|money }}</div><div class="note">{{ count }} transactions</div></div>
+{% for k, v in methods.items() %}<div class="card kpi"><div class="lbl">{{ v }}</div><div class="val">{{ by_method[k]|money }}</div>{% if k=='cash' %}<div class="note">Change given {{ cash_out|money }} (already deducted)</div>{% endif %}</div>{% endfor %}
+<div class="card kpi"><div class="lbl">GST included</div><div class="val">{{ gst|money }}</div></div></div>
+<div class="tbl"><table><tr><th>Time</th><th>Receipt</th><th>Customer</th><th>Paid by</th><th class="n">Total</th><th></th></tr>
+{% for r in rows %}<tr class="{{ 'muted' if r.voided }}"><td>{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a></td><td>{{ r.cname }}</td><td>{{ methods[r.method] }}</td>
+<td class="n">{{ r.total|money }}</td><td style="white-space:nowrap">{% if r.voided %}<span class="badge void">void</span>{% else %}
+<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" target="_blank">Receipt</a>
+<form method="post" class="inline" action="{{ url_for('pos.void', sid=r.id) }}" data-confirm="Void {{ r.number }}? Stock goes back and the takings are reversed."><button class="btn sm danger">Void</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No POS sales on this day.</td></tr>{% endfor %}</table></div>
+{% endblock %}

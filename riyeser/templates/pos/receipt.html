@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Receipt {{ s.number }}</title>
+<style>body{font:13px/1.4 "Courier New",monospace;margin:0;background:#fff;color:#000}.r{width:72mm;margin:0 auto;padding:10px 4px}
+h1{font-size:16px;text-align:center;margin:0}.c{text-align:center}hr{border:0;border-top:1px dashed #000;margin:8px 0}
+table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}td.n{text-align:right;white-space:nowrap}.t td{font-weight:bold;font-size:15px}
+@media print{.np{display:none}@page{size:80mm auto;margin:0}}</style></head>
+<body onload="setTimeout(()=>window.print(),300)"><div class="r">
+<h1>{{ company.name }}</h1><div class="c">{{ company.address or '' }}{% if company.abn %}<br>ABN {{ company.abn }}{% endif %}{% if company.phone %}<br>{{ company.phone }}{% endif %}</div>
+<hr><div class="c"><b>TAX INVOICE</b><br>{{ s.number }} · {{ s.created_at }}{% if s.voided %}<br><b>*** VOIDED ***</b>{% endif %}</div><hr>
+<table>{% for l in lines %}<tr><td colspan="2">{{ l.description }}</td></tr>
+<tr><td>&nbsp; {{ '%g'|format(l.qty) }} x {{ l.unit_price|money }}{% if l.discount_pct %} -{{ '%g'|format(l.discount_pct) }}%{% endif %}</td><td class="n">{{ (l.net_amount + l.tax_amount)|money }}</td></tr>{% endfor %}</table>
+<hr><table><tr class="t"><td>TOTAL</td><td class="n">{{ s.total|money }}</td></tr>
+<tr><td>GST included</td><td class="n">{{ s.tax_total|money }}</td></tr>
+<tr><td>{{ methods[s.method] }}</td><td class="n">{{ s.tendered|money }}</td></tr>
+{% if s.method == 'cash' %}<tr><td>Change</td><td class="n">{{ s.change_given|money }}</td></tr>{% endif %}</table>
+<hr><div class="c">{% if s.cname != 'Walk-in Customer' %}Customer: {{ s.cname }}<br>{% endif %}Served by {{ s.full_name or s.username }}<br>Thank you!</div>
+<p class="c np"><button onclick="print()">Print</button> <button onclick="close()">Close</button></p></div></body></html>

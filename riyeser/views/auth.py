@@ -16,7 +16,7 @@ def setup_company():
     if request.method == "POST":
         name = request.form.get("name", "").strip() or "My Company Pty Ltd"
         pw = request.form.get("password") or "admin"
-        init_db(name, pw)
+        init_db(name, pw, request.form.get("edition", "enterprise"))
         if request.form.get("demo"):
             from ..demo import seed_demo
             seed_demo(get_db())

@@ -3,7 +3,7 @@ import csv
 import io
 from datetime import date
 
-from flask import Blueprint, render_template, request, Response, url_for, abort
+from flask import Blueprint, render_template, request, Response, url_for, abort, g
 
 from ..db import get_db, linked, fmt_money
 from ..ledger import balances, fy_start, add_days
@@ -28,6 +28,17 @@ CATALOG = [
     ("Payroll", [("payroll_summary", "Payroll Activity Summary")]),
     ("Jobs", [("jobs", "Job Profit & Loss")]),
 ]
+
+
+BASIC_REPORTS = {"pnl", "gst", "aged_receivables", "sales_customer", "sales_item", "aged_payables",
+                 "purchases_supplier", "inventory_valuation", "reorder"}
+
+
+def _catalog():
+    if g.company and g.company["edition"] == "basic":
+        return [(grp, [(k, t) for k, t in items if k in BASIC_REPORTS]) for grp, items in CATALOG
+                if any(k in BASIC_REPORTS for k, _ in items)]
+    return CATALOG
 
 
 def R(cells, kind="row", link=None, indent=0):
@@ -391,13 +402,13 @@ def rpt_jobs(db, p):
 # ------------------------------------------------------------------ routes
 @bp.route("/")
 def index():
-    return render_template("reports/index.html", catalog=CATALOG)
+    return render_template("reports/index.html", catalog=_catalog())
 
 
 @bp.route("/<name>")
 def show(name):
     fn = globals().get(f"rpt_{name}")
-    title = next((t for _, items in CATALOG for k, t in items if k == name), None)
+    title = next((t for _, items in _catalog() for k, t in items if k == name), None)
     if not fn or not title:
         abort(404)
     db = get_db()
