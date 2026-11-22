@@ -49,7 +49,7 @@ CREATE TABLE tax_codes (
     paid_account_id INTEGER REFERENCES accounts(id)
 );
 
--- Linked/control accounts (MYOB "linked accounts")
+-- Control accounts used automatically by each kind of transaction
 CREATE TABLE linked_accounts (
     key TEXT PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES accounts(id)

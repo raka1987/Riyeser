@@ -1232,7 +1232,7 @@ const tools = {
     const presets = [['Approved', '#15803d'], ['Paid', '#15803d'], ['Received', '#1d4ed8'], ['Checked', '#1d4ed8'], ['Draft', '#b91c1c'], ['Rejected', '#b91c1c'], ['Confidential', '#b91c1c'], ['Copy', '#6b7280'], ['Void', '#6b7280']];
     const pick = await dialog(`<div class="row"><h2 style="margin:0">Add a stamp</h2><span class="spacer"></span><button data-dlg="cancel">✕</button></div>
       <div class="stampgrid">${presets.map(([t, c]) => `<button data-dlg="${t}|${c}" style="color:${c};border-color:${c}">${t.toUpperCase()}</button>`).join('')}</div>
-      <div class="dlgrow"><label>Custom</label><input id="stxt" placeholder="e.g. Entered in Xero" style="flex:1"><button data-dlg="custom">Add</button></div>
+      <div class="dlgrow"><label>Custom</label><input id="stxt" placeholder="e.g. Entered in accounts" style="flex:1"><button data-dlg="custom">Add</button></div>
       <label class="small"><input type="checkbox" id="sdate" checked> Show today's date (${today()})</label>`, () => {});
     if (!pick) return;
     const withDate = $('#sdate')?.checked !== false;
