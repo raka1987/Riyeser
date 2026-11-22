@@ -111,7 +111,7 @@ jobs:
             echo
             echo "Every installer was built, installed and checked on Windows before publishing."
           } > notes.md
-          echo "TAG=riyser-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "TAG=riyeser-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           echo "TITLE=Riyeser for Windows — $(date -u '+%-d %B %Y')" >> "$GITHUB_ENV"
           rm out/versions-*.txt
           ls -la out
