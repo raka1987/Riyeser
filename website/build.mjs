@@ -120,6 +120,8 @@ function page({ path, title, description, active, body }) {
   <a href="${up}downloads.html">Downloads</a><a href="${up}support.html">Support</a><a href="${up}terms.html">Terms</a>
   <span class="r">© ${new Date().getFullYear()} Riyser Group</span></div></footer>
 <script>addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('scrolled',scrollY>8),{passive:true})</script>
+${path === 'index.html' && !SERVICES_APP.startsWith(SITE) ? `<script>/* old Riyser Services links (riyeser.com/?demo, riyeser.com/#/...) now live at the Services app */
+if(/[?&]demo\b/.test(location.search)||location.hash.startsWith('#/'))location.replace(${JSON.stringify(SERVICES_APP)}+'/'+location.search+location.hash)</script>` : ''}
 </body>
 </html>
 `;
@@ -247,7 +249,7 @@ ${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyser Central — fr
   <p>Big buttons, works with no signal, and syncs when you're back in range. Phones, tablets and computers — add it to your home screen and it opens like an app.</p>
   <ul class="ticks"><li>Electrical: boards, circuits and test results on record</li><li>IT and comms: racks, fibre and copper, port by port</li><li>Plumbing: pipe routes and pressure tests before the wall closes</li><li>Every trade working from the same drawing</li></ul></div>
   <img src="${up}assets/services-report.webp" alt="Two pages of a power test report" loading="lazy"></div></section>
-<section class="c faq" style="max-width:900px"><h2 class="h2">Questions and answers</h2>
+<section class="c faq" id="faq" style="max-width:900px"><h2 class="h2">Questions and answers</h2>
   ${FAQ.map(([g, qs]) => `<h3 style="margin:28px 0 4px;font-size:18px">${esc(g)}</h3>${qs.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}`).join('')}
   <p class="note" style="margin-top:24px">More help: the <a class="more" href="${SERVICES_APP}/help.html">help guide</a> · <a class="more" href="${up}terms.html">Terms of use</a> · <a class="more" href="mailto:${EMAIL}">${EMAIL}</a></p></section>
 <section class="c"><div class="cta"><h2>See it on a real job</h2><p>Try the demo now, or email us to set Riyser Services up for your team.</p>
@@ -312,6 +314,12 @@ page({
 </section>
 ${ctaBlock(up)}`,
 });
+
+// ---------- old riyeser.com addresses keep working ----------
+const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
+  writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
+redirect('faq.html', `${BASE}programs/services.html#faq`, 'Riyser Services questions and answers');
+if (!SERVICES_APP.startsWith(SITE)) redirect('help.html', `${SERVICES_APP}/help.html`, 'Riyser Services help guide');
 
 // ---------- extras ----------
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
