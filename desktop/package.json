@@ -37,6 +37,7 @@
     "mammoth": "^1.13.0",
     "node-ical": "^0.27.6",
     "pdf-lib": "^1.17.1",
+    "sql.js": "^1.11.0",
     "tesseract.js": "^5.1.1",
     "unpdf": "^1.9.1"
   },

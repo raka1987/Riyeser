@@ -1,31 +1,43 @@
-// electron-builder settings for the Windows installers. DESK_APP=pdf builds Riyeser PDF, otherwise Riyeser Desk Assistant.
+// electron-builder settings for the Windows installers, all built from this one code base.
+//   DESK_APP=central -> Riyser Central (the Riyser Group home screen)
+//   DESK_APP=pdf     -> Riyeser PDF
+//   (default)        -> Riyeser Desk Assistant
 const base = require('../package.json').build;
-const pdf = process.env.DESK_APP === 'pdf';
-const name = pdf ? 'Riyeser PDF' : 'Riyeser Desk Assistant';
-const ico = pdf ? 'build/pdf/icon.ico' : 'build/icon.ico';
+const which = process.env.DESK_APP === 'pdf' ? 'pdf' : process.env.DESK_APP === 'central' ? 'central' : 'assistant';
+const pdf = which === 'pdf';
+const APPS = {
+  assistant: { name: 'Riyeser Desk Assistant', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDeskAssistant' },
+  pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
+    extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
+  central: { name: 'Riyser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyserCentral',
+    extraMetadata: { main: 'src/central-main.js', name: 'riyser-central', version: '1.0.0', productName: 'Riyser Central' } },
+};
+const a = APPS[which];
 
 module.exports = {
   ...base,
-  productName: name,
-  appId: pdf ? 'com.deskassistant.pdf' : 'com.deskassistant.app',
-  ...(pdf ? { extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } } : {}),
-  directories: { ...base.directories, output: pdf ? 'dist-pdf' : 'dist' },
+  productName: a.name,
+  appId: a.appId,
+  ...(a.extraMetadata ? { extraMetadata: a.extraMetadata } : {}),
+  directories: { ...base.directories, output: a.out },
   // Riyeser PDF offers itself for .pdf files ("Open with", Default apps)
-  ...(pdf ? { fileAssociations: [{ ext: 'pdf', name: 'PDF Document', description: 'PDF document', icon: ico, role: 'Editor' }] } : {}),
+  ...(pdf ? { fileAssociations: [{ ext: 'pdf', name: 'PDF Document', description: 'PDF document', icon: a.ico, role: 'Editor' }] } : {}),
+  // Riyser Central reads Accounting's books with sql.js (WebAssembly), kept outside the archive.
+  ...(which === 'central' ? { asarUnpack: [...(base.asarUnpack || []), 'node_modules/sql.js/dist/**'] } : {}),
   copyright: 'Riyeser Group',
   publish: null,
-  win: { target: [{ target: 'nsis', arch: ['x64'] }], icon: ico, legalTrademarks: name },
+  win: { target: [{ target: 'nsis', arch: ['x64'] }], icon: a.ico, legalTrademarks: a.name },
   nsis: {
     oneClick: true,            // one click: installs for this Windows user, no admin needed
     perMachine: false,
     createDesktopShortcut: 'always',
     createStartMenuShortcut: true,
-    shortcutName: name,
+    shortcutName: a.name,
     runAfterFinish: true,
-    deleteAppDataOnUninstall: false, // keep signatures/settings unless the user removes them in the app
-    installerIcon: ico,
-    uninstallerIcon: ico,
-    uninstallDisplayName: `${name} \${version}`,
-    artifactName: `${pdf ? 'RiyeserPDF' : 'RiyeserDeskAssistant'}-Setup-\${version}.\${ext}`,
+    deleteAppDataOnUninstall: false, // keep settings unless the user removes them in the app
+    installerIcon: a.ico,
+    uninstallerIcon: a.ico,
+    uninstallDisplayName: `${a.name} \${version}`,
+    artifactName: `${a.artifact}-Setup-\${version}.\${ext}`,
   },
 };

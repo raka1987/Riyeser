@@ -1,0 +1,46 @@
+/* Riyser Central: the home screen */
+body.central { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); }
+.chead { background: linear-gradient(135deg, #17365d, #0f2742); color: #fff; padding: 22px 32px 26px; display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between; }
+.cbrand { display: flex; gap: 14px; align-items: center; }
+.cbrand img { width: 52px; height: 52px; border-radius: 12px; }
+.ctitle { font-size: 26px; font-weight: 700; letter-spacing: -0.3px; }
+.csub { opacity: 0.85; font-size: 14px; }
+.csearch { flex: 1; min-width: 280px; max-width: 640px; display: flex; gap: 8px; align-items: center; }
+.csearch input { flex: 1; font-size: 15px; padding: 11px 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.12); color: #fff; }
+.csearch input::placeholder { color: rgba(255,255,255,0.7); }
+.csearch .link { color: #fff; }
+#cmain { padding: 22px 32px 40px; max-width: 1400px; margin: 0 auto; box-sizing: border-box; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; margin-top: -30px; position: relative; z-index: 1; }
+.chead { padding-bottom: 44px; }
+.pcard { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: 0 4px 18px rgba(0,0,0,0.08); display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+.pcard:hover { border-color: var(--accent); }
+.pcard .pi { font-size: 26px; }
+.pcard h3 { margin: 2px 0 0; font-size: 17px; }
+.pcard .pd { font-size: 13px; color: var(--muted); flex: 1; }
+.pcard .ps { font-size: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--good); } .dot.no { background: var(--warn); } .dot.web { background: var(--accent); }
+.cgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
+.cgrid .wide { grid-column: 1 / -1; }
+@media (max-width: 1000px) { .cgrid { grid-template-columns: 1fr; } }
+.cgrid .card h2 { font-size: 16px; margin: 0 0 10px; }
+.mline { display: flex; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.mline:last-child { border-bottom: none; }
+.mline .grow { flex: 1; min-width: 0; }
+.mtime { font-weight: 600; min-width: 64px; font-size: 13px; }
+.money-tot { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.money-tot .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted); }
+.money-tot .v { font-size: 22px; font-weight: 700; }
+.money-tot .v.bad { color: var(--bad); }
+.amount { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 18px; }
+.recent .ritem { display: flex; gap: 8px; align-items: center; padding: 6px 4px; border-radius: 8px; cursor: pointer; min-width: 0; }
+.recent .ritem:hover { background: var(--accent-soft); }
+.ritem .rn { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ritem .rd { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cfoot { text-align: center; margin-top: 22px; }
+.sfilters { margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.frow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.flabel { font-size: 12px; font-weight: 600; color: var(--muted); width: 42px; }
+.fchip { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+.fchip.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }

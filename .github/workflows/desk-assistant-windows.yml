@@ -1,6 +1,6 @@
-name: Riyeser Desk Assistant + Riyeser PDF (Windows)
+name: Riyser Central + Riyeser Desk Assistant + Riyeser PDF (Windows)
 
-# Builds the Windows installers for Riyeser Desk Assistant and Riyeser PDF,
+# Builds the Windows installers for Riyser Central, Riyeser Desk Assistant and Riyeser PDF,
 # installs them on a clean Windows machine and checks they are registered.
 on:
   push:
@@ -37,7 +37,8 @@ jobs:
         run: |
           foreach ($app in @(
               @{ setup = "dist\RiyeserDeskAssistant-Setup-*.exe"; exe = "Riyeser Desk Assistant.exe"; name = "Riyeser Desk Assistant*" },
-              @{ setup = "dist-pdf\RiyeserPDF-Setup-*.exe"; exe = "Riyeser PDF.exe"; name = "Riyeser PDF*" })) {
+              @{ setup = "dist-pdf\RiyeserPDF-Setup-*.exe"; exe = "Riyeser PDF.exe"; name = "Riyeser PDF*" },
+              @{ setup = "dist-central\RiyserCentral-Setup-*.exe"; exe = "Riyser Central.exe"; name = "Riyser Central*" })) {
             $setup = Get-ChildItem $app.setup | Select-Object -First 1
             Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
             $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter $app.exe | Select-Object -First 1
@@ -47,6 +48,14 @@ jobs:
             if (-not $entry) { throw "Not listed in Installed apps: $($app.name)" }
             Write-Host "Listed as:" $entry.DisplayName "by" $entry.Publisher
           }
+          # Riyser Central must find the other programs it opens
+          $central = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyser Central.exe" | Select-Object -First 1
+          $report = "$env:RUNNER_TEMP\central.json"
+          Start-Process -FilePath $central.FullName -ArgumentList "--self-test=$report" -Wait
+          $r = Get-Content $report -Raw | ConvertFrom-Json
+          $r.programs | Format-Table id, status, where -AutoSize | Out-String | Write-Host
+          foreach ($id in @("desk", "pdf")) { if (($r.programs | Where-Object id -eq $id).status -ne "installed") { throw "Riyser Central can't find $id" } }
+          Write-Host "Riyser Central" $r.version "finds Desk Assistant and PDF"
           $leftover = Get-ChildItem "$env:LOCALAPPDATA\Programs\desk-assistant\resources" -Directory | Where-Object Name -in @("python", "accounting")
           if ($leftover) { throw "Accounting files are still bundled" }
 
@@ -56,4 +65,5 @@ jobs:
           path: |
             desktop/dist/RiyeserDeskAssistant-Setup-*.exe
             desktop/dist-pdf/RiyeserPDF-Setup-*.exe
+            desktop/dist-central/RiyserCentral-Setup-*.exe
           if-no-files-found: error

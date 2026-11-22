@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
+  <title>Riyser Central</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="central.css">
+</head>
+<body class="central">
+  <header class="chead">
+    <div class="cbrand"><img src="icon-central.png" alt=""><div><div class="ctitle">Riyser Central</div><div class="csub" id="greet">Your business in one place</div></div></div>
+    <div class="csearch"><input id="q" placeholder="Find any file — name, words inside it, company, or an old name" autocomplete="off"><button id="qclear" class="link" hidden>Clear</button></div>
+  </header>
+  <main id="cmain">
+    <section id="search" hidden></section>
+    <section id="home">
+      <div class="cards" id="programs"></div>
+      <div class="cgrid">
+        <div class="card"><h2>📅 Today</h2><div id="meetings" class="empty small">Loading…</div></div>
+        <div class="card"><h2>✅ To-do</h2><div id="tasks" class="empty small">Loading…</div></div>
+        <div class="card"><h2>💲 Money</h2><div id="money" class="empty small">Loading…</div></div>
+        <div class="card wide"><h2>🕘 Recent documents</h2><div id="recent" class="empty small">Loading…</div></div>
+      </div>
+      <p class="cfoot small muted" id="foot"></p>
+    </section>
+  </main>
+  <div id="toast" class="toast"></div>
+  <script src="central.js"></script>
+</body>
+</html>

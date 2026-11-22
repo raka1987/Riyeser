@@ -560,3 +560,29 @@ test('Find a file: filters by type, year and kind, and finds old names', () => {
   assert.equal(idx.find({ year: '2026', kind: 'Excel' }, { organisedRoot: root }).results[0].name, 'wages.xlsx');
   assert.equal(idx.find({ q: 'schematic' }, { organisedRoot: root }).total, 1); // old name / contents
 });
+
+test('Riyser Central reads money owed and owing from the Accounting company file (read-only)', async () => {
+  const initSql = require('sql.js/dist/sql-wasm.js');
+  const SQL = await initSql({ locateFile: () => require.resolve('sql.js/dist/sql-wasm.wasm') });
+  const db = new SQL.Database();
+  db.run(`CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT);
+    CREATE TABLE contacts (id INTEGER PRIMARY KEY, kind TEXT, name TEXT);
+    CREATE TABLE documents (id INTEGER PRIMARY KEY, side TEXT, status TEXT, number TEXT, contact_id INTEGER, date TEXT, due_date TEXT, total INTEGER, amount_paid INTEGER);
+    INSERT INTO company VALUES (1, 'Westin Test Pty Ltd');
+    INSERT INTO contacts VALUES (1, 'customer', 'Bayside Cafe'), (2, 'supplier', 'CityPower');
+    INSERT INTO documents VALUES (1, 'sale', 'open', 'INV1', 1, '2026-10-01', '2026-10-31', 150000, 50000),
+      (2, 'sale', 'paid', 'INV2', 1, '2026-10-01', '2026-10-31', 9900, 9900),
+      (3, 'purchase', 'open', 'PO1', 2, '2026-11-01', '2026-12-01', 48400, 0);`);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acct-'));
+  const file = path.join(dir, 'company.db');
+  fs.writeFileSync(file, Buffer.from(db.export()));
+  const before = fs.readFileSync(file);
+  const { pendingPayments } = require('../src/central/sources');
+  const r = await pendingPayments(file, { today: '2026-11-22' });
+  assert.equal(r.company, 'Westin Test Pty Ltd');
+  assert.deepEqual(r.totals, { owedToYou: 1000, overdueToYou: 1000, youOwe: 484, overdueYouOwe: 0 });
+  assert.equal(r.receivables[0].contact, 'Bayside Cafe');
+  assert.ok(r.receivables[0].overdue);
+  assert.ok(fs.readFileSync(file).equals(before)); // never changed
+  assert.equal((await pendingPayments(path.join(dir, 'missing.db'))).found, false);
+});
