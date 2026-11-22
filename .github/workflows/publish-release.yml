@@ -1,8 +1,8 @@
-name: Publish Riyser release
+name: Publish Riyeser release
 
-# One button for a new public release of the Riyser Windows programs:
-#   Actions → "Publish Riyser release" → Run workflow
-# Builds Riyser Central, Riyeser Desk Assistant and Riyser PDF (branch module/desk-assistant) and Riyeser Accounting
+# One button for a new public release of the Riyeser Windows programs:
+#   Actions → "Publish Riyeser release" → Run workflow
+# Builds Riyeser Central, Riyeser Desk Assistant and Riyser PDF (branch module/desk-assistant) and Riyeser Accounting
 # (main) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
 # every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
 on:
@@ -40,7 +40,7 @@ jobs:
         shell: pwsh
         run: |
           $apps = @(
-            @{ src = "dist-central\RiyserCentral-Setup-*.exe";        out = "RiyserCentral-Setup.exe";        name = "Riyser Central*" },
+            @{ src = "dist-central\RiyserCentral-Setup-*.exe";        out = "RiyserCentral-Setup.exe";        name = "Riy*ser Central*" },
             @{ src = "dist\RiyeserDeskAssistant-Setup-*.exe";        out = "RiyeserDeskAssistant-Setup.exe"; name = "Riyeser Desk Assistant*" },
             @{ src = "dist-pdf\RiyeserPDF-Setup-*.exe";              out = "RiyserPDF-Setup.exe";            name = "Riyeser PDF*" })
           New-Item -ItemType Directory -Force -Path release | Out-Null
@@ -101,7 +101,7 @@ jobs:
         env: { NOTES: "${{ inputs.notes }}" }
         run: |
           {
-            echo "Free Windows programs from Riyser Group. **No sign-up, no card, works offline.** Windows 10 and 11."
+            echo "Free Windows programs from Riyeser Group. **No sign-up, no card, works offline.** Windows 10 and 11."
             echo
             if [ -n "$NOTES" ]; then echo "### What's new"; echo "$NOTES"; echo; fi
             echo "### In this release"
@@ -112,7 +112,7 @@ jobs:
             echo "Every installer was built, installed and checked on Windows before publishing."
           } > notes.md
           echo "TAG=riyser-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
-          echo "TITLE=Riyser for Windows — $(date -u '+%-d %B %Y')" >> "$GITHUB_ENV"
+          echo "TITLE=Riyeser for Windows — $(date -u '+%-d %B %Y')" >> "$GITHUB_ENV"
           rm out/versions-*.txt
           ls -la out
       - uses: softprops/action-gh-release@v2

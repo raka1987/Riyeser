@@ -1,6 +1,6 @@
 name: Publish website
 
-# Builds the Riyser website (website/ on branch module/desk-assistant) and publishes it with GitHub Pages.
+# Builds the Riyeser website (website/ on branch module/desk-assistant) and publishes it with GitHub Pages.
 # Actions → "Publish website" → Run workflow.  Pages must use "GitHub Actions" as its source (Settings → Pages).
 on:
   workflow_dispatch:
