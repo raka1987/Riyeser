@@ -240,7 +240,7 @@ page({
 
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
-  <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's $30 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's about a coffee a week: $20 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline. Riyeser Services can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
   <details><summary>Will it work on a Mac?</summary><p>Not yet — the programs are for Windows 10 and 11. Riyeser Services also works in any web browser at riyeser.com/app.</p></details>
   <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has step-by-step answers for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
@@ -365,20 +365,20 @@ ${ctaBlock(up, 'New here? Start with Riyeser Central', 'It\'s the home screen fo
 
 // ---------- pricing ----------
 page({
-  path: 'pricing.html', title: 'Riyeser pricing — 90 days free, then from $19.50 per user', active: 'pricing',
-  description: 'Every Riyeser program free for 90 days with no card. Then one simple price per user for the whole suite, with discounts for teams and yearly plans.',
+  path: 'pricing.html', title: 'Riyeser pricing — 90 days free, then about a coffee a week', active: 'pricing',
+  description: 'Every Riyeser program free for 90 days with no card. Then about the price of a coffee a week per user for the whole suite.',
   body: (up) => `
-<div class="hero2"><div class="c hero"><span class="eyebrow">90 days free · no card · every program</span><h1>One price for <span class="grad">everything</span></h1>
-  <p class="lead">Accounting, Payroll, Services, Desk Assistant, PDF and Riyeser Central — all included. Try the lot free for 90 days, then pay per person who uses it.</p>
+<div class="hero2"><div class="c hero"><span class="eyebrow">90 days free · no card · every program</span><h1>Everything, for <span class="grad">a coffee a week</span></h1>
+  <p class="lead">Accounting, Payroll, Services, Desk Assistant, PDF and Riyeser Central — all included. Try the lot free for 90 days, then it's $5 a week per person — less than a takeaway coffee.</p>
   <div class="ctas"><a class="btn p big" href="${dl(prog('central'))}">⬇ Start your free trial</a><a class="btn s big" href="#calc">Work out my price</a></div>
   <p style="font-size:13px;color:var(--faint);margin:14px 0 0">No sign-up to start · nothing is charged automatically when the trial ends</p></div></div>
 
 <section class="c">
-  ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off your first year</b><p>For the first 100 users to buy a licence. That's from <b>$9.75</b> per user a month for 12 months, then the normal price below. The offer ends when 100 users have it.</p></div></div>` : ''}
+  ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off your first year</b><p>For the first 100 users to buy a licence. That's from <b>$6.50</b> per user a month for 12 months, then the normal price below. The offer ends when 100 users have it.</p></div></div>` : ''}
   <div class="plans">
-    <div class="plan"><div class="k">1–4 users</div><div class="price">$30<small> per user / month</small></div><p>Everything, for sole traders and small teams.</p></div>
-    <div class="plan best"><span class="tag">Most popular</span><div class="k">5–19 users</div><div class="price">$24<small> per user / month</small></div><p>20% off every user once you reach five.</p></div>
-    <div class="plan"><div class="k">20+ users</div><div class="price">$19.50<small> per user / month</small></div><p>35% off every user for larger teams.</p></div>
+    <div class="plan best"><span class="tag">☕ About a coffee a week</span><div class="k">1–4 users</div><div class="price">$5<small> per user / week</small></div><p>Billed $20 a month per user. Everything, for sole traders and small teams.</p></div>
+    <div class="plan"><div class="k">5–19 users</div><div class="price">$4<small> per user / week</small></div><p>Billed $16 a month per user — 20% off once you reach five.</p></div>
+    <div class="plan"><div class="k">20+ users</div><div class="price">$3.25<small> per user / week</small></div><p>Billed $13 a month per user — 35% off for larger teams.</p></div>
   </div>
   <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
 </section>
@@ -407,15 +407,15 @@ page({
   <details><summary>What counts as a user?</summary><p>Each person who uses Riyeser on their own computer. One licence covers every Riyeser program for that person.</p></details>
   <details><summary>Can I change the number of users later?</summary><p>Yes, add or remove users any time. Your price per user follows the table above.</p></details>
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
-  ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 users to buy a licence pay half price for their first 12 months — for example $15 instead of $30 per user a month. After 12 months the normal price applies. Once 100 users have the offer, it ends; we won't extend it or run a fake countdown.</p></details>` : ''}
+  ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 users to buy a licence pay half price for their first 12 months — for example $10 instead of $20 per user a month. After 12 months the normal price applies. Once 100 users have the offer, it ends; we won't extend it or run a fake countdown.</p></details>` : ''}
   <details><summary>How do I buy?</summary><p>Online checkout is opening soon. Until then, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser licence')}">${EMAIL}</a> with your business name and number of users and we'll send your licence key.</p></details>
 </section>
 ${ctaBlock(up, 'Try everything free for 90 days', 'No card, no sign-up. Install Riyeser Central and add the programs you need.')}
 <script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},u=document.getElementById('users'),y=document.getElementById('yearly');
-function price(n){return n>=20?19.5:n>=5?24:30}
+function price(n){return n>=20?13:n>=5?16:20}
 function money(v){return '$'+v.toLocaleString('en-AU',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})}
 function draw(){var n=Math.max(1,Math.min(500,parseInt(u.value,10)||1)),p=price(n),m=p*n;
-document.getElementById('per').textContent=n+' user'+(n>1?'s':'')+' × '+money(p)+' a month'+(p<30?' ('+(p===24?'20':'35')+'% off)':'');
+document.getElementById('per').textContent=n+' user'+(n>1?'s':'')+' × '+money(p)+' a month'+(p<20?' ('+(p===16?'20':'35')+'% off)':'');
 if(y.checked){document.getElementById('total').textContent=money(m*10)+' a year';document.getElementById('note').textContent='That\\'s '+money(m*10/12)+' a month — 2 months free.'}
 else{document.getElementById('total').textContent=money(m)+' a month';document.getElementById('note').textContent='After your 90-day free trial.'}
 if(EB){document.getElementById('note').textContent+=' Early bird: '+(y.checked?money(m*10/2)+' for your first year':money(m/2)+' a month for your first year')+'.'}}
