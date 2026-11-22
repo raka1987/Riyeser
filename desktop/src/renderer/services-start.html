@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Riyeser Services</title>
+<script>
+// Already chosen? Go straight in (Riyeser Services ▸ "How I work…" brings this page back).
+try { if (!/[?&]choose\b/.test(location.search) && localStorage.getItem('riyeser.mode')) location.replace('/app/'); } catch (e) {}
+</script>
+<style>
+  :root { --bg: #172326; --card: #20302f; --line: rgba(255,255,255,.12); --text: #eef4f3; --muted: #a9bcba; --accent: #e8a33d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(1200px 600px at 20% -10%, #24413f, var(--bg)); color: var(--text);
+    font: 15px/1.5 "Segoe UI", system-ui, sans-serif; display: grid; place-items: center; padding: 32px 16px; }
+  main { width: 100%; max-width: 860px; }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+  .brand img { width: 44px; height: 44px; border-radius: 10px; }
+  .brand b { font-size: 20px; } .brand small { display: block; color: var(--muted); }
+  h1 { font-size: 30px; margin: 0 0 6px; letter-spacing: -.01em; }
+  p.lead { color: var(--muted); margin: 0 0 26px; }
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .opts { grid-template-columns: 1fr; } }
+  button.opt { text-align: left; font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 22px; cursor: pointer; transition: border-color .15s, transform .15s; }
+  button.opt:hover, button.opt:focus-visible { border-color: var(--accent); transform: translateY(-2px); outline: none; }
+  .opt .i { font-size: 28px; } .opt h2 { font-size: 19px; margin: 8px 0 6px; }
+  .opt ul { margin: 10px 0 0; padding-left: 18px; color: var(--muted); }
+  .opt .tag { display: inline-block; font-size: 12px; font-weight: 600; color: #172326; background: var(--accent); border-radius: 99px; padding: 2px 9px; }
+  .foot { margin-top: 22px; color: var(--muted); font-size: 13px; }
+  .foot a { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand"><img src="/img/logo-128.png" alt=""><div><b>Riyeser Services</b><small>Riyeser Group</small></div></div>
+  <h1>How do you want to work?</h1>
+  <p class="lead">You can change this later from the Riyeser Services menu.</p>
+  <div class="opts">
+    <button class="opt" data-mode="local" type="button">
+      <span class="tag">No account needed</span>
+      <div class="i">💻</div>
+      <h2>On this PC</h2>
+      <div>Projects are saved on this computer. Works without internet.</div>
+      <ul><li>Nothing to sign up for</li><li>Your projects stay on this PC</li><li>Later, you can move them to an online account to share with phones, clients and staff</li></ul>
+    </button>
+    <button class="opt" data-mode="online" type="button">
+      <span class="tag">Share with your team</span>
+      <div class="i">☁️</div>
+      <h2>With my online account</h2>
+      <div>Sign in to your Riyeser Services account. Projects sync with phones, the website and your team.</div>
+      <ul><li>Same projects everywhere</li><li>Share links with clients</li><li>Keeps working offline, then catches up</li></ul>
+    </button>
+  </div>
+  <p class="foot">Just looking? <a href="/app/?demo">Try the demo</a> (nothing is saved).</p>
+</main>
+<script>
+document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+  try { localStorage.setItem('riyeser.mode', b.dataset.mode); } catch (e) {}
+  location.href = b.dataset.mode === 'online' ? '/app/?signin' : '/app/';
+}));
+</script>
+</body>
+</html>

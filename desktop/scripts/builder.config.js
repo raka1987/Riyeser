@@ -13,7 +13,7 @@ const APPS = {
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
     extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.3.0', productName: 'Riyeser Central' } },
   services: { name: 'Riyeser Services', appId: 'com.riyeser.services', ico: 'build/services/icon.ico', out: 'dist-services', artifact: 'RiyeserServices',
-    extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.0.0', productName: 'Riyeser Services' } },
+    extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.1.0', productName: 'Riyeser Services' } },
 };
 const a = APPS[which];
 
@@ -26,6 +26,8 @@ module.exports = {
   // Riyeser PDF offers itself for .pdf files ("Open with", Default apps)
   ...(pdf ? { fileAssociations: [{ ext: 'pdf', name: 'PDF Document', description: 'PDF document', icon: a.ico, role: 'Editor' }] } : {}),
   // Riyeser Central reads Accounting's books with sql.js (WebAssembly), kept outside the archive.
+  // Riyeser Services carries its own copy of the app (built by package-win.js into build/services-web).
+  ...(which === 'services' ? { extraResources: [{ from: 'build/services-web', to: 'services-web' }] } : {}),
   ...(which === 'central' ? { asarUnpack: [...(base.asarUnpack || []), 'node_modules/sql.js/dist/**'] } : {}),
   copyright: 'Riyeser Group',
   publish: null,
