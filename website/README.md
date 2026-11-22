@@ -4,7 +4,7 @@ The Riyser Group website: home, a page per program, Downloads, Pricing (free dur
 
 - **Edit**: all text lives in `build.mjs` (one place for every page); styling in `assets/site.css`.
 - **Build**: `node website/build.mjs` → `website/public/` (plain HTML, works on any web host).
-- **Publish free with GitHub Pages**: Settings → Pages → Source: *GitHub Actions*, then Actions → *Website (riyeser.com)* → *Run workflow*.
+- **Publish**: Actions → *Publish website* → *Run workflow* (the workflow lives on `main`; it builds this folder from `module/desk-assistant`).
 - **Use riyeser.com**: at your domain registrar add `A` records for `@` → 185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153 and a `CNAME` for `www` → `raka1987.github.io`; then in Settings → Pages enter `riyeser.com` and tick *Enforce HTTPS*.
 - **Download buttons** point to `https://github.com/raka1987/Riyeser/releases/latest/download/<file>`; each release must include
   `RiyserCentral-Setup.exe`, `RiyeserDeskAssistant-Setup.exe`, `RiyserPDF-Setup.exe` and `RiyeserAccounting-Setup.exe`.
