@@ -631,7 +631,7 @@ Object.assign(pages, {
     const st0 = await bridge.call('index:status').catch(() => ({ size: 0 }));
     page.innerHTML = `<h1>Find a file</h1>
       <p class="sub">Type any part of a file's name, words inside it, a company, or a name it used to have. Narrow it down by type, year or kind of file. Searching ${st0.size.toLocaleString()} files${st0.busy ? ' (still reading new ones…)' : ''}. Tip: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> searches from anywhere.</p>
-      <input id="sq" class="bigsearch" placeholder="e.g. westin drawing, payslip march, acme invoice" value="${esc(finder.q)}" autocomplete="off">
+      <input id="sq" class="bigsearch" placeholder="e.g. harbourview drawing, payslip march, acme invoice" value="${esc(finder.q)}" autocomplete="off">
       <div id="sfilters" class="sfilters"></div>
       <div id="sres" class="card" style="margin-top:12px"></div>
       <div class="row small muted" style="margin-top:8px"><span class="grow">Can't find something you just saved? </span><button class="link small" data-act="reindex">Re-scan my folders</button></div>`;
