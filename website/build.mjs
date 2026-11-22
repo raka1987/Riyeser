@@ -15,7 +15,7 @@ const EMAIL = 'info@riyeser.com';
 // Early bird: 50% off the first year for the first 100 paid users. Set to false once 100 users have it.
 const EARLY_BIRD = true;
 // Turn on once a release with RiyeserServices-Setup.exe is published.
-const SERVICES_WIN = process.env.SERVICES_WIN === '1';
+const SERVICES_WIN = process.env.SERVICES_WIN !== '0'; // in the release since riyeser-2026.11.22-4
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
 const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');
