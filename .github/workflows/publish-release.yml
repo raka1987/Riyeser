@@ -136,6 +136,8 @@ jobs:
   publish:
     name: Publish release
     needs: [desktop, accounting, payroll]
+    # Payroll is newest: if its build or check fails, the other programs are still published (Payroll joins next time).
+    if: ${{ !cancelled() && needs.desktop.result == 'success' && needs.accounting.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -172,4 +174,4 @@ jobs:
             out/RiyeserServices-Setup.exe
             out/RiyeserAccounting-Setup.exe
             out/RiyeserPayroll-Setup.exe
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false  # Payroll's file may be missing if its job failed; the others are checked above
