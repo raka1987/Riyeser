@@ -1,0 +1,130 @@
+name: Publish Riyser release
+
+# One button for a new public release of the Riyser Windows programs:
+#   Actions → "Publish Riyser release" → Run workflow
+# Builds Riyser Central, Riyeser Desk Assistant and Riyser PDF (branch module/desk-assistant) and Riyeser Accounting
+# (main) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
+# every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: "What's new (optional, shown on the release page)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: Central, Desk Assistant, PDF
+    runs-on: windows-latest
+    defaults: { run: { working-directory: desktop } }
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: module/desk-assistant }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Install
+        run: |
+          npm ci
+          python -m pip install --quiet pillow
+      - name: Unit tests
+        run: npm test
+      - name: Build installers
+        run: node scripts/package-win.js
+      - name: Install each one and check it is registered
+        shell: pwsh
+        run: |
+          $apps = @(
+            @{ src = "dist-central\RiyserCentral-Setup-*.exe";        out = "RiyserCentral-Setup.exe";        name = "Riyser Central*" },
+            @{ src = "dist\RiyeserDeskAssistant-Setup-*.exe";        out = "RiyeserDeskAssistant-Setup.exe"; name = "Riyeser Desk Assistant*" },
+            @{ src = "dist-pdf\RiyeserPDF-Setup-*.exe";              out = "RiyserPDF-Setup.exe";            name = "Riyeser PDF*" })
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $versions = @()
+          foreach ($a in $apps) {
+            $setup = Get-ChildItem $a.src | Select-Object -First 1
+            if (-not $setup) { throw "Missing installer: $($a.src)" }
+            Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
+            $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like $a.name
+            if (-not $entry) { throw "Not installed: $($a.name)" }
+            Write-Host "OK:" $entry.DisplayName
+            $versions += "$($entry.DisplayName)"
+            Copy-Item $setup.FullName (Join-Path release $a.out)
+          }
+          $versions | Set-Content release\versions-desktop.txt
+      - uses: actions/upload-artifact@v4
+        with: { name: desktop, path: desktop/release/*, if-no-files-found: error }
+
+  accounting:
+    name: Accounting
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: main }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Build
+        run: |
+          pip install . pyinstaller
+          python packaging/build_desktop.py
+      - name: Installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $ver = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$ver" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
+          $setup = Get-ChildItem dist\RiyeserAccounting-Setup-*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+          $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Accounting*"
+          if (-not $entry) { throw "Riyeser Accounting did not install" }
+          Write-Host "OK:" $entry.DisplayName
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item $setup.FullName release\RiyeserAccounting-Setup.exe
+          "$($entry.DisplayName)" | Set-Content release\versions-accounting.txt
+      - uses: actions/upload-artifact@v4
+        with: { name: accounting, path: release/*, if-no-files-found: error }
+
+  publish:
+    name: Publish release
+    needs: [desktop, accounting]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - name: Release notes
+        env: { NOTES: "${{ inputs.notes }}" }
+        run: |
+          {
+            echo "Free Windows programs from Riyser Group. **No sign-up, no card, works offline.** Windows 10 and 11."
+            echo
+            if [ -n "$NOTES" ]; then echo "### What's new"; echo "$NOTES"; echo; fi
+            echo "### In this release"
+            cat out/versions-*.txt | sed 's/^/- /'
+            echo
+            echo "**Installing:** run the file. If Windows shows \"Windows protected your PC\", click **More info → Run anyway**. Each program installs for your Windows user (no admin rights needed) and updates over the old version, keeping your data."
+            echo
+            echo "Every installer was built, installed and checked on Windows before publishing."
+          } > notes.md
+          echo "TAG=riyser-$(date -u +%Y.%m.%d)-${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "TITLE=Riyser for Windows — $(date -u '+%-d %B %Y')" >> "$GITHUB_ENV"
+          rm out/versions-*.txt
+          ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: module/desk-assistant
+          name: ${{ env.TITLE }}
+          body_path: notes.md
+          make_latest: "true"
+          files: |
+            out/RiyserCentral-Setup.exe
+            out/RiyeserDeskAssistant-Setup.exe
+            out/RiyserPDF-Setup.exe
+            out/RiyeserAccounting-Setup.exe
+          fail_on_unmatched_files: true
