@@ -1,18 +1,69 @@
 {% extends "base.html" %}{% block title %}Users{% endblock %}
 {% block content %}
-<div class="head"><div><h1>Users &amp; Roles</h1><p class="sub">Admin: full access · Accountant: all transactions, no user management · Viewer: read-only</p></div></div>
-<div class="tbl"><table><tr><th>Username</th><th>Name</th><th>Role</th><th>Active</th><th>Password</th><th></th></tr>
-{% for u in users %}<tr>
-<td><b>{{ u.username }}</b></td><td><input form="u{{ u.id }}" name="full_name" value="{{ u.full_name or '' }}"></td>
-<td><select form="u{{ u.id }}" name="role">{% for r in ['admin','accountant','viewer'] %}<option {{ 'selected' if u.role==r }}>{{ r }}</option>{% endfor %}</select></td>
-<td><input form="u{{ u.id }}" type="checkbox" name="active" value="1" {{ 'checked' if u.active }}></td>
-<td><input form="u{{ u.id }}" name="password" type="password" placeholder="New password (optional)"></td>
-<td><form id="u{{ u.id }}" method="post" action="{{ url_for('auth.save_user') }}"><input type="hidden" name="id" value="{{ u.id }}"><button class="btn sm">Save</button></form></td></tr>{% endfor %}
-</table></div>
-<div class="card" style="margin-top:18px"><h3>Add user</h3>
-<form method="post" action="{{ url_for('auth.save_user') }}" class="fields">
-<div><label>Username</label><input name="username" required></div><div><label>Full name</label><input name="full_name"></div>
-<div><label>Password</label><input name="password" type="password" required></div>
-<div><label>Role</label><select name="role"><option>accountant</option><option>viewer</option><option>admin</option></select></div>
-<div><label>&nbsp;</label><button class="btn pri">Add user</button></div></form></div>
+<div class="head"><div><h1>Users &amp; roles</h1><p class="sub">Choose what each person can see and change. Administrators can do everything, including managing users.</p></div></div>
+
+<div class="card perm-key"><b>Access levels:</b>
+  <span><i class="lv0"></i>Hidden — not shown at all</span><span><i class="lv1"></i>View — look and print only</span>
+  <span><i class="lv2"></i>Add &amp; edit — but not delete or void</span><span><i class="lv3"></i>Full — including delete and void</span></div>
+
+{% for u in users %}{% set L = levels(u) %}
+<form class="card user-card" method="post" action="{{ url_for('auth.save_user') }}">
+  <input type="hidden" name="id" value="{{ u.id }}">
+  <div class="user-head">
+    <div class="av">{{ ((u.full_name or u.username) or '?')[:1]|upper }}</div>
+    <div><b>{{ u.username }}</b>{% if not u.active %} <span class="badge void">inactive</span>{% endif %}<div class="muted">{{ u.full_name or '' }}</div></div>
+    <div class="user-fields">
+      <div><label>Full name</label><input name="full_name" value="{{ u.full_name or '' }}"></div>
+      <div><label>Type</label><select name="role" class="role-sel">
+        <option value="admin" {{ 'selected' if u.role=='admin' }}>Administrator</option>
+        <option value="accountant" {{ 'selected' if u.role=='accountant' }}>Staff</option>
+        <option value="viewer" {{ 'selected' if u.role=='viewer' }}>Read-only</option></select></div>
+      <div><label>New password</label><input name="password" type="password" placeholder="Leave blank to keep"></div>
+      <label class="check" style="margin-top:22px"><input type="checkbox" name="active" value="1" {{ 'checked' if u.active }}> Active</label>
+    </div>
+  </div>
+  <div class="perm-wrap" {% if u.role == 'admin' %}hidden{% endif %}>
+    <div class="presets"><span class="muted">Quick set:</span>{% for key, (name, _) in presets.items() %}<button type="button" class="btn sm" data-preset="{{ key }}">{{ name }}</button>{% endfor %}</div>
+    <table class="perm-grid"><tr><th>Area</th>{% for v, name in level_names %}<th class="c">{{ name }}</th>{% endfor %}</tr>
+    {% for a, name, desc in areas %}<tr><td><b>{{ name }}</b><div class="muted small">{{ desc }}</div></td>
+      {% for v, _ in level_names %}<td class="c"><input type="radio" name="perm_{{ a }}" value="{{ v }}" {{ 'checked' if L[a] == v }} {{ 'disabled' if u.role == 'viewer' and v > 1 }} aria-label="{{ name }}: {{ level_names[v][1] }}"></td>{% endfor %}</tr>{% endfor %}
+    </table>
+  </div>
+  <div class="admin-note muted" {% if u.role != 'admin' %}hidden{% endif %}>Administrators have full access to every area.</div>
+  <div style="margin-top:12px"><button class="btn pri">Save {{ u.username }}</button></div>
+</form>
+{% endfor %}
+
+<form class="card" method="post" action="{{ url_for('auth.save_user') }}">
+  <h3>Add a user</h3>
+  <div class="fields">
+    <div><label>Username</label><input name="username" required autocomplete="off"></div><div><label>Full name</label><input name="full_name"></div>
+    <div><label>Password</label><input name="password" type="password" required autocomplete="new-password"></div>
+    <div><label>Starting access</label><select name="preset">{% for key, (name, _) in presets.items() %}<option value="{{ key }}" {{ 'selected' if key == 'readonly' }}>{{ name }}</option>{% endfor %}<option value="admin">Administrator</option></select></div>
+    <div><label>&nbsp;</label><button class="btn pri">Add user</button></div>
+  </div>
+  <p class="muted small" style="margin:10px 0 0">You can fine-tune each area after adding them.</p>
+</form>
 {% endblock %}
+{% block scripts %}<script>
+(function () {
+  const PRESETS = {{ presets_json|safe }};
+  document.querySelectorAll('.user-card').forEach(function (card) {
+    const role = card.querySelector('.role-sel');
+    function sync() {
+      card.querySelector('.perm-wrap').hidden = role.value === 'admin';
+      card.querySelector('.admin-note').hidden = role.value !== 'admin';
+      card.querySelectorAll('.perm-grid input').forEach(function (r) { r.disabled = role.value === 'viewer' && +r.value > 1; if (r.disabled && r.checked) { card.querySelector('input[name="' + r.name + '"][value="1"]').checked = true; } });
+    }
+    role.addEventListener('change', sync);
+    card.querySelectorAll('[data-preset]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const p = PRESETS[b.dataset.preset];
+        if (role.value === 'viewer' && Object.values(p).some(function (v) { return v > 1; })) role.value = 'accountant';
+        Object.keys(p).forEach(function (a) { const r = card.querySelector('input[name="perm_' + a + '"][value="' + p[a] + '"]'); if (r) r.checked = true; });
+        sync();
+      });
+    });
+  });
+})();
+</script>{% endblock %}

@@ -402,7 +402,9 @@ def rpt_jobs(db, p):
 # ------------------------------------------------------------------ routes
 @bp.route("/")
 def index():
-    return render_template("reports/index.html", catalog=_catalog())
+    from ..perms import can, report_area
+    cat = [(grp, [(k, t) for k, t in items if can(report_area(k))]) for grp, items in _catalog()]
+    return render_template("reports/index.html", catalog=[(grp, items) for grp, items in cat if items])
 
 
 @bp.route("/<name>")

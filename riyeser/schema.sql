@@ -24,6 +24,7 @@ CREATE TABLE users (
     password_hash TEXT NOT NULL,
     full_name TEXT,
     role TEXT NOT NULL CHECK (role IN ('admin','accountant','viewer')),
+    perms TEXT,                  -- per-area levels as JSON (riyeser/perms.py); empty = follow the role
     active INTEGER NOT NULL DEFAULT 1
 );
 

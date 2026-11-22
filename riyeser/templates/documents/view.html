@@ -11,10 +11,10 @@
 <a class="btn" href="{{ url_for('documents.edit', side=doc.side, doc_id=doc.id) }}">Edit</a>
 {% if doc.status=='quote' %}<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="order"><button class="btn">Convert to order</button></form>{% endif %}
 <form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="open"><button class="btn pri">Convert to {{ L.doc|lower }}</button></form>
-<form method="post" class="inline" action="{{ url_for('documents.delete', doc_id=doc.id) }}" data-confirm="Delete this {{ doc.status }}?"><button class="btn danger">Delete</button></form>
+{% if lv('sales' if doc.side == 'sale' else 'purchases') >= 3 %}<form method="post" class="inline" action="{{ url_for('documents.delete', doc_id=doc.id) }}" data-confirm="Delete this {{ doc.status }}?"><button class="btn danger">Delete</button></form>{% endif %}
 {% endif %}
 {% if doc.status=='open' %}<a class="btn pri" href="{{ url_for('documents.pay', side=doc.side, contact=doc.contact_id) }}">{{ L.pay }}</a>{% endif %}
-{% if doc.status=='open' and not doc.amount_paid %}<form method="post" class="inline" action="{{ url_for('documents.void', doc_id=doc.id) }}" data-confirm="Void {{ doc.number }}? A reversing entry will be posted."><button class="btn danger">Void</button></form>{% endif %}
+{% if doc.status=='open' and not doc.amount_paid %}{% if lv('sales' if doc.side == 'sale' else 'purchases') >= 3 %}<form method="post" class="inline" action="{{ url_for('documents.void', doc_id=doc.id) }}" data-confirm="Void {{ doc.number }}? A reversing entry will be posted."><button class="btn danger">Void</button></form>{% endif %}{% endif %}
 {% if doc.entry_id %}<a class="btn" href="{{ url_for('core.entry', eid=doc.entry_id) }}">Journal #{{ doc.entry_id }}</a>{% endif %}
 </div></div>
 <div class="tbl"><table><tr><th>Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th>Account</th><th>Tax</th><th>Job</th><th class="n">Net</th><th class="n">GST</th></tr>

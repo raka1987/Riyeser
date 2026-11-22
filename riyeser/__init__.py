@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 
 def create_app(test_config=None):
@@ -53,6 +53,13 @@ def create_app(test_config=None):
         if g.user is not None and request.method == "POST" and g.user["role"] == "viewer" \
                 and request.endpoint not in ("auth.logout", "auth.login", "auth.forgot"):
             abort(403)
+        if g.user is not None:
+            from .perms import check_request
+            why = check_request(db)
+            if why:
+                flash(why, "error")
+                back = request.referrer if request.method == "POST" and request.referrer else url_for("core.dashboard")
+                return redirect(back)
         if g.user is not None and g.company["edition"] == "basic" and _enterprise_only(request.endpoint):
             flash("That's part of Riyeser Accounting Enterprise. An administrator can upgrade under "
                   "Setup → Company (your data stays as it is).", "error")
@@ -61,11 +68,14 @@ def create_app(test_config=None):
     @app.context_processor
     def inject():
         from .licence import status as licence_status
-        return dict(user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None)
+        from . import perms
+        return dict(user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
+                    can=lambda area, need=1: perms.can(area, need), lv=lambda area: perms.level(area),
+                    report_area=perms.report_area)
 
     @app.errorhandler(403)
     def forbidden(_e):
-        flash("You do not have permission to do that (read-only role).", "error")
+        flash("Your user doesn't have permission to do that. Ask an administrator.", "error")
         return redirect(request.referrer or url_for("core.dashboard"))
 
     from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help

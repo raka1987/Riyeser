@@ -1,3 +1,4 @@
+import json
 import os
 
 from flask import Blueprint, render_template, request, redirect, url_for, session, flash, current_app, g
@@ -5,6 +6,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from ..db import get_db, init_db, audit
 from . import admin_only, guarded
+from .. import perms
 
 bp = Blueprint("auth", __name__)
 
@@ -89,7 +91,9 @@ def logout():
 @admin_only
 def users():
     rows = get_db().execute("SELECT * FROM users ORDER BY username").fetchall()
-    return render_template("auth/users.html", users=rows)
+    return render_template("auth/users.html", users=rows, areas=perms.AREAS, level_names=perms.LEVELS,
+                           presets=perms.PRESETS, presets_json=json.dumps({k: v for k, (_, v) in perms.PRESETS.items()}),
+                           levels=perms.levels_for)
 
 
 @bp.route("/users/save", methods=["POST"])
@@ -99,18 +103,38 @@ def save_user():
     db = get_db()
     f = request.form
     uid = f.get("id")
-    if f.get("role") not in ("admin", "accountant", "viewer"):
-        raise ValueError("Invalid role.")
     if uid:
-        db.execute("UPDATE users SET full_name=?, role=?, active=? WHERE id=?",
-                   (f.get("full_name"), f["role"], 1 if f.get("active") else 0, uid))
+        role = f.get("role")
+        if role not in ("admin", "accountant", "viewer"):
+            raise ValueError("Invalid user type.")
+        active = 1 if f.get("active") else 0
+        # Never lock everyone out: keep at least one active administrator.
+        if role != "admin" or not active:
+            others = db.execute("SELECT COUNT(*) n FROM users WHERE role='admin' AND active=1 AND id<>?", (uid,)).fetchone()["n"]
+            if not others:
+                raise ValueError("Keep at least one active administrator, or nobody could manage users.")
+        levels = perms.parse_form(f)
+        db.execute("UPDATE users SET full_name=?, role=?, active=?, perms=? WHERE id=?",
+                   (f.get("full_name"), role, active, None if role == "admin" else json.dumps(levels), uid))
         if f.get("password"):
             db.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(f["password"]), uid))
+        name = db.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()["username"]
+        audit(db, "save_user", f"{name}: {role}" + ("" if role == "admin" else " " + ", ".join(f"{a}={v}" for a, v in levels.items())))
     else:
         if not f.get("username") or not f.get("password"):
             raise ValueError("Username and password are required.")
-        db.execute("INSERT INTO users (username, password_hash, full_name, role) VALUES (?,?,?,?)",
-                   (f["username"].strip(), generate_password_hash(f["password"]), f.get("full_name"), f["role"]))
-    audit(db, "save_user", f.get("username") or uid)
+        preset = f.get("preset") or ("role:" + f["role"] if f.get("role") else "readonly")
+        if preset.startswith("role:") and preset[5:] in ("admin", "accountant", "viewer"):
+            role, levels = preset[5:], None  # older forms / scripts: a plain role
+        elif preset == "admin":
+            role, levels = "admin", None
+        elif preset in perms.PRESETS:
+            role, levels = "accountant", perms.PRESETS[preset][1]
+        else:
+            raise ValueError("Choose what the new user can access.")
+        db.execute("INSERT INTO users (username, password_hash, full_name, role, perms) VALUES (?,?,?,?,?)",
+                   (f["username"].strip(), generate_password_hash(f["password"]), f.get("full_name"), role,
+                    json.dumps(levels) if levels else None))
+        audit(db, "add_user", f"{f['username'].strip()}: {preset}")
     flash("User saved.", "ok")
     return redirect(url_for("auth.users"))

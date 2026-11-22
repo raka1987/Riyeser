@@ -12,6 +12,6 @@
 {% else %}<td>{{ account_select('account_id', accounts)|replace('<select', '<select form="f' ~ r.id ~ '" required') }}</td><td>{{ tax_select('tax_code_id', tax_codes)|replace('<select', '<select form="f' ~ r.id ~ '"') }}</td>
 <td style="white-space:nowrap"><form id="f{{ r.id }}" method="post" class="inline" action="{{ url_for('banking.allocate', fid=r.id) }}"><button class="btn sm pri">Allocate</button></form>
 <a class="btn sm" href="{{ url_for('banking.money', kind='receive' if r.amount > 0 else 'spend', feed=r.id, account=aid, date=r.date, payee=r.description) }}">Split…</a>
-<form method="post" class="inline" action="{{ url_for('banking.feed_delete', fid=r.id) }}"><button class="btn sm danger">✕</button></form></td>{% endif %}</tr>
+{% if lv('banking') >= 3 %}<form method="post" class="inline" action="{{ url_for('banking.feed_delete', fid=r.id) }}"><button class="btn sm danger">✕</button></form>{% endif %}</td>{% endif %}</tr>
 {% else %}<tr><td colspan="6" class="muted">No statement lines.</td></tr>{% endfor %}</table></div>
 {% endblock %}

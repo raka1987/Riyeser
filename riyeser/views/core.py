@@ -1,9 +1,10 @@
 """Dashboard, setup, chart of accounts, general journal, transaction search, audit."""
-from flask import Blueprint, render_template, request, redirect, url_for, flash, g
+from flask import Blueprint, render_template, request, redirect, url_for, flash, g, abort
 
 from ..db import get_db, audit, to_cents, linked
 from ..ledger import general_journal, reverse_entry, balances, fy_start, PostingError
 from . import lookups, opt_int, form_lines, guarded, admin_only
+from ..perms import can, PAYROLL_SOURCES
 
 bp = Blueprint("core", __name__)
 
@@ -11,6 +12,12 @@ SOURCE_LINKS = {"invoice": "documents.view", "bill": "documents.view"}
 
 
 # ------------------------------------------------------------------ dashboard
+
+def _hide_payroll_sql():
+    """Wages entries are left out for users who can't see payroll."""
+    return "" if can("payroll") else " AND e.source_type NOT IN ('payrun','payroll_import')"
+
+
 @bp.route("/")
 def dashboard():
     db = get_db()
@@ -40,7 +47,7 @@ def dashboard():
         " SUM(CASE WHEN a.type IN ('cost_of_sales','expense','other_expense') THEN l.debit-l.credit ELSE 0 END) exp"
         " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id JOIN accounts a ON a.id=l.account_id"
         " WHERE e.date <= ? GROUP BY m ORDER BY m DESC LIMIT 6", (today,)).fetchall()[::-1]
-    recent = db.execute("SELECT * FROM journal_entries ORDER BY id DESC LIMIT 8").fetchall()
+    recent = db.execute("SELECT * FROM journal_entries e WHERE 1=1" + _hide_payroll_sql() + " ORDER BY id DESC LIMIT 8").fetchall()
     return render_template("core/dashboard.html", banks=banks, income=income, expenses=expenses, ar=ar, ap=ap,
                            overdue=overdue, bills_due=bills_due, low_stock=low_stock, months=months,
                            recent=recent, fy_start=start, today=today)
@@ -96,7 +103,7 @@ def account_ledger(aid):
                          " ON e.id=l.entry_id WHERE l.account_id=? AND e.date<?", (aid, start)).fetchone()["b"]
     rows = db.execute("SELECT l.*, e.date, e.memo emo, e.reference, e.source_type, e.source_id, e.id eid"
                       " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
-                      " WHERE l.account_id=? AND e.date BETWEEN ? AND ? ORDER BY e.date, e.id",
+                      " WHERE l.account_id=? AND e.date BETWEEN ? AND ?" + _hide_payroll_sql() + " ORDER BY e.date, e.id",
                       (aid, start, end)).fetchall()
     return render_template("core/account_ledger.html", acct=acct, rows=rows, opening=opening, start=start, end=end)
 
@@ -107,7 +114,7 @@ def journal_list():
     db = get_db()
     q = request.args.get("q", "").strip()
     src = request.args.get("source", "")
-    sql = "SELECT e.*, (SELECT SUM(debit) FROM journal_lines WHERE entry_id=e.id) amt FROM journal_entries e WHERE 1=1"
+    sql = "SELECT e.*, (SELECT SUM(debit) FROM journal_lines WHERE entry_id=e.id) amt FROM journal_entries e WHERE 1=1" + _hide_payroll_sql()
     p = []
     if q:
         sql += " AND (e.memo LIKE ? OR e.reference LIKE ? OR e.id = ?)"
@@ -152,6 +159,8 @@ def entry(eid):
     lines = db.execute("SELECT l.*, a.code, a.name, t.code tcode, j.code jcode FROM journal_lines l"
                        " JOIN accounts a ON a.id=l.account_id LEFT JOIN tax_codes t ON t.id=l.tax_code_id"
                        " LEFT JOIN jobs j ON j.id=l.job_id WHERE l.entry_id=? ORDER BY l.id", (eid,)).fetchall()
+    if e and e["source_type"] in PAYROLL_SOURCES and not can("payroll"):
+        abort(403)
     reversal = db.execute("SELECT id FROM journal_entries WHERE reverses_id=?", (eid,)).fetchone()
     return render_template("core/entry.html", e=e, lines=lines, reversal=reversal)
 

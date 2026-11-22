@@ -11,6 +11,6 @@
 {% for r in rows %}<tr class="{{ 'muted' if r.voided }}"><td>{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a></td><td>{{ r.cname }}</td><td>{{ methods[r.method] }}</td>
 <td class="n">{{ r.total|money }}</td><td style="white-space:nowrap">{% if r.voided %}<span class="badge void">void</span>{% else %}
 <a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" target="_blank">Receipt</a>
-<form method="post" class="inline" action="{{ url_for('pos.void', sid=r.id) }}" data-confirm="Void {{ r.number }}? Stock goes back and the takings are reversed."><button class="btn sm danger">Void</button></form>{% endif %}</td></tr>
+{% if lv('sales') >= 3 %}<form method="post" class="inline" action="{{ url_for('pos.void', sid=r.id) }}" data-confirm="Void {{ r.number }}? Stock goes back and the takings are reversed."><button class="btn sm danger">Void</button></form>{% endif %}{% endif %}</td></tr>
 {% else %}<tr><td colspan="6" class="muted">No POS sales on this day.</td></tr>{% endfor %}</table></div>
 {% endblock %}
