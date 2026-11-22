@@ -678,7 +678,7 @@ Object.assign(pages, {
     const dupes = plan?.dupes || [];
     const nChange = dupeChangeCount(dupes);
     page.innerHTML = `<h1>Sort by type</h1>
-      <p class="sub">Puts every file into <b>Organised › Type › Year</b> — e.g. <b>Invoices › 2026</b>, <b>Drawings › 2026</b>, <b>Payroll › 2026</b>, <b>Pictures › 2024</b> — including files already in Organised from earlier layouts. Program folders (Payroll's own Riyser folder, Outlook, accounting files…) are left alone. You see everything before it moves, and it can all be undone in <a href="#restore">Where are my files?</a></p>
+      <p class="sub">Puts every file into <b>Organised › Type › Year</b> — e.g. <b>Invoices › 2026</b>, <b>Drawings › 2026</b>, <b>Payroll › 2026</b>, <b>Pictures › 2024</b> — including files already in Organised from earlier layouts. Program folders (Payroll's own data folder, Outlook, accounting files…) are left alone. You see everything before it moves, and it can all be undone in <a href="#restore">Where are my files?</a></p>
       <div class="card"><h2>Folders to sort</h2>
         <div class="chips">${(sorter.pool || []).map((f, i) => `<span class="chip" title="${esc(f)}">📁 ${esc(nm(f))}<button data-act="sadel" data-i="${i}" title="Remove">×</button></span>`).join('') || '<span class="muted small">None — add a folder</span>'}</div>
         <button style="margin-top:8px" data-act="saadd">+ Add folder</button>

@@ -593,7 +593,7 @@ test('Riyeser Central update check: compares installed versions with the latest 
   const release = {
     tag_name: 'riyser-2026.11.22-1', name: 'Riyeser for Windows', published_at: '2026-11-22T11:20:00Z',
     body: '### In this release\n- Riyeser Central 1.2.0\n- Riyeser Desk Assistant 0.22.0\n- Riyeser PDF 0.23.0\n- Riyeser Accounting 1.0.0\n',
-    assets: ['RiyserCentral-Setup.exe', 'RiyeserDeskAssistant-Setup.exe', 'RiyserPDF-Setup.exe', 'RiyeserAccounting-Setup.exe']
+    assets: ['RiyeserCentral-Setup.exe', 'RiyeserDeskAssistant-Setup.exe', 'RiyeserPDF-Setup.exe', 'RiyeserAccounting-Setup.exe']
       .map((n) => ({ name: n, size: 10, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/riyser-2026.11.22-1/${n}` })),
   };
   const latest = u.latestFromRelease(release);
@@ -610,6 +610,9 @@ test('Riyeser Central update check: compares installed versions with the latest 
   assert.deepEqual(installed, { pdf: '0.22.0', desk: '0.22.0', central: '1.1.0' });
   const ups = u.availableUpdates(installed, latest);
   assert.deepEqual(ups.map((x) => `${x.id} ${x.from}->${x.to}`), ['central 1.1.0->1.2.0', 'pdf 0.22.0->0.23.0']); // not Accounting: not installed
+  // a release that still uses the old Riyser file names is understood too
+  const oldNames = u.latestFromRelease({ ...release, assets: release.assets.map((a) => ({ ...a, name: a.name.replace('RiyeserCentral', 'RiyserCentral').replace('RiyeserPDF', 'RiyserPDF') })) });
+  assert.equal(oldNames.products.central.version, '1.2.0'); assert.equal(oldNames.products.pdf.version, '0.23.0');
   // downloads only from the Riyeser release
   const evil = u.latestFromRelease({ ...release, assets: release.assets.map((a) => ({ ...a, browser_download_url: 'https://evil.example/x.exe' })) });
   assert.deepEqual(evil.products, {});

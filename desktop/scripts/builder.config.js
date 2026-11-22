@@ -9,8 +9,8 @@ const APPS = {
   assistant: { name: 'Riyeser Desk Assistant', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDeskAssistant' },
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
-  central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyserCentral',
-    extraMetadata: { main: 'src/central-main.js', name: 'riyser-central', version: '1.2.0', productName: 'Riyeser Central' } },
+  central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
+    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.2.0', productName: 'Riyeser Central' } },
 };
 const a = APPS[which];
 

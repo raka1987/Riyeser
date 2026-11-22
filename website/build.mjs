@@ -18,7 +18,7 @@ const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'conten
 const SERVICES_APP = process.env.SERVICES_APP || 'https://riyeser.com';
 
 const PROGRAMS = [
-  { id: 'central', name: 'Riyeser Central', short: 'Central', icon: 'R', file: 'RiyserCentral-Setup.exe',
+  { id: 'central', name: 'Riyeser Central', short: 'Central', icon: 'R', file: 'RiyeserCentral-Setup.exe',
     one: 'The home screen for your business: money owed, today\'s meetings, to-dos and recent files — and every Riyeser program one click away.',
     pitch: 'Start your day knowing exactly what needs doing.',
     shot: 'central-light.webp', shot2: 'central-dark.webp',
@@ -68,7 +68,7 @@ const PROGRAMS = [
       ['Meetings & to-dos', 'Connect your calendar; action items from meeting notes land on your to-do list.'],
     ],
     note: 'Desk Assistant never touches Windows or program files — only your own documents.' },
-  { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyserPDF-Setup.exe',
+  { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyeserPDF-Setup.exe',
     one: 'Open, fill in, sign, combine and edit PDFs — even scanned ones.',
     pitch: 'Drawings and forms, done on the PC.',
     shot: 'pdf.webp',

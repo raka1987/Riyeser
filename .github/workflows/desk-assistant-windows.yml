@@ -38,7 +38,7 @@ jobs:
           foreach ($app in @(
               @{ setup = "dist\RiyeserDeskAssistant-Setup-*.exe"; exe = "Riyeser Desk Assistant.exe"; name = "Riyeser Desk Assistant*" },
               @{ setup = "dist-pdf\RiyeserPDF-Setup-*.exe"; exe = "Riyeser PDF.exe"; name = "Riyeser PDF*" },
-              @{ setup = "dist-central\RiyserCentral-Setup-*.exe"; exe = "Riyeser Central.exe"; name = "Riyeser Central*" })) {
+              @{ setup = "dist-central\RiyeserCentral-Setup-*.exe"; exe = "Riyeser Central.exe"; name = "Riyeser Central*" })) {
             $setup = Get-ChildItem $app.setup | Select-Object -First 1
             Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
             $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter $app.exe | Select-Object -First 1
@@ -65,5 +65,5 @@ jobs:
           path: |
             desktop/dist/RiyeserDeskAssistant-Setup-*.exe
             desktop/dist-pdf/RiyeserPDF-Setup-*.exe
-            desktop/dist-central/RiyserCentral-Setup-*.exe
+            desktop/dist-central/RiyeserCentral-Setup-*.exe
           if-no-files-found: error

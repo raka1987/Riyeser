@@ -13,7 +13,13 @@ const { upcomingMeetings } = require('./core/calendar');
 const sources = require('./central/sources');
 
 app.setName('Riyeser Central');
-app.setPath('userData', path.join(app.getPath('appData'), 'Riyser Central'));
+// Central's data folder. Versions before 1.2 used "Riyser Central": move it across once so nothing is lost.
+{
+  const dataNew = path.join(app.getPath('appData'), 'Riyeser Central');
+  const dataOld = path.join(app.getPath('appData'), 'Riyser Central');
+  try { if (!fs.existsSync(dataNew) && fs.existsSync(dataOld)) fs.renameSync(dataOld, dataNew); } catch { /* keep going with a fresh folder */ }
+  app.setPath('userData', dataNew);
+}
 if (!app.requestSingleInstanceLock()) { app.quit(); }
 
 let win = null; let store = null;
@@ -25,7 +31,7 @@ const PROGRAMS = [
   { id: 'accounting', name: 'Accounting', full: 'Riyeser Accounting', icon: '📒', desc: 'Invoices, bills, banking, GST/BAS and reports.',
     dirs: ['Riyeser Accounting'], exes: ['Riyeser Accounting.exe'], links: ['Riyeser Accounting'] },
   { id: 'payroll', name: 'Payroll', full: 'Riyeser Payroll', icon: '🕒', desc: 'Time clock, timesheets, pay runs, payslips and leave.',
-    dirs: ['riyser', 'Riyser'], exes: ['Riyser.exe'], links: ['Riyser'] },
+    dirs: ['riyeser', 'Riyeser', 'riyser', 'Riyser'], exes: ['Riyeser.exe', 'Riyser.exe'], links: ['Riyeser', 'Riyser'] }, // the hub's older builds are called Riyser
   { id: 'desk', name: 'Desk Assistant', full: 'Riyeser Desk Assistant', icon: '🗂', desc: 'Sort files by type, find anything, meetings and to-dos.',
     dirs: ['desk-assistant'], exes: ['Riyeser Desk Assistant.exe', 'Desk Assistant.exe'], links: ['Riyeser Desk Assistant', 'Desk Assistant'] },
   { id: 'pdf', name: 'PDF', full: 'Riyeser PDF', icon: '📕', desc: 'Open, fill in, sign, combine and edit PDFs.',

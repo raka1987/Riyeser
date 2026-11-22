@@ -5,9 +5,9 @@ const ALLOWED_DOWNLOAD = /^https:\/\/(github\.com\/raka1987\/Riyeser\/releases\/
 
 // Each program: its name in Windows' installed-apps list, the release file, and how to install it silently.
 const PRODUCTS = [
-  { id: 'central', display: 'Riyeser Central', also: ['Riyser Central'], asset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
+  { id: 'central', display: 'Riyeser Central', also: ['Riyser Central'], asset: 'RiyeserCentral-Setup.exe', oldAsset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
   { id: 'desk', display: 'Riyeser Desk Assistant', asset: 'RiyeserDeskAssistant-Setup.exe', args: ['/S'] },
-  { id: 'pdf', display: 'Riyeser PDF', asset: 'RiyserPDF-Setup.exe', args: ['/S'] },
+  { id: 'pdf', display: 'Riyeser PDF', asset: 'RiyeserPDF-Setup.exe', oldAsset: 'RiyserPDF-Setup.exe', args: ['/S'] },
   { id: 'accounting', display: 'Riyeser Accounting', asset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
 ];
 
@@ -23,7 +23,7 @@ function newer(a, b) {
 function latestFromRelease(release, versionsJson = null) {
   const out = {};
   for (const p of PRODUCTS) {
-    const asset = (release.assets || []).find((a) => a.name === p.asset);
+    const asset = (release.assets || []).find((a) => a.name === p.asset) || (release.assets || []).find((a) => p.oldAsset && a.name === p.oldAsset);
     let version = versionsJson && versionsJson[p.id];
     if (!version) {
       const names = [p.display, ...(p.also || [])].map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
