@@ -48,7 +48,7 @@ When a pay run is finalised, Riyeser Payroll writes one UTF-8 JSON file to `Docu
 | Super / contribution payable | | employer_contribution |
 | Bank account the user picks on import | | net |
 
-The accounts come from **Setup → Company → Linked accounts**: wages, super expense, PAYG payable and super payable.
+The accounts come from **Setup → Company → Default accounts**: wages, super expense, PAYG payable and super payable.
 
 ## Accounting → Desk Assistant: PDFs
 

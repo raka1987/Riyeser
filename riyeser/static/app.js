@@ -5,6 +5,16 @@
   const num = v => { const n = parseFloat(String(v || "").replace(/[,$]/g, "")); return isNaN(n) ? 0 : n; };
   const money = n => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  // sidebar sections: remember which are open; close the top-bar menus on an outside click
+  try {
+    const saved = JSON.parse(localStorage.getItem("riyeser.nav") || "{}");
+    $$(".nav-sec").forEach(d => {
+      if (!d.hasAttribute("data-active") && saved[d.dataset.sec] !== undefined) d.open = saved[d.dataset.sec];
+      d.addEventListener("toggle", () => { saved[d.dataset.sec] = d.open; try { localStorage.setItem("riyeser.nav", JSON.stringify(saved)); } catch (e) {} });
+    });
+  } catch (e) {}
+  document.addEventListener("click", e => { $$(".top details[open]").forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
+
   // clickable rows
   document.addEventListener("click", e => {
     const tr = e.target.closest("tr[data-href]");

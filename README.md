@@ -53,13 +53,13 @@ The builds are unsigned. Windows SmartScreen will warn ("More info → Run anywa
 **Accounts**
 * Chart of accounts numbered by type (1- Assets … 9- Other Expenses), with opening balances.
 * General journal checks that each entry balances.
-* Find Transactions, plus a register and drill-down for every account.
+* Search Transactions, plus a register and drill-down for every account.
 * Reversing entries. Posted entries are never deleted, so the audit trail stays intact.
 * Period lock date.
 * Linked (control) accounts.
 
 **Banking**
-* Spend Money / Receive Money with split allocations. GST can be inclusive or exclusive.
+* Money Out / Money In with split allocations. GST can be inclusive or exclusive.
 * Transfer Money.
 * Bank reconciliation with a live out-of-balance display and undo.
 * Bank statement CSV import. Each line can be allocated in one click or split.
@@ -73,7 +73,7 @@ The builds are unsigned. Windows SmartScreen will warn ("More info → Run anywa
 
 **Purchases**
 * Quotes, purchase orders and bills, plus Pay Bills.
-* Supplier card file.
+* Supplier contacts.
 
 **Inventory**
 * Stock items with moving average cost.

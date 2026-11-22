@@ -1,6 +1,6 @@
 """Core double-entry posting engine and business transactions.
 
-Every business event (invoice, bill, payment, spend money, pay run, stock
+Every business event (invoice, bill, payment, money out, pay run, stock
 adjustment...) is turned into a balanced journal entry here.  Reports read
 only from journal_lines, so the books always reconcile.
 """
@@ -358,7 +358,7 @@ def void_payment(db, payment_id):
 # ==================================================================== banking
 def bank_transaction(db, kind, bank_account_id, date, lines, payee=None, reference=None, memo=None,
                      contact_id=None, tax_inclusive=True):
-    """Spend money (kind='spend') or receive money (kind='receive').
+    """Money out (kind='spend') or money in (kind='receive').
     lines: list of dicts account_id, amount (cents), tax_code_id, job_id, memo."""
     jl = []
     total = 0

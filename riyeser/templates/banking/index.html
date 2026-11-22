@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Banking{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Banking</h1></div>
-<div class="actions"><a class="btn pri" href="{{ url_for('banking.money', kind='spend') }}">Spend money</a><a class="btn" href="{{ url_for('banking.money', kind='receive') }}">Receive money</a>
+<div class="actions"><a class="btn pri" href="{{ url_for('banking.money', kind='spend') }}">Money out</a><a class="btn" href="{{ url_for('banking.money', kind='receive') }}">Money in</a>
 <a class="btn" href="{{ url_for('banking.transfer_money') }}">Transfer</a><a class="btn" href="{{ url_for('banking.reconcile') }}">Reconcile</a><a class="btn" href="{{ url_for('banking.feed') }}">Import statement</a></div></div>
 <div class="grid g3">{% for a in banks %}{% set b = bal.get(a.id, 0) %}
 <div class="card kpi"><div class="lbl">{{ a.code }} {{ a.name }}</div><div class="val {{ 'neg' if b < 0 }}">{{ b|money }}</div>

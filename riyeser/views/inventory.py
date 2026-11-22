@@ -1,4 +1,4 @@
-"""Inventory: items list, item maintenance, stock adjustments, movements."""
+"""Inventory: stock items, item maintenance, stock adjustments, movements."""
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 
 from ..db import get_db, to_cents, audit, linked

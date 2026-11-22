@@ -64,7 +64,7 @@ def close_db(_e=None):
 def linked(db, key) -> int:
     row = db.execute("SELECT account_id FROM linked_accounts WHERE key=?", (key,)).fetchone()
     if not row:
-        raise ValueError(f"Linked account '{key}' is not configured")
+        raise ValueError(f"Default account '{key}' is not configured")
     return row["account_id"]
 
 

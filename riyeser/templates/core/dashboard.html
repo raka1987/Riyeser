@@ -1,11 +1,11 @@
 {% extends "base.html" %}{% block title %}Dashboard{% endblock %}
 {% from "_macros.html" import status %}
 {% block content %}
-<div class="head"><div><h1>Dashboard</h1><p class="sub">Financial year from {{ fy_start }} · as at {{ today }}</p></div>
+<div class="head"><div><div class="greet" id="greet">Welcome back</div><h1>Dashboard</h1><p class="sub">Financial year from {{ fy_start }} · as at {{ today }}</p></div>
 <div class="actions"><a class="btn pri" href="{{ url_for('documents.edit', side='sale') }}">+ Invoice</a>
 <a class="btn" href="{{ url_for('documents.edit', side='purchase') }}">+ Bill</a>
-<a class="btn" href="{{ url_for('banking.money', kind='spend') }}">Spend money</a>
-<a class="btn" href="{{ url_for('banking.money', kind='receive') }}">Receive money</a></div></div>
+<a class="btn" href="{{ url_for('banking.money', kind='spend') }}">Money out</a>
+<a class="btn" href="{{ url_for('banking.money', kind='receive') }}">Money in</a></div></div>
 <div class="grid g4">
   <div class="card kpi"><div class="lbl">Income YTD</div><div class="val">{{ income|money }}</div></div>
   <div class="card kpi"><div class="lbl">Expenses YTD</div><div class="val">{{ expenses|money }}</div></div>
@@ -42,3 +42,5 @@
 <div class="card"><h3>Recent transactions</h3><table>{% for e in recent %}
 <tr class="click" data-href="{{ url_for('core.entry', eid=e.id) }}"><td>#{{ e.id }}</td><td>{{ e.date }}</td><td><span class="badge">{{ e.source_type }}</span></td><td>{{ e.memo }}</td></tr>{% endfor %}</table></div>
 {% endblock %}
+
+{% block scripts %}<script>(function(){var h=new Date().getHours();document.getElementById("greet").textContent=h<12?"Good morning":h<17?"Good afternoon":"Good evening"})()</script>{% endblock %}

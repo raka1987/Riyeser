@@ -1,4 +1,4 @@
-"""Banking: spend/receive money, transfers, bank reconciliation, bank statement import."""
+"""Banking: money in and out, transfers, bank reconciliation, bank statement import."""
 import csv
 import io
 from datetime import date

@@ -1,6 +1,6 @@
 {% extends "base.html" %}{% block title %}Items{% endblock %}
 {% block content %}
-<div class="head"><div><h1>Items List</h1><p class="sub">Inventory value (average cost): <b>{{ value|money }}</b></p></div>
+<div class="head"><div><h1>Stock Items</h1><p class="sub">Inventory value (average cost): <b>{{ value|money }}</b></p></div>
 <div class="actions"><a class="btn pri" href="{{ url_for('inventory.edit') }}">+ New item</a><a class="btn" href="{{ url_for('inventory.count') }}">Stocktake</a>
 <a class="btn" href="{{ url_for('reports.show', name='inventory_valuation') }}">Valuation report</a></div></div>
 <form class="filters"><div><label>Search</label><input name="q" value="{{ q }}"></div><div><button class="btn">Search</button></div></form>

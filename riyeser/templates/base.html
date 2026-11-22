@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Riyeser Accounting{% endblock %} · Riyeser Group</title>
+<title>{% block title %}Riyeser Accounting{% endblock %} · Riyeser Accounting</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
@@ -11,70 +11,65 @@
 {% macro nav(endpoint, label) -%}
 <a href="{{ url_for(endpoint, **kwargs) }}" class="{{ 'on' if request.path == url_for(endpoint, **kwargs) }}">{{ label }}</a>
 {%- endmacro %}
+{% set ICONS = {
+  'home': '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  'pos': '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4"/>',
+  'sales': '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
+  'buy': '<path d="M3 4h2l2.4 11h11l2-8H6.2"/><circle cx="9" cy="20" r="1.4"/><circle cx="17" cy="20" r="1.4"/>',
+  'stock': '<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/>',
+  'bank': '<path d="M3 10h18M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18M12 3l9 5H3z"/>',
+  'books': '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h7"/>',
+  'pay': '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c.6-3.6 3-5.5 6-5.5s5.4 1.9 6 5.5M16 4.5a3 3 0 0 1 0 6M18 14.5c1.7.6 2.8 2.4 3 5.5"/>',
+  'reports': '<path d="M4 20V10M10 20V4M16 20v-7M21 20H3"/>',
+  'setup': '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+} %}
+{% macro icon(name) %}<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">{{ ICONS[name]|safe }}</svg>{% endmacro %}
+{% macro sec(name, title) -%}
+{% set links = caller() %}
+<details class="nav-sec" data-sec="{{ title }}"{% if 'class="on"' in links %} open data-active{% endif %}><summary>{{ icon(name) }}<span>{{ title }}</span></summary><div class="nav-links">{{ links }}</div></details>
+{%- endmacro %}
 <div class="layout">
-  <aside class="side">
+  <aside class="side" id="side">
     {% set basic = company and company.edition == 'basic' %}
-    <div class="brand"><div class="logo">R</div><div>Riyeser Group<small>Accounting {{ 'Basic' if basic else 'Enterprise' }}</small></div></div>
-    <div class="nav-sec">{{ nav('core.dashboard', 'Dashboard') }}</div>
-    <div class="nav-sec"><h4>Riyeser POS</h4>
-      {{ nav('pos.register', 'Open Register') }}{{ nav('pos.sales', "Today's Sales") }}</div>
+    <a class="brand" href="{{ url_for('core.dashboard') }}"><div class="logo">R</div><div>Riyeser Accounting<small>{{ 'Basic' if basic else 'Enterprise' }} · Riyeser Group</small></div></a>
+    <a class="home{{ ' on' if ep == 'core.dashboard' }}" href="{{ url_for('core.dashboard') }}">{{ icon('home') }}<span>Home</span></a>
+    {% call sec('pos', 'Shop counter') %}{{ nav('pos.register', 'Open register') }}{{ nav('pos.sales', "Today's sales") }}{% endcall %}
     {% if basic %}
-    <div class="nav-sec"><h4>Sales</h4>
-      {{ nav('documents.edit', 'New Invoice', side='sale') }}{{ nav('documents.edit', 'New Quote', side='sale', status='quote') }}
-      {{ nav('documents.index', 'Invoices', side='sale') }}{{ nav('documents.pay', 'Receive Payments', side='sale') }}
-      {{ nav('contacts.index', 'Customers', kind='customer') }}</div>
-    <div class="nav-sec"><h4>Stock</h4>
-      {{ nav('inventory.index', 'Stock Items') }}{{ nav('inventory.edit', 'New Item') }}
-      {{ nav('documents.edit', 'Receive Stock (Bill)', side='purchase') }}{{ nav('documents.pay', 'Pay Bills', side='purchase') }}
-      {{ nav('contacts.index', 'Suppliers', kind='supplier') }}{{ nav('inventory.count', 'Stocktake') }}</div>
-    <div class="nav-sec"><h4>Money</h4>
-      {{ nav('banking.index', 'Bank Accounts') }}{{ nav('banking.money', 'Spend Money', kind='spend') }}
-      {{ nav('banking.money', 'Receive Money', kind='receive') }}{{ nav('links.payroll', 'Import from Payroll') }}</div>
-    <div class="nav-sec"><h4>Reports</h4>
-      {{ nav('reports.index', 'All Reports') }}{{ nav('reports.show', 'Inventory Report', name='inventory_valuation') }}
-      {{ nav('reports.show', 'Sales by Item', name='sales_item') }}{{ nav('reports.show', 'Who Owes Me', name='aged_receivables') }}
-      {{ nav('reports.show', 'Profit & Loss', name='pnl') }}{{ nav('reports.show', 'GST Summary', name='gst') }}</div>
-    <div class="nav-sec"><h4>Setup</h4>
-      {{ nav('core.company', 'Company & Preferences') }}{{ nav('core.accounts', 'Accounts List') }}
-      {% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & Roles') }}{% endif %}
-      {{ nav('core.audit_log', 'Audit Trail') }}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support Diagnostics') }}</div>
+    {% call sec('sales', 'Sales') %}{{ nav('documents.edit', 'New invoice', side='sale') }}{{ nav('documents.edit', 'New quote', side='sale', status='quote') }}{{ nav('documents.index', 'All invoices', side='sale') }}{{ nav('documents.pay', 'Receive payments', side='sale') }}{{ nav('contacts.index', 'Customers', kind='customer') }}{% endcall %}
+    {% call sec('stock', 'Stock') %}{{ nav('inventory.index', 'Stock items') }}{{ nav('inventory.edit', 'New item') }}{{ nav('documents.edit', 'Receive stock (bill)', side='purchase') }}{{ nav('documents.pay', 'Pay bills', side='purchase') }}{{ nav('contacts.index', 'Suppliers', kind='supplier') }}{{ nav('inventory.count', 'Stocktake') }}{% endcall %}
+    {% call sec('bank', 'Money') %}{{ nav('banking.index', 'Bank accounts') }}{{ nav('banking.money', 'Money out', kind='spend') }}{{ nav('banking.money', 'Money in', kind='receive') }}{{ nav('links.payroll', 'Import from Payroll') }}{% endcall %}
+    {% call sec('reports', 'Reports') %}{{ nav('reports.index', 'All reports') }}{{ nav('reports.show', 'Inventory report', name='inventory_valuation') }}{{ nav('reports.show', 'Sales by item', name='sales_item') }}{{ nav('reports.show', 'Who owes me', name='aged_receivables') }}{{ nav('reports.show', 'Profit & loss', name='pnl') }}{{ nav('reports.show', 'GST summary', name='gst') }}{% endcall %}
+    {% call sec('setup', 'Setup') %}{{ nav('core.company', 'Company & preferences') }}{{ nav('core.accounts', 'Chart of accounts') }}{% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & roles') }}{% endif %}{{ nav('core.audit_log', 'Audit trail') }}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support diagnostics') }}{% endcall %}
     {% else %}
-    <div class="nav-sec"><h4>Accounts</h4>
-      {{ nav('core.accounts', 'Chart of Accounts') }}{{ nav('core.journal_new', 'General Journal') }}
-      {{ nav('core.journal_list', 'Find Transactions') }}</div>
-    <div class="nav-sec"><h4>Banking</h4>
-      {{ nav('banking.index', 'Bank Accounts') }}{{ nav('banking.money', 'Spend Money', kind='spend') }}
-      {{ nav('banking.money', 'Receive Money', kind='receive') }}{{ nav('banking.transfer_money', 'Transfer Money') }}
-      {{ nav('banking.reconcile', 'Reconcile Accounts') }}{{ nav('banking.feed', 'Bank Statement Import') }}
-      {{ nav('links.payroll', 'Import from Riyeser Payroll') }}</div>
-    <div class="nav-sec"><h4>Sales</h4>
-      {{ nav('documents.edit', 'New Invoice', side='sale') }}{{ nav('documents.index', 'Sales Register', side='sale') }}
-      {{ nav('documents.pay', 'Receive Payments', side='sale') }}{{ nav('contacts.index', 'Customers', kind='customer') }}</div>
-    <div class="nav-sec"><h4>Purchases</h4>
-      {{ nav('documents.edit', 'Enter Bill', side='purchase') }}{{ nav('documents.index', 'Purchases Register', side='purchase') }}
-      {{ nav('documents.pay', 'Pay Bills', side='purchase') }}{{ nav('contacts.index', 'Suppliers', kind='supplier') }}</div>
-    <div class="nav-sec"><h4>Inventory</h4>
-      {{ nav('inventory.index', 'Items List') }}{{ nav('inventory.count', 'Stocktake') }}</div>
-    <div class="nav-sec"><h4>Payroll</h4>
-      {{ nav('payroll.index', 'Employees & Pay Runs') }}{{ nav('payroll.run', 'Process Payroll') }}</div>
-    <div class="nav-sec"><h4>Reports</h4>
-      {{ nav('reports.index', 'All Reports') }}{{ nav('reports.show', 'Profit & Loss', name='pnl') }}
-      {{ nav('reports.show', 'Balance Sheet', name='balance_sheet') }}{{ nav('reports.show', 'BAS / GST', name='gst') }}</div>
-    <div class="nav-sec"><h4>Setup</h4>
-      {{ nav('core.company', 'Company & Linked Accounts') }}{{ nav('core.tax_codes', 'Tax Codes') }}
-      {{ nav('core.jobs', 'Jobs') }}{{ nav('core.budgets', 'Budgets') }}
-      {% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & Roles') }}{% endif %}
-      {{ nav('core.audit_log', 'Audit Trail') }}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support Diagnostics') }}</div>
+    {% call sec('sales', 'Sales') %}{{ nav('documents.edit', 'New invoice', side='sale') }}{{ nav('documents.index', 'All invoices', side='sale') }}{{ nav('documents.pay', 'Receive payments', side='sale') }}{{ nav('contacts.index', 'Customers', kind='customer') }}{% endcall %}
+    {% call sec('buy', 'Purchases') %}{{ nav('documents.edit', 'Enter bill', side='purchase') }}{{ nav('documents.index', 'All bills', side='purchase') }}{{ nav('documents.pay', 'Pay bills', side='purchase') }}{{ nav('contacts.index', 'Suppliers', kind='supplier') }}{% endcall %}
+    {% call sec('bank', 'Banking') %}{{ nav('banking.index', 'Bank accounts') }}{{ nav('banking.money', 'Money out', kind='spend') }}{{ nav('banking.money', 'Money in', kind='receive') }}{{ nav('banking.transfer_money', 'Transfer money') }}{{ nav('banking.reconcile', 'Reconcile accounts') }}{{ nav('banking.feed', 'Bank statement import') }}{{ nav('links.payroll', 'Import from Riyeser Payroll') }}{% endcall %}
+    {% call sec('stock', 'Stock') %}{{ nav('inventory.index', 'Stock items') }}{{ nav('inventory.count', 'Stocktake') }}{% endcall %}
+    {% call sec('pay', 'Payroll') %}{{ nav('payroll.index', 'Employees & pay runs') }}{{ nav('payroll.run', 'Run payroll') }}{% endcall %}
+    {% call sec('books', 'Accounts') %}{{ nav('core.accounts', 'Chart of accounts') }}{{ nav('core.journal_new', 'General journal') }}{{ nav('core.journal_list', 'Search transactions') }}{% endcall %}
+    {% call sec('reports', 'Reports') %}{{ nav('reports.index', 'All reports') }}{{ nav('reports.show', 'Profit & loss', name='pnl') }}{{ nav('reports.show', 'Balance sheet', name='balance_sheet') }}{{ nav('reports.show', 'BAS / GST', name='gst') }}{% endcall %}
+    {% call sec('setup', 'Setup') %}{{ nav('core.company', 'Company & default accounts') }}{{ nav('core.tax_codes', 'Tax codes') }}{{ nav('core.jobs', 'Jobs') }}{{ nav('core.budgets', 'Budgets') }}{% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & roles') }}{% endif %}{{ nav('core.audit_log', 'Audit trail') }}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support diagnostics') }}{% endcall %}
     {% endif %}
   </aside>
   <div class="main">
-    <div class="top">
-      <div class="co">{{ company.name if company }}<small>{% if company and company.lock_date %}Locked to {{ company.lock_date }}{% endif %}</small></div>
-      <div class="who"><a href="{{ url_for('help.index') }}#{{ help_section(request.endpoint) }}">Help</a> · {{ user.full_name or user.username }} · {{ user.role|title }} · <a href="{{ url_for('auth.logout') }}">Sign out</a></div>
-    </div>
+    <header class="top">
+      <button class="menu-btn" type="button" aria-label="Menu" onclick="document.body.classList.toggle('side-open')">☰</button>
+      <div class="co">{{ company.name if company }}{% if company and company.lock_date %}<small>Locked to {{ company.lock_date }}</small>{% endif %}</div>
+      {% if not basic %}<form class="tsearch" action="{{ url_for('core.journal_list') }}" method="get" role="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><input name="q" placeholder="Search transactions…" aria-label="Search transactions" value="{{ request.args.get('q', '') if ep == 'core.journal_list' }}"></form>{% endif %}
+      <details class="newmenu"><summary class="btn pri">+ New</summary><div class="dd">
+        <a href="{{ url_for('documents.edit', side='sale') }}">Invoice</a><a href="{{ url_for('documents.edit', side='sale', status='quote') }}">Quote</a>
+        <a href="{{ url_for('documents.edit', side='purchase') }}">Bill</a><a href="{{ url_for('banking.money', kind='spend') }}">Money out</a>
+        <a href="{{ url_for('banking.money', kind='receive') }}">Money in</a><a href="{{ url_for('contacts.edit', kind='customer') }}">Customer</a>
+        <a href="{{ url_for('contacts.edit', kind='supplier') }}">Supplier</a></div></details>
+      <a class="tlink" href="{{ url_for('help.index') }}#{{ help_section(request.endpoint) }}">Help</a>
+      <details class="usermenu"><summary><span class="av">{{ ((user.full_name or user.username) or '?')[:1]|upper }}</span></summary><div class="dd">
+        <div class="who"><b>{{ user.full_name or user.username }}</b><small>{{ user.role|title }}</small></div>
+        <a href="{{ url_for('auth.logout') }}">Sign out</a></div></details>
+    </header>
     <div class="content">{{ flashes() }}{% block content %}{% endblock %}</div>
   </div>
 </div>
+<div class="scrim" onclick="document.body.classList.remove('side-open')"></div>
 {% block scripts %}{% endblock %}
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
