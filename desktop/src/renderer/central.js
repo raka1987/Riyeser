@@ -113,7 +113,7 @@ function renderUpdates() {
   box.hidden = false;
   if (updating) return; // progress is drawn by the update-progress events
   box.innerHTML = `<div style="font-size:24px">⬆</div><div class="grow"><b>${list.length === 1 ? 'An update is ready' : `${list.length} updates are ready`}</b>
-    <div class="lbl">${list.map((u) => `${esc(u.name)} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}</div></div>
+    <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app — it has no tile)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}</div></div>
     <button class="go" id="updall">Update ${list.length === 1 ? '' : 'all'}</button>`;
   $('#updall').addEventListener('click', () => safe(async () => {
     updating = true;
