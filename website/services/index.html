@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<title>Riyeser</title>
+<meta name="description" content="Riyeser maps every building service on your PDF drawings, builds schematics and as-built drawings as you go, and keeps photos, test results and QA reports on each item. Owned by RL Group of Companies.">
+<meta name="theme-color" content="#172326">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Riyeser">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/img/logo-128.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/site.css">
+</head>
+<body>
+<main class="screen lp lp2" id="login" hidden>
+<header class="w-head">
+  <div class="w-wrap w-head-in">
+    <a class="w-brand" href="/" aria-label="Riyeser home"><img class="w-logo" src="/img/logo.png" width="34" height="34" alt=""><span>Riyeser</span></a>
+    <nav class="w-nav" aria-label="Main">
+      <button type="button" data-lp="how">How it works</button>
+      <button type="button" data-lp="trades">Trades</button>
+      <a href="/software/">Software</a> <a href="/faq.html">FAQ</a>
+      <a href="/help.html">Help</a>
+      <a class="w-nav-demo" href="/?demo">Try the demo</a>
+      <button type="button" class="w-btn w-btn-ink" data-lp="signin">Sign in</button>
+    </nav>
+  </div>
+</header>
+
+<section class="w-hero">
+  <div class="w-wrap w-hero-in">
+    <div class="w-hero-copy">
+      <h1>Map every service while the building goes up</h1>
+      <p class="w-lede">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
+      <div class="w-cta">
+        <a href="/?demo" class="w-btn w-btn-hv lp-try">Try it now, free</a>
+        <button type="button" class="w-btn w-btn-line" data-lp="signin">Sign in to your projects</button>
+      </div>
+      <p class="w-fine">No sign-up for the demo. Explore a marked-up resort with a guided tour.</p>
+    </div>
+    <div class="w-hero-art">
+      <svg class="w-build" viewBox="0 0 640 560" role="img" aria-label="A tower crane building one building after another, with coloured services drawn through each floor">
+        <defs><pattern id="w-grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#1737C4" stroke-opacity=".07"/></pattern></defs>
+        <rect width="640" height="560" fill="url(#w-grid)"/>
+        <!-- crane: hero.js moves the trolley and hook -->
+        <g class="b-crane" stroke="#16223B" stroke-width="3" fill="none">
+          <path d="M470 520V70M488 520V70"/><path d="M470 520L488 500M470 480L488 460M470 440L488 420M470 400L488 380M470 360L488 340M470 320L488 300M470 280L488 260M470 240L488 220M470 200L488 180M470 160L488 140M470 120L488 100"/>
+          <path d="M60 70H620M60 86H600M60 70L479 40L620 70M90 86L110 70M140 86L160 70M190 86L210 70M240 86L260 70M290 86L310 70M340 86L360 70M390 86L410 70M430 86L450 70M520 86L540 70M570 86L590 70"/>
+          <rect x="590" y="86" width="26" height="22" fill="#16223B"/><rect x="448" y="44" width="52" height="24" rx="3" fill="#FFC72C"/>
+          <g id="b-trolley"><rect x="348" y="84" width="24" height="8" fill="#16223B"/></g>
+          <path id="b-cable" d="M360 86V190"/>
+          <g id="b-hookg"><path d="M352 190h16l-8 12z" fill="#16223B"/><rect id="b-load" x="320" y="204" width="80" height="10" fill="#FFC72C" stroke="none"/></g>
+        </g>
+        <path d="M20 520H620" stroke="#16223B" stroke-width="3"/>
+        <g id="b-stage"></g>
+        <text id="b-label" x="24" y="548" font-family="IBM Plex Sans, sans-serif" font-size="14" font-weight="600" fill="#5B6478"></text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<section class="w-sec" id="lp-how">
+  <div class="w-wrap">
+    <h2>How it works</h2>
+    <ol class="w-steps">
+      <li><h3>Put your drawings in</h3><p>Upload PDF or image plans for each level, then set the scale with two taps.</p></li>
+      <li><h3>Mark up as it goes in</h3><p>Add outlets, boards, pits and racks. Draw each cable or pipe, connect its ends and pick the port it lands on.</p></li>
+      <li><h3>Check, test and photograph</h3><p>Run the checklist on each item, record test results and add photos before the wall or trench closes.</p></li>
+      <li><h3>Hand it over</h3><p>Print the handover pack, as-builts, schematics and port schedules. Everything is already in them.</p></li>
+    </ol>
+  </div>
+</section>
+
+<section class="w-sec w-sec-tint" id="lp-trades">
+  <div class="w-wrap">
+    <h2>One drawing for every trade</h2>
+    <p class="w-sub">Each trade gets its own symbols, checklists and reports. Choose one to see a sample.</p>
+    <div class="w-trades">
+      <button type="button" class="lp-tile w-trade" data-trade="data" aria-expanded="false" aria-controls="lp-sample" style="--t:#2460C7"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="12" y="4" width="8" height="7" rx="1.5"/><rect x="3" y="21" width="8" height="7" rx="1.5"/><rect x="21" y="21" width="8" height="7" rx="1.5"/><path d="M16 11v5M7 21v-5h18v5"/></svg><strong>Data and comms</strong><span>Fibre, copper, racks and every port</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="power" aria-expanded="false" aria-controls="lp-sample" style="--t:#C66A0A"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M18 3L7 18h8l-2 11 11-16h-8z"/></svg><strong>Electrical</strong><span>Boards, circuits, outlets and test results</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="fire" aria-expanded="false" aria-controls="lp-sample" style="--t:#C9261D"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 29c-6 0-9-4-9-9 0-6 6-9 6-15 3 2 5 5 5 8 1-1 2-3 2-4 3 3 5 7 5 11 0 5-3 9-9 9z"/><path d="M16 29c-2.5 0-4-1.7-4-4 0-3 4-5 4-8 2 2 4 5 4 8 0 2.3-1.5 4-4 4z"/></svg><strong>Fire</strong><span>Detection, sprinklers, hydrants and panels</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="water" aria-expanded="false" aria-controls="lp-sample" style="--t:#00798A"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3s-9 10-9 17a9 9 0 0 0 18 0C25 13 16 3 16 3z"/><path d="M11 20a5 5 0 0 0 5 5"/></svg><strong>Water</strong><span>Mains, valves, meters and fixtures</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="drainage" aria-expanded="false" aria-controls="lp-sample" style="--t:#2E7D32"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="5" width="22" height="22" rx="2"/><path d="M10 11h12M10 16h12M10 21h12"/></svg><strong>Drainage</strong><span>Sewer, stormwater, pits and falls</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="mech" aria-expanded="false" aria-controls="lp-sample" style="--t:#7442BC"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="12"/><path d="M16 16c-1-5 2-8 5-7-1 4-3 6-5 7zm0 0c5-1 8 2 7 5-4-1-6-3-7-5zm0 0c1 5-2 8-5 7 1-4 3-6 5-7zm0 0c-5 1-8-2-7-5 4 1 6 3 7 5z"/></svg><strong>Mechanical</strong><span>Ducts, refrigerant, plant and controls</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="security" aria-expanded="false" aria-controls="lp-sample" style="--t:#3F6F2A"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="10" width="18" height="12" rx="2"/><path d="M21 14l8-4v12l-8-4z"/></svg><strong>Security</strong><span>Cameras, readers, locks and alarms</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="av" aria-expanded="false" aria-controls="lp-sample" style="--t:#0F6FA8"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 12h5l7-6v20l-7-6H5z"/><path d="M22 11a7 7 0 0 1 0 10M25 8a11 11 0 0 1 0 16"/></svg><strong>Audio visual</strong><span>Speakers, displays and control</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="gas" aria-expanded="false" aria-controls="lp-sample" style="--t:#B8860B"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="18" r="10"/><path d="M16 18l5-5M11 26h10M16 4v4"/></svg><strong>Gas</strong><span>Mains, meters and shut-offs</span></button>
+      <button type="button" class="lp-tile w-trade" data-trade="access" aria-expanded="false" aria-controls="lp-sample" style="--t:#4D5B5E"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l11 13-11 13L5 16z"/><path d="M16 9v14"/></svg><strong>Risers and trenches</strong><span>How services move between levels</span></button>
+    </div>
+    <div id="lp-sample" class="lp-sample" hidden>
+      <div class="lp-s-top"><div><h3 id="lp-s-name"></h3><p id="lp-s-text"></p></div><button type="button" class="lp-s-x" data-sclose aria-label="Close sample">×</button></div>
+      <div class="lp-s-tabs" role="group" aria-label="Sample view"><button type="button" data-sview="plan" aria-pressed="true">On the plan</button><button type="button" data-sview="schem" aria-pressed="false">Schematic</button><button type="button" data-sview="report" aria-pressed="false">Test report</button></div>
+      <figure><img id="lp-s-img" alt=""></figure>
+      <p class="lp-s-note">Sample building, for illustration.</p>
+    </div>
+  </div>
+</section>
+
+<section class="w-sec" id="lp-tools">
+  <div class="w-wrap">
+    <h2>What you hand over</h2>
+    <div class="w-tools">
+      <article><div class="w-shot"><img loading="lazy" src="/img/schematic.webp" alt="A schematic with outlets linked to a comms cabinet"></div><h3>Schematics for any service</h3><p>See what connects to what, port by port, for one item, one area or the whole site.</p></article>
+      <article><div class="w-shot"><img loading="lazy" src="/img/trace.webp" alt="A water main route highlighted on a floor plan"></div><h3>Follow any run, end to end</h3><p>Pick a port, outlet or valve and the route lights up on the plan.</p></article>
+      <article><div class="w-shot"><img loading="lazy" src="/img/report.webp" alt="Two pages of a power test report"></div><h3>Test reports for every trade</h3><p>Checklists, readings, defects and photos in one clean report.</p></article>
+      <article><div class="w-shot"><img loading="lazy" src="/img/asbuilt.webp" alt="An as-built drawing with a title block"></div><h3>As-builts as you go</h3><p>Mark up what went in as it goes in, and the as-built is ready when the job is.</p></article>
+    </div>
+  </div>
+</section>
+
+<section class="w-sec w-sec-tint">
+  <div class="w-wrap">
+    <h2>Built for the people doing the work</h2>
+    <p class="w-sub">Big buttons, works with no signal, and syncs when you're back in range.</p>
+    <div class="lp-photos"><figure class="lp-photo" style="background-image:url(/img/trade-power.svg)"><img src="https://images.unsplash.com/photo-1758101755915-462eddc23f57?fm=jpg&q=70&w=900&h=1100&auto=format&fit=crop" alt="Electrician testing a panel with a multimeter" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"><figcaption><strong>Electrical</strong>Boards, circuits and test results on record.</figcaption></figure><figure class="lp-photo" style="background-image:url(/img/trade-comms.svg)"><img src="https://images.unsplash.com/photo-1785682117029-86171f64c826?fm=jpg&q=70&w=900&h=1100&auto=format&fit=crop" alt="Technician working on network equipment with tools" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"><figcaption><strong>IT and comms</strong>Racks, fibre and copper, port by port.</figcaption></figure><figure class="lp-photo" style="background-image:url(/img/trade-water.svg)"><img src="https://images.unsplash.com/photo-1676210134188-4c05dd172f89?fm=jpg&q=70&w=900&h=1100&auto=format&fit=crop" alt="Plumber working on a pipe in a wall" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"><figcaption><strong>Plumbing</strong>Pipe routes and pressure tests before the wall closes.</figcaption></figure><figure class="lp-photo" style="background-image:url(/img/trade-fire.svg)"><img src="https://images.unsplash.com/photo-1587582423116-ec07293f0395?fm=jpg&q=70&w=900&h=1100&auto=format&fit=crop" alt="Construction worker in a hard hat on a building frame" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"><figcaption><strong>On site</strong>Every trade working from the same drawing.</figcaption></figure></div>
+  </div>
+</section>
+
+<section class="w-band">
+  <div class="w-wrap w-band-in">
+    <div><h2>See it on a real job</h2><p>Try the demo now, or email us to set Riyeser up for your team.</p></div>
+    <div class="w-cta"><a href="/?demo" class="w-btn w-btn-hv">Try the demo</a><a href="mailto:info@riyeser.com?subject=Riyeser%20enquiry" class="w-btn w-btn-line-l">info@riyeser.com</a></div>
+  </div>
+</section>
+
+<div id="lp-backdrop"></div><section id="lp-signin" aria-labelledby="lp-si-h"><button type="button" class="lp-x" data-lp-close aria-label="Close">×</button>
+  <div>
+    <div>
+      <h2 id="lp-si-h">Sign in</h2>
+      <p>Works with no signal, and syncs when you reconnect.</p>
+    </div>
+    <form id="login-form">
+      <label>Email<input id="email" type="email" required autocomplete="username"></label>
+      <label>Password<input id="password" type="password" required autocomplete="current-password"></label>
+      <button class="lp-go" type="submit">Sign in</button>
+      <p class="err" id="login-err" role="alert"></p>
+      <p class="lp-si-note">Forgotten your password? Ask your Riyeser admin to reset it, or email <a href="mailto:info@riyeser.com">info@riyeser.com</a>.</p>
+    </form>
+    <p id="notset" hidden>This app isn’t connected yet. Add your Supabase details to config.js, then upload it again.</p>
+  </div>
+</section>
+
+<footer class="w-foot">
+  <div class="w-wrap w-foot-in">
+    <div class="w-foot-brand"><strong><img src="/img/logo-white.png" width="26" height="26" alt="">Riyeser</strong><span>Services mapping, QA and handover for building trades.</span></div>
+    <nav aria-label="Footer"><a href="/?demo">Try the demo</a><a href="/software/">Software</a> <a href="/faq.html">FAQ</a><a href="/help.html">Help</a><a href="/terms.html">Terms of use</a><a href="mailto:info@riyeser.com">info@riyeser.com</a></nav>
+    <p class="w-legal">© 2026 RL Group of Companies. Riyeser, its software, designs and content are the intellectual property of RL Group of Companies and may not be copied or shared without written permission. Trade photos from Unsplash.</p>
+  </div>
+</footer>
+</main>
+<main class="screen" id="wait" hidden>
+  <div class="narrow"><div class="wordmark"><img class="app-logo" src="/img/logo.png" width="34" height="34" alt="">Riyeser</div><p>Your account is waiting for approval. Ask your Riyeser admin to approve it, then come back here.</p><button class="btn quiet" type="button" data-act="signout">Sign out</button></div>
+</main>
+<main class="screen" id="home" hidden>
+  <div class="wide">
+    <div class="home-top"><div class="wordmark"><img class="app-logo" src="/img/logo.png" width="34" height="34" alt="">Riyeser</div><div class="acts"><span class="sync"></span><button class="btn quiet" id="team-btn" type="button" hidden>Team</button><button class="btn quiet acct" type="button">Account</button><button class="btn solid" id="new-project" type="button">New project</button></div></div>
+    <div class="plist" id="plist"></div>
+  </div>
+</main>
+<div id="app-root" style="height:100%" hidden>
+<div class="app" id="app" data-tab="plan" data-mode="select">
+  <header class="block">
+    <div class="cell c-project"><a class="back" href="#/">All projects</a><h1 class="brand" id="ptitle"></h1></div>
+    <div class="cell c-sheet"><label class="lab" for="sheet">Level</label><select id="sheet"></select><button class="btn quiet dw-btn" id="dwg-btn" type="button" title="Choose which drawings are in use">Drawings</button></div>
+    <div class="cell c-scale"><span class="lab">Scale</span><span class="val" id="scale"></span></div>
+    <div class="cell c-tally"><span class="lab">Latest inspection, this level</span><div class="tally" id="tally"></div></div>
+    <div class="cell c-up"><span class="sync"></span><button class="btn quiet" id="todo-btn" type="button">To do</button><button class="btn quiet" id="sun-btn" type="button" aria-pressed="false" hidden>Sunlight</button><button class="btn quiet help-btn" id="help-btn" type="button" aria-label="Help for this screen">?</button><button class="btn quiet set-btn" id="set-btn" type="button" aria-label="Settings" title="Settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Settings</span></button><button class="btn quiet exit-btn" type="button" data-exit title="Save your work and leave">Save &amp; exit</button><button class="btn quiet" id="menu-btn" type="button">Project</button><button class="btn solid" id="upload" type="button">Upload drawings</button></div>
+  </header>
+  <aside class="side" aria-label="Lists"><div class="draw" id="draw" hidden></div><div class="subtabs" id="subtabs"></div><div class="side-body" id="sidebody"></div></aside>
+  <section class="stage" aria-label="Plan">
+    <div class="layers" id="layers"></div>
+    <div class="layers ctypes" id="ctypes" hidden></div>
+    <div class="plan-wrap" id="wrap">
+      <svg id="plan" role="img" aria-label="Floor plan with service points and runs"></svg>
+      <div class="bar" id="bar" role="status"></div>
+      <button class="btn solo" id="solo-off" type="button" hidden></button>
+      <div class="undo" id="undo-bar"><button type="button" id="undo-btn" disabled>Undo</button><button type="button" id="redo-btn" disabled>Redo</button></div>
+      <div class="zoom" id="zoom"><button type="button" id="find-btn" aria-label="Find an item" title="Find an item (press /)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg></button><button type="button" id="zin" aria-label="Zoom in">+</button><button type="button" id="zout" aria-label="Zoom out">&minus;</button><button type="button" id="zfit">FIT</button></div>
+      <div class="tools" id="tools" role="group" aria-label="Plan tools">
+        <button class="tool" type="button" data-mode="select" aria-pressed="true">Select</button>
+        <button class="tool" type="button" data-mode="point" aria-pressed="false">Add item</button>
+        <button class="tool" type="button" data-mode="run" aria-pressed="false">Add run</button>
+        <button class="tool" type="button" data-mode="mk" aria-pressed="false" id="mk-tool" title="Cloud, arrow, dimension, pen, highlighter, stamps, count, area and measure">Markup</button>
+        <button class="tool" type="button" data-mode="note" aria-pressed="false">Note</button>
+        <button class="tool" type="button" data-mode="stage" aria-pressed="false" id="stage-tool" title="Outline a stage or area and shade it">Area</button>
+        <button class="tool" type="button" data-mode="scale" aria-pressed="false" id="scale-tool" title="Tell Riyeser how big the drawing is, so lengths are measured correctly" hidden>Set scale</button>
+      </div>
+      <div id="diagram" hidden></div>
+      <div id="view3d" hidden></div>
+      <div id="noplan" hidden><div><h2>Upload your first level</h2><p>Add a PDF or image of the floor plan, then set its scale from a dimension you know.</p><button class="btn solid" id="first-plan" type="button">Upload plan</button></div></div>
+    </div>
+  </section>
+  <aside class="record" id="record" hidden aria-label="Item record"></aside>
+  <nav class="tabs" aria-label="View">
+    <button type="button" data-tab="plan" aria-pressed="true">Plan</button>
+    <button type="button" data-tab="diagram" aria-pressed="false">Diagram</button>
+    <button type="button" data-tab="3d" aria-pressed="false">3D</button>
+    <button type="button" data-tab="lists" aria-pressed="false">Lists</button>
+  </nav>
+</div>
+</div>
+<div id="print"></div>
+<input id="plan-file" type="file" accept=".pdf,application/pdf,image/*" multiple hidden>
+<input id="pf-file" type="file" accept="image/*" capture="environment" hidden><input id="photo-file" type="file" accept="image/*" multiple hidden>
+<dialog id="dlg"></dialog>
+<div id="toast" role="status" hidden></div>
+<script src="/config.js"></script>
+<script src="/qr.js"></script>
+<script src="/data.js"></script>
+<script src="/app.js"></script>
+<script src="/hero.js" defer></script>
+</body>
+</html>

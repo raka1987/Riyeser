@@ -9,3 +9,11 @@ The Riyeser Group website: home, a page per program, Downloads, Pricing (free du
 - **Download buttons** point to `https://github.com/raka1987/Riyeser/releases/latest/download/<file>`; each release must include
   `RiyeserCentral-Setup.exe`, `RiyeserDeskAssistant-Setup.exe`, `RiyeserPDF-Setup.exe` and `RiyeserAccounting-Setup.exe`.
 - **Contact address** used on the site: info@riyeser.com (change `EMAIL` in `build.mjs`).
+
+## One site on riyeser.com (Services + Riyeser Group website)
+
+- `website/services/` is Riyeser Services exactly as it was on riyeser.com (copied from the live site, plus a *Software* link in its menus).
+  Its data stays in Supabase (`config.js`), so projects and logins carry on.
+- `node website/build-combined.mjs` puts Services at `/` and this website at `/software/` (the Services app must be at the top of the domain).
+- Publish: Actions → *Publish website* → Run workflow → layout **combined** (only once riyeser.com points at GitHub Pages).
+- Changes to Riyeser Services now go into `website/services/` and are published the same way.

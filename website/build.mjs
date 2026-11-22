@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
-const OUT = join(ROOT, 'public');
+const OUT = process.env.OUT_DIR || join(ROOT, 'public');
 const SITE = process.env.SITE_URL || 'https://riyeser.com';
 // Installers are attached to the latest GitHub Release under these fixed names, so links never go stale.
 const RELEASES = 'https://github.com/raka1987/Riyeser/releases/latest/download';
@@ -148,7 +148,7 @@ page({
   description: 'Free Windows programs for small business: accounting, payroll, files, PDFs and building services, with one home screen. No sign-up, works offline.',
   body: (up) => `
 <div class="c hero">
-  <span class="eyebrow">NEW · Riyeser Central 1.1 · free</span>
+  <span class="eyebrow">NEW · Riyeser Central 1.2 · free</span>
   <h1>Your whole business, <span class="grad">in one place</span></h1>
   <p class="lead">Accounting, payroll, files, PDFs and building services — simple Windows programs that work together, with one home screen that tells you what needs doing today.</p>
   <div class="ctas"><a class="btn p" href="${dl(prog('central'))}">⬇ Download free for Windows</a><a class="btn s" href="#programs">See the programs</a></div>
