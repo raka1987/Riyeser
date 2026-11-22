@@ -3,7 +3,7 @@ name: Publish Riyeser release
 # One button for a new public release of the Riyeser Windows programs:
 #   Actions → "Publish Riyeser release" → Run workflow
 # Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF and Riyeser Services (branch module/desk-assistant) and Riyeser Accounting
-# (main) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
+# (main) and Riyeser Payroll (branch module/payroll) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
 # every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
 on:
   workflow_dispatch:
@@ -91,9 +91,49 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: accounting, path: release/*, if-no-files-found: error }
 
+  payroll:
+    name: Payroll
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: module/payroll }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install and test
+        run: |
+          npm ci
+          npm test
+      - name: Build installer
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build
+      - name: Install it and check it is registered and starts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          $setup = Get-ChildItem desktop\dist\RiyeserPayroll-Setup-*.exe | Select-Object -First 1
+          if (-not $setup) { throw "No Payroll installer was built" }
+          Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
+          $exe = "$env:LOCALAPPDATA\Programs\riyeser-payroll\Riyeser Payroll.exe"
+          if (-not (Test-Path $exe)) { throw "Riyeser Payroll.exe not installed where Riyeser Central looks: $exe" }
+          $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Payroll*"
+          if (-not $entry) { throw "Riyeser Payroll is not listed in Installed apps" }
+          Write-Host "OK:" $entry.DisplayName
+          $p = Start-Process -FilePath $exe -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 40; $i++) { Start-Sleep 2; try { $r = Invoke-RestMethod http://127.0.0.1:37421/api/public/setup; if ($r) { $ok = $true; break } } catch {} }
+          Get-Process | Where-Object { $_.Path -like "*riyeser-payroll*" } | Stop-Process -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "Riyeser Payroll did not start" }
+          $v = if ($entry.DisplayVersion) { "Riyeser Payroll $($entry.DisplayVersion)" } else { $entry.DisplayName }
+          $v | Set-Content release\versions-payroll.txt
+          Copy-Item $setup.FullName release\RiyeserPayroll-Setup.exe
+      - uses: actions/upload-artifact@v4
+        with: { name: payroll, path: release/*, if-no-files-found: error }
+
   publish:
     name: Publish release
-    needs: [desktop, accounting]
+    needs: [desktop, accounting, payroll]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -129,4 +169,5 @@ jobs:
             out/RiyeserPDF-Setup.exe
             out/RiyeserServices-Setup.exe
             out/RiyeserAccounting-Setup.exe
+            out/RiyeserPayroll-Setup.exe
           fail_on_unmatched_files: true
