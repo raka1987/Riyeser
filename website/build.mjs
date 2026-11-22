@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT = join(ROOT, 'public');
-const SITE = 'https://riyeser.com';
+const SITE = process.env.SITE_URL || 'https://riyeser.com';
 // Installers are attached to the latest GitHub Release under these fixed names, so links never go stale.
 const RELEASES = 'https://github.com/raka1987/Riyeser/releases/latest/download';
 const EMAIL = 'info@riyeser.com';
@@ -16,6 +16,7 @@ const BASE = process.env.SITE_BASE || '/';
 const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');
 // Riyeser Services (the web app). It runs at riyeser.com today; when it moves to app.riyeser.com, change this one line.
 const SERVICES_APP = process.env.SERVICES_APP || 'https://riyeser.com';
+const SERVICES_MOVED = !/^https:\/\/riyeser\.com\/?$/.test(SERVICES_APP);
 
 const PROGRAMS = [
   { id: 'central', name: 'Riyeser Central', short: 'Central', icon: 'R', file: 'RiyeserCentral-Setup.exe',
@@ -120,7 +121,12 @@ function page({ path, title, description, active, body }) {
   <a href="${up}downloads.html">Downloads</a><a href="${up}support.html">Support</a><a href="${up}terms.html">Terms</a>
   <span class="r">© ${new Date().getFullYear()} Riyeser Group</span></div></footer>
 <script>addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('scrolled',scrollY>8),{passive:true})</script>
-${path === 'index.html' && !SERVICES_APP.startsWith(SITE) ? `<script>/* old Riyeser Services links (riyeser.com/?demo, riyeser.com/#/...) now live at the Services app */
+<script>/* Download buttons always point at the newest release file, whatever its exact name. */
+(function(){var a=[].slice.call(document.querySelectorAll('a[href*="/releases/latest/download/"]'));if(!a.length||!window.fetch)return;
+fetch('https://api.github.com/repos/raka1987/Riyeser/releases/latest').then(function(r){return r.ok?r.json():null}).then(function(rel){if(!rel)return;
+a.forEach(function(el){var want=el.href.split('/').pop().replace(/^Riye?ser/i,'').toLowerCase();
+var hit=(rel.assets||[]).filter(function(x){return x.name.replace(/^Riye?ser/i,'').toLowerCase()===want})[0];if(hit)el.href=hit.browser_download_url;});}).catch(function(){});})();</script>
+${path === 'index.html' && SERVICES_MOVED ? `<script>/* old Riyeser Services links (riyeser.com/?demo, riyeser.com/#/...) now live at the Services app */
 if(/[?&]demo\b/.test(location.search)||location.hash.startsWith('#/'))location.replace(${JSON.stringify(SERVICES_APP)}+'/'+location.search+location.hash)</script>` : ''}
 </body>
 </html>
@@ -319,12 +325,13 @@ ${ctaBlock(up)}`,
 const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
 redirect('faq.html', `${BASE}programs/services.html#faq`, 'Riyeser Services questions and answers');
-if (!SERVICES_APP.startsWith(SITE)) redirect('help.html', `${SERVICES_APP}/help.html`, 'Riyeser Services help guide');
+if (SERVICES_MOVED) redirect('help.html', `${SERVICES_APP}/help.html`, 'Riyeser Services help guide');
 
 // ---------- extras ----------
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
-writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
-writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
+const SUBFOLDER = BASE !== '/';
+if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
+if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
 const urls = ['', 'downloads.html', 'pricing.html', 'support.html', 'terms.html', ...PROGRAMS.map((p) => `programs/${p.id}.html`)];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
 writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyeser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
