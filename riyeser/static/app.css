@@ -139,3 +139,4 @@ input[type=checkbox]{width:auto}
 tr.co-current td{background:#f5f9ff}
 .top .cosw{overflow:visible}
 .also{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin-top:12px;font-size:13.5px}.also .check{margin:0}
+.plan-note{font-size:13.5px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}

@@ -84,7 +84,8 @@ def index():
             if u and u["role"] == "admin":
                 archived.append(c)
     return render_template("companies/index.html", rows=rows, totals=totals, shown=shown, archived=archived,
-                           can_add=_is_admin_here())
+                           can_add=_is_admin_here(), allowance=co.allowance(), in_use=len(co.active_ids()),
+                           room=co.can_add_another())
 
 
 @bp.route("/switch/<cid>", methods=["GET", "POST"])
@@ -118,6 +119,10 @@ def switch(cid):
 def add():
     if not _is_admin_here():
         abort(403)
+    if not co.can_add_another():
+        flash(f"Your plan includes {co.allowance()} compan{'y' if co.allowance() == 1 else 'ies'}. Extra companies are "
+              "$10 a month each — add them in Riyeser Central (Licence), then come back here.", "error")
+        return redirect(url_for("companies.index"))
     f = request.form
     try:
         cid = co.add_company(f.get("name"), f.get("abn"), f.get("edition") or "enterprise", owner=g.user, demo=bool(f.get("demo")))
@@ -137,6 +142,10 @@ def add():
 def import_file():
     if not _is_admin_here():
         abort(403)
+    if not co.can_add_another():
+        flash(f"Your plan includes {co.allowance()} compan{'y' if co.allowance() == 1 else 'ies'}. Extra companies are "
+              "$10 a month each — add them in Riyeser Central (Licence), then come back here.", "error")
+        return redirect(url_for("companies.index"))
     up = request.files.get("file")
     if not up or not up.filename:
         flash("Choose a company file (.db) to bring in.", "error")

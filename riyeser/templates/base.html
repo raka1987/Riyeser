@@ -71,7 +71,7 @@
         <div class="who"><b>{{ user.full_name or user.username }}</b><small>{{ user.role|title }}</small></div>
         <a href="{{ url_for('auth.logout') }}">Sign out</a></div></details>
     </header>
-    <div class="content">{{ flashes() }}{% block content %}{% endblock %}</div>
+    <div class="content">{% if over_allowance %}<div class="flash error">🔒 <b>Read-only:</b> this company is beyond the companies included in your plan. Everything is still here to view and print. Extra companies are $10 a month each — add one in Riyeser Central under <b>Licence</b>, or archive a company you no longer use.</div>{% endif %}{{ flashes() }}{% block content %}{% endblock %}</div>
   </div>
 </div>
 <div class="scrim" onclick="document.body.classList.remove('side-open')"></div>

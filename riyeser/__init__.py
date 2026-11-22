@@ -65,6 +65,7 @@ def create_app(test_config=None):
                 and request.endpoint not in ("auth.logout", "auth.login", "auth.forgot"):
             abort(403)
         if g.user is not None:
+            g.over_allowance = not co.within_allowance(co.current_id())
             from .perms import check_request
             why = check_request(db)
             if why:
@@ -85,6 +86,7 @@ def create_app(test_config=None):
         mine = [c for c in co.all_companies() if c["id"] in acc] if g.get("user") else []
         return dict(user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
+                    over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
                     can=lambda area, need=1: perms.can(area, need), lv=lambda area: perms.level(area),
                     report_area=perms.report_area)
 

@@ -3,6 +3,10 @@
 <div class="head"><div><h1>Companies</h1><p class="sub">Every company you can open, with the figures you're allowed to see. Each company keeps its own books, users and access.</p></div>
 {% if can_add %}<div class="actions"><a class="btn pri" href="#add">+ Add company</a></div>{% endif %}</div>
 
+<div class="card plan-note">{% if allowance is none %}🎁 <b>Extra companies are free during your trial.</b> After that your plan includes one company, and each extra company is <b>$10 a month</b>.
+{% else %}<b>Your plan includes {{ allowance }} compan{{ 'y' if allowance == 1 else 'ies' }}</b> · {{ in_use }} in use. Extra companies are <b>$10 a month</b> each — add them in Riyeser Central under <b>Licence</b>.{% if in_use > allowance %} Companies beyond your plan open <b>read-only</b> until then; nothing is removed.{% endif %}{% endif %}
+  <span class="muted small">Archived companies don't count.</span></div>
+
 {% if rows|length > 1 %}
 <div class="grid g4">
   {% if 'cash' in shown %}<div class="card kpi"><div class="lbl">Cash at bank · all</div><div class="val {{ 'neg' if totals.cash < 0 }}">{{ totals.cash|money }}</div></div>{% endif %}
@@ -38,7 +42,7 @@
       <div><label>ABN (optional)</label><input name="abn"></div>
       <div><label>Edition</label><select name="edition"><option value="enterprise">Enterprise</option><option value="basic">Basic</option></select></div>
       <label class="check wide"><input type="checkbox" name="demo" value="1"> Fill with demo data (for practice)</label></div>
-    <button class="btn pri" style="margin-top:14px">Add company</button>
+    <button class="btn pri" style="margin-top:14px" {{ 'disabled title="Your plan has no free company places - extra companies are $10 a month each"' if not room }}>Add company</button>{% if not room %}<p class="muted small">Your plan's companies are all in use. Add an extra company ($10 a month) in Riyeser Central, or archive one you no longer use.</p>{% endif %}
   </form>
   <form class="card" method="post" action="{{ url_for('companies.import_file') }}" enctype="multipart/form-data">
     <h3>Bring in an existing company file</h3><p class="muted">From another computer or a client: a Riyeser Accounting company file (<code>company.db</code> or a backup). It's copied in; the original isn't changed. Open it with a user from that file.</p>

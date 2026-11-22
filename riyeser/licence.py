@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 TRIAL_DAYS = 90
 OFFLINE_GRACE_DAYS = 30
 BUY_URL = "https://riyeser.com/pricing.html"
+EXTRA_COMPANY_PRICE = 10  # dollars a month for each company after the first
 
 
 def licence_file():
@@ -41,7 +42,7 @@ def status(now=None, path=None):
         expires = _when(lic.get("expiresAt")) if lic.get("expiresAt") else None
         fresh = checked and (now - checked).total_seconds() < OFFLINE_GRACE_DAYS * 86400
         if lic.get("status") == "active" and (not expires or expires > now) and fresh:
-            return {"mode": "licensed", "plan": lic.get("plan")}
+            return {"mode": "licensed", "plan": lic.get("plan"), "extra_companies": int(lic.get("extraCompanies") or 0)}
         return {"mode": "expired", "buy_url": BUY_URL}
     start = _when(d.get("trialStart"))
     if not start:
@@ -51,3 +52,14 @@ def status(now=None, path=None):
     if left > 0:
         return {"mode": "trial", "days_left": left, "buy_url": BUY_URL}
     return {"mode": "expired", "buy_url": BUY_URL}
+
+
+def company_allowance(now=None, path=None):
+    """How many companies can be worked in: None = no limit (free trial, or Riyeser Central not set up yet).
+    A licence includes one company; each extra company is an add-on. After the trial without a licence: one."""
+    st = status(now, path)
+    if st["mode"] in ("trial", "unknown"):
+        return None
+    if st["mode"] == "licensed":
+        return 1 + st.get("extra_companies", 0)
+    return 1

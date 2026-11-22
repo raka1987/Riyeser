@@ -125,3 +125,41 @@ def test_new_company_keeps_its_own_abn_with_demo_data(app):
     a.post("/companies/add", data={"name": "Demo Two", "abn": "99 999 999 999", "demo": "1"})
     page = a.get("/companies/").get_data(as_text=True)
     assert "ABN 99 999 999 999" in page and "Demo Two" in page
+
+
+def _licence(tmp_path, monkeypatch, **lic):
+    import json
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    d = {"trialStart": (now - timedelta(days=120)).isoformat()}
+    if lic:
+        d.update({"key": "K", "licence": {"status": "active", "checkedAt": now.isoformat(), **lic}})
+    f = tmp_path / "lic" / "Riyeser" / "licence.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(d))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "lic"))
+
+
+def test_extra_companies_are_an_add_on(app, tmp_path, monkeypatch):
+    a = login(app)
+    a.post("/companies/add", data={"name": "Made During Trial"})  # free while the trial runs (no licence file here)
+    extra = [i for i in company_ids(a) if i != "main"][0]
+    # licence with no extra companies: the first company works, the extra one is read-only, no more can be added
+    _licence(tmp_path, monkeypatch, extraCompanies=0)
+    page = a.get("/companies/").get_data(as_text=True)
+    assert "Your plan includes 1 company" in page and "read-only" in page
+    a.post("/companies/add", data={"name": "Blocked Co"})
+    assert "Blocked Co" not in a.get("/companies/").get_data(as_text=True)
+    a.get(f"/companies/switch/{extra}")
+    assert "Read-only:" in a.get("/").get_data(as_text=True)
+    a.post("/cards/customer/new", data={"name": "Should Not Save", "active": "1"})
+    assert "Should Not Save" not in a.get("/cards/customer").get_data(as_text=True)
+    a.get("/companies/switch/main")
+    a.post("/cards/customer/new", data={"name": "Main Still Works", "active": "1"})
+    assert "Main Still Works" in a.get("/cards/customer").get_data(as_text=True)
+    # buy one extra company: unlocked
+    _licence(tmp_path, monkeypatch, extraCompanies=1)
+    a.get(f"/companies/switch/{extra}")
+    assert "Read-only:" not in a.get("/").get_data(as_text=True)
+    a.post("/cards/customer/new", data={"name": "Now Saves", "active": "1"})
+    assert "Now Saves" in a.get("/cards/customer").get_data(as_text=True)

@@ -472,4 +472,4 @@ def test_licence_status_from_central_file(tmp_path):
     assert status(now, str(f))["mode"] == "expired"
     f.write_text(json.dumps({"trialStart": (now - timedelta(days=95)).isoformat(), "key": "K",
                              "licence": {"status": "active", "plan": "Riyeser · 5 users", "checkedAt": (now - timedelta(days=3)).isoformat()}}))
-    assert status(now, str(f)) == {"mode": "licensed", "plan": "Riyeser · 5 users"}
+    assert status(now, str(f)) == {"mode": "licensed", "plan": "Riyeser · 5 users", "extra_companies": 0}

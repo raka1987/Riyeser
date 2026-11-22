@@ -188,3 +188,27 @@ def access_after_login(username, password_hash_used):
             out[c["id"]] = u["id"]
     return out
 
+
+
+# ------------------------------------------------------------------ extra companies are an add-on
+def allowance():
+    from .licence import company_allowance
+    return company_allowance()
+
+
+def active_ids():
+    return [c["id"] for c in all_companies()]
+
+
+def within_allowance(cid):
+    """Companies beyond what the plan includes stay open read-only (nothing is ever locked away)."""
+    n = allowance()
+    if n is None:
+        return True
+    ids = active_ids()
+    return cid not in ids or ids.index(cid) < n
+
+
+def can_add_another():
+    n = allowance()
+    return n is None or len(active_ids()) < n

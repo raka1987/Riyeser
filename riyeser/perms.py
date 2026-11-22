@@ -57,7 +57,7 @@ def levels_for(user):
     if not user:
         return {a: HIDDEN for a in AREA_KEYS}
     if user["role"] == "admin":
-        return {a: FULL for a in AREA_KEYS}
+        return _capped({a: FULL for a in AREA_KEYS}, user)
     base = role_defaults(user["role"])
     raw = user["perms"] if "perms" in user.keys() else None
     if raw:
@@ -70,7 +70,14 @@ def levels_for(user):
             pass
     if user["role"] == "viewer":  # a viewer never changes anything, whatever is saved
         base = {a: min(v, VIEW) for a, v in base.items()}
-    return base
+    return _capped(base, user)
+
+
+def _capped(levels, user):
+    """A company beyond the plan's included companies is read-only for everyone until the add-on is bought."""
+    if g.get("over_allowance") and user is g.get("user"):
+        return {a: min(v, VIEW) for a, v in levels.items()}
+    return levels
 
 
 def level(area, user=None):
@@ -158,6 +165,9 @@ def check_request(db):
     if have >= need:
         return None
     name = dict((a, n) for a, n, _ in AREAS)[area]
+    if g.get("over_allowance") and need > VIEW:
+        return ("This company is read-only: your plan includes fewer companies. "
+                "Extra companies are $10 a month each — add them in Riyeser Central.")
     if have == HIDDEN:
         return f"{name} isn't available for your user."
     if need == FULL:
