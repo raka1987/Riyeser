@@ -29,7 +29,7 @@
       {{ nav('contacts.index', 'Suppliers', kind='supplier') }}{{ nav('inventory.count', 'Stocktake') }}</div>
     <div class="nav-sec"><h4>Money</h4>
       {{ nav('banking.index', 'Bank Accounts') }}{{ nav('banking.money', 'Spend Money', kind='spend') }}
-      {{ nav('banking.money', 'Receive Money', kind='receive') }}</div>
+      {{ nav('banking.money', 'Receive Money', kind='receive') }}{{ nav('links.payroll', 'Import from Payroll') }}</div>
     <div class="nav-sec"><h4>Reports</h4>
       {{ nav('reports.index', 'All Reports') }}{{ nav('reports.show', 'Inventory Report', name='inventory_valuation') }}
       {{ nav('reports.show', 'Sales by Item', name='sales_item') }}{{ nav('reports.show', 'Who Owes Me', name='aged_receivables') }}
@@ -45,7 +45,8 @@
     <div class="nav-sec"><h4>Banking</h4>
       {{ nav('banking.index', 'Bank Accounts') }}{{ nav('banking.money', 'Spend Money', kind='spend') }}
       {{ nav('banking.money', 'Receive Money', kind='receive') }}{{ nav('banking.transfer_money', 'Transfer Money') }}
-      {{ nav('banking.reconcile', 'Reconcile Accounts') }}{{ nav('banking.feed', 'Bank Statement Import') }}</div>
+      {{ nav('banking.reconcile', 'Reconcile Accounts') }}{{ nav('banking.feed', 'Bank Statement Import') }}
+      {{ nav('links.payroll', 'Import from Riyeser Payroll') }}</div>
     <div class="nav-sec"><h4>Sales</h4>
       {{ nav('documents.edit', 'New Invoice', side='sale') }}{{ nav('documents.index', 'Sales Register', side='sale') }}
       {{ nav('documents.pay', 'Receive Payments', side='sale') }}{{ nav('contacts.index', 'Customers', kind='customer') }}</div>

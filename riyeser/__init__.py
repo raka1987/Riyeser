@@ -64,7 +64,7 @@ def create_app(test_config=None):
         flash("You do not have permission to do that (read-only role).", "error")
         return redirect(request.referrer or url_for("core.dashboard"))
 
-    from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos
+    from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links
     app.register_blueprint(auth.bp)
     app.register_blueprint(core.bp)
     app.register_blueprint(contacts.bp)
@@ -74,6 +74,7 @@ def create_app(test_config=None):
     app.register_blueprint(payroll.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(pos.bp)
+    app.register_blueprint(links.bp)
     return app
 
 

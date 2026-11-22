@@ -173,6 +173,11 @@ def migrate(db):
         user_id INTEGER REFERENCES users(id),
         voided INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS imported_payruns (
+        id INTEGER PRIMARY KEY, source TEXT NOT NULL, payrun_id TEXT NOT NULL, pay_date TEXT,
+        employees INTEGER, gross INTEGER, entry_id INTEGER REFERENCES journal_entries(id),
+        file_name TEXT, imported_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        UNIQUE(source, payrun_id))""")
     for key, code in (("pos_cash", "1-1190"), ("pos_card", "1-1110")):
         if not db.execute("SELECT 1 FROM linked_accounts WHERE key=?", (key,)).fetchone():
             row = db.execute("SELECT id FROM accounts WHERE code=?", (code,)).fetchone() or \

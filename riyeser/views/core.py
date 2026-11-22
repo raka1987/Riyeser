@@ -161,11 +161,12 @@ def entry(eid):
 def reverse(eid):
     db = get_db()
     e = db.execute("SELECT * FROM journal_entries WHERE id=?", (eid,)).fetchone()
-    if e["source_type"] not in ("journal", "spend", "receive", "transfer", "stock_adj"):
+    if e["source_type"] not in ("journal", "spend", "receive", "transfer", "stock_adj", "payroll_import"):
         raise PostingError("Reverse this transaction from its source document (invoice, bill, payment or pay run).")
     rid = reverse_entry(db, eid, request.form.get("date") or None)
     audit(db, "reverse_entry", f"#{eid} -> #{rid}")
     db.execute("UPDATE bank_feed_lines SET entry_id=NULL WHERE entry_id=?", (eid,))
+    db.execute("DELETE FROM imported_payruns WHERE entry_id=?", (eid,))  # can be imported again
     flash(f"Entry #{eid} reversed by #{rid}.", "ok")
     return redirect(url_for("core.entry", eid=rid))
 

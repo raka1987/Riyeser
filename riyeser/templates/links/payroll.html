@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Import from Riyeser Payroll{% endblock %}
+{% from "_macros.html" import account_select %}
+{% block content %}
+<div class="head"><div><h1>Import from Riyeser Payroll</h1>
+<p class="sub">Riyeser Payroll saves each pay run into <b>{{ inbox }}</b>. Import it here to record wages, tax withheld and employer contributions in your books. Each pay run can only be imported once.</p></div></div>
+<form method="post" id="imp"><div class="card"><div class="fields">
+<div><label>Wages were paid from</label>{{ account_select('bank_account_id', bank_accounts, default_bank, blank=False) }}</div>
+<div><label>Or choose a pay run file</label><input type="file" name="file" accept=".json,application/json"></div>
+<div><label>&nbsp;</label><button class="btn" name="upload" value="1">Import file</button></div></div></div>
+<h2>Waiting in the inbox</h2>
+<div class="tbl"><table><tr><th>File</th><th>Pay date</th><th>Period</th><th class="n">Staff</th><th class="n">Gross</th><th class="n">Tax</th><th class="n">Contributions</th><th class="n">Net paid</th><th></th></tr>
+{% for f in files %}{% if f.error %}<tr><td>{{ f.name }}</td><td colspan="8" class="neg">{{ f.error }}</td></tr>
+{% else %}{% set t = f.pr.totals %}<tr><td>{{ f.name }}<br><span class="muted">{{ f.pr.source }} · {{ f.pr.payrun_id }}{% if f.pr.currency %} · {{ f.pr.currency }}{% endif %}</span></td>
+<td>{{ f.pr.pay_date }}</td><td>{{ f.pr.period }}</td><td class="n">{{ f.pr.employees|length }}</td><td class="n">{{ t.gross|money }}</td><td class="n">{{ t.tax|money }}</td>
+<td class="n">{{ t.contrib|money }}</td><td class="n">{{ t.net|money }}</td>
+<td>{% if f.done %}<a class="badge paid" href="{{ url_for('core.entry', eid=f.done.entry_id) }}">imported</a>{% else %}<button class="btn sm pri" name="name" value="{{ f.name }}">Import</button>{% endif %}</td></tr>{% endif %}
+{% else %}<tr><td colspan="9" class="muted">No pay runs waiting. When Riyeser Payroll finishes a pay run it appears here.</td></tr>{% endfor %}</table></div></form>
+{% if history %}<h2>Imported</h2><div class="tbl"><table><tr><th>When</th><th>Pay run</th><th>Pay date</th><th class="n">Staff</th><th class="n">Gross</th><th></th></tr>
+{% for h in history %}<tr><td>{{ h.imported_at }}</td><td>{{ h.payrun_id }}</td><td>{{ h.pay_date }}</td><td class="n">{{ h.employees }}</td><td class="n">{{ h.gross|money }}</td>
+<td><a class="btn sm" href="{{ url_for('core.entry', eid=h.entry_id) }}">Journal</a></td></tr>{% endfor %}</table></div>{% endif %}
+{% endblock %}

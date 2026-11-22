@@ -7,7 +7,7 @@
 {% if e.source_type == 'payrun' %}<a class="btn" href="{{ url_for('payroll.payrun', rid=e.source_id) }}">Open pay run</a>{% endif %}
 {% if e.reverses_id %}<a class="btn" href="{{ url_for('core.entry', eid=e.reverses_id) }}">Original #{{ e.reverses_id }}</a>{% endif %}
 {% if reversal %}<a class="btn" href="{{ url_for('core.entry', eid=reversal.id) }}">Reversal #{{ reversal.id }}</a>{% endif %}
-{% if not e.voided and e.source_type in ('journal','spend','receive','transfer','stock_adj') %}
+{% if not e.voided and e.source_type in ('journal','spend','receive','transfer','stock_adj','payroll_import') %}
 <form method="post" class="inline" action="{{ url_for('core.reverse', eid=e.id) }}" data-confirm="Post a reversing entry?"><button class="btn danger">Reverse</button></form>{% endif %}
 </div></div>
 <div class="tbl"><table><tr><th>Account</th><th>Memo</th><th>Tax</th><th>Job</th><th class="n">Debit</th><th class="n">Credit</th></tr>

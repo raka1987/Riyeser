@@ -3,7 +3,7 @@
 <div class="head"><div><h1>Find Transactions</h1><p class="sub">Every posted entry in the general ledger.</p></div>
 <div class="actions"><a class="btn pri" href="{{ url_for('core.journal_new') }}">+ General journal</a></div></div>
 <form class="filters"><div><label>Search</label><input name="q" value="{{ q }}" placeholder="Memo, reference or ID"></div>
-<div><label>Source</label><select name="source"><option value="">All</option>{% for s in ['journal','invoice','bill','receipt','payment','spend','receive','transfer','payrun','stock_adj','reversal'] %}<option {{ 'selected' if src==s }}>{{ s }}</option>{% endfor %}</select></div>
+<div><label>Source</label><select name="source"><option value="">All</option>{% for s in ['journal','invoice','bill','receipt','payment','spend','receive','transfer','payrun','payroll_import','stock_adj','reversal'] %}<option {{ 'selected' if src==s }}>{{ s }}</option>{% endfor %}</select></div>
 <div><label>From</label><input type="date" name="start" value="{{ request.args.start }}"></div><div><label>To</label><input type="date" name="end" value="{{ request.args.end }}"></div>
 <div><button class="btn">Search</button></div></form>
 <div class="tbl"><table><tr><th>ID</th><th>Date</th><th>Source</th><th>Reference</th><th>Memo</th><th class="n">Amount</th><th></th></tr>

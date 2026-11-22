@@ -358,3 +358,36 @@ def test_pdfs_download_and_riyeser_folder(client, app, tmp_path, monkeypatch):
                                    "line_price": ["10"], "line_discount": [""], "line_account": [acc["4-2000"]],
                                    "line_tax": [tc["GST"]], "line_job": [""]})
     assert len(list((tmp_path / "Riyeser" / "Accounting" / "Invoices" / "2026").glob("*.pdf"))) == 2
+
+
+def test_import_payroll_payrun(client, app, tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.setenv("RIYESER_DOCS", str(tmp_path / "Riyeser"))
+    inbox = tmp_path / "Riyeser" / "Inbox" / "Payroll"
+    inbox.mkdir(parents=True)
+    run = {"format": "riyeser.payrun.v1", "source": "Riyeser Payroll", "payrun_id": "W46", "pay_date": "2026-11-14",
+           "employees": [{"name": "Iliesa", "gross": 650, "tax_withheld": 48, "employer_contribution": 65,
+                          "other_deductions": 52, "net": 550},
+                         {"name": "Ben", "gross": 500, "tax_withheld": 20, "employer_contribution": 50}]}
+    (inbox / "2026-11-14 W46.json").write_text(_json.dumps(run))
+    (inbox / "broken.json").write_text("{nope")
+    page = client.get("/links/payroll").get_data(as_text=True)
+    assert "W46" in page and "not valid JSON" in page and "$1,150.00" in page
+    with app.app_context():
+        db = get_db()
+        acc, _ = ids(db)
+    client.post("/links/payroll", data={"bank_account_id": acc["1-1110"], "name": "2026-11-14 W46.json"})
+    with app.app_context():
+        db = get_db()
+        b = L.balances(db)
+        assert b[linked(db, "wages")] == 115000
+        assert b[linked(db, "super_expense")] == 11500
+        assert b[acc["1-1110"]] == -(55000 + 48000)
+        assert b[linked(db, "payg_payable")] == -(4800 + 2000 + 5200)
+        assert trial_balance_ok(db)
+    assert (inbox / "Imported" / "2026-11-14 W46.json").exists()
+    # the same pay run cannot be imported twice
+    (inbox / "again.json").write_text(_json.dumps(run))
+    client.post("/links/payroll", data={"bank_account_id": acc["1-1110"], "name": "again.json"})
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM imported_payruns").fetchone()[0] == 1
