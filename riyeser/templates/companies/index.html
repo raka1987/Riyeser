@@ -1,0 +1,55 @@
+{% extends "base.html" %}{% block title %}Companies{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Companies</h1><p class="sub">Every company you can open, with the figures you're allowed to see. Each company keeps its own books, users and access.</p></div>
+{% if can_add %}<div class="actions"><a class="btn pri" href="#add">+ Add company</a></div>{% endif %}</div>
+
+{% if rows|length > 1 %}
+<div class="grid g4">
+  {% if 'cash' in shown %}<div class="card kpi"><div class="lbl">Cash at bank · all</div><div class="val {{ 'neg' if totals.cash < 0 }}">{{ totals.cash|money }}</div></div>{% endif %}
+  {% if 'owed' in shown %}<div class="card kpi"><div class="lbl">Customers owe · all</div><div class="val">{{ totals.owed|money }}</div><div class="note">{{ totals.overdue|money }} overdue</div></div>{% endif %}
+  {% if 'owe' in shown %}<div class="card kpi"><div class="lbl">You owe suppliers · all</div><div class="val">{{ totals.owe|money }}</div></div>{% endif %}
+  {% if 'profit' in shown %}<div class="card kpi"><div class="lbl">Net profit this year · all</div><div class="val {{ 'neg' if totals.profit < 0 }}">{{ totals.profit|money }}</div></div>{% endif %}
+</div>
+{% endif %}
+
+<div class="tbl"><table>
+<tr><th>Company</th><th class="n">Cash at bank</th><th class="n">Customers owe</th><th class="n">Overdue</th><th class="n">You owe</th><th class="n">Net profit (year)</th><th>Locked to</th><th></th></tr>
+{% for c in rows %}<tr class="{{ 'co-current' if c.current }}">
+  <td><b>{{ c.name }}</b>{% if c.current %} <span class="badge paid">open now</span>{% endif %}{% if c.abn %}<div class="muted small">ABN {{ c.abn }}</div>{% endif %}</td>
+  {% if c.f %}
+  <td class="n">{{ c.f.cash|money if c.f.cash is defined else '—' }}</td>
+  <td class="n">{{ c.f.owed|money if c.f.owed is defined else '—' }}</td>
+  <td class="n {{ 'neg' if c.f.overdue is defined and c.f.overdue > 0 }}">{{ c.f.overdue|money if c.f.overdue is defined else '—' }}</td>
+  <td class="n">{{ c.f.owe|money if c.f.owe is defined else '—' }}</td>
+  <td class="n {{ 'neg' if c.f.profit is defined and c.f.profit < 0 }}">{{ c.f.profit|money if c.f.profit is defined else '—' }}</td>
+  <td>{{ c.f.lock_date or '' }}</td>
+  {% else %}<td colspan="6" class="muted">Needs your password for this company</td>{% endif %}
+  <td style="white-space:nowrap;text-align:right">{% if not c.current %}<a class="btn sm pri" href="{{ url_for('companies.switch', cid=c.id) }}">Open</a>{% endif %}
+    {% if c.f and c.f.levels and c.id != 'main' and can_add %}<form method="post" class="inline" action="{{ url_for('companies.archive', cid=c.id) }}" data-confirm="Archive {{ c.name }}? Its books are kept and you can restore it any time."><button class="btn sm">Archive</button></form>{% endif %}</td>
+</tr>{% endfor %}
+</table></div>
+<p class="muted small" style="margin-top:8px">“—” means your user can't see that area in that company.</p>
+
+{% if can_add %}
+<div class="grid g2" id="add" style="margin-top:22px">
+  <form class="card" method="post" action="{{ url_for('companies.add') }}">
+    <h3>Add a company</h3><p class="muted">A new, empty set of books — for another company, trust or client. You'll be its administrator with your current sign-in.</p>
+    <div class="fields"><div class="wide"><label>Company name</label><input name="name" required placeholder="e.g. Harbourview Holdings Pty Ltd"></div>
+      <div><label>ABN (optional)</label><input name="abn"></div>
+      <div><label>Edition</label><select name="edition"><option value="enterprise">Enterprise</option><option value="basic">Basic</option></select></div>
+      <label class="check wide"><input type="checkbox" name="demo" value="1"> Fill with demo data (for practice)</label></div>
+    <button class="btn pri" style="margin-top:14px">Add company</button>
+  </form>
+  <form class="card" method="post" action="{{ url_for('companies.import_file') }}" enctype="multipart/form-data">
+    <h3>Bring in an existing company file</h3><p class="muted">From another computer or a client: a Riyeser Accounting company file (<code>company.db</code> or a backup). It's copied in; the original isn't changed. Open it with a user from that file.</p>
+    <input type="file" name="file" accept=".db,.sqlite,.riyeser" required>
+    <button class="btn" style="margin-top:14px">Bring it in</button>
+  </form>
+</div>
+{% endif %}
+
+{% if archived %}
+<div class="card" style="margin-top:22px"><h3>Archived companies</h3><p class="muted">Hidden from the list; their books are kept.</p>
+<table>{% for c in archived %}<tr><td>{{ c.name }}</td><td class="right"><form method="post" class="inline" action="{{ url_for('companies.archive', cid=c.id) }}"><input type="hidden" name="restore" value="1"><button class="btn sm">Restore</button></form></td></tr>{% endfor %}</table></div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Open {{ name }}{% endblock %}
+{% block content %}
+<div class="card" style="max-width:460px;margin:40px auto">
+  <h1 style="font-size:22px">Open {{ name }}</h1>
+  <p class="muted">Your user <b>{{ username }}</b> has a different password in this company. Enter it once to open it.</p>
+  <form method="post"><label>Password for {{ name }}</label><input name="password" type="password" autofocus required>
+  <div class="actions" style="margin-top:14px"><button class="btn pri">Open company</button><a class="btn" href="{{ url_for('companies.index') }}">Back</a></div></form>
+  <p class="muted small" style="margin-top:14px">Tip: an administrator can give you the same password in every company from <b>Setup → Users &amp; roles</b>, so one sign-in opens them all.</p>
+</div>
+{% endblock %}

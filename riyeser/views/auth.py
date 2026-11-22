@@ -29,20 +29,33 @@ def setup_company():
 
 @bp.route("/login", methods=["GET", "POST"])
 def login():
+    from .. import companies as co
+    choices = co.all_companies()
     if request.method == "POST":
-        db = get_db()
-        u = db.execute("SELECT * FROM users WHERE username=? AND active=1",
-                       (request.form.get("username", "").strip(),)).fetchone()
-        if u and check_password_hash(u["password_hash"], request.form.get("password", "")):
+        cid = request.form.get("company") or co.MAIN
+        path = co.path_of(cid) if any(c["id"] == cid for c in choices) else None
+        if not path:
+            cid, path = co.MAIN, co.path_of(co.MAIN)
+        with co.using(path):
+            db = get_db()
+            u = db.execute("SELECT * FROM users WHERE username=? AND active=1",
+                           (request.form.get("username", "").strip(),)).fetchone()
+            ok = bool(u and check_password_hash(u["password_hash"], request.form.get("password", "")))
+            if ok:
+                audit(db, "login", u["username"])
+                db.commit()
+        if ok:
             session.clear()
+            access = co.access_after_login(u["username"], u["password_hash"])
+            access[cid] = u["id"]
+            session["access"] = access
+            session["co"] = cid
             session["uid"] = u["id"]
             g.user = u
-            audit(db, "login", u["username"])
-            db.commit()
             nxt = request.args.get("next") or ""
             return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("core.dashboard"))
         flash("Invalid username or password.", "error")
-    return render_template("auth/login.html")
+    return render_template("auth/login.html", choices=choices)
 
 
 def _local_reset_allowed():
@@ -90,8 +103,17 @@ def logout():
 @bp.route("/users")
 @admin_only
 def users():
+    from .. import companies as co
     rows = get_db().execute("SELECT * FROM users ORDER BY username").fetchall()
-    return render_template("auth/users.html", users=rows, areas=perms.AREAS, level_names=perms.LEVELS,
+    here = co.current_id()
+    others = []  # other companies where you're an administrator: you can give people access there too
+    for c in co.all_companies():
+        if c["id"] == here:
+            continue
+        me = co.user_row(c["path"], g.user["username"])
+        if me and me["role"] == "admin":
+            others.append({**c, "has": {r["username"] for r in _users_in(c["path"])}})
+    return render_template("auth/users.html", users=rows, others=others, areas=perms.AREAS, level_names=perms.LEVELS,
                            presets=perms.PRESETS, presets_json=json.dumps({k: v for k, (_, v) in perms.PRESETS.items()}),
                            levels=perms.levels_for)
 
@@ -136,5 +158,52 @@ def save_user():
                    (f["username"].strip(), generate_password_hash(f["password"]), f.get("full_name"), role,
                     json.dumps(levels) if levels else None))
         audit(db, "add_user", f"{f['username'].strip()}: {preset}")
+    _copy_to_other_companies(db, f)
     flash("User saved.", "ok")
     return redirect(url_for("auth.users"))
+
+
+def _users_in(path):
+    import sqlite3
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            return con.execute("SELECT username FROM users WHERE active=1").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+
+
+def _copy_to_other_companies(db, f):
+    """Give this person the same sign-in and access in the other companies ticked (where you're an administrator)."""
+    from .. import companies as co
+    wanted = f.getlist("also")
+    if not wanted:
+        return
+    username = (f.get("username") or "").strip()
+    if not username and f.get("id"):
+        username = db.execute("SELECT username FROM users WHERE id=?", (f["id"],)).fetchone()["username"]
+    src = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+    db.commit()
+    done = []
+    for cid in wanted:
+        path = co.path_of(cid)
+        me = co.user_row(path, g.user["username"]) if path else None
+        if not me or me["role"] != "admin" or cid == co.current_id():
+            continue
+        with co.using(path):
+            other = get_db()
+            row = other.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+            if row:
+                other.execute("UPDATE users SET password_hash=?, full_name=?, role=?, perms=?, active=1 WHERE id=?",
+                              (src["password_hash"], src["full_name"], src["role"], src["perms"], row["id"]))
+            else:
+                other.execute("INSERT INTO users (username, password_hash, full_name, role, perms) VALUES (?,?,?,?,?)",
+                              (username, src["password_hash"], src["full_name"], src["role"], src["perms"]))
+            audit(other, "save_user", f"{username}: copied from another company by {g.user['username']}")
+            other.commit()
+        done.append(cid)
+    if done:
+        flash(f"{username} can now also open {len(done)} other compan{'y' if len(done) == 1 else 'ies'} with the same sign-in and access.", "ok")

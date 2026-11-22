@@ -33,6 +33,7 @@
     {% set basic = company and company.edition == 'basic' %}
     <a class="brand" href="{{ url_for('core.dashboard') }}"><div class="logo">R</div><div>Riyeser Accounting<small>{{ 'Basic' if basic else 'Enterprise' }} · Riyeser Group</small></div></a>
     <a class="home{{ ' on' if ep == 'core.dashboard' }}" href="{{ url_for('core.dashboard') }}">{{ icon('home') }}<span>Home</span></a>
+    <a class="home{{ ' on' if ep.startswith('companies.') }}" href="{{ url_for('companies.index') }}"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21V8l6-4v17M9 21h12V10l-6-3v14M13 11h2M13 15h2M5 11h2M5 15h2"/></svg><span>Companies</span></a>
     {% if can('sales') %}{% call sec('pos', 'Shop counter') %}{{ nav('pos.register', 'Open register') }}{{ nav('pos.sales', "Today's sales") }}{% endcall %}{% endif %}
     {% if basic %}
     {% if can('sales') %}{% call sec('sales', 'Sales') %}{{ nav('documents.edit', 'New invoice', side='sale') }}{{ nav('documents.edit', 'New quote', side='sale', status='quote') }}{{ nav('documents.index', 'All invoices', side='sale') }}{{ nav('documents.pay', 'Receive payments', side='sale') }}{{ nav('contacts.index', 'Customers', kind='customer') }}{% endcall %}{% endif %}
@@ -54,7 +55,10 @@
   <div class="main">
     <header class="top">
       <button class="menu-btn" type="button" aria-label="Menu" onclick="document.body.classList.toggle('side-open')">☰</button>
-      <div class="co">{{ company.name if company }}{% if company and company.lock_date %}<small>Locked to {{ company.lock_date }}</small>{% endif %}</div>
+      <details class="co cosw"><summary><span class="coname">{{ company.name if company }}</span>{% if company and company.lock_date %}<small>Locked to {{ company.lock_date }}</small>{% endif %}<span class="caret"></span></summary><div class="dd left">
+        <div class="ddh">Switch company</div>
+        {% for c in my_companies %}<a href="{{ url_for('companies.switch', cid=c.id) }}" class="{{ 'on' if c.id == current_company }}">{{ c.name }}{% if c.abn %}<small>ABN {{ c.abn }}</small>{% endif %}</a>{% endfor %}
+        <a class="ddall" href="{{ url_for('companies.index') }}">All companies & overview →</a></div></details>
       {% if not basic and can('accounts') %}<form class="tsearch" action="{{ url_for('core.journal_list') }}" method="get" role="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg><input name="q" placeholder="Search transactions…" aria-label="Search transactions" value="{{ request.args.get('q', '') if ep == 'core.journal_list' }}"></form>{% endif %}
       {% if can('sales', 2) or can('purchases', 2) or can('banking', 2) %}<details class="newmenu"><summary class="btn pri">+ New</summary><div class="dd">
         {% if can('sales', 2) %}<a href="{{ url_for('documents.edit', side='sale') }}">Invoice</a><a href="{{ url_for('documents.edit', side='sale', status='quote') }}">Quote</a>{% endif %}

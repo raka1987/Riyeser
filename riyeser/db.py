@@ -49,7 +49,7 @@ def cents_str(cents) -> str:
 # ---------------------------------------------------------------- connection
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(current_app.config["DATABASE"])
+        g.db = sqlite3.connect(g.get("db_path") or current_app.config["DATABASE"])  # the company that's open
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db

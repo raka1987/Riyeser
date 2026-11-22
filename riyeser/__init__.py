@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 
 def create_app(test_config=None):
@@ -39,11 +39,22 @@ def create_app(test_config=None):
             if request.endpoint not in ("auth.setup_company", "static"):
                 return redirect(url_for("auth.setup_company"))
             return
+        from . import companies as co
+        g.db_path = None
+        if session.get("co") and session.get("co") != co.MAIN:
+            path = co.path_of(session["co"])
+            if path and session["co"] in (session.get("access") or {}):
+                g.db_path = path
+            else:
+                session.pop("co", None)
+                session.pop("uid", None)
         uid = session.get("uid")
         db = get_db()
-        if app.config.get("_migrated_db") != app.config["DATABASE"]:
+        migrated = app.config.setdefault("_migrated_dbs", set())
+        here = g.db_path or app.config["DATABASE"]
+        if here not in migrated:
             dbmod.migrate(db)
-            app.config["_migrated_db"] = app.config["DATABASE"]
+            migrated.add(here)
         if uid:
             g.user = db.execute("SELECT * FROM users WHERE id=? AND active=1", (uid,)).fetchone()
         g.company = db.execute("SELECT * FROM company WHERE id=1").fetchone()
@@ -69,7 +80,11 @@ def create_app(test_config=None):
     def inject():
         from .licence import status as licence_status
         from . import perms
+        from . import companies as co
+        acc = session.get("access") or {}
+        mine = [c for c in co.all_companies() if c["id"] in acc] if g.get("user") else []
         return dict(user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
+                    my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     can=lambda area, need=1: perms.can(area, need), lv=lambda area: perms.level(area),
                     report_area=perms.report_area)
 
@@ -78,8 +93,9 @@ def create_app(test_config=None):
         flash("Your user doesn't have permission to do that. Ask an administrator.", "error")
         return redirect(request.referrer or url_for("core.dashboard"))
 
-    from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help
+    from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help, companies
     app.register_blueprint(auth.bp)
+    app.register_blueprint(companies.bp)
     app.register_blueprint(core.bp)
     app.register_blueprint(contacts.bp)
     app.register_blueprint(documents.bp)

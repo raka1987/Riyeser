@@ -30,6 +30,7 @@
     </table>
   </div>
   <div class="admin-note muted" {% if u.role != 'admin' %}hidden{% endif %}>Administrators have full access to every area.</div>
+  {% if others %}<div class="also"><span class="muted">Same sign-in and access in:</span>{% for c in others %}<label class="check"><input type="checkbox" name="also" value="{{ c.id }}" {{ 'checked disabled' if u.username in c.has }}> {{ c.name }}{% if u.username in c.has %} <span class="muted small">(already)</span>{% endif %}</label>{% endfor %}</div>{% endif %}
   <div style="margin-top:12px"><button class="btn pri">Save {{ u.username }}</button></div>
 </form>
 {% endfor %}
@@ -42,6 +43,7 @@
     <div><label>Starting access</label><select name="preset">{% for key, (name, _) in presets.items() %}<option value="{{ key }}" {{ 'selected' if key == 'readonly' }}>{{ name }}</option>{% endfor %}<option value="admin">Administrator</option></select></div>
     <div><label>&nbsp;</label><button class="btn pri">Add user</button></div>
   </div>
+  {% if others %}<div class="also" style="margin-top:12px"><span class="muted">Also give them access in:</span>{% for c in others %}<label class="check"><input type="checkbox" name="also" value="{{ c.id }}"> {{ c.name }}</label>{% endfor %}</div>{% endif %}
   <p class="muted small" style="margin:10px 0 0">You can fine-tune each area after adding them.</p>
 </form>
 {% endblock %}

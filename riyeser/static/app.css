@@ -128,3 +128,14 @@ input[type=checkbox]{width:auto}
 .perm-grid{border:1px solid var(--line);border-radius:12px;overflow:hidden}.perm-grid th.c,.perm-grid td.c{text-align:center;width:110px}
 .perm-grid input[type=radio]{width:18px;height:18px;accent-color:var(--brand);cursor:pointer}.small{font-size:12px}
 @media (max-width:900px){.user-fields{grid-template-columns:1fr 1fr}.perm-grid th.c,.perm-grid td.c{width:auto;padding:6px 4px}}
+
+/* company switcher */
+.cosw{margin-right:auto;min-width:0}.cosw>summary{display:flex;align-items:center;gap:8px;padding:6px 10px;margin-left:-10px;border-radius:10px}
+.cosw>summary:hover{background:#f1f5f9}.cosw .coname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cosw .caret{width:7px;height:7px;border-right:1.8px solid #94a3b8;border-bottom:1.8px solid #94a3b8;transform:rotate(45deg);margin:-3px 2px 0 2px;flex-shrink:0}
+.dd.left{left:0;right:auto;min-width:280px;max-height:70vh;overflow:auto}.dd .ddh{padding:6px 12px;font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700}
+.dd a small{display:block;color:var(--muted);font-size:11.5px}.dd a.on{background:var(--brand-l);color:var(--brand);font-weight:600}
+.dd .ddall{border-top:1px solid var(--line);margin-top:4px;color:var(--brand);font-weight:600}
+tr.co-current td{background:#f5f9ff}
+.top .cosw{overflow:visible}
+.also{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin-top:12px;font-size:13.5px}.also .check{margin:0}
