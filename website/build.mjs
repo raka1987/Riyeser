@@ -40,7 +40,7 @@ const PROGRAMS = [
     shot: 'accounting.webp',
     features: [
       ['Quotes → invoices → payments', 'Turn a quote into an order and an invoice, then record payments against several invoices at once.'],
-      ['Bills & suppliers', 'Purchase orders, bills and Pay Bills, with a supplier card file.'],
+      ['Bills & suppliers', 'Purchase orders, bills and paying bills, with supplier contacts.'],
       ['Banking', 'Spend and receive money, transfers, bank reconciliation and bank statement import.'],
       ['GST / BAS', 'GST tax codes and a BAS summary (G1, 1A, 1B, W1, W2 and more).'],
       ['Reports', 'Profit & Loss, Balance Sheet, aged receivables and payables, job P&L — print or export to Excel.'],
@@ -186,7 +186,7 @@ page({
       <p>Double-entry accounting that reads like plain English — and a home screen that shows who's overdue the moment you sit down.</p>
       <ul class="ticks"><li>Quotes → invoices → payments, bills and purchase orders</li><li>Bank statement import and reconciliation</li><li>GST/BAS summary, profit &amp; loss and balance sheet — print or export to CSV</li><li>Pay runs and payslips with Riyeser Payroll</li></ul>
       <p class="uses">Uses: <a href="${up}programs/accounting.html">Accounting</a> · <a href="${up}programs/payroll.html">Payroll</a> · <a href="${up}programs/central.html">Central</a></p></div>
-    <img src="${up}assets/accounting.webp" alt="Riyeser Accounting dashboard with income, expenses, bank accounts and money owed" loading="lazy" width="1400" height="1053"></div>
+    <img src="${up}assets/accounting.webp" alt="Riyeser Accounting dashboard with income, expenses, bank accounts and money owed" loading="lazy" width="1400" height="900"></div>
   <div class="panel" data-panel="trades" hidden><div class="t">
       <h3>Every service on the drawing, as it goes in</h3>
       <p>Map cables, pipes and ducts on your PDF drawings with photos, inspections and test results on each item. The as-builts are done at handover.</p>
