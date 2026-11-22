@@ -509,14 +509,14 @@ test('Type › Year filing with full tidy names (the default layout)', async () 
   const pool = path.join(tmp, 'Desktop'); fs.mkdirSync(pool);
   const org = path.join(tmp, 'Organised');
   fs.writeFileSync(path.join(pool, 'scan0042.txt'), 'TAX INVOICE\nAcme Plumbing\nInvoice Number INV-1042\nInvoice Date: 3 November 2025\nTotal $1,200.00');
-  fs.writeFileSync(path.join(pool, 'Westin Data schematic.txt'), 'ELECTRICAL SERVICES\nDATA SCHEMATIC\nDRAWN BY AB CHECKED BY CD\nDRAWING NO E-301 REVISION B\nNOT FOR CONSTRUCTION DO NOT SCALE\nWestin Hotel\nDate: 6/11/2026');
+  fs.writeFileSync(path.join(pool, 'Harbourview Data schematic.txt'), 'ELECTRICAL SERVICES\nDATA SCHEMATIC\nDRAWN BY AB CHECKED BY CD\nDRAWING NO E-301 REVISION B\nNOT FOR CONSTRUCTION DO NOT SCALE\nHarbourview Hotel\nDate: 6/11/2026');
   fs.writeFileSync(path.join(pool, 'random thoughts.txt'), 'hello world');
   const old = new Date('2024-05-01').getTime() / 1000; for (const f of fs.readdirSync(pool)) fs.utimesSync(path.join(pool, f), old, old);
   const s = { ...settings, filingLayout: undefined, nameStyle: 'full', organisedRoot: org };
   const r = await reviewFiles([pool], s);
   const to = (n) => path.relative(org, r.plan.find((p) => p.name === n).to);
   assert.equal(to('scan0042.txt'), path.join('Invoices', '2025', '2025-11-03 Acme Plumbing Invoice INV-1042.txt'));
-  assert.match(to('Westin Data schematic.txt'), /^Drawings[\\/]2026[\\/]2026-11-06 .*Drawing E-301 Rev B/);
+  assert.match(to('Harbourview Data schematic.txt'), /^Drawings[\\/]2026[\\/]2026-11-06 .*Drawing E-301 Rev B/);
   assert.equal(path.dirname(to('random thoughts.txt')), path.join('Text files', '2024')); // unknown type: by format, by year
   // keep names
   const k = await reviewFiles([pool], { ...s, nameStyle: 'keep' });
@@ -532,11 +532,11 @@ test('Sort by type: refiles old layouts into Type › Year, leaves program folde
   put(path.join(org, 'Archive', 'Duplicates', '2026-11-18', 'old copy.txt'), 'TAX INVOICE\nInvoice Number INV-9\nTotal $1.00');
   put(path.join(docs, 'Riyeser', 'Payroll', 'Payslips', 'Payslips paid.pdf'), '%PDF-1.4 payslip');
   put(path.join(docs, 'Riyeser', 'Payroll', 'backup.json'), '{}');
-  put(path.join(docs, 'quote westin.txt'), 'QUOTATION\nWestin\nQuote number Q-5\nTotal $5,000.00');
+  put(path.join(docs, 'quote harbourview.txt'), 'QUOTATION\nHarbourview\nQuote number Q-5\nTotal $5,000.00');
   const r = await reviewFiles([docs], { ...settings, filingLayout: 'typeYear', nameStyle: 'keep', organisedRoot: org }, { refileAll: true });
   const to = (n) => { const p = r.plan.find((x) => x.name === n); return p && path.relative(org, p.to); };
   assert.equal(to('inv1.txt'), path.join('Invoices', '2025', 'inv1.txt'));       // old Clients/Acme layout -> Type/Year, name kept
-  assert.equal(to('quote westin.txt'), path.join('Quotes', '2025', 'quote westin.txt'));
+  assert.equal(to('quote harbourview.txt'), path.join('Quotes', '2025', 'quote harbourview.txt'));
   assert.equal(to('old copy.txt'), undefined);                                     // Archive left alone
   assert.ok(!r.plan.some((x) => x.from.includes(`${path.sep}Riyeser${path.sep}`)));  // Payroll's own folder left alone
   assert.ok(r.kept.some((k) => /Riyeser$/.test(k.path)));
@@ -549,14 +549,14 @@ test('Find a file: filters by type, year and kind, and finds old names', () => {
   const root = path.join(os.tmpdir(), 'Organised');
   const now = Date.now();
   idx.docs = {
-    [path.join(root, 'Invoices', '2026', 'inv7.pdf')]: { name: 'inv7.pdf', dir: path.join(root, 'Invoices', '2026'), ext: '.pdf', mtime: now, size: 1, text: 'Westin hotel invoice', docType: 'Invoices' },
-    [path.join(root, 'Drawings', '2025', 'E-301.pdf')]: { name: 'E-301.pdf', dir: path.join(root, 'Drawings', '2025'), ext: '.pdf', mtime: now, size: 1, text: 'Westin data schematic', docType: 'Plans & Drawings', formerNames: ['Westin Data schematic.pdf'] },
+    [path.join(root, 'Invoices', '2026', 'inv7.pdf')]: { name: 'inv7.pdf', dir: path.join(root, 'Invoices', '2026'), ext: '.pdf', mtime: now, size: 1, text: 'Harbourview hotel invoice', docType: 'Invoices' },
+    [path.join(root, 'Drawings', '2025', 'E-301.pdf')]: { name: 'E-301.pdf', dir: path.join(root, 'Drawings', '2025'), ext: '.pdf', mtime: now, size: 1, text: 'Harbourview data schematic', docType: 'Plans & Drawings', formerNames: ['Harbourview Data schematic.pdf'] },
     [path.join(root, 'Payroll', '2026', 'wages.xlsx')]: { name: 'wages.xlsx', dir: path.join(root, 'Payroll', '2026'), ext: '.xlsx', mtime: now, size: 1, text: 'hours', docType: 'Payroll' },
   };
-  const all = idx.find({ q: 'westin' }, { organisedRoot: root });
+  const all = idx.find({ q: 'harbourview' }, { organisedRoot: root });
   assert.equal(all.total, 2);
   assert.deepEqual(all.facets.type, { Invoices: 1, Drawings: 1 });
-  assert.equal(idx.find({ q: 'westin', type: 'Drawings' }, { organisedRoot: root }).results[0].name, 'E-301.pdf');
+  assert.equal(idx.find({ q: 'harbourview', type: 'Drawings' }, { organisedRoot: root }).results[0].name, 'E-301.pdf');
   assert.equal(idx.find({ year: '2026', kind: 'Excel' }, { organisedRoot: root }).results[0].name, 'wages.xlsx');
   assert.equal(idx.find({ q: 'schematic' }, { organisedRoot: root }).total, 1); // old name / contents
 });
@@ -568,7 +568,7 @@ test('Riyeser Central reads money owed and owing from the Accounting company fil
   db.run(`CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT);
     CREATE TABLE contacts (id INTEGER PRIMARY KEY, kind TEXT, name TEXT);
     CREATE TABLE documents (id INTEGER PRIMARY KEY, side TEXT, status TEXT, number TEXT, contact_id INTEGER, date TEXT, due_date TEXT, total INTEGER, amount_paid INTEGER);
-    INSERT INTO company VALUES (1, 'Westin Test Pty Ltd');
+    INSERT INTO company VALUES (1, 'Harbourview Test Pty Ltd');
     INSERT INTO contacts VALUES (1, 'customer', 'Bayside Cafe'), (2, 'supplier', 'CityPower');
     INSERT INTO documents VALUES (1, 'sale', 'open', 'INV1', 1, '2026-10-01', '2026-10-31', 150000, 50000),
       (2, 'sale', 'paid', 'INV2', 1, '2026-10-01', '2026-10-31', 9900, 9900),
@@ -579,7 +579,7 @@ test('Riyeser Central reads money owed and owing from the Accounting company fil
   const before = fs.readFileSync(file);
   const { pendingPayments } = require('../src/central/sources');
   const r = await pendingPayments(file, { today: '2026-11-22' });
-  assert.equal(r.company, 'Westin Test Pty Ltd');
+  assert.equal(r.company, 'Harbourview Test Pty Ltd');
   assert.deepEqual(r.totals, { owedToYou: 1000, overdueToYou: 1000, youOwe: 484, overdueYouOwe: 0 });
   assert.equal(r.receivables[0].contact, 'Bayside Cafe');
   assert.ok(r.receivables[0].overdue);

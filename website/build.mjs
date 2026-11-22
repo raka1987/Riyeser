@@ -12,6 +12,8 @@ const SITE = process.env.SITE_URL || 'https://riyeser.com';
 // Installers are attached to the latest GitHub Release under these fixed names, so links never go stale.
 const RELEASES = 'https://github.com/raka1987/Riyeser/releases/latest/download';
 const EMAIL = 'info@riyeser.com';
+// Turn on once a release with RiyeserServices-Setup.exe is published.
+const SERVICES_WIN = process.env.SERVICES_WIN === '1';
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
 const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');
@@ -82,7 +84,7 @@ const PROGRAMS = [
       ['Scans', 'Turn scanned pages into searchable, editable text.'],
       ['Convert', 'Make PDFs from pictures, Word and Excel — or turn a PDF back into Word.'],
     ] },
-  { id: 'services', name: 'Riyeser Services', short: 'Services', icon: '🏗', file: 'RiyeserServices-Setup.exe', link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
+  { id: 'services', name: 'Riyeser Services', short: 'Services', icon: '🏗', file: SERVICES_WIN ? 'RiyeserServices-Setup.exe' : null, link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
     one: 'Map every cable, pipe and duct on your drawings as it goes in — with inspections, test results and photos — and the as-builts are done at handover.',
     pitch: 'Map every service while the building goes up.', custom: true },
 ];
@@ -104,7 +106,7 @@ function withVersions(html) {
 function page({ path, title, description, active, body }) {
   const depth = path.split('/').length - 1;
   const up = depth ? '../'.repeat(depth) : '';
-  const nav = [['programs', 'Programs', `${up}#programs`], ['downloads', 'Downloads', `${up}downloads.html`], ['pricing', 'Pricing', `${up}pricing.html`], ['support', 'Support', `${up}support.html`]];
+  const nav = [['programs', 'Programs', `${up}#programs`], ['downloads', 'Downloads', `${up}downloads.html`], ['pricing', 'Pricing', `${up}pricing.html`], ['help', 'Help', `${up}help.html`]];
   if (SERVICES_MOVED) nav.push(['signin', 'Services sign in', `${SERVICES_APP}/?signin`]);
   const html = `<!doctype html>
 <html lang="en">
@@ -134,7 +136,7 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
 <main>${body(up)}</main>
 <footer><div class="c"><b>Riyeser Group</b>
   ${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html">${p.short}</a>`).join('')}
-  <a href="${up}downloads.html">Downloads</a><a href="${up}support.html">Support</a><a href="${up}terms.html">Terms</a>
+  <a href="${up}downloads.html">Downloads</a><a href="${up}help.html">Help</a><a href="${up}terms.html">Terms</a>
   <span class="r">© ${new Date().getFullYear()} Riyeser Group</span></div></footer>
 <script>addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('scrolled',scrollY>8),{passive:true})</script>
 <script>/* Download buttons always point at the newest release file, whatever its exact name. */
@@ -158,34 +160,90 @@ const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in o
 
 // ---------- home ----------
 page({
-  path: 'index.html', title: 'Riyeser — your whole business, in one place', active: '',
-  description: 'Free Windows programs for small business: accounting, payroll, files, PDFs and building services, with one home screen. No sign-up, works offline.',
+  path: 'index.html', title: 'Riyeser — bookkeeping, payroll and job records for small business', active: '',
+  description: 'Free Windows programs for bookkeepers, small business offices and building services teams: accounting, payroll, file finding, PDFs and job records. No sign-up, works offline.',
   body: (up) => `
-<div class="c hero">
-  <span class="eyebrow">NEW · Riyeser Central 1.3 · free</span>
-  <h1>Your whole business, <span class="grad">in one place</span></h1>
-  <p class="lead">Accounting, payroll, files, PDFs and building services — simple Windows programs that work together, with one home screen that tells you what needs doing today.</p>
-  <div class="ctas"><a class="btn p" href="${dl(prog('central'))}">⬇ Download free for Windows</a><a class="btn s" href="#programs">See the programs</a></div>
+<div class="hero2"><div class="c hero">
+  <span class="eyebrow">Free during early access · Windows 10 &amp; 11</span>
+  <h1>Books, pay runs and job records — <span class="grad">sorted</span>.</h1>
+  <p class="lead">Simple Windows programs for bookkeepers, small business offices and building services teams. Everything stays on your PC, works without internet, and there's nothing to sign up for.</p>
+  <div class="ctas"><a class="btn p big" href="${dl(prog('central'))}">⬇ Download free for Windows</a><a class="btn s big" href="#who">Who it's for</a></div>
   <p style="font-size:13px;color:var(--faint);margin:14px 0 0">${freeLine}</p>
   <div class="shot"><picture><source srcset="${up}assets/central-dark.webp" media="(prefers-color-scheme: dark)"><img src="${up}assets/central-light.webp" alt="Riyeser Central home screen showing money owed, today's meetings, to-dos and recent files" width="1600" height="1000"></picture></div>
-</div>
-<div class="c trust"><span>WORKS OFFLINE</span><span>YOUR DATA STAYS ON YOUR PC</span><span>NO ADMIN RIGHTS NEEDED</span><span>EVERY CHANGE CAN BE UNDONE</span></div>
+</div></div>
+<div class="c pills"><span>📴 Works offline</span><span>🔒 Your data stays on your PC</span><span>🧑‍💼 No admin rights needed</span><span>↩️ Every change can be undone</span><span>💳 No card, no sign-up</span></div>
+
+<section id="who" class="c">
+  <h2 class="h2">Built for the way you work</h2>
+  <p class="sub">Pick what sounds like you. Install only what you need — they all share one home screen.</p>
+  <div class="tabs" role="tablist">
+    <button class="tab on" role="tab" aria-selected="true" data-tab="books">📒 Bookkeepers &amp; accountants</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="trades">🏗 Building services &amp; trades</button>
+    <button class="tab" role="tab" aria-selected="false" data-tab="office">🗂 Small business office</button>
+  </div>
+  <div class="panel on" data-panel="books"><div class="t">
+      <h3>Keep the books without the jargon</h3>
+      <p>Double-entry accounting that reads like plain English — and a home screen that shows who's overdue the moment you sit down.</p>
+      <ul class="ticks"><li>Quotes → invoices → payments, bills and purchase orders</li><li>Bank statement import and reconciliation</li><li>GST/BAS summary, profit &amp; loss and balance sheet — print or export to CSV</li><li>Pay runs and payslips with Riyeser Payroll</li></ul>
+      <p class="uses">Uses: <a href="${up}programs/accounting.html">Accounting</a> · <a href="${up}programs/payroll.html">Payroll</a> · <a href="${up}programs/central.html">Central</a></p></div>
+    <img src="${up}assets/accounting.webp" alt="Riyeser Accounting dashboard with income, expenses, bank accounts and money owed" loading="lazy" width="1400" height="1053"></div>
+  <div class="panel" data-panel="trades" hidden><div class="t">
+      <h3>Every service on the drawing, as it goes in</h3>
+      <p>Map cables, pipes and ducts on your PDF drawings with photos, inspections and test results on each item. The as-builts are done at handover.</p>
+      <ul class="ticks"><li>Works on site with no signal — on this PC or with an online account</li><li>Trace any run from end to end</li><li>Defects, RFIs and hold points in one register</li><li>Share a read-only link with your client</li></ul>
+      <p class="uses">Uses: <a href="${up}programs/services.html">Services</a> · <a href="${up}programs/pdf.html">PDF</a> · <a href="${up}programs/desk-assistant.html">Desk Assistant</a></p></div>
+    <img src="${up}assets/services-trace.webp" alt="Riyeser Services tracing a water main between two points on a floor plan" loading="lazy" width="1500" height="783"></div>
+  <div class="panel" data-panel="office" hidden><div class="t">
+      <h3>Find any file in seconds</h3>
+      <p>Invoices, drawings, payslips and photos filed by type and year — with one search that finds them by name, by the words inside, or by an old name.</p>
+      <ul class="ticks"><li>Sort by type with a preview first, and Undo after</li><li>Spots duplicate copies, even a Word file and its PDF</li><li>Fill in, sign and combine PDFs</li><li>Meetings and to-dos on the home screen</li></ul>
+      <p class="uses">Uses: <a href="${up}programs/desk-assistant.html">Desk Assistant</a> · <a href="${up}programs/pdf.html">PDF</a> · <a href="${up}programs/central.html">Central</a></p></div>
+    <img src="${up}assets/desk-find.webp" alt="Riyeser Desk Assistant search with type and year filters" loading="lazy" width="1150" height="900"></div>
+</section>
+
+<section class="band"><div class="c">
+  <h2 class="h2">Sound familiar?</h2>
+  <p class="sub">The everyday jobs that eat your week — handled.</p>
+  <div class="pains">
+    <div class="pain"><b>“Who still owes us?”</b><p>Riyeser Central shows money owed and overdue the moment you open it, and who to chase first.</p></div>
+    <div class="pain"><b>“Where did I save that?”</b><p>One search across every folder — by name, by the words inside, even by the file's old name.</p></div>
+    <div class="pain"><b>“Payslips take all afternoon.”</b><p>Timesheets in, pay run done, payslips saved as PDFs and ready to send.</p></div>
+    <div class="pain"><b>“The as-builts are a mess.”</b><p>Record each service on the drawing as it's installed, with photos and tests attached.</p></div>
+  </div>
+</div></section>
+
 <section id="programs" class="c">
-  <h2 class="h2">Pick the programs you need</h2>
+  <h2 class="h2">The programs</h2>
   <p class="sub">Start with one. Add more any time — they all show up in Riyeser Central.</p>
   <div class="grid">${PROGRAMS.map((p) => `<a class="card" href="${up}programs/${p.id}.html">${iconBox(p)}<h3>${p.short === 'Central' ? 'Riyeser Central' : p.short}</h3><p>${esc(p.one)}</p><span class="more">Learn more →</span></a>`).join('')}</div>
 </section>
-<div class="c">
-  <div class="feat"><div class="t"><div class="k">Accounting</div><h3>Know who owes you — and who you owe</h3><p>Real double-entry books without the jargon. Riyeser Central shows what's overdue the moment you sit down.</p>
-    <ul class="ticks"><li>Quotes → invoices → payments</li><li>Bank reconciliation & statement import</li><li>GST/BAS summary, P&L and balance sheet</li></ul>
-    <p style="margin-top:18px"><a class="btn s" href="${up}programs/accounting.html">More about Accounting</a></p></div>
-    <img src="${up}assets/accounting.webp" alt="Riyeser Accounting dashboard" loading="lazy" width="1400" height="1050"></div>
-  <div class="feat r"><div class="t"><div class="k">Desk Assistant</div><h3>Never lose a file again</h3><p>Everything filed by type and year — invoices, drawings, payroll — and one search that finds it by name, contents or an old name.</p>
-    <ul class="ticks"><li>Sort by type, with a preview and Undo</li><li>Finds duplicates, even Word + PDF copies</li><li>Where are my files? — every move recorded</li></ul>
-    <p style="margin-top:18px"><a class="btn s" href="${up}programs/desk-assistant.html">More about Desk Assistant</a></p></div>
-    <img src="${up}assets/desk-find.webp" alt="Riyeser Desk Assistant search with type and year filters" loading="lazy" width="1400" height="1100"></div>
-</div>
-${ctaBlock(up)}`,
+
+<section class="c">
+  <h2 class="h2">Up and running in three minutes</h2>
+  <div class="how">
+    <div><span class="n">1</span><h3>Download</h3><p>One free file. No account, no card, no admin password.</p></div>
+    <div><span class="n">2</span><h3>Install in one click</h3><p>It sets itself up for your Windows user and opens Riyeser Central.</p></div>
+    <div><span class="n">3</span><h3>Add what you need</h3><p>Accounting, Payroll, Services and more appear on the home screen as you install them, and Central tells you when updates are ready.</p></div>
+  </div>
+</section>
+
+<section class="c">
+  <div class="safe">
+    <div><div class="k">Your business, your computer</div><h2>Safe by design</h2>
+      <p>Your books, staff records and files stay on your own PC — not on someone else's server. Nothing is ever deleted without asking, and almost everything can be undone.</p></div>
+    <ul class="ticks"><li>Works with no internet — on site, in the car, anywhere</li><li>Forgot your password? Reset it on the PC without losing anything</li><li>Payroll keeps a backup every day</li><li>Desk Assistant records every file it moves, with “Put everything back”</li><li>Want online access too? Riyeser Services can sync to an online account when you choose</li></ul>
+  </div>
+</section>
+
+<section class="c faq" style="max-width:860px">
+  <h2 class="h2">Questions</h2>
+  <details><summary>Is it really free?</summary><p>Yes — every program is free while we're in early access. If we introduce paid plans later, you'll be told well before anything changes, and your information stays yours. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>Does it need the internet?</summary><p>No. Everything works offline. Riyeser Services can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
+  <details><summary>Will it work on a Mac?</summary><p>Not yet — the programs are for Windows 10 and 11. Riyeser Services also works in any web browser at riyeser.com/app.</p></details>
+  <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has step-by-step answers for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
+</section>
+${ctaBlock(up, 'Get started free today', 'Download Riyeser Central, add the programs you need, and keep everything on your own computer.')}
+<script>document.querySelectorAll('.tab').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('.tab').forEach(function(x){var on=x===b;x.classList.toggle('on',on);x.setAttribute('aria-selected',on)});document.querySelectorAll('.panel').forEach(function(p){var on=p.dataset.panel===b.dataset.tab;p.hidden=!on;p.classList.toggle('on',on)})})})</script>`,
 });
 
 // ---------- program pages ----------
@@ -256,8 +314,8 @@ ${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyeser Central — f
   ${iconBox(p)}<div class="k" style="margin-top:14px">Riyeser Services</div>
   <h1>Map every service while the building goes up</h1>
   <p class="lead">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
-  <div class="ctas" style="justify-content:flex-start"><a class="btn p" href="${SERVICES_APP}/?demo">Try it now, free</a><a class="btn s" href="${RELEASES}/RiyeserServices-Setup.exe">⬇ Windows app</a><a class="btn s" href="${SERVICES_APP}/">Sign in to your projects</a></div>
-  <p style="font-size:13px;color:var(--faint);margin:14px 0 0">Works in any web browser, on phones and tablets — or install the Windows app for its own window and desktop icon.</p>
+  <div class="ctas" style="justify-content:flex-start"><a class="btn p" href="${SERVICES_APP}/?demo">Try it now, free</a>${SERVICES_WIN ? `<a class="btn s" href="${RELEASES}/RiyeserServices-Setup.exe">⬇ Windows app</a>` : ''}<a class="btn s" href="${SERVICES_APP}/">Sign in to your projects</a></div>
+  ${SERVICES_WIN ? '<p style="font-size:13px;color:var(--faint);margin:14px 0 0">Works in any web browser, on phones and tablets — or install the Windows app: it works on your PC with no account and no internet, and can sync to your online account.</p>' : ''}
   <p style="font-size:13px;color:var(--faint);margin:14px 0 0">No sign-up for the demo. Explore a marked-up resort with a guided tour.</p>
 </div><img class="pshot" src="${up}assets/services-trace.webp" alt="A water main route highlighted on a floor plan" width="1200" height="900"></div>
 <section class="c"><h2 class="h2">How it works</h2><p class="sub">From the first drawing to the handover pack.</p>
@@ -321,33 +379,83 @@ ${ctaBlock(up)}`,
 
 // ---------- support ----------
 page({
-  path: 'support.html', title: 'Riyeser support', active: 'support',
-  description: 'Help with installing and using Riyeser programs.',
-  body: (up) => `
-<div class="c" style="padding:56px 24px 0"><h1 style="font-size:clamp(32px,5vw,48px);letter-spacing:-1px">Support</h1>
-  <p class="lead" style="margin:10px 0 30px;text-align:left">Questions, ideas or something not working? Email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> — a real person will reply.</p></div>
-<section class="c faq" style="max-width:860px;padding-top:0">
-  <details open><summary>Windows says “Windows protected your PC”</summary><p>Click <b>More info → Run anyway</b>. This appears for new programs until they're digitally signed, which we're arranging.</p></details>
-  <details><summary>How do I update?</summary><p>Download the latest version from <a class="more" href="${up}downloads.html">Downloads</a> and run it. It replaces the old version and keeps all your data.</p></details>
-  <details><summary>Where is my information kept?</summary><p>On your own computer. Accounting keeps its books in <code>.riyeser</code> in your user folder; the other programs keep their settings in your Windows user profile.</p></details>
-  <details><summary>Desk Assistant moved a file — where did it go?</summary><p>Open Desk Assistant → <b>Where are my files?</b>. Every move is listed, with an Open button and a <b>Put everything back</b> button.</p></details>
-  <details><summary>How do I uninstall?</summary><p>Windows <b>Settings → Apps → Installed apps</b>, find the program, then <b>Uninstall</b>. Your documents are never deleted.</p></details>
-</section>
-${ctaBlock(up)}`,
+  path: 'help.html', title: 'Help Centre — Riyeser', active: 'help',
+  description: 'Step-by-step help for Riyeser Central, Accounting, Payroll, Services, Desk Assistant and PDF: installing, passwords, finding files, backups and more.',
+  body: (up) => {
+    const q = (title, html, open = false) => `<details${open ? ' open' : ''}><summary>${title}</summary>${html}</details>`;
+    const SECTIONS = [
+      { id: 'start', icon: '<div class="icon i-central">⬇</div>', name: 'Installing & updating', items: [
+        q('Windows says “Windows protected your PC”', '<p>Click <b>More info</b>, then <b>Run anyway</b>. Windows shows this for new programs until they are digitally signed, which we are arranging. It is safe to continue if you downloaded the file from riyeser.com.</p>', true),
+        q('Do I need an administrator password?', '<p>No. Each program installs just for your Windows user, so no admin rights are needed.</p>'),
+        q('How do I update?', '<p>Open <b>Riyeser Central</b> — it checks for updates and shows a banner when one is ready. Click <b>Install updates</b>. Or download the newest version from <a class="more" href="' + up + 'downloads.html">Downloads</a> and run it: it installs over the old version and <b>keeps all your information</b>.</p>'),
+        q('How do I uninstall a program?', '<p>Windows <b>Settings → Apps → Installed apps</b>, find the program and choose <b>Uninstall</b>. Your documents, books and records are not deleted.</p>'),
+        q('Moving to a new computer', '<ol><li>Install the programs on the new computer.</li><li>Copy across your information: Accounting\'s <code>.riyeser</code> folder (in your user folder) and Payroll\'s <code>Documents\\Riyeser\\Payroll</code> folder. Email us if you\'d like a hand.</li></ol>'),
+      ] },
+      { id: 'central', icon: '<div class="icon i-central">R</div>', name: 'Riyeser Central', items: [
+        q('A program I installed isn\'t showing', '<p>Under <b>More Riyeser apps</b>, click <b>Locate…</b> next to its name and pick the program (or its desktop shortcut). Central remembers it from then on.</p>'),
+        q('The Money panel is empty', '<p>It reads from Riyeser Accounting. Open Accounting, set up your company and enter an invoice or bill — the totals then appear in Central.</p>'),
+        q('My meetings don\'t show under Today', '<p>Open Desk Assistant → <b>Settings → Calendars</b> and connect your calendar.</p>'),
+      ] },
+      { id: 'accounting', icon: '<div class="icon i-accounting">📒</div>', name: 'Accounting', items: [
+        q('I forgot my password', '<ol><li>On the sign-in screen, click <b>Forgot password?</b></li><li>Choose your username and a new password.</li></ol><p>This works in the Accounting program on the computer that holds your company file, so nobody elsewhere can use it. <b>Your books are not changed</b> — only the password. For other staff, an administrator can set a new password under <b>Setup → Users &amp; Roles</b>.</p>', true),
+        q('Where are my books kept?', '<p>In one company file on your computer: <code>.riyeser\\company.db</code> in your Windows user folder. Copy that file to a USB stick or cloud drive to keep a backup.</p>'),
+        q('Starting with an empty company', '<p>When you first open Accounting it asks for your company name. Leave <b>Load demo data</b> unticked to start completely empty.</p>'),
+        q('Printing or exporting reports', '<p>Every report has <b>Print</b> and <b>Export CSV</b> buttons, so you can send figures to your accountant or open them in Excel.</p>'),
+        q('More help inside Accounting', '<p>Click <b>Help</b> at the top of any Accounting screen for a guide to invoices, banking, GST/BAS and reports.</p>'),
+      ] },
+      { id: 'payroll', icon: '<div class="icon i-payroll">🕒</div>', name: 'Payroll', items: [
+        q('Where are payslips saved?', '<p>As PDFs in <code>Documents\\Riyeser\\Payroll\\Payslips</code>. Open that folder from the Payroll menu.</p>'),
+        q('Are my payroll records backed up?', '<p>Yes — Payroll saves a backup every day in <code>Documents\\Riyeser\\Payroll\\Backups</code> and keeps the last 30.</p>'),
+        q('A payslip PDF looks blank', '<p>Make sure you have the newest version of Payroll, then export the payslip again. If it still looks blank, open it in Riyeser PDF or email us the payslip date (not the file).</p>'),
+      ] },
+      { id: 'services', icon: '<div class="icon i-services">🏗</div>', name: 'Services', items: [
+        q('On this PC or with an online account?', '<p>The Windows app asks the first time you open it. <b>On this PC</b>: no account, projects saved on your computer, works with no internet. <b>With my online account</b>: sign in and projects sync with phones, the website and your team. Change it any time from the <b>Riyeser Services</b> menu → <b>How I work…</b></p>', true),
+        q('Moving my PC projects online', '<p>Menu <b>Riyeser Services → Sync to my online account…</b>, then sign in. Your projects and photos upload and the copy on the PC is kept as a backup.</p>'),
+        q('I forgot my online password', '<p>On the sign-in screen choose <b>Forgot password</b> and follow the email. Projects saved on your PC are not affected.</p>'),
+        q('Working without signal on site', '<p>Keep working — changes are saved on the device and sync when you are back online. The status at the top shows <b>All saved</b> or how many changes are waiting.</p>'),
+        q('The full Services guide', '<p>See the <a class="more" href="' + SERVICES_APP + '/help.html">Riyeser Services help guide</a> for drawings, items, runs, inspections and reports.</p>'),
+      ] },
+      { id: 'desk', icon: '<div class="icon i-desk">🗂</div>', name: 'Desk Assistant', items: [
+        q('Desk Assistant moved a file — where is it?', '<p>Open <b>Where are my files?</b>. Every move is listed with an <b>Open</b> button, and <b>Put everything back</b> returns every file to where it was.</p>', true),
+        q('Finding a file', '<p>Open <b>Find a file</b> and type part of the name, a word inside it, a company or an old name. Narrow it down by type and year.</p>'),
+        q('Undoing a tidy-up', '<p>On the <b>Today</b> page under <b>Recent tidy-ups</b>, click <b>Undo</b>. Nothing is ever deleted — duplicates are moved to an Archive folder, not removed.</p>'),
+      ] },
+      { id: 'pdf', icon: '<div class="icon i-pdf">📕</div>', name: 'PDF', items: [
+        q('A PDF opens blank or grey', '<p>Choose <b>Tools → Basic viewer</b>. It shows any PDF using Windows\' built-in viewer, so you can still read and print it.</p>', true),
+        q('Make Riyeser PDF open my PDFs', '<p>Right-click a PDF → <b>Open with → Choose another app</b> → <b>Riyeser PDF</b> → tick <b>Always</b>.</p>'),
+      ] },
+    ];
+    return `
+<div class="c" style="padding:56px 24px 0;max-width:900px">
+  <h1 style="font-size:clamp(32px,5vw,48px);letter-spacing:-1px">Help Centre</h1>
+  <p class="lead" style="margin:10px 0 22px;text-align:left">Step-by-step answers for every Riyeser program. Can't find it? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Help with Riyeser')}">${EMAIL}</a> — a real person will reply.</p>
+  <input class="hsearch" id="hq" type="search" placeholder="Search help — e.g. password, payslip, update, blank PDF" autocomplete="off" aria-label="Search help">
+  <div class="hjump">${SECTIONS.map((s) => `<a href="#${s.id}">${s.name}</a>`).join('')}</div>
+</div>
+<div class="c" style="max-width:900px">
+  ${SECTIONS.map((s) => `<div class="hsec" id="${s.id}"><h2>${s.icon}${s.name}</h2><div class="faq">${s.items.join('')}</div></div>`).join('')}
+  <p class="hnone" id="hnone">Nothing matches that. Try another word, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a>.</p>
+  <div class="note" style="margin:36px 0 0"><b>Emailing us?</b> Tell us which program, what you clicked, and what you saw (a screenshot helps). Please don't send passwords, bank details or staff pay information.</div>
+</div>
+${ctaBlock(up, 'Not installed yet?', 'Download Riyeser Central free and add the programs you need.')}
+<script>(function(){var box=document.getElementById('hq');box.addEventListener('input',function(){var t=box.value.trim().toLowerCase(),any=false;
+document.querySelectorAll('.hsec').forEach(function(sec){var shown=0;sec.querySelectorAll('details').forEach(function(d){var hit=!t||d.textContent.toLowerCase().indexOf(t)>=0;d.style.display=hit?'':'none';if(t&&hit)d.open=true;if(hit)shown++});sec.style.display=shown?'':'none';if(shown)any=true});
+document.getElementById('hnone').style.display=any?'none':'block'})})()</script>`;
+  },
 });
 
 // ---------- old riyeser.com addresses keep working ----------
 const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
 redirect('faq.html', `${BASE}programs/services.html#faq`, 'Riyeser Services questions and answers');
-if (SERVICES_MOVED) redirect('help.html', `${SERVICES_APP}/help.html`, 'Riyeser Services help guide');
+redirect('support.html', `${BASE}help.html`, 'Riyeser Help Centre');
 
 // ---------- extras ----------
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 const SUBFOLDER = BASE !== '/';
 if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-const urls = ['', 'downloads.html', 'pricing.html', 'support.html', 'terms.html', ...PROGRAMS.map((p) => `programs/${p.id}.html`)];
+const urls = ['', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...PROGRAMS.map((p) => `programs/${p.id}.html`)];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
 writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyeser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
 console.log('Built', urls.length, 'pages into', OUT);
