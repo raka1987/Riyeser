@@ -19,7 +19,11 @@ before(async () => {
   for (let i = 0; i < 50; i++) { try { await fetch(B + '/api/public/info'); return; } catch { await new Promise(r => setTimeout(r, 100)); } }
   throw new Error('Server did not start');
 });
-after(() => { server.kill(); fs.rmSync(DATA_DIR, { recursive: true, force: true }); });
+after(async () => {
+  // Wait for the test server to close before removing its folder: on Windows an open database file can't be deleted.
+  if (server.exitCode === null) await new Promise((r) => { server.once('exit', r); server.kill(); setTimeout(r, 5000); });
+  try { fs.rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* temp folder; Windows tidies it later */ }
+});
 
 test('desktop: first run asks the owner to create the Super admin login, once', async () => {
   assert.ok(!fs.existsSync(path.join(DATA_DIR, 'FIRST_RUN_ADMIN_PASSWORD.txt')));     // no password left lying in a file
