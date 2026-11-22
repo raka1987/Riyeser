@@ -61,6 +61,7 @@
         <a href="{{ url_for('documents.edit', side='purchase') }}">Bill</a><a href="{{ url_for('banking.money', kind='spend') }}">Money out</a>
         <a href="{{ url_for('banking.money', kind='receive') }}">Money in</a><a href="{{ url_for('contacts.edit', kind='customer') }}">Customer</a>
         <a href="{{ url_for('contacts.edit', kind='supplier') }}">Supplier</a></div></details>
+      {% if licence and licence.mode == 'trial' %}<a class="lic-pill{{ ' soon' if licence.days_left <= 14 }}" href="{{ licence.buy_url }}" target="_blank" rel="noopener" title="Free trial of every Riyeser program. Enter a licence in Riyeser Central.">Free trial · {{ licence.days_left }} day{{ '' if licence.days_left == 1 else 's' }} left</a>{% elif licence and licence.mode == 'expired' %}<a class="lic-pill end" href="{{ licence.buy_url }}" target="_blank" rel="noopener" title="Open Riyeser Central to enter a licence">Licence needed</a>{% endif %}
       <a class="tlink" href="{{ url_for('help.index') }}#{{ help_section(request.endpoint) }}">Help</a>
       <details class="usermenu"><summary><span class="av">{{ ((user.full_name or user.username) or '?')[:1]|upper }}</span></summary><div class="dd">
         <div class="who"><b>{{ user.full_name or user.username }}</b><small>{{ user.role|title }}</small></div>

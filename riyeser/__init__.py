@@ -60,7 +60,8 @@ def create_app(test_config=None):
 
     @app.context_processor
     def inject():
-        return dict(user=g.get("user"), company=g.get("company"))
+        from .licence import status as licence_status
+        return dict(user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None)
 
     @app.errorhandler(403)
     def forbidden(_e):

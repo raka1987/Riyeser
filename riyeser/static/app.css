@@ -117,3 +117,5 @@ input[type=checkbox]{width:auto}
 .kpi.card{position:relative;overflow:hidden}.kpi.card::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:linear-gradient(90deg,var(--accent),var(--brand))}
 .bars .inc{background:var(--accent)}.bars .exp{background:#f59e0b}
 .greet{font-size:12.5px;font-weight:700;color:#0e7c70;text-transform:uppercase;letter-spacing:.8px;margin-bottom:2px}
+.lic-pill{font-size:12.5px;font-weight:600;padding:5px 11px;border-radius:99px;background:var(--accent-l);color:#0e7c70;white-space:nowrap}.lic-pill:hover{text-decoration:none}.lic-pill.soon{background:#fff4e5;color:var(--warn)}.lic-pill.end{background:var(--err-bg);color:var(--err)}
+@media (max-width:900px){.lic-pill{display:none}}

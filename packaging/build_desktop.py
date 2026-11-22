@@ -27,6 +27,7 @@ args = [
     "--add-data", f"{PKG / 'static'}{sep}riyeser/static",
     "--add-data", f"{PKG / 'schema.sql'}{sep}riyeser",
     "--hidden-import", "riyeser.demo",
+    "--hidden-import", "riyeser.licence",
     "--collect-submodules", "riyeser",
     "--collect-data", "fpdf",
     "--distpath", str(ROOT / "dist"),

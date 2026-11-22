@@ -457,3 +457,19 @@ def test_unexpected_error_is_logged_for_support(tmp_path):
     assert r.status_code == 500 and "something went wrong" in r.get_data(as_text=True)
     errs = c.get("/help/diagnostics?download=1").get_json()["recent_errors"]
     assert errs and "kaboom" in errs[0]["details"]
+
+
+def test_licence_status_from_central_file(tmp_path):
+    import json
+    from datetime import datetime, timedelta, timezone
+    from riyeser.licence import status
+    f = tmp_path / "licence.json"
+    now = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    assert status(now, str(f))["mode"] == "unknown"  # no Riyeser Central yet: show nothing
+    f.write_text(json.dumps({"trialStart": (now - timedelta(days=80)).isoformat()}))
+    assert status(now, str(f)) == {"mode": "trial", "days_left": 10, "buy_url": "https://riyeser.com/pricing.html"}
+    f.write_text(json.dumps({"trialStart": (now - timedelta(days=95)).isoformat()}))
+    assert status(now, str(f))["mode"] == "expired"
+    f.write_text(json.dumps({"trialStart": (now - timedelta(days=95)).isoformat(), "key": "K",
+                             "licence": {"status": "active", "plan": "Riyeser · 5 users", "checkedAt": (now - timedelta(days=3)).isoformat()}}))
+    assert status(now, str(f)) == {"mode": "licensed", "plan": "Riyeser · 5 users"}
