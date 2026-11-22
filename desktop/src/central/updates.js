@@ -1,0 +1,55 @@
+// Update checks for Riyser Central: compares the versions installed on this PC with the latest public release
+// (made by the "Publish Riyser release" button) and installs newer ones in the background.
+const RELEASE_API = 'https://api.github.com/repos/raka1987/Riyeser/releases/latest';
+const ALLOWED_DOWNLOAD = /^https:\/\/(github\.com\/raka1987\/Riyeser\/releases\/download\/|objects\.githubusercontent\.com\/|release-assets\.githubusercontent\.com\/)/i;
+
+// Each program: its name in Windows' installed-apps list, the release file, and how to install it silently.
+const PRODUCTS = [
+  { id: 'central', display: 'Riyser Central', asset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
+  { id: 'desk', display: 'Riyeser Desk Assistant', asset: 'RiyeserDeskAssistant-Setup.exe', args: ['/S'] },
+  { id: 'pdf', display: 'Riyeser PDF', asset: 'RiyserPDF-Setup.exe', args: ['/S'] },
+  { id: 'accounting', display: 'Riyeser Accounting', asset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
+];
+
+/** "1.10.0" > "1.9.2" */
+function newer(a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0); }
+  return false;
+}
+
+/** Latest versions from the release: a versions.json file if the release has one, else the "In this release" list. */
+function latestFromRelease(release, versionsJson = null) {
+  const out = {};
+  for (const p of PRODUCTS) {
+    const asset = (release.assets || []).find((a) => a.name === p.asset);
+    let version = versionsJson && versionsJson[p.id];
+    if (!version) {
+      const m = String(release.body || '').match(new RegExp(`^\\s*[-*]\\s*${p.display.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+v?(\\d+(?:\\.\\d+){1,3})`, 'mi'));
+      version = m ? m[1] : null;
+    }
+    if (asset && version && ALLOWED_DOWNLOAD.test(asset.browser_download_url)) out[p.id] = { version, url: asset.browser_download_url, size: asset.size };
+  }
+  return { tag: release.tag_name, name: release.name, published: release.published_at, products: out };
+}
+
+/** Installed versions from `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall /s` output. */
+function installedFromRegistry(text) {
+  const out = {};
+  for (const block of String(text || '').split(/\r?\n(?=HKEY_)/)) {
+    const name = (block.match(/^\s*DisplayName\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
+    const ver = (block.match(/^\s*DisplayVersion\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
+    if (!name) continue;
+    for (const p of PRODUCTS) if (name.toLowerCase().startsWith(p.display.toLowerCase())) out[p.id] = ver || (name.match(/(\d+(?:\.\d+){1,3})\s*$/) || [])[1] || null;
+  }
+  return out;
+}
+
+/** Which installed programs have a newer version. ownVersion: this Central's version. */
+function availableUpdates(installed, latest) {
+  return PRODUCTS.filter((p) => installed[p.id] && latest.products[p.id] && newer(latest.products[p.id].version, installed[p.id]))
+    .map((p) => ({ id: p.id, name: p.display, from: installed[p.id], to: latest.products[p.id].version, url: latest.products[p.id].url, size: latest.products[p.id].size, self: !!p.self, args: p.args }));
+}
+
+module.exports = { RELEASE_API, PRODUCTS, newer, latestFromRelease, installedFromRegistry, availableUpdates, ALLOWED_DOWNLOAD };

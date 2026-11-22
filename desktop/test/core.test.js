@@ -586,3 +586,31 @@ test('Riyser Central reads money owed and owing from the Accounting company file
   assert.ok(fs.readFileSync(file).equals(before)); // never changed
   assert.equal((await pendingPayments(path.join(dir, 'missing.db'))).found, false);
 });
+
+test('Riyser Central update check: compares installed versions with the latest release', () => {
+  const u = require('../src/central/updates');
+  assert.ok(u.newer('1.10.0', '1.9.2')); assert.ok(!u.newer('1.1.0', '1.1.0')); assert.ok(!u.newer('0.21.9', '0.22.0'));
+  const release = {
+    tag_name: 'riyser-2026.11.22-1', name: 'Riyser for Windows', published_at: '2026-11-22T11:20:00Z',
+    body: '### In this release\n- Riyser Central 1.2.0\n- Riyeser Desk Assistant 0.22.0\n- Riyeser PDF 0.23.0\n- Riyeser Accounting 1.0.0\n',
+    assets: ['RiyserCentral-Setup.exe', 'RiyeserDeskAssistant-Setup.exe', 'RiyserPDF-Setup.exe', 'RiyeserAccounting-Setup.exe']
+      .map((n) => ({ name: n, size: 10, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/riyser-2026.11.22-1/${n}` })),
+  };
+  const latest = u.latestFromRelease(release);
+  assert.equal(latest.products.pdf.version, '0.23.0');
+  const reg = [
+    'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\abc',
+    '    DisplayName    REG_SZ    Riyeser PDF 0.22.0', '    DisplayVersion    REG_SZ    0.22.0', '',
+    'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\def',
+    '    DisplayName    REG_SZ    Riyeser Desk Assistant 0.22.0', '    DisplayVersion    REG_SZ    0.22.0', '',
+    'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ghi',
+    '    DisplayName    REG_SZ    Some Other App', '    DisplayVersion    REG_SZ    9.9.9',
+  ].join('\r\n');
+  const installed = { ...u.installedFromRegistry(reg), central: '1.1.0' };
+  assert.deepEqual(installed, { pdf: '0.22.0', desk: '0.22.0', central: '1.1.0' });
+  const ups = u.availableUpdates(installed, latest);
+  assert.deepEqual(ups.map((x) => `${x.id} ${x.from}->${x.to}`), ['central 1.1.0->1.2.0', 'pdf 0.22.0->0.23.0']); // not Accounting: not installed
+  // downloads only from the Riyser release
+  const evil = u.latestFromRelease({ ...release, assets: release.assets.map((a) => ({ ...a, browser_download_url: 'https://evil.example/x.exe' })) });
+  assert.deepEqual(evil.products, {});
+});

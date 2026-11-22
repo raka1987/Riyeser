@@ -35,7 +35,7 @@ function tick() {
 tick(); setInterval(tick, 15000);
 
 // ---------- home ----------
-let programs = []; let today = null;
+let programs = []; let today = null; let upd = { updates: [] }; let updating = false;
 const has = (id) => programs.some((p) => p.id === id && p.status !== 'missing');
 
 function tileSub(p) {
@@ -51,8 +51,9 @@ function tileSub(p) {
 function renderTiles() {
   const mine = programs.filter((p) => p.status !== 'missing');
   const others = programs.filter((p) => p.status === 'missing');
+  const upFor = new Set((upd.updates || []).map((u) => u.id));
   $('#tiles').innerHTML = mine.map((p) => `<button class="tile t-${esc(p.id)}" data-open="${esc(p.id)}" title="${esc(p.where || '')}">
-      <div class="i">${p.icon}</div><div><b>${esc(p.name)}</b><small>${esc(tileSub(p))}</small></div></button>`).join('')
+      ${upFor.has(p.id) ? '<span class="badge">⬆ Update</span>' : ''}<div class="i">${p.icon}</div><div><b>${esc(p.name)}</b><small>${esc(tileSub(p))}</small></div></button>`).join('')
     + (others.length ? `<div class="tile glass more"><div class="i">➕</div><div><b style="color:var(--text)">More Riyser apps</b>
         <small class="muted">${others.map((p) => `${esc(p.name)} <button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`).join('<br>')}</small></div></div>` : '');
 }
@@ -104,6 +105,40 @@ async function refresh() {
   renderTiles(); renderMoney(); renderToday(); renderTodo(); renderRecent(); layoutWidgets();
 }
 
+// ---------- updates ----------
+function renderUpdates() {
+  const box = $('#updates');
+  const list = upd.updates || [];
+  if (!list.length && !updating) { box.hidden = true; return; }
+  box.hidden = false;
+  if (updating) return; // progress is drawn by the update-progress events
+  box.innerHTML = `<div style="font-size:24px">⬆</div><div class="grow"><b>${list.length === 1 ? 'An update is ready' : `${list.length} updates are ready`}</b>
+    <div class="lbl">${list.map((u) => `${esc(u.name)} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}</div></div>
+    <button class="go" id="updall">Update ${list.length === 1 ? '' : 'all'}</button>`;
+  $('#updall').addEventListener('click', () => safe(async () => {
+    updating = true;
+    box.innerHTML = '<div style="font-size:24px">⬇</div><div class="grow"><b id="updmsg">Getting ready…</b><div class="prog"><i id="updbar"></i></div><div class="lbl">Your information is kept. Programs being updated will close for a moment.</div></div>';
+    try {
+      const r = await bridge.call('central:installUpdates', null);
+      if (r.restarting) { $('#updmsg').textContent = 'Riyser Central is restarting to finish updating…'; return; }
+      toast(`Updated ${r.done.length} program${r.done.length === 1 ? '' : 's'}.`);
+    } catch (e) { toast(e.message); }
+    updating = false;
+    await checkForUpdates(true);
+  }));
+}
+async function checkForUpdates(force, quiet = true) {
+  try { upd = await bridge.call('central:updates', force); } catch (e) { if (!quiet) toast(e.message); return; }
+  renderUpdates(); renderTiles();
+  if (!quiet) toast(upd.updates.length ? `${upd.updates.length} update${upd.updates.length === 1 ? '' : 's'} available.` : upd.note || 'Everything is up to date.');
+}
+bridge.on('update-progress', (p) => {
+  const msg = $('#updmsg'); const bar = $('#updbar'); if (!msg) return;
+  msg.textContent = p.stage === 'downloading' ? `Downloading ${p.name}… ${Math.round(p.pct * 100)}%` : p.stage === 'installing' ? `Installing ${p.name}…` : `Restarting Riyser Central…`;
+  bar.style.width = `${Math.round((p.stage === 'downloading' ? p.pct : 1) * 100)}%`;
+});
+$('#checkupd').addEventListener('click', () => checkForUpdates(true, false));
+
 // ---------- search ----------
 const finder = { q: '', type: null, year: null, kind: null };
 async function runSearch() {
@@ -148,6 +183,8 @@ $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign
   document.title = `Riyser Central ${v}`;
   $('#foot').textContent = `Riyser Central ${v} · Riyser Group · shows information from your other Riyeser programs; it never changes it.`;
   await safe(refresh);
+  checkForUpdates(false);
   setInterval(() => { if ($('#results').hidden) safe(refresh); }, 5 * 60 * 1000);
+  setInterval(() => checkForUpdates(false), 6 * 3600 * 1000);
   window.addEventListener('focus', () => { if ($('#results').hidden) safe(refresh); });
 })();

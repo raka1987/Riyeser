@@ -1,7 +1,9 @@
 // Riyser Central: the Riyser Group home screen. Opens every Riyeser program and shows, like a PA would, what needs
 // attention today: meetings, to-dos, money owed and owing, and recent documents, plus one search for every file.
 // It only READS the other programs' data, so it can never damage their files.
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net } = require('electron');
+const { execFile, spawn } = require('child_process');
+const updates = require('./central/updates');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -73,6 +75,75 @@ function searchIndex() {
   return idx;
 }
 
+// ---------- updates ----------
+const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
+function installedVersions() {
+  if (process.platform !== 'win32') return Promise.resolve(app.isPackaged ? { central: app.getVersion() } : {});
+  return new Promise((resolve) => execFile('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+    (err, out) => { const v = updates.installedFromRegistry(out || ''); if (app.isPackaged) v.central = app.getVersion(); resolve(v); }));
+}
+async function checkUpdates(force) {
+  const cached = store.get('updateCheck', null);
+  if (!force && cached && Date.now() - cached.at < 6 * 3600 * 1000) return { ...cached.result, installed: await installedVersions(), cached: true };
+  const res = await net.fetch(updates.RELEASE_API, { headers: { 'User-Agent': 'Riyser-Central', Accept: 'application/vnd.github+json' } });
+  if (res.status === 404) return { latest: null, updates: [], note: 'No release published yet.' };
+  if (!res.ok) throw new Error(`Couldn't check for updates (${res.status}). Try again later.`);
+  const release = await res.json();
+  let versionsJson = null;
+  const vj = (release.assets || []).find((a) => a.name === 'versions.json');
+  if (vj) { try { versionsJson = await (await net.fetch(vj.browser_download_url, { headers: { 'User-Agent': 'Riyser-Central' } })).json(); } catch { /* use the release notes */ } }
+  const latest = updates.latestFromRelease(release, versionsJson);
+  store.set('updateCheck', { at: Date.now(), result: { latest } });
+  return { latest, installed: await installedVersions() };
+}
+async function updateStatus(force) {
+  const r = await checkUpdates(force);
+  if (!r.latest) return { checkedAt: Date.now(), updates: [], note: r.note };
+  return { checkedAt: Date.now(), release: r.latest.name, updates: updates.availableUpdates(r.installed || {}, r.latest) };
+}
+async function download(url, file, onProgress) {
+  if (!updates.ALLOWED_DOWNLOAD.test(url)) throw new Error('Refusing to download from an unexpected address.');
+  const res = await net.fetch(url, { headers: { 'User-Agent': 'Riyser-Central' } });
+  if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}).`);
+  const total = +res.headers.get('content-length') || 0; let got = 0;
+  const out = fs.createWriteStream(file);
+  const reader = res.body.getReader();
+  for (;;) { const { done, value } = await reader.read(); if (done) break; got += value.length; out.write(Buffer.from(value)); onProgress(total ? got / total : 0); }
+  await new Promise((r) => out.end(r));
+  if (total && fs.statSync(file).size !== total) throw new Error('The download was incomplete. Please try again.');
+}
+async function installUpdates(ids) {
+  const st = await updateStatus(false);
+  const todo = st.updates.filter((u) => !ids || ids.includes(u.id)).sort((a, b) => a.self - b.self); // Central last
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyser-update-'));
+  const done = [];
+  for (const u of todo) {
+    const file = path.join(dir, path.basename(new URL(u.url).pathname));
+    send('update-progress', { id: u.id, name: u.name, stage: 'downloading', pct: 0 });
+    await download(u.url, file, (pct) => send('update-progress', { id: u.id, name: u.name, stage: 'downloading', pct }));
+    if (process.platform !== 'win32') throw new Error('Updates install on Windows only.');
+    if (u.self) {
+      // Central updates itself: close, install quietly, then open again.
+      send('update-progress', { id: u.id, name: u.name, stage: 'restarting', pct: 1 });
+      const cmd = `timeout /t 2 /nobreak >nul & "${file}" /S & start "" "${process.execPath}"`;
+      spawn('cmd.exe', ['/d', '/c', cmd], { detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true }).unref();
+      setTimeout(() => app.quit(), 300);
+      done.push(u.id);
+      return { done, restarting: true };
+    }
+    send('update-progress', { id: u.id, name: u.name, stage: 'installing', pct: 1 });
+    await new Promise((resolve, reject) => {
+      const child = spawn(file, u.args, { windowsHide: true });
+      const t = setTimeout(() => { try { child.kill(); } catch { /* gone */ } reject(new Error(`${u.name} took too long to install.`)); }, 10 * 60 * 1000);
+      child.on('exit', (code) => { clearTimeout(t); code === 0 ? resolve() : reject(new Error(`${u.name} installer stopped (code ${code}).`)); });
+      child.on('error', (e) => { clearTimeout(t); reject(e); });
+    });
+    done.push(u.id);
+  }
+  store.set('updateCheck', null);
+  return { done, restarting: false };
+}
+
 // ---------- IPC ----------
 function handle(name, fn) {
   ipcMain.handle(name, async (_e, ...args) => {
@@ -122,6 +193,8 @@ function registerIpc() {
     });
     return { deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, money, recent };
   });
+  handle('central:updates', (force) => updateStatus(!!force));
+  handle('central:installUpdates', (ids) => installUpdates(ids));
   handle('search:find', (opts) => {
     const da = sources.deskAssistant(deskData());
     return searchIndex().find(opts || {}, { organisedRoot: (da.settings && da.settings.organisedRoot) || '' });
@@ -150,7 +223,8 @@ app.whenReady().then(async () => {
   if (selfTest) {
     const out = selfTest.slice('--self-test='.length);
     let money; try { money = await sources.pendingPayments(); } catch (e) { money = { error: e.message }; }
-    fs.writeFileSync(out, JSON.stringify({ version: app.getVersion(), programs: programList(), money: { found: money.found, error: money.error || null } }, null, 2));
+    let upd; try { upd = await updateStatus(true); } catch (e) { upd = { error: e.message }; }
+    fs.writeFileSync(out, JSON.stringify({ version: app.getVersion(), programs: programList(), money: { found: money.found, error: money.error || null }, installed: await installedVersions(), updates: upd }, null, 2));
     app.exit(0);
     return;
   }

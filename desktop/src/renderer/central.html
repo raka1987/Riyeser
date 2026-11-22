@@ -17,6 +17,7 @@
     <div class="search glass"><span>🔍</span><input id="q" placeholder="Search all your files — name, words inside, company or an old name" autocomplete="off"><button id="qclear" class="clear" hidden>✕</button></div>
     <section id="results" hidden></section>
     <section id="home">
+      <div id="updates" class="glass upd" hidden></div>
       <div class="tiles" id="tiles"></div>
       <div class="widgets">
         <div class="glass w"><h3>💲 Money</h3><div id="money"><span class="lbl">Loading…</span></div></div>
@@ -26,7 +27,7 @@
       <h4 class="dockh">Recent documents</h4>
       <div class="dock" id="recent"></div>
     </section>
-    <p class="foot" id="foot"></p>
+    <p class="foot"><span id="foot"></span> · <button class="link" id="checkupd">Check for updates</button></p>
   </div>
   <div id="toast" class="toast"></div>
   <script src="central.js"></script>
