@@ -10,7 +10,7 @@ const OUT = join(ROOT, 'public');
 const SITE = 'https://riyeser.com';
 // Installers are attached to the latest GitHub Release under these fixed names, so links never go stale.
 const RELEASES = 'https://github.com/raka1987/Riyeser/releases/latest/download';
-const EMAIL = 'support@riyeser.com';
+const EMAIL = 'info@riyeser.com';
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
 
