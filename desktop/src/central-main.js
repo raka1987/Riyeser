@@ -37,7 +37,7 @@ const PROGRAMS = [
   { id: 'pdf', name: 'PDF', full: 'Riyeser PDF', icon: '📕', desc: 'Open, fill in, sign, combine and edit PDFs.',
     dirs: ['desk-pdf'], exes: ['Riyeser PDF.exe', 'Desk PDF.exe'], links: ['Riyeser PDF', 'Desk PDF'] },
   { id: 'services', name: 'Riyeser Services', full: 'Riyeser Services', icon: '🏗', desc: 'Building services on your drawings, with photos, tests and QA.',
-    url: 'https://riyeser.com' },
+    url: 'https://riyeser.com/app/' },
 ];
 
 function shortcutDirs() {

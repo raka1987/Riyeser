@@ -95,6 +95,7 @@ function page({ path, title, description, active, body }) {
   const depth = path.split('/').length - 1;
   const up = depth ? '../'.repeat(depth) : '';
   const nav = [['programs', 'Programs', `${up}#programs`], ['downloads', 'Downloads', `${up}downloads.html`], ['pricing', 'Pricing', `${up}pricing.html`], ['support', 'Support', `${up}support.html`]];
+  if (SERVICES_MOVED) nav.push(['signin', 'Services sign in', `${SERVICES_APP}/?signin`]);
   const html = `<!doctype html>
 <html lang="en">
 <head>
@@ -107,6 +108,11 @@ function page({ path, title, description, active, body }) {
 <link rel="canonical" href="${SITE}/${path === 'index.html' ? '' : path}">
 <link rel="icon" href="${up}assets/favicon.png">
 <link rel="stylesheet" href="${up}assets/site.css">
+${path === 'index.html' && SERVICES_MOVED ? `<script>/* Riyeser Services now lives at ${SERVICES_APP}/ - forward its old links: demo and sign-in links,
+   project and QR links (#/p/...), sign-in emails (#access_token, ?code=) and the installed app (start screen icon). */
+(function(){var s=location.search,h=location.hash,app=false;try{app=matchMedia('(display-mode: standalone)').matches}catch(e){}
+if(/[?&](demo|signin|code|error|token_hash|type)\\b/.test(s)||/^#(\\/|access_token|error|type=|refresh_token)/.test(h)||/[&#](access_token|type=recovery)/.test(h)||app)
+location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
 </head>
 <body>
 <header class="nav" id="nav"><div class="c">
@@ -126,8 +132,6 @@ function page({ path, title, description, active, body }) {
 fetch('https://api.github.com/repos/raka1987/Riyeser/releases/latest').then(function(r){return r.ok?r.json():null}).then(function(rel){if(!rel)return;
 a.forEach(function(el){var want=el.href.split('/').pop().replace(/^Riye?ser/i,'').toLowerCase();
 var hit=(rel.assets||[]).filter(function(x){return x.name.replace(/^Riye?ser/i,'').toLowerCase()===want})[0];if(hit)el.href=hit.browser_download_url;});}).catch(function(){});})();</script>
-${path === 'index.html' && SERVICES_MOVED ? `<script>/* old Riyeser Services links (riyeser.com/?demo, riyeser.com/#/...) now live at the Services app */
-if(/[?&]demo\b/.test(location.search)||location.hash.startsWith('#/'))location.replace(${JSON.stringify(SERVICES_APP)}+'/'+location.search+location.hash)</script>` : ''}
 </body>
 </html>
 `;
