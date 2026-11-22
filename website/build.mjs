@@ -240,7 +240,7 @@ page({
 
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
-  <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's about a coffee a week: $20 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's $20 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline. Riyeser Services can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
   <details><summary>Will it work on a Mac?</summary><p>Not yet — the programs are for Windows 10 and 11. Riyeser Services also works in any web browser at riyeser.com/app.</p></details>
   <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has step-by-step answers for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
@@ -365,20 +365,20 @@ ${ctaBlock(up, 'New here? Start with Riyeser Central', 'It\'s the home screen fo
 
 // ---------- pricing ----------
 page({
-  path: 'pricing.html', title: 'Riyeser pricing — 90 days free, then about a coffee a week', active: 'pricing',
-  description: 'Every Riyeser program free for 90 days with no card. Then about the price of a coffee a week per user for the whole suite.',
+  path: 'pricing.html', title: 'Riyeser pricing — 90 days free, then $20 a month per user', active: 'pricing',
+  description: 'Every Riyeser program free for 90 days with no card. Then $20 a month per user for the whole suite, less for teams.',
   body: (up) => `
-<div class="hero2"><div class="c hero"><span class="eyebrow">90 days free · no card · every program</span><h1>Everything, for <span class="grad">a coffee a week</span></h1>
-  <p class="lead">Accounting, Payroll, Services, Desk Assistant, PDF and Riyeser Central — all included. Try the lot free for 90 days, then it's $5 a week per person — less than a takeaway coffee.</p>
+<div class="hero2"><div class="c hero"><span class="eyebrow">90 days free · no card · every program</span><h1>Everything, for <span class="grad">$20 a month</span></h1>
+  <p class="lead">Accounting, Payroll, Services, Desk Assistant, PDF and Riyeser Central — all included. Try the lot free for 90 days, then it's $20 a month per person.</p>
   <div class="ctas"><a class="btn p big" href="${dl(prog('central'))}">⬇ Start your free trial</a><a class="btn s big" href="#calc">Work out my price</a></div>
   <p style="font-size:13px;color:var(--faint);margin:14px 0 0">No sign-up to start · nothing is charged automatically when the trial ends</p></div></div>
 
 <section class="c">
   ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off your first year</b><p>For the first 100 users to buy a licence. That's from <b>$6.50</b> per user a month for 12 months, then the normal price below. The offer ends when 100 users have it.</p></div></div>` : ''}
   <div class="plans">
-    <div class="plan best"><span class="tag">☕ About a coffee a week</span><div class="k">1–4 users</div><div class="price">$5<small> per user / week</small></div><p>Billed $20 a month per user. Everything, for sole traders and small teams.</p></div>
-    <div class="plan"><div class="k">5–19 users</div><div class="price">$4<small> per user / week</small></div><p>Billed $16 a month per user — 20% off once you reach five.</p></div>
-    <div class="plan"><div class="k">20+ users</div><div class="price">$3.25<small> per user / week</small></div><p>Billed $13 a month per user — 35% off for larger teams.</p></div>
+    <div class="plan best"><span class="tag">Most popular</span><div class="k">1–4 users</div><div class="price">$20<small> per user / month</small></div><p>Everything, for sole traders and small teams.</p></div>
+    <div class="plan"><div class="k">5–19 users</div><div class="price">$16<small> per user / month</small></div><p>20% off every user once you reach five.</p></div>
+    <div class="plan"><div class="k">20+ users</div><div class="price">$13<small> per user / month</small></div><p>35% off every user for larger teams.</p></div>
   </div>
   <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
 </section>
