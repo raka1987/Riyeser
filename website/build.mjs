@@ -12,6 +12,8 @@ const SITE = process.env.SITE_URL || 'https://riyeser.com';
 // Installers are attached to the latest GitHub Release under these fixed names, so links never go stale.
 const RELEASES = 'https://github.com/raka1987/Riyeser/releases/latest/download';
 const EMAIL = 'info@riyeser.com';
+// Early bird: 50% off the first year for the first 100 paid users. Set to false once 100 users have it.
+const EARLY_BIRD = true;
 // Turn on once a release with RiyeserServices-Setup.exe is published.
 const SERVICES_WIN = process.env.SERVICES_WIN === '1';
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
@@ -169,6 +171,7 @@ page({
   <p class="lead">Simple Windows programs for bookkeepers, small business offices and building services teams. Everything stays on your PC, works without internet, and there's nothing to sign up for.</p>
   <div class="ctas"><a class="btn p big" href="${dl(prog('central'))}">⬇ Download free for Windows</a><a class="btn s big" href="#who">Who it's for</a></div>
   <p style="font-size:13px;color:var(--faint);margin:14px 0 0">${freeLine}</p>
+  ${EARLY_BIRD ? `<a class="early" href="${up}pricing.html#early">🐣 <b>Early bird:</b> 50% off your first year for the first 100 users <span>See pricing →</span></a>` : ''}
   <div class="shot"><picture><source srcset="${up}assets/central-dark.webp" media="(prefers-color-scheme: dark)"><img src="${up}assets/central-light.webp" alt="Riyeser Central home screen showing money owed, today's meetings, to-dos and recent files" width="1600" height="1000"></picture></div>
 </div></div>
 <div class="c pills"><span>📴 Works offline</span><span>🔒 Your data stays on your PC</span><span>🧑‍💼 No admin rights needed</span><span>↩️ Every change can be undone</span><span>💳 No card, no sign-up</span></div>
@@ -371,6 +374,7 @@ page({
   <p style="font-size:13px;color:var(--faint);margin:14px 0 0">No sign-up to start · nothing is charged automatically when the trial ends</p></div></div>
 
 <section class="c">
+  ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off your first year</b><p>For the first 100 users to buy a licence. That's from <b>$9.75</b> per user a month for 12 months, then the normal price below. The offer ends when 100 users have it.</p></div></div>` : ''}
   <div class="plans">
     <div class="plan"><div class="k">1–4 users</div><div class="price">$30<small> per user / month</small></div><p>Everything, for sole traders and small teams.</p></div>
     <div class="plan best"><span class="tag">Most popular</span><div class="k">5–19 users</div><div class="price">$24<small> per user / month</small></div><p>20% off every user once you reach five.</p></div>
@@ -403,16 +407,18 @@ page({
   <details><summary>What counts as a user?</summary><p>Each person who uses Riyeser on their own computer. One licence covers every Riyeser program for that person.</p></details>
   <details><summary>Can I change the number of users later?</summary><p>Yes, add or remove users any time. Your price per user follows the table above.</p></details>
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
+  ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 users to buy a licence pay half price for their first 12 months — for example $15 instead of $30 per user a month. After 12 months the normal price applies. Once 100 users have the offer, it ends; we won't extend it or run a fake countdown.</p></details>` : ''}
   <details><summary>How do I buy?</summary><p>Online checkout is opening soon. Until then, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser licence')}">${EMAIL}</a> with your business name and number of users and we'll send your licence key.</p></details>
 </section>
 ${ctaBlock(up, 'Try everything free for 90 days', 'No card, no sign-up. Install Riyeser Central and add the programs you need.')}
-<script>(function(){var u=document.getElementById('users'),y=document.getElementById('yearly');
+<script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},u=document.getElementById('users'),y=document.getElementById('yearly');
 function price(n){return n>=20?19.5:n>=5?24:30}
 function money(v){return '$'+v.toLocaleString('en-AU',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})}
 function draw(){var n=Math.max(1,Math.min(500,parseInt(u.value,10)||1)),p=price(n),m=p*n;
 document.getElementById('per').textContent=n+' user'+(n>1?'s':'')+' × '+money(p)+' a month'+(p<30?' ('+(p===24?'20':'35')+'% off)':'');
 if(y.checked){document.getElementById('total').textContent=money(m*10)+' a year';document.getElementById('note').textContent='That\\'s '+money(m*10/12)+' a month — 2 months free.'}
-else{document.getElementById('total').textContent=money(m)+' a month';document.getElementById('note').textContent='After your 90-day free trial.'}}
+else{document.getElementById('total').textContent=money(m)+' a month';document.getElementById('note').textContent='After your 90-day free trial.'}
+if(EB){document.getElementById('note').textContent+=' Early bird: '+(y.checked?money(m*10/2)+' for your first year':money(m/2)+' a month for your first year')+'.'}}
 document.querySelectorAll('[data-d]').forEach(function(b){b.addEventListener('click',function(){u.value=Math.max(1,(parseInt(u.value,10)||1)+parseInt(b.dataset.d,10));draw()})});
 u.addEventListener('input',draw);y.addEventListener('change',draw);draw()})()</script>`,
 });

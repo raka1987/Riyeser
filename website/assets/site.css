@@ -183,3 +183,9 @@ section.c { padding-top: 56px; padding-bottom: 56px; }
 .incl > div { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 10px 16px 10px 10px; }
 .incl .icon { width: 38px; height: 38px; font-size: 18px; border-radius: 11px; margin: 0; }
 @media (max-width: 900px) { .plans, .calc { grid-template-columns: 1fr; } .calc { padding: 24px; } }
+.early { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 18px; padding: 9px 16px; border-radius: 99px; background: #fff7e6; color: #7a4a00; border: 1px solid #f6d58f; font-size: 14px; }
+.early span { color: var(--brand); font-weight: 600; } .early:hover { box-shadow: var(--shadow); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .early { background: #2a2110; color: #f6d58f; border-color: #5c4413; } }
+.earlybox { display: flex; gap: 16px; align-items: center; background: #fff7e6; border: 1px solid #f6d58f; border-radius: 20px; padding: 20px 24px; margin-bottom: 26px; color: #5c3a00; scroll-margin-top: 90px; }
+.earlybox .big { font-size: 34px; } .earlybox b { color: #3d2600; font-size: 17px; } .earlybox p { margin: 4px 0 0; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .earlybox { background: #2a2110; border-color: #5c4413; color: #f3dca8; } :root:not([data-theme="light"]) .earlybox b { color: #fff; } }
