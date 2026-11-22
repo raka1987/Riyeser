@@ -73,6 +73,12 @@ def view(cid):
 def statement(cid):
     db = get_db()
     c = db.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone()
+    if request.args.get("pdf"):
+        from flask import Response
+        from .. import pdf as pdfmod
+        name = pdfmod.safe_name(f"Statement {c['name']} {__import__('datetime').date.today()}") + ".pdf"
+        return Response(pdfmod.statement_pdf(db, cid), mimetype="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
     docs = db.execute("SELECT * FROM documents WHERE contact_id=? AND status='open' ORDER BY date", (cid,)).fetchall()
     return render_template("contacts/statement.html", c=c, docs=docs,
                            total=sum(d["total"] - d["amount_paid"] for d in docs))

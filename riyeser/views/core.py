@@ -177,7 +177,8 @@ def company():
     if request.method == "POST":
         return _save_company()
     linked_rows = db.execute("SELECT l.key, l.account_id FROM linked_accounts l ORDER BY l.key").fetchall()
-    return render_template("core/company.html", linked_rows=linked_rows, **lookups(db))
+    from ..pdf import docs_root
+    return render_template("core/company.html", linked_rows=linked_rows, docs_root=docs_root(), **lookups(db))
 
 
 @admin_only
@@ -192,6 +193,7 @@ def _save_company():
                 int(f.get("fy_start_month") or 7), f.get("lock_date") or None, 1 if f.get("gst_registered") else 0,
                 f.get("invoice_prefix") or "INV", f.get("bill_prefix") or "PO", int(f.get("next_invoice_no") or 1),
                 int(f.get("next_bill_no") or 1), int(f.get("default_terms_days") or 30)))
+    db.execute("UPDATE company SET auto_pdf=? WHERE id=1", (1 if f.get("auto_pdf") else 0,))
     if f.get("edition") in ("basic", "enterprise"):
         db.execute("UPDATE company SET edition=? WHERE id=1", (f["edition"],))
     for key in [r["key"] for r in db.execute("SELECT key FROM linked_accounts")]:

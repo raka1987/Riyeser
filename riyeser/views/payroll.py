@@ -147,6 +147,12 @@ def payslip(sid):
                      " JOIN payruns r ON r.id=p.payrun_id JOIN journal_entries je ON je.id=r.entry_id"
                      " WHERE p.employee_id=? AND r.pay_date<=? AND je.voided=0",
                      (s["employee_id"], s["pay_date"])).fetchone()
+    if request.args.get("pdf"):
+        from flask import Response
+        from .. import pdf as pdfmod
+        name = pdfmod.safe_name(f"{s['pay_date']} Payslip {s['first_name']} {s['last_name']}") + ".pdf"
+        return Response(pdfmod.payslip_pdf(db, sid), mimetype="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
     return render_template("payroll/payslip.html", s=s, ytd=ytd)
 
 

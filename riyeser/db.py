@@ -161,6 +161,8 @@ def migrate(db):
     cols = {r["name"] for r in db.execute("PRAGMA table_info(company)")}
     if "edition" not in cols:
         db.execute("ALTER TABLE company ADD COLUMN edition TEXT NOT NULL DEFAULT 'enterprise'")
+    if "auto_pdf" not in cols:
+        db.execute("ALTER TABLE company ADD COLUMN auto_pdf INTEGER NOT NULL DEFAULT 0")
     db.execute("""CREATE TABLE IF NOT EXISTS pos_sales (
         id INTEGER PRIMARY KEY,
         document_id INTEGER NOT NULL REFERENCES documents(id),

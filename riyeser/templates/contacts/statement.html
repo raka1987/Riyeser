@@ -6,5 +6,5 @@
 <table><tr><th>Invoice</th><th>Date</th><th>Due</th><th class="n">Total</th><th class="n">Paid</th><th class="n">Balance</th></tr>
 {% for d in docs %}<tr><td>{{ d.number }}</td><td>{{ d.date }}</td><td>{{ d.due_date }}</td><td class="n">{{ d.total|money }}</td><td class="n">{{ d.amount_paid|money }}</td><td class="n">{{ (d.total-d.amount_paid)|money }}</td></tr>{% endfor %}
 <tr class="grand"><td colspan="5">Total due</td><td class="n">{{ total|money }}</td></tr></table>
-<p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print / Save PDF</button> <a class="btn" href="{{ url_for('contacts.view', cid=c.id) }}">Back</a></p>
+<p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print</button> <a class="btn" href="?pdf=1">Download PDF</a> <a class="btn" href="{{ url_for('contacts.view', cid=c.id) }}">Back</a></p>
 </div></body></html>

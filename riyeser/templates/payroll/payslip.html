@@ -10,5 +10,5 @@
 <tr class="grand"><td>Net pay</td><td class="n">{{ s.net|money }}</td><td class="n">{{ ytd.n|money }}</td></tr>
 <tr><td>Superannuation ({{ s.super_rate }}%) {{ s.super_fund or '' }}</td><td class="n">{{ s.super|money }}</td><td class="n">{{ ytd.s|money }}</td></tr>
 <tr><td>Annual leave accrued</td><td class="n">{{ '%.2f'|format(s.leave_accrued) }} hrs</td><td class="n">balance {{ '%.2f'|format(s.leave_hours) }} hrs</td></tr></table>
-<p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print / Save PDF</button></p>
+<p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print</button> <a class="btn" href="?pdf=1">Download PDF</a></p>
 </div></body></html>

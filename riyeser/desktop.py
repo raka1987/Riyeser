@@ -67,6 +67,10 @@ def main(argv=None):
             return
     try:
         import webview
+        try:
+            webview.settings["ALLOW_DOWNLOADS"] = True  # PDFs, CSV exports
+        except Exception:
+            pass
         webview.create_window("Riyeser Group · Accounting", url, width=1360, height=860, min_size=(1000, 650))
         webview.start()
     except Exception as e:  # no GUI toolkit - use the browser instead

@@ -12,6 +12,9 @@
 <div class="card"><h3>Edition</h3><div class="fields">
 <div><label>Riyeser Accounting edition</label><select name="edition"><option value="basic" {{ 'selected' if company.edition=='basic' }}>Basic: invoicing, stock and inventory</option><option value="enterprise" {{ 'selected' if company.edition!='basic' }}>Enterprise: everything</option></select></div>
 <p class="muted wide" style="margin:0">Switching edition only changes which menus show. All your data stays as it is.</p></div></div>
+<div class="card"><h3>Riyeser folder</h3>
+<label class="check"><input type="checkbox" name="auto_pdf" value="1" {{ 'checked' if company.auto_pdf }}> Save a PDF of every invoice and bill into <b>{{ docs_root }}</b></label>
+<p class="muted" style="margin:6px 0 0">Riyeser Desk Assistant and the other Riyeser modules use this folder, so your documents are filed automatically.</p></div>
 <div class="card"><h3>Accounting preferences</h3><div class="fields">
 <div><label>Financial year starts (month)</label><select name="fy_start_month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if company.fy_start_month==m }}>{{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1] }}</option>{% endfor %}</select></div>
 <div><label>Lock periods up to (inclusive)</label><input type="date" name="lock_date" value="{{ company.lock_date or '' }}"></div>

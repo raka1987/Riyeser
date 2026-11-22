@@ -329,3 +329,32 @@ def test_pos_rejects_bad_sales(client, app):
     assert r.get_json()["total"] == 990
     with app.app_context():
         assert get_db().execute("SELECT COUNT(*) FROM pos_sales").fetchone()[0] == 1
+
+
+def test_pdfs_download_and_riyeser_folder(client, app, tmp_path, monkeypatch):
+    from pypdf import PdfReader
+    import io
+    monkeypatch.setenv("RIYESER_DOCS", str(tmp_path / "Riyeser"))
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cid = db.execute("INSERT INTO contacts (kind, name, address) VALUES ('customer','Café Ōra & Co','1 Main St')").lastrowid
+        doc = L.save_document(db, "sale", dict(contact_id=cid, date="2026-09-01", notes="Thanks – see you soon"),
+                              [dict(description="Consulting — day rate", qty=2, unit_price=15000,
+                                    account_id=acc["4-2000"], tax_code_id=tc["GST"])], "open")
+        db.execute("UPDATE company SET auto_pdf=1")
+        db.commit()
+    r = client.get(f"/document/{doc}?pdf=1")
+    assert r.status_code == 200 and r.mimetype == "application/pdf"
+    text = PdfReader(io.BytesIO(r.data)).pages[0].extract_text()
+    assert "Tax Invoice" in text and "INV00001" in text and "$330.00" in text
+    client.post(f"/document/{doc}/save-pdf")
+    saved = list((tmp_path / "Riyeser" / "Accounting" / "Invoices" / "2026").glob("*.pdf"))
+    assert len(saved) == 1 and "INV00001" in saved[0].name
+    assert client.get(f"/cards/statement/{cid}?pdf=1").mimetype == "application/pdf"
+    # auto-save when a new invoice is posted from the screen
+    client.post("/sale/new", data={"contact_id": cid, "date": "2026-09-02", "status": "open",
+                                   "line_item": [""], "line_description": ["Widget"], "line_qty": ["1"],
+                                   "line_price": ["10"], "line_discount": [""], "line_account": [acc["4-2000"]],
+                                   "line_tax": [tc["GST"]], "line_job": [""]})
+    assert len(list((tmp_path / "Riyeser" / "Accounting" / "Invoices" / "2026").glob("*.pdf"))) == 2

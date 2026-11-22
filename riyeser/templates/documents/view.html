@@ -4,7 +4,9 @@
 <div class="head"><div><h1>{{ {'quote':'Quote','order':'Order'}.get(doc.status, L.doc) }} {{ doc.number }} {{ status(doc, today()) }}</h1>
 <p class="sub"><a href="{{ url_for('contacts.view', cid=doc.contact_id) }}">{{ doc.cname }}</a> · {{ doc.date }}{% if doc.due_date %} · due {{ doc.due_date }}{% endif %}{% if doc.reference %} · Ref {{ doc.reference }}{% endif %}</p></div>
 <div class="actions">
-<a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, print=1) }}" target="_blank">Print / PDF</a>
+<a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, pdf=1) }}">Download PDF</a>
+<form method="post" class="inline" action="{{ url_for('documents.save_pdf', doc_id=doc.id) }}"><button class="btn" title="Save into Documents\Riyeser for Riyeser Desk Assistant">Save to Riyeser folder</button></form>
+<a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, print=1) }}" target="_blank">Print</a>
 {% if doc.status in ('quote','order') %}
 <a class="btn" href="{{ url_for('documents.edit', side=doc.side, doc_id=doc.id) }}">Edit</a>
 {% if doc.status=='quote' %}<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="order"><button class="btn">Convert to order</button></form>{% endif %}

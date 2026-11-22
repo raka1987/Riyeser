@@ -2,9 +2,10 @@
 import json
 from datetime import date
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, g
+from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, g, Response
 
 from ..db import get_db, to_cents, linked
+from .. import pdf as pdfmod
 from ..ledger import save_document, convert_document, void_document, record_payment, void_payment, add_days
 from . import lookups, opt_int, opt_float, form_lines, guarded
 
@@ -95,6 +96,8 @@ def _save(side, doc_id):
     did = save_document(db, side, header, lines, status, doc_id)
     doc = db.execute("SELECT number FROM documents WHERE id=?", (did,)).fetchone()
     flash(f"{doc['number']} saved.", "ok")
+    if status == "open":
+        _auto_pdf(db, did)
     return redirect(url_for("documents.view", doc_id=did))
 
 
@@ -111,6 +114,10 @@ def view(doc_id):
                        " WHERE l.document_id=? ORDER BY l.id", (doc_id,)).fetchall()
     pays = db.execute("SELECT p.*, a.amount alloc FROM payment_allocations a JOIN payments p ON p.id=a.payment_id"
                       " WHERE a.document_id=? ORDER BY p.date", (doc_id,)).fetchall()
+    if request.args.get("pdf"):
+        name, _ = pdfmod.document_filename(db, doc_id)
+        return Response(pdfmod.document_pdf(db, doc_id), mimetype="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
     tpl = "documents/print.html" if request.args.get("print") else "documents/view.html"
     return render_template(tpl, doc=doc, lines=lines, pays=pays, L=LABELS[doc["side"]])
 
@@ -118,8 +125,31 @@ def view(doc_id):
 @bp.route("/document/<int:doc_id>/convert", methods=["POST"])
 @guarded
 def convert(doc_id):
-    convert_document(get_db(), doc_id, request.form.get("to", "open"))
+    db = get_db()
+    to = request.form.get("to", "open")
+    convert_document(db, doc_id, to)
     flash("Document converted.", "ok")
+    if to == "open":
+        _auto_pdf(db, doc_id)
+    return redirect(url_for("documents.view", doc_id=doc_id))
+
+
+def _auto_pdf(db, doc_id):
+    if g.company["auto_pdf"]:
+        try:
+            path = pdfmod.save_document_pdf(db, doc_id)
+            flash(f"PDF saved to {path}", "ok")
+        except OSError as e:
+            flash(f"Saved, but the PDF could not be written to the Riyeser folder: {e}", "error")
+
+
+@bp.route("/document/<int:doc_id>/save-pdf", methods=["POST"])
+def save_pdf(doc_id):
+    try:
+        path = pdfmod.save_document_pdf(get_db(), doc_id)
+        flash(f"PDF saved to {path}", "ok")
+    except OSError as e:
+        flash(f"Could not write the PDF: {e}", "error")
     return redirect(url_for("documents.view", doc_id=doc_id))
 
 
