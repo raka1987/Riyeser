@@ -72,13 +72,19 @@ async function loadBytes(bytes, { keepState = false } = {}) {
   const doc = await task.promise;
   if (st.doc) st.doc.destroy();
   st.doc = doc;
-  st.baseRot = [];
-  for (let i = 1; i <= doc.numPages; i++) st.baseRot.push((await doc.getPage(i)).rotate || 0);
+  st.pages = await Promise.all(Array.from({ length: doc.numPages }, (_, i) => doc.getPage(i + 1)));
+  st.baseRot = st.pages.map((pg) => pg.rotate || 0);
   if (!keepState) {
     st.order = st.baseRot.map((_, i) => ({ src: i, rot: 0 }));
     st.anns = {}; st.text = {}; st.undo = []; st.redo = []; st.selected = null; st.current = 0; st.selPages = new Set();
   }
   $('#empty').hidden = true;
+  // Work out "fit to width" before the first drawing, so a big page isn't drawn twice.
+  if (!keepState && fitMode && st.pages[0]) {
+    const w = st.pages[0].getViewport({ scale: PX_PER_PT, rotation: st.baseRot[0] % 360 }).width;
+    st.zoom = Math.min(4, Math.max(0.25, Math.min(2, ($('#viewer').clientWidth - 60) / w)));
+    $('#zoomlabel').textContent = `${Math.round(st.zoom * 100)}%`;
+  }
   buildPages();
 }
 
@@ -92,17 +98,27 @@ async function openFile(file) {
     $('#docname').title = file;
     // A PDF the engine gets stuck on must not leave a grey window: give up after a while and use the backup viewer.
     const limit = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} took too long`)), ms))]);
-    await limit(readForm(), 15000, 'Reading the form');
+    st.firstShown = false; st.form = []; st.formValues = {}; st.encrypted = false; renderForm();
     await limit(loadBytes(bytes), 20000, 'Opening the pages');
     setDirty(false);
     watchFirstPage(file);
-    if (st.encrypted) toast('This PDF is password-protected. You can view it, but saving changes may not work.');
-    checkIfScanned().catch(() => {});
     requestAnimationFrame(fitWidth);
   } catch (e) {
     toast(`This PDF couldn't be drawn here (${e.message}), so it's open in the basic viewer.`);
     bridge.call('pdf:basicView', file).catch(() => {});
   }
+}
+
+/** Once the first page is showing: fillable fields, password protection and scanned pages (none of these hold up opening). */
+async function afterFirstPage() {
+  const doc = st.doc;
+  try {
+    const [fields, meta] = await Promise.all([doc.getFieldObjects().catch(() => null), doc.getMetadata().catch(() => null)]);
+    if (doc !== st.doc) return;
+    if (meta?.info?.EncryptFilterName) { st.encrypted = true; toast('This PDF is password-protected. You can view it, but saving changes may not work.'); }
+    if (fields && Object.keys(fields).length) await readForm();
+  } catch { /* not a form */ }
+  checkIfScanned().catch(() => {});
 }
 
 /** If the first page comes out empty or fails to draw, show the PDF in the backup viewer as well. */
@@ -133,14 +149,17 @@ function viewportFor(page, entry) {
   return page.getViewport({ scale: st.zoom * PX_PER_PT, rotation: (st.baseRot[entry.src] + entry.rot) % 360 });
 }
 
+const liveRenders = new Set();
 async function buildPages() {
   const token = ++renderToken;
+  for (const t of liveRenders) { try { t.cancel(); } catch { /* finished */ } }
+  liveRenders.clear();
   const wrap = $('#pages');
   wrap.innerHTML = '';
   st.vps = {};
   for (let i = 0; i < st.order.length; i++) {
     const entry = st.order[i];
-    const page = await st.doc.getPage(entry.src + 1);
+    const page = st.pages?.[entry.src] || await st.doc.getPage(entry.src + 1);
     if (token !== renderToken) return;
     const vp = viewportFor(page, entry);
     st.vps[entry.src] = vp;
@@ -149,7 +168,7 @@ async function buildPages() {
     el.dataset.src = entry.src;
     el.dataset.idx = i;
     el.style.width = `${vp.width}px`; el.style.height = `${vp.height}px`;
-    el.innerHTML = '<canvas></canvas><div class="overlay"><svg></svg></div>';
+    el.innerHTML = '<canvas></canvas><div class="overlay"><svg></svg></div><div class="drawing">Drawing this page…</div>';
     wrap.appendChild(el);
     pageObserver.observe(el);
     drawOverlay(entry.src);
@@ -166,7 +185,7 @@ async function drawPage(el) {
   el.dataset.drawn = '1';
   const src = +el.dataset.src;
   const entry = st.order.find((o) => o.src === src);
-  const page = await st.doc.getPage(src + 1);
+  const page = st.pages?.[src] || await st.doc.getPage(src + 1);
   const vp = viewportFor(page, entry);
   const ratio = window.devicePixelRatio || 1;
   const canvas = el.querySelector('canvas');
@@ -174,9 +193,18 @@ async function drawPage(el) {
   canvas.style.width = `${vp.width}px`; canvas.style.height = `${vp.height}px`;
   const ctx = canvas.getContext('2d');
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  try { await page.render({ canvasContext: ctx, viewport: vp }).promise; }
-  catch (e) { if (!/cancel/i.test(e?.name || e?.message || '') && src === 0 && st.firstPageCheck) st.firstPageCheck.failed = true; }
+  const task = page.render({ canvasContext: ctx, viewport: vp });
+  liveRenders.add(task);
+  try { await task.promise; }
+  catch (e) {
+    if (/cancel/i.test(e?.name || e?.message || '')) return; // the view changed; a fresh drawing takes over
+    if (src === 0 && st.firstPageCheck) st.firstPageCheck.failed = true;
+  } finally { liveRenders.delete(task); }
+  el.querySelector('.drawing')?.remove();
+  copyToThumb(src, canvas);
+  if (!st.firstShown) { st.firstShown = true; afterFirstPage(); }
   if (!st.text[src]) {
+    await new Promise((r) => setTimeout(r, 30)); // let the page appear before reading its words for search
     const tc = await page.getTextContent();
     st.text[src] = tc.items.filter((it) => it.str && it.str.trim()).map((it) => {
       const [a, b, c, d, e, f] = it.transform;
@@ -313,11 +341,24 @@ function buildThumbs() {
     thumbObserver.observe(d);
   });
 }
+function copyToThumb(src, from) {
+  const d = document.querySelector(`.thumb[data-src="${src}"]`);
+  if (!d || !from.width) return;
+  const k = 150 / Math.max(from.width, from.height);
+  const c = d.querySelector('canvas');
+  c.width = Math.max(1, Math.round(from.width * k)); c.height = Math.max(1, Math.round(from.height * k));
+  c.getContext('2d').drawImage(from, 0, 0, c.width, c.height);
+  d.dataset.drawn = '1';
+}
 async function drawThumb(d) {
   d.dataset.drawn = '1';
+  // Pages on screen are drawn anyway: their thumbnail is copied from that, so a big drawing isn't drawn twice.
+  await new Promise((r) => setTimeout(r, 400));
   const entry = st.order[+d.dataset.idx];
   if (!entry) return;
-  const page = await st.doc.getPage(entry.src + 1);
+  const main = document.querySelector(`.page[data-src="${entry.src}"]`);
+  if (main?.dataset.drawn) return;
+  const page = st.pages?.[entry.src] || await st.doc.getPage(entry.src + 1);
   const base = page.getViewport({ scale: 1, rotation: (st.baseRot[entry.src] + entry.rot) % 360 });
   const vp = page.getViewport({ scale: 150 / Math.max(base.width, base.height), rotation: base.rotation });
   const c = d.querySelector('canvas');
@@ -350,7 +391,9 @@ $('#thumbs').addEventListener('click', (e) => {
 let fitMode = true; // keep fitting the page to the window until the user zooms by hand
 function setZoom(z, { fromFit = false } = {}) {
   if (!fromFit) fitMode = false;
-  st.zoom = Math.min(4, Math.max(0.25, z));
+  const nz = Math.min(4, Math.max(0.25, z));
+  if (fromFit && Math.abs(nz - st.zoom) < 0.005) return; // already that size: don't redraw
+  st.zoom = nz;
   $('#zoomlabel').textContent = `${Math.round(st.zoom * 100)}%`;
   if (st.doc) { const cur = st.current; buildPages().then(() => scrollToPage(cur)); }
 }
@@ -1191,8 +1234,9 @@ async function checkIfScanned() {
   let empty = 0;
   const n = Math.min(st.doc.numPages, 3);
   for (let i = 1; i <= n; i++) {
-    const tc = await (await st.doc.getPage(i)).getTextContent();
-    if (!tc.items.some((it) => it.str && it.str.trim())) empty++;
+    const known = st.text[i - 1];
+    const has = known ? known.length > 0 : (await (await st.doc.getPage(i)).getTextContent()).items.some((it) => it.str && it.str.trim());
+    if (!has) empty++;
   }
   $('#scanbanner').hidden = empty === 0;
 }

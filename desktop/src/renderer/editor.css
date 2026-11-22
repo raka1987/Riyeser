@@ -76,3 +76,8 @@ body { overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
 .dlgrow label { min-width: 90px; font-weight: 600; font-size: 13px; }
 .stampgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
 .stampgrid button { padding: 12px 6px; font-weight: 800; letter-spacing: .05em; border-width: 2px; }
+
+/* while a big page is being drawn */
+.page .drawing { position: absolute; inset: 0; display: grid; place-items: center; color: #64748b; font: 600 14px/1.4 "Segoe UI", system-ui, sans-serif; pointer-events: none; }
+.page .drawing::before { content: ""; width: 26px; height: 26px; margin-bottom: 44px; border-radius: 50%; border: 3px solid #cbd5e1; border-top-color: #1f4e86; animation: pdfspin 0.8s linear infinite; position: absolute; }
+@keyframes pdfspin { to { transform: rotate(360deg); } }
