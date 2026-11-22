@@ -1,4 +1,4 @@
-// Your own filing rules: "Dynamix timesheets go in Staff > Timesheets > (year)".
+// Your own filing rules: "Brightwell timesheets go in Staff > Timesheets > (year)".
 // A rule has conditions (all must match) and a destination folder. Rules beat the app's own guesses.
 const path = require('path');
 const { templateFor, folderFromTemplate } = require('./learn');

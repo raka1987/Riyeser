@@ -14,7 +14,7 @@ const { categorise } = require('../src/core/email');
 const settings = {
   filingLayout: 'company', // the older Company › Type layout (Type › Year is tested separately)
   ownCompanyNames: ['Riki Consulting Ltd'],
-  companies: [{ name: 'Acme Plumbing', aliases: ['acme'], type: 'Clients' }, { name: 'Spark', aliases: [], type: 'Utilities' }],
+  companies: [{ name: 'Acme Plumbing', aliases: ['acme'], type: 'Clients' }, { name: 'Helm', aliases: [], type: 'Utilities' }],
 };
 
 test('classifies an invoice for a known company', () => {
@@ -95,9 +95,9 @@ test('reads calendar with recurring events and links companies', async () => {
 });
 
 test('email sorting', () => {
-  const inv = categorise({ subject: 'Invoice INV-77 from Spark', from: 'billing@spark.co.nz', text: 'Your invoice. Amount due $90. Due date 1 Dec' }, settings);
+  const inv = categorise({ subject: 'Invoice INV-77 from Helm', from: 'billing@spark.co.nz', text: 'Your invoice. Amount due $90. Due date 1 Dec' }, settings);
   assert.equal(inv.category, 'Invoices & Bills');
-  assert.equal(inv.company, 'Spark');
+  assert.equal(inv.company, 'Helm');
   const ask = categorise({ subject: 'Quick question', from: 'jo@acme.co.nz', text: 'Can you send the plans by Friday?' }, settings);
   assert.ok(ask.needsReply);
   const news = categorise({ subject: 'Big sale!', from: 'news@shop.com', text: 'Deals. Unsubscribe here', listUnsubscribe: 'x' }, settings);
@@ -211,7 +211,7 @@ test('finds related documents by reference, address or project', () => {
     { name: 'invoice', company: 'Acme Plumbing', keys: extractKeys('Invoice INV-1042. As per quote QU-0077') },
     { name: 'receipt', company: null, keys: extractKeys('Payment received for invoice INV-1042, thank you') },
     { name: 'other', company: 'Acme Plumbing', keys: extractKeys('Invoice INV-2000 for 99 Other Road') },
-    { name: 'spark', company: 'Spark', keys: extractKeys('Invoice INV-1042 electricity') },
+    { name: 'spark', company: 'Helm', keys: extractKeys('Invoice INV-1042 electricity') },
   ];
   linkRelated(items);
   const [q, inv, rec, other, spark] = items;
@@ -356,9 +356,9 @@ test('tidy everything: files all personal folders by company/type/year, keeps pr
     execFileSync('python3', ['-c', `from PIL import Image\nim=Image.new('RGB',(8,8));e=im.getexif();e[0x0132]='${when}';im.save(r'''${p}''',exif=e)`]);
     fs.utimesSync(p, old, old);
   };
-  put(path.join(docs, 'Ark project', 'plan.txt'), 'Dynamix Limited commissioning plan. Agreement between the parties. Date: 03/10/2026');
-  put(path.join(docs, 'Ark project', 'quote.txt'), 'Quotation from Dynamix Limited. Quote number QD-552. Date: 01/09/2026');
-  put(path.join(docs, 'Ark project', 'notes.txt'), 'Site notes for Dynamix job');
+  put(path.join(docs, 'Elm project', 'plan.txt'), 'Brightwell Limited commissioning plan. Agreement between the parties. Date: 03/10/2026');
+  put(path.join(docs, 'Elm project', 'quote.txt'), 'Quotation from Brightwell Limited. Quote number QD-552. Date: 01/09/2026');
+  put(path.join(docs, 'Elm project', 'notes.txt'), 'Site notes for Brightwell job');
   for (let i = 1; i <= 4; i++) jpeg(path.join(docs, 'Smith wedding', `IMG_00${i}.jpg`), '2023:02:18 14:00:00');
   put(path.join(docs, 'New folder (3)', 'doc1.txt'), 'TAX INVOICE\nBill To: Acme Plumbing\nInvoice Number: INV-3001\nInvoice Date: 05/03/2025\nTotal due $90.00');
   put(path.join(docs, 'New folder (3)', 'shopping.txt'), 'milk and eggs');
@@ -372,10 +372,10 @@ test('tidy everything: files all personal folders by company/type/year, keeps pr
   jpeg(path.join(pics, 'Camera Roll', 'IMG_9001.jpg'), '2022:08:01 09:30:00');
   put(path.join(dl, 'SomeTool', 'tool.exe'), 'MZ'); put(path.join(dl, 'SomeTool', 'helper.dll'), 'MZ'); put(path.join(dl, 'SomeTool', 'readme.txt'), 'tool');
   const s = { ...settings, organisedRoot: root, libraryFolders: [docs, pics, dl], neverTouch: [path.join(docs, 'Private')],
-    companies: [...settings.companies, { name: 'Dynamix', aliases: ['dynamix limited'], type: 'Suppliers' }] };
+    companies: [...settings.companies, { name: 'Brightwell', aliases: ['brightwell limited'], type: 'Suppliers' }] };
   const r = await planEverything(s);
   const where = (name) => { const p = r.plan.find((x) => x.name === name); return p && path.relative(root, p.to); };
-  assert.equal(where('Ark project'), path.join('Suppliers', 'Dynamix', 'Projects', 'Ark project'));
+  assert.equal(where('Elm project'), path.join('Suppliers', 'Brightwell', 'Projects', 'Elm project'));
   assert.equal(where('Smith wedding'), path.join('Media', 'Images', '2023', 'Smith wedding'));
   assert.equal(where('IMG_9001.jpg'), path.join('Media', 'Images', '2022', 'IMG_9001.jpg'));
   assert.equal(where('doc1.txt'), path.join('Clients', 'Acme Plumbing', 'Invoices', '2025', '2025-03-05 Acme Plumbing Invoice INV-3001.txt'));
@@ -411,34 +411,34 @@ test('learns where you file things: your folder choices and your own filing are 
   // 1. You once chose a folder for a timesheet...
   const chosen = path.join(root, 'Staff', 'Timesheets', '2025');
   const examples = [makeExample({ name: 'Timesheet wk45 Jo.txt', text: 'Timesheet week ending 08/11/2025 total hours 40 ordinary hours', docType: 'Timesheets', ext: '.txt' }, chosen, root, true)];
-  // 2. ...and you keep the Ark comment files together in your own folder.
-  const site = path.join(root, 'Site docs', 'Ark');
-  for (const r of ['A', 'B']) examples.push(makeExample({ name: `Ark FHF comments rev ${r}.txt`, text: 'Dynamix commissioning plan FHF comments services coordination', company: 'Dynamix', docType: 'Commissioning', ext: '.txt' }, site, root));
+  // 2. ...and you keep the Elm comment files together in your own folder.
+  const site = path.join(root, 'Site docs', 'Elm');
+  for (const r of ['A', 'B']) examples.push(makeExample({ name: `Elm FHF comments rev ${r}.txt`, text: 'Brightwell commissioning plan FHF comments services coordination', company: 'Brightwell', docType: 'Commissioning', ext: '.txt' }, site, root));
   const old = new Date(Date.now() - 3 * 86400_000);
   const put = (n, body) => { fs.writeFileSync(path.join(desk, n), body); fs.utimesSync(path.join(desk, n), old, old); };
   put('Timesheet wk46 Sam.txt', 'Timesheet week ending 14/11/2026 total hours 38 ordinary hours overtime');
-  put('Ark FHF comments rev C.txt', 'Dynamix Limited commissioning plan FHF comments services coordination');
+  put('Elm FHF comments rev C.txt', 'Brightwell Limited commissioning plan FHF comments services coordination');
   put('Acme invoice.txt', 'Invoice for Acme Plumbing. Invoice number INV-77. Amount due $10');
-  const s = { ...settings, watchFolders: [desk], organisedRoot: root, groupByYear: true, companies: [...settings.companies, { name: 'Dynamix', aliases: ['dynamix limited'], type: 'Suppliers' }], _examples: examples };
+  const s = { ...settings, watchFolders: [desk], organisedRoot: root, groupByYear: true, companies: [...settings.companies, { name: 'Brightwell', aliases: ['brightwell limited'], type: 'Suppliers' }], _examples: examples };
   const { plan } = await planOrganise(s, { minAgeMs: 0 });
   const to = (n) => path.dirname(plan.find((p) => p.name === n).to);
   assert.equal(to('Timesheet wk46 Sam.txt'), path.join(root, 'Staff', 'Timesheets', '2026')); // same place, this year's folder
-  assert.equal(to('Ark FHF comments rev C.txt'), site);
+  assert.equal(to('Elm FHF comments rev C.txt'), site);
   assert.equal(to('Acme invoice.txt'), path.join(root, 'Clients', 'Acme Plumbing', 'Invoices', '2026')); // unrelated file: normal rules
-  assert.match(plan.find((p) => p.name === 'Ark FHF comments rev C.txt').learned, /you keep 2 similar files here/);
+  assert.match(plan.find((p) => p.name === 'Elm FHF comments rev C.txt').learned, /you keep 2 similar files here/);
   // a different company's document is never pulled into another company's folder
-  const other = { name: 'Ark FHF comments.txt', company: 'Acme Plumbing', docType: 'Commissioning', ext: '.txt', nameTokens: ['ark', 'fhf', 'comments'], textTokens: ['commissioning'] };
+  const other = { name: 'Elm FHF comments.txt', company: 'Acme Plumbing', docType: 'Commissioning', ext: '.txt', nameTokens: ['elm', 'fhf', 'comments'], textTokens: ['commissioning'] };
   assert.equal(learnedDestination(other, examples.slice(1), root), null);
 });
 
-test('search matches the start of words ("ark" finds Ark, not Spark)', async () => {
+test('search matches the start of words ("elm" finds Elm, not Helm)', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'));
-  fs.writeFileSync(path.join(tmp, 'Ark commissioning plan.txt'), 'commissioning');
-  fs.writeFileSync(path.join(tmp, 'Spark bill.txt'), 'Spark Energy invoice');
+  fs.writeFileSync(path.join(tmp, 'Elm commissioning plan.txt'), 'commissioning');
+  fs.writeFileSync(path.join(tmp, 'Helm bill.txt'), 'Helm Energy invoice');
   const idx = new Index(new Store(path.join(tmp, 'data')));
   await idx.rebuild([tmp], settings);
-  assert.deepEqual(idx.search('ark').map((r) => r.name), ['Ark commissioning plan.txt']);
-  assert.deepEqual(idx.search('commission').map((r) => r.name), ['Ark commissioning plan.txt']); // start of a word still works
+  assert.deepEqual(idx.search('elm').map((r) => r.name), ['Elm commissioning plan.txt']);
+  assert.deepEqual(idx.search('commission').map((r) => r.name), ['Elm commissioning plan.txt']); // start of a word still works
 });
 
 test('your filing rules win, match on company/type/words/kind, and file by year', async () => {
@@ -447,21 +447,21 @@ test('your filing rules win, match on company/type/words/kind, and file by year'
   const desk = path.join(tmp, 'Desktop'); fs.mkdirSync(desk);
   const root = path.join(tmp, 'Organised');
   const rule = rules.makeRule({ folder: path.join(root, 'Staff', 'Timesheets'), root, conditions: { docType: 'Timesheets' }, useYear: true });
-  const byWords = rules.makeRule({ folder: path.join(root, 'Site docs', 'Ark'), root, conditions: { words: ['ark', 'fhf'] }, useYear: false });
+  const byWords = rules.makeRule({ folder: path.join(root, 'Site docs', 'Elm'), root, conditions: { words: ['elm', 'fhf'] }, useYear: false });
   assert.equal(rules.describeDest(rule), 'Organised/Staff/Timesheets/(year)');
   const old = new Date(Date.now() - 3 * 86400_000);
   const put = (n, body) => { fs.writeFileSync(path.join(desk, n), body); fs.utimesSync(path.join(desk, n), old, old); };
   put('Book1.txt', 'Timesheet\nWeek ending 07/11/2025\nTotal hours 40');
-  put('notes.txt', 'Ark project FHF comments on the commissioning plan');
+  put('notes.txt', 'Elm project FHF comments on the commissioning plan');
   put('inv.txt', 'Invoice for Acme Plumbing. Invoice number INV-1. Amount due $5');
   const { plan } = await planOrganise({ ...settings, watchFolders: [desk], organisedRoot: root, _rules: [rule, byWords] }, { minAgeMs: 0 });
   const dir = (n) => path.dirname(plan.find((p) => p.name === n).to);
   assert.equal(dir('Book1.txt'), path.join(root, 'Staff', 'Timesheets', '2025'));   // the file's own year
-  assert.equal(dir('notes.txt'), path.join(root, 'Site docs', 'Ark'));
+  assert.equal(dir('notes.txt'), path.join(root, 'Site docs', 'Elm'));
   assert.equal(dir('inv.txt'), path.join(root, 'Clients', 'Acme Plumbing', 'Invoices')); // no rule: normal filing
   assert.match(plan.find((p) => p.name === 'Book1.txt').learned, /your rule/);
-  // "ark" must match a whole word start: "Spark" doesn't count; a turned-off rule does nothing
-  assert.equal(rules.ruleMatches(byWords, { name: 'Spark fhf.txt', text: '' }), false);
+  // "elm" must match a whole word start: "Helm" doesn't count; a turned-off rule does nothing
+  assert.equal(rules.ruleMatches(byWords, { name: 'Helm fhf.txt', text: '' }), false);
   assert.equal(rules.ruleMatches({ ...rule, enabled: false }, { docType: 'Timesheets' }), false);
   assert.equal(rules.kindOf('.xlsx'), 'Excel');
 });
@@ -497,7 +497,7 @@ test('smart review: labels, dated names, and duplicates with different names or 
 });
 
 test('a services drawing that mentions "quote" in its notes is a drawing, not a quote', () => {
-  const drawing = classify({ fileName: 'Ark Mechanical Services M-201 Rev C.pdf', ext: '.pdf', text: 'MECHANICAL SERVICES\nLEVEL 1 DUCTWORK LAYOUT\nNOTES: CONTRACTOR TO INCLUDE ALL FITTINGS IN QUOTE. REFER TO QUOTATION Q-1123.\nDRAWN: JB CHECKED: RM SCALE 1:100 @ A1\nDRAWING NO: M-201 REV: C\nSTATUS: FOR CONSTRUCTION\nDO NOT SCALE' }, settings);
+  const drawing = classify({ fileName: 'Elm Mechanical Services M-201 Rev C.pdf', ext: '.pdf', text: 'MECHANICAL SERVICES\nLEVEL 1 DUCTWORK LAYOUT\nNOTES: CONTRACTOR TO INCLUDE ALL FITTINGS IN QUOTE. REFER TO QUOTATION Q-1123.\nDRAWN: JB CHECKED: RM SCALE 1:100 @ A1\nDRAWING NO: M-201 REV: C\nSTATUS: FOR CONSTRUCTION\nDO NOT SCALE' }, settings);
   assert.equal(drawing.docType, 'Plans & Drawings');
   const quote = classify({ fileName: 'Q-1123.pdf', ext: '.pdf', text: 'QUOTATION\nAcme Plumbing\nQuote number Q-1123\nSupply and install ductwork\nSubtotal $12,400.00\nTotal $14,260.00\nValid until 30/12/2026' }, settings);
   assert.equal(quote.docType, 'Quotes');

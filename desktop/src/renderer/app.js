@@ -76,7 +76,7 @@ async function renderFind() {
   const r = await bridge.call('folder:find', q).catch(() => ({ folders: [], files: [] }));
   if (token !== findToken || !$('#ftree')) return;
   const routeOf = (rel) => rel.split(' › ').map((x) => `<span class="seg">${esc(x)}</span>`).join('<span class="sep">›</span>');
-  // "Organised › Suppliers › Dynamix" instead of a long path
+  // "Organised › Suppliers › Brightwell" instead of a long path
   const relRoute = (dir) => {
     const root = treeRoots.filter((t) => dir === t.path || dir.startsWith(t.path)).sort((a, b) => b.path.length - a.path.length)[0];
     if (!root) return esc(short(dir));
@@ -449,7 +449,7 @@ const pages = {
     const order = Object.keys(groups).sort((a, b) => (a === 'Folders kept together' ? -1 : b === 'Folders kept together' ? 1 : a.localeCompare(b)));
     const nFiles = (plan?.plan || []).reduce((n, p) => n + (p.isFolder ? p.files : 1), 0);
     page.innerHTML = `<h1>Tidy everything</h1>
-      <p class="sub">Goes through all your personal folders <b>and every sub-folder</b>, and files everything like an assistant would: ${(settings.filingLayout || 'typeYear') === 'typeYear' ? 'by type and by year — e.g. <b>Invoices › 2026</b>, <b>Drawings › 2026</b> or <b>Pictures › 2024</b>' : 'by company, by type and by year — e.g. <b>Clients › Acme Plumbing › Invoices › 2026</b> or <b>Media › Images › 2024</b>'}. Named folders whose contents belong together (like “Ark project” or “Smith wedding”) are kept together. Nothing moves until you approve it, and Undo puts everything back.</p>
+      <p class="sub">Goes through all your personal folders <b>and every sub-folder</b>, and files everything like an assistant would: ${(settings.filingLayout || 'typeYear') === 'typeYear' ? 'by type and by year — e.g. <b>Invoices › 2026</b>, <b>Drawings › 2026</b> or <b>Pictures › 2024</b>' : 'by company, by type and by year — e.g. <b>Clients › Acme Plumbing › Invoices › 2026</b> or <b>Media › Images › 2024</b>'}. Named folders whose contents belong together (like “Elm project” or “Smith wedding”) are kept together. Nothing moves until you approve it, and Undo puts everything back.</p>
       <div class="grid">
         <div class="card"><h2>Folders to go through</h2>${list('libraryFolders', libs, 'None — add a folder')}<button style="margin-top:8px" data-act="evadd" data-key="libraryFolders">+ Add folder</button></div>
         <div class="card"><h2>Never touch</h2><p class="muted small">Anything in these folders stays exactly where it is.</p>${list('neverTouch', never, 'Nothing yet')}<button style="margin-top:8px" data-act="evadd" data-key="neverTouch">+ Add folder</button>

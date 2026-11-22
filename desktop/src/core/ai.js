@@ -11,7 +11,7 @@ const SCHEMA = {
     companyType: { type: 'string', description: 'e.g. Clients, Suppliers, Government, Banks, Utilities, Personal, or "My business" for the owner\'s own business' },
     confident: { type: 'boolean' },
     reason: { type: 'string', description: 'One short sentence a person can read: what the document is and who it is from/for.' },
-    title: { type: 'string', description: 'A short title for the file name, 2-6 words, without the date, company or document type (e.g. "Ark project FHF comments", "Jo Bloggs week 45"). Empty if nothing useful to add.' },
+    title: { type: 'string', description: 'A short title for the file name, 2-6 words, without the date, company or document type (e.g. "Elm project FHF comments", "Jo Bloggs week 45"). Empty if nothing useful to add.' },
     date: { type: ['string', 'null'], description: 'The document\'s own date as YYYY-MM-DD, or YYYY-MM if only the month is known; null if there is none.' },
   },
   required: ['docType', 'company', 'companyType', 'confident', 'reason', 'title', 'date'],

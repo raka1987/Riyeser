@@ -603,7 +603,7 @@ function registerIpc() {
     if (!terms.length) return { folders: [], files: [] };
     const roots = folderRoots();
     const dirs = allFolders(roots);
-    // Each word must match the START of a word somewhere in the folder's path ("ark" finds "Ark project", not "Spark"),
+    // Each word must match the START of a word somewhere in the folder's path ("elm" finds "Elm project", not "Helm"),
     // and at least one word must match the folder's own name (so its sub-folders don't all show up too).
     const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const res = terms.map((t) => new RegExp(`(^|[^a-z0-9])${esc(t)}`, 'i'));

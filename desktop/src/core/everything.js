@@ -1,6 +1,6 @@
 // "Tidy everything": goes through all your personal folders (and every sub-folder) and files it all like an assistant would.
 // - Folders that belong to programs (Outlook data, accounting files, game saves, code projects, installed programs) are left alone.
-// - A named folder whose contents belong together ("Ark project", "Smith wedding") is kept together and moved as one.
+// - A named folder whose contents belong together ("Elm project", "Smith wedding") is kept together and moved as one.
 // - Messy/generic folders ("New folder (3)", "Misc", "Camera Roll") are sorted file by file.
 // - Everything is filed by year as well: Clients > Acme Plumbing > Invoices > 2026, Media > Images > 2024.
 const fs = require('fs');
@@ -103,7 +103,7 @@ function folderDestination(node, items, settings) {
   if (companyNames.some((c) => n === c || n.startsWith(c + ' ') && n.split(' ').length <= c.split(' ').length + 1)) return null;
   const root = settings.organisedRoot;
   if (usesTypeYear(settings)) {
-    // Type › Year: a folder that belongs together goes inside its type and year, e.g. Drawings\2026\Ark project.
+    // Type › Year: a folder that belongs together goes inside its type and year, e.g. Drawings\2026\Elm project.
     const docsT = items.filter((i) => i.category !== 'Media');
     const mediaT = items.filter((i) => i.category === 'Media');
     const yr = (majority(items.map(yearOf)) || {}).value || 'Undated';

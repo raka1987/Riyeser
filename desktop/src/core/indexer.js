@@ -81,7 +81,7 @@ class Index {
   search(query, limit = 30) {
     const terms = String(query || '').toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return [];
-    // match the start of words: "ark" finds "Ark project" but not "Spark"
+    // match the start of words: "elm" finds "Elm project" but not "Helm"
     const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const res = terms.map((t) => new RegExp(`(^|[^a-z0-9])${esc(t)}`));
     const results = [];
