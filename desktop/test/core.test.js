@@ -627,3 +627,12 @@ test('Riyeser Central offers Riyeser Payroll in place of the old "Riyser" hub', 
   const rel = { tag_name: 't', body: '- Riyeser Payroll 2.1.1\n- Riyeser Central 1.3.2', assets: ['RiyeserPayroll-Setup.exe', 'RiyeserCentral-Setup.exe'].map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 })) };
   assert.deepEqual(u.availableUpdates(installed, u.latestFromRelease(rel)).map((x) => `${x.id} ${x.from}->${x.to}`).sort(), ['central 1.1.0->1.3.2', 'payroll 1.2.0->2.1.1']);
 });
+
+test('Riyeser Central: an old copy listed next to the new one does not keep asking to update', () => {
+  const u = require('../src/central/updates');
+  const reg = 'HKEY_CURRENT_USER\\x\\a\r\n    DisplayName    REG_SZ    Riyeser Payroll 2.1.1\r\n    DisplayVersion    REG_SZ    2.1.1\r\n'
+    + 'HKEY_CURRENT_USER\\x\\b\r\n    DisplayName    REG_SZ    Riyser 1.2.0\r\n    DisplayVersion    REG_SZ    1.2.0\r\n';
+  assert.deepEqual(u.installedFromRegistry(reg), { payroll: '2.1.1' });
+  const rel = { tag_name: 't', body: '- Riyeser Payroll 2.1.1', assets: [{ name: 'RiyeserPayroll-Setup.exe', browser_download_url: 'https://github.com/raka1987/Riyeser/releases/download/t/RiyeserPayroll-Setup.exe', size: 1 }] };
+  assert.equal(u.availableUpdates(u.installedFromRegistry(reg), u.latestFromRelease(rel)).length, 0);
+});

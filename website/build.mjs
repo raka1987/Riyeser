@@ -17,7 +17,7 @@ const EARLY_BIRD = true;
 // Turn on once a release with RiyeserServices-Setup.exe is published.
 const SERVICES_WIN = process.env.SERVICES_WIN !== '0';
 // Riyeser Payroll's installer is in the release from the first release after module/payroll was added.
-const PAYROLL_WIN = process.env.PAYROLL_WIN === '1'; // in the release since riyeser-2026.11.22-4
+const PAYROLL_WIN = process.env.PAYROLL_WIN !== '0'; // in the release since riyeser-2026.11.22-9 // in the release since riyeser-2026.11.22-4
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
 const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');

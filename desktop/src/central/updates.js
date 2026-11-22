@@ -45,7 +45,12 @@ function installedFromRegistry(text) {
     const name = (block.match(/^\s*DisplayName\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
     const ver = (block.match(/^\s*DisplayVersion\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
     if (!name) continue;
-    for (const p of PRODUCTS) if ([p.display, ...(p.also || [])].some((n) => name.toLowerCase().startsWith(n.toLowerCase())) || (p.alsoRe && p.alsoRe.test(name))) out[p.id] = ver || (name.match(/(\d+(?:\.\d+){1,3})\s*$/) || [])[1] || null;
+    for (const p of PRODUCTS) {
+      if (![p.display, ...(p.also || [])].some((n) => name.toLowerCase().startsWith(n.toLowerCase())) && !(p.alsoRe && p.alsoRe.test(name))) continue;
+      const v = ver || (name.match(/(\d+(?:\.\d+){1,3})\s*$/) || [])[1] || null;
+      // An old copy can still be listed next to the new one (e.g. the old "Riyser" hub next to Riyeser Payroll): keep the newest.
+      if (!(p.id in out) || (v && (!out[p.id] || newer(v, out[p.id])))) out[p.id] = v;
+    }
   }
   return out;
 }
