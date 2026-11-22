@@ -68,7 +68,8 @@ function locate(p) {
 }
 const programList = () => PROGRAMS.map((p) => {
   const exe = locate(p);
-  if (p.url && !exe) return { id: p.id, name: p.name, full: p.full, icon: p.icon, desc: p.desc, status: 'online', where: p.url.replace(/^https?:\/\//, '') };
+  // Not installed: listed under "More Riyeser apps" (Services can still be opened online from there).
+  if (p.url && !exe) return { id: p.id, name: p.name, full: p.full, icon: p.icon, desc: p.desc, status: 'missing', online: p.url, where: p.url.replace(/^https?:\/\//, '') };
   return { id: p.id, name: p.name, full: p.full, icon: p.icon, desc: p.desc, status: exe ? 'installed' : 'missing', where: exe };
 });
 
@@ -173,6 +174,12 @@ function registerIpc() {
     if (err) throw new Error(err);
     return true;
   });
+  // A program that isn't installed yet: its page on riyeser.com, with the download.
+  handle('central:get', async (id) => {
+    const page = { accounting: 'accounting', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    await shell.openExternal(page ? `https://riyeser.com/programs/${page}.html` : 'https://riyeser.com/downloads.html');
+    return true;
+  });
   handle('central:locate', async (id) => {
     const p = PROGRAMS.find((x) => x.id === id);
     const r = await dialog.showOpenDialog(win, { title: `Where is ${p.full}?`, properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe', 'lnk'] }] : [] });
@@ -198,7 +205,7 @@ function registerIpc() {
     const recent = sources.recentDocuments({
       recentDir: process.platform === 'win32' ? path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Recent') : null,
       readLink: (l) => shell.readShortcutLink(l).target,
-      indexDocs: searchIndex().docs, limit: 12,
+      indexDocs: locate(PROGRAMS.find((x) => x.id === 'desk')) ? searchIndex().docs : {}, limit: 12, // Desk Assistant's list only while it's installed
     });
     return { deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, money, recent };
   });

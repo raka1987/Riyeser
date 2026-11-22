@@ -55,12 +55,12 @@ function renderTiles() {
   $('#tiles').innerHTML = mine.map((p) => `<button class="tile t-${esc(p.id)}" data-open="${esc(p.id)}" title="${esc(p.where || '')}">
       ${upFor.has(p.id) ? '<span class="badge">⬆ Update</span>' : ''}<div class="i">${p.icon}</div><div><b>${esc(p.name)}</b><small>${esc(tileSub(p))}</small></div></button>`).join('')
     + (others.length ? `<div class="tile glass more"><div class="i">➕</div><div><b style="color:var(--text)">More Riyeser apps</b>
-        <small class="muted">${others.map((p) => `${esc(p.name)} <button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`).join('<br>')}</small></div></div>` : '');
+        <small class="muted">${others.map((p) => `${esc(p.name)} <button class="link" data-get="${esc(p.id)}" title="Download it from riyeser.com">Get it</button>${p.online ? ` · <button class="link" data-open="${esc(p.id)}" title="Use it in your web browser">Open online</button>` : ''} · <button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`).join('<br>')}</small></div></div>` : '');
 }
 function renderMoney() {
   const m = today.money;
   const box = $('#money').closest('.w');
-  box.hidden = !has('accounting') && !(m && m.found); // no Accounting, no Money panel
+  box.hidden = !has('accounting'); // Money panel only when Riyeser Accounting is installed (an old company file left after uninstalling isn't shown)
   if (box.hidden) return;
   if (!m || !m.found) { $('#money').innerHTML = `<div class="lbl">${m && m.error ? `Couldn't read your books: ${esc(m.error)}` : 'Open Accounting and set up your company to see money owed and owing here.'}</div>`; return; }
   const t = m.totals; const notDue = Math.max(0, t.owedToYou - t.overdueToYou);
@@ -75,7 +75,7 @@ function renderMoney() {
 }
 function renderToday() {
   const box = $('#today').closest('.w');
-  box.hidden = !today.deskFound; // calendars live in Desk Assistant
+  box.hidden = !has('desk'); // calendars live in Riyeser Desk Assistant (data left after uninstalling isn't shown)
   if (box.hidden) return;
   if (!today.calendars) { $('#today').innerHTML = '<div class="lbl">Connect a calendar in Desk Assistant → Settings → Calendars to see your meetings here.</div>'; return; }
   $('#today').innerHTML = today.meetings.length ? today.meetings.slice(0, 6).map((m) => `<div class="li"><span class="h">${isToday(m.start) ? (m.allDay ? 'All day' : fmtTime(m.start)) : fmtDay(m.start)}</span><span class="grow">${esc(m.title)}${m.location ? ` <span class="lbl">· ${esc(m.location)}</span>` : ''}</span>${m.link ? `<a class="link" href="${esc(m.link)}" target="_blank">Join</a>` : ''}</div>`).join('')
@@ -84,7 +84,7 @@ function renderToday() {
 }
 function renderTodo() {
   const box = $('#todo').closest('.w');
-  box.hidden = !today.deskFound; // the to-do list belongs to Desk Assistant
+  box.hidden = !has('desk'); // the to-do list belongs to Riyeser Desk Assistant
   if (box.hidden) return;
   $('#todo').innerHTML = today.tasks.length ? today.tasks.slice(0, 6).map((x) => `<div class="li"><span>☐</span><span class="grow">${esc(x.text)}</span>${x.due ? `<span class="lbl warn">${esc(x.due)}</span>` : ''}</div>`).join('')
       + (today.tasks.length > 6 ? `<div class="lbl" style="margin-top:6px">+ ${today.tasks.length - 6} more in Desk Assistant</div>` : '')
@@ -210,6 +210,8 @@ async function runSearch() {
 document.addEventListener('click', (e) => {
   const loc = e.target.closest('[data-locate]');
   if (loc) { e.stopPropagation(); safe(async () => { const f = await bridge.call('central:locate', loc.dataset.locate); if (f) { toast('Got it — it\'s on your home screen now.'); refresh(); } }); return; }
+  const get = e.target.closest('[data-get]');
+  if (get) { e.stopPropagation(); safe(() => bridge.call('central:get', get.dataset.get)); return; }
   const open = e.target.closest('[data-open]');
   if (open) { safe(() => bridge.call('central:open', open.dataset.open)); return; }
   const file = e.target.closest('[data-file]');
