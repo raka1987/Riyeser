@@ -1,7 +1,7 @@
 // Builds the Riyser website into website/public (plain HTML, no server needed - GitHub Pages or any host).
 //   node website/build.mjs
 // Edit the text here; every page shares the same header, footer and download buttons.
-import { mkdirSync, writeFileSync, cpSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, cpSync, rmSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +13,9 @@ const RELEASES = 'https://github.com/raka1987/Riyeser/releases/latest/download';
 const EMAIL = 'info@riyeser.com';
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
+const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');
+// Riyser Services (the web app). It runs at riyeser.com today; when it moves to app.riyeser.com, change this one line.
+const SERVICES_APP = process.env.SERVICES_APP || 'https://riyeser.com';
 
 const PROGRAMS = [
   { id: 'central', name: 'Riyser Central', short: 'Central', icon: 'R', file: 'RiyserCentral-Setup.exe',
@@ -77,21 +80,14 @@ const PROGRAMS = [
       ['Scans', 'Turn scanned pages into searchable, editable text.'],
       ['Convert', 'Make PDFs from pictures, Word and Excel — or turn a PDF back into Word.'],
     ] },
-  { id: 'services', name: 'Riyser Services', short: 'Services', icon: '🏗', file: null,
-    one: 'Building services mapped on your drawings, with photos, tests and QA records in one place.',
-    pitch: 'Every service, on the drawing, with the proof.',
-    features: [
-      ['On the drawing', 'Pin services to the exact spot on your plans.'],
-      ['Photos', 'Attach site photos to each item as the job goes.'],
-      ['Tests & QA', 'Record tests and sign-offs against each service.'],
-      ['Handover ready', 'Everything you need for commissioning and handover, together.'],
-    ],
-    note: 'Riyser Services is online. Get in touch to set up your projects.' },
+  { id: 'services', name: 'Riyser Services', short: 'Services', icon: '🏗', file: null, link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
+    one: 'Map every cable, pipe and duct on your drawings as it goes in — with inspections, test results and photos — and the as-builts are done at handover.',
+    pitch: 'Map every service while the building goes up.', custom: true },
 ];
 rmSync(OUT, { recursive: true, force: true });
 const prog = (id) => PROGRAMS.find((p) => p.id === id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const dl = (p) => (p.file ? `${RELEASES}/${p.file}` : `mailto:${EMAIL}?subject=${encodeURIComponent(`Early access: ${p.name}`)}`);
+const dl = (p) => (p.file ? `${RELEASES}/${p.file}` : p.link ? p.link : `mailto:${EMAIL}?subject=${encodeURIComponent(`Early access: ${p.name}`)}`);
 const iconBox = (p, extra = '') => `<div class="icon i-${p.id === 'desk-assistant' ? 'desk' : p.id}" ${extra}>${p.icon}</div>`;
 
 function page({ path, title, description, active, body }) {
@@ -121,7 +117,7 @@ function page({ path, title, description, active, body }) {
 <main>${body(up)}</main>
 <footer><div class="c"><b>Riyser Group</b>
   ${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html">${p.short}</a>`).join('')}
-  <a href="${up}downloads.html">Downloads</a><a href="${up}support.html">Support</a>
+  <a href="${up}downloads.html">Downloads</a><a href="${up}support.html">Support</a><a href="${up}terms.html">Terms</a>
   <span class="r">© ${new Date().getFullYear()} Riyser Group</span></div></footer>
 <script>addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('scrolled',scrollY>8),{passive:true})</script>
 </body>
@@ -171,7 +167,7 @@ ${ctaBlock(up)}`,
 });
 
 // ---------- program pages ----------
-for (const p of PROGRAMS) {
+for (const p of PROGRAMS.filter((x) => !x.custom)) {
   page({
     path: `programs/${p.id}.html`, title: `${p.name} — ${p.pitch}`, active: 'programs',
     description: `${p.name}: ${p.one}`,
@@ -179,7 +175,7 @@ for (const p of PROGRAMS) {
 <div class="c phead"><div>
   ${iconBox(p)}<div class="k" style="margin-top:14px">${esc(p.name)}</div>
   <h1>${esc(p.pitch)}</h1><p class="lead">${esc(p.one)}</p>
-  <div class="ctas" style="justify-content:flex-start">${p.file ? `<a class="btn p" href="${dl(p)}">⬇ Download ${esc(p.short)} — free</a>` : `<a class="btn p" href="${dl(p)}">Get early access</a>`}<a class="btn s" href="${up}downloads.html">All downloads</a></div>
+  <div class="ctas" style="justify-content:flex-start">${p.file ? `<a class="btn p" href="${dl(p)}">⬇ Download ${esc(p.short)} — free</a>` : `<a class="btn p" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="btn s" href="${up}downloads.html">All downloads</a></div>
   ${p.file ? `<p style="font-size:13px;color:var(--faint);margin:14px 0 0">${freeLine}</p>` : ''}
 </div>
 ${p.shot ? `<img class="pshot" src="${up}assets/${p.shot}" alt="${esc(p.name)} screenshot" width="1400" height="1000">` : `<div class="placeholder i-${p.id}">${p.icon}</div>`}
@@ -196,6 +192,76 @@ ${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyser Central — fr
   });
 }
 
+
+// ---------- Riyser Services (content carried over from the original riyeser.com homepage and FAQ) ----------
+{
+  const p = prog('services');
+  const TRADES = [['Data and comms', 'Fibre, copper, racks and every port'], ['Electrical', 'Boards, circuits, outlets and test results'], ['Fire', 'Detection, sprinklers, hydrants and panels'],
+    ['Water', 'Mains, valves, meters and fixtures'], ['Drainage', 'Sewer, stormwater, pits and falls'], ['Mechanical', 'Ducts, refrigerant, plant and controls'], ['Security', 'Cameras, readers, locks and alarms'],
+    ['Audio visual', 'Speakers, displays and control'], ['Gas', 'Mains, meters and shut-offs'], ['Risers and trenches', 'How services move between levels']];
+  const STEPS = [['Put your drawings in', 'Upload PDF or image plans for each level, then set the scale with two taps.'], ['Mark up as it goes in', 'Add outlets, boards, pits and racks. Draw each cable or pipe, connect its ends and pick the port it lands on.'],
+    ['Check, test and photograph', 'Run the checklist on each item, record test results and add photos before the wall or trench closes.'], ['Hand it over', 'Print the handover pack, as-builts, schematics and port schedules. Everything is already in them.']];
+  const HANDOVER = [['services-schematic.webp', 'Schematics for any service', 'See what connects to what, port by port, for one item, one area or the whole site.', 'A schematic with outlets linked to a comms cabinet'],
+    ['services-trace.webp', 'Follow any run, end to end', 'Pick a port, outlet or valve and the route lights up on the plan.', 'A water main route highlighted on a floor plan'],
+    ['services-report.webp', 'Test reports for every trade', 'Checklists, readings, defects and photos in one clean report.', 'Two pages of a power test report'],
+    ['services-asbuilt.webp', 'As-builts as you go', 'Mark up what went in as it goes in, and the as-built is ready when the job is.', 'An as-built drawing with a title block']];
+  const FAQ = [
+    ['About Riyser Services', [
+      ['What is it?', 'An app for marking up building services on your drawings while they\'re installed. You record every cable, pipe and duct, connect each one from end to end, run inspections, add photos and test results, and print the handover pack, as-builts, schematics and port schedules at the end.'],
+      ['Who is it for?', 'Electrical, data and comms, fire, plumbing, drainage, mechanical, security and AV contractors, plus the project managers, supervisors and clients who need to see what\'s been installed and checked.'],
+      ['Can I try it first?', 'Yes. Open the demo to explore a marked-up resort with a guided tour. Nothing is saved, and it resets each time you visit.']]],
+    ['Using it on site', [
+      ['Which devices does it work on?', 'Phones, tablets and computers, in any modern browser. On a phone or tablet you can add it to your home screen so it opens like an app.'],
+      ['Does it work without signal?', 'Yes. Everything you record is saved on your device straight away, and it syncs with your team when you\'re back in range. The status at the top shows when everything is saved.'],
+      ['What drawings can I use?', 'PDF files and images such as PNG or JPG. Each page becomes a level you can mark up. Set the scale once and lengths are measured for you.'],
+      ['Do the symbols follow Australian Standards?', 'The plan symbols are based on AS/NZS 1102.11 conventions for electrical and communications items and AS 1670 for fire. You can also switch on AS 5488 service colours in Settings. Tap Key on the plan to see what each symbol means.'],
+      ['Can I connect an outlet to a specific patch panel port?', 'Yes. Open the outlet, choose how many ports it has, then pick the rack, panel and port number for each one. The cable, terminations and test results are recorded end to end, and they show up in the schematic and port schedule.']]],
+    ['Sharing and handover', [
+      ['What can I print or export?', 'A full handover pack, as-built drawings, schematics for any service, item or area, port and circuit schedules, labels, RFIs, defect reports and test reports. Each prints straight to PDF.'],
+      ['Can a client answer an RFI without an account?', 'Yes. Send them a client link for that RFI or defect. They can see it and reply, but nothing else in your project.'],
+      ['Who can see my projects?', 'Only people your admin adds to your team, at the access level they\'re given.']]],
+    ['Your information and accounts', [
+      ['Who owns my project information?', 'You do, or your client does, as you\'ve agreed between you. We only store and process it to run Riyser Services for you. See the terms of use.'],
+      ['How do I get it for my team?', `Email ${EMAIL} with your company name and roughly how many people will use it, and we'll set you up.`],
+      ['I\'ve forgotten my password', `Ask your admin to reset it, or email ${EMAIL}.`],
+      ['How do I get help?', `Tap the ? button in the app for help on the screen you're on, read the help guide, or email ${EMAIL}.`]]],
+  ];
+  page({
+    path: 'programs/services.html', title: 'Riyser Services — map every service while the building goes up', active: 'programs',
+    description: 'Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with inspections, test results and photos. As-builts done at handover.',
+    body: (up) => `
+<div class="c phead"><div>
+  ${iconBox(p)}<div class="k" style="margin-top:14px">Riyser Services</div>
+  <h1>Map every service while the building goes up</h1>
+  <p class="lead">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
+  <div class="ctas" style="justify-content:flex-start"><a class="btn p" href="${SERVICES_APP}/?demo">Try it now, free</a><a class="btn s" href="${SERVICES_APP}/">Sign in to your projects</a></div>
+  <p style="font-size:13px;color:var(--faint);margin:14px 0 0">No sign-up for the demo. Explore a marked-up resort with a guided tour.</p>
+</div><img class="pshot" src="${up}assets/services-trace.webp" alt="A water main route highlighted on a floor plan" width="1200" height="900"></div>
+<section class="c"><h2 class="h2">How it works</h2><p class="sub">From the first drawing to the handover pack.</p>
+  <div class="fgrid steps4">${STEPS.map(([h, t], i) => `<div class="f"><div class="k">Step ${i + 1}</div><h4 style="margin-top:6px">${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div></section>
+<section class="c"><h2 class="h2">One drawing for every trade</h2><p class="sub">Each trade gets its own symbols, checklists and reports.</p>
+  <div class="fgrid trades">${TRADES.map(([h, t]) => `<div class="f"><h4>${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div></section>
+<section class="c"><h2 class="h2">What you hand over</h2><p class="sub">Everything is already in them — no rework at the end of the job.</p>
+  <div class="grid two">${HANDOVER.map(([img, h, t, alt]) => `<div class="card"><img src="${up}assets/${img}" alt="${esc(alt)}" loading="lazy" style="border-radius:12px;margin-bottom:14px;border:1px solid var(--line)"><h3>${esc(h)}</h3><p>${esc(t)}</p></div>`).join('')}</div></section>
+<section class="c"><div class="feat" style="padding:24px 0"><div class="t"><div class="k">On site</div><h3>Built for the people doing the work</h3>
+  <p>Big buttons, works with no signal, and syncs when you're back in range. Phones, tablets and computers — add it to your home screen and it opens like an app.</p>
+  <ul class="ticks"><li>Electrical: boards, circuits and test results on record</li><li>IT and comms: racks, fibre and copper, port by port</li><li>Plumbing: pipe routes and pressure tests before the wall closes</li><li>Every trade working from the same drawing</li></ul></div>
+  <img src="${up}assets/services-report.webp" alt="Two pages of a power test report" loading="lazy"></div></section>
+<section class="c faq" style="max-width:900px"><h2 class="h2">Questions and answers</h2>
+  ${FAQ.map(([g, qs]) => `<h3 style="margin:28px 0 4px;font-size:18px">${esc(g)}</h3>${qs.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}`).join('')}
+  <p class="note" style="margin-top:24px">More help: the <a class="more" href="${SERVICES_APP}/help.html">help guide</a> · <a class="more" href="${up}terms.html">Terms of use</a> · <a class="more" href="mailto:${EMAIL}">${EMAIL}</a></p></section>
+<section class="c"><div class="cta"><h2>See it on a real job</h2><p>Try the demo now, or email us to set Riyser Services up for your team.</p>
+  <a class="btn t" href="${SERVICES_APP}/?demo">Try the demo</a> &nbsp; <a class="btn s" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyser Services enquiry')}">${EMAIL}</a></div></section>`,
+  });
+}
+
+// ---------- terms of use (as published on riyeser.com, 8 November 2026) ----------
+page({
+  path: 'terms.html', title: 'Terms of use — Riyser', active: '',
+  description: 'Terms of use for Riyser and Riyser Services.',
+  body: () => `<div class="c legal" style="max-width:820px;padding:56px 24px 64px">${TERMS}</div>`,
+});
+
 // ---------- downloads ----------
 page({
   path: 'downloads.html', title: 'Download Riyser — free for Windows', active: 'downloads',
@@ -204,7 +270,7 @@ page({
 <div class="c" style="padding-top:56px">
   <h1 style="font-size:clamp(32px,5vw,48px);letter-spacing:-1px">Downloads</h1>
   <p class="lead" style="margin:10px 0 30px;text-align:left">${freeLine}. For Windows 10 and 11. Each installs in one click and updates over the old version — your data is kept.</p>
-  ${PROGRAMS.map((p) => `<div class="dl">${iconBox(p)}<div><h3>${esc(p.name)}</h3><p>${esc(p.one)}</p></div>${p.file ? `<a class="btn p" href="${dl(p)}">⬇ Download</a>` : `<a class="btn s" href="${dl(p)}">Early access</a>`}</div>`).join('')}
+  ${PROGRAMS.map((p) => `<div class="dl">${iconBox(p)}<div><h3>${esc(p.name)}</h3><p>${esc(p.one)}</p></div>${p.file ? `<a class="btn p" href="${dl(p)}">⬇ Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join('')}
   <section style="padding:40px 0 0"><h2 style="font-size:24px;margin-bottom:8px">Installing</h2>
     <ol class="steps"><li>Click <b>Download</b> and open the file when it finishes.</li>
     <li>If Windows shows <b>“Windows protected your PC”</b>, click <b>More info → Run anyway</b>. (We're getting our programs signed so this goes away.)</li>
@@ -251,7 +317,7 @@ ${ctaBlock(up)}`,
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-const urls = ['', 'downloads.html', 'pricing.html', 'support.html', ...PROGRAMS.map((p) => `programs/${p.id}.html`)];
+const urls = ['', 'downloads.html', 'pricing.html', 'support.html', 'terms.html', ...PROGRAMS.map((p) => `programs/${p.id}.html`)];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
 writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
 console.log('Built', urls.length, 'pages into', OUT);
