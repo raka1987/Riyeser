@@ -189,3 +189,5 @@ section.c { padding-top: 56px; padding-bottom: 56px; }
 .earlybox { display: flex; gap: 16px; align-items: center; background: #fff7e6; border: 1px solid #f6d58f; border-radius: 20px; padding: 20px 24px; margin-bottom: 26px; color: #5c3a00; scroll-margin-top: 90px; }
 .earlybox .big { font-size: 34px; } .earlybox b { color: #3d2600; font-size: 17px; } .earlybox p { margin: 4px 0 0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .earlybox { background: #2a2110; border-color: #5c4413; color: #f3dca8; } :root:not([data-theme="light"]) .earlybox b { color: #fff; } }
+.addon { display: flex; gap: 16px; align-items: center; background: var(--card); border: 1px dashed var(--brand); border-radius: 20px; padding: 20px 24px; margin-top: 22px; }
+.addon .big { font-size: 32px; } .addon b { color: var(--ink); font-size: 17px; } .addon p { margin: 4px 0 0; color: var(--muted); }

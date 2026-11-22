@@ -380,6 +380,7 @@ page({
     <div class="plan"><div class="k">5–19 users</div><div class="price">$16<small> per user / month</small></div><p>20% off every user once you reach five.</p></div>
     <div class="plan"><div class="k">20+ users</div><div class="price">$13<small> per user / month</small></div><p>35% off every user for larger teams.</p></div>
   </div>
+  <div class="addon"><div class="big">🏢</div><div><b>Add-on: extra companies — $10 a month each</b><p>Your plan includes one company in Riyeser Accounting. Run more — another company, a trust, or your clients' books — for $10 a month per extra company. Free to try during your 90 days.</p></div></div>
   <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
 </section>
 
@@ -406,6 +407,7 @@ page({
   <details><summary>What happens when the trial ends?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays on your computer and can still be opened. To keep adding new work, get a licence and enter the key in Riyeser Central.</p></details>
   <details><summary>What counts as a user?</summary><p>Each person who uses Riyeser on their own computer. One licence covers every Riyeser program for that person.</p></details>
   <details><summary>Can I change the number of users later?</summary><p>Yes, add or remove users any time. Your price per user follows the table above.</p></details>
+  <details><summary>How do extra companies work?</summary><p>Each licence includes one company in Riyeser Accounting. Groups, trusts and bookkeepers can add more for $10 a month per extra company, and switch between them with one sign-in. If you stop paying for an extra company, its books stay — they open read-only until you add it back.</p></details>
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
   ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 users to buy a licence pay half price for their first 12 months — for example $10 instead of $20 per user a month. After 12 months the normal price applies. Once 100 users have the offer, it ends; we won't extend it or run a fake countdown.</p></details>` : ''}
   <details><summary>How do I buy?</summary><p>Online checkout is opening soon. Until then, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser licence')}">${EMAIL}</a> with your business name and number of users and we'll send your licence key.</p></details>

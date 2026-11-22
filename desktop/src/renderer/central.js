@@ -162,7 +162,7 @@ function renderLicence() {
 function openLicence() {
   const s = lic || {}; const body = $('#licbody');
   const state = s.mode === 'licensed'
-    ? `<div class="state"><span class="big">✅</span><div><b>Licensed${s.plan ? ` — ${esc(s.plan)}` : ''}</b>${s.email ? `${esc(s.email)} · ` : ''}key ${esc(s.key || '')}<div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleDateString() : '—'}. Works offline; it's re-checked now and then when you're online.</div></div></div>`
+    ? `<div class="state"><span class="big">✅</span><div><b>Licensed${s.plan ? ` — ${esc(s.plan)}` : ''}</b>${s.email ? `${esc(s.email)} · ` : ''}key ${esc(s.key || '')}<div>Companies in Riyeser Accounting: ${1 + (s.extraCompanies || 0)} (1 included${s.extraCompanies ? ` + ${s.extraCompanies} extra` : ''})</div><div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleDateString() : '—'}. Works offline; it's re-checked now and then when you're online.</div></div></div>`
     : s.mode === 'trial'
       ? `<div class="state"><span class="big">🎁</span><div><b>Free trial — ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left</b>Every Riyeser program is included until ${new Date(s.trialEnds).toLocaleDateString()}. No card needed.</div></div>`
       : `<div class="state bad"><span class="big">🔑</span><div><b>Licence needed</b>${esc(s.message || '')}</div></div>`;
@@ -172,7 +172,7 @@ function openLicence() {
     : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
       <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
       <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">$20 per user a month for every Riyeser program, less for 5+ users. 🐣 Early bird: 50% off your first year for the first 100 users. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+      <p class="muted">$20 per user a month for every Riyeser program, less for 5+ users. 🐣 Early bird: 50% off your first year for the first 100 users. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
   $('#licdlg').showModal();
 }
 document.addEventListener('click', (e) => {

@@ -18,9 +18,9 @@ test('licence: 90-day trial, counts down, then expires without losing anything',
 
 test('licence: activate a key, works offline for 30 days, then asks to re-check', async () => {
   const dir = tmp(); const t0 = Date.parse('2026-03-01T00:00:00Z');
-  const ok = { activated: true, instance: { id: 'i1' }, license_key: { status: 'active', activation_limit: 5, activation_usage: 1 }, meta: { product_name: 'Riyeser', variant_name: '5 users', customer_email: 'a@b.c', store_id: 1 } };
+  const ok = { activated: true, instance: { id: 'i1' }, license_key: { status: 'active', activation_limit: 5, activation_usage: 1 }, meta: { product_name: 'Riyeser', variant_name: '5 users + 2 extra companies', customer_email: 'a@b.c', store_id: 1 } };
   const s = await lic.activate(dir, 'ABCD-1234-EFGH-5678', { fetchFn: fakeFetch(ok), now: t0 });
-  assert.equal(s.mode, 'licensed'); assert.equal(s.plan, 'Riyeser · 5 users'); assert.equal(s.key, 'ABCD…5678');
+  assert.equal(s.mode, 'licensed'); assert.equal(s.plan, 'Riyeser · 5 users + 2 extra companies'); assert.equal(s.extraCompanies, 2); assert.equal(s.key, 'ABCD…5678');
   assert.equal(lic.status(dir, t0 + 20 * DAY).mode, 'licensed');
   assert.equal(lic.status(dir, t0 + 31 * DAY).mode, 'expired');
   // back online: a successful check renews it

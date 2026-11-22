@@ -51,7 +51,7 @@ function status(appData, now = Date.now()) {
     const offlineLeft = checked + OFFLINE_GRACE_DAYS * DAY - now;
     const active = d.licence.status === 'active' && (!expiresAt || expiresAt > now);
     if (active && offlineLeft > 0) {
-      return { ...base, mode: 'licensed', plan: d.licence.plan || 'Riyeser', email: d.licence.email || null, key: mask(d.key),
+      return { ...base, mode: 'licensed', plan: d.licence.plan || 'Riyeser', email: d.licence.email || null, key: mask(d.key), extraCompanies: d.licence.extraCompanies || 0,
         checkedAt: d.licence.checkedAt, needsCheck: now - checked > RECHECK_DAYS * DAY,
         message: offlineLeft < 7 * DAY ? `Connect to the internet within ${days(offlineLeft)} day(s) so your licence can be checked.` : null };
     }
@@ -72,6 +72,8 @@ function fromApi(r) {
     plan: [meta.product_name, meta.variant_name].filter(Boolean).join(' · ') || null,
     email: meta.customer_email || null,
     storeId: meta.store_id || null,
+    // Extra companies (Riyeser Accounting add-on, $10 a month each): set up in the shop as a variant named like "3 extra companies"
+    extraCompanies: Number((String(meta.variant_name || '').match(/(\d+)\s*extra\s*compan/i) || [])[1] || 0),
   };
 }
 async function post(fetchFn, endpoint, params) {
