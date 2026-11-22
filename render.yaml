@@ -1,0 +1,20 @@
+# Render settings for the live site. Paid "starter" plan + a disk so staff, timesheets, pay runs and pay history
+# are kept when the site restarts or updates.
+services:
+  - type: web
+    name: riyeser-payroll
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_DIR
+        value: /var/data
+      - key: ADMIN_PASSWORD
+        generateValue: true
+    disk:
+      name: payroll-data
+      mountPath: /var/data
+      sizeGB: 1

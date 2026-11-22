@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>Riyeser Payroll</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/svg+xml" href="/images/logo.svg">
+  <link rel="manifest" href="/staff.webmanifest">
+  <link rel="apple-touch-icon" href="/images/logo.svg">
+  <meta name="theme-color" content="#0e2a47">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Riyeser Payroll">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/staff.css">
+</head>
+<body class="staff">
+  <div id="login" class="login hidden">
+    <form class="card" id="login-form">
+      <div style="text-align:center"><img src="/images/logo.svg" width="84" height="84" alt=""></div>
+      <h2 style="font-size:1.6rem;margin-top:12px;text-align:center">Riyeser Payroll</h2>
+      <p class="muted small" style="text-align:center">Time clock, timesheets and pay. Authorised staff only.</p>
+      <div id="login-err"></div>
+      <div class="field"><label>Username</label><input name="username" autocomplete="username" required></div>
+      <div class="field"><label>Password</label><input name="password" type="password" autocomplete="current-password" required></div>
+      <button class="btn" style="width:100%">Log in</button>
+    </form>
+  </div>
+
+  <div id="setup" class="login hidden">
+    <form class="card" id="setup-form">
+      <div style="text-align:center"><img src="/images/logo.svg" width="72" height="72" alt=""></div>
+      <h2 style="font-size:1.5rem;margin-top:12px;text-align:center">Welcome to Riyeser Payroll</h2>
+      <p class="muted small" style="text-align:center">First time on this computer: create your Super admin login. You'll use it to log in, add staff and run payroll.</p>
+      <div id="setup-err"></div>
+      <div class="field"><label>Company name</label><input name="company_name" placeholder="Your business name" required></div>
+      <div class="field"><label>Your name</label><input name="name" autocomplete="name" required></div>
+      <div class="field"><label>Username</label><input name="username" autocomplete="username" autocapitalize="none" required placeholder="e.g. admin"></div>
+      <div class="field"><label>Password (at least 8 characters)</label><input name="password" type="password" autocomplete="new-password" required minlength="8"></div>
+      <div class="field"><label>Password again</label><input name="password2" type="password" autocomplete="new-password" required minlength="8"></div>
+      <button class="btn" style="width:100%">Create login</button>
+    </form>
+  </div>
+
+  <div id="app" class="app hidden">
+    <aside class="side" id="side">
+      <div class="side-head">
+        <a class="brand" href="#/dashboard">
+          <img src="/images/logo.svg" width="34" height="34" alt="">
+          <span>Riyeser Payroll</span>
+        </a>
+        <button class="side-close" id="side-close" aria-label="Close menu">✕</button>
+      </div>
+      <nav id="menu"></nav>
+      <div class="side-foot">
+        <div id="me" class="small"></div>
+        <button class="btn sm light" id="clock-btn" style="width:100%;margin-top:8px"></button>
+        <button class="btn sm ghost" id="logout" style="width:100%;margin-top:6px;color:#d7e7de;box-shadow:inset 0 0 0 1.5px #3a6b59">Log out</button>
+      </div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>
+        <h1 id="view-title">Dashboard</h1>
+        <div class="live" id="live" style="color:var(--green-700)"><i></i> Live</div>
+      </header>
+      <div id="view" class="view"></div>
+    </main>
+  </div>
+  <div class="side-backdrop" id="side-backdrop"></div>
+  <div id="modal-root"></div>
+  <script src="/common.js"></script>
+  <script src="/staff.js"></script>
+</body>
+</html>

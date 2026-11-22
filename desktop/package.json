@@ -1,0 +1,13 @@
+{
+  "name": "riyeser-payroll-desktop",
+  "private": true,
+  "description": "Builds Riyeser Payroll as a Windows desktop program",
+  "scripts": {
+    "build": "node prepare.js && electron-builder --projectDir build/app --win nsis portable --x64",
+    "start": "node prepare.js && electron build/app"
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.18.0"
+  }
+}

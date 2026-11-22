@@ -1,0 +1,36 @@
+name: Windows app
+# Builds the Riyeser Payroll Windows program (installer + portable .exe) on a Windows machine, checks it starts,
+# and keeps the files for download (Actions → this run → Artifacts). Run it from the Actions tab, or push a tag like v1.0.1.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - run: npm ci
+        working-directory: desktop
+      - run: npm run build
+        working-directory: desktop
+      - name: Check the program starts and its records work
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "desktop\dist\win-unpacked\Riyeser Payroll.exe" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 40; $i++) { Start-Sleep 2; try { $r = Invoke-RestMethod http://127.0.0.1:37421/api/public/setup; if ($r.desktop) { $ok = $true; break } } catch {} }
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "The program did not start" }
+          if (-not (Test-Path "$env:APPDATA\Riyeser Payroll\payroll\payroll.db")) { throw "No records file" }
+          Write-Host "Started OK; records at $env:APPDATA\Riyeser Payroll\payroll"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RiyeserPayroll-Windows
+          path: |
+            desktop/dist/*.exe
