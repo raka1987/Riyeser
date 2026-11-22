@@ -17,9 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { ref: module/desk-assistant }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: "22" }
       - id: pages
         uses: actions/configure-pages@v5
@@ -27,7 +27,7 @@ jobs:
         run: node website/build.mjs
         env:
           SITE_BASE: "${{ steps.pages.outputs.base_path }}/"
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with: { path: website/public }
       - id: deploy
         uses: actions/deploy-pages@v4
