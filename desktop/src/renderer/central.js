@@ -1,67 +1,114 @@
-// Riyser Central home screen.
+// Riyser Central home screen ("Launcher" design).
+// Shows only what this customer has: tiles for installed programs, panels only when their program's data is there,
+// and one "More Riyser apps" tile for anything not installed.
 const $ = (s, el = document) => el.querySelector(s);
 const bridge = window.api;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const moneyShort = (n) => `$${Math.round(Number(n || 0)).toLocaleString()}`;
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-const fmtDay = (d) => new Date(d).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtDay = (d) => new Date(d).toLocaleDateString([], { weekday: 'short' });
 const fmtDate = (s) => (s ? new Date(`${s}T00:00:00`).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '');
+const isToday = (d) => new Date(d).toDateString() === new Date().toDateString();
 const fileIcon = (n) => /\.pdf$/i.test(n) ? '📕' : /\.(docx?|odt|rtf)$/i.test(n) ? '📘' : /\.(xlsx?|xlsm|csv|ods)$/i.test(n) ? '📗' : /\.(pptx?)$/i.test(n) ? '📙' : /\.(jpe?g|png|heic|gif|webp)$/i.test(n) ? '🖼' : /\.(dwg|dxf)$/i.test(n) ? '📐' : '📄';
 const short = (p) => p.replace(/^(\/home\/[^/]+|\/Users\/[^/]+|[A-Z]:\\Users\\[^\\]+)/, '~');
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), 4200); }
 async function safe(fn) { try { return await fn(); } catch (e) { toast(e.message); return null; } }
 
-// ---------- programs ----------
-async function renderPrograms() {
-  const list = await bridge.call('central:programs');
-  $('#programs').innerHTML = list.map((p) => `<div class="pcard" data-open="${esc(p.id)}" title="${esc(p.where || '')}">
-    <div class="pi">${p.icon}</div><h3>${esc(p.name)}</h3><div class="pd">${esc(p.desc)}</div>
-    <div class="ps">${p.status === 'installed' ? '<span class="dot ok"></span> Installed' : p.status === 'online' ? `<span class="dot web"></span> Online · ${esc(p.where)}` : '<span class="dot no"></span> Not found on this computer'}
-      ${p.status === 'missing' ? `<button class="link small" data-locate="${esc(p.id)}">Locate…</button>` : ''}</div></div>`).join('');
+// ---------- light / dark ----------
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $('#theme').textContent = t === 'light' ? '☾' : '☀';
+  $('#theme').title = t === 'light' ? 'Switch to dark' : 'Switch to light';
 }
+let theme = 'dark';
+try { theme = localStorage.getItem('central-theme') || 'dark'; } catch { /* storage unavailable */ }
+applyTheme(theme);
+$('#theme').addEventListener('click', () => { theme = theme === 'light' ? 'dark' : 'light'; applyTheme(theme); try { localStorage.setItem('central-theme', theme); } catch { /* ignore */ } });
 
-// ---------- today ----------
-async function renderToday() {
-  const t = await bridge.call('central:today');
-  // meetings
-  $('#meetings').className = '';
-  $('#meetings').innerHTML = !t.calendars ? '<div class="empty small">No calendar connected. Add one in Desk Assistant → Settings → Calendars to see meetings here.</div>'
-    : t.meetings.length ? t.meetings.map((m) => `<div class="mline"><span class="mtime">${m.allDay ? 'All day' : fmtTime(m.start)}<div class="small muted">${fmtDay(m.start)}</div></span>
-        <div class="grow"><b>${esc(m.title)}</b>${m.location ? `<div class="small muted">${esc(m.location)}</div>` : ''}</div>${m.link ? `<a class="small" href="${esc(m.link)}" target="_blank">Join</a>` : ''}</div>`).join('')
-      : '<div class="empty small">No meetings today or tomorrow.</div>';
-  if (t.meetingErrors.length) $('#meetings').innerHTML += `<div class="small" style="color:var(--warn)">Couldn't read: ${esc(t.meetingErrors.join(', '))}</div>`;
-  // to-dos
-  $('#tasks').className = '';
-  $('#tasks').innerHTML = !t.deskFound ? '<div class="empty small">Install Riyeser Desk Assistant to keep a to-do list (it picks up action items from your meeting notes).</div>'
-    : t.tasks.length ? t.tasks.map((x) => `<div class="mline"><span>☐</span><div class="grow">${esc(x.text)}${x.meeting ? `<div class="small muted">from ${esc(x.meeting)}</div>` : ''}</div>${x.due ? `<span class="pill warn">${esc(x.due)}</span>` : ''}</div>`).join('')
-        + '<div class="small muted" style="margin-top:6px">Tick items off in Desk Assistant → To-do.</div>'
-      : '<div class="empty small">Nothing outstanding. 🎉</div>';
-  // money
-  const m = t.money;
-  $('#money').className = '';
-  if (!m || !m.found) {
-    $('#money').innerHTML = `<div class="empty small">${m && m.error ? `Couldn't read your books: ${esc(m.error)}` : 'No company file yet. Open Accounting and set up your company to see money owed and owing here.'}</div>`;
-  } else {
-    const line = (r) => `<div class="mline"><div class="grow"><b>${esc(r.contact)}</b> <span class="small muted">${esc(r.number)}</span><div class="small ${r.overdue ? '' : 'muted'}" ${r.overdue ? 'style="color:var(--bad)"' : ''}>${r.due ? `${r.overdue ? 'overdue since' : 'due'} ${fmtDate(r.due)}` : 'no due date'}</div></div><span class="amount">${money(r.owing)}</span></div>`;
-    const top = (list) => list.slice().sort((a, b) => (b.overdue - a.overdue) || String(a.due).localeCompare(String(b.due))).slice(0, 4);
-    $('#money').innerHTML = `${m.company ? `<div class="small muted" style="margin-bottom:8px">${esc(m.company)}</div>` : ''}
-      <div class="money-tot"><div><div class="k">Customers owe you</div><div class="v">${money(m.totals.owedToYou)}</div>${m.totals.overdueToYou ? `<div class="small" style="color:var(--bad)">${money(m.totals.overdueToYou)} overdue</div>` : ''}</div>
-        <div><div class="k">You owe suppliers</div><div class="v">${money(m.totals.youOwe)}</div>${m.totals.overdueYouOwe ? `<div class="small" style="color:var(--bad)">${money(m.totals.overdueYouOwe)} overdue</div>` : ''}</div></div>
-      ${m.receivables.length ? `<div class="small"><b>To chase</b></div>${top(m.receivables).map(line).join('')}` : ''}
-      ${m.payables.length ? `<div class="small" style="margin-top:8px"><b>To pay</b></div>${top(m.payables).map(line).join('')}` : ''}
-      <div style="margin-top:8px"><button class="link small" data-open="accounting">Open Accounting →</button></div>`;
-  }
-  // recent documents
-  $('#recent').className = 'recent';
-  $('#recent').innerHTML = t.recent.length ? t.recent.map((r) => `<div class="ritem" data-file="${esc(r.path)}" title="${esc(r.path)}"><span>${fileIcon(r.name)}</span><div style="min-width:0"><div class="rn">${esc(r.name)}</div><div class="rd">${esc(short(r.dir))}</div></div></div>`).join('')
-    : '<div class="empty small">No recent documents yet.</div>';
+// ---------- clock ----------
+function tick() {
+  const n = new Date();
+  $('#time').textContent = n.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?[AP]M$/i, '');
+  $('#date').textContent = n.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+}
+tick(); setInterval(tick, 15000);
+
+// ---------- home ----------
+let programs = []; let today = null;
+const has = (id) => programs.some((p) => p.id === id && p.status !== 'missing');
+
+function tileSub(p) {
+  if (p.status === 'missing') return 'Not on this computer';
+  const m = today && today.money;
+  if (p.id === 'accounting') return m && m.found ? (m.totals.owedToYou ? `${moneyShort(m.totals.owedToYou)} owed to you` : 'All invoices paid') : 'Set up your company';
+  if (p.id === 'desk') return today && today.tasks.length ? `${today.tasks.length} to-do${today.tasks.length === 1 ? '' : 's'} · find & sort files` : 'Find & sort your files';
+  if (p.id === 'payroll') return 'Timesheets · pay runs · payslips';
+  if (p.id === 'pdf') return 'Fill · sign · edit';
+  if (p.id === 'services') return p.where;
+  return p.desc;
+}
+function renderTiles() {
+  const mine = programs.filter((p) => p.status !== 'missing');
+  const others = programs.filter((p) => p.status === 'missing');
+  $('#tiles').innerHTML = mine.map((p) => `<button class="tile t-${esc(p.id)}" data-open="${esc(p.id)}" title="${esc(p.where || '')}">
+      <div class="i">${p.icon}</div><div><b>${esc(p.name)}</b><small>${esc(tileSub(p))}</small></div></button>`).join('')
+    + (others.length ? `<div class="tile glass more"><div class="i">➕</div><div><b style="color:var(--text)">More Riyser apps</b>
+        <small class="muted">${others.map((p) => `${esc(p.name)} <button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`).join('<br>')}</small></div></div>` : '');
+}
+function renderMoney() {
+  const m = today.money;
+  const box = $('#money').closest('.w');
+  box.hidden = !has('accounting') && !(m && m.found); // no Accounting, no Money panel
+  if (box.hidden) return;
+  if (!m || !m.found) { $('#money').innerHTML = `<div class="lbl">${m && m.error ? `Couldn't read your books: ${esc(m.error)}` : 'Open Accounting and set up your company to see money owed and owing here.'}</div>`; return; }
+  const t = m.totals; const notDue = Math.max(0, t.owedToYou - t.overdueToYou);
+  const pct = t.owedToYou ? Math.round((t.overdueToYou / t.owedToYou) * 100) : 0;
+  const chase = m.receivables.filter((r) => r.overdue).sort((a, b) => String(a.due).localeCompare(String(b.due))).slice(0, 2);
+  const nextBill = m.payables.slice().sort((a, b) => (b.overdue - a.overdue) || String(a.due).localeCompare(String(b.due)))[0];
+  $('#money').innerHTML = `<div class="big num">${money(t.owedToYou)}</div><div class="lbl">customers owe you</div>
+    <div class="bar"><i style="width:${pct}%;background:var(--bad)"></i><i style="width:${100 - pct}%;background:var(--ok)"></i></div>
+    <div class="lbl">${moneyShort(t.overdueToYou)} overdue · ${moneyShort(notDue)} not yet due</div>
+    ${chase.map((r) => `<div class="li"><span class="grow">Chase ${esc(r.contact)} <span class="lbl">${esc(r.number)}</span></span><span class="amt num bad">${money(r.owing)}</span></div>`).join('')}
+    <div class="li"><span class="h">You owe</span><span class="grow"><b class="num">${money(t.youOwe)}</b>${nextBill ? ` <span class="lbl">· next: ${esc(nextBill.contact)} ${nextBill.due ? (nextBill.overdue ? '<span class="bad">overdue</span>' : `due ${fmtDate(nextBill.due)}`) : ''}</span>` : ''}</span></div>`;
+}
+function renderToday() {
+  const box = $('#today').closest('.w');
+  box.hidden = !today.deskFound; // calendars live in Desk Assistant
+  if (box.hidden) return;
+  if (!today.calendars) { $('#today').innerHTML = '<div class="lbl">Connect a calendar in Desk Assistant → Settings → Calendars to see your meetings here.</div>'; return; }
+  $('#today').innerHTML = today.meetings.length ? today.meetings.slice(0, 6).map((m) => `<div class="li"><span class="h">${isToday(m.start) ? (m.allDay ? 'All day' : fmtTime(m.start)) : fmtDay(m.start)}</span><span class="grow">${esc(m.title)}${m.location ? ` <span class="lbl">· ${esc(m.location)}</span>` : ''}</span>${m.link ? `<a class="link" href="${esc(m.link)}" target="_blank">Join</a>` : ''}</div>`).join('')
+    : '<div class="lbl">No meetings today or tomorrow. 🎉</div>';
+  if (today.meetingErrors.length) $('#today').innerHTML += `<div class="lbl warn" style="margin-top:6px">Couldn't read: ${esc(today.meetingErrors.join(', '))}</div>`;
+}
+function renderTodo() {
+  const box = $('#todo').closest('.w');
+  box.hidden = !today.deskFound; // the to-do list belongs to Desk Assistant
+  if (box.hidden) return;
+  $('#todo').innerHTML = today.tasks.length ? today.tasks.slice(0, 6).map((x) => `<div class="li"><span>☐</span><span class="grow">${esc(x.text)}</span>${x.due ? `<span class="lbl warn">${esc(x.due)}</span>` : ''}</div>`).join('')
+      + (today.tasks.length > 6 ? `<div class="lbl" style="margin-top:6px">+ ${today.tasks.length - 6} more in Desk Assistant</div>` : '')
+    : '<div class="lbl">Nothing outstanding. 🎉</div>';
+}
+function renderRecent() {
+  $('#recent').innerHTML = today.recent.length ? today.recent.slice(0, 10).map((r) => `<div class="glass doc" data-file="${esc(r.path)}" title="${esc(r.path)}">${fileIcon(r.name)} <span>${esc(r.name)}</span></div>`).join('')
+    : '<div class="lbl">Files you open will show up here.</div>';
+}
+function layoutWidgets() {
+  // fill the row with whichever panels this customer has
+  const shown = [...document.querySelectorAll('.widgets .w')].filter((w) => !w.hidden).length;
+  $('.widgets').style.gridTemplateColumns = shown ? `repeat(${shown}, minmax(0, 1fr))` : '';
+  $('.widgets').hidden = !shown;
+}
+async function refresh() {
+  [programs, today] = await Promise.all([bridge.call('central:programs'), bridge.call('central:today')]);
+  renderTiles(); renderMoney(); renderToday(); renderTodo(); renderRecent(); layoutWidgets();
 }
 
 // ---------- search ----------
 const finder = { q: '', type: null, year: null, kind: null };
 async function runSearch() {
   const active = finder.q.trim() || finder.type || finder.year || finder.kind;
-  $('#search').hidden = !active; $('#home').hidden = !!active; $('#qclear').hidden = !active;
+  $('#results').hidden = !active; $('#home').hidden = !!active; $('#qclear').hidden = !active;
   if (!active) return;
   const r = await bridge.call('search:find', { ...finder, limit: 150 });
   const chipRow = (label, key, counts, order) => {
@@ -69,19 +116,19 @@ async function runSearch() {
     if (!entries.length) return '';
     return `<div class="frow"><span class="flabel">${label}</span>${finder[key] ? `<button class="fchip on" data-f="${key}" data-v="">${esc(finder[key])} ✕</button>` : entries.slice(0, 20).map(([v, n]) => `<button class="fchip" data-f="${key}" data-v="${esc(v)}">${esc(v)} <span class="muted">${n}</span></button>`).join('')}</div>`;
   };
-  $('#search').innerHTML = `<div class="sfilters">${chipRow('Type', 'type', r.facets.type, (a, b) => b[1] - a[1])}${chipRow('Year', 'year', r.facets.year, (a, b) => b[0].localeCompare(a[0]))}${chipRow('Kind', 'kind', r.facets.kind, (a, b) => b[1] - a[1])}</div>
-    <div class="card"><div class="small muted" style="margin-bottom:6px">${r.total.toLocaleString()} match${r.total === 1 ? '' : 'es'}${r.total > r.results.length ? ` — showing the best ${r.results.length}` : ''}</div>
-    ${r.results.length ? `<ul class="list">${r.results.map((x) => `<li><div class="grow"><b class="fname">${fileIcon(x.name)} ${esc(x.name)}</b>${x.formerNames.length ? `<div class="small muted">used to be called ${esc(x.formerNames[x.formerNames.length - 1])}</div>` : ''}
-        <div style="margin:3px 0"><span class="pill">${esc(x.type)}</span> <span class="pill">${esc(x.year)}</span> <span class="pill">${esc(x.kind)}</span>${x.company ? ` <span class="pill">${esc(x.company)}</span>` : ''}</div>
-        <div class="path small">${esc(short(x.dir))}</div>${x.snippet ? `<div class="small muted">…${esc(x.snippet)}…</div>` : ''}</div>
-        <button class="link" data-file="${esc(x.path)}">Open</button><button class="link" data-reveal="${esc(x.path)}">Show in folder</button></li>`).join('')}</ul>`
-      : '<div class="empty">No matches. Desk Assistant keeps the search list up to date — open it and use “Re-scan my folders” if you just saved something.</div>'}</div>`;
+  $('#results').innerHTML = `<div class="filters">${chipRow('Type', 'type', r.facets.type, (a, b) => b[1] - a[1])}${chipRow('Year', 'year', r.facets.year, (a, b) => b[0].localeCompare(a[0]))}${chipRow('Kind', 'kind', r.facets.kind, (a, b) => b[1] - a[1])}</div>
+    <div class="glass rlist"><div class="lbl" style="padding:8px 0">${r.total.toLocaleString()} match${r.total === 1 ? '' : 'es'}${r.total > r.results.length ? ` — showing the best ${r.results.length}` : ''}</div>
+    ${r.results.length ? r.results.map((x) => `<div class="r"><div style="font-size:22px">${fileIcon(x.name)}</div><div class="grow"><b>${esc(x.name)}</b>${x.formerNames.length ? ` <span class="lbl">· used to be ${esc(x.formerNames[x.formerNames.length - 1])}</span>` : ''}
+        <div style="margin:3px 0"><span class="pill">${esc(x.type)}</span><span class="pill">${esc(x.year)}</span><span class="pill">${esc(x.kind)}</span>${x.company ? `<span class="pill">${esc(x.company)}</span>` : ''}</div>
+        <div class="p">${esc(short(x.dir))}${x.snippet ? ` · …${esc(x.snippet)}…` : ''}</div></div>
+        <button data-file="${esc(x.path)}">Open</button><button data-reveal="${esc(x.path)}">Show</button></div>`).join('')
+      : `<div class="lbl" style="padding:12px 0 16px">No matches.${has('desk') ? ' If you just saved it, open Desk Assistant → Find a file → “Re-scan my folders”.' : ' Search uses Riyeser Desk Assistant’s file list — install it to search all your files.'}</div>`}</div>`;
 }
 
 // ---------- events ----------
 document.addEventListener('click', (e) => {
   const loc = e.target.closest('[data-locate]');
-  if (loc) { e.stopPropagation(); safe(async () => { const f = await bridge.call('central:locate', loc.dataset.locate); if (f) { toast('Got it — I\'ll open it from there.'); renderPrograms(); } }); return; }
+  if (loc) { e.stopPropagation(); safe(async () => { const f = await bridge.call('central:locate', loc.dataset.locate); if (f) { toast('Got it — it\'s on your home screen now.'); refresh(); } }); return; }
   const open = e.target.closest('[data-open]');
   if (open) { safe(() => bridge.call('central:open', open.dataset.open)); return; }
   const file = e.target.closest('[data-file]');
@@ -93,17 +140,14 @@ document.addEventListener('click', (e) => {
 });
 let timer;
 $('#q').addEventListener('input', (e) => { finder.q = e.target.value; clearTimeout(timer); timer = setTimeout(() => safe(runSearch), 150); });
-$('#q').addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('#qclear').click(); } });
+$('#q').addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#qclear').click(); });
 $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign(finder, { q: '', type: null, year: null, kind: null }); safe(runSearch); $('#q').focus(); });
 
 (async () => {
-  const h = new Date().getHours();
-  $('#greet').textContent = `${h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'} · ${new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' })}`;
   const v = await bridge.call('app:version').catch(() => '');
   document.title = `Riyser Central ${v}`;
-  $('#foot').textContent = `Riyser Central ${v} · Riyser Group · reads your other Riyeser programs' information; it never changes it.`;
-  await Promise.all([safe(renderPrograms), safe(renderToday)]);
-  // keep it fresh while it's open
-  setInterval(() => { if ($('#search').hidden) { safe(renderToday); safe(renderPrograms); } }, 5 * 60 * 1000);
-  window.addEventListener('focus', () => { if ($('#search').hidden) safe(renderPrograms); });
+  $('#foot').textContent = `Riyser Central ${v} · Riyser Group · shows information from your other Riyeser programs; it never changes it.`;
+  await safe(refresh);
+  setInterval(() => { if ($('#results').hidden) safe(refresh); }, 5 * 60 * 1000);
+  window.addEventListener('focus', () => { if ($('#results').hidden) safe(refresh); });
 })();

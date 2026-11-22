@@ -4,27 +4,30 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
   <title>Riyser Central</title>
-  <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="central.css">
 </head>
-<body class="central">
-  <header class="chead">
-    <div class="cbrand"><img src="icon-central.png" alt=""><div><div class="ctitle">Riyser Central</div><div class="csub" id="greet">Your business in one place</div></div></div>
-    <div class="csearch"><input id="q" placeholder="Find any file — name, words inside it, company, or an old name" autocomplete="off"><button id="qclear" class="link" hidden>Clear</button></div>
-  </header>
-  <main id="cmain">
-    <section id="search" hidden></section>
+<body>
+  <div class="wrap">
+    <header class="head">
+      <img src="icon-central.png" alt="">
+      <div class="brand"><b>Riyser Central</b><small>Riyser Group</small></div>
+      <button id="theme" class="themebtn" title="Light or dark">☾</button>
+      <div class="clock"><span id="time">--:--</span><small id="date"></small></div>
+    </header>
+    <div class="search glass"><span>🔍</span><input id="q" placeholder="Search all your files — name, words inside, company or an old name" autocomplete="off"><button id="qclear" class="clear" hidden>✕</button></div>
+    <section id="results" hidden></section>
     <section id="home">
-      <div class="cards" id="programs"></div>
-      <div class="cgrid">
-        <div class="card"><h2>📅 Today</h2><div id="meetings" class="empty small">Loading…</div></div>
-        <div class="card"><h2>✅ To-do</h2><div id="tasks" class="empty small">Loading…</div></div>
-        <div class="card"><h2>💲 Money</h2><div id="money" class="empty small">Loading…</div></div>
-        <div class="card wide"><h2>🕘 Recent documents</h2><div id="recent" class="empty small">Loading…</div></div>
+      <div class="tiles" id="tiles"></div>
+      <div class="widgets">
+        <div class="glass w"><h3>💲 Money</h3><div id="money"><span class="lbl">Loading…</span></div></div>
+        <div class="glass w"><h3>📅 Today</h3><div id="today"><span class="lbl">Loading…</span></div></div>
+        <div class="glass w"><h3>✅ To-do</h3><div id="todo"><span class="lbl">Loading…</span></div></div>
       </div>
-      <p class="cfoot small muted" id="foot"></p>
+      <h4 class="dockh">Recent documents</h4>
+      <div class="dock" id="recent"></div>
     </section>
-  </main>
+    <p class="foot" id="foot"></p>
+  </div>
   <div id="toast" class="toast"></div>
   <script src="central.js"></script>
 </body>
