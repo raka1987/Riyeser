@@ -82,7 +82,7 @@ const PROGRAMS = [
       ['Scans', 'Turn scanned pages into searchable, editable text.'],
       ['Convert', 'Make PDFs from pictures, Word and Excel — or turn a PDF back into Word.'],
     ] },
-  { id: 'services', name: 'Riyeser Services', short: 'Services', icon: '🏗', file: null, link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
+  { id: 'services', name: 'Riyeser Services', short: 'Services', icon: '🏗', file: 'RiyeserServices-Setup.exe', link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
     one: 'Map every cable, pipe and duct on your drawings as it goes in — with inspections, test results and photos — and the as-builts are done at handover.',
     pitch: 'Map every service while the building goes up.', custom: true },
 ];
@@ -162,7 +162,7 @@ page({
   description: 'Free Windows programs for small business: accounting, payroll, files, PDFs and building services, with one home screen. No sign-up, works offline.',
   body: (up) => `
 <div class="c hero">
-  <span class="eyebrow">NEW · Riyeser Central 1.2 · free</span>
+  <span class="eyebrow">NEW · Riyeser Central 1.3 · free</span>
   <h1>Your whole business, <span class="grad">in one place</span></h1>
   <p class="lead">Accounting, payroll, files, PDFs and building services — simple Windows programs that work together, with one home screen that tells you what needs doing today.</p>
   <div class="ctas"><a class="btn p" href="${dl(prog('central'))}">⬇ Download free for Windows</a><a class="btn s" href="#programs">See the programs</a></div>
@@ -256,7 +256,8 @@ ${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyeser Central — f
   ${iconBox(p)}<div class="k" style="margin-top:14px">Riyeser Services</div>
   <h1>Map every service while the building goes up</h1>
   <p class="lead">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
-  <div class="ctas" style="justify-content:flex-start"><a class="btn p" href="${SERVICES_APP}/?demo">Try it now, free</a><a class="btn s" href="${SERVICES_APP}/">Sign in to your projects</a></div>
+  <div class="ctas" style="justify-content:flex-start"><a class="btn p" href="${SERVICES_APP}/?demo">Try it now, free</a><a class="btn s" href="${RELEASES}/RiyeserServices-Setup.exe">⬇ Windows app</a><a class="btn s" href="${SERVICES_APP}/">Sign in to your projects</a></div>
+  <p style="font-size:13px;color:var(--faint);margin:14px 0 0">Works in any web browser, on phones and tablets — or install the Windows app for its own window and desktop icon.</p>
   <p style="font-size:13px;color:var(--faint);margin:14px 0 0">No sign-up for the demo. Explore a marked-up resort with a guided tour.</p>
 </div><img class="pshot" src="${up}assets/services-trace.webp" alt="A water main route highlighted on a floor plan" width="1200" height="900"></div>
 <section class="c"><h2 class="h2">How it works</h2><p class="sub">From the first drawing to the handover pack.</p>
