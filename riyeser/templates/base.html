@@ -16,6 +16,8 @@
     {% set basic = company and company.edition == 'basic' %}
     <div class="brand"><div class="logo">R</div><div>Riyeser Group<small>Accounting {{ 'Basic' if basic else 'Enterprise' }}</small></div></div>
     <div class="nav-sec">{{ nav('core.dashboard', 'Dashboard') }}</div>
+    <div class="nav-sec"><h4>Riyeser POS</h4>
+      {{ nav('pos.register', 'Open Register') }}{{ nav('pos.sales', "Today's Sales") }}</div>
     {% if basic %}
     <div class="nav-sec"><h4>Sales</h4>
       {{ nav('documents.edit', 'New Invoice', side='sale') }}{{ nav('documents.edit', 'New Quote', side='sale', status='quote') }}

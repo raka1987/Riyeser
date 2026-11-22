@@ -13,4 +13,5 @@ table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}td
 <tr><td>{{ methods[s.method] }}</td><td class="n">{{ s.tendered|money }}</td></tr>
 {% if s.method == 'cash' %}<tr><td>Change</td><td class="n">{{ s.change_given|money }}</td></tr>{% endif %}</table>
 <hr><div class="c">{% if s.cname != 'Walk-in Customer' %}Customer: {{ s.cname }}<br>{% endif %}Served by {{ s.full_name or s.username }}<br>Thank you!</div>
-<p class="c np"><button onclick="print()">Print</button> <button onclick="close()">Close</button></p></div></body></html>
+<p class="c np"><button onclick="print()">Print</button>
+{% if request.args.back %}<a href="{{ url_for('pos.register') }}"><button>New sale</button></a>{% else %}<button onclick="close()">Close</button>{% endif %}</p></div></body></html>

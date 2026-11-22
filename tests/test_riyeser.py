@@ -278,3 +278,54 @@ def test_migrates_old_company_file(tmp_path):
     con = sqlite3.connect(path)
     assert con.execute("SELECT edition FROM company").fetchone()[0] == "enterprise"
     assert con.execute("SELECT COUNT(*) FROM linked_accounts WHERE key LIKE 'pos_%'").fetchone()[0] == 2
+
+
+def _pos_setup(app):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        item = db.execute("INSERT INTO items (sku, name, is_inventoried, income_account_id, expense_account_id,"
+                          " asset_account_id, sell_price, sale_tax_code_id) VALUES ('CUP','Coffee cup',1,?,?,?,1000,?)",
+                          (acc["4-1000"], acc["5-1000"], acc["1-1300"], tc["GST"])).lastrowid
+        L.stock_adjust(db, item, "2026-01-01", 10, 400, "Opening")
+        db.commit()
+        return item, acc
+
+
+def test_pos_cash_sale_receipt_and_void(client, app):
+    item, acc = _pos_setup(app)
+    assert "Coffee cup" in client.get("/pos/").get_data(as_text=True)
+    # $10 ex GST -> $11 inc GST; 2 cups = $22, pay $50 cash
+    r = client.post("/pos/sale", json={"method": "cash", "tendered": "50", "lines": [{"item_id": item, "qty": 2}]})
+    d = r.get_json()
+    assert d["ok"] and d["total"] == 2200 and d["change"] == 2800
+    assert "TAX INVOICE" in client.get(d["receipt_url"]).get_data(as_text=True)
+    with app.app_context():
+        db = get_db()
+        b = L.balances(db)
+        assert b[linked(db, "pos_cash")] == 2200          # takings in the cash drawer
+        assert b[acc["4-1000"]] == -2000 and b[acc["2-1310"]] == -200
+        assert b[acc["5-1000"]] == 800                     # COGS 2 x $4
+        assert db.execute("SELECT qty_on_hand FROM items WHERE id=?", (item,)).fetchone()[0] == 8
+        assert db.execute("SELECT status FROM documents").fetchone()[0] == "paid"
+        assert trial_balance_ok(db)
+    summary = client.get("/pos/sales").get_data(as_text=True)
+    assert "$22.00" in summary
+    client.post(f"/pos/sale/{d['sale_id']}/void")
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT qty_on_hand FROM items WHERE id=?", (item,)).fetchone()[0] == 10
+        assert L.balances(db).get(linked(db, "pos_cash"), 0) == 0
+        assert trial_balance_ok(db)
+
+
+def test_pos_rejects_bad_sales(client, app):
+    item, _ = _pos_setup(app)
+    r = client.post("/pos/sale", json={"method": "cash", "tendered": "5", "lines": [{"item_id": item, "qty": 1}]})
+    assert r.status_code == 400 and "less than" in r.get_json()["error"]
+    r = client.post("/pos/sale", json={"method": "card", "lines": []})
+    assert r.status_code == 400
+    r = client.post("/pos/sale", json={"method": "card", "lines": [{"item_id": item, "qty": 1, "discount_pct": 10}]})
+    assert r.get_json()["total"] == 990
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM pos_sales").fetchone()[0] == 1

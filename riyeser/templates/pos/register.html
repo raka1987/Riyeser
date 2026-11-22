@@ -73,6 +73,7 @@ $('#done').addEventListener('click',async()=>{$('#done').disabled=true;$('#err')
     customer_id:$('#cust').value||null,method,tendered:$('#tendered').value||0,lines:cart.map(l=>({item_id:l.id,qty:l.qty,discount_pct:l.disc}))})});
   const d=await r.json().catch(()=>({ok:false,error:'Server error'}));
   if(!d.ok){$('#err').textContent=d.error;upd();return;}
-  window.open(d.receipt_url,'receipt','width=380,height=640');location.reload();});
+  const w=window.open(d.receipt_url,'receipt','width=380,height=640');
+  if(!w){location.href=d.receipt_url+'?back=1';return;} location.reload();});
 drawGrid();draw();})();
 </script>{% endblock %}
