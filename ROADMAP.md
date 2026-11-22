@@ -6,9 +6,9 @@ Riyeser Group is the holding company. Every program is a module of the **Riyeser
 |---|---|---|
 | 1 | **Riyeser Accounting Basic**: invoices, quotes, customers, stock items, inventory reports | Done (choose Basic when creating a company) |
 | 1 | **Riyeser Accounting Enterprise**: adds bank reconciliation, payroll, journals, jobs and budgets | Done |
-| 2 | **Riyeser POS**: tap-to-sell register, cash or card, receipts, end-of-day totals, void a sale | Next. A first version is in the code but not yet in the menus |
+| 2 | **Riyeser POS**: full-screen Retail and Restaurant modes, categories, parked sales, tables, kitchen dockets, cash or card, receipts, end-of-day totals | Done (v1.1.0) |
 | 3 | **Riyeser hub**: one desktop app with cards for Accounting, POS, Payroll, Desk Assistant, PDF and Services | In progress in the payroll and Desk Assistant chats |
-| 3 | Links between modules: pay runs go from Payroll into Accounting, Desk Assistant files PDFs from Accounting and POS | Planned |
+| 3 | Links between modules: Payroll pay runs import into Accounting, and Accounting saves PDFs into Documents\\Riyeser for Desk Assistant (see INTEGRATION.md) | Accounting side done. Payroll needs to write the pay run file |
 | Final | **Riyeser AI Assistant**: in-app help and first-line support | Planned (see below) |
 
 ## Final phase: Riyeser AI Assistant
@@ -29,4 +29,9 @@ Riyeser Group is the holding company. Every program is a module of the **Riyeser
 - Privacy: customer data is sent only when the user switches on "let the assistant see my data". Each company can turn this off.
 - It needs the internet. Every module keeps working offline without it.
 
-**Groundwork to lay now:** consistent error messages, a help page for each screen, and an exportable diagnostics bundle (version, edition, row counts, recent errors). All modules should follow these.
+**Groundwork (done in Accounting v1.1.0):**
+- A Help page with a section for every area, linked from each screen.
+- Unexpected errors are recorded and shown as a friendly page.
+- Support Diagnostics gives a downloadable health check: books balance, stock vs ledger, recent errors, and no personal data.
+
+Other modules should follow the same pattern.

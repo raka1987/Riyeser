@@ -1,10 +1,13 @@
 import os
+import traceback
 from datetime import date
 
-from flask import Flask, g, session, redirect, url_for, request, abort, flash
+from flask import Flask, g, session, redirect, url_for, request, abort, flash, render_template
 
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
+
+__version__ = "1.1.0"
 
 
 def create_app(test_config=None):
@@ -64,7 +67,7 @@ def create_app(test_config=None):
         flash("You do not have permission to do that (read-only role).", "error")
         return redirect(request.referrer or url_for("core.dashboard"))
 
-    from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links
+    from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help
     app.register_blueprint(auth.bp)
     app.register_blueprint(core.bp)
     app.register_blueprint(contacts.bp)
@@ -75,6 +78,25 @@ def create_app(test_config=None):
     app.register_blueprint(reports.bp)
     app.register_blueprint(pos.bp)
     app.register_blueprint(links.bp)
+    app.register_blueprint(help.bp)
+    app.jinja_env.globals["help_section"] = help.section_for
+    app.jinja_env.globals["riyeser_version"] = __version__
+
+    @app.errorhandler(500)
+    def server_error(e):
+        """Record the error (for diagnostics / support) and show a friendly page."""
+        err = getattr(e, "original_exception", e)
+        try:
+            db = get_db()
+            db.rollback()
+            db.execute("INSERT INTO audit_log (user_id, action, details) VALUES (?,?,?)",
+                       (g.user["id"] if g.get("user") else None, "error",
+                        f"{request.method} {request.path}: {type(err).__name__}: {err}"[:500]))
+            db.commit()
+        except Exception:
+            pass
+        app.logger.error("".join(traceback.format_exception(err)))
+        return render_template("help/error.html"), 500
     return app
 
 

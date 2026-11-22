@@ -37,7 +37,7 @@
     <div class="nav-sec"><h4>Setup</h4>
       {{ nav('core.company', 'Company & Preferences') }}{{ nav('core.accounts', 'Accounts List') }}
       {% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & Roles') }}{% endif %}
-      {{ nav('core.audit_log', 'Audit Trail') }}</div>
+      {{ nav('core.audit_log', 'Audit Trail') }}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support Diagnostics') }}</div>
     {% else %}
     <div class="nav-sec"><h4>Accounts</h4>
       {{ nav('core.accounts', 'Chart of Accounts') }}{{ nav('core.journal_new', 'General Journal') }}
@@ -64,13 +64,13 @@
       {{ nav('core.company', 'Company & Linked Accounts') }}{{ nav('core.tax_codes', 'Tax Codes') }}
       {{ nav('core.jobs', 'Jobs') }}{{ nav('core.budgets', 'Budgets') }}
       {% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & Roles') }}{% endif %}
-      {{ nav('core.audit_log', 'Audit Trail') }}</div>
+      {{ nav('core.audit_log', 'Audit Trail') }}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support Diagnostics') }}</div>
     {% endif %}
   </aside>
   <div class="main">
     <div class="top">
       <div class="co">{{ company.name if company }}<small>{% if company and company.lock_date %}Locked to {{ company.lock_date }}{% endif %}</small></div>
-      <div class="who">{{ user.full_name or user.username }} · {{ user.role|title }} · <a href="{{ url_for('auth.logout') }}">Sign out</a></div>
+      <div class="who"><a href="{{ url_for('help.index') }}#{{ help_section(request.endpoint) }}">Help</a> · {{ user.full_name or user.username }} · {{ user.role|title }} · <a href="{{ url_for('auth.logout') }}">Sign out</a></div>
     </div>
     <div class="content">{{ flashes() }}{% block content %}{% endblock %}</div>
   </div>

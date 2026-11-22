@@ -1,0 +1,81 @@
+{% extends "base.html" %}{% block title %}Help{% endblock %}
+{% block content %}
+<style>.help h2{scroll-margin-top:16px;margin-top:28px}.help li{margin:4px 0}.help .card{max-width:900px}.toc a{display:inline-block;margin:0 12px 6px 0}</style>
+<div class="head"><div><h1>Riyeser Accounting help</h1><p class="sub">Version {{ version }} · a Riyeser Group module. Can't find the answer? Download <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a> and send it with your question.</p></div></div>
+<div class="card toc">{% for k, t in [('start','Getting started'),('sales','Invoices & customers'),('stock','Stock & suppliers'),('pos','Riyeser POS'),('banking','Money & banking'),('payroll','Payroll'),('reports','Reports'),('accounts','Accounts & journals'),('setup','Setup & editions'),('users','Users & passwords'),('modules','Other Riyeser modules'),('trouble','Troubleshooting')] %}<a href="#{{ k }}">{{ t }}</a>{% endfor %}</div>
+<div class="help">
+<div class="card"><h2 id="start">Getting started</h2><ol>
+<li><b>Setup → Company</b>: enter your business name, ABN, address and when your financial year starts.</li>
+<li>Add your <b>customers</b> and <b>suppliers</b>, and your <b>stock items</b> with buy and sell prices.</li>
+<li>Already trading? Enter opening balances: <b>Setup → Accounts</b> for bank balances, and opening quantity and cost on each new stock item.</li>
+<li>Start invoicing. The <b>Dashboard</b> shows cash, who owes you, bills due and low stock.</li></ol>
+<p class="muted">Every transaction is double-entry, so the reports always balance. You never type debits and credits for normal work.</p></div>
+
+<div class="card"><h2 id="sales">Invoices &amp; customers</h2><ul>
+<li><b>New Invoice</b>: choose a customer, then add lines. Picking a stock item fills in the price, account and GST. Tick <b>Prices include GST</b> if your prices are GST-inclusive.</li>
+<li><b>Save as</b> lets you keep a <b>Quote</b> or <b>Order</b>. Open it later and press <b>Convert to invoice</b>.</li>
+<li><b>Receive Payments</b>: pick the customer and enter what they paid against each invoice. One payment can cover several invoices.</li>
+<li>Made a mistake? A posted invoice can't be edited. <b>Void</b> it (this reverses the books and returns the stock) and enter it again. Void any payment on it first.</li>
+<li><b>Download PDF</b> gives you a PDF to email. <b>Statement</b> on the customer's card shows everything they owe.</li></ul></div>
+
+<div class="card"><h2 id="stock">Stock &amp; suppliers</h2><ul>
+<li>Tick <b>I inventory this item</b> to track quantity and cost. Riyeser uses <b>average cost</b>: each purchase updates the average, and each sale records cost of goods sold automatically.</li>
+<li><b>Receive Stock (Bill)</b>: enter the supplier's bill with the stock items and quantities. Stock goes up and you owe the supplier. Use <b>Pay Bills</b> when you pay.</li>
+<li><b>Stocktake</b>: type what you counted. The differences are posted as an inventory adjustment.</li>
+<li>Set a <b>reorder level</b> on each item to see it on the dashboard and in <b>Items to Reorder</b> when stock runs low.</li>
+<li>The <b>Category</b> (e.g. Coffee, Hardware) decides which tab the item shows under in Riyeser POS.</li></ul></div>
+
+<div class="card"><h2 id="pos">Riyeser POS</h2><ul>
+<li><b>Open Register</b> opens the full-screen till. Switch between <b>Retail</b> and <b>Restaurant</b> at the top.</li>
+<li><b>Retail</b>: scan a barcode, or type a SKU and press Enter, or tap tiles. <b>Park sale</b> holds a sale while the customer fetches something.</li>
+<li><b>Restaurant</b>: choose <b>Dine in</b> and a table, or <b>Takeaway</b>. Tap an item in the order to add a kitchen note or discount. <b>Send to kitchen</b> prints a docket. Tables with an open bill show amber on the table map; tap one to add more items or take payment.</li>
+<li><b>Pay</b>: choose Cash or Card. For cash, tap a quick amount and the change is shown. A receipt prints automatically.</li>
+<li>Every sale is a GST tax invoice, paid immediately. Stock, GST and your takings update by themselves. Cash goes to <i>Undeposited Funds</i> (your cash drawer) and card to your bank account. You can change both under Setup → Company → Linked accounts.</li>
+<li><b>Today's Sales</b> is the end-of-day summary, with totals by cash and card. Sales can be voided there.</li></ul></div>
+
+<div class="card"><h2 id="banking">Money &amp; banking</h2><ul>
+<li><b>Spend Money</b> / <b>Receive Money</b>: payments and deposits that aren't for an invoice or bill (rent, bank fees, interest). Amounts include GST unless you untick it.</li>
+<li><b>Bank Reconciliation</b> (Enterprise): enter your statement's closing balance and tick the transactions that appear on it until the difference is $0.00.</li>
+<li><b>Bank Statement Import</b> (Enterprise): load a CSV from your bank, then allocate each line to an account in one click.</li>
+<li><b>Banking your cash takings</b>: use <b>Transfer Money</b> from <i>Undeposited Funds</i> to your bank account when you deposit the till cash.</li></ul></div>
+
+<div class="card"><h2 id="payroll">Payroll</h2><ul>
+<li>With <b>Riyeser Payroll</b>: finished pay runs appear under <b>Import from Payroll</b>. Import each one to record wages, tax withheld and employer contributions.</li>
+<li>Built-in payroll (Enterprise): add employees, then <b>Process Payroll</b>. PAYG is an estimate using Australian 2024-25 rates, so check it before lodging.</li></ul></div>
+
+<div class="card"><h2 id="reports">Reports</h2><ul>
+<li>Every report can be filtered by date, printed and exported to CSV. Click a line to drill down to the transactions behind it.</li>
+<li><b>Who Owes Me</b> (aged receivables) groups unpaid invoices by how overdue they are.</li>
+<li><b>GST Summary</b> shows the figures for your BAS: G1, 1A, 1B and so on.</li>
+<li><b>Inventory Report</b> shows what's on hand at average cost. Its total should match the Inventory account; Support Diagnostics checks this for you.</li></ul></div>
+
+<div class="card"><h2 id="accounts">Accounts &amp; journals</h2><ul>
+<li><b>Chart of Accounts</b>: click any account to see every transaction in it.</li>
+<li><b>General Journal</b> (Enterprise): for adjustments such as depreciation. Debits must equal credits.</li>
+<li>Nothing is ever deleted. Corrections are <b>reversals</b>, so the audit trail stays complete.</li></ul></div>
+
+<div class="card"><h2 id="setup">Setup &amp; editions</h2><ul>
+<li><b>Basic</b>: invoices, quotes, customers, stock, suppliers, simple banking, POS and the key reports.</li>
+<li><b>Enterprise</b>: everything in Basic plus bank reconciliation, statement import, payroll, journals, jobs, budgets, Balance Sheet and Trial Balance.</li>
+<li>Switch any time under <b>Setup → Company → Edition</b>. Your data never changes.</li>
+<li><b>Lock periods up to</b> stops anyone posting into a finished period, for example after your BAS is lodged.</li>
+<li><b>Riyeser folder</b>: tick <i>Save a PDF of every invoice and bill</i> to file copies in Documents\Riyeser for Riyeser Desk Assistant.</li></ul></div>
+
+<div class="card"><h2 id="users">Users &amp; passwords</h2><ul>
+<li>Roles: <b>Admin</b> can do everything. <b>Accountant</b> can do all transactions but not manage users. <b>Viewer</b> is read-only.</li>
+<li><b>Forgot password?</b> on the sign-in screen works in the desktop app on the computer that holds the company file. Otherwise an admin can reset it under <b>Users &amp; Roles</b>.</li>
+<li>Back up the company file regularly. It's the single file <code>company.db</code> in your <code>.riyeser</code> folder.</li></ul></div>
+
+<div class="card"><h2 id="modules">Other Riyeser modules</h2><ul>
+<li><b>Riyeser Payroll</b> sends pay runs to Accounting through <code>Documents\Riyeser\Inbox\Payroll</code>.</li>
+<li><b>Riyeser Desk Assistant</b> files the PDFs Accounting saves in <code>Documents\Riyeser\Accounting</code>.</li>
+<li>All modules open from the <b>Riyeser</b> hub.</li></ul></div>
+
+<div class="card"><h2 id="trouble">Troubleshooting</h2><ul>
+<li><b>"Period is locked"</b>: the date is on or before the lock date. Change the date, or an admin can move the lock date.</li>
+<li><b>"Out of balance"</b> on a journal: debits must equal credits. The difference is shown under the lines.</li>
+<li><b>Reconciliation won't balance</b>: look for a missing or doubled transaction, or one dated after the statement date.</li>
+<li><b>"That's part of Riyeser Accounting Enterprise"</b>: the screen isn't in Basic. An admin can upgrade under Setup → Company.</li>
+<li>Still stuck? Open <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a>, press <b>Download</b>, and send the file to support. It contains no customer or bank details.</li></ul></div>
+</div>
+{% endblock %}

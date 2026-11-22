@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}Support Diagnostics{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Support Diagnostics</h1><p class="sub">Health checks for this company file. The download contains no customer, supplier, employee or bank details.</p></div>
+<div class="actions"><a class="btn pri" href="?download=1">Download for support</a></div></div>
+<div class="grid g3">
+<div class="card kpi"><div class="lbl">Version</div><div class="val">{{ d.version }}</div><div class="note">{{ d.edition|title }} edition · {{ d.os }}</div></div>
+<div class="card kpi"><div class="lbl">Books balance</div><div class="val {{ '' if d.checks.books_balance else 'neg' }}">{{ 'Yes ✓' if d.checks.books_balance else 'NO' }}</div></div>
+<div class="card kpi"><div class="lbl">Company file</div><div class="val">{{ d.company_file_size_kb }} KB</div><div class="note">Lock date: {{ d.lock_date or 'none' }}</div></div></div>
+<div class="grid g2">
+<div class="card"><h3>Checks</h3><table>
+<tr><td>Items with negative stock</td><td class="n {{ 'neg' if d.checks.negative_stock_items }}">{{ d.checks.negative_stock_items }}</td></tr>
+<tr><td>Inventory report vs Inventory account</td><td class="n {{ 'neg' if d.checks.inventory_value_vs_ledger_cents|abs > 100 }}">{{ d.checks.inventory_value_vs_ledger_cents|money }}</td></tr>
+<tr><td>Over-paid documents</td><td class="n {{ 'neg' if d.checks.open_documents_overpaid }}">{{ d.checks.open_documents_overpaid }}</td></tr>
+<tr><td>Bank statement lines not allocated</td><td class="n">{{ d.checks.unallocated_bank_lines }}</td></tr>
+<tr><td>Open POS orders / tables</td><td class="n">{{ d.checks.open_pos_orders }}</td></tr></table></div>
+<div class="card"><h3>Records</h3><table>{% for k, v in d.record_counts.items() %}<tr><td>{{ k.replace('_',' ')|title }}</td><td class="n">{{ v }}</td></tr>{% endfor %}</table></div></div>
+<div class="card"><h3>Recent errors</h3>{% if d.recent_errors %}<table>{% for e in d.recent_errors %}<tr><td style="white-space:nowrap">{{ e.at }}</td><td>{{ e.details }}</td></tr>{% endfor %}</table>{% else %}<p class="muted">None recorded. 👍</p>{% endif %}</div>
+{% endblock %}

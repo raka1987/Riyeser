@@ -431,3 +431,29 @@ def test_pos_retail_park_and_cancel(client, app):
     assert len(client.get("/pos/orders").get_json()) == 1
     client.post(f"/pos/order/{r['id']}/cancel")
     assert client.get("/pos/orders").get_json() == []
+
+
+def test_help_diagnostics_and_error_logging(client, app):
+    assert "Riyeser POS" in client.get("/help/").get_data(as_text=True)
+    dash = client.get("/").get_data(as_text=True)
+    assert "/help/#start" in dash
+    assert "/help/#pos" in client.get("/pos/sales").get_data(as_text=True)
+    r = client.get("/help/diagnostics?download=1")
+    d = r.get_json()
+    assert d["checks"]["books_balance"] is True and d["edition"] == "enterprise" and d["version"]
+
+
+def test_unexpected_error_is_logged_for_support(tmp_path):
+    app = create_app({"DATABASE": str(tmp_path / "e.db")})
+    with app.app_context():
+        init_db("Co")
+
+    @app.route("/boom")
+    def boom():
+        raise RuntimeError("kaboom")
+    c = app.test_client()
+    c.post("/login", data={"username": "admin", "password": "admin"})
+    r = c.get("/boom")
+    assert r.status_code == 500 and "something went wrong" in r.get_data(as_text=True)
+    errs = c.get("/help/diagnostics?download=1").get_json()["recent_errors"]
+    assert errs and "kaboom" in errs[0]["details"]
