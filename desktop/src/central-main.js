@@ -4,6 +4,7 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net } = require('electron');
 const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
+const licence = require('./core/licence');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -201,6 +202,12 @@ function registerIpc() {
     });
     return { deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, money, recent };
   });
+  // ---------- licence (one for the whole Riyeser suite; %APPDATA%\Riyeser\licence.json) ----------
+  const appData = app.getPath('appData'); const lfetch = (u, o) => net.fetch(u, o);
+  handle('central:licence', async () => { const s = licence.status(appData); return s.needsCheck ? licence.recheck(appData, { fetchFn: lfetch }) : s; });
+  handle('central:licenceActivate', (key) => licence.activate(appData, key, { fetchFn: lfetch }));
+  handle('central:licenceRemove', () => licence.remove(appData, { fetchFn: lfetch }));
+  handle('central:buy', () => shell.openExternal(licence.BUY_URL));
   handle('central:updates', (force) => updateStatus(!!force));
   handle('central:installUpdates', (ids) => installUpdates(ids));
   handle('search:find', (opts) => {
@@ -232,7 +239,7 @@ app.whenReady().then(async () => {
     const out = selfTest.slice('--self-test='.length);
     let money; try { money = await sources.pendingPayments(); } catch (e) { money = { error: e.message }; }
     let upd; try { upd = await updateStatus(true); } catch (e) { upd = { error: e.message }; }
-    fs.writeFileSync(out, JSON.stringify({ version: app.getVersion(), programs: programList(), money: { found: money.found, error: money.error || null }, installed: await installedVersions(), updates: upd }, null, 2));
+    fs.writeFileSync(out, JSON.stringify({ version: app.getVersion(), programs: programList(), money: { found: money.found, error: money.error || null }, installed: await installedVersions(), updates: upd, licence: licence.status(app.getPath('appData')) }, null, 2));
     app.exit(0);
     return;
   }

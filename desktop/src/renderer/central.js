@@ -139,6 +139,52 @@ bridge.on('update-progress', (p) => {
 });
 $('#checkupd').addEventListener('click', () => checkForUpdates(true, false));
 
+// ---------- licence: one free 90-day trial, then one licence for every Riyeser program ----------
+let lic = null;
+async function loadLicence() { try { lic = await bridge.call('central:licence'); } catch { lic = null; } renderLicence(); }
+function licLine(s) {
+  if (!s) return 'Licence';
+  if (s.mode === 'trial') return `Free trial · ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left`;
+  if (s.mode === 'licensed') return `Licensed${s.plan ? ` · ${s.plan}` : ''}`;
+  return 'Licence needed';
+}
+function renderLicence() {
+  $('#licbtn').textContent = licLine(lic);
+  const bar = $('#licbar');
+  const show = lic && (lic.mode === 'expired' || (lic.mode === 'trial' && lic.daysLeft <= 14) || lic.message);
+  bar.hidden = !show;
+  if (show) {
+    const text = lic.mode === 'trial' ? `<b>${lic.daysLeft} day${lic.daysLeft === 1 ? '' : 's'} left in your free trial</b><div class="lbl">Get a licence any time — everything you've made stays exactly where it is.</div>`
+      : `<b>${lic.mode === 'licensed' ? 'Licence check due' : 'Licence needed'}</b><div class="lbl">${esc(lic.message || '')}</div>`;
+    bar.innerHTML = `<span style="font-size:24px">🔑</span><div class="grow">${text}</div><button class="go" data-lic="open">${lic.mode === 'licensed' ? 'Details' : 'Get a licence'}</button>`;
+  }
+}
+function openLicence() {
+  const s = lic || {}; const body = $('#licbody');
+  const state = s.mode === 'licensed'
+    ? `<div class="state"><span class="big">✅</span><div><b>Licensed${s.plan ? ` — ${esc(s.plan)}` : ''}</b>${s.email ? `${esc(s.email)} · ` : ''}key ${esc(s.key || '')}<div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleDateString() : '—'}. Works offline; it's re-checked now and then when you're online.</div></div></div>`
+    : s.mode === 'trial'
+      ? `<div class="state"><span class="big">🎁</span><div><b>Free trial — ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left</b>Every Riyeser program is included until ${new Date(s.trialEnds).toLocaleDateString()}. No card needed.</div></div>`
+      : `<div class="state bad"><span class="big">🔑</span><div><b>Licence needed</b>${esc(s.message || '')}</div></div>`;
+  body.innerHTML = `${state}
+    ${s.mode === 'licensed' ? `<div class="row"><button class="btn s" data-lic="remove">Remove licence from this PC</button><button class="btn s" data-lic="buy">Manage plan</button></div>
+      <p class="muted">Removing frees this computer's place so you can use the licence on another PC.</p>`
+    : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
+      <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
+      <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
+      <p class="muted">$30 per user a month for every Riyeser program, less for 5+ users. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+  $('#licdlg').showModal();
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-lic]'); if (!b) return;
+  const a = b.dataset.lic;
+  if (a === 'open') openLicence();
+  if (a === 'buy') safe(() => bridge.call('central:buy'));
+  if (a === 'activate') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceActivate', $('#lickey').value); renderLicence(); openLicence(); toast('Licence turned on — thank you!'); } finally { b.disabled = false; } });
+  if (a === 'remove') safe(async () => { if (!confirm('Remove the licence from this PC?')) return; lic = await bridge.call('central:licenceRemove'); renderLicence(); openLicence(); });
+});
+$('#licbtn').addEventListener('click', openLicence);
+
 // ---------- search ----------
 const finder = { q: '', type: null, year: null, kind: null };
 async function runSearch() {
@@ -184,6 +230,8 @@ $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign
   $('#foot').textContent = `Riyeser Central ${v} · Riyeser Group · shows information from your other Riyeser programs; it never changes it.`;
   await safe(refresh);
   checkForUpdates(false);
+  loadLicence();
+  setInterval(loadLicence, 6 * 3600 * 1000);
   setInterval(() => { if ($('#results').hidden) safe(refresh); }, 5 * 60 * 1000);
   setInterval(() => checkForUpdates(false), 6 * 3600 * 1000);
   window.addEventListener('focus', () => { if ($('#results').hidden) safe(refresh); });

@@ -76,6 +76,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .r .grow { flex: 1; min-width: 0; } .r b { font-size: 14px; } .r .p { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--line); margin-right: 4px; }
 .r button { border: 1px solid var(--glass-line); background: var(--glass); border-radius: 10px; padding: 6px 12px; font-size: 12px; }
+.lic .go { background: #1f4e86; }
+.licdlg { border: 0; border-radius: 18px; padding: 0; width: min(520px, 92vw); background: #17233d; color: var(--text); box-shadow: 0 30px 80px rgba(0,0,0,.35); }
+.licdlg::backdrop { background: rgba(15,23,42,.45); }
+.lichead { display: flex; align-items: center; justify-content: space-between; padding: 18px 22px 0; margin: 0; font-size: 17px; }
+.lichead .x { border: 0; background: none; font-size: 16px; cursor: pointer; color: inherit; opacity: .6; }
+#licbody { padding: 12px 22px 22px; font-size: 14px; line-height: 1.5; }
+#licbody .state { display: flex; gap: 12px; align-items: center; padding: 14px; border-radius: 12px; background: rgba(20,184,166,.12); margin-bottom: 14px; }
+#licbody .state.bad { background: rgba(239,68,68,.12); } #licbody .state b { display: block; font-size: 15px; }
+#licbody .big { font-size: 28px; }
+#licbody input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(100,116,139,.4); font: inherit; background: transparent; color: inherit; margin: 6px 0 10px; letter-spacing: .5px; }
+#licbody .row { display: flex; gap: 8px; flex-wrap: wrap; }
+#licbody .btn { border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 600; cursor: pointer; background: #1f4e86; color: #fff; }
+#licbody .btn.s { background: rgba(100,116,139,.15); color: inherit; }
+#licbody .muted { opacity: .7; font-size: 12.5px; }
 .foot { text-align: center; font-size: 11px; color: var(--muted); margin-top: 26px; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0; background: #0b1426; color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 13px; transition: all .2s; pointer-events: none; max-width: 80vw; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
@@ -90,3 +104,4 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .upd .go[disabled] { opacity: .6; cursor: default; }
 .prog { height: 6px; border-radius: 9px; background: var(--line); overflow: hidden; margin-top: 8px; } .prog i { display: block; height: 100%; background: #14b8a6; width: 0; transition: width .2s; }
 .tile .badge { position: absolute; top: 12px; right: 12px; background: #fff; color: #0f2742; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 99px; }
+:root[data-theme="light"] .licdlg { background: #fff; }

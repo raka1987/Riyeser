@@ -164,7 +164,7 @@ page({
   description: 'Free Windows programs for bookkeepers, small business offices and building services teams: accounting, payroll, file finding, PDFs and job records. No sign-up, works offline.',
   body: (up) => `
 <div class="hero2"><div class="c hero">
-  <span class="eyebrow">Free during early access · Windows 10 &amp; 11</span>
+  <span class="eyebrow">90 days free · no card · Windows 10 &amp; 11</span>
   <h1>Books, pay runs and job records — <span class="grad">sorted</span>.</h1>
   <p class="lead">Simple Windows programs for bookkeepers, small business offices and building services teams. Everything stays on your PC, works without internet, and there's nothing to sign up for.</p>
   <div class="ctas"><a class="btn p big" href="${dl(prog('central'))}">⬇ Download free for Windows</a><a class="btn s big" href="#who">Who it's for</a></div>
@@ -237,7 +237,7 @@ page({
 
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
-  <details><summary>Is it really free?</summary><p>Yes — every program is free while we're in early access. If we introduce paid plans later, you'll be told well before anything changes, and your information stays yours. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's $30 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline. Riyeser Services can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
   <details><summary>Will it work on a Mac?</summary><p>Not yet — the programs are for Windows 10 and 11. Riyeser Services also works in any web browser at riyeser.com/app.</p></details>
   <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has step-by-step answers for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
@@ -362,19 +362,59 @@ ${ctaBlock(up, 'New here? Start with Riyeser Central', 'It\'s the home screen fo
 
 // ---------- pricing ----------
 page({
-  path: 'pricing.html', title: 'Riyeser pricing — free during early access', active: 'pricing',
-  description: 'Every Riyeser program is free to download and use during early access.',
+  path: 'pricing.html', title: 'Riyeser pricing — 90 days free, then from $19.50 per user', active: 'pricing',
+  description: 'Every Riyeser program free for 90 days with no card. Then one simple price per user for the whole suite, with discounts for teams and yearly plans.',
   body: (up) => `
-<div class="c hero"><span class="eyebrow">EARLY ACCESS</span><h1>Free while we're in <span class="grad">early access</span></h1>
-  <p class="lead">Download any Riyeser program and use it free — no sign-up, no card, no time limit during early access. Tell us what you'd like next and help shape it.</p>
-  <div class="ctas"><a class="btn p" href="${up}downloads.html">⬇ Download free</a><a class="btn s" href="mailto:${EMAIL}?subject=Riyeser%20feedback">Send feedback</a></div></div>
-<section class="c faq" style="max-width:820px">
-  <details open><summary>Is it really free?</summary><p>Yes. During early access every program is free to download and use. If paid plans come later, you'll hear about it first — and early users will be looked after.</p></details>
-  <details><summary>Do I need an account?</summary><p>No. Download, install and go. Your information stays on your own computer.</p></details>
-  <details><summary>Does it work without internet?</summary><p>Yes. Everything runs on your PC. You only need internet to download and to get updates.</p></details>
-  <details><summary>Can I use it for my whole team?</summary><p>Yes — install it on each computer. Riyeser Accounting can also run for several people on your office network.</p></details>
+<div class="hero2"><div class="c hero"><span class="eyebrow">90 days free · no card · every program</span><h1>One price for <span class="grad">everything</span></h1>
+  <p class="lead">Accounting, Payroll, Services, Desk Assistant, PDF and Riyeser Central — all included. Try the lot free for 90 days, then pay per person who uses it.</p>
+  <div class="ctas"><a class="btn p big" href="${dl(prog('central'))}">⬇ Start your free trial</a><a class="btn s big" href="#calc">Work out my price</a></div>
+  <p style="font-size:13px;color:var(--faint);margin:14px 0 0">No sign-up to start · nothing is charged automatically when the trial ends</p></div></div>
+
+<section class="c">
+  <div class="plans">
+    <div class="plan"><div class="k">1–4 users</div><div class="price">$30<small> per user / month</small></div><p>Everything, for sole traders and small teams.</p></div>
+    <div class="plan best"><span class="tag">Most popular</span><div class="k">5–19 users</div><div class="price">$24<small> per user / month</small></div><p>20% off every user once you reach five.</p></div>
+    <div class="plan"><div class="k">20+ users</div><div class="price">$19.50<small> per user / month</small></div><p>35% off every user for larger teams.</p></div>
+  </div>
+  <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
 </section>
-${ctaBlock(up)}`,
+
+<section class="c" id="calc">
+  <div class="calc">
+    <div><h2>Work out your price</h2><p class="muted">How many people will use Riyeser?</p>
+      <div class="users"><button type="button" data-d="-1" aria-label="Fewer users">−</button><input id="users" type="number" min="1" max="500" value="3" aria-label="Number of users"><button type="button" data-d="1" aria-label="More users">+</button></div>
+      <label class="yr"><input id="yearly" type="checkbox"> Pay yearly (2 months free)</label></div>
+    <div class="out"><div class="muted" id="per"></div><div class="total" id="total"></div><div class="muted" id="note"></div></div>
+  </div>
+</section>
+
+<section class="c">
+  <h2 class="h2">What's included</h2>
+  <div class="incl">
+    ${PROGRAMS.map((p) => `<div>${iconBox(p)}<b>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</b></div>`).join('')}
+  </div>
+  <ul class="ticks" style="max-width:720px;margin:26px auto 0"><li>Every program and every update</li><li>Works offline; your information stays on your PC</li><li>Help by email from a real person</li><li>Riyeser Services online account for sharing with phones, clients and staff</li></ul>
+</section>
+
+<section class="c faq" style="max-width:860px">
+  <h2 class="h2">Questions</h2>
+  <details open><summary>How does the free trial work?</summary><p>Install Riyeser Central and every program is free for 90 days. No account and no card. Riyeser Central shows how many days are left.</p></details>
+  <details><summary>What happens when the trial ends?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays on your computer and can still be opened. To keep adding new work, get a licence and enter the key in Riyeser Central.</p></details>
+  <details><summary>What counts as a user?</summary><p>Each person who uses Riyeser on their own computer. One licence covers every Riyeser program for that person.</p></details>
+  <details><summary>Can I change the number of users later?</summary><p>Yes, add or remove users any time. Your price per user follows the table above.</p></details>
+  <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
+  <details><summary>How do I buy?</summary><p>Online checkout is opening soon. Until then, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser licence')}">${EMAIL}</a> with your business name and number of users and we'll send your licence key.</p></details>
+</section>
+${ctaBlock(up, 'Try everything free for 90 days', 'No card, no sign-up. Install Riyeser Central and add the programs you need.')}
+<script>(function(){var u=document.getElementById('users'),y=document.getElementById('yearly');
+function price(n){return n>=20?19.5:n>=5?24:30}
+function money(v){return '$'+v.toLocaleString('en-AU',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})}
+function draw(){var n=Math.max(1,Math.min(500,parseInt(u.value,10)||1)),p=price(n),m=p*n;
+document.getElementById('per').textContent=n+' user'+(n>1?'s':'')+' × '+money(p)+' a month'+(p<30?' ('+(p===24?'20':'35')+'% off)':'');
+if(y.checked){document.getElementById('total').textContent=money(m*10)+' a year';document.getElementById('note').textContent='That\\'s '+money(m*10/12)+' a month — 2 months free.'}
+else{document.getElementById('total').textContent=money(m)+' a month';document.getElementById('note').textContent='After your 90-day free trial.'}}
+document.querySelectorAll('[data-d]').forEach(function(b){b.addEventListener('click',function(){u.value=Math.max(1,(parseInt(u.value,10)||1)+parseInt(b.dataset.d,10));draw()})});
+u.addEventListener('input',draw);y.addEventListener('change',draw);draw()})()</script>`,
 });
 
 // ---------- support ----------
