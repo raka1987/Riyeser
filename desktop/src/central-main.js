@@ -1,4 +1,4 @@
-// Riyser Central: the Riyser Group home screen. Opens every Riyeser program and shows, like a PA would, what needs
+// Riyeser Central: the Riyeser Group home screen. Opens every Riyeser program and shows, like a PA would, what needs
 // attention today: meetings, to-dos, money owed and owing, and recent documents, plus one search for every file.
 // It only READS the other programs' data, so it can never damage their files.
 const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net } = require('electron');
@@ -12,7 +12,7 @@ const { Index } = require('./core/indexer');
 const { upcomingMeetings } = require('./core/calendar');
 const sources = require('./central/sources');
 
-app.setName('Riyser Central');
+app.setName('Riyeser Central');
 app.setPath('userData', path.join(app.getPath('appData'), 'Riyser Central'));
 if (!app.requestSingleInstanceLock()) { app.quit(); }
 
@@ -24,13 +24,13 @@ const localPrograms = () => path.join(process.env.LOCALAPPDATA || path.join(os.h
 const PROGRAMS = [
   { id: 'accounting', name: 'Accounting', full: 'Riyeser Accounting', icon: '📒', desc: 'Invoices, bills, banking, GST/BAS and reports.',
     dirs: ['Riyeser Accounting'], exes: ['Riyeser Accounting.exe'], links: ['Riyeser Accounting'] },
-  { id: 'payroll', name: 'Payroll', full: 'Riyser Payroll', icon: '🕒', desc: 'Time clock, timesheets, pay runs, payslips and leave.',
+  { id: 'payroll', name: 'Payroll', full: 'Riyeser Payroll', icon: '🕒', desc: 'Time clock, timesheets, pay runs, payslips and leave.',
     dirs: ['riyser', 'Riyser'], exes: ['Riyser.exe'], links: ['Riyser'] },
   { id: 'desk', name: 'Desk Assistant', full: 'Riyeser Desk Assistant', icon: '🗂', desc: 'Sort files by type, find anything, meetings and to-dos.',
     dirs: ['desk-assistant'], exes: ['Riyeser Desk Assistant.exe', 'Desk Assistant.exe'], links: ['Riyeser Desk Assistant', 'Desk Assistant'] },
   { id: 'pdf', name: 'PDF', full: 'Riyeser PDF', icon: '📕', desc: 'Open, fill in, sign, combine and edit PDFs.',
     dirs: ['desk-pdf'], exes: ['Riyeser PDF.exe', 'Desk PDF.exe'], links: ['Riyeser PDF', 'Desk PDF'] },
-  { id: 'services', name: 'Riyser Services', full: 'Riyser Services', icon: '🏗', desc: 'Building services on your drawings, with photos, tests and QA.',
+  { id: 'services', name: 'Riyeser Services', full: 'Riyeser Services', icon: '🏗', desc: 'Building services on your drawings, with photos, tests and QA.',
     url: 'https://riyeser.com' },
 ];
 
@@ -38,7 +38,7 @@ function shortcutDirs() {
   const appData = process.env.APPDATA || app.getPath('appData');
   const dirs = [app.getPath('desktop'), path.join(os.homedir(), 'Desktop'), process.env.PUBLIC && path.join(process.env.PUBLIC, 'Desktop'),
     path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs'), path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Riyeser Group'),
-    path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Riyser Group')];
+    path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Riyeser Group')];
   return [...new Set(dirs.filter(Boolean))];
 }
 const exists = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
@@ -85,13 +85,13 @@ function installedVersions() {
 async function checkUpdates(force) {
   const cached = store.get('updateCheck', null);
   if (!force && cached && Date.now() - cached.at < 6 * 3600 * 1000) return { ...cached.result, installed: await installedVersions(), cached: true };
-  const res = await net.fetch(updates.RELEASE_API, { headers: { 'User-Agent': 'Riyser-Central', Accept: 'application/vnd.github+json' } });
+  const res = await net.fetch(updates.RELEASE_API, { headers: { 'User-Agent': 'Riyeser-Central', Accept: 'application/vnd.github+json' } });
   if (res.status === 404) return { latest: null, updates: [], note: 'No release published yet.' };
   if (!res.ok) throw new Error(`Couldn't check for updates (${res.status}). Try again later.`);
   const release = await res.json();
   let versionsJson = null;
   const vj = (release.assets || []).find((a) => a.name === 'versions.json');
-  if (vj) { try { versionsJson = await (await net.fetch(vj.browser_download_url, { headers: { 'User-Agent': 'Riyser-Central' } })).json(); } catch { /* use the release notes */ } }
+  if (vj) { try { versionsJson = await (await net.fetch(vj.browser_download_url, { headers: { 'User-Agent': 'Riyeser-Central' } })).json(); } catch { /* use the release notes */ } }
   const latest = updates.latestFromRelease(release, versionsJson);
   store.set('updateCheck', { at: Date.now(), result: { latest } });
   return { latest, installed: await installedVersions() };
@@ -103,7 +103,7 @@ async function updateStatus(force) {
 }
 async function download(url, file, onProgress) {
   if (!updates.ALLOWED_DOWNLOAD.test(url)) throw new Error('Refusing to download from an unexpected address.');
-  const res = await net.fetch(url, { headers: { 'User-Agent': 'Riyser-Central' } });
+  const res = await net.fetch(url, { headers: { 'User-Agent': 'Riyeser-Central' } });
   if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}).`);
   const total = +res.headers.get('content-length') || 0; let got = 0;
   const out = fs.createWriteStream(file);
@@ -205,7 +205,7 @@ function registerIpc() {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 1280, height: 860, minWidth: 900, minHeight: 600, title: 'Riyser Central',
+    width: 1280, height: 860, minWidth: 900, minHeight: 600, title: 'Riyeser Central',
     icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-central.ico' : 'icon-central.png'),
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });

@@ -1,6 +1,6 @@
 # riyeser.com
 
-The Riyser Group website: home, a page per program, Downloads, Pricing (free during early access) and Support.
+The Riyeser Group website: home, a page per program, Downloads, Pricing (free during early access) and Support.
 
 - **Edit**: all text lives in `build.mjs` (one place for every page); styling in `assets/site.css`.
 - **Build**: `node website/build.mjs` → `website/public/` (plain HTML, works on any web host).

@@ -1,11 +1,11 @@
-// Update checks for Riyser Central: compares the versions installed on this PC with the latest public release
-// (made by the "Publish Riyser release" button) and installs newer ones in the background.
+// Update checks for Riyeser Central: compares the versions installed on this PC with the latest public release
+// (made by the "Publish Riyeser release" button) and installs newer ones in the background.
 const RELEASE_API = 'https://api.github.com/repos/raka1987/Riyeser/releases/latest';
 const ALLOWED_DOWNLOAD = /^https:\/\/(github\.com\/raka1987\/Riyeser\/releases\/download\/|objects\.githubusercontent\.com\/|release-assets\.githubusercontent\.com\/)/i;
 
 // Each program: its name in Windows' installed-apps list, the release file, and how to install it silently.
 const PRODUCTS = [
-  { id: 'central', display: 'Riyser Central', asset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
+  { id: 'central', display: 'Riyeser Central', also: ['Riyser Central'], asset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
   { id: 'desk', display: 'Riyeser Desk Assistant', asset: 'RiyeserDeskAssistant-Setup.exe', args: ['/S'] },
   { id: 'pdf', display: 'Riyeser PDF', asset: 'RiyserPDF-Setup.exe', args: ['/S'] },
   { id: 'accounting', display: 'Riyeser Accounting', asset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
@@ -26,7 +26,8 @@ function latestFromRelease(release, versionsJson = null) {
     const asset = (release.assets || []).find((a) => a.name === p.asset);
     let version = versionsJson && versionsJson[p.id];
     if (!version) {
-      const m = String(release.body || '').match(new RegExp(`^\\s*[-*]\\s*${p.display.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+v?(\\d+(?:\\.\\d+){1,3})`, 'mi'));
+      const names = [p.display, ...(p.also || [])].map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+      const m = String(release.body || '').match(new RegExp(`^\\s*[-*]\\s*(?:${names})\\s+v?(\\d+(?:\\.\\d+){1,3})`, 'mi'));
       version = m ? m[1] : null;
     }
     if (asset && version && ALLOWED_DOWNLOAD.test(asset.browser_download_url)) out[p.id] = { version, url: asset.browser_download_url, size: asset.size };
@@ -41,7 +42,7 @@ function installedFromRegistry(text) {
     const name = (block.match(/^\s*DisplayName\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
     const ver = (block.match(/^\s*DisplayVersion\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
     if (!name) continue;
-    for (const p of PRODUCTS) if (name.toLowerCase().startsWith(p.display.toLowerCase())) out[p.id] = ver || (name.match(/(\d+(?:\.\d+){1,3})\s*$/) || [])[1] || null;
+    for (const p of PRODUCTS) if ([p.display, ...(p.also || [])].some((n) => name.toLowerCase().startsWith(n.toLowerCase()))) out[p.id] = ver || (name.match(/(\d+(?:\.\d+){1,3})\s*$/) || [])[1] || null;
   }
   return out;
 }

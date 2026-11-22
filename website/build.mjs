@@ -1,4 +1,4 @@
-// Builds the Riyser website into website/public (plain HTML, no server needed - GitHub Pages or any host).
+// Builds the Riyeser website into website/public (plain HTML, no server needed - GitHub Pages or any host).
 //   node website/build.mjs
 // Edit the text here; every page shares the same header, footer and download buttons.
 import { mkdirSync, writeFileSync, cpSync, rmSync, readFileSync } from 'node:fs';
@@ -14,23 +14,23 @@ const EMAIL = 'info@riyeser.com';
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
 const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');
-// Riyser Services (the web app). It runs at riyeser.com today; when it moves to app.riyeser.com, change this one line.
+// Riyeser Services (the web app). It runs at riyeser.com today; when it moves to app.riyeser.com, change this one line.
 const SERVICES_APP = process.env.SERVICES_APP || 'https://riyeser.com';
 
 const PROGRAMS = [
-  { id: 'central', name: 'Riyser Central', short: 'Central', icon: 'R', file: 'RiyserCentral-Setup.exe',
-    one: 'The home screen for your business: money owed, today\'s meetings, to-dos and recent files — and every Riyser program one click away.',
+  { id: 'central', name: 'Riyeser Central', short: 'Central', icon: 'R', file: 'RiyserCentral-Setup.exe',
+    one: 'The home screen for your business: money owed, today\'s meetings, to-dos and recent files — and every Riyeser program one click away.',
     pitch: 'Start your day knowing exactly what needs doing.',
     shot: 'central-light.webp', shot2: 'central-dark.webp',
     features: [
-      ['Money at a glance', 'What customers owe you, what\'s overdue, and the bills you need to pay — straight from Riyser Accounting.'],
+      ['Money at a glance', 'What customers owe you, what\'s overdue, and the bills you need to pay — straight from Riyeser Accounting.'],
       ['Today & to-dos', 'Your meetings and to-do list in one place, so nothing slips.'],
       ['Find any file', 'One search box finds invoices, drawings and payslips by name, by the words inside, or by an old name.'],
       ['Recent documents', 'Pick up where you left off with the files you opened last.'],
       ['Only what you have', 'Shows just the programs you use — add more any time.'],
       ['Light or dark', 'A modern look that\'s easy on the eyes, day or night.'],
     ] },
-  { id: 'accounting', name: 'Riyser Accounting', short: 'Accounting', icon: '📒', file: 'RiyeserAccounting-Setup.exe',
+  { id: 'accounting', name: 'Riyeser Accounting', short: 'Accounting', icon: '📒', file: 'RiyeserAccounting-Setup.exe',
     one: 'Invoices, bills, banking, GST/BAS and reports — real double-entry books without the jargon.',
     pitch: 'Know who owes you, and who you owe.',
     shot: 'accounting.webp',
@@ -43,7 +43,7 @@ const PROGRAMS = [
       ['Inventory & payroll', 'Stock with average cost, stocktakes, and pay runs that post straight to the books.'],
     ],
     note: 'Built for Australian small businesses. Have your accountant check your setup before relying on it for tax.' },
-  { id: 'payroll', name: 'Riyser Payroll', short: 'Payroll', icon: '🕒', file: null,
+  { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: null,
     one: 'Time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click.',
     pitch: 'Pay day without the paperwork.',
     features: [
@@ -54,8 +54,8 @@ const PROGRAMS = [
       ['Leave', 'Track leave balances as they build up and as they\'re taken.'],
       ['Bank statement check', 'Reads your bank statement and matches the wage payments that went out.'],
     ],
-    note: 'Payroll is part of the Riyser hub. Get in touch for early access.' },
-  { id: 'desk-assistant', name: 'Riyser Desk Assistant', short: 'Desk Assistant', icon: '🗂', file: 'RiyeserDeskAssistant-Setup.exe',
+    note: 'Payroll is part of the Riyeser hub. Get in touch for early access.' },
+  { id: 'desk-assistant', name: 'Riyeser Desk Assistant', short: 'Desk Assistant', icon: '🗂', file: 'RiyeserDeskAssistant-Setup.exe',
     one: 'Sorts every file by type and year, finds anything in seconds, finds duplicates, and keeps your to-dos.',
     pitch: 'Never lose a file again.',
     shot: 'desk-find.webp',
@@ -68,7 +68,7 @@ const PROGRAMS = [
       ['Meetings & to-dos', 'Connect your calendar; action items from meeting notes land on your to-do list.'],
     ],
     note: 'Desk Assistant never touches Windows or program files — only your own documents.' },
-  { id: 'pdf', name: 'Riyser PDF', short: 'PDF', icon: '📕', file: 'RiyserPDF-Setup.exe',
+  { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyserPDF-Setup.exe',
     one: 'Open, fill in, sign, combine and edit PDFs — even scanned ones.',
     pitch: 'Drawings and forms, done on the PC.',
     shot: 'pdf.webp',
@@ -80,7 +80,7 @@ const PROGRAMS = [
       ['Scans', 'Turn scanned pages into searchable, editable text.'],
       ['Convert', 'Make PDFs from pictures, Word and Excel — or turn a PDF back into Word.'],
     ] },
-  { id: 'services', name: 'Riyser Services', short: 'Services', icon: '🏗', file: null, link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
+  { id: 'services', name: 'Riyeser Services', short: 'Services', icon: '🏗', file: null, link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
     one: 'Map every cable, pipe and duct on your drawings as it goes in — with inspections, test results and photos — and the as-builts are done at handover.',
     pitch: 'Map every service while the building goes up.', custom: true },
 ];
@@ -109,18 +109,18 @@ function page({ path, title, description, active, body }) {
 </head>
 <body>
 <header class="nav" id="nav"><div class="c">
-  <a class="logo" href="${up}index.html"><img src="${up}assets/logo.png" alt="">Riyser</a>
+  <a class="logo" href="${up}index.html"><img src="${up}assets/logo.png" alt="">Riyeser</a>
   <nav class="links">${nav.map(([k, l, h]) => `<a href="${h}"${k === active ? ' class="on"' : ''}>${l}</a>`).join('')}</nav>
   <a class="btn p" href="${up}downloads.html">Free download</a>
   <button class="menu" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">☰</button>
 </div></header>
 <main>${body(up)}</main>
-<footer><div class="c"><b>Riyser Group</b>
+<footer><div class="c"><b>Riyeser Group</b>
   ${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html">${p.short}</a>`).join('')}
   <a href="${up}downloads.html">Downloads</a><a href="${up}support.html">Support</a><a href="${up}terms.html">Terms</a>
-  <span class="r">© ${new Date().getFullYear()} Riyser Group</span></div></footer>
+  <span class="r">© ${new Date().getFullYear()} Riyeser Group</span></div></footer>
 <script>addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('scrolled',scrollY>8),{passive:true})</script>
-${path === 'index.html' && !SERVICES_APP.startsWith(SITE) ? `<script>/* old Riyser Services links (riyeser.com/?demo, riyeser.com/#/...) now live at the Services app */
+${path === 'index.html' && !SERVICES_APP.startsWith(SITE) ? `<script>/* old Riyeser Services links (riyeser.com/?demo, riyeser.com/#/...) now live at the Services app */
 if(/[?&]demo\b/.test(location.search)||location.hash.startsWith('#/'))location.replace(${JSON.stringify(SERVICES_APP)}+'/'+location.search+location.hash)</script>` : ''}
 </body>
 </html>
@@ -131,39 +131,39 @@ if(/[?&]demo\b/.test(location.search)||location.hash.startsWith('#/'))location.r
 }
 
 const freeLine = 'Free download · no sign-up · no card · works offline';
-const ctaBlock = (up, title = 'Try Riyser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
+const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
 <section class="c"><div class="cta"><h2>${title}</h2><p>${text}</p>
-<a class="btn t" href="${dl(prog('central'))}">⬇ Download Riyser Central — free</a>
+<a class="btn t" href="${dl(prog('central'))}">⬇ Download Riyeser Central — free</a>
 <p style="font-size:13px;margin:14px 0 0;opacity:.75">${freeLine} · Windows 10 & 11</p></div></section>`;
 
 // ---------- home ----------
 page({
-  path: 'index.html', title: 'Riyser — your whole business, in one place', active: '',
+  path: 'index.html', title: 'Riyeser — your whole business, in one place', active: '',
   description: 'Free Windows programs for small business: accounting, payroll, files, PDFs and building services, with one home screen. No sign-up, works offline.',
   body: (up) => `
 <div class="c hero">
-  <span class="eyebrow">NEW · Riyser Central 1.1 · free</span>
+  <span class="eyebrow">NEW · Riyeser Central 1.1 · free</span>
   <h1>Your whole business, <span class="grad">in one place</span></h1>
   <p class="lead">Accounting, payroll, files, PDFs and building services — simple Windows programs that work together, with one home screen that tells you what needs doing today.</p>
   <div class="ctas"><a class="btn p" href="${dl(prog('central'))}">⬇ Download free for Windows</a><a class="btn s" href="#programs">See the programs</a></div>
   <p style="font-size:13px;color:var(--faint);margin:14px 0 0">${freeLine}</p>
-  <div class="shot"><picture><source srcset="${up}assets/central-dark.webp" media="(prefers-color-scheme: dark)"><img src="${up}assets/central-light.webp" alt="Riyser Central home screen showing money owed, today's meetings, to-dos and recent files" width="1600" height="1000"></picture></div>
+  <div class="shot"><picture><source srcset="${up}assets/central-dark.webp" media="(prefers-color-scheme: dark)"><img src="${up}assets/central-light.webp" alt="Riyeser Central home screen showing money owed, today's meetings, to-dos and recent files" width="1600" height="1000"></picture></div>
 </div>
 <div class="c trust"><span>WORKS OFFLINE</span><span>YOUR DATA STAYS ON YOUR PC</span><span>NO ADMIN RIGHTS NEEDED</span><span>EVERY CHANGE CAN BE UNDONE</span></div>
 <section id="programs" class="c">
   <h2 class="h2">Pick the programs you need</h2>
-  <p class="sub">Start with one. Add more any time — they all show up in Riyser Central.</p>
-  <div class="grid">${PROGRAMS.map((p) => `<a class="card" href="${up}programs/${p.id}.html">${iconBox(p)}<h3>${p.short === 'Central' ? 'Riyser Central' : p.short}</h3><p>${esc(p.one)}</p><span class="more">Learn more →</span></a>`).join('')}</div>
+  <p class="sub">Start with one. Add more any time — they all show up in Riyeser Central.</p>
+  <div class="grid">${PROGRAMS.map((p) => `<a class="card" href="${up}programs/${p.id}.html">${iconBox(p)}<h3>${p.short === 'Central' ? 'Riyeser Central' : p.short}</h3><p>${esc(p.one)}</p><span class="more">Learn more →</span></a>`).join('')}</div>
 </section>
 <div class="c">
-  <div class="feat"><div class="t"><div class="k">Accounting</div><h3>Know who owes you — and who you owe</h3><p>Real double-entry books without the jargon. Riyser Central shows what's overdue the moment you sit down.</p>
+  <div class="feat"><div class="t"><div class="k">Accounting</div><h3>Know who owes you — and who you owe</h3><p>Real double-entry books without the jargon. Riyeser Central shows what's overdue the moment you sit down.</p>
     <ul class="ticks"><li>Quotes → invoices → payments</li><li>Bank reconciliation & statement import</li><li>GST/BAS summary, P&L and balance sheet</li></ul>
     <p style="margin-top:18px"><a class="btn s" href="${up}programs/accounting.html">More about Accounting</a></p></div>
-    <img src="${up}assets/accounting.webp" alt="Riyser Accounting dashboard" loading="lazy" width="1400" height="1050"></div>
+    <img src="${up}assets/accounting.webp" alt="Riyeser Accounting dashboard" loading="lazy" width="1400" height="1050"></div>
   <div class="feat r"><div class="t"><div class="k">Desk Assistant</div><h3>Never lose a file again</h3><p>Everything filed by type and year — invoices, drawings, payroll — and one search that finds it by name, contents or an old name.</p>
     <ul class="ticks"><li>Sort by type, with a preview and Undo</li><li>Finds duplicates, even Word + PDF copies</li><li>Where are my files? — every move recorded</li></ul>
     <p style="margin-top:18px"><a class="btn s" href="${up}programs/desk-assistant.html">More about Desk Assistant</a></p></div>
-    <img src="${up}assets/desk-find.webp" alt="Riyser Desk Assistant search with type and year filters" loading="lazy" width="1400" height="1100"></div>
+    <img src="${up}assets/desk-find.webp" alt="Riyeser Desk Assistant search with type and year filters" loading="lazy" width="1400" height="1100"></div>
 </div>
 ${ctaBlock(up)}`,
 });
@@ -187,15 +187,15 @@ ${p.shot ? `<img class="pshot" src="${up}assets/${p.shot}" alt="${esc(p.name)} s
   ${p.shot2 ? `<img class="pshot" style="margin-top:40px" src="${up}assets/${p.shot2}" alt="${esc(p.name)} screenshot" loading="lazy" width="1600" height="1000">` : ''}
   ${p.note ? `<p class="note" style="margin-top:28px">${esc(p.note)}</p>` : ''}
 </section>
-<section class="c"><h2 class="h2">Works even better together</h2><p class="sub">Every Riyser program shows up in Riyser Central, your home screen for the whole business.</p>
-  <div class="grid">${PROGRAMS.filter((o) => o.id !== p.id).slice(0, 3).map((o) => `<a class="card" href="${up}programs/${o.id}.html">${iconBox(o)}<h3>${esc(o.short === 'Central' ? 'Riyser Central' : o.short)}</h3><p>${esc(o.one)}</p><span class="more">Learn more →</span></a>`).join('')}</div>
+<section class="c"><h2 class="h2">Works even better together</h2><p class="sub">Every Riyeser program shows up in Riyeser Central, your home screen for the whole business.</p>
+  <div class="grid">${PROGRAMS.filter((o) => o.id !== p.id).slice(0, 3).map((o) => `<a class="card" href="${up}programs/${o.id}.html">${iconBox(o)}<h3>${esc(o.short === 'Central' ? 'Riyeser Central' : o.short)}</h3><p>${esc(o.one)}</p><span class="more">Learn more →</span></a>`).join('')}</div>
 </section>
-${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyser Central — free')}`,
+${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyeser Central — free')}`,
   });
 }
 
 
-// ---------- Riyser Services (content carried over from the original riyeser.com homepage and FAQ) ----------
+// ---------- Riyeser Services (content carried over from the original riyeser.com homepage and FAQ) ----------
 {
   const p = prog('services');
   const TRADES = [['Data and comms', 'Fibre, copper, racks and every port'], ['Electrical', 'Boards, circuits, outlets and test results'], ['Fire', 'Detection, sprinklers, hydrants and panels'],
@@ -208,7 +208,7 @@ ${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyser Central — fr
     ['services-report.webp', 'Test reports for every trade', 'Checklists, readings, defects and photos in one clean report.', 'Two pages of a power test report'],
     ['services-asbuilt.webp', 'As-builts as you go', 'Mark up what went in as it goes in, and the as-built is ready when the job is.', 'An as-built drawing with a title block']];
   const FAQ = [
-    ['About Riyser Services', [
+    ['About Riyeser Services', [
       ['What is it?', 'An app for marking up building services on your drawings while they\'re installed. You record every cable, pipe and duct, connect each one from end to end, run inspections, add photos and test results, and print the handover pack, as-builts, schematics and port schedules at the end.'],
       ['Who is it for?', 'Electrical, data and comms, fire, plumbing, drainage, mechanical, security and AV contractors, plus the project managers, supervisors and clients who need to see what\'s been installed and checked.'],
       ['Can I try it first?', 'Yes. Open the demo to explore a marked-up resort with a guided tour. Nothing is saved, and it resets each time you visit.']]],
@@ -223,17 +223,17 @@ ${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyser Central — fr
       ['Can a client answer an RFI without an account?', 'Yes. Send them a client link for that RFI or defect. They can see it and reply, but nothing else in your project.'],
       ['Who can see my projects?', 'Only people your admin adds to your team, at the access level they\'re given.']]],
     ['Your information and accounts', [
-      ['Who owns my project information?', 'You do, or your client does, as you\'ve agreed between you. We only store and process it to run Riyser Services for you. See the terms of use.'],
+      ['Who owns my project information?', 'You do, or your client does, as you\'ve agreed between you. We only store and process it to run Riyeser Services for you. See the terms of use.'],
       ['How do I get it for my team?', `Email ${EMAIL} with your company name and roughly how many people will use it, and we'll set you up.`],
       ['I\'ve forgotten my password', `Ask your admin to reset it, or email ${EMAIL}.`],
       ['How do I get help?', `Tap the ? button in the app for help on the screen you're on, read the help guide, or email ${EMAIL}.`]]],
   ];
   page({
-    path: 'programs/services.html', title: 'Riyser Services — map every service while the building goes up', active: 'programs',
+    path: 'programs/services.html', title: 'Riyeser Services — map every service while the building goes up', active: 'programs',
     description: 'Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with inspections, test results and photos. As-builts done at handover.',
     body: (up) => `
 <div class="c phead"><div>
-  ${iconBox(p)}<div class="k" style="margin-top:14px">Riyser Services</div>
+  ${iconBox(p)}<div class="k" style="margin-top:14px">Riyeser Services</div>
   <h1>Map every service while the building goes up</h1>
   <p class="lead">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
   <div class="ctas" style="justify-content:flex-start"><a class="btn p" href="${SERVICES_APP}/?demo">Try it now, free</a><a class="btn s" href="${SERVICES_APP}/">Sign in to your projects</a></div>
@@ -252,22 +252,22 @@ ${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyser Central — fr
 <section class="c faq" id="faq" style="max-width:900px"><h2 class="h2">Questions and answers</h2>
   ${FAQ.map(([g, qs]) => `<h3 style="margin:28px 0 4px;font-size:18px">${esc(g)}</h3>${qs.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}`).join('')}
   <p class="note" style="margin-top:24px">More help: the <a class="more" href="${SERVICES_APP}/help.html">help guide</a> · <a class="more" href="${up}terms.html">Terms of use</a> · <a class="more" href="mailto:${EMAIL}">${EMAIL}</a></p></section>
-<section class="c"><div class="cta"><h2>See it on a real job</h2><p>Try the demo now, or email us to set Riyser Services up for your team.</p>
-  <a class="btn t" href="${SERVICES_APP}/?demo">Try the demo</a> &nbsp; <a class="btn s" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyser Services enquiry')}">${EMAIL}</a></div></section>`,
+<section class="c"><div class="cta"><h2>See it on a real job</h2><p>Try the demo now, or email us to set Riyeser Services up for your team.</p>
+  <a class="btn t" href="${SERVICES_APP}/?demo">Try the demo</a> &nbsp; <a class="btn s" style="background:transparent;color:#fff;border-color:rgba(255,255,255,.4)" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser Services enquiry')}">${EMAIL}</a></div></section>`,
   });
 }
 
 // ---------- terms of use (as published on riyeser.com, 8 November 2026) ----------
 page({
-  path: 'terms.html', title: 'Terms of use — Riyser', active: '',
-  description: 'Terms of use for Riyser and Riyser Services.',
+  path: 'terms.html', title: 'Terms of use — Riyeser', active: '',
+  description: 'Terms of use for Riyeser and Riyeser Services.',
   body: () => `<div class="c legal" style="max-width:820px;padding:56px 24px 64px">${TERMS}</div>`,
 });
 
 // ---------- downloads ----------
 page({
-  path: 'downloads.html', title: 'Download Riyser — free for Windows', active: 'downloads',
-  description: 'Download Riyser Central, Accounting, Desk Assistant and PDF free for Windows 10 and 11. No sign-up, no card.',
+  path: 'downloads.html', title: 'Download Riyeser — free for Windows', active: 'downloads',
+  description: 'Download Riyeser Central, Accounting, Desk Assistant and PDF free for Windows 10 and 11. No sign-up, no card.',
   body: (up) => `
 <div class="c" style="padding-top:56px">
   <h1 style="font-size:clamp(32px,5vw,48px);letter-spacing:-1px">Downloads</h1>
@@ -278,30 +278,30 @@ page({
     <li>If Windows shows <b>“Windows protected your PC”</b>, click <b>More info → Run anyway</b>. (We're getting our programs signed so this goes away.)</li>
     <li>That's it — it installs for you in a few seconds and adds a desktop icon. No admin rights needed.</li></ol></section>
 </div>
-${ctaBlock(up, 'New here? Start with Riyser Central', 'It\'s the home screen for everything — and it shows you what else you can add.')}`,
+${ctaBlock(up, 'New here? Start with Riyeser Central', 'It\'s the home screen for everything — and it shows you what else you can add.')}`,
 });
 
 // ---------- pricing ----------
 page({
-  path: 'pricing.html', title: 'Riyser pricing — free during early access', active: 'pricing',
-  description: 'Every Riyser program is free to download and use during early access.',
+  path: 'pricing.html', title: 'Riyeser pricing — free during early access', active: 'pricing',
+  description: 'Every Riyeser program is free to download and use during early access.',
   body: (up) => `
 <div class="c hero"><span class="eyebrow">EARLY ACCESS</span><h1>Free while we're in <span class="grad">early access</span></h1>
-  <p class="lead">Download any Riyser program and use it free — no sign-up, no card, no time limit during early access. Tell us what you'd like next and help shape it.</p>
-  <div class="ctas"><a class="btn p" href="${up}downloads.html">⬇ Download free</a><a class="btn s" href="mailto:${EMAIL}?subject=Riyser%20feedback">Send feedback</a></div></div>
+  <p class="lead">Download any Riyeser program and use it free — no sign-up, no card, no time limit during early access. Tell us what you'd like next and help shape it.</p>
+  <div class="ctas"><a class="btn p" href="${up}downloads.html">⬇ Download free</a><a class="btn s" href="mailto:${EMAIL}?subject=Riyeser%20feedback">Send feedback</a></div></div>
 <section class="c faq" style="max-width:820px">
   <details open><summary>Is it really free?</summary><p>Yes. During early access every program is free to download and use. If paid plans come later, you'll hear about it first — and early users will be looked after.</p></details>
   <details><summary>Do I need an account?</summary><p>No. Download, install and go. Your information stays on your own computer.</p></details>
   <details><summary>Does it work without internet?</summary><p>Yes. Everything runs on your PC. You only need internet to download and to get updates.</p></details>
-  <details><summary>Can I use it for my whole team?</summary><p>Yes — install it on each computer. Riyser Accounting can also run for several people on your office network.</p></details>
+  <details><summary>Can I use it for my whole team?</summary><p>Yes — install it on each computer. Riyeser Accounting can also run for several people on your office network.</p></details>
 </section>
 ${ctaBlock(up)}`,
 });
 
 // ---------- support ----------
 page({
-  path: 'support.html', title: 'Riyser support', active: 'support',
-  description: 'Help with installing and using Riyser programs.',
+  path: 'support.html', title: 'Riyeser support', active: 'support',
+  description: 'Help with installing and using Riyeser programs.',
   body: (up) => `
 <div class="c" style="padding:56px 24px 0"><h1 style="font-size:clamp(32px,5vw,48px);letter-spacing:-1px">Support</h1>
   <p class="lead" style="margin:10px 0 30px;text-align:left">Questions, ideas or something not working? Email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> — a real person will reply.</p></div>
@@ -317,9 +317,9 @@ ${ctaBlock(up)}`,
 
 // ---------- old riyeser.com addresses keep working ----------
 const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
-  writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
-redirect('faq.html', `${BASE}programs/services.html#faq`, 'Riyser Services questions and answers');
-if (!SERVICES_APP.startsWith(SITE)) redirect('help.html', `${SERVICES_APP}/help.html`, 'Riyser Services help guide');
+  writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
+redirect('faq.html', `${BASE}programs/services.html#faq`, 'Riyeser Services questions and answers');
+if (!SERVICES_APP.startsWith(SITE)) redirect('help.html', `${SERVICES_APP}/help.html`, 'Riyeser Services help guide');
 
 // ---------- extras ----------
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
@@ -327,5 +327,5 @@ writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
 const urls = ['', 'downloads.html', 'pricing.html', 'support.html', 'terms.html', ...PROGRAMS.map((p) => `programs/${p.id}.html`)];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
-writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
+writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyeser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
 console.log('Built', urls.length, 'pages into', OUT);

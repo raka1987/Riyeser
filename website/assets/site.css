@@ -1,4 +1,4 @@
-/* Riyser website — design A ("clean & bright"). Light by default, dark when the visitor's system is dark. */
+/* Riyeser website — design A ("clean & bright"). Light by default, dark when the visitor's system is dark. */
 :root {
   --ink: #0f172a; --text: #334155; --muted: #64748b; --faint: #94a3b8; --line: #e2e8f0; --bg: #ffffff; --soft: #f6f8fb; --card: #ffffff;
   --brand: #1f4e86; --brand-2: #0f2742; --teal: #14b8a6; --teal-ink: #0e7c70; --teal-soft: #e8f7f4;
@@ -111,7 +111,7 @@ footer b { color: var(--ink); } footer .r { margin-left: auto; }
   .trust { gap: 8px 18px; }
 }
 
-/* Riyser Services page */
+/* Riyeser Services page */
 .steps4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .trades { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }

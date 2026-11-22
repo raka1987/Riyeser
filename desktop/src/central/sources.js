@@ -1,4 +1,4 @@
-// Riyser Central reads (never writes) what the other Riyeser programs keep on this PC:
+// Riyeser Central reads (never writes) what the other Riyeser programs keep on this PC:
 //  - Riyeser Desk Assistant: to-do list, calendars, settings and the file search index (%APPDATA%\Desk Assistant\data)
 //  - Riyeser Accounting: invoices and bills still to be paid (~/.riyeser/company.db)
 //  - Windows: recently opened documents (%APPDATA%\Microsoft\Windows\Recent)

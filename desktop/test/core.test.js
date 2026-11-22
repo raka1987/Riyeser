@@ -530,16 +530,16 @@ test('Sort by type: refiles old layouts into Type › Year, leaves program folde
   const put = (p, t) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t); const old = new Date('2025-03-01').getTime() / 1000; fs.utimesSync(p, old, old); };
   put(path.join(org, 'Clients', 'Acme Plumbing', 'Invoices', 'inv1.txt'), 'TAX INVOICE\nAcme Plumbing\nInvoice Number INV-1\nInvoice Date: 3 November 2025\nTotal $100.00');
   put(path.join(org, 'Archive', 'Duplicates', '2026-11-18', 'old copy.txt'), 'TAX INVOICE\nInvoice Number INV-9\nTotal $1.00');
-  put(path.join(docs, 'Riyser', 'Payroll', 'Payslips', 'Payslips paid.pdf'), '%PDF-1.4 payslip');
-  put(path.join(docs, 'Riyser', 'Payroll', 'backup.json'), '{}');
+  put(path.join(docs, 'Riyeser', 'Payroll', 'Payslips', 'Payslips paid.pdf'), '%PDF-1.4 payslip');
+  put(path.join(docs, 'Riyeser', 'Payroll', 'backup.json'), '{}');
   put(path.join(docs, 'quote westin.txt'), 'QUOTATION\nWestin\nQuote number Q-5\nTotal $5,000.00');
   const r = await reviewFiles([docs], { ...settings, filingLayout: 'typeYear', nameStyle: 'keep', organisedRoot: org }, { refileAll: true });
   const to = (n) => { const p = r.plan.find((x) => x.name === n); return p && path.relative(org, p.to); };
   assert.equal(to('inv1.txt'), path.join('Invoices', '2025', 'inv1.txt'));       // old Clients/Acme layout -> Type/Year, name kept
   assert.equal(to('quote westin.txt'), path.join('Quotes', '2025', 'quote westin.txt'));
   assert.equal(to('old copy.txt'), undefined);                                     // Archive left alone
-  assert.ok(!r.plan.some((x) => x.from.includes(`${path.sep}Riyser${path.sep}`)));  // Payroll's own folder left alone
-  assert.ok(r.kept.some((k) => /Riyser$/.test(k.path)));
+  assert.ok(!r.plan.some((x) => x.from.includes(`${path.sep}Riyeser${path.sep}`)));  // Payroll's own folder left alone
+  assert.ok(r.kept.some((k) => /Riyeser$/.test(k.path)));
 });
 
 test('Find a file: filters by type, year and kind, and finds old names', () => {
@@ -561,7 +561,7 @@ test('Find a file: filters by type, year and kind, and finds old names', () => {
   assert.equal(idx.find({ q: 'schematic' }, { organisedRoot: root }).total, 1); // old name / contents
 });
 
-test('Riyser Central reads money owed and owing from the Accounting company file (read-only)', async () => {
+test('Riyeser Central reads money owed and owing from the Accounting company file (read-only)', async () => {
   const initSql = require('sql.js/dist/sql-wasm.js');
   const SQL = await initSql({ locateFile: () => require.resolve('sql.js/dist/sql-wasm.wasm') });
   const db = new SQL.Database();
@@ -587,12 +587,12 @@ test('Riyser Central reads money owed and owing from the Accounting company file
   assert.equal((await pendingPayments(path.join(dir, 'missing.db'))).found, false);
 });
 
-test('Riyser Central update check: compares installed versions with the latest release', () => {
+test('Riyeser Central update check: compares installed versions with the latest release', () => {
   const u = require('../src/central/updates');
   assert.ok(u.newer('1.10.0', '1.9.2')); assert.ok(!u.newer('1.1.0', '1.1.0')); assert.ok(!u.newer('0.21.9', '0.22.0'));
   const release = {
-    tag_name: 'riyser-2026.11.22-1', name: 'Riyser for Windows', published_at: '2026-11-22T11:20:00Z',
-    body: '### In this release\n- Riyser Central 1.2.0\n- Riyeser Desk Assistant 0.22.0\n- Riyeser PDF 0.23.0\n- Riyeser Accounting 1.0.0\n',
+    tag_name: 'riyser-2026.11.22-1', name: 'Riyeser for Windows', published_at: '2026-11-22T11:20:00Z',
+    body: '### In this release\n- Riyeser Central 1.2.0\n- Riyeser Desk Assistant 0.22.0\n- Riyeser PDF 0.23.0\n- Riyeser Accounting 1.0.0\n',
     assets: ['RiyserCentral-Setup.exe', 'RiyeserDeskAssistant-Setup.exe', 'RiyserPDF-Setup.exe', 'RiyeserAccounting-Setup.exe']
       .map((n) => ({ name: n, size: 10, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/riyser-2026.11.22-1/${n}` })),
   };
@@ -606,11 +606,11 @@ test('Riyser Central update check: compares installed versions with the latest r
     'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ghi',
     '    DisplayName    REG_SZ    Some Other App', '    DisplayVersion    REG_SZ    9.9.9',
   ].join('\r\n');
-  const installed = { ...u.installedFromRegistry(reg), central: '1.1.0' };
+  const installed = { ...u.installedFromRegistry(reg + '\r\n\r\nHKEY_CURRENT_USER\\Software\\X\r\n    DisplayName    REG_SZ    Riyser Central 1.1.0\r\n    DisplayVersion    REG_SZ    1.1.0') };
   assert.deepEqual(installed, { pdf: '0.22.0', desk: '0.22.0', central: '1.1.0' });
   const ups = u.availableUpdates(installed, latest);
   assert.deepEqual(ups.map((x) => `${x.id} ${x.from}->${x.to}`), ['central 1.1.0->1.2.0', 'pdf 0.22.0->0.23.0']); // not Accounting: not installed
-  // downloads only from the Riyser release
+  // downloads only from the Riyeser release
   const evil = u.latestFromRelease({ ...release, assets: release.assets.map((a) => ({ ...a, browser_download_url: 'https://evil.example/x.exe' })) });
   assert.deepEqual(evil.products, {});
 });

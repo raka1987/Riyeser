@@ -1,6 +1,6 @@
-// Riyser Central home screen ("Launcher" design).
+// Riyeser Central home screen ("Launcher" design).
 // Shows only what this customer has: tiles for installed programs, panels only when their program's data is there,
-// and one "More Riyser apps" tile for anything not installed.
+// and one "More Riyeser apps" tile for anything not installed.
 const $ = (s, el = document) => el.querySelector(s);
 const bridge = window.api;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -54,7 +54,7 @@ function renderTiles() {
   const upFor = new Set((upd.updates || []).map((u) => u.id));
   $('#tiles').innerHTML = mine.map((p) => `<button class="tile t-${esc(p.id)}" data-open="${esc(p.id)}" title="${esc(p.where || '')}">
       ${upFor.has(p.id) ? '<span class="badge">⬆ Update</span>' : ''}<div class="i">${p.icon}</div><div><b>${esc(p.name)}</b><small>${esc(tileSub(p))}</small></div></button>`).join('')
-    + (others.length ? `<div class="tile glass more"><div class="i">➕</div><div><b style="color:var(--text)">More Riyser apps</b>
+    + (others.length ? `<div class="tile glass more"><div class="i">➕</div><div><b style="color:var(--text)">More Riyeser apps</b>
         <small class="muted">${others.map((p) => `${esc(p.name)} <button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`).join('<br>')}</small></div></div>` : '');
 }
 function renderMoney() {
@@ -120,7 +120,7 @@ function renderUpdates() {
     box.innerHTML = '<div style="font-size:24px">⬇</div><div class="grow"><b id="updmsg">Getting ready…</b><div class="prog"><i id="updbar"></i></div><div class="lbl">Your information is kept. Programs being updated will close for a moment.</div></div>';
     try {
       const r = await bridge.call('central:installUpdates', null);
-      if (r.restarting) { $('#updmsg').textContent = 'Riyser Central is restarting to finish updating…'; return; }
+      if (r.restarting) { $('#updmsg').textContent = 'Riyeser Central is restarting to finish updating…'; return; }
       toast(`Updated ${r.done.length} program${r.done.length === 1 ? '' : 's'}.`);
     } catch (e) { toast(e.message); }
     updating = false;
@@ -134,7 +134,7 @@ async function checkForUpdates(force, quiet = true) {
 }
 bridge.on('update-progress', (p) => {
   const msg = $('#updmsg'); const bar = $('#updbar'); if (!msg) return;
-  msg.textContent = p.stage === 'downloading' ? `Downloading ${p.name}… ${Math.round(p.pct * 100)}%` : p.stage === 'installing' ? `Installing ${p.name}…` : `Restarting Riyser Central…`;
+  msg.textContent = p.stage === 'downloading' ? `Downloading ${p.name}… ${Math.round(p.pct * 100)}%` : p.stage === 'installing' ? `Installing ${p.name}…` : `Restarting Riyeser Central…`;
   bar.style.width = `${Math.round((p.stage === 'downloading' ? p.pct : 1) * 100)}%`;
 });
 $('#checkupd').addEventListener('click', () => checkForUpdates(true, false));
@@ -180,8 +180,8 @@ $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign
 
 (async () => {
   const v = await bridge.call('app:version').catch(() => '');
-  document.title = `Riyser Central ${v}`;
-  $('#foot').textContent = `Riyser Central ${v} · Riyser Group · shows information from your other Riyeser programs; it never changes it.`;
+  document.title = `Riyeser Central ${v}`;
+  $('#foot').textContent = `Riyeser Central ${v} · Riyeser Group · shows information from your other Riyeser programs; it never changes it.`;
   await safe(refresh);
   checkForUpdates(false);
   setInterval(() => { if ($('#results').hidden) safe(refresh); }, 5 * 60 * 1000);
