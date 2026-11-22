@@ -8,7 +8,8 @@ const PRODUCTS = [
   { id: 'central', display: 'Riyeser Central', also: ['Riyser Central'], asset: 'RiyeserCentral-Setup.exe', oldAsset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
   { id: 'desk', display: 'Riyeser Desk Assistant', asset: 'RiyeserDeskAssistant-Setup.exe', args: ['/S'] },
   { id: 'pdf', display: 'Riyeser PDF', asset: 'RiyeserPDF-Setup.exe', oldAsset: 'RiyserPDF-Setup.exe', args: ['/S'] },
-  { id: 'payroll', display: 'Riyeser Payroll', asset: 'RiyeserPayroll-Setup.exe', args: ['/S'] },
+  // The old "Riyser" hub (Riyser 1.x) counts as Payroll, so Central offers to replace it with Riyeser Payroll.
+  { id: 'payroll', display: 'Riyeser Payroll', alsoRe: /^Riyser\s+\d/i, asset: 'RiyeserPayroll-Setup.exe', args: ['/S'] },
   { id: 'services', display: 'Riyeser Services', asset: 'RiyeserServices-Setup.exe', args: ['/S'] },
   { id: 'accounting', display: 'Riyeser Accounting', asset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
 ];
@@ -44,7 +45,7 @@ function installedFromRegistry(text) {
     const name = (block.match(/^\s*DisplayName\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
     const ver = (block.match(/^\s*DisplayVersion\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
     if (!name) continue;
-    for (const p of PRODUCTS) if ([p.display, ...(p.also || [])].some((n) => name.toLowerCase().startsWith(n.toLowerCase()))) out[p.id] = ver || (name.match(/(\d+(?:\.\d+){1,3})\s*$/) || [])[1] || null;
+    for (const p of PRODUCTS) if ([p.display, ...(p.also || [])].some((n) => name.toLowerCase().startsWith(n.toLowerCase())) || (p.alsoRe && p.alsoRe.test(name))) out[p.id] = ver || (name.match(/(\d+(?:\.\d+){1,3})\s*$/) || [])[1] || null;
   }
   return out;
 }

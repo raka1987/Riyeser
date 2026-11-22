@@ -15,7 +15,9 @@ const EMAIL = 'info@riyeser.com';
 // Early bird: 50% off the first year for the first 100 paid users. Set to false once 100 users have it.
 const EARLY_BIRD = true;
 // Turn on once a release with RiyeserServices-Setup.exe is published.
-const SERVICES_WIN = process.env.SERVICES_WIN !== '0'; // in the release since riyeser-2026.11.22-4
+const SERVICES_WIN = process.env.SERVICES_WIN !== '0';
+// Riyeser Payroll's installer is in the release from the first release after module/payroll was added.
+const PAYROLL_WIN = process.env.PAYROLL_WIN === '1'; // in the release since riyeser-2026.11.22-4
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
 const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');
@@ -49,7 +51,7 @@ const PROGRAMS = [
       ['Inventory & payroll', 'Stock with average cost, stocktakes, and pay runs that post straight to the books.'],
     ],
     note: 'Built for Australian small businesses. Have your accountant check your setup before relying on it for tax.' },
-  { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: null,
+  { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: PAYROLL_WIN ? 'RiyeserPayroll-Setup.exe' : null,
     one: 'Time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click.',
     pitch: 'Pay day without the paperwork.',
     features: [

@@ -617,3 +617,13 @@ test('Riyeser Central update check: compares installed versions with the latest 
   const evil = u.latestFromRelease({ ...release, assets: release.assets.map((a) => ({ ...a, browser_download_url: 'https://evil.example/x.exe' })) });
   assert.deepEqual(evil.products, {});
 });
+
+test('Riyeser Central offers Riyeser Payroll in place of the old "Riyser" hub', () => {
+  const u = require('../src/central/updates');
+  const reg = 'HKEY_CURRENT_USER\\x\\a\r\n    DisplayName    REG_SZ    Riyser 1.2.0\r\n    DisplayVersion    REG_SZ    1.2.0\r\n'
+    + 'HKEY_CURRENT_USER\\x\\b\r\n    DisplayName    REG_SZ    Riyser Central 1.1.0\r\n    DisplayVersion    REG_SZ    1.1.0\r\n';
+  const installed = u.installedFromRegistry(reg);
+  assert.deepEqual(installed, { payroll: '1.2.0', central: '1.1.0' });
+  const rel = { tag_name: 't', body: '- Riyeser Payroll 2.1.1\n- Riyeser Central 1.3.2', assets: ['RiyeserPayroll-Setup.exe', 'RiyeserCentral-Setup.exe'].map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 })) };
+  assert.deepEqual(u.availableUpdates(installed, u.latestFromRelease(rel)).map((x) => `${x.id} ${x.from}->${x.to}`).sort(), ['central 1.1.0->1.3.2', 'payroll 1.2.0->2.1.1']);
+});
