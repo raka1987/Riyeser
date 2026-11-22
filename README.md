@@ -2,7 +2,7 @@
 
 *A Riyeser Group module.*
 
-Double-entry business accounting for Australian small and medium businesses. It runs in your browser and keeps everything in one local company file (SQLite). It works the way desktop accounting suites like MYOB AccountRight do, but Riyeser is an original product.
+Double-entry business accounting for Australian small and medium businesses. It runs in your browser and keeps everything in one local company file (SQLite). Riyeser is an original product, written from scratch.
 
 ## Install
 
@@ -51,7 +51,7 @@ The builds are unsigned. Windows SmartScreen will warn ("More info → Run anywa
 ## Features
 
 **Accounts**
-* Chart of accounts uses MYOB-style codes (1- Assets … 9- Other Expenses), with opening balances.
+* Chart of accounts numbered by type (1- Assets … 9- Other Expenses), with opening balances.
 * General journal checks that each entry balances.
 * Find Transactions, plus a register and drill-down for every account.
 * Reversing entries. Posted entries are never deleted, so the audit trail stays intact.
