@@ -4,6 +4,7 @@
 import { mkdirSync, writeFileSync, cpSync, rmSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.OUT_DIR || join(ROOT, 'public');
@@ -91,6 +92,15 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const dl = (p) => (p.file ? `${RELEASES}/${p.file}` : p.link ? p.link : `mailto:${EMAIL}?subject=${encodeURIComponent(`Early access: ${p.name}`)}`);
 const iconBox = (p, extra = '') => `<div class="icon i-${p.id === 'desk-assistant' ? 'desk' : p.id}" ${extra}>${p.icon}</div>`;
 
+/** assets/x.webp -> assets/x.webp?v=<content hash>, so browsers fetch new pictures and styles as soon as they change. */
+const versionOf = {};
+function withVersions(html) {
+  return html.replace(/(assets\/[\w.-]+\.(?:webp|png|css))(?=["'\s)])/g, (m, a) => {
+    if (!(a in versionOf)) { try { versionOf[a] = createHash('sha1').update(readFileSync(join(ROOT, a))).digest('hex').slice(0, 8); } catch { versionOf[a] = ''; } }
+    return versionOf[a] ? `${a}?v=${versionOf[a]}` : a;
+  });
+}
+
 function page({ path, title, description, active, body }) {
   const depth = path.split('/').length - 1;
   const up = depth ? '../'.repeat(depth) : '';
@@ -137,7 +147,7 @@ var hit=(rel.assets||[]).filter(function(x){return x.name.replace(/^Riye?ser/i,'
 `;
   const file = join(OUT, path);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, html);
+  writeFileSync(file, withVersions(html));
 }
 
 const freeLine = 'Free download · no sign-up · no card · works offline';
