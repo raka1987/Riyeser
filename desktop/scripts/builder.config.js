@@ -1,9 +1,10 @@
 // electron-builder settings for the Windows installers, all built from this one code base.
 //   DESK_APP=central -> Riyeser Central (the Riyeser Group home screen)
 //   DESK_APP=pdf     -> Riyeser PDF
+//   DESK_APP=services -> Riyeser Services (the riyeser.com/app/ app in its own window)
 //   (default)        -> Riyeser Desk Assistant
 const base = require('../package.json').build;
-const which = process.env.DESK_APP === 'pdf' ? 'pdf' : process.env.DESK_APP === 'central' ? 'central' : 'assistant';
+const which = ['pdf', 'central', 'services'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
 const pdf = which === 'pdf';
 const APPS = {
   assistant: { name: 'Riyeser Desk Assistant', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDeskAssistant' },
@@ -11,6 +12,8 @@ const APPS = {
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
     extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.2.0', productName: 'Riyeser Central' } },
+  services: { name: 'Riyeser Services', appId: 'com.riyeser.services', ico: 'build/services/icon.ico', out: 'dist-services', artifact: 'RiyeserServices',
+    extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.0.0', productName: 'Riyeser Services' } },
 };
 const a = APPS[which];
 

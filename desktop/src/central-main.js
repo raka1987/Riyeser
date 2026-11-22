@@ -37,7 +37,8 @@ const PROGRAMS = [
   { id: 'pdf', name: 'PDF', full: 'Riyeser PDF', icon: '📕', desc: 'Open, fill in, sign, combine and edit PDFs.',
     dirs: ['desk-pdf'], exes: ['Riyeser PDF.exe', 'Desk PDF.exe'], links: ['Riyeser PDF', 'Desk PDF'] },
   { id: 'services', name: 'Riyeser Services', full: 'Riyeser Services', icon: '🏗', desc: 'Building services on your drawings, with photos, tests and QA.',
-    url: 'https://riyeser.com/app/' },
+    dirs: ['riyeser-services'], exes: ['Riyeser Services.exe'], links: ['Riyeser Services'],
+    url: 'https://riyeser.com/app/' }, // opens the Windows app when it's installed, else the website
 ];
 
 function shortcutDirs() {
@@ -64,8 +65,8 @@ function locate(p) {
   return null;
 }
 const programList = () => PROGRAMS.map((p) => {
-  if (p.url) return { id: p.id, name: p.name, full: p.full, icon: p.icon, desc: p.desc, status: 'online', where: p.url.replace(/^https?:\/\//, '') };
   const exe = locate(p);
+  if (p.url && !exe) return { id: p.id, name: p.name, full: p.full, icon: p.icon, desc: p.desc, status: 'online', where: p.url.replace(/^https?:\/\//, '') };
   return { id: p.id, name: p.name, full: p.full, icon: p.icon, desc: p.desc, status: exe ? 'installed' : 'missing', where: exe };
 });
 
@@ -163,8 +164,8 @@ function registerIpc() {
   handle('central:open', async (id) => {
     const p = PROGRAMS.find((x) => x.id === id);
     if (!p) throw new Error('Unknown program');
-    if (p.url) { await shell.openExternal(p.url); return true; }
     const exe = locate(p);
+    if (p.url && !exe) { await shell.openExternal(p.url); return true; }
     if (!exe) throw new Error(`${p.full} isn't installed on this computer yet (or I can't find it). Use “Locate…” to point me to it.`);
     const err = await shell.openPath(exe);
     if (err) throw new Error(err);

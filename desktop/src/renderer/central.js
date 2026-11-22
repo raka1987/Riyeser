@@ -45,7 +45,7 @@ function tileSub(p) {
   if (p.id === 'desk') return today && today.tasks.length ? `${today.tasks.length} to-do${today.tasks.length === 1 ? '' : 's'} · find & sort files` : 'Find & sort your files';
   if (p.id === 'payroll') return 'Timesheets · pay runs · payslips';
   if (p.id === 'pdf') return 'Fill · sign · edit';
-  if (p.id === 'services') return p.where;
+  if (p.id === 'services') return p.status === 'installed' ? 'Projects · drawings · QA' : p.where;
   return p.desc;
 }
 function renderTiles() {
