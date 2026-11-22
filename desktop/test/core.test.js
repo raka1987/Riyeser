@@ -522,3 +522,41 @@ test('Type › Year filing with full tidy names (the default layout)', async () 
   const k = await reviewFiles([pool], { ...s, nameStyle: 'keep' });
   assert.equal(path.relative(org, k.plan.find((p) => p.name === 'scan0042.txt').to), path.join('Invoices', '2025', 'scan0042.txt'));
 });
+
+test('Sort by type: refiles old layouts into Type › Year, leaves program folders and the Archive alone', async () => {
+  const { reviewFiles } = require('../src/core/review');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sortall-'));
+  const docs = path.join(tmp, 'Documents'); const org = path.join(docs, 'Organised');
+  const put = (p, t) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, t); const old = new Date('2025-03-01').getTime() / 1000; fs.utimesSync(p, old, old); };
+  put(path.join(org, 'Clients', 'Acme Plumbing', 'Invoices', 'inv1.txt'), 'TAX INVOICE\nAcme Plumbing\nInvoice Number INV-1\nInvoice Date: 3 November 2025\nTotal $100.00');
+  put(path.join(org, 'Archive', 'Duplicates', '2026-11-18', 'old copy.txt'), 'TAX INVOICE\nInvoice Number INV-9\nTotal $1.00');
+  put(path.join(docs, 'Riyser', 'Payroll', 'Payslips', 'Payslips paid.pdf'), '%PDF-1.4 payslip');
+  put(path.join(docs, 'Riyser', 'Payroll', 'backup.json'), '{}');
+  put(path.join(docs, 'quote westin.txt'), 'QUOTATION\nWestin\nQuote number Q-5\nTotal $5,000.00');
+  const r = await reviewFiles([docs], { ...settings, filingLayout: 'typeYear', nameStyle: 'keep', organisedRoot: org }, { refileAll: true });
+  const to = (n) => { const p = r.plan.find((x) => x.name === n); return p && path.relative(org, p.to); };
+  assert.equal(to('inv1.txt'), path.join('Invoices', '2025', 'inv1.txt'));       // old Clients/Acme layout -> Type/Year, name kept
+  assert.equal(to('quote westin.txt'), path.join('Quotes', '2025', 'quote westin.txt'));
+  assert.equal(to('old copy.txt'), undefined);                                     // Archive left alone
+  assert.ok(!r.plan.some((x) => x.from.includes(`${path.sep}Riyser${path.sep}`)));  // Payroll's own folder left alone
+  assert.ok(r.kept.some((k) => /Riyser$/.test(k.path)));
+});
+
+test('Find a file: filters by type, year and kind, and finds old names', () => {
+  const { Index } = require('../src/core/indexer');
+  const store = { get: (k, d) => d, set: () => {} };
+  const idx = new Index(store);
+  const root = path.join(os.tmpdir(), 'Organised');
+  const now = Date.now();
+  idx.docs = {
+    [path.join(root, 'Invoices', '2026', 'inv7.pdf')]: { name: 'inv7.pdf', dir: path.join(root, 'Invoices', '2026'), ext: '.pdf', mtime: now, size: 1, text: 'Westin hotel invoice', docType: 'Invoices' },
+    [path.join(root, 'Drawings', '2025', 'E-301.pdf')]: { name: 'E-301.pdf', dir: path.join(root, 'Drawings', '2025'), ext: '.pdf', mtime: now, size: 1, text: 'Westin data schematic', docType: 'Plans & Drawings', formerNames: ['Westin Data schematic.pdf'] },
+    [path.join(root, 'Payroll', '2026', 'wages.xlsx')]: { name: 'wages.xlsx', dir: path.join(root, 'Payroll', '2026'), ext: '.xlsx', mtime: now, size: 1, text: 'hours', docType: 'Payroll' },
+  };
+  const all = idx.find({ q: 'westin' }, { organisedRoot: root });
+  assert.equal(all.total, 2);
+  assert.deepEqual(all.facets.type, { Invoices: 1, Drawings: 1 });
+  assert.equal(idx.find({ q: 'westin', type: 'Drawings' }, { organisedRoot: root }).results[0].name, 'E-301.pdf');
+  assert.equal(idx.find({ year: '2026', kind: 'Excel' }, { organisedRoot: root }).results[0].name, 'wages.xlsx');
+  assert.equal(idx.find({ q: 'schematic' }, { organisedRoot: root }).total, 1); // old name / contents
+});

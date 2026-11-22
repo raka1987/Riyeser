@@ -18,6 +18,8 @@ let combine = [];     // PDFs chosen for combining
 let everythingDone = null; // last "tidy everything" batch
 let review = { tab: 'labels', pool: null, hasAiKey: false, useAI: false, done: null, dupeDone: null, only: 'all' };
 let docTypes = [];
+let sorter = { pool: null, tab: 'files', done: null, hasAiKey: false, useAI: false };
+let finder = { q: '', type: null, year: null, kind: null };
 let restoreFilter = '';
 let restoreDone = null;
 let dupeChoice = new Map(); // duplicate file path -> 'keep' | 'archive' | 'bin'
@@ -294,6 +296,21 @@ function movedNote(now) {
   setTimeout(() => render(), 300);
 }
 
+// ---------------- duplicate sets (Smart review and Sort by type) ----------------
+const dupeChoiceOf = (f) => dupeChoice.get(f.path) || f.recommend;
+const dupeChangeCount = (dupes) => dupes.reduce((n, g) => n + g.files.filter((f) => dupeChoiceOf(f) !== 'keep').length, 0);
+function dupeCardsHtml(dupes) {
+  const choice = dupeChoiceOf;
+  return dupes.map((g, gi) => `<div class="card dupegroup">
+      <div class="row"><b>${g.kind === 'exact' ? `Exact copies (${g.files.length})` : `Same document, different ${g.differentFormats ? 'format' : 'name or version'} — ${g.similarity >= 99 ? 'almost word-for-word the same' : `${g.similarity}% match`}`}</b><span class="spacer"></span>
+        <button class="link small" data-act="dupeall" data-g="${gi}" data-v="keep">Keep all</button><button class="link small" data-act="dupeall" data-g="${gi}" data-v="rec">Use my suggestion</button></div>
+      <ul class="list">${g.files.map((f) => `<li class="dupefile"><div class="grow"><b class="fname">${esc(f.name)}</b>
+          <div class="small muted">${fmtSize(f.size)} · changed ${esc(new Date(f.mtime).toLocaleDateString())} · ${f.recommend === 'keep' ? '<span style="color:var(--good)">suggest keep</span>' : 'suggest archive'}: ${esc(f.why)}</div>
+          <div class="route small" title="${esc(f.path)}">${route(f.path.split(/[\\/]/).slice(0, -1).join(f.path.includes('\\') ? '\\' : '/'))}</div></div>
+        <div class="seg3" role="radiogroup">${[['keep', 'Keep'], ['archive', 'Archive'], ['bin', 'Recycle Bin']].map(([v, l]) => `<label class="${choice(f) === v ? 'on' : ''}"><input type="radio" name="d${gi}-${esc(f.path)}" data-dupe="${esc(f.path)}" value="${v}" ${choice(f) === v ? 'checked' : ''}>${l}</label>`).join('')}</div>
+        <button class="link" data-act="open" data-path="${esc(f.path)}">Open</button></li>`).join('')}</ul></div>`).join('');
+}
+
 // ---------------- pages ----------------
 const pages = {
   async today() {
@@ -469,6 +486,7 @@ const pages = {
       <div class="card"><div class="row wrap"><div class="grow"><h2 style="margin:0">Put everything back</h2>
           <p class="muted small" style="margin:4px 0 0">Moves <b>${away}</b> file(s) back to the folder they were in, with their original names, from before Desk Assistant touched them. If something new has taken a name, both are kept. Nothing is deleted.</p></div>
         <button class="primary" data-act="restoreall" ${away ? '' : 'disabled'}>Put everything back</button>
+        <button data-act="namesback" ${r.files.length ? '' : 'disabled'} title="Original names back, files stay in their current folders">Only change names back</button>
         <button data-act="restorereport" ${r.files.length ? '' : 'disabled'}>Save list as spreadsheet</button></div>
         ${r.untraceable.length ? `<details class="small" style="margin-top:10px"><summary><b>${r.untraceable.length} file(s) I moved but can't trace back</b> <span class="muted">— their old location is no longer recorded, so they'll stay where they are</span></summary>
           <ul class="list">${r.untraceable.slice(0, 300).map((p) => `<li><div class="grow"><b class="fname">${esc(p.split(/[\\/]/).pop())}</b><div class="route small">${route(dirOf(p))}</div></div><button class="link" data-act="reveal" data-path="${esc(p)}">Show</button></li>`).join('')}</ul></details>` : ''}
@@ -514,16 +532,8 @@ const pages = {
         <div class="small muted" style="margin-top:3px">${esc((p.reasons || []).slice(0, 2).join(' · '))}</div>
         ${p.preview ? `<details class="small"><summary class="muted">What I read</summary><div class="readbox">${esc(p.preview)}…</div></details>` : ''}</td>
       <td><button class="link" data-act="open" data-path="${esc(p.from)}">Open</button></td></tr>`).join('');
-    const choice = (f) => dupeChoice.get(f.path) || f.recommend;
-    const dupeCards = dupes.map((g, gi) => `<div class="card dupegroup">
-      <div class="row"><b>${g.kind === 'exact' ? `Exact copies (${g.files.length})` : `Same document, different ${g.differentFormats ? 'format' : 'name or version'} — ${g.similarity >= 99 ? 'almost word-for-word the same' : `${g.similarity}% match`}`}</b><span class="spacer"></span>
-        <button class="link small" data-act="dupeall" data-g="${gi}" data-v="keep">Keep all</button><button class="link small" data-act="dupeall" data-g="${gi}" data-v="rec">Use my suggestion</button></div>
-      <ul class="list">${g.files.map((f) => `<li class="dupefile"><div class="grow"><b class="fname">${esc(f.name)}</b>
-          <div class="small muted">${fmtSize(f.size)} · changed ${esc(new Date(f.mtime).toLocaleDateString())} · ${f.recommend === 'keep' ? '<span style="color:var(--good)">suggest keep</span>' : 'suggest archive'}: ${esc(f.why)}</div>
-          <div class="route small" title="${esc(f.path)}">${route(f.path.split(/[\\/]/).slice(0, -1).join(f.path.includes('\\') ? '\\' : '/'))}</div></div>
-        <div class="seg3" role="radiogroup">${[['keep', 'Keep'], ['archive', 'Archive'], ['bin', 'Recycle Bin']].map(([v, l]) => `<label class="${choice(f) === v ? 'on' : ''}"><input type="radio" name="d${gi}-${esc(f.path)}" data-dupe="${esc(f.path)}" value="${v}" ${choice(f) === v ? 'checked' : ''}>${l}</label>`).join('')}</div>
-        <button class="link" data-act="open" data-path="${esc(f.path)}">Open</button></li>`).join('')}</ul></div>`).join('');
-    const nChange = dupes.reduce((n, g) => n + g.files.filter((f) => choice(f) !== 'keep').length, 0);
+    const dupeCards = dupeCardsHtml(dupes);
+    const nChange = dupeChangeCount(dupes);
     page.innerHTML = `<h1>Smart review</h1>
       <p class="sub">I read every file in the folders below and suggest <b>what it is</b> (type, company, date), <b>a clear name that starts with its date</b> — e.g. <b>2026-11-03 Acme Plumbing Invoice INV-1042.pdf</b> — and <b>where it belongs</b>. I also find <b>duplicates</b>, even when they have different names or one is a Word file and the other a PDF, and ask what you'd like to do. Nothing changes until you approve it.</p>
       <div class="card"><h2>Folders to review</h2>
@@ -616,19 +626,87 @@ async function renderFolderMain(main) {
 
 Object.assign(pages, {
 
+  // Find a file: one box (name, words inside, old names) + filters for type, year and kind of file.
   async search() {
-    page.innerHTML = `<h1>Search</h1><p class="sub">Searches file names, folder names, companies and the text inside PDFs, Word docs, emails and text files. Tip: press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> from anywhere.</p>
-      <input id="sq" style="width:100%;font-size:17px;padding:11px 14px" placeholder="e.g. acme invoice october" autofocus>
-      <div id="sres" class="card" style="margin-top:14px"><div class="empty">Start typing…</div></div>`;
+    const st0 = await bridge.call('index:status').catch(() => ({ size: 0 }));
+    page.innerHTML = `<h1>Find a file</h1>
+      <p class="sub">Type any part of a file's name, words inside it, a company, or a name it used to have. Narrow it down by type, year or kind of file. Searching ${st0.size.toLocaleString()} files${st0.busy ? ' (still reading new ones…)' : ''}. Tip: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Space</kbd> searches from anywhere.</p>
+      <input id="sq" class="bigsearch" placeholder="e.g. westin drawing, payslip march, acme invoice" value="${esc(finder.q)}" autocomplete="off">
+      <div id="sfilters" class="sfilters"></div>
+      <div id="sres" class="card" style="margin-top:12px"></div>
+      <div class="row small muted" style="margin-top:8px"><span class="grow">Can't find something you just saved? </span><button class="link small" data-act="reindex">Re-scan my folders</button></div>`;
+    const run = async () => {
+      const r = await bridge.call('search:find', { q: finder.q, type: finder.type, year: finder.year, kind: finder.kind, limit: 200 });
+      const chipRow = (label, key, counts, order) => {
+        const entries = Object.entries(counts).sort(order);
+        if (!entries.length) return '';
+        return `<div class="frow"><span class="flabel">${label}</span>${finder[key] ? `<button class="fchip on" data-act="ffilter" data-k="${key}" data-v="">${esc(finder[key])} ✕</button>` : entries.slice(0, 24).map(([v, n]) => `<button class="fchip" data-act="ffilter" data-k="${key}" data-v="${esc(v)}">${esc(v)} <span class="muted">${n}</span></button>`).join('')}</div>`;
+      };
+      $('#sfilters').innerHTML = chipRow('Type', 'type', r.facets.type, (a, b) => b[1] - a[1])
+        + chipRow('Year', 'year', r.facets.year, (a, b) => b[0].localeCompare(a[0]))
+        + chipRow('Kind', 'kind', r.facets.kind, (a, b) => b[1] - a[1]);
+      const any = finder.q.trim() || finder.type || finder.year || finder.kind;
+      const head = `<div class="row small muted" style="margin-bottom:6px"><span class="grow">${any ? `${r.total.toLocaleString()} match${r.total === 1 ? '' : 'es'}${r.total > r.results.length ? ` — showing the best ${r.results.length}` : ''}` : 'Newest files'}</span>${any ? '<button class="link small" data-act="fclear">Clear search</button>' : ''}</div>`;
+      $('#sres').innerHTML = head + (r.results.length ? `<ul class="list">${r.results.map((x) => `<li><div class="grow" data-dbl="${esc(x.path)}" title="Double-click to open">
+          <b class="fname">${esc(x.name)}</b>${x.formerNames.length ? `<div class="small muted">used to be called ${esc(x.formerNames[x.formerNames.length - 1])}</div>` : ''}
+          <div style="margin:3px 0"><span class="pill">${esc(x.type)}</span> <span class="pill">${esc(x.year)}</span> <span class="pill">${esc(x.kind)}</span>${x.company ? ` <span class="pill">${esc(x.company)}</span>` : ''} <span class="small muted">${fmtSize(x.size)}</span></div>
+          <div class="route small">${route(x.dir)}</div>${x.snippet ? `<div class="small muted">…${esc(x.snippet)}…</div>` : ''}</div>
+          <button class="link" data-act="open" data-path="${esc(x.path)}">Open</button>${/\.pdf$/i.test(x.name) ? `<button class="link" data-act="pdfedit" data-path="${esc(x.path)}">Edit PDF</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(x.path)}">Show in folder</button></li>`).join('')}</ul>` : `<div class="empty">No matches.${finder.type || finder.year || finder.kind ? ' Try removing a filter.' : ''} If you moved or renamed it, try its old name, or check <a href="#restore">Where are my files?</a></div>`);
+    };
+    pages._findRun = run;
     let timer;
-    $('#sq').addEventListener('input', (e) => { clearTimeout(timer); timer = setTimeout(async () => {
-      const res = await bridge.call('search', e.target.value);
-      $('#sres').innerHTML = !e.target.value.trim() ? '<div class="empty">Start typing…</div>' : res.length ? `<ul class="list">${res.map((r) => `<li><div class="grow">
-        <div class="row"><b>${esc(r.name)}</b>${r.company ? `<span class="pill">${esc(r.company)}</span>` : ''}${r.docType ? `<span class="pill good">${esc(r.docType)}</span>` : ''}<span class="small muted">${fmtDay(r.mtime)} · ${fmtSize(r.size)}</span></div>
-        <div class="path">${esc(short(r.dir))}</div>${r.snippet ? `<div class="small muted">…${esc(r.snippet)}…</div>` : ''}</div>
-        <button class="link" data-act="open" data-path="${esc(r.path)}">Open</button>${/\.pdf$/i.test(r.name) ? `<button class="link" data-act="pdfedit" data-path="${esc(r.path)}">Edit PDF</button>` : ''}<button class="link" data-act="reveal" data-path="${esc(r.path)}">Show in folder</button></li>`).join('')}</ul>` : '<div class="empty">No matches.</div>';
-    }, 150); });
-    $('#sq').focus();
+    $('#sq').addEventListener('input', (e) => { finder.q = e.target.value; clearTimeout(timer); timer = setTimeout(() => safe(run), 150); });
+    await run();
+    const q = $('#sq'); q.focus(); q.setSelectionRange(q.value.length, q.value.length);
+  },
+
+  // Sort by type: every file into Organised › Type › Year (e.g. Invoices › 2026), with a preview first. Finds copies too.
+  async sortall() {
+    const last = await bridge.call('organise:last');
+    plan = last && last.mode === 'sortall' ? last : null;
+    if (!sorter.pool) { sorter.pool = await bridge.call('sortall:pool'); const r = await bridge.call('review:pool'); sorter.hasAiKey = r.hasAiKey; }
+    const nm = (f) => f.split(/[\\/]/).filter(Boolean).pop() || f;
+    const layoutOk = (settings.filingLayout || 'typeYear') === 'typeYear';
+    const names = settings.nameStyle || 'full';
+    const groups = {};
+    for (const p of plan?.plan || []) {
+      const segs = p.dir.startsWith(settings.organisedRoot) ? p.dir.slice(settings.organisedRoot.length).split(/[\\/]/).filter(Boolean) : [p.dir];
+      const key = segs.slice(0, -1).join(' › ') || segs.join(' › ');
+      (groups[key] = groups[key] || []).push(p);
+    }
+    const order = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+    const dupes = plan?.dupes || [];
+    const nChange = dupeChangeCount(dupes);
+    page.innerHTML = `<h1>Sort by type</h1>
+      <p class="sub">Puts every file into <b>Organised › Type › Year</b> — e.g. <b>Invoices › 2026</b>, <b>Drawings › 2026</b>, <b>Payroll › 2026</b>, <b>Pictures › 2024</b> — including files already in Organised from earlier layouts. Program folders (Payroll's own Riyser folder, Outlook, accounting files…) are left alone. You see everything before it moves, and it can all be undone in <a href="#restore">Where are my files?</a></p>
+      <div class="card"><h2>Folders to sort</h2>
+        <div class="chips">${(sorter.pool || []).map((f, i) => `<span class="chip" title="${esc(f)}">📁 ${esc(nm(f))}<button data-act="sadel" data-i="${i}" title="Remove">×</button></span>`).join('') || '<span class="muted small">None — add a folder</span>'}</div>
+        <button style="margin-top:8px" data-act="saadd">+ Add folder</button>
+        <div class="row small wrap" style="margin-top:12px"><b>File names</b>
+          <select id="sanames"><option value="keep" ${names === 'keep' ? 'selected' : ''}>Keep the names as they are</option><option value="date" ${names === 'date' ? 'selected' : ''}>Add the date in front</option><option value="full" ${names === 'full' ? 'selected' : ''}>Full tidy name (date, company, type)</option></select>
+          <button class="link small" data-act="namesback">Change names back to the originals…</button></div>
+        <label class="row small" style="margin-top:8px"><input type="checkbox" id="saai" ${sorter.useAI ? 'checked' : ''} ${sorter.hasAiKey ? '' : 'disabled'}>
+          <span><b>✨ Use AI to read each file</b> — better types and dates, and checks for copies. ${sorter.hasAiKey ? 'Sends the start of each document’s text to Claude (small cost per file).' : 'Needs an AI key in <a href="#settings">Settings → AI</a>; without it the built-in rules are used (offline). Copies are found either way.'}</span></label></div>
+      <div class="row" style="margin:6px 0 16px"><button class="primary" data-act="sascan" ${scanning || !(sorter.pool || []).length ? 'disabled' : ''}>${scanning ? 'Reading your files…' : plan ? 'Look again' : 'Show me the plan'}</button>
+        ${scanning ? '<button data-act="evcancel">Stop</button>' : ''}<span id="scan-status" class="muted small"></span></div>
+      ${sorter.done ? `<div class="card" style="border-color:var(--good)"><b>Sorted ${sorter.done.moves.length} file(s)${sorter.done.errors.length ? `, ${sorter.done.errors.length} couldn't be moved` : ''}.</b> <button class="link" data-act="saundo" data-id="${esc(sorter.done.id)}">Undo</button> · <a href="#search">Find a file →</a></div>` : ''}
+      ${review.dupeDone && plan ? `<div class="card" style="border-color:var(--good)"><b>Copies: ${review.dupeDone.archived} archived${review.dupeDone.binned ? `, ${review.dupeDone.binned} to the Recycle Bin` : ''}.</b> ${review.dupeDone.batchId ? `<button class="link" data-act="rvundo" data-id="${esc(review.dupeDone.batchId)}">Undo archive</button>` : ''}</div>` : ''}
+      ${!plan ? '' : `
+      <p class="muted small">Read ${plan.scanned} file(s) · ${plan.fine} already in the right place${(plan.kept || []).length ? ` · ${plan.kept.length} program folder(s)/file(s) left alone` : ''}${(plan.skipped || []).length ? ` · ${plan.skipped.length} skipped (online-only or unreadable)` : ''}.</p>
+      <div class="tabs"><button class="${sorter.tab === 'files' ? 'active' : ''}" data-act="satab" data-t="files">Files to sort (${plan.plan.length})</button><button class="${sorter.tab === 'dupes' ? 'active' : ''}" data-act="satab" data-t="dupes">Copies of the same file (${dupes.length} set${dupes.length === 1 ? '' : 's'})</button></div>
+      ${sorter.tab === 'files' ? `<div class="card"><div class="row wrap"><h2 style="margin:0" class="grow">Where everything will go</h2>
+          <button class="link" data-act="selall">Select all</button><button class="link" data-act="selnone">Clear</button>
+          <button class="primary" data-act="apply" ${selected.size ? '' : 'disabled'}>Move ${selected.size} selected</button></div>
+        ${order.length ? order.map((g) => `<details class="evgroup"><summary><b>${esc(g)}</b> <span class="muted">— ${groups[g].length} file(s)</span></summary>
+          <ul class="list">${groups[g].slice(0, 400).map((p) => `<li><input type="checkbox" data-sel="${esc(p.from)}" ${selected.has(p.from) ? 'checked' : ''}><div class="grow"><b class="fname">${esc(p.name)}</b>${p.newName ? `<div class="small">→ ${esc(p.newName)}</div>` : ''}
+            <div class="route small"><span class="muted">from</span> ${route(p.from.split(/[\\/]/).slice(0, -1).join(p.from.includes('\\') ? '\\' : '/'))}</div></div>
+            <select class="typesel" data-settype="${esc(p.from)}" title="Wrong type? Pick the right one">${docTypes.map((t) => `<option ${t === p.docType ? 'selected' : ''}>${esc(t)}</option>`).join('')}<option value="Other" ${!p.docType || p.docType === 'Other' ? 'selected' : ''}>Not sure (file by kind)</option></select>
+            <button class="link" data-act="open" data-path="${esc(p.from)}">Open</button></li>`).join('')}</ul>${groups[g].length > 400 ? `<p class="muted small">…and ${groups[g].length - 400} more (included).</p>` : ''}</details>`).join('') : '<div class="empty">Everything is already sorted by type. 🎉</div>'}</div>`
+      : `${dupes.length ? `<div class="card"><div class="row wrap"><div class="grow small muted">Copies of the same file, even with different names or as Word + PDF. <b>Archive</b> moves a copy to Organised › Archive › Duplicates (not deleted, can be undone). I've picked a suggestion for each set.</div>
+          <button class="primary" data-act="dupeapply" ${nChange ? '' : 'disabled'}>Apply ${nChange} change${nChange === 1 ? '' : 's'}</button></div></div>${dupeCardsHtml(dupes)}` : '<div class="card"><div class="empty">No copies found. 🎉</div></div>'}`}`}`;
+    if (!docTypes.length) docTypes = await bridge.call('review:types').catch(() => []);
+    $('#sanames')?.addEventListener('change', async (e) => { await saveSettings({ nameStyle: e.target.value, renameFiles: e.target.value !== 'keep' }); toast('Saved — press “Look again” to update the plan'); });
+    $('#saai')?.addEventListener('change', (e) => { sorter.useAI = e.target.checked; });
   },
 
   async meetings(force) {
@@ -902,6 +980,29 @@ const actions = {
     plan = null; render();
   },
   restorereport: async () => { const f = await bridge.call('restore:report'); toast(`Saved ${f.split(/[\\/]/).pop()}`); },
+  ffilter: (el) => { finder[el.dataset.k] = el.dataset.v || null; safe(pages._findRun); },
+  fclear: () => { finder = { q: '', type: null, year: null, kind: null }; render(); },
+  saadd: async () => { const f = await bridge.call('dialog:folder'); if (f && !sorter.pool.includes(f)) { sorter.pool = await bridge.call('sortall:setPool', [...sorter.pool, f]); render(); } },
+  sadel: async (el) => { sorter.pool = await bridge.call('sortall:setPool', sorter.pool.filter((_, i) => i !== +el.dataset.i)); render(); },
+  satab: (el) => { sorter.tab = el.dataset.t; render(); },
+  sascan: async () => {
+    scanning = true; sorter.done = null; review.dupeDone = null; dupeChoice = new Map(); render();
+    try {
+      const p = await bridge.call('sortall:scan', { folders: sorter.pool, useAI: sorter.useAI });
+      selected = new Set(p.plan.map((x) => x.from));
+      toast(`Read ${p.scanned} file(s): ${p.plan.length} to sort, ${p.dupes.length} set(s) of copies.`);
+    } finally { scanning = false; render(); }
+  },
+  saundo: async (el) => { const r = await bridge.call('organise:undo', el.dataset.id); toast(r.errors.length ? `Undone, but ${r.errors.length} file(s) couldn't be moved back` : 'Undone — files are back where they were'); sorter.done = null; render(); },
+  namesback: async () => {
+    const r = await bridge.call('restore:names', true);
+    if (!r.items.length) { toast('No renamed files on record — names are already the originals.'); return; }
+    const list = r.items.slice(0, 12).map((i) => `“${i.current}” → “${i.original}”`).join('\n');
+    if (!(await bridge.call('confirm', `Change ${r.items.length} file name(s) back to the originals?`, `Files stay in the folder they're in now. For example:\n${list}${r.items.length > 12 ? `\n…and ${r.items.length - 12} more` : ''}\n\nYou can undo this on “Where are my files?”.`))) return;
+    const done = await bridge.call('restore:names', false);
+    toast(`Changed ${done.renamed} name(s) back${done.errors.length ? `, ${done.errors.length} couldn't be` : ''}.`);
+    render();
+  },
   rvtab: (el) => { review.tab = el.dataset.t; render(); },
   rvadd: async () => { const f = await bridge.call('dialog:folder'); if (f && !review.pool.includes(f)) { review.pool = await bridge.call('review:setPool', [...review.pool, f]); render(); } },
   rvdel: async (el) => { review.pool = await bridge.call('review:setPool', review.pool.filter((_, i) => i !== +el.dataset.i)); render(); },
@@ -976,6 +1077,7 @@ const actions = {
     selected = new Set();
     if (plan.mode === 'everything') { everythingDone = batch; plan = null; render(); return; }
     if (plan.mode === 'review') { review.done = batch; render(); return; }
+    if (plan.mode === 'sortall') { sorter.done = batch; render(); return; }
     await bridge.call(plan.mode === 'recheck' ? 'organise:recheck' : 'organise:scan');
     render();
   },

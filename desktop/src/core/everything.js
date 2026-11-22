@@ -10,7 +10,7 @@ const { linkRelated } = require('./related');
 const { isSystemPath, isTooBroad, isProtectedFile } = require('./safety');
 
 // Folders created by programs - moving them breaks the program.
-const APP_FOLDER = /^(my games|outlook files|onenote notebooks|custom office templates|my shapes|my data sources|my received files|visual studio( \d+| code)?|windowspowershell|powershell|sql server management studio.*|rainmeter|paradox interactive|electronic arts|ea games|rockstar games|ubisoft.*|epic games|steam|battle\.net|blizzard.*|bioware|square enix|cd projekt red|avalanche studios|my cheat tables|zoom|adobe|autodesk|arduino|processing|unity|unreal projects|fiddler2|iisexpress|my web sites|python scripts|matlab|wechat files|tencent files|kakaotalk|garmin|quickbooks.*|myob.*|xero.*|sage.*|intuit|turbotax|h&r block|lightroom|capture one|itunes|music library|apple|ipod|amazon music|spotify|obs-studio|kindle|calibre library|keepass.*|bitwarden|1password|virtual machines|vmware|virtualbox vms|docker|wsl|android|xcode)$/i;
+const APP_FOLDER = /^(\.?riyeser.*|\.?riyser.*|desk assistant|desk pdf|my games|outlook files|onenote notebooks|custom office templates|my shapes|my data sources|my received files|visual studio( \d+| code)?|windowspowershell|powershell|sql server management studio.*|rainmeter|paradox interactive|electronic arts|ea games|rockstar games|ubisoft.*|epic games|steam|battle\.net|blizzard.*|bioware|square enix|cd projekt red|avalanche studios|my cheat tables|zoom|adobe|autodesk|arduino|processing|unity|unreal projects|fiddler2|iisexpress|my web sites|python scripts|matlab|wechat files|tencent files|kakaotalk|garmin|quickbooks.*|myob.*|xero.*|sage.*|intuit|turbotax|h&r block|lightroom|capture one|itunes|music library|apple|ipod|amazon music|spotify|obs-studio|kindle|calibre library|keepass.*|bitwarden|1password|virtual machines|vmware|virtualbox vms|docker|wsl|android|xcode)$/i;
 // Files that hold a program's data (email archives, accounting company files, catalogues, databases, virtual disks...)
 const APP_DATA_EXT = new Set(['.pst', '.ost', '.nst', '.qbw', '.qbb', '.qbm', '.tlg', '.nd', '.myo', '.box', '.mdb', '.accdb', '.sqlite', '.sqlite3', '.db', '.db3',
   '.lrcat', '.lrdata', '.cocatalog', '.itl', '.musiclibrary', '.photoslibrary', '.one', '.onetoc2', '.onepkg', '.vhd', '.vhdx', '.vmdk', '.vdi', '.qcow2',
@@ -218,4 +218,24 @@ function removeEmptiedFolders(batch, libraries) {
   }
 }
 
-module.exports = { planEverything, removeEmptiedFolders, appFolderReason, isGeneric, takenDate };
+/**
+ * Every personal file in these folders, safely: program folders, program data files, Archive and never-touch folders
+ * are left out (with the reason in `kept`). Used by "Sort by type", which re-files Organised too.
+ */
+function collectPersonalFiles(folders, settings) {
+  const never = (settings.neverTouch || []).map((p) => path.resolve(p).toLowerCase());
+  const archive = settings.organisedRoot ? path.resolve(settings.organisedRoot, 'Archive').toLowerCase() : null;
+  const ctx = {
+    kept: [], count: 0,
+    isOrganised: (p) => !!archive && (path.resolve(p).toLowerCase() === archive || path.resolve(p).toLowerCase().startsWith(archive + path.sep)),
+    neverTouch: (p) => { const r = path.resolve(p).toLowerCase(); return never.some((n) => r === n || r.startsWith(n + path.sep)); },
+  };
+  const files = new Set();
+  for (const f of folders) {
+    if (!f || !fs.existsSync(f) || isSystemPath(f) || isTooBroad(f) || ctx.neverTouch(f) || appFolderReason(f)) continue;
+    for (const file of allFiles(survey(f, ctx))) files.add(file);
+  }
+  return { files: [...files], kept: ctx.kept };
+}
+
+module.exports = { planEverything, removeEmptiedFolders, appFolderReason, isGeneric, takenDate, collectPersonalFiles };

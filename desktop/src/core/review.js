@@ -19,16 +19,23 @@ const withLimit = (promise, ms) => new Promise((resolve, reject) => {
 const tick = () => new Promise((r) => setImmediate(r));
 const inside = (p, root) => !!root && (p === root || p.startsWith(root + path.sep));
 
-async function reviewFiles(folders, settings, { ai = null, onProgress = () => {}, isCancelled = () => false, maxFiles = 5000, perFileMs = PER_FILE_MS, log = () => {}, cloudOnly = new Set() } = {}) {
+async function reviewFiles(folders, settings, { ai = null, onProgress = () => {}, isCancelled = () => false, maxFiles = 5000, perFileMs = PER_FILE_MS, log = () => {}, cloudOnly = new Set(), refileAll = false } = {}) {
   const t0 = Date.now();
   const root = settings.organisedRoot;
   const placed = new Set(settings._placedByApp || []);
-  const seen = new Set();
-  for (const f of folders) {
-    if (!f || !fs.existsSync(f) || isSystemPath(f) || isTooBroad(f)) continue;
-    for (const file of listFiles(f, { recursive: true, maxDepth: 8, maxFiles })) if (!inArchive(file, settings.organisedRoot)) seen.add(file); // archived files are left alone
+  let files; let kept = [];
+  if (refileAll) {
+    // "Sort by type": every personal file, including what's already in Organised; program folders are left alone.
+    ({ files, kept } = require('./everything').collectPersonalFiles(folders, settings));
+    files = files.slice(0, maxFiles);
+  } else {
+    const seen = new Set();
+    for (const f of folders) {
+      if (!f || !fs.existsSync(f) || isSystemPath(f) || isTooBroad(f)) continue;
+      for (const file of listFiles(f, { recursive: true, maxDepth: 8, maxFiles })) if (!inArchive(file, settings.organisedRoot)) seen.add(file); // archived files are left alone
+    }
+    files = [...seen];
   }
-  const files = [...seen];
   // With AI switched on, every document gets a second opinion (not only the unsure ones).
   const s = { ...settings, groupByYear: true, aiCheckAll: !!ai || settings.aiCheckAll };
   const items = []; const skipped = [];
@@ -56,7 +63,7 @@ async function reviewFiles(folders, settings, { ai = null, onProgress = () => {}
     item.details = { ...item.details, drawing: drawingNumber(item._text, item.name) };
     const { dir } = placeItem(item, s);
     // A file you filed yourself inside Organised stays in its folder - only its name is reviewed.
-    const keepFolder = inside(item.from, root) && !placed.has(item.from);
+    const keepFolder = !refileAll && inside(item.from, root) && !placed.has(item.from);
     const destDir = keepFolder || !dir ? path.dirname(item.from) : dir;
     const suggested = item.newName;
     const newName = suggested || item.name;
@@ -74,7 +81,7 @@ async function reviewFiles(folders, settings, { ai = null, onProgress = () => {}
       renamed: !!suggested, moved: path.resolve(destDir) !== path.resolve(path.dirname(item.from)), keptFolder: keepFolder,
     });
   }
-  return { mode: 'review', plan, review: [], dupes, skipped, scanned: items.length, fine, stopped: isCancelled() };
+  return { mode: refileAll ? 'sortall' : 'review', plan, review: [], dupes, skipped, kept, scanned: items.length, fine, stopped: isCancelled() };
 }
 
 module.exports = { reviewFiles };

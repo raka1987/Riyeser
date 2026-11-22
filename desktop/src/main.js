@@ -55,10 +55,10 @@ function defaults() {
     libraryFolders: [desktop, downloads, documents, knownFolder('pictures'), knownFolder('videos'), knownFolder('music')].filter((f, i, a) => fs.existsSync(f) && a.indexOf(f) === i),
     neverTouch: [],
     recursiveScan: false,
-    renameFiles: true,
+    renameFiles: false,
     groupByYear: false,
     filingLayout: 'typeYear', // 'typeYear': Invoices\2026 · 'company': Clients\Acme\Invoices
-    nameStyle: 'full',        // 'keep' | 'date' | 'full'
+    nameStyle: 'keep',        // 'keep' | 'date' | 'full'
     dayFirstDates: true,
     staleDays: 90,
     groupRelated: true,
@@ -673,7 +673,7 @@ function registerIpc() {
   handle('review:types', () => require('./core/classifier').DOC_TYPES.map((d) => d.type));
   // Correct the type of one file in the review list: its name and folder are worked out again.
   handle('review:setType', (from, docType) => {
-    const item = state.lastPlan?.mode === 'review' && state.lastPlan.plan.find((p) => p.from === from);
+    const item = ['review', 'sortall'].includes(state.lastPlan?.mode) && state.lastPlan.plan.find((p) => p.from === from);
     if (!item) throw new Error('That file is no longer in the list.');
     const { DOC_TYPES } = require('./core/classifier');
     if (!DOC_TYPES.some((d) => d.type === docType) && docType !== 'Other') throw new Error('Unknown type');
@@ -692,6 +692,35 @@ function registerIpc() {
     item.label = { ...item.label, type: docType === 'Other' ? null : docType };
     item.warning = null;
     return item;
+  });
+  // ----- Sort by type: everything into Organised › Type › Year (the one layout), with a preview first -----
+  handle('sortall:pool', () => {
+    const s = getSettings();
+    const saved = store.get('sortallPool', null);
+    const pool = (saved || [...s.watchFolders, s.organisedRoot]).filter((f) => f && fs.existsSync(f) && !safety.folderProblem(f));
+    return [...new Set(pool)];
+  });
+  handle('sortall:setPool', (folders) => {
+    const ok = [...new Set((folders || []).filter((f) => typeof f === 'string' && fs.existsSync(f)))];
+    for (const f of ok) { const why = safety.folderProblem(f); if (why) throw new Error(`${f}: ${why}`); }
+    store.set('sortallPool', ok); return ok;
+  });
+  handle('sortall:scan', async ({ folders, useAI } = {}) => {
+    state.cancel = false;
+    const s = { ...planSettings(), filingLayout: 'typeYear' };
+    const pool = (folders || []).filter((f) => !safety.folderProblem(f));
+    if (!pool.length) throw new Error('Choose at least one folder.');
+    send('scan-progress', { i: 0, n: 0, file: 'checking which files are only in OneDrive online…' });
+    const cloudOnly = await cloudOnlyFiles(pool);
+    const logFile = path.join(app.getPath('userData'), 'smart-review.log');
+    const log = (m) => { try { fs.appendFileSync(logFile, `${new Date().toISOString()} [sort by type] ${m}\n`); } catch { /* ignore */ } };
+    const brain = useAI ? ai() : null;
+    if (useAI && !brain) throw new Error('Add your AI key in Settings → AI first, or turn off "Use AI".');
+    state.lastPlan = await reviewFiles(pool, s, { ai: brain, refileAll: true, cloudOnly, log, onProgress: (i, n, file) => send('scan-progress', { i, n, file: path.basename(file) }), isCancelled: () => state.cancel });
+    // Sorting by type is the chosen layout from now on, for every page.
+    if (getSettings().filingLayout !== 'typeYear') setSettings({ ...getSettings(), filingLayout: 'typeYear' });
+    send('plan-changed');
+    return state.lastPlan;
   });
   // Decide what happens to duplicates: keep, archive (moved to Organised\Archive\Duplicates\<date>, can be undone) or Recycle Bin.
   handle('dupes:resolve', async (actions) => {
@@ -717,7 +746,7 @@ function registerIpc() {
     if (binned.length) store.update('cleanupLog', [], (l) => [{ at: new Date().toISOString(), binned }, ...l].slice(0, 50));
     // Files that were archived or binned drop out of the rename list.
     const gone = new Set([...binned, ...(batch ? batch.moves.map((m) => m.from) : [])]);
-    if (state.lastPlan?.mode === 'review') {
+    if (state.lastPlan?.mode === 'review' || state.lastPlan?.mode === 'sortall') {
       state.lastPlan.plan = state.lastPlan.plan.filter((p) => !gone.has(p.from));
       state.lastPlan.dupes = (state.lastPlan.dupes || []).map((g) => ({ ...g, files: g.files.filter((f) => !gone.has(f.path)) })).filter((g) => g.files.length > 1);
     }
@@ -788,7 +817,8 @@ function registerIpc() {
     // Sub-folders that were ticked for clean-up and are now empty get removed (undo recreates them).
     for (const sub of state.lastPlan?.emptyFolderCleanup || []) organizer.removeEmptyDirs(sub, { includeRoot: true });
     if (state.lastPlan?.mode === 'everything') { removeEmptiedFolders(batch, state.lastPlan.libraries || []); state.lastPlan = null; }
-    if (state.lastPlan?.mode === 'review') {
+    if (state.lastPlan?.mode === 'sortall') { tidyEmptied(batch); organizer.removeEmptyDirs(getSettings().organisedRoot); } // old company folders left empty
+    if (state.lastPlan?.mode === 'review' || state.lastPlan?.mode === 'sortall') {
       // Moved/renamed files leave the list; duplicates follow their new location.
       const moved = new Map(batch.moves.map((m) => [m.from, m.to]));
       state.lastPlan.plan = state.lastPlan.plan.filter((p) => !moved.has(p.from));
@@ -848,6 +878,24 @@ function registerIpc() {
     shell.showItemInFolder(file);
     return file;
   });
+  // Original names back, files stay where they are now. preview=true only lists what would change.
+  handle('restore:names', (preview) => {
+    const items = [];
+    for (const j of fileJourneys()) {
+      if (!j.now || !fs.existsSync(j.now)) continue;
+      const original = path.basename(j.was); const current = path.basename(j.now);
+      if (original === current) continue;
+      if (safety.isSystemPath(j.now) || safety.isProtectedFile(j.now)) continue;
+      items.push({ from: j.now, to: path.join(path.dirname(j.now), original), current, original, folder: path.dirname(j.now) });
+    }
+    if (preview) return { items };
+    const batch = organizer.applyPlan(items.map(({ from, to }) => ({ from, to })));
+    batch.label = `Changed ${batch.moves.length} name(s) back to the originals`;
+    store.update('history', [], (h) => [batch, ...h].slice(0, 2000));
+    recordMoves(batch, { byApp: false });
+    refreshIndex().catch(() => {});
+    return { renamed: batch.moves.length, errors: batch.errors, batchId: batch.id };
+  });
   // Put every file back where it was before the app moved or renamed it (newest move first, so chains unwind correctly).
   handle('restore:all', async () => {
     const s = getSettings();
@@ -896,6 +944,8 @@ function registerIpc() {
   });
 
   handle('search', (q) => index.search(q));
+  handle('search:find', (opts) => index.find(opts || {}, { organisedRoot: getSettings().organisedRoot }));
+  handle('index:status', () => ({ size: index.size, busy: !!state.busy.index }));
   handle('index:rebuild', () => refreshIndex());
   handle('index:stats', () => ({ size: index.size, busy: !!state.busy.index }));
   // Opening a file from a list that's out of date: follow it to where it was moved.
@@ -971,6 +1021,8 @@ app.whenReady().then(async () => {
   store = new Store(path.join(app.getPath('userData'), 'data'));
   index = new Index(store);
   fixFolderLocations();
+  // 0.22: files keep their own names unless the user picks a naming style (asked for after earlier renames caused confusion).
+  if (!store.get('namesKeptByDefault', false)) { setSettings({ ...getSettings(), nameStyle: 'keep', renameFiles: false }); store.set('namesKeptByDefault', true); }
   applyTheme(getSettings().theme);
   registerInstalledApp(APP_INFO).catch(() => {});
   ocr.configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });
