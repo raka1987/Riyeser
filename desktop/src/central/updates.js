@@ -8,6 +8,7 @@ const PRODUCTS = [
   { id: 'central', display: 'Riyeser Central', also: ['Riyser Central'], asset: 'RiyeserCentral-Setup.exe', oldAsset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
   { id: 'desk', display: 'Riyeser Desk Assistant', asset: 'RiyeserDeskAssistant-Setup.exe', args: ['/S'] },
   { id: 'pdf', display: 'Riyeser PDF', asset: 'RiyeserPDF-Setup.exe', oldAsset: 'RiyserPDF-Setup.exe', args: ['/S'] },
+  { id: 'payroll', display: 'Riyeser Payroll', asset: 'RiyeserPayroll-Setup.exe', args: ['/S'] },
   { id: 'services', display: 'Riyeser Services', asset: 'RiyeserServices-Setup.exe', args: ['/S'] },
   { id: 'accounting', display: 'Riyeser Accounting', asset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
 ];
