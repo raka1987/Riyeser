@@ -102,7 +102,7 @@ jobs:
         env: { NOTES: "${{ inputs.notes }}" }
         run: |
           {
-            echo "Free Windows programs from Riyeser Group. **No sign-up, no card, works offline.** Windows 10 and 11."
+            echo "Windows programs from Riyeser Group. **Free for 90 days, no sign-up, no card, works offline.** Windows 10 and 11."
             echo
             if [ -n "$NOTES" ]; then echo "### What's new"; echo "$NOTES"; echo; fi
             echo "### In this release"
