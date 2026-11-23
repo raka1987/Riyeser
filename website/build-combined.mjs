@@ -61,7 +61,7 @@ writeFileSync(join(OUT, 'data.js'), swap(readFileSync(join(SRC, 'data.js'), 'utf
 writeFileSync(join(OUT, 'manifest.webmanifest'), swap(readFileSync(join(SRC, 'manifest.webmanifest'), 'utf8'), 'manifest', [['"start_url":"/"', '"start_url":"/app/"']]));
 // Offline support: the app's pages now live in /app/; leave the website's pages to the browser.
 writeFileSync(join(OUT, 'sw.js'), swap(readFileSync(join(SRC, 'sw.js'), 'utf8'), 'sw.js', [
-  ['VERSION="riyeser-152"', 'VERSION="riyeser-153"'],
+  ['VERSION="riyeser-153"', 'VERSION="riyeser-154"'],
   ['SHELL=["/","/index.html",', 'SHELL=["/app/",'],
   ['const n=e.request.mode==="navigate"?"/index.html":e.request;', 'if(e.request.mode==="navigate"&&!t.pathname.startsWith("/app/"))return;const n=e.request.mode==="navigate"?"/app/":e.request;'],
 ]));
