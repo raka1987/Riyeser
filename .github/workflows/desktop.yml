@@ -22,12 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
-        edition: [basics, plus, pos]
+        edition: [basics, plus, pos, invoices]
     runs-on: ${{ matrix.os }}
     env:
-      APP: ${{ fromJSON('{"basics":"Riyeser Accounting Basics","plus":"Riyeser Accounting Plus","pos":"Riyeser POS"}')[matrix.edition] }}
-      LINUX_APP: ${{ fromJSON('{"basics":"riyeser-accounting-basics","plus":"riyeser-accounting-plus","pos":"riyeser-pos"}')[matrix.edition] }}
-      SETUP: ${{ fromJSON('{"basics":"RiyeserAccountingBasics-Setup","plus":"RiyeserAccountingPlus-Setup","pos":"RiyeserPOS-Setup"}')[matrix.edition] }}
+      APP: ${{ fromJSON('{"basics":"Riyeser Accounting Basics","plus":"Riyeser Accounting Plus","pos":"Riyeser POS","invoices":"Riyeser Invoices"}')[matrix.edition] }}
+      LINUX_APP: ${{ fromJSON('{"basics":"riyeser-accounting-basics","plus":"riyeser-accounting-plus","pos":"riyeser-pos","invoices":"riyeser-invoices"}')[matrix.edition] }}
+      SETUP: ${{ fromJSON('{"basics":"RiyeserAccountingBasics-Setup","plus":"RiyeserAccountingPlus-Setup","pos":"RiyeserPOS-Setup","invoices":"RiyeserInvoices-Setup"}')[matrix.edition] }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -94,6 +94,7 @@ jobs:
             dist/*-macOS.zip
             dist/riyeser-accounting-*
             dist/riyeser-pos
+            dist/riyeser-invoices
           if-no-files-found: error
 
   switch:
@@ -138,6 +139,13 @@ jobs:
           if (-not (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser POS*")) { throw "Installing Plus removed Riyeser POS" }
           if ((Get-FileHash $db).Hash -ne $size) { throw "Company file changed" }
           Write-Host "OK: Riyeser POS installs next to Accounting:" $posEntry
+          # Riyeser Invoices (free) also sits next to Accounting and POS.
+          $inv = Get-ChildItem out\RiyeserInvoices-Setup-*.exe | Select-Object -First 1
+          Run $inv
+          if (-not (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Invoices*")) { throw "Riyeser Invoices is not listed in Installed apps" }
+          if (-not (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser POS*")) { throw "Installing Invoices removed Riyeser POS" }
+          if (@(Installed).Count -ne 1) { throw "Installing Invoices changed Accounting" }
+          Write-Host "OK: Riyeser Invoices installs next to Accounting and POS"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

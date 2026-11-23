@@ -168,3 +168,8 @@ body.ed-pos { --brand:#0f766e; --brand-d:#0f5f58; --brand-l:#e0f5f2; --accent:#f
 body.ed-pos .side { border-top: 4px solid #14b8a6; }
 body.ed-pos .login .logo, body.ed-pos .brand .logo { background: linear-gradient(135deg,#14b8a6,#0f6e66); font-size: 15px; letter-spacing: -.5px; }
 body.ed-pos .brand .logo::after { background: #facc15; right: 3px; bottom: 8px; }
+/* Riyeser Invoices (free): sky blue */
+body.ed-inv { --brand:#0369a1; --brand-d:#075985; --brand-l:#e0f2fe; --accent:#f59e0b; --accent-l:#fef3c7; }
+body.ed-inv .side { border-top: 4px solid #0ea5e9; }
+body.ed-inv .login .logo, body.ed-inv .brand .logo { background: linear-gradient(135deg,#0ea5e9,#075985); font-size: 15px; letter-spacing: -.5px; }
+body.ed-inv .brand .logo::after { background: #f59e0b; right: 3px; bottom: 8px; }

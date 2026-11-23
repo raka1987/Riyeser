@@ -266,6 +266,9 @@ EDITIONS = {
 # The third app built from this code base: the till on its own (see riyeser/edition.py).
 POS_APP = {"name": "POS", "title": "POS", "app": "Riyeser POS", "price": "+$20 a month"}
 
+# The fourth: free invoicing on its own. Same company file, so a business can move up to Accounting Basics any time.
+INVOICES_APP = {"name": "Invoices", "title": "Invoices", "app": "Riyeser Invoices", "price": "Free"}
+
 
 
 def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition=None):
@@ -289,8 +292,8 @@ def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition=N
     db.commit()
     migrate(db)
     if edition not in EDITIONS:
-        from .edition import app_edition
-        edition = app_edition() or "enterprise"
+        from .edition import app_edition, is_invoices_app
+        edition = app_edition() or ("basic" if is_invoices_app() else "enterprise")
     db.execute("UPDATE company SET edition=? WHERE id=1", (edition,))
     db.commit()
 

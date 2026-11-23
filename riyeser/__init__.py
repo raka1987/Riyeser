@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.3.1"
+__version__ = "2.4.0"
 
 
 def create_app(test_config=None):
@@ -116,17 +116,20 @@ def create_app(test_config=None):
         from . import companies as co
         acc = session.get("access") or {}
         mine = [c for c in co.all_companies() if c["id"] in acc] if g.get("user") else []
-        from .edition import app_edition, is_pos_app, is_accounting_app
+        from .edition import app_edition, is_pos_app, is_accounting_app, is_invoices_app
         if is_pos_app():
             product = {"key": "pos", "app": dbmod.POS_APP["app"], "title": dbmod.POS_APP["title"], "letter": "Po",
                        "cls": "ed-pos", "separate": True}
+        elif is_invoices_app():
+            product = {"key": "invoices", "app": dbmod.INVOICES_APP["app"], "title": dbmod.INVOICES_APP["title"],
+                       "letter": "In", "cls": "ed-inv", "separate": True}
         else:
             ed = app_edition() or ((g.get("company") or {}).get("edition"))
             product = {"key": ed, "app": dbmod.EDITIONS[ed]["app"] if ed else "Riyeser Accounting",
                        "title": dbmod.EDITIONS[ed]["title"] if ed else "Riyeser Accounting",
                        "letter": {"basic": "B", "enterprise": "P"}.get(ed, "R"),
                        "cls": {"basic": "ed-basic", "enterprise": "ed-plus"}.get(ed, ""), "separate": bool(app_edition())}
-        product["pos_separate"] = is_accounting_app()  # Accounting builds: the till is in Riyeser POS
+        product["pos_separate"] = is_accounting_app() or is_invoices_app()  # Accounting builds: the till is in Riyeser POS
         return dict(product=product, user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
@@ -196,7 +199,9 @@ POS_APP_AREAS = ("pos.", "inventory.", "contacts.", "companies.", "help.", "auth
 def _separate_app_redirect(endpoint):
     """Keep each app to its own screens. Riyeser POS shows only the till (and products, customers, users, help);
     Accounting Basics and Plus send the till's screens to Riyeser POS. Both open the same company file."""
-    from .edition import is_pos_app, is_accounting_app
+    from .edition import is_pos_app, is_accounting_app, is_invoices_app
+    if is_invoices_app():
+        return _invoices_app_redirect(endpoint)
     if is_pos_app():
         if endpoint == "core.dashboard":
             return redirect(url_for("pos.register"))
@@ -209,6 +214,32 @@ def _separate_app_redirect(endpoint):
         return redirect(url_for("links.pos_app"))
     return None
 
+
+# Riyeser Invoices (free): quotes, invoices, customers, receiving payments and who owes you. Everything else is
+# Riyeser Accounting's, and opens there with the same company file.
+INVOICES_APP_ENDPOINTS = ("companies.", "help.", "auth.")
+INVOICES_APP_EXACT = {"static", "core.company", "core.invoices_upgrade", "documents.save_pdf"}
+
+
+def _invoices_app_redirect(endpoint):
+    from . import perms
+    home = url_for("documents.index", side="sale")
+    if endpoint == "core.dashboard":
+        return redirect(home)
+    if endpoint in INVOICES_APP_EXACT or endpoint.startswith(INVOICES_APP_ENDPOINTS):
+        return None
+    if endpoint == "reports.show" and (request.view_args or {}).get("name") == "aged_receivables":
+        return None
+    if endpoint.startswith(("documents.", "contacts.")):
+        try:
+            area = perms.area_of(endpoint, request.view_args, request.args, get_db())
+        except Exception:
+            area = None
+        if area == "sales":
+            return None
+    flash("That's part of Riyeser Accounting Basics. It opens the same company file, so everything you've made here "
+          "is already in it.", "error")
+    return redirect(url_for("core.invoices_upgrade"))
 
 ENTERPRISE_ONLY = {"core.journal_new", "core.journal_list", "core.budgets", "core.jobs", "core.reverse",
                    "banking.reconcile", "banking.feed", "banking.allocate", "banking.feed_delete",

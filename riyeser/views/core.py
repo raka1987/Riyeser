@@ -188,6 +188,13 @@ def upgrade():
     return render_template("core/upgrade.html", here=g.company["edition"], separate_apps=bool(app_edition()))
 
 
+@bp.route("/setup/accounting-basics")
+def invoices_upgrade():
+    """Riyeser Invoices: what Accounting Basics adds, and where to get it."""
+    from ..edition import download_url
+    return render_template("core/invoices_upgrade.html", basics_url=download_url("basic"))
+
+
 @bp.route("/setup/company", methods=["GET", "POST"])
 def company():
     db = get_db()

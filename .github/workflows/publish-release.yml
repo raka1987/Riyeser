@@ -61,7 +61,7 @@ jobs:
         with: { name: desktop, path: desktop/release/*, if-no-files-found: error }
 
   accounting:
-    name: Accounting Basics, Accounting Plus and POS
+    name: Accounting Basics, Accounting Plus, POS and Invoices
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +75,7 @@ jobs:
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           $ver = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          foreach ($ed in "basics", "plus", "pos") {
+          foreach ($ed in "basics", "plus", "pos", "invoices") {
             python packaging/build_desktop.py --edition $ed
             if ($LASTEXITCODE -ne 0) { throw "$ed build failed" }
             & $iscc "/DEdition=$ed" "/DAppVersion=$ver" packaging\installer.iss
@@ -105,6 +105,15 @@ jobs:
           Write-Host "OK:" $pos[0]
           Copy-Item $setup.FullName "release\RiyeserPOS-Setup.exe"
           "$($pos[0])" | Set-Content "release\versions-pos.txt"
+          # Riyeser Invoices (free) installs next to Accounting and POS too.
+          $setup = Get-ChildItem "dist\RiyeserInvoices-Setup-*.exe" | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+          $inv = @((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Invoices*").DisplayName)
+          if ($inv.Count -ne 1) { throw "Riyeser Invoices is not listed in Installed apps" }
+          if (@(Installed).Count -ne 1) { throw "Installing Invoices changed Accounting" }
+          Write-Host "OK:" $inv[0]
+          Copy-Item $setup.FullName "release\RiyeserInvoices-Setup.exe"
+          "$($inv[0])" | Set-Content "release\versions-invoices.txt"
           # Older Riyeser Central (1.3.6 and before) and old links download RiyeserAccounting-Setup.exe: give them Plus.
           Copy-Item release\RiyeserAccountingPlus-Setup.exe release\RiyeserAccounting-Setup.exe
       - uses: actions/upload-artifact@v4
@@ -209,5 +218,6 @@ jobs:
             out/RiyeserAccountingPlus-Setup.exe
             out/RiyeserAccounting-Setup.exe
             out/RiyeserPOS-Setup.exe
+            out/RiyeserInvoices-Setup.exe
             out/RiyeserPayroll-Setup.exe
           fail_on_unmatched_files: false  # Payroll's file may be missing if its job failed; the others are checked above

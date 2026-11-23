@@ -41,10 +41,11 @@ def start_path(page):
 
 
 def main(argv=None):
-    from .db import EDITIONS, POS_APP
-    from .edition import app_edition, is_pos_app
+    from .db import EDITIONS, POS_APP, INVOICES_APP
+    from .edition import app_edition, is_pos_app, is_invoices_app
     ed = app_edition()
-    app_name = POS_APP["app"] if is_pos_app() else EDITIONS[ed]["app"] if ed else "Riyeser Accounting"
+    app_name = (POS_APP["app"] if is_pos_app() else INVOICES_APP["app"] if is_invoices_app()
+                else EDITIONS[ed]["app"] if ed else "Riyeser Accounting")
     if is_pos_app() and not any(a.startswith("--page") for a in (argv if argv is not None else sys.argv[1:])):
         argv = list(argv if argv is not None else sys.argv[1:]) + ["--page=pos"]  # Riyeser POS opens on the till
     p = argparse.ArgumentParser(prog=app_name)

@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block title %}Need stock or bills?{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Need stock, bills or reports?</h1>
+<p class="sub">You're using <b>Riyeser Invoices</b>, which is free forever. When your business needs more, Accounting Basics opens the same company file, so every customer, quote, invoice and payment is already there.</p></div></div>
+<div class="eds">
+  <div class="card ed ed-inv here"><div class="edlogo" style="background:linear-gradient(135deg,#0ea5e9,#075985)">In</div><h2>Riyeser Invoices</h2><p class="edprice">Free forever</p>
+    <ul><li>Quotes and invoices, with your logo and details</li><li>Customers and statements</li><li>Receiving payments</li><li>Who owes me</li><li>Save any invoice as a PDF</li></ul>
+    <p class="youare">✓ This is what you're using</p></div>
+  <div class="card ed ed-basic"><div class="edlogo">B</div><h2>{{ editions.basic.title }}</h2><p class="edprice">Free for 90 days, then $20 a month per business</p>
+    <ul><li>Everything in Riyeser Invoices</li><li>Suppliers and bills</li><li>Stock items, stocktake and reorder alerts</li><li>Simple money in and money out</li>
+    <li>Profit &amp; Loss, GST summary, sales and stock reports</li><li>Works with Riyeser POS, the till app</li></ul></div>
+</div>
+<div class="card">
+  <h3>Move up to {{ editions.basic.title }}</h3>
+  <ol><li>Download and run the {{ editions.basic.title }} installer.</li><li>Open it and sign in as usual: it opens the same company file, with everything you made here.</li>
+  <li>Keep Riyeser Invoices too if you like. Both work on the same books.</li></ol>
+  <a class="btn pri" href="{{ basics_url }}" target="_blank" rel="noopener">⬇ Download {{ editions.basic.title }}</a>
+</div>
+{% endblock %}

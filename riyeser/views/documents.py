@@ -142,6 +142,9 @@ def convert(doc_id):
 
 def free_invoices_apply():
     """Accounting Basics (and Plus once its trial has ended without a licence) is free up to a number of invoices."""
+    from ..edition import is_invoices_app
+    if is_invoices_app():
+        return False  # Riyeser Invoices is free forever
     c = g.get("company") or {}
     return c.get("edition") == "basic" or bool(c.get("plus_locked"))
 

@@ -13,6 +13,9 @@
 ;   ISCC /DEdition=basics /DAppVersion=2.0.0 packaging\installer.iss -> dist\RiyeserAccountingBasics-Setup-2.0.0.exe
 ;   ISCC /DEdition=plus   /DAppVersion=2.0.0 packaging\installer.iss -> dist\RiyeserAccountingPlus-Setup-2.0.0.exe
 ;   ISCC /DEdition=pos    /DAppVersion=2.3.0 packaging\installer.iss -> dist\RiyeserPOS-Setup-2.3.0.exe
+;   ISCC /DEdition=invoices /DAppVersion=2.4.0 packaging\installer.iss -> dist\RiyeserInvoices-Setup-2.4.0.exe
+;
+; Riyeser Invoices (free) also installs NEXT TO Accounting and opens the same company files.
 ;
 ; Riyeser POS is the till on its own. It installs NEXT TO Accounting Basics or Plus (it never replaces either) and
 ; opens the same company files, so till sales show in Accounting as paid invoices.
@@ -27,8 +30,15 @@
 #define PlusId "6C0B3C9E-5B0E-4E4B-9F5D-52E1A7C3A1B7"
 #define BasicsId "21C257C6-5CFC-4E4B-A13F-50206BF8970E"
 #define PosId "63A56771-35A2-4A5D-9FA4-76DFC5FA74CF"
+#define InvoicesId "9E4D2B57-7C1A-4F0E-B8A3-3D6F51C2E9A4"
 
-#if Edition == "pos"
+#if Edition == "invoices"
+  #define AppName "Riyeser Invoices"
+  #define ShortName "Invoices"
+  #define SetupBase "RiyeserInvoices-Setup"
+  #define IconFile "invoices.ico"
+  #define MyId InvoicesId
+#elif Edition == "pos"
   #define AppName "Riyeser POS"
   #define ShortName "POS"
   #define SetupBase "RiyeserPOS-Setup"
@@ -77,7 +87,7 @@ CloseApplications=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
-#if Edition != "pos"
+#if Edition != "pos" && Edition != "invoices"
 [InstallDelete]
 ; The old single app (Riyeser Accounting 1.x): its program folder and shortcuts. Company files are elsewhere and kept.
 Type: filesandordirs; Name: "{localappdata}\Programs\Riyeser Accounting"
@@ -95,7 +105,7 @@ Name: "{userprograms}\Riyeser Group\{#AppName}"; Filename: "{app}\{#AppName}.exe
 [Run]
 Filename: "{app}\{#AppName}.exe"; Description: "Open {#AppName}"; Flags: nowait postinstall skipifsilent
 
-#if Edition != "pos"
+#if Edition != "pos" && Edition != "invoices"
 [Code]
 function OtherUninstaller(): String;
 var
