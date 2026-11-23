@@ -78,6 +78,27 @@ def test_book_clash_and_invoice(tmp_path, monkeypatch):
     assert _one(app, "SELECT COUNT(*) n FROM documents")["n"] == 1
 
 
+def test_price_typed_on_the_booking_is_invoiced(tmp_path, monkeypatch):
+    app, c, item = make(tmp_path, monkeypatch, "bookings")
+    c.get("/bookings/")
+    cust = _cust(app)
+    form = c.get("/bookings/new").get_data(as_text=True)
+    assert 'name="price"' in form and "Price" in form
+    _book(c, contact_id=cust)                            # no job type and no price
+    bid = _one(app, "SELECT id FROM bookings ORDER BY id DESC")["id"]
+    r = c.post(f"/bookings/{bid}/invoice", headers={"Referer": f"/bookings/{bid}"}, follow_redirects=True)
+    assert "has no price yet" in r.get_data(as_text=True)
+    assert _one(app, "SELECT COUNT(*) n FROM documents")["n"] == 0
+    # type the price on the job, save, then invoice
+    c.post(f"/bookings/{bid}", data={"contact_id": cust, "date": "2026-11-24", "time": "09:00", "minutes": "60",
+                                     "status": "booked", "price": "220.00"})
+    assert _one(app, "SELECT price FROM bookings WHERE id=?", (bid,))["price"] == 22000
+    assert "220.00" in c.get(f"/bookings/{bid}").get_data(as_text=True)
+    assert "Invoice made" in c.post(f"/bookings/{bid}/invoice", follow_redirects=True).get_data(as_text=True)
+    doc = _one(app, "SELECT d.total FROM documents d JOIN bookings b ON b.document_id=d.id WHERE b.id=?", (bid,))
+    assert doc["total"] == 22000
+
+
 def test_new_customer_from_the_booking_form(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
     _book(c, new_customer="Sam Lee", phone="0411 111 111")
