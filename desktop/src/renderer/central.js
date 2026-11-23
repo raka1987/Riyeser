@@ -91,6 +91,7 @@ function renderTodo() {
     : '<div class="lbl">Nothing outstanding. 🎉</div>';
 }
 function renderRecent() {
+  const dockShown = has('desk'); $('#recent').hidden = !dockShown; $('.dockh').hidden = !dockShown;
   $('#recent').innerHTML = today.recent.length ? today.recent.slice(0, 10).map((r) => `<div class="glass doc" data-file="${esc(r.path)}" title="${esc(r.path)}">${fileIcon(r.name)} <span>${esc(r.name)}</span></div>`).join('')
     : '<div class="lbl">Files you open will show up here.</div>';
 }

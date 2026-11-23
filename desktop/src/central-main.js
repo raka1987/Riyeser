@@ -202,10 +202,12 @@ function registerIpc() {
     }
     let money;
     try { money = await sources.pendingPayments(); } catch (e) { money = { found: false, error: e.message }; }
-    const recent = sources.recentDocuments({
+    // Recent documents (Windows' own Recent files list) belong to Riyeser Desk Assistant: only while it's installed.
+    const deskInstalled = !!locate(PROGRAMS.find((x) => x.id === 'desk'));
+    const recent = !deskInstalled ? [] : sources.recentDocuments({
       recentDir: process.platform === 'win32' ? path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Recent') : null,
       readLink: (l) => shell.readShortcutLink(l).target,
-      indexDocs: locate(PROGRAMS.find((x) => x.id === 'desk')) ? searchIndex().docs : {}, limit: 12, // Desk Assistant's list only while it's installed
+      indexDocs: searchIndex().docs, limit: 12,
     });
     return { deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, money, recent };
   });
