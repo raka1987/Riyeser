@@ -272,6 +272,10 @@ def migrate(db):
         created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
     db.execute("CREATE INDEX IF NOT EXISTS bookings_starts ON bookings(starts_at)")
+    if "price" not in {r["name"] for r in db.execute("PRAGMA table_info(bookings)")}:
+        db.execute("ALTER TABLE bookings ADD COLUMN price INTEGER")  # cents inc GST; empty = use the job type's price
+    if "description" not in {r["name"] for r in db.execute("PRAGMA table_info(booking_services)")}:
+        db.execute("ALTER TABLE booking_services ADD COLUMN description TEXT")  # wording on the invoice line
     db.commit()
 
 

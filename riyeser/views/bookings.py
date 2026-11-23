@@ -258,15 +258,17 @@ def _save(bid):
                                "to book it anyway.")
     vals = (cid, rid, svc["id"] if svc else None, start.isoformat(timespec="minutes"), minutes,
             (f.get("title") or "").strip() or None, (f.get("address") or "").strip() or None, party,
-            (f.get("phone") or "").strip() or None, (f.get("notes") or "").strip() or None, status)
+            (f.get("phone") or "").strip() or None, (f.get("notes") or "").strip() or None, status,
+            to_cents(f.get("price")) if (f.get("price") or "").strip() else None)
     if bid:
         db.execute("UPDATE bookings SET contact_id=?, resource_id=?, service_id=?, starts_at=?, minutes=?, title=?,"
-                   " address=?, party=?, phone=?, notes=?, status=?, updated_at=datetime('now','localtime') WHERE id=?",
+                   " address=?, party=?, phone=?, notes=?, status=?, price=?, updated_at=datetime('now','localtime')"
+                   " WHERE id=?",
                    vals + (bid,))
         audit(db, "booking_edit", f"#{bid}")
     else:
         bid = db.execute("INSERT INTO bookings (contact_id, resource_id, service_id, starts_at, minutes, title, address,"
-                         " party, phone, notes, status, mode, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         " party, phone, notes, status, price, mode, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                          vals + (mode(), g.user["id"])).lastrowid
         audit(db, "booking_new", f"#{bid} {start:%Y-%m-%d %H:%M}")
     flash(f"{m['one'].capitalize()} saved.", "ok")
@@ -315,9 +317,9 @@ def invoice(bid):
         raise PostingError("Choose the customer on this booking first, then invoice it.")
     svc = db.execute("SELECT * FROM booking_services WHERE id=?", (b["service_id"],)).fetchone() if b["service_id"] else None
     st = datetime.fromisoformat(b["starts_at"])
-    what = (svc["name"] if svc else None) or b["title"] or M()["one"].capitalize()
+    what = (svc and (svc["description"] or svc["name"])) or b["title"] or M()["one"].capitalize()
     desc = f"{what} — {st:%a %d %b %Y}" + (f", {b['address']}" if b["address"] else "")
-    line = dict(description=desc, qty=1, unit_price=svc["price"] if svc else 0, discount_pct=0,
+    line = dict(description=desc, qty=1, unit_price=b["price"] or (svc["price"] if svc else 0), discount_pct=0,
                 tax_code_id=_gst(db), item_id=svc["item_id"] if svc and svc["item_id"] else None)
     if not line["item_id"]:
         line["account_id"] = _income_account(db)
@@ -327,6 +329,9 @@ def invoice(bid):
             line["unit_price"] = item["sell_price"] or 0
         if item and item["sale_tax_code_id"]:
             line["tax_code_id"] = item["sale_tax_code_id"]
+    if not line["unit_price"]:
+        raise PostingError(f"This {M()['one']} has no price yet. Type the price in the Price box on this {M()['one']},"
+                           " press Save, then press Invoice again.")
     terms = (g.get("company") or {}).get("default_terms_days") or 14
     today = date.today()
     doc_id = save_document(db, "sale", dict(contact_id=b["contact_id"], date=today.isoformat(),
@@ -336,7 +341,7 @@ def invoice(bid):
     db.execute("UPDATE bookings SET document_id=?, status=CASE WHEN status IN ('booked','confirmed','started')"
                " THEN 'done' ELSE status END, updated_at=datetime('now','localtime') WHERE id=?", (doc_id, bid))
     audit(db, "booking_invoice", f"#{bid} -> document {doc_id}")
-    flash("Invoice made. Check the price, then save or send it.", "ok")
+    flash("Invoice made. You can print or email it from here.", "ok")
     return redirect(url_for("documents.view", doc_id=doc_id))
 
 
@@ -403,15 +408,19 @@ def _save_setup():
     for s in services(db, True):
         name = (f.get(f"svc_name_{s['id']}") or "").strip()
         if name:
-            db.execute("UPDATE booking_services SET name=?, minutes=?, price=?, item_id=?, active=? WHERE id=?",
-                       (name, opt_int(f.get(f"svc_min_{s['id']}")) or 60, to_cents(f.get(f"svc_price_{s['id']}") or 0),
+            db.execute("UPDATE booking_services SET name=?, description=?, minutes=?, price=?, item_id=?, active=?"
+                       " WHERE id=?",
+                       (name, (f.get(f"svc_desc_{s['id']}") or "").strip() or None,
+                        opt_int(f.get(f"svc_min_{s['id']}")) or 60, to_cents(f.get(f"svc_price_{s['id']}") or 0),
                         opt_int(f.get(f"svc_item_{s['id']}")), 1 if f.get(f"svc_on_{s['id']}") else 0, s["id"]))
     mins, prices, items = f.getlist("svc_new_min"), f.getlist("svc_new_price"), f.getlist("svc_new_item")
+    descs = f.getlist("svc_new_desc")
     at = lambda lst, i: lst[i] if i < len(lst) else None
     for i, name in enumerate(f.getlist("svc_new")):
         if name.strip():
-            db.execute("INSERT INTO booking_services (name, minutes, price, item_id) VALUES (?,?,?,?)",
-                       (name.strip(), opt_int(at(mins, i)) or 60, to_cents(at(prices, i) or 0), opt_int(at(items, i))))
+            db.execute("INSERT INTO booking_services (name, description, minutes, price, item_id) VALUES (?,?,?,?,?)",
+                       (name.strip(), (at(descs, i) or "").strip() or None, opt_int(at(mins, i)) or 60,
+                        to_cents(at(prices, i) or 0), opt_int(at(items, i))))
     audit(db, "bookings_setup", new_mode)
     flash("Bookings setup saved.", "ok")
     return redirect(url_for("bookings.setup"))
