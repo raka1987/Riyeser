@@ -31,13 +31,13 @@ To build a distributable wheel for your own install packages, run `pip wheel . -
 
 Riyeser also runs as a normal desktop app in its own window, with no Python needed. It keeps the company file in `~/.riyeser`.
 
-* **Windows installers:** `RiyeserAccountingBasics-Setup-<version>.exe` and `RiyeserAccountingPlus-Setup-<version>.exe` install it for your Windows user (no admin needed), with a
+* **Windows installers:** `RiyeserAccountingBasics-Setup-<version>.exe`, `RiyeserAccountingPlus-Setup-<version>.exe` and `RiyeserPOS-Setup-<version>.exe` install it for your Windows user (no admin needed), with a
   desktop icon, a Start menu entry under *Riyeser Group* and an *Installed apps* listing. It works completely offline:
   it opens in its own window and everything stays on your PC. Uninstalling keeps your company file (`%USERPROFILE%\.riyeser`).
 * **Download:** after each push to `main`, GitHub Actions ("Build desktop app") builds
   `Riyeser Accounting.exe` (Windows), `Riyeser Accounting.app` (macOS, zipped) and `riyeser-accounting` (Linux).
   Get them from the workflow run's **Artifacts**. Pushing a tag such as `v1.0.0` also attaches them to a GitHub Release.
-* **Build it yourself:** run `pip install ".[desktop]" pyinstaller`, then `python packaging/build_desktop.py --edition basics` (or `plus`). The app lands in `dist/`.
+* **Build it yourself:** run `pip install ".[desktop]" pyinstaller`, then `python packaging/build_desktop.py --edition basics` (or `plus`, or `pos`). The app lands in `dist/`.
 * **Run from source:** run `pip install ".[desktop]"`, then `riyeser-desktop`.
 
 The builds are unsigned. Windows SmartScreen will warn ("More info → Run anyway"). On macOS, right-click the app → **Open** the first time.
@@ -48,24 +48,26 @@ The builds are unsigned. Windows SmartScreen will warn ("More info → Run anywa
 * **Other users:** an administrator can set a new password under **Setup → Users & Roles**.
 * **Command line:** run `riyeser reset-password admin` on the computer that holds the company file.
 
-## Two apps: Accounting Basics and Accounting Plus
+## Three apps: Accounting Basics, Accounting Plus and Riyeser POS
 
-Riyeser Accounting ships as **two separate Windows apps**, built from this one code base so they're easy to look after. Each has its own installer, name, icon and colours, so nobody mixes them up:
+This code base ships as **three separate Windows apps**, so they're easy to look after. Each has its own installer, name, icon and colours, so nobody mixes them up:
 
-| | **Riyeser Accounting Basics** | **Riyeser Accounting Plus** |
-|---|---|---|
-| Price | Free, no licence | Free for 90 days, then included in a Riyeser licence |
-| Looks | Green, "B" logo, *Free* badge | Blue, "P" logo |
-| Has | Invoices, quotes, customers, suppliers, bills, stock, simple money in/out, shop counter (POS), key reports | Everything in Basics plus bank reconciliation, statement import, payroll, general journal, jobs, budgets, Balance Sheet and Trial Balance |
-| Installer | `RiyeserAccountingBasics-Setup.exe` | `RiyeserAccountingPlus-Setup.exe` |
+| | **Riyeser Accounting Basics** | **Riyeser Accounting Plus** | **Riyeser POS** |
+|---|---|---|---|
+| Price | Free for the first 500 invoices, then a Riyeser licence | Free for 90 days, then included in a Riyeser licence | Free for the first 500 sales, then a Riyeser licence |
+| Looks | Green, "B." logo | Blue, "P." logo | Teal, "Po." logo |
+| Has | Invoices, quotes, customers, suppliers, bills, stock, simple money in/out, key reports | Everything in Basics plus bank reconciliation, statement import, payroll, general journal, jobs, budgets, Balance Sheet and Trial Balance | The till: retail or restaurant, receipts, tables and kitchen dockets, manager approvals, refunds, close till, plus products, stock and customers |
+| Installer | `RiyeserAccountingBasics-Setup.exe` | `RiyeserAccountingPlus-Setup.exe` | `RiyeserPOS-Setup.exe` |
 
-* **Same books.** Both open the same company files in `~/.riyeser`, which no installer or uninstaller touches.
+* **Same books.** All three open the same company files in `~/.riyeser`, which no installer or uninstaller touches.
 * **Upgrade:** install Plus. It replaces Basics and opens the books exactly as they were.
 * **Downgrade:** install Basics. It asks first, then replaces Plus. Payroll, journals, jobs and budgets stay in the company file (hidden) and come back if Plus is installed again.
 * **Plus after the trial without a licence:** the everyday screens keep working; the Plus-only screens lock (nothing removed) until a licence is entered in Riyeser Central.
 * Existing *Riyeser Accounting 1.x* installs update in place to Plus.
+* **Riyeser POS installs next to Accounting** (it never replaces Basics or Plus) and works without it. Each till sale is a paid tax invoice in the same company file, so Accounting's stock, GST and reports include it straight away. Accounting Basics and Plus don't have a till of their own: their **Riyeser POS** menu item opens POS, or offers the download.
+* **Free allowances:** the caps live in one place, `riyeser/plan.py`. Reaching one never deletes or hides anything; only new invoices (Basics) or new till sales (POS) stop until a licence is entered in Riyeser Central. Quotes, payments, reports, past sales and close-till all keep working. Voided invoices and sales don't count, and till sales count toward POS, not Basics.
 
-Build one: `python packaging/build_desktop.py --edition basics` (or `plus`). Run from source with no edition baked in, each company picks Basic or Plus under **Setup → Company** instead (set `RIYESER_APP_EDITION=basics|plus` to try either app). The names live in one place, `EDITIONS` in `riyeser/db.py`; the edition logic is in `riyeser/edition.py`.
+Build one: `python packaging/build_desktop.py --edition basics` (or `plus`, or `pos`). Run from source with no edition baked in, each company picks Basic or Plus under **Setup → Company** instead (set `RIYESER_APP_EDITION=basics|plus|pos` to try any of the apps). The names live in one place, `EDITIONS` in `riyeser/db.py`; the edition logic is in `riyeser/edition.py`.
 
 ## Features
 

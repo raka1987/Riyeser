@@ -214,7 +214,7 @@ def _save_company():
     if f.get("edition") == "enterprise" and not g.company["enterprise_allowed"]:
         from ..db import EDITIONS
         flash(f"{EDITIONS['enterprise']['name']} needs a Riyeser licence. Enter one in Riyeser Central, then switch "
-              f"here. {EDITIONS['basic']['name']} stays free.", "error")
+              f"here. {EDITIONS['basic']['name']} is free for your first 500 invoices.", "error")
     elif f.get("edition") in ("basic", "enterprise"):
         db.execute("UPDATE company SET edition=? WHERE id=1", (f["edition"],))
     for key in [r["key"] for r in db.execute("SELECT key FROM linked_accounts")]:

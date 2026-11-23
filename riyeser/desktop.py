@@ -1,4 +1,4 @@
-"""Riyeser Accounting desktop app.
+"""Riyeser Accounting / Riyeser POS desktop app.
 
 Runs the accounting server privately on this computer and shows it in its
 own application window (via pywebview).  If no window toolkit is available
@@ -41,10 +41,12 @@ def start_path(page):
 
 
 def main(argv=None):
-    from .db import EDITIONS
-    from .edition import app_edition
+    from .db import EDITIONS, POS_APP
+    from .edition import app_edition, is_pos_app
     ed = app_edition()
-    app_name = EDITIONS[ed]["app"] if ed else "Riyeser Accounting"
+    app_name = POS_APP["app"] if is_pos_app() else EDITIONS[ed]["app"] if ed else "Riyeser Accounting"
+    if is_pos_app() and not any(a.startswith("--page") for a in (argv if argv is not None else sys.argv[1:])):
+        argv = list(argv if argv is not None else sys.argv[1:]) + ["--page=pos"]  # Riyeser POS opens on the till
     p = argparse.ArgumentParser(prog=app_name)
     p.add_argument("--data-dir", help="folder for the company file (default ~/.riyeser)")
     p.add_argument("--port", type=int, default=0)
@@ -71,7 +73,7 @@ def main(argv=None):
     if not _wait_until_up(url):
         print(f"{app_name} failed to start.", file=sys.stderr)
         sys.exit(1)
-    print(f"Riyeser Accounting running at {url}  (company file: {os.environ['RIYESER_DB']})", flush=True)
+    print(f"{app_name} running at {url}  (company file: {os.environ['RIYESER_DB']})", flush=True)
 
     if args.no_window:
         try:

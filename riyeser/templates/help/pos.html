@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Help{% endblock %}
+{% block content %}
+<style>.help h2{scroll-margin-top:16px;margin-top:28px}.help li{margin:4px 0}.help .card{max-width:900px}</style>
+<div class="head"><div><h1>Riyeser POS help</h1><p class="sub">Version {{ version }} · a Riyeser Group program. Can't find the answer? Download <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a> and send it with your question.</p></div></div>
+<div class="help">
+<div class="card"><h2 id="start">Getting started</h2><ol>
+<li><b>Setup → POS setup</b>: choose <b>Retail</b> or <b>Restaurant</b>, turn on the features you want and name your tills.</li>
+<li><b>Products → New product</b>: add what you sell, with a price, a category (it becomes a tab on the till) and, if you like, a photo. Tick <b>I inventory this item</b> to count stock.</li>
+<li><b>Setup → Users &amp; roles</b>: add a sign-in for each staff member. Managers (Full access to Sales) can approve voids, refunds and big discounts.</li>
+<li>Tap <b>Open the till</b> and start selling.</li></ol></div>
+{% include "help/_pos_card.html" %}
+<div class="card"><h2 id="accounting">Riyeser POS and Riyeser Accounting</h2><ul>
+<li>POS and Accounting are separate apps that open the <b>same company file</b> (in your <b>.riyeser</b> folder). Install either, or both.</li>
+<li>Each till sale is saved as a paid tax invoice to the <b>Walk-in Customer</b> (or the customer you picked), so Accounting's reports, stock and GST include it straight away.</li>
+<li>Products, stock and customers are shared: change a price in either app and the other sees it.</li>
+<li>Bank accounts, bills, payroll and the reports live in Riyeser Accounting.</li></ul></div>
+<div class="card"><h2 id="users">Users &amp; passwords</h2><ul>
+<li>Forgot your password? Click <b>Forgot password?</b> on the sign-in screen, on the computer that holds the company file. An administrator can also set a new one under <b>Setup → Users &amp; roles</b>.</li></ul></div>
+</div>
+{% endblock %}

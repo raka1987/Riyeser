@@ -127,3 +127,39 @@ def _do_import():
     flash(f"Pay run {pr['payrun_id']} imported: {len(pr['employees'])} staff, gross {fmt_money(pr['totals']['gross'])}.",
           "ok")
     return redirect(url_for("core.entry", eid=eid))
+
+
+# ------------------------------------------------------------ Riyeser POS (the till is its own app)
+def pos_exe():
+    """Where the Riyeser POS installer puts the app for this Windows user (None if it isn't installed)."""
+    import os
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        return None
+    exe = os.path.join(base, "Programs", "Riyeser POS", "Riyeser POS.exe")
+    return exe if os.path.exists(exe) else None
+
+
+def _local_desktop():
+    from flask import current_app
+    return bool(current_app.config.get("LOCAL_RESET")) and request.remote_addr in ("127.0.0.1", "::1")
+
+
+@bp.route("/pos", methods=["GET", "POST"])
+def pos_app():
+    """The till moved to Riyeser POS. It uses this same company file, and its sales show here as paid invoices."""
+    from ..edition import download_url, POS_PAGE
+    db = get_db()
+    exe = pos_exe() if _local_desktop() else None
+    if request.method == "POST" and exe:
+        import os
+        import subprocess
+        env = dict(os.environ)  # same company files (RIYESER_HOME / RIYESER_DB) as this app
+        subprocess.Popen([exe], env=env, cwd=os.path.dirname(exe), close_fds=True,
+                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+        flash("Opening Riyeser POS…", "ok")
+        return redirect(url_for("links.pos_app"))
+    sales = db.execute("SELECT COUNT(*) n, COALESCE(SUM(d.total),0) t FROM pos_sales p JOIN documents d"
+                       " ON d.id=p.document_id WHERE p.voided=0 AND d.date=date('now','localtime')").fetchone()
+    return render_template("links/pos.html", installed=bool(exe), download=download_url("pos"), page=POS_PAGE,
+                           today=sales)

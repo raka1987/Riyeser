@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Riyeser POS{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Riyeser POS</h1>
+<p class="sub">The shop counter is now its own app, <b>Riyeser POS</b>. It opens this same company file, so every sale shows here straight away as a paid invoice, and stock and GST stay right.</p></div></div>
+<div class="card" style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+  <div class="poslogo" aria-hidden="true">Po</div>
+  <div style="flex:1;min-width:260px">
+    <h2 style="margin:0 0 4px">{% if installed %}Riyeser POS is installed on this computer{% else %}Get Riyeser POS{% endif %}</h2>
+    <p class="muted" style="margin:0">A touch-friendly till for shops, cafes and restaurants: receipts, tables and kitchen dockets, manager approvals and close till. Free for your first 500 sales.</p>
+  </div>
+  <div class="actions">
+    {% if installed %}<form method="post"><button class="btn pri">Open Riyeser POS</button></form>
+    {% else %}<a class="btn pri" href="{{ download }}">Download Riyeser POS</a>{% endif %}
+    <a class="btn" href="{{ page }}" target="_blank" rel="noopener">More about POS</a>
+  </div>
+</div>
+{% if today and today.n %}<div class="card"><h2 style="margin-top:0">Till sales today</h2>
+<p>{{ today.n }} sale{{ '' if today.n == 1 else 's' }}, {{ today.t|money }} in total. They're in <a href="{{ url_for('documents.index', side='sale') }}">All invoices</a>.</p></div>{% endif %}
+<style>.poslogo{width:64px;height:64px;border-radius:16px;background:linear-gradient(135deg,#14b8a6,#0f6e66);color:#fff;display:grid;place-items:center;font-weight:800;font-size:26px;letter-spacing:-1px;position:relative;flex-shrink:0}
+.poslogo::after{content:"";position:absolute;right:7px;bottom:15px;width:9px;height:9px;border-radius:50%;background:#facc15}</style>
+{% endblock %}

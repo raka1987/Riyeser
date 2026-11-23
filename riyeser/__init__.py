@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 
 def create_app(test_config=None):
@@ -72,7 +72,7 @@ def create_app(test_config=None):
                 g.company["edition"] = app_ed
                 g.company["plus_locked"] = app_ed == "enterprise" and not g.company["enterprise_allowed"]
             elif not g.company["enterprise_allowed"]:
-                g.company["edition"] = "basic"  # Basic is free; Enterprise needs a licence (data is kept)
+                g.company["edition"] = "basic"  # Basic is free up to 500 invoices; Enterprise needs a licence (data is kept)
         public = ("auth.login", "auth.setup_company", "auth.forgot", "static")
         if g.user is None and request.endpoint not in public:
             return redirect(url_for("auth.login", next=request.path))
@@ -87,6 +87,10 @@ def create_app(test_config=None):
                 flash(why, "error")
                 back = request.referrer if request.method == "POST" and request.referrer else url_for("core.dashboard")
                 return redirect(back)
+        if g.user is not None:
+            sep = _separate_app_redirect(request.endpoint or "")
+            if sep:
+                return sep
         if g.user is not None and _enterprise_only(request.endpoint):
             ent, basic = dbmod.EDITIONS["enterprise"]["title"], dbmod.EDITIONS["basic"]["title"]
             from .edition import app_edition
@@ -101,7 +105,7 @@ def create_app(test_config=None):
                     flash(f"That's part of {ent}. An administrator can switch to {ent} under "
                           "Setup → Company (your data stays as it is).", "error")
                 else:
-                    flash(f"That's part of {ent}, which needs a licence. {basic} stays free. "
+                    flash(f"That's part of {ent}, which needs a licence. {basic} is free for your first 500 invoices. "
                           f"Enter a licence in Riyeser Central to unlock {ent} (your data stays as it is).", "error")
                 return redirect(url_for("core.dashboard"))
 
@@ -112,12 +116,17 @@ def create_app(test_config=None):
         from . import companies as co
         acc = session.get("access") or {}
         mine = [c for c in co.all_companies() if c["id"] in acc] if g.get("user") else []
-        from .edition import app_edition
-        ed = app_edition() or ((g.get("company") or {}).get("edition"))
-        product = {"key": ed, "app": dbmod.EDITIONS[ed]["app"] if ed else "Riyeser Accounting",
-                   "title": dbmod.EDITIONS[ed]["title"] if ed else "Riyeser Accounting",
-                   "letter": {"basic": "B", "enterprise": "P"}.get(ed, "R"),
-                   "cls": {"basic": "ed-basic", "enterprise": "ed-plus"}.get(ed, ""), "separate": bool(app_edition())}
+        from .edition import app_edition, is_pos_app, is_accounting_app
+        if is_pos_app():
+            product = {"key": "pos", "app": dbmod.POS_APP["app"], "title": dbmod.POS_APP["title"], "letter": "Po",
+                       "cls": "ed-pos", "separate": True}
+        else:
+            ed = app_edition() or ((g.get("company") or {}).get("edition"))
+            product = {"key": ed, "app": dbmod.EDITIONS[ed]["app"] if ed else "Riyeser Accounting",
+                       "title": dbmod.EDITIONS[ed]["title"] if ed else "Riyeser Accounting",
+                       "letter": {"basic": "B", "enterprise": "P"}.get(ed, "R"),
+                       "cls": {"basic": "ed-basic", "enterprise": "ed-plus"}.get(ed, ""), "separate": bool(app_edition())}
+        product["pos_separate"] = is_accounting_app()  # Accounting builds: the till is in Riyeser POS
         return dict(product=product, user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
@@ -145,6 +154,18 @@ def create_app(test_config=None):
     app.jinja_env.globals["help_section"] = help.section_for
     app.jinja_env.globals["riyeser_version"] = __version__
     app.jinja_env.globals["editions"] = dbmod.EDITIONS
+
+    def free_plan(product):
+        """For banners and pills: how much of a free allowance is left (None when it doesn't apply here)."""
+        from . import plan as P
+        from .views.documents import free_invoices_apply
+        if product == "basic" and not free_invoices_apply():
+            return None
+        try:
+            return P.plan(get_db(), product)
+        except Exception:
+            return None
+    app.jinja_env.globals["free_plan"] = free_plan
     from .edition import app_edition, download_url
     app.jinja_env.globals["app_edition"] = app_edition
     app.jinja_env.globals["edition_download"] = download_url
@@ -165,6 +186,28 @@ def create_app(test_config=None):
         app.logger.error("".join(traceback.format_exception(err)))
         return render_template("help/error.html"), 500
     return app
+
+
+# Riyeser POS is the till plus what a shop needs to run it: products and stock, customers, users, help.
+# Everything else is Riyeser Accounting's, so POS sends people back to the till.
+POS_APP_AREAS = ("pos.", "inventory.", "contacts.", "companies.", "help.", "auth.")
+
+
+def _separate_app_redirect(endpoint):
+    """Keep each app to its own screens. Riyeser POS shows only the till (and products, customers, users, help);
+    Accounting Basics and Plus send the till's screens to Riyeser POS. Both open the same company file."""
+    from .edition import is_pos_app, is_accounting_app
+    if is_pos_app():
+        if endpoint == "core.dashboard":
+            return redirect(url_for("pos.register"))
+        if endpoint.startswith(POS_APP_AREAS) or endpoint == "static":
+            return None
+        flash("That's part of Riyeser Accounting. Open it in Riyeser Accounting: it uses the same company file.",
+              "error")
+        return redirect(url_for("pos.register"))
+    if is_accounting_app() and endpoint.startswith("pos.") and endpoint != "pos.photo":
+        return redirect(url_for("links.pos_app"))
+    return None
 
 
 ENTERPRISE_ONLY = {"core.journal_new", "core.journal_list", "core.budgets", "core.jobs", "core.reverse",

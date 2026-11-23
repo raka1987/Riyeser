@@ -40,7 +40,7 @@
     <h3>Add a company</h3><p class="muted">A new, empty set of books — for another company, trust or client. You'll be its administrator with your current sign-in.</p>
     <div class="fields"><div class="wide"><label>Company name</label><input name="name" required placeholder="e.g. Harbourview Holdings Pty Ltd"></div>
       <div><label>ABN (optional)</label><input name="abn"></div>
-      {% if not product.separate %}<div><label>Edition</label><select name="edition"><option value="enterprise">{{ editions.enterprise.name }} (licence)</option><option value="basic">{{ editions.basic.name }} (free)</option></select></div>{% endif %}
+      {% if not product.separate %}<div><label>Edition</label><select name="edition"><option value="enterprise">{{ editions.enterprise.name }} (licence)</option><option value="basic">{{ editions.basic.name }} (500 free invoices)</option></select></div>{% endif %}
       <label class="check wide"><input type="checkbox" name="demo" value="1"> Fill with demo data (for practice)</label></div>
     <button class="btn pri" style="margin-top:14px" {{ 'disabled title="Your plan has no free company places - extra companies are $10 a month each"' if not room }}>Add company</button>{% if not room %}<p class="muted small">Your plan's companies are all in use. Add an extra company ($10 a month) in Riyeser Central, or archive one you no longer use.</p>{% endif %}
   </form>

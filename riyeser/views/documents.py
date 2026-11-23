@@ -6,7 +6,8 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from ..db import get_db, to_cents, linked
 from .. import pdf as pdfmod
-from ..ledger import save_document, convert_document, void_document, record_payment, void_payment, add_days
+from ..ledger import save_document, convert_document, void_document, record_payment, void_payment, add_days, \
+    PostingError
 from . import lookups, opt_int, opt_float, form_lines, guarded
 
 bp = Blueprint("documents", __name__)
@@ -93,6 +94,8 @@ def _save(side, doc_id):
     status = f.get("status", "open")
     if status not in ("quote", "order", "open"):
         raise ValueError("Invalid status.")
+    if side == "sale" and status == "open":
+        _check_free_invoices(db)
     did = save_document(db, side, header, lines, status, doc_id)
     doc = db.execute("SELECT number FROM documents WHERE id=?", (did,)).fetchone()
     flash(f"{doc['number']} saved.", "ok")
@@ -127,11 +130,26 @@ def view(doc_id):
 def convert(doc_id):
     db = get_db()
     to = request.form.get("to", "open")
+    doc = db.execute("SELECT side FROM documents WHERE id=?", (doc_id,)).fetchone()
+    if doc and doc["side"] == "sale" and to == "open":
+        _check_free_invoices(db)
     convert_document(db, doc_id, to)
     flash("Document converted.", "ok")
     if to == "open":
         _auto_pdf(db, doc_id)
     return redirect(url_for("documents.view", doc_id=doc_id))
+
+
+def free_invoices_apply():
+    """Accounting Basics (and Plus once its trial has ended without a licence) is free up to a number of invoices."""
+    c = g.get("company") or {}
+    return c.get("edition") == "basic" or bool(c.get("plus_locked"))
+
+
+def _check_free_invoices(db):
+    from .. import plan as P
+    if free_invoices_apply() and P.plan(db, "basic")["locked"]:
+        raise PostingError(P.capped_message("basic") + " Quotes and orders can still be saved.")
 
 
 def _auto_pdf(db, doc_id):
