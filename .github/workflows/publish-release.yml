@@ -142,6 +142,20 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
+      - name: Keep the previous installer of any program whose new build failed
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          for f in RiyeserPayroll-Setup.exe; do
+            [ -f "out/$f" ] && continue
+            tag=""
+            for t in $(gh release list -R "$GITHUB_REPOSITORY" -L 30 --json tagName -q '.[].tagName'); do
+              if gh release view "$t" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -qx "$f"; then tag="$t"; break; fi
+            done
+            if [ -z "$tag" ]; then echo "No earlier $f to keep"; continue; fi
+            gh release download "$tag" -R "$GITHUB_REPOSITORY" -p "$f" -D out
+            gh release view "$tag" -R "$GITHUB_REPOSITORY" --json body -q .body | grep -E "^- Riyeser Payroll " | sed 's/^- //' > out/versions-payroll.txt || true
+            echo "Kept $f from $tag (its new build didn't pass)"
+          done
       - name: Release notes
         env: { NOTES: "${{ inputs.notes }}" }
         run: |
