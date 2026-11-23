@@ -14,10 +14,52 @@ WARN_AT = 0.8       # warn once 80% of the free allowance is used
 WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices")}
 
 
-def subscribed(product=None):
-    """True when this computer has an active Riyeser licence (kept up to date by Riyeser Central)."""
+# licence.json (written by Riyeser Central from Riyeser's server) can carry, per product:
+#   "products": {"basics"|"plus"|"pos"|...: {"paid": bool, "until": ISO date, "warning": str}}
+#   "caps":     {"basic": 50, "pos": 500, ..., "warnAt": 0.8}
+PRODUCT_KEYS = {"basic": ("basics", "plus"),   # Plus includes everything in Basics
+                "pos": ("pos",)}
+
+
+def _licence_json():
+    import json
+    from .licence import licence_file
+    try:
+        with open(licence_file(), encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _paid(entry, now):
+    from .licence import _when
+    if not isinstance(entry, dict) or not entry.get("paid"):
+        return False
+    until = _when(entry.get("until")) if entry.get("until") else None
+    if until is not None and until.tzinfo is None:
+        from datetime import timezone
+        until = until.replace(tzinfo=timezone.utc)
+    return until is None or until > now
+
+
+def subscribed(product=None, now=None):
+    """True when this product is paid for on this computer.
+    With per-product subscriptions in the licence file, only that product's own subscription counts (a POS-only
+    subscription doesn't unlock Basics). Older licence files without "products" fall back to the suite licence."""
+    from datetime import datetime, timezone
+    now = now or datetime.now(timezone.utc)
+    products = _licence_json().get("products")
+    if isinstance(products, dict) and product in PRODUCT_KEYS:
+        return any(_paid(products.get(k), now) for k in PRODUCT_KEYS[product])
     from .licence import status
-    return status()["mode"] == "licensed"
+    return status(now)["mode"] == "licensed"
+
+
+def warn_at():
+    caps = _licence_json().get("caps")
+    v = caps.get("warnAt") if isinstance(caps, dict) else None
+    return v if isinstance(v, (int, float)) and 0 < v <= 1 else WARN_AT
 
 
 def used(db, product):
@@ -31,17 +73,12 @@ def used(db, product):
 
 def limit_for(product):
     """The free cap: from the licence file if Riyeser's server has set one ("caps"), else FREE_LIMITS."""
-    import json
-    from .licence import licence_file
-    try:
-        with open(licence_file(), encoding="utf-8") as f:
-            caps = json.load(f).get("caps") or {}
+    caps = _licence_json().get("caps")
+    if isinstance(caps, dict):
         key = {"basic": "accounting-basics"}.get(product, product)
-        v = caps.get(key, caps.get(product))
-        if isinstance(v, int) and v >= 0:
+        v = caps.get(product, caps.get(key))
+        if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
             return v
-    except (OSError, ValueError, AttributeError):
-        pass
     return FREE_LIMITS[product]
 
 
@@ -53,7 +90,7 @@ def plan(db, product):
     left = max(limit - n, 0)
     one, many = WHAT[product]
     return dict(product=product, licensed=licensed, used=n, left=left, limit=limit, one=one, many=many,
-                locked=not licensed and left == 0, warn=not licensed and left > 0 and n >= limit * WARN_AT)
+                locked=not licensed and left == 0, warn=not licensed and left > 0 and n >= limit * warn_at())
 
 
 def capped_message(product):
