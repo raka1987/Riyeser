@@ -1,6 +1,6 @@
 # riyeser.com
 
-The Riyeser Group website: home, a page per program, Downloads, Pricing (Accounting Basics free for 500 invoices and POS for 500 sales, other paid programs free for 90 days, then per business per month), Help Centre and Terms.
+The Riyeser Group website: home, a page per program, Downloads, Pricing (Accounting Basics free for 50 invoices and POS for 500 sales, other paid programs free for 90 days, then per business per month), Help Centre and Terms.
 
 - **Edit**: page text lives in `build.mjs`; the Help Centre guides (one per program) in `help.mjs`; styling in `assets/site.css`; program icons in `assets/apps/`.
 - **Build**: `node website/build.mjs` → `website/public/` (plain HTML, works on any web host).
