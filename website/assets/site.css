@@ -392,3 +392,7 @@ footer { background: #fff; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --soft: #0d1830; --pale: #0f1f3d; --line: #22324f; }
   :root:not([data-theme="light"]) .hero, :root:not([data-theme="light"]) .band-hero, :root:not([data-theme="light"]) .safe, :root:not([data-theme="light"]) footer { background: var(--bg); } }
 .pcard { border-color: var(--line); }
+/* every product uses its own letter-and-dot logo */
+.icon.i-services, img.appicon.i-services { background: none; padding: 0; border: 0; }
+.card > .icon { width: 54px; height: 54px; margin-bottom: 16px; }
+.menu-pop img.mi { width: 36px; height: 36px; border-radius: 10px; flex: none; }
