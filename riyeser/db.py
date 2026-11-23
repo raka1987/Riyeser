@@ -259,12 +259,12 @@ def migrate(db):
 #   title = the product name in the app's logo
 #   app   = the full name of the separate Windows app (window title, installer, Start menu)
 EDITIONS = {
-    "basic": {"name": "Basics", "title": "Accounting Basics", "app": "Riyeser Accounting Basics", "price": "50 free"},
-    "enterprise": {"name": "Plus", "title": "Accounting Plus", "app": "Riyeser Accounting Plus", "price": "Licence"},
+    "basic": {"name": "Basics", "title": "Accounting Basics", "app": "Riyeser Accounting Basics", "price": "$20 a month"},
+    "enterprise": {"name": "Plus", "title": "Accounting Plus", "app": "Riyeser Accounting Plus", "price": "+$20 a month"},
 }
 
 # The third app built from this code base: the till on its own (see riyeser/edition.py).
-POS_APP = {"name": "POS", "title": "POS", "app": "Riyeser POS", "price": "500 free sales"}
+POS_APP = {"name": "POS", "title": "POS", "app": "Riyeser POS", "price": "+$20 a month"}
 
 
 

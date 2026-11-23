@@ -1,23 +1,28 @@
-"""Free allowances, then a subscription.
+"""Free for 90 days, then a subscription.
 
-Every Riyeser program is free up to a cap, then needs a subscription (a Riyeser licence, entered in Riyeser Central):
-  * Riyeser POS:               the first 500 till sales in each company file
-  * Riyeser Accounting Basics: the first 50 invoices in each company file
-Reaching the cap never deletes or hides anything. Only the one action that's capped (a new sale, a new invoice) stops
-until a licence is entered; everything else keeps working and every record stays.
+Riyeser pricing (riyeser.com/pricing.html): every paid program — Riyeser Accounting Basics, Accounting Plus, Riyeser POS,
+Payroll and As Built — is free for 90 days with no card, then $20 a month per business (Basics) or +$20 a month each.
+The trial and the licence are kept by Riyeser Central in licence.json (see riyeser/licence.py).
 
-This is the one place that decides it, so the caps can change, or a subscription/billing backend can take over
-`subscribed()`, without touching the screens.
+When the trial ends without a licence, nothing is deleted or hidden. Only the paid actions stop (a new till sale, a new
+invoice) until a licence is entered; everything else keeps working and every record stays.
+
+This is the one place that decides it, so a billing backend can take over `subscribed()` without touching the screens.
 """
-FREE_LIMITS = {"pos": 500, "basic": 50}
-WARN_AT = 0.8       # warn once 80% of the free allowance is used
+from .licence import TRIAL_DAYS
+
+WARN_DAYS = 14      # remind people in the last two weeks of the trial
 WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices")}
+
+
+def _status():
+    from .licence import status
+    return status()
 
 
 def subscribed(product=None):
     """True when this computer has an active Riyeser licence (kept up to date by Riyeser Central)."""
-    from .licence import status
-    return status()["mode"] == "licensed"
+    return _status()["mode"] == "licensed"
 
 
 def used(db, product):
@@ -29,34 +34,20 @@ def used(db, product):
                       " AND NOT EXISTS (SELECT 1 FROM pos_sales p WHERE p.document_id=d.id)").fetchone()[0]
 
 
-def limit_for(product):
-    """The free cap: from the licence file if Riyeser's server has set one ("caps"), else FREE_LIMITS."""
-    import json
-    from .licence import licence_file
-    try:
-        with open(licence_file(), encoding="utf-8") as f:
-            caps = json.load(f).get("caps") or {}
-        key = {"basic": "accounting-basics"}.get(product, product)
-        v = caps.get(key, caps.get(product))
-        if isinstance(v, int) and v >= 0:
-            return v
-    except (OSError, ValueError, AttributeError):
-        pass
-    return FREE_LIMITS[product]
-
-
 def plan(db, product):
-    """{'product', 'licensed', 'used', 'left', 'limit', 'locked', 'warn', 'one', 'many'}"""
-    limit = limit_for(product)
-    licensed = subscribed(product)
-    n = used(db, product)
-    left = max(limit - n, 0)
+    """{'product', 'licensed', 'trial', 'left' (trial days left), 'limit' (trial length), 'used', 'locked', 'warn', 'one', 'many'}"""
+    st = _status()
+    licensed = st["mode"] == "licensed"
+    # No licence file yet (Riyeser Central not installed or not opened): treat it as the start of the trial.
+    trial = st["mode"] in ("trial", "unknown")
+    left = st.get("days_left", TRIAL_DAYS) if trial else 0
     one, many = WHAT[product]
-    return dict(product=product, licensed=licensed, used=n, left=left, limit=limit, one=one, many=many,
-                locked=not licensed and left == 0, warn=not licensed and left > 0 and n >= limit * WARN_AT)
+    return dict(product=product, licensed=licensed, trial=trial and not licensed, used=used(db, product),
+                left=left, limit=TRIAL_DAYS, one=one, many=many,
+                locked=not licensed and not trial, warn=not licensed and trial and left <= WARN_DAYS)
 
 
 def capped_message(product):
-    limit, (_, many) = limit_for(product), WHAT[product]
-    return (f"You've used your {limit} free {many}. Enter a Riyeser licence in Riyeser Central to keep going. "
-            "Nothing has been deleted.")
+    _, many = WHAT[product]
+    return (f"Your {TRIAL_DAYS}-day free trial has ended. Enter a Riyeser licence in Riyeser Central to keep adding "
+            f"{many}. Nothing has been deleted.")

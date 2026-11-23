@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.3.0"
+__version__ = "2.3.1"
 
 
 def create_app(test_config=None):
@@ -72,7 +72,7 @@ def create_app(test_config=None):
                 g.company["edition"] = app_ed
                 g.company["plus_locked"] = app_ed == "enterprise" and not g.company["enterprise_allowed"]
             elif not g.company["enterprise_allowed"]:
-                g.company["edition"] = "basic"  # Basic is free up to 50 invoices; Enterprise needs a licence (data is kept)
+                g.company["edition"] = "basic"  # after the trial: Enterprise needs a licence (data is kept)
         public = ("auth.login", "auth.setup_company", "auth.forgot", "static")
         if g.user is None and request.endpoint not in public:
             return redirect(url_for("auth.login", next=request.path))
@@ -105,7 +105,7 @@ def create_app(test_config=None):
                     flash(f"That's part of {ent}. An administrator can switch to {ent} under "
                           "Setup → Company (your data stays as it is).", "error")
                 else:
-                    flash(f"That's part of {ent}, which needs a licence. {basic} is free for your first 50 invoices. "
+                    flash(f"That's part of {ent}, which needs a licence after the 90-day free trial. "
                           f"Enter a licence in Riyeser Central to unlock {ent} (your data stays as it is).", "error")
                 return redirect(url_for("core.dashboard"))
 

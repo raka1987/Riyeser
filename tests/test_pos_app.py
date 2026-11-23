@@ -1,4 +1,4 @@
-"""Riyeser POS as its own app: the till on its own, Accounting without the till, and 500 free sales."""
+"""Riyeser POS as its own app: the till on its own, Accounting without the till, and the 90-day free trial."""
 import json
 from datetime import datetime, timezone
 
@@ -78,36 +78,41 @@ def test_pos_sales_show_in_accounting_as_paid_invoices(tmp_path, monkeypatch):
     assert doc["status"] == "paid" and doc["total"] == 440
 
 
-def test_500_free_sales_then_a_licence(tmp_path, monkeypatch):
-    app, c, item = make(tmp_path, monkeypatch, "pos")
-    monkeypatch.setitem(plan.FREE_LIMITS, "pos", 3)
-    monkeypatch.setattr(plan, "WARN_AT", 0.3)
-    assert sell(c, item).get_json()["ok"]
-    assert "2 free sales left" in c.get("/pos/").get_data(as_text=True)
-    sid = sell(c, item).get_json()["sale_id"]
-    c.post(f"/pos/sale/{sid}/void")                   # voided sales don't count
-    assert sell(c, item).get_json()["ok"]
-    assert sell(c, item).get_json()["ok"]
-    r = sell(c, item)
-    assert r.status_code == 402 and "free sales" in r.get_json()["error"]
-    page = c.get("/pos/").get_data(as_text=True)
-    assert "used your 3 free sales" in page and "Nothing has been deleted" in page
-    assert c.get("/pos/sales").status_code == 200   # past sales stay viewable
-    with app.app_context():
-        assert get_db().execute("SELECT COUNT(*) FROM pos_sales").fetchone()[0] == 4
-    # a licence from Riyeser Central removes the limit
+def _trial(tmp_path, days_ago, licensed=False):
+    from datetime import timedelta
     f = tmp_path / "appdata" / "Riyeser" / "licence.json"
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"key": "K", "licence": {"status": "active",
-                                                      "checkedAt": datetime.now(timezone.utc).isoformat()}}))
+    now = datetime.now(timezone.utc)
+    d = {"trialStart": (now - timedelta(days=days_ago)).isoformat()}
+    if licensed:
+        d.update({"key": "K", "licence": {"status": "active", "checkedAt": now.isoformat()}})
+    f.write_text(json.dumps(d))
+
+
+def test_pos_is_free_for_90_days_then_a_licence(tmp_path, monkeypatch):
+    app, c, item = make(tmp_path, monkeypatch, "pos")
+    _trial(tmp_path, 10)
     assert sell(c, item).get_json()["ok"]
-    assert "free sale" not in c.get("/pos/").get_data(as_text=True)
+    page = c.get("/pos/").get_data(as_text=True)
+    assert "left in your free trial" not in page and "trial has ended" not in page   # no nagging early on
+    _trial(tmp_path, 80)                               # last two weeks: a reminder on the till
+    assert "10 days left in your free trial" in c.get("/pos/").get_data(as_text=True)
+    assert sell(c, item).get_json()["ok"]
+    _trial(tmp_path, 91)                               # trial over, no licence: new sales stop
+    r = sell(c, item)
+    assert r.status_code == 402 and "90-day free trial has ended" in r.get_json()["error"]
+    page = c.get("/pos/").get_data(as_text=True)
+    assert "free trial has ended" in page and "Nothing has been deleted" in page
+    assert c.get("/pos/sales").status_code == 200   # past sales stay viewable
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM pos_sales").fetchone()[0] == 2
+    _trial(tmp_path, 91, licensed=True)                # a licence from Riyeser Central: selling again
+    assert sell(c, item).get_json()["ok"]
+    assert "free trial" not in c.get("/pos/").get_data(as_text=True).lower()
 
 
-def test_accounting_basics_is_free_for_50_invoices(tmp_path, monkeypatch):
+def test_accounting_basics_is_free_for_90_days(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "basics")
-    monkeypatch.setitem(plan.FREE_LIMITS, "basic", 2)
-    monkeypatch.setattr(plan, "WARN_AT", 0.5)
     with app.app_context():
         cust = get_db().execute("INSERT INTO contacts (kind, name) VALUES ('customer','Jo')").lastrowid
         get_db().commit()
@@ -118,23 +123,13 @@ def test_accounting_basics_is_free_for_50_invoices(tmp_path, monkeypatch):
                                          "line_price": "4", "line_discount": "", "line_account": "", "line_tax": "",
                                          "line_job": ""}, follow_redirects=True)
 
+    _trial(tmp_path, 30)
     assert "saved" in invoice().get_data(as_text=True)
-    page = c.get("/").get_data(as_text=True)
-    assert "1 free invoice left" in page
-    assert "saved" in invoice().get_data(as_text=True)
+    assert "Free trial · 60 days left" in c.get("/").get_data(as_text=True)
+    _trial(tmp_path, 95)
     page = invoice().get_data(as_text=True)
-    assert "used your 2 free invoices" in page
-    assert "saved" in invoice("quote").get_data(as_text=True)       # quotes are still free
+    assert "90-day free trial has ended" in page
+    assert "saved" in invoice("quote").get_data(as_text=True)       # quotes are still allowed
     with app.app_context():
         n = get_db().execute("SELECT COUNT(*) FROM documents WHERE side='sale' AND status!='quote'").fetchone()[0]
-    assert n == 2
-
-
-def test_server_set_caps_in_the_licence_file_win(tmp_path, monkeypatch):
-    app, c, item = make(tmp_path, monkeypatch, "pos")
-    f = tmp_path / "appdata" / "Riyeser" / "licence.json"
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"caps": {"pos": 1, "accounting-basics": 7}}))
-    assert plan.limit_for("pos") == 1 and plan.limit_for("basic") == 7
-    assert sell(c, item).get_json()["ok"]
-    assert sell(c, item).status_code == 402
+    assert n == 1

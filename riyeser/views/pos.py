@@ -74,7 +74,7 @@ def pos_config(db):
     return mode, on & allowed
 
 
-# ------------------------------------------------------------ free sales, then a licence (see riyeser/plan.py)
+# ------------------------------------------------------------ 90-day free trial, then a licence (see riyeser/plan.py)
 def plan(db):
     from .. import plan as P
     return P.plan(db, "pos")
@@ -82,7 +82,7 @@ def plan(db):
 
 @bp.app_template_global()
 def pos_free_plan():
-    """For the till's banner: how many free sales are left (None outside a company)."""
+    """For the till's banner: trial days left, or a licence (None outside a company)."""
     try:
         return plan(get_db())
     except Exception:

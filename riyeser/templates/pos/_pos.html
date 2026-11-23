@@ -100,8 +100,8 @@ details.um{position:relative}details.um>summary{list-style:none;cursor:pointer}d
       <a href="{{ url_for('help.index') }}#pos">Help</a>
       <a href="{{ url_for('auth.logout') }}">Sign out</a></div></details>
   </header>
-  {% set fp = pos_free_plan() %}{% if fp and fp.locked %}<div class="flash error">🔒 <b>You've used your {{ fp.limit }} free sales.</b> To keep selling, enter a Riyeser licence in Riyeser Central (Licence). Nothing has been deleted: your sales, receipts, close-till reports, products and stock are all still here.</div>
-  {% elif fp and fp.warn %}<div class="flash warn">{{ fp.left }} free sale{{ '' if fp.left == 1 else 's' }} left out of {{ fp.limit }}. After that, enter a Riyeser licence in Riyeser Central to keep selling.</div>{% endif %}
+  {% set fp = pos_free_plan() %}{% if fp and fp.locked %}<div class="flash error">🔒 <b>Your {{ fp.limit }}-day free trial has ended.</b> To keep selling, enter a Riyeser licence in Riyeser Central (Licence). Nothing has been deleted: your sales, receipts, close-till reports, products and stock are all still here.</div>
+  {% elif fp and fp.warn %}<div class="flash warn">{{ fp.left }} day{{ '' if fp.left == 1 else 's' }} left in your free trial. After that, enter a Riyeser licence in Riyeser Central to keep selling.</div>{% endif %}
   {% with msgs = get_flashed_messages(with_categories=true) %}{% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}{% endwith %}
   <main class="main">{% block body %}{% endblock %}</main>
 </div>
