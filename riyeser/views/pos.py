@@ -74,6 +74,21 @@ def pos_config(db):
     return mode, on & allowed
 
 
+# ------------------------------------------------------------ free sales, then a licence (see riyeser/plan.py)
+def plan(db):
+    from .. import plan as P
+    return P.plan(db, "pos")
+
+
+@bp.app_template_global()
+def pos_free_plan():
+    """For the till's banner: how many free sales are left (None outside a company)."""
+    try:
+        return plan(get_db())
+    except Exception:
+        return None
+
+
 def _tills(db):
     return db.execute("SELECT * FROM pos_tills WHERE active=1 ORDER BY id").fetchall()
 
@@ -606,6 +621,9 @@ def docket(oid):
 def sale():
     db = get_db()
     data = request.get_json(silent=True) or {}
+    if plan(db)["locked"]:
+        from ..plan import capped_message
+        return jsonify(ok=False, error=capped_message("pos")), 402
     try:
         method = data.get("method")
         if method not in METHODS:

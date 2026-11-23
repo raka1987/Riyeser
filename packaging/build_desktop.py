@@ -1,12 +1,13 @@
 """Build a Riyeser Accounting desktop app for the current OS.
 
     pip install . pyinstaller
-    python packaging/build_desktop.py --edition basics   # Riyeser Accounting Basics (free)
+    python packaging/build_desktop.py --edition basics   # Riyeser Accounting Basics (50 free invoices)
     python packaging/build_desktop.py --edition plus     # Riyeser Accounting Plus (licence)
+    python packaging/build_desktop.py --edition pos      # Riyeser POS (500 free sales, then a licence)
 
-Two separate apps from one code base: the edition is baked into the build (riyeser/_built_edition.py), with its own
+Three separate apps from one code base: the edition is baked into the build (riyeser/_built_edition.py), with its own
 name, icon and colours. Output: dist/Riyeser Accounting Basics.exe / dist/Riyeser Accounting Plus.exe (Windows),
-.app bundles on macOS, riyeser-accounting-basics / riyeser-accounting-plus on Linux.
+dist/Riyeser POS.exe, .app bundles on macOS, riyeser-accounting-basics / -plus / riyeser-pos on Linux.
 """
 import argparse
 import os
@@ -22,10 +23,10 @@ sep = os.pathsep
 system = platform.system()
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--edition", choices=["basics", "plus"], required=True)
+ap.add_argument("--edition", choices=["basics", "plus", "pos"], required=True)
 EDITION = ap.parse_args().edition
-APP_NAME = {"basics": "Riyeser Accounting Basics", "plus": "Riyeser Accounting Plus"}[EDITION]
-ICON = ROOT / "packaging" / ("basics.ico" if EDITION == "basics" else "plus.ico")
+APP_NAME = {"basics": "Riyeser Accounting Basics", "plus": "Riyeser Accounting Plus", "pos": "Riyeser POS"}[EDITION]
+ICON = ROOT / "packaging" / f"{EDITION}.ico"
 built = PKG / "_built_edition.py"
 built.write_text(f'APP_EDITION = "{EDITION}"\n', encoding="utf-8")
 
@@ -50,7 +51,7 @@ args = [
     "--specpath", str(ROOT / "build"),
 ]
 if system == "Darwin":
-    args += ["--windowed", "--osx-bundle-identifier", f"com.riyeser.accounting.{EDITION}"]
+    args += ["--windowed", "--osx-bundle-identifier", "com.riyeser.pos" if EDITION == "pos" else f"com.riyeser.accounting.{EDITION}"]
 elif system == "Windows":
     # Its own app window (pywebview on Microsoft Edge WebView2, which Windows 10/11 already has) - never the web browser.
     args += ["--windowed", "--onefile", "--icon", str(ICON),

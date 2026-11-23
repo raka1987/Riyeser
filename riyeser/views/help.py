@@ -31,7 +31,8 @@ def section_for(endpoint):
 
 @bp.route("/")
 def index():
-    return render_template("help/index.html", version=__version__)
+    from ..edition import is_pos_app
+    return render_template("help/pos.html" if is_pos_app() else "help/index.html", version=__version__)
 
 
 def diagnostics(db):

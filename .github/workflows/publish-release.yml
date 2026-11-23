@@ -3,7 +3,7 @@ name: Publish Riyeser release
 # One button for a new public release of the Riyeser Windows programs:
 #   Actions → "Publish Riyeser release" → Run workflow
 # Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF and As Built (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
-# (main) and Riyeser Payroll (branch module/payroll) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
+# and Riyeser POS (main) and Riyeser Payroll (branch module/payroll) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
 # every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
 on:
   workflow_dispatch:
@@ -61,21 +61,21 @@ jobs:
         with: { name: desktop, path: desktop/release/*, if-no-files-found: error }
 
   accounting:
-    name: Accounting Basics and Accounting Plus
+    name: Accounting Basics, Accounting Plus and POS
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with: { ref: main }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - name: Build both apps and their installers
+      - name: Build the three apps and their installers
         shell: pwsh
         run: |
           pip install . pyinstaller
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           $ver = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          foreach ($ed in "basics", "plus") {
+          foreach ($ed in "basics", "plus", "pos") {
             python packaging/build_desktop.py --edition $ed
             if ($LASTEXITCODE -ne 0) { throw "$ed build failed" }
             & $iscc "/DEdition=$ed" "/DAppVersion=$ver" packaging\installer.iss
@@ -95,6 +95,16 @@ jobs:
             Copy-Item $setup.FullName "release\$($app.file).exe"
             "$($now[0])" | Set-Content "release\versions-accounting-$($app.ed.ToLower()).txt"
           }
+          # Riyeser POS installs next to Accounting (Plus stays installed).
+          $setup = Get-ChildItem "dist\RiyeserPOS-Setup-*.exe" | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+          $pos = @((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser POS*").DisplayName)
+          if ($pos.Count -ne 1) { throw "Riyeser POS is not listed in Installed apps" }
+          $now = @(Installed)
+          if ($now.Count -ne 1 -or $now[0] -notlike "Riyeser Accounting Plus *") { throw "Installing POS should leave Accounting Plus installed, found: $now" }
+          Write-Host "OK:" $pos[0]
+          Copy-Item $setup.FullName "release\RiyeserPOS-Setup.exe"
+          "$($pos[0])" | Set-Content "release\versions-pos.txt"
           # Older Riyeser Central (1.3.6 and before) and old links download RiyeserAccounting-Setup.exe: give them Plus.
           Copy-Item release\RiyeserAccountingPlus-Setup.exe release\RiyeserAccounting-Setup.exe
       - uses: actions/upload-artifact@v4
@@ -198,5 +208,6 @@ jobs:
             out/RiyeserAccountingBasics-Setup.exe
             out/RiyeserAccountingPlus-Setup.exe
             out/RiyeserAccounting-Setup.exe
+            out/RiyeserPOS-Setup.exe
             out/RiyeserPayroll-Setup.exe
           fail_on_unmatched_files: false  # Payroll's file may be missing if its job failed; the others are checked above

@@ -22,12 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
-        edition: [basics, plus]
+        edition: [basics, plus, pos]
     runs-on: ${{ matrix.os }}
     env:
-      APP: ${{ matrix.edition == 'basics' && 'Riyeser Accounting Basics' || 'Riyeser Accounting Plus' }}
-      LINUX_APP: ${{ matrix.edition == 'basics' && 'riyeser-accounting-basics' || 'riyeser-accounting-plus' }}
-      SETUP: ${{ matrix.edition == 'basics' && 'RiyeserAccountingBasics-Setup' || 'RiyeserAccountingPlus-Setup' }}
+      APP: ${{ fromJSON('{"basics":"Riyeser Accounting Basics","plus":"Riyeser Accounting Plus","pos":"Riyeser POS"}')[matrix.edition] }}
+      LINUX_APP: ${{ fromJSON('{"basics":"riyeser-accounting-basics","plus":"riyeser-accounting-plus","pos":"riyeser-pos"}')[matrix.edition] }}
+      SETUP: ${{ fromJSON('{"basics":"RiyeserAccountingBasics-Setup","plus":"RiyeserAccountingPlus-Setup","pos":"RiyeserPOS-Setup"}')[matrix.edition] }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -93,10 +93,12 @@ jobs:
             dist/*.exe
             dist/*-macOS.zip
             dist/riyeser-accounting-*
+            dist/riyeser-pos
           if-no-files-found: error
 
   switch:
-    # Basics -> Plus -> Basics on one PC: only one app installed at a time, and the company file is never touched.
+    # Basics -> Plus -> Basics on one PC: only one Accounting app installed at a time, and the company file is never
+    # touched. Then Riyeser POS, which installs next to Accounting.
     needs: build
     runs-on: windows-latest
     steps:
@@ -125,6 +127,17 @@ jobs:
           if ($now.Count -ne 1 -or $now[0] -notlike "Riyeser Accounting Basics*") { throw "Basics should replace Plus" }
           if ((Get-FileHash $db).Hash -ne $size) { throw "Company file changed on downgrade" }
           Write-Host "OK: one app at a time, books kept"
+          # Riyeser POS sits next to Accounting: installing it must not remove Basics, and it opens the same books.
+          $pos = Get-ChildItem out\RiyeserPOS-Setup-*.exe | Select-Object -First 1
+          Run $pos
+          $now = @(Installed); Write-Host "After POS, Accounting:" $now
+          if ($now.Count -ne 1 -or $now[0] -notlike "Riyeser Accounting Basics*") { throw "Installing POS should leave Accounting Basics installed" }
+          $posEntry = (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser POS*").DisplayName
+          if (-not $posEntry) { throw "Riyeser POS is not listed in Installed apps" }
+          Run $plus
+          if (-not (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser POS*")) { throw "Installing Plus removed Riyeser POS" }
+          if ((Get-FileHash $db).Hash -ne $size) { throw "Company file changed" }
+          Write-Host "OK: Riyeser POS installs next to Accounting:" $posEntry
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

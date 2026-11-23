@@ -82,6 +82,7 @@ tfoot td{font-weight:700}
 .flash{padding:10px 14px;border-radius:8px;margin-bottom:14px;border:1px solid}
 .flash.ok{background:var(--ok-bg);color:var(--ok);border-color:#b7e4c7}
 .flash.error{background:var(--err-bg);color:var(--err);border-color:#f3c3bd}
+.flash.warn{background:#fff4e5;color:var(--warn);border-color:#f8d9a8}
 form.inline{display:inline}
 label{display:block;font-size:12.5px;color:#475467;font-weight:500;margin-bottom:4px}
 input,select,textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;background:#fff;color:var(--ink)}
@@ -161,3 +162,9 @@ body.ed-basic .login .logo, body.ed-basic .brand .logo { background: linear-grad
 .ed .edprice { color: var(--muted); margin: 0 0 8px; }
 .ed .youare { color: var(--ok); font-weight: 700; margin: 10px 0 0; }
 @media (max-width: 800px) { .eds { grid-template-columns: 1fr; } }
+
+/* Riyeser POS (the till as its own app): teal "Po." */
+body.ed-pos { --brand:#0f766e; --brand-d:#0f5f58; --brand-l:#e0f5f2; --accent:#facc15; --accent-l:#fef9c3; }
+body.ed-pos .side { border-top: 4px solid #14b8a6; }
+body.ed-pos .login .logo, body.ed-pos .brand .logo { background: linear-gradient(135deg,#14b8a6,#0f6e66); font-size: 15px; letter-spacing: -.5px; }
+body.ed-pos .brand .logo::after { background: #facc15; right: 3px; bottom: 8px; }

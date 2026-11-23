@@ -25,17 +25,7 @@
 <li>Set a <b>reorder level</b> on each item to see it on the dashboard and in <b>Items to Reorder</b> when stock runs low.</li>
 <li>The <b>Category</b> (e.g. Coffee, Hardware) decides which tab the item shows under in Riyeser POS.</li></ul></div>
 
-<div class="card"><h2 id="pos">Riyeser POS</h2><ul>
-<li><b>Open register</b> opens the full-screen till. Tap products (or scan a barcode), check the <b>Current sale</b>, then tap <b>Pay</b>. Choose Cash or Card; for cash, tap the note the customer gave and the till shows the change.</li>
-<li><b>POS setup</b> (Shop counter → POS setup, owners and administrators only) sets the business type: <b>Retail</b> or <b>Restaurant</b>. Retail never shows tables or the kitchen. Each type has switches, such as barcode scanning, stock on tiles, tables, kitchen dockets and discounts. You can also name your tills here.</li>
-<li><b>Retail</b>: scan a barcode, or type a SKU and press Enter, or tap tiles. <b>Hold</b> puts a sale aside while the customer fetches something; find it again under <b>Held sales</b>.</li>
-<li><b>Restaurant</b>: choose <b>Dine-in</b> and a table, or <b>Takeaway</b>. Tap a line in the order to change the quantity, add options or a kitchen note (e.g. oat milk), or give a discount. <b>Send to kitchen</b> prints a docket. Tables with an open bill show amber in the table picker.</li>
-<li><b>Photos and Favourites</b>: in Inventory, edit a product to add a photo and tick <b>Show in POS Favourites</b>. Favourites are the first tab on the till.</li>
-<li><b>Sales</b> shows the day: totals, GST, sales by hour, best sellers and every sale with Receipt, Refund and Void.</li>
-<li><b>Manager approvals</b> (Shop counter → Manager approvals): managers are the people with Full access to Sales. Give each a <b>PIN</b> and, if you like, a <b>manager card</b> (any barcode card, scanned with the till's scanner). Staff then need a manager's PIN or card to void a sale, give a refund, give a discount over the limit, or close a till that doesn't balance. The manager approves on the same screen. Staff stay logged in. Every approval, with its reason, is kept in the override log. Lost a card? Disable it there straight away.</li>
-<li><b>Refunds</b>: on the Sales screen, tap Refund, choose the items coming back and how the money goes back. Stock returns to the shelf, and the income and GST come off.</li>
-<li><b>Open and close the till</b>: the first time you sell, the till asks for the float (the change you start with). At the end of the day choose <b>Close till</b>, count the notes and coins, and Riyeser shows if the drawer is over or short. Closing prints the Z-report, records any difference in the <b>Cash Over/Short</b> account, and records the takings going to the bank. <b>Print mid-day report (X-read)</b> shows the figures without closing.</li>
-</ul></div>
+{% include "help/_pos_card.html" %}
 
 <div class="card"><h2 id="banking">Money &amp; banking</h2><ul>
 <li><b>Money Out</b> / <b>Money In</b>: payments and deposits that aren't for an invoice or bill (rent, bank fees, interest). Amounts include GST unless you untick it.</li>

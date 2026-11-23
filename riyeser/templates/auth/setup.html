@@ -10,7 +10,7 @@
   <label style="margin-top:12px">Admin password</label><input name="password" type="password" required minlength="4">
 {% if not product.separate %}
   <label style="margin-top:14px">Edition</label>
-  <label class="check"><input type="radio" name="edition" value="basic" checked> <span><b>{{ editions.basic.name }}</b> (free) · invoices, quotes, customers, stock items, inventory reports</span></label>
+  <label class="check"><input type="radio" name="edition" value="basic" checked> <span><b>{{ editions.basic.name }}</b> (free for your first 50 invoices) · invoices, quotes, customers, stock items, inventory reports</span></label>
   <label class="check" style="margin-top:6px"><input type="radio" name="edition" value="enterprise"> <span><b>{{ editions.enterprise.name }}</b> (free during the trial, then a licence) · everything: adds bank reconciliation, payroll, journals, jobs, budgets</span></label>
   <p class="muted" style="font-size:12px;margin:6px 0 0">You can upgrade later under Setup without losing anything.</p>
 {% endif %}
