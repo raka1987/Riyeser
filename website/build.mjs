@@ -64,6 +64,19 @@ const PROGRAMS = [
       ['Every report', 'Profit & Loss, Balance Sheet, Trial Balance, aged receivables and payables, job P&L — print or export to Excel.'],
     ],
     note: 'Built for Australian small businesses. Have your accountant check your setup before relying on it for tax.' },
+  { id: 'pos', name: 'Riyeser POS', short: 'POS', icon: '🧾', file: 'RiyeserAccountingBasics-Setup.exe',
+    one: 'A touch-friendly till for retail shops or cafes and restaurants. Every sale goes straight into your books. +$20 a month, free for 90 days.',
+    pitch: 'Sell at the counter. Books done automatically.',
+    shot: 'pos-till.webp',
+    features: [
+      ['Retail or restaurant', 'Choose your setup in POS setup: barcode scanning and returns for shops, or tables, kitchen dockets and takeaway for cafes.'],
+      ['Fast selling', 'Photo product tiles, Favourites, categories, search or scan, and Hold a sale to come back to it.'],
+      ['Cash or card', 'A cash keypad that works out the change, card payments, and GST tax-invoice receipts.'],
+      ['Named tills', 'Till 1, Bar, Front counter — each sale records which till took it.'],
+      ['Straight into Accounting', 'Every sale is a proper invoice and payment, so stock, GST/BAS and reports update by themselves.'],
+      ['Sales & Today', 'Today\'s takings, sales by hour and best sellers, with receipts and voids kept in the audit trail.'],
+    ],
+    note: 'Riyeser POS runs inside Riyeser Accounting: install Accounting Basics or Plus and open Shop counter. Manager approvals and close-till reports are coming next.' },
   { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: PAYROLL_WIN ? 'RiyeserPayroll-Setup.exe' : null,
     one: 'Time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click.',
     pitch: 'Pay day without the paperwork.',
@@ -110,6 +123,7 @@ const CARD = {
   central: ['Your home screen: money owed, meetings, to-dos and every Riyeser program.', 'Home screen and updates'],
   'accounting-basics': ['Invoices, quotes, customers and stock. $20 a month per business.', 'Invoicing and stock'],
   accounting: ['Full books: banking, reconciliation, BAS, payroll, journals, jobs and budgets.', 'Full books, +$20 a month'],
+  pos: ['A touch-friendly till for shops, cafes and restaurants.', 'Shop counter till'],
   payroll: ['Time clock, timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
   'desk-assistant': ['Sorts your files by type and year, and finds anything in seconds.', 'Sort and find your files'],
   pdf: ['Open, fill in, sign, mark up and combine PDFs, even scanned ones.', 'Fill, sign and edit PDFs'],
@@ -133,6 +147,7 @@ const SEARCH = svg('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>
 const BOOK = svg('<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/>');
 // Line icons (outlined, like the sample layouts). Each is the inside of a 24×24 SVG.
 const LI = {
+  pos: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M7 20h10M12 16v4M7 8h4M7 11h7"/>',
   central: '<rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M8 20.5h8M12 16.5v4"/><path d="M10 13V7h2.6a1.8 1.8 0 0 1 0 3.6H10M12.4 10.6L14.4 13"/>',
   'accounting-basics': '<rect x="4.5" y="2.5" width="15" height="19" rx="2"/><rect x="7" y="5" width="10" height="4" rx=".8"/><path d="M8 12.5h.01M12 12.5h.01M16 12.5h.01M8 15.5h.01M12 15.5h.01M16 15.5h.01M8 18.5h.01M12 18.5h.01M16 18.5h.01"/>',
   accounting: '<ellipse cx="15" cy="6" rx="6" ry="2.5"/><path d="M9 6v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V6"/><path d="M21 10v4c0 1.4-2.7 2.5-6 2.5"/><ellipse cx="9" cy="14" rx="6" ry="2.5"/><path d="M3 14v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4"/>',
@@ -504,7 +519,7 @@ page({
 </section>
 <section class="c" style="padding-top:0">
   <h2 class="h2">Every program</h2><p class="sub">Or download a program on its own. Each one installs in one click and updates over the old version, so your information is kept.</p>
-  ${PROGRAMS.filter((p) => p.id !== 'central').map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p></div>${p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join('')}
+  ${PROGRAMS.filter((p) => p.id !== 'central').map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p></div>${p.id === 'pos' ? `<a class="btn s" href="${up}programs/accounting-basics.html">Included in Accounting</a>` : p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join('')}
   <div class="note" style="margin-top:26px"><b>Windows says “Windows protected your PC”?</b> Click <b>More info</b>, then <b>Run anyway</b>. We're getting our programs signed so this goes away. The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates and your licence.</div>
 </section>
 ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the same button names you see on screen.')}`,

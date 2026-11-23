@@ -52,7 +52,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'accounting-basics', blurb: 'Invoices, stock, the shop counter and reports.', app: 'accounting-basics', name: 'Accounting Basics', badge: ['free', 'Free'],
+      id: 'accounting-basics', blurb: 'Invoices, stock, the shop counter and reports.', app: 'accounting-basics', name: 'Accounting Basics', badge: ['trial', '90 days free'],
       intro: 'Free invoicing, quotes, customers, suppliers, stock and a shop counter. Everything here also works the same way in Accounting Plus.',
       groups: [
         { title: 'Getting started', items: [
@@ -127,6 +127,25 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
         { title: 'More than one company', items: [
           ['companies', 'Run several companies (groups, trusts or clients)', '<ol><li>Click <b>Companies</b> in the menu, then <b>+ Add company</b>. Each company has its own books and users.</li><li>Switch company from its name at the top of the screen.</li><li><b>Companies</b> also shows cash, money owed, bills and profit for every company and in total.</li></ol><p>Have a company file from another computer or a client? Use <b>Bring in an existing company file</b>. The original isn\'t changed. Your plan includes one company; extra companies are $10 a month each.</p>'],
           ['roles', 'Give each person the right access', '<p>Open <b>Setup → Users &amp; roles</b>. Choose <b>Hidden</b>, <b>View</b>, <b>Add &amp; edit</b> or <b>Full</b> for each area, or click a quick set: <b>Owner</b>, <b>Bookkeeper</b>, <b>Sales staff</b>, <b>Payroll officer</b> or <b>Read-only</b>. Hidden areas really are hidden: their menus, figures and reports don\'t appear.</p>'],
+        ] },
+      ],
+    },
+    {
+      id: 'pos', blurb: 'The shop counter: selling, payments and setup.', app: 'pos', name: 'Riyeser POS', badge: ['trial', '90 days free'],
+      intro: 'A touch-friendly till inside Riyeser Accounting. Every sale is saved as an invoice and payment, so stock, GST and reports update by themselves.',
+      groups: [
+        { title: 'Getting started', items: [
+          ['open', 'Open the till', '<ol><li>Open Riyeser Accounting (Basics or Plus).</li><li>Click <b>Shop counter</b> in the menu, then <b>Open register</b>. Or open it straight from Riyeser Central.</li></ol>'],
+          ['setup', 'Choose Retail or Restaurant', '<ol><li>Go to <b>Shop counter → POS setup</b> in Accounting's menu (you need Full access to Setup to save).</li><li>Pick <b>Retail</b> or <b>Restaurant</b>. Each starts with sensible switches: barcode scanning and returns for shops; tables, kitchen dockets and takeaway for cafes.</li><li>Turn any switch on or off, name your tills (for example Till 1, Bar), and click <b>Save</b>.</li></ol>'],
+          ['products', 'Add products, photos and Favourites', '<ol><li>Open <b>Stock items</b> and open (or add) an item.</li><li>Add a photo and tick <b>Show in POS Favourites</b> for your best sellers.</li><li>The item appears on the till under its category, with its price and stock.</li></ol>'],
+        ] },
+        { title: 'Selling', items: [
+          ['sell', 'Ring up a sale', '<ol><li>Tap products, or type or scan in <b>Search or scan an item</b>.</li><li>Change quantities in <b>Current sale</b>; tap <b>Hold</b> to park a sale and come back to it.</li><li>Tap <b>Pay</b>, choose <b>Cash</b> (the keypad works out the change) or <b>Card</b>, and finish the sale.</li></ol>'],
+          ['receipt', 'Print or reprint a receipt', '<p>After the sale, choose <b>Print receipt</b>. To reprint, open <b>Sales</b>, find the sale and click <b>Receipt</b>.</p>'],
+          ['void', 'Void a sale', '<p>Open <b>Sales</b>, find the sale and click <b>Void</b>. You need Full access to Sales. Stock goes back and the takings are reversed; the sale stays in the audit trail, it is never deleted.</p>'],
+        ] },
+        { title: 'End of the day', items: [
+          ['today', "See today's takings", '<p>Open <b>Sales</b> for today\'s takings, sales by hour and your best sellers.</p>'],
         ] },
       ],
     },
