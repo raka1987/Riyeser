@@ -1,7 +1,7 @@
 // Riyeser Central: the Riyeser Group home screen. Opens every Riyeser program and shows, like a PA would, what needs
 // attention today: meetings, to-dos, money owed and owing, and recent documents, plus one search for every file.
 // It only READS the other programs' data, so it can never damage their files.
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, safeStorage } = require('electron');
 const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
 const licence = require('./core/licence');
@@ -269,11 +269,22 @@ function registerIpc() {
     const organisedRoot = deskInstalled ? ((da.settings && da.settings.organisedRoot) || '') : '';
     return { deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, taskCount: open.length, money, recent, payroll, organisedRoot };
   });
-  // ---------- licence (one for the whole Riyeser suite; %APPDATA%\Riyeser\licence.json) ----------
+  // ---------- plan (one Riyeser account for the whole suite; %APPDATA%\Riyeser\licence.json) ----------
   const appData = app.getPath('appData'); const lfetch = (u, o) => net.fetch(u, o);
-  handle('central:licence', async () => { const s = licence.status(appData); return s.needsCheck ? licence.recheck(appData, { fetchFn: lfetch }) : s; });
-  handle('central:licenceActivate', (key) => licence.activate(appData, key, { fetchFn: lfetch }));
-  handle('central:licenceRemove', () => licence.remove(appData, { fetchFn: lfetch }));
+  // The sign-in is sealed with Windows' own encryption (DPAPI), so it can't be copied to another PC.
+  const box = {
+    seal: (s) => (safeStorage.isEncryptionAvailable() ? `dpapi:${safeStorage.encryptString(s).toString('base64')}` : s),
+    unseal: (s) => (String(s).startsWith('dpapi:') ? safeStorage.decryptString(Buffer.from(String(s).slice(6), 'base64')) : s),
+  };
+  const planOpts = () => ({ fetchFn: lfetch, box, device: { versions: { central: app.getVersion() } } });
+  const openLink = (url) => { if (!/^https:\/\//.test(String(url || ''))) throw new Error('No link came back. Please try again.'); return shell.openExternal(url).then(() => true); };
+  handle('central:licence', async () => { const s = licence.status(appData); return s.needsCheck ? licence.recheck(appData, planOpts()) : s; });
+  handle('central:planRefresh', () => licence.recheck(appData, { ...planOpts(), force: true }));
+  handle('central:signInStart', (email) => licence.startSignIn(appData, email, planOpts()));
+  handle('central:signInFinish', (email, code) => licence.finishSignIn(appData, email, code, planOpts()));
+  handle('central:signOut', () => licence.signOut(appData));
+  handle('central:subscribe', async (items, interval) => openLink(await licence.checkout(appData, items, { ...planOpts(), interval })));
+  handle('central:managePlan', async () => openLink(await licence.portal(appData, planOpts())));
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
   handle('central:updates', (force) => updateStatus(!!force));
   handle('central:installUpdates', (ids) => installUpdates(ids));
