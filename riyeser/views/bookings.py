@@ -317,7 +317,7 @@ def invoice(bid):
         raise PostingError("Choose the customer on this booking first, then invoice it.")
     svc = db.execute("SELECT * FROM booking_services WHERE id=?", (b["service_id"],)).fetchone() if b["service_id"] else None
     st = datetime.fromisoformat(b["starts_at"])
-    what = (svc["name"] if svc else None) or b["title"] or M()["one"].capitalize()
+    what = (svc and (svc["description"] or svc["name"])) or b["title"] or M()["one"].capitalize()
     desc = f"{what} — {st:%a %d %b %Y}" + (f", {b['address']}" if b["address"] else "")
     line = dict(description=desc, qty=1, unit_price=b["price"] or (svc["price"] if svc else 0), discount_pct=0,
                 tax_code_id=_gst(db), item_id=svc["item_id"] if svc and svc["item_id"] else None)
@@ -383,12 +383,14 @@ def _save_setup():
     for s in services(db, True):
         name = (f.get(f"svc_name_{s['id']}") or "").strip()
         if name:
-            db.execute("UPDATE booking_services SET name=?, minutes=?, price=?, item_id=?, active=? WHERE id=?",
-                       (name, opt_int(f.get(f"svc_min_{s['id']}")) or 60, to_cents(f.get(f"svc_price_{s['id']}") or 0),
+            db.execute("UPDATE booking_services SET name=?, description=?, minutes=?, price=?, item_id=?, active=?"
+                       " WHERE id=?",
+                       (name, (f.get(f"svc_desc_{s['id']}") or "").strip() or None,
+                        opt_int(f.get(f"svc_min_{s['id']}")) or 60, to_cents(f.get(f"svc_price_{s['id']}") or 0),
                         opt_int(f.get(f"svc_item_{s['id']}")), 1 if f.get(f"svc_on_{s['id']}") else 0, s["id"]))
     if (f.get("svc_new") or "").strip():
-        db.execute("INSERT INTO booking_services (name, minutes, price, item_id) VALUES (?,?,?,?)",
-                   (f["svc_new"].strip(), opt_int(f.get("svc_new_min")) or 60, to_cents(f.get("svc_new_price") or 0),
+        db.execute("INSERT INTO booking_services (name, description, minutes, price, item_id) VALUES (?,?,?,?,?)",
+                   (f["svc_new"].strip(), (f.get("svc_new_desc") or "").strip() or None, opt_int(f.get("svc_new_min")) or 60, to_cents(f.get("svc_new_price") or 0),
                     opt_int(f.get("svc_new_item"))))
     audit(db, "bookings_setup", f.get("mode") or "")
     flash("Bookings setup saved.", "ok")
