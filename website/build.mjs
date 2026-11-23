@@ -30,7 +30,7 @@ const PROGRAMS = [
   { id: 'central', name: 'Riyeser Central', short: 'Central', icon: 'R', file: 'RiyeserCentral-Setup.exe',
     one: 'The home screen for your business: money owed, today\'s meetings, to-dos and recent files — and every Riyeser program one click away.',
     pitch: 'Start your day knowing exactly what needs doing.',
-    shot: 'central-light.webp', shot2: 'central-dark.webp',
+    shot: 'central-home.webp', shot2: 'central-home-dark.webp',
     features: [
       ['Money at a glance', 'What customers owe you, what\'s overdue, and the bills you need to pay — straight from Riyeser Accounting.'],
       ['Today & to-dos', 'Your meetings and to-do list in one place, so nothing slips.'],
@@ -105,6 +105,17 @@ const PROGRAMS = [
     one: 'Map every cable, pipe and duct on your drawings as it goes in — with inspections, test results and photos — and the as-builts are done at handover.',
     pitch: 'Map every service while the building goes up.', custom: true },
 ];
+// Short words for program cards and the Programs menu.
+const CARD = {
+  central: ['Your home screen: money owed, meetings, to-dos and every Riyeser program.', 'Home screen and updates'],
+  'accounting-basics': ['Invoices, quotes, customers, stock and a shop counter. Free forever.', 'Free invoicing and stock'],
+  accounting: ['Full books: banking, reconciliation, BAS, payroll, journals, jobs and budgets.', 'Full books, 90 days free'],
+  payroll: ['Time clock, timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
+  'desk-assistant': ['Sorts your files by type and year, and finds anything in seconds.', 'Sort and find your files'],
+  pdf: ['Open, fill in, sign, mark up and combine PDFs, even scanned ones.', 'Fill, sign and edit PDFs'],
+  services: ['Map cables, pipes and ducts on your plans, with inspections and photos.', 'Services on your drawings'],
+};
+for (const p of PROGRAMS) [p.card, p.tag] = CARD[p.id];
 rmSync(OUT, { recursive: true, force: true });
 const prog = (id) => PROGRAMS.find((p) => p.id === id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -120,8 +131,62 @@ const PLAY = svg('<path d="M7 5l12 7-12 7z"/>');
 const MAIL = svg('<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3.5 6.5l8.5 6.5 8.5-6.5"/>');
 const SEARCH = svg('<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>');
 const BOOK = svg('<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/>');
+// Line icons (outlined, like the sample layouts). Each is the inside of a 24×24 SVG.
+const LI = {
+  central: '<rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M8 20.5h8M12 16.5v4"/><path d="M10 13V7h2.6a1.8 1.8 0 0 1 0 3.6H10M12.4 10.6L14.4 13"/>',
+  'accounting-basics': '<rect x="4.5" y="2.5" width="15" height="19" rx="2"/><rect x="7" y="5" width="10" height="4" rx=".8"/><path d="M8 12.5h.01M12 12.5h.01M16 12.5h.01M8 15.5h.01M12 15.5h.01M16 15.5h.01M8 18.5h.01M12 18.5h.01M16 18.5h.01"/>',
+  accounting: '<ellipse cx="15" cy="6" rx="6" ry="2.5"/><path d="M9 6v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V6"/><path d="M21 10v4c0 1.4-2.7 2.5-6 2.5"/><ellipse cx="9" cy="14" rx="6" ry="2.5"/><path d="M3 14v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4"/>',
+  payroll: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><path d="M7.5 13h.01M12 13h.01M16.5 13h.01M7.5 16.5h.01M12 16.5h.01M16.5 16.5h.01"/>',
+  'desk-assistant': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12.5" cy="13.5" r="2.6"/><path d="M14.5 15.5l2 2"/>',
+  pdf: '<path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><path d="M14 2.5V8h5.5"/><path d="M7.5 17v-4h1.3a1.2 1.2 0 0 1 0 2.4H7.5M11.5 13v4h.9a2 2 0 0 0 0-4zM16.8 13h-1.9v4M14.9 15h1.6"/>',
+  services: '<path d="M3 17.5h18"/><path d="M5 17.5a7 7 0 0 1 14 0"/><path d="M10 10.8V8a2 2 0 0 1 4 0v2.8"/><path d="M4 17.5v2h16v-2"/>',
+  retail: '<path d="M3.5 9.5l1.5-5h14l1.5 5"/><path d="M3.5 9.5a2.2 2.2 0 0 0 4.3 0 2.2 2.2 0 0 0 4.2 0 2.2 2.2 0 0 0 4.2 0 2.2 2.2 0 0 0 4.3 0"/><path d="M5 11.5v9h14v-9"/><path d="M10 20.5v-5h4v5"/>',
+  practice: '<rect x="4.5" y="2.5" width="15" height="19" rx="2"/><rect x="7" y="5" width="10" height="4" rx=".8"/><path d="M8 12.5h.01M12 12.5h.01M16 12.5h.01M8 15.5h.01M12 15.5h.01M16 15.5h.01M8 18.5h.01M12 18.5h.01M16 18.5h.01"/>',
+  trades: '<path d="M3 17.5h18"/><path d="M5 17.5a7 7 0 0 1 14 0"/><path d="M10 10.8V8a2 2 0 0 1 4 0v2.8"/><path d="M4 17.5v2h16v-2"/>',
+  rocket: '<path d="M5 15c-1.5 1.5-2 4.5-2 4.5s3-.5 4.5-2"/><path d="M14.5 4.5c2-1.5 5-2 6-1.5.5 1 0 4-1.5 6l-6.5 6.5-4.5-4.5z"/><path d="M8 11.5H4.5l2.5-3.5h4M12.5 16v3.5l3.5-2.5v-4"/><circle cx="16" cy="8" r="1.4"/>',
+  layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 12.5l9 5 9-5"/><path d="M3 16.5l9 5 9-5"/>',
+  download: '<path d="M12 3.5v11"/><path d="M7 10l5 5 5-5"/><path d="M4 19.5h16"/>',
+  monitor: '<rect x="2.5" y="3.5" width="19" height="13" rx="2"/><path d="M8 20.5h8M12 16.5v4"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
+};
+const li = (k, cls = 'li') => svg(LI[k] || LI.layers, cls).replace('stroke-width="2.2"', 'stroke-width="1.7"');
+const WINLOGO = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><path d="M2.5 4.6l8-1.1v7.9h-8zM11.6 3.4L21.5 2v9.4h-9.9zM2.5 12.6h8v7.9l-8-1.1zM11.6 12.6h9.9V22l-9.9-1.4z"/></svg>';
+const WINDL = `${WINLOGO} Download for Windows`;
+// Blue swooshes for the right-hand side of each page's top band.
+const SWOOSH = `<svg class="swoosh" viewBox="0 0 600 300" preserveAspectRatio="xMaxYMid slice" aria-hidden="true"><defs><linearGradient id="sw1" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#7fb0ff"/><stop offset="1" stop-color="#2f7bff"/></linearGradient><linearGradient id="sw2" x1="0" x2="1" y1="0" y2="1"><stop offset="0" stop-color="#2f7bff"/><stop offset="1" stop-color="#0846d8"/></linearGradient></defs>
+<path d="M330 300C380 170 450 60 600 40V0H560C430 20 340 150 270 300z" fill="#bcd5ff" opacity=".7"/><path d="M420 300C460 190 520 110 600 95V40C470 60 390 170 340 300z" fill="url(#sw1)" opacity=".85"/><path d="M500 300C530 230 565 185 600 170V95C530 115 470 200 430 300z" fill="url(#sw2)"/></svg>`;
+const bandHero = ({ eyebrow, title, lead, img = '', up = '', extra = '' }) => `<div class="band-hero">${img ? `<img class="bgimg" src="${up}assets/photos/${img}" alt="">` : SWOOSH}<div class="c"><div class="inner">${eyebrow ? `<span class="eyebrow">${eyebrow}</span>` : ''}<h1>${title}</h1>${lead ? `<p class="lead">${lead}</p>` : ''}${extra}</div></div></div>`;
+// The three industries: real photos, and only what the programs really do.
+const INDUSTRIES = [
+  { id: 'retail', name: 'Retail & hospitality', icon: 'retail', photo: 'retail.webp', short: 'Manage stock, sales records and staff pay.',
+    title: 'Retail & Hospitality', lead: 'Sell at the counter, keep stock under control and pay your staff, from one Windows PC.',
+    h: 'Sales, stock and staff pay', p: 'Ring up sales on a full-screen shop counter, keep count of stock as it sells, and pay your team from their clock-in hours.',
+    shot: 'accounting.webp', shotName: 'Riyeser Accounting', shotApp: 'accounting-basics', cta: ['accounting-basics', 'Explore Accounting Basics'],
+    progs: [['accounting-basics', ['Shop counter for retail or restaurant: tables, kitchen dockets and park sale', 'Receipts print by themselves; end-of-day totals by cash and card', 'Stock with average cost, stocktakes and reorder alerts', 'Free forever, no licence needed']],
+      ['payroll', ['Staff clock in and out with a 4-digit PIN', 'Timesheets flow straight into the pay run', 'Payslips with year-to-date totals, printed, emailed or saved as PDFs']],
+      ['central', ['What customers owe and what you owe, as soon as you open it', "Today's meetings and your to-do list", 'Every Riyeser program one click away']]] },
+  { id: 'accounting', name: 'Accounting practices', icon: 'practice', photo: 'accounting.webp', short: 'Keep client books and pay runs organised.',
+    title: 'Accounting Practices', lead: "Keep every client's books, pay runs and paperwork organised, with one sign-in.",
+    h: 'Client books, one sign-in', p: "Run a separate company file for each client, switch between them from the top of the screen, and see everyone's cash, money owed and profit on one page.",
+    shot: 'accounting.webp', shotName: 'Riyeser Accounting Plus', shotApp: 'accounting', cta: ['accounting', 'Explore Accounting Plus'],
+    progs: [['accounting', ['Several companies with one sign-in, and an overview of them all', 'Bank reconciliation, statement import and BAS / GST figures', 'Lock a period after the BAS is lodged', 'Quick access sets: Owner, Bookkeeper, Payroll officer, Read-only']],
+      ['desk-assistant', ['Files every invoice and statement by company, type and year', 'Find any file by a word inside it or an old name', 'Undo any tidy-up, and nothing is ever deleted']],
+      ['pdf', ['Fill in and sign forms', 'Combine, split and reorder pages', 'Black out bank details before you send']]] },
+  { id: 'trades', name: 'Trades & construction', icon: 'trades', photo: 'trades.webp', short: 'Track installations, inspections and handovers.',
+    title: 'Trades & Construction', lead: 'Service mapping and inspections for trades and construction projects, with clear plans and on-site markups.',
+    h: 'Service mapping and inspections', p: 'Map services on your plans as they go in, and carry out inspections with clear, marked-up drawings for the job.',
+    shot: 'services-trace.webp', shotName: 'Riyeser Services', shotApp: 'services', cta: ['services', 'Explore Riyeser Services'], photoTall: 'trades-tall.webp',
+    progs: [['services', ['Cables, pipes and ducts drawn on your PDF plans, end to end', 'Inspections, test results and photos on every item', 'Works with no signal on site; as-builts ready at handover']],
+      ['pdf', ['Mark up drawings with clouds, arrows, boxes and stamps', 'Fill in and sign site forms', 'Read scanned drawings so they can be searched']],
+      ['desk-assistant', ['Files drawings, quotes and invoices by type and year', 'Spots duplicate copies of the same drawing', 'Find any file in seconds']]] },
+];
+const indLink = (i, up) => `${up}industries/${i.id}.html`;
+const winFrame = (up, app, name, img, alt, w = 1400, h = 900) => `<div class="win"><div class="bar"><img src="${up}assets/${app === 'logo' ? 'logo-r.png' : `apps/${app}.png`}" alt="">${esc(name)}<span class="ctl">${svg('<path d="M5 12h14"/>')}${svg('<rect x="5" y="5" width="14" height="14" rx="1"/>')}${svg('<path d="M6 6l12 12M18 6L6 18"/>')}</span></div><img src="${up}assets/${img}" alt="${esc(alt)}" width="${w}" height="${h}"></div>`;
+const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">${badgeOf(p)}${li(p.id)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p><span class="go">${ARR}</span></a>`;
+
 const more = (t) => `<span class="more">${t} ${ARR}</span>`;
-const badgeOf = (p) => p.id === 'accounting-basics' ? '<span class="badge free">Free forever</span>' : p.id === 'accounting' ? '<span class="badge trial">90 days free</span>' : '';
+const badgeOf = (p) => p.id === 'accounting-basics' ? '<span class="badge free">Free forever</span>' : p.id === 'accounting' ? '<span class="badge">90 days free</span>' : '';
 
 /** assets/x.webp -> assets/x.webp?v=<content hash>, so browsers fetch new pictures and styles as soon as they change. */
 const versionOf = {};
@@ -135,9 +200,7 @@ function withVersions(html) {
 function page({ path, title, description, active, body }) {
   const depth = path.split('/').length - 1;
   const up = depth ? '../'.repeat(depth) : '';
-  const nav = [['programs', 'Programs', `${up}#programs`], ['downloads', 'Downloads', `${up}downloads.html`], ['pricing', 'Pricing', `${up}pricing.html`], ['help', 'Help', `${up}help.html`]];
-  if (SERVICES_MOVED) nav.push(['signin', 'Services sign in', `${SERVICES_APP}/?signin`]);
-  const html = `<!doctype html>
+    const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -145,9 +208,9 @@ function page({ path, title, description, active, body }) {
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(description)}">
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">
-<meta property="og:image" content="${SITE}/assets/central-light.webp"><meta property="og:url" content="${SITE}/${path === 'index.html' ? '' : path}">
+<meta property="og:image" content="${SITE}/assets/central-home.webp"><meta property="og:url" content="${SITE}/${path === 'index.html' ? '' : path}">
 <link rel="canonical" href="${SITE}/${path === 'index.html' ? '' : path}">
-<link rel="icon" href="${up}assets/favicon.png">
+<link rel="icon" href="${up}assets/logo-r.png">
 <link rel="stylesheet" href="${up}assets/site.css">
 ${path === 'index.html' && SERVICES_MOVED ? `<script>/* Riyeser Services now lives at ${SERVICES_APP}/ - forward its old links: demo and sign-in links,
    project and QR links (#/p/...), sign-in emails (#access_token, ?code=) and the installed app (start screen icon). */
@@ -157,21 +220,27 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
 </head>
 <body>
 <header class="nav" id="nav"><div class="c">
-  <a class="logo" href="${up}index.html"><img src="${up}assets/logo.png" alt="">Riyeser</a>
-  <nav class="links">${nav.map(([k, l, h]) => `<a href="${h}"${k === active ? ' class="on"' : ''}>${l}</a>`).join('')}</nav>
-  <a class="btn p sm" href="${up}downloads.html">${DL} Free download</a>
+  <a class="logo" href="${up}index.html"><img src="${up}assets/logo-r.png" alt="">Riyeser</a>
+  <nav class="links">
+    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop">${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html"><span class="li">${li(p.id, '')}</span><span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}<small>${esc(p.tag || '')}</small></span></a>`).join('')}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
+    <div class="dd"><a href="${indLink(INDUSTRIES[0], up)}"${active === 'industries' ? ' class="on"' : ''}>Industries ${svg(LI.down)}</a><div class="menu-pop">${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}"><span class="li">${li(i.icon, '')}</span><span>${esc(i.name)}<small>${esc(i.short)}</small></span></a>`).join('')}</div></div>
+    <a href="${up}pricing.html"${active === 'pricing' ? ' class="on"' : ''}>Pricing</a>
+    <div class="dd"><a href="${up}help.html"${active === 'help' ? ' class="on"' : ''}>Help ${svg(LI.down)}</a><div class="menu-pop">${helpGuides({ EMAIL, SERVICES_APP, up }).map((g) => `<a href="${up}help/${g.id}.html"><img class="appicon i-${g.app}" src="${up}assets/apps/${g.app}.png" alt="" style="width:30px;height:30px;border-radius:8px">${esc(g.name)}</a>`).join('')}<a class="all" href="${up}help.html">Help Centre ${ARR}</a></div></div>
+    <a href="${up}downloads.html"${active === 'downloads' ? ' class="on"' : ''}>Downloads</a>
+  </nav>
+  <div class="right"><a class="signin" href="${up}signin.html">Sign in</a><a class="btn p" href="${up}downloads.html">${WINDL}</a></div>
   <button class="menu" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">☰</button>
 </div></header>
 <main>${body(up)}</main>
 <footer><div class="c">
   <div class="fcols">
-    <div><a class="logo" href="${up}index.html"><img src="${up}assets/logo.png" alt="">Riyeser</a><p style="margin:0;max-width:300px">Simple Windows programs for bookkeepers, small business offices and building services teams. Your information stays on your PC.</p></div>
+    <div><a class="logo" href="${up}index.html"><img src="${up}assets/logo-r.png" alt="">Riyeser</a><p style="margin:0;max-width:300px">Windows software for small businesses. Work offline and keep your records on your PC.</p></div>
     <div><h4>Programs</h4>${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html">${p.short === 'Central' ? 'Riyeser Central' : p.short}</a>`).join('')}</div>
-    <div><h4>Help</h4><a href="${up}help.html">Help Centre</a>${['start', 'accounting-basics', 'payroll', 'pdf'].map((id) => `<a href="${up}help/${id}.html">${id === 'start' ? 'Getting started' : prog(id).short} guide</a>`).join('')}<a href="mailto:${EMAIL}">${EMAIL}</a></div>
-    <div><h4>Riyeser</h4><a href="${up}downloads.html">Downloads</a><a href="${up}pricing.html">Pricing</a><a href="${up}terms.html">Terms of use</a></div>
+    <div><h4>Industries</h4>${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}">${esc(i.name)}</a>`).join('')}</div>
+    <div><h4>Help</h4><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="mailto:${EMAIL}">${EMAIL}</a></div>
+    <div><h4>Riyeser</h4><a href="${up}pricing.html">Pricing</a><a href="${up}signin.html">Services sign in</a><a href="${up}terms.html">Terms of use</a></div>
   </div>
-  <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span>For Windows 10 &amp; 11 · Works offline · No sign-up</span></div></div></footer>
-<script>addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('scrolled',scrollY>8),{passive:true})</script>
+  <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span>For Windows 10 &amp; 11 · Works offline · No account or card needed</span></div></div></footer>
 <script>/* Download buttons always point at the newest release file, whatever its exact name. */
 (function(){var a=[].slice.call(document.querySelectorAll('a[href*="/releases/latest/download/"]'));if(!a.length||!window.fetch)return;
 fetch('https://api.github.com/repos/raka1987/Riyeser/releases/latest').then(function(r){return r.ok?r.json():null}).then(function(rel){if(!rel)return;
@@ -206,135 +275,144 @@ const editionsBlock = (up, { download = true } = {}) => `
 ${download ? `<div class="ctas" style="justify-content:flex-start;margin-top:6px"><a class="btn s" href="${RELEASES}/RiyeserAccountingBasics-Setup.exe">${DL} Download Accounting Basics — free</a><a class="btn p" href="${RELEASES}/RiyeserAccountingPlus-Setup.exe">${DL} Download Accounting Plus — 90 days free</a></div>` : ''}`;
 const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
 <section class="c" style="padding-bottom:0"><div class="cta"><h2>${title}</h2><p>${text}</p>
-<div class="ctas"><a class="btn t big" href="${dl(prog('central'))}">${DL} Download Riyeser Central — free</a><a class="btn glass big" href="${up}help.html">${BOOK} Help Centre</a></div>
-<p class="fine">${freeLine} · Windows 10 &amp; 11</p></div></section>`;
+<div class="ctas"><a class="btn t big" href="${up}downloads.html">${WINDL}</a><a class="btn glass big" href="${up}help.html">Help Centre</a></div>
+<p class="fine">Windows 10 &amp; 11 · No account or card needed · 90 days free</p></div></section>`;
 
 // ---------- home ----------
 page({
-  path: 'index.html', title: 'Riyeser — bookkeeping, payroll and job records for small business', active: '',
-  description: 'Free Windows programs for bookkeepers, small business offices and building services teams: accounting, payroll, file finding, PDFs and job records. No sign-up, works offline.',
+  path: 'index.html', title: 'Riyeser — keep your books, payroll and job records in order', active: '',
+  description: 'Windows software for small businesses: accounting, payroll, file finding, PDFs and job records. Work offline and keep your records on your PC. No account or card needed.',
   body: (up) => `
-<div class="hero2"><div class="c hero">
-  <span class="eyebrow"><span class="dot"></span>90 days free · no card · Windows 10 &amp; 11</span>
-  <h1>Books, pay runs and job records, <span class="grad">sorted</span>.</h1>
-  <p class="lead">Simple Windows programs for bookkeepers, small business offices and building services teams. Everything stays on your PC, works without internet, and there's nothing to sign up for.</p>
-  <div class="ctas"><a class="btn p big" href="${dl(prog('central'))}">${WIN} Download free for Windows</a><a class="btn glass big" href="#programs">See the programs ${ARR}</a></div>
-  <p class="fine">${freeLine}</p>
-  ${EARLY_BIRD ? `<a class="early" href="${up}pricing.html#early">🐣 <b>Early bird:</b> 50% off your first year for the first 100 users <span>See pricing →</span></a>` : ''}
-  <div class="appdock">${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up)}<span>${esc(p.short === 'Central' ? 'Central' : p.short.replace('Accounting ', ''))}</span></a>`).join('')}</div>
-  <div class="shot"><div class="bar"><i></i><i></i><i></i></div><picture><source srcset="${up}assets/central-dark.webp" media="(prefers-color-scheme: dark)"><img src="${up}assets/central-light.webp" alt="Riyeser Central home screen showing money owed, today's meetings, to-dos and recent files" width="1600" height="1000"></picture></div>
+<div class="hero"><div class="c">
+  <div>
+    <h1>Keep your books, payroll and job records in order.</h1>
+    <p class="lead">Windows software for small businesses. Work offline and keep your records on your PC.</p>
+    <div class="ctas"><a class="btn p big" href="${up}downloads.html">${WINDL}</a><a class="tlink" href="#how">See how it works</a></div>
+    <p class="fine">Windows 10 &amp; 11 · No account or card needed</p>
+    <div class="badges"><span class="chip">${svg('<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>')}90 days free</span><span class="chip">${svg('<rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>')}Your data stays on your PC</span>${EARLY_BIRD ? `<a class="chip gold" href="${up}pricing.html#early">🐣 Early bird: 50% off your first year</a>` : ''}</div>
+  </div>
+  ${winFrame(up, 'logo', 'Riyeser Central', 'central-home.webp', "Riyeser Central home screen: overdue invoices, money owed, bills to pay, last pay run, quick access to every program, recent files, today's meetings and to-dos", 1440, 900)}
 </div></div>
-<div class="c pills">${[['<path d="M2 8.5a15 15 0 0 1 20 0"/><path d="M5.5 12a10 10 0 0 1 13 0"/><path d="M9 15.5a5 5 0 0 1 6 0"/><path d="M3 3l18 18"/>', 'Works offline'],
-  ['<rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>', 'Your data stays on your PC'],
-  ['<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>', 'No admin rights needed'],
-  ['<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>', 'Every change can be undone'],
-  ['<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/>', 'No card, no sign-up']].map(([d, t]) => `<span>${svg(d)}${t}</span>`).join('')}</div>
 
-<section id="who" class="c">
-  <span class="kicker">Who it's for</span>
-  <h2 class="h2">Built for the way you work</h2>
-  <p class="sub">Pick what sounds like you. Install only what you need — they all share one home screen.</p>
-  <div class="tabwrap"><div class="tabs" role="tablist">
-    <button class="tab on" role="tab" aria-selected="true" data-tab="books">📒 Bookkeepers &amp; accountants</button>
-    <button class="tab" role="tab" aria-selected="false" data-tab="trades">🏗 Building services &amp; trades</button>
-    <button class="tab" role="tab" aria-selected="false" data-tab="office">🗂 Small business office</button>
-  </div></div>
-  <div class="panel on" data-panel="books"><div class="t">
-      <h3>Keep the books without the jargon</h3>
-      <p>Double-entry accounting that reads like plain English — and a home screen that shows who's overdue the moment you sit down.</p>
-      <ul class="ticks"><li>Quotes → invoices → payments, bills and purchase orders</li><li>Bank statement import and reconciliation</li><li>GST/BAS summary, profit &amp; loss and balance sheet — print or export to CSV</li><li>Pay runs and payslips with Riyeser Payroll</li></ul>
-      <p class="uses">Uses: <a href="${up}programs/accounting-basics.html">${appImg('accounting-basics', up)}Accounting Basics</a><a href="${up}programs/accounting.html">${appImg('accounting', up)}Accounting Plus</a><a href="${up}programs/payroll.html">${appImg('payroll', up)}Payroll</a><a href="${up}programs/central.html">${appImg('central', up)}Central</a></p></div>
-    <img src="${up}assets/accounting.webp" alt="Riyeser Accounting dashboard with income, expenses, bank accounts and money owed" loading="lazy" width="1400" height="900"></div>
-  <div class="panel" data-panel="trades" hidden><div class="t">
-      <h3>Every service on the drawing, as it goes in</h3>
-      <p>Map cables, pipes and ducts on your PDF drawings with photos, inspections and test results on each item. The as-builts are done at handover.</p>
-      <ul class="ticks"><li>Works on site with no signal — on this PC or with an online account</li><li>Trace any run from end to end</li><li>Defects, RFIs and hold points in one register</li><li>Share a read-only link with your client</li></ul>
-      <p class="uses">Uses: <a href="${up}programs/services.html">${appImg('services', up)}Services</a><a href="${up}programs/pdf.html">${appImg('pdf', up)}PDF</a><a href="${up}programs/desk-assistant.html">${appImg('desk-assistant', up)}Desk Assistant</a></p></div>
-    <img src="${up}assets/services-trace.webp" alt="Riyeser Services tracing a water main between two points on a floor plan" loading="lazy" width="1500" height="783"></div>
-  <div class="panel" data-panel="office" hidden><div class="t">
-      <h3>Find any file in seconds</h3>
-      <p>Invoices, drawings, payslips and photos filed by type and year — with one search that finds them by name, by the words inside, or by an old name.</p>
-      <ul class="ticks"><li>Sort by type with a preview first, and Undo after</li><li>Spots duplicate copies, even a Word file and its PDF</li><li>Fill in, sign and combine PDFs</li><li>Meetings and to-dos on the home screen</li></ul>
-      <p class="uses">Uses: <a href="${up}programs/desk-assistant.html">${appImg('desk-assistant', up)}Desk Assistant</a><a href="${up}programs/pdf.html">${appImg('pdf', up)}PDF</a><a href="${up}programs/central.html">${appImg('central', up)}Central</a></p></div>
-    <img src="${up}assets/desk-find.webp" alt="Riyeser Desk Assistant search with type and year filters" loading="lazy" width="1150" height="900"></div>
+<section class="c">
+  <h2 class="h2">Built for your industry</h2>
+  <p class="sub">Pick what sounds like you. Install only what you need; every program shares one home screen.</p>
+  <div class="inds">${INDUSTRIES.map((i) => `<a class="ind" href="${indLink(i, up)}"><div class="t">${li(i.icon)}<h3>${esc(i.name)}</h3><p>${esc(i.short)}</p>${more('Learn more')}</div><img src="${up}assets/photos/${i.photo}" alt="" loading="lazy" width="280" height="225"></a>`).join('')}</div>
 </section>
 
-<section class="band"><div class="c">
-  <span class="kicker">Sound familiar?</span>
-  <h2 class="h2">The jobs that eat your week, handled</h2>
-  <p class="sub">Four everyday headaches, and the Riyeser program that fixes each one.</p>
-  <div class="pains">
-    <div class="pain"><b>“Who still owes us?”</b><p>Riyeser Central shows money owed and overdue the moment you open it, and who to chase first.</p></div>
-    <div class="pain"><b>“Where did I save that?”</b><p>One search across every folder — by name, by the words inside, even by the file's old name.</p></div>
-    <div class="pain"><b>“Payslips take all afternoon.”</b><p>Timesheets in, pay run done, payslips saved as PDFs and ready to send.</p></div>
-    <div class="pain"><b>“The as-builts are a mess.”</b><p>Record each service on the drawing as it's installed, with photos and tests attached.</p></div>
+<section class="c" style="padding-top:0" id="programs">
+  <span class="eyebrow">Programs</span>
+  <h2 class="h2">One home screen. Every program you need.</h2>
+  <p class="sub">Start with Riyeser Central, then add the programs you use. They all show up in Central.</p>
+  <div class="grid">${PROGRAMS.map((p) => progCard(p, up)).join('')}
+    <a class="card" href="${up}help.html">${li('rocket')}<h3>Help Centre</h3><p>Plain-English, step-by-step guides for every program.</p><span class="go">${ARR}</span></a></div>
+</section>
+
+<section class="band-hero" id="how" style="border-top:1px solid var(--line)"><div class="c">
+  <span class="eyebrow">How it works</span>
+  <h2 class="h2">Up and running in three minutes</h2>
+  <p class="sub">No account, no card and no admin password.</p>
+  <div class="steps3">
+    <div class="step"><span class="n">1</span>${li('download')}<div><h3>Download</h3><p>Get Riyeser Central for Windows.</p></div></div><span class="to">${ARR}</span>
+    <div class="step"><span class="n">2</span>${li('monitor')}<div><h3>Install</h3><p>It installs itself in a few seconds, just for you.</p></div></div><span class="to">${ARR}</span>
+    <div class="step"><span class="n">3</span>${li('layers')}<div><h3>Add programs</h3><p>Choose the Riyeser programs you need. Central keeps them updated.</p></div></div>
   </div>
 </div></section>
 
-<section id="programs" class="c">
-  <span class="kicker">The suite</span>
-  <h2 class="h2">The programs</h2>
-  <p class="sub">Start with one. Add more any time — they all show up in Riyeser Central.</p>
-  <div class="grid">${PROGRAMS.map((p) => `<a class="card" href="${up}programs/${p.id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${p.short === 'Central' ? 'Riyeser Central' : p.short}</h3><p>${esc(p.one)}</p>${more('Learn more')}</a>`).join('')}
-    <a class="card" href="${up}help.html" style="background:var(--soft)"><div class="icon" style="background:var(--accent);color:#fff">${BOOK}</div><h3>Help Centre</h3><p>Step-by-step guides for every program, in plain English.</p>${more('Get help')}</a></div>
-</section>
-
-<section class="c">
-  <span class="kicker">Getting started</span>
-  <h2 class="h2">Up and running in three minutes</h2>
-  <div class="how">
-    <div><span class="n">1</span><h3>Download</h3><p>One free file. No account, no card, no admin password.</p></div>
-    <div><span class="n">2</span><h3>Install in one click</h3><p>It sets itself up for your Windows user and opens Riyeser Central.</p></div>
-    <div><span class="n">3</span><h3>Add what you need</h3><p>Accounting, Payroll, Services and more appear on the home screen as you install them, and Central tells you when updates are ready.</p></div>
-  </div>
-</section>
-
 <section class="c">
   <div class="safe">
-    <div><div class="k">Your business, your computer</div><h2>Safe by design</h2>
-      <p>Your books, staff records and files stay on your own PC — not on someone else's server. Nothing is ever deleted without asking, and almost everything can be undone.</p></div>
-    <ul class="ticks"><li>Works with no internet — on site, in the car, anywhere</li><li>Forgot your password? Reset it on the PC without losing anything</li><li>Payroll keeps a backup every day</li><li>Desk Assistant records every file it moves, with “Put everything back”</li><li>Want online access too? Riyeser Services can sync to an online account when you choose</li></ul>
+    <div><span class="k">Your business, your computer</span><h2>Safe by design</h2>
+      <p>Your books, staff records and files stay on your own PC, not on someone else's server. Nothing is deleted without asking, and almost everything can be undone.</p></div>
+    <ul class="ticks" style="margin:0"><li>Works with no internet: on site, in the car, anywhere</li><li>Forgot your password? Reset it on the PC without losing anything</li><li>Payroll keeps a backup every day</li><li>Desk Assistant records every file it moves, with “Put everything back”</li><li>Want online access too? Riyeser Services can sync to an online account when you choose</li></ul>
   </div>
 </section>
 
-<section class="c faq" style="max-width:860px">
-  <h2 class="h2">Questions</h2>
+<section class="c" style="padding-top:0;max-width:920px">
+  <h2 class="h2 center">Frequently asked questions</h2>
+  <div class="faq" style="margin-top:26px">
   <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's $20 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends, and Accounting Basics stays free. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline. Riyeser Services can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
   <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11. Riyeser Services also works in any web browser, on phones and tablets.</p></details>
+  <details><summary>Where do I start?</summary><p>Download Riyeser Central. It's the home screen for every program and shows you what else you can add. The <a class="more" href="${up}help/start.html">Getting started guide</a> walks you through it.</p></details>
   <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has a step-by-step guide for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
+  </div>
 </section>
-${ctaBlock(up, 'Get started free today', 'Download Riyeser Central, add the programs you need, and keep everything on your own computer.')}
-<script>document.querySelectorAll('.tab').forEach(function(b){b.addEventListener('click',function(){document.querySelectorAll('.tab').forEach(function(x){var on=x===b;x.classList.toggle('on',on);x.setAttribute('aria-selected',on)});document.querySelectorAll('.panel').forEach(function(p){var on=p.dataset.panel===b.dataset.tab;p.hidden=!on;p.classList.toggle('on',on)})})})</script>`,
+${ctaBlock(up, 'Get started free today', 'Download Riyeser Central, add the programs you need, and keep everything on your own computer.')}`,
 });
 
+// ---------- all programs ----------
+page({
+  path: 'programs.html', title: 'All programs — Riyeser', active: 'programs',
+  description: 'Every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and Services.',
+  body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
+<section class="c" style="padding-top:44px"><div class="grid">${PROGRAMS.map((p) => progCard(p, up)).join('')}</div></section>
+<section class="c" style="padding-top:0"><h2 class="h2">Accounting Basics or Accounting Plus?</h2>${editionsBlock(up)}</section>
+${ctaBlock(up, 'Start with Riyeser Central', "It's the home screen for every program, and it keeps them all up to date.")}`,
+});
+
+// ---------- industries ----------
+for (const ind of INDUSTRIES) {
+  page({
+    path: `industries/${ind.id}.html`, title: `${ind.name} — Riyeser`, active: 'industries',
+    description: `${ind.title}: ${ind.lead}`,
+    body: (up) => `${bandHero({ eyebrow: 'Industries', title: esc(ind.title), lead: esc(ind.lead) })}
+<div class="c">
+  <div class="itabs">${INDUSTRIES.map((o) => `<a href="${indLink(o, up)}"${o.id === ind.id ? ' class="on" aria-current="page"' : ''}>${li(o.icon, '')}${esc(o.title)}</a>`).join('')}</div>
+  <div class="ind-split">
+    <div class="t"><h2>${esc(ind.h)}</h2><p>${esc(ind.p)}</p>
+      <a class="btn p" href="${up}programs/${ind.cta[0]}.html">${esc(ind.cta[1])} ${ARR}</a>
+      <div class="photo-card"><img src="${up}assets/photos/${ind.photoTall || ind.photo}" alt="" width="500" height="300" style="width:100%;max-height:300px;object-fit:cover"></div></div>
+    ${winFrame(up, ind.shotApp, ind.shotName, ind.shot, `${ind.shotName} screenshot`)}
+  </div>
+</div>
+<section class="c"><h2 class="h2">The programs that help</h2><p class="sub">What each one does for ${esc(ind.name.toLowerCase())}.</p>
+  <div class="progrow">${ind.progs.map(([id, pts]) => { const p = prog(id); return `<a class="card" href="${up}programs/${id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><ul class="ticks">${pts.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>${more('Learn more')}</a>`; }).join('')}</div>
+</section>
+${ctaBlock(up, `Try Riyeser for ${esc(ind.name.toLowerCase())}`, 'Download Riyeser Central, add the programs above, and keep everything on your own computer.')}`,
+  });
+}
+
+// ---------- Riyeser Services sign in (hands over to the real sign-in in the Services app) ----------
+page({
+  path: 'signin.html', title: 'Sign in to Riyeser Services', active: '',
+  description: 'Sign in to your Riyeser Services projects, drawings and inspections.',
+  body: (up) => `<div class="signin-page"><img class="bgimg" src="${up}assets/photos/blueprint-roll.webp" alt="">
+  <div class="signbox"><img class="mark" src="${up}assets/logo-r.png" alt="">
+    <h1>Sign in to<br>Riyeser Services</h1>
+    <p>Open your projects, drawings and inspections. Sign in with the email and password for your Riyeser Services online account.</p>
+    <a class="btn p big" href="${SERVICES_APP}/?signin">Sign in</a>
+    <a class="forgot" href="${SERVICES_APP}/?signin">Forgot password?</a>
+    <div class="alt"><p><b>Using the Windows app on this PC only?</b> You don't need to sign in. Open Riyeser Services on your PC.</p>
+      <p>New to Riyeser Services? <a href="${SERVICES_APP}/?demo">Try the demo</a> or <a href="${up}programs/services.html">see what it does</a>.</p></div>
+  </div></div>`,
+});
 // ---------- program pages ----------
 for (const p of PROGRAMS.filter((x) => !x.custom)) {
   page({
     path: `programs/${p.id}.html`, title: `${p.name} — ${p.pitch}`, active: 'programs',
     description: `${p.name}: ${p.one}`,
     body: (up) => `
-<div class="phead-wrap"><div class="c phead"><div>
-  <div class="who">${iconBox(p, up)}<div><div class="k">${esc(p.name)}</div>${badgeOf(p)}</div></div>
-  <h1 style="margin-top:18px">${esc(p.pitch)}</h1><p class="lead">${esc(p.one)}</p>
-  <div class="ctas" style="justify-content:flex-start">${p.file ? `<a class="btn p big" href="${dl(p)}">${DL} Download ${esc(p.short)}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="btn s big" href="${up}help/${p.id}.html">${BOOK} How to use it</a></div>
-  ${p.file ? `<p class="fine">${freeLine} · Windows 10 &amp; 11</p>` : ''}
-</div>
-${p.shot ? `<img class="pshot" src="${up}assets/${p.shot}" alt="${esc(p.name)} screenshot" width="1400" height="1000">` : `<div class="placeholder">${appImg(p.id, up)}</div>`}
+<div class="hero"><div class="c">
+  <div>
+    <div class="phead-who" style="display:flex;align-items:center;gap:14px;margin-bottom:18px">${iconBox(p, up)}<div><span class="eyebrow" style="margin:0">${esc(p.name)}</span>${badgeOf(p)}</div></div>
+    <h1>${esc(p.pitch)}</h1><p class="lead">${esc(p.one)}</p>
+    <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
+    ${p.file ? `<p class="fine">Windows 10 &amp; 11 · No account or card needed</p>` : ''}
+  </div>
+  ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
 </div></div>
 ${p.id.startsWith('accounting') ? `<section class="c" id="editions"><h2 class="h2">Accounting Basics or Accounting Plus</h2>${editionsBlock(up, { download: false })}</section>` : ''}
-<section class="c"><span class="kicker">Features</span><h2 class="h2">What it does</h2><p class="sub">${esc(p.one)}</p>
+<section class="c"${p.id.startsWith('accounting') ? ' style="padding-top:0"' : ''}><span class="eyebrow">Features</span><h2 class="h2">What it does</h2><p class="sub">${esc(p.one)}</p>
   <div class="fgrid">${p.features.map(([h, t], i) => `<div class="f"><div class="fi">${i + 1}</div><h4>${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div>
-  ${p.shot2 ? `<img class="pshot" style="margin-top:40px" src="${up}assets/${p.shot2}" alt="${esc(p.name)} screenshot" loading="lazy" width="1600" height="1000">` : ''}
+  ${p.shot2 ? `<div style="margin-top:40px">${winFrame(up, p.id, p.name, p.shot2, `${p.name} in dark mode`, 1440, 900)}</div>` : ''}
   ${p.note ? `<p class="note" style="margin-top:28px">${esc(p.note)}</p>` : ''}
 </section>
-<section class="c"><h2 class="h2">Works even better together</h2><p class="sub">Every Riyeser program shows up in Riyeser Central, your home screen for the whole business.</p>
-  <div class="grid">${PROGRAMS.filter((o) => o.id !== p.id).slice(0, 3).map((o) => `<a class="card" href="${up}programs/${o.id}.html">${iconBox(o, up)}<h3>${esc(o.short === 'Central' ? 'Riyeser Central' : o.short)}</h3><p>${esc(o.one)}</p>${more('Learn more')}</a>`).join('')}</div>
+<section class="c" style="padding-top:0"><h2 class="h2">Works even better together</h2><p class="sub">Every Riyeser program shows up in Riyeser Central, your home screen for the whole business.</p>
+  <div class="grid three">${PROGRAMS.filter((o) => o.id !== p.id).slice(0, 3).map((o) => progCard(o, up)).join('')}</div>
 </section>
-${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyeser Central — free')}`,
+${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}`,
   });
 }
-
 
 // ---------- Riyeser Services (content carried over from the original riyeser.com homepage and FAQ) ----------
 {
@@ -373,29 +451,29 @@ ${ctaBlock(up, p.file ? `Get ${p.name} free` : 'Start with Riyeser Central — f
     path: 'programs/services.html', title: 'Riyeser Services — map every service while the building goes up', active: 'programs',
     description: 'Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with inspections, test results and photos. As-builts done at handover.',
     body: (up) => `
-<div class="phead-wrap"><div class="c phead"><div>
-  <div class="who">${iconBox(p, up)}<div class="k">Riyeser Services</div></div>
-  <h1 style="margin-top:18px">Map every service while the building goes up</h1>
+<div class="hero"><div class="c"><div>
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">${iconBox(p, up)}<span class="eyebrow" style="margin:0">Riyeser Services</span></div>
+  <h1>Map every service while the building goes up</h1>
   <p class="lead">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
   <div class="ctas" style="justify-content:flex-start"><a class="btn p big" href="${SERVICES_APP}/?demo">${PLAY} Try it now, free</a>${SERVICES_WIN ? `<a class="btn s big" href="${RELEASES}/RiyeserServices-Setup.exe">${DL} Windows app</a>` : ''}<a class="btn s big" href="${SERVICES_APP}/">Sign in</a></div>
   ${SERVICES_WIN ? '<p class="fine">Works in any web browser, on phones and tablets — or install the Windows app: it works on your PC with no account and no internet, and can sync to your online account.</p>' : ''}
   <p class="fine">No sign-up for the demo. Explore a marked-up resort with a guided tour.</p>
-</div><img class="pshot" src="${up}assets/services-trace.webp" alt="A water main route highlighted on a floor plan" width="1200" height="900"></div></div>
+</div>${winFrame(up, 'services', 'Riyeser Services', 'services-trace.webp', 'A water main route highlighted on a floor plan', 1500, 783)}</div></div>
 <section class="c"><h2 class="h2">How it works</h2><p class="sub">From the first drawing to the handover pack.</p>
   <div class="fgrid steps4">${STEPS.map(([h, t], i) => `<div class="f"><div class="k">Step ${i + 1}</div><h4 style="margin-top:6px">${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div></section>
 <section class="c"><h2 class="h2">One drawing for every trade</h2><p class="sub">Each trade gets its own symbols, checklists and reports.</p>
   <div class="fgrid trades">${TRADES.map(([h, t]) => `<div class="f"><h4>${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div></section>
 <section class="c"><h2 class="h2">What you hand over</h2><p class="sub">Everything is already in them — no rework at the end of the job.</p>
   <div class="grid two">${HANDOVER.map(([img, h, t, alt]) => `<div class="card"><img src="${up}assets/${img}" alt="${esc(alt)}" loading="lazy" style="border-radius:12px;margin-bottom:14px;border:1px solid var(--line)"><h3>${esc(h)}</h3><p>${esc(t)}</p></div>`).join('')}</div></section>
-<section class="c"><div class="feat" style="padding:24px 0"><div class="t"><div class="k">On site</div><h3>Built for the people doing the work</h3>
+<section class="c"><div class="ind-split" style="padding:0"><div class="t"><span class="k">On site</span><h2 style="margin-top:8px">Built for the people doing the work</h2>
   <p>Big buttons, works with no signal, and syncs when you're back in range. Phones, tablets and computers — add it to your home screen and it opens like an app.</p>
   <ul class="ticks"><li>Electrical: boards, circuits and test results on record</li><li>IT and comms: racks, fibre and copper, port by port</li><li>Plumbing: pipe routes and pressure tests before the wall closes</li><li>Every trade working from the same drawing</li></ul></div>
-  <img src="${up}assets/services-report.webp" alt="Two pages of a power test report" loading="lazy"></div></section>
-<section class="c faq" id="faq" style="max-width:900px"><h2 class="h2">Questions and answers</h2>
-  ${FAQ.map(([g, qs]) => `<h3 style="margin:28px 0 4px;font-size:18px">${esc(g)}</h3>${qs.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}`).join('')}
+  <img class="pshot" src="${up}assets/services-report.webp" alt="Two pages of a power test report" loading="lazy"></div></section>
+<section class="c" id="faq" style="max-width:920px"><h2 class="h2">Questions and answers</h2>
+  ${FAQ.map(([g, qs]) => `<h3 style="margin:28px 0 12px;font-size:19px">${esc(g)}</h3><div class="faq">${qs.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>`).join('')}
   <p class="note" style="margin-top:24px">More help: the <a class="more" href="${SERVICES_APP}/help.html">help guide</a> · <a class="more" href="${up}terms.html">Terms of use</a> · <a class="more" href="mailto:${EMAIL}">${EMAIL}</a></p></section>
 <section class="c"><div class="cta"><h2>See it on a real job</h2><p>Try the demo now, or email us to set Riyeser Services up for your team.</p>
-  <a class="btn t" href="${SERVICES_APP}/?demo">Try the demo</a> &nbsp; <a class="btn glass" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser Services enquiry')}">${EMAIL}</a></div></section>`,
+  <div class="ctas"><a class="btn t big" href="${SERVICES_APP}/?demo">${PLAY} Try the demo</a><a class="btn glass big" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser Services enquiry')}">${EMAIL}</a></div></div></section>`,
   });
 }
 
@@ -408,22 +486,27 @@ page({
 
 // ---------- downloads ----------
 page({
-  path: 'downloads.html', title: 'Download Riyeser — free for Windows', active: 'downloads',
-  description: 'Download Riyeser Central, Accounting, Desk Assistant and PDF free for Windows 10 and 11. No sign-up, no card.',
-  body: (up) => `
-<div class="phead-wrap"><div class="c pagehead" style="max-width:1000px">
-  <span class="eyebrow"><span class="dot"></span>Windows 10 &amp; 11 · no admin rights needed</span>
-  <h1 style="margin-top:16px">Downloads</h1>
-  <p class="lead">${freeLine}. Each installs in one click and updates over the old version, so your information is kept.</p></div></div>
-<div class="c" style="max-width:1000px">
-  ${PROGRAMS.map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p></div>${p.file ? `<a class="btn p" href="${dl(p)}">${DL} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join('')}
-  <section style="padding:40px 0 0"><h2 style="font-size:26px;margin-bottom:8px">Installing</h2>
-    <ol class="steps"><li>Click <b>Download</b> and open the file when it finishes.</li>
-    <li>If Windows shows <b>“Windows protected your PC”</b>, click <b>More info → Run anyway</b>. (We're getting our programs signed so this goes away.)</li>
-    <li>That's it — it installs for you in a few seconds and adds a desktop icon. No admin rights needed.</li></ol>
-    <p class="note" style="margin-top:18px">Need a hand? The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates, your free trial and licence.</p></section>
-</div>
-${ctaBlock(up, 'New here? Start with Riyeser Central', 'It\'s the home screen for everything — and it shows you what else you can add.')}`,
+  path: 'downloads.html', title: 'Download Riyeser for Windows', active: 'downloads',
+  description: 'Download Riyeser Central for Windows 10 and 11, then add the programs you need. No account, no card.',
+  body: (up) => `${bandHero({ title: 'Download Riyeser for Windows', lead: 'Get Riyeser Central, then add the programs you need.' })}
+<section class="c" style="padding-top:44px">
+  <div class="central-dl"><img src="${up}assets/logo-r.png" alt="">
+    <div><h2>Riyeser Central</h2><p>The home screen and installer for Riyeser programs. It shows what else you can add and keeps everything up to date.</p></div>
+    <span class="sep"></span>
+    <div class="act"><a class="btn p big" href="${dl(prog('central'))}">${WINDL}</a><small>${WINLOGO} Windows 10 &amp; 11</small></div>
+  </div>
+  <div class="steps3" style="margin-top:40px">
+    <div class="step"><span class="n">1</span>${li('download')}<div><h3>Download</h3><p>Get Riyeser Central for Windows.</p></div></div><span class="to">${ARR}</span>
+    <div class="step"><span class="n">2</span>${li('monitor')}<div><h3>Install</h3><p>Open the file. It installs in a few seconds; no admin rights needed.</p></div></div><span class="to">${ARR}</span>
+    <div class="step"><span class="n">3</span>${li('layers')}<div><h3>Add programs</h3><p>Choose and install the Riyeser programs you need.</p></div></div>
+  </div>
+</section>
+<section class="c" style="padding-top:0">
+  <h2 class="h2">Every program</h2><p class="sub">Or download a program on its own. Each one installs in one click and updates over the old version, so your information is kept.</p>
+  ${PROGRAMS.filter((p) => p.id !== 'central').map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p></div>${p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join('')}
+  <div class="note" style="margin-top:26px"><b>Windows says “Windows protected your PC”?</b> Click <b>More info</b>, then <b>Run anyway</b>. We're getting our programs signed so this goes away. The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates and your licence.</div>
+</section>
+${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the same button names you see on screen.')}`,
 });
 
 // ---------- pricing ----------
@@ -431,12 +514,20 @@ page({
   path: 'pricing.html', title: 'Riyeser pricing — 90 days free, then $20 a month per user', active: 'pricing',
   description: 'Every Riyeser program free for 90 days with no card. Then $20 a month per user for the whole suite, less for teams.',
   body: (up) => `
-<div class="hero2"><div class="c hero"><span class="eyebrow"><span class="dot"></span>90 days free · no card · every program</span><h1>Everything, for <span class="grad">$20 a month</span></h1>
-  <p class="lead">Accounting, Payroll, Services, Desk Assistant, PDF and Riyeser Central — all included. Try the lot free for 90 days, then it's $20 a month per person.</p>
-  <div class="ctas"><a class="btn p big" href="${dl(prog('central'))}">${DL} Start your free trial</a><a class="btn glass big" href="#calc">Work out my price ${ARR}</a></div>
-  <p class="fine">No sign-up to start · nothing is charged automatically when the trial ends</p></div></div>
+${bandHero({ title: 'Pricing', lead: 'Choose the right way to use Riyeser for your needs.' })}
+<section class="c" style="padding-bottom:20px">
+  <div class="price2">
+    <div class="pcard"><div class="head">${li('accounting-basics')}<div><h2>Accounting Basics</h2><span class="badge big free">Free forever</span></div></div>
+      <ul class="ticks"><li>Invoices, quotes, customers, suppliers and stock</li><li>A shop counter for retail or restaurants</li><li>Keep using it at no cost, with no licence</li></ul>
+      <a class="tlink" href="${dl(prog('accounting-basics'))}">Download Accounting Basics ${ARR}</a></div>
+    <div class="pcard"><div class="head">${li('layers')}<div><h2>Licensed programs</h2><span class="badge big">90 days free</span></div></div>
+      <ul class="ticks"><li>Try every licensed program free for 90 days, no card</li><li>Full program features during your trial</li><li>Then from $20 per user a month for the whole suite</li></ul>
+      <a class="tlink" href="#plans">See licence options ${ARR}</a></div>
+  </div>
+</section>
 
-<section class="c">
+<section class="c" id="plans" style="padding-top:40px">
+  <h2 class="h2">Licence options</h2><p class="sub">One licence covers every Riyeser program for that person: Accounting Plus, Payroll, Services, Desk Assistant, PDF and Riyeser Central.</p>
   ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off your first year</b><p>For the first 100 users to buy a licence. That's from <b>$6.50</b> per user a month for 12 months, then the normal price below. The offer ends when 100 users have it.</p></div></div>` : ''}
   <div class="plans">
     <div class="plan best"><span class="tag">Most popular</span><div class="k">1–4 users</div><div class="price">$20<small> per user / month</small></div><p>Everything, for sole traders and small teams.</p></div>
@@ -498,7 +589,7 @@ u.addEventListener('input',draw);y.addEventListener('change',draw);draw()})()</s
   const gName = (g) => (g.id === 'accounting-basics' || g.id === 'accounting' ? `Accounting ${g.name.replace('Accounting ', '')}` : g.name);
   const countQ = (g) => g.groups.reduce((n, x) => n + x.items.length, 0);
   const plain = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
-  const searchBox = (ph) => `<div class="hsearch-wrap">${SEARCH}<input class="hsearch" id="hq" type="search" placeholder="${ph}" autocomplete="off" aria-label="Search help"></div>`;
+  const searchBox = (ph) => `<div class="hsearch-wrap">${SEARCH}<input class="hsearch" id="hq" type="search" placeholder="${ph}" autocomplete="off" aria-label="Search help"><button class="go" type="button" aria-label="Search" onclick="var a=document.querySelector('#hres a');if(a)location.href=a.href;else document.getElementById('hq').focus()">${SEARCH}</button></div>`;
   // Every question in every guide, for the search box (title, guide, link, words).
   const INDEX = (up) => guides(up).flatMap((g) => g.groups.flatMap((grp) => grp.items.map(([id, q, a]) => [q, gName(g), g.app, `${up}help/${g.id}.html#${id}`, plain(a).slice(0, 400)])));
   const searchScript = (up) => `<script>(function(){var IX=${JSON.stringify(INDEX(up)).replace(/</g, '\\u003c')},box=document.getElementById('hq'),out=document.getElementById('hres');
@@ -514,22 +605,15 @@ box.addEventListener('keydown',function(e){if(e.key==='Enter'){var a=out.querySe
     description: 'Step-by-step help for every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and Services.',
     body: (up) => {
       const G = guides(up);
-      const popular = G.flatMap((g) => g.groups.flatMap((grp) => grp.items.filter((it) => it[3]).map((it) => [g, it]))).filter((_, i) => i % 2 === 0).slice(0, 10);
+      const popular = G.flatMap((g) => g.groups.flatMap((grp) => grp.items.filter((it) => it[3]).map((it) => [g, it]))).filter((_, i) => i % 2 === 0).slice(0, 8);
       return `
-<div class="hero2"><div class="c helphero">
-  <span class="eyebrow"><span class="dot"></span>Help Centre</span>
-  <h1>How can we help?</h1>
-  <p class="lead">Plain-English, step-by-step guides for every Riyeser program.</p>
-  ${searchBox('Search help — e.g. password, payslip, update, sign a PDF')}
-  <div class="hresults" id="hres"></div>
-</div></div>
-<section class="c" style="padding-top:20px">
-  <span class="kicker">Guides</span><h2 class="h2">Choose a program</h2><p class="sub">Each guide walks you through the everyday jobs, using the same button names you'll see on screen.</p>
-  <div class="happs">${G.map((g) => `<a class="card" href="${up}help/${g.id}.html">${g.badge ? `<span class="badge ${g.badge[0]}">${g.badge[1]}</span>` : ''}<div class="icon i-${g.app}">${gIcon(g, up)}</div><h3>${esc(gName(g))}</h3><p>${esc(g.intro)}</p>${more(`${countQ(g)} answers`)}</a>`).join('')}</div>
+${bandHero({ eyebrow: 'Help Centre', title: 'How can we help?', img: 'blueprint.webp', up, extra: `<div class="hres-wrap" style="margin-top:22px">${searchBox('Search help — e.g. password, payslip, update, sign a PDF')}<div class="hresults" id="hres"></div></div>` })}
+<section class="c" style="padding-top:40px;padding-bottom:20px">
+  <div class="hcats">${G.map((g) => `<a class="hcat" href="${up}help/${g.id}.html"><div>${li(g.id === 'start' ? 'rocket' : g.id)}<h3>${esc(gName(g))}</h3><p>${esc(g.blurb || g.intro)}</p></div>${svg(LI.chev, 'chev')}</a>`).join('')}</div>
 </section>
-<section class="c" style="padding-top:8px;max-width:1000px">
-  <span class="kicker">Popular</span><h2 class="h2">Most asked</h2><p class="sub">Quick answers to the questions we hear most.</p>
-  <div class="popular">${popular.map(([g, [id, q]]) => `<a href="${up}help/${g.id}.html#${id}">${gIcon(g, up)}<span>${q}<small>${esc(gName(g))}</small></span></a>`).join('')}</div>
+<section class="c" style="padding-top:30px;max-width:1000px">
+  <h2 class="h2" style="font-size:34px">Frequently asked questions</h2>
+  <div class="faq" style="margin-top:18px">${popular.map(([g, [id, q, a]]) => `<details><summary>${q}</summary>${a}<p><a class="more" href="${up}help/${g.id}.html#${id}">More in the ${esc(gName(g))} guide ${ARR}</a></p></details>`).join('')}</div>
 </section>
 <section class="c" style="padding-top:8px;max-width:1000px">${contact(up)}</section>
 ${searchScript(up)}
@@ -579,7 +663,7 @@ cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 const SUBFOLDER = BASE !== '/';
 if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-const urls = ['', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...helpGuides({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`)];
+const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'signin.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...helpGuides({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`)];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
 writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyeser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
 console.log('Built', urls.length, 'pages into', OUT);

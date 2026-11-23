@@ -7,7 +7,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
   const warn = (t) => `<p class="warn">⚠️ ${t}</p>`;
   return [
     {
-      id: 'start', app: 'central', name: 'Getting started', short: 'Getting started',
+      id: 'start', blurb: 'Set up Riyeser and get going quickly.', app: 'central', name: 'Getting started', short: 'Getting started',
       intro: 'Downloading, installing, updates, your free trial and licence, and moving to a new computer.',
       groups: [
         { title: 'Installing', items: [
@@ -31,7 +31,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'central', app: 'central', name: 'Riyeser Central',
+      id: 'central', blurb: 'Your home screen, programs and updates.', app: 'central', name: 'Riyeser Central',
       intro: 'Your home screen: money owed, today\'s meetings, to-dos, recent files, one search box, and every Riyeser program one click away.',
       groups: [
         { title: 'The home screen', items: [
@@ -52,7 +52,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'accounting-basics', app: 'accounting-basics', name: 'Accounting Basics', badge: ['free', 'Free'],
+      id: 'accounting-basics', blurb: 'Invoices, stock, the shop counter and reports.', app: 'accounting-basics', name: 'Accounting Basics', badge: ['free', 'Free'],
       intro: 'Free invoicing, quotes, customers, suppliers, stock and a shop counter. Everything here also works the same way in Accounting Plus.',
       groups: [
         { title: 'Getting started', items: [
@@ -95,7 +95,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'accounting', app: 'accounting', name: 'Accounting Plus', badge: ['trial', '90 days free'],
+      id: 'accounting', blurb: 'Banking, BAS, journals and several companies.', app: 'accounting', name: 'Accounting Plus', badge: ['trial', '90 days free'],
       intro: 'Full books: everything in Basics, plus banking and reconciliation, payroll, journals, jobs, budgets, BAS and every report.',
       groups: [
         { title: 'Basics and Plus', items: [
@@ -131,7 +131,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'payroll', app: 'payroll', name: 'Riyeser Payroll',
+      id: 'payroll', blurb: 'Staff, time clock, pay runs and payslips.', app: 'payroll', name: 'Riyeser Payroll',
       intro: 'Time clock, timesheets, pay runs, payslips, leave, wage reports and bank statement checks, all kept on your computer.',
       groups: [
         { title: 'Getting started', items: [
@@ -169,7 +169,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'desk-assistant', app: 'desk-assistant', name: 'Riyeser Desk Assistant',
+      id: 'desk-assistant', blurb: 'Find, sort and tidy your files.', app: 'desk-assistant', name: 'Riyeser Desk Assistant',
       intro: 'Sorts your files by type and year, finds anything in seconds, spots duplicate copies, and keeps your meetings and to-dos.',
       groups: [
         { title: 'Getting started', items: [
@@ -199,7 +199,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'pdf', app: 'pdf', name: 'Riyeser PDF',
+      id: 'pdf', blurb: 'Fill in, sign, mark up and combine PDFs.', app: 'pdf', name: 'Riyeser PDF',
       intro: 'Open, fill in, sign, mark up, combine and edit PDFs, even scanned ones. Every save keeps a backup of the previous version.',
       groups: [
         { title: 'Getting started', items: [
@@ -231,7 +231,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'services', app: 'services', name: 'Riyeser Services',
+      id: 'services', blurb: 'Projects, drawings, inspections and sign in.', app: 'services', name: 'Riyeser Services',
       intro: 'Building services on your drawings: cables, pipes and ducts with inspections, tests and photos. Works in a browser, or as a Windows app on your PC.',
       groups: [
         { title: 'Getting started', items: [
