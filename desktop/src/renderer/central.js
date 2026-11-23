@@ -79,10 +79,11 @@ tick(); setInterval(tick, 60000);
 
 // ---------- the programs ----------
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
-const ORDER = ['central', 'accounting-basics', 'accounting', 'payroll', 'desk', 'pdf', 'services'];
+const ORDER = ['central', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Accounting' }, accounting: { ic: 'book', c: 'c-acc', nav: 'Accounting' },
+  pos: { ic: 'store', c: 'c-pos', nav: 'POS' },
   payroll: { ic: 'people', c: 'c-pay', nav: 'Payroll' }, desk: { ic: 'folder', c: 'c-desk', nav: 'Desk Assistant' },
   pdf: { ic: 'pdf', c: 'c-pdf', nav: 'PDF' }, services: { ic: 'hat', c: 'c-svc' }, // services: shown by its own name (As Built)
 };
@@ -94,7 +95,7 @@ const hasAcc = () => !!accId();
 // Quick access: one-click jobs, each shown only when its program is installed.
 // `page` asks the program to open on that screen (programs that don't know the page just open normally).
 const QUICK = [
-  { p: 'acc', ic: 'store', t: 'Shop counter', s: 'Ring up a sale (POS)', page: 'pos' },
+  { p: 'pos', ic: 'store', t: 'Open the till', s: 'Ring up a sale', page: 'pos' },
   { p: 'acc', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' },
   { p: 'payroll', ic: 'people', t: 'Run payroll', s: 'Timesheets to payslips', page: 'payrun' },
   { p: 'desk', ic: 'sort', t: 'Sort new files', s: 'Downloads, Desktop, phone', page: 'organise' },
@@ -104,7 +105,7 @@ const QUICK = [
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 // Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
-const LOGO = { 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const LOGO = { 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 const quickFor = (q) => (q.p === 'acc' ? accId() : has(q.p) ? q.p : null);
 
@@ -330,7 +331,7 @@ function openLicence() {
     <div class="progs">${programRows(s)}</div>
     ${s.signedIn && s.configured ? `<label class="yr"><input type="checkbox" id="licyearly" ${yearly ? 'checked' : ''}> Pay yearly (2 months free)</label>
     <div class="row">${paidAny ? '<button class="btn s" data-lic="manage">Manage plan &amp; receipts</button>' : ''}<button class="btn s" data-lic="refresh">Check again</button><button class="btn s" data-lic="signout">Sign out on this PC</button></div>` : ''}
-    <p class="muted">Central, PDF and Desk Assistant are always free. Reaching a free limit never deletes anything: you can still open, print and export everything, and only new work waits for a subscription. Extra users $5 a month, extra companies $10 a month. Prices in AUD; any tax is shown before you pay. <a href="#" data-lic="buy">See pricing</a></p>`;
+    <p class="muted">Central, PDF and Desk Assistant are always free. Reaching a free limit never deletes anything: you can still open, print and export everything, and only new work waits for a subscription. 🐣 Early bird: 50% off your first year for the first 100 businesses. Extra users $5 a month, extra companies $10 a month. Prices in AUD; any tax is shown before you pay. <a href="#" data-lic="buy">See pricing</a></p>`;
   if (!$('#licdlg').open) $('#licdlg').showModal();
 }
 document.addEventListener('change', (e) => { if (e.target.id === 'licyearly') yearly = e.target.checked; });

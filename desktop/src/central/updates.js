@@ -13,6 +13,8 @@ const PRODUCTS = [
   { id: 'services', display: 'As Built', also: ['Riyeser Services'], asset: 'RiyeserServices-Setup.exe', args: ['/S'] },
   // Two separate apps. The old single "Riyeser Accounting 1.x" counts as Plus, so it updates to Accounting Plus.
   { id: 'accounting-basics', display: 'Riyeser Accounting Basics', asset: 'RiyeserAccountingBasics-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
+  // The till on its own (installs next to Accounting).
+  { id: 'pos', display: 'Riyeser POS', asset: 'RiyeserPOS-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'accounting', display: 'Riyeser Accounting Plus', alsoRe: /^Riyeser Accounting\s+\d/i, asset: 'RiyeserAccountingPlus-Setup.exe', oldAsset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
 ];
 
