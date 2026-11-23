@@ -21,7 +21,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['updates', 'How do I update my programs?', `<ol><li>Open <b>Riyeser Central</b>. It checks for updates by itself.</li><li>When one is ready you'll see <b>An update is ready</b>. Click <b>Update</b> (or <b>Update all</b>).</li><li>Programs being updated close for a moment and open again. Your information is kept.</li></ol><p>To check straight away, click <b>Check for updates</b> at the bottom of Riyeser Central. You can also download the newest version from <a class="more" href="${up}downloads.html">Downloads</a> and run it over the old one.</p>`, true],
         ] },
         { title: 'Free trial and licence', items: [
-          ['trial', 'How does the free trial work?', '<p>Riyeser Central, PDF and Desk Assistant are free forever. <b>Accounting Basics</b> is free for your first 50 invoices and <b>Riyeser POS</b> for your first 500 sales. Accounting Plus, Payroll and As Built are free for 90 days. No card and no sign-up. Each program shows how many free invoices, sales or days are left.</p><p>When the free part runs out nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
+          ['trial', 'How does the free trial work?', '<p>Riyeser Central, PDF and Desk Assistant are free forever. Every paid program — <b>Accounting Basics</b>, Accounting Plus, Payroll, <b>Riyeser POS</b> and As Built — is free for 90 days. No card and no sign-up. Each program shows how many days are left.</p><p>When the trial ends nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
           ['licence', 'How do I enter my licence key?', `<ol><li>Open <b>Riyeser Central</b> and click <b>Licence</b> at the bottom of the screen.</li><li>Paste the key from your receipt email into <b>Have a licence key?</b></li><li>Click <b>Turn on licence</b>.</li></ol><p>One licence covers every Riyeser program for that person. To buy one, click <b>See plans &amp; buy</b> or see <a class="more" href="${up}pricing.html">Pricing</a>.</p>`, true],
           ['licence-move', 'Moving my licence to another computer', '<p>On the old computer open Riyeser Central → <b>Licence</b> → <b>Remove licence from this PC</b>. That frees its place. Then enter the same key on the new computer.</p>'],
         ] },
@@ -52,8 +52,8 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'accounting-basics', blurb: 'Invoices, stock and reports.', app: 'accounting-basics', name: 'Accounting Basics', badge: ['trial', '50 invoices free'],
-      intro: 'Invoicing, quotes, customers, suppliers and stock, free for your first 50 invoices. Everything here also works the same way in Accounting Plus. For a till, see Riyeser POS.',
+      id: 'accounting-basics', blurb: 'Invoices, stock and reports.', app: 'accounting-basics', name: 'Accounting Basics', badge: ['trial', '90 days free'],
+      intro: 'Invoicing, quotes, customers, suppliers and stock, free for 90 days. Everything here also works the same way in Accounting Plus. For a till, see Riyeser POS.',
       groups: [
         { title: 'Getting started', items: [
           ['first-company', 'Setting up my company', `<ol><li>Open Accounting Basics. It asks you to <b>Create company file</b>.</li><li>Type your <b>Company name</b> and choose an <b>Admin password</b>. Leave <b>Load demo data</b> unticked to start empty (tick it if you just want to look around).</li><li>Go to <b>Setup → Company &amp; preferences</b> and enter your ABN, address and when your financial year starts.</li><li>Add your customers, suppliers and stock items, then start invoicing.</li></ol>${tip('Already trading? Enter your bank balances under <b>Setup → Chart of accounts</b>, and the opening quantity and cost on each new stock item.')}`, true],
@@ -131,12 +131,12 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'pos', blurb: 'The till: selling, payments, close till and setup.', app: 'pos', name: 'Riyeser POS', badge: ['trial', '500 sales free'],
-      intro: 'A touch-friendly till, as its own app. It opens the same company file as Riyeser Accounting, so every sale is an invoice and payment there, and stock, GST and reports update by themselves. Free for your first 500 sales.',
+      id: 'pos', blurb: 'The till: selling, payments, close till and setup.', app: 'pos', name: 'Riyeser POS', badge: ['trial', '90 days free'],
+      intro: 'A touch-friendly till, as its own app. It opens the same company file as Riyeser Accounting, so every sale is an invoice and payment there, and stock, GST and reports update by themselves. Free for 90 days.',
       groups: [
         { title: 'Getting started', items: [
           ['open', 'Install and open the till', '<ol><li>Download <b>Riyeser POS</b> from the Downloads page, or click <b>Get more apps</b> in Riyeser Central.</li><li>Open <b>Riyeser POS</b> from the desktop, the Start menu or Riyeser Central (<b>Open the till</b>). It opens straight on the till.</li><li>First time? It asks you to create a company file, or opens the one Riyeser Accounting already uses.</li></ol>', true],
-          ['free-sales', 'How many free sales do I have?', '<p>Riyeser POS is free for your first 500 sales (voided sales don\'t count). The number left shows at the top of the screen, and the till warns you once 400 have been used. After 500, new sales wait until you enter a licence key in Riyeser Central; sales, receipts, close till, products and stock all keep working.</p>'],
+          ['free-sales', 'How long is POS free?', '<p>Riyeser POS is free for 90 days, with as many sales as you like. The days left show at the top of the screen, and the till reminds you in the last two weeks. After the trial, new sales wait until you enter a licence key in Riyeser Central; sales, receipts, close till, products and stock all keep working.</p>'],
           ['setup', 'Choose Retail or Restaurant', '<ol><li>Go to <b>Setup → POS setup</b> in Riyeser POS (you need Full access to Setup to save).</li><li>Pick <b>Retail</b> or <b>Restaurant</b>. Each starts with sensible switches: barcode scanning and returns for shops; tables, kitchen dockets and takeaway for cafes.</li><li>Turn any switch on or off, name your tills (for example Till 1, Bar), and click <b>Save</b>.</li></ol>'],
           ['products', 'Add products, photos and Favourites', '<ol><li>Open <b>Products → Products &amp; stock</b> and open (or add) a product.</li><li>Add a photo and tick <b>Show in POS Favourites</b> for your best sellers.</li><li>The item appears on the till under its category, with its price and stock.</li></ol>'],
         ] },

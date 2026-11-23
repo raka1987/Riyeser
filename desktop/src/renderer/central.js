@@ -313,7 +313,7 @@ function openLicence() {
     : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
       <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
       <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business (3 users included), and Accounting Plus, Payroll, POS and As Built are +$20 each. 🐣 Early bird: 50% off your first year for the first 100 businesses. Without a licence, Accounting Basics is free for your first 50 invoices and POS for your first 500 sales; Accounting Plus is included in your licence. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+      <p class="muted">Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business (3 users included), and Accounting Plus, Payroll, POS and As Built are +$20 each. 🐣 Early bird: 50% off your first year for the first 100 businesses. Every paid program is free for 90 days, no card. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
   $('#licdlg').showModal();
 }
 document.addEventListener('click', (e) => {
