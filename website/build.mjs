@@ -394,7 +394,7 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
     body: (up) => `
 <div class="hero"><div class="c">
   <div>
-    <div class="phead-who" style="display:flex;align-items:center;gap:14px;margin-bottom:18px">${iconBox(p, up)}<div><span class="eyebrow" style="margin:0">${esc(p.name)}</span>${badgeOf(p)}</div></div>
+    <div class="phead-who" style="display:flex;align-items:center;gap:18px;margin-bottom:18px">${iconBox(p, up)}<div><span class="eyebrow" style="margin:0">${esc(p.name)}</span>${badgeOf(p)}</div></div>
     <h1>${esc(p.pitch)}</h1><p class="lead">${esc(p.one)}</p>
     <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
     ${p.file ? `<p class="fine">Windows 10 &amp; 11 · No account or card needed</p>` : ''}
@@ -452,7 +452,7 @@ ${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}`,
     description: 'Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with inspections, test results and photos. As-builts done at handover.',
     body: (up) => `
 <div class="hero"><div class="c"><div>
-  <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">${iconBox(p, up)}<span class="eyebrow" style="margin:0">Riyeser Services</span></div>
+  <div class="phead-who" style="display:flex;align-items:center;gap:18px;margin-bottom:18px">${iconBox(p, up)}<span class="eyebrow" style="margin:0">Riyeser Services</span></div>
   <h1>Map every service while the building goes up</h1>
   <p class="lead">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
   <div class="ctas" style="justify-content:flex-start"><a class="btn p big" href="${SERVICES_APP}/?demo">${PLAY} Try it now, free</a>${SERVICES_WIN ? `<a class="btn s big" href="${RELEASES}/RiyeserServices-Setup.exe">${DL} Windows app</a>` : ''}<a class="btn s big" href="${SERVICES_APP}/">Sign in</a></div>
