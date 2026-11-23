@@ -21,7 +21,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['updates', 'How do I update my programs?', `<ol><li>Open <b>Riyeser Central</b>. It checks for updates by itself.</li><li>When one is ready you'll see <b>An update is ready</b>. Click <b>Update</b> (or <b>Update all</b>).</li><li>Programs being updated close for a moment and open again. Your information is kept.</li></ol><p>To check straight away, click <b>Check for updates</b> at the bottom of Riyeser Central. You can also download the newest version from <a class="more" href="${up}downloads.html">Downloads</a> and run it over the old one.</p>`, true],
         ] },
         { title: 'Free trial and licence', items: [
-          ['trial', 'How does the free trial work?', '<p>Riyeser Central, Riyeser Invoices, PDF and Desk Assistant are free forever. Every paid program — <b>Accounting Basics</b>, Accounting Plus, Payroll, <b>Riyeser POS</b>, and As Built for the building industry — is free for 90 days. No card and no sign-up. Each program shows how many days are left.</p><p>When the trial ends nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
+          ['trial', 'How does the free trial work?', '<p>Riyeser Central, Riyeser Invoices, PDF and Desk Assistant are free forever. Every paid program — <b>Accounting Basics</b>, Accounting Plus, Payroll, <b>Riyeser POS</b>, Bookings, and As Built for the building industry — is free for 90 days. No card and no sign-up. Each program shows how many days are left.</p><p>When the trial ends nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
           ['licence', 'How do I enter my licence key?', `<ol><li>Open <b>Riyeser Central</b> and click <b>Licence</b> at the bottom of the screen.</li><li>Paste the key from your receipt email into <b>Have a licence key?</b></li><li>Click <b>Turn on licence</b>.</li></ol><p>One licence covers every Riyeser program for that person. To buy one, click <b>See plans &amp; buy</b> or see <a class="more" href="${up}pricing.html">Pricing</a>.</p>`, true],
           ['licence-move', 'Moving my licence to another computer', '<p>On the old computer open Riyeser Central → <b>Licence</b> → <b>Remove licence from this PC</b>. That frees its place. Then enter the same key on the new computer.</p>'],
         ] },
@@ -65,6 +65,21 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['paid', 'Record a payment', '<p>Click <b>Sales → Receive payments</b>, choose the customer, tick the invoices being paid and enter the amount. Part payments are fine.</p>'],
           ['owed', 'See who owes me', '<p>Open <b>Reports → Who owes me</b> for every unpaid invoice by customer and how overdue it is.</p>'],
           ['more', 'I need stock, bills or a Profit &amp; Loss', '<p>Install <b>Accounting Basics</b>. It opens the same company file, so every customer, invoice and payment is already there. It\'s free for 90 days, then $20 a month per business. Click <b>Setup → Need stock or bills?</b> in Riyeser Invoices for the download.</p>'],
+        ] },
+      ],
+    },
+    {
+      id: 'bookings', blurb: 'Jobs, appointments and table bookings.', app: 'bookings', name: 'Riyeser Bookings', badge: ['trial', '90 days free'],
+      intro: 'Book and schedule trades jobs, appointments or restaurant tables, as its own app. It opens the same company file as Riyeser Accounting, Invoices and POS, so customers are shared and invoices appear there straight away. Free for 90 days.',
+      groups: [
+        { title: 'Getting started', items: [
+          ['open', 'Install Bookings and choose your kind of business', '<ol><li>Download <b>Riyeser Bookings</b> from the Downloads page, or click <b>Get more apps</b> in Riyeser Central.</li><li>Open it and go to <b>Setup → Bookings setup</b>.</li><li>Choose <b>Trades &amp; site jobs</b>, <b>Appointments</b> or <b>Restaurant tables</b>, and your opening hours.</li><li>Name your staff (or tables, with their seats), and add the job types or services you offer with how long they take and their price.</li><li>Click <b>Save</b>.</li></ol>', true],
+        ] },
+        { title: 'Booking', items: [
+          ['book', 'Make a booking', '<ol><li>On the <b>Day</b> view, click an empty time in the right staff member\'s or table\'s column (or click <b>+ New</b>).</li><li>Choose the customer, or type a new customer\'s name and phone.</li><li>Pick the job type or service: the time it takes fills in by itself. Add the job address or number of people if needed.</li><li>Click <b>Save</b>.</li></ol><p>If that person or table is already booked then, Bookings tells you. Tick <b>Allow double-booking</b> only if you really mean it.</p>', true],
+          ['status', 'Confirm, start, finish or cancel', '<p>Open the booking and click <b>Confirm</b>, <b>Start</b> or <b>Mark done</b>. <b>Cancel this booking</b> and <b>Didn\'t show</b> keep it on record, crossed out on the calendar.</p>'],
+          ['invoice', 'Invoice a job or appointment', '<p>Open it and click <b>Invoice this job</b>. A real invoice is made for the customer with the service\'s price and GST. Check it, then save a PDF or send it. It\'s in Riyeser Accounting and Invoices too. <b>List → Done, not invoiced yet</b> shows everything still waiting for an invoice.</p>', true],
+          ['online', 'Can customers book online?', '<p>Not yet: bookings are made by your staff in the app for now. Online booking for customers is the next step.</p>'],
         ] },
       ],
     },

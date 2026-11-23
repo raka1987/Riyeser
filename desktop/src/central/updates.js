@@ -16,6 +16,7 @@ const PRODUCTS = [
   // The till on its own (installs next to Accounting).
   { id: 'pos', display: 'Riyeser POS', asset: 'RiyeserPOS-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'invoices', display: 'Riyeser Invoices', asset: 'RiyeserInvoices-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
+  { id: 'bookings', display: 'Riyeser Bookings', asset: 'RiyeserBookings-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'accounting', display: 'Riyeser Accounting Plus', alsoRe: /^Riyeser Accounting\s+\d/i, asset: 'RiyeserAccountingPlus-Setup.exe', oldAsset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
 ];
 

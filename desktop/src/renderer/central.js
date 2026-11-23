@@ -35,6 +35,7 @@ const P = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   store: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 11.5V20h13v-8.5"/><path d="M10 20v-5h4v5"/>',
   invoice: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M8 14h3"/>',
   sort: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13l2 2 4-4"/>',
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
   sign: '<path d="M4 20c3-1 4-6 6-6s0 4 2 4 3-3 4-3 1 2 3 2"/><path d="M15 4l5 5-8 8H7v-5z"/>',
@@ -79,10 +80,11 @@ tick(); setInterval(tick, 60000);
 
 // ---------- the programs ----------
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
-const ORDER = ['central', 'invoices', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
+const ORDER = ['central', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
   invoices: { ic: 'invoice', c: 'c-inv', nav: 'Invoices', col: '#0284c7', blurb: 'Send invoices and get paid' },
+  bookings: { ic: 'calendar', c: 'c-book', nav: 'Bookings', col: '#e11d48', blurb: 'Jobs, appointments and tables' },
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Books', col: '#16a05a', blurb: 'View and manage your accounts' },
   accounting: { ic: 'book', c: 'c-acc', nav: 'Books', col: '#1a5fd6', blurb: 'View and manage your accounts' },
   pos: { ic: 'store', c: 'c-pos', nav: 'POS', col: '#0f8f82', blurb: 'Open the till and ring up sales' },
@@ -101,6 +103,7 @@ const hasAcc = () => !!accId();
 const QUICK = [
   { p: 'pos', ic: 'store', t: 'Open the till', s: 'Ring up a sale', page: 'pos' },
   { p: 'acc', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' },
+  { p: 'bookings', ic: 'calendar', t: 'New booking', s: 'Jobs, appointments, tables' },
   { p: 'invoices', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' }, // free Invoices, when Accounting isn't installed
   { p: 'payroll', ic: 'people', t: 'Run payroll', s: 'Timesheets to payslips', page: 'payrun' },
   { p: 'desk', ic: 'sort', t: 'Sort new files', s: 'Downloads, Desktop, phone', page: 'organise' },
@@ -110,7 +113,7 @@ const QUICK = [
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 // Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
-const LOGO = { invoices: 'invoices', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const LOGO = { invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 const quickFor = (q) => (q.p === 'acc' ? accId() : q.p === 'invoices' && hasAcc() ? null : has(q.p) ? q.p : null);
 

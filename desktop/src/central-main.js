@@ -32,6 +32,9 @@ const PROGRAMS = [
   // Free invoicing on its own (free forever). Opens the same company files as Accounting and installs next to it.
   { id: 'invoices', name: 'Invoices', full: 'Riyeser Invoices', icon: '🧾', desc: 'Quotes, invoices, customers and getting paid. Free forever.',
     dirs: ['Riyeser Invoices'], exes: ['Riyeser Invoices.exe'], links: ['Riyeser Invoices'], pages: ['invoice'] },
+  // Bookings and scheduling (jobs, appointments, tables). Same company files as Accounting; installs next to it.
+  { id: 'bookings', name: 'Bookings', full: 'Riyeser Bookings', icon: '📅', desc: 'Jobs, appointments and table bookings on one calendar. Free for 90 days.',
+    dirs: ['Riyeser Bookings'], exes: ['Riyeser Bookings.exe'], links: ['Riyeser Bookings'] },
   // Two separate apps that share the same books. The old single "Riyeser Accounting" 1.x counts as Plus.
   { id: 'accounting-basics', name: 'Accounting Basics', full: 'Riyeser Accounting Basics', icon: '📗', desc: 'Invoicing, quotes, customers and stock. Free for 90 days.',
     dirs: ['Riyeser Accounting Basics'], exes: ['Riyeser Accounting Basics.exe'], links: ['Riyeser Accounting Basics'], pages: ['invoice'] },
@@ -219,7 +222,7 @@ function registerIpc() {
   });
   // A program that isn't installed yet: its page on riyeser.com, with the download.
   handle('central:get', async (id) => {
-    const page = { invoices: 'invoices', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const page = { invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     await shell.openExternal(page ? `https://riyeser.com/programs/${page}.html` : 'https://riyeser.com/downloads.html');
     return true;
   });
@@ -286,7 +289,7 @@ function registerIpc() {
   handle('central:install', (id) => installProgram(id));
   // Help: each program's guide in the Riyeser Help Centre.
   handle('central:help', (id) => {
-    const guide = { central: 'central', invoices: 'invoices', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const guide = { central: 'central', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     return shell.openExternal(guide ? `https://riyeser.com/help/${guide}.html` : 'https://riyeser.com/help.html').then(() => true);
   });
   handle('search:find', (opts) => {
