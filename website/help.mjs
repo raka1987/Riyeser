@@ -21,7 +21,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['updates', 'How do I update my programs?', `<ol><li>Open <b>Riyeser Central</b>. It checks for updates by itself.</li><li>When one is ready you'll see <b>An update is ready</b>. Click <b>Update</b> (or <b>Update all</b>).</li><li>Programs being updated close for a moment and open again. Your information is kept.</li></ol><p>To check straight away, click <b>Check for updates</b> at the bottom of Riyeser Central. You can also download the newest version from <a class="more" href="${up}downloads.html">Downloads</a> and run it over the old one.</p>`, true],
         ] },
         { title: 'Free trial and licence', items: [
-          ['trial', 'How does the free trial work?', '<p>Riyeser Central, PDF and Desk Assistant are free forever. Every paid program — <b>Accounting Basics</b>, Accounting Plus, Payroll, <b>Riyeser POS</b>, and As Built for the building industry — is free for 90 days. No card and no sign-up. Each program shows how many days are left.</p><p>When the trial ends nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
+          ['trial', 'How does the free trial work?', '<p>Riyeser Central, Riyeser Invoices, PDF and Desk Assistant are free forever. Every paid program — <b>Accounting Basics</b>, Accounting Plus, Payroll, <b>Riyeser POS</b>, and As Built for the building industry — is free for 90 days. No card and no sign-up. Each program shows how many days are left.</p><p>When the trial ends nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
           ['licence', 'How do I enter my licence key?', `<ol><li>Open <b>Riyeser Central</b> and click <b>Licence</b> at the bottom of the screen.</li><li>Paste the key from your receipt email into <b>Have a licence key?</b></li><li>Click <b>Turn on licence</b>.</li></ol><p>One licence covers every Riyeser program for that person. To buy one, click <b>See plans &amp; buy</b> or see <a class="more" href="${up}pricing.html">Pricing</a>.</p>`, true],
           ['licence-move', 'Moving my licence to another computer', '<p>On the old computer open Riyeser Central → <b>Licence</b> → <b>Remove licence from this PC</b>. That frees its place. Then enter the same key on the new computer.</p>'],
         ] },
@@ -48,6 +48,23 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
         { title: 'Something\'s not right', items: [
           ['money-empty', 'The Money panel is empty', '<p>It reads from Riyeser Accounting. If it says <b>Open Accounting and set up your company to see money owed and owing here</b>, open Accounting, create your company and enter an invoice or bill. The totals then show in Central.</p>'],
           ['no-meetings', 'My meetings don\'t show under Today', `<p>Open <b>Desk Assistant → ⚙ Settings → Calendars</b> and paste your calendar's secret iCal address. See <a class="more" href="${up}help/desk-assistant.html#calendar">Connect my calendar</a>.</p>`],
+        ] },
+      ],
+    },
+    {
+      id: 'invoices', blurb: 'Free quotes, invoices and getting paid.', app: 'invoices', name: 'Riyeser Invoices',
+      intro: 'Free invoicing, as its own app: quotes, invoices, customers and getting paid. It opens the same company file as Riyeser Accounting, so moving up to Accounting Basics later loses nothing.',
+      groups: [
+        { title: 'Getting started', items: [
+          ['open', 'Install and open Riyeser Invoices', '<ol><li>Download <b>Riyeser Invoices</b> from the Downloads page, or click <b>Get more apps</b> in Riyeser Central.</li><li>Open it from the desktop, the Start menu or Riyeser Central.</li><li>First time? Enter your business name and a password for the administrator. Add your ABN, address and invoice numbering under <b>Setup → Company details</b>.</li></ol>', true],
+          ['free', 'Is it really free?', '<p>Yes. Riyeser Invoices is free forever, with no time limit, no card and no limit on invoices or customers.</p>'],
+        ] },
+        { title: 'Invoices and payments', items: [
+          ['invoice', 'Send an invoice', '<ol><li>Click <b>+ New → Invoice</b>.</li><li>Choose the customer (or <b>+ new customer</b>), add a line for each thing you charge for, and check the GST.</li><li>Click <b>Save</b>, then <b>Save PDF</b> to email or print it.</li></ol>', true],
+          ['quote', 'Quote first, then invoice', '<p>Click <b>+ New → Quote</b> and save it. When the customer says yes, open the quote and click <b>Convert to invoice</b>.</p>'],
+          ['paid', 'Record a payment', '<p>Click <b>Sales → Receive payments</b>, choose the customer, tick the invoices being paid and enter the amount. Part payments are fine.</p>'],
+          ['owed', 'See who owes me', '<p>Open <b>Reports → Who owes me</b> for every unpaid invoice by customer and how overdue it is.</p>'],
+          ['more', 'I need stock, bills or a Profit &amp; Loss', '<p>Install <b>Accounting Basics</b>. It opens the same company file, so every customer, invoice and payment is already there. It\'s free for 90 days, then $20 a month per business. Click <b>Setup → Need stock or bills?</b> in Riyeser Invoices for the download.</p>'],
         ] },
       ],
     },
