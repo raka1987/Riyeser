@@ -88,6 +88,28 @@ async function lastPayRun(dbPath) {
   } finally { db.close(); }
 }
 
+/**
+ * How much of each free allowance this PC has used, for the Riyeser server (counts only, nothing else leaves the PC).
+ * Same counting as riyeser/plan.py: posted, non-voided invoices that aren't till sales; non-voided till sales; pay runs.
+ */
+async function usageCounts({ accountingDb = accountingDbPath(), payrollDb = null } = {}) {
+  const out = {};
+  const count = async (file, queries) => {
+    if (!file || !fs.existsSync(file)) return;
+    const SQL = await sqlJs();
+    const db = new SQL.Database(new Uint8Array(fs.readFileSync(file)));
+    try {
+      for (const [key, sql] of queries) { try { out[key] = Number(db.exec(sql)[0].values[0][0]) || 0; } catch { /* older file without that table */ } }
+    } finally { db.close(); }
+  };
+  await count(accountingDb, [
+    ['invoices', "SELECT COUNT(*) FROM documents d WHERE d.side='sale' AND d.status IN ('open','paid') AND NOT EXISTS (SELECT 1 FROM pos_sales p WHERE p.document_id=d.id)"],
+    ['pos_sales', 'SELECT COUNT(*) FROM pos_sales WHERE voided=0'],
+  ]);
+  await count(payrollDb, [['pay_runs', 'SELECT COUNT(*) FROM payroll_runs']]);
+  return out;
+}
+
 const PERSONAL_EXT = /\.(pdf|docx?|xlsx?|xlsm|csv|pptx?|txt|rtf|odt|ods|jpe?g|png|heic|dwg|dxf|msg|eml|zip)$/i;
 /**
  * Recently opened documents. readLink(lnkPath) -> target path (Electron's shell.readShortcutLink on Windows).
@@ -120,4 +142,4 @@ function recentDocuments({ recentDir, readLink, indexDocs = {}, limit = 15 } = {
   return out;
 }
 
-module.exports = { deskAssistant, accountingDbPath, pendingPayments, payrollDbPath, lastPayRun, recentDocuments, readJson };
+module.exports = { deskAssistant, accountingDbPath, pendingPayments, usageCounts, payrollDbPath, lastPayRun, recentDocuments, readJson };

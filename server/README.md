@@ -32,10 +32,12 @@ Customer in Riyeser Central ──sign in (email code)──▶ Supabase Auth
 | `supabase/functions/plan` | Called by Central. Records the PC's check-in (counts and versions only) and returns the signed plan pass. |
 | `supabase/functions/checkout` | Called by Central. Makes a Paddle checkout for the chosen programs, tagged with the account id. |
 | `supabase/functions/portal` | Called by Central. Opens Paddle's customer portal. |
+| `supabase/migrations/…_admin_and_chats.sql` | Chats (conversations, messages, staff-only internal notes) and `admin_dashboard()`, the one call behind the admin page. |
+| `admin/` | The admin page (plain HTML + JS). Publish it at riyeser.com/admin/. With no config it shows sample data. |
 | `web/pay.html` | Paddle's "default payment link" page. Goes on riyeser.com as `/pay.html`. |
 | `scripts/make-signing-key.mjs` | Makes the key pair that signs plan passes. |
 
-Tests: `cd server && npm test` (Node 22). Type check: `DENO_NO_PACKAGE_JSON=1 deno check supabase/functions/*/index.ts`.
+Tests: `cd server && npm install && npm test` (Node 22). The SQL tests run the real migrations in an in-memory Postgres (PGlite) and check who can see what. Type check: `DENO_NO_PACKAGE_JSON=1 deno check supabase/functions/*/index.ts`.
 
 ## Setting it up (needs your own accounts)
 
@@ -68,5 +70,24 @@ Do it all in **sandbox** first. Nothing here charges anyone until step 8.
    steps 1, 5 and 6 on the live Paddle account (Paddle checks your business and website first), set `PADDLE_ENV=live`,
    and make one real purchase and refund.
 
-To make yourself an admin (for the admin page, coming next):
+## The admin page (`admin/`)
+
+- **Overview:** monthly recurring revenue, paying customers, sign-ups, PCs active this week, failed payments, chats
+  waiting; sign-ups per day and revenue per month; who is near a free limit; renewals in the next 14 days; latest payments;
+  Central versions in use.
+- **Customers:** search by email; each customer's subscriptions, payments, PCs (versions and usage counts), chats and a
+  staff-only note.
+- **Chats:** every "Message us" conversation from Riyeser Central. Reply, add internal notes (never shown to the
+  customer), mark done.
+- **Downloads & traffic:** installer downloads from GitHub Releases (live), and a link to the website traffic dashboard.
+
+Try it now with sample data: open `server/admin/index.html` through any local web server (for example
+`python3 -m http.server` in `server/admin`).
+
+To switch it on: fill in `admin/config.js` (project URL and publishable key), publish the folder at riyeser.com/admin/,
+add each price's `amount` (cents) to the `prices` table so revenue adds up, and make yourself an admin. Sign in once in
+Central first, so your account exists, then run:
 `insert into admins (account_id) select id from accounts where email = 'you@…';`
+
+Website traffic: add riyeser.com to Cloudflare Web Analytics (free, no cookies), paste its script tag into the
+website's page template, and put the dashboard link in `admin/config.js` → `trafficUrl`.

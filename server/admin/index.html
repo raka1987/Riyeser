@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Riyeser admin</title>
+<link rel="stylesheet" href="admin.css">
+</head>
+<body class="viz-root">
+  <header class="top">
+    <b class="brand">Riyeser admin</b>
+    <nav id="tabs" hidden>
+      <button data-tab="overview" class="on">Overview</button>
+      <button data-tab="customers">Customers</button>
+      <button data-tab="chats">Chats <span id="chatcount" class="pill" hidden></span></button>
+      <button data-tab="downloads">Downloads &amp; traffic</button>
+    </nav>
+    <span class="grow"></span>
+    <span id="who" class="muted"></span>
+    <button id="themebtn" class="ghost" title="Switch light or dark">Light / dark</button>
+  </header>
+  <div id="demo" class="banner" hidden>Sample data: this is what the page looks like with customers. Nothing here is real.</div>
+  <main id="main"><p class="muted pad">Loading…</p></main>
+  <div id="tip" class="tip" hidden></div>
+  <script src="config.js"></script>
+  <script type="module" src="admin.js"></script>
+</body>
+</html>

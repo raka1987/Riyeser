@@ -359,6 +359,54 @@ function watchForPayment() {
   }, 20000);
 }
 $('#licbtn').addEventListener('click', openLicence);
+// ---------- Message us: questions to Riyeser, answered from the admin page ----------
+let chats = []; let chatOn = null; let chatTimer = null;
+async function loadChats() {
+  try { chats = await bridge.call('central:chatList'); } catch (e) { chats = null; return e.message; }
+  return null;
+}
+function renderChat(err) {
+  const body = $('#chatbody');
+  if (chats === null) { body.innerHTML = `<p>${esc(err || 'Messages are not available right now.')}</p>${/Sign in/.test(err || '') ? '<div class="row"><button class="btn" data-lic="open">Sign in</button></div>' : ''}`; return; }
+  const cur = chats.find((c) => c.id === chatOn) || null;
+  const fmt = (iso) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  body.innerHTML = `${chats.length ? `<div class="convs">${chats.map((c) => `<button class="conv${c.id === chatOn ? ' on' : ''}" data-chat="pick" data-id="${esc(c.id)}"><span>${esc(c.subject)}</span>${c.unread ? '<span class="new">New reply</span>' : `<span class="muted">${esc(fmt(c.at))}</span>`}</button>`).join('')}
+      <button class="conv${chatOn ? '' : ' on'}" data-chat="new"><span>➕ New question</span></button></div>` : ''}
+    ${cur ? `<div class="thread">${cur.messages.map((m) => `<div class="msg${m.fromStaff ? ' staff' : ''}">${esc(m.body)}<span class="at">${m.fromStaff ? 'Riyeser' : 'You'} · ${esc(fmt(m.at))}</span></div>`).join('')}</div>` : '<p>Ask us anything: setting up, a problem, or your plan. Our answer shows up here, and the Message us button shows a number when there's a new reply.</p>'}
+    <textarea id="chattext" placeholder="${cur ? 'Write a reply…' : 'Your question…'}" maxlength="4000"></textarea>
+    <div class="row"><button class="btn" data-chat="send">Send</button></div>
+    <p class="muted">Please don't send passwords or card numbers. Only what you type here is sent: your books stay on this PC.</p>`;
+  const t = body.querySelector('.thread'); if (t) t.scrollTop = t.scrollHeight;
+}
+async function openChat() {
+  const err = await loadChats();
+  if (!chatOn && chats && chats.length && chats[0].status === 'open') chatOn = chats[0].id;
+  renderChat(err);
+  if (!$('#chatdlg').open) $('#chatdlg').showModal();
+  markChatRead();
+  clearInterval(chatTimer);
+  chatTimer = setInterval(async () => { if (!$('#chatdlg').open) return clearInterval(chatTimer); const text = $('#chattext') ? $('#chattext').value : ''; const e = await loadChats(); renderChat(e); if ($('#chattext')) $('#chattext').value = text; markChatRead(); }, 30000);
+}
+function markChatRead() {
+  const cur = chats && chats.find((c) => c.id === chatOn);
+  if (cur && cur.unread) { cur.unread = false; bridge.call('central:chatRead', cur.id).catch(() => {}); refreshChatBadge(); }
+}
+async function refreshChatBadge() {
+  let n = 0; try { n = await bridge.call('central:chatUnread'); } catch { n = 0; }
+  $('#chatbtn').innerHTML = `Message us${n ? `<span class="dot">${n}</span>` : ''}`;
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-chat]'); if (!b) return;
+  const a = b.dataset.chat;
+  if (a === 'pick') { chatOn = b.dataset.id; renderChat(); markChatRead(); }
+  if (a === 'new') { chatOn = null; renderChat(); }
+  if (a === 'send') safe(async () => {
+    b.disabled = true;
+    try { chatOn = await bridge.call('central:chatSend', $('#chattext').value, chatOn); await loadChats(); renderChat(); toast('Sent. Our answer will show up here.'); } finally { b.disabled = false; }
+  });
+});
+$('#chatbtn').addEventListener('click', () => safe(openChat));
+
 
 // ---------- search ----------
 const finder = { q: '', type: null, year: null, kind: null };
@@ -425,6 +473,8 @@ $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign
   checkForUpdates(false);
   loadLicence();
   setInterval(loadLicence, 6 * 3600 * 1000);
+  refreshChatBadge();
+  setInterval(refreshChatBadge, 15 * 60 * 1000);
   setInterval(() => { if ($('#results').hidden) safe(refresh); }, 5 * 60 * 1000);
   setInterval(() => checkForUpdates(false), 6 * 3600 * 1000);
   window.addEventListener('focus', () => { if ($('#results').hidden) safe(refresh); });

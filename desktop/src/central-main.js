@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, safeStorag
 const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
 const licence = require('./core/licence');
+const chat = require('./core/chat');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -279,10 +280,22 @@ function registerIpc() {
     seal: (s) => (safeStorage.isEncryptionAvailable() ? `dpapi:${safeStorage.encryptString(s).toString('base64')}` : s),
     unseal: (s) => (String(s).startsWith('dpapi:') ? safeStorage.decryptString(Buffer.from(String(s).slice(6), 'base64')) : s),
   };
-  const planOpts = () => ({ fetchFn: lfetch, box, device: { versions: { central: app.getVersion() } } });
+  const planOpts = () => ({ fetchFn: lfetch, box, device: { versions: { central: app.getVersion() }, usage: lastUsage } });
+  // Free-allowance counts for the server's "near the cap" list. Read at most every 10 minutes; counts only.
+  let lastUsage = {}; let usageAt = 0;
+  const refreshUsage = async () => {
+    if (Date.now() - usageAt < 600000) return;
+    usageAt = Date.now();
+    try { lastUsage = await sources.usageCounts({ payrollDb: sources.payrollDbPath(appData) }); } catch { /* keep the last counts */ }
+  };
   const openLink = (url) => { if (!/^https:\/\//.test(String(url || ''))) throw new Error('No link came back. Please try again.'); return shell.openExternal(url).then(() => true); };
-  handle('central:licence', async () => { const s = licence.status(appData); return s.needsCheck ? licence.recheck(appData, planOpts()) : s; });
-  handle('central:planRefresh', () => licence.recheck(appData, { ...planOpts(), force: true }));
+  handle('central:licence', async () => { const s = licence.status(appData); if (!s.needsCheck) return s; await refreshUsage(); return licence.recheck(appData, planOpts()); });
+  handle('central:planRefresh', async () => { await refreshUsage(); return licence.recheck(appData, { ...planOpts(), force: true }); });
+  const chatOpts = () => ({ fetchFn: lfetch, box });
+  handle('central:chatList', () => chat.list(appData, chatOpts()));
+  handle('central:chatSend', (body, id) => chat.send(appData, body, id || null, chatOpts()));
+  handle('central:chatRead', (id) => chat.markRead(appData, id, chatOpts()));
+  handle('central:chatUnread', () => chat.unread(appData, chatOpts()));
   handle('central:signInStart', (email) => licence.startSignIn(appData, email, planOpts()));
   handle('central:signInFinish', (email, code) => licence.finishSignIn(appData, email, code, planOpts()));
   handle('central:signOut', () => licence.signOut(appData));

@@ -144,3 +144,17 @@ h2.sec { font-size: 13px; font-weight: 700; color: var(--muted); text-transform:
 #appsv h2.sec { margin-top: 4px; } #home:not([hidden]) ~ #appsv h2.sec { margin-top: 24px; }
 .logo-i { flex: none; border-radius: 22%; display: block; }
 .nav .logo-i { box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+
+/* Message us */
+.chatdlg { width: min(560px, 94vw); }
+#chatbody { padding: 12px 22px 22px; font-size: 14px; line-height: 1.5; }
+#chatbody .convs { display: grid; gap: 6px; margin-bottom: 12px; max-height: 180px; overflow: auto; }
+#chatbody .conv { text-align: left; display: flex; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+#chatbody .conv.on { border-color: var(--accent, #2563eb); } #chatbody .conv .new { font-size: 12px; font-weight: 600; color: var(--accent, #2563eb); }
+#chatbody .thread { display: grid; gap: 8px; max-height: 320px; overflow: auto; padding: 4px 0 10px; }
+#chatbody .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; background: var(--ok-soft); white-space: pre-wrap; justify-self: end; }
+#chatbody .msg.staff { background: var(--line); justify-self: start; }
+#chatbody .msg .at { display: block; font-size: 11.5px; opacity: .65; margin-top: 2px; }
+#chatbody textarea { width: 100%; min-height: 84px; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); font: inherit; background: transparent; color: inherit; resize: vertical; }
+#chatbody .muted { font-size: 12.5px; }
+#chatbtn .dot { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 4px; border-radius: 8px; background: var(--accent, #2563eb); color: #fff; font-size: 11px; line-height: 16px; }

@@ -126,11 +126,11 @@ function status(appData, now = Date.now(), c = cloud()) {
 }
 
 // ---------- talking to the server ----------
-async function call(fetchFn, c, endpoint, { body, token, method = 'POST' } = {}) {
+async function call(fetchFn, c, endpoint, { body, token, method = 'POST', prefer = false } = {}) {
   let res;
   try {
     res = await fetchFn(`${c.url}${endpoint}`, {
-      method, headers: { apikey: c.anonKey, 'Content-Type': 'application/json', Authorization: `Bearer ${token || c.anonKey}` },
+      method, headers: { apikey: c.anonKey, 'Content-Type': 'application/json', Authorization: `Bearer ${token || c.anonKey}`, ...(prefer ? { Prefer: 'return=representation' } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch { const e = new Error('No internet connection. Connect and try again.'); e.offline = true; throw e; }
@@ -233,5 +233,5 @@ function signOut(appData, now = Date.now()) {
   return status(appData, now);
 }
 
-module.exports = { PLUS_TRIAL_DAYS, TRIAL_DAYS: PLUS_TRIAL_DAYS, OFFLINE_GRACE_DAYS, DEFAULT_CAPS, PRODUCTS, BUY_URL, licenceFile, accountFile,
+module.exports = { cloud, call, accessToken, PLUS_TRIAL_DAYS, TRIAL_DAYS: PLUS_TRIAL_DAYS, OFFLINE_GRACE_DAYS, DEFAULT_CAPS, PRODUCTS, BUY_URL, licenceFile, accountFile,
   configured, read, ensureTrial, status, startSignIn, finishSignIn, recheck, checkout, portal, signOut, verifySigned };
