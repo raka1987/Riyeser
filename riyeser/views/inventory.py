@@ -1,4 +1,7 @@
 """Inventory: stock items, item maintenance, stock adjustments, movements."""
+import base64
+import binascii
+
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 
 from ..db import get_db, to_cents, audit, linked
@@ -27,7 +30,9 @@ def edit(iid=None):
     item = db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone() if iid else None
     defaults = dict(income=linked(db, "default_income"), cogs=linked(db, "cogs"), asset=linked(db, "inventory"))
     cats = [r[0] for r in db.execute("SELECT DISTINCT category FROM items WHERE category IS NOT NULL ORDER BY 1")]
-    return render_template("inventory/edit.html", item=item, defaults=defaults, categories=cats, **lookups(db))
+    has_photo = bool(iid and db.execute("SELECT 1 FROM item_photos WHERE item_id=?", (iid,)).fetchone())
+    return render_template("inventory/edit.html", item=item, defaults=defaults, categories=cats, has_photo=has_photo,
+                           **lookups(db))
 
 
 @guarded
@@ -56,10 +61,37 @@ def _save(iid):
             stock_adjust(db, iid, f.get("opening_date") or __import__("datetime").date.today().isoformat(), oq,
                          to_cents(f.get("opening_cost") or f.get("buy_price")), "Opening stock",
                          account_id=linked(db, "historical_balancing"))
-    db.execute("UPDATE items SET category=? WHERE id=?", ((f.get("category") or "").strip() or None, iid))
+    db.execute("UPDATE items SET category=?, pos_favourite=? WHERE id=?",
+               ((f.get("category") or "").strip() or None, 1 if f.get("pos_favourite") else 0, iid))
+    _save_photo(db, iid, f)
     audit(db, "save_item", vals[0])
     flash(f"Item {vals[0]} saved.", "ok")
     return redirect(url_for("inventory.view", iid=iid))
+
+
+PHOTO_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_PHOTO = 1_500_000  # bytes, after the browser has shrunk it
+
+
+def _save_photo(db, iid, f):
+    """Store the POS photo sent as a data URL (the form shrinks it first)."""
+    if f.get("photo_remove"):
+        db.execute("DELETE FROM item_photos WHERE item_id=?", (iid,))
+    raw = f.get("photo_data") or ""
+    if not raw:
+        return
+    try:
+        head, b64 = raw.split(",", 1)
+        mime = head[5:].split(";", 1)[0]
+        data = base64.b64decode(b64, validate=True)
+    except (ValueError, binascii.Error):
+        raise ValueError("That photo couldn't be read. Try a JPG or PNG.")
+    if mime not in PHOTO_TYPES or not data:
+        raise ValueError("Photos must be JPG, PNG or WebP.")
+    if len(data) > MAX_PHOTO:
+        raise ValueError("That photo is too large. Try a smaller one.")
+    db.execute("INSERT OR REPLACE INTO item_photos (item_id, mime, data, updated_at)"
+               " VALUES (?,?,?,datetime('now','localtime'))", (iid, mime, data))
 
 
 @bp.route("/<int:iid>")

@@ -123,6 +123,8 @@ def area_of(endpoint, view_args, args, db):
             r = db.execute("SELECT kind FROM contacts WHERE id=?", (va["cid"],)).fetchone()
             return _kind_area(r["kind"]) if r else None
         return None
+    if endpoint in ("pos.setup", "pos.set_mode"):
+        return "setup"  # how the till is set up is a setup decision, not a sales one
     if bp == "pos":
         return "sales"
     if bp == "banking":
