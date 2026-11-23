@@ -202,7 +202,13 @@ def migrate(db):
     db.commit()
 
 
-EDITIONS = {"basic": "Basic", "enterprise": "Enterprise"}
+# Edition names in one place: change them here and every screen follows.
+#   name  = short name used in menus, settings and help ("Basic", "Enterprise")
+#   title = the product name in the app's logo
+EDITIONS = {
+    "basic": {"name": "Basic", "title": "Accounting Basics", "price": "Free"},
+    "enterprise": {"name": "Plus", "title": "Accounting Plus", "price": "Licence"},
+}
 
 
 def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition="enterprise"):

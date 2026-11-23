@@ -48,6 +48,15 @@ The builds are unsigned. Windows SmartScreen will warn ("More info → Run anywa
 * **Other users:** an administrator can set a new password under **Setup → Users & Roles**.
 * **Command line:** run `riyeser reset-password admin` on the computer that holds the company file.
 
+## Editions
+
+One app, two editions. Each company picks one under **Setup → Company → Edition**; switching never changes your data.
+
+* **Accounting Basics (free):** invoices, quotes, customers, stock, suppliers, simple money in and out, the shop counter (POS) and the key reports.
+* **Accounting Plus (licence):** everything in Basics plus bank reconciliation, statement import, payroll, general journal, jobs, budgets, Balance Sheet and Trial Balance. Included in the 90-day free trial; after that it needs a licence entered in Riyeser Central. Without one, companies open in Basics and come back to Plus, untouched, once a licence is entered.
+
+The edition names live in one place, `EDITIONS` in `riyeser/db.py` (internally the editions are still `basic` and `enterprise`).
+
 ## Features
 
 **Accounts**

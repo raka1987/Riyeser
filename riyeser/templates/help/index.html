@@ -35,13 +35,13 @@
 
 <div class="card"><h2 id="banking">Money &amp; banking</h2><ul>
 <li><b>Money Out</b> / <b>Money In</b>: payments and deposits that aren't for an invoice or bill (rent, bank fees, interest). Amounts include GST unless you untick it.</li>
-<li><b>Bank Reconciliation</b> (Enterprise): enter your statement's closing balance and tick the transactions that appear on it until the difference is $0.00.</li>
-<li><b>Bank Statement Import</b> (Enterprise): load a CSV from your bank, then allocate each line to an account in one click.</li>
+<li><b>Bank Reconciliation</b> ({{ editions.enterprise.name }}): enter your statement's closing balance and tick the transactions that appear on it until the difference is $0.00.</li>
+<li><b>Bank Statement Import</b> ({{ editions.enterprise.name }}): load a CSV from your bank, then allocate each line to an account in one click.</li>
 <li><b>Banking your cash takings</b>: use <b>Transfer Money</b> from <i>Undeposited Funds</i> to your bank account when you deposit the till cash.</li></ul></div>
 
 <div class="card"><h2 id="payroll">Payroll</h2><ul>
 <li>With <b>Riyeser Payroll</b>: finished pay runs appear under <b>Import from Payroll</b>. Import each one to record wages, tax withheld and employer contributions.</li>
-<li>Built-in payroll (Enterprise): add employees, then <b>Run Payroll</b>. PAYG is an estimate using Australian 2024-25 rates, so check it before lodging.</li></ul></div>
+<li>Built-in payroll ({{ editions.enterprise.name }}): add employees, then <b>Run Payroll</b>. PAYG is an estimate using Australian 2024-25 rates, so check it before lodging.</li></ul></div>
 
 <div class="card"><h2 id="reports">Reports</h2><ul>
 <li>Every report can be filtered by date, printed and exported to CSV. Click a line to drill down to the transactions behind it.</li>
@@ -51,13 +51,13 @@
 
 <div class="card"><h2 id="accounts">Accounts &amp; journals</h2><ul>
 <li><b>Chart of Accounts</b>: click any account to see every transaction in it.</li>
-<li><b>General Journal</b> (Enterprise): for adjustments such as depreciation. Debits must equal credits.</li>
+<li><b>General Journal</b> ({{ editions.enterprise.name }}): for adjustments such as depreciation. Debits must equal credits.</li>
 <li>Nothing is ever deleted. Corrections are <b>reversals</b>, so the audit trail stays complete.</li></ul></div>
 
 <div class="card"><h2 id="setup">Setup &amp; editions</h2><ul>
-<li><b>Basic</b>: invoices, quotes, customers, stock, suppliers, simple banking, POS and the key reports.</li>
-<li><b>Enterprise</b>: everything in Basic plus bank reconciliation, statement import, payroll, journals, jobs, budgets, Balance Sheet and Trial Balance.</li>
-<li>Switch any time under <b>Setup → Company → Edition</b>. Your data never changes.</li>
+<li><b>{{ editions.basic.name }}</b> (free): invoices, quotes, customers, stock, suppliers, simple banking, POS and the key reports.</li>
+<li><b>{{ editions.enterprise.name }}</b> (included in the free trial, then needs a licence): everything in {{ editions.basic.name }} plus bank reconciliation, statement import, payroll, journals, jobs, budgets, Balance Sheet and Trial Balance.</li>
+<li>Switch any time under <b>Setup → Company → Edition</b>. Your data never changes. If the trial ends without a licence, companies open in {{ editions.basic.name }}; enter a licence in Riyeser Central and {{ editions.enterprise.name }} comes back with everything as you left it.</li>
 <li><b>Lock periods up to</b> stops anyone posting into a finished period, for example after your BAS is lodged.</li>
 <li><b>Riyeser folder</b>: tick <i>Save a PDF of every invoice and bill</i> to file copies in Documents\Riyeser for Riyeser Desk Assistant.</li></ul></div>
 
@@ -75,7 +75,7 @@
 <li><b>"Period is locked"</b>: the date is on or before the lock date. Change the date, or an admin can move the lock date.</li>
 <li><b>"Out of balance"</b> on a journal: debits must equal credits. The difference is shown under the lines.</li>
 <li><b>Reconciliation won't balance</b>: look for a missing or doubled transaction, or one dated after the statement date.</li>
-<li><b>"That's part of Riyeser Accounting Enterprise"</b>: the screen isn't in Basic. An admin can upgrade under Setup → Company.</li>
+<li><b>"That's part of Riyeser Accounting {{ editions.enterprise.name }}"</b>: the screen isn't in {{ editions.basic.name }}. An admin can switch under Setup → Company. After the free trial, {{ editions.enterprise.name }} needs a licence from Riyeser Central.</li>
 <li>Still stuck? Open <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a>, press <b>Download</b>, and send the file to support. It contains no customer or bank details.</li></ul></div>
 </div>
 {% endblock %}

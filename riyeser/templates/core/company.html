@@ -10,8 +10,8 @@
 <div><label>Email</label><input name="email" value="{{ company.email or '' }}"></div>
 <div class="wide"><label>Address</label><input name="address" value="{{ company.address or '' }}"></div></div></div>
 <div class="card"><h3>Edition</h3><div class="fields">
-<div><label>Riyeser Accounting edition</label><select name="edition"><option value="basic" {{ 'selected' if company.edition=='basic' }}>Basic: invoicing, stock and inventory</option><option value="enterprise" {{ 'selected' if company.edition!='basic' }}>Enterprise: everything</option></select></div>
-<p class="muted wide" style="margin:0">Switching edition only changes which menus show. All your data stays as it is.</p></div></div>
+<div><label>Riyeser Accounting edition</label><select name="edition"><option value="basic" {{ 'selected' if company.edition=='basic' }}>{{ editions.basic.name }} (free): invoicing, stock and inventory</option><option value="enterprise" {{ 'selected' if company.edition!='basic' }}{{ ' disabled' if not company.enterprise_allowed }}>{{ editions.enterprise.name }} (licence): everything</option></select></div>
+<p class="muted wide" style="margin:0">Switching edition only changes which menus show. All your data stays as it is.{% if not company.enterprise_allowed %} <b>{{ editions.enterprise.name }} needs a licence:</b> enter one in Riyeser Central under <b>Licence</b>, or <a href="https://riyeser.com/pricing.html" target="_blank" rel="noopener">see pricing</a>.{% endif %}</p></div></div>
 <div class="card"><h3>Riyeser folder</h3>
 <label class="check"><input type="checkbox" name="auto_pdf" value="1" {{ 'checked' if company.auto_pdf }}> Save a PDF of every invoice and bill into <b>{{ docs_root }}</b></label>
 <p class="muted" style="margin:6px 0 0">Riyeser Desk Assistant and the other Riyeser modules use this folder, so your documents are filed automatically.</p></div>

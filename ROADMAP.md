@@ -4,8 +4,8 @@ Riyeser Group is the holding company. Every program is a module of the **Riyeser
 
 | Phase | Module | Status |
 |---|---|---|
-| 1 | **Riyeser Accounting Basic**: invoices, quotes, customers, stock items, inventory reports | Done (choose Basic when creating a company) |
-| 1 | **Riyeser Accounting Enterprise**: adds bank reconciliation, payroll, journals, jobs and budgets | Done |
+| 1 | **Accounting Basics** (free): invoices, quotes, customers, stock items, inventory reports | Done (choose Basic when creating a company) |
+| 1 | **Accounting Plus** (licence, free in the trial): adds bank reconciliation, payroll, journals, jobs and budgets | Done |
 | 2 | **Riyeser POS**: full-screen Retail and Restaurant modes, categories, parked sales, tables, kitchen dockets, cash or card, receipts, end-of-day totals | Done (v1.1.0) |
 | 3 | **Riyeser hub**: one desktop app with cards for Accounting, POS, Payroll, Desk Assistant, PDF and Services | In progress in the payroll and Desk Assistant chats |
 | 3 | Links between modules: Payroll pay runs import into Accounting, and Accounting saves PDFs into Documents\\Riyeser for Desk Assistant (see INTEGRATION.md) | Accounting side done. Payroll needs to write the pay run file |

@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 
 def create_app(test_config=None):
@@ -58,6 +58,13 @@ def create_app(test_config=None):
         if uid:
             g.user = db.execute("SELECT * FROM users WHERE id=? AND active=1", (uid,)).fetchone()
         g.company = db.execute("SELECT * FROM company WHERE id=1").fetchone()
+        if g.company is not None:
+            from .licence import enterprise_allowed
+            g.company = dict(g.company)
+            g.company["chosen_edition"] = g.company["edition"]
+            g.company["enterprise_allowed"] = enterprise_allowed()
+            if not g.company["enterprise_allowed"]:
+                g.company["edition"] = "basic"  # Basic is free; Enterprise needs a licence (data is kept)
         public = ("auth.login", "auth.setup_company", "auth.forgot", "static")
         if g.user is None and request.endpoint not in public:
             return redirect(url_for("auth.login", next=request.path))
@@ -73,8 +80,13 @@ def create_app(test_config=None):
                 back = request.referrer if request.method == "POST" and request.referrer else url_for("core.dashboard")
                 return redirect(back)
         if g.user is not None and g.company["edition"] == "basic" and _enterprise_only(request.endpoint):
-            flash("That's part of Riyeser Accounting Enterprise. An administrator can upgrade under "
-                  "Setup → Company (your data stays as it is).", "error")
+            ent, basic = dbmod.EDITIONS["enterprise"]["name"], dbmod.EDITIONS["basic"]["name"]
+            if g.company["enterprise_allowed"]:
+                flash(f"That's part of Riyeser Accounting {ent}. An administrator can switch to {ent} under "
+                      "Setup → Company (your data stays as it is).", "error")
+            else:
+                flash(f"That's part of Riyeser Accounting {ent}, which needs a licence. {basic} stays free. "
+                      f"Enter a licence in Riyeser Central to unlock {ent} (your data stays as it is).", "error")
             return redirect(url_for("core.dashboard"))
 
     @app.context_processor
@@ -110,6 +122,7 @@ def create_app(test_config=None):
     app.register_blueprint(help.bp)
     app.jinja_env.globals["help_section"] = help.section_for
     app.jinja_env.globals["riyeser_version"] = __version__
+    app.jinja_env.globals["editions"] = dbmod.EDITIONS
 
     @app.errorhandler(500)
     def server_error(e):

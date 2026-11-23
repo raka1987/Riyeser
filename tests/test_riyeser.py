@@ -241,7 +241,7 @@ def test_basic_edition_menus_and_guard(tmp_path):
     c = app.test_client()
     c.post("/login", data={"username": "admin", "password": "pw"})
     home = c.get("/").get_data(as_text=True)
-    assert "Basic · Riyeser Group" in home and "Stock items" in home and "Run payroll" not in home
+    assert "Accounting Basics" in home and "Stock items" in home and "Run payroll" not in home
     # enterprise-only screens redirect to the dashboard
     for url in ("/payroll/", "/journal/new", "/banking/reconcile", "/setup/budgets"):
         r = c.get(url)

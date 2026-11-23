@@ -3,7 +3,8 @@
 %APPDATA%\\Riyeser\\licence.json on Windows (~/.config/Riyeser/licence.json elsewhere).
 Accounting only READS it to show where the free trial or licence stands; licences are entered in Riyeser Central.
 Same rules as Central (desktop/src/core/licence.js): a 90-day trial, and a licence checked online stays valid
-for 30 days offline. Nothing here locks or deletes anything.
+for 30 days offline. Riyeser Accounting Basic is free; once the trial ends without a licence, companies open in
+Basic (their Enterprise records stay, and come back with a licence). Nothing here deletes anything.
 """
 import json
 import os
@@ -52,6 +53,12 @@ def status(now=None, path=None):
     if left > 0:
         return {"mode": "trial", "days_left": left, "buy_url": BUY_URL}
     return {"mode": "expired", "buy_url": BUY_URL}
+
+
+def enterprise_allowed(now=None, path=None):
+    """Basic is free for everyone. Enterprise needs the free trial or a licence from Riyeser Central.
+    'unknown' (Central not set up, e.g. a pip install) keeps everything open, like the trial."""
+    return status(now, path)["mode"] != "expired"
 
 
 def company_allowance(now=None, path=None):

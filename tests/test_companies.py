@@ -163,3 +163,26 @@ def test_extra_companies_are_an_add_on(app, tmp_path, monkeypatch):
     assert "Read-only:" not in a.get("/").get_data(as_text=True)
     a.post("/cards/customer/new", data={"name": "Now Saves", "active": "1"})
     assert "Now Saves" in a.get("/cards/customer").get_data(as_text=True)
+
+
+def test_basic_is_free_enterprise_needs_licence(app, tmp_path, monkeypatch):
+    a = login(app)  # demo company is Enterprise; no licence file = trial-like, everything open
+    page = a.get("/").get_data(as_text=True)
+    assert "Accounting Plus" in page and "Accounting Basics" not in page
+    assert a.get("/journal/new").status_code == 200
+    # trial over, no licence: the company opens as free Accounting Basics, Enterprise screens are closed
+    _licence(tmp_path, monkeypatch)
+    page = a.get("/").get_data(as_text=True)
+    assert "Accounting Basics" in page and "Free" in page
+    r = a.get("/journal/new")
+    assert r.status_code == 302
+    assert "needs a licence" in a.get(r.location).get_data(as_text=True)
+    a.post("/company", data={"name": "Group Holdings Pty Ltd", "edition": "enterprise"})
+    assert "Accounting Basics" in a.get("/").get_data(as_text=True)
+    with app.app_context():
+        assert get_db().execute("SELECT edition FROM company").fetchone()[0] == "enterprise"  # their choice is kept
+    # licence entered in Central: Enterprise is back, nothing lost
+    _licence(tmp_path, monkeypatch, extraCompanies=0)
+    page = a.get("/").get_data(as_text=True)
+    assert "Accounting Basics" not in page and "Accounting Plus" in page
+    assert a.get("/journal/new").status_code == 200
