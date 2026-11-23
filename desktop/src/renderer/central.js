@@ -103,6 +103,9 @@ const QUICK = [
   { p: 'pdf', ic: 'layers', t: 'Combine PDFs', s: 'Join files into one', page: 'combine' },
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
+// Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
+const LOGO = { 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 const quickFor = (q) => (q.p === 'acc' ? accId() : has(q.p) ? q.p : null);
 
 function renderNav() {
@@ -111,7 +114,7 @@ function renderNav() {
   const missing = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting'))).length;
   $('#nav').innerHTML = `<button class="${view === 'home' ? 'on' : ''}" data-view="home">${icon('home')}Home</button>
     ${mine.length ? '<div class="navlbl">Your programs</div>' : ''}
-    ${mine.map((p) => `<button data-open="${esc(p.id)}" title="Open ${esc(p.full)}">${icon(LOOK[p.id].ic)}${esc(LOOK[p.id].nav || p.name)}${upFor.has(p.id) ? '<span class="tag">Update</span>' : ''}</button>`).join('')}
+    ${mine.map((p) => `<button data-open="${esc(p.id)}" title="Open ${esc(p.full)}">${logo(p)}${esc(LOOK[p.id].nav || p.name)}${upFor.has(p.id) ? '<span class="tag">Update</span>' : ''}</button>`).join('')}
     <hr>
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
@@ -206,7 +209,7 @@ function renderLayout() {
 function renderApps() {
   const others = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')))
     .map((p) => (p.id === 'accounting' && has('accounting-basics') ? { ...p, name: 'Upgrade to Accounting Plus' } : p));
-  $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc"><span class="qi ${LOOK[p.id].c}">${icon(LOOK[p.id].ic)}</span><div><b>${esc(p.name)}</b><p>${esc(p.desc)}</p>
+  $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc">${logo(p, 44)}<div><b>${esc(p.name)}</b><p>${esc(p.desc)}</p>
       <div class="row" id="inst-${esc(p.id)}"><button class="btn" data-install="${esc(p.id)}" title="Download and install it now">Install</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-help="${esc(p.id)}">Learn more</button><button class="link" data-get="${esc(p.id)}" title="Its page on riyeser.com">Download page</button><button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button></div></div></div>`).join('')
     : '<div class="lbl">You have every Riyeser program.</div>';
 }
