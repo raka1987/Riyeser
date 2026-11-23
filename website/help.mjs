@@ -136,7 +136,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       groups: [
         { title: 'Getting started', items: [
           ['open', 'Open the till', '<ol><li>Open Riyeser Accounting (Basics or Plus).</li><li>Click <b>Shop counter</b> in the menu, then <b>Open register</b>. Or open it straight from Riyeser Central.</li></ol>'],
-          ['setup', 'Choose Retail or Restaurant', '<ol><li>Go to <b>Shop counter → POS setup</b> in Accounting's menu (you need Full access to Setup to save).</li><li>Pick <b>Retail</b> or <b>Restaurant</b>. Each starts with sensible switches: barcode scanning and returns for shops; tables, kitchen dockets and takeaway for cafes.</li><li>Turn any switch on or off, name your tills (for example Till 1, Bar), and click <b>Save</b>.</li></ol>'],
+          ['setup', 'Choose Retail or Restaurant', '<ol><li>Go to <b>Shop counter → POS setup</b> in the Accounting menu (you need Full access to Setup to save).</li><li>Pick <b>Retail</b> or <b>Restaurant</b>. Each starts with sensible switches: barcode scanning and returns for shops; tables, kitchen dockets and takeaway for cafes.</li><li>Turn any switch on or off, name your tills (for example Till 1, Bar), and click <b>Save</b>.</li></ol>'],
           ['products', 'Add products, photos and Favourites', '<ol><li>Open <b>Stock items</b> and open (or add) an item.</li><li>Add a photo and tick <b>Show in POS Favourites</b> for your best sellers.</li><li>The item appears on the till under its category, with its price and stock.</li></ol>'],
         ] },
         { title: 'Selling', items: [
