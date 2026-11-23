@@ -636,3 +636,19 @@ test('Riyeser Central: an old copy listed next to the new one does not keep aski
   const rel = { tag_name: 't', body: '- Riyeser Payroll 2.1.1', assets: [{ name: 'RiyeserPayroll-Setup.exe', browser_download_url: 'https://github.com/raka1987/Riyeser/releases/download/t/RiyeserPayroll-Setup.exe', size: 1 }] };
   assert.equal(u.availableUpdates(u.installedFromRegistry(reg), u.latestFromRelease(rel)).length, 0);
 });
+
+test('Riyeser Central: Accounting Basics and Accounting Plus are separate apps, and old Accounting 1.x updates to Plus', () => {
+  const u = require('../src/central/updates');
+  const reg = (name, v) => `HKEY_CURRENT_USER\\x\\${name}\r\n    DisplayName    REG_SZ    ${name} ${v}\r\n    DisplayVersion    REG_SZ    ${v}\r\n`;
+  assert.deepEqual(u.installedFromRegistry(reg('Riyeser Accounting Basics', '2.0.0')), { 'accounting-basics': '2.0.0' });
+  assert.deepEqual(u.installedFromRegistry(reg('Riyeser Accounting Plus', '2.0.0')), { accounting: '2.0.0' });
+  const old = u.installedFromRegistry(reg('Riyeser Accounting', '1.5.0'));
+  assert.deepEqual(old, { accounting: '1.5.0' });
+  const files = ['RiyeserAccountingBasics-Setup.exe', 'RiyeserAccountingPlus-Setup.exe', 'RiyeserAccounting-Setup.exe'];
+  const rel = { tag_name: 't', body: '- Riyeser Accounting Basics 2.0.1\n- Riyeser Accounting Plus 2.0.1', assets: files.map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 })) };
+  const latest = u.latestFromRelease(rel);
+  assert.match(latest.products.accounting.url, /RiyeserAccountingPlus-Setup\.exe$/);
+  assert.match(latest.products['accounting-basics'].url, /RiyeserAccountingBasics-Setup\.exe$/);
+  assert.deepEqual(u.availableUpdates(old, latest).map((x) => `${x.id} ${x.from}->${x.to}`), ['accounting 1.5.0->2.0.1']);
+  assert.deepEqual(u.availableUpdates({ 'accounting-basics': '2.0.0' }, latest).map((x) => x.id), ['accounting-basics']);
+});

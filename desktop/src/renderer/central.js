@@ -41,7 +41,7 @@ const has = (id) => programs.some((p) => p.id === id && p.status !== 'missing');
 function tileSub(p) {
   if (p.status === 'missing') return 'Not on this computer';
   const m = today && today.money;
-  if (p.id === 'accounting') return m && m.found ? (m.totals.owedToYou ? `${moneyShort(m.totals.owedToYou)} owed to you` : 'All invoices paid') : 'Set up your company';
+  if (p.id === 'accounting' || p.id === 'accounting-basics') return m && m.found ? (m.totals.owedToYou ? `${moneyShort(m.totals.owedToYou)} owed to you` : 'All invoices paid') : 'Set up your company';
   if (p.id === 'desk') return today && today.tasks.length ? `${today.tasks.length} to-do${today.tasks.length === 1 ? '' : 's'} · find & sort files` : 'Find & sort your files';
   if (p.id === 'payroll') return 'Timesheets · pay runs · payslips';
   if (p.id === 'pdf') return 'Fill · sign · edit';
@@ -50,7 +50,9 @@ function tileSub(p) {
 }
 function renderTiles() {
   const mine = programs.filter((p) => p.status !== 'missing');
-  const others = programs.filter((p) => p.status === 'missing');
+  // Only one Accounting app is installed at a time: with Plus, don't offer Basics; with Basics, offer Plus as the upgrade.
+  const others = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')))
+    .map((p) => (p.id === 'accounting' && has('accounting-basics') ? { ...p, name: 'Upgrade to Accounting Plus' } : p));
   const upFor = new Set((upd.updates || []).map((u) => u.id));
   $('#tiles').innerHTML = mine.map((p) => `<button class="tile t-${esc(p.id)}" data-open="${esc(p.id)}" title="${esc(p.where || '')}">
       ${upFor.has(p.id) ? '<span class="badge">⬆ Update</span>' : ''}<div class="i">${p.icon}</div><div><b>${esc(p.name)}</b><small>${esc(tileSub(p))}</small></div></button>`).join('')
@@ -60,7 +62,7 @@ function renderTiles() {
 function renderMoney() {
   const m = today.money;
   const box = $('#money').closest('.w');
-  box.hidden = !has('accounting'); // Money panel only when Riyeser Accounting is installed (an old company file left after uninstalling isn't shown)
+  box.hidden = !has('accounting') && !has('accounting-basics'); // Money panel only when Riyeser Accounting is installed (an old company file left after uninstalling isn't shown)
   if (box.hidden) return;
   if (!m || !m.found) { $('#money').innerHTML = `<div class="lbl">${m && m.error ? `Couldn't read your books: ${esc(m.error)}` : 'Open Accounting and set up your company to see money owed and owing here.'}</div>`; return; }
   const t = m.totals; const notDue = Math.max(0, t.owedToYou - t.overdueToYou);
@@ -173,7 +175,7 @@ function openLicence() {
     : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
       <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
       <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">$20 per user a month for every Riyeser program, less for 5+ users. 🐣 Early bird: 50% off your first year for the first 100 users. Accounting Basics stays free without a licence; a licence unlocks Accounting Plus. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+      <p class="muted">$20 per user a month for every Riyeser program, less for 5+ users. 🐣 Early bird: 50% off your first year for the first 100 users. Accounting Basics is free without a licence; Accounting Plus is included in your licence. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
   $('#licdlg').showModal();
 }
 document.addEventListener('click', (e) => {

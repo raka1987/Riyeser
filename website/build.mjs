@@ -38,7 +38,7 @@ const PROGRAMS = [
       ['Only what you have', 'Shows just the programs you use — add more any time.'],
       ['Light or dark', 'A modern look that\'s easy on the eyes, day or night.'],
     ] },
-  { id: 'accounting-basics', name: 'Riyeser Accounting Basics', short: 'Accounting Basics', icon: '📗', file: 'RiyeserAccounting-Setup.exe',
+  { id: 'accounting-basics', name: 'Riyeser Accounting Basics', short: 'Accounting Basics', icon: '📗', file: 'RiyeserAccountingBasics-Setup.exe',
     one: 'Free invoicing, quotes, customers and stock for shops and sole traders. Free forever, no licence needed.',
     pitch: 'Invoice, get paid and keep stock. Free.',
     features: [
@@ -49,8 +49,8 @@ const PROGRAMS = [
       ['Money in & out', 'Record what you spend and receive, with GST worked out for you.'],
       ['Key reports', 'Profit & Loss, GST summary, who owes you, sales by customer and item, and stock reports.'],
     ],
-    note: 'Need bank reconciliation, payroll or a Balance Sheet? Accounting Plus adds them, and it\'s the same download: switch a company to Plus any time and your data stays as it is.' },
-  { id: 'accounting', name: 'Riyeser Accounting Plus', short: 'Accounting Plus', icon: '📒', file: 'RiyeserAccounting-Setup.exe',
+    note: 'Need bank reconciliation, payroll or a Balance Sheet? Install Accounting Plus: it replaces Basics and opens your books exactly as they are.' },
+  { id: 'accounting', name: 'Riyeser Accounting Plus', short: 'Accounting Plus', icon: '📒', file: 'RiyeserAccountingPlus-Setup.exe',
     one: 'Full double-entry books: everything in Basics plus banking, payroll, journals, jobs and budgets. Free for 90 days, then included in your licence.',
     pitch: 'Know who owes you, and who you owe.',
     shot: 'accounting.webp',
@@ -185,8 +185,8 @@ const editionsBlock = (up, { download = true } = {}) => `
 <div class="plans eds">${EDITIONS.map((e, i) => `<div class="plan${i ? ' best' : ''}"><span class="tag">${esc(e.tag)}</span><div class="k">${esc(e.name)}</div>
   <div class="price">${esc(e.price)}<small> ${esc(e.small)}</small></div><p>${esc(e.blurb)}</p>
   <ul class="edlist">${e.has.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>`).join('')}</div>
-<p class="sub" style="margin-top:16px">Both use the same download. Pick Basics or Plus for each company when you set it up, and switch any time; your data never changes. If your free trial ends without a licence, your books open in Basics and nothing is lost.</p>
-${download ? `<div class="ctas" style="justify-content:flex-start;margin-top:6px"><a class="btn p" href="${RELEASES}/RiyeserAccounting-Setup.exe">⬇ Download Riyeser Accounting — free</a></div>` : ''}`;
+<p class="sub" style="margin-top:16px">Two separate apps that open the same books. Move up to Plus or back down to Basics any time: install the other one and it replaces the first, with all your customers, invoices and stock carried over. Plus-only records (payroll, journals, jobs, budgets) are kept safe in Basics and come back in Plus.</p>
+${download ? `<div class="ctas" style="justify-content:flex-start;margin-top:6px"><a class="btn s" href="${RELEASES}/RiyeserAccountingBasics-Setup.exe">⬇ Download Accounting Basics — free</a><a class="btn p" href="${RELEASES}/RiyeserAccountingPlus-Setup.exe">⬇ Download Accounting Plus — 90 days free</a></div>` : ''}`;
 const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
 <section class="c"><div class="cta"><h2>${title}</h2><p>${text}</p>
 <a class="btn t" href="${dl(prog('central'))}">⬇ Download Riyeser Central — free</a>
