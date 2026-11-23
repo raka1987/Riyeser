@@ -65,6 +65,7 @@ const PROGRAMS = [
     ],
     note: 'Built for Australian small businesses. Have your accountant check your setup before relying on it for tax.' },
   { id: 'pos', name: 'Riyeser POS', short: 'POS', icon: '🧾', file: 'RiyeserAccountingBasics-Setup.exe',
+    via: 'Accounting Basics', // POS is part of Riyeser Accounting: this download is the Accounting Basics installer
     one: 'A touch-friendly till for retail shops or cafes and restaurants. Every sale goes straight into your books. +$20 a month, free for 90 days.',
     pitch: 'Sell at the counter. Books done automatically.',
     shot: 'pos-till.webp',
@@ -412,8 +413,8 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
   <div>
     <div class="phead-who" style="display:flex;align-items:center;gap:18px;margin-bottom:18px">${iconBox(p, up)}<div><span class="eyebrow" style="margin:0">${esc(p.name)}</span>${badgeOf(p)}</div></div>
     <h1>${esc(p.pitch)}</h1><p class="lead">${esc(p.one)}</p>
-    <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
-    ${p.file ? `<p class="fine">Windows 10 &amp; 11 · No account or card needed</p>` : ''}
+    <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${p.via ? `${WINLOGO} Download ${esc(p.via)} (includes POS)` : WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
+    ${p.file ? `<p class="fine">${p.via ? `POS is part of Riyeser Accounting: install ${esc(p.via)}, then open the Shop counter. · ` : ''}Windows 10 &amp; 11 · No account or card needed</p>` : ''}
   </div>
   ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
 </div></div>
@@ -658,7 +659,7 @@ ${searchScript(up)}
   <div>
     <div class="crumbs"><a href="${up}help.html">Help Centre</a> › ${esc(gName(g))}</div>
     <div class="hhead"><div class="icon i-${g.app}">${gIcon(g, up)}</div><div><h1>${esc(gName(g))}</h1><p>${esc(g.intro)}</p>
-      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
+      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} ${p.via ? `Download ${esc(p.via)} (includes POS)` : 'Download'}</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
     ${searchBox(`Search the ${gName(g)} guide`)}
     ${g.groups.map((grp, i) => `<div class="hgroup" id="s${i + 1}"><h2><span class="num">${i + 1}</span>${esc(grp.title)}</h2><div class="faq">${grp.items.map(([id, q, a], j) => `<details id="${id}"${i === 0 && j === 0 ? ' open' : ''}><summary>${q}</summary>${a}</details>`).join('')}</div></div>`).join('')}
     <p class="hnone" id="hnone">Nothing in this guide matches that. Try the <a class="more" href="${up}help.html">Help Centre</a> search, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a>.</p>
