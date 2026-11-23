@@ -157,6 +157,24 @@ var hit=(rel.assets||[]).filter(function(x){return x.name.replace(/^Riye?ser/i,'
 }
 
 const freeLine = 'Free download · no sign-up · no card · works offline';
+
+// Riyeser Accounting comes in two editions: one download, the licence decides which one you get.
+const EDITIONS = [
+  { name: 'Accounting Basics', price: 'Free', small: 'no licence needed', tag: 'Free forever',
+    blurb: 'Everything a small shop or sole trader needs to invoice and keep stock.',
+    has: ['Quotes, invoices and receiving payments', 'Customers, suppliers and bills', 'Stock items, stocktake and reorder alerts',
+      'Simple money in and money out', 'Shop counter (POS)', 'Profit & Loss, GST summary, who owes you, sales and stock reports'] },
+  { name: 'Accounting Plus', price: 'Licence', small: 'included in your Riyeser licence', tag: 'Free for 90 days',
+    blurb: 'Everything in Basics, plus the tools for full books.',
+    has: ['Everything in Accounting Basics', 'Bank reconciliation and bank statement import', 'Payroll and pay runs',
+      'General journal and search transactions', 'Jobs and budgets', 'Balance Sheet, Trial Balance and every report'] },
+];
+const editionsBlock = (up, { download = true } = {}) => `
+<div class="plans eds">${EDITIONS.map((e, i) => `<div class="plan${i ? ' best' : ''}"><span class="tag">${esc(e.tag)}</span><div class="k">${esc(e.name)}</div>
+  <div class="price">${esc(e.price)}<small> ${esc(e.small)}</small></div><p>${esc(e.blurb)}</p>
+  <ul class="edlist">${e.has.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>`).join('')}</div>
+<p class="sub" style="margin-top:16px">One download for both. Pick Basics or Plus for each company when you set it up, and switch any time; your data never changes. If your free trial ends without a licence, your books open in Basics and nothing is lost.</p>
+${download ? `<div class="ctas" style="justify-content:flex-start;margin-top:6px"><a class="btn p" href="${RELEASES}/RiyeserAccounting-Setup.exe">⬇ Download Riyeser Accounting — free</a></div>` : ''}`;
 const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
 <section class="c"><div class="cta"><h2>${title}</h2><p>${text}</p>
 <a class="btn t" href="${dl(prog('central'))}">⬇ Download Riyeser Central — free</a>
@@ -265,6 +283,7 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
 </div>
 ${p.shot ? `<img class="pshot" src="${up}assets/${p.shot}" alt="${esc(p.name)} screenshot" width="1400" height="1000">` : `<div class="placeholder i-${p.id}">${p.icon}</div>`}
 </div>
+${p.id === 'accounting' ? `<section class="c" id="editions"><h2 class="h2">Accounting Basics or Accounting Plus</h2>${editionsBlock(up)}</section>` : ''}
 <section class="c"><h2 class="h2">What it does</h2><p class="sub">${esc(p.one)}</p>
   <div class="fgrid">${p.features.map(([h, t]) => `<div class="f"><h4>${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div>
   ${p.shot2 ? `<img class="pshot" style="margin-top:40px" src="${up}assets/${p.shot2}" alt="${esc(p.name)} screenshot" loading="lazy" width="1600" height="1000">` : ''}
@@ -356,7 +375,7 @@ page({
 <div class="c" style="padding-top:56px">
   <h1 style="font-size:clamp(32px,5vw,48px);letter-spacing:-1px">Downloads</h1>
   <p class="lead" style="margin:10px 0 30px;text-align:left">${freeLine}. For Windows 10 and 11. Each installs in one click and updates over the old version — your data is kept.</p>
-  ${PROGRAMS.map((p) => `<div class="dl">${iconBox(p)}<div><h3>${esc(p.name)}</h3><p>${esc(p.one)}</p></div>${p.file ? `<a class="btn p" href="${dl(p)}">⬇ Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join('')}
+  ${PROGRAMS.map((p) => `<div class="dl">${iconBox(p)}<div><h3>${esc(p.name)}</h3><p>${esc(p.one)}</p></div>${p.file ? `<a class="btn p" href="${dl(p)}">⬇ Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>${p.id === 'accounting' ? `<div class="dl-eds"><h3 style="margin:0 0 12px">Riyeser Accounting comes in two editions</h3>${editionsBlock(up, { download: false })}</div>` : ''}`).join('')}
   <section style="padding:40px 0 0"><h2 style="font-size:24px;margin-bottom:8px">Installing</h2>
     <ol class="steps"><li>Click <b>Download</b> and open the file when it finishes.</li>
     <li>If Windows shows <b>“Windows protected your PC”</b>, click <b>More info → Run anyway</b>. (We're getting our programs signed so this goes away.)</li>
@@ -383,7 +402,8 @@ page({
     <div class="plan"><div class="k">20+ users</div><div class="price">$13<small> per user / month</small></div><p>35% off every user for larger teams.</p></div>
   </div>
   <div class="addon"><div class="big">🏢</div><div><b>Add-on: extra companies — $10 a month each</b><p>Your plan includes one company in Riyeser Accounting. Run more — another company, a trust, or your clients' books — for $10 a month per extra company. Free to try during your 90 days.</p></div></div>
-  <div class="addon"><div class="big">📒</div><div><b>Accounting Basics — free, no licence needed</b><p>Invoices, quotes, customers, stock, suppliers, simple money in and out, the shop counter and the key reports, free for as long as you like. <b>Accounting Plus</b> adds bank reconciliation, statement import, payroll, journals, jobs, budgets, Balance Sheet and Trial Balance, and is included in your licence. If your trial ends without a licence, your books open in Basics and nothing is lost.</p></div></div>
+  <h2 class="h2" style="margin-top:40px" id="accounting">Accounting Basics vs Accounting Plus</h2>
+  ${editionsBlock(up)}
   <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
 </section>
 
