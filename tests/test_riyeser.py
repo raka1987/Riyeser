@@ -549,3 +549,169 @@ def test_pos_tills_photos_favourites_and_today(client, app):
     assert "Best sellers" in today and "Coffee cup" in today and "Gift shelf" in today and "$22.00" in today
     client.post(f"/inventory/{item}/edit", data={**full, "photo_remove": "1"})
     assert client.get(f"/pos/photo/{item}").status_code == 404
+
+
+# ---------------------------------------------------------------- POS phases 3 & 4: approvals, refunds, till close
+def _staff(app, name="sam", preset="sales"):
+    a = app.test_client()
+    a.post("/login", data={"username": "admin", "password": "admin"})
+    a.post("/users/save", data={"username": name, "password": "pw", "preset": preset})
+    s = app.test_client()
+    s.post("/login", data={"username": name, "password": "pw"})
+    return s
+
+
+def _set_pin(client, pin="2468", uid=1):
+    return client.post("/pos/approvals", data={"what": "pin", "user_id": uid, "pin": pin}, follow_redirects=True)
+
+
+def test_pos_staff_void_needs_manager_pin(client, app):
+    item, _ = _pos_setup(app)
+    assert "PIN saved" in _set_pin(client).get_data(as_text=True)
+    sid = client.post("/pos/sale", json={"method": "card", "lines": [{"item_id": item, "qty": 1}]}).get_json()["sale_id"]
+    sam = _staff(app)
+    # no approval: refused, nothing changes
+    sam.post(f"/pos/sale/{sid}/void")
+    with app.app_context():
+        assert get_db().execute("SELECT voided FROM pos_sales WHERE id=?", (sid,)).fetchone()[0] == 0
+    # wrong PIN counts down; the right PIN gives a one-time approval
+    r = sam.post("/pos/approve", json={"action": "void", "ref": sid, "reason": "Wrong item", "pin": "1111"})
+    assert r.status_code == 400 and "Wrong PIN" in r.get_json()["error"] and "2 tries left" in r.get_json()["error"]
+    assert sam.post("/pos/approve", json={"action": "void", "ref": sid, "pin": "2468"}).status_code == 400  # needs a reason
+    a = sam.post("/pos/approve", json={"action": "void", "ref": sid, "reason": "Wrong item", "pin": "2468"}).get_json()
+    assert a["ok"] and a["method"] == "PIN" and a["approver"] == "Administrator"
+    # an approval for another sale doesn't work
+    sid2 = client.post("/pos/sale", json={"method": "card", "lines": [{"item_id": item, "qty": 1}]}).get_json()["sale_id"]
+    sam.post(f"/pos/sale/{sid2}/void", data={"approval_id": a["approval_id"]})
+    sam.post(f"/pos/sale/{sid}/void", data={"approval_id": a["approval_id"]})
+    sam.post(f"/pos/sale/{sid}/void", data={"approval_id": a["approval_id"]})  # can't be used twice
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT voided FROM pos_sales WHERE id=?", (sid,)).fetchone()[0] == 1
+        assert db.execute("SELECT voided FROM pos_sales WHERE id=?", (sid2,)).fetchone()[0] == 0
+        row = db.execute("SELECT * FROM pos_approvals WHERE id=?", (a["approval_id"],)).fetchone()
+        assert row["used_at"] and row["reason"] == "Wrong item"
+        assert trial_balance_ok(db)
+    log = client.get("/pos/approvals").get_data(as_text=True)
+    assert "Wrong item" in log and "Override log" in log
+    # too many wrong tries locks approvals for a while
+    for _ in range(2):
+        sam.post("/pos/approve", json={"action": "void", "ref": sid2, "reason": "Other", "pin": "0000"})
+    r = sam.post("/pos/approve", json={"action": "void", "ref": sid2, "reason": "Other", "pin": "2468"})
+    assert r.status_code == 400 and "Too many wrong tries" in r.get_json()["error"]
+    # staff can't open the approvals settings
+    assert sam.get("/pos/approvals").status_code in (302, 403)
+
+
+def test_pos_manager_card_and_pin_rules(client, app):
+    item, _ = _pos_setup(app)
+    _set_pin(client, "13579")
+    r = client.post("/pos/approvals", data={"what": "card", "user_id": 1, "card": "MGR-0042"}, follow_redirects=True)
+    assert "Manager card registered" in r.get_data(as_text=True)
+    sam = _staff(app)
+    sid = client.post("/pos/sale", json={"method": "cash", "tendered": "11", "lines": [{"item_id": item, "qty": 1}]}).get_json()["sale_id"]
+    ok = sam.post("/pos/approve", json={"action": "void", "ref": sid, "reason": "Other", "card": "MGR-0042"}).get_json()
+    assert ok["ok"] and ok["method"] == "card"
+    assert sam.post("/pos/approve", json={"action": "void", "ref": sid, "reason": "Other", "card": "NOPE"}).status_code == 400
+    # Card + PIN: the card alone is no longer enough
+    client.post("/pos/approvals", data={"what": "rules", "method": "both", "discount": "1", "discount_limit": "10",
+                                       "close": "1", "close_limit": "2"})
+    r = sam.post("/pos/approve", json={"action": "void", "ref": sid, "reason": "Other", "card": "MGR-0042"})
+    assert r.status_code == 400 and "PIN" in r.get_json()["error"]
+    both = sam.post("/pos/approve", json={"action": "void", "ref": sid, "reason": "Other", "card": "MGR-0042",
+                                         "pin": "13579"}).get_json()
+    assert both["ok"] and both["method"] == "card + PIN"
+    # a lost card is disabled at once
+    client.post("/pos/approvals", data={"what": "card_off", "user_id": 1})
+    client.post("/pos/approvals", data={"what": "rules", "method": "either", "discount": "1", "discount_limit": "10",
+                                       "close": "1", "close_limit": "2"})
+    assert sam.post("/pos/approve", json={"action": "void", "ref": sid, "reason": "Other", "card": "MGR-0042"}).status_code == 400
+    # PINs must be 4-6 numbers and different from other managers'
+    assert "4 to 6 numbers" in _set_pin(client, "12").get_data(as_text=True)
+
+
+def test_pos_refund_reverses_income_gst_and_stock(client, app):
+    item, acc = _pos_setup(app)
+    d = client.post("/pos/sale", json={"method": "cash", "tendered": "22", "lines": [{"item_id": item, "qty": 2}]}).get_json()
+    sid = d["sale_id"]
+    lines = client.get(f"/pos/sale/{sid}/lines").get_json()["lines"]
+    assert lines[0]["left"] == 2 and lines[0]["each"] == 1100
+    lid = lines[0]["id"]
+    r = client.post(f"/pos/sale/{sid}/refund", json={"lines": {lid: 1}, "method": "cash", "reason": "Faulty item"}).get_json()
+    assert r["ok"] and r["amount"] == 1100
+    assert client.post(f"/pos/sale/{sid}/refund", json={"lines": {lid: 5}, "method": "cash"}).status_code == 400
+    # a part-refunded sale can't then be voided
+    client.post(f"/pos/sale/{sid}/void", data={"reason": "x"})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT voided FROM pos_sales WHERE id=?", (sid,)).fetchone()[0] == 0
+        assert db.execute("SELECT qty_on_hand FROM items WHERE id=?", (item,)).fetchone()[0] == 9  # 10 - 2 + 1
+        today = date.today().isoformat()
+        f = gst_figures(db, today, today)
+        assert f["A1"] == 100 and f["G1"] == 1100  # one $11 cup left sold: $1 GST
+        b = L.balances(db)
+        assert b[linked(db, "pos_cash")] == 1100
+        assert trial_balance_ok(db)
+    today_page = client.get("/pos/sales").get_data(as_text=True)
+    assert "Refunds" in today_page and "Faulty item" in today_page and "$11.00" in today_page
+    # staff need a manager for a refund
+    sam = _staff(app)
+    assert sam.post(f"/pos/sale/{sid}/refund", json={"lines": {lid: 1}, "method": "cash"}).status_code == 400
+
+
+def test_pos_discount_over_limit_needs_manager(client, app):
+    item, _ = _pos_setup(app)
+    _set_pin(client, "2468")
+    sam = _staff(app)
+    sale = {"method": "card", "lines": [{"item_id": item, "qty": 1, "discount_pct": 15}]}
+    assert sam.post("/pos/sale", json=sale).status_code == 400
+    small = sam.post("/pos/approve", json={"action": "discount", "amount": 12, "reason": "Damaged item", "pin": "2468"}).get_json()
+    assert sam.post("/pos/sale", json={**sale, "approval_id": small["approval_id"]}).status_code == 400  # approved 12%, not 15%
+    a = sam.post("/pos/approve", json={"action": "discount", "amount": 15, "reason": "Damaged item", "pin": "2468"}).get_json()
+    assert sam.post("/pos/sale", json={**sale, "approval_id": a["approval_id"]}).get_json()["ok"]
+    # up to the limit needs nobody; the owner approves their own
+    assert sam.post("/pos/sale", json={"method": "card", "lines": [{"item_id": item, "qty": 1, "discount_pct": 10}]}).get_json()["ok"]
+    assert client.post("/pos/sale", json=sale).get_json()["ok"]
+
+
+def test_pos_open_and_close_till(client, app):
+    item, acc = _pos_setup(app)
+    page = client.get("/pos/").get_data(as_text=True)
+    assert 'id="pOpen"' in page
+    assert client.post("/pos/shift/open", json={"till_id": 1, "float": "200"}).get_json()["ok"]
+    client.post("/pos/sale", json={"method": "cash", "tendered": "50", "till_id": 1, "lines": [{"item_id": item, "qty": 2}]})
+    client.post("/pos/sale", json={"method": "card", "till_id": 1, "lines": [{"item_id": item, "qty": 1}]})
+    close = client.get("/pos/close?till=1").get_data(as_text=True)
+    assert "Should be in the drawer" in close and "$222.00" in close
+    assert "X-READ" in client.get("/pos/shift/1").get_data(as_text=True)
+    # counted exactly right: $200 float + $22 cash; the $22 goes to the bank
+    r = client.post("/pos/close", data={"till": 1, "n10000": 2, "n2000": 1, "n200": 1, "bank_it": "1",
+                                        "bank_id": acc["1-1110"], "card_settlement": "11.00"}, follow_redirects=True)
+    z = r.get_data(as_text=True)
+    assert "Z-REPORT" in z and "$22.00" in z
+    with app.app_context():
+        db = get_db()
+        sh = db.execute("SELECT * FROM pos_shifts WHERE id=1").fetchone()
+        assert sh["status"] == "closed" and sh["variance"] == 0 and sh["deposit"] == 2200
+        b = L.balances(db)
+        assert b.get(linked(db, "pos_cash"), 0) == 0  # undeposited cash all banked
+        assert trial_balance_ok(db)
+    # next shift: $5 short. Staff need a reason and a manager.
+    client.post("/pos/shift/open", json={"till_id": 1, "float": "200"})
+    client.post("/pos/sale", json={"method": "cash", "tendered": "11", "till_id": 1, "lines": [{"item_id": item, "qty": 1}]})
+    _set_pin(client, "2468")
+    sam = _staff(app)
+    form = {"till": 1, "n10000": 2, "n500": 1, "n100": 1}  # $206, expected $211
+    sam.post("/pos/close", data=form)  # no reason
+    sam.post("/pos/close", data={**form, "reason": "Gave wrong change"})  # no manager
+    with app.app_context():
+        assert get_db().execute("SELECT status FROM pos_shifts WHERE id=2").fetchone()[0] == "open"
+    a = sam.post("/pos/approve", json={"action": "close", "ref": 2, "amount": -500, "reason": "Gave wrong change",
+                                       "pin": "2468"}).get_json()
+    sam.post("/pos/close", data={**form, "reason": "Gave wrong change", "approval_id": a["approval_id"]})
+    with app.app_context():
+        db = get_db()
+        sh = db.execute("SELECT * FROM pos_shifts WHERE id=2").fetchone()
+        assert sh["status"] == "closed" and sh["variance"] == -500 and sh["approval_id"] == a["approval_id"]
+        assert L.balances(db)[linked(db, "cash_over_short")] == 500  # $5 expense
+        assert trial_balance_ok(db)

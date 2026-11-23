@@ -29,6 +29,9 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
 .none{color:var(--muted);padding:16px 0}
 @media (max-width:1100px){.k4{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}}
 @media print{.tbar,.h1 form,.noprint{display:none!important}.shell{height:auto}.main{overflow:visible}body{background:#fff}}
+.rl{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.rl small{display:block;color:var(--muted)}.stp{display:flex;align-items:center;gap:8px}.stp button{width:44px;height:44px;border-radius:12px;border:1.5px solid var(--line2);background:#fff;font-size:22px;font-weight:700}
+.stp b{min-width:30px;text-align:center;font-size:18px}
 {% endblock %}
 {% block body %}
 {% set card = by_method.get('card', 0) %}{% set cash = by_method.get('cash', 0) %}
@@ -37,7 +40,7 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
     <form method="get"><input type="date" name="date" value="{{ day }}" aria-label="Day"><button class="btn sm">Show</button>
       <button type="button" class="btn sm" onclick="print()">Print summary</button><a class="btn sm" href="{{ url_for('help.index') }}#pos">Help</a></form></div>
   <div class="k4">
-    <div class="card kpi"><span class="bx"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><div><div class="lbl">Sales inc GST</div><div class="v n">{{ total|money }}</div><div class="nt">Voided sales left out</div></div></div>
+    <div class="card kpi"><span class="bx"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><div><div class="lbl">Sales inc GST</div><div class="v n">{{ total|money }}</div><div class="nt">After refunds; voided sales left out</div></div></div>
     <div class="card kpi"><span class="bx" style="background:#eaf1ff;color:#2563eb"><svg class="ic" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></svg></span><div><div class="lbl">Sales</div><div class="v n">{{ count }}</div><div class="nt">{% if count %}Average {{ (total // count)|money }}{% else %}None yet{% endif %}</div></div></div>
     <div class="card kpi"><span class="bx" style="background:var(--warn-bg);color:var(--warn)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/></svg></span><div><div class="lbl">GST collected</div><div class="v n">{{ gst|money }}</div><div class="nt">Goes to your BAS</div></div></div>
     {% if mode == 'restaurant' %}<div class="card kpi"><span class="bx" style="background:#f3e8ff;color:#7c3aed"><svg class="ic" viewBox="0 0 24 24"><path d="M3 9h18M5 9v11M19 9v11M7 5h10l2 4H5l2-4Z"/></svg></span><div><div class="lbl">Open orders</div><div class="v n">{{ open_orders }}</div><div class="nt">Not paid yet</div></div></div>
@@ -58,9 +61,11 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
       <table class="t"><tr><th>Time</th><th>Receipt</th><th>Customer</th><th>Paid</th><th class="r">Total</th><th class="r noprint"></th></tr>
       {% for r in rows %}<tr class="{{ 'void' if r.voided }}"><td class="n">{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a>{% if r.till_name and tills|length > 1 %}<br><small style="color:var(--muted)">{{ r.till_name }}</small>{% endif %}</td>
         <td>{{ r.cname }}</td><td>{{ methods[r.method] }}</td><td class="r n">{% if r.voided %}<s>{{ r.total|money }}</s>{% else %}{{ r.total|money }}{% endif %}</td>
-        <td class="r noprint" style="white-space:nowrap">{% if r.voided %}<span class="badge err">Voided</span>{% else %}<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" target="_blank">Receipt</a>
-        {% if lv('sales') >= 3 %}<form method="post" action="{{ url_for('pos.void', sid=r.id) }}" onsubmit="return confirm('Void {{ r.number }}? Stock goes back and the takings are reversed.')"><button class="btn sm danger">Void</button></form>{% endif %}{% endif %}</td></tr>
-      {% else %}<tr><td colspan="6" class="none">No POS sales on this day.</td></tr>{% endfor %}</table></div>
+        <td class="r noprint" style="white-space:nowrap">{% if r.voided %}<span class="badge err">Voided</span>{% else %}{% if refunded.get(r.id) %}<span class="badge warn">Refunded {{ refunded[r.id]|money }}</span> {% endif %}<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" target="_blank">Receipt</a>
+        {% if lv('sales') >= 2 %}<button class="btn sm" data-refund="{{ r.id }}">Refund</button>{% if not refunded.get(r.id) %} <button class="btn sm danger" data-void="{{ r.id }}" data-num="{{ r.number }}" data-total="{{ r.total }}" data-method="{{ methods[r.method] }}" data-time="{{ r.created_at[11:16] }}">Void</button>{% endif %}{% endif %}{% endif %}</td></tr>
+      {% else %}<tr><td colspan="6" class="none">No POS sales on this day.</td></tr>{% endfor %}</table>
+      {% if refunds %}<div class="pd" style="padding-bottom:6px"><h3>Refunds</h3></div><table class="t"><tr><th>Time</th><th>From sale</th><th>Paid back</th><th>Reason</th><th class="r">Amount</th></tr>
+      {% for f in refunds %}<tr><td class="n">{{ f.created_at[11:16] }}</td><td>{{ f.number }}</td><td>{{ methods[f.method] }}</td><td>{{ f.reason or '' }}</td><td class="r n">-{{ f.amount|money }}</td></tr>{% endfor %}</table>{% endif %}</div>
     <div class="card pd"><h3>How people paid</h3>
       {% if total %}<div class="meter"><i style="width:{{ (card / total * 100)|round(1) }}%;background:var(--green)"></i><i style="width:{{ (cash / total * 100)|round(1) }}%;background:var(--mint)"></i></div>{% endif %}
       <div class="pm"><div><span><i style="background:var(--green)"></i>{{ methods.card }}</span><b class="n">{{ card|money }}</b></div>
@@ -69,4 +74,50 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
         <div><span>GST included</span><span class="n">{{ gst|money }}</span></div></div></div>
   </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<div class="modal" id="mRefund"><div class="box"><h2><span id="rfTitle">Refund</span><button class="x" data-rclose>&times;</button></h2>
+  <p style="margin:-6px 0 10px;color:var(--muted)">Choose what the customer is bringing back. Stock goes back and GST comes off.</p>
+  <div id="rfLines"></div>
+  <div class="lbl" style="margin:14px 0 8px">Pay back by</div>
+  <div class="seg" id="rfMethod">{% for k, v in methods.items() %}<button data-m="{{ k }}">{{ v }}</button>{% endfor %}</div>
+  <div class="ttl" style="display:flex;justify-content:space-between;font-size:24px;font-weight:800;margin:16px 0 6px"><span>Refund</span><span class="n" id="rfTotal">$0.00</span></div>
+  <p class="err" id="rfErr" style="color:var(--err);font-weight:600;min-height:1.2em"></p>
+  <div style="display:flex;gap:10px"><button class="btn" data-rclose style="flex:1">Cancel</button><button class="btn go" id="rfGo" style="flex:1.4" disabled>Refund</button></div></div></div>
+<form method="post" id="voidForm" hidden><input name="approval_id"><input name="reason"></form>
+<script>
+(function(){
+const $=s=>document.querySelector(s), fmt=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2});
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const BASE='{{ url_for('pos.register') }}';
+let rf=null;
+document.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b)return;
+  if(b.dataset.void){const sid=b.dataset.void;
+    try{const a=await requestApproval({action:'void',ref:sid,amount:+b.dataset.total,what:'Void sale '+b.dataset.num,
+      detail:b.dataset.method+' \u00b7 '+b.dataset.time+' \u00b7 stock goes back, takings reversed',amountLabel:fmt(+b.dataset.total),verb:'Approve & void'});
+      const f=$('#voidForm');f.action=BASE+'sale/'+sid+'/void';f.approval_id.value=a.approval_id||'';f.reason.value=a.reason;f.submit();}catch(err){}
+    return;}
+  if(b.dataset.refund){const r=await fetch(BASE+'sale/'+b.dataset.refund+'/lines');const d=await r.json();
+    rf={sid:b.dataset.refund,num:d.number,method:d.method,lines:d.lines.map(l=>({...l,q:0}))};drawRf();$('#mRefund').classList.add('show');return;}
+  if(b.dataset.rclose!==undefined){$('#mRefund').classList.remove('show');rf=null;return;}
+  if(!rf)return;
+  if(b.dataset.m){rf.method=b.dataset.m;drawRf();return;}
+  if(b.dataset.inc!==undefined||b.dataset.dec!==undefined){const l=rf.lines[+(b.dataset.inc??b.dataset.dec)];
+    l.q=Math.min(l.left,Math.max(0,l.q+(b.dataset.inc!==undefined?1:-1)));drawRf();return;}
+  if(b.id==='rfGo'&&!b.disabled){const amt=total();
+    try{const a=await requestApproval({action:'refund',ref:rf.sid,amount:amt,what:'Refund from '+rf.num,detail:'Paid back by '+(rf.method==='cash'?'cash':'card'),amountLabel:fmt(amt),verb:'Approve refund'});
+      const lines={};rf.lines.forEach(l=>{if(l.q>0)lines[l.id]=l.q;});
+      const r=await fetch(BASE+'sale/'+rf.sid+'/refund',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({lines,method:rf.method,approval_id:a.approval_id,reason:a.reason,till_id:($('#till')||{}).value})});
+      const d=await r.json().catch(()=>({ok:false,error:'Something went wrong.'}));
+      if(!d.ok){$('#rfErr').textContent=d.error;return;}
+      toast('Refunded '+fmt(d.amount)+'. Pay this back to the customer.');setTimeout(()=>location.reload(),900);}catch(err){}}});
+function total(){return rf.lines.reduce((a,l)=>a+l.q*l.each,0);}
+function drawRf(){$('#rfTitle').textContent='Refund from '+rf.num;
+  $('#rfLines').innerHTML=rf.lines.map((l,i)=>`<div class="rl"><div><b>${esc(l.description)}</b><small>${fmt(l.each)} each \u00b7 ${+l.left.toFixed(3)} can be refunded</small></div>
+    <div class="stp"><button data-dec="${i}" ${l.q<=0?'disabled':''}>&minus;</button><b class="n">${+l.q.toFixed(3)}</b><button data-inc="${i}" ${l.q>=l.left?'disabled':''}>+</button></div><b class="n">${fmt(l.q*l.each)}</b></div>`).join('');
+  document.querySelectorAll('#rfMethod button').forEach(x=>x.classList.toggle('on',x.dataset.m===rf.method));
+  $('#rfTotal').textContent=fmt(total());$('#rfGo').disabled=total()<=0;$('#rfErr').textContent='';}
+})();
+</script>
 {% endblock %}
