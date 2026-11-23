@@ -396,6 +396,9 @@ footer { background: #fff; }
 .icon.i-services, img.appicon.i-services { background: none; padding: 0; border: 0; }
 .card > .icon { width: 54px; height: 54px; margin-bottom: 16px; }
 .menu-pop img.mi { width: 36px; height: 36px; border-radius: 10px; flex: none; }
+/* Program pages: show the product logo big and clear */
+.phead-who .icon { width: 88px; height: 88px; border-radius: 22px; box-shadow: 0 10px 24px rgba(15,40,80,.16); }
+.phead-who .eyebrow { font-size: 15px; }
 /* pricing: free tools, Basics, add-on programs */
 .plans3 .plan .ticks { margin-top: 12px; font-size: 14.5px; } .plans3 .plan .ticks li { padding: 4px 0 4px 24px; }
 .plan .tag.free { background: var(--green, #16a34a); }
