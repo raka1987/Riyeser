@@ -1270,6 +1270,7 @@ function placeBox(ann, wPt, hPt) {
 }
 
 const tools = {
+  help: () => bridge.call('pdf:help'),
   basicview: async () => { if (!st.file) throw new Error('Open a PDF first.'); await bridge.call('pdf:basicView', st.file); },
   async stamp() {
     if (!st.doc) return;

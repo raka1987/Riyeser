@@ -132,6 +132,36 @@ async function download(url, file, onProgress) {
   await new Promise((r) => out.end(r));
   if (total && fs.statSync(file).size !== total) throw new Error('The download was incomplete. Please try again.');
 }
+/** Run a downloaded installer quietly and wait for it to finish. */
+function runInstaller(file, args, name) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(file, args, { windowsHide: true });
+    const t = setTimeout(() => { try { child.kill(); } catch { /* gone */ } reject(new Error(`${name} took too long to install.`)); }, 10 * 60 * 1000);
+    child.on('exit', (code) => { clearTimeout(t); code === 0 ? resolve() : reject(new Error(`${name} installer stopped (code ${code}).`)); });
+    child.on('error', (e) => { clearTimeout(t); reject(e); });
+  });
+}
+
+/** Install a program that isn't on this PC yet, straight from the latest Riyeser release (no trip to the website). */
+async function installProgram(id) {
+  const product = updates.PRODUCTS.find((x) => x.id === id && !x.self);
+  if (!product) throw new Error('Unknown program');
+  if (process.platform !== 'win32') throw new Error('Programs install on Windows only.');
+  let r = await checkUpdates(false);
+  if (!r.latest || !r.latest.products[id]) r = await checkUpdates(true); // a newer release may have added it
+  const item = r.latest && r.latest.products[id];
+  if (!item) throw new Error(`${product.display} isn't in the latest release yet. Use “Download page” instead.`);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-install-'));
+  const file = path.join(dir, path.basename(new URL(item.url).pathname));
+  send('install-progress', { id, stage: 'downloading', pct: 0 });
+  await download(item.url, file, (pct) => send('install-progress', { id, stage: 'downloading', pct }));
+  send('install-progress', { id, stage: 'installing', pct: 1 });
+  await runInstaller(file, product.args, product.display);
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp folder */ }
+  send('install-progress', { id, stage: 'done', pct: 1 });
+  return { id, version: item.version };
+}
+
 async function installUpdates(ids) {
   const st = await updateStatus(false);
   const todo = st.updates.filter((u) => !ids || ids.includes(u.id)).sort((a, b) => a.self - b.self); // Central last
@@ -152,12 +182,7 @@ async function installUpdates(ids) {
       return { done, restarting: true };
     }
     send('update-progress', { id: u.id, name: u.name, stage: 'installing', pct: 1 });
-    await new Promise((resolve, reject) => {
-      const child = spawn(file, u.args, { windowsHide: true });
-      const t = setTimeout(() => { try { child.kill(); } catch { /* gone */ } reject(new Error(`${u.name} took too long to install.`)); }, 10 * 60 * 1000);
-      child.on('exit', (code) => { clearTimeout(t); code === 0 ? resolve() : reject(new Error(`${u.name} installer stopped (code ${code}).`)); });
-      child.on('error', (e) => { clearTimeout(t); reject(e); });
-    });
+    await runInstaller(file, u.args, u.name);
     done.push(u.id);
   }
   store.set('updateCheck', null);
@@ -252,6 +277,12 @@ function registerIpc() {
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
   handle('central:updates', (force) => updateStatus(!!force));
   handle('central:installUpdates', (ids) => installUpdates(ids));
+  handle('central:install', (id) => installProgram(id));
+  // Help: each program's guide in the Riyeser Help Centre.
+  handle('central:help', (id) => {
+    const guide = { central: 'central', 'accounting-basics': 'accounting-basics', accounting: 'accounting', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    return shell.openExternal(guide ? `https://riyeser.com/help/${guide}.html` : 'https://riyeser.com/help.html').then(() => true);
+  });
   handle('search:find', (opts) => {
     // Search uses Desk Assistant's file list: nothing (not an old list) when it isn't installed.
     if (!locate(PROGRAMS.find((x) => x.id === 'desk'))) return { total: 0, results: [], facets: { type: {}, year: {}, kind: {} } };

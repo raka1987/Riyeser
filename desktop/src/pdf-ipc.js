@@ -47,6 +47,7 @@ function createEditorWindow(file, { store, icon }) {
 function registerPdfIpc({ handle, store, openEditor, getTheme = () => 'system', setTheme = () => {} }) {
   handle('app:platform', () => process.platform);
   handle('app:version', () => app.getVersion());
+  handle('pdf:help', () => shell.openExternal('https://riyeser.com/help/pdf.html').then(() => true));
   handle('theme:get', () => getTheme());
   handle('ocr:readFile', async (file) => new Uint8Array(await fs.promises.readFile(file)));
 

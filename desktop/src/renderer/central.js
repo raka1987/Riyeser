@@ -47,6 +47,7 @@ const P = {
   grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><path d="M16.5 13.5v6M13.5 16.5h6"/>',
   key: '<circle cx="8" cy="14" r="4"/><path d="M11 11l8-8M16 6l2 2M14 8l2 2"/>',
   up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
+  help: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.5a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.6M12 17h.01"/>',
   doc: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
   img: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M20.5 16l-5-5-8.5 8.5"/>',
   sheet: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M4 9h16M4 15h16M10 3v18"/>',
@@ -111,7 +112,8 @@ function renderNav() {
     <hr>
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
-    <button data-lic="open">${icon('key')}Licence</button>`;
+    <button data-lic="open">${icon('key')}Licence</button>
+    <button data-help="central">${icon('help')}Help</button>`;
 }
 
 // ---------- summary tiles ----------
@@ -202,7 +204,7 @@ function renderApps() {
   const others = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')))
     .map((p) => (p.id === 'accounting' && has('accounting-basics') ? { ...p, name: 'Upgrade to Accounting Plus' } : p));
   $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc"><span class="qi ${LOOK[p.id].c}">${icon(LOOK[p.id].ic)}</span><div><b>${esc(p.name)}</b><p>${esc(p.desc)}</p>
-      <div class="row"><button class="btn" data-get="${esc(p.id)}">Get it</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button></div></div></div>`).join('')
+      <div class="row" id="inst-${esc(p.id)}"><button class="btn" data-install="${esc(p.id)}" title="Download and install it now">Install</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-help="${esc(p.id)}">Learn more</button><button class="link" data-get="${esc(p.id)}" title="Its page on riyeser.com">Download page</button><button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button></div></div></div>`).join('')
     : '<div class="lbl">You have every Riyeser program.</div>';
 }
 function setView(v) {
@@ -214,6 +216,26 @@ async function refresh() {
   [programs, today] = await Promise.all([bridge.call('central:programs'), bridge.call('central:today')]);
   renderNav(); renderKpis(); renderQuick(); renderRecent(); renderMoney(); renderToday(); renderTodo(); renderLayout(); renderApps();
 }
+
+// ---------- install a program from here (no trip to the website) ----------
+let installing = null;
+async function installApp(id) {
+  if (installing) { toast('One program is installing already. It won\'t be long.'); return; }
+  const p = programs.find((x) => x.id === id); installing = id;
+  const row = $(`#inst-${id}`);
+  if (row) row.innerHTML = `<div style="flex:1"><b id="instmsg" style="font-size:13px">Getting ready…</b><div class="prog"><i id="instbar"></i></div></div>`;
+  try {
+    await bridge.call('central:install', id);
+    toast(`${p ? p.full : 'The program'} is installed. It's on your home screen now.`);
+  } catch (e) { toast(e.message); }
+  installing = null;
+  await safe(refresh);
+}
+bridge.on('install-progress', (x) => {
+  const msg = $('#instmsg'); const bar = $('#instbar'); if (!msg || x.id !== installing) return;
+  msg.textContent = x.stage === 'downloading' ? `Downloading… ${Math.round(x.pct * 100)}%` : x.stage === 'installing' ? 'Installing…' : 'Done';
+  bar.style.width = `${Math.round((x.stage === 'downloading' ? x.pct : 1) * 100)}%`;
+});
 
 // ---------- updates ----------
 function renderUpdates() {
@@ -324,6 +346,10 @@ document.addEventListener('click', (e) => {
   if (loc) { e.stopPropagation(); safe(async () => { const f = await bridge.call('central:locate', loc.dataset.locate); if (f) { toast('Got it. It\'s on your home screen now.'); refresh(); } }); return; }
   const get = e.target.closest('[data-get]');
   if (get) { e.stopPropagation(); safe(() => bridge.call('central:get', get.dataset.get)); return; }
+  const hb = e.target.closest('[data-help]');
+  if (hb) { safe(() => bridge.call('central:help', hb.dataset.help)); return; }
+  const ib = e.target.closest('[data-install]');
+  if (ib) { installApp(ib.dataset.install); return; }
   const vw = e.target.closest('[data-view]');
   if (vw) { $('#qclear').click(); setView(vw.dataset.view); return; }
   const act = e.target.closest('[data-act]');
