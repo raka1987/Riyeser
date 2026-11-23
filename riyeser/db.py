@@ -251,6 +251,27 @@ def migrate(db):
                 db.execute("SELECT account_id id FROM linked_accounts WHERE key='default_bank'").fetchone()
             if row:
                 db.execute("INSERT INTO linked_accounts (key, account_id) VALUES (?,?)", (key, row["id"]))
+    # Riyeser Bookings: jobs, appointments and table bookings, with who/what they're booked on and the services offered.
+    ccols = {r["name"] for r in db.execute("PRAGMA table_info(company)")}
+    if "bookings_mode" not in ccols:
+        db.execute("ALTER TABLE company ADD COLUMN bookings_mode TEXT NOT NULL DEFAULT 'jobs'")  # jobs, appointments, tables
+    if "bookings_hours" not in ccols:
+        db.execute("ALTER TABLE company ADD COLUMN bookings_hours TEXT NOT NULL DEFAULT '07:00-18:00'")
+    db.execute("""CREATE TABLE IF NOT EXISTS booking_resources (
+        id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'staff',  -- staff, table, room, vehicle
+        capacity INTEGER, colour TEXT, active INTEGER NOT NULL DEFAULT 1)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS booking_services (
+        id INTEGER PRIMARY KEY, name TEXT NOT NULL, minutes INTEGER NOT NULL DEFAULT 60, price INTEGER NOT NULL DEFAULT 0,
+        item_id INTEGER REFERENCES items(id), active INTEGER NOT NULL DEFAULT 1)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS bookings (
+        id INTEGER PRIMARY KEY, mode TEXT NOT NULL DEFAULT 'jobs', contact_id INTEGER REFERENCES contacts(id),
+        resource_id INTEGER REFERENCES booking_resources(id), service_id INTEGER REFERENCES booking_services(id),
+        starts_at TEXT NOT NULL, minutes INTEGER NOT NULL DEFAULT 60, title TEXT, address TEXT, party INTEGER,
+        phone TEXT, notes TEXT, status TEXT NOT NULL DEFAULT 'booked',  -- booked, confirmed, started, done, cancelled, no_show
+        document_id INTEGER REFERENCES documents(id), created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("CREATE INDEX IF NOT EXISTS bookings_starts ON bookings(starts_at)")
     db.commit()
 
 
@@ -268,6 +289,9 @@ POS_APP = {"name": "POS", "title": "POS", "app": "Riyeser POS", "price": "+$20 a
 
 # The fourth: free invoicing on its own. Same company file, so a business can move up to Accounting Basics any time.
 INVOICES_APP = {"name": "Invoices", "title": "Invoices", "app": "Riyeser Invoices", "price": "Free"}
+
+# The fifth: bookings and scheduling for trades jobs, appointments and restaurant tables.
+BOOKINGS_APP = {"name": "Bookings", "title": "Bookings", "app": "Riyeser Bookings", "price": "+$20 a month"}
 
 
 
@@ -292,8 +316,8 @@ def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition=N
     db.commit()
     migrate(db)
     if edition not in EDITIONS:
-        from .edition import app_edition, is_invoices_app
-        edition = app_edition() or ("basic" if is_invoices_app() else "enterprise")
+        from .edition import app_edition, is_invoices_app, is_bookings_app
+        edition = app_edition() or ("basic" if is_invoices_app() or is_bookings_app() else "enterprise")
     db.execute("UPDATE company SET edition=? WHERE id=1", (edition,))
     db.commit()
 

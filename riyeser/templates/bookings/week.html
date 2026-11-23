@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Week of {{ start.strftime('%d %b') }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Week of {{ start.strftime('%d %B') }}</h1><p class="sub">{{ m.name }}</p></div>
+<div class="actions">{% include "bookings/_nav.html" %}<a class="btn" href="{{ url_for('bookings.week', d=prev.isoformat()) }}" aria-label="Previous week">‹</a><a class="btn" href="{{ url_for('bookings.week') }}">This week</a><a class="btn" href="{{ url_for('bookings.week', d=next.isoformat()) }}" aria-label="Next week">›</a>
+{% if can('bookings', 2) %}<a class="btn pri" href="{{ url_for('bookings.edit') }}">+ New {{ m.one }}</a>{% endif %}</div></div>
+<div class="bk-week">{% for day, items in days %}<div class="card bk-wd{{ ' today' if day == today }}">
+  <a class="bk-wh" href="{{ url_for('bookings.calendar', d=day.isoformat()) }}"><b>{{ day.strftime('%a') }}</b> {{ day.strftime('%d %b') }}<span>{{ items|length or '' }}</span></a>
+  {% for b in items %}<a class="bk-wi st-{{ b.status }}" href="{{ url_for('bookings.edit', bid=b.id) }}" style="--c:{{ b.colour or '#64748b' }}"><b>{{ b.starts_at[11:16] }}</b> {{ b.customer or b.title or '' }}<small>{{ b.resource or '' }}{% if b.service %} · {{ b.service }}{% endif %}{% if b.status != 'booked' %} · {{ statuses[b.status] }}{% endif %}</small></a>
+  {% else %}<p class="muted small">Nothing booked</p>{% endfor %}</div>{% endfor %}</div>
+{% endblock %}

@@ -188,6 +188,13 @@ def upgrade():
     return render_template("core/upgrade.html", here=g.company["edition"], separate_apps=bool(app_edition()))
 
 
+@bp.route("/setup/bookings-app")
+def bookings_app():
+    """In Accounting, Invoices and POS: Riyeser Bookings is its own app, on the same company file."""
+    from ..edition import download_url
+    return render_template("core/bookings_app.html", download=download_url("bookings"))
+
+
 @bp.route("/setup/accounting-basics")
 def invoices_upgrade():
     """Riyeser Invoices: what Accounting Basics adds, and where to get it."""

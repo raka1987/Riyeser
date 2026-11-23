@@ -18,4 +18,7 @@
 <h2>Payments</h2>
 <div class="tbl"><table><tr><th>Date</th><th>Bank</th><th>Reference</th><th class="n">Amount</th><th></th></tr>
 {% for p in pays %}<tr><td>{{ p.date }}</td><td>{{ p.bank }}</td><td>{{ p.reference or '' }}</td><td class="n">{{ p.amount|money }}</td><td>{% if p.voided %}<span class="badge void">void</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">None.</td></tr>{% endfor %}</table></div>
-{% endblock %}
+{% if bks %}<h3 style="margin-top:22px">Bookings</h3>
+<div class="tbl"><table><tr><th>When</th><th>What</th><th>With</th><th>Status</th></tr>
+{% for b in bks %}<tr class="click" data-href="{{ url_for('core.bookings_app') if product.bookings_separate else url_for('bookings.edit', bid=b.id) }}"><td>{{ b.starts_at[:10] }} {{ b.starts_at[11:16] }}</td><td>{{ b.service or b.title or '' }}</td><td>{{ b.resource or '' }}</td><td><span class="bk-st st-{{ b.status }}">{{ b.status|replace('_', '-')|capitalize }}</span></td></tr>{% endfor %}</table></div>
+{% endif %}{% endblock %}

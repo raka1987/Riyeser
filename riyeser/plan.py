@@ -12,7 +12,7 @@ This is the one place that decides it, so a billing backend can take over `subsc
 from .licence import TRIAL_DAYS
 
 WARN_DAYS = 14      # remind people in the last two weeks of the trial
-WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices")}
+WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices"), "bookings": ("booking", "bookings")}
 
 
 def _status():
@@ -26,6 +26,8 @@ def subscribed(product=None):
 
 
 def used(db, product):
+    if product == "bookings":
+        return db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
     if product == "pos":
         # every till sale that wasn't voided (refunds aren't sales)
         return db.execute("SELECT COUNT(*) FROM pos_sales WHERE voided=0").fetchone()[0]

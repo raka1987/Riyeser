@@ -1,0 +1,35 @@
+{% extends "base.html" %}{% block title %}{{ (m.one|capitalize ~ ' #' ~ b.id) if b else 'New ' ~ m.one }}{% endblock %}
+{% block content %}
+{% set v = b or {} %}
+<div class="head"><div><h1>{{ (m.one|capitalize ~ ' #' ~ b.id) if b else 'New ' ~ m.one }}</h1>
+<p class="sub">{{ m.name }}{% if b %} · <span class="bk-st st-{{ b.status }}">{{ (statuses|list|selectattr(0, 'equalto', b.status)|first)[1] }}</span>{% endif %}</p></div>
+{% if b and can('bookings', 2) %}<div class="actions">
+  {% for st, label in [('confirmed', 'Confirm'), ('started', 'Start'), ('done', 'Mark done')] if b.status not in ('done', 'cancelled', 'no_show') and st != b.status %}<form method="post" action="{{ url_for('bookings.set_status', bid=b.id) }}"><input type="hidden" name="status" value="{{ st }}"><button class="btn">{{ label }}</button></form>{% endfor %}
+  {% if inv %}<a class="btn pri" href="{{ url_for('documents.view', doc_id=inv.id) }}">Open invoice {{ inv.number }}</a>
+  {% elif b.contact_id and can('sales', 2) %}<form method="post" action="{{ url_for('bookings.invoice', bid=b.id) }}"><button class="btn pri">Invoice this {{ m.one }}</button></form>{% endif %}
+</div>{% endif %}</div>
+<form method="post" class="card"><div class="fields">
+  <div><label>Customer</label><select name="contact_id" id="bk-cust"><option value="">—</option>{% for c in customers %}<option value="{{ c.id }}" data-phone="{{ c.phone or '' }}" data-address="{{ (c.address or '')|replace('\n', ', ') }}" {{ 'selected' if (v.contact_id or pre.contact_id) == c.id }}>{{ c.name }}</option>{% endfor %}</select></div>
+  <div><label>…or a new customer</label><input name="new_customer" placeholder="Name"></div>
+  <div><label>Phone</label><input name="phone" id="bk-phone" value="{{ v.phone or '' }}"></div>
+  <div><label>Date</label><input type="date" name="date" value="{{ v.starts_at[:10] if b else pre.date }}" required></div>
+  <div><label>Time</label><input type="time" name="time" step="900" value="{{ v.starts_at[11:16] if b else pre.time }}" required></div>
+  <div><label>{{ m.what }}</label><select name="service_id" id="bk-svc"><option value="">—</option>{% for s in svcs %}<option value="{{ s.id }}" data-min="{{ s.minutes }}" {{ 'selected' if v.service_id == s.id }}>{{ s.name }}{% if s.price %} · {{ s.price|money }}{% endif %}</option>{% endfor %}</select></div>
+  <div><label>How long (minutes)</label><input type="number" name="minutes" id="bk-min" min="5" step="5" value="{{ v.minutes or m.minutes }}"></div>
+  <div><label>{{ m.who_one|capitalize }}</label><select name="resource_id"><option value="">Not given to anyone yet</option>{% for r in res %}<option value="{{ r.id }}" {{ 'selected' if (v.resource_id or pre.resource_id) == r.id }}>{{ r.name }}{% if m.party and r.capacity %} (seats {{ r.capacity }}){% endif %}</option>{% endfor %}</select></div>
+  {% if m.party %}<div><label>People</label><input type="number" name="party" min="1" value="{{ v.party or 2 }}"></div>{% endif %}
+  <div><label>Status</label><select name="status">{% for k, label in statuses %}<option value="{{ k }}" {{ 'selected' if (v.status or 'booked') == k }}>{{ label }}</option>{% endfor %}</select></div>
+  <div><label>{{ 'Job name' if m.address else 'Name on the booking' }} <small>(optional)</small></label><input name="title" value="{{ v.title or '' }}"></div>
+  {% if m.address %}<div class="wide"><label>Job address</label><input name="address" id="bk-addr" value="{{ v.address or '' }}"></div>{% endif %}
+  <div class="wide"><label>Notes</label><textarea name="notes" rows="2">{{ v.notes or '' }}</textarea></div>
+  <label class="check"><input type="checkbox" name="allow_overlap" value="1"> Allow double-booking</label>
+</div>{% if can('bookings', 2) %}<p><button class="btn pri">Save</button> <a class="btn" href="{{ url_for('bookings.calendar', d=(v.starts_at[:10] if b else pre.date)) }}">Back to calendar</a></p>{% endif %}</form>
+{% if b and b.status not in ('cancelled', 'no_show') and can('bookings', 2) %}<div class="bk-more">
+  <form method="post" action="{{ url_for('bookings.set_status', bid=b.id) }}"><input type="hidden" name="status" value="cancelled"><button class="btn">Cancel this {{ m.one }}</button></form>
+  <form method="post" action="{{ url_for('bookings.set_status', bid=b.id) }}"><input type="hidden" name="status" value="no_show"><button class="btn">Didn't show</button></form></div>{% endif %}
+{% endblock %}
+{% block scripts %}<script>
+(function(){var c=document.getElementById('bk-cust'),s=document.getElementById('bk-svc'),mi=document.getElementById('bk-min'),ph=document.getElementById('bk-phone'),ad=document.getElementById('bk-addr');
+c&&c.addEventListener('change',function(){var o=c.selectedOptions[0];if(!o)return;if(ph&&!ph.value)ph.value=o.dataset.phone||'';if(ad&&!ad.value)ad.value=o.dataset.address||''});
+s&&s.addEventListener('change',function(){var o=s.selectedOptions[0];if(o&&o.dataset.min)mi.value=o.dataset.min})})();
+</script>{% endblock %}

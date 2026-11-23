@@ -20,6 +20,7 @@ AREAS = [
     ("purchases", "Purchases", "Bills, purchase orders, suppliers and paying bills"),
     ("banking", "Banking", "Bank accounts, money in and out, transfers, reconciling and statement import"),
     ("stock", "Stock", "Stock items, stocktake and adjustments"),
+    ("bookings", "Bookings", "The bookings calendar: jobs, appointments and table bookings"),
     ("payroll", "Payroll", "Employees, pay rates, pay runs and payslips"),
     ("accounts", "Accounts & reports", "Chart of accounts, journals, transaction search, financial reports and GST/BAS"),
     ("setup", "Setup", "Company details, tax codes, jobs, budgets and the audit trail"),
@@ -28,9 +29,9 @@ AREA_KEYS = [a for a, _, _ in AREAS]
 PRESETS = {
     "owner": ("Owner / manager", {a: FULL for a in AREA_KEYS}),
     "bookkeeper": ("Bookkeeper", {**{a: FULL for a in AREA_KEYS}, "setup": EDIT}),
-    "sales": ("Sales staff", {"sales": EDIT, "purchases": HIDDEN, "banking": HIDDEN, "stock": VIEW, "payroll": HIDDEN,
+    "sales": ("Sales staff", {"sales": EDIT, "bookings": EDIT, "purchases": HIDDEN, "banking": HIDDEN, "stock": VIEW, "payroll": HIDDEN,
                               "accounts": HIDDEN, "setup": HIDDEN}),
-    "payroll": ("Payroll officer", {"sales": HIDDEN, "purchases": HIDDEN, "banking": VIEW, "stock": HIDDEN, "payroll": FULL,
+    "payroll": ("Payroll officer", {"sales": HIDDEN, "bookings": VIEW, "purchases": HIDDEN, "banking": VIEW, "stock": HIDDEN, "payroll": FULL,
                                     "accounts": HIDDEN, "setup": HIDDEN}),
     "readonly": ("Read-only (no payroll)", {**{a: VIEW for a in AREA_KEYS}, "payroll": HIDDEN}),
 }
@@ -124,6 +125,10 @@ def area_of(endpoint, view_args, args, db):
             r = db.execute("SELECT kind FROM contacts WHERE id=?", (va["cid"],)).fetchone()
             return _kind_area(r["kind"]) if r else None
         return None
+    if endpoint == "bookings.setup":
+        return "setup" if request.method == "POST" else "bookings"
+    if bp == "bookings":
+        return "bookings"
     if endpoint in ("pos.setup", "pos.set_mode", "pos.approvals"):
         return "setup"  # how the till is set up is a setup decision, not a sales one
     if bp == "pos":

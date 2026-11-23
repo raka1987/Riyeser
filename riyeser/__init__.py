@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"
 
 
 def create_app(test_config=None):
@@ -116,8 +116,11 @@ def create_app(test_config=None):
         from . import companies as co
         acc = session.get("access") or {}
         mine = [c for c in co.all_companies() if c["id"] in acc] if g.get("user") else []
-        from .edition import app_edition, is_pos_app, is_accounting_app, is_invoices_app
-        if is_pos_app():
+        from .edition import app_edition, is_pos_app, is_accounting_app, is_invoices_app, is_bookings_app
+        if is_bookings_app():
+            product = {"key": "bookings", "app": dbmod.BOOKINGS_APP["app"], "title": dbmod.BOOKINGS_APP["title"],
+                       "letter": "Bk", "cls": "ed-book", "separate": True}
+        elif is_pos_app():
             product = {"key": "pos", "app": dbmod.POS_APP["app"], "title": dbmod.POS_APP["title"], "letter": "Po",
                        "cls": "ed-pos", "separate": True}
         elif is_invoices_app():
@@ -129,7 +132,8 @@ def create_app(test_config=None):
                        "title": dbmod.EDITIONS[ed]["title"] if ed else "Riyeser Accounting",
                        "letter": {"basic": "B", "enterprise": "P"}.get(ed, "R"),
                        "cls": {"basic": "ed-basic", "enterprise": "ed-plus"}.get(ed, ""), "separate": bool(app_edition())}
-        product["pos_separate"] = is_accounting_app() or is_invoices_app()  # Accounting builds: the till is in Riyeser POS
+        product["pos_separate"] = is_accounting_app() or is_invoices_app() or is_bookings_app()
+        product["bookings_separate"] = is_accounting_app() or is_invoices_app() or is_pos_app()  # Accounting builds: the till is in Riyeser POS
         return dict(product=product, user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
@@ -142,6 +146,7 @@ def create_app(test_config=None):
         return redirect(request.referrer or url_for("core.dashboard"))
 
     from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help, companies
+    from .views import bookings
     app.register_blueprint(auth.bp)
     app.register_blueprint(companies.bp)
     app.register_blueprint(core.bp)
@@ -152,6 +157,7 @@ def create_app(test_config=None):
     app.register_blueprint(payroll.bp)
     app.register_blueprint(reports.bp)
     app.register_blueprint(pos.bp)
+    app.register_blueprint(bookings.bp)
     app.register_blueprint(links.bp)
     app.register_blueprint(help.bp)
     app.jinja_env.globals["help_section"] = help.section_for
@@ -199,17 +205,25 @@ POS_APP_AREAS = ("pos.", "inventory.", "contacts.", "companies.", "help.", "auth
 def _separate_app_redirect(endpoint):
     """Keep each app to its own screens. Riyeser POS shows only the till (and products, customers, users, help);
     Accounting Basics and Plus send the till's screens to Riyeser POS. Both open the same company file."""
-    from .edition import is_pos_app, is_accounting_app, is_invoices_app
+    from .edition import is_pos_app, is_accounting_app, is_invoices_app, is_bookings_app
+    if is_bookings_app():
+        return _bookings_app_redirect(endpoint)
     if is_invoices_app():
+        if endpoint.startswith("bookings."):
+            return redirect(url_for("core.bookings_app"))
         return _invoices_app_redirect(endpoint)
     if is_pos_app():
         if endpoint == "core.dashboard":
             return redirect(url_for("pos.register"))
-        if endpoint.startswith(POS_APP_AREAS) or endpoint == "static":
+        if endpoint.startswith("bookings."):
+            return redirect(url_for("core.bookings_app"))
+        if endpoint.startswith(POS_APP_AREAS) or endpoint in ("static", "core.bookings_app"):
             return None
         flash("That's part of Riyeser Accounting. Open it in Riyeser Accounting: it uses the same company file.",
               "error")
         return redirect(url_for("pos.register"))
+    if endpoint.startswith("bookings.") and (is_accounting_app() or is_pos_app()):
+        return redirect(url_for("core.bookings_app"))
     if is_accounting_app() and endpoint.startswith("pos.") and endpoint != "pos.photo":
         return redirect(url_for("links.pos_app"))
     return None
@@ -218,7 +232,7 @@ def _separate_app_redirect(endpoint):
 # Riyeser Invoices (free): quotes, invoices, customers, receiving payments and who owes you. Everything else is
 # Riyeser Accounting's, and opens there with the same company file.
 INVOICES_APP_ENDPOINTS = ("companies.", "help.", "auth.")
-INVOICES_APP_EXACT = {"static", "core.company", "core.invoices_upgrade", "documents.save_pdf"}
+INVOICES_APP_EXACT = {"static", "core.company", "core.invoices_upgrade", "core.bookings_app", "documents.save_pdf"}
 
 
 def _invoices_app_redirect(endpoint):
@@ -240,6 +254,25 @@ def _invoices_app_redirect(endpoint):
     flash("That's part of Riyeser Accounting Basics. It opens the same company file, so everything you've made here "
           "is already in it.", "error")
     return redirect(url_for("core.invoices_upgrade"))
+
+# Riyeser Bookings: the calendar, customers, and the invoices it makes (so they can be checked and sent from here).
+def _bookings_app_redirect(endpoint):
+    from . import perms
+    home = url_for("bookings.calendar")
+    if endpoint == "core.dashboard":
+        return redirect(home)
+    if endpoint.startswith(("bookings.", "companies.", "help.", "auth.")) or endpoint in ("static", "core.company"):
+        return None
+    if endpoint.startswith(("documents.", "contacts.")):
+        try:
+            area = perms.area_of(endpoint, request.view_args, request.args, get_db())
+        except Exception:
+            area = None
+        if area == "sales":
+            return None
+    flash("That's part of Riyeser Accounting. It opens the same company file, so your bookings' invoices are already "
+          "there.", "error")
+    return redirect(home)
 
 ENTERPRISE_ONLY = {"core.journal_new", "core.journal_list", "core.budgets", "core.jobs", "core.reverse",
                    "banking.reconcile", "banking.feed", "banking.allocate", "banking.feed_delete",

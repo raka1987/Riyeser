@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}{{ m.many|capitalize }} · {{ d.strftime('%a %d %b') }}{% endblock %}
+{% block content %}
+<div class="head"><div><h1>{{ d.strftime('%A %d %B') }}{% if d == today %} <span class="pill">Today</span>{% endif %}</h1>
+<p class="sub">{{ m.name }} · {{ rows|length }} {{ m.one if rows|length == 1 else m.many }}{% for k, n in counts.items() if n and k in ('done', 'cancelled', 'no_show') %} · {{ n }} {{ statuses[k]|lower }}{% endfor %}</p></div>
+<div class="actions">{% include "bookings/_nav.html" %}
+<a class="btn" href="{{ url_for('bookings.calendar', d=prev.isoformat()) }}" aria-label="Previous day">‹</a>{% if d != today %}<a class="btn" href="{{ url_for('bookings.calendar') }}">Today</a>{% endif %}<a class="btn" href="{{ url_for('bookings.calendar', d=next.isoformat()) }}" aria-label="Next day">›</a>
+<form class="bk-date"><input type="date" name="d" value="{{ d.isoformat() }}" onchange="this.form.submit()" aria-label="Go to date"></form>
+{% if can('bookings', 2) %}<a class="btn pri" href="{{ url_for('bookings.edit', d=d.isoformat()) }}">+ New {{ m.one }}</a>{% endif %}</div></div>
+{% if not cols %}<div class="card"><p>Add your {{ m.who|lower }} under <a href="{{ url_for('bookings.setup') }}">Bookings setup</a> to start booking.</p></div>{% else %}
+<div class="bk-day" style="--cols:{{ cols|length }};--rows:{{ slots|length }}">
+  <div class="bk-times"><div class="bk-ch"></div>{% for s in slots %}<div class="bk-t">{% if s % 60 == 0 %}{{ '%02d:00'|format(s // 60) }}{% endif %}</div>{% endfor %}</div>
+  {% for c in cols %}<div class="bk-col">
+    <div class="bk-ch"><i style="background:{{ c.colour }}"></i>{{ c.name }}{% if c.capacity and m.party %}<small>seats {{ c.capacity }}</small>{% endif %}</div>
+    <div class="bk-grid">{% for s in slots %}{% if can('bookings', 2) and c.id %}<a class="bk-slot" href="{{ url_for('bookings.edit', d=d.isoformat(), t='%02d:%02d'|format(s // 60, s % 60), r=c.id) }}" aria-label="Book {{ c.name }} at {{ '%02d:%02d'|format(s // 60, s % 60) }}"></a>{% else %}<span class="bk-slot"></span>{% endif %}{% endfor %}
+      {% for it in c['items'] %}{% set b = it.b %}<a class="bk-b st-{{ b.status }}" href="{{ url_for('bookings.edit', bid=b.id) }}" style="top:calc({{ it.top }} * var(--slot));height:calc({{ it.height }} * var(--slot) - 3px);--c:{{ c.colour }}">
+        <b>{{ it.start }}–{{ it.end }} {{ b.customer or b.title or '' }}</b>
+        <span>{{ b.service or '' }}{% if b.party %} · {{ b.party }} people{% endif %}{% if b.address %} · {{ b.address }}{% endif %}</span>
+        {% if b.status not in ('booked',) %}<em>{{ statuses[b.status] }}{% if b.inv_no %} · {{ b.inv_no }}{% endif %}</em>{% elif b.inv_no %}<em>{{ b.inv_no }}</em>{% endif %}</a>{% endfor %}
+    </div></div>{% endfor %}
+</div>
+<p class="muted small">Click an empty time to book it. Click a {{ m.one }} to change it, mark it done or invoice it.</p>{% endif %}
+{% endblock %}

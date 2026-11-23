@@ -66,7 +66,10 @@ def view(cid):
     pays = db.execute("SELECT p.*, a.name bank FROM payments p JOIN accounts a ON a.id=p.bank_account_id"
                       " WHERE contact_id=? ORDER BY date DESC", (cid,)).fetchall()
     balance = sum(d["total"] - d["amount_paid"] for d in docs if d["status"] == "open")
-    return render_template("contacts/view.html", c=c, docs=docs, pays=pays, balance=balance)
+    from .bookings import customer_bookings
+    from .. import perms
+    bks = customer_bookings(db, cid) if c["kind"] == "customer" and perms.can("bookings") else []
+    return render_template("contacts/view.html", c=c, docs=docs, pays=pays, balance=balance, bks=bks)
 
 
 @bp.route("/statement/<int:cid>")
