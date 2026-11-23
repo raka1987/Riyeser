@@ -41,8 +41,8 @@ const PROGRAMS = [
     dirs: ['desk-assistant'], exes: ['Riyeser Desk Assistant.exe', 'Desk Assistant.exe'], links: ['Riyeser Desk Assistant', 'Desk Assistant'] },
   { id: 'pdf', name: 'PDF', full: 'Riyeser PDF', icon: '📕', desc: 'Open, fill in, sign, combine and edit PDFs.',
     dirs: ['desk-pdf'], exes: ['Riyeser PDF.exe', 'Desk PDF.exe'], links: ['Riyeser PDF', 'Desk PDF'] },
-  { id: 'services', name: 'Riyeser Services', full: 'Riyeser Services', icon: '🏗', desc: 'Building services on your drawings, with photos, tests and QA.',
-    dirs: ['riyeser-services'], exes: ['Riyeser Services.exe'], links: ['Riyeser Services'],
+  { id: 'services', name: 'As Built', full: 'As Built', icon: '🏗', desc: 'Building services on your drawings, with photos, tests and QA.',
+    dirs: ['riyeser-services'], exes: ['Riyeser Services.exe', 'As Built.exe'], links: ['As Built', 'Riyeser Services'], // was Riyeser Services
     url: 'https://riyeser.com/app/' }, // opens the Windows app when it's installed, else the website
 ];
 
@@ -71,7 +71,7 @@ function locate(p) {
 }
 const programList = () => PROGRAMS.map((p) => {
   const exe = locate(p);
-  // Not installed: listed under "More Riyeser apps" (Services can still be opened online from there).
+  // Not installed: listed under "More Riyeser apps" (As Built can still be opened online from there).
   if (p.url && !exe) return { id: p.id, name: p.name, full: p.full, icon: p.icon, desc: p.desc, status: 'missing', online: p.url, where: p.url.replace(/^https?:\/\//, '') };
   return { id: p.id, name: p.name, full: p.full, icon: p.icon, desc: p.desc, status: exe ? 'installed' : 'missing', where: exe };
 });

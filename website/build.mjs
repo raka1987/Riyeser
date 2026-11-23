@@ -15,14 +15,14 @@ const RELEASES = 'https://github.com/raka1987/Riyeser/releases/latest/download';
 const EMAIL = 'info@riyeser.com';
 // Early bird: 50% off the first year for the first 100 paid users. Set to false once 100 users have it.
 const EARLY_BIRD = true;
-// Turn on once a release with RiyeserServices-Setup.exe is published.
+// Turn on once a release with RiyeserServices-Setup.exe (As Built) is published.
 const SERVICES_WIN = process.env.SERVICES_WIN !== '0';
 // Riyeser Payroll's installer is in the release from the first release after module/payroll was added.
 const PAYROLL_WIN = process.env.PAYROLL_WIN !== '0'; // in the release since riyeser-2026.11.22-9
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
 const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');
-// Riyeser Services (the web app). It runs at riyeser.com today; when it moves to app.riyeser.com, change this one line.
+// As Built (the web app). It runs at riyeser.com today; when it moves to app.riyeser.com, change this one line.
 const SERVICES_APP = process.env.SERVICES_APP || 'https://riyeser.com';
 const SERVICES_MOVED = !/^https:\/\/riyeser\.com\/?$/.test(SERVICES_APP);
 
@@ -101,7 +101,7 @@ const PROGRAMS = [
       ['Scans', 'Turn scanned pages into searchable, editable text.'],
       ['Convert', 'Make PDFs from pictures, Word and Excel — or turn a PDF back into Word.'],
     ] },
-  { id: 'services', name: 'Riyeser Services', short: 'Services', icon: '🏗', file: SERVICES_WIN ? 'RiyeserServices-Setup.exe' : null, link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
+  { id: 'services', name: 'As Built', short: 'As Built', icon: '🏗', file: SERVICES_WIN ? 'RiyeserServices-Setup.exe' : null, link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
     one: 'Map every cable, pipe and duct on your drawings as it goes in — with inspections, test results and photos — and the as-builts are done at handover.',
     pitch: 'Map every service while the building goes up.', custom: true },
 ];
@@ -176,7 +176,7 @@ const INDUSTRIES = [
   { id: 'trades', name: 'Trades & construction', icon: 'trades', photo: 'trades.webp', short: 'Track installations, inspections and handovers.',
     title: 'Trades & Construction', lead: 'Service mapping and inspections for trades and construction projects, with clear plans and on-site markups.',
     h: 'Service mapping and inspections', p: 'Map services on your plans as they go in, and carry out inspections with clear, marked-up drawings for the job.',
-    shot: 'services-trace.webp', shotName: 'Riyeser Services', shotApp: 'services', cta: ['services', 'Explore Riyeser Services'], photoTall: 'trades-tall.webp',
+    shot: 'services-trace.webp', shotName: 'As Built', shotApp: 'services', cta: ['services', 'Explore As Built'], photoTall: 'trades-tall.webp',
     progs: [['services', ['Cables, pipes and ducts drawn on your PDF plans, end to end', 'Inspections, test results and photos on every item', 'Works with no signal on site; as-builts ready at handover']],
       ['pdf', ['Mark up drawings with clouds, arrows, boxes and stamps', 'Fill in and sign site forms', 'Read scanned drawings so they can be searched']],
       ['desk-assistant', ['Files drawings, quotes and invoices by type and year', 'Spots duplicate copies of the same drawing', 'Find any file in seconds']]] },
@@ -212,7 +212,7 @@ function page({ path, title, description, active, body }) {
 <link rel="canonical" href="${SITE}/${path === 'index.html' ? '' : path}">
 <link rel="icon" href="${up}assets/logo-r.png">
 <link rel="stylesheet" href="${up}assets/site.css">
-${path === 'index.html' && SERVICES_MOVED ? `<script>/* Riyeser Services now lives at ${SERVICES_APP}/ - forward its old links: demo and sign-in links,
+${path === 'index.html' && SERVICES_MOVED ? `<script>/* As Built now lives at ${SERVICES_APP}/ - forward its old links: demo and sign-in links,
    project and QR links (#/p/...), sign-in emails (#access_token, ?code=) and the installed app (start screen icon). */
 (function(){var s=location.search,h=location.hash,app=false;try{app=matchMedia('(display-mode: standalone)').matches}catch(e){}
 if(/[?&](demo|signin|code|error|token_hash|type)\\b/.test(s)||/^#(\\/|access_token|error|type=|refresh_token)/.test(h)||/[&#](access_token|type=recovery)/.test(h)||app)
@@ -238,7 +238,7 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
     <div><h4>Programs</h4>${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html">${p.short === 'Central' ? 'Riyeser Central' : p.short}</a>`).join('')}</div>
     <div><h4>Industries</h4>${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}">${esc(i.name)}</a>`).join('')}</div>
     <div><h4>Help</h4><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="mailto:${EMAIL}">${EMAIL}</a></div>
-    <div><h4>Riyeser</h4><a href="${up}pricing.html">Pricing</a><a href="${up}signin.html">Services sign in</a><a href="${up}terms.html">Terms of use</a></div>
+    <div><h4>Riyeser</h4><a href="${up}pricing.html">Pricing</a><a href="${up}signin.html">As Built sign in</a><a href="${up}terms.html">Terms of use</a></div>
   </div>
   <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span>For Windows 10 &amp; 11 · Works offline · No account or card needed</span></div></div></footer>
 <script>/* Download buttons always point at the newest release file, whatever its exact name. */
@@ -323,7 +323,7 @@ page({
   <div class="safe">
     <div><span class="k">Your business, your computer</span><h2>Safe by design</h2>
       <p>Your books, staff records and files stay on your own PC, not on someone else's server. Nothing is deleted without asking, and almost everything can be undone.</p></div>
-    <ul class="ticks" style="margin:0"><li>Works with no internet: on site, in the car, anywhere</li><li>Forgot your password? Reset it on the PC without losing anything</li><li>Payroll keeps a backup every day</li><li>Desk Assistant records every file it moves, with “Put everything back”</li><li>Want online access too? Riyeser Services can sync to an online account when you choose</li></ul>
+    <ul class="ticks" style="margin:0"><li>Works with no internet: on site, in the car, anywhere</li><li>Forgot your password? Reset it on the PC without losing anything</li><li>Payroll keeps a backup every day</li><li>Desk Assistant records every file it moves, with “Put everything back”</li><li>Want online access too? As Built can sync to an online account when you choose</li></ul>
   </div>
 </section>
 
@@ -331,8 +331,8 @@ page({
   <h2 class="h2 center">Frequently asked questions</h2>
   <div class="faq" style="margin-top:26px">
   <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's $20 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends, and Accounting Basics stays free. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
-  <details><summary>Does it need the internet?</summary><p>No. Everything works offline. Riyeser Services can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
-  <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11. Riyeser Services also works in any web browser, on phones and tablets.</p></details>
+  <details><summary>Does it need the internet?</summary><p>No. Everything works offline. As Built can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
+  <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11. As Built also works in any web browser, on phones and tablets.</p></details>
   <details><summary>Where do I start?</summary><p>Download Riyeser Central. It's the home screen for every program and shows you what else you can add. The <a class="more" href="${up}help/start.html">Getting started guide</a> walks you through it.</p></details>
   <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has a step-by-step guide for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
   </div>
@@ -343,7 +343,7 @@ ${ctaBlock(up, 'Get started free today', 'Download Riyeser Central, add the prog
 // ---------- all programs ----------
 page({
   path: 'programs.html', title: 'All programs — Riyeser', active: 'programs',
-  description: 'Every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and Services.',
+  description: 'Every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and As Built.',
   body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
 <section class="c" style="padding-top:44px"><div class="grid">${PROGRAMS.map((p) => progCard(p, up)).join('')}</div></section>
 <section class="c" style="padding-top:0"><h2 class="h2">Accounting Basics or Accounting Plus?</h2>${editionsBlock(up)}</section>
@@ -372,18 +372,18 @@ ${ctaBlock(up, `Try Riyeser for ${esc(ind.name.toLowerCase())}`, 'Download Riyes
   });
 }
 
-// ---------- Riyeser Services sign in (hands over to the real sign-in in the Services app) ----------
+// ---------- As Built sign in (hands over to the real sign-in in the Services app) ----------
 page({
-  path: 'signin.html', title: 'Sign in to Riyeser Services', active: '',
-  description: 'Sign in to your Riyeser Services projects, drawings and inspections.',
+  path: 'signin.html', title: 'Sign in to As Built', active: '',
+  description: 'Sign in to your As Built projects, drawings and inspections.',
   body: (up) => `<div class="signin-page"><img class="bgimg" src="${up}assets/photos/blueprint-roll.webp" alt="">
   <div class="signbox"><img class="mark" src="${up}assets/logo-r.png" alt="">
-    <h1>Sign in to<br>Riyeser Services</h1>
-    <p>Open your projects, drawings and inspections. Sign in with the email and password for your Riyeser Services online account.</p>
+    <h1>Sign in to<br>As Built</h1>
+    <p>Open your projects, drawings and inspections. Sign in with the email and password for your As Built online account.</p>
     <a class="btn p big" href="${SERVICES_APP}/?signin">Sign in</a>
     <a class="forgot" href="${SERVICES_APP}/?signin">Forgot password?</a>
-    <div class="alt"><p><b>Using the Windows app on this PC only?</b> You don't need to sign in. Open Riyeser Services on your PC.</p>
-      <p>New to Riyeser Services? <a href="${SERVICES_APP}/?demo">Try the demo</a> or <a href="${up}programs/services.html">see what it does</a>.</p></div>
+    <div class="alt"><p><b>Using the Windows app on this PC only?</b> You don't need to sign in. Open As Built on your PC.</p>
+      <p>New to As Built? <a href="${SERVICES_APP}/?demo">Try the demo</a> or <a href="${up}programs/services.html">see what it does</a>.</p></div>
   </div></div>`,
 });
 // ---------- program pages ----------
@@ -414,7 +414,7 @@ ${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}`,
   });
 }
 
-// ---------- Riyeser Services (content carried over from the original riyeser.com homepage and FAQ) ----------
+// ---------- As Built (content carried over from the original riyeser.com homepage and FAQ) ----------
 {
   const p = prog('services');
   const TRADES = [['Data and comms', 'Fibre, copper, racks and every port'], ['Electrical', 'Boards, circuits, outlets and test results'], ['Fire', 'Detection, sprinklers, hydrants and panels'],
@@ -427,7 +427,7 @@ ${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}`,
     ['services-report.webp', 'Test reports for every trade', 'Checklists, readings, defects and photos in one clean report.', 'Two pages of a power test report'],
     ['services-asbuilt.webp', 'As-builts as you go', 'Mark up what went in as it goes in, and the as-built is ready when the job is.', 'An as-built drawing with a title block']];
   const FAQ = [
-    ['About Riyeser Services', [
+    ['About As Built', [
       ['What is it?', 'An app for marking up building services on your drawings while they\'re installed. You record every cable, pipe and duct, connect each one from end to end, run inspections, add photos and test results, and print the handover pack, as-builts, schematics and port schedules at the end.'],
       ['Who is it for?', 'Electrical, data and comms, fire, plumbing, drainage, mechanical, security and AV contractors, plus the project managers, supervisors and clients who need to see what\'s been installed and checked.'],
       ['Can I try it first?', 'Yes. Open the demo to explore a marked-up resort with a guided tour. Nothing is saved, and it resets each time you visit.']]],
@@ -442,23 +442,23 @@ ${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}`,
       ['Can a client answer an RFI without an account?', 'Yes. Send them a client link for that RFI or defect. They can see it and reply, but nothing else in your project.'],
       ['Who can see my projects?', 'Only people your admin adds to your team, at the access level they\'re given.']]],
     ['Your information and accounts', [
-      ['Who owns my project information?', 'You do, or your client does, as you\'ve agreed between you. We only store and process it to run Riyeser Services for you. See the terms of use.'],
+      ['Who owns my project information?', 'You do, or your client does, as you\'ve agreed between you. We only store and process it to run As Built for you. See the terms of use.'],
       ['How do I get it for my team?', `Email ${EMAIL} with your company name and roughly how many people will use it, and we'll set you up.`],
       ['I\'ve forgotten my password', `Ask your admin to reset it, or email ${EMAIL}.`],
       ['How do I get help?', `Tap the ? button in the app for help on the screen you're on, read the help guide, or email ${EMAIL}.`]]],
   ];
   page({
-    path: 'programs/services.html', title: 'Riyeser Services — map every service while the building goes up', active: 'programs',
+    path: 'programs/services.html', title: 'As Built — map every service while the building goes up', active: 'programs',
     description: 'Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with inspections, test results and photos. As-builts done at handover.',
     body: (up) => `
 <div class="hero"><div class="c"><div>
-  <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">${iconBox(p, up)}<span class="eyebrow" style="margin:0">Riyeser Services</span></div>
+  <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">${iconBox(p, up)}<span class="eyebrow" style="margin:0">As Built</span></div>
   <h1>Map every service while the building goes up</h1>
   <p class="lead">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
   <div class="ctas" style="justify-content:flex-start"><a class="btn p big" href="${SERVICES_APP}/?demo">${PLAY} Try it now, free</a>${SERVICES_WIN ? `<a class="btn s big" href="${RELEASES}/RiyeserServices-Setup.exe">${DL} Windows app</a>` : ''}<a class="btn s big" href="${SERVICES_APP}/">Sign in</a></div>
   ${SERVICES_WIN ? '<p class="fine">Works in any web browser, on phones and tablets — or install the Windows app: it works on your PC with no account and no internet, and can sync to your online account.</p>' : ''}
   <p class="fine">No sign-up for the demo. Explore a marked-up resort with a guided tour.</p>
-</div>${winFrame(up, 'services', 'Riyeser Services', 'services-trace.webp', 'A water main route highlighted on a floor plan', 1500, 783)}</div></div>
+</div>${winFrame(up, 'services', 'As Built', 'services-trace.webp', 'A water main route highlighted on a floor plan', 1500, 783)}</div></div>
 <section class="c"><h2 class="h2">How it works</h2><p class="sub">From the first drawing to the handover pack.</p>
   <div class="fgrid steps4">${STEPS.map(([h, t], i) => `<div class="f"><div class="k">Step ${i + 1}</div><h4 style="margin-top:6px">${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div></section>
 <section class="c"><h2 class="h2">One drawing for every trade</h2><p class="sub">Each trade gets its own symbols, checklists and reports.</p>
@@ -472,15 +472,15 @@ ${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}`,
 <section class="c" id="faq" style="max-width:920px"><h2 class="h2">Questions and answers</h2>
   ${FAQ.map(([g, qs]) => `<h3 style="margin:28px 0 12px;font-size:19px">${esc(g)}</h3><div class="faq">${qs.map(([q, a]) => `<details><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>`).join('')}
   <p class="note" style="margin-top:24px">More help: the <a class="more" href="${SERVICES_APP}/help.html">help guide</a> · <a class="more" href="${up}terms.html">Terms of use</a> · <a class="more" href="mailto:${EMAIL}">${EMAIL}</a></p></section>
-<section class="c"><div class="cta"><h2>See it on a real job</h2><p>Try the demo now, or email us to set Riyeser Services up for your team.</p>
-  <div class="ctas"><a class="btn t big" href="${SERVICES_APP}/?demo">${PLAY} Try the demo</a><a class="btn glass big" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser Services enquiry')}">${EMAIL}</a></div></div></section>`,
+<section class="c"><div class="cta"><h2>See it on a real job</h2><p>Try the demo now, or email us to set As Built up for your team.</p>
+  <div class="ctas"><a class="btn t big" href="${SERVICES_APP}/?demo">${PLAY} Try the demo</a><a class="btn glass big" href="mailto:${EMAIL}?subject=${encodeURIComponent('As Built enquiry')}">${EMAIL}</a></div></div></section>`,
   });
 }
 
 // ---------- terms of use (as published on riyeser.com, 8 November 2026) ----------
 page({
   path: 'terms.html', title: 'Terms of use — Riyeser', active: '',
-  description: 'Terms of use for Riyeser and Riyeser Services.',
+  description: 'Terms of use for Riyeser and As Built.',
   body: () => `<div class="c legal" style="max-width:820px;padding:56px 24px 64px">${TERMS}</div>`,
 });
 
@@ -527,7 +527,7 @@ ${bandHero({ title: 'Pricing', lead: 'Choose the right way to use Riyeser for yo
 </section>
 
 <section class="c" id="plans" style="padding-top:40px">
-  <h2 class="h2">Licence options</h2><p class="sub">One licence covers every Riyeser program for that person: Accounting Plus, Payroll, Services, Desk Assistant, PDF and Riyeser Central.</p>
+  <h2 class="h2">Licence options</h2><p class="sub">One licence covers every Riyeser program for that person: Accounting Plus, Payroll, As Built, Desk Assistant, PDF and Riyeser Central.</p>
   ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off your first year</b><p>For the first 100 users to buy a licence. That's from <b>$6.50</b> per user a month for 12 months, then the normal price below. The offer ends when 100 users have it.</p></div></div>` : ''}
   <div class="plans">
     <div class="plan best"><span class="tag">Most popular</span><div class="k">1–4 users</div><div class="price">$20<small> per user / month</small></div><p>Everything, for sole traders and small teams.</p></div>
@@ -554,7 +554,7 @@ ${bandHero({ title: 'Pricing', lead: 'Choose the right way to use Riyeser for yo
   <div class="incl">
     ${PROGRAMS.map((p) => `<div>${iconBox(p, up)}<b>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</b></div>`).join('')}
   </div>
-  <ul class="ticks" style="max-width:720px;margin:26px auto 0"><li>Every program and every update</li><li>Works offline; your information stays on your PC</li><li>Help by email from a real person</li><li>Riyeser Services online account for sharing with phones, clients and staff</li></ul>
+  <ul class="ticks" style="max-width:720px;margin:26px auto 0"><li>Every program and every update</li><li>Works offline; your information stays on your PC</li><li>Help by email from a real person</li><li>As Built online account for sharing with phones, clients and staff</li></ul>
 </section>
 
 <section class="c faq" style="max-width:860px">
@@ -602,7 +602,7 @@ box.addEventListener('keydown',function(e){if(e.key==='Enter'){var a=out.querySe
 
   page({
     path: 'help.html', title: 'Help Centre — Riyeser', active: 'help',
-    description: 'Step-by-step help for every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and Services.',
+    description: 'Step-by-step help for every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and As Built.',
     body: (up) => {
       const G = guides(up);
       const popular = G.flatMap((g) => g.groups.flatMap((grp) => grp.items.filter((it) => it[3]).map((it) => [g, it]))).filter((_, i) => i % 2 === 0).slice(0, 8);
@@ -635,7 +635,7 @@ ${searchScript(up)}
   <div>
     <div class="crumbs"><a href="${up}help.html">Help Centre</a> › ${esc(gName(g))}</div>
     <div class="hhead"><div class="icon i-${g.app}">${gIcon(g, up)}</div><div><h1>${esc(gName(g))}</h1><p>${esc(g.intro)}</p>
-      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full Services guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
+      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
     ${searchBox(`Search the ${gName(g)} guide`)}
     ${g.groups.map((grp, i) => `<div class="hgroup" id="s${i + 1}"><h2><span class="num">${i + 1}</span>${esc(grp.title)}</h2><div class="faq">${grp.items.map(([id, q, a], j) => `<details id="${id}"${i === 0 && j === 0 ? ' open' : ''}><summary>${q}</summary>${a}</details>`).join('')}</div></div>`).join('')}
     <p class="hnone" id="hnone">Nothing in this guide matches that. Try the <a class="more" href="${up}help.html">Help Centre</a> search, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a>.</p>
@@ -655,7 +655,7 @@ document.getElementById('hnone').style.display=any?'none':'block'})})()</script>
 // ---------- old riyeser.com addresses keep working ----------
 const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
-redirect('faq.html', `${BASE}programs/services.html#faq`, 'Riyeser Services questions and answers');
+redirect('faq.html', `${BASE}programs/services.html#faq`, 'As Built questions and answers');
 redirect('support.html', `${BASE}help.html`, 'Riyeser Help Centre');
 
 // ---------- extras ----------

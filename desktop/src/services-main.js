@@ -1,5 +1,5 @@
-// Riyeser Services for Windows.
-// The Riyeser Services app ships inside this program, so it opens with no internet at all. Two ways to work,
+// As Built for Windows.
+// The As Built app ships inside this program, so it opens with no internet at all. Two ways to work,
 // chosen on first start and changeable from the menu:
 //   On this PC              - no account; projects are saved on this computer (works fully offline)
 //   With my online account  - sign in; projects sync with phones, the website and the team
@@ -19,7 +19,8 @@ const inApp = (url) => {
   try { const u = new URL(url); return u.origin === SITE && (u.pathname.startsWith('/app/') || u.pathname === '/app' || u.pathname === '/share.html'); } catch { return false; }
 };
 
-app.setName('Riyeser Services');
+app.setName('As Built');
+// Projects stay in the folder from when the app was called Riyeser Services, so nothing is lost after the rename.
 app.setPath('userData', path.join(app.getPath('appData'), 'Riyeser Services'));
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -74,7 +75,7 @@ function createWindow() {
   const s = readState();
   win = new BrowserWindow({
     width: s.width || 1360, height: s.height || 880, x: s.x, y: s.y, minWidth: 380, minHeight: 500,
-    title: 'Riyeser Services', backgroundColor: '#172326', autoHideMenuBar: true, show: false,
+    title: 'As Built', backgroundColor: '#172326', autoHideMenuBar: true, show: false,
     icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-services.ico' : 'icon-services.png'),
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: true },
   });
@@ -93,7 +94,7 @@ function createWindow() {
     e.preventDefault();
     if (/^(https?|mailto|tel):/i.test(url)) shell.openExternal(url);
   });
-  win.webContents.on('page-title-updated', (e) => { e.preventDefault(); win.setTitle('Riyeser Services'); });
+  win.webContents.on('page-title-updated', (e) => { e.preventDefault(); win.setTitle('As Built'); });
   win.loadURL(START);
 }
 
@@ -101,12 +102,12 @@ function createWindow() {
 async function syncToOnline() {
   const mode = await getMode();
   if (mode !== 'local') {
-    await dialog.showMessageBox(win, { type: 'info', title: 'Riyeser Services', message: 'You are already using your online account.', detail: 'Your projects sync automatically whenever you have internet.' });
+    await dialog.showMessageBox(win, { type: 'info', title: 'As Built', message: 'You are already using your online account.', detail: 'Your projects sync automatically whenever you have internet.' });
     return;
   }
   const r = await dialog.showMessageBox(win, {
     type: 'question', buttons: ['Sign in and move my projects', 'Cancel'], defaultId: 0, cancelId: 1, title: 'Sync to my online account',
-    message: 'Move the projects on this PC to your online Riyeser Services account?',
+    message: 'Move the projects on this PC to your online As Built account?',
     detail: 'You\'ll sign in (or ask info@riyeser.com for an account). Your projects and photos are then uploaded and stay in sync with phones, the website and your team.\n\nThe copy on this PC is kept as a backup.',
   });
   if (r.response !== 0) return;
@@ -132,7 +133,7 @@ async function useOnlineAccount() {
 
 function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
-    { label: 'Riyeser Services', submenu: [
+    { label: 'As Built', submenu: [
       { label: 'Home', accelerator: 'Alt+Home', click: () => win && win.loadURL(APP) },
       { type: 'separator' },
       { label: 'Sync to my online account…', click: () => syncToOnline() },
@@ -141,7 +142,7 @@ function buildMenu() {
       { label: 'How I work…', click: () => win && win.loadURL(`${START}?choose`) },
       { type: 'separator' },
       { role: 'reload' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { role: 'togglefullscreen' }, { type: 'separator' },
-      { label: 'About', click: () => dialog.showMessageBox(win, { title: 'Riyeser Services', message: `Riyeser Services ${app.getVersion()}`, detail: `Riyeser Group · riyeser.com\nProjects on this PC are kept in:\n${app.getPath('userData')}` }) },
+      { label: 'About', click: () => dialog.showMessageBox(win, { title: 'As Built', message: `As Built ${app.getVersion()}`, detail: `Riyeser Group · riyeser.com\nProjects on this PC are kept in:\n${app.getPath('userData')}` }) },
       { role: 'quit' },
     ] },
     { role: 'editMenu' },

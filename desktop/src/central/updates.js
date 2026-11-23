@@ -10,7 +10,7 @@ const PRODUCTS = [
   { id: 'pdf', display: 'Riyeser PDF', asset: 'RiyeserPDF-Setup.exe', oldAsset: 'RiyserPDF-Setup.exe', args: ['/S'] },
   // The old "Riyser" hub (Riyser 1.x) counts as Payroll, so Central offers to replace it with Riyeser Payroll.
   { id: 'payroll', display: 'Riyeser Payroll', alsoRe: /^Riyser\s+\d/i, asset: 'RiyeserPayroll-Setup.exe', args: ['/S'] },
-  { id: 'services', display: 'Riyeser Services', asset: 'RiyeserServices-Setup.exe', args: ['/S'] },
+  { id: 'services', display: 'As Built', also: ['Riyeser Services'], asset: 'RiyeserServices-Setup.exe', args: ['/S'] },
   // Two separate apps. The old single "Riyeser Accounting 1.x" counts as Plus, so it updates to Accounting Plus.
   { id: 'accounting-basics', display: 'Riyeser Accounting Basics', asset: 'RiyeserAccountingBasics-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'accounting', display: 'Riyeser Accounting Plus', alsoRe: /^Riyeser Accounting\s+\d/i, asset: 'RiyeserAccountingPlus-Setup.exe', oldAsset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },

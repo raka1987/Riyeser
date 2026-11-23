@@ -231,11 +231,11 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'services', blurb: 'Projects, drawings, inspections and sign in.', app: 'services', name: 'Riyeser Services',
+      id: 'services', blurb: 'Projects, drawings, inspections and sign in.', app: 'services', name: 'As Built',
       intro: 'Building services on your drawings: cables, pipes and ducts with inspections, tests and photos. Works in a browser, or as a Windows app on your PC.',
       groups: [
         { title: 'Getting started', items: [
-          ['how', 'On this PC or with an online account?', '<p>The Windows app asks the first time you open it.</p><ul><li><b>On this PC</b>: no account, projects saved on your computer, works with no internet.</li><li><b>With my online account</b>: sign in and your projects sync with phones, the website and your team.</li></ul><p>Change it any time from the <b>Riyeser Services</b> menu → <b>How I work…</b></p>', true],
+          ['how', 'On this PC or with an online account?', '<p>The Windows app asks the first time you open it.</p><ul><li><b>On this PC</b>: no account, projects saved on your computer, works with no internet.</li><li><b>With my online account</b>: sign in and your projects sync with phones, the website and your team.</li></ul><p>Change it any time from the <b>As Built</b> menu → <b>How I work…</b></p>', true],
           ['project', 'Start a project', '<ol><li>Tap <b>New project</b> and give it a name, site and client.</li><li>Tap <b>Upload drawings</b> and choose your PDFs or images. Tap each page you want so it has a green tick, then tap <b>Add</b>. Each one becomes a level.</li><li>Tap <b>Set scale</b>, tap two points a known distance apart and type the distance. Lengths are then measured for you.</li></ol>', true],
           ['demo', 'Try it first', `<p>Open the <a class="more" href="${SERVICES_APP}/?demo">demo</a> to explore a marked-up resort with a guided tour. Nothing is saved.</p>`],
         ] },
@@ -245,10 +245,10 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['inspect', 'Inspections, tests and photos', '<p>Open an item and tap <b>Inspect</b>. Mark each check Pass, Fail or N/A, record test readings and add photos before the wall or trench is closed. <b>To do</b> shows everything still outstanding.</p>'],
         ] },
         { title: 'Online account and handover', items: [
-          ['sync', 'Move my PC projects online', '<p>Choose the <b>Riyeser Services</b> menu → <b>Sync to my online account…</b> and sign in. Your projects and photos upload, and the copy on the PC is kept as a backup.</p>'],
+          ['sync', 'Move my PC projects online', '<p>Choose the <b>As Built</b> menu → <b>Sync to my online account…</b> and sign in. Your projects and photos upload, and the copy on the PC is kept as a backup.</p>'],
           ['password', 'I forgot my online password', '<p>On the sign-in screen choose <b>Forgot password</b> and follow the email. Projects saved on your PC are not affected.</p>'],
           ['offline', 'Working without signal on site', '<p>Keep working. Changes are saved on the device and sync when you\'re back online. The status at the top shows <b>All saved</b> or how many changes are waiting.</p>'],
-          ['full', 'The full Services guide', `<p>For drawings, markup, ports and racks, RFIs, defects, schematics and reports, see the <a class="more" href="${SERVICES_APP}/help.html">complete Riyeser Services guide</a>, or tap <b>?</b> in the app for help on the screen you\'re on.</p>`, true],
+          ['full', 'The full As Built guide', `<p>For drawings, markup, ports and racks, RFIs, defects, schematics and reports, see the <a class="more" href="${SERVICES_APP}/help.html">complete As Built guide</a>, or tap <b>?</b> in the app for help on the screen you\'re on.</p>`, true],
         ] },
       ],
     },

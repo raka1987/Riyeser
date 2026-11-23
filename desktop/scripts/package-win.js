@@ -17,7 +17,7 @@ fs.copyFileSync(path.join(root, 'build/pdf/icon.ico'), path.join(root, 'src/rend
 fs.copyFileSync(path.join(root, 'build/central/icon.ico'), path.join(root, 'src/renderer/icon-central.ico'));
 fs.copyFileSync(path.join(root, 'build/services/icon.ico'), path.join(root, 'src/renderer/icon-services.ico'));
 
-// Riyeser Services' own copy of the app: the riyeser.com build, kept inside the installer so it works offline.
+// As Built's own copy of the app: the riyeser.com build, kept inside the installer so it works offline.
 if (!process.argv[2] || process.argv[2] === 'services') {
   const site = path.join(root, '..', 'website');
   run('node', [path.join(site, 'build-combined.mjs')]);
