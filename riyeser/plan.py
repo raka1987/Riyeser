@@ -2,15 +2,15 @@
 
 Every Riyeser program is free up to a cap, then needs a subscription (a Riyeser licence, entered in Riyeser Central):
   * Riyeser POS:               the first 500 till sales in each company file
-  * Riyeser Accounting Basics: the first 500 invoices in each company file
+  * Riyeser Accounting Basics: the first 50 invoices in each company file
 Reaching the cap never deletes or hides anything. Only the one action that's capped (a new sale, a new invoice) stops
 until a licence is entered; everything else keeps working and every record stays.
 
 This is the one place that decides it, so the caps can change, or a subscription/billing backend can take over
 `subscribed()`, without touching the screens.
 """
-FREE_LIMITS = {"pos": 500, "basic": 500}
-WARN_FROM = 50      # start counting down when this many free uses are left
+FREE_LIMITS = {"pos": 500, "basic": 50}
+WARN_FROM = {"pos": 50, "basic": 10}   # start counting down when this many free uses are left
 WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices")}
 
 
@@ -37,7 +37,7 @@ def plan(db, product):
     left = max(limit - n, 0)
     one, many = WHAT[product]
     return dict(product=product, licensed=licensed, used=n, left=left, limit=limit, one=one, many=many,
-                locked=not licensed and left == 0, warn=not licensed and 0 < left <= WARN_FROM)
+                locked=not licensed and left == 0, warn=not licensed and 0 < left <= WARN_FROM[product])
 
 
 def capped_message(product):

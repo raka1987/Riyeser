@@ -54,7 +54,7 @@ This code base ships as **three separate Windows apps**, so they're easy to look
 
 | | **Riyeser Accounting Basics** | **Riyeser Accounting Plus** | **Riyeser POS** |
 |---|---|---|---|
-| Price | Free for the first 500 invoices, then a Riyeser licence | Free for 90 days, then included in a Riyeser licence | Free for the first 500 sales, then a Riyeser licence |
+| Price | Free for the first 50 invoices, then a Riyeser licence | Free for 90 days, then included in a Riyeser licence | Free for the first 500 sales, then a Riyeser licence |
 | Looks | Green, "B." logo | Blue, "P." logo | Teal, "Po." logo |
 | Has | Invoices, quotes, customers, suppliers, bills, stock, simple money in/out, key reports | Everything in Basics plus bank reconciliation, statement import, payroll, general journal, jobs, budgets, Balance Sheet and Trial Balance | The till: retail or restaurant, receipts, tables and kitchen dockets, manager approvals, refunds, close till, plus products, stock and customers |
 | Installer | `RiyeserAccountingBasics-Setup.exe` | `RiyeserAccountingPlus-Setup.exe` | `RiyeserPOS-Setup.exe` |

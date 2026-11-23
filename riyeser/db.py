@@ -259,7 +259,7 @@ def migrate(db):
 #   title = the product name in the app's logo
 #   app   = the full name of the separate Windows app (window title, installer, Start menu)
 EDITIONS = {
-    "basic": {"name": "Basics", "title": "Accounting Basics", "app": "Riyeser Accounting Basics", "price": "500 free"},
+    "basic": {"name": "Basics", "title": "Accounting Basics", "app": "Riyeser Accounting Basics", "price": "50 free"},
     "enterprise": {"name": "Plus", "title": "Accounting Plus", "app": "Riyeser Accounting Plus", "price": "Licence"},
 }
 

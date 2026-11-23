@@ -4,7 +4,7 @@
 <div class="head"><div><h1>{{ editions.basic.title }} or {{ editions.enterprise.title }}</h1>
 <p class="sub">You're using <b>{{ editions[here].app }}</b>. Both open the same company files, so moving up or down never loses anything.</p></div></div>
 <div class="eds">
-  <div class="card ed ed-basic{{ ' here' if here == 'basic' }}"><div class="edlogo">B</div><h2>{{ editions.basic.title }}</h2><p class="edprice">Free for your first 500 invoices, then a Riyeser licence</p>
+  <div class="card ed ed-basic{{ ' here' if here == 'basic' }}"><div class="edlogo">B</div><h2>{{ editions.basic.title }}</h2><p class="edprice">Free for your first 50 invoices, then a Riyeser licence</p>
     <ul><li>Quotes, invoices and receiving payments</li><li>Customers, suppliers and bills</li><li>Stock items, stocktake and reorder alerts</li>
     <li>Simple money in and money out</li><li>Till sales from Riyeser POS show as paid invoices</li><li>Profit &amp; Loss, GST summary, who owes you, sales and stock reports</li></ul>
     {% if here == 'basic' %}<p class="youare">✓ This is what you're using</p>{% endif %}</div>

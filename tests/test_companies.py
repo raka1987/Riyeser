@@ -173,7 +173,7 @@ def test_basic_is_free_enterprise_needs_licence(app, tmp_path, monkeypatch):
     # trial over, no licence: the company opens as free Accounting Basics, Enterprise screens are closed
     _licence(tmp_path, monkeypatch)
     page = a.get("/").get_data(as_text=True)
-    assert "Accounting Basics" in page and "500 free" in page
+    assert "Accounting Basics" in page and "50 free" in page
     r = a.get("/journal/new")
     assert r.status_code == 302
     assert "needs a licence" in a.get(r.location).get_data(as_text=True)

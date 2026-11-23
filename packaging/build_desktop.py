@@ -1,7 +1,7 @@
 """Build a Riyeser Accounting desktop app for the current OS.
 
     pip install . pyinstaller
-    python packaging/build_desktop.py --edition basics   # Riyeser Accounting Basics (500 free invoices)
+    python packaging/build_desktop.py --edition basics   # Riyeser Accounting Basics (50 free invoices)
     python packaging/build_desktop.py --edition plus     # Riyeser Accounting Plus (licence)
     python packaging/build_desktop.py --edition pos      # Riyeser POS (500 free sales, then a licence)
 

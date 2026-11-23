@@ -81,7 +81,7 @@ def test_pos_sales_show_in_accounting_as_paid_invoices(tmp_path, monkeypatch):
 def test_500_free_sales_then_a_licence(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "pos")
     monkeypatch.setitem(plan.FREE_LIMITS, "pos", 3)
-    monkeypatch.setattr(plan, "WARN_FROM", 2)
+    monkeypatch.setitem(plan.WARN_FROM, "pos", 2)
     assert sell(c, item).get_json()["ok"]
     assert "2 free sales left" in c.get("/pos/").get_data(as_text=True)
     sid = sell(c, item).get_json()["sale_id"]
@@ -104,10 +104,10 @@ def test_500_free_sales_then_a_licence(tmp_path, monkeypatch):
     assert "free sale" not in c.get("/pos/").get_data(as_text=True)
 
 
-def test_accounting_basics_is_free_for_500_invoices(tmp_path, monkeypatch):
+def test_accounting_basics_is_free_for_50_invoices(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "basics")
     monkeypatch.setitem(plan.FREE_LIMITS, "basic", 2)
-    monkeypatch.setattr(plan, "WARN_FROM", 1)
+    monkeypatch.setitem(plan.WARN_FROM, "basic", 1)
     with app.app_context():
         cust = get_db().execute("INSERT INTO contacts (kind, name) VALUES ('customer','Jo')").lastrowid
         get_db().commit()

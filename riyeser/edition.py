@@ -1,7 +1,7 @@
 """Which product this copy of the app is.
 
 Three separate apps are built from this one code base. All of them open the same company files:
-  * Riyeser Accounting Basics (500 free invoices) -> APP_EDITION = "basic"
+  * Riyeser Accounting Basics (50 free invoices) -> APP_EDITION = "basic"
   * Riyeser Accounting Plus (licence)             -> APP_EDITION = "enterprise"
   * Riyeser POS (500 free sales)                  -> APP_EDITION = "pos"
 packaging/build_desktop.py --edition basics|plus|pos writes riyeser/_built_edition.py into the build. Run from source
