@@ -1,7 +1,7 @@
 // electron-builder settings for the Windows installers, all built from this one code base.
 //   DESK_APP=central -> Riyeser Central (the Riyeser Group home screen)
 //   DESK_APP=pdf     -> Riyeser PDF
-//   DESK_APP=services -> Riyeser Services (the riyeser.com/app/ app in its own window)
+//   DESK_APP=services -> As Built, formerly Riyeser Services (the riyeser.com/app/ app in its own window)
 //   (default)        -> Riyeser Desk Assistant
 const base = require('../package.json').build;
 const which = ['pdf', 'central', 'services'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
@@ -11,9 +11,13 @@ const APPS = {
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
-    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.4.1', productName: 'Riyeser Central' } },
-  services: { name: 'Riyeser Services', appId: 'com.riyeser.services', ico: 'build/services/icon.ico', out: 'dist-services', artifact: 'RiyeserServices',
-    extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.1.1', productName: 'Riyeser Services' } },
+    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.4.2', productName: 'Riyeser Central' } },
+  // As Built was called Riyeser Services. Only the name people see changed: the app id, install folder (riyeser-services),
+  // program file (Riyeser Services.exe), saved projects and release file (RiyeserServices-Setup.exe) stay the same,
+  // so installed copies update in place and keep their projects.
+  services: { name: 'As Built', appId: 'com.riyeser.services', ico: 'build/services/icon.ico', out: 'dist-services', artifact: 'RiyeserServices',
+    executableName: 'Riyeser Services',
+    extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.2.0', productName: 'As Built' } },
 };
 const a = APPS[which];
 
@@ -21,12 +25,13 @@ module.exports = {
   ...base,
   productName: a.name,
   appId: a.appId,
+  ...(a.executableName ? { executableName: a.executableName } : {}),
   ...(a.extraMetadata ? { extraMetadata: a.extraMetadata } : {}),
   directories: { ...base.directories, output: a.out },
   // Riyeser PDF offers itself for .pdf files ("Open with", Default apps)
   ...(pdf ? { fileAssociations: [{ ext: 'pdf', name: 'PDF Document', description: 'PDF document', icon: a.ico, role: 'Editor' }] } : {}),
   // Riyeser Central reads Accounting's books with sql.js (WebAssembly), kept outside the archive.
-  // Riyeser Services carries its own copy of the app (built by package-win.js into build/services-web).
+  // As Built carries its own copy of the app (built by package-win.js into build/services-web).
   ...(which === 'services' ? { extraResources: [{ from: 'build/services-web', to: 'services-web' }] } : {}),
   ...(which === 'central' ? { asarUnpack: [...(base.asarUnpack || []), 'node_modules/sql.js/dist/**'] } : {}),
   copyright: 'Riyeser Group',

@@ -334,7 +334,7 @@ footer .fcols a { display: block; padding: 4px 0; } footer a:hover { color: var(
 footer .fcols a.logo { display: flex; color: var(--ink); font-size: 22px; margin-bottom: 10px; } footer .logo img { width: 36px; }
 footer .fbase { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content: space-between; border-top: 1px solid var(--line); margin-top: 36px; padding-top: 20px; font-size: 14px; }
 
-/* Riyeser Services page */
+/* As Built page */
 .steps4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .trades { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .legal h1 { font-size: clamp(30px, 5vw, 44px); letter-spacing: -1px; margin-bottom: 12px; }
