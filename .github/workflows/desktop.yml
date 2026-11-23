@@ -110,20 +110,20 @@ jobs:
           function Installed { (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Accounting*").DisplayName }
           function Run($f) { Start-Process $f.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait }
           Run $basics
-          $exe = "$env:LOCALAPPDATA\Programs\Riyeser Accounting Basics\Riyeser Accounting Basics.exe"
-          Start-Process $exe -ArgumentList "init","--name","Keep Me Pty Ltd","--demo" -Wait
+          # Stand-in company file: it must come through every switch byte for byte.
           $db = "$env:USERPROFILE\.riyeser\company.db"
-          if (-not (Test-Path $db)) { throw "No company file was made" }
-          $size = (Get-Item $db).Length
+          New-Item -ItemType Directory -Force -Path (Split-Path $db) | Out-Null
+          [IO.File]::WriteAllBytes($db, [byte[]](1..200))
+          $size = (Get-FileHash $db).Hash
           Write-Host "Basics:" (Installed)
           Run $plus
           $now = @(Installed); Write-Host "After Plus:" $now
           if ($now.Count -ne 1 -or $now[0] -notlike "Riyeser Accounting Plus*") { throw "Plus should replace Basics" }
-          if ((Get-Item $db).Length -ne $size) { throw "Company file changed on upgrade" }
+          if ((Get-FileHash $db).Hash -ne $size) { throw "Company file changed on upgrade" }
           Run $basics
           $now = @(Installed); Write-Host "After Basics:" $now
           if ($now.Count -ne 1 -or $now[0] -notlike "Riyeser Accounting Basics*") { throw "Basics should replace Plus" }
-          if ((Get-Item $db).Length -ne $size) { throw "Company file changed on downgrade" }
+          if ((Get-FileHash $db).Hash -ne $size) { throw "Company file changed on downgrade" }
           Write-Host "OK: one app at a time, books kept"
 
   release:
