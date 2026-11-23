@@ -366,7 +366,7 @@ for (const ind of INDUSTRIES) {
   </div>
 </div>
 <section class="c"><h2 class="h2">The programs that help</h2><p class="sub">What each one does for ${esc(ind.name.toLowerCase())}.</p>
-  <div class="progrow">${ind.progs.map(([id, pts]) => { const p = prog(id); return `<a class="card" href="${up}programs/${id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><ul class="ticks">${pts.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>${more('Learn more')}</a>`; }).join('')}</div>
+  <div class="progrow">${[...ind.progs].sort((x, y) => PROGRAMS.findIndex((p) => p.id === x[0]) - PROGRAMS.findIndex((p) => p.id === y[0])).map(([id, pts]) => { const p = prog(id); return `<a class="card" href="${up}programs/${id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><ul class="ticks">${pts.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>${more('Learn more')}</a>`; }).join('')}</div>
 </section>
 ${ctaBlock(up, `Try Riyeser for ${esc(ind.name.toLowerCase())}`, 'Download Riyeser Central, add the programs above, and keep everything on your own computer.')}`,
   });
@@ -527,7 +527,7 @@ ${bandHero({ title: 'Pricing', lead: 'Choose the right way to use Riyeser for yo
 </section>
 
 <section class="c" id="plans" style="padding-top:40px">
-  <h2 class="h2">Licence options</h2><p class="sub">One licence covers every Riyeser program for that person: Accounting Plus, Payroll, Services, Desk Assistant, PDF and Riyeser Central.</p>
+  <h2 class="h2">Licence options</h2><p class="sub">One licence covers every Riyeser program for that person: Riyeser Central, Accounting Plus, Payroll, Desk Assistant, PDF and Services.</p>
   ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off your first year</b><p>For the first 100 users to buy a licence. That's from <b>$6.50</b> per user a month for 12 months, then the normal price below. The offer ends when 100 users have it.</p></div></div>` : ''}
   <div class="plans">
     <div class="plan best"><span class="tag">Most popular</span><div class="k">1–4 users</div><div class="price">$20<small> per user / month</small></div><p>Everything, for sole traders and small teams.</p></div>
