@@ -69,7 +69,8 @@ def resources(db, all_=False):
 
 
 def services(db, all_=False):
-    return db.execute("SELECT s.*, i.name item_name FROM booking_services s LEFT JOIN items i ON i.id=s.item_id"
+    return db.execute("SELECT s.*, i.name item_name, (SELECT COUNT(*) FROM bookings b WHERE b.service_id=s.id) used"
+                      " FROM booking_services s LEFT JOIN items i ON i.id=s.item_id"
                       + ("" if all_ else " WHERE s.active=1") + " ORDER BY s.name").fetchall()
 
 
@@ -380,8 +381,16 @@ def _save_setup():
         kind = MODES[f.get("mode") if f.get("mode") in MODES else mode()]["kind"]
         db.execute("INSERT INTO booking_resources (name, kind, capacity, colour) VALUES (?,?,?,?)",
                    (f["res_new"].strip(), kind, opt_int(f.get("res_new_cap")), COLOURS[n % len(COLOURS)]))
+    kept = []
     for s in services(db, True):
         name = (f.get(f"svc_name_{s['id']}") or "").strip()
+        if f.get(f"svc_del_{s['id']}"):
+            if s["used"]:
+                kept.append(s["name"])
+                db.execute("UPDATE booking_services SET active=0 WHERE id=?", (s["id"],))
+            else:
+                db.execute("DELETE FROM booking_services WHERE id=?", (s["id"],))
+            continue
         if name:
             db.execute("UPDATE booking_services SET name=?, description=?, minutes=?, price=?, item_id=?, active=?"
                        " WHERE id=?",
@@ -394,6 +403,9 @@ def _save_setup():
                     opt_int(f.get("svc_new_item"))))
     audit(db, "bookings_setup", f.get("mode") or "")
     flash("Bookings setup saved.", "ok")
+    if kept:
+        flash(f"{', '.join(kept)} is already on a booking, so it was turned off instead of deleted. It won't show"
+              " for new bookings.", "ok")
     return redirect(url_for("bookings.setup"))
 
 

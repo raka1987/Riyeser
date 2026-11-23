@@ -117,6 +117,21 @@ def test_job_type_description_goes_on_the_invoice(tmp_path, monkeypatch):
     assert line["description"].startswith("Clean and flush all gutters and downpipes") and line["total"] == 33000
 
 
+def test_delete_a_job_type(tmp_path, monkeypatch):
+    app, c, item = make(tmp_path, monkeypatch, "bookings")
+    c.get("/bookings/")
+    cust = _cust(app)
+    used = _one(app, "SELECT id FROM booking_services WHERE name='Call-out'")["id"]
+    spare = _one(app, "SELECT id FROM booking_services WHERE name='Full day'")["id"]
+    _book(c, contact_id=cust, service_id=used)
+    assert "Delete" in c.get("/bookings/setup").get_data(as_text=True)
+    r = c.post("/bookings/setup", data={"mode": "jobs", "open": "07:00", "close": "18:00",
+                                        f"svc_del_{used}": "1", f"svc_del_{spare}": "1"}, follow_redirects=True)
+    assert _one(app, "SELECT id FROM booking_services WHERE id=?", (spare,)) is None        # unused: gone
+    assert _one(app, "SELECT active FROM booking_services WHERE id=?", (used,))["active"] == 0  # used: turned off
+    assert "turned off instead of deleted" in r.get_data(as_text=True)
+
+
 def test_new_customer_from_the_booking_form(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
     _book(c, new_customer="Sam Lee", phone="0411 111 111")
