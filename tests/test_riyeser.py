@@ -473,3 +473,10 @@ def test_licence_status_from_central_file(tmp_path):
     f.write_text(json.dumps({"trialStart": (now - timedelta(days=95)).isoformat(), "key": "K",
                              "licence": {"status": "active", "plan": "Riyeser · 5 users", "checkedAt": (now - timedelta(days=3)).isoformat()}}))
     assert status(now, str(f)) == {"mode": "licensed", "plan": "Riyeser · 5 users", "extra_companies": 0}
+
+
+def test_desktop_start_page_for_central_quick_access():
+    from riyeser.desktop import start_path
+    assert start_path("pos") == "/pos/"
+    assert start_path("Invoice") == "/sale/new"
+    assert start_path(None) == "" and start_path("../etc") == ""
