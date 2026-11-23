@@ -79,9 +79,10 @@ tick(); setInterval(tick, 60000);
 
 // ---------- the programs ----------
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
-const ORDER = ['central', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
+const ORDER = ['central', 'invoices', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
+  invoices: { ic: 'invoice', c: 'c-inv', nav: 'Invoices', col: '#0284c7', blurb: 'Send invoices and get paid' },
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Books', col: '#16a05a', blurb: 'View and manage your accounts' },
   accounting: { ic: 'book', c: 'c-acc', nav: 'Books', col: '#1a5fd6', blurb: 'View and manage your accounts' },
   pos: { ic: 'store', c: 'c-pos', nav: 'POS', col: '#0f8f82', blurb: 'Open the till and ring up sales' },
@@ -100,6 +101,7 @@ const hasAcc = () => !!accId();
 const QUICK = [
   { p: 'pos', ic: 'store', t: 'Open the till', s: 'Ring up a sale', page: 'pos' },
   { p: 'acc', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' },
+  { p: 'invoices', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' }, // free Invoices, when Accounting isn't installed
   { p: 'payroll', ic: 'people', t: 'Run payroll', s: 'Timesheets to payslips', page: 'payrun' },
   { p: 'desk', ic: 'sort', t: 'Sort new files', s: 'Downloads, Desktop, phone', page: 'organise' },
   { p: 'desk', ic: 'search', t: 'Find a file', s: 'Search every folder', act: 'find' },
@@ -108,9 +110,9 @@ const QUICK = [
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 // Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
-const LOGO = { 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const LOGO = { invoices: 'invoices', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
-const quickFor = (q) => (q.p === 'acc' ? accId() : has(q.p) ? q.p : null);
+const quickFor = (q) => (q.p === 'acc' ? accId() : q.p === 'invoices' && hasAcc() ? null : has(q.p) ? q.p : null);
 
 function renderNav() {
   const mine = programs.filter((p) => p.status !== 'missing' && !(p.id === 'accounting-basics' && has('accounting')));
