@@ -55,8 +55,8 @@
 <li>Nothing is ever deleted. Corrections are <b>reversals</b>, so the audit trail stays complete.</li></ul></div>
 
 <div class="card"><h2 id="setup">Setup &amp; editions</h2><ul>
-<li><b>{{ editions.basic.name }}</b> (free): invoices, quotes, customers, stock, suppliers, simple banking, POS and the key reports.</li>
-<li><b>{{ editions.enterprise.name }}</b> (included in the free trial, then needs a licence): everything in {{ editions.basic.name }} plus bank reconciliation, statement import, payroll, journals, jobs, budgets, Balance Sheet and Trial Balance.</li>
+<li><b>{{ editions.basic.name }}</b> ($20 a month per business, free for 90 days): invoices, quotes, customers, stock, suppliers, simple banking and the key reports. The shop counter (POS) is a +$20 a month add-on.</li>
+<li><b>{{ editions.enterprise.name }}</b> (+$20 a month, free for 90 days): everything in {{ editions.basic.name }} plus bank reconciliation, statement import, payroll, journals, jobs, budgets, Balance Sheet and Trial Balance.</li>
 {% if product.separate %}<li><b>{{ editions.basic.app }}</b> and <b>{{ editions.enterprise.app }}</b> are two separate apps (green and blue) that open the same company files. To move up or down, open <a href="{{ url_for('core.upgrade') }}">Basics or Plus</a> under Setup and install the other app: it replaces this one and your books carry straight over. Plus-only records are kept safe in Basics and come back in Plus.</li>
 <li>If the free trial ends without a licence, {{ editions.enterprise.title }} keeps your everyday screens working and locks the Plus-only screens (nothing is removed) until you enter a licence in Riyeser Central.</li>
 {% else %}<li>Switch any time under <b>Setup → Company → Edition</b>. Your data never changes. If the trial ends without a licence, companies open in {{ editions.basic.name }}; enter a licence in Riyeser Central and {{ editions.enterprise.name }} comes back with everything as you left it.</li>{% endif %}
