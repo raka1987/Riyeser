@@ -78,10 +78,13 @@ function tick() {
 tick(); setInterval(tick, 60000);
 
 // ---------- the programs ----------
+// One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
+const ORDER = ['central', 'accounting-basics', 'accounting', 'payroll', 'desk', 'pdf', 'services'];
+const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Accounting' }, accounting: { ic: 'book', c: 'c-acc', nav: 'Accounting' },
   payroll: { ic: 'people', c: 'c-pay', nav: 'Payroll' }, desk: { ic: 'folder', c: 'c-desk', nav: 'Desk Assistant' },
-  pdf: { ic: 'pdf', c: 'c-pdf', nav: 'PDF' }, services: { ic: 'hat', c: 'c-svc', nav: 'Job records' },
+  pdf: { ic: 'pdf', c: 'c-pdf', nav: 'PDF' }, services: { ic: 'hat', c: 'c-svc' }, // services: shown by its own name (As Built)
 };
 let programs = []; let today = null; let upd = { updates: [] }; let updating = false; let view = 'home'; let rtab = 'all';
 const has = (id) => programs.some((p) => p.id === id && p.status !== 'missing');
@@ -93,12 +96,12 @@ const hasAcc = () => !!accId();
 const QUICK = [
   { p: 'acc', ic: 'store', t: 'Shop counter', s: 'Ring up a sale (POS)', page: 'pos' },
   { p: 'acc', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' },
+  { p: 'payroll', ic: 'people', t: 'Run payroll', s: 'Timesheets to payslips', page: 'payrun' },
   { p: 'desk', ic: 'sort', t: 'Sort new files', s: 'Downloads, Desktop, phone', page: 'organise' },
   { p: 'desk', ic: 'search', t: 'Find a file', s: 'Search every folder', act: 'find' },
   { p: 'pdf', ic: 'pdf', t: 'Open a PDF', s: 'Fill in, sign or edit', act: 'pickpdf' },
   { p: 'pdf', ic: 'layers', t: 'Combine PDFs', s: 'Join files into one', page: 'combine' },
-  { p: 'payroll', ic: 'people', t: 'Run payroll', s: 'Timesheets to payslips', page: 'payrun' },
-  { p: 'services', ic: 'hat', t: 'Job records', s: 'Drawings, tests and QA', page: 'projects' },
+  { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 const quickFor = (q) => (q.p === 'acc' ? accId() : has(q.p) ? q.p : null);
 
@@ -108,7 +111,7 @@ function renderNav() {
   const missing = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting'))).length;
   $('#nav').innerHTML = `<button class="${view === 'home' ? 'on' : ''}" data-view="home">${icon('home')}Home</button>
     ${mine.length ? '<div class="navlbl">Your programs</div>' : ''}
-    ${mine.map((p) => `<button data-open="${esc(p.id)}" title="Open ${esc(p.full)}">${icon(LOOK[p.id].ic)}${esc(LOOK[p.id].nav)}${upFor.has(p.id) ? '<span class="tag">Update</span>' : ''}</button>`).join('')}
+    ${mine.map((p) => `<button data-open="${esc(p.id)}" title="Open ${esc(p.full)}">${icon(LOOK[p.id].ic)}${esc(LOOK[p.id].nav || p.name)}${upFor.has(p.id) ? '<span class="tag">Update</span>' : ''}</button>`).join('')}
     <hr>
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
@@ -145,7 +148,7 @@ function renderKpis() {
 function renderQuick() {
   const list = QUICK.map((q) => ({ ...q, id: quickFor(q) })).filter((q) => q.id);
   $('#quickwrap').hidden = !list.length;
-  $('#quick').innerHTML = list.map((q) => `<button class="qa" ${q.act ? `data-act="${q.act}"` : `data-open="${esc(q.id)}" data-page="${esc(q.page || '')}"`}><span class="qi ${LOOK[q.id].c}">${icon(q.ic)}</span><span><b>${esc(q.t)}</b><small>${esc(q.s)}</small></span></button>`).join('');
+  $('#quick').innerHTML = list.map((q) => `<button class="qa" ${q.act ? `data-act="${q.act}"` : `data-open="${esc(q.id)}" data-page="${esc(q.page || '')}"`}><span class="qi ${LOOK[q.id].c}">${icon(q.ic)}</span><span><b>${esc(q.t || (programs.find((x) => x.id === q.id) || {}).name || '')}</b><small>${esc(q.s)}</small></span></button>`).join('');
 }
 
 // ---------- panels ----------
@@ -214,6 +217,7 @@ function setView(v) {
 }
 async function refresh() {
   [programs, today] = await Promise.all([bridge.call('central:programs'), bridge.call('central:today')]);
+  programs.sort((a, b) => byOrder(a.id, b.id));
   renderNav(); renderKpis(); renderQuick(); renderRecent(); renderMoney(); renderToday(); renderTodo(); renderLayout(); renderApps();
 }
 
@@ -261,6 +265,7 @@ function renderUpdates() {
 }
 async function checkForUpdates(force, quiet = true) {
   try { upd = await bridge.call('central:updates', force); } catch (e) { if (!quiet) toast(e.message); return; }
+  (upd.updates || []).sort((a, b) => byOrder(a.id, b.id));
   renderUpdates(); renderNav();
   if (!quiet) toast(upd.updates.length ? `${upd.updates.length} update${upd.updates.length === 1 ? '' : 's'} available.` : upd.note || 'Everything is up to date.');
 }
