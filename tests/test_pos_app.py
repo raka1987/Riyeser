@@ -81,7 +81,7 @@ def test_pos_sales_show_in_accounting_as_paid_invoices(tmp_path, monkeypatch):
 def test_500_free_sales_then_a_licence(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "pos")
     monkeypatch.setitem(plan.FREE_LIMITS, "pos", 3)
-    monkeypatch.setitem(plan.WARN_FROM, "pos", 2)
+    monkeypatch.setattr(plan, "WARN_AT", 0.3)
     assert sell(c, item).get_json()["ok"]
     assert "2 free sales left" in c.get("/pos/").get_data(as_text=True)
     sid = sell(c, item).get_json()["sale_id"]
@@ -107,7 +107,7 @@ def test_500_free_sales_then_a_licence(tmp_path, monkeypatch):
 def test_accounting_basics_is_free_for_50_invoices(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "basics")
     monkeypatch.setitem(plan.FREE_LIMITS, "basic", 2)
-    monkeypatch.setitem(plan.WARN_FROM, "basic", 1)
+    monkeypatch.setattr(plan, "WARN_AT", 0.5)
     with app.app_context():
         cust = get_db().execute("INSERT INTO contacts (kind, name) VALUES ('customer','Jo')").lastrowid
         get_db().commit()
@@ -128,3 +128,13 @@ def test_accounting_basics_is_free_for_50_invoices(tmp_path, monkeypatch):
     with app.app_context():
         n = get_db().execute("SELECT COUNT(*) FROM documents WHERE side='sale' AND status!='quote'").fetchone()[0]
     assert n == 2
+
+
+def test_server_set_caps_in_the_licence_file_win(tmp_path, monkeypatch):
+    app, c, item = make(tmp_path, monkeypatch, "pos")
+    f = tmp_path / "appdata" / "Riyeser" / "licence.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps({"caps": {"pos": 1, "accounting-basics": 7}}))
+    assert plan.limit_for("pos") == 1 and plan.limit_for("basic") == 7
+    assert sell(c, item).get_json()["ok"]
+    assert sell(c, item).status_code == 402

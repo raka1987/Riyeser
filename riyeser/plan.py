@@ -10,7 +10,7 @@ This is the one place that decides it, so the caps can change, or a subscription
 `subscribed()`, without touching the screens.
 """
 FREE_LIMITS = {"pos": 500, "basic": 50}
-WARN_FROM = {"pos": 50, "basic": 10}   # start counting down when this many free uses are left
+WARN_AT = 0.8       # warn once 80% of the free allowance is used
 WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices")}
 
 
@@ -29,18 +29,34 @@ def used(db, product):
                       " AND NOT EXISTS (SELECT 1 FROM pos_sales p WHERE p.document_id=d.id)").fetchone()[0]
 
 
+def limit_for(product):
+    """The free cap: from the licence file if Riyeser's server has set one ("caps"), else FREE_LIMITS."""
+    import json
+    from .licence import licence_file
+    try:
+        with open(licence_file(), encoding="utf-8") as f:
+            caps = json.load(f).get("caps") or {}
+        key = {"basic": "accounting-basics"}.get(product, product)
+        v = caps.get(key, caps.get(product))
+        if isinstance(v, int) and v >= 0:
+            return v
+    except (OSError, ValueError, AttributeError):
+        pass
+    return FREE_LIMITS[product]
+
+
 def plan(db, product):
     """{'product', 'licensed', 'used', 'left', 'limit', 'locked', 'warn', 'one', 'many'}"""
-    limit = FREE_LIMITS[product]
+    limit = limit_for(product)
     licensed = subscribed(product)
     n = used(db, product)
     left = max(limit - n, 0)
     one, many = WHAT[product]
     return dict(product=product, licensed=licensed, used=n, left=left, limit=limit, one=one, many=many,
-                locked=not licensed and left == 0, warn=not licensed and 0 < left <= WARN_FROM[product])
+                locked=not licensed and left == 0, warn=not licensed and left > 0 and n >= limit * WARN_AT)
 
 
 def capped_message(product):
-    limit, (_, many) = FREE_LIMITS[product], WHAT[product]
+    limit, (_, many) = limit_for(product), WHAT[product]
     return (f"You've used your {limit} free {many}. Enter a Riyeser licence in Riyeser Central to keep going. "
             "Nothing has been deleted.")
