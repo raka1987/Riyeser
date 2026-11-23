@@ -180,6 +180,9 @@ function menu(web) {
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'reload', label: 'Refresh' }, { type: 'separator' }, { role: 'zoomIn', label: 'Bigger text' }, { role: 'zoomOut', label: 'Smaller text' }, { role: 'resetZoom', label: 'Normal size' }, { type: 'separator' }, { role: 'togglefullscreen' }] },
     { label: 'Help', submenu: [
+      { label: 'Payroll help guide', accelerator: 'F1', click: () => shell.openExternal('https://riyeser.com/help/payroll.html') },
+      { label: 'Email support', click: () => shell.openExternal('mailto:info@riyeser.com?subject=' + encodeURIComponent(`Riyeser Payroll ${app.getVersion()}`)) },
+      { type: 'separator' },
       { label: 'Where are my records?', click: () => dialog.showMessageBox(win, { type: 'info', message: 'Your records', detail: `Payroll records:\n${CUR}\n\nPayslip PDFs and daily backups:\n${path.join(HOME_DIR, 'Payroll')}\n\nCopy that folder to a USB stick or cloud drive now and then.` }) },
       { label: `About Riyeser Payroll (version ${app.getVersion()})`, click: () => dialog.showMessageBox(win, { type: 'info', message: 'Riyeser Payroll', detail: `Version ${app.getVersion()}\nRiyeser Group\nTime clock, timesheets, pay runs, payslips, leave and pay history.` }) } ] },
   ]));
