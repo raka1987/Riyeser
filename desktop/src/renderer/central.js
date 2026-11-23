@@ -283,11 +283,13 @@ $('#checkupd').addEventListener('click', () => checkForUpdates(true, false));
 // ---------- plan: one Riyeser account; free allowances, then a subscription per program ----------
 let lic = null; let signIn = { email: '', sent: false }; let yearly = false;
 async function loadLicence() { try { lic = await bridge.call('central:licence'); } catch { lic = null; } renderLicence(); }
-const PAID = [['basics', 'Accounting Basics', (c) => `Free for your first ${c.basic} invoices, then $20 a month per business (3 users included).`],
-  ['plus', 'Accounting Plus', (c) => `Free for ${c.plusTrialDays} days, then +$20 a month. Includes everything in Basics.`],
-  ['pos', 'POS', (c) => `Free for your first ${c.pos} sales, then +$20 a month.`],
-  ['payroll', 'Payroll', (c) => `Free for your first ${c.payroll} pay runs, then +$20 a month.`],
-  ['asbuilt', 'As Built', (c) => `Free for your first ${c.asbuilt} projects, then +$20 a month.`]];
+// Every paid program is free for its first 90 days (one trial for the suite, no card). If the server also sets a
+// free allowance for a program (caps), it shows here too.
+const PAID = [['basics', 'Accounting Basics', '$20 a month per business (3 users included)', (c) => c.basic && `your first ${c.basic} invoices`],
+  ['plus', 'Accounting Plus', '+$20 a month, includes everything in Basics', () => null],
+  ['pos', 'POS', '+$20 a month', (c) => c.pos && `your first ${c.pos} sales`],
+  ['payroll', 'Payroll', '+$20 a month', (c) => c.payroll && `your first ${c.payroll} pay runs`],
+  ['asbuilt', 'As Built', '$20 a month on its own, for the building industry', (c) => c.asbuilt && `your first ${c.asbuilt} projects`]];
 function licLine(s) {
   if (!s) return 'Your plan';
   if (s.mode === 'licensed') return `Plan · ${s.plan || 'paid'}`;
@@ -304,11 +306,13 @@ function renderLicence() {
 const when = (iso) => (iso ? new Date(iso).toLocaleDateString() : '');
 function programRows(s) {
   const c = s.caps || {};
-  return PAID.map(([id, name, free]) => {
+  return PAID.map(([id, name, price, allowance]) => {
     const p = (s.products || {})[id];
+    const free = allowance(c);
     const state = p && p.paid
       ? `<span class="ok">✓ Paid${p.until ? ` to ${when(p.until)}` : ''}${p.warning === 'cancelled' ? ' (cancelled, ends then)' : ''}${p.warning === 'payment_failed' ? ' · payment failed' : ''}</span>`
-      : id === 'plus' && s.daysLeft > 0 ? `<span>${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} of free trial left</span>` : `<span class="muted">${esc(free(c))}</span>`;
+      : s.daysLeft > 0 ? `<span>${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} of free trial left${free ? `, then free for ${esc(free)}` : ''}. Then ${esc(price)}.</span>`
+        : free ? `<span class="muted">Free for ${esc(free)}, then ${esc(price)}.</span>` : `<span class="muted">Trial finished: everything you made is still here. ${esc(price)} to keep adding new work.</span>`;
     const btn = p && p.paid ? '' : s.signedIn && s.configured ? `<button class="btn s" data-lic="subscribe" data-product="${id}">Subscribe</button>` : '';
     return `<div class="plrow"><div><b>${name}</b>${state}</div>${btn}</div>`;
   }).join('');
@@ -316,7 +320,7 @@ function programRows(s) {
 function openLicence() {
   const s = lic || {}; const body = $('#licbody');
   let head;
-  if (!s.configured) head = `<div class="state"><span class="big">🎁</span><div><b>Riyeser accounts are coming soon</b>Every program works now: the free allowances below apply until then.</div></div>`;
+  if (!s.configured) head = `<div class="state"><span class="big">🎁</span><div><b>Riyeser accounts are coming soon</b>Every program works now, with the free trial below.</div></div>`;
   else if (!s.signedIn) {
     head = `<div class="state"><span class="big">👋</span><div><b>Sign in to Riyeser</b>Just your email: we send a 6-digit code, no password. Your work stays on this PC.</div></div>
       <label for="licemail"><b>Email</b></label><input id="licemail" type="email" autocomplete="email" value="${esc(signIn.email)}" placeholder="you@business.com">
@@ -324,14 +328,14 @@ function openLicence() {
       <div class="row"><button class="btn" data-lic="finish">Sign in</button><button class="btn s" data-lic="start">Send a new code</button></div>`
       : `<div class="row"><button class="btn" data-lic="start">Email me a code</button></div>`}`;
   } else {
-    head = `<div class="state${s.mode === 'expired' ? ' bad' : ''}"><span class="big">${s.mode === 'licensed' ? '✅' : '🙂'}</span><div><b>${esc(s.email || 'Signed in')}</b>${s.mode === 'licensed' ? `Paid: ${esc(s.plan)}` : 'Nothing paid yet: you are on the free allowances.'}${s.message ? `<div>${esc(s.message)}</div>` : ''}<div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleString() : '—'}. Works offline for 30 days at a time.</div></div></div>`;
+    head = `<div class="state${s.mode === 'expired' ? ' bad' : ''}"><span class="big">${s.mode === 'licensed' ? '✅' : '🙂'}</span><div><b>${esc(s.email || 'Signed in')}</b>${s.mode === 'licensed' ? `Paid: ${esc(s.plan)}` : 'Nothing paid yet.'}${s.message ? `<div>${esc(s.message)}</div>` : ''}<div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleString() : '—'}. Works offline for 30 days at a time.</div></div></div>`;
   }
   const paidAny = Object.values(s.products || {}).some((p) => p.paid);
   body.innerHTML = `${head}
     <div class="plrows">${programRows(s)}</div>
     ${s.signedIn && s.configured ? `<label class="yr"><input type="checkbox" id="licyearly" ${yearly ? 'checked' : ''}> Pay yearly (2 months free)</label>
     <div class="row">${paidAny ? '<button class="btn s" data-lic="manage">Manage plan &amp; receipts</button>' : ''}<button class="btn s" data-lic="refresh">Check again</button><button class="btn s" data-lic="signout">Sign out on this PC</button></div>` : ''}
-    <p class="muted">Central, PDF and Desk Assistant are always free. Reaching a free limit never deletes anything: you can still open, print and export everything, and only new work waits for a subscription. 🐣 Early bird: 50% off your first year for the first 100 businesses. Extra users $5 a month, extra companies $10 a month. Prices in AUD; any tax is shown before you pay. <a href="#" data-lic="buy">See pricing</a></p>`;
+    <p class="muted">Central, PDF and Desk Assistant are free forever. Every paid program is free for 90 days, no card. When a trial ends nothing is deleted: you can still open, print and export everything, and only new work waits for a subscription. 🐣 Early bird: 50% off your first year for the first 100 businesses. Extra users $5 a month, extra companies $10 a month. Prices in AUD; any tax is shown before you pay. <a href="#" data-lic="buy">See pricing</a></p>`;
   if (!$('#licdlg').open) $('#licdlg').showModal();
 }
 document.addEventListener('change', (e) => { if (e.target.id === 'licyearly') yearly = e.target.checked; });

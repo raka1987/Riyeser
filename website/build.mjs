@@ -348,7 +348,7 @@ page({
 <section class="c" style="padding-top:0;max-width:920px">
   <h2 class="h2 center">Frequently asked questions</h2>
   <div class="faq" style="margin-top:26px">
-  <details><summary>What does it cost?</summary><p>Riyeser Central, PDF and the Desk Assistant file organiser are free forever. Every paid program is free for 90 days with no card. After that, Accounting Basics is $20 a month per business — not per person — and Accounting Plus, Payroll, POS and As Built are +$20 a month each, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Riyeser Central, PDF and the Desk Assistant file organiser are free forever. Every paid program is free for 90 days with no card. After that, Accounting Basics is $20 a month per business — not per person — and Accounting Plus, Payroll and POS are +$20 a month each. As Built, for the building industry, is $20 a month on its own. 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline. As Built can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
   <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11. As Built also works in any web browser, on phones and tablets.</p></details>
   <details><summary>Where do I start?</summary><p>Download Riyeser Central. It's the home screen for every program and shows you what else you can add. The <a class="more" href="${up}help/start.html">Getting started guide</a> walks you through it.</p></details>
@@ -363,7 +363,8 @@ page({
   path: 'programs.html', title: 'All programs — Riyeser', active: 'programs',
   description: 'Every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and As Built.',
   body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
-<section class="c" style="padding-top:44px"><div class="grid">${PROGRAMS.map((p) => progCard(p, up)).join('')}</div></section>
+<section class="c" style="padding-top:44px"><div class="grid">${PROGRAMS.filter((p) => p.id !== 'services').map((p) => progCard(p, up)).join('')}</div></section>
+<section class="c" style="padding-top:0"><h2 class="h2">For the building industry</h2><p class="sub">A separate program for trades and construction, priced on its own.</p><div class="grid">${progCard(prog('services'), up)}</div></section>
 <section class="c" style="padding-top:0"><h2 class="h2">Accounting Basics or Accounting Plus?</h2>${editionsBlock(up)}</section>
 ${ctaBlock(up, 'Start with Riyeser Central', "It's the home screen for every program, and it keeps them all up to date.")}`,
 });
@@ -530,7 +531,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
 // ---------- pricing ----------
 page({
   path: 'pricing.html', title: 'Riyeser pricing — free tools, then $20 a month per business', active: 'pricing',
-  description: 'Riyeser Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business; Accounting Plus, Payroll, POS and As Built are +$20 each. Every paid program is free for 90 days, no card.',
+  description: 'Riyeser Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business; Accounting Plus, Payroll and POS are +$20 each. As Built, for the building industry, is $20 a month on its own. Every paid program is free for 90 days, no card.',
   body: (up) => `
 ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a month — per business, not per person.' })}
 <section class="c" style="padding-bottom:20px">
@@ -541,7 +542,7 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
     <div class="plan best"><span class="tag">Start here</span><div class="k">Accounting Basics</div><div class="price">$20<small> / month per business</small></div>
       <ul class="ticks"><li><b>Free for 90 days</b></li><li>Invoices, quotes, customers and stock</li><li>Money in &amp; out, GST summary, profit &amp; loss</li><li>3 users included</li></ul></div>
     <div class="plan"><div class="k">Add programs</div><div class="price">+$20<small> / month each</small></div>
-      <ul class="ticks"><li><b>Accounting Plus</b> — reconciling, bank import, BAS, jobs, budgets</li><li><b>Payroll</b> — timesheets, pay runs, payslips, leave</li><li><b>POS</b> — the till app for shops and cafes</li><li><b>As Built</b> — building services on your drawings</li></ul></div>
+      <ul class="ticks"><li><b>Accounting Plus</b> — reconciling, bank import, BAS, jobs, budgets</li><li><b>Payroll</b> — timesheets, pay runs, payslips, leave</li><li><b>POS</b> — the till app for shops and cafes</li></ul></div>
   </div>
   <div class="addon"><div class="big">➕</div><div><b>Extras</b><p>More than 3 people: <b>$5 a month</b> per extra user. Another company, trust or client's books: <b>$10 a month</b> per extra company. Every paid program is free for 90 days. No card.</p></div></div>
   <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
@@ -555,7 +556,6 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
         <label class="check"><input type="checkbox" data-m="plus"> Accounting Plus</label>
         <label class="check"><input type="checkbox" data-m="payroll"> Payroll</label>
         <label class="check"><input type="checkbox" data-m="pos"> POS</label>
-        <label class="check"><input type="checkbox" data-m="services"> As Built</label>
       </div>
       <p class="muted" style="margin:14px 0 4px">People using Riyeser</p>
       <div class="users"><button type="button" data-d="-1" aria-label="Fewer users">−</button><input id="users" type="number" min="1" max="500" value="3" aria-label="Number of users"><button type="button" data-d="1" aria-label="More users">+</button></div>
@@ -571,20 +571,29 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
   ${editionsBlock(up)}
 </section>
 
+<section class="c" id="as-built" style="padding-top:0">
+  <h2 class="h2">For the building industry</h2><p class="sub">As Built is a separate program for trades and construction. It isn't part of the business programs above, and doesn't need Accounting.</p>
+  <div class="plans eds"><div class="plan best"><span class="tag">Free for 90 days</span><div class="k">${appImg('services', up)}As Built</div>
+    <div class="price">$20<small> a month per business · 3 users included</small></div><p>Map every cable, pipe and duct on your drawings as it goes in, with inspections, test results and photos.</p>
+    <ul class="edlist"><li>Services marked on your PDF plans, end to end</li><li>Inspections, test results and photos on every item</li><li>Works on site with no signal; online sync optional</li><li>Handover pack and as-builts ready when the job is</li></ul>
+    <div class="ctas" style="justify-content:flex-start;margin-top:10px"><a class="btn s" href="${up}programs/services.html">About As Built ${ARR}</a></div></div></div>
+</section>
+
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
   <details open><summary>What's free?</summary><p>Riyeser Central, Riyeser PDF and the Desk Assistant file organiser are free forever — no time limit, no account, no card.</p></details>
-  <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, Payroll, POS and As Built — is free for 90 days from when you first open Riyeser Central. No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
+  <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, Payroll, POS, and As Built for the building industry — is free for 90 days from when you first open Riyeser Central. No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
   <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays on your computer and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS) or that program's screens (the others) wait until you buy it and enter the key in Riyeser Central. They unlock straight away.</p></details>
   <details><summary>Is it per person?</summary><p>No — per business. Each program is $20 a month for the whole business, with 3 people included. A 4th person and beyond is $5 a month each, for all your programs.</p></details>
   <details><summary>How do extra companies work?</summary><p>Your plan includes one company in Riyeser Accounting. Groups, trusts and bookkeepers can add more for $10 a month per extra company, with one sign-in. If you stop paying for one, its books stay — they open read-only until you add it back.</p></details>
   ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months — $10 instead of $20 a month for each program. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
+  <details><summary>Is As Built part of the business programs?</summary><p>No. As Built is a separate program for trades and construction, priced on its own at $20 a month per business after its 90-day free trial. You don't need Accounting or any other program to use it, and it works on its own Windows app or in a web browser.</p></details>
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
   <details><summary>How do I buy?</summary><p>Online checkout is opening soon. Until then, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser licence')}">${EMAIL}</a> with your business name and the programs you want, and we'll send your licence key.</p></details>
 </section>
 ${ctaBlock(up, 'Start free today', 'Install Riyeser Central — the free tools are yours to keep, and every paid program is free to start.')}
 <script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},u=document.getElementById('users'),c=document.getElementById('cos'),y=document.getElementById('yearly');
-var NAMES={basic:'Accounting Basics',plus:'Accounting Plus',payroll:'Payroll',pos:'POS',services:'As Built'};
+var NAMES={basic:'Accounting Basics',plus:'Accounting Plus',payroll:'Payroll',pos:'POS'};
 function money(v){return '$'+v.toLocaleString('en-AU',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})}
 function draw(){
   var plus=document.querySelector('[data-m=plus]'),pos=document.querySelector('[data-m=pos]'),basic=document.querySelector('[data-m=basic]');
