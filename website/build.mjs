@@ -212,6 +212,35 @@ const INDUSTRIES = [
       ['desk-assistant', ['Files drawings, quotes and invoices by type and year', 'Spots duplicate copies of the same drawing', 'Find any file in seconds']]] },
 ];
 const indLink = (i, up) => `${up}industries/${i.id}.html`;
+// The Riyeser Central window on the home page, drawn in HTML so it stays sharp at any size (sample figures).
+const CI = {
+  home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5M8 7h7"/>',
+  people: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c.6-3.6 3-5.5 6-5.5s5.4 1.9 6 5.5M16 4.5a3 3 0 0 1 0 6M18 14.5c1.7.6 2.8 2.4 3 5.5"/>',
+  invoice: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  folder: '<path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>',
+  pdf: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
+  key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7M12 17h.01"/>',
+};
+const ci = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${CI[k]}</svg>`;
+const centralMock = (up) => `<div class="cmock-wrap" aria-label="Riyeser Central home screen" role="img"><div class="cmock">
+  <div class="cm-side"><div class="cm-logo"><img src="${up}assets/logo-r.png" alt="">Riyeser Central</div>
+    <span class="on">${ci('home')}Home</span><span>${ci('book')}Books</span><span>${ci('people')}Payroll</span><span>${ci('invoice')}Invoices</span><span>${ci('folder')}Desk Assistant</span><span>${ci('pdf')}PDF</span>
+    <hr><span>${ci('key')}Licence</span><span>${ci('help')}Help</span></div>
+  <div class="cm-main"><div class="cm-ctl"><i></i><i></i><i></i></div>
+    <b class="cm-hi">Good morning.</b><small class="cm-sub">Your business at a glance in Riyeser Central.</small>
+    <div class="cm-cards">
+      <div><em class="k1">${ci('book')}</em><b>Books</b><small>$2,450 owed to you</small></div>
+      <div><em class="k2">${ci('people')}</em><b>Payroll</b><small>Run payroll and manage staff</small></div>
+      <div><em class="k3">${ci('pdf')}</em><b>PDF</b><small>Fill in, sign and combine</small></div>
+    </div>
+    <div class="cm-act"><div class="cm-h"><b>Recent activity</b><span>View all ›</span></div>
+      <div class="cm-row">${ci('invoice')}<span>Invoice INV-1047 created</span><small>Today, 10:24 AM</small></div>
+      <div class="cm-row">${ci('people')}<span>Pay run for week ending 21 Nov prepared</span><small>Today, 9:17 AM</small></div>
+      <div class="cm-row">${ci('pdf')}<span>Site plan level 2 signed</span><small>Yesterday, 4:32 PM</small></div>
+    </div></div>
+</div></div>`;
 const winFrame = (up, app, name, img, alt, w = 1400, h = 900) => `<div class="win"><div class="bar"><img src="${up}assets/${app === 'logo' ? 'logo-r.png' : `apps/${app}.png`}" alt="">${esc(name)}<span class="ctl">${svg('<path d="M5 12h14"/>')}${svg('<rect x="5" y="5" width="14" height="14" rx="1"/>')}${svg('<path d="M6 6l12 12M18 6L6 18"/>')}</span></div><img src="${up}assets/${img}" alt="${esc(alt)}" width="${w}" height="${h}"></div>`;
 const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p><span class="go">${ARR}</span></a>`;
 
@@ -311,24 +340,29 @@ const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in o
 
 // ---------- home ----------
 page({
-  path: 'index.html', title: 'Riyeser — keep your books, payroll and job records in order', active: '',
+  path: 'index.html', title: 'Riyeser — the everyday tools your business runs on', active: '',
   description: 'Windows software for small businesses: accounting, payroll, file finding, PDFs and job records. Work offline and keep your records on your PC. No account or card needed.',
   body: (up) => `
-<div class="hero"><div class="c">
+<div class="hero hero2"><div class="c">
   <div>
-    <h1>Keep your books, payroll and job records in order.</h1>
-    <p class="lead">Windows software for small businesses. Work offline and keep your records on your PC.</p>
-    <div class="ctas"><a class="btn p big" href="${up}downloads.html">${WINDL}</a><a class="tlink" href="#how">See how it works</a></div>
-    <p class="fine">Windows 10 &amp; 11 · No account or card needed</p>
+    <h1>The everyday tools your business runs on.</h1>
+    <p class="lead">Books, payroll and job records. On your Windows PC.</p>
+    <div class="ctas"><a class="btn p big" href="${up}downloads.html">${WINDL}</a><a class="tlink" href="#find">Explore programs</a></div>
+    <p class="fine">Windows 10 &amp; 11 · No account or card needed · Works offline</p>
     <div class="badges"><span class="chip">${svg('<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>')}Free tools + 90-day trials</span><span class="chip">${svg('<rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>')}Your data stays on your PC</span>${EARLY_BIRD ? `<a class="chip gold" href="${up}pricing.html#early">🐣 Early bird: 50% off your first year</a>` : ''}</div>
   </div>
-  ${winFrame(up, 'logo', 'Riyeser Central', 'central-home.webp', "Riyeser Central home screen: overdue invoices, money owed, bills to pay, last pay run, quick access to every program, recent files, today's meetings and to-dos", 1440, 900)}
+  ${centralMock(up)}
 </div></div>
+
+<section class="finder" id="find"><div class="c">
+  <h2 class="h2">Find your program</h2>
+  <div class="frow">${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html"><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span>${esc(p.short === 'Central' ? 'Central' : p.short)}</span></a>`).join('')}</div>
+</div></section>
 
 <section class="c">
   <h2 class="h2">Built for your industry</h2>
   <p class="sub">Pick what sounds like you. Install only what you need; every program shares one home screen.</p>
-  <div class="inds">${INDUSTRIES.map((i) => `<a class="ind" href="${indLink(i, up)}"><div class="t">${li(i.icon)}<h3>${esc(i.name)}</h3><p>${esc(i.short)}</p>${more('Learn more')}</div><img src="${up}assets/photos/${i.photo}" alt="" loading="lazy" width="280" height="225"></a>`).join('')}</div>
+  <div class="inds2">${INDUSTRIES.map((i) => `<a class="ind2" href="${indLink(i, up)}"><img src="${up}assets/photos/${i.photoTall || i.photo}" alt="" loading="lazy" width="500" height="300"><div class="t"><h3>${esc(i.title)}</h3><i></i></div><p>${esc(i.short)} <b>Learn more ${ARR}</b></p></a>`).join('')}</div>
 </section>
 
 <section class="c" style="padding-top:0" id="programs">
