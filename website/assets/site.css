@@ -375,3 +375,20 @@ footer .fbase { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content:
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
 section.c { padding-top: 76px; padding-bottom: 76px; }
 @media (max-width: 760px) { section.c { padding-top: 52px; padding-bottom: 52px; } }
+
+/* ---------- cleaner white look (November 2026): white pages, blue only for buttons, links and icons ---------- */
+:root { --soft: #f7f9fc; --pale: #eef4ff; --line: #e4e9f2; }
+.hero, .band-hero, .signin-page { background: #fff; }
+.hero { background: radial-gradient(900px 420px at 85% 30%, #eef4ff, transparent 70%), #fff; }
+.band-hero { border-bottom: 1px solid var(--line); }
+.band-hero .swoosh { opacity: .22; width: 36%; }
+.band-hero .bgimg { opacity: .5; width: 40%; }
+.signin-page { background: var(--soft); } .signin-page .bgimg { opacity: .35; }
+section.band-hero#how { background: var(--soft); border-top: 1px solid var(--line); }
+.safe { background: #fff; }
+footer { background: #fff; }
+.win { box-shadow: 0 24px 60px -28px rgba(10, 40, 120, .35); }
+.ticks li::before, .edlist li::before { filter: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --soft: #0d1830; --pale: #0f1f3d; --line: #22324f; }
+  :root:not([data-theme="light"]) .hero, :root:not([data-theme="light"]) .band-hero, :root:not([data-theme="light"]) .safe, :root:not([data-theme="light"]) footer { background: var(--bg); } }
+.pcard { border-color: var(--line); }
