@@ -29,7 +29,7 @@ const localPrograms = () => path.join(process.env.LOCALAPPDATA || path.join(os.h
 
 // ---------- the programs ----------
 const PROGRAMS = [
-  { id: 'accounting', name: 'Accounting', full: 'Riyeser Accounting', icon: '📒', desc: 'Invoices, bills, banking, GST/BAS and reports.',
+  { id: 'accounting', name: 'Accounting', full: 'Riyeser Accounting', icon: '📒', desc: 'Invoices, bills, GST/BAS and reports. Accounting Basics is free; Accounting Plus comes with your licence.',
     dirs: ['Riyeser Accounting'], exes: ['Riyeser Accounting.exe'], links: ['Riyeser Accounting'] },
   { id: 'payroll', name: 'Payroll', full: 'Riyeser Payroll', icon: '🕒', desc: 'Time clock, timesheets, pay runs, payslips and leave.',
     dirs: ['riyeser-payroll', 'Riyeser Payroll', 'riyeser', 'Riyeser', 'riyser', 'Riyser'], exes: ['Riyeser Payroll.exe', 'Riyeser.exe', 'Riyser.exe'],

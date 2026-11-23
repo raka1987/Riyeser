@@ -173,7 +173,7 @@ function openLicence() {
     : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
       <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
       <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">$20 per user a month for every Riyeser program, less for 5+ users. 🐣 Early bird: 50% off your first year for the first 100 users. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+      <p class="muted">$20 per user a month for every Riyeser program, less for 5+ users. 🐣 Early bird: 50% off your first year for the first 100 users. Accounting Basics stays free without a licence; a licence unlocks Accounting Plus. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
   $('#licdlg').showModal();
 }
 document.addEventListener('click', (e) => {

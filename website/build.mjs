@@ -39,7 +39,7 @@ const PROGRAMS = [
       ['Light or dark', 'A modern look that\'s easy on the eyes, day or night.'],
     ] },
   { id: 'accounting', name: 'Riyeser Accounting', short: 'Accounting', icon: '📒', file: 'RiyeserAccounting-Setup.exe',
-    one: 'Invoices, bills, banking, GST/BAS and reports — real double-entry books without the jargon.',
+    one: 'Invoices, bills, banking, GST/BAS and reports — real double-entry books without the jargon. Accounting Basics is free; Accounting Plus adds banking, payroll and more.',
     pitch: 'Know who owes you, and who you owe.',
     shot: 'accounting.webp',
     features: [
@@ -242,7 +242,7 @@ page({
 
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
-  <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's $20 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Every program is free for 90 days with no card. After that it's $20 per user a month for the whole suite, less for teams of 5 or more, and 2 months free if you pay yearly. Nothing is deleted when the trial ends, and Accounting Basics stays free. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline. Riyeser Services can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
   <details><summary>Will it work on a Mac?</summary><p>Not yet — the programs are for Windows 10 and 11. Riyeser Services also works in any web browser at riyeser.com/app.</p></details>
   <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has step-by-step answers for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
@@ -383,6 +383,7 @@ page({
     <div class="plan"><div class="k">20+ users</div><div class="price">$13<small> per user / month</small></div><p>35% off every user for larger teams.</p></div>
   </div>
   <div class="addon"><div class="big">🏢</div><div><b>Add-on: extra companies — $10 a month each</b><p>Your plan includes one company in Riyeser Accounting. Run more — another company, a trust, or your clients' books — for $10 a month per extra company. Free to try during your 90 days.</p></div></div>
+  <div class="addon"><div class="big">📒</div><div><b>Accounting Basics — free, no licence needed</b><p>Invoices, quotes, customers, stock, suppliers, simple money in and out, the shop counter and the key reports, free for as long as you like. <b>Accounting Plus</b> adds bank reconciliation, statement import, payroll, journals, jobs, budgets, Balance Sheet and Trial Balance, and is included in your licence. If your trial ends without a licence, your books open in Basics and nothing is lost.</p></div></div>
   <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
 </section>
 
