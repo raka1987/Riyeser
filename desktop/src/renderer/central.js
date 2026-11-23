@@ -310,7 +310,7 @@ function programRows(s) {
       ? `<span class="ok">✓ Paid${p.until ? ` to ${when(p.until)}` : ''}${p.warning === 'cancelled' ? ' (cancelled, ends then)' : ''}${p.warning === 'payment_failed' ? ' · payment failed' : ''}</span>`
       : id === 'plus' && s.daysLeft > 0 ? `<span>${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} of free trial left</span>` : `<span class="muted">${esc(free(c))}</span>`;
     const btn = p && p.paid ? '' : s.signedIn && s.configured ? `<button class="btn s" data-lic="subscribe" data-product="${id}">Subscribe</button>` : '';
-    return `<div class="prog"><div><b>${name}</b>${state}</div>${btn}</div>`;
+    return `<div class="plrow"><div><b>${name}</b>${state}</div>${btn}</div>`;
   }).join('');
 }
 function openLicence() {
@@ -328,7 +328,7 @@ function openLicence() {
   }
   const paidAny = Object.values(s.products || {}).some((p) => p.paid);
   body.innerHTML = `${head}
-    <div class="progs">${programRows(s)}</div>
+    <div class="plrows">${programRows(s)}</div>
     ${s.signedIn && s.configured ? `<label class="yr"><input type="checkbox" id="licyearly" ${yearly ? 'checked' : ''}> Pay yearly (2 months free)</label>
     <div class="row">${paidAny ? '<button class="btn s" data-lic="manage">Manage plan &amp; receipts</button>' : ''}<button class="btn s" data-lic="refresh">Check again</button><button class="btn s" data-lic="signout">Sign out on this PC</button></div>` : ''}
     <p class="muted">Central, PDF and Desk Assistant are always free. Reaching a free limit never deletes anything: you can still open, print and export everything, and only new work waits for a subscription. 🐣 Early bird: 50% off your first year for the first 100 businesses. Extra users $5 a month, extra companies $10 a month. Prices in AUD; any tax is shown before you pay. <a href="#" data-lic="buy">See pricing</a></p>`;

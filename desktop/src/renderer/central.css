@@ -135,9 +135,9 @@ h2.sec { font-size: 13px; font-weight: 700; color: var(--muted); text-transform:
 #licbody .big { font-size: 28px; }
 #licbody input { width: 100%; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); font: inherit; background: transparent; color: inherit; margin: 6px 0 10px; letter-spacing: .5px; }
 #licbody .muted { font-size: 12.5px; }
-#licbody .progs { display: grid; gap: 8px; margin: 4px 0 12px; }
-#licbody .prog { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
-#licbody .prog b { display: block; } #licbody .prog span { font-size: 12.5px; } #licbody .prog .ok { color: var(--ok, #15803d); }
+#licbody .plrows { display: grid; gap: 8px; margin: 4px 0 12px; }
+#licbody .plrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+#licbody .plrow b { display: block; } #licbody .plrow span { font-size: 12.5px; } #licbody .plrow .ok { color: var(--ok, #15803d); }
 #licbody .yr { display: flex; gap: 8px; align-items: center; margin: 4px 0 10px; } #licbody .yr input { width: auto; margin: 0; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0; background: #0b1426; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px; transition: all .2s; pointer-events: none; max-width: 80vw; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
