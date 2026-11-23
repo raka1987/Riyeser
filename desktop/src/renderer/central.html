@@ -9,14 +9,14 @@
 <body>
   <div class="app">
     <aside class="side">
-      <div class="logo"><img src="icon-central.png" alt=""><div><b>Riyeser Central</b><small>Riyeser Group</small></div></div>
+      <div class="logo"><img src="logo-r.png" alt=""><b>Riyeser Central</b></div>
       <nav class="nav" id="nav"></nav>
       <div class="foot"><span id="foot"></span><br><button id="licbtn">Licence</button> · <button id="checkupd">Check for updates</button></div>
     </aside>
     <main class="main">
       <div class="inner">
         <header class="top">
-          <div><h1 id="hello">Home</h1><div class="date" id="date"></div></div>
+          <div class="greet"><h1 id="hello">Hello.</h1><div class="date">Your business at a glance in Riyeser Central. <span id="date"></span></div></div>
           <label class="search"><span data-ic="search"></span><input id="q" placeholder="Search all your files: name, words inside, company" autocomplete="off"><button id="qclear" class="clear" hidden aria-label="Clear" data-ic="x"></button></label>
           <button id="theme" class="iconbtn" title="Light or dark"></button>
         </header>
@@ -26,22 +26,22 @@
         <section id="results" hidden></section>
 
         <section id="home">
-          <div class="kpis" id="kpis"></div>
-          <div id="quickwrap"><h2 class="sec">Quick access</h2><div class="quick" id="quick"></div></div>
+          <div class="cards" id="cards"></div>
           <div class="cols">
             <div class="stack">
-              <div class="panel" id="recentp">
-                <div class="ph"><span class="grow">Recent files</span><div class="tabs" id="rtabs"><button data-rt="all" class="on">All</button><button data-rt="pdf">PDFs</button><button data-rt="sorted">Sorted</button></div></div>
-                <div id="recent"></div>
+              <div class="panel" id="actp">
+                <div class="ph"><span class="grow">Recent activity</span><button class="lnk" id="actall">View all <span class="chev">›</span></button></div>
+                <div id="activity"></div>
               </div>
               <div class="panel" id="moneyp">
-                <div class="ph"><span class="grow">Invoices to chase</span><button class="lnk" data-open="" id="moneyopen">Open Accounting</button></div>
+                <div class="ph"><span class="grow">Invoices to chase</span><button class="lnk" data-open="" id="moneyopen">Open Accounting <span class="chev">›</span></button></div>
                 <div id="money"></div>
               </div>
             </div>
             <div class="stack">
+              <div class="panel" id="quickp"><div class="ph"><span class="grow">Shortcuts</span></div><div class="quick" id="quick"></div></div>
               <div class="panel" id="todayp"><div class="ph"><span class="grow">Today</span></div><div id="today"></div></div>
-              <div class="panel" id="todop"><div class="ph"><span class="grow">To-do</span><button class="lnk" data-open="desk">Open Desk Assistant</button></div><div id="todo"></div></div>
+              <div class="panel" id="todop"><div class="ph"><span class="grow">To-do</span><button class="lnk" data-open="desk">Open Desk Assistant <span class="chev">›</span></button></div><div id="todo"></div></div>
             </div>
           </div>
           <div id="getstarted" class="panel" hidden></div>

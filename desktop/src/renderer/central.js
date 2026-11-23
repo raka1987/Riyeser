@@ -1,4 +1,4 @@
-// Riyeser Central home screen ("Desk" design: navy sidebar, summary tiles, quick access, tables).
+// Riyeser Central home screen: navy sidebar, a greeting, one card per installed program, recent activity, shortcuts.
 // Shows only what this customer has: sidebar entries, tiles, quick links and panels appear only for programs that are
 // installed on this PC. Anything else is listed under "Get more apps". A program that isn't installed never shows data,
 // even if old files from an earlier install are still on the PC.
@@ -72,8 +72,8 @@ $('#theme').addEventListener('click', () => { theme = theme === 'dark' ? 'light'
 
 function tick() {
   const n = new Date(); const h = n.getHours();
-  $('#hello').textContent = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
-  $('#date').textContent = n.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  $('#hello').textContent = h < 12 ? 'Good morning.' : h < 17 ? 'Good afternoon.' : 'Good evening.';
+  $('#date').textContent = n.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
 }
 tick(); setInterval(tick, 60000);
 
@@ -82,12 +82,15 @@ tick(); setInterval(tick, 60000);
 const ORDER = ['central', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
-  'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Accounting' }, accounting: { ic: 'book', c: 'c-acc', nav: 'Accounting' },
-  pos: { ic: 'store', c: 'c-pos', nav: 'POS' },
-  payroll: { ic: 'people', c: 'c-pay', nav: 'Payroll' }, desk: { ic: 'folder', c: 'c-desk', nav: 'Desk Assistant' },
-  pdf: { ic: 'pdf', c: 'c-pdf', nav: 'PDF' }, services: { ic: 'hat', c: 'c-svc' }, // services: shown by its own name (As Built)
+  'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Books', col: '#16a05a', blurb: 'View and manage your accounts' },
+  accounting: { ic: 'book', c: 'c-acc', nav: 'Books', col: '#1a5fd6', blurb: 'View and manage your accounts' },
+  pos: { ic: 'store', c: 'c-pos', nav: 'POS', col: '#0f8f82', blurb: 'Open the till and ring up sales' },
+  payroll: { ic: 'people', c: 'c-pay', nav: 'Payroll', col: '#5b54d6', blurb: 'Run payroll and manage staff' },
+  desk: { ic: 'folder', c: 'c-desk', nav: 'Desk Assistant', col: '#6a4be0', blurb: 'Sort and find every file' },
+  pdf: { ic: 'pdf', c: 'c-pdf', nav: 'PDF', col: '#d6423a', blurb: 'Fill in, sign and combine PDFs' },
+  services: { ic: 'hat', c: 'c-svc', col: '#d98a0b', blurb: 'Keep job records up to date' }, // services: shown by its own name (As Built)
 };
-let programs = []; let today = null; let upd = { updates: [] }; let updating = false; let view = 'home'; let rtab = 'all';
+let programs = []; let today = null; let upd = { updates: [] }; let updating = false; let view = 'home';
 const has = (id) => programs.some((p) => p.id === id && p.status !== 'missing');
 const accId = () => (has('accounting') ? 'accounting' : has('accounting-basics') ? 'accounting-basics' : null); // Plus wins when both are there
 const hasAcc = () => !!accId();
@@ -114,8 +117,7 @@ function renderNav() {
   const upFor = new Set((upd.updates || []).map((u) => u.id));
   const missing = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting'))).length;
   $('#nav').innerHTML = `<button class="${view === 'home' ? 'on' : ''}" data-view="home">${icon('home')}Home</button>
-    ${mine.length ? '<div class="navlbl">Your programs</div>' : ''}
-    ${mine.map((p) => `<button data-open="${esc(p.id)}" title="Open ${esc(p.full)}">${logo(p)}${esc(LOOK[p.id].nav || p.name)}${upFor.has(p.id) ? '<span class="tag">Update</span>' : ''}</button>`).join('')}
+    ${mine.map((p) => `<button data-open="${esc(p.id)}" title="Open ${esc(p.full)}">${icon(LOOK[p.id].ic)}${esc(LOOK[p.id].nav || p.name)}${upFor.has(p.id) ? '<span class="tag">Update</span>' : ''}</button>`).join('')}
     <hr>
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
@@ -123,52 +125,62 @@ function renderNav() {
     <button data-help="central">${icon('help')}Help</button>`;
 }
 
-// ---------- summary tiles ----------
-function kpi({ ic, t, v, s, cls = '', open }) {
-  return `<button class="kpi ${cls}"${open ? ` data-open="${esc(open)}"` : ''}><span class="ki">${icon(ic, 22)}</span><span><div class="kt">${esc(t)}</div><div class="kv num">${esc(v)}</div>${s ? `<div class="ks">${esc(s)}</div>` : ''}</span></button>`;
+// ---------- program cards (one per installed program, with real figures when there are any) ----------
+const CHEV = '<svg class="ic chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>';
+function cardLine(id) {
+  const L = LOOK[id];
+  if (id === accId()) {
+    const m = today.money;
+    if (m && m.found) {
+      const overdue = m.receivables.filter((r) => r.overdue).length;
+      if (m.receivables.length) return { s: `${money(m.totals.owedToYou)} owed to you${overdue ? ` · ${overdue} overdue` : ''}`, alert: overdue > 0 };
+    }
+    return { s: L.blurb };
+  }
+  if (id === 'payroll') { const r = (today.payroll || {}).lastRun; return { s: r ? `Last pay run ${fmtDate(r.pay_date)} · ${r.employees} staff` : L.blurb }; }
+  if (id === 'desk') { const n = today.taskCount ?? today.tasks.length; return { s: n ? `${n} to-do${n === 1 ? '' : 's'} waiting` : L.blurb }; }
+  return { s: L.blurb };
 }
-function renderKpis() {
-  const out = [];
-  if (hasAcc()) {
-    const m = today.money; const ok = m && m.found; const t = ok ? m.totals : { owedToYou: 0, overdueToYou: 0, youOwe: 0 };
-    const overdue = ok ? m.receivables.filter((r) => r.overdue) : [];
-    out.push(kpi({ ic: 'alert', t: 'Overdue invoices', v: String(overdue.length), s: overdue.length ? `${money(t.overdueToYou)} to chase` : ok ? 'Nothing overdue' : 'Set up your company', cls: overdue.length ? 'alert' : '', open: accId() }));
-    out.push(kpi({ ic: 'money', t: 'Owed to you', v: money(t.owedToYou), s: ok ? `${m.receivables.length} open invoice${m.receivables.length === 1 ? '' : 's'}` : '', open: accId() }));
-    const next = ok ? m.payables.slice().sort((a, b) => (b.overdue - a.overdue) || String(a.due).localeCompare(String(b.due)))[0] : null;
-    out.push(kpi({ ic: 'bill', t: 'Bills to pay', v: money(t.youOwe), s: next ? `Next: ${next.contact}${next.due ? (next.overdue ? ' (overdue)' : `, due ${fmtDate(next.due)}`) : ''}` : 'No bills waiting', open: accId() }));
-  }
-  if (has('payroll')) {
-    const pr = today.payroll || {};
-    out.push(kpi({ ic: 'cal', t: 'Last pay run', v: pr.lastRun ? fmtDate(pr.lastRun.pay_date) : 'None yet', s: pr.lastRun ? `${money(pr.lastRun.total_net)} net · ${pr.lastRun.employees} staff` : 'Run your first pay in Payroll', open: 'payroll' }));
-  }
-  if (has('desk')) {
-    const meetingsToday = today.meetings.filter((x) => isToday(x.start)).length;
-    const n = today.taskCount ?? today.tasks.length;
-    out.push(kpi({ ic: 'check', t: 'To-dos', v: String(n), s: today.calendars ? `${meetingsToday} meeting${meetingsToday === 1 ? '' : 's'} today` : 'From meetings and emails', cls: n ? '' : 'good', open: 'desk' }));
-  }
-  $('#kpis').innerHTML = out.join('');
-  $('#kpis').hidden = !out.length;
+function renderCards() {
+  const mine = programs.filter((p) => p.status !== 'missing' && !(p.id === 'accounting-basics' && has('accounting')));
+  const missing = programs.some((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')));
+  $('#cards').hidden = !mine.length;
+  $('#cards').innerHTML = mine.map((p) => {
+    const L = LOOK[p.id]; const c = cardLine(p.id);
+    return `<button class="pcard" data-open="${esc(p.id)}" title="Open ${esc(p.full)}"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}</b><span class="ps${c.alert ? ' bad' : ''}">${esc(c.s)}</span>${CHEV}</button>`;
+  }).join('') + (missing ? `<button class="pcard add" data-view="apps"><span class="pi">${icon('plus', 30)}</span><b>Add a program</b><span class="ps">Install more Riyeser apps</span>${CHEV}</button>` : '');
 }
 function renderQuick() {
   const list = QUICK.map((q) => ({ ...q, id: quickFor(q) })).filter((q) => q.id);
-  $('#quickwrap').hidden = !list.length;
+  $('#quickp').hidden = !list.length;
   $('#quick').innerHTML = list.map((q) => `<button class="qa" ${q.act ? `data-act="${q.act}"` : `data-open="${esc(q.id)}" data-page="${esc(q.page || '')}"`}><span class="qi ${LOOK[q.id].c}">${icon(q.ic)}</span><span><b>${esc(q.t || (programs.find((x) => x.id === q.id) || {}).name || '')}</b><small>${esc(q.s)}</small></span></button>`).join('');
 }
 
 // ---------- panels ----------
-function renderRecent() {
-  // Recent files come from Desk Assistant (and Windows' recent list) so they're only shown while it's installed.
-  const box = $('#recentp'); box.hidden = !has('desk') && !has('pdf');
-  if (box.hidden) return;
-  if (!has('desk')) rtab = 'pdf'; // with only Riyeser PDF, this is a list of recent PDFs
-  $('#rtabs').hidden = !has('desk'); $('#recentp .ph .grow').textContent = has('desk') ? 'Recent files' : 'Recent PDFs';
-  const root = (today.organisedRoot || '').toLowerCase();
-  const list = (today.recent || []).filter((r) => rtab === 'pdf' ? isPdf(r.name) : rtab === 'sorted' ? root && r.path.toLowerCase().startsWith(root) : true).slice(0, 8);
-  document.querySelectorAll('#rtabs button').forEach((b) => b.classList.toggle('on', b.dataset.rt === rtab));
-  $('#recent').innerHTML = list.length
-    ? `<table class="tbl"><colgroup><col style="width:48%"><col style="width:34%"><col style="width:18%"></colgroup><tr><th>Name</th><th>Folder</th><th class="r">Opened</th></tr>
-      ${list.map((r) => `<tr data-file="${esc(r.path)}" title="${esc(r.path)}"><td>${fileIcon(r.name)}${esc(r.name)}</td><td class="muted">${esc(folderName(r.dir))}</td><td class="r muted">${r.when ? ago(r.when) : ''}</td></tr>`).join('')}</table>`
-    : `<div class="empty">${rtab === 'pdf' ? 'PDFs you open will show up here.' : rtab === 'sorted' ? 'Files Desk Assistant sorts for you will show up here.' : 'Files you open will show up here.'}</div>`;
+// Recent activity: only real things from installed programs (files opened, overdue invoices, the last pay run).
+let actAll = false;
+const dayOf = (v) => new Date(`${String(v).slice(0, 10)}T12:00:00`).getTime();
+function whenText(t, dateOnly) {
+  const d = new Date(t); const y = new Date(); y.setDate(y.getDate() - 1);
+  const day = isToday(t) ? 'Today' : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  return dateOnly ? day : `${day}, ${fmtTime(t)}`;
+}
+function activityItems() {
+  const out = [];
+  for (const r of today.recent || []) if (r.when) out.push({ t: r.when, ic: fileIcon(r.name), text: `${esc(r.name)} <span class="lbl">· ${esc(folderName(r.dir))}</span>`, attr: `data-file="${esc(r.path)}" title="${esc(r.path)}"` });
+  const m = today.money;
+  if (hasAcc() && m && m.found) for (const r of m.receivables.filter((x) => x.overdue)) out.push({ t: dayOf(r.due || r.date), dateOnly: true, ic: `<span class="fi bad">${icon('invoice', 18)}</span>`, text: `Invoice ${esc(r.number)} for ${esc(r.contact)} is overdue · ${money(r.owing)}`, attr: `data-open="${esc(accId())}"` });
+  const pr = has('payroll') && today.payroll && today.payroll.lastRun;
+  if (pr) out.push({ t: dayOf(pr.pay_date), dateOnly: true, ic: `<span class="fi" style="color:#5b54d6">${icon('people', 18)}</span>`, text: `Pay run for ${pr.employees} staff · ${money(pr.total_net)} net`, attr: 'data-open="payroll"' });
+  return out.sort((a, b) => b.t - a.t);
+}
+function renderActivity() {
+  const list = activityItems(); const shown = list.slice(0, actAll ? 30 : 6);
+  $('#actall').hidden = list.length <= 6;
+  $('#actall').innerHTML = actAll ? 'Show less' : 'View all <span class="chev">›</span>';
+  $('#activity').innerHTML = shown.length
+    ? shown.map((a) => `<div class="act" ${a.attr}>${a.ic}<span class="grow">${a.text}</span><span class="lbl">${whenText(a.t, a.dateOnly)}</span></div>`).join('')
+    : '<div class="empty">Nothing yet — open a program to get started.</div>';
 }
 function renderMoney() {
   const box = $('#moneyp'); box.hidden = !hasAcc(); // only while an Accounting app is installed
@@ -178,7 +190,7 @@ function renderMoney() {
   if (!m || !m.found) { $('#money').innerHTML = `<div class="empty">${m && m.error ? `Couldn't read your books: ${esc(m.error)}` : 'No invoices yet. Open Accounting and set up your company to see who owes you here.'}</div>`; return; }
   const rows = m.receivables.slice().sort((a, b) => (b.overdue - a.overdue) || String(a.due || a.date).localeCompare(String(b.due || b.date))).slice(0, 6);
   $('#money').innerHTML = rows.length
-    ? `<table class="tbl"><colgroup><col style="width:17%"><col style="width:17%"><col style="width:36%"><col style="width:12%"><col style="width:18%"></colgroup><tr><th>Due</th><th>Reference</th><th>Customer</th><th></th><th class="r">Amount</th></tr>
+    ? `<table class="tbl"><colgroup><col style="width:15%"><col style="width:15%"><col style="width:35%"><col style="width:15%"><col style="width:20%"></colgroup><tr><th>Due</th><th>Reference</th><th>Customer</th><th></th><th class="r">Amount</th></tr>
       ${rows.map((r) => `<tr data-open="${esc(accId())}"><td>${esc(fmtDate(r.due || r.date))}</td><td>${esc(r.number)}</td><td>${esc(r.contact)}</td><td>${r.overdue ? '<span class="bad">Overdue</span>' : ''}</td><td class="r num">${money(r.owing)}</td></tr>`).join('')}</table>`
     : '<div class="empty">Every invoice is paid. 🎉</div>';
 }
@@ -198,13 +210,14 @@ function renderTodo() {
     : '<div class="empty">Nothing outstanding.</div>';
 }
 function renderLayout() {
-  const left = !$('#recentp').hidden || !$('#moneyp').hidden; const right = !$('#todayp').hidden || !$('#todop').hidden;
+  const left = !$('#actp').hidden || !$('#moneyp').hidden; const right = !$('#quickp').hidden || !$('#todayp').hidden || !$('#todop').hidden;
   $('.cols').hidden = !left && !right;
   $('.cols').style.gridTemplateColumns = left && right ? '' : '1fr';
   // Nothing installed yet (a fresh install): no numbers, just a welcome and the apps to get.
   const none = !programs.some((p) => p.status !== 'missing');
   $('#getstarted').hidden = !none;
-  if (none) $('#getstarted').innerHTML = `<div class="ph">Welcome to Riyeser Central</div><div class="empty" style="font-size:14px">Central is your home screen for every Riyeser program. Add the programs you need below. Their money, files, pay runs and quick links then show up here.</div>`;
+  $('#actp').hidden = none;
+  if (none) $('#getstarted').innerHTML = `<div class="ph">Nothing yet — add a program to get started</div><div class="empty" style="font-size:14px">Riyeser Central is your home screen for every Riyeser program. Install the ones you need below; their cards, shortcuts and recent activity then show up here.</div>`;
   $('#appsv').hidden = !(view === 'apps' || (none && view === 'home')) || !$('#results').hidden;
 }
 function renderApps() {
@@ -222,7 +235,7 @@ function setView(v) {
 async function refresh() {
   [programs, today] = await Promise.all([bridge.call('central:programs'), bridge.call('central:today')]);
   programs.sort((a, b) => byOrder(a.id, b.id));
-  renderNav(); renderKpis(); renderQuick(); renderRecent(); renderMoney(); renderToday(); renderTodo(); renderLayout(); renderApps();
+  renderNav(); renderCards(); renderQuick(); renderActivity(); renderMoney(); renderToday(); renderTodo(); renderLayout(); renderApps();
 }
 
 // ---------- install a program from here (no trip to the website) ----------
@@ -348,8 +361,6 @@ async function runSearch() {
 }
 
 // ---------- events ----------
-
-// ---------- events ----------
 document.addEventListener('click', (e) => {
   const loc = e.target.closest('[data-locate]');
   if (loc) { e.stopPropagation(); safe(async () => { const f = await bridge.call('central:locate', loc.dataset.locate); if (f) { toast('Got it. It\'s on your home screen now.'); refresh(); } }); return; }
@@ -367,8 +378,7 @@ document.addEventListener('click', (e) => {
     if (act.dataset.act === 'pickpdf') safe(() => bridge.call('central:openPdf'));
     return;
   }
-  const rt = e.target.closest('[data-rt]');
-  if (rt) { rtab = rt.dataset.rt; renderRecent(); return; }
+  if (e.target.closest('#actall')) { actAll = !actAll; renderActivity(); return; }
   const open = e.target.closest('[data-open]');
   if (open) { safe(() => bridge.call('central:open', open.dataset.open, open.dataset.page || null)); return; }
   const file = e.target.closest('[data-file]');
