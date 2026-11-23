@@ -8,7 +8,7 @@
 {% if inv %}<a class="btn pri" href="{{ url_for('documents.view', doc_id=inv.id) }}">Open invoice {{ inv.number }}</a>
 {% elif j and j.contact_id and can('sales', 2) %}<form method="post" action="{{ url_for('bookings.invoice_job', jid=j.id) }}"><button class="btn pri">Invoice this job</button></form>{% endif %}</div></div>
 
-<form method="post" class="card"><h3>Job details</h3><fieldset {{ 'disabled' if locked }}><div class="fields">
+<form method="post" class="card"><h3>Job details</h3><fieldset style="border:0;padding:0;margin:0;min-width:0" {{ 'disabled' if locked }}><div class="fields">
   <div><label>Customer</label><select name="contact_id" id="bk-cust"><option value="">—</option>{% for c in customers %}<option value="{{ c.id }}" data-phone="{{ c.phone or '' }}" data-address="{{ (c.address or '')|replace('\n', ', ') }}" {{ 'selected' if v.contact_id == c.id }}>{{ c.name }}</option>{% endfor %}</select></div>
   {% if not j %}<div><label>…or a new customer</label><input name="new_customer" placeholder="Name"></div>{% endif %}
   <div><label>Phone</label><input name="phone" id="bk-phone" value="{{ v.phone or '' }}"></div>
