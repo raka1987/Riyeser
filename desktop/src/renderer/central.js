@@ -79,10 +79,11 @@ tick(); setInterval(tick, 60000);
 
 // ---------- the programs ----------
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
-const ORDER = ['central', 'accounting-basics', 'accounting', 'payroll', 'desk', 'pdf', 'services'];
+const ORDER = ['central', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Accounting' }, accounting: { ic: 'book', c: 'c-acc', nav: 'Accounting' },
+  pos: { ic: 'store', c: 'c-pos', nav: 'POS' },
   payroll: { ic: 'people', c: 'c-pay', nav: 'Payroll' }, desk: { ic: 'folder', c: 'c-desk', nav: 'Desk Assistant' },
   pdf: { ic: 'pdf', c: 'c-pdf', nav: 'PDF' }, services: { ic: 'hat', c: 'c-svc' }, // services: shown by its own name (As Built)
 };
@@ -94,7 +95,7 @@ const hasAcc = () => !!accId();
 // Quick access: one-click jobs, each shown only when its program is installed.
 // `page` asks the program to open on that screen (programs that don't know the page just open normally).
 const QUICK = [
-  { p: 'acc', ic: 'store', t: 'Shop counter', s: 'Ring up a sale (POS)', page: 'pos' },
+  { p: 'pos', ic: 'store', t: 'Open the till', s: 'Ring up a sale', page: 'pos' },
   { p: 'acc', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' },
   { p: 'payroll', ic: 'people', t: 'Run payroll', s: 'Timesheets to payslips', page: 'payrun' },
   { p: 'desk', ic: 'sort', t: 'Sort new files', s: 'Downloads, Desktop, phone', page: 'organise' },
@@ -104,7 +105,7 @@ const QUICK = [
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 // Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
-const LOGO = { 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const LOGO = { 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 const quickFor = (q) => (q.p === 'acc' ? accId() : has(q.p) ? q.p : null);
 
@@ -312,7 +313,7 @@ function openLicence() {
     : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
       <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
       <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business (3 users included), and Accounting Plus, Payroll, POS and As Built are +$20 each. 🐣 Early bird: 50% off your first year for the first 100 businesses. Accounting Basics is free without a licence; Accounting Plus is included in your licence. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+      <p class="muted">Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business (3 users included), and Accounting Plus, Payroll, POS and As Built are +$20 each. 🐣 Early bird: 50% off your first year for the first 100 businesses. Without a licence, Accounting Basics is free for your first 500 invoices and POS for your first 500 sales; Accounting Plus is included in your licence. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
   $('#licdlg').showModal();
 }
 document.addEventListener('click', (e) => {

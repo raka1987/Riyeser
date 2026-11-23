@@ -40,13 +40,13 @@ const PROGRAMS = [
       ['Light or dark', 'A modern look that\'s easy on the eyes, day or night.'],
     ] },
   { id: 'accounting-basics', name: 'Riyeser Accounting Basics', short: 'Accounting Basics', icon: '📗', file: 'RiyeserAccountingBasics-Setup.exe',
-    one: 'Invoicing, quotes, customers and stock for shops and sole traders. $20 a month per business, free for 90 days.',
+    one: 'Invoicing, quotes, customers and stock for shops and sole traders. Free for your first 500 invoices, then $20 a month per business.',
     pitch: 'Invoice, get paid and keep stock.',
     features: [
       ['Quotes → invoices → payments', 'Send quotes, turn them into invoices, and record payments against several invoices at once.'],
       ['Customers & suppliers', 'Contacts, bills and paying bills, with who owes you at a glance.'],
       ['Stock', 'Stock items with average cost, stocktakes and reorder alerts.'],
-      ['Shop counter (POS add-on)', 'Add Riyeser POS (+$20 a month) for a full-screen point of sale for retail or restaurants, with receipts and end-of-day totals.'],
+      ['Works with Riyeser POS', 'Selling at a counter? Add Riyeser POS, the till app. Every till sale shows here as a paid invoice, with stock and GST right.'],
       ['Money in & out', 'Record what you spend and receive, with GST worked out for you.'],
       ['Key reports', 'Profit & Loss, GST summary, who owes you, sales by customer and item, and stock reports.'],
     ],
@@ -56,7 +56,7 @@ const PROGRAMS = [
     pitch: 'Know who owes you, and who you owe.',
     shot: 'accounting.webp',
     features: [
-      ['Everything in Basics', 'Quotes, invoices, payments, customers, suppliers, stock and the shop counter.'],
+      ['Everything in Basics', 'Quotes, invoices, payments, customers, suppliers and stock. Works with Riyeser POS too.'],
       ['Banking', 'Spend and receive money, transfers, bank reconciliation and bank statement import.'],
       ['Payroll', 'Pay runs that post straight to the books, payslips and leave.'],
       ['GST / BAS', 'GST tax codes and a BAS summary (G1, 1A, 1B, W1, W2 and more).'],
@@ -64,8 +64,8 @@ const PROGRAMS = [
       ['Every report', 'Profit & Loss, Balance Sheet, Trial Balance, aged receivables and payables, job P&L — print or export to Excel.'],
     ],
     note: 'Built for Australian small businesses. Have your accountant check your setup before relying on it for tax.' },
-  { id: 'pos', name: 'Riyeser POS', short: 'POS', icon: '🧾', file: 'RiyeserAccountingBasics-Setup.exe',
-    one: 'A touch-friendly till for retail shops or cafes and restaurants. Every sale goes straight into your books. +$20 a month, free for 90 days.',
+  { id: 'pos', name: 'Riyeser POS', short: 'POS', icon: '🧾', file: 'RiyeserPOS-Setup.exe',
+    one: 'A touch-friendly till for retail shops or cafes and restaurants. Every sale goes straight into your books. Free for your first 500 sales, then $20 a month.',
     pitch: 'Sell at the counter. Books done automatically.',
     shot: 'pos-till.webp',
     features: [
@@ -75,8 +75,9 @@ const PROGRAMS = [
       ['Named tills', 'Till 1, Bar, Front counter — each sale records which till took it.'],
       ['Straight into Accounting', 'Every sale is a proper invoice and payment, so stock, GST/BAS and reports update by themselves.'],
       ['Sales & Today', 'Today\'s takings, sales by hour and best sellers, with receipts and voids kept in the audit trail.'],
+      ['Managers & close till', 'Manager PIN or card for voids, refunds and big discounts, then count the drawer and print the Z-report.'],
     ],
-    note: 'Riyeser POS runs inside Riyeser Accounting: install Accounting Basics or Plus and open Shop counter. Manager approvals and close-till reports are coming next.' },
+    note: 'Riyeser POS is its own app with its own installer. It opens the same company file as Riyeser Accounting Basics or Plus, so till sales show there as paid invoices. You don\'t need Accounting to use POS.' },
   { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: PAYROLL_WIN ? 'RiyeserPayroll-Setup.exe' : null,
     one: 'Time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click.',
     pitch: 'Pay day without the paperwork.',
@@ -121,9 +122,9 @@ const PROGRAMS = [
 // Short words for program cards and the Programs menu.
 const CARD = {
   central: ['Your home screen: money owed, meetings, to-dos and every Riyeser program.', 'Home screen and updates'],
-  'accounting-basics': ['Invoices, quotes, customers and stock. $20 a month per business.', 'Invoicing and stock'],
+  'accounting-basics': ['Invoices, quotes, customers and stock. Free for your first 500 invoices.', 'Invoicing and stock'],
   accounting: ['Full books: banking, reconciliation, BAS, payroll, journals, jobs and budgets.', 'Full books, +$20 a month'],
-  pos: ['A touch-friendly till for shops, cafes and restaurants.', 'Shop counter till'],
+  pos: ['A touch-friendly till for shops, cafes and restaurants. Free for your first 500 sales.', 'The till for shops and cafes'],
   payroll: ['Time clock, timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
   'desk-assistant': ['Sorts your files by type and year, and finds anything in seconds.', 'Sort and find your files'],
   pdf: ['Open, fill in, sign, mark up and combine PDFs, even scanned ones.', 'Fill, sign and edit PDFs'],
@@ -176,9 +177,10 @@ const bandHero = ({ eyebrow, title, lead, img = '', up = '', extra = '' }) => `<
 const INDUSTRIES = [
   { id: 'retail', name: 'Retail & hospitality', icon: 'retail', photo: 'retail.webp', short: 'Manage stock, sales records and staff pay.',
     title: 'Retail & Hospitality', lead: 'Sell at the counter, keep stock under control and pay your staff, from one Windows PC.',
-    h: 'Sales, stock and staff pay', p: 'Ring up sales on a full-screen shop counter, keep count of stock as it sells, and pay your team from their clock-in hours.',
+    h: 'Sales, stock and staff pay', p: 'Ring up sales on Riyeser POS, keep count of stock as it sells, and pay your team from their clock-in hours.',
     shot: 'accounting.webp', shotName: 'Riyeser Accounting', shotApp: 'accounting-basics', cta: ['accounting-basics', 'Explore Accounting Basics'],
-    progs: [['accounting-basics', ['Shop counter for retail or restaurant: tables, kitchen dockets and park sale', 'Receipts print by themselves; end-of-day totals by cash and card', 'Stock with average cost, stocktakes and reorder alerts', 'Free forever, no licence needed']],
+    progs: [['pos', ['A till for retail or restaurant: tables, kitchen dockets and held sales', 'Receipts print by themselves; close the till with cash and card totals', 'Manager PIN or card for voids, refunds and big discounts', 'Free for your first 500 sales']],
+      ['accounting-basics', ['Every till sale lands as a paid invoice, with GST right', 'Stock with average cost, stocktakes and reorder alerts', 'Free for your first 500 invoices']],
       ['payroll', ['Staff clock in and out with a 4-digit PIN', 'Timesheets flow straight into the pay run', 'Payslips with year-to-date totals, printed, emailed or saved as PDFs']],
       ['central', ['What customers owe and what you owe, as soon as you open it', "Today's meetings and your to-do list", 'Every Riyeser program one click away']]] },
   { id: 'accounting', name: 'Accounting practices', icon: 'practice', photo: 'accounting.webp', short: 'Keep client books and pay runs organised.',
@@ -202,7 +204,8 @@ const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">$
 
 const more = (t) => `<span class="more">${t} ${ARR}</span>`;
 const FREE_TOOLS = ['central', 'desk-assistant', 'pdf'];
-const badgeOf = (p) => FREE_TOOLS.includes(p.id) ? '<span class="badge free">Free forever</span>' : '<span class="badge">$20/mo · 90 days free</span>';
+const FREE_CAP = { 'accounting-basics': '500 invoices free', pos: '500 sales free' };
+const badgeOf = (p) => FREE_TOOLS.includes(p.id) ? '<span class="badge free">Free forever</span>' : FREE_CAP[p.id] ? `<span class="badge">$20/mo · ${FREE_CAP[p.id]}</span>` : '<span class="badge">$20/mo · 90 days free</span>';
 
 /** assets/x.webp -> assets/x.webp?v=<content hash>, so browsers fetch new pictures and styles as soon as they change. */
 const versionOf = {};
@@ -274,10 +277,10 @@ const freeLine = 'Free download · no sign-up · no card · works offline';
 
 // Riyeser Accounting comes in two editions: one download, the licence decides which one you get.
 const EDITIONS = [
-  { name: 'Accounting Basics', price: '$20', small: 'a month per business · 3 users included', tag: 'Free for 90 days',
+  { name: 'Accounting Basics', price: '$20', small: 'a month per business · 3 users included', tag: 'First 500 invoices free',
     blurb: 'Everything a small shop or sole trader needs to invoice and keep stock.',
     has: ['Quotes, invoices and receiving payments', 'Customers, suppliers and bills', 'Stock items, stocktake and reorder alerts',
-      'Simple money in and money out', 'Shop counter with the POS add-on (+$20 a month)', 'Profit & Loss, GST summary, who owes you, sales and stock reports'] },
+      'Simple money in and money out', 'Works with Riyeser POS, the till app', 'Profit & Loss, GST summary, who owes you, sales and stock reports'] },
   { name: 'Accounting Plus', price: '+$20', small: 'a month on top of Basics', tag: 'Free for 90 days',
     blurb: 'Everything in Basics, plus the tools for full books.',
     has: ['Everything in Accounting Basics', 'Bank reconciliation and bank statement import', 'Payroll and pay runs',
@@ -288,11 +291,11 @@ const editionsBlock = (up, { download = true } = {}) => `
   <div class="price">${esc(e.price)}<small> ${esc(e.small)}</small></div><p>${esc(e.blurb)}</p>
   <ul class="edlist">${e.has.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>`).join('')}</div>
 <p class="sub" style="margin-top:16px">Two separate apps that open the same books. Move up to Plus or back down to Basics any time: install the other one and it replaces the first, with all your customers, invoices and stock carried over. Plus-only records (payroll, journals, jobs, budgets) are kept safe in Basics and come back in Plus.</p>
-${download ? `<div class="ctas" style="justify-content:flex-start;margin-top:6px"><a class="btn s" href="${RELEASES}/RiyeserAccountingBasics-Setup.exe">${DL} Download Accounting Basics — 90 days free</a><a class="btn p" href="${RELEASES}/RiyeserAccountingPlus-Setup.exe">${DL} Download Accounting Plus — 90 days free</a></div>` : ''}`;
+${download ? `<div class="ctas" style="justify-content:flex-start;margin-top:6px"><a class="btn s" href="${RELEASES}/RiyeserAccountingBasics-Setup.exe">${DL} Download Accounting Basics — 500 invoices free</a><a class="btn p" href="${RELEASES}/RiyeserAccountingPlus-Setup.exe">${DL} Download Accounting Plus — 90 days free</a></div>` : ''}`;
 const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
 <section class="c" style="padding-bottom:0"><div class="cta"><h2>${title}</h2><p>${text}</p>
 <div class="ctas"><a class="btn t big" href="${up}downloads.html">${WINDL}</a><a class="btn glass big" href="${up}help.html">Help Centre</a></div>
-<p class="fine">Windows 10 &amp; 11 · Free tools forever · paid programs free for 90 days · no card</p></div></section>`;
+<p class="fine">Windows 10 &amp; 11 · Free tools forever · paid programs free to start · no card</p></div></section>`;
 
 // ---------- home ----------
 page({
@@ -346,7 +349,7 @@ page({
 <section class="c" style="padding-top:0;max-width:920px">
   <h2 class="h2 center">Frequently asked questions</h2>
   <div class="faq" style="margin-top:26px">
-  <details><summary>What does it cost?</summary><p>Riyeser Central, PDF and the Desk Assistant file organiser are free forever. Accounting Basics is $20 a month per business — not per person — and Accounting Plus, Payroll, POS and As Built are +$20 a month each. Every paid program is free for 90 days with no card, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Riyeser Central, PDF and the Desk Assistant file organiser are free forever. Accounting Basics is free for your first 500 invoices, then $20 a month per business — not per person. POS is free for your first 500 sales, then $20 a month. Accounting Plus, Payroll and As Built are +$20 a month each, free for 90 days with no card, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline. As Built can optionally sync to an online account so phones, clients and staff can see your projects.</p></details>
   <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11. As Built also works in any web browser, on phones and tablets.</p></details>
   <details><summary>Where do I start?</summary><p>Download Riyeser Central. It's the home screen for every program and shows you what else you can add. The <a class="more" href="${up}help/start.html">Getting started guide</a> walks you through it.</p></details>
@@ -519,7 +522,7 @@ page({
 </section>
 <section class="c" style="padding-top:0">
   <h2 class="h2">Every program</h2><p class="sub">Or download a program on its own. Each one installs in one click and updates over the old version, so your information is kept.</p>
-  ${PROGRAMS.filter((p) => p.id !== 'central').map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p></div>${p.id === 'pos' ? `<a class="btn s" href="${up}programs/accounting-basics.html">Included in Accounting</a>` : p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join('')}
+  ${PROGRAMS.filter((p) => p.id !== 'central').map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p></div>${p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join('')}
   <div class="note" style="margin-top:26px"><b>Windows says “Windows protected your PC”?</b> Click <b>More info</b>, then <b>Run anyway</b>. We're getting our programs signed so this goes away. The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates and your licence.</div>
 </section>
 ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the same button names you see on screen.')}`,
@@ -528,7 +531,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
 // ---------- pricing ----------
 page({
   path: 'pricing.html', title: 'Riyeser pricing — free tools, then $20 a month per business', active: 'pricing',
-  description: 'Riyeser Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business; Accounting Plus, Payroll, POS and As Built are +$20 each. Every paid program is free for 90 days, no card.',
+  description: 'Riyeser Central, PDF and Desk Assistant are free forever. Accounting Basics is free for 500 invoices and POS for 500 sales, then $20 a month; Accounting Plus, Payroll and As Built are +$20 each, free for 90 days, no card.',
   body: (up) => `
 ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a month — per business, not per person.' })}
 <section class="c" style="padding-bottom:20px">
@@ -537,11 +540,11 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
     <div class="plan"><span class="tag free">Free forever</span><div class="k">Free tools</div><div class="price">$0</div>
       <ul class="ticks"><li>Riyeser Central — your home screen</li><li>Riyeser PDF — fill, sign, combine, edit</li><li>Desk Assistant — sort and find every file</li></ul></div>
     <div class="plan best"><span class="tag">Start here</span><div class="k">Accounting Basics</div><div class="price">$20<small> / month per business</small></div>
-      <ul class="ticks"><li>Invoices, quotes, customers and stock</li><li>Money in &amp; out, GST summary, profit &amp; loss</li><li>3 users included</li></ul></div>
+      <ul class="ticks"><li><b>First 500 invoices free</b></li><li>Invoices, quotes, customers and stock</li><li>Money in &amp; out, GST summary, profit &amp; loss</li><li>3 users included</li></ul></div>
     <div class="plan"><div class="k">Add programs</div><div class="price">+$20<small> / month each</small></div>
-      <ul class="ticks"><li><b>Accounting Plus</b> — reconciling, bank import, BAS, jobs, budgets</li><li><b>Payroll</b> — timesheets, pay runs, payslips, leave</li><li><b>POS</b> — shop counter, tables, kitchen, close till</li><li><b>As Built</b> — building services on your drawings</li></ul></div>
+      <ul class="ticks"><li><b>Accounting Plus</b> — reconciling, bank import, BAS, jobs, budgets</li><li><b>Payroll</b> — timesheets, pay runs, payslips, leave</li><li><b>POS</b> — the till app, first 500 sales free</li><li><b>As Built</b> — building services on your drawings</li></ul></div>
   </div>
-  <div class="addon"><div class="big">➕</div><div><b>Extras</b><p>More than 3 people: <b>$5 a month</b> per extra user. Another company, trust or client's books: <b>$10 a month</b> per extra company. Every paid program is free for 90 days first — no card.</p></div></div>
+  <div class="addon"><div class="big">➕</div><div><b>Extras</b><p>More than 3 people: <b>$5 a month</b> per extra user. Another company, trust or client's books: <b>$10 a month</b> per extra company. Accounting Basics is free for your first 500 invoices and POS for your first 500 sales; the other paid programs are free for 90 days. No card.</p></div></div>
   <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
 </section>
 
@@ -572,21 +575,21 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
   <details open><summary>What's free?</summary><p>Riyeser Central, Riyeser PDF and the Desk Assistant file organiser are free forever — no time limit, no account, no card.</p></details>
-  <details><summary>How do the free trials work?</summary><p>Each paid program — Accounting Basics, Accounting Plus, Payroll, POS and As Built — is free for 90 days after you first open it. No card. Riyeser Central shows how many days are left.</p></details>
-  <details><summary>What happens when a trial ends?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays on your computer and can still be opened. To keep adding new work, buy that program and enter the key in Riyeser Central.</p></details>
+  <details><summary>How do the free allowances work?</summary><p><b>Accounting Basics</b> is free for your first 500 invoices and <b>POS</b> for your first 500 sales, with no time limit. Accounting Plus, Payroll and As Built are free for 90 days after you first open them. No card. The programs show how many free invoices, sales or days are left.</p></details>
+  <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays on your computer and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS) or that program's screens (the others) wait until you buy it and enter the key in Riyeser Central. They unlock straight away.</p></details>
   <details><summary>Is it per person?</summary><p>No — per business. Each program is $20 a month for the whole business, with 3 people included. A 4th person and beyond is $5 a month each, for all your programs.</p></details>
   <details><summary>How do extra companies work?</summary><p>Your plan includes one company in Riyeser Accounting. Groups, trusts and bookkeepers can add more for $10 a month per extra company, with one sign-in. If you stop paying for one, its books stay — they open read-only until you add it back.</p></details>
   ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months — $10 instead of $20 a month for each program. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
   <details><summary>How do I buy?</summary><p>Online checkout is opening soon. Until then, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser licence')}">${EMAIL}</a> with your business name and the programs you want, and we'll send your licence key.</p></details>
 </section>
-${ctaBlock(up, 'Start free today', 'Install Riyeser Central — the free tools are yours to keep, and every paid program is free for 90 days.')}
+${ctaBlock(up, 'Start free today', 'Install Riyeser Central — the free tools are yours to keep, and every paid program is free to start.')}
 <script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},u=document.getElementById('users'),c=document.getElementById('cos'),y=document.getElementById('yearly');
 var NAMES={basic:'Accounting Basics',plus:'Accounting Plus',payroll:'Payroll',pos:'POS',services:'As Built'};
 function money(v){return '$'+v.toLocaleString('en-AU',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})}
 function draw(){
   var plus=document.querySelector('[data-m=plus]'),pos=document.querySelector('[data-m=pos]'),basic=document.querySelector('[data-m=basic]');
-  if((plus.checked||pos.checked)&&!basic.checked)basic.checked=true; // Plus and POS work inside Accounting
+  if(plus.checked&&!basic.checked)basic.checked=true; // Plus adds to Basics; POS is its own app
   var mods=[].slice.call(document.querySelectorAll('[data-m]')).filter(function(x){return x.checked}).map(function(x){return x.dataset.m});
   var n=Math.max(1,Math.min(500,parseInt(u.value,10)||1)),k=Math.max(1,Math.min(200,parseInt(c.value,10)||1));
   var prog=mods.length*20,users=mods.length?Math.max(0,n-3)*5:0,cos=mods.indexOf('basic')>=0?(k-1)*10:0,m=prog+users+cos;
@@ -595,7 +598,7 @@ function draw(){
   document.getElementById('per').textContent=parts.join(' · ');
   if(!m){document.getElementById('total').textContent='$0';document.getElementById('note').textContent='Central, PDF and Desk Assistant are free forever.';return}
   if(y.checked){document.getElementById('total').textContent=money(m*10)+' a year';document.getElementById('note').textContent="That's "+money(m*10/12)+' a month — 2 months free.'}
-  else{document.getElementById('total').textContent=money(m)+' a month';document.getElementById('note').textContent='After your 90-day free trial. Free tools are always $0.'}
+  else{document.getElementById('total').textContent=money(m)+' a month';document.getElementById('note').textContent='After the free part (500 invoices in Basics, 500 sales in POS, 90 days for the others). Free tools are always $0.'}
   if(EB){document.getElementById('note').textContent+=' Early bird: '+(y.checked?money(m*10/2)+' for your first year':money(m/2)+' a month for your first year')+'.'}
 }
 document.querySelectorAll('[data-d]').forEach(function(x){x.addEventListener('click',function(){u.value=Math.max(1,(parseInt(u.value,10)||1)+parseInt(x.dataset.d,10));draw()})});

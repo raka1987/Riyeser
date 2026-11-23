@@ -21,7 +21,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['updates', 'How do I update my programs?', `<ol><li>Open <b>Riyeser Central</b>. It checks for updates by itself.</li><li>When one is ready you'll see <b>An update is ready</b>. Click <b>Update</b> (or <b>Update all</b>).</li><li>Programs being updated close for a moment and open again. Your information is kept.</li></ol><p>To check straight away, click <b>Check for updates</b> at the bottom of Riyeser Central. You can also download the newest version from <a class="more" href="${up}downloads.html">Downloads</a> and run it over the old one.</p>`, true],
         ] },
         { title: 'Free trial and licence', items: [
-          ['trial', 'How does the free trial work?', '<p>Riyeser Central, PDF and Desk Assistant are free forever. Every paid program (Accounting, Payroll, POS, As Built) is free for 90 days, with no card and no sign-up. Riyeser Central shows how many days are left, and reminds you when there are 14 days or fewer.</p><p>When the trial ends nothing is deleted and nothing is charged. <b>Accounting Basics</b> stays free for good.</p>', true],
+          ['trial', 'How does the free trial work?', '<p>Riyeser Central, PDF and Desk Assistant are free forever. <b>Accounting Basics</b> is free for your first 500 invoices and <b>Riyeser POS</b> for your first 500 sales. Accounting Plus, Payroll and As Built are free for 90 days. No card and no sign-up. Each program shows how many free invoices, sales or days are left.</p><p>When the free part runs out nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
           ['licence', 'How do I enter my licence key?', `<ol><li>Open <b>Riyeser Central</b> and click <b>Licence</b> at the bottom of the screen.</li><li>Paste the key from your receipt email into <b>Have a licence key?</b></li><li>Click <b>Turn on licence</b>.</li></ol><p>One licence covers every Riyeser program for that person. To buy one, click <b>See plans &amp; buy</b> or see <a class="more" href="${up}pricing.html">Pricing</a>.</p>`, true],
           ['licence-move', 'Moving my licence to another computer', '<p>On the old computer open Riyeser Central → <b>Licence</b> → <b>Remove licence from this PC</b>. That frees its place. Then enter the same key on the new computer.</p>'],
         ] },
@@ -52,8 +52,8 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'accounting-basics', blurb: 'Invoices, stock, the shop counter and reports.', app: 'accounting-basics', name: 'Accounting Basics', badge: ['trial', '90 days free'],
-      intro: 'Free invoicing, quotes, customers, suppliers, stock and a shop counter. Everything here also works the same way in Accounting Plus.',
+      id: 'accounting-basics', blurb: 'Invoices, stock and reports.', app: 'accounting-basics', name: 'Accounting Basics', badge: ['trial', '500 invoices free'],
+      intro: 'Invoicing, quotes, customers, suppliers and stock, free for your first 500 invoices. Everything here also works the same way in Accounting Plus. For a till, see Riyeser POS.',
       groups: [
         { title: 'Getting started', items: [
           ['first-company', 'Setting up my company', `<ol><li>Open Accounting Basics. It asks you to <b>Create company file</b>.</li><li>Type your <b>Company name</b> and choose an <b>Admin password</b>. Leave <b>Load demo data</b> unticked to start empty (tick it if you just want to look around).</li><li>Go to <b>Setup → Company &amp; preferences</b> and enter your ABN, address and when your financial year starts.</li><li>Add your customers, suppliers and stock items, then start invoicing.</li></ol>${tip('Already trading? Enter your bank balances under <b>Setup → Chart of accounts</b>, and the opening quantity and cost on each new stock item.')}`, true],
@@ -72,9 +72,9 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['stocktake', 'Do a stocktake', '<p>Click <b>Stock → Stocktake</b> and type what you counted. The differences are recorded for you.</p>'],
           ['reorder', 'See what needs reordering', '<p>Items under their reorder level show on the Home screen. Set the level on each stock item.</p>'],
         ] },
-        { title: 'Shop counter (point of sale)', items: [
-          ['register', 'Sell at the counter', '<ol><li>Click <b>Shop counter → Open register</b>. It opens full screen.</li><li>Choose <b>Retail</b> or <b>Restaurant</b> at the top.</li><li><b>Retail</b>: scan a barcode, type a code and press Enter, or tap the item tiles. <b>Park sale</b> holds a sale while the customer fetches something.</li><li><b>Restaurant</b>: choose <b>Dine in</b> and a table, or <b>Takeaway</b>. <b>Send to kitchen</b> prints a docket.</li><li>Press <b>Pay</b>, choose Cash or Card. For cash, tap an amount and the change is shown. The receipt prints by itself.</li></ol>', true],
-          ['end-of-day', 'End-of-day totals', '<p>Click <b>Shop counter → Today\'s sales</b> for the day\'s takings by cash and card. You can void a sale there too.</p>'],
+        { title: 'Selling at a counter', items: [
+          ['register', 'Sell at the counter', '<p>The till is its own app, <b>Riyeser POS</b>. Click <b>Riyeser POS</b> in the Accounting menu to open it, or to download it. See the <a class="more" href="pos.html">Riyeser POS guide</a>. Till sales show in Accounting as paid invoices.</p><ol><li>In Riyeser POS, tap <b>Sell</b>. It opens full screen.</li><li>Choose <b>Retail</b> or <b>Restaurant</b> at the top.</li><li><b>Retail</b>: scan a barcode, type a code and press Enter, or tap the item tiles. <b>Park sale</b> holds a sale while the customer fetches something.</li><li><b>Restaurant</b>: choose <b>Dine in</b> and a table, or <b>Takeaway</b>. <b>Send to kitchen</b> prints a docket.</li><li>Press <b>Pay</b>, choose Cash or Card. For cash, tap an amount and the change is shown. The receipt prints by itself.</li></ol>', true],
+          ['end-of-day', 'End-of-day totals', '<p>In Riyeser POS, open <b>Sales</b> for the day\'s takings by cash and card, and <b>Close till</b> to count the drawer.</p>'],
         ] },
         { title: 'Money in and out', items: [
           ['money', 'Record spending or money received', '<p>Use <b>Money → Money out</b> for things like rent or bank fees, and <b>Money → Money in</b> for money that isn\'t for an invoice. GST is worked out for you; untick it if the amount has no GST.</p>'],
@@ -99,7 +99,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       intro: 'Full books: everything in Basics, plus banking and reconciliation, payroll, journals, jobs, budgets, BAS and every report.',
       groups: [
         { title: 'Basics and Plus', items: [
-          ['everyday', 'Invoices, quotes, stock and the shop counter', `<p>These work exactly as in Basics. See the <a class="more" href="${up}help/accounting-basics.html">Accounting Basics guide</a> for invoices, payments, stock, the shop counter and passwords.</p>`],
+          ['everyday', 'Invoices, quotes and stock', `<p>These work exactly as in Basics. See the <a class="more" href="${up}help/accounting-basics.html">Accounting Basics guide</a> for invoices, payments, stock and passwords. The till is its own app: see the <a class="more" href="${up}help/pos.html">Riyeser POS guide</a>.</p>`],
           ['switch', 'Moving between Basics and Plus', '<p>Basics (green <b>B</b>) and Plus (blue <b>P</b>) are two separate apps that open the same books. Install the other one and it replaces the first, with your customers, invoices and stock carried over. Plus-only records (payroll, journals, jobs, budgets) are kept safe in Basics and come back in Plus. In Plus you\'ll find this under <b>Setup → Basics or Plus</b>.</p>', true],
           ['trial-end', 'What happens when the free trial ends?', '<p>Your everyday screens keep working and nothing is removed. The Plus-only screens are locked until you enter a licence in <b>Riyeser Central → Licence</b>. You\'ll see a message saying <b>Licence needed</b>.</p>'],
         ] },
@@ -131,13 +131,14 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
-      id: 'pos', blurb: 'The shop counter: selling, payments and setup.', app: 'pos', name: 'Riyeser POS', badge: ['trial', '90 days free'],
-      intro: 'A touch-friendly till inside Riyeser Accounting. Every sale is saved as an invoice and payment, so stock, GST and reports update by themselves.',
+      id: 'pos', blurb: 'The till: selling, payments, close till and setup.', app: 'pos', name: 'Riyeser POS', badge: ['trial', '500 sales free'],
+      intro: 'A touch-friendly till, as its own app. It opens the same company file as Riyeser Accounting, so every sale is an invoice and payment there, and stock, GST and reports update by themselves. Free for your first 500 sales.',
       groups: [
         { title: 'Getting started', items: [
-          ['open', 'Open the till', '<ol><li>Open Riyeser Accounting (Basics or Plus).</li><li>Click <b>Shop counter</b> in the menu, then <b>Open register</b>. Or open it straight from Riyeser Central.</li></ol>'],
-          ['setup', 'Choose Retail or Restaurant', '<ol><li>Go to <b>Shop counter → POS setup</b> in the Accounting menu (you need Full access to Setup to save).</li><li>Pick <b>Retail</b> or <b>Restaurant</b>. Each starts with sensible switches: barcode scanning and returns for shops; tables, kitchen dockets and takeaway for cafes.</li><li>Turn any switch on or off, name your tills (for example Till 1, Bar), and click <b>Save</b>.</li></ol>'],
-          ['products', 'Add products, photos and Favourites', '<ol><li>Open <b>Stock items</b> and open (or add) an item.</li><li>Add a photo and tick <b>Show in POS Favourites</b> for your best sellers.</li><li>The item appears on the till under its category, with its price and stock.</li></ol>'],
+          ['open', 'Install and open the till', '<ol><li>Download <b>Riyeser POS</b> from the Downloads page, or click <b>Get more apps</b> in Riyeser Central.</li><li>Open <b>Riyeser POS</b> from the desktop, the Start menu or Riyeser Central (<b>Open the till</b>). It opens straight on the till.</li><li>First time? It asks you to create a company file, or opens the one Riyeser Accounting already uses.</li></ol>', true],
+          ['free-sales', 'How many free sales do I have?', '<p>Riyeser POS is free for your first 500 sales (voided sales don\'t count). The number left shows at the top of the screen, and the till warns you from 50. After 500, new sales wait until you enter a licence key in Riyeser Central; sales, receipts, close till, products and stock all keep working.</p>'],
+          ['setup', 'Choose Retail or Restaurant', '<ol><li>Go to <b>Setup → POS setup</b> in Riyeser POS (you need Full access to Setup to save).</li><li>Pick <b>Retail</b> or <b>Restaurant</b>. Each starts with sensible switches: barcode scanning and returns for shops; tables, kitchen dockets and takeaway for cafes.</li><li>Turn any switch on or off, name your tills (for example Till 1, Bar), and click <b>Save</b>.</li></ol>'],
+          ['products', 'Add products, photos and Favourites', '<ol><li>Open <b>Products → Products &amp; stock</b> and open (or add) a product.</li><li>Add a photo and tick <b>Show in POS Favourites</b> for your best sellers.</li><li>The item appears on the till under its category, with its price and stock.</li></ol>'],
         ] },
         { title: 'Selling', items: [
           ['sell', 'Ring up a sale', '<ol><li>Tap products, or type or scan in <b>Search or scan an item</b>.</li><li>Change quantities in <b>Current sale</b>; tap <b>Hold</b> to park a sale and come back to it.</li><li>Tap <b>Pay</b>, choose <b>Cash</b> (the keypad works out the change) or <b>Card</b>, and finish the sale.</li></ol>'],
@@ -146,6 +147,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
         ] },
         { title: 'End of the day', items: [
           ['today', "See today's takings", '<p>Open <b>Sales</b> for today\'s takings, sales by hour and your best sellers.</p>'],
+          ['close', 'Close the till', '<p>Tap <b>Close till</b>, count the notes and coins, and Riyeser POS shows if the drawer is over or short. Closing prints the Z-report and records the takings going to the bank.</p>'],
         ] },
       ],
     },
