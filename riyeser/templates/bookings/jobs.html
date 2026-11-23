@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Jobs{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Jobs</h1><p class="sub">Each job can have several visits and is invoiced once.</p></div>
+<div class="actions">{% include "bookings/_nav.html" %}{% if can('bookings', 2) %}<a class="btn pri" href="{{ url_for('bookings.job') }}">+ New job</a>{% endif %}</div></div>
+<form class="filters"><div><label>Search</label><input name="q" value="{{ q }}" placeholder="Job number, customer, address, or words like Room 204"></div><div><button class="btn">Search</button>{% if q %} <a class="btn" href="{{ url_for('bookings.jobs') }}">Clear</a>{% endif %}</div></form>
+{% for title, help, rows in groups %}<div class="card bk-q"><h3>{{ title }} <small>{{ rows|length }}</small></h3>{% if help %}<p class="muted small">{{ help }}</p>{% endif %}
+<div class="tbl"><table><tr><th>Job</th><th>Customer</th><th>{{ m.what }}</th><th>Address</th><th>Next visit</th><th>Visits</th><th>Status</th><th>Invoice</th></tr>
+{% for j in rows %}<tr class="click" data-href="{{ url_for('bookings.job', jid=j.id) }}"><td><a href="{{ url_for('bookings.job', jid=j.id) }}">{{ job_no(j.id) }}</a></td><td><b>{{ j.customer or j.title or '' }}</b>{% if j.customer and j.title %}<br><small class="muted">{{ j.title }}</small>{% endif %}</td><td>{{ j.service or '' }}</td><td>{{ j.address or '' }}</td><td>{{ (j.next_visit[:10] ~ ' ' ~ j.next_visit[11:16]) if j.next_visit else '' }}</td><td class="n">{{ j.visits }}</td><td><span class="bk-st st-{{ j.status }}">{{ statuses[j.status] }}</span>{% if j.next_action %}<br><small class="muted">{{ j.next_action }}</small>{% endif %}</td><td>{{ j.inv_no or '' }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">None.</td></tr>{% endfor %}</table></div></div>{% endfor %}
+{% endblock %}

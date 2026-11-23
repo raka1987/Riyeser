@@ -6,6 +6,9 @@ One app for three kinds of business, chosen under Bookings setup (company.bookin
   * tables        cafes and restaurants: a table for a party at a time
 Bookings live in the same company file as Riyeser Accounting, Invoices and POS: customers are shared, and
 "Invoice" on a booking makes a real invoice there. Staff are bookable resources (staff, tables, rooms, vehicles).
+
+Every booking is a visit on a job (booking_jobs). A job can have several visits, with time and parts logged on
+each, and is invoiced once: at its agreed price, or for its hours and parts.
 """
 from datetime import date, datetime, timedelta
 
@@ -13,7 +16,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 
 from ..db import get_db, audit, to_cents
 from ..ledger import save_document, PostingError
-from . import guarded, opt_int
+from . import guarded, opt_int, opt_float
 
 bp = Blueprint("bookings", __name__, url_prefix="/bookings")
 
@@ -31,6 +34,12 @@ MODES = {
 STATUSES = [("booked", "Booked"), ("confirmed", "Confirmed"), ("started", "In progress"), ("done", "Done"),
             ("cancelled", "Cancelled"), ("no_show", "No-show")]
 ACTIVE = ("booked", "confirmed", "started", "done")
+OPEN = ("booked", "confirmed", "started")
+JOB_STATUSES = [("requested", "Needs a time"), ("scheduled", "Booked"), ("in_progress", "In progress"),
+                ("needs_visit", "Needs another visit"), ("on_hold", "On hold"), ("completed", "Work finished"),
+                ("cancelled", "Cancelled")]
+OUTCOMES = [("finished", "Work finished"), ("return", "Return visit needed"), ("no_access", "Couldn't get in")]
+BILLING = [("fixed", "Fixed price"), ("time", "Time and materials")]
 COLOURS = ["#2563eb", "#16a34a", "#d97706", "#9333ea", "#dc2626", "#0891b2", "#db2777", "#65a30d"]
 SLOT = 30  # minutes per row on the day view
 
@@ -214,10 +223,25 @@ def edit(bid=None):
         return _save(bid)
     pre = dict(date=request.args.get("d") or date.today().isoformat(), time=request.args.get("t") or "",
                resource_id=opt_int(request.args.get("r")), contact_id=opt_int(request.args.get("c")))
+    job = None
+    jid = (b["job_id"] if b else None) or opt_int(request.args.get("job"))
+    if jid:
+        job = db.execute("SELECT * FROM booking_jobs WHERE id=?", (jid,)).fetchone()
+        if job and not b:   # a new visit on an existing job starts from the job's details
+            pre.update(contact_id=pre["contact_id"] or job["contact_id"], service_id=job["service_id"],
+                       title=job["title"], address=job["address"], phone=job["phone"])
     inv = None
-    if b and b["document_id"]:
-        inv = db.execute("SELECT id, number, status, total, amount_paid FROM documents WHERE id=?", (b["document_id"],)).fetchone()
-    return render_template("bookings/edit.html", b=b, pre=pre, inv=inv, **_form_lookups(db))
+    doc_id = (job["document_id"] if job else None) or (b["document_id"] if b else None)
+    if doc_id:
+        inv = db.execute("SELECT id, number, status, total, amount_paid FROM documents WHERE id=?", (doc_id,)).fetchone()
+    extra = {}
+    if b and job:
+        extra = dict(times=db.execute("SELECT t.*, u.username who FROM booking_time t LEFT JOIN users u ON u.id=t.user_id"
+                                      " WHERE t.booking_id=? ORDER BY t.id", (b["id"],)).fetchall(),
+                     parts=db.execute("SELECT * FROM booking_materials WHERE booking_id=? ORDER BY id", (b["id"],)).fetchall(),
+                     items=_sold_items(db), outcomes=OUTCOMES,
+                     visits=db.execute("SELECT COUNT(*) FROM bookings WHERE job_id=?", (job["id"],)).fetchone()[0])
+    return render_template("bookings/edit.html", b=b, pre=pre, inv=inv, job=job, **extra, **_form_lookups(db))
 
 
 @guarded
@@ -256,22 +280,42 @@ def _save(bid):
         if cap and cap["capacity"] and party > cap["capacity"] and not f.get("allow_overlap"):
             raise PostingError(f"That table seats {cap['capacity']}. Pick a bigger table, or tick 'Allow double-booking' "
                                "to book it anyway.")
+    jid = opt_int(f.get("job_id"))
+    if bid:
+        jid = db.execute("SELECT job_id FROM bookings WHERE id=?", (bid,)).fetchone()["job_id"] or jid
+    price = to_cents(f.get("price")) if (f.get("price") or "").strip() else None
+    jvals = (cid, svc["id"] if svc else None, (f.get("title") or "").strip() or None,
+             (f.get("address") or "").strip() or None, (f.get("phone") or "").strip() or None)
+    if not jid:
+        jid = db.execute("INSERT INTO booking_jobs (contact_id, service_id, title, address, phone, price, created_by)"
+                         " VALUES (?,?,?,?,?,?,?)", jvals + (price, g.user["id"])).lastrowid
+    else:
+        visits = db.execute("SELECT COUNT(*) FROM bookings WHERE job_id=? AND id IS NOT ?", (jid, bid)).fetchone()[0]
+        if bid and not visits:  # a job with only this visit follows its details
+            db.execute("UPDATE booking_jobs SET contact_id=?, service_id=?, title=?, address=?, phone=? WHERE id=?",
+                       jvals + (jid,))
+        else:                   # another visit on the job only fills in what the job is missing
+            db.execute("UPDATE booking_jobs SET contact_id=COALESCE(contact_id, ?), service_id=COALESCE(service_id, ?),"
+                       " title=COALESCE(title, ?), address=COALESCE(address, ?), phone=COALESCE(phone, ?) WHERE id=?",
+                       jvals + (jid,))
+        if "price" in f:
+            db.execute("UPDATE booking_jobs SET price=? WHERE id=?", (price, jid))
     vals = (cid, rid, svc["id"] if svc else None, start.isoformat(timespec="minutes"), minutes,
             (f.get("title") or "").strip() or None, (f.get("address") or "").strip() or None, party,
-            (f.get("phone") or "").strip() or None, (f.get("notes") or "").strip() or None, status,
-            to_cents(f.get("price")) if (f.get("price") or "").strip() else None)
+            (f.get("phone") or "").strip() or None, (f.get("notes") or "").strip() or None, status, jid)
     if bid:
         db.execute("UPDATE bookings SET contact_id=?, resource_id=?, service_id=?, starts_at=?, minutes=?, title=?,"
-                   " address=?, party=?, phone=?, notes=?, status=?, price=?, updated_at=datetime('now','localtime')"
+                   " address=?, party=?, phone=?, notes=?, status=?, job_id=?, updated_at=datetime('now','localtime')"
                    " WHERE id=?",
                    vals + (bid,))
         audit(db, "booking_edit", f"#{bid}")
     else:
         bid = db.execute("INSERT INTO bookings (contact_id, resource_id, service_id, starts_at, minutes, title, address,"
-                         " party, phone, notes, status, price, mode, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                         " party, phone, notes, status, job_id, mode, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                          vals + (mode(), g.user["id"])).lastrowid
         audit(db, "booking_new", f"#{bid} {start:%Y-%m-%d %H:%M}")
-    flash(f"{m['one'].capitalize()} saved.", "ok")
+    refresh_job(db, jid)
+    flash(("Visit" if m["address"] else m["one"].capitalize()) + " saved.", "ok")
     return redirect(url_for("bookings.calendar", d=start.date().isoformat()))
 
 
@@ -283,8 +327,10 @@ def set_status(bid):
     if st not in dict(STATUSES):
         abort(400)
     b = db.execute("SELECT * FROM bookings WHERE id=?", (bid,)).fetchone() or abort(404)
-    db.execute("UPDATE bookings SET status=?, updated_at=datetime('now','localtime') WHERE id=?", (st, bid))
+    db.execute("UPDATE bookings SET status=?, outcome=CASE WHEN ?='done' THEN COALESCE(outcome, 'finished') ELSE outcome END,"
+               " updated_at=datetime('now','localtime') WHERE id=?", (st, st, bid))
     audit(db, "booking_status", f"#{bid} {st}")
+    refresh_job(db, b["job_id"])
     flash(f"Marked {dict(STATUSES)[st].lower()}.", "ok")
     return redirect(request.form.get("back") or url_for("bookings.calendar", d=b["starts_at"][:10]))
 
@@ -308,41 +354,338 @@ def _gst(db):
 @bp.route("/<int:bid>/invoice", methods=["POST"])
 @guarded
 def invoice(bid):
-    """Make a customer invoice from a booking, in the same company file as Riyeser Accounting and Invoices."""
+    """Invoice the job this booking is a visit on (all its visits on one invoice)."""
     db = get_db()
     b = db.execute("SELECT * FROM bookings WHERE id=?", (bid,)).fetchone() or abort(404)
-    if b["document_id"]:
-        return redirect(url_for("documents.view", doc_id=b["document_id"]))
-    if not b["contact_id"]:
-        raise PostingError("Choose the customer on this booking first, then invoice it.")
-    svc = db.execute("SELECT * FROM booking_services WHERE id=?", (b["service_id"],)).fetchone() if b["service_id"] else None
-    st = datetime.fromisoformat(b["starts_at"])
-    what = (svc and (svc["description"] or svc["name"])) or b["title"] or M()["one"].capitalize()
-    desc = f"{what} — {st:%a %d %b %Y}" + (f", {b['address']}" if b["address"] else "")
-    line = dict(description=desc, qty=1, unit_price=b["price"] or (svc["price"] if svc else 0), discount_pct=0,
-                tax_code_id=_gst(db), item_id=svc["item_id"] if svc and svc["item_id"] else None)
-    if not line["item_id"]:
-        line["account_id"] = _income_account(db)
-    if svc and svc["item_id"]:
-        item = db.execute("SELECT sell_price, sale_tax_code_id FROM items WHERE id=?", (svc["item_id"],)).fetchone()
-        if item and not line["unit_price"]:
-            line["unit_price"] = item["sell_price"] or 0
-        if item and item["sale_tax_code_id"]:
-            line["tax_code_id"] = item["sale_tax_code_id"]
-    if not line["unit_price"]:
-        raise PostingError(f"This {M()['one']} has no price yet. Type the price in the Price box on this {M()['one']},"
+    return _invoice_job(db, b["job_id"])
+
+
+# ---------------------------------------------------------------- jobs: one job, many visits, one invoice
+
+def _sold_items(db):
+    return db.execute("SELECT id, name, sell_price FROM items WHERE is_sold=1 AND active=1 ORDER BY name").fetchall()
+
+
+def get_job(db, jid):
+    j = db.execute("SELECT j.*, c.name customer, s.name service, s.description service_desc, s.price service_price,"
+                   " s.item_id service_item FROM booking_jobs j LEFT JOIN contacts c ON c.id=j.contact_id"
+                   " LEFT JOIN booking_services s ON s.id=j.service_id WHERE j.id=?", (jid,)).fetchone()
+    return j or abort(404)
+
+
+def job_no(jid):
+    return f"J-{jid:04d}"
+
+
+def refresh_job(db, jid):
+    """Work out a job's status from its visits after a visit changes."""
+    if not jid:
+        return
+    j = db.execute("SELECT status, document_id FROM booking_jobs WHERE id=?", (jid,)).fetchone()
+    vs = db.execute("SELECT status, outcome, outcome_note FROM bookings WHERE job_id=? ORDER BY starts_at, id",
+                    (jid,)).fetchall()
+    live = [v for v in vs if v["status"] in OPEN]
+    done = [v for v in vs if v["status"] == "done"]
+    nxt = None
+    if any(v["status"] == "started" for v in live):
+        st = "in_progress"
+    elif live:
+        st = "scheduled"
+    elif j["status"] in ("on_hold", "cancelled") and not j["document_id"]:
+        st = j["status"]
+    elif done and done[-1]["outcome"] in ("return", "no_access"):
+        st, nxt = "needs_visit", done[-1]["outcome_note"] or dict(OUTCOMES)[done[-1]["outcome"]]
+    elif done:
+        st = "completed"
+    elif vs:
+        st = "cancelled"
+    else:
+        st = "requested"
+    db.execute("UPDATE booking_jobs SET status=?, next_action=?, updated_at=datetime('now','localtime') WHERE id=?",
+               (st, nxt, jid))
+
+
+def job_charges(db, j):
+    """What was logged on a job and what its invoice will charge.  Returns (lines, summary)."""
+    visits = db.execute("SELECT * FROM bookings WHERE job_id=? AND status NOT IN ('cancelled','no_show')"
+                        " ORDER BY starts_at", (j["id"],)).fetchall()
+    minutes = db.execute("SELECT COALESCE(SUM(minutes),0) FROM booking_time WHERE job_id=?", (j["id"],)).fetchone()[0]
+    parts = db.execute("SELECT m.*, i.name item_name, i.sale_tax_code_id FROM booking_materials m"
+                       " LEFT JOIN items i ON i.id=m.item_id WHERE m.job_id=? ORDER BY m.id", (j["id"],)).fetchall()
+    rate = (g.get("company") or {}).get("bookings_labour_rate") or 0
+    hours = round(minutes / 60.0, 2)
+    gst = _gst(db)
+    what = j["service_desc"] or j["service"] or j["title"] or M()["one"].capitalize()
+    days = ", ".join(datetime.fromisoformat(v["starts_at"]).strftime("%a %d %b %Y") for v in visits)
+    desc = what + (f" — {days}" if days else "") + (f", {j['address']}" if j["address"] else "")
+    lines = []
+    if j["billing"] == "time":
+        if hours:
+            lines.append(dict(description=f"Labour — {desc}", qty=hours, unit_price=rate, discount_pct=0,
+                              tax_code_id=gst, account_id=_income_account(db)))
+        for p in parts:
+            line = dict(description=p["description"] or p["item_name"] or "Parts", qty=p["qty"],
+                        unit_price=p["unit_price"], discount_pct=0, tax_code_id=p["sale_tax_code_id"] or gst,
+                        item_id=p["item_id"])
+            if not p["item_id"]:
+                line["account_id"] = _income_account(db)
+            lines.append(line)
+    else:
+        price = j["price"] if j["price"] is not None else (j["service_price"] or 0)
+        line = dict(description=desc, qty=1, unit_price=price, discount_pct=0, tax_code_id=gst, item_id=j["service_item"])
+        if j["service_item"]:
+            item = db.execute("SELECT sell_price, sale_tax_code_id FROM items WHERE id=?", (j["service_item"],)).fetchone()
+            if item and not line["unit_price"]:
+                line["unit_price"] = item["sell_price"] or 0
+            if item and item["sale_tax_code_id"]:
+                line["tax_code_id"] = item["sale_tax_code_id"]
+        else:
+            line["account_id"] = _income_account(db)
+        if line["unit_price"]:
+            lines.append(line)
+    for l in lines:
+        l["amount"] = round(float(l["qty"]) * (l["unit_price"] or 0))
+    summary = dict(visits=visits, minutes=minutes, hours=hours, rate=rate, parts=parts,
+                   parts_value=sum(round(p["qty"] * p["unit_price"]) for p in parts), labour_value=round(hours * rate),
+                   total=sum(l["amount"] for l in lines))
+    return lines, summary
+
+
+def _invoice_job(db, jid):
+    j = get_job(db, jid)
+    if j["document_id"]:
+        return redirect(url_for("documents.view", doc_id=j["document_id"]))
+    if not j["contact_id"]:
+        raise PostingError(f"Choose the customer on this {M()['one']} first, then invoice it.")
+    lines, sm = job_charges(db, j)
+    if j["billing"] == "time" and sm["minutes"] and not sm["rate"]:
+        raise PostingError("Set your hourly labour rate in Bookings setup first, then invoice this job.")
+    if not lines or not sm["total"]:
+        one = M()["one"]
+        if j["billing"] == "time":
+            raise PostingError(f"Nothing to charge yet. Log the time and parts on this {one}'s visits, then invoice it.")
+        raise PostingError(f"This {one} has no price yet. Type the price in the Price box on this {one},"
                            " press Save, then press Invoice again.")
+    for l in lines:
+        l.pop("amount", None)
     terms = (g.get("company") or {}).get("default_terms_days") or 14
     today = date.today()
-    doc_id = save_document(db, "sale", dict(contact_id=b["contact_id"], date=today.isoformat(),
+    first = db.execute("SELECT notes FROM bookings WHERE job_id=? ORDER BY starts_at LIMIT 1", (jid,)).fetchone()
+    doc_id = save_document(db, "sale", dict(contact_id=j["contact_id"], date=today.isoformat(),
                                             due_date=(today + timedelta(days=terms)).isoformat(),
-                                            reference=f"Booking {bid}", notes=b["notes"] or "", tax_inclusive=True),
-                           [line], "open")
+                                            reference=f"Job {job_no(jid)}",
+                                            notes=(first["notes"] if first else None) or "", tax_inclusive=True),
+                           lines, "open")
+    db.execute("UPDATE booking_jobs SET document_id=?, status='completed', next_action=NULL,"
+               " updated_at=datetime('now','localtime') WHERE id=?", (doc_id, jid))
     db.execute("UPDATE bookings SET document_id=?, status=CASE WHEN status IN ('booked','confirmed','started')"
-               " THEN 'done' ELSE status END, updated_at=datetime('now','localtime') WHERE id=?", (doc_id, bid))
-    audit(db, "booking_invoice", f"#{bid} -> document {doc_id}")
+               " THEN 'done' ELSE status END, updated_at=datetime('now','localtime') WHERE job_id=?", (doc_id, jid))
+    audit(db, "booking_invoice", f"job {jid} -> document {doc_id}")
     flash("Invoice made. You can print or email it from here.", "ok")
     return redirect(url_for("documents.view", doc_id=doc_id))
+
+
+@bp.route("/jobs")
+def jobs():
+    db = get_db()
+    ensure_started(db)
+    q = request.args.get("q", "").strip()
+    sql = ("SELECT j.*, c.name customer, s.name service, doc.number inv_no,"
+           " (SELECT MIN(starts_at) FROM bookings b WHERE b.job_id=j.id AND b.status IN ('booked','confirmed','started'))"
+           " next_visit, (SELECT COUNT(*) FROM bookings b WHERE b.job_id=j.id) visits"
+           " FROM booking_jobs j LEFT JOIN contacts c ON c.id=j.contact_id"
+           " LEFT JOIN booking_services s ON s.id=j.service_id LEFT JOIN documents doc ON doc.id=j.document_id")
+    args = []
+    if q:
+        num = q.upper().removeprefix("J-").lstrip("0")
+        sql += (" WHERE (c.name LIKE ? OR j.title LIKE ? OR j.address LIKE ? OR j.phone LIKE ? OR j.notes LIKE ?"
+                " OR EXISTS (SELECT 1 FROM bookings b WHERE b.job_id=j.id AND (b.notes LIKE ? OR b.outcome_note LIKE ?))"
+                " OR j.id=?)")
+        args = [f"%{q}%"] * 7 + [int(num) if num.isdigit() else -1]
+    else:
+        sql += " WHERE j.status NOT IN ('cancelled') AND NOT (j.status='completed' AND j.document_id IS NOT NULL)"
+    rows = db.execute(sql + " ORDER BY j.id DESC LIMIT 500", args).fetchall()
+    groups = [
+        ("Needs a visit", "Logged but not booked yet, or the last visit said it needs another one.",
+         [r for r in rows if r["status"] in ("requested", "needs_visit")]),
+        ("In hand", "Booked, in progress or on hold.", [r for r in rows if r["status"] in ("scheduled", "in_progress", "on_hold")]),
+        ("Ready to invoice", "Work finished, not invoiced yet.",
+         [r for r in rows if r["status"] == "completed" and not r["document_id"]]),
+    ]
+    if q:
+        groups.append(("Invoiced or cancelled", "", [r for r in rows if r["status"] == "cancelled" or
+                                                       (r["status"] == "completed" and r["document_id"])]))
+    return render_template("bookings/jobs.html", groups=groups, q=q, m=M(), statuses=dict(JOB_STATUSES), job_no=job_no)
+
+
+@bp.route("/job/new", methods=["GET", "POST"])
+@bp.route("/job/<int:jid>", methods=["GET", "POST"])
+def job(jid=None):
+    db = get_db()
+    ensure_started(db)
+    j = get_job(db, jid) if jid else None
+    if request.method == "POST":
+        return _save_job(jid)
+    ctx = dict(j=j, billing=BILLING, jstatuses=JOB_STATUSES, job_no=job_no, items=_sold_items(db), outcomes=dict(OUTCOMES),
+               bstatuses=dict(STATUSES), **_form_lookups(db))
+    if j:
+        lines, sm = job_charges(db, j)
+        ctx.update(lines=lines, sm=sm,
+                   times=db.execute("SELECT t.*, u.username who, b.starts_at FROM booking_time t"
+                                    " LEFT JOIN users u ON u.id=t.user_id LEFT JOIN bookings b ON b.id=t.booking_id"
+                                    " WHERE t.job_id=? ORDER BY t.id", (jid,)).fetchall(),
+                   visits=db.execute("SELECT b.*, r.name resource FROM bookings b LEFT JOIN booking_resources r"
+                                     " ON r.id=b.resource_id WHERE b.job_id=? ORDER BY b.starts_at", (jid,)).fetchall(),
+                   inv=db.execute("SELECT id, number, status, total FROM documents WHERE id=?",
+                                  (j["document_id"],)).fetchone() if j["document_id"] else None)
+    return render_template("bookings/job.html", **ctx)
+
+
+@guarded
+def _save_job(jid):
+    db = get_db()
+    f = request.form
+    if not jid:
+        plan_check(db)
+    cid = opt_int(f.get("contact_id"))
+    new_name = (f.get("new_customer") or "").strip()
+    if not cid and new_name:
+        cid = db.execute("INSERT INTO contacts (kind, name, phone, address) VALUES ('customer',?,?,?)",
+                         (new_name, f.get("phone") or None, f.get("address") or None)).lastrowid
+    title = (f.get("title") or "").strip() or None
+    if not cid and not title:
+        raise PostingError(f"Choose a customer, add a new one, or give the {M()['one']} a name.")
+    svc = opt_int(f.get("service_id"))
+    billing = f.get("billing") if f.get("billing") in dict(BILLING) else "fixed"
+    price = to_cents(f.get("price")) if (f.get("price") or "").strip() else None
+    vals = (cid, svc, title, (f.get("address") or "").strip() or None, (f.get("phone") or "").strip() or None,
+            (f.get("notes") or "").strip() or None, billing, price)
+    if jid:
+        j = get_job(db, jid)
+        if j["document_id"]:
+            raise PostingError("This job is already invoiced, so its charges can't change. Void the invoice to change it.")
+        db.execute("UPDATE booking_jobs SET contact_id=?, service_id=?, title=?, address=?, phone=?, notes=?, billing=?,"
+                   " price=?, updated_at=datetime('now','localtime') WHERE id=?", vals + (jid,))
+        st = f.get("status")
+        if st in ("on_hold", "cancelled", "completed") or (st in dict(JOB_STATUSES) and st != j["status"]):
+            db.execute("UPDATE booking_jobs SET status=? WHERE id=?", (st, jid))
+        audit(db, "booking_job_edit", f"job {jid}")
+        flash("Job saved.", "ok")
+    else:
+        jid = db.execute("INSERT INTO booking_jobs (contact_id, service_id, title, address, phone, notes, billing, price,"
+                         " status, created_by) VALUES (?,?,?,?,?,?,?,?, 'requested', ?)", vals + (g.user["id"],)).lastrowid
+        audit(db, "booking_job_new", f"job {jid}")
+        flash(f"Job {job_no(jid)} saved. Book its first visit when you have a time.", "ok")
+    return redirect(url_for("bookings.job", jid=jid))
+
+
+@bp.route("/job/<int:jid>/invoice", methods=["POST"])
+@guarded
+def invoice_job(jid):
+    return _invoice_job(get_db(), jid)
+
+
+def _visit(db, bid):
+    b = db.execute("SELECT * FROM bookings WHERE id=?", (bid,)).fetchone() or abort(404)
+    if b["job_id"] and db.execute("SELECT document_id FROM booking_jobs WHERE id=?", (b["job_id"],)).fetchone()[0]:
+        raise PostingError("This job is already invoiced. Void the invoice to change its time or parts.")
+    return b
+
+
+def _back(b):
+    return redirect(request.form.get("back") or url_for("bookings.edit", bid=b["id"]))
+
+
+@bp.route("/<int:bid>/finish", methods=["POST"])
+@guarded
+def finish(bid):
+    """The technician finishes a visit: what happened, and whether the job needs another visit."""
+    db = get_db()
+    b = db.execute("SELECT * FROM bookings WHERE id=?", (bid,)).fetchone() or abort(404)
+    f = request.form
+    outcome = f.get("outcome") if f.get("outcome") in dict(OUTCOMES) else "finished"
+    note = (f.get("outcome_note") or "").strip() or None
+    if outcome != "finished" and not note:
+        raise PostingError("Say what's still needed, so the office knows what to book next.")
+    hours = opt_float(f.get("hours"))
+    if hours < 0 or hours > 24:
+        raise PostingError("Enter the hours worked on this visit (0 to 24).")
+    if hours and b["job_id"]:
+        db.execute("INSERT INTO booking_time (job_id, booking_id, user_id, minutes, note) VALUES (?,?,?,?,?)",
+                   (b["job_id"], bid, g.user["id"], round(hours * 60), "On finishing the visit"))
+    db.execute("UPDATE bookings SET status='done', outcome=?, outcome_note=?, updated_at=datetime('now','localtime')"
+               " WHERE id=?", (outcome, note, bid))
+    refresh_job(db, b["job_id"])
+    audit(db, "booking_finish", f"#{bid} {outcome}")
+    flash({"finished": "Visit finished.", "return": "Visit finished. The job is waiting for its return visit.",
+           "no_access": "Saved. The job is waiting for another visit."}[outcome], "ok")
+    return _back(b)
+
+
+@bp.route("/<int:bid>/time", methods=["POST"])
+@guarded
+def add_time(bid):
+    db = get_db()
+    b = _visit(db, bid)
+    hours = opt_float(request.form.get("hours"))
+    if hours <= 0 or hours > 24:
+        raise PostingError("Enter the hours worked, for example 1.5.")
+    db.execute("INSERT INTO booking_time (job_id, booking_id, user_id, minutes, note) VALUES (?,?,?,?,?)",
+               (b["job_id"], bid, g.user["id"], round(hours * 60), (request.form.get("note") or "").strip() or None))
+    audit(db, "booking_time", f"#{bid} {hours}h")
+    flash(f"{hours:g} hours added.", "ok")
+    return _back(b)
+
+
+@bp.route("/<int:bid>/part", methods=["POST"])
+@guarded
+def add_part(bid):
+    db = get_db()
+    b = _visit(db, bid)
+    f = request.form
+    item = db.execute("SELECT * FROM items WHERE id=?", (opt_int(f.get("item_id")),)).fetchone()
+    desc = (f.get("description") or "").strip() or (item["name"] if item else "")
+    if not desc:
+        raise PostingError("Pick a stock item or type what the part is.")
+    qty = opt_float(f.get("qty"), 1)
+    if qty <= 0:
+        raise PostingError("Enter how many were used.")
+    price = to_cents(f.get("unit_price")) if (f.get("unit_price") or "").strip() else (item["sell_price"] if item else 0)
+    db.execute("INSERT INTO booking_materials (job_id, booking_id, item_id, description, qty, unit_price, user_id)"
+               " VALUES (?,?,?,?,?,?,?)", (b["job_id"], bid, item["id"] if item else None, desc, qty, price, g.user["id"]))
+    audit(db, "booking_part", f"#{bid} {desc}")
+    flash(f"{desc} added." + ("" if price else " The office will add its price."), "ok")
+    return _back(b)
+
+
+@bp.route("/job/<int:jid>/remove", methods=["POST"])
+@guarded
+def remove_entry(jid):
+    db = get_db()
+    j = get_job(db, jid)
+    if j["document_id"]:
+        raise PostingError("This job is already invoiced. Void the invoice to change its time or parts.")
+    table = {"time": "booking_time", "part": "booking_materials"}.get(request.form.get("kind")) or abort(400)
+    db.execute(f"DELETE FROM {table} WHERE id=? AND job_id=?", (opt_int(request.form.get("id")), jid))
+    audit(db, "booking_remove", f"job {jid} {table}")
+    flash("Removed.", "ok")
+    return redirect(request.form.get("back") or url_for("bookings.job", jid=jid))
+
+
+@bp.route("/job/<int:jid>/part-price", methods=["POST"])
+@guarded
+def part_price(jid):
+    """The office prices a one-off part a technician added."""
+    db = get_db()
+    j = get_job(db, jid)
+    if j["document_id"]:
+        raise PostingError("This job is already invoiced.")
+    for k, v in request.form.items():
+        if k.startswith("price_") and v.strip():
+            db.execute("UPDATE booking_materials SET unit_price=? WHERE id=? AND job_id=?",
+                       (to_cents(v), opt_int(k[6:]), jid))
+    flash("Prices saved.", "ok")
+    return redirect(url_for("bookings.job", jid=jid))
 
 
 # ---------------------------------------------------------------- setup
@@ -356,7 +699,7 @@ def setup():
     items = db.execute("SELECT id, name FROM items WHERE is_sold=1 ORDER BY name").fetchall()
     return render_template("bookings/setup.html", res=resources(db, True), svcs=services(db, True), modes=MODES,
                            here=mode(), m=M(), items=items, hours=(g.company.get("bookings_hours") or "07:00-18:00"),
-                           colours=COLOURS)
+                           colours=COLOURS, labour_rate=g.company.get("bookings_labour_rate") or 0)
 
 
 @guarded
@@ -368,7 +711,7 @@ def _save_setup():
         db.execute("UPDATE company SET bookings_mode=? WHERE id=1", (new_mode,))
         g.company["bookings_mode"] = new_mode
         # Nothing booked yet: swap the starter staff/tables and services for the new kind of business.
-        if not db.execute("SELECT 1 FROM bookings").fetchone():
+        if not db.execute("SELECT 1 FROM bookings").fetchone() and not db.execute("SELECT 1 FROM booking_jobs").fetchone():
             db.execute("DELETE FROM booking_resources")
             db.execute("DELETE FROM booking_services")
             db.commit()
@@ -380,11 +723,14 @@ def _save_setup():
     if h1 >= h2:
         raise PostingError("Closing time must be after opening time.")
     db.execute("UPDATE company SET bookings_hours=? WHERE id=1", (f"{h1}-{h2}",))
+    if "labour_rate" in f:
+        db.execute("UPDATE company SET bookings_labour_rate=? WHERE id=1", (to_cents(f.get("labour_rate") or 0),))
     # Remove one: deleted if nothing was ever booked on it, otherwise hidden so past bookings keep their name.
     for key, table, col in (("res_del", "booking_resources", "resource_id"), ("svc_del", "booking_services", "service_id")):
         rid = opt_int(f.get(key))
         if rid:
-            if db.execute(f"SELECT 1 FROM bookings WHERE {col}=?", (rid,)).fetchone():
+            if db.execute(f"SELECT 1 FROM bookings WHERE {col}=?", (rid,)).fetchone() or (key == "svc_del" and db.execute(
+                    "SELECT 1 FROM booking_jobs WHERE service_id=?", (rid,)).fetchone()):
                 db.execute(f"UPDATE {table} SET active=0 WHERE id=?", (rid,))
                 flash("Hidden rather than deleted, because past bookings use it. Tick 'In use' to bring it back.", "ok")
             else:
