@@ -1,8 +1,16 @@
-{% extends "base.html" %}{% block title %}{{ item.sku if item else 'New item' }}{% endblock %}
+{% extends "base.html" %}{% block title %}{{ item.sku if item else 'New item' }}<script>
+/* Shrink the photo in the browser (max 600px JPEG) so company files stay small. */
+document.getElementById('photoFile').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,600/Math.max(im.width,im.height)),c=document.createElement('canvas');
+    c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+    const d=c.toDataURL('image/jpeg',.85);document.getElementById('photoData').value=d;const p=document.getElementById('photoPrev');p.src=d;p.style.display='';};im.src=r.result;};
+  r.readAsDataURL(f);});
+</script>
+{% endblock %}
 {% from "_macros.html" import account_select, tax_select %}
 {% block content %}
 <div class="head"><div><h1>{{ item.sku ~ ' ' ~ item.name if item else 'New item' }}</h1></div></div>
-<form method="post" class="card"><div class="fields">
+<form method="post" class="card" id="itemForm"><div class="fields">
 <div><label>SKU / item number</label><input name="sku" value="{{ item.sku if item }}" required></div>
 <div><label>Name</label><input name="name" value="{{ item.name if item }}" required></div>
 <div><label>Category (POS tab)</label><input name="category" list="cats" value="{{ item.category or '' if item }}" placeholder="e.g. Coffee, Mains, Hardware">
@@ -12,6 +20,14 @@
 <label class="check"><input type="checkbox" name="is_bought" value="1" {{ 'checked' if not item or item.is_bought }}> I buy this item</label>
 <label class="check"><input type="checkbox" name="is_inventoried" value="1" {{ 'checked' if item and item.is_inventoried }}> I inventory this item (track quantity &amp; cost)</label>
 <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not item or item.active }}> Active</label>
+<label class="check"><input type="checkbox" name="pos_favourite" value="1" {{ 'checked' if item and item.pos_favourite }}> Show in POS Favourites</label>
+<div class="wide"><label>Photo for the POS (optional)</label>
+<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+<img id="photoPrev" alt="" style="width:96px;height:96px;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:#f8fafc;{{ '' if has_photo else 'display:none' }}" {% if has_photo %}src="{{ url_for('pos.photo', iid=item.id) }}"{% endif %}>
+<input type="file" accept="image/*" id="photoFile" style="max-width:320px">
+{% if has_photo %}<label class="check"><input type="checkbox" name="photo_remove" value="1"> Remove photo</label>{% endif %}
+<input type="hidden" name="photo_data" id="photoData"></div>
+<p class="muted" style="margin:6px 0 0;font-size:12.5px">A square-ish photo works best. It is shrunk automatically before saving.</p></div>
 <div><label>Selling price (ex GST)</label><input name="sell_price" value="{{ item.sell_price|cents if item }}"></div>
 <div><label>Buying price (ex GST)</label><input name="buy_price" value="{{ item.buy_price|cents if item }}"></div>
 <div><label>Income account</label>{{ account_select('income_account_id', accounts, item.income_account_id if item else defaults.income) }}</div>
@@ -23,4 +39,12 @@
 {% if not item %}<div><label>Opening quantity</label><input name="opening_qty"></div><div><label>Opening unit cost</label><input name="opening_cost"></div>
 <div><label>Opening date</label><input type="date" name="opening_date" value="{{ today() }}"></div>{% endif %}
 </div><p><button class="btn pri">Save item</button></p></form>
+<script>
+/* Shrink the photo in the browser (max 600px JPEG) so company files stay small. */
+document.getElementById('photoFile').addEventListener('change',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
+  r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,600/Math.max(im.width,im.height)),c=document.createElement('canvas');
+    c.width=Math.round(im.width*s);c.height=Math.round(im.height*s);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+    const d=c.toDataURL('image/jpeg',.85);document.getElementById('photoData').value=d;const p=document.getElementById('photoPrev');p.src=d;p.style.display='';};im.src=r.result;};
+  r.readAsDataURL(f);});
+</script>
 {% endblock %}

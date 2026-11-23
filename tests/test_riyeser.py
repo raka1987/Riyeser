@@ -397,7 +397,7 @@ def test_pos_restaurant_tables_kitchen_and_pay(client, app):
     item, acc = _pos_setup(app)
     client.post("/pos/mode", data={"mode": "restaurant"})
     page = client.get("/pos/").get_data(as_text=True)
-    assert "Send to kitchen" in page and "Dine in" in page
+    assert "Send to kitchen" in page and "Dine-in" in page
     # dine-in needs a table
     r = client.post("/pos/order", json={"order_type": "dine_in", "lines": [{"item_id": item, "qty": 1}]})
     assert r.status_code == 400
@@ -426,7 +426,7 @@ def test_pos_restaurant_tables_kitchen_and_pay(client, app):
 def test_pos_retail_park_and_cancel(client, app):
     item, _ = _pos_setup(app)
     page = client.get("/pos/").get_data(as_text=True)
-    assert "Park sale" in page and "Coffee cup" in page
+    assert "Hold" in page and "Held sales" in page and "Coffee cup" in page
     r = client.post("/pos/order", json={"order_type": "retail", "lines": [{"item_id": item, "qty": 1}]}).get_json()
     assert len(client.get("/pos/orders").get_json()) == 1
     client.post(f"/pos/order/{r['id']}/cancel")
@@ -480,3 +480,79 @@ def test_desktop_start_page_for_central_quick_access():
     assert start_path("pos") == "/pos/"
     assert start_path("Invoice") == "/sale/new"
     assert start_path(None) == "" and start_path("../etc") == ""
+
+
+def test_pos_setup_retail_never_shows_restaurant_features(client, app):
+    _pos_setup(app)
+    page = client.get("/pos/").get_data(as_text=True)
+    restaurant_bits = ('id="kitchen"', 'id="otype"', 'id="tableBtn"', 'data-open="tables"')
+    assert not any(b in page for b in restaurant_bits) and 'id="hold"' in page
+    # a retail setup can't switch on restaurant-only features, even if the form asks for them
+    client.post("/pos/setup", data={"mode": "retail", "feature": ["scan", "tables", "kitchen"]})
+    with app.app_context():
+        from riyeser.views.pos import pos_config
+        assert pos_config(get_db()) == ("retail", {"scan"})
+    page = client.get("/pos/").get_data(as_text=True)
+    assert not any(b in page for b in restaurant_bits) and 'id="hold"' not in page  # Hold was switched off
+    # switching type starts from that type's sensible defaults
+    client.post("/pos/setup", data={"mode": "restaurant", "mode_changed": "1"})
+    with app.app_context():
+        mode, on = __import__("riyeser.views.pos", fromlist=["pos_config"]).pos_config(get_db())
+        assert mode == "restaurant" and {"tables", "kitchen", "takeaway"} <= on
+    page = client.get("/pos/").get_data(as_text=True)
+    assert all(b in page for b in restaurant_bits)
+
+
+def test_pos_setup_needs_full_setup_access(app):
+    _pos_setup(app)
+    a = app.test_client()
+    a.post("/login", data={"username": "admin", "password": "admin"})
+    a.post("/users/save", data={"username": "sam", "password": "pw", "preset": "sales"})
+    a.post("/users/save", data={"username": "bob", "password": "pw", "preset": "bookkeeper"})
+    s = app.test_client()
+    s.post("/login", data={"username": "sam", "password": "pw"})
+    assert s.get("/pos/").status_code == 200
+    assert s.get("/pos/setup").status_code in (302, 403)  # sales staff can't even open it
+    s.post("/pos/setup", data={"mode": "restaurant", "mode_changed": "1"})
+    b = app.test_client()
+    b.post("/login", data={"username": "bob", "password": "pw"})
+    assert b.get("/pos/setup").status_code == 200  # a bookkeeper can look...
+    b.post("/pos/setup", data={"mode": "restaurant", "mode_changed": "1"})  # ...but not change it
+    with app.app_context():
+        assert get_db().execute("SELECT pos_mode FROM company").fetchone()[0] == "retail"
+
+
+def test_pos_tills_photos_favourites_and_today(client, app):
+    import base64
+    item, acc = _pos_setup(app)
+    with app.app_context():
+        gst = ids(get_db())[1]["GST"]
+    full = {"sku": "CUP", "name": "Coffee cup", "is_sold": "1", "active": "1", "is_inventoried": "1", "sell_price": "10",
+            "income_account_id": acc["4-1000"], "expense_account_id": acc["5-1000"], "asset_account_id": acc["1-1300"],
+            "sale_tax_code_id": gst}
+    client.post("/pos/setup", data={"mode": "retail", "feature": ["scan"], "till_name_1": "Front till",
+                                    "new_till": "Gift shelf", "new_till_loc": "Back wall"})
+    with app.app_context():
+        tills = get_db().execute("SELECT id, name FROM pos_tills WHERE active=1 ORDER BY id").fetchall()
+        assert [t["name"] for t in tills] == ["Front till", "Gift shelf"]
+        till2 = tills[1]["id"]
+    # photo + favourite from the product form (the browser sends a shrunk JPEG as a data URL)
+    jpeg = b"\xff\xd8\xff\xe0" + b"0" * 200
+    url = "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()
+    client.post(f"/inventory/{item}/edit", data={**full, "pos_favourite": "1", "photo_data": url})
+    r = client.get(f"/pos/photo/{item}")
+    assert r.status_code == 200 and r.data == jpeg and r.mimetype == "image/jpeg"
+    page = client.get("/pos/").get_data(as_text=True)
+    assert '"fav": true' in page and '"photo": true' in page and "Gift shelf" in page
+    bad = client.post(f"/inventory/{item}/edit", data={**full, "photo_data": "data:text/html;base64,PGI+"},
+                      follow_redirects=True)
+    assert "JPG, PNG or WebP" in bad.get_data(as_text=True)
+    # a sale remembers its till and shows on the Today screen
+    d = client.post("/pos/sale", json={"method": "card", "till_id": till2, "lines": [{"item_id": item, "qty": 2}]}).get_json()
+    assert d["ok"]
+    with app.app_context():
+        assert get_db().execute("SELECT till_id FROM pos_sales WHERE id=?", (d["sale_id"],)).fetchone()[0] == till2
+    today = client.get("/pos/sales").get_data(as_text=True)
+    assert "Best sellers" in today and "Coffee cup" in today and "Gift shelf" in today and "$22.00" in today
+    client.post(f"/inventory/{item}/edit", data={**full, "photo_remove": "1"})
+    assert client.get(f"/pos/photo/{item}").status_code == 404

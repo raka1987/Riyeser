@@ -193,6 +193,20 @@ def migrate(db):
         employees INTEGER, gross INTEGER, entry_id INTEGER REFERENCES journal_entries(id),
         file_name TEXT, imported_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
         UNIQUE(source, payrun_id))""")
+    # Riyeser POS: favourites, product photos, the switches chosen on POS setup, and named tills.
+    if "pos_favourite" not in {r["name"] for r in db.execute("PRAGMA table_info(items)")}:
+        db.execute("ALTER TABLE items ADD COLUMN pos_favourite INTEGER NOT NULL DEFAULT 0")
+    if "pos_features" not in {r["name"] for r in db.execute("PRAGMA table_info(company)")}:
+        db.execute("ALTER TABLE company ADD COLUMN pos_features TEXT")  # JSON list; empty = the defaults for the mode
+    db.execute("""CREATE TABLE IF NOT EXISTS item_photos (
+        item_id INTEGER PRIMARY KEY REFERENCES items(id), mime TEXT NOT NULL, data BLOB NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_tills (
+        id INTEGER PRIMARY KEY, name TEXT NOT NULL, location TEXT, active INTEGER NOT NULL DEFAULT 1)""")
+    if not db.execute("SELECT 1 FROM pos_tills").fetchone():
+        db.execute("INSERT INTO pos_tills (name, location) VALUES ('Till 1', 'Front counter')")
+    if "till_id" not in {r["name"] for r in db.execute("PRAGMA table_info(pos_sales)")}:
+        db.execute("ALTER TABLE pos_sales ADD COLUMN till_id INTEGER REFERENCES pos_tills(id)")
     for key, code in (("pos_cash", "1-1190"), ("pos_card", "1-1110")):
         if not db.execute("SELECT 1 FROM linked_accounts WHERE key=?", (key,)).fetchone():
             row = db.execute("SELECT id FROM accounts WHERE code=?", (code,)).fetchone() or \

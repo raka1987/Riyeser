@@ -1,16 +1,72 @@
-{% extends "base.html" %}{% block title %}POS sales{% endblock %}
-{% block content %}
-<div class="head"><div><h1>POS sales · {{ day }}</h1><p class="sub">End-of-day summary for the register.</p></div>
-<div class="actions"><a class="btn pri" href="{{ url_for('pos.register') }}">Open register</a><button class="btn" onclick="print()">Print summary</button></div></div>
-<form class="filters"><div><label>Day</label><input type="date" name="date" value="{{ day }}"></div><div><button class="btn">Show</button></div></form>
-<div class="grid g4">
-<div class="card kpi"><div class="lbl">Sales</div><div class="val">{{ total|money }}</div><div class="note">{{ count }} transactions</div></div>
-{% for k, v in methods.items() %}<div class="card kpi"><div class="lbl">{{ v }}</div><div class="val">{{ by_method[k]|money }}</div>{% if k=='cash' %}<div class="note">Change given {{ cash_out|money }} (already deducted)</div>{% endif %}</div>{% endfor %}
-<div class="card kpi"><div class="lbl">GST included</div><div class="val">{{ gst|money }}</div></div></div>
-<div class="tbl"><table><tr><th>Time</th><th>Receipt</th><th>Customer</th><th>Paid by</th><th class="n">Total</th><th></th></tr>
-{% for r in rows %}<tr class="{{ 'muted' if r.voided }}"><td>{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a></td><td>{{ r.cname }}</td><td>{{ methods[r.method] }}</td>
-<td class="n">{{ r.total|money }}</td><td style="white-space:nowrap">{% if r.voided %}<span class="badge void">void</span>{% else %}
-<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" target="_blank">Receipt</a>
-{% if lv('sales') >= 3 %}<form method="post" class="inline" action="{{ url_for('pos.void', sid=r.id) }}" data-confirm="Void {{ r.number }}? Stock goes back and the takings are reversed."><button class="btn sm danger">Void</button></form>{% endif %}{% endif %}</td></tr>
-{% else %}<tr><td colspan="6" class="muted">No POS sales on this day.</td></tr>{% endfor %}</table></div>
+{% extends "pos/_pos.html" %}{% set active = 'sales' %}
+{% block title %}Sales {{ day }}{% endblock %}
+{% block css %}
+.today{padding:20px 22px 40px;max-width:1320px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.h1{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.h1 h1{margin:0;font-size:30px;letter-spacing:-.5px}.h1 p{margin:4px 0 0;color:var(--muted)}
+.h1 form{display:flex;gap:8px;align-items:center}
+.h1 input[type=date]{border:1.5px solid var(--line2);border-radius:12px;padding:10px 12px;min-height:46px;background:#fff}
+.k4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.kpi{padding:18px 20px;display:flex;gap:14px;align-items:flex-start}
+.kpi .bx{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;flex-shrink:0;background:var(--green-l);color:var(--green)}
+.kpi .v{font-size:28px;font-weight:800;letter-spacing:-.6px;margin-top:2px}.kpi .nt{font-size:13px;color:var(--muted)}
+.g2{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:18px}
+.pd{padding:20px}.pd h3{margin:0 0 4px;font-size:18px}
+.bars{display:flex;align-items:flex-end;gap:8px;height:190px;padding-top:12px}
+.bars .m{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+.bars .b{width:100%;max-width:36px;border-radius:8px 8px 0 0;background:var(--mint);min-height:2px}.bars .b.top{background:var(--green)}
+.bars .lab{font-size:12px;color:var(--muted)}
+.bs{display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.bs .th{width:44px;height:44px;border-radius:10px;display:grid;place-items:center;background:var(--green-l);color:var(--green-d);font-weight:800;font-size:14px;overflow:hidden}
+.bs .th img{width:100%;height:100%;object-fit:cover}
+.bs b{font-size:15.5px}.bs small{display:block;color:var(--muted);font-size:13px}
+.meter{height:14px;border-radius:999px;background:#eef1f4;overflow:hidden;display:flex;margin:10px 0 4px}.meter i{display:block;height:100%}
+.pm div{display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.pm i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-right:8px}
+table.t{width:100%;border-collapse:collapse}table.t th,table.t td{padding:12px 14px;border-bottom:1px solid var(--line);text-align:left;font-size:15px}
+table.t th{font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);background:#f8fafc;font-weight:700}
+table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}table.t form{display:inline}
+.none{color:var(--muted);padding:16px 0}
+@media (max-width:1100px){.k4{grid-template-columns:repeat(2,1fr)}.g2{grid-template-columns:1fr}}
+@media print{.tbar,.h1 form,.noprint{display:none!important}.shell{height:auto}.main{overflow:visible}body{background:#fff}}
+{% endblock %}
+{% block body %}
+{% set card = by_method.get('card', 0) %}{% set cash = by_method.get('cash', 0) %}
+<div class="today">
+  <div class="h1"><div><h1>{{ 'Today' if day == today() else 'Sales' }}</h1><p>{{ day_label }} · {{ company.name }}</p></div>
+    <form method="get"><input type="date" name="date" value="{{ day }}" aria-label="Day"><button class="btn sm">Show</button>
+      <button type="button" class="btn sm" onclick="print()">Print summary</button><a class="btn sm" href="{{ url_for('help.index') }}#pos">Help</a></form></div>
+  <div class="k4">
+    <div class="card kpi"><span class="bx"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><div><div class="lbl">Sales inc GST</div><div class="v n">{{ total|money }}</div><div class="nt">Voided sales left out</div></div></div>
+    <div class="card kpi"><span class="bx" style="background:#eaf1ff;color:#2563eb"><svg class="ic" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></svg></span><div><div class="lbl">Sales</div><div class="v n">{{ count }}</div><div class="nt">{% if count %}Average {{ (total // count)|money }}{% else %}None yet{% endif %}</div></div></div>
+    <div class="card kpi"><span class="bx" style="background:var(--warn-bg);color:var(--warn)"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5"/></svg></span><div><div class="lbl">GST collected</div><div class="v n">{{ gst|money }}</div><div class="nt">Goes to your BAS</div></div></div>
+    {% if mode == 'restaurant' %}<div class="card kpi"><span class="bx" style="background:#f3e8ff;color:#7c3aed"><svg class="ic" viewBox="0 0 24 24"><path d="M3 9h18M5 9v11M19 9v11M7 5h10l2 4H5l2-4Z"/></svg></span><div><div class="lbl">Open orders</div><div class="v n">{{ open_orders }}</div><div class="nt">Not paid yet</div></div></div>
+    {% else %}<div class="card kpi"><span class="bx" style="background:#f3e8ff;color:#7c3aed"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg></span><div><div class="lbl">Cash in drawer</div><div class="v n">{{ cash|money }}</div><div class="nt">Cash sales, after change</div></div></div>{% endif %}
+  </div>
+  <div class="g2">
+    <div class="card pd"><h3>Sales by hour</h3>
+      {% set hmax = (hours.values()|max) if hours else 0 %}
+      {% if hours %}{% set h0 = [hours.keys()|min, 7]|min %}{% set h1 = [hours.keys()|max, 17]|max %}
+      <div class="bars">{% for h in range(h0, h1 + 1) %}{% set v = hours.get(h, 0) %}<div class="m"><div class="b {{ 'top' if v == hmax }}" style="height:{{ (v / hmax * 150)|round|int if hmax else 0 }}px" title="{{ v|money }}"></div><span class="lab">{{ (h % 12) or 12 }}{{ 'a' if h < 12 else 'p' }}</span></div>{% endfor %}</div>
+      {% else %}<p class="none">No sales yet on this day.</p>{% endif %}</div>
+    <div class="card pd"><h3>Best sellers</h3>
+      {% for b in best %}<div class="bs"><span class="th">{% if b.photo %}<img src="{{ url_for('pos.photo', iid=b.id) }}" alt="">{% else %}{{ b.name[:2]|upper }}{% endif %}</span><div><b>{{ b.name }}</b><small>{{ '%g'|format(b.qty) }} sold</small></div><b class="n">{{ b.amt|money }}</b></div>
+      {% else %}<p class="none">Best sellers show here once you’ve made some sales.</p>{% endfor %}</div>
+  </div>
+  <div class="g2">
+    <div class="card" style="overflow:hidden"><div class="pd" style="padding-bottom:8px"><h3>Sales</h3></div>
+      <table class="t"><tr><th>Time</th><th>Receipt</th><th>Customer</th><th>Paid</th><th class="r">Total</th><th class="r noprint"></th></tr>
+      {% for r in rows %}<tr class="{{ 'void' if r.voided }}"><td class="n">{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a>{% if r.till_name and tills|length > 1 %}<br><small style="color:var(--muted)">{{ r.till_name }}</small>{% endif %}</td>
+        <td>{{ r.cname }}</td><td>{{ methods[r.method] }}</td><td class="r n">{% if r.voided %}<s>{{ r.total|money }}</s>{% else %}{{ r.total|money }}{% endif %}</td>
+        <td class="r noprint" style="white-space:nowrap">{% if r.voided %}<span class="badge err">Voided</span>{% else %}<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" target="_blank">Receipt</a>
+        {% if lv('sales') >= 3 %}<form method="post" action="{{ url_for('pos.void', sid=r.id) }}" onsubmit="return confirm('Void {{ r.number }}? Stock goes back and the takings are reversed.')"><button class="btn sm danger">Void</button></form>{% endif %}{% endif %}</td></tr>
+      {% else %}<tr><td colspan="6" class="none">No POS sales on this day.</td></tr>{% endfor %}</table></div>
+    <div class="card pd"><h3>How people paid</h3>
+      {% if total %}<div class="meter"><i style="width:{{ (card / total * 100)|round(1) }}%;background:var(--green)"></i><i style="width:{{ (cash / total * 100)|round(1) }}%;background:var(--mint)"></i></div>{% endif %}
+      <div class="pm"><div><span><i style="background:var(--green)"></i>{{ methods.card }}</span><b class="n">{{ card|money }}</b></div>
+        <div><span><i style="background:var(--mint)"></i>{{ methods.cash }}</span><b class="n">{{ cash|money }}</b></div>
+        <div><span>Change given (already taken off)</span><span class="n">{{ cash_out|money }}</span></div>
+        <div><span>GST included</span><span class="n">{{ gst|money }}</span></div></div></div>
+  </div>
+</div>
 {% endblock %}
