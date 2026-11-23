@@ -135,8 +135,26 @@ h2.sec { font-size: 13px; font-weight: 700; color: var(--muted); text-transform:
 #licbody .big { font-size: 28px; }
 #licbody input { width: 100%; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); font: inherit; background: transparent; color: inherit; margin: 6px 0 10px; letter-spacing: .5px; }
 #licbody .muted { font-size: 12.5px; }
+#licbody .plrows { display: grid; gap: 8px; margin: 4px 0 12px; }
+#licbody .plrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+#licbody .plrow b { display: block; } #licbody .plrow span { font-size: 12.5px; } #licbody .plrow .ok { color: var(--ok, #15803d); }
+#licbody .yr { display: flex; gap: 8px; align-items: center; margin: 4px 0 10px; } #licbody .yr input { width: auto; margin: 0; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); opacity: 0; background: #0b1426; color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 13px; transition: all .2s; pointer-events: none; max-width: 80vw; }
 .toast.show { opacity: 1; transform: translateX(-50%); }
 #appsv h2.sec { margin-top: 4px; } #home:not([hidden]) ~ #appsv h2.sec { margin-top: 24px; }
 .logo-i { flex: none; border-radius: 22%; display: block; }
 .nav .logo-i { box-shadow: 0 0 0 1px rgba(255,255,255,.12); }
+
+/* Message us */
+.chatdlg { width: min(560px, 94vw); }
+#chatbody { padding: 12px 22px 22px; font-size: 14px; line-height: 1.5; }
+#chatbody .convs { display: grid; gap: 6px; margin-bottom: 12px; max-height: 180px; overflow: auto; }
+#chatbody .conv { text-align: left; display: flex; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+#chatbody .conv.on { border-color: var(--accent, #2563eb); } #chatbody .conv .new { font-size: 12px; font-weight: 600; color: var(--accent, #2563eb); }
+#chatbody .thread { display: grid; gap: 8px; max-height: 320px; overflow: auto; padding: 4px 0 10px; }
+#chatbody .msg { max-width: 85%; padding: 8px 12px; border-radius: 12px; background: var(--ok-soft); white-space: pre-wrap; justify-self: end; }
+#chatbody .msg.staff { background: var(--line); justify-self: start; }
+#chatbody .msg .at { display: block; font-size: 11.5px; opacity: .65; margin-top: 2px; }
+#chatbody textarea { width: 100%; min-height: 84px; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); font: inherit; background: transparent; color: inherit; resize: vertical; }
+#chatbody .muted { font-size: 12.5px; }
+#chatbtn .dot { display: inline-block; min-width: 16px; padding: 0 5px; margin-left: 4px; border-radius: 8px; background: var(--accent, #2563eb); color: #fff; font-size: 11px; line-height: 16px; }

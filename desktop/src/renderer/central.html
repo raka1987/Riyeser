@@ -11,7 +11,7 @@
     <aside class="side">
       <div class="logo"><img src="icon-central.png" alt=""><div><b>Riyeser Central</b><small>Riyeser Group</small></div></div>
       <nav class="nav" id="nav"></nav>
-      <div class="foot"><span id="foot"></span><br><button id="licbtn">Licence</button> · <button id="checkupd">Check for updates</button></div>
+      <div class="foot"><span id="foot"></span><br><button id="licbtn">Your plan</button> · <button id="chatbtn">Message us</button> · <button id="checkupd">Check for updates</button></div>
     </aside>
     <main class="main">
       <div class="inner">
@@ -55,8 +55,12 @@
     </main>
   </div>
   <dialog id="licdlg" class="licdlg">
-    <form method="dialog" class="lichead"><b>Your Riyeser licence</b><button class="x" value="close" aria-label="Close">✕</button></form>
+    <form method="dialog" class="lichead"><b>Your Riyeser plan</b><button class="x" value="close" aria-label="Close">✕</button></form>
     <div id="licbody"></div>
+  </dialog>
+  <dialog id="chatdlg" class="licdlg chatdlg">
+    <form method="dialog" class="lichead"><b>Message Riyeser</b><button class="x" value="close" aria-label="Close">✕</button></form>
+    <div id="chatbody"></div>
   </dialog>
   <div id="toast" class="toast"></div>
   <script src="central.js"></script>

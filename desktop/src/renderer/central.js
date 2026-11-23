@@ -119,7 +119,7 @@ function renderNav() {
     <hr>
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
-    <button data-lic="open">${icon('key')}Licence</button>
+    <button data-lic="open">${icon('key')}Your plan</button>
     <button data-help="central">${icon('help')}Help</button>`;
 }
 
@@ -280,51 +280,137 @@ bridge.on('update-progress', (p) => {
 });
 $('#checkupd').addEventListener('click', () => checkForUpdates(true, false));
 
-// ---------- licence: one free 90-day trial, then one licence for every Riyeser program ----------
-let lic = null;
+// ---------- plan: one Riyeser account; free allowances, then a subscription per program ----------
+let lic = null; let signIn = { email: '', sent: false }; let yearly = false;
 async function loadLicence() { try { lic = await bridge.call('central:licence'); } catch { lic = null; } renderLicence(); }
+// Every paid program is free for its first 90 days (one trial for the suite, no card). If the server also sets a
+// free allowance for a program (caps), it shows here too.
+const PAID = [['basics', 'Accounting Basics', '$20 a month per business (3 users included)', (c) => c.basic && `your first ${c.basic} invoices`],
+  ['plus', 'Accounting Plus', '+$20 a month, includes everything in Basics', () => null],
+  ['pos', 'POS', '+$20 a month', (c) => c.pos && `your first ${c.pos} sales`],
+  ['payroll', 'Payroll', '+$20 a month', (c) => c.payroll && `your first ${c.payroll} pay runs`],
+  ['asbuilt', 'As Built', '$20 a month on its own, for the building industry', (c) => c.asbuilt && `your first ${c.asbuilt} projects`]];
 function licLine(s) {
-  if (!s) return 'Licence';
-  if (s.mode === 'trial') return `Free trial · ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left`;
-  if (s.mode === 'licensed') return `Licensed${s.plan ? ` · ${s.plan}` : ''}`;
-  return 'Licence needed';
+  if (!s) return 'Your plan';
+  if (s.mode === 'licensed') return `Plan · ${s.plan || 'paid'}`;
+  if (s.mode === 'expired') return 'Plan check needed';
+  return s.signedIn ? 'Your plan · free' : 'Your plan';
 }
 function renderLicence() {
   $('#licbtn').textContent = licLine(lic);
   const bar = $('#licbar');
-  const show = lic && (lic.mode === 'expired' || (lic.mode === 'trial' && lic.daysLeft <= 14) || lic.message);
+  const show = lic && (lic.mode === 'expired' || lic.message);
   bar.hidden = !show;
-  if (show) {
-    const text = lic.mode === 'trial' ? `<b>${lic.daysLeft} day${lic.daysLeft === 1 ? '' : 's'} left in your free trial</b><div class="lbl">Get a licence any time — everything you've made stays exactly where it is.</div>`
-      : `<b>${lic.mode === 'licensed' ? 'Licence check due' : 'Licence needed'}</b><div class="lbl">${esc(lic.message || '')}</div>`;
-    bar.innerHTML = `<span style="font-size:24px">🔑</span><div class="grow">${text}</div><button class="go" data-lic="open">${lic.mode === 'licensed' ? 'Details' : 'Get a licence'}</button>`;
-  }
+  if (show) bar.innerHTML = `<span style="font-size:24px">🔑</span><div class="grow"><b>${lic.mode === 'expired' ? 'Plan check needed' : 'Your plan'}</b><div class="lbl">${esc(lic.message || '')}</div></div><button class="go" data-lic="open">Details</button>`;
+}
+const when = (iso) => (iso ? new Date(iso).toLocaleDateString() : '');
+function programRows(s) {
+  const c = s.caps || {};
+  return PAID.map(([id, name, price, allowance]) => {
+    const p = (s.products || {})[id];
+    const free = allowance(c);
+    const state = p && p.paid
+      ? `<span class="ok">✓ Paid${p.until ? ` to ${when(p.until)}` : ''}${p.warning === 'cancelled' ? ' (cancelled, ends then)' : ''}${p.warning === 'payment_failed' ? ' · payment failed' : ''}</span>`
+      : s.daysLeft > 0 ? `<span>${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} of free trial left${free ? `, then free for ${esc(free)}` : ''}. Then ${esc(price)}.</span>`
+        : free ? `<span class="muted">Free for ${esc(free)}, then ${esc(price)}.</span>` : `<span class="muted">Trial finished: everything you made is still here. ${esc(price)} to keep adding new work.</span>`;
+    const btn = p && p.paid ? '' : s.signedIn && s.configured ? `<button class="btn s" data-lic="subscribe" data-product="${id}">Subscribe</button>` : '';
+    return `<div class="plrow"><div><b>${name}</b>${state}</div>${btn}</div>`;
+  }).join('');
 }
 function openLicence() {
   const s = lic || {}; const body = $('#licbody');
-  const state = s.mode === 'licensed'
-    ? `<div class="state"><span class="big">✅</span><div><b>Licensed${s.plan ? ` — ${esc(s.plan)}` : ''}</b>${s.email ? `${esc(s.email)} · ` : ''}key ${esc(s.key || '')}<div>Companies in Riyeser Accounting: ${1 + (s.extraCompanies || 0)} (1 included${s.extraCompanies ? ` + ${s.extraCompanies} extra` : ''})</div><div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleDateString() : '—'}. Works offline; it's re-checked now and then when you're online.</div></div></div>`
-    : s.mode === 'trial'
-      ? `<div class="state"><span class="big">🎁</span><div><b>Free trial — ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left</b>Every Riyeser program is included until ${new Date(s.trialEnds).toLocaleDateString()}. No card needed.</div></div>`
-      : `<div class="state bad"><span class="big">🔑</span><div><b>Licence needed</b>${esc(s.message || '')}</div></div>`;
-  body.innerHTML = `${state}
-    ${s.mode === 'licensed' ? `<div class="row"><button class="btn s" data-lic="remove">Remove licence from this PC</button><button class="btn s" data-lic="buy">Manage plan</button></div>
-      <p class="muted">Removing frees this computer's place so you can use the licence on another PC.</p>`
-    : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
-      <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
-      <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business (3 users included), and Accounting Plus, Payroll and POS are +$20 each. As Built, for the building industry, is $20 a month on its own. 🐣 Early bird: 50% off your first year for the first 100 businesses. Every paid program is free for 90 days, no card. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
-  $('#licdlg').showModal();
+  let head;
+  if (!s.configured) head = `<div class="state"><span class="big">🎁</span><div><b>Riyeser accounts are coming soon</b>Every program works now, with the free trial below.</div></div>`;
+  else if (!s.signedIn) {
+    head = `<div class="state"><span class="big">👋</span><div><b>Sign in to Riyeser</b>Just your email: we send a 6-digit code, no password. Your work stays on this PC.</div></div>
+      <label for="licemail"><b>Email</b></label><input id="licemail" type="email" autocomplete="email" value="${esc(signIn.email)}" placeholder="you@business.com">
+      ${signIn.sent ? `<label for="liccode"><b>Code from the email</b></label><input id="liccode" inputmode="numeric" maxlength="8" autocomplete="one-time-code" placeholder="123456">
+      <div class="row"><button class="btn" data-lic="finish">Sign in</button><button class="btn s" data-lic="start">Send a new code</button></div>`
+      : `<div class="row"><button class="btn" data-lic="start">Email me a code</button></div>`}`;
+  } else {
+    head = `<div class="state${s.mode === 'expired' ? ' bad' : ''}"><span class="big">${s.mode === 'licensed' ? '✅' : '🙂'}</span><div><b>${esc(s.email || 'Signed in')}</b>${s.mode === 'licensed' ? `Paid: ${esc(s.plan)}` : 'Nothing paid yet.'}${s.message ? `<div>${esc(s.message)}</div>` : ''}<div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleString() : '—'}. Works offline for 30 days at a time.</div></div></div>`;
+  }
+  const paidAny = Object.values(s.products || {}).some((p) => p.paid);
+  body.innerHTML = `${head}
+    <div class="plrows">${programRows(s)}</div>
+    ${s.signedIn && s.configured ? `<label class="yr"><input type="checkbox" id="licyearly" ${yearly ? 'checked' : ''}> Pay yearly (2 months free)</label>
+    <div class="row">${paidAny ? '<button class="btn s" data-lic="manage">Manage plan &amp; receipts</button>' : ''}<button class="btn s" data-lic="refresh">Check again</button><button class="btn s" data-lic="signout">Sign out on this PC</button></div>` : ''}
+    <p class="muted">Central, PDF and Desk Assistant are free forever. Every paid program is free for 90 days, no card. When a trial ends nothing is deleted: you can still open, print and export everything, and only new work waits for a subscription. 🐣 Early bird: 50% off your first year for the first 100 businesses. Extra users $5 a month, extra companies $10 a month. Prices in AUD; any tax is shown before you pay. <a href="#" data-lic="buy">See pricing</a></p>`;
+  if (!$('#licdlg').open) $('#licdlg').showModal();
 }
+document.addEventListener('change', (e) => { if (e.target.id === 'licyearly') yearly = e.target.checked; });
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-lic]'); if (!b) return;
-  const a = b.dataset.lic;
+  const a = b.dataset.lic; if (b.tagName === 'A') e.preventDefault();
+  const busy = (fn) => safe(async () => { b.disabled = true; try { await fn(); } finally { b.disabled = false; } });
   if (a === 'open') openLicence();
   if (a === 'buy') safe(() => bridge.call('central:buy'));
-  if (a === 'activate') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceActivate', $('#lickey').value); renderLicence(); openLicence(); toast('Licence turned on — thank you!'); } finally { b.disabled = false; } });
-  if (a === 'remove') safe(async () => { if (!confirm('Remove the licence from this PC?')) return; lic = await bridge.call('central:licenceRemove'); renderLicence(); openLicence(); });
+  if (a === 'start') busy(async () => { signIn.email = $('#licemail').value.trim(); await bridge.call('central:signInStart', signIn.email); signIn.sent = true; openLicence(); toast('Code sent. Check your email.'); setTimeout(() => $('#liccode') && $('#liccode').focus(), 50); });
+  if (a === 'finish') busy(async () => { lic = await bridge.call('central:signInFinish', $('#licemail').value.trim(), $('#liccode').value); signIn = { email: '', sent: false }; renderLicence(); openLicence(); toast('Signed in.'); });
+  if (a === 'subscribe') busy(async () => { await bridge.call('central:subscribe', [{ product: b.dataset.product, quantity: 1 }], yearly ? 'year' : 'month'); toast('Checkout opened in your browser. Come back here when you have paid.'); watchForPayment(); });
+  if (a === 'manage') busy(() => bridge.call('central:managePlan'));
+  if (a === 'refresh') busy(async () => { lic = await bridge.call('central:planRefresh'); renderLicence(); openLicence(); });
+  if (a === 'signout') safe(async () => { if (!confirm('Sign out of Riyeser on this PC? Your work stays here.')) return; lic = await bridge.call('central:signOut'); renderLicence(); openLicence(); });
 });
+// After checkout, check every 20 seconds for 10 minutes so the programs unlock as soon as Paddle confirms the payment.
+let payWatch = null;
+function watchForPayment() {
+  clearInterval(payWatch); let n = 0; const before = JSON.stringify((lic && lic.products) || {});
+  payWatch = setInterval(async () => {
+    n += 1; if (n > 30) return clearInterval(payWatch);
+    try { lic = await bridge.call('central:planRefresh'); } catch { return; }
+    if (JSON.stringify(lic.products || {}) !== before) { clearInterval(payWatch); renderLicence(); if ($('#licdlg').open) openLicence(); toast('Payment received. Thank you!'); }
+  }, 20000);
+}
 $('#licbtn').addEventListener('click', openLicence);
+// ---------- Message us: questions to Riyeser, answered from the admin page ----------
+let chats = []; let chatOn = null; let chatTimer = null;
+async function loadChats() {
+  try { chats = await bridge.call('central:chatList'); } catch (e) { chats = null; return e.message; }
+  return null;
+}
+function renderChat(err) {
+  const body = $('#chatbody');
+  if (chats === null) { body.innerHTML = `<p>${esc(err || 'Messages are not available right now.')}</p>${/Sign in/.test(err || '') ? '<div class="row"><button class="btn" data-lic="open">Sign in</button></div>' : ''}`; return; }
+  const cur = chats.find((c) => c.id === chatOn) || null;
+  const fmt = (iso) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  body.innerHTML = `${chats.length ? `<div class="convs">${chats.map((c) => `<button class="conv${c.id === chatOn ? ' on' : ''}" data-chat="pick" data-id="${esc(c.id)}"><span>${esc(c.subject)}</span>${c.unread ? '<span class="new">New reply</span>' : `<span class="muted">${esc(fmt(c.at))}</span>`}</button>`).join('')}
+      <button class="conv${chatOn ? '' : ' on'}" data-chat="new"><span>➕ New question</span></button></div>` : ''}
+    ${cur ? `<div class="thread">${cur.messages.map((m) => `<div class="msg${m.fromStaff ? ' staff' : ''}">${esc(m.body)}<span class="at">${m.fromStaff ? 'Riyeser' : 'You'} · ${esc(fmt(m.at))}</span></div>`).join('')}</div>` : '<p>Ask us anything: setting up, a problem, or your plan. Our answer shows up here, and the Message us button shows a number when there is a new reply.</p>'}
+    <textarea id="chattext" placeholder="${cur ? 'Write a reply…' : 'Your question…'}" maxlength="4000"></textarea>
+    <div class="row"><button class="btn" data-chat="send">Send</button></div>
+    <p class="muted">Please don't send passwords or card numbers. Only what you type here is sent: your books stay on this PC.</p>`;
+  const t = body.querySelector('.thread'); if (t) t.scrollTop = t.scrollHeight;
+}
+async function openChat() {
+  const err = await loadChats();
+  if (!chatOn && chats && chats.length && chats[0].status === 'open') chatOn = chats[0].id;
+  renderChat(err);
+  if (!$('#chatdlg').open) $('#chatdlg').showModal();
+  markChatRead();
+  clearInterval(chatTimer);
+  chatTimer = setInterval(async () => { if (!$('#chatdlg').open) return clearInterval(chatTimer); const text = $('#chattext') ? $('#chattext').value : ''; const e = await loadChats(); renderChat(e); if ($('#chattext')) $('#chattext').value = text; markChatRead(); }, 30000);
+}
+function markChatRead() {
+  const cur = chats && chats.find((c) => c.id === chatOn);
+  if (cur && cur.unread) { cur.unread = false; bridge.call('central:chatRead', cur.id).catch(() => {}); refreshChatBadge(); }
+}
+async function refreshChatBadge() {
+  let n = 0; try { n = await bridge.call('central:chatUnread'); } catch { n = 0; }
+  $('#chatbtn').innerHTML = `Message us${n ? `<span class="dot">${n}</span>` : ''}`;
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-chat]'); if (!b) return;
+  const a = b.dataset.chat;
+  if (a === 'pick') { chatOn = b.dataset.id; renderChat(); markChatRead(); }
+  if (a === 'new') { chatOn = null; renderChat(); }
+  if (a === 'send') safe(async () => {
+    b.disabled = true;
+    try { chatOn = await bridge.call('central:chatSend', $('#chattext').value, chatOn); await loadChats(); renderChat(); toast('Sent. Our answer will show up here.'); } finally { b.disabled = false; }
+  });
+});
+$('#chatbtn').addEventListener('click', () => safe(openChat));
+
 
 // ---------- search ----------
 const finder = { q: '', type: null, year: null, kind: null };
@@ -391,6 +477,8 @@ $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign
   checkForUpdates(false);
   loadLicence();
   setInterval(loadLicence, 6 * 3600 * 1000);
+  refreshChatBadge();
+  setInterval(refreshChatBadge, 15 * 60 * 1000);
   setInterval(() => { if ($('#results').hidden) safe(refresh); }, 5 * 60 * 1000);
   setInterval(() => checkForUpdates(false), 6 * 3600 * 1000);
   window.addEventListener('focus', () => { if ($('#results').hidden) safe(refresh); });

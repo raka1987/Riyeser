@@ -1,0 +1,6 @@
+{
+  "_readme": "The Riyeser server (see server/README.md). All three values are safe to publish. Leave them empty until the Supabase project exists.",
+  "supabaseUrl": "",
+  "anonKey": "",
+  "passPublicKey": ""
+}

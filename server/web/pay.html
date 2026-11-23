@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Riyeser — checkout</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;background:#f6f7f9;color:#1d2430}main{text-align:center;padding:24px}</style>
+</head>
+<body>
+<main>
+  <h1>Riyeser checkout</h1>
+  <p id="msg">Opening the secure checkout…</p>
+</main>
+<!-- Paddle's "default payment link" page. Set it in Paddle → Checkout → Checkout settings to https://riyeser.com/pay.html.
+     Riyeser Central opens this page with ?_ptxn=txn_..., and Paddle.js opens that checkout by itself. -->
+<script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+<script>
+  // Fill these in from Paddle → Developer tools → Authentication → Client-side tokens (safe to publish).
+  var PADDLE = { env: 'sandbox', token: '' };
+  var q = new URLSearchParams(location.search);
+  var msg = document.getElementById('msg');
+  if (!PADDLE.token) msg.textContent = 'Checkout isn\'t switched on yet.';
+  else {
+    if (PADDLE.env === 'sandbox') Paddle.Environment.set('sandbox');
+    Paddle.Initialize({
+      token: PADDLE.token,
+      checkout: { settings: { displayMode: 'overlay', theme: 'light', successUrl: 'https://riyeser.com/thanks.html' } },
+      eventCallback: function (e) {
+        if (e.name === 'checkout.completed') msg.textContent = 'Thank you! Riyeser Central will unlock your programs within a minute. You can close this page.';
+        if (e.name === 'checkout.closed') msg.textContent = 'Checkout closed. Go back to Riyeser Central to try again.';
+      }
+    });
+    // With ?_ptxn= in the address, Paddle.js opens that checkout by itself.
+    if (!q.get('_ptxn')) msg.textContent = 'Start from Riyeser Central → Your plan → Subscribe.';
+  }
+</script>
+</body>
+</html>

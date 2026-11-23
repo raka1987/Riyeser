@@ -1,0 +1,8 @@
+# Only the parts Riyeser changes from the Supabase defaults. `supabase link` fills in the rest.
+[functions.paddle-webhook]
+verify_jwt = false   # Paddle can't sign in; the function checks Paddle's own signature instead
+
+[auth.email]
+enable_signup = true
+otp_length = 6
+otp_expiry = 900
