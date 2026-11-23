@@ -2,7 +2,7 @@ name: Publish Riyeser release
 
 # One button for a new public release of the Riyeser Windows programs:
 #   Actions → "Publish Riyeser release" → Run workflow
-# Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF and Riyeser Services (branch module/desk-assistant) and Riyeser Accounting
+# Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF and Riyeser Services (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
 # (main) and Riyeser Payroll (branch module/payroll) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
 # every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
 on:
@@ -61,33 +61,42 @@ jobs:
         with: { name: desktop, path: desktop/release/*, if-no-files-found: error }
 
   accounting:
-    name: Accounting
+    name: Accounting Basics and Accounting Plus
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with: { ref: main }
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - name: Build
-        run: |
-          pip install . pyinstaller
-          python packaging/build_desktop.py
-      - name: Installer
+      - name: Build both apps and their installers
         shell: pwsh
         run: |
+          pip install . pyinstaller
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
           $ver = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          & $iscc "/DAppVersion=$ver" packaging\installer.iss
-          if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
-          $setup = Get-ChildItem dist\RiyeserAccounting-Setup-*.exe | Select-Object -First 1
-          Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
-          $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Accounting*"
-          if (-not $entry) { throw "Riyeser Accounting did not install" }
-          Write-Host "OK:" $entry.DisplayName
+          foreach ($ed in "basics", "plus") {
+            python packaging/build_desktop.py --edition $ed
+            if ($LASTEXITCODE -ne 0) { throw "$ed build failed" }
+            & $iscc "/DEdition=$ed" "/DAppVersion=$ver" packaging\installer.iss
+            if ($LASTEXITCODE -ne 0) { throw "$ed installer build failed" }
+          }
+      - name: Install each one to check it, and that each replaces the other
+        shell: pwsh
+        run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          Copy-Item $setup.FullName release\RiyeserAccounting-Setup.exe
-          "$($entry.DisplayName)" | Set-Content release\versions-accounting.txt
+          function Installed { @((Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Accounting*").DisplayName) }
+          foreach ($app in @(@{ ed = "Basics"; file = "RiyeserAccountingBasics-Setup" }, @{ ed = "Plus"; file = "RiyeserAccountingPlus-Setup" })) {
+            $setup = Get-ChildItem "dist\$($app.file)-*.exe" | Select-Object -First 1
+            Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
+            $now = Installed
+            if ($now.Count -ne 1 -or $now[0] -notlike "Riyeser Accounting $($app.ed) *") { throw "Expected only Riyeser Accounting $($app.ed), found: $now" }
+            Write-Host "OK:" $now[0]
+            Copy-Item $setup.FullName "release\$($app.file).exe"
+            "$($now[0])" | Set-Content "release\versions-accounting-$($app.ed.ToLower()).txt"
+          }
+          # Older Riyeser Central (1.3.6 and before) and old links download RiyeserAccounting-Setup.exe: give them Plus.
+          Copy-Item release\RiyeserAccountingPlus-Setup.exe release\RiyeserAccounting-Setup.exe
       - uses: actions/upload-artifact@v4
         with: { name: accounting, path: release/*, if-no-files-found: error }
 
@@ -186,6 +195,8 @@ jobs:
             out/RiyeserDeskAssistant-Setup.exe
             out/RiyeserPDF-Setup.exe
             out/RiyeserServices-Setup.exe
+            out/RiyeserAccountingBasics-Setup.exe
+            out/RiyeserAccountingPlus-Setup.exe
             out/RiyeserAccounting-Setup.exe
             out/RiyeserPayroll-Setup.exe
           fail_on_unmatched_files: false  # Payroll's file may be missing if its job failed; the others are checked above

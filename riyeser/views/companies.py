@@ -125,7 +125,7 @@ def add():
         return redirect(url_for("companies.index"))
     f = request.form
     try:
-        cid = co.add_company(f.get("name"), f.get("abn"), f.get("edition") or "enterprise", owner=g.user, demo=bool(f.get("demo")))
+        cid = co.add_company(f.get("name"), f.get("abn"), f.get("edition") or None, owner=g.user, demo=bool(f.get("demo")))
     except ValueError as e:
         flash(str(e), "error")
         return redirect(url_for("companies.index"))

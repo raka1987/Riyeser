@@ -1,0 +1,32 @@
+{% extends "base.html" %}{% block title %}Accounting Basics or Plus{% endblock %}
+{% block content %}
+{% set other = 'enterprise' if here == 'basic' else 'basic' %}
+<div class="head"><div><h1>{{ editions.basic.title }} or {{ editions.enterprise.title }}</h1>
+<p class="sub">You're using <b>{{ editions[here].app }}</b>. Both open the same company files, so moving up or down never loses anything.</p></div></div>
+<div class="eds">
+  <div class="card ed ed-basic{{ ' here' if here == 'basic' }}"><div class="edlogo">B</div><h2>{{ editions.basic.title }}</h2><p class="edprice">Free · no licence needed</p>
+    <ul><li>Quotes, invoices and receiving payments</li><li>Customers, suppliers and bills</li><li>Stock items, stocktake and reorder alerts</li>
+    <li>Simple money in and money out</li><li>Shop counter (POS)</li><li>Profit &amp; Loss, GST summary, who owes you, sales and stock reports</li></ul>
+    {% if here == 'basic' %}<p class="youare">✓ This is what you're using</p>{% endif %}</div>
+  <div class="card ed ed-plus{{ ' here' if here != 'basic' }}"><div class="edlogo">P</div><h2>{{ editions.enterprise.title }}</h2><p class="edprice">Free for 90 days, then included in your Riyeser licence</p>
+    <ul><li>Everything in {{ editions.basic.title }}</li><li>Bank reconciliation and bank statement import</li><li>Payroll and pay runs</li>
+    <li>General journal and search transactions</li><li>Jobs and budgets</li><li>Balance Sheet, Trial Balance and every report</li></ul>
+    {% if here != 'basic' %}<p class="youare">✓ This is what you're using</p>{% endif %}</div>
+</div>
+<div class="card">
+{% if separate_apps %}
+  {% if here == 'basic' %}
+  <h3>Upgrade to {{ editions.enterprise.title }}</h3>
+  <ol><li>Download and run the {{ editions.enterprise.title }} installer.</li><li>It replaces {{ editions.basic.title }} and opens your books exactly as they are, with the extra screens switched on.</li></ol>
+  <a class="btn pri" href="{{ edition_download('enterprise') }}" target="_blank" rel="noopener">⬇ Download {{ editions.enterprise.title }}</a>
+  {% else %}
+  <h3>Switch to the free {{ editions.basic.title }}</h3>
+  <ol><li>Download and run the {{ editions.basic.title }} installer. It asks before replacing {{ editions.enterprise.title }}.</li>
+  <li>Your customers, invoices, stock and reports carry straight over. Payroll, journals, jobs and budgets are hidden but kept safe, and come back if you install {{ editions.enterprise.title }} again.</li></ol>
+  <a class="btn" href="{{ edition_download('basic') }}" target="_blank" rel="noopener">⬇ Download {{ editions.basic.title }}</a>
+  {% endif %}
+{% else %}
+  <p>Switch any time under <a href="{{ url_for('core.company') }}">Setup → Company</a>. Your data never changes.</p>
+{% endif %}
+</div>
+{% endblock %}

@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "1.5.0"
+__version__ = "2.0.0"
 
 
 def create_app(test_config=None):
@@ -60,10 +60,18 @@ def create_app(test_config=None):
         g.company = db.execute("SELECT * FROM company WHERE id=1").fetchone()
         if g.company is not None:
             from .licence import enterprise_allowed
+            from .edition import app_edition
             g.company = dict(g.company)
             g.company["chosen_edition"] = g.company["edition"]
             g.company["enterprise_allowed"] = enterprise_allowed()
-            if not g.company["enterprise_allowed"]:
+            g.company["plus_locked"] = False
+            app_ed = app_edition()
+            if app_ed:
+                # The separate Basics / Plus apps: the app decides, not the company file (so the same books open in
+                # either one, and nothing is lost going up or down).
+                g.company["edition"] = app_ed
+                g.company["plus_locked"] = app_ed == "enterprise" and not g.company["enterprise_allowed"]
+            elif not g.company["enterprise_allowed"]:
                 g.company["edition"] = "basic"  # Basic is free; Enterprise needs a licence (data is kept)
         public = ("auth.login", "auth.setup_company", "auth.forgot", "static")
         if g.user is None and request.endpoint not in public:
@@ -79,15 +87,23 @@ def create_app(test_config=None):
                 flash(why, "error")
                 back = request.referrer if request.method == "POST" and request.referrer else url_for("core.dashboard")
                 return redirect(back)
-        if g.user is not None and g.company["edition"] == "basic" and _enterprise_only(request.endpoint):
-            ent, basic = dbmod.EDITIONS["enterprise"]["name"], dbmod.EDITIONS["basic"]["name"]
-            if g.company["enterprise_allowed"]:
-                flash(f"That's part of Riyeser Accounting {ent}. An administrator can switch to {ent} under "
-                      "Setup → Company (your data stays as it is).", "error")
-            else:
-                flash(f"That's part of Riyeser Accounting {ent}, which needs a licence. {basic} stays free. "
-                      f"Enter a licence in Riyeser Central to unlock {ent} (your data stays as it is).", "error")
-            return redirect(url_for("core.dashboard"))
+        if g.user is not None and _enterprise_only(request.endpoint):
+            ent, basic = dbmod.EDITIONS["enterprise"]["title"], dbmod.EDITIONS["basic"]["title"]
+            from .edition import app_edition
+            if g.company["plus_locked"]:
+                flash(f"Your free trial has ended, so this {ent} screen needs a licence. Enter one in Riyeser Central "
+                      f"(Licence). Nothing has been removed. Or switch to the free {basic} under Setup.", "error")
+                return redirect(url_for("core.dashboard"))
+            if g.company["edition"] == "basic":
+                if app_edition() == "basic":
+                    return redirect(url_for("core.upgrade"))
+                if g.company["enterprise_allowed"]:
+                    flash(f"That's part of {ent}. An administrator can switch to {ent} under "
+                          "Setup → Company (your data stays as it is).", "error")
+                else:
+                    flash(f"That's part of {ent}, which needs a licence. {basic} stays free. "
+                          f"Enter a licence in Riyeser Central to unlock {ent} (your data stays as it is).", "error")
+                return redirect(url_for("core.dashboard"))
 
     @app.context_processor
     def inject():
@@ -96,7 +112,13 @@ def create_app(test_config=None):
         from . import companies as co
         acc = session.get("access") or {}
         mine = [c for c in co.all_companies() if c["id"] in acc] if g.get("user") else []
-        return dict(user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
+        from .edition import app_edition
+        ed = app_edition() or ((g.get("company") or {}).get("edition"))
+        product = {"key": ed, "app": dbmod.EDITIONS[ed]["app"] if ed else "Riyeser Accounting",
+                   "title": dbmod.EDITIONS[ed]["title"] if ed else "Riyeser Accounting",
+                   "letter": {"basic": "B", "enterprise": "P"}.get(ed, "R"),
+                   "cls": {"basic": "ed-basic", "enterprise": "ed-plus"}.get(ed, ""), "separate": bool(app_edition())}
+        return dict(product=product, user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
                     can=lambda area, need=1: perms.can(area, need), lv=lambda area: perms.level(area),
@@ -123,6 +145,9 @@ def create_app(test_config=None):
     app.jinja_env.globals["help_section"] = help.section_for
     app.jinja_env.globals["riyeser_version"] = __version__
     app.jinja_env.globals["editions"] = dbmod.EDITIONS
+    from .edition import app_edition, download_url
+    app.jinja_env.globals["app_edition"] = app_edition
+    app.jinja_env.globals["edition_download"] = download_url
 
     @app.errorhandler(500)
     def server_error(e):

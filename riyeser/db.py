@@ -205,13 +205,14 @@ def migrate(db):
 # Edition names in one place: change them here and every screen follows.
 #   name  = short name used in menus, settings and help ("Basic", "Enterprise")
 #   title = the product name in the app's logo
+#   app   = the full name of the separate Windows app (window title, installer, Start menu)
 EDITIONS = {
-    "basic": {"name": "Basic", "title": "Accounting Basics", "price": "Free"},
-    "enterprise": {"name": "Plus", "title": "Accounting Plus", "price": "Licence"},
+    "basic": {"name": "Basics", "title": "Accounting Basics", "app": "Riyeser Accounting Basics", "price": "Free"},
+    "enterprise": {"name": "Plus", "title": "Accounting Plus", "app": "Riyeser Accounting Plus", "price": "Licence"},
 }
 
 
-def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition="enterprise"):
+def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition=None):
     db = get_db()
     with current_app.open_resource("schema.sql") as f:
         db.executescript(f.read().decode("utf8"))
@@ -231,7 +232,10 @@ def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition="
                ("admin", generate_password_hash(admin_password), "Administrator", "admin"))
     db.commit()
     migrate(db)
-    db.execute("UPDATE company SET edition=? WHERE id=1", (edition if edition in EDITIONS else "enterprise",))
+    if edition not in EDITIONS:
+        from .edition import app_edition
+        edition = app_edition() or "enterprise"
+    db.execute("UPDATE company SET edition=? WHERE id=1", (edition,))
     db.commit()
 
 

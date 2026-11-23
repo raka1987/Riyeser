@@ -111,7 +111,7 @@ def _slug(name):
     return f"{s}-{secrets.token_hex(3)}"
 
 
-def add_company(name, abn=None, edition="enterprise", owner=None, demo=False):
+def add_company(name, abn=None, edition=None, owner=None, demo=False):
     """Create a new company file. owner = users row of the person creating it: they become its administrator
     with the same username and password, so one sign-in reaches both companies."""
     from .db import init_db, get_db

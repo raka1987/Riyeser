@@ -32,7 +32,11 @@ def _wait_until_up(url, timeout=30):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="Riyeser Accounting")
+    from .db import EDITIONS
+    from .edition import app_edition
+    ed = app_edition()
+    app_name = EDITIONS[ed]["app"] if ed else "Riyeser Accounting"
+    p = argparse.ArgumentParser(prog=app_name)
     p.add_argument("--data-dir", help="folder for the company file (default ~/.riyeser)")
     p.add_argument("--port", type=int, default=0)
     p.add_argument("--no-window", action="store_true", help="run the server only (for testing)")
@@ -55,7 +59,7 @@ def main(argv=None):
                                                                 _quiet=True), daemon=True)
     t.start()
     if not _wait_until_up(url):
-        print("Riyeser Accounting failed to start.", file=sys.stderr)
+        print(f"{app_name} failed to start.", file=sys.stderr)
         sys.exit(1)
     print(f"Riyeser Accounting running at {url}  (company file: {os.environ['RIYESER_DB']})", flush=True)
 
@@ -71,7 +75,7 @@ def main(argv=None):
             webview.settings["ALLOW_DOWNLOADS"] = True  # PDFs, CSV exports
         except Exception:
             pass
-        webview.create_window("Riyeser Group · Accounting", url, width=1360, height=860, min_size=(1000, 650))
+        webview.create_window(app_name, url, width=1360, height=860, min_size=(1000, 650))
         webview.start()
     except Exception as e:  # no GUI toolkit - use the browser instead
         print(f"(No app window available: {e}; opening your browser instead. Close this window to quit.)")

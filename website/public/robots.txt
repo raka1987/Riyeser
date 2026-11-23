@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://riyeser.com/sitemap.xml

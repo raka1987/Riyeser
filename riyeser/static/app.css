@@ -144,3 +144,20 @@ tr.co-current td{background:#f5f9ff}
 .top .cosw{overflow:visible}
 .also{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;margin-top:12px;font-size:13.5px}.also .check{margin:0}
 .plan-note{font-size:13.5px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+
+/* ---- Two products, two looks: Accounting Basics is green, Accounting Plus is blue ---- */
+body.ed-basic { --brand:#15803d; --brand-d:#166534; --brand-l:#e7f6ec; --accent:#facc15; --accent-l:#fef9c3; }
+body.ed-basic .side { border-top: 4px solid #16a34a; }
+body.ed-plus .side { border-top: 4px solid var(--brand); }
+body.ed-basic .login .logo, body.ed-basic .brand .logo { background: linear-gradient(135deg,#16a34a,#065f46); }
+/* Basics or Plus page */
+.eds { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.ed { position: relative; }
+.ed.here { outline: 2px solid var(--brand); }
+.ed .edlogo { width: 40px; height: 40px; border-radius: 11px; color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 18px; }
+.ed.ed-basic .edlogo { background: linear-gradient(135deg,#16a34a,#065f46); }
+.ed.ed-plus .edlogo { background: linear-gradient(135deg,#1f4e86,#0f2742); }
+.ed h2 { margin: 10px 0 2px; }
+.ed .edprice { color: var(--muted); margin: 0 0 8px; }
+.ed .youare { color: var(--ok); font-weight: 700; margin: 10px 0 0; }
+@media (max-width: 800px) { .eds { grid-template-columns: 1fr; } }

@@ -177,7 +177,7 @@ def test_basic_is_free_enterprise_needs_licence(app, tmp_path, monkeypatch):
     r = a.get("/journal/new")
     assert r.status_code == 302
     assert "needs a licence" in a.get(r.location).get_data(as_text=True)
-    a.post("/company", data={"name": "Group Holdings Pty Ltd", "edition": "enterprise"})
+    a.post("/setup/company", data={"name": "Group Holdings Pty Ltd", "edition": "enterprise"})
     assert "Accounting Basics" in a.get("/").get_data(as_text=True)
     with app.app_context():
         assert get_db().execute("SELECT edition FROM company").fetchone()[0] == "enterprise"  # their choice is kept
@@ -186,3 +186,47 @@ def test_basic_is_free_enterprise_needs_licence(app, tmp_path, monkeypatch):
     page = a.get("/").get_data(as_text=True)
     assert "Accounting Basics" not in page and "Accounting Plus" in page
     assert a.get("/journal/new").status_code == 200
+
+
+def test_separate_basics_and_plus_apps_share_the_books(app, tmp_path, monkeypatch):
+    # The same company file opens in either app; the app decides what shows, and nothing is changed or lost.
+    monkeypatch.setenv("RIYESER_APP_EDITION", "basic")
+    a = login(app)
+    page = a.get("/").get_data(as_text=True)
+    assert 'class="ed-basic"' in page and "Accounting Basics" in page and "Run payroll" not in page
+    assert "Upgrade to Accounting Plus" in page
+    r = a.get("/payroll/")
+    assert r.status_code == 302 and r.location.endswith("/editions")
+    up = a.get("/editions").get_data(as_text=True)
+    assert "RiyeserAccountingPlus-Setup.exe" in up and "This is what you're using" in up
+    assert 'name="edition"' not in a.get("/setup/company").get_data(as_text=True)  # no edition switch inside an app
+    a.post("/cards/customer/new", data={"name": "Made In Basics", "active": "1"})
+    # "install Plus": same books, Plus screens back, customer still there
+    monkeypatch.setenv("RIYESER_APP_EDITION", "plus")
+    page = a.get("/").get_data(as_text=True)
+    assert 'class="ed-plus"' in page and "Accounting Plus" in page and "Run payroll" in page
+    assert a.get("/payroll/").status_code == 200
+    assert "Made In Basics" in a.get("/cards/customer").get_data(as_text=True)
+    assert "RiyeserAccountingBasics-Setup.exe" in a.get("/editions").get_data(as_text=True)
+    # Plus after the trial with no licence: Plus screens locked (not removed), everyday screens still work
+    _licence(tmp_path, monkeypatch)
+    page = a.get("/").get_data(as_text=True)
+    assert "Licence needed for Accounting Plus" in page and "Accounting Plus" in page
+    r = a.get("/payroll/")
+    assert r.status_code == 302 and "/editions" not in r.location
+    assert a.get("/cards/customer").status_code == 200
+    # and Basics stays free after the trial
+    monkeypatch.setenv("RIYESER_APP_EDITION", "basic")
+    page = a.get("/").get_data(as_text=True)
+    assert "Licence needed" not in page.split('class="content"')[1][:400] and "Made In Basics" in a.get("/cards/customer").get_data(as_text=True)
+
+
+def test_new_company_file_takes_the_app_edition(tmp_path, monkeypatch):
+    monkeypatch.setenv("RIYESER_APP_EDITION", "basic")
+    app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "new.db")})
+    c = app.test_client()
+    page = c.get("/setup").get_data(as_text=True)
+    assert "Riyeser Accounting Basics" in page and 'name="edition"' not in page
+    c.post("/setup", data={"name": "Corner Shop", "password": "pass1"})
+    with app.app_context():
+        assert get_db().execute("SELECT edition FROM company").fetchone()[0] == "basic"

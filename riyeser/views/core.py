@@ -181,6 +181,13 @@ def reverse(eid):
 
 
 # ------------------------------------------------------------------ setup
+@bp.route("/editions")
+def upgrade():
+    """Accounting Basics or Accounting Plus: what each has, and how to move between the two apps."""
+    from ..edition import app_edition
+    return render_template("core/upgrade.html", here=g.company["edition"], separate_apps=bool(app_edition()))
+
+
 @bp.route("/setup/company", methods=["GET", "POST"])
 def company():
     db = get_db()

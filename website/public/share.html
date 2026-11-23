@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Riyeser: please take a look</title>
+<link rel="icon" href="/icon.svg">
+<script src="/config.js"></script>
+<style>
+:root{--ink:#172326;--mute:#4A585B;--line:#C9D1CE;--bg:#F4F6F5;--panel:#fff;--blue:#1737C4;--ok:#2E8540;--hold:#B87400;--bad:#C9261D;--none:#6B787B}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:#101B3B;color:#fff;padding:14px 16px calc(14px) ;padding-top:calc(14px + env(safe-area-inset-top,0px))}
+header .brand{font-weight:800;letter-spacing:-.01em;font-size:18px}
+header .proj{opacity:.8;font-size:14px}
+main{max-width:760px;margin:0 auto;padding:16px 16px 60px}
+h1{font-size:28px;line-height:1.1;margin:6px 0 4px}
+h2{font-size:19px;margin:24px 0 8px}
+.pill{display:inline-block;padding:3px 10px;border-radius:12px;font-size:13px;font-weight:700;color:#fff;background:var(--none)}
+.pill.ok{background:var(--ok)}.pill.hold{background:var(--hold)}.pill.bad{background:var(--bad)}
+.q{background:var(--panel);border-left:6px solid var(--blue);padding:14px 16px;border-radius:6px;font-size:18px;margin:12px 0;white-space:pre-wrap}
+.q.def{border-left-color:var(--bad)}
+.fig{position:relative;overflow:hidden;border:1px solid var(--line);border-radius:6px;background:#fff;width:100%}
+.fig img{position:absolute;max-width:none;opacity:.75}
+.fig svg{position:absolute;inset:0;width:100%;height:100%}
+.items{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;padding:0;list-style:none}
+.items li{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:3px 10px;font-size:14px}
+.photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+.photos button{padding:0;border:0;background:none;cursor:zoom-in}
+.photos img{width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:6px;display:block;background:#ddd}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-top:10px}
+.decs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 12px}
+.decs button{min-height:56px;border:2px solid var(--line);border-radius:8px;background:#fff;font:600 16px/1.2 inherit;color:inherit;cursor:pointer;padding:8px}
+.decs button[aria-pressed=true]{border-color:var(--ink);background:#101B3B;color:#fff}
+.decs .d-ok[aria-pressed=true]{background:var(--ok);border-color:var(--ok)}.decs .d-bad[aria-pressed=true]{background:var(--bad);border-color:var(--bad)}.decs .d-hold[aria-pressed=true]{background:var(--hold);border-color:var(--hold)}
+label{display:block;font-size:13px;font-weight:700;color:var(--mute);text-transform:uppercase;letter-spacing:.04em;margin:10px 0 4px}
+input,textarea{width:100%;font:inherit;font-size:17px;padding:12px;border:2px solid var(--line);border-radius:6px;background:#fff;color:inherit}
+input:focus,textarea:focus{outline:none;border-color:var(--blue)}
+.send{margin-top:14px;width:100%;min-height:54px;border:0;border-radius:8px;background:#101B3B;color:#fff;font:700 18px inherit;cursor:pointer}
+.send:disabled{opacity:.6}
+.log{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.log li{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px}
+.log .when{color:var(--mute);font-size:13px}
+.log p{margin:4px 0 0;white-space:pre-wrap}
+.msg{padding:14px 16px;border-radius:8px;margin:12px 0;font-size:17px}
+.msg.good{background:#E3F3E6;border-left:6px solid var(--ok)}
+.msg.warn{background:#FFF4D6;border-left:6px solid var(--hold)}
+.small{color:var(--mute);font-size:13px}
+#big{position:fixed;inset:0;background:rgba(0,0,0,.9);display:none;align-items:center;justify-content:center;z-index:9;padding:12px}
+#big img{max-width:100%;max-height:100%}
+#big.on{display:flex}
+footer{max-width:760px;margin:0 auto;padding:0 16px 40px;color:var(--mute);font-size:13px}
+</style>
+</head>
+<body>
+<header><div class="brand">Riyeser</div><div class="proj" id="proj">Loading…</div></header>
+<main id="main"><p>Loading…</p></main>
+<div id="big" role="dialog" aria-label="Photo"><img alt="Photo"></div>
+<footer>This page shows one item shared with you by the project team. Nothing else in the project can be seen from here.</footer>
+<script>
+(function(){
+const C=window.RIYESER_CONFIG||{};const base=(C.supabaseUrl||'').replace(/\/$/,'');const key=C.supabaseKey||'';
+const tok=(location.hash||'').replace(/^#/,'').replace(/[^a-f0-9]/gi,'');
+const $=s=>document.querySelector(s);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const RDEC={yes:['Yes, go ahead','ok'],changes:['Go ahead with these changes','hold'],no:["No, don't do this",'bad'],info:['Need more information','none']};
+let D=null,dec='';const store={get:k=>{try{return localStorage.getItem(k)||''}catch{return ''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch{}}};
+async function rpc(fn,args){const r=await fetch(base+'/rest/v1/rpc/'+fn,{method:'POST',headers:{apikey:key,'Content-Type':'application/json'},body:JSON.stringify(args)});const t=await r.text();let j;try{j=JSON.parse(t)}catch{j=t}if(!r.ok)throw new Error((j&&j.message)||t||('Error '+r.status));return j}
+const when=s=>{if(!s)return '';const d=new Date(s);if(isNaN(d))return String(s);return d.toLocaleString(undefined,{day:'numeric',month:'short',year:'numeric',hour:/T/.test(s)?'numeric':undefined,minute:/T/.test(s)?'2-digit':undefined})};
+function stat(r){const def=r.cat==='defect';if(def)return r.status==='closed'?['Closed, fix accepted','none']:r.status==='fixed'?['Fixed, please check it','ok']:['Waiting to be fixed','bad'];return r.status==='closed'?['Closed','none']:r.status==='answered'?[(RDEC[r.decision]||['Answered'])[0],(RDEC[r.decision]||[0,'ok'])[1]]:['Waiting for your answer','hold']}
+function logText(x,def){const by=`<strong>${esc(x.by||'Someone')}</strong>`;const k=x.kind;if(k==='raised')return `${by} ${def?'reported this':'asked this'}`;if(k==='answer')return `${by} answered: ${esc((RDEC[x.decision]||['Answered'])[0])}`;if(k==='fixed')return `${by} marked it fixed`;if(k==='accepted')return `${by} accepted the fix`;if(k==='rejected')return `${by} said it is not fixed`;if(k==='closed')return `${by} closed it`;if(k==='reopened')return `${by} reopened it`;if(k==='contact'||k==='call'||k==='email'||k==='meeting')return `${by} added a note`;return `${by} commented`}
+function fig(v){if(!v||!v.sheet||!v.box)return '';const[bx,by,bw,bh]=v.box;const k=bw/1000;const s=v.sheet;let svg='';if(v.area)svg+=`<rect x="${v.area.x}" y="${v.area.y}" width="${v.area.w}" height="${v.area.h}" fill="rgba(255,176,0,.18)" stroke="#E08A00" stroke-width="${3*k}" stroke-dasharray="${10*k} ${6*k}"/>`;for(const r of v.runs||[])svg+=`<polyline points="${r.pts.map(p=>p.join(',')).join(' ')}" fill="none" stroke="#FFB000" stroke-opacity=".55" stroke-width="${14*k}" stroke-linecap="round" stroke-linejoin="round"/><polyline points="${r.pts.map(p=>p.join(',')).join(' ')}" fill="none" stroke="${esc(r.c)}" stroke-width="${4*k}" stroke-linecap="round" stroke-linejoin="round"/>`;for(const p of v.pins||[])svg+=`<circle cx="${p.x}" cy="${p.y}" r="${30*k}" fill="rgba(255,176,0,.35)" stroke="#E08A00" stroke-width="${3*k}"/><circle cx="${p.x}" cy="${p.y}" r="${14*k}" fill="${esc(p.c)}" stroke="#fff" stroke-width="${3*k}"/><text x="${p.x+36*k}" y="${p.y+9*k}" font-size="${28*k}" font-weight="700" font-family="system-ui,sans-serif" fill="#111" stroke="#fff" stroke-width="${4*k}" paint-order="stroke">${esc(p.ref)}</text>`;return `<div class="fig" style="aspect-ratio:${(bw/bh).toFixed(4)}"><img src="${esc(s.url)}" alt="Drawing${s.name?': '+esc(s.name):''}" style="width:${(s.w/bw*100).toFixed(3)}%;left:${(-bx/bw*100).toFixed(3)}%;top:${(-by/bh*100).toFixed(3)}%"><svg viewBox="${bx} ${by} ${bw} ${bh}" aria-hidden="true">${svg}</svg></div>${s.name?`<p class="small">${esc(s.name)}. The highlighted part is what this is about.</p>`:''}`}
+function phs(list,map){const u=(list||[]).map(p=>map&&map[p]).filter(Boolean);return u.length?`<div class="photos">${u.map(x=>`<button type="button" data-big="${esc(x)}"><img src="${esc(x)}" alt="Photo" loading="lazy"></button>`).join('')}</div>`:''}
+function form(r){const def=r.cat==='defect';if(r.status==='closed')return `<div class="msg good">This is closed. Nothing more is needed. Thank you.</div>`;const name=store.get('riyeser-share-name');
+ let top='';if(def){top=r.status==='fixed'?`<h2>Is it fixed?</h2><p>Check it on site or in the photos, then choose:</p><div class="decs"><button type="button" class="d-ok" data-dec="accepted" aria-pressed="${dec==='accepted'}">Yes, the fix is good</button><button type="button" class="d-bad" data-dec="rejected" aria-pressed="${dec==='rejected'}">No, it's not fixed</button></div>`:`<h2>Add a comment</h2><p class="small">The team is still fixing this. You can add a comment for them.</p>`}
+ else{top=r.status==='open'?`<h2>Your answer</h2><div class="decs">${Object.entries(RDEC).map(([k,[l,c]])=>`<button type="button" class="d-${c}" data-dec="${k}" aria-pressed="${dec===k}">${esc(l)}</button>`).join('')}</div>`:`<h2>Add a comment</h2>`}
+ const lab=dec==='changes'?'What changes?':dec==='info'?'What else do you need to know?':dec==='rejected'?"What still isn't right?":'Comment, optional';
+ return `<div class="card">${top}<label for="txt">${lab}</label><textarea id="txt" rows="4"></textarea><label for="nm">Your name</label><input id="nm" autocomplete="name" value="${esc(name)}" placeholder="For example: Jane Smith, site supervisor"><button class="send" id="send" type="button">${dec?'Send answer':'Send'}</button><p class="small" id="err" role="alert"></p></div>`}
+function render(){const r=D.rfi;const v=D.view||{};const def=r.cat==='defect';const[st,c]=stat(r);$('#proj').textContent=[D.project,D.client].filter(Boolean).join(' · ');document.title=`${v.ref||''} ${D.project||''}`.trim();const keep=$('#txt')?.value;const log=Array.isArray(r.log)&&r.log.length?r.log:[{kind:'raised',by:r.by,at:r.date}];
+ $('#main').innerHTML=`<p class="small">${def?'Defect':'Request for information'}</p><h1>${esc(v.ref||'')}</h1><span class="pill ${c}">${esc(st)}</span><div class="q ${def?'def':''}">${esc(r.q||'')}</div>${(v.items||[]).length?`<ul class="items">${v.items.map(i=>`<li><strong>${esc(i.ref)}</strong> ${esc(i.kind)}${i.room?', '+esc(i.room):''}</li>`).join('')}</ul>`:''}${fig(v)?`<h2>Where</h2>${fig(v)}`:''}${(r.photos||[]).length&&phs(r.photos,v.photos)?`<h2>Photos</h2>${phs(r.photos,v.photos)}`:''}${form(r)}<h2>History</h2><ol class="log">${log.map(x=>`<li><div>${logText(x,def)}</div><div class="when">${esc(when(x.at))}</div>${x.text?`<p>${esc(x.text)}</p>`:''}${phs(x.photos,v.photos)}</li>`).join('')}</ol>`;if(keep&&$('#txt'))$('#txt').value=keep}
+async function load(){if(!base||!key){$('#main').innerHTML='<div class="msg warn">This site is not set up yet.</div>';return}if(tok.length<40){$('#main').innerHTML='<div class="msg warn">This link is not complete. Ask the person who sent it to send it again.</div>';$('#proj').textContent='';return}
+ try{const j=await rpc('share_get',{p_token:tok});if(j.error){$('#main').innerHTML=`<div class="msg warn">${esc(j.error)}</div>`;$('#proj').textContent='';return}D=j;render()}catch(e){$('#main').innerHTML=`<div class="msg warn">Could not load this. Check your signal and try again.<br><span class="small">${esc(e.message)}</span></div>`}}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-big]');if(b){const g=$('#big');g.querySelector('img').src=b.dataset.big;g.classList.add('on');return}if(e.target.closest('#big')){$('#big').classList.remove('on');return}const d=e.target.closest('[data-dec]');if(d){dec=dec===d.dataset.dec?'':d.dataset.dec;render();return}
+ if(e.target.id==='send'){const txt=$('#txt').value.trim(),nm=$('#nm').value.trim();const err=$('#err');if(!nm){err.textContent='Please add your name so the team knows who answered.';$('#nm').focus();return}if(!dec&&!txt){err.textContent=D.rfi.cat==='defect'&&D.rfi.status==='fixed'?'Choose whether it is fixed, or write a comment.':'Choose an answer or write a comment.';return}if((dec==='changes'||dec==='rejected')&&!txt){err.textContent='Please say what is needed.';$('#txt').focus();return}store.set('riyeser-share-name',nm);const s=e.target;s.disabled=true;s.textContent='Sending…';try{D.rfi=await rpc('share_answer',{p_token:tok,p_name:nm,p_text:txt,p_decision:dec});dec='';$('#txt').value='';render();$('#main').insertAdjacentHTML('afterbegin','<div class="msg good"><strong>Thank you.</strong> Your answer has been sent to the team.</div>');scrollTo({top:0,behavior:'smooth'})}catch(x){s.disabled=false;s.textContent='Try again';err.textContent=x.message.includes('Failed to fetch')?'No signal. Try again when you are back online.':x.message}}});
+load();
+})();
+</script>
+</body>
+</html>

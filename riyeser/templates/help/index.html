@@ -57,7 +57,9 @@
 <div class="card"><h2 id="setup">Setup &amp; editions</h2><ul>
 <li><b>{{ editions.basic.name }}</b> (free): invoices, quotes, customers, stock, suppliers, simple banking, POS and the key reports.</li>
 <li><b>{{ editions.enterprise.name }}</b> (included in the free trial, then needs a licence): everything in {{ editions.basic.name }} plus bank reconciliation, statement import, payroll, journals, jobs, budgets, Balance Sheet and Trial Balance.</li>
-<li>Switch any time under <b>Setup → Company → Edition</b>. Your data never changes. If the trial ends without a licence, companies open in {{ editions.basic.name }}; enter a licence in Riyeser Central and {{ editions.enterprise.name }} comes back with everything as you left it.</li>
+{% if product.separate %}<li><b>{{ editions.basic.app }}</b> and <b>{{ editions.enterprise.app }}</b> are two separate apps (green and blue) that open the same company files. To move up or down, open <a href="{{ url_for('core.upgrade') }}">Basics or Plus</a> under Setup and install the other app: it replaces this one and your books carry straight over. Plus-only records are kept safe in Basics and come back in Plus.</li>
+<li>If the free trial ends without a licence, {{ editions.enterprise.title }} keeps your everyday screens working and locks the Plus-only screens (nothing is removed) until you enter a licence in Riyeser Central.</li>
+{% else %}<li>Switch any time under <b>Setup → Company → Edition</b>. Your data never changes. If the trial ends without a licence, companies open in {{ editions.basic.name }}; enter a licence in Riyeser Central and {{ editions.enterprise.name }} comes back with everything as you left it.</li>{% endif %}
 <li><b>Lock periods up to</b> stops anyone posting into a finished period, for example after your BAS is lodged.</li>
 <li><b>Riyeser folder</b>: tick <i>Save a PDF of every invoice and bill</i> to file copies in Documents\Riyeser for Riyeser Desk Assistant.</li></ul></div>
 
@@ -75,7 +77,7 @@
 <li><b>"Period is locked"</b>: the date is on or before the lock date. Change the date, or an admin can move the lock date.</li>
 <li><b>"Out of balance"</b> on a journal: debits must equal credits. The difference is shown under the lines.</li>
 <li><b>Reconciliation won't balance</b>: look for a missing or doubled transaction, or one dated after the statement date.</li>
-<li><b>"That's part of Riyeser Accounting {{ editions.enterprise.name }}"</b>: the screen isn't in {{ editions.basic.name }}. An admin can switch under Setup → Company. After the free trial, {{ editions.enterprise.name }} needs a licence from Riyeser Central.</li>
+<li><b>"That's part of Riyeser Accounting {{ editions.enterprise.name }}"</b>: the screen isn't in {{ editions.basic.name }}. {% if product.separate %}Install {{ editions.enterprise.title }} to get it (your books carry over).{% else %}An admin can switch under Setup → Company.{% endif %} After the free trial, {{ editions.enterprise.name }} needs a licence from Riyeser Central.</li>
 <li>Still stuck? Open <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a>, press <b>Download</b>, and send the file to support. It contains no customer or bank details.</li></ul></div>
 </div>
 {% endblock %}

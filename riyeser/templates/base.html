@@ -3,10 +3,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Riyeser Accounting{% endblock %} · Riyeser Accounting</title>
+<title>{% block title %}{{ product.title }}{% endblock %} · {{ product.app }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
-<body>
+<body class="{{ product.cls }}">
 {% set ep = request.endpoint or '' %}
 {% macro nav(endpoint, label) -%}
 <a href="{{ url_for(endpoint, **kwargs) }}" class="{{ 'on' if request.path == url_for(endpoint, **kwargs) }}">{{ label }}</a>
@@ -40,7 +40,7 @@
     {% if can('stock') %}{% call sec('stock', 'Stock') %}{{ nav('inventory.index', 'Stock items') }}{{ nav('inventory.edit', 'New item') }}{{ nav('documents.edit', 'Receive stock (bill)', side='purchase') }}{{ nav('documents.pay', 'Pay bills', side='purchase') }}{{ nav('contacts.index', 'Suppliers', kind='supplier') }}{{ nav('inventory.count', 'Stocktake') }}{% endcall %}{% endif %}
     {% if can('banking') %}{% call sec('bank', 'Money') %}{{ nav('banking.index', 'Bank accounts') }}{{ nav('banking.money', 'Money out', kind='spend') }}{{ nav('banking.money', 'Money in', kind='receive') }}{% if can('payroll') %}{{ nav('links.payroll', 'Import from Payroll') }}{% endif %}{% endcall %}{% endif %}
     {% call sec('reports', 'Reports') %}{{ nav('reports.index', 'All reports') }}{% if can('stock') %}{{ nav('reports.show', 'Inventory report', name='inventory_valuation') }}{% endif %}{% if can('sales') %}{{ nav('reports.show', 'Sales by item', name='sales_item') }}{{ nav('reports.show', 'Who owes me', name='aged_receivables') }}{% endif %}{% if can('accounts') %}{{ nav('reports.show', 'Profit & loss', name='pnl') }}{{ nav('reports.show', 'GST summary', name='gst') }}{% endif %}{% endcall %}
-    {% call sec('setup', 'Setup') %}{% if can('setup') %}{{ nav('core.company', 'Company & preferences') }}{% endif %}{% if can('accounts') %}{{ nav('core.accounts', 'Chart of accounts') }}{% endif %}{% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & roles') }}{% endif %}{% if can('setup') %}{{ nav('core.audit_log', 'Audit trail') }}{% endif %}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support diagnostics') }}{% endcall %}
+    {% call sec('setup', 'Setup') %}{% if can('setup') %}{{ nav('core.company', 'Company & preferences') }}{% endif %}{% if can('accounts') %}{{ nav('core.accounts', 'Chart of accounts') }}{% endif %}{% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & roles') }}{% endif %}{% if can('setup') %}{{ nav('core.audit_log', 'Audit trail') }}{% endif %}{{ nav('core.upgrade', 'Upgrade to ' ~ editions.enterprise.title) }}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support diagnostics') }}{% endcall %}
     {% else %}
     {% if can('sales') %}{% call sec('sales', 'Sales') %}{{ nav('documents.edit', 'New invoice', side='sale') }}{{ nav('documents.index', 'All invoices', side='sale') }}{{ nav('documents.pay', 'Receive payments', side='sale') }}{{ nav('contacts.index', 'Customers', kind='customer') }}{% endcall %}{% endif %}
     {% if can('purchases') %}{% call sec('buy', 'Purchases') %}{{ nav('documents.edit', 'Enter bill', side='purchase') }}{{ nav('documents.index', 'All bills', side='purchase') }}{{ nav('documents.pay', 'Pay bills', side='purchase') }}{{ nav('contacts.index', 'Suppliers', kind='supplier') }}{% endcall %}{% endif %}
@@ -49,7 +49,7 @@
     {% if can('payroll') %}{% call sec('pay', 'Payroll') %}{{ nav('payroll.index', 'Employees & pay runs') }}{{ nav('payroll.run', 'Run payroll') }}{% endcall %}{% endif %}
     {% if can('accounts') %}{% call sec('books', 'Accounts') %}{{ nav('core.accounts', 'Chart of accounts') }}{{ nav('core.journal_new', 'General journal') }}{{ nav('core.journal_list', 'Search transactions') }}{% endcall %}{% endif %}
     {% call sec('reports', 'Reports') %}{{ nav('reports.index', 'All reports') }}{% if can('accounts') %}{{ nav('reports.show', 'Profit & loss', name='pnl') }}{{ nav('reports.show', 'Balance sheet', name='balance_sheet') }}{{ nav('reports.show', 'BAS / GST', name='gst') }}{% endif %}{% endcall %}
-    {% call sec('setup', 'Setup') %}{% if can('setup') %}{{ nav('core.company', 'Company & default accounts') }}{{ nav('core.tax_codes', 'Tax codes') }}{{ nav('core.jobs', 'Jobs') }}{{ nav('core.budgets', 'Budgets') }}{% endif %}{% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & roles') }}{% endif %}{% if can('setup') %}{{ nav('core.audit_log', 'Audit trail') }}{% endif %}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support diagnostics') }}{% endcall %}
+    {% call sec('setup', 'Setup') %}{% if can('setup') %}{{ nav('core.company', 'Company & default accounts') }}{{ nav('core.tax_codes', 'Tax codes') }}{{ nav('core.jobs', 'Jobs') }}{{ nav('core.budgets', 'Budgets') }}{% endif %}{% if user and user.role == 'admin' %}{{ nav('auth.users', 'Users & roles') }}{% endif %}{% if can('setup') %}{{ nav('core.audit_log', 'Audit trail') }}{% endif %}{{ nav('core.upgrade', 'Basics or Plus') }}{{ nav('help.index', 'Help') }}{{ nav('help.diagnostics_view', 'Support diagnostics') }}{% endcall %}
     {% endif %}
   </aside>
   <div class="main">
@@ -71,7 +71,7 @@
         <div class="who"><b>{{ user.full_name or user.username }}</b><small>{{ user.role|title }}</small></div>
         <a href="{{ url_for('auth.logout') }}">Sign out</a></div></details>
     </header>
-    <div class="content">{% if over_allowance %}<div class="flash error">🔒 <b>Read-only:</b> this company is beyond the companies included in your plan. Everything is still here to view and print. Extra companies are $10 a month each — add one in Riyeser Central under <b>Licence</b>, or archive a company you no longer use.</div>{% endif %}{{ flashes() }}{% block content %}{% endblock %}</div>
+    <div class="content">{% if company and company.plus_locked %}<div class="flash error">🔒 <b>Licence needed for {{ editions.enterprise.title }}:</b> your free trial has ended. Invoices, customers, stock and reports still work. Banking, payroll, journals, jobs and budgets are kept safe and unlock when you enter a licence in Riyeser Central. Or <a href="{{ url_for('core.upgrade') }}">switch to the free {{ editions.basic.title }}</a>.</div>{% endif %}{% if over_allowance %}<div class="flash error">🔒 <b>Read-only:</b> this company is beyond the companies included in your plan. Everything is still here to view and print. Extra companies are $10 a month each — add one in Riyeser Central under <b>Licence</b>, or archive a company you no longer use.</div>{% endif %}{{ flashes() }}{% block content %}{% endblock %}</div>
   </div>
 </div>
 <div class="scrim" onclick="document.body.classList.remove('side-open')"></div>

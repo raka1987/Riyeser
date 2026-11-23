@@ -142,7 +142,7 @@ def main(argv=None):
     i.add_argument("--name", default="My Company Pty Ltd")
     i.add_argument("--password", default="admin")
     i.add_argument("--demo", action="store_true", help="load demo data")
-    i.add_argument("--edition", choices=["basic", "enterprise"], default="enterprise")
+    i.add_argument("--edition", choices=["basic", "enterprise"], default=None)
     i.add_argument("--force", action="store_true")
     i.set_defaults(fn=cmd_init)
     r = sub.add_parser("reset-password", help="set a new password for a user (default admin)")

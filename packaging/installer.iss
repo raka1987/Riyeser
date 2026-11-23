@@ -1,32 +1,64 @@
-; Riyeser Accounting - Windows installer (Inno Setup 6).
-; Installs for the current Windows user (no admin needed), adds desktop and Start menu shortcuts and an
-; "Installed apps" entry. Everything runs on this PC: no internet is needed to install or use it.
-; The company file lives in %USERPROFILE%\.riyeser and is kept when the app is uninstalled.
+; Riyeser Accounting Basics / Riyeser Accounting Plus - Windows installers (Inno Setup 6).
+; Two separate apps built from one code base. Each installs for the current Windows user (no admin needed), with its
+; own desktop and Start menu shortcut, icon and "Installed apps" entry. Everything runs on this PC.
 ;
-; Build (on Windows, after packaging/build_desktop.py):
-;   ISCC /DAppVersion=1.0.0 packaging\installer.iss   ->  dist\RiyeserAccounting-Setup-1.0.0.exe
+; Both apps open the same company files in %USERPROFILE%\.riyeser, which no installer or uninstaller ever touches.
+; Only one of the two is installed at a time:
+;   * Installing Plus replaces Basics (an upgrade): the books open in Plus exactly as they were.
+;   * Installing Basics replaces Plus (a downgrade, after asking): payroll, journals, jobs and budgets are hidden but
+;     kept in the company file, and come back if Plus is installed again.
+; Plus keeps the AppId of the old single "Riyeser Accounting" app, so existing installs update in place to Plus.
+;
+; Build (on Windows, after packaging/build_desktop.py --edition basics|plus):
+;   ISCC /DEdition=basics /DAppVersion=2.0.0 packaging\installer.iss -> dist\RiyeserAccountingBasics-Setup-2.0.0.exe
+;   ISCC /DEdition=plus   /DAppVersion=2.0.0 packaging\installer.iss -> dist\RiyeserAccountingPlus-Setup-2.0.0.exe
 
 #ifndef AppVersion
   #define AppVersion "1.0.0"
 #endif
+#ifndef Edition
+  #define Edition "plus"
+#endif
+
+#define PlusId "6C0B3C9E-5B0E-4E4B-9F5D-52E1A7C3A1B7"
+#define BasicsId "21C257C6-5CFC-4E4B-A13F-50206BF8970E"
+
+#if Edition == "basics"
+  #define AppName "Riyeser Accounting Basics"
+  #define ShortName "Accounting Basics"
+  #define SetupBase "RiyeserAccountingBasics-Setup"
+  #define IconFile "basics.ico"
+  #define MyId BasicsId
+  #define OtherId PlusId
+  #define OtherName "Riyeser Accounting Plus"
+#else
+  #define AppName "Riyeser Accounting Plus"
+  #define ShortName "Accounting Plus"
+  #define SetupBase "RiyeserAccountingPlus-Setup"
+  #define IconFile "plus.ico"
+  #define MyId PlusId
+  #define OtherId BasicsId
+  #define OtherName "Riyeser Accounting Basics"
+#endif
 
 [Setup]
-AppId={{6C0B3C9E-5B0E-4E4B-9F5D-52E1A7C3A1B7}
-AppName=Riyeser Accounting
+AppId={{{#MyId}}
+AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName=Riyeser Accounting {#AppVersion}
+AppVerName={#AppName} {#AppVersion}
 AppPublisher=Riyeser Group
 AppCopyright=Riyeser Group
-DefaultDirName={localappdata}\Programs\Riyeser Accounting
+DefaultDirName={localappdata}\Programs\{#AppName}
+UsePreviousAppDir=no
 DefaultGroupName=Riyeser Group
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\dist
-OutputBaseFilename=RiyeserAccounting-Setup-{#AppVersion}
-SetupIconFile=riyeser.ico
-UninstallDisplayIcon={app}\Riyeser Accounting.exe
-UninstallDisplayName=Riyeser Accounting {#AppVersion}
+OutputBaseFilename={#SetupBase}-{#AppVersion}
+SetupIconFile={#IconFile}
+UninstallDisplayIcon={app}\{#AppName}.exe
+UninstallDisplayName={#AppName} {#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -34,12 +66,61 @@ CloseApplications=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
+[InstallDelete]
+; The old single app (Riyeser Accounting 1.x): its program folder and shortcuts. Company files are elsewhere and kept.
+Type: filesandordirs; Name: "{localappdata}\Programs\Riyeser Accounting"
+Type: files; Name: "{userdesktop}\Riyeser Accounting.lnk"
+Type: files; Name: "{userprograms}\Riyeser Group\Riyeser Accounting.lnk"
+
 [Files]
-Source: "..\dist\Riyeser Accounting.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\{#AppName}.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userdesktop}\Riyeser Accounting"; Filename: "{app}\Riyeser Accounting.exe"
-Name: "{userprograms}\Riyeser Group\Riyeser Accounting"; Filename: "{app}\Riyeser Accounting.exe"
+Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppName}.exe"
+Name: "{userprograms}\Riyeser Group\{#AppName}"; Filename: "{app}\{#AppName}.exe"
 
 [Run]
-Filename: "{app}\Riyeser Accounting.exe"; Description: "Open Riyeser Accounting"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppName}.exe"; Description: "Open {#AppName}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function OtherUninstaller(): String;
+var
+  OtherKey: String;
+begin
+  OtherKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + Chr(123) + '{#OtherId}' + Chr(125) + '_is1';
+  Result := '';
+  if not RegQueryStringValue(HKCU, OtherKey, 'UninstallString', Result) then
+    RegQueryStringValue(HKLM, OtherKey, 'UninstallString', Result);
+  Result := RemoveQuotes(Result);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+#if Edition == "basics"
+  if (OtherUninstaller() <> '') and not WizardSilent() then
+    Result := MsgBox('{#OtherName} is installed on this PC.' + #13#10 + #13#10 +
+      'Installing Accounting Basics will replace it. Your books stay exactly as they are: customers, invoices, stock ' +
+      'and reports carry straight over. Payroll, journals, jobs and budgets are hidden but kept safe, and come back ' +
+      'if you install Accounting Plus again.' + #13#10 + #13#10 + 'Switch to Accounting Basics?',
+      mbConfirmation, MB_YESNO) = IDYES;
+#endif
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Uninst: String;
+  Code: Integer;
+begin
+  if CurStep = ssInstall then
+  begin
+    Uninst := OtherUninstaller();
+    if Uninst <> '' then
+    begin
+      // Close the other app if it's open, then remove it. Its uninstaller never touches the company files.
+      Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "{#OtherName}.exe"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+      Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM "Riyeser Accounting.exe"', '', SW_HIDE, ewWaitUntilTerminated, Code);
+      Exec(Uninst, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    end;
+  end;
+end;

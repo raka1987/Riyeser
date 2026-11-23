@@ -21,11 +21,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: windows-latest, artifact: Riyeser-Accounting-Windows }
-          - { os: macos-latest,   artifact: Riyeser-Accounting-macOS }
-          - { os: ubuntu-latest,  artifact: Riyeser-Accounting-Linux }
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        edition: [basics, plus]
     runs-on: ${{ matrix.os }}
+    env:
+      APP: ${{ matrix.edition == 'basics' && 'Riyeser Accounting Basics' || 'Riyeser Accounting Plus' }}
+      LINUX_APP: ${{ matrix.edition == 'basics' && 'riyeser-accounting-basics' || 'riyeser-accounting-plus' }}
+      SETUP: ${{ matrix.edition == 'basics' && 'RiyeserAccountingBasics-Setup' || 'RiyeserAccountingPlus-Setup' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,12 +35,18 @@ jobs:
       - name: Install
         run: pip install . pyinstaller
       - name: Build
-        run: python packaging/build_desktop.py
+        run: python packaging/build_desktop.py --edition ${{ matrix.edition }}
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
         run: |
-          RIYESER_HOME=$RUNNER_TEMP/rh ./dist/riyeser-accounting --no-window --port 8765 &
-          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8765/setup >/dev/null && echo OK && exit 0; sleep 1; done; exit 1
+          RIYESER_HOME=$RUNNER_TEMP/rh "./dist/$LINUX_APP" --no-window --port 8765 &
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8765/setup -o page.html; then
+              grep -q "$APP" page.html || { echo "Setup page doesn't say $APP"; exit 1; }
+              echo OK; exit 0
+            fi
+            sleep 1
+          done; exit 1
       - name: Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
@@ -46,18 +54,18 @@ jobs:
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
           $ver = (Select-String -Path pyproject.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
-          & $iscc "/DAppVersion=$ver" packaging\installer.iss
+          & $iscc "/DEdition=${{ matrix.edition }}" "/DAppVersion=$ver" packaging\installer.iss
           if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
       - name: Install on Windows and check it opens in its own window (offline)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $setup = Get-ChildItem dist\RiyeserAccounting-Setup-*.exe | Select-Object -First 1
+          $setup = Get-ChildItem "dist\$env:SETUP-*.exe" | Select-Object -First 1
           Start-Process $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait
-          $exe = "$env:LOCALAPPDATA\Programs\Riyeser Accounting\Riyeser Accounting.exe"
+          $exe = "$env:LOCALAPPDATA\Programs\$env:APP\$env:APP.exe"
           if (-not (Test-Path $exe)) { throw "Not installed" }
-          if (-not (Test-Path "$([Environment]::GetFolderPath('Desktop'))\Riyeser Accounting.lnk")) { throw "No desktop shortcut" }
-          $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Accounting*"
+          if (-not (Test-Path "$([Environment]::GetFolderPath('Desktop'))\$env:APP.lnk")) { throw "No desktop shortcut" }
+          $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "$env:APP*"
           if (-not $entry) { throw "Not listed in Installed apps" }
           Write-Host "Listed as:" $entry.DisplayName "by" $entry.Publisher
           $env:RIYESER_HOME = "$env:RUNNER_TEMP\rh-installed"
@@ -66,26 +74,57 @@ jobs:
           $title = ""
           for ($i = 0; $i -lt 120 -and -not $title; $i++) {
             Start-Sleep 1
-            $title = (Get-Process -Name "Riyeser Accounting" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | Select-Object -First 1).MainWindowTitle
+            $title = (Get-Process -Name $env:APP -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle } | Select-Object -First 1).MainWindowTitle
           }
           $browsers = Get-Process msedge, chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle -notlike "*Riyeser*" }
-          Get-Process -Name "Riyeser Accounting" -ErrorAction SilentlyContinue | Format-Table Id, MainWindowTitle -AutoSize | Out-String | Write-Host
-          Get-Process -Name "Riyeser Accounting" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name $env:APP -ErrorAction SilentlyContinue | Format-Table Id, MainWindowTitle -AutoSize | Out-String | Write-Host
+          Get-Process -Name $env:APP -ErrorAction SilentlyContinue | Stop-Process -Force
           if (-not $title) { throw "No app window appeared" }
           Write-Host "App window:" $title
+          if ($title -notlike "$env:APP*") { throw "Window title should start with $env:APP" }
           if ($browsers) { throw "It opened a web browser instead of its own window" }
       - name: Zip macOS app
         if: runner.os == 'macOS'
-        run: cd dist && ditto -c -k --keepParent "Riyeser Accounting.app" Riyeser-Accounting-macOS.zip
+        run: cd dist && ditto -c -k --keepParent "$APP.app" "${APP// /-}-macOS.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: ${{ matrix.edition }}-${{ runner.os }}
           path: |
-            dist/Riyeser Accounting.exe
-            dist/RiyeserAccounting-Setup-*.exe
-            dist/Riyeser-Accounting-macOS.zip
-            dist/riyeser-accounting
+            dist/*.exe
+            dist/*-macOS.zip
+            dist/riyeser-accounting-*
           if-no-files-found: error
+
+  switch:
+    # Basics -> Plus -> Basics on one PC: only one app installed at a time, and the company file is never touched.
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { pattern: "*-Windows", path: out, merge-multiple: true }
+      - name: Upgrade and downgrade keep the books
+        shell: pwsh
+        run: |
+          $basics = Get-ChildItem out\RiyeserAccountingBasics-Setup-*.exe | Select-Object -First 1
+          $plus = Get-ChildItem out\RiyeserAccountingPlus-Setup-*.exe | Select-Object -First 1
+          function Installed { (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Accounting*").DisplayName }
+          function Run($f) { Start-Process $f.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait }
+          Run $basics
+          $exe = "$env:LOCALAPPDATA\Programs\Riyeser Accounting Basics\Riyeser Accounting Basics.exe"
+          Start-Process $exe -ArgumentList "init","--name","Keep Me Pty Ltd","--demo" -Wait
+          $db = "$env:USERPROFILE\.riyeser\company.db"
+          if (-not (Test-Path $db)) { throw "No company file was made" }
+          $size = (Get-Item $db).Length
+          Write-Host "Basics:" (Installed)
+          Run $plus
+          $now = @(Installed); Write-Host "After Plus:" $now
+          if ($now.Count -ne 1 -or $now[0] -notlike "Riyeser Accounting Plus*") { throw "Plus should replace Basics" }
+          if ((Get-Item $db).Length -ne $size) { throw "Company file changed on upgrade" }
+          Run $basics
+          $now = @(Installed); Write-Host "After Basics:" $now
+          if ($now.Count -ne 1 -or $now[0] -notlike "Riyeser Accounting Basics*") { throw "Basics should replace Plus" }
+          if ((Get-Item $db).Length -ne $size) { throw "Company file changed on downgrade" }
+          Write-Host "OK: one app at a time, books kept"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
