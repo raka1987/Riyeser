@@ -671,3 +671,15 @@ test('Riyeser Central: Accounting Basics and Accounting Plus are separate apps, 
   assert.deepEqual(u.availableUpdates(old, latest).map((x) => `${x.id} ${x.from}->${x.to}`), ['accounting 1.5.0->2.0.1']);
   assert.deepEqual(u.availableUpdates({ 'accounting-basics': '2.0.0' }, latest).map((x) => x.id), ['accounting-basics']);
 });
+
+test('Riyeser Central: Riyeser POS is its own program, found and updated separately from Accounting', () => {
+  const u = require('../src/central/updates');
+  const reg = (name, v) => `HKEY_CURRENT_USER\\${name}\r\n    DisplayName    REG_SZ    ${name} ${v}\r\n    DisplayVersion    REG_SZ    ${v}\r\n`;
+  const both = u.installedFromRegistry(reg('Riyeser Accounting Basics', '2.3.0') + reg('Riyeser POS', '2.3.0'));
+  assert.deepEqual(both, { 'accounting-basics': '2.3.0', pos: '2.3.0' });
+  const files = ['RiyeserAccountingBasics-Setup.exe', 'RiyeserPOS-Setup.exe'];
+  const rel = { tag_name: 't', body: '- Riyeser Accounting Basics 2.3.0\n- Riyeser POS 2.3.1', assets: files.map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 })) };
+  const latest = u.latestFromRelease(rel);
+  assert.match(latest.products.pos.url, /RiyeserPOS-Setup\.exe$/);
+  assert.deepEqual(u.availableUpdates(both, latest).map((x) => `${x.id} ${x.from}->${x.to}`), ['pos 2.3.0->2.3.1']);
+});

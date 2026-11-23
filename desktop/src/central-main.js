@@ -30,10 +30,13 @@ const localPrograms = () => path.join(process.env.LOCALAPPDATA || path.join(os.h
 // ---------- the programs ----------
 const PROGRAMS = [
   // Two separate apps that share the same books. The old single "Riyeser Accounting" 1.x counts as Plus.
-  { id: 'accounting-basics', name: 'Accounting Basics', full: 'Riyeser Accounting Basics', icon: '📗', desc: 'Free invoicing, quotes, customers and stock.',
-    dirs: ['Riyeser Accounting Basics'], exes: ['Riyeser Accounting Basics.exe'], links: ['Riyeser Accounting Basics'], pages: ['pos', 'invoice'] },
+  { id: 'accounting-basics', name: 'Accounting Basics', full: 'Riyeser Accounting Basics', icon: '📗', desc: 'Invoicing, quotes, customers and stock. Free for your first 50 invoices.',
+    dirs: ['Riyeser Accounting Basics'], exes: ['Riyeser Accounting Basics.exe'], links: ['Riyeser Accounting Basics'], pages: ['invoice'] },
   { id: 'accounting', name: 'Accounting Plus', full: 'Riyeser Accounting Plus', icon: '📒', desc: 'Full books: banking, payroll, journals, jobs and budgets. Included in your licence.',
-    dirs: ['Riyeser Accounting Plus', 'Riyeser Accounting'], exes: ['Riyeser Accounting Plus.exe', 'Riyeser Accounting.exe'], links: ['Riyeser Accounting Plus', 'Riyeser Accounting'], pages: ['pos', 'invoice'] },
+    dirs: ['Riyeser Accounting Plus', 'Riyeser Accounting'], exes: ['Riyeser Accounting Plus.exe', 'Riyeser Accounting.exe'], links: ['Riyeser Accounting Plus', 'Riyeser Accounting'], pages: ['invoice'] },
+  // The till on its own. It opens the same company files as Accounting and installs next to it.
+  { id: 'pos', name: 'POS', full: 'Riyeser POS', icon: '🧾', desc: 'The till for shops, cafes and restaurants. Free for your first 500 sales.',
+    dirs: ['Riyeser POS'], exes: ['Riyeser POS.exe'], links: ['Riyeser POS'], pages: ['pos'] },
   { id: 'payroll', name: 'Payroll', full: 'Riyeser Payroll', icon: '🕒', desc: 'Time clock, timesheets, pay runs, payslips and leave.',
     dirs: ['riyeser-payroll', 'Riyeser Payroll', 'riyeser', 'Riyeser', 'riyser', 'Riyser'], exes: ['Riyeser Payroll.exe', 'Riyeser.exe', 'Riyser.exe'],
     links: ['Riyeser Payroll', 'Riyeser', 'Riyser'] }, // Riyeser Payroll 2.0+; older builds were a hub called Riyser
@@ -213,7 +216,7 @@ function registerIpc() {
   });
   // A program that isn't installed yet: its page on riyeser.com, with the download.
   handle('central:get', async (id) => {
-    const page = { 'accounting-basics': 'accounting-basics', accounting: 'accounting', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const page = { 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     await shell.openExternal(page ? `https://riyeser.com/programs/${page}.html` : 'https://riyeser.com/downloads.html');
     return true;
   });
@@ -280,7 +283,7 @@ function registerIpc() {
   handle('central:install', (id) => installProgram(id));
   // Help: each program's guide in the Riyeser Help Centre.
   handle('central:help', (id) => {
-    const guide = { central: 'central', 'accounting-basics': 'accounting-basics', accounting: 'accounting', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const guide = { central: 'central', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     return shell.openExternal(guide ? `https://riyeser.com/help/${guide}.html` : 'https://riyeser.com/help.html').then(() => true);
   });
   handle('search:find', (opts) => {
