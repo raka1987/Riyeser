@@ -1,6 +1,6 @@
 {
   "name": "desk-assistant",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "description": "Riyeser Desk Assistant (Riyeser Group): sorts your files, tracks meetings and to-dos, and edits PDFs.",
   "main": "src/main.js",
   "scripts": {
