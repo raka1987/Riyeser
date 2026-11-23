@@ -273,9 +273,45 @@ def migrate(db):
         updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
     db.execute("CREATE INDEX IF NOT EXISTS bookings_starts ON bookings(starts_at)")
     if "price" not in {r["name"] for r in db.execute("PRAGMA table_info(bookings)")}:
-        db.execute("ALTER TABLE bookings ADD COLUMN price INTEGER")  # cents inc GST; empty = use the job type's price
+        db.execute("ALTER TABLE bookings ADD COLUMN price INTEGER")  # older files only: the price now lives on booking_jobs
     if "description" not in {r["name"] for r in db.execute("PRAGMA table_info(booking_services)")}:
         db.execute("ALTER TABLE booking_services ADD COLUMN description TEXT")  # wording on the invoice line
+    # A job holds one or more visits (rows in bookings). The calendar schedules visits; the office invoices the job.
+    if "bookings_labour_rate" not in ccols:
+        db.execute("ALTER TABLE company ADD COLUMN bookings_labour_rate INTEGER NOT NULL DEFAULT 0")  # cents/hour inc GST
+    db.execute("""CREATE TABLE IF NOT EXISTS booking_jobs (
+        id INTEGER PRIMARY KEY, contact_id INTEGER REFERENCES contacts(id), service_id INTEGER REFERENCES booking_services(id),
+        title TEXT, address TEXT, phone TEXT, notes TEXT,
+        billing TEXT NOT NULL DEFAULT 'fixed',  -- fixed: the agreed price; time: hours at the labour rate plus parts
+        price INTEGER,                          -- agreed price in cents inc GST; empty = the job type's price
+        status TEXT NOT NULL DEFAULT 'requested',  -- requested, scheduled, in_progress, needs_visit, on_hold, completed, cancelled
+        next_action TEXT,                       -- why it needs another visit
+        document_id INTEGER REFERENCES documents(id), created_by INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS booking_time (
+        id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES booking_jobs(id), booking_id INTEGER REFERENCES bookings(id),
+        user_id INTEGER REFERENCES users(id), minutes INTEGER NOT NULL, note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS booking_materials (
+        id INTEGER PRIMARY KEY, job_id INTEGER NOT NULL REFERENCES booking_jobs(id), booking_id INTEGER REFERENCES bookings(id),
+        item_id INTEGER REFERENCES items(id), description TEXT, qty REAL NOT NULL DEFAULT 1,
+        unit_price INTEGER NOT NULL DEFAULT 0, user_id INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    bcols = {r["name"] for r in db.execute("PRAGMA table_info(bookings)")}
+    for col, ddl in (("job_id", "INTEGER REFERENCES booking_jobs(id)"), ("outcome", "TEXT"), ("outcome_note", "TEXT")):
+        if col not in bcols:
+            db.execute(f"ALTER TABLE bookings ADD COLUMN {col} {ddl}")  # outcome: finished, return, no_access
+    # every older booking becomes a job with one visit
+    for b in db.execute("SELECT * FROM bookings WHERE job_id IS NULL").fetchall():
+        st = {"booked": "scheduled", "confirmed": "scheduled", "started": "in_progress", "done": "completed"}.get(
+            b["status"], "cancelled")
+        jid = db.execute("INSERT INTO booking_jobs (contact_id, service_id, title, address, phone, price, status, document_id,"
+                         " created_by, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                         (b["contact_id"], b["service_id"], b["title"], b["address"], b["phone"], b["price"], st,
+                          b["document_id"], b["created_by"], b["created_at"])).lastrowid
+        db.execute("UPDATE bookings SET job_id=? WHERE id=?", (jid, b["id"]))
+    db.execute("CREATE INDEX IF NOT EXISTS bookings_job ON bookings(job_id)")
     db.commit()
 
 

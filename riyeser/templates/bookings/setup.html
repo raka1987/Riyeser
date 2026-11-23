@@ -4,7 +4,9 @@
 <form method="post">
 <div class="card"><h3>What kind of business?</h3>
 <div class="bk-modes">{% for k, mm in modes.items() %}<label class="bk-mode{{ ' on' if k == here }}"><input type="radio" name="mode" value="{{ k }}" {{ 'checked' if k == here }}><b>{{ mm.name }}</b><small>{% if k == 'jobs' %}Jobs at the customer's address, given to your staff. Invoice when the job's done.{% elif k == 'appointments' %}Appointments for a service with a staff member, at your place.{% else %}Tables for a party at a time. Works with Riyeser POS tables.{% endif %}</small></label>{% endfor %}</div>
-<div class="fields" style="margin-top:14px"><div><label>Open from</label><input type="time" name="open" value="{{ hours.split('-')[0] }}"></div><div><label>Until</label><input type="time" name="close" value="{{ hours.split('-')[1] }}"></div></div></div>
+<div class="fields" style="margin-top:14px"><div><label>Open from</label><input type="time" name="open" value="{{ hours.split('-')[0] }}"></div><div><label>Until</label><input type="time" name="close" value="{{ hours.split('-')[1] }}"></div>
+{% if here == 'jobs' %}<div><label>Hourly labour rate <small>(including GST)</small></label><input name="labour_rate" inputmode="decimal" placeholder="0.00" value="{{ labour_rate|cents if labour_rate }}"></div>{% endif %}</div>
+{% if here == 'jobs' %}<p class="muted small">Used for jobs charged as time and materials.</p>{% endif %}</div>
 <div class="card"><h3>{{ m.who }}</h3><p class="muted small">Each one gets its own column on the day view. Untick to hide one; its past {{ m.many }} are kept.</p>
 <div class="tbl"><table><tr><th>Name</th>{% if m.party %}<th>Seats</th>{% endif %}<th>Colour</th><th>In use</th></tr>
 {% for r in res %}<tr><td><input name="res_name_{{ r.id }}" value="{{ r.name }}" aria-label="Name"></td>{% if m.party %}<td><input type="number" min="1" name="res_cap_{{ r.id }}" value="{{ r.capacity or '' }}" style="width:80px" aria-label="Seats"></td>{% else %}<input type="hidden" name="res_cap_{{ r.id }}" value="{{ r.capacity or '' }}">{% endif %}

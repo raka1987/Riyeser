@@ -1,21 +1,22 @@
-{% extends "base.html" %}{% block title %}{{ (m.one|capitalize ~ ' #' ~ b.id) if b else 'New ' ~ m.one }}{% endblock %}
+{% extends "base.html" %}{% block title %}{% set one = 'visit' if m.address else m.one %}{{ (one|capitalize ~ ' #' ~ b.id) if b else 'New ' ~ one }}{% endblock %}
 {% block content %}
-{% set v = b or {} %}
-<div class="head"><div><h1>{{ (m.one|capitalize ~ ' #' ~ b.id) if b else 'New ' ~ m.one }}</h1>
-<p class="sub">{{ m.name }}{% if b %} · <span class="bk-st st-{{ b.status }}">{{ (statuses|list|selectattr(0, 'equalto', b.status)|first)[1] }}</span>{% endif %}</p></div>
+{% set v = b or pre %}{% set one = 'visit' if m.address else m.one %}
+<div class="head"><div><h1>{{ (one|capitalize ~ ' #' ~ b.id) if b else 'New ' ~ one }}</h1>
+<p class="sub">{{ m.name }}{% if job and m.address %} · <a href="{{ url_for('bookings.job', jid=job.id) }}">Job J-{{ '%04d' % job.id }}</a>{% if visits and visits > 1 %} ({{ visits }} visits){% endif %}{% endif %}{% if b %} · <span class="bk-st st-{{ b.status }}">{{ (statuses|list|selectattr(0, 'equalto', b.status)|first)[1] }}</span>{% endif %}</p></div>
 {% if b and can('bookings', 2) %}<div class="actions">
   {% for st, label in [('confirmed', 'Confirm'), ('started', 'Start'), ('done', 'Mark done')] if b.status not in ('done', 'cancelled', 'no_show') and st != b.status %}<form method="post" action="{{ url_for('bookings.set_status', bid=b.id) }}"><input type="hidden" name="status" value="{{ st }}"><button class="btn">{{ label }}</button></form>{% endfor %}
   {% if inv %}<a class="btn pri" href="{{ url_for('documents.view', doc_id=inv.id) }}">Open invoice {{ inv.number }}</a>
-  {% elif b.contact_id and can('sales', 2) %}<form method="post" action="{{ url_for('bookings.invoice', bid=b.id) }}"><button class="btn pri">Invoice this {{ m.one }}</button></form>{% endif %}
+  {% elif b.contact_id and can('sales', 2) %}<form method="post" action="{{ url_for('bookings.invoice', bid=b.id) }}"><button class="btn pri">Invoice this {{ m.one }}{% if visits and visits > 1 %} ({{ visits }} visits){% endif %}</button></form>{% endif %}
 </div>{% endif %}</div>
-<form method="post" class="card"><div class="fields">
+{% if job and not b and m.address %}<p class="note">New visit on job <b>J-{{ '%04d' % job.id }}</b>{% if job.next_action %}: {{ job.next_action }}{% endif %}</p>{% endif %}
+<form method="post" class="card">{% if job %}<input type="hidden" name="job_id" value="{{ job.id }}">{% endif %}<div class="fields">
   <div><label>Customer</label><select name="contact_id" id="bk-cust"><option value="">—</option>{% for c in customers %}<option value="{{ c.id }}" data-phone="{{ c.phone or '' }}" data-address="{{ (c.address or '')|replace('\n', ', ') }}" {{ 'selected' if (v.contact_id or pre.contact_id) == c.id }}>{{ c.name }}</option>{% endfor %}</select></div>
   <div><label>…or a new customer</label><input name="new_customer" placeholder="Name"></div>
   <div><label>Phone</label><input name="phone" id="bk-phone" value="{{ v.phone or '' }}"></div>
   <div><label>Date</label><input type="date" name="date" value="{{ v.starts_at[:10] if b else pre.date }}" required></div>
   <div><label>Time</label><input type="time" name="time" step="900" value="{{ v.starts_at[11:16] if b else pre.time }}" required></div>
   <div><label>{{ m.what }}</label><select name="service_id" id="bk-svc"><option value="">—</option>{% for s in svcs %}<option value="{{ s.id }}" data-min="{{ s.minutes }}" data-price="{{ s.price|cents if s.price }}" {{ 'selected' if v.service_id == s.id }}>{{ s.name }}{% if s.price %} · {{ s.price|money }}{% endif %}</option>{% endfor %}</select></div>
-  <div><label>Price <small>(including GST)</small></label><input name="price" id="bk-price" inputmode="decimal" placeholder="0.00" value="{{ v.price|cents if v.price else '' }}"></div>
+  {% if not (job and job.billing == 'time') %}<div><label>{{ 'Job price' if visits and visits > 1 else 'Price' }} <small>(including GST)</small></label><input name="price" id="bk-price" inputmode="decimal" placeholder="0.00" value="{{ job.price|cents if job and job.price is not none else '' }}"></div>{% endif %}
   <div><label>How long (minutes)</label><input type="number" name="minutes" id="bk-min" min="5" step="5" value="{{ v.minutes or m.minutes }}"></div>
   <div><label>{{ m.who_one|capitalize }}</label><select name="resource_id"><option value="">Not given to anyone yet</option>{% for r in res %}<option value="{{ r.id }}" {{ 'selected' if (v.resource_id or pre.resource_id) == r.id }}>{{ r.name }}{% if m.party and r.capacity %} (seats {{ r.capacity }}){% endif %}</option>{% endfor %}</select></div>
   {% if m.party %}<div><label>People</label><input type="number" name="party" min="1" value="{{ v.party or 2 }}"></div>{% endif %}
@@ -25,8 +26,23 @@
   <div class="wide"><label>Notes</label><textarea name="notes" rows="2">{{ v.notes or '' }}</textarea></div>
   <label class="check"><input type="checkbox" name="allow_overlap" value="1"> Allow double-booking</label>
 </div>{% if can('bookings', 2) %}<p><button class="btn pri">Save</button> <a class="btn" href="{{ url_for('bookings.calendar', d=(v.starts_at[:10] if b else pre.date)) }}">Back to calendar</a></p>{% endif %}</form>
+{% if b and job and m.address and can('bookings', 2) %}
+<div class="bk-two">
+{% if b.status in ('booked', 'confirmed', 'started') %}<form method="post" action="{{ url_for('bookings.finish', bid=b.id) }}" class="card"><h3>Finish this visit</h3>
+<div class="fields"><div><label>How did it go?</label><select name="outcome" id="bk-out">{% for k, label in outcomes %}<option value="{{ k }}">{{ label }}</option>{% endfor %}</select></div>
+<div><label>Hours worked <small>(optional)</small></label><input name="hours" inputmode="decimal" placeholder="1.5"></div>
+<div class="wide"><label>What was done, or what's still needed</label><textarea name="outcome_note" rows="2" placeholder="For a return visit: what to bring or do next time"></textarea></div></div>
+<p><button class="btn pri">Finish visit</button></p></form>
+{% elif b.outcome %}<div class="card"><h3>Visit outcome</h3><p><span class="bk-st st-{{ 'done' if b.outcome == 'finished' else 'started' }}">{{ (outcomes|selectattr(0, 'equalto', b.outcome)|first)[1] }}</span></p>{% if b.outcome_note %}<p>{{ b.outcome_note }}</p>{% endif %}
+{% if b.outcome != 'finished' and job.status == 'needs_visit' %}<p><a class="btn pri" href="{{ url_for('bookings.edit', job=job.id) }}">Book the return visit</a></p>{% endif %}</div>{% endif %}
+<div class="card"><h3>Time and parts on this visit</h3>
+{% if times or parts %}<div class="tbl"><table>{% for t in times %}<tr><td>Labour</td><td>{{ '%g' % (t.minutes / 60) }} h{% if t.note %} · {{ t.note }}{% endif %}</td><td>{{ t.who or '' }}</td><td>{% if not inv %}<form method="post" action="{{ url_for('bookings.remove_entry', jid=job.id) }}"><input type="hidden" name="kind" value="time"><input type="hidden" name="id" value="{{ t.id }}"><input type="hidden" name="back" value="{{ request.path }}"><button class="btn sm">Remove</button></form>{% endif %}</td></tr>{% endfor %}
+{% for p in parts %}<tr><td>{{ p.description }}</td><td>{{ '%g' % p.qty }} × {{ p.unit_price|money if p.unit_price else 'price to add' }}</td><td></td><td>{% if not inv %}<form method="post" action="{{ url_for('bookings.remove_entry', jid=job.id) }}"><input type="hidden" name="kind" value="part"><input type="hidden" name="id" value="{{ p.id }}"><input type="hidden" name="back" value="{{ request.path }}"><button class="btn sm">Remove</button></form>{% endif %}</td></tr>{% endfor %}</table></div>{% else %}<p class="muted small">Nothing logged on this visit yet.</p>{% endif %}
+{% if not inv %}<form method="post" action="{{ url_for('bookings.add_time', bid=b.id) }}" class="bk-inline"><input name="hours" inputmode="decimal" placeholder="Hours, e.g. 1.5" aria-label="Hours"><input name="note" placeholder="What for (optional)" aria-label="Note"><button class="btn">Add time</button></form>
+<form method="post" action="{{ url_for('bookings.add_part', bid=b.id) }}" class="bk-inline"><select name="item_id" aria-label="Stock item"><option value="">Stock item…</option>{% for i in items %}<option value="{{ i.id }}">{{ i.name }}{% if i.sell_price %} · {{ i.sell_price|money }}{% endif %}</option>{% endfor %}</select><input name="description" placeholder="…or a one-off part" aria-label="Part"><input name="qty" value="1" inputmode="decimal" style="width:60px" aria-label="How many"><input name="unit_price" placeholder="Price each" inputmode="decimal" style="width:100px" aria-label="Price each"><button class="btn">Add part</button></form>{% endif %}
+</div></div>{% endif %}
 {% if b and b.status not in ('cancelled', 'no_show') and can('bookings', 2) %}<div class="bk-more">
-  <form method="post" action="{{ url_for('bookings.set_status', bid=b.id) }}"><input type="hidden" name="status" value="cancelled"><button class="btn">Cancel this {{ m.one }}</button></form>
+  <form method="post" action="{{ url_for('bookings.set_status', bid=b.id) }}"><input type="hidden" name="status" value="cancelled"><button class="btn">Cancel this {{ one }}</button></form>
   <form method="post" action="{{ url_for('bookings.set_status', bid=b.id) }}"><input type="hidden" name="status" value="no_show"><button class="btn">Didn't show</button></form></div>{% endif %}
 {% endblock %}
 {% block scripts %}<script>
