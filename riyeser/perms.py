@@ -38,7 +38,8 @@ PAYROLL_SOURCES = ("payrun", "payroll_import")
 
 # Actions that remove or cancel something: they need Full.
 DESTRUCTIVE = {"documents.void", "documents.delete", "documents.payment_void", "banking.feed_delete", "core.reverse",
-               "payroll.void_run", "pos.void", "pos.cancel_order"}
+               "payroll.void_run", "pos.cancel_order"}
+# pos.void and pos.refund check for themselves: staff may do them with a manager's PIN or card.
 REPORT_AREA = {
     "aged_receivables": "sales", "sales_customer": "sales", "sales_item": "sales",
     "aged_payables": "purchases", "purchases_supplier": "purchases",
@@ -123,7 +124,7 @@ def area_of(endpoint, view_args, args, db):
             r = db.execute("SELECT kind FROM contacts WHERE id=?", (va["cid"],)).fetchone()
             return _kind_area(r["kind"]) if r else None
         return None
-    if endpoint in ("pos.setup", "pos.set_mode"):
+    if endpoint in ("pos.setup", "pos.set_mode", "pos.approvals"):
         return "setup"  # how the till is set up is a setup decision, not a sales one
     if bp == "pos":
         return "sales"

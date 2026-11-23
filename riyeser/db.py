@@ -207,6 +207,44 @@ def migrate(db):
         db.execute("INSERT INTO pos_tills (name, location) VALUES ('Till 1', 'Front counter')")
     if "till_id" not in {r["name"] for r in db.execute("PRAGMA table_info(pos_sales)")}:
         db.execute("ALTER TABLE pos_sales ADD COLUMN till_id INTEGER REFERENCES pos_tills(id)")
+    # Manager approvals (PIN / manager card) and opening + closing the till.
+    ucols = {r["name"] for r in db.execute("PRAGMA table_info(users)")}
+    for col in ("pos_pin_hash", "pos_card_hash", "pos_card_last4"):
+        if col not in ucols:
+            db.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+    if "pos_approval_rules" not in {r["name"] for r in db.execute("PRAGMA table_info(company)")}:
+        db.execute("ALTER TABLE company ADD COLUMN pos_approval_rules TEXT")  # JSON; empty = the defaults
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_approvals (
+        id INTEGER PRIMARY KEY, action TEXT NOT NULL, ref TEXT, amount INTEGER NOT NULL DEFAULT 0, reason TEXT,
+        requested_by INTEGER REFERENCES users(id), approved_by INTEGER REFERENCES users(id), method TEXT NOT NULL,
+        till_id INTEGER REFERENCES pos_tills(id), used_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_auth_fails (
+        id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id),
+        at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_shifts (
+        id INTEGER PRIMARY KEY, till_id INTEGER NOT NULL REFERENCES pos_tills(id), status TEXT NOT NULL DEFAULT 'open',
+        opened_by INTEGER REFERENCES users(id), opened_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+        float_amount INTEGER NOT NULL DEFAULT 0, closed_by INTEGER REFERENCES users(id), closed_at TEXT,
+        counts TEXT, counted INTEGER, expected INTEGER, variance INTEGER, card_settlement INTEGER,
+        reason TEXT, approval_id INTEGER REFERENCES pos_approvals(id), deposit INTEGER,
+        deposit_account_id INTEGER REFERENCES accounts(id), summary TEXT)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS pos_refunds (
+        id INTEGER PRIMARY KEY, sale_id INTEGER NOT NULL REFERENCES pos_sales(id),
+        entry_id INTEGER REFERENCES journal_entries(id), method TEXT NOT NULL, amount INTEGER NOT NULL,
+        tax INTEGER NOT NULL DEFAULT 0, lines TEXT NOT NULL, reason TEXT, user_id INTEGER REFERENCES users(id),
+        approval_id INTEGER REFERENCES pos_approvals(id), shift_id INTEGER REFERENCES pos_shifts(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    if "shift_id" not in {r["name"] for r in db.execute("PRAGMA table_info(pos_sales)")}:
+        db.execute("ALTER TABLE pos_sales ADD COLUMN shift_id INTEGER REFERENCES pos_shifts(id)")
+    if not db.execute("SELECT 1 FROM linked_accounts WHERE key='cash_over_short'").fetchone():
+        row = db.execute("SELECT id FROM accounts WHERE code='6-1950'").fetchone()
+        if not row:
+            ntc = db.execute("SELECT id FROM tax_codes WHERE code='N-T'").fetchone()
+            row = {"id": db.execute("INSERT INTO accounts (code, name, type, is_bank, tax_code_id) VALUES"
+                                    " ('6-1950', 'Cash Over/Short', 'expense', 0, ?)",
+                                    (ntc["id"] if ntc else None,)).lastrowid}
+        db.execute("INSERT INTO linked_accounts (key, account_id) VALUES ('cash_over_short', ?)", (row["id"],))
     for key, code in (("pos_cash", "1-1190"), ("pos_card", "1-1110")):
         if not db.execute("SELECT 1 FROM linked_accounts WHERE key=?", (key,)).fetchone():
             row = db.execute("SELECT id FROM accounts WHERE code=?", (code,)).fetchone() or \

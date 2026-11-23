@@ -98,6 +98,8 @@ body{overflow:hidden;user-select:none}
 .stepper button{width:56px;height:56px;border-radius:14px;border:1.5px solid var(--line2);background:#fff;font-size:26px;font-weight:700}
 .stepper b{font-size:26px;min-width:60px;text-align:center}
 .pcts{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.pcts button{border:1.5px solid var(--line2);background:#fff;border-radius:10px;padding:8px 14px;font-weight:700}
+#cashArea{display:flex;flex-direction:column;gap:12px}#cashArea[hidden],#cardArea[hidden]{display:none}
+#pOpen .donec{margin:16px auto;gap:10px}#pOpen .keys button{min-height:48px}#pOpen .quick button{min-height:48px}
 @media (max-width:1100px){.sell{grid-template-columns:minmax(0,1fr) 340px}}
 @media (max-width:820px){body{overflow:auto}.sell{display:flex;flex-direction:column;height:auto}.grid{max-height:none}.paygrid{grid-template-columns:1fr}}
 {% endblock %}
@@ -134,6 +136,18 @@ body{overflow:hidden;user-select:none}
   </aside>
 </div>
 
+<!-- open the till -->
+<section class="panel" id="pOpen"><div class="card donec">
+  <div class="tick" style="background:#e8f0fa;color:var(--navy)"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
+  <h2>Open <span id="openName">the till</span></h2>
+  <p style="margin:0;color:var(--muted)">Count the float (the change you start with) and put it in the drawer.</p>
+  <div class="disp"><small>Float in drawer</small><span class="n" id="flt">$0.00</span></div>
+  <div class="quick" id="fq"><button data-flt="10000">$100</button><button data-flt="20000">$200</button><button data-flt="30000">$300</button><button data-flt="0">No float</button></div>
+  <div class="keys" id="fkeys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">&#9003;</button></div>
+  <p class="err" id="openErr"></p>
+  <button class="btn go big" id="openGo">Open till &amp; start selling</button>
+</div></section>
+
 <!-- payment -->
 <section class="panel" id="pPay"><div class="paygrid">
   <div class="card sumc">
@@ -148,7 +162,7 @@ body{overflow:hidden;user-select:none}
       <button data-m="cash"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 10v4M18 10v4"/></svg>Cash</button>
       <button data-m="card"><svg class="ic" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>Card</button>
     </div>
-    <div id="cashArea" hidden style="display:flex;flex-direction:column;gap:12px">
+    <div id="cashArea" hidden>
       <div class="quick" id="quick"></div>
       <div class="disp"><small>Cash received</small><span class="n" id="tend">$0.00</span></div>
       <div class="keys" id="keys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">⌫</button></div>
@@ -192,7 +206,8 @@ body{overflow:hidden;user-select:none}
 (function(){
 const MODE='{{ mode }}', F=new Set({{ features|tojson }}), ITEMS={{ items_json|safe }}, CATS={{ cats|tojson }};
 const CUSTOMERS={{ customers|map(attribute='name')|list|tojson }}, CUST_IDS={{ customers|map(attribute='id')|list|tojson }}, WALK_IN={{ walk_in|tojson }};
-const U={sale:'{{ url_for('pos.sale') }}',order:'{{ url_for('pos.save_order') }}',orders:'{{ url_for('pos.orders') }}',base:'{{ url_for('pos.register') }}',photo:'{{ url_for('pos.photo', iid=0) }}'.replace(/0$/,'')};
+const SHIFTS={{ shifts|tojson }}, FLOATS={{ floats|tojson }}, RULES={{ rules|tojson }}, SELF_OK={{ self_ok|tojson }};
+const U={open:'{{ url_for('pos.shift_open') }}',sale:'{{ url_for('pos.sale') }}',order:'{{ url_for('pos.save_order') }}',orders:'{{ url_for('pos.orders') }}',base:'{{ url_for('pos.register') }}',photo:'{{ url_for('pos.photo', iid=0) }}'.replace(/0$/,'')};
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const fmt=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -262,6 +277,12 @@ async function complete(){$('#complete').disabled=true;
   const till=$('#till').value||null;
   const body={order_id:orderId,order_type:otype,table_no:table,customer_id:cust,method,tendered:(tend/100).toFixed(2),till_id:till,
     lines:cart.map(l=>({item_id:l.id,qty:l.qty,discount_pct:l.disc,note:l.note}))};
+  const top=Math.max(0,...cart.map(l=>l.disc||0));
+  if(RULES.discount&&top>RULES.discount_limit&&!SELF_OK){
+    const off=cart.reduce((a,l)=>a+Math.round(l.qty*l.price*(l.disc||0)/100),0);
+    try{const ap=await requestApproval({action:'discount',amount:Math.ceil(top),what:'Discount of '+top+'%',
+      detail:'Over the '+RULES.discount_limit+'% limit',amountLabel:'-'+fmt(off),verb:'Approve discount'});body.approval_id=ap.approval_id;}
+    catch(e){updPay();return;}}
   const r=await fetch(U.sale,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const d=await r.json().catch(()=>({ok:false,error:'Something went wrong. The sale was not saved.'}));
   if(!d.ok){$('#payErr').textContent=d.error;updPay();return;}
@@ -317,6 +338,20 @@ if($('#custBtn')){const dc=()=>{const q=$('#cq').value.trim().toLowerCase();
   $('#custBtn').onclick=()=>{$('#cq').value='';dc();show('#mCust',true);$('#cq').focus();};$('#cq').addEventListener('input',dc);}
 // Tables / Held in the top menu
 $$('[data-open]').forEach(a=>a.addEventListener('click',async e=>{if(!a.closest('#tnav'))return;e.preventDefault();await loadOrders();a.dataset.open==='tables'?showTables():showOrders();}));
+// the till must be opened (with its float) before selling
+let flt=0;
+function drawFlt(){$('#flt').textContent=fmt(flt);$$('#fq button').forEach(b=>b.classList.toggle('on',+b.dataset.flt===flt));}
+function needOpen(){const t=$('#till').value;if(!t||SHIFTS[t])return false;flt=(t in FLOATS)?FLOATS[t]:20000;
+  $('#openName').textContent=$('#till').selectedOptions[0].text;$('#openErr').textContent='';drawFlt();show('#pOpen',true);return true;}
+$('#fq').addEventListener('click',e=>{const b=e.target.closest('button');if(b){flt=+b.dataset.flt;drawFlt();}});
+$('#fkeys').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;let c=String(flt);
+  if(b.dataset.k==='del')c=c.slice(0,-1)||'0';else c=(c==='0'?'':c)+b.textContent;flt=Math.min(+c,9999999);drawFlt();});
+$('#openGo').onclick=async()=>{const t=$('#till').value;
+  const r=await fetch(U.open,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({till_id:t,float:(flt/100).toFixed(2)})});
+  const d=await r.json().catch(()=>({ok:false,error:'Could not open the till.'}));if(!d.ok){$('#openErr').textContent=d.error;return;}
+  SHIFTS[t]=true;show('#pOpen',false);toast($('#till').selectedOptions[0].text+' is open');$('#q').focus();};
+document.addEventListener('tillchange',()=>{if(!needOpen())show('#pOpen',false);});
+needOpen();
 drawCats();drawGrid();draw();loadOrders().then(()=>{const h=location.hash.slice(1);if(h==='tables'&&$('#tables'))showTables();else if(h==='held')showOrders();if(h)history.replaceState(null,'',location.pathname);});
 })();
 </script>

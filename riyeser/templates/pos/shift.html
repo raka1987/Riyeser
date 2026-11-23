@@ -1,0 +1,34 @@
+<!doctype html><html><head><meta charset="utf-8"><title>{{ 'Z-report' if sh.status == 'closed' else 'X-read' }} {{ sh.till_name }}</title>
+<style>body{font:13px/1.45 "Courier New",monospace;margin:0;background:#fff;color:#000}.r{width:72mm;margin:0 auto;padding:10px 4px}
+h1{font-size:16px;text-align:center;margin:0}.c{text-align:center}hr{border:0;border-top:1px dashed #000;margin:8px 0}
+table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}td.n{text-align:right;white-space:nowrap}.t td{font-weight:bold}
+.np{text-align:center;margin:14px 0}.np button,.np a{font:14px system-ui,sans-serif;padding:8px 14px;margin:0 4px}
+@media print{.np{display:none}@page{size:80mm auto;margin:0}}</style></head>
+<body onload="setTimeout(()=>window.print(),300)"><div class="r">
+<h1>{{ company.name }}</h1>
+<div class="c">{% if company.abn %}ABN {{ company.abn }}<br>{% endif %}<b>{{ 'Z-REPORT (TILL CLOSED)' if sh.status == 'closed' else 'X-READ (TILL STILL OPEN)' }}</b><br>
+{{ sh.till_name }} · #{{ sh.id }}<br>Opened {{ sh.opened_at[:16] }} by {{ users.get(sh.opened_by, '') }}<br>
+{% if sh.status == 'closed' %}Closed {{ sh.closed_at[:16] }} by {{ users.get(sh.closed_by, '') }}{% else %}Printed {{ now[:16] }}{% endif %}</div><hr>
+<table>
+<tr><td>Sales ({{ fig.count }})</td><td class="n">{{ fig.total|money }}</td></tr>
+<tr><td>&nbsp; Card</td><td class="n">{{ fig.card|money }}</td></tr>
+<tr><td>&nbsp; Cash</td><td class="n">{{ fig.cash|money }}</td></tr>
+<tr><td>Refunds ({{ fig.refunds }})</td><td class="n">-{{ (fig.refund_cash + fig.refund_card)|money }}</td></tr>
+<tr><td>Voids ({{ fig.voids }})</td><td class="n">{{ fig.void_total|money }}</td></tr>
+<tr><td>Discounts given</td><td class="n">{{ fig.discounts|money }}</td></tr>
+<tr><td>GST included</td><td class="n">{{ fig.gst|money }}</td></tr>
+</table><hr>
+<table>
+<tr><td>Float</td><td class="n">{{ fig.float|money }}</td></tr>
+<tr><td>Cash expected</td><td class="n">{{ fig.expected|money }}</td></tr>
+{% if sh.status == 'closed' %}<tr><td>Cash counted</td><td class="n">{{ sh.counted|money }}</td></tr>
+<tr class="t"><td>Difference</td><td class="n">{{ '+' if sh.variance > 0 }}{{ sh.variance|money }}</td></tr>
+{% if sh.deposit %}<tr><td>To bank{% if bank %} ({{ bank.name }}){% endif %}</td><td class="n">{{ sh.deposit|money }}</td></tr>{% endif %}
+<tr><td>Card (till)</td><td class="n">{{ fig.card_net|money }}</td></tr>
+{% if sh.card_settlement is not none %}<tr><td>Card machine</td><td class="n">{{ sh.card_settlement|money }}</td></tr>{% endif %}
+{% endif %}</table>
+{% if sh.status == 'closed' and counts %}<hr><table>{% for d, n in counts if n %}<tr><td>{{ '$%d'|format(d // 100) if d >= 100 else '%dc'|format(d) }} x {{ n }}</td><td class="n">{{ (d * n)|money }}</td></tr>{% endfor %}</table>{% endif %}
+{% if sh.reason %}<hr><div>Reason: {{ sh.reason }}{% if appr and appr.method != 'self' %}<br>Approved by {{ users.get(appr.approved_by, '') }} ({{ appr.method }}){% endif %}</div>{% endif %}
+<hr><div class="c">Sent to Riyeser Accounting automatically</div>
+<p class="np"><button onclick="print()">Print</button> <a href="{{ url_for('pos.close_till', till=sh.till_id) }}">Back to the till</a></p>
+</div></body></html>
