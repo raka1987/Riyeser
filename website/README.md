@@ -2,7 +2,7 @@
 
 The Riyeser Group website: home, a page per program, Downloads, Pricing (90 days free, then per user per month), Help Centre and Terms.
 
-- **Edit**: all text lives in `build.mjs` (one place for every page); styling in `assets/site.css`.
+- **Edit**: page text lives in `build.mjs`; the Help Centre guides (one per program) in `help.mjs`; styling in `assets/site.css`; program icons in `assets/apps/`.
 - **Build**: `node website/build.mjs` → `website/public/` (plain HTML, works on any web host).
 - **Publish**: Actions → *Publish website* → *Run workflow* (the workflow lives on `main`; it builds this folder from `module/desk-assistant`).
 - **Use riyeser.com**: at your domain registrar add `A` records for `@` → 185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153 and a `CNAME` for `www` → `raka1987.github.io`; then in Settings → Pages enter `riyeser.com` and tick *Enforce HTTPS*.
