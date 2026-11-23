@@ -43,7 +43,11 @@ before(async () => {
   }
   throw new Error('Server did not start');
 });
-after(() => { server.kill(); fs.rmSync(DATA_DIR, { recursive: true, force: true }); });
+after(async () => {
+  // Wait for the test server to close before removing its folder: on Windows an open database file can't be deleted.
+  if (server.exitCode === null) await new Promise((r) => { server.once('exit', r); server.kill(); setTimeout(r, 5000); });
+  try { fs.rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* temp folder; Windows tidies it later */ }
+});
 
 let admin, staff;
 
