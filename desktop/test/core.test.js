@@ -587,6 +587,25 @@ test('Riyeser Central reads money owed and owing from the Accounting company fil
   assert.equal((await pendingPayments(path.join(dir, 'missing.db'))).found, false);
 });
 
+test('Riyeser Central reads the last pay run from Riyeser Payroll without changing it', async () => {
+  const init = require('sql.js/dist/sql-wasm.js');
+  const SQL = await init({ locateFile: () => require.resolve('sql.js/dist/sql-wasm.wasm') });
+  const db = new SQL.Database();
+  db.run(`CREATE TABLE payroll_runs (id INTEGER PRIMARY KEY, period_start TEXT, period_end TEXT, pay_date TEXT, total_gross REAL, total_net REAL);
+    CREATE TABLE payslips (id INTEGER PRIMARY KEY, run_id INTEGER, user_id INTEGER, net REAL);
+    INSERT INTO payroll_runs VALUES (1, '2026-11-03', '2026-11-09', '2026-11-13', 9000, 7100.5), (2, '2026-11-10', '2026-11-16', '2026-11-20', 9300, 7420);
+    INSERT INTO payslips VALUES (1, 1, 1, 0), (2, 2, 1, 0), (3, 2, 2, 0), (4, 2, 3, 0);`);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pay-'));
+  const file = path.join(dir, 'payroll.db');
+  fs.writeFileSync(file, Buffer.from(db.export()));
+  const before = fs.readFileSync(file);
+  const { lastPayRun, payrollDbPath } = require('../src/central/sources');
+  assert.deepEqual(await lastPayRun(file), { found: true, lastRun: { pay_date: '2026-11-20', total_net: 7420, employees: 3 } });
+  assert.ok(fs.readFileSync(file).equals(before));
+  assert.deepEqual(await lastPayRun(path.join(dir, 'missing.db')), { found: false, lastRun: null }); // fresh install: nothing
+  assert.equal(payrollDbPath('/appdata'), path.join('/appdata', 'Riyeser Payroll', 'payroll', 'payroll.db'));
+});
+
 test('Riyeser Central update check: compares installed versions with the latest release', () => {
   const u = require('../src/central/updates');
   assert.ok(u.newer('1.10.0', '1.9.2')); assert.ok(!u.newer('1.1.0', '1.1.0')); assert.ok(!u.newer('0.21.9', '0.22.0'));

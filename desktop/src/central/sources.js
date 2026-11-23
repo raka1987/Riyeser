@@ -1,6 +1,7 @@
 // Riyeser Central reads (never writes) what the other Riyeser programs keep on this PC:
 //  - Riyeser Desk Assistant: to-do list, calendars, settings and the file search index (%APPDATA%\Desk Assistant\data)
 //  - Riyeser Accounting: invoices and bills still to be paid (~/.riyeser/company.db)
+//  - Riyeser Payroll: the last pay run (%APPDATA%\Riyeser Payroll\payroll\payroll.db)
 //  - Windows: recently opened documents (%APPDATA%\Microsoft\Windows\Recent)
 const fs = require('fs');
 const path = require('path');
@@ -67,6 +68,26 @@ async function pendingPayments(dbPath = accountingDbPath(), { today = new Date()
   } finally { db.close(); }
 }
 
+/** Where Riyeser Payroll keeps its records. */
+function payrollDbPath(appData) { return path.join(appData, 'Riyeser Payroll', 'payroll', 'payroll.db'); }
+
+/**
+ * The most recent pay run in Riyeser Payroll: { found, lastRun: { pay_date, total_net, employees } | null }.
+ * Payroll writes through a -wal file; a run saved in the last few moments may only show once Payroll tidies that up
+ * (it does when it closes), which is fine for a home screen.
+ */
+async function lastPayRun(dbPath) {
+  if (!dbPath || !fs.existsSync(dbPath)) return { found: false, lastRun: null };
+  const SQL = await sqlJs();
+  const db = new SQL.Database(new Uint8Array(fs.readFileSync(dbPath)));
+  try {
+    const st = db.prepare(`SELECT r.pay_date, r.total_net, (SELECT COUNT(*) FROM payslips p WHERE p.run_id = r.id) AS employees
+      FROM payroll_runs r ORDER BY r.pay_date DESC, r.id DESC LIMIT 1`);
+    const row = st.step() ? st.getAsObject() : null; st.free();
+    return { found: true, lastRun: row ? { pay_date: row.pay_date, total_net: Number(row.total_net) || 0, employees: Number(row.employees) || 0 } : null };
+  } finally { db.close(); }
+}
+
 const PERSONAL_EXT = /\.(pdf|docx?|xlsx?|xlsm|csv|pptx?|txt|rtf|odt|ods|jpe?g|png|heic|dwg|dxf|msg|eml|zip)$/i;
 /**
  * Recently opened documents. readLink(lnkPath) -> target path (Electron's shell.readShortcutLink on Windows).
@@ -99,4 +120,4 @@ function recentDocuments({ recentDir, readLink, indexDocs = {}, limit = 15 } = {
   return out;
 }
 
-module.exports = { deskAssistant, accountingDbPath, pendingPayments, recentDocuments, readJson };
+module.exports = { deskAssistant, accountingDbPath, pendingPayments, payrollDbPath, lastPayRun, recentDocuments, readJson };

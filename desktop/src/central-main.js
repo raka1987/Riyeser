@@ -31,9 +31,9 @@ const localPrograms = () => path.join(process.env.LOCALAPPDATA || path.join(os.h
 const PROGRAMS = [
   // Two separate apps that share the same books. The old single "Riyeser Accounting" 1.x counts as Plus.
   { id: 'accounting-basics', name: 'Accounting Basics', full: 'Riyeser Accounting Basics', icon: '📗', desc: 'Free invoicing, quotes, customers and stock.',
-    dirs: ['Riyeser Accounting Basics'], exes: ['Riyeser Accounting Basics.exe'], links: ['Riyeser Accounting Basics'] },
+    dirs: ['Riyeser Accounting Basics'], exes: ['Riyeser Accounting Basics.exe'], links: ['Riyeser Accounting Basics'], pages: ['pos', 'invoice'] },
   { id: 'accounting', name: 'Accounting Plus', full: 'Riyeser Accounting Plus', icon: '📒', desc: 'Full books: banking, payroll, journals, jobs and budgets. Included in your licence.',
-    dirs: ['Riyeser Accounting Plus', 'Riyeser Accounting'], exes: ['Riyeser Accounting Plus.exe', 'Riyeser Accounting.exe'], links: ['Riyeser Accounting Plus', 'Riyeser Accounting'] },
+    dirs: ['Riyeser Accounting Plus', 'Riyeser Accounting'], exes: ['Riyeser Accounting Plus.exe', 'Riyeser Accounting.exe'], links: ['Riyeser Accounting Plus', 'Riyeser Accounting'], pages: ['pos', 'invoice'] },
   { id: 'payroll', name: 'Payroll', full: 'Riyeser Payroll', icon: '🕒', desc: 'Time clock, timesheets, pay runs, payslips and leave.',
     dirs: ['riyeser-payroll', 'Riyeser Payroll', 'riyeser', 'Riyeser', 'riyser', 'Riyser'], exes: ['Riyeser Payroll.exe', 'Riyeser.exe', 'Riyser.exe'],
     links: ['Riyeser Payroll', 'Riyeser', 'Riyser'] }, // Riyeser Payroll 2.0+; older builds were a hub called Riyser
@@ -45,6 +45,13 @@ const PROGRAMS = [
     dirs: ['riyeser-services'], exes: ['Riyeser Services.exe'], links: ['Riyeser Services'],
     url: 'https://riyeser.com/app/' }, // opens the Windows app when it's installed, else the website
 ];
+
+/** Start a program with arguments, separate from Central (it keeps running if Central closes). */
+function launch(exe, args) {
+  const child = spawn(exe, args, { detached: true, stdio: 'ignore', cwd: path.dirname(exe) });
+  child.on('error', () => { /* reported by the program itself */ });
+  child.unref();
+}
 
 function shortcutDirs() {
   const appData = process.env.APPDATA || app.getPath('appData');
@@ -167,12 +174,14 @@ function registerIpc() {
   handle('app:version', () => app.getVersion());
   handle('app:platform', () => process.platform);
   handle('central:programs', () => programList());
-  handle('central:open', async (id) => {
+  handle('central:open', async (id, page) => {
     const p = PROGRAMS.find((x) => x.id === id);
     if (!p) throw new Error('Unknown program');
     const exe = locate(p);
     if (p.url && !exe) { await shell.openExternal(p.url); return true; }
     if (!exe) throw new Error(`${p.full} isn't installed on this computer yet (or I can't find it). Use “Locate…” to point me to it.`);
+    // Quick access: programs that can open on a given screen (e.g. Accounting's Shop counter) get --page=<name>.
+    if (page && (p.pages || []).includes(page) && /\.exe$/i.test(exe)) { launch(exe, [`--page=${page}`]); return true; }
     const err = await shell.openPath(exe);
     if (err) throw new Error(err);
     return true;
@@ -181,6 +190,15 @@ function registerIpc() {
   handle('central:get', async (id) => {
     const page = { 'accounting-basics': 'accounting-basics', accounting: 'accounting', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     await shell.openExternal(page ? `https://riyeser.com/programs/${page}.html` : 'https://riyeser.com/downloads.html');
+    return true;
+  });
+  // Quick access "Open a PDF": choose one and open it in Riyeser PDF.
+  handle('central:openPdf', async () => {
+    const exe = locate(PROGRAMS.find((x) => x.id === 'pdf'));
+    if (!exe) throw new Error("Riyeser PDF isn't installed on this computer yet.");
+    const r = await dialog.showOpenDialog(win, { title: 'Open a PDF', properties: ['openFile'], filters: [{ name: 'PDF files', extensions: ['pdf'] }] });
+    if (r.canceled || !r.filePaths[0]) return false;
+    launch(exe, [r.filePaths[0]]);
     return true;
   });
   handle('central:locate', async (id) => {
@@ -193,8 +211,13 @@ function registerIpc() {
     return f;
   });
   handle('central:today', async () => {
-    const da = sources.deskAssistant(deskData());
-    const tasks = (da.tasks || []).filter((t) => !t.done).sort((a, b) => String(a.due || '9').localeCompare(String(b.due || '9'))).slice(0, 12);
+    // Each program's information is read only while that program is installed, so a fresh install (or one where a
+    // program was removed) never shows old to-dos, balances or documents left behind on the PC.
+    const installed = (id) => !!locate(PROGRAMS.find((x) => x.id === id));
+    const deskInstalled = installed('desk'); const pdfInstalled = installed('pdf');
+    const da = deskInstalled ? sources.deskAssistant(deskData()) : { found: false, settings: {}, tasks: [] };
+    const open = (da.tasks || []).filter((t) => !t.done);
+    const tasks = open.sort((a, b) => String(a.due || '9').localeCompare(String(b.due || '9'))).slice(0, 12);
     let meetings = []; let meetingErrors = [];
     const cals = (da.settings && da.settings.calendars) || [];
     if (cals.length) {
@@ -203,16 +226,23 @@ function registerIpc() {
         meetings = r.meetings.slice(0, 10); meetingErrors = r.errors.map((e) => e.source);
       } catch (e) { meetingErrors = [e.message]; }
     }
-    let money;
-    try { money = await sources.pendingPayments(); } catch (e) { money = { found: false, error: e.message }; }
+    let money = { found: false };
+    if (installed('accounting') || installed('accounting-basics')) {
+      try { money = await sources.pendingPayments(); } catch (e) { money = { found: false, error: e.message }; }
+    }
     // Recent documents (Windows' own Recent files list) belong to Riyeser Desk Assistant: only while it's installed.
-    const deskInstalled = !!locate(PROGRAMS.find((x) => x.id === 'desk'));
-    const recent = !deskInstalled ? [] : sources.recentDocuments({
+    // With only Riyeser PDF installed, recent PDFs are shown (and nothing from Desk Assistant's file list).
+    let recent = !deskInstalled && !pdfInstalled ? [] : sources.recentDocuments({
       recentDir: process.platform === 'win32' ? path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Recent') : null,
       readLink: (l) => shell.readShortcutLink(l).target,
-      indexDocs: searchIndex().docs, limit: 12,
+      indexDocs: deskInstalled ? searchIndex().docs : {}, limit: deskInstalled ? 24 : 40,
     });
-    return { deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, money, recent };
+    if (!deskInstalled) recent = recent.filter((r) => /\.pdf$/i.test(r.name));
+    // The last pay run, only while Riyeser Payroll is installed (records left after uninstalling aren't shown).
+    let payroll = { found: false, lastRun: null };
+    if (installed('payroll')) { try { payroll = await sources.lastPayRun(sources.payrollDbPath(app.getPath('appData'))); } catch (e) { payroll = { found: false, lastRun: null, error: e.message }; } }
+    const organisedRoot = deskInstalled ? ((da.settings && da.settings.organisedRoot) || '') : '';
+    return { deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, taskCount: open.length, money, recent, payroll, organisedRoot };
   });
   // ---------- licence (one for the whole Riyeser suite; %APPDATA%\Riyeser\licence.json) ----------
   const appData = app.getPath('appData'); const lfetch = (u, o) => net.fetch(u, o);
@@ -223,6 +253,8 @@ function registerIpc() {
   handle('central:updates', (force) => updateStatus(!!force));
   handle('central:installUpdates', (ids) => installUpdates(ids));
   handle('search:find', (opts) => {
+    // Search uses Desk Assistant's file list: nothing (not an old list) when it isn't installed.
+    if (!locate(PROGRAMS.find((x) => x.id === 'desk'))) return { total: 0, results: [], facets: { type: {}, year: {}, kind: {} } };
     const da = sources.deskAssistant(deskData());
     return searchIndex().find(opts || {}, { organisedRoot: (da.settings && da.settings.organisedRoot) || '' });
   });

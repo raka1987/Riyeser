@@ -7,28 +7,52 @@
   <link rel="stylesheet" href="central.css">
 </head>
 <body>
-  <div class="wrap">
-    <header class="head">
-      <img src="icon-central.png" alt="">
-      <div class="brand"><b>Riyeser Central</b><small>Riyeser Group</small></div>
-      <button id="theme" class="themebtn" title="Light or dark">☾</button>
-      <div class="clock"><span id="time">--:--</span><small id="date"></small></div>
-    </header>
-    <div class="search glass"><span>🔍</span><input id="q" placeholder="Search all your files — name, words inside, company or an old name" autocomplete="off"><button id="qclear" class="clear" hidden>✕</button></div>
-    <section id="results" hidden></section>
-    <section id="home">
-      <div id="updates" class="glass upd" hidden></div>
-      <div id="licbar" class="glass upd lic" hidden></div>
-      <div class="tiles" id="tiles"></div>
-      <div class="widgets">
-        <div class="glass w"><h3>💲 Money</h3><div id="money"><span class="lbl">Loading…</span></div></div>
-        <div class="glass w"><h3>📅 Today</h3><div id="today"><span class="lbl">Loading…</span></div></div>
-        <div class="glass w"><h3>✅ To-do</h3><div id="todo"><span class="lbl">Loading…</span></div></div>
+  <div class="app">
+    <aside class="side">
+      <div class="logo"><img src="icon-central.png" alt=""><div><b>Riyeser Central</b><small>Riyeser Group</small></div></div>
+      <nav class="nav" id="nav"></nav>
+      <div class="foot"><span id="foot"></span><br><button id="licbtn">Licence</button> · <button id="checkupd">Check for updates</button></div>
+    </aside>
+    <main class="main">
+      <div class="inner">
+        <header class="top">
+          <div><h1 id="hello">Home</h1><div class="date" id="date"></div></div>
+          <label class="search"><span data-ic="search"></span><input id="q" placeholder="Search all your files: name, words inside, company" autocomplete="off"><button id="qclear" class="clear" hidden aria-label="Clear" data-ic="x"></button></label>
+          <button id="theme" class="iconbtn" title="Light or dark"></button>
+        </header>
+        <div id="updates" class="panel banner" hidden></div>
+        <div id="licbar" class="panel banner" hidden></div>
+
+        <section id="results" hidden></section>
+
+        <section id="home">
+          <div class="kpis" id="kpis"></div>
+          <div id="quickwrap"><h2 class="sec">Quick access</h2><div class="quick" id="quick"></div></div>
+          <div class="cols">
+            <div class="stack">
+              <div class="panel" id="recentp">
+                <div class="ph"><span class="grow">Recent files</span><div class="tabs" id="rtabs"><button data-rt="all" class="on">All</button><button data-rt="pdf">PDFs</button><button data-rt="sorted">Sorted</button></div></div>
+                <div id="recent"></div>
+              </div>
+              <div class="panel" id="moneyp">
+                <div class="ph"><span class="grow">Invoices to chase</span><button class="lnk" data-open="" id="moneyopen">Open Accounting</button></div>
+                <div id="money"></div>
+              </div>
+            </div>
+            <div class="stack">
+              <div class="panel" id="todayp"><div class="ph"><span class="grow">Today</span></div><div id="today"></div></div>
+              <div class="panel" id="todop"><div class="ph"><span class="grow">To-do</span><button class="lnk" data-open="desk">Open Desk Assistant</button></div><div id="todo"></div></div>
+            </div>
+          </div>
+          <div id="getstarted" class="panel" hidden></div>
+        </section>
+
+        <section id="appsv" hidden>
+          <h2 class="sec">More Riyeser apps</h2>
+          <div class="apps" id="apps"></div>
+        </section>
       </div>
-      <h4 class="dockh">Recent documents</h4>
-      <div class="dock" id="recent"></div>
-    </section>
-    <p class="foot"><span id="foot"></span> · <button class="link" id="checkupd">Check for updates</button> · <button class="link" id="licbtn">Licence</button></p>
+    </main>
   </div>
   <dialog id="licdlg" class="licdlg">
     <form method="dialog" class="lichead"><b>Your Riyeser licence</b><button class="x" value="close" aria-label="Close">✕</button></form>
