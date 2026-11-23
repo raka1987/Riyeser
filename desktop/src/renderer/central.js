@@ -372,7 +372,7 @@ function renderChat(err) {
   const fmt = (iso) => new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   body.innerHTML = `${chats.length ? `<div class="convs">${chats.map((c) => `<button class="conv${c.id === chatOn ? ' on' : ''}" data-chat="pick" data-id="${esc(c.id)}"><span>${esc(c.subject)}</span>${c.unread ? '<span class="new">New reply</span>' : `<span class="muted">${esc(fmt(c.at))}</span>`}</button>`).join('')}
       <button class="conv${chatOn ? '' : ' on'}" data-chat="new"><span>➕ New question</span></button></div>` : ''}
-    ${cur ? `<div class="thread">${cur.messages.map((m) => `<div class="msg${m.fromStaff ? ' staff' : ''}">${esc(m.body)}<span class="at">${m.fromStaff ? 'Riyeser' : 'You'} · ${esc(fmt(m.at))}</span></div>`).join('')}</div>` : '<p>Ask us anything: setting up, a problem, or your plan. Our answer shows up here, and the Message us button shows a number when there's a new reply.</p>'}
+    ${cur ? `<div class="thread">${cur.messages.map((m) => `<div class="msg${m.fromStaff ? ' staff' : ''}">${esc(m.body)}<span class="at">${m.fromStaff ? 'Riyeser' : 'You'} · ${esc(fmt(m.at))}</span></div>`).join('')}</div>` : '<p>Ask us anything: setting up, a problem, or your plan. Our answer shows up here, and the Message us button shows a number when there is a new reply.</p>'}
     <textarea id="chattext" placeholder="${cur ? 'Write a reply…' : 'Your question…'}" maxlength="4000"></textarea>
     <div class="row"><button class="btn" data-chat="send">Send</button></div>
     <p class="muted">Please don't send passwords or card numbers. Only what you type here is sent: your books stay on this PC.</p>`;
