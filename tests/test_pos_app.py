@@ -160,3 +160,19 @@ def test_per_product_subscriptions_from_the_licence_file(tmp_path, monkeypatch):
     # Plus includes Basics
     _licfile(tmp_path, {"products": {"plus": {"paid": True}}})
     assert plan.subscribed("basic") and not plan.subscribed("pos")
+
+
+def test_plus_needs_its_own_subscription_or_trial(tmp_path, monkeypatch):
+    from datetime import timedelta
+    from riyeser.licence import enterprise_allowed
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=100)).isoformat()
+    _licfile(tmp_path, {"trialStart": old, "products": {"pos": {"paid": True}}})
+    assert not enterprise_allowed()                       # POS subscription doesn't unlock Plus
+    _licfile(tmp_path, {"trialStart": old, "products": {"plus": {"paid": True}}})
+    assert enterprise_allowed()
+    _licfile(tmp_path, {"trialStart": old, "products": {}, "caps": {"plusTrialDays": 120}})
+    assert enterprise_allowed()                           # still inside a longer server-set trial
+    _licfile(tmp_path, {"trialStart": old, "products": {"plus": {"paid": True, "until": "2020-01-01"}}})
+    assert not enterprise_allowed()

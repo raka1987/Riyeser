@@ -57,7 +57,31 @@ def status(now=None, path=None):
 
 def enterprise_allowed(now=None, path=None):
     """Basic is free up to its invoice cap (riyeser/plan.py). Enterprise needs the free trial or a licence from Riyeser Central.
-    'unknown' (Central not set up, e.g. a pip install) keeps everything open, like the trial."""
+    'unknown' (Central not set up, e.g. a pip install) keeps everything open, like the trial.
+    With per-product subscriptions in the licence file ("products"), Plus needs its own: products.plus paid, or the
+    Plus trial (caps.plusTrialDays, default 90, from trialStart). Older files use the suite licence."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        with open(path or licence_file(), encoding="utf-8") as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        d = {}
+    products = d.get("products") if isinstance(d, dict) else None
+    if isinstance(products, dict):
+        plus = products.get("plus")
+        if isinstance(plus, dict) and plus.get("paid"):
+            until = _when(plus.get("until")) if plus.get("until") else None
+            if until is not None and until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
+            if until is None or until > now:
+                return True
+        caps = d.get("caps") if isinstance(d.get("caps"), dict) else {}
+        days = caps.get("plusTrialDays", TRIAL_DAYS)
+        days = days if isinstance(days, int) and not isinstance(days, bool) else TRIAL_DAYS
+        start = _when(d.get("trialStart"))
+        if start is not None and start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        return start is None or (now - start).days < days
     return status(now, path)["mode"] != "expired"
 
 
