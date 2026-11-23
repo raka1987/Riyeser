@@ -136,7 +136,7 @@ const CARD = {
   central: ['Your home screen: money owed, meetings, to-dos and every Riyeser program.', 'Home screen and updates'],
   invoices: ['Quotes, invoices, customers and getting paid. Free forever.', 'Free invoicing'],
   'accounting-basics': ['Invoices, quotes, customers and stock. Free for 90 days.', 'Invoicing and stock'],
-  accounting: ['Full books: banking, reconciliation, BAS, payroll, journals, jobs and budgets.', 'Full books, +$20 a month'],
+  accounting: ['Full books: banking, reconciliation, BAS, payroll, journals, jobs and budgets.', 'Full books and banking'],
   pos: ['A touch-friendly till for shops, cafes and restaurants. Free for 90 days.', 'The till for shops and cafes'],
   payroll: ['Time clock, timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
   'desk-assistant': ['Sorts your files by type and year, and finds anything in seconds.', 'Sort and find your files'],
@@ -246,7 +246,7 @@ const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">$
 
 const more = (t) => `<span class="more">${t} ${ARR}</span>`;
 const FREE_TOOLS = ['central', 'invoices', 'desk-assistant', 'pdf'];
-const badgeOf = (p) => FREE_TOOLS.includes(p.id) ? '<span class="badge free">Free forever</span>' : '<span class="badge">$20/mo · 90 days free</span>';
+const badgeOf = (p) => FREE_TOOLS.includes(p.id) ? '<span class="badge free">Free forever</span>' : '<span class="badge">Free trial</span>';
 
 /** assets/x.webp -> assets/x.webp?v=<content hash>, so browsers fetch new pictures and styles as soon as they change. */
 const versionOf = {};
