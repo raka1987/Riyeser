@@ -2,7 +2,7 @@ name: Publish Riyeser release
 
 # One button for a new public release of the Riyeser Windows programs:
 #   Actions → "Publish Riyeser release" → Run workflow
-# Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF and Riyeser Services (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
+# Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF and As Built (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
 # (main) and Riyeser Payroll (branch module/payroll) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
 # every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
 on:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   desktop:
-    name: Central, Desk Assistant, PDF, Services
+    name: Central, Desk Assistant, PDF, As Built
     runs-on: windows-latest
     defaults: { run: { working-directory: desktop } }
     steps:
@@ -43,7 +43,7 @@ jobs:
             @{ src = "dist-central\RiyeserCentral-Setup-*.exe";        out = "RiyeserCentral-Setup.exe";        name = "Riy*ser Central*" },
             @{ src = "dist\RiyeserDeskAssistant-Setup-*.exe";        out = "RiyeserDeskAssistant-Setup.exe"; name = "Riyeser Desk Assistant*" },
             @{ src = "dist-pdf\RiyeserPDF-Setup-*.exe";              out = "RiyeserPDF-Setup.exe";            name = "Riyeser PDF*" },
-            @{ src = "dist-services\RiyeserServices-Setup-*.exe";    out = "RiyeserServices-Setup.exe";       name = "Riyeser Services*" })
+            @{ src = "dist-services\RiyeserServices-Setup-*.exe";    out = "RiyeserServices-Setup.exe";       name = "As Built*" })
           New-Item -ItemType Directory -Force -Path release | Out-Null
           $versions = @()
           foreach ($a in $apps) {
