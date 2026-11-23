@@ -31,6 +31,15 @@ def _wait_until_up(url, timeout=30):
     return False
 
 
+# Screens Riyeser Central can open the app on (quick access): --page=pos opens the Shop counter.
+START_PAGES = {"pos": "/pos/", "invoice": "/sale/new"}
+
+
+def start_path(page):
+    """The address to open for --page (anything unknown opens the usual home screen)."""
+    return START_PAGES.get((page or "").strip().lower(), "")
+
+
 def main(argv=None):
     from .db import EDITIONS
     from .edition import app_edition
@@ -40,6 +49,7 @@ def main(argv=None):
     p.add_argument("--data-dir", help="folder for the company file (default ~/.riyeser)")
     p.add_argument("--port", type=int, default=0)
     p.add_argument("--no-window", action="store_true", help="run the server only (for testing)")
+    p.add_argument("--page", help="open on this screen: pos (Shop counter) or invoice (New invoice)")
     p.add_argument("command", nargs="?", help="init / serve / backup - same as the riyeser command")
     args, rest = p.parse_known_args(argv)
     if args.command:  # the desktop build doubles as the full riyeser command
@@ -75,11 +85,11 @@ def main(argv=None):
             webview.settings["ALLOW_DOWNLOADS"] = True  # PDFs, CSV exports
         except Exception:
             pass
-        webview.create_window(app_name, url, width=1360, height=860, min_size=(1000, 650))
+        webview.create_window(app_name, url + start_path(args.page), width=1360, height=860, min_size=(1000, 650))
         webview.start()
     except Exception as e:  # no GUI toolkit - use the browser instead
         print(f"(No app window available: {e}; opening your browser instead. Close this window to quit.)")
-        webbrowser.open(url)
+        webbrowser.open(url + start_path(args.page))
         try:
             while True:
                 time.sleep(3600)
