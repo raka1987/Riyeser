@@ -358,34 +358,61 @@ def setup():
 def _save_setup():
     db = get_db()
     f = request.form
-    if f.get("mode") in MODES:
-        db.execute("UPDATE company SET bookings_mode=? WHERE id=1", (f["mode"],))
+    new_mode = f.get("mode") if f.get("mode") in MODES else mode()
+    if new_mode != mode():
+        db.execute("UPDATE company SET bookings_mode=? WHERE id=1", (new_mode,))
+        g.company["bookings_mode"] = new_mode
+        # Nothing booked yet: swap the starter staff/tables and services for the new kind of business.
+        if not db.execute("SELECT 1 FROM bookings").fetchone():
+            db.execute("DELETE FROM booking_resources")
+            db.execute("DELETE FROM booking_services")
+            db.commit()
+            ensure_started(db)
+            audit(db, "bookings_setup", new_mode)
+            flash(f"Set up for {MODES[new_mode]['name'].lower()}. Rename the starters below to suit you.", "ok")
+            return redirect(url_for("bookings.setup"))
     h1, h2 = f.get("open") or "07:00", f.get("close") or "18:00"
     if h1 >= h2:
         raise PostingError("Closing time must be after opening time.")
     db.execute("UPDATE company SET bookings_hours=? WHERE id=1", (f"{h1}-{h2}",))
+    # Remove one: deleted if nothing was ever booked on it, otherwise hidden so past bookings keep their name.
+    for key, table, col in (("res_del", "booking_resources", "resource_id"), ("svc_del", "booking_services", "service_id")):
+        rid = opt_int(f.get(key))
+        if rid:
+            if db.execute(f"SELECT 1 FROM bookings WHERE {col}=?", (rid,)).fetchone():
+                db.execute(f"UPDATE {table} SET active=0 WHERE id=?", (rid,))
+                flash("Hidden rather than deleted, because past bookings use it. Tick 'In use' to bring it back.", "ok")
+            else:
+                db.execute(f"DELETE FROM {table} WHERE id=?", (rid,))
+                flash("Removed.", "ok")
+            audit(db, "bookings_setup_remove", f"{table} {rid}")
+            return redirect(url_for("bookings.setup"))
     for r in resources(db, True):
         name = (f.get(f"res_name_{r['id']}") or "").strip()
         if name:
             db.execute("UPDATE booking_resources SET name=?, capacity=?, colour=?, active=? WHERE id=?",
                        (name, opt_int(f.get(f"res_cap_{r['id']}")), f.get(f"res_col_{r['id']}") or r["colour"],
                         1 if f.get(f"res_on_{r['id']}") else 0, r["id"]))
-    if (f.get("res_new") or "").strip():
-        n = db.execute("SELECT COUNT(*) FROM booking_resources").fetchone()[0]
-        kind = MODES[f.get("mode") if f.get("mode") in MODES else mode()]["kind"]
-        db.execute("INSERT INTO booking_resources (name, kind, capacity, colour) VALUES (?,?,?,?)",
-                   (f["res_new"].strip(), kind, opt_int(f.get("res_new_cap")), COLOURS[n % len(COLOURS)]))
+    caps = f.getlist("res_new_cap")
+    for i, name in enumerate(f.getlist("res_new")):
+        if name.strip():
+            n = db.execute("SELECT COUNT(*) FROM booking_resources").fetchone()[0]
+            db.execute("INSERT INTO booking_resources (name, kind, capacity, colour) VALUES (?,?,?,?)",
+                       (name.strip(), MODES[new_mode]["kind"], opt_int(caps[i] if i < len(caps) else None),
+                        COLOURS[n % len(COLOURS)]))
     for s in services(db, True):
         name = (f.get(f"svc_name_{s['id']}") or "").strip()
         if name:
             db.execute("UPDATE booking_services SET name=?, minutes=?, price=?, item_id=?, active=? WHERE id=?",
                        (name, opt_int(f.get(f"svc_min_{s['id']}")) or 60, to_cents(f.get(f"svc_price_{s['id']}") or 0),
                         opt_int(f.get(f"svc_item_{s['id']}")), 1 if f.get(f"svc_on_{s['id']}") else 0, s["id"]))
-    if (f.get("svc_new") or "").strip():
-        db.execute("INSERT INTO booking_services (name, minutes, price, item_id) VALUES (?,?,?,?)",
-                   (f["svc_new"].strip(), opt_int(f.get("svc_new_min")) or 60, to_cents(f.get("svc_new_price") or 0),
-                    opt_int(f.get("svc_new_item"))))
-    audit(db, "bookings_setup", f.get("mode") or "")
+    mins, prices, items = f.getlist("svc_new_min"), f.getlist("svc_new_price"), f.getlist("svc_new_item")
+    at = lambda lst, i: lst[i] if i < len(lst) else None
+    for i, name in enumerate(f.getlist("svc_new")):
+        if name.strip():
+            db.execute("INSERT INTO booking_services (name, minutes, price, item_id) VALUES (?,?,?,?)",
+                       (name.strip(), opt_int(at(mins, i)) or 60, to_cents(at(prices, i) or 0), opt_int(at(items, i))))
+    audit(db, "bookings_setup", new_mode)
     flash("Bookings setup saved.", "ok")
     return redirect(url_for("bookings.setup"))
 

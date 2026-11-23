@@ -124,3 +124,49 @@ def test_customer_page_lists_their_bookings(tmp_path, monkeypatch):
 def test_users_can_be_kept_out_of_bookings(tmp_path, monkeypatch):
     from riyeser import perms
     assert "bookings" in perms.AREA_KEYS
+
+
+def _setup_form(app, **extra):
+    data = {"open": "07:00", "close": "18:00"}
+    with app.app_context():
+        db = get_db()
+        for r in db.execute("SELECT * FROM booking_resources"):
+            data[f"res_name_{r['id']}"] = r["name"]; data[f"res_on_{r['id']}"] = "1" if r["active"] else ""
+        for s in db.execute("SELECT * FROM booking_services"):
+            data[f"svc_name_{s['id']}"] = s["name"]; data[f"svc_min_{s['id']}"] = s["minutes"]
+            data[f"svc_on_{s['id']}"] = "1" if s["active"] else ""
+        data["mode"] = db.execute("SELECT bookings_mode FROM company").fetchone()[0]
+    data.update(extra)
+    return data
+
+
+def test_switching_business_type_swaps_the_starters(tmp_path, monkeypatch):
+    app, c, item = make(tmp_path, monkeypatch, "bookings")
+    c.get("/bookings/setup")
+    r = c.post("/bookings/setup", data=_setup_form(app, mode="appointments"), follow_redirects=True)
+    page = r.get_data(as_text=True)
+    assert "Set up for appointments" in page and "Consultation" in page and "Call-out" not in page and "Services" in page
+    page = c.post("/bookings/setup", data=_setup_form(app, mode="tables"), follow_redirects=True).get_data(as_text=True)
+    assert "Table 4" in page and "Seats" in page
+
+
+def test_add_several_and_remove_job_types_and_staff(tmp_path, monkeypatch):
+    app, c, item = make(tmp_path, monkeypatch, "bookings")
+    c.get("/bookings/setup")
+    form = _setup_form(app)
+    form = list(form.items()) + [("svc_new", "Gas fitting"), ("svc_new_min", "90"), ("svc_new_price", "180"),
+                                 ("svc_new", "Leak check"), ("svc_new_min", "30"), ("svc_new_price", "60"),
+                                 ("res_new", "Alex"), ("res_new_cap", ""), ("res_new", "Sam"), ("res_new_cap", "")]
+    from werkzeug.datastructures import MultiDict
+    c.post("/bookings/setup", data=MultiDict(form))
+    assert _one(app, "SELECT price FROM booking_services WHERE name='Leak check'")["price"] == 6000
+    assert _one(app, "SELECT COUNT(*) n FROM booking_resources")["n"] == 3
+    # remove one nobody booked: gone; remove one with a booking: hidden and kept
+    gas = _one(app, "SELECT id FROM booking_services WHERE name='Gas fitting'")["id"]
+    leak = _one(app, "SELECT id FROM booking_services WHERE name='Leak check'")["id"]
+    _book(c, title="Tap", service_id=leak)
+    c.post("/bookings/setup", data=_setup_form(app, svc_del=gas))
+    assert _one(app, "SELECT COUNT(*) n FROM booking_services WHERE id=?", (gas,))["n"] == 0
+    page = c.post("/bookings/setup", data=_setup_form(app, svc_del=leak), follow_redirects=True).get_data(as_text=True)
+    assert "Hidden rather than deleted" in page
+    assert _one(app, "SELECT active FROM booking_services WHERE id=?", (leak,))["active"] == 0
