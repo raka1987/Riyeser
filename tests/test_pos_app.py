@@ -138,3 +138,41 @@ def test_server_set_caps_in_the_licence_file_win(tmp_path, monkeypatch):
     assert plan.limit_for("pos") == 1 and plan.limit_for("basic") == 7
     assert sell(c, item).get_json()["ok"]
     assert sell(c, item).status_code == 402
+
+
+def _licfile(tmp_path, d):
+    f = tmp_path / "appdata" / "Riyeser" / "licence.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(d))
+
+
+def test_per_product_subscriptions_from_the_licence_file(tmp_path, monkeypatch):
+    app, c, item = make(tmp_path, monkeypatch, "pos")
+    _licfile(tmp_path, {"products": {"pos": {"paid": True, "until": "2099-01-01"}, "basics": {"paid": False}},
+                        "caps": {"basic": 50, "pos": 1, "warnAt": 0.5}})
+    assert plan.subscribed("pos") and not plan.subscribed("basic")   # POS-only doesn't unlock Basics
+    assert sell(c, item).get_json()["ok"] and sell(c, item).get_json()["ok"]   # paid: no cap
+    assert plan.warn_at() == 0.5
+    # a lapsed subscription brings the cap back
+    _licfile(tmp_path, {"products": {"pos": {"paid": True, "until": "2020-01-01"}}, "caps": {"pos": 1}})
+    assert not plan.subscribed("pos")
+    assert sell(c, item).status_code == 402
+    # Plus includes Basics
+    _licfile(tmp_path, {"products": {"plus": {"paid": True}}})
+    assert plan.subscribed("basic") and not plan.subscribed("pos")
+
+
+def test_plus_needs_its_own_subscription_or_trial(tmp_path, monkeypatch):
+    from datetime import timedelta
+    from riyeser.licence import enterprise_allowed
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    now = datetime.now(timezone.utc)
+    old = (now - timedelta(days=100)).isoformat()
+    _licfile(tmp_path, {"trialStart": old, "products": {"pos": {"paid": True}}})
+    assert not enterprise_allowed()                       # POS subscription doesn't unlock Plus
+    _licfile(tmp_path, {"trialStart": old, "products": {"plus": {"paid": True}}})
+    assert enterprise_allowed()
+    _licfile(tmp_path, {"trialStart": old, "products": {}, "caps": {"plusTrialDays": 120}})
+    assert enterprise_allowed()                           # still inside a longer server-set trial
+    _licfile(tmp_path, {"trialStart": old, "products": {"plus": {"paid": True, "until": "2020-01-01"}}})
+    assert not enterprise_allowed()
