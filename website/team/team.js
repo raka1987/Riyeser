@@ -320,13 +320,12 @@
   }
   function detailsFields(joining, d = {}) {
     const v = (k) => esc(d[k] || '');
-    return `<div class="f2"><label class="f"><span>Mobile number <small class="opt">(optional)</small></span><input name="phone" type="tel" maxlength="40" autocomplete="tel" placeholder="e.g. +679 …" value="${v('phone')}"></label>
+    return `<div class="f2"><label class="f"><span>Mobile number (optional)</span><input name="phone" type="tel" maxlength="40" autocomplete="tel" placeholder="e.g. +679 …" value="${v('phone')}"></label>
         <label class="f"><span>Country</span><select name="country" autocomplete="country-name">${countryOptions(d.country || 'Fiji')}</select></label></div>
-      ${joining ? '' : `<fieldset class="opt-set"><legend>Business details <small>All optional. Add them now or later; they're used on your invoices and in your programs.</small></legend>
-        <label class="f"><span>Business name</span><input name="team" maxlength="80" autocomplete="organization" placeholder="Only if you have one" value="${v('biz')}"></label>
-        <div class="f2"><label class="f"><span>Legal name</span><input name="legal_name" maxlength="120" placeholder="If different" value="${v('legal_name')}"></label>
-          <label class="f"><span>ABN / TIN</span><input name="tax_number" maxlength="40" value="${v('tax_number')}"></label></div>
-        <label class="f"><span>Business address</span><input name="address" maxlength="300" autocomplete="street-address" value="${v('address')}"></label></fieldset>`}`;
+      ${joining ? '' : `<label class="f"><span>Business name (optional)</span><input name="team" maxlength="80" autocomplete="organization" value="${v('biz')}"></label>
+        <label class="f"><span>ABN / TIN / Tax ID (optional)</span><input name="tax_number" maxlength="40" value="${v('tax_number')}"></label>
+        <label class="f"><span>Business address (optional)</span><input name="address" maxlength="300" autocomplete="street-address" value="${v('address')}"></label>
+        <p class="fhint" style="margin:-4px 0 14px">You can add or change any of these later.</p>`}`;
   }
   function readDetails(f) {
     const v = (k) => String(f.get(k) || '').trim();
@@ -545,7 +544,7 @@
     modal(`<h3>${esc(t.name)}</h3>${justMade ? '<div class="ok">Your company is set up. Give your staff and branches the Company ID below: they ask to join, and you approve them.</div>' : ''}
       <div class="cid"><small>Company ID</small><span class="code" id="cidv">${esc(t.company_code || '')}</span><button class="btn sm" id="cpid">Copy</button></div>
       <p class="muted small" style="margin:4px 0 14px">Everyone in the company, on every Riyeser program and PC, links with this ID. ${admin ? 'New people need your approval.' : ''}</p>
-      <form id="cof">${field('name', 'Business name', 80)}${field('legal_name', 'Legal name')}${field('tax_number', 'ABN / TIN', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
+      <form id="cof">${field('name', 'Business name', 80)}${field('tax_number', 'ABN / TIN / Tax ID', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
       ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4><div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Chat Plus']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
         const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
@@ -560,7 +559,7 @@
       d.querySelectorAll('[data-unlink]').forEach((b) => b.onclick = async () => { if (!confirm('Unlink this PC? It stops getting the company\'s information until someone links it again. Nothing is deleted.')) return;
         try { await api.unlinkDevice(b.dataset.unlink); b.closest('div').remove(); } catch (err) { alert(plainError(err)); } });
       d.querySelector('#cof').onsubmit = async (e) => { e.preventDefault(); if (!admin) return close();
-        const f = new FormData(e.target); const pr = Object.fromEntries(['name', 'legal_name', 'tax_number', 'address', 'phone', 'email', 'country'].map((k) => [k, String(f.get(k) || '')]));
+        const f = new FormData(e.target); const pr = Object.fromEntries(['name', 'tax_number', 'address', 'phone', 'email', 'country'].map((k) => [k, String(f.get(k) || '')]));
         pr.require_approval = !!f.get('require_approval');
         try { await api.updateCompany(t.id, pr); await refreshCompany(); close(); } catch (err) { alert(plainError(err)); } };
     });
@@ -698,7 +697,7 @@
         <section class="hco"><div><small>${solo ? 'Your account' : 'Your business'}</small><h2>${esc(t.name)}</h2>
           <div class="cid"><small>${solo ? 'Your Riyeser ID' : 'Business ID'}</small><span class="code">${esc(t.company_code || '')}</span><button class="btn sm" id="hcp">Copy</button></div>
           <p class="muted small">${solo ? 'Your Riyeser programs link to your account with this ID. If someone helps you later, they can use it to join you.' : 'The people who help you use this ID to join. Every Riyeser program on your PCs links with it.'}</p>
-          <dl class="hkv">${[...(solo ? [] : [['Legal name', t.legal_name]]), ['ABN / TIN', t.tax_number], ['Address', t.address], ['Phone', t.phone], ['Email', t.email], ['Country', t.country]]
+          <dl class="hkv">${[['ABN / TIN / Tax ID', t.tax_number], ['Address', t.address], ['Phone', t.phone], ['Email', t.email], ['Country', t.country]]
             .map(([k, v]) => `<dt>${k}</dt><dd>${v ? esc(v) : `<span class="muted">${admin ? 'Not added yet' : '—'}</span>`}</dd>`).join('')}</dl></div>
           <div class="hacts"><button class="btn" id="hco">✏️ ${admin ? (solo ? 'Edit my details' : 'Edit business details') : 'Business details'}</button>${admin && team ? `<button class="btn" id="hppl">👥 People · ${S.people.length}</button>
           <button class="btn" id="hreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button class="btn" id="hhist">🕘 History</button>` : ''}
