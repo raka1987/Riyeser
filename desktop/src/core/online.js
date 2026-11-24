@@ -210,7 +210,11 @@ class Online {
   /** Send it (support_report): { id, ref: 'T-10234', diag_ref: 'DG-4821' }. */
   async reportIssue(payload) {
     if (!this.canReport()) { const e = new Error('Sign in with your Riyeser account first.'); e.signIn = true; throw e; }
-    return this.rpc('support_report', { ws: readCompany(this.appData).workspace_id, payload });
+    try { return await this.rpc('support_report', { ws: readCompany(this.appData).workspace_id, payload }); }
+    catch (e) {   // Riyeser's database hasn't had this release's team-chat.sql yet
+      if (e.status === 404 || /support_report|schema cache|PGRST202/i.test(e.message)) throw new Error('Report an issue is still being switched on. Use Get help for now.');
+      throw e;
+    }
   }
   /** true / false, or null when it can't be checked (offline, not signed in, not an online company). */
   async stillLinked() {

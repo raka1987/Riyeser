@@ -76,13 +76,14 @@ test('diagnostics: the preview is exactly what is sent', () => {
 });
 
 test('diagnostics: sent with the signed-in account to support_report, or "Sign in … first"', async () => {
-  const dir = tmp(); const calls = [];
+  const dir = tmp(); const calls = []; let old = false;
   const res = (status, body) => ({ ok: status < 300, status, text: async () => JSON.stringify(body) });
   const fetchFn = async (url, opts = {}) => {
     const u = new URL(url); calls.push([u.pathname, opts.body ? JSON.parse(opts.body) : null, opts.headers || {}]);
     if (u.href.startsWith(on.CONFIG_URL)) return { ok: true, status: 200, text: async () => 'window.RIYESER_TEAM={supabaseUrl:"https://x.supabase.co",supabaseKey:"k"};' };
     if (u.pathname === '/auth/v1/token') return res(200, { access_token: 'tok', refresh_token: 'r', expires_in: 3600, user: { id: 'u1', email: 'a@b.test' } });
-    if (u.pathname === '/rest/v1/rpc/support_report') return res(200, { id: 't1', ref: 'T-10234', diag_ref: 'DG-4821' });
+    if (u.pathname === '/rest/v1/rpc/support_report') return old ? res(404, { code: 'PGRST202', message: 'Could not find the function public.support_report(payload, ws) in the schema cache' })
+      : res(200, { id: 't1', ref: 'T-10234', diag_ref: 'DG-4821' });
     return res(404, {});
   };
   const o = new on.Online({ store: new Store(path.join(dir, 'data')), fetchFn, appData: dir });
@@ -96,6 +97,8 @@ test('diagnostics: sent with the signed-in account to support_report, or "Sign i
   assert.deepEqual(await o.reportIssue(body), { id: 't1', ref: 'T-10234', diag_ref: 'DG-4821' });
   const c = calls.find((x) => x[0] === '/rest/v1/rpc/support_report');
   assert.deepEqual(c[1], { ws: 'w1', payload: body }); assert.equal(c[2].Authorization, 'Bearer tok');
+  old = true;   // before team-chat.sql is re-run: a plain message
+  await assert.rejects(o.reportIssue(body), /still being switched on\. Use Get help for now/);
 });
 
 test('Central: Report an issue uses in-page dialogs, never confirm() or alert()', () => {
