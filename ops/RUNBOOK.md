@@ -91,6 +91,7 @@ The Downloads page shows live totals straight away. Per-day numbers start the da
 Download totals include a few copies fetched by Riyeser's own release checks, so treat small numbers as roughly right.
 
 **Marking a company paid for Riyeser Link Plus:** HQ → Customers → open the business → Programs → Riyeser Link Plus → **Mark paid until…**.
+Customers who pay online (PayPal or bank transfer) don't need this: see "Taking payments" below.
 
 ### Using HQ
 
@@ -98,7 +99,7 @@ The menu on the left is the same on every screen and only shows what your permis
 address (for example `riyeser.com/hq/#/company/<id>/programs`), so you can paste a link to a colleague and Back works.
 Needs the latest `team-chat.sql`; before that, the new parts say "Run the latest team-chat.sql…" and the rest still works.
 
-- **Overview (start here):** New signups, Failed payments (0 until payments are connected), Renewals due and Open
+- **Overview (start here):** New signups, Failed payments (PayPal payments in their grace period), Renewals due and Open
   complaints, then **Needs attention**: one queue of what's yours (complaints, approvals, refunds, your follow-ups due,
   trials and paid periods ending in 7 days, sign-ups stuck with no PC). Press the blue **Next action** (Reply, Approve,
   Review, Follow up, Extend, Message) or ▾ for more. On the right: **System health** (last backup and last restore test,
@@ -235,9 +236,104 @@ Riyeser Link chat files: 2 GB per business free, 20 GB with Link Plus, plus any 
 Programs → File storage → **Grant extra storage**, with a reason; needs "Manage licences").
 
 To change a price, change it in all of these, then re-run `website/team/team-chat.sql` and publish the website:
-`riyeser_price()` in `website/team/team-chat.sql` (HQ's estimates), `website/prices.mjs` (the website),
-`PRICE` in `website/hq/hq.js` (the HQ demo), `PRICE_LINK_PLUS` in `website/team/team.js`, `PRICE_USD` in
+`riyeser_price()` in `website/team/team-chat.sql` (HQ's estimates and what customers are charged), `website/prices.mjs`
+(the website), `PRICE` in `website/hq/hq.js` (the HQ demo), `PRICE` in `website/team/team.js` (Add to my plan), `PRICE_USD` in
 `riyeser/db.py` (Accounting's screens) and the licence text in `desktop/src/renderer/central.js`.
+`website/team/test/pay-test.js` fails if the first four don't agree. A price change applies to new payments; PayPal
+subscriptions already running keep the price they started with (cancel and pay again to move one to the new price).
+
+## Taking payments (PayPal and bank transfer)
+
+Customers pay on their Riyeser home page (riyeser.com/link). On riyeser.com every paid program has **Start free for 90
+days** and **Buy now**, and the price calculator has **Buy this plan**. They create an account (or sign in), and
+**Add to my plan / Pay** opens with that program. Only the business's **owner** can pay or see billing; admins and staff can't.
+This needs the latest `website/team/team-chat.sql` (see "After this release"). Until it's re-run, Billing stays hidden and
+Add to my plan says paying online is still being switched on.
+
+- They choose the programs, how many people (3 included, then US$7 a month each for each program) and monthly or yearly
+  (10 months for 12). The total comes from the price list (see "Prices"); the early bird applies by itself to the first
+  100 businesses to pay. All amounts are in US dollars.
+- **Their free days aren't lost:** paid time starts when each program's 90-day trial ends (or the day they pay, if it ended).
+- **Pay with PayPal** (a card or their PayPal balance): PayPal takes the money every month or year until they cancel.
+  They come back to "Thanks, we're confirming your payment", and the programs switch on when PayPal tells Riyeser it's paid
+  (usually within a minute). Riyeser Central picks it up by itself.
+- **Pay by bank transfer:** they get an invoice (like **RI-10003**) with the amount, a due date 14 days away, the reference to
+  quote and your bank details. **The programs aren't switched on until you mark it paid** (their free trial carries on meanwhile).
+- **Billing** on their home page shows their subscription and next charge, invoices, payment history, a printable invoice
+  and receipt for each, **Manage in PayPal**, and **Cancel subscription** (two-step sign-in needed). Cancelling stops future
+  charges; everything keeps working until the end of what they've paid, then stops. Nothing is deleted.
+- **A failed PayPal payment:** PayPal tries again by itself. The programs keep working for a grace period (7 days;
+  HQ team → HQ settings), and the owner sees and is emailed the exact date. It shows in HQ → Overview (Failed payments)
+  and the Needs attention queue. After 3 failed tries PayPal stops the subscription ("Payments stopped").
+
+### In HQ: Billing & Licences → Invoices & payments
+- **PayPal card:** Sandbox (test money) or Live, the last webhook PayPal sent, and whether webhooks are verified.
+- **Failed payments** and **Unpaid invoices** (also in Needs attention on the Overview).
+- **Mark bank transfer paid** (Owner and Finance): only when the money is in your bank account. Type the amount and your
+  bank's reference from the statement. The programs switch on straight away, the owner is emailed a receipt, and it's in the HQ history.
+- **Payments:** every payment, with PayPal ids shown only by their last 6 characters. The same is on each customer's page, Money tab.
+- **Billing entity:** who sells Riyeser, printed on every invoice and receipt: business name, address, **ABN** (or another
+  tax number: change the label), contact email and the bank details customers pay into. **Until you add the bank details,
+  HQ shows "Add your bank details"** and bank transfer invoices tell customers you'll email them the details.
+  Each change is kept as a new version: invoices and receipts already made keep the details they were made with.
+
+**Tax:** Riyeser doesn't add GST or any other tax to these prices. Whether you must charge GST to Australian customers
+(and what to show on invoices if you do) is a question for your accountant.
+
+### Set up PayPal (once)
+
+You need a PayPal **Business** account (yours is an Australian one). Charges are in US dollars.
+
+1. **Check the PayPal account**
+   - Sign in at paypal.com. Under **Settings → Money, banks and cards**, check your Australian bank account is **linked and confirmed**.
+   - Your PayPal account will hold a **US dollar balance** from Riyeser payments. When you withdraw to your Australian bank,
+     PayPal converts US$ to A$ and charges a currency conversion fee. You can keep the money as US dollars in PayPal
+     instead, and you can see the fee under **Settings → Money, banks and cards → Currency conversion** (or in PayPal's fees page).
+2. **Make a PayPal app (Sandbox first)**
+   - Go to **developer.paypal.com** and sign in with the same PayPal account. Open **Apps & Credentials**.
+   - At the top, choose **Sandbox**. Press **Create App**, call it `Riyeser`, type **Merchant**, and create it.
+   - You'll see a **Client ID** and a **Secret**. Don't paste them into chat, email or a file.
+3. **Put them in GitHub** (repository → **Settings → Secrets and variables → Actions → New repository secret**):
+
+   | Secret | Value |
+   |---|---|
+   | `PAYPAL_CLIENT_ID` | the app's Client ID |
+   | `PAYPAL_CLIENT_SECRET` | the app's Secret |
+   | `PAYPAL_ENV` | `sandbox` (later `live`) |
+   | `SUPABASE_ACCESS_TOKEN` | already there if licence signing is set up |
+
+4. **Deploy:** GitHub → **Actions → Deploy PayPal payments → Run workflow**. Wait for the green tick. Its summary says
+   "PayPal keys are in (sandbox), but webhooks aren't verified yet" and shows the webhook address:
+   `https://goaugynxeatzqzifpoes.supabase.co/functions/v1/paypal/webhook`
+5. **Add the webhook:** back in developer.paypal.com → your Sandbox app → **Webhooks → Add Webhook**.
+   - Webhook URL: the address above.
+   - Tick these events: **Billing subscription activated**, **Billing subscription cancelled**, **Billing subscription
+     suspended**, **Billing subscription expired**, **Billing subscription payment failed**, and **Payment sale completed**
+     (`BILLING.SUBSCRIPTION.ACTIVATED`, `.CANCELLED`, `.SUSPENDED`, `.EXPIRED`, `.PAYMENT.FAILED`, `PAYMENT.SALE.COMPLETED`).
+   - Save. Copy the **Webhook ID** it shows and add it as the GitHub secret **`PAYPAL_WEBHOOK_ID`**.
+   - Run **Deploy PayPal payments** again. Its summary now says "PayPal is on (sandbox)".
+   Until `PAYPAL_WEBHOOK_ID` is there, Riyeser refuses PayPal's webhooks, HQ's PayPal card says "Webhooks not verified yet",
+   and customers only see bank transfer (a PayPal payment couldn't be confirmed without webhooks).
+6. **Test with pretend money:** developer.paypal.com → **Testing tools → Sandbox accounts** has a test **Personal** account
+   (a pretend buyer; its email and password are under ⋯ → View/edit account).
+   - Make a test business at riyeser.com/link (your own spare email), press **Add to my plan / Pay**, choose a program and
+     **Pay with PayPal**. Sign in at PayPal with the **sandbox buyer** account and agree.
+   - Back on riyeser.com it says "Thanks, we're confirming your payment", then "Payment confirmed". Check **Billing** shows the
+     receipt, HQ → Invoices & payments shows the payment and "Last webhook: just now".
+   - Try **Cancel subscription**: it should say everything works until the paid date.
+7. **Go live:** in developer.paypal.com switch the top toggle to **Live**, create the app again (Live), and add the same
+   webhook with the same events to the **Live** app. Update the GitHub secrets `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,
+   `PAYPAL_WEBHOOK_ID` with the **Live** values and set `PAYPAL_ENV` to `live`. Run **Deploy PayPal payments**.
+   HQ's PayPal card then says **Live**. Make one small real payment yourself and refund it in PayPal to be sure.
+
+The workflow passes the secrets straight to Supabase without printing them. A secret missing from GitHub is left as it is in Supabase.
+
+### Changing to a different PayPal account later
+Put the new account's Client ID, Secret and Webhook ID (made as in steps 2–5, on the new account) in the same GitHub
+secrets and run **Deploy PayPal payments**. New customers then pay into the new account. **Subscriptions already running
+stay on the old account** (PayPal keeps charging them there), so keep the old account open, with its app and webhook,
+until each of them has been cancelled; the customer can cancel and pay again to move. Update the **Billing entity** in HQ
+if the business name, ABN or bank details change: old invoices and receipts keep their old details.
 
 ## Refunds
 
@@ -251,8 +347,8 @@ In HQ → **Refunds**, with filters for New, Reviewing, Waiting for second appro
    "Approve refunds" must also approve. The same person can't give both approvals. The database enforces this, not
    just the website. The HQ owner can change the threshold in HQ team → HQ settings.
 3. **Mark as paid** with how it was paid (card refund, bank transfer, M-PAiSA or credit on account) and the reference.
-   **Real card refunds come in phase 2** with the payment provider. For now, do the refund by hand (bank or card
-   terminal), then record it here. Credit on account shows on the company panel as "Credit: USD …".
+   For a PayPal payment, refund it in PayPal (paypal.com → Activity → the payment → **Issue a refund**), then record it here.
+   For a bank transfer, pay it back from the bank, then record it here. Credit on account shows on the company panel as "Credit: USD …".
 
 Finance and owners can approve and pay. Support can see refunds and enter them for customers. The customer is emailed
 when it's received, decided and paid. Refund requests are never deleted.

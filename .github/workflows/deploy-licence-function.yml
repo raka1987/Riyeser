@@ -8,11 +8,12 @@ name: Deploy licence signing
 # LICENCE_SIGNING_KEY: it only ever goes through a pipe (never a file, a variable, the log or the repo), and it isn't
 # made again once that secret exists (a new key would refuse every program built with the old public key).
 # Only the PUBLIC key is printed (job summary). Builds fetch it from …/functions/v1/licence/public-key.
+# Only the licence function's own code starts it (the paypal function has its own, run-by-hand workflow).
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["supabase/functions/**", ".github/workflows/deploy-licence-function.yml"]
+    paths: ["supabase/functions/licence/**"]
 
 permissions:
   contents: read

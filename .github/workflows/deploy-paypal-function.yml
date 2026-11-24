@@ -1,0 +1,103 @@
+name: Deploy PayPal payments
+
+# The "paypal" Edge Function (supabase/functions/paypal): PayPal subscriptions for Riyeser plans, and PayPal's
+# webhooks. Runs only when started by hand (Actions -> Deploy PayPal payments -> Run workflow), so a change to the
+# code never goes live by itself. See ops/RUNBOOK.md, "Set up PayPal".
+#
+# GitHub secrets (Settings -> Secrets and variables -> Actions), with these exact names:
+#   SUPABASE_ACCESS_TOKEN  a Supabase personal access token (the same one the licence function uses)
+#   PAYPAL_CLIENT_ID       from developer.paypal.com -> Apps & Credentials (Sandbox first, then Live)
+#   PAYPAL_CLIENT_SECRET   from the same app
+#   PAYPAL_ENV             sandbox or live
+#   PAYPAL_WEBHOOK_ID      from the app's webhook (made after the first deploy; until then webhooks are refused)
+# The PAYPAL_* values go straight from GitHub's secrets to the function's secrets through a pipe: never a file, the
+# log or the repository. Without SUPABASE_ACCESS_TOKEN this says so and stops. Without the PayPal ones the function is
+# still deployed and answers "PayPal isn't set up yet" (riyeser.com hides Pay with PayPal; bank transfer still works).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: { group: deploy-paypal-function, cancel-in-progress: false }
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: goaugynxeatzqzifpoes   # public (it's in riyeser.com/link/config.js)
+    steps:
+      - name: Is it set up?
+        id: ready
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "Not set up yet: add the GitHub secret SUPABASE_ACCESS_TOKEN, then run this again."
+            echo "Not set up yet: add the GitHub secret **SUPABASE_ACCESS_TOKEN**, then run this again." >> "$GITHUB_STEP_SUMMARY"
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.ready.outputs.go == 'yes'
+      - uses: denoland/setup-deno@v2
+        if: steps.ready.outputs.go == 'yes'
+        with: { deno-version: v2.x }
+      - name: Test the PayPal code (a pretend PayPal, no real money)
+        if: steps.ready.outputs.go == 'yes'
+        run: deno test supabase/functions/paypal
+      - uses: supabase/setup-cli@v1
+        if: steps.ready.outputs.go == 'yes'
+        with: { version: latest }
+      - name: PayPal keys (from GitHub secrets, straight to the function's secrets)
+        if: steps.ready.outputs.go == 'yes'
+        env:
+          PAYPAL_CLIENT_ID: ${{ secrets.PAYPAL_CLIENT_ID }}
+          PAYPAL_CLIENT_SECRET: ${{ secrets.PAYPAL_CLIENT_SECRET }}
+          PAYPAL_ENV: ${{ secrets.PAYPAL_ENV }}
+          PAYPAL_WEBHOOK_ID: ${{ secrets.PAYPAL_WEBHOOK_ID }}
+        run: |
+          set -euo pipefail
+          case "$(printf '%s' "${PAYPAL_ENV:-}" | tr 'A-Z' 'a-z' | tr -d '[:space:]')" in
+            sandbox|live|"") ;;
+            *) echo "PAYPAL_ENV must be sandbox or live."; exit 1 ;;
+          esac
+          # Only the names are ever printed. The values are written into the pipe by the shell itself.
+          have=""
+          for n in PAYPAL_CLIENT_ID PAYPAL_CLIENT_SECRET PAYPAL_ENV PAYPAL_WEBHOOK_ID; do
+            if [ -n "${!n:-}" ]; then have="$have $n"; fi
+          done
+          if [ -z "$have" ]; then
+            echo "No PayPal secrets in GitHub yet: the function will say \"PayPal isn't set up yet\"."
+          else
+            for n in $have; do printf '%s=%s\n' "$n" "$(printf '%s' "${!n}" | tr -d '\r\n')"; done \
+              | supabase secrets set --yes --env-file /dev/stdin --project-ref "$PROJECT_REF" > /dev/null
+            echo "Saved as function secrets:$have"
+          fi
+          missing=""
+          for n in PAYPAL_CLIENT_ID PAYPAL_CLIENT_SECRET PAYPAL_ENV PAYPAL_WEBHOOK_ID; do
+            case " $have " in *" $n "*) ;; *) missing="$missing $n" ;; esac
+          done
+          if [ -n "$missing" ]; then
+            echo "Not in GitHub secrets (left as they are in Supabase):$missing"
+            echo "Not in GitHub secrets yet:$missing" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Deploy the paypal function
+        if: steps.ready.outputs.go == 'yes'
+        # --no-verify-jwt: PayPal's webhooks don't carry a Supabase sign-in; paying and cancelling check the session themselves
+        run: supabase functions deploy paypal --yes --project-ref "$PROJECT_REF" --no-verify-jwt
+      - name: Check it answers
+        if: steps.ready.outputs.go == 'yes'
+        run: |
+          set -euo pipefail
+          url="https://$PROJECT_REF.supabase.co/functions/v1/paypal/status"
+          for i in $(seq 1 12); do
+            if curl -sf "$url" -o "$RUNNER_TEMP/st.json"; then break; fi
+            sleep 5
+          done
+          node -e "
+            const s = JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8'));
+            const line = s.ready ? 'PayPal is on (' + s.env + ').' : s.credentials ? 'PayPal keys are in (' + s.env + '), but webhooks aren\'t verified yet: add PAYPAL_WEBHOOK_ID and run this again.' : 'PayPal isn\'t set up yet.';
+            console.log(line);
+            require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, '### ' + line + '\n\nWebhook address for PayPal: \`https://' + process.env.PROJECT_REF + '.supabase.co/functions/v1/paypal/webhook\`\n');
+          " "$RUNNER_TEMP/st.json"

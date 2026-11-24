@@ -1,7 +1,12 @@
-# Only for deploying the Edge Functions (.github/workflows/deploy-licence-function.yml). The database itself is
+# Only for deploying the Edge Functions (.github/workflows/deploy-licence-function.yml and deploy-paypal-function.yml). The database itself is
 # set up from website/team/team-chat.sql on branch module/desk-assistant.
 project_id = "goaugynxeatzqzifpoes"
 
 [functions.licence]
 # The public key is fetched without signing in; signing a licence checks the person's session itself.
+verify_jwt = false
+
+[functions.paypal]
+# PayPal's webhooks arrive without a Supabase sign-in (their signature is checked with PayPal instead);
+# paying and cancelling check the person's session themselves.
 verify_jwt = false
