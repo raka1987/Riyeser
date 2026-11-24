@@ -137,6 +137,10 @@
       grantStorage: (ws, gb, why) => rpc('hq_grant_storage', { ws, gb, why }),
       setPlan: (ws, users, cos, billing, eb) => rpc('hq_set_plan', { ws, users_extra: users, companies_extra: cos, billing_period: billing, is_early_bird: eb }),
       settings: () => rpc('hq_get_settings'), setSetting: (k, v) => rpc('hq_set_setting', { setting: k, val: v }),
+      // payments: PayPal subscriptions and bank transfer invoices (team-chat.sql), and the paypal function's status
+      billing: () => rpc('hq_billing'), markPaid: (ref, bankRef, amount) => rpc('hq_billing_mark_paid', { invoice_ref: ref, bank_reference: bankRef, paid_amount: amount }),
+      setBillingEntity: (d) => rpc('hq_set_billing_entity', { details: d }),
+      async paypalStatus() { try { const r = await fetch(`${CFG.supabaseUrl}/functions/v1/paypal/status`, { headers: { apikey: CFG.supabaseKey } }); return r.ok ? await r.json() : { deployed: false }; } catch { return { deployed: false }; } },
       // support
       tickets: (box, q) => rpc('hq_tickets', { box, search: q || '' }), ticket: (id) => rpc('hq_ticket', { ticket: id }),
       ticketReply: (id, msg, note, st) => rpc('hq_ticket_reply', { ticket: id, message: msg, as_note: !!note, then_status: st || null }),
@@ -242,7 +246,18 @@
     for (let i = 6; i <= 118; i += 6) mods['g' + i] = { basic: { status: 'active', paid_until: t(-20 - i).slice(0, 10), paid_since: t(i % 50).slice(0, 10) }, ...(i % 12 ? {} : { pos: { status: 'active', paid_until: t(-40 - i).slice(0, 10), paid_since: t(i % 30).slice(0, 10) } }) };
     mods.w1.basic.paid_since = t(120).slice(0, 10); mods.w2.basic.paid_since = t(200).slice(0, 10); mods.w2.pos.paid_since = t(20).slice(0, 10); mods.w2.calls.paid_since = t(35).slice(0, 10);
     const plans = { w2: { extra_users: 6, extra_companies: 0, billing: 'yearly', early_bird: true } };
-    const settings = { 'support.overdue_hours': 24, 'support.escalate_hours': 48, 'refunds.two_person_threshold': 200, 'offers.self_limit_days': 31 };
+    const settings = { 'support.overdue_hours': 24, 'support.escalate_hours': 48, 'refunds.two_person_threshold': 200, 'offers.self_limit_days': 31, 'billing.grace_days': 7 };
+    // payments in the demo: Harbour Cafe pays by PayPal, Sample Plumbing has a bank transfer invoice waiting, one PayPal payment failed
+    let entity = { name: 'Riyeser', address: '', tax_label: 'ABN', tax_number: '', email: 'info@riyeser.com', bank: { account_name: '', bank_name: '', bsb: '', account_number: '', swift: '', note: '' } };
+    const bOrders = [
+      { id: 'o1', workspace_id: 'w2', ref: 'RI-10002', method: 'paypal', modules: ['basic', 'pos', 'calls'], module_names: ['Accounting Basics', 'POS', 'Riyeser Link Plus'], people: 9, billing: 'monthly', amount: 177, first_amount: null, total: 177, status: 'active', paypal_id: '…7Q2X9K', paypal_env: 'sandbox', next_charge_at: t(-12), paid_through: t(-12).slice(0, 10), created_at: t(18) },
+      { id: 'o2', workspace_id: 'w1', ref: 'RI-10003', method: 'bank', modules: ['plus', 'payroll'], module_names: ['Accounting Plus', 'Payroll'], people: 5, billing: 'monthly', amount: 92, first_amount: 46, early_bird: true, total: 46, status: 'pending', due_date: t(-9).slice(0, 10), created_at: t(5) },
+      { id: 'o3', workspace_id: 'g12', ref: 'RI-10001', method: 'paypal', modules: ['basic'], module_names: ['Accounting Basics'], people: 3, billing: 'monthly', amount: 25, total: 25, status: 'payment_failed', paypal_id: '…H8LM3P', paypal_env: 'sandbox', grace_until: t(-5).slice(0, 10), paid_through: t(1).slice(0, 10), next_charge_at: t(-2), created_at: t(40), updated_at: t(2) }];
+    const bPays = [{ id: 1, workspace_id: 'w2', order_ref: 'RI-10002', ref: 'RR-10002', method: 'paypal', status: 'completed', amount: 177, currency: 'USD', at: t(18), period_to: t(-12).slice(0, 10), provider_ref: '…4T7Y2A', module_names: ['Accounting Basics', 'POS', 'Riyeser Link Plus'] },
+      { id: 2, workspace_id: 'g12', order_ref: 'RI-10001', ref: 'RR-10001', method: 'paypal', status: 'completed', amount: 25, currency: 'USD', at: t(31), period_to: t(1).slice(0, 10), provider_ref: '…9K2W1D', module_names: ['Accounting Basics'] },
+      { id: 3, workspace_id: 'g12', order_ref: 'RI-10001', ref: null, method: 'paypal', status: 'failed', amount: 25, currency: 'USD', at: t(2), note: 'PayPal couldn\'t take the payment.', module_names: ['Accounting Basics'] }];
+    const bizOf = (o) => ({ ...o, business: (cos.find((c) => c.id === o.workspace_id) || {}).name, workspace_id: o.workspace_id });
+    const paypalSeen = { env: 'sandbox', last_webhook_at: h(3), last_webhook_type: 'PAYMENT.SALE.COMPLETED' };
     const today = () => new Date(new Date().toISOString().slice(0, 10));
     const dd = (a) => Math.round((new Date(a) - today()) / 864e5);
     const addDays = (d, n) => new Date(new Date(d).getTime() + n * 864e5).toISOString().slice(0, 10);
@@ -391,6 +406,7 @@
           requests_waiting: 1, notes: notes[ws] || [],
           extra: { credit: credits[ws] || {}, tickets: P.includes('support.view') ? tickets.filter((x) => x.workspace_id === ws) : null,
             refunds: P.includes('refunds.view') ? refunds.filter((f) => f.workspace_id === ws).map(rowOf) : null, offers: offers.filter((o) => o.workspace_id === ws),
+            billing: P.includes('licences.view') ? { orders: bOrders.filter((o) => o.workspace_id === ws), payments: bPays.filter((x) => x.workspace_id === ws), can_mark_paid: P.includes('licences.manage') } : null,
             history: P.includes('audit.view') ? hist.filter((x) => x.workspace_id === ws) : null } }; },
       async setCallsPaid(ws, until) { cos.find((x) => x.id === ws).calls_paid_until = until + 'T23:59:59Z'; log('calls.paid_until', { workspace_id: ws, until }); },
       async addNote(ws, body) { return this.noteAdd(ws, { kind: 'note', body }); },
@@ -418,6 +434,27 @@
       async setPlan(ws, users, cosx, billing, eb) { need('licences.manage'); plans[ws] = { extra_users: users, extra_companies: cosx, billing, early_bird: eb }; log('licence.plan', { workspace_id: ws }); },
       async settings() { return { ...settings }; },
       async setSetting(k, v) { need('settings.manage'); settings[k] = Number(v); log('settings.changed', { setting: k, value: v }); },
+      async billing() { need('licences.view'); const P = permsOf(me());
+        return { failed: bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).map(bizOf), unpaid: bOrders.filter((o) => o.method === 'bank' && o.status === 'pending').map(bizOf),
+          payments: bPays.slice().sort((a, b) => b.at.localeCompare(a.at)).map(bizOf), paypal: { ...paypalSeen, events_7d: 14, subscriptions: bOrders.filter((o) => o.method === 'paypal' && o.status !== 'cancelled').length },
+          entity: JSON.parse(JSON.stringify(entity)), bank_ready: !!entity.bank.account_number, grace_days: settings['billing.grace_days'],
+          can_mark_paid: P.includes('licences.manage'), can_edit_entity: P.includes('settings.manage') || P.includes('licences.manage') }; },
+      async markPaid(ref, bankRef, amount) { need('licences.manage'); const o = bOrders.find((x) => x.ref === String(ref).trim().toUpperCase() && x.method === 'bank');
+        if (!o) throw new Error('There\'s no bank transfer invoice with that number.'); if (o.status !== 'pending') throw new Error('That invoice is already paid.');
+        if (String(bankRef || '').trim().length < 3) throw new Error('Type the bank\'s reference for the payment (from your bank statement).');
+        if (!(Number(amount) >= o.total - 0.005)) throw new Error(`The invoice is for ${money(o.total)}. Check the amount on the bank statement.`);
+        const l = demoLicence(o.workspace_id); let upto = null;
+        o.modules.forEach((m) => { const v = l.modules[m]; const base = [today().toISOString().slice(0, 10), v.status === 'trial' ? v.trial_ends : null, ['active', 'cancelled'].includes(v.status) ? v.paid_until : null].filter(Boolean).sort().pop();
+          const to = addMonths(base, o.billing === 'yearly' ? 12 : 1); (mods[o.workspace_id] = mods[o.workspace_id] || {})[m] = { status: 'active', paid_until: to, paid_since: iso(Date.now()) }; upto = !upto || to > upto ? to : upto; });
+        Object.assign(o, { status: 'paid', paid_at: now(), paid_through: upto, paid_reference: String(bankRef).trim(), marked_paid_by: me().display_name });
+        const rc = 'RR-' + (10001 + bPays.length); bPays.unshift({ id: bPays.length + 1, workspace_id: o.workspace_id, order_ref: o.ref, ref: rc, method: 'bank', status: 'completed', amount: Number(amount), currency: 'USD', at: now(), period_to: upto, provider_ref: String(bankRef).trim(), module_names: o.module_names });
+        log('billing.bank_paid', { workspace_id: o.workspace_id, invoice: o.ref, receipt: rc, amount: Number(amount), paid_until: upto }); return { receipt: rc, paid_until: upto }; },
+      async setBillingEntity(d) { if (!['settings.manage', 'licences.manage'].some((x) => permsOf(me()).includes(x))) throw new Error('Your HQ role can\'t do that.');
+        if (String(d.name || '').trim().length < 2) throw new Error('Type the business name that sells Riyeser.');
+        entity = { name: d.name.trim(), address: (d.address || '').trim(), tax_label: (d.tax_label || '').trim() || 'ABN', tax_number: (d.tax_number || '').trim(), email: (d.email || '').trim(),
+          bank: Object.fromEntries(['account_name', 'bank_name', 'bsb', 'account_number', 'swift', 'note'].map((k) => [k, String((d.bank || {})[k] || '').trim()])) };
+        log('billing.entity_changed', { name: entity.name, bank_set: !!entity.bank.account_number }); },
+      async paypalStatus() { return { ready: false, credentials: true, webhooks: false, env: 'sandbox', message: 'Webhooks aren\'t verified yet: add PAYPAL_WEBHOOK_ID and deploy again.' }; },
       // support
       async tickets(box = 'open', q = '') { need('support.view'); const od = settings['support.overdue_hours']; const s = q.toLowerCase();
         const all = tickets.map((x) => ({ ...x, business: (cos.find((c) => c.id === x.workspace_id) || {}).name || null, assignee_name: nameOf(x.assignee), escalated: x.escalations.length > 0,
@@ -681,12 +718,14 @@
           .forEach((x) => add(1, 'complaint', x.workspace_id, !x.first_reply_at && hours(x.created_at) > od ? 'Overdue complaint' : 'Open complaint', x.subject, nameOf(x.assignee) || 'Unassigned', 'Reply', x.id, x.created_at));
         if (P.includes('offers.approve')) offers.filter((o) => o.status === 'waiting').forEach((o) => add(2, 'approval', o.workspace_id, 'Approval needed', `${o.days} free days · ${o.modules.map(modName).join(', ')}`, o.requested_by_name, 'Approve', o.id, o.created_at));
         if (P.includes('refunds.approve')) refunds.filter((f) => ['submitted', 'reviewing'].includes(f.status)).forEach((f) => add(3, 'refund', f.workspace_id, 'Refund waiting', `${f.currency} ${f.amount} · ${f.for_what}`, 'Finance', 'Review', f.id, f.created_at));
+        if (P.includes('licences.view')) bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).forEach((o) => add(2, 'payment', o.workspace_id, o.status === 'suspended' ? 'Payments stopped' : 'Payment failed', `${o.ref} · ${money(o.amount)}${o.grace_until ? ` · works until ${day(o.grace_until)}` : ''}`, 'Finance', 'Review', o.ref, o.updated_at || o.created_at));
+        if (P.includes('licences.view')) bOrders.filter((o) => o.method === 'bank' && o.status === 'pending').forEach((o) => add(3, 'invoice', o.workspace_id, o.due_date < iso(Date.now()) ? 'Invoice overdue' : 'Invoice unpaid', `${o.ref} · ${money(o.total)} · due ${day(o.due_date)}`, 'Finance', 'Mark paid', o.ref, o.created_at));
         myFollowUps().filter((f) => f.due).forEach((f) => add(4, 'follow_up', f.workspace_id, 'Follow-up due', f.body, me().display_name, 'Follow up', String(f.id), f.follow_up));
         const ending = []; cos.filter((c) => c.status === 'active').forEach((c) => { const l = demoLicence(c.id); const e = Object.entries(l.modules).filter(([, v]) => ['trial', 'active'].includes(v.status) && v.days_left != null && v.days_left <= 7);
           if (e.length) { const d = Math.min(...e.map(([, v]) => v.days_left)); ending.push(c.id); add(5, 'renewal', c.id, e.some(([, v]) => v.status === 'active') ? 'Renewal due' : 'Trial ending', `${d === 0 ? 'Ends today' : `Ends in ${d} day${d === 1 ? '' : 's'}`} · ${e.length === 7 ? 'every program' : e.map(([m]) => modName(m)).join(', ')}`, null, 'Extend', null, addDays(today(), d)); } });
         cos.filter((c) => c.status === 'active' && !c.pcs && hours(c.created_at) / 24 >= 3 && hours(c.created_at) / 24 <= 30).forEach((c) => add(6, 'signup', c.id, 'Stuck signup', `Signed up ${Math.round(hours(c.created_at) / 24)} days ago, no PC linked yet`, null, 'Message', null, c.created_at));
         const monday = new Date(); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-        return { counts: { new_signups: cos.filter((c) => new Date(c.created_at) >= monday).length, failed_payments: null, renewals_due: ending.length, open_complaints: P.includes('support.view') ? tickets.filter((x) => x.status !== 'done').length : null },
+        return { counts: { new_signups: cos.filter((c) => new Date(c.created_at) >= monday).length, failed_payments: P.includes('licences.view') ? bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).length : null, renewals_due: ending.length, open_complaints: P.includes('support.view') ? tickets.filter((x) => x.status !== 'done').length : null },
           queue: q.sort((a, b) => a.prio - b.prio || String(a.at).localeCompare(String(b.at))).slice(0, 60) }; },
       async signups(days) { need('customers.view'); return cos.filter((c) => hours(c.created_at) / 24 <= days).sort((a, b) => b.created_at.localeCompare(a.created_at)).map((c, i) => { const l = demoLicence(c.id); const pcs = pcsOf(c);
         return { id: c.id, name: c.name, company_code: c.company_code, country: c.country, kind: c.kind, created_at: c.created_at, status: c.status, hq_owner_name: nameOf(c.hq_owner), owner_name: c.owner_name, owner_email: c.owner_email,
@@ -756,7 +795,7 @@
   // Every page HQ has (its address is #/<key>), and who can open it.
   const TABS = () => [['overview', 'Overview', can('overview.view')], ['companies', 'Customers', can('customers.view')], ['signups', 'Signups', can('customers.view')],
     ['licences', 'Licences', can('licences.view')], ['approvals', 'Approvals', can('refunds.approve', 'offers.approve')], ['refunds', 'Refunds', can('refunds.view')],
-    ['payments', 'Invoices & payments', can('licences.view', 'refunds.view')], ['support', 'Support', can('support.view', 'support.diagnostics')], ['inbox', 'Team Inbox', can('overview.view')],
+    ['payments', 'Invoices & payments', can('licences.view')], ['support', 'Support', can('support.view', 'support.diagnostics')], ['inbox', 'Team Inbox', can('overview.view')],
     ['inactive', 'Inactive accounts', can('customers.view', 'accounts.inactive')], ['health', 'System health', can('overview.view')], ['emails', 'Emails', can('emails.view')],
     ['downloads', 'Downloads', can('downloads.view')], ['reports', 'Reports', can('reports.view')], ['team', 'HQ team', true], ['history', 'History', can('audit.view')],
     ['settings', 'Settings', can('settings.manage')]].filter((x) => x[2]);
@@ -765,7 +804,7 @@
   const NAV = [['Overview', '🏠', ['overview']], ['Customers', '👥', ['companies']], ['Signups', '🌱', ['signups']],
     ['Billing & Licences', '💳', ['licences', 'approvals', 'refunds', 'payments']], ['Support', '🎧', ['support']], ['Team Inbox', '💬', ['inbox']],
     ['Retention', '🔁', ['inactive']], ['System Operations', '🛠️', ['health', 'emails', 'downloads']], ['Reports', '📊', ['reports']], ['Admin', '⚙️', ['team', 'history', 'settings']]];
-  const SOON = { inbox: 'soon', payments: 'phase 2' };
+  const SOON = { inbox: 'soon' };
   function navHtml() {
     const ok = TABS(); const label = (k) => (ok.find((x) => x[0] === k) || [k, k])[1];
     return NAV.map(([name, icon, views]) => { const v = views.filter((k) => ok.some((x) => x[0] === k)); if (!v.length) return '';
@@ -857,7 +896,7 @@
   // ------------------------------------------------------------------ Operations overview: counts, one work queue, system health, team handover
   const cityOf = (c) => { const city = String(c.address || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean).pop(); return [city && city !== c.country ? city : null, c.country].filter(Boolean).join(', '); };
   const avatar = (name, cls = '') => `<span class="avatar${cls ? ' ' + cls : ''}" aria-hidden="true">${esc(initials(name))}</span>`;
-  const ISSUE = { update: 'bad', complaint: 'blue', approval: 'violet', refund: 'warn', follow_up: 'warn', renewal: 'warn', signup: 'violet' };
+  const ISSUE = { update: 'bad', complaint: 'blue', approval: 'violet', refund: 'warn', follow_up: 'warn', renewal: 'warn', signup: 'violet', payment: 'bad', invoice: 'warn' };
   const card = (icon, cls, k, v, d) => `<div class="ccard"><span class="cic ${cls}" aria-hidden="true">${icon}</span><div><div class="k">${k}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div></div>`;
   async function overview() {
     main('<p class="muted">Loading…</p>');
@@ -868,7 +907,7 @@
     const wk = o ? (o.signups_by_week || []).map((w) => ({ ...w, label: new Date(w.week).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) })) : [];
     const m = main(`<h2>Operations overview</h2><p class="sub">Good to see you, ${esc(String(S.me.name || '').split(' ')[0])}. Account information only: HQ never sees customers' messages or books.</p>
       <div class="ops"><div class="opsl">
-        <div class="ccards">${card('👤', 'blue', 'New signups', num(cn.new_signups ?? (o && o.companies_7d)), 'this week')}${card('💳', 'red', 'Failed payments', '0', 'payments not connected yet')}
+        <div class="ccards">${card('👤', 'blue', 'New signups', num(cn.new_signups ?? (o && o.companies_7d)), 'this week')}${card('💳', 'red', 'Failed payments', cn.failed_payments == null ? '—' : num(cn.failed_payments), 'PayPal, in their grace period')}
           ${card('🔄', 'green', 'Renewals due', cn.renewals_due == null ? '—' : num(cn.renewals_due), 'trials and paid, next 7 days')}${card('⚠️', 'amber', 'Open complaints', cn.open_complaints == null ? '—' : num(cn.open_complaints), 'open support tickets')}</div>
         <div class="card" id="queueCard"><h3>Needs attention <small>· ${q.length ? `${q.length} item${q.length === 1 ? '' : 's'} for you` : 'nothing waiting'}</small></h3>
           ${wq && wq.missing ? '<p class="muted small">Run the latest <b>team-chat.sql</b> in Supabase (SQL Editor) to switch on the work queue.</p>'
@@ -895,6 +934,8 @@
       if (x.kind === 'complaint' || x.kind === 'update') { S.ticket = x.ref; return go('#/support'); }
       if (x.kind === 'approval') return go('#/approvals');
       if (x.kind === 'refund') return go('#/refunds');
+      if (x.kind === 'invoice') { S.markPaid = x.ref; return go('#/payments'); }
+      if (x.kind === 'payment') return openCompany(x.workspace_id, 'money');
       if (x.kind === 'renewal') return openCompany(x.workspace_id, 'programs');
       if (x.kind === 'signup') { S.cpAfter = 'message'; return openCompany(x.workspace_id, 'conversations'); }
       return openCompany(x.workspace_id, 'conversations'); });
@@ -988,7 +1029,66 @@
     wireHealth(m); m.querySelectorAll('[data-tab2]').forEach((b) => b.onclick = () => go('#/' + b.dataset.tab2));
   }
   const soon = (title, what, when) => `<h2>${title}</h2><div class="card soonc"><p><b>${when}.</b> ${what}</p><p class="muted small">See ops/HQ-DESIGN.md for the plan.</p></div>`;
-  async function payments() { main(soon('Invoices & payments', 'Invoices (open, overdue, paid), payment states (pending, approved, settled, declined, refunded, disputed), retries, payment links and reconciliation arrive once a payment provider is connected. Until then, licences are managed by hand under Licences, and refunds under Refunds.', 'Coming with payments (phase 2)')); }
+  // ------------------------------------------------------------------ Invoices & payments: PayPal, bank transfers, the Billing entity
+  const ORDER_ST = { pending: ['Waiting', 'warn'], active: ['Active', 'ok'], paid: ['Paid', 'ok'], payment_failed: ['Payment failed', 'bad'], suspended: ['Payments stopped', 'bad'], cancelled: ['Cancelled', ''], void: ['Cancelled', ''] };
+  const orderPill = (o) => { const [l, c] = ORDER_ST[o.status] || [o.status, '']; return `<span class="pill ${c}">${esc(l)}</span>`; };
+  const orderWhat = (o) => `${(o.module_names || o.modules || []).join(', ')} · ${o.people} people · ${o.billing}`;
+  const ordersTable = (list, id, biz, mark) => `<table class="tbl" id="${id}"><tr>${biz ? '<th>Business</th>' : ''}<th>Invoice</th><th>What</th><th>Amount</th><th>How</th><th>State</th>${mark ? '<th></th>' : ''}</tr>
+    ${list.map((o) => `<tr>${biz ? `<td><button class="lnk" data-goco="${esc(o.workspace_id)}" data-cptab="money"><b>${esc(o.business || '')}</b></button></td>` : ''}<td class="code">${esc(o.ref)}<small>${day(o.created_at)}</small></td>
+      <td>${esc(orderWhat(o))}</td><td class="nowrap">${money(o.total)}${o.first_amount != null && o.method === 'paypal' ? `<small>then ${money(o.amount)}</small>` : ''}</td>
+      <td>${o.method === 'paypal' ? `PayPal${o.paypal_id ? `<small class="code">${esc(o.paypal_id)}</small>` : ''}` : 'Bank transfer'}</td>
+      <td>${orderPill(o)}<small>${o.status === 'pending' && o.due_date ? `due ${day(o.due_date)}` : o.status === 'payment_failed' && o.grace_until ? `works until ${day(o.grace_until)}` : o.paid_through ? `paid to ${day(o.paid_through)}` : ''}${o.paid_reference ? ` · ref ${esc(o.paid_reference)}` : ''}${o.marked_paid_by ? ` · by ${esc(o.marked_paid_by)}` : ''}</small></td>
+      ${mark ? `<td>${o.method === 'bank' && o.status === 'pending' ? `<button class="btn sm p" data-markpaid="${esc(o.ref)}" data-amount="${esc(o.total)}">Mark bank transfer paid</button>` : ''}</td>` : ''}</tr>`).join('')}</table>`;
+  const paysTable = (list, id, biz) => `<table class="tbl" id="${id}"><tr><th>When</th>${biz ? '<th>Business</th>' : ''}<th>Receipt</th><th>Amount</th><th>How</th><th>State</th></tr>
+    ${list.map((p) => `<tr><td>${day(p.at)}</td>${biz ? `<td><button class="lnk" data-goco="${esc(p.workspace_id)}" data-cptab="money">${esc(p.business || '')}</button></td>` : ''}<td class="code">${esc(p.ref || '—')}<small>${esc(p.order_ref || '')}</small></td>
+      <td>${p.amount != null ? money(p.amount) : ''}</td><td>${p.method === 'paypal' ? 'PayPal' : 'Bank transfer'}${p.provider_ref ? `<small class="code">${esc(p.provider_ref)}</small>` : ''}</td>
+      <td>${p.status === 'completed' ? '<span class="pill ok">Paid</span>' : `<span class="pill bad">Failed</span>${p.note ? `<small>${esc(p.note)}</small>` : ''}`}</td></tr>`).join('')}</table>`;
+  function markPaidDlg(ref, amount, after) {
+    dlg(`<h3>Mark bank transfer paid</h3><p class="muted small">Only when the money is in Riyeser's bank account. This switches the programs on straight away, emails the owner a receipt, and goes in the HQ history.</p>
+      <form id="mp"><label class="f"><span>Invoice</span><input name="ref" value="${esc(ref)}" readonly></label>
+      <label class="f"><span>Amount received (US$)</span><input name="amount" type="number" step="0.01" min="0" value="${esc(amount)}" required></label>
+      <label class="f"><span>The bank's reference <small class="muted">(from the bank statement)</small></span><input name="bankref" required minlength="3" maxlength="200"></label>
+      <div id="mperr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Mark paid</button></div></form>`, (d, close) => {
+      d.querySelector('#mp').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
+        try { const r = await api.markPaid(String(f.get('ref')), String(f.get('bankref')).trim(), Number(f.get('amount'))); close(); flash(`${ref} is paid: receipt ${r.receipt}, programs paid until ${day(r.paid_until)}.`); after(); }
+        catch (err) { d.querySelector('#mperr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
+  }
+  function paypalCard(st, pp) {
+    const s = st || {}; const deployed = s.deployed !== false;
+    const [l, c, msg] = !deployed ? ['Not deployed', '', 'The paypal function isn\'t deployed yet: run Actions → Deploy PayPal payments.']
+      : s.ready ? [s.env === 'live' ? 'Live' : 'Sandbox (test money)', s.env === 'live' ? 'ok' : 'warn', s.env === 'live' ? 'Customers can pay with PayPal.' : 'Test mode: payments use sandbox accounts, not real money.']
+      : s.credentials ? ['Webhooks not verified yet', 'bad', 'The PayPal keys are in, but PAYPAL_WEBHOOK_ID isn\'t: webhook events are refused, so customers can\'t pay with PayPal yet. Add the webhook (RUNBOOK: Set up PayPal), then deploy again.']
+      : ['Not set up yet', '', 'Customers only see bank transfer until PayPal is set up (RUNBOOK: Set up PayPal).'];
+    return `<div class="card" id="ppcard"><h3>PayPal</h3><div class="hrow"><span class="hic" aria-hidden="true">🅿️</span><div><b>${esc(l)}</b><small>${esc(msg)}</small></div><span class="pill ${c}">${esc(s.env || '—')}</span></div>
+      <p class="small" style="margin:10px 0 0">Last webhook: <b>${pp && pp.last_webhook_at ? `${esc(ago(pp.last_webhook_at))}` : 'none yet'}</b>${pp && pp.last_webhook_type ? ` <span class="muted">(${esc(pp.last_webhook_type)})</span>` : ''} · ${num(pp ? pp.events_7d : 0)} in 7 days · ${num(pp ? pp.subscriptions : 0)} PayPal subscription${pp && pp.subscriptions === 1 ? '' : 's'}</p></div>`;
+  }
+  function entityCard(b) {
+    const e = b.entity || {}; const bk = e.bank || {}; const ed = b.can_edit_entity;
+    const fld = (k, label, v, max = 120) => `<label class="f"><span>${label}</span><input name="${k}" value="${esc(v || '')}" maxlength="${max}"${ed ? '' : ' readonly'}></label>`;
+    return `<div class="card" id="entity"><h3>Billing entity <small>· who sells Riyeser: on every invoice and receipt</small></h3>
+      ${b.bank_ready ? '' : '<div class="err" id="addbank">Add your bank details. Until then, bank transfer invoices tell customers Riyeser will email the details.</div>'}
+      <form id="entf" class="grid g2">${fld('name', 'Business name', e.name)}${fld('email', 'Contact email', e.email)}${fld('address', 'Address', e.address, 300)}
+        ${fld('tax_label', 'Tax number label', e.tax_label || 'ABN', 40)}${fld('tax_number', 'ABN (or tax number)', e.tax_number, 40)}
+        ${fld('bank.account_name', 'Bank account name', bk.account_name, 80)}${fld('bank.bank_name', 'Bank', bk.bank_name, 80)}${fld('bank.bsb', 'BSB', bk.bsb, 80)}
+        ${fld('bank.account_number', 'Account number', bk.account_number, 80)}${fld('bank.swift', 'SWIFT / BIC (for overseas payers)', bk.swift, 80)}${fld('bank.note', 'Note for customers (optional)', bk.note, 300)}
+        ${ed ? '<div><button class="btn p">Save billing entity</button></div>' : '<p class="muted small">Owners and Finance can change this.</p>'}</form>
+      <p class="muted small">Each change is kept as a new version: invoices and receipts already made keep the details they were made with.</p></div>`;
+  }
+  async function payments() {
+    main('<p class="muted">Loading…</p>');
+    const [b, st] = await Promise.all([api.billing(), api.paypalStatus()]);
+    const m = main(`<h2>Invoices &amp; payments</h2><p class="sub">PayPal subscriptions and bank transfers. All amounts in US dollars. PayPal ids show only their last 6 characters.</p>
+      <div class="grid g2">${paypalCard(st, b.paypal)}<div class="card"><h3>At a glance</h3><div class="tiles mtiles">${tile('Failed payments', num(b.failed.length), `grace ${num(b.grace_days)} days`)}${tile('Unpaid invoices', num(b.unpaid.length), 'bank transfer')}${tile('Payments', num(b.payments.filter((p) => p.status === 'completed').length), 'latest 100')}</div></div></div>
+      <div class="card scroll" id="failedCard"><h3>Failed payments <small>· PayPal couldn't take the money; the programs work until the date shown</small></h3>${b.failed.length ? ordersTable(b.failed, 'failedTbl', true, false) : '<p class="muted small">None. 🎉</p>'}</div>
+      <div class="card scroll" id="unpaidCard"><h3>Unpaid invoices <small>· bank transfer; mark paid when the money is in the bank</small></h3>${b.unpaid.length ? ordersTable(b.unpaid, 'unpaidTbl', true, b.can_mark_paid) : '<p class="muted small">None.</p>'}</div>
+      <div class="card scroll" id="paysCard"><h3>Payments</h3>${b.payments.length ? paysTable(b.payments, 'paysTbl', true) : '<p class="muted small">No payments yet.</p>'}</div>
+      ${entityCard(b)}`);
+    m.querySelectorAll('[data-markpaid]').forEach((x) => x.onclick = () => markPaidDlg(x.dataset.markpaid, x.dataset.amount, payments));
+    const ef = m.querySelector('#entf'); if (ef && b.can_edit_entity) ef.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(ef); const d = { bank: {} };
+      for (const [k, v] of f.entries()) { if (k.startsWith('bank.')) d.bank[k.slice(5)] = String(v); else d[k] = String(v); }
+      try { await api.setBillingEntity(d); flash('Billing entity saved. New invoices use it.'); payments(); } catch (err) { flash(plain(err)); } };
+    if (S.markPaid) { const ref = S.markPaid; S.markPaid = null; const o = b.unpaid.find((x) => x.ref === ref); if (o && b.can_mark_paid) markPaidDlg(o.ref, o.total, payments); }
+  }
   async function inbox() { main(soon('Team Inbox', 'Internal discussions linked to a customer, case or invoice, handovers that become tasks with an owner and due time, and commitments saved to the customer timeline. For now, use the Team handover on the Overview and internal notes on each customer page.', 'Coming soon')); }
   async function settings() { await team(); const el = document.getElementById('settings'); if (el) el.scrollIntoView({ block: 'start' }); }
   // "Needs attention": only what this person can act on. Each item opens the right page.
@@ -1105,7 +1205,7 @@
   }
 
   function closePanel() { document.querySelectorAll('.modal').forEach((x) => x.remove()); }
-  const HIST_ACTS = { 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link Plus paid-until',
+  const HIST_ACTS = { 'billing.bank_paid': 'marked a bank transfer paid', 'billing.entity_changed': 'changed the billing entity', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link Plus paid-until',
     'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'licence.storage': 'granted extra file storage', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
     'staff.owner_made': 'made an HQ owner (SQL Editor)', 'ticket.viewed': 'opened a ticket', 'ticket.replied': 'replied to a ticket', 'ticket.note': 'added an internal note',
     'ticket.status': 'changed a ticket\'s status', 'ticket.priority': 'changed a ticket\'s priority', 'ticket.assigned': 'assigned a ticket', 'ticket.escalated': 'escalated a ticket',
@@ -1411,12 +1511,18 @@
     return out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
   }
   // --- Money: refunds, credit, free periods
+  function billingCards(X) {
+    const B = X.billing; if (!B) return '';
+    return `<div class="card scroll" id="coBilling" style="margin-top:14px"><h3>Invoices and subscriptions <small>· ${B.orders.length} · PayPal ids show only their last 6 characters</small></h3>${B.orders.length ? ordersTable(B.orders, 'coOrders', false, B.can_mark_paid) : '<p class="muted small">None yet: they haven\'t paid online.</p>'}</div>
+      <div class="card scroll" id="coPays" style="margin-top:14px"><h3>Payments <small>· ${B.payments.length}</small></h3>${B.payments.length ? paysTable(B.payments, 'coPayTbl', false) : '<p class="muted small">None yet.</p>'}</div>`;
+  }
   function tabMoney(c) {
     const X = c.extra; if (!X) return SWITCH_ON; const credit = creditText(X.credit);
-    return `<div class="tiles mtiles">${tile('A month (estimate)', c.monthly != null ? money(c.monthly) : '—', 'list price, until payments are connected')}${tile('Credit on account', credit || '0', 'from refunds paid as credit')}
+    return `<div class="tiles mtiles">${tile('A month (estimate)', c.monthly != null ? money(c.monthly) : '—', 'at list prices')}${tile('Credit on account', credit || '0', 'from refunds paid as credit')}
         ${tile('Refunds', X.refunds ? num(X.refunds.length) : '—', X.refunds ? `${X.refunds.filter((f) => !['paid', 'declined'].includes(f.status)).length} open` : 'your role can\'t see refunds')}${tile('Free periods', num((X.offers || []).length), `${(X.offers || []).filter((o) => o.status === 'waiting').length} waiting for approval`)}</div>
       ${X.refunds ? `<div class="card scroll" id="coRefunds"><h3>Refunds <small>· ${X.refunds.length} · approve and pay them in Refunds</small></h3>${X.refunds.length ? `<table class="tbl">${X.refunds.map((f) => `<tr><td class="code">${esc(f.ref)}<small>${day(f.created_at)}</small></td><td>${cur(f.amount, f.currency)}<small>${esc(f.for_what)}</small></td><td>${refundPill(f)}</td><td>${f.amount_approved != null ? cur(f.amount_approved, f.currency) : ''}<small>${esc(f.paid_method ? (PAID_HOW.find((x) => x[0] === f.paid_method) || [0, f.paid_method])[1] : '')}</small></td></tr>`).join('')}</table>` : '<p class="muted small">None.</p>'}
         ${can('refunds.view') ? '<button class="btn sm" data-gotab="refunds" style="margin-top:8px">Open Refunds</button>' : ''}</div>` : ''}
+      ${billingCards(X)}
       <div class="card scroll" id="moneyOffers" style="margin-top:14px"><h3>Free periods and credits <small>· ${(X.offers || []).length}</small></h3>${(X.offers || []).length ? offersTable(X.offers) : '<p class="muted small">None.</p>'}</div>`;
   }
   // --- History: this business's HQ history
@@ -1435,6 +1541,7 @@
     const c = S.cp; const id = c.profile.id || S.cpId;
     el.querySelectorAll('[data-cpgo]').forEach((b) => b.onclick = () => { const x = document.querySelector(`#cptabs [data-cptab="${b.dataset.cpgo}"]`); if (x) x.click(); });
     el.querySelectorAll('[data-gotab]').forEach((b) => b.onclick = () => go('#/' + b.dataset.gotab));
+    el.querySelectorAll('[data-markpaid]').forEach((b) => b.onclick = () => markPaidDlg(b.dataset.markpaid, b.dataset.amount, reloadCompany));
     el.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => quickAction(b.dataset.mod, b.dataset.q, Number(b.dataset.days) || null));
     el.querySelectorAll('[data-tk]').forEach((r) => r.onclick = () => { S.ticket = r.dataset.tk; go('#/support'); });
     el.querySelectorAll('[data-pin]').forEach((b) => b.onclick = async () => { try { await api.notePin(Number(b.dataset.pin), !!b.dataset.on); await reloadCompany(); } catch (err) { alert(plain(err)); } });
@@ -1974,6 +2081,7 @@
         <label class="f"><span>Escalate automatically after (hours waiting on us)</span><input type="number" min="1" name="support.escalate_hours" value="${esc(settings['support.escalate_hours'])}"></label>
         <label class="f"><span>Refunds over this need two approvals (any currency)</span><input type="number" min="1" name="refunds.two_person_threshold" value="${esc(settings['refunds.two_person_threshold'])}"></label>
         <label class="f"><span>Free periods up to this many days apply straight away</span><input type="number" min="1" name="offers.self_limit_days" value="${esc(settings['offers.self_limit_days'])}"></label>
+        ${settings['billing.grace_days'] != null ? `<label class="f"><span>After a failed PayPal payment, programs keep working this many days</span><input type="number" min="1" name="billing.grace_days" value="${esc(settings['billing.grace_days'])}"></label>` : ''}
         <div><button class="btn p">Save settings</button></div></form></div>` : ''}`);
     m.querySelectorAll('[data-role]').forEach((sel) => sel.onchange = async () => { const s = staff.find((x) => x.user_id === sel.dataset.role);
       try { await api.setStaff(s.user_id, sel.value, s.active); team(); } catch (err) { alert(plain(err)); team(); } });

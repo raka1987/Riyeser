@@ -1279,7 +1279,7 @@ do $$ declare h json; q json; s json; begin
   begin perform public.hq_handover_add('  ', null); raise exception 'empty handover';
   exception when others then assert sqlerrm like 'Write the handover%', sqlerrm; end;
   q := public.hq_work_queue();
-  assert (q -> 'counts' ->> 'new_signups') is not null and (q -> 'counts' ->> 'failed_payments') is null and (q -> 'counts' ->> 'open_complaints')::int >= 1, format('counts: %s', q -> 'counts');
+  assert (q -> 'counts' ->> 'new_signups') is not null and (q -> 'counts' ->> 'failed_payments')::int = 0 and (q -> 'counts' ->> 'open_complaints')::int >= 1, format('counts: %s', q -> 'counts');
   assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'issue' like '%complaint' and x ->> 'action' = 'Reply'), 'complaints in the queue';
   assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'action' = 'Extend' and x ->> 'business' = 'Corner Cafe'), format('renewals in the queue: %s', q -> 'queue');
   assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'action' = 'Follow up'), 'my follow-ups in the queue';
@@ -2334,6 +2334,240 @@ do $$ begin
   exception when insufficient_privilege then null; end;
 end $$;
 reset role;
+
+-- ================================================================ Payments (PayPal subscriptions, bank transfer invoices)
+-- Pay Co: Lisi (owner), Ana (admin), Tom (member). Viliami owns Other Pay Co. HQ: Fina (finance), Sol (sales: can look, not mark paid).
+reset role;
+insert into auth.users (id, email) values ('b1b1b1b1-0000-4000-8000-000000000001', 'lisi@pay.test'), ('b1b1b1b1-0000-4000-8000-000000000002', 'ana@pay.test'),
+  ('b1b1b1b1-0000-4000-8000-000000000003', 'tom@pay.test'), ('b1b1b1b1-0000-4000-8000-000000000004', 'viliami@pay.test'),
+  ('b1b1b1b1-0000-4000-8000-000000000005', 'fina@riyeser.test'), ('b1b1b1b1-0000-4000-8000-000000000006', 'sol@riyeser.test');
+insert into public.hq_staff (user_id, display_name, role) values ('b1b1b1b1-0000-4000-8000-000000000005', 'Fina', 'finance'), ('b1b1b1b1-0000-4000-8000-000000000006', 'Sol', 'sales');
+do $$ declare a uuid; b uuid; begin
+  insert into public.workspaces (name) values ('Pay Co') returning id into a;
+  insert into public.workspaces (name) values ('Other Pay Co') returning id into b;
+  insert into public.members (workspace_id, user_id, display_name, role) values (a, 'b1b1b1b1-0000-4000-8000-000000000001', 'Lisi', 'owner'),
+    (a, 'b1b1b1b1-0000-4000-8000-000000000002', 'Ana', 'admin'), (a, 'b1b1b1b1-0000-4000-8000-000000000003', 'Tom', 'member'),
+    (b, 'b1b1b1b1-0000-4000-8000-000000000004', 'Viliami', 'owner');
+  perform set_config('pay.a', a::text, false), set_config('pay.b', b::text, false), set_config('pay.te', (current_date + 90)::text, false);
+end $$;
+set role authenticated;
+-- the early bird is full (100 businesses, above): the quote is the normal price
+select pg_temp.as_user_password_only('b1b1b1b1-0000-4000-8000-000000000001');
+do $$ declare q json := public.billing_quote(current_setting('pay.a')::uuid, array['plus', 'payroll'], 5, 'monthly'); begin
+  assert not (q ->> 'early_bird')::boolean and (q ->> 'due_now')::numeric = 92, 'no early bird once 100 have it';
+end $$;
+reset role; update public.company_plans set early_bird = false where workspace_id in (select id from public.workspaces where name like 'Early bird %'); set role authenticated;
+-- the owner (even before two-step sign-in) gets a quote from the same price list as the website, early bird included
+select pg_temp.as_user_password_only('b1b1b1b1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('pay.a')::uuid; q json; begin
+  q := public.billing_quote(a, array['plus', 'payroll'], 5, 'monthly');
+  assert (q ->> 'amount')::numeric = 92 and (q ->> 'amount')::numeric = public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', false), 'quote = riyeser_bill = 92';
+  assert (q ->> 'early_bird')::boolean and (q ->> 'first_amount')::numeric = 46 and (q ->> 'early_cycles')::int = 12, 'early bird: half for 12 months';
+  q := public.billing_quote(a, array['basic', 'plus', 'plus', 'link'], 3, 'yearly');
+  assert (q ->> 'amount')::numeric = 390 and json_array_length(q -> 'modules') = 1, 'Basics and Plus = Plus only; free programs ignored; yearly = 10 months';
+  begin perform public.billing_quote(a, array['plus'], 3, 'weekly'); raise exception 'weekly';
+  exception when others then assert sqlerrm like 'Choose monthly or yearly%', sqlerrm; end;
+  begin perform public.billing_start(a, array['link', 'pdf'], 3, 'monthly', 'bank'); raise exception 'free only';
+  exception when others then assert sqlerrm like 'Choose at least one paid program%', sqlerrm; end;
+end $$;
+-- admins, staff and other businesses can't pay, quote or see billing; nobody reads the tables directly
+do $$ declare u text; a uuid := current_setting('pay.a')::uuid; begin
+  foreach u in array array['b1b1b1b1-0000-4000-8000-000000000002', 'b1b1b1b1-0000-4000-8000-000000000003', 'b1b1b1b1-0000-4000-8000-000000000004'] loop
+    perform pg_temp.as_user(u);
+    begin perform public.billing_quote(a, array['plus'], 3, 'monthly'); raise exception 'quoted';
+    exception when others then assert sqlerrm like 'Only the business owner%', u || ': ' || sqlerrm; end;
+    begin perform public.billing_start(a, array['plus'], 3, 'monthly', 'bank'); raise exception 'paid';
+    exception when others then assert sqlerrm like 'Only the business owner%', u || ': ' || sqlerrm; end;
+    begin perform public.my_billing(a); raise exception 'saw billing';
+    exception when others then assert sqlerrm like 'Only the business owner%', u || ': ' || sqlerrm; end;
+    begin perform public.billing_cancel_start(a); raise exception 'cancelled';
+    exception when others then assert sqlerrm like 'Only the business owner%', u || ': ' || sqlerrm; end;
+  end loop;
+  begin perform count(*) from public.billing_orders; raise exception 'read orders';
+  exception when insufficient_privilege then null; end;
+  begin perform count(*) from public.billing_payments; raise exception 'read payments';
+  exception when insufficient_privilege then null; end;
+  begin perform count(*) from public.billing_entities; raise exception 'read entities';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- only the paypal function (service role) records PayPal's side: not a signed-in person
+do $$ begin
+  begin perform public.billing_paypal_event('WH-x', 'PAYMENT.SALE.COMPLETED', '{}', 'live'); raise exception 'fake webhook';
+  exception when insufficient_privilege then null; end;
+  begin perform public.billing_paypal_created(gen_random_uuid(), 'I-ABCDEFGH', 'live'); raise exception 'fake created';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role; set role anon; select pg_temp.as_user('');
+do $$ begin
+  begin perform public.billing_start(current_setting('pay.a')::uuid, array['plus'], 3, 'monthly', 'bank'); raise exception 'anon paid';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role; set role authenticated;
+
+-- ---- bank transfer: an invoice; the licence is NOT on until HQ marks it paid (the free trial carries on)
+select pg_temp.as_user_password_only('b1b1b1b1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('pay.a')::uuid; o json; b json; begin
+  o := public.billing_start(a, array['plus', 'payroll'], 5, 'monthly', 'bank');
+  assert o ->> 'ref' like 'RI-1%' and o ->> 'status' = 'pending' and (o ->> 'amount')::numeric = 92 and (o ->> 'total')::numeric = 46, 'invoice for 46 (early bird of 92)';
+  assert (o ->> 'due_date')::date = current_date + 14 and o -> 'seller' ->> 'name' = 'Riyeser' and o -> 'seller' ->> 'tax_label' = 'ABN', 'due in 14 days, seller from the Billing entity';
+  assert coalesce(o -> 'seller' -> 'bank' ->> 'account_number', '') = '', 'bank details blank until HQ adds them';
+  perform set_config('pay.inv1', o ->> 'ref', false);
+  b := public.my_billing(a);
+  assert json_array_length(b -> 'orders') = 1 and b -> 'licence' -> 'modules' -> 'plus' ->> 'status' = 'trial', 'not paid yet: still the free trial';
+end $$;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000004');
+do $$ declare b json := public.my_billing(current_setting('pay.b')::uuid); begin
+  assert json_array_length(b -> 'orders') = 0 and json_array_length(b -> 'payments') = 0, 'another business sees none of it';
+end $$;
+-- HQ: sales can see it (in the work queue), but only licences.manage (Owner, Finance) marks it paid
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
+do $$ declare h json := public.hq_billing(); q json := public.hq_work_queue(); begin
+  assert json_array_length(h -> 'unpaid') >= 1 and not (h ->> 'bank_ready')::boolean and not (h ->> 'can_mark_paid')::boolean, 'sales sees unpaid invoices';
+  assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'kind' = 'invoice' and x ->> 'ref' = current_setting('pay.inv1')), 'unpaid invoice in the work queue';
+  begin perform public.hq_billing_mark_paid(current_setting('pay.inv1'), 'BANK REF 1', 46); raise exception 'sales marked paid';
+  exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
+  begin perform public.hq_set_billing_entity('{"name": "Sol Pty Ltd"}'); raise exception 'sales changed the entity';
+  exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
+end $$;
+select pg_temp.as_user_password_only('b1b1b1b1-0000-4000-8000-000000000005');
+do $$ begin
+  begin perform public.hq_billing(); raise exception 'HQ without two-step';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');
+do $$ declare a uuid := current_setting('pay.a')::uuid; r json; te date; begin
+  begin perform public.hq_billing_mark_paid(current_setting('pay.inv1'), 'BANK REF 1', 20); raise exception 'short payment';
+  exception when others then assert sqlerrm like 'The invoice is for US$46.00%', sqlerrm; end;
+  begin perform public.hq_billing_mark_paid(current_setting('pay.inv1'), '', 46); raise exception 'no reference';
+  exception when others then assert sqlerrm like 'Type the bank''s reference%', sqlerrm; end;
+  te := current_setting('pay.te')::date;
+  r := public.hq_billing_mark_paid(lower(current_setting('pay.inv1')), 'WESTPAC 88123', 46);
+  assert (r ->> 'paid_until')::date = (te + interval '1 month')::date, 'paid time starts when the free trial ends';
+  assert r ->> 'receipt' like 'RR-1%', 'a receipt number';
+  begin perform public.hq_billing_mark_paid(current_setting('pay.inv1'), 'AGAIN', 46); raise exception 'paid twice';
+  exception when others then assert sqlerrm like 'That invoice is already paid%', sqlerrm; end;
+end $$;
+reset role;
+do $$ declare a uuid := current_setting('pay.a')::uuid; begin
+  assert (select status from public.company_modules where workspace_id = a and module = 'plus') = 'active', 'Plus switched on';
+  assert (select status from public.company_modules where workspace_id = a and module = 'payroll') = 'active', 'Payroll switched on';
+  assert (public.licence_json(a) -> 'modules' -> 'payroll' ->> 'active')::boolean, 'the signed licence sees it';
+  assert (select extra_users from public.company_plans where workspace_id = a) = 2 and (select early_bird from public.company_plans where workspace_id = a), 'plan: 2 extra users, early bird';
+  assert exists (select 1 from public.email_outbox where workspace_id = a and template = 'billing_paid'), 'the owner is emailed';
+  assert exists (select 1 from public.hq_audit where action = 'billing.bank_paid' and workspace_id = a and actor = 'b1b1b1b1-0000-4000-8000-000000000005'), 'in the HQ history, with who';
+  begin delete from public.billing_payments where workspace_id = a; raise exception 'deleted a payment';
+  exception when others then assert sqlerrm like 'Rows in billing_payments are never deleted%', sqlerrm; end;
+end $$;
+set role authenticated;
+-- the Billing entity: finance fills it in (with bank details); old invoices keep the old details, new ones get the new
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');
+select public.hq_set_billing_entity('{"name": "Riyeser Pty Ltd", "address": "1 George St, Sydney NSW", "tax_label": "", "tax_number": "12 345 678 901",
+  "email": "accounts@riyeser.test", "bank": {"account_name": "Riyeser Pty Ltd", "bank_name": "Westpac", "bsb": "032-000", "account_number": "123456", "junk": "x"}}');
+do $$ declare h json := public.hq_billing(); begin
+  assert (h ->> 'bank_ready')::boolean and h -> 'entity' ->> 'tax_label' = 'ABN' and h -> 'entity' -> 'bank' ->> 'junk' is null, 'bank ready, ABN label by default, only known fields';
+end $$;
+select pg_temp.as_user_password_only('b1b1b1b1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('pay.a')::uuid; b json; o json; begin
+  b := public.my_billing(a);
+  assert (select x -> 'seller' ->> 'name' from json_array_elements(b -> 'orders') x where x ->> 'ref' = current_setting('pay.inv1')) = 'Riyeser', 'old invoice keeps the old seller';
+  assert (select x -> 'seller' ->> 'name' from json_array_elements(b -> 'payments') x limit 1) = 'Riyeser', 'old receipt keeps the old seller';
+  assert b -> 'seller' ->> 'name' = 'Riyeser Pty Ltd', 'the current seller';
+  o := public.billing_start(a, array['pos'], 3, 'yearly', 'bank');
+  assert o -> 'seller' -> 'bank' ->> 'bsb' = '032-000' and o -> 'seller' ->> 'tax_number' = '12 345 678 901', 'a new invoice has the new details and bank';
+  assert (o ->> 'early_bird')::boolean and (o ->> 'total')::numeric = 145 and (o ->> 'amount')::numeric = 290, 'still early bird (in its 12 months): half of 290';
+  perform public.billing_cancel_invoice(a, o ->> 'ref');
+  begin perform public.billing_cancel_invoice(a, o ->> 'ref'); raise exception 'cancelled twice';
+  exception when others then assert sqlerrm like 'That invoice is already%', sqlerrm; end;
+end $$;
+
+-- ---- PayPal: the function starts it; webhooks (each applied once) do the rest
+do $$ declare a uuid := current_setting('pay.a')::uuid; o json; begin
+  o := public.billing_start(a, array['calls'], 4, 'monthly', 'paypal');
+  assert (o ->> 'amount')::numeric = 46 and (o ->> 'first_amount')::numeric = 23 and (o ->> 'early_cycles')::int = 12, 'Link Plus, 4 people: 46, early bird 23';
+  perform set_config('pay.o1', o ->> 'id', false);
+  o := public.billing_start(a, array['calls'], 4, 'monthly', 'paypal');   -- started again: the first (never approved) is replaced
+  perform set_config('pay.o2', o ->> 'id', false);
+  assert (select count(*) from json_array_elements(public.my_billing(a) -> 'orders') x where x ->> 'method' = 'paypal') = 1, 'one PayPal start shows';
+end $$;
+reset role; set role service_role;
+select public.billing_paypal_created(current_setting('pay.o2')::uuid, 'I-PAYCO0SUB123456', 'sandbox');
+select public.billing_paypal_event('WH-1', 'BILLING.SUBSCRIPTION.ACTIVATED', '{"id": "I-PAYCO0SUB123456", "status": "ACTIVE", "billing_info": {"next_billing_time": "2027-01-24T10:00:00Z"}}', 'sandbox') = 'activated' as activated \gset
+reset role;
+select set_config('pay.act', :'activated', false);
+do $$ begin assert current_setting('pay.act')::boolean, 'the service role applies a webhook'; end $$;
+do $$ declare a uuid := current_setting('pay.a')::uuid; r text; te date := current_setting('pay.te')::date; g date; begin
+  begin perform public.billing_paypal_created(current_setting('pay.o1')::uuid, 'I-OLDONE00000', 'sandbox'); raise exception 'replaced one taken';
+  exception when others then assert sqlerrm like 'That payment isn''t waiting%', sqlerrm; end;
+  assert public.billing_paypal_event('WH-1', 'BILLING.SUBSCRIPTION.ACTIVATED', '{"id": "I-PAYCO0SUB123456"}', 'sandbox') = 'duplicate', 'the same event twice: ignored';
+  assert (public.module_state(a, 'calls') ->> 'status') = 'trial', 'activated alone switches nothing on: the payment does';
+  r := public.billing_paypal_event('WH-2', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox');
+  assert r = 'paid', r;
+  assert (select paid_until from public.company_modules where workspace_id = a and module = 'calls') = (te + interval '1 month')::date, 'Link Plus paid from the end of its trial';
+  assert public.billing_paypal_event('WH-2', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox') = 'duplicate', 'duplicate webhook';
+  assert public.billing_paypal_event('WH-2b', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox') = 'duplicate payment', 'same sale, new event id: counted once';
+  assert public.billing_paypal_event('WH-3', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0002", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "5.00", "currency": "USD"}}', 'sandbox') = 'amount mismatch', 'too little: recorded, not applied';
+  assert public.billing_paypal_event('WH-3b', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0003", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "AUD"}}', 'sandbox') = 'amount mismatch', 'wrong currency: not applied';
+  assert (select paid_until from public.company_modules where workspace_id = a and module = 'calls') = (te + interval '1 month')::date, 'mismatches extended nothing';
+  assert (select count(*) from public.billing_payments where workspace_id = a and method = 'paypal' and status = 'completed') = 1, 'one PayPal payment';
+  -- a failed payment: a grace period to an exact date (7 days), then a retry that works
+  r := public.billing_paypal_event('WH-4', 'BILLING.SUBSCRIPTION.PAYMENT.FAILED', '{"id": "I-PAYCO0SUB123456", "billing_info": {"last_failed_payment": {"amount": {"value": "23.00"}}}}', 'sandbox');
+  assert r = 'payment failed', r;
+  select grace_until into g from public.billing_orders where id = current_setting('pay.o2')::uuid;
+  assert g = current_date + 7 and (select status from public.billing_orders where id = current_setting('pay.o2')::uuid) = 'payment_failed', 'grace until today + 7';
+  assert exists (select 1 from public.email_outbox where workspace_id = a and template = 'billing_failed' and body_text like '%' || to_char(g, 'FMDD Month YYYY') || '%'), 'the email gives the date';
+  assert public.billing_paypal_event('WH-5', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0004", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox') = 'paid', 'retry paid';
+  assert (select status from public.billing_orders where id = current_setting('pay.o2')::uuid) = 'active'
+     and (select grace_until from public.billing_orders where id = current_setting('pay.o2')::uuid) is null, 'back to active, no grace';
+  assert (select paid_until from public.company_modules where workspace_id = a and module = 'calls') = (te + interval '2 months')::date, 'a second month';
+  assert public.billing_paypal_event('WH-6', 'BILLING.SUBSCRIPTION.CREATED', '{"id": "I-PAYCO0SUB123456"}', 'sandbox') = 'ignored', 'other events ignored';
+  assert public.billing_paypal_event('WH-7', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-9", "billing_agreement_id": "I-NOT0OURS", "amount": {"total": "99", "currency": "USD"}}', 'sandbox') = 'unknown subscription', 'not ours';
+end $$;
+reset role; set role authenticated;
+-- a second PayPal subscription while one is running is refused; cancelling needs two-step sign-in
+select pg_temp.as_user_password_only('b1b1b1b1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('pay.a')::uuid; b json; begin
+  begin perform public.billing_start(a, array['pos'], 3, 'monthly', 'paypal'); raise exception 'two subscriptions';
+  exception when others then assert sqlerrm like 'You already pay by PayPal%', sqlerrm; end;
+  begin perform public.billing_cancel_start(a); raise exception 'cancelled without two-step';
+  exception when others then assert sqlerrm like 'Turn on two-step sign-in%', sqlerrm; end;
+  b := public.my_billing(a);
+  assert b -> 'subscription' ->> 'status' = 'active' and (b -> 'subscription' ->> 'next_amount')::numeric = 23, 'next charge: early bird 23';
+  assert b ->> 'paypal_manage_url' like 'https://www.sandbox.paypal.com/%', 'manage link for sandbox';
+  assert (select count(*) from json_array_elements(b -> 'payments') x where x ->> 'status' = 'failed') >= 1, 'failed payment in the history';
+end $$;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000001');
+do $$ declare c json := public.billing_cancel_start(current_setting('pay.a')::uuid); begin
+  assert c ->> 'subscription_id' = 'I-PAYCO0SUB123456' and c ->> 'env' = 'sandbox', 'what the function tells PayPal';
+end $$;
+-- HQ: PayPal ids masked except the last 6; the PayPal status card
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
+do $$ declare c json := public.hq_company_billing(current_setting('pay.a')::uuid); h json := public.hq_billing(); t text; begin
+  t := c::text;
+  assert t not like '%I-PAYCO0SUB123456%' and t not like '%SALE-0001%', 'no full PayPal ids in HQ';
+  assert (select x ->> 'paypal_id' from json_array_elements(c -> 'orders') x where x ->> 'method' = 'paypal') = '…123456', 'subscription id masked';
+  assert exists (select 1 from json_array_elements(c -> 'payments') x where x ->> 'provider_ref' = '…E-0001'), 'sale id masked';
+  assert h -> 'paypal' ->> 'env' = 'sandbox' and h -> 'paypal' ->> 'last_webhook_at' is not null, 'PayPal status: sandbox, last webhook';
+  assert (public.hq_company_page(current_setting('pay.a')::uuid) -> 'extra' -> 'billing') is not null, 'on the customer page';
+end $$;
+-- PayPal says it's cancelled: everything works until the end of what's paid, then stops
+reset role;
+do $$ declare a uuid := current_setting('pay.a')::uuid; pu date; begin
+  select paid_until into pu from public.company_modules where workspace_id = a and module = 'calls';
+  assert public.billing_paypal_event('WH-8', 'BILLING.SUBSCRIPTION.CANCELLED', '{"id": "I-PAYCO0SUB123456"}', 'sandbox') = 'cancelled', 'cancelled';
+  perform public.billing_paypal_cancelled(current_setting('pay.o2')::uuid);   -- the function's own call after cancelling: no harm twice
+  assert (public.module_state(a, 'calls') ->> 'status') = 'cancelled' and (public.module_state(a, 'calls') ->> 'active')::boolean
+     and (public.module_state(a, 'calls') ->> 'paid_until')::date = pu, 'cancelled: works until the paid date';
+  assert public.billing_paypal_event('WH-9', 'BILLING.SUBSCRIPTION.PAYMENT.FAILED', '{"id": "I-PAYCO0SUB123456"}', 'sandbox') = 'payment failed', 'a late failure';
+  assert (select status from public.billing_orders where id = current_setting('pay.o2')::uuid) = 'cancelled', 'stays cancelled';
+  assert (select count(*) from public.billing_events) = 11, 'every event kept, once each';
+end $$;
+reset role;
+-- the Billing entity can't be changed or removed in place (new versions only)
+do $$ begin
+  begin update public.billing_entities set details = '{}'; raise exception 'edited an entity';
+  exception when others then assert sqlerrm like 'Rows in billing_entities%', sqlerrm; end;
+end $$;
+select 'payments ok' as billing;
 
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;

@@ -170,7 +170,7 @@ a { color: var(--blue); }
 .hplan .pl.ok { background: #dcfce7; color: #15803d; } .hplan .pl.warn { background: #fef3c7; color: #b45309; } .hplan .pl.bad { background: #fee2e2; color: #b91c1c; }
 #app.home { height: auto; min-height: 100vh; min-height: 100dvh; }
 .hteam { grid-column: 1 / -1; } .hbtns { display: flex; flex-direction: column; gap: 6px; } .hbtns .btn { justify-content: center; white-space: nowrap; }
-@media (max-width: 700px) { .hteam { flex-wrap: wrap; } .hbtns { flex-direction: row; width: 100%; } .hbtns .btn { flex: 1; } }
+@media (max-width: 700px) { .hteam { flex-wrap: wrap; } .hbtns { flex-direction: row; width: 100%; } .hbtns .btn { flex: 1; } .hteam > .hbtns { flex: 1 1 100%; } }
 
 .kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
 .kind { position: relative; border: 1.5px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; background: var(--card); }
@@ -748,4 +748,50 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
   .lk-row:has(.lk-more) .item { padding-right: 62px; } .lk-row.arch .lk-more { right: 6px; } .lk-row.arch .item { padding-right: 34px; }
   .lk-rtog { display: none; }
   .lk-archbar { margin: 0 8px calc(8px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
+}
+
+/* ---- paying: Add to my plan / Pay, Billing on Riyeser home, the printable invoice and receipt */
+.mcard.wide { max-width: 620px; }
+.apmods { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0 0 8px; }
+.apm { display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-size: 14px; color: var(--ink); }
+.apm:has(input:checked) { border-color: var(--brand); background: var(--brand-l); }
+.apm input { margin-top: 3px; } .apm small { display: block; color: var(--muted); font-size: 12.5px; }
+.apopts { margin-top: 10px; } .apopts .opt.sm { margin: 0 0 6px; }
+.mcard .brk { list-style: none; margin: 10px 0 4px; padding: 0; font-size: 14px; }
+.mcard .brk li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line); color: var(--text); }
+.aptotal { font-size: 15px; color: var(--muted); margin: 8px 0 2px; } .aptotal b { font-size: 26px; color: var(--ink); }
+#apeb:empty { display: none; }
+.appay { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0 4px; }
+.appay .btn { flex-direction: column; padding: 12px 10px; line-height: 1.25; } .appay .btn small { font-weight: 500; font-size: 12px; opacity: .85; }
+.appay[hidden], .appay .btn[hidden] { display: none; }
+.appay:has(> .btn[hidden]) { grid-template-columns: 1fr; }
+.hbill > div { display: block; }
+.hbill .hbrow, .hbill .hbsub { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.hbill small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; } .hbill .hbst { color: var(--text); }
+.hbill .hbst .pl { margin-right: 6px; }
+.hbbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.hbill .hbrow > span:first-child, .hbill .hbsub > span:first-child { flex: 1 1 240px; min-width: 0; }
+.hbtab .tbl { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13.5px; }
+.hbtab .tbl td { padding: 7px 6px; border-top: 1px solid var(--line); vertical-align: top; color: var(--ink); }
+.hbtab .tbl td.num { text-align: right; white-space: nowrap; font-weight: 600; } .hbtab .tbl td.act { text-align: right; width: 1%; white-space: nowrap; }
+.invkv { grid-template-columns: 130px 1fr; }
+.printdoc { background: #fff; color: #111827; border-radius: 10px; padding: 26px; font-size: 14px; line-height: 1.45; }
+.mcard.paper { max-width: 720px; }
+.pd-head { display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap; border-bottom: 2px solid #111827; padding-bottom: 14px; margin-bottom: 14px; }
+.pd-from b { font-size: 18px; } .pd-title { text-align: right; } .pd-title h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: .5px; }
+.pd-to { margin: 0 0 16px; } .pd-to small { display: block; color: #6b7280; text-transform: uppercase; font-size: 11px; letter-spacing: .6px; }
+.pd-lines { width: 100%; border-collapse: collapse; margin: 0 0 16px; } .pd-lines th { text-align: left; border-bottom: 1px solid #9ca3af; padding: 6px 4px; font-size: 12px; color: #4b5563; }
+.pd-lines td { padding: 7px 4px; border-bottom: 1px solid #e5e7eb; } .pd-lines .num { text-align: right; white-space: nowrap; }
+.pd-total td { font-weight: 800; font-size: 16px; border-bottom: 2px solid #111827; }
+.pd-pay { background: #f3f4f6; border-radius: 8px; padding: 10px 12px; } .pd-pay > b { display: block; margin-bottom: 4px; }
+.pd-stamp { display: inline-block; border: 3px solid #15803d; color: #15803d; font-weight: 900; letter-spacing: 3px; padding: 4px 12px; border-radius: 6px; transform: rotate(-4deg); margin: 16px 0 0; }
+.pd-foot { color: #6b7280; margin-top: 14px; font-size: 12.5px; }
+@media (max-width: 520px) { .apmods, .appay { grid-template-columns: 1fr; } .printdoc { padding: 16px; } .pd-title { text-align: left; }
+  .hbtab .tbl, .hbtab .tbl tbody, .hbtab .tbl tr { display: block; } .hbtab .tbl tr { border-top: 1px solid var(--line); padding: 6px 0; }
+  .hbtab .tbl td { display: inline-block; border: 0; padding: 3px 8px 3px 0; } .hbtab .tbl td.act { display: block; text-align: left; width: auto; } }
+@media print {
+  body > *:not(.modal.printing) { display: none !important; }
+  .modal.printing { position: static !important; background: none !important; padding: 0 !important; display: block !important; }
+  .modal.printing .mcard { box-shadow: none !important; border: 0 !important; max-width: none !important; max-height: none !important; overflow: visible !important; padding: 0 !important; background: #fff !important; }
+  .modal.printing .noprint { display: none !important; }
 }

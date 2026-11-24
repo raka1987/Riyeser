@@ -208,6 +208,10 @@ const priceLong = (m) => `${usd(PRICE[m])} a month · ${USERS_LINE}`;
 const priceShort = (m) => `${usd(PRICE[m])}/mo · ${PRICE.users_included} users incl.`;
 const USERS_NOTE = `Every paid program includes ${PRICE.users_included} users; extra users ${usd(PRICE.extra_user)} a month each.`;
 /** The price box at the top of a paid program's page and its checklist. */
+/** Where the two buttons go: create an account (or sign in), then Riyeser home opens "Add to my plan" for these programs. */
+const BUY_LINK = (mods, buy, extra = '') => `/link/?signup&add=${mods}${extra}${buy ? '&buy=1' : ''}`;
+/** "Start free for 90 days" and "Buy now" for a paid program (m = its PRICE key). */
+const buyBtns = (m, cls = '') => `<div class="buybtns${cls ? ' ' + cls : ''}" data-buy="${m}"><a class="btn s sm" href="${BUY_LINK(m, false)}">Start free for 90 days</a><a class="btn p sm" href="${BUY_LINK(m, true)}">Buy now</a></div>`;
 const priceBox = (m, extra = 'Free for 90 days, no card') => `<div class="pricebox"><div><b>${usd(PRICE[m])}</b> a month per business</div><small>${PRICE.users_included} users included · +${usd(PRICE.extra_user)} a month per extra user${extra ? ` · ${extra}` : ''}</small></div>`;
 
 // ---------- what each program includes ----------
@@ -512,7 +516,7 @@ const plusLine = (p, up, asLink = false) => (!p.plus ? '' : asLink
 /** A paid program's price, users included and extra-user price (all from PRICE). */
 const priceTag = (p) => `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(USERS_LINE)}`;
 /** A program's checklist with its price at the top (program pages). */
-const includedCard = (key, name, m, up) => `<div class="inclcard${m ? '' : ' free'}"><div class="ih"><b>${esc(name)}</b>${m ? priceBox(m) : '<div class="pricebox free"><div><b>Free forever</b></div><small>No time limit, no card, no user charges</small></div>'}</div>${inclList(key)}${m ? `<a class="more" href="${up}pricing.html">All prices ${ARR}</a>` : ''}</div>`;
+const includedCard = (key, name, m, up) => `<div class="inclcard${m ? '' : ' free'}"><div class="ih"><b>${esc(name)}</b>${m ? priceBox(m) : '<div class="pricebox free"><div><b>Free forever</b></div><small>No time limit, no card, no user charges</small></div>'}</div>${inclList(key)}${m ? `${buyBtns(m)}<a class="more" href="${up}pricing.html">All prices ${ARR}</a>` : ''}</div>`;
 const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}</h3><p>${esc(p.card || p.one)}</p>${p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}${plusLine(p, up)}<span class="go">${ARR}</span></a>`;
 
 const more = (t) => `<span class="more">${t} ${ARR}</span>`;
@@ -609,7 +613,7 @@ const EDITIONS = [
 const editionsBlock = (up, { download = true } = {}) => `
 <div class="plans eds">${EDITIONS.map((e, i) => `<div class="plan${i ? ' best' : ''}"><span class="tag">${esc(e.tag)}</span><div class="k">${appImg(i ? 'accounting' : 'accounting-basics', up)}${esc(e.name)}</div>
   <div class="price">${esc(e.price)}<small> ${esc(e.small)}</small></div><p>${esc(e.blurb)}</p>
-  <ul class="edlist">${e.has.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>`).join('')}</div>
+  <ul class="edlist">${e.has.map((h) => `<li>${esc(h)}</li>`).join('')}</ul>${buyBtns(i ? 'plus' : 'basic')}</div>`).join('')}</div>
 <p class="sub" style="margin-top:16px">You pay for one or the other, never both: Plus includes everything in Basics, so moving up is ${usd(PRICE.plus - PRICE.basic)} a month more. Two separate apps that open the same books. Move up to Plus or back down to Basics any time: install the other one and it replaces the first, with all your customers, invoices and stock carried over. Plus-only records (payroll, journals, jobs, budgets) are kept safe in Basics and come back in Plus.</p>
 ${download ? `<div class="ctas" style="justify-content:flex-start;margin-top:6px"><a class="btn s" href="${RELEASES}/RiyeserAccountingBasics-Setup.exe">${DL} Download Accounting Basics — 90 days free</a><a class="btn p" href="${RELEASES}/RiyeserAccountingPlus-Setup.exe">${DL} Download Accounting Plus — 90 days free</a></div>` : ''}`;
 const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
@@ -718,7 +722,7 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
 <div class="hero"><div class="c">
   <div>
     <div class="phead-who" style="display:flex;align-items:center;gap:18px;margin-bottom:18px">${iconBox(p, up)}<div><span class="eyebrow" style="margin:0">${esc(p.name)}</span>${badgeOf(p)}${p.plus ? ` ${plusPill(p, up, true)}` : ''}</div></div>
-    <h1>${esc(p.pitch)}</h1><p class="lead">${esc(p.one)}</p>${MOD[p.id] ? priceBox(MOD[p.id]) : ''}${freeInfo(p.id, up)}
+    <h1>${esc(p.pitch)}</h1><p class="lead">${esc(p.one)}</p>${MOD[p.id] ? priceBox(MOD[p.id]) + buyBtns(MOD[p.id], 'hero') : ''}${freeInfo(p.id, up)}
     <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
     ${p.file ? `<p class="fine">Windows 10 &amp; 11 · No account or card needed</p>` : ''}
   </div>
@@ -870,7 +874,7 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Each paid program has its own 
       <tr class="grp"><th colspan="2">${esc(FREE_HEAD)}</th></tr>
       ${FREE.map(([id, n]) => `<tr data-free="${id}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b>${id === 'link' ? ` ${plusPill(prog('link'), up, true)}` : ''}${freeInfo(id, up)}${inclDetails(id, n)}</span></span></td><td class="pr"><b>Free forever</b><small>No user charges</small></td></tr>`).join('')}
       <tr class="grp"><th colspan="2">${esc(PAID_HEAD)} <span class="gnote">${esc(USERS_NOTE)}</span></th></tr>
-      ${ROWS.map(([m, n, id, d]) => `<tr${m === 'calls' ? ' id="link-plus"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(m === 'calls' ? 'link-plus' : id, n)}</span></span></td><td class="pr"><b>${usd(P[m])}</b> a month<small>${P.users_included} users included<br>+${usd(P.extra_user)} a month per extra user</small></td></tr>`).join('')}
+      ${ROWS.map(([m, n, id, d]) => `<tr${m === 'calls' ? ' id="link-plus"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(m === 'calls' ? 'link-plus' : id, n)}</span></span></td><td class="pr"><b>${usd(P[m])}</b> a month<small>${P.users_included} users included<br>+${usd(P.extra_user)} a month per extra user</small>${buyBtns(m, 'row')}</td></tr>`).join('')}
     </tbody></table></div>
   <div class="addon"><div class="big">➕</div><div><b>Good to know</b><p>Each paid program includes ${P.users_included} users. Each extra person is <b>$${P.extra_user} a month for each paid program</b> they use. Another company, trust or client's books in Accounting: <b>$${P.extra_company} a month</b> each. Pay yearly: pay for 10 months and get 12. Riyeser Link chat: space for files shared in chat, ${STORAGE_GB.free} GB of file storage per business free; ${STORAGE_GB.plus} GB with Link Plus. Every paid program is free for 90 days, no card.</p></div></div>
 </section>
@@ -885,7 +889,9 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Each paid program has its own 
       <p class="muted" style="margin:10px 0 4px">Companies in Accounting</p>
       <div class="users"><button type="button" data-c="-1" aria-label="Fewer companies">−</button><input id="cos" type="number" min="1" max="200" value="1" aria-label="Number of companies"><button type="button" data-c="1" aria-label="More companies">+</button></div>
       <label class="yr" style="margin-top:12px"><input id="yearly" type="checkbox"> Pay yearly (10 months for 12)</label></div>
-    <div class="out"><ul class="brk" id="per"></ul><div class="total" id="total"></div><div class="muted" id="note"></div>${EARLY_BIRD ? '<div class="ebline" id="eb"></div>' : ''}<p class="muted small" style="margin:10px 0 0">All prices in US dollars.</p></div>
+    <div class="out"><ul class="brk" id="per"></ul><div class="total" id="total"></div><div class="muted" id="note"></div>${EARLY_BIRD ? '<div class="ebline" id="eb"></div>' : ''}
+      <div class="buybtns calcbtns" id="calcbuy"><a class="btn s" id="calcfree" href="${BUY_LINK('basic', false)}">Start free for 90 days</a><a class="btn p" id="calcpay" href="${BUY_LINK('basic', true)}">Buy this plan</a></div>
+      <p class="muted small" style="margin:10px 0 0">All prices in US dollars. Pay by PayPal (card or PayPal balance) or bank transfer.</p></div>
   </div>
 </section>
 
@@ -898,7 +904,7 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
   <h2 class="h2">For the building industry</h2><p class="sub">As Built is a separate program for trades and construction. It doesn't need Accounting.</p>
   <div class="plans eds"><div class="plan best"><span class="tag">Free for 90 days</span><div class="k">${appImg('services', up)}As Built</div>
     <div class="price">${usd(P.as_built)}<small> a month per business · 3 users included</small></div><p>Map every cable, pipe and duct on your drawings as it goes in, with inspections, test results and photos.</p>
-    <div class="ctas" style="justify-content:flex-start;margin-top:10px"><a class="btn s" href="${up}programs/services.html">About As Built ${ARR}</a></div></div></div>
+    ${buyBtns('as_built')}<div class="ctas" style="justify-content:flex-start;margin-top:10px"><a class="btn s" href="${up}programs/services.html">About As Built ${ARR}</a></div></div></div>
 </section>` : ''}
 
 <section class="c faq" style="max-width:860px">
@@ -916,7 +922,7 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
   <details><summary>How does paying yearly work?</summary><p>Pay for 10 months and get 12: the yearly price is 10 times the monthly price.</p></details>
   ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months, on each program and its extra users (not on extra companies) — for example ${half(P.basic)} instead of $${P.basic} a month for Accounting Basics. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
-  <details><summary>How do I buy?</summary><p>Online checkout is opening soon. Until then, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser licence')}">${EMAIL}</a> with your business name and the programs you want, and we'll send your licence.</p></details>
+  <details><summary>How do I buy?</summary><p>Press <b>Buy now</b> next to a program (or <b>Buy this plan</b> in the price calculator). Create your free Riyeser account, or sign in, and choose how many people and monthly or yearly. Then pay with <b>PayPal</b> (a card or your PayPal balance; it renews by itself until you cancel) or by <b>bank transfer</b> (we give you an invoice with the bank details and a reference; the program switches on when the money arrives). Your free days aren't lost: paid time starts when your 90-day trial ends. Questions? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Buying Riyeser')}">${EMAIL}</a>.</p></details>
 </section>
 ${ctaBlock(up, 'Start free today', 'Install Riyeser Central — the free tools are yours to keep, and every paid program is free to start.')}
 <script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},P=${JSON.stringify(P)},u=document.getElementById('users'),c=document.getElementById('cos'),y=document.getElementById('yearly');
@@ -938,6 +944,8 @@ function draw(e){
   var acc=mods.indexOf('basic')>=0||mods.indexOf('plus')>=0,cos=acc?(k-1)*P.extra_company:0;
   if(cos)per.appendChild(li((k-1)+' extra compan'+(k-1>1?'ies':'y')+' × '+money(P.extra_company),money(cos)));
   var m=progs+cos,t=document.getElementById('total'),note=document.getElementById('note'),eb=document.getElementById('eb');
+  var q='/link/?signup&add='+mods.join(',')+(n!==P.users_included?'&users='+n:'')+(y.checked?'&period=yearly':''),cb=document.getElementById('calcbuy');
+  cb.hidden=!mods.length;document.getElementById('calcfree').href=q;document.getElementById('calcpay').href=q+'&buy=1';
   if(!mods.length){per.appendChild(li('Free tools only','US$0'));t.textContent='US$0 a month';note.textContent='Central, Invoices, Link chat, PDF and Desk Assistant are free forever.';if(eb)eb.textContent='';return}
   if(y.checked){t.textContent=money(m*10)+' a year';note.textContent=money(m)+' a month × 10: 2 months free.'}
   else{t.textContent=money(m)+' a month';note.textContent='After the 90-day free trial. Per business, not per person.'}

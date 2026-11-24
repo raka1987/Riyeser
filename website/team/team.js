@@ -11,8 +11,10 @@
   const $app = document.getElementById('app');
   const NAME = 'Riyeser Link';
   // Prices are in US dollars a month per business (the full list is on riyeser.com/pricing.html, from website/prices.mjs).
-  const PRICE_LINK_PLUS = 39;
-  const PRICE_EXTRA_USER = 7;   // each person after the 3 included, a month, per paid program (website/prices.mjs; riyeser_price('extra_user'))
+  // PRICE is the same list as PRICE in website/prices.mjs and riyeser_price() in team-chat.sql (pay-test.js checks they agree).
+  const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 7, extra_company: 10 };
+  const PRICE_LINK_PLUS = PRICE.calls;
+  const PRICE_EXTRA_USER = PRICE.extra_user;   // each person after the 3 included, a month, per paid program
   const STORAGE_GB = { free: 2, plus: 20 };   // Riyeser Link files per business (the database enforces it: link_storage_limit)
   const GB = 1073741824;
   const usd = (n) => `US$${n % 1 ? n.toFixed(2) : n}`;
@@ -216,6 +218,24 @@
       async confirmFixed(id) { ok(await sb.rpc('ticket_confirm_fixed', { ticket: id })); },
       async rateTicket(id, stars, comment) { ok(await sb.rpc('ticket_rate', { ticket: id, stars, comment: comment || null })); },
       async myRefunds(ws) { return ok(await sb.rpc('my_refunds', { ws })) || []; },
+      // Paying (the owner): null = this database hasn't had the payments part of team-chat.sql yet (Billing then hides).
+      async myBilling(ws) { return soft(sb.rpc('my_billing', { ws })); },
+      async billingQuote(ws, mods, people, period) { return ok(await sb.rpc('billing_quote', { ws, mods, people, billing_period: period })); },
+      async billingStart(ws, mods, people, period, how) { return ok(await sb.rpc('billing_start', { ws, mods, people, billing_period: period, pay_method: how })); },
+      async billingCancelInvoice(ws, ref) { ok(await sb.rpc('billing_cancel_invoice', { ws, invoice_ref: ref })); },
+      // The paypal Edge Function (supabase/functions/paypal on main). Its status says whether PayPal is set up.
+      async paypal(route, body) {
+        const s = body ? ok(await sb.auth.getSession()).session : null;
+        const r = await fetch(`${CFG.supabaseUrl}/functions/v1/paypal/${route}`, { method: body ? 'POST' : 'GET',
+          headers: { apikey: CFG.supabaseKey, ...(s ? { Authorization: `Bearer ${s.access_token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+          body: body ? JSON.stringify(body) : undefined });
+        let j = {}; try { j = await r.json(); } catch { /* not JSON */ }
+        if (!r.ok) throw new Error(j.error || 'PayPal isn\'t answering right now. Try again in a minute, or pay by bank transfer.');
+        return j;
+      },
+      async paypalStatus() { try { return await this.paypal('status'); } catch { return { ready: false }; } },
+      async paypalSubscribe(ws, mods, people, period) { return this.paypal('subscribe', { ws, modules: mods, people, billing: period }); },
+      async paypalCancel(ws) { return this.paypal('cancel', { ws }); },
       // Riyeser Link Office (desk phones). null = the database hasn't had this release's team-chat.sql yet.
       async linkStatus(ws) { try { return ok(await sb.rpc('link_status', { ws })); } catch (e) { if (/PGRST202|Could not find the function|schema cache/i.test(e.message || '')) return null; throw e; } },
       async linkCommand(ws, office, kind, data) { return ok(await sb.rpc('link_command', { ws, office_id: office, kind, data: data || {} })); },
@@ -510,6 +530,8 @@
       async linkMyDnd(w, on) { return this.linkCommand(w, lo.office_id, 'set_dnd', { extension: String((ppl.find((q) => q[0] === AS) || [])[3]), on: !!on }); },
       async linkSupport(_w, allow) { loSupport = allow ? Date.now() + 3600e3 : null; return allow ? { until: new Date(loSupport).toISOString() } : null; },
       async requestRefund(_w, r) { const f = { id: 'f' + (refs.length + 1), ref: 'R-' + (1042 + refs.length), ...r, status: 'submitted', created_at: new Date().toISOString() }; refs.unshift(f); return { id: f.id, ref: f.ref }; },
+      // the demo doesn't take payments (Billing hides)
+      async myBilling() { return null; }, async paypalStatus() { return { ready: false }; },
     };
   }
 
@@ -839,7 +861,7 @@
       <form id="cof">${field('name', 'Business name', 80)}${field('tax_number', 'ABN / TIN / Tax ID', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
       ${lic && isOwner() ? `<h4 style="margin:16px 0 6px">Your plan</h4>${planHtml(lic)}
-        <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Riyeser Link chat. To change your plan, contact Riyeser.</p>` : ''}
+        <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Riyeser Link chat. To add programs or pay, use Billing on your Riyeser home page.</p>` : ''}
       ${admin && devs.length ? `<h4 style="margin:16px 0 6px">Linked PCs</h4><div class="devs">${devs.map((dv) => `<div><span><b>${esc(dv.device_name || 'A PC')}</b><small>${esc(nameOf(dv.user_id))} · ${esc(dv.platform || '')} · seen ${ago(dv.last_seen)}</small></span><button type="button" class="btn sm" data-unlink="${dv.id}">Unlink</button></div>`).join('')}</div>` : ''}
       <div class="mfoot"><button type="button" class="btn" id="cl">Close</button>${admin ? '<button class="btn p">Save</button>' : ''}</div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
@@ -958,7 +980,8 @@
     const solo = t.kind === 'personal'; const team = !solo || S.people.length > 1 || S.requests.length > 0;
     const owner = isOwner();
     if (S.homeLic === undefined || S.homeLicFor !== t.id) { S.homeLicFor = t.id; S.homeLic = admin ? await api.licence(t.id).catch(() => null) : null;
-      S.homeStore = owner ? await api.storage(t.id).catch(() => null) : null; }
+      S.homeStore = owner ? await api.storage(t.id).catch(() => null) : null; S.billing = undefined; }
+    if (owner && S.billing === undefined) await loadBilling();
     const lic = S.homeLic && S.homeLic.modules ? S.homeLic : null;
     await loadHelp();
     if (S.view === 'phones' || S.view === 'myphone') return;   // the Phones or My phone page opened meanwhile (?phones, ?myphone)
@@ -981,10 +1004,11 @@
           <button class="btn" id="hsec">🔐 Security</button></div></section>
         ${myDetailsHtml(me, admin)}
         ${helpHtml()}
-        ${owner && lic ? `<h3 class="hsec" id="hplanv">Your plan <small>${lic.seats ? `${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
+        ${owner && lic ? `<h3 class="hsec" id="hplanv">Your plan <small>${lic.seats ? `${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}${S.billing ? 'To add programs or pay, use Billing below.' : 'To change your plan, contact Riyeser.'}</small></h3>
         <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link Plus (calls)']]
           .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
         ${owner && S.homeStore ? `${lic ? '' : '<h3 class="hsec" id="hplanv">Your plan</h3>'}${storageHtml(S.homeStore)}` : ''}
+        ${owner ? billingHtml() : ''}
         <h3 class="hsec">Riyeser Link</h3>
         <div class="happs"><div class="happ hteam"><img src="/assets/apps/link.png" alt=""><div><b>Riyeser Link${unread ? ` <span class="badge">${unread}</span>` : ''}</b>
           <small>Chat with the people you work with. Calls between you, your staff and other locations come with Riyeser Link Plus.</small>
@@ -1009,7 +1033,9 @@
     on('#hhelp', () => getHelp()); on('#hreport', () => reportIssue()); on('#hrefund', () => (needs2step() ? security() : requestRefund()));
     on('#hmine', () => editMyDetails(me)); on('#hmbiz', () => companyInfo(false));
     $app.querySelectorAll('[data-ticket]').forEach((b) => b.onclick = () => openTicket(b.dataset.ticket));
+    wireBilling($app);
     if (params.has('help') && !S.helpShown) helpLink();
+    else billingLinks();
   }
   // riyeser.com/link/?help opens Get help; ?help#T-10234 (the link in our emails) opens that request; ?help#report opens Report an issue.
   function helpLink() {
@@ -1017,6 +1043,249 @@
     const t = /^T-\d+$/.test(h) && (S.tickets || []).find((x) => x.ref === h);
     if (t || h === 'REPORT') { S.helpShown = true; params.delete('help'); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '')); return t ? openTicket(t.id) : reportIssue(); }
     return getHelp();
+  }
+
+  // ------------------------------------------------------------------ paying: Add to my plan / Pay, and Billing (the owner only)
+  // riyeser.com's Buy now and Start free buttons come here as ?signup&add=plus,payroll&users=5&period=yearly&buy=1: after
+  // sign-in the owner gets "Add to my plan" for those programs. The total uses PRICE (the same list as prices.mjs and
+  // riyeser_bill in team-chat.sql); the database works it out again when you pay (billing_start), early bird included.
+  // Pay with PayPal (card or PayPal balance) goes through the paypal function to PayPal and back (?paid=RI-…);
+  // bank transfer makes an invoice with the bank details. Only the owner can pay or see billing (the database checks).
+  const PAID_MODS = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']];
+  const modLabel = (m) => (PAID_MODS.find((x) => x[0] === m) || [m, m])[1];
+  const money = (n) => `US$${Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const longDay = (d) => (d ? new Date(String(d).length === 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : '');
+  /** The same sum as riyeser_bill (no extra companies): each program + PRICE.extra_user for each person over 3; yearly x 10. */
+  function billFor(mods, people, period, early = false) {
+    const m = PAID_MODS.map((x) => x[0]).filter((k) => mods.includes(k) && !(k === 'basic' && mods.includes('plus')));
+    const extra = Math.max(0, people - PRICE.users_included);
+    const lines = m.map((k) => ({ module: k, name: modLabel(k), price: PRICE[k], extra, monthly: PRICE[k] + extra * PRICE.extra_user }));
+    const monthly = lines.reduce((a, l) => a + l.monthly, 0);
+    const total = Math.round(monthly * (period === 'yearly' ? 10 : 1) * (early ? 0.5 : 1) * 100) / 100;
+    return { mods: m, lines, monthly, total };
+  }
+  const payParams = () => {
+    const add = (params.get('add') || '').split(',').map((x) => x.trim().toLowerCase()).filter((x) => PAID_MODS.some((p) => p[0] === x));
+    const users = Math.max(1, Math.min(500, parseInt(params.get('users') || '', 10) || 0)) || null;
+    return { add, users, period: params.get('period') === 'yearly' ? 'yearly' : 'monthly', buy: params.has('buy') };
+  };
+  const dropParams = (...keys) => { keys.forEach((k) => params.delete(k)); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash); };
+
+  // What the home shows under Billing (null: this database hasn't had the payments part of team-chat.sql yet).
+  async function loadBilling() {
+    if (!isOwner()) { S.billing = null; return; }
+    [S.billing, S.paypal] = await Promise.all([api.myBilling(S.team.id).catch(() => null), S.paypal ? S.paypal : api.paypalStatus().catch(() => ({ ready: false }))]);
+  }
+  const orderWhat = (o) => `${(o.modules || []).map(modLabel).join(', ')} · ${o.people} ${o.people === 1 ? 'person' : 'people'} · ${o.billing === 'yearly' ? 'yearly' : 'monthly'}`;
+  function subLine(o) {
+    const until = o.works_until || o.paid_through;
+    if (o.status === 'pending') return '<span class="pl">Waiting for PayPal to confirm</span>';
+    if (o.status === 'active') return `<span class="pl ok">Active</span> ${o.next_charge_at ? `Next charge <b>${money(o.next_amount)}</b> on <b>${longDay(o.next_charge_at)}</b>` : ''}`;
+    if (o.status === 'payment_failed') return `<span class="pl bad">Payment didn't go through</span> Everything keeps working until <b>${longDay(until)}</b>. PayPal tries again by itself: check the card or PayPal account you pay with, or pay by bank transfer.`;
+    if (o.status === 'suspended') return `<span class="pl bad">PayPal stopped this subscription</span>${until ? ` Everything works until <b>${longDay(until)}</b>.` : ''} Pay again below to carry on.`;
+    if (o.status === 'cancelled') return `<span class="pl warn">Cancelled</span>${until ? ` Works until <b>${longDay(until)}</b>, then stops. Nothing is deleted.` : ''}`;
+    return `<span class="pl">${esc(o.status)}</span>`;
+  }
+  function billingHtml() {
+    const b = S.billing; if (!b) return '';
+    const sub = b.subscription; const invoices = (b.orders || []).filter((o) => o.method === 'bank');
+    const pays = b.payments || [];
+    return `<h3 class="hsec" id="hbill">Billing <small>Only you, the owner, see this. All amounts in US dollars.</small></h3>
+      <div class="hplan hbill">
+        <div class="hbrow"><span><b>Pay for Riyeser</b><small>Add programs or people, monthly or yearly. PayPal (card or PayPal balance) or bank transfer.</small></span><button class="btn p sm" id="haddplan">➕ Add to my plan / Pay</button></div>
+        ${sub ? `<div class="hbsub" id="hbsub"><span><b>PayPal subscription</b> <span class="muted">${esc(sub.ref)}</span><small>${esc(orderWhat(sub))} · ${money(sub.amount)} a ${sub.billing === 'yearly' ? 'year' : 'month'}${sub.early_bird ? ` (🐣 ${money(sub.first_amount)} for the first ${sub.early_cycles === 1 ? 'year' : sub.early_cycles + ' months'})` : ''}</small>
+          <small class="hbst">${subLine(sub)}</small></span>
+          <span class="hbbtns"><a class="btn sm" href="${esc(b.paypal_manage_url)}" target="_blank" rel="noopener">Manage in PayPal</a>${['active', 'payment_failed', 'suspended'].includes(sub.status) ? '<button class="btn sm danger" id="hbcancel">Cancel subscription</button>' : ''}</span></div>` : ''}
+        ${invoices.length ? `<div class="hbtab"><b>Invoices</b><table class="tbl" id="hbinv">${invoices.map((o) => `<tr><td><b>${esc(o.ref)}</b><small>${shortDay(o.created_at)}</small></td><td>${esc(orderWhat(o))}</td><td class="num">${money(o.total)}</td>
+          <td>${o.status === 'paid' ? '<span class="pl ok">Paid</span>' : o.status === 'void' ? '<span class="pl">Cancelled</span>' : `<span class="pl${o.due_date < today() ? ' bad' : ' warn'}">Due ${shortDay(o.due_date)}</span>`}</td>
+          <td class="act"><button class="btn sm" data-inv="${esc(o.ref)}">View</button></td></tr>`).join('')}</table></div>` : ''}
+        <div class="hbtab"><b>Payment history</b>${pays.length ? `<table class="tbl" id="hbpay">${pays.map((p) => `<tr><td>${shortDay(p.at)}<small>${p.ref ? esc(p.ref) : ''}</small></td><td>${p.method === 'paypal' ? 'PayPal' : 'Bank transfer'}<small>${esc((p.module_names || []).join(', '))}</small></td>
+          <td class="num">${p.amount != null ? money(p.amount) : ''}</td><td>${p.status === 'completed' ? `<span class="pl ok">Paid</span>${p.period_to ? `<small>to ${shortDay(p.period_to)}</small>` : ''}` : `<span class="pl bad">Didn't go through</span>${p.note ? `<small>${esc(p.note)}</small>` : ''}`}</td>
+          <td class="act">${p.status === 'completed' ? `<button class="btn sm" data-rcpt="${esc(p.ref)}">Receipt</button>` : ''}</td></tr>`).join('')}</table>` : '<p class="muted small" style="margin:6px 0 0">No payments yet.</p>'}</div>
+      </div>`;
+  }
+  const today = () => new Date().toISOString().slice(0, 10);
+  function wireBilling(root) {
+    const on = (sel, fn) => { const el = root.querySelector(sel); if (el) el.onclick = fn; };
+    on('#haddplan', () => addToPlan({}));
+    on('#hbcancel', cancelSubscription);
+    root.querySelectorAll('[data-inv]').forEach((b) => b.onclick = () => { const o = (S.billing.orders || []).find((x) => x.ref === b.dataset.inv); if (o) invoiceView(o); });
+    root.querySelectorAll('[data-rcpt]').forEach((b) => b.onclick = () => { const p = (S.billing.payments || []).find((x) => x.ref === b.dataset.rcpt); if (p) printDoc(receiptHtml(p), `Receipt ${p.ref}`); });
+  }
+
+  // "Add to my plan": the programs, how many people, monthly or yearly, the total, and the two ways to pay.
+  async function addToPlan({ add = [], users = null, period = 'monthly', buy = true } = {}) {
+    if (!isOwner()) {
+      const ownerP = S.people.find((p) => p.role === 'owner');
+      return modal(`<h3>Add to the plan</h3><p>Only the owner of ${esc(S.team.name)}${ownerP ? ` (${esc(ownerP.display_name)})` : ''} can pay for Riyeser. Ask them to sign in at riyeser.com/link and choose <b>Add to my plan</b>.</p>
+        ${add.length ? `<p>You picked: <b>${esc(add.map(modLabel).join(', '))}</b>. ${buy ? '' : 'It\'s free for 90 days in the meantime.'}</p>` : ''}<div class="mfoot"><button class="btn p" id="cl">OK</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
+    }
+    if (S.billing === undefined) await loadBilling();
+    if (!S.billing) return modal('<h3>Add to my plan</h3><p>Paying online is still being switched on. Email info@riyeser.com with the programs you want, and we\'ll send you an invoice.</p><div class="mfoot"><button class="btn p" id="cl">OK</button></div>', (d, close) => { d.querySelector('#cl').onclick = close; });
+    const lic = S.billing.licence || {}; const L = lic.modules || {};
+    const sub = S.billing.subscription && ['active', 'payment_failed', 'suspended'].includes(S.billing.subscription.status) ? S.billing.subscription : null;
+    let chosen = add.length ? add.slice() : [];
+    if (chosen.includes('plus')) chosen = chosen.filter((m) => m !== 'basic');
+    const people0 = users || Math.max(PRICE.users_included, (lic.seats && lic.seats.used) || S.people.length || 1);
+    const state = (m) => { const v = L[m] || {}; return v.status === 'active' ? `Paid to ${shortDay(v.paid_until)}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' && v.active ? `Works to ${shortDay(v.paid_until)}` : 'Not active'; };
+    modal(`<h3>${buy ? '➕ Add to my plan / Pay' : '➕ Add to my plan'}</h3>
+      <p>${buy ? 'Choose what to pay for.' : 'You\'re on the 90-day free trial: nothing to pay today. When you\'re ready, choose what to pay for here.'} Prices are per business, in US dollars, with ${PRICE.users_included} people included in each program.</p>
+      <form id="apf"><div class="apmods">${PAID_MODS.map(([m, n]) => `<label class="apm"><input type="checkbox" name="m" value="${m}"${chosen.includes(m) ? ' checked' : ''}><span><b>${n}</b><small>${usd(PRICE[m])} a month · ${esc(state(m))}</small></span></label>`).join('')}</div>
+      <p class="muted small" id="apnote" hidden>Accounting Plus includes everything in Basics, so you pay for one or the other.</p>
+      <div class="f2 apopts"><label class="f"><span>People using Riyeser</span><input name="people" type="number" min="1" max="500" value="${people0}" inputmode="numeric"></label>
+        <div class="f"><span>Pay</span><label class="opt sm"><input type="radio" name="period" value="monthly"${period !== 'yearly' ? ' checked' : ''}> Monthly</label><label class="opt sm"><input type="radio" name="period" value="yearly"${period === 'yearly' ? ' checked' : ''}> Yearly (10 months for 12)</label></div></div>
+      <ul class="brk" id="apbrk"></ul><div class="aptotal" id="aptotal"></div><p class="muted small" id="apeb"></p>
+      <p class="muted small">Your free days aren't lost: paid time starts when each program's free trial ends. You can cancel any time.</p>
+      <div id="aperr"></div>
+      ${sub ? `<div class="ok">You already pay by PayPal (${esc(sub.ref)}). To change that plan, cancel it under Billing first (it keeps working to the end of what's paid), then pay for the new plan here. Or pay for extra programs by bank transfer.</div>` : ''}
+      <div class="appay"><button type="button" class="btn p" id="appaypal"${S.paypal && S.paypal.ready && !sub ? '' : ' hidden'}>Pay with PayPal <small>card or PayPal balance</small></button>
+        <button type="button" class="btn" id="apbank">Pay by bank transfer <small>we give you an invoice</small></button></div>
+      ${S.paypal && S.paypal.ready ? '' : '<p class="muted small" id="apnopp">Paying by PayPal isn\'t switched on yet, so it\'s bank transfer for now.</p>'}
+      <div class="mfoot"><button type="button" class="btn" id="cl">${buy ? 'Cancel' : 'Not now'}</button></div></form>`, (d, close) => {
+      d.querySelector('.mcard').classList.add('wide');
+      const f = d.querySelector('#apf'); let quote = null; let qn = 0;
+      const read = () => { const mods = [...f.querySelectorAll('input[name=m]:checked')].map((x) => x.value);
+        return { mods, people: Math.max(1, Math.min(500, parseInt(f.people.value, 10) || 1)), period: f.querySelector('input[name=period]:checked').value }; };
+      const draw = async (e) => {
+        const t = e && e.target; const bx = (m) => f.querySelector(`input[value=${m}]`);
+        if (t === bx('plus') && t.checked) bx('basic').checked = false; if (t === bx('basic') && t.checked) bx('plus').checked = false;
+        const r = read(); const bill = billFor(r.mods, r.people, r.period);
+        d.querySelector('#apnote').hidden = !r.mods.includes('plus');
+        d.querySelector('#apbrk').innerHTML = bill.lines.map((l) => `<li><span>${esc(l.name)} (${usd(l.price)}${l.extra ? ` + ${l.extra} extra ${l.extra === 1 ? 'person' : 'people'} × ${usd(PRICE.extra_user)}` : `, ${PRICE.users_included} people included`})</span><b>${usd(l.monthly)}</b></li>`).join('')
+          || '<li><span>Tick a program</span><b>US$0</b></li>';
+        d.querySelector('#aptotal').innerHTML = bill.mods.length ? `${r.period === 'yearly' ? `<b>${money(bill.total)}</b> a year <small>(${usd(bill.monthly)} a month × 10)</small>` : `<b>${money(bill.total)}</b> a month`}` : '';
+        d.querySelector('.appay').hidden = !bill.mods.length;
+        // the database's quote: the same total, and the early bird if this business can have it
+        const n = ++qn; quote = null; d.querySelector('#apeb').textContent = '';
+        if (!bill.mods.length) return;
+        try { const q = await api.billingQuote(S.team.id, bill.mods, r.people, r.period); if (n !== qn) return; quote = q;
+          if (Math.abs(Number(q.amount) - bill.total) > 0.005) d.querySelector('#aptotal').innerHTML = `<b>${money(q.amount)}</b> a ${r.period === 'yearly' ? 'year' : 'month'}`;
+          d.querySelector('#apeb').innerHTML = q.early_bird ? `🐣 <b>Early bird:</b> ${money(q.first_amount)} a ${r.period === 'yearly' ? 'year for your first year' : `month for your first ${q.early_cycles} months`}, then ${money(q.amount)}.` : '';
+        } catch { /* the total above stands; paying checks again */ }
+      };
+      f.querySelectorAll('input').forEach((i) => { i.addEventListener('change', draw); i.addEventListener('input', draw); });
+      draw();
+      d.querySelector('#cl').onclick = close;
+      const fail = (err) => { d.querySelector('#aperr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; d.querySelectorAll('.appay button').forEach((b) => { b.disabled = false; }); };
+      const go = (how) => async () => {
+        const r = read(); const bill = billFor(r.mods, r.people, r.period);
+        if (!bill.mods.length) return fail(new Error('Tick at least one program.'));
+        d.querySelectorAll('.appay button').forEach((b) => { b.disabled = true; }); d.querySelector('#aperr').innerHTML = '';
+        try {
+          if (how === 'paypal') {
+            d.querySelector('#aperr').innerHTML = '<div class="ok">Taking you to PayPal…</div>';
+            const x = await api.paypalSubscribe(S.team.id, bill.mods, r.people, r.period);
+            location.assign(x.approve_url); return;
+          }
+          const o = await api.billingStart(S.team.id, bill.mods, r.people, r.period, 'bank');
+          close(); await loadBilling(); if (S.home) await renderHome(); invoiceView(o, true);
+        } catch (err) { fail(err); }
+      };
+      d.querySelector('#appaypal').onclick = go('paypal'); d.querySelector('#apbank').onclick = go('bank');
+    });
+  }
+
+  // The bank transfer invoice: number, amount, due date, the reference to quote, and the bank details.
+  function invoiceView(o, fresh = false) {
+    const bank = (o.seller && o.seller.bank) || {}; const has = !!String(bank.account_number || '').trim();
+    const kv = [['Account name', bank.account_name], ['Bank', bank.bank_name], ['BSB', bank.bsb], ['Account number', bank.account_number], ['SWIFT / BIC', bank.swift]].filter(([, v]) => String(v || '').trim());
+    modal(`<h3>🧾 Invoice ${esc(o.ref)}</h3>${fresh ? '<div class="ok">Your invoice is ready. The programs switch on as soon as Riyeser sees the money (usually 1–2 working days). Your free trial carries on until then.</div>' : ''}
+      <dl class="hkv invkv"><dt>Amount</dt><dd><b>${money(o.total)}</b> (US dollars)</dd><dt>For</dt><dd>${esc(orderWhat(o))}</dd>
+        <dt>Due</dt><dd>${longDay(o.due_date)}</dd><dt>Reference</dt><dd><span class="code" id="invref">${esc(o.ref)}</span> <small class="muted">put this on your transfer</small></dd>
+        <dt>Status</dt><dd>${o.status === 'paid' ? '<span class="pl ok">Paid</span>' : o.status === 'void' ? '<span class="pl">Cancelled</span>' : '<span class="pl warn">Waiting for your payment</span>'}</dd></dl>
+      <h4 style="margin:14px 0 6px">Pay to</h4>
+      ${has ? `<dl class="hkv invkv" id="invbank">${kv.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>${bank.note ? `<p class="muted small">${esc(bank.note)}</p>` : ''}
+        <p class="muted small">Send US$${Number(o.total).toFixed(2)}. If your bank changes it from your own currency, any fees are yours.</p>`
+        : '<p id="invnobank">Riyeser will email you the bank details for this invoice within one working day. Or email info@riyeser.com.</p>'}
+      <div class="mfoot">${o.status === 'pending' ? '<button class="btn" id="invcancel" style="margin-right:auto">Cancel invoice</button>' : ''}<button class="btn" id="invprint">🖨 Print or save as PDF</button><button class="btn p" id="cl">Done</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#invprint').onclick = () => printDoc(invoiceHtml(o), `Invoice ${o.ref}`);
+      const cx = d.querySelector('#invcancel'); if (cx) cx.onclick = async () => {
+        if (!(await ask(`Cancel invoice ${o.ref}? Don't pay it after this. Your programs stay as they are now, and you can make a new invoice any time.`, { yes: 'Cancel invoice', no: 'Keep it', danger: true }))) return;
+        try { await api.billingCancelInvoice(S.team.id, o.ref); close(); await loadBilling(); if (S.home) renderHome(); phMsg('Invoice cancelled.', 'ok'); } catch (err) { tell(plainError(err)); } };
+    });
+  }
+
+  // Cancel the PayPal subscription: say exactly what happens first (in-page, never the browser's own box).
+  async function cancelSubscription() {
+    const sub = S.billing && S.billing.subscription; if (!sub) return;
+    if (S.aal !== 'aal2') { tell('Turn on two-step sign-in (🔐 Security) to cancel. It keeps your business safe.'); return security(); }
+    const until = sub.works_until || sub.paid_through;
+    const yes = await ask(`If you cancel, PayPal won't charge you again. ${orderWhat(sub).split(' · ')[0]} keep${sub.modules.length === 1 ? 's' : ''} working until ${until ? longDay(until) : 'the end of what you\'ve paid'}, then stop${sub.modules.length === 1 ? 's' : ''}. Nothing is deleted: you can still open and print everything, and you can pay again any time.`,
+      { title: 'Cancel your PayPal subscription?', yes: 'Cancel subscription', no: 'Keep it', danger: true });
+    if (!yes) return;
+    try { const r = await api.paypalCancel(S.team.id); await loadBilling(); if (S.home) await renderHome();
+      phMsg(`Cancelled. Everything keeps working until ${longDay(r.works_until || until)}.`, 'ok'); }
+    catch (err) { tell(plainError(err)); }
+  }
+
+  // Back from PayPal (?paid=RI-…): "Thanks, we're confirming your payment", until PayPal tells Riyeser it went through.
+  async function paidReturn(ref) {
+    let tries = 0;
+    modal(`<h3>🙏 Thanks, we're confirming your payment</h3><p id="pdmsg">PayPal is letting Riyeser know. This usually takes less than a minute. You can close this: it carries on by itself.</p>
+      <div class="mfoot"><button class="btn p" id="cl">Close</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      const tick = async () => {
+        if (!document.body.contains(d)) return;
+        await loadBilling();
+        const o = S.billing && (S.billing.orders || []).find((x) => x.ref === ref);
+        const done = o && ['active', 'paid'].includes(o.status) && o.paid_through;
+        if (done) { d.querySelector('h3').textContent = '✅ Payment confirmed';
+          d.querySelector('#pdmsg').innerHTML = `${esc(orderWhat(o))}: paid until <b>${longDay(o.paid_through)}</b>. Your receipt is under Billing. Riyeser Central picks it up by itself.`;
+          if (S.home) renderHome(); return; }
+        if (o && o.status === 'payment_failed') { d.querySelector('#pdmsg').innerHTML = `PayPal couldn't take the payment. ${subLine(o)}`; return; }
+        if (++tries < 40) setTimeout(tick, 3000);
+        else d.querySelector('#pdmsg').textContent = 'PayPal hasn\'t confirmed it yet. It can take a few minutes: check Billing on this page later. If you were charged and it still says waiting tomorrow, use Get help.';
+      };
+      setTimeout(tick, 1500);
+    });
+  }
+  // On the home page, after sign-in: ?add (from riyeser.com's buttons), ?paid / ?paycancel (back from PayPal).
+  function billingLinks() {
+    if (S.billingLinked) return; S.billingLinked = true;
+    if (params.has('paid')) { const ref = params.get('paid'); dropParams('paid', 'subscription_id', 'ba_token', 'token'); return paidReturn(ref); }
+    if (params.has('paycancel')) { dropParams('paycancel', 'subscription_id', 'ba_token', 'token'); return tell('You didn\'t finish at PayPal, so nothing was charged. You can pay again under Billing.', 'warn'); }
+    if (params.has('add')) { const p = payParams(); dropParams('add', 'buy', 'users', 'period', 'signup'); if (p.add.length || p.buy) return addToPlan(p); }
+    return null;
+  }
+
+  // ---- printable invoice and receipt (the browser's Print, or Save as PDF)
+  function sellerBlock(s) {
+    s = s || {}; const lines = [s.address, s.tax_number ? `${s.tax_label || 'ABN'} ${s.tax_number}` : '', s.email].filter((x) => String(x || '').trim());
+    return `<div class="pd-from"><b>${esc(s.name || 'Riyeser')}</b>${lines.map((l) => `<div>${esc(l)}</div>`).join('')}</div>`;
+  }
+  const buyerBlock = () => { const t = S.team; return `<div class="pd-to"><small>Bill to</small><b>${esc(t.legal_name || t.name)}</b>${[t.address, t.tax_number ? `Tax number ${t.tax_number}` : '', t.email, t.company_code ? `Riyeser ID ${t.company_code}` : ''].filter(Boolean).map((l) => `<div>${esc(l)}</div>`).join('')}</div>`; };
+  function linesFor(o) {
+    const bill = billFor(o.modules || [], o.people || 3, o.billing);
+    const k = o.billing === 'yearly' ? 10 : 1;
+    if (Math.abs(bill.total - Number(o.amount)) > 0.005) return [[`Riyeser: ${orderWhat(o)}`, Number(o.amount)]];
+    const rows = bill.lines.map((l) => [`${l.name}${l.extra ? `, with ${l.extra} extra ${l.extra === 1 ? 'person' : 'people'} × ${usd(PRICE.extra_user)}` : `, ${PRICE.users_included} people included`}${k === 10 ? ' (a year: 10 months)' : ' (a month)'}`, l.monthly * k]);
+    if (o.first_amount != null && Number(o.first_amount) < Number(o.amount)) rows.push(['🐣 Early bird: half price for the first 12 months', Number(o.first_amount) - Number(o.amount)]);
+    return rows;
+  }
+  const docTable = (rows, total, label) => `<table class="pd-lines"><tr><th>Description</th><th class="num">US$</th></tr>${rows.map(([t, v]) => `<tr><td>${esc(t)}</td><td class="num">${Number(v).toFixed(2)}</td></tr>`).join('')}
+    <tr class="pd-total"><td>${label}</td><td class="num">${money(total)}</td></tr></table>`;
+  function invoiceHtml(o) {
+    const bank = (o.seller && o.seller.bank) || {}; const has = !!String(bank.account_number || '').trim();
+    return `<div class="pd-head">${sellerBlock(o.seller)}<div class="pd-title"><h1>Invoice</h1><div>No. <b>${esc(o.ref)}</b></div><div>Date ${longDay(o.created_at)}</div><div>Due ${longDay(o.due_date)}</div></div></div>
+      ${buyerBlock()}${docTable(linesFor(o), o.total, 'Total to pay (US dollars)')}
+      <div class="pd-pay"><b>How to pay: bank transfer</b>${has ? [['Account name', bank.account_name], ['Bank', bank.bank_name], ['BSB', bank.bsb], ['Account number', bank.account_number], ['SWIFT / BIC', bank.swift]].filter(([, v]) => String(v || '').trim()).map(([k2, v]) => `<div>${k2}: <b>${esc(v)}</b></div>`).join('') + (bank.note ? `<div>${esc(bank.note)}</div>` : '') : '<div>Riyeser will email you the bank details.</div>'}
+        <div>Reference: <b>${esc(o.ref)}</b> (please quote it so we can match your payment)</div></div>
+      ${o.status === 'paid' ? `<p class="pd-stamp">PAID${o.paid_at ? ` ${longDay(o.paid_at)}` : ''}</p>` : ''}<p class="pd-foot">Thank you for using Riyeser.</p>`;
+  }
+  function receiptHtml(p) {
+    const o = { modules: p.modules, people: p.people, billing: p.billing, amount: p.amount };
+    return `<div class="pd-head">${sellerBlock(p.seller)}<div class="pd-title"><h1>Receipt</h1><div>No. <b>${esc(p.ref)}</b></div><div>Paid ${longDay(p.at)}</div><div>For invoice ${esc(p.order_ref)}</div></div></div>
+      ${buyerBlock()}${docTable([[`Riyeser: ${orderWhat(o)}${p.period_to ? `, paid until ${longDay(p.period_to)}` : ''}`, p.amount]], p.amount, 'Paid (US dollars)')}
+      <div class="pd-pay"><b>Paid by ${p.method === 'paypal' ? 'PayPal' : 'bank transfer'}</b>${p.provider_ref ? `<div>Reference ${esc(p.provider_ref)}</div>` : ''}</div>
+      <p class="pd-stamp">PAID</p><p class="pd-foot">Thank you for using Riyeser.</p>`;
+  }
+  function printDoc(html, title) {
+    modal(`<div class="printdoc" id="printdoc">${html}</div><div class="mfoot noprint"><button class="btn" id="cl">Close</button><button class="btn p" id="pp">🖨 Print or save as PDF</button></div>`, (d, close) => {
+      d.classList.add('printing'); d.querySelector('.mcard').classList.add('wide', 'paper');
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#pp').onclick = () => { const t = document.title; document.title = title; window.print(); document.title = t; };
+    });
   }
 
   // ------------------------------------------------------------------ your details (so Riyeser has the right name and phone for you)
@@ -2259,7 +2528,7 @@
   async function planBilling() {
     if (!isOwner()) return;
     S.home = true; await renderHome();
-    const x = document.getElementById('hplanv'); if (x) x.scrollIntoView({ block: 'start' });
+    const x = document.getElementById('hbill') || document.getElementById('hplanv'); if (x) x.scrollIntoView({ block: 'start' });
   }
 
   function modal(html, wire) {

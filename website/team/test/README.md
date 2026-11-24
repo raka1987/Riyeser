@@ -75,3 +75,19 @@
   and the 80% warning in Billing & Subscription, the plain message when an upload would go over, and HQ's File storage
   card, Grant extra storage and "Storage over 80%". `rules-test.sql` checks the upload rule, the limits, who can see the
   usage and that granting needs `licences.manage`.
+- `pay-test.js`: paying for Riyeser against a pretend Supabase and a pretend `paypal` function, at desktop and 390px: every paid
+  program's **Start free for 90 days** and **Buy now** (pricing rows and checklists, program pages) and the calculator's **Buy this
+  plan** go to `/link/?signup&add=…` (the sign-up email's link keeps it); after sign-in **Add to my plan** opens for those programs
+  (people, monthly or yearly, the total, the database's early bird); **Pay with PayPal** to PayPal and back ("Thanks, we're
+  confirming your payment", then confirmed); **bank transfer** (the invoice, bank details, reference, printable invoice and
+  receipt); **Billing** (next charge, a failed payment's grace date, invoices, history, Manage in PayPal, Cancel with the in-page
+  question); PayPal not set up (bank transfer only); no bank details yet; admins can't pay or see billing; an older database;
+  no browser pop-ups; and that `prices.mjs`, `team.js`, `hq.js` and `riyeser_price()` have the same prices.
+  HQ: `../../hq/test-hq-pay.js` (Invoices & payments in demo mode: the PayPal card, failed payments and unpaid invoices in the
+  work queue, Mark bank transfer paid, masked PayPal ids, the Billing entity and "Add your bank details", the Money tab).
+  `rules-test.sql` covers the database side: only the owner quotes, pays and sees billing (admins, staff and other businesses
+  can't; nobody reads the tables); bank invoices (licence off until HQ marks it paid; only `licences.manage`; the HQ history);
+  the versioned Billing entity (old invoices keep old details); PayPal webhooks applied once each (duplicates, the same sale
+  twice, wrong amount or currency, unknown subscriptions), a failed payment's grace, retry, cancel (works to the paid date),
+  masked ids for HQ; only the service role records PayPal's side. The function itself: `supabase/functions/paypal` on `main`
+  (`deno test supabase/functions/paypal`).

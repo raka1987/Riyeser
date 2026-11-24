@@ -668,3 +668,13 @@ h2.ghead { font-size: 22px; text-transform: none; letter-spacing: -.3px; color: 
 .menu-pop em.mprice i { font-style: normal; color: var(--muted); font-weight: 600; }
 .gal { grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); }
 .ptable td { vertical-align: top; } .ptable .pn { align-items: flex-start; } .ptable td.pr { padding-top: 14px; }
+/* "Start free for 90 days" and "Buy now" next to each paid program's price (both go to /link/?signup&add=…) */
+.buybtns { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.buybtns .btn { white-space: nowrap; }
+.buybtns.hero { margin: 4px 0 14px; }
+.buybtns.row { margin: 8px 0 0; }
+.buybtns.row .btn.sm { padding: 7px 12px; font-size: 13.5px; }
+.buybtns.calcbtns { justify-content: center; margin-top: 16px; }
+.buybtns[hidden] { display: none; }
+.plan .buybtns { margin-top: 14px; }
+@media (max-width: 640px) { .buybtns .btn { flex: 1 1 auto; white-space: normal; text-align: center; } .ptable td.pr .buybtns { flex-direction: column; } }

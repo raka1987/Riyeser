@@ -1399,7 +1399,8 @@ create or replace function public.hq_settings_json() returns json
     'support.overdue_hours', public.hq_setting_num('support.overdue_hours', 24),
     'support.escalate_hours', public.hq_setting_num('support.escalate_hours', 48),
     'refunds.two_person_threshold', public.hq_setting_num('refunds.two_person_threshold', 200),
-    'offers.self_limit_days', public.hq_setting_num('offers.self_limit_days', 31))
+    'offers.self_limit_days', public.hq_setting_num('offers.self_limit_days', 31),
+    'billing.grace_days', public.hq_setting_num('billing.grace_days', 7))
 $$;
 create or replace function public.hq_get_settings() returns json
   language plpgsql stable security definer set search_path = public as $$
@@ -1408,7 +1409,7 @@ create or replace function public.hq_set_setting(setting text, val numeric) retu
   language plpgsql security definer set search_path = public as $$
 begin
   perform hq_need(array['settings.manage']);
-  if setting not in ('support.overdue_hours', 'support.escalate_hours', 'refunds.two_person_threshold', 'offers.self_limit_days') then
+  if setting not in ('support.overdue_hours', 'support.escalate_hours', 'refunds.two_person_threshold', 'offers.self_limit_days', 'billing.grace_days') then
     raise exception 'That isn''t a setting HQ can change.'; end if;
   if val is null or val <= 0 or val > 100000 then raise exception 'Choose a number above 0.'; end if;
   insert into hq_settings (key, value) values (setting, val::text) on conflict (key) do update set value = excluded.value;
@@ -2718,6 +2719,8 @@ begin
         from refund_requests f where f.workspace_id = ws) end,
     'offers', (select coalesce(json_agg(offer_row_json(o) order by o.created_at desc), '[]') from offers o where o.workspace_id = ws),
     'credit', credit_json(ws),
+    -- invoices and payments (PayPal ids show only their last 6 characters)
+    'billing', case when hq_can('licences.view') then hq_company_billing(ws) end,
     'history', case when hq_can('audit.view') then (select coalesce(json_agg(json_build_object('at', a.at, 'who', coalesce(staff_name(a.actor), 'Riyeser'),
         'action', a.action, 'ticket', a.ticket, 'details', a.details) order by a.at desc), '[]')
         from (select * from hq_audit where workspace_id = ws order by at desc limit 100) a) end);
@@ -4057,6 +4060,18 @@ begin
       select 3, 'refund', f.workspace_id, 'Refund waiting', f.currency || ' ' || f.amount || ' · ' || f.for_what, coalesce(public.staff_name(f.decided_by), 'Finance'), 'Review', f.id::text, f.created_at
       from refund_requests f where f.status in ('submitted', 'reviewing') and hq_can('refunds.approve')
       union all
+      -- PayPal couldn't take a payment (in its grace period), or PayPal stopped trying
+      select 2, 'payment', o.workspace_id, case when o.status = 'suspended' then 'Payments stopped' else 'Payment failed' end,
+        o.ref || ' · ' || public.billing_money(o.amount) || coalesce(' · works until ' || to_char(o.grace_until, 'FMDD Mon YYYY'), ''),
+        'Finance', 'Review', o.ref, o.updated_at
+      from billing_orders o where o.status in ('payment_failed', 'suspended') and hq_can('licences.view')
+      union all
+      -- a bank transfer invoice not marked paid yet
+      select 3, 'invoice', o.workspace_id, case when o.due_date < current_date then 'Invoice overdue' else 'Invoice unpaid' end,
+        o.ref || ' · ' || public.billing_money(coalesce(o.first_amount, o.amount)) || ' · due ' || to_char(o.due_date, 'FMDD Mon YYYY'),
+        'Finance', 'Mark paid', o.ref, o.created_at
+      from billing_orders o where o.method = 'bank' and o.status = 'pending' and hq_can('licences.view')
+      union all
       select 4, 'follow_up', n.workspace_id, 'Follow-up due', left(n.body, 120), coalesce(public.staff_name(n.author), 'Riyeser'), 'Follow up', n.id::text, n.follow_up::timestamptz
       from hq_notes n where n.author = auth.uid() and n.follow_up <= current_date and n.follow_up_done_at is null
       union all
@@ -4074,7 +4089,7 @@ begin
   select json_build_object(
     'counts', json_build_object(
       'new_signups', (select count(*) from workspaces where created_at >= date_trunc('week', now())),
-      'failed_payments', null,
+      'failed_payments', case when hq_can('licences.view') then (select count(*) from billing_orders where status in ('payment_failed', 'suspended')) end,
       'renewals_due', (select count(*) from ending),
       'open_complaints', case when hq_can('support.view') then (select count(*) from support_tickets where status <> 'done') end),
     'queue', (select coalesce(json_agg(json_build_object('kind', q.kind, 'workspace_id', q.ws, 'business', w.name, 'country', w.country, 'address', w.address,
@@ -4796,3 +4811,526 @@ revoke all on function public.channel_can_manage(uuid), public.channel_rename(uu
   public.channel_mute(uuid, boolean), public.channel_leave(uuid), public.channel_rejoin(uuid) from public, anon;
 grant execute on function public.channel_can_manage(uuid), public.channel_rename(uuid, text, text), public.channel_archive(uuid, boolean),
   public.channel_mute(uuid, boolean), public.channel_leave(uuid), public.channel_rejoin(uuid) to authenticated;
+
+-- ================================================================ Payments: PayPal subscriptions and bank transfer invoices
+-- The business's owner pays on their Riyeser home ("Add to my plan / Pay"). The amount always comes from riyeser_bill
+-- (the same price list as website/prices.mjs): each program's price, 3 users included, then the extra-user price each,
+-- per program; yearly = 10 months; early bird = half for the first 12 months (the first 100 businesses to buy).
+--  * PayPal (card or PayPal balance): the "paypal" Edge Function (supabase/functions/paypal on main) creates ONE PayPal
+--    subscription for the whole plan, priced for this business (the plan's price is set per subscription), and PayPal's
+--    webhooks come back through it to billing_paypal_event (service role only). Each event is applied once.
+--  * Bank transfer: an invoice (number, US$ amount, due date, the reference to quote) with the bank details from the
+--    Billing entity. HQ (licences.manage: Owner, Finance) marks it paid, which switches the programs on.
+-- Paying never cuts a free trial short: paid time starts when the trial ends (or today, if it has already ended).
+-- A failed PayPal payment keeps the programs working for a grace period (HQ setting billing.grace_days, 7) to a date the
+-- owner is shown. Cancelling keeps everything until the end of what's paid. The licence tables (company_modules,
+-- company_plans) are what Central's signed licence reads, so it picks the changes up by itself.
+-- The seller's details ("Billing entity": name, address, ABN or tax number, email, bank details) are versioned: a change
+-- adds a new version, and every invoice and payment keeps the version it was issued under, so old receipts keep the
+-- old details. No tax is worked out here (ask an accountant about GST). Safe to re-run: it only adds what's missing.
+create table if not exists public.billing_entities (
+  id bigint generated always as identity primary key,
+  details jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  created_by uuid
+);
+insert into public.billing_entities (details)
+  select jsonb_build_object('name', 'Riyeser', 'address', '', 'tax_label', 'ABN', 'tax_number', '', 'email', 'info@riyeser.com',
+    'bank', jsonb_build_object('account_name', '', 'bank_name', '', 'bsb', '', 'account_number', '', 'swift', '', 'note', ''))
+  where not exists (select 1 from public.billing_entities);
+create sequence if not exists public.billing_invoice_no start 10001;
+create sequence if not exists public.billing_receipt_no start 10001;
+create table if not exists public.billing_orders (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  ref text not null unique default ('RI-' || nextval('public.billing_invoice_no')),   -- the invoice number, and the reference to quote
+  method text not null check (method in ('paypal', 'bank')),
+  modules text[] not null,
+  people int not null check (people between 1 and 10000),
+  billing text not null check (billing in ('monthly', 'yearly')),
+  amount numeric(12,2) not null check (amount > 0),          -- the regular price each month or year (US$)
+  first_amount numeric(12,2),                                -- the early bird price, for early_cycles payments
+  early_bird boolean not null default false,
+  early_cycles int not null default 0,
+  currency text not null default 'USD' check (currency = 'USD'),
+  status text not null default 'pending' check (status in ('pending', 'active', 'payment_failed', 'suspended', 'cancelled', 'paid', 'void')),
+  entity_id bigint references public.billing_entities(id),
+  due_date date,
+  paypal_subscription_id text unique,
+  paypal_env text check (paypal_env in ('sandbox', 'live')),
+  next_charge_at timestamptz,
+  grace_until date,
+  paid_through date,
+  paid_at timestamptz,
+  paid_reference text check (length(paid_reference) <= 200),
+  marked_paid_by uuid,
+  cancelled_at timestamptz,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists billing_orders_ws on public.billing_orders (workspace_id, created_at desc);
+create table if not exists public.billing_payments (
+  id bigint generated always as identity primary key,
+  order_id uuid not null references public.billing_orders(id) on delete cascade,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  ref text unique,                                 -- the receipt number (completed payments only)
+  method text not null check (method in ('paypal', 'bank')),
+  status text not null check (status in ('completed', 'failed')),
+  amount numeric(12,2),
+  currency text not null default 'USD',
+  provider_ref text unique,                        -- PayPal's sale id, or the invoice number for a bank transfer
+  bank_reference text check (length(bank_reference) <= 200),
+  entity_id bigint references public.billing_entities(id),
+  period_to date,
+  note text check (length(note) <= 500),
+  at timestamptz not null default now()
+);
+create index if not exists billing_payments_ws on public.billing_payments (workspace_id, at desc);
+-- Every PayPal webhook, once (PayPal sends some more than once): the event id is the key, so a repeat does nothing.
+create table if not exists public.billing_events (
+  event_id text primary key,
+  event_type text not null,
+  resource_id text,
+  env text,
+  received_at timestamptz not null default now(),
+  result text
+);
+alter table public.billing_entities enable row level security;
+alter table public.billing_orders enable row level security;
+alter table public.billing_payments enable row level security;
+alter table public.billing_events enable row level security;
+revoke all on public.billing_entities, public.billing_orders, public.billing_payments, public.billing_events from anon, authenticated;
+revoke all on sequence public.billing_invoice_no, public.billing_receipt_no from anon, authenticated;
+-- Nothing about money is ever deleted (a business being removed cascades, as everything else does).
+drop trigger if exists billing_payments_keep on public.billing_payments;
+create trigger billing_payments_keep before delete on public.billing_payments for each row execute function public.no_delete();
+drop trigger if exists billing_entities_keep on public.billing_entities;
+create trigger billing_entities_keep before update or delete on public.billing_entities for each row execute function public.no_delete();
+
+-- ---------------------------------------------------------------- helpers (not callable from the website)
+-- The paid programs in a list, once each, in the usual order; Basics is dropped when Plus is there (Plus includes it).
+create or replace function public.billing_mods(mods text[]) returns text[]
+  language sql immutable set search_path = public as $$
+  select coalesce(array_agg(u.m order by u.ord), '{}'::text[])
+  from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) with ordinality u(m, ord)
+  where u.m = any (coalesce(mods, '{}'::text[])) and not (u.m = 'basic' and 'plus' = any (mods))
+$$;
+-- "…AB12CD": PayPal's ids in HQ, all but the last 6 characters hidden.
+create or replace function public.billing_mask(t text) returns text language sql immutable as $$
+  select case when t is null then null when length(t) <= 6 then t else '…' || right(t, 6) end
+$$;
+create or replace function public.billing_money(n numeric) returns text language sql immutable as $$
+  select 'US$' || to_char(coalesce(n, 0), 'FM999,999,990.00')
+$$;
+create or replace function public.billing_entity_now() returns billing_entities
+  language sql stable security definer set search_path = public as $$
+  select * from billing_entities order by id desc limit 1
+$$;
+-- What this business would pay: the regular amount, and the early bird price for its first 12 months if it has it
+-- (or can still get it: fewer than 100 businesses have it and this one hasn't paid before).
+create or replace function public.billing_terms(ws uuid, mods text[], people int, billing_period text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare m text[] := billing_mods(mods); p int := least(greatest(coalesce(people, 3), 1), 500); regular numeric; half numeric;
+  eb boolean := false; since date; months int; cycles int := 0;
+begin
+  if billing_period is null or billing_period not in ('monthly', 'yearly') then raise exception 'Choose monthly or yearly.'; end if;
+  regular := riyeser_bill(m, p, 0, billing_period, false);
+  select early_bird_since into since from company_plans where workspace_id = ws and early_bird;
+  if since is not null then eb := since > current_date - 365;
+  else
+    eb := (select count(*) from company_plans where early_bird) < 100
+      and not exists (select 1 from billing_payments where workspace_id = ws and status = 'completed');
+    since := current_date;
+  end if;
+  if eb and regular > 0 then
+    half := riyeser_bill(m, p, 0, billing_period, true);
+    months := (extract(year from age(current_date, since)) * 12 + extract(month from age(current_date, since)))::int;
+    cycles := case when billing_period = 'yearly' then 1 else greatest(1, 12 - months) end;
+  else eb := false; end if;
+  return json_build_object('modules', to_json(m), 'people', p, 'billing', billing_period, 'currency', 'USD', 'amount', regular,
+    'early_bird', eb, 'first_amount', half, 'early_cycles', cycles, 'due_now', coalesce(half, regular),
+    'users_included', riyeser_price('users_included'), 'extra_user', riyeser_price('extra_user'),
+    'lines', (select coalesce(json_agg(json_build_object('module', x, 'name', module_label(x), 'price', riyeser_price(x),
+        'extra_users', greatest(0, p - riyeser_price('users_included')::int),
+        'monthly', riyeser_bill(array[x], p, 0, 'monthly', false)) order by o), '[]') from unnest(m) with ordinality t(x, o)));
+end $$;
+
+-- The owner of the business (signed in; two-step sign-in is only needed to cancel).
+create or replace function public.billing_is_owner(ws uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members m join workspaces w on w.id = m.workspace_id
+    where m.workspace_id = ws and m.user_id = auth.uid() and m.role = 'owner' and w.status = 'active')
+$$;
+
+-- One invoice / subscription for the website and HQ. masked: PayPal ids shortened (HQ).
+create or replace function public.billing_order_json(o billing_orders, masked boolean) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', o.id, 'ref', o.ref, 'method', o.method, 'modules', to_json(o.modules),
+    'module_names', (select json_agg(module_label(x)) from unnest(o.modules) x), 'people', o.people, 'billing', o.billing,
+    'amount', o.amount, 'first_amount', o.first_amount, 'early_bird', o.early_bird, 'early_cycles', o.early_cycles,
+    'total', coalesce(o.first_amount, o.amount), 'currency', o.currency, 'status', o.status, 'due_date', o.due_date,
+    'next_charge_at', o.next_charge_at,
+    'next_amount', case when o.early_bird and (select count(*) from billing_payments p where p.order_id = o.id and p.status = 'completed') < o.early_cycles
+                        then o.first_amount else o.amount end,
+    'grace_until', o.grace_until, 'paid_through', o.paid_through, 'works_until', greatest(o.grace_until, o.paid_through), 'paid_at', o.paid_at, 'cancelled_at', o.cancelled_at, 'created_at', o.created_at,
+    'paypal_env', o.paypal_env, 'paypal_id', case when masked then billing_mask(o.paypal_subscription_id) end,
+    'paid_reference', case when masked then o.paid_reference end, 'marked_paid_by', case when masked then staff_name(o.marked_paid_by) end,
+    'seller', (select e.details from billing_entities e where e.id = o.entity_id))
+$$;
+create or replace function public.billing_payment_json(p billing_payments, masked boolean) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', p.id, 'ref', p.ref, 'order_ref', o.ref, 'method', p.method, 'status', p.status, 'amount', p.amount,
+    'currency', p.currency, 'at', p.at, 'period_to', p.period_to, 'note', p.note, 'modules', to_json(o.modules),
+    'module_names', (select json_agg(module_label(x)) from unnest(o.modules) x), 'people', o.people, 'billing', o.billing,
+    'provider_ref', case when masked then (case when p.method = 'paypal' then billing_mask(p.provider_ref) else p.bank_reference end) end,
+    'seller', (select e.details from billing_entities e where e.id = p.entity_id))
+  from billing_orders o where o.id = p.order_id
+$$;
+
+-- Payment received: extend each program on the order by a month or a year. The first time, from the end of its free
+-- trial (or today); after that, from the end of what's paid. Also the plan's people and billing period.
+create or replace function public.billing_extend(oid uuid) returns date
+  language plpgsql security definer set search_path = public as $$
+declare o billing_orders; m text; st json; base date; upto date; latest date; step interval; cur date;
+begin
+  select * into o from billing_orders where id = oid for update;
+  step := case when o.billing = 'yearly' then interval '1 year' else interval '1 month' end;
+  foreach m in array o.modules loop
+    st := module_state(o.workspace_id, m);
+    if o.paid_through is not null then base := greatest(current_date, o.paid_through);
+    else base := greatest(current_date,
+        case when st ->> 'status' = 'trial' then (st ->> 'trial_ends')::date end,
+        case when st ->> 'status' in ('active', 'cancelled') then (st ->> 'paid_until')::date end);
+    end if;
+    upto := (base + step)::date;
+    select paid_until into cur from company_modules where workspace_id = o.workspace_id and module = m and status in ('active', 'cancelled');
+    perform licence_set_module(o.workspace_id, m, 'active', null, greatest(upto, cur));
+    latest := greatest(latest, upto);
+  end loop;
+  update billing_orders set paid_through = latest, grace_until = null, updated_at = now(),
+    status = case when o.method = 'bank' then 'paid' when o.status = 'cancelled' then 'cancelled' else 'active' end,
+    paid_at = coalesce(paid_at, now()) where id = oid;
+  insert into company_plans (workspace_id, extra_users, billing, early_bird, early_bird_since)
+    values (o.workspace_id, greatest(0, o.people - 3), o.billing, o.early_bird, case when o.early_bird then current_date end)
+  on conflict (workspace_id) do update set extra_users = greatest(company_plans.extra_users, excluded.extra_users), billing = excluded.billing,
+    early_bird = company_plans.early_bird or excluded.early_bird,
+    early_bird_since = coalesce(company_plans.early_bird_since, excluded.early_bird_since), updated_at = now();
+  return latest;
+end $$;
+
+-- Cancelled (by the owner, PayPal or HQ): the programs keep working until the end of what's paid, then stop.
+create or replace function public.billing_apply_cancel(oid uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare o billing_orders; m text; cur company_modules;
+begin
+  select * into o from billing_orders where id = oid for update;
+  if o.id is null or o.status in ('cancelled', 'void') then return; end if;
+  update billing_orders set status = case when o.status = 'pending' then 'void' else 'cancelled' end, cancelled_at = now(),
+    next_charge_at = null, updated_at = now() where id = oid;
+  if o.status = 'pending' then return; end if;
+  foreach m in array o.modules loop
+    continue when exists (select 1 from billing_orders x where x.workspace_id = o.workspace_id and x.id <> o.id
+      and x.status in ('active', 'payment_failed', 'suspended') and m = any (x.modules));
+    select * into cur from company_modules where workspace_id = o.workspace_id and module = m;
+    if cur.status = 'active' then perform licence_set_module(o.workspace_id, m, 'cancelled', null, cur.paid_until); end if;
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------- the owner (Riyeser home: Add to my plan / Pay, Billing)
+-- The price for a plan, as the database works it out (the website shows the same).
+create or replace function public.billing_quote(ws uuid, mods text[], people int, billing_period text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  if not billing_is_owner(ws) then raise exception 'Only the business owner can see prices and pay for Riyeser.'; end if;
+  return billing_terms(ws, mods, people, billing_period);
+end $$;
+
+-- Start paying: a PayPal subscription (the paypal function finishes it) or a bank transfer invoice.
+create or replace function public.billing_start(ws uuid, mods text[], people int, billing_period text, pay_method text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare t json; o billing_orders;
+begin
+  if not billing_is_owner(ws) then raise exception 'Only the business owner can pay for Riyeser.'; end if;
+  if pay_method is null or pay_method not in ('paypal', 'bank') then raise exception 'Choose PayPal or bank transfer.'; end if;
+  t := billing_terms(ws, mods, people, billing_period);
+  if (t ->> 'amount')::numeric <= 0 then raise exception 'Choose at least one paid program.'; end if;
+  if pay_method = 'paypal' and exists (select 1 from billing_orders where workspace_id = ws and method = 'paypal'
+      and status in ('active', 'payment_failed', 'suspended')) then
+    raise exception 'You already pay by PayPal. To change your plan, cancel that subscription first (everything keeps working until the end of what you''ve paid), then pay for the new plan.';
+  end if;
+  if (select count(*) from billing_orders where workspace_id = ws and status = 'pending' and created_at > now() - interval '1 day') >= 20 then
+    raise exception 'That''s a lot of tries today. Contact Riyeser and we''ll help.'; end if;
+  -- a PayPal payment that was started but never approved is replaced by this one
+  update billing_orders set status = 'void', updated_at = now() where workspace_id = ws and method = 'paypal' and status = 'pending';
+  insert into billing_orders (workspace_id, method, modules, people, billing, amount, first_amount, early_bird, early_cycles, entity_id, due_date, created_by)
+  values (ws, pay_method, array(select json_array_elements_text(t -> 'modules')), (t ->> 'people')::int, billing_period,
+    (t ->> 'amount')::numeric, (t ->> 'first_amount')::numeric, (t ->> 'early_bird')::boolean, (t ->> 'early_cycles')::int,
+    (billing_entity_now()).id, case when pay_method = 'bank' then current_date + 14 end, auth.uid())
+  returning * into o;
+  return billing_order_json(o, false);
+end $$;
+
+-- Billing on the owner's Riyeser home: the plan, the subscription or invoices, payments (receipts) and the seller.
+create or replace function public.my_billing(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare cur billing_orders;
+begin
+  if not billing_is_owner(ws) then raise exception 'Only the business owner can see billing.'; end if;
+  select * into cur from billing_orders where workspace_id = ws and method = 'paypal' and status in ('active', 'payment_failed', 'suspended', 'pending')
+    order by (status = 'pending'), created_at desc limit 1;
+  return json_build_object(
+    'licence', licence_json(ws),
+    'subscription', case when cur.id is not null then billing_order_json(cur, false) end,
+    'orders', (select coalesce(json_agg(billing_order_json(o, false) order by o.created_at desc), '[]')
+               from billing_orders o where o.workspace_id = ws and o.status <> 'void'),
+    'payments', (select coalesce(json_agg(billing_payment_json(p, false) order by p.at desc), '[]')
+                 from (select * from billing_payments where workspace_id = ws order by at desc limit 200) p),
+    'seller', (billing_entity_now()).details,
+    'grace_days', hq_setting_num('billing.grace_days', 7),
+    'paypal_manage_url', case when coalesce(cur.paypal_env, (select value from hq_settings where key = 'paypal.env')) = 'sandbox'
+      then 'https://www.sandbox.paypal.com/myaccount/autopay/' else 'https://www.paypal.com/myaccount/autopay/' end);
+end $$;
+
+-- Cancel the PayPal subscription (the owner, with two-step sign-in). Returns what the paypal function needs to tell PayPal.
+create or replace function public.billing_cancel_start(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare o billing_orders;
+begin
+  if not is_owner(ws) then
+    if billing_is_owner(ws) then raise exception 'Turn on two-step sign-in (🔐 Security) to cancel. It keeps your business safe.'; end if;
+    raise exception 'Only the business owner can cancel.';
+  end if;
+  select * into o from billing_orders where workspace_id = ws and method = 'paypal' and status in ('active', 'payment_failed', 'suspended')
+    order by created_at desc limit 1;
+  if o.id is null or o.paypal_subscription_id is null then raise exception 'There''s no PayPal subscription to cancel.'; end if;
+  return json_build_object('order_id', o.id, 'subscription_id', o.paypal_subscription_id, 'env', o.paypal_env, 'paid_through', greatest(o.grace_until, o.paid_through));
+end $$;
+
+-- Cancel a bank transfer invoice that hasn't been paid (the owner).
+create or replace function public.billing_cancel_invoice(ws uuid, invoice_ref text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare o billing_orders;
+begin
+  if not billing_is_owner(ws) then raise exception 'Only the business owner can do that.'; end if;
+  select * into o from billing_orders where workspace_id = ws and ref = invoice_ref and method = 'bank';
+  if o.id is null then raise exception 'That invoice isn''t there.'; end if;
+  if o.status <> 'pending' then raise exception 'That invoice is already paid or cancelled.'; end if;
+  update billing_orders set status = 'void', cancelled_at = now(), updated_at = now() where id = o.id;
+end $$;
+
+-- ---------------------------------------------------------------- the paypal Edge Function (service role only)
+-- The subscription PayPal made for an invoice.
+create or replace function public.billing_paypal_created(order_id uuid, subscription_id text, env text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if env not in ('sandbox', 'live') or coalesce(subscription_id, '') !~ '^[A-Za-z0-9-]{6,64}$' then raise exception 'bad subscription'; end if;
+  update billing_orders set paypal_subscription_id = subscription_id, paypal_env = env, updated_at = now()
+    where id = order_id and method = 'paypal' and status = 'pending' and paypal_subscription_id is null;
+  if not found then raise exception 'That payment isn''t waiting for PayPal.'; end if;
+  insert into hq_settings (key, value) values ('paypal.env', env) on conflict (key) do update set value = excluded.value;
+end $$;
+-- The cancel went through at PayPal.
+create or replace function public.billing_paypal_cancelled(order_id uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare o billing_orders;
+begin
+  select * into o from billing_orders where id = order_id;
+  if o.id is null then return; end if;
+  perform billing_apply_cancel(o.id);
+  perform queue_email_owners(o.workspace_id, 'billing_cancelled', 'Your Riyeser subscription is cancelled',
+    'Your PayPal subscription for ' || array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ') || ' is cancelled. Nothing more will be charged.'
+    || case when o.paid_through is not null then E'\n\nEverything keeps working until ' || to_char(greatest(o.grace_until, o.paid_through), 'FMDD Month YYYY') || '. Nothing is deleted.' else '' end);
+end $$;
+-- Its product and plan ids at PayPal (made once per sandbox/live by the function).
+create or replace function public.billing_paypal_config(env text) returns json
+  language sql stable security definer set search_path = public as $$
+  select coalesce(json_object_agg(substr(key, length('paypal.' || env || '.') + 1), value), '{}')
+  from hq_settings where key like 'paypal.' || env || '.%'
+$$;
+create or replace function public.billing_paypal_config_set(env text, k text, v text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if env not in ('sandbox', 'live') or k !~ '^(product|plan\.(monthly|yearly)(\.eb)?)$' then raise exception 'bad setting'; end if;
+  insert into hq_settings (key, value) values ('paypal.' || env || '.' || k, v) on conflict (key) do update set value = excluded.value;
+end $$;
+
+-- One PayPal webhook (its signature already checked by the function). Each event id is applied once only.
+-- Returns what happened: 'duplicate', 'ignored', 'unknown subscription', 'activated', 'paid', 'amount mismatch',
+-- 'payment failed', 'suspended', 'cancelled'.
+create or replace function public.billing_paypal_event(event_id text, event_type text, resource jsonb, env text) returns text
+  language plpgsql security definer set search_path = public as $$
+declare sub text; o billing_orders; res text; amt numeric; curr text; nb timestamptz; g date; m text; upto date; cm company_modules;
+begin
+  if coalesce(event_id, '') = '' or coalesce(event_type, '') = '' then raise exception 'bad event'; end if;
+  insert into billing_events (event_id, event_type, resource_id, env) values (event_id, event_type, left(resource ->> 'id', 80), env)
+    on conflict do nothing;
+  if not found then return 'duplicate'; end if;
+  insert into hq_settings (key, value) values ('paypal.last_webhook_at', now()::text), ('paypal.last_webhook_type', event_type)
+    on conflict (key) do update set value = excluded.value;
+  if env in ('sandbox', 'live') then insert into hq_settings (key, value) values ('paypal.env', env) on conflict (key) do update set value = excluded.value; end if;
+
+  sub := case when event_type like 'PAYMENT.SALE.%' then resource ->> 'billing_agreement_id' else resource ->> 'id' end;
+  select * into o from billing_orders where paypal_subscription_id = sub;
+  if o.id is null and event_type like 'BILLING.SUBSCRIPTION.%' and coalesce(resource ->> 'custom_id', '') ~ '^[0-9a-f-]{36}$' then
+    update billing_orders set paypal_subscription_id = sub, paypal_env = env where id = (resource ->> 'custom_id')::uuid
+      and method = 'paypal' and paypal_subscription_id is null returning * into o;
+  end if;
+  if event_type not in ('BILLING.SUBSCRIPTION.ACTIVATED', 'PAYMENT.SALE.COMPLETED', 'BILLING.SUBSCRIPTION.PAYMENT.FAILED',
+      'BILLING.SUBSCRIPTION.SUSPENDED', 'BILLING.SUBSCRIPTION.CANCELLED', 'BILLING.SUBSCRIPTION.EXPIRED') then res := 'ignored';
+  elsif o.id is null then res := 'unknown subscription';
+  else
+    nb := nullif(resource #>> '{billing_info,next_billing_time}', '')::timestamptz;
+    if event_type = 'BILLING.SUBSCRIPTION.ACTIVATED' then
+      update billing_orders set status = case when status in ('pending', 'suspended') then 'active' else status end,
+        next_charge_at = coalesce(nb, next_charge_at), updated_at = now() where id = o.id;
+      res := 'activated';
+    elsif event_type = 'PAYMENT.SALE.COMPLETED' then
+      amt := nullif(resource #>> '{amount,total}', '')::numeric; curr := resource #>> '{amount,currency}';
+      if amt is null or curr is distinct from 'USD' or amt < coalesce(o.first_amount, o.amount) - 0.005 then
+        insert into billing_payments (order_id, workspace_id, method, status, amount, currency, provider_ref, entity_id, note)
+          values (o.id, o.workspace_id, 'paypal', 'failed', amt, coalesce(curr, '?'), resource ->> 'id', o.entity_id,
+                  'The amount didn''t match the plan, so nothing was switched on. Check it in PayPal.')
+          on conflict (provider_ref) do nothing;
+        res := 'amount mismatch';
+      else
+        insert into billing_payments (order_id, workspace_id, method, status, amount, currency, provider_ref, entity_id, ref)
+          values (o.id, o.workspace_id, 'paypal', 'completed', amt, curr, resource ->> 'id', o.entity_id, 'RR-' || nextval('billing_receipt_no'))
+          on conflict (provider_ref) do nothing;
+        if found then
+          upto := billing_extend(o.id);
+          update billing_payments set period_to = upto where provider_ref = resource ->> 'id';
+          if o.status = 'pending' or o.paid_through is null then
+            perform queue_email_owners(o.workspace_id, 'billing_paid', 'Thanks, your Riyeser payment is in',
+              'We received ' || billing_money(amt) || ' by PayPal for ' || array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ')
+              || E'.\n\nPaid until ' || to_char(upto, 'FMDD Month YYYY') || '. Your receipt is on your Riyeser home page, under Billing.');
+          end if;
+          res := 'paid';
+        else res := 'duplicate payment'; end if;
+      end if;
+      update billing_orders set next_charge_at = coalesce(nb, next_charge_at) where id = o.id;
+    elsif event_type = 'BILLING.SUBSCRIPTION.PAYMENT.FAILED' then
+      g := current_date + hq_setting_num('billing.grace_days', 7)::int;
+      update billing_orders set status = case when status = 'cancelled' then status else 'payment_failed' end,
+        grace_until = greatest(coalesce(grace_until, g), g), next_charge_at = coalesce(nb, next_charge_at), updated_at = now() where id = o.id;
+      foreach m in array o.modules loop
+        select * into cm from company_modules where workspace_id = o.workspace_id and module = m;
+        if cm.status = 'active' and cm.paid_until < g then perform licence_set_module(o.workspace_id, m, 'active', null, g); end if;
+      end loop;
+      insert into billing_payments (order_id, workspace_id, method, status, amount, currency, provider_ref, entity_id, note)
+        values (o.id, o.workspace_id, 'paypal', 'failed', nullif(resource #>> '{billing_info,last_failed_payment,amount,value}', '')::numeric, 'USD',
+                'failed:' || event_id, o.entity_id, 'PayPal couldn''t take the payment.');
+      perform queue_email_owners(o.workspace_id, 'billing_failed', 'Your Riyeser payment didn''t go through',
+        'PayPal couldn''t take your Riyeser payment. Everything keeps working until ' || to_char(g, 'FMDD Month YYYY')
+        || E'.\n\nPlease check the card or PayPal account you pay with (PayPal tries again by itself), or pay by bank transfer from your Riyeser home page, under Billing.');
+      res := 'payment failed';
+    elsif event_type = 'BILLING.SUBSCRIPTION.SUSPENDED' then
+      update billing_orders set status = case when status = 'cancelled' then status else 'suspended' end, next_charge_at = null, updated_at = now() where id = o.id;
+      res := 'suspended';
+    else   -- CANCELLED or EXPIRED
+      perform billing_apply_cancel(o.id); res := 'cancelled';
+    end if;
+  end if;
+  update billing_events set result = res where billing_events.event_id = billing_paypal_event.event_id;
+  return res;
+end $$;
+
+-- ---------------------------------------------------------------- HQ
+-- Payments, invoices and PayPal's state: failed payments and unpaid invoices first. PayPal ids show only their last 6.
+create or replace function public.hq_billing() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['licences.view']);
+  return json_build_object(
+    'failed', (select coalesce(json_agg(billing_order_json(o, true)::jsonb || jsonb_build_object('business', w.name, 'workspace_id', w.id) order by o.updated_at desc), '[]')
+      from billing_orders o join workspaces w on w.id = o.workspace_id where o.status in ('payment_failed', 'suspended')),
+    'unpaid', (select coalesce(json_agg(billing_order_json(o, true)::jsonb || jsonb_build_object('business', w.name, 'workspace_id', w.id) order by o.due_date), '[]')
+      from billing_orders o join workspaces w on w.id = o.workspace_id where o.method = 'bank' and o.status = 'pending'),
+    'payments', (select coalesce(json_agg(billing_payment_json(p, true)::jsonb || jsonb_build_object('business', w.name, 'workspace_id', w.id) order by p.at desc), '[]')
+      from (select * from billing_payments order by at desc limit 100) p join workspaces w on w.id = p.workspace_id),
+    'paypal', json_build_object('env', (select value from hq_settings where key = 'paypal.env'),
+      'last_webhook_at', (select value from hq_settings where key = 'paypal.last_webhook_at'),
+      'last_webhook_type', (select value from hq_settings where key = 'paypal.last_webhook_type'),
+      'events_7d', (select count(*) from billing_events where received_at > now() - interval '7 days'),
+      'subscriptions', (select count(*) from billing_orders where method = 'paypal' and status in ('active', 'payment_failed', 'suspended'))),
+    'entity', (billing_entity_now()).details,
+    'bank_ready', coalesce(nullif(trim((billing_entity_now()).details #>> '{bank,account_number}'), ''), '') <> '',
+    'grace_days', hq_setting_num('billing.grace_days', 7),
+    'can_mark_paid', hq_can('licences.manage'), 'can_edit_entity', hq_can('settings.manage') or hq_can('licences.manage'));
+end $$;
+-- This business's invoices and payments (the customer page, Money tab).
+create or replace function public.hq_company_billing(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['licences.view']);
+  return json_build_object(
+    'orders', (select coalesce(json_agg(billing_order_json(o, true) order by o.created_at desc), '[]') from billing_orders o where o.workspace_id = ws and o.status <> 'void'),
+    'payments', (select coalesce(json_agg(billing_payment_json(p, true) order by p.at desc), '[]') from billing_payments p where p.workspace_id = ws),
+    'can_mark_paid', hq_can('licences.manage'));
+end $$;
+-- A bank transfer came in: mark its invoice paid (Owner, Finance), which switches the programs on. In the HQ history.
+create or replace function public.hq_billing_mark_paid(invoice_ref text, bank_reference text, paid_amount numeric) returns json
+  language plpgsql security definer set search_path = public as $$
+declare o billing_orders; upto date; rcpt text;
+begin
+  perform hq_need(array['licences.manage']);
+  select * into o from billing_orders where ref = upper(trim(coalesce(invoice_ref, ''))) for update;
+  if o.id is null or o.method <> 'bank' then raise exception 'There''s no bank transfer invoice with that number.'; end if;
+  if o.status <> 'pending' then raise exception 'That invoice is already %.', case when o.status = 'paid' then 'paid' else 'cancelled' end; end if;
+  if length(trim(coalesce(bank_reference, ''))) < 3 then raise exception 'Type the bank''s reference for the payment (from your bank statement).'; end if;
+  if paid_amount is null or paid_amount < coalesce(o.first_amount, o.amount) - 0.005 then
+    raise exception 'The invoice is for %. Check the amount on the bank statement.', billing_money(coalesce(o.first_amount, o.amount)); end if;
+  rcpt := 'RR-' || nextval('billing_receipt_no');
+  insert into billing_payments (order_id, workspace_id, method, status, amount, currency, provider_ref, bank_reference, entity_id, ref)
+    values (o.id, o.workspace_id, 'bank', 'completed', paid_amount, 'USD', 'bank:' || o.ref, trim(bank_reference), o.entity_id, rcpt);
+  upto := billing_extend(o.id);
+  update billing_orders set paid_reference = trim(bank_reference), marked_paid_by = auth.uid() where id = o.id;
+  update billing_payments set period_to = upto where ref = rcpt;
+  perform hq_log('billing.bank_paid', jsonb_build_object('workspace_id', o.workspace_id, 'invoice', o.ref, 'receipt', rcpt,
+    'amount', paid_amount, 'paid_until', upto));
+  perform queue_email_owners(o.workspace_id, 'billing_paid', 'Thanks, your Riyeser payment is in',
+    'We received your bank transfer of ' || billing_money(paid_amount) || ' for invoice ' || o.ref || E'.\n\n'
+    || array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ') || ' paid until ' || to_char(upto, 'FMDD Month YYYY')
+    || '. Your receipt is on your Riyeser home page, under Billing.');
+  return json_build_object('receipt', rcpt, 'paid_until', upto);
+end $$;
+-- The Billing entity: who sells Riyeser (on every invoice and receipt). Each change is a new version.
+create or replace function public.hq_set_billing_entity(details jsonb) returns void
+  language plpgsql security definer set search_path = public as $$
+declare d jsonb; b jsonb := coalesce(details -> 'bank', '{}'::jsonb); k text; cur jsonb := (billing_entity_now()).details;
+  t text := '';
+begin
+  if not (hq_can('settings.manage') or hq_can('licences.manage')) then perform hq_need(array['settings.manage']); end if;
+  if length(trim(coalesce(details ->> 'name', ''))) < 2 then raise exception 'Type the business name that sells Riyeser.'; end if;
+  d := jsonb_build_object('name', '', 'address', '', 'tax_label', 'ABN', 'tax_number', '', 'email', '');
+  foreach k in array array['name', 'address', 'tax_label', 'tax_number', 'email'] loop
+    t := left(trim(coalesce(details ->> k, '')), case when k = 'address' then 300 else 120 end);
+    d := d || jsonb_build_object(k, case when k = 'tax_label' and t = '' then 'ABN' else t end);
+  end loop;
+  d := d || jsonb_build_object('bank', (select jsonb_object_agg(x, left(trim(coalesce(b ->> x, '')), case when x = 'note' then 300 else 80 end))
+         from unnest(array['account_name', 'bank_name', 'bsb', 'account_number', 'swift', 'note']) x));
+  if d = cur then return; end if;
+  insert into billing_entities (details, created_by) values (d, auth.uid());
+  perform hq_log('billing.entity_changed', jsonb_build_object('name', d ->> 'name', 'bank_set', coalesce(d #>> '{bank,account_number}', '') <> ''));
+end $$;
+
+-- ---------------------------------------------------------------- who can call what
+revoke all on function public.billing_mods(text[]), public.billing_mask(text), public.billing_money(numeric), public.billing_entity_now(),
+  public.billing_terms(uuid, text[], int, text), public.billing_is_owner(uuid), public.billing_order_json(billing_orders, boolean),
+  public.billing_payment_json(billing_payments, boolean), public.billing_extend(uuid), public.billing_apply_cancel(uuid),
+  public.billing_quote(uuid, text[], int, text), public.billing_start(uuid, text[], int, text, text), public.my_billing(uuid),
+  public.billing_cancel_start(uuid), public.billing_cancel_invoice(uuid, text),
+  public.billing_paypal_created(uuid, text, text), public.billing_paypal_cancelled(uuid), public.billing_paypal_config(text),
+  public.billing_paypal_config_set(text, text, text), public.billing_paypal_event(text, text, jsonb, text),
+  public.hq_billing(), public.hq_company_billing(uuid), public.hq_billing_mark_paid(text, text, numeric), public.hq_set_billing_entity(jsonb)
+  from public, anon, authenticated;
+grant execute on function public.billing_quote(uuid, text[], int, text), public.billing_start(uuid, text[], int, text, text), public.my_billing(uuid),
+  public.billing_cancel_start(uuid), public.billing_cancel_invoice(uuid, text),
+  public.hq_billing(), public.hq_company_billing(uuid), public.hq_billing_mark_paid(text, text, numeric), public.hq_set_billing_entity(jsonb) to authenticated;
+-- Only the paypal Edge Function (Supabase's service role) records PayPal's side.
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.billing_paypal_created(uuid, text, text), public.billing_paypal_cancelled(uuid), public.billing_paypal_config(text),
+      public.billing_paypal_config_set(text, text, text), public.billing_paypal_event(text, text, jsonb, text) to service_role;
+  end if;
+end $$;
