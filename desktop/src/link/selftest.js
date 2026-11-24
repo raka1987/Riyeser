@@ -1,4 +1,4 @@
-// The self-test run by `Riyeser Link.exe --self-test=<file>` (and the Windows build check): starts the SIP
+// The self-test run by `Riyeser Link Office.exe --self-test=<file>` (and the Windows build check): starts the SIP
 // server and the desk-phone set-up server on spare ports on this PC only, registers two simulated phones, places a
 // test call between them (ring, answer, hang up), and fetches a desk phone's settings. Uses a throwaway data folder.
 const fs = require('fs');

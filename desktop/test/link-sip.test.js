@@ -1,4 +1,4 @@
-// Riyeser Link: the SIP server, driven by simulated phones over UDP on this PC.
+// Riyeser Link Office: the SIP server, driven by simulated phones over UDP on this PC.
 const test = require('node:test');
 const assert = require('node:assert');
 const dgram = require('dgram');

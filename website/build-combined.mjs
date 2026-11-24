@@ -1,7 +1,8 @@
 // Builds ONE site for riyeser.com:
 //   /        the Riyeser Group software website (website/build.mjs) - what people see when they open riyeser.com
 //   /app/    the Riyeser Services app (website/services, copied from the old riyeser.com)
-//   /team/   Riyeser Team, the team chat (website/team)
+//   /link/   Riyeser Link, the chat (website/team; it was called Riyeser Team)
+//   /team/   the same app again at its old address, so older desktop apps, invite links and sign-up emails keep working
 //   node website/build-combined.mjs        -> website/public
 //
 // The Services app's scripts, images and client share page (/share.html) stay at the top of the domain, so
@@ -31,13 +32,23 @@ const websiteFiles = [];
 
 // Riyeser HQ (staff back office) at /hq/: not linked from the site, not indexed, staff sign-in only.
 cpSync(join(ROOT, 'hq'), join(OUT, 'hq'), { recursive: true, filter: (src) => !basename(src).startsWith('test-') });
-// 3. Riyeser Team (team chat) at /team/. Its database setup (team-chat.sql) stays in the repository only.
-cpSync(join(ROOT, 'team'), join(OUT, 'team'), { recursive: true, filter: (src) => !src.endsWith('.sql') && !/[\/]team[\/]test([\/]|$)/.test(src) });
-// Cloudflare keeps files for hours, so give the Team and HQ scripts and styles a version stamp that changes with them.
+// 3. Riyeser Link (the chat, formerly Riyeser Team) at /link/, and the very same files at its old address /team/:
+// the Riyeser Team desktop app 1.0 and Centrals before 1.8 open /team/ and only allow /team/ in their windows, invite
+// links and Supabase sign-up emails point there, and older Centrals read /team/config.js. So /team/ is a full copy,
+// not a redirect; it only says (for search engines) that /link/ is the main address.
+// Its database setup (team-chat.sql) stays in the repository only.
+for (const dir of ['link', 'team']) {
+  cpSync(join(ROOT, 'team'), join(OUT, dir), { recursive: true, filter: (src) => !src.endsWith('.sql') && !/[\/]team[\/]test([\/]|$)/.test(src) });
+}
+{
+  const f = join(OUT, 'team', 'index.html');
+  writeFileSync(f, readFileSync(f, 'utf8').replace('</title>', `</title>\n<link rel="canonical" href="${SITE}/link/">`));
+}
+// Cloudflare keeps files for hours, so give the Link and HQ scripts and styles a version stamp that changes with them.
 {
   const { createHash } = await import('node:crypto');
   const stamp = (file) => createHash('sha256').update(readFileSync(file)).digest('hex').slice(0, 8);
-  for (const page of ['team/index.html', 'hq/index.html']) {
+  for (const page of ['link/index.html', 'team/index.html', 'hq/index.html']) {
     const f = join(OUT, page); const dir = dirname(f);
     writeFileSync(f, readFileSync(f, 'utf8').replace(/(src|href)="([^":?#]+\.(?:js|css))"/g, (m, attr, url) => `${attr}="${url}?v=${stamp(join(dir, url))}"`));
   }

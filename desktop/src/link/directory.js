@@ -1,8 +1,8 @@
-// People, extensions and ring groups for Riyeser Link, kept on this PC so calls work with no internet.
+// People, extensions and ring groups for Riyeser Link Office, kept on this PC so calls work with no internet.
 //   phone-directory.json  people, ring groups (branches), the business name, where they came from, when last synced
 //   phone-secrets.json    each extension's SIP password (sealed with Windows' own data protection when available)
 //   phone-dnd.json        which extensions have Do not disturb on
-// People come from Riyeser Team (members with an extension, branches as ring groups) when this PC is signed in to
+// People come from Riyeser Link (members with an extension, branches as ring groups) when this PC is signed in to
 // Riyeser, or are added here by hand. A sync only ever replaces the Team people; nothing is deleted otherwise.
 const crypto = require('crypto');
 const { validExt, EMERGENCY, MIN_EXT, MAX_EXT } = require('./dialplan');
@@ -17,7 +17,7 @@ function strongPassword(len = 16) {
 const clean = (v, n = 60) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>"&]/g, '').trim().slice(0, n);
 
 /**
- * Riyeser Team's members and branches as people and ring groups.
+ * Riyeser Link's members and branches as people and ring groups.
  * members:  [{ user_id, display_name, extension }]   branches: [{ id, name, extension, branch_members: [{ user_id }] }]
  * -> { business, people: [{ id, name, ext, source: 'team', teamUserId }], groups: [{ id, name, ext, members: [ext] }], skipped: [{ name, why }] }
  */
@@ -29,7 +29,7 @@ function mapTeam({ members = [], branches = [], business = '' } = {}) {
     if (!m || !m.user_id) continue;
     const name = clean(m.display_name) || 'Team member';
     const ext = m.extension == null ? '' : String(m.extension);
-    if (!ext) { skipped.push({ name, why: 'No extension yet - give them one in Riyeser Team' }); continue; }
+    if (!ext) { skipped.push({ name, why: 'No extension yet - give them one in Riyeser Link' }); continue; }
     if (!validExt(ext)) { skipped.push({ name, why: `Extension ${ext} isn't between ${MIN_EXT} and ${MAX_EXT}` }); continue; }
     if (used.has(ext)) { skipped.push({ name, why: `Extension ${ext} is already used` }); continue; }
     used.add(ext);
@@ -78,7 +78,7 @@ class Directory {
   dnd(ext) { return !!(this.store.get('phone-dnd', {}) || {})[ext]; }
   setDnd(ext, on) { this.store.update('phone-dnd', {}, (d) => ({ ...(d || {}), [String(ext)]: !!on })); }
 
-  // ---------- Riyeser Team ----------
+  // ---------- Riyeser Link ----------
   /** Replace the Team people and branches with what Team says now. People added by hand stay (unless Team now uses their number). */
   applyTeam(mapped, now = Date.now()) {
     const d = this.data();
@@ -110,11 +110,11 @@ class Directory {
     this.password(e);
     return p;
   }
-  /** Take a hand-added person off the list (their call history stays). Team people are changed in Riyeser Team. */
+  /** Take a hand-added person off the list (their call history stays). Team people are changed in Riyeser Link. */
   removePerson(id) {
     const d = this.data(); const p = d.people.find((x) => x.id === id);
     if (!p) return false;
-    if (p.source === 'team') throw new Error('This person comes from Riyeser Team. Change them there.');
+    if (p.source === 'team') throw new Error('This person comes from Riyeser Link. Change them there.');
     d.people = d.people.filter((x) => x.id !== id); this.save(d);
     return true;
   }

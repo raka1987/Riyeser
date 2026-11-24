@@ -28,7 +28,7 @@ if (!process.argv[2] || process.argv[2] === 'services') {
 }
 
 const only = process.argv[2];
-for (const app of ['assistant', 'pdf', 'central', 'services', 'team', 'link'].filter((a) => !only || a === only)) {
+for (const app of ['assistant', 'pdf', 'central', 'services', 'team', 'linkoffice'].filter((a) => !only || a === only)) {
   const out = app === 'assistant' ? 'dist' : `dist-${app}`;
   fs.rmSync(path.join(root, out), { recursive: true, force: true });
   run('npx', ['electron-builder', '--win', '--config', 'scripts/builder.config.js'], { DESK_APP: app });

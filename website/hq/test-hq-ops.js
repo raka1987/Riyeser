@@ -133,7 +133,7 @@ const fs = require('fs');
 
   // --- before team-chat.sql is re-run: the new screens say how to switch them on
   const p3 = await b.newPage(); p3.on('pageerror', (e) => errs.push('old db: ' + e.message));
-  await p3.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"k"};' }));
+  await p3.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"k"};' }));
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url'); const user = { id: 'u1', email: 'riki@riyeser.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
   const tok = `${b64({ alg: 'HS256' })}.${b64({ sub: 'u1', aal: 'aal2', amr: [{ method: 'totp', timestamp: 1 }], exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.sig`;
   await p3.addInitScript((t) => localStorage.setItem('riyeser.hq.session', JSON.stringify({ access_token: t, token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user: { id: 'u1', email: 'riki@riyeser.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] } })), tok);

@@ -120,7 +120,7 @@ function showCreated(c) {
   wiz(`<div class="wdone">✅</div><h1>${esc(c.name)} is set up</h1>
     <p class="wsub">Give this Company ID to your staff and branches. They choose <b>Join an existing company</b> and enter it, then you approve them.</p>
     <div class="wid"><span id="wid">${esc(c.company_code || '')}</span><button class="btn" data-w="copy">Copy</button></div>
-    <p class="wnote">You can always find it under <b>Company</b> in the sidebar. Branch codes (for staff who belong to a branch) are in Riyeser Team.</p>
+    <p class="wnote">You can always find it under <b>Company</b> in the sidebar. Branch codes (for staff who belong to a branch) are in Riyeser Link.</p>
     <div class="wrow"><button class="btn" data-w="done">Start using Riyeser</button></div>`);
 }
 
@@ -139,7 +139,7 @@ function showJoinForm() {
 function showWaiting(name) {
   CO.screen = 'waiting';
   wiz(`<div class="wdone wait">⏳</div><h1>Waiting for ${esc(name || 'your company')} to approve you</h1>
-    <p class="wsub">We've let them know. An owner or admin approves you in Riyeser Team (Join requests) and chooses what you can see. This page checks every 15 seconds.</p>
+    <p class="wsub">We've let them know. An owner or admin approves you in Riyeser Link (Join requests) and chooses what you can see. This page checks every 15 seconds.</p>
     <div class="wrow"><button class="btn s" data-w="cancel-join">Use a different code</button><button class="btn" data-w="check">Check now</button></div>
     <p class="wfoot"><button class="wlink" data-w="later">Keep using Central while I wait</button></p>`);
   clearInterval(CO.poll); CO.poll = setInterval(() => checkJoin(true), 15000);
@@ -225,7 +225,7 @@ function renderCompany() {
   el.innerHTML = `<h2 class="sec">Company</h2>
     <div class="panel cobox">
       <div class="cohead"><span class="cologo">🏢</span><div><h3>${esc(c.name)}</h3><div class="lbl">${c.mode === 'online' ? `Linked online${s.signedIn ? ` · signed in as ${esc(s.signedIn)}` : ''}` : 'Set up on this PC only'}</div></div></div>
-      ${c.company_code ? `<div class="wid sm"><span id="coid">${esc(c.company_code)}</span><button class="btn" data-w="copy">Copy</button></div><p class="lbl">Give this Company ID to staff and branches. They choose <b>Join an existing company</b> in Riyeser Central, and you approve them in Riyeser Team.</p>` : ''}
+      ${c.company_code ? `<div class="wid sm"><span id="coid">${esc(c.company_code)}</span><button class="btn" data-w="copy">Copy</button></div><p class="lbl">Give this Company ID to staff and branches. They choose <b>Join an existing company</b> in Riyeser Central, and you approve them in Riyeser Link.</p>` : ''}
       <div class="kvs">${row('Legal name', c.legal_name)}${row('ABN / tax number', c.tax_number)}${row('Address', c.address)}${row('Phone', c.phone)}${row('Email', c.email)}${row('Country', c.country)}${row('You', c.your_name)}</div>
       <div class="row">${c.mode !== 'online' ? '<button class="btn" data-w="link">Sign in with your Riyeser account</button><button class="btn s" data-w="local">Edit details</button>' : ''}
         ${s.signedIn ? '<button class="btn s" data-w="signout">Sign out</button>' : ''}<button class="btn s" data-w="restart">Use a different company</button></div>

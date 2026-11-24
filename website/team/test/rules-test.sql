@@ -418,14 +418,14 @@ do $$ declare l json; m numeric; begin
   assert (l -> 'modules' -> 'payroll' ->> 'status') = 'cancelled' and not (l -> 'modules' -> 'payroll' ->> 'active')::boolean, 'payroll cancelled, ended';
   assert (l ->> 'extra_companies')::int = 1, 'extra companies';
   m := ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric;
-  assert m = 20 + 20 + 2 * 5 + 10, format('monthly estimate: Basics 20 + Team Calls 20 (paid earlier) + 2 users 10 + 1 company 10 = 60, got %s', m);
+  assert m = 20 + 20 + 2 * 5 + 10, format('monthly estimate: Basics 20 + Link Plus 20 (paid earlier) + 2 users 10 + 1 company 10 = 60, got %s', m);
   assert ((public.hq_licences()) ->> 'monthly_estimate')::numeric >= 60, 'total estimate';
   assert ((public.hq_licences()) ->> 'early_bird_left')::int = 100, 'early bird places';
 end $$;
 -- yearly + early bird: 60 a month list -> x 10/12 -> half = 25
 select public.hq_set_plan(:'ws_c', 2, 1, 'yearly', true);
 do $$ begin assert ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric = 25.00, 'yearly early bird'; end $$;
--- Team Calls via the licence: cancelled and unpaid -> no calls; the old button sets it paid again
+-- Riyeser Link Plus (was Team Calls) via the licence: cancelled and unpaid -> no calls; the old button sets it paid again
 select public.hq_set_module(:'ws_c', 'calls', 'cancelled', null, null);
 select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
 do $$ begin assert not public.calls_allowed(current_setting('test.ws_c')::uuid), 'calls off when cancelled'; end $$;
@@ -723,7 +723,7 @@ insert into public.members (workspace_id, user_id, display_name, role) values
 update public.workspaces set warned_7_at = now() - interval '8 days' where id = 'f0000000-0000-4000-8000-000000000003';
 insert into public.channels (id, workspace_id, kind, name) values ('f1000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000003', 'channel', 'general');
 insert into public.messages (channel_id, workspace_id, user_id, body) values ('f1000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000003', 'e1e1e1e1-0000-4000-8000-000000000003', 'Pat''s private note');
--- Sample Plumbing pays for Team Calls: never closed, however long it's quiet
+-- Sample Plumbing pays for Riyeser Link Plus: never closed, however long it's quiet
 update public.workspaces set last_active_at = now() - interval '2 years' where id = :'ws_a';
 set role authenticated;
 do $$ begin begin perform public.hq_inactivity_sweep(); raise exception 'a signed-in user ran the sweep';

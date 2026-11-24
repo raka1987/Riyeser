@@ -1,4 +1,4 @@
-// Riyeser Link's SIP server: a registrar and a record-routing proxy for desk phones on the office network.
+// Riyeser Link Office's SIP server: a registrar and a record-routing proxy for desk phones on the office network.
 //   REGISTER   digest authentication (MD5, qop=auth); each extension has its own strong password
 //   INVITE     routed by the dial plan to a person's phones, or to every phone in a ring group at once
 //              (the first to answer wins and the others are cancelled); 486 busy / 480 not connected / 404
@@ -22,7 +22,7 @@ const MAX_BINDINGS = 5;
 const NONCE_FRESH = 5 * 60 * 1000; const NONCE_STALE = 60 * 60 * 1000;
 const STALE_CALL = 12 * 3600 * 1000;
 const ALLOW = 'INVITE, ACK, CANCEL, BYE, OPTIONS, REFER, NOTIFY, INFO, UPDATE, PRACK, SUBSCRIBE, MESSAGE';
-const AGENT = 'Riyeser Link';
+const AGENT = 'Riyeser Link Office';
 // Which failure the caller hears when every phone said no: busy beats not connected beats the rest.
 const RANK = { 486: 1, 600: 2, 603: 3, 488: 4, 480: 5, 404: 6, 408: 7, 487: 9 };
 const rank = (s) => RANK[s] || (s < 500 ? 8 : 10);
@@ -89,7 +89,7 @@ class Pbx extends EventEmitter {
     }
     this.running = true;
     this.sweeper = setInterval(() => this.sweep(), 5000); this.sweeper.unref();
-    this.log('info', `Riyeser Link listening on ${this.host}:${this.port}`);
+    this.log('info', `Riyeser Link Office listening on ${this.host}:${this.port}`);
     return this;
   }
   async stop() {
@@ -297,7 +297,7 @@ class Pbx extends EventEmitter {
 
     if (!this.trusted(src)) {
       this.fail(src.address, 'outside the office network');
-      this.logOnce(`public:${src.address}`, 'warn', `Refused ${req.method} from ${src.address}: only phones on the office network can use Riyeser Link.`);
+      this.logOnce(`public:${src.address}`, 'warn', `Refused ${req.method} from ${src.address}: only phones on the office network can use Riyeser Link Office.`);
       if (['REGISTER', 'INVITE', 'SUBSCRIBE'].includes(req.method) && !this.isBlocked(src.address)) this.reply(req, 403, 'Forbidden (office network only)', { keep: false });
       return;
     }
@@ -325,7 +325,7 @@ class Pbx extends EventEmitter {
   onRegister(req, src) {
     const to = sip.parseNameAddr(sip.getHeader(req, 'to'));
     const ext = sip.userOf(to.parsed);
-    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Team Chat Plus)');
+    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Link Plus)');
     if (!this.authenticate(req, src, false, ext)) return;
     const map = this.bindings.get(ext) || new Map();
     const contacts = sip.getAll(req, 'contact');
@@ -362,7 +362,7 @@ class Pbx extends EventEmitter {
 
   // ---------- INVITE (a new call) ----------
   onInvite(req, src) {
-    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Team Chat Plus)');
+    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Link Plus)');
     const caller = this.authenticate(req, src, true);
     if (!caller) return;
     const key = this.txKey(req);
@@ -634,7 +634,7 @@ class Pbx extends EventEmitter {
   onSubscribe(req, src) {
     const ev = String(sip.getHeader(req, 'event') || '');
     if (!/^ua-profile\b/i.test(ev)) return this.reply(req, 489, null, { headers: [['allow-events', 'ua-profile']] });
-    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Team Chat Plus)');
+    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Link Plus)');
     const params = sip.parseParams(ev.slice(ev.indexOf(';') + 1));
     const from = sip.parseNameAddr(sip.getHeader(req, 'from'));
     let mac = null;

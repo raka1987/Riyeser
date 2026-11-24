@@ -5,7 +5,7 @@ const on = require('../src/core/online');
 const { Store } = require('../src/core/store');
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'co-'));
 
-test('online: reads the address and key from riyeser.com/team/config.js', () => {
+test('online: reads the address and key from riyeser.com/link/config.js', () => {
   const live = 'window.RIYESER_TEAM = {\n  supabaseUrl: "https://abc.supabase.co/",\n  supabaseKey: "sb_publishable_x1"\n};';
   assert.deepEqual(on.parseConfig(live), { url: 'https://abc.supabase.co', key: 'sb_publishable_x1' });
   const empty = 'window.RIYESER_TEAM = { supabaseUrl: "", supabaseKey: "" };';

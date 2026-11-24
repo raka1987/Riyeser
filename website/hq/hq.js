@@ -1,9 +1,9 @@
 /* Riyeser HQ: the back office for running Riyeser. Riyeser staff only, with two-step sign-in.
-   Shows account information (companies, people counts, branches, linked PCs and versions, trials, Team Chat Plus,
+   Shows account information (companies, people counts, branches, linked PCs and versions, trials, Riyeser Link Plus,
    downloads, notes), support tickets, refunds, free periods and the staff history. It never sees customers' chat
    messages, calls or books: the database only offers hq_ summaries. Support tickets are written to Riyeser, so HQ sees those.
    Every button is checked again by the database (hq_need); the website only hides what you can't do.
-   Runs on the Riyeser Team Supabase project (../team/config.js). With ?demo, or before it's set up, sample data. */
+   Runs on the Riyeser Link (formerly Riyeser Team) Supabase project (../link/config.js). With ?demo, or before it's set up, sample data. */
 (() => {
   'use strict';
   const CFG = window.RIYESER_TEAM || {};
@@ -20,7 +20,7 @@
   const dur = (h) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
   const ROLES = [['owner', 'Owner'], ['finance', 'Finance'], ['support', 'Support'], ['senior', 'Senior support'], ['sales', 'Sales'], ['developer', 'Developer']];
   const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
-  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Chat Plus']];
+  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']];
   const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
   const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
   const cur = (n, c) => `${esc(c || 'FJD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -411,7 +411,7 @@
       const lv = await api.aal();
       if (lv.currentLevel !== 'aal2') {
         if (lv.nextLevel === 'aal2') return gate('', 'code');
-        return blocked('<h1>Turn on two-step sign-in first</h1><p>Riyeser HQ needs two-step sign-in. Open <a href="/team/">Riyeser Team</a>, click <b>🔐 Security</b> and turn it on, then come back and sign in again.</p>');
+        return blocked('<h1>Turn on two-step sign-in first</h1><p>Riyeser HQ needs two-step sign-in. Open <a href="/link/">Riyeser Link</a>, click <b>🔐 Security</b> and turn it on, then come back and sign in again.</p>');
       }
       await loadMe();
       if (!S.me || !S.me.active) return blocked('<h1>Not Riyeser HQ staff</h1><p>This account isn\'t on the Riyeser HQ team. Ask a Riyeser HQ owner to add you.</p>');
@@ -490,10 +490,10 @@
     main(`<h2>Overview</h2><p class="sub">How Riyeser is doing. Account information only: HQ never sees customers' messages or books.</p>
       <div class="tiles">${tile('Companies', num(o.companies), `+${num(o.companies_7d)} this week · +${num(o.companies_30d)} in 30 days`)}
         ${tile('People', num(o.people), 'in all companies')}${tile('Linked PCs', num(o.pcs), `${num(o.pcs_active_7d)} active this week`)}
-        ${tile('Team Chat Plus', num(o.calls_paid) + ' paid', `${num(o.calls_trial)} on the free trial`)}</div>
+        ${tile('Riyeser Link Plus', num(o.calls_paid) + ' paid', `${num(o.calls_trial)} on the free trial`)}</div>
       <div class="grid g2"><div class="card"><h3>New companies per week</h3>${columnChart(wk, (r) => r.label, (r) => Number(r.companies), 'companies')}</div>
         <div class="card"><h3>Riyeser Central versions in use <small>· PCs seen in 30 days</small></h3>${barList(o.versions || [], (r) => r.version, (r) => Number(r.pcs))}</div>
-        <div class="card"><h3>Team Chat Plus trials ending soon <small>· 14 days or less, not paid</small></h3>
+        <div class="card"><h3>Riyeser Link Plus trials ending soon <small>· 14 days or less, not paid</small></h3>
           ${(o.trials_ending || []).length ? `<table class="tbl"><tr><th>Company</th><th class="n">Days left</th></tr>${o.trials_ending.map((t) => `<tr class="click" data-co="${t.id}"><td><b>${esc(t.name)}</b><small>${esc(t.company_code)}</small></td><td class="n"><span class="pill warn">${t.days_left}</span></td></tr>`).join('')}</table>` : '<p class="muted small">None right now.</p>'}</div>
         <div class="card"><h3>Companies by country</h3>${barList(o.countries || [], (r) => r.country, (r) => Number(r.companies))}
           <p class="muted small" style="margin-top:12px">${num(o.requests_waiting)} join request${o.requests_waiting === 1 ? '' : 's'} waiting for a company admin · ${num(o.pcs_active_30d)} PCs active in 30 days</p></div></div>`)
@@ -512,7 +512,7 @@
     S.companies = await api.companies(q, st);
     const callsPill = (c) => (c.calls_paid_until && new Date(c.calls_paid_until) > new Date() ? `<span class="pill ok">Paid to ${day(c.calls_paid_until)}</span>`
       : c.trial_days_left > 0 ? `<span class="pill${c.trial_days_left <= 14 ? ' warn' : ''}">Trial · ${c.trial_days_left} days</span>` : '<span class="pill bad">Trial ended</span>');
-    m.querySelector('#cl').innerHTML = S.companies.length ? `<table class="tbl"><tr><th>Company</th><th>Owner</th><th>Country</th><th class="n">People</th><th class="n">PCs</th><th>Last active</th><th>Team Chat Plus</th><th>Joined</th></tr>
+    m.querySelector('#cl').innerHTML = S.companies.length ? `<table class="tbl"><tr><th>Company</th><th>Owner</th><th>Country</th><th class="n">People</th><th class="n">PCs</th><th>Last active</th><th>Link Plus</th><th>Joined</th></tr>
       ${S.companies.map((c) => `<tr class="click" data-co="${c.id}"><td><b>${esc(c.name)}</b>${c.status && c.status !== 'active' ? ' ' + pill(BSTAT, c.status) : ''}<small class="code">${esc(c.company_code || '')}</small></td><td>${esc(c.owner_name || '')}<small>${esc(c.owner_email || '')}</small></td>
         <td>${esc(c.country || '')}</td><td class="n">${num(c.people)}</td><td class="n">${num(c.pcs)}</td><td>${ago(c.last_active_at || c.last_seen)}</td><td>${callsPill(c)}</td><td>${day(c.created_at)}</td></tr>`).join('')}</table>`
       : '<p class="muted">No companies match.</p>';
@@ -520,7 +520,7 @@
   }
 
   function closePanel() { document.querySelectorAll('.panel,.scrim').forEach((x) => x.remove()); }
-  const HIST_ACTS = { 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Team Chat Plus paid-until',
+  const HIST_ACTS = { 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link Plus paid-until',
     'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
     'staff.owner_made': 'made an HQ owner (SQL Editor)', 'ticket.viewed': 'opened a ticket', 'ticket.replied': 'replied to a ticket', 'ticket.note': 'added an internal note',
     'ticket.status': 'changed a ticket\'s status', 'ticket.priority': 'changed a ticket\'s priority', 'ticket.assigned': 'assigned a ticket', 'ticket.escalated': 'escalated a ticket',
@@ -904,7 +904,7 @@
         <td>${s.active ? '<span class="pill ok">Active</span>' : '<span class="pill">Switched off</span>'}</td><td>${day(s.added_at)}</td>
         ${owner ? `<td><div class="row">${s.display_name !== S.me.name ? `<button class="btn sm" data-toggle="${s.user_id}" data-active="${s.active}">${s.active ? 'Switch off' : 'Switch on'}</button>${T && ownerRole && s.role !== 'owner' ? `<button class="btn sm" data-perms="${s.user_id}">Permissions</button>` : ''}` : '<span class="muted small">you</span>'}</div></td>` : ''}</tr>
         <tr class="permrow" data-permrow="${s.user_id}" hidden><td colspan="5"></td></tr>`).join('')}</table></div>
-      ${owner ? `<div class="card" style="margin-top:14px"><h3>Add someone to the HQ team</h3><p class="muted small">They need a Riyeser account first (riyeser.com/team), and must turn on two-step sign-in there.</p>
+      ${owner ? `<div class="card" style="margin-top:14px"><h3>Add someone to the HQ team</h3><p class="muted small">They need a Riyeser account first (riyeser.com/link), and must turn on two-step sign-in there.</p>
         <form id="as" class="grid g3"><label class="f"><span>Email</span><input type="email" name="email" required></label><label class="f"><span>Name</span><input name="name" required maxlength="60"></label>
         <label class="f"><span>Role</span><select name="role">${ROLES.map(([k, l]) => `<option value="${k}"${k === 'support' ? ' selected' : ''}>${l}</option>`).join('')}</select></label><div><button class="btn p">Add</button></div></form></div>` : ''}
       <div class="card scroll" style="margin-top:14px"><h3>What each role can do <small>· the defaults</small></h3><table class="tbl small rolegrid"><tr><th>Permission</th>${ROLES.map(([, l]) => `<th>${l}</th>`).join('')}</tr>

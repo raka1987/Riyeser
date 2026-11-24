@@ -4,7 +4,8 @@
 // even if old files from an earlier install are still on the PC.
 const $ = (s, el = document) => el.querySelector(s);
 const bridge = window.api;
-if (bridge && bridge.on) bridge.on('team:title', (t) => { const n = (/^\((\d+)\)/.exec(t || '') || [])[1]; const el = document.getElementById('teamtag'); if (el) { el.hidden = !n; el.textContent = n || ''; } });
+if (bridge && bridge.on) bridge.on('team:title', (t) => { const n = (/^\((\d+)\)\s*Riyeser (?:Link|Team)\b/.exec(t || '') || [])[1];   // "(3) Riyeser Link" ("(3) Riyeser Team" before the rename)
+   const el = document.getElementById('teamtag'); if (el) { el.hidden = !n; el.textContent = n || ''; } });
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const moneyShort = (n) => `$${Math.round(Number(n || 0)).toLocaleString()}`;
@@ -84,11 +85,11 @@ tick(); setInterval(tick, 60000);
 
 // ---------- the programs ----------
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
-const ORDER = ['central', 'team', 'link', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
+const ORDER = ['central', 'team', 'linkoffice', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
-  team: { ic: 'chat', c: 'c-team', nav: 'Team', col: '#a21caf', blurb: 'Team chat and Team Chat Plus calls' },
-  link: { ic: 'phone', c: 'c-link', nav: 'Link', col: '#0e7490', blurb: 'Comes with Team Chat Plus' },
+  team: { ic: 'chat', c: 'c-team', nav: 'Link', col: '#a21caf', blurb: 'Chat, and Link Plus calls' },   // Riyeser Link (program id still "team")
+  linkoffice: { ic: 'phone', c: 'c-link', nav: 'Link Office', col: '#0e7490', blurb: 'Comes with Riyeser Link Plus' },
   invoices: { ic: 'invoice', c: 'c-inv', nav: 'Invoices', col: '#0284c7', blurb: 'Send invoices and get paid' },
   bookings: { ic: 'calendar', c: 'c-book', nav: 'Bookings', col: '#e11d48', blurb: 'Jobs, appointments and tables' },
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Books', col: '#16a05a', blurb: 'View and manage your accounts' },
@@ -119,19 +120,19 @@ const QUICK = [
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 // Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
-const LOGO = { team: 'team', link: 'link', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const LOGO = { team: 'team', linkoffice: 'link', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 const quickFor = (q) => (q.p === 'acc' ? accId() : q.p === 'invoices' && hasAcc() ? null : has(q.p) ? q.p : null);
 
 function renderNav() {
-  // Riyeser Team has its own Team chat button below, so it isn't listed twice.
+  // Riyeser Link has its own Riyeser Link button below, so it isn't listed twice.
   const mine = programs.filter((p) => p.status !== 'missing' && p.id !== 'team' && !(p.id === 'accounting-basics' && has('accounting')));
   const upFor = new Set((upd.updates || []).map((u) => u.id));
   const missing = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting'))).length;
   $('#nav').innerHTML = `<button class="${view === 'home' ? 'on' : ''}" data-view="home">${icon('home')}Home</button>
     ${mine.map((p) => `<button data-open="${esc(p.id)}" title="Open ${esc(p.full)}">${icon(LOOK[p.id].ic)}${esc(LOOK[p.id].nav || p.name)}${upFor.has(p.id) ? '<span class="tag">Update</span>' : ''}</button>`).join('')}
     <hr>
-    <button data-act="team">${icon('chat')}Team chat<span class="tag" id="teamtag" hidden></span></button>
+    <button data-act="team">${icon('chat')}Riyeser Link<span class="tag" id="teamtag" hidden></span></button>
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
     <button class="${view === 'company' ? 'on' : ''}" data-view="company">${icon('building')}Company</button>
@@ -154,9 +155,9 @@ function cardLine(id) {
     return { s: L.blurb };
   }
   if (id === 'payroll') { const r = (today.payroll || {}).lastRun; return { s: r ? `Last pay run ${fmtDate(r.pay_date)} · ${r.employees} staff` : L.blurb }; }
-  if (id === 'link') {   // its plan, like the other paid programs: Team Chat Plus
+  if (id === 'linkoffice') {   // its plan, like the other paid programs: Riyeser Link Plus
     const row = lic && lic.online && (lic.online.rows || []).find((r) => r.id === 'calls');
-    return row ? { s: `Team Chat Plus · ${row.text}`, alert: row.tone === 'bad' } : { s: L.blurb };
+    return row ? { s: `Link Plus · ${row.text}`, alert: row.tone === 'bad' } : { s: L.blurb };
   }
   if (id === 'desk') { const n = today.taskCount ?? today.tasks.length; return { s: n ? `${n} to-do${n === 1 ? '' : 's'} waiting` : L.blurb }; }
   return { s: L.blurb };
@@ -327,7 +328,7 @@ async function installPlan() {
 
 // ---------- "Getting started with Riyeser": a checklist that ticks itself from your real records ----------
 let cl = null;
-const CL_BTN = { wizard: 'Sign in', company: 'Check details', apps: 'Install them', team: 'Open Riyeser Team' };
+const CL_BTN = { wizard: 'Sign in', company: 'Check details', apps: 'Install them', team: 'Open Riyeser Link' };
 function clAction(it) {
   const a = it.action || {}; const p = programs.find((x) => x.id === a.id); const name = p ? p.name : '';
   if (a.kind === 'wizard') return `<button class="btn sm" data-w="link">${CL_BTN.wizard}</button>`;
@@ -469,7 +470,7 @@ function licLine(s) {
 }
 function renderLicence() {
   $('#licbtn').textContent = licLine(lic);
-  if (today && has('link')) renderCards();   // Riyeser Link's card shows its plan
+  if (today && has('linkoffice')) renderCards();   // Riyeser Link Office's card shows its plan
   const bar = $('#licbar');
   if (lic && lic.online) {   // the company's plan from Riyeser online
     const o = lic.online; const ended = o.rows.filter((r) => r.tone === 'bad'); const soon = o.rows.filter((r) => r.tone === 'warn');
@@ -490,12 +491,12 @@ function openPlan(o) {
   $('#licbody').innerHTML = `<div class="state${o.stale ? ' bad' : ''}"><span class="big">${o.stale ? '🔑' : '🏢'}</span><div><b>Your Riyeser plan${o.companyCode ? ` · ${esc(o.companyCode)}` : ''}</b>
       ${o.stale ? esc(o.message) : 'Set by Riyeser for your whole company. Every Riyeser program on this PC follows it.'}</div></div>
     <ul class="planrows">${o.rows.map((r) => `<li class="t-${r.tone}"><span>${icon[r.tone] || ''}</span><b>${esc(r.name)}</b><span class="pt">${esc(r.text)}</span></li>`).join('')
-      || '<li><span></span><b>No paid programs yet</b><span class="pt">Central, Invoices, PDF, Desk Assistant and Team chat are free.</span></li>'}</ul>
+      || '<li><span></span><b>No paid programs yet</b><span class="pt">Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are free.</span></li>'}</ul>
     <p class="planmeta">Users: ${o.seatsIncluded} included${o.extraUsers ? ` + ${o.extraUsers} extra` : ''}${o.usersUsed != null ? ` (${o.usersUsed} in use)` : ''} · Companies in Accounting: ${1 + o.extraCompanies} (1 included${o.extraCompanies ? ` + ${o.extraCompanies} extra` : ''})
       · Billed ${o.billing === 'yearly' ? 'yearly' : 'monthly'}${o.earlyBird ? ' · 🐣 early bird' : ''}</p>
     <p class="muted">Last checked ${esc(o.checkedAgo)}. Works offline for 30 days between checks.</p>
     <div class="row"><button class="btn" data-lic="refresh">Check now</button><button class="btn s" data-lic="buy">See plans</button></div>
-    <p class="muted">Central, Invoices, PDF, Desk Assistant and Team chat are always free. To add or change a paid program, contact Riyeser.</p>`;
+    <p class="muted">Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are always free. To add or change a paid program, contact Riyeser.</p>`;
   $('#licdlg').showModal();
 }
 function openLicence() {

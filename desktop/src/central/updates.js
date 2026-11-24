@@ -15,9 +15,10 @@ const PRODUCTS = [
   { id: 'accounting-basics', display: 'Riyeser Accounting Basics', asset: 'RiyeserAccountingBasics-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   // The till on its own (installs next to Accounting).
   { id: 'pos', display: 'Riyeser POS', asset: 'RiyeserPOS-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
-  { id: 'team', display: 'Riyeser Team', asset: 'RiyeserTeam-Setup.exe', args: ['/S'] },
+  // Riyeser Link was called Riyeser Team (same app, same release file): Windows lists it under either name.
+  { id: 'team', display: 'Riyeser Link', also: ['Riyeser Team'], asset: 'RiyeserTeam-Setup.exe', args: ['/S'] },
   // Installs for the whole PC, so Windows asks for permission when it installs or updates (for its firewall rule).
-  { id: 'link', display: 'Riyeser Link', asset: 'RiyeserLink-Setup.exe', args: ['/S'] },
+  { id: 'linkoffice', display: 'Riyeser Link Office', asset: 'RiyeserLinkOffice-Setup.exe', args: ['/S'] },
   { id: 'invoices', display: 'Riyeser Invoices', asset: 'RiyeserInvoices-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'bookings', display: 'Riyeser Bookings', asset: 'RiyeserBookings-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'accounting', display: 'Riyeser Accounting Plus', alsoRe: /^Riyeser Accounting\s+\d/i, asset: 'RiyeserAccountingPlus-Setup.exe', oldAsset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
@@ -54,8 +55,14 @@ function installedFromRegistry(text) {
     const name = (block.match(/^\s*DisplayName\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
     const ver = (block.match(/^\s*DisplayVersion\s+REG_SZ\s+(.+?)\s*$/mi) || [])[1];
     if (!name) continue;
-    for (const p of PRODUCTS) {
-      if (![p.display, ...(p.also || [])].some((n) => name.toLowerCase().startsWith(n.toLowerCase())) && !(p.alsoRe && p.alsoRe.test(name))) continue;
+    // The program whose name matches the longest part of the listed name ("Riyeser Link Office 1.0" is Link Office, not Link).
+    let p = null; let best = -1;
+    for (const q of PRODUCTS) {
+      const len = Math.max(-1, ...[q.display, ...(q.also || [])].filter((n) => name.toLowerCase().startsWith(n.toLowerCase())).map((n) => n.length));
+      const hit = len >= 0 ? len : (q.alsoRe && q.alsoRe.test(name) ? 0 : -1);
+      if (hit > best) { best = hit; p = q; }
+    }
+    if (p) {
       const v = ver || (name.match(/(\d+(?:\.\d+){1,3})\s*$/) || [])[1] || null;
       // An old copy can still be listed next to the new one (e.g. the old "Riyser" hub next to Riyeser Payroll): keep the newest.
       if (!(p.id in out) || (v && (!out[p.id] || newer(v, out[p.id])))) out[p.id] = v;

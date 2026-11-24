@@ -7,7 +7,7 @@ const { chromium } = require('playwright');
   const b = await chromium.launch(); const errs = [];
   const pg = await b.newPage({ viewport: { width: 1200, height: 900 } });
   pg.on('pageerror', (e) => errs.push(e.message));
-  await pg.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
+  await pg.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
   const user = { id: 'aaaaaaaa-0000-4000-8000-000000000021', email: 'new.owner@sample.test', aud: 'authenticated', role: 'authenticated', user_metadata: {} };
   let made = null; let signupSent = null;
   await pg.route('https://fake.supabase.test/**', async (r) => {
@@ -16,7 +16,7 @@ const { chromium } = require('playwright');
     const json = (body, status = 200) => r.fulfill({ status, contentType: 'application/json', headers: h, body: JSON.stringify(body) });
     if (r.request().method() === 'OPTIONS') return r.fulfill({ status: 200, headers: h });
     if (u.pathname === '/auth/v1/signup') {           // email confirmation is on: no session yet
-      signupSent = JSON.parse(r.request().postData() || '{}');
+      signupSent = JSON.parse(r.request().postData() || '{}'); signupSent.redirectTo = u.searchParams.get('redirect_to');
       user.user_metadata = signupSent.data || {};
       return json({ ...user, confirmation_sent_at: new Date().toISOString() });
     }
@@ -33,7 +33,7 @@ const { chromium } = require('playwright');
     return json([]);
   });
 
-  await pg.goto('http://127.0.0.1:8090/team/?signup'); await pg.waitForSelector('#gf');
+  await pg.goto('http://127.0.0.1:8090/link/?signup'); await pg.waitForSelector('#gf');
   console.log('1. sign-up page asks for:', await pg.$$eval('#gf label > span', (x) => x.map((s) => s.textContent.trim()).join(' | ')));
   await pg.fill('[name=you]', 'Sione Example'); await pg.fill('[name=email]', user.email); await pg.fill('[name=password]', 'a-good-password');
   await pg.selectOption('[name=country]', 'Samoa'); console.log('   phone hint for Samoa:', await pg.getAttribute('[name=phone]', 'placeholder'));
@@ -41,6 +41,9 @@ const { chromium } = require('playwright');
   await pg.fill('[name=address]', '1 Example Road, Apia'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.ok'); console.log('2. after creating:', (await pg.textContent('.ok')).trim());
   console.log('   details kept with the account:', JSON.stringify(signupSent && signupSent.data && signupSent.data.riyeser_signup));
+  // The confirmation email brings them back to the page they signed up on: /link/ (riyeser.com/link/ in Supabase's Redirect URLs)
+  console.log('   confirmation email returns to:', signupSent.redirectTo);
+  if (!/^http:\/\/127\.0\.0\.1:8090\/link\/\?signup$/.test(signupSent.redirectTo || '')) errs.push('sign-up on /link/ must return to /link/, got ' + signupSent.redirectTo);
   // after confirming the email: sign in
   await pg.fill('[name=email]', user.email); await pg.fill('[name=password]', 'a-good-password'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.hco', { timeout: 10000 });

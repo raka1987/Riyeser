@@ -1,4 +1,4 @@
-// Riyeser Link's status screen: is it running, which phones are connected, people, new phones, recent calls.
+// Riyeser Link Office's status screen: is it running, which phones are connected, people, new phones, recent calls.
 const api = window.api; const T = window.LinkText;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -20,13 +20,13 @@ function renderState() {
   } else if (S.state === 'waiting-licence') {
     el.className = 'state wait';
     el.innerHTML = `<div class="grow"><b class="big">${esc(T.WAITING_TITLE)}</b><span>${T.boldPlus(esc(S.licence.message || T.NEEDS_PLUS))}</span></div>
-      <button class="btn" data-a="team">Open Riyeser Team</button><button class="btn s" data-a="recheck">Check again</button>`;
+      <button class="btn" data-a="team">Open Riyeser Link</button><button class="btn s" data-a="recheck">Check again</button>`;
   } else if (S.state === 'stopping') {
     el.className = 'state wait';
-    el.innerHTML = `<div class="grow"><b class="big">${esc(T.STOPPING_TITLE)}</b><span>${esc(T.STOPPING)}</span></div><button class="btn" data-a="team">Open Riyeser Team</button>`;
+    el.innerHTML = `<div class="grow"><b class="big">${esc(T.STOPPING_TITLE)}</b><span>${esc(T.STOPPING)}</span></div><button class="btn" data-a="team">Open Riyeser Link</button>`;
   } else if (S.state === 'error') {
     el.className = 'state bad';
-    el.innerHTML = `<div class="grow"><b class="big">Riyeser Link isn't running</b><span>${esc(S.error)}</span></div>`;
+    el.innerHTML = `<div class="grow"><b class="big">Riyeser Link Office isn't running</b><span>${esc(S.error)}</span></div>`;
   } else { el.className = 'state'; el.innerHTML = '<b>Starting…</b>'; }
 }
 
@@ -52,7 +52,7 @@ function renderFound() {
 }
 
 function renderPeople() {
-  $('#pcount').textContent = S.people.length ? `${S.people.length} · ${S.source === 'team' ? 'from Riyeser Team' : 'added on this PC'}` : '';
+  $('#pcount').textContent = S.people.length ? `${S.people.length} · ${S.source === 'team' ? 'from Riyeser Link' : 'added on this PC'}` : '';
   if (!S.people.length) { $('#people').innerHTML = '<p class="muted">No one yet. Sign in to Riyeser below to bring in your team, or add people here.</p>'; }
   else {
     $('#people').innerHTML = `<div class="tw"><table><tr><th>Name</th><th>Extension</th><th>Device</th><th>State</th><th class="hide-sm">Do not disturb</th><th></th></tr>
@@ -64,7 +64,7 @@ function renderPeople() {
           <button class="btn s sm" data-reveal="${esc(p.ext)}">${shown[p.ext].reveal ? 'Hide' : 'Show'}</button><button class="btn s sm" data-copy="${esc(shown[p.ext].password)}">Copy password</button>
           <button class="btn s sm" data-reset="${esc(p.ext)}">Make a new password</button></div></td></tr>` : ''}`).join('')}</table></div>`;
   }
-  $('#addperson').innerHTML = `<form id="personform" class="row"><input id="pname" placeholder="${S.source === 'team' ? 'Someone not in Riyeser Team? Their name' : 'Add a person: their name'}" autocomplete="off">
+  $('#addperson').innerHTML = `<form id="personform" class="row"><input id="pname" placeholder="${S.source === 'team' ? 'Someone not in Riyeser Link? Their name' : 'Add a person: their name'}" autocomplete="off">
     <input id="pext" placeholder="Extension (blank = next free)" style="flex:0 1 190px" inputmode="numeric"><button class="btn">Add</button></form>`;
   $('#macwho').innerHTML = personOptions('');
 }
@@ -84,11 +84,11 @@ function renderCalls() {
 }
 function renderAccount() {
   const s = S.sync;
-  const line = S.teamSyncedAt ? `People and ring groups came from Riyeser Team, last brought in ${esc(when(S.teamSyncedAt))}. They're kept on this PC, so the phones work without the internet.` : 'Sign in to your Riyeser account to bring in your team: their names, extensions and branches.';
+  const line = S.teamSyncedAt ? `People and ring groups came from Riyeser Link, last brought in ${esc(when(S.teamSyncedAt))}. They're kept on this PC, so the phones work without the internet.` : 'Sign in to your Riyeser account to bring in your team: their names, extensions and branches.';
   $('#account').innerHTML = `<p>${line}</p>${s && s.status === 'offline' ? `<p class="muted">${esc(s.error)}</p>` : ''}${s && s.status === 'local' ? `<p class="muted">${esc(s.why)}</p>` : ''}
-    <div class="row"><button class="btn s" data-a="sync">Bring in people from Riyeser Team now</button>${S.signedIn ? '<button class="btn s sm" data-a="signout">Sign out of Riyeser here</button>' : ''}</div>
+    <div class="row"><button class="btn s" data-a="sync">Bring in people from Riyeser Link now</button>${S.signedIn ? '<button class="btn s sm" data-a="signout">Sign out of Riyeser here</button>' : ''}</div>
     ${S.signedIn ? '' : `<form id="signin" class="row"><input id="em" type="email" placeholder="Riyeser account email" autocomplete="username"><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button class="btn">Sign in</button></form>
-      <p class="muted">Already signed in on Riyeser Central? Riyeser Link uses that too when it can.</p>`}`;
+      <p class="muted">Already signed in on Riyeser Central? Riyeser Link Office uses that too when it can.</p>`}`;
 }
 function renderAdvanced() {
   const a = S.adapters;
@@ -96,7 +96,7 @@ function renderAdvanced() {
     <div class="row"><select id="adapter"><option value="">Choose automatically</option>${a.list.map((x) => `<option value="${esc(x.name)}"${a.current.chosen && a.current.name === x.name ? ' selected' : ''}>${esc(x.name)} (${esc(x.address)})</option>`).join('')}</select></div>
     <p><label><input type="checkbox" id="sww"${S.startWithWindows ? ' checked' : ''}> Start with Windows (needed so the phones work after a restart)</label></p>
     <p><label><input type="checkbox" id="pub"${S.allowPublic ? ' checked' : ''}> Allow phones from outside the office network (not recommended: it lets strangers try passwords)</label></p>
-    <p><b>Settings file.</b> People, extensions, ring groups and phone assignments in one file, to move to a new PC or to Riyeser Link: Cloud later. It holds the phones' passwords, so keep it safe.</p>
+    <p><b>Settings file.</b> People, extensions, ring groups and phone assignments in one file, to move to a new PC or to Riyeser Link Cloud later. It holds the phones' passwords, so keep it safe.</p>
     <div class="row"><button class="btn s" data-a="export">Export settings</button><button class="btn s" data-a="import">Import settings</button><button class="btn s" data-a="logs">Open the log folder</button></div>
     <p class="muted">Phones connect on port ${esc(S.sipPort)} (SIP) and fetch their settings from port ${esc(S.httpPort)}.</p>
     <div class="log">${S.logs.map((l) => `${esc(when(l.at))}  ${esc(l.text)}`).join('\n') || 'Nothing yet.'}</div>`;
@@ -127,7 +127,7 @@ document.addEventListener('click', async (e) => {
   b.disabled = true;
   try {
     if (a === 'team') await safe(() => api.call('link:openTeam'));
-    if (a === 'recheck') { await safe(() => api.call('link:recheck')); toast(S && S.state === 'running' ? 'Riyeser Link is on.' : 'Checked.'); }
+    if (a === 'recheck') { await safe(() => api.call('link:recheck')); toast(S && S.state === 'running' ? 'Riyeser Link Office is on.' : 'Checked.'); }
     if (a === 'sync') { const r = await safe(() => api.call('link:sync')); if (r) toast(r.status === 'synced' ? `Brought in ${r.people} people.` : (r.error || r.why)); }
     if (a === 'signout') await safe(() => api.call('link:signOut'));
     if (a === 'firewall') { const ok = await safe(() => api.call('link:firewall')); toast(ok ? 'Phones are allowed through the firewall.' : 'The firewall rule wasn\'t added. Try again and choose Yes when Windows asks.'); }

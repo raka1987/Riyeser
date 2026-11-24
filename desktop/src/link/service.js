@@ -1,6 +1,6 @@
-// Riyeser Link's engine: the SIP server, the desk-phone set-up server, people, recent calls and the licence,
+// Riyeser Link Office's engine: the SIP server, the desk-phone set-up server, people, recent calls and the licence,
 // put together. The Electron app (phone-main.js) shows it; the self-test and the tests drive it directly.
-// It only starts the phone system while Team Chat Plus is on (trial or paid). If it lapses while running, calls in
+// It only starts the phone system while Link Plus is on (trial or paid). If it lapses while running, calls in
 // progress finish, then new phones and calls are refused. Nothing is deleted: people, phones and call history stay.
 const { EventEmitter } = require('events');
 const { Pbx } = require('./pbx');
@@ -95,10 +95,10 @@ class PhoneService extends EventEmitter {
     this.lic = this.licence();
     if (this.lic.active) {
       if (!this.pbx) await this.startPbx();
-      else if (!this.pbx.accepting) { this.pbx.setAccepting(true); this.state = 'running'; this.log('info', 'Team Chat Plus is on again. Phones can connect and call.'); }
+      else if (!this.pbx.accepting) { this.pbx.setAccepting(true); this.state = 'running'; this.log('info', 'Link Plus is on again. Phones can connect and call.'); }
     } else if (this.pbx) {
       if (this.pbx.accepting) {
-        this.log('warn', 'Team Chat Plus isn\'t active any more. Calls in progress can finish; new calls and phones are refused.');
+        this.log('warn', 'Link Plus isn\'t active any more. Calls in progress can finish; new calls and phones are refused.');
         this.state = 'stopping';
         this.pbx.setAccepting(false);   // 'idle' (below) stops the phone system once the last call ends
       }
@@ -120,8 +120,8 @@ class PhoneService extends EventEmitter {
     } catch (e) {
       await pbx.stop().catch(() => {}); await prov.stop().catch(() => {});
       this.state = 'error';
-      this.error = e.code === 'EADDRINUSE' ? 'Another program on this PC is already using the phone ports (5060 or 5080). Close other phone or SIP software, then restart Riyeser Link.'
-        : `Riyeser Link couldn't start: ${e.message}`;
+      this.error = e.code === 'EADDRINUSE' ? 'Another program on this PC is already using the phone ports (5060 or 5080). Close other phone or SIP software, then restart Riyeser Link Office.'
+        : `Riyeser Link Office couldn't start: ${e.message}`;
       this.log('error', this.error);
       return;
     }
@@ -139,16 +139,16 @@ class PhoneService extends EventEmitter {
     this.pbx = null; this.prov = null;
     if (pbx) await pbx.stop().catch(() => {});
     if (prov) await prov.stop().catch(() => {});
-    if (why === 'licence') { this.state = 'waiting-licence'; this.log('info', 'Riyeser Link is paused until Team Chat Plus is on. People, phones and call history are kept.'); }
+    if (why === 'licence') { this.state = 'waiting-licence'; this.log('info', 'Riyeser Link Office is paused until Link Plus is on. People, phones and call history are kept.'); }
     this.emit('change');
   }
   async stop() { clearInterval(this.timer); await this.stopPbx(); }
 
-  /** Bring people in from Riyeser Team (when linked), then re-check the licence. */
+  /** Bring people in from Riyeser Link (when linked), then re-check the licence. */
   async sync() {
     const r = await syncFromTeam({ clients: (this.opts.clients ? this.opts.clients() : []), appData: this.appData, directory: this.directory });
     this.syncState = { ...r, at: new Date().toISOString() };
-    if (r.status === 'synced') this.log('info', `Brought in ${r.people} people and ${r.groups} ring group${r.groups === 1 ? '' : 's'} from Riyeser Team.`);
+    if (r.status === 'synced') this.log('info', `Brought in ${r.people} people and ${r.groups} ring group${r.groups === 1 ? '' : 's'} from Riyeser Link.`);
     await this.checkLicence();
     return this.syncState;
   }
@@ -182,7 +182,7 @@ class PhoneService extends EventEmitter {
       const regs = regsBy.get(p.ext) || [];
       const kinds = [...new Set(regs.map((r) => r.device))];
       const assigned = phones.filter((x) => x.ext === p.ext);
-      const state = waiting ? 'waiting for Team Chat Plus' : busy.get(p.ext) || (regs.length ? 'ready' : 'not connected');
+      const state = waiting ? 'waiting for Link Plus' : busy.get(p.ext) || (regs.length ? 'ready' : 'not connected');
       return { id: p.id, name: p.name, ext: p.ext, source: p.source, dnd: this.directory.dnd(p.ext), device: kinds.length ? kinds.join(' + ') : assigned.length ? 'desk phone' : '',
         connected: regs.length > 0, state, ips: regs.map((r) => r.ip) };
     });
@@ -194,7 +194,7 @@ class PhoneService extends EventEmitter {
       licence: this.lic, business: d.business, source: d.source, teamSyncedAt: d.teamSyncedAt, skipped: d.skipped || [], sync: this.syncState,
       people, groups: this.directory.groups().map((g) => ({ ...g, names: g.members.map((m) => this.directory.nameOf(m)) })),
       phones: phones.map((x) => ({ ...x, macText: prettyMac(x.mac), vendorName: VENDORS[x.vendor] || 'Desk phone', name: this.directory.nameOf(x.ext),
-        state: waiting ? 'waiting for Team Chat Plus' : (x.ip && regIps.has(x.ip)) ? 'connected' : x.lastFetch ? 'set up, not connected now' : 'waiting for the phone to ask for its settings' })),
+        state: waiting ? 'waiting for Link Plus' : (x.ip && regIps.has(x.ip)) ? 'connected' : x.lastFetch ? 'set up, not connected now' : 'waiting for the phone to ask for its settings' })),
       found, inProgress: snap.calls, recent: this.calls.list({ limit: 100 }),
       counts: { connected: new Set(snap.registrations.map((r) => r.ext)).size, onCalls: snap.calls.filter((c) => c.state === 'talking').length, phones: snap.registrations.length },
       blocked: snap.blocked, ipChanged: this.ipChanged || null, adapter: this.adapter(), allowPublic: !!this.settings().allowPublic, logs: this.logs.slice(-60).reverse(),

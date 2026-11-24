@@ -4,10 +4,11 @@
 const fs = require('fs');
 
 // ---------- the plan (licence.json "online".modules) -> programs ----------
-// The same names Central uses everywhere: basic = Accounting Basics, plus = Accounting Plus, calls = Riyeser Team
-// (and Riyeser Link, id "link", once it's in Central's PROGRAMS), as_built = As Built (its program id is still "services").
+// The same names Central uses everywhere: basic = Accounting Basics, plus = Accounting Plus, calls = Riyeser Link Plus:
+// the Riyeser Link app (program id still "team") and Riyeser Link Office (id "linkoffice", once it's in Central's PROGRAMS),
+// as_built = As Built (its program id is still "services").
 const MODULE_PROGRAMS = { basic: ['accounting-basics'], plus: ['accounting'], pos: ['pos'], bookings: ['bookings'], payroll: ['payroll'],
-  calls: ['team', 'link'], as_built: ['services'] };
+  calls: ['team', 'linkoffice'], as_built: ['services'] };
 
 /** Module ids that are on the plan right now (active, which includes a running free trial). */
 function planModules(lic) {
@@ -17,7 +18,7 @@ function planModules(lic) {
 
 /**
  * Programs on the plan that aren't installed yet, in Central's order.
- * known: the program ids Central knows about (so "link" only appears once Central has it); installed: ids installed.
+ * known: the program ids Central knows about (so "linkoffice" only appears once Central has it); installed: ids installed.
  * names: id -> display name. Accounting Plus covers Accounting Basics.
  */
 function planToInstall(lic, { known = [], installed = [], names = {} } = {}) {
@@ -96,10 +97,10 @@ const DETAIL_KEYS = ['name', 'address', 'phone', 'email', 'tax_number'];
  *   names: id -> name; acc / payroll: facts from the readers above; kind: 'personal' | 'business' | null;
  *   members: people in the company online (null when unknown); skipped: ids skipped; hidden: the card is hidden.
  */
-/** Riyeser Link's desk phones, read from its settings file (%APPDATA%\\Riyeser Link\\data\\phone-devices.json). Read-only. */
+/** Riyeser Link Office's desk phones, from its settings file (%APPDATA%\\Riyeser Link Office\\data\\phone-devices.json). Read-only. */
 function linkFacts(appData) {
   try {
-    const d = JSON.parse(require('fs').readFileSync(require('path').join(appData, 'Riyeser Link', 'data', 'phone-devices.json'), 'utf8')) || {};
+    const d = JSON.parse(require('fs').readFileSync(require('path').join(appData, 'Riyeser Link Office', 'data', 'phone-devices.json'), 'utf8')) || {};
     return { found: true, phones: Array.isArray(d.phones) ? d.phones.length : 0 };
   } catch { return { found: false, phones: 0 }; }
 }
@@ -134,7 +135,7 @@ function build({ company = null, lic = {}, demo = false, installed = [], known =
   add('invoice', 'Send your first invoice or quote', 'Make one, check it, send it. Getting paid starts here.',
     books.found && books.salesDocs > 0, accApp ? { kind: 'open', id: accApp, page: 'invoice' } : { kind: 'install', id: 'invoices' });
   if (kind !== 'personal') {
-    add('team', 'Invite the people who help you', 'Staff, family or your bookkeeper. They chat with you in Riyeser Team.',
+    add('team', 'Invite the people who help you', 'Staff, family or your bookkeeper. They chat with you in Riyeser Link.',
       members != null && members > 1, { kind: 'team' });
   }
   if (onPlan('payroll') || has('payroll')) {
@@ -148,9 +149,9 @@ function build({ company = null, lic = {}, demo = false, installed = [], known =
   if (onPlan('pos') || has('pos')) {
     add('sale', 'Make your first sale', 'Open the till and ring something up.', books.found && books.posSales > 0, run('pos', 'pos'));
   }
-  if (has('link')) {
-    add('deskphone', 'Connect a desk phone to Riyeser Link', 'Plug a desk phone into the office network. Riyeser Link finds it, then you choose who it\'s for.',
-      !!(link && link.found && link.phones > 0), run('link'));
+  if (has('linkoffice')) {
+    add('deskphone', 'Connect a desk phone to Riyeser Link Office', 'Plug a desk phone into the office network. Riyeser Link Office finds it, then you choose who it\'s for.',
+      !!(link && link.found && link.phones > 0), run('linkoffice'));
   }
 
   for (const it of items) it.skipped = !it.done && skipped.includes(it.id);

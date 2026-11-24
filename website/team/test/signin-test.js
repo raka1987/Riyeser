@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
   const b = await chromium.launch(); const errs = []; const calls = [];
   const pg = await b.newPage({ viewport: { width: 1200, height: 800 } });
   pg.on('pageerror', (e) => errs.push(e.message));
-  await pg.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
+  await pg.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
   const user = { id: 'aaaaaaaa-0000-4000-8000-000000000001', email: 'owner@sample.test' };
   let teamMade = false;
   await pg.route('https://fake.supabase.test/**', async (r) => {
@@ -26,7 +26,7 @@ const { chromium } = require('playwright');
     if (u.pathname === '/rest/v1/reads') return json([], 201);
     return json([]);
   });
-  await pg.goto('http://127.0.0.1:8090/team/'); await pg.waitForSelector('#gf');
+  await pg.goto('http://127.0.0.1:8090/link/'); await pg.waitForSelector('#gf');
   console.log('1. signed out shows:', await pg.textContent('.gcard h1'), '| demo?', await pg.evaluate(() => window.RiyeserTeam.demo));
   await pg.fill('input[name=email]', user.email); await pg.fill('input[name=password]', 'wrong-password'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.err'); console.log('2. wrong password:', await pg.textContent('.err'));

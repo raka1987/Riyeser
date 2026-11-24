@@ -1,17 +1,20 @@
-// Riyeser Link for Windows ("Riyeser Link: Office"): the office phone system, on one PC.
-// It registers the office's desk phones (and, next, the Riyeser Team app) and connects calls between them on the
+// Riyeser Link Office for Windows: the office phone system, on one PC.
+// It registers the office's desk phones (and, next, the Riyeser Link app) and connects calls between them on the
 // office network. It sits by the clock, starts with Windows and keeps the PC awake while it runs; closing the window
 // keeps it running (Quit from the tray icon). Internal calls only: no outside numbers and no emergency calls.
-// It works only while Team Chat Plus is on (trial or paid); everything is kept on this PC, so it runs with no internet.
+// It works only while Link Plus is on (trial or paid); everything is kept on this PC, so it runs with no internet.
 const { app, BrowserWindow, Tray, Menu, shell, ipcMain, powerSaveBlocker, safeStorage, net, Notification, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const NAME = 'Riyeser Link';
-const TEAM_URL = 'https://riyeser.com/team/';
+const NAME = 'Riyeser Link Office';
+const TEAM_URL = 'https://riyeser.com/link/';
 app.setName(NAME);
-if (process.platform === 'win32') app.setAppUserModelId('com.riyeser.link');
+// Its own data folder, %APPDATA%\Riyeser Link Office (Riyeser Central reads the desk phones from it). Never the
+// chat app's: that one is called Riyeser Link now, but keeps its data in %APPDATA%\Riyeser Team.
+app.setPath('userData', path.join(app.getPath('appData'), NAME));
+if (process.platform === 'win32') app.setAppUserModelId('com.riyeser.linkoffice');
 const selfTestArg = process.argv.find((a) => a.startsWith('--self-test='));
 if (!selfTestArg && !app.requestSingleInstanceLock()) app.quit();
 
@@ -95,8 +98,8 @@ function makeService() {
 function updateTray() {
   if (!tray || !service) return;
   const s = service.status();
-  tray.setToolTip(s.state === 'running' ? `${NAME} · ${s.counts.phones} phone${s.counts.phones === 1 ? '' : 's'} connected${s.counts.onCalls ? ` · ${s.counts.onCalls} on calls` : ''}` : `${NAME} · ${s.state === 'waiting-licence' ? 'waiting for Team Chat Plus' : 'not running'}`);
-  if (s.found.length > service.prevFound && Notification.isSupported()) new Notification({ title: NAME, body: 'New phone found. Open Riyeser Link to say who it\'s for.' }).show();
+  tray.setToolTip(s.state === 'running' ? `${NAME} · ${s.counts.phones} phone${s.counts.phones === 1 ? '' : 's'} connected${s.counts.onCalls ? ` · ${s.counts.onCalls} on calls` : ''}` : `${NAME} · ${s.state === 'waiting-licence' ? 'waiting for Link Plus' : 'not running'}`);
+  if (s.found.length > service.prevFound && Notification.isSupported()) new Notification({ title: NAME, body: 'New phone found. Open Riyeser Link Office to say who it\'s for.' }).show();
   service.prevFound = s.found.length;
 }
 
@@ -121,7 +124,7 @@ function registerIpc() {
   handle('link:manual', (ext) => service.manual(ext));
   handle('link:resetPassword', async (ext) => {
     const r = await dialog.showMessageBox(win, { type: 'question', buttons: ['Make a new password', 'Cancel'], defaultId: 1, cancelId: 1, title: NAME,
-      message: `Make a new password for extension ${ext}?`, detail: 'Phones using the old one stop working until they get the new one. Desk phones set up by Riyeser Link get it when they restart.' });
+      message: `Make a new password for extension ${ext}?`, detail: 'Phones using the old one stop working until they get the new one. Desk phones set up by Riyeser Link Office get it when they restart.' });
     return r.response === 0 ? service.resetPassword(ext) : null;
   });
   handle('link:dnd', (ext, on) => service.setDnd(ext, on));
@@ -138,15 +141,15 @@ function registerIpc() {
   handle('link:allowPublic', async (on) => { service.setSettings({ allowPublic: !!on }); if (service.pbx) { await service.stopPbx(); await service.checkLicence(); } return !!on; });
   handle('link:export', async () => {
     const { exportSettings } = require('./link/portable');
-    const r = await dialog.showSaveDialog(win, { title: 'Export Riyeser Link settings', defaultPath: path.join(app.getPath('documents'), `Riyeser Link settings ${new Date().toISOString().slice(0, 10)}.json`),
-      filters: [{ name: 'Riyeser Link settings', extensions: ['json'] }] });
+    const r = await dialog.showSaveDialog(win, { title: 'Export Riyeser Link Office settings', defaultPath: path.join(app.getPath('documents'), `Riyeser Link Office settings ${new Date().toISOString().slice(0, 10)}.json`),
+      filters: [{ name: 'Riyeser Link Office settings', extensions: ['json'] }] });
     if (r.canceled || !r.filePath) return null;
     fs.writeFileSync(r.filePath, JSON.stringify(exportSettings({ directory: service.directory, store }), null, 2));
     return r.filePath;
   });
   handle('link:import', async () => {
     const { importSettings } = require('./link/portable');
-    const r = await dialog.showOpenDialog(win, { title: 'Import Riyeser Link settings', properties: ['openFile'], filters: [{ name: 'Riyeser Link settings', extensions: ['json'] }] });
+    const r = await dialog.showOpenDialog(win, { title: 'Import Riyeser Link Office settings', properties: ['openFile'], filters: [{ name: 'Riyeser Link Office settings', extensions: ['json'] }] });
     if (r.canceled || !r.filePaths[0]) return null;
     const out = importSettings({ directory: service.directory, store, data: JSON.parse(fs.readFileSync(r.filePaths[0], 'utf8')) });
     service.emit('change');

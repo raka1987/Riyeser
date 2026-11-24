@@ -33,12 +33,14 @@ const localPrograms = () => path.join(process.env.LOCALAPPDATA || path.join(os.h
 // ---------- the programs ----------
 const PROGRAMS = [
   // Free invoicing on its own (free forever). Opens the same company files as Accounting and installs next to it.
-  // Riyeser Team as its own desktop app (chat free; Team Chat Plus calls). When it's installed, Team chat opens it.
-  { id: 'team', name: 'Team', full: 'Riyeser Team', icon: '💬', desc: 'Team chat for your business, and Team Chat Plus calls. Chat is free.',
-    dirs: ['riyeser-team', 'Riyeser Team'], exes: ['Riyeser Team.exe'], links: ['Riyeser Team'] },
-  // Riyeser Link (Riyeser Link: Office): the office phone system, with Team Chat Plus. Installs for the whole PC (Program Files).
-  { id: 'link', name: 'Link', full: 'Riyeser Link', icon: '☎', desc: 'Your office phone system: desk phones that ring each other. Comes with Team Chat Plus.',
-    dirs: ['riyeser-link', 'Riyeser Link'], exes: ['Riyeser Link.exe'], links: ['Riyeser Link'], machine: true },
+  // Riyeser Link (formerly Riyeser Team) as its own desktop app (chat free; Link Plus calls). When it's installed,
+  // the Link button opens it. Its folder and program file kept the old names (riyeser-team, Riyeser Team.exe) so it
+  // updates in place; the Start menu and desktop shortcuts are called Riyeser Link now (Riyeser Team before 1.1).
+  { id: 'team', name: 'Link', full: 'Riyeser Link', icon: '💬', desc: 'Chat for your business, and Link Plus calls. Chat is free.',
+    dirs: ['riyeser-team', 'Riyeser Team'], exes: ['Riyeser Team.exe'], links: ['Riyeser Link', 'Riyeser Team'] },
+  // Riyeser Link Office: the office phone system, with Riyeser Link Plus. Installs for the whole PC (Program Files).
+  { id: 'linkoffice', name: 'Link Office', full: 'Riyeser Link Office', icon: '☎', desc: 'Your office phone system: desk phones that ring each other. Comes with Riyeser Link Plus.',
+    dirs: ['Riyeser Link Office', 'riyeser-linkoffice'], exes: ['Riyeser Link Office.exe'], links: ['Riyeser Link Office'], machine: true },
   { id: 'invoices', name: 'Invoices', full: 'Riyeser Invoices', icon: '🧾', desc: 'Quotes, invoices, customers and getting paid. Free forever.',
     dirs: ['Riyeser Invoices'], exes: ['Riyeser Invoices.exe'], links: ['Riyeser Invoices'], pages: ['invoice'] },
   // Bookings and scheduling (jobs, appointments, tables). Same company files as Accounting; installs next to it.
@@ -126,7 +128,7 @@ const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send
 function installedVersions() {
   if (process.platform !== 'win32') return Promise.resolve(app.isPackaged ? { central: app.getVersion() } : {});
   const q = (key) => new Promise((resolve) => execFile('reg', ['query', key, '/s', '/reg:64'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, out) => resolve(out || '')));
-  // Most programs install for this Windows user (HKCU); Riyeser Link installs for the whole PC (HKLM).
+  // Most programs install for this Windows user (HKCU); Riyeser Link Office installs for the whole PC (HKLM).
   return Promise.all([q('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall'), q('HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall')])
     .then(([user, machine]) => { const v = { ...updates.installedFromRegistry(machine), ...updates.installedFromRegistry(user) }; if (app.isPackaged) v.central = app.getVersion(); return v; });
 }
@@ -243,7 +245,7 @@ function registerIpc() {
   });
   // A program that isn't installed yet: its page on riyeser.com, with the download.
   handle('central:get', async (id) => {
-    const page = { team: 'team', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const page = { team: 'link', linkoffice: 'link', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     await shell.openExternal(page ? `https://riyeser.com/programs/${page}.html` : 'https://riyeser.com/downloads.html');
     return true;
   });
@@ -398,12 +400,12 @@ function registerIpc() {
   handle('central:install', (id) => installProgram(id));
   // Help: each program's guide in the Riyeser Help Centre.
   handle('central:help', (id) => {
-    const guide = { central: 'central', team: 'team', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const guide = { central: 'central', team: 'link', linkoffice: 'link', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     return shell.openExternal(guide ? `https://riyeser.com/help/${guide}.html` : 'https://riyeser.com/help.html').then(() => true);
   });
   // Get help: ask Riyeser Support on riyeser.com (signs in, then opens the "Get help" form).
-  handle('central:getHelp', () => shell.openExternal('https://riyeser.com/team/?help').then(() => true));
-  // Team chat: the Riyeser Team app when it's installed (it rings by itself), otherwise Central's own Team window.
+  handle('central:getHelp', () => shell.openExternal('https://riyeser.com/link/?help').then(() => true));
+  // Riyeser Link: its own app when it's installed (it rings by itself), otherwise Central's own Link window.
   handle('central:team', async () => { const exe = teamApp(); if (exe) { const err = await shell.openPath(exe); if (err) throw new Error(err); return true; } return openTeam(); });
   handle('search:find', (opts) => {
     // Search uses Desk Assistant's file list: nothing (not an old list) when it isn't installed.
@@ -415,11 +417,11 @@ function registerIpc() {
   handle('file:reveal', (p) => { shell.showItemInFolder(p); return true; });
 }
 
-// Riyeser Team (team chat) in its own window. It's the online chat at riyeser.com/team, with its sign-in kept
-// in its own storage so it stays signed in. Links people send open in the normal web browser.
-const TEAM_URL = 'https://riyeser.com/team/';
+// Riyeser Link (chat, formerly Riyeser Team) in its own window. It's the online chat at riyeser.com/link, with its
+// sign-in kept in its own storage (still called riyeser-team) so it stays signed in. Links open in the web browser.
+const TEAM_URL = 'https://riyeser.com/link/';
 let teamWin = null; let quitting = false;
-// Microphone and camera (for Riyeser Team Calls) and notifications, only for riyeser.com, only in the Team window.
+// Microphone and camera (for Link Plus calls) and notifications, only for riyeser.com, only in the Link window.
 function teamSession() {
   const ses = session.fromPartition('persist:riyeser-team');
   if (!ses.__riyeserPerms) {
@@ -430,7 +432,7 @@ function teamSession() {
   }
   return ses;
 }
-// After the first time Team is opened, it keeps running (hidden) while Central is open, so calls can ring.
+// After the first time Link is opened, it keeps running (hidden) while Central is open, so calls can ring.
 function teamApp() { try { return locate(PROGRAMS.find((x) => x.id === 'team')); } catch { return null; } }
 function openTeam(opts = {}) {
   if (teamWin && !teamWin.isDestroyed()) {
@@ -438,18 +440,19 @@ function openTeam(opts = {}) {
     return true;
   }
   teamWin = new BrowserWindow({
-    width: 1100, height: 760, minWidth: 380, minHeight: 500, title: 'Riyeser Team', show: !opts.background,
+    width: 1100, height: 760, minWidth: 380, minHeight: 500, title: 'Riyeser Link', show: !opts.background,
     icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-central.ico' : 'icon-central.png'),
     webPreferences: { session: teamSession(), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
   });
   teamWin.removeMenu();
   teamWin.loadURL(TEAM_URL);
-  const outside = (url) => { try { const u = new URL(url); return !(u.origin === new URL(TEAM_URL).origin && u.pathname.startsWith('/team/')); } catch { return true; } };
+  // riyeser.com/link/ and its old address riyeser.com/team/ both stay in this window.
+  const outside = (url) => { try { const u = new URL(url); return !(u.origin === new URL(TEAM_URL).origin && (u.pathname.startsWith('/link/') || u.pathname.startsWith('/team/'))); } catch { return true; } };
   teamWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   teamWin.webContents.on('will-navigate', (e, url) => { if (outside(url)) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
   teamWin.webContents.on('page-title-updated', (_e, title) => {
     if (win && !win.isDestroyed()) win.webContents.send('team:title', title);
-    if (/^📞/.test(title) && teamWin && !teamWin.isDestroyed()) {   // an incoming call: bring Team forward
+    if (/^📞/.test(title) && teamWin && !teamWin.isDestroyed()) {   // an incoming call: bring Link forward
       if (teamWin.isMinimized()) teamWin.restore();
       teamWin.show(); teamWin.focus(); teamWin.flashFrame(true);
     }
@@ -470,11 +473,11 @@ function createWindow() {
   win.removeMenu();
   win.loadFile(path.join(__dirname, 'renderer', 'central.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  // Closing Central closes the hidden Team window too, so Central really quits.
+  // Closing Central closes the hidden Link window too, so Central really quits.
   win.on('closed', () => { win = null; quitting = true; if (teamWin && !teamWin.isDestroyed()) teamWin.destroy(); });
-  // Team was used before: start it quietly in the background so calls can ring.
+  // Link was used before: start it quietly in the background so calls can ring.
   let t = null; try { t = store.get('team', null); } catch { /* none yet */ }
-  // (not when the Riyeser Team app is installed: it rings by itself, and two windows would ring twice)
+  // (not when the Riyeser Link app is installed: it rings by itself, and two windows would ring twice)
   if (t && t.background && !teamApp()) setTimeout(() => openTeam({ background: true }), 4000);
 }
 

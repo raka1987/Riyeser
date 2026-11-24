@@ -4,13 +4,14 @@
 // read it to fill in their set-up). It's written when someone sets up a new company, is approved to join one, or sets
 // this PC up on its own. Nothing here ever deletes company.json or any other data.
 //
-// The online service is Riyeser Team's Supabase project. Its address and publishable key aren't built in: they're
-// read from https://riyeser.com/team/config.js, so switching it on needs no new Central release.
+// The online service is Riyeser Link's Supabase project (set up when it was called Riyeser Team). Its address and
+// publishable key aren't built in: they're read from https://riyeser.com/link/config.js (the same file is still at
+// riyeser.com/team/config.js for older Centrals), so switching it on needs no new Central release.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const CONFIG_URL = 'https://riyeser.com/team/config.js';
+const CONFIG_URL = 'https://riyeser.com/link/config.js';
 const PROFILE_KEYS = ['name', 'legal_name', 'tax_number', 'address', 'phone', 'email', 'country'];
 
 /** {url, key} from the text of config.js; empty strings when it isn't set up yet. */

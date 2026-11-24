@@ -1,4 +1,4 @@
-// A small, careful SIP message parser and writer (RFC 3261), written for Riyeser Link.
+// A small, careful SIP message parser and writer (RFC 3261), written for Riyeser Link Office.
 // It only does what an office phone system needs: requests and responses, the common headers, compact header
 // names, folded lines, Via / Route / Contact lists, name-addr and URI parsing, and digest authentication.
 // Anything it can't make sense of throws, so the caller can drop the packet without crashing.

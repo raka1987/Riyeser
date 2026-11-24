@@ -2,11 +2,11 @@
 //   DESK_APP=central -> Riyeser Central (the Riyeser Group home screen)
 //   DESK_APP=pdf     -> Riyeser PDF
 //   DESK_APP=services -> As Built, formerly Riyeser Services (the riyeser.com/app/ app in its own window)
-//   DESK_APP=team    -> Riyeser Team (team chat and Team Chat Plus calls, riyeser.com/team in its own window)
-//   DESK_APP=link    -> Riyeser Link (Riyeser Link: Office, the office phone system for desk phones)
+//   DESK_APP=team    -> Riyeser Link, formerly Riyeser Team (chat, and Link Plus calls: riyeser.com/link in its own window)
+//   DESK_APP=linkoffice -> Riyeser Link Office (the office phone system for desk phones)
 //   (default)        -> Riyeser Desk Assistant
 const base = require('../package.json').build;
-const which = ['pdf', 'central', 'services', 'team', 'link'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
+const which = ['pdf', 'central', 'services', 'team', 'linkoffice'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
 const pdf = which === 'pdf';
 const APPS = {
   assistant: { name: 'Riyeser Desk Assistant', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDeskAssistant' },
@@ -20,13 +20,18 @@ const APPS = {
   services: { name: 'As Built', appId: 'com.riyeser.services', ico: 'build/services/icon.ico', out: 'dist-services', artifact: 'RiyeserServices',
     executableName: 'Riyeser Services',
     extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.2.0', productName: 'As Built' } },
-  team: { name: 'Riyeser Team', appId: 'com.riyeser.team', ico: 'build/team/icon.ico', out: 'dist-team', artifact: 'RiyeserTeam',
-    extraMetadata: { main: 'src/team-main.js', name: 'riyeser-team', version: '1.0.0', productName: 'Riyeser Team' } },
-  // Riyeser Link installs for the whole PC (one Windows permission prompt) so its installer can add the Windows
+  // Riyeser Link was called Riyeser Team. Only the name people see changed (window, tray, shortcuts, Installed apps,
+  // Task Manager). The app id, install folder (riyeser-team, from the package name), program file (Riyeser Team.exe),
+  // data folder (%APPDATA%\Riyeser Team, set in team-main.js, with the sign-in and chats) and release file
+  // (RiyeserTeam-Setup.exe) stay the same, so installed copies update in place and older Centrals still find it.
+  team: { name: 'Riyeser Link', appId: 'com.riyeser.team', ico: 'build/team/icon.ico', out: 'dist-team', artifact: 'RiyeserTeam',
+    executableName: 'Riyeser Team',
+    extraMetadata: { main: 'src/team-main.js', name: 'riyeser-team', version: '1.1.0', productName: 'Riyeser Link' } },
+  // Riyeser Link Office installs for the whole PC (one Windows permission prompt) so its installer can add the Windows
   // Firewall rule that lets the office's desk phones reach it (build/link/installer.nsh; removed on uninstall).
-  link: { name: 'Riyeser Link', appId: 'com.riyeser.link', ico: 'build/link/icon.ico', out: 'dist-link', artifact: 'RiyeserLink',
+  linkoffice: { name: 'Riyeser Link Office', appId: 'com.riyeser.linkoffice', ico: 'build/link/icon.ico', out: 'dist-linkoffice', artifact: 'RiyeserLinkOffice',
     perMachine: true, include: 'build/link/installer.nsh',
-    extraMetadata: { main: 'src/link-main.js', name: 'riyeser-link', version: '1.0.0', productName: 'Riyeser Link' } },
+    extraMetadata: { main: 'src/link-main.js', name: 'riyeser-linkoffice', version: '1.0.0', productName: 'Riyeser Link Office' } },
 };
 const a = APPS[which];
 
@@ -47,7 +52,7 @@ module.exports = {
   publish: null,
   win: { target: [{ target: 'nsis', arch: ['x64'] }], icon: a.ico, legalTrademarks: a.name },
   nsis: {
-    oneClick: true,            // one click: installs for this Windows user, no admin needed (Riyeser Link: for the whole PC)
+    oneClick: true,            // one click: installs for this Windows user, no admin needed (Riyeser Link Office: for the whole PC)
     perMachine: !!a.perMachine,
     ...(a.include ? { include: a.include } : {}),
     createDesktopShortcut: 'always',

@@ -1,4 +1,4 @@
-// Shared set-up for the Riyeser Link tests: a throwaway data folder, made-up people, a phone system on a
+// Shared set-up for the Riyeser Link Office tests: a throwaway data folder, made-up people, a phone system on a
 // spare port on this PC, and simulated phones.
 const fs = require('fs');
 const os = require('os');

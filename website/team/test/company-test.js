@@ -5,7 +5,7 @@ const { chromium, devices } = require('playwright');
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   const pg = await b.newPage({ viewport: { width: 1280, height: 860 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-  await pg.goto('http://127.0.0.1:8090/team/?demo'); await pg.waitForSelector('.cobar');
+  await pg.goto('http://127.0.0.1:8090/link/?demo'); await pg.waitForSelector('.cobar');
   console.log('team header:', (await pg.textContent('.team small')).trim(), '| bar:', (await pg.textContent('.cobar')).replace(/\s+/g, ' ').trim());
   // approve Mere as Sales in Lautoka
   await pg.click('#coreq'); await pg.waitForSelector('form[data-req]');
@@ -35,7 +35,7 @@ const { chromium, devices } = require('playwright');
 
   // ask to join -> waiting -> approved (pretend Supabase)
   const p2 = await b.newPage({ viewport: { width: 1000, height: 800 } }); p2.on('pageerror', (e) => errs.push('join: ' + e.message));
-  await p2.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
+  await p2.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
   const user = { id: 'aaaaaaaa-0000-4000-8000-000000000009', email: 'mere@sample.test' }; let approved = false; let asked = null;
   await p2.route('https://fake.supabase.test/**', async (r) => {
     const u = new URL(r.request().url()); const m = r.request().method();
@@ -51,7 +51,7 @@ const { chromium, devices } = require('playwright');
     if (u.pathname === '/rest/v1/members') return json([{ user_id: user.id, display_name: 'Mere', role: 'member', job_role: 'sales', extension: 201 }]);
     return json([]);
   });
-  await p2.goto('http://127.0.0.1:8090/team/?join=riy-7k3m-q2'); await p2.waitForSelector('#gf');
+  await p2.goto('http://127.0.0.1:8090/link/?join=riy-7k3m-q2'); await p2.waitForSelector('#gf');
   await p2.fill('input[name=email]', user.email); await p2.fill('input[name=password]', 'a-good-password'); await p2.click('button[type=submit]');
   await p2.waitForSelector('#jf'); console.log('join form prefilled with:', await p2.inputValue('#jf input[name=code]'));
   await p2.fill('#jf input[name=you]', 'Mere'); await p2.fill('#jf input[name=note]', 'Lautoka front desk'); await p2.click('#jf button');
@@ -60,7 +60,7 @@ const { chromium, devices } = require('playwright');
   approved = true; await p2.click('#chk'); await p2.waitForSelector('.hco', { timeout: 8000 });
   console.log('approved -> Riyeser home:', await p2.textContent('.hco h2'), '| staff see no admin buttons:', !(await p2.$('#hreq'))); await p2.click('#hchat'); await p2.waitForSelector('.cobar');
   console.log('approved -> in the company:', (await p2.textContent('.team b')).trim(), '| no admin buttons for staff:', !(await p2.$('#coreq')));
-  const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); await ph.goto('http://127.0.0.1:8090/team/?demo'); await ph.waitForSelector('.cobar');
+  const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); await ph.goto('http://127.0.0.1:8090/link/?demo'); await ph.waitForSelector('.cobar');
   await ph.tap('#coreq'); await ph.waitForSelector('form[data-req]'); console.log('phone overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   console.log('errors:', errs); await b.close();
 })();

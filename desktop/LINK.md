@@ -1,19 +1,20 @@
-# Riyeser Link
+# Riyeser Link Office
 
-Riyeser Link is Riyeser's phone hosting service. It comes in two forms:
+Riyeser Link is Riyeser's chat and calls (the app at riyeser.com/link, formerly Riyeser Team). Its paid tier,
+**Riyeser Link Plus**, adds calls and the office phone system, which comes in two forms:
 
-- **Riyeser Link: Office** runs on one PC in the office. That's this program, `Riyeser Link.exe`.
-- **Riyeser Link: Cloud** will be hosted by Riyeser, in a later phase.
+- **Riyeser Link Office** runs on one PC in the office. That's this program, `Riyeser Link Office.exe`.
+- **Riyeser Link Cloud** will be hosted by Riyeser, in a later phase.
 
 Both use the same extensions, ring groups and desk-phone set-up. A business can move from one to the other without setting anything up again (see *Moving between Office and Cloud*).
 
-Riyeser Link comes with **Team Chat Plus** (the `calls` module of the Riyeser plan).
+Riyeser Link Office comes with **Riyeser Link Plus** (the `calls` module of the Riyeser plan).
 
 > **Internal calls only.** These phones can't call emergency services — keep a mobile or normal phone line for that.
 
 ## What it does
 
-One office PC runs Riyeser Link. It:
+One office PC runs Riyeser Link Office. It:
 
 - keeps everyone's extension (100–899) and the ring groups (branches);
 - lets the office's desk phones connect to it (SIP registration);
@@ -24,18 +25,18 @@ There are no outside lines and no phone numbers. Dialling an outside number, or 
 ### How a call works
 
 ```
- Desk phone 101 ──SIP──▶ Riyeser Link (this PC) ──SIP──▶ Desk phone 102
+ Desk phone 101 ──SIP──▶ Riyeser Link Office (this PC) ──SIP──▶ Desk phone 102
         ▲                                                     │
         └──────────── sound (RTP), phone to phone ────────────┘
 ```
 
-Riyeser Link handles the *signalling*: who's calling, ringing, answering and hanging up. The sound never passes through the PC. The SDP (the description of the sound) passes through unchanged, so the phones send sound to each other directly. That's why both phones must be on the same office network. If a phone connects from a different subnet, Riyeser Link notes it in the log, because that phone may have no sound.
+Riyeser Link Office handles the *signalling*: who's calling, ringing, answering and hanging up. The sound never passes through the PC. The SDP (the description of the sound) passes through unchanged, so the phones send sound to each other directly. That's why both phones must be on the same office network. If a phone connects from a different subnet, Riyeser Link Office notes it in the log, because that phone may have no sound.
 
 ### The dial plan
 
 | Dial | What happens |
 |---|---|
-| `101`–`899` | That person's phones ring (desk phone and, later, the Riyeser Team app, all at once). |
+| `101`–`899` | That person's phones ring (desk phone and, later, the Riyeser Link app, all at once). |
 | A branch number, e.g. `100`, `200` | Every phone in that ring group rings at once. The first to answer gets the call; the others stop ringing. |
 | `*78` / `*79` | Do not disturb on / off for your extension. Callers hear busy. |
 | Anything else | "Not found", with a short reason on the phone's screen. |
@@ -56,7 +57,7 @@ Done:
 Not done yet:
 
 - No media relay, voicemail, call recording, music on hold, call parking, BLF/presence (SUBSCRIBE `dialog`), MWI, call forwarding, TLS/SRTP or IPv6.
-- Transfer is passed through, not handled by Riyeser Link. A transfer works when the phones support REFER, which Yealink, Grandstream and Snom do.
+- Transfer is passed through, not handled by Riyeser Link Office. A transfer works when the phones support REFER, which Yealink, Grandstream and Snom do.
 
 ## Supported phones, and plugging one in
 
@@ -75,7 +76,7 @@ The formats follow each maker's published provisioning documentation, and the te
 
 1. Plug the phone into a network socket on the same office network as this PC.
 2. Many desk phones don't come with a power adapter and expect power over the network cable (PoE). Buy the phone's power adapter, or a small PoE switch.
-3. Turn it on. The phone asks the network "who sets me up?" (SIP plug-and-play on 224.0.1.75). Riyeser Link answers with the address of its small settings server, on this PC at port 5080.
+3. Turn it on. The phone asks the network "who sets me up?" (SIP plug-and-play on 224.0.1.75). Riyeser Link Office answers with the address of its small settings server, on this PC at port 5080.
 4. The phone shows on the status screen as **New phone found**. Choose who it's for. The phone fetches its settings (server address, extension, password, and the person's name as its label) and connects. If it hasn't done that within a minute, restart the phone.
 5. Wi-Fi desk phones work too, once joined to the office Wi-Fi.
 6. A phone in another building or at home won't reach it. That's coming with the cloud version.
@@ -84,20 +85,20 @@ Didn't appear? Use **Add a desk phone → Add phone** with the MAC address on th
 
 ## The Windows Firewall rule
 
-Riyeser Link's installer adds **one** inbound Windows Firewall rule, named "Riyeser Link". The rule:
+Riyeser Link Office's installer adds **one** inbound Windows Firewall rule, named "Riyeser Link Office". The rule:
 
-- covers this program only (`Riyeser Link.exe`);
+- covers this program only (`Riyeser Link Office.exe`);
 - opens UDP 5060, and TCP 5060 and 5080;
 - accepts only office (private) addresses: 10/8, 172.16/12, 192.168/16 and 169.254/16;
 - applies to every network profile. Windows often calls an office network "Public", and phones would be blocked if the rule only covered "Private".
 
-Uninstalling removes the rule. This is the only change Riyeser Link makes to Windows. It never changes power, sleep or any other settings.
+Uninstalling removes the rule. This is the only change Riyeser Link Office makes to Windows. It never changes power, sleep or any other settings.
 
-**Why the installer is per-machine.** The other Riyeser programs install just for the current Windows user, with no admin rights. A per-user installer can't add a firewall rule. Riyeser Link's installer is therefore per-machine (`perMachine: true`, Program Files), so Windows asks for permission once and the installer adds the rule itself (`build/link/installer.nsh`, an electron-builder `nsis.include`). This is the most reliable option. It works before anyone opens the program, it covers the program's exact path, and it's undone by the uninstaller. Updates from Riyeser Central ask for permission the same way. As a fallback, if the rule ever goes missing, the status screen shows **Allow phones through the firewall**. That button adds the same rule, with Windows' permission prompt.
+**Why the installer is per-machine.** The other Riyeser programs install just for the current Windows user, with no admin rights. A per-user installer can't add a firewall rule. Riyeser Link Office's installer is therefore per-machine (`perMachine: true`, Program Files), so Windows asks for permission once and the installer adds the rule itself (`build/link/installer.nsh`, an electron-builder `nsis.include`). This is the most reliable option. It works before anyone opens the program, it covers the program's exact path, and it's undone by the uninstaller. Updates from Riyeser Central ask for permission the same way. As a fallback, if the rule ever goes missing, the status screen shows **Allow phones through the firewall**. That button adds the same rule, with Windows' permission prompt.
 
 ## Why the PC must stay on
 
-The phones only work while Riyeser Link is running. If the PC is off, asleep or restarting, the phones can't call each other. While Riyeser Link runs:
+The phones only work while Riyeser Link Office is running. If the PC is off, asleep or restarting, the phones can't call each other. While Riyeser Link Office runs:
 
 - it starts with Windows and sits by the clock;
 - it asks Windows not to sleep (`powerSaveBlocker` `prevent-app-suspension`);
@@ -107,14 +108,14 @@ Set sleep to **Never** when plugged in, and don't use a laptop with its lid clos
 
 ### A stable address
 
-Phones keep this PC's network address. If the router gives the PC a new address, Riyeser Link notices (at start-up, and every minute while running). It then:
+Phones keep this PC's network address. If the router gives the PC a new address, Riyeser Link Office notices (at start-up, and every minute while running). It then:
 
 - moves to the new address;
 - sends settings with the new address;
 - asks each desk phone to fetch them again;
 - shows a yellow notice with "Show me how" steps and the PC's MAC address for a **DHCP reservation** / **Static lease** in the router.
 
-Three changes in 30 days mark the address as not stable. If the PC has several network adapters, Riyeser Link picks the office one, skipping virtual adapters such as Hyper-V, WSL, VPNs and Docker. The owner can choose another under **Advanced**.
+Three changes in 30 days mark the address as not stable. If the PC has several network adapters, Riyeser Link Office picks the office one, skipping virtual adapters such as Hyper-V, WSL, VPNs and Docker. The owner can choose another under **Advanced**.
 
 ## Security
 
@@ -129,45 +130,45 @@ Three changes in 30 days mark the address as not stable. If the PC has several n
   - it is refused when the phone's own MAC (in its User-Agent) doesn't match the file it asked for;
   - addresses that keep asking for files they can't have are blocked;
   - every fetch is logged.
-- **Inside calls.** Requests inside a call are only passed on for calls Riyeser Link set up, and only to office addresses, so it can't be used as an open relay.
+- **Inside calls.** Requests inside a call are only passed on for calls Riyeser Link Office set up, and only to office addresses, so it can't be used as an open relay.
 - **Bad messages.** Malformed SIP is ignored. The parser is fuzz-tested.
 
 ## People and the licence
 
-- **Signed in to Riyeser.** When the PC is signed in (Riyeser Central's sign-in, or Riyeser Link's own), Riyeser Link brings in the Riyeser Team members with their extensions, the branches (as ring groups) and the business name. It does this every 30 minutes and saves everything on this PC, so the phones keep working with no internet, indefinitely. It never renews Central's sign-in itself, so the two programs can't trip each other up.
+- **Signed in to Riyeser.** When the PC is signed in (Riyeser Central's sign-in, or Riyeser Link Office's own), Riyeser Link Office brings in the Riyeser Link members with their extensions, the branches (as ring groups) and the business name. It does this every 30 minutes and saves everything on this PC, so the phones keep working with no internet, indefinitely. It never renews Central's sign-in itself, so the two programs can't trip each other up.
 - **Not signed in.** People can be added by hand. Hand-added people never get an emergency number (111, 112).
-- **Licence.** Riyeser Link works while Team Chat Plus is on: in its free trial (the same 90 days as every paid program) or paid. That's read from `%APPDATA%\Riyeser\licence.json`, and it keeps working for 30 days without the internet.
-- **When it isn't on.** Riyeser Link still installs and opens, but doesn't start the phone system. The screen says: "Riyeser Link comes with **Team Chat Plus**. Start your free trial or add Team Chat Plus from your Riyeser home page." It has a button to open Riyeser Team, and phones show as "waiting for Team Chat Plus".
+- **Licence.** Riyeser Link Office works while Riyeser Link Plus is on: in its free trial (the same 90 days as every paid program) or paid. That's read from `%APPDATA%\Riyeser\licence.json`, and it keeps working for 30 days without the internet.
+- **When it isn't on.** Riyeser Link Office still installs and opens, but doesn't start the phone system. The screen says: "Riyeser Link Office comes with **Riyeser Link Plus**. Start your free trial or add Link Plus from your Riyeser home page." It has a button to open Riyeser Link, and phones show as "waiting for Riyeser Link Plus".
 - **If it lapses while running.** Calls in progress finish. New phones and calls are then refused, and it pauses. Nothing is deleted.
 
 ## Moving between Office and Cloud
 
 **Advanced → Export settings** saves one JSON file (`"format": "riyeser-link-settings", "version": 1`). It holds:
 
-- people and extensions (and whether they came from Riyeser Team);
+- people and extensions (and whether they came from Riyeser Link);
 - ring groups;
 - desk-phone assignments (MAC → extension, maker, model);
 - Do not disturb;
 - each extension's SIP password.
 
-**Import settings** takes the same file on another PC, or later in Riyeser Link: Cloud. Phones keep their extensions and passwords, so nothing needs setting up again. The file holds passwords, so keep it safe. Recent calls stay where they are. The code is in `src/link/portable.js`.
+**Import settings** takes the same file on another PC, or later in Riyeser Link Cloud. Phones keep their extensions and passwords, so nothing needs setting up again. The file holds passwords, so keep it safe. Recent calls stay where they are. The code is in `src/link/portable.js`.
 
 ## Next steps
 
-### Step 2: the Riyeser Team app as a softphone
+### Step 2: the Riyeser Link app as a softphone
 
-The Riyeser Team desktop app (`src/team-main.js`) will register to Riyeser Link as a SIP phone on the same network. It will do this natively in Electron's main process:
+The Riyeser Link desktop app (`src/team-main.js`) will register to Riyeser Link Office as a SIP phone on the same network. It will do this natively in Electron's main process:
 
-1. **Signalling.** It uses SIP over UDP. The same digest REGISTER and INVITE, with a User-Agent containing "Riyeser", so Riyeser Link shows its device as "Riyeser Team app".
+1. **Signalling.** It uses SIP over UDP. The same digest REGISTER and INVITE, with a User-Agent containing "Riyeser", so Riyeser Link Office shows its device as "Riyeser Link app".
 2. **Sound.** It sends RTP over UDP with G.711 (PCMU/PCMA, 8 kHz, 20 ms packets). Microphone and speaker audio crosses from the renderer to main over IPC.
-3. **Finding Riyeser Link.** It uses the same company link. Riyeser Link's address and the person's password can be published to the Team app on the same PC or network: a later small authenticated endpoint on the settings server, or the settings export.
-4. **No changes needed in Riyeser Link.** A person can have a desk phone and the app, and both ring (parallel forking already does this).
+3. **Finding Riyeser Link Office.** It uses the same company link. Riyeser Link Office's address and the person's password can be published to the Riyeser Link app on the same PC or network: a later small authenticated endpoint on the settings server, or the settings export.
+4. **No changes needed in Riyeser Link Office.** A person can have a desk phone and the app, and both ring (parallel forking already does this).
 
 `src/link/simua.js` is a minimal SIP user agent (register, call, answer, hang up, hold) and is a starting point for the signalling side.
 
-### Step 3: the Riyeser relay (remote Team users and branches)
+### Step 3: the Riyeser relay (remote Link app users and branches)
 
-The Office Link is designed to keep an **outgoing** connection to a Riyeser relay. Remote Riyeser Team users, and other branches' Links, will reach office extensions through it with no router changes. The relay isn't built yet. The seam is `src/link/trunks.js`. A trunk:
+The Office Link is designed to keep an **outgoing** connection to a Riyeser relay. Remote Riyeser Link app users, and other branches' Links, will reach office extensions through it with no router changes. The relay isn't built yet. The seam is `src/link/trunks.js`. A trunk:
 
 - opens its own outgoing connection (`start`) and hands the SIP it receives to the PBX as coming from a trusted trunk (`proto: 'TRUNK'`);
 - says which numbers it can reach (`route(number)`): the PBX asks only for numbers that aren't on this PC, and never for emergency numbers;
@@ -175,9 +176,9 @@ The Office Link is designed to keep an **outgoing** connection to a Riyeser rela
 
 Office extensions always stay local. A test checks that an unknown number is handed to a registered trunk.
 
-### Later: Riyeser Link: Cloud
+### Later: Riyeser Link Cloud
 
-The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring groups, phone set-up and settings file. Phones and Team apps anywhere connect to it over the internet (TLS/SRTP and a media relay then become necessary).
+The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring groups, phone set-up and settings file. Phones and Riyeser Link apps anywhere connect to it over the internet (TLS/SRTP and a media relay then become necessary).
 
 ## Files
 
@@ -188,8 +189,8 @@ The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring
   - `dialplan.js`
   - `provision.js` — plug-and-play answers and the settings server.
   - `directory.js` — people, ring groups, passwords and DND.
-  - `sync.js` — Riyeser Team.
-  - `licence.js` — Team Chat Plus.
+  - `sync.js` — Riyeser Link.
+  - `licence.js` — Riyeser Link Plus.
   - `calllog.js` — 90 days of recent calls.
   - `service.js` — puts it all together.
   - `portable.js` — export and import.
@@ -202,7 +203,7 @@ The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring
 - `build/link/installer.nsh` — the firewall rule in the installer.
 - `test/link-*.test.js` — simulated phones over UDP on this PC.
 
-Data lives in `%APPDATA%\Riyeser Link\data\`:
+Data lives in `%APPDATA%\Riyeser Link Office\data\`:
 
 - `phone-directory.json`
 - `phone-secrets.json` (sealed)
@@ -211,7 +212,7 @@ Data lives in `%APPDATA%\Riyeser Link\data\`:
 - `phone-dnd.json`
 - `phone-settings.json`
 
-The log is in `%APPDATA%\Riyeser Link\logs\link.log`.
+The log is in `%APPDATA%\Riyeser Link Office\logs\link.log`.
 
 ## Testing with a real phone
 

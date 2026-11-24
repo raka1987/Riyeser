@@ -1,4 +1,4 @@
-// Riyeser Link: desk-phone set-up, people from Riyeser Team, the offline copy, the licence and the PC's address.
+// Riyeser Link Office: desk-phone set-up, people from Riyeser Link, the offline copy, the licence and the PC's address.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -87,7 +87,7 @@ test('provisioning helpers: file names, makers and MACs', () => {
 });
 
 // ---------- people ----------
-test('Riyeser Team members become extensions and branches become ring groups', () => {
+test('Riyeser Link members become extensions and branches become ring groups', () => {
   const m = mapTeam({
     business: 'Sample Trading Co',
     members: [{ user_id: 'u1', display_name: 'Alex Sample', extension: 101 }, { user_id: 'u2', display_name: 'Bo Example', extension: 102 },
@@ -101,7 +101,7 @@ test('Riyeser Team members become extensions and branches become ring groups', (
   assert.match(m.skipped[0].why, /No extension yet/);
 });
 
-test('sync from Riyeser Team, then keep working from the saved copy with no internet', async () => {
+test('sync from Riyeser Link, then keep working from the saved copy with no internet', async () => {
   const appData = tmp('appdata'); const dir = tmp();
   fs.mkdirSync(path.join(appData, 'Riyeser'), { recursive: true });
   fs.writeFileSync(path.join(appData, 'Riyeser', 'company.json'), JSON.stringify({ name: 'Sample Trading Co', mode: 'online', workspace_id: 'ws-1' }));
@@ -146,7 +146,7 @@ test('people added by hand get the next free extension, never an emergency numbe
   rmTmp(dir);
 });
 
-// ---------- licence (Team Chat Plus) ----------
+// ---------- licence (Link Plus) ----------
 test('licence: trial and paid work; none, ended, cancelled and 30 days unchecked do not; the offline grace keeps it going', () => {
   const appData = tmp('appdata');
   try {
@@ -178,7 +178,7 @@ const serviceEnv = async (licenceFn, extra = {}) => {
   return { dir, appData, store, svc, close: async () => { await svc.stop(); rmTmp(dir); rmTmp(appData); } };
 };
 
-test('without Team Chat Plus the phone system does not start, and says why', async () => {
+test('without Link Plus the phone system does not start, and says why', async () => {
   const env = await serviceEnv((a) => callsLicence(a));
   try {
     env.svc.addPerson({ name: 'Alex Sample', ext: '101' });
@@ -187,9 +187,9 @@ test('without Team Chat Plus the phone system does not start, and says why', asy
     assert.strictEqual(env.svc.pbx, null);
     const st = env.svc.status();
     assert.strictEqual(st.state, 'waiting-licence');
-    assert.strictEqual(st.licence.message, 'Riyeser Link comes with Team Chat Plus. Start your free trial or add Team Chat Plus from your Riyeser home page.');
-    assert.strictEqual(st.phones[0].state, 'waiting for Team Chat Plus');
-    assert.strictEqual(st.people[0].state, 'waiting for Team Chat Plus');
+    assert.strictEqual(st.licence.message, 'Riyeser Link Office comes with Riyeser Link Plus. Start your free trial or add Link Plus from your Riyeser home page.');
+    assert.strictEqual(st.phones[0].state, 'waiting for Link Plus');
+    assert.strictEqual(st.people[0].state, 'waiting for Link Plus');
     // switched on (trial): it starts
     writeLicence(env.appData, plan({ status: 'trial', active: true, days_left: 60 }, new Date().toISOString()));
     await env.svc.checkLicence();
@@ -198,7 +198,7 @@ test('without Team Chat Plus the phone system does not start, and says why', asy
   } finally { await env.close(); }
 });
 
-test('paid Team Chat Plus: phones register and call', async () => {
+test('paid Link Plus: phones register and call', async () => {
   const env = await serviceEnv(() => ({ active: true, state: 'paid' }));
   try {
     env.svc.addPerson({ name: 'Alex Sample', ext: '101' }); env.svc.addPerson({ name: 'Bo Example', ext: '102' });
@@ -305,7 +305,7 @@ test('when this PC\'s address changes, phones get settings with the new one and 
   } finally { Pbx.prototype.checkSync = orig; rmTmp(dir); rmTmp(appData); }
 });
 
-test('settings export and import (to move to a new PC, or to Riyeser Link: Cloud later) keep extensions, groups, phones and passwords', () => {
+test('settings export and import (to move to a new PC, or to Riyeser Link Cloud later) keep extensions, groups, phones and passwords', () => {
   const { exportSettings, importSettings } = require('../src/link/portable');
   const a = tmp(); const b = tmp();
   try {
@@ -324,7 +324,7 @@ test('settings export and import (to move to a new PC, or to Riyeser Link: Cloud
     assert.strictEqual(db.password('101'), da.password('101'));
     assert.strictEqual(db.dnd('102'), true);
     assert.strictEqual(sb.get('phone-devices').phones[0].ext, '101');
-    assert.throws(() => importSettings({ directory: db, store: sb, data: { hello: 1 } }), /isn't a Riyeser Link settings file/);
+    assert.throws(() => importSettings({ directory: db, store: sb, data: { hello: 1 } }), /isn't a Riyeser Link Office settings file/);
   } finally { rmTmp(a); rmTmp(b); }
 });
 
@@ -348,7 +348,7 @@ test('trunks: a number that is not on this PC can be handed to a trunk (the seam
 
 test('wording: status line, licence message, address notice, emergency note', () => {
   const T = require('../src/renderer/link-text');
-  assert.strictEqual(T.running('192.168.1.20'), 'Riyeser Link is running on this PC (192.168.1.20).');
+  assert.strictEqual(T.running('192.168.1.20'), 'Riyeser Link Office is running on this PC (192.168.1.20).');
   assert.strictEqual(T.NEEDS_PLUS, NEEDS_PLUS);
   assert.strictEqual(T.ipChanged({ from: '192.168.1.20', to: '192.168.1.23' }), 'This PC\'s network address changed (was 192.168.1.20, now 192.168.1.23). Phones are being updated. To stop this happening, ask your router to always give this PC the same address. Look for \'DHCP reservation\' or \'Static lease\' in your router\'s settings.');
   assert.ok(T.ipSteps('AA:BB:CC:DD:EE:01', '192.168.1.23').some((s) => s.includes('AA:BB:CC:DD:EE:01')));
@@ -356,7 +356,7 @@ test('wording: status line, licence message, address notice, emergency note', ()
   assert.strictEqual(T.counts({ phones: 1, onCalls: 0 }), '1 phone connected · no calls right now');
   assert.strictEqual(T.duration(125), '2 min 5 s');
   const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'link.html'), 'utf8');
-  assert.ok(html.includes('Riyeser Link: Office') && html.includes('Your office phone system'));
+  assert.ok(html.includes('Riyeser Link Office') && html.includes('Your office phone system'));
   assert.ok(html.includes('<b>Internal calls only.</b> These phones can\'t call emergency services — keep a mobile or normal phone line for that.'));
   for (const s of ['power over the network cable (PoE)', 'same office network as this PC', 'coming with the cloud version', 'Wi-Fi desk phones work too']) assert.ok(html.includes(s), s);
 });
@@ -367,9 +367,9 @@ test('Windows: sleep settings are read (never changed) and the firewall rule is 
   assert.deepStrictEqual(w.parsePowercfg(q), { ac: 30, dc: 15 });
   assert.match(w.sleepWarning({ sleep: { ac: 30 }, hibernate: { ac: 0 } }), /after 30 minutes/);
   assert.strictEqual(w.sleepWarning({ sleep: { ac: 0 }, hibernate: { ac: 0 } }), null);
-  const cmds = w.firewallCommands('C:\\Program Files\\riyeser-link\\Riyeser Link.exe');
+  const cmds = w.firewallCommands('C:\\Program Files\\Riyeser Link Office\\Riyeser Link Office.exe');
   assert.ok(cmds.every((c) => c.startsWith('netsh advfirewall firewall ')));
-  assert.ok(cmds.slice(1).every((c) => c.includes('program="C:\\Program Files\\riyeser-link\\Riyeser Link.exe"') && c.includes('remoteip=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16')));
+  assert.ok(cmds.slice(1).every((c) => c.includes('program="C:\\Program Files\\Riyeser Link Office\\Riyeser Link Office.exe"') && c.includes('remoteip=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16')));
   const nsh = fs.readFileSync(path.join(__dirname, '..', 'build', 'link', 'installer.nsh'), 'utf8');
-  for (const c of cmds) assert.ok(nsh.includes(c.replace('C:\\Program Files\\riyeser-link\\Riyeser Link.exe', '$INSTDIR\\Riyeser Link.exe')), `installer runs: ${c}`);
+  for (const c of cmds) assert.ok(nsh.includes(c.replace('C:\\Program Files\\Riyeser Link Office\\Riyeser Link Office.exe', '$INSTDIR\\Riyeser Link Office.exe')), `installer runs: ${c}`);
 });

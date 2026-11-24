@@ -1,4 +1,5 @@
--- Riyeser Team: team chat for each business, in its OWN Supabase project (not the As Built one).
+-- Riyeser Link (formerly Riyeser Team): chat for each business, in its OWN Supabase project (not the As Built one).
+-- Only what people see was renamed: tables, functions and the 'calls' module keep their names, so this stays safe to re-run.
 -- Paste all of this into Supabase → SQL Editor → New query → Run. Safe to run again: it only adds what's missing.
 --
 -- Each business is a "team" (workspace). People join with the team's invite code. Row-level security means a
@@ -282,7 +283,7 @@ grant update (name) on public.workspaces to authenticated;
 grant update (display_name) on public.members to authenticated;
 grant update (name, topic, archived) on public.channels to authenticated;
 
--- ================================================================ Riyeser Team Calls (premium)
+-- ================================================================ Riyeser Link Plus calls (premium; was Team Calls)
 -- Calls between people in a team, and to a branch (rings everyone there; the first to answer takes it).
 -- The call itself goes directly between the two devices (WebRTC); these rows only carry the ringing and set-up.
 -- Premium: free for the team's first 90 days, then only while calls_paid_until is in the future.
@@ -772,7 +773,7 @@ do $$ declare t text; begin
 end $$;
 
 -- ================================================================ Riyeser HQ (for Riyeser's own staff)
--- The back office for running Riyeser: companies, linked PCs and versions, trials, Team Calls, downloads, notes.
+-- The back office for running Riyeser: companies, linked PCs and versions, trials, Riyeser Link Plus, downloads, notes.
 -- PRIVACY: HQ only sees account information. Nothing here reads customers' messages, chats, calls or books.
 -- Staff need two-step sign-in. Make yourself the first owner in Supabase's SQL Editor (not from the website):
 --   select public.hq_make_owner('you@example.com', 'Your name');
@@ -1012,7 +1013,7 @@ begin
   if staff_role not in ('owner', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
   if staff_role = 'owner' and hq_role() <> 'owner' then raise exception 'Only an HQ owner can make another owner.'; end if;
   select id into uid from auth.users where lower(email::text) = lower(trim(staff_email));
-  if uid is null then raise exception 'No Riyeser account with that email yet. Ask them to create one at riyeser.com/team first.'; end if;
+  if uid is null then raise exception 'No Riyeser account with that email yet. Ask them to create one at riyeser.com/link first.'; end if;
   insert into hq_staff (user_id, display_name, role, added_by) values (uid, trim(staff_name), staff_role, auth.uid())
     on conflict (user_id) do update set display_name = excluded.display_name, role = excluded.role, active = true;
   perform hq_log('staff.added', json_build_object('email', staff_email, 'role', staff_role)::jsonb);
@@ -1073,7 +1074,7 @@ create or replace function public.hq_make_owner(owner_email text, owner_name tex
 declare uid uuid;
 begin
   select id into uid from auth.users where lower(email::text) = lower(trim(owner_email));
-  if uid is null then raise exception 'No account with that email. Create one at riyeser.com/team first.'; end if;
+  if uid is null then raise exception 'No account with that email. Create one at riyeser.com/link first.'; end if;
   insert into hq_staff (user_id, display_name, role) values (uid, trim(owner_name), 'owner')
     on conflict (user_id) do update set role = 'owner', active = true;
   insert into hq_audit (actor, action, details) values (null, 'staff.owner_made', json_build_object('email', owner_email)::jsonb);
@@ -1091,8 +1092,8 @@ grant execute on function public.hq_me(), public.hq_overview(), public.hq_compan
 grant execute on function public.hq_record_downloads(text, jsonb) to anon, authenticated;
 
 -- ================================================================ Licences online (per company, per program)
--- Paid programs: basic (Accounting Basics), plus (Accounting Plus), payroll, pos, bookings, as_built, calls (Team Calls).
--- Free programs (Central, Invoices, PDF, Desk Assistant, Team chat) aren't listed: they're always free.
+-- Paid programs: basic (Accounting Basics), plus (Accounting Plus), payroll, pos, bookings, as_built, calls (Riyeser Link Plus).
+-- Free programs (Central, Invoices, PDF, Desk Assistant, Riyeser Link chat) aren't listed: they're always free.
 -- With no row, a program is on its free trial: 90 days from when the company joined Riyeser online.
 -- Riyeser HQ (owners, finance) sets each one: trial (with its end date), active (paid until), or cancelled.
 -- Riyeser Central reads company_licence() and the programs on the PC unlock what's active.
@@ -1579,7 +1580,7 @@ begin
   insert into support_reads (ticket_id, user_id) values (t.id, uid) on conflict do nothing;
   perform queue_email(uid, null, 'ticket_received', 'We''ve got your help request (' || t.ref || ')',
     'Hi,' || E'\n\n' || 'Thanks for getting in touch. We''ve got your help request "' || t.subject || '" (' || t.ref || ').' || E'\n\n'
-    || 'We''ll reply by email, and you''ll see our answer on your Riyeser home page at riyeser.com/team under "Your help requests". '
+    || 'We''ll reply by email, and you''ll see our answer on your Riyeser home page at riyeser.com/link under "Your help requests". '
     || 'To add anything, open the request there and reply.', ws, t.id, null);
   return json_build_object('id', t.id, 'ref', t.ref);
 end $$;
@@ -1741,7 +1742,7 @@ begin
   if t.opened_by is not null then
     perform queue_email(t.opened_by, null, 'ticket_reply', 'Re: ' || t.subject || ' (' || t.ref || ')',
       'Hi,' || E'\n\n' || 'Riyeser Support has replied to your help request ' || t.ref || ':' || E'\n\n' || trim(message) || E'\n\n'
-      || 'To reply, sign in at riyeser.com/team and open "Your help requests".', t.workspace_id, t.id, null);
+      || 'To reply, sign in at riyeser.com/link and open "Your help requests".', t.workspace_id, t.id, null);
   end if;
   perform hq_log('ticket.replied', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'status', st));
 end $$;
@@ -1919,7 +1920,7 @@ begin
   get diagnostics n = row_count;
   perform queue_email(person, null, 'mfa_reset', 'Your two-step sign-in was reset',
     'Hi,' || E'\n\n' || 'At your request, Riyeser Support has reset two-step sign-in on your Riyeser account. '
-    || 'Next time you sign in at riyeser.com/team you''ll only need your password. Then open Security to set up your authenticator app again.'
+    || 'Next time you sign in at riyeser.com/link you''ll only need your password. Then open Security to set up your authenticator app again.'
     || E'\n\n' || 'If you didn''t ask for this, contact Riyeser Support straight away.', ws, null, null);
   perform hq_log('people.reset_2fa', jsonb_build_object('workspace_id', ws, 'ticket', tr, 'reason', trim(reason), 'user_id', person,
     'identity_checked', trim(identity_checked), 'factors_removed', n));
@@ -1958,7 +1959,7 @@ begin
   where id = ws;
   perform queue_email_owners(ws, case when new_status = 'active' then 'business_reopened' else 'business_closed' end,
     case when new_status = 'active' then w.name || ' is open again on Riyeser' else w.name || ' has been ' || new_status || ' on Riyeser' end,
-    case when new_status = 'active' then 'Hi,' || E'\n\n' || w.name || ' is open again. Sign in at riyeser.com/team to carry on where you left off.'
+    case when new_status = 'active' then 'Hi,' || E'\n\n' || w.name || ' is open again. Sign in at riyeser.com/link to carry on where you left off.'
          else 'Hi,' || E'\n\n' || w.name || ' has been ' || new_status || ' on Riyeser. Its online account isn''t available, and your programs '
            || 'will show their licence as not active. The books on your PCs are not touched.' || E'\n\n'
            || 'If you think this is a mistake, or you''d like it reopened, contact Riyeser Support.' end);
@@ -1987,7 +1988,7 @@ begin
     w.name || ' will close in ' || days_left || ' days',
     'Hi,' || E'\n\n' || 'Nobody has used ' || w.name || ' on Riyeser online for nearly a year. To keep things tidy, free accounts that '
     || 'haven''t been used for 12 months are closed. ' || w.name || ' will close in ' || days_left || ' days.' || E'\n\n'
-    || 'To keep it open, just sign in at riyeser.com/team. That''s all you need to do.' || E'\n\n'
+    || 'To keep it open, just sign in at riyeser.com/link. That''s all you need to do.' || E'\n\n'
     || 'The books on your PCs are never touched.');
 end $$;
 
@@ -2183,7 +2184,7 @@ begin
   if who is not null then
     perform queue_email(who, null, 'refund_received', 'We''ve got your refund request (' || f.ref || ')',
       'Hi,' || E'\n\n' || 'We''ve got your request for a refund of ' || f.currency || ' ' || f.amount || ' (' || f.ref || '). '
-      || 'We''ll look at it within 2 business days and let you know by email. You can follow it on your Riyeser home page at riyeser.com/team.',
+      || 'We''ll look at it within 2 business days and let you know by email. You can follow it on your Riyeser home page at riyeser.com/link.',
       ws, tk.id, f.id);
   end if;
   return json_build_object('id', f.id, 'ref', f.ref, 'ticket_id', tk.id, 'ticket_ref', tk.ref);
@@ -2268,7 +2269,7 @@ begin
   if f.status = 'declined' then
     perform queue_email(f.requested_by, null, 'refund_declined', 'About your refund request (' || f.ref || ')',
       'Hi,' || E'\n\n' || 'We''ve looked at your refund request ' || f.ref || ' and we can''t give a refund this time.' || E'\n\n'
-      || 'Why: ' || coalesce(f.decision_reason, '') || E'\n\n' || 'If you''d like to talk about it, reply on your help request at riyeser.com/team.',
+      || 'Why: ' || coalesce(f.decision_reason, '') || E'\n\n' || 'If you''d like to talk about it, reply on your help request at riyeser.com/link.',
       f.workspace_id, f.ticket_id, f.id);
   else
     perform queue_email(f.requested_by, null, 'refund_approved', 'Your refund is approved (' || f.ref || ')',
@@ -2393,7 +2394,7 @@ create trigger no_delete before delete on public.offers for each row execute fun
 
 create or replace function public.module_label(m text) returns text language sql immutable as $$
   select case m when 'basic' then 'Accounting Basics' when 'plus' then 'Accounting Plus' when 'payroll' then 'Payroll' when 'pos' then 'POS'
-    when 'bookings' then 'Bookings' when 'as_built' then 'As Built' when 'calls' then 'Team Chat Plus' else m end
+    when 'bookings' then 'Bookings' when 'as_built' then 'As Built' when 'calls' then 'Riyeser Link Plus' else m end
 $$;
 
 -- Apply a free period now (uses the licence functions). Returns {module: {was, now}}.

@@ -1,7 +1,7 @@
 // Real calls between browser tabs in the demo (fake microphone and camera): person to person, a branch call
 // (first to answer takes it), the dial pad, branch set-up, and the premium upsell.
 const { chromium, devices } = require('playwright');
-const URL = 'http://127.0.0.1:8090/team/?demo';
+const URL = 'http://127.0.0.1:8090/link/?demo';
 (async () => {
   const b = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
   const ctx = await b.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['microphone', 'camera'] });

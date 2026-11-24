@@ -1,5 +1,5 @@
-// Riyeser Link settings as one portable JSON file: people and extensions, ring groups, which desk phone belongs to
-// whom, Do not disturb, and each extension's SIP password. Riyeser Link: Office (this PC) and Riyeser Link: Cloud
+// Riyeser Link Office settings as one portable JSON file: people and extensions, ring groups, which desk phone belongs to
+// whom, Do not disturb, and each extension's SIP password. Riyeser Link Office (this PC) and Riyeser Link Cloud
 // (hosted by Riyeser, later) use the same extensions and phone set-up, so a business can move between them, or to a
 // new PC, by exporting here and importing there, without setting any phone up again.
 // The file holds the phones' passwords: keep it somewhere safe. Recent calls and logs aren't included.
@@ -23,8 +23,8 @@ function exportSettings({ directory, store, now = Date.now() }) {
 
 /** Take settings from an export. Replaces people, groups and phone assignments; recent calls on this PC are kept. */
 function importSettings({ directory, store, data }) {
-  if (!data || data.format !== FORMAT || typeof data.version !== 'number') throw new Error('That isn\'t a Riyeser Link settings file.');
-  if (data.version > VERSION) throw new Error('That settings file is from a newer Riyeser Link. Update this one first.');
+  if (!data || data.format !== FORMAT || typeof data.version !== 'number') throw new Error('That isn\'t a Riyeser Link Office settings file.');
+  if (data.version > VERSION) throw new Error('That settings file is from a newer Riyeser Link Office. Update this one first.');
   const { validExt } = require('./dialplan');
   const s = (v, n = 60) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>"&]/g, '').trim().slice(0, n);
   const people = (data.people || []).filter((p) => p && validExt(String(p.ext)) && s(p.name)).map((p) => ({

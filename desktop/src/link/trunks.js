@@ -1,8 +1,8 @@
-// Trunks and links: the seam where Riyeser Link: Office will reach beyond this office network. Nothing uses it yet.
+// Trunks and links: the seam where Riyeser Link Office will reach beyond this office network. Nothing uses it yet.
 //
 // The next step is a Riyeser relay. The Office Link keeps one OUTGOING connection to it (so no router changes are
-// needed), and remote Riyeser Team users and other branches' Links reach office extensions through it. Riyeser
-// Link: Cloud will be the same idea with the phone system itself hosted by Riyeser.
+// needed), and remote Riyeser Link users and other branches' Links reach office extensions through it. Riyeser
+// Link Cloud will be the same idea with the phone system itself hosted by Riyeser.
 //
 // A trunk is an object with:
 //   id, name

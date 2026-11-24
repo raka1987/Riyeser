@@ -1,4 +1,4 @@
-// Network helpers for Riyeser Link: which addresses count as "this office", this PC's address, and
+// Network helpers for Riyeser Link Office: which addresses count as "this office", this PC's address, and
 // whether a phone is on the same network (subnet) as this PC.
 const os = require('os');
 

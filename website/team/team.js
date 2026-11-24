@@ -1,4 +1,5 @@
-/* Riyeser Team: team chat for a business. Channels, direct messages, live updates and unread counts.
+/* Riyeser Link (formerly Riyeser Team): chat for a business. Channels, direct messages, live updates and unread counts.
+   Served at riyeser.com/link/ and, unchanged, at its old address riyeser.com/team/ (older desktop apps and links).
    Runs on its own Supabase project (config.js, database in team-chat.sql). With ?demo, or before it's
    set up, it runs on sample data in this browser only, so anyone can try it. */
 (() => {
@@ -8,6 +9,9 @@
   const params = new URLSearchParams(location.search);
   const DEMO = params.has('demo') || !CONFIGURED;
   const $app = document.getElementById('app');
+  const NAME = 'Riyeser Link';
+  // This page's own folder (/link/ or the old /team/), so signing out and the demo stay where they are.
+  const HERE = location.pathname.replace(/[^/]*$/, '') || '/link/';
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const COLOURS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#db2777', '#65a30d', '#7c3aed', '#0d9488'];
   const colourOf = (id) => COLOURS[[...String(id)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % COLOURS.length];
@@ -22,7 +26,7 @@
     if (/Signups not allowed/i.test(m)) return 'New accounts aren\'t open yet. Ask Riyeser to turn on sign-ups.';
     if (/Invalid TOTP|mfa_verification_failed|expired/i.test(m)) return 'That code isn\'t right. Type the 6 numbers your authenticator app shows now (they change every 30 seconds).';
     if (/created_by_fkey|JWT|sub claim/i.test(m)) return 'Your sign-in has ended. Sign out, then sign in again.';
-    if (/Failed to fetch|NetworkError/i.test(m)) return 'Can\'t reach Riyeser Team. Check your internet connection and try again.';
+    if (/Failed to fetch|NetworkError/i.test(m)) return 'Can\'t reach Riyeser Link. Check your internet connection and try again.';
     return m;
   };
 
@@ -197,7 +201,7 @@
       async session() { return { user: me }; },
       onAuth() {},
       async signIn() { return { user: me }; }, async signUp() { return { user: me }; }, async resetPassword() {},
-      async signOut() { location.href = '/team/'; },
+      async signOut() { location.href = HERE; },
       async teams() { return [{ id: ws, ...company, invite_code: 'DEMO1234', role: AS === 'u-me' ? 'owner' : AS === 'u-sam' ? 'admin' : 'member', myName: 'You' }]; },
       async requestJoin(code) { return { status: 'pending', company_name: 'Sample Plumbing', workspace_id: ws, code }; },
       async myRequests() { return []; },
@@ -297,7 +301,7 @@
   const jobName = (j) => (JOBS.find((x) => x[0] === j) || [j, j === 'owner' ? 'Owner' : 'Staff'])[1];
   const nameOf = (uid) => (S.people.find((p) => p.user_id === uid) || {}).display_name || 'Someone who left';
   const chanLabel = (c) => (c.kind === 'dm' ? nameOf(c.people.find((p) => p !== S.user.id) || S.user.id) : c.name);
-  const demoBar = () => (DEMO ? `<div class="demo-bar">This is a demo with sample messages and calls${CONFIGURED ? ` · <a href="/team/">Sign in for real</a>` : ''} · <a href="/programs/team.html">About Riyeser Team</a></div>` : '');
+  const demoBar = () => (DEMO ? `<div class="demo-bar">This is a demo with sample messages and calls${CONFIGURED ? ` · <a href="${HERE}">Sign in for real</a>` : ''} · <a href="/programs/link.html">About Riyeser Link</a></div>` : '');
 
   // ------------------------------------------------------------------ sign in / create account
   function gate(mode = 'in', note = '') {
@@ -573,12 +577,12 @@
       <p class="muted small" style="margin:4px 0 14px">Everyone in the company, on every Riyeser program and PC, links with this ID. ${admin ? 'New people need your approval.' : ''}</p>
       <form id="cof">${field('name', 'Business name', 80)}${field('tax_number', 'ABN / TIN / Tax ID', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
-      ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4><div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Chat Plus']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
+      ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4><div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
         const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
         const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
         return `<div><span>${n}</span><span class="pl ${v.status === 'active' ? 'ok' : v.active ? (v.days_left <= 14 ? 'warn' : '') : 'bad'}">${txt}</span></div>`; }).join('')}
         <div><span>People</span><span class="pl">${lic.seats.used} of ${lic.seats.included + lic.seats.extra} included${lic.early_bird ? ' · 🐣 early bird' : ''}</span></div></div>
-        <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Team chat. To change your plan, contact Riyeser.</p>` : ''}
+        <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Riyeser Link chat. To change your plan, contact Riyeser.</p>` : ''}
       ${admin && devs.length ? `<h4 style="margin:16px 0 6px">Linked PCs</h4><div class="devs">${devs.map((dv) => `<div><span><b>${esc(dv.device_name || 'A PC')}</b><small>${esc(nameOf(dv.user_id))} · ${esc(dv.platform || '')} · seen ${ago(dv.last_seen)}</small></span><button type="button" class="btn sm" data-unlink="${dv.id}">Unlink</button></div>`).join('')}</div>` : ''}
       <div class="mfoot"><button type="button" class="btn" id="cl">Close</button>${admin ? '<button class="btn p">Save</button>' : ''}</div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
@@ -624,8 +628,14 @@
       S.unread[m.channel_id] = (S.unread[m.channel_id] || 0) + 1;
       if (!S.chans.find((c) => c.id === m.channel_id)) api.channels(S.team.id).then((c) => { S.chans = c; renderSide(); }); else renderSide();
     }
-    const total = Object.values(S.unread).reduce((a, b) => a + b, 0);
-    document.title = (total ? `(${total}) ` : '') + 'Riyeser Team';
+    chatTitle();
+  }
+  // The tab title in chat: "(3) Riyeser Link". The desktop apps read the unread count from it (they also still accept
+  // "(3) Riyeser Team" from before the rename). A ringing call's "📞 ..." title is left alone.
+  function chatTitle() {
+    if (/^📞/.test(document.title)) return;
+    const total = Object.values(S.unread || {}).reduce((a, b) => a + (b || 0), 0);
+    document.title = (total ? `(${total}) ` : '') + NAME;
   }
 
   // Message text: safe HTML, links, @names, and Riyeser references (INV-1047, Q-0042, Booking 12, Job #12).
@@ -733,11 +743,11 @@
           <button class="btn" id="hsec">🔐 Security</button></div></section>
         ${helpHtml()}
         ${lic ? `<h3 class="hsec">Your plan <small>${lic.seats ? `${lic.seats.used} of ${lic.seats.included + lic.seats.extra} people included${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
-        <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Team Chat Plus (calls)']]
+        <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link Plus (calls)']]
           .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
-        <h3 class="hsec">Riyeser Team</h3>
-        <div class="happs"><div class="happ hteam"><img src="/assets/apps/team.png" alt=""><div><b>Riyeser Team${unread ? ` <span class="badge">${unread}</span>` : ''}</b>
-          <small>Chat with the people you work with. Calls between you, your staff and other locations come with Team Chat Plus.</small>
+        <h3 class="hsec">Riyeser Link</h3>
+        <div class="happs"><div class="happ hteam"><img src="/assets/apps/link.png" alt=""><div><b>Riyeser Link${unread ? ` <span class="badge">${unread}</span>` : ''}</b>
+          <small>Chat with the people you work with. Calls between you, your staff and other locations come with Riyeser Link Plus.</small>
           <span class="pl ok">Chat: free forever</span> ${calls ? licLine(lic, 'calls').replace('>Free trial', '>Calls: free trial').replace('>Paid', '>Calls: paid').replace('>Not active', '>Calls: not active') : '<span class="pl">Calls: free for 90 days</span>'}</div>
           <div class="hbtns"><button class="btn p sm" id="hchat">Open</button><a class="btn sm" href="${REL}RiyeserTeam-Setup.exe">⬇ Download for Windows</a></div></div></div>
         <h3 class="hsec">Programs for your PC <small>Start with Riyeser Central: it installs and updates the rest.</small></h3>
@@ -764,7 +774,7 @@
   const TSTATUS = { new: ['Sent', ''], waiting_us: ['With Riyeser', ''], waiting_customer: ['Waiting for your reply', 'warn'], done: ['Done', 'ok'] };
   const RSTATUS = { submitted: ['Received', ''], reviewing: ['Being looked at', ''], approved: ['Approved', 'ok'], partly_approved: ['Partly approved', 'ok'],
     declined: ['Not approved', 'bad'], paid: ['Paid', 'ok'] };
-  const REFUND_FOR = ['Accounting Basics', 'Accounting Plus', 'Payroll', 'POS', 'Bookings', 'As Built', 'Team Chat Plus', 'My whole plan', 'Something else'];
+  const REFUND_FOR = ['Accounting Basics', 'Accounting Plus', 'Payroll', 'POS', 'Bookings', 'As Built', 'Riyeser Link Plus', 'My whole plan', 'Something else'];
   const REFUND_WHY = [['mistake', 'I was charged by mistake'], ['didnt_work', 'It didn\'t work for me'], ['cancelled', 'I cancelled'], ['duplicate', 'I was charged twice'], ['other', 'Something else']];
   const pill = (map, st) => { const [l, c] = map[st] || [st, '']; return `<span class="pl${c ? ' ' + c : ''}">${esc(l)}</span>`; };
   const money2 = (n, c) => `${esc(c || 'FJD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -851,7 +861,7 @@
     $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
   }
 
-  // The browser tab shows Riyeser's logo on the account screens, and Team's icon once inside chat.
+  // The browser tab shows Riyeser's logo on the account screens, and Riyeser Link's icon once inside chat.
   function tabIcon(team) {
     const l = document.getElementById('favicon'); if (!l) return;
     l.type = team ? 'image/svg+xml' : 'image/png'; l.href = team ? 'icon.svg' : '/assets/logo-r.png';
@@ -867,7 +877,7 @@
   }
   function renderSide() {
     const el = document.getElementById('side'); if (!el) return;
-    el.innerHTML = sideHtml();
+    el.innerHTML = sideHtml(); chatTitle();
     el.querySelectorAll('[data-ch]').forEach((b) => b.onclick = () => openChannel(b.dataset.ch));
     el.querySelectorAll('[data-dm]').forEach((b) => b.onclick = async () => {
       const id = await api.openDm(S.team.id, b.dataset.dm);
@@ -939,7 +949,7 @@
     document.body.appendChild(d); wire(d, () => d.remove());
   }
   function invite() {
-    const link = () => `${location.origin}/team/?join=${S.team.company_code || S.team.invite_code}`;
+    const link = () => `${location.origin}/link/?join=${S.team.company_code || S.team.invite_code}`;
     const admin = S.team.role === 'owner' || S.team.role === 'admin';
     modal(`<h3>Invite people to ${esc(S.team.name)}</h3><p>Send them this link, or the Company ID <b>${esc(S.team.company_code || '')}</b>. They create a free account and ask to join${S.team.require_approval ? ', then you approve them under 👋 Requests' : ''}.</p>
       <div class="copyrow"><input id="il" readonly value="${esc(link())}"><button class="btn p" id="cp">Copy</button></div>
@@ -1007,7 +1017,7 @@
   }
 
 
-  // ================================================================== Team Chat Plus (premium)
+  // ================================================================== Riyeser Link Plus (premium)
   // Calls go directly between the two devices (WebRTC). The online service only carries the ringing and set-up.
   // Calling a branch rings everyone in it; the first to answer takes the call. 30 seconds with no answer is a missed call.
   function callsSideHtml() {
@@ -1021,7 +1031,7 @@
   }
 
   function upsell() {
-    modal(`<h3>⭐ Team Chat Plus</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
+    modal(`<h3>⭐ Riyeser Link Plus</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
       <p><b>+$20 a month per business</b>, free for your first 90 days. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>
       <div class="mfoot"><button class="btn" id="cl">Not now</button><a class="btn p" href="/pricing.html" target="_blank" rel="noopener">See pricing</a></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }
@@ -1121,7 +1131,7 @@
     async function mic() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('This browser can\'t make calls. Use Riyeser Central, Chrome or Edge.');
       try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false }); }
-      catch (e) { throw new Error('Riyeser Team needs your microphone for calls. Allow it when asked (or in the browser\'s site settings), then try again.'); }
+      catch (e) { throw new Error('Riyeser Link needs your microphone for calls. Allow it when asked (or in the browser\'s site settings), then try again.'); }
     }
 
     // ---- start a call to a person ({user}) or a branch ({branch})
@@ -1224,7 +1234,7 @@
       if (call.cam) { await tx.sender.replaceTrack(null); call.camTrack && call.camTrack.stop(); call.camTrack = null; call.cam = false; draw(); return; }
       try { const v = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } }); call.camTrack = v.getVideoTracks()[0];
         await tx.sender.replaceTrack(call.camTrack); call.cam = true; draw(); }
-      catch { alert('Riyeser Team couldn\'t use your camera. Check it\'s plugged in and allowed.'); }
+      catch { alert('Riyeser Link couldn\'t use your camera. Check it\'s plugged in and allowed.'); }
     }
 
     // ---- end: tidy up, and (caller only) leave a note in the direct message
@@ -1235,7 +1245,7 @@
       (c.local ? c.local.getTracks() : []).forEach((t) => t.stop()); c.camTrack && c.camTrack.stop();
       call = { ...c, status: 'ended', note, pc: null }; draw();
       setTimeout(() => { if (call && call.status === 'ended' && call.id === c.id) { call = null; draw(); } }, 2500);
-      document.title = 'Riyeser Team';
+      document.title = NAME; chatTitle();
       if (c.dir === 'out' && (c.peer || c.targets) && !DEMO) api.tidyCall(c.id).catch(() => {});
       if (c.dir === 'out' && c.peer) {
         const text = c.startedAt ? `📞 Call · ${fmtTime(Date.now() - c.startedAt)}` : `📞 Missed call${c.branch ? ` to ${c.label}` : ''}`;
@@ -1250,7 +1260,7 @@
     function alertIncoming() {
       const who = nameOf(call.peer);
       document.title = `📞 Incoming call from ${who}`;
-      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Riyeser Team', { body: `Incoming call from ${who}${call.via ? ` (${call.via})` : ''}`, icon: 'icon-192.png' }); } catch { /* no notifications */ }
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification(NAME, { body: `Incoming call from ${who}${call.via ? ` (${call.via})` : ''}`, icon: 'icon-192.png' }); } catch { /* no notifications */ }
     }
 
     function listen() {

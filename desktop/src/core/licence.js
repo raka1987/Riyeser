@@ -41,7 +41,7 @@ const mask = (key) => (key ? `${String(key).slice(0, 4)}…${String(key).slice(-
 // Riyeser Central fetches it (core/online.js refreshLicence) and keeps it here under "online", next to the older
 // fields, so each Riyeser program can unlock its own paid module. It stays good for OFFLINE_GRACE_DAYS offline.
 const MODULE_NAMES = { basic: 'Accounting Basics', plus: 'Accounting Plus', payroll: 'Payroll', pos: 'POS', bookings: 'Bookings',
-  as_built: 'As Built', calls: 'Team Chat Plus' };   // calls: Team Chat Plus (Team calls and Riyeser Link)
+  as_built: 'As Built', calls: 'Riyeser Link Plus' };   // calls: Riyeser Link Plus (Link calls and Riyeser Link Office)
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function fmtDate(ymd) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '')); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : ''; }
 function ago(iso, now) {

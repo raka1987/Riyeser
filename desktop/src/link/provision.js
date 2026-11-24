@@ -1,4 +1,4 @@
-// Zero-touch desk-phone set-up for Riyeser Link.
+// Zero-touch desk-phone set-up for Riyeser Link Office.
 // A new desk phone asks the office network "who sets me up?" (SIP plug-and-play, SUBSCRIBE Event: ua-profile on
 // 224.0.1.75). The phone system answers with the address of the small web server below, and the phone fetches its
 // settings file from it, in its maker's own format:
@@ -35,28 +35,28 @@ const line = (s) => String(s == null ? '' : s).replace(/[\r\n]/g, ' ');
 // ---------- the settings files ----------
 /** a: { mac, ext, name, password, server, sipPort, provisionUrl } */
 function yealinkConfig(a) {
-  return ['#!version:1.0.0.1', '## Riyeser Link', 'account.1.enable = 1', `account.1.label = ${line(a.name)}`, `account.1.display_name = ${line(a.name)}`,
+  return ['#!version:1.0.0.1', '## Riyeser Link Office', 'account.1.enable = 1', `account.1.label = ${line(a.name)}`, `account.1.display_name = ${line(a.name)}`,
     `account.1.auth_name = ${a.ext}`, `account.1.user_name = ${a.ext}`, `account.1.password = ${line(a.password)}`,
     `account.1.sip_server.1.address = ${a.server}`, `account.1.sip_server.1.port = ${a.sipPort}`, 'account.1.sip_server.1.transport_type = 0',
     'account.1.sip_server.1.expires = 600', `static.auto_provision.server.url = ${a.provisionUrl}`, ''].join('\n');
 }
 function grandstreamConfig(a) {
   const p = { P271: 1, P270: a.name, P47: `${a.server}:${a.sipPort}`, P35: a.ext, P36: a.ext, P34: a.password, P3: a.name, P32: 10, P237: a.provisionUrl, P212: 1 };
-  return `<?xml version="1.0" encoding="UTF-8" ?>\n<!-- Riyeser Link -->\n<gs_provision version="1">\n<mac>${a.mac}</mac>\n<config version="1">\n${
+  return `<?xml version="1.0" encoding="UTF-8" ?>\n<!-- Riyeser Link Office -->\n<gs_provision version="1">\n<mac>${a.mac}</mac>\n<config version="1">\n${
     Object.entries(p).map(([k, v]) => `<${k}>${xml(v)}</${k}>`).join('\n')}\n</config>\n</gs_provision>\n`;
 }
 function snomConfig(a) {
   const s = [['user_active', 'on'], ['user_realname', a.name], ['user_name', a.ext], ['user_pname', a.ext], ['user_pass', a.password], ['user_host', `${a.server}:${a.sipPort}`], ['user_expiry', '600']];
-  return `<?xml version="1.0" encoding="utf-8"?>\n<!-- Riyeser Link -->\n<settings>\n<phone-settings e="2">\n${
+  return `<?xml version="1.0" encoding="utf-8"?>\n<!-- Riyeser Link Office -->\n<settings>\n<phone-settings e="2">\n${
     s.map(([k, v]) => `<${k} idx="1" perm="">${xml(v)}</${k}>`).join('\n')}\n<setting_server perm="">${xml(a.provisionUrl)}</setting_server>\n</phone-settings>\n</settings>\n`;
 }
 function polycomMaster(a) {
-  return `<?xml version="1.0" standalone="yes"?>\n<!-- Riyeser Link -->\n<APPLICATION APP_FILE_PATH="" CONFIG_FILES="${a.mac}-riyeser.cfg" MISC_FILES="" LOG_FILE_DIRECTORY="" OVERRIDES_DIRECTORY="" CONTACTS_DIRECTORY="" LICENSE_DIRECTORY=""/>\n`;
+  return `<?xml version="1.0" standalone="yes"?>\n<!-- Riyeser Link Office -->\n<APPLICATION APP_FILE_PATH="" CONFIG_FILES="${a.mac}-riyeser.cfg" MISC_FILES="" LOG_FILE_DIRECTORY="" OVERRIDES_DIRECTORY="" CONTACTS_DIRECTORY="" LICENSE_DIRECTORY=""/>\n`;
 }
 function polycomConfig(a) {
   const r = { 'reg.1.displayName': a.name, 'reg.1.label': a.name, 'reg.1.address': a.ext, 'reg.1.auth.userId': a.ext, 'reg.1.auth.password': a.password,
     'reg.1.server.1.address': a.server, 'reg.1.server.1.port': a.sipPort, 'reg.1.server.1.transport': 'UDPOnly', 'reg.1.server.1.expires': 600 };
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<!-- Riyeser Link -->\n<polycomConfig>\n<reg ${Object.entries(r).map(([k, v]) => `${k}="${xml(v)}"`).join(' ')}/>\n</polycomConfig>\n`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<!-- Riyeser Link Office -->\n<polycomConfig>\n<reg ${Object.entries(r).map(([k, v]) => `${k}="${xml(v)}"`).join(' ')}/>\n</polycomConfig>\n`;
 }
 
 /** Which settings file a path asks for: { vendor, mac, kind } or null. */
@@ -176,7 +176,7 @@ class Provisioner extends EventEmitter {
   }
   handle(req, res) {
     const ip = v4(req.socket.remoteAddress);
-    const send = (code, body = '', type = 'text/plain; charset=utf-8') => { res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', Server: 'Riyeser Link' }); res.end(body); };
+    const send = (code, body = '', type = 'text/plain; charset=utf-8') => { res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store', Server: 'Riyeser Link Office' }); res.end(body); };
     if (!this.allowPublic && !isPrivate(ip)) { this.log('warn', `Refused phone settings to ${ip}: not on the office network.`); return send(403, 'Office network only\n'); }
     if (this.blocked.get(ip) > Date.now()) return send(403, 'Blocked\n');
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(405, 'GET only\n');
@@ -185,7 +185,7 @@ class Provisioner extends EventEmitter {
     const r = route(pathname);
     const file = pathname.slice(0, 120);
     if (!r) { this.logFetch({ ip, file, ok: false, why: 'not a settings file' }); return send(404, 'Not found\n'); }
-    if (r.kind === 'common') return send(200, '#!version:1.0.0.1\n## Riyeser Link\n');
+    if (r.kind === 'common') return send(200, '#!version:1.0.0.1\n## Riyeser Link Office\n');
     const agentMac = macInAgent(req.headers['user-agent']);
     if (agentMac && agentMac !== r.mac) {
       this.refuse(ip); this.logFetch({ ip, mac: r.mac, file, ok: false, why: 'MAC in the request does not match the phone' });
@@ -196,7 +196,7 @@ class Provisioner extends EventEmitter {
     if (!s) {
       this.refuse(ip); this.seen(r.mac, { vendor: r.vendor, model: '', ip });
       this.logFetch({ ip, mac: r.mac, file, ok: false, why: 'phone not assigned to anyone yet' });
-      return send(403, 'This phone has not been given to anyone yet. Open Riyeser Link on the office PC.\n');
+      return send(403, 'This phone has not been given to anyone yet. Open Riyeser Link Office on the office PC.\n');
     }
     this.logFetch({ ip, mac: r.mac, file, ok: true, ext: s.phone.ext });
     this.log('info', `Sent settings to phone ${prettyMac(r.mac)} (extension ${s.phone.ext}) at ${ip}.`);

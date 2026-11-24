@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   const pg = await b.newPage({ viewport: { width: 1280, height: 860 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-  await pg.goto('http://127.0.0.1:8090/team/?demo'); await pg.waitForSelector('.cobar');
+  await pg.goto('http://127.0.0.1:8090/link/?demo'); await pg.waitForSelector('.cobar');
   console.log('owner with two-step: nag shown?', !!(await pg.$('#mfanag')), '| bar:', (await pg.textContent('.cobar')).replace(/\s+/g, ' ').trim());
   // history
   await pg.click('#cohist'); await pg.waitForSelector('.hist');
@@ -23,7 +23,7 @@ const { chromium } = require('playwright');
 
   // sign in to an account with two-step on: asks for the code, then lets you in
   const p2 = await b.newPage({ viewport: { width: 1000, height: 800 } }); p2.on('pageerror', (e) => errs.push('signin: ' + e.message));
-  await p2.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
+  await p2.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
   const user = { id: 'aaaaaaaa-0000-4000-8000-000000000001', email: 'owner@sample.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const token = (aal) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: user.id, aal, amr: [{ method: 'password', timestamp: 1 }], exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.sig`;
@@ -43,7 +43,7 @@ const { chromium } = require('playwright');
     if (u.pathname === '/rest/v1/rpc/team_features') return json({ calls: true });
     return json([]);
   });
-  await p2.goto('http://127.0.0.1:8090/team/?chat'); await p2.waitForSelector('#gf');
+  await p2.goto('http://127.0.0.1:8090/link/?chat'); await p2.waitForSelector('#gf');
   await p2.fill('input[name=email]', user.email); await p2.fill('input[name=password]', 'right-password'); await p2.click('button[type=submit]');
   await p2.waitForSelector('#cs'); console.log('after password -> asks for code:', await p2.textContent('#cs h1'));
   await p2.screenshot({ path: out + '/mfa-code.png' });

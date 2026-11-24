@@ -1,10 +1,10 @@
-// The two Windows things Riyeser Link looks at: sleep settings (read only, never changed) and its own firewall rule.
-// The firewall rule is the only system change Riyeser Link ever makes. The installer adds it (the installer is
+// The two Windows things Riyeser Link Office looks at: sleep settings (read only, never changed) and its own firewall rule.
+// The firewall rule is the only system change Riyeser Link Office ever makes. The installer adds it (the installer is
 // per-machine, so Windows asks once for permission); if it's missing later, the status screen offers a button that
 // adds the same rule, which asks Windows for permission again. Uninstalling removes it.
 const { execFile } = require('child_process');
 
-const RULE = 'Riyeser Link';
+const RULE = 'Riyeser Link Office';
 const OFFICE = '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16';
 /** The netsh commands that add the rule for this program only (UDP 5060; TCP 5060 and the phone set-up port). */
 function firewallCommands(exe, httpPort = 5080) {
@@ -21,7 +21,7 @@ const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { window
 async function firewallRuleExists() {
   if (process.platform !== 'win32') return null;
   const r = await run('netsh', ['advfirewall', 'firewall', 'show', 'rule', `name=${RULE}`]);
-  return r.ok && /Riyeser Link/i.test(r.out);
+  return r.ok && /Riyeser Link Office/i.test(r.out);
 }
 /** Add the rule with Windows' permission prompt (UAC). Resolves when the prompt is answered. */
 async function addFirewallRule(exe, httpPort) {
@@ -48,7 +48,7 @@ function sleepWarning({ sleep, hibernate }) {
   if (!after.length) return null;
   const mins = Math.min(...after);
   const when = mins >= 60 && mins % 60 === 0 ? `${mins / 60} hour${mins === 60 ? '' : 's'}` : `${mins} minutes`;
-  return `Windows is set to put this PC to sleep after ${when}. Riyeser Link asks Windows to stay awake while it runs, but a sleep button, closing a laptop's lid or a power cut will still stop the phones. To be safe, open Settings > System > Power, and set sleep to "Never" when plugged in.`;
+  return `Windows is set to put this PC to sleep after ${when}. Riyeser Link Office asks Windows to stay awake while it runs, but a sleep button, closing a laptop's lid or a power cut will still stop the phones. To be safe, open Settings > System > Power, and set sleep to "Never" when plugged in.`;
 }
 async function readSleep() {
   if (process.platform !== 'win32') return { sleep: null, hibernate: null };

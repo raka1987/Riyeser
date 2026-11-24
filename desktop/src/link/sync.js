@@ -1,4 +1,4 @@
-// Bring people, extensions and branches in from Riyeser Team (the company's Riyeser Online account).
+// Bring people, extensions and branches in from Riyeser Link (the company's Riyeser Online account).
 // Uses the PC's link to the company (%APPDATA%\Riyeser\company.json, written by Riyeser Central) and a signed-in
 // Riyeser account: this app's own sign-in, or Central's while its access is still current (read only: this app never
 // renews Central's sign-in, so the two can't trip each other up). What comes back is saved on this PC, so the phones

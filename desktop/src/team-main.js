@@ -1,4 +1,4 @@
-// Riyeser Team for Windows: the team chat and Team Chat Plus calls (riyeser.com/team) as its own desktop app.
+// Riyeser Link for Windows (formerly Riyeser Team): the chat and Link Plus calls (riyeser.com/link) as its own desktop app.
 // It sits by the clock and starts with Windows, so messages and calls reach people even when no other Riyeser
 // program is open. Closing the window keeps it running (Quit from the tray icon closes it). The unread count shows
 // on the taskbar icon, and an incoming call brings the window forward.
@@ -6,12 +6,18 @@ const { app, BrowserWindow, Tray, Menu, shell, session, nativeImage, Notificatio
 const path = require('path');
 
 const SITE = 'https://riyeser.com';
-const TEAM = `${SITE}/team/`;
-const NAME = 'Riyeser Team';
+const TEAM = `${SITE}/link/`;
+const NAME = 'Riyeser Link';
 const ours = (url) => { try { return new URL(url).origin === SITE; } catch { return false; } };
-const inApp = (url) => { try { const u = new URL(url); return u.origin === SITE && u.pathname.startsWith('/team/'); } catch { return false; } };
+// riyeser.com/link/ is the app; riyeser.com/team/ (its old address) still is too, so both stay in this window.
+const inApp = (url) => { try { const u = new URL(url); return u.origin === SITE && (u.pathname.startsWith('/link/') || u.pathname.startsWith('/team/')); } catch { return false; } };
+// The unread count from the page title: "(3) Riyeser Link", or "(3) Riyeser Team" from the page before the rename.
+const unreadFrom = (title) => Number((/^\((\d+)\)\s*Riyeser (?:Link|Team)\b/.exec(title || '') || [])[1] || 0);
 
 app.setName(NAME);
+// Everything stays where it was when the app was called Riyeser Team: the sign-in and chats (persist:riyeser-team)
+// and settings live in %APPDATA%\Riyeser Team, and Windows knows the app by com.riyeser.team.
+{ const keep = path.join(app.getPath('appData'), 'Riyeser Team'); app.setPath('userData', keep); app.setPath('sessionData', keep); }
 if (process.platform === 'win32') app.setAppUserModelId('com.riyeser.team');
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -31,7 +37,7 @@ function badge(n) {
 function offlinePage() {
   const html = `<!doctype html><meta charset="utf-8"><title>${NAME}</title><body style="font-family:Segoe UI,Arial,sans-serif;background:#f4f6fa;display:grid;place-items:center;height:100vh;margin:0;color:#0f1d3d">
     <div style="background:#fff;border:1px solid #e3e8f1;border-radius:16px;padding:28px;max-width:380px;text-align:center">
-    <h2 style="margin:0 0 8px">Can't reach Riyeser Team</h2><p style="color:#64708a;line-height:1.5">Riyeser Team needs the internet. Check your connection, then try again.
+    <h2 style="margin:0 0 8px">Can't reach ${NAME}</h2><p style="color:#64708a;line-height:1.5">${NAME} needs the internet. Check your connection, then try again.
     It keeps trying by itself every 30 seconds.</p><button onclick="location.href='${TEAM}'" style="background:#a21caf;color:#fff;border:0;border-radius:10px;padding:10px 18px;font-weight:700">Try again</button></div>
     <script>setTimeout(()=>location.href='${TEAM}',30000)</script></body>`;
   return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
@@ -49,9 +55,9 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => { if (!inApp(url) && !url.startsWith('data:')) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
   win.webContents.on('did-fail-load', (_e, code, _desc, url, isMain) => { if (isMain && code !== -3 && inApp(url)) win.loadURL(offlinePage()); });
   win.webContents.on('page-title-updated', (_e, title) => {
-    const n = Number((/^\((\d+)\)/.exec(title || '') || [])[1] || 0);
+    const n = unreadFrom(title);
     if (n !== lastUnread) { lastUnread = n; if (process.platform === 'win32') win.setOverlayIcon(badge(n), n ? `${n} unread` : ''); if (tray) tray.setToolTip(n ? `${NAME} · ${n} unread` : NAME); }
-    if (/^📞/.test(title)) {   // an incoming call: bring Riyeser Team forward
+    if (/^📞/.test(title)) {   // an incoming call: bring Riyeser Link forward
       if (win.isMinimized()) win.restore();
       win.show(); win.focus(); win.flashFrame(true);
     }
@@ -105,7 +111,7 @@ app.whenReady().then(() => {
   // Self-test for the Windows build check: write that it started, then quit.
   const selfTest = process.argv.find((a) => a.startsWith('--self-test='));
   if (selfTest) {
-    require('fs').writeFileSync(selfTest.slice('--self-test='.length), JSON.stringify({ ok: true, name: NAME, version: app.getVersion(), loginItem: startsWithWindows() }));
+    require('fs').writeFileSync(selfTest.slice('--self-test='.length), JSON.stringify({ ok: true, name: NAME, version: app.getVersion(), loginItem: startsWithWindows(), userData: app.getPath('userData'), sessionData: app.getPath('sessionData'), url: TEAM }));
     quitting = true; setTimeout(() => app.quit(), 500);
   }
 });

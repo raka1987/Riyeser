@@ -683,3 +683,24 @@ test('Riyeser Central: Riyeser POS is its own program, found and updated separat
   assert.match(latest.products.pos.url, /RiyeserPOS-Setup\.exe$/);
   assert.deepEqual(u.availableUpdates(both, latest).map((x) => `${x.id} ${x.from}->${x.to}`), ['pos 2.3.0->2.3.1']);
 });
+
+test('Riyeser Central: Riyeser Link (formerly Riyeser Team) and Riyeser Link Office are found and updated separately', () => {
+  const u = require('../src/central/updates');
+  const reg = (name, v) => `HKEY_CURRENT_USER\\${name}\r\n    DisplayName    REG_SZ    ${name} ${v}\r\n    DisplayVersion    REG_SZ    ${v}\r\n`;
+  // Before the rename Windows lists it as Riyeser Team, after it as Riyeser Link: both are the same program
+  assert.deepEqual(u.installedFromRegistry(reg('Riyeser Team', '1.0.0')), { team: '1.0.0' });
+  assert.deepEqual(u.installedFromRegistry(reg('Riyeser Link', '1.1.0')), { team: '1.1.0' });
+  // Link Office is never mistaken for Riyeser Link, in either order
+  assert.deepEqual(u.installedFromRegistry(reg('Riyeser Link Office', '1.0.0')), { linkoffice: '1.0.0' });
+  assert.deepEqual(u.installedFromRegistry(reg('Riyeser Link Office', '1.0.0') + reg('Riyeser Link', '1.1.0')), { linkoffice: '1.0.0', team: '1.1.0' });
+  const files = ['RiyeserTeam-Setup.exe', 'RiyeserLinkOffice-Setup.exe'];
+  const asset = (n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 });
+  const latest = u.latestFromRelease({ tag_name: 't', body: '- Riyeser Link Office 1.0.0\n- Riyeser Link 1.1.0', assets: files.map(asset) });
+  assert.equal(latest.products.team.version, '1.1.0');
+  assert.match(latest.products.team.url, /RiyeserTeam-Setup\.exe$/);   // the same release file as before
+  assert.equal(latest.products.linkoffice.version, '1.0.0');
+  assert.match(latest.products.linkoffice.url, /RiyeserLinkOffice-Setup\.exe$/);
+  assert.deepEqual(u.availableUpdates(u.installedFromRegistry(reg('Riyeser Team', '1.0.0')), latest).map((x) => `${x.id} ${x.from}->${x.to}`), ['team 1.0.0->1.1.0']);
+  // a release file that says versions.json (read by older Centrals as well) works too
+  assert.equal(u.latestFromRelease({ tag_name: 't', body: '', assets: files.map(asset) }, { team: '1.1.0' }).products.team.version, '1.1.0');
+});
