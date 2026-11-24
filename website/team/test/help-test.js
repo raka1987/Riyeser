@@ -8,6 +8,7 @@
 //     Still having an issue; Confirm fixed, then "How did we do?" (1 to 5, optional comment); ?help#T-… (the email link) opens the request.
 //  7. Phone width: no sideways scrolling. Run: build the site, serve website/public on 8090, then `node website/team/test/help-test.js <shots>`.
 const { chromium, devices } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const user = { id: 'aaaaaaaa-0000-4000-8000-000000000001', email: 'owner@sample.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
 const token = () => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: user.id, aal: 'aal2', amr: [{ method: 'totp', timestamp: 1 }], exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.sig`;
@@ -66,7 +67,7 @@ const signIn = async (pg, url) => { await pg.goto(url); await pg.waitForSelector
   // 1. ?help after sign-in
   const pg = await b.newPage({ viewport: { width: 1280, height: 900 } }); pg.on('pageerror', (e) => errs.push(e.message));
   const st = await fakeServer(pg);
-  await signIn(pg, 'http://127.0.0.1:8090/link/?help'); await pg.waitForSelector('#ghf');
+  await signIn(pg, BASE + '/link/?help'); await pg.waitForSelector('#ghf');
   console.log('?help opened:', (await pg.textContent('.mcard h3')).trim(), '|', (await pg.textContent('.mcard p')).trim());
   console.log('topics:', await pg.evaluate(() => [...document.querySelectorAll('#ghf select option')].map((o) => o.textContent)));
   await pg.selectOption('#ghf select[name=topic]', 'program'); await pg.fill('#ghf input[name=subject]', 'The receipt printer stopped working');
@@ -140,24 +141,24 @@ const signIn = async (pg, url) => { await pg.goto(url); await pg.waitForSelector
   // the email's link: riyeser.com/link/?help#T-… opens that request after sign-in
   const p6 = await b.newPage({ viewport: { width: 1280, height: 900 } }); p6.on('pageerror', (e) => errs.push('email link: ' + e.message));
   const s6 = await fakeServer(p6); s6.tickets.push({ id: 't7', ref: 'T-10250', subject: 'Leave balance not updating', status: 'waiting_customer', mine: true, fresh: true, product: 'payroll', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), first: 'Leave didn\'t change.' });
-  await signIn(p6, 'http://127.0.0.1:8090/link/?help#T-10250'); await p6.waitForSelector('.tconv');
+  await signIn(p6, BASE + '/link/?help#T-10250'); await p6.waitForSelector('.tconv');
   check((await p6.textContent('.mcard h3')).trim() === 'Leave balance not updating' && !(await p6.$('#ghf')), '?help#T-10250 opens that request');
 
   // 3. the live database before team-chat.sql is re-run
   const p2 = await b.newPage({ viewport: { width: 1280, height: 900 } }); p2.on('pageerror', (e) => errs.push('old db: ' + e.message));
-  await fakeServer(p2, { oldDatabase: true }); await signIn(p2, 'http://127.0.0.1:8090/link/'); await p2.waitForSelector('.hco');
+  await fakeServer(p2, { oldDatabase: true }); await signIn(p2, BASE + '/link/'); await p2.waitForSelector('.hco');
   console.log('old database -> home works:', await p2.textContent('.hco h2'), '| help requests hidden:', !(await p2.$('.htix')), '| refund button hidden:', !(await p2.$('#hrefund')));
   check(!(await p2.$('#hreport')), 'old database: Report an issue hidden');
   await p2.click('#hhelp'); await p2.waitForSelector('.mcard'); console.log('old database -> Get help:', (await p2.textContent('.mcard p')).trim());
   // 4. a closed business
   const p3 = await b.newPage({ viewport: { width: 1000, height: 800 } }); p3.on('pageerror', (e) => errs.push('closed: ' + e.message));
-  await fakeServer(p3, { closed: true }); await signIn(p3, 'http://127.0.0.1:8090/link/'); await p3.waitForSelector('#gh');
+  await fakeServer(p3, { closed: true }); await signIn(p3, BASE + '/link/'); await p3.waitForSelector('#gh');
   console.log('closed business:', (await p3.textContent('.gcard h1')).trim(), '|', (await p3.textContent('.gcard p')).trim());
   await p3.click('#gh'); await p3.waitForSelector('#ghf'); console.log('closed -> can still ask for help:', !!(await p3.$('#ghf')));
   // 5. phone
   const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); ph.on('pageerror', (e) => errs.push('phone: ' + e.message));
   const sp = await fakeServer(ph); sp.tickets.push({ id: 't1', ref: 'T-10234', subject: 'A rather long subject about the receipt printer that stopped working this morning', status: 'waiting_customer', mine: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), first: 'x' });
-  sp.staffReplied = true; await signIn(ph, 'http://127.0.0.1:8090/link/'); await ph.waitForSelector('.htk');
+  sp.staffReplied = true; await signIn(ph, BASE + '/link/'); await ph.waitForSelector('.htk');
   console.log('phone home overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   await ph.screenshot({ path: out + '/help-phone.png', fullPage: true });
   await ph.click('#hrefund'); await ph.waitForSelector('#rff'); console.log('phone refund form overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
@@ -165,7 +166,7 @@ const signIn = async (pg, url) => { await pg.goto(url); await pg.waitForSelector
   await ph.screenshot({ path: out + '/help-report-phone.png' }); check(ro <= 0, 'phone: Report an issue fits (overflow ' + ro + ')');
   // the demo: ?demo&help opens it too
   const p4 = await b.newPage(); p4.on('pageerror', (e) => errs.push('demo: ' + e.message));
-  await p4.goto('http://127.0.0.1:8090/link/?demo&help'); await p4.waitForSelector('#ghf'); console.log('demo ?help opens Get help:', !!(await p4.$('#ghf')));
+  await p4.goto(BASE + '/link/?demo&help'); await p4.waitForSelector('#ghf'); console.log('demo ?help opens Get help:', !!(await p4.$('#ghf')));
   console.log('errors:', errs); check(!errs.length, 'no page errors'); await b.close();
   console.log(bad.length ? `\n${bad.length} FAILED` : '\nALL HELP TESTS PASSED'); process.exit(bad.length ? 1 : 0);
 })();

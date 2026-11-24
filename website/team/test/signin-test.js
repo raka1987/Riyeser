@@ -1,5 +1,6 @@
 // The real (non-demo) sign-in and team set-up, against a pretend Supabase that answers like the real one.
 const { chromium } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 (async () => {
   const b = await chromium.launch(); const errs = []; const calls = [];
   const pg = await b.newPage({ viewport: { width: 1200, height: 800 } });
@@ -26,7 +27,7 @@ const { chromium } = require('playwright');
     if (u.pathname === '/rest/v1/reads') return json([], 201);
     return json([]);
   });
-  await pg.goto('http://127.0.0.1:8090/link/'); await pg.waitForSelector('#gf');
+  await pg.goto(BASE + '/link/'); await pg.waitForSelector('#gf');
   console.log('1. signed out shows:', await pg.textContent('.gcard h1'), '| demo?', await pg.evaluate(() => window.RiyeserTeam.demo));
   await pg.fill('input[name=email]', user.email); await pg.fill('input[name=password]', 'wrong-password'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.err'); console.log('2. wrong password:', await pg.textContent('.err'));

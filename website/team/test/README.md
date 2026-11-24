@@ -52,3 +52,10 @@
   "How did we do?" and the `?help#T-…` email link. HQ: `../../hq/test-hq-support.js` (three columns, filters, assign,
   status, separate drafts with the audience line, Log a call, Next update, diagnostics, support notes, phone width).
   Riyeser Central: `desktop/test/diagnostics.test.js` (scrubbing, 200 lines / 64 KB, the preview is what's sent).
+- `link-ui-test.js`: the Riyeser Link workspace (phase 1) in the demo and against a pretend Supabase: the panels (nav, list,
+  conversation, People / Info), the status picker and Away after 10 idle minutes, reactions, pin and unpin, New chat, presence
+  and extensions in the People panel, Quick dial, the floating call bar between two tabs (mute, hold, audio, end, chat while
+  calling), an incoming call (Answer / Decline, the 📞 title, Do not disturb), themes (dark, light, match my computer, six
+  accents, contrast checks), Admin / Settings hidden for members, phone width (one panel at a time), files (link-files) and an
+  older database. Saves screenshots to the folder given. `rules-test.sql` covers presence, reactions, pins and file rules.
+- Every browser test takes `LINK_BASE=http://127.0.0.1:8091` to use another port. Confirmations are in-page now (`#askyes`).

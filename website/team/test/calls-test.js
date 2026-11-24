@@ -1,7 +1,8 @@
 // Real calls between browser tabs in the demo (fake microphone and camera): person to person, a branch call
 // (first to answer takes it), the dial pad, branch set-up, and the premium upsell.
 const { chromium, devices } = require('playwright');
-const URL = 'http://127.0.0.1:8090/link/?demo';
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
+const URL = BASE + '/link/?demo';
 (async () => {
   const b = await chromium.launch({ args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
   const ctx = await b.newContext({ viewport: { width: 1280, height: 800 }, permissions: ['microphone', 'camera'] });
@@ -9,15 +10,16 @@ const URL = 'http://127.0.0.1:8090/link/?demo';
   const open = async (as) => { const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(as + ': ' + e.message)); p.on('dialog', (d) => d.accept());
     await p.goto(URL + (as ? '&as=' + as : '')); await p.waitForSelector('.item'); return p; };
   const status = (p) => p.evaluate(() => { const c = window.RiyeserTeam.calls.current; return c ? c.status : 'none'; });
+  const tab = async (p, t) => { await p.click(`[data-tab="${t}"]`); await p.waitForTimeout(100); };
   const until = async (p, want, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { if ((await status(p)) === want) return true; await p.waitForTimeout(100); } return false; };
 
   const me = await open(''); const jordan = await open('u-jordan');
-  await me.waitForTimeout(300);
-  console.log('sidebar calls:', await me.evaluate(() => [...document.querySelectorAll('[data-callbranch]')].map((x) => x.textContent.replace(/\s+/g, ' ').trim())),
+  await me.waitForTimeout(300); await tab(me, 'calls');
+  console.log('Calls tab:', await me.evaluate(() => [...document.querySelectorAll('[data-callbranch]')].map((x) => x.textContent.replace(/\s+/g, ' ').trim())),
     '| my ext:', await me.textContent('.myext'));
 
   // 1. person to person
-  await me.click('[data-dm="u-jordan"]'); await me.waitForTimeout(200); await me.click('#calldm');
+  await tab(me, 'chats'); await me.click('[data-dm="u-jordan"]'); await me.waitForTimeout(200); await me.click('#calldm');
   console.log('1. Jordan rings:', await until(jordan, 'incoming'), '| title:', await jordan.title());
   await jordan.screenshot({ path: out + '/call-incoming.png' });
   await jordan.click('#c-ans');
@@ -34,19 +36,19 @@ const URL = 'http://127.0.0.1:8090/link/?demo';
 
   // 2. branch call: Jordan and Alex both ring; Jordan answers, Alex is told
   const alex = await open('u-alex'); await me.waitForTimeout(300);
-  await me.click('[data-callbranch="b-lau"]');
+  await tab(me, 'calls'); await me.click('[data-callbranch="b-lau"]');
   console.log('2. branch rings both:', await until(jordan, 'incoming'), await until(alex, 'incoming'));
   await jordan.click('#c-ans');
   console.log('   Jordan live:', await until(jordan, 'live'), '| Alex sees:', await until(alex, 'ended') && await alex.evaluate(() => window.RiyeserTeam.calls.current && window.RiyeserTeam.calls.current.note));
   await jordan.click('#c-end'); await until(me, 'ended'); await me.waitForTimeout(2700);
 
   // 3. declining
-  await me.click('[data-dm="u-jordan"]'); await me.click('#calldm'); await until(jordan, 'incoming'); await jordan.click('#c-dec');
+  await tab(me, 'chats'); await me.click('[data-dm="u-jordan"]'); await me.click('#calldm'); await until(jordan, 'incoming'); await jordan.click('#c-dec');
   console.log('3. declined ->', await until(me, 'ended') && await me.evaluate(() => window.RiyeserTeam.calls.current.note));
   await me.waitForTimeout(2700);
 
   // 4. dial pad
-  await me.click('#dial'); await me.click('[data-k="2"]'); await me.click('[data-k="0"]'); await me.click('[data-k="2"]');
+  await tab(me, 'calls'); await me.click('#dial'); await me.click('[data-k="2"]'); await me.click('[data-k="0"]'); await me.click('[data-k="2"]');
   console.log('4. dial 202 ->', await me.textContent('#dpw')); await me.fill('#dpn', '200'); await me.dispatchEvent('#dpn', 'input'); console.log('   dial 200 ->', await me.textContent('#dpw'));
   await me.click('#cl');
 

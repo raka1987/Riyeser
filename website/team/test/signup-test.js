@@ -3,6 +3,7 @@
 // the account is set up from those details straight away (no second form) -> the Riyeser home.
 // Run: build the site, serve website/public on port 8090, then `node website/team/test/signup-test.js`.
 const { chromium } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 (async () => {
   const b = await chromium.launch(); const errs = [];
   const pg = await b.newPage({ viewport: { width: 1200, height: 900 } });
@@ -33,7 +34,7 @@ const { chromium } = require('playwright');
     return json([]);
   });
 
-  await pg.goto('http://127.0.0.1:8090/link/?signup'); await pg.waitForSelector('#gf');
+  await pg.goto(BASE + '/link/?signup'); await pg.waitForSelector('#gf');
   console.log('1. sign-up page asks for:', await pg.$$eval('#gf label > span', (x) => x.map((s) => s.textContent.trim()).join(' | ')));
   await pg.fill('[name=you]', 'Sione Example'); await pg.fill('[name=email]', user.email); await pg.fill('[name=password]', 'a-good-password');
   await pg.selectOption('[name=country]', 'Samoa'); console.log('   phone hint for Samoa:', await pg.getAttribute('[name=phone]', 'placeholder'));
@@ -61,7 +62,7 @@ const { chromium } = require('playwright');
   console.log('   details kept with the account:', JSON.stringify(signupSent && signupSent.data && signupSent.data.riyeser_signup));
   // The confirmation email brings them back to the page they signed up on: /link/ (riyeser.com/link/ in Supabase's Redirect URLs)
   console.log('   confirmation email returns to:', signupSent.redirectTo);
-  if (!/^http:\/\/127\.0\.0\.1:8090\/link\/\?signup$/.test(signupSent.redirectTo || '')) errs.push('sign-up on /link/ must return to /link/, got ' + signupSent.redirectTo);
+  if ((signupSent.redirectTo || '') !== BASE + '/link/?signup') errs.push('sign-up on /link/ must return to /link/, got ' + signupSent.redirectTo);
   // after confirming the email: sign in
   await pg.fill('[name=email]', user.email); await pg.fill('[name=password]', 'a-good-password'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.hco', { timeout: 10000 });

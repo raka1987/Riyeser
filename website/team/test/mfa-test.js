@@ -1,17 +1,18 @@
 // Two-step sign-in and the change history: in the demo, and the sign-in code screen against a pretend server.
 const { chromium } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 (async () => {
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   const pg = await b.newPage({ viewport: { width: 1280, height: 860 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-  await pg.goto('http://127.0.0.1:8090/link/?demo'); await pg.waitForSelector('.cobar');
-  console.log('owner with two-step: nag shown?', !!(await pg.$('#mfanag')), '| bar:', (await pg.textContent('.cobar')).replace(/\s+/g, ' ').trim());
+  await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('#lknav');
+  console.log('owner with two-step: nag shown?', !!(await pg.$('#mfanag')), '| admin group:', (await pg.textContent('#adming')).replace(/\s+/g, ' ').trim());
   // history
   await pg.click('#cohist'); await pg.waitForSelector('.hist');
   console.log('history:', await pg.evaluate(() => [...document.querySelectorAll('.hl')].map((x) => x.textContent.replace(/\s+/g, ' ').trim()).slice(0, 3)));
   await pg.screenshot({ path: out + '/mfa-history.png' }); await pg.click('#cl');
   // turn it off: the nag appears, and People leads to set-up instead
-  await pg.click('#cosec'); await pg.waitForSelector('#off'); await pg.click('#off'); await pg.waitForTimeout(300);
+  await pg.click('#cosec'); await pg.waitForSelector('#off'); await pg.click('#off'); await pg.click('#askyes'); await pg.waitForTimeout(300);
   console.log('after turning off: nag shown?', !!(await pg.$('#mfanag')));
   await pg.click('#coppl'); await pg.waitForSelector('#vf');
   console.log('People asks for set-up first:', await pg.textContent('.mcard h3'), '| QR shown:', await pg.isVisible('.qr img'));
@@ -43,12 +44,12 @@ const { chromium } = require('playwright');
     if (u.pathname === '/rest/v1/rpc/team_features') return json({ calls: true });
     return json([]);
   });
-  await p2.goto('http://127.0.0.1:8090/link/?chat'); await p2.waitForSelector('#gf');
+  await p2.goto(BASE + '/link/?chat'); await p2.waitForSelector('#gf');
   await p2.fill('input[name=email]', user.email); await p2.fill('input[name=password]', 'right-password'); await p2.click('button[type=submit]');
   await p2.waitForSelector('#cs'); console.log('after password -> asks for code:', await p2.textContent('#cs h1'));
   await p2.screenshot({ path: out + '/mfa-code.png' });
   await p2.fill('#cs input', '111111'); await p2.click('#cs .btn.p'); await p2.waitForSelector('#cs .err'); console.log('wrong code:', await p2.textContent('#cs .err'));
-  await p2.fill('#cs input', '246810'); await p2.click('#cs .btn.p'); await p2.waitForSelector('.cobar', { timeout: 8000 });
+  await p2.fill('#cs input', '246810'); await p2.click('#cs .btn.p'); await p2.waitForSelector('#lknav', { timeout: 8000 });
   console.log('right code -> in:', (await p2.textContent('.team b')).trim(), '| owner nag shown (should be no):', !!(await p2.$('#mfanag')));
   console.log('errors:', errs); await b.close();
 })();

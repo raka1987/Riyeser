@@ -1,10 +1,11 @@
 // Private chats in the demo: make one with chosen people, see who's in it, change it, leave it.
 const { chromium, devices } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 (async () => {
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   const pg = await b.newPage({ viewport: { width: 1366, height: 820 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-  await pg.goto('http://127.0.0.1:8090/link/?demo'); await pg.waitForSelector('.item');
+  await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('.item');
   const side = () => pg.evaluate(() => [...document.querySelectorAll('[data-ch]')].map((x) => x.textContent.replace(/\s+/g, ' ').trim()));
   console.log('sidebar:', await side());
   await pg.click('[data-ch="c-exec"]'); await pg.waitForTimeout(200);
@@ -24,10 +25,10 @@ const { chromium, devices } = require('playwright');
   const people = await pg.evaluate(() => window.RiyeserTeam.state.ch.people);
   console.log('after change, people:', people, '| header:', (await pg.textContent('#mhead small')).trim());
   // leave it
-  await pg.click('#ppl'); await pg.waitForSelector('#lv'); await pg.click('#lv'); await pg.waitForTimeout(300);
+  await pg.click('#ppl'); await pg.waitForSelector('#lv'); await pg.click('#lv'); await pg.click('#askyes'); await pg.waitForTimeout(300);
   console.log('after leaving, sidebar:', await side());
   const ph = await b.newContext({ ...devices['iPhone 13'] }); const pp = await ph.newPage(); pp.on('pageerror', (e) => errs.push('phone: ' + e.message));
-  await pp.goto('http://127.0.0.1:8090/link/?demo'); await pp.waitForSelector('.item'); await pp.tap('#addch'); await pp.check('input[name=who][value=some]');
+  await pp.goto(BASE + '/link/?demo'); await pp.waitForSelector('.item'); await pp.tap('#addch'); await pp.check('input[name=who][value=some]');
   console.log('phone add-chat overflow:', await pp.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   await pp.screenshot({ path: out + '/team-private-phone.png' });
   console.log('errors:', errs); await b.close();

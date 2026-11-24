@@ -1,9 +1,10 @@
 const { chromium, devices } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 (async () => {
   const b = await chromium.launch(); const errs = []; const out = process.argv[2];
   const pg = await b.newPage({ viewport: { width: 1366, height: 820 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
-  await pg.goto('http://127.0.0.1:8090/link/?demo'); await pg.waitForSelector('.item');
+  await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('.item');
   const texts = (sel) => pg.evaluate((s) => [...document.querySelectorAll(s)].map((x) => x.textContent.trim()), sel);
   console.log('channels:', await texts('[data-ch] .nm'), 'unread badges:', await texts('.badge'));
   await pg.click('[data-ch="c-jobs"]'); await pg.waitForTimeout(200);
@@ -20,13 +21,13 @@ const { chromium, devices } = require('playwright');
   await pg.fill('[data-edit] textarea', 'Booking 14 moved to Friday'); await pg.press('[data-edit] textarea', 'Enter'); await pg.waitForTimeout(200);
   console.log('edited shows:', (await texts('#msgs .mb')).filter((t) => t.includes('Friday')));
   const ph = await b.newContext({ ...devices['iPhone 13'] }); const pp = await ph.newPage(); pp.on('pageerror', (e) => errs.push('phone: ' + e.message));
-  await pp.goto('http://127.0.0.1:8090/link/?demo'); await pp.waitForSelector('.item');
+  await pp.goto(BASE + '/link/?demo'); await pp.waitForSelector('.item');
   console.log('phone starts on the list?', !(await pp.evaluate(() => document.querySelector('.shell').classList.contains('inchat'))),
     'overflow', await pp.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   await pp.screenshot({ path: out + '/team-phone-list.png' });
   await pp.tap('[data-ch="c-jobs"]'); await pp.waitForTimeout(300); await pp.screenshot({ path: out + '/team-phone-chat.png' });
   await pp.tap('.back'); console.log('back to list:', !(await pp.evaluate(() => document.querySelector('.shell').classList.contains('inchat'))));
-  const g = await b.newPage(); await g.goto('http://127.0.0.1:8090/link/'); await g.waitForTimeout(500);
+  const g = await b.newPage(); await g.goto(BASE + '/link/'); await g.waitForTimeout(500);
   console.log('not set up yet -> demo?', await g.evaluate(() => window.RiyeserTeam && window.RiyeserTeam.demo));
   console.log('errors:', errs); await b.close();
 })();

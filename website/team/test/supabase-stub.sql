@@ -11,3 +11,10 @@ grant execute on function auth.uid(), auth.jwt() to anon, authenticated;
 create publication supabase_realtime;
 insert into auth.users values ('11111111-1111-1111-1111-111111111111','owner@a.test'),('22222222-2222-2222-2222-222222222222','staff@a.test'),
   ('33333333-3333-3333-3333-333333333333','owner@b.test'),('44444444-4444-4444-4444-444444444444','third@a.test');
+-- Supabase Storage, just enough for the file rules: buckets, objects (with row rules) and who uploaded each.
+create schema storage;
+create table storage.buckets (id text primary key, name text not null, public boolean default false, file_size_limit bigint, allowed_mime_types text[]);
+create table storage.objects (id uuid primary key default gen_random_uuid(), bucket_id text references storage.buckets(id), name text not null,
+  owner uuid default auth.uid(), created_at timestamptz default now(), metadata jsonb, unique (bucket_id, name));
+alter table storage.objects enable row level security;
+grant usage on schema storage to anon, authenticated; grant select, insert on storage.objects to authenticated;

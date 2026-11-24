@@ -1861,6 +1861,160 @@ select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authent
 do $$ begin assert (select count(*) from public.messages) = 0, 'HQ staff see no chat messages'; end $$;
 reset role;
 
+-- ===== Riyeser Link: workspace (presence, reactions, pins, files)
+-- A fresh business (Pip owner, Quinn member, Rua member) and another business (Sol). Made directly, as the database owner.
+reset role;
+insert into auth.users (id, email) values ('a7a7a7a1-0000-4000-8000-000000000001', 'pip@lk.test'), ('a7a7a7a2-0000-4000-8000-000000000002', 'quinn@lk.test'),
+  ('a7a7a7a3-0000-4000-8000-000000000003', 'rua@lk.test'), ('a7a7a7a4-0000-4000-8000-000000000004', 'sol@lk.test');
+do $$ declare a uuid; b uuid; g uuid; p uuid; m uuid; pm uuid; begin
+  insert into public.workspaces (name) values ('Sample Link Co') returning id into a;
+  insert into public.workspaces (name) values ('Other Link Co') returning id into b;
+  insert into public.members (workspace_id, user_id, display_name, role) values (a, 'a7a7a7a1-0000-4000-8000-000000000001', 'Pip', 'owner'),
+    (a, 'a7a7a7a2-0000-4000-8000-000000000002', 'Quinn', 'member'), (a, 'a7a7a7a3-0000-4000-8000-000000000003', 'Rua', 'member'),
+    (b, 'a7a7a7a4-0000-4000-8000-000000000004', 'Sol', 'owner');
+  insert into public.channels (workspace_id, kind, name) values (a, 'channel', 'general') returning id into g;
+  insert into public.channels (workspace_id, kind, name) values (a, 'private', 'managers') returning id into p;
+  insert into public.channel_members values (p, 'a7a7a7a1-0000-4000-8000-000000000001'), (p, 'a7a7a7a2-0000-4000-8000-000000000002');
+  insert into public.messages (channel_id, workspace_id, user_id, body) values (g, a, 'a7a7a7a1-0000-4000-8000-000000000001', 'Morning all') returning id into m;
+  insert into public.messages (channel_id, workspace_id, user_id, body) values (p, a, 'a7a7a7a1-0000-4000-8000-000000000001', 'Managers only') returning id into pm;
+  perform set_config('lk.a', a::text, false), set_config('lk.b', b::text, false), set_config('lk.g', g::text, false), set_config('lk.p', p::text, false),
+    set_config('lk.m', m::text, false), set_config('lk.pm', pm::text, false);
+end $$;
+set role authenticated;
+
+-- presence: I set my own; everyone in the business sees it; another business sees nothing and can't set it here
+select pg_temp.as_user('a7a7a7a2-0000-4000-8000-000000000002');
+do $$ declare a uuid := current_setting('lk.a')::uuid; begin
+  perform public.link_presence_set(a, 'dnd', 'dnd', 'At the Elm St job', false);
+  perform public.link_presence_set(a, 'dnd', 'dnd', 'At the Elm St job', true);
+  assert (select count(*) from public.presence) = 1, 'one row for Quinn';
+  assert (select status || '/' || manual || '/' || custom_text || '/' || on_call || '/' || fresh from public.link_presence(a)) = 'dnd/dnd/At the Elm St job/true/true', 'Quinn sees their own status';
+  begin perform public.link_presence_set(a, 'sleeping', null, null, false); raise exception 'bad status';
+  exception when others then assert sqlerrm like 'Choose Available%', sqlerrm; end;
+  begin perform public.link_presence_set(a, 'busy', null, '<b>hi</b>', false); raise exception 'markup';
+  exception when others then assert sqlerrm like 'Keep your status short%', sqlerrm; end;
+  begin insert into public.presence (workspace_id, user_id, status) values (a, 'a7a7a7a3-0000-4000-8000-000000000003', 'away'); raise exception 'wrote someone else''s presence';
+  exception when insufficient_privilege then null; end;
+  begin update public.presence set status = 'available'; raise exception 'updated presence directly';
+  exception when insufficient_privilege then null; end;
+end $$;
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003');
+do $$ declare a uuid := current_setting('lk.a')::uuid; begin
+  perform public.link_presence_set(a, 'away', null, null, false);
+  assert (select count(*) from public.presence) = 2, 'Rua sees both in the business';
+  assert (select manual from public.link_presence(a) where user_id = 'a7a7a7a2-0000-4000-8000-000000000002') is null, 'someone else''s manual choice stays theirs';
+  assert (select status from public.link_presence(a) where user_id = 'a7a7a7a2-0000-4000-8000-000000000002') = 'dnd', 'Rua sees Quinn is DND';
+  assert (select away_since is not null from public.presence where user_id = 'a7a7a7a3-0000-4000-8000-000000000003'), 'away since';
+end $$;
+select pg_temp.as_user('a7a7a7a4-0000-4000-8000-000000000004');
+do $$ declare a uuid := current_setting('lk.a')::uuid; begin
+  assert (select count(*) from public.presence) = 0, 'another business sees no presence';
+  assert (select count(*) from public.link_presence(a)) = 0, 'nor through the function';
+  begin perform public.link_presence_set(a, 'available', null, null, false); raise exception 'set presence in another business';
+  exception when others then assert sqlerrm like 'You''re not in that company%', sqlerrm; end;
+end $$;
+reset role; set role anon; select pg_temp.as_user('');
+do $$ begin
+  begin perform count(*) from public.presence; raise exception 'anon read presence'; exception when insufficient_privilege then null; end;
+  begin perform public.link_presence_set(current_setting('lk.a')::uuid, 'available', null, null, false); raise exception 'anon set presence';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role; set role authenticated;
+
+-- reactions: only people who can see the message, only as themselves, only their own taken back
+select pg_temp.as_user('a7a7a7a2-0000-4000-8000-000000000002');
+insert into public.message_reactions (message_id, emoji) select current_setting('lk.m')::uuid, '👍';
+insert into public.message_reactions (message_id, emoji) select current_setting('lk.pm')::uuid, '✅';
+do $$ begin
+  assert (select channel_id::text from public.message_reactions where emoji = '👍') = current_setting('lk.g'), 'the chat comes from the message';
+  begin insert into public.message_reactions (message_id, emoji) values (current_setting('lk.m')::uuid, '🤡'); raise exception 'odd emoji';
+  exception when check_violation then null; end;
+  begin insert into public.message_reactions (message_id, user_id, emoji) values (current_setting('lk.m')::uuid, 'a7a7a7a3-0000-4000-8000-000000000003', '🎉'); raise exception 'reacted as Rua';
+  exception when insufficient_privilege then null; end;
+  begin insert into public.message_reactions (message_id, emoji, channel_id, workspace_id)
+    values (current_setting('lk.m')::uuid, '❤️', current_setting('lk.p')::uuid, current_setting('lk.b')::uuid);
+    assert (select channel_id::text from public.message_reactions where emoji = '❤️') = current_setting('lk.g'), 'a made-up chat is replaced by the real one';
+  end;
+end $$;
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003');
+do $$ begin
+  assert (select count(*) from public.message_reactions) = 2, 'Rua (not in managers) sees the #general reactions only';
+  begin insert into public.message_reactions (message_id, emoji) values (current_setting('lk.pm')::uuid, '👀'); raise exception 'reacted in a private chat';
+  exception when others then if sqlerrm = 'reacted in a private chat' then raise; end if; end;
+  delete from public.message_reactions where emoji = '👍';
+  assert (select count(*) from public.message_reactions where emoji = '👍') = 1, 'Rua can''t take back Quinn''s reaction';
+  insert into public.message_reactions (message_id, emoji) values (current_setting('lk.m')::uuid, '👍');
+  delete from public.message_reactions where emoji = '👍' and user_id = auth.uid();
+  assert (select count(*) from public.message_reactions where emoji = '👍') = 1, 'Rua took back their own';
+end $$;
+select pg_temp.as_user('a7a7a7a4-0000-4000-8000-000000000004');
+do $$ begin
+  assert (select count(*) from public.message_reactions) = 0, 'another business sees no reactions';
+  begin insert into public.message_reactions (message_id, emoji) values (current_setting('lk.m')::uuid, '😂'); raise exception 'outsider reacted';
+  exception when others then if sqlerrm = 'outsider reacted' then raise; end if; end;
+end $$;
+
+-- pins: my own, only for chats I can see
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003');
+insert into public.channel_pins (channel_id) values (current_setting('lk.g')::uuid);
+do $$ begin
+  begin insert into public.channel_pins (channel_id) values (current_setting('lk.p')::uuid); raise exception 'pinned a private chat I''m not in';
+  exception when insufficient_privilege then null; end;
+  begin insert into public.channel_pins (user_id, channel_id) values ('a7a7a7a2-0000-4000-8000-000000000002', current_setting('lk.g')::uuid); raise exception 'pinned for Quinn';
+  exception when insufficient_privilege then null; end;
+end $$;
+select pg_temp.as_user('a7a7a7a2-0000-4000-8000-000000000002');
+do $$ begin
+  assert (select count(*) from public.channel_pins) = 0, 'Quinn can''t see Rua''s pins';
+  delete from public.channel_pins;
+end $$;
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003');
+do $$ begin
+  assert (select count(*) from public.channel_pins) = 1, 'Quinn couldn''t remove Rua''s pin';
+  delete from public.channel_pins where channel_id = current_setting('lk.g')::uuid;
+  assert (select count(*) from public.channel_pins) = 0, 'unpinned';
+end $$;
+
+-- files: only into, and out of, chats I can see; a message's files must be in its own chat; can't be swapped later
+do $$ declare a text := current_setting('lk.a'); g text := current_setting('lk.g'); p text := current_setting('lk.p'); f text; begin
+  f := a || '/' || g || '/' || 'abcdef0123456789' || '/report.pdf';
+  insert into storage.objects (bucket_id, name) values ('link-files', f);
+  insert into public.messages (channel_id, workspace_id, body, files) values (g::uuid, a::uuid, '📎 report.pdf', jsonb_build_array(jsonb_build_object('path', f, 'name', 'report.pdf', 'size', 1200)));
+  begin insert into storage.objects (bucket_id, name) values ('link-files', a || '/' || p || '/abcdef0123456789/x.pdf'); raise exception 'uploaded into a private chat I''m not in';
+  exception when insufficient_privilege then null; end;
+  begin insert into storage.objects (bucket_id, name) values ('link-files', current_setting('lk.b') || '/' || g || '/abcdef0123456789/x.pdf'); raise exception 'wrong business in the path';
+  exception when insufficient_privilege then null; end;
+  begin insert into storage.objects (bucket_id, name) values ('link-files', 'anything.pdf'); raise exception 'odd path';
+  exception when insufficient_privilege then null; end;
+  begin insert into public.messages (channel_id, workspace_id, body, files) values (g::uuid, a::uuid, 'x', jsonb_build_array(jsonb_build_object('path', a || '/' || p || '/abcdef0123456789/x.pdf', 'name', 'x.pdf', 'size', 5)));
+    raise exception 'pointed at a file in another chat';
+  exception when others then assert sqlerrm like 'That file isn''t in this chat%', sqlerrm; end;
+  begin insert into public.messages (channel_id, workspace_id, body, files) values (g::uuid, a::uuid, 'x', jsonb_build_array(jsonb_build_object('path', f, 'name', 'big.zip', 'size', 26214401)));
+    raise exception 'over 25 MB';
+  exception when others then assert sqlerrm like 'That file isn''t in this chat%', sqlerrm; end;
+  begin update public.messages set files = '[{"path":"x","name":"y","size":1}]' where body = '📎 report.pdf'; raise exception 'swapped a file';
+  exception when others then assert sqlerrm like 'Files can''t be changed%', sqlerrm; end;
+  update public.messages set body = '📎 report.pdf (final)' where body = '📎 report.pdf';
+  assert (select count(*) from storage.objects) = 1, 'Rua sees the #general file';
+end $$;
+select pg_temp.as_user('a7a7a7a2-0000-4000-8000-000000000002');
+insert into storage.objects (bucket_id, name) select 'link-files', current_setting('lk.a') || '/' || current_setting('lk.p') || '/0123456789abcdef/plan.pdf';
+do $$ begin assert (select count(*) from storage.objects) = 2, 'Quinn (in managers) sees both files'; end $$;
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003');
+do $$ begin
+  assert (select count(*) from storage.objects) = 1, 'Rua can''t see the managers file';
+  begin update storage.objects set name = name || 'x'; raise exception 'changed a file'; exception when insufficient_privilege then null; end;
+  begin delete from storage.objects; raise exception 'removed a file'; exception when insufficient_privilege then null; end;
+end $$;
+select pg_temp.as_user('a7a7a7a4-0000-4000-8000-000000000004');
+do $$ begin assert (select count(*) from storage.objects) = 0, 'another business sees no files'; end $$;
+reset role;
+do $$ begin
+  assert (select public = false and file_size_limit = 26214400 from storage.buckets where id = 'link-files'), 'a private bucket, 25 MB';
+  assert (select count(*) from pg_publication_tables where pubname = 'supabase_realtime' and tablename in ('presence', 'message_reactions')) = 2, 'live updates';
+  assert exists (select 1 from pg_constraint where conname = 'call_signals_kind_check' and pg_get_constraintdef(oid) like '%hold%'), 'hold signal';
+end $$;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

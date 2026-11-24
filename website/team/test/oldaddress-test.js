@@ -7,7 +7,7 @@
 //   5. inside chat the tab says "(n) Riyeser Link", the form the desktop apps read the unread count from
 // Run: build the site, serve website/public on port 8090, then `node website/team/test/oldaddress-test.js`.
 const { chromium } = require('playwright');
-const BASE = 'http://127.0.0.1:8090';
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 (async () => {
   const b = await chromium.launch(); const errs = []; const fail = (m) => { errs.push(m); console.log('FAIL:', m); };
   const user = { id: 'aaaaaaaa-0000-4000-8000-000000000031', email: 'old.link@sample.test', aud: 'authenticated', role: 'authenticated', user_metadata: {} };

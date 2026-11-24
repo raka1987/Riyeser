@@ -4326,3 +4326,183 @@ grant execute on function public.support_report(uuid, jsonb), public.ticket_stil
   public.ticket_rate(uuid, int, text) to authenticated;
 grant execute on function public.hq_support_inbox(text, text, jsonb), public.hq_ticket_set(uuid, jsonb), public.hq_ticket_next_update(uuid, timestamptz, uuid),
   public.hq_ticket_log_call(uuid, text, text, text), public.hq_diagnostic(text), public.hq_note_edit(bigint, text) to authenticated;
+
+-- ===== Riyeser Link: workspace (presence, reactions, themes) =====
+-- The Riyeser Link workspace (phase 1): who's available, emoji reactions, pinned chats, and files in chats.
+-- Themes and accent colours are kept with each person's account (riyeser_prefs in their sign-in details), not here.
+-- Everything here only ever shows to people in the same business; files and reactions only to the people in that chat.
+-- Riyeser HQ has no way in to any of it. Nothing is ever deleted by this section. Safe to re-run.
+
+-- ---------------------------------------------------------------- presence: Available, Busy, Away, Do not disturb, Offline
+-- One row per person per business. The app writes it through link_presence_set (at most about once a minute, and when
+-- something changes); "fresh" means a Riyeser Link window wrote it in the last 3 minutes, otherwise the person shows Offline.
+create table if not exists public.presence (
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'available' check (status in ('available', 'busy', 'away', 'dnd', 'offline')),
+  manual text check (manual in ('available', 'busy', 'away', 'dnd', 'offline')),   -- what they chose; null = automatic
+  custom_text text check (length(custom_text) <= 80),
+  on_call boolean not null default false,
+  away_since timestamptz,
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, user_id)
+);
+alter table public.presence enable row level security;
+drop policy if exists pr_read on public.presence;
+create policy pr_read on public.presence for select to authenticated using (public.is_member(workspace_id));
+grant select on public.presence to authenticated;
+revoke insert, update, delete on public.presence from authenticated;
+revoke all on public.presence from anon;
+
+-- My status in this business. Only for me, only in a business I'm in. Plain text only for the custom status.
+create or replace function public.link_presence_set(ws uuid, st text, manual_choice text, custom text, on_a_call boolean)
+  returns void language plpgsql security definer set search_path = public as $$
+declare t text := nullif(trim(coalesce(custom, '')), '');
+begin
+  if auth.uid() is null or not is_member(ws) then raise exception 'You''re not in that company.'; end if;
+  if st is null or st not in ('available', 'busy', 'away', 'dnd', 'offline') then raise exception 'Choose Available, Busy, Away, Do not disturb or Offline.'; end if;
+  if manual_choice is not null and manual_choice not in ('available', 'busy', 'away', 'dnd', 'offline') then raise exception 'Choose Available, Busy, Away, Do not disturb or Offline.'; end if;
+  if t is not null and (length(t) > 80 or t ~ '[<>]') then raise exception 'Keep your status short: up to 80 letters, no < or >.'; end if;
+  insert into presence (workspace_id, user_id, status, manual, custom_text, on_call, away_since, updated_at)
+    values (ws, auth.uid(), st, manual_choice, t, coalesce(on_a_call, false), case when st = 'away' then now() end, now())
+  on conflict (workspace_id, user_id) do update set status = excluded.status, manual = excluded.manual, custom_text = excluded.custom_text,
+    on_call = excluded.on_call, updated_at = now(),
+    away_since = case when excluded.status <> 'away' then null else coalesce(presence.away_since, now()) end;
+end $$;
+
+-- Everyone's status in a business I'm in, with "fresh" worked out on the database's clock.
+create or replace function public.link_presence(ws uuid) returns table (user_id uuid, status text, manual text, custom_text text, on_call boolean,
+  away_since timestamptz, updated_at timestamptz, fresh boolean, now timestamptz)
+  language sql stable security definer set search_path = public as $$
+  select p.user_id, p.status, case when p.user_id = auth.uid() then p.manual end, p.custom_text, p.on_call, p.away_since, p.updated_at,
+         p.status <> 'offline' and p.updated_at > now() - interval '3 minutes', now()
+  from presence p join members m on m.workspace_id = p.workspace_id and m.user_id = p.user_id
+  where p.workspace_id = ws and public.is_member(ws)
+$$;
+revoke all on function public.link_presence_set(uuid, text, text, text, boolean), public.link_presence(uuid) from public, anon;
+grant execute on function public.link_presence_set(uuid, text, text, text, boolean), public.link_presence(uuid) to authenticated;
+
+-- ---------------------------------------------------------------- reactions: 👍 ✅ ❤️ 😂 🎉 👀 on a message
+-- Only people who can see the message can react, only as themselves, and only take back their own.
+create table if not exists public.message_reactions (
+  message_id uuid not null references public.messages(id) on delete cascade,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  emoji text not null check (emoji in ('👍', '✅', '❤️', '😂', '🎉', '👀')),
+  channel_id uuid not null references public.channels(id) on delete cascade,     -- filled in from the message
+  workspace_id uuid not null references public.workspaces(id) on delete cascade, -- filled in from the message
+  created_at timestamptz not null default now(),
+  primary key (message_id, user_id, emoji)
+);
+create index if not exists message_reactions_channel on public.message_reactions (channel_id);
+-- The chat and business always come from the message itself (as the person reacting can see it), never from the app.
+create or replace function public.message_reactions_fill() returns trigger language plpgsql as $$
+begin
+  select m.channel_id, m.workspace_id into new.channel_id, new.workspace_id from public.messages m where m.id = new.message_id and not m.deleted;
+  if new.channel_id is null then raise exception 'That message isn''t there any more.'; end if;
+  new.created_at := now();
+  return new;
+end $$;
+drop trigger if exists message_reactions_fill on public.message_reactions;
+create trigger message_reactions_fill before insert on public.message_reactions for each row execute function public.message_reactions_fill();
+alter table public.message_reactions enable row level security;
+drop policy if exists rx_read on public.message_reactions;
+create policy rx_read on public.message_reactions for select to authenticated using (public.can_see_channel(channel_id));
+drop policy if exists rx_add on public.message_reactions;
+create policy rx_add on public.message_reactions for insert to authenticated
+  with check (user_id = auth.uid() and public.can_see_channel(channel_id));
+drop policy if exists rx_remove on public.message_reactions;
+create policy rx_remove on public.message_reactions for delete to authenticated using (user_id = auth.uid());
+grant select, insert, delete on public.message_reactions to authenticated;
+revoke update on public.message_reactions from authenticated;
+revoke all on public.message_reactions from anon;
+
+-- ---------------------------------------------------------------- pinned chats: each person's own
+create table if not exists public.channel_pins (
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  channel_id uuid not null references public.channels(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, channel_id)
+);
+alter table public.channel_pins enable row level security;
+drop policy if exists pin_own on public.channel_pins;
+create policy pin_own on public.channel_pins for select to authenticated using (user_id = auth.uid());
+drop policy if exists pin_add on public.channel_pins;
+create policy pin_add on public.channel_pins for insert to authenticated with check (user_id = auth.uid() and public.can_see_channel(channel_id));
+drop policy if exists pin_remove on public.channel_pins;
+create policy pin_remove on public.channel_pins for delete to authenticated using (user_id = auth.uid());
+grant select, insert, delete on public.channel_pins to authenticated;
+revoke update on public.channel_pins from authenticated;
+revoke all on public.channel_pins from anon;
+
+-- ---------------------------------------------------------------- calls: "on hold" is passed to the other person
+alter table public.call_signals drop constraint if exists call_signals_kind_check;
+alter table public.call_signals add constraint call_signals_kind_check
+  check (kind in ('ring', 'accept', 'decline', 'cancel', 'taken', 'offer', 'answer', 'ice', 'hangup', 'busy', 'hold'));
+
+-- ---------------------------------------------------------------- files in chats (Supabase Storage, private bucket link-files)
+-- A file lives at <business id>/<chat id>/<random>/<file name>. Only the people who can see that chat can upload to it or
+-- download from it, through short-lived links. Up to 25 MB each. Files can't be changed or removed from the app.
+-- A message lists its files in messages.files; each must be in that message's own chat.
+alter table public.messages add column if not exists files jsonb;
+do $$ begin
+  alter table public.messages add constraint messages_files_shape check (files is null or (jsonb_typeof(files) = 'array'
+    and jsonb_array_length(files) between 1 and 10 and length(files::text) < 6000));
+exception when duplicate_object then null; end $$;
+
+-- The chat a file belongs to, from its path (null when the path isn't one of ours). Internal.
+create or replace function public.link_file_channel(path text) returns uuid
+  language sql immutable set search_path = public as $$
+  select case when path ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9A-Za-z-]{8,40}/[^/]{1,120}$' then split_part(path, '/', 2)::uuid end
+$$;
+-- Can I use this file path: a chat I can see, in the business the path names?
+create or replace function public.link_file_ok(path text) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select c.workspace_id::text = split_part(path, '/', 1) and public.can_see_channel(c.id)
+                   from channels c where c.id = public.link_file_channel(path)), false)
+$$;
+revoke all on function public.link_file_ok(text) from public, anon;
+grant execute on function public.link_file_ok(text), public.link_file_channel(text) to authenticated;
+
+create or replace function public.messages_files_guard() returns trigger language plpgsql as $$
+declare f jsonb;
+begin
+  if tg_op = 'UPDATE' then
+    if new.files is distinct from old.files then raise exception 'Files can''t be changed after they''re sent.'; end if;
+    return new;
+  end if;
+  if new.files is null then return new; end if;
+  for f in select * from jsonb_array_elements(new.files) loop
+    if jsonb_typeof(f) <> 'object' or coalesce(f ->> 'path', '') not like new.workspace_id::text || '/' || new.channel_id::text || '/%'
+       or public.link_file_channel(f ->> 'path') is null or length(coalesce(f ->> 'name', '')) not between 1 and 120
+       or coalesce((f ->> 'size')::bigint, 0) not between 1 and 26214400 then
+      raise exception 'That file isn''t in this chat.';
+    end if;
+  end loop;
+  return new;
+end $$;
+drop trigger if exists messages_files_guard on public.messages;
+create trigger messages_files_guard before insert or update on public.messages for each row execute function public.messages_files_guard();
+
+-- The bucket and its rules, only where Supabase Storage is there (it always is on Supabase).
+do $$ begin
+  if exists (select 1 from information_schema.tables where table_schema = 'storage' and table_name = 'objects')
+     and exists (select 1 from information_schema.tables where table_schema = 'storage' and table_name = 'buckets') then
+    insert into storage.buckets (id, name, public, file_size_limit) values ('link-files', 'link-files', false, 26214400)
+      on conflict (id) do update set public = false, file_size_limit = 26214400;
+    execute 'drop policy if exists link_files_read on storage.objects';
+    execute 'create policy link_files_read on storage.objects for select to authenticated using (bucket_id = ''link-files'' and public.link_file_ok(name))';
+    execute 'drop policy if exists link_files_add on storage.objects';
+    execute 'create policy link_files_add on storage.objects for insert to authenticated with check (bucket_id = ''link-files'' and public.link_file_ok(name))';
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------- live updates
+do $$ declare t text; begin
+  if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    foreach t in array array['presence', 'message_reactions'] loop
+      if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = t) then
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      end if;
+    end loop;
+  end if;
+end $$;

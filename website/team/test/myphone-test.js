@@ -8,6 +8,7 @@
 // 11. Phone width: no sideways scrolling.
 // Run: build the site, serve website/public on 8090, then `node website/team/test/myphone-test.js <shots>`. Exits 1 on any failure.
 const { chromium, devices } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 const crypto = require('crypto');
 const assert = require('assert');
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -73,7 +74,7 @@ const text = (pg, sel) => pg.textContent(sel).then((t) => t.replace(/\s+/g, ' ')
 (async () => {
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   let failed = false;
-  const page = async (opts, url = 'http://127.0.0.1:8090/link/?myphone', vp = { width: 1180, height: 900 }) => {
+  const page = async (opts, url = BASE + '/link/?myphone', vp = { width: 1180, height: 900 }) => {
     const pg = await b.newPage({ viewport: vp }); pg.on('pageerror', (e) => errs.push(e.message));
     const st = await fakeServer(pg, opts); await signIn(pg, url); return [pg, st];
   };
@@ -155,7 +156,7 @@ const text = (pg, sel) => pg.textContent(sel).then((t) => t.replace(/\s+/g, ' ')
     assert.strictEqual(await text(p9, '#myext'), 'Others call you by dialling 102'); assert.ok(!(await p9.$('#myPhonePage .err')));
 
     // 10. the ways in
-    const [p10] = await page({}, 'http://127.0.0.1:8090/link/'); await p10.waitForSelector('#hmyphone');
+    const [p10] = await page({}, BASE + '/link/'); await p10.waitForSelector('#hmyphone');
     console.log('home tile:', await text(p10, '#hmyphone'));
     await p10.click('#hmyphone'); await p10.waitForSelector('#myPhonePage'); await p10.click('#myback'); await p10.waitForSelector('#hchat');
     await p10.click('#hchat'); await p10.waitForSelector('#comyphone');
@@ -167,7 +168,7 @@ const text = (pg, sel) => pg.textContent(sel).then((t) => t.replace(/\s+/g, ' ')
 
     // 11. phone width
     const mob = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); mob.on('pageerror', (e) => errs.push('phone: ' + e.message));
-    await fakeServer(mob, {}); await signIn(mob, 'http://127.0.0.1:8090/link/?myphone'); await mob.waitForSelector('#myPhonePage');
+    await fakeServer(mob, {}); await signIn(mob, BASE + '/link/?myphone'); await mob.waitForSelector('#myPhonePage');
     await mob.click('#mymenus summary');
     const over = await mob.evaluate(() => document.documentElement.scrollWidth - innerWidth); console.log('phone overflow:', over);
     assert.strictEqual(over, 0);
@@ -175,7 +176,7 @@ const text = (pg, sel) => pg.textContent(sel).then((t) => t.replace(/\s+/g, ' ')
 
     // the demo works too (Jordan: extension 201, an offline desk phone)
     const pd = await b.newPage(); pd.on('pageerror', (e) => errs.push('demo: ' + e.message));
-    await pd.goto('http://127.0.0.1:8090/link/?demo&as=u-jordan&myphone'); await pd.waitForSelector('#myext');
+    await pd.goto(BASE + '/link/?demo&as=u-jordan&myphone'); await pd.waitForSelector('#myext');
     assert.strictEqual(await text(pd, '#myext'), 'Others call you by dialling 201'); console.log('demo:', await text(pd, '.my-phones'));
   } catch (e) { failed = true; console.error('FAILED:', e.message); }
   console.log('errors:', errs); await b.close();

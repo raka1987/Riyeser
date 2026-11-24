@@ -1,12 +1,13 @@
 // Companies in the Team app: Company ID, join requests (approve with role + branch), people & access,
 // company profile, linked PCs (demo); and ask-to-join -> waiting -> approved (pretend server).
 const { chromium, devices } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 (async () => {
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   const pg = await b.newPage({ viewport: { width: 1280, height: 860 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-  await pg.goto('http://127.0.0.1:8090/link/?demo'); await pg.waitForSelector('.cobar');
-  console.log('team header:', (await pg.textContent('.team small')).trim(), '| bar:', (await pg.textContent('.cobar')).replace(/\s+/g, ' ').trim());
+  await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('#lknav');
+  console.log('team header:', (await pg.textContent('.team small')).trim(), '| admin group:', (await pg.textContent('#adming')).replace(/\s+/g, ' ').trim());
   // approve Mere as Sales in Lautoka
   await pg.click('#coreq'); await pg.waitForSelector('form[data-req]');
   console.log('request:', (await pg.textContent('.rq-who')).replace(/\s+/g, ' ').trim(), '| Lautoka pre-ticked:', await pg.isChecked('form[data-req] input[name=br][value="b-lau"]'));
@@ -28,7 +29,7 @@ const { chromium, devices } = require('playwright');
   // company profile and PCs
   await pg.click('#coinfo'); await pg.waitForSelector('#cof');
   console.log('company ID:', await pg.textContent('#cidv'), '| PCs:', await pg.evaluate(() => [...document.querySelectorAll('.devs b')].map((x) => x.textContent)));
-  await pg.fill('#cof input[name=phone]', '330 9999'); await pg.click('[data-unlink="d2"]'); await pg.waitForTimeout(200);
+  await pg.fill('#cof input[name=phone]', '330 9999'); await pg.click('[data-unlink="d2"]'); await pg.click('#askyes'); await pg.waitForTimeout(200);
   await pg.screenshot({ path: out + '/company-profile.png' });
   await pg.click('#cof .btn.p'); await pg.waitForTimeout(300);
   console.log('saved phone:', await pg.evaluate(() => window.RiyeserTeam.state.team.phone), '| PCs after unlink:', (await pg.evaluate(async () => (await window.RiyeserTeam.state, 1))) && 'ok');
@@ -51,16 +52,16 @@ const { chromium, devices } = require('playwright');
     if (u.pathname === '/rest/v1/members') return json([{ user_id: user.id, display_name: 'Mere', role: 'member', job_role: 'sales', extension: 201 }]);
     return json([]);
   });
-  await p2.goto('http://127.0.0.1:8090/link/?join=riy-7k3m-q2'); await p2.waitForSelector('#gf');
+  await p2.goto(BASE + '/link/?join=riy-7k3m-q2'); await p2.waitForSelector('#gf');
   await p2.fill('input[name=email]', user.email); await p2.fill('input[name=password]', 'a-good-password'); await p2.click('button[type=submit]');
   await p2.waitForSelector('#jf'); console.log('join form prefilled with:', await p2.inputValue('#jf input[name=code]'));
   await p2.fill('#jf input[name=you]', 'Mere'); await p2.fill('#jf input[name=note]', 'Lautoka front desk'); await p2.click('#jf button');
   await p2.waitForSelector('.waitdots'); console.log('waiting screen:', await p2.textContent('.gcard h1'), '| sent:', JSON.stringify(asked));
   await p2.screenshot({ path: out + '/company-waiting.png' });
   approved = true; await p2.click('#chk'); await p2.waitForSelector('.hco', { timeout: 8000 });
-  console.log('approved -> Riyeser home:', await p2.textContent('.hco h2'), '| staff see no admin buttons:', !(await p2.$('#hreq'))); await p2.click('#hchat'); await p2.waitForSelector('.cobar');
-  console.log('approved -> in the company:', (await p2.textContent('.team b')).trim(), '| no admin buttons for staff:', !(await p2.$('#coreq')));
-  const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); await ph.goto('http://127.0.0.1:8090/link/?demo'); await ph.waitForSelector('.cobar');
-  await ph.tap('#coreq'); await ph.waitForSelector('form[data-req]'); console.log('phone overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
+  console.log('approved -> Riyeser home:', await p2.textContent('.hco h2'), '| staff see no admin buttons:', !(await p2.$('#hreq'))); await p2.click('#hchat'); await p2.waitForSelector('#lknav');
+  console.log('approved -> in the company:', (await p2.textContent('.team b')).trim(), '| no admin buttons for staff:', !(await p2.$('#coreq')) && !(await p2.$('#adming')));
+  const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); await ph.goto(BASE + '/link/?demo'); await ph.waitForSelector('#lknav', { state: 'attached' });
+  await ph.tap('#burger'); await ph.waitForTimeout(250); await ph.tap('#coreq'); await ph.waitForSelector('form[data-req]'); console.log('phone overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   console.log('errors:', errs); await b.close();
 })();

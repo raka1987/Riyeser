@@ -35,7 +35,10 @@
   function onlineBackend() {
     const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, storageKey: 'riyeser.team.session' } });
     const ok = ({ data, error }) => { if (error) throw error; return data; };
-    let sub = null;
+    let sub = null; let sub2 = null;
+    // Parts of this release's team-chat.sql that a database may not have yet: those calls give null and the app hides them.
+    const missing = (e) => /PGRST20[25]|42P01|42883|Could not find|schema cache|does not exist/i.test(String((e && (e.message || e.code)) || ''));
+    const soft = async (q) => { const r = await q; if (r.error) { if (missing(r.error)) return null; throw r.error; } return r.data; };
     return {
       demo: false,
       async session() {
@@ -52,7 +55,7 @@
         return ok(await sb.auth.signUp({ email, password, options: { data: details ? { riyeser_signup: details } : {}, emailRedirectTo: location.origin + location.pathname + location.search } }));
       },
       async resetPassword(email) { return ok(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })); },
-      async signOut() { if (sub) sb.removeChannel(sub); await sb.auth.signOut(); },
+      async signOut() { if (sub) sb.removeChannel(sub); if (sub2) sb.removeChannel(sub2); await sb.auth.signOut(); },
       async teams(uid) {
         const cols = 'id, name, invite_code, company_code, legal_name, tax_number, address, phone, email, country, require_approval';
         // 'kind' (just me / business) arrived later: still works on a database that hasn't been updated yet
@@ -116,7 +119,51 @@
         const rows = ok(await sb.from('messages').select('*').eq('channel_id', ch).order('created_at', { ascending: false }).limit(200));
         return rows.reverse();
       },
-      async send(ws, ch, body) { return ok(await sb.from('messages').insert({ workspace_id: ws, channel_id: ch, body }).select('*').single()); },
+      async send(ws, ch, body, files) { return ok(await sb.from('messages').insert({ workspace_id: ws, channel_id: ch, body, ...(files && files.length ? { files } : {}) }).select('*').single()); },
+      // ---- the Link workspace: your look (kept with your account), presence, reactions, pins, files, search
+      async savePrefs(p) {
+        const u = (ok(await sb.auth.getUser()) || {}).user || {}; const cur = (u.user_metadata || {}).riyeser_prefs;
+        const r = ok(await sb.auth.updateUser({ data: { riyeser_prefs: { ...(cur && typeof cur === 'object' ? cur : {}), ...p } } }));
+        return (r && r.user) || null;
+      },
+      async presence(ws) { return soft(sb.rpc('link_presence', { ws })); },
+      async setPresence(ws, p) { ok(await sb.rpc('link_presence_set', { ws, st: p.status, manual_choice: p.manual || null, custom: p.text || '', on_a_call: !!p.on_call })); },
+      async reactions(ch) { return soft(sb.from('message_reactions').select('message_id, user_id, emoji').eq('channel_id', ch)); },
+      async react(_ws, msg, uid, emoji, on) {
+        if (on) ok(await sb.from('message_reactions').insert({ message_id: msg, emoji }));
+        else ok(await sb.from('message_reactions').delete().eq('message_id', msg).eq('user_id', uid).eq('emoji', emoji));
+      },
+      async pins(_ws, uid) { const r = await soft(sb.from('channel_pins').select('channel_id').eq('user_id', uid)); return r && r.map((x) => x.channel_id); },
+      async pin(_ws, ch, uid, on) {
+        if (on) ok(await sb.from('channel_pins').upsert({ channel_id: ch, user_id: uid }, { onConflict: 'user_id,channel_id', ignoreDuplicates: true }));
+        else ok(await sb.from('channel_pins').delete().eq('channel_id', ch).eq('user_id', uid));
+      },
+      async lastMessages(ws) {
+        const rows = ok(await sb.from('messages').select('*').eq('workspace_id', ws).order('created_at', { ascending: false }).limit(300));
+        const out = {}; for (const m of rows) if (!out[m.channel_id]) out[m.channel_id] = m; return out;
+      },
+      async search(ws, q) {
+        const like = '%' + q.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+        return ok(await sb.from('messages').select('*').eq('workspace_id', ws).eq('deleted', false).ilike('body', like).order('created_at', { ascending: false }).limit(20));
+      },
+      // Files go to the private "link-files" store, in a folder for this business and chat; only people in the chat can get them.
+      async upload(ws, ch, file, name) {
+        const rnd = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)).replace(/[^0-9a-f]/gi, '').slice(0, 20);
+        const path = `${ws}/${ch}/${rnd}/${name}`;
+        ok(await sb.storage.from('link-files').upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false }));
+        return { path, name, size: file.size, type: file.type || '' };
+      },
+      async fileUrl(path, name) { return ok(await sb.storage.from('link-files').createSignedUrl(path, 120, { download: name })).signedUrl; },
+      liveExtra(ws, fns) {
+        if (sub2) sb.removeChannel(sub2);
+        sub2 = sb.channel('link-' + ws);
+        if (fns.presence) sub2.on('postgres_changes', { event: '*', schema: 'public', table: 'presence', filter: 'workspace_id=eq.' + ws }, (p) => fns.presence(p.new));
+        if (fns.reaction) {
+          sub2.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reactions', filter: 'workspace_id=eq.' + ws }, (p) => fns.reaction(p.new));
+          sub2.on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'message_reactions' }, (p) => fns.reaction(p.old));   // deletes carry only the key
+        }
+        sub2.subscribe();
+      },
       async edit(id, body) { ok(await sb.from('messages').update({ body }).eq('id', id)); },
       async remove(id) { ok(await sb.from('messages').update({ deleted: true, body: '(deleted)' }).eq('id', id)); },
       async markRead(ch, uid) { await sb.from('reads').upsert({ channel_id: ch, user_id: uid, last_read_at: new Date().toISOString() }); },
@@ -182,29 +229,40 @@
     const AS = /^u-(me|sam|jordan|alex)$/.test(params.get('as') || '') ? params.get('as') : 'u-me';
     const me = { id: AS, email: AS.slice(2) + '@sample.test' };
     const ws = 'w-demo';
-    const ppl = [['u-me', 'You', 'owner', 101, 'owner'], ['u-sam', 'Sam Taylor', 'admin', 102, 'manager'], ['u-jordan', 'Jordan Lee', 'member', 201, 'staff'], ['u-alex', 'Alex Nguyen', 'member', 202, 'sales']];
+    const ppl = [['u-me', 'You', 'owner', 101, 'owner'], ['u-sam', 'Sam Taylor', 'admin', 102, 'manager'], ['u-jordan', 'Jordan Lee', 'member', 201, 'staff'], ['u-alex', 'Alex Nguyen', 'member', 202, 'sales'],
+      ['u-ana', 'Ana Ruiz', 'member', 103, 'bookkeeper']];
     const mfa = { on: true };
     const company = { name: 'Sample Plumbing', company_code: 'RIY-7K3M-Q2', legal_name: 'Sample Plumbing Pty Ltd', tax_number: '12 345 678 901', address: '4 Harbour Rd, Suva', phone: '330 1234', email: 'office@sample.test', country: 'Fiji', require_approval: true };
     const reqs = [{ id: 'r1', display_name: 'Mere Vula', email: 'mere@sample.test', branch_id: 'b-lau', note: 'New front desk at Lautoka', created_at: new Date(Date.now() - 25 * 60000).toISOString(), status: 'pending' }];
     const devs = [{ id: 'd1', user_id: 'u-me', device_name: 'Head office PC', platform: 'Windows', app_version: '1.7.0', last_seen: new Date(Date.now() - 2 * 60000).toISOString() },
       { id: 'd2', user_id: 'u-jordan', device_name: 'Lautoka front desk', platform: 'Windows', app_version: '1.7.0', last_seen: new Date(Date.now() - 3 * 3600000).toISOString() }];
-    const brs = [{ id: 'b-head', name: 'Head office', code: 'HEA-3071', extension: 100, people: ['u-me', 'u-sam'] },
+    const brs = [{ id: 'b-head', name: 'Head office', code: 'HEA-3071', extension: 100, people: ['u-me', 'u-sam', 'u-ana'] },
       { id: 'b-lau', name: 'Lautoka branch', code: 'LAU-4821', extension: 200, people: ['u-jordan', 'u-alex'] }];
     // Calls in the demo travel between browser tabs (open the demo again with ?demo&as=u-sam to be Sam).
     const bus = 'BroadcastChannel' in window ? new BroadcastChannel('riyeser-team-demo-calls') : null;
-    const online = new Set([AS]); let onSig = null;
+    const online = new Set([AS]); let onSig = null; let onPres = null;
+    const now = Date.now(); const ago = (m) => new Date(now - m * 60000).toISOString();
+    // Who's around in the demo. Other demo tabs (?demo&as=u-sam) tell each other their real status.
+    const pres = { 'u-sam': { user_id: 'u-sam', status: 'available', custom_text: '', on_call: false, fresh: true },
+      'u-jordan': { user_id: 'u-jordan', status: 'busy', custom_text: '', on_call: true, fresh: true },
+      'u-alex': { user_id: 'u-alex', status: 'away', custom_text: '', on_call: false, away_since: ago(10), fresh: true },
+      'u-ana': { user_id: 'u-ana', status: 'offline', custom_text: '', on_call: false, fresh: false },
+      'u-me': { user_id: 'u-me', status: 'available', custom_text: 'In the office today', on_call: false, fresh: true } };
+    let myPres = null;
     if (bus) {
       bus.onmessage = (e) => { const m = e.data || {};
-        if (m.hello) { online.add(m.hello); if (!m.reply) bus.postMessage({ hello: AS, reply: true }); return; }
+        if (m.hello) { online.add(m.hello); if (!m.reply) bus.postMessage({ hello: AS, reply: true }); if (myPres) bus.postMessage({ presence: myPres }); return; }
+        if (m.presence) { pres[m.presence.user_id] = { ...m.presence, fresh: m.presence.status !== 'offline' }; if (onPres) onPres(pres[m.presence.user_id]); return; }
         if (m.to === AS && onSig) onSig(m); };
       bus.postMessage({ hello: AS });
+      addEventListener('pagehide', () => { if (myPres) bus.postMessage({ presence: { ...myPres, status: 'offline', on_call: false } }); });
     }
-    const now = Date.now(); const ago = (m) => new Date(now - m * 60000).toISOString();
     const chans = [{ id: 'c-general', kind: 'channel', name: 'general', topic: 'Everyone in the team', people: [] },
       { id: 'c-jobs', kind: 'channel', name: 'jobs', topic: 'Jobs, bookings and what\'s on today', people: [] },
       { id: 'c-office', kind: 'channel', name: 'office', topic: 'Invoices, bills and paperwork', people: [] },
       { id: 'c-exec', kind: 'private', name: 'executives', topic: 'Owners and managers only', people: ['u-me', 'u-sam'], created_by: 'u-me' },
-      { id: 'd-sam', kind: 'dm', name: null, topic: null, people: ['u-me', 'u-sam'] }];
+      { id: 'd-sam', kind: 'dm', name: null, topic: null, people: ['u-me', 'u-sam'] },
+      { id: 'd-alex', kind: 'dm', name: null, topic: null, people: ['u-me', 'u-alex'] }];
     let n = 0; const msg = (ch, u, body, m) => ({ id: 'm' + (++n), channel_id: ch, workspace_id: ws, user_id: u, body, created_at: ago(m), edited_at: null, deleted: false });
     const msgs = [
       msg('c-general', 'u-sam', 'Morning all ☀️ Toolbox talk at 7:15 in the yard.', 1500),
@@ -215,8 +273,20 @@
       msg('c-office', 'u-sam', 'INV-1047 from Sample Customer Pty Ltd is 4 days overdue ($880). I\'ll give them a call.', 60),
       msg('c-office', 'u-sam', 'They paid! INV-1047 is cleared ✅', 8),
       msg('c-exec', 'u-sam', 'Q3 numbers are in. Margins up 4% on last quarter. Can we talk pricing for next year on Friday?', 240),
-      msg('d-sam', 'u-sam', 'Can you approve the timesheets before 3? Pay run goes tonight.', 30)];
-    const read = { 'c-general': ago(1400), 'c-jobs': ago(92), 'c-office': ago(61), 'c-exec': ago(200), 'd-sam': ago(40) };
+      msg('d-sam', 'u-sam', 'Can you approve the timesheets before 3? Pay run goes tonight.', 30),
+      msg('d-alex', 'u-alex', 'Back from the yard in 20 min, then I\'ll call the supplier.', 12),
+      msg('c-general', 'u-me', 'Morning team 👋 Quick update: the Hill Rd fit-out is on track. Please post your site notes by 4pm.', 50),
+      msg('c-general', 'u-jordan', 'Got it. I\'ll send the final test results this afternoon.', 44),
+      { ...msg('c-jobs', 'u-jordan', 'Job sheet for Booking 12, signed by the customer.', 16), files: [{ path: 'demo/c-jobs/sample/Job_12_sheet.pdf', name: 'Job_12_sheet.pdf', size: 188416, type: 'application/pdf' }] },
+      msg('c-general', 'u-sam', 'Site visit tomorrow at 8am. Gear is ready and the access team knows we\'re coming ✅', 6),
+      msg('c-general', 'u-sam', 'Bring your hard hats and hi-vis, please.', 5)];
+    const read = { 'c-general': ago(10), 'c-jobs': ago(92), 'c-office': ago(61), 'c-exec': ago(200), 'd-sam': ago(40), 'd-alex': ago(60) };
+    // reactions, pinned chats and files in the demo
+    const rx = [['m1', 'u-alex', '👍'], ['m1', 'u-jordan', '👍'], ['m1', 'u-sam', '🎉'], ['m4', 'u-me', '👍'], ['m5', 'u-sam', '✅'], ['m5', 'u-alex', '✅'], ['m5', 'u-me', '🎉'],
+      ['m7', 'u-me', '🎉'], ['m7', 'u-jordan', '🎉'], ['m7', 'u-alex', '❤️'], ['m11', 'u-sam', '👍'], ['m11', 'u-alex', '👍'], ['m11', 'u-jordan', '👍'], ['m11', 'u-ana', '🎉'],
+      ['m14', 'u-jordan', '✅']].map(([message_id, user_id, emoji]) => ({ message_id, user_id, emoji }));
+    let pinned = ['c-jobs', 'd-sam']; let onRx = null;
+    const files = { 'demo/c-jobs/sample/Job_12_sheet.pdf': 'data:text/plain;charset=utf-8,' + encodeURIComponent('A sample job sheet from the Riyeser Link demo.') };
     let listener = null;
     // a message Riyeser started (from HQ's "Message customer"): it waits for the customer's reply
     const tix = [{ id: 't0', ref: 'T-10230', topic: 'other', subject: 'Welcome to Riyeser', status: 'waiting_customer', who_acts: 'customer', mine: true, from_riyeser: true, business: 'Sample Plumbing',
@@ -283,6 +353,25 @@
       async setExtension(_w, person, ext) {
         if (ppl.some((q) => q[3] === ext && q[0] !== person) || brs.some((b) => b.extension === ext)) throw new Error(`Extension ${ext} is already used`);
         ppl.find((q) => q[0] === person)[3] = ext; },
+      // ---- the Link workspace in the demo
+      async savePrefs(p) { me.user_metadata = { ...(me.user_metadata || {}), riyeser_prefs: { ...((me.user_metadata || {}).riyeser_prefs || {}), ...p } }; return me; },
+      async presence() { return Object.values(pres).filter((x) => ppl.some((q) => q[0] === x.user_id)).map((x) => ({ ...x, manual: x.user_id === AS ? x.manual : null })); },
+      async setPresence(_w, p) { myPres = { user_id: AS, status: p.status, manual: p.manual || null, custom_text: p.text || '', on_call: !!p.on_call, away_since: p.away_since || null };
+        pres[AS] = { ...myPres, fresh: true }; if (bus) bus.postMessage({ presence: myPres }); },
+      async reactions(ch) { const ids = new Set(msgs.filter((m) => m.channel_id === ch).map((m) => m.id)); return rx.filter((r) => ids.has(r.message_id)).map((r) => ({ ...r })); },
+      async react(_w, msgId, uid, emoji, on) {
+        const i = rx.findIndex((r) => r.message_id === msgId && r.user_id === uid && r.emoji === emoji);
+        if (on && i < 0) rx.push({ message_id: msgId, user_id: uid, emoji }); if (!on && i >= 0) rx.splice(i, 1); },
+      async pins() { return pinned.slice(); },
+      async pin(_w, ch, _u, on) { pinned = pinned.filter((x) => x !== ch); if (on) pinned.push(ch); },
+      async lastMessages() { const out = {}; for (const m of [...msgs].sort((a, b) => b.created_at.localeCompare(a.created_at))) if (!out[m.channel_id]) out[m.channel_id] = { ...m }; return out; },
+      async search(_w, q) { const t = q.toLowerCase(); return msgs.filter((m) => !m.deleted && m.body.toLowerCase().includes(t)).slice(-20).reverse().map((m) => ({ ...m })); },
+      async upload(_w, ch, file, name) { const path = `demo/${ch}/${Date.now().toString(36)}/${name}`; files[path] = URL.createObjectURL(file); return { path, name, size: file.size, type: file.type || '' }; },
+      async fileUrl(path) { return files[path] || 'data:text/plain,' + encodeURIComponent('This demo file is gone. Files only last while the demo is open.'); },
+      liveExtra(_w, fns) { onPres = fns.presence || null; onRx = fns.reaction || null; },
+      callHistory() { const t = (m) => new Date(Date.now() - m * 60000).toISOString();
+        return [{ id: 'h1', dir: 'in', peer: 'u-alex', at: t(35), dur: 0, result: 'missed' }, { id: 'h2', dir: 'out', peer: 'u-sam', at: t(80), dur: 252, result: 'answered' },
+          { id: 'h3', dir: 'in', peer: 'u-jordan', at: t(200), dur: 95, result: 'answered' }, { id: 'h4', dir: 'out', branch: 'b-lau', label: 'Lautoka branch', at: t(1500), dur: 0, result: 'no answer' }]; },
       async signal(_w, call, to, kind, payload) {
         const m = { call_id: call, from_user: AS, to_user: to, to, kind, payload: payload || null, created_at: new Date().toISOString() };
         if (bus && online.has(to)) bus.postMessage(m);
@@ -301,11 +390,12 @@
         return c.id;
       },
       async messages(ch) { return msgs.filter((m) => m.channel_id === ch).sort((a, b) => a.created_at.localeCompare(b.created_at)); },
-      async send(_w, ch, body) {
-        const m = msg(ch, 'u-me', body, 0); m.created_at = new Date().toISOString(); msgs.push(m);
+      async send(_w, ch, body, fl) {
+        const m = msg(ch, 'u-me', body, 0); m.created_at = new Date().toISOString(); if (fl && fl.length) m.files = fl; msgs.push(m);
         const dm = chans.find((c) => c.id === ch && c.kind === 'dm');
         if (dm) reply(ch, dm.people.find((p) => p !== 'u-me'), 'Thanks, all sorted 👍', 1800);
         else if (/@jordan/i.test(body)) reply(ch, 'u-jordan', 'No worries, I\'ll take it.', 1800);
+        else if (ch === 'c-general') setTimeout(() => { rx.push({ message_id: m.id, user_id: 'u-sam', emoji: '👍' }); if (onRx) onRx({ message_id: m.id }); }, 1500);
         return m;
       },
       async edit(id, body) { const m = msgs.find((x) => x.id === id); if (m) { m.body = body; m.edited_at = new Date().toISOString(); } },
@@ -375,7 +465,7 @@
 
   const api = DEMO ? demoBackend() : onlineBackend();
   const S = { user: null, teams: [], team: null, people: [], chans: [], unread: {}, ch: null, msgs: [], inChat: false, editing: null,
-    features: { calls: false }, branches: [], requests: [] };
+    features: { calls: false }, branches: [], requests: [], presence: {}, pinned: [], last: {}, rx: [], callLog: [], dial: {} };
   const JOBS = [['manager', 'Manager'], ['bookkeeper', 'Bookkeeper'], ['sales', 'Sales'], ['payroll', 'Payroll'], ['staff', 'Staff'], ['readonly', 'Read-only']];
   const isAdmin = () => !!S.team && (S.team.role === 'owner' || S.team.role === 'admin');
   // Owners and admins need two-step sign-in before their admin powers work (the database checks this too).
@@ -561,14 +651,14 @@
         <div class="mfoot"><button class="btn" id="off" style="margin-right:auto;color:#b91c1c">Turn it off</button><button class="btn p" id="cl">Done</button></div>`, (d, close) => {
         d.querySelector('#cl').onclick = close;
         d.querySelector('#off').onclick = async () => {
-          if (!confirm(isAdmin() ? 'Turn off two-step sign-in? Your admin powers stop until you turn it on again.' : 'Turn off two-step sign-in?')) return;
-          try { const f = (await api.factors())[0]; await api.unenrol(f.id); S.aal = 'aal1'; close(); renderSide(); } catch (err) { alert(plainError(err)); }
+          if (!(await ask(isAdmin() ? 'Turn off two-step sign-in? Your admin powers stop until you turn it on again.' : 'Turn off two-step sign-in?'))) return;
+          try { const f = (await api.factors())[0]; await api.unenrol(f.id); S.aal = 'aal1'; close(); renderSide(); } catch (err) { tell(plainError(err)); }
         };
       });
       return;
     }
     let en;
-    try { en = await api.enrol(); } catch (err) { alert(plainError(err)); return; }
+    try { en = await api.enrol(); } catch (err) { tell(plainError(err)); return; }
     modal(`<h3>🔐 Turn on two-step sign-in</h3>
       <ol class="steps"><li>Install an authenticator app on your phone, such as <b>Microsoft Authenticator</b> or <b>Google Authenticator</b> (free).</li>
       <li>In the app, add an account and <b>scan this code</b>:<div class="qr"><img src="${esc(en.qr)}" alt="QR code to scan"></div>
@@ -581,7 +671,7 @@
         e.preventDefault();
         try { await api.verifyCode(en.id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; close(); await refreshCompany();
           modal('<h3>✅ Two-step sign-in is on</h3><p>Next time you sign in, Riyeser asks for a code from your authenticator app.</p><div class="mfoot"><button class="btn p" id="cl">Done</button></div>', (dd, c2) => { dd.querySelector('#cl').onclick = c2; }); }
-        catch (err) { alert(plainError(err)); }
+        catch (err) { tell(plainError(err)); }
       };
     });
   }
@@ -609,7 +699,7 @@
   async function showHistory() {
     if (needs2step()) return security();
     let rows = [];
-    try { rows = await api.history(S.team.id); } catch (err) { alert(plainError(err)); return; }
+    try { rows = await api.history(S.team.id); } catch (err) { tell(plainError(err)); return; }
     modal(`<h3>🕘 Change history</h3><p>Who changed people, access, branches, PCs and company details. It can't be edited or deleted.</p>
       <div class="hist">${rows.map(histLine).join('') || '<div class="empty"><b>Nothing yet</b></div>'}</div>
       <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
@@ -638,12 +728,12 @@
     modal(body(), function wire(d, close) {
       d.querySelector('#cl').onclick = close;
       const again = async () => { await refreshCompany(); d.querySelector('.mcard').innerHTML = body(); wire(d, close); };
-      d.querySelectorAll('[data-dec]').forEach((b) => b.onclick = async () => { if (!confirm('Decline this request?')) return;
-        try { await api.decideJoin(b.dataset.dec, false, null, false, []); } catch (err) { alert(plainError(err)); } again(); });
+      d.querySelectorAll('[data-dec]').forEach((b) => b.onclick = async () => { if (!(await ask('Decline this request?'))) return;
+        try { await api.decideJoin(b.dataset.dec, false, null, false, []); } catch (err) { tell(plainError(err)); } again(); });
       d.querySelectorAll('form[data-req]').forEach((f) => f.onsubmit = async (e) => { e.preventDefault();
         const job = f.querySelector('[name=job]').value; const admin = f.querySelector('[name=admin]').checked;
         const brs = [...f.querySelectorAll('[name=br]:checked')].map((x) => x.value);
-        try { await api.decideJoin(f.dataset.req, true, job, admin, brs); } catch (err) { alert(plainError(err)); } again(); });
+        try { await api.decideJoin(f.dataset.req, true, job, admin, brs); } catch (err) { tell(plainError(err)); } again(); });
     });
   }
 
@@ -662,13 +752,21 @@
       d.querySelectorAll('form[data-person]').forEach((f) => f.onsubmit = async (e) => { e.preventDefault();
         const j = f.querySelector('[name=job]'); const a = f.querySelector('[name=admin]');
         try { await api.setAccess(S.team.id, f.dataset.person, j ? j.value : 'staff', a ? a.checked : false, [...f.querySelectorAll('[name=br]:checked')].map((x) => x.value)); }
-        catch (err) { alert(plainError(err)); } again(); });
+        catch (err) { tell(plainError(err)); } again(); });
       d.querySelectorAll('[data-remove]').forEach((b) => b.onclick = async () => {
-        if (!confirm(`Remove ${nameOf(b.dataset.remove)} from ${S.team.name}? They lose access on all their devices. Their old messages stay.`)) return;
-        try { await api.removePerson(S.team.id, b.dataset.remove); } catch (err) { alert(plainError(err)); } again(); });
+        if (!(await ask(`Remove ${nameOf(b.dataset.remove)} from ${S.team.name}? They lose access on all their devices. Their old messages stay.`))) return;
+        try { await api.removePerson(S.team.id, b.dataset.remove); } catch (err) { tell(plainError(err)); } again(); });
     });
   }
 
+  // The plan: each program's state, and people included (Company, and Billing & Subscription).
+  function planHtml(lic) {
+    return `<div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
+        const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+        const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
+        return `<div><span>${n}</span><span class="pl ${v.status === 'active' ? 'ok' : v.active ? (v.days_left <= 14 ? 'warn' : '') : 'bad'}">${txt}</span></div>`; }).join('')}
+        ${lic.seats ? `<div><span>People</span><span class="pl">${lic.seats.used} of ${lic.seats.included + lic.seats.extra} included${lic.early_bird ? ' · 🐣 early bird' : ''}</span></div>` : ''}</div>`;
+  }
   async function companyInfo(justMade) {
     const admin = isAdmin(); const t = S.team;
     const devs = admin ? await api.devices(t.id).catch(() => []) : [];
@@ -680,22 +778,18 @@
       <p class="muted small" style="margin:4px 0 14px">Everyone in the company, on every Riyeser program and PC, links with this ID. ${admin ? 'New people need your approval.' : ''}</p>
       <form id="cof">${field('name', 'Business name', 80)}${field('tax_number', 'ABN / TIN / Tax ID', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
-      ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4><div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
-        const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
-        const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
-        return `<div><span>${n}</span><span class="pl ${v.status === 'active' ? 'ok' : v.active ? (v.days_left <= 14 ? 'warn' : '') : 'bad'}">${txt}</span></div>`; }).join('')}
-        <div><span>People</span><span class="pl">${lic.seats.used} of ${lic.seats.included + lic.seats.extra} included${lic.early_bird ? ' · 🐣 early bird' : ''}</span></div></div>
+      ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4>${planHtml(lic)}
         <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Riyeser Link chat. To change your plan, contact Riyeser.</p>` : ''}
       ${admin && devs.length ? `<h4 style="margin:16px 0 6px">Linked PCs</h4><div class="devs">${devs.map((dv) => `<div><span><b>${esc(dv.device_name || 'A PC')}</b><small>${esc(nameOf(dv.user_id))} · ${esc(dv.platform || '')} · seen ${ago(dv.last_seen)}</small></span><button type="button" class="btn sm" data-unlink="${dv.id}">Unlink</button></div>`).join('')}</div>` : ''}
       <div class="mfoot"><button type="button" class="btn" id="cl">Close</button>${admin ? '<button class="btn p">Save</button>' : ''}</div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
       d.querySelector('#cpid').onclick = async () => { try { await navigator.clipboard.writeText(t.company_code); d.querySelector('#cpid').textContent = 'Copied'; } catch { /* select it instead */ } };
-      d.querySelectorAll('[data-unlink]').forEach((b) => b.onclick = async () => { if (!confirm('Unlink this PC? It stops getting the company\'s information until someone links it again. Nothing is deleted.')) return;
-        try { await api.unlinkDevice(b.dataset.unlink); b.closest('div').remove(); } catch (err) { alert(plainError(err)); } });
+      d.querySelectorAll('[data-unlink]').forEach((b) => b.onclick = async () => { if (!(await ask('Unlink this PC? It stops getting the company\'s information until someone links it again. Nothing is deleted.'))) return;
+        try { await api.unlinkDevice(b.dataset.unlink); b.closest('div').remove(); } catch (err) { tell(plainError(err)); } });
       d.querySelector('#cof').onsubmit = async (e) => { e.preventDefault(); if (!admin) return close();
         const f = new FormData(e.target); const pr = Object.fromEntries(['name', 'tax_number', 'address', 'phone', 'email', 'country'].map((k) => [k, String(f.get(k) || '')]));
         pr.require_approval = !!f.get('require_approval');
-        try { await api.updateCompany(t.id, pr); await refreshCompany(); close(); } catch (err) { alert(plainError(err)); } };
+        try { await api.updateCompany(t.id, pr); await refreshCompany(); close(); } catch (err) { tell(plainError(err)); } };
     });
   }
 
@@ -709,6 +803,7 @@
     Calls.listen();
     const first = S.chans.find((c) => c.name === 'general') || S.chans[0];
     api.live(S.team.id, onLive);
+    S.rxOff = false; S.ch = null; await loadWorkspace();
     await openChannel(first && first.id, false);
     if (params.has('phones') && !S.phonesShown && isAdmin()) { S.phonesShown = true; phonesPage(S.home ? 'home' : 'chat'); }
     else if ((params.has('myphone') || params.has('phones')) && !S.myShown) { S.myShown = true; S.phonesShown = true; myPhonePage(S.home ? 'home' : 'chat'); }
@@ -717,17 +812,19 @@
   async function openChannel(id, toChat = true) {
     S.ch = S.chans.find((c) => c.id === id) || null; S.editing = null;
     S.msgs = S.ch ? await api.messages(S.ch.id) : [];
-    if (toChat) { S.inChat = true; S.home = false; }
+    await loadReactions();
+    if (toChat) { S.inChat = true; S.home = false; S.nav = 'chat'; S.listTab = 'chats'; S.pane = 'main'; S.navOpen = false; }
     if (S.home) renderHome(); else render();
     if (S.ch) { await api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); }
   }
 
   function onLive(m) {
     if (!m || !S.team || m.workspace_id !== S.team.id) return;
+    const lm = S.last && S.last[m.channel_id]; if (S.last && (!lm || lm.id === m.id || lm.created_at <= m.created_at)) S.last[m.channel_id] = m;
     if (S.ch && m.channel_id === S.ch.id) {
       const i = S.msgs.findIndex((x) => x.id === m.id);
       if (i >= 0) S.msgs[i] = m; else S.msgs.push(m);
-      renderMsgs(true);
+      renderMsgs(true); renderList();
       if (!document.hidden) api.markRead(S.ch.id, S.user.id);
     } else if (m.user_id !== S.user.id && !m.deleted) {
       S.unread[m.channel_id] = (S.unread[m.channel_id] || 0) + 1;
@@ -755,51 +852,6 @@
   const dayName = (d) => { const t = new Date(); const y = new Date(Date.now() - 864e5); const s = (x) => x.toDateString();
     return s(d) === s(t) ? 'Today' : s(d) === s(y) ? 'Yesterday' : d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }); };
   const timeOf = (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-
-  function msgsHtml() {
-    if (!S.ch) return `<div class="empty"><b>No channels yet</b>Add one with + next to Channels.</div>`;
-    if (!S.msgs.length) return `<div class="empty"><b>${S.ch.kind === 'dm' ? 'Say hello 👋' : `Welcome to #${esc(S.ch.name)}`}</b>${esc(S.ch.topic || 'Nothing here yet. Write the first message below.')}</div>`;
-    let out = ''; let lastDay = ''; let prev = null;
-    for (const m of S.msgs) {
-      const d = new Date(m.created_at); const day = d.toDateString();
-      if (day !== lastDay) { out += `<div class="day">${esc(dayName(d))}</div>`; lastDay = day; prev = null; }
-      const cont = prev && prev.user_id === m.user_id && d - new Date(prev.created_at) < 5 * 60000;
-      const mine = m.user_id === S.user.id && !m.deleted;
-      const body = S.editing === m.id
-        ? `<form class="cbox" data-edit="${m.id}"><textarea rows="2">${esc(m.body)}</textarea><button>Save</button></form>`
-        : `<div class="mb${m.deleted ? ' gone' : ''}">${m.deleted ? 'Message deleted' : fmt(m.body)}${m.edited_at && !m.deleted ? ' <span class="edited">(edited)</span>' : ''}</div>`;
-      out += `<div class="msg${cont ? ' cont' : ''}" data-id="${m.id}">${av(m.user_id, nameOf(m.user_id))}<div>
-        ${cont ? '' : `<div class="mt"><b>${esc(nameOf(m.user_id))}</b><time datetime="${m.created_at}">${esc(timeOf(d))}</time>${mine ? `<span class="macts"><button data-act="edit">Edit</button><button data-act="del">Delete</button></span>` : ''}</div>`}
-        ${cont && mine ? `<div class="mt"><span class="macts"><button data-act="edit">Edit</button><button data-act="del">Delete</button></span></div>` : ''}
-        ${body}</div></div>`;
-      prev = m;
-    }
-    return out;
-  }
-
-  function sideHtml() {
-    const chs = S.chans.filter((c) => c.kind !== 'dm');
-    const others = S.people.filter((p) => p.user_id !== S.user.id);
-    const dmFor = (uid) => S.chans.find((c) => c.kind === 'dm' && c.people.includes(uid));
-    const me = S.people.find((p) => p.user_id === S.user.id) || {};
-    const unreadBadge = (id) => (S.unread[id] ? `<span class="badge">${S.unread[id]}</span>` : '');
-    return `${/Electron/.test(navigator.userAgent) || DEMO ? '' : '<button class="tohome" id="tohome">← Riyeser home</button>'}<div class="team"><img src="icon.svg" alt=""><div>${S.teams.length > 1
-      ? `<select id="tsw" aria-label="Switch team">${S.teams.map((t) => `<option value="${t.id}"${t.id === S.team.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
-      : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}${S.team.company_code ? ` · ${esc(S.team.company_code)}` : ''}</small></div></div>
-    <div class="cobar"><button id="coinfo">🏢 Company</button>${isAdmin() ? `<button id="coppl">👥 People</button><button id="coreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button id="cohist">🕘 History</button><button id="cophones">☎ Desk phones</button>` : ''}<button id="comyphone">☎ My phone</button><button id="coset">⚙ Settings</button><button id="cosec">🔐 Security</button></div>
-    ${needs2step() ? '<button class="mfa-nag" id="mfanag">🔐 Owners and admins need <b>two-step sign-in</b> to approve people and change access. <u>Turn it on (2 minutes)</u></button>' : ''}
-    <div class="sidescroll">
-      <div class="sec">Channels <button id="addch" aria-label="Add a channel" title="Add a channel">+</button></div>
-      ${chs.map((c) => `<button class="item${S.ch && S.ch.id === c.id ? ' on' : ''}${S.unread[c.id] ? ' unread' : ''}" data-ch="${c.id}"><span class="hash">${c.kind === 'private' ? '🔒' : '#'}</span><span class="nm">${esc(c.name)}</span>${unreadBadge(c.id)}</button>`).join('')}
-      <div class="sec">Direct messages</div>
-      ${others.map((p) => { const dm = dmFor(p.user_id); return `<button class="item${dm && S.ch && S.ch.id === dm.id ? ' on' : ''}${dm && S.unread[dm.id] ? ' unread' : ''}" data-dm="${p.user_id}">${av(p.user_id, p.display_name)}<span class="nm">${esc(p.display_name)}</span>${p.extension ? `<span class="ext">${p.extension}</span>` : ''}${dm ? unreadBadge(dm.id) : ''}</button>`; }).join('')
-        || '<p style="padding:4px 10px;color:var(--side-muted);font-size:13px">Invite your team to start chatting.</p>'}
-      ${callsSideHtml()}
-      <button class="invite" id="inv">+ Invite people</button>
-    </div>
-    <div class="me">${av(S.user.id, me.display_name || S.user.email)}<div class="nm">${esc(me.display_name || 'You')}<small>${esc(S.user.email || '')}</small></div><button id="out">Sign out</button></div>`;
-  }
-
 
   // ------------------------------------------------------------------ Riyeser home (the account's front page on the website)
   const REL = 'https://github.com/raka1987/Riyeser/releases/latest/download/';
@@ -903,7 +955,7 @@
       d.querySelector('#cl').onclick = close;
       d.querySelector('#mdf').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const name = String(f.get('name')).trim(); const phone = String(f.get('phone') || '').trim();
         try { const u = await api.updateMyDetails(S.team.id, S.user.id, name, phone); if (u && u.user_metadata) S.user.user_metadata = u.user_metadata;
-          const p = S.people.find((x) => x.user_id === S.user.id); if (p && name) p.display_name = name; close(); renderHome(); }
+          const p = S.people.find((x) => x.user_id === S.user.id); if (p && name) p.display_name = name; close(); if (S.home) renderHome(); else render(); }
         catch (err) { d.querySelector('#mderr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; } };
     });
   }
@@ -1070,65 +1122,759 @@
 
   // The browser tab shows Riyeser's logo on the account screens, and Riyeser Link's icon once inside chat.
   function tabIcon(team) {
+    Theme.scope(team ? 'link' : 'acct');
     const l = document.getElementById('favicon'); if (!l) return;
     l.type = team ? 'image/svg+xml' : 'image/png'; l.href = team ? 'icon.svg' : '/assets/logo-r.png';
   }
-  function render() {
-    S.view = null; tabIcon(true);
-    $app.className = '';
-    $app.innerHTML = `${demoBar()}<div class="shell${S.inChat ? ' inchat' : ''}"><aside class="side" id="side"></aside>
-      <section class="main"><header class="mhead" id="mhead"></header><div class="msgs" id="msgs" aria-live="polite"></div>
-      <form class="composer" id="comp"><div class="cbox"><textarea id="txt" rows="1" placeholder="" aria-label="Message"></textarea><button id="send" disabled>Send</button></div>
-      <div class="hint">Enter to send · Shift+Enter for a new line · Type INV-1047 or Booking 12 to point at one</div></form></section></div>`;
-    renderSide(); renderHead(); renderMsgs(true); wireComposer();
-  }
-  function renderSide() {
-    const el = document.getElementById('side'); if (!el) return;
-    el.innerHTML = sideHtml(); chatTitle();
-    el.querySelectorAll('[data-ch]').forEach((b) => b.onclick = () => openChannel(b.dataset.ch));
-    el.querySelectorAll('[data-dm]').forEach((b) => b.onclick = async () => {
-      const id = await api.openDm(S.team.id, b.dataset.dm);
-      if (!S.chans.find((c) => c.id === id)) S.chans = await api.channels(S.team.id);
-      openChannel(id);
+  // ================================================================== the Riyeser Link workspace (phase 1)
+  // Header (search, status, notifications, help, you) · left nav (Workspace, and Admin / Settings for owners and admins)
+  // · the list (Chats / Calls / Voicemail) · the conversation or a view · the right panel (People / Info, Quick dial).
+  // On a phone, one panel at a time with back buttons.
+  const ic = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
+  const IC = {
+    home: '<path d="M3 11 12 4l9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/>', chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+    phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/>',
+    video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="m16 10 5-3v10l-5-3z"/>', users: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.5 2.7-6 6-6s6 2.5 6 6"/><path d="M16 4.5a3 3 0 0 1 0 6M18 14c2 .8 3 2.8 3 6"/>',
+    hash: '<path d="M9 3 7 21M17 3l-2 18M4 8h17M3 16h17"/>', desk: '<rect x="3" y="9" width="18" height="11" rx="2"/><path d="M6 9c0-3 2.5-5 6-5s6 2 6 5"/><path d="M7 13h4M7 16h4M15 13h2M15 16h2"/>',
+    monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>', cog: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/>', bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
+    more: '<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>', clip: '<path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"/>',
+    smile: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>', send: '<path d="M4 12 20 4l-6 16-3-7z"/><path d="m11 13 9-9"/>',
+    pin: '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>', plus: '<path d="M12 5v14M5 12h14"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="m15 5-7 7 7 7"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+    micoff: '<path d="m3 3 18 18M9 9v2a3 3 0 0 0 5 2.2M15 10V6a3 3 0 0 0-5.8-1"/><path d="M5 11a7 7 0 0 0 11 5.7M19 11a7 7 0 0 1-.5 2.5M12 18v3"/>',
+    pause: '<path d="M8 5v14M16 5v14"/>', speaker: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+    hang: '<path d="M3 15c5-5 13-5 18 0l-2.5 2.5-3.5-1.5v-2.5a10 10 0 0 0-6 0V16L5.5 17.5z"/>', xfer: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>', conf: '<circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M2 20c0-3 2.5-5 6-5s6 2 6 5M14 15.3c.6-.2 1.3-.3 2-.3 3.5 0 6 2 6 5"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>', chart: '<path d="M5 20V10M12 20V4M19 20v-7"/>', file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
+    dl: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', cam: '<path d="M4 7h3l2-2h6l2 2h3v12H4z"/><circle cx="12" cy="13" r="3.5"/>', grid: '<path d="M5 5h2v2H5zM11 5h2v2h-2zM17 5h2v2h-2zM5 11h2v2H5zM11 11h2v2h-2zM17 11h2v2h-2zM5 17h2v2H5zM11 17h2v2h-2zM17 17h2v2h-2z"/>',
+    vm: '<circle cx="6.5" cy="12" r="3.5"/><circle cx="17.5" cy="12" r="3.5"/><path d="M6.5 15.5h11"/>', card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h3"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', shield: '<path d="M12 3 5 6v6c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6z"/>', building: '<path d="M4 21V5l8-2v18M12 9h8v12M7 8h2M7 12h2M7 16h2M15 13h2M15 17h2"/>',
+    branch: '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 8v8M18 11c0 4-6 3-12 5"/>', out: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.5 3.5-7 8-7s8 2.5 8 7"/>', palette: '<path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2s-1-2 0-3 2-1 3-1a4 4 0 0 0 4-4c0-4.5-4-8-9-8z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/>',
+    in: '<path d="M18 6 6 18M6 9v9h9"/>', outc: '<path d="M6 18 18 6M9 6h9v9"/>', missed: '<path d="M18 6 6 18M6 9v9h9"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  };
+  const STATUS = { available: 'Available', busy: 'Busy', away: 'Away', dnd: 'Do not disturb', offline: 'Offline' };
+  const REACTIONS = ['👍', '✅', '❤️', '😂', '🎉', '👀'];
+  const EMOJI = ['😀', '😊', '😂', '😉', '😍', '🙏', '👍', '👏', '🙌', '💪', '✅', '❌', '🎉', '🔥', '⭐', '❤️', '👀', '🤔', '😅', '😢', '☕', '🚚', '🔧', '📞'];
+  const MAX_FILE = 25 * 1024 * 1024;
+  const personOf = (uid) => S.people.find((p) => p.user_id === uid) || null;
+  const extOf = (uid) => (personOf(uid) || {}).extension || null;
+  const plus = () => !!(S.features && S.features.calls);
+  const otherIn = (c) => (c && c.kind === 'dm' ? c.people.find((p) => p !== S.user.id) || S.user.id : null);
+  const dmWith = (uid) => S.chans.find((c) => c.kind === 'dm' && c.people.includes(uid) && (uid !== S.user.id || c.people.every((p) => p === uid)));
+  const sizeText = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
+  const whenShort = (t) => { const d = new Date(t); const y = new Date(Date.now() - 864e5);
+    return d.toDateString() === new Date().toDateString() ? timeOf(d) : d.toDateString() === y.toDateString() ? 'Yesterday' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); };
+  const durText = (s) => (s >= 3600 ? `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`);
+
+  // ---- in-page yes/no boxes and messages (never the browser's own pop-ups: they can stop typing in the Windows app)
+  function ask(text, { yes = 'OK', no = 'Cancel', danger = false, title = '' } = {}) {
+    return new Promise((resolve) => {
+      modal(`${title ? `<h3>${esc(title)}</h3>` : ''}<p class="askp">${esc(text)}</p><div class="mfoot"><button class="btn" id="askno">${esc(no)}</button><button class="btn p${danger ? ' danger' : ''}" id="askyes">${esc(yes)}</button></div>`, (d, close) => {
+        const done = (v) => { close(); resolve(v); };
+        d.querySelector('#askno').onclick = () => done(false); d.querySelector('#askyes').onclick = () => done(true);
+        d.onclick = (e) => { if (e.target === d) done(false); }; d.querySelector('#askyes').focus();
+      });
     });
-    el.querySelector('#addch').onclick = addChannel;
-    const th = el.querySelector('#tohome'); if (th) th.onclick = () => { S.home = true; renderHome(); };
-    el.querySelector('#inv').onclick = invite;
-    el.querySelectorAll('[data-callbranch]').forEach((b) => b.onclick = () => Calls.start({ branch: b.dataset.callbranch }));
-    const dp = el.querySelector('#dial'); if (dp) dp.onclick = dialPad;
-    const mg = el.querySelector('#mgbr'); if (mg) mg.onclick = manageBranches;
-    el.querySelector('#out').onclick = async () => { await api.signOut(); S.team = null; gate(); };
-    const sw = el.querySelector('#tsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
-    el.querySelector('#coinfo').onclick = () => companyInfo(false);
-    const pp = el.querySelector('#coppl'); if (pp) pp.onclick = () => (needs2step() ? security() : peopleAccess());
-    const rq = el.querySelector('#coreq'); if (rq) rq.onclick = () => (needs2step() ? security() : joinRequests());
-    const hs = el.querySelector('#cohist'); if (hs) hs.onclick = showHistory;
-    const cp = el.querySelector('#cophones'); if (cp) cp.onclick = () => phonesPage('chat');
-    el.querySelector('#comyphone').onclick = () => myPhonePage('chat'); el.querySelector('#coset').onclick = settingsMenu;
-    el.querySelector('#cosec').onclick = security;
-    const ng = el.querySelector('#mfanag'); if (ng) ng.onclick = security;
-    const mg2 = el.querySelector('#mgbr'); if (mg2 && needs2step()) mg2.onclick = security;
   }
+  const tell = (text, cls = 'bad') => phMsg(esc(text), cls);
+
+  // ---- presence: Available, Busy, Away (after 10 minutes idle), Do not disturb, Offline, and "On a call"
+  const Presence = (() => {
+    const AWAY_AFTER = 10 * 60000; const BEAT = 60000; const STALE = 3 * 60000;
+    let lastActive = Date.now(); let awaySince = null; let lastSent = ''; let lastBeat = 0; let timer = null; let off = false; let fakeNow = null;
+    const now = () => fakeNow || Date.now();
+    const onCall = () => { const c = Calls.current; return !!(c && ['live', 'connecting', 'calling'].includes(c.status)); };
+    function mine() {
+      const m = S.myManual; let st;
+      if (m === 'dnd' || m === 'offline') st = m; else if (onCall()) st = 'busy'; else if (m) st = m; else st = now() - lastActive > AWAY_AFTER ? 'away' : 'available';
+      if (st === 'away' && !awaySince) awaySince = new Date(m === 'away' ? now() : lastActive).toISOString();   // "Away (12m)": since they last used Riyeser Link
+      if (st !== 'away') awaySince = null;
+      return { user_id: S.user.id, status: st, manual: m || null, custom_text: S.myText || '', on_call: onCall() && st !== 'offline', away_since: awaySince, fresh: true, at: Date.now() };
+    }
+    function info(uid) {
+      if (S.user && uid === S.user.id) return mine();
+      const p = S.presence[uid];
+      if (!p || !p.fresh || Date.now() - (p.at || 0) > STALE || p.status === 'offline') return { status: 'offline', custom_text: '', on_call: false };
+      return p;
+    }
+    function text(uid) {
+      const p = info(uid);
+      if (p.status === 'offline') return 'Offline';
+      if (p.on_call) return 'On a call';
+      if (p.status === 'away') { const m = p.away_since ? Math.max(1, Math.round((now() - Date.parse(p.away_since)) / 60000)) : 0; return p.custom_text || `Away${m ? ` (${m < 60 ? m + 'm' : Math.round(m / 60) + 'h'})` : ''}`; }
+      return p.custom_text || STATUS[p.status] || 'Available';
+    }
+    const dot = (uid) => { const p = info(uid); return `<i class="pd st-${p.on_call && p.status !== 'offline' ? 'call' : p.status}" title="${esc(text(uid))}"></i>`; };
+    async function send(force) {
+      if (!S.team || off) return;
+      const p = mine(); const key = [p.status, p.manual, p.custom_text, p.on_call].join('|');
+      if (!force && key === lastSent && Date.now() - lastBeat < BEAT) return;
+      lastSent = key; lastBeat = Date.now();
+      try { await api.setPresence(S.team.id, { status: p.status, manual: p.manual, text: p.custom_text, on_call: p.on_call, away_since: p.away_since }); }
+      catch (e) { if (/PGRST202|Could not find|schema cache|does not exist/i.test(String(e && e.message))) off = true; }
+    }
+    function changed() { send(); paintMine(); }
+    function tick(at) { if (at) fakeNow = at; const before = lastSent; send(); if (lastSent !== before) { paintMine(); paintOthers(); } }
+    function active() { const was = now() - lastActive > AWAY_AFTER; lastActive = Date.now(); fakeNow = null; if (was) changed(); }
+    function start() {
+      if (timer) return;
+      ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((e) => addEventListener(e, active, { passive: true }));
+      let mv = 0; addEventListener('pointermove', () => { if (Date.now() - mv > 5000) { mv = Date.now(); active(); } }, { passive: true });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) active(); });
+      addEventListener('pagehide', () => { if (S.team && !off) api.setPresence(S.team.id, { status: 'offline', manual: S.myManual || null, text: S.myText || '', on_call: false }).catch(() => {}); });
+      timer = setInterval(() => tick(), 15000);
+    }
+    async function load() {
+      S.presence = {}; off = false;
+      const rows = await api.presence(S.team.id).catch(() => null);
+      if (rows === null) { off = true; return; }
+      for (const r of rows) {
+        if (r.user_id === S.user.id) { if (S.myManual === undefined) { S.myManual = r.manual || null; S.myText = r.custom_text || ''; } continue; }
+        S.presence[r.user_id] = { ...r, at: Date.now() };
+      }
+    }
+    function onRow(r) { if (!r || !r.user_id || r.user_id === S.user.id) return; S.presence[r.user_id] = { ...r, fresh: r.status !== 'offline', at: Date.now() }; paintOthers(); }
+    // a status change from the picker (DND also switches Do not disturb on the desk phone, where there is one)
+    async function choose(manual, txt) {
+      const wasDnd = S.myManual === 'dnd'; S.myManual = manual === 'available' ? null : manual; if (txt !== undefined) S.myText = txt;
+      lastActive = Date.now(); changed();
+      if ((S.myManual === 'dnd') !== wasDnd && api.linkMyDnd) api.linkMyDnd(S.team.id, S.myManual === 'dnd').catch(() => {});
+    }
+    return { start, load, onRow, info, text, dot, choose, changed, tick, status: () => mine().status, get off() { return off; } };
+  })();
+  function paintMine() {
+    const p = Presence.info(S.user.id); const b = document.getElementById('stbtn');
+    if (b) { b.innerHTML = `${Presence.dot(S.user.id)}<span class="stt">${esc(Presence.text(S.user.id))}</span>${ic('down')}`; b.dataset.st = p.status; }
+    document.querySelectorAll(`.pd-me`).forEach((x) => { x.outerHTML = Presence.dot(S.user.id).replace('class="pd', 'class="pd pd-me'); });
+  }
+  function paintOthers() {
+    if (!document.getElementById('lkshell')) return;
+    renderList(); renderRight(); if (S.nav === 'contacts' || S.nav === 'home') renderMain();
+  }
+
+  // ---- your look: Dark (navy/purple, the default), Light, or Match my computer, and an accent colour.
+  // Kept with your account (riyeser_prefs), and in this browser so it shows straight away. Sign-in and Riyeser home stay Riyeser blue.
+  const ACCENTS = [['purple', 'Purple (Riyeser Link)', '#7c3aed'], ['blue', 'Blue', '#2563eb'], ['teal', 'Teal', '#0f766e'], ['green', 'Green', '#15803d'], ['orange', 'Orange', '#c2410c'], ['pink', 'Pink', '#be185d']];
+  const THEMES = [['dark', 'Dark', 'Navy and purple. Easy on the eyes.'], ['light', 'Light', 'Bright and clear, like Riyeser Link has always been.'], ['system', 'Match my computer', 'Dark or light, the same as Windows or your phone.']];
+  const Theme = (() => {
+    const KEY = 'riyeser.link.look'; let pref = { theme: 'dark', accent: 'purple' }; let scope = 'acct';
+    try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (v) pref = { ...pref, ...v }; } catch { /* private mode */ }
+    const mq = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+    const resolved = () => (pref.theme === 'system' ? (mq && mq.matches ? 'dark' : 'light') : pref.theme === 'light' ? 'light' : 'dark');
+    function apply() {
+      const h = document.documentElement; const link = scope === 'link';
+      h.dataset.theme = link ? resolved() : 'light'; h.dataset.scope = link ? 'link' : 'acct';
+      if (link) h.dataset.accent = ACCENTS.some((a) => a[0] === pref.accent) ? pref.accent : 'purple'; else delete h.dataset.accent;
+      const m = document.querySelector('meta[name=color-scheme]'); if (m) m.content = h.dataset.theme;
+    }
+    if (mq) (mq.addEventListener ? mq.addEventListener('change', apply) : mq.addListener(apply));
+    function keep() { try { localStorage.setItem(KEY, JSON.stringify(pref)); } catch { /* private mode */ } }
+    function set(p, save = true) {
+      pref = { ...pref, ...p }; keep(); apply();
+      if (save && S.user) api.savePrefs({ theme: pref.theme, accent: pref.accent }).then((u) => { if (u && u.user_metadata) S.user.user_metadata = u.user_metadata; }).catch(() => {});
+    }
+    function fromAccount(user) { const p = ((user && user.user_metadata) || {}).riyeser_prefs; if (p && typeof p === 'object') { pref = { ...pref, ...(p.theme ? { theme: p.theme } : {}), ...(p.accent ? { accent: p.accent } : {}) }; keep(); apply(); } }
+    return { set, fromAccount, get: () => ({ ...pref }), resolved, scope(s) { scope = s; apply(); } };
+  })();
+  function appearance() {
+    const p = Theme.get();
+    const prev = (t) => `<span class="tprev tp-${t}" aria-hidden="true"><i class="tp-n"></i><i class="tp-l"><b></b><b></b><b></b></i><i class="tp-m"><b></b><b></b><b class="tp-a"></b></i></span>`;
+    modal(`<h3>${ic('palette')} Appearance</h3><p>Choose how Riyeser Link looks for you. It follows you to every PC and phone you sign in on.</p>
+      <div class="tpick" role="radiogroup" aria-label="Theme">${THEMES.map(([k, n, d]) => `<label class="tcard"><input type="radio" name="theme" value="${k}"${p.theme === k ? ' checked' : ''}>
+        ${k === 'system' ? `<span class="tprev tp-split" aria-hidden="true">${prev('dark')}${prev('light')}</span>` : prev(k)}<b>${n}</b><small>${d}</small></label>`).join('')}</div>
+      <h4 class="ahh">Accent colour</h4><div class="apick" role="radiogroup" aria-label="Accent colour">${ACCENTS.map(([k, n, c]) => `<label class="acc" title="${esc(n)}"><input type="radio" name="accent" value="${k}"${p.accent === k ? ' checked' : ''}><i style="background:${c}"></i><span>${esc(n)}</span></label>`).join('')}</div>
+      <p class="muted small">Sign-in and your Riyeser home page keep Riyeser's own blue.</p>
+      <div class="mfoot"><button class="btn p" id="cl">Done</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelectorAll('input[name=theme]').forEach((r) => r.onchange = () => Theme.set({ theme: r.value }));
+      d.querySelectorAll('input[name=accent]').forEach((r) => r.onchange = () => Theme.set({ accent: r.value }));
+    });
+  }
+
+  // ---- call history (this device; Riyeser Link Office voicemail and a shared history come later)
+  const callKey = () => `riyeser.link.calls.${S.user.id}.${S.team.id}`;
+  function loadCalls() {
+    let mine = []; try { mine = JSON.parse(localStorage.getItem(callKey()) || '[]'); } catch { /* private mode */ }
+    const demo = api.callHistory ? api.callHistory() : [];
+    S.callLog = [...mine, ...demo.filter((d) => !mine.some((x) => x.id === d.id))].sort((a, b) => String(b.at).localeCompare(String(a.at))).slice(0, 100);
+    try { S.callSeen = Number(localStorage.getItem(callKey() + '.seen') || 0); } catch { S.callSeen = 0; }
+  }
+  function logCall(e) {
+    S.callLog = [e, ...(S.callLog || []).filter((x) => x.id !== e.id)].slice(0, 100);
+    try { const mine = JSON.parse(localStorage.getItem(callKey()) || '[]').filter((x) => x.id !== e.id); localStorage.setItem(callKey(), JSON.stringify([e, ...mine].slice(0, 100))); } catch { /* private mode */ }
+    if (document.getElementById('lkshell')) { renderList(); renderTop(); if (S.nav === 'calls' || S.nav === 'home') renderMain(); }
+  }
+  const missedNew = () => (S.callLog || []).filter((c) => c.result === 'missed' && Date.parse(c.at) > (S.callSeen || 0)).length;
+  function seeCalls() { S.callSeen = Date.now(); try { localStorage.setItem(callKey() + '.seen', String(S.callSeen)); } catch { /* private mode */ } }
+  const callWho = (c) => (c.peer ? nameOf(c.peer) : c.label || 'A branch');
+  const callExt = (c) => (c.peer ? extOf(c.peer) : (S.branches.find((b) => b.id === c.branch) || {}).extension);
+  const callLine = (c) => ({ missed: 'Missed', declined: 'Declined', answered: c.dir === 'in' ? 'Incoming' : 'Outgoing', 'no answer': 'No answer', cancelled: 'Cancelled', elsewhere: 'Answered elsewhere' }[c.result] || c.result);
+
+  // ---- loading what the workspace shows
+  async function loadWorkspace() {
+    S.nav = S.nav || 'chat'; S.listTab = S.listTab || 'chats'; S.rightTab = S.rightTab || 'people'; S.pane = S.pane || 'list';
+    S.myManual = undefined; S.myText = '';
+    const [pins, last] = await Promise.all([api.pins(S.team.id, S.user.id).catch(() => null), api.lastMessages(S.team.id).catch(() => ({})), Presence.load()]);
+    if (S.myManual === undefined) S.myManual = null;
+    S.pinsOff = pins === null; S.last = last || {};
+    const meta = ((S.user.user_metadata || {}).riyeser_prefs || {});
+    S.pinned = pins === null ? (Array.isArray(meta.pinned) ? meta.pinned : []) : pins;
+    loadCalls();
+    api.liveExtra && api.liveExtra(S.team.id, { presence: Presence.off ? null : Presence.onRow, reaction: S.rxOff ? null : onReaction });
+    Presence.start(); Presence.changed();
+  }
+  async function togglePin(ch) {
+    const on = !S.pinned.includes(ch);
+    S.pinned = on ? [...S.pinned, ch] : S.pinned.filter((x) => x !== ch);
+    renderList(); renderHead(); if (S.rightTab === 'info') renderRight();
+    try {
+      if (S.pinsOff) await api.savePrefs({ pinned: S.pinned }); else await api.pin(S.team.id, ch, S.user.id, on);
+    } catch (err) { S.pinned = on ? S.pinned.filter((x) => x !== ch) : [...S.pinned, ch]; renderList(); tell(plainError(err)); }
+  }
+
+  // ---- reactions
+  async function loadReactions() {
+    if (!S.ch) { S.rx = []; return; }
+    const r = await api.reactions(S.ch.id).catch(() => []);
+    if (r === null) { S.rxOff = true; S.rx = []; return; }
+    S.rx = r;
+  }
+  let rxTimer = null;
+  function onReaction(r) {
+    if (!r || !S.ch || !S.msgs.some((m) => m.id === r.message_id)) return;
+    clearTimeout(rxTimer); rxTimer = setTimeout(async () => { await loadReactions(); renderMsgs(); }, 250);
+  }
+  async function react(msgId, emoji) {
+    const mineNow = (S.rx || []).some((r) => r.message_id === msgId && r.user_id === S.user.id && r.emoji === emoji);
+    if (mineNow) S.rx = S.rx.filter((r) => !(r.message_id === msgId && r.user_id === S.user.id && r.emoji === emoji));
+    else S.rx = [...(S.rx || []), { message_id: msgId, user_id: S.user.id, emoji }];
+    renderMsgs();
+    try { await api.react(S.team.id, msgId, S.user.id, emoji, !mineNow); } catch (err) { tell(plainError(err)); await loadReactions(); renderMsgs(); }
+  }
+  function rxHtml(m) {
+    if (S.rxOff || m.deleted) return '';
+    const mine = (S.rx || []).filter((r) => r.message_id === m.id);
+    if (!mine.length) return '';
+    return `<div class="rx">${REACTIONS.filter((e) => mine.some((r) => r.emoji === e)).map((e) => { const who = mine.filter((r) => r.emoji === e);
+      const me = who.some((r) => r.user_id === S.user.id);
+      return `<button class="rxc${me ? ' me' : ''}" data-rx="${e}" aria-pressed="${me}" title="${esc(who.map((r) => (r.user_id === S.user.id ? 'You' : nameOf(r.user_id))).join(', '))}">${e} <span>${who.length}</span></button>`; }).join('')}</div>`;
+  }
+
+  // ---- messages
+  const autoBody = (files) => '📎 ' + files.map((f) => f.name).join(', ');
+  function filesHtml(m) {
+    if (!m.files || !m.files.length || m.deleted) return '';
+    return `<div class="fcards">${m.files.map((f, i) => `<div class="fcard"><span class="fic">${ic('file')}<small>${esc(((f.name.split('.').pop() || '').slice(0, 4)).toUpperCase())}</small></span>
+      <span class="fnm"><b>${esc(f.name)}</b><small>${esc(sizeText(Number(f.size) || 0))}</small></span><button class="lk-ib" data-file="${i}" aria-label="Download ${esc(f.name)}" title="Download">${ic('dl')}</button></div>`).join('')}</div>`;
+  }
+  function msgsHtml() {
+    if (!S.ch) return `<div class="empty"><b>No channels yet</b>Add one with + next to Channels.</div>`;
+    if (!S.msgs.length) return `<div class="empty"><b>${S.ch.kind === 'dm' ? 'Say hello 👋' : `Welcome to #${esc(S.ch.name)}`}</b>${esc(S.ch.topic || 'Nothing here yet. Write the first message below.')}</div>`;
+    let out = ''; let lastDay = ''; let prev = null;
+    for (const m of S.msgs) {
+      const d = new Date(m.created_at); const day = d.toDateString();
+      if (day !== lastDay) { out += `<div class="day"><span>${esc(dayName(d))}</span></div>`; lastDay = day; prev = null; }
+      const cont = prev && prev.user_id === m.user_id && d - new Date(prev.created_at) < 5 * 60000;
+      const mine = m.user_id === S.user.id && !m.deleted;
+      const showText = !(m.files && m.files.length && m.body === autoBody(m.files)) || m.deleted;
+      const body = S.editing === m.id
+        ? `<form class="cbox" data-edit="${m.id}"><textarea rows="2">${esc(m.body)}</textarea><button>Save</button></form>`
+        : `${showText ? `<div class="mb${m.deleted ? ' gone' : ''}${mine ? ' mine' : ''}">${m.deleted ? 'Message deleted' : fmt(m.body)}${m.edited_at && !m.deleted ? ' <span class="edited">(edited)</span>' : ''}</div>` : ''}${filesHtml(m)}`;
+      const acts = m.deleted ? '' : `<span class="macts">${S.rxOff ? '' : `<button data-act="react" aria-label="Add a reaction" title="React">${ic('smile')}</button>`}${mine ? '<button data-act="edit">Edit</button><button data-act="del">Delete</button>' : ''}</span>`;
+      out += `<div class="msg${cont ? ' cont' : ''}" data-id="${m.id}">${av(m.user_id, nameOf(m.user_id))}<div class="mc">
+        ${cont ? '' : `<div class="mt"><b>${esc(nameOf(m.user_id))}</b><time datetime="${m.created_at}">${esc(timeOf(d))}</time></div>`}
+        ${body}${rxHtml(m)}</div>${acts}</div>`;
+      prev = m;
+    }
+    return out;
+  }
+
+  // ---- the shell
+  function render(force) {
+    S.view = null; tabIcon(true);
+    if (S.nav === undefined || !S.listTab) { S.nav = S.nav || 'chat'; S.listTab = S.listTab || 'chats'; S.rightTab = S.rightTab || 'people'; S.pane = S.pane || (S.inChat ? 'main' : 'list'); }
+    if (!force && document.getElementById('lkshell')) { paneClasses(); renderTop(); renderNav(); renderList(); renderMain(); renderRight(); return; }
+    $app.className = 'lk';
+    $app.innerHTML = `${demoBar()}<div class="shell" id="lkshell"><header class="lk-top" id="lktop"></header><nav class="lk-nav" id="lknav" aria-label="Workspace"></nav>
+      <section class="lk-list" id="side" aria-label="Chats"></section><section class="main" id="main"></section><aside class="lk-right" id="lkright" aria-label="People and info"></aside>
+      <div class="lk-scrim" id="scrim"></div></div>`;
+    paneClasses();
+    document.getElementById('scrim').onclick = () => { S.navOpen = false; if (S.pane === 'right' && !narrow()) S.pane = 'main'; paneClasses(); };
+    renderTop(); renderNav(); renderList(); renderMain(); renderRight(); paneClasses();
+  }
+  const narrow = () => matchMedia('(max-width: 760px)').matches;
+  function paneClasses() {
+    const sh = document.getElementById('lkshell'); if (!sh) return;
+    S.inChat = S.pane === 'main' || S.pane === 'right';
+    sh.classList.toggle('inchat', S.pane === 'main'); sh.classList.toggle('inright', S.pane === 'right'); sh.classList.toggle('navopen', !!S.navOpen);
+    sh.classList.toggle('rightshut', !!S.rightShut);
+  }
+  function go(pane) { S.pane = pane; S.navOpen = false; paneClasses(); }
+  // Back-compat: the old name for "refresh the side panels".
+  function renderSide() { if (!document.getElementById('lkshell')) return; renderTop(); renderNav(); renderList(); renderRight(); chatTitle(); }
+
+  // ---- header: logo, search, status, notifications, help, you
+  function renderTop() {
+    const el = document.getElementById('lktop'); if (!el) return;
+    const me = personOf(S.user.id) || {};
+    const role = S.team.role === 'owner' ? 'Owner' : S.team.role === 'admin' ? 'Admin' : jobName(me.job_role || 'staff');
+    const n = bellCount();
+    if (!el.dataset.ready) {
+      el.dataset.ready = '1';
+      el.innerHTML = `<button class="lk-ib lk-burger" id="burger" aria-label="Menu">${ic('menu')}</button>
+        <div class="lk-logo"><span class="lk-li" aria-hidden="true">Li.</span><span class="lk-lt"><b>Riyeser Link</b><small>Business Communications</small></span></div>
+        <div class="lk-search" id="srch" role="search">${ic('search')}<input id="q" type="search" autocomplete="off" placeholder="Search chats, people, calls…" aria-label="Search chats, people and calls"><div class="lk-pop lk-sres" id="sres" hidden></div></div>
+        <button class="lk-ib lk-sbtn" id="srchbtn" aria-label="Search">${ic('search')}</button>
+        <button class="lk-status" id="stbtn" aria-haspopup="true" aria-label="Your status"></button>
+        <button class="lk-ib" id="bell" aria-label="Notifications">${ic('bell')}<span class="badge" id="bellc" hidden></span></button>
+        <button class="lk-ib" id="helpbtn" aria-label="Help">${ic('help')}</button>
+        <button class="lk-user" id="umenu" aria-haspopup="true"><span id="umav"></span><span class="lk-un"><b id="umn"></b><small id="umr"></small></span>${ic('down')}</button>`;
+      el.querySelector('#burger').onclick = () => { S.navOpen = !S.navOpen; paneClasses(); };
+      el.querySelector('#srchbtn').onclick = () => { el.classList.toggle('searching'); el.querySelector('#q').focus(); };
+      wireSearch(el.querySelector('#q'), el.querySelector('#sres'));
+      el.querySelector('#stbtn').onclick = (e) => statusMenu(e.currentTarget);
+      el.querySelector('#bell').onclick = (e) => bellMenu(e.currentTarget);
+      el.querySelector('#helpbtn').onclick = (e) => helpMenu(e.currentTarget);
+      el.querySelector('#umenu').onclick = (e) => userMenu(e.currentTarget);
+    }
+    el.querySelector('#umav').innerHTML = `<span class="lk-av">${av(S.user.id, me.display_name || S.user.email)}${Presence.dot(S.user.id).replace('class="pd', 'class="pd pd-me')}</span>`;
+    el.querySelector('#umn').textContent = me.display_name || 'You'; el.querySelector('#umr').textContent = role;
+    const bc = el.querySelector('#bellc'); bc.hidden = !n; bc.textContent = n;
+    paintMine();
+  }
+  const unreadTotal = () => Object.values(S.unread || {}).reduce((a, b) => a + (b || 0), 0);
+  const bellCount = () => unreadTotal() + missedNew() + (isAdmin() ? S.requests.length : 0);
+
+  // A small menu under a button. Closes on Escape or a click elsewhere.
+  function popMenu(anchor, html, wire, cls = '') {
+    closePops();
+    const d = document.createElement('div'); d.className = `lk-pop lk-menu ${cls}`; d.setAttribute('role', 'menu'); d.innerHTML = html;
+    document.body.appendChild(d);
+    const r = anchor.getBoundingClientRect(); const w = Math.min(d.offsetWidth || 280, innerWidth - 16); const h = d.offsetHeight || 200;
+    d.style.top = `${Math.round(r.bottom + 6 + h > innerHeight - 8 && r.top - h - 6 > 8 ? r.top - h - 6 : Math.min(r.bottom + 6, Math.max(8, innerHeight - h - 8)))}px`; d.style.left = `${Math.round(Math.max(8, Math.min(r.right - w, innerWidth - w - 8)))}px`;
+    const close = () => d.remove();
+    setTimeout(() => { const off = (e) => { if (!d.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) { close(); document.removeEventListener('pointerdown', off, true); } };
+      document.addEventListener('pointerdown', off, true); }, 0);
+    d.addEventListener('keydown', (e) => { if (e.key === 'Escape') { close(); anchor.focus(); } });
+    wire(d, close); const f = d.querySelector('button, input'); if (f) f.focus();
+    return d;
+  }
+  const closePops = () => document.querySelectorAll('.lk-menu').forEach((x) => x.remove());
+  function statusMenu(anchor) {
+    const cur = Presence.info(S.user.id);
+    popMenu(anchor, `<div class="mh">Your status</div>${[['available', 'Available', 'Away after 10 minutes without using Riyeser Link'], ['busy', 'Busy', ''], ['dnd', 'Do not disturb', 'Calls don\'t ring you; your desk phone too'], ['away', 'Away', ''], ['offline', 'Appear offline', '']]
+      .map(([k, n, h]) => `<button class="mi${(S.myManual || 'available') === k ? ' on' : ''}" data-st="${k}" role="menuitemradio" aria-checked="${(S.myManual || 'available') === k}"><i class="pd st-${k}"></i><span>${n}${h ? `<small>${h}</small>` : ''}</span></button>`).join('')}
+      <form class="mform" id="stf"><label><span>Status message</span><input name="t" maxlength="80" placeholder="e.g. At the Elm St job" value="${esc(S.myText || '')}"></label><button class="btn sm">Save</button></form>
+      <div class="mnote">${cur.on_call ? 'You\'re on a call, so others see <b>On a call</b>.' : ''}</div>`, (d, close) => {
+      d.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => { close(); Presence.choose(b.dataset.st); renderRight(); });
+      d.querySelector('#stf').onsubmit = (e) => { e.preventDefault(); const t = String(new FormData(e.target).get('t') || '').replace(/[<>]/g, '').trim(); close(); Presence.choose(S.myManual || 'available', t); renderRight(); };
+    }, 'stmenu');
+  }
+  function bellMenu(anchor) {
+    const unread = S.chans.filter((c) => S.unread[c.id]);
+    const missed = (S.callLog || []).filter((c) => c.result === 'missed').slice(0, 5);
+    popMenu(anchor, `<div class="mh">Notifications</div>
+      ${unread.length ? unread.map((c) => `<button class="mi" data-go-ch="${c.id}">${c.kind === 'dm' ? av(otherIn(c), chanLabel(c)) : `<span class="hash">${c.kind === 'private' ? ic('lock') : '#'}</span>`}<span>${esc(chanLabel(c))}<small>${S.unread[c.id]} unread</small></span></button>`).join('') : ''}
+      ${missed.map((c) => `<button class="mi" data-go-calls="1"><span class="hash miss">${ic('missed')}</span><span>Missed call: ${esc(callWho(c))}<small>${esc(whenShort(c.at))}</small></span></button>`).join('')}
+      ${isAdmin() && S.requests.length ? `<button class="mi" data-go-req="1"><span class="hash">👋</span><span>${S.requests.length} join request${S.requests.length === 1 ? '' : 's'}<small>People asking to join ${esc(S.team.name)}</small></span></button>` : ''}
+      ${!unread.length && !missed.length && !(isAdmin() && S.requests.length) ? '<p class="mnote">You\'re all caught up.</p>' : ''}`, (d, close) => {
+      d.querySelectorAll('[data-go-ch]').forEach((b) => b.onclick = () => { close(); openChannel(b.dataset.goCh); });
+      d.querySelectorAll('[data-go-calls]').forEach((b) => b.onclick = () => { close(); S.listTab = 'calls'; seeCalls(); renderList(); renderTop(); go('list'); });
+      const rq = d.querySelector('[data-go-req]'); if (rq) rq.onclick = () => { close(); needs2step() ? security() : joinRequests(); };
+    }, 'bellmenu');
+  }
+  function helpMenu(anchor) {
+    popMenu(anchor, `<div class="mh">Help</div><a class="mi" href="/help/link.html" target="_blank" rel="noopener">${ic('help')}<span>Riyeser Link Help Centre<small>Chat, calls and desk phones</small></span></a>
+      <button class="mi" id="hgh">${ic('chat')}<span>Ask Riyeser for help<small>We usually reply within one business day</small></span></button>
+      <button class="mi" id="hks">${ic('grid')}<span>Keyboard tips</span></button>`, (d, close) => {
+      d.querySelector('#hgh').onclick = () => { close(); getHelp(); };
+      d.querySelector('#hks').onclick = () => { close(); modal(`<h3>Keyboard tips</h3><dl class="kbd"><dt>Enter</dt><dd>Send</dd><dt>Shift + Enter</dt><dd>New line</dd><dt>Esc</dt><dd>Stop editing, close a menu</dd><dt>/</dt><dd>Search</dd></dl>
+        <p class="muted small">Type INV-1047, Q-0042 or Booking 12 in a message to point at one.</p><div class="mfoot"><button class="btn p" id="cl">Done</button></div>`, (m, c) => { m.querySelector('#cl').onclick = c; }); };
+    });
+  }
+  function userMenu(anchor) {
+    const me = personOf(S.user.id) || {}; const desk = /Electron/.test(navigator.userAgent) || DEMO;
+    popMenu(anchor, `<div class="mh mhu">${av(S.user.id, me.display_name || 'You')}<span><b>${esc(me.display_name || 'You')}</b><small>${esc(S.user.email || '')}</small></span></div>
+      <button class="mi" id="um-prof">${ic('user')}<span>My profile</span></button>
+      <button class="mi" id="um-theme">${ic('palette')}<span>Theme<small>${esc((THEMES.find((t) => t[0] === Theme.get().theme) || THEMES[0])[1])} · ${esc((ACCENTS.find((a) => a[0] === Theme.get().accent) || ACCENTS[0])[1].replace(' (Riyeser Link)', ''))}</small></span></button>
+      <button class="mi" id="um-phone">${ic('desk')}<span>My phone</span></button>
+      <button class="mi" id="um-sec">${ic('shield')}<span>Security<small>Two-step sign-in</small></span></button>
+      <button class="mi" id="um-co">${ic('building')}<span>${esc(S.team.name)}<small>Company details</small></span></button>
+      ${desk ? '' : `<button class="mi" id="tohome">${ic('back')}<span>Riyeser home</span></button>`}
+      <button class="mi" id="out">${ic('out')}<span>Sign out</span></button>`, (d, close) => {
+      const on = (id, fn) => { const b = d.querySelector(id); if (b) b.onclick = () => { close(); fn(); }; };
+      on('#um-prof', () => editMyDetails(me)); on('#um-theme', appearance); on('#um-phone', () => myPhonePage('chat')); on('#um-sec', security);
+      on('#um-co', () => companyInfo(false)); on('#tohome', () => { S.home = true; renderHome(); });
+      on('#out', async () => { await api.signOut(); S.team = null; gate(); });
+    }, 'usermenu');
+  }
+  function wireSearch(input, box) {
+    let t = null; let seq = 0;
+    const hide = () => { box.hidden = true; };
+    input.addEventListener('blur', () => setTimeout(hide, 200));
+    input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { input.value = ''; hide(); input.blur(); } });
+    addEventListener('keydown', (e) => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '') && document.getElementById('q')) { e.preventDefault(); document.getElementById('q').focus(); } });
+    input.oninput = () => { clearTimeout(t); const q = input.value.trim(); if (!q) return hide(); t = setTimeout(() => run(q), 180); };
+    async function run(q) {
+      const my = ++seq; const ql = q.toLowerCase();
+      const ppl = S.people.filter((p) => p.display_name.toLowerCase().includes(ql) || String(p.extension || '').startsWith(q)).slice(0, 5);
+      const chs = S.chans.filter((c) => c.kind !== 'dm' && (c.name || '').toLowerCase().includes(ql)).slice(0, 5);
+      const cls = (S.callLog || []).filter((c) => callWho(c).toLowerCase().includes(ql) || String(callExt(c) || '').startsWith(q)).slice(0, 4);
+      const draw = (msgs) => {
+        if (my !== seq) return;
+        box.innerHTML = `${ppl.length ? `<div class="mh">People</div>${ppl.map((p) => `<button class="mi" data-sp="${p.user_id}"><span class="lk-av">${av(p.user_id, p.display_name)}${Presence.dot(p.user_id)}</span><span>${esc(p.display_name)}<small>${esc(Presence.text(p.user_id))}${p.extension ? ` · Ext. ${p.extension}` : ''}</small></span></button>`).join('')}` : ''}
+          ${chs.length ? `<div class="mh">Chats</div>${chs.map((c) => `<button class="mi" data-sc="${c.id}"><span class="hash">${c.kind === 'private' ? ic('lock') : '#'}</span><span>${esc(c.name)}<small>${esc(c.topic || '')}</small></span></button>`).join('')}` : ''}
+          ${cls.length ? `<div class="mh">Calls</div>${cls.map((c) => `<button class="mi" data-scl="1"><span class="hash">${ic('phone')}</span><span>${esc(callWho(c))}<small>${esc(callLine(c))} · ${esc(whenShort(c.at))}</small></span></button>`).join('')}` : ''}
+          ${msgs && msgs.length ? `<div class="mh">Messages</div>${msgs.slice(0, 6).map((m) => { const c = S.chans.find((x) => x.id === m.channel_id); return c ? `<button class="mi" data-sm="${m.channel_id}"><span class="hash">${ic('chat')}</span><span>${esc(m.body.slice(0, 80))}<small>${esc(nameOf(m.user_id))} in ${esc(c.kind === 'dm' ? chanLabel(c) : '#' + c.name)} · ${esc(whenShort(m.created_at))}</small></span></button>` : ''; }).join('')}` : ''}
+          ${!ppl.length && !chs.length && !cls.length && msgs && !msgs.length ? `<p class="mnote">Nothing found for “${esc(q)}”.</p>` : ''}`;
+        box.hidden = false;
+        box.querySelectorAll('[data-sp]').forEach((b) => b.onmousedown = (e) => { e.preventDefault(); hide(); input.value = ''; openDm(b.dataset.sp); });
+        box.querySelectorAll('[data-sc],[data-sm]').forEach((b) => b.onmousedown = (e) => { e.preventDefault(); hide(); input.value = ''; openChannel(b.dataset.sc || b.dataset.sm); });
+        box.querySelectorAll('[data-scl]').forEach((b) => b.onmousedown = (e) => { e.preventDefault(); hide(); input.value = ''; S.listTab = 'calls'; renderList(); go('list'); });
+      };
+      draw(null);
+      if (q.length >= 2) draw(await api.search(S.team.id, q).catch(() => []));
+    }
+  }
+
+  // ---- left nav
+  function renderNav() {
+    const el = document.getElementById('lknav'); if (!el) return;
+    const admin = isAdmin(); const item = (k, icon, label, extra = '', id = '') => `<button class="lk-ni${S.nav === k ? ' on' : ''}" data-nav="${k}"${id ? ` id="${id}"` : ''}>${ic(icon)}<span>${label}</span>${extra}</button>`;
+    const unread = unreadTotal(); const missed = missedNew();
+    el.innerHTML = `<div class="team"><span class="lk-tico" aria-hidden="true">${esc(initials(S.team.name))}</span><div>${S.teams.length > 1
+      ? `<select id="tsw" aria-label="Switch company">${S.teams.map((t) => `<option value="${t.id}"${t.id === S.team.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
+      : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}${S.team.company_code ? ` · ${esc(S.team.company_code)}` : ''}</small></div></div>
+      ${needs2step() ? '<button class="mfa-nag" id="mfanag">🔐 Owners and admins need <b>two-step sign-in</b> to approve people and change access. <u>Turn it on (2 minutes)</u></button>' : ''}
+      <div class="lk-nscroll"><div class="lk-nh">Workspace</div>
+      ${item('home', 'home', 'Home')}${item('chat', 'chat', 'Chat', unread ? `<span class="badge">${unread}</span>` : '')}${item('calls', 'phone', 'Calls', missed ? `<span class="badge">${missed}</span>` : '')}
+      ${item('contacts', 'users', 'Contacts')}${item('channels', 'hash', 'Teams / Channels')}
+      ${admin ? `<button class="lk-ni" id="cophones">${ic('desk')}<span>Desk Phones</span></button>` : `<button class="lk-ni" id="comyphone">${ic('desk')}<span>My phone</span></button>`}
+      ${item('devices', 'monitor', 'Devices')}
+      ${admin ? `<div class="lk-admin${S.adminShut ? ' shut' : ''}"><button class="lk-ah" id="adminh" aria-expanded="${!S.adminShut}">${ic('cog')}<span>Admin / Settings</span>${ic('down')}</button>
+        <div class="lk-ag" id="adming">
+          <button class="lk-ni sm" id="coppl">${ic('users')}<span>People &amp; access</span></button>
+          <button class="lk-ni sm" id="coreq">${ic('user')}<span>Join requests</span>${S.requests.length ? `<span class="badge">${S.requests.length}</span>` : ''}</button>
+          <button class="lk-ni sm" id="coinfo">${ic('building')}<span>Company</span></button>
+          <button class="lk-ni sm" id="mgbr">${ic('branch')}<span>Branches &amp; extensions</span></button>
+          <button class="lk-ni sm" id="ad-phones">${ic('desk')}<span>Desk phones</span></button>
+          <button class="lk-ni sm" id="cosec">${ic('shield')}<span>Security</span></button>
+          <button class="lk-ni sm" id="cohist">${ic('clock')}<span>History</span></button>
+          <button class="lk-ni sm" id="cobill">${ic('card')}<span>Billing &amp; Subscription</span></button>
+          <button class="lk-ni sm" disabled title="Coming soon">${ic('chart')}<span>Reports</span><span class="soon">soon</span></button>
+        </div></div>` : ''}</div>
+      <div class="lk-nfoot"><button class="lk-ni sm" id="coset">${ic('cog')}<span>Settings</span></button><button class="lk-ni sm lk-inv" id="inv">${ic('plus')}<span>Invite people</span></button></div>`;
+    const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = () => { S.navOpen = false; paneClasses(); fn(); }; };
+    el.querySelectorAll('[data-nav]').forEach((b) => b.onclick = () => setNav(b.dataset.nav));
+    const sw = el.querySelector('#tsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
+    on('#mfanag', security); on('#cophones', () => phonesPage('chat')); on('#ad-phones', () => phonesPage('chat')); on('#comyphone', () => myPhonePage('chat'));
+    on('#coppl', () => (needs2step() ? security() : peopleAccess())); on('#coreq', () => (needs2step() ? security() : joinRequests()));
+    on('#coinfo', () => companyInfo(false)); on('#mgbr', () => (needs2step() ? security() : manageBranches())); on('#cosec', security); on('#cohist', showHistory);
+    on('#cobill', billing); on('#coset', settingsMenu); on('#inv', invite);
+    const ah = el.querySelector('#adminh'); if (ah) ah.onclick = () => { S.adminShut = !S.adminShut; ah.parentElement.classList.toggle('shut', S.adminShut); ah.setAttribute('aria-expanded', String(!S.adminShut)); };
+  }
+  function setNav(k) {
+    S.nav = k; S.navOpen = false; closePops();
+    if (k === 'chat') { S.listTab = 'chats'; renderNav(); renderList(); renderMain(); go(narrow() ? 'list' : 'main'); return; }
+    if (k === 'calls') { S.listTab = 'calls'; seeCalls(); renderTop(); }
+    renderNav(); renderList(); renderMain(); go('main');
+  }
+
+  // ---- the list: Chats / Calls / Voicemail
+  function chatRow(c, uid) {
+    const ch = c || null; const id = ch ? ch.id : null; const lm = id ? S.last[id] : null; const un = id ? S.unread[id] || 0 : 0;
+    const dm = uid || (ch && ch.kind === 'dm' ? otherIn(ch) : null);
+    const label = dm ? nameOf(dm) : ch.name; const on = S.nav === 'chat' && S.ch && id && S.ch.id === id;
+    const pic = dm ? `<span class="lk-av">${av(dm, label)}${Presence.dot(dm)}</span>`
+      : `<span class="lk-chic${ch.kind === 'private' ? ' prv' : ''}" aria-hidden="true">${ch.kind === 'private' ? ic('lock') : ic('hash')}</span>`;
+    const prev = lm ? (lm.deleted ? 'Message deleted' : `${lm.user_id === S.user.id ? 'You: ' : dm ? '' : esc(nameOf(lm.user_id).split(' ')[0]) + ': '}${esc(lm.body.replace(/\s+/g, ' ').slice(0, 70))}`)
+      : dm ? esc(Presence.text(dm)) : esc((ch && ch.topic) || 'No messages yet');
+    const pinned = id && S.pinned.includes(id);
+    return `<div class="lk-row"><button class="item${on ? ' on' : ''}${un ? ' unread' : ''}" ${dm ? `data-dm="${dm}"` : `data-ch="${id}"`}>${pic}
+      <span class="lk-rb"><span class="lk-r1"><span class="nm">${esc(label)}</span>${lm ? `<time>${esc(whenShort(lm.created_at))}</time>` : dm && extOf(dm) ? `<span class="ext">${extOf(dm)}</span>` : ''}</span>
+      <span class="lk-r2"><span class="pv">${prev}</span>${un ? `<span class="badge">${un}</span>` : ''}</span></span></button>
+      ${id ? `<button class="lk-pin${pinned ? ' on' : ''}" data-pin="${id}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${esc(label)}" title="${pinned ? 'Unpin' : 'Pin to the top'}">${ic('pin')}</button>` : ''}</div>`;
+  }
+  function renderList() {
+    const el = document.getElementById('side'); if (!el) return;
+    const tab = S.listTab || 'chats'; const missed = missedNew(); const unread = unreadTotal();
+    let body = '';
+    if (tab === 'chats') {
+      const pinned = S.pinned.map((id) => S.chans.find((c) => c.id === id)).filter(Boolean);
+      const chs = S.chans.filter((c) => c.kind !== 'dm' && !S.pinned.includes(c.id));
+      const others = S.people.filter((p) => p.user_id !== S.user.id).filter((p) => { const d = dmWith(p.user_id); return !(d && S.pinned.includes(d.id)); })
+        .sort((a, b) => { const la = S.last[(dmWith(a.user_id) || {}).id]; const lb = S.last[(dmWith(b.user_id) || {}).id];
+          return (lb ? lb.created_at : '').localeCompare(la ? la.created_at : '') || a.display_name.localeCompare(b.display_name); });
+      body = `<button class="lk-new" id="newchat">${ic('plus')} New chat</button><div class="sidescroll" id="lscroll">
+        ${pinned.length ? `<div class="sec">Pinned</div>${pinned.map((c) => chatRow(c)).join('')}` : ''}
+        <div class="sec">Channels <button id="addch" aria-label="Add a channel" title="Add a channel">${ic('plus')}</button></div>
+        ${chs.map((c) => chatRow(c)).join('') || '<p class="lk-none">No channels yet.</p>'}
+        <div class="sec">Direct messages <button id="adddm" aria-label="Message someone" title="Message someone">${ic('plus')}</button></div>
+        ${others.map((p) => chatRow(dmWith(p.user_id), p.user_id)).join('') || '<p class="lk-none">Invite your team to start chatting.</p>'}</div>`;
+    } else if (tab === 'calls') {
+      const f = S.features || {}; const me = personOf(S.user.id) || {};
+      const trial = f.calls && !f.calls_paid && f.trial_days_left != null ? `<span class="trialtag">Trial · ${f.trial_days_left} days left</span>` : '';
+      body = `<div class="sidescroll" id="lscroll"><div class="sec">Ring a branch ${f.calls ? trial : '<span class="trialtag prem">⭐ Premium</span>'}<span><button id="dial" aria-label="Dial an extension" title="Dial an extension">${ic('grid')}</button></span></div>
+        ${S.branches.map((b) => `<div class="lk-row"><button class="item" data-callbranch="${b.id}" title="Rings everyone in ${esc(b.name)}"><span class="lk-chic" aria-hidden="true">${ic('phone')}</span><span class="lk-rb"><span class="lk-r1"><span class="nm">${esc(b.name)}</span>${b.extension ? `<span class="ext">${b.extension}</span>` : ''}</span><span class="lk-r2"><span class="pv">${b.people.length} ${b.people.length === 1 ? 'person' : 'people'} ring together</span></span></span></button></div>`).join('') || '<p class="lk-none">No branches yet.</p>'}
+        ${me.extension ? `<p class="myext">Your extension: <b>${me.extension}</b></p>` : ''}
+        <div class="sec">Recent calls</div>${callRows(S.callLog || [], 30)}</div>`;
+    } else {
+      body = `<div class="sidescroll" id="lscroll"><div class="lk-vm">${ic('vm')}<b>No voicemail</b><p>Coming with Riyeser Link Office voicemail. Messages people leave on your extension will show here.</p></div></div>`;
+    }
+    el.innerHTML = `<div class="lk-tabs" role="tablist"><button role="tab" data-tab="chats" aria-selected="${tab === 'chats'}" class="${tab === 'chats' ? 'on' : ''}">Chats${unread ? ` <span class="badge">${unread}</span>` : ''}</button>
+      <button role="tab" data-tab="calls" aria-selected="${tab === 'calls'}" class="${tab === 'calls' ? 'on' : ''}">Calls${missed ? ` <span class="badge">${missed}</span>` : ''}</button>
+      <button role="tab" data-tab="voicemail" aria-selected="${tab === 'voicemail'}" class="${tab === 'voicemail' ? 'on' : ''}">Voicemail <span class="cnt" id="vmc">0</span></button></div>${body}`;
+    el.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { S.listTab = b.dataset.tab; if (S.listTab === 'calls') { seeCalls(); renderTop(); renderNav(); } renderList(); });
+    el.querySelectorAll('[data-ch]').forEach((b) => b.onclick = () => openChannel(b.dataset.ch));
+    el.querySelectorAll('[data-dm]').forEach((b) => b.onclick = () => openDm(b.dataset.dm));
+    el.querySelectorAll('[data-pin]').forEach((b) => b.onclick = () => togglePin(b.dataset.pin));
+    el.querySelectorAll('[data-callbranch]').forEach((b) => b.onclick = () => Calls.start({ branch: b.dataset.callbranch }));
+    el.querySelectorAll('[data-redial]').forEach((b) => b.onclick = () => redial(b.dataset.redial));
+    const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = fn; };
+    on('#newchat', newChat); on('#addch', addChannel); on('#adddm', newChat); on('#dial', dialPad);
+    chatTitle();
+  }
+  function callRows(list, n) {
+    if (!list.length) return `<div class="lk-vm small">${ic('phone')}<b>Your calls will show here</b><p>Calls you make and get in Riyeser Link, on this device.</p></div>`;
+    return list.slice(0, n).map((c, i) => `<div class="lk-row"><button class="item lk-callrow${c.result === 'missed' ? ' miss' : ''}" data-redial="${i}" title="Call back">
+      <span class="lk-av">${c.peer ? av(c.peer, callWho(c)) + Presence.dot(c.peer) : `<span class="lk-chic" aria-hidden="true">${ic('phone')}</span>`}</span>
+      <span class="lk-rb"><span class="lk-r1"><span class="nm">${esc(callWho(c))}</span><time>${esc(whenShort(c.at))}</time></span>
+      <span class="lk-r2"><span class="pv"><span class="cdir">${ic(c.result === 'missed' ? 'missed' : c.dir === 'in' ? 'in' : 'outc')}</span>${esc(callLine(c))}${c.dur ? ` · ${durText(c.dur)}` : ''}${callExt(c) ? ` · Ext. ${callExt(c)}` : ''}</span></span></span></button></div>`).join('');
+  }
+  function redial(i) { const c = (S.callLog || [])[Number(i)]; if (!c) return; if (c.peer) Calls.start({ user: c.peer }); else if (c.branch) Calls.start({ branch: c.branch }); }
+  async function openDm(uid) {
+    if (uid === S.user.id) return;
+    const id = await api.openDm(S.team.id, uid);
+    if (!S.chans.find((c) => c.id === id)) S.chans = await api.channels(S.team.id);
+    openChannel(id);
+  }
+
+  // ---- the middle: a conversation, or Home / Calls / Contacts / Teams / Devices
+  function renderMain() {
+    const el = document.getElementById('main'); if (!el) return;
+    if (S.nav === 'chat') {
+      if (!document.getElementById('msgs')) {
+        el.innerHTML = `<header class="mhead" id="mhead"></header><div class="msgs" id="msgs" aria-live="polite"></div>
+          <form class="composer" id="comp"><div class="lk-up" id="upl" hidden></div><div class="cbox"><button type="button" class="lk-ib" id="attach" aria-label="Attach a file" title="Attach a file (up to 25 MB)">${ic('clip')}</button>
+          <button type="button" class="lk-ib" id="emo" aria-label="Add an emoji" title="Emoji">${ic('smile')}</button>
+          <textarea id="txt" rows="1" placeholder="" aria-label="Message"></textarea><button id="send" disabled aria-label="Send" title="Send (Enter)">${ic('send')}</button></div>
+          <input type="file" id="file" multiple hidden></form>`;
+        wireComposer();
+      }
+      renderHead(); renderMsgs(true);
+      return;
+    }
+    el.innerHTML = `<div class="lk-view" id="mview"><button class="back lk-vback" aria-label="Back">${ic('back')}</button>${viewHtml(S.nav)}</div>`;
+    el.querySelector('.lk-vback').onclick = () => go('list');
+    wireView(el);
+  }
+  function card(title, body, cls = '', id = '') { return `<section class="lk-card ${cls}"${id ? ` id="${id}"` : ''}><h3>${title}</h3>${body}</section>`; }
+  function personRow(p, actions = true) {
+    const me = p.user_id === S.user.id;
+    return `<div class="lk-person" data-person="${p.user_id}"><span class="lk-av">${av(p.user_id, p.display_name)}${Presence.dot(p.user_id)}</span>
+      <span class="lk-pn"><b>${esc(p.display_name)}${me && p.display_name !== 'You' ? ' <small>(You)</small>' : ''}</b><small class="lk-pst">${esc(Presence.text(p.user_id))}</small></span>
+      ${p.extension ? `<span class="lk-ext">Ext. ${p.extension}</span>` : '<span class="lk-ext"></span>'}
+      ${actions && !me ? `${plus() ? `<button class="lk-call" data-callp="${p.user_id}" aria-label="Call ${esc(p.display_name)}" title="Call">${ic('phone')}</button>` : ''}` : ''}</div>`;
+  }
+  function viewHtml(k) {
+    const me = personOf(S.user.id) || {};
+    if (k === 'home') {
+      const recent = [...S.chans].filter((c) => S.pinned.includes(c.id) || S.unread[c.id] || S.last[c.id])
+        .sort((a, b) => (S.pinned.includes(b.id) - S.pinned.includes(a.id)) || ((S.unread[b.id] ? 1 : 0) - (S.unread[a.id] ? 1 : 0)) || String((S.last[b.id] || {}).created_at || '').localeCompare(String((S.last[a.id] || {}).created_at || ''))).slice(0, 6);
+      const missed = (S.callLog || []).filter((c) => c.result === 'missed').slice(0, 4);
+      const chans = S.chans.filter((c) => c.kind !== 'dm').slice(0, 6);
+      return `<h1>Your workspace</h1><p class="lk-sub">Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}${me.display_name && me.display_name !== 'You' ? ', ' + esc(me.display_name.split(' ')[0]) : ''}. Here's what's happening at ${esc(S.team.name)}.</p>
+        <div class="lk-cards">
+        ${card(`${ic('chat')} Recent conversations`, recent.length ? `<div class="lk-mini">${recent.map((c) => `<button class="mi" data-go-ch="${c.id}">${c.kind === 'dm' ? `<span class="lk-av">${av(otherIn(c), chanLabel(c))}${Presence.dot(otherIn(c))}</span>` : `<span class="lk-chic sm">${c.kind === 'private' ? ic('lock') : ic('hash')}</span>`}<span>${S.pinned.includes(c.id) ? `<span class="pinmark">${ic('pin')}</span>` : ''}${esc(chanLabel(c))}<small>${S.last[c.id] ? esc(S.last[c.id].body.slice(0, 60)) : esc(c.topic || '')}</small></span>${S.unread[c.id] ? `<span class="badge">${S.unread[c.id]}</span>` : ''}</button>`).join('')}</div>` : '<p class="muted">Pinned chats and unread messages show here.</p>', '', 'hrecent')}
+        ${card(`${ic('phone')} Quick call`, plus() ? `<form class="lk-qc" id="qcf"><input id="qci" placeholder="Search name or extension" autocomplete="off" aria-label="Name or extension"><button class="btn p" id="qcgo">${ic('phone')} Call</button></form><div class="lk-mini" id="qcr"></div>` : `<p class="muted">Calls between your people and branches come with <b>Riyeser Link Plus</b>.</p><button class="btn" id="qcup">See Riyeser Link Plus</button>`, '', 'hquick')}
+        ${card(`${ic('missed')} Missed calls`, missed.length ? `<div class="lk-mini">${missed.map((c) => `<div class="mi"><span class="lk-av">${c.peer ? av(c.peer, callWho(c)) : ''}</span><span>${esc(callWho(c))}<small>${esc(whenShort(c.at))}${callExt(c) ? ` · Ext. ${callExt(c)}` : ''}</small></span>
+          ${c.peer && plus() ? `<button class="lk-ib" data-callp="${c.peer}" aria-label="Call back ${esc(callWho(c))}" title="Call back">${ic('phone')}</button>` : ''}${c.peer ? `<button class="lk-ib" data-dmp="${c.peer}" aria-label="Message ${esc(callWho(c))}" title="Send a message">${ic('chat')}</button>` : ''}</div>`).join('')}</div>` : '<p class="muted">No missed calls. Nice.</p>', '', 'hmissed')}
+        ${card(`${ic('hash')} Team channels`, `<div class="lk-mini">${chans.map((c) => `<button class="mi" data-go-ch="${c.id}"><span class="lk-chic sm">${c.kind === 'private' ? ic('lock') : ic('hash')}</span><span>${esc(c.name)}<small>${esc(c.topic || '')}</small></span>${S.unread[c.id] ? `<span class="badge">${S.unread[c.id]}</span>` : ''}</button>`).join('')}</div><button class="linkbtn" data-nav-go="channels">All channels →</button>`, '', 'hchans')}
+        ${isAdmin() ? card(`${ic('user')} Requests`, S.requests.length ? `<p><b>${S.requests.length}</b> ${S.requests.length === 1 ? 'person is' : 'people are'} asking to join ${esc(S.team.name)}.</p><button class="btn p" id="hreqs">Review requests</button>` : '<p class="muted">No one is waiting to join. Share your Company ID to invite people.</p><button class="btn" id="hinv">Invite people</button>', '', 'hrequests') : ''}
+        ${card(`${ic('desk')} My devices`, `<div id="hdev"><p class="muted">Loading…</p></div>`, '', 'hdevices')}
+        </div>`;
+    }
+    if (k === 'calls') {
+      return `<h1>Calls</h1><p class="lk-sub">${plus() ? 'Ring a person or a whole branch. Calls go straight between devices, with no call charges.' : 'Calls come with <b>Riyeser Link Plus</b>: free for your first 90 days.'}</p>
+        <div class="lk-cards two">${card(`${ic('grid')} Dial`, dialHtml('vd'), 'lk-qd')}${card(`${ic('clock')} Recent calls`, `<div class="lk-mini lk-calls">${callRows(S.callLog || [], 50)}</div>`)}</div>`;
+    }
+    if (k === 'contacts') {
+      return `<h1>Contacts</h1><p class="lk-sub">Everyone at ${esc(S.team.name)}, their status and extension.</p>
+        <input class="lk-find" id="cfind" placeholder="Search people…" aria-label="Search people">
+        <div class="lk-dir" id="cdir">${S.people.map((p) => `<div class="lk-drow" data-name="${esc(p.display_name.toLowerCase())} ${p.extension || ''}">${personRow(p, false)}<span class="lk-job">${esc(p.role === 'owner' ? 'Owner' : jobName(p.job_role))}</span>
+          <span class="lk-dact">${p.user_id !== S.user.id ? `<button class="btn sm" data-dmp="${p.user_id}">${ic('chat')} Message</button>${plus() ? `<button class="btn sm" data-callp="${p.user_id}">${ic('phone')} Call</button>` : ''}` : ''}</span></div>`).join('')}</div>
+        ${S.branches.length ? `<h2 class="lk-h2">Branches</h2><div class="lk-dir">${S.branches.map((b) => `<div class="lk-drow"><div class="lk-person"><span class="lk-chic">${ic('branch')}</span><span class="lk-pn"><b>${esc(b.name)}</b><small class="lk-pst">${b.people.length} ${b.people.length === 1 ? 'person' : 'people'} · rings everyone</small></span>${b.extension ? `<span class="lk-ext">Ext. ${b.extension}</span>` : ''}</div><span class="lk-job"></span><span class="lk-dact">${plus() ? `<button class="btn sm" data-callbranch="${b.id}">${ic('phone')} Call</button>` : ''}</span></div>`).join('')}</div>` : ''}`;
+    }
+    if (k === 'channels') {
+      const chs = S.chans.filter((c) => c.kind !== 'dm');
+      return `<div class="lk-vh"><div><h1>Teams / Channels</h1><p class="lk-sub">Channels everyone can see, and private ones you're in.</p></div><button class="btn p" id="vnewch">${ic('plus')} New channel</button></div>
+        <div class="lk-cards">${chs.map((c) => `<button class="lk-card lk-chcard" data-go-ch="${c.id}"><span class="lk-chic">${c.kind === 'private' ? ic('lock') : ic('hash')}</span><b>${esc(c.name)}</b><small>${esc(c.topic || (c.kind === 'private' ? 'Private' : 'Everyone in the team'))}</small>
+          <span class="lk-chm">${c.kind === 'private' ? `${c.people.length} ${c.people.length === 1 ? 'person' : 'people'} · private` : `${S.people.length} people`}${S.unread[c.id] ? ` · <span class="badge">${S.unread[c.id]}</span>` : ''}</span></button>`).join('')}</div>`;
+    }
+    if (k === 'devices') {
+      return `<h1>Devices</h1><p class="lk-sub">Your desk phone, and the PCs and apps you're signed in on.</p><div class="lk-cards two">
+        ${card(`${ic('desk')} My desk phone`, '<div id="vdesk"><p class="muted">Loading…</p></div>')}${card(`${ic('monitor')} My PCs`, '<div id="vpcs"><p class="muted">Loading…</p></div>')}</div>`;
+    }
+    return '';
+  }
+  function wireView(el) {
+    el.querySelectorAll('[data-go-ch]').forEach((b) => b.onclick = () => openChannel(b.dataset.goCh));
+    el.querySelectorAll('[data-nav-go]').forEach((b) => b.onclick = () => setNav(b.dataset.navGo));
+    el.querySelectorAll('[data-callp]').forEach((b) => b.onclick = () => Calls.start({ user: b.dataset.callp }));
+    el.querySelectorAll('[data-dmp]').forEach((b) => b.onclick = () => openDm(b.dataset.dmp));
+    el.querySelectorAll('[data-callbranch]').forEach((b) => b.onclick = () => Calls.start({ branch: b.dataset.callbranch }));
+    el.querySelectorAll('[data-redial]').forEach((b) => b.onclick = () => redial(b.dataset.redial));
+    const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = fn; };
+    on('#hreqs', () => (needs2step() ? security() : joinRequests())); on('#hinv', invite); on('#vnewch', addChannel); on('#qcup', upsell);
+    wireDial(el, 'vd');
+    const cf = el.querySelector('#cfind'); if (cf) cf.oninput = () => { const q = cf.value.trim().toLowerCase(); el.querySelectorAll('#cdir .lk-drow').forEach((r) => { r.hidden = !!q && !r.dataset.name.includes(q); }); };
+    const qci = el.querySelector('#qci');
+    if (qci) {
+      const find = () => { const q = qci.value.trim().toLowerCase(); return q ? S.people.filter((p) => p.user_id !== S.user.id && (p.display_name.toLowerCase().includes(q) || String(p.extension || '').startsWith(q))).slice(0, 4) : []; };
+      const show = () => { const r = find(); el.querySelector('#qcr').innerHTML = r.map((p) => `<button class="mi" type="button" data-callp="${p.user_id}"><span class="lk-av">${av(p.user_id, p.display_name)}${Presence.dot(p.user_id)}</span><span>${esc(p.display_name)}<small>${esc(Presence.text(p.user_id))}${p.extension ? ` · Ext. ${p.extension}` : ''}</small></span>${ic('phone')}</button>`).join('');
+        el.querySelectorAll('#qcr [data-callp]').forEach((b) => b.onclick = () => Calls.start({ user: b.dataset.callp })); };
+      qci.oninput = show;
+      el.querySelector('#qcf').onsubmit = (e) => { e.preventDefault(); const t = findDial(qci.value) || (find()[0] ? { user: find()[0].user_id } : null); if (t) Calls.start(t); else { el.querySelector('#qcr').innerHTML = '<p class="muted small">No one by that name or extension.</p>'; } };
+    }
+    if (el.querySelector('#hdev') || el.querySelector('#vdesk')) fillDevices(el);
+  }
+  async function fillDevices(el) {
+    const [my, devs] = await Promise.all([api.linkMyPhone(S.team.id).catch(() => null), api.devices(S.team.id).catch(() => [])]);
+    const mine = (devs || []).filter((d) => d.user_id === S.user.id);
+    const phones = (my && my.phones) || []; const ext = (my && my.extension) || extOf(S.user.id);
+    const phoneHtml = phones.length ? phones.map((p) => `<div class="mi"><span class="lk-chic sm">${ic('desk')}</span><span>${esc(phoneLabel(p))}<small>${esc([p.vendor, p.model].filter(Boolean).join(' '))}${ext ? ` · Ext. ${esc(ext)}` : ''}</small></span><span class="lk-pill ${p.registered ? 'ok' : ''}">${p.registered ? 'Online' : 'Not connected'}</span></div>`).join('')
+      : `<p class="muted">${ext ? `No desk phone on extension ${esc(ext)} yet.` : 'No extension or desk phone yet.'}</p>`;
+    const pcHtml = mine.length ? mine.map((d) => `<div class="mi"><span class="lk-chic sm">${ic('monitor')}</span><span>${esc(d.device_name || 'A PC')}<small>${esc(d.platform || '')}${d.app_version ? ' · ' + esc(d.app_version) : ''} · seen ${esc(ago(d.last_seen))}</small></span></div>`).join('')
+      : '<p class="muted">No PCs linked yet. Riyeser Central links a PC when you sign in on it.</p>';
+    const h = el.querySelector('#hdev'); if (h) { h.innerHTML = `<div class="lk-mini">${phoneHtml}${mine.length ? `<div class="mi"><span class="lk-chic sm">${ic('monitor')}</span><span>${mine.length} PC${mine.length === 1 ? '' : 's'} linked<small>${esc(mine[0].device_name || '')}</small></span></div>` : ''}</div><button class="linkbtn" data-nav-go="devices">All my devices →</button>`;
+      h.querySelector('[data-nav-go]').onclick = () => setNav('devices'); }
+    const vd = el.querySelector('#vdesk'); if (vd) { vd.innerHTML = `<div class="lk-mini">${phoneHtml}</div><button class="btn" id="vmyph">${ic('desk')} Open My phone</button>`; vd.querySelector('#vmyph').onclick = () => myPhonePage('chat'); }
+    const vp = el.querySelector('#vpcs'); if (vp) vp.innerHTML = `<div class="lk-mini">${pcHtml}<div class="mi"><span class="lk-chic sm">${ic('chat')}</span><span>This ${/Electron/.test(navigator.userAgent) ? 'Riyeser Link app' : 'browser'}<small>Signed in now</small></span><span class="lk-pill ok">Online</span></div></div>`;
+  }
+
+  // ---- conversation header
   function renderHead() {
     const el = document.getElementById('mhead'); if (!el) return;
-    el.innerHTML = `<button class="back" aria-label="Back to channels">‹</button>${S.ch ? (S.ch.kind === 'dm'
-      ? `${av(S.ch.people.find((p) => p !== S.user.id) || S.user.id, chanLabel(S.ch))}<div style="flex:1;min-width:0"><h2>${esc(chanLabel(S.ch))}</h2><small>Direct message${(() => { const o = S.people.find((p) => p.user_id === S.ch.people.find((u) => u !== S.user.id)); return o && o.extension ? ' · ext ' + o.extension : ''; })()}</small></div><button class="btn sm callbtn" id="calldm" aria-label="Call ${esc(chanLabel(S.ch))}">📞 Call</button>`
-      : `<div style="flex:1;min-width:0"><h2>${S.ch.kind === 'private' ? '🔒' : '#'} ${esc(S.ch.name)}</h2><small>${S.ch.kind === 'private' ? `Private · ${S.ch.people.length} ${S.ch.people.length === 1 ? 'person' : 'people'}${S.ch.topic ? ' · ' : ''}` : ''}${esc(S.ch.topic || '')}</small></div>${S.ch.kind === 'private' ? '<button class="btn sm" id="ppl">People</button>' : ''}`) : ''}`;
-    el.querySelector('.back').onclick = () => { S.inChat = false; document.querySelector('.shell').classList.remove('inchat'); };
-    const pb = el.querySelector('#ppl'); if (pb) pb.onclick = peopleOf;
-    const cb = el.querySelector('#calldm'); if (cb) cb.onclick = () => Calls.start({ user: S.ch.people.find((u) => u !== S.user.id) });
-    const t = document.getElementById('txt'); if (t && S.ch) t.placeholder = S.ch.kind === 'dm' ? `Message ${chanLabel(S.ch)}` : S.ch.kind === 'private' ? `Message ${S.ch.name} (private)` : `Message #${S.ch.name}`;
+    const c = S.ch;
+    if (!c) { el.innerHTML = '<button class="back" aria-label="Back to chats">‹</button><div class="lk-ht"><h2>No chat open</h2></div>'; el.querySelector('.back').onclick = () => go('list'); return; }
+    const o = otherIn(c); const count = c.kind === 'channel' ? S.people.length : c.people.length; const pinned = S.pinned.includes(c.id);
+    el.innerHTML = `<button class="back" aria-label="Back to chats">${ic('back')}</button>${c.kind === 'dm' ? `<span class="lk-av">${av(o, chanLabel(c))}${Presence.dot(o)}</span>` : `<span class="lk-chic hd${c.kind === 'private' ? ' prv' : ''}" aria-hidden="true">${c.kind === 'private' ? ic('lock') : ic('hash')}</span>`}
+      <div class="lk-ht">${c.kind === 'dm' ? `<h2>${esc(chanLabel(c))}</h2><small>${esc(Presence.text(o))}${extOf(o) ? ` · Ext. ${extOf(o)}` : ''}</small>`
+        : `<h2>${c.kind === 'private' ? '🔒' : '#'} ${esc(c.name)}</h2><small>${c.kind === 'private' ? `Private · ${c.people.length} ${c.people.length === 1 ? 'person' : 'people'}${c.topic ? ' · ' : ''}` : ''}${esc(c.topic || '')}</small>`}</div>
+      <div class="lk-hacts">
+        <button class="lk-ib" id="vidbtn" aria-label="Video call" title="Video call">${ic('video')}</button>
+        <button class="lk-ib" id="${c.kind === 'dm' ? 'calldm' : 'callch'}" aria-label="${c.kind === 'dm' ? `Call ${esc(chanLabel(c))}` : 'Call someone in this chat'}" title="Call">${ic('phone')}</button>
+        <button class="lk-hb" id="ppl" aria-label="People in this chat: ${count}" title="People">${ic('users')}<span>${count}</span></button>
+        <button class="lk-ib" id="infobtn" aria-label="Chat info" title="Info">${ic('info')}</button>
+        <button class="lk-ib" id="morebtn" aria-label="More" title="More">${ic('more')}</button></div>`;
+    el.querySelector('.back').onclick = () => go('list');
+    const pb = el.querySelector('#ppl'); pb.onclick = () => (c.kind === 'private' ? peopleOf() : showRight('people'));
+    el.querySelector('#infobtn').onclick = () => showRight('info');
+    const call = (video) => (c.kind === 'dm' ? Calls.start({ user: o, video }) : pickToCall(video));
+    el.querySelector('#vidbtn').onclick = () => call(true); el.querySelector(c.kind === 'dm' ? '#calldm' : '#callch').onclick = () => call(false);
+    el.querySelector('#morebtn').onclick = (e) => popMenu(e.currentTarget, `<button class="mi" id="mpin">${ic('pin')}<span>${pinned ? 'Unpin this chat' : 'Pin this chat'}</span></button>
+      <button class="mi" id="mread">${ic('chat')}<span>Mark as read</span></button>
+      ${c.kind === 'private' ? `<button class="mi" id="mppl">${ic('users')}<span>Who's in it</span></button>` : ''}
+      ${c.kind !== 'dm' ? `<button class="mi" id="minfo">${ic('info')}<span>Channel info</span></button>` : ''}`, (d, close) => {
+      const on = (id, fn) => { const b = d.querySelector(id); if (b) b.onclick = () => { close(); fn(); }; };
+      on('#mpin', () => togglePin(c.id)); on('#mread', () => { api.markRead(c.id, S.user.id); S.unread[c.id] = 0; renderSide(); }); on('#mppl', peopleOf); on('#minfo', () => showRight('info'));
+    });
+    const t = document.getElementById('txt');
+    if (t) t.placeholder = c.kind === 'dm' ? `Type a message to ${chanLabel(c)}…` : c.kind === 'private' ? `Type a message in 🔒 ${c.name}…` : `Type a message in #${c.name}…`;
   }
+  function pickToCall(video) {
+    if (!plus()) return upsell();
+    const who = (S.ch.kind === 'private' ? S.ch.people : S.people.map((p) => p.user_id)).filter((u) => u !== S.user.id);
+    modal(`<h3>${video ? 'Video call' : 'Call'} someone in ${esc(S.ch.kind === 'dm' ? chanLabel(S.ch) : '#' + S.ch.name)}</h3><p>Group calls are coming. For now, call one person.</p>
+      <div class="lk-mini">${who.map((u) => `<button class="mi" data-cw="${u}"><span class="lk-av">${av(u, nameOf(u))}${Presence.dot(u)}</span><span>${esc(nameOf(u))}<small>${esc(Presence.text(u))}${extOf(u) ? ` · Ext. ${extOf(u)}` : ''}</small></span>${ic(video ? 'video' : 'phone')}</button>`).join('')}</div>
+      <div class="mfoot"><button class="btn" id="cl">Cancel</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = close; d.querySelectorAll('[data-cw]').forEach((b) => b.onclick = () => { close(); Calls.start({ user: b.dataset.cw, video }); });
+    });
+  }
+
+  // ---- right panel: People (n) / Info, and Quick dial
+  function showRight(tab) { S.rightTab = tab; S.rightShut = false; renderRight(); if (narrow() || matchMedia('(max-width: 1180px)').matches) go('right'); else paneClasses(); }
+  function renderRight() {
+    const el = document.getElementById('lkright'); if (!el) return;
+    const tab = S.rightTab || 'people'; const q = (S.pq || '').toLowerCase();
+    const list = [...S.people].sort((a, b) => (b.user_id === S.user.id) - (a.user_id === S.user.id) || (Number(a.extension) || 9999) - (Number(b.extension) || 9999))
+      .filter((p) => !q || p.display_name.toLowerCase().includes(q) || String(p.extension || '').startsWith(q));
+    let body = '';
+    if (tab === 'people') {
+      body = `<div class="lk-psearch">${ic('search')}<input id="psearch" placeholder="Search people…" aria-label="Search people" value="${esc(S.pq || '')}"></div>
+        <div class="lk-people" id="plist">${list.map((p) => personRow(p)).join('') || '<p class="lk-none">No one matches.</p>'}</div>
+        <section class="lk-qd${S.qdShut ? ' shut' : ''}" id="qd"><button class="lk-qdh" id="qdh" aria-expanded="${!S.qdShut}">${ic('grid')}<span>Quick Dial</span>${ic('down')}</button><div class="lk-qdb">${dialHtml('qd')}</div></section>`;
+    } else {
+      const c = S.ch;
+      if (!c) body = '<p class="lk-none">Open a chat to see its details.</p>';
+      else {
+        const o = otherIn(c); const files = S.msgs.filter((m) => m.files && m.files.length && !m.deleted).flatMap((m) => m.files.map((f, i) => ({ ...f, m: m.id, i }))).slice(-8).reverse();
+        const ppl = c.kind === 'channel' ? S.people.map((p) => p.user_id) : c.people;
+        body = `<div class="lk-info">${c.kind === 'dm' ? `<div class="lk-icard"><span class="lk-av big">${av(o, nameOf(o), 'big')}${Presence.dot(o)}</span><b>${esc(nameOf(o))}</b><small>${esc(Presence.text(o))}${extOf(o) ? ` · Ext. ${extOf(o)}` : ''}</small>
+            ${plus() ? `<div class="row2"><button class="btn sm" data-callp="${o}">${ic('phone')} Call</button><button class="btn sm" data-vidp="${o}">${ic('video')} Video</button></div>` : ''}</div>`
+          : `<div class="lk-icard"><span class="lk-chic big">${c.kind === 'private' ? ic('lock') : ic('hash')}</span><b>${esc(c.name)}</b><small>${esc(c.topic || (c.kind === 'private' ? 'Private chat' : 'Everyone in the team'))}</small></div>`}
+          <button class="btn w" id="ipin">${ic('pin')} ${S.pinned.includes(c.id) ? 'Unpin this chat' : 'Pin this chat'}</button>
+          ${c.kind !== 'dm' ? `<h4>${c.kind === 'private' ? 'Who\'s in it' : 'Members'} · ${ppl.length}</h4><div class="lk-people">${ppl.map((u) => personOf(u)).filter(Boolean).map((p) => personRow(p)).join('')}</div>${c.kind === 'private' ? '<button class="btn sm" id="ippl">Change who\'s in it</button>' : ''}` : ''}
+          <h4>Files</h4>${files.length ? `<div class="lk-mini">${files.map((f) => `<button class="mi" data-ifile="${f.m}:${f.i}"><span class="lk-chic sm">${ic('file')}</span><span>${esc(f.name)}<small>${esc(sizeText(Number(f.size) || 0))}</small></span>${ic('dl')}</button>`).join('')}</div>` : '<p class="muted small">Files shared here show up here.</p>'}</div>`;
+      }
+    }
+    el.innerHTML = `<div class="lk-rhead"><button class="back" aria-label="Back">${ic('back')}</button><div class="lk-tabs" role="tablist"><button role="tab" data-rt="people" aria-selected="${tab === 'people'}" class="${tab === 'people' ? 'on' : ''}">People (${S.people.length})</button><button role="tab" data-rt="info" aria-selected="${tab === 'info'}" class="${tab === 'info' ? 'on' : ''}">Info</button></div>
+      <button class="lk-ib lk-rclose" id="rclose" aria-label="Close the panel" title="Close">${ic('x')}</button></div><div class="lk-rbody">${body}</div>`;
+    el.querySelector('.back').onclick = () => go(S.ch ? 'main' : 'list');
+    el.querySelector('#rclose').onclick = () => { S.rightShut = true; if (S.pane === 'right') S.pane = 'main'; paneClasses(); };
+    el.querySelectorAll('[data-rt]').forEach((b) => b.onclick = () => { S.rightTab = b.dataset.rt; renderRight(); });
+    el.querySelectorAll('[data-callp]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); Calls.start({ user: b.dataset.callp }); });
+    el.querySelectorAll('[data-vidp]').forEach((b) => b.onclick = () => Calls.start({ user: b.dataset.vidp, video: true }));
+    el.querySelectorAll('.lk-person[data-person]').forEach((r) => { if (r.dataset.person !== S.user.id) { r.tabIndex = 0; r.setAttribute('role', 'button'); r.setAttribute('aria-label', `Message ${nameOf(r.dataset.person)}`);
+      r.onclick = () => openDm(r.dataset.person); r.onkeydown = (e) => { if (e.key === 'Enter') openDm(r.dataset.person); }; } });
+    const ps = el.querySelector('#psearch'); if (ps) ps.oninput = () => { S.pq = ps.value; const pos = ps.selectionStart; renderRight(); const n = document.getElementById('psearch'); n.focus(); n.setSelectionRange(pos, pos); };
+    const qh = el.querySelector('#qdh'); if (qh) qh.onclick = () => { S.qdShut = !S.qdShut; renderRight(); };
+    const ip = el.querySelector('#ipin'); if (ip) ip.onclick = () => togglePin(S.ch.id);
+    const ipp = el.querySelector('#ippl'); if (ipp) ipp.onclick = peopleOf;
+    el.querySelectorAll('[data-ifile]').forEach((b) => b.onclick = () => { const [mid, i] = b.dataset.ifile.split(':'); const m = S.msgs.find((x) => String(x.id) === mid); if (m) download(m.files[Number(i)]); });
+    wireDial(el, 'qd');
+  }
+  // the keypad (Quick dial in the right panel, and the Calls view)
+  function dialHtml(p) {
+    const sub = { 2: 'ABC', 3: 'DEF', 4: 'GHI', 5: 'JKL', 6: 'MNO', 7: 'PQRS', 8: 'TUV', 9: 'WXYZ', 0: '+' };
+    return `<input class="lk-dn" id="${p}n" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="Extension" aria-label="Extension to call" value="${esc(S.dial[p] || '')}">
+      <div class="lk-keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '*', 0, '#'].map((k) => `<button type="button" data-${p}k="${k}">${k}<small>${sub[k] || ''}</small></button>`).join('')}</div>
+      <div class="lk-dw" id="${p}w" aria-live="polite"></div>
+      <div class="lk-dcall"><button type="button" class="lk-green" id="${p}call" aria-label="Call">${ic('phone')}</button><button type="button" class="lk-vbtn" id="${p}vid" aria-label="Video call">${ic('video')}</button></div>`;
+  }
+  function findDial(v) {
+    const x = Number(String(v).trim()); if (!x) return null;
+    const p = S.people.find((q) => q.extension === x && q.user_id !== S.user.id); if (p) return { user: p.user_id, label: p.display_name };
+    const b = S.branches.find((q) => q.extension === x); return b ? { branch: b.id, label: b.name + ' (everyone)' } : null;
+  }
+  function wireDial(root, p) {
+    const n = root.querySelector(`#${p}n`); if (!n) return; const w = root.querySelector(`#${p}w`);
+    const show = () => { S.dial[p] = n.value; const t = findDial(n.value); w.textContent = n.value ? (t ? `${t.label}${t.user ? ' · ' + Presence.text(t.user) : ''}` : 'No one on that number') : ''; };
+    if (n.value) show();
+    n.oninput = () => { n.value = n.value.replace(/[^0-9*#]/g, '').slice(0, 4); show(); };
+    root.querySelectorAll(`[data-${p}k]`).forEach((k) => k.onclick = () => { n.value = (n.value + k.getAttribute(`data-${p}k`)).slice(0, 4); show(); });
+    n.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); root.querySelector(`#${p}call`).click(); } if (e.key === 'Backspace' && !n.value) e.preventDefault(); };
+    const go2 = (video) => { const t = findDial(n.value); if (!t) { show(); n.focus(); return; } if (video && !t.user) { w.textContent = 'Video calls are for one person at a time.'; return; } Calls.start({ ...t, video }); n.value = ''; show(); };
+    root.querySelector(`#${p}call`).onclick = () => go2(false); root.querySelector(`#${p}vid`).onclick = () => go2(true);
+  }
+
   function renderMsgs(toBottom) {
     const el = document.getElementById('msgs'); if (!el) return;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
     el.innerHTML = msgsHtml();
     if (toBottom || near) el.scrollTop = el.scrollHeight;
-    el.querySelectorAll('[data-act]').forEach((b) => b.onclick = async () => {
-      const id = b.closest('.msg').dataset.id;
-      if (b.dataset.act === 'del') { if (!confirm('Delete this message?')) return; await api.remove(id); const m = S.msgs.find((x) => x.id === id); if (m) { m.deleted = true; } renderMsgs(); }
+    el.querySelectorAll('[data-act]').forEach((b) => b.onclick = async (e) => {
+      e.stopPropagation(); const id = b.closest('.msg').dataset.id;
+      if (b.dataset.act === 'react') return popMenu(b, `<div class="rxpick">${REACTIONS.map((x) => `<button class="mi" data-rxp="${x}" aria-label="React ${x}">${x}</button>`).join('')}</div>`,
+        (d, close) => d.querySelectorAll('[data-rxp]').forEach((x) => x.onclick = () => { close(); react(id, x.dataset.rxp); }), 'rxmenu');
+      if (b.dataset.act === 'del') { if (!(await ask('Delete this message?', { yes: 'Delete', danger: true }))) return; await api.remove(id); const m = S.msgs.find((x) => x.id === id); if (m) { m.deleted = true; } renderMsgs(); }
       else { S.editing = id; renderMsgs(); const ta = el.querySelector(`[data-edit="${id}"] textarea`); ta && ta.focus(); }
     });
+    el.querySelectorAll('[data-rx]').forEach((b) => b.onclick = () => react(b.closest('.msg').dataset.id, b.dataset.rx));
+    el.querySelectorAll('[data-file]').forEach((b) => b.onclick = () => { const m = S.msgs.find((x) => String(x.id) === b.closest('.msg').dataset.id); if (m) download(m.files[Number(b.dataset.file)]); });
+    el.querySelectorAll('.msg').forEach((m) => m.addEventListener('click', (e) => { if (matchMedia('(hover: none)').matches && !e.target.closest('button, a, form')) { el.querySelectorAll('.msg.sel').forEach((x) => x !== m && x.classList.remove('sel')); m.classList.toggle('sel'); } }));
     el.querySelectorAll('[data-edit]').forEach((f) => {
       const ta = f.querySelector('textarea');
       const save = async () => { const v = ta.value.trim(); const m = S.msgs.find((x) => x.id === f.dataset.edit);
@@ -1137,6 +1883,12 @@
       ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); } if (e.key === 'Escape') { S.editing = null; renderMsgs(); } };
     });
   }
+  async function download(f) {
+    if (!f) return;
+    try { const url = await api.fileUrl(f.path, f.name); const a = document.createElement('a'); a.href = url; a.download = f.name; a.rel = 'noopener'; a.target = '_blank'; document.body.appendChild(a); a.click(); a.remove(); }
+    catch (err) { tell('That file couldn\'t be opened: ' + plainError(err)); }
+  }
+  const safeName = (n) => (String(n || 'file').normalize('NFKD').replace(/[^\w.\- ]+/g, '').replace(/\s+/g, '_').replace(/^\.+/, '').slice(-100) || 'file');
   function wireComposer() {
     const f = document.getElementById('comp'); const t = document.getElementById('txt'); const b = document.getElementById('send');
     const grow = () => { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 160) + 'px'; b.disabled = !t.value.trim() || !S.ch; };
@@ -1145,11 +1897,76 @@
     f.onsubmit = async (e) => {
       e.preventDefault(); const body = t.value.trim(); if (!body || !S.ch) return;
       t.value = ''; grow();
-      try { const m = await api.send(S.team.id, S.ch.id, body); if (!S.msgs.find((x) => x.id === m.id)) S.msgs.push(m); renderMsgs(true); }
-      catch (err) { t.value = body; grow(); alert('That message didn\'t send: ' + plainError(err)); }
+      try { const m = await api.send(S.team.id, S.ch.id, body); if (!S.msgs.find((x) => x.id === m.id)) S.msgs.push(m); S.last[S.ch.id] = m; renderMsgs(true); renderList(); }
+      catch (err) { t.value = body; grow(); tell('That message didn\'t send: ' + plainError(err)); }
     };
-    renderHead();
+    document.getElementById('emo').onclick = (e) => popMenu(e.currentTarget, `<div class="emopick">${EMOJI.map((x) => `<button class="mi" data-em="${x}" aria-label="${x}">${x}</button>`).join('')}</div>`, (d, close) => {
+      d.querySelectorAll('[data-em]').forEach((x) => x.onclick = () => { const s0 = t.selectionStart ?? t.value.length; t.value = t.value.slice(0, s0) + x.dataset.em + t.value.slice(t.selectionEnd ?? s0); close(); grow(); t.focus(); t.setSelectionRange(s0 + x.dataset.em.length, s0 + x.dataset.em.length); });
+    }, 'emomenu');
+    const fi = document.getElementById('file');
+    document.getElementById('attach').onclick = () => { if (!S.ch) return; fi.value = ''; fi.click(); };
+    fi.onchange = () => sendFiles([...fi.files]);
+    // drop files onto the conversation
+    const main = document.getElementById('main');
+    main.ondragover = (e) => { if (S.ch && e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); main.classList.add('drop'); } };
+    main.ondragleave = () => main.classList.remove('drop');
+    main.ondrop = (e) => { main.classList.remove('drop'); if (S.ch && e.dataTransfer && e.dataTransfer.files.length) { e.preventDefault(); sendFiles([...e.dataTransfer.files]); } };
     if (matchMedia('(min-width: 761px)').matches) t.focus();
+  }
+  async function sendFiles(list) {
+    if (!list.length || !S.ch) return;
+    if (list.length > 10) return tell('Send up to 10 files at a time.');
+    const big = list.find((x) => x.size > MAX_FILE); if (big) return tell(`${big.name} is over 25 MB. Send a smaller file, or share a link to it instead.`);
+    const empty = list.find((x) => !x.size); if (empty) return tell(`${empty.name} is empty.`);
+    const box = document.getElementById('upl'); const t = document.getElementById('txt'); const ch = S.ch;
+    box.hidden = false; const done = [];
+    try {
+      for (const x of list) {
+        box.innerHTML = `<span class="spin sm"></span> Uploading ${esc(x.name)} (${esc(sizeText(x.size))})…`;
+        done.push(await api.upload(S.team.id, ch.id, x, safeName(x.name)));
+      }
+      const files = done.map((d) => ({ path: d.path, name: d.name, size: d.size, type: d.type }));
+      const text = t.value.trim(); const body = text || autoBody(files);
+      const m = await api.send(S.team.id, ch.id, body, files); if (text) { t.value = ''; t.oninput(); }
+      if (S.ch && S.ch.id === ch.id && !S.msgs.find((y) => y.id === m.id)) S.msgs.push(m); S.last[ch.id] = m; renderMsgs(true); renderList();
+    } catch (err) {
+      const msg = plainError(err);
+      tell(/bucket|not found|row-level|policy|files/i.test(msg) ? 'Files can\'t be sent here yet. Ask your business\'s owner to finish the Riyeser Link update.' : 'That file didn\'t send: ' + msg);
+    } finally { box.hidden = true; box.innerHTML = ''; }
+  }
+
+  // ---- New chat: message one person, a few people (a private chat), or make a channel
+  function newChat() {
+    const others = S.people.filter((p) => p.user_id !== S.user.id);
+    modal(`<h3>New chat</h3><p>Choose one person for a direct message, or a few for a private group chat.</p>
+      <input class="lk-find" id="ncq" placeholder="Search people…" aria-label="Search people" autocomplete="off">
+      <form id="ncf"><div class="pick" id="ncl">${others.map((p) => `<label class="pk" data-n="${esc(p.display_name.toLowerCase())}"><input type="checkbox" name="p" value="${p.user_id}"><span class="lk-av">${av(p.user_id, p.display_name)}${Presence.dot(p.user_id)}</span><span>${esc(p.display_name)}<small class="lk-pst">${esc(Presence.text(p.user_id))}</small></span>${p.extension ? `<small>Ext. ${p.extension}</small>` : ''}</label>`).join('') || '<p class="muted" style="padding:8px">Invite your team first.</p>'}</div>
+      <label class="f" id="ncname" hidden><span>Name for the group chat</span><input name="name" maxlength="40" placeholder="e.g. hill-rd-site"></label>
+      <div class="mfoot"><button type="button" class="btn" id="ncch" style="margin-right:auto">${ic('hash')} New channel instead</button><button type="button" class="btn" id="cl">Cancel</button><button class="btn p" id="ncgo" disabled>Start chat</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = close; d.querySelector('#ncch').onclick = () => { close(); addChannel(); };
+      const q = d.querySelector('#ncq'); q.focus();
+      q.oninput = () => { const v = q.value.trim().toLowerCase(); d.querySelectorAll('#ncl .pk').forEach((x) => { x.hidden = !!v && !x.dataset.n.includes(v); }); };
+      const upd = () => { const n = ticked(d).length; d.querySelector('#ncgo').disabled = !n; d.querySelector('#ncname').hidden = n < 2; d.querySelector('#ncgo').textContent = n > 1 ? `Start group chat (${n + 1})` : 'Start chat'; };
+      d.querySelectorAll('input[name=p]').forEach((x) => x.onchange = upd);
+      d.querySelector('#ncf').onsubmit = async (e) => {
+        e.preventDefault(); const who = ticked(d); if (!who.length) return;
+        try {
+          if (who.length === 1) { close(); return openDm(who[0]); }
+          const raw = String(new FormData(e.target).get('name') || '').trim() || who.map((u) => nameOf(u).split(' ')[0]).join('-');
+          const name = raw.toLowerCase().replace(/^#/, '').replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '').slice(0, 40) || 'group-chat';
+          const id = await api.createPrivate(S.team.id, name, '', who); S.chans = await api.channels(S.team.id); close(); openChannel(id);
+        } catch (err) { tell(plainError(err)); }
+      };
+    });
+  }
+
+  // Billing & Subscription (owners and admins): the plan, and how to change it.
+  async function billing() {
+    if (needs2step()) return security();
+    const lic = await api.licence(S.team.id).catch(() => null);
+    modal(`<h3>${ic('card')} Billing &amp; Subscription</h3>${lic && lic.modules ? planHtml(lic) : '<p>Your plan shows here once it\'s set up online.</p>'}
+      <p class="muted small">To change your plan, contact Riyeser. Riyeser Link chat is free forever; calls and desk phones come with Riyeser Link Plus.</p>
+      <div class="mfoot"><a class="btn" href="/pricing.html" target="_blank" rel="noopener">See pricing</a><button class="btn p" id="cl">Done</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }
 
   function modal(html, wire) {
@@ -1169,7 +1986,7 @@
       d.querySelector('#cp').onclick = async () => { try { await navigator.clipboard.writeText(link()); d.querySelector('#cp').textContent = 'Copied'; } catch { d.querySelector('#il').select(); } };
       d.querySelector('#cl').onclick = close;
       const nc = d.querySelector('#nc'); if (nc) nc.onclick = async () => {
-        if (!confirm('Make a new code? The old invite link will stop working.')) return;
+        if (!(await ask('Make a new code? The old invite link will stop working.'))) return;
         S.team.invite_code = await api.newInvite(S.team.id); d.querySelector('#il').value = link(); d.querySelector('#ic').textContent = S.team.invite_code; };
     });
   }
@@ -1197,7 +2014,7 @@
             ? await api.createPrivate(S.team.id, name, topic, ticked(d).filter((x) => x !== S.user.id))
             : await api.createChannel(S.team.id, S.user.id, name, topic);
           S.chans = await api.channels(S.team.id); close(); openChannel(id);
-        } catch (err) { alert(plainError(err)); }
+        } catch (err) { tell(plainError(err)); }
       };
     });
   }
@@ -1211,16 +2028,16 @@
       <div class="mfoot"><button class="btn" id="lv" style="margin-right:auto;color:#b91c1c">Leave this chat</button><button class="btn" id="cl">${manage ? 'Cancel' : 'Done'}</button>${manage ? '<button class="btn p" id="sv">Save</button>' : ''}</div>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
       d.querySelector('#lv').onclick = async () => {
-        if (!confirm(`Leave ${c.name}? You won't see it again unless someone adds you back.`)) return;
+        if (!(await ask(`Leave ${c.name}? You won't see it again unless someone adds you back.`))) return;
         try { await api.leave(c.id, S.user.id); S.chans = await api.channels(S.team.id); close(); openChannel((S.chans.find((x) => x.name === 'general') || S.chans[0] || {}).id, false); }
-        catch (err) { alert(plainError(err)); }
+        catch (err) { tell(plainError(err)); }
       };
       const sv = d.querySelector('#sv'); if (sv) sv.onclick = async () => {
-        const now = ticked(d); if (!now.length) { alert('Keep at least one person in the chat.'); return; }
+        const now = ticked(d); if (!now.length) { tell('Keep at least one person in the chat.'); return; }
         const add = now.filter((u) => !c.people.includes(u)); const remove = c.people.filter((u) => !now.includes(u));
         try { await api.setPeople(c.id, add, remove); S.chans = await api.channels(S.team.id); S.ch = S.chans.find((x) => x.id === c.id) || null; close();
           if (!S.ch) openChannel((S.chans.find((x) => x.name === 'general') || S.chans[0] || {}).id, false); else { renderHead(); renderSide(); } }
-        catch (err) { alert(plainError(err)); }
+        catch (err) { tell(plainError(err)); }
       };
     });
   }
@@ -1229,16 +2046,6 @@
   // ================================================================== Riyeser Link Plus (premium)
   // Calls go directly between the two devices (WebRTC). The online service only carries the ringing and set-up.
   // Calling a branch rings everyone in it; the first to answer takes the call. 30 seconds with no answer is a missed call.
-  function callsSideHtml() {
-    const f = S.features || {};
-    const admin = S.team.role === 'owner' || S.team.role === 'admin';
-    const trial = f.calls && !f.calls_paid && f.trial_days_left != null ? `<span class="trialtag">Trial · ${f.trial_days_left} days left</span>` : '';
-    const me = S.people.find((p) => p.user_id === S.user.id) || {};
-    return `<div class="sec">Calls ${f.calls ? trial : '<span class="trialtag prem">⭐ Premium</span>'}<span>${admin ? '<button id="mgbr" aria-label="Branches and extensions" title="Branches and extensions">⚙</button>' : ''}<button id="dial" aria-label="Dial an extension" title="Dial an extension">⌨</button></span></div>
-      ${S.branches.map((b) => `<button class="item" data-callbranch="${b.id}" title="Rings everyone in ${esc(b.name)}"><span class="hash">📞</span><span class="nm">${esc(b.name)}</span>${b.extension ? `<span class="ext">${b.extension}</span>` : ''}</button>`).join('')}
-      ${me.extension ? `<p class="myext">Your extension: <b>${me.extension}</b></p>` : ''}`;
-  }
-
   function upsell() {
     modal(`<h3>⭐ Riyeser Link Plus</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
       <p><b>+$20 a month per business</b>, free for your first 90 days. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>
@@ -1275,13 +2082,13 @@
     modal(body(), function wire(d, close) {
       const refresh = async () => { [S.people, S.branches] = await Promise.all([api.people(S.team.id), api.branches(S.team.id)]); renderSide();
         d.querySelector('.mcard').innerHTML = body(); wire(d, close); };
-      const run = async (fn) => { try { await fn(); } catch (err) { alert(plainError(err)); } await refresh(); };
+      const run = async (fn) => { try { await fn(); } catch (err) { tell(plainError(err)); } await refresh(); };
       d.querySelector('#cl').onclick = close;
       d.querySelectorAll('[data-save]').forEach((b) => b.onclick = () => run(async () => {
         const br = S.branches.find((x) => x.id === b.dataset.save);
         const now = [...d.querySelectorAll(`input[data-br="${br.id}"]:checked`)].map((x) => x.value);
         await api.setBranchPeople(br.id, now.filter((u) => !br.people.includes(u)), br.people.filter((u) => !now.includes(u))); }));
-      d.querySelectorAll('[data-code]').forEach((b) => b.onclick = () => { if (confirm('Make a new join code for this branch? The old one stops working.')) run(() => api.newBranchCode(b.dataset.code)); });
+      d.querySelectorAll('[data-code]').forEach((b) => b.onclick = async () => { if (await ask('Make a new join code for this branch? The old one stops working.', { yes: 'Make a new code' })) run(() => api.newBranchCode(b.dataset.code)); });
       d.querySelector('#nb').onsubmit = (e) => { e.preventDefault(); const nm = String(new FormData(e.target).get('name')).trim(); if (nm) run(() => api.createBranch(S.team.id, nm)); };
       d.querySelector('#sx').onclick = () => run(async () => {
         for (const i of d.querySelectorAll('[data-ext]')) {
@@ -1446,7 +2253,7 @@
     on('#loaddphone', () => addDeskPhone());
     const pk = $app.querySelector('#lopick'); if (pk) pk.onchange = () => { S.lo.pick = pk.value; drawPhones(); };
     on('#losupon', async () => { if (needs2step()) return security();
-      if (!confirm('Let Riyeser support see and change your phone set-up for the next hour?')) return;
+      if (!(await ask('Let Riyeser support see and change your phone set-up for the next hour?'))) return;
       try { await api.linkSupport(t.id, true); phMsg('Riyeser support can help for the next hour.', 'ok'); } catch (err) { phMsg(esc(plainError(err)), 'bad'); } refreshPhones(); });
     on('#losupend', async () => { try { await api.linkSupport(t.id, false); phMsg('Riyeser support can\'t change your phones any more.', 'ok'); } catch (err) { phMsg(esc(plainError(err)), 'bad'); } refreshPhones(); });
     $app.querySelectorAll('[data-step]').forEach((b) => b.onclick = () => { const s = b.dataset.step;
@@ -1510,7 +2317,7 @@
         await show(); };
       d.querySelector('#cppw').onclick = async () => { const v = await show(); if (!v) return; try { await navigator.clipboard.writeText(v); d.querySelector('#cppw').textContent = 'Copied'; } catch { /* shown instead */ } };
       d.querySelector('#newpw').onclick = async () => {
-        if (!confirm(`Make a new password for extension ${ext}? Phones using the old one stop working until they get the new one. Desk phones set up by Riyeser Link Office get it when they restart.`)) return;
+        if (!(await ask(`Make a new password for extension ${ext}? Phones using the old one stop working until they get the new one. Desk phones set up by Riyeser Link Office get it when they restart.`))) return;
         pw = null; d.querySelector('#pw').textContent = '••••••••••••••••'; d.querySelector('#show').textContent = 'Show';
         const r = await sendCmd('new_password', { extension: ext }, say);
         if (r) say('New password made. Press <b>Show</b> to see it. Restart desk phones that Riyeser Link Office set up, so they get it.', 'ok');
@@ -1857,12 +2664,13 @@
     modal(`<h3>⚙ Settings</h3><div class="lo-acts lo-set">
       <button class="btn" data-s="myphone"><b>☎ My phone</b><small>Your extension, your desk phone and how to set it up</small></button>
       ${admin ? '<button class="btn" data-s="phones"><b>☎ Desk phones</b><small>Every desk phone in the business: add, replace, troubleshoot</small></button>' : ''}
+      <button class="btn" data-s="look"><b>🎨 Appearance</b><small>Dark, light or match your computer, and your accent colour</small></button>
       <button class="btn" data-s="sec"><b>🔐 Security</b><small>Two-step sign-in</small></button>
       <button class="btn" data-s="co"><b>🏢 Company</b><small>Business details and Company ID</small></button></div>
       <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
       d.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { close(); const s = b.dataset.s; const back = S.home ? 'home' : 'chat';
-        if (s === 'myphone') myPhonePage(back); if (s === 'phones') phonesPage(back); if (s === 'sec') security(); if (s === 'co') companyInfo(false); });
+        if (s === 'myphone') myPhonePage(back); if (s === 'phones') phonesPage(back); if (s === 'sec') security(); if (s === 'co') companyInfo(false); if (s === 'look') appearance(); });
     });
   }
 
@@ -1885,32 +2693,71 @@
     }
     function stopTone() { clearInterval(toneTimer); toneTimer = null; }
 
-    // ---- the call window
+    // ---- the floating phone: a call bar bottom-right on every view (chat while you call), and the incoming-call card
     function box() { let b = document.getElementById('callbox'); if (!b) { b = document.createElement('div'); b.id = 'callbox'; document.body.appendChild(b); } return b; }
     const fmtTime = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+    const extLine = () => { const e = call.peer ? extOf(call.peer) : call.branch ? (S.branches.find((b) => b.id === call.branch) || {}).extension : null; return e ? `Ext. ${e}` : ''; };
     function draw() {
       const b = box();
       if (!call) { b.innerHTML = ''; b.className = ''; return; }
-      const who = call.peer ? nameOf(call.peer) : call.label;
-      const sub = call.status === 'incoming' ? `Incoming call${call.via ? ` to ${esc(call.via)}` : ''}`
-        : call.status === 'calling' ? `Calling${call.branch ? ' everyone' : ''}…` : call.status === 'connecting' ? 'Connecting…'
-        : call.status === 'live' ? `<span id="ctime">${fmtTime(Date.now() - call.startedAt)}</span>${call.sim ? ' · demo call, no sound' : ''}` : esc(call.note || 'Call ended');
-      b.className = 'on' + (call.cam || call.remoteVideo ? ' video' : '') + (call.cam && call.remoteVideo ? ' both' : '');
-      b.innerHTML = `<div class="cwin" role="dialog" aria-label="Call">
+      const who = call.peer ? nameOf(call.peer) : call.label; const ext = extLine();
+      const sub = call.status === 'incoming' ? `${ext ? ext + ' · ' : ''}Incoming call${call.via ? ` to ${esc(call.via)}` : ''}`
+        : call.status === 'calling' ? `${ext ? ext + ' · ' : ''}Calling${call.branch ? ' everyone' : ''}…` : call.status === 'connecting' ? 'Connecting…'
+        : call.status === 'live' ? `${ext ? ext + ' · ' : ''}<span id="ctime">${fmtTime(Date.now() - call.startedAt)}</span>${call.held ? ' · <b class="chold">On hold</b>' : ''}${call.remoteHeld ? ' · <b class="chold">They put you on hold</b>' : ''}${call.sim ? ' · demo call, no sound' : ''}`
+        : esc(call.note || 'Call ended');
+      const live = call.status === 'live';
+      b.className = 'on' + (call.status === 'incoming' ? ' ringing' : ' bar') + (call.cam || call.remoteVideo ? ' video' : '') + (call.cam && call.remoteVideo ? ' both' : '');
+      const btn = (id, icon, label, extra = '') => `<button class="cb${extra}" id="${id}" title="${label}" aria-label="${label}">${ic(icon)}<span>${label}</span></button>`;
+      b.innerHTML = `<div class="cwin" role="dialog" aria-label="${call.status === 'incoming' ? 'Incoming call' : 'Call'}">
         <video id="rv" autoplay playsinline ${call.remoteVideo ? '' : 'hidden'}></video><video id="lv" autoplay playsinline muted ${call.cam ? '' : 'hidden'}></video>
-        <div class="cwho">${call.peer ? av(call.peer, who, 'big') : '<span class="av big" style="background:#a21caf">📞</span>'}<div><b>${esc(who || '')}</b><small>${sub}</small></div></div>
+        <div class="cwho">${call.peer ? `<span class="lk-av">${av(call.peer, who, 'big')}</span>` : `<span class="av big lk-brav">${ic('phone')}</span>`}<div><b>${esc(who || '')}</b><small>${sub}</small></div></div>
         <div class="cbtns">${call.status === 'incoming'
-          ? `<button class="cb no" id="c-dec">Decline</button><button class="cb yes" id="c-ans">Answer</button>`
-          : call.status === 'ended' ? '' : `<button class="cb${call.muted ? ' off' : ''}" id="c-mute">${call.muted ? 'Unmute' : 'Mute'}</button>
-            ${call.status === 'live' && !call.sim ? `<button class="cb${call.cam ? ' off' : ''}" id="c-cam">${call.cam ? 'Camera off' : 'Camera'}</button>` : ''}
-            <button class="cb no" id="c-end">${call.status === 'live' ? 'Hang up' : 'Cancel'}</button>`}</div>
+          ? `<button class="cb no" id="c-dec">${ic('hang')}<span>Decline</span></button><button class="cb yes" id="c-ans">${ic('phone')}<span>Answer</span></button>`
+          : call.status === 'ended' ? '' : `${btn('c-mute', call.muted ? 'micoff' : 'mic', call.muted ? 'Unmute' : 'Mute', call.muted ? ' off' : '')}
+            ${btn('c-hold', 'pause', call.held ? 'Resume' : 'Hold', call.held ? ' off' : '').replace('<button', live ? '<button' : '<button disabled')}
+            ${btn('c-audio', 'speaker', 'Audio')}
+            ${live && !call.sim ? btn('c-cam', 'cam', call.cam ? 'Camera off' : 'Camera', call.cam ? ' off' : '') : ''}
+            <button class="cb soon" id="c-xfer" disabled title="Transfer: coming soon">${ic('xfer')}<span>Transfer</span><i>soon</i></button>
+            <button class="cb soon" id="c-conf" disabled title="Conference: coming soon">${ic('conf')}<span>Conference</span><i>soon</i></button>
+            <button class="cb no" id="c-end" title="${live ? 'End call' : 'Cancel'}">${ic('hang')}<span>${live ? 'End call' : 'Cancel'}</span></button>`}</div>
         <audio id="ra" autoplay></audio></div>`;
       const on = (id, fn) => { const e = b.querySelector(id); if (e) e.onclick = fn; };
-      on('#c-ans', answer); on('#c-dec', decline); on('#c-end', () => hangup()); on('#c-mute', mute); on('#c-cam', camera);
-      if (call.remoteStream) { b.querySelector('#ra').srcObject = call.remoteStream; b.querySelector('#rv').srcObject = call.remoteStream; }
+      on('#c-ans', answer); on('#c-dec', decline); on('#c-end', () => hangup()); on('#c-mute', mute); on('#c-cam', camera); on('#c-hold', hold); on('#c-audio', (e) => audioMenu(e.currentTarget));
+      const ra = b.querySelector('#ra');
+      if (call.remoteStream) { ra.srcObject = call.remoteStream; b.querySelector('#rv').srcObject = call.remoteStream; }
+      ra.muted = !!call.held; if (call.sinkId && ra.setSinkId) ra.setSinkId(call.sinkId).catch(() => {});
       if (call.camTrack) b.querySelector('#lv').srcObject = new MediaStream([call.camTrack]);
+      if (typeof Presence !== 'undefined' && S.team) Presence.changed();
     }
     setInterval(() => { const t = document.getElementById('ctime'); if (t && call && call.startedAt) t.textContent = fmtTime(Date.now() - call.startedAt); }, 1000);
+    // Mute and Hold: on hold, your microphone and camera stop and you don't hear them; they see "On hold".
+    function tracks() {
+      if (!call) return;
+      if (call.local) call.local.getAudioTracks().forEach((t) => { t.enabled = !call.muted && !call.held; });
+      if (call.camTrack) call.camTrack.enabled = !call.held;
+      const ra = document.getElementById('ra'); if (ra) ra.muted = !!call.held;
+    }
+    function hold() { if (!call || call.status !== 'live') return; call.held = !call.held; tracks(); if (call.peer && !call.sim) send(call.peer, 'hold', { on: call.held }); draw(); }
+    // Audio: choose the microphone, and the speaker or headset where the browser allows it.
+    async function audioMenu(anchor) {
+      let devs = []; try { devs = await navigator.mediaDevices.enumerateDevices(); } catch { /* no list */ }
+      const ins = devs.filter((d) => d.kind === 'audioinput'); const outs = devs.filter((d) => d.kind === 'audiooutput');
+      const canOut = 'setSinkId' in HTMLMediaElement.prototype;
+      const curIn = call && call.local && call.local.getAudioTracks()[0] ? (call.local.getAudioTracks()[0].getSettings().deviceId || '') : '';
+      const opt = (d, cur, i) => `<option value="${esc(d.deviceId)}"${d.deviceId === cur ? ' selected' : ''}>${esc(d.label || `Device ${i + 1}`)}</option>`;
+      popMenu(anchor, `<div class="mh">Audio</div><form class="mform" id="audf"><label><span>Microphone</span><select id="ain">${ins.map((d, i) => opt(d, curIn, i)).join('') || '<option>Default microphone</option>'}</select></label>
+        ${canOut ? `<label><span>Speaker or headset</span><select id="aout">${outs.map((d, i) => opt(d, (call && call.sinkId) || 'default', i)).join('') || '<option value="">Default speaker</option>'}</select></label>` : '<p class="mnote">This browser plays calls through your default speaker. Change it in Windows sound settings.</p>'}</form>`, (d) => {
+        d.querySelector('#ain').onchange = async (e) => {
+          if (!call || !call.local) return;
+          try { const st = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: e.target.value }, echoCancellation: true, noiseSuppression: true } });
+            const nt = st.getAudioTracks()[0]; const old = call.local.getAudioTracks()[0];
+            const snd = call.pc && call.pc.getSenders().find((x) => x.track && x.track.kind === 'audio'); if (snd) await snd.replaceTrack(nt);
+            if (old) { call.local.removeTrack(old); old.stop(); } call.local.addTrack(nt); tracks();
+          } catch { tell('That microphone couldn\'t be used. Check it\'s plugged in.'); } };
+        const ao = d.querySelector('#aout'); if (ao) ao.onchange = async (e) => { if (!call) return; call.sinkId = e.target.value; const ra = document.getElementById('ra');
+          try { if (ra && ra.setSinkId) await ra.setSinkId(call.sinkId); } catch { tell('That speaker couldn\'t be used.'); } };
+      }, 'audmenu');
+    }
 
     async function mic() {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('This browser can\'t make calls. Use Riyeser Central, Chrome or Edge.');
@@ -1925,11 +2772,11 @@
       let targets; let label;
       if (t.branch) { const b = S.branches.find((x) => x.id === t.branch); if (!b) return;
         targets = b.people.filter((u) => u !== S.user.id); label = b.name;
-        if (!targets.length) return alert(`Nobody else is in ${b.name} yet. Add people under ⚙ Branches and extensions.`); }
+        if (!targets.length) return tell(`Nobody else is in ${b.name} yet. Add people under ⚙ Branches and extensions.`); }
       else { targets = [t.user]; label = nameOf(t.user); }
-      call = { id: uuid(), dir: 'out', status: 'calling', targets: new Set(targets), label, branch: t.branch || null, peer: t.user || null, pendingIce: [] };
+      call = { id: uuid(), dir: 'out', status: 'calling', targets: new Set(targets), label, branch: t.branch || null, peer: t.user || null, pendingIce: [], wantVideo: !!(t.video && t.user), at: new Date().toISOString() };
       draw();
-      try { call.local = await mic(); } catch (e) { call = null; draw(); return alert(e.message); }
+      try { call.local = await mic(); } catch (e) { call = null; draw(); return tell(e.message); }
       if (!call) return;
       tone('out');
       for (const to of targets) send(to, 'ring', { from_name: myName(), via: t.branch ? label : null });
@@ -1945,7 +2792,7 @@
         draw(); };
       pc.onconnectionstatechange = () => {
         if (!call) return;
-        if (pc.connectionState === 'connected' && call.status !== 'live') { call.status = 'live'; call.startedAt = Date.now(); stopTone(); draw(); }
+        if (pc.connectionState === 'connected' && call.status !== 'live') { call.status = 'live'; call.startedAt = Date.now(); stopTone(); draw(); if (call.wantVideo && !call.cam) { call.wantVideo = false; camera(); } }
         if (pc.connectionState === 'failed') { if (call.peer) send(call.peer, 'hangup'); finish('Couldn\'t connect. A network between you may be blocking calls.'); }
       };
       return pc;
@@ -1959,7 +2806,11 @@
       if (k === 'ring') {
         if (call && call.status !== 'ended') { api.signal(S.team.id, sig.call_id, from, 'busy').catch(() => {}); return; }
         if (!S.features.calls) return;
-        call = { id: sig.call_id, dir: 'in', status: 'incoming', peer: from, via: pl.via || null, pendingIce: [] };
+        if (Presence.status() === 'dnd') {   // Do not disturb: they hear "can't take the call", you see it as missed
+          api.signal(S.team.id, sig.call_id, from, 'decline').catch(() => {});
+          logCall({ id: sig.call_id, dir: 'in', peer: from, at: new Date().toISOString(), dur: 0, result: 'missed', via: pl.via || null }); return;
+        }
+        call = { id: sig.call_id, dir: 'in', status: 'incoming', peer: from, via: pl.via || null, pendingIce: [], at: new Date().toISOString() };
         tone('in'); draw(); alertIncoming(); return;
       }
       if (!call || sig.call_id !== call.id) return;
@@ -1993,6 +2844,7 @@
       }
       if (k === 'ice' && from === call.peer) { if (call.pc && call.pc.remoteDescription) { try { await call.pc.addIceCandidate(pl); } catch { /* ignore */ } } else call.pendingIce.push(pl); return; }
       if (k === 'hangup' && from === call.peer) return finish('Call ended');
+      if (k === 'hold' && from === call.peer) { call.remoteHeld = !!pl.on; draw(); return; }
     }
 
     async function answer() {
@@ -2010,21 +2862,24 @@
       if (call.peer) send(call.peer, 'hangup');
       finish('Call ended');
     }
-    function mute() { if (!call || !call.local) return; call.muted = !call.muted; call.local.getAudioTracks().forEach((t) => { t.enabled = !call.muted; }); draw(); }
+    function mute() { if (!call || !call.local) return; call.muted = !call.muted; tracks(); draw(); }
     async function camera() {
       if (!call || !call.pc) return;
       const tx = call.pc.getTransceivers().find((t) => (t.receiver.track && t.receiver.track.kind === 'video'));
       if (!tx) return;
       if (call.cam) { await tx.sender.replaceTrack(null); call.camTrack && call.camTrack.stop(); call.camTrack = null; call.cam = false; draw(); return; }
       try { const v = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } }); call.camTrack = v.getVideoTracks()[0];
-        await tx.sender.replaceTrack(call.camTrack); call.cam = true; draw(); }
-      catch { alert('Riyeser Link couldn\'t use your camera. Check it\'s plugged in and allowed.'); }
+        await tx.sender.replaceTrack(call.camTrack); call.cam = true; tracks(); draw(); }
+      catch { tell('Riyeser Link couldn\'t use your camera. Check it\'s plugged in and allowed.'); }
     }
 
     // ---- end: tidy up, and (caller only) leave a note in the direct message
     async function finish(note, missed) {
       if (!call) return;
       const c = call; call = null; stopTone(); clearTimeout(c.timeout);
+      const result = c.startedAt ? 'answered' : c.dir === 'in' ? (note === 'Declined' ? 'declined' : note === 'Answered by someone else' ? 'elsewhere' : 'missed') : note === 'Cancelled' ? 'cancelled' : 'no answer';
+      try { logCall({ id: c.id, dir: c.dir, peer: c.peer || null, branch: c.branch || null, label: c.peer ? null : c.label, via: c.via || null, at: c.at || new Date().toISOString(),
+        dur: c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) : 0, result }); } catch { /* history is a nice-to-have */ }
       try { c.pc && c.pc.close(); } catch { /* closed */ }
       (c.local ? c.local.getTracks() : []).forEach((t) => t.stop()); c.camTrack && c.camTrack.stop();
       call = { ...c, status: 'ended', note, pc: null }; draw();
@@ -2042,7 +2897,7 @@
     }
 
     function alertIncoming() {
-      const who = nameOf(call.peer);
+      const who = nameOf(call.peer) + (extOf(call.peer) ? ` (ext. ${extOf(call.peer)})` : '');
       document.title = `📞 Incoming call from ${who}`;
       try { if ('Notification' in window && Notification.permission === 'granted') new Notification(NAME, { body: `Incoming call from ${who}${call.via ? ` (${call.via})` : ''}`, icon: 'icon-192.png' }); } catch { /* no notifications */ }
     }
@@ -2052,7 +2907,7 @@
       api.onSignals(S.user.id, (sig) => onSignal(sig).catch((e) => console.warn('call', e)));
       try { if ('Notification' in window && Notification.permission === 'default') document.addEventListener('click', () => Notification.requestPermission().catch(() => {}), { once: true }); } catch { /* no notifications */ }
     }
-    return { start, listen, get current() { return call; } };
+    return { start, listen, hold, get current() { return call; } };
   })();
 
   // ------------------------------------------------------------------ start
@@ -2061,7 +2916,7 @@
       const s = await api.session();
       if (!s) { const gone = S.signedOutNote; S.signedOutNote = false;
         return gate(params.has('signup') ? 'up' : 'in', gone ? '<div class="err">That sign-in has ended (the account may have been removed). Sign in again, or create a new account.</div>' : ''); }
-      S.user = s.user;
+      S.user = s.user; Theme.fromAccount(S.user);
       S.home = (!DEMO || params.has('help')) && !/Electron/.test(navigator.userAgent) && !params.has('chat');
       const lv = await api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' }));
       S.aal = lv.currentLevel;
@@ -2093,6 +2948,7 @@
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
   setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);
-  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, reportIssue, requestRefund, phonesPage, myPhonePage, settingsMenu };
+  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, reportIssue, requestRefund, phonesPage, myPhonePage, settingsMenu,
+    presence: Presence, theme: Theme, appearance, newChat };
   start();
 })();

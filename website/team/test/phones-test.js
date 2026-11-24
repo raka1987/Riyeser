@@ -11,6 +11,7 @@
 // 12. Not on Link Plus: the upsell. 13. An older database: the steps, no errors. 14. Phone width: no sideways scrolling.
 // Run: build the site, serve website/public on 8090, then `node website/team/test/phones-test.js <shots>`. Exits 1 on any failure.
 const { chromium, devices } = require('playwright');
+const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
 const crypto = require('crypto');
 const assert = require('assert');
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -90,7 +91,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
   try {
     // 1. no Link Office yet: the 5 steps, from the Riyeser home tile
     const p1 = await b.newPage({ viewport: { width: 1280, height: 900 } }); p1.on('pageerror', (e) => errs.push(e.message));
-    await fakeServer(p1); await signIn(p1, 'http://127.0.0.1:8090/link/'); await p1.waitForSelector('#hphones');
+    await fakeServer(p1); await signIn(p1, BASE + '/link/'); await p1.waitForSelector('#hphones');
     console.log('home tile:', await text(p1, '#hphones'));
     await p1.click('#hphones'); await p1.waitForSelector('.lo-setup');
     const s1 = await steps(p1); console.log('steps, nothing yet:', s1);
@@ -103,7 +104,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     // 2. with a heartbeat, straight from riyeser.com/link/?phones
     const pg = await b.newPage({ viewport: { width: 1280, height: 900 } }); pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
     const st = await fakeServer(pg, { offices: [office()] });
-    await signIn(pg, 'http://127.0.0.1:8090/link/?phones'); await pg.waitForSelector('#loaddr');
+    await signIn(pg, BASE + '/link/?phones'); await pg.waitForSelector('#loaddr');
     console.log('server address:', await text(pg, '#loaddr'), 'port', await text(pg, '#loport'), '| state:', await text(pg, '#lostate'), '| seen:', await text(pg, '#loseen'));
     assert.strictEqual(await text(pg, '#loaddr'), '192.168.1.20'); assert.strictEqual(await text(pg, '#loport'), '5060'); assert.strictEqual(await text(pg, '#lostate'), 'Running');
     const warn = await text(pg, '.lo-warn'); assert.match(warn, /DHCP reservation/); assert.match(warn, /3C:52:82:1A:2B:3C/);
@@ -142,7 +143,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.ok(!JSON.stringify(rev).includes(PASSWORD), 'the password was never sent as plain text');
     assert.strictEqual(st.taken, 1, 'taken once'); console.log('by hand Show: ok');
     await pg.screenshot({ path: out + '/phones-byhand.png' });
-    await pg.click('#newpw'); await pg.waitForFunction(() => /New password made/.test(document.querySelector('#hstat').textContent), null, { timeout: 8000 });
+    await pg.click('#newpw'); await pg.click('#askyes'); await pg.waitForFunction(() => /New password made/.test(document.querySelector('#hstat').textContent), null, { timeout: 8000 });
     await pg.click('#cl');
 
     // 5. Do not disturb
@@ -227,13 +228,13 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     await pg.click('[data-more="001565aabbcc"]'); await pg.click('[data-m=adv]'); await pg.waitForSelector('#show');
     assert.match(await text(pg, '.mcard h3'), /Advanced setup \(manual SIP\)/); await pg.click('.mcard #cl');
     const pm = await b.newPage({ viewport: { width: 1100, height: 800 } }); pm.on('pageerror', (e) => errs.push('member: ' + e.message));
-    await fakeServer(pm, { member: true, offices: [office()] }); await signIn(pm, 'http://127.0.0.1:8090/link/?phones'); await pm.waitForSelector('#myPhonePage');
+    await fakeServer(pm, { member: true, offices: [office()] }); await signIn(pm, BASE + '/link/?phones'); await pm.waitForSelector('#myPhonePage');
     assert.ok(!(await pm.$('[data-more]')) && !(await pm.$('#cophones')), 'no Desk phones list or ⋯ menu for a member');
     assert.ok(!(await pm.evaluate(() => document.body.innerText.includes('Advanced setup'))), 'no Advanced setup for a member');
     console.log('member ?phones -> My phone, no Advanced setup: ok');
 
     // 10. Let Riyeser help
-    await pg.waitForSelector('#losupon'); await pg.click('#losupon'); await pg.waitForSelector('#losupend');
+    await pg.waitForSelector('#losupon'); await pg.click('#losupon'); await pg.click('#askyes'); await pg.waitForSelector('#losupend');
     assert.match(await text(pg, '#losupport'), /^Riyeser support can see and change your phone set-up until \d{1,2}:\d\d(am|pm)\. Everything they do is in your 🕘 History\.$/);
     await pg.click('#losupend'); await pg.waitForSelector('#losupon');
     assert.ok(st.calls.includes('link_support_allow') && st.calls.includes('link_support_end'));
@@ -254,28 +255,28 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     // 11. real calls made: step 5 ticks itself (no tick by hand)
     const p11 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p11.on('pageerror', (e) => errs.push(e.message));
     const done = office(); done.phones = done.phones.filter((p) => p.assigned); done.counts.calls_made = 4;
-    await fakeServer(p11, { offices: [done] }); await signIn(p11, 'http://127.0.0.1:8090/link/?phones'); await p11.waitForSelector('.lo-setdone');
+    await fakeServer(p11, { offices: [done] }); await signIn(p11, BASE + '/link/?phones'); await p11.waitForSelector('.lo-setdone');
     await p11.screenshot({ path: out + '/phones-allset.png' });
     // no calls reported: "Done" by hand
     const p12 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p12.on('pageerror', (e) => errs.push(e.message));
     const nocall = office(); nocall.phones = nocall.phones.filter((p) => p.assigned);
-    await fakeServer(p12, { offices: [nocall] }); await signIn(p12, 'http://127.0.0.1:8090/link/?phones'); await p12.waitForSelector('[data-step="test"]');
+    await fakeServer(p12, { offices: [nocall] }); await signIn(p12, BASE + '/link/?phones'); await p12.waitForSelector('[data-step="test"]');
     assert.deepStrictEqual((await steps(p12)).map((x) => x[0]), ['✓', '✓', '✓', '✓', '·']);
     await p12.click('[data-step="test"]'); await p12.waitForSelector('.lo-setdone'); console.log('test call ticked by hand: folded away');
 
     // 12. not on Link Plus: the upsell
     const p8 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p8.on('pageerror', (e) => errs.push(e.message));
-    await fakeServer(p8, { noPlus: true, offices: [office()] }); await signIn(p8, 'http://127.0.0.1:8090/link/?phones'); await p8.waitForSelector('.lo-up');
+    await fakeServer(p8, { noPlus: true, offices: [office()] }); await signIn(p8, BASE + '/link/?phones'); await p8.waitForSelector('.lo-up');
     assert.match(await text(p8, '.lo-up p'), /^Desk phones and calls come with Riyeser Link Plus\./);
 
     // 13. an older database: the steps, nothing breaks
     const p9 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p9.on('pageerror', (e) => errs.push('old db: ' + e.message));
-    await fakeServer(p9, { oldDatabase: true }); await signIn(p9, 'http://127.0.0.1:8090/link/?phones'); await p9.waitForSelector('.lo-setup');
+    await fakeServer(p9, { oldDatabase: true }); await signIn(p9, BASE + '/link/?phones'); await p9.waitForSelector('.lo-setup');
     assert.ok(!(await p9.$('#phonesPage .err')));
 
     // 14. phone width
     const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); ph.on('pageerror', (e) => errs.push('phone: ' + e.message));
-    await fakeServer(ph, { offices: [office()] }); await signIn(ph, 'http://127.0.0.1:8090/link/?phones'); await ph.waitForSelector('#loaddr');
+    await fakeServer(ph, { offices: [office()] }); await signIn(ph, BASE + '/link/?phones'); await ph.waitForSelector('#loaddr');
     const over = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth); console.log('phone overflow:', over);
     assert.strictEqual(over, 0);
     await ph.screenshot({ path: out + '/phones-phone.png', fullPage: true });
@@ -286,7 +287,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
 
     // the demo works too
     const pd = await b.newPage(); pd.on('pageerror', (e) => errs.push('demo: ' + e.message));
-    await pd.goto('http://127.0.0.1:8090/link/?demo&phones'); await pd.waitForSelector('#loaddr'); console.log('demo ?phones:', await text(pd, '#loaddr'));
+    await pd.goto(BASE + '/link/?demo&phones'); await pd.waitForSelector('#loaddr'); console.log('demo ?phones:', await text(pd, '#loaddr'));
     assert.deepStrictEqual((await rows(pd)).map((x) => x.st), ['Online', 'Online', 'Offline']);
   } catch (e) { failed = true; console.error('FAILED:', e.message); }
   console.log('errors:', errs); await b.close();
