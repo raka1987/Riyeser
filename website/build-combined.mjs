@@ -9,7 +9,7 @@
 // Old Services links (riyeser.com/?demo, riyeser.com/#/p/..., sign-in emails) are forwarded to /app/ by the home page.
 import { execFileSync } from 'node:child_process';
 import { cpSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -33,6 +33,8 @@ const websiteFiles = [];
 cpSync(SRC, OUT, { recursive: true, force: false, errorOnExist: false, filter: (src) => !APP_PAGES.includes(relative(SRC, src)) });
 mkdirSync(join(OUT, 'app'), { recursive: true });
 
+// Riyeser HQ (staff back office) at /hq/: not linked from the site, not indexed, staff sign-in only.
+cpSync(join(ROOT, 'hq'), join(OUT, 'hq'), { recursive: true, filter: (src) => !basename(src).startsWith('test-') });
 // 3. Riyeser Team (team chat) at /team/. Its database setup (team-chat.sql) stays in the repository only.
 cpSync(join(ROOT, 'team'), join(OUT, 'team'), { recursive: true, filter: (src) => !src.endsWith('.sql') && !/[\/]team[\/]test([\/]|$)/.test(src) });
 

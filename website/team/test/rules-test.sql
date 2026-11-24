@@ -311,6 +311,81 @@ do $$ begin
 end $$;
 reset role;
 
+-- ===== Riyeser HQ (Riyeser's own staff)
+reset role;
+insert into auth.users values ('99999999-9999-9999-9999-999999999999', 'riki@riyeser.test'), ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'help@riyeser.test');
+-- only the database owner (SQL Editor) can make the first owner: a normal signed-in user can't
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ begin
+  begin perform public.hq_make_owner('riki@riyeser.test', 'Riki'); raise exception 'made self owner';
+  exception when insufficient_privilege then null; end;
+  begin perform public.hq_overview(); raise exception 'non-staff saw HQ';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for Riyeser staff%', sqlerrm; end;
+  begin perform count(*) from public.hq_staff; raise exception 'read staff table';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select public.hq_make_owner('riki@riyeser.test', 'Riki');
+-- owner with only a password: nothing; with two-step: everything
+select pg_temp.as_user_password_only('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ begin
+  begin perform public.hq_overview(); raise exception 'HQ without two-step';
+  exception when others then if sqlerrm = 'HQ without two-step' then raise; end if; end;
+  assert (public.hq_me() ->> 'two_step')::boolean = false, 'tells the site two-step is needed';
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare o json; c json; begin
+  o := public.hq_overview();
+  assert (o ->> 'companies')::int >= 3, 'sees all companies';
+  assert (select count(*) from public.hq_companies('island')) = 1, 'search by name';
+  assert (select count(*) from public.hq_companies('RIY-')) >= 1, 'search by Company ID';
+  c := public.hq_company((select id from public.hq_companies('island') limit 1));
+  assert json_array_length(c -> 'people') >= 1 and json_array_length(c -> 'branches') >= 1, 'company detail';
+  -- privacy: no message text anywhere in what HQ gets
+  assert c::text not like '%Morning team%' and c::text not like '%Exec only%' and o::text not like '%Exec only%', 'no messages in HQ';
+end $$;
+select public.hq_set_calls_paid((select id from public.hq_companies('island') limit 1), '2027-06-30');
+select public.hq_add_note((select id from public.hq_companies('island') limit 1), 'Called Mere: wants POS for Nadi.');
+select public.hq_add_staff('help@riyeser.test', 'Help Desk', 'support');
+do $$ begin
+  assert (select (calls_paid_until at time zone 'UTC')::date from public.hq_companies('island')) = '2027-06-30', 'paid until set';
+  assert (select count(*) from public.workspaces where name = 'Island Traders') = 0, 'HQ staff still can''t read customer tables directly';
+  assert (select count(*) from public.hq_history() where action in ('calls.paid_until', 'note.added', 'staff.added', 'company.viewed')) >= 4, 'HQ history';
+  begin perform public.hq_set_staff(auth.uid(), 'support', true); raise exception 'changed own access';
+  exception when others then assert sqlerrm like 'You can%', sqlerrm; end;
+end $$;
+-- support staff: can look and add notes, can't change billing or staff, can't read the HQ history
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ begin
+  assert (select count(*) from public.hq_companies('')) >= 3, 'support sees companies';
+  perform public.hq_add_note((select id from public.hq_companies('island') limit 1), 'Helped with branch codes.');
+  begin perform public.hq_set_calls_paid((select id from public.hq_companies('island') limit 1), '2030-01-01'); raise exception 'support set billing';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  begin perform public.hq_add_staff('x@y.z', 'X', 'owner'); raise exception 'support added staff';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  begin perform public.hq_history(); raise exception 'support read history';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+-- switched off: no access at all
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_set_staff('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'support', false);
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ begin begin perform public.hq_overview(); raise exception 'switched-off staff saw HQ';
+  exception when others then if sqlerrm = 'switched-off staff saw HQ' then raise; end if; end; end $$;
+-- download counts: only with the token
+reset role;
+select public.hq_set_ingest_token('test-token-123');
+set role anon;
+do $$ begin
+  begin perform public.hq_record_downloads('wrong', '{"RiyeserCentral-Setup.exe": 10}'); raise exception 'wrong token accepted';
+  exception when others then assert sqlerrm = 'Not allowed', sqlerrm; end;
+  assert public.hq_record_downloads('test-token-123', '{"RiyeserCentral-Setup.exe": 120, "RiyeserPOS-Setup.exe": 33}') = 2, 'recorded';
+end $$;
+reset role;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ begin assert (select total from public.hq_downloads(30) where asset = 'RiyeserPOS-Setup.exe') = 33, 'downloads read back'; end $$;
+reset role;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

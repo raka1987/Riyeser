@@ -730,3 +730,252 @@ do $$ declare t text; begin
   drop trigger if exists audit_join_requests on public.join_requests;
   create trigger audit_join_requests after update on public.join_requests for each row execute function public.audit_change();
 end $$;
+
+-- ================================================================ Riyeser HQ (for Riyeser's own staff)
+-- The back office for running Riyeser: companies, linked PCs and versions, trials, Team Calls, downloads, notes.
+-- PRIVACY: HQ only sees account information. Nothing here reads customers' messages, chats, calls or books.
+-- Staff need two-step sign-in. Make yourself the first owner in Supabase's SQL Editor (not from the website):
+--   select public.hq_make_owner('you@example.com', 'Your name');
+create table if not exists public.hq_staff (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  display_name text not null check (length(trim(display_name)) between 1 and 60),
+  role text not null check (role in ('owner', 'finance', 'support', 'sales', 'developer')),
+  active boolean not null default true,
+  added_by uuid references auth.users(id) on delete set null,
+  added_at timestamptz not null default now()
+);
+create table if not exists public.hq_notes (
+  id bigint generated always as identity primary key,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  author uuid references auth.users(id) on delete set null,
+  body text not null check (length(trim(body)) between 1 and 2000),
+  created_at timestamptz not null default now()
+);
+create table if not exists public.hq_audit (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  actor uuid default auth.uid(),
+  action text not null,
+  details jsonb
+);
+create table if not exists public.downloads_daily (
+  day date not null,
+  asset text not null,
+  total bigint not null check (total >= 0),       -- all-time downloads of that file name, across releases, that day
+  primary key (day, asset)
+);
+create table if not exists public.hq_settings (key text primary key, value text);
+alter table public.hq_staff enable row level security;
+alter table public.hq_notes enable row level security;
+alter table public.hq_audit enable row level security;
+alter table public.downloads_daily enable row level security;
+alter table public.hq_settings enable row level security;
+revoke all on public.hq_staff, public.hq_notes, public.hq_audit, public.downloads_daily, public.hq_settings from anon, authenticated;
+-- (no policies: everything goes through the checked hq_ functions below)
+
+-- Staff role for this session, only after two-step sign-in. null = not HQ staff.
+create or replace function public.hq_role() returns text
+  language sql stable security definer set search_path = public as $$
+  select role from hq_staff where user_id = auth.uid() and active and public.mfa_ok()
+$$;
+create or replace function public.hq_need(roles text[]) returns void
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  if hq_role() is null then raise exception 'Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.'; end if;
+  if not (hq_role() = 'owner' or hq_role() = any(roles)) then raise exception 'Your HQ role can''t do that.'; end if;
+end $$;
+create or replace function public.hq_log(act text, det jsonb) returns void
+  language sql security definer set search_path = public as $$ insert into hq_audit (action, details) values (act, det) $$;
+
+-- Who am I in HQ (also tells the website whether two-step sign-in is still needed)
+create or replace function public.hq_me() returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('role', s.role, 'name', s.display_name, 'active', s.active, 'two_step', public.mfa_ok())
+  from hq_staff s where s.user_id = auth.uid()
+$$;
+
+create or replace function public.hq_overview() returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare r json;
+begin
+  perform hq_need(array['finance', 'support', 'sales', 'developer']);
+  select json_build_object(
+    'companies', (select count(*) from workspaces),
+    'companies_7d', (select count(*) from workspaces where created_at > now() - interval '7 days'),
+    'companies_30d', (select count(*) from workspaces where created_at > now() - interval '30 days'),
+    'people', (select count(*) from members),
+    'pcs', (select count(*) from devices),
+    'pcs_active_7d', (select count(*) from devices where last_seen > now() - interval '7 days'),
+    'pcs_active_30d', (select count(*) from devices where last_seen > now() - interval '30 days'),
+    'requests_waiting', (select count(*) from join_requests where status = 'pending'),
+    'calls_paid', (select count(*) from workspaces where calls_paid_until > now()),
+    'calls_trial', (select count(*) from workspaces where created_at > now() - interval '90 days' and coalesce(calls_paid_until, '-infinity') <= now()),
+    'trials_ending', (select coalesce(json_agg(t order by t.days_left), '[]') from (
+        select w.id, w.name, w.company_code, 90 - extract(day from now() - w.created_at)::int as days_left from workspaces w
+        where w.created_at between now() - interval '90 days' and now() - interval '76 days' and coalesce(w.calls_paid_until, '-infinity') <= now()) t),
+    'versions', (select coalesce(json_agg(v order by v.pcs desc), '[]') from (
+        select coalesce(app_version, 'unknown') as version, count(*) as pcs from devices where last_seen > now() - interval '30 days' group by 1) v),
+    'countries', (select coalesce(json_agg(c order by c.companies desc), '[]') from (
+        select coalesce(country, 'Not set') as country, count(*) as companies from workspaces group by 1) c),
+    'signups_by_week', (select coalesce(json_agg(w order by w.week), '[]') from (
+        select date_trunc('week', created_at)::date as week, count(*) as companies from workspaces
+        where created_at > now() - interval '12 weeks' group by 1) w)
+  ) into r;
+  return r;
+end $$;
+
+create or replace function public.hq_companies(search text) returns table (
+  id uuid, name text, company_code text, country text, created_at timestamptz, people bigint, branches bigint, pcs bigint,
+  last_seen timestamptz, calls_paid_until timestamptz, trial_days_left int, owner_name text, owner_email text)
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['finance', 'support', 'sales']);
+  return query
+  select w.id, w.name, w.company_code, w.country, w.created_at,
+    (select count(*) from members m where m.workspace_id = w.id),
+    (select count(*) from branches b where b.workspace_id = w.id),
+    (select count(*) from devices d where d.workspace_id = w.id),
+    (select max(d.last_seen) from devices d where d.workspace_id = w.id),
+    w.calls_paid_until, greatest(0, 90 - extract(day from now() - w.created_at)::int),
+    (select m.display_name from members m where m.workspace_id = w.id and m.role = 'owner' limit 1),
+    (select u.email::text from members m join auth.users u on u.id = m.user_id where m.workspace_id = w.id and m.role = 'owner' limit 1)
+  from workspaces w
+  where coalesce(search, '') = '' or w.name ilike '%' || search || '%' or w.company_code ilike '%' || search || '%'
+     or w.legal_name ilike '%' || search || '%' or w.tax_number ilike '%' || search || '%'
+     or exists (select 1 from members m join auth.users u on u.id = m.user_id where m.workspace_id = w.id and u.email::text ilike '%' || search || '%')
+  order by w.created_at desc limit 500;
+end $$;
+
+-- One company: account information only (profile, people, branches, PCs, notes). Never messages or books.
+create or replace function public.hq_company(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare r json;
+begin
+  perform hq_need(array['finance', 'support', 'sales']);
+  select json_build_object(
+    'profile', (select json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'legal_name', w.legal_name,
+        'tax_number', w.tax_number, 'address', w.address, 'phone', w.phone, 'email', w.email, 'country', w.country,
+        'created_at', w.created_at, 'calls_paid_until', w.calls_paid_until, 'require_approval', w.require_approval,
+        'trial_days_left', greatest(0, 90 - extract(day from now() - w.created_at)::int)) from workspaces w where w.id = ws),
+    'people', (select coalesce(json_agg(json_build_object('name', m.display_name, 'role', m.role, 'job_role', m.job_role,
+        'extension', m.extension, 'email', u.email, 'joined', m.joined_at) order by m.joined_at), '[]')
+        from members m join auth.users u on u.id = m.user_id where m.workspace_id = ws),
+    'branches', (select coalesce(json_agg(json_build_object('name', b.name, 'extension', b.extension,
+        'people', (select count(*) from branch_members bm where bm.branch_id = b.id)) order by b.extension), '[]') from branches b where b.workspace_id = ws),
+    'pcs', (select coalesce(json_agg(json_build_object('name', d.device_name, 'platform', d.platform, 'version', d.app_version,
+        'last_seen', d.last_seen, 'person', (select display_name from members m where m.workspace_id = ws and m.user_id = d.user_id))
+        order by d.last_seen desc), '[]') from devices d where d.workspace_id = ws),
+    'requests_waiting', (select count(*) from join_requests j where j.workspace_id = ws and j.status = 'pending'),
+    'notes', (select coalesce(json_agg(json_build_object('body', n.body, 'at', n.created_at,
+        'by', (select display_name from hq_staff s where s.user_id = n.author)) order by n.created_at desc), '[]') from hq_notes n where n.workspace_id = ws)
+  ) into r;
+  perform hq_log('company.viewed', json_build_object('workspace_id', ws)::jsonb);
+  return r;
+end $$;
+
+create or replace function public.hq_set_calls_paid(ws uuid, until date) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform hq_need(array['finance']);
+  update workspaces set calls_paid_until = until::timestamptz + interval '1 day' - interval '1 second' where id = ws;
+  perform hq_log('calls.paid_until', json_build_object('workspace_id', ws, 'until', until)::jsonb);
+end $$;
+
+create or replace function public.hq_add_note(ws uuid, body text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform hq_need(array['finance', 'support', 'sales']);
+  insert into hq_notes (workspace_id, author, body) values (ws, auth.uid(), trim(body));
+  perform hq_log('note.added', json_build_object('workspace_id', ws)::jsonb);
+end $$;
+
+create or replace function public.hq_staff_list() returns table (user_id uuid, display_name text, role text, active boolean, email text, added_at timestamptz)
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['finance', 'support', 'sales', 'developer']);
+  return query select s.user_id, s.display_name, s.role, s.active, u.email::text, s.added_at from hq_staff s join auth.users u on u.id = s.user_id order by s.added_at;
+end $$;
+
+-- Owners add staff (they need a Riyeser account first), change their role, or switch them off.
+create or replace function public.hq_add_staff(staff_email text, staff_name text, staff_role text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare uid uuid;
+begin
+  perform hq_need(array[]::text[]);
+  if staff_role not in ('owner', 'finance', 'support', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  select id into uid from auth.users where lower(email::text) = lower(trim(staff_email));
+  if uid is null then raise exception 'No Riyeser account with that email yet. Ask them to create one at riyeser.com/team first.'; end if;
+  insert into hq_staff (user_id, display_name, role, added_by) values (uid, trim(staff_name), staff_role, auth.uid())
+    on conflict (user_id) do update set display_name = excluded.display_name, role = excluded.role, active = true;
+  perform hq_log('staff.added', json_build_object('email', staff_email, 'role', staff_role)::jsonb);
+end $$;
+
+create or replace function public.hq_set_staff(staff uuid, staff_role text, is_active boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform hq_need(array[]::text[]);
+  if staff = auth.uid() then raise exception 'You can''t change your own HQ access. Ask another owner.'; end if;
+  if staff_role not in ('owner', 'finance', 'support', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  update hq_staff set role = staff_role, active = is_active where user_id = staff;
+  perform hq_log('staff.changed', json_build_object('user_id', staff, 'role', staff_role, 'active', is_active)::jsonb);
+end $$;
+
+create or replace function public.hq_history() returns table (at timestamptz, who text, action text, details jsonb)
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array[]::text[]);
+  return query select a.at, coalesce((select display_name from hq_staff s where s.user_id = a.actor), 'Riyeser'), a.action, a.details
+    from hq_audit a order by a.at desc limit 300;
+end $$;
+
+create or replace function public.hq_downloads(days int) returns table (day date, asset text, total bigint)
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['finance', 'support', 'sales', 'developer']);
+  return query select d.day, d.asset, d.total from downloads_daily d where d.day > current_date - least(greatest(days, 1), 730) order by d.day, d.asset;
+end $$;
+
+-- The daily GitHub job records download totals with a private token (set in the SQL Editor, see ops/RUNBOOK.md):
+--   select public.hq_set_ingest_token('a long random token');
+create or replace function public.hq_set_ingest_token(token text) returns void
+  language sql security definer set search_path = public as $$
+  insert into hq_settings (key, value) values ('ingest_token_sha256', encode(sha256(convert_to(token, 'UTF8')), 'hex'))
+  on conflict (key) do update set value = excluded.value
+$$;
+create or replace function public.hq_record_downloads(token text, totals jsonb) returns int
+  language plpgsql security definer set search_path = public as $$
+declare n int := 0; k text;
+begin
+  if coalesce(token, '') = '' or encode(sha256(convert_to(token, 'UTF8')), 'hex') is distinct from (select value from hq_settings where key = 'ingest_token_sha256') then
+    raise exception 'Not allowed';
+  end if;
+  for k in select jsonb_object_keys(totals) loop
+    insert into downloads_daily (day, asset, total) values (current_date, left(k, 120), (totals ->> k)::bigint)
+      on conflict (day, asset) do update set total = excluded.total;
+    n := n + 1;
+  end loop;
+  return n;
+end $$;
+
+-- Only from the SQL Editor (the database owner): make the first HQ owner.
+create or replace function public.hq_make_owner(owner_email text, owner_name text) returns text
+  language plpgsql security definer set search_path = public as $$
+declare uid uuid;
+begin
+  select id into uid from auth.users where lower(email::text) = lower(trim(owner_email));
+  if uid is null then raise exception 'No account with that email. Create one at riyeser.com/team first.'; end if;
+  insert into hq_staff (user_id, display_name, role) values (uid, trim(owner_name), 'owner')
+    on conflict (user_id) do update set role = 'owner', active = true;
+  insert into hq_audit (actor, action, details) values (null, 'staff.owner_made', json_build_object('email', owner_email)::jsonb);
+  return 'Done: ' || owner_email || ' is an HQ owner. Sign in at riyeser.com/hq with two-step sign-in.';
+end $$;
+
+revoke all on function public.hq_role(), public.hq_need(text[]), public.hq_log(text, jsonb), public.hq_me(), public.hq_overview(),
+  public.hq_companies(text), public.hq_company(uuid), public.hq_set_calls_paid(uuid, date), public.hq_add_note(uuid, text),
+  public.hq_staff_list(), public.hq_add_staff(text, text, text), public.hq_set_staff(uuid, text, boolean), public.hq_history(),
+  public.hq_downloads(int), public.hq_set_ingest_token(text), public.hq_record_downloads(text, jsonb), public.hq_make_owner(text, text)
+  from public, anon, authenticated;
+grant execute on function public.hq_me(), public.hq_overview(), public.hq_companies(text), public.hq_company(uuid),
+  public.hq_set_calls_paid(uuid, date), public.hq_add_note(uuid, text), public.hq_staff_list(), public.hq_add_staff(text, text, text),
+  public.hq_set_staff(uuid, text, boolean), public.hq_history(), public.hq_downloads(int) to authenticated;
+grant execute on function public.hq_record_downloads(text, jsonb) to anon, authenticated;
