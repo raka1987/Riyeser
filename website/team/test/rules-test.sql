@@ -119,6 +119,96 @@ select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
 do $$ begin assert not exists (select 1 from public.channels where kind = 'private'), 'B sees no private channels'; end $$;
 reset role;
 
+-- Nobody can promote themselves, or flip a private chat to public
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222'); set role authenticated;
+do $$ begin
+  begin update public.members set role = 'owner' where user_id = auth.uid(); raise exception 'self-promoted';
+  exception when insufficient_privilege then null; end;
+  begin update public.workspaces set calls_paid_until = now() + interval '10 years'; raise exception 'gave self premium';
+  exception when insufficient_privilege then null; end;
+  begin update public.channels set kind = 'channel' where kind = 'private'; raise exception 'made private public';
+  exception when insufficient_privilege then null; end;
+end $$;
+update public.members set display_name = 'Sam T' where user_id = auth.uid();
+do $$ begin assert (select display_name from public.members where user_id = auth.uid()) = 'Sam T', 'can rename self'; end $$;
+
+-- ===== Calls (premium)
+-- Branches: only admins make them; everyone in the team sees them
+do $$ begin
+  begin insert into public.branches (workspace_id, name) select workspace_id, 'Sneaky' from public.members limit 1; raise exception 'member made a branch';
+  exception when insufficient_privilege then null; end;
+end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+select public.create_branch(:'ws_a', 'Lautoka branch') as br \gset
+insert into public.branch_members (branch_id, user_id) values (:'br', '22222222-2222-2222-2222-222222222222'), (:'br', '44444444-4444-4444-4444-444444444444');
+-- set-up: Head office is 100 with Alex on 101; Lautoka is 200 with its own join code
+do $$ begin
+  assert (select extension from public.branches where name = 'Head office') = 100, 'head office 100';
+  assert (select extension from public.members where user_id = '11111111-1111-1111-1111-111111111111') = 101, 'owner on 101';
+  assert (select extension from public.branches where name = 'Lautoka branch') = 200, 'second branch 200';
+  assert (select code from public.branches where name = 'Lautoka branch') ~ '^LAU-[0-9]{4}$', 'branch code like LAU-1234';
+end $$;
+select code as lau_code from public.branches where name = 'Lautoka branch' \gset
+-- an admin can't put someone from another business in a branch
+do $$ begin
+  begin insert into public.branch_members (branch_id, user_id) select id, '33333333-3333-3333-3333-333333333333' from public.branches limit 1; raise exception 'added outsider';
+  exception when insufficient_privilege then null; end;
+end $$;
+do $$ begin assert (public.team_features((select id from public.workspaces limit 1)) ->> 'calls')::boolean, 'new team has the calls trial'; end $$;
+-- Alex rings Sam: Sam sees the ring, Jordan doesn't
+insert into public.call_signals (workspace_id, call_id, to_user, kind) values (:'ws_a', gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'ring');
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ begin assert (select count(*) from public.call_signals where kind = 'ring') = 1, 'Sam sees the ring'; end $$;
+select pg_temp.as_user('44444444-4444-4444-4444-444444444444');
+do $$ begin assert (select count(*) from public.call_signals) = 0, 'Jordan sees nothing of the Alex-Sam call'; end $$;
+-- B can't ring anyone in A
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin
+  begin insert into public.call_signals (workspace_id, call_id, to_user, kind)
+        values ((select id from public.workspaces limit 1), gen_random_uuid(), '11111111-1111-1111-1111-111111111111', 'ring');
+        raise exception 'B rang A';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- after the trial, without paying: no calls; with paying: calls again
+reset role;
+update public.workspaces set created_at = now() - interval '100 days' where id = :'ws_a';
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+do $$ begin
+  assert not (public.team_features((select id from public.workspaces limit 1)) ->> 'calls')::boolean, 'trial over';
+  begin insert into public.call_signals (workspace_id, call_id, to_user, kind)
+        values ((select id from public.workspaces limit 1), gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'ring');
+        raise exception 'rang without calls';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+update public.workspaces set calls_paid_until = now() + interval '30 days' where id = :'ws_a';
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+insert into public.call_signals (workspace_id, call_id, to_user, kind) values (:'ws_a', gen_random_uuid(), '22222222-2222-2222-2222-222222222222', 'ring');
+do $$ begin assert (public.team_features((select id from public.workspaces limit 1)) ->> 'calls_paid')::boolean, 'paid'; end $$;
+reset role;
+
+-- A new person joins with the Lautoka code: in the team, in the branch, on 201
+reset role;
+insert into auth.users values ('55555555-5555-5555-5555-555555555555', 'lautoka@a.test');
+select pg_temp.as_user('55555555-5555-5555-5555-555555555555'); set role authenticated;
+select public.join_team(lower(:'lau_code'), 'Lautoka front desk');
+do $$ begin
+  assert (select extension from public.members where user_id = auth.uid()) = 201, 'branch joiner gets 201';
+  assert exists (select 1 from public.branch_members bm join public.branches b on b.id = bm.branch_id where b.name = 'Lautoka branch' and bm.user_id = auth.uid()), 'placed in Lautoka';
+  begin update public.members set extension = 999 where user_id = auth.uid(); raise exception 'changed own extension';
+  exception when insufficient_privilege then null; end;
+  begin perform public.set_extension((select workspace_id from public.members where user_id = auth.uid()), auth.uid(), 999); raise exception 'non-admin set ext';
+  exception when others then if sqlerrm = 'non-admin set ext' then raise; end if; end;
+end $$;
+-- the owner can renumber, but not onto a number that's taken
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+select public.set_extension(:'ws_a', '55555555-5555-5555-5555-555555555555', 250);
+do $$ begin
+  begin perform public.set_extension((select id from public.workspaces limit 1), '55555555-5555-5555-5555-555555555555', 101); raise exception 'took 101';
+  exception when others then assert sqlerrm like 'Extension 101 is already used%', sqlerrm; end;
+end $$;
+reset role;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

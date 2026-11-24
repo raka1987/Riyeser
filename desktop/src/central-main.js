@@ -1,7 +1,7 @@
 // Riyeser Central: the Riyeser Group home screen. Opens every Riyeser program and shows, like a PA would, what needs
 // attention today: meetings, to-dos, money owed and owing, and recent documents, plus one search for every file.
 // It only READS the other programs' data, so it can never damage their files.
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, session } = require('electron');
 const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
 const licence = require('./core/licence');
@@ -306,21 +306,45 @@ function registerIpc() {
 // Riyeser Team (team chat) in its own window. It's the online chat at riyeser.com/team, with its sign-in kept
 // in its own storage so it stays signed in. Links people send open in the normal web browser.
 const TEAM_URL = 'https://riyeser.com/team/';
-let teamWin = null;
-function openTeam() {
-  if (teamWin && !teamWin.isDestroyed()) { if (teamWin.isMinimized()) teamWin.restore(); teamWin.show(); teamWin.focus(); return true; }
+let teamWin = null; let quitting = false;
+// Microphone and camera (for Riyeser Team Calls) and notifications, only for riyeser.com, only in the Team window.
+function teamSession() {
+  const ses = session.fromPartition('persist:riyeser-team');
+  if (!ses.__riyeserPerms) {
+    const ours = (url) => { try { return new URL(url).origin === new URL(TEAM_URL).origin; } catch { return false; } };
+    ses.setPermissionRequestHandler((wc, perm, cb, details) => cb(['media', 'notifications', 'clipboard-sanitized-write'].includes(perm) && ours(details.requestingUrl || wc.getURL())));
+    ses.setPermissionCheckHandler((_wc, perm, origin) => ['media', 'notifications', 'clipboard-sanitized-write'].includes(perm) && ours(origin));
+    ses.__riyeserPerms = true;
+  }
+  return ses;
+}
+// After the first time Team is opened, it keeps running (hidden) while Central is open, so calls can ring.
+function openTeam(opts = {}) {
+  if (teamWin && !teamWin.isDestroyed()) {
+    if (!opts.background) { if (teamWin.isMinimized()) teamWin.restore(); teamWin.show(); teamWin.focus(); }
+    return true;
+  }
   teamWin = new BrowserWindow({
-    width: 1100, height: 760, minWidth: 380, minHeight: 500, title: 'Riyeser Team',
+    width: 1100, height: 760, minWidth: 380, minHeight: 500, title: 'Riyeser Team', show: !opts.background,
     icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-central.ico' : 'icon-central.png'),
-    webPreferences: { partition: 'persist:riyeser-team', contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { session: teamSession(), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
   });
   teamWin.removeMenu();
   teamWin.loadURL(TEAM_URL);
   const outside = (url) => { try { const u = new URL(url); return !(u.origin === new URL(TEAM_URL).origin && u.pathname.startsWith('/team/')); } catch { return true; } };
   teamWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   teamWin.webContents.on('will-navigate', (e, url) => { if (outside(url)) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
-  teamWin.webContents.on('page-title-updated', (_e, title) => { if (win && !win.isDestroyed()) win.webContents.send('team:title', title); });
+  teamWin.webContents.on('page-title-updated', (_e, title) => {
+    if (win && !win.isDestroyed()) win.webContents.send('team:title', title);
+    if (/^📞/.test(title) && teamWin && !teamWin.isDestroyed()) {   // an incoming call: bring Team forward
+      if (teamWin.isMinimized()) teamWin.restore();
+      teamWin.show(); teamWin.focus(); teamWin.flashFrame(true);
+    }
+  });
+  teamWin.on('focus', () => { if (teamWin) teamWin.flashFrame(false); });
+  teamWin.on('close', (e) => { if (!quitting) { e.preventDefault(); teamWin.hide(); } });   // keep running so calls can ring
   teamWin.on('closed', () => { teamWin = null; });
+  try { store.set('team', { background: true }); } catch { /* settings are a nice-to-have */ }
   return true;
 }
 
@@ -333,6 +357,11 @@ function createWindow() {
   win.removeMenu();
   win.loadFile(path.join(__dirname, 'renderer', 'central.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  // Closing Central closes the hidden Team window too, so Central really quits.
+  win.on('closed', () => { win = null; quitting = true; if (teamWin && !teamWin.isDestroyed()) teamWin.destroy(); });
+  // Team was used before: start it quietly in the background so calls can ring.
+  let t = null; try { t = store.get('team', null); } catch { /* none yet */ }
+  if (t && t.background) setTimeout(() => openTeam({ background: true }), 4000);
 }
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
@@ -352,4 +381,5 @@ app.whenReady().then(async () => {
   registerIpc();
   createWindow();
 });
+app.on('before-quit', () => { quitting = true; });
 app.on('window-all-closed', () => app.quit());

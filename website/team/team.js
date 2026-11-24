@@ -46,7 +46,7 @@
       async createTeam(name, you) { return ok(await sb.rpc('create_team', { team_name: name, your_name: you })); },
       async joinTeam(code, you) { return ok(await sb.rpc('join_team', { code, your_name: you })); },
       async newInvite(ws) { return ok(await sb.rpc('new_invite_code', { ws })); },
-      async people(ws) { return ok(await sb.from('members').select('user_id, display_name, role').eq('workspace_id', ws).order('display_name')); },
+      async people(ws) { return ok(await sb.from('members').select('user_id, display_name, role, extension').eq('workspace_id', ws).order('display_name')); },
       async channels(ws) {
         const chans = ok(await sb.from('channels').select('id, kind, name, topic, created_by').eq('workspace_id', ws).eq('archived', false).order('name'));
         const dms = chans.filter((c) => c.kind !== 'channel').map((c) => c.id);
@@ -71,6 +71,27 @@
       async remove(id) { ok(await sb.from('messages').update({ deleted: true, body: '(deleted)' }).eq('id', id)); },
       async markRead(ch, uid) { await sb.from('reads').upsert({ channel_id: ch, user_id: uid, last_read_at: new Date().toISOString() }); },
       async unread(ws) { const r = ok(await sb.rpc('unread_counts', { ws })); return Object.fromEntries(r.map((x) => [x.channel_id, Number(x.unread)])); },
+      async features(ws) { return ok(await sb.rpc('team_features', { ws })) || { calls: false }; },
+      async branches(ws) {
+        const rows = ok(await sb.from('branches').select('id, name, code, extension, branch_members(user_id)').eq('workspace_id', ws).order('extension'));
+        return rows.map((b) => ({ id: b.id, name: b.name, code: b.code, extension: b.extension, people: (b.branch_members || []).map((x) => x.user_id) }));
+      },
+      async createBranch(ws, name) { return ok(await sb.rpc('create_branch', { ws, branch_name: name })); },
+      async newBranchCode(branch) { return ok(await sb.rpc('new_branch_code', { branch })); },
+      async setBranchPeople(branch, add, remove) {
+        if (add.length) ok(await sb.from('branch_members').insert(add.map((user_id) => ({ branch_id: branch, user_id }))));
+        if (remove.length) ok(await sb.from('branch_members').delete().eq('branch_id', branch).in('user_id', remove));
+      },
+      async setExtension(ws, person, ext) { ok(await sb.rpc('set_extension', { ws, person, ext })); },
+      async signal(ws, call, to, kind, payload) {
+        ok(await sb.from('call_signals').insert({ workspace_id: ws, call_id: call, to_user: to, kind, payload: payload || null }));
+      },
+      async tidyCall(call) { await sb.from('call_signals').delete().eq('call_id', call); },
+      onSignals(uid, fn) {
+        sb.channel('calls-' + uid)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_signals', filter: 'to_user=eq.' + uid }, (p) => fn(p.new))
+          .subscribe();
+      },
       live(ws, onChange) {
         if (sub) sb.removeChannel(sub);
         sub = sb.channel('team-' + ws)
@@ -82,9 +103,21 @@
 
   // ------------------------------------------------------------------ the demo (sample data, this browser only)
   function demoBackend() {
-    const me = { id: 'u-me', email: 'you@sample.test' };
+    const AS = /^u-(me|sam|jordan|alex)$/.test(params.get('as') || '') ? params.get('as') : 'u-me';
+    const me = { id: AS, email: AS.slice(2) + '@sample.test' };
     const ws = 'w-demo';
-    const ppl = [['u-me', 'You', 'owner'], ['u-sam', 'Sam Taylor', 'admin'], ['u-jordan', 'Jordan Lee', 'member'], ['u-alex', 'Alex Nguyen', 'member']];
+    const ppl = [['u-me', 'You', 'owner', 101], ['u-sam', 'Sam Taylor', 'admin', 102], ['u-jordan', 'Jordan Lee', 'member', 201], ['u-alex', 'Alex Nguyen', 'member', 202]];
+    const brs = [{ id: 'b-head', name: 'Head office', code: 'HEA-3071', extension: 100, people: ['u-me', 'u-sam'] },
+      { id: 'b-lau', name: 'Lautoka branch', code: 'LAU-4821', extension: 200, people: ['u-jordan', 'u-alex'] }];
+    // Calls in the demo travel between browser tabs (open the demo again with ?demo&as=u-sam to be Sam).
+    const bus = 'BroadcastChannel' in window ? new BroadcastChannel('riyeser-team-demo-calls') : null;
+    const online = new Set([AS]); let onSig = null;
+    if (bus) {
+      bus.onmessage = (e) => { const m = e.data || {};
+        if (m.hello) { online.add(m.hello); if (!m.reply) bus.postMessage({ hello: AS, reply: true }); return; }
+        if (m.to === AS && onSig) onSig(m); };
+      bus.postMessage({ hello: AS });
+    }
     const now = Date.now(); const ago = (m) => new Date(now - m * 60000).toISOString();
     const chans = [{ id: 'c-general', kind: 'channel', name: 'general', topic: 'Everyone in the team', people: [] },
       { id: 'c-jobs', kind: 'channel', name: 'jobs', topic: 'Jobs, bookings and what\'s on today', people: [] },
@@ -113,7 +146,23 @@
       async signOut() { location.href = '/team/'; },
       async teams() { return [{ id: ws, name: 'Sample Plumbing', invite_code: 'DEMO1234', role: 'owner', myName: 'You' }]; },
       async createTeam() { return ws; }, async joinTeam() { return ws; }, async newInvite() { return 'DEMO' + Math.floor(1000 + Math.random() * 9000); },
-      async people() { return ppl.map(([user_id, display_name, role]) => ({ user_id, display_name, role })); },
+      async people() { return ppl.map(([user_id, display_name, role, extension]) => ({ user_id, display_name, role, extension })); },
+      async features() { return { calls: true, calls_paid: false, trial_days_left: 74 }; },
+      async branches() { return brs.map((b) => ({ ...b, people: b.people.slice() })); },
+      async createBranch(_w, name) { const ext = Math.max(...brs.map((b) => b.extension)) + 100;
+        brs.push({ id: 'b-' + Date.now(), name, code: name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'B') + '-' + Math.floor(1000 + Math.random() * 9000), extension: ext, people: [] }); },
+      async newBranchCode(b) { const x = brs.find((y) => y.id === b); x.code = x.code.slice(0, 4) + Math.floor(1000 + Math.random() * 9000); return x.code; },
+      async setBranchPeople(b, add, remove) { const x = brs.find((y) => y.id === b); x.people = [...new Set([...x.people, ...add])].filter((u) => !remove.includes(u)); },
+      async setExtension(_w, person, ext) {
+        if (ppl.some((q) => q[3] === ext && q[0] !== person) || brs.some((b) => b.extension === ext)) throw new Error(`Extension ${ext} is already used`);
+        ppl.find((q) => q[0] === person)[3] = ext; },
+      async signal(_w, call, to, kind, payload) {
+        const m = { call_id: call, from_user: AS, to_user: to, to, kind, payload: payload || null, created_at: new Date().toISOString() };
+        if (bus && online.has(to)) bus.postMessage(m);
+        else if (kind === 'ring' && onSig && online.size === 1) setTimeout(() => onSig({ ...m, from_user: to, to_user: AS, kind: 'accept', payload: { demo: true } }), 2200);
+      },
+      async tidyCall() {},
+      onSignals(_u, fn) { onSig = fn; },
       async channels() { return chans.slice(); },
       async createChannel(_w, _u, name, topic) { const id = 'c-' + name; chans.push({ id, kind: 'channel', name, topic, people: [], created_by: 'u-me' }); return id; },
       async createPrivate(_w, name, topic, people) { const id = 'p-' + name; chans.push({ id, kind: 'private', name, topic, people: ['u-me', ...people.filter((x) => x !== 'u-me')], created_by: 'u-me' }); return id; },
@@ -145,10 +194,11 @@
   }
 
   const api = DEMO ? demoBackend() : onlineBackend();
-  const S = { user: null, teams: [], team: null, people: [], chans: [], unread: {}, ch: null, msgs: [], inChat: false, editing: null };
+  const S = { user: null, teams: [], team: null, people: [], chans: [], unread: {}, ch: null, msgs: [], inChat: false, editing: null,
+    features: { calls: false }, branches: [] };
   const nameOf = (uid) => (S.people.find((p) => p.user_id === uid) || {}).display_name || 'Someone who left';
   const chanLabel = (c) => (c.kind === 'dm' ? nameOf(c.people.find((p) => p !== S.user.id) || S.user.id) : c.name);
-  const demoBar = () => (DEMO ? `<div class="demo-bar">This is a demo with sample messages${CONFIGURED ? ` · <a href="/team/">Sign in for real</a>` : ''} · <a href="/programs/team.html">About Riyeser Team</a></div>` : '');
+  const demoBar = () => (DEMO ? `<div class="demo-bar">This is a demo with sample messages and calls${CONFIGURED ? ` · <a href="/team/">Sign in for real</a>` : ''} · <a href="/programs/team.html">About Riyeser Team</a></div>` : '');
 
   // ------------------------------------------------------------------ sign in / create account
   function gate(mode = 'in', note = '') {
@@ -207,6 +257,8 @@
     S.team = S.teams.find((t) => t.id === id) || S.teams[0];
     try { localStorage.setItem('riyeser.team.last', S.team.id); } catch { /* private mode */ }
     [S.people, S.chans, S.unread] = await Promise.all([api.people(S.team.id), api.channels(S.team.id), api.unread(S.team.id)]);
+    [S.features, S.branches] = await Promise.all([api.features(S.team.id).catch(() => ({ calls: false })), api.branches(S.team.id).catch(() => [])]);
+    Calls.listen();
     const first = S.chans.find((c) => c.name === 'general') || S.chans[0];
     api.live(S.team.id, onLive);
     await openChannel(first && first.id, false);
@@ -282,8 +334,9 @@
       <div class="sec">Channels <button id="addch" aria-label="Add a channel" title="Add a channel">+</button></div>
       ${chs.map((c) => `<button class="item${S.ch && S.ch.id === c.id ? ' on' : ''}${S.unread[c.id] ? ' unread' : ''}" data-ch="${c.id}"><span class="hash">${c.kind === 'private' ? '🔒' : '#'}</span><span class="nm">${esc(c.name)}</span>${unreadBadge(c.id)}</button>`).join('')}
       <div class="sec">Direct messages</div>
-      ${others.map((p) => { const dm = dmFor(p.user_id); return `<button class="item${dm && S.ch && S.ch.id === dm.id ? ' on' : ''}${dm && S.unread[dm.id] ? ' unread' : ''}" data-dm="${p.user_id}">${av(p.user_id, p.display_name)}<span class="nm">${esc(p.display_name)}</span>${dm ? unreadBadge(dm.id) : ''}</button>`; }).join('')
+      ${others.map((p) => { const dm = dmFor(p.user_id); return `<button class="item${dm && S.ch && S.ch.id === dm.id ? ' on' : ''}${dm && S.unread[dm.id] ? ' unread' : ''}" data-dm="${p.user_id}">${av(p.user_id, p.display_name)}<span class="nm">${esc(p.display_name)}</span>${p.extension ? `<span class="ext">${p.extension}</span>` : ''}${dm ? unreadBadge(dm.id) : ''}</button>`; }).join('')
         || '<p style="padding:4px 10px;color:var(--side-muted);font-size:13px">Invite your team to start chatting.</p>'}
+      ${callsSideHtml()}
       <button class="invite" id="inv">+ Invite people</button>
     </div>
     <div class="me">${av(S.user.id, me.display_name || S.user.email)}<div class="nm">${esc(me.display_name || 'You')}<small>${esc(S.user.email || '')}</small></div><button id="out">Sign out</button></div>`;
@@ -308,16 +361,20 @@
     });
     el.querySelector('#addch').onclick = addChannel;
     el.querySelector('#inv').onclick = invite;
+    el.querySelectorAll('[data-callbranch]').forEach((b) => b.onclick = () => Calls.start({ branch: b.dataset.callbranch }));
+    const dp = el.querySelector('#dial'); if (dp) dp.onclick = dialPad;
+    const mg = el.querySelector('#mgbr'); if (mg) mg.onclick = manageBranches;
     el.querySelector('#out').onclick = async () => { await api.signOut(); S.team = null; gate(); };
     const sw = el.querySelector('#tsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
   }
   function renderHead() {
     const el = document.getElementById('mhead'); if (!el) return;
     el.innerHTML = `<button class="back" aria-label="Back to channels">‹</button>${S.ch ? (S.ch.kind === 'dm'
-      ? `${av(S.ch.people.find((p) => p !== S.user.id) || S.user.id, chanLabel(S.ch))}<div><h2>${esc(chanLabel(S.ch))}</h2><small>Direct message</small></div>`
+      ? `${av(S.ch.people.find((p) => p !== S.user.id) || S.user.id, chanLabel(S.ch))}<div style="flex:1;min-width:0"><h2>${esc(chanLabel(S.ch))}</h2><small>Direct message${(() => { const o = S.people.find((p) => p.user_id === S.ch.people.find((u) => u !== S.user.id)); return o && o.extension ? ' · ext ' + o.extension : ''; })()}</small></div><button class="btn sm callbtn" id="calldm" aria-label="Call ${esc(chanLabel(S.ch))}">📞 Call</button>`
       : `<div style="flex:1;min-width:0"><h2>${S.ch.kind === 'private' ? '🔒' : '#'} ${esc(S.ch.name)}</h2><small>${S.ch.kind === 'private' ? `Private · ${S.ch.people.length} ${S.ch.people.length === 1 ? 'person' : 'people'}${S.ch.topic ? ' · ' : ''}` : ''}${esc(S.ch.topic || '')}</small></div>${S.ch.kind === 'private' ? '<button class="btn sm" id="ppl">People</button>' : ''}`) : ''}`;
     el.querySelector('.back').onclick = () => { S.inChat = false; document.querySelector('.shell').classList.remove('inchat'); };
     const pb = el.querySelector('#ppl'); if (pb) pb.onclick = peopleOf;
+    const cb = el.querySelector('#calldm'); if (cb) cb.onclick = () => Calls.start({ user: S.ch.people.find((u) => u !== S.user.id) });
     const t = document.getElementById('txt'); if (t && S.ch) t.placeholder = S.ch.kind === 'dm' ? `Message ${chanLabel(S.ch)}` : S.ch.kind === 'private' ? `Message ${S.ch.name} (private)` : `Message #${S.ch.name}`;
   }
   function renderMsgs(toBottom) {
@@ -364,6 +421,8 @@
     modal(`<h3>Invite people to ${esc(S.team.name)}</h3><p>Send them this link. They create a free account, then join with the code.</p>
       <div class="copyrow"><input id="il" readonly value="${esc(link())}"><button class="btn p" id="cp">Copy</button></div>
       <p style="margin:14px 0 0">Or give them the code: <span class="code" id="ic">${esc(S.team.invite_code)}</span></p>
+      ${S.branches.length ? `<p style="margin:16px 0 6px"><b>Joining a branch?</b> Use its code instead: they're put in that branch and given the next extension.</p>
+      <div class="brcodes">${S.branches.map((b) => `<div><span>${esc(b.name)}${b.extension ? ` · ${b.extension}` : ''}</span><span class="code sm">${esc(b.code || '')}</span></div>`).join('')}</div>` : ''}
       <div class="mfoot">${admin ? '<button class="btn" id="nc" title="The old link stops working">New code</button>' : ''}<button class="btn" id="cl">Done</button></div>`, (d, close) => {
       d.querySelector('#cp').onclick = async () => { try { await navigator.clipboard.writeText(link()); d.querySelector('#cp').textContent = 'Copied'; } catch { d.querySelector('#il').select(); } };
       d.querySelector('#cl').onclick = close;
@@ -424,6 +483,261 @@
     });
   }
 
+
+  // ================================================================== Riyeser Team Calls (premium)
+  // Calls go directly between the two devices (WebRTC). The online service only carries the ringing and set-up.
+  // Calling a branch rings everyone in it; the first to answer takes the call. 30 seconds with no answer is a missed call.
+  function callsSideHtml() {
+    const f = S.features || {};
+    const admin = S.team.role === 'owner' || S.team.role === 'admin';
+    const trial = f.calls && !f.calls_paid && f.trial_days_left != null ? `<span class="trialtag">Trial · ${f.trial_days_left} days left</span>` : '';
+    const me = S.people.find((p) => p.user_id === S.user.id) || {};
+    return `<div class="sec">Calls ${f.calls ? trial : '<span class="trialtag prem">⭐ Premium</span>'}<span>${admin ? '<button id="mgbr" aria-label="Branches and extensions" title="Branches and extensions">⚙</button>' : ''}<button id="dial" aria-label="Dial an extension" title="Dial an extension">⌨</button></span></div>
+      ${S.branches.map((b) => `<button class="item" data-callbranch="${b.id}" title="Rings everyone in ${esc(b.name)}"><span class="hash">📞</span><span class="nm">${esc(b.name)}</span>${b.extension ? `<span class="ext">${b.extension}</span>` : ''}</button>`).join('')}
+      ${me.extension ? `<p class="myext">Your extension: <b>${me.extension}</b></p>` : ''}`;
+  }
+
+  function upsell() {
+    modal(`<h3>⭐ Riyeser Team Calls</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
+      <p><b>+$20 a month per business</b>, free for your first 90 days. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>
+      <div class="mfoot"><button class="btn" id="cl">Not now</button><a class="btn p" href="/pricing.html" target="_blank" rel="noopener">See pricing</a></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
+  }
+
+  function dialPad() {
+    modal(`<h3>Dial an extension</h3><p>A person's number rings them; a branch's number (like 200) rings everyone there.</p>
+      <form id="dpf"><input id="dpn" class="dpn" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="Extension">
+      <div class="keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, '⌫'].map((k) => k === '' ? '<span></span>' : `<button type="button" data-k="${k}">${k}</button>`).join('')}</div>
+      <div class="dpwho" id="dpw"></div>
+      <div class="mfoot"><button type="button" class="btn" id="cl">Close</button><button class="btn p">📞 Call</button></div></form>`, (d, close) => {
+      const n = d.querySelector('#dpn'); const who = d.querySelector('#dpw');
+      const find = (v) => { const x = Number(v); const p = S.people.find((q) => q.extension === x && q.user_id !== S.user.id); if (p) return { user: p.user_id, label: p.display_name };
+        const b = S.branches.find((q) => q.extension === x); return b ? { branch: b.id, label: b.name + ' (everyone)' } : null; };
+      const show = () => { const t = find(n.value); who.textContent = n.value ? (t ? t.label : 'No one on that number') : ''; };
+      n.oninput = show; n.focus();
+      d.querySelectorAll('[data-k]').forEach((k) => k.onclick = () => { n.value = k.dataset.k === '⌫' ? n.value.slice(0, -1) : (n.value + k.dataset.k).slice(0, 4); show(); });
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#dpf').onsubmit = (e) => { e.preventDefault(); const t = find(n.value); if (!t) { show(); return; } close(); Calls.start(t); };
+    });
+  }
+
+  // Owners and admins: branches, who's in each, their join codes, and everyone's extension.
+  function manageBranches() {
+    const body = () => `<h3>Branches and extensions</h3><p>Each branch has its own join code: staff who join with it go straight into that branch with the next extension.</p>
+      ${S.branches.map((b) => `<details class="brm"><summary><b>${esc(b.name)}</b>${b.extension ? ` · ${b.extension}` : ''} <span class="code sm">${esc(b.code || '')}</span></summary>
+        <div class="pick">${S.people.map((p) => `<label class="pk"><input type="checkbox" data-br="${b.id}" value="${p.user_id}"${b.people.includes(p.user_id) ? ' checked' : ''}>${av(p.user_id, p.display_name)}<span>${esc(p.display_name)}</span></label>`).join('')}</div>
+        <div class="row2"><button class="btn sm" data-save="${b.id}">Save who's in it</button><button class="btn sm" data-code="${b.id}">New join code</button></div></details>`).join('')}
+      <form id="nb" class="row2" style="margin-top:10px"><input name="name" required maxlength="60" placeholder="New branch, e.g. Nadi branch" class="inl"><button class="btn sm">+ Add branch</button></form>
+      <h4 style="margin:18px 0 6px">Extensions</h4>
+      <div class="exts">${S.people.map((p) => `<label>${av(p.user_id, p.display_name)}<span>${esc(p.display_name)}</span><input type="number" min="10" max="9999" value="${p.extension || ''}" data-ext="${p.user_id}" aria-label="Extension for ${esc(p.display_name)}"></label>`).join('')}</div>
+      <div class="mfoot"><button class="btn" id="cl">Close</button><button class="btn p" id="sx">Save extensions</button></div>`;
+    modal(body(), function wire(d, close) {
+      const refresh = async () => { [S.people, S.branches] = await Promise.all([api.people(S.team.id), api.branches(S.team.id)]); renderSide();
+        d.querySelector('.mcard').innerHTML = body(); wire(d, close); };
+      const run = async (fn) => { try { await fn(); } catch (err) { alert(plainError(err)); } await refresh(); };
+      d.querySelector('#cl').onclick = close;
+      d.querySelectorAll('[data-save]').forEach((b) => b.onclick = () => run(async () => {
+        const br = S.branches.find((x) => x.id === b.dataset.save);
+        const now = [...d.querySelectorAll(`input[data-br="${br.id}"]:checked`)].map((x) => x.value);
+        await api.setBranchPeople(br.id, now.filter((u) => !br.people.includes(u)), br.people.filter((u) => !now.includes(u))); }));
+      d.querySelectorAll('[data-code]').forEach((b) => b.onclick = () => { if (confirm('Make a new join code for this branch? The old one stops working.')) run(() => api.newBranchCode(b.dataset.code)); });
+      d.querySelector('#nb').onsubmit = (e) => { e.preventDefault(); const nm = String(new FormData(e.target).get('name')).trim(); if (nm) run(() => api.createBranch(S.team.id, nm)); };
+      d.querySelector('#sx').onclick = () => run(async () => {
+        for (const i of d.querySelectorAll('[data-ext]')) {
+          const p = S.people.find((x) => x.user_id === i.dataset.ext); const v = i.value ? Number(i.value) : null;
+          if ((p.extension || null) !== v) await api.setExtension(S.team.id, p.user_id, v);
+        } });
+    });
+  }
+
+  const Calls = (() => {
+    const ICE = CFG.iceServers || [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+    let call = null; let listening = null;
+    const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'c' + Date.now() + Math.random().toString(16).slice(2));
+    const send = (to, kind, payload) => api.signal(S.team.id, call.id, to, kind, payload).catch((e) => console.warn('call signal', e));
+    const myName = () => (S.people.find((p) => p.user_id === S.user.id) || {}).display_name || 'Someone';
+
+    // ---- sounds: a ring for incoming calls, a softer ring-back while calling out
+    let audio = null; let toneTimer = null;
+    function tone(kind) {
+      stopTone();
+      try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); } catch { return; }
+      const beep = (f1, f2, len) => { const t = audio.currentTime; const g = audio.createGain(); g.gain.value = kind === 'in' ? 0.12 : 0.05; g.connect(audio.destination);
+        for (const f of [f1, f2]) { const o = audio.createOscillator(); o.frequency.value = f; o.connect(g); o.start(t); o.stop(t + len); } };
+      const once = () => (kind === 'in' ? (beep(440, 480, 0.4), setTimeout(() => beep(440, 480, 0.4), 600)) : beep(400, 450, 1.0));
+      once(); toneTimer = setInterval(once, kind === 'in' ? 2500 : 3000);
+    }
+    function stopTone() { clearInterval(toneTimer); toneTimer = null; }
+
+    // ---- the call window
+    function box() { let b = document.getElementById('callbox'); if (!b) { b = document.createElement('div'); b.id = 'callbox'; document.body.appendChild(b); } return b; }
+    const fmtTime = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+    function draw() {
+      const b = box();
+      if (!call) { b.innerHTML = ''; b.className = ''; return; }
+      const who = call.peer ? nameOf(call.peer) : call.label;
+      const sub = call.status === 'incoming' ? `Incoming call${call.via ? ` to ${esc(call.via)}` : ''}`
+        : call.status === 'calling' ? `Calling${call.branch ? ' everyone' : ''}…` : call.status === 'connecting' ? 'Connecting…'
+        : call.status === 'live' ? `<span id="ctime">${fmtTime(Date.now() - call.startedAt)}</span>${call.sim ? ' · demo call, no sound' : ''}` : esc(call.note || 'Call ended');
+      b.className = 'on' + (call.cam || call.remoteVideo ? ' video' : '') + (call.cam && call.remoteVideo ? ' both' : '');
+      b.innerHTML = `<div class="cwin" role="dialog" aria-label="Call">
+        <video id="rv" autoplay playsinline ${call.remoteVideo ? '' : 'hidden'}></video><video id="lv" autoplay playsinline muted ${call.cam ? '' : 'hidden'}></video>
+        <div class="cwho">${call.peer ? av(call.peer, who, 'big') : '<span class="av big" style="background:#a21caf">📞</span>'}<div><b>${esc(who || '')}</b><small>${sub}</small></div></div>
+        <div class="cbtns">${call.status === 'incoming'
+          ? `<button class="cb no" id="c-dec">Decline</button><button class="cb yes" id="c-ans">Answer</button>`
+          : call.status === 'ended' ? '' : `<button class="cb${call.muted ? ' off' : ''}" id="c-mute">${call.muted ? 'Unmute' : 'Mute'}</button>
+            ${call.status === 'live' && !call.sim ? `<button class="cb${call.cam ? ' off' : ''}" id="c-cam">${call.cam ? 'Camera off' : 'Camera'}</button>` : ''}
+            <button class="cb no" id="c-end">${call.status === 'live' ? 'Hang up' : 'Cancel'}</button>`}</div>
+        <audio id="ra" autoplay></audio></div>`;
+      const on = (id, fn) => { const e = b.querySelector(id); if (e) e.onclick = fn; };
+      on('#c-ans', answer); on('#c-dec', decline); on('#c-end', () => hangup()); on('#c-mute', mute); on('#c-cam', camera);
+      if (call.remoteStream) { b.querySelector('#ra').srcObject = call.remoteStream; b.querySelector('#rv').srcObject = call.remoteStream; }
+      if (call.camTrack) b.querySelector('#lv').srcObject = new MediaStream([call.camTrack]);
+    }
+    setInterval(() => { const t = document.getElementById('ctime'); if (t && call && call.startedAt) t.textContent = fmtTime(Date.now() - call.startedAt); }, 1000);
+
+    async function mic() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('This browser can\'t make calls. Use Riyeser Central, Chrome or Edge.');
+      try { return await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true }, video: false }); }
+      catch (e) { throw new Error('Riyeser Team needs your microphone for calls. Allow it when asked (or in the browser\'s site settings), then try again.'); }
+    }
+
+    // ---- start a call to a person ({user}) or a branch ({branch})
+    async function start(t) {
+      if (!S.features.calls) return upsell();
+      if (call && call.status !== 'ended') return;
+      let targets; let label;
+      if (t.branch) { const b = S.branches.find((x) => x.id === t.branch); if (!b) return;
+        targets = b.people.filter((u) => u !== S.user.id); label = b.name;
+        if (!targets.length) return alert(`Nobody else is in ${b.name} yet. Add people under ⚙ Branches and extensions.`); }
+      else { targets = [t.user]; label = nameOf(t.user); }
+      call = { id: uuid(), dir: 'out', status: 'calling', targets: new Set(targets), label, branch: t.branch || null, peer: t.user || null, pendingIce: [] };
+      draw();
+      try { call.local = await mic(); } catch (e) { call = null; draw(); return alert(e.message); }
+      if (!call) return;
+      tone('out');
+      for (const to of targets) send(to, 'ring', { from_name: myName(), via: t.branch ? label : null });
+      call.timeout = setTimeout(() => { if (call && call.status === 'calling') { for (const to of call.targets) send(to, 'cancel'); finish('No answer', true); } }, 30000);
+    }
+
+    function newPc() {
+      const pc = new RTCPeerConnection({ iceServers: ICE });
+      pc.onicecandidate = (e) => { if (e.candidate && call && call.peer) send(call.peer, 'ice', e.candidate.toJSON()); };
+      pc.ontrack = (e) => { if (!call) return; call.remoteStream = call.remoteStream || new MediaStream();
+        if (!call.remoteStream.getTracks().includes(e.track)) call.remoteStream.addTrack(e.track);
+        if (e.track.kind === 'video') { e.track.onunmute = () => { if (call) { call.remoteVideo = true; draw(); } }; e.track.onmute = () => { if (call) { call.remoteVideo = false; draw(); } }; }
+        draw(); };
+      pc.onconnectionstatechange = () => {
+        if (!call) return;
+        if (pc.connectionState === 'connected' && call.status !== 'live') { call.status = 'live'; call.startedAt = Date.now(); stopTone(); draw(); }
+        if (pc.connectionState === 'failed') { if (call.peer) send(call.peer, 'hangup'); finish('Couldn\'t connect. A network between you may be blocking calls.'); }
+      };
+      return pc;
+    }
+    async function flushIce() { if (!call || !call.pc || !call.pc.remoteDescription) return; for (const c of call.pendingIce.splice(0)) { try { await call.pc.addIceCandidate(c); } catch { /* old candidate */ } } }
+
+    async function onSignal(sig) {
+      if (!sig || !S.team) return;
+      if (sig.created_at && Date.now() - new Date(sig.created_at) > 60000) return;   // something old
+      const k = sig.kind; const from = sig.from_user; const pl = sig.payload || {};
+      if (k === 'ring') {
+        if (call && call.status !== 'ended') { api.signal(S.team.id, sig.call_id, from, 'busy').catch(() => {}); return; }
+        if (!S.features.calls) return;
+        call = { id: sig.call_id, dir: 'in', status: 'incoming', peer: from, via: pl.via || null, pendingIce: [] };
+        tone('in'); draw(); alertIncoming(); return;
+      }
+      if (!call || sig.call_id !== call.id) return;
+      if (call.dir === 'in') {
+        if (k === 'cancel') return finish('Missed call');
+        if (k === 'taken') return finish('Answered by someone else');
+        if (k === 'offer' && call.pc) {
+          await call.pc.setRemoteDescription(pl);
+          call.pc.getTransceivers().forEach((t) => { if (t.receiver.track && t.receiver.track.kind === 'video') t.direction = 'sendrecv'; });
+          const ans = await call.pc.createAnswer(); await call.pc.setLocalDescription(ans);
+          send(from, 'answer', { type: ans.type, sdp: ans.sdp }); await flushIce(); return;
+        }
+      } else {
+        if (k === 'accept' && call.status === 'calling') {
+          clearTimeout(call.timeout); call.peer = from; call.targets.delete(from);
+          for (const to of call.targets) send(to, 'taken'); call.targets.clear();
+          if (pl.demo) { call.sim = true; call.status = 'live'; call.startedAt = Date.now(); stopTone(); draw(); return; }
+          call.status = 'connecting'; draw();
+          call.pc = newPc();
+          call.local.getTracks().forEach((tr) => call.pc.addTrack(tr, call.local));
+          call.pc.addTransceiver('video', { direction: 'sendrecv' });
+          const off = await call.pc.createOffer(); await call.pc.setLocalDescription(off);
+          send(from, 'offer', { type: off.type, sdp: off.sdp }); return;
+        }
+        if (k === 'accept' && from !== call.peer) { api.signal(S.team.id, call.id, from, 'taken').catch(() => {}); return; }
+        if ((k === 'decline' || k === 'busy') && call.status === 'calling') {
+          call.targets.delete(from); if (!call.targets.size) { clearTimeout(call.timeout); finish(k === 'busy' ? `${call.label} is on another call` : `${call.label} can't take the call right now`, true); }
+          return;
+        }
+        if (k === 'answer' && call.pc) { await call.pc.setRemoteDescription(pl); await flushIce(); return; }
+      }
+      if (k === 'ice' && from === call.peer) { if (call.pc && call.pc.remoteDescription) { try { await call.pc.addIceCandidate(pl); } catch { /* ignore */ } } else call.pendingIce.push(pl); return; }
+      if (k === 'hangup' && from === call.peer) return finish('Call ended');
+    }
+
+    async function answer() {
+      if (!call || call.status !== 'incoming') return;
+      stopTone(); call.status = 'connecting'; draw();
+      try { call.local = await mic(); } catch (e) { send(call.peer, 'decline'); finish(e.message); return; }
+      call.pc = newPc();
+      call.local.getTracks().forEach((tr) => call.pc.addTrack(tr, call.local));
+      send(call.peer, 'accept');
+    }
+    function decline() { if (!call) return; send(call.peer, 'decline'); finish('Declined'); }
+    function hangup() {
+      if (!call) return;
+      if (call.status === 'calling') { clearTimeout(call.timeout); for (const to of call.targets) send(to, 'cancel'); return finish('Cancelled', true); }
+      if (call.peer) send(call.peer, 'hangup');
+      finish('Call ended');
+    }
+    function mute() { if (!call || !call.local) return; call.muted = !call.muted; call.local.getAudioTracks().forEach((t) => { t.enabled = !call.muted; }); draw(); }
+    async function camera() {
+      if (!call || !call.pc) return;
+      const tx = call.pc.getTransceivers().find((t) => (t.receiver.track && t.receiver.track.kind === 'video'));
+      if (!tx) return;
+      if (call.cam) { await tx.sender.replaceTrack(null); call.camTrack && call.camTrack.stop(); call.camTrack = null; call.cam = false; draw(); return; }
+      try { const v = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } }); call.camTrack = v.getVideoTracks()[0];
+        await tx.sender.replaceTrack(call.camTrack); call.cam = true; draw(); }
+      catch { alert('Riyeser Team couldn\'t use your camera. Check it\'s plugged in and allowed.'); }
+    }
+
+    // ---- end: tidy up, and (caller only) leave a note in the direct message
+    async function finish(note, missed) {
+      if (!call) return;
+      const c = call; call = null; stopTone(); clearTimeout(c.timeout);
+      try { c.pc && c.pc.close(); } catch { /* closed */ }
+      (c.local ? c.local.getTracks() : []).forEach((t) => t.stop()); c.camTrack && c.camTrack.stop();
+      call = { ...c, status: 'ended', note, pc: null }; draw();
+      setTimeout(() => { if (call && call.status === 'ended' && call.id === c.id) { call = null; draw(); } }, 2500);
+      document.title = 'Riyeser Team';
+      if (c.dir === 'out' && (c.peer || c.targets) && !DEMO) api.tidyCall(c.id).catch(() => {});
+      if (c.dir === 'out' && c.peer) {
+        const text = c.startedAt ? `📞 Call · ${fmtTime(Date.now() - c.startedAt)}` : `📞 Missed call${c.branch ? ` to ${c.label}` : ''}`;
+        try { const dm = await api.openDm(S.team.id, c.peer); const m = await api.send(S.team.id, dm, text);
+          if (S.ch && S.ch.id === dm && m && !S.msgs.find((x) => x.id === m.id)) { S.msgs.push(m); renderMsgs(true); }
+          if (!S.chans.find((x) => x.id === dm)) { S.chans = await api.channels(S.team.id); renderSide(); } } catch { /* chat note is a nice-to-have */ }
+      } else if (c.dir === 'out' && missed && c.branch) {
+        const g = S.chans.find((x) => x.name === 'general'); if (g) api.send(S.team.id, g.id, `📞 Missed call to ${c.label}`).catch(() => {});
+      }
+    }
+
+    function alertIncoming() {
+      const who = nameOf(call.peer);
+      document.title = `📞 Incoming call from ${who}`;
+      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('Riyeser Team', { body: `Incoming call from ${who}${call.via ? ` (${call.via})` : ''}`, icon: 'icon-192.png' }); } catch { /* no notifications */ }
+    }
+
+    function listen() {
+      if (listening === S.user.id) return; listening = S.user.id;
+      api.onSignals(S.user.id, (sig) => onSignal(sig).catch((e) => console.warn('call', e)));
+      try { if ('Notification' in window && Notification.permission === 'default') document.addEventListener('click', () => Notification.requestPermission().catch(() => {}), { once: true }); } catch { /* no notifications */ }
+    }
+    return { start, listen, get current() { return call; } };
+  })();
+
   // ------------------------------------------------------------------ start
   async function start() {
     try {
@@ -437,6 +751,6 @@
     } catch (e) { $app.className = ''; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
-  window.RiyeserTeam = { state: S, demo: DEMO };
+  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls };
   start();
 })();

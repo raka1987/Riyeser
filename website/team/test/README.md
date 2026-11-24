@@ -6,3 +6,6 @@
   `../team-chat.sql`, then `rules-test.sql`. It ends with `ALL CHAT DATABASE TESTS PASSED`.
 - `demo-test.js` and `signin-test.js` (Playwright): build the site (`node website/build-combined.mjs`), serve
   `website/public` on port 8090, then run them with node.
+- `private-test.js`: private chats with chosen people. `calls-test.js`: real calls between browser tabs in the
+  demo (fake microphone and camera): person to person, a branch (first to answer), declining, the dial pad,
+  branches and extensions, and the premium upsell.
