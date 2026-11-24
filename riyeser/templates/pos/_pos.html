@@ -77,7 +77,7 @@ details.um{position:relative}details.um>summary{list-style:none;cursor:pointer}d
 </head>
 <body>
 <div class="shell">
-{% if company and company.is_demo %}<div class="flash demo" style="margin:0;border-radius:0;padding:6px 14px;background:#fef9c3;color:#713f12;border-bottom:1px solid #facc15;font-size:14px" role="status">Demo company: practice data, not real books.{% if user and user.role == 'admin' %} <a style="color:#713f12;font-weight:600;text-decoration:underline" href="{{ url_for('companies.index') }}#start-again">Start again with a blank company</a>{% endif %}</div>{% endif %}
+{% if company and company.is_demo %}<div class="flash demo" style="margin:0;border-radius:0;padding:6px 14px;background:#fef9c3;color:#713f12;border-bottom:1px solid #facc15;font-size:14px" role="status">Demo company: practice data, not real books.{% if central_demo %} Leave demo mode from Riyeser Central.{% elif user and user.role == 'admin' %} <a style="color:#713f12;font-weight:600;text-decoration:underline" href="{{ url_for('companies.index') }}#start-again">Start again with a blank company</a>{% endif %}</div>{% endif %}
   {% set tables_on = mode == 'restaurant' and 'tables' in features %}
   {% set held_on = (mode == 'retail' and 'hold' in features) or mode == 'restaurant' %}
   <header class="tbar">

@@ -61,3 +61,11 @@ The accounts come from **Setup → Company → Default accounts**: wages, super 
 - The hub opens `%LOCALAPPDATA%\Programs\Riyeser Accounting\Riyeser Accounting.exe`. Its Installed-apps DisplayName is `Riyeser Accounting <version>`.
 - To run it embedded with no window: `Riyeser Accounting.exe --no-window --port <port>`, then show `http://127.0.0.1:<port>`.
 - The company file is `%USERPROFILE%\.riyeser\company.db`.
+
+## Central → every program: demo mode
+
+- Central writes `%APPDATA%\Riyeser\demo.json` (next to `company.json` and `licence.json`): `{"on": true, "since": "<ISO>", "business": "Sample Trading Co"}`. No file, a damaged file or `"on": false` means normal mode. `RIYESER_DEMO_FILE` points elsewhere (tests, dev server).
+- Demo on: Accounting Basics/Plus, Invoices, Bookings and POS all open `%USERPROFILE%\.riyeser\demo\company.db` instead of the real `company.db`. They share one folder in normal mode, so they share one demo folder too. Whichever opens first makes "Sample Trading Co (demo)" there (under a lock); the others open the same file.
+- The demo signs in on its own as `demo` (password `demo`, administrator). After signing out, the login page says "Demo mode: sign in with demo / demo".
+- The demo's staff are `riyeser.demo.DEMO_STAFF`; Riyeser Payroll's demo uses the same people.
+- Leaving demo mode: set `"on": false`, then rename `.riyeser\demo` to `.riyeser\demo-ended-<UTC stamp>` (never delete it). Close the programs first, or reopen them afterwards: a program that is still open shows "Demo mode has ended. Close this program and open it again." Next time demo is switched on, a fresh demo folder is made.

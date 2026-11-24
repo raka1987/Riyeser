@@ -104,6 +104,8 @@ def forgot():
 @bp.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
+    if current_app.config.get("DEMO_MODE"):
+        session["demo_signed_out"] = True  # demo mode signs you in on its own; not straight after signing out
     return redirect(url_for("auth.login"))
 
 

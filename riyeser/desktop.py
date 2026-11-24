@@ -75,7 +75,8 @@ def main(argv=None):
     if not _wait_until_up(url):
         print(f"{app_name} failed to start.", file=sys.stderr)
         sys.exit(1)
-    print(f"{app_name} running at {url}  (company file: {os.environ['RIYESER_DB']})", flush=True)
+    print(f"{app_name} running at {url}  (company file: {app.config['DATABASE']}"
+          f"{', demo mode' if app.config.get('DEMO_MODE') else ''})", flush=True)
 
     if args.no_window:
         try:

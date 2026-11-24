@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.8.0"
+__version__ = "2.9.0"
 
 
 def create_app(test_config=None):
@@ -20,6 +20,14 @@ def create_app(test_config=None):
         app.config.update(test_config)
     os.makedirs(app.instance_path, exist_ok=True)
     dbmod.init_app(app)
+    from . import demo_mode
+    if app.config.get("DEMO_MODE") is None:  # not decided by the caller: Riyeser Central's demo.json decides
+        app.config["DEMO_MODE"] = demo_mode.demo_on()
+    if app.config["DEMO_MODE"]:
+        # Demo mode: a separate demo folder next to the real books, which are never opened.
+        app.config["NORMAL_DATABASE"] = app.config["DATABASE"]
+        app.config["DATABASE"] = demo_mode.demo_db(app.config["DATABASE"])
+        demo_mode.ensure_company(app)
 
     app.jinja_env.filters["money"] = fmt_money
     app.jinja_env.filters["money0"] = lambda c: fmt_money(c, blank_zero=True)
@@ -35,6 +43,16 @@ def create_app(test_config=None):
     def load_user():
         g.user = None
         g.company = None
+        if app.config["DEMO_MODE"]:
+            if not demo_mode.demo_on():  # Central has left demo mode while this program was open
+                if request.endpoint != "static":
+                    return render_template("help/demo_ended.html"), 503
+                return
+            if not os.path.exists(app.config["DATABASE"]):  # the demo folder was moved aside: make a fresh one
+                demo_mode.ensure_company(app)
+            if request.endpoint in ("auth.setup_company", "companies.start_again", "companies.start_everything"):
+                flash("This is the demo company. Leave demo mode from Riyeser Central.", "error")
+                return redirect(url_for("core.dashboard"))
         if not os.path.exists(app.config["DATABASE"]):
             if request.endpoint not in ("auth.setup_company", "static"):
                 return redirect(url_for("auth.setup_company"))
@@ -73,6 +91,16 @@ def create_app(test_config=None):
                 g.company["plus_locked"] = app_ed == "enterprise" and not g.company["enterprise_allowed"]
             elif not g.company["enterprise_allowed"]:
                 g.company["edition"] = "basic"  # after the trial: Enterprise needs a licence (data is kept)
+        if g.user is None and app.config["DEMO_MODE"] and g.company and g.company.get("is_demo") \
+                and not g.db_path and not session.get("demo_signed_out") and request.endpoint != "auth.logout":
+            # Demo mode signs you in as demo straight away: only in the demo folder, only on the demo company.
+            u = db.execute("SELECT * FROM users WHERE username=? AND active=1 AND role='admin'",
+                           (demo_mode.DEMO_USER,)).fetchone()
+            if u:
+                session["access"] = {co.MAIN: u["id"]}
+                session["co"] = co.MAIN
+                session["uid"] = u["id"]
+                g.user = u
         public = ("auth.login", "auth.setup_company", "auth.forgot", "static")
         if g.user is None and request.endpoint not in public:
             return redirect(url_for("auth.login", next=request.path))
@@ -164,6 +192,8 @@ def create_app(test_config=None):
     app.register_blueprint(help.bp)
     app.jinja_env.globals["help_section"] = help.section_for
     app.jinja_env.globals["riyeser_version"] = __version__
+    app.jinja_env.globals["central_demo"] = bool(app.config["DEMO_MODE"])
+    app.jinja_env.globals["demo_login"] = (demo_mode.DEMO_USER, demo_mode.DEMO_PASSWORD)
     app.jinja_env.globals["editions"] = dbmod.EDITIONS
 
     def free_plan(product):

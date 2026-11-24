@@ -42,6 +42,7 @@ def cmd_serve(args):
     db_path = _configure(args)
     from . import create_app
     app = create_app()
+    db_path = app.config["DATABASE"]  # the demo folder's file while Riyeser Central's demo mode is on
     url = f"http://{'127.0.0.1' if args.host in ('0.0.0.0', '') else args.host}:{args.port}"
     print(f"Riyeser Accounting\n  company file: {db_path}\n  open: {url}\n  (Ctrl+C to stop)")
     if not os.path.exists(db_path):
@@ -67,7 +68,7 @@ def cmd_init(args):
         _archive_before_replacing(db_path, "init --force from the command line")
     from . import create_app
     from .db import init_db, get_db, _keep_ledger_head
-    app = create_app()
+    app = create_app({"DEMO_MODE": False})  # init always makes the real company file it was asked for
     with app.app_context():
         init_db(args.name, args.password, args.edition)
         if args.demo:

@@ -42,6 +42,7 @@ args = [
     "--add-data", f"{PKG / 'static'}{sep}riyeser/static",
     "--add-data", f"{PKG / 'schema.sql'}{sep}riyeser",
     "--hidden-import", "riyeser.demo",
+    "--hidden-import", "riyeser.demo_mode",
     "--hidden-import", "riyeser._built_edition",
     "--hidden-import", "riyeser.licence",
     "--hidden-import", "riyeser.companies",

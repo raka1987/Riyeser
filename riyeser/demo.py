@@ -5,9 +5,24 @@ from .db import linked, to_cents
 from . import ledger as L
 
 
+# The demo's made-up staff. Riyeser Payroll's demo seeds the same people, so both programs show the same team.
+# Keep the two in step: change one, change the other.
+DEMO_STAFF = [
+    dict(first_name="Alex", last_name="Sample", role="Store manager", pay_basis="salary", hourly_rate=0,
+         annual_salary=78000, std_hours=38, email="alex.sample@sampletrading.example"),
+    dict(first_name="Jamie", last_name="Example", role="Service technician", pay_basis="hourly", hourly_rate=34.5,
+         annual_salary=0, std_hours=38, email="jamie.example@sampletrading.example"),
+    dict(first_name="Robin", last_name="Demo", role="Service technician", pay_basis="hourly", hourly_rate=33,
+         annual_salary=0, std_hours=38, email="robin.demo@sampletrading.example"),
+    dict(first_name="Casey", last_name="Placeholder", role="Shop assistant", pay_basis="hourly", hourly_rate=31,
+         annual_salary=0, std_hours=20, email="casey.placeholder@sampletrading.example"),
+    dict(first_name="Morgan", last_name="Testwell", role="Cafe barista", pay_basis="hourly", hourly_rate=30,
+         annual_salary=0, std_hours=25, email="morgan.testwell@sampletrading.example"),
+]
+
 # Made-up details the demo fills in. Start again doesn't carry these over to the blank company.
 DEMO_DETAILS = {"abn": "51 824 753 556", "address": "12 Harbour St, Sydney NSW 2000", "phone": "02 9000 1234",
-                "email": "accounts@clearwater.example"}
+                "email": "accounts@sampletrading.example"}
 
 
 def seed_demo(db):
@@ -29,7 +44,7 @@ def seed_demo(db):
         ("Bayside Cafe Group", 14, "ap@bayside.example"), ("Northshore Fitness", 30, None),
         ("Greenleaf Landscaping", 30, None), ("Harper & Co Architects", 7, None)]]
     supp = [contact("supplier", n, t, a) for n, t, a in [
-        ("Pacific Wholesale Supplies", 30, "5-1000"), ("CityPower Energy", 14, "6-1300"),
+        ("Pacific Wholesale Supplies", 30, "5-1000"), ("Sample Power Co", 14, "6-1300"),
         ("Metro Office Leasing", 7, "6-1600"), ("Swift Freight Logistics", 30, "5-1100")]]
 
     jobs = []
@@ -88,7 +103,7 @@ def seed_demo(db):
     # Equipment (capital)
     L.bank_transaction(db, "spend", acc["1-1110"], d(110), [
         dict(account_id=acc["1-2100"], amount=to_cents(4290), tax_code_id=tc["CAP"], memo="Laptops x3")],
-        payee="TechWorld")
+        payee="Sample Computer Store")
 
     # Sales invoices across months
     sales = [
@@ -147,13 +162,12 @@ def seed_demo(db):
     # Employees and pay runs
     from .payroll_calc import compute_pay
     emps = []
-    for fn, ln, basis, rate, sal in [("Mia", "Thompson", "salary", 0, 78000), ("Leo", "Nguyen", "hourly", 34.5, 0),
-                                     ("Ava", "Patel", "hourly", 31, 0)]:
-        std = 20 if fn == "Ava" else 38
+    for st in DEMO_STAFF:
         emps.append(db.execute(
-            "INSERT INTO employees (first_name, last_name, pay_basis, hourly_rate, annual_salary, pay_frequency,"
-            " start_date, super_fund, std_hours) VALUES (?,?,?,?,?,?,?,?,?)",
-            (fn, ln, basis, to_cents(rate), to_cents(sal), "fortnightly", d(200), "AustralianSuper", std)).lastrowid)
+            "INSERT INTO employees (first_name, last_name, email, pay_basis, hourly_rate, annual_salary, pay_frequency,"
+            " start_date, super_fund, std_hours) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (st["first_name"], st["last_name"], st["email"], st["pay_basis"], to_cents(st["hourly_rate"]),
+             to_cents(st["annual_salary"]), "fortnightly", d(200), "Sample Super Fund", st["std_hours"])).lastrowid)
     for days in (84, 70, 56, 42, 28, 14):
         rid = db.execute("INSERT INTO payruns (pay_date, period_start, period_end, frequency, bank_account_id)"
                          " VALUES (?,?,?,?,?)", (d(days), d(days + 13), d(days), "fortnightly", acc["1-1110"])).lastrowid
@@ -182,11 +196,57 @@ def seed_demo(db):
                        (acc[code], f"{y}-{m:02d}", to_cents(amt)))
 
     # A few unallocated bank statement lines to demo the bank feed
-    for days, desc, amt in ((1, "EFTPOS SETTLEMENT", 1240.00), (1, "OFFICEWORKS SYDNEY", -86.90),
-                            (0, "AMPOL FUEL", -94.15)):
+    for days, desc, amt in ((1, "EFTPOS SETTLEMENT", 1240.00), (1, "OFFICE SUPPLIES STORE", -86.90),
+                            (0, "FUEL STATION", -94.15)):
         db.execute("INSERT INTO bank_feed_lines (account_id, date, description, amount) VALUES (?,?,?,?)",
                    (acc["1-1110"], d(days), desc, to_cents(amt)))
+    seed_bookings(db, cust)
     db.commit()
+
+
+def seed_bookings(db, customers=None):
+    """Riyeser Bookings: the suggested staff and job types, two named technicians and a few visits this week.
+    Done visits are left ready to invoice. Only runs on a file with no bookings yet."""
+    if db.execute("SELECT 1 FROM bookings").fetchone():
+        return
+    from .views.bookings import add_starters, refresh_job, COLOURS
+    db.execute("UPDATE company SET bookings_mode='jobs' WHERE id=1")
+    add_starters(db, "jobs")
+    for name, price in (("Call-out", 150), ("Half day", 480), ("Full day", 900)):
+        db.execute("UPDATE booking_services SET price=? WHERE name=? AND price=0", (to_cents(price), name))
+    n = db.execute("SELECT COUNT(*) FROM booking_resources").fetchone()[0]
+    for i, st in enumerate(s for s in DEMO_STAFF if s["role"] == "Service technician"):
+        db.execute("INSERT INTO booking_resources (name, kind, colour) VALUES (?,?,?)",
+                   (f"{st['first_name']} {st['last_name']}", "staff", COLOURS[(n + i) % len(COLOURS)]))
+    staff = [r[0] for r in db.execute("SELECT id FROM booking_resources ORDER BY id")]
+    svc = {r["name"]: r["id"] for r in db.execute("SELECT id, name FROM booking_services")}
+    customers = customers or [r[0] for r in db.execute("SELECT id FROM contacts WHERE kind='customer' ORDER BY id")]
+    admin = (db.execute("SELECT id FROM users WHERE role='admin' ORDER BY id").fetchone() or [None])[0]
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    visits = [  # (day of the week, time, staff, job type, customer, what, address)
+        (0, "09:00", 1, "Call-out", 0, "Filter not flowing", "1 Example Lane, Sampletown"),
+        (1, "08:00", 2, "Half day", 1, "Pump service", "22 Demo Road, Sampletown"),
+        (2, "13:00", 0, "Call-out", 2, "Leaking tap", "5 Placeholder Ave, Sampletown"),
+        (3, "09:00", 1, "Full day", 3, "Office water system install", "8 Test Street, Sampletown"),
+        (4, "10:30", 2, "Call-out", 0, "Follow-up check", "1 Example Lane, Sampletown"),
+    ]
+    for wd, at, who, what, c, title, addr in visits:
+        day = monday + timedelta(days=wd)
+        status = "done" if day < today else "confirmed" if day == today else "booked"
+        cid = customers[c % len(customers)] if customers else None
+        jid = db.execute("INSERT INTO booking_jobs (contact_id, service_id, title, address, created_by)"
+                         " VALUES (?,?,?,?,?)", (cid, svc[what], title, addr, admin)).lastrowid
+        mins = db.execute("SELECT minutes FROM booking_services WHERE id=?", (svc[what],)).fetchone()[0]
+        db.execute("INSERT INTO bookings (contact_id, resource_id, service_id, starts_at, minutes, title, address,"
+                   " status, outcome, job_id, mode, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (cid, staff[who % len(staff)], svc[what], f"{day.isoformat()}T{at}", mins, title, addr, status,
+                    "finished" if status == "done" else None, jid, "jobs", admin))
+        refresh_job(db, jid)
+    # one job still waiting for a time
+    db.execute("INSERT INTO booking_jobs (contact_id, service_id, title, address, created_by) VALUES (?,?,?,?,?)",
+               (customers[1 % len(customers)] if customers else None, svc["Call-out"], "Quote for a new filter",
+                "22 Demo Road, Sampletown", admin))
 
 
 def _total(db, doc_id):

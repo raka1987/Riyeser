@@ -4,6 +4,7 @@
 <body class="{{ product.cls }}"><div class="login">
 <div class="brand" style="color:var(--ink);padding:0 0 18px"><div class="logo" style="color:#fff">{{ product.letter }}</div><div>{{ product.app }}<small>{{ company.name if company }}</small></div></div>
 {{ flashes() }}
+{% if central_demo %}<div class="flash demo" role="status">Demo mode: sign in with <b>{{ demo_login[0] }}</b> / <b>{{ demo_login[1] }}</b></div>{% endif %}
 <form method="post">
   {% if choices and choices|length > 1 %}<label>Company</label><select name="company" style="margin-bottom:12px">{% for c in choices %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>{% endif %}
   <label>Username</label><input name="username" autofocus required>

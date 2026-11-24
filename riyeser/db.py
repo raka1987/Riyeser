@@ -386,7 +386,7 @@ def init_app(app):
         path = app.config["DATABASE"]
         if os.path.exists(path):
             _archive_before_replacing(path, "seed-demo from the command line")
-        init_db("Clearwater Trading Pty Ltd")
+        init_db("Sample Trading Co (demo)")
         seed_demo(get_db())
         _keep_ledger_head(path)
         print(f"Demo company created at {path} (login admin / admin)")
