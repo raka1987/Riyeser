@@ -43,7 +43,8 @@ jobs:
             @{ src = "dist-central\RiyeserCentral-Setup-*.exe";        out = "RiyeserCentral-Setup.exe";        name = "Riy*ser Central*" },
             @{ src = "dist\RiyeserDeskAssistant-Setup-*.exe";        out = "RiyeserDeskAssistant-Setup.exe"; name = "Riyeser Desk Assistant*" },
             @{ src = "dist-pdf\RiyeserPDF-Setup-*.exe";              out = "RiyeserPDF-Setup.exe";            name = "Riyeser PDF*" },
-            @{ src = "dist-services\RiyeserServices-Setup-*.exe";    out = "RiyeserServices-Setup.exe";       name = "As Built*" })
+            @{ src = "dist-services\RiyeserServices-Setup-*.exe";    out = "RiyeserServices-Setup.exe";       name = "As Built*" },
+            @{ src = "dist-team\RiyeserTeam-Setup-*.exe";            out = "RiyeserTeam-Setup.exe";           name = "Riyeser Team*" })
           New-Item -ItemType Directory -Force -Path release | Out-Null
           $versions = @()
           foreach ($a in $apps) {
@@ -223,6 +224,7 @@ jobs:
             out/RiyeserDeskAssistant-Setup.exe
             out/RiyeserPDF-Setup.exe
             out/RiyeserServices-Setup.exe
+            out/RiyeserTeam-Setup.exe
             out/RiyeserAccountingBasics-Setup.exe
             out/RiyeserAccountingPlus-Setup.exe
             out/RiyeserAccounting-Setup.exe
