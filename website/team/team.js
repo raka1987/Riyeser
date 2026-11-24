@@ -42,8 +42,9 @@
       },
       onAuth(fn) { sb.auth.onAuthStateChange((_e, s) => fn(s)); },
       async signIn(email, password) { return ok(await sb.auth.signInWithPassword({ email, password })); },
-      async signUp(email, password) {
-        return ok(await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname + location.search } }));
+      async signUp(email, password, details) {
+        // details (name, contact, optional business) are kept with the account and used to set it up after the email is confirmed
+        return ok(await sb.auth.signUp({ email, password, options: { data: details ? { riyeser_signup: details } : {}, emailRedirectTo: location.origin + location.pathname + location.search } }));
       },
       async resetPassword(email) { return ok(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })); },
       async signOut() { if (sub) sb.removeChannel(sub); await sb.auth.signOut(); },
@@ -281,14 +282,16 @@
       <h1>${mode === 'up' ? 'Create your Riyeser account' : mode === 'reset' ? 'Reset your password' : 'Sign in to Riyeser'}</h1>
       <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. One account for you, your business and every Riyeser program.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for you, your business and all your Riyeser programs.'}</p>
       ${note}
+      ${mode === 'up' ? '<label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>' : ''}
       <label class="f"><span>Email</span><input type="email" name="email" autocomplete="email" required></label>
-      ${mode !== 'reset' ? `<label class="f"><span>Password</span><input type="password" name="password" minlength="8" autocomplete="${mode === 'up' ? 'new-password' : 'current-password'}" required></label>` : ''}
+      ${mode !== 'reset' ? `<label class="f"><span>Password</span><input type="password" name="password" minlength="8" autocomplete="${mode === 'up' ? 'new-password' : 'current-password'}" required>${mode === 'up' ? '<small class="fhint">At least 8 characters.</small>' : ''}</label>` : ''}
+      ${mode === 'up' ? detailsFields(!!join) : ''}
       <button class="btn p w" type="submit">${mode === 'up' ? 'Create account' : mode === 'reset' ? 'Send the link' : 'Sign in'}</button>
       ${mode === 'up' ? `<button type="button" class="btn w gcancel" id="gcancel">Cancel</button>` : ''}
       <div class="alt">${mode === 'in' ? `<button type="button" class="linkbtn" data-go="reset">Forgot password?</button></div>
       <div class="or">New to Riyeser?</div><button type="button" class="btn w" data-go="up">Create a free account</button><div class="alt" hidden>`
         : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div></form></div>`;
-    $app.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => gate(b.dataset.go));
+    $app.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => gate(b.dataset.go)); wireCountry($app);
     // Cancel: back to riyeser.com (in the Windows app, back to Sign in)
     const cx = $app.querySelector('#gcancel'); if (cx) cx.onclick = () => (/Electron/.test(navigator.userAgent) ? gate('in') : location.assign('/'));
     $app.querySelector('#gf').onsubmit = async (e) => {
@@ -296,7 +299,7 @@
       try {
         if (mode === 'reset') { await api.resetPassword(f.get('email')); return gate('in', '<div class="ok">Check your email for the link.</div>'); }
         if (mode === 'up') {
-          const r = await api.signUp(f.get('email'), f.get('password'));
+          const r = await api.signUp(f.get('email'), f.get('password'), readDetails(f));
           if (!r.session) return gate('in', '<div class="ok">Nearly there: open the link we just emailed you, then sign in here.</div>');
         } else await api.signIn(f.get('email'), f.get('password'));
         await start();
@@ -315,19 +318,32 @@
     return top.map((c) => opt(c, name(c))).join('') + '<option disabled>──────────</option>'
       + COUNTRY_NAMES.filter(([c]) => !top.includes(c)).map(([c, n]) => opt(c, n)).join('');
   }
+  function detailsFields(joining, d = {}) {
+    const v = (k) => esc(d[k] || '');
+    return `<div class="f2"><label class="f"><span>Mobile number <small class="opt">(optional)</small></span><input name="phone" type="tel" maxlength="40" autocomplete="tel" placeholder="e.g. +679 …" value="${v('phone')}"></label>
+        <label class="f"><span>Country</span><select name="country" autocomplete="country-name">${countryOptions(d.country || 'Fiji')}</select></label></div>
+      ${joining ? '' : `<fieldset class="opt-set"><legend>Business details <small>All optional. Add them now or later; they're used on your invoices and in your programs.</small></legend>
+        <label class="f"><span>Business name</span><input name="team" maxlength="80" autocomplete="organization" placeholder="Only if you have one" value="${v('biz')}"></label>
+        <div class="f2"><label class="f"><span>Legal name</span><input name="legal_name" maxlength="120" placeholder="If different" value="${v('legal_name')}"></label>
+          <label class="f"><span>ABN / TIN</span><input name="tax_number" maxlength="40" value="${v('tax_number')}"></label></div>
+        <label class="f"><span>Business address</span><input name="address" maxlength="300" autocomplete="street-address" value="${v('address')}"></label></fieldset>`}`;
+  }
+  function readDetails(f) {
+    const v = (k) => String(f.get(k) || '').trim();
+    return { you: v('you'), phone: v('phone'), country: v('country'), email: v('email'), biz: v('team'), legal_name: v('legal_name'), tax_number: v('tax_number'), address: v('address'), joining: !!params.get('join') };
+  }
+  function wireCountry(root) {
+    const cs = root.querySelector('[name=country]'); const ph = root.querySelector('[name=phone]');
+    if (cs && ph) cs.onchange = () => { const dd = cs.selectedOptions[0] && cs.selectedOptions[0].dataset.dial; ph.placeholder = dd ? `e.g. ${dd} …` : 'Your mobile number'; };
+  }
   function setupTeam(note = '', mode = params.get('join') ? 'join' : 'new') {
     const join = params.get('join') || '';
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
+    const md = (S.user && S.user.user_metadata && S.user.user_metadata.riyeser_signup) || {};
     const newForm = `<form id="cf"><h1>A few details</h1><p>Nearly done. This is how you'll appear in Riyeser.</p>
-        <label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>
-        <div class="f2"><label class="f"><span>Mobile number <small class="opt">(optional)</small></span><input name="phone" type="tel" maxlength="40" autocomplete="tel" placeholder="e.g. +679 912 3456"></label>
-          <label class="f"><span>Country</span><select name="country" autocomplete="country-name">${countryOptions()}</select></label></div>
-        <label class="f"><span>Contact email</span><input name="email" type="email" required maxlength="120" autocomplete="email" value="${esc((S.user && S.user.email) || '')}"></label>
-        <fieldset class="opt-set"><legend>Business details <small>All optional. Add them now or later; they're used on your invoices and in your programs.</small></legend>
-          <label class="f"><span>Business name</span><input name="team" maxlength="80" autocomplete="organization" placeholder="Only if you have one"></label>
-          <div class="f2"><label class="f"><span>Legal name</span><input name="legal_name" maxlength="120" placeholder="If different"></label>
-            <label class="f"><span>ABN / TIN</span><input name="tax_number" maxlength="40"></label></div>
-          <label class="f"><span>Business address</span><input name="address" maxlength="300" autocomplete="street-address"></label></fieldset>
+        <label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name" value="${esc(md.you || '')}"></label>
+        <label class="f"><span>Contact email</span><input name="email" type="email" required maxlength="120" autocomplete="email" value="${esc(md.email || (S.user && S.user.email) || '')}"></label>
+        ${detailsFields(false, md)}
         <button class="btn p w">Finish signing up</button></form>
       <div class="or">Joining someone else's business?</div>
       <button type="button" class="btn w" id="tojoin">Join with their code</button>`;
@@ -342,8 +358,7 @@
       <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${note}${mode === 'join' ? joinForm : newForm}
       <div class="alt"><button class="linkbtn" id="so">Cancel and sign out</button></div></div></div>`;
-    const cs = $app.querySelector('#cf [name=country]'); const ph = $app.querySelector('#cf [name=phone]');
-    if (cs && ph) cs.onchange = () => { const d = cs.selectedOptions[0] && cs.selectedOptions[0].dataset.dial; ph.placeholder = d ? `e.g. ${d} …` : 'Your mobile number'; };
+    wireCountry($app);
     const sw = $app.querySelector(mode === 'join' ? '#tonew' : '#tojoin'); sw.onclick = () => setupTeam('', mode === 'join' ? 'new' : 'join');
     const fail = (e) => setupTeam(`<div class="err">${esc(plainError(e))}</div>`, mode);
     const jf = $app.querySelector('#jf'); if (jf) jf.onsubmit = async (e) => {
@@ -1136,7 +1151,15 @@
       const jc = (params.get('join') || '').toUpperCase();
       if (jc && !S.teams.some((t) => t.invite_code === jc || t.company_code === jc)) return setupTeam();
       if (!S.teams.length) { const r = (await api.myRequests().catch(() => []))[0];
-        return r && r.status === 'pending' ? waiting(r.company_name) : setupTeam(); }
+        if (r && r.status === 'pending') return waiting(r.company_name);
+        const d = (S.user.user_metadata || {}).riyeser_signup;
+        if (d && d.you && !jc && !d.joining) {   // details given when the account was made: set it up now, no second form
+          try { await api.createTeam(d.biz || d.you, d.you, { kind: d.biz ? 'business' : 'personal', country: d.country || '', phone: d.phone || '', email: d.email || S.user.email || '',
+            legal_name: d.legal_name || '', tax_number: d.tax_number || '', address: d.address || '' });
+            S.teams = await api.teams(S.user.id); if (S.teams.length) return loadTeam(S.teams[0].id);
+          } catch (err) { return setupTeam(`<div class="err">${esc(plainError(err))}</div>`); }
+        }
+        return setupTeam(); }
       let last = null; try { last = localStorage.getItem('riyeser.team.last'); } catch { /* private mode */ }
       await loadTeam(S.teams.some((t) => t.id === last) ? last : S.teams[0].id);
     } catch (e) { $app.className = 'acct'; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
