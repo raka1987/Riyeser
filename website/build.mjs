@@ -135,7 +135,7 @@ const ALL_PROGRAMS = [
     one: 'Chat for your business: channels for jobs and the office, direct messages, and live updates on your PC and phone. Free. Add Link Plus for calls.',
     // A free program with a paid upgrade: shows the gold "★ Plus" marker wherever the program is listed.
     plus: { name: 'Riyeser Link Plus', module: 'calls', anchor: 'link-plus',
-      what: `calls, desk phones and ${STORAGE_GB.plus} GB of files`, line: `calls between people and branches, office desk phones, ${STORAGE_GB.plus} GB of files.` },
+      what: `calls, desk phones and ${STORAGE_GB.plus} GB of chat file space`, line: `calls between people and branches, office desk phones, ${STORAGE_GB.plus} GB of space for files shared in chat (not hosting).` },
     pitch: 'Your whole team, in one conversation.',
     features: [
       ['Channels', 'A place for each topic: #jobs, #office, or one per site, for everyone in the team.'],
@@ -148,7 +148,7 @@ const ALL_PROGRAMS = [
       ['⭐ Riyeser Link Plus: branches and extensions', 'Each branch gets a number (Head office 100, your next branch 200) and its own join code. Staff who join with it get the next extension automatically.'],
       ['⭐ Riyeser Link Plus: call anyone', 'Call a person, dial an extension, or call a branch to ring everyone there: the first to answer takes it. Turn the camera on any time.'],
     ],
-    note: `Chat is free, with ${STORAGE_GB.free} GB of file storage per business. Riyeser Link Plus is ${usd(PRICE.calls)} a month per business (3 users included), free for 90 days: call any person or a whole branch, answer on any PC or phone you're signed in on, with no call charges, and ${STORAGE_GB.plus} GB of file storage. Each business only ever sees its own team.` },
+    note: `Chat is free, with ${STORAGE_GB.free} GB of file storage per business. Riyeser Link Plus is ${usd(PRICE.calls)} a month per business (3 users included), free for 90 days: call any person or a whole branch, answer on any PC or phone you're signed in on, with no call charges, and ${STORAGE_GB.plus} GB of space for files shared in chat. This is chat file space only: it isn't website, email or cloud hosting. Each business only ever sees its own team.` },
   { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyeserPDF-Setup.exe',
     one: 'Open, fill in, sign, combine and edit PDFs — even scanned ones.',
     pitch: 'Drawings and forms, done on the PC.',
@@ -193,7 +193,7 @@ const FREE_INFO = {
   invoices: { inc: 'Unlimited quotes, invoices, customers and payments received, who owes you, and PDF copies to print or attach to your email.', lim: null,
     up: `For stock, bills, money in and out and reports, move up to Accounting Basics (${usd(PRICE.basic)}/month): it opens the same company file.` },
   link: { inc: 'Unlimited people, messages, channels and direct messages, on your PC, in a web browser and on your phone.',
-    lim: `${STORAGE_GB.free} GB of file storage per business (up to 25 MB a file).` },
+    lim: `${STORAGE_GB.free} GB of space per business for files shared in chat (up to 25 MB a file). Not a hosting service.` },
   pdf: { inc: 'Open, fill in, sign, edit, combine and split PDFs, and read scanned pages.', lim: null },
   'desk-assistant': { inc: 'Sorts your files by type and year, finds anything by name or by the words inside, spots copies, and keeps your to-dos.', lim: null,
     note: 'Optional AI sorting uses your own AI key, if you add one.' },
@@ -722,7 +722,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
     ['pos', 'POS', 'pos', 'The till for shops, cafes and restaurants. Every sale goes into your books.'],
     ['bookings', 'Bookings', 'bookings', 'Jobs, appointments and table bookings on one calendar.'],
     ['payroll', 'Payroll', 'payroll', 'Time clock, timesheets, pay runs, payslips and leave.'],
-    ['calls', 'Riyeser Link Plus', 'link', `Calls between your people and branches, office desk phones with Riyeser Link Office, and ${STORAGE_GB.plus} GB of chat files.`],
+    ['calls', 'Riyeser Link Plus', 'link', `Calls between your people and branches, office desk phones with Riyeser Link Office, and ${STORAGE_GB.plus} GB of space for files shared in chat (not hosting).`],
     ...(ASBUILT ? [['as_built', 'As Built', 'services', 'Services on your drawings, for the building industry. Doesn\'t need Accounting.']] : []),
   ];
   const FREE = [['central', 'Riyeser Central', 'Your home screen, and it installs and updates the rest'], ['invoices', 'Riyeser Invoices', 'Quotes, invoices and getting paid'],
@@ -736,7 +736,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
 ${bandHero({ title: 'Pricing', lead: `Start free. Each paid program is one price per business per month, with 3 users included. From ${usd(LOWEST)} a month.` })}
 <section class="c" style="padding-bottom:10px">
   <p class="usdnote" id="usd"><b>All prices in US dollars (US$)</b>, per business, per month. Any GST or local tax is shown before you pay.</p>
-  ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off for your first 12 months</b><p>For the first 100 businesses to buy. Half price on each program and its extra users for 12 months — for example Accounting Basics is ${half(P.basic)} a month instead of $${P.basic} — then the normal price. The offer ends when 100 businesses have it.</p></div></div>` : ''}
+  ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off for your first 12 months</b><p>For the first 100 businesses to buy. Half price on each program and its extra users for 12 months (extra companies in Accounting stay full price) — for example Accounting Basics is ${half(P.basic)} a month instead of $${P.basic} — then the normal price. The offer ends when 100 businesses have it.</p></div></div>` : ''}
 
   <h2 class="h2" style="margin-top:8px">Price list</h2>
   <div class="ptable-wrap"><table class="ptable">
@@ -747,7 +747,7 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Each paid program is one price
       <tr class="grp"><th colspan="4">${esc(PAID_HEAD)}</th></tr>
       ${ROWS.map(([m, n, id, d]) => `<tr${m === 'calls' ? ' id="link-plus"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small></span></span></td><td class="pr"><b>${usd(P[m])}</b> a month</td><td>${P.users_included} users</td><td>+${usd(P.extra_user)} a month each</td></tr>`).join('')}
     </tbody></table></div>
-  <div class="addon"><div class="big">➕</div><div><b>Good to know</b><p>Each paid program includes ${P.users_included} users. Each extra person is <b>$${P.extra_user} a month for each paid program</b> they use. Another company, trust or client's books in Accounting: <b>$${P.extra_company} a month</b> each. Pay yearly: pay for 10 months and get 12. Riyeser Link chat: ${STORAGE_GB.free} GB of file storage per business free; ${STORAGE_GB.plus} GB with Link Plus. Every paid program is free for 90 days, no card.</p></div></div>
+  <div class="addon"><div class="big">➕</div><div><b>Good to know</b><p>Each paid program includes ${P.users_included} users. Each extra person is <b>$${P.extra_user} a month for each paid program</b> they use. Another company, trust or client's books in Accounting: <b>$${P.extra_company} a month</b> each. Pay yearly: pay for 10 months and get 12. Riyeser Link chat: space for files shared in chat, ${STORAGE_GB.free} GB of file storage per business free; ${STORAGE_GB.plus} GB with Link Plus. Every paid program is free for 90 days, no card.</p></div></div>
 </section>
 
 <section class="c" id="calc">
@@ -785,10 +785,11 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
   <details><summary>What's free?</summary><p>Riyeser Central, Riyeser Invoices, Riyeser Link chat (with ${STORAGE_GB.free} GB of file storage per business), Riyeser PDF and the Desk Assistant file organiser are free forever — no time limit and no card.</p></details>
   <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, POS, Bookings, Payroll and Riyeser Link Plus${ASBUILT ? ', and As Built for the building industry' : ''} — is free for 90 days. No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
   <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays on your computer and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS) or that program's screens (the others) wait until you buy it. They unlock straight away.</p></details>
-  <details><summary>How much file storage do I get in Riyeser Link?</summary><p>${STORAGE_GB.free} GB of chat files per business on free chat, and ${STORAGE_GB.plus} GB with Riyeser Link Plus. Owners and admins can see how much is used in Billing &amp; Subscription. Nothing is ever deleted for you: when you're full, new uploads wait until you free up space or add Link Plus.</p></details>
+  <details><summary>How much file storage do I get in Riyeser Link?</summary><p>${STORAGE_GB.free} GB of chat files per business on free chat, and ${STORAGE_GB.plus} GB with Riyeser Link Plus. Owners and admins can see how much is used in Billing &amp; Subscription. This is only space for the files people send in Link chats (photos, PDFs, documents). It is not website hosting, email hosting, cloud backup or a cloud phone system, and no plan includes those. Nothing is ever deleted for you: when you're full, new uploads wait until you upgrade to Link Plus or contact Riyeser support.</p></details>
+  <details><summary>Is hosting included?</summary><p>No. Riyeser programs run on your own PCs, and your company files stay with you. The file space in Riyeser Link is only for files shared in chat. Website hosting, email hosting and hosted (cloud) phone systems are not part of any plan. If Riyeser offers them later, they will be separate services with their own prices.</p></details>
   <details><summary>How do extra companies work?</summary><p>Your plan includes one company in Riyeser Accounting. Groups, trusts and bookkeepers can add more for $${P.extra_company} a month per extra company, with one sign-in. If you stop paying for one, its books stay — they open read-only until you add it back.</p></details>
   <details><summary>How does paying yearly work?</summary><p>Pay for 10 months and get 12: the yearly price is 10 times the monthly price.</p></details>
-  ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months, on each program and its extra users — for example ${half(P.basic)} instead of $${P.basic} a month for Accounting Basics. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
+  ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months, on each program and its extra users (not on extra companies) — for example ${half(P.basic)} instead of $${P.basic} a month for Accounting Basics. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
   <details><summary>How do I buy?</summary><p>Online checkout is opening soon. Until then, email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Riyeser licence')}">${EMAIL}</a> with your business name and the programs you want, and we'll send your licence.</p></details>
 </section>
