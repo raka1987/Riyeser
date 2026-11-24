@@ -29,8 +29,8 @@ async function fakeServer(page, opts = {}) {
     if (u.pathname === '/auth/v1/user' && m === 'PUT') { st.userUpdate = body; return json({ ...user, user_metadata: body.data }); }
     if (u.pathname === '/auth/v1/user') return json(user);
     if (u.pathname === '/rest/v1/members' && m === 'PATCH') { st.memberUpdate = { body, query: u.search }; return json([]); }
-    if (u.pathname === '/rest/v1/members' && u.search.includes('workspaces')) return json(opts.closed ? [] : [{ role: 'owner', job_role: 'owner', display_name: 'Alex Sample', workspaces: { id: 'w1', name: 'Sample Plumbing', invite_code: 'AB12CD34', company_code: 'RIY-7K3M-Q2', kind: 'business', country: 'Fiji' } }]);
-    if (u.pathname === '/rest/v1/members') return json([{ user_id: user.id, display_name: 'Alex Sample', role: 'owner', job_role: 'owner', extension: 101 }]);
+    if (u.pathname === '/rest/v1/members' && u.search.includes('workspaces')) return json(opts.closed ? [] : [{ role: opts.role || 'owner', job_role: 'owner', display_name: 'Alex Sample', workspaces: { id: 'w1', name: 'Sample Plumbing', invite_code: 'AB12CD34', company_code: 'RIY-7K3M-Q2', kind: 'business', country: 'Fiji' } }]);
+    if (u.pathname === '/rest/v1/members') return json([{ user_id: user.id, display_name: 'Alex Sample', role: opts.role || 'owner', job_role: 'owner', extension: 101 }]);
     if (u.pathname === '/rest/v1/channels') return json([{ id: 'c1', kind: 'channel', name: 'general', topic: null }]);
     if (fn === 'my_closed_businesses') return json(opts.closed ? [{ id: 'w1', name: 'Sample Plumbing', status: 'closed' }] : []);
     if (fn === 'company_licence') return json({ modules: { basic: { status: 'active', active: true, paid_until: '2027-06-30', days_left: 200 }, pos: { status: 'trial', active: true, trial_ends: '2026-12-08', days_left: 14 } }, seats: { included: 3, extra: 0, used: 1 } });
@@ -150,6 +150,10 @@ const signIn = async (pg, url) => { await pg.goto(url); await pg.waitForSelector
   console.log('old database -> home works:', await p2.textContent('.hco h2'), '| help requests hidden:', !(await p2.$('.htix')), '| refund button hidden:', !(await p2.$('#hrefund')));
   check(!(await p2.$('#hreport')), 'old database: Report an issue hidden');
   await p2.click('#hhelp'); await p2.waitForSelector('.mcard'); console.log('old database -> Get help:', (await p2.textContent('.mcard p')).trim());
+  // 3b. an admin (not the owner): no refunds on Riyeser home (they show amounts; the database refuses admins too)
+  const pa = await b.newPage({ viewport: { width: 1280, height: 900 } }); pa.on('pageerror', (e) => errs.push('admin: ' + e.message));
+  const sa = await fakeServer(pa, { role: 'admin' }); await signIn(pa, BASE + '/link/'); await pa.waitForSelector('#hhelp');
+  check(!(await pa.$('#hrefund')) && !(await pa.$('.hrf')) && !sa.calls.includes('my_refunds'), 'admin: no Request a refund, no refund list, my_refunds not asked');
   // 4. a closed business
   const p3 = await b.newPage({ viewport: { width: 1000, height: 800 } }); p3.on('pageerror', (e) => errs.push('closed: ' + e.message));
   await fakeServer(p3, { closed: true }); await signIn(p3, BASE + '/link/'); await p3.waitForSelector('#gh');

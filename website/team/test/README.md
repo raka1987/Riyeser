@@ -16,7 +16,7 @@
   it, the code screen at sign-in with a wrong and a right code) and the change history.
 - `help-test.js`: help requests and refunds on Riyeser home against a pretend Supabase: `?help` opens "Get help" after
   sign-in, the request is sent, a Riyeser reply shows as unread and the customer replies; an owner asks for a refund;
-  a closed business sees the plain "closed" message; and the same pages against a database that hasn't had the latest
+  a closed business sees the plain "closed" message; an admin (not the owner) sees no refunds (they show amounts); and the same pages against a database that hasn't had the latest
   `team-chat.sql` yet (the new parts hide, nothing breaks). Phone widths too.
 - `rules-test.sql` also covers Riyeser HQ phase 1: support tickets (customers see only their own, never internal notes),
   escalations (by hand and by the 48-hour sweep), staff permissions, the locked HQ history, fix-up tools (2FA reset,
@@ -58,10 +58,17 @@
   calling), an incoming call (Answer / Decline, the 📞 title, Do not disturb), themes (dark, light, match my computer, six
   accents, contrast checks), Admin / Settings hidden for members, phone width (one panel at a time), files (link-files) and an
   older database. Saves screenshots to the folder given. `rules-test.sql` covers presence, reactions, pins and file rules.
+- `channel-menu-test.js`: the ⋯ channel menu (header, hover and right-click in the list): Rename, Edit topic, Members, Mute,
+  Pin, Leave / Join again, Archive (the in-page question, the folded Archived section, read-only, Unarchive); #general can't
+  be archived, renamed or left; a member only sees what they may do; folding the left menu, the right panel and each list
+  section, remembered per person after a reload (Enter, Ctrl + [ and Ctrl + ]); phone width; light and dark; against a
+  pretend Supabase (channel_rename / channel_archive / channel_mute, the database's refusal in the dialog, an older
+  database). `rules-test.sql` covers the database side (who may rename and archive, two-step sign-in for admins,
+  #general, read-only archived channels, mute and leave are each person's own, another business can't touch any of it).
 - Every browser test takes `LINK_BASE=http://127.0.0.1:8091` to use another port. Confirmations are in-page now (`#askyes`).
 - `pricing-test.js`: the website's prices (US dollars, per business per month, 3 users included in each program): the
-  calculator's worked examples (5 people with Accounting Plus + Payroll = US$84, Basics only = US$25, Link Plus with 4
-  people = US$44, Plus + Payroll + Link Plus with 5 people = US$133, never Basics and Plus both, yearly and early bird),
+  calculator's worked examples (US$7 for each person over 3, per paid program: 5 people with Accounting Plus + Payroll = US$92,
+  Basics only = US$25, Link Plus with 4 people = US$46, Plus + Payroll + Link Plus with 5 people = US$145, never Basics and Plus both, yearly and early bird),
   no FJD/AUD/NZD on the website, free programs listed before paid ones (Central first), and the gold "★ Plus" marker on
   Riyeser Link. `rules-test.sql` checks the same sums in `riyeser_bill()` and `company_monthly()`.
 - `storage-test.js`: Riyeser Link file storage (2 GB a business free, 20 GB with Link Plus, plus extra from HQ): the bar

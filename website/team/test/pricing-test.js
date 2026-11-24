@@ -1,7 +1,7 @@
 // The website's prices and program lists (riyeser.com, built by website/build.mjs):
 //  1. The pricing page says "US$" and "All prices in US dollars", and the calculator gives the worked examples
-//     (5 people with Accounting Plus + Payroll = US$84; 3 people with Basics = US$25; Link Plus with 4 people = US$44;
-//     Plus + Payroll + Link Plus with 5 people = US$133; Basics and Plus never both; yearly = 10 x; early bird half).
+//     (US$7 a month for each person over the 3 included, per paid program: 5 people with Accounting Plus + Payroll = US$92;
+//     3 people with Basics = US$25; Link Plus with 4 people = US$46; Plus + Payroll + Link Plus with 5 people = US$145; Basics and Plus never both; yearly = 10 x; early bird half).
 //  2. No FJD, AUD or NZD prices anywhere on the website.
 //  3. Free programs come first everywhere programs are listed (menu, finder, All programs, Downloads), starting with
 //     Riyeser Central, and Riyeser Link has the gold "★ Plus" marker.
@@ -28,7 +28,7 @@ const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
   const free = await pg.$$eval('tr[data-free]', (rs) => rs.map((r) => [r.dataset.free, r.querySelector('.freeinfo') ? r.querySelector('.freeinfo').textContent.replace(/\s+/g, ' ') : '', !!r.querySelector('.nolim')]));
   check(free.length === 5 && free.every(([, t]) => t.includes('Included free:') && t.includes('Limits')), `What's free on all 5 free programs (${free.map((x) => x[0]).join(', ')})`);
   check(free.filter(([, , n]) => n).map(([id]) => id).join(',') === 'central,invoices,pdf,desk-assistant', 'No limits (green) on all but Riyeser Link');
-  check(free.some(([id, t]) => id === 'link' && t.includes('2 GB of file storage per business') && t.includes('Riyeser Link Plus available')), 'Riyeser Link: the 2 GB limit and the Link Plus line');
+  check(free.some(([id, t]) => id === 'link' && t.includes('2 GB of space per business for files shared in chat') && t.includes('Riyeser Link Plus available')), 'Riyeser Link: the 2 GB limit and the Link Plus line');
   check(free.some(([id, t]) => id === 'invoices' && t.includes('Accounting Basics (US$25/month)')), 'Invoices: the upgrade note with the Basics price');
   check(body.includes('Are the free programs really free?'), 'FAQ: Are the free programs really free?');
   const total = () => pg.textContent('#total');
@@ -39,14 +39,14 @@ const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
     if (yearly !== await pg.isChecked('#yearly')) await pg.click('#yearly');
   }
   check((await total()) === 'US$25 a month', `default: Basics, 3 people = US$25 (${await total()})`);
-  await set(['plus', 'payroll'], 5); check((await total()) === 'US$84 a month', `5 people, Plus + Payroll = US$84 (${await total()})`);
+  await set(['plus', 'payroll'], 5); check((await total()) === 'US$92 a month', `5 people, Plus + Payroll = US$92 (${await total()})`);
   check((await pg.textContent('#per')).includes('Accounting Plus') && (await pg.$$('#per li')).length === 2, 'a line for each program');
-  if (await pg.$('#eb')) check((await pg.textContent('#eb')).includes('US$42 a month'), `early bird: half (${await pg.textContent('#eb')})`);
-  await set(['plus', 'payroll'], 5, true); check((await total()) === 'US$840 a year', `yearly = 10 months (${await total()})`);
-  if (await pg.$('#eb')) check((await pg.textContent('#eb')).includes('US$420 for your first year'), 'yearly early bird');
+  if (await pg.$('#eb')) check((await pg.textContent('#eb')).includes('US$46 a month'), `early bird: half (${await pg.textContent('#eb')})`);
+  await set(['plus', 'payroll'], 5, true); check((await total()) === 'US$920 a year', `yearly = 10 months (${await total()})`);
+  if (await pg.$('#eb')) check((await pg.textContent('#eb')).includes('US$460 for your first year'), 'yearly early bird');
   await set(['basic'], 3); check((await total()) === 'US$25 a month', '3 people, Basics only = US$25');
-  await set(['calls'], 4); check((await total()) === 'US$44 a month', `Link Plus, 4 people = US$44 (${await total()})`);
-  await set(['plus', 'payroll', 'calls'], 5); check((await total()) === 'US$133 a month', `Plus + Payroll + Link Plus, 5 people = US$133 (${await total()})`);
+  await set(['calls'], 4); check((await total()) === 'US$46 a month', `Link Plus, 4 people = US$46 (${await total()})`);
+  await set(['plus', 'payroll', 'calls'], 5); check((await total()) === 'US$145 a month', `Plus + Payroll + Link Plus, 5 people = US$145 (${await total()})`);
   await set(['basic'], 3); await pg.check('[data-m=plus]');
   check(!(await pg.isChecked('[data-m=basic]')) && (await total()) === 'US$39 a month' && await pg.isVisible('#plusnote'), 'ticking Plus takes Basics off: US$39 only');
   await set([], 3); check((await total()) === 'US$0 a month', 'free tools only = US$0');

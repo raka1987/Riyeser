@@ -694,3 +694,58 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
 .lk-files-use { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; font-size: 13.5px; }
 .lk-files-use .sbar { margin-top: 6px; } .lk-files-use small { display: block; margin-top: 6px; }
 .lk-files-use.warn .sbar i { background: #d97706; }
+
+/* ================================================================ the channel menu, Archived, and folding panels away */
+/* list sections: the heading folds its chats away (Archived starts folded) */
+.sec .sech { display: inline-flex; align-items: center; gap: 4px; width: auto; height: auto; min-width: 0; padding: 3px 6px 3px 2px; margin-left: -4px; border-radius: 6px;
+  background: none; color: var(--ink); font: inherit; font-weight: 700; text-align: left; }
+.sec .sech:hover { background: var(--hover); color: var(--ink); }
+.sec .sech .ic { width: 14px; height: 14px; color: var(--muted); transition: transform .15s; }
+.sec.shut .sech .ic { transform: rotate(-90deg); }
+.sec .sech .badge { margin-left: 4px; }
+.secb[hidden] { display: none; }
+.badge.dim { background: var(--panel-2); color: var(--muted); }
+/* ⋯ on each chat (shows on hover or keyboard focus, like the pin) */
+.lk-more { position: absolute; right: 36px; top: 6px; width: 26px; height: 26px; border-radius: 7px; border: 0; background: var(--card); color: var(--muted); display: grid; place-items: center; opacity: 0; box-shadow: 0 2px 6px rgba(0, 0, 0, .15); }
+.lk-more .ic { width: 15px; height: 15px; } .lk-row:hover .lk-more, .lk-more:focus-visible, .lk-more[aria-expanded="true"] { opacity: 1; } .lk-more:hover { color: var(--ink); }
+.lk-row.arch .lk-more { right: 6px; }
+.lk-row.arch .item { opacity: .78; } .lk-row.arch .lk-chic { color: var(--muted); }
+.lk-archnote { font-size: 12px; padding: 2px 10px 6px; }
+.item.muted .nm { color: var(--muted); }
+.mutei { display: inline-flex; color: var(--muted); flex: none; } .mutei .ic { width: 14px; height: 14px; }
+.mhead h2 .mutei .ic { width: 16px; height: 16px; vertical-align: -2px; }
+.lk-pill.arch { vertical-align: 2px; font-size: 11.5px; background: #fef3c7; color: #854d0e; }
+:root[data-theme="dark"] .lk-pill.arch { background: rgba(250, 204, 21, .16); color: #fde68a; }
+.chmenu { width: 290px; }
+.chmenu .mi.warn, .chmenu .mi.warn .ic { color: #b45309; }
+:root[data-theme="dark"] .chmenu .mi.warn, :root[data-theme="dark"] .chmenu .mi.warn .ic { color: #fbbf24; }
+.chmenu .mi.warn { border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; }
+.chmenu .mi.warn + .mi.warn { border-top: 0; border-radius: 8px; }
+.ferr { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: #fee2e2; color: #991b1b !important; font-size: 13.5px; }
+:root[data-theme="dark"] .ferr { background: rgba(239, 68, 68, .16); color: #fecaca !important; }
+.ferr[hidden] { display: none; }
+/* an archived channel: a read-only note where you'd type */
+.lk-archbar { display: flex; align-items: center; gap: 12px; margin: 0 16px 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); color: var(--text); font-size: 14px; line-height: 1.45; flex: none; }
+.lk-archbar > .ic { color: var(--muted); } .lk-archbar span { flex: 1; min-width: 0; } .lk-archbar b { color: var(--ink); }
+.composer[hidden] { display: none; }
+.lk-chcard.arch { opacity: .8; }
+/* the header button that hides / shows the right panel */
+.lk-rtog.on { color: var(--acc-text); }
+/* the left menu's own fold button (on wide screens; narrower screens already show icons only, and a phone has a drawer) */
+.lk-navtog { color: var(--nav-muted); }
+@media (max-width: 980px) { .lk-navtog { display: none; } }
+@media (min-width: 981px) {
+  .shell.navmini { --navw: 64px; }
+  .shell.navmini .lk-nav .team > div, .shell.navmini .lk-ni span, .shell.navmini .lk-ah span, .shell.navmini .lk-nh, .shell.navmini .lk-nav .mfa-nag, .shell.navmini .lk-ah .ic:last-child { display: none; }
+  .shell.navmini .lk-nav .team { justify-content: center; padding: 12px 0 8px; }
+  .shell.navmini .lk-ni, .shell.navmini .lk-ah { justify-content: center; padding: 10px 0; position: relative; } .shell.navmini .lk-ag { padding-left: 0; }
+  .shell.navmini .lk-ni span.badge { display: inline-block; position: absolute; transform: translate(12px, -10px); }
+  .shell.navmini .lk-nfoot { padding: 8px 6px; } .shell.navmini .lk-inv { justify-content: center; }
+  .shell.navmini .lk-logo { width: auto; }
+}
+@media (max-width: 760px) {
+  .lk-more { opacity: .7; background: none; box-shadow: none; top: 8px; right: 34px; } .lk-row .item { padding-right: 34px; }
+  .lk-row:has(.lk-more) .item { padding-right: 62px; } .lk-row.arch .lk-more { right: 6px; } .lk-row.arch .item { padding-right: 34px; }
+  .lk-rtog { display: none; }
+  .lk-archbar { margin: 0 8px calc(8px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
+}

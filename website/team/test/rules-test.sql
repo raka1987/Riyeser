@@ -418,30 +418,30 @@ do $$ declare l json; m numeric; begin
   assert (l -> 'modules' -> 'payroll' ->> 'status') = 'cancelled' and not (l -> 'modules' -> 'payroll' ->> 'active')::boolean, 'payroll cancelled, ended';
   assert (l ->> 'extra_companies')::int = 1, 'extra companies';
   m := ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric;
-  assert m = (25 + 2 * 5) + (39 + 2 * 5) + 10, format('monthly estimate (US$): Basics 25 + Link Plus 39 (paid earlier), each with 3 + 2 extra users at 5, + 1 company 10 = 94, got %s', m);
-  assert ((public.hq_licences()) ->> 'monthly_estimate')::numeric >= 94, 'total estimate';
+  assert m = (25 + 2 * 7) + (39 + 2 * 7) + 10, format('monthly estimate (US$): Basics 25 + Link Plus 39 (paid earlier), each with 3 + 2 extra users at 7, + 1 company 10 = 102, got %s', m);
+  assert ((public.hq_licences()) ->> 'monthly_estimate')::numeric >= 102, 'total estimate';
   assert ((public.hq_licences()) ->> 'early_bird_left')::int = 100, 'early bird places';
 end $$;
--- Prices are in US$ a month per business: each paid program includes 3 people, then US$5 a person for that program
+-- Prices are in US$ a month per business: each paid program includes 3 people, then US$7 a person for that program
 do $$ begin
-  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', false) = 84, '5 people with Plus + Payroll = (39 + 10) + (25 + 10) = 84';
-  assert public.riyeser_bill(array['plus', 'payroll', 'calls'], 5, 0, 'monthly', false) = 133, 'Plus + Payroll + Link Plus, 5 people = 133';
+  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', false) = 92, '5 people with Plus + Payroll = (39 + 14) + (25 + 14) = 92';
+  assert public.riyeser_bill(array['plus', 'payroll', 'calls'], 5, 0, 'monthly', false) = 145, 'Plus + Payroll + Link Plus, 5 people = 145';
   assert public.riyeser_bill(array['basic'], 3, 0, 'monthly', false) = 25, '3 people with Basics only = 25';
   assert public.riyeser_bill(array['basic'], 1, 0, 'monthly', false) = 25, 'fewer than 3 people is still 25';
   assert public.riyeser_bill(array['basic', 'plus'], 3, 0, 'monthly', false) = 39, 'Basics and Plus both on = the Plus price only';
-  assert public.riyeser_bill(array['basic', 'plus'], 5, 0, 'monthly', false) = 49, 'Basics and Plus, 5 people: users counted once';
-  assert public.riyeser_bill(array['calls'], 4, 0, 'monthly', false) = 44, 'Link Plus with 4 people = 44';
-  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'yearly', false) = 840, 'yearly = 10 months';
-  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', true) = 42, 'early bird = half';
-  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'yearly', true) = 420, 'yearly early bird';
-  assert public.riyeser_bill(array['calls'], 4, 0, 'yearly', false) = 440, 'Link Plus yearly';
+  assert public.riyeser_bill(array['basic', 'plus'], 5, 0, 'monthly', false) = 53, 'Basics and Plus, 5 people: users counted once';
+  assert public.riyeser_bill(array['calls'], 4, 0, 'monthly', false) = 46, 'Link Plus with 4 people = 39 + 7 = 46';
+  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'yearly', false) = 920, 'yearly = 10 months';
+  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', true) = 46, 'early bird = half';
+  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'yearly', true) = 460, 'yearly early bird';
+  assert public.riyeser_bill(array['calls'], 4, 0, 'yearly', false) = 460, 'Link Plus yearly';
   assert public.riyeser_bill(array['basic'], 3, 2, 'monthly', false) = 45, 'extra companies 10 each';
   assert public.riyeser_bill(array['basic'], 3, 1, 'monthly', true) = 22.5, 'early bird halves programs and users, not extra companies';
   assert public.riyeser_bill(array['payroll'], 3, 2, 'monthly', false) = 25, 'extra companies only count with Accounting';
   assert public.riyeser_bill(array['as_built', 'pos', 'bookings'], 3, 0, 'monthly', false) = 83, 'As Built 29, POS 29 and Bookings 25';
   assert public.riyeser_bill(array[]::text[], 9, 0, 'monthly', false) = 0, 'free tools only = 0';
   assert public.riyeser_bill(array['basic', 'basic', 'link', 'central', 'pdf'], 3, 0, 'monthly', false) = 25, 'free programs and repeats add nothing';
-  assert public.riyeser_price('plus') = 39 and public.riyeser_price('calls') = 39 and public.riyeser_price('payroll') = 25 and public.riyeser_price('extra_user') = 5, 'price list';
+  assert public.riyeser_price('plus') = 39 and public.riyeser_price('calls') = 39 and public.riyeser_price('payroll') = 25 and public.riyeser_price('extra_user') = 7, 'price list';
 end $$;
 -- The same on a real company (undone after): 5 people with Plus + Payroll paid, Basics paid as well, Link Plus off -> 84
 do $$ declare ws uuid := current_setting('test.ws_c')::uuid; m numeric; begin
@@ -451,19 +451,19 @@ do $$ declare ws uuid := current_setting('test.ws_c')::uuid; m numeric; begin
     perform public.hq_set_module(ws, 'calls', 'cancelled', null, null);
     perform public.hq_set_plan(ws, 2, 0, 'monthly', false);
     m := (public.hq_company_licence(ws) ->> 'monthly')::numeric;
-    assert m = 84, format('Plus + Payroll, 5 people = 84 (Basics not counted with Plus), got %s', m);
+    assert m = 92, format('Plus + Payroll, 5 people = 92 (Basics not counted with Plus), got %s', m);
     perform public.hq_set_plan(ws, 2, 0, 'yearly', false);
     m := (public.hq_company_licence(ws) ->> 'monthly')::numeric;
-    assert m = 70, format('yearly: 840 a year = 70 a month, got %s', m);
+    assert m = 76.67, format('yearly: 920 a year = 76.67 a month, got %s', m);
     perform public.hq_set_plan(ws, 2, 0, 'monthly', true);
     m := (public.hq_company_licence(ws) ->> 'monthly')::numeric;
-    assert m = 42, format('early bird: 42, got %s', m);
+    assert m = 46, format('early bird: 46, got %s', m);
     raise exception 'undo the price check';
   exception when others then if sqlerrm <> 'undo the price check' then raise; end if; end;
 end $$;
--- yearly + early bird: (Basics 35 + Link Plus 49) half = 42, + 1 company 10 = 52 a month list -> x 10/12 = 43.33
+-- yearly + early bird: (Basics 39 + Link Plus 53) half = 46, + 1 company 10 = 56 a month list -> x 10/12 = 46.67
 select public.hq_set_plan(:'ws_c', 2, 1, 'yearly', true);
-do $$ begin assert ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric = 43.33,
+do $$ begin assert ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric = 46.67,
   format('yearly early bird, got %s', (public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly'); end $$;
 -- Riyeser Link Plus (was Team Calls) via the licence: cancelled and unpaid -> no calls; the old button sets it paid again
 select public.hq_set_module(:'ws_c', 'calls', 'cancelled', null, null);
@@ -826,13 +826,19 @@ do $$ begin
   assert not exists (select 1 from public.audit_log where workspace_id = 'f0000000-0000-4000-8000-000000000003' and details::text like '%Pat%'), 'history scrubbed';
 end $$;
 
--- --- refunds (Island Traders: owner Jone, admin Mere; Vika is a plain member)
+-- --- refunds (Island Traders: owner Jone, admin Mere; Vika is a plain member). Only the owner: refunds show amounts.
 insert into auth.users values ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'vika@c.test');
 insert into public.members (workspace_id, user_id, display_name, role) values (:'ws_c', 'ffffffff-ffff-ffff-ffff-ffffffffffff', 'Vika', 'member');
 select pg_temp.as_user('ffffffff-ffff-ffff-ffff-ffffffffffff'); set role authenticated;
 do $$ begin begin perform public.request_refund(current_setting('test.ws_c')::uuid, 'Accounting Basics', 'November', null, 50, 'FJD', 'mistake', 'x', null);
   raise exception 'a member asked for a refund';
-  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end; end $$;
+  exception when others then assert sqlerrm like 'Only the business''s owner can%', sqlerrm; end; end $$;
+-- an admin (Mere, with two-step sign-in) can't ask for one either
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+do $$ begin assert (select role from public.members where workspace_id = current_setting('test.ws_c')::uuid and user_id = auth.uid()) = 'admin', 'Mere is an admin';
+  begin perform public.request_refund(current_setting('test.ws_c')::uuid, 'Accounting Basics', 'November', null, 50, 'FJD', 'mistake', 'x', null);
+  raise exception 'an admin asked for a refund';
+  exception when others then assert sqlerrm like 'Only the business''s owner can%', sqlerrm; end; end $$;
 select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
 select (public.request_refund(:'ws_c', 'Accounting Basics', 'November 2026', 'INV-0042', 350, 'FJD', 'duplicate', 'We were charged twice this month.', null) ->> 'id') as rf \gset
 select (public.request_refund(:'ws_c', 'POS', 'October 2026', null, 50, 'FJD', 'didnt_work', 'The till never worked for us.', null) ->> 'id') as rf2 \gset
@@ -841,6 +847,12 @@ do $$ begin
   assert json_array_length(public.my_refunds(current_setting('test.ws_c')::uuid)) = 2, 'owner sees the requests';
   assert (public.my_refunds(current_setting('test.ws_c')::uuid) -> 0 ->> 'ref') ~ '^R-[0-9]{4,}$', 'refund number like R-1042';
   assert exists (select 1 from public.support_tickets where topic = 'billing' and subject like 'Refund request R-%'), 'a billing ticket for the conversation';
+end $$;
+-- the admin sees none of them (no amounts), through the action or the table
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+do $$ begin
+  assert json_array_length(public.my_refunds(current_setting('test.ws_c')::uuid)) = 0, 'an admin sees no refund requests';
+  assert (select count(*) from public.refund_requests) = 0, 'row rules: an admin reads no refund rows';
 end $$;
 select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
 do $$ begin
@@ -2157,6 +2169,168 @@ reset role;
 set role anon;
 do $$ begin
   begin perform public.licence_device_linked(current_setting('test.ws_a')::uuid, 'e1e1e1e1-0000-4000-8000-000000000001'); raise exception 'anon checked a PC';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+
+-- ===== Riyeser Link: the channel menu (rename, topic, archive / bring back, mute, leave; #general protected)
+-- Channel Menu Co: Ola (owner), Pita (admin), Mele (member, made #jobs), Tui (member). Vai owns another business.
+reset role;
+insert into auth.users (id, email) values ('c4c4c4c1-0000-4000-8000-000000000001', 'ola@cm.test'), ('c4c4c4c2-0000-4000-8000-000000000002', 'pita@cm.test'),
+  ('c4c4c4c3-0000-4000-8000-000000000003', 'mele@cm.test'), ('c4c4c4c4-0000-4000-8000-000000000004', 'tui@cm.test'), ('c4c4c4c5-0000-4000-8000-000000000005', 'vai@cm.test');
+do $$ declare a uuid; b uuid; g uuid; j uuid; o uuid; x uuid; d uuid; m uuid; begin
+  insert into public.workspaces (name) values ('Channel Menu Co') returning id into a;
+  insert into public.workspaces (name) values ('Other Menu Co') returning id into b;
+  insert into public.members (workspace_id, user_id, display_name, role) values (a, 'c4c4c4c1-0000-4000-8000-000000000001', 'Ola', 'owner'),
+    (a, 'c4c4c4c2-0000-4000-8000-000000000002', 'Pita', 'admin'), (a, 'c4c4c4c3-0000-4000-8000-000000000003', 'Mele', 'member'),
+    (a, 'c4c4c4c4-0000-4000-8000-000000000004', 'Tui', 'member'), (b, 'c4c4c4c5-0000-4000-8000-000000000005', 'Vai', 'owner');
+  insert into public.channels (workspace_id, kind, name, created_by) values (a, 'channel', 'general', 'c4c4c4c1-0000-4000-8000-000000000001') returning id into g;
+  insert into public.channels (workspace_id, kind, name, created_by) values (a, 'channel', 'jobs', 'c4c4c4c3-0000-4000-8000-000000000003') returning id into j;
+  insert into public.channels (workspace_id, kind, name, created_by) values (a, 'channel', 'office', 'c4c4c4c1-0000-4000-8000-000000000001') returning id into o;
+  insert into public.channels (workspace_id, kind, name, created_by) values (a, 'private', 'execs', 'c4c4c4c1-0000-4000-8000-000000000001') returning id into x;
+  insert into public.channel_members values (x, 'c4c4c4c1-0000-4000-8000-000000000001'), (x, 'c4c4c4c4-0000-4000-8000-000000000004');
+  insert into public.channels (workspace_id, kind, dm_key, created_by) values (a, 'dm', 'cm-dm', 'c4c4c4c4-0000-4000-8000-000000000004') returning id into d;
+  insert into public.channel_members values (d, 'c4c4c4c3-0000-4000-8000-000000000003'), (d, 'c4c4c4c4-0000-4000-8000-000000000004');
+  insert into public.messages (channel_id, workspace_id, user_id, body) values (o, a, 'c4c4c4c4-0000-4000-8000-000000000004', 'Invoices are on the desk') returning id into m;
+  perform set_config('cm.a', a::text, false), set_config('cm.g', g::text, false), set_config('cm.j', j::text, false), set_config('cm.o', o::text, false),
+    set_config('cm.x', x::text, false), set_config('cm.d', d::text, false), set_config('cm.m', m::text, false);
+  -- a second #general can't be made
+  begin insert into public.channels (workspace_id, kind, name) values (a, 'channel', 'general'); raise exception 'two generals';
+  exception when others then assert sqlerrm like 'There''s already a #general%', sqlerrm; end;
+end $$;
+set role authenticated;
+
+-- Mele made #jobs, so Mele can rename it and change its topic (the name is tidied: "Site Jobs" becomes site-jobs)
+select pg_temp.as_user('c4c4c4c3-0000-4000-8000-000000000003');
+do $$ declare j uuid := current_setting('cm.j')::uuid; begin
+  assert public.channel_can_manage(j) and not public.channel_can_manage(current_setting('cm.o')::uuid), 'Mele manages #jobs only';
+  perform public.channel_rename(j, '#Site Jobs', '  Bookings and call-outs ');
+  assert (select name || '|' || topic from public.channels where id = j) = 'site-jobs|Bookings and call-outs', 'renamed and topic set';
+  perform public.channel_rename(j, null, '');
+  assert (select name = 'site-jobs' and topic is null from public.channels where id = j), 'topic cleared, name kept';
+  begin perform public.channel_rename(j, 'bad/name!', null); raise exception 'bad name';
+  exception when others then assert sqlerrm like 'Use up to 40%', sqlerrm; end;
+  begin perform public.channel_rename(j, 'General', null); raise exception 'renamed to general';
+  exception when others then assert sqlerrm like 'There''s already a #general%', sqlerrm; end;
+  begin perform public.channel_rename(j, null, repeat('x', 201)); raise exception 'long topic';
+  exception when others then assert sqlerrm like 'Keep the topic%', sqlerrm; end;
+end $$;
+-- Tui (a member who didn't make them) can't rename or archive, through the action or directly
+select pg_temp.as_user('c4c4c4c4-0000-4000-8000-000000000004');
+do $$ declare j uuid := current_setting('cm.j')::uuid; o uuid := current_setting('cm.o')::uuid; begin
+  assert not public.channel_can_manage(j), 'Tui can''t manage #site-jobs';
+  begin perform public.channel_rename(j, 'tuis', null); raise exception 'Tui renamed';
+  exception when others then assert sqlerrm like 'Only whoever made this channel%', sqlerrm; end;
+  begin perform public.channel_archive(o, true); raise exception 'Tui archived';
+  exception when others then assert sqlerrm like 'Only whoever made this channel%', sqlerrm; end;
+  update public.channels set name = 'tuis' where id = o;
+  assert (select name from public.channels where id = o) = 'office', 'a direct rename by Tui changes nothing';
+  begin update public.channels set archived = true where id = o; raise exception 'Tui archived directly';
+  exception when insufficient_privilege then null; end;
+  begin perform public.channel_rename(current_setting('cm.d')::uuid, 'x', null); raise exception 'renamed a DM';
+  exception when others then assert sqlerrm like 'Direct messages don''t%', sqlerrm; end;
+end $$;
+-- #general: not archived, not renamed, not left, by anyone (even the owner)
+select pg_temp.as_user('c4c4c4c1-0000-4000-8000-000000000001');
+do $$ declare g uuid := current_setting('cm.g')::uuid; begin
+  assert public.channel_can_manage(g), 'the owner manages #general (its topic)';
+  begin perform public.channel_archive(g, true); raise exception 'archived general';
+  exception when others then assert sqlerrm like '#general is where everyone%', sqlerrm; end;
+  begin perform public.channel_rename(g, 'everyone', null); raise exception 'renamed general';
+  exception when others then assert sqlerrm like '#general keeps its name%', sqlerrm; end;
+  begin update public.channels set name = 'everyone' where id = g; raise exception 'renamed general directly';
+  exception when others then assert sqlerrm like '#general keeps its name%', sqlerrm; end;
+  perform public.channel_rename(g, 'general', 'Everyone at Channel Menu Co');
+  assert (select topic from public.channels where id = g) = 'Everyone at Channel Menu Co', 'the topic of #general can change';
+  begin perform public.channel_leave(g); raise exception 'left general';
+  exception when others then assert sqlerrm like '#general is for everyone%', sqlerrm; end;
+end $$;
+-- An admin archives #office: hidden for everyone, read-only, nothing deleted; only with two-step sign-in
+select pg_temp.as_user_password_only('c4c4c4c2-0000-4000-8000-000000000002');
+do $$ begin
+  begin perform public.channel_archive(current_setting('cm.o')::uuid, true); raise exception 'archived without two-step';
+  exception when others then assert sqlerrm like 'Only whoever made this channel%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('c4c4c4c2-0000-4000-8000-000000000002');
+do $$ declare o uuid := current_setting('cm.o')::uuid; begin
+  perform public.channel_archive(o, true);
+  assert (select archived and archived_by = auth.uid() and archived_at > now() - interval '1 minute' from public.channels where id = o), 'archived, by Pita, now';
+  perform public.channel_archive(o, true);   -- again: nothing changes
+end $$;
+select pg_temp.as_user('c4c4c4c4-0000-4000-8000-000000000004');
+do $$ declare o uuid := current_setting('cm.o')::uuid; begin
+  assert (select archived from public.channels where id = o), 'Tui still sees #office, as archived';
+  assert (select count(*) from public.messages where channel_id = o) = 1, 'its messages are kept and readable';
+  begin insert into public.messages (channel_id, workspace_id, body) values (o, current_setting('cm.a')::uuid, 'still here?'); raise exception 'posted in archived';
+  exception when others then assert sqlerrm like 'This channel is archived%', sqlerrm; end;
+  begin update public.messages set body = 'edited' where id = current_setting('cm.m')::uuid; raise exception 'edited in archived';
+  exception when others then assert sqlerrm like 'This channel is archived%', sqlerrm; end;
+  begin insert into public.message_reactions (message_id, emoji) values (current_setting('cm.m')::uuid, '👍'); raise exception 'reacted in archived';
+  exception when others then assert sqlerrm like 'This channel is archived%', sqlerrm; end;
+  begin perform public.channel_archive(o, false); raise exception 'Tui brought it back';
+  exception when others then assert sqlerrm like 'Only whoever made this channel%', sqlerrm; end;
+end $$;
+-- Ola made #office, so Ola can bring it back; then posting works again. The History shows both.
+select pg_temp.as_user('c4c4c4c1-0000-4000-8000-000000000001');
+do $$ declare o uuid := current_setting('cm.o')::uuid; begin
+  begin perform public.channel_rename(o, 'old-office', null); raise exception 'renamed while archived';
+  exception when others then assert sqlerrm like 'This channel is archived. Bring it back first%', sqlerrm; end;
+  perform public.channel_archive(o, false);
+  assert (select not archived and archived_at is null and archived_by is null from public.channels where id = o), 'brought back';
+  insert into public.messages (channel_id, workspace_id, body) values (o, current_setting('cm.a')::uuid, 'Back in business');
+  assert (select string_agg(action || ' ' || (details ->> 'name'), ', ' order by id) from public.audit_log where workspace_id = current_setting('cm.a')::uuid and action like 'channel.%')
+    = 'channel.rename #site-jobs, channel.archive #office, channel.unarchive #office', 'history of renames and archiving';
+end $$;
+-- Mute and Leave are each person's own
+select pg_temp.as_user('c4c4c4c4-0000-4000-8000-000000000004');
+do $$ declare j uuid := current_setting('cm.j')::uuid; x uuid := current_setting('cm.x')::uuid; begin
+  perform public.channel_mute(j, true); perform public.channel_mute(current_setting('cm.d')::uuid, true);
+  assert (select count(*) from public.channel_prefs where muted) = 2, 'Tui muted #site-jobs and the DM';
+  perform public.channel_mute(current_setting('cm.d')::uuid, false);
+  assert (select count(*) from public.channel_prefs where muted) = 1, 'and unmuted the DM';
+  begin insert into public.channel_prefs (channel_id, muted) values (current_setting('cm.g')::uuid, true); raise exception 'wrote prefs directly';
+  exception when insufficient_privilege then null; end;
+  perform public.channel_leave(j);
+  assert (select left_at is not null from public.channel_prefs where channel_id = j), 'left #site-jobs';
+  assert exists (select 1 from public.channels where id = j), 'an everyone channel can still be found to join again';
+  perform public.channel_rejoin(j);
+  assert (select left_at is null and muted from public.channel_prefs where channel_id = j), 'joined again, still muted';
+  begin perform public.channel_leave(current_setting('cm.d')::uuid); raise exception 'left a DM';
+  exception when others then assert sqlerrm like 'You can''t leave a direct message%', sqlerrm; end;
+  perform public.channel_leave(x);
+  assert not exists (select 1 from public.channels where id = x), 'left the private #execs: can''t see it';
+  begin perform public.channel_leave(x); raise exception 'left twice';
+  exception when others then assert sqlerrm like 'That channel isn''t there%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('c4c4c4c3-0000-4000-8000-000000000003');
+do $$ begin assert not exists (select 1 from public.channel_prefs), 'Mele sees none of Tui''s mutes'; end $$;
+-- the last person in a private channel can't leave it empty; an admin who isn't in it can't archive it
+select pg_temp.as_user('c4c4c4c1-0000-4000-8000-000000000001');
+do $$ begin
+  begin perform public.channel_leave(current_setting('cm.x')::uuid); raise exception 'left it empty';
+  exception when others then assert sqlerrm like 'You''re the only person%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('c4c4c4c2-0000-4000-8000-000000000002');
+do $$ begin
+  begin perform public.channel_archive(current_setting('cm.x')::uuid, true); raise exception 'archived a private chat I''m not in';
+  exception when others then assert sqlerrm like 'That channel isn''t there%', sqlerrm; end;
+end $$;
+-- another business can't touch any of it, and signed-out visitors can't call the actions
+select pg_temp.as_user('c4c4c4c5-0000-4000-8000-000000000005');
+do $$ declare j uuid := current_setting('cm.j')::uuid; begin
+  assert not public.channel_can_manage(j), 'Vai manages nothing here';
+  begin perform public.channel_rename(j, 'vai', null); raise exception 'Vai renamed';
+  exception when others then assert sqlerrm like 'That channel isn''t there%', sqlerrm; end;
+  begin perform public.channel_archive(j, true); raise exception 'Vai archived';
+  exception when others then assert sqlerrm like 'That channel isn''t there%', sqlerrm; end;
+  begin perform public.channel_mute(j, true); raise exception 'Vai muted';
+  exception when others then assert sqlerrm like 'That channel isn''t there%', sqlerrm; end;
+  begin perform public.channel_leave(j); raise exception 'Vai left';
+  exception when others then assert sqlerrm like 'That channel isn''t there%', sqlerrm; end;
+end $$;
+reset role; set role anon; select pg_temp.as_user('');
+do $$ begin
+  begin perform public.channel_archive(current_setting('cm.j')::uuid, true); raise exception 'anon archived';
   exception when insufficient_privilege then null; end;
 end $$;
 reset role;

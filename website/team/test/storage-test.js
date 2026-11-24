@@ -38,7 +38,9 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   pg = await linkDemo('nearly');
   await openPlan(pg);
   t = (await pg.textContent('#stor')).replace(/\s+/g, ' ');
-  check(t.includes('1.7 GB of 2 GB used') && !!(await pg.$('#stor.warn')) && t.includes('85% used') && t.includes('20 GB with Riyeser Link Plus'), `80% warning (${t.slice(0, 120)})`);
+  check(t.includes('1.7 GB of 2 GB used') && !!(await pg.$('#stor.warn')) && t.includes('85% used') && t.includes('Upgrade to Riyeser Link Plus for 20 GB, or contact Riyeser support.')
+    && t.includes('space for files shared in Link chats (not website, email or cloud hosting)') && !/free up space/i.test(t), `80% warning (${t.slice(0, 160)})`);
+  check(!!(await pg.$('#hrefund')), 'the owner can ask for a refund on Riyeser home');
   if (out) { await (await pg.$('#hplanv')).scrollIntoViewIfNeeded(); await pg.screenshot({ path: out + '/link-storage-bar.png' }); }
   await pg.close();
   // 1c. an admin who isn't the owner: no Billing, no Plan & billing, no prices; "Files: x of y" in the Info panel
@@ -61,7 +63,7 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   await pg.setInputFiles('#file', { name: 'site-photos.zip', mimeType: 'application/zip', buffer: Buffer.alloc(2 * 1024 * 1024, 1) });
   await pg.waitForSelector('#phmsg:not([hidden])');
   t = await pg.textContent('#phmsg');
-  check(t === 'Your business has used its 2 GB of file storage. Free up space by asking your admin, or get 20 GB with Riyeser Link Plus.', `refused: "${t}"`);
+  check(t === 'Your business has used its 2 GB of space for files shared in Link chats (not website, email or cloud hosting). Upgrade to Riyeser Link Plus for 20 GB, or contact Riyeser support.', `refused: "${t}"`);
   check((await pg.$$eval('#msgs .msg', (m) => m.length)) === before, 'nothing was sent');
   if (out) await pg.screenshot({ path: out + '/link-storage-full.png' });
   // a small file still fits

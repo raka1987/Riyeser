@@ -99,6 +99,13 @@ create or replace function public.is_admin(ws uuid) returns boolean
     where m.workspace_id = ws and m.user_id = auth.uid() and m.role in ('owner', 'admin') and w.status = 'active')
 $$;
 
+-- The business's owner (with two-step sign-in): for what shows money, like refunds.
+create or replace function public.is_owner(ws uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select public.mfa_ok() and exists (select 1 from members m join workspaces w on w.id = m.workspace_id
+    where m.workspace_id = ws and m.user_id = auth.uid() and m.role = 'owner' and w.status = 'active')
+$$;
+
 create or replace function public.can_see_channel(ch uuid) returns boolean
   language sql stable security definer set search_path = public as $$
   select exists (
@@ -281,7 +288,7 @@ end $$;
 revoke update on public.workspaces, public.members, public.channels from authenticated;
 grant update (name) on public.workspaces to authenticated;
 grant update (display_name) on public.members to authenticated;
-grant update (name, topic, archived) on public.channels to authenticated;
+grant update (name, topic) on public.channels to authenticated;   -- archiving goes through channel_archive (below)
 
 -- ================================================================ Riyeser Link Plus calls (premium; was Team Calls)
 -- Calls between people in a team, and to a branch (rings everyone there; the first to answer takes it).
@@ -1235,12 +1242,12 @@ create or replace function public.riyeser_price(item text) returns numeric
     when 'basic' then 25 when 'plus' then 39 when 'payroll' then 25 when 'pos' then 29 when 'bookings' then 25
     when 'calls' then 39 when 'as_built' then 29
     when 'users_included' then 3     -- people included in each paid program
-    when 'extra_user' then 5         -- each person over that, for each paid program
+    when 'extra_user' then 7         -- each person over that, for each paid program
     when 'extra_company' then 10     -- each extra company in Accounting
     else 0 end)::numeric
 $$;
 
--- One bill at list prices (US$). Each paid program: its price, plus US$5 for each person over 3 (for that program).
+-- One bill at list prices (US$). Each paid program: its price, plus US$7 for each person over 3 (for that program).
 -- Accounting Plus includes Basics, so Basics is never counted as well. Extra companies count only with Accounting.
 -- Yearly = 10 months. Early bird = half the program and user amounts (the caller says if it's still in its 12 months).
 create or replace function public.riyeser_bill(mods text[], people int, extra_companies int, billing text, early_bird boolean) returns numeric
@@ -2334,7 +2341,7 @@ do $$ declare t text; begin
 end $$;
 -- Customers (owners and admins, after two-step sign-in) can read their business's requests; changes go through functions.
 drop policy if exists rr_read on public.refund_requests;
-create policy rr_read on public.refund_requests for select to authenticated using (public.is_admin(workspace_id));
+create policy rr_read on public.refund_requests for select to authenticated using (public.is_owner(workspace_id));
 grant select (id, number, ref, workspace_id, for_what, period, invoice_ref, amount, currency, reason_category, explanation, status,
   decision_reason, amount_approved, paid_at, created_at, updated_at) on public.refund_requests to authenticated;
 
@@ -2384,12 +2391,13 @@ begin
 end $$;
 revoke all on function public.refund_insert(uuid, uuid, uuid, uuid, text, text, text, numeric, text, text, text) from public, anon, authenticated;
 
--- Customers: only the business's owner or an admin (with two-step sign-in) can ask for a refund.
+-- Customers: only the business's owner (with two-step sign-in) can ask for a refund or see them: they show amounts.
+-- Admins run the team, not the bill.
 create or replace function public.request_refund(ws uuid, for_what text, period text, invoice_ref text, amount numeric, currency text,
     reason_category text, explanation text, ticket uuid) returns json
   language plpgsql security definer set search_path = public as $$
 begin
-  if not is_admin(ws) then raise exception 'Only the business''s owner or an admin can ask for a refund.'; end if;
+  if not is_owner(ws) then raise exception 'Only the business''s owner can ask for a refund.'; end if;
   if ticket is not null and not exists (select 1 from support_tickets where id = ticket and workspace_id = ws and can_see_ticket(ticket)) then
     raise exception 'We couldn''t find that help request.'; end if;
   if (select count(*) from refund_requests where workspace_id = ws and created_at > now() - interval '1 day') >= 5 then
@@ -2405,7 +2413,7 @@ create or replace function public.my_refunds(ws uuid) returns json
       'status', case when f.status in ('approved', 'partly_approved') and f.needs_second and f.second_approver is null then 'reviewing' else f.status end,
       'decision_reason', case when f.status = 'declined' or (f.status in ('approved', 'partly_approved', 'paid') and (not f.needs_second or f.second_approver is not null))
                               then f.decision_reason end) order by f.created_at desc), '[]')
-  from refund_requests f where public.is_admin(ws) and f.workspace_id = ws
+  from refund_requests f where public.is_owner(ws) and f.workspace_id = ws
 $$;
 
 -- Staff: enter a refund request for a customer from their ticket.
@@ -4643,3 +4651,148 @@ create or replace function public.licence_device_linked(ws uuid, device uuid) re
 $$;
 revoke all on function public.licence_device_linked(uuid, uuid) from public, anon;
 grant execute on function public.licence_device_linked(uuid, uuid) to authenticated;
+
+-- ===== Riyeser Link: the channel menu (rename, topic, members, mute, pin, leave, archive) =====
+-- Whoever made a channel, or the business's owner or an admin, can rename it, change its topic and archive it.
+-- Archiving hides a channel for everyone and makes it read-only; nothing is deleted and it can be brought back.
+-- #general is for the whole team: it can't be archived, renamed or left. Mute and Leave are for each person.
+alter table public.channels add column if not exists archived_at timestamptz;
+alter table public.channels add column if not exists archived_by uuid references auth.users(id) on delete set null;
+
+create table if not exists public.channel_prefs (      -- each person's own: muted, or left (an everyone channel)
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  channel_id uuid not null references public.channels(id) on delete cascade,
+  muted boolean not null default false,
+  left_at timestamptz,
+  primary key (user_id, channel_id)
+);
+alter table public.channel_prefs enable row level security;
+drop policy if exists cp_own on public.channel_prefs;
+create policy cp_own on public.channel_prefs for select to authenticated using (user_id = auth.uid());
+revoke all on public.channel_prefs from anon, authenticated;
+grant select on public.channel_prefs to authenticated;          -- changed only through channel_mute / channel_leave / channel_rejoin
+
+-- #general can't be archived or renamed, and there's only one.
+create or replace function public.channels_guard() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'UPDATE' and old.kind = 'channel' and old.name = 'general' then
+    if new.archived then raise exception '#general is where everyone in the team talks, so it can''t be archived.'; end if;
+    if new.name is distinct from old.name then raise exception '#general keeps its name, so everyone can find it.'; end if;
+  elsif new.kind = 'channel' and new.name = 'general' and (tg_op = 'INSERT' or old.name is distinct from 'general')
+        and exists (select 1 from public.channels c where c.workspace_id = new.workspace_id and c.kind = 'channel' and c.name = 'general' and c.id <> new.id) then
+    raise exception 'There''s already a #general. Choose another name.';
+  end if;
+  if tg_op = 'UPDATE' and new.archived is distinct from old.archived then
+    new.archived_at := case when new.archived then now() end;
+    new.archived_by := case when new.archived then auth.uid() end;
+  end if;
+  return new;
+end $$;
+drop trigger if exists channels_guard on public.channels;
+create trigger channels_guard before insert or update on public.channels for each row execute function public.channels_guard();
+
+-- An archived channel is read-only: no new messages, edits or reactions (owner-approved removal still anonymises).
+create or replace function public.channel_open_guard() returns trigger language plpgsql as $$
+begin
+  if current_setting('riyeser.removing', true) = 'on' then return new; end if;
+  if exists (select 1 from public.channels c where c.id = new.channel_id and c.archived) then
+    raise exception 'This channel is archived, so it''s read-only. Whoever made it, or an owner or admin, can bring it back.';
+  end if;
+  return new;
+end $$;
+drop trigger if exists messages_open on public.messages;
+create trigger messages_open before insert or update on public.messages for each row execute function public.channel_open_guard();
+drop trigger if exists message_reactions_open on public.message_reactions;   -- after message_reactions_fill has found the channel
+create trigger message_reactions_open before insert on public.message_reactions for each row execute function public.channel_open_guard();
+
+-- Can the person asking rename, change the topic of, or archive this channel?
+create or replace function public.channel_can_manage(ch uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from channels c where c.id = ch and c.kind in ('channel', 'private') and public.can_see_channel(ch)
+                 and (c.created_by = auth.uid() or public.is_admin(c.workspace_id)))
+$$;
+
+-- Rename and/or change the topic. new_name null keeps the name; new_topic null keeps the topic ('' clears it).
+create or replace function public.channel_rename(ch uuid, new_name text, new_topic text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare c record; n text; t text;
+begin
+  select * into c from channels where id = ch;
+  if c.id is null or not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  if c.kind = 'dm' then raise exception 'Direct messages don''t have a name to change.'; end if;
+  if not channel_can_manage(ch) then
+    raise exception 'Only whoever made this channel, or the owner or an admin, can change its name or topic.'; end if;
+  if c.archived then raise exception 'This channel is archived. Bring it back first, then change it.'; end if;
+  n := c.name; t := c.topic;
+  if new_name is not null then
+    n := regexp_replace(regexp_replace(lower(trim(new_name)), '^#+', ''), '\s+', '-', 'g');
+    if n !~ '^[a-z0-9_-]{1,40}$' then
+      raise exception 'Use up to 40 lowercase letters, numbers, - or _ for the name (no spaces), e.g. hill-rd-site.'; end if;
+  end if;
+  if new_topic is not null then
+    t := nullif(trim(new_topic), '');
+    if length(t) > 200 then raise exception 'Keep the topic under 200 characters.'; end if;
+  end if;
+  update channels set name = n, topic = t where id = ch;
+  if n is distinct from c.name then
+    insert into audit_log (workspace_id, action, details) values (c.workspace_id, 'channel.rename', jsonb_build_object('name', '#' || n, 'was', '#' || c.name));
+  end if;
+end $$;
+
+-- Archive (hide for everyone, read-only, nothing deleted) or bring back.
+create or replace function public.channel_archive(ch uuid, archive boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from channels where id = ch;
+  if c.id is null or not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  if c.kind = 'dm' then raise exception 'Direct messages can''t be archived.'; end if;
+  if not channel_can_manage(ch) then
+    raise exception 'Only whoever made this channel, or the owner or an admin, can archive it or bring it back.'; end if;
+  if c.archived = coalesce(archive, false) then return; end if;
+  update channels set archived = coalesce(archive, false) where id = ch;
+  insert into audit_log (workspace_id, action, details)
+    values (c.workspace_id, case when archive then 'channel.archive' else 'channel.unarchive' end, jsonb_build_object('name', '#' || c.name));
+end $$;
+
+-- Mute: still there, but its unread messages don't add to your total or ring the bell.
+create or replace function public.channel_mute(ch uuid, mute_on boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  insert into channel_prefs (user_id, channel_id, muted) values (auth.uid(), ch, coalesce(mute_on, false))
+    on conflict (user_id, channel_id) do update set muted = excluded.muted;
+end $$;
+
+-- Leave: a private channel takes you out of it (someone who manages it can add you back); an everyone channel
+-- goes from your list (Teams / Channels lets you join again). Not #general, and not a direct message.
+create or replace function public.channel_leave(ch uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from channels where id = ch;
+  if c.id is null or not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  if c.kind = 'dm' then raise exception 'You can''t leave a direct message. Mute it instead.'; end if;
+  if c.kind = 'channel' and c.name = 'general' then raise exception '#general is for everyone in the team, so you can''t leave it. Mute it instead.'; end if;
+  if c.kind = 'private' then
+    if not exists (select 1 from channel_members where channel_id = ch and user_id <> auth.uid()) then
+      raise exception 'You''re the only person in this channel. Add someone first, or archive it.'; end if;
+    delete from channel_members where channel_id = ch and user_id = auth.uid();
+  else
+    insert into channel_prefs (user_id, channel_id, left_at) values (auth.uid(), ch, now())
+      on conflict (user_id, channel_id) do update set left_at = now();
+  end if;
+end $$;
+
+create or replace function public.channel_rejoin(ch uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from channels c where c.id = ch and c.kind = 'channel') or not can_see_channel(ch) then
+    raise exception 'That channel isn''t there any more.'; end if;
+  update channel_prefs set left_at = null where user_id = auth.uid() and channel_id = ch;
+end $$;
+
+revoke all on function public.channel_can_manage(uuid), public.channel_rename(uuid, text, text), public.channel_archive(uuid, boolean),
+  public.channel_mute(uuid, boolean), public.channel_leave(uuid), public.channel_rejoin(uuid) from public, anon;
+grant execute on function public.channel_can_manage(uuid), public.channel_rename(uuid, text, text), public.channel_archive(uuid, boolean),
+  public.channel_mute(uuid, boolean), public.channel_leave(uuid), public.channel_rejoin(uuid) to authenticated;
