@@ -256,6 +256,12 @@ const centralMock = (up) => `<div class="cmock-wrap" aria-label="Riyeser Central
       <div class="cm-row">${ci('pdf')}<span>Site plan level 2 signed</span><small>Yesterday, 4:32 PM</small></div>
     </div></div>
 </div></div>`;
+// The home page picture: the real Riyeser Central 1.6 home screen on a laptop, with two moments from Bookings and Invoices.
+const heroShot = (up) => `<div class="hshot">
+  <div class="lap"><div class="lap-scr"><img src="${up}assets/central-hero.webp" alt="Riyeser Central home screen: bookings, money owed, POS, payroll and PDF in one place, with recent activity and shortcuts" width="2560" height="1600" fetchpriority="high"></div><div class="lap-base"></div></div>
+  <div class="hfloat f1"><img src="${up}assets/apps/bookings.png" alt="" width="40" height="40"><div><small>Riyeser Bookings</small><b>Jo Smith · 10:00 today</b><span>Hot water service · Confirmed</span></div></div>
+  <div class="hfloat f2"><img src="${up}assets/apps/invoices.png" alt="" width="40" height="40"><div><small>Riyeser Invoices</small><b>INV-1047 paid</b><span class="ok">$880.00 received</span></div></div>
+</div>`;
 const winFrame = (up, app, name, img, alt, w = 1400, h = 900) => `<div class="win"><div class="bar"><img src="${up}assets/${app === 'logo' ? 'logo-r.png' : `apps/${app}.png`}" alt="">${esc(name)}<span class="ctl">${svg('<path d="M5 12h14"/>')}${svg('<rect x="5" y="5" width="14" height="14" rx="1"/>')}${svg('<path d="M6 6l12 12M18 6L6 18"/>')}</span></div><img src="${up}assets/${img}" alt="${esc(alt)}" width="${w}" height="${h}"></div>`;
 const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p><span class="go">${ARR}</span></a>`;
 
@@ -366,7 +372,7 @@ page({
     <p class="fine">Windows 10 &amp; 11 · No account or card needed · Works offline</p>
     <div class="badges"><span class="chip">${svg('<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>')}Free tools + 90-day trials</span><span class="chip">${svg('<rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>')}Your data stays on your PC</span>${EARLY_BIRD ? `<a class="chip gold" href="${up}pricing.html#early">🐣 Early bird: 50% off your first year</a>` : ''}</div>
   </div>
-  ${centralMock(up)}
+  ${heroShot(up)}
 </div></div>
 
 <section class="finder" id="find"><div class="c">
