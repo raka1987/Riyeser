@@ -67,9 +67,12 @@ function createWindow() {
   });
 }
 
+// Windows matches the start-up entry by its arguments, so read it back with the same ones.
+const LOGIN = { args: ['--hidden'] };
 function startWithWindows(on) {
-  app.setLoginItemSettings({ openAtLogin: on, args: ['--hidden'] });
+  app.setLoginItemSettings({ openAtLogin: on, ...LOGIN });
 }
+const startsWithWindows = () => app.getLoginItemSettings(LOGIN).openAtLogin;
 
 function createTray() {
   tray = new Tray(icon('icon-team.png'));
@@ -77,7 +80,7 @@ function createTray() {
   const menu = () => Menu.buildFromTemplate([
     { label: `Open ${NAME}`, click: () => { win.show(); win.focus(); } },
     { type: 'separator' },
-    { label: 'Start with Windows', type: 'checkbox', checked: app.getLoginItemSettings().openAtLogin,
+    { label: 'Start with Windows', type: 'checkbox', checked: startsWithWindows(),
       click: (item) => { startWithWindows(item.checked); tray.setContextMenu(menu()); } },
     { type: 'separator' },
     { label: `Quit ${NAME}`, click: () => { quitting = true; app.quit(); } },
@@ -102,7 +105,7 @@ app.whenReady().then(() => {
   // Self-test for the Windows build check: write that it started, then quit.
   const selfTest = process.argv.find((a) => a.startsWith('--self-test='));
   if (selfTest) {
-    require('fs').writeFileSync(selfTest.slice('--self-test='.length), JSON.stringify({ ok: true, name: NAME, version: app.getVersion(), loginItem: app.getLoginItemSettings().openAtLogin }));
+    require('fs').writeFileSync(selfTest.slice('--self-test='.length), JSON.stringify({ ok: true, name: NAME, version: app.getVersion(), loginItem: startsWithWindows() }));
     quitting = true; setTimeout(() => app.quit(), 500);
   }
 });
