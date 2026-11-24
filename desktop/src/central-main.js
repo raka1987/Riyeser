@@ -1,7 +1,7 @@
 // Riyeser Central: the Riyeser Group home screen. Opens every Riyeser program and shows, like a PA would, what needs
 // attention today: meetings, to-dos, money owed and owing, and recent documents, plus one search for every file.
 // It only READS the other programs' data, so it can never damage their files.
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, session, clipboard } = require('electron');
 const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
 const licence = require('./core/licence');
@@ -12,6 +12,7 @@ const { Store } = require('./core/store');
 const { Index } = require('./core/indexer');
 const { upcomingMeetings } = require('./core/calendar');
 const sources = require('./central/sources');
+const online = require('./core/online');
 
 app.setName('Riyeser Central');
 // Central's data folder. Versions before 1.2 used "Riyser Central": move it across once so nothing is lost.
@@ -284,6 +285,30 @@ function registerIpc() {
   handle('central:licenceActivate', (key) => licence.activate(appData, key, { fetchFn: lfetch }));
   handle('central:licenceRemove', () => licence.remove(appData, { fetchFn: lfetch }));
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
+  // ---------- the company this PC belongs to (%APPDATA%\Riyeser\company.json; set up or join online) ----------
+  const on = new online.Online({ store, fetchFn: (u, o) => net.fetch(u, o), appData, appVersion: app.getVersion(), deviceName: os.hostname() });
+  const companyState = async () => {
+    const setup = store.get('company-setup', {}) || {};
+    const s = on.session;
+    return { company: online.readCompany(appData), onlineReady: await on.ready(), signedIn: s ? s.user.email : null,
+      pendingJoin: setup.pendingJoin || null, skipped: !!setup.skipped, unlinked: !!setup.unlinked };
+  };
+  handle('company:get', () => companyState());
+  handle('company:signIn', (email, password, create) => on.signIn(String(email || '').trim(), String(password || ''), !!create));
+  handle('company:signOut', () => { on.signOut(); return true; });
+  handle('company:create', (profile, yourName) => on.createCompany(profile || {}, yourName));
+  handle('company:join', (code, yourName, note) => on.requestJoin(code, yourName, note));
+  handle('company:checkJoin', () => on.checkJoin());
+  handle('company:cancelJoin', () => { store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null })); return true; });
+  handle('company:local', (profile, yourName) => on.setupLocal(profile || {}, yourName));
+  handle('company:skip', () => { store.update('company-setup', {}, (o) => ({ ...(o || {}), skipped: true })); return true; });
+  handle('company:copy', (text) => { clipboard.writeText(String(text || '')); return true; });
+  // Was this PC unlinked by an admin? Checked once a day; the company file and all data stay as they are.
+  handle('company:checkLinked', async () => {
+    const ok = await on.stillLinked();
+    if (ok !== null) store.update('company-setup', {}, (o) => ({ ...(o || {}), unlinked: ok === false }));
+    return ok;
+  });
   handle('central:updates', (force) => updateStatus(!!force));
   handle('central:installUpdates', (ids) => installUpdates(ids));
   handle('central:install', (id) => installProgram(id));

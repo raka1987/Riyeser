@@ -26,6 +26,7 @@ const P = {
   home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
   book: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6M9 11h6M9 15h3"/>',
   people: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.2c2.4 0 4 1.5 4.5 4.3"/>',
+  building: '<path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M16 9h2a2 2 0 0 1 2 2v10M3 21h18M8 7h4M8 11h4M8 15h4"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   pdf: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M9.5 16.5h5M9.5 13h5"/>',
   hat: '<path d="M4 17h16"/><path d="M5.5 17a6.5 6.5 0 0 1 13 0"/><path d="M10 10.8V8h4v2.8"/><path d="M3 17v2h18v-2"/>',
@@ -129,6 +130,7 @@ function renderNav() {
     <button data-act="team">${icon('chat')}Team chat<span class="tag" id="teamtag" hidden></span></button>
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
+    <button class="${view === 'company' ? 'on' : ''}" data-view="company">${icon('building')}Company</button>
     <button data-lic="open">${icon('key')}Licence</button>
     <button data-help="central">${icon('help')}Help</button>`;
 }
@@ -236,8 +238,9 @@ function renderApps() {
     : '<div class="lbl">You have every Riyeser program.</div>';
 }
 function setView(v) {
-  view = v; $('#home').hidden = v !== 'home'; $('#appsv').hidden = v !== 'apps';
-  if (v !== 'home' && v !== 'apps') return;
+  view = v; $('#home').hidden = v !== 'home'; $('#appsv').hidden = v !== 'apps'; $('#companyv').hidden = v !== 'company';
+  if (v === 'company' && window.RiyeserCompany) window.RiyeserCompany.renderCompany();
+  if (v !== 'home' && v !== 'apps' && v !== 'company') return;
   renderNav();
 }
 async function refresh() {
@@ -351,7 +354,7 @@ $('#licbtn').addEventListener('click', openLicence);
 const finder = { q: '', type: null, year: null, kind: null };
 async function runSearch() {
   const active = finder.q.trim() || finder.type || finder.year || finder.kind;
-  $('#results').hidden = !active; $('#home').hidden = !!active || view !== 'home'; $('#appsv').hidden = !!active || view !== 'apps'; $('#qclear').hidden = !active;
+  $('#results').hidden = !active; $('#home').hidden = !!active || view !== 'home'; $('#appsv').hidden = !!active || view !== 'apps'; $('#companyv').hidden = !!active || view !== 'company'; $('#qclear').hidden = !active;
   if (!active) return;
   const r = await bridge.call('search:find', { ...finder, limit: 150 });
   const chipRow = (label, key, counts, order) => {
