@@ -69,9 +69,9 @@ It never sees customers' messages, calls or books.
 | Role | Can do (defaults) |
 |---|---|
 | Owner | Everything, including HQ staff, settings, the HQ history and approving account removal |
-| Finance | Companies, licences, refunds (approve and pay), free periods (give and approve), level 2 and 3 tickets |
+| Finance | Companies, licences, refunds (approve and pay), free periods (give and approve), level 2 and 3 tickets, Reports |
 | Support | Companies, notes, level 1 tickets, edit details, two-step resets, free periods (within the limit), entering refunds |
-| Senior support | As Support, plus level 2 tickets, change owner, close and reopen businesses |
+| Senior support | As Support, plus level 2 tickets, change owner, close and reopen businesses, Reports |
 | Sales | Companies, notes, licences (view), tickets (view), free periods (within the limit) |
 | Developer | Overview and downloads |
 
@@ -90,7 +90,43 @@ The Downloads page shows live totals straight away. Per-day numbers start the da
 
 Download totals include a few copies fetched by Riyeser's own release checks, so treat small numbers as roughly right.
 
-**Marking a company paid for Riyeser Link Plus:** HQ → Companies → open the company → Riyeser Link Plus (the `calls` module) → Paid until → Save.
+**Marking a company paid for Riyeser Link Plus:** HQ → Customers → open the business → Programs → Riyeser Link Plus → **Mark paid until…**.
+
+### Using HQ
+
+The menu on the left is the same on every screen and only shows what your permissions allow. Every page has its own
+address (for example `riyeser.com/hq/#/company/<id>/programs`), so you can paste a link to a colleague and Back works.
+Needs the latest `team-chat.sql`; before that, the new parts say "Run the latest team-chat.sql…" and the rest still works.
+
+- **Overview (start here):** New signups, Failed payments (0 until payments are connected), Renewals due and Open
+  complaints, then **Needs attention**: one queue of what's yours (complaints, approvals, refunds, your follow-ups due,
+  trials and paid periods ending in 7 days, sign-ups stuck with no PC). Press the blue **Next action** (Reply, Approve,
+  Review, Follow up, Extend, Message) or ▾ for more. On the right: **System health** (last backup and last restore test,
+  from the nightly GitHub jobs) and **Team handover**: add a note for the next shift; tick it Done when it's handled.
+- **Customers:** search, filter (plan, trial ending, country, status, inactive, open tickets, needs follow-up,
+  My customers), sort any column, 50 a page. Quick views: Trials ending this week, Paying customers, Needs follow-up,
+  My customers. **Download CSV** gives the whole filtered list (the download is in the HQ history).
+- **The customer page:** click any business (in Customers, Support, Refunds, Licences, Inactive, Reports…). The header
+  shows the Riyeser **Owner** (who looks after them: set it from the ⋯ menu), Next renewal, the next promised follow-up,
+  the business owner's phone and email, and warning chips (trial ending, payment overdue, no sign-in, open tickets,
+  Link Office offline). Tabs: Overview, Programs, PCs & programs (which Riyeser programs are on each PC, from Central
+  1.8.1), People, Conversations, Money, History, Link. The **Customer timeline** on the right shows the latest of everything.
+- **Quick extensions (Programs tab):** each program has **+7 / +30 / +90 days**, **Unlock now**, **Mark paid until…**,
+  **Pause** (stops now) and **Cancel** (works until the end of what's paid). Each asks for a reason and an optional ticket
+  number. Free days go through free periods: up to 31 days applies straight away, longer goes to **Approvals** for someone
+  else to approve. Paid-until, Pause and Cancel need "Change licences and plans" (Owner, Finance). All are in the HQ history.
+- **Message customer / Send customer reply:** starts a help request from Riyeser to someone in the business (the owner
+  unless you choose). They see it on their Riyeser home page as "Message from Riyeser", get it by email, and can reply;
+  their reply lands in Support. **Add internal note** is staff only: customers never see it.
+- **Log a call:** they called us or we called them, who, what it was about, and an optional **follow-up date**.
+  Follow-ups show in **My follow-ups** (Overview and the customer page) and in the Needs attention queue on the day.
+  Tick **Done** when you've followed up.
+- **Signups:** each new business from signed up → email verified → trial → set up (a PC linked) → activated (a program
+  used), the step blocking go-live and its owner. Product checklists say "not reported yet" for anything the programs
+  don't tell Riyeser yet.
+- **Reports** (Owner, Finance, Senior): sign-ups and the funnel, trials and conversion, a **revenue estimate** (list
+  prices until payments are connected), who's leaving, support and staff activity, for 30, 90 or 365 days. Every table
+  has **CSV**. Numbers are account information only: never customers' messages or books.
 
 ## Riyeser Team is now Riyeser Link: Supabase addresses (once)
 
