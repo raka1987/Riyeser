@@ -43,7 +43,7 @@ const { chromium } = require('playwright');
     if (u.pathname === '/rest/v1/rpc/team_features') return json({ calls: true });
     return json([]);
   });
-  await p2.goto('http://127.0.0.1:8090/team/'); await p2.waitForSelector('#gf');
+  await p2.goto('http://127.0.0.1:8090/team/?chat'); await p2.waitForSelector('#gf');
   await p2.fill('input[name=email]', user.email); await p2.fill('input[name=password]', 'right-password'); await p2.click('button[type=submit]');
   await p2.waitForSelector('#cs'); console.log('after password -> asks for code:', await p2.textContent('#cs h1'));
   await p2.screenshot({ path: out + '/mfa-code.png' });

@@ -34,6 +34,7 @@ const { chromium } = require('playwright');
   await pg.waitForSelector('#jf'); console.log('3. signed in, no company yet ->', await pg.textContent('#jf h1'), '/', await pg.textContent('.newco summary'));
   await pg.click('.newco summary'); await pg.fill('#cf input[name=team]', 'Sample Plumbing'); await pg.fill('#cf input[name=you]', 'Alex'); await pg.click('#cf button');
   await pg.waitForSelector('#cidv'); console.log('4. company made, shows its ID:', await pg.textContent('#cidv')); await pg.click('#cl');
+  await pg.waitForSelector('.hco'); console.log('   lands on the Riyeser home:', await pg.textContent('.hco h2'), '| tiles:', await pg.$$eval('.happ b', (x) => x.length)); await pg.click('#hchat');
   await pg.waitForSelector('#txt'); console.log('   chat open on:', await pg.textContent('#mhead h2'));
   await pg.fill('#txt', 'First message'); await pg.press('#txt', 'Enter'); await pg.waitForTimeout(400);
   console.log('5. sent:', await pg.evaluate(() => [...document.querySelectorAll('#msgs .mb')].map((x) => x.textContent.trim())));

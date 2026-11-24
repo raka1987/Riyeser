@@ -443,7 +443,7 @@
     [S.people, S.branches, S.teams] = await Promise.all([api.people(S.team.id), api.branches(S.team.id), api.teams(S.user.id)]);
     S.team = S.teams.find((t) => t.id === S.team.id) || S.team;
     S.requests = isAdmin() ? await api.pendingRequests(S.team.id).catch(() => []) : [];
-    renderSide();
+    renderSide(); if (S.home) renderHome();
   }
 
   function joinRequests() {
@@ -535,8 +535,8 @@
   async function openChannel(id, toChat = true) {
     S.ch = S.chans.find((c) => c.id === id) || null; S.editing = null;
     S.msgs = S.ch ? await api.messages(S.ch.id) : [];
-    if (toChat) S.inChat = true;
-    render();
+    if (toChat) { S.inChat = true; S.home = false; }
+    if (S.home) renderHome(); else render();
     if (S.ch) { await api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); }
   }
 
@@ -595,7 +595,7 @@
     const dmFor = (uid) => S.chans.find((c) => c.kind === 'dm' && c.people.includes(uid));
     const me = S.people.find((p) => p.user_id === S.user.id) || {};
     const unreadBadge = (id) => (S.unread[id] ? `<span class="badge">${S.unread[id]}</span>` : '');
-    return `<div class="team"><img src="icon.svg" alt=""><div>${S.teams.length > 1
+    return `${/Electron/.test(navigator.userAgent) || DEMO ? '' : '<button class="tohome" id="tohome">← Riyeser home</button>'}<div class="team"><img src="icon.svg" alt=""><div>${S.teams.length > 1
       ? `<select id="tsw" aria-label="Switch team">${S.teams.map((t) => `<option value="${t.id}"${t.id === S.team.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
       : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}${S.team.company_code ? ` · ${esc(S.team.company_code)}` : ''}</small></div></div>
     <div class="cobar"><button id="coinfo">🏢 Company</button>${isAdmin() ? `<button id="coppl">👥 People</button><button id="coreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button id="cohist">🕘 History</button>` : ''}<button id="cosec">🔐 Security</button></div>
@@ -610,6 +610,72 @@
       <button class="invite" id="inv">+ Invite people</button>
     </div>
     <div class="me">${av(S.user.id, me.display_name || S.user.email)}<div class="nm">${esc(me.display_name || 'You')}<small>${esc(S.user.email || '')}</small></div><button id="out">Sign out</button></div>`;
+  }
+
+
+  // ------------------------------------------------------------------ Riyeser home (the account's front page on the website)
+  const REL = 'https://github.com/raka1987/Riyeser/releases/latest/download/';
+  const APPS = [
+    ['central', 'Riyeser Central', 'Your home screen on the PC. Installs and updates everything.', 'RiyeserCentral-Setup.exe', 'free'],
+    ['accounting-basics', 'Accounting Basics', 'Invoices, quotes, customers and stock.', 'RiyeserAccountingBasics-Setup.exe', 'basic'],
+    ['accounting', 'Accounting Plus', 'Full books: banking, BAS, payroll, jobs.', 'RiyeserAccountingPlus-Setup.exe', 'plus'],
+    ['invoices', 'Invoices', 'Quotes and invoices, free.', 'RiyeserInvoices-Setup.exe', 'free'],
+    ['pos', 'POS', 'The till for shops and restaurants.', 'RiyeserPOS-Setup.exe', 'pos'],
+    ['bookings', 'Bookings', 'Jobs, appointments and tables.', 'RiyeserBookings-Setup.exe', 'bookings'],
+    ['payroll', 'Payroll', 'Staff, timesheets and pay runs.', 'RiyeserPayroll-Setup.exe', 'payroll'],
+    ['pdf', 'PDF', 'Fill, sign and edit PDFs.', 'RiyeserPDF-Setup.exe', 'free'],
+    ['desk-assistant', 'Desk Assistant', 'Files your documents for you.', 'RiyeserDeskAssistant-Setup.exe', 'free'],
+  ];
+  function licLine(lic, key) {
+    if (key === 'free') return '<span class="pl ok">Free forever</span>';
+    const v = lic && lic.modules && lic.modules[key]; if (!v) return '<span class="pl">Free for 90 days</span>';
+    if (v.status === 'active') return '<span class="pl ok">Paid</span>';
+    if (v.status === 'trial') return `<span class="pl${v.days_left <= 14 ? ' warn' : ''}">Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left</span>`;
+    return '<span class="pl bad">Not active</span>';
+  }
+  async function renderHome() {
+    tabIcon(false); document.title = 'Riyeser';
+    const admin = isAdmin(); const t = S.team; const me = S.people.find((p) => p.user_id === S.user.id) || {};
+    if (S.homeLic === undefined || S.homeLicFor !== t.id) { S.homeLicFor = t.id; S.homeLic = admin ? await api.licence(t.id).catch(() => null) : null; }
+    const lic = S.homeLic && S.homeLic.modules ? S.homeLic : null;
+    const unread = Object.values(S.unread || {}).reduce((a, b) => a + (b || 0), 0);
+    const calls = lic && lic.modules && lic.modules.calls;
+    $app.className = 'acct home'; window.scrollTo(0, 0);
+    $app.innerHTML = `<header class="htop"><a class="hbrand" href="/"><img src="/assets/logo-r.png" alt="">Riyeser</a>
+        ${S.teams.length > 1 ? `<select id="hsw" aria-label="Switch company">${S.teams.map((x) => `<option value="${x.id}"${x.id === t.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}
+        <span class="hme">${esc(me.display_name || S.user.email || '')}</span><button class="btn sm" id="hout">Sign out</button></header>
+      <main class="hmain">
+        <h1>Welcome${me.display_name ? ', ' + esc(me.display_name.split(' ')[0]) : ''}</h1>
+        ${needs2step() ? '<button class="hnag" id="hmfa">🔐 Turn on <b>two-step sign-in</b> to approve people and change access. It takes 2 minutes.</button>' : ''}
+        <section class="hco"><div><small>Your company</small><h2>${esc(t.name)}</h2>
+          <div class="cid"><small>Company ID</small><span class="code">${esc(t.company_code || '')}</span><button class="btn sm" id="hcp">Copy</button></div>
+          <p class="muted small">Staff and branches use this ID to ask to join. Every Riyeser program on your PCs links with it.</p>
+          <dl class="hkv">${[['Legal name', t.legal_name], ['ABN / TIN', t.tax_number], ['Address', t.address], ['Phone', t.phone], ['Email', t.email], ['Country', t.country]]
+            .map(([k, v]) => `<dt>${k}</dt><dd>${v ? esc(v) : `<span class="muted">${admin ? 'Not added yet' : '—'}</span>`}</dd>`).join('')}</dl></div>
+          <div class="hacts"><button class="btn" id="hco">✏️ ${admin ? 'Edit company details' : 'Company details'}</button>${admin ? `<button class="btn" id="hppl">👥 People · ${S.people.length}</button>
+          <button class="btn" id="hreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button class="btn" id="hhist">🕘 History</button>` : ''}
+          <button class="btn" id="hsec">🔐 Security</button></div></section>
+        ${lic ? `<h3 class="hsec">Your plan <small>${lic.seats ? `${lic.seats.used} of ${lic.seats.included + lic.seats.extra} people included${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
+        <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Team Chat Plus (calls)']]
+          .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
+        <h3 class="hsec">Riyeser Team</h3>
+        <div class="happs"><div class="happ hteam"><img src="/assets/apps/team.png" alt=""><div><b>Riyeser Team${unread ? ` <span class="badge">${unread}</span>` : ''}</b>
+          <small>Chat with your staff and branches. Calls between branches and extensions come with Team Chat Plus.</small>
+          <span class="pl ok">Chat: free forever</span> ${calls ? licLine(lic, 'calls').replace('>Free trial', '>Calls: free trial').replace('>Paid', '>Calls: paid').replace('>Not active', '>Calls: not active') : '<span class="pl">Calls: free for 90 days</span>'}</div>
+          <div class="hbtns"><button class="btn p sm" id="hchat">Open</button><a class="btn sm" href="${REL}RiyeserTeam-Setup.exe">⬇ Download for Windows</a></div></div></div>
+        <h3 class="hsec">Programs for your PC <small>Start with Riyeser Central: it installs and updates the rest.</small></h3>
+        <div class="happs">${APPS.map(([id, n, d, file, key]) => `<a class="happ" href="${REL}${file}"><img src="/assets/apps/${id}.png" alt=""><div><b>${n}</b><small>${d}</small>${admin || key === 'free' ? licLine(lic, key) : ''}</div><span class="go">⬇ Download</span></a>`).join('')}</div>
+        <p class="muted small hfoot">Windows 10 and 11. <a href="/help.html">Help Centre</a> · <a href="/pricing.html">Pricing</a></p>
+      </main>`;
+    const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
+    on('#hchat', () => { S.home = false; render(); });
+    on('#hout', async () => { await api.signOut(); S.team = null; gate(); });
+    on('#hco', () => companyInfo(false));
+    on('#hppl', () => (needs2step() ? security() : peopleAccess()));
+    on('#hreq', () => (needs2step() ? security() : joinRequests()));
+    on('#hhist', showHistory); on('#hsec', security); on('#hmfa', security);
+    on('#hcp', async () => { try { await navigator.clipboard.writeText(t.company_code); $app.querySelector('#hcp').textContent = 'Copied'; } catch { /* nothing */ } });
+    const sw = $app.querySelector('#hsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
   }
 
   // The browser tab shows Riyeser's logo on the account screens, and Team's icon once inside chat.
@@ -636,6 +702,7 @@
       openChannel(id);
     });
     el.querySelector('#addch').onclick = addChannel;
+    const th = el.querySelector('#tohome'); if (th) th.onclick = () => { S.home = true; renderHome(); };
     el.querySelector('#inv').onclick = invite;
     el.querySelectorAll('[data-callbranch]').forEach((b) => b.onclick = () => Calls.start({ branch: b.dataset.callbranch }));
     const dp = el.querySelector('#dial'); if (dp) dp.onclick = dialPad;
@@ -1027,6 +1094,7 @@
       const s = await api.session();
       if (!s) return gate(params.has('signup') ? 'up' : 'in');
       S.user = s.user;
+      S.home = !DEMO && !/Electron/.test(navigator.userAgent) && !params.has('chat');
       const lv = await api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' }));
       S.aal = lv.currentLevel;
       if (lv.nextLevel === 'aal2' && lv.currentLevel !== 'aal2') return codeScreen();
