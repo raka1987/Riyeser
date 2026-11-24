@@ -498,10 +498,26 @@ function demoNote(msg) {
   const box = $('#demonote'); box.hidden = !msg;
   box.innerHTML = msg ? `<span style="font-size:24px">🧪</span><div class="grow"><b>Practice data not put away yet</b><div class="lbl">${esc(msg)}</div></div><button class="go" data-demo="retry">Try again</button>` : '';
 }
+// A plain yes/no box with real button words (not the browser's OK/Cancel). Resolves true only for the yes button.
+function askConfirm({ title, body, ok, cancel = 'Cancel' }) {
+  return new Promise((resolve) => {
+    const d = document.createElement('dialog'); d.className = 'licdlg askdlg';
+    d.innerHTML = `<div class="askbody"><h2>${esc(title)}</h2><p>${esc(body)}</p>
+      <div class="wrow"><button class="btn s" value="no">${esc(cancel)}</button><button class="btn" value="yes">${esc(ok)}</button></div></div>`;
+    let answer = false;
+    d.addEventListener('click', (e) => { const b = e.target.closest('button[value]'); if (b) { answer = b.value === 'yes'; d.close(); } });
+    d.addEventListener('close', () => { d.remove(); resolve(answer); });
+    document.body.appendChild(d); d.showModal(); d.querySelector('button[value="no"]').focus();   // Enter on its own never says yes
+  });
+}
+// Demo mode only ever starts here, after "Turn on demo mode?" is answered yes. true when it was turned on.
 async function startDemo() {
-  await bridge.call('demo:start');
+  const T = window.RiyeserDemo.TEXT;
+  if (!(await askConfirm({ title: T.confirmTitle, body: T.confirmBody, ok: T.confirmOk, cancel: T.confirmCancel }))) return false;
+  await bridge.call('demo:start', { confirmed: true });
   await loadDemo(); await safe(refresh);
   toast(`Demo mode is on. Open any program to explore ${window.RiyeserDemo.BUSINESS}.`);
+  return true;
 }
 async function leaveDemo(retry) {
   const r = await bridge.call('demo:leave');
@@ -512,11 +528,11 @@ async function leaveDemo(retry) {
   // never set up a company: offer the normal set-up now
   if (r.neverSetUp && !retry && window.RiyeserCompany) window.RiyeserCompany.offerSetup();
 }
-window.RiyeserCentralDemo = { startDemo, loadDemo, state: () => demoState };
+window.RiyeserCentralDemo = { startDemo, loadDemo, askConfirm, state: () => demoState };
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-demo]'); if (!b) return;
   const a = b.dataset.demo; const T = window.RiyeserDemo.TEXT;
-  if (a === 'try') { if (confirm(T.confirmTry)) safe(startDemo); }
+  if (a === 'try') safe(startDemo);
   if (a === 'leave') { if (confirm(T.confirmLeave)) safe(() => leaveDemo(false)); }
   if (a === 'retry') safe(() => leaveDemo(true));
 });

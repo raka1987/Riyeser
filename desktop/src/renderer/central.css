@@ -205,7 +205,7 @@ h2.sec { font-size: 13px; font-weight: 700; color: var(--muted); text-transform:
 .demobar { display: flex; align-items: center; gap: 14px; height: 40px; box-sizing: border-box; padding: 0 16px; background: #ffd84d; color: #3a2c00; border-bottom: 1px solid #e0b800; font-size: 13.5px; }
 .demobar[hidden] { display: none; }
 .demobar .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.demobar .demo-leave { border: 1px solid #8a6d00; background: #fff6cc; color: #3a2c00; border-radius: 8px; padding: 4px 12px; font-weight: 600; cursor: pointer; }
+.demobar .demo-leave { flex-shrink: 0; white-space: nowrap; border: 1px solid #8a6d00; background: #fff6cc; color: #3a2c00; border-radius: 8px; padding: 4px 12px; font-weight: 600; cursor: pointer; }
 .demobar .demo-leave:hover { background: #fff; }
 body.demo .app { height: calc(100vh - 40px); }
 .wchoices.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -235,3 +235,25 @@ body.demo .app { height: calc(100vh - 40px); }
 .setbody { padding: 12px 22px 22px; }
 .setrow { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; } .setrow input { margin-top: 3px; width: 16px; height: 16px; }
 .setrow small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+
+/* narrow windows: the banner text shrinks (and is cut short) so "Leave demo mode" always shows in full */
+@media (max-width: 640px) { .demobar { gap: 8px; padding: 0 10px; font-size: 12px; } .demobar .demo-leave { padding: 3px 9px; font-size: 12px; } }
+
+/* sign-in form: the eye button, Caps Lock warning and "Forgot password?" */
+.pwwrap, .wf .pwwrap { position: relative; display: block; margin: 0; font-weight: 400; } .pwwrap input { padding-right: 46px; }
+.pweye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 38px; height: 34px; border: 0; border-radius: 8px; background: none; font-size: 17px; opacity: .55; cursor: pointer; }
+.pweye:hover, .pweye.on { opacity: 1; background: var(--accent-soft); }
+.wcaps { margin: -4px 0 10px; color: #b45309; font-size: 13px; font-weight: 600; } .wcaps[hidden] { display: none; }
+.wforgot { margin: -4px 0 6px; font-size: 13.5px; }
+#wf-msg[hidden] { display: none; }
+
+/* first-run: "Start blank" is the big choice; demo is a smaller one under it */
+.wbig.wprimary { padding: 22px; background: var(--accent-soft); } .wbig.wprimary b { font-size: 17px; }
+.wsecond { margin-top: 14px; } .wsecond .wbig { width: 100%; box-sizing: border-box; border-width: 1px; }
+
+/* Company page while signed out */
+.coout { text-align: center; padding: 36px 22px; } .coout > h3 { display: block; margin: 6px 0; padding: 0; font-size: 20px; } .coout p { color: var(--muted); margin: 0 0 16px; }
+.coout .row { justify-content: center; } .btn.big { padding: 12px 30px; font-size: 15px; }
+
+/* yes/no questions (askConfirm) */
+.askbody { padding: 22px 24px 20px; } .askbody h2 { margin: 0 0 8px; font-size: 19px; } .askbody p { margin: 0 0 16px; color: var(--muted); line-height: 1.5; }

@@ -14,6 +14,7 @@ const { upcomingMeetings } = require('./core/calendar');
 const sources = require('./central/sources');
 const online = require('./core/online');
 const demo = require('./central/demo');
+const demoUi = require('./renderer/demo-ui');
 const checklist = require('./central/checklist');
 const freshstart = require('./central/freshstart');
 
@@ -329,7 +330,9 @@ function registerIpc() {
     const setup = store.get('company-setup', {}) || {};
     const s = on.session;
     return { company: online.readCompany(appData), onlineReady: await on.ready(), signedIn: s ? s.user.email : null,
-      pendingJoin: setup.pendingJoin || null, skipped: !!setup.skipped, unlinked: !!setup.unlinked };
+      pendingJoin: setup.pendingJoin || null, skipped: !!setup.skipped, unlinked: !!setup.unlinked,
+      // signed out on purpose (company.json put away): the Company page asks to sign in, and the first-run choice isn't shown
+      signedOut: !!setup.signedOut && !s, lastEmail: on.lastEmail() };
   };
   refreshOnlineLicence = async (force) => {
     const last = store.get('licence-online-at', 0) || 0;
@@ -342,7 +345,13 @@ function registerIpc() {
   setInterval(() => refreshOnlineLicence(false), 6 * 3600 * 1000);
   handle('company:get', () => companyState());
   handle('company:signIn', (email, password, create) => on.signIn(String(email || '').trim(), String(password || ''), !!create));
-  handle('company:signOut', () => { on.signOut(); return true; });
+  handle('company:recover', (email) => on.recover(email));
+  // "Sign out" on the Company page: company.json and licence.json's online part are put away (renamed, never deleted)
+  handle('company:signOut', () => {
+    const r = on.signOutOfPC();
+    if (win && !win.isDestroyed()) win.webContents.send('licence-changed', true);
+    return r;
+  });
   handle('company:create', (profile, yourName) => on.createCompany(profile || {}, yourName));
   // After signing in with a Riyeser account: link to its business (one), let them pick (several), or the details form (none)
   const linked = (r) => { if (r && r.company && win && !win.isDestroyed()) win.webContents.send('licence-changed', true); return r; };
@@ -356,9 +365,13 @@ function registerIpc() {
   handle('company:skip', () => { store.update('company-setup', {}, (o) => ({ ...(o || {}), skipped: true })); return true; });
   handle('company:copy', (text) => { clipboard.writeText(String(text || '')); return true; });
   // ---------- demo mode (%APPDATA%\Riyeser\demo.json; every program reads it when it starts) ----------
-  const neverSetUp = () => { const setup = store.get('company-setup', {}) || {}; return !online.readCompany(appData) && !setup.skipped; };
+  const neverSetUp = () => { const setup = store.get('company-setup', {}) || {}; return !online.readCompany(appData) && !setup.skipped && !setup.signedOut; };
   handle('demo:get', () => ({ on: demo.isOn(appData), business: demo.BUSINESS, neverSetUp: neverSetUp() }));
-  handle('demo:start', () => { demo.start(appData); return { on: true, business: demo.BUSINESS }; });
+  // Only after the person said yes to "Turn on demo mode?" (the renderer sends { confirmed: true }).
+  handle('demo:start', (opts) => {
+    if (!demoUi.startAllowed(opts)) throw new Error('Demo mode wasn\'t turned on. Choose Try demo mode, then Turn on demo mode.');
+    demo.start(appData); return { on: true, business: demo.BUSINESS };
+  });
   handle('demo:leave', () => ({ ...demo.leave({ appData }), on: false, neverSetUp: neverSetUp() }));
   try { demo.tidy({ appData }); } catch { /* tried again next start */ }
   // Was this PC unlinked by an admin? Checked once a day; the company file and all data stay as they are.

@@ -3,7 +3,7 @@
 // request), or set this PC up on its own. Afterwards, the Company page shows the profile and Company ID.
 // The profile is saved in %APPDATA%\Riyeser\company.json, so every Riyeser program fills in the company details itself.
 /* global $, esc, bridge, toast, safe, setView, renderNav */
-const CO = { first: false, list: null, details: null, state: null, mode: null, screen: 'choice', create: false, poll: null, busy: false, err: '', note: '', last: null };
+const CO = { first: false, fromCompany: false, email: '', list: null, details: null, state: null, mode: null, screen: 'choice', create: false, poll: null, busy: false, err: '', note: '', last: null };
 const COUNTRIES = ['Fiji', 'Australia', 'New Zealand', 'Samoa', 'Tonga', 'Vanuatu', 'Papua New Guinea', 'Solomon Islands', 'Other'];
 const field = (n, label, v = '', extra = '') => `<label class="wf"><span>${label}</span><input name="${n}" value="${esc(v)}" ${extra}></label>`;
 const profileFields = (p = {}) => `<div class="wgrid">
@@ -15,7 +15,10 @@ const profileFields = (p = {}) => `<div class="wgrid">
   ${field('phone', 'Phone', p.phone, 'maxlength="40" autocomplete="tel"')}
   ${field('email', 'Business email', p.email, 'type="email" maxlength="120" autocomplete="email"')}
 </div>`;
-const formData = (f) => Object.fromEntries([...new FormData(f).entries()].map(([k, v]) => [k, String(v).trim()]));
+// Passwords are sent exactly as typed (a space at the end is part of a password); everything else is trimmed.
+const formData = (f) => Object.fromEntries([...new FormData(f).entries()].map(([k, v]) => [k, /^password/.test(k) ? String(v) : String(v).trim()]));
+// A password box with an eye button to see what was typed, and a Caps Lock warning under it.
+const pwField = (n, label, auto) => `<label class="wf"><span>${label}</span><span class="pwwrap"><input name="${n}" type="password" minlength="8" required autocomplete="${auto}" spellcheck="false"><button type="button" class="pweye" data-pweye aria-label="Show password" title="Show password">👁</button></span></label>`;
 
 async function coLoad() { CO.state = await bridge.call('company:get'); return CO.state; }
 
@@ -52,20 +55,47 @@ function showChoice() {
 }
 
 // next: 'signin' (then the account's business is found) or 'join' (then the code form)
+const typedEmail = () => (CO.email || (CO.state && CO.state.lastEmail) || '');
 function showAccount(next) {
   CO.mode = next; CO.screen = 'account';
   if (CO.state.signedIn) return next === 'join' ? showJoinForm() : findBusiness();
-  wiz(`<h1>${CO.create ? 'Create your free Riyeser account' : 'Sign in with your Riyeser account'}</h1>
-    <p class="wsub">${CO.create ? 'You can use it on riyeser.com and in every Riyeser program.' : 'Use the same email and password as riyeser.com.'}</p>
-    <form id="wf-acc">${field('email', 'Email', '', 'type="email" required autocomplete="email"')}
-      <label class="wf"><span>Password</span><input name="password" type="password" minlength="8" required autocomplete="${CO.create ? 'new-password' : 'current-password'}"></label>
-      <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">${CO.create ? 'Create account' : 'Sign in'}</button></div></form>
-    <p class="wfoot">${CO.create ? 'Already have an account? <button class="wlink" data-w="signin-form">Sign in</button>' : 'Don\'t have one? <button class="wlink" data-w="signup-form">Create a free account</button>'}</p>`);
-  $('#wf-acc').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); run(async () => {
-    const r = await bridge.call('company:signIn', f.email, f.password, CO.create);
-    if (r && r.needsConfirm) { CO.create = false; CO.note = `Nearly there: open the link we emailed to ${f.email}, then sign in here.`; return showAccount(next); }
-    await coLoad(); return next === 'join' ? showJoinForm() : findBusiness();
-  }); };
+  const make = CO.create;
+  wiz(`<h1>${make ? 'Create your free Riyeser account' : 'Sign in with your Riyeser account'}</h1>
+    <p class="wsub">${make ? 'You can use it on riyeser.com and in every Riyeser program.' : 'Use the same email and password as riyeser.com.'}</p>
+    <form id="wf-acc" autocomplete="on">${field('email', 'Email', make ? CO.email : typedEmail(), 'type="email" required autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="200"')}
+      ${pwField('password', make ? 'Choose a password (at least 8 characters)' : 'Password', make ? 'new-password' : 'current-password')}
+      ${make ? pwField('password2', 'Type the password again', 'new-password') : ''}
+      <p class="wcaps" hidden>Caps Lock is on</p>
+      <div class="werr" id="wf-msg" hidden></div>
+      ${make ? '' : '<p class="wforgot"><button type="button" class="wlink" data-w="forgot">Forgot password?</button></p>'}
+      <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">${make ? 'Create account' : 'Sign in'}</button></div></form>
+    <p class="wfoot">${make ? 'Already have an account? <button class="wlink" data-w="signin-form">Sign in</button>' : 'Don\'t have one? <button class="wlink" data-w="signup-form">Create a free account</button>'}</p>`);
+  const form = $('#wf-acc');
+  // the email box gets the focus when it's empty, else the password (the email is remembered from last time)
+  (form.email.value ? form.password : form.email).focus();
+  form.onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); CO.email = f.email;
+    if (make && f.password !== f.password2) { const m = $('#wf-msg'); m.textContent = 'The two passwords don\'t match. Type them again.'; m.hidden = false; form.password2.focus(); return; }
+    run(async () => {
+      const r = await bridge.call('company:signIn', f.email, f.password, make);
+      if (r && r.needsConfirm) { CO.create = false; CO.note = `Nearly there: open the link we emailed to ${f.email}, then sign in here.`; return showAccount(next); }
+      await coLoad(); return next === 'join' ? showJoinForm() : findBusiness();
+    }); };
+}
+
+// "Forgot password?": Riyeser emails a reset link. The same words whether or not there's an account for that email.
+function showForgot() {
+  CO.screen = 'forgot';
+  wiz(`<h1>Reset your password</h1><p class="wsub">Type the email you use for Riyeser. We'll email you a link to choose a new password.</p>
+    <form id="wf-forgot">${field('email', 'Email', typedEmail(), 'type="email" required autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="200"')}
+      <div class="wrow"><button type="button" class="btn s" data-w="signin-form">Back</button><button class="btn">Send reset link</button></div></form>`);
+  $('#wf-forgot').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); CO.email = f.email; run(async () => {
+    await bridge.call('company:recover', f.email); showForgotSent(); }); };
+}
+function showForgotSent() {
+  CO.screen = 'forgot-sent';
+  wiz(`<div class="wdone">📧</div><h1>Check your email</h1>
+    <p class="wsub">If that email has a Riyeser account, we've sent a link to reset the password. Open it, choose a new password, then sign in here.</p>
+    <div class="wrow"><button class="btn" data-w="signin-form">Back to sign in</button></div>`);
 }
 
 // Signed in: one business -> linked straight away; several -> pick one; none -> "A few details".
@@ -173,6 +203,19 @@ function showLocal() {
     await bridge.call('company:local', f, f.your_name); await coLoad(); closeWizard(); toast(`${f.name} is set up on this PC.`); afterChange(); }); };
 }
 
+// "Sign out" on the Company page: asked first, then the business is put away on this PC (renamed, never deleted).
+async function signOut() {
+  const c = (CO.state && CO.state.company) || {};
+  const ok = await window.RiyeserCentralDemo.askConfirm({ title: 'Sign out of Riyeser on this PC?',
+    body: `This PC stops showing ${c.name || 'your business'} and its Company ID until someone signs in again. Your books and files on this PC aren't touched.`,
+    ok: 'Sign out', cancel: 'Cancel' });
+  if (!ok) return;
+  clearInterval(CO.poll); CO.poll = null; CO.list = null; CO.details = null; CO.last = null;
+  await bridge.call('company:signOut');
+  await coLoad(); afterChange();
+  toast('Signed out. This PC no longer shows your business.');
+}
+
 async function run(fn) {
   if (CO.busy) return; CO.busy = true;
   document.querySelectorAll('#wizard button').forEach((b) => { b.disabled = true; });
@@ -189,34 +232,62 @@ function rerender() {
   if (s === 'local') return showLocal();
   if (s === 'waiting') return showWaiting(CO.state.pendingJoin && CO.state.pendingJoin.company_name);
   if (s === 'start') return showStart();
+  if (s === 'forgot') return showForgot();
   return showChoice();
 }
+
+// The eye button: show or hide the password typed in the box next to it.
+document.addEventListener('click', (e) => {
+  const eye = e.target.closest('[data-pweye]'); if (!eye) return;
+  const input = eye.parentElement.querySelector('input'); const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  const t = show ? 'Hide password' : 'Show password'; eye.setAttribute('aria-label', t); eye.title = t; eye.classList.toggle('on', show);
+  input.focus();
+});
+// "Caps Lock is on" under the password boxes while it is.
+const capsCheck = (e) => {
+  if (!e.target.matches || !e.target.matches('#wizard input[name^=password]') || typeof e.getModifierState !== 'function') return;
+  const note = document.querySelector('#wizard .wcaps'); if (note) note.hidden = !e.getModifierState('CapsLock');
+};
+document.addEventListener('keydown', capsCheck); document.addEventListener('keyup', capsCheck);
 
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-w]'); if (!b || b.disabled) return;
   const a = b.dataset.w;
-  if (a === 'signin' || a === 'join') { CO.create = false; return showAccount(a); }
-  if (a === 'signup') { CO.create = true; return showAccount('signin'); }
+  if (a === 'signin' || a === 'join') { CO.create = false; CO.fromCompany = false; return showAccount(a); }
+  if (a === 'signup') { CO.create = true; CO.fromCompany = false; return showAccount('signin'); }
   if (a === 'pick') return run(async () => { const r = await bridge.call('company:link', b.dataset.ws); await coLoad(); showWelcome(r); });
   if (a === 'local') return showLocal();
   if (a === 'blank') return showChoice();
   if (a === 'start') return showStart();
-  if (a === 'demo') return run(async () => { closeWizard(); CO.first = false; await window.RiyeserCentralDemo.startDemo(); });
-  if (a === 'signup-form' || a === 'signin-form') { CO.create = a === 'signup-form'; return showAccount(CO.mode); }
-  if (a === 'back') return showChoice();
+  // demo mode only after "Turn on demo mode?" is answered yes; Cancel stays on this step
+  if (a === 'demo') return run(async () => { if (await window.RiyeserCentralDemo.startDemo()) { closeWizard(); CO.first = false; } });
+  if (a === 'signup-form' || a === 'signin-form') { CO.create = a === 'signup-form'; return showAccount(CO.mode || 'signin'); }
+  if (a === 'forgot') { const em = document.querySelector('#wf-acc [name=email]'); if (em && em.value.trim()) CO.email = em.value.trim(); return showForgot(); }
+  // from the Company page's "You're signed out", Back goes back there (not to the set-up choices)
+  if (a === 'back') { if (CO.fromCompany) { closeWizard(); return; } return showChoice(); }
   if (a === 'copy') { const t = ($('#wid') || $('#coid') || {}).textContent; safe(() => bridge.call('company:copy', t)).then(() => toast('Company ID copied')); return; }
   if (a === 'check') return checkJoin(false);
   if (a === 'cancel-join') return run(async () => { await bridge.call('company:cancelJoin'); await coLoad(); showJoinForm(); });
   if (a === 'later') { safe(() => bridge.call('company:skip')); closeWizard(); return; }
   if (a === 'done') { closeWizard(); afterChange(); return; }
-  if (a === 'restart') { coLoad().then(showChoice); return; }
-  if (a === 'link') { coLoad().then(() => (CO.state.onlineReady ? showAccount('signin') : (CO.err = 'Online company linking is being switched on. Try again soon.', showChoice()))); return; }
-  if (a === 'signout') { safe(async () => { await bridge.call('company:signOut'); await coLoad(); renderCompany(); toast('Signed out of Riyeser Online on this PC.'); }); }
+  if (a === 'restart') { CO.fromCompany = false; coLoad().then(showChoice); return; }
+  if (a === 'link' || a === 'co-signup') {
+    CO.fromCompany = !!b.closest('#companyv'); CO.create = a === 'co-signup';
+    coLoad().then(() => (CO.state.onlineReady ? showAccount('signin') : (CO.err = 'Online company linking is being switched on. Try again soon.', showChoice()))); return;
+  }
+  if (a === 'signout') { safe(signOut); }
 });
 
 // ---------------------------------------------------------------- Company page and the "unlinked" note
 function renderCompany() {
   const s = CO.state || {}; const c = s.company; const el = $('#companyv');
+  if (!c && s.signedOut) {   // signed out on purpose: nothing of the old business is shown
+    el.innerHTML = `<h2 class="sec">Company</h2><div class="panel cobox coout"><span class="cologo">🔒</span><h3>You're signed out.</h3>
+      <p>Sign in with your Riyeser account to see your business on this PC.</p>
+      <div class="row"><button class="btn big" data-w="link">Sign in</button><button class="btn s" data-w="co-signup">Create a free account</button></div></div>`;
+    return;
+  }
   if (!c) {
     el.innerHTML = `<h2 class="sec">Company</h2><div class="panel cobox"><p>This PC isn't set up with a business yet.</p><div class="row"><button class="btn" data-w="restart">Set up or join a business</button></div></div>`;
     return;
@@ -227,7 +298,9 @@ function renderCompany() {
       <div class="cohead"><span class="cologo">🏢</span><div><h3>${esc(c.name)}</h3><div class="lbl">${c.mode === 'online' ? `Linked online${s.signedIn ? ` · signed in as ${esc(s.signedIn)}` : ''}` : 'Set up on this PC only'}</div></div></div>
       ${c.company_code ? `<div class="wid sm"><span id="coid">${esc(c.company_code)}</span><button class="btn" data-w="copy">Copy</button></div><p class="lbl">Give this Company ID to staff and branches. They choose <b>Join an existing company</b> in Riyeser Central, and you approve them in Riyeser Link.</p>` : ''}
       <div class="kvs">${row('Legal name', c.legal_name)}${row('ABN / tax number', c.tax_number)}${row('Address', c.address)}${row('Phone', c.phone)}${row('Email', c.email)}${row('Country', c.country)}${row('You', c.your_name)}</div>
+      ${c.mode === 'online' && !s.signedIn ? '<p class="wnote">You\'re not signed in on this PC any more. Sign in again to keep your plan and team up to date.</p>' : ''}
       <div class="row">${c.mode !== 'online' ? '<button class="btn" data-w="link">Sign in with your Riyeser account</button><button class="btn s" data-w="local">Edit details</button>' : ''}
+        ${c.mode === 'online' && !s.signedIn ? '<button class="btn" data-w="link">Sign in again</button>' : ''}
         ${s.signedIn ? '<button class="btn s" data-w="signout">Sign out</button>' : ''}<button class="btn s" data-w="restart">Use a different company</button></div>
       <p class="lbl">Changing company never deletes anything: your books, files and settings on this PC stay where they are.</p>
     </div>`;
@@ -241,7 +314,7 @@ function renderCoBar() {
 function afterChange() { renderCompany(); renderCoBar(); if (typeof renderNav === 'function') renderNav(); }
 
 // After leaving demo mode, for someone who never set up a company: the normal set-up.
-async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state.skipped && !CO.state.pendingJoin) { CO.first = false; showChoice(); } }
+async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state.skipped && !CO.state.pendingJoin && !CO.state.signedOut) { CO.first = false; showChoice(); } }
 
 // On start: the wizard the first time (it starts with "How would you like to start?"), or the waiting screen if a
 // request is still out. Nothing is asked while demo mode is on, or once the company is set up.
@@ -253,6 +326,7 @@ async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state
     const first = window.RiyeserDemo.firstScreen(s, demo);
     if (first === 'waiting') { showWaiting(s.pendingJoin.company_name); checkJoin(true); }
     else if (first === 'start') { CO.first = true; showStart(); }
+    else if (first === 'signedout') { if (typeof setView === 'function') setView('company'); }   // never the first-run choice again
     else if (s.company && s.company.mode === 'online') { await bridge.call('company:checkLinked').catch(() => null); await coLoad(); renderCoBar(); }
   } catch { /* the rest of Central works without it */ }
   setInterval(async () => { try { await bridge.call('company:checkLinked'); await coLoad(); renderCoBar(); } catch { /* offline */ } }, 24 * 3600 * 1000);

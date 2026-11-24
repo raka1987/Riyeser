@@ -12,6 +12,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const CONFIG_URL = 'https://riyeser.com/link/config.js';
+const RECOVER_REDIRECT = 'https://riyeser.com/link/';
 const PROFILE_KEYS = ['name', 'legal_name', 'tax_number', 'address', 'phone', 'email', 'country'];
 
 /** {url, key} from the text of config.js; empty strings when it isn't set up yet. */
@@ -51,7 +52,7 @@ function plain(status, body) {
   if (/password should be/i.test(m)) return 'Choose a password of at least 8 characters.';
   if (/signups not allowed/i.test(m)) return 'New Riyeser accounts aren\'t open yet.';
   if (m) return m.replace(/^.*?:\s*(?=[A-Z])/, '');
-  return status ? `Riyeser Online answered with an error (${status}). Please try again.` : 'Can\'t reach Riyeser Online. Check the internet connection.';
+  return status ? `Riyeser Online answered with an error (${status}). Please try again.` : 'Can\'t reach Riyeser. Check your internet and try again.';
 }
 
 const firstName = (name, email) => String(name || '').trim().split(/\s+/)[0] || String(email || '').split('@')[0] || '';
@@ -121,7 +122,11 @@ class Online {
       .catch((e) => { if (e.status === 400 || e.status === 401) this.setSession(null); throw new Error('Please sign in again.'); });
     this.setSession(fresh); return fresh.access_token;
   }
+  /** The email last used to sign in here, to fill in the form next time. The password is never kept. */
+  lastEmail() { const v = this.store.get('last-email', null); return (v && typeof v.email === 'string') ? v.email : ''; }
+  rememberEmail(email) { this.store.set('last-email', { email: String(email || '').trim().slice(0, 200) }); }
   async signIn(email, password, create = false) {
+    this.rememberEmail(email);
     if (create) {
       const r = await this.call('/auth/v1/signup', { method: 'POST', auth: false, body: { email, password } });
       if (!r || !r.access_token) return { needsConfirm: true, email };
@@ -130,7 +135,46 @@ class Online {
     const r = await this.call('/auth/v1/token?grant_type=password', { method: 'POST', auth: false, body: { email, password } });
     this.setSession(r); return { email };
   }
+  /** Just the session (Riyeser Link Office uses this too). Central's "Sign out" is signOutOfPC below. */
   signOut() { this.setSession(null); }
+  /** "Forgot password?": Supabase emails a reset link. Same answer whether or not the account exists. */
+  async recover(email) {
+    email = String(email || '').trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter the email you use for your Riyeser account.');
+    await this.call(`/auth/v1/recover?redirect_to=${encodeURIComponent(RECOVER_REDIRECT)}`, { method: 'POST', auth: false, body: { email } })
+      .catch((e) => {
+        if (e.status === 429) throw new Error('Too many tries. Wait a few minutes, then try again.');
+        if (!e.status || e.status >= 500) throw e;   // offline, or the service is down
+      });   // any other answer (e.g. no such account): the same message, so nobody learns who has an account
+    return true;
+  }
+  /**
+   * Central's "Sign out": this PC stops showing the business until someone signs in again. Nothing is deleted:
+   * company.json (an online company's) is renamed company.signed-out.json, and licence.json's "online" part is moved
+   * to "online_signed_out", so every program reads this PC as not linked. Local books and files aren't touched.
+   */
+  signOutOfPC(now = Date.now()) {
+    this.setSession(null);
+    const out = { company: null, licence: false };
+    const f = companyFile(this.appData);
+    const c = readCompany(this.appData);
+    if (c && c.mode === 'online') {
+      const to = path.join(path.dirname(f), 'company.signed-out.json');
+      fs.renameSync(f, to); out.company = to;
+    }
+    const licence = require('./licence');
+    const lf = licence.licenceFile(this.appData);
+    const d = licence.read(this.appData);
+    if (d && d.online) {
+      d.online_signed_out = { ...d.online, signed_out_at: new Date(now).toISOString() };
+      delete d.online;
+      fs.writeFileSync(`${lf}.tmp`, JSON.stringify(d, null, 2)); fs.renameSync(`${lf}.tmp`, lf);
+      out.licence = true;
+    }
+    this.store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null, unlinked: false, signedOut: true }));
+    this.store.set('licence-online-at', 0);
+    return out;
+  }
   rpc(name, args) { return this.call(`/rest/v1/rpc/${name}`, { method: 'POST', body: args || {} }); }
 
   // ---------- this PC ----------
@@ -169,7 +213,7 @@ class Online {
     const out = writeCompany(this.appData, { mode: 'online', company_code: r.company_code, workspace_id: r.workspace_id, ...profile, your_name: yourName,
       email_signed_in: this.session && this.session.user.email, linked_at: new Date().toISOString() });
     await this.linkDevice(r.workspace_id).catch(() => {});
-    this.store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null, skipped: false }));
+    this.store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null, skipped: false, signedOut: false }));
     return out;
   }
   async requestJoin(code, yourName, note) {
@@ -229,7 +273,7 @@ class Online {
       tax_number: w.tax_number, address: w.address, phone: w.phone, email: w.email, country: w.country, your_name: row.display_name || yourName,
       email_signed_in: this.session.user.email, linked_at: new Date().toISOString() });
     await this.linkDevice(w.id).catch(() => {});
-    this.store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null, skipped: false }));
+    this.store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null, skipped: false, signedOut: false }));
     return out;
   }
   // ---------- what the person chose in Central, kept with their Riyeser account (user metadata riyeser_prefs) ----------
@@ -260,9 +304,9 @@ class Online {
 
   setupLocal(profile, yourName) {
     const out = writeCompany(this.appData, { ...profile, your_name: yourName || '', mode: 'local', company_code: '', workspace_id: '' });
-    this.store.update('company-setup', {}, (o) => ({ ...(o || {}), skipped: false }));
+    this.store.update('company-setup', {}, (o) => ({ ...(o || {}), skipped: false, signedOut: false }));
     return out;
   }
 }
 
-module.exports = { Online, signupDetails, detailsToProfile, firstName, parseConfig, usable, companyFile, readCompany, writeCompany, CONFIG_URL, PROFILE_KEYS };
+module.exports = { Online, signupDetails, detailsToProfile, firstName, parseConfig, usable, companyFile, readCompany, writeCompany, CONFIG_URL, PROFILE_KEYS, RECOVER_REDIRECT };
