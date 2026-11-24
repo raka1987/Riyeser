@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 TRIAL_DAYS = 90
 OFFLINE_GRACE_DAYS = 30
 BUY_URL = "https://riyeser.com/pricing.html"
-EXTRA_COMPANY_PRICE = 10  # dollars a month for each company after the first
+EXTRA_COMPANY_PRICE = 10  # US dollars a month for each company after the first
 
 
 def licence_file():

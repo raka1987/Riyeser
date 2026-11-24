@@ -4,11 +4,11 @@
 <div class="head"><div><h1>{{ editions.basic.title }} or {{ editions.enterprise.title }}</h1>
 <p class="sub">You're using <b>{{ editions[here].app }}</b>. Both open the same company files, so moving up or down never loses anything.</p></div></div>
 <div class="eds">
-  <div class="card ed ed-basic{{ ' here' if here == 'basic' }}"><div class="edlogo">B</div><h2>{{ editions.basic.title }}</h2><p class="edprice">Free for 90 days, then $20 a month per business</p>
+  <div class="card ed ed-basic{{ ' here' if here == 'basic' }}"><div class="edlogo">B</div><h2>{{ editions.basic.title }}</h2><p class="edprice">Free for 90 days, then {{ prices.basic }} a month per business</p>
     <ul><li>Quotes, invoices and receiving payments</li><li>Customers, suppliers and bills</li><li>Stock items, stocktake and reorder alerts</li>
     <li>Simple money in and money out</li><li>Till sales from Riyeser POS show as paid invoices</li><li>Profit &amp; Loss, GST summary, who owes you, sales and stock reports</li></ul>
     {% if here == 'basic' %}<p class="youare">✓ This is what you're using</p>{% endif %}</div>
-  <div class="card ed ed-plus{{ ' here' if here != 'basic' }}"><div class="edlogo">P</div><h2>{{ editions.enterprise.title }}</h2><p class="edprice">Free for 90 days, then +$20 a month</p>
+  <div class="card ed ed-plus{{ ' here' if here != 'basic' }}"><div class="edlogo">P</div><h2>{{ editions.enterprise.title }}</h2><p class="edprice">Free for 90 days, then {{ prices.plus }} a month per business, instead of Basics</p>
     <ul><li>Everything in {{ editions.basic.title }}</li><li>Bank reconciliation and bank statement import</li><li>Payroll and pay runs</li>
     <li>General journal and search transactions</li><li>Jobs and budgets</li><li>Balance Sheet, Trial Balance and every report</li></ul>
     {% if here != 'basic' %}<p class="youare">✓ This is what you're using</p>{% endif %}</div>

@@ -2,10 +2,10 @@
 
 Five separate apps are built from this one code base. All of them open the same company files:
   * Riyeser Invoices (free forever)                 -> APP_EDITION = "invoices"
-  * Riyeser Bookings (90 days free, then +$20)     -> APP_EDITION = "bookings"
-  * Riyeser Accounting Basics ($20 a month)    -> APP_EDITION = "basic"
-  * Riyeser Accounting Plus (licence)             -> APP_EDITION = "enterprise"
-  * Riyeser POS (90 days free, then +$20 a month)                  -> APP_EDITION = "pos"
+  * Riyeser Bookings (90 days free, then US$25 a month)-> APP_EDITION = "bookings"
+  * Riyeser Accounting Basics (US$25 a month)    -> APP_EDITION = "basic"
+  * Riyeser Accounting Plus (US$39 a month)       -> APP_EDITION = "enterprise"
+  * Riyeser POS (90 days free, then US$29 a month)-> APP_EDITION = "pos"
 packaging/build_desktop.py --edition basics|plus|pos|invoices|bookings writes riyeser/_built_edition.py into the build. Run from source
 (or `pip install`) there is no built edition, so APP_EDITION is None: each company picks Basic or Plus under Setup
 and the till is there too. RIYESER_APP_EDITION=basics|plus|pos|invoices|bookings overrides it (handy for testing). Switching app never

@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.9.0"
+__version__ = "2.9.1"
 
 
 def create_app(test_config=None):
@@ -166,7 +166,7 @@ def create_app(test_config=None):
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
                     can=lambda area, need=1: perms.can(area, need), lv=lambda area: perms.level(area),
-                    report_area=perms.report_area)
+                    report_area=perms.report_area, prices=dbmod.PRICES)
 
     @app.errorhandler(403)
     def forbidden(_e):

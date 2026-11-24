@@ -225,10 +225,24 @@ history, which can't be changed or deleted. Write reasons without personal detai
 - **Close as duplicate:** for a business that signed up twice. Choose the business to keep. The panel links to it.
 - **Give a free period:** see "Free periods and approvals".
 
+## Prices (US dollars)
+
+All Riyeser prices are in US dollars, per business per month. Each paid program includes 3 users; each extra user is
+US$5 a month for that program. Accounting Basics US$25, Accounting Plus US$39 (it includes Basics, so a business pays
+for one or the other), Payroll US$25, POS US$29, Bookings US$25, Riyeser Link Plus US$39, As Built US$29. Extra
+companies in Accounting US$10 each. Yearly = 10 months. Early bird = half the program and user amounts for 12 months.
+Riyeser Link chat files: 2 GB per business free, 20 GB with Link Plus, plus any extra granted in HQ (customer page →
+Programs → File storage → **Grant extra storage**, with a reason; needs "Manage licences").
+
+To change a price, change it in all of these, then re-run `website/team/team-chat.sql` and publish the website:
+`riyeser_price()` in `website/team/team-chat.sql` (HQ's estimates), `website/prices.mjs` (the website),
+`PRICE` in `website/hq/hq.js` (the HQ demo), `PRICE_LINK_PLUS` in `website/team/team.js`, `PRICE_USD` in
+`riyeser/db.py` (Accounting's screens) and the licence text in `desktop/src/renderer/central.js`.
+
 ## Refunds
 
 Owners and admins (with two-step sign-in) can ask for a refund from their Riyeser home page: what it's for, the
-period, the amount and currency (FJD, AUD, NZD or USD), and why. This also opens a billing help request for the
+period, the amount and the currency it was paid in (USD by default; FJD, AUD or NZD if that's what was paid), and why. This also opens a billing help request for the
 conversation. Support staff can enter one for a customer from their ticket.
 
 In HQ → **Refunds**, with filters for New, Reviewing, Waiting for second approval, Approved – to pay, Paid and Declined:
@@ -238,7 +252,7 @@ In HQ → **Refunds**, with filters for New, Reviewing, Waiting for second appro
    just the website. The HQ owner can change the threshold in HQ team → HQ settings.
 3. **Mark as paid** with how it was paid (card refund, bank transfer, M-PAiSA or credit on account) and the reference.
    **Real card refunds come in phase 2** with the payment provider. For now, do the refund by hand (bank or card
-   terminal), then record it here. Credit on account shows on the company panel as "Credit: FJD …".
+   terminal), then record it here. Credit on account shows on the company panel as "Credit: USD …".
 
 Finance and owners can approve and pay. Support can see refunds and enter them for customers. The customer is emailed
 when it's received, decided and paid. Refund requests are never deleted.

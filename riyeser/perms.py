@@ -177,7 +177,7 @@ def check_request(db):
     name = dict((a, n) for a, n, _ in AREAS)[area]
     if g.get("over_allowance") and need > VIEW:
         return ("This company is read-only: your plan includes fewer companies. "
-                "Extra companies are $10 a month each — add them in Riyeser Central.")
+                "Extra companies are US$10 a month each — add them in Riyeser Central.")
     if have == HIDDEN:
         return f"{name} isn't available for your user."
     if need == FULL:

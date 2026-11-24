@@ -1,7 +1,8 @@
 """Free for 90 days, then a subscription.
 
 Riyeser pricing (riyeser.com/pricing.html): every paid program — Riyeser Accounting Basics, Accounting Plus, Riyeser POS,
-Payroll and As Built — is free for 90 days with no card, then $20 a month per business (Basics) or +$20 a month each.
+Payroll and As Built — is free for 90 days with no card, then one price per business per month in US dollars, with 3 users
+included (Basics US$25, Plus US$39, POS US$29, Bookings US$25, Payroll US$25; see PRICE_USD in riyeser/db.py).
 The trial and the licence are kept by Riyeser Central in licence.json (see riyeser/licence.py).
 
 When the trial ends without a licence, nothing is deleted or hidden. Only the paid actions stop (a new till sale, a new

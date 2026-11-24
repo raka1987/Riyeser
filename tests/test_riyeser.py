@@ -722,3 +722,14 @@ def test_pos_open_and_close_till(client, app):
         assert sh["status"] == "closed" and sh["variance"] == -500 and sh["approval_id"] == a["approval_id"]
         assert L.balances(db)[linked(db, "cash_over_short")] == 500  # $5 expense
         assert trial_balance_ok(db)
+
+
+def test_prices_are_in_us_dollars(client):
+    # One price list (riyeser/db.py PRICE_USD), in US dollars a month per business; no old "+$20" add-on wording.
+    from riyeser.db import PRICE_USD, PRICES, EDITIONS
+    assert PRICE_USD["basic"] == 25 and PRICE_USD["plus"] == 39 and PRICE_USD["pos"] == 29 and PRICES["basic"] == "US$25"
+    assert EDITIONS["enterprise"]["price"] == "US$39 a month"
+    help_page = client.get("/help/").get_data(as_text=True)
+    assert "US$25 a month per business" in help_page and "US$39 a month" in help_page and "+$20" not in help_page
+    up = client.get("/editions").get_data(as_text=True)
+    assert "US$25 a month per business" in up and "US$39 a month per business" in up and "+$20" not in up

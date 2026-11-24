@@ -319,23 +319,29 @@ def migrate(db):
     db.commit()
 
 
+# Riyeser prices in one place: US dollars a month per business (the same as riyeser.com/pricing.html).
+# Each paid program includes 3 users; each extra user is US$5 a month for that program. Plus includes Basics.
+PRICE_USD = {"basic": 25, "plus": 39, "payroll": 25, "pos": 29, "bookings": 25, "calls": 39, "as_built": 29,
+             "extra_user": 5, "extra_company": 10}
+PRICES = {k: f"US${v}" for k, v in PRICE_USD.items()}   # for screens: {{ prices.basic }} -> "US$25"
+
 # Edition names in one place: change them here and every screen follows.
 #   name  = short name used in menus, settings and help ("Basic", "Enterprise")
 #   title = the product name in the app's logo
 #   app   = the full name of the separate Windows app (window title, installer, Start menu)
 EDITIONS = {
-    "basic": {"name": "Basics", "title": "Accounting Basics", "app": "Riyeser Accounting Basics", "price": "$20 a month"},
-    "enterprise": {"name": "Plus", "title": "Accounting Plus", "app": "Riyeser Accounting Plus", "price": "+$20 a month"},
+    "basic": {"name": "Basics", "title": "Accounting Basics", "app": "Riyeser Accounting Basics", "price": f"{PRICES['basic']} a month"},
+    "enterprise": {"name": "Plus", "title": "Accounting Plus", "app": "Riyeser Accounting Plus", "price": f"{PRICES['plus']} a month"},
 }
 
 # The third app built from this code base: the till on its own (see riyeser/edition.py).
-POS_APP = {"name": "POS", "title": "POS", "app": "Riyeser POS", "price": "+$20 a month"}
+POS_APP = {"name": "POS", "title": "POS", "app": "Riyeser POS", "price": f"{PRICES['pos']} a month"}
 
 # The fourth: free invoicing on its own. Same company file, so a business can move up to Accounting Basics any time.
 INVOICES_APP = {"name": "Invoices", "title": "Invoices", "app": "Riyeser Invoices", "price": "Free"}
 
 # The fifth: bookings and scheduling for trades jobs, appointments and restaurant tables.
-BOOKINGS_APP = {"name": "Bookings", "title": "Bookings", "app": "Riyeser Bookings", "price": "+$20 a month"}
+BOOKINGS_APP = {"name": "Bookings", "title": "Bookings", "app": "Riyeser Bookings", "price": f"{PRICES['bookings']} a month"}
 
 
 

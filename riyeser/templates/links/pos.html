@@ -6,7 +6,7 @@
   <div class="poslogo" aria-hidden="true">Po</div>
   <div style="flex:1;min-width:260px">
     <h2 style="margin:0 0 4px">{% if installed %}Riyeser POS is installed on this computer{% else %}Get Riyeser POS{% endif %}</h2>
-    <p class="muted" style="margin:0">A touch-friendly till for shops, cafes and restaurants: receipts, tables and kitchen dockets, manager approvals and close till. Free for 90 days, then +$20 a month.</p>
+    <p class="muted" style="margin:0">A touch-friendly till for shops, cafes and restaurants: receipts, tables and kitchen dockets, manager approvals and close till. Free for 90 days, then {{ prices.pos }} a month per business.</p>
   </div>
   <div class="actions">
     {% if installed %}<form method="post"><button class="btn pri">Open Riyeser POS</button></form>

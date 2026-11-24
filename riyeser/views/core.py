@@ -226,9 +226,9 @@ def _save_company():
                 int(f.get("next_bill_no") or 1), int(f.get("default_terms_days") or 30)))
     db.execute("UPDATE company SET auto_pdf=? WHERE id=1", (1 if f.get("auto_pdf") else 0,))
     if f.get("edition") == "enterprise" and not g.company["enterprise_allowed"]:
-        from ..db import EDITIONS
+        from ..db import EDITIONS, PRICES
         flash(f"{EDITIONS['enterprise']['name']} needs a Riyeser licence. Enter one in Riyeser Central, then switch "
-              f"here. {EDITIONS['basic']['name']} is $20 a month per business after the 90-day free trial.", "error")
+              f"here. {EDITIONS['basic']['name']} is {PRICES['basic']} a month per business after the 90-day free trial.", "error")
     elif f.get("edition") in ("basic", "enterprise"):
         db.execute("UPDATE company SET edition=? WHERE id=1", (f["edition"],))
     for key in [r["key"] for r in db.execute("SELECT key FROM linked_accounts")]:

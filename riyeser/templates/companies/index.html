@@ -3,8 +3,8 @@
 <div class="head"><div><h1>Companies</h1><p class="sub">Every company you can open, with the figures you're allowed to see. Each company keeps its own books, users and access.</p></div>
 {% if can_add %}<div class="actions"><a class="btn pri" href="#add">+ Add company</a></div>{% endif %}</div>
 
-<div class="card plan-note">{% if allowance is none %}🎁 <b>Extra companies are free during your trial.</b> After that your plan includes one company, and each extra company is <b>$10 a month</b>.
-{% else %}<b>Your plan includes {{ allowance }} compan{{ 'y' if allowance == 1 else 'ies' }}</b> · {{ in_use }} in use. Extra companies are <b>$10 a month</b> each — add them in Riyeser Central under <b>Licence</b>.{% if in_use > allowance %} Companies beyond your plan open <b>read-only</b> until then; nothing is removed.{% endif %}{% endif %}
+<div class="card plan-note">{% if allowance is none %}🎁 <b>Extra companies are free during your trial.</b> After that your plan includes one company, and each extra company is <b>{{ prices.extra_company }} a month</b>.
+{% else %}<b>Your plan includes {{ allowance }} compan{{ 'y' if allowance == 1 else 'ies' }}</b> · {{ in_use }} in use. Extra companies are <b>{{ prices.extra_company }} a month</b> each — add them in Riyeser Central under <b>Licence</b>.{% if in_use > allowance %} Companies beyond your plan open <b>read-only</b> until then; nothing is removed.{% endif %}{% endif %}
   <span class="muted small">Archived companies don't count.</span></div>
 
 {% if rows|length > 1 %}
@@ -40,12 +40,12 @@
     <h3>Add a company</h3><p class="muted">A new, empty set of books — for another company, trust or client. You'll be its administrator with your current sign-in.</p>
     <div class="fields"><div class="wide"><label>Company name</label><input name="name" required placeholder="e.g. Harbourview Holdings Pty Ltd"></div>
       <div><label>ABN (optional)</label><input name="abn"></div>
-      {% if not product.separate %}<div><label>Edition</label><select name="edition"><option value="enterprise">{{ editions.enterprise.name }} (licence)</option><option value="basic">{{ editions.basic.name }} ($20 a month, 90 days free)</option></select></div>{% endif %}
+      {% if not product.separate %}<div><label>Edition</label><select name="edition"><option value="enterprise">{{ editions.enterprise.name }} (licence)</option><option value="basic">{{ editions.basic.name }} ({{ prices.basic }} a month, 90 days free)</option></select></div>{% endif %}
       <div class="wide picks two">
         <label class="pick"><input type="radio" name="start" value="blank" checked> <b>Start blank (recommended)</b><small>Your own company. Nothing is filled in.</small></label>
         <label class="pick"><input type="radio" name="start" value="demo"> <b>Explore with demo data</b><small>Practice data: made-up customers and invoices. Not for real books.</small></label>
       </div></div>
-    <button class="btn pri" style="margin-top:14px" {{ 'disabled title="Your plan has no free company places - extra companies are $10 a month each"' if not room }}>Add company</button>{% if not room %}<p class="muted small">Your plan's companies are all in use. Add an extra company ($10 a month) in Riyeser Central, or archive one you no longer use.</p>{% endif %}
+    <button class="btn pri" style="margin-top:14px" {{ 'disabled title="Your plan has no free company places - extra companies are {{ prices.extra_company }} a month each"' if not room }}>Add company</button>{% if not room %}<p class="muted small">Your plan's companies are all in use. Add an extra company ($10 a month) in Riyeser Central, or archive one you no longer use.</p>{% endif %}
   </form>
   <form class="card" method="post" action="{{ url_for('companies.import_file') }}" enctype="multipart/form-data">
     <h3>Bring in an existing company file</h3><p class="muted">From another computer or a client: a Riyeser Accounting company file (<code>company.db</code> or a backup). It's copied in; the original isn't changed. Open it with a user from that file.</p>
