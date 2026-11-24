@@ -135,7 +135,8 @@ function renderNav() {
     <button class="${view === 'company' ? 'on' : ''}" data-view="company">${icon('building')}Company</button>
     ${demoState.on ? '' : `<button data-demo="try" title="Explore every program with made-up data">${icon('layers')}${esc(window.RiyeserDemo.TEXT.tryButton)}</button>`}
     <button data-lic="open">${icon('key')}Licence</button>
-    <button data-help="central">${icon('help')}Help</button>`;
+    <button data-help="central">${icon('help')}Help</button>
+    <button data-act="gethelp" title="Ask Riyeser Support (opens riyeser.com)">${icon('chat')}Get help</button>`;
 }
 
 // ---------- program cards (one per installed program, with real figures when there are any) ----------
@@ -555,6 +556,7 @@ document.addEventListener('click', (e) => {
   if (act) {
     if (act.dataset.act === 'find') { setView('home'); $('#q').focus(); }
     if (act.dataset.act === 'team') safe(() => bridge.call('central:team'));
+    if (act.dataset.act === 'gethelp') safe(() => bridge.call('central:getHelp'));
     if (act.dataset.act === 'pickpdf') safe(() => bridge.call('central:openPdf'));
     return;
   }

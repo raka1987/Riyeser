@@ -75,6 +75,7 @@ function onlinePlan(appData, now = Date.now(), d = read(appData)) {
       text = n != null ? `free trial, ${n} day${n === 1 ? '' : 's'} left` : 'free trial'; tone = n != null && n <= 14 ? 'warn' : 'trial';
     } else if (m.active) { text = m.paid_until ? `paid until ${fmtDate(m.paid_until)}` : 'active'; tone = 'ok'; }
     else if (m.status === 'cancelled') { text = 'cancelled — contact Riyeser'; tone = 'bad'; }
+    else if (m.status === 'closed') { text = 'business closed — contact Riyeser support'; tone = 'bad'; }   // HQ closed or suspended it
     else { text = 'trial ended — contact Riyeser'; tone = 'bad'; }
     return { id, name, text, tone, line: `${name}: ${text}` };
   });

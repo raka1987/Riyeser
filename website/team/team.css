@@ -243,3 +243,21 @@ a { color: var(--blue); }
 .opt-set legend { font-weight: 700; color: var(--ink); font-size: 14px; padding: 0 6px; } .opt-set legend small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
 @media (max-width: 420px) { .f2 { grid-template-columns: 1fr; } }
 .f span small.opt { font-weight: 500; color: var(--muted); }
+
+/* help requests and refunds on Riyeser home */
+.f textarea { width: 100%; padding: 10px 12px; border: 1px solid #cfd6e4; border-radius: 10px; background: #fff; font: inherit; resize: vertical; }
+.hhelp { display: flex; flex-wrap: wrap; gap: 8px; }
+.htix .htk { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 14px; border: 0; border-top: 1px solid var(--line); background: #fff; text-align: left; cursor: pointer; font: inherit; color: var(--ink); }
+.htix .htk:first-child { border-top: 0; } .htix .htk:hover { background: #f7f9ff; }
+.htk > span:first-child, .hrf > div > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.htk small, .hrf small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; font-weight: 400; }
+.htr { display: flex; gap: 6px; align-items: center; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.tconv { max-height: 46vh; overflow-y: auto; display: grid; gap: 8px; margin: 4px 0 12px; }
+.tmsg { border-radius: 12px; padding: 9px 12px; background: #f1f5f9; font-size: 14.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.tmsg.staff { background: #eef3ff; border: 1px solid #dbe5ff; } .tmsg.me { background: #f8fafc; border: 1px solid var(--line); margin-left: 18px; }
+.tmsg small { display: block; color: var(--muted); font-size: 12px; margin-bottom: 3px; }
+.mcard .pl { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #eef2f7; color: #334155; }
+.mcard .pl.ok { background: #dcfce7; color: #15803d; } .mcard .pl.warn { background: #fef3c7; color: #b45309; } .mcard .pl.bad { background: #fee2e2; color: #b91c1c; }
+.rfrow { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+@media (max-width: 420px) { .rfrow { grid-template-columns: 1fr; } }
+.mcard .code { font-family: ui-monospace, Consolas, monospace; letter-spacing: .5px; }

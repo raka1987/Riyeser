@@ -124,6 +124,17 @@
         ok(await sb.from('call_signals').insert({ workspace_id: ws, call_id: call, to_user: to, kind, payload: payload || null }));
       },
       async tidyCall(call) { await sb.from('call_signals').delete().eq('call_id', call); },
+      // Help requests, refunds and activity. These arrived with HQ: on a database that hasn't been updated yet they
+      // fail, and the website hides them (touch never shows an error).
+      async touch() { try { await sb.rpc('touch_activity'); } catch { /* not there yet */ } },
+      async closedBusinesses() { return ok(await sb.rpc('my_closed_businesses')) || []; },
+      async myTickets() { return ok(await sb.rpc('my_tickets')) || []; },
+      async openTicket(ws, topic, subject, message) { return ok(await sb.rpc('open_ticket', { ws: ws || null, help_topic: topic, help_subject: subject, message })); },
+      async ticket(id) { return ok(await sb.rpc('my_ticket', { ticket: id })); },
+      async replyTicket(id, message) { ok(await sb.rpc('reply_ticket', { ticket: id, message })); },
+      async myRefunds(ws) { return ok(await sb.rpc('my_refunds', { ws })) || []; },
+      async requestRefund(ws, r) { return ok(await sb.rpc('request_refund', { ws, for_what: r.for_what, period: r.period, invoice_ref: r.invoice_ref,
+        amount: r.amount, currency: r.currency, reason_category: r.reason_category, explanation: r.explanation, ticket: null })); },
       onSignals(uid, fn) {
         sb.channel('calls-' + uid)
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'call_signals', filter: 'to_user=eq.' + uid }, (p) => fn(p.new))
@@ -179,6 +190,7 @@
       msg('d-sam', 'u-sam', 'Can you approve the timesheets before 3? Pay run goes tonight.', 30)];
     const read = { 'c-general': ago(1400), 'c-jobs': ago(92), 'c-office': ago(61), 'c-exec': ago(200), 'd-sam': ago(40) };
     let listener = null;
+    const tix = []; const refs = [];
     const reply = (ch, from, body, ms) => setTimeout(() => { const m = msg(ch, from, body, 0); m.created_at = new Date().toISOString(); msgs.push(m); listener && listener(m); }, ms);
     return {
       demo: true,
@@ -261,6 +273,17 @@
         return out;
       },
       live(_w, fn) { listener = fn; },
+      // help requests in the demo: Riyeser Support "replies" a moment later
+      async touch() {}, async closedBusinesses() { return []; },
+      async myTickets() { return tix.map((t) => ({ ...t, unread: t.messages.filter((m) => m.staff && m.at > (t.read || '')).length, messages: undefined })); },
+      async openTicket(_w, topic, subject, message) { const t = { id: 't' + (tix.length + 1), ref: 'T-' + (10234 + tix.length), topic, subject, status: 'new', mine: true, business: company.name,
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString(), read: new Date().toISOString(), messages: [{ id: 1, staff: false, mine: true, from: 'You', body: message, at: new Date().toISOString() }] };
+        tix.unshift(t); setTimeout(() => { t.messages.push({ id: 2, staff: true, mine: false, from: 'Riyeser Support', body: 'Thanks for getting in touch. We\'re looking into it and will reply here soon.', at: new Date().toISOString() }); t.status = 'waiting_customer'; t.updated_at = new Date().toISOString(); }, 1500);
+        return { id: t.id, ref: t.ref }; },
+      async ticket(id) { const t = tix.find((x) => x.id === id); t.read = new Date().toISOString(); return { ...t }; },
+      async replyTicket(id, body) { const t = tix.find((x) => x.id === id); t.messages.push({ id: t.messages.length + 1, staff: false, mine: true, from: 'You', body, at: new Date().toISOString() }); t.status = 'waiting_us'; t.updated_at = new Date().toISOString(); },
+      async myRefunds() { return refs.slice(); },
+      async requestRefund(_w, r) { const f = { id: 'f' + (refs.length + 1), ref: 'R-' + (1042 + refs.length), ...r, status: 'submitted', created_at: new Date().toISOString() }; refs.unshift(f); return { id: f.id, ref: f.ref }; },
     };
   }
 
@@ -676,11 +699,12 @@
     ['pdf', 'PDF', 'Fill, sign and edit PDFs.', 'RiyeserPDF-Setup.exe', 'free'],
     ['desk-assistant', 'Desk Assistant', 'Files your documents for you.', 'RiyeserDeskAssistant-Setup.exe', 'free'],
   ];
+  const shortDay = (d) => new Date(d + (String(d).length === 10 ? 'T00:00:00' : '')).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
   function licLine(lic, key) {
     if (key === 'free') return '<span class="pl ok">Free forever</span>';
     const v = lic && lic.modules && lic.modules[key]; if (!v) return '<span class="pl">Free for 90 days</span>';
-    if (v.status === 'active') return '<span class="pl ok">Paid</span>';
-    if (v.status === 'trial') return `<span class="pl${v.days_left <= 14 ? ' warn' : ''}">Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left</span>`;
+    if (v.status === 'active') return `<span class="pl ok">Paid${v.paid_until ? ` to ${shortDay(v.paid_until)}` : ''}</span>`;
+    if (v.status === 'trial') return `<span class="pl${v.days_left <= 14 ? ' warn' : ''}">Free trial${v.trial_ends ? ` to ${shortDay(v.trial_ends)}` : ''} · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left</span>`;
     return '<span class="pl bad">Not active</span>';
   }
   async function renderHome() {
@@ -689,6 +713,7 @@
     const solo = t.kind === 'personal'; const team = !solo || S.people.length > 1 || S.requests.length > 0;
     if (S.homeLic === undefined || S.homeLicFor !== t.id) { S.homeLicFor = t.id; S.homeLic = admin ? await api.licence(t.id).catch(() => null) : null; }
     const lic = S.homeLic && S.homeLic.modules ? S.homeLic : null;
+    await loadHelp();
     const unread = Object.values(S.unread || {}).reduce((a, b) => a + (b || 0), 0);
     const calls = lic && lic.modules && lic.modules.calls;
     $app.className = 'acct home'; window.scrollTo(0, 0);
@@ -706,6 +731,7 @@
           <div class="hacts"><button class="btn" id="hco">✏️ ${admin ? (solo ? 'Edit my details' : 'Edit business details') : 'Business details'}</button>${admin && team ? `<button class="btn" id="hppl">👥 People · ${S.people.length}</button>
           <button class="btn" id="hreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button class="btn" id="hhist">🕘 History</button>` : ''}
           <button class="btn" id="hsec">🔐 Security</button></div></section>
+        ${helpHtml()}
         ${lic ? `<h3 class="hsec">Your plan <small>${lic.seats ? `${lic.seats.used} of ${lic.seats.included + lic.seats.extra} people included${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
         <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Team Chat Plus (calls)']]
           .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
@@ -727,6 +753,102 @@
     on('#hhist', showHistory); on('#hsec', security); on('#hmfa', security);
     on('#hcp', async () => { try { await navigator.clipboard.writeText(t.company_code); $app.querySelector('#hcp').textContent = 'Copied'; } catch { /* nothing */ } });
     const sw = $app.querySelector('#hsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
+    on('#hhelp', () => getHelp()); on('#hrefund', () => (needs2step() ? security() : requestRefund()));
+    $app.querySelectorAll('[data-ticket]').forEach((b) => b.onclick = () => openTicket(b.dataset.ticket));
+    if (params.has('help') && !S.helpShown) getHelp();
+  }
+
+  // ------------------------------------------------------------------ help requests (support tickets) and refunds
+  // Plain words for each status. Customers never see levels, staff names or internal notes.
+  const TOPICS = [['program', 'A problem with a program'], ['signin', 'Signing in'], ['billing', 'Billing or my plan'], ['other', 'Something else']];
+  const TSTATUS = { new: ['Sent', ''], waiting_us: ['With Riyeser', ''], waiting_customer: ['Waiting for your reply', 'warn'], done: ['Done', 'ok'] };
+  const RSTATUS = { submitted: ['Received', ''], reviewing: ['Being looked at', ''], approved: ['Approved', 'ok'], partly_approved: ['Partly approved', 'ok'],
+    declined: ['Not approved', 'bad'], paid: ['Paid', 'ok'] };
+  const REFUND_FOR = ['Accounting Basics', 'Accounting Plus', 'Payroll', 'POS', 'Bookings', 'As Built', 'Team Chat Plus', 'My whole plan', 'Something else'];
+  const REFUND_WHY = [['mistake', 'I was charged by mistake'], ['didnt_work', 'It didn\'t work for me'], ['cancelled', 'I cancelled'], ['duplicate', 'I was charged twice'], ['other', 'Something else']];
+  const pill = (map, st) => { const [l, c] = map[st] || [st, '']; return `<span class="pl${c ? ' ' + c : ''}">${esc(l)}</span>`; };
+  const money2 = (n, c) => `${esc(c || 'FJD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // null = this part of Riyeser isn't switched on yet (the database hasn't been updated): hide it.
+  async function loadHelp() {
+    S.tickets = await api.myTickets().catch(() => null);
+    S.refunds = S.team && isAdmin() && !needs2step() ? await api.myRefunds(S.team.id).catch(() => null) : (S.team && isAdmin() ? [] : null);
+  }
+  function helpHtml() {
+    const unread = (S.tickets || []).reduce((a, t) => a + Number(t.unread || 0), 0);
+    return `<h3 class="hsec">Help${unread ? ` <span class="badge">${unread}</span>` : ''} <small>Stuck, or something not right? Ask us. We usually reply within one business day.</small></h3>
+      <div class="hhelp"><button class="btn p" id="hhelp">💬 Get help</button>${S.refunds !== null && S.tickets !== null && isAdmin() ? '<button class="btn" id="hrefund">↩️ Request a refund</button>' : ''}<a class="btn" href="/help.html">📖 Help Centre</a></div>
+      ${S.tickets && S.tickets.length ? `<h3 class="hsec">Your help requests</h3><div class="hplan htix">${S.tickets.map((t) => `<button class="htk" data-ticket="${esc(t.id)}">
+        <span><b>${esc(t.subject)}</b><small>${esc(t.ref)} · ${t.mine ? 'you asked' : 'asked by someone in your business'} · ${ago(t.updated_at)}</small></span>
+        <span class="htr">${Number(t.unread) ? `<span class="badge" title="New reply from Riyeser">${t.unread} new</span>` : ''}${pill(TSTATUS, t.status)}</span></button>`).join('')}</div>` : ''}
+      ${S.refunds && S.refunds.length ? `<h3 class="hsec">Your refund requests</h3><div class="hplan hrf">${S.refunds.map((r) => `<div><span><b>${money2(r.amount, r.currency)} · ${esc(r.for_what)}</b>
+        <small>${esc(r.ref)}${r.period ? ` · ${esc(r.period)}` : ''} · ${ago(r.created_at)}${r.amount_approved != null && r.status !== 'declined' && r.status !== 'submitted' && r.status !== 'reviewing' ? ` · ${money2(r.amount_approved, r.currency)} approved` : ''}${r.decision_reason ? `<br>${esc(r.decision_reason)}` : ''}</small></span>${pill(RSTATUS, r.status)}</div>`).join('')}</div>` : ''}`;
+  }
+  function helpOff() {
+    modal(`<h3>💬 Get help</h3><p>Asking for help from here is on its way. For now, the Help Centre has answers to common questions.</p>
+      <div class="mfoot"><button class="btn" id="cl">Close</button><a class="btn p" href="/help.html">Open the Help Centre</a></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
+  }
+  // The "Get help" form. ws: the business it's about (none for people without one).
+  function getHelp(ws = S.team ? S.team.id : null) {
+    S.helpShown = true;
+    if (params.has('help')) { params.delete('help'); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '')); }
+    if (S.tickets === null) return helpOff();
+    modal(`<h3>💬 Get help</h3><p>Tell us what's going on and we'll get back to you by email and here on your Riyeser home page.</p>
+      <form id="ghf"><label class="f"><span>What's it about?</span><select name="topic">${TOPICS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+      <label class="f"><span>Subject</span><input name="subject" maxlength="150" required placeholder="e.g. The receipt printer stopped working"></label>
+      <label class="f"><span>Message</span><textarea name="message" rows="5" maxlength="5000" required placeholder="What happened, and what were you trying to do?"></textarea></label>
+      <div id="gherr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Send</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#ghf').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const btn = e.target.querySelector('.btn.p'); btn.disabled = true;
+        try { const r = await api.openTicket(ws, String(f.get('topic')), String(f.get('subject')).trim(), String(f.get('message')).trim());
+          d.querySelector('.mcard').innerHTML = `<h3>✅ Thanks, we've got it</h3><p>Your request number is <b class="code">${esc(r.ref)}</b>. We'll reply by email and here on your Riyeser home page.</p>
+            <div class="mfoot"><button class="btn p" id="ok">Done</button></div>`;
+          d.querySelector('#ok').onclick = () => { close(); if (S.team && S.home) renderHome(); };
+        } catch (err) { btn.disabled = false; d.querySelector('#gherr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; } };
+    });
+  }
+  async function openTicket(id) {
+    let t; try { t = await api.ticket(id); } catch (err) { alert(plainError(err)); return; }
+    modal(`<h3>${esc(t.subject)}</h3><p class="small">${esc(t.ref)} · ${pill(TSTATUS, t.status)}</p>
+      <div class="tconv">${(t.messages || []).map((m) => `<div class="tmsg${m.staff ? ' staff' : ' me'}"><small>${esc(m.staff ? 'Riyeser Support' : m.from || 'You')} · ${ago(m.at)}</small><div>${esc(m.body).replace(/\n/g, '<br>')}</div></div>`).join('')}</div>
+      ${t.status === 'done' ? '<p class="small">This request is marked done. If you still need help, reply and we\'ll pick it up again.</p>' : ''}
+      <form id="trf"><label class="f"><span>Your reply</span><textarea name="message" rows="3" maxlength="5000" required></textarea></label>
+      <div id="trerr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Close</button><button class="btn p">Send reply</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = () => { close(); if (S.home) renderHome(); };
+      const conv = d.querySelector('.tconv'); conv.scrollTop = conv.scrollHeight;
+      d.querySelector('#trf').onsubmit = async (e) => { e.preventDefault(); const msg = String(new FormData(e.target).get('message')).trim(); if (!msg) return;
+        try { await api.replyTicket(id, msg); close(); openTicket(id); } catch (err) { d.querySelector('#trerr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; } };
+    });
+  }
+  // Owners and admins: ask for a refund. It also opens a billing help request, where the conversation happens.
+  function requestRefund() {
+    modal(`<h3>↩️ Request a refund</h3><p>Tell us what it's for and why. We'll look at it within 2 business days and let you know by email.</p>
+      <form id="rff"><label class="f"><span>What's it for?</span><select name="for_what">${REFUND_FOR.map((x) => `<option>${x}</option>`).join('')}</select></label>
+      <div class="rfrow"><label class="f"><span>Which period? <small class="opt">(e.g. November 2026)</small></span><input name="period" maxlength="80"></label>
+      <label class="f"><span>Invoice or receipt number <small class="opt">(optional)</small></span><input name="invoice_ref" maxlength="80"></label></div>
+      <div class="rfrow"><label class="f"><span>Amount</span><input name="amount" type="number" min="0.01" step="0.01" required inputmode="decimal"></label>
+      <label class="f"><span>Currency</span><select name="currency">${['FJD', 'AUD', 'NZD', 'USD'].map((c) => `<option>${c}</option>`).join('')}</select></label></div>
+      <label class="f"><span>Why?</span><select name="reason_category">${REFUND_WHY.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+      <label class="f"><span>Tell us a bit more</span><textarea name="explanation" rows="3" maxlength="2000" placeholder="What happened?"></textarea></label>
+      <div id="rferr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Send request</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#rff').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const v = (k) => String(f.get(k) || '').trim();
+        try { const r = await api.requestRefund(S.team.id, { for_what: v('for_what'), period: v('period'), invoice_ref: v('invoice_ref'), amount: Number(v('amount')),
+            currency: v('currency'), reason_category: v('reason_category'), explanation: v('explanation') });
+          d.querySelector('.mcard').innerHTML = `<h3>✅ Thanks, we've got your request</h3><p>Your refund request number is <b class="code">${esc(r.ref)}</b>. We'll look at it within 2 business days and let you know by email.</p>
+            <div class="mfoot"><button class="btn p" id="ok">Done</button></div>`;
+          d.querySelector('#ok').onclick = () => { close(); renderHome(); };
+        } catch (err) { d.querySelector('#rferr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; } };
+    });
+  }
+  // A business that Riyeser has closed (or suspended): a plain message at sign-in.
+  function closedScreen(b) {
+    $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
+    $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <h1>${esc(b.name)}</h1><p>This business is closed. Contact Riyeser support.</p>
+      <button class="btn p w" id="gh">💬 Contact Riyeser support</button>
+      <div class="alt"><button class="linkbtn" id="so">Sign out</button></div></div></div>`;
+    $app.querySelector('#gh').onclick = async () => { if (S.tickets === undefined) S.tickets = await api.myTickets().catch(() => null); getHelp(b.id); };
+    $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
   }
 
   // The browser tab shows Riyeser's logo on the account screens, and Team's icon once inside chat.
@@ -1146,13 +1268,15 @@
       if (!s) { const gone = S.signedOutNote; S.signedOutNote = false;
         return gate(params.has('signup') ? 'up' : 'in', gone ? '<div class="err">That sign-in has ended (the account may have been removed). Sign in again, or create a new account.</div>' : ''); }
       S.user = s.user;
-      S.home = !DEMO && !/Electron/.test(navigator.userAgent) && !params.has('chat');
+      S.home = (!DEMO || params.has('help')) && !/Electron/.test(navigator.userAgent) && !params.has('chat');
       const lv = await api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' }));
       S.aal = lv.currentLevel;
       if (lv.nextLevel === 'aal2' && lv.currentLevel !== 'aal2') return codeScreen();
       S.teams = await api.teams(S.user.id);
+      touchActivity();
       const jc = (params.get('join') || '').toUpperCase();
       if (jc && !S.teams.some((t) => t.invite_code === jc || t.company_code === jc)) return setupTeam();
+      if (!S.teams.length && !jc) { const closed = (await api.closedBusinesses().catch(() => []))[0]; if (closed) return closedScreen(closed); }
       if (!S.teams.length) { const r = (await api.myRequests().catch(() => []))[0];
         if (r && r.status === 'pending') return waiting(r.company_name);
         const d = (S.user.user_metadata || {}).riyeser_signup;
@@ -1167,8 +1291,14 @@
       await loadTeam(S.teams.some((t) => t.id === last) ? last : S.teams[0].id);
     } catch (e) { $app.className = 'acct'; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
   }
+  // Once per visit (at most hourly): tells Riyeser the account is in use, so it isn't closed for being inactive.
+  function touchActivity() {
+    let due = true; const k = 'riyeser.active.' + S.user.id;
+    try { due = Date.now() - Number(localStorage.getItem(k) || 0) > 3600e3; if (due) localStorage.setItem(k, String(Date.now())); } catch { /* private mode */ }
+    if (due) Promise.resolve().then(() => api.touch()).catch(() => {});
+  }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
   setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);
-  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory };
+  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, requestRefund };
   start();
 })();

@@ -351,7 +351,7 @@ select public.hq_add_staff('help@riyeser.test', 'Help Desk', 'support');
 do $$ begin
   assert (select (calls_paid_until at time zone 'UTC')::date from public.hq_companies('island')) = '2027-06-30', 'paid until set';
   assert (select count(*) from public.workspaces where name = 'Island Traders') = 0, 'HQ staff still can''t read customer tables directly';
-  assert (select count(*) from public.hq_history() where action in ('licence.module', 'note.added', 'staff.added', 'company.viewed')) >= 4, 'HQ history';
+  assert (select count(*) from public.hq_history() where action in ('licence.module', 'note.added', 'staff.added', 'customer.viewed')) >= 4, 'HQ history';
   begin perform public.hq_set_staff(auth.uid(), 'support', true); raise exception 'changed own access';
   exception when others then assert sqlerrm like 'You can%', sqlerrm; end;
 end $$;
@@ -453,6 +453,450 @@ do $$ begin
   assert ((public.hq_licences()) ->> 'paying_companies')::int >= 1, 'support sees licences';
   begin perform public.hq_set_module(current_setting('test.ws_c')::uuid, 'pos', 'active', null, '2030-01-01'); raise exception 'support changed licence';
   exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+reset role;
+
+-- ===== Riyeser HQ phase 1: support tickets, escalations, fix-ups, permissions, audit, inactive accounts, emails, refunds, free periods
+reset role;
+-- (test helper: read the HQ history while acting as someone else)
+create function pg_temp.audit(act text) returns setof public.hq_audit language sql security definer as $$ select * from public.hq_audit where action = act $$;
+insert into auth.users values ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'dev@riyeser.test'), ('cccccccc-cccc-cccc-cccc-cccccccccccc', 'senior@riyeser.test'),
+  ('dddddddd-dddd-dddd-dddd-dddddddddddd', 'money@riyeser.test');
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_add_staff('dev@riyeser.test', 'Dev', 'developer');
+select public.hq_add_staff('senior@riyeser.test', 'Senior Sam', 'senior');
+select public.hq_add_staff('money@riyeser.test', 'Finance Fi', 'finance');
+-- permissions: roles give defaults; the owner has everything
+do $$ begin
+  assert (public.hq_me() -> 'perms')::text like '%staff.manage%' and (public.hq_me() -> 'perms')::text like '%accounts.inactive%', 'owner has everything';
+  assert ((public.hq_me()) -> 'perms')::text like '%support.level3%', 'hq_me lists permissions';
+end $$;
+select set_config('test.ws_b', :'ws_b', false), set_config('test.ws_a', :'ws_a', false);
+
+-- --- tickets: Sam (staff at A), Jordan (staff at A) and Kim (B's owner, asking with no business)
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+select (public.open_ticket(:'ws_a', 'program', 'POS won''t print', 'The receipt printer stopped after the update.') ->> 'id') as t_sam \gset
+select set_config('test.t_sam', :'t_sam', false);
+select pg_temp.as_user('44444444-4444-4444-4444-444444444444');
+select (public.open_ticket(:'ws_a', 'signin', 'Can''t sign in', 'It says my password is wrong.') ->> 'id') as t_jordan \gset
+select set_config('test.t_jordan', :'t_jordan', false);
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+select (public.open_ticket(null, 'other', 'Question', 'Do you do payroll for NZ?') ->> 'id') as t_kim \gset
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ begin
+  assert json_array_length(public.my_tickets()) = 1, 'Sam sees only his own ticket';
+  assert (select count(*) from public.support_tickets) = 1, 'row rules: Sam reads only his ticket';
+  assert (public.my_tickets() -> 0 ->> 'ref') ~ '^T-[0-9]{5,}$', 'ticket number like T-10234';
+  begin perform public.my_ticket(current_setting('test.t_jordan')::uuid); raise exception 'Sam opened Jordan''s ticket';
+  exception when others then assert sqlerrm like 'We couldn%', sqlerrm; end;
+  begin perform public.reply_ticket(current_setting('test.t_jordan')::uuid, 'sneaky'); raise exception 'Sam replied to Jordan''s ticket';
+  exception when others then assert sqlerrm like 'We couldn%', sqlerrm; end;
+  begin perform public.hq_tickets(null, null); raise exception 'customer read the HQ inbox';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+end $$;
+-- the owner (Alex, two-step) sees the business's tickets; nobody else's
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin assert json_array_length(public.my_tickets()) = 2, 'owner sees the business''s 2 tickets, not Kim''s'; end $$;
+select pg_temp.as_user_password_only('11111111-1111-1111-1111-111111111111');
+do $$ begin assert json_array_length(public.my_tickets()) = 0, 'owner without two-step: only their own (none)'; end $$;
+-- Help Desk (support): replies, adds an internal note
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ declare b json; begin
+  b := public.hq_tickets('new', null);
+  assert json_array_length(b -> 'tickets') = 3, 'support sees every new ticket';
+  assert (b -> 'counts' ->> 'unassigned')::int = 3, 'counts';
+  assert json_array_length(public.hq_tickets('all', 'printer') -> 'tickets') = 1, 'search finds the message text';
+  perform public.hq_ticket_reply(current_setting('test.t_sam')::uuid, 'Thanks Sam. Try turning the printer off and on, then print a test page.', false, null);
+  perform public.hq_ticket_reply(current_setting('test.t_sam')::uuid, 'INTERNAL: known driver bug in 1.7.0', true, null);
+  assert (public.hq_ticket(current_setting('test.t_sam')::uuid) -> 'business' ->> 'people')::int >= 3, 'business summary beside the ticket';
+  assert exists (select 1 from pg_temp.audit('ticket.viewed') where true), 'opening a ticket is logged';
+end $$;
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ declare t json; begin
+  assert (public.my_tickets() -> 0 ->> 'unread')::int = 1, 'one unread reply';
+  t := public.my_ticket(current_setting('test.t_sam')::uuid);
+  assert json_array_length(t -> 'messages') = 2, 'customer sees question + reply, not the internal note';
+  assert t::text not like '%INTERNAL%', 'internal note never shown';
+  assert (t ->> 'status') = 'waiting_customer', 'waiting on the customer after a reply';
+  assert (t -> 'messages' -> 1 ->> 'from') = 'Riyeser Support', 'staff names not shown';
+  assert not exists (select 1 from public.support_messages where body like 'INTERNAL%'), 'row rules hide internal notes';
+  assert (public.my_tickets() -> 0 ->> 'unread')::int = 0, 'read now';
+  begin update public.support_messages set body = 'changed'; raise exception 'customer edited a message';
+  exception when insufficient_privilege then null; end;
+  begin delete from public.support_messages; raise exception 'customer deleted a message';
+  exception when insufficient_privilege then null; end;
+  begin update public.support_tickets set status = 'done'; raise exception 'customer changed status directly';
+  exception when insufficient_privilege then null; end;
+  begin perform level from public.support_tickets; raise exception 'customer read the level';
+  exception when insufficient_privilege then null; end;
+  perform public.reply_ticket(current_setting('test.t_sam')::uuid, 'Still not printing.');
+  assert (public.my_ticket(current_setting('test.t_sam')::uuid) ->> 'status') = 'waiting_us', 'a reply re-opens it to waiting on us';
+end $$;
+reset role;
+do $$ begin
+  begin update public.support_messages set body = 'x'; raise exception 'owner edited a support message';
+  exception when others then assert sqlerrm like 'Support messages can%', sqlerrm; end;
+  begin delete from public.support_tickets; raise exception 'owner deleted a ticket';
+  exception when others then assert sqlerrm like 'Rows in support_tickets are never deleted%', sqlerrm; end;
+  assert (select count(*) from public.email_outbox where template = 'ticket_received') = 3, 'received emails queued';
+  assert (select count(*) from public.email_outbox where template = 'ticket_reply' and to_address = 'staff@a.test') = 1, 'reply email to the customer';
+end $$;
+
+-- --- staff without permission are refused; the owner ticks one on
+select pg_temp.as_user('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'); set role authenticated;
+do $$ begin
+  begin perform public.hq_tickets(null, null); raise exception 'developer read tickets';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  begin perform public.hq_company(current_setting('test.ws_c')::uuid); raise exception 'developer opened a company';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  begin perform public.hq_set_staff_perms('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', array['audit.view'], null); raise exception 'developer changed perms';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_set_staff_perms('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', array['support.view'], array['downloads.view']);
+select pg_temp.as_user('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+do $$ begin
+  assert json_array_length(public.hq_tickets('all', null) -> 'tickets') = 3, 'ticked on: developer can read tickets';
+  begin perform public.hq_downloads(30); raise exception 'ticked off but still works';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  begin perform public.hq_ticket_reply(current_setting('test.t_sam')::uuid, 'hi', false, null); raise exception 'developer replied';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ begin
+  begin perform public.hq_set_staff_perms('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', array['audit.view'], null); raise exception 'support changed perms';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+-- two-step still required: an owner with only a password can't do anything
+select pg_temp.as_user_password_only('99999999-9999-9999-9999-999999999999');
+do $$ begin begin perform public.hq_tickets(null, null); raise exception 'HQ without two-step';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end; end $$;
+
+-- --- escalation: by hand (support -> Senior), and the customer only sees "passed to our senior team"
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ begin
+  begin perform public.hq_ticket_escalate(current_setting('test.t_sam')::uuid, 2, '', null); raise exception 'escalated without a reason';
+  exception when others then assert sqlerrm like 'Give a reason%', sqlerrm; end;
+  begin perform public.hq_ticket_escalate(current_setting('test.t_sam')::uuid, 2, 'Printer driver bug', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'); raise exception 'assigned to someone who can''t work level 2';
+  exception when others then assert sqlerrm like '%can''t work Senior%', sqlerrm; end;
+  perform public.hq_ticket_escalate(current_setting('test.t_sam')::uuid, 2, 'Printer driver bug', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+  assert (public.hq_ticket(current_setting('test.t_sam')::uuid) -> 'ticket' ->> 'level')::int = 2, 'now level 2';
+  assert exists (select 1 from pg_temp.audit('ticket.escalated') where true and ticket like 'T-%'), 'escalation in the HQ history';
+  begin perform public.hq_ticket_reply(current_setting('test.t_sam')::uuid, 'hello', false, null); raise exception 'support replied at level 2';
+  exception when others then assert sqlerrm like 'This ticket is with Senior%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('cccccccc-cccc-cccc-cccc-cccccccccccc');
+do $$ begin
+  assert json_array_length(public.hq_tickets('level2', null) -> 'tickets') = 1, 'level 2 inbox';
+  perform public.hq_ticket_reply(current_setting('test.t_sam')::uuid, 'We''ve found the problem: a fix is coming in 1.7.1.', false, null);
+  assert public.hq_ticket(current_setting('test.t_sam')::uuid)::text like '%Escalated to Senior by Help Desk: Printer driver bug%', 'internal note written';
+end $$;
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ declare t text := public.my_ticket(current_setting('test.t_sam')::uuid)::text; begin
+  assert t like '%We''ve passed this to our senior team%', 'customer told it was passed on';
+  assert t not like '%Printer driver bug%', 'internal reason never shown';
+end $$;
+-- automatic: Jordan's ticket has had no reply for 49 hours -> overdue and escalated to Senior
+reset role;
+update public.support_tickets set created_at = now() - interval '49 hours', last_customer_at = now() - interval '49 hours' where id = :'t_jordan';
+set role authenticated;
+do $$ begin begin perform public.hq_support_sweep(); raise exception 'a signed-in user ran the support sweep';
+  exception when insufficient_privilege then null; end; end $$;
+reset role;
+do $$ declare r json; begin
+  r := public.hq_support_sweep();
+  assert (r ->> 'escalated')::int = 1, format('one escalated: %s', r);
+  assert (select level from public.support_tickets where id = current_setting('test.t_jordan')::uuid) = 2, 'Jordan''s ticket is level 2';
+  assert (select overdue_at is not null from public.support_tickets where id = current_setting('test.t_jordan')::uuid), 'flagged overdue';
+  assert exists (select 1 from public.support_escalations where ticket_id = current_setting('test.t_jordan')::uuid and reason = 'No reply in 48 hours' and by_user is null), 'reason: No reply in 48 hours';
+  assert ((public.hq_support_sweep()) ->> 'escalated')::int = 0, 'not escalated twice straight away';
+  assert (select count(*) from public.support_tickets where level = 1 and id = current_setting('test.t_sam')::uuid) = 0, 'Sam''s stays where it is';
+end $$;
+-- the thresholds are settings the HQ owner can change (and nobody else)
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ begin begin perform public.hq_set_setting('support.escalate_hours', 12); raise exception 'support changed a setting';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end; end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_set_setting('support.escalate_hours', 72);
+do $$ begin assert (public.hq_get_settings() ->> 'support.escalate_hours')::numeric = 72, 'setting saved'; end $$;
+select public.hq_set_setting('support.escalate_hours', 48);
+
+-- --- the HQ history can't be changed or deleted, even by the database owner
+reset role;
+do $$ begin
+  begin update public.hq_audit set action = 'x'; raise exception 'edited the HQ history';
+  exception when others then assert sqlerrm like 'The HQ history can%', sqlerrm; end;
+  begin delete from public.hq_audit; raise exception 'deleted the HQ history';
+  exception when others then assert sqlerrm like 'The HQ history can%', sqlerrm; end;
+  begin truncate public.hq_audit; raise exception 'emptied the HQ history';
+  exception when others then assert sqlerrm like 'The HQ history can%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ begin
+  begin update public.hq_audit set action = 'x'; raise exception 'staff edited history';
+  exception when insufficient_privilege then null; end;
+  assert json_array_length(public.hq_audit_search(null, 'ticket.', null, current_date - 1, current_date, false)) >= 3, 'history filters';
+  assert json_array_length(public.hq_audit_search('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', null, null, null, null, false)) >= 3, 'filter by who';
+  perform public.hq_audit_search(null, null, null, null, null, true);
+  assert exists (select 1 from pg_temp.audit('audit.exported') where true), 'CSV download is logged';
+end $$;
+
+-- --- fix-up tools (Island Traders: owner Mere, admin Jone)
+reset role; insert into auth.mfa_factors (user_id) values ('77777777-7777-7777-7777-777777777777');
+select ref as t_sam_ref from public.support_tickets where id = :'t_sam' \gset
+select set_config('test.t_sam_ref', :'t_sam_ref', false);
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ begin
+  begin perform public.hq_edit_business(current_setting('test.ws_c')::uuid, '{"phone":"679 999 0000"}', '', null); raise exception 'edited without a reason';
+  exception when others then assert sqlerrm like 'Give a reason%', sqlerrm; end;
+  perform public.hq_edit_business(current_setting('test.ws_c')::uuid, '{"phone":"679 999 0000","country":"Fiji"}', 'Owner asked on the phone', current_setting('test.t_sam_ref'));
+  assert exists (select 1 from pg_temp.audit('business.edited') where true and ticket = current_setting('test.t_sam_ref') and details::text not like '%679 999%'), 'edit audited with the ticket, no values';
+  begin perform public.hq_reset_2fa(current_setting('test.ws_c')::uuid, '77777777-7777-7777-7777-777777777777', '', 'Lost phone', null); raise exception 'reset without identity check';
+  exception when others then assert sqlerrm like 'Say how you checked%', sqlerrm; end;
+  assert public.hq_reset_2fa(current_setting('test.ws_c')::uuid, '77777777-7777-7777-7777-777777777777', 'called back on the number on file', 'Lost phone', null) = 1, 'one authenticator removed';
+  assert exists (select 1 from pg_temp.audit('people.reset_2fa') where true and details ->> 'identity_checked' = 'called back on the number on file'), '2FA reset audited';
+  begin perform public.hq_change_owner(current_setting('test.ws_c')::uuid, '77777777-7777-7777-7777-777777777777', 'Sold the business', null); raise exception 'support changed owner';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  begin perform public.hq_set_business_status(current_setting('test.ws_b')::uuid, 'closed', 'Asked to close', null); raise exception 'support closed a business';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin
+  assert not exists (select 1 from auth.mfa_factors where user_id = '77777777-7777-7777-7777-777777777777'), 'factors gone';
+  assert exists (select 1 from public.email_outbox where template = 'mfa_reset' and to_address = 'newbie@c.test'), 'the person is told';
+  assert (select phone from public.workspaces where id = current_setting('test.ws_c')::uuid) = '679 999 0000', 'details changed';
+  assert exists (select 1 from public.audit_log where workspace_id = current_setting('test.ws_c')::uuid and action = 'workspaces.update' and actor is null), 'customer history shows Riyeser';
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_change_owner(:'ws_c', '77777777-7777-7777-7777-777777777777', 'Mere sold the business to Jone', null);
+do $$ begin
+  assert (select json_agg(x.role order by x.name) from json_to_recordset(public.hq_company(current_setting('test.ws_c')::uuid) -> 'people') x(name text, role text))::text = '["owner", "admin"]', 'Jone owner, Mere admin';
+end $$;
+-- close Corner Cafe: hidden from its people, licence not active, can't be joined; then reopen
+select public.hq_set_business_status(:'ws_b', 'closed', 'Owner asked us to close it', null);
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ declare l json; begin
+  assert (select count(*) from public.workspaces) = 0, 'closed business hidden';
+  assert (select count(*) from public.members) = 0, 'its people hidden';
+  assert (select count(*) from public.my_closed_businesses()) = 1, 'told it is closed';
+  l := public.company_licence(current_setting('test.ws_b')::uuid);
+  assert not (l -> 'modules' -> 'basic' ->> 'active')::boolean and (l -> 'modules' -> 'basic' ->> 'status') = 'closed', 'licence not active';
+  assert not public.calls_allowed(current_setting('test.ws_b')::uuid), 'no calls';
+  assert json_array_length(public.my_tickets()) = 1, 'can still see their help request';
+end $$;
+reset role; select invite_code as code_b from public.workspaces where id = :'ws_b' \gset
+select pg_temp.as_user('44444444-4444-4444-4444-444444444444'); set role authenticated;
+do $$ begin begin perform public.join_team(current_setting('test.code_b', true), 'X'); exception when others then null; end; end $$;
+select set_config('test.code_b', :'code_b', false);
+do $$ begin begin perform public.join_team(current_setting('test.code_b'), 'X'); raise exception 'joined a closed business';
+  exception when others then assert sqlerrm like 'This business is closed%', sqlerrm; end; end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ begin
+  assert json_array_length(public.hq_business_list('', 'closed')) = 1, 'HQ filters by status';
+  assert (public.hq_emails() ->> 'recent') like '%business_closed%', 'owner told (and the Emails view shows it)';
+end $$;
+select public.hq_set_business_status(:'ws_b', 'active', 'Reopened at the owner''s request', null);
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin assert (select count(*) from public.workspaces) = 1, 'reopened: visible again'; end $$;
+-- close as a duplicate
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_close_duplicate((select id from public.hq_companies('Early bird 2') where name = 'Early bird 2'), (select id from public.hq_companies('Early bird 1') where name = 'Early bird 1'), 'Signed up twice', null);
+do $$ begin
+  assert (select (x ->> 'duplicate_of_name') from (select public.hq_company((select id from public.hq_companies('Early bird 2') where name = 'Early bird 2')) -> 'profile' as x) y) = 'Early bird 1', 'duplicate link';
+end $$;
+reset role;
+
+-- --- inactive accounts
+reset role;
+insert into auth.users values ('e1e1e1e1-0000-4000-8000-000000000001', 'w30@d.test'), ('e1e1e1e1-0000-4000-8000-000000000002', 'w7@d.test'),
+  ('e1e1e1e1-0000-4000-8000-000000000003', 'due@d.test'), ('e1e1e1e1-0000-4000-8000-000000000004', 'late@d.test');
+insert into public.workspaces (id, name, company_code, last_active_at, created_at, phone) values
+  ('f0000000-0000-4000-8000-000000000001', 'Quiet 30', public.make_company_code(), now() - interval '12 months' + interval '20 days', now() - interval '2 years', null),
+  ('f0000000-0000-4000-8000-000000000002', 'Quiet 7', public.make_company_code(), now() - interval '12 months' + interval '3 days', now() - interval '2 years', null),
+  ('f0000000-0000-4000-8000-000000000003', 'Quiet due', public.make_company_code(), now() - interval '12 months' - interval '1 day', now() - interval '3 years', '330 0000'),
+  ('f0000000-0000-4000-8000-000000000004', 'Quiet late', public.make_company_code(), now() - interval '13 months', now() - interval '3 years', null);
+insert into public.members (workspace_id, user_id, display_name, role) values
+  ('f0000000-0000-4000-8000-000000000001', 'e1e1e1e1-0000-4000-8000-000000000001', 'Owner Thirty', 'owner'),
+  ('f0000000-0000-4000-8000-000000000002', 'e1e1e1e1-0000-4000-8000-000000000002', 'Owner Seven', 'owner'),
+  ('f0000000-0000-4000-8000-000000000003', 'e1e1e1e1-0000-4000-8000-000000000003', 'Pat Sample', 'owner'),
+  ('f0000000-0000-4000-8000-000000000004', 'e1e1e1e1-0000-4000-8000-000000000004', 'Owner Late', 'owner');
+update public.workspaces set warned_7_at = now() - interval '8 days' where id = 'f0000000-0000-4000-8000-000000000003';
+insert into public.channels (id, workspace_id, kind, name) values ('f1000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000003', 'channel', 'general');
+insert into public.messages (channel_id, workspace_id, user_id, body) values ('f1000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000003', 'e1e1e1e1-0000-4000-8000-000000000003', 'Pat''s private note');
+-- Sample Plumbing pays for Team Calls: never closed, however long it's quiet
+update public.workspaces set last_active_at = now() - interval '2 years' where id = :'ws_a';
+set role authenticated;
+do $$ begin begin perform public.hq_inactivity_sweep(); raise exception 'a signed-in user ran the sweep';
+  exception when insufficient_privilege then null; end; end $$;
+reset role;
+do $$ declare r json; begin
+  r := public.hq_inactivity_sweep();
+  assert (r ->> 'warned_30')::int = 1 and (r ->> 'warned_7')::int = 2 and (r ->> 'closed')::int = 1, format('sweep: %s', r);
+  assert exists (select 1 from public.email_outbox where template = 'inactive_warning_30' and to_address = 'w30@d.test'), '30-day warning queued';
+  assert exists (select 1 from public.email_outbox where template = 'inactive_warning_7' and to_address = 'w7@d.test'), '7-day warning queued';
+  assert exists (select 1 from public.email_outbox where template = 'inactive_warning_7' and to_address = 'late@d.test'), 'overdue: warned first, not closed';
+  assert (select status from public.workspaces where name = 'Quiet late') = 'active', 'not closed without a warning';
+  assert (select status || '/' || closed_reason from public.workspaces where name = 'Quiet due') = 'closed/inactive', 'closed at 12 months';
+  assert (select status from public.workspaces where id = current_setting('test.ws_a')::uuid) = 'active', 'paid business never closed';
+  assert not exists (select 1 from public.email_outbox where to_address = 'owner@a.test' and template like 'inactive%'), 'paid business not warned';
+  r := public.hq_inactivity_sweep();
+  assert (r ->> 'warned_30')::int = 0 and (r ->> 'warned_7')::int = 0, 'no repeat warnings';
+end $$;
+-- signing in, or the website's touch, resets the clock
+update auth.users set last_sign_in_at = now() where id = 'e1e1e1e1-0000-4000-8000-000000000001';
+select pg_temp.as_user('e1e1e1e1-0000-4000-8000-000000000002'); set role authenticated;
+select public.touch_activity();
+reset role;
+do $$ begin
+  assert (select last_active_at > now() - interval '1 minute' from public.workspaces where name = 'Quiet 30'), 'sign-in resets the clock';
+  assert (select last_active_at > now() - interval '1 minute' from public.workspaces where name = 'Quiet 7'), 'touch_activity resets the clock';
+  assert not exists (select 1 from public.audit_log where action = 'workspaces.update' and details ? 'last_active_at'), 'activity isn''t change history';
+end $$;
+-- 2 years after closing: ready for removal (not removed)
+update public.workspaces set closed_at = now() - interval '25 months' where name = 'Quiet due';
+select public.hq_inactivity_sweep();
+do $$ begin assert (select removal_state from public.workspaces where name = 'Quiet due') = 'ready', 'ready for removal';
+  assert (select phone from public.workspaces where name = 'Quiet due') = '330 0000', 'nothing removed automatically'; end $$;
+insert into public.support_tickets (id, workspace_id, opened_by, subject) values ('f2000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000003', 'e1e1e1e1-0000-4000-8000-000000000003', 'Pat''s question');
+insert into public.support_messages (ticket_id, author, body) values ('f2000000-0000-4000-8000-000000000003', 'e1e1e1e1-0000-4000-8000-000000000003', 'Pat''s phone is 021 000');
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ begin
+  assert json_array_length(public.hq_inactive_accounts() -> 'ready') = 1, 'Inactive accounts view: ready for removal';
+  begin perform public.hq_remove_accounts(array['f0000000-0000-4000-8000-000000000003']::uuid[], 'Closed 2 years'); raise exception 'support removed accounts';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ begin
+  begin perform public.hq_remove_accounts(array['f0000000-0000-4000-8000-000000000001']::uuid[], 'Not ready'); raise exception 'removed an active account';
+  exception when others then assert sqlerrm like 'Only accounts marked%', sqlerrm; end;
+  begin perform public.hq_remove_accounts(array['f0000000-0000-4000-8000-000000000003']::uuid[], ''); raise exception 'removed without a reason';
+  exception when others then assert sqlerrm like 'Give a reason%', sqlerrm; end;
+  assert public.hq_remove_accounts(array['f0000000-0000-4000-8000-000000000003']::uuid[], 'Closed 2 years, owner approved') = 1, 'removed one';
+end $$;
+reset role;
+do $$ begin
+  assert (select body from public.messages where workspace_id = 'f0000000-0000-4000-8000-000000000003') = '[removed]', 'message bodies removed';
+  assert (select display_name from public.members where workspace_id = 'f0000000-0000-4000-8000-000000000003') = 'Removed person', 'names removed';
+  assert (select name || coalesce(phone, '') from public.workspaces where id = 'f0000000-0000-4000-8000-000000000003') = 'Removed business', 'business details removed';
+  assert (select body from public.support_messages where ticket_id = 'f2000000-0000-4000-8000-000000000003') = '[removed]', 'ticket text removed';
+  assert (select subject from public.support_tickets where id = 'f2000000-0000-4000-8000-000000000003') = '[removed]', 'ticket subject removed';
+  assert (select count(*) from public.workspaces where id = 'f0000000-0000-4000-8000-000000000003') = 1, 'rows kept (never deleted)';
+  assert exists (select 1 from auth.users where id = 'e1e1e1e1-0000-4000-8000-000000000003'), 'login account not deleted here';
+  assert exists (select 1 from pg_temp.audit('accounts.removed') where true and details::text not like '%Pat%'), 'anonymous record kept';
+  assert not exists (select 1 from public.audit_log where workspace_id = 'f0000000-0000-4000-8000-000000000003' and details::text like '%Pat%'), 'history scrubbed';
+end $$;
+
+-- --- refunds (Island Traders: owner Jone, admin Mere; Vika is a plain member)
+insert into auth.users values ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'vika@c.test');
+insert into public.members (workspace_id, user_id, display_name, role) values (:'ws_c', 'ffffffff-ffff-ffff-ffff-ffffffffffff', 'Vika', 'member');
+select pg_temp.as_user('ffffffff-ffff-ffff-ffff-ffffffffffff'); set role authenticated;
+do $$ begin begin perform public.request_refund(current_setting('test.ws_c')::uuid, 'Accounting Basics', 'November', null, 50, 'FJD', 'mistake', 'x', null);
+  raise exception 'a member asked for a refund';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end; end $$;
+select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
+select (public.request_refund(:'ws_c', 'Accounting Basics', 'November 2026', 'INV-0042', 350, 'FJD', 'duplicate', 'We were charged twice this month.', null) ->> 'id') as rf \gset
+select (public.request_refund(:'ws_c', 'POS', 'October 2026', null, 50, 'FJD', 'didnt_work', 'The till never worked for us.', null) ->> 'id') as rf2 \gset
+select set_config('test.rf', :'rf', false), set_config('test.rf2', :'rf2', false);
+do $$ begin
+  assert json_array_length(public.my_refunds(current_setting('test.ws_c')::uuid)) = 2, 'owner sees the requests';
+  assert (public.my_refunds(current_setting('test.ws_c')::uuid) -> 0 ->> 'ref') ~ '^R-[0-9]{4,}$', 'refund number like R-1042';
+  assert exists (select 1 from public.support_tickets where topic = 'billing' and subject like 'Refund request R-%'), 'a billing ticket for the conversation';
+end $$;
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin
+  assert json_array_length(public.my_refunds(current_setting('test.ws_c')::uuid)) = 0, 'another business sees nothing';
+  assert (select count(*) from public.refund_requests) = 0, 'row rules: nothing of Island Traders''';
+end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ begin
+  assert json_array_length(public.hq_refunds('new') -> 'refunds') = 2, 'support can see refunds';
+  begin perform public.hq_refund_decide(current_setting('test.rf')::uuid, 'approve', null, 'Double charge confirmed'); raise exception 'support approved a refund';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ begin
+  begin perform public.hq_refund_decide(current_setting('test.rf')::uuid, 'approve', null, ''); raise exception 'approved without a reason';
+  exception when others then assert sqlerrm like 'Give a reason%', sqlerrm; end;
+  perform public.hq_refund_decide(current_setting('test.rf')::uuid, 'approve', null, 'Double charge confirmed in the bank statement');
+  assert json_array_length(public.hq_refunds('second') -> 'refunds') = 1, 'over 200: waiting for a second approval';
+  assert json_array_length(public.hq_approvals() -> 'refunds') = 1, 'in the Approvals queue';
+  begin perform public.hq_refund_second(current_setting('test.rf')::uuid, 'me again'); raise exception 'same person approved twice';
+  exception when others then assert sqlerrm like 'The same person can''t give both approvals%', sqlerrm; end;
+  begin perform public.hq_refund_paid(current_setting('test.rf')::uuid, 'bank', 'TX1'); raise exception 'paid before the second approval';
+  exception when others then assert sqlerrm like 'This refund needs a second approval%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
+do $$ begin assert (public.my_refunds(current_setting('test.ws_c')::uuid) -> 1 ->> 'status') in ('reviewing', 'submitted'), 'customer doesn''t see half-approved as approved'; end $$;
+select pg_temp.as_user('dddddddd-dddd-dddd-dddd-dddddddddddd');
+select public.hq_refund_second(:'rf', 'Checked');
+select public.hq_refund_paid(:'rf', 'credit', null);
+select public.hq_refund_decide(:'rf2', 'decline', null, 'POS was used every day in October');
+reset role;
+do $$ begin
+  assert (select status from public.refund_requests where id = current_setting('test.rf')::uuid) = 'paid', 'paid';
+  assert (public.credit_json(current_setting('test.ws_c')::uuid) ->> 'FJD')::numeric = 350, 'credit on account';
+  assert exists (select 1 from pg_temp.audit('refund.approved') where true) and exists (select 1 from pg_temp.audit('refund.second_approved') where true)
+     and exists (select 1 from pg_temp.audit('refund.paid') where true) and exists (select 1 from pg_temp.audit('refund.declined') where true), 'refund steps audited';
+  assert exists (select 1 from public.email_outbox where template = 'refund_declined') and exists (select 1 from public.email_outbox where template = 'refund_paid')
+     and exists (select 1 from public.email_outbox where template = 'refund_received'), 'refund emails queued';
+  begin update public.refund_requests set second_approver = decided_by where id = current_setting('test.rf')::uuid; raise exception 'one person, two approvals';
+  exception when check_violation then null; end;
+  begin delete from public.refund_requests; raise exception 'deleted refunds';
+  exception when others then assert sqlerrm like 'Rows in refund_requests are never deleted%', sqlerrm; end;
+end $$;
+
+-- --- free periods: up to 31 days apply straight away; longer waits for a supervisor (not the same person)
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ declare o json; before date; begin
+  before := (public.hq_company_licence(current_setting('test.ws_c')::uuid) -> 'licence' -> 'modules' -> 'pos' ->> 'trial_ends')::date;
+  o := public.hq_grant_offer(current_setting('test.ws_c')::uuid, 'trial', array['pos'], 14, 'days', 'goodwill', 'Sorry about the printer trouble', null);
+  assert (o ->> 'status') = 'applied' and (o ->> 'ref') ~ '^O-[0-9]{4,}$', format('applied straight away: %s', o);
+  assert (public.hq_company_licence(current_setting('test.ws_c')::uuid) -> 'licence' -> 'modules' -> 'pos' ->> 'trial_ends')::date = before + 14, 'POS trial 14 days longer';
+  before := (public.hq_company_licence(current_setting('test.ws_c')::uuid) -> 'licence' -> 'modules' -> 'basic' ->> 'paid_until')::date;
+  o := public.hq_grant_offer(current_setting('test.ws_c')::uuid, 'paid', array['basic'], 3, 'months', 'retention', 'Thinking of leaving', null);
+  assert (o ->> 'status') = 'waiting', 'over the limit: waits';
+  perform set_config('test.offer', o ->> 'id', false); perform set_config('test.basic_before', before::text, false);
+  assert (public.hq_company_licence(current_setting('test.ws_c')::uuid) -> 'licence' -> 'modules' -> 'basic' ->> 'paid_until')::date = before, 'not applied while waiting';
+  begin perform public.hq_decide_offer((o ->> 'id')::uuid, true, null); raise exception 'support approved';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+do $$ begin begin perform public.hq_grant_offer(current_setting('test.ws_c')::uuid, 'trial', array['pos'], 7, 'days', 'other', 'test it', null); raise exception 'developer granted';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end; end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare o json; begin
+  assert json_array_length(public.hq_approvals() -> 'offers') = 1, 'waiting in Approvals';
+  o := public.hq_grant_offer(current_setting('test.ws_c')::uuid, 'account', null, 60, 'days', 'promotion', 'Launch promotion', null);
+  begin perform public.hq_decide_offer((o ->> 'id')::uuid, true, null); raise exception 'approved own free period';
+  exception when others then assert sqlerrm like 'The same person can''t ask for and approve%', sqlerrm; end;
+  begin perform public.hq_decide_offer((o ->> 'id')::uuid, false, 'Promotion not running yet'); raise exception 'declined own free period';
+  exception when others then assert sqlerrm like 'The same person can''t ask for and approve%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin assert (select status from public.offers where reason = 'Launch promotion') = 'waiting', 'own request can''t be decided by yourself'; end $$;
+select pg_temp.as_user('dddddddd-dddd-dddd-dddd-dddddddddddd'); set role authenticated;
+do $$ declare m json; begin
+  perform public.hq_decide_offer(current_setting('test.offer')::uuid, true, null);
+  assert (public.hq_company_licence(current_setting('test.ws_c')::uuid) -> 'licence' -> 'modules' -> 'basic' ->> 'paid_until')::date
+         = (current_setting('test.basic_before')::date + interval '3 months')::date, 'approved and applied: 3 more months';
+  perform public.hq_decide_offer((select (x ->> 'id')::uuid from json_array_elements(public.hq_approvals() -> 'offers') x limit 1), false, 'Promotion not running yet');
+  m := public.hq_approvals() -> 'month';
+  assert (m ->> 'count')::int = 2 and (m -> 'by_reason' ->> 'goodwill')::int = 14, format('summary: %s', m);
+  assert json_array_length(public.hq_company(current_setting('test.ws_c')::uuid) -> 'extra' -> 'offers') = 3, 'company panel shows offers';
+end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.email_outbox where template = 'free_period') = 2, 'customer told twice (14 days, 3 months)';
+  assert exists (select 1 from public.email_outbox where template = 'free_period' and body_text like 'Hi,%Good news: we''ve added 14 free days to POS — now free until %'), 'email wording';
+  assert not exists (select 1 from public.email_outbox where body_text like '%printer trouble%'), 'internal reasons never emailed';
+  assert exists (select 1 from pg_temp.audit('offer.approved') where true) and exists (select 1 from pg_temp.audit('offer.declined') where true), 'offers audited';
+  begin delete from public.offers; raise exception 'deleted offers'; exception when others then assert sqlerrm like 'Rows in offers are never deleted%', sqlerrm; end;
+end $$;
+-- privacy: none of HQ's new views contain customers' chat messages
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ begin
+  assert public.hq_company(current_setting('test.ws_a')::uuid)::text not like '%Morning team%', 'no chat in the company panel';
+  assert public.hq_tickets('all', null)::text not like '%Morning team%', 'no chat in the inbox';
 end $$;
 reset role;
 

@@ -395,6 +395,8 @@ function registerIpc() {
     const guide = { central: 'central', team: 'team', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     return shell.openExternal(guide ? `https://riyeser.com/help/${guide}.html` : 'https://riyeser.com/help.html').then(() => true);
   });
+  // Get help: ask Riyeser Support on riyeser.com (signs in, then opens the "Get help" form).
+  handle('central:getHelp', () => shell.openExternal('https://riyeser.com/team/?help').then(() => true));
   // Team chat: the Riyeser Team app when it's installed (it rings by itself), otherwise Central's own Team window.
   handle('central:team', async () => { const exe = teamApp(); if (exe) { const err = await shell.openPath(exe); if (err) throw new Error(err); return true; } return openTeam(); });
   handle('search:find', (opts) => {

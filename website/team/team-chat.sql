@@ -14,6 +14,21 @@ create table if not exists public.workspaces (
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now()
 );
+-- Account status: HQ can suspend or close a business (nothing is ever deleted), and when anyone last used it.
+alter table public.workspaces add column if not exists status text not null default 'active';
+do $$ begin
+  alter table public.workspaces add constraint workspaces_status check (status in ('active', 'suspended', 'closed'));
+exception when duplicate_object then null; end $$;
+alter table public.workspaces add column if not exists closed_at timestamptz;
+alter table public.workspaces add column if not exists closed_reason text check (length(closed_reason) <= 300);
+alter table public.workspaces add column if not exists closed_by uuid references auth.users(id) on delete set null;
+alter table public.workspaces add column if not exists duplicate_of uuid references public.workspaces(id) on delete set null;
+alter table public.workspaces add column if not exists last_active_at timestamptz;
+alter table public.workspaces add column if not exists warned_30_at timestamptz;
+alter table public.workspaces add column if not exists warned_7_at timestamptz;
+alter table public.workspaces add column if not exists removal_state text check (removal_state in ('ready', 'removed'));
+alter table public.workspaces add column if not exists removal_ready_at timestamptz;
+alter table public.workspaces add column if not exists removed_at timestamptz;
 
 create table if not exists public.members (
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
@@ -68,7 +83,8 @@ create table if not exists public.reads (              -- how far each person ha
 -- ---------------------------------------------------------------- who can see what
 create or replace function public.is_member(ws uuid) returns boolean
   language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where workspace_id = ws and user_id = auth.uid())
+  select exists (select 1 from members m join workspaces w on w.id = m.workspace_id
+                 where m.workspace_id = ws and m.user_id = auth.uid() and w.status = 'active')
 $$;
 
 -- Two-step sign-in: a session that also passed an authenticator-app code is 'aal2'.
@@ -78,13 +94,15 @@ create or replace function public.mfa_ok() returns boolean
 -- Owners and admins can only use their admin powers after two-step sign-in (password + authenticator code).
 create or replace function public.is_admin(ws uuid) returns boolean
   language sql stable security definer set search_path = public as $$
-  select public.mfa_ok() and exists (select 1 from members where workspace_id = ws and user_id = auth.uid() and role in ('owner', 'admin'))
+  select public.mfa_ok() and exists (select 1 from members m join workspaces w on w.id = m.workspace_id
+    where m.workspace_id = ws and m.user_id = auth.uid() and m.role in ('owner', 'admin') and w.status = 'active')
 $$;
 
 create or replace function public.can_see_channel(ch uuid) returns boolean
   language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from channels c join members m on m.workspace_id = c.workspace_id and m.user_id = auth.uid()
+      join workspaces w on w.id = c.workspace_id and w.status = 'active'
     where c.id = ch and (c.kind = 'channel'
       or exists (select 1 from channel_members cm where cm.channel_id = c.id and cm.user_id = auth.uid())))
 $$;
@@ -460,6 +478,7 @@ begin
   select id, workspace_id into b, ws from branches where branches.code = c;
   if ws is null then select id into ws from workspaces where invite_code = c; end if;
   if ws is null then raise exception 'That invite code isn''t right. Ask the person who invited you for the link again.'; end if;
+  if (select status from workspaces where id = ws) <> 'active' then raise exception 'This business is closed. Contact Riyeser support.'; end if;
   insert into members (workspace_id, user_id, display_name) values (ws, auth.uid(), trim(your_name))
     on conflict (workspace_id, user_id) do nothing;
   if b is not null then perform place_in_branch(b, auth.uid()); end if;
@@ -594,6 +613,7 @@ begin
   if ws is null then select id into ws from workspaces where company_code = c or invite_code = c; end if;
   if ws is null then raise exception 'We couldn''t find a company with that ID. Check it with the person who gave it to you.'; end if;
   select name, require_approval into nm, approval from workspaces where id = ws;
+  if (select status from workspaces where id = ws) <> 'active' then raise exception 'This business is closed. Contact Riyeser support.'; end if;
   if exists (select 1 from members where workspace_id = ws and user_id = auth.uid()) then
     return json_build_object('status', 'member', 'company_name', nm, 'workspace_id', ws);
   end if;
@@ -675,9 +695,18 @@ begin
 end $$;
 
 create or replace function public.device_still_linked(ws uuid, device uuid) returns boolean
-  language sql stable security definer set search_path = public as $$
-  select is_member(ws) and exists (select 1 from devices where id = device and workspace_id = ws and user_id = auth.uid())
-$$;
+  language plpgsql volatile security definer set search_path = public as $$
+declare linked boolean;
+begin
+  linked := exists (select 1 from members where workspace_id = ws and user_id = auth.uid())
+            and exists (select 1 from devices where id = device and workspace_id = ws and user_id = auth.uid());
+  -- Riyeser Central checks in: the business is in use (at most one write an hour)
+  if linked then
+    update workspaces set last_active_at = now()
+      where id = ws and status = 'active' and (last_active_at is null or last_active_at < now() - interval '1 hour');
+  end if;
+  return linked;
+end $$;
 
 revoke all on function public.make_company_code(), public.create_company(text, text, jsonb), public.update_company(uuid, jsonb),
   public.request_join(text, text, text), public.my_join_requests(), public.set_person_branches(uuid, uuid, uuid[]),
@@ -710,6 +739,7 @@ create or replace function public.audit_change() returns trigger
   language plpgsql security definer set search_path = public as $$
 declare ws uuid; rec jsonb; old_j jsonb; new_j jsonb; act text;
 begin
+  if current_setting('riyeser.removing', true) = 'on' then return null; end if;   -- owner-approved anonymising
   old_j := case when tg_op <> 'INSERT' then to_jsonb(old) end;
   new_j := case when tg_op <> 'DELETE' then to_jsonb(new) end;
   rec := coalesce(new_j, old_j);
@@ -722,11 +752,13 @@ begin
   -- keep only what changed (and never the invite codes themselves)
   if tg_op = 'UPDATE' then
     select jsonb_object_agg(k, jsonb_build_object('was', old_j -> k, 'now', new_j -> k)) into rec
-      from jsonb_object_keys(new_j) k where (old_j -> k) is distinct from (new_j -> k) and k not in ('last_seen');
+      from jsonb_object_keys(new_j) k where (old_j -> k) is distinct from (new_j -> k)
+        and k not in ('last_seen', 'last_active_at', 'warned_30_at', 'warned_7_at', 'removal_ready_at');
     if rec is null then return null; end if;
   end if;
   rec := rec - 'invite_code' - 'code';
-  insert into audit_log (workspace_id, action, details) values (ws, act, rec);
+  insert into audit_log (workspace_id, action, details, actor)
+    values (ws, act, rec, case when current_setting('riyeser.by_hq', true) = 'on' then null else auth.uid() end);   -- HQ fixes show as "Riyeser"
   return null;
 end $$;
 
@@ -747,11 +779,16 @@ end $$;
 create table if not exists public.hq_staff (
   user_id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null check (length(trim(display_name)) between 1 and 60),
-  role text not null check (role in ('owner', 'finance', 'support', 'sales', 'developer')),
+  role text not null check (role in ('owner', 'finance', 'support', 'senior', 'sales', 'developer')),
   active boolean not null default true,
   added_by uuid references auth.users(id) on delete set null,
   added_at timestamptz not null default now()
 );
+-- Roles give default permissions; an owner can tick extra ones on (perms_add) or off (perms_remove) per person.
+alter table public.hq_staff add column if not exists perms_add text[] not null default '{}';
+alter table public.hq_staff add column if not exists perms_remove text[] not null default '{}';
+alter table public.hq_staff drop constraint if exists hq_staff_role_check;
+alter table public.hq_staff add constraint hq_staff_role_check check (role in ('owner', 'finance', 'support', 'senior', 'sales', 'developer'));
 create table if not exists public.hq_notes (
   id bigint generated always as identity primary key,
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
@@ -766,6 +803,19 @@ create table if not exists public.hq_audit (
   action text not null,
   details jsonb
 );
+-- Which business and ticket each HQ action was about (for filters and the company panel's own history).
+alter table public.hq_audit add column if not exists workspace_id uuid;   -- no foreign key: the history outlives everything
+alter table public.hq_audit add column if not exists ticket text;
+create index if not exists hq_audit_at on public.hq_audit (at desc);
+create index if not exists hq_audit_ws on public.hq_audit (workspace_id, at desc);
+create index if not exists hq_audit_actor on public.hq_audit (actor, at desc);
+-- The HQ history can't be changed or deleted by anyone, the database owner included.
+create or replace function public.hq_audit_locked() returns trigger language plpgsql as $$
+begin raise exception 'The HQ history can''t be changed or deleted.'; end $$;
+drop trigger if exists hq_audit_locked on public.hq_audit;
+create trigger hq_audit_locked before update or delete on public.hq_audit for each row execute function public.hq_audit_locked();
+drop trigger if exists hq_audit_no_truncate on public.hq_audit;
+create trigger hq_audit_no_truncate before truncate on public.hq_audit for each statement execute function public.hq_audit_locked();
 create table if not exists public.downloads_daily (
   day date not null,
   asset text not null,
@@ -786,19 +836,64 @@ create or replace function public.hq_role() returns text
   language sql stable security definer set search_path = public as $$
   select role from hq_staff where user_id = auth.uid() and active and public.mfa_ok()
 $$;
+-- Permissions. Every HQ function checks one (or one of several) with hq_need; the website only hides buttons.
+create or replace function public.hq_all_perms() returns text[] language sql immutable as $$
+  select array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
+    'people.change_owner', 'business.close', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.assign',
+    'support.saved_replies', 'support.escalate', 'support.level2', 'support.level3', 'refunds.view', 'refunds.request',
+    'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'emails.manage', 'accounts.inactive',
+    'staff.manage', 'audit.view', 'settings.manage']
+$$;
+create or replace function public.hq_role_perms(r text) returns text[] language sql immutable as $$
+  select case r
+    when 'owner' then public.hq_all_perms()
+    when 'finance' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'licences.manage',
+      'support.view', 'support.reply', 'support.level2', 'support.level3', 'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay',
+      'offers.grant', 'offers.approve', 'emails.view']
+    when 'support' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
+      'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'refunds.view',
+      'refunds.request', 'offers.grant', 'emails.view']
+    when 'senior' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
+      'people.change_owner', 'business.close', 'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies',
+      'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage']
+    when 'sales' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'support.view', 'offers.grant']
+    when 'developer' then array['overview.view', 'downloads.view']
+    else '{}'::text[] end
+$$;
+-- What a staff member can do: their role's defaults, plus ticked extras, minus ticked-off ones. Owners can do everything.
+create or replace function public.hq_staff_perms(uid uuid) returns text[]
+  language sql stable security definer set search_path = public as $$
+  select case when s.role = 'owner' then public.hq_all_perms() else
+    array(select distinct p from unnest(public.hq_role_perms(s.role) || s.perms_add) p
+          where not (p = any(s.perms_remove)) and p = any(public.hq_all_perms()) order by 1) end
+  from hq_staff s where s.user_id = uid and s.active
+$$;
+create or replace function public.hq_perms() returns text[]
+  language sql stable security definer set search_path = public as $$
+  select case when public.mfa_ok() then public.hq_staff_perms(auth.uid()) end
+$$;
+create or replace function public.hq_can(perm text) returns boolean
+  language sql stable security definer set search_path = public as $$ select coalesce(perm = any(public.hq_perms()), false) $$;
+-- hq_need(array['a.b', 'c.d']): you need at least one of these permissions. (The argument is still called "roles"
+-- so the database can update it in place; it now holds permission names.)
 create or replace function public.hq_need(roles text[]) returns void
   language plpgsql stable security definer set search_path = public as $$
 begin
   if hq_role() is null then raise exception 'Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.'; end if;
-  if not (hq_role() = 'owner' or hq_role() = any(roles)) then raise exception 'Your HQ role can''t do that.'; end if;
+  if not coalesce(hq_perms() && roles, false) then raise exception 'Your HQ role can''t do that.'; end if;
 end $$;
+-- Every HQ action is written here. Never put personal details in it: it is kept for good, even after an account is removed.
 create or replace function public.hq_log(act text, det jsonb) returns void
-  language sql security definer set search_path = public as $$ insert into hq_audit (action, details) values (act, det) $$;
+  language sql security definer set search_path = public as $$
+  insert into hq_audit (action, details, workspace_id, ticket)
+  values (act, det, case when det ->> 'workspace_id' ~ '^[0-9a-f-]{36}$' then (det ->> 'workspace_id')::uuid end, nullif(det ->> 'ticket', ''))
+$$;
 
 -- Who am I in HQ (also tells the website whether two-step sign-in is still needed)
 create or replace function public.hq_me() returns json
   language sql stable security definer set search_path = public as $$
-  select json_build_object('role', s.role, 'name', s.display_name, 'active', s.active, 'two_step', public.mfa_ok())
+  select json_build_object('role', s.role, 'name', s.display_name, 'active', s.active, 'two_step', public.mfa_ok(),
+    'perms', case when s.active then public.hq_staff_perms(s.user_id) end)
   from hq_staff s where s.user_id = auth.uid()
 $$;
 
@@ -806,7 +901,7 @@ create or replace function public.hq_overview() returns json
   language plpgsql stable security definer set search_path = public as $$
 declare r json;
 begin
-  perform hq_need(array['finance', 'support', 'sales', 'developer']);
+  perform hq_need(array['overview.view']);
   select json_build_object(
     'companies', (select count(*) from workspaces),
     'companies_7d', (select count(*) from workspaces where created_at > now() - interval '7 days'),
@@ -837,7 +932,7 @@ create or replace function public.hq_companies(search text) returns table (
   last_seen timestamptz, calls_paid_until timestamptz, trial_days_left int, owner_name text, owner_email text)
   language plpgsql stable security definer set search_path = public as $$
 begin
-  perform hq_need(array['finance', 'support', 'sales']);
+  perform hq_need(array['customers.view']);
   return query
   select w.id, w.name, w.company_code, w.country, w.created_at,
     (select count(*) from members m where m.workspace_id = w.id),
@@ -859,14 +954,17 @@ create or replace function public.hq_company(ws uuid) returns json
   language plpgsql stable security definer set search_path = public as $$
 declare r json;
 begin
-  perform hq_need(array['finance', 'support', 'sales']);
+  perform hq_need(array['customers.view']);
   select json_build_object(
     'profile', (select json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'legal_name', w.legal_name,
         'tax_number', w.tax_number, 'address', w.address, 'phone', w.phone, 'email', w.email, 'country', w.country,
         'created_at', w.created_at, 'calls_paid_until', w.calls_paid_until, 'require_approval', w.require_approval,
-        'trial_days_left', greatest(0, 90 - extract(day from now() - w.created_at)::int)) from workspaces w where w.id = ws),
-    'people', (select coalesce(json_agg(json_build_object('name', m.display_name, 'role', m.role, 'job_role', m.job_role,
-        'extension', m.extension, 'email', u.email, 'joined', m.joined_at) order by m.joined_at), '[]')
+        'trial_days_left', greatest(0, 90 - extract(day from now() - w.created_at)::int), 'kind', w.kind,
+        'status', w.status, 'closed_at', w.closed_at, 'closed_reason', w.closed_reason, 'last_active_at', w.last_active_at,
+        'duplicate_of', w.duplicate_of, 'duplicate_of_name', (select d.name from workspaces d where d.id = w.duplicate_of),
+        'removal_state', w.removal_state) from workspaces w where w.id = ws),
+    'people', (select coalesce(json_agg(json_build_object('user_id', m.user_id, 'name', m.display_name, 'role', m.role, 'job_role', m.job_role,
+        'extension', m.extension, 'email', u.email, 'joined', m.joined_at, 'two_step', public.has_two_step(m.user_id)) order by m.joined_at), '[]')
         from members m join auth.users u on u.id = m.user_id where m.workspace_id = ws),
     'branches', (select coalesce(json_agg(json_build_object('name', b.name, 'extension', b.extension,
         'people', (select count(*) from branch_members bm where bm.branch_id = b.id)) order by b.extension), '[]') from branches b where b.workspace_id = ws),
@@ -875,16 +973,17 @@ begin
         order by d.last_seen desc), '[]') from devices d where d.workspace_id = ws),
     'requests_waiting', (select count(*) from join_requests j where j.workspace_id = ws and j.status = 'pending'),
     'notes', (select coalesce(json_agg(json_build_object('body', n.body, 'at', n.created_at,
-        'by', (select display_name from hq_staff s where s.user_id = n.author)) order by n.created_at desc), '[]') from hq_notes n where n.workspace_id = ws)
+        'by', (select display_name from hq_staff s where s.user_id = n.author)) order by n.created_at desc), '[]') from hq_notes n where n.workspace_id = ws),
+    'extra', public.hq_company_extra(ws)
   ) into r;
-  perform hq_log('company.viewed', json_build_object('workspace_id', ws)::jsonb);
+  perform hq_log('customer.viewed', json_build_object('workspace_id', ws)::jsonb);
   return r;
 end $$;
 
 create or replace function public.hq_set_calls_paid(ws uuid, until date) returns void
   language plpgsql security definer set search_path = public as $$
 begin
-  perform hq_need(array['finance']);
+  perform hq_need(array['licences.manage']);
   update workspaces set calls_paid_until = until::timestamptz + interval '1 day' - interval '1 second' where id = ws;
   perform hq_log('calls.paid_until', json_build_object('workspace_id', ws, 'until', until)::jsonb);
 end $$;
@@ -892,7 +991,7 @@ end $$;
 create or replace function public.hq_add_note(ws uuid, body text) returns void
   language plpgsql security definer set search_path = public as $$
 begin
-  perform hq_need(array['finance', 'support', 'sales']);
+  perform hq_need(array['customers.notes']);
   insert into hq_notes (workspace_id, author, body) values (ws, auth.uid(), trim(body));
   perform hq_log('note.added', json_build_object('workspace_id', ws)::jsonb);
 end $$;
@@ -900,7 +999,7 @@ end $$;
 create or replace function public.hq_staff_list() returns table (user_id uuid, display_name text, role text, active boolean, email text, added_at timestamptz)
   language plpgsql stable security definer set search_path = public as $$
 begin
-  perform hq_need(array['finance', 'support', 'sales', 'developer']);
+  perform hq_need(array['overview.view']);
   return query select s.user_id, s.display_name, s.role, s.active, u.email::text, s.added_at from hq_staff s join auth.users u on u.id = s.user_id order by s.added_at;
 end $$;
 
@@ -909,8 +1008,9 @@ create or replace function public.hq_add_staff(staff_email text, staff_name text
   language plpgsql security definer set search_path = public as $$
 declare uid uuid;
 begin
-  perform hq_need(array[]::text[]);
-  if staff_role not in ('owner', 'finance', 'support', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  perform hq_need(array['staff.manage']);
+  if staff_role not in ('owner', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  if staff_role = 'owner' and hq_role() <> 'owner' then raise exception 'Only an HQ owner can make another owner.'; end if;
   select id into uid from auth.users where lower(email::text) = lower(trim(staff_email));
   if uid is null then raise exception 'No Riyeser account with that email yet. Ask them to create one at riyeser.com/team first.'; end if;
   insert into hq_staff (user_id, display_name, role, added_by) values (uid, trim(staff_name), staff_role, auth.uid())
@@ -921,9 +1021,11 @@ end $$;
 create or replace function public.hq_set_staff(staff uuid, staff_role text, is_active boolean) returns void
   language plpgsql security definer set search_path = public as $$
 begin
-  perform hq_need(array[]::text[]);
+  perform hq_need(array['staff.manage']);
   if staff = auth.uid() then raise exception 'You can''t change your own HQ access. Ask another owner.'; end if;
-  if staff_role not in ('owner', 'finance', 'support', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  if staff_role not in ('owner', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  if hq_role() <> 'owner' and (staff_role = 'owner' or (select role from hq_staff where user_id = staff) = 'owner') then
+    raise exception 'Only an HQ owner can change an owner.'; end if;
   update hq_staff set role = staff_role, active = is_active where user_id = staff;
   perform hq_log('staff.changed', json_build_object('user_id', staff, 'role', staff_role, 'active', is_active)::jsonb);
 end $$;
@@ -931,7 +1033,7 @@ end $$;
 create or replace function public.hq_history() returns table (at timestamptz, who text, action text, details jsonb)
   language plpgsql stable security definer set search_path = public as $$
 begin
-  perform hq_need(array[]::text[]);
+  perform hq_need(array['audit.view']);
   return query select a.at, coalesce((select display_name from hq_staff s where s.user_id = a.actor), 'Riyeser'), a.action, a.details
     from hq_audit a order by a.at desc limit 300;
 end $$;
@@ -939,7 +1041,7 @@ end $$;
 create or replace function public.hq_downloads(days int) returns table (day date, asset text, total bigint)
   language plpgsql stable security definer set search_path = public as $$
 begin
-  perform hq_need(array['finance', 'support', 'sales', 'developer']);
+  perform hq_need(array['downloads.view']);
   return query select d.day, d.asset, d.total from downloads_daily d where d.day > current_date - least(greatest(days, 1), 730) order by d.day, d.asset;
 end $$;
 
@@ -1019,9 +1121,13 @@ revoke all on public.company_modules, public.company_plans from anon, authentica
 -- One program's state today: {status, active, trial_ends, paid_until, days_left}
 create or replace function public.module_state(ws uuid, mod text) returns json
   language plpgsql stable security definer set search_path = public as $$
-declare m company_modules; joined date; te date; st text; act boolean; left_days int;
+declare m company_modules; joined date; te date; st text; act boolean; left_days int; wst text;
 begin
-  select created_at::date into joined from workspaces where id = ws;
+  select created_at::date, status into joined, wst from workspaces where id = ws;
+  -- a suspended or closed business: nothing is active online (the books on its PCs are never touched)
+  if wst is distinct from 'active' then
+    return json_build_object('status', 'closed', 'active', false, 'trial_ends', null, 'paid_until', null, 'days_left', null);
+  end if;
   select * into m from company_modules where workspace_id = ws and module = mod;
   if m.module is null or m.status = 'trial' then
     te := coalesce(m.trial_ends, joined + 90);
@@ -1041,7 +1147,7 @@ end $$;
 create or replace function public.licence_json(ws uuid) returns json
   language sql stable security definer set search_path = public as $$
   select json_build_object(
-    'workspace_id', w.id, 'company_code', w.company_code, 'checked_at', now(),
+    'workspace_id', w.id, 'company_code', w.company_code, 'checked_at', now(), 'business_status', w.status,
     'modules', (select json_object_agg(m, public.module_state(w.id, m)) from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m),
     'seats', json_build_object('included', 3, 'extra', coalesce(p.extra_users, 0), 'used', (select count(*) from members where workspace_id = w.id)),
     'extra_companies', coalesce(p.extra_companies, 0), 'billing', coalesce(p.billing, 'monthly'), 'early_bird', coalesce(p.early_bird, false))
@@ -1052,7 +1158,7 @@ $$;
 create or replace function public.company_licence(ws uuid) returns json
   language plpgsql stable security definer set search_path = public as $$
 begin
-  if not is_member(ws) then raise exception 'You''re not in that company'; end if;
+  if not exists (select 1 from members where workspace_id = ws and user_id = auth.uid()) then raise exception 'You''re not in that company'; end if;
   return licence_json(ws);
 end $$;
 
@@ -1072,10 +1178,10 @@ create or replace function public.team_features(ws uuid) returns json
 $$;
 
 -- HQ: set one program for a company (owners and finance).
-create or replace function public.hq_set_module(ws uuid, mod text, new_status text, trial_end date, paid_to date) returns void
+-- The licence change itself (no permission check: only called by checked hq_ functions).
+create or replace function public.licence_set_module(ws uuid, mod text, new_status text, trial_end date, paid_to date) returns void
   language plpgsql security definer set search_path = public as $$
 begin
-  perform hq_need(array['finance']);
   if new_status not in ('trial', 'active', 'cancelled') then raise exception 'Choose trial, active or cancelled'; end if;
   if new_status = 'trial' and trial_end is null then raise exception 'A trial needs an end date'; end if;
   if new_status = 'active' and paid_to is null then raise exception 'Active needs a paid-until date'; end if;
@@ -1084,6 +1190,14 @@ begin
   on conflict (workspace_id, module) do update set status = excluded.status, trial_ends = excluded.trial_ends,
     paid_until = excluded.paid_until, updated_at = now();
   if mod = 'calls' then update workspaces set calls_paid_until = case when new_status = 'active' then paid_to + time '23:59:59' end where id = ws; end if;
+end $$;
+revoke all on function public.licence_set_module(uuid, text, text, date, date) from public, anon, authenticated;
+
+create or replace function public.hq_set_module(ws uuid, mod text, new_status text, trial_end date, paid_to date) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform hq_need(array['licences.manage']);
+  perform licence_set_module(ws, mod, new_status, trial_end, paid_to);
   perform hq_log('licence.module', json_build_object('workspace_id', ws, 'module', mod, 'status', new_status, 'trial_ends', trial_end, 'paid_until', paid_to)::jsonb);
 end $$;
 
@@ -1092,7 +1206,7 @@ create or replace function public.hq_set_plan(ws uuid, users_extra int, companie
   language plpgsql security definer set search_path = public as $$
 declare was boolean;
 begin
-  perform hq_need(array['finance']);
+  perform hq_need(array['licences.manage']);
   select early_bird into was from company_plans where workspace_id = ws;
   if is_early_bird and not coalesce(was, false) and (select count(*) from company_plans where early_bird) >= 100 then
     raise exception 'The early bird offer is full: 100 businesses already have it.';
@@ -1129,7 +1243,7 @@ create or replace function public.hq_licences() returns json
   language plpgsql stable security definer set search_path = public as $$
 declare r json;
 begin
-  perform hq_need(array['finance', 'sales', 'support']);
+  perform hq_need(array['licences.view']);
   select json_build_object(
     'monthly_estimate', coalesce((select sum(public.company_monthly(id)) from workspaces), 0),
     'paying_companies', (select count(*) from workspaces w where public.company_monthly(w.id) > 0),
@@ -1138,7 +1252,7 @@ begin
     'modules', (select json_agg(json_build_object('module', m,
         'active_paid', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'active'),
         'on_trial', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'trial'),
-        'ended', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') in ('ended', 'cancelled')))) 
+        'ended', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') in ('ended', 'cancelled', 'closed')))) 
       from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m),
     'ending_soon', (select coalesce(json_agg(x order by x.days_left), '[]') from (
         select w.id, w.name, w.company_code, m as module, (public.module_state(w.id, m) ->> 'status') as status,
@@ -1153,7 +1267,7 @@ end $$;
 create or replace function public.hq_company_licence(ws uuid) returns json
   language plpgsql stable security definer set search_path = public as $$
 begin
-  perform hq_need(array['finance', 'support', 'sales']);
+  perform hq_need(array['licences.view']);
   return json_build_object('licence', licence_json(ws), 'monthly', company_monthly(ws));
 end $$;
 
@@ -1163,3 +1277,1355 @@ revoke all on function public.module_state(uuid, text), public.licence_json(uuid
 grant execute on function public.company_licence(uuid), public.hq_set_module(uuid, text, text, date, date),
   public.hq_set_plan(uuid, int, int, text, boolean), public.hq_licences(), public.hq_company_licence(uuid) to authenticated;
 revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_monthly(uuid) from authenticated;
+
+-- ================================================================ Riyeser HQ, phase 1
+-- Support tickets (with escalations), fix-up tools, staff permissions, the full staff audit trail, inactive accounts,
+-- the email outbox, refund requests and free periods (one "Approvals" queue for both).
+-- Rules: nothing here deletes customer data. The only removal is the owner-approved anonymising of long-closed
+-- accounts (hq_remove_accounts). HQ never sees customers' chat messages or books; support tickets are written
+-- to Riyeser, so HQ seeing those is fine.
+
+-- ---------------------------------------------------------------- activity (for inactive accounts)
+update public.workspaces w set last_active_at = greatest(w.created_at,
+    coalesce((select max(d.last_seen) from public.devices d where d.workspace_id = w.id), w.created_at))
+  where w.last_active_at is null;
+alter table public.workspaces alter column last_active_at set default now();
+create index if not exists workspaces_status_active on public.workspaces (status, last_active_at);
+
+-- The website calls this once per visit after sign-in (at most one write an hour).
+create or replace function public.touch_activity() returns void
+  language sql security definer set search_path = public as $$
+  update workspaces set last_active_at = now()
+  where status = 'active' and (last_active_at is null or last_active_at < now() - interval '1 hour')
+    and id in (select workspace_id from members where user_id = auth.uid())
+$$;
+-- Signing in counts too (Supabase sets auth.users.last_sign_in_at at each sign-in).
+create or replace function public.activity_on_sign_in() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if new.last_sign_in_at is distinct from old.last_sign_in_at then
+    update workspaces set last_active_at = now()
+    where status = 'active' and (last_active_at is null or last_active_at < now() - interval '1 hour')
+      and id in (select workspace_id from members where user_id = new.id);
+  end if;
+  return new;
+end $$;
+do $$ begin
+  if exists (select 1 from information_schema.columns where table_schema = 'auth' and table_name = 'users' and column_name = 'last_sign_in_at') then
+    drop trigger if exists riyeser_activity_on_sign_in on auth.users;
+    create trigger riyeser_activity_on_sign_in after update of last_sign_in_at on auth.users
+      for each row execute function public.activity_on_sign_in();
+  end if;
+exception when insufficient_privilege then raise notice 'Sign-in activity trigger skipped (no permission on auth.users).';
+end $$;
+
+-- Two-step sign-in turned on? (for HQ's people list)
+create or replace function public.has_two_step(uid uuid) returns boolean
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  return exists (select 1 from auth.mfa_factors f where f.user_id = uid and f.status::text = 'verified');
+exception when undefined_table then return null;
+end $$;
+
+-- Members of a closed or suspended business: what to tell them at sign-in.
+create or replace function public.my_closed_businesses() returns table (id uuid, name text, status text)
+  language sql stable security definer set search_path = public as $$
+  select w.id, w.name, w.status from members m join workspaces w on w.id = m.workspace_id
+  where m.user_id = auth.uid() and w.status <> 'active'
+$$;
+
+-- Paying for any program right now? Paid businesses are never closed for being inactive.
+create or replace function public.is_paying(ws uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from company_modules m where m.workspace_id = ws
+                   and ((m.status = 'active' and (m.paid_until is null or m.paid_until >= current_date))
+                     or (m.status = 'cancelled' and m.paid_until >= current_date)))
+      or exists (select 1 from workspaces w where w.id = ws and w.calls_paid_until > now())
+$$;
+
+-- ---------------------------------------------------------------- settings the HQ owner can change
+create or replace function public.hq_setting_num(k text, dflt numeric) returns numeric
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select value::numeric from hq_settings where key = k and value ~ '^[0-9]+(\.[0-9]+)?$'), dflt)
+$$;
+create or replace function public.hq_settings_json() returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object(
+    'support.overdue_hours', public.hq_setting_num('support.overdue_hours', 24),
+    'support.escalate_hours', public.hq_setting_num('support.escalate_hours', 48),
+    'refunds.two_person_threshold', public.hq_setting_num('refunds.two_person_threshold', 200),
+    'offers.self_limit_days', public.hq_setting_num('offers.self_limit_days', 31))
+$$;
+create or replace function public.hq_get_settings() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin perform hq_need(array['overview.view']); return hq_settings_json(); end $$;
+create or replace function public.hq_set_setting(setting text, val numeric) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform hq_need(array['settings.manage']);
+  if setting not in ('support.overdue_hours', 'support.escalate_hours', 'refunds.two_person_threshold', 'offers.self_limit_days') then
+    raise exception 'That isn''t a setting HQ can change.'; end if;
+  if val is null or val <= 0 or val > 100000 then raise exception 'Choose a number above 0.'; end if;
+  insert into hq_settings (key, value) values (setting, val::text) on conflict (key) do update set value = excluded.value;
+  perform hq_log('settings.changed', jsonb_build_object('setting', setting, 'value', val));
+end $$;
+
+-- ---------------------------------------------------------------- email outbox (dormant until a provider is chosen)
+-- Only HQ functions and jobs add to it. The daily GitHub job (hq-jobs.yml) sends what's queued, once set up.
+create table if not exists public.email_outbox (
+  id bigint generated always as identity primary key,
+  to_address text check (length(to_address) <= 320),
+  to_user uuid,
+  subject text not null check (length(subject) between 1 and 200),
+  body_text text not null check (length(body_text) <= 20000),
+  body_html text check (length(body_html) <= 60000),
+  template text not null check (length(template) <= 40),
+  workspace_id uuid,
+  ticket_id uuid,
+  refund_id uuid,
+  status text not null default 'queued' check (status in ('queued', 'sent', 'failed', 'held')),
+  attempts int not null default 0,
+  last_error text check (length(last_error) <= 500),
+  created_at timestamptz not null default now(),
+  sent_at timestamptz
+);
+create index if not exists email_outbox_status on public.email_outbox (status, id);
+alter table public.email_outbox enable row level security;
+revoke all on public.email_outbox from anon, authenticated;
+
+create or replace function public.email_esc(t text) returns text language sql immutable as $$
+  select replace(replace(replace(replace(coalesce(t, ''), '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), '"', '&quot;')
+$$;
+create or replace function public.email_html(subj text, body text) returns text language sql immutable as $$
+  select '<!doctype html><html><body style="margin:0;background:#f4f6fa;font-family:Segoe UI,Arial,sans-serif;color:#2c3a5a">'
+    || '<div style="max-width:560px;margin:0 auto;padding:24px 16px"><div style="font-weight:800;font-size:20px;color:#0f1d3d;margin-bottom:14px">Riyeser</div>'
+    || '<div style="background:#fff;border:1px solid #e3e8f1;border-radius:12px;padding:20px 22px;line-height:1.55;font-size:15px">'
+    || '<h1 style="font-size:18px;color:#0f1d3d;margin:0 0 12px">' || public.email_esc(subj) || '</h1>'
+    || replace(public.email_esc(body), E'\n', '<br>')
+    || '</div><p style="font-size:12px;color:#64708a;margin-top:14px">Riyeser Support &middot; riyeser.com</p></div></body></html>'
+$$;
+-- Queue one email. With no usable address it's 'held' (HQ can see it and send it again later).
+create or replace function public.queue_email(to_uid uuid, to_addr text, tmpl text, subj text, body text, ws uuid, ticket uuid, refund uuid)
+  returns void language plpgsql security definer set search_path = public as $$
+declare a text := coalesce(nullif(trim(coalesce(to_addr, '')), ''), (select email::text from auth.users where id = to_uid));
+begin
+  if current_setting('riyeser.removing', true) = 'on' then return; end if;
+  insert into email_outbox (to_address, to_user, subject, body_text, body_html, template, workspace_id, ticket_id, refund_id, status)
+  values (a, to_uid, left(subj, 200), left(body, 19000) || E'\n\nRiyeser Support\nriyeser.com', email_html(left(subj, 200), left(body, 19000)),
+          tmpl, ws, ticket, refund, case when a is null or a !~ '^[^@\s]+@[^@\s]+$' then 'held' else 'queued' end);
+end $$;
+-- To the business's owner(s).
+create or replace function public.queue_email_owners(ws uuid, tmpl text, subj text, body text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare o uuid;
+begin
+  for o in select user_id from members where workspace_id = ws and role = 'owner' loop
+    perform queue_email(o, null, tmpl, subj, body, ws, null, null);
+  end loop;
+end $$;
+
+-- HQ "Emails" view: counts, recent, held and failed (no message bodies).
+create or replace function public.hq_emails() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['emails.view']);
+  return json_build_object(
+    'counts', (select json_build_object('queued', count(*) filter (where status = 'queued'), 'sent', count(*) filter (where status = 'sent'),
+        'failed', count(*) filter (where status = 'failed'), 'held', count(*) filter (where status = 'held'),
+        'sent_7d', count(*) filter (where status = 'sent' and sent_at > now() - interval '7 days')) from email_outbox),
+    'recent', (select coalesce(json_agg(x order by x.id desc), '[]') from (select id, to_address, subject, template, status, attempts, created_at, sent_at
+        from email_outbox order by id desc limit 60) x),
+    'problems', (select coalesce(json_agg(x order by x.id desc), '[]') from (select id, to_address, subject, template, status, attempts, last_error, created_at
+        from email_outbox where status in ('held', 'failed') order by id desc limit 100) x));
+end $$;
+create or replace function public.hq_email_resend(email_id bigint) returns void
+  language plpgsql security definer set search_path = public as $$
+declare a text;
+begin
+  perform hq_need(array['emails.manage']);
+  select coalesce(o.to_address, (select email::text from auth.users where id = o.to_user)) into a from email_outbox o
+    where o.id = email_id and o.status in ('held', 'failed');
+  if not found then raise exception 'Only held or failed emails can be sent again.'; end if;
+  if a is null then raise exception 'That email has no address to send to.'; end if;
+  update email_outbox set status = 'queued', attempts = 0, last_error = null, to_address = a where id = email_id;
+  perform hq_log('email.resend', jsonb_build_object('email_id', email_id));
+end $$;
+
+-- ---------------------------------------------------------------- support tickets
+create sequence if not exists public.support_ticket_no start 10234;
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  number bigint not null unique default nextval('public.support_ticket_no'),
+  ref text generated always as ('T-' || number::text) stored,
+  workspace_id uuid references public.workspaces(id) on delete set null,      -- empty for people with no business
+  opened_by uuid references auth.users(id) on delete set null,
+  topic text not null default 'other' check (topic in ('billing', 'signin', 'program', 'other')),
+  subject text not null check (length(trim(subject)) between 1 and 150),
+  status text not null default 'new' check (status in ('new', 'waiting_us', 'waiting_customer', 'done')),
+  priority text not null default 'normal' check (priority in ('low', 'normal', 'high', 'urgent')),
+  assignee uuid references auth.users(id) on delete set null,
+  level int not null default 1 check (level between 1 and 3),                  -- 1 Support, 2 Senior / technical, 3 Management
+  created_at timestamptz not null default now(),
+  first_reply_at timestamptz,
+  updated_at timestamptz not null default now(),
+  last_customer_at timestamptz,
+  last_staff_at timestamptz,
+  overdue_at timestamptz,
+  escalated_at timestamptz
+);
+create index if not exists support_tickets_opener on public.support_tickets (opened_by, updated_at desc);
+create index if not exists support_tickets_ws on public.support_tickets (workspace_id, updated_at desc);
+create index if not exists support_tickets_status on public.support_tickets (status, updated_at desc);
+create table if not exists public.support_messages (
+  id bigint generated always as identity primary key,
+  ticket_id uuid not null references public.support_tickets(id),
+  author uuid references auth.users(id) on delete set null,      -- empty: Riyeser itself (automatic notes)
+  is_staff boolean not null default false,
+  internal boolean not null default false,                         -- a staff-only note: customers never see it
+  body text not null check (length(trim(body)) between 1 and 5000),
+  created_at timestamptz not null default now(),
+  check (is_staff or not internal)
+);
+create index if not exists support_messages_ticket on public.support_messages (ticket_id, id);
+create table if not exists public.support_reads (
+  ticket_id uuid not null references public.support_tickets(id),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  read_at timestamptz not null default now(),
+  primary key (ticket_id, user_id)
+);
+create table if not exists public.support_saved_replies (
+  id bigint generated always as identity primary key,
+  title text not null check (length(trim(title)) between 1 and 80),
+  body text not null check (length(trim(body)) between 1 and 5000),
+  active boolean not null default true,
+  updated_by uuid references auth.users(id) on delete set null,
+  updated_at timestamptz not null default now()
+);
+create table if not exists public.support_escalations (
+  id bigint generated always as identity primary key,
+  ticket_id uuid not null references public.support_tickets(id),
+  from_level int not null, to_level int not null,
+  by_user uuid references auth.users(id) on delete set null,     -- empty: the automatic support sweep
+  reason text not null check (length(reason) <= 500),
+  at timestamptz not null default now()
+);
+alter table public.support_tickets enable row level security;
+alter table public.support_messages enable row level security;
+alter table public.support_reads enable row level security;
+alter table public.support_saved_replies enable row level security;
+alter table public.support_escalations enable row level security;
+revoke all on public.support_tickets, public.support_messages, public.support_reads, public.support_saved_replies,
+  public.support_escalations from anon, authenticated;
+revoke all on sequence public.support_ticket_no from anon, authenticated;
+
+-- Can this customer see this ticket? Their own, or (owners and admins, after two-step sign-in) their business's.
+create or replace function public.can_see_ticket(t uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from support_tickets s where s.id = t and auth.uid() is not null
+                 and (s.opened_by = auth.uid() or (s.workspace_id is not null and public.is_admin(s.workspace_id))))
+$$;
+drop policy if exists st_read on public.support_tickets;
+create policy st_read on public.support_tickets for select to authenticated
+  using (opened_by = auth.uid() or (workspace_id is not null and public.is_admin(workspace_id)));
+drop policy if exists sm_read on public.support_messages;
+create policy sm_read on public.support_messages for select to authenticated using (not internal and public.can_see_ticket(ticket_id));
+-- Customers read only these columns (never who at Riyeser is assigned, levels or internal notes); writes go through functions.
+grant select (id, number, ref, workspace_id, opened_by, topic, subject, status, created_at, updated_at, first_reply_at,
+  last_customer_at, last_staff_at) on public.support_tickets to authenticated;
+grant select (id, ticket_id, is_staff, internal, body, created_at) on public.support_messages to authenticated;
+
+-- Nobody can edit or delete a support message (only the owner-approved anonymising can blank it).
+create or replace function public.support_messages_locked() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'DELETE' then raise exception 'Support messages can''t be changed or deleted.'; end if;
+  if current_setting('riyeser.removing', true) = 'on' then return new; end if;
+  if new.body is distinct from old.body or new.ticket_id <> old.ticket_id or new.is_staff <> old.is_staff
+     or new.internal <> old.internal or new.created_at <> old.created_at or (new.author is not null and new.author is distinct from old.author) then
+    raise exception 'Support messages can''t be changed or deleted.';
+  end if;
+  return new;   -- (only a deleted login account's id becoming empty gets through)
+end $$;
+drop trigger if exists support_messages_locked on public.support_messages;
+create trigger support_messages_locked before update or delete on public.support_messages for each row execute function public.support_messages_locked();
+create or replace function public.no_delete() returns trigger language plpgsql as $$
+begin raise exception 'Rows in % are never deleted.', tg_table_name; end $$;
+do $$ declare t text; begin
+  foreach t in array array['support_tickets', 'support_escalations', 'email_outbox'] loop
+    execute format('drop trigger if exists no_delete on public.%I', t);
+    execute format('create trigger no_delete before delete on public.%I for each row execute function public.no_delete()', t);
+  end loop;
+end $$;
+
+create or replace function public.level_name(l int) returns text language sql immutable as $$
+  select case l when 1 then 'Support' when 2 then 'Senior' when 3 then 'Management' else 'Level ' || l end
+$$;
+
+-- Customers: ask for help (with or without a business).
+create or replace function public.open_ticket(ws uuid, help_topic text, help_subject text, message text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; uid uuid := auth.uid(); tp text := coalesce(nullif(help_topic, ''), 'other');
+begin
+  if uid is null then raise exception 'Sign in first'; end if;
+  if ws is not null and not exists (select 1 from members where workspace_id = ws and user_id = uid) then
+    raise exception 'You''re not in that business'; end if;
+  if tp not in ('billing', 'signin', 'program', 'other') then tp := 'other'; end if;
+  if length(trim(coalesce(help_subject, ''))) = 0 or length(trim(coalesce(message, ''))) = 0 then
+    raise exception 'Add a subject and a message, then send it again.'; end if;
+  if (select count(*) from support_tickets where opened_by = uid and created_at > now() - interval '1 day') >= 10 then
+    raise exception 'You''ve sent a lot of help requests today. Reply to one of them instead and we''ll pick it up.'; end if;
+  insert into support_tickets (workspace_id, opened_by, topic, subject, status, last_customer_at)
+    values (ws, uid, tp, left(trim(help_subject), 150), 'new', now()) returning * into t;
+  insert into support_messages (ticket_id, author, body) values (t.id, uid, left(trim(message), 5000));
+  insert into support_reads (ticket_id, user_id) values (t.id, uid) on conflict do nothing;
+  perform queue_email(uid, null, 'ticket_received', 'We''ve got your help request (' || t.ref || ')',
+    'Hi,' || E'\n\n' || 'Thanks for getting in touch. We''ve got your help request "' || t.subject || '" (' || t.ref || ').' || E'\n\n'
+    || 'We''ll reply by email, and you''ll see our answer on your Riyeser home page at riyeser.com/team under "Your help requests". '
+    || 'To add anything, open the request there and reply.', ws, t.id, null);
+  return json_build_object('id', t.id, 'ref', t.ref);
+end $$;
+
+create or replace function public.reply_ticket(ticket uuid, message text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not can_see_ticket(ticket) then raise exception 'We couldn''t find that help request.'; end if;
+  if length(trim(coalesce(message, ''))) = 0 then raise exception 'Write a message first.'; end if;
+  insert into support_messages (ticket_id, author, body) values (ticket, auth.uid(), left(trim(message), 5000));
+  update support_tickets set status = 'waiting_us', last_customer_at = now(), updated_at = now() where id = ticket;
+  insert into support_reads (ticket_id, user_id) values (ticket, auth.uid()) on conflict (ticket_id, user_id) do update set read_at = now();
+end $$;
+
+-- Customers' list, with how many Riyeser replies they haven't read.
+create or replace function public.my_tickets() returns json
+  language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(x order by x.updated_at desc), '[]') from (
+    select t.id, t.ref, t.subject, t.topic, t.status, t.workspace_id, w.name as business, t.opened_by = auth.uid() as mine,
+      t.created_at, t.updated_at,
+      (select count(*) from support_messages m where m.ticket_id = t.id and m.is_staff and not m.internal
+         and m.created_at > coalesce((select r.read_at from support_reads r where r.ticket_id = t.id and r.user_id = auth.uid()), '-infinity')) as unread
+    from support_tickets t left join workspaces w on w.id = t.workspace_id
+    where auth.uid() is not null and (t.opened_by = auth.uid() or (t.workspace_id is not null and public.is_admin(t.workspace_id)))
+    order by t.updated_at desc limit 50) x
+$$;
+-- One request and its conversation (never internal notes, never staff names), and mark it read.
+create or replace function public.my_ticket(ticket uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare r json;
+begin
+  if not can_see_ticket(ticket) then raise exception 'We couldn''t find that help request.'; end if;
+  select json_build_object('id', t.id, 'ref', t.ref, 'subject', t.subject, 'topic', t.topic, 'status', t.status, 'created_at', t.created_at,
+    'messages', (select coalesce(json_agg(json_build_object('id', m.id, 'staff', m.is_staff, 'mine', m.author = auth.uid(),
+        'from', case when m.is_staff then 'Riyeser Support'
+                     else coalesce((select display_name from members mm where mm.workspace_id = t.workspace_id and mm.user_id = m.author), 'You') end,
+        'body', m.body, 'at', m.created_at) order by m.id), '[]') from support_messages m where m.ticket_id = t.id and not m.internal))
+    into r from support_tickets t where t.id = ticket;
+  insert into support_reads (ticket_id, user_id) values (ticket, auth.uid()) on conflict (ticket_id, user_id) do update set read_at = now();
+  return r;
+end $$;
+
+-- HQ: who can work a level. Level 1 needs support.reply, level 2 support.level2, level 3 support.level3.
+create or replace function public.level_perm(l int) returns text language sql immutable as $$
+  select case l when 1 then 'support.reply' when 2 then 'support.level2' else 'support.level3' end
+$$;
+create or replace function public.hq_can_work(l int) returns boolean
+  language sql stable security definer set search_path = public as $$ select public.hq_can(public.level_perm(l)) $$;
+create or replace function public.staff_can_work(uid uuid, l int) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce(public.level_perm(l) = any(public.hq_staff_perms(uid)), false)
+$$;
+create or replace function public.staff_name(uid uuid) returns text
+  language sql stable security definer set search_path = public as $$ select display_name from hq_staff where user_id = uid $$;
+
+create or replace function public.hq_tickets(box text, search text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare q text := nullif(trim(coalesce(search, '')), ''); od numeric := hq_setting_num('support.overdue_hours', 24); r json;
+begin
+  perform hq_need(array['support.view']);
+  with t as (
+    select t.*, w.name as business, w.status as business_status,
+      (t.overdue_at is not null or (t.first_reply_at is null and t.status <> 'done' and t.created_at < now() - make_interval(secs => od * 3600))) as is_overdue,
+      exists (select 1 from support_escalations e where e.ticket_id = t.id) as was_escalated
+    from support_tickets t left join workspaces w on w.id = t.workspace_id
+    where q is null or t.ref ilike '%' || q || '%' or t.subject ilike '%' || q || '%' or w.name ilike '%' || q || '%' or w.company_code ilike '%' || q || '%'
+       or exists (select 1 from auth.users u where u.id = t.opened_by and u.email::text ilike '%' || q || '%')
+       or exists (select 1 from support_messages m where m.ticket_id = t.id and m.body ilike '%' || q || '%')
+  ), boxed as (
+    select t.*, (case coalesce(box, 'open')
+      when 'new' then t.status = 'new' when 'waiting_us' then t.status = 'waiting_us' when 'waiting_customer' then t.status = 'waiting_customer'
+      when 'done' then t.status = 'done' when 'mine' then t.status <> 'done' and t.assignee = auth.uid()
+      when 'unassigned' then t.status <> 'done' and t.assignee is null when 'escalated' then t.status <> 'done' and t.level > 1
+      when 'level2' then t.status <> 'done' and t.level = 2 when 'level3' then t.status <> 'done' and t.level = 3
+      when 'overdue' then t.status <> 'done' and t.is_overdue when 'all' then true
+      else t.status <> 'done' end) as inbox from t)
+  select json_build_object(
+    'tickets', (select coalesce(json_agg(json_build_object('id', b.id, 'ref', b.ref, 'subject', b.subject, 'topic', b.topic, 'status', b.status,
+        'priority', b.priority, 'level', b.level, 'assignee', b.assignee, 'assignee_name', staff_name(b.assignee),
+        'workspace_id', b.workspace_id, 'business', b.business, 'business_status', b.business_status,
+        'opened_by_name', (select display_name from members m where m.workspace_id = b.workspace_id and m.user_id = b.opened_by),
+        'opened_by_email', (select email::text from auth.users u where u.id = b.opened_by),
+        'created_at', b.created_at, 'first_reply_at', b.first_reply_at, 'updated_at', b.updated_at, 'last_customer_at', b.last_customer_at,
+        'overdue', b.is_overdue, 'escalated', b.was_escalated) order by b.updated_at desc), '[]')
+      from (select * from boxed where inbox order by updated_at desc limit 300) b),
+    'counts', (select json_build_object('new', count(*) filter (where status = 'new'), 'waiting_us', count(*) filter (where status = 'waiting_us'),
+        'waiting_customer', count(*) filter (where status = 'waiting_customer'), 'done', count(*) filter (where status = 'done'),
+        'mine', count(*) filter (where status <> 'done' and assignee = auth.uid()), 'unassigned', count(*) filter (where status <> 'done' and assignee is null),
+        'escalated', count(*) filter (where status <> 'done' and level > 1), 'level2', count(*) filter (where status <> 'done' and level = 2),
+        'level3', count(*) filter (where status <> 'done' and level = 3), 'overdue', count(*) filter (where status <> 'done' and is_overdue)) from t),
+    'overdue_hours', od) into r;
+  return r;
+end $$;
+
+-- The business's summary shown beside a ticket (and in the company panel).
+create or replace function public.business_summary(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  return (select json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'status', w.status, 'kind', w.kind,
+    'country', w.country, 'last_active_at', w.last_active_at,
+    'people', (select count(*) from members m where m.workspace_id = w.id), 'pcs', (select count(*) from devices d where d.workspace_id = w.id),
+    'paid', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+             where (public.module_state(w.id, m) ->> 'status') = 'active'),
+    'trial', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+             where (public.module_state(w.id, m) ->> 'status') = 'trial'),
+    'monthly', public.company_monthly(w.id), 'credit', public.credit_json(w.id),
+    'notes', (select coalesce(json_agg(json_build_object('body', n.body, 'at', n.created_at, 'by', public.staff_name(n.author)) order by n.created_at desc), '[]')
+              from (select * from hq_notes where workspace_id = w.id order by created_at desc limit 5) n))
+  from workspaces w where w.id = ws);
+end $$;
+
+create or replace function public.hq_ticket(ticket uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; r json;
+begin
+  perform hq_need(array['support.view']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  select json_build_object(
+    'ticket', json_build_object('id', t.id, 'ref', t.ref, 'subject', t.subject, 'topic', t.topic, 'status', t.status, 'priority', t.priority,
+      'level', t.level, 'assignee', t.assignee, 'assignee_name', staff_name(t.assignee), 'workspace_id', t.workspace_id, 'created_at', t.created_at,
+      'first_reply_at', t.first_reply_at, 'updated_at', t.updated_at, 'last_customer_at', t.last_customer_at, 'last_staff_at', t.last_staff_at,
+      'overdue_at', t.overdue_at, 'opened_by', t.opened_by,
+      'opened_by_name', (select display_name from members m where m.workspace_id = t.workspace_id and m.user_id = t.opened_by),
+      'opened_by_email', (select email::text from auth.users u where u.id = t.opened_by)),
+    'messages', (select coalesce(json_agg(json_build_object('id', m.id, 'staff', m.is_staff, 'internal', m.internal, 'body', m.body, 'at', m.created_at,
+        'from', case when m.author is null then 'Riyeser (automatic)' when m.is_staff then coalesce(staff_name(m.author), 'Riyeser staff')
+                     else coalesce((select display_name from members mm where mm.workspace_id = t.workspace_id and mm.user_id = m.author),
+                                   (select email::text from auth.users u where u.id = m.author), 'Customer') end) order by m.id), '[]')
+      from support_messages m where m.ticket_id = t.id),
+    'escalations', (select coalesce(json_agg(json_build_object('from', e.from_level, 'to', e.to_level, 'by', coalesce(staff_name(e.by_user), 'Automatic'),
+        'reason', e.reason, 'at', e.at) order by e.id), '[]') from support_escalations e where e.ticket_id = t.id),
+    'business', case when t.workspace_id is not null then business_summary(t.workspace_id) end,
+    'refunds', (select coalesce(json_agg(json_build_object('id', f.id, 'ref', f.ref, 'status', f.status, 'amount', f.amount, 'currency', f.currency)), '[]')
+      from refund_requests f where f.ticket_id = t.id),
+    'can_work', hq_can_work(t.level)) into r;
+  perform hq_log('ticket.viewed', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id));
+  return r;
+end $$;
+
+create or replace function public.hq_ticket_reply(ticket uuid, message text, as_note boolean, then_status text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; st text := coalesce(nullif(then_status, ''), 'waiting_customer');
+begin
+  perform hq_need(array['support.reply']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if not hq_can_work(t.level) then raise exception 'This ticket is with % (level %). Someone who works that level needs to reply.', level_name(t.level), t.level; end if;
+  if length(trim(coalesce(message, ''))) = 0 then raise exception 'Write a message first.'; end if;
+  insert into support_messages (ticket_id, author, is_staff, internal, body) values (ticket, auth.uid(), true, coalesce(as_note, false), left(trim(message), 5000));
+  if coalesce(as_note, false) then
+    update support_tickets set updated_at = now() where id = ticket;
+    perform hq_log('ticket.note', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id));
+    return;
+  end if;
+  if st not in ('waiting_customer', 'waiting_us', 'done') then st := 'waiting_customer'; end if;
+  update support_tickets set first_reply_at = coalesce(first_reply_at, now()), last_staff_at = now(), updated_at = now(), status = st,
+    assignee = coalesce(assignee, auth.uid()) where id = ticket;
+  if t.opened_by is not null then
+    perform queue_email(t.opened_by, null, 'ticket_reply', 'Re: ' || t.subject || ' (' || t.ref || ')',
+      'Hi,' || E'\n\n' || 'Riyeser Support has replied to your help request ' || t.ref || ':' || E'\n\n' || trim(message) || E'\n\n'
+      || 'To reply, sign in at riyeser.com/team and open "Your help requests".', t.workspace_id, t.id, null);
+  end if;
+  perform hq_log('ticket.replied', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'status', st));
+end $$;
+
+create or replace function public.hq_ticket_status(ticket uuid, new_status text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets;
+begin
+  perform hq_need(array['support.reply']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if not hq_can_work(t.level) then raise exception 'This ticket is with % (level %).', level_name(t.level), t.level; end if;
+  if new_status not in ('new', 'waiting_us', 'waiting_customer', 'done') then raise exception 'Choose a status'; end if;
+  update support_tickets set status = new_status, updated_at = now() where id = ticket;
+  perform hq_log('ticket.status', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'was', t.status, 'now', new_status));
+end $$;
+
+create or replace function public.hq_ticket_priority(ticket uuid, new_priority text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets;
+begin
+  perform hq_need(array['support.reply', 'support.assign']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if new_priority not in ('low', 'normal', 'high', 'urgent') then raise exception 'Choose a priority'; end if;
+  update support_tickets set priority = new_priority, updated_at = now() where id = ticket;
+  perform hq_log('ticket.priority', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'was', t.priority, 'now', new_priority));
+end $$;
+
+-- Assign (or unassign with null). Anyone who can work the level can take it themselves; assigning others needs support.assign.
+create or replace function public.hq_ticket_assign(ticket uuid, staff uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets;
+begin
+  perform hq_need(array['support.view']);
+  if not (hq_can('support.assign') or (staff = auth.uid() and hq_can('support.reply'))) then raise exception 'Your HQ role can''t do that.'; end if;
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if staff is not null and not staff_can_work(staff, t.level) then
+    raise exception '% can''t work % tickets (level %).', coalesce(staff_name(staff), 'That person'), level_name(t.level), t.level; end if;
+  update support_tickets set assignee = staff, updated_at = now() where id = ticket;
+  perform hq_log('ticket.assigned', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'to', staff_name(staff)));
+end $$;
+
+-- Escalate or de-escalate: a reason is required; it's an internal note. Customers only see "passed to our senior team".
+create or replace function public.ticket_move_level(t support_tickets, to_level int, why text, by_uid uuid, assign_to uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare up boolean := to_level > t.level; who text := coalesce(staff_name(by_uid), 'Riyeser'); new_assignee uuid;
+begin
+  new_assignee := case when assign_to is not null then assign_to
+                       when t.assignee is not null and staff_can_work(t.assignee, to_level) then t.assignee end;
+  insert into support_escalations (ticket_id, from_level, to_level, by_user, reason) values (t.id, t.level, to_level, by_uid, left(why, 500));
+  update support_tickets set level = to_level, assignee = new_assignee, updated_at = now(),
+    escalated_at = case when up then now() else escalated_at end,
+    status = case when status = 'done' then 'waiting_us' else status end where id = t.id;
+  insert into support_messages (ticket_id, author, is_staff, internal, body) values (t.id, by_uid, true, true,
+    case when up then 'Escalated' else 'De-escalated' end || ' to ' || level_name(to_level)
+    || case when by_uid is null then ' automatically' else ' by ' || who end || ': ' || left(why, 500));
+  if up then
+    insert into support_messages (ticket_id, author, is_staff, internal, body)
+      values (t.id, null, true, false, 'We''ve passed this to our senior team. They''ll reply here.');
+  end if;
+  perform hq_log(case when up then 'ticket.escalated' else 'ticket.deescalated' end,
+    jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'from', t.level, 'to', to_level, 'reason', left(why, 500), 'auto', by_uid is null));
+end $$;
+create or replace function public.hq_ticket_escalate(ticket uuid, to_level int, reason text, assign_to uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets;
+begin
+  perform hq_need(array['support.escalate']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if to_level not between 1 and 3 or to_level = t.level then raise exception 'Choose a different level.'; end if;
+  if length(trim(coalesce(reason, ''))) < 4 then raise exception 'Give a reason (a few words is fine).'; end if;
+  if to_level < t.level and not hq_can_work(t.level) then raise exception 'Only someone who works % tickets can send it back.', level_name(t.level); end if;
+  if assign_to is not null and not staff_can_work(assign_to, to_level) then
+    raise exception '% can''t work % tickets.', coalesce(staff_name(assign_to), 'That person'), level_name(to_level); end if;
+  perform ticket_move_level(t, to_level, trim(reason), auth.uid(), assign_to);
+end $$;
+
+-- Saved replies
+create or replace function public.hq_saved_replies() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['support.view']);
+  return (select coalesce(json_agg(json_build_object('id', id, 'title', title, 'body', body, 'updated_at', updated_at) order by title), '[]')
+          from support_saved_replies where active);
+end $$;
+create or replace function public.hq_save_reply(reply_id bigint, title text, body text) returns bigint
+  language plpgsql security definer set search_path = public as $$
+declare i bigint := reply_id;
+begin
+  perform hq_need(array['support.saved_replies']);
+  if i is null then
+    insert into support_saved_replies (title, body, updated_by) values (trim(title), trim(body), auth.uid()) returning id into i;
+  else
+    update support_saved_replies s set title = trim(hq_save_reply.title), body = trim(hq_save_reply.body), updated_by = auth.uid(), updated_at = now() where s.id = i;
+  end if;
+  perform hq_log('saved_reply.saved', jsonb_build_object('id', i, 'title', trim(title)));
+  return i;
+end $$;
+create or replace function public.hq_retire_reply(reply_id bigint) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform hq_need(array['support.saved_replies']);
+  update support_saved_replies set active = false, updated_by = auth.uid(), updated_at = now() where id = reply_id;
+  perform hq_log('saved_reply.retired', jsonb_build_object('id', reply_id));
+end $$;
+
+-- Hourly job: flag tickets not first-replied in 24 hours; escalate ones waiting on us 48 hours (settings change both).
+create or replace function public.hq_support_sweep() returns json
+  language plpgsql security definer set search_path = public as $$
+declare od numeric := hq_setting_num('support.overdue_hours', 24); eh numeric := hq_setting_num('support.escalate_hours', 48);
+        n_over int; n_esc int := 0; t support_tickets;
+begin
+  update support_tickets set overdue_at = now()
+    where status <> 'done' and first_reply_at is null and overdue_at is null and created_at < now() - make_interval(secs => od * 3600);
+  get diagnostics n_over = row_count;
+  for t in select * from support_tickets s where s.status in ('new', 'waiting_us') and s.level < 3
+      and coalesce(s.last_customer_at, s.created_at) < now() - make_interval(secs => eh * 3600)
+      and (s.last_staff_at is null or s.last_staff_at < coalesce(s.last_customer_at, s.created_at))
+      and (s.escalated_at is null or s.escalated_at < now() - make_interval(secs => eh * 3600)) loop
+    perform ticket_move_level(t, t.level + 1, 'No reply in ' || trim_scale(eh)::text || ' hours', null, null);
+    n_esc := n_esc + 1;
+  end loop;
+  if n_over > 0 or n_esc > 0 then perform hq_log('sweep.support', jsonb_build_object('overdue', n_over, 'escalated', n_esc)); end if;
+  return json_build_object('overdue', n_over, 'escalated', n_esc);
+end $$;
+
+-- ---------------------------------------------------------------- fix-up tools (company panel)
+-- Each needs its own permission, a reason and (optionally) the ticket it's for; each is written to the HQ history.
+create or replace function public.hq_fix_start(perm text, why text, ticket_ref text) returns text
+  language plpgsql security definer set search_path = public as $$
+declare tr text := upper(nullif(trim(coalesce(ticket_ref, '')), ''));
+begin
+  perform hq_need(array[perm]);
+  if length(trim(coalesce(why, ''))) < 4 then raise exception 'Give a reason (a few words is fine).'; end if;
+  if tr is not null then
+    if tr ~ '^[0-9]+$' then tr := 'T-' || tr; end if;
+    if not exists (select 1 from support_tickets where ref = tr) then raise exception 'There''s no ticket %.', tr; end if;
+  end if;
+  perform set_config('riyeser.by_hq', 'on', true);   -- the customer's own change history shows "Riyeser"
+  return tr;
+end $$;
+
+create or replace function public.hq_edit_business(ws uuid, profile jsonb, reason text, ticket_ref text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare tr text := hq_fix_start('customers.edit', reason, ticket_ref); pr jsonb := coalesce(profile, '{}'); f text[];
+begin
+  select array_agg(k order by k) into f from jsonb_object_keys(pr) k where k in ('name', 'legal_name', 'tax_number', 'address', 'phone', 'email', 'country');
+  update workspaces set
+    name = case when pr ? 'name' and length(trim(pr ->> 'name')) > 0 then left(trim(pr ->> 'name'), 80) else name end,
+    legal_name = case when pr ? 'legal_name' then nullif(trim(pr ->> 'legal_name'), '') else legal_name end,
+    tax_number = case when pr ? 'tax_number' then nullif(trim(pr ->> 'tax_number'), '') else tax_number end,
+    address = case when pr ? 'address' then nullif(trim(pr ->> 'address'), '') else address end,
+    phone = case when pr ? 'phone' then nullif(trim(pr ->> 'phone'), '') else phone end,
+    email = case when pr ? 'email' then nullif(trim(pr ->> 'email'), '') else email end,
+    country = case when pr ? 'country' then nullif(trim(pr ->> 'country'), '') else country end
+  where id = ws;
+  if not found then raise exception 'That business doesn''t exist.'; end if;
+  -- field names only: the values are personal details, and the HQ history is kept for good
+  perform hq_log('business.edited', jsonb_build_object('workspace_id', ws, 'ticket', tr, 'reason', trim(reason), 'fields', to_jsonb(coalesce(f, '{}'))));
+end $$;
+
+-- Reset someone's two-step sign-in (they lost their phone). Only after checking who they are, e.g. calling back
+-- on the number on file. Their authenticator is removed; they set it up again at their next sign-in.
+create or replace function public.hq_reset_2fa(ws uuid, person uuid, identity_checked text, reason text, ticket_ref text) returns int
+  language plpgsql security definer set search_path = public as $$
+declare tr text := hq_fix_start('people.reset_2fa', reason, ticket_ref); n int;
+begin
+  if length(trim(coalesce(identity_checked, ''))) < 6 then
+    raise exception 'Say how you checked who they are (for example "called back on the number on file").'; end if;
+  if not exists (select 1 from members where workspace_id = ws and user_id = person) then raise exception 'That person isn''t in this business.'; end if;
+  delete from auth.mfa_factors where user_id = person;
+  get diagnostics n = row_count;
+  perform queue_email(person, null, 'mfa_reset', 'Your two-step sign-in was reset',
+    'Hi,' || E'\n\n' || 'At your request, Riyeser Support has reset two-step sign-in on your Riyeser account. '
+    || 'Next time you sign in at riyeser.com/team you''ll only need your password. Then open Security to set up your authenticator app again.'
+    || E'\n\n' || 'If you didn''t ask for this, contact Riyeser Support straight away.', ws, null, null);
+  perform hq_log('people.reset_2fa', jsonb_build_object('workspace_id', ws, 'ticket', tr, 'reason', trim(reason), 'user_id', person,
+    'identity_checked', trim(identity_checked), 'factors_removed', n));
+  return n;
+end $$;
+
+create or replace function public.hq_change_owner(ws uuid, new_owner uuid, reason text, ticket_ref text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare tr text := hq_fix_start('people.change_owner', reason, ticket_ref);
+begin
+  if not exists (select 1 from members where workspace_id = ws and user_id = new_owner) then raise exception 'Choose someone who is in this business.'; end if;
+  if exists (select 1 from members where workspace_id = ws and user_id = new_owner and role = 'owner') then raise exception 'They''re already the owner.'; end if;
+  update members set role = 'admin', job_role = case when job_role = 'owner' then 'manager' else job_role end where workspace_id = ws and role = 'owner';
+  update members set role = 'owner', job_role = 'owner' where workspace_id = ws and user_id = new_owner;
+  perform hq_log('people.change_owner', jsonb_build_object('workspace_id', ws, 'ticket', tr, 'reason', trim(reason), 'new_owner', new_owner));
+end $$;
+
+-- Close, suspend or reopen a business. It's never deleted: closed businesses are hidden from their people and
+-- their programs' online licence reads as not active.
+create or replace function public.hq_set_business_status(ws uuid, new_status text, reason text, ticket_ref text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare tr text := hq_fix_start('business.close', reason, ticket_ref); w workspaces;
+begin
+  select * into w from workspaces where id = ws;
+  if w.id is null then raise exception 'That business doesn''t exist.'; end if;
+  if new_status not in ('active', 'suspended', 'closed') then raise exception 'Choose open, suspended or closed.'; end if;
+  if w.removal_state = 'removed' then raise exception 'This account''s details were removed. It can''t be reopened.'; end if;
+  if new_status = w.status then raise exception 'It''s already %.', case new_status when 'active' then 'open' else new_status end; end if;
+  update workspaces set status = new_status,
+    closed_at = case when new_status = 'active' then null else now() end,
+    closed_reason = case when new_status = 'active' then null else left(trim(reason), 300) end,
+    closed_by = case when new_status = 'active' then null else auth.uid() end,
+    duplicate_of = case when new_status = 'active' then null else duplicate_of end,
+    removal_state = null, removal_ready_at = null,
+    last_active_at = case when new_status = 'active' then now() else last_active_at end
+  where id = ws;
+  perform queue_email_owners(ws, case when new_status = 'active' then 'business_reopened' else 'business_closed' end,
+    case when new_status = 'active' then w.name || ' is open again on Riyeser' else w.name || ' has been ' || new_status || ' on Riyeser' end,
+    case when new_status = 'active' then 'Hi,' || E'\n\n' || w.name || ' is open again. Sign in at riyeser.com/team to carry on where you left off.'
+         else 'Hi,' || E'\n\n' || w.name || ' has been ' || new_status || ' on Riyeser. Its online account isn''t available, and your programs '
+           || 'will show their licence as not active. The books on your PCs are not touched.' || E'\n\n'
+           || 'If you think this is a mistake, or you''d like it reopened, contact Riyeser Support.' end);
+  perform hq_log(case when new_status = 'active' then 'business.reopened' when new_status = 'suspended' then 'business.suspended' else 'business.closed' end,
+    jsonb_build_object('workspace_id', ws, 'ticket', tr, 'reason', trim(reason), 'was', w.status));
+end $$;
+
+create or replace function public.hq_close_duplicate(ws uuid, duplicate_of_ws uuid, reason text, ticket_ref text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if ws = duplicate_of_ws then raise exception 'Choose a different business.'; end if;
+  if not exists (select 1 from workspaces where id = duplicate_of_ws) then raise exception 'Choose the business it duplicates.'; end if;
+  perform hq_set_business_status(ws, 'closed', reason, ticket_ref);
+  update workspaces set duplicate_of = duplicate_of_ws, closed_reason = left('Duplicate: ' || trim(reason), 300) where id = ws;
+  perform hq_log('business.duplicate', jsonb_build_object('workspace_id', ws, 'duplicate_of', duplicate_of_ws, 'ticket', upper(nullif(trim(coalesce(ticket_ref, '')), ''))));
+end $$;
+
+-- ---------------------------------------------------------------- inactive accounts
+-- The owner's rule: free accounts close after 12 months unused (warnings 30 and 7 days before); 2 years after
+-- closing they're ready for removal, which an HQ owner approves (never automatic). Paid businesses are never closed
+-- for this, and the books on customers' PCs are never touched.
+create or replace function public.inactivity_email(w workspaces, days_left int, stage int) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform queue_email_owners(w.id, 'inactive_warning_' || stage,
+    w.name || ' will close in ' || days_left || ' days',
+    'Hi,' || E'\n\n' || 'Nobody has used ' || w.name || ' on Riyeser online for nearly a year. To keep things tidy, free accounts that '
+    || 'haven''t been used for 12 months are closed. ' || w.name || ' will close in ' || days_left || ' days.' || E'\n\n'
+    || 'To keep it open, just sign in at riyeser.com/team. That''s all you need to do.' || E'\n\n'
+    || 'The books on your PCs are never touched.');
+end $$;
+
+create or replace function public.hq_inactivity_sweep() returns json
+  language plpgsql security definer set search_path = public as $$
+declare w workspaces; n30 int := 0; n7 int := 0; nclosed int := 0; nready int := 0; la timestamptz; due timestamptz;
+begin
+  for w in select * from workspaces where status = 'active' loop
+    if is_paying(w.id) then continue; end if;
+    la := coalesce(w.last_active_at, w.created_at); due := la + interval '12 months';
+    if now() >= due then
+      -- close only once a 7-day warning has had its 7 days (an overdue account gets the warning first)
+      if w.warned_7_at is not null and w.warned_7_at >= la and w.warned_7_at <= now() - interval '7 days' then
+        update workspaces set status = 'closed', closed_at = now(), closed_reason = 'inactive', closed_by = null where id = w.id;
+        perform queue_email_owners(w.id, 'business_closed', w.name || ' has been closed on Riyeser',
+          'Hi,' || E'\n\n' || 'Nobody has used ' || w.name || ' on Riyeser online for 12 months, so we''ve closed it. '
+          || 'The books on your PCs are not touched.' || E'\n\n' || 'If you''d like it back, contact Riyeser Support and we''ll reopen it.');
+        perform hq_log('business.closed_inactive', jsonb_build_object('workspace_id', w.id));
+        nclosed := nclosed + 1;
+      elsif w.warned_7_at is null or w.warned_7_at < la then
+        update workspaces set warned_7_at = now() where id = w.id; perform inactivity_email(w, 7, 7); n7 := n7 + 1;
+      end if;
+    elsif now() >= due - interval '7 days' then
+      if w.warned_7_at is null or w.warned_7_at < la then
+        update workspaces set warned_7_at = now() where id = w.id; perform inactivity_email(w, greatest(1, ceil(extract(epoch from due - now()) / 86400)::int), 7); n7 := n7 + 1;
+      end if;
+    elsif now() >= due - interval '30 days' then
+      if w.warned_30_at is null or w.warned_30_at < la then
+        update workspaces set warned_30_at = now() where id = w.id; perform inactivity_email(w, ceil(extract(epoch from due - now()) / 86400)::int, 30); n30 := n30 + 1;
+      end if;
+    end if;
+  end loop;
+  update workspaces set removal_state = 'ready', removal_ready_at = now()
+    where status = 'closed' and removal_state is null and closed_at < now() - interval '2 years';
+  get diagnostics nready = row_count;
+  perform hq_log('sweep.inactivity', jsonb_build_object('warned_30', n30, 'warned_7', n7, 'closed', nclosed, 'ready_for_removal', nready));
+  return json_build_object('warned_30', n30, 'warned_7', n7, 'closed', nclosed, 'ready_for_removal', nready);
+end $$;
+
+create or replace function public.hq_inactive_accounts() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['customers.view', 'accounts.inactive']);
+  return json_build_object(
+    'approaching', (select coalesce(json_agg(json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'kind', w.kind,
+        'last_active_at', coalesce(w.last_active_at, w.created_at), 'closes_at', coalesce(w.last_active_at, w.created_at) + interval '12 months',
+        'warned_30_at', w.warned_30_at, 'warned_7_at', w.warned_7_at) order by coalesce(w.last_active_at, w.created_at)), '[]')
+      from workspaces w where w.status = 'active' and coalesce(w.last_active_at, w.created_at) < now() - interval '12 months' + interval '60 days'
+        and not public.is_paying(w.id)),
+    'closed', (select coalesce(json_agg(json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'kind', w.kind,
+        'last_active_at', coalesce(w.last_active_at, w.created_at), 'closed_at', w.closed_at, 'ready_at', w.closed_at + interval '2 years') order by w.closed_at), '[]')
+      from workspaces w where w.status = 'closed' and w.closed_reason = 'inactive' and w.removal_state is null),
+    'ready', (select coalesce(json_agg(json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'kind', w.kind,
+        'last_active_at', coalesce(w.last_active_at, w.created_at), 'closed_at', w.closed_at, 'closed_reason', w.closed_reason,
+        'removal_ready_at', w.removal_ready_at) order by w.closed_at), '[]')
+      from workspaces w where w.removal_state = 'ready'),
+    'removed', (select count(*) from workspaces where removal_state = 'removed'),
+    'can_remove', hq_can('accounts.inactive'));
+end $$;
+
+-- Owner-approved removal of personal details from accounts that have been closed for 2 years. Rows stay; text is
+-- blanked. Login accounts (auth.users) are not deleted here: that's a later step with the service key (see RUNBOOK).
+create or replace function public.hq_remove_accounts(ids uuid[], reason text) returns int
+  language plpgsql security definer set search_path = public as $$
+declare ws uuid; n int := 0;
+begin
+  perform hq_need(array['accounts.inactive']);
+  if hq_role() <> 'owner' then raise exception 'Only an HQ owner can approve removing accounts.'; end if;
+  if length(trim(coalesce(reason, ''))) < 4 then raise exception 'Give a reason (a few words is fine).'; end if;
+  if exists (select 1 from unnest(ids) i where not exists (select 1 from workspaces w where w.id = i and w.removal_state = 'ready')) then
+    raise exception 'Only accounts marked "ready for removal" can be removed.'; end if;
+  perform set_config('riyeser.removing', 'on', true);
+  foreach ws in array ids loop
+    update messages set body = '[removed]' where workspace_id = ws;
+    update channels set topic = null where workspace_id = ws;
+    update members set display_name = 'Removed person' where workspace_id = ws;
+    update join_requests set display_name = 'Removed person', email = null, note = null where workspace_id = ws;
+    update devices set device_name = null where workspace_id = ws;
+    update branches set name = 'Branch ' || left(id::text, 8) where workspace_id = ws;
+    update audit_log set details = '{"removed": true}'::jsonb where workspace_id = ws;
+    update hq_notes set body = '[removed]' where workspace_id = ws;
+    update support_messages set body = '[removed]' where ticket_id in (select id from support_tickets where workspace_id = ws);
+    update support_tickets set subject = '[removed]' where workspace_id = ws;
+    update refund_requests set explanation = '[removed]', invoice_ref = null where workspace_id = ws;
+    update email_outbox set to_address = null, subject = '[removed]', body_text = '[removed]', body_html = null,
+      status = case when status = 'queued' then 'held' else status end where workspace_id = ws;
+    update workspaces set name = 'Removed business', legal_name = null, tax_number = null, address = null, phone = null, email = null,
+      removal_state = 'removed', removed_at = now() where id = ws;
+    n := n + 1;
+  end loop;
+  perform set_config('riyeser.removing', 'off', true);
+  -- the anonymous record: how many, when, why, by whom (no names)
+  perform hq_log('accounts.removed', jsonb_build_object('count', n, 'reason', trim(reason), 'workspace_ids', to_jsonb(ids)));
+  return n;
+end $$;
+
+-- ---------------------------------------------------------------- refunds and account credit
+create sequence if not exists public.refund_no start 1042;
+create table if not exists public.refund_requests (
+  id uuid primary key default gen_random_uuid(),
+  number bigint not null unique default nextval('public.refund_no'),
+  ref text generated always as ('R-' || number::text) stored,
+  workspace_id uuid not null references public.workspaces(id),
+  requested_by uuid references auth.users(id) on delete set null,
+  on_behalf_by uuid references auth.users(id) on delete set null,     -- HQ staff who entered it for the customer
+  ticket_id uuid references public.support_tickets(id),
+  for_what text not null check (length(trim(for_what)) between 1 and 120),   -- plan / program
+  period text check (length(period) <= 80),
+  invoice_ref text check (length(invoice_ref) <= 80),                 -- free text until billing (phase 2)
+  amount numeric(12, 2) not null check (amount > 0 and amount < 1000000),
+  currency text not null default 'FJD' check (currency in ('FJD', 'AUD', 'NZD', 'USD')),
+  reason_category text not null check (reason_category in ('mistake', 'didnt_work', 'cancelled', 'duplicate', 'other')),
+  explanation text check (length(explanation) <= 2000),
+  status text not null default 'submitted' check (status in ('submitted', 'reviewing', 'approved', 'partly_approved', 'declined', 'paid')),
+  decided_by uuid references auth.users(id) on delete set null,
+  decided_at timestamptz,
+  decision_reason text check (length(decision_reason) <= 1000),
+  amount_approved numeric(12, 2) check (amount_approved >= 0),
+  needs_second boolean not null default false,
+  second_approver uuid references auth.users(id) on delete set null,
+  second_approved_at timestamptz,
+  paid_at timestamptz,
+  paid_method text check (paid_method in ('card', 'bank', 'mpaisa', 'credit')),
+  paid_reference text check (length(paid_reference) <= 120),
+  paid_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (second_approver is null or second_approver is distinct from decided_by)   -- two different people, always
+);
+create index if not exists refund_requests_ws on public.refund_requests (workspace_id, created_at desc);
+create table if not exists public.account_credits (
+  id bigint generated always as identity primary key,
+  workspace_id uuid not null references public.workspaces(id),
+  amount numeric(12, 2) not null,
+  currency text not null check (currency in ('FJD', 'AUD', 'NZD', 'USD')),
+  refund_id uuid references public.refund_requests(id),
+  note text check (length(note) <= 200),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+alter table public.refund_requests enable row level security;
+alter table public.account_credits enable row level security;
+revoke all on public.refund_requests, public.account_credits from anon, authenticated;
+revoke all on sequence public.refund_no from anon, authenticated;
+do $$ declare t text; begin
+  foreach t in array array['refund_requests', 'account_credits'] loop
+    execute format('drop trigger if exists no_delete on public.%I', t);
+    execute format('create trigger no_delete before delete on public.%I for each row execute function public.no_delete()', t);
+  end loop;
+end $$;
+-- Customers (owners and admins, after two-step sign-in) can read their business's requests; changes go through functions.
+drop policy if exists rr_read on public.refund_requests;
+create policy rr_read on public.refund_requests for select to authenticated using (public.is_admin(workspace_id));
+grant select (id, number, ref, workspace_id, for_what, period, invoice_ref, amount, currency, reason_category, explanation, status,
+  decision_reason, amount_approved, paid_at, created_at, updated_at) on public.refund_requests to authenticated;
+
+create or replace function public.credit_json(ws uuid) returns json
+  language sql stable security definer set search_path = public as $$
+  select coalesce(json_object_agg(currency, total), '{}') from (
+    select currency, sum(amount) as total from account_credits where workspace_id = ws group by currency having sum(amount) <> 0) c
+$$;
+
+create or replace function public.refund_reason_name(c text) returns text language sql immutable as $$
+  select case c when 'mistake' then 'Charged by mistake' when 'didnt_work' then 'It didn''t work' when 'cancelled' then 'I cancelled'
+    when 'duplicate' then 'Charged twice' else 'Something else' end
+$$;
+
+-- Make a refund request (shared by customers and staff entering one from a ticket).
+create or replace function public.refund_insert(ws uuid, by_customer uuid, by_staff uuid, ticket uuid, for_what text, period text, invoice_ref text,
+    amount numeric, currency text, reason_category text, explanation text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare f refund_requests; tk support_tickets; cur text := upper(coalesce(nullif(currency, ''), 'FJD')); who uuid;
+begin
+  if amount is null or amount <= 0 then raise exception 'Enter the amount you''d like back.'; end if;
+  if cur not in ('FJD', 'AUD', 'NZD', 'USD') then raise exception 'Choose FJD, AUD, NZD or USD.'; end if;
+  if reason_category not in ('mistake', 'didnt_work', 'cancelled', 'duplicate', 'other') then raise exception 'Choose a reason.'; end if;
+  if length(trim(coalesce(for_what, ''))) = 0 then raise exception 'Say what the refund is for.'; end if;
+  if ticket is not null then select * into tk from support_tickets where id = ticket; end if;
+  who := coalesce(by_customer, tk.opened_by);
+  -- the conversation happens on a billing ticket: link the one given, or open one
+  if tk.id is null then
+    insert into support_tickets (workspace_id, opened_by, topic, subject, status, last_customer_at)
+      values (ws, who, 'billing', 'Refund request', 'new', now()) returning * into tk;
+  end if;
+  insert into refund_requests (workspace_id, requested_by, on_behalf_by, ticket_id, for_what, period, invoice_ref, amount, currency, reason_category, explanation)
+    values (ws, who, by_staff, tk.id, left(trim(for_what), 120), nullif(left(trim(coalesce(period, '')), 80), ''),
+            nullif(left(trim(coalesce(invoice_ref, '')), 80), ''), round(amount, 2), cur, reason_category, nullif(left(trim(coalesce(explanation, '')), 2000), ''))
+    returning * into f;
+  update support_tickets set subject = case when subject = 'Refund request' then 'Refund request ' || f.ref else subject end, updated_at = now() where id = tk.id;
+  insert into support_messages (ticket_id, author, is_staff, body) values (tk.id, coalesce(by_staff, who), by_staff is not null,
+    'Refund request ' || f.ref || ': ' || f.currency || ' ' || f.amount || ' for ' || f.for_what || coalesce(' (' || f.period || ')', '')
+    || coalesce(', invoice ' || f.invoice_ref, '') || '. Reason: ' || refund_reason_name(f.reason_category) || '.' || coalesce(E'\n' || f.explanation, ''));
+  if who is not null then
+    perform queue_email(who, null, 'refund_received', 'We''ve got your refund request (' || f.ref || ')',
+      'Hi,' || E'\n\n' || 'We''ve got your request for a refund of ' || f.currency || ' ' || f.amount || ' (' || f.ref || '). '
+      || 'We''ll look at it within 2 business days and let you know by email. You can follow it on your Riyeser home page at riyeser.com/team.',
+      ws, tk.id, f.id);
+  end if;
+  return json_build_object('id', f.id, 'ref', f.ref, 'ticket_id', tk.id, 'ticket_ref', tk.ref);
+end $$;
+revoke all on function public.refund_insert(uuid, uuid, uuid, uuid, text, text, text, numeric, text, text, text) from public, anon, authenticated;
+
+-- Customers: only the business's owner or an admin (with two-step sign-in) can ask for a refund.
+create or replace function public.request_refund(ws uuid, for_what text, period text, invoice_ref text, amount numeric, currency text,
+    reason_category text, explanation text, ticket uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin(ws) then raise exception 'Only the business''s owner or an admin can ask for a refund.'; end if;
+  if ticket is not null and not exists (select 1 from support_tickets where id = ticket and workspace_id = ws and can_see_ticket(ticket)) then
+    raise exception 'We couldn''t find that help request.'; end if;
+  if (select count(*) from refund_requests where workspace_id = ws and created_at > now() - interval '1 day') >= 5 then
+    raise exception 'You''ve sent several refund requests today. We''ll look at those first.'; end if;
+  return refund_insert(ws, auth.uid(), null, ticket, for_what, period, invoice_ref, amount, currency, reason_category, explanation);
+end $$;
+create or replace function public.my_refunds(ws uuid) returns json
+  language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(json_build_object('id', f.id, 'ref', f.ref, 'for_what', f.for_what, 'period', f.period, 'amount', f.amount,
+      'currency', f.currency, 'amount_approved', f.amount_approved, 'created_at', f.created_at, 'paid_at', f.paid_at,
+      'ticket_id', f.ticket_id,
+      -- customers see "approved" only once both approvals are in; never staff names
+      'status', case when f.status in ('approved', 'partly_approved') and f.needs_second and f.second_approver is null then 'reviewing' else f.status end,
+      'decision_reason', case when f.status = 'declined' or (f.status in ('approved', 'partly_approved', 'paid') and (not f.needs_second or f.second_approver is not null))
+                              then f.decision_reason end) order by f.created_at desc), '[]')
+  from refund_requests f where public.is_admin(ws) and f.workspace_id = ws
+$$;
+
+-- Staff: enter a refund request for a customer from their ticket.
+create or replace function public.hq_refund_create(ticket uuid, for_what text, period text, invoice_ref text, amount numeric, currency text,
+    reason_category text, explanation text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare tk support_tickets; r json;
+begin
+  perform hq_need(array['refunds.request', 'refunds.approve']);
+  select * into tk from support_tickets where id = ticket;
+  if tk.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if tk.workspace_id is null then raise exception 'This ticket isn''t linked to a business, so there''s nothing to refund.'; end if;
+  r := refund_insert(tk.workspace_id, null, auth.uid(), ticket, for_what, period, invoice_ref, amount, currency, reason_category, explanation);
+  perform hq_log('refund.created', jsonb_build_object('workspace_id', tk.workspace_id, 'ticket', tk.ref, 'refund', r ->> 'ref', 'amount', amount, 'currency', currency));
+  return r;
+end $$;
+
+create or replace function public.refund_row_json(f refund_requests) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', f.id, 'ref', f.ref, 'workspace_id', f.workspace_id, 'business', (select name from workspaces where id = f.workspace_id),
+    'requested_by_name', coalesce((select display_name from members m where m.workspace_id = f.workspace_id and m.user_id = f.requested_by), 'Customer'),
+    'on_behalf_by', public.staff_name(f.on_behalf_by), 'ticket_id', f.ticket_id, 'ticket_ref', (select ref from support_tickets where id = f.ticket_id),
+    'for_what', f.for_what, 'period', f.period, 'invoice_ref', f.invoice_ref, 'amount', f.amount, 'currency', f.currency,
+    'reason_category', f.reason_category, 'explanation', f.explanation, 'status', f.status, 'decided_by', f.decided_by,
+    'decided_by_name', public.staff_name(f.decided_by), 'decided_at', f.decided_at, 'decision_reason', f.decision_reason,
+    'amount_approved', f.amount_approved, 'needs_second', f.needs_second, 'second_approver_name', public.staff_name(f.second_approver),
+    'second_approved_at', f.second_approved_at, 'waiting_second', f.needs_second and f.second_approver is null and f.status in ('approved', 'partly_approved'),
+    'paid_at', f.paid_at, 'paid_method', f.paid_method, 'paid_reference', f.paid_reference, 'created_at', f.created_at)
+$$;
+
+create or replace function public.hq_refunds(box text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['refunds.view']);
+  return json_build_object(
+    'refunds', (select coalesce(json_agg(refund_row_json(f) order by f.created_at desc), '[]') from (select * from refund_requests f where
+      case coalesce(box, 'open')
+        when 'new' then f.status = 'submitted' when 'reviewing' then f.status = 'reviewing'
+        when 'second' then f.status in ('approved', 'partly_approved') and f.needs_second and f.second_approver is null
+        when 'to_pay' then f.status in ('approved', 'partly_approved') and (not f.needs_second or f.second_approver is not null)
+        when 'paid' then f.status = 'paid' when 'declined' then f.status = 'declined' when 'all' then true
+        else f.status not in ('paid', 'declined') end order by f.created_at desc limit 300) f),
+    'counts', (select json_build_object('new', count(*) filter (where status = 'submitted'), 'reviewing', count(*) filter (where status = 'reviewing'),
+        'second', count(*) filter (where status in ('approved', 'partly_approved') and needs_second and second_approver is null),
+        'to_pay', count(*) filter (where status in ('approved', 'partly_approved') and (not needs_second or second_approver is not null)),
+        'paid', count(*) filter (where status = 'paid'), 'declined', count(*) filter (where status = 'declined')) from refund_requests),
+    'threshold', hq_setting_num('refunds.two_person_threshold', 200));
+end $$;
+
+create or replace function public.refund_decided_email(f refund_requests) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if f.requested_by is null then return; end if;
+  if f.status = 'declined' then
+    perform queue_email(f.requested_by, null, 'refund_declined', 'About your refund request (' || f.ref || ')',
+      'Hi,' || E'\n\n' || 'We''ve looked at your refund request ' || f.ref || ' and we can''t give a refund this time.' || E'\n\n'
+      || 'Why: ' || coalesce(f.decision_reason, '') || E'\n\n' || 'If you''d like to talk about it, reply on your help request at riyeser.com/team.',
+      f.workspace_id, f.ticket_id, f.id);
+  else
+    perform queue_email(f.requested_by, null, 'refund_approved', 'Your refund is approved (' || f.ref || ')',
+      'Hi,' || E'\n\n' || 'Good news: we''ve approved a refund of ' || f.currency || ' ' || f.amount_approved
+      || case when f.status = 'partly_approved' then ' (part of the ' || f.currency || ' ' || f.amount || ' you asked for)' else '' end
+      || ' for request ' || f.ref || '.' || E'\n\n' || coalesce(f.decision_reason || E'\n\n', '')
+      || 'We''ll let you know when it''s been paid.', f.workspace_id, f.ticket_id, f.id);
+  end if;
+end $$;
+
+create or replace function public.hq_refund_review(refund uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare f refund_requests;
+begin
+  perform hq_need(array['refunds.approve']);
+  update refund_requests set status = 'reviewing', updated_at = now() where id = refund and status = 'submitted' returning * into f;
+  if f.id is null then raise exception 'Only a new request can be moved to reviewing.'; end if;
+  perform hq_log('refund.reviewing', jsonb_build_object('workspace_id', f.workspace_id, 'refund', f.ref));
+end $$;
+
+-- Approve, partly approve or decline (reason required). Over the threshold, a second person must also approve.
+create or replace function public.hq_refund_decide(refund uuid, decision text, approved_amount numeric, reason text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare f refund_requests; amt numeric; thr numeric := hq_setting_num('refunds.two_person_threshold', 200);
+begin
+  perform hq_need(array['refunds.approve']);
+  select * into f from refund_requests where id = refund for update;
+  if f.id is null then raise exception 'That refund request doesn''t exist.'; end if;
+  if f.status not in ('submitted', 'reviewing') then raise exception 'That request has already been decided.'; end if;
+  if length(trim(coalesce(reason, ''))) < 4 then raise exception 'Give a reason (a few words is fine).'; end if;
+  if decision = 'decline' then amt := 0;
+  elsif decision = 'approve' then amt := f.amount;
+  elsif decision = 'partly' then
+    amt := round(approved_amount, 2);
+    if amt is null or amt <= 0 or amt >= f.amount then raise exception 'For a part refund, enter an amount between 0 and %.', f.amount; end if;
+  else raise exception 'Choose approve, partly approve or decline.'; end if;
+  update refund_requests set status = case decision when 'decline' then 'declined' when 'approve' then 'approved' else 'partly_approved' end,
+    amount_approved = amt, decided_by = auth.uid(), decided_at = now(), decision_reason = left(trim(reason), 1000),
+    needs_second = decision <> 'decline' and amt > thr, updated_at = now() where id = refund returning * into f;
+  if not f.needs_second then perform refund_decided_email(f); end if;
+  perform hq_log('refund.' || case decision when 'decline' then 'declined' when 'approve' then 'approved' else 'partly_approved' end,
+    jsonb_build_object('workspace_id', f.workspace_id, 'refund', f.ref, 'amount', amt, 'currency', f.currency, 'reason', left(trim(reason), 1000),
+      'needs_second', f.needs_second, 'ticket', (select ref from support_tickets where id = f.ticket_id)));
+end $$;
+
+create or replace function public.hq_refund_second(refund uuid, reason text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare f refund_requests;
+begin
+  perform hq_need(array['refunds.approve']);
+  select * into f from refund_requests where id = refund for update;
+  if f.id is null then raise exception 'That refund request doesn''t exist.'; end if;
+  if not (f.needs_second and f.second_approver is null and f.status in ('approved', 'partly_approved')) then
+    raise exception 'That request isn''t waiting for a second approval.'; end if;
+  if f.decided_by = auth.uid() then raise exception 'The same person can''t give both approvals. Ask another staff member with refunds.approve.'; end if;
+  update refund_requests set second_approver = auth.uid(), second_approved_at = now(), updated_at = now() where id = refund returning * into f;
+  perform refund_decided_email(f);
+  perform hq_log('refund.second_approved', jsonb_build_object('workspace_id', f.workspace_id, 'refund', f.ref, 'amount', f.amount_approved,
+    'currency', f.currency, 'reason', nullif(trim(coalesce(reason, '')), '')));
+end $$;
+
+-- Mark as paid (refunds done by hand until the payment provider comes in phase 2). Credit on account is recorded.
+create or replace function public.hq_refund_paid(refund uuid, method text, reference text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare f refund_requests;
+begin
+  perform hq_need(array['refunds.pay']);
+  select * into f from refund_requests where id = refund for update;
+  if f.id is null then raise exception 'That refund request doesn''t exist.'; end if;
+  if f.status not in ('approved', 'partly_approved') then raise exception 'Only an approved refund can be marked as paid.'; end if;
+  if f.needs_second and f.second_approver is null then raise exception 'This refund needs a second approval before it''s paid.'; end if;
+  if method not in ('card', 'bank', 'mpaisa', 'credit') then raise exception 'Choose how it was paid.'; end if;
+  if method <> 'credit' and length(trim(coalesce(reference, ''))) = 0 then raise exception 'Add the payment reference.'; end if;
+  update refund_requests set status = 'paid', paid_at = now(), paid_method = method, paid_reference = nullif(left(trim(coalesce(reference, '')), 120), ''),
+    paid_by = auth.uid(), updated_at = now() where id = refund returning * into f;
+  if method = 'credit' then
+    insert into account_credits (workspace_id, amount, currency, refund_id, note, created_by)
+      values (f.workspace_id, f.amount_approved, f.currency, f.id, 'Refund ' || f.ref, auth.uid());
+  end if;
+  if f.requested_by is not null then
+    perform queue_email(f.requested_by, null, 'refund_paid', 'Your refund has been paid (' || f.ref || ')',
+      'Hi,' || E'\n\n' || 'We''ve ' || case when method = 'credit' then 'added ' || f.currency || ' ' || f.amount_approved || ' credit to your Riyeser account'
+        else 'paid your refund of ' || f.currency || ' ' || f.amount_approved || case method when 'card' then ' back to your card' when 'bank' then ' by bank transfer'
+        else ' by M-PAiSA' end end || ' (' || f.ref || ').' || case when method in ('card', 'bank') then ' It can take a few business days to show.' else '' end,
+      f.workspace_id, f.ticket_id, f.id);
+  end if;
+  perform hq_log('refund.paid', jsonb_build_object('workspace_id', f.workspace_id, 'refund', f.ref, 'amount', f.amount_approved, 'currency', f.currency, 'method', method));
+end $$;
+
+-- ---------------------------------------------------------------- free periods (offers) with supervisor approval
+create sequence if not exists public.offer_no start 1001;
+create table if not exists public.offers (
+  id uuid primary key default gen_random_uuid(),
+  number bigint not null unique default nextval('public.offer_no'),
+  ref text generated always as ('O-' || number::text) stored,
+  workspace_id uuid not null references public.workspaces(id),
+  modules text[] not null,
+  kind text not null check (kind in ('trial', 'paid', 'account')),   -- extend a trial / free time on a paid program / all paid programs
+  length_amount int not null check (length_amount between 1 and 1000),
+  length_unit text not null check (length_unit in ('days', 'months')),
+  days int not null check (days > 0),
+  reason_category text not null check (reason_category in ('retention', 'goodwill', 'promotion', 'other')),
+  reason text not null check (length(trim(reason)) between 1 and 500),
+  ticket text,
+  status text not null check (status in ('applied', 'waiting', 'approved', 'declined')),   -- approved = approved and applied
+  requested_by uuid references auth.users(id) on delete set null,
+  approved_by uuid references auth.users(id) on delete set null,
+  decided_at timestamptz,
+  decline_reason text check (length(decline_reason) <= 500),
+  applied_at timestamptz,
+  ends_at date,
+  applied jsonb,          -- what changed: module -> {was, now}
+  created_at timestamptz not null default now(),
+  check (approved_by is null or approved_by is distinct from requested_by)
+);
+create index if not exists offers_ws on public.offers (workspace_id, created_at desc);
+alter table public.offers enable row level security;
+revoke all on public.offers from anon, authenticated;
+revoke all on sequence public.offer_no from anon, authenticated;
+drop trigger if exists no_delete on public.offers;
+create trigger no_delete before delete on public.offers for each row execute function public.no_delete();
+
+create or replace function public.module_label(m text) returns text language sql immutable as $$
+  select case m when 'basic' then 'Accounting Basics' when 'plus' then 'Accounting Plus' when 'payroll' then 'Payroll' when 'pos' then 'POS'
+    when 'bookings' then 'Bookings' when 'as_built' then 'As Built' when 'calls' then 'Team Chat Plus' else m end
+$$;
+
+-- Apply a free period now (uses the licence functions). Returns {module: {was, now}}.
+create or replace function public.offer_apply(o offers) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare m text; st json; base date; newd date; res jsonb := '{}'; last_end date;
+begin
+  foreach m in array o.modules loop
+    st := module_state(o.workspace_id, m);
+    if o.kind = 'trial' then
+      if st ->> 'status' not in ('trial', 'ended') or exists (select 1 from company_modules c where c.workspace_id = o.workspace_id and c.module = m and c.status <> 'trial') then
+        raise exception '% isn''t on a free trial. Add free time to its paid period instead.', module_label(m); end if;
+      base := greatest(coalesce((st ->> 'trial_ends')::date, current_date), current_date);
+      newd := case when o.length_unit = 'months' then (base + make_interval(months => o.length_amount))::date else base + o.length_amount end;
+      perform licence_set_module(o.workspace_id, m, 'trial', newd, null);
+    else
+      if st ->> 'status' <> 'active' then raise exception '% isn''t paid right now, so there''s no paid period to extend.', module_label(m); end if;
+      base := greatest(coalesce((st ->> 'paid_until')::date, current_date), current_date);
+      newd := case when o.length_unit = 'months' then (base + make_interval(months => o.length_amount))::date else base + o.length_amount end;
+      perform licence_set_module(o.workspace_id, m, 'active', null, newd);
+    end if;
+    res := res || jsonb_build_object(m, jsonb_build_object('was', base, 'now', newd));
+    last_end := greatest(last_end, newd);
+  end loop;
+  update offers set applied_at = now(), ends_at = last_end, applied = res where id = o.id;
+  perform queue_email_owners(o.workspace_id, 'free_period',
+    'Good news: ' || o.days || ' free days added',
+    'Hi,' || E'\n\n' || 'Good news: we''ve added ' || o.days || ' free days to '
+    || case when o.kind = 'account' then 'your paid programs' else (select string_agg(module_label(x), ', ') from unnest(o.modules) x) end
+    || ' — now free until ' || to_char(last_end, 'FMDD Mon YYYY') || '.' || E'\n\n' || 'There''s nothing you need to do: your programs pick it up by themselves.');
+  return res;
+end $$;
+revoke all on function public.offer_apply(offers) from public, anon, authenticated;
+
+create or replace function public.hq_grant_offer(ws uuid, kind text, modules text[], length_amount int, length_unit text, reason_category text,
+    reason text, ticket_ref text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare o offers; mods text[]; d int; lim numeric := hq_setting_num('offers.self_limit_days', 31); tr text := upper(nullif(trim(coalesce(ticket_ref, '')), ''));
+begin
+  perform hq_need(array['offers.grant']);
+  if not exists (select 1 from workspaces where id = ws and status = 'active') then raise exception 'Free periods are only for open businesses.'; end if;
+  if kind not in ('trial', 'paid', 'account') then raise exception 'Choose what to give.'; end if;
+  if length_unit not in ('days', 'months') or coalesce(length_amount, 0) < 1 then raise exception 'Choose how long.'; end if;
+  if reason_category not in ('retention', 'goodwill', 'promotion', 'other') then raise exception 'Choose a reason.'; end if;
+  if length(trim(coalesce(reason, ''))) < 4 then raise exception 'Give a reason (a few words is fine).'; end if;
+  if tr ~ '^[0-9]+$' then tr := 'T-' || tr; end if;
+  if tr is not null and not exists (select 1 from support_tickets where ref = tr) then raise exception 'There''s no ticket %.', tr; end if;
+  if kind = 'account' then
+    select array_agg(m) into mods from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+      where (module_state(ws, m) ->> 'status') = 'active';
+    if mods is null then raise exception 'This business has no paid programs. Extend a trial instead.'; end if;
+  else
+    select array_agg(distinct m) into mods from unnest(coalesce(modules, '{}')) m where m in ('basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls');
+    if mods is null then raise exception 'Choose a program.'; end if;
+  end if;
+  d := case when length_unit = 'months' then ((current_date + make_interval(months => length_amount))::date - current_date) else length_amount end;
+  insert into offers (workspace_id, modules, kind, length_amount, length_unit, days, reason_category, reason, ticket, status, requested_by)
+    values (ws, mods, kind, length_amount, length_unit, d, reason_category, left(trim(reason), 500), tr, case when d <= lim then 'applied' else 'waiting' end, auth.uid())
+    returning * into o;
+  if o.status = 'applied' then perform offer_apply(o); end if;
+  perform hq_log(case when o.status = 'applied' then 'offer.applied' else 'offer.requested' end,
+    jsonb_build_object('workspace_id', ws, 'offer', o.ref, 'ticket', tr, 'kind', kind, 'modules', to_jsonb(mods), 'days', d,
+      'reason_category', reason_category, 'reason', left(trim(reason), 500)));
+  return json_build_object('id', o.id, 'ref', o.ref, 'status', o.status, 'days', d, 'limit', lim);
+end $$;
+
+create or replace function public.hq_decide_offer(offer uuid, approve boolean, reason text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare o offers;
+begin
+  perform hq_need(array['offers.approve']);
+  select * into o from offers where id = offer for update;
+  if o.id is null then raise exception 'That free period doesn''t exist.'; end if;
+  if o.status <> 'waiting' then raise exception 'That free period isn''t waiting for approval.'; end if;
+  if o.requested_by = auth.uid() then raise exception 'The same person can''t ask for and approve a free period. Ask another supervisor.'; end if;
+  if not approve and length(trim(coalesce(reason, ''))) < 4 then raise exception 'Give a reason (a few words is fine).'; end if;
+  update offers set status = case when approve then 'approved' else 'declined' end, approved_by = auth.uid(), decided_at = now(),
+    decline_reason = case when approve then null else left(trim(hq_decide_offer.reason), 500) end where id = offer returning * into o;
+  if approve then perform offer_apply(o); end if;
+  perform hq_log(case when approve then 'offer.approved' else 'offer.declined' end,
+    jsonb_build_object('workspace_id', o.workspace_id, 'offer', o.ref, 'days', o.days, 'reason', nullif(trim(coalesce(reason, '')), '')));
+end $$;
+
+create or replace function public.offer_row_json(o offers) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', o.id, 'ref', o.ref, 'workspace_id', o.workspace_id, 'business', (select name from workspaces where id = o.workspace_id),
+    'modules', o.modules, 'kind', o.kind, 'length_amount', o.length_amount, 'length_unit', o.length_unit, 'days', o.days,
+    'reason_category', o.reason_category, 'reason', o.reason, 'ticket', o.ticket, 'status', o.status, 'requested_by', o.requested_by,
+    'requested_by_name', public.staff_name(o.requested_by), 'approved_by_name', public.staff_name(o.approved_by), 'decided_at', o.decided_at,
+    'decline_reason', o.decline_reason, 'applied_at', o.applied_at, 'ends_at', o.ends_at, 'created_at', o.created_at)
+$$;
+
+-- One queue for everything that needs a second person: refunds over the threshold and free periods over the limit.
+create or replace function public.hq_approvals() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['refunds.approve', 'offers.approve', 'refunds.view']);
+  return json_build_object(
+    'refunds', (select coalesce(json_agg(refund_row_json(f) order by f.created_at), '[]') from refund_requests f
+                where f.status in ('approved', 'partly_approved') and f.needs_second and f.second_approver is null),
+    'offers', (select coalesce(json_agg(offer_row_json(o) order by o.created_at), '[]') from offers o where o.status = 'waiting'),
+    'month', (select json_build_object('count', count(*), 'days', coalesce(sum(days), 0),
+        'by_reason', (select coalesce(json_object_agg(reason_category, d), '{}') from (select reason_category, sum(days) d from offers
+                       where status in ('applied', 'approved') and coalesce(applied_at, created_at) >= date_trunc('month', now()) group by 1) x))
+      from offers where status in ('applied', 'approved') and coalesce(applied_at, created_at) >= date_trunc('month', now())),
+    'limit_days', hq_setting_num('offers.self_limit_days', 31), 'threshold', hq_setting_num('refunds.two_person_threshold', 200),
+    'me', auth.uid());
+end $$;
+
+-- ---------------------------------------------------------------- the company panel, the businesses list and the history
+create or replace function public.hq_company_extra(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  return json_build_object(
+    'summary', business_summary(ws),
+    'tickets', case when hq_can('support.view') then (select coalesce(json_agg(json_build_object('id', t.id, 'ref', t.ref, 'subject', t.subject,
+        'status', t.status, 'level', t.level, 'updated_at', t.updated_at) order by t.updated_at desc), '[]')
+        from (select * from support_tickets where workspace_id = ws order by updated_at desc limit 30) t) end,
+    'refunds', case when hq_can('refunds.view') then (select coalesce(json_agg(refund_row_json(f) order by f.created_at desc), '[]')
+        from refund_requests f where f.workspace_id = ws) end,
+    'offers', (select coalesce(json_agg(offer_row_json(o) order by o.created_at desc), '[]') from offers o where o.workspace_id = ws),
+    'credit', credit_json(ws),
+    'history', case when hq_can('audit.view') then (select coalesce(json_agg(json_build_object('at', a.at, 'who', coalesce(staff_name(a.actor), 'Riyeser'),
+        'action', a.action, 'ticket', a.ticket, 'details', a.details) order by a.at desc), '[]')
+        from (select * from hq_audit where workspace_id = ws order by at desc limit 100) a) end);
+end $$;
+
+create or replace function public.hq_business_list(search text, status_filter text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare q text := nullif(trim(coalesce(search, '')), '');
+begin
+  perform hq_need(array['customers.view']);
+  return (select coalesce(json_agg(x order by x.created_at desc), '[]') from (
+    select w.id, w.name, w.company_code, w.country, w.created_at, w.status, w.kind, w.last_active_at, w.duplicate_of, w.removal_state,
+      (select count(*) from members m where m.workspace_id = w.id) as people,
+      (select count(*) from devices d where d.workspace_id = w.id) as pcs,
+      (select max(d.last_seen) from devices d where d.workspace_id = w.id) as last_seen,
+      w.calls_paid_until, greatest(0, 90 - extract(day from now() - w.created_at)::int) as trial_days_left,
+      (select m.display_name from members m where m.workspace_id = w.id and m.role = 'owner' limit 1) as owner_name,
+      (select u.email::text from members m join auth.users u on u.id = m.user_id where m.workspace_id = w.id and m.role = 'owner' limit 1) as owner_email
+    from workspaces w
+    where (coalesce(status_filter, 'all') = 'all' or w.status = status_filter)
+      and (q is null or w.name ilike '%' || q || '%' or w.company_code ilike '%' || q || '%' or w.legal_name ilike '%' || q || '%'
+           or w.tax_number ilike '%' || q || '%'
+           or exists (select 1 from members m join auth.users u on u.id = m.user_id where m.workspace_id = w.id and u.email::text ilike '%' || q || '%'))
+    order by w.created_at desc limit 500) x);
+end $$;
+
+-- HQ history with filters (who, action, business, dates). Exports are written to the history too.
+create or replace function public.hq_audit_search(who uuid, action_like text, ws uuid, from_day date, to_day date, for_export boolean) returns json
+  language plpgsql security definer set search_path = public as $$
+declare r json;
+begin
+  perform hq_need(array['audit.view']);
+  select coalesce(json_agg(json_build_object('id', a.id, 'at', a.at, 'actor', a.actor, 'who', coalesce(staff_name(a.actor), 'Riyeser'),
+      'action', a.action, 'workspace_id', a.workspace_id, 'business', (select name from workspaces w where w.id = a.workspace_id),
+      'ticket', a.ticket, 'details', a.details) order by a.at desc), '[]') into r
+  from (select * from hq_audit a
+        where (who is null or a.actor = who) and (coalesce(action_like, '') = '' or a.action like action_like || '%')
+          and (ws is null or a.workspace_id = ws) and (from_day is null or a.at >= from_day) and (to_day is null or a.at < to_day + 1)
+        order by a.at desc limit case when for_export then 20000 else 500 end) a;
+  if for_export then perform hq_log('audit.exported', jsonb_build_object('who', who, 'action', action_like, 'workspace_id', ws, 'from', from_day, 'to', to_day)); end if;
+  return r;
+end $$;
+
+-- Staff and their permissions (the HQ team tab)
+create or replace function public.hq_team() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['overview.view']);
+  return json_build_object('all', hq_all_perms(),
+    'roles', (select json_object_agg(r, hq_role_perms(r)) from unnest(array['owner', 'finance', 'support', 'senior', 'sales', 'developer']) r),
+    'staff', (select coalesce(json_agg(json_build_object('user_id', s.user_id, 'display_name', s.display_name, 'role', s.role, 'active', s.active,
+        'email', u.email::text, 'added_at', s.added_at, 'perms_add', s.perms_add, 'perms_remove', s.perms_remove,
+        'perms', coalesce(hq_staff_perms(s.user_id), '{}')) order by s.added_at), '[]') from hq_staff s join auth.users u on u.id = s.user_id));
+end $$;
+create or replace function public.hq_set_staff_perms(staff uuid, perms_on text[], perms_off text[]) returns void
+  language plpgsql security definer set search_path = public as $$
+declare bad text;
+begin
+  perform hq_need(array['staff.manage']);
+  if hq_role() <> 'owner' then raise exception 'Only an HQ owner can tick permissions on or off.'; end if;
+  if staff = auth.uid() then raise exception 'You can''t change your own HQ access. Ask another owner.'; end if;
+  select p into bad from unnest(coalesce(perms_on, '{}') || coalesce(perms_off, '{}')) p where not p = any(hq_all_perms()) limit 1;
+  if bad is not null then raise exception 'Unknown permission: %', bad; end if;
+  update hq_staff set perms_add = coalesce(perms_on, '{}'), perms_remove = coalesce(perms_off, '{}') where user_id = staff;
+  if not found then raise exception 'That person isn''t on the HQ team.'; end if;
+  perform hq_log('staff.permissions', jsonb_build_object('user_id', staff, 'on', to_jsonb(coalesce(perms_on, '{}')), 'off', to_jsonb(coalesce(perms_off, '{}'))));
+end $$;
+
+-- ---------------------------------------------------------------- who can call what
+revoke all on function public.touch_activity(), public.activity_on_sign_in(), public.has_two_step(uuid), public.my_closed_businesses(),
+  public.is_paying(uuid), public.hq_setting_num(text, numeric), public.hq_settings_json(), public.hq_get_settings(), public.hq_set_setting(text, numeric),
+  public.email_esc(text), public.email_html(text, text), public.queue_email(uuid, text, text, text, text, uuid, uuid, uuid),
+  public.queue_email_owners(uuid, text, text, text), public.hq_emails(), public.hq_email_resend(bigint),
+  public.can_see_ticket(uuid), public.level_name(int), public.open_ticket(uuid, text, text, text), public.reply_ticket(uuid, text),
+  public.my_tickets(), public.my_ticket(uuid), public.level_perm(int), public.hq_can_work(int), public.staff_can_work(uuid, int), public.staff_name(uuid),
+  public.hq_tickets(text, text), public.business_summary(uuid), public.hq_ticket(uuid), public.hq_ticket_reply(uuid, text, boolean, text),
+  public.hq_ticket_status(uuid, text), public.hq_ticket_priority(uuid, text), public.hq_ticket_assign(uuid, uuid),
+  public.ticket_move_level(support_tickets, int, text, uuid, uuid), public.hq_ticket_escalate(uuid, int, text, uuid),
+  public.hq_saved_replies(), public.hq_save_reply(bigint, text, text), public.hq_retire_reply(bigint), public.hq_support_sweep(),
+  public.hq_fix_start(text, text, text), public.hq_edit_business(uuid, jsonb, text, text), public.hq_reset_2fa(uuid, uuid, text, text, text),
+  public.hq_change_owner(uuid, uuid, text, text), public.hq_set_business_status(uuid, text, text, text), public.hq_close_duplicate(uuid, uuid, text, text),
+  public.inactivity_email(workspaces, int, int), public.hq_inactivity_sweep(), public.hq_inactive_accounts(), public.hq_remove_accounts(uuid[], text),
+  public.credit_json(uuid), public.refund_reason_name(text), public.request_refund(uuid, text, text, text, numeric, text, text, text, uuid),
+  public.my_refunds(uuid), public.hq_refund_create(uuid, text, text, text, numeric, text, text, text), public.refund_row_json(refund_requests),
+  public.hq_refunds(text), public.refund_decided_email(refund_requests), public.hq_refund_review(uuid), public.hq_refund_decide(uuid, text, numeric, text),
+  public.hq_refund_second(uuid, text), public.hq_refund_paid(uuid, text, text), public.module_label(text),
+  public.hq_grant_offer(uuid, text, text[], int, text, text, text, text), public.hq_decide_offer(uuid, boolean, text), public.offer_row_json(offers),
+  public.hq_approvals(), public.hq_company_extra(uuid), public.hq_business_list(text, text),
+  public.hq_audit_search(uuid, text, uuid, date, date, boolean), public.hq_team(), public.hq_set_staff_perms(uuid, text[], text[]),
+  public.hq_all_perms(), public.hq_role_perms(text), public.hq_staff_perms(uuid), public.hq_perms(), public.hq_can(text), public.is_paying(uuid)
+  from public, anon, authenticated;
+-- customers
+grant execute on function public.touch_activity(), public.my_closed_businesses(), public.open_ticket(uuid, text, text, text),
+  public.reply_ticket(uuid, text), public.my_tickets(), public.my_ticket(uuid), public.can_see_ticket(uuid),
+  public.request_refund(uuid, text, text, text, numeric, text, text, text, uuid), public.my_refunds(uuid) to authenticated;
+-- HQ staff (each function checks its own permission)
+grant execute on function public.hq_get_settings(), public.hq_set_setting(text, numeric), public.hq_emails(), public.hq_email_resend(bigint),
+  public.hq_tickets(text, text), public.hq_ticket(uuid), public.hq_ticket_reply(uuid, text, boolean, text), public.hq_ticket_status(uuid, text),
+  public.hq_ticket_priority(uuid, text), public.hq_ticket_assign(uuid, uuid), public.hq_ticket_escalate(uuid, int, text, uuid),
+  public.hq_saved_replies(), public.hq_save_reply(bigint, text, text), public.hq_retire_reply(bigint),
+  public.hq_edit_business(uuid, jsonb, text, text), public.hq_reset_2fa(uuid, uuid, text, text, text), public.hq_change_owner(uuid, uuid, text, text),
+  public.hq_set_business_status(uuid, text, text, text), public.hq_close_duplicate(uuid, uuid, text, text), public.hq_inactive_accounts(),
+  public.hq_remove_accounts(uuid[], text), public.hq_refund_create(uuid, text, text, text, numeric, text, text, text), public.hq_refunds(text),
+  public.hq_refund_review(uuid), public.hq_refund_decide(uuid, text, numeric, text), public.hq_refund_second(uuid, text),
+  public.hq_refund_paid(uuid, text, text), public.hq_grant_offer(uuid, text, text[], int, text, text, text, text), public.hq_decide_offer(uuid, boolean, text),
+  public.hq_approvals(), public.hq_business_list(text, text), public.hq_audit_search(uuid, text, uuid, date, date, boolean),
+  public.hq_team(), public.hq_set_staff_perms(uuid, text[], text[]) to authenticated;
+-- the jobs (hq-jobs.yml connects as the database owner); Supabase's service role may run them too
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.hq_inactivity_sweep(), public.hq_support_sweep() to service_role;
+  end if;
+end $$;
