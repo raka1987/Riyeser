@@ -71,9 +71,14 @@ create or replace function public.is_member(ws uuid) returns boolean
   select exists (select 1 from members where workspace_id = ws and user_id = auth.uid())
 $$;
 
+-- Two-step sign-in: a session that also passed an authenticator-app code is 'aal2'.
+create or replace function public.mfa_ok() returns boolean
+  language sql stable as $$ select coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2' $$;
+
+-- Owners and admins can only use their admin powers after two-step sign-in (password + authenticator code).
 create or replace function public.is_admin(ws uuid) returns boolean
   language sql stable security definer set search_path = public as $$
-  select exists (select 1 from members where workspace_id = ws and user_id = auth.uid() and role in ('owner', 'admin'))
+  select public.mfa_ok() and exists (select 1 from members where workspace_id = ws and user_id = auth.uid() and role in ('owner', 'admin'))
 $$;
 
 create or replace function public.can_see_channel(ch uuid) returns boolean
@@ -674,3 +679,54 @@ grant execute on function public.create_company(text, text, jsonb), public.updat
   public.request_join(text, text, text), public.my_join_requests(), public.decide_join(uuid, boolean, text, boolean, uuid[]),
   public.set_access(uuid, uuid, text, boolean, uuid[]), public.link_device(uuid, uuid, text, text, text),
   public.device_still_linked(uuid, uuid) to authenticated;
+
+
+-- ================================================================ change history (who changed what, and when)
+-- Written by the database itself; owners and admins can read their company's; nobody can edit or delete it.
+create table if not exists public.audit_log (
+  id bigint generated always as identity primary key,
+  workspace_id uuid references public.workspaces(id) on delete cascade,
+  at timestamptz not null default now(),
+  actor uuid default auth.uid(),
+  action text not null,
+  details jsonb
+);
+create index if not exists audit_log_ws_time on public.audit_log (workspace_id, at desc);
+alter table public.audit_log enable row level security;
+drop policy if exists al_read on public.audit_log;
+create policy al_read on public.audit_log for select to authenticated using (public.is_admin(workspace_id));
+revoke all on public.audit_log from anon, authenticated;
+grant select on public.audit_log to authenticated;
+
+create or replace function public.audit_change() returns trigger
+  language plpgsql security definer set search_path = public as $$
+declare ws uuid; rec jsonb; old_j jsonb; new_j jsonb; act text;
+begin
+  old_j := case when tg_op <> 'INSERT' then to_jsonb(old) end;
+  new_j := case when tg_op <> 'DELETE' then to_jsonb(new) end;
+  rec := coalesce(new_j, old_j);
+  ws := case tg_table_name
+          when 'workspaces' then (rec ->> 'id')::uuid
+          when 'branch_members' then (select workspace_id from branches where id = (rec ->> 'branch_id')::uuid)
+          else (rec ->> 'workspace_id')::uuid end;
+  act := tg_table_name || '.' || lower(tg_op);
+  if tg_table_name = 'join_requests' then act := 'join_request.' || coalesce(new_j ->> 'status', 'changed'); end if;
+  -- keep only what changed (and never the invite codes themselves)
+  if tg_op = 'UPDATE' then
+    select jsonb_object_agg(k, jsonb_build_object('was', old_j -> k, 'now', new_j -> k)) into rec
+      from jsonb_object_keys(new_j) k where (old_j -> k) is distinct from (new_j -> k) and k not in ('last_seen');
+    if rec is null then return null; end if;
+  end if;
+  rec := rec - 'invite_code' - 'code';
+  insert into audit_log (workspace_id, action, details) values (ws, act, rec);
+  return null;
+end $$;
+
+do $$ declare t text; begin
+  foreach t in array array['workspaces', 'members', 'branches', 'branch_members', 'devices'] loop
+    execute format('drop trigger if exists audit_%1$s on public.%1$s', t);
+    execute format('create trigger audit_%1$s after insert or update or delete on public.%1$s for each row execute function public.audit_change()', t);
+  end loop;
+  drop trigger if exists audit_join_requests on public.join_requests;
+  create trigger audit_join_requests after update on public.join_requests for each row execute function public.audit_change();
+end $$;

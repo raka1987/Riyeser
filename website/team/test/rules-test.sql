@@ -1,5 +1,11 @@
 \set ON_ERROR_STOP on
-create function pg_temp.as_user(u text) returns void language plpgsql as $$ begin perform set_config('request.jwt.claim.sub', u, false); end $$;
+-- Signed in with two-step sign-in (aal2) unless a test says otherwise.
+create function pg_temp.as_user(u text) returns void language plpgsql as $$ begin
+  perform set_config('request.jwt.claim.sub', u, false);
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'aal', 'aal2')::text, false); end $$;
+create function pg_temp.as_user_password_only(u text) returns void language plpgsql as $$ begin
+  perform set_config('request.jwt.claim.sub', u, false);
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'aal', 'aal1')::text, false); end $$;
 set role authenticated;
 -- Business A: owner creates the team; staff joins with the code
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
@@ -278,6 +284,30 @@ do $$ begin
   assert (select count(*) from public.workspaces) = 0, 'declined person sees nothing';
   begin perform public.request_join('RIY-NOPE-00', 'X', null); raise exception 'bad code worked';
   exception when others then assert sqlerrm like 'We couldn%', sqlerrm; end;
+end $$;
+reset role;
+
+-- ===== Two-step sign-in and change history
+-- the owner with only a password: no admin powers (can't approve, can't change access, can't see the history)
+select pg_temp.as_user_password_only('66666666-6666-6666-6666-666666666666'); set role authenticated;
+do $$ begin
+  begin perform public.create_branch((select id from public.workspaces where name = 'Island Traders'), 'Labasa'); raise exception 'admin without 2-step';
+  exception when others then if sqlerrm = 'admin without 2-step' then raise; end if; end;
+  assert (select count(*) from public.audit_log) = 0, 'no history without 2-step';
+  assert (select count(*) from public.messages) >= 0, 'chat still works with a password only';
+end $$;
+-- with two-step sign-in: sees the history of what happened, and nobody can change it
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+do $$ begin
+  assert exists (select 1 from public.audit_log where action = 'join_request.approved'), 'approval recorded';
+  assert exists (select 1 from public.audit_log where action = 'members.update' and details ? 'job_role'), 'access change recorded';
+  assert exists (select 1 from public.audit_log where action = 'devices.delete'), 'unlinked PC recorded';
+  assert not exists (select 1 from public.audit_log where details::text like '%invite_code%'), 'codes not stored in history';
+  assert (select count(distinct workspace_id) from public.audit_log) = 1, 'only this company''s history';
+  begin delete from public.audit_log; raise exception 'deleted history';
+  exception when insufficient_privilege then null; end;
+  begin update public.audit_log set action = 'x'; raise exception 'edited history';
+  exception when insufficient_privilege then null; end;
 end $$;
 reset role;
 

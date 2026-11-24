@@ -169,3 +169,12 @@ a { color: var(--blue); }
 @media (max-width: 760px) { .rq-grid { grid-template-columns: 1fr; } }
 #cof { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; } #cof > *:not(label.f), #cof label.f:has([name=address]) { grid-column: 1 / -1; }
 @media (max-width: 760px) { #cof { grid-template-columns: 1fr; } }
+/* two-step sign-in and history */
+.mfa-nag { display: block; margin: 8px 10px 0; text-align: left; background: rgba(250, 204, 21, .14); border: 1px solid rgba(250, 204, 21, .45); color: #fef3c7; border-radius: 10px; padding: 8px 10px; font-size: 12.5px; line-height: 1.4; cursor: pointer; }
+.mfa-nag u { color: #fde68a; font-weight: 700; }
+.steps { padding-left: 20px; margin: 0 0 10px; line-height: 1.5; } .steps li { margin-bottom: 8px; }
+.qr { margin: 10px 0 4px; } .qr img { width: 180px; height: 180px; border: 1px solid var(--line); border-radius: 10px; padding: 6px; background: #fff; image-rendering: pixelated; }
+.steps code { font-family: ui-monospace, Consolas, monospace; background: #f1f5f9; padding: 1px 6px; border-radius: 5px; word-break: break-all; }
+.hist { max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; }
+.hl { padding: 9px 12px; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.4; } .hl:first-child { border-top: 0; }
+.hl .hw { font-weight: 700; color: var(--ink); } .hl small { color: var(--muted); } .hl time { float: right; color: var(--muted); font-size: 12px; margin-left: 8px; }

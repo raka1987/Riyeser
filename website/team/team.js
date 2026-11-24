@@ -20,6 +20,7 @@
     if (/already registered/i.test(m)) return 'There\'s already an account with that email. Sign in instead.';
     if (/Password should be/i.test(m)) return 'Choose a password of at least 8 characters.';
     if (/Signups not allowed/i.test(m)) return 'New accounts aren\'t open yet. Ask Riyeser to turn on sign-ups.';
+    if (/Invalid TOTP|mfa_verification_failed|expired/i.test(m)) return 'That code isn\'t right. Type the 6 numbers your authenticator app shows now (they change every 30 seconds).';
     if (/Failed to fetch|NetworkError/i.test(m)) return 'Can\'t reach Riyeser Team. Check your internet connection and try again.';
     return m;
   };
@@ -56,6 +57,13 @@
       async updateCompany(ws, profile) { ok(await sb.rpc('update_company', { ws, profile })); },
       async devices(ws) { return ok(await sb.from('devices').select('id, user_id, device_name, platform, app_version, last_seen').eq('workspace_id', ws).order('last_seen', { ascending: false })); },
       async unlinkDevice(id) { ok(await sb.from('devices').delete().eq('id', id)); },
+      async aal() { return ok(await sb.auth.mfa.getAuthenticatorAssuranceLevel()); },
+      async factors() { const f = ok(await sb.auth.mfa.listFactors()); return (f.totp || []).filter((x) => x.status === 'verified'); },
+      async enrol() { const r = ok(await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Riyeser ' + new Date().toISOString().slice(0, 16) }));
+        return { id: r.id, qr: r.totp.qr_code, secret: r.totp.secret }; },
+      async verifyCode(factorId, code) { ok(await sb.auth.mfa.challengeAndVerify({ factorId, code })); },
+      async unenrol(factorId) { ok(await sb.auth.mfa.unenroll({ factorId })); },
+      async history(ws) { return ok(await sb.from('audit_log').select('id, at, actor, action, details').eq('workspace_id', ws).order('at', { ascending: false }).limit(200)); },
       async joinTeam(code, you) { return ok(await sb.rpc('join_team', { code, your_name: you })); },
       async newInvite(ws) { return ok(await sb.rpc('new_invite_code', { ws })); },
       async people(ws) { return ok(await sb.from('members').select('user_id, display_name, role, job_role, extension').eq('workspace_id', ws).order('display_name')); },
@@ -119,6 +127,7 @@
     const me = { id: AS, email: AS.slice(2) + '@sample.test' };
     const ws = 'w-demo';
     const ppl = [['u-me', 'You', 'owner', 101, 'owner'], ['u-sam', 'Sam Taylor', 'admin', 102, 'manager'], ['u-jordan', 'Jordan Lee', 'member', 201, 'staff'], ['u-alex', 'Alex Nguyen', 'member', 202, 'sales']];
+    const mfa = { on: true };
     const company = { name: 'Sample Plumbing', company_code: 'RIY-7K3M-Q2', legal_name: 'Sample Plumbing Pty Ltd', tax_number: '12 345 678 901', address: '4 Harbour Rd, Suva', phone: '330 1234', email: 'office@sample.test', country: 'Fiji', require_approval: true };
     const reqs = [{ id: 'r1', display_name: 'Mere Vula', email: 'mere@sample.test', branch_id: 'b-lau', note: 'New front desk at Lautoka', created_at: new Date(Date.now() - 25 * 60000).toISOString(), status: 'pending' }];
     const devs = [{ id: 'd1', user_id: 'u-me', device_name: 'Head office PC', platform: 'Windows', app_version: '1.7.0', last_seen: new Date(Date.now() - 2 * 60000).toISOString() },
@@ -174,6 +183,17 @@
       async updateCompany(_w, pr) { Object.assign(company, Object.fromEntries(Object.entries(pr).filter(([, v]) => v !== undefined))); },
       async devices() { return devs.slice(); },
       async unlinkDevice(id) { const i = devs.findIndex((d) => d.id === id); if (i >= 0) devs.splice(i, 1); },
+      async aal() { return { currentLevel: mfa.on ? 'aal2' : 'aal1', nextLevel: mfa.on ? 'aal2' : 'aal1' }; },
+      async factors() { return mfa.on ? [{ id: 'f1', status: 'verified' }] : []; },
+      async enrol() { return { id: 'f1', secret: 'JBSWY3DPEHPK3PXP', qr: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/>' + [...Array(120)].map((_, i) => `<rect x="${(i * 7) % 21}" y="${Math.floor(i * 7 / 21) % 21}" width="1" height="1"/>`).join('') + '<rect x="0" y="0" width="7" height="7" fill="none" stroke="#000"/><rect x="14" y="0" width="7" height="7" fill="none" stroke="#000"/><rect x="0" y="14" width="7" height="7" fill="none" stroke="#000"/></svg>') }; },
+      async verifyCode(_f, code) { if (!/^\d{6}$/.test(code)) throw new Error('That code isn\'t right. Check the 6 numbers in your authenticator app.'); mfa.on = true; },
+      async unenrol() { mfa.on = false; },
+      async history() { const t = (m) => new Date(Date.now() - m * 60000).toISOString();
+        return [{ id: 5, at: t(3), actor: 'u-me', action: 'devices.delete', details: { device_name: 'Lautoka front desk' } },
+          { id: 4, at: t(9), actor: 'u-me', action: 'members.update', details: { job_role: { was: 'staff', now: 'bookkeeper' }, user_id: 'u-jordan' } },
+          { id: 3, at: t(30), actor: 'u-me', action: 'join_request.approved', details: { display_name: { was: 'Mere Vula', now: 'Mere Vula' } } },
+          { id: 2, at: t(1440), actor: 'u-sam', action: 'branches.insert', details: { name: 'Lautoka branch', extension: 200 } },
+          { id: 1, at: t(2880), actor: 'u-me', action: 'workspaces.update', details: { phone: { was: '330 0000', now: '330 1234' } } }]; },
       async createTeam() { return ws; }, async joinTeam() { return ws; }, async newInvite() { return 'DEMO' + Math.floor(1000 + Math.random() * 9000); },
       async people() { return ppl.map(([user_id, display_name, role, extension, job_role]) => ({ user_id, display_name, role, extension, job_role: job_role || (role === 'owner' ? 'owner' : 'staff') })); },
       async features() { return { calls: true, calls_paid: false, trial_days_left: 74 }; },
@@ -227,6 +247,8 @@
     features: { calls: false }, branches: [], requests: [] };
   const JOBS = [['manager', 'Manager'], ['bookkeeper', 'Bookkeeper'], ['sales', 'Sales'], ['payroll', 'Payroll'], ['staff', 'Staff'], ['readonly', 'Read-only']];
   const isAdmin = () => !!S.team && (S.team.role === 'owner' || S.team.role === 'admin');
+  // Owners and admins need two-step sign-in before their admin powers work (the database checks this too).
+  const needs2step = () => isAdmin() && S.aal !== 'aal2';
   const jobName = (j) => (JOBS.find((x) => x[0] === j) || [j, j === 'owner' ? 'Owner' : 'Staff'])[1];
   const nameOf = (uid) => (S.people.find((p) => p.user_id === uid) || {}).display_name || 'Someone who left';
   const chanLabel = (c) => (c.kind === 'dm' ? nameOf(c.people.find((p) => p !== S.user.id) || S.user.id) : c.name);
@@ -322,6 +344,84 @@
     on('#chk', check); on('#again', () => setupTeam()); on('#other', () => { clearInterval(waitTimer); setupTeam(); });
     on('#so', async () => { clearInterval(waitTimer); await api.signOut(); gate(); });
     if (!declined) waitTimer = setInterval(check, 15000);
+  }
+
+
+  // ---------------- two-step sign-in
+  // At sign-in, when it's turned on: the 6-number code from the authenticator app.
+  async function codeScreen(note = '') {
+    $app.className = '';
+    $app.innerHTML = `<div class="gate"><form class="gcard" id="cs">
+      <div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div>
+      <h1>🔐 Enter your code</h1><p>Open your authenticator app and type the 6 numbers shown for Riyeser.</p>${note}
+      <label class="f"><span>Code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn"></label>
+      <button class="btn p w">Continue</button>
+      <div class="alt">Lost your phone? Ask your company's owner, or Riyeser support, to reset it. · <button type="button" class="linkbtn" id="so">Sign out</button></div></form></div>`;
+    $app.querySelector('input').focus();
+    $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
+    $app.querySelector('#cs').onsubmit = async (e) => {
+      e.preventDefault();
+      try { const f = (await api.factors())[0]; await api.verifyCode(f.id, String(new FormData(e.target).get('code')).trim()); await start(); }
+      catch (err) { codeScreen(`<div class="err">${esc(plainError(err))}</div>`); }
+    };
+  }
+
+  // Turn two-step sign-in on (scan a QR code, type the code) or off.
+  async function security() {
+    const on = (await api.factors().catch(() => [])).length > 0;
+    if (on) {
+      modal(`<h3>🔐 Two-step sign-in is on</h3><p>Signing in needs your password and a code from your authenticator app. That stops someone who learns your password.</p>
+        ${isAdmin() ? '<p><b>As an owner or admin you need it</b> to approve people, change access and see the history.</p>' : ''}
+        <div class="mfoot"><button class="btn" id="off" style="margin-right:auto;color:#b91c1c">Turn it off</button><button class="btn p" id="cl">Done</button></div>`, (d, close) => {
+        d.querySelector('#cl').onclick = close;
+        d.querySelector('#off').onclick = async () => {
+          if (!confirm(isAdmin() ? 'Turn off two-step sign-in? Your admin powers stop until you turn it on again.' : 'Turn off two-step sign-in?')) return;
+          try { const f = (await api.factors())[0]; await api.unenrol(f.id); S.aal = 'aal1'; close(); renderSide(); } catch (err) { alert(plainError(err)); }
+        };
+      });
+      return;
+    }
+    let en;
+    try { en = await api.enrol(); } catch (err) { alert(plainError(err)); return; }
+    modal(`<h3>🔐 Turn on two-step sign-in</h3>
+      <ol class="steps"><li>Install an authenticator app on your phone, such as <b>Microsoft Authenticator</b> or <b>Google Authenticator</b> (free).</li>
+      <li>In the app, add an account and <b>scan this code</b>:<div class="qr"><img src="${en.qr}" alt="QR code to scan"></div>
+        <small class="muted">Can't scan? Type this key instead: <code>${esc(en.secret)}</code></small></li>
+      <li>Type the <b>6 numbers</b> the app shows:</li></ol>
+      <form id="vf"><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn" aria-label="6-number code">
+      <div class="mfoot"><button type="button" class="btn" id="cl">Later</button><button class="btn p">Turn it on</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = async () => { try { await api.unenrol(en.id); } catch { /* not finished: nothing to undo */ } close(); };
+      d.querySelector('#vf').onsubmit = async (e) => {
+        e.preventDefault();
+        try { await api.verifyCode(en.id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; close(); await refreshCompany();
+          modal('<h3>✅ Two-step sign-in is on</h3><p>Next time you sign in, Riyeser asks for a code from your authenticator app.</p><div class="mfoot"><button class="btn p" id="cl">Done</button></div>', (dd, c2) => { dd.querySelector('#cl').onclick = c2; }); }
+        catch (err) { alert(plainError(err)); }
+      };
+    });
+  }
+
+  // ---------------- change history (owners and admins)
+  const HIST = {
+    'workspaces.update': 'changed the company details', 'members.insert': 'added someone to the company', 'members.update': 'changed someone\'s access',
+    'members.delete': 'removed someone from the company', 'branches.insert': 'added a branch', 'branches.update': 'changed a branch', 'branches.delete': 'removed a branch',
+    'branch_members.insert': 'put someone in a branch', 'branch_members.delete': 'took someone out of a branch', 'devices.insert': 'linked a PC',
+    'devices.delete': 'unlinked a PC', 'join_request.approved': 'approved a join request', 'join_request.declined': 'declined a join request',
+  };
+  function histLine(h) {
+    const d = h.details || {}; const v = (k) => (d[k] && typeof d[k] === 'object' && 'now' in d[k] ? d[k].now : d[k]);
+    const who = h.actor ? nameOf(h.actor) : 'Riyeser';
+    let what = HIST[h.action] || h.action;
+    const extra = [v('display_name'), v('device_name'), v('name'), d.user_id ? nameOf(v('user_id')) : null].filter(Boolean)[0];
+    const changed = h.action.endsWith('.update') ? Object.keys(d).filter((k) => d[k] && typeof d[k] === 'object' && 'was' in d[k]).map((k) => k.replace(/_/g, ' ')).join(', ') : '';
+    return `<div class="hl"><span class="hw">${esc(who)}</span> ${esc(what)}${extra ? ` · <b>${esc(extra)}</b>` : ''}${changed ? ` <small>(${esc(changed)})</small>` : ''}<time>${ago(h.at)}</time></div>`;
+  }
+  async function showHistory() {
+    if (needs2step()) return security();
+    let rows = [];
+    try { rows = await api.history(S.team.id); } catch (err) { alert(plainError(err)); return; }
+    modal(`<h3>🕘 Change history</h3><p>Who changed people, access, branches, PCs and company details. It can't be edited or deleted.</p>
+      <div class="hist">${rows.map(histLine).join('') || '<div class="empty"><b>Nothing yet</b></div>'}</div>
+      <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }
 
   // ---------------- company admin: requests, people & access, company profile and PCs
@@ -479,7 +579,8 @@
     return `<div class="team"><img src="icon.svg" alt=""><div>${S.teams.length > 1
       ? `<select id="tsw" aria-label="Switch team">${S.teams.map((t) => `<option value="${t.id}"${t.id === S.team.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
       : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}${S.team.company_code ? ` · ${esc(S.team.company_code)}` : ''}</small></div></div>
-    <div class="cobar"><button id="coinfo">🏢 Company</button>${isAdmin() ? `<button id="coppl">👥 People</button><button id="coreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button>` : ''}</div>
+    <div class="cobar"><button id="coinfo">🏢 Company</button>${isAdmin() ? `<button id="coppl">👥 People</button><button id="coreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button id="cohist">🕘 History</button>` : ''}<button id="cosec">🔐 Security</button></div>
+    ${needs2step() ? '<button class="mfa-nag" id="mfanag">🔐 Owners and admins need <b>two-step sign-in</b> to approve people and change access. <u>Turn it on (2 minutes)</u></button>' : ''}
     <div class="sidescroll">
       <div class="sec">Channels <button id="addch" aria-label="Add a channel" title="Add a channel">+</button></div>
       ${chs.map((c) => `<button class="item${S.ch && S.ch.id === c.id ? ' on' : ''}${S.unread[c.id] ? ' unread' : ''}" data-ch="${c.id}"><span class="hash">${c.kind === 'private' ? '🔒' : '#'}</span><span class="nm">${esc(c.name)}</span>${unreadBadge(c.id)}</button>`).join('')}
@@ -517,8 +618,12 @@
     el.querySelector('#out').onclick = async () => { await api.signOut(); S.team = null; gate(); };
     const sw = el.querySelector('#tsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
     el.querySelector('#coinfo').onclick = () => companyInfo(false);
-    const pp = el.querySelector('#coppl'); if (pp) pp.onclick = peopleAccess;
-    const rq = el.querySelector('#coreq'); if (rq) rq.onclick = joinRequests;
+    const pp = el.querySelector('#coppl'); if (pp) pp.onclick = () => (needs2step() ? security() : peopleAccess());
+    const rq = el.querySelector('#coreq'); if (rq) rq.onclick = () => (needs2step() ? security() : joinRequests());
+    const hs = el.querySelector('#cohist'); if (hs) hs.onclick = showHistory;
+    el.querySelector('#cosec').onclick = security;
+    const ng = el.querySelector('#mfanag'); if (ng) ng.onclick = security;
+    const mg2 = el.querySelector('#mgbr'); if (mg2 && needs2step()) mg2.onclick = security;
   }
   function renderHead() {
     const el = document.getElementById('mhead'); if (!el) return;
@@ -897,6 +1002,9 @@
       const s = await api.session();
       if (!s) return gate();
       S.user = s.user;
+      const lv = await api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' }));
+      S.aal = lv.currentLevel;
+      if (lv.nextLevel === 'aal2' && lv.currentLevel !== 'aal2') return codeScreen();
       S.teams = await api.teams(S.user.id);
       const jc = (params.get('join') || '').toUpperCase();
       if (jc && !S.teams.some((t) => t.invite_code === jc || t.company_code === jc)) return setupTeam();
@@ -908,6 +1016,6 @@
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
   setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);
-  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests };
+  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory };
   start();
 })();

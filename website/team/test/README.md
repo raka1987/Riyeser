@@ -11,3 +11,5 @@
   branches and extensions, and the premium upsell.
 - `company-test.js`: Company ID, join requests (approve with job role and branch), people & access, company details,
   linked PCs, and ask-to-join → waiting → approved against a pretend server.
+- `mfa-test.js`: two-step sign-in (set up with a QR code, the reminder for owners/admins, admin screens waiting for
+  it, the code screen at sign-in with a wrong and a right code) and the change history.
