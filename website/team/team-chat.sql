@@ -843,7 +843,7 @@ create or replace function public.hq_all_perms() returns text[] language sql imm
     'people.change_owner', 'business.close', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.assign',
     'support.saved_replies', 'support.escalate', 'support.level2', 'support.level3', 'refunds.view', 'refunds.request',
     'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'emails.manage', 'accounts.inactive',
-    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view']
+    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view', 'support.diagnostics']
 $$;
 create or replace function public.hq_role_perms(r text) returns text[] language sql immutable as $$
   select case r
@@ -853,12 +853,13 @@ create or replace function public.hq_role_perms(r text) returns text[] language 
       'offers.grant', 'offers.approve', 'emails.view', 'reports.view']
     when 'support' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'refunds.view',
-      'refunds.request', 'offers.grant', 'emails.view', 'link.support']
+      'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics']
     when 'senior' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'people.change_owner', 'business.close', 'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies',
-      'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view']
+      'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view',
+      'support.diagnostics']
     when 'sales' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'support.view', 'offers.grant']
-    when 'developer' then array['overview.view', 'downloads.view']
+    when 'developer' then array['overview.view', 'downloads.view', 'support.diagnostics']
     else '{}'::text[] end
 $$;
 -- What a staff member can do: their role's defaults, plus ticked extras, minus ticked-off ones. Owners can do everything.
@@ -1519,6 +1520,127 @@ revoke all on public.support_tickets, public.support_messages, public.support_re
   public.support_escalations from anon, authenticated;
 revoke all on sequence public.support_ticket_no from anon, authenticated;
 
+-- ---------------------------------------------------------------- the Support workspace: products, diagnostics, promised updates
+-- Which product a ticket is about, the next update Riyeser promised the customer (when and who), a planned release
+-- (free text for now), the developer bug it's linked to, the diagnostic report, and whether the customer's work is blocked.
+-- After it's resolved the customer can rate it (1 to 5). known_issue_id and fixed_in_version are for the known issues
+-- board and release tracking (later releases): nullable and unused for now. who_acts: who has to do something next.
+-- Diagnostic reports hold technical details only (product, versions, Windows version, error, scrubbed log lines), never
+-- customer records. Emails, long numbers and anything after "password" are masked again here, whoever sends them.
+create or replace function public.support_scrub(t text) returns text language sql immutable as $$
+  select regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(coalesce(t, ''),
+    '([A-Za-z0-9])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})', '\1***@\2', 'g'),
+    '\m(password|passwd|pwd|secret|token|api[_ -]?key)\M.*', '\1 [removed]', 'gin'),
+    '\m\d{4}([ -]\d{4}){3}\M', '[number removed]', 'g'),
+    '\m\d{2,3}([ -]\d{3}){2,}\M', '[number removed]', 'g'),
+    '\d{7,}', '[number removed]', 'g')
+$$;
+create or replace function public.support_products() returns text[] language sql immutable as $$
+  select array['central', 'accounting', 'invoices', 'pos', 'bookings', 'payroll', 'link', 'linkoffice', 'pdf', 'desk', 'website', 'other']
+$$;
+create or replace function public.product_label(p text) returns text language sql immutable as $$
+  select case p when 'central' then 'Riyeser Central' when 'accounting' then 'Accounting' when 'invoices' then 'Invoices' when 'pos' then 'POS'
+    when 'bookings' then 'Bookings' when 'payroll' then 'Payroll' when 'link' then 'Riyeser Link' when 'linkoffice' then 'Link Office'
+    when 'pdf' then 'Riyeser PDF' when 'desk' then 'Desk Assistant' when 'website' then 'riyeser.com' else 'Something else' end
+$$;
+create sequence if not exists public.support_diag_no start 4821;
+create table if not exists public.support_diagnostics (
+  id uuid primary key default gen_random_uuid(),
+  number bigint not null unique default nextval('public.support_diag_no'),
+  ref text generated always as ('DG-' || number::text) stored,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  source text not null default 'web' check (source in ('central', 'web')),
+  product text not null default 'other',
+  product_version text check (length(product_version) <= 40),
+  error_text text check (length(error_text) <= 500),          -- the error message or code, if any
+  os text check (length(os) <= 120),                           -- e.g. "Windows 11 Pro (10.0.22631)"
+  central_version text check (length(central_version) <= 40),
+  programs jsonb not null default '[]'::jsonb,                 -- Riyeser programs on that PC: [{"id": "payroll", "version": "2.8.1"}]
+  log_lines text check (length(log_lines) <= 65536),           -- the last lines of the program's technical log (200 at most)
+  log_source text check (length(log_source) <= 80),            -- which log, e.g. "Riyeser Link Office log" (never a folder path)
+  reported_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+create index if not exists support_diagnostics_ws on public.support_diagnostics (workspace_id, created_at desc);
+alter table public.support_diagnostics enable row level security;
+revoke all on public.support_diagnostics from anon, authenticated;
+-- Customers insert and read only their own reports (Report an issue normally goes through support_report below).
+grant select, insert on public.support_diagnostics to authenticated;
+grant usage on sequence public.support_diag_no to authenticated;
+drop policy if exists sd_read on public.support_diagnostics;
+create policy sd_read on public.support_diagnostics for select to authenticated using (created_by = auth.uid());
+drop policy if exists sd_insert on public.support_diagnostics;
+create policy sd_insert on public.support_diagnostics for insert to authenticated
+  with check (created_by = auth.uid() and public.is_member(workspace_id));
+-- Every report is tidied before it's saved: scrubbed, at most 200 log lines (64 KB), programs as [{id, version}].
+create or replace function public.support_diagnostics_clean() returns trigger language plpgsql as $$
+declare lines text[];
+begin
+  if tg_op = 'UPDATE' then
+    if current_setting('riyeser.removing', true) = 'on' then return new; end if;
+    raise exception 'Diagnostic reports can''t be changed.';
+  end if;
+  new.created_at := now();
+  if new.product is null or not (new.product = any(public.support_products())) then new.product := 'other'; end if;
+  new.error_text := nullif(left(public.support_scrub(new.error_text), 500), '');
+  new.product_version := nullif(left(trim(coalesce(new.product_version, '')), 40), '');
+  new.os := nullif(left(trim(coalesce(new.os, '')), 120), '');
+  new.central_version := nullif(left(trim(coalesce(new.central_version, '')), 40), '');
+  new.log_source := nullif(left(regexp_replace(coalesce(new.log_source, ''), '[\\/:]', ' ', 'g'), 80), '');
+  if new.reported_at is null or new.reported_at > now() + interval '1 day' or new.reported_at < now() - interval '30 days' then new.reported_at := now(); end if;
+  if coalesce(new.log_lines, '') = '' then new.log_lines := null;
+  else
+    lines := regexp_split_to_array(public.support_scrub(new.log_lines), E'\r?\n');
+    if array_length(lines, 1) > 200 then lines := lines[array_length(lines, 1) - 199 : array_length(lines, 1)]; end if;
+    new.log_lines := right(array_to_string(lines, E'\n'), 65536);
+  end if;
+  new.programs := (select coalesce(jsonb_agg(jsonb_build_object('id', y.pid, 'version', y.ver) order by y.pid), '[]') from (
+    select distinct on (e ->> 'id') e ->> 'id' as pid, left(nullif(trim(coalesce(e ->> 'version', '')), ''), 40) as ver
+    from jsonb_array_elements(case jsonb_typeof(new.programs) when 'array' then new.programs
+           when 'object' then (select coalesce(jsonb_agg(jsonb_build_object('id', k, 'version', v)), '[]') from jsonb_each_text(new.programs) x(k, v))
+           else '[]'::jsonb end) e
+    where jsonb_typeof(e) = 'object' and coalesce(e ->> 'id', '') ~ '^[a-z0-9-]{1,40}$' order by e ->> 'id' limit 60) y);
+  return new;
+end $$;
+drop trigger if exists support_diagnostics_clean on public.support_diagnostics;
+create trigger support_diagnostics_clean before insert or update on public.support_diagnostics for each row execute function public.support_diagnostics_clean();
+
+alter table public.support_tickets add column if not exists product text;
+do $$ begin
+  alter table public.support_tickets add constraint support_tickets_product check (product = any(public.support_products()));
+exception when duplicate_object then null; end $$;
+alter table public.support_tickets add column if not exists next_update_due timestamptz;
+alter table public.support_tickets add column if not exists next_update_owner uuid references auth.users(id) on delete set null;
+alter table public.support_tickets add column if not exists update_reminded_at timestamptz;
+alter table public.support_tickets add column if not exists planned_release text check (length(planned_release) <= 80);
+alter table public.support_tickets add column if not exists bug_ref text check (length(bug_ref) <= 80);
+alter table public.support_tickets add column if not exists bug_url text check (bug_url ~ '^https://[^[:space:]]{3,}$' and length(bug_url) <= 300);
+alter table public.support_tickets add column if not exists diag_id uuid references public.support_diagnostics(id) on delete set null;
+alter table public.support_tickets add column if not exists work_blocked boolean not null default false;
+alter table public.support_tickets add column if not exists resolved_at timestamptz;
+alter table public.support_tickets add column if not exists rating int check (rating between 1 and 5);
+alter table public.support_tickets add column if not exists rating_comment text check (length(rating_comment) <= 1000);
+alter table public.support_tickets add column if not exists rated_at timestamptz;
+-- later: the known issues board (one known issue, many tickets) and release tracking (the version with the fix)
+alter table public.support_tickets add column if not exists known_issue_id uuid;
+alter table public.support_tickets add column if not exists fixed_in_version text check (length(fixed_in_version) <= 40);
+-- Statuses: New, Investigating, In progress (waiting_us: back with Riyeser, e.g. the customer replied), Waiting on customer, Resolved (done).
+alter table public.support_tickets drop constraint if exists support_tickets_status_check;
+alter table public.support_tickets add constraint support_tickets_status_check check (status in ('new', 'investigating', 'waiting_us', 'waiting_customer', 'done'));
+alter table public.support_tickets add column if not exists who_acts text generated always as
+  (case when status = 'done' then null when status = 'waiting_customer' then 'customer' else 'riyeser' end) stored;
+create index if not exists support_tickets_update_due on public.support_tickets (next_update_due) where status <> 'done' and next_update_due is not null;
+create index if not exists support_tickets_product on public.support_tickets (product, updated_at desc);
+grant select (product, work_blocked, next_update_due, resolved_at, rating, rating_comment, who_acts) on public.support_tickets to authenticated;
+-- Logged phone calls sit in the ticket's thread as staff-only entries.
+alter table public.support_messages add column if not exists kind text not null default 'message';
+do $$ begin
+  alter table public.support_messages add constraint support_messages_kind check (kind in ('message', 'call'));
+exception when duplicate_object then null; end $$;
+alter table public.support_messages add column if not exists call_direction text check (call_direction in ('in', 'out'));
+alter table public.support_messages add column if not exists call_with text check (length(call_with) <= 120);
+
 -- Can this customer see this ticket? Their own, or (owners and admins, after two-step sign-in) their business's.
 create or replace function public.can_see_ticket(t uuid) returns boolean
   language sql stable security definer set search_path = public as $$
@@ -1580,8 +1702,8 @@ begin
   insert into support_reads (ticket_id, user_id) values (t.id, uid) on conflict do nothing;
   perform queue_email(uid, null, 'ticket_received', 'We''ve got your help request (' || t.ref || ')',
     'Hi,' || E'\n\n' || 'Thanks for getting in touch. We''ve got your help request "' || t.subject || '" (' || t.ref || ').' || E'\n\n'
-    || 'We''ll reply by email, and you''ll see our answer on your Riyeser home page at riyeser.com/link under "Your help requests". '
-    || 'To add anything, open the request there and reply.', ws, t.id, null);
+    || 'We''ll reply by email, and you''ll see our answer on your Riyeser home page under "Your help requests":' || E'\n'
+    || 'https://riyeser.com/link/?help#' || t.ref || E'\n\n' || 'To add anything, open the request there and reply.', ws, t.id, null);
   return json_build_object('id', t.id, 'ref', t.ref);
 end $$;
 
@@ -1703,10 +1825,26 @@ begin
     'ticket', json_build_object('id', t.id, 'ref', t.ref, 'subject', t.subject, 'topic', t.topic, 'status', t.status, 'priority', t.priority,
       'level', t.level, 'assignee', t.assignee, 'assignee_name', staff_name(t.assignee), 'workspace_id', t.workspace_id, 'created_at', t.created_at,
       'first_reply_at', t.first_reply_at, 'updated_at', t.updated_at, 'last_customer_at', t.last_customer_at, 'last_staff_at', t.last_staff_at,
-      'overdue_at', t.overdue_at, 'opened_by', t.opened_by,
+      'overdue_at', t.overdue_at, 'opened_by', t.opened_by, 'staff_started', t.staff_started,
       'opened_by_name', (select display_name from members m where m.workspace_id = t.workspace_id and m.user_id = t.opened_by),
-      'opened_by_email', (select email::text from auth.users u where u.id = t.opened_by)),
+      'opened_by_email', (select email::text from auth.users u where u.id = t.opened_by),
+      'product', t.product, 'who_acts', t.who_acts, 'work_blocked', t.work_blocked, 'next_update_due', t.next_update_due,
+      'next_update_owner', t.next_update_owner, 'next_update_owner_name', staff_name(t.next_update_owner),
+      'update_overdue', t.status <> 'done' and t.next_update_due < now(), 'planned_release', t.planned_release, 'bug_ref', t.bug_ref, 'bug_url', t.bug_url,
+      'resolved_at', t.resolved_at, 'rating', t.rating, 'rating_comment', t.rating_comment, 'known_issue_id', t.known_issue_id,
+      'fixed_in_version', t.fixed_in_version, 'diag_id', t.diag_id),
+    'diagnostic', case when t.diag_id is not null and hq_can('support.diagnostics') then
+        (select support_diag_json(d) from support_diagnostics d where d.id = t.diag_id) end,
+    'diag_hidden', t.diag_id is not null and not hq_can('support.diagnostics'),
+    'pcs', case when t.workspace_id is not null then (select coalesce(json_agg(json_build_object('name', d.device_name, 'platform', d.platform,
+        'version', d.app_version, 'programs', coalesce(d.programs, '[]'::jsonb), 'programs_at', d.programs_at, 'last_seen', d.last_seen) order by d.last_seen desc), '[]')
+        from devices d where d.workspace_id = t.workspace_id) end,
+    'support_notes', case when t.workspace_id is not null then (select coalesce(json_agg(json_build_object('id', n.id, 'body', n.body, 'at', n.created_at,
+        'by', staff_name(n.author)) order by n.created_at desc), '[]') from hq_notes n where n.workspace_id = t.workspace_id and n.pinned) end,
+    'staff', (select coalesce(json_agg(json_build_object('user_id', s.user_id, 'name', s.display_name, 'can_work', staff_can_work(s.user_id, t.level))
+        order by s.display_name), '[]') from hq_staff s where s.active),
     'messages', (select coalesce(json_agg(json_build_object('id', m.id, 'staff', m.is_staff, 'internal', m.internal, 'body', m.body, 'at', m.created_at,
+        'kind', m.kind, 'call_direction', m.call_direction, 'call_with', m.call_with,
         'from', case when m.author is null then 'Riyeser (automatic)' when m.is_staff then coalesce(staff_name(m.author), 'Riyeser staff')
                      else coalesce((select display_name from members mm where mm.workspace_id = t.workspace_id and mm.user_id = m.author),
                                    (select email::text from auth.users u where u.id = m.author), 'Customer') end) order by m.id), '[]')
@@ -1717,7 +1855,8 @@ begin
     'refunds', (select coalesce(json_agg(json_build_object('id', f.id, 'ref', f.ref, 'status', f.status, 'amount', f.amount, 'currency', f.currency)), '[]')
       from refund_requests f where f.ticket_id = t.id),
     'can_work', hq_can_work(t.level)) into r;
-  perform hq_log('ticket.viewed', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id));
+  perform hq_log('ticket.viewed', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id,
+    'diagnostic', case when t.diag_id is not null and hq_can('support.diagnostics') then (select ref from support_diagnostics where id = t.diag_id) end));
   return r;
 end $$;
 
@@ -1736,13 +1875,13 @@ begin
     perform hq_log('ticket.note', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id));
     return;
   end if;
-  if st not in ('waiting_customer', 'waiting_us', 'done') then st := 'waiting_customer'; end if;
+  if st not in ('waiting_customer', 'waiting_us', 'investigating', 'done') then st := 'waiting_customer'; end if;
   update support_tickets set first_reply_at = coalesce(first_reply_at, now()), last_staff_at = now(), updated_at = now(), status = st,
-    assignee = coalesce(assignee, auth.uid()) where id = ticket;
+    resolved_at = case when st = 'done' then coalesce(resolved_at, now()) end, assignee = coalesce(assignee, auth.uid()) where id = ticket;
   if t.opened_by is not null then
     perform queue_email(t.opened_by, null, 'ticket_reply', 'Re: ' || t.subject || ' (' || t.ref || ')',
       'Hi,' || E'\n\n' || 'Riyeser Support has replied to your help request ' || t.ref || ':' || E'\n\n' || trim(message) || E'\n\n'
-      || 'To reply, sign in at riyeser.com/link and open "Your help requests".', t.workspace_id, t.id, null);
+      || 'To reply, or to tell us it''s fixed, open it here:' || E'\n' || 'https://riyeser.com/link/?help#' || t.ref, t.workspace_id, t.id, null);
   end if;
   perform hq_log('ticket.replied', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'status', st));
 end $$;
@@ -1755,8 +1894,9 @@ begin
   select * into t from support_tickets where id = ticket;
   if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
   if not hq_can_work(t.level) then raise exception 'This ticket is with % (level %).', level_name(t.level), t.level; end if;
-  if new_status not in ('new', 'waiting_us', 'waiting_customer', 'done') then raise exception 'Choose a status'; end if;
-  update support_tickets set status = new_status, updated_at = now() where id = ticket;
+  if new_status not in ('new', 'investigating', 'waiting_us', 'waiting_customer', 'done') then raise exception 'Choose a status'; end if;
+  update support_tickets set status = new_status, updated_at = now(),
+    resolved_at = case when new_status = 'done' then coalesce(resolved_at, now()) end where id = ticket;
   perform hq_log('ticket.status', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'was', t.status, 'now', new_status));
 end $$;
 
@@ -1856,20 +1996,35 @@ end $$;
 create or replace function public.hq_support_sweep() returns json
   language plpgsql security definer set search_path = public as $$
 declare od numeric := hq_setting_num('support.overdue_hours', 24); eh numeric := hq_setting_num('support.escalate_hours', 48);
-        n_over int; n_esc int := 0; t support_tickets;
+        n_over int; n_esc int := 0; n_upd int := 0; t support_tickets;
 begin
+  for t in select * from support_tickets s where s.status <> 'done' and s.next_update_due is not null and s.next_update_due < now()
+      and (s.update_reminded_at is null or s.update_reminded_at < s.next_update_due) loop
+    update support_tickets set update_reminded_at = now() where id = t.id;
+    insert into support_messages (ticket_id, author, is_staff, internal, body) values (t.id, null, true, true,
+      'Reminder: the next update to the customer was due ' || to_char(t.next_update_due at time zone 'UTC', 'FMDay DD Mon, FMHH12:MI am') || ' UTC'
+      || coalesce(' (' || staff_name(t.next_update_owner) || ')', '') || '. Reply to the customer, then set the next update.');
+    if t.next_update_owner is not null then
+      perform queue_email(t.next_update_owner, null, 'staff_update_due', 'Update overdue: ' || t.ref,
+        'The next update to the customer on ' || t.ref || ' ("' || t.subject || '") was due '
+        || to_char(t.next_update_due at time zone 'UTC', 'FMDay DD Mon, FMHH12:MI am') || ' UTC.' || E'\n\n'
+        || 'Open it in Riyeser HQ: https://riyeser.com/hq/#/support', null, t.id, null);
+    end if;
+    n_upd := n_upd + 1;
+  end loop;
   update support_tickets set overdue_at = now()
     where status <> 'done' and first_reply_at is null and overdue_at is null and created_at < now() - make_interval(secs => od * 3600);
   get diagnostics n_over = row_count;
-  for t in select * from support_tickets s where s.status in ('new', 'waiting_us') and s.level < 3
+  for t in select * from support_tickets s where s.status in ('new', 'investigating', 'waiting_us') and s.level < 3
       and coalesce(s.last_customer_at, s.created_at) < now() - make_interval(secs => eh * 3600)
       and (s.last_staff_at is null or s.last_staff_at < coalesce(s.last_customer_at, s.created_at))
       and (s.escalated_at is null or s.escalated_at < now() - make_interval(secs => eh * 3600)) loop
     perform ticket_move_level(t, t.level + 1, 'No reply in ' || trim_scale(eh)::text || ' hours', null, null);
     n_esc := n_esc + 1;
   end loop;
-  if n_over > 0 or n_esc > 0 then perform hq_log('sweep.support', jsonb_build_object('overdue', n_over, 'escalated', n_esc)); end if;
-  return json_build_object('overdue', n_over, 'escalated', n_esc);
+  if n_over > 0 or n_esc > 0 or n_upd > 0 then
+    perform hq_log('sweep.support', jsonb_build_object('overdue', n_over, 'escalated', n_esc, 'updates_overdue', n_upd)); end if;
+  return json_build_object('overdue', n_over, 'escalated', n_esc, 'updates_overdue', n_upd);
 end $$;
 
 -- ---------------------------------------------------------------- fix-up tools (company panel)
@@ -2071,7 +2226,8 @@ begin
     update audit_log set details = '{"removed": true}'::jsonb where workspace_id = ws;
     update hq_notes set body = '[removed]' where workspace_id = ws;
     update support_messages set body = '[removed]' where ticket_id in (select id from support_tickets where workspace_id = ws);
-    update support_tickets set subject = '[removed]' where workspace_id = ws;
+    update support_tickets set subject = '[removed]', rating_comment = null where workspace_id = ws;
+    update support_diagnostics set error_text = null, log_lines = null, os = null where workspace_id = ws;
     update refund_requests set explanation = '[removed]', invoice_ref = null where workspace_id = ws;
     update email_outbox set to_address = null, subject = '[removed]', body_text = '[removed]', body_html = null,
       status = case when status = 'queued' then 'held' else status end where workspace_id = ws;
@@ -3371,7 +3527,7 @@ begin
   select m.display_name into nm from members m where m.workspace_id = ws and m.user_id = who;
   perform queue_email(who, null, 'staff_message', t.subject || ' (' || t.ref || ')',
     'Hi ' || coalesce(split_part(trim(nm), ' ', 1), '') || ',' || E'\n\n' || trim(msg_body) || E'\n\n'
-    || 'To reply, sign in at riyeser.com/link and open "Your help requests" on your Riyeser home page (' || t.ref || ').', ws, t.id, null);
+    || 'To reply, open it under "Your help requests" on your Riyeser home page:' || E'\n' || 'https://riyeser.com/link/?help#' || t.ref, ws, t.id, null);
   perform hq_log('ticket.started', jsonb_build_object('workspace_id', ws, 'ticket', t.ref, 'to', who));
   return json_build_object('id', t.id, 'ref', t.ref);
 end $$;
@@ -3381,7 +3537,8 @@ create or replace function public.my_tickets() returns json
   language sql stable security definer set search_path = public as $$
   select coalesce(json_agg(x order by x.updated_at desc), '[]') from (
     select t.id, t.ref, t.subject, t.topic, t.status, t.workspace_id, w.name as business, t.opened_by = auth.uid() as mine,
-      t.staff_started as from_riyeser, t.created_at, t.updated_at,
+      t.staff_started as from_riyeser, t.created_at, t.updated_at, t.product, t.who_acts, t.work_blocked, t.resolved_at, t.rating,
+      case when t.status <> 'done' then t.next_update_due end as next_update_due,
       (select count(*) from support_messages m where m.ticket_id = t.id and m.is_staff and not m.internal
          and m.created_at > coalesce((select r.read_at from support_reads r where r.ticket_id = t.id and r.user_id = auth.uid()), '-infinity')) as unread
     from support_tickets t left join workspaces w on w.id = t.workspace_id
@@ -3394,7 +3551,9 @@ declare r json;
 begin
   if not can_see_ticket(ticket) then raise exception 'We couldn''t find that help request.'; end if;
   select json_build_object('id', t.id, 'ref', t.ref, 'subject', t.subject, 'topic', t.topic, 'status', t.status, 'created_at', t.created_at,
-    'from_riyeser', t.staff_started,
+    'from_riyeser', t.staff_started, 'product', t.product, 'who_acts', t.who_acts, 'work_blocked', t.work_blocked, 'resolved_at', t.resolved_at,
+    'rating', t.rating, 'rating_comment', t.rating_comment, 'next_update_due', case when t.status <> 'done' then t.next_update_due end,
+    'diag_ref', (select d.ref from support_diagnostics d where d.id = t.diag_id),
     'messages', (select coalesce(json_agg(json_build_object('id', m.id, 'staff', m.is_staff, 'mine', m.author = auth.uid(),
         'from', case when m.is_staff then 'Riyeser Support'
                      else coalesce((select display_name from members mm where mm.workspace_id = t.workspace_id and mm.user_id = m.author), 'You') end,
@@ -3574,7 +3733,7 @@ begin
       and (f_trial is null or (x.trial_end is not null and x.trial_end <= current_date + f_trial))
       and (not f_tickets or x.tickets_open > 0)
       and (not f_follow or exists (select 1 from hq_notes n where n.workspace_id = x.id and n.follow_up is not null and n.follow_up_done_at is null)
-           or exists (select 1 from support_tickets t where t.workspace_id = x.id and t.status in ('new', 'waiting_us')))
+           or exists (select 1 from support_tickets t where t.workspace_id = x.id and t.status in ('new', 'investigating', 'waiting_us')))
   ), ordered as (
     select f.*, row_number() over (order by
       case when not dsc then case sk when 'name' then lower(f.name) when 'owner' then lower(f.owner_name) when 'phone' then f.phone
@@ -3727,7 +3886,8 @@ begin
     'unassigned', case when hq_can('support.view') then (select count(*) from support_tickets where status <> 'done' and assignee is null) end,
     'overdue', case when hq_can('support.view') then (select count(*) from support_tickets s where s.status <> 'done'
         and (s.overdue_at is not null or (s.first_reply_at is null and s.created_at < now() - make_interval(secs => od * 3600)))) end,
-    'mine', case when hq_can('support.view') then (select count(*) from support_tickets where status in ('new', 'waiting_us') and assignee = auth.uid()) end,
+    'mine', case when hq_can('support.view') then (select count(*) from support_tickets where status in ('new', 'investigating', 'waiting_us') and assignee = auth.uid()) end,
+    'updates_overdue', case when hq_can('support.view') then (select count(*) from support_tickets where status <> 'done' and next_update_due < now()) end,
     'approvals', case when hq_can('offers.approve') or hq_can('refunds.approve') then
         (select count(*) from offers where status = 'waiting') + (select count(*) from refund_requests
           where status in ('approved', 'partly_approved') and needs_second and second_approver is null) end,
@@ -3826,10 +3986,15 @@ begin
     group by w.id
   ), q as (
     select * from (
+      select 1 as prio, 'update' as kind, t.workspace_id as ws, 'Update overdue' as issue,
+        t.ref || ' · ' || t.subject || ' · was due ' || to_char(t.next_update_due at time zone 'UTC', 'FMDD Mon FMHH12:MI am') || ' UTC' as detail,
+        coalesce(public.staff_name(t.next_update_owner), public.staff_name(t.assignee), 'Unassigned') as owner, 'Update' as action, t.id::text as ref, t.next_update_due as at
+      from support_tickets t where hq_can('support.view') and t.status <> 'done' and t.next_update_due < now()
+      union all
       select 1 as prio, 'complaint' as kind, t.workspace_id as ws, case when t.first_reply_at is null and t.created_at < now() - make_interval(secs => od * 3600)
           then 'Overdue complaint' else 'Open complaint' end as issue, t.subject as detail, coalesce(public.staff_name(t.assignee), 'Unassigned') as owner,
         'Reply' as action, t.id::text as ref, t.created_at as at
-      from support_tickets t where hq_can('support.view') and t.status in ('new', 'waiting_us') and (t.assignee is null or t.assignee = auth.uid()
+      from support_tickets t where hq_can('support.view') and t.status in ('new', 'investigating', 'waiting_us') and (t.assignee is null or t.assignee = auth.uid()
         or (t.first_reply_at is null and t.created_at < now() - make_interval(secs => od * 3600)))
       union all
       select 2, 'approval', o.workspace_id, 'Approval needed', o.days || ' free days · ' || array_to_string(array(select public.module_label(x) from unnest(o.modules) x), ', '),
@@ -3908,3 +4073,256 @@ grant execute on function public.hq_company_page(uuid), public.hq_message_custom
   public.hq_companies_page(text, jsonb, text, boolean, int, int, boolean), public.hq_reports(date, date), public.hq_attention(),
   public.hq_set_owner(uuid, uuid), public.hq_handover(), public.hq_handover_add(text, date), public.hq_handover_done(bigint),
   public.hq_work_queue(), public.hq_signups(int) to authenticated;
+
+-- ===== Support workspace: Report an issue, the customer's Reply / Still having an issue / Confirm fixed, the HQ workspace =====
+-- (The new columns and the support_diagnostics table are with the support tables above.) Customers' functions only
+-- work on their own business's tickets (can_see_ticket); HQ's check a permission with hq_need and are written to hq_audit.
+-- Diagnostic reports are technical only, and HQ reads them with the support.diagnostics permission.
+create or replace function public.support_diag_json(d support_diagnostics) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', d.id, 'ref', d.ref, 'source', d.source, 'product', d.product, 'product_version', d.product_version,
+    'error_text', d.error_text, 'os', d.os, 'central_version', d.central_version, 'programs', d.programs, 'log_lines', d.log_lines,
+    'log_source', d.log_source, 'line_count', coalesce(array_length(regexp_split_to_array(d.log_lines, E'\n'), 1), 0),
+    'reported_at', d.reported_at, 'created_at', d.created_at)
+$$;
+
+-- Report an issue (Riyeser Central, or riyeser.com's Help): one diagnostic report and one ticket. payload:
+-- {product, what_happened, blocked, subject?, product_version?, error_text?, os?, central_version?, programs?, log_lines?,
+--  log_source?, reported_at?, source: 'central'|'web', diag_ref?: 'DG-4821' (a report already made in Central)}
+create or replace function public.support_report(ws uuid, payload jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); p jsonb := coalesce(payload, '{}'::jsonb); prod text; what text; blocked boolean; d support_diagnostics;
+        t support_tickets; dref text; subj text; ra timestamptz;
+begin
+  if uid is null then raise exception 'Sign in with your Riyeser account first.'; end if;
+  if jsonb_typeof(p) <> 'object' then raise exception 'Something went wrong with that report. Please try again.'; end if;
+  if ws is null or not exists (select 1 from members where workspace_id = ws and user_id = uid) then raise exception 'You''re not in that business'; end if;
+  prod := coalesce(nullif(p ->> 'product', ''), 'other');
+  if not (prod = any(support_products())) then prod := 'other'; end if;
+  what := trim(coalesce(p ->> 'what_happened', ''));
+  if length(what) = 0 then raise exception 'Say what happened, then send it again.'; end if;
+  blocked := lower(coalesce(p ->> 'blocked', '')) in ('true', 'yes', '1');
+  if (select count(*) from support_tickets where opened_by = uid and created_at > now() - interval '1 day') >= 10 then
+    raise exception 'You''ve sent a lot of help requests today. Reply to one of them instead and we''ll pick it up.'; end if;
+  dref := upper(trim(coalesce(p ->> 'diag_ref', '')));
+  if dref <> '' then
+    if dref !~ '^DG-[0-9]{1,12}$' then raise exception 'That diagnostic reference doesn''t look right. It looks like DG-4821.'; end if;
+    select * into d from support_diagnostics x where x.ref = dref and x.workspace_id = ws;
+    if d.id is null then raise exception 'We couldn''t find diagnostic reference % for this business. Check it in Riyeser Central, or leave it empty.', dref; end if;
+  else
+    begin ra := (p ->> 'reported_at')::timestamptz; exception when others then ra := null; end;
+    insert into support_diagnostics (workspace_id, created_by, source, product, product_version, error_text, os, central_version, programs,
+        log_lines, log_source, reported_at)
+      values (ws, uid, case when p ->> 'source' = 'central' then 'central' else 'web' end, prod, p ->> 'product_version', p ->> 'error_text',
+        p ->> 'os', p ->> 'central_version', coalesce(p -> 'programs', '[]'::jsonb), p ->> 'log_lines', p ->> 'log_source', ra)
+      returning * into d;
+  end if;
+  subj := left(coalesce(nullif(trim(p ->> 'subject'), ''), product_label(prod) || ': ' || split_part(what, E'\n', 1)), 150);
+  insert into support_tickets (workspace_id, opened_by, topic, subject, status, last_customer_at, product, diag_id, work_blocked, priority)
+    values (ws, uid, 'program', subj, 'new', now(), prod, d.id, blocked, case when blocked then 'high' else 'normal' end) returning * into t;
+  insert into support_messages (ticket_id, author, body) values (t.id, uid, left(what, 4800) || E'\n\n' || 'Work blocked: '
+    || case when blocked then 'Yes' else 'No' end || E'\n' || 'Diagnostic reference: ' || d.ref);
+  insert into support_reads (ticket_id, user_id) values (t.id, uid) on conflict do nothing;
+  perform queue_email(uid, null, 'ticket_received', 'We''ve got your report (' || t.ref || ')',
+    'Hi,' || E'\n\n' || 'Thanks for reporting this. Your request number is ' || t.ref || ' (diagnostic reference ' || d.ref || ').' || E'\n\n'
+    || 'We''ll reply by email and on your Riyeser home page:' || E'\n' || 'https://riyeser.com/link/?help#' || t.ref, ws, t.id, null);
+  insert into audit_log (workspace_id, action, details, actor)
+    values (ws, 'support.reported', jsonb_build_object('ticket', t.ref, 'diagnostic', d.ref, 'product', prod, 'blocked', blocked), uid);
+  return json_build_object('id', t.id, 'ref', t.ref, 'diag_ref', d.ref, 'diag_id', d.id);
+end $$;
+
+-- The customer, on one of their business's tickets: "Still having an issue" (back to the owner's queue: Riyeser to act)
+create or replace function public.ticket_still_issue(ticket uuid, message text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; m text := trim(coalesce(message, ''));
+begin
+  if not can_see_ticket(ticket) then raise exception 'We couldn''t find that help request.'; end if;
+  select * into t from support_tickets where id = ticket;
+  insert into support_messages (ticket_id, author, body)
+    values (ticket, auth.uid(), left('Still having an issue.' || case when m <> '' then E'\n\n' || m else '' end, 5000));
+  update support_tickets set status = 'waiting_us', resolved_at = null, last_customer_at = now(), updated_at = now() where id = ticket;
+  insert into support_reads (ticket_id, user_id) values (ticket, auth.uid()) on conflict (ticket_id, user_id) do update set read_at = now();
+  if t.workspace_id is not null then
+    insert into audit_log (workspace_id, action, details, actor) values (t.workspace_id, 'support.reopened', jsonb_build_object('ticket', t.ref), auth.uid());
+  end if;
+end $$;
+-- "Confirm fixed": resolved.
+create or replace function public.ticket_confirm_fixed(ticket uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets;
+begin
+  if not can_see_ticket(ticket) then raise exception 'We couldn''t find that help request.'; end if;
+  select * into t from support_tickets where id = ticket;
+  if t.status = 'done' then return; end if;
+  insert into support_messages (ticket_id, author, body) values (ticket, auth.uid(), 'Confirmed fixed. Thanks!');
+  update support_tickets set status = 'done', resolved_at = now(), last_customer_at = now(), updated_at = now() where id = ticket;
+  insert into support_reads (ticket_id, user_id) values (ticket, auth.uid()) on conflict (ticket_id, user_id) do update set read_at = now();
+  if t.workspace_id is not null then
+    insert into audit_log (workspace_id, action, details, actor) values (t.workspace_id, 'support.fixed', jsonb_build_object('ticket', t.ref), auth.uid());
+  end if;
+end $$;
+-- "How did we do?": 1 to 5, only once it's resolved.
+create or replace function public.ticket_rate(ticket uuid, stars int, comment text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets;
+begin
+  if not can_see_ticket(ticket) then raise exception 'We couldn''t find that help request.'; end if;
+  select * into t from support_tickets where id = ticket;
+  if t.status <> 'done' then raise exception 'You can rate this once it''s resolved.'; end if;
+  if stars is null or stars not between 1 and 5 then raise exception 'Choose 1 to 5 stars.'; end if;
+  update support_tickets set rating = stars, rating_comment = nullif(left(trim(coalesce(comment, '')), 1000), ''), rated_at = now() where id = ticket;
+end $$;
+
+-- ---------------------------------------------------------------- HQ: the Support workspace
+-- The inbox: quick tabs (mine, waiting_customer, unassigned, overdue = first reply or promised update overdue, all) and
+-- filters {product, owner ('me', 'none' or a staff id), status ('open' or a status), level, topic}. Counts follow the filters.
+create or replace function public.hq_support_inbox(box text, search text, filters jsonb) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare q text := nullif(trim(coalesce(search, '')), ''); od numeric := hq_setting_num('support.overdue_hours', 24); r json;
+        f jsonb := coalesce(filters, '{}'::jsonb); fp text; fo text; fs text; fl int; ft text;
+begin
+  perform hq_need(array['support.view']);
+  fp := nullif(f ->> 'product', ''); fo := nullif(f ->> 'owner', ''); fs := nullif(f ->> 'status', ''); ft := nullif(f ->> 'topic', '');
+  fl := case when coalesce(f ->> 'level', '') ~ '^[123]$' then (f ->> 'level')::int end;
+  with t as (
+    select t.*, w.name as business, w.status as business_status,
+      (t.overdue_at is not null or (t.first_reply_at is null and t.status <> 'done' and t.created_at < now() - make_interval(secs => od * 3600))) as is_overdue,
+      (t.status <> 'done' and t.next_update_due is not null and t.next_update_due < now()) as is_update_overdue,
+      exists (select 1 from support_escalations e where e.ticket_id = t.id) as was_escalated
+    from support_tickets t left join workspaces w on w.id = t.workspace_id
+    where (q is null or t.ref ilike '%' || q || '%' or t.subject ilike '%' || q || '%' or w.name ilike '%' || q || '%' or w.company_code ilike '%' || q || '%'
+       or exists (select 1 from auth.users u where u.id = t.opened_by and u.email::text ilike '%' || q || '%')
+       or exists (select 1 from support_diagnostics d where d.id = t.diag_id and d.ref ilike '%' || q || '%')
+       or exists (select 1 from support_messages m where m.ticket_id = t.id and m.body ilike '%' || q || '%'))
+  ), base as (
+    select * from t where (fp is null or t.product = fp)
+      and (fo is null or (fo = 'me' and t.assignee = auth.uid()) or (fo = 'none' and t.assignee is null) or t.assignee::text = fo)
+      and (fs is null or (fs = 'open' and t.status <> 'done') or t.status = fs) and (fl is null or t.level = fl) and (ft is null or t.topic = ft)
+  ), boxed as (
+    select b.*, (case coalesce(box, 'open')
+      when 'mine' then b.status <> 'done' and b.assignee = auth.uid() when 'waiting_customer' then b.status = 'waiting_customer'
+      when 'unassigned' then b.status <> 'done' and b.assignee is null when 'overdue' then b.status <> 'done' and (b.is_overdue or b.is_update_overdue)
+      when 'all' then true else b.status <> 'done' end) as inbox from base b)
+  select json_build_object(
+    'tickets', (select coalesce(json_agg(json_build_object('id', b.id, 'ref', b.ref, 'subject', b.subject, 'topic', b.topic, 'status', b.status,
+        'priority', b.priority, 'level', b.level, 'assignee', b.assignee, 'assignee_name', staff_name(b.assignee),
+        'workspace_id', b.workspace_id, 'business', b.business, 'business_status', b.business_status, 'staff_started', b.staff_started,
+        'opened_by_name', (select display_name from members m where m.workspace_id = b.workspace_id and m.user_id = b.opened_by),
+        'opened_by_email', (select email::text from auth.users u where u.id = b.opened_by),
+        'created_at', b.created_at, 'first_reply_at', b.first_reply_at, 'updated_at', b.updated_at, 'last_customer_at', b.last_customer_at,
+        'overdue', b.is_overdue, 'update_overdue', b.is_update_overdue, 'escalated', b.was_escalated, 'product', b.product, 'who_acts', b.who_acts,
+        'work_blocked', b.work_blocked, 'next_update_due', b.next_update_due, 'next_update_owner', b.next_update_owner,
+        'next_update_owner_name', staff_name(b.next_update_owner)) order by b.is_update_overdue desc, b.updated_at desc), '[]')
+      from (select * from boxed where inbox order by is_update_overdue desc, updated_at desc limit 300) b),
+    'counts', (select json_build_object('mine', count(*) filter (where status <> 'done' and assignee = auth.uid()),
+        'waiting_customer', count(*) filter (where status = 'waiting_customer'), 'unassigned', count(*) filter (where status <> 'done' and assignee is null),
+        'overdue', count(*) filter (where status <> 'done' and (is_overdue or is_update_overdue)), 'all', count(*),
+        'open', count(*) filter (where status <> 'done')) from base),
+    'staff', (select coalesce(json_agg(json_build_object('user_id', s.user_id, 'name', s.display_name) order by s.display_name), '[]') from hq_staff s where s.active),
+    'overdue_hours', od) into r;
+  return r;
+end $$;
+
+-- Product, planned release and the linked bug (free text and an optional https link, e.g. a GitHub issue).
+create or replace function public.hq_ticket_set(ticket uuid, fields jsonb) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; f jsonb := coalesce(fields, '{}'::jsonb); v text; k text;
+begin
+  perform hq_need(array['support.reply']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if not hq_can_work(t.level) then raise exception 'This ticket is with % (level %).', level_name(t.level), t.level; end if;
+  for k in select jsonb_object_keys(f) loop
+    if k not in ('product', 'planned_release', 'bug_ref', 'bug_url') then raise exception 'That can''t be changed here.'; end if;
+  end loop;
+  if f ? 'product' then
+    v := nullif(trim(coalesce(f ->> 'product', '')), '');
+    if v is not null and not (v = any(support_products())) then raise exception 'Choose a product.'; end if;
+    update support_tickets set product = v where id = ticket;
+  end if;
+  if f ? 'planned_release' then update support_tickets set planned_release = nullif(left(trim(coalesce(f ->> 'planned_release', '')), 80), '') where id = ticket; end if;
+  if f ? 'bug_ref' then update support_tickets set bug_ref = nullif(left(trim(coalesce(f ->> 'bug_ref', '')), 80), '') where id = ticket; end if;
+  if f ? 'bug_url' then
+    v := nullif(trim(coalesce(f ->> 'bug_url', '')), '');
+    if v is not null and (v !~ '^https://[^[:space:]]{3,}$' or length(v) > 300) then raise exception 'The bug link must start with https://'; end if;
+    update support_tickets set bug_url = v where id = ticket;
+  end if;
+  update support_tickets set updated_at = now() where id = ticket;
+  perform hq_log('ticket.updated', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id,
+    'fields', (select jsonb_agg(x) from jsonb_object_keys(f) x), 'product', f ->> 'product', 'planned_release', f ->> 'planned_release', 'bug_ref', f ->> 'bug_ref'));
+end $$;
+-- The next update promised to the customer: when, and who'll send it (null clears it).
+create or replace function public.hq_ticket_next_update(ticket uuid, due timestamptz, owner uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; who uuid := coalesce(owner, auth.uid());
+begin
+  perform hq_need(array['support.reply']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if not hq_can_work(t.level) then raise exception 'This ticket is with % (level %).', level_name(t.level), t.level; end if;
+  if due is null then
+    update support_tickets set next_update_due = null, next_update_owner = null, update_reminded_at = null, updated_at = now() where id = ticket;
+    perform hq_log('ticket.next_update', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'due', null));
+    return;
+  end if;
+  if due < now() - interval '5 minutes' then raise exception 'Choose a time from now on.'; end if;
+  if due > now() + interval '90 days' then raise exception 'Choose a time in the next 90 days.'; end if;
+  if not exists (select 1 from hq_staff s where s.user_id = who and s.active) then raise exception 'Choose someone on the HQ team.'; end if;
+  update support_tickets set next_update_due = due, next_update_owner = who, update_reminded_at = null, updated_at = now() where id = ticket;
+  perform hq_log('ticket.next_update', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'due', due, 'owner', staff_name(who)));
+end $$;
+-- A phone call about this ticket, in its thread (staff only).
+create or replace function public.hq_ticket_log_call(ticket uuid, direction text, call_with text, body text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets;
+begin
+  perform hq_need(array['support.reply']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if not hq_can_work(t.level) then raise exception 'This ticket is with % (level %).', level_name(t.level), t.level; end if;
+  if coalesce(direction, '') not in ('in', 'out') then raise exception 'Choose whether they called us or we called them.'; end if;
+  if length(trim(coalesce(body, ''))) = 0 then raise exception 'Write what the call was about first.'; end if;
+  insert into support_messages (ticket_id, author, is_staff, internal, body, kind, call_direction, call_with)
+    values (ticket, auth.uid(), true, true, left(trim(body), 5000), 'call', direction, nullif(left(trim(coalesce(call_with, '')), 120), ''));
+  update support_tickets set updated_at = now() where id = ticket;
+  perform hq_log('ticket.call', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'direction', direction));
+end $$;
+-- Diagnostic lookup by reference (DG-4821), for staff with support.diagnostics.
+create or replace function public.hq_diagnostic(diag_ref text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare d support_diagnostics; r json;
+begin
+  perform hq_need(array['support.diagnostics']);
+  select * into d from support_diagnostics where ref = upper(trim(coalesce(diag_ref, '')));
+  if d.id is null then raise exception 'There''s no diagnostic report %.', upper(trim(coalesce(diag_ref, ''))); end if;
+  select json_build_object('diagnostic', support_diag_json(d),
+    'business', (select json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code) from workspaces w where w.id = d.workspace_id),
+    'tickets', case when hq_can('support.view') then (select coalesce(json_agg(json_build_object('id', t.id, 'ref', t.ref, 'subject', t.subject, 'status', t.status)
+        order by t.created_at desc), '[]') from support_tickets t where t.diag_id = d.id) end) into r;
+  perform hq_log('diagnostic.viewed', jsonb_build_object('workspace_id', d.workspace_id, 'diagnostic', d.ref));
+  return r;
+end $$;
+-- Customer support notes are the business's pinned notes; staff can correct one.
+create or replace function public.hq_note_edit(note_id bigint, note_body text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare n hq_notes;
+begin
+  perform hq_need(array['customers.notes']);
+  if length(trim(coalesce(note_body, ''))) = 0 then raise exception 'Write the note first.'; end if;
+  update hq_notes set body = left(trim(note_body), 2000) where id = note_id returning * into n;
+  if n.id is null then raise exception 'That note doesn''t exist.'; end if;
+  perform hq_log('note.edited', jsonb_build_object('workspace_id', n.workspace_id, 'note', n.id));
+end $$;
+
+revoke all on function public.support_scrub(text), public.support_products(), public.product_label(text), public.support_diagnostics_clean(),
+  public.support_diag_json(support_diagnostics), public.support_report(uuid, jsonb), public.ticket_still_issue(uuid, text),
+  public.ticket_confirm_fixed(uuid), public.ticket_rate(uuid, int, text), public.hq_support_inbox(text, text, jsonb),
+  public.hq_ticket_set(uuid, jsonb), public.hq_ticket_next_update(uuid, timestamptz, uuid), public.hq_ticket_log_call(uuid, text, text, text),
+  public.hq_diagnostic(text), public.hq_note_edit(bigint, text)
+  from public, anon, authenticated;
+-- (support_products and support_scrub are used by the table's rules, so everyone may run those two)
+grant execute on function public.support_products(), public.support_scrub(text) to anon, authenticated;
+grant execute on function public.support_report(uuid, jsonb), public.ticket_still_issue(uuid, text), public.ticket_confirm_fixed(uuid),
+  public.ticket_rate(uuid, int, text) to authenticated;
+grant execute on function public.hq_support_inbox(text, text, jsonb), public.hq_ticket_set(uuid, jsonb), public.hq_ticket_next_update(uuid, timestamptz, uuid),
+  public.hq_ticket_log_call(uuid, text, text, text), public.hq_diagnostic(text), public.hq_note_edit(bigint, text) to authenticated;

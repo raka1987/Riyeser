@@ -43,3 +43,12 @@
   someone, no extension, Link Plus off, no Link Office yet, an older database, the ways in, phone widths. `phones-test.js` also covers
   Set up your office phones (5 steps), the Desk phones list's four statuses, Add desk phone through to Online, Replace phone,
   Troubleshoot and Advanced setup being for admins only; `rules-test.sql` covers `link_my_*` and `name_phone`.
+- Support workspace: `rules-test.sql` covers `support_report` (one diagnostic report and one ticket; logs, emails, long
+  numbers and passwords scrubbed; a DG- reference from Central linked instead), diagnostics privacy (only whoever made a
+  report reads it; other businesses can't; HQ needs `support.diagnostics`), the HQ inbox filters, product, planned
+  release, linked bug, logged calls, the next promised update (the hourly sweep's internal reminder, once; Needs
+  attention; the work queue), Still having an issue / Confirm fixed (only the ticket's business) and the rating (only
+  once resolved). `help-test.js` covers Report an issue, "We'll update you by", Still having an issue, Confirm fixed,
+  "How did we do?" and the `?help#T-…` email link. HQ: `../../hq/test-hq-support.js` (three columns, filters, assign,
+  status, separate drafts with the audience line, Log a call, Next update, diagnostics, support notes, phone width).
+  Riyeser Central: `desktop/test/diagnostics.test.js` (scrubbing, 200 lines / 64 KB, the preview is what's sent).

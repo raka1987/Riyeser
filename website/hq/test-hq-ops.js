@@ -28,7 +28,7 @@ const fs = require('fs');
   console.log('business beside the ticket:', (await pg.textContent('#tbiz')).replace(/\s+/g, ' ').trim().slice(0, 140));
   await pg.selectOption('#ins', { label: 'Printer: turn it off and on' }); await pg.click('#rf .btn.p'); await pg.waitForTimeout(300);
   console.log('after reply:', await pg.evaluate(() => [...document.querySelectorAll('.msg small')].map((x) => x.textContent).pop()), '| status:', await pg.$eval('#tst', (s) => s.value));
-  await pg.check('#rf input[value=note]'); await fill('#rf textarea', 'Known driver bug in 1.7.0, fix coming.'); await pg.click('#rf .btn.p'); await pg.waitForTimeout(300);
+  await pg.click('#rf [data-ctab=note]'); await fill('#rf textarea[name=note]', 'Known driver bug in 1.7.0, fix coming.'); await pg.click('#rf .btn.p'); await pg.waitForTimeout(300);
   console.log('internal note:', await pg.evaluate(() => { const n = [...document.querySelectorAll('.msg.note')].pop(); return n && n.innerText.replace(/\s+/g, ' '); }));
   await pg.selectOption('#tas', { label: 'Help Desk' }); await pg.waitForTimeout(300); console.log('assigned to:', await pg.$eval('#tas', (s) => s.options[s.selectedIndex].text));
   await pg.click('#tesc'); await pg.waitForSelector('#ef'); await pg.selectOption('#ef [name=level]', '2'); await pg.selectOption('#ef [name=assign]', { label: 'Senior Sione' });

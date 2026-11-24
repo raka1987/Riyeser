@@ -1683,6 +1683,184 @@ do $$ begin
 end $$;
 reset role;
 
+-- ===== Support workspace: Report an issue, diagnostics privacy, Still having an issue / Confirm fixed, rating, promised updates
+-- Sam (staff at A) reports an issue from Riyeser Central: one diagnostic report and one ticket, scrubbed
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222'); set role authenticated;
+select public.support_report(:'ws_a', jsonb_build_object('source', 'central', 'product', 'payroll', 'product_version', '2.8.1',
+  'what_happened', 'Payroll export times out after the update', 'blocked', true, 'error_text', 'Export timed out (sam.sample@a.test)',
+  'os', 'Windows 11 Pro (10.0.22631)', 'central_version', '1.8.3', 'programs', '[{"id":"payroll","version":"2.8.1"},{"id":"central","version":"1.8.3"}]'::jsonb,
+  'log_lines', E'10:00 export started for jo@sample.test\n10:01 bank account 123456789 checked\n10:02 password=hunter2 sent\n10:03 tax 12 345 678 901 ok\n10:04 version 2.8.1 on 2026-11-24',
+  'log_source', 'C:\Users\sam\AppData\Payroll log')) as rep \gset
+select set_config('test.rep_t', (:'rep'::json ->> 'id'), false), set_config('test.rep_d', (:'rep'::json ->> 'diag_id'), false), set_config('test.rep_ref', (:'rep'::json ->> 'diag_ref'), false);
+do $$ declare d record; begin
+  assert current_setting('test.rep_ref') ~ '^DG-[0-9]{4,}$', 'a reference like DG-4821';
+  select * into d from public.support_diagnostics where id = current_setting('test.rep_d')::uuid;
+  assert d.id is not null, 'Sam reads his own report';
+  assert d.log_lines like '%j***@sample.test%' and d.log_lines not like '%jo@sample.test%', 'emails masked';
+  assert d.log_lines not like '%123456789%' and d.log_lines like '%[number removed]%', 'long numbers masked';
+  assert d.log_lines not like '%hunter2%' and d.log_lines like '%password [removed]%', 'anything after "password" masked';
+  assert d.log_lines not like '%12 345 678 901%', 'grouped tax numbers masked';
+  assert d.log_lines like '%2.8.1 on 2026-11-24%', 'versions and dates kept';
+  assert d.error_text = 'Export timed out (s***@a.test)', d.error_text;
+  assert d.log_source !~ '[\\/:]', 'no folder path kept';
+  assert d.source = 'central' and d.product = 'payroll' and d.product_version = '2.8.1' and jsonb_array_length(d.programs) = 2, 'details kept';
+  assert (public.my_ticket(current_setting('test.rep_t')::uuid) ->> 'diag_ref') = d.ref and (public.my_ticket(current_setting('test.rep_t')::uuid) -> 'messages' -> 0 ->> 'body') like '%Work blocked: Yes%', 'customer sees the reference';
+  begin perform public.support_report(current_setting('test.ws_b')::uuid, '{"what_happened":"x"}'); raise exception 'reported for another business';
+  exception when others then assert sqlerrm like 'You''re not in that business%', sqlerrm; end;
+  begin perform public.support_report(current_setting('test.ws_a')::uuid, '{"product":"pos"}'); raise exception 'no description';
+  exception when others then assert sqlerrm like 'Say what happened%', sqlerrm; end;
+  -- direct inserts: only your own, only for your business
+  begin insert into public.support_diagnostics (workspace_id, created_by, product) values (current_setting('test.ws_b')::uuid, auth.uid(), 'pos'); raise exception 'inserted for B';
+  exception when insufficient_privilege then null; end;
+  begin insert into public.support_diagnostics (workspace_id, created_by, product) values (current_setting('test.ws_a')::uuid, '11111111-1111-1111-1111-111111111111', 'pos'); raise exception 'inserted as Alex';
+  exception when insufficient_privilege then null; end;
+  insert into public.support_diagnostics (workspace_id, product, log_lines) values (current_setting('test.ws_a')::uuid, 'pos', 'printer at a@b.test');
+  assert (select log_lines from public.support_diagnostics where product = 'pos') = 'printer at a***@b.test', 'own report inserted directly, scrubbed too';
+  begin update public.support_diagnostics set os = 'x'; raise exception 'changed a report';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- the website form can link the reference from Central (only this business's)
+do $$ declare r json; begin
+  r := public.support_report(current_setting('test.ws_a')::uuid, jsonb_build_object('product', 'payroll', 'what_happened', 'Same again today', 'blocked', 'no', 'diag_ref', lower(current_setting('test.rep_ref'))));
+  assert (r ->> 'diag_ref') = current_setting('test.rep_ref'), 'linked to the Central report';
+  assert (select count(*) from public.support_diagnostics) = 2, 'no new report made (the Central one and the direct one)';
+  assert (select not work_blocked from public.support_tickets where id = (r ->> 'id')::uuid), 'not blocked';
+  perform set_config('test.rep_t2', r ->> 'id', false);
+  begin perform public.support_report(current_setting('test.ws_a')::uuid, '{"what_happened":"x","diag_ref":"DG-1"}'); raise exception 'unknown reference';
+  exception when others then assert sqlerrm like 'We couldn''t find diagnostic reference DG-1%', sqlerrm; end;
+end $$;
+reset role;
+do $$ declare t record; begin
+  select * into t from public.support_tickets where id = current_setting('test.rep_t')::uuid;
+  assert (select priority from public.support_tickets where id = current_setting('test.rep_t2')::uuid) = 'normal', 'not blocked: normal priority';
+  assert t.product = 'payroll' and t.work_blocked and t.priority = 'high' and t.diag_id = current_setting('test.rep_d')::uuid and t.status = 'new' and t.who_acts = 'riyeser', 'ticket: product, work blocked bumps the priority, diagnostic';
+  assert exists (select 1 from public.email_outbox where template = 'ticket_received' and body_text like '%riyeser.com/link/?help#T-%'), 'the email links to the portal';
+  assert exists (select 1 from public.audit_log where action = 'support.reported' and details ->> 'diagnostic' = current_setting('test.rep_ref')), 'in the business''s history';
+end $$;
+-- diagnostics privacy: another business's people, and other people in the same business, can't read it
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333'); set role authenticated;
+do $$ begin
+  assert (select count(*) from public.support_diagnostics) = 0, 'B reads none of A''s reports';
+  begin perform public.hq_diagnostic(current_setting('test.rep_ref')); raise exception 'customer used the HQ lookup';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+do $$ begin assert (select count(*) from public.support_diagnostics) = 0, 'reports are read only by whoever made them'; end $$;
+reset role; set role anon;
+do $$ begin begin perform count(*) from public.support_diagnostics; raise exception 'anon read reports'; exception when insufficient_privilege then null; end; end $$;
+reset role;
+-- HQ: support.diagnostics needed (support, senior, developer and owner have it; finance doesn't)
+select pg_temp.as_user('dddddddd-dddd-dddd-dddd-dddddddddddd'); set role authenticated;
+do $$ begin
+  begin perform public.hq_diagnostic(current_setting('test.rep_ref')); raise exception 'finance read a diagnostic';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  assert (public.hq_ticket(current_setting('test.rep_t')::uuid) -> 'diagnostic')::text = 'null' and (public.hq_ticket(current_setting('test.rep_t')::uuid) ->> 'diag_hidden')::boolean, 'hidden on the ticket too';
+end $$;
+select pg_temp.as_user('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'); set role authenticated;
+do $$ begin assert (public.hq_diagnostic(current_setting('test.rep_ref')) -> 'diagnostic' ->> 'product_version') = '2.8.1', 'developer looks it up'; end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ declare r json; begin
+  r := public.hq_ticket(current_setting('test.rep_t')::uuid);
+  assert (r -> 'diagnostic' ->> 'ref') = current_setting('test.rep_ref') and (r -> 'diagnostic' ->> 'line_count')::int = 5, 'support sees it on the ticket';
+  assert (r -> 'ticket' ->> 'product') = 'payroll' and (r -> 'ticket' ->> 'who_acts') = 'riyeser', 'product and who acts';
+  assert json_array_length(r -> 'staff') >= 3, 'staff to assign';
+  assert exists (select 1 from json_array_elements(public.hq_support_inbox('all', '', jsonb_build_object('product', 'payroll')) -> 'tickets') x where x ->> 'id' = current_setting('test.rep_t')), 'product filter';
+  assert not exists (select 1 from json_array_elements(public.hq_support_inbox('all', '', jsonb_build_object('product', 'pos')) -> 'tickets') x where x ->> 'id' = current_setting('test.rep_t')), 'other products filtered out';
+  assert exists (select 1 from json_array_elements(public.hq_support_inbox('all', current_setting('test.rep_ref'), null) -> 'tickets') x where x ->> 'id' = current_setting('test.rep_t')), 'search by DG reference';
+  -- product, planned release, linked bug, a logged call, owner, status
+  perform public.hq_ticket_set(current_setting('test.rep_t')::uuid, '{"planned_release":"Payroll 2.8.2","bug_ref":"BUG-7719","bug_url":"https://github.com/example/issues/7719"}');
+  begin perform public.hq_ticket_set(current_setting('test.rep_t')::uuid, '{"bug_url":"javascript:alert(1)"}'); raise exception 'bad link';
+  exception when others then assert sqlerrm like 'The bug link must start with https://%', sqlerrm; end;
+  begin perform public.hq_ticket_set(current_setting('test.rep_t')::uuid, '{"product":"spaceship"}'); raise exception 'bad product';
+  exception when others then assert sqlerrm like 'Choose a product%', sqlerrm; end;
+  perform public.hq_ticket_log_call(current_setting('test.rep_t')::uuid, 'out', 'Sam', 'Rang to say we can reproduce it');
+  perform public.hq_ticket_assign(current_setting('test.rep_t')::uuid, 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+  perform public.hq_ticket_status(current_setting('test.rep_t')::uuid, 'investigating');
+  r := public.hq_ticket(current_setting('test.rep_t')::uuid);
+  assert (r -> 'ticket' ->> 'planned_release') = 'Payroll 2.8.2' and (r -> 'ticket' ->> 'bug_ref') = 'BUG-7719', 'saved';
+  assert exists (select 1 from json_array_elements(r -> 'messages') x where x ->> 'kind' = 'call' and (x ->> 'internal')::boolean), 'the call is in the thread, staff only';
+  begin perform public.hq_ticket_next_update(current_setting('test.rep_t')::uuid, now() - interval '1 hour', null); raise exception 'next update in the past';
+  exception when others then assert sqlerrm like 'Choose a time from now on%', sqlerrm; end;
+  perform public.hq_ticket_next_update(current_setting('test.rep_t')::uuid, now() + interval '2 hours', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+  assert (public.hq_ticket(current_setting('test.rep_t')::uuid) -> 'ticket' ->> 'next_update_owner_name') = 'Senior Sam', 'next update owner';
+end $$;
+-- the customer sees "We'll update you by", never the call or who at Riyeser
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222'); set role authenticated;
+do $$ declare r json; begin
+  r := public.my_ticket(current_setting('test.rep_t')::uuid);
+  assert (r ->> 'next_update_due') is not null and (r ->> 'status') = 'investigating', 'promised update shown';
+  assert not exists (select 1 from json_array_elements(r -> 'messages') x where x ->> 'body' like 'Rang to say%'), 'logged calls are staff only';
+  assert r::text not like '%Senior Sam%', 'no staff names';
+end $$;
+-- the hourly sweep: an overdue promised update gets an internal reminder, once, and shows in Needs attention
+reset role;
+update public.support_tickets set next_update_due = now() - interval '10 minutes' where id = current_setting('test.rep_t')::uuid;
+do $$ declare r json; n int; begin
+  n := (select count(*) from public.email_outbox);
+  r := public.hq_support_sweep();
+  assert (r ->> 'updates_overdue')::int = 1, r::text;
+  assert exists (select 1 from public.support_messages where ticket_id = current_setting('test.rep_t')::uuid and internal and author is null and body like 'Reminder: the next update%'), 'internal reminder in the thread';
+  assert exists (select 1 from public.email_outbox where template = 'staff_update_due' and to_user = 'cccccccc-cccc-cccc-cccc-cccccccccccc' and workspace_id is null), 'reminder queued for the owner (staff)';
+  assert not exists (select 1 from public.email_outbox where id > 0 and template = 'staff_update_due' and to_user = '22222222-2222-2222-2222-222222222222'), 'the customer isn''t emailed';
+  assert (select count(*) from public.email_outbox) = n + 1, 'one email only';
+  r := public.hq_support_sweep();
+  assert (r ->> 'updates_overdue')::int = 0, 'reminded once';
+end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ begin
+  assert (public.hq_attention() ->> 'updates_overdue')::int >= 1, 'Needs attention counts overdue updates';
+  assert exists (select 1 from json_array_elements(public.hq_work_queue() -> 'queue') x where x ->> 'kind' = 'update' and x ->> 'ref' = current_setting('test.rep_t')), 'in the work queue';
+  assert exists (select 1 from json_array_elements(public.hq_support_inbox('overdue', '', null) -> 'tickets') x where x ->> 'id' = current_setting('test.rep_t') and (x ->> 'update_overdue')::boolean), 'Overdue update tab';
+  perform public.hq_ticket_reply(current_setting('test.rep_t')::uuid, 'Fixed in Payroll 2.8.2. Please update and try again.', false, 'waiting_customer');
+end $$;
+-- Still having an issue / Confirm fixed: only the ticket's business
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333'); set role authenticated;
+do $$ begin
+  begin perform public.ticket_still_issue(current_setting('test.rep_t')::uuid, 'not mine'); raise exception 'B reopened A''s ticket';
+  exception when others then assert sqlerrm like 'We couldn''t find that help request%', sqlerrm; end;
+  begin perform public.ticket_confirm_fixed(current_setting('test.rep_t')::uuid); raise exception 'B closed A''s ticket';
+  exception when others then assert sqlerrm like 'We couldn''t find that help request%', sqlerrm; end;
+  begin perform public.ticket_rate(current_setting('test.rep_t')::uuid, 5, null); raise exception 'B rated A''s ticket';
+  exception when others then assert sqlerrm like 'We couldn''t find that help request%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('44444444-4444-4444-4444-444444444444'); set role authenticated;   -- Jordan: same business, not his, not an admin
+do $$ begin
+  begin perform public.ticket_confirm_fixed(current_setting('test.rep_t')::uuid); raise exception 'Jordan closed Sam''s ticket';
+  exception when others then assert sqlerrm like 'We couldn''t find that help request%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222'); set role authenticated;
+do $$ begin
+  assert (public.my_ticket(current_setting('test.rep_t')::uuid) ->> 'who_acts') = 'customer', 'customer to act';
+  begin perform public.ticket_rate(current_setting('test.rep_t')::uuid, 5, 'quick'); raise exception 'rated before resolved';
+  exception when others then assert sqlerrm like 'You can rate this once it''s resolved%', sqlerrm; end;
+  perform public.ticket_still_issue(current_setting('test.rep_t')::uuid, 'Updated, still times out');
+  assert (public.my_ticket(current_setting('test.rep_t')::uuid) ->> 'status') = 'waiting_us' and (public.my_ticket(current_setting('test.rep_t')::uuid) ->> 'who_acts') = 'riyeser', 'back with Riyeser';
+end $$;
+reset role;
+do $$ begin assert (select assignee from public.support_tickets where id = current_setting('test.rep_t')::uuid) = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'still in the owner''s queue'; end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ begin assert exists (select 1 from json_array_elements(public.hq_support_inbox('mine', '', null) -> 'tickets') x where x ->> 'id' = current_setting('test.rep_t') and x ->> 'who_acts' = 'riyeser'), 'in My tickets as Riyeser to act'; end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;   -- Alex, A's owner, may confirm it
+do $$ begin
+  perform public.ticket_confirm_fixed(current_setting('test.rep_t')::uuid);
+  assert (public.my_ticket(current_setting('test.rep_t')::uuid) ->> 'status') = 'done', 'resolved';
+  begin perform public.ticket_rate(current_setting('test.rep_t')::uuid, 6, null); raise exception 'six stars';
+  exception when others then assert sqlerrm like 'Choose 1 to 5 stars%', sqlerrm; end;
+  perform public.ticket_rate(current_setting('test.rep_t')::uuid, 5, 'Quick and clear, thanks');
+  assert (public.my_ticket(current_setting('test.rep_t')::uuid) ->> 'rating')::int = 5, 'rated';
+end $$;
+reset role;
+do $$ begin
+  assert (select resolved_at is not null and rating_comment = 'Quick and clear, thanks' and who_acts is null from public.support_tickets where id = current_setting('test.rep_t')::uuid), 'stored';
+  assert exists (select 1 from public.audit_log where action = 'support.fixed') and exists (select 1 from public.audit_log where action = 'support.reopened'), 'customer actions in the history';
+  assert exists (select 1 from pg_temp.audit('ticket.next_update')) and exists (select 1 from pg_temp.audit('ticket.call')) and exists (select 1 from pg_temp.audit('diagnostic.viewed')), 'HQ actions audited';
+  assert (select known_issue_id is null and fixed_in_version is null from public.support_tickets where id = current_setting('test.rep_t')::uuid), 'later: known issues and releases';
+end $$;
+-- HQ still can't read chat messages or books
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ begin assert (select count(*) from public.messages) = 0, 'HQ staff see no chat messages'; end $$;
+reset role;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

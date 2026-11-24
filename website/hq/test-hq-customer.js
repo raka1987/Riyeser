@@ -177,7 +177,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   const mine = await pg.evaluate(() => [...document.querySelectorAll('#cl tr.click b')].map((x) => x.textContent)); console.log('Help Desk\'s customers:', await text('#ctotal'));
   check(mine.includes('Northside Dental') && mine.includes('Sample Plumbing'), 'My customers');
   await pg.selectOption('#demoAs', { label: 'Riki (Owner)' }); await pg.waitForSelector('#main > *');
-  await tab('support'); await pg.click('.tk'); await pg.waitForSelector('#rf'); check((await text('#rf')).includes('Send customer reply') && (await text('#rf')).includes('Add internal note'), 'tickets: Send customer reply / Add internal note');
+  await tab('support'); await pg.click('.tk'); await pg.waitForSelector('#rf'); check((await text('#rf')).includes('Reply to customer') && (await text('#rf')).includes('Add internal note'), 'tickets: Reply to customer / Add internal note');
 
   // --- phone width: no sideways scrolling
   const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); ph.on('pageerror', (e) => errs.push('phone: ' + e.message)); const over = {};

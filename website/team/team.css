@@ -384,3 +384,18 @@ table.lo .btn { white-space: nowrap; } .lo-help-us p, .lo-card p { font-size: 14
 }
 .my-dnd .sw { flex: none; }
 @media (max-width: 560px) { .my-steps .lo-sip { grid-template-columns: 1fr; gap: 2px 0; } .my-steps .lo-sip dd { margin-bottom: 8px; } .my-steps { margin-left: -4px; } }
+/* help requests: what's happening, Still having an issue / Confirm fixed, the rating, Report an issue */
+.hnu { color: #1f62f0 !important; font-weight: 600 !important; }
+.tsays { margin: 0 0 10px; padding: 9px 12px; border-radius: 10px; background: #eef3ff; color: #1e3a8a; font-size: 14px; } .tsays.ok { background: #dcfce7; color: #166534; }
+.okmsg { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; background: #dcfce7; color: #166534; font-size: 14px; }
+.mcard .btn.ok { background: #15803d; border-color: #15803d; color: #fff; }
+.tacts { flex-wrap: wrap; }
+.rate { border: 1px solid #fde68a; background: #fffbeb; border-radius: 12px; padding: 10px 12px; margin: 0 0 12px; }
+.starpick { display: flex; gap: 2px; margin: 6px 0 8px; } .starpick input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.starpick label span { font-size: 30px; line-height: 1; color: #cbd5e1; cursor: pointer; padding: 0 2px; display: inline-block; }
+.starpick:has(input:checked) label span { color: #f59e0b; } .starpick label:has(input:checked) ~ label span { color: #cbd5e1; }
+.starpick label:has(input:focus-visible) span { outline: 2px solid #1f62f0; border-radius: 4px; }
+.stars { color: #f59e0b; letter-spacing: 1px; }
+fieldset.yn { border: 0; padding: 0; display: flex; gap: 18px; flex-wrap: wrap; } fieldset.yn legend { font-size: 13px; font-weight: 600; margin-bottom: 6px; padding: 0; }
+fieldset.yn label { display: inline-flex; gap: 6px; align-items: center; font-size: 14.5px; }
+fieldset.yn input { width: auto; margin: 0; padding: 0; }

@@ -17,6 +17,8 @@ const demo = require('./central/demo');
 const demoUi = require('./renderer/demo-ui');
 const checklist = require('./central/checklist');
 const freshstart = require('./central/freshstart');
+const diagnostics = require('./central/diagnostics');
+const crypto = require('crypto');
 
 app.setName('Riyeser Central');
 // Central's data folder. Versions before 1.2 used "Riyser Central": move it across once so nothing is lost.
@@ -423,6 +425,30 @@ function registerIpc() {
   });
   // Get help: ask Riyeser Support on riyeser.com (signs in, then opens the "Get help" form).
   handle('central:getHelp', () => shell.openExternal('https://riyeser.com/link/?help').then(() => true));
+  // Report an issue: the diagnostic details are made here once (scrubbed), shown in the preview, and exactly those are
+  // sent with what the person typed (diagnostics.js says what's collected). Needs the Riyeser account signed in here.
+  let prepared = null;
+  const progNames = { ...Object.fromEntries(PROGRAMS.map((p) => [p.id, p.full])), central: 'Riyeser Central' };
+  handle('support:prepare', async (product) => {
+    const known = diagnostics.PRODUCTS.map((p) => ({ id: p.id, name: p.name }));
+    if (!on.canReport()) { prepared = null; return { signedIn: false, products: known }; }
+    if (!diagnostics.PRODUCTS.some((p) => p.id === product)) return { signedIn: true, products: known, business: (online.readCompany(appData) || {}).name || '' };
+    const programs = await installedVersions().catch(() => ({}));
+    const diag = diagnostics.build({ product, programs, centralVersion: app.getVersion(), log: diagnostics.readLog(product),
+      osName: diagnostics.windowsName(typeof os.version === 'function' ? os.version() : '', os.release(), process.platform) });
+    prepared = { token: crypto.randomUUID(), diag };
+    return { signedIn: true, products: known, business: (online.readCompany(appData) || {}).name || '', token: prepared.token, diag, preview: diagnostics.preview(diag, progNames) };
+  });
+  handle('support:send', async (token, form) => {
+    if (!prepared || prepared.token !== token) throw new Error('The details changed. Check the preview again, then send.');
+    const r = await on.reportIssue(diagnostics.payload(prepared.diag, form || {}));
+    prepared = null;
+    return { ref: r && r.ref, diag_ref: r && r.diag_ref };
+  });
+  handle('support:open', (ref) => {
+    if (!/^T-\d{1,12}$/.test(String(ref || ''))) throw new Error('That request number doesn\'t look right.');
+    return shell.openExternal(`https://riyeser.com/link/?help#${ref}`).then(() => true);
+  });
   // Riyeser Link: its own app when it's installed (it rings by itself), otherwise Central's own Link window.
   handle('central:team', async () => { const exe = teamApp(); if (exe) { const err = await shell.openPath(exe); if (err) throw new Error(err); return true; } return openTeam(); });
   handle('search:find', (opts) => {

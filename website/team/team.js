@@ -27,6 +27,7 @@
     if (/Invalid TOTP|mfa_verification_failed|expired/i.test(m)) return 'That code isn\'t right. Type the 6 numbers your authenticator app shows now (they change every 30 seconds).';
     if (/created_by_fkey|JWT|sub claim/i.test(m)) return 'Your sign-in has ended. Sign out, then sign in again.';
     if (/Failed to fetch|NetworkError/i.test(m)) return 'Can\'t reach Riyeser Link. Check your internet connection and try again.';
+    if (/PGRST202|Could not find the function/i.test(m)) return 'This part of Riyeser is still being switched on. Use Get help for now.';
     return m;
   };
 
@@ -144,6 +145,11 @@
       async openTicket(ws, topic, subject, message) { return ok(await sb.rpc('open_ticket', { ws: ws || null, help_topic: topic, help_subject: subject, message })); },
       async ticket(id) { return ok(await sb.rpc('my_ticket', { ticket: id })); },
       async replyTicket(id, message) { ok(await sb.rpc('reply_ticket', { ticket: id, message })); },
+      // Report an issue, Still having an issue, Confirm fixed and the rating (newer team-chat.sql)
+      async reportIssue(ws, payload) { return ok(await sb.rpc('support_report', { ws, payload })); },
+      async stillIssue(id, message) { ok(await sb.rpc('ticket_still_issue', { ticket: id, message: message || '' })); },
+      async confirmFixed(id) { ok(await sb.rpc('ticket_confirm_fixed', { ticket: id })); },
+      async rateTicket(id, stars, comment) { ok(await sb.rpc('ticket_rate', { ticket: id, stars, comment: comment || null })); },
       async myRefunds(ws) { return ok(await sb.rpc('my_refunds', { ws })) || []; },
       // Riyeser Link Office (desk phones). null = the database hasn't had this release's team-chat.sql yet.
       async linkStatus(ws) { try { return ok(await sb.rpc('link_status', { ws })); } catch (e) { if (/PGRST202|Could not find the function|schema cache/i.test(e.message || '')) return null; throw e; } },
@@ -213,7 +219,7 @@
     const read = { 'c-general': ago(1400), 'c-jobs': ago(92), 'c-office': ago(61), 'c-exec': ago(200), 'd-sam': ago(40) };
     let listener = null;
     // a message Riyeser started (from HQ's "Message customer"): it waits for the customer's reply
-    const tix = [{ id: 't0', ref: 'T-10230', topic: 'other', subject: 'Welcome to Riyeser', status: 'waiting_customer', mine: true, from_riyeser: true, business: 'Sample Plumbing',
+    const tix = [{ id: 't0', ref: 'T-10230', topic: 'other', subject: 'Welcome to Riyeser', status: 'waiting_customer', who_acts: 'customer', mine: true, from_riyeser: true, business: 'Sample Plumbing',
       created_at: ago(300), updated_at: ago(300), read: '', messages: [{ id: 1, staff: true, mine: false, from: 'Riyeser Support', body: 'Hi! We\'re here if you need a hand setting up Riyeser Central or bringing your customers across. Just reply here.', at: ago(300) }] }];
     const refs = [];
     const lo = { office_id: 'lo-demo', pc_name: 'OFFICE-PC', version: '1.1.0', state: 'running', addresses: ['192.168.1.20'], sip_port: 5060, address_stable: true, pc_mac: '3C:52:82:1A:2B:3C',
@@ -320,6 +326,14 @@
         return { id: t.id, ref: t.ref }; },
       async ticket(id) { const t = tix.find((x) => x.id === id); t.read = new Date().toISOString(); return { ...t }; },
       async replyTicket(id, body) { const t = tix.find((x) => x.id === id); t.messages.push({ id: t.messages.length + 1, staff: false, mine: true, from: 'You', body, at: new Date().toISOString() }); t.status = 'waiting_us'; t.updated_at = new Date().toISOString(); },
+      async reportIssue(_w, p) { const n = tix.length; const d = p.diag_ref ? String(p.diag_ref).toUpperCase() : 'DG-' + (4821 + n);
+        const t = { id: 't' + (n + 1), ref: 'T-' + (10234 + n), topic: 'program', product: p.product, subject: `${PRODUCT_NAMES[p.product] || 'Something else'}: ${String(p.what_happened).split('\n')[0]}`.slice(0, 150), status: 'new', who_acts: 'riyeser', mine: true, business: company.name,
+          work_blocked: !!p.blocked, diag_ref: d, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), read: new Date().toISOString(),
+          messages: [{ id: 1, staff: false, mine: true, from: 'You', body: `${p.what_happened}\n\nWork blocked: ${p.blocked ? 'Yes' : 'No'}\nDiagnostic reference: ${d}`, at: new Date().toISOString() }] };
+        tix.unshift(t); return { id: t.id, ref: t.ref, diag_ref: d }; },
+      async stillIssue(id, m) { const t = tix.find((x) => x.id === id); t.messages.push({ id: t.messages.length + 1, staff: false, mine: true, from: 'You', body: 'Still having an issue.' + (m ? '\n\n' + m : ''), at: new Date().toISOString() }); t.status = 'waiting_us'; t.who_acts = 'riyeser'; t.updated_at = new Date().toISOString(); },
+      async confirmFixed(id) { const t = tix.find((x) => x.id === id); t.messages.push({ id: t.messages.length + 1, staff: false, mine: true, from: 'You', body: 'Confirmed fixed. Thanks!', at: new Date().toISOString() }); t.status = 'done'; t.who_acts = null; t.updated_at = new Date().toISOString(); },
+      async rateTicket(id, stars, comment) { const t = tix.find((x) => x.id === id); if (t.status !== 'done') throw new Error('You can rate this once it\'s resolved.'); t.rating = stars; t.rating_comment = comment || null; },
       async myRefunds() { return refs.slice(); },
       // Riyeser Link Office in the demo: one office PC, four desk phones (one just plugged in), changes done after a moment.
       async linkStatus() { return { now: new Date().toISOString(), calls: true, offices: [JSON.parse(JSON.stringify(lo))], support: loSupport && loSupport > Date.now() ? { until: new Date(loSupport).toISOString() } : null }; },
@@ -582,6 +596,7 @@
     'link.new_password': 'made a new phone password', 'link.set_dnd': 'changed Do not disturb', 'link.reveal_password': 'looked at a phone password (Set up a phone by hand)',
     'link.reveal_own': 'looked at their own phone password (My phone)', 'link.set_dnd_own': 'changed their own Do not disturb', 'link.name_phone': 'named or moved a desk phone',
     'link.support_allowed': 'let Riyeser help with the phones for an hour', 'link.support_ended': 'ended Riyeser\'s help with the phones',
+    'support.reported': 'reported an issue to Riyeser', 'support.reopened': 'told Riyeser an issue is still happening', 'support.fixed': 'confirmed an issue is fixed',
   };
   function histLine(h) {
     const d = h.details || {}; const v = (k) => (d[k] && typeof d[k] === 'object' && 'now' in d[k] ? d[k].now : d[k]);
@@ -858,10 +873,17 @@
     on('#hhist', showHistory); on('#hsec', security); on('#hmfa', security);
     on('#hcp', async () => { try { await navigator.clipboard.writeText(t.company_code); $app.querySelector('#hcp').textContent = 'Copied'; } catch { /* nothing */ } });
     const sw = $app.querySelector('#hsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
-    on('#hhelp', () => getHelp()); on('#hrefund', () => (needs2step() ? security() : requestRefund()));
+    on('#hhelp', () => getHelp()); on('#hreport', () => reportIssue()); on('#hrefund', () => (needs2step() ? security() : requestRefund()));
     on('#hmine', () => editMyDetails(me)); on('#hmbiz', () => companyInfo(false));
     $app.querySelectorAll('[data-ticket]').forEach((b) => b.onclick = () => openTicket(b.dataset.ticket));
-    if (params.has('help') && !S.helpShown) getHelp();
+    if (params.has('help') && !S.helpShown) helpLink();
+  }
+  // riyeser.com/link/?help opens Get help; ?help#T-10234 (the link in our emails) opens that request; ?help#report opens Report an issue.
+  function helpLink() {
+    const h = decodeURIComponent(location.hash.replace(/^#/, '')).toUpperCase();
+    const t = /^T-\d+$/.test(h) && (S.tickets || []).find((x) => x.ref === h);
+    if (t || h === 'REPORT') { S.helpShown = true; params.delete('help'); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '')); return t ? openTicket(t.id) : reportIssue(); }
+    return getHelp();
   }
 
   // ------------------------------------------------------------------ your details (so Riyeser has the right name and phone for you)
@@ -889,7 +911,16 @@
   // ------------------------------------------------------------------ help requests (support tickets) and refunds
   // Plain words for each status. Customers never see levels, staff names or internal notes.
   const TOPICS = [['program', 'A problem with a program'], ['signin', 'Signing in'], ['billing', 'Billing or my plan'], ['other', 'Something else']];
-  const TSTATUS = { new: ['Sent', ''], waiting_us: ['With Riyeser', ''], waiting_customer: ['Waiting for your reply', 'warn'], done: ['Done', 'ok'] };
+  const TSTATUS = { new: ['Received', ''], investigating: ['We\'re looking into it', ''], waiting_us: ['With Riyeser', ''], waiting_customer: ['Waiting for your reply', 'warn'], done: ['Resolved', 'ok'] };
+  // What each status means, in plain words, on the request itself.
+  const TSAYS = { new: 'We\'ve got it and will reply soon.', investigating: 'We\'re looking into it.', waiting_us: 'It\'s with Riyeser. We\'ll reply here.',
+    waiting_customer: 'We\'re waiting for your reply. Is it fixed?', done: 'Resolved. If it happens again, press Still having an issue.' };
+  const PRODUCTS = [['central', 'Riyeser Central'], ['accounting', 'Accounting'], ['invoices', 'Invoices'], ['pos', 'POS'], ['bookings', 'Bookings'], ['payroll', 'Payroll'],
+    ['link', 'Riyeser Link'], ['linkoffice', 'Riyeser Link Office'], ['pdf', 'Riyeser PDF'], ['desk', 'Desk Assistant'], ['website', 'riyeser.com'], ['other', 'Something else']];
+  const PRODUCT_NAMES = Object.fromEntries(PRODUCTS);
+  // "3:00 pm Fri" this week, else "3:00 pm Fri 5 Dec"
+  const byWhen = (t) => { const d = new Date(t); const tm = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).replace(/\s?([ap])\.?m\.?/i, ' $1m').toLowerCase();
+    const soon = Math.abs(d - Date.now()) < 6 * 864e5; return `${tm} ${d.toLocaleDateString('en-AU', { weekday: 'short' })}${soon ? '' : ' ' + d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`; };
   const RSTATUS = { submitted: ['Received', ''], reviewing: ['Being looked at', ''], approved: ['Approved', 'ok'], partly_approved: ['Partly approved', 'ok'],
     declined: ['Not approved', 'bad'], paid: ['Paid', 'ok'] };
   const REFUND_FOR = ['Accounting Basics', 'Accounting Plus', 'Payroll', 'POS', 'Bookings', 'As Built', 'Riyeser Link Plus', 'My whole plan', 'Something else'];
@@ -904,9 +935,9 @@
   function helpHtml() {
     const unread = (S.tickets || []).reduce((a, t) => a + Number(t.unread || 0), 0);
     return `<h3 class="hsec">Help${unread ? ` <span class="badge">${unread}</span>` : ''} <small>Stuck, or something not right? Ask us. We usually reply within one business day.</small></h3>
-      <div class="hhelp"><button class="btn p" id="hhelp">💬 Get help</button>${S.refunds !== null && S.tickets !== null && isAdmin() ? '<button class="btn" id="hrefund">↩️ Request a refund</button>' : ''}<a class="btn" href="/help.html">📖 Help Centre</a></div>
+      <div class="hhelp"><button class="btn p" id="hhelp">💬 Get help</button>${S.tickets !== null && S.team ? '<button class="btn" id="hreport">🛠 Report an issue</button>' : ''}${S.refunds !== null && S.tickets !== null && isAdmin() ? '<button class="btn" id="hrefund">↩️ Request a refund</button>' : ''}<a class="btn" href="/help.html">📖 Help Centre</a></div>
       ${S.tickets && S.tickets.length ? `<h3 class="hsec">Your help requests</h3><div class="hplan htix">${S.tickets.map((t) => `<button class="htk" data-ticket="${esc(t.id)}">
-        <span>${t.from_riyeser ? '<span class="pl riy">Message from Riyeser</span> ' : ''}<b>${esc(t.subject)}</b><small>${esc(t.ref)} · ${t.from_riyeser ? (t.mine ? 'Riyeser wrote to you' : 'Riyeser wrote to someone in your business') : t.mine ? 'you asked' : 'asked by someone in your business'} · ${ago(t.updated_at)}</small></span>
+        <span>${t.from_riyeser ? '<span class="pl riy">Message from Riyeser</span> ' : ''}<b>${esc(t.subject)}</b><small>${esc(t.ref)}${t.product ? ` · ${esc(PRODUCT_NAMES[t.product] || t.product)}` : ''} · ${t.from_riyeser ? (t.mine ? 'Riyeser wrote to you' : 'Riyeser wrote to someone in your business') : t.mine ? 'you asked' : 'asked by someone in your business'} · ${ago(t.updated_at)}</small>${t.next_update_due && t.status !== 'done' ? `<small class="hnu">We'll update you by ${esc(byWhen(t.next_update_due))}</small>` : ''}</span>
         <span class="htr">${Number(t.unread) ? `<span class="badge" title="New reply from Riyeser">${t.unread} new</span>` : ''}${pill(TSTATUS, t.status)}</span></button>`).join('')}</div>` : ''}
       ${S.refunds && S.refunds.length ? `<h3 class="hsec">Your refund requests</h3><div class="hplan hrf">${S.refunds.map((r) => `<div><span><b>${money2(r.amount, r.currency)} · ${esc(r.for_what)}</b>
         <small>${esc(r.ref)}${r.period ? ` · ${esc(r.period)}` : ''} · ${ago(r.created_at)}${r.amount_approved != null && r.status !== 'declined' && r.status !== 'submitted' && r.status !== 'reviewing' ? ` · ${money2(r.amount_approved, r.currency)} approved` : ''}${r.decision_reason ? `<br>${esc(r.decision_reason)}` : ''}</small></span>${pill(RSTATUS, r.status)}</div>`).join('')}</div>` : ''}`;
@@ -936,17 +967,73 @@
         } catch (err) { btn.disabled = false; d.querySelector('#gherr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; } };
     });
   }
-  async function openTicket(id) {
-    let t; try { t = await api.ticket(id); } catch (err) { alert(plainError(err)); return; }
-    modal(`<h3>${esc(t.subject)}</h3><p class="small">${t.from_riyeser ? '<span class="pl riy">Message from Riyeser</span> ' : ''}${esc(t.ref)} · ${pill(TSTATUS, t.status)}</p>
+  // One help request: the conversation, what's happening in plain words, and Reply / Still having an issue / Confirm fixed.
+  // After Confirm fixed: an optional rating ("How did we do?"). Older databases (no who_acts yet) just get Reply.
+  async function openTicket(id, after = '') {
+    let t; try { t = await api.ticket(id); } catch (err) { modal(`<h3>Help request</h3><div class="err">${esc(plainError(err))}</div><div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; }); return; }
+    const fresh = 'who_acts' in t; const done = t.status === 'done';
+    const stars = (n) => `<span class="stars" aria-label="${n} out of 5">${'★'.repeat(n)}${'☆'.repeat(5 - n)}</span>`;
+    const rate = fresh && done && !t.rating;
+    modal(`<h3>${esc(t.subject)}</h3><p class="small">${t.from_riyeser ? '<span class="pl riy">Message from Riyeser</span> ' : ''}${esc(t.ref)}${t.product ? ` · ${esc(PRODUCT_NAMES[t.product] || t.product)}` : ''} · ${pill(TSTATUS, t.status)}${t.diag_ref ? ` · Diagnostic reference <b>${esc(t.diag_ref)}</b>` : ''}</p>
+      ${fresh ? `<p class="tsays${done ? ' ok' : ''}" id="tsays">${esc(TSAYS[t.status] || '')}${t.next_update_due && !done ? ` <b>We'll update you by ${esc(byWhen(t.next_update_due))}.</b>` : ''}</p>` : ''}
+      ${after ? `<div class="okmsg">${esc(after)}</div>` : ''}
       <div class="tconv">${(t.messages || []).map((m) => `<div class="tmsg${m.staff ? ' staff' : ' me'}"><small>${esc(m.staff ? 'Riyeser Support' : m.from || 'You')} · ${ago(m.at)}</small><div>${esc(m.body).replace(/\n/g, '<br>')}</div></div>`).join('')}</div>
-      ${t.status === 'done' ? '<p class="small">This request is marked done. If you still need help, reply and we\'ll pick it up again.</p>' : ''}
-      <form id="trf"><label class="f"><span>Your reply</span><textarea name="message" rows="3" maxlength="5000" required></textarea></label>
-      <div id="trerr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Close</button><button class="btn p">Send reply</button></div></form>`, (d, close) => {
+      ${rate ? `<form id="rtf" class="rate"><b>How did we do?</b> <small class="muted">(optional)</small><div class="starpick" role="radiogroup" aria-label="Rating">${[1, 2, 3, 4, 5].map((n) => `<label><input type="radio" name="stars" value="${n}"><span title="${n} out of 5">★</span></label>`).join('')}</div>
+          <label class="f"><span>Anything to add? <small class="muted">(optional)</small></span><textarea name="comment" rows="2" maxlength="1000"></textarea></label>
+          <div id="rterr"></div><div class="mfoot"><button type="button" class="btn" id="rtskip">No thanks</button><button class="btn p">Send rating</button></div></form>`
+        : fresh && t.rating ? `<p class="small">You rated this ${stars(t.rating)}. Thank you!</p>` : ''}
+      ${done && !fresh ? '<p class="small">This request is marked done. If you still need help, reply and we\'ll pick it up again.</p>' : ''}
+      <form id="trf"><label class="f"><span>${done && fresh ? 'Still not right? Tell us what\'s happening' : 'Your reply'}</span><textarea name="message" rows="3" maxlength="5000"></textarea></label>
+      <div id="trerr"></div><div class="mfoot tacts"><button type="button" class="btn" id="cl">Close</button>
+        ${fresh ? `<button type="button" class="btn" id="tstill">Still having an issue</button>${done ? '' : '<button type="button" class="btn ok" id="tfixed">✓ Confirm fixed</button>'}` : ''}
+        ${done && fresh ? '' : '<button class="btn p" id="treply">Reply</button>'}</div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = () => { close(); if (S.home) renderHome(); };
       const conv = d.querySelector('.tconv'); conv.scrollTop = conv.scrollHeight;
-      d.querySelector('#trf').onsubmit = async (e) => { e.preventDefault(); const msg = String(new FormData(e.target).get('message')).trim(); if (!msg) return;
-        try { await api.replyTicket(id, msg); close(); openTicket(id); } catch (err) { d.querySelector('#trerr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; } };
+      const msg = () => String(d.querySelector('#trf [name=message]').value).trim();
+      const err = (e) => { d.querySelector('#trerr').innerHTML = `<div class="err">${esc(plainError(e))}</div>`; };
+      const busy = (on) => d.querySelectorAll('#trf button').forEach((b) => { b.disabled = on; });
+      d.querySelector('#trf').onsubmit = async (e) => { e.preventDefault(); if (!msg()) { err(new Error('Write your reply first.')); return; } busy(true);
+        try { await api.replyTicket(id, msg()); close(); openTicket(id, 'Reply sent. We\'ll get back to you here.'); } catch (x) { busy(false); err(x); } };
+      const still = d.querySelector('#tstill'); if (still) still.onclick = async () => { busy(true);
+        try { await api.stillIssue(id, msg()); close(); openTicket(id, 'Thanks. It\'s back with Riyeser Support and we\'ll reply here.'); } catch (x) { busy(false); err(x); } };
+      const fixed = d.querySelector('#tfixed'); if (fixed) fixed.onclick = async () => { busy(true);
+        try { await api.confirmFixed(id); close(); openTicket(id, 'Great, it\'s marked resolved.'); } catch (x) { busy(false); err(x); } };
+      const rf = d.querySelector('#rtf');
+      if (rf) {
+        d.querySelector('#rtskip').onclick = () => { rf.remove(); };
+        rf.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(rf); const n = Number(f.get('stars'));
+          if (!n) { rf.querySelector('#rterr').innerHTML = '<div class="err">Choose 1 to 5 stars, or press No thanks.</div>'; return; }
+          try { await api.rateTicket(id, n, String(f.get('comment') || '').trim()); rf.outerHTML = `<p class="small" id="rated">Thanks for the feedback: ${stars(n)}</p>`; }
+          catch (x) { rf.querySelector('#rterr').innerHTML = `<div class="err">${esc(plainError(x))}</div>`; } };
+      }
+    });
+  }
+  // Report an issue (the website version of Riyeser Central's): the product, what happened and whether work is blocked.
+  // No logs from the website (it can't read your PC). Optionally the DG- reference Riyeser Central showed.
+  function reportIssue() {
+    S.helpShown = true;
+    if (S.tickets === null || !S.team) return getHelp();
+    modal(`<h3>🛠 Report an issue</h3><p>Tell us which program and what happened. If Riyeser Central gave you a diagnostic reference (it looks like DG-4821), add it so we can see the technical details.</p>
+      <form id="rif"><label class="f"><span>Which program?</span><select name="product" required><option value="">Choose…</option>${PRODUCTS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+      <label class="f"><span>What happened?</span><textarea name="what" rows="4" maxlength="4000" required placeholder="e.g. The payroll export stops at about 90% with &quot;Export timed out&quot;"></textarea></label>
+      <fieldset class="f yn"><legend>Is your work blocked?</legend><label><input type="radio" name="blocked" value="yes" required> Yes</label><label><input type="radio" name="blocked" value="no"> No</label></fieldset>
+      <div class="rfrow"><label class="f"><span>Version <small class="muted">(optional)</small></span><input name="version" maxlength="40" placeholder="e.g. 2.8.1"></label>
+      <label class="f"><span>Error message or code <small class="muted">(optional)</small></span><input name="error" maxlength="300"></label></div>
+      <label class="f"><span>Diagnostic reference from Riyeser Central <small class="muted">(optional)</small></span><input name="diag" maxlength="20" placeholder="DG-4821" autocomplete="off"></label>
+      <p class="small muted">Please don't include passwords, bank details or customers' details. Your records stay in your business.</p>
+      <div id="rierr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Send report</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#rif').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const v = (k) => String(f.get(k) || '').trim(); const btn = e.target.querySelector('.btn.p');
+        const diag = v('diag').toUpperCase(); if (diag && !/^DG-\d+$/.test(diag)) { d.querySelector('#rierr').innerHTML = '<div class="err">That reference doesn\'t look right. It looks like DG-4821.</div>'; return; }
+        btn.disabled = true;
+        try { const r = await api.reportIssue(S.team.id, { source: 'web', product: v('product'), what_happened: v('what'), blocked: v('blocked') === 'yes', product_version: v('version') || null,
+            error_text: v('error') || null, diag_ref: diag || null, reported_at: new Date().toISOString() });
+          d.querySelector('.mcard').innerHTML = `<h3>✅ Thanks — your request number is ${esc(r.ref)}.</h3><p>Reference <b class="code">${esc(r.diag_ref || '')}</b>. We'll reply by email and here on your Riyeser home page.</p>
+            <div class="mfoot"><button class="btn" id="ok">Done</button><button class="btn p" id="see">Open it</button></div>`;
+          S.tickets = await api.myTickets().catch(() => S.tickets);
+          d.querySelector('#ok').onclick = () => { close(); if (S.team && S.home) renderHome(); };
+          d.querySelector('#see').onclick = () => { close(); openTicket(r.id); };
+        } catch (err) { btn.disabled = false; d.querySelector('#rierr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; } };
     });
   }
   // Owners and admins: ask for a refund. It also opens a billing help request, where the conversation happens.
@@ -2006,6 +2093,6 @@
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
   setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);
-  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, requestRefund, phonesPage, myPhonePage, settingsMenu };
+  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, reportIssue, requestRefund, phonesPage, myPhonePage, settingsMenu };
   start();
 })();

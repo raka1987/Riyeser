@@ -204,6 +204,14 @@ class Online {
       .sort((a, b) => a.id.localeCompare(b.id));
     try { await this.rpc('report_programs', { ws, device: this.deviceId(), programs }); return true; } catch { return false; }
   }
+  // ---------- Report an issue (Get help): a diagnostic report and a help request, for this PC's business ----------
+  /** Signed in here, with this PC linked to an online business? Report an issue needs both. */
+  canReport() { const c = readCompany(this.appData); return !!(this.session && c && c.mode === 'online' && c.workspace_id); }
+  /** Send it (support_report): { id, ref: 'T-10234', diag_ref: 'DG-4821' }. */
+  async reportIssue(payload) {
+    if (!this.canReport()) { const e = new Error('Sign in with your Riyeser account first.'); e.signIn = true; throw e; }
+    return this.rpc('support_report', { ws: readCompany(this.appData).workspace_id, payload });
+  }
   /** true / false, or null when it can't be checked (offline, not signed in, not an online company). */
   async stillLinked() {
     const c = readCompany(this.appData);

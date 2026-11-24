@@ -52,24 +52,42 @@
     ['refunds.approve', 'Approve refunds'], ['refunds.pay', 'Mark refunds paid'], ['offers.grant', 'Give free periods'], ['offers.approve', 'Approve free periods (supervisor)'],
     ['emails.view', 'See the email outbox'], ['emails.manage', 'Send held or failed emails again'], ['accounts.inactive', 'Approve removing inactive accounts'],
     ['staff.manage', 'Manage the HQ team'], ['audit.view', 'See the HQ history'], ['settings.manage', 'Change HQ settings'], ['reports.view', 'See reports'],
-    ['link.support', 'Riyeser Link phone support']];
+    ['link.support', 'Riyeser Link phone support'], ['support.diagnostics', 'Look up diagnostic reports']];
   const BASE = ['overview.view', 'downloads.view'];
   const ROLE_PERMS = {
     owner: PERMS.map((p) => p[0]),
     finance: [...BASE, 'customers.view', 'customers.notes', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.level2', 'support.level3',
       'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'reports.view'],
     support: [...BASE, 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa', 'licences.view', 'support.view', 'support.reply', 'support.assign',
-      'support.saved_replies', 'support.escalate', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'link.support'],
+      'support.saved_replies', 'support.escalate', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics'],
     senior: [...BASE, 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa', 'people.change_owner', 'business.close', 'licences.view', 'support.view',
-      'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view'],
+      'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view',
+      'support.diagnostics'],
     sales: [...BASE, 'customers.view', 'customers.notes', 'licences.view', 'support.view', 'offers.grant'],
-    developer: [...BASE],
+    developer: [...BASE, 'support.diagnostics'],
   };
   const permsOf = (s) => (s.role === 'owner' ? ROLE_PERMS.owner : [...new Set([...(ROLE_PERMS[s.role] || []), ...(s.perms_add || [])])].filter((p) => !(s.perms_remove || []).includes(p)));
   const LEVELS = { 1: 'Support', 2: 'Senior', 3: 'Management' };
   const LEVEL_PERM = { 1: 'support.reply', 2: 'support.level2', 3: 'support.level3' };
   const TOPICS = { billing: 'Billing', signin: 'Signing in', program: 'A program problem', other: 'Something else' };
-  const TSTAT = { new: ['New', 'warn'], waiting_us: ['Waiting on us', 'warn'], waiting_customer: ['Waiting on customer', ''], done: ['Done', 'ok'] };
+  // Ticket statuses. waiting_us is "In progress": back with Riyeser (e.g. the customer replied or said it's still happening).
+  const TSTAT = { new: ['New', 'warn'], investigating: ['Investigating', 'blue'], waiting_us: ['In progress', 'violet'], waiting_customer: ['Waiting on customer', ''], done: ['Resolved', 'ok'] };
+  const TSTAT_ORDER = ['new', 'investigating', 'waiting_us', 'waiting_customer', 'done'];
+  // The products a ticket can be about (support_products() in team-chat.sql), with an icon for the inbox.
+  const PRODUCTS = [['central', 'Riyeser Central', '🏠'], ['accounting', 'Accounting', '📒'], ['invoices', 'Invoices', '🧾'], ['pos', 'POS', '🛒'], ['bookings', 'Bookings', '📅'],
+    ['payroll', 'Payroll', '🕒'], ['link', 'Riyeser Link', '💬'], ['linkoffice', 'Link Office', '☎️'], ['pdf', 'Riyeser PDF', '📕'], ['desk', 'Desk Assistant', '🗂'],
+    ['website', 'riyeser.com', '🌐'], ['other', 'Something else', '❔']];
+  const prodName = (p) => (PRODUCTS.find((x) => x[0] === p) || [p, p ? 'Something else' : 'Not set'])[1];
+  const prodIcon = (p) => (PRODUCTS.find((x) => x[0] === p) || [0, 0, '🎧'])[2];
+  // Program ids in devices.programs (from Riyeser Central) for each product.
+  const PRODUCT_APPS = { central: ['central'], accounting: ['accounting', 'accounting-basics'], invoices: ['invoices'], pos: ['pos'], bookings: ['bookings'], payroll: ['payroll'],
+    link: ['team'], linkoffice: ['linkoffice'], pdf: ['pdf'], desk: ['desk'] };
+  const APP_NAMES = { central: 'Central', accounting: 'Accounting Plus', 'accounting-basics': 'Accounting Basics', invoices: 'Invoices', pos: 'POS', bookings: 'Bookings', payroll: 'Payroll',
+    team: 'Riyeser Link', linkoffice: 'Link Office', pdf: 'PDF', desk: 'Desk Assistant', services: 'As Built' };
+  // "3:00 pm Fri" (this week) or "3:00 pm Fri 5 Dec"
+  const dueText = (t) => { const d = new Date(t); const tm = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).replace(/\s?([ap])\.?m\.?/i, ' $1m').toLowerCase();
+    const wd = d.toLocaleDateString('en-AU', { weekday: 'short' }); const soon = Math.abs(d - Date.now()) < 6 * 864e5;
+    return `${tm} ${wd}${soon ? '' : ' ' + d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`; };
   const RSTAT = { submitted: ['New', 'warn'], reviewing: ['Reviewing', ''], approved: ['Approved', 'ok'], partly_approved: ['Partly approved', 'ok'], declined: ['Declined', 'bad'], paid: ['Paid', 'ok'] };
   const RWHY = { mistake: 'Charged by mistake', didnt_work: 'Didn\'t work', cancelled: 'Cancelled', duplicate: 'Duplicate payment', other: 'Other' };
   const PAID_HOW = [['card', 'Card refund'], ['bank', 'Bank transfer'], ['mpaisa', 'M-PAiSA'], ['credit', 'Credit on account']];
@@ -119,6 +137,19 @@
       ticketStatus: (id, st) => rpc('hq_ticket_status', { ticket: id, new_status: st }), ticketPriority: (id, p) => rpc('hq_ticket_priority', { ticket: id, new_priority: p }),
       ticketAssign: (id, staff) => rpc('hq_ticket_assign', { ticket: id, staff: staff || null }),
       ticketEscalate: (id, level, reason, assign) => rpc('hq_ticket_escalate', { ticket: id, to_level: level, reason, assign_to: assign || null }),
+      // the Support workspace (newer team-chat.sql; before it's re-run the inbox falls back to hq_tickets and the new buttons say how to switch them on)
+      async supportInbox(box, q, f) {
+        f = f || {};
+        try { return await rpc('hq_support_inbox', { box, search: q || '', filters: f || {} }); } catch (e) { if (!missing(e)) throw e; }
+        const r = await rpc('hq_tickets', { box: ({ all: f && f.status === 'open' ? 'open' : 'all' })[box] || box, search: q || '' });
+        const rows = (r.tickets || []).filter((x) => (!f.owner || (f.owner === 'me' ? x.assignee === (S.me || {}).id : f.owner === 'none' ? !x.assignee : x.assignee === f.owner))
+          && (!f.status || (f.status === 'open' ? x.status !== 'done' : x.status === f.status)) && (!f.level || String(x.level) === String(f.level)) && (!f.topic || x.topic === f.topic) && !f.product);
+        return { ...r, tickets: rows.map((x) => ({ ...x, who_acts: x.status === 'done' ? null : x.status === 'waiting_customer' ? 'customer' : 'riyeser' })), old: true };
+      },
+      ticketSet: (id, fields) => rpc('hq_ticket_set', { ticket: id, fields }),
+      ticketNextUpdate: (id, due, owner) => rpc('hq_ticket_next_update', { ticket: id, due: due || null, owner: owner || null }),
+      ticketLogCall: (id, dir, who, body) => rpc('hq_ticket_log_call', { ticket: id, direction: dir, call_with: who || null, body }),
+      diagnostic: (ref) => rpc('hq_diagnostic', { diag_ref: ref }), noteEdit: (id, body) => rpc('hq_note_edit', { note_id: id, note_body: body }),
       savedReplies: () => rpc('hq_saved_replies'), saveReply: (id, title, body) => rpc('hq_save_reply', { reply_id: id || null, title, body }),
       retireReply: (id) => rpc('hq_retire_reply', { reply_id: id }),
       // fix-up tools
@@ -220,9 +251,10 @@
       const pl = plans[ws] || {}; return { workspace_id: ws, company_code: c.company_code, modules, seats: { included: 3, extra: pl.extra_users || 0, used: c.people }, extra_companies: pl.extra_companies || 0, billing: pl.billing || 'monthly', early_bird: !!pl.early_bird }; }
     function demoMonthly(ws) { const l = demoLicence(ws); const n = Object.values(l.modules).filter((v) => v.status === 'active').length;
       let m = n * 20 + l.seats.extra * 5 + l.extra_companies * 10; if (l.billing === 'yearly') m *= 10 / 12; if (l.early_bird) m *= 0.5; return Math.round(m * 100) / 100; }
-    let nid = 3;
+    let nid = 4;
     const notes = { w1: [{ id: 1, kind: 'note', body: 'Called Alex: wants POS for the Lautoka branch next month.', at: t(2), by: 'Riki', author: 's1', pinned: false }],
-      w2: [{ id: 2, kind: 'call', direction: 'in', contact: 'Mere', body: 'Asked about yearly billing for the second cafe.', at: t(1), by: 'Riki', author: 's1', follow_up: new Date().toISOString().slice(0, 10), pinned: false }] };
+      w2: [{ id: 2, kind: 'call', direction: 'in', contact: 'Mere', body: 'Asked about yearly billing for the second cafe.', at: t(1), by: 'Riki', author: 's1', follow_up: new Date().toISOString().slice(0, 10), pinned: false },
+        { id: 3, kind: 'note', body: 'Call Mere on the cafe landline before 10 am. Payroll runs on Thursdays. Ask for the PC name (Back office PC).', at: t(20), by: 'Help Desk', author: 's2', pinned: true }] };
     const hist = [{ at: t(0.1), actor: 's1', who: 'Riki', action: 'customer.viewed', workspace_id: 'w1', details: { workspace_id: 'w1' } }, { at: t(2), actor: 's1', who: 'Riki', action: 'note.added', workspace_id: 'w1', details: { workspace_id: 'w1' } },
       { at: t(3), actor: 's2', who: 'Help Desk', action: 'ticket.replied', workspace_id: 'w2', ticket: 'T-10235', details: { workspace_id: 'w2', ticket: 'T-10235' } },
       { at: t(5), actor: 's1', who: 'Riki', action: 'staff.added', details: { email: 'help@riyeser.test', role: 'support' } }, { at: t(30), actor: null, who: 'Riyeser', action: 'staff.owner_made', details: { email: 'riki@riyeser.test' } }];
@@ -231,16 +263,39 @@
     for (let d = 29; d >= 0; d--) assets.forEach((a, i) => daily.push({ day: t(d).slice(0, 10), asset: a, total: Math.round((30 - d) * (6 - i) * 1.7 + 20 * (6 - i)) }));
     // support
     let tn = 10234; const mk = (ws, by, email, topic, subject, status, level, created, msgs, extra = {}) => ({ id: 'tk' + tn, ref: 'T-' + tn++, workspace_id: ws, opened_by_name: by, opened_by_email: email, topic, subject, status, priority: 'normal', level,
-      assignee: null, created_at: created, updated_at: msgs.length ? msgs[msgs.length - 1].at : created, first_reply_at: (msgs.find((m) => m.staff && !m.internal) || {}).at || null, last_customer_at: created, messages: msgs, escalations: [], ...extra });
+      assignee: null, created_at: created, updated_at: msgs.length ? msgs[msgs.length - 1].at : created, first_reply_at: (msgs.find((m) => m.staff && !m.internal) || {}).at || null, last_customer_at: created, messages: msgs, escalations: [],
+      product: null, next_update_due: null, next_update_owner: null, planned_release: null, bug_ref: null, bug_url: null, diag: null, work_blocked: false, rating: null, rating_comment: null, resolved_at: null, ...extra });
     const cm = (from, body, at) => ({ staff: false, internal: false, from, body, at }); const sm = (from, body, at, internal = false) => ({ staff: true, internal, from, body, at });
+    const call = (from, dir, who, body, at) => ({ staff: true, internal: true, kind: 'call', call_direction: dir, call_with: who, from, body, at });
+    const ahead = (hrs) => { const d = new Date(Date.now() + hrs * 3600e3); d.setMinutes(0, 0, 0); return d.toISOString(); };   // on the hour
+    // Diagnostic reports, as Riyeser Central sends them (technical details only, already scrubbed)
+    const diags = {
+      'DG-4821': { ref: 'DG-4821', source: 'central', workspace_id: 'w2', product: 'payroll', product_version: '2.8.1', error_text: 'Export timed out', os: 'Windows 11 Pro (10.0.22631)', central_version: '1.8.3',
+        programs: [{ id: 'central', version: '1.8.3' }, { id: 'payroll', version: '2.8.1' }, { id: 'pos', version: '1.4.0' }], log_source: 'Riyeser Payroll log', reported_at: h(26), created_at: h(26),
+        log_lines: ['09:12:01 INFO export: started (pay run 2026-11-21, 9 staff)', '09:12:04 INFO export: building bank file', '09:13:30 INFO export: 90% done', '09:14:00 WARN export: no answer from the export job after 30 s',
+          '09:14:00 ERROR export: Export timed out', '09:14:00 INFO emailed payslip to m***@harbour.test', '09:14:01 INFO bank account [number removed] skipped'].join('\n') },
+      'DG-4822': { ref: 'DG-4822', source: 'central', workspace_id: 'w1', product: 'pos', product_version: '1.7.0', error_text: 'Printer not responding (P-12)', os: 'Windows 10 Pro (10.0.19045)', central_version: '1.8.1',
+        programs: [{ id: 'central', version: '1.8.1' }, { id: 'pos', version: '1.7.0' }], log_source: null, log_lines: null, reported_at: h(30), created_at: h(30) } };
+    Object.values(diags).forEach((d) => { d.line_count = d.log_lines ? d.log_lines.split('\n').length : 0; });
     const tickets = [
       mk('w1', 'Alex', 'alex@sample.test', 'program', 'Receipt printer stopped after the update', 'new', 1, h(30), [cm('Alex', 'Since the 1.7.0 update the POS receipt printer prints nothing. Kitchen printer is fine.', h(30))]),
       mk('w2', 'Mere', 'mere@harbour.test', 'billing', 'Charged twice in November', 'waiting_us', 1, h(5), [cm('Mere', 'Our card was charged twice for November. Can you check?', h(5))]),
       mk('w3', 'Priya', 'priya@northside.test', 'signin', 'Lost my phone, can\'t sign in', 'waiting_customer', 1, t(1), [cm('Priya', 'New phone, and the authenticator app is gone. How do I get back in?', t(1)), sm('Help Desk', 'Sorry about that, Priya. We\'ll call you on the number on file to check it\'s you, then reset it.', h(20))]),
       mk('w4', 'Jone', 'jone@island.test', 'program', 'Payroll totals don\'t match the bank', 'waiting_us', 2, t(3), [cm('Jone', 'The pay run total is $12 more than what left the bank.', t(3)), sm('Help Desk', 'Escalated to Senior by Help Desk: needs a look at the rounding', t(2), true), sm(null, 'We\'ve passed this to our senior team. They\'ll reply here.', t(2))],
         { escalations: [{ from: 1, to: 2, by: 'Help Desk', reason: 'needs a look at the rounding', at: t(2) }] }),
-      mk(null, 'someone@example.test', 'someone@example.test', 'other', 'Do you support NZ GST?', 'done', 1, t(6), [cm('Customer', 'Thinking of switching. Do you handle NZ GST returns?', t(6)), sm('Riki', 'Yes: Accounting Plus does NZ GST returns.', t(5.8))])];
-    tickets[1].assignee = 's2';
+      mk(null, 'someone@example.test', 'someone@example.test', 'other', 'Do you support NZ GST?', 'done', 1, t(6), [cm('Customer', 'Thinking of switching. Do you handle NZ GST returns?', t(6)), sm('Riki', 'Yes: Accounting Plus does NZ GST returns.', t(5.8))], { product: 'accounting', resolved_at: t(5.8), rating: 5 }),
+      mk('w2', 'Mere', 'mere@harbour.test', 'program', 'Payroll export fails after update', 'investigating', 1, h(26), [
+        cm('Mere', 'Since the 2.8.1 update yesterday, our payroll export fails with a timeout. It gets to around 90% then stops with "Export timed out".', h(26)),
+        sm('Riki', 'Thanks Mere. We can see the diagnostic report (DG-4821) and we\'re checking it now. We\'ll update you here by this afternoon.', h(25)),
+        cm('Mere', 'Just confirming this is still happening for us this morning. We need to run payroll today, so a fix or workaround would be really helpful.', h(5)),
+        sm('Riki', 'Reproduced in a test workspace on Payroll 2.8.1. Export reaches ~90% then times out with the same error. Likely the export job changes in 2.8.1. Linked to the existing bug.', h(4.5), true),
+        call('Riki', 'out', 'Mere', 'Rang Mere: they can export by pay group for now. Promised an update after lunch.', h(4))],
+        { product: 'payroll', assignee: 's1', diag: 'DG-4821', work_blocked: true, priority: 'high', next_update_due: ahead(0), next_update_owner: 's1', planned_release: 'Payroll 2.8.2', bug_ref: 'BUG-7719', bug_url: 'https://github.com/raka1987/Riyeser/issues' }),
+      mk('w3', 'Priya', 'priya@northside.test', 'program', 'Leave balance not updating', 'waiting_customer', 1, t(2), [cm('Priya', 'Annual leave balances didn\'t change after the last pay run.', t(2)),
+        sm('Help Desk', 'Thanks Priya. Could you check Payroll → Settings → Leave and tell us whether "Accrue each pay run" is ticked?', t(1.5))], { product: 'payroll', assignee: 's2', next_update_due: ahead(30), next_update_owner: 's2' }),
+      mk('w4', 'Jone', 'jone@island.test', 'program', 'Timesheet approval error', 'waiting_us', 1, t(1), [cm('Jone', 'Approving a timesheet says "Something went wrong (T-40)".', t(1)), sm('Senior Sione', 'Thanks Jone, we\'re on it.', t(0.8)), cm('Jone', 'Still the same today.', h(3))],
+        { product: 'payroll', assignee: 's4' })];
+    tickets[1].assignee = 's2'; tickets[1].product = 'other'; tickets[0].product = 'pos'; tickets[0].diag = 'DG-4822'; tickets[2].product = 'central'; tickets[3].product = 'payroll';
     const saved = [{ id: 1, title: 'Two-step reset: identity check', body: 'Thanks for letting us know. To keep your account safe we\'ll call you back on the phone number we have on file before we reset two-step sign-in.' },
       { id: 2, title: 'Printer: turn it off and on', body: 'Please turn the printer off and on again, then print a test page from POS → Settings → Printers. Let us know what happens.' }];
     // refunds, offers, credit, emails
@@ -259,6 +314,7 @@
     const queue = (to, subject, template, ws = wsOf(to)) => emails.unshift({ id: en++, to_address: to, subject, template, status: 'queued', attempts: 0, created_at: now(), workspace_id: ws });
     const owner = (ws) => (cos.find((c) => c.id === ws) || {}).owner_email;
     const tk = (id) => tickets.find((x) => x.id === id);
+    const whoActs = (x) => (x.status === 'done' ? null : x.status === 'waiting_customer' ? 'customer' : 'riyeser');
     const reasonOk = (r) => { if (String(r || '').trim().length < 4) throw new Error('Give a reason (a few words is fine).'); };
     const ticketOk = (r) => { if (r && !tickets.some((x) => x.ref === r.toUpperCase().replace(/^(\d)/, 'T-$1'))) throw new Error(`There's no ticket ${r}.`); return r ? r.toUpperCase() : null; };
     function applyOffer(o) { const l = demoLicence(o.workspace_id); let end = null;
@@ -271,11 +327,11 @@
       return c.people_list || (c.people_list = [{ user_id: ws + '-p1', name: c.owner_name, role: 'owner', job_role: 'owner', extension: 101, email: c.owner_email, joined: c.created_at, two_step: true, phone: c.owner_phone, last_sign_in: c.last_active_at },
         { user_id: ws + '-p2', name: 'Sam Taylor', role: 'admin', job_role: 'manager', extension: 102, email: 'sam@sample.test', joined: t(20), two_step: true, phone: '555 0201', last_sign_in: t(4) },
         { user_id: ws + '-p3', name: 'Jordan Lee', role: 'member', job_role: 'staff', extension: 201, email: 'jordan@sample.test', joined: t(10), two_step: false, phone: null, last_sign_in: t(40) }]); }
-    const APPS = [['central', '1.8.1'], ['accounting-basics', '2.3.0'], ['pos', '1.4.0'], ['invoices', '1.2.0'], ['team', '1.1.0'], ['payroll', '1.6.0'], ['pdf', '1.3.2']];
+    const APPS = [['central', '1.8.1'], ['accounting-basics', '2.3.0'], ['pos', '1.4.0'], ['invoices', '1.2.0'], ['team', '1.1.0'], ['payroll', '2.8.1'], ['pdf', '1.3.2']];
     function pcsOf(c) { const names = ['Head office PC', 'Front counter', 'Lautoka front desk', 'Manager laptop']; const owner = c.owner_name;
       return Array.from({ length: c.id.startsWith('g') ? c.pcs : Math.max(1, Math.min(4, c.pcs)) }, (_, i) => ({ id: c.id + '-d' + i, name: names[i], platform: 'Windows', version: i === 1 ? '1.8.0' : '1.8.1',
         last_seen: t(i * 1.5 + 0.01), linked_at: t(30 + i), person: i % 2 ? 'Jordan Lee' : owner,
-        programs: i === 3 ? null : APPS.slice(0, 3 + ((i + c.name.length) % 4)).map(([id, v]) => ({ id, version: i === 1 && id === 'pos' ? '1.3.9' : v })), programs_at: i === 3 ? null : t(i + 0.1) })); }
+        programs: i === 3 ? null : APPS.filter(([id], k) => k < 3 + ((i + c.name.length) % 4) || (c.id === 'w2' && id === 'payroll')).map(([id, v]) => ({ id, version: i === 1 && id === 'pos' ? '1.3.9' : i === 1 && id === 'payroll' ? '2.8.0' : v })), programs_at: i === 3 ? null : t(i + 0.1) })); }
     const noteRow = (n) => ({ follow_up: null, follow_up_done_at: null, direction: null, contact: null, pinned: false, kind: 'note', ...n });
     function timelineOf(ws) { const P = permsOf(me()); const out = [];
       if (P.includes('support.view')) tickets.filter((x) => x.workspace_id === ws).forEach((x) => out.push({ kind: 'ticket', at: x.created_at, id: x.id, ref: x.ref, title: x.subject, status: x.status, by_staff: !!x.staff_started, detail: x.topic, who: x.staff_started ? x.started_by_name : x.opened_by_name, extra: String(x.level) }));
@@ -352,18 +408,54 @@
           level2: (x) => x.status !== 'done' && x.level === 2, level3: (x) => x.status !== 'done' && x.level === 3, overdue: (x) => x.status !== 'done' && x.overdue, all: () => true, open: (x) => x.status !== 'done' };
         const counts = {}; Object.keys(f).forEach((k) => { counts[k] = all.filter(f[k]).length; });
         return { tickets: all.filter(f[box] || f.open).sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map((x) => ({ ...x, messages: undefined })), counts, overdue_hours: od }; },
-      async ticket(id) { need('support.view'); const x = tk(id); log('ticket.viewed', { ticket: x.ref, workspace_id: x.workspace_id }); const c = cos.find((y) => y.id === x.workspace_id);
+      async supportInbox(box = 'all', q = '', f = {}) { need('support.view'); const od = settings['support.overdue_hours']; const s = String(q || '').toLowerCase();
+        const all = tickets.map((x) => ({ ...x, business: (cos.find((c) => c.id === x.workspace_id) || {}).name || null, assignee_name: nameOf(x.assignee), escalated: x.escalations.length > 0,
+          overdue: x.status !== 'done' && !x.first_reply_at && hours(x.created_at) > od, update_overdue: x.status !== 'done' && !!x.next_update_due && new Date(x.next_update_due) < new Date(),
+          who_acts: whoActs(x), next_update_owner_name: nameOf(x.next_update_owner), messages: undefined }))
+          .filter((x) => !s || [x.ref, x.subject, x.business, x.opened_by_email, x.diag, ...tk(x.id).messages.map((m) => m.body)].some((v) => String(v || '').toLowerCase().includes(s)));
+        const base = all.filter((x) => (!f.product || x.product === f.product) && (!f.owner || (f.owner === 'me' ? x.assignee === actor : f.owner === 'none' ? !x.assignee : x.assignee === f.owner))
+          && (!f.status || (f.status === 'open' ? x.status !== 'done' : x.status === f.status)) && (!f.level || String(x.level) === String(f.level)) && (!f.topic || x.topic === f.topic));
+        const B = { mine: (x) => x.status !== 'done' && x.assignee === actor, waiting_customer: (x) => x.status === 'waiting_customer', unassigned: (x) => x.status !== 'done' && !x.assignee,
+          overdue: (x) => x.status !== 'done' && (x.overdue || x.update_overdue), all: () => true };
+        const counts = { open: base.filter((x) => x.status !== 'done').length }; Object.keys(B).forEach((k) => { counts[k] = base.filter(B[k]).length; });
+        return { tickets: base.filter(B[box] || B.all).sort((a, b) => (b.update_overdue - a.update_overdue) || b.updated_at.localeCompare(a.updated_at)), counts, overdue_hours: od,
+          staff: staff.filter((x) => x.active).map((x) => ({ user_id: x.user_id, name: x.display_name })) }; },
+      async ticket(id) { need('support.view'); const x = tk(id); const P = permsOf(me()); const dg = x.diag && P.includes('support.diagnostics') ? diags[x.diag] : null;
+        log('ticket.viewed', { ticket: x.ref, workspace_id: x.workspace_id, diagnostic: dg ? dg.ref : null }); const c = cos.find((y) => y.id === x.workspace_id);
         const l = c ? demoLicence(c.id) : null;
-        return { ticket: { ...x, assignee_name: nameOf(x.assignee), messages: undefined }, messages: x.messages.map((m, i) => ({ ...m, id: i + 1, from: m.from || 'Riyeser (automatic)' })), escalations: x.escalations,
+        return { ticket: { ...x, assignee_name: nameOf(x.assignee), next_update_owner_name: nameOf(x.next_update_owner), who_acts: whoActs(x), messages: undefined,
+            update_overdue: x.status !== 'done' && !!x.next_update_due && new Date(x.next_update_due) < new Date(), diag_id: x.diag },
+          diagnostic: dg ? { ...dg } : null, diag_hidden: !!x.diag && !dg, pcs: c ? pcsOf(c) : null,
+          support_notes: c ? (notes[c.id] || []).filter((n) => n.pinned).map((n) => ({ id: n.id, body: n.body, at: n.at, by: n.by })) : null,
+          staff: staff.filter((y) => y.active).map((y) => ({ user_id: y.user_id, name: y.display_name, can_work: permsOf(y).includes(LEVEL_PERM[x.level]) })),
+          messages: x.messages.map((m, i) => ({ kind: 'message', ...m, id: i + 1, from: m.from || 'Riyeser (automatic)' })), escalations: x.escalations,
           business: c ? { id: c.id, name: c.name, company_code: c.company_code, status: c.status, people: c.people, pcs: c.pcs, last_active_at: c.last_active_at,
             paid: Object.keys(l.modules).filter((m) => l.modules[m].status === 'active'), trial: Object.keys(l.modules).filter((m) => l.modules[m].status === 'trial'), monthly: demoMonthly(c.id),
             credit: credits[c.id] || {}, notes: notes[c.id] || [] } : null,
           refunds: refunds.filter((f) => f.ticket_id === id), can_work: permsOf(me()).includes(LEVEL_PERM[x.level]) }; },
       async ticketReply(id, msg, note, st) { need('support.reply'); const x = tk(id); if (!permsOf(me()).includes(LEVEL_PERM[x.level])) throw new Error(`This ticket is with ${LEVELS[x.level]} (level ${x.level}). Someone who works that level needs to reply.`);
         x.messages.push(sm(me().display_name, msg, now(), !!note)); x.updated_at = now();
-        if (!note) { x.first_reply_at = x.first_reply_at || now(); x.status = st || 'waiting_customer'; x.assignee = x.assignee || actor; queue(x.opened_by_email, `Re: ${x.subject} (${x.ref})`, 'ticket_reply'); }
+        if (!note) { x.first_reply_at = x.first_reply_at || now(); x.status = st || 'waiting_customer'; x.resolved_at = x.status === 'done' ? (x.resolved_at || now()) : null; x.assignee = x.assignee || actor; queue(x.opened_by_email, `Re: ${x.subject} (${x.ref})`, 'ticket_reply'); }
         log(note ? 'ticket.note' : 'ticket.replied', { ticket: x.ref, workspace_id: x.workspace_id }); },
-      async ticketStatus(id, st) { need('support.reply'); const x = tk(id); const was = x.status; x.status = st; x.updated_at = now(); log('ticket.status', { ticket: x.ref, workspace_id: x.workspace_id, was, now: st }); },
+      async ticketStatus(id, st) { need('support.reply'); const x = tk(id); const was = x.status; x.status = st; x.updated_at = now(); x.resolved_at = st === 'done' ? (x.resolved_at || now()) : null;
+        log('ticket.status', { ticket: x.ref, workspace_id: x.workspace_id, was, now: st }); },
+      async ticketSet(id, f) { need('support.reply'); const x = tk(id); if (!permsOf(me()).includes(LEVEL_PERM[x.level])) throw new Error(`This ticket is with ${LEVELS[x.level]} (level ${x.level}).`);
+        if ('bug_url' in f && f.bug_url && !/^https:\/\/\S{3,300}$/.test(f.bug_url)) throw new Error('The bug link must start with https://');
+        if ('product' in f && f.product && !PRODUCTS.some(([k]) => k === f.product)) throw new Error('Choose a product.');
+        Object.entries(f).forEach(([k, v]) => { x[k] = String(v || '').trim() || null; }); x.updated_at = now(); log('ticket.updated', { ticket: x.ref, workspace_id: x.workspace_id, fields: Object.keys(f) }); },
+      async ticketNextUpdate(id, due, who) { need('support.reply'); const x = tk(id);
+        if (!due) { Object.assign(x, { next_update_due: null, next_update_owner: null }); log('ticket.next_update', { ticket: x.ref, workspace_id: x.workspace_id, due: null }); return; }
+        if (new Date(due) < new Date(Date.now() - 5 * 60e3)) throw new Error('Choose a time from now on.');
+        Object.assign(x, { next_update_due: new Date(due).toISOString(), next_update_owner: who || actor, updated_at: now() }); log('ticket.next_update', { ticket: x.ref, workspace_id: x.workspace_id, due, owner: nameOf(who || actor) }); },
+      async ticketLogCall(id, dir, who, body) { need('support.reply'); const x = tk(id); if (!['in', 'out'].includes(dir)) throw new Error('Choose whether they called us or we called them.');
+        if (!String(body || '').trim()) throw new Error('Write what the call was about first.');
+        x.messages.push(call(me().display_name, dir, String(who || '').trim() || null, String(body).trim(), now())); x.updated_at = now(); log('ticket.call', { ticket: x.ref, workspace_id: x.workspace_id, direction: dir }); },
+      async diagnostic(ref) { need('support.diagnostics'); const d = diags[String(ref || '').trim().toUpperCase()]; if (!d) throw new Error(`There's no diagnostic report ${String(ref || '').trim().toUpperCase()}.`);
+        const c = cos.find((y) => y.id === d.workspace_id); log('diagnostic.viewed', { workspace_id: d.workspace_id, diagnostic: d.ref });
+        return { diagnostic: { ...d }, business: c ? { id: c.id, name: c.name, company_code: c.company_code } : null,
+          tickets: permsOf(me()).includes('support.view') ? tickets.filter((x) => x.diag === d.ref).map((x) => ({ id: x.id, ref: x.ref, subject: x.subject, status: x.status })) : null }; },
+      async noteEdit(id, body) { need('customers.notes'); if (!String(body || '').trim()) throw new Error('Write the note first.'); const [ws, n] = Object.entries(notes).map(([w, l]) => [w, l.find((x) => x.id === id)]).find(([, x]) => x) || [];
+        if (!n) throw new Error('That note doesn\'t exist.'); n.body = body.trim(); log('note.edited', { workspace_id: ws, note: id }); },
       async ticketPriority(id, p) { const x = tk(id); const was = x.priority; x.priority = p; log('ticket.priority', { ticket: x.ref, workspace_id: x.workspace_id, was, now: p }); },
       async ticketAssign(id, s) { const x = tk(id); if (!(permsOf(me()).includes('support.assign') || s === actor)) throw new Error('Your HQ role can\'t do that.');
         if (s && !permsOf(staff.find((y) => y.user_id === s)).includes(LEVEL_PERM[x.level])) throw new Error(`${nameOf(s)} can't work ${LEVELS[x.level]} tickets (level ${x.level}).`);
@@ -563,7 +655,9 @@
       async handoverDone(id) { const x = handover.find((h) => h.id === id); if (!x || x.done) throw new Error('That handover note is already done.'); Object.assign(x, { done: true, done_by: me().display_name }); log('handover.done', { handover: id }); },
       async workQueue() { const P = permsOf(me()); const od = settings['support.overdue_hours']; const q = []; const co = (ws) => cos.find((c) => c.id === ws) || {};
         const add = (prio, kind, ws, issue, detail, owner, action, ref, at) => q.push({ prio, kind, workspace_id: ws, business: co(ws).name, country: co(ws).country, address: co(ws).address, issue, detail, owner: owner || nameOf(co(ws).hq_owner) || 'Unassigned', action, ref, at });
-        if (P.includes('support.view')) tickets.filter((x) => ['new', 'waiting_us'].includes(x.status) && x.workspace_id && (!x.assignee || x.assignee === actor || (!x.first_reply_at && hours(x.created_at) > od)))
+        if (P.includes('support.view')) tickets.filter((x) => x.status !== 'done' && x.workspace_id && x.next_update_due && new Date(x.next_update_due) < new Date())
+          .forEach((x) => add(1, 'update', x.workspace_id, 'Update overdue', `${x.ref} · ${x.subject} · was due ${dueText(x.next_update_due)}`, nameOf(x.next_update_owner) || nameOf(x.assignee) || 'Unassigned', 'Update', x.id, x.next_update_due));
+        if (P.includes('support.view')) tickets.filter((x) => ['new', 'investigating', 'waiting_us'].includes(x.status) && x.workspace_id && (!x.assignee || x.assignee === actor || (!x.first_reply_at && hours(x.created_at) > od)))
           .forEach((x) => add(1, 'complaint', x.workspace_id, !x.first_reply_at && hours(x.created_at) > od ? 'Overdue complaint' : 'Open complaint', x.subject, nameOf(x.assignee) || 'Unassigned', 'Reply', x.id, x.created_at));
         if (P.includes('offers.approve')) offers.filter((o) => o.status === 'waiting').forEach((o) => add(2, 'approval', o.workspace_id, 'Approval needed', `${o.days} free days · ${o.modules.map(modName).join(', ')}`, o.requested_by_name, 'Approve', o.id, o.created_at));
         if (P.includes('refunds.approve')) refunds.filter((f) => ['submitted', 'reviewing'].includes(f.status)).forEach((f) => add(3, 'refund', f.workspace_id, 'Refund waiting', `${f.currency} ${f.amount} · ${f.for_what}`, 'Finance', 'Review', f.id, f.created_at));
@@ -581,7 +675,8 @@
       async attention() { const P = permsOf(me()); const od = settings['support.overdue_hours']; const open = tickets.filter((x) => x.status !== 'done');
         const sup = P.includes('support.view'); const L = (c) => demoLicence(c.id);
         return { unassigned: sup ? open.filter((x) => !x.assignee).length : null, overdue: sup ? open.filter((x) => !x.first_reply_at && hours(x.created_at) > od).length : null,
-          mine: sup ? open.filter((x) => ['new', 'waiting_us'].includes(x.status) && x.assignee === actor).length : null,
+          updates_overdue: sup ? open.filter((x) => x.next_update_due && new Date(x.next_update_due) < new Date()).length : null,
+          mine: sup ? open.filter((x) => ['new', 'investigating', 'waiting_us'].includes(x.status) && x.assignee === actor).length : null,
           approvals: P.includes('offers.approve') || P.includes('refunds.approve') ? offers.filter((o) => o.status === 'waiting').length + refunds.map(rowOf).filter((f) => f.waiting_second).length : null,
           refunds_waiting: P.includes('refunds.view') ? refunds.filter((f) => ['submitted', 'reviewing'].includes(f.status)).length : null,
           emails_failed: P.includes('emails.view') ? emails.filter((e) => ['failed', 'held'].includes(e.status)).length : null,
@@ -641,7 +736,7 @@
   // Every page HQ has (its address is #/<key>), and who can open it.
   const TABS = () => [['overview', 'Overview', can('overview.view')], ['companies', 'Customers', can('customers.view')], ['signups', 'Signups', can('customers.view')],
     ['licences', 'Licences', can('licences.view')], ['approvals', 'Approvals', can('refunds.approve', 'offers.approve')], ['refunds', 'Refunds', can('refunds.view')],
-    ['payments', 'Invoices & payments', can('licences.view', 'refunds.view')], ['support', 'Support', can('support.view')], ['inbox', 'Team Inbox', can('overview.view')],
+    ['payments', 'Invoices & payments', can('licences.view', 'refunds.view')], ['support', 'Support', can('support.view', 'support.diagnostics')], ['inbox', 'Team Inbox', can('overview.view')],
     ['inactive', 'Inactive accounts', can('customers.view', 'accounts.inactive')], ['health', 'System health', can('overview.view')], ['emails', 'Emails', can('emails.view')],
     ['downloads', 'Downloads', can('downloads.view')], ['reports', 'Reports', can('reports.view')], ['team', 'HQ team', true], ['history', 'History', can('audit.view')],
     ['settings', 'Settings', can('settings.manage')]].filter((x) => x[2]);
@@ -700,7 +795,7 @@
     if (can('support.view')) api.tickets('open', '').then((r) => set('support', (r.counts || {}).new + (r.counts || {}).waiting_us || 0)).catch(() => {});
     if (can('refunds.approve', 'offers.approve')) api.approvals().then((r) => set('approvals', (r.refunds || []).length + (r.offers || []).length)).catch(() => {});
   }
-  const main = (html) => { document.getElementById('main').innerHTML = html; return document.getElementById('main'); };
+  const main = (html) => { const m = document.getElementById('main'); m.className = ''; m.innerHTML = html; return m; };
 
   // A small dialog. wire(d, close) sets up its buttons.
   function dlg(html, wire) {
@@ -742,7 +837,7 @@
   // ------------------------------------------------------------------ Operations overview: counts, one work queue, system health, team handover
   const cityOf = (c) => { const city = String(c.address || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean).pop(); return [city && city !== c.country ? city : null, c.country].filter(Boolean).join(', '); };
   const avatar = (name, cls = '') => `<span class="avatar${cls ? ' ' + cls : ''}" aria-hidden="true">${esc(initials(name))}</span>`;
-  const ISSUE = { complaint: 'blue', approval: 'violet', refund: 'warn', follow_up: 'warn', renewal: 'warn', signup: 'violet' };
+  const ISSUE = { update: 'bad', complaint: 'blue', approval: 'violet', refund: 'warn', follow_up: 'warn', renewal: 'warn', signup: 'violet' };
   const card = (icon, cls, k, v, d) => `<div class="ccard"><span class="cic ${cls}" aria-hidden="true">${icon}</span><div><div class="k">${k}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div></div>`;
   async function overview() {
     main('<p class="muted">Loading…</p>');
@@ -777,7 +872,7 @@
     wireAttention(m, overview); wireHealth(m);
     m.querySelectorAll('[data-qi]').forEach((b) => b.onclick = () => { const x = q[Number(b.dataset.qi)]; const mm = b.dataset.qm; b.closest('details') && b.closest('details').removeAttribute('open');
       if (mm) { if (['message', 'call', 'note'].includes(mm)) S.cpAfter = mm; return openCompany(x.workspace_id, mm === 'programs' ? 'programs' : ['open', 'note'].includes(mm) ? null : 'conversations'); }
-      if (x.kind === 'complaint') { S.ticket = x.ref; return go('#/support'); }
+      if (x.kind === 'complaint' || x.kind === 'update') { S.ticket = x.ref; return go('#/support'); }
       if (x.kind === 'approval') return go('#/approvals');
       if (x.kind === 'refund') return go('#/refunds');
       if (x.kind === 'renewal') return openCompany(x.workspace_id, 'programs');
@@ -880,7 +975,7 @@
   function attentionHtml(a, off) {
     if (!a) return '';
     if (a.missing) return '<div class="card attn"><h3>Queue at a glance</h3><p class="muted small">Run the latest <b>team-chat.sql</b> in Supabase (SQL Editor) to switch this on.</p></div>';
-    const items = [[a.unassigned, 'Unassigned tickets', 'support:unassigned'], [a.overdue, 'Overdue tickets', 'support:overdue', 'bad'], [a.mine, 'My open tickets', 'support:mine'],
+    const items = [[a.unassigned, 'Unassigned tickets', 'support:unassigned'], [a.overdue, 'Overdue tickets', 'support:overdue', 'bad'], [a.updates_overdue, 'Overdue updates to customers', 'support:overdue', 'bad'], [a.mine, 'My open tickets', 'support:mine'],
       [a.approvals, 'Approvals waiting', 'approvals'], [a.refunds_waiting, 'Refunds waiting', 'refunds'], [(a.trials_3d || []).length, 'Trials ending in 3 days', 'trials'],
       [(a.follow_ups || []).filter((f) => f.due).length, 'My follow-ups due', 'followups'], [a.emails_failed, 'Failed or held emails', 'emails', 'bad'],
       [Array.isArray(off) ? off.length : null, 'Link Offices offline', 'linkoff', 'bad']].filter((x) => x[0] != null);
@@ -1416,88 +1511,166 @@
     : o.status === 'waiting' ? '<span class="pill warn">Waiting for approval</span>' : '<span class="pill bad">Declined</span>');
   const refundPill = (f) => (f.waiting_second ? '<span class="pill warn">Waiting for second approval</span>' : pill(RSTAT, f.status));
 
-  // ------------------------------------------------------------------ support
-  const BOXES = [['new', 'New'], ['waiting_us', 'Waiting on us'], ['waiting_customer', 'Waiting on customer'], ['done', 'Done'], ['mine', 'Mine'], ['unassigned', 'Unassigned'],
-    ['overdue', 'Overdue'], ['escalated', 'Escalated'], ['level2', 'Level 2'], ['level3', 'Level 3'], ['all', 'All']];
+  // ------------------------------------------------------------------ support: the Support workspace
+  // Three columns (one under the other on narrow screens): the inbox, the conversation, and Product diagnostics.
+  const QTABS = [['mine', 'My tickets'], ['waiting_customer', 'Waiting'], ['unassigned', 'Unassigned'], ['overdue', 'Overdue update'], ['all', 'All']];
+  const SF0 = { product: '', owner: '', status: 'open', level: '', topic: '' };
   const timer = (t, od) => { if (t.first_reply_at) return `<span class="tmr">First reply in ${dur(hours(t.created_at, t.first_reply_at))}</span>`;
     if (t.status === 'done') return '';
     const hh = hours(t.created_at); return `<span class="tmr${hh > od ? ' late' : ''}">No reply yet · ${dur(hh)}</span>`; };
+  const actBadge = (w) => (w === 'riyeser' ? '<span class="act r">Riyeser to act</span>' : w === 'customer' ? '<span class="act c">Customer to act</span>' : '');
+  const S_DRAFTS = {};   // each ticket's drafts: { reply, note } (kept while HQ is open)
+  const localInput = (t) => { if (!t) return ''; const d = new Date(t); const z = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`; };
   async function support() {
-    S.box = S.box || 'open'; S.tq = S.tq || '';
-    const m = main(`<h2>Support</h2><p class="sub">Help requests from customers. Replies are emailed to them and show on their Riyeser home page. Internal notes are never shown to customers.</p>
-      <div class="sup"><div class="sup-list"><form class="search" id="tsf"><input name="q" value="${esc(S.tq)}" placeholder="Search tickets, businesses, emails, text…" aria-label="Search tickets"><button class="btn">Search</button></form>
-      <div id="boxes"></div><div id="tl" class="card tlist"><p class="muted">Loading…</p></div></div><div class="sup-view" id="tv"></div></div>`);
+    S.box = S.box || 'all'; S.tq = S.tq || ''; S.sf = S.sf || { ...SF0 };
+    if (!can('support.view')) return diagnosticsOnly();
+    const sel = (name, label, opts, v) => `<label class="sfl"><span>${label}</span><select name="${name}" aria-label="${label}">${opts.map(([k, l]) => `<option value="${esc(k)}"${String(v) === String(k) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+    const m = main(`<div class="sws" id="sws"><section class="card sw-in"><div class="swhead"><h2>Support inbox</h2>${can('support.diagnostics') ? '<button class="btn sm" id="dglook" title="Look up a diagnostic reference">🔎 DG-…</button>' : ''}</div>
+        <form class="search" id="tsf"><input name="q" value="${esc(S.tq)}" placeholder="Search tickets, businesses, DG-…" aria-label="Search tickets"><button class="btn">Search</button></form>
+        <div id="boxes"></div>
+        <form class="sfil" id="sfil">${sel('product', 'Product', [['', 'All products'], ...PRODUCTS.map(([k, l]) => [k, l])], S.sf.product)}
+          ${sel('owner', 'Owner', [['', 'Anyone'], ['me', 'Me'], ['none', 'Nobody yet']], S.sf.owner)}
+          ${sel('status', 'Status', [['open', 'Open (not resolved)'], ['', 'Any status'], ...TSTAT_ORDER.map((k) => [k, TSTAT[k][0]])], S.sf.status)}
+          ${sel('level', 'Level', [['', 'Any level'], ['1', 'Level 1 · Support'], ['2', 'Level 2 · Senior'], ['3', 'Level 3 · Management']], S.sf.level)}
+          ${sel('topic', 'Topic', [['', 'Any topic'], ...Object.entries(TOPICS)], S.sf.topic)}</form>
+        <div id="tl" class="tlist"><p class="muted">Loading…</p></div></section>
+      <section class="sw-conv" id="tv"></section><aside class="sw-diag" id="tdx"></aside></div>`);
+    m.classList.add('wide');
     m.querySelector('#tsf').onsubmit = (e) => { e.preventDefault(); S.tq = String(new FormData(e.target).get('q')); loadInbox(); };
+    m.querySelector('#sfil').onchange = (e) => { S.sf[e.target.name] = e.target.value; loadInbox(); };
+    const dl = m.querySelector('#dglook'); if (dl) dl.onclick = () => lookupDiag();
     await loadInbox();
-    if (S.ticket) await openTicket(S.ticket); else m.querySelector('#tv').innerHTML = '<div class="card"><p class="muted">Choose a ticket.</p></div>';
+    if (S.ticket) await openTicket(S.ticket);
+    else { m.querySelector('#tv').innerHTML = '<div class="card swempty"><p class="muted">Choose a ticket from the inbox.</p></div>'; }
+  }
+  // Developers (and anyone with support.diagnostics but not tickets): just the diagnostic lookup.
+  async function diagnosticsOnly() {
+    const m = main(`<h2>Support</h2><p class="sub">Look up a diagnostic report by its reference (it looks like DG-4821). Technical details only: never the customer's records.</p>
+      <div class="card" style="max-width:640px"><form class="search" id="dgf"><input name="ref" placeholder="DG-4821" aria-label="Diagnostic reference"><button class="btn p">Look up</button></form><div id="dgout"></div></div>`);
+    m.classList.remove('wide');
+    m.querySelector('#dgf').onsubmit = async (e) => { e.preventDefault(); const out = m.querySelector('#dgout');
+      try { const r = await api.diagnostic(String(new FormData(e.target).get('ref')).trim()); out.innerHTML = diagCard(r.diagnostic, null, r.business); }
+      catch (err) { out.innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+  }
+  function lookupDiag() {
+    dlg(`<h3>🔎 Look up a diagnostic report</h3><p class="muted small">The reference is on the customer's screen after they use Report an issue (it looks like DG-4821).</p>
+      <form id="dgf"><label class="f"><span>Reference</span><input name="ref" required maxlength="20" placeholder="DG-4821"></label><div id="dgout"></div>
+      <div class="mfoot"><button type="button" class="btn" data-close>Close</button><button class="btn p">Look up</button></div></form>`, (d) => {
+      d.querySelector('#dgf').onsubmit = async (e) => { e.preventDefault(); const out = d.querySelector('#dgout');
+        try { const r = await api.diagnostic(String(new FormData(e.target).get('ref')).trim());
+          out.innerHTML = `${diagCard(r.diagnostic, null, r.business)}${(r.tickets || []).length ? `<p class="small">Tickets: ${r.tickets.map((x) => `<button type="button" class="lnk" data-dgt="${esc(x.id)}">${esc(x.ref)}</button> ${esc(x.subject)}`).join(' · ')}</p>` : ''}`;
+          out.querySelectorAll('[data-dgt]').forEach((b) => b.onclick = () => { d.remove(); S.ticket = b.dataset.dgt; S.box = 'all'; S.sf = { ...SF0, status: '' }; go('#/support'); });
+        } catch (err) { out.innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
   }
   async function loadInbox() {
-    const r = await api.tickets(S.box, S.tq); const od = Number(r.overdue_hours || 24);
+    const r = await api.supportInbox(S.box, S.tq, S.sf); const od = Number(r.overdue_hours || 24);
     const bx = document.getElementById('boxes'); if (!bx) return;
-    bx.innerHTML = chips(BOXES, S.box, r.counts || {});
-    bx.querySelectorAll('[data-box]').forEach((b) => b.onclick = () => { S.box = S.box === b.dataset.box ? 'open' : b.dataset.box; loadInbox(); });
+    const c = r.counts || {};
+    bx.innerHTML = `<div class="chips qtabs" role="tablist">${QTABS.map(([k, l]) => `<button class="chip${S.box === k ? ' on' : ''}" data-box="${k}" role="tab" aria-selected="${S.box === k}">${l}${['mine', 'waiting_customer'].includes(k) && c[k] != null ? ` (${num(c[k])})` : k === 'overdue' && c[k] ? ` <b class="late">${num(c[k])}</b>` : ''}</button>`).join('')}
+      <button class="chip soon" disabled title="Coming in a later release">Known issues (soon)</button></div>${r.old ? '<p class="muted small">Run the latest <b>team-chat.sql</b> to switch on products, promised updates and the product filter.</p>' : ''}`;
+    bx.querySelectorAll('[data-box]').forEach((b) => b.onclick = () => { S.box = b.dataset.box; loadInbox(); });
+    const ow = document.querySelector('#sfil [name=owner]');
+    if (ow && r.staff && ow.options.length <= 3) { r.staff.forEach((x) => ow.add(new Option(x.name, x.user_id))); ow.value = S.sf.owner; }
     const tl = document.getElementById('tl');
-    tl.innerHTML = (r.tickets || []).length ? r.tickets.map((t) => `<button class="tk${S.ticket === t.id ? ' on' : ''}" data-t="${esc(t.id)}">
-        <span class="tk1"><span class="code">${esc(t.ref)}</span> ${pill(TSTAT, t.status)}${t.level > 1 ? ` <span class="pill">L${t.level} ${LEVELS[t.level]}</span>` : ''}${['high', 'urgent'].includes(t.priority) ? ` <span class="pill bad">${esc(t.priority)}</span>` : ''}${t.overdue ? ' <span class="pill bad">Overdue</span>' : ''}</span>
-        <b>${esc(t.subject)}</b><small>${esc(t.business || t.opened_by_email || 'No business')} · ${esc(TOPICS[t.topic] || t.topic)} · opened ${ago(t.created_at)}${t.assignee_name ? ` · ${esc(t.assignee_name)}` : ' · unassigned'}</small>${timer(t, od)}</button>`).join('')
-      : `<p class="muted">${S.box === 'open' ? 'No open tickets. 🎉' : 'Nothing here.'}</p>`;
+    tl.innerHTML = (r.tickets || []).length ? r.tickets.map((t) => `<button class="tk${S.ticket === t.id ? ' on' : ''}${t.update_overdue ? ' late' : ''}" data-t="${esc(t.id)}">
+        <span class="tkic" aria-hidden="true">${prodIcon(t.product)}</span><span class="tkb">
+        <b>${esc(t.subject)}</b><small>${esc(t.business || t.opened_by_email || 'No business')} · <span class="code">${esc(t.ref)}</span>${t.product ? ` · ${esc(prodName(t.product))}` : ''}</small>
+        <span class="tk1">${pill(TSTAT, t.status)}${actBadge(t.who_acts)}${t.work_blocked && t.status !== 'done' ? ' <span class="pill bad">Work blocked</span>' : ''}${t.level > 1 ? ` <span class="pill">L${t.level}</span>` : ''}${t.overdue ? ' <span class="pill bad">Overdue</span>' : ''}</span>
+        ${t.next_update_due && t.status !== 'done' ? `<span class="tnu${t.update_overdue ? ' late' : ''}">${t.update_overdue ? 'Update overdue' : 'Update due'} ${esc(dueText(t.next_update_due))}${t.next_update_owner_name ? ` · ${esc(t.next_update_owner_name)}` : ''}</span>` : ''}
+        ${timer(t, od)}<small>${t.assignee_name ? `Owner: ${esc(t.assignee_name)}` : 'No owner yet'} · ${ago(t.updated_at)}</small></span></button>`).join('')
+      : `<p class="muted">${S.box === 'mine' ? 'Nothing assigned to you. 🎉' : 'Nothing here.'}</p>`;
     tl.querySelectorAll('[data-t]').forEach((b) => b.onclick = () => openTicket(b.dataset.t));
+  }
+  // The Product diagnostics card (also used by the lookup).
+  function diagCard(d, product, business) {
+    if (!d) return '';
+    const progs = (d.programs || []).map((p) => `${esc(APP_NAMES[p.id] || p.id)} ${esc(p.version || '?')}`).join(' · ');
+    return `<div class="dgcard"><dl class="kv dkv"><dt>Product</dt><dd><b>${esc(prodName(d.product || product))}</b></dd><dt>Version</dt><dd><b>${esc(d.product_version || 'Not known')}</b></dd>
+      <dt>Error</dt><dd><b>${esc(d.error_text || 'None given')}</b></dd><dt>Reference</dt><dd><b class="code">${esc(d.ref)}</b> ${copyBtn(d.ref)}</dd>
+      ${business ? `<dt>Business</dt><dd><button type="button" class="lnk" data-goco="${esc(business.id)}">${esc(business.name)}</button></dd>` : ''}
+      <dt>Windows</dt><dd>${esc(d.os || 'Not known')}</dd><dt>Central</dt><dd>${esc(d.central_version || '—')}</dd><dt>Reported</dt><dd>${esc(whenFull(d.reported_at || d.created_at))} <span class="muted">(${ago(d.reported_at || d.created_at)})</span></dd></dl>
+      ${progs ? `<p class="small muted dprogs">On that PC: ${progs}</p>` : ''}
+      ${d.log_lines ? `<details class="dlog"><summary>Log lines (${num(d.line_count || d.log_lines.split('\n').length)})${d.log_source ? ` · ${esc(d.log_source)}` : ''}</summary><pre>${esc(d.log_lines)}</pre></details>` : '<p class="small muted">No log lines in this report.</p>'}</div>`;
   }
   async function openTicket(id) {
     S.ticket = id; document.querySelectorAll('.tk').forEach((b) => b.classList.toggle('on', b.dataset.t === id));
-    const tv = document.getElementById('tv'); if (!tv) return;
-    const [r, staff, saved] = await Promise.all([api.ticket(id), api.staff().catch(() => []), api.savedReplies().catch(() => [])]);
-    const t = r.ticket; const B = r.business; const workers = (lvl) => staff.filter((s) => s.active && (s.perms || permsOf(s)).includes(LEVEL_PERM[lvl]));
-    const myId = (staff.find((s) => s.display_name === S.me.name) || {}).user_id;
-    tv.innerHTML = `<div class="card tview"><div class="phead"><div style="flex:1;min-width:0"><h2>${esc(t.subject)}</h2>
-        <div class="row small"><span class="code">${esc(t.ref)}</span>${pill(TSTAT, t.status)}<span class="pill">Level ${t.level} · ${LEVELS[t.level]}</span>${t.overdue_at ? '<span class="pill bad">Overdue</span>' : ''}
-        <span class="muted">${esc(TOPICS[t.topic] || t.topic)} · from ${esc(t.opened_by_name || '')} ${esc(t.opened_by_email || '')} · opened ${ago(t.created_at)}</span></div></div>
-        <button class="btn sm sup-back" id="tback">← Inbox</button></div>
-      <div class="tgrid"><div><div class="conv">${r.messages.map((x) => `<div class="msg${x.internal ? ' note' : x.staff ? ' staff' : ''}"><small><b>${esc(x.from)}</b>${x.internal ? ' · internal note' : x.staff ? ' · to the customer' : ''} · ${ago(x.at)}</small><div>${esc(x.body).replace(/\n/g, '<br>')}</div></div>`).join('')}</div>
-        ${r.can_work ? `<form id="rf" class="card rbox"><div class="row"><label class="opt"><input type="radio" name="kind" value="reply" checked> Send customer reply <small class="muted">(they see it)</small></label><label class="opt"><input type="radio" name="kind" value="note"> Add internal note <small class="muted">(staff only)</small></label>
-          ${saved.length ? `<select id="ins" aria-label="Insert a saved reply"><option value="">Insert a saved reply…</option>${saved.map((s) => `<option value="${s.id}">${esc(s.title)}</option>`).join('')}</select>` : ''}</div>
-          <textarea name="msg" rows="5" required maxlength="5000" placeholder="Write your reply…"></textarea>
-          <div class="row"><label class="small" id="thenl">Then <select name="then"><option value="waiting_customer">wait for the customer</option><option value="done">mark done</option><option value="waiting_us">keep it with us</option></select></label>
-          <span style="flex:1"></span><button class="btn p" id="send">Send customer reply</button></div></form>`
-          : `<div class="card"><p class="muted small">This ticket is with <b>${LEVELS[t.level]}</b> (level ${t.level}). Only staff who work that level can reply or add notes${can('support.escalate') ? ', or you can escalate it' : ''}.</p></div>`}
-        ${r.escalations.length ? `<div class="card small"><h3>Escalations</h3>${r.escalations.map((e) => `<div>${e.to > e.from ? '⬆' : '⬇'} ${LEVELS[e.from]} → <b>${LEVELS[e.to]}</b> by ${esc(e.by)} · ${ago(e.at)}<br><span class="muted">${esc(e.reason)}</span></div>`).join('')}</div>` : ''}</div>
-      <div class="tside"><div class="card"><h3>Ticket</h3>
-        <label class="f"><span>Status</span><select id="tst"${r.can_work ? '' : ' disabled'}>${Object.entries(TSTAT).map(([k, [l]]) => `<option value="${k}"${k === t.status ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
-        <label class="f"><span>Priority</span><select id="tpr"${can('support.reply', 'support.assign') ? '' : ' disabled'}>${['low', 'normal', 'high', 'urgent'].map((k) => `<option${k === t.priority ? ' selected' : ''}>${k}</option>`).join('')}</select></label>
-        <label class="f"><span>Assigned to</span><select id="tas"${can('support.assign') || r.can_work ? '' : ' disabled'}><option value="">Nobody yet</option>${workers(t.level).map((s) => `<option value="${esc(s.user_id)}"${s.user_id === t.assignee ? ' selected' : ''}${!can('support.assign') && s.user_id !== myId && s.user_id !== t.assignee ? ' disabled' : ''}>${esc(s.display_name)}</option>`).join('')}</select></label>
-        <div class="row">${can('support.escalate') ? '<button class="btn sm" id="tesc">⬆ Escalate / ⬇ send back</button>' : ''}${can('support.saved_replies') ? '<button class="btn sm" id="tsr">Saved replies…</button>' : ''}
-          ${t.workspace_id && can('refunds.request', 'refunds.approve') ? '<button class="btn sm" id="trf">↩️ Refund request</button>' : ''}</div></div>
-        ${B ? `<div class="card" id="tbiz"><h3>${esc(B.name)} ${pill(BSTAT, B.status || 'active')}</h3><dl class="kv"><dt>Business ID</dt><dd class="code">${esc(B.company_code || '')}</dd>
-          <dt>Plan</dt><dd>${(B.paid || []).length ? B.paid.map(modName).map(esc).join(', ') : 'Nothing paid'}${(B.trial || []).length ? `<small class="muted"> · trial: ${B.trial.map(modName).map(esc).join(', ')}</small>` : ''}</dd>
-          <dt>A month</dt><dd>${money(B.monthly)}</dd><dt>People · PCs</dt><dd>${num(B.people)} · ${num(B.pcs)}</dd><dt>Last active</dt><dd>${ago(B.last_active_at)}</dd>
-          ${creditText(B.credit) ? `<dt>Credit</dt><dd>${creditText(B.credit)}</dd>` : ''}</dl>
-          ${(B.notes || []).length ? `<div class="notes">${B.notes.slice(0, 3).map((n) => `<div class="nt">${esc(n.body)}<small>${esc(n.by || 'Riyeser')} · ${ago(n.at)}</small></div>`).join('')}</div>` : ''}
-          <button class="btn sm" id="tco" style="margin-top:8px">Open customer page</button></div>` : '<div class="card"><p class="muted small">Not linked to a business.</p></div>'}
-        ${(r.refunds || []).length ? `<div class="card small"><h3>Refund requests</h3>${r.refunds.map((f) => `<div><span class="code">${esc(f.ref)}</span> ${cur(f.amount, f.currency)} · ${pill(RSTAT, f.status)}</div>`).join('')}</div>` : ''}</div></div></div>`;
+    const tv = document.getElementById('tv'); const tdx = document.getElementById('tdx'); if (!tv) return;
+    const r = await api.ticket(id);
+    const t = r.ticket; const B = r.business; const staff = r.staff || (await api.staff().catch(() => [])).filter((x) => x.active).map((x) => ({ user_id: x.user_id, name: x.display_name, can_work: (x.perms || permsOf(x)).includes(LEVEL_PERM[t.level]) }));
+    const workers = (lvl) => staff.filter((x) => (lvl === t.level ? x.can_work : true));
+    const myId = S.me.id || (staff.find((x) => x.name === S.me.name) || {}).user_id;
+    const dr = S_DRAFTS[id] = S_DRAFTS[id] || { reply: '', note: '', tab: 'reply' };
+    const thread = r.messages.map((x) => (x.kind === 'call'
+      ? `<div class="msg call"><small><b>📞 Call · ${x.call_direction === 'in' ? 'they called us' : 'we called them'}${x.call_with ? ` · ${esc(x.call_with)}` : ''}</b> · ${esc(x.from)} · ${ago(x.at)} <span class="aud">only Riyeser staff see this</span></small><div>${esc(x.body).replace(/\n/g, '<br>')}</div></div>`
+      : x.internal ? `<div class="msg note"><small><b>Internal note · only Riyeser staff see this</b> · ${esc(x.from)} · ${ago(x.at)}</small><div>${esc(x.body).replace(/\n/g, '<br>')}</div></div>`
+        : `<div class="msg${x.staff ? ' staff' : ' mcust'}"><small><span class="mav" aria-hidden="true">${esc(initials(x.from))}</span><b>${esc(x.from)}</b>${x.staff ? ' · to the customer' : ''} · ${ago(x.at)} <span class="muted">${esc(whenFull(x.at))}</span></small><div>${esc(x.body).replace(/\n/g, '<br>')}</div></div>`)).join('');
+    const ownerOpts = `<option value="">Nobody yet</option>${workers(t.level).map((x) => `<option value="${esc(x.user_id)}"${x.user_id === t.assignee ? ' selected' : ''}${!can('support.assign') && x.user_id !== myId && x.user_id !== t.assignee ? ' disabled' : ''}>${esc(x.name)}</option>`).join('')}`;
+    tv.innerHTML = `<div class="card tview"><button class="btn sm sup-back" id="tback">← Inbox</button>
+      <h2>${esc(t.subject)}</h2>
+      <div class="tsub">${B ? `<button class="lnk" data-goco="${esc(B.id)}">${esc(B.name)}</button>` : `<span>${esc(t.opened_by_email || 'No business')}</span>`} · <span>Ticket <span class="code">${esc(t.ref)}</span></span>
+        ${t.opened_by_name || t.opened_by_email ? `<span class="muted">· from ${esc(t.opened_by_name || '')} ${esc(t.opened_by_email || '')}</span>` : ''}</div>
+      <div class="tbar"><label><span>Product</span><select id="tprod"${r.can_work ? '' : ' disabled'}><option value="">Not set</option>${PRODUCTS.map(([k, l]) => `<option value="${k}"${k === t.product ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+        <label><span>Status</span><select id="tst"${r.can_work ? '' : ' disabled'}>${TSTAT_ORDER.map((k) => `<option value="${k}"${k === t.status ? ' selected' : ''}>${TSTAT[k][0]}</option>`).join('')}</select></label>
+        <label><span>Owner</span><select id="tas"${can('support.assign') || r.can_work ? '' : ' disabled'}>${ownerOpts}</select></label>
+        <label><span>Priority</span><select id="tpr"${can('support.reply', 'support.assign') ? '' : ' disabled'}>${['low', 'normal', 'high', 'urgent'].map((k) => `<option${k === t.priority ? ' selected' : ''}>${k}</option>`).join('')}</select></label></div>
+      <div class="row small tpills">${pill(TSTAT, t.status)}${actBadge(t.who_acts)}<span class="pill">Level ${t.level} · ${LEVELS[t.level]}</span>${t.work_blocked && t.status !== 'done' ? '<span class="pill bad">Work blocked</span>' : ''}${t.overdue_at ? '<span class="pill bad">Overdue</span>' : ''}
+        ${t.rating ? `<span class="pill ok">Rated ${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</span>` : ''}<span class="muted">${esc(TOPICS[t.topic] || t.topic)} · opened ${ago(t.created_at)}</span>
+        <span style="flex:1"></span>${can('support.escalate') ? '<button class="btn sm" id="tesc">⬆ Escalate / ⬇ send back</button>' : ''}${can('support.saved_replies') ? '<button class="btn sm" id="tsr">Saved replies…</button>' : ''}
+        ${t.workspace_id && can('refunds.request', 'refunds.approve') ? '<button class="btn sm" id="trf">↩️ Refund request</button>' : ''}</div>
+      ${t.rating_comment ? `<p class="small rcomment">“${esc(t.rating_comment)}”</p>` : ''}
+      <div class="conv" id="thread">${thread}</div>
+      ${r.can_work ? `<form id="rf" class="rbox${dr.tab === 'note' ? ' isnote' : ''}"><div class="ctabs" role="tablist">
+          <button type="button" class="ctab${dr.tab === 'reply' ? ' on' : ''}" data-ctab="reply" role="tab" aria-selected="${dr.tab === 'reply'}">✉️ Reply to customer</button>
+          <button type="button" class="ctab${dr.tab === 'note' ? ' on' : ''}" data-ctab="note" role="tab" aria-selected="${dr.tab === 'note'}">📝 Add internal note</button></div>
+        <p class="aud" id="aud"></p>
+        <textarea name="reply" rows="5" maxlength="5000" placeholder="Type your reply to the customer…" aria-label="Reply to customer"${dr.tab === 'reply' ? '' : ' hidden'}>${esc(dr.reply)}</textarea>
+        <textarea name="note" rows="5" maxlength="5000" placeholder="For Riyeser staff: what you found, what's next…" aria-label="Internal note"${dr.tab === 'note' ? '' : ' hidden'}>${esc(dr.note)}</textarea>
+        <div class="row cfoot" id="cfoot"></div></form>`
+        : `<div class="card"><p class="muted small">This ticket is with <b>${LEVELS[t.level]}</b> (level ${t.level}). Only staff who work that level can reply or add notes${can('support.escalate') ? ', or you can escalate it' : ''}.</p></div>`}
+      ${r.escalations.length ? `<div class="card small tesc"><h3>Escalations</h3>${r.escalations.map((e) => `<div>${e.to > e.from ? '⬆' : '⬇'} ${LEVELS[e.from]} → <b>${LEVELS[e.to]}</b> by ${esc(e.by)} · ${ago(e.at)}<br><span class="muted">${esc(e.reason)}</span></div>`).join('')}</div>` : ''}</div>`;
+    tdx.innerHTML = diagPanel(r);
+    const conv = tv.querySelector('#thread'); if (conv && conv.scrollHeight > conv.clientHeight) conv.scrollTop = conv.scrollHeight;
     const done = async () => { await loadInbox(); await openTicket(id); };
-    const act = async (fn) => { try { await fn(); await done(); } catch (err) { alert(plain(err)); await done(); } };
-    tv.querySelector('#tback').onclick = () => { S.ticket = null; tv.innerHTML = ''; document.querySelector('.sup').classList.remove('open'); };
-    document.querySelector('.sup').classList.add('open');
+    const act = async (fn, ok) => { try { await fn(); if (ok) flash(ok); await done(); } catch (err) { flash(plain(err)); await done(); } };
+    tv.querySelector('#tback').onclick = () => { S.ticket = null; tv.innerHTML = ''; tdx.innerHTML = ''; document.querySelector('.sws').classList.remove('open'); document.querySelectorAll('.tk.on').forEach((b) => b.classList.remove('on')); };
+    document.querySelector('.sws').classList.add('open');
     const rf = tv.querySelector('#rf');
     if (rf) {
-      const sync = () => { const note = rf.querySelector('[name=kind]:checked').value === 'note'; rf.classList.toggle('isnote', note); tv.querySelector('#send').textContent = note ? 'Add internal note' : 'Send customer reply'; tv.querySelector('#thenl').hidden = note; };
-      rf.querySelectorAll('[name=kind]').forEach((x) => x.onchange = sync);
-      const ins = rf.querySelector('#ins'); if (ins) ins.onchange = () => { const s = saved.find((x) => String(x.id) === ins.value); if (!s) return; const ta = rf.querySelector('textarea');
-        const at = ta.selectionStart || ta.value.length; ta.value = ta.value.slice(0, at) + s.body + ta.value.slice(at); ins.value = ''; ta.focus(); };
-      rf.onsubmit = (e) => { e.preventDefault(); const f = new FormData(rf); const note = f.get('kind') === 'note';
-        act(() => api.ticketReply(id, String(f.get('msg')).trim(), note, note ? null : String(f.get('then')))); };
+      const saved = await api.savedReplies().catch(() => []);
+      const ta = (k) => rf.querySelector(`textarea[name=${k}]`);
+      const foot = () => { const note = dr.tab === 'note'; rf.classList.toggle('isnote', note);
+        rf.querySelector('#aud').innerHTML = note ? '🔒 <b>Only Riyeser staff</b> see internal notes. The customer never does.' : '✉️ <b>The customer will see this and get an email.</b>';
+        rf.querySelector('#cfoot').innerHTML = note ? '<button type="button" class="btn sm" id="tcall">📞 Log a call</button><span style="flex:1"></span><button class="btn p note" id="savenote">Save internal note</button>'
+          : `${saved.length ? `<select id="ins" aria-label="Insert a saved reply"><option value="">Insert a saved reply…</option>${saved.map((x) => `<option value="${x.id}">${esc(x.title)}</option>`).join('')}</select>` : ''}
+            <button type="button" class="btn sm" id="tcall">📞 Log a call</button><span style="flex:1"></span>
+            <label class="small" id="thenl">Then <select name="then"><option value="waiting_customer">wait for the customer</option><option value="investigating">keep investigating</option><option value="waiting_us">keep it in progress</option><option value="done">mark resolved</option></select></label>
+            <button class="btn p" id="send">Send reply</button>`;
+        const ins = rf.querySelector('#ins'); if (ins) ins.onchange = () => { const x = saved.find((y) => String(y.id) === ins.value); if (!x) return; const a = ta('reply');
+          const at = a.selectionStart || a.value.length; a.value = a.value.slice(0, at) + x.body + a.value.slice(at); dr.reply = a.value; ins.value = ''; a.focus(); };
+        rf.querySelector('#tcall').onclick = () => logTicketCall(t, B, () => done()); };
+      foot();
+      rf.querySelectorAll('[data-ctab]').forEach((b) => b.onclick = () => { dr.tab = b.dataset.ctab;
+        rf.querySelectorAll('[data-ctab]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); });
+        ta('reply').hidden = dr.tab !== 'reply'; ta('note').hidden = dr.tab !== 'note'; foot(); ta(dr.tab).focus(); });
+      ['reply', 'note'].forEach((k) => { ta(k).oninput = () => { dr[k] = ta(k).value; }; });
+      rf.onsubmit = (e) => { e.preventDefault(); const note = dr.tab === 'note'; const text = ta(dr.tab).value.trim();
+        if (!text) { flash(note ? 'Write the note first.' : 'Write your reply first.'); return; }
+        const then = note ? null : String((rf.querySelector('[name=then]') || {}).value || 'waiting_customer');
+        act(async () => { await api.ticketReply(id, text, note, then); dr[dr.tab] = ''; }, note ? 'Internal note saved. Only Riyeser staff see it.' : 'Reply sent. The customer gets an email.'); };
     }
-    tv.querySelector('#tst').onchange = (e) => act(() => api.ticketStatus(id, e.target.value));
-    tv.querySelector('#tpr').onchange = (e) => act(() => api.ticketPriority(id, e.target.value));
-    tv.querySelector('#tas').onchange = (e) => act(() => api.ticketAssign(id, e.target.value || null));
-    const co = tv.querySelector('#tco'); if (co) co.onclick = () => openCompany(B.id);
+    const onSel = (sel, fn) => { const x = tv.querySelector(sel); if (x) x.onchange = (e) => fn(e.target.value); };
+    onSel('#tst', (v) => act(() => api.ticketStatus(id, v)));
+    onSel('#tpr', (v) => act(() => api.ticketPriority(id, v)));
+    onSel('#tas', (v) => act(() => api.ticketAssign(id, v || null), v ? `Owner: ${(staff.find((x) => x.user_id === v) || {}).name || ''}` : 'No owner now.'));
+    onSel('#tprod', (v) => act(() => api.ticketSet(id, { product: v || null })));
     const esb = tv.querySelector('#tesc'); if (esb) esb.onclick = () => dlg(`<h3>Escalate or send back</h3><p class="muted small">Now: level ${t.level} (${LEVELS[t.level]}). The reason is an internal note; the customer only sees "We've passed this to our senior team".</p>
       <form id="ef"><label class="f"><span>Move to</span><select name="level">${[1, 2, 3].filter((l) => l !== t.level).map((l) => `<option value="${l}"${l === t.level + 1 ? ' selected' : ''}>Level ${l} · ${LEVELS[l]}</option>`).join('')}</select></label>
       <label class="f"><span>Assign to <small class="muted">(optional)</small></span><select name="assign"><option value="">Whoever picks it up</option></select></label>
       <label class="f"><span>Reason</span><input name="reason" required minlength="4" maxlength="500" placeholder="e.g. Needs a developer to check the printer driver"></label>
       <div id="eferr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Move it</button></div></form>`, (d, close) => {
       const lv = d.querySelector('[name=level]'); const as = d.querySelector('[name=assign]');
-      const fill = () => { as.innerHTML = '<option value="">Whoever picks it up</option>' + workers(Number(lv.value)).map((s) => `<option value="${esc(s.user_id)}">${esc(s.display_name)}</option>`).join(''); };
+      const fill = async () => { const all = await api.staff().catch(() => []); as.innerHTML = '<option value="">Whoever picks it up</option>' + all.filter((x) => x.active && (x.perms || permsOf(x)).includes(LEVEL_PERM[Number(lv.value)])).map((x) => `<option value="${esc(x.user_id)}">${esc(x.display_name)}</option>`).join(''); };
       lv.onchange = fill; fill();
       d.querySelector('#ef').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
         try { await api.ticketEscalate(id, Number(f.get('level')), String(f.get('reason')).trim(), String(f.get('assign') || '') || null); close(); await done(); }
@@ -1513,6 +1686,76 @@
       d.querySelector('#rq').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const v = (k) => String(f.get(k) || '').trim();
         try { const x = await api.refundCreate(id, { for_what: v('for_what'), period: v('period'), invoice_ref: v('invoice_ref'), amount: Number(v('amount')), currency: v('currency'), reason_category: v('reason_category'), explanation: v('explanation') });
           close(); flash(`Refund request ${x.ref} entered.`); await done(); } catch (err) { d.querySelector('#rqerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
+    wireDiagPanel(tdx, r, staff, done);
+  }
+  // The right-hand column: Product diagnostics, Next update, Linked bug, Customer support notes, the business.
+  function diagPanel(r) {
+    const t = r.ticket; const B = r.business; const d = r.diagnostic;
+    const apps = PRODUCT_APPS[t.product] || [];
+    const pcs = (r.pcs || []).map((p) => { const mine = (p.programs || []).filter((x) => apps.includes(x.id)); const other = (p.programs || []).filter((x) => !apps.includes(x.id));
+      return `<li><b>${esc(p.name || 'A PC')}</b>${p.platform ? ` <span class="muted">${esc(p.platform === 'win32' ? 'Windows' : p.platform)}</span>` : ''}${p.version ? ` · Central ${esc(p.version)}` : ''}
+        <span class="vers">${mine.map((x) => `<span class="pill blue">${esc(APP_NAMES[x.id] || x.id)} ${esc(x.version || '?')}</span>`).join('')}${other.map((x) => `<span class="vtag">${esc(APP_NAMES[x.id] || x.id)} ${esc(x.version || '?')}</span>`).join('')}${!(p.programs || []).length ? '<span class="muted">Programs not reported yet</span>' : ''}</span>
+        <small class="muted">${p.programs_at ? `Reported ${ago(p.programs_at)}` : ''}${p.last_seen ? ` · last seen ${ago(p.last_seen)}` : ''}</small></li>`; }).join('');
+    const nu = t.next_update_due ? `<p class="nuline${t.update_overdue ? ' late' : ''}">${t.update_overdue ? '⚠️ Overdue: next update to customer was due' : 'Next update to customer: by'} <b>${esc(dueText(t.next_update_due))}</b>${t.next_update_owner_name ? ` (${esc(t.next_update_owner_name)})` : ''}</p>`
+      : '<p class="nuline muted">No update promised yet. Set when the customer will hear from us next.</p>';
+    return `<div class="card dcard" id="diagCard"><h3><span aria-hidden="true">📈</span> Product diagnostics</h3>
+        ${d ? diagCard(d, t.product) : r.diag_hidden ? '<p class="muted small">This ticket has a diagnostic report. Looking at it needs the <b>support.diagnostics</b> permission.</p>'
+          : `<dl class="kv dkv"><dt>Product</dt><dd><b>${esc(prodName(t.product))}</b></dd><dt>Reference</dt><dd class="muted">None yet</dd></dl><p class="muted small">No diagnostic report on this ticket. Ask the customer to use <b>Get help → Report an issue</b> in Riyeser Central, then look up the DG- reference they give you.</p>`}
+        ${r.pcs ? `<h4>Installed on their PCs</h4>${pcs ? `<ul class="pcl">${pcs}</ul>` : '<p class="muted small">No PCs linked yet.</p>'}` : ''}</div>
+      <div class="card nucard${t.update_overdue ? ' late' : ''}" id="nuCard"><h3><span aria-hidden="true">🗓️</span> Next update</h3>${nu}
+        ${t.status !== 'done' ? `<div class="row"><button class="btn sm" id="nuEdit">${t.next_update_due ? 'Edit' : 'Set next update'}</button>${t.next_update_due ? '<button class="btn sm" id="nuClear">Clear</button>' : ''}</div>` : ''}
+        <form id="prf" class="prf"><label class="f"><span>Planned release <small class="muted">(free text for now)</small></span><input name="planned_release" maxlength="80" value="${esc(t.planned_release || '')}" placeholder="e.g. Payroll 2.8.2"></label><button class="btn sm">Save</button></form></div>
+      <div class="card" id="bugCard"><h3><span aria-hidden="true">🐞</span> Linked bug</h3>
+        ${t.bug_ref || t.bug_url ? `<p class="bugl">${t.bug_url ? `<a href="${esc(t.bug_url)}" target="_blank" rel="noopener noreferrer"><b>${esc(t.bug_ref || 'Open the bug')}</b> ↗</a>` : `<b>${esc(t.bug_ref)}</b>`}</p>` : '<p class="muted small">No bug linked.</p>'}
+        <button class="btn sm" id="bugEdit">${t.bug_ref || t.bug_url ? 'Edit' : 'Link a bug'}</button></div>
+      ${r.support_notes ? `<div class="card" id="snCard"><h3><span aria-hidden="true">📌</span> Customer support notes</h3><p class="muted small">Pinned for ${esc(B ? B.name : 'this business')}: they show on every ticket.</p>
+        ${r.support_notes.length ? `<div class="snl">${r.support_notes.map((n) => `<div class="sn"><div>${esc(n.body)}</div><small>${esc(n.by || 'Riyeser')} · ${ago(n.at)}</small>
+          ${can('customers.notes') ? `<span class="snb"><button class="lnk" data-snedit="${esc(n.id)}">Edit</button> · <button class="lnk" data-snunpin="${esc(n.id)}">Unpin</button></span>` : ''}</div>`).join('')}</div>` : '<p class="muted small">None yet.</p>'}
+        ${can('customers.notes') ? '<button class="btn sm" id="snAdd">Add a support note</button>' : ''}</div>` : ''}
+      ${B ? `<div class="card" id="tbiz"><h3>${esc(B.name)} ${pill(BSTAT, B.status || 'active')}</h3><dl class="kv"><dt>Business ID</dt><dd class="code">${esc(B.company_code || '')}</dd>
+        <dt>Plan</dt><dd>${(B.paid || []).length ? B.paid.map(modName).map(esc).join(', ') : 'Nothing paid'}${(B.trial || []).length ? `<small class="muted"> · trial: ${B.trial.map(modName).map(esc).join(', ')}</small>` : ''}</dd>
+        <dt>People · PCs</dt><dd>${num(B.people)} · ${num(B.pcs)}</dd><dt>Last active</dt><dd>${ago(B.last_active_at)}</dd>${creditText(B.credit) ? `<dt>Credit</dt><dd>${creditText(B.credit)}</dd>` : ''}</dl>
+        <button class="btn sm" id="tco">Open customer page</button></div>` : '<div class="card"><p class="muted small">Not linked to a business.</p></div>'}
+      ${(r.refunds || []).length ? `<div class="card small"><h3>Refund requests</h3>${r.refunds.map((f) => `<div><span class="code">${esc(f.ref)}</span> ${cur(f.amount, f.currency)} · ${pill(RSTAT, f.status)}</div>`).join('')}</div>` : ''}`;
+  }
+  function wireDiagPanel(el, r, staff, done) {
+    const t = r.ticket; const B = r.business; const id = t.id;
+    const on = (sel, fn) => { const x = el.querySelector(sel); if (x) x.onclick = fn; };
+    const run = async (d, fn, ok) => { try { await fn(); if (d) d.remove(); if (ok) flash(ok); await done(); } catch (err) { if (d) d.querySelector('.derr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; else flash(plain(err)); } };
+    on('#tco', () => openCompany(B.id));
+    on('#nuEdit', () => dlg(`<h3>🗓️ Next update to the customer</h3><p class="muted small">When the customer will hear from us next, and who'll send it. If it's missed, it shows red in the inbox and on the Operations overview, and the owner gets a reminder. The customer isn't emailed about this.</p>
+      <form id="nuf"><label class="f"><span>By</span><input type="datetime-local" name="due" required value="${esc(localInput(t.next_update_due || new Date(Date.now() + 4 * 3600e3)))}" min="${esc(localInput(new Date()))}"></label>
+      <label class="f"><span>Who sends it</span><select name="owner">${staff.map((x) => `<option value="${esc(x.user_id)}"${x.user_id === (t.next_update_owner || t.assignee || S.me.id) || (!t.next_update_owner && !t.assignee && x.name === S.me.name) ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
+      <div class="derr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Save</button></div></form>`, (d) => {
+      d.querySelector('#nuf').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); const due = new Date(String(f.get('due')));
+        run(d, () => { if (Number.isNaN(due.getTime())) throw new Error('Choose a date and time.'); return api.ticketNextUpdate(id, due.toISOString(), String(f.get('owner') || '') || null); }, `Next update by ${dueText(due)}.`); }; }));
+    on('#nuClear', () => run(null, () => api.ticketNextUpdate(id, null, null), 'Next update cleared.'));
+    const prf = el.querySelector('#prf'); if (prf) prf.onsubmit = (e) => { e.preventDefault(); run(null, () => api.ticketSet(id, { planned_release: String(new FormData(prf).get('planned_release')).trim() }), 'Planned release saved.'); };
+    on('#bugEdit', () => dlg(`<h3>🐞 Linked bug</h3><p class="muted small">The developers' bug for this problem: a short reference, and a link if there is one (for example a GitHub issue).</p>
+      <form id="bgf"><label class="f"><span>Bug reference</span><input name="bug_ref" maxlength="80" value="${esc(t.bug_ref || '')}" placeholder="e.g. BUG-7719"></label>
+      <label class="f"><span>Link <small class="muted">(optional, https://…)</small></span><input name="bug_url" type="url" maxlength="300" value="${esc(t.bug_url || '')}" placeholder="https://github.com/…/issues/…"></label>
+      <div class="derr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Save</button></div></form>`, (d) => {
+      d.querySelector('#bgf').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target);
+        run(d, () => api.ticketSet(id, { bug_ref: String(f.get('bug_ref') || '').trim(), bug_url: String(f.get('bug_url') || '').trim() }), 'Bug link saved.'); }; }));
+    const noteForm = (n) => dlg(`<h3>📌 ${n ? 'Edit support note' : 'Add a support note'}</h3><p class="muted small">Pinned to ${esc(B.name)}: it shows on every ticket for this business. Useful facts for troubleshooting (which office to call, which PC), never passwords.</p>
+      <form id="snf"><label class="f"><span>Note</span><textarea name="body" rows="4" required maxlength="2000">${esc(n ? n.body : '')}</textarea></label>
+      <div class="derr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Save note</button></div></form>`, (d) => {
+      d.querySelector('#snf').onsubmit = (e) => { e.preventDefault(); const body = String(new FormData(e.target).get('body')).trim();
+        run(d, () => (n ? api.noteEdit(n.id, body) : api.noteAdd(B.id, { kind: 'note', body, pinned: true })), 'Support note saved.'); }; });
+    on('#snAdd', () => noteForm(null));
+    el.querySelectorAll('[data-snedit]').forEach((b) => b.onclick = () => noteForm(r.support_notes.find((n) => String(n.id) === b.dataset.snedit)));
+    el.querySelectorAll('[data-snunpin]').forEach((b) => b.onclick = () => run(null, () => api.notePin(Number(b.dataset.snunpin), false), 'Unpinned. It stays on the customer page.'));
+  }
+  function logTicketCall(t, B, after) {
+    dlg(`<h3>📞 Log a call</h3><p class="muted small">It goes in this ticket's thread. Only Riyeser staff see it.</p>
+      <form id="lcf"><div class="row"><label class="opt"><input type="radio" name="direction" value="in" checked> They called us</label><label class="opt"><input type="radio" name="direction" value="out"> We called them</label></div>
+      <label class="f"><span>Who</span><input name="who" maxlength="120" value="${esc(t.opened_by_name || '')}"></label>
+      <label class="f"><span>What was said, and the next step</span><textarea name="body" rows="4" required maxlength="5000" placeholder="e.g. Agreed to try the workaround; we'll update them by 3 pm"></textarea></label>
+      <div id="lcerr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Save call</button></div></form>`, (d, close) => {
+      d.querySelector('#lcf').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
+        try { await api.ticketLogCall(t.id, String(f.get('direction')), String(f.get('who') || '').trim(), String(f.get('body')).trim()); close(); flash('Call saved in the thread.'); await after(); }
+        catch (err) { d.querySelector('#lcerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
+    void B;
   }
   async function manageSaved(after) {
     const list = await api.savedReplies();

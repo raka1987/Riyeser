@@ -139,7 +139,8 @@ function renderNav() {
     ${demoState.on ? '' : `<button data-demo="try" title="Explore every program with made-up data">${icon('layers')}${esc(window.RiyeserDemo.TEXT.tryButton)}</button>`}
     <button data-lic="open">${icon('key')}Licence</button>
     <button data-help="central">${icon('help')}Help</button>
-    <button data-act="gethelp" title="Ask Riyeser Support (opens riyeser.com)">${icon('chat')}Get help</button>`;
+    <button data-act="gethelp" title="Ask Riyeser Support (opens riyeser.com)">${icon('chat')}Get help</button>
+    <button data-act="report" title="Tell Riyeser Support about a problem, with this PC's technical details">${icon('alert')}Report an issue</button>`;
 }
 
 // ---------- program cards (one per installed program, with real figures when there are any) ----------
@@ -537,6 +538,58 @@ document.addEventListener('click', (e) => {
   if (a === 'retry') safe(() => leaveDemo(true));
 });
 
+// ---------- Get help → Report an issue: a small in-page dialog (never the browser's pop-ups) ----------
+// The person picks the program, says what happened and whether work is blocked, and sees exactly what technical details
+// will be sent (the log lines open underneath). Central makes those details once; Send sends them as shown.
+async function reportIssue() {
+  document.querySelectorAll('dialog.supdlg').forEach((x) => x.remove());
+  const d = document.createElement('dialog'); d.className = 'licdlg supdlg'; d.setAttribute('aria-label', 'Report an issue');
+  document.body.appendChild(d); d.addEventListener('close', () => d.remove());
+  const head = '<h2 class="lichead">Report an issue <button class="x" data-sup="close" aria-label="Close">✕</button></h2>';
+  let st = await bridge.call('support:prepare', null);
+  if (!st.signedIn) {
+    d.innerHTML = `${head}<div class="supbody"><div class="supstate"><span class="big">🔑</span><div><b>Sign in with your Riyeser account first</b>
+      So we know which business it's for and can reply to you. Use the same email and password as riyeser.com.</div></div>
+      <div class="wrow"><button class="btn s" data-sup="close">Cancel</button><button class="btn" data-w="link" data-sup="close">Sign in</button></div></div>`;
+    d.addEventListener('click', (e) => { if (e.target.closest('[data-sup=close]')) d.close(); });
+    d.showModal(); return;
+  }
+  const form = { product: '', what: '', blocked: null, error: '' };
+  const draw = (note = '') => {
+    const pv = st.preview || [];
+    d.innerHTML = `${head}<form class="supbody" id="supf">${note}
+      <p class="lbl">For ${esc(st.business || 'your business')}. We'll reply by email and on riyeser.com.</p>
+      <label class="wf"><span>Which program?</span><select name="product" required><option value="">Choose…</option>${st.products.map((p) => `<option value="${esc(p.id)}"${p.id === form.product ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <label class="wf"><span>What happened?</span><textarea name="what" rows="3" maxlength="4000" required placeholder="e.g. The payroll export stops at about 90% with “Export timed out”">${esc(form.what)}</textarea></label>
+      <fieldset class="supyn"><legend>Is your work blocked?</legend><label><input type="radio" name="blocked" value="yes"${form.blocked === true ? ' checked' : ''}> Yes</label><label><input type="radio" name="blocked" value="no"${form.blocked === false ? ' checked' : ''}> No</label></fieldset>
+      <label class="wf"><span>Error message or code <small>(optional)</small></span><input name="error" maxlength="300" value="${esc(form.error)}"></label>
+      ${st.diag ? `<div class="suppv" id="suppv"><b>What we'll send with it</b><table>${pv.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(k === 'When' ? new Date(v).toLocaleString() : v)}</td></tr>`).join('')}</table>
+        ${st.diag.log_lines ? `<details id="suplog"><summary>Show the log lines (${st.diag.log_lines.split('\n').length})</summary><pre>${esc(st.diag.log_lines)}</pre></details>` : ''}
+        <p class="muted">Only technical details. Never your invoices, payroll, customers, files or messages. Emails, long numbers and anything after “password” are hidden.</p></div>`
+        : '<p class="muted">Choose the program to see the technical details we\'ll send with it.</p>'}
+      <div id="superr"></div><div class="wrow"><button type="button" class="btn s" data-sup="close">Cancel</button><button class="btn" id="supsend"${st.diag ? '' : ' disabled'}>Send report</button></div></form>`;
+    const f = d.querySelector('#supf');
+    const keep = () => { const x = new FormData(f); form.what = String(x.get('what') || ''); form.error = String(x.get('error') || ''); const b = x.get('blocked'); form.blocked = b ? b === 'yes' : null; };
+    f.addEventListener('input', keep);
+    f.product.onchange = async () => { keep(); form.product = f.product.value; st = await bridge.call('support:prepare', form.product || null); draw(); };
+    f.onsubmit = async (e) => { e.preventDefault(); keep(); const err = d.querySelector('#superr'); const btn = d.querySelector('#supsend');
+      if (!form.what.trim()) { err.innerHTML = '<div class="werr">Say what happened.</div>'; return; }
+      if (form.blocked === null) { err.innerHTML = '<div class="werr">Choose whether your work is blocked: Yes or No.</div>'; return; }
+      btn.disabled = true; btn.textContent = 'Sending…';
+      try {
+        const r = await bridge.call('support:send', st.token, { what_happened: form.what, blocked: form.blocked, error_text: form.error });
+        d.innerHTML = `${head}<div class="supbody"><div class="supstate ok"><span class="big">✅</span><div><b>Thanks — your request number is ${esc(r.ref)}.</b> Reference ${esc(r.diag_ref)}.
+          <div>We'll reply by email and on riyeser.com under “Your help requests”.</div></div></div>
+          <div class="wrow"><button class="btn s" data-sup="close">Done</button><button class="btn" data-sup="open" data-ref="${esc(r.ref)}">Open it on riyeser.com</button></div></div>`;
+      } catch (x) { btn.disabled = false; btn.textContent = 'Send report'; err.innerHTML = `<div class="werr">${esc(x.message)}</div>`; }
+    };
+  };
+  d.addEventListener('click', (e) => { if (e.target.closest('[data-sup=close]')) d.close();
+    const o = e.target.closest('[data-sup=open]'); if (o) { safe(() => bridge.call('support:open', o.dataset.ref)); d.close(); } });
+  draw(); d.showModal(); d.querySelector('select').focus();
+}
+window.RiyeserCentralReport = { reportIssue };
+
 // ---------- licence: one free 90-day trial, then one licence for every Riyeser program ----------
 let lic = null;
 if (bridge && bridge.on) bridge.on('licence-changed', () => loadLicence());
@@ -645,6 +698,7 @@ document.addEventListener('click', (e) => {
     if (act.dataset.act === 'find') { setView('home'); $('#q').focus(); }
     if (act.dataset.act === 'team') safe(() => bridge.call('central:team'));
     if (act.dataset.act === 'gethelp') safe(() => bridge.call('central:getHelp'));
+    if (act.dataset.act === 'report') safe(() => reportIssue());
     if (act.dataset.act === 'pickpdf') safe(() => bridge.call('central:openPdf'));
     return;
   }
