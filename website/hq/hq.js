@@ -16,6 +16,13 @@
     return m < 2 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
   const ROLES = [['owner', 'Owner'], ['finance', 'Finance'], ['support', 'Support'], ['sales', 'Sales'], ['developer', 'Developer']];
   const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
+  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Calls']];
+  const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
+  const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  const statusPill = (v) => (v.status === 'active' ? `<span class="pill ok">Paid${v.paid_until ? ` to ${day(v.paid_until)}` : ''}</span>`
+    : v.status === 'trial' ? `<span class="pill${v.days_left <= 14 ? ' warn' : ''}">Trial · ${v.days_left} days</span>`
+    : v.status === 'cancelled' ? (v.active ? `<span class="pill warn">Cancelled · works to ${day(v.paid_until)}</span>` : '<span class="pill bad">Cancelled</span>')
+    : '<span class="pill bad">Ended</span>');
   // Which program each installer is (older file names included).
   const PRODUCT = [[/Central/i, 'Riyeser Central'], [/AccountingBasics/i, 'Accounting Basics'], [/Accounting(Plus)?-Setup|AccountingPlus/i, 'Accounting Plus'],
     [/POS/i, 'POS'], [/Invoices/i, 'Invoices'], [/Bookings/i, 'Bookings'], [/Payroll/i, 'Payroll'], [/DeskAssistant/i, 'Desk Assistant'],
@@ -44,6 +51,9 @@
       addStaff: (email, name, role) => rpc('hq_add_staff', { staff_email: email, staff_name: name, staff_role: role }),
       setStaff: (staff, role, active) => rpc('hq_set_staff', { staff, staff_role: role, is_active: active }),
       history: () => rpc('hq_history'), downloadsDaily: (days) => rpc('hq_downloads', { days }),
+      licences: () => rpc('hq_licences'), companyLicence: (ws) => rpc('hq_company_licence', { ws }),
+      setModule: (ws, mod, status, trialEnd, paidTo) => rpc('hq_set_module', { ws, mod, new_status: status, trial_end: trialEnd || null, paid_to: paidTo || null }),
+      setPlan: (ws, users, cos, billing, eb) => rpc('hq_set_plan', { ws, users_extra: users, companies_extra: cos, billing_period: billing, is_early_bird: eb }),
     };
   }
   // ------------------------------------------------------------------ demo (sample data, nothing real)
@@ -56,6 +66,20 @@
       { id: 'w4', name: 'Island Traders', company_code: 'RIY-1SLD-T8', country: 'Fiji', created_at: t(3), people: 2, branches: 2, pcs: 1, last_seen: t(3), calls_paid_until: null, trial_days_left: 87, owner_name: 'Jone', owner_email: 'jone@island.test' }];
     const staff = [{ user_id: 's1', display_name: 'Riki', role: 'owner', active: true, email: 'riki@riyeser.test', added_at: t(30) },
       { user_id: 's2', display_name: 'Help Desk', role: 'support', active: true, email: 'help@riyeser.test', added_at: t(5) }];
+    const mods = { w2: { basic: { status: 'active', paid_until: t(-300).slice(0, 10) }, pos: { status: 'active', paid_until: t(-300).slice(0, 10) }, calls: { status: 'active', paid_until: t(-200).slice(0, 10) } },
+      w1: { basic: { status: 'active', paid_until: t(-20).slice(0, 10) }, payroll: { status: 'cancelled', paid_until: t(5).slice(0, 10) } } };
+    const plans = { w2: { extra_users: 6, extra_companies: 0, billing: 'yearly', early_bird: true } };
+    const today = () => new Date(new Date().toISOString().slice(0, 10));
+    const dd = (a) => Math.round((new Date(a) - today()) / 864e5);
+    function demoLicence(ws) { const c = cos.find((x) => x.id === ws); const joined = c.created_at.slice(0, 10);
+      const modules = {}; MODULES.forEach(([m]) => { const r = (mods[ws] || {})[m];
+        if (!r || r.status === 'trial') { const te = r && r.trial_ends ? r.trial_ends : new Date(new Date(joined).getTime() + 90 * 864e5).toISOString().slice(0, 10); const left = dd(te);
+          modules[m] = { status: left >= 0 ? 'trial' : 'ended', active: left >= 0, trial_ends: te, paid_until: null, days_left: left >= 0 ? left : null }; }
+        else if (r.status === 'active') { const left = dd(r.paid_until); modules[m] = { status: left >= 0 ? 'active' : 'ended', active: left >= 0, trial_ends: null, paid_until: r.paid_until, days_left: left >= 0 ? left : null }; }
+        else { const left = r.paid_until ? dd(r.paid_until) : -1; modules[m] = { status: 'cancelled', active: left >= 0, trial_ends: null, paid_until: r.paid_until, days_left: left >= 0 ? left : null }; } });
+      const pl = plans[ws] || {}; return { workspace_id: ws, company_code: c.company_code, modules, seats: { included: 3, extra: pl.extra_users || 0, used: c.people }, extra_companies: pl.extra_companies || 0, billing: pl.billing || 'monthly', early_bird: !!pl.early_bird }; }
+    function demoMonthly(ws) { const l = demoLicence(ws); const n = Object.values(l.modules).filter((v) => v.status === 'active').length;
+      let m = n * 20 + l.seats.extra * 5 + l.extra_companies * 10; if (l.billing === 'yearly') m *= 10 / 12; if (l.early_bird) m *= 0.5; return Math.round(m * 100) / 100; }
     const notes = { w1: [{ body: 'Called Alex: wants POS for the Lautoka branch next month.', at: t(2), by: 'Riki' }] };
     const hist = [{ at: t(0.1), who: 'Riki', action: 'company.viewed', details: { workspace_id: 'w1' } }, { at: t(2), who: 'Riki', action: 'note.added', details: { workspace_id: 'w1' } },
       { at: t(5), who: 'Riki', action: 'staff.added', details: { email: 'help@riyeser.test', role: 'support' } }, { at: t(30), who: 'Riyeser', action: 'staff.owner_made', details: { email: 'riki@riyeser.test' } }];
@@ -85,6 +109,17 @@
       async addStaff(email, name, role) { staff.push({ user_id: 's' + (staff.length + 1), display_name: name, role, active: true, email, added_at: new Date().toISOString() }); },
       async setStaff(id, role, active) { Object.assign(staff.find((x) => x.user_id === id), { role, active }); },
       async history() { return hist.slice(); }, async downloadsDaily() { return daily; },
+      async licences() { const list = cos.map((c) => ({ c, l: demoLicence(c.id) }));
+        const ending = []; list.forEach(({ c, l }) => Object.entries(l.modules).forEach(([m, v]) => { if (v.days_left != null && v.days_left <= 14) ending.push({ id: c.id, name: c.name, company_code: c.company_code, module: m, status: v.status, days_left: v.days_left }); }));
+        return { monthly_estimate: list.reduce((a, x) => a + demoMonthly(x.c.id), 0), paying_companies: list.filter((x) => demoMonthly(x.c.id) > 0).length,
+          early_bird_used: Object.values(plans).filter((x) => x.early_bird).length + 37, early_bird_left: 100 - 37 - Object.values(plans).filter((x) => x.early_bird).length,
+          modules: MODULES.map(([m]) => ({ module: m, active_paid: list.filter((x) => x.l.modules[m].status === 'active').length, on_trial: list.filter((x) => x.l.modules[m].status === 'trial').length,
+            ended: list.filter((x) => ['ended', 'cancelled'].includes(x.l.modules[m].status)).length })), ending_soon: ending.sort((a, b) => a.days_left - b.days_left) }; },
+      async companyLicence(ws) { return { licence: demoLicence(ws), monthly: demoMonthly(ws) }; },
+      async setModule(ws, mod, status, te, pt) { (mods[ws] = mods[ws] || {})[mod] = { status, trial_ends: te || null, paid_until: pt || null };
+        hist.unshift({ at: new Date().toISOString(), who: 'Riki', action: 'licence.module', details: { workspace_id: ws, module: mod, status } }); },
+      async setPlan(ws, users, cosx, billing, eb) { plans[ws] = { extra_users: users, extra_companies: cosx, billing, early_bird: eb };
+        hist.unshift({ at: new Date().toISOString(), who: 'Riki', action: 'licence.plan', details: { workspace_id: ws } }); },
     };
   }
   const api = DEMO ? demo() : online();
@@ -130,7 +165,7 @@
   }
 
   // ------------------------------------------------------------------ the shell
-  const TABS = () => [['overview', 'Overview', true], ['companies', 'Companies', can('finance', 'support', 'sales')], ['downloads', 'Downloads', true],
+  const TABS = () => [['overview', 'Overview', true], ['companies', 'Companies', can('finance', 'support', 'sales')], ['licences', 'Licences', can('finance', 'support', 'sales')], ['downloads', 'Downloads', true],
     ['team', 'HQ team', true], ['history', 'History', can()]].filter((x) => x[2]);
   function shell() {
     $app.innerHTML = `${DEMO ? '<div class="demo">Demo with sample data. Nothing here is real.</div>' : ''}
@@ -139,7 +174,7 @@
       <div class="me">${esc(S.me.name)} <small>${esc(roleName(S.me.role))}</small><button id="so">Sign out</button></div></header><main id="main"></main>`;
     $app.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; shell(); });
     $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
-    ({ overview, companies, downloads, team, history })[S.tab]().catch((err) => { document.getElementById('main').innerHTML = `<div class="err">${esc(plain(err))}</div>`; });
+    ({ overview, companies, licences, downloads, team, history })[S.tab]().catch((err) => { document.getElementById('main').innerHTML = `<div class="err">${esc(plain(err))}</div>`; });
   }
   const main = (html) => { document.getElementById('main').innerHTML = html; return document.getElementById('main'); };
 
@@ -189,18 +224,26 @@
   }
 
   async function openCompany(id) {
-    const c = await api.company(id); const p = c.profile;
+    const [c, lic] = await Promise.all([api.company(id), api.companyLicence(id)]); const p = c.profile; const L = lic.licence;
     document.querySelectorAll('.panel,.scrim').forEach((x) => x.remove());
     const scrim = document.createElement('div'); scrim.className = 'scrim'; const panel = document.createElement('aside'); panel.className = 'panel';
     const close = () => { panel.remove(); scrim.remove(); }; scrim.onclick = close;
-    const paid = p.calls_paid_until && new Date(p.calls_paid_until) > new Date();
     panel.innerHTML = `<div class="phead"><div style="flex:1"><h2>${esc(p.name)}</h2><span class="code">${esc(p.company_code || '')}</span></div><button class="btn sm" id="x">Close</button></div>
       <div class="card"><h3>Details</h3><dl class="kv"><dt>Legal name</dt><dd>${esc(p.legal_name || '—')}</dd><dt>ABN / TIN</dt><dd>${esc(p.tax_number || '—')}</dd>
         <dt>Country</dt><dd>${esc(p.country || '—')}</dd><dt>Address</dt><dd>${esc(p.address || '—')}</dd><dt>Phone</dt><dd>${esc(p.phone || '—')}</dd><dt>Email</dt><dd>${esc(p.email || '—')}</dd>
         <dt>Joined Riyeser</dt><dd>${day(p.created_at)}</dd><dt>New people need</dt><dd>${p.require_approval ? 'Approval (recommended)' : 'No approval'}</dd>
         <dt>Waiting to join</dt><dd>${num(c.requests_waiting)}</dd></dl></div>
-      <div class="card" id="callsCard"><h3>Team Calls</h3><p class="small">${paid ? `<span class="pill ok">Paid until ${day(p.calls_paid_until)}</span>` : p.trial_days_left > 0 ? `<span class="pill">Free trial · ${p.trial_days_left} days left</span>` : '<span class="pill bad">Trial ended, not paid</span>'}</p>
-        ${can('finance') ? `<form class="row" id="cp"><label class="small">Paid until <input type="date" name="until" value="${p.calls_paid_until ? p.calls_paid_until.slice(0, 10) : ''}" required></label><button class="btn p sm">Save</button></form>` : '<p class="muted small">Owners and Finance can change this.</p>'}</div>
+      <div class="card" id="licCard"><h3>Licence <small>· ${money(lic.monthly)} a month (list price estimate)</small></h3>
+        <table class="tbl lic"><tr><th>Program</th><th>Now</th>${can('finance') ? '<th>Change to</th><th></th>' : ''}</tr>
+        ${MODULES.map(([m, name]) => { const v = L.modules[m]; return `<tr data-mod="${m}"><td><b>${name}</b></td><td>${statusPill(v)}</td>${can('finance') ? `<td><div class="row">
+          <select name="st" aria-label="${name} status"><option value="trial"${v.status === 'trial' ? ' selected' : ''}>Free trial until</option><option value="active"${v.status === 'active' || v.status === 'ended' ? ' selected' : ''}>Paid until</option><option value="cancelled"${v.status === 'cancelled' ? ' selected' : ''}>Cancelled (works until)</option></select>
+          <input type="date" name="dt" value="${(v.status === 'trial' ? v.trial_ends : v.paid_until) || ''}" aria-label="${name} date"></div></td><td><button class="btn sm" data-save="${m}">Save</button></td>` : ''}</tr>`; }).join('')}</table>
+        <form id="plan" class="grid g3" style="margin-top:12px"><label class="f"><span>Extra users <small class="muted">(${L.seats.used} people, ${L.seats.included} included)</small></span><input type="number" min="0" name="users" value="${L.seats.extra}"${can('finance') ? '' : ' disabled'}></label>
+          <label class="f"><span>Extra companies</span><input type="number" min="0" name="cos" value="${L.extra_companies}"${can('finance') ? '' : ' disabled'}></label>
+          <label class="f"><span>Billing</span><select name="billing"${can('finance') ? '' : ' disabled'}><option value="monthly"${L.billing === 'monthly' ? ' selected' : ''}>Monthly</option><option value="yearly"${L.billing === 'yearly' ? ' selected' : ''}>Yearly (2 months free)</option></select></label>
+          <label class="opt"><input type="checkbox" name="eb"${L.early_bird ? ' checked' : ''}${can('finance') ? '' : ' disabled'}> Early bird: half price for the first 12 months</label>
+          ${can('finance') ? '<div><button class="btn p sm">Save plan</button></div>' : '<p class="muted small">Owners and Finance can change licences.</p>'}</form>
+        <p class="muted small">Changes reach the company's PCs the next time Riyeser Central checks in (at start-up and daily).</p></div>
       <div class="card scroll"><h3>People <small>· ${c.people.length}</small></h3><table class="tbl"><tr><th>Name</th><th>Role</th><th class="n">Ext</th><th>Joined</th></tr>
         ${c.people.map((x) => `<tr><td>${esc(x.name)}<small>${esc(x.email || '')}</small></td><td>${esc(x.role === 'owner' ? 'Owner' : x.job_role)}${x.role === 'admin' ? ' · admin' : ''}</td><td class="n">${x.extension || ''}</td><td>${day(x.joined)}</td></tr>`).join('')}</table></div>
       <div class="grid g2"><div class="card"><h3>Branches</h3>${c.branches.map((b) => `<div class="small">${esc(b.name)} <span class="muted">· ${b.extension || ''} · ${b.people} people</span></div>`).join('') || '<p class="muted small">None.</p>'}</div>
@@ -211,10 +254,29 @@
       <p class="privacy">🔒 HQ shows account information only. Customers' messages, calls and books are never shown here.</p>`;
     document.body.append(scrim, panel);
     panel.querySelector('#x').onclick = close;
-    const cp = panel.querySelector('#cp'); if (cp) cp.onsubmit = async (e) => { e.preventDefault();
-      try { await api.setCallsPaid(id, String(new FormData(e.target).get('until'))); openCompany(id); if (S.tab === 'companies') companies(); } catch (err) { alert(plain(err)); } };
+    panel.querySelectorAll('[data-save]').forEach((btn) => btn.onclick = async () => {
+      const row = btn.closest('tr'); const st = row.querySelector('[name=st]').value; const dt = row.querySelector('[name=dt]').value;
+      if (!dt) { alert('Choose a date.'); return; }
+      try { await api.setModule(id, btn.dataset.save, st, st === 'trial' ? dt : null, st === 'trial' ? null : dt); openCompany(id); } catch (err) { alert(plain(err)); } });
+    const pf = panel.querySelector('#plan'); if (pf && can('finance')) pf.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
+      try { await api.setPlan(id, Number(f.get('users') || 0), Number(f.get('cos') || 0), String(f.get('billing')), !!f.get('eb')); openCompany(id); } catch (err) { alert(plain(err)); } };
     panel.querySelector('#nf').onsubmit = async (e) => { e.preventDefault();
       try { await api.addNote(id, String(new FormData(e.target).get('body'))); openCompany(id); } catch (err) { alert(plain(err)); } };
+  }
+
+
+  // ------------------------------------------------------------------ licences
+  async function licences() {
+    main('<p class="muted">Loading…</p>');
+    const L = await api.licences();
+    main(`<h2>Licences</h2><p class="sub">Who pays for what. The money figure is an estimate at list prices until payments are connected.</p>
+      <div class="tiles">${tile('Monthly income (estimate)', money(L.monthly_estimate), `${money(L.monthly_estimate * 12)} a year`)}${tile('Paying companies', num(L.paying_companies), 'at least one paid program')}
+        ${tile('Early bird places left', num(L.early_bird_left), `of 100 · ${num(L.early_bird_used)} taken`)}${tile('Ending in 14 days', num((L.ending_soon || []).length), 'trials and paid periods')}</div>
+      <div class="grid g2"><div class="card scroll"><h3>By program</h3><table class="tbl"><tr><th>Program</th><th class="n">Paid</th><th class="n">On trial</th><th class="n">Ended</th></tr>
+        ${(L.modules || []).map((m) => `<tr><td>${esc(modName(m.module))}</td><td class="n">${num(m.active_paid)}</td><td class="n">${num(m.on_trial)}</td><td class="n">${num(m.ended)}</td></tr>`).join('')}</table></div>
+      <div class="card scroll"><h3>Ending soon <small>· follow up before they lapse</small></h3>${(L.ending_soon || []).length ? `<table class="tbl"><tr><th>Company</th><th>Program</th><th class="n">Days</th></tr>
+        ${L.ending_soon.map((x) => `<tr class="click" data-co="${x.id}"><td><b>${esc(x.name)}</b><small class="code">${esc(x.company_code || '')}</small></td><td>${esc(modName(x.module))} <small>${x.status === 'trial' ? 'free trial' : 'paid period'}</small></td><td class="n"><span class="pill warn">${x.days_left}</span></td></tr>`).join('')}</table>`
+        : '<p class="muted small">Nothing ending in the next 14 days.</p>'}</div></div>`).querySelectorAll('[data-co]').forEach((r) => r.onclick = () => openCompany(r.dataset.co));
   }
 
   // ------------------------------------------------------------------ downloads
@@ -265,12 +327,13 @@
 
   // ------------------------------------------------------------------ HQ history
   const ACTS = { 'company.viewed': 'opened a company', 'note.added': 'added a note', 'calls.paid_until': 'changed Team Calls paid-until',
+    'licence.module': 'changed a licence', 'licence.plan': 'changed a plan',
     'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.owner_made': 'made an HQ owner (SQL Editor)' };
   async function history() {
     const rows = await api.history(); const coName = (id) => (S.companies.find((c) => c.id === id) || {}).name;
     main(`<h2>HQ history</h2><p class="sub">Everything done in HQ, by whom and when. It can't be edited.</p>
       <div class="card scroll"><table class="tbl"><tr><th>When</th><th>Who</th><th>What</th></tr>
-      ${rows.map((h) => { const d = h.details || {}; const extra = [coName(d.workspace_id), d.email, d.until, d.role].filter(Boolean).join(' · ');
+      ${rows.map((h) => { const d = h.details || {}; const extra = [coName(d.workspace_id), d.module ? modName(d.module) : null, d.status, d.email, d.until, d.role].filter(Boolean).join(' · ');
         return `<tr><td>${ago(h.at)}<small>${day(h.at)}</small></td><td>${esc(h.who)}</td><td>${esc(ACTS[h.action] || h.action)}${extra ? ` <small>${esc(extra)}</small>` : ''}</td></tr>`; }).join('')}</table></div>`);
   }
 

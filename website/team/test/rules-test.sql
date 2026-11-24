@@ -221,6 +221,7 @@ insert into auth.users values ('66666666-6666-6666-6666-666666666666', 'boss@c.t
 select pg_temp.as_user('66666666-6666-6666-6666-666666666666'); set role authenticated;
 select (public.create_company('Island Traders', 'Mere', '{"legal_name":"Island Traders Pte Ltd","tax_number":"50-12345-0-1","country":"Fiji"}'::jsonb)) as made \gset
 select (:'made'::json ->> 'workspace_id') as ws_c, (:'made'::json ->> 'company_code') as code_c \gset
+select set_config('test.ws_c', :'ws_c', false);
 do $$ begin
   assert (select company_code from public.workspaces where name = 'Island Traders') ~ '^RIY-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{2}$', 'company code format';
   assert (select tax_number from public.workspaces where name = 'Island Traders') = '50-12345-0-1', 'profile saved';
@@ -350,7 +351,7 @@ select public.hq_add_staff('help@riyeser.test', 'Help Desk', 'support');
 do $$ begin
   assert (select (calls_paid_until at time zone 'UTC')::date from public.hq_companies('island')) = '2027-06-30', 'paid until set';
   assert (select count(*) from public.workspaces where name = 'Island Traders') = 0, 'HQ staff still can''t read customer tables directly';
-  assert (select count(*) from public.hq_history() where action in ('calls.paid_until', 'note.added', 'staff.added', 'company.viewed')) >= 4, 'HQ history';
+  assert (select count(*) from public.hq_history() where action in ('licence.module', 'note.added', 'staff.added', 'company.viewed')) >= 4, 'HQ history';
   begin perform public.hq_set_staff(auth.uid(), 'support', true); raise exception 'changed own access';
   exception when others then assert sqlerrm like 'You can%', sqlerrm; end;
 end $$;
@@ -384,6 +385,75 @@ end $$;
 reset role;
 select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
 do $$ begin assert (select total from public.hq_downloads(30) where asset = 'RiyeserPOS-Setup.exe') = 33, 'downloads read back'; end $$;
+reset role;
+
+-- ===== Licences online
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666'); set role authenticated;   -- Island Traders' owner
+do $$ declare l json; begin
+  l := public.company_licence((select id from public.workspaces where name = 'Island Traders'));
+  assert (l -> 'modules' -> 'basic' ->> 'status') = 'trial', 'new company: basic on trial';
+  assert (l -> 'modules' -> 'basic' ->> 'days_left')::int between 85 and 90, 'about 90 days';
+  assert (l -> 'seats' ->> 'included')::int = 3, 'three users included';
+  assert (l ->> 'company_code') like 'RIY-%', 'company code';
+  begin perform public.company_licence((select id from public.workspaces where name = 'Island Traders' limit 0)); exception when others then null; end;
+end $$;
+-- someone from another company can't read Island Traders' licence
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin
+  begin perform public.company_licence(current_setting('test.ws_c')::uuid); raise exception 'read another licence';
+  exception when others then assert sqlerrm like 'You''re not in that company%', sqlerrm; end;
+  begin perform public.hq_set_module(current_setting('test.ws_c')::uuid, 'pos', 'active', null, '2030-01-01'); raise exception 'customer set own licence';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+end $$;
+-- HQ (Riki, owner): Basics paid for a year, POS trial extended, Payroll cancelled; 2 extra users; yearly
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_set_module(:'ws_c', 'basic', 'active', null, (current_date + 365));
+select public.hq_set_module(:'ws_c', 'pos', 'trial', (current_date + 30), null);
+select public.hq_set_module(:'ws_c', 'payroll', 'cancelled', null, (current_date - 1));
+select public.hq_set_plan(:'ws_c', 2, 1, 'monthly', false);
+do $$ declare l json; m numeric; begin
+  l := (public.hq_company_licence(current_setting('test.ws_c')::uuid)) -> 'licence';
+  assert (l -> 'modules' -> 'basic' ->> 'status') = 'active' and (l -> 'modules' -> 'basic' ->> 'active')::boolean, 'basic paid';
+  assert (l -> 'modules' -> 'pos' ->> 'days_left')::int = 30, 'pos trial extended to 30 days';
+  assert (l -> 'modules' -> 'payroll' ->> 'status') = 'cancelled' and not (l -> 'modules' -> 'payroll' ->> 'active')::boolean, 'payroll cancelled, ended';
+  assert (l ->> 'extra_companies')::int = 1, 'extra companies';
+  m := ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric;
+  assert m = 20 + 20 + 2 * 5 + 10, format('monthly estimate: Basics 20 + Team Calls 20 (paid earlier) + 2 users 10 + 1 company 10 = 60, got %s', m);
+  assert ((public.hq_licences()) ->> 'monthly_estimate')::numeric >= 60, 'total estimate';
+  assert ((public.hq_licences()) ->> 'early_bird_left')::int = 100, 'early bird places';
+end $$;
+-- yearly + early bird: 60 a month list -> x 10/12 -> half = 25
+select public.hq_set_plan(:'ws_c', 2, 1, 'yearly', true);
+do $$ begin assert ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric = 25.00, 'yearly early bird'; end $$;
+-- Team Calls via the licence: cancelled and unpaid -> no calls; the old button sets it paid again
+select public.hq_set_module(:'ws_c', 'calls', 'cancelled', null, null);
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+do $$ begin assert not public.calls_allowed(current_setting('test.ws_c')::uuid), 'calls off when cancelled'; end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+select public.hq_set_calls_paid(:'ws_c', (current_date + 60));
+do $$ begin assert public.calls_allowed(current_setting('test.ws_c')::uuid), 'calls on when paid'; end $$;
+-- the early bird stops at 100 businesses
+reset role;
+do $$ declare i int; wid uuid; begin
+  for i in 1..99 loop
+    insert into public.workspaces (name, company_code) values ('Early bird ' || i, public.make_company_code()) returning id into wid;
+    insert into public.company_plans (workspace_id, early_bird, early_bird_since) values (wid, true, current_date);
+  end loop;
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ begin
+  assert ((public.hq_licences()) ->> 'early_bird_left')::int = 0, 'all 100 used';
+  begin perform public.hq_set_plan((select id from public.hq_companies('harbour') limit 1), 0, 0, 'monthly', true); raise exception '101st early bird';
+  exception when others then assert sqlerrm like 'The early bird offer is full%', sqlerrm; end;
+end $$;
+-- support staff can see licences but not change them
+reset role; update public.hq_staff set active = true where display_name = 'Help Desk';
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ begin
+  assert ((public.hq_licences()) ->> 'paying_companies')::int >= 1, 'support sees licences';
+  begin perform public.hq_set_module(current_setting('test.ws_c')::uuid, 'pos', 'active', null, '2030-01-01'); raise exception 'support changed licence';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
 reset role;
 
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)

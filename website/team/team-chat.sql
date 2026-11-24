@@ -979,3 +979,179 @@ grant execute on function public.hq_me(), public.hq_overview(), public.hq_compan
   public.hq_set_calls_paid(uuid, date), public.hq_add_note(uuid, text), public.hq_staff_list(), public.hq_add_staff(text, text, text),
   public.hq_set_staff(uuid, text, boolean), public.hq_history(), public.hq_downloads(int) to authenticated;
 grant execute on function public.hq_record_downloads(text, jsonb) to anon, authenticated;
+
+-- ================================================================ Licences online (per company, per program)
+-- Paid programs: basic (Accounting Basics), plus (Accounting Plus), payroll, pos, bookings, as_built, calls (Team Calls).
+-- Free programs (Central, Invoices, PDF, Desk Assistant, Team chat) aren't listed: they're always free.
+-- With no row, a program is on its free trial: 90 days from when the company joined Riyeser online.
+-- Riyeser HQ (owners, finance) sets each one: trial (with its end date), active (paid until), or cancelled.
+-- Riyeser Central reads company_licence() and the programs on the PC unlock what's active.
+create table if not exists public.company_modules (
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  module text not null check (module in ('basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls')),
+  status text not null default 'trial' check (status in ('trial', 'active', 'cancelled')),
+  trial_ends date,
+  paid_until date,
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, module)
+);
+create table if not exists public.company_plans (
+  workspace_id uuid primary key references public.workspaces(id) on delete cascade,
+  extra_users int not null default 0 check (extra_users between 0 and 10000),
+  extra_companies int not null default 0 check (extra_companies between 0 and 1000),
+  billing text not null default 'monthly' check (billing in ('monthly', 'yearly')),
+  early_bird boolean not null default false,
+  early_bird_since date,
+  updated_at timestamptz not null default now()
+);
+alter table public.company_modules enable row level security;
+alter table public.company_plans enable row level security;
+revoke all on public.company_modules, public.company_plans from anon, authenticated;   -- read through company_licence()
+
+-- One program's state today: {status, active, trial_ends, paid_until, days_left}
+create or replace function public.module_state(ws uuid, mod text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare m company_modules; joined date; te date; st text; act boolean; left_days int;
+begin
+  select created_at::date into joined from workspaces where id = ws;
+  select * into m from company_modules where workspace_id = ws and module = mod;
+  if m.module is null or m.status = 'trial' then
+    te := coalesce(m.trial_ends, joined + 90);
+    act := te >= current_date; st := case when act then 'trial' else 'ended' end;
+    left_days := case when act then te - current_date end;
+  elsif m.status = 'active' then
+    act := m.paid_until is null or m.paid_until >= current_date; st := case when act then 'active' else 'ended' end;
+    left_days := case when act and m.paid_until is not null then m.paid_until - current_date end;
+  else   -- cancelled: works until the end of what was paid for
+    act := m.paid_until is not null and m.paid_until >= current_date; st := 'cancelled';
+    left_days := case when act then m.paid_until - current_date end;
+  end if;
+  return json_build_object('status', st, 'active', act, 'trial_ends', case when m.module is null or m.status = 'trial' then te end,
+                           'paid_until', m.paid_until, 'days_left', left_days);
+end $$;
+
+create or replace function public.licence_json(ws uuid) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object(
+    'workspace_id', w.id, 'company_code', w.company_code, 'checked_at', now(),
+    'modules', (select json_object_agg(m, public.module_state(w.id, m)) from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m),
+    'seats', json_build_object('included', 3, 'extra', coalesce(p.extra_users, 0), 'used', (select count(*) from members where workspace_id = w.id)),
+    'extra_companies', coalesce(p.extra_companies, 0), 'billing', coalesce(p.billing, 'monthly'), 'early_bird', coalesce(p.early_bird, false))
+  from workspaces w left join company_plans p on p.workspace_id = w.id where w.id = ws
+$$;
+
+-- For anyone in the company (Riyeser Central asks this to unlock the programs on the PC).
+create or replace function public.company_licence(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  if not is_member(ws) then raise exception 'You''re not in that company'; end if;
+  return licence_json(ws);
+end $$;
+
+-- Team Calls is now the 'calls' program (the old calls_paid_until still counts, for companies set up before).
+create or replace function public.calls_allowed(ws uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce((public.module_state(ws, 'calls') ->> 'active')::boolean, false)
+      or exists (select 1 from workspaces where id = ws and calls_paid_until > now())
+$$;
+create or replace function public.team_features(ws uuid) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('calls', public.calls_allowed(ws),
+    'calls_paid', (public.module_state(ws, 'calls') ->> 'status') = 'active' or coalesce(w.calls_paid_until > now(), false),
+    'calls_paid_until', coalesce((public.module_state(ws, 'calls') ->> 'paid_until'), w.calls_paid_until::date::text),
+    'trial_days_left', coalesce((public.module_state(ws, 'calls') ->> 'days_left')::int, 0))
+  from workspaces w where w.id = ws and public.is_member(ws)
+$$;
+
+-- HQ: set one program for a company (owners and finance).
+create or replace function public.hq_set_module(ws uuid, mod text, new_status text, trial_end date, paid_to date) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform hq_need(array['finance']);
+  if new_status not in ('trial', 'active', 'cancelled') then raise exception 'Choose trial, active or cancelled'; end if;
+  if new_status = 'trial' and trial_end is null then raise exception 'A trial needs an end date'; end if;
+  if new_status = 'active' and paid_to is null then raise exception 'Active needs a paid-until date'; end if;
+  insert into company_modules (workspace_id, module, status, trial_ends, paid_until)
+    values (ws, mod, new_status, trial_end, paid_to)
+  on conflict (workspace_id, module) do update set status = excluded.status, trial_ends = excluded.trial_ends,
+    paid_until = excluded.paid_until, updated_at = now();
+  if mod = 'calls' then update workspaces set calls_paid_until = case when new_status = 'active' then paid_to + time '23:59:59' end where id = ws; end if;
+  perform hq_log('licence.module', json_build_object('workspace_id', ws, 'module', mod, 'status', new_status, 'trial_ends', trial_end, 'paid_until', paid_to)::jsonb);
+end $$;
+
+-- HQ: extra users, extra companies, monthly or yearly, early bird (first 100 businesses only).
+create or replace function public.hq_set_plan(ws uuid, users_extra int, companies_extra int, billing_period text, is_early_bird boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+declare was boolean;
+begin
+  perform hq_need(array['finance']);
+  select early_bird into was from company_plans where workspace_id = ws;
+  if is_early_bird and not coalesce(was, false) and (select count(*) from company_plans where early_bird) >= 100 then
+    raise exception 'The early bird offer is full: 100 businesses already have it.';
+  end if;
+  insert into company_plans (workspace_id, extra_users, extra_companies, billing, early_bird, early_bird_since)
+    values (ws, users_extra, companies_extra, billing_period, is_early_bird, case when is_early_bird then current_date end)
+  on conflict (workspace_id) do update set extra_users = excluded.extra_users, extra_companies = excluded.extra_companies,
+    billing = excluded.billing, early_bird = excluded.early_bird,
+    early_bird_since = case when excluded.early_bird then coalesce(company_plans.early_bird_since, current_date) end, updated_at = now();
+  perform hq_log('licence.plan', json_build_object('workspace_id', ws, 'extra_users', users_extra, 'extra_companies', companies_extra,
+    'billing', billing_period, 'early_bird', is_early_bird)::jsonb);
+end $$;
+
+-- The old "Team Calls paid until" button now sets the calls program.
+create or replace function public.hq_set_calls_paid(ws uuid, until date) returns void
+  language plpgsql security definer set search_path = public as $$
+begin perform hq_set_module(ws, 'calls', 'active', null, until); end $$;
+
+-- What each company pays per month, at list prices (an estimate: payments aren't connected yet).
+-- Basics $20; each other program +$20; extra users $5; extra companies $10; yearly = 10 months for 12;
+-- early bird = half price for the first 12 months.
+create or replace function public.company_monthly(ws uuid) returns numeric
+  language sql stable security definer set search_path = public as $$
+  select round((
+      (select count(*) * 20 from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+         where (public.module_state(ws, m) ->> 'status') = 'active')
+      + coalesce(p.extra_users, 0) * 5 + coalesce(p.extra_companies, 0) * 10)
+    * case when coalesce(p.billing, 'monthly') = 'yearly' then 10.0 / 12 else 1 end
+    * case when coalesce(p.early_bird, false) and p.early_bird_since > current_date - 365 then 0.5 else 1 end, 2)
+  from (select 1) x left join company_plans p on p.workspace_id = ws
+$$;
+
+create or replace function public.hq_licences() returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare r json;
+begin
+  perform hq_need(array['finance', 'sales', 'support']);
+  select json_build_object(
+    'monthly_estimate', coalesce((select sum(public.company_monthly(id)) from workspaces), 0),
+    'paying_companies', (select count(*) from workspaces w where public.company_monthly(w.id) > 0),
+    'early_bird_used', (select count(*) from company_plans where early_bird),
+    'early_bird_left', greatest(0, 100 - (select count(*) from company_plans where early_bird)),
+    'modules', (select json_agg(json_build_object('module', m,
+        'active_paid', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'active'),
+        'on_trial', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'trial'),
+        'ended', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') in ('ended', 'cancelled')))) 
+      from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m),
+    'ending_soon', (select coalesce(json_agg(x order by x.days_left), '[]') from (
+        select w.id, w.name, w.company_code, m as module, (public.module_state(w.id, m) ->> 'status') as status,
+               (public.module_state(w.id, m) ->> 'days_left')::int as days_left
+        from workspaces w, unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+        where (public.module_state(w.id, m) ->> 'days_left')::int between 0 and 14) x)
+  ) into r;
+  return r;
+end $$;
+
+-- HQ company detail now includes the licence and the monthly estimate.
+create or replace function public.hq_company_licence(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['finance', 'support', 'sales']);
+  return json_build_object('licence', licence_json(ws), 'monthly', company_monthly(ws));
+end $$;
+
+revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_licence(uuid),
+  public.hq_set_module(uuid, text, text, date, date), public.hq_set_plan(uuid, int, int, text, boolean), public.company_monthly(uuid),
+  public.hq_licences(), public.hq_company_licence(uuid) from public, anon;
+grant execute on function public.company_licence(uuid), public.hq_set_module(uuid, text, text, date, date),
+  public.hq_set_plan(uuid, int, int, text, boolean), public.hq_licences(), public.hq_company_licence(uuid) to authenticated;
+revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_monthly(uuid) from authenticated;

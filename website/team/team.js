@@ -63,6 +63,7 @@
         return { id: r.id, qr: r.totp.qr_code, secret: r.totp.secret }; },
       async verifyCode(factorId, code) { ok(await sb.auth.mfa.challengeAndVerify({ factorId, code })); },
       async unenrol(factorId) { ok(await sb.auth.mfa.unenroll({ factorId })); },
+      async licence(ws) { return ok(await sb.rpc('company_licence', { ws })); },
       async history(ws) { return ok(await sb.from('audit_log').select('id, at, actor, action, details').eq('workspace_id', ws).order('at', { ascending: false }).limit(200)); },
       async joinTeam(code, you) { return ok(await sb.rpc('join_team', { code, your_name: you })); },
       async newInvite(ws) { return ok(await sb.rpc('new_invite_code', { ws })); },
@@ -188,6 +189,11 @@
       async enrol() { return { id: 'f1', secret: 'JBSWY3DPEHPK3PXP', qr: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/>' + [...Array(120)].map((_, i) => `<rect x="${(i * 7) % 21}" y="${Math.floor(i * 7 / 21) % 21}" width="1" height="1"/>`).join('') + '<rect x="0" y="0" width="7" height="7" fill="none" stroke="#000"/><rect x="14" y="0" width="7" height="7" fill="none" stroke="#000"/><rect x="0" y="14" width="7" height="7" fill="none" stroke="#000"/></svg>') }; },
       async verifyCode(_f, code) { if (!/^\d{6}$/.test(code)) throw new Error('That code isn\'t right. Check the 6 numbers in your authenticator app.'); mfa.on = true; },
       async unenrol() { mfa.on = false; },
+      async licence() { const d = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+        return { modules: { basic: { status: 'active', active: true, paid_until: d(200), days_left: 200 }, plus: { status: 'trial', active: true, trial_ends: d(10), days_left: 10 },
+          payroll: { status: 'ended', active: false }, pos: { status: 'trial', active: true, trial_ends: d(10), days_left: 10 }, bookings: { status: 'trial', active: true, trial_ends: d(10), days_left: 10 },
+          as_built: { status: 'trial', active: true, trial_ends: d(10), days_left: 10 }, calls: { status: 'trial', active: true, trial_ends: d(10), days_left: 10 } },
+          seats: { included: 3, extra: 2, used: 4 }, extra_companies: 0, billing: 'monthly', early_bird: true }; },
       async history() { const t = (m) => new Date(Date.now() - m * 60000).toISOString();
         return [{ id: 5, at: t(3), actor: 'u-me', action: 'devices.delete', details: { device_name: 'Lautoka front desk' } },
           { id: 4, at: t(9), actor: 'u-me', action: 'members.update', details: { job_role: { was: 'staff', now: 'bookkeeper' }, user_id: 'u-jordan' } },
@@ -481,12 +487,20 @@
   async function companyInfo(justMade) {
     const admin = isAdmin(); const t = S.team;
     const devs = admin ? await api.devices(t.id).catch(() => []) : [];
+    let lic = admin ? await api.licence(t.id).catch(() => null) : null;
+    if (!lic || !lic.modules || !lic.seats) lic = null;   // not set up online yet: no plan to show
     const field = (k, label, max = 120) => `<label class="f"><span>${label}</span><input name="${k}" value="${esc(t[k] || '')}" maxlength="${max}"${admin ? '' : ' readonly'}></label>`;
     modal(`<h3>${esc(t.name)}</h3>${justMade ? '<div class="ok">Your company is set up. Give your staff and branches the Company ID below: they ask to join, and you approve them.</div>' : ''}
       <div class="cid"><small>Company ID</small><span class="code" id="cidv">${esc(t.company_code || '')}</span><button class="btn sm" id="cpid">Copy</button></div>
       <p class="muted small" style="margin:4px 0 14px">Everyone in the company, on every Riyeser program and PC, links with this ID. ${admin ? 'New people need your approval.' : ''}</p>
       <form id="cof">${field('name', 'Business name', 80)}${field('legal_name', 'Legal name')}${field('tax_number', 'ABN / TIN', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
+      ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4><div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Calls']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
+        const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
+        const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
+        return `<div><span>${n}</span><span class="pl ${v.status === 'active' ? 'ok' : v.active ? (v.days_left <= 14 ? 'warn' : '') : 'bad'}">${txt}</span></div>`; }).join('')}
+        <div><span>People</span><span class="pl">${lic.seats.used} of ${lic.seats.included + lic.seats.extra} included${lic.early_bird ? ' · 🐣 early bird' : ''}</span></div></div>
+        <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Team chat. To change your plan, contact Riyeser.</p>` : ''}
       ${admin && devs.length ? `<h4 style="margin:16px 0 6px">Linked PCs</h4><div class="devs">${devs.map((dv) => `<div><span><b>${esc(dv.device_name || 'A PC')}</b><small>${esc(nameOf(dv.user_id))} · ${esc(dv.platform || '')} · seen ${ago(dv.last_seen)}</small></span><button type="button" class="btn sm" data-unlink="${dv.id}">Unlink</button></div>`).join('')}</div>` : ''}
       <div class="mfoot"><button type="button" class="btn" id="cl">Close</button>${admin ? '<button class="btn p">Save</button>' : ''}</div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;

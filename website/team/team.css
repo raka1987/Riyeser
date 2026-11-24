@@ -178,3 +178,7 @@ a { color: var(--blue); }
 .hist { max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; }
 .hl { padding: 9px 12px; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.4; } .hl:first-child { border-top: 0; }
 .hl .hw { font-weight: 700; color: var(--ink); } .hl small { color: var(--muted); } .hl time { float: right; color: var(--muted); font-size: 12px; margin-left: 8px; }
+.plan { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 10px; }
+.plan > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line); font-size: 14px; } .plan > div:first-child { border-top: 0; }
+.pl { font-weight: 600; color: var(--muted); font-size: 13px; text-align: right; } .pl.ok { color: #15803d; } .pl.warn { color: #b45309; } .pl.bad { color: #b91c1c; }
+#cof h4, #cof .plan, #cof > p { grid-column: 1 / -1; }
