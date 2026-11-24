@@ -532,3 +532,39 @@ section.finder { padding: 0; }
 @media (max-width: 900px) { .nav.open .links .mob-only { display: block; font-weight: 700; color: var(--blue-ink); } }
 .right .signin { white-space: nowrap; }
 @media (max-width: 1240px) { .right .signin .sx { display: none; } }
+
+/* ---------- home hero: "Take it anywhere with you" (four scenes, slow cross-fade) ---------- */
+.hero3 { position: relative; overflow: hidden; background: #efe9e1; min-height: clamp(560px, 46vw, 760px); display: flex; align-items: center; }
+.h3slides { position: absolute; inset: 0; }
+.h3slide { position: absolute; inset: 0; margin: 0; opacity: 0; transition: opacity 1.2s ease; }
+.h3slide.on { opacity: 1; }
+.h3slide > img { width: 100%; height: 100%; object-fit: cover; object-position: 70% 40%; display: block; }
+.h3slide::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(247,244,239,.94) 0%, rgba(247,244,239,.82) 30%, rgba(247,244,239,.25) 50%, rgba(247,244,239,0) 62%); pointer-events: none; }
+.h3pops { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.h3slide .hfloat { position: absolute; opacity: 0; transform: translateY(10px); transition: opacity .6s ease .5s, transform .6s ease .5s; }
+.h3slide .hfloat.hp2 { transition-delay: 1.1s; }
+.h3slide.on .hfloat { opacity: 1; transform: none; }
+.h3slide .hp1 { left: 52%; top: 16%; } .h3slide .hp2 { right: 4%; bottom: 12%; }
+.h3text { position: relative; z-index: 3; width: 100%; padding-top: 56px; padding-bottom: 64px; }
+.h3text > * { max-width: 560px; }
+.h3text h1 { font-size: clamp(40px, 4.6vw, 66px); letter-spacing: -2px; line-height: 1.03; margin: 6px 0 16px; color: #0f1d3d; }
+.h3text h1 span { color: var(--blue); }
+.h3text .lead { font-size: clamp(17px, 1.4vw, 20px); color: #2c3a5a; }
+.h3dots { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 22px; }
+.h3dots button { display: flex; align-items: center; gap: 7px; border: 1px solid rgba(15,29,61,.14); background: rgba(255,255,255,.75); border-radius: 999px; padding: 6px 12px 6px 9px; font-size: 13px; font-weight: 600; color: #2c3a5a; cursor: pointer; }
+.h3dots button i { width: 8px; height: 8px; border-radius: 50%; background: #c3cbdb; }
+.h3dots button.on { background: #fff; border-color: var(--blue); color: #0f1d3d; } .h3dots button.on i { background: var(--blue); }
+@media (prefers-reduced-motion: reduce) { .h3slide, .h3slide .hfloat { transition: none; } }
+@media (max-width: 900px) {
+  .hero3 { display: block; min-height: 0; background: #f7f4ef; }
+  .h3slides { position: relative; inset: auto; height: 62vw; min-height: 260px; }
+  .h3slide::after { background: linear-gradient(180deg, rgba(247,244,239,0) 70%, rgba(247,244,239,1) 100%); }
+  .h3slide > img { object-position: 78% 35%; }
+  .h3slide .hp1 { left: 3%; top: 6%; } .h3slide .hp2 { right: 3%; bottom: 10%; }
+  .h3text { padding-top: 6px; padding-bottom: 40px; }
+  .h3text > * { max-width: none; }
+}
+@media (max-width: 520px) { .h3slide .hfloat { padding: 7px 10px 7px 7px; gap: 7px; border-radius: 11px; } .h3slide .hfloat img { width: 28px; height: 28px; }
+  .h3slide .hfloat b { font-size: 12.5px; } .h3slide .hfloat span, .h3slide .hfloat small { font-size: 10.5px; } .h3dots button span { display: none; } .h3dots button { padding: 8px; } }
+.hero3 { padding: 0; } .h3text > .ctas { max-width: none; }
+@media (max-width: 900px) { .hero3 { padding: 0; } }

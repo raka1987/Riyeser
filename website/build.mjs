@@ -250,6 +250,38 @@ const INDUSTRIES = [
       ['desk-assistant', ['Files drawings, quotes and invoices by type and year', 'Spots duplicate copies of the same drawing', 'Find any file in seconds']]] },
 ];
 if (!ASBUILT) for (const i of INDUSTRIES) i.progs = i.progs.filter(([id]) => id !== 'services');
+// ---------- home page hero: "Take it anywhere with you" — four real-life scenes that slowly take turns ----------
+const HERO_SLIDES = [
+  { img: 'hero-trades', alt: 'A tradie checking his phone on the back of his ute', where: 'On the road',
+    pops: [['bookings', 'Riyeser Bookings', 'Jo Smith · 10:00 tomorrow', 'Hot water service · Confirmed', ''], ['invoices', 'Riyeser Invoices', 'INV-1047 paid', '$880.00 received', 'ok']] },
+  { img: 'hero-cafe-call', alt: 'A café owner on the desk phone at her counter', where: 'At the counter',
+    pops: [['team', 'Riyeser Link', 'Call from Kitchen · ext 102', 'Answered on the desk phone', ''], ['team', 'Riyeser Team', 'Supplier delivery at 2pm', 'Message from the back office', '']] },
+  { img: 'hero-florist', alt: 'A florist checking her phone beside her car full of bouquets', where: 'Out on deliveries',
+    pops: [['invoices', 'Riyeser Invoices', 'Order paid', '$85.00 received', 'ok'], ['bookings', 'Riyeser Bookings', 'Wedding flowers · Sat 8:00', 'Delivery booked', '']] },
+  { img: 'hero-cafe-till', alt: 'A café owner taking a payment on a tablet at the counter', where: 'Serving customers',
+    pops: [['pos', 'Riyeser POS', 'Sale complete · $12.50', 'Stock updated', 'ok'], ['accounting-basics', 'Riyeser Accounting', "Today's takings", '$1,240.00 · in your books', '']] },
+];
+function homeHero(up) {
+  const pop = ([app, k, b, sub, tone], n) => `<div class="hfloat hp${n}"><img src="${up}assets/apps/${app}.png" alt="" width="40" height="40"><div><small>${esc(k)}</small><b>${esc(b)}</b><span class="${tone}">${esc(sub)}</span></div></div>`;
+  return `<section class="hero3" aria-label="Riyeser: take it anywhere with you">
+  <div class="h3slides">${HERO_SLIDES.map((sl, i) => `<figure class="h3slide${i === 0 ? ' on' : ''}" data-i="${i}">
+    <img src="${up}assets/photos/${sl.img}.webp" srcset="${up}assets/photos/${sl.img}-900.webp 900w, ${up}assets/photos/${sl.img}.webp 1672w" sizes="100vw" alt="${esc(sl.alt)}" width="1672" height="941"${i ? ' loading="lazy"' : ' fetchpriority="high"'}>
+    <div class="h3pops">${sl.pops.map((p, n) => pop(p, n + 1)).join('')}</div></figure>`).join('')}</div>
+  <div class="c h3text">
+    <span class="eyebrow">Riyeser</span>
+    <h1>Your whole office.<br><span>Take it anywhere with you.</span></h1>
+    <p class="lead">Invoices, books, pay, bookings, the till, team chat and phones. All linked, on your PC and on the go.</p>
+    <div class="ctas"><a class="btn p big" href="${up}downloads.html">${WINDL}</a><a class="btn s big" href="/team/?signup">Create a free account</a></div>
+    <p class="fine">Free tools forever · Paid programs free for 90 days · No card needed</p>
+    <div class="h3dots" role="tablist" aria-label="Scenes">${HERO_SLIDES.map((sl, i) => `<button role="tab" aria-selected="${i === 0}" aria-label="${esc(sl.where)}" data-go="${i}"${i === 0 ? ' class="on"' : ''}><i></i><span>${esc(sl.where)}</span></button>`).join('')}</div>
+  </div>
+</section>
+<script>(function(){var r=document.querySelector('.hero3');if(!r)return;var s=r.querySelectorAll('.h3slide'),d=r.querySelectorAll('.h3dots button'),i=0,t=null;
+function go(n){s[i].classList.remove('on');d[i].classList.remove('on');d[i].setAttribute('aria-selected','false');i=(n+s.length)%s.length;s[i].classList.add('on');d[i].classList.add('on');d[i].setAttribute('aria-selected','true');}
+var still=matchMedia('(prefers-reduced-motion: reduce)').matches;function play(){if(!still&&!t)t=setInterval(function(){go(i+1)},6500);}function stop(){clearInterval(t);t=null;}
+d.forEach(function(b){b.addEventListener('click',function(){stop();go(+b.dataset.go);});});r.addEventListener('mouseenter',stop);r.addEventListener('mouseleave',play);
+document.addEventListener('visibilitychange',function(){document.hidden?stop():play();});play();})();</script>`;
+}
 const indLink = (i, up) => `${up}industries/${i.id}.html`;
 // The Riyeser Central window on the home page, drawn in HTML so it stays sharp at any size (sample figures).
 const CI = {
@@ -423,19 +455,10 @@ const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in o
 
 // ---------- home ----------
 page({
-  path: 'index.html', title: 'Riyeser — the everyday tools your business runs on', active: '',
-  description: 'Windows software for small businesses: accounting, payroll, file finding, PDFs and job records. Work offline and keep your records on your PC. No account or card needed.',
+  path: 'index.html', title: 'Riyeser — your whole office. Take it anywhere with you.', active: '',
+  description: 'Riyeser is everything your small business runs on: invoices, books, payroll, bookings, the till, team chat and office phones, all linked. On your PC and on the go.',
   body: (up) => `
-<div class="hero hero2"><div class="c">
-  <div>
-    <h1>The everyday tools your business runs on.</h1>
-    <p class="lead">Books, payroll and job records. On your Windows PC.</p>
-    <div class="ctas"><a class="btn p big" href="${up}downloads.html">${WINDL}</a><a class="tlink" href="#find">Explore programs</a></div>
-    <p class="fine">Windows 10 &amp; 11 · No account or card needed · Works offline</p>
-    <div class="badges"><span class="chip">${svg('<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>')}Free tools + 90-day trials</span><span class="chip">${svg('<rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>')}Your data stays on your PC</span>${EARLY_BIRD ? `<a class="chip gold" href="${up}pricing.html#early">🐣 Early bird: 50% off your first year</a>` : ''}</div>
-  </div>
-  ${photoPop('home', up, 'big')}
-</div></div>
+${homeHero(up)}
 
 <section class="finder" id="find"><div class="c">
   <h2 class="h2">Find your program</h2>
