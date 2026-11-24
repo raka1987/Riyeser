@@ -346,6 +346,19 @@
   const demoBar = () => (DEMO ? `<div class="demo-bar">This is a demo with sample messages and calls${CONFIGURED ? ` · <a href="${HERE}">Sign in for real</a>` : ''} · <a href="/programs/link.html">About Riyeser Link</a></div>` : '');
 
   // ------------------------------------------------------------------ sign in / create account
+  // A password box with an eye to show what was typed, and a Caps Lock warning.
+  const pwField = (name, label, auto, hint) => `<label class="f"><span>${label}</span><span class="pwwrap"><input type="password" name="${name}" minlength="8" autocomplete="${auto}" required>
+    <button type="button" class="pweye" aria-label="Show password" title="Show password" aria-pressed="false">👁</button></span>
+    <small class="capsnote" hidden>Caps Lock is on</small>${hint ? `<small class="fhint">${hint}</small>` : ''}</label>`;
+  function wirePw(root) {
+    root.querySelectorAll('.pwwrap').forEach((w) => {
+      const i = w.querySelector('input'); const b = w.querySelector('.pweye'); const caps = w.parentElement.querySelector('.capsnote');
+      b.onclick = () => { const show = i.type === 'password'; i.type = show ? 'text' : 'password'; const l = show ? 'Hide password' : 'Show password';
+        b.setAttribute('aria-label', l); b.title = l; b.setAttribute('aria-pressed', String(show)); b.classList.toggle('on', show); i.focus(); };
+      const check = (e) => { if (e.getModifierState) caps.hidden = !e.getModifierState('CapsLock'); };
+      i.addEventListener('keydown', check); i.addEventListener('keyup', check); i.addEventListener('blur', () => { caps.hidden = true; });
+    });
+  }
   function gate(mode = 'in', note = '') {
     const join = params.get('join');
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
@@ -356,8 +369,9 @@
       <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. One account for you, your business and every Riyeser program.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for you, your business and all your Riyeser programs.'}</p>
       ${note}
       ${mode === 'up' ? '<label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>' : ''}
-      <label class="f"><span>Email</span><input type="email" name="email" autocomplete="email" required></label>
-      ${mode !== 'reset' ? `<label class="f"><span>Password</span><input type="password" name="password" minlength="8" autocomplete="${mode === 'up' ? 'new-password' : 'current-password'}" required>${mode === 'up' ? '<small class="fhint">At least 8 characters.</small>' : ''}</label>` : ''}
+      <label class="f"><span>Email</span><input type="email" name="email" autocomplete="username email" required></label>
+      ${mode !== 'reset' ? pwField('password', 'Password', mode === 'up' ? 'new-password' : 'current-password', mode === 'up' ? 'At least 8 characters.' : '') : ''}
+      ${mode === 'up' ? pwField('password2', 'Confirm password', 'new-password', '') : ''}<div id="gerr"></div>
       ${mode === 'up' ? detailsFields(!!join) : ''}
       <button class="btn p w" type="submit">${mode === 'up' ? 'Create account' : mode === 'reset' ? 'Send the link' : 'Sign in'}</button>
       ${mode === 'up' ? `<button type="button" class="btn w gcancel" id="gcancel">Cancel</button>` : ''}
@@ -365,6 +379,7 @@
       <div class="or">New to Riyeser?</div><button type="button" class="btn w" data-go="up">Create a free account</button><div class="alt" hidden>`
         : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div></form></div>`;
     $app.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => gate(b.dataset.go)); wireCountry($app);
+    wirePw($app);
     // Cancel: back to riyeser.com (in the Windows app, back to Sign in)
     const cx = $app.querySelector('#gcancel'); if (cx) cx.onclick = () => (/Electron/.test(navigator.userAgent) ? gate('in') : location.assign('/'));
     $app.querySelector('#gf').onsubmit = async (e) => {
@@ -372,6 +387,7 @@
       try {
         if (mode === 'reset') { await api.resetPassword(f.get('email')); return gate('in', '<div class="ok">Check your email for the link.</div>'); }
         if (mode === 'up') {
+          if (f.get('password') !== f.get('password2')) { btn.disabled = false; $app.querySelector('#gerr').innerHTML = '<div class="err">The two passwords don\'t match.</div>'; $app.querySelector('[name=password2]').focus(); return; }
           const r = await api.signUp(f.get('email'), f.get('password'), readDetails(f));
           if (!r.session) return gate('in', '<div class="ok">Nearly there: open the link we just emailed you, then sign in here.</div>');
         } else await api.signIn(f.get('email'), f.get('password'));

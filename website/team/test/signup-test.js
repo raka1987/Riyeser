@@ -38,7 +38,25 @@ const { chromium } = require('playwright');
   await pg.fill('[name=you]', 'Sione Example'); await pg.fill('[name=email]', user.email); await pg.fill('[name=password]', 'a-good-password');
   await pg.selectOption('[name=country]', 'Samoa'); console.log('   phone hint for Samoa:', await pg.getAttribute('[name=phone]', 'placeholder'));
   await pg.fill('[name=phone]', '+685 70 00000'); await pg.fill('[name=team]', 'Sample Garden Care'); await pg.fill('[name=tax_number]', '12-345-678');
-  await pg.fill('[name=address]', '1 Example Road, Apia'); await pg.click('button[type=submit]');
+  await pg.fill('[name=address]', '1 Example Road, Apia');
+  // see what you typed: the eye shows and hides the password
+  const eye = '.pwwrap:has([name=password]) .pweye';
+  console.log('   autocomplete:', await pg.getAttribute('[name=email]', 'autocomplete'), '/', await pg.getAttribute('[name=password]', 'autocomplete'), '/', await pg.getAttribute('[name=password2]', 'autocomplete'));
+  if (await pg.getAttribute('[name=email]', 'autocomplete') !== 'username email' || await pg.getAttribute('[name=password2]', 'autocomplete') !== 'new-password') errs.push('autocomplete attributes');
+  await pg.click(eye);
+  const shown = [await pg.getAttribute('[name=password]', 'type'), await pg.getAttribute(eye, 'aria-label')];
+  await pg.click(eye);
+  const hidden = [await pg.getAttribute('[name=password]', 'type'), await pg.getAttribute(eye, 'aria-label')];
+  console.log('   eye:', shown.join(' / '), '->', hidden.join(' / '));
+  if (shown.join() !== 'text,Hide password' || hidden.join() !== 'password,Show password') errs.push('the eye should toggle the password');
+  // Caps Lock warning
+  await pg.focus('[name=password]'); await pg.keyboard.press('CapsLock'); await pg.keyboard.press('CapsLock');
+  console.log('   Caps Lock note text:', await pg.$eval('.capsnote', (x) => x.textContent));
+  // the confirm box must match
+  await pg.fill('[name=password2]', 'a-different-one'); await pg.click('button[type=submit]'); await pg.waitForSelector('#gerr .err');
+  console.log('   mismatch:', await pg.textContent('#gerr .err'), '| sent anyway?', !!signupSent);
+  if ((await pg.textContent('#gerr .err')) !== 'The two passwords don\'t match.' || signupSent) errs.push('confirm password must block a mismatch');
+  await pg.fill('[name=password2]', 'a-good-password'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.ok'); console.log('2. after creating:', (await pg.textContent('.ok')).trim());
   console.log('   details kept with the account:', JSON.stringify(signupSent && signupSent.data && signupSent.data.riyeser_signup));
   // The confirmation email brings them back to the page they signed up on: /link/ (riyeser.com/link/ in Supabase's Redirect URLs)

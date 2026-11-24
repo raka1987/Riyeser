@@ -37,7 +37,7 @@ const BASE = 'http://127.0.0.1:8090';
   await pg.goto(`${BASE}/team/?signup`); await pg.waitForSelector('#gf');
   const fields = await pg.$$eval('#gf label > span', (x) => x.length);
   console.log('1. /team/?signup shows the sign-up form with', fields, 'fields');
-  await pg.fill('[name=you]', 'Alex Sample'); await pg.fill('[name=email]', user.email); await pg.fill('[name=password]', 'a-good-password');
+  await pg.fill('[name=you]', 'Alex Sample'); await pg.fill('[name=email]', user.email); await pg.fill('[name=password]', 'a-good-password'); await pg.fill('[name=password2]', 'a-good-password');
   await pg.click('button[type=submit]'); await pg.waitForSelector('.ok');
   console.log('   confirmation email returns to:', signup && signup.redirectTo);
   if (!signup || signup.redirectTo !== `${BASE}/team/?signup`) fail('a sign-up on /team/ must return to /team/');
