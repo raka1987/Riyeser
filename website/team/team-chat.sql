@@ -843,20 +843,20 @@ create or replace function public.hq_all_perms() returns text[] language sql imm
     'people.change_owner', 'business.close', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.assign',
     'support.saved_replies', 'support.escalate', 'support.level2', 'support.level3', 'refunds.view', 'refunds.request',
     'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'emails.manage', 'accounts.inactive',
-    'staff.manage', 'audit.view', 'settings.manage', 'link.support']
+    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view']
 $$;
 create or replace function public.hq_role_perms(r text) returns text[] language sql immutable as $$
   select case r
     when 'owner' then public.hq_all_perms()
     when 'finance' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'licences.manage',
       'support.view', 'support.reply', 'support.level2', 'support.level3', 'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay',
-      'offers.grant', 'offers.approve', 'emails.view']
+      'offers.grant', 'offers.approve', 'emails.view', 'reports.view']
     when 'support' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'refunds.view',
       'refunds.request', 'offers.grant', 'emails.view', 'link.support']
     when 'senior' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'people.change_owner', 'business.close', 'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies',
-      'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support']
+      'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view']
     when 'sales' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'support.view', 'offers.grant']
     when 'developer' then array['overview.view', 'downloads.view']
     else '{}'::text[] end
@@ -3014,3 +3014,743 @@ revoke all on function public.link_int(jsonb), public.link_bool(jsonb), public.l
 grant execute on function public.link_office_report(uuid, text, jsonb), public.link_office_pending(uuid, text), public.link_office_done(uuid, boolean, text, text),
   public.link_command(uuid, text, text, jsonb), public.link_command_state(uuid), public.link_reveal_take(uuid), public.link_status(uuid),
   public.link_support_allow(uuid), public.link_support_end(uuid), public.hq_company_link(uuid) to authenticated;
+-- ===== HQ customer page & reports =====
+-- The full customer page in HQ (#/company/<id>): contact person, programs with one-click extensions, PCs and the
+-- Riyeser programs installed on them, people, one conversation timeline (tickets, emails, notes, logged calls,
+-- refunds, free periods), staff-started tickets ("Message customer"), follow-ups; the Companies list with filters,
+-- sorting and server-side pages (for 15,000+ businesses); Reports; and the HQ home's "Needs attention".
+-- Same rules as above: every hq_ function checks a permission with hq_need (two-step sign-in included), every change
+-- is written to hq_audit, nothing deletes customer data, and HQ never sees customers' chat messages or books.
+
+-- ---------------------------------------------------------------- new columns and indexes (for 15,000+ businesses)
+-- Which Riyeser programs are installed on each linked PC, as Riyeser Central last reported it: [{id, version}].
+alter table public.devices add column if not exists programs jsonb;
+alter table public.devices add column if not exists programs_at timestamptz;
+-- Notes can be logged calls (in or out, with whom), pinned, and have a follow-up date for the staff member who wrote them.
+alter table public.hq_notes add column if not exists kind text not null default 'note';
+do $$ begin
+  alter table public.hq_notes add constraint hq_notes_kind check (kind in ('note', 'call'));
+exception when duplicate_object then null; end $$;
+alter table public.hq_notes add column if not exists direction text check (direction in ('in', 'out'));
+alter table public.hq_notes add column if not exists contact text check (length(contact) <= 120);
+alter table public.hq_notes add column if not exists follow_up date;
+alter table public.hq_notes add column if not exists follow_up_done_at timestamptz;
+alter table public.hq_notes add column if not exists pinned boolean not null default false;
+-- Tickets Riyeser started ("Message customer"): the first message is from staff, to someone in the business.
+alter table public.support_tickets add column if not exists staff_started boolean not null default false;
+alter table public.support_tickets add column if not exists started_by uuid references auth.users(id) on delete set null;
+-- When each program was first paid for (for the revenue estimate and trial conversion).
+alter table public.company_modules add column if not exists paid_since date;
+update public.company_modules set paid_since = updated_at::date where paid_since is null and status in ('active', 'cancelled') and paid_until is not null;
+create or replace function public.company_modules_paid_since() returns trigger language plpgsql as $$
+begin
+  if new.status = 'active' and (tg_op = 'INSERT' or old.status <> 'active' or (old.paid_until is not null and old.paid_until < current_date)) then
+    new.paid_since := current_date;
+  end if;
+  return new;
+end $$;
+drop trigger if exists company_modules_paid_since on public.company_modules;
+create trigger company_modules_paid_since before insert or update on public.company_modules for each row execute function public.company_modules_paid_since();
+-- The owner-approved removal (hq_remove_accounts) blanks note text; this also blanks who a call was with.
+create or replace function public.hq_notes_removing() returns trigger language plpgsql as $$
+begin
+  if current_setting('riyeser.removing', true) = 'on' then new.contact := null; end if;
+  return new;
+end $$;
+drop trigger if exists hq_notes_removing on public.hq_notes;
+create trigger hq_notes_removing before update on public.hq_notes for each row execute function public.hq_notes_removing();
+
+create index if not exists workspaces_created on public.workspaces (created_at desc);
+create index if not exists workspaces_last_active on public.workspaces (last_active_at);
+create index if not exists workspaces_status on public.workspaces (status);
+create index if not exists workspaces_country on public.workspaces (country);
+create index if not exists company_modules_trial_ends on public.company_modules (trial_ends) where status = 'trial';
+create index if not exists company_modules_paid_until on public.company_modules (paid_until);
+create index if not exists company_modules_paid_since on public.company_modules (paid_since);
+create index if not exists members_owner on public.members (workspace_id) where role = 'owner';
+create index if not exists members_user on public.members (user_id);
+create index if not exists devices_ws on public.devices (workspace_id, last_seen desc);
+create index if not exists support_tickets_ws_open on public.support_tickets (workspace_id) where status <> 'done';
+create index if not exists support_tickets_created on public.support_tickets (created_at);
+create index if not exists email_outbox_ws on public.email_outbox (workspace_id, id desc);
+create index if not exists hq_notes_ws on public.hq_notes (workspace_id, created_at desc);
+create index if not exists hq_notes_follow_up on public.hq_notes (author, follow_up) where follow_up is not null and follow_up_done_at is null;
+create index if not exists refund_requests_status on public.refund_requests (status);
+create index if not exists offers_status on public.offers (status);
+
+-- ---------------------------------------------------------------- Riyeser Central: the programs on each PC
+-- Central sends this when it links the PC and at its daily check-in. Only for someone in the business, and only
+-- for a PC they linked. programs: [{"id": "pos", "version": "1.4.0"}, ...] (or {"pos": "1.4.0", ...}).
+create or replace function public.report_programs(ws uuid, device uuid, programs jsonb) returns void
+  language plpgsql security definer set search_path = public as $$
+declare arr jsonb; clean jsonb;
+begin
+  if not is_member(ws) then raise exception 'You''re not in that company'; end if;
+  if not exists (select 1 from devices d where d.id = device and d.workspace_id = ws and d.user_id = auth.uid()) then
+    raise exception 'Link this PC to the company first'; end if;
+  arr := case jsonb_typeof(report_programs.programs)
+    when 'array' then report_programs.programs
+    when 'object' then (select coalesce(jsonb_agg(jsonb_build_object('id', k, 'version', v)), '[]') from jsonb_each_text(report_programs.programs) e(k, v))
+    else '[]'::jsonb end;
+  select coalesce(jsonb_agg(jsonb_build_object('id', y.pid, 'version', y.ver) order by y.pid), '[]') into clean from (
+    select distinct on (e ->> 'id') e ->> 'id' as pid, left(nullif(trim(coalesce(e ->> 'version', '')), ''), 40) as ver
+    from jsonb_array_elements(arr) e
+    where jsonb_typeof(e) = 'object' and coalesce(e ->> 'id', '') ~ '^[a-z0-9-]{1,40}$'
+    order by e ->> 'id' limit 60) y;
+  update devices d set programs = clean, programs_at = now(), last_seen = now() where d.id = device and d.workspace_id = ws;
+end $$;
+
+-- ---------------------------------------------------------------- helpers (only called by the checked hq_ functions)
+-- hq_can with two permissions (either will do)
+create or replace function public.hq_can(perm text, perm2 text) returns boolean
+  language sql stable security definer set search_path = public as $$ select public.hq_can(perm) or public.hq_can(perm2) $$;
+-- What someone typed when they made their account on riyeser.com (only these fields: never anything else kept with it).
+create or replace function public.signup_json(md jsonb) returns jsonb language sql immutable as $$
+  select jsonb_strip_nulls(jsonb_build_object(
+    'you', nullif(s ->> 'you', ''), 'phone', nullif(s ->> 'phone', ''), 'country', nullif(s ->> 'country', ''), 'email', nullif(s ->> 'email', ''),
+    'biz', nullif(case when jsonb_typeof(s -> 'biz') = 'object' then s -> 'biz' ->> 'name' else s ->> 'biz' end, ''),
+    'tax_number', nullif(coalesce(s -> 'biz' ->> 'tax_number', s ->> 'tax_number'), ''),
+    'address', nullif(coalesce(s -> 'biz' ->> 'address', s ->> 'address'), '')))
+  from (select case when jsonb_typeof(md -> 'riyeser_signup') = 'object' then md -> 'riyeser_signup' else '{}'::jsonb end as s) x
+$$;
+-- One person in a business: their contact details and sign-in (never their messages).
+create or replace function public.hq_person(ws uuid, uid uuid) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('user_id', m.user_id, 'name', m.display_name, 'role', m.role, 'job_role', m.job_role, 'extension', m.extension,
+    'email', u.email::text, 'phone', public.signup_json(u.raw_user_meta_data) ->> 'phone', 'country', public.signup_json(u.raw_user_meta_data) ->> 'country',
+    'signed_up', u.created_at, 'last_sign_in', u.last_sign_in_at, 'email_confirmed', u.email_confirmed_at is not null,
+    'two_step', public.has_two_step(m.user_id), 'joined', m.joined_at, 'signup', public.signup_json(u.raw_user_meta_data),
+    'branches', (select coalesce(json_agg(b.name order by b.extension), '[]') from branch_members bm join branches b on b.id = bm.branch_id
+                 where bm.user_id = m.user_id and b.workspace_id = ws))
+  from members m join auth.users u on u.id = m.user_id where m.workspace_id = ws and m.user_id = uid
+$$;
+create or replace function public.hq_note_json(n hq_notes) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', n.id, 'kind', n.kind, 'body', n.body, 'at', n.created_at, 'by', public.staff_name(n.author), 'author', n.author,
+    'direction', n.direction, 'contact', n.contact, 'follow_up', n.follow_up, 'follow_up_done_at', n.follow_up_done_at, 'pinned', n.pinned)
+$$;
+-- The business's conversations, newest first: tickets, emails sent (subject and status only), notes, logged calls,
+-- refunds and free periods. Tickets and refunds only for staff who may see them.
+create or replace function public.hq_timeline(ws uuid) returns json
+  language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(x order by x.at desc), '[]') from (select * from (
+    select 'ticket' as kind, t.created_at as at, t.id::text as id, t.ref, t.subject as title, t.status, t.staff_started as by_staff,
+      t.topic as detail, case when t.staff_started then public.staff_name(t.started_by)
+        else (select m.display_name from members m where m.workspace_id = ws and m.user_id = t.opened_by) end as who, null::date as follow_up, t.level::text as extra
+    from support_tickets t where t.workspace_id = ws and public.hq_can('support.view')
+    union all
+    select 'email', e.created_at, e.id::text, null, e.subject, e.status, true, e.template, e.to_address, null, null
+    from email_outbox e where e.workspace_id = ws and public.hq_can('emails.view', 'support.view')
+    union all
+    select n.kind, n.created_at, n.id::text, null, n.body, case when n.follow_up is not null and n.follow_up_done_at is null then 'follow_up' end,
+      true, n.direction, public.staff_name(n.author), n.follow_up, n.contact
+    from hq_notes n where n.workspace_id = ws
+    union all
+    select 'refund', f.created_at, f.id::text, f.ref, f.for_what, f.status, f.on_behalf_by is not null, f.currency || ' ' || f.amount::text,
+      coalesce(public.staff_name(f.on_behalf_by), (select m.display_name from members m where m.workspace_id = ws and m.user_id = f.requested_by)), null, null
+    from refund_requests f where f.workspace_id = ws and public.hq_can('refunds.view')
+    union all
+    select 'offer', o.created_at, o.id::text, o.ref, o.days || ' free days · ' || array_to_string(array(select public.module_label(x) from unnest(o.modules) x), ', '),
+      o.status, true, o.reason_category, public.staff_name(o.requested_by), o.ends_at, null
+    from offers o where o.workspace_id = ws
+  ) y order by y.at desc limit 300) x
+$$;
+
+-- ---------------------------------------------------------------- the customer page
+create or replace function public.hq_company_page(ws uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare w workspaces; r json; owner_id uuid; od numeric := hq_setting_num('support.overdue_hours', 24);
+begin
+  perform hq_need(array['customers.view']);
+  select * into w from workspaces where id = ws;
+  if w.id is null then raise exception 'That business doesn''t exist.'; end if;
+  select m.user_id into owner_id from members m where m.workspace_id = ws and m.role = 'owner' order by m.joined_at limit 1;
+  select json_build_object(
+    'profile', json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'legal_name', w.legal_name,
+        'tax_number', w.tax_number, 'address', w.address, 'phone', w.phone, 'email', w.email, 'country', w.country,
+        'created_at', w.created_at, 'calls_paid_until', w.calls_paid_until, 'require_approval', w.require_approval, 'kind', w.kind,
+        'status', w.status, 'closed_at', w.closed_at, 'closed_reason', w.closed_reason, 'last_active_at', w.last_active_at,
+        'duplicate_of', w.duplicate_of, 'duplicate_of_name', (select d.name from workspaces d where d.id = w.duplicate_of), 'removal_state', w.removal_state,
+        'hq_owner', w.hq_owner, 'hq_owner_name', public.staff_name(w.hq_owner)),
+    'next_follow_up', public.next_follow_up(ws),
+    'staff', (select coalesce(json_agg(json_build_object('user_id', s.user_id, 'name', s.display_name) order by s.display_name), '[]') from hq_staff s where s.active),
+    'owner', case when owner_id is not null then public.hq_person(ws, owner_id) end,
+    'people', (select coalesce(json_agg(public.hq_person(ws, m.user_id) order by (m.role = 'owner') desc, m.joined_at), '[]') from members m where m.workspace_id = ws),
+    'branches', (select coalesce(json_agg(json_build_object('name', b.name, 'extension', b.extension,
+        'people', (select count(*) from branch_members bm where bm.branch_id = b.id)) order by b.extension), '[]') from branches b where b.workspace_id = ws),
+    'pcs', (select coalesce(json_agg(json_build_object('id', d.id, 'name', d.device_name, 'platform', d.platform, 'version', d.app_version,
+        'last_seen', d.last_seen, 'linked_at', d.linked_at, 'programs', coalesce(d.programs, '[]'::jsonb), 'programs_at', d.programs_at,
+        'person', (select m.display_name from members m where m.workspace_id = ws and m.user_id = d.user_id)) order by d.last_seen desc), '[]')
+        from devices d where d.workspace_id = ws),
+    'licence', case when hq_can('licences.view') then licence_json(ws) end,
+    'monthly', case when hq_can('licences.view') then company_monthly(ws) end,
+    'requests_waiting', (select count(*) from join_requests j where j.workspace_id = ws and j.status = 'pending'),
+    'notes', (select coalesce(json_agg(public.hq_note_json(n) order by n.pinned desc, n.created_at desc), '[]')
+        from (select * from hq_notes where workspace_id = ws order by created_at desc limit 200) n),
+    'tickets_open', (select count(*) from support_tickets t where t.workspace_id = ws and t.status <> 'done'),
+    'tickets_overdue', (select count(*) from support_tickets t where t.workspace_id = ws and t.status <> 'done'
+        and (t.overdue_at is not null or (t.first_reply_at is null and t.created_at < now() - make_interval(secs => od * 3600)))),
+    'timeline', public.hq_timeline(ws),
+    'extra', public.hq_company_extra(ws)) into r;
+  perform hq_log('customer.viewed', jsonb_build_object('workspace_id', ws));
+  return r;
+end $$;
+
+-- ---------------------------------------------------------------- Message customer (a ticket Riyeser starts)
+-- Opened on behalf of the business, addressed to one person in it (the owner when none is chosen). They see it on
+-- their Riyeser home page (Help) as "Message from Riyeser" and can reply; it's emailed to them through the outbox.
+create or replace function public.hq_message_customer(ws uuid, to_person uuid, msg_topic text, msg_subject text, msg_body text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; who uuid := to_person; nm text; tp text := coalesce(nullif(msg_topic, ''), 'other');
+begin
+  perform hq_need(array['support.reply']);
+  if not exists (select 1 from workspaces where id = ws) then raise exception 'That business doesn''t exist.'; end if;
+  if who is null then select m.user_id into who from members m where m.workspace_id = ws and m.role = 'owner' order by m.joined_at limit 1; end if;
+  if who is null or not exists (select 1 from members m where m.workspace_id = ws and m.user_id = who) then
+    raise exception 'Choose someone who is in this business.'; end if;
+  if length(trim(coalesce(msg_subject, ''))) = 0 or length(trim(coalesce(msg_body, ''))) = 0 then
+    raise exception 'Add a subject and a message, then send it again.'; end if;
+  if tp not in ('billing', 'signin', 'program', 'other') then tp := 'other'; end if;
+  insert into support_tickets (workspace_id, opened_by, topic, subject, status, staff_started, started_by, assignee, first_reply_at, last_staff_at)
+    values (ws, who, tp, left(trim(msg_subject), 150), 'waiting_customer', true, auth.uid(), auth.uid(), now(), now()) returning * into t;
+  insert into support_messages (ticket_id, author, is_staff, body) values (t.id, auth.uid(), true, left(trim(msg_body), 5000));
+  select m.display_name into nm from members m where m.workspace_id = ws and m.user_id = who;
+  perform queue_email(who, null, 'staff_message', t.subject || ' (' || t.ref || ')',
+    'Hi ' || coalesce(split_part(trim(nm), ' ', 1), '') || ',' || E'\n\n' || trim(msg_body) || E'\n\n'
+    || 'To reply, sign in at riyeser.com/link and open "Your help requests" on your Riyeser home page (' || t.ref || ').', ws, t.id, null);
+  perform hq_log('ticket.started', jsonb_build_object('workspace_id', ws, 'ticket', t.ref, 'to', who));
+  return json_build_object('id', t.id, 'ref', t.ref);
+end $$;
+
+-- Customers' help requests now say when Riyeser started them (the rest is as before).
+create or replace function public.my_tickets() returns json
+  language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(x order by x.updated_at desc), '[]') from (
+    select t.id, t.ref, t.subject, t.topic, t.status, t.workspace_id, w.name as business, t.opened_by = auth.uid() as mine,
+      t.staff_started as from_riyeser, t.created_at, t.updated_at,
+      (select count(*) from support_messages m where m.ticket_id = t.id and m.is_staff and not m.internal
+         and m.created_at > coalesce((select r.read_at from support_reads r where r.ticket_id = t.id and r.user_id = auth.uid()), '-infinity')) as unread
+    from support_tickets t left join workspaces w on w.id = t.workspace_id
+    where auth.uid() is not null and (t.opened_by = auth.uid() or (t.workspace_id is not null and public.is_admin(t.workspace_id)))
+    order by t.updated_at desc limit 50) x
+$$;
+create or replace function public.my_ticket(ticket uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare r json;
+begin
+  if not can_see_ticket(ticket) then raise exception 'We couldn''t find that help request.'; end if;
+  select json_build_object('id', t.id, 'ref', t.ref, 'subject', t.subject, 'topic', t.topic, 'status', t.status, 'created_at', t.created_at,
+    'from_riyeser', t.staff_started,
+    'messages', (select coalesce(json_agg(json_build_object('id', m.id, 'staff', m.is_staff, 'mine', m.author = auth.uid(),
+        'from', case when m.is_staff then 'Riyeser Support'
+                     else coalesce((select display_name from members mm where mm.workspace_id = t.workspace_id and mm.user_id = m.author), 'You') end,
+        'body', m.body, 'at', m.created_at) order by m.id), '[]') from support_messages m where m.ticket_id = t.id and not m.internal))
+    into r from support_tickets t where t.id = ticket;
+  insert into support_reads (ticket_id, user_id) values (ticket, auth.uid()) on conflict (ticket_id, user_id) do update set read_at = now();
+  return r;
+end $$;
+
+-- ---------------------------------------------------------------- notes, logged calls and follow-ups
+create or replace function public.hq_note_add(ws uuid, note_kind text, note_body text, call_direction text, call_with text, follow_up_on date, pin boolean)
+  returns bigint language plpgsql security definer set search_path = public as $$
+declare i bigint; k text := coalesce(nullif(note_kind, ''), 'note');
+begin
+  perform hq_need(array['customers.notes']);
+  if not exists (select 1 from workspaces where id = ws) then raise exception 'That business doesn''t exist.'; end if;
+  if k not in ('note', 'call') then raise exception 'Choose a note or a call.'; end if;
+  if length(trim(coalesce(note_body, ''))) = 0 then raise exception 'Write what it was about first.'; end if;
+  if k = 'call' and coalesce(call_direction, '') not in ('in', 'out') then raise exception 'Choose whether they called us or we called them.'; end if;
+  if follow_up_on is not null and follow_up_on < current_date then raise exception 'Choose a follow-up date from today on.'; end if;
+  insert into hq_notes (workspace_id, author, body, kind, direction, contact, follow_up, pinned)
+    values (ws, auth.uid(), left(trim(note_body), 2000), k, case when k = 'call' then call_direction end,
+            nullif(left(trim(coalesce(call_with, '')), 120), ''), follow_up_on, coalesce(pin, false))
+    returning id into i;
+  -- (no note text here: the HQ history is kept for good)
+  perform hq_log(case when k = 'call' then 'call.logged' else 'note.added' end,
+    jsonb_build_object('workspace_id', ws, 'note', i, 'direction', call_direction, 'follow_up', follow_up_on, 'pinned', coalesce(pin, false)));
+  return i;
+end $$;
+create or replace function public.hq_note_pin(note_id bigint, pin boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+declare n hq_notes;
+begin
+  perform hq_need(array['customers.notes']);
+  update hq_notes set pinned = coalesce(pin, false) where id = note_id returning * into n;
+  if n.id is null then raise exception 'That note doesn''t exist.'; end if;
+  perform hq_log(case when n.pinned then 'note.pinned' else 'note.unpinned' end, jsonb_build_object('workspace_id', n.workspace_id, 'note', n.id));
+end $$;
+create or replace function public.hq_follow_up_done(note_id bigint) returns void
+  language plpgsql security definer set search_path = public as $$
+declare n hq_notes;
+begin
+  perform hq_need(array['customers.notes']);
+  update hq_notes set follow_up_done_at = now() where id = note_id and follow_up is not null and follow_up_done_at is null returning * into n;
+  if n.id is null then raise exception 'That follow-up is already done.'; end if;
+  perform hq_log('follow_up.done', jsonb_build_object('workspace_id', n.workspace_id, 'note', n.id));
+end $$;
+-- My follow-ups: the ones I set and haven't ticked off, soonest first.
+create or replace function public.hq_my_follow_ups() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['customers.view', 'customers.notes']);
+  return (select coalesce(json_agg(json_build_object('id', n.id, 'workspace_id', n.workspace_id, 'business', w.name, 'company_code', w.company_code,
+      'kind', n.kind, 'body', left(n.body, 200), 'contact', n.contact, 'direction', n.direction, 'follow_up', n.follow_up,
+      'due', n.follow_up <= current_date, 'overdue', n.follow_up < current_date, 'at', n.created_at) order by n.follow_up, n.id), '[]')
+    from (select * from hq_notes where author = auth.uid() and follow_up is not null and follow_up_done_at is null order by follow_up, id limit 200) n
+    join workspaces w on w.id = n.workspace_id);
+end $$;
+
+-- ---------------------------------------------------------------- one-click licence actions (the Programs tab)
+-- act: 'extend' (days: +7/+30/+90 free), 'unlock' (a trial to 30 days, or paid-until for a lapsed paid program),
+-- 'paid_until' (a date), 'pause' (stops now) or 'cancel' (works to the end of what's paid). Free time goes through
+-- the free periods (offers) above, so the self limit (31 days) and supervisor approval still apply. Paid-until,
+-- pause and cancel need licences.manage. Each needs a reason (category and note) and can name a ticket.
+create or replace function public.hq_quick_licence(ws uuid, mod text, act text, days int, until_day date, reason_category text, reason text, ticket_ref text)
+  returns json language plpgsql security definer set search_path = public as $$
+declare st json; s text; tr text; target date; base date; trialish boolean; res json; was jsonb;
+begin
+  perform hq_need(array['offers.grant', 'licences.manage']);
+  if mod is null or mod not in ('basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls') then raise exception 'Choose a program.'; end if;
+  if act is null or act not in ('extend', 'unlock', 'paid_until', 'pause', 'cancel') then raise exception 'Choose what to do.'; end if;
+  if not exists (select 1 from workspaces where id = ws) then raise exception 'That business doesn''t exist.'; end if;
+  st := module_state(ws, mod); s := st ->> 'status';
+  if s = 'closed' then raise exception 'This business is closed or suspended. Reopen it first.'; end if;
+  trialish := s in ('trial', 'ended') and not exists (select 1 from company_modules c where c.workspace_id = ws and c.module = mod and c.status <> 'trial');
+  was := jsonb_build_object('status', s, 'trial_ends', st ->> 'trial_ends', 'paid_until', st ->> 'paid_until');
+  if act in ('extend', 'unlock') and reason_category not in ('retention', 'goodwill', 'promotion', 'other') then raise exception 'Choose a reason.'; end if;
+  if act in ('paid_until', 'pause', 'cancel') and coalesce(reason_category, '') not in ('payment', 'correction', 'customer_asked', 'non_payment', 'other') then
+    raise exception 'Choose a reason.'; end if;
+  if act = 'extend' then
+    if days is null or days < 1 or days > 1000 then raise exception 'Choose how many days.'; end if;
+    if trialish then res := hq_grant_offer(ws, 'trial', array[mod], days, 'days', reason_category, reason, ticket_ref);
+    elsif s = 'active' then res := hq_grant_offer(ws, 'paid', array[mod], days, 'days', reason_category, reason, ticket_ref);
+    else raise exception '% isn''t on a trial or paid right now. Use Unlock now or Mark paid until.', module_label(mod); end if;
+    return (res::jsonb || jsonb_build_object('action', act, 'module', mod))::json;
+  elsif act = 'unlock' then
+    if trialish then
+      target := current_date + 30;
+      base := greatest(coalesce((st ->> 'trial_ends')::date, current_date), current_date);
+      if base >= target then raise exception '% is already on its trial until %.', module_label(mod), to_char(base, 'FMDD Mon YYYY'); end if;
+      res := hq_grant_offer(ws, 'trial', array[mod], target - base, 'days', reason_category, reason, ticket_ref);
+      return (res::jsonb || jsonb_build_object('action', act, 'module', mod))::json;
+    elsif s = 'active' then
+      raise exception '% is already paid%.', module_label(mod), coalesce(' until ' || to_char((st ->> 'paid_until')::date, 'FMDD Mon YYYY'), '');
+    end if;
+    -- a paid program that was cancelled or has lapsed: set it paid until a date (needs licences.manage)
+    tr := hq_fix_start('licences.manage', reason, ticket_ref);
+    target := coalesce(until_day, current_date + 30);
+    if target < current_date then raise exception 'Choose a date from today on.'; end if;
+    perform licence_set_module(ws, mod, 'active', null, target);
+  elsif act = 'paid_until' then
+    tr := hq_fix_start('licences.manage', reason, ticket_ref);
+    if until_day is null or until_day < current_date then raise exception 'Choose a date from today on.'; end if;
+    target := until_day;
+    perform licence_set_module(ws, mod, 'active', null, target);
+  else
+    tr := hq_fix_start('licences.manage', reason, ticket_ref);
+    if s = 'trial' then target := current_date - 1; perform licence_set_module(ws, mod, 'trial', target, null);
+    elsif s = 'active' then
+      target := case when act = 'pause' then current_date - 1 else (st ->> 'paid_until')::date end;
+      perform licence_set_module(ws, mod, 'cancelled', null, target);
+    elsif s = 'cancelled' and act = 'pause' and (st ->> 'active')::boolean then
+      target := current_date - 1; perform licence_set_module(ws, mod, 'cancelled', null, target);
+    else raise exception '% isn''t running, so there''s nothing to %.', module_label(mod), act; end if;
+  end if;
+  perform hq_log('licence.' || case act when 'unlock' then 'unlocked' when 'paid_until' then 'paid_until' when 'pause' then 'paused' else 'cancelled' end,
+    jsonb_build_object('workspace_id', ws, 'module', mod, 'ticket', tr, 'reason_category', reason_category, 'reason', left(trim(reason), 500),
+      'was', was, 'until', target));
+  return json_build_object('status', 'done', 'action', act, 'module', mod, 'until', target);
+end $$;
+
+-- ---------------------------------------------------------------- the Companies list: filters, sorting, pages
+-- filters: {plan: 'paid'|'trial'|'free', trial_days: 7|14|30, country, status, kind, inactive_days: 30|60|90,
+--           open_tickets: true, follow_up: true}. sort_by: name, owner, phone, plan, trial, last_active, tickets,
+-- status, country, created. 50 a page (up to 200; up to 5,000 a page for a CSV export, which is written to the history).
+create or replace function public.hq_companies_page(search text, filters jsonb, sort_by text, sort_desc boolean, page_no int, per_page int, for_export boolean)
+  returns json language plpgsql security definer set search_path = public as $$
+declare q text := nullif(trim(coalesce(search, '')), ''); fl jsonb := coalesce(filters, '{}'::jsonb); lim int; off int; r json;
+  sk text := coalesce(nullif(sort_by, ''), 'created'); dsc boolean := coalesce(sort_desc, sort_by is null or sort_by = '' or sort_by = 'created');
+  f_status text := nullif(fl ->> 'status', ''); f_country text := nullif(fl ->> 'country', ''); f_kind text := nullif(fl ->> 'kind', '');
+  f_plan text := nullif(fl ->> 'plan', ''); f_trial int; f_inactive int;
+  f_tickets boolean := coalesce((fl ->> 'open_tickets')::boolean, false); f_follow boolean := coalesce((fl ->> 'follow_up')::boolean, false);
+  f_mine boolean := coalesce((fl ->> 'mine')::boolean, false);
+begin
+  perform hq_need(array['customers.view']);
+  f_trial := case when (fl ->> 'trial_days') ~ '^[0-9]{1,4}$' then (fl ->> 'trial_days')::int end;
+  f_inactive := case when (fl ->> 'inactive_days') ~ '^[0-9]{1,4}$' then (fl ->> 'inactive_days')::int end;
+  lim := least(greatest(coalesce(per_page, 50), 1), case when coalesce(for_export, false) then 5000 else 200 end);
+  off := greatest(coalesce(page_no, 1) - 1, 0) * lim;
+  if sk not in ('name', 'owner', 'phone', 'plan', 'trial', 'last_active', 'tickets', 'status', 'country', 'created') then sk := 'created'; end if;
+  with base as (
+    select w.* from workspaces w
+    where (f_status is null or w.status = f_status)
+      and (f_country is null or coalesce(w.country, 'Not set') = f_country)
+      and (f_kind is null or w.kind = f_kind)
+      and (not f_mine or w.hq_owner = auth.uid())
+      and (f_inactive is null or coalesce(w.last_active_at, w.created_at) < now() - make_interval(days => f_inactive))
+      and (q is null or w.name ilike '%' || q || '%' or w.company_code ilike '%' || q || '%' or w.legal_name ilike '%' || q || '%'
+           or w.tax_number ilike '%' || q || '%' or w.phone ilike '%' || q || '%'
+           or exists (select 1 from members m join auth.users u on u.id = m.user_id where m.workspace_id = w.id
+                      and (u.email::text ilike '%' || q || '%' or m.display_name ilike '%' || q || '%')))
+  ), lic as (
+    select b.id, count(*) filter (where x.st = 'paid') as paid_n, count(*) filter (where x.st = 'trial') as trial_n,
+      min(x.te) filter (where x.st = 'trial') as trial_end
+    from base b cross join unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) mm(m)
+    left join company_modules c on c.workspace_id = b.id and c.module = mm.m
+    cross join lateral (select coalesce(c.trial_ends, b.created_at::date + 90) as te,
+      case when b.status <> 'active' then 'closed'
+           when c.module is null or c.status = 'trial' then case when coalesce(c.trial_ends, b.created_at::date + 90) >= current_date then 'trial' else 'ended' end
+           when c.status = 'active' then case when c.paid_until is null or c.paid_until >= current_date then 'paid' else 'ended' end
+           else case when c.paid_until >= current_date then 'cancelled' else 'ended' end end as st) x
+    group by b.id
+  ), rws as (
+    select b.id, b.name, b.company_code, b.country, b.created_at, b.status, b.kind, b.last_active_at,
+      l.paid_n, l.trial_n, l.trial_end, (l.trial_end - current_date) as trial_days,
+      o.user_id as owner_id, o.display_name as owner_name,
+      coalesce(nullif(ou.raw_user_meta_data -> 'riyeser_signup' ->> 'phone', ''), b.phone) as phone,
+      coalesce(tk.n, 0) as tickets_open
+    from base b join lic l on l.id = b.id
+    left join (select t.workspace_id, count(*) as n from support_tickets t where t.status <> 'done' group by 1) tk on tk.workspace_id = b.id
+    left join lateral (select m.user_id, m.display_name from members m where m.workspace_id = b.id and m.role = 'owner' order by m.joined_at limit 1) o on true
+    left join auth.users ou on ou.id = o.user_id
+  ), filtered as (
+    select * from rws x where
+      (f_plan is null or (f_plan = 'paid' and x.paid_n > 0) or (f_plan = 'trial' and x.paid_n = 0 and x.trial_n > 0)
+        or (f_plan = 'free' and x.paid_n = 0 and x.trial_n = 0))
+      and (f_trial is null or (x.trial_end is not null and x.trial_end <= current_date + f_trial))
+      and (not f_tickets or x.tickets_open > 0)
+      and (not f_follow or exists (select 1 from hq_notes n where n.workspace_id = x.id and n.follow_up is not null and n.follow_up_done_at is null)
+           or exists (select 1 from support_tickets t where t.workspace_id = x.id and t.status in ('new', 'waiting_us')))
+  ), ordered as (
+    select f.*, row_number() over (order by
+      case when not dsc then case sk when 'name' then lower(f.name) when 'owner' then lower(f.owner_name) when 'phone' then f.phone
+        when 'status' then f.status when 'country' then lower(f.country) end end asc nulls last,
+      case when dsc then case sk when 'name' then lower(f.name) when 'owner' then lower(f.owner_name) when 'phone' then f.phone
+        when 'status' then f.status when 'country' then lower(f.country) end end desc nulls last,
+      case when not dsc then case sk when 'plan' then f.paid_n::numeric when 'trial' then f.trial_days::numeric when 'tickets' then f.tickets_open::numeric
+        when 'last_active' then extract(epoch from f.last_active_at) when 'created' then extract(epoch from f.created_at) end end asc nulls last,
+      case when dsc then case sk when 'plan' then f.paid_n::numeric when 'trial' then f.trial_days::numeric when 'tickets' then f.tickets_open::numeric
+        when 'last_active' then extract(epoch from f.last_active_at) when 'created' then extract(epoch from f.created_at) end end desc nulls last,
+      f.created_at desc, f.id) as rn
+    from filtered f
+  )
+  select json_build_object('total', (select count(*) from filtered), 'page', greatest(coalesce(page_no, 1), 1), 'per_page', lim,
+    'sort_by', sk, 'sort_desc', dsc,
+    -- the details only shown in the list are looked up for this page's rows only
+    'rows', (select coalesce(json_agg(json_build_object('id', o.id, 'name', o.name, 'company_code', o.company_code, 'country', o.country,
+        'created_at', o.created_at, 'status', o.status, 'kind', o.kind, 'last_active_at', o.last_active_at, 'paid_n', o.paid_n,
+        'paid', coalesce((select array_agg(c.module order by c.module) from company_modules c where c.workspace_id = o.id and o.status = 'active'
+            and c.status = 'active' and (c.paid_until is null or c.paid_until >= current_date)), '{}'),
+        'trial_n', o.trial_n, 'trial_end', o.trial_end, 'trial_days', o.trial_days, 'owner_name', o.owner_name,
+        'owner_email', (select u.email::text from auth.users u where u.id = o.owner_id),
+        'phone', o.phone, 'tickets_open', o.tickets_open, 'people', (select count(*) from members m where m.workspace_id = o.id),
+        'pcs', (select count(*) from devices d where d.workspace_id = o.id),
+        'hq_owner_name', (select public.staff_name(w.hq_owner) from workspaces w where w.id = o.id),
+        'next_follow_up', (select min(n.follow_up) from hq_notes n where n.workspace_id = o.id and n.follow_up is not null and n.follow_up_done_at is null)) order by o.rn), '[]')
+      from ordered o where o.rn > off and o.rn <= off + lim),
+    'countries', (select coalesce(json_agg(json_build_object('country', c.country, 'n', c.n) order by c.n desc, c.country), '[]')
+      from (select coalesce(country, 'Not set') as country, count(*) as n from workspaces group by 1) c)) into r;
+  if coalesce(for_export, false) and coalesce(page_no, 1) <= 1 then
+    perform hq_log('customers.exported', jsonb_build_object('filters', fl, 'search', q is not null, 'rows', (r ->> 'total')::int));
+  end if;
+  return r;
+end $$;
+
+-- ---------------------------------------------------------------- Reports (reports.view)
+-- Everything for the Reports tab in one go, for a date range (from_day to to_day, at most about 2 years).
+-- Money is an estimate at list prices until payments are connected.
+create or replace function public.hq_reports(from_day date, to_day date) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare f date := coalesce(from_day, current_date - 90); t date := coalesce(to_day, current_date); r json;
+  od numeric := hq_setting_num('support.overdue_hours', 24);
+  mods text[] := array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls'];
+begin
+  perform hq_need(array['reports.view']);
+  if t < f then raise exception 'Choose a start date before the end date.'; end if;
+  if t - f > 800 then f := t - 800; end if;
+  select json_build_object('from', f, 'to', t, 'today', current_date,
+    -- sign-ups
+    'signups_by_week', (select coalesce(json_agg(x order by x.week), '[]') from (
+        select date_trunc('week', w.created_at)::date as week, count(*) as n from workspaces w where w.created_at >= f and w.created_at < t + 1 group by 1) x),
+    'funnel', (with u as (select au.id, au.email_confirmed_at from auth.users au where au.created_at >= f and au.created_at < t + 1
+                            and not exists (select 1 from hq_staff s where s.user_id = au.id)),
+                    b as (select distinct u.id as uid, m.workspace_id as ws from u join members m on m.user_id = u.id and m.role = 'owner')
+      select json_build_object('signed_up', (select count(*) from u), 'confirmed', (select count(*) from u where u.email_confirmed_at is not null),
+        'business', (select count(distinct b.uid) from b),
+        'pc_linked', (select count(distinct b.uid) from b where exists (select 1 from devices d where d.workspace_id = b.ws)),
+        'program_used', (select count(distinct b.uid) from b where exists (select 1 from devices d where d.workspace_id = b.ws and d.programs_at is not null
+            and exists (select 1 from jsonb_array_elements(d.programs) p where p ->> 'id' <> 'central'))))),
+    -- trials
+    'trials_by_week', (select coalesce(json_agg(x order by x.week), '[]') from (
+        select week, count(distinct ws) as n from (
+          select date_trunc('week', w.created_at)::date as week, w.id as ws from workspaces w where w.created_at >= f and w.created_at < t + 1
+          union all
+          select date_trunc('week', o.created_at)::date, o.workspace_id from offers o where o.kind = 'trial' and o.status in ('applied', 'approved')
+            and o.created_at >= f and o.created_at < t + 1) s group by 1) x),
+    'trials_ending', (select coalesce(json_agg(x order by x.days_left, x.name), '[]') from (
+        select w.id, w.name, w.company_code, min(z.te) as trial_ends, min(z.te) - current_date as days_left, array_agg(mm.m order by mm.m) as modules,
+          (select m.display_name from members m where m.workspace_id = w.id and m.role = 'owner' limit 1) as owner_name
+        from workspaces w cross join unnest(mods) mm(m) left join company_modules c on c.workspace_id = w.id and c.module = mm.m
+        cross join lateral (select coalesce(c.trial_ends, w.created_at::date + 90) as te) z
+        where w.status = 'active' and (c.module is null or c.status = 'trial') and z.te between current_date and current_date + 30
+        group by w.id, w.name, w.company_code limit 1000) x),
+    'conversion', (select coalesce(json_agg(x order by x.module), '[]') from (
+        select mm.m as module,
+          count(*) filter (where c.paid_since >= current_date - 30) as paid_30,
+          count(*) filter (where c.paid_since >= current_date - 30 or (coalesce(c.status, 'trial') = 'trial'
+            and coalesce(c.trial_ends, w.created_at::date + 90) between current_date - 30 and current_date - 1)) as ended_30,
+          count(*) filter (where c.paid_since >= current_date - 90) as paid_90,
+          count(*) filter (where c.paid_since >= current_date - 90 or (coalesce(c.status, 'trial') = 'trial'
+            and coalesce(c.trial_ends, w.created_at::date + 90) between current_date - 90 and current_date - 1)) as ended_90
+        from workspaces w cross join unnest(mods) mm(m) left join company_modules c on c.workspace_id = w.id and c.module = mm.m
+        group by mm.m) x),
+    -- money (estimate)
+    'revenue_by_month', (with months as (select mo::date as ms, (mo + interval '1 month' - interval '1 day')::date as me
+                                           from generate_series(date_trunc('month', f), date_trunc('month', t), interval '1 month') mo),
+          paid as (select c.workspace_id, c.module, c.paid_since, c.paid_until from company_modules c
+                   join workspaces w on w.id = c.workspace_id
+                   where c.status in ('active', 'cancelled') and c.paid_since is not null),
+          per as (select mo.ms, p.workspace_id, count(*) as n from months mo join paid p on p.paid_since <= mo.me
+                    and coalesce(p.paid_until, 'infinity'::date) >= mo.ms
+                    and not exists (select 1 from workspaces w where w.id = p.workspace_id and w.status <> 'active' and w.closed_at < mo.ms)
+                  group by 1, 2),
+          amt as (select per.ms, (per.n * 20 + coalesce(pl.extra_users, 0) * 5 + coalesce(pl.extra_companies, 0) * 10)
+                     * case when coalesce(pl.billing, 'monthly') = 'yearly' then 10.0 / 12 else 1 end
+                     * case when coalesce(pl.early_bird, false) and pl.early_bird_since > per.ms - 365 then 0.5 else 1 end as a
+                  from per left join company_plans pl on pl.workspace_id = per.workspace_id)
+      select coalesce(json_agg(json_build_object('month', mo.ms,
+          'estimate', round(coalesce((select sum(a.a) from amt a where a.ms = mo.ms), 0), 2),
+          'paying', (select count(distinct p.workspace_id) from per p where p.ms = mo.ms),
+          'new_paid', (select count(*) from paid p where p.paid_since between mo.ms and mo.me),
+          'lost', (select count(*) from paid p where p.paid_until between mo.ms and mo.me and p.paid_until < current_date)) order by mo.ms), '[]')
+      from months mo),
+    'revenue_by_program', (select coalesce(json_agg(x order by x.paying desc, x.module), '[]') from (
+        select mm.m as module, count(c.*) as paying, count(c.*) * 20 as estimate
+        from unnest(mods) mm(m) left join (company_modules c join workspaces w on w.id = c.workspace_id and w.status = 'active')
+          on c.module = mm.m and c.status = 'active' and (c.paid_until is null or c.paid_until >= current_date)
+        group by mm.m) x),
+    'monthly_now', coalesce((select sum(public.company_monthly(c.workspace_id)) from (select distinct workspace_id from company_modules
+        where status in ('active', 'cancelled') and (paid_until is null or paid_until >= current_date)) c), 0),
+    -- leaving
+    'leaving_by_month', (select coalesce(json_agg(x order by x.month), '[]') from (
+        select mo::date as month,
+          (select count(*) from workspaces w where w.status <> 'active' and w.closed_at >= mo and w.closed_at < mo + interval '1 month') as closed,
+          (select count(*) from workspaces w where w.status <> 'active' and w.closed_reason = 'inactive' and w.closed_at >= mo and w.closed_at < mo + interval '1 month') as closed_inactive,
+          (select count(distinct c.workspace_id) from company_modules c where c.status = 'cancelled' and c.updated_at >= mo and c.updated_at < mo + interval '1 month') as cancelled,
+          (select count(*) from workspaces w where w.status = 'active' and w.last_active_at >= mo and w.last_active_at < mo + interval '1 month'
+             and w.last_active_at < now() - interval '60 days') as went_quiet
+        from generate_series(date_trunc('month', f), date_trunc('month', t), interval '1 month') mo) x),
+    -- support
+    'support', json_build_object(
+      'open_by_status', (select coalesce(json_object_agg(s.status, s.n), '{}') from (select status, count(*) as n from support_tickets where status <> 'done' group by 1) s),
+      'open_by_level', (select coalesce(json_object_agg(s.level, s.n), '{}') from (select level, count(*) as n from support_tickets where status <> 'done' group by 1) s),
+      'overdue', (select count(*) from support_tickets s where s.status <> 'done'
+          and (s.overdue_at is not null or (s.first_reply_at is null and s.created_at < now() - make_interval(secs => od * 3600)))),
+      'median_first_reply_hours', (select round((percentile_cont(0.5) within group (order by extract(epoch from s.first_reply_at - s.created_at) / 3600))::numeric, 1)
+          from support_tickets s where not s.staff_started and s.first_reply_at is not null and s.created_at >= f and s.created_at < t + 1),
+      'opened', (select count(*) from support_tickets s where s.created_at >= f and s.created_at < t + 1),
+      'by_topic', (select coalesce(json_agg(x order by x.n desc), '[]') from (select s.topic, count(*) as n from support_tickets s
+          where s.created_at >= f and s.created_at < t + 1 group by 1) x),
+      'satisfaction', null),
+    -- staff
+    'staff_week', (select coalesce(json_agg(x order by x.changes desc, x.total desc), '[]') from (
+        select coalesce(public.staff_name(a.actor), 'Riyeser') as who, count(*) as total, count(*) filter (where a.action not like '%.viewed') as changes
+        from hq_audit a where a.actor is not null and a.at >= date_trunc('week', now()) group by a.actor) x),
+    'staff_range', (select coalesce(json_agg(x order by x.changes desc, x.total desc), '[]') from (
+        select coalesce(public.staff_name(a.actor), 'Riyeser') as who, count(*) as total, count(*) filter (where a.action not like '%.viewed') as changes
+        from hq_audit a where a.actor is not null and a.at >= f and a.at < t + 1 group by a.actor) x)
+  ) into r;
+  return r;
+end $$;
+
+-- ---------------------------------------------------------------- the HQ home: what needs attention, for whoever is signed in
+create or replace function public.hq_attention() returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare od numeric := hq_setting_num('support.overdue_hours', 24);
+begin
+  perform hq_need(array['overview.view']);
+  return json_build_object(
+    'unassigned', case when hq_can('support.view') then (select count(*) from support_tickets where status <> 'done' and assignee is null) end,
+    'overdue', case when hq_can('support.view') then (select count(*) from support_tickets s where s.status <> 'done'
+        and (s.overdue_at is not null or (s.first_reply_at is null and s.created_at < now() - make_interval(secs => od * 3600)))) end,
+    'mine', case when hq_can('support.view') then (select count(*) from support_tickets where status in ('new', 'waiting_us') and assignee = auth.uid()) end,
+    'approvals', case when hq_can('offers.approve') or hq_can('refunds.approve') then
+        (select count(*) from offers where status = 'waiting') + (select count(*) from refund_requests
+          where status in ('approved', 'partly_approved') and needs_second and second_approver is null) end,
+    'refunds_waiting', case when hq_can('refunds.view') then (select count(*) from refund_requests where status in ('submitted', 'reviewing')) end,
+    'emails_failed', case when hq_can('emails.view') then (select count(*) from email_outbox where status in ('failed', 'held')) end,
+    'trials_3d', case when hq_can('customers.view') then (select coalesce(json_agg(x order by x.days_left, x.name), '[]') from (
+        select w.id, w.name, w.company_code, min(z.te) - current_date as days_left, array_agg(mm.m order by mm.m) as modules
+        from workspaces w cross join unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) mm(m)
+        left join company_modules c on c.workspace_id = w.id and c.module = mm.m
+        cross join lateral (select coalesce(c.trial_ends, w.created_at::date + 90) as te) z
+        where w.status = 'active' and (c.module is null or c.status = 'trial') and z.te between current_date and current_date + 3
+          and not exists (select 1 from company_modules p where p.workspace_id = w.id and p.status = 'active' and (p.paid_until is null or p.paid_until >= current_date))
+        group by w.id, w.name, w.company_code limit 50) x) end,
+    'follow_ups', case when hq_can('customers.view') or hq_can('customers.notes') then hq_my_follow_ups() end);
+end $$;
+
+-- ---------------------------------------------------------------- the Riyeser account owner, handover notes, the work queue, sign-ups
+-- Each business can have one Riyeser staff member who looks after it ("Owner" on the customer page; "My customers").
+alter table public.workspaces add column if not exists hq_owner uuid references auth.users(id) on delete set null;
+create index if not exists workspaces_hq_owner on public.workspaces (hq_owner);
+create or replace function public.hq_set_owner(ws uuid, staff uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare was uuid;
+begin
+  perform hq_need(array['customers.edit', 'support.assign', 'licences.manage']);
+  select hq_owner into was from workspaces where id = ws;
+  if not found then raise exception 'That business doesn''t exist.'; end if;
+  if staff is not null and not exists (select 1 from hq_staff s where s.user_id = staff and s.active) then raise exception 'Choose someone on the HQ team.'; end if;
+  update workspaces set hq_owner = staff where id = ws;
+  perform hq_log('customer.owner_set', jsonb_build_object('workspace_id', ws, 'was', staff_name(was), 'now', staff_name(staff)));
+end $$;
+
+-- Team handover: notes for the next shift (who wrote it, for which day, done or not). Never deleted.
+create table if not exists public.hq_handover_notes (
+  id bigint generated always as identity primary key,
+  author uuid references auth.users(id) on delete set null,
+  note text not null check (length(trim(note)) between 1 and 1000),
+  shift_date date not null default current_date,
+  done boolean not null default false,
+  done_at timestamptz,
+  done_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists hq_handover_open on public.hq_handover_notes (done, shift_date desc);
+alter table public.hq_handover_notes enable row level security;
+revoke all on public.hq_handover_notes from anon, authenticated;
+drop trigger if exists no_delete on public.hq_handover_notes;
+create trigger no_delete before delete on public.hq_handover_notes for each row execute function public.no_delete();
+create or replace function public.hq_handover() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['overview.view']);
+  return (select coalesce(json_agg(json_build_object('id', h.id, 'note', h.note, 'shift_date', h.shift_date, 'done', h.done, 'by', staff_name(h.author),
+      'author', h.author, 'at', h.created_at, 'done_by', staff_name(h.done_by)) order by h.done, h.shift_date desc, h.id desc), '[]')
+    from (select * from hq_handover_notes where not done or shift_date >= current_date - 1 order by shift_date desc, id desc limit 50) h);
+end $$;
+create or replace function public.hq_handover_add(note text, shift_day date) returns bigint
+  language plpgsql security definer set search_path = public as $$
+declare i bigint;
+begin
+  perform hq_need(array['overview.view']);
+  if length(trim(coalesce(note, ''))) = 0 then raise exception 'Write the handover note first.'; end if;
+  insert into hq_handover_notes (author, note, shift_date) values (auth.uid(), left(trim(note), 1000), coalesce(shift_day, current_date)) returning id into i;
+  perform hq_log('handover.added', jsonb_build_object('handover', i, 'shift_date', coalesce(shift_day, current_date)));
+  return i;
+end $$;
+create or replace function public.hq_handover_done(note_id bigint) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  perform hq_need(array['overview.view']);
+  update hq_handover_notes set done = true, done_at = now(), done_by = auth.uid() where id = note_id and not done;
+  if not found then raise exception 'That handover note is already done.'; end if;
+  perform hq_log('handover.done', jsonb_build_object('handover', note_id));
+end $$;
+
+-- The earliest open follow-up for a business (the "next promised follow-up").
+create or replace function public.next_follow_up(ws uuid) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', n.id, 'date', n.follow_up, 'body', left(n.body, 200), 'by', public.staff_name(n.author), 'kind', n.kind)
+  from hq_notes n where n.workspace_id = ws and n.follow_up is not null and n.follow_up_done_at is null order by n.follow_up, n.id limit 1
+$$;
+
+-- The Operations overview: counts and one work queue (customer, issue, owner, next action), for whoever is signed in.
+create or replace function public.hq_work_queue() returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare od numeric := hq_setting_num('support.overdue_hours', 24); r json;
+begin
+  perform hq_need(array['overview.view']);
+  with ending as (
+    select w.id, min(z.te) as ends, bool_or(z.paid) as paid, array_agg(distinct mm.m) as modules
+    from workspaces w cross join unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) mm(m)
+    left join company_modules c on c.workspace_id = w.id and c.module = mm.m
+    cross join lateral (select case when c.status = 'active' then c.paid_until else coalesce(c.trial_ends, w.created_at::date + 90) end as te,
+                               coalesce(c.status = 'active', false) as paid) z
+    where w.status = 'active' and (c.module is null or c.status in ('trial', 'active')) and z.te between current_date and current_date + 7
+    group by w.id
+  ), q as (
+    select * from (
+      select 1 as prio, 'complaint' as kind, t.workspace_id as ws, case when t.first_reply_at is null and t.created_at < now() - make_interval(secs => od * 3600)
+          then 'Overdue complaint' else 'Open complaint' end as issue, t.subject as detail, coalesce(public.staff_name(t.assignee), 'Unassigned') as owner,
+        'Reply' as action, t.id::text as ref, t.created_at as at
+      from support_tickets t where hq_can('support.view') and t.status in ('new', 'waiting_us') and (t.assignee is null or t.assignee = auth.uid()
+        or (t.first_reply_at is null and t.created_at < now() - make_interval(secs => od * 3600)))
+      union all
+      select 2, 'approval', o.workspace_id, 'Approval needed', o.days || ' free days · ' || array_to_string(array(select public.module_label(x) from unnest(o.modules) x), ', '),
+        coalesce(public.staff_name(o.requested_by), 'Riyeser'), 'Approve', o.id::text, o.created_at
+      from offers o where o.status = 'waiting' and hq_can('offers.approve')
+      union all
+      select 3, 'refund', f.workspace_id, 'Refund waiting', f.currency || ' ' || f.amount || ' · ' || f.for_what, coalesce(public.staff_name(f.decided_by), 'Finance'), 'Review', f.id::text, f.created_at
+      from refund_requests f where f.status in ('submitted', 'reviewing') and hq_can('refunds.approve')
+      union all
+      select 4, 'follow_up', n.workspace_id, 'Follow-up due', left(n.body, 120), coalesce(public.staff_name(n.author), 'Riyeser'), 'Follow up', n.id::text, n.follow_up::timestamptz
+      from hq_notes n where n.author = auth.uid() and n.follow_up <= current_date and n.follow_up_done_at is null
+      union all
+      select 5, 'renewal', e.id, case when e.paid then 'Renewal due' else 'Trial ending' end,
+        case when e.ends = current_date then 'Ends today' else 'Ends in ' || (e.ends - current_date) || ' day' || case when e.ends - current_date = 1 then '' else 's' end end
+          || ' · ' || array_to_string(array(select public.module_label(x) from unnest(e.modules) x), ', '),
+        null, 'Extend', null, e.ends::timestamptz
+      from ending e where hq_can('customers.view')
+      union all
+      select 6, 'signup', w.id, 'Stuck signup', 'Signed up ' || (current_date - w.created_at::date) || ' days ago, no PC linked yet', null, 'Message', null, w.created_at
+      from workspaces w where hq_can('customers.view') and w.status = 'active' and w.created_at between now() - interval '30 days' and now() - interval '3 days'
+        and not exists (select 1 from devices d where d.workspace_id = w.id)
+    ) x order by prio, at limit 60
+  )
+  select json_build_object(
+    'counts', json_build_object(
+      'new_signups', (select count(*) from workspaces where created_at >= date_trunc('week', now())),
+      'failed_payments', null,
+      'renewals_due', (select count(*) from ending),
+      'open_complaints', case when hq_can('support.view') then (select count(*) from support_tickets where status <> 'done') end),
+    'queue', (select coalesce(json_agg(json_build_object('kind', q.kind, 'workspace_id', q.ws, 'business', w.name, 'country', w.country, 'address', w.address,
+        'issue', q.issue, 'detail', q.detail, 'owner', coalesce(q.owner, public.staff_name(w.hq_owner), 'Unassigned'), 'action', q.action, 'ref', q.ref, 'at', q.at) order by q.prio, q.at), '[]')
+      from q left join workspaces w on w.id = q.ws)) into r;
+  return r;
+end $$;
+
+-- Sign-ups and onboarding: each recent business, its stages and what's blocking go-live. Only what HQ can see:
+-- anything the programs don't report yet is "unknown", never guessed.
+create or replace function public.hq_signups(days int) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare d int := least(greatest(coalesce(days, 30), 1), 365);
+begin
+  perform hq_need(array['customers.view']);
+  return (select coalesce(json_agg(x order by x.created_at desc), '[]') from (
+    select w.id, w.name, w.company_code, w.country, w.kind, w.created_at, w.status, public.staff_name(w.hq_owner) as hq_owner_name,
+      o.display_name as owner_name, u.email::text as owner_email, u.email_confirmed_at is not null as email_verified,
+      exists (select 1 from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) mm(m)
+              where (public.module_state(w.id, mm.m) ->> 'status') in ('trial', 'active')) as on_trial,
+      exists (select 1 from devices dv where dv.workspace_id = w.id) as pc_linked,
+      exists (select 1 from devices dv where dv.workspace_id = w.id and dv.programs_at is not null
+              and exists (select 1 from jsonb_array_elements(dv.programs) p where p ->> 'id' <> 'central')) as program_used,
+      exists (select 1 from company_modules c where c.workspace_id = w.id and c.status = 'active') as paying,
+      (select coalesce(jsonb_agg(distinct p ->> 'id'), '[]') from devices dv, jsonb_array_elements(coalesce(dv.programs, '[]')) p where dv.workspace_id = w.id) as installed,
+      (select count(*) from members m where m.workspace_id = w.id) as people,
+      public.next_follow_up(w.id) as next_follow_up
+    from workspaces w
+    left join lateral (select m.user_id, m.display_name from members m where m.workspace_id = w.id and m.role = 'owner' order by m.joined_at limit 1) o on true
+    left join auth.users u on u.id = o.user_id
+    where w.created_at > now() - make_interval(days => d)
+    order by w.created_at desc limit 300) x);
+end $$;
+
+-- ---------------------------------------------------------------- who can call what
+revoke all on function public.report_programs(uuid, uuid, jsonb), public.signup_json(jsonb), public.hq_person(uuid, uuid), public.hq_note_json(hq_notes),
+  public.hq_timeline(uuid), public.hq_can(text, text), public.hq_company_page(uuid), public.hq_message_customer(uuid, uuid, text, text, text),
+  public.hq_note_add(uuid, text, text, text, text, date, boolean), public.hq_note_pin(bigint, boolean), public.hq_follow_up_done(bigint),
+  public.hq_my_follow_ups(), public.hq_quick_licence(uuid, text, text, int, date, text, text, text),
+  public.hq_companies_page(text, jsonb, text, boolean, int, int, boolean), public.hq_reports(date, date), public.hq_attention(),
+  public.company_modules_paid_since(), public.hq_notes_removing(),
+  public.hq_set_owner(uuid, uuid), public.hq_handover(), public.hq_handover_add(text, date), public.hq_handover_done(bigint), public.next_follow_up(uuid),
+  public.hq_work_queue(), public.hq_signups(int)
+  from public, anon, authenticated;
+grant execute on function public.report_programs(uuid, uuid, jsonb), public.my_tickets(), public.my_ticket(uuid) to authenticated;
+grant execute on function public.hq_company_page(uuid), public.hq_message_customer(uuid, uuid, text, text, text),
+  public.hq_note_add(uuid, text, text, text, text, date, boolean), public.hq_note_pin(bigint, boolean), public.hq_follow_up_done(bigint),
+  public.hq_my_follow_ups(), public.hq_quick_licence(uuid, text, text, int, date, text, text, text),
+  public.hq_companies_page(text, jsonb, text, boolean, int, int, boolean), public.hq_reports(date, date), public.hq_attention(),
+  public.hq_set_owner(uuid, uuid), public.hq_handover(), public.hq_handover_add(text, date), public.hq_handover_done(bigint),
+  public.hq_work_queue(), public.hq_signups(int) to authenticated;

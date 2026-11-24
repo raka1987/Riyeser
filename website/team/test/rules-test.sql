@@ -892,6 +892,358 @@ do $$ begin
   assert exists (select 1 from pg_temp.audit('offer.approved') where true) and exists (select 1 from pg_temp.audit('offer.declined') where true), 'offers audited';
   begin delete from public.offers; raise exception 'deleted offers'; exception when others then assert sqlerrm like 'Rows in offers are never deleted%', sqlerrm; end;
 end $$;
+-- ===== HQ customer page & reports
+reset role;
+update auth.users set raw_user_meta_data = '{"riyeser_signup": {"you": "Alex Sample", "phone": "+679 330 1234", "country": "Fiji", "biz": {"name": "Sample Plumbing", "tax_number": "50-12345"}}, "riyeser_prefs": {"secret_pref": "do-not-show"}}'
+  where id = '11111111-1111-1111-1111-111111111111';
+update auth.users set raw_user_meta_data = '{"riyeser_signup": {"you": "Jordan", "phone": "021 555 0101"}}' where id = '44444444-4444-4444-4444-444444444444';
+-- reports.view: owners, finance and senior support by default; not support, sales or developers
+do $$ begin
+  assert 'reports.view' = any(public.hq_all_perms()), 'new permission listed';
+  assert 'reports.view' = any(public.hq_staff_perms('99999999-9999-9999-9999-999999999999')), 'owner';
+  assert 'reports.view' = any(public.hq_staff_perms('dddddddd-dddd-dddd-dddd-dddddddddddd')), 'finance';
+  assert 'reports.view' = any(public.hq_staff_perms('cccccccc-cccc-cccc-cccc-cccccccccccc')), 'senior';
+  assert not 'reports.view' = any(public.hq_staff_perms('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')), 'not support';
+  assert not 'reports.view' = any(coalesce(public.hq_staff_perms('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'), '{}')), 'not developer';
+  assert not 'reports.view' = any(public.hq_role_perms('sales')), 'not sales';
+end $$;
+
+-- --- Riyeser Central reports the programs on each PC: only someone in the business, only for a PC they linked
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+select public.link_device(:'ws_a', 'e1e1e1e1-0000-4000-8000-000000000001', 'Front desk PC', 'win32', '1.8.1');
+select public.report_programs(:'ws_a', 'e1e1e1e1-0000-4000-8000-000000000001',
+  '[{"id": "central", "version": "1.8.1"}, {"id": "pos", "version": "1.4.0"}, {"id": "pos", "version": "1.4.0"}, {"id": "BAD id; drop", "version": "x"}, "junk"]');
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin
+  begin perform public.report_programs(current_setting('test.ws_a')::uuid, 'e1e1e1e1-0000-4000-8000-000000000001', '[{"id": "pos", "version": "9"}]');
+    raise exception 'someone from another business reported programs';
+  exception when others then assert sqlerrm like 'You''re not in that company%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ begin
+  begin perform public.report_programs(current_setting('test.ws_a')::uuid, 'e1e1e1e1-0000-4000-8000-000000000001', '[{"id": "pos", "version": "9"}]');
+    raise exception 'reported programs for someone else''s PC';
+  exception when others then assert sqlerrm like 'Link this PC to the company first%', sqlerrm; end;
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  begin perform public.report_programs(current_setting('test.ws_a')::uuid, 'e1e1e1e1-0000-4000-8000-000000000001', '[]'); raise exception 'anon reported';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+do $$ declare p jsonb; begin
+  select programs into p from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000001';
+  assert p = '[{"id": "central", "version": "1.8.1"}, {"id": "pos", "version": "1.4.0"}]'::jsonb, format('programs stored cleanly: %s', p);
+  assert (select programs_at is not null from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000001'), 'when';
+end $$;
+-- the {id: version} form works too
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+select public.report_programs(:'ws_a', 'e1e1e1e1-0000-4000-8000-000000000001', '{"central": "1.8.1", "pos": "1.4.1", "invoices": "2.0.0"}');
+reset role;
+do $$ begin assert (select jsonb_array_length(programs) from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000001') = 3, 'object form'; end $$;
+
+-- --- the customer page: contact person (with what they typed at sign-up), people, PCs with programs; never messages
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ declare c json; begin
+  c := public.hq_company_page(current_setting('test.ws_a')::uuid);
+  assert (c -> 'owner' ->> 'name') = 'Alex' and (c -> 'owner' ->> 'phone') = '+679 330 1234', format('owner contact: %s', c -> 'owner');
+  assert (c -> 'owner' -> 'signup' ->> 'biz') = 'Sample Plumbing' and (c -> 'owner' -> 'signup' ->> 'tax_number') = '50-12345', 'sign-up details';
+  assert c::text not like '%do-not-show%', 'only sign-up fields, nothing else kept with the account';
+  assert json_array_length(c -> 'people') >= 3 and (c -> 'people' -> 0 ->> 'role') = 'owner', format('people, owner first: %s', c -> 'people');
+  assert (select count(*) from json_array_elements(c -> 'people') p where p ->> 'phone' = '021 555 0101') = 1, 'phone from sign-up';
+  assert (select count(*) from json_array_elements(c -> 'pcs') d where json_array_length(d -> 'programs') = 3) = 1, 'PC programs';
+  assert (c -> 'licence' -> 'modules' -> 'pos' ->> 'status') is not null, 'licence';
+  assert c::text not like '%Morning team%' and c::text not like '%Private: your pay rise%', 'no chat messages on the customer page';
+end $$;
+select pg_temp.as_user('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+do $$ begin begin perform public.hq_company_page(current_setting('test.ws_a')::uuid); raise exception 'developer opened the customer page';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end; end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin begin perform public.hq_company_page(current_setting('test.ws_a')::uuid); raise exception 'customer opened HQ';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end; end $$;
+
+-- --- Message customer: a ticket Riyeser starts, seen only by the person it's to (and the business's owners/admins)
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+select (public.hq_message_customer(:'ws_a', '44444444-4444-4444-4444-444444444444', 'billing', 'Your trial ends soon', 'Hi Jordan, would you like help choosing a plan?') ->> 'id') as t_staff \gset
+select set_config('test.t_staff', :'t_staff', false);
+do $$ declare r json; begin
+  r := public.hq_message_customer(current_setting('test.ws_a')::uuid, null, 'other', 'Welcome to Riyeser', 'Hi, we''re here if you need a hand setting up.');
+  perform set_config('test.t_welcome', r ->> 'id', false);
+  begin perform public.hq_message_customer(current_setting('test.ws_a')::uuid, '33333333-3333-3333-3333-333333333333', 'other', 'Hi', 'Hello');
+    raise exception 'messaged someone outside the business';
+  exception when others then assert sqlerrm like 'Choose someone who is in this business%', sqlerrm; end;
+  begin perform public.hq_message_customer(current_setting('test.ws_a')::uuid, null, 'other', '', 'Hello'); raise exception 'no subject';
+  exception when others then assert sqlerrm like 'Add a subject%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('cccccccc-cccc-cccc-cccc-cccccccccccc');
+do $$ begin assert (select count(*) from json_array_elements(public.hq_tickets('waiting_customer', 'trial ends') -> 'tickets')) = 1, 'in the HQ inbox'; end $$;
+select pg_temp.as_user('44444444-4444-4444-4444-444444444444');
+do $$ declare t json; begin
+  select x into t from json_array_elements(public.my_tickets()) x where x ->> 'id' = current_setting('test.t_staff');
+  assert t is not null and (t ->> 'from_riyeser')::boolean and (t ->> 'mine')::boolean, format('Jordan sees the message from Riyeser: %s', t);
+  assert (t ->> 'unread')::int = 1, 'unread';
+  t := public.my_ticket(current_setting('test.t_staff')::uuid);
+  assert (t ->> 'from_riyeser')::boolean and (t -> 'messages' -> 0 ->> 'staff')::boolean and (t -> 'messages' -> 0 ->> 'from') = 'Riyeser Support', 'first message is from staff';
+  assert not exists (select 1 from json_array_elements(public.my_tickets()) x where x ->> 'id' = current_setting('test.t_welcome')), 'not the one to the owner';
+  perform public.reply_ticket(current_setting('test.t_staff')::uuid, 'Yes please, call me tomorrow.');
+end $$;
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ begin
+  assert not exists (select 1 from json_array_elements(public.my_tickets()) x where x ->> 'id' in (current_setting('test.t_staff'), current_setting('test.t_welcome'))), 'Sam (a member) sees neither';
+  begin perform public.my_ticket(current_setting('test.t_staff')::uuid); raise exception 'Sam opened it';
+  exception when others then assert sqlerrm like 'We couldn%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin
+  assert not exists (select 1 from json_array_elements(public.my_tickets()) x where x ->> 'id' in (current_setting('test.t_staff'), current_setting('test.t_welcome'))), 'another business sees neither';
+  begin perform public.my_ticket(current_setting('test.t_staff')::uuid); raise exception 'Kim opened it';
+  exception when others then assert sqlerrm like 'We couldn%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin
+  assert (select count(*) from json_array_elements(public.my_tickets()) x where x ->> 'id' in (current_setting('test.t_staff'), current_setting('test.t_welcome'))) = 2, 'the owner sees both';
+end $$;
+select pg_temp.as_user('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+do $$ begin begin perform public.hq_message_customer(current_setting('test.ws_a')::uuid, null, 'other', 'Hi', 'Hello'); raise exception 'developer messaged';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end; end $$;
+reset role;
+do $$ begin
+  assert (select status from public.support_tickets where id = current_setting('test.t_staff')::uuid) = 'waiting_us', 'the reply puts it back with us';
+  assert (select staff_started and first_reply_at is not null and assignee = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' from public.support_tickets where id = current_setting('test.t_staff')::uuid), 'staff-started';
+  assert exists (select 1 from public.email_outbox where template = 'staff_message' and to_user = '44444444-4444-4444-4444-444444444444'
+    and body_text like 'Hi Jordan,%would you like help choosing a plan?%Your help requests%' and status = 'queued'), 'emailed through the outbox';
+  assert exists (select 1 from pg_temp.audit('ticket.started') where true), 'audited';
+end $$;
+
+-- --- logged calls, notes and follow-ups
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+select public.hq_note_add(:'ws_a', 'call', 'Asked about POS pricing for a second till', 'in', 'Alex', current_date + 2, false) as call_id \gset
+select set_config('test.call_id', :'call_id', false);
+select public.hq_note_add(:'ws_a', 'note', 'Prefers email to phone calls', null, null, null, true);
+do $$ declare c json; f json; begin
+  begin perform public.hq_note_add(current_setting('test.ws_a')::uuid, 'call', 'x', null, null, null, false); raise exception 'call without direction';
+  exception when others then assert sqlerrm like 'Choose whether they called us%', sqlerrm; end;
+  begin perform public.hq_note_add(current_setting('test.ws_a')::uuid, 'note', 'x', null, null, current_date - 1, false); raise exception 'follow-up in the past';
+  exception when others then assert sqlerrm like 'Choose a follow-up date%', sqlerrm; end;
+  f := public.hq_my_follow_ups();
+  assert json_array_length(f) = 1 and (f -> 0 ->> 'business') = 'Sample Plumbing' and (f -> 0 ->> 'contact') = 'Alex', format('my follow-ups: %s', f);
+  c := public.hq_company_page(current_setting('test.ws_a')::uuid);
+  assert (c -> 'notes' -> 0 ->> 'pinned')::boolean and (c -> 'notes' -> 0 ->> 'body') = 'Prefers email to phone calls', 'pinned note first';
+  assert (select count(*) from json_array_elements(c -> 'timeline') x where x ->> 'kind' = 'call' and x ->> 'status' = 'follow_up') = 1, 'call in the timeline';
+  assert (select count(*) from json_array_elements(c -> 'timeline') x where x ->> 'kind' = 'ticket' and (x ->> 'by_staff')::boolean) = 2, 'staff-started tickets in the timeline';
+  assert (select count(*) from json_array_elements(c -> 'timeline') x where x ->> 'kind' = 'email' and x ->> 'title' like 'Your trial ends soon%') = 1, 'emails in the timeline';
+  assert (c -> 'timeline' -> 0 ->> 'at') >= (c -> 'timeline' -> 1 ->> 'at'), 'newest first';
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ begin assert json_array_length(public.hq_my_follow_ups()) = 0, 'follow-ups are per staff member'; end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+select public.hq_follow_up_done(:'call_id');
+do $$ begin
+  assert json_array_length(public.hq_my_follow_ups()) = 0, 'ticked off';
+  begin perform public.hq_follow_up_done(current_setting('test.call_id')::bigint); raise exception 'done twice';
+  exception when others then assert sqlerrm like 'That follow-up is already done%', sqlerrm; end;
+end $$;
+select public.hq_note_add(:'ws_a', 'call', 'Call back about the second till', 'out', 'Alex', current_date, false);
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin begin perform public.hq_note_add(current_setting('test.ws_a')::uuid, 'note', 'sneaky', null, null, null, false); raise exception 'customer wrote an HQ note';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end; end $$;
+reset role;
+do $$ begin assert exists (select 1 from pg_temp.audit('call.logged') where (details ->> 'follow_up') is not null) and exists (select 1 from pg_temp.audit('follow_up.done') where true), 'audited'; end $$;
+-- the owner-approved removal also blanks who a call was with
+do $$ declare i bigint; begin
+  insert into public.hq_notes (workspace_id, author, body, kind, direction, contact) values (current_setting('test.ws_b')::uuid, null, 'Rang Kim', 'call', 'out', 'Kim') returning id into i;
+  perform set_config('riyeser.removing', 'on', true);
+  update public.hq_notes set body = '[removed]' where id = i;
+  perform set_config('riyeser.removing', 'off', true);
+  assert (select contact is null and body = '[removed]' from public.hq_notes where id = i), 'contact blanked';
+end $$;
+
+-- --- one-click licence actions: free time goes through free periods (the 31-day limit and supervisor approval)
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ declare o json; before date; waiting int; begin
+  before := (public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence' -> 'modules' -> 'bookings' ->> 'trial_ends')::date;
+  o := public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'bookings', 'extend', 30, null, 'goodwill', 'Setting up took a while', current_setting('test.t_sam_ref'));
+  assert (o ->> 'status') = 'applied' and (o ->> 'ref') like 'O-%', format('+30 days applied: %s', o);
+  assert (public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence' -> 'modules' -> 'bookings' ->> 'trial_ends')::date = greatest(before, current_date) + 30, '+30 days';
+  o := public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'payroll', 'extend', 90, null, 'retention', 'Wants to try a full quarter', null);
+  assert (o ->> 'status') = 'waiting', format('+90 days is over the limit: waits for a supervisor: %s', o);
+  begin perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'extend', 7, null, 'goodwill', '', null); raise exception 'no reason';
+  exception when others then assert sqlerrm like 'Give a reason%', sqlerrm; end;
+  begin perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'extend', 7, null, 'payment', 'Paid by bank', null); raise exception 'wrong category';
+  exception when others then assert sqlerrm like 'Choose a reason%', sqlerrm; end;
+  begin perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'extend', 7, null, 'goodwill', 'For the printer', 'T-1'); raise exception 'bad ticket';
+  exception when others then assert sqlerrm like 'There''s no ticket%', sqlerrm; end;
+  -- support can't set paid-until, pause or cancel (licences.manage)
+  begin perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'paid_until', null, current_date + 365, 'payment', 'Paid by bank', null); raise exception 'support set paid-until';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  begin perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'pause', null, null, 'non_payment', 'Card declined', null); raise exception 'support paused';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare o json; l json; begin
+  assert (select count(*) from json_array_elements(public.hq_approvals() -> 'offers') x where x ->> 'business' = 'Sample Plumbing' and (x ->> 'days')::int = 90) = 1, 'in Approvals';
+  o := public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'paid_until', null, current_date + 365, 'payment', 'Paid a year by bank transfer', null);
+  l := public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence';
+  assert (l -> 'modules' -> 'pos' ->> 'status') = 'active' and (l -> 'modules' -> 'pos' ->> 'paid_until')::date = current_date + 365, 'paid until a year';
+  -- +7 days on a paid program: free time on its paid period
+  o := public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'extend', 7, null, 'goodwill', 'Printer trouble', null);
+  assert (public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence' -> 'modules' -> 'pos' ->> 'paid_until')::date = current_date + 372, 'paid period +7';
+  begin perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'paid_until', null, current_date - 3, 'payment', 'Backdated', null); raise exception 'paid until in the past';
+  exception when others then assert sqlerrm like 'Choose a date from today on%', sqlerrm; end;
+  -- cancel: works to the end of what's paid; pause: stops now; unlock a lapsed paid program: paid for 30 days
+  perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'cancel', null, null, 'customer_asked', 'Closing the second shop', null);
+  l := public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence';
+  assert (l -> 'modules' -> 'pos' ->> 'status') = 'cancelled' and (l -> 'modules' -> 'pos' ->> 'active')::boolean, 'cancelled, works to the end';
+  perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'pause', null, null, 'non_payment', 'Card declined', null);
+  assert not ((public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence' -> 'modules' -> 'pos' ->> 'active')::boolean), 'paused: stops now';
+  perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'pos', 'unlock', null, null, 'goodwill', 'Paying next week', null);
+  l := public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence';
+  assert (l -> 'modules' -> 'pos' ->> 'status') = 'active' and (l -> 'modules' -> 'pos' ->> 'days_left')::int = 30, 'unlocked: paid for 30 days';
+  -- a trial that ended: pause the As Built trial, then Unlock now gives it 30 days (as a free period, within the limit)
+  if (public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence' -> 'modules' -> 'as_built' ->> 'status') = 'trial' then
+    perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'as_built', 'pause', null, null, 'correction', 'Test the trial end', null);
+  end if;
+  begin perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'as_built', 'pause', null, null, 'correction', 'Again', null); raise exception 'paused an ended trial';
+  exception when others then assert sqlerrm like '%isn''t running%', sqlerrm; end;
+  assert (public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence' -> 'modules' -> 'as_built' ->> 'status') = 'ended', 'trial ended';
+end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ declare o json; begin
+  o := public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'as_built', 'unlock', null, null, 'goodwill', 'Wants another look', null);
+  assert (o ->> 'status') = 'applied', format('unlocked as a free period: %s', o);
+  assert (public.hq_company_licence(current_setting('test.ws_a')::uuid) -> 'licence' -> 'modules' -> 'as_built' ->> 'days_left')::int = 30, 'trial to 30 days';
+  begin perform public.hq_quick_licence(current_setting('test.ws_a')::uuid, 'as_built', 'unlock', null, null, 'goodwill', 'Again', null); raise exception 'unlocked twice';
+  exception when others then assert sqlerrm like '%already on its trial%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin
+  assert exists (select 1 from pg_temp.audit('licence.paid_until') where details ->> 'reason_category' = 'payment' and details -> 'was' ->> 'status' is not null), 'paid-until audited';
+  assert exists (select 1 from pg_temp.audit('licence.paused') where true) and exists (select 1 from pg_temp.audit('licence.cancelled') where true)
+     and exists (select 1 from pg_temp.audit('licence.unlocked') where true), 'pause, cancel, unlock audited';
+  assert (select count(*) from public.offers where workspace_id = current_setting('test.ws_a')::uuid) = 4, 'free time went through free periods';
+  assert (select paid_since from public.company_modules where workspace_id = current_setting('test.ws_a')::uuid and module = 'pos') = current_date, 'paid since';
+end $$;
+
+-- --- the Companies list: filters, sorting and server-side pages
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ declare p1 json; p2 json; n int; r json; begin
+  n := (select count(*) from public.hq_companies(''));
+  p1 := public.hq_companies_page('', '{}', 'name', false, 1, 2, false);
+  p2 := public.hq_companies_page('', '{}', 'name', false, 2, 2, false);
+  assert (p1 ->> 'total')::int >= 100 and (p1 ->> 'total')::int = n, format('total count: %s of %s', p1 ->> 'total', n);
+  assert json_array_length(p1 -> 'rows') = 2 and json_array_length(p2 -> 'rows') = 2, 'two a page';
+  assert lower(p1 -> 'rows' -> 0 ->> 'name') <= lower(p1 -> 'rows' -> 1 ->> 'name') and lower(p1 -> 'rows' -> 1 ->> 'name') <= lower(p2 -> 'rows' -> 0 ->> 'name'), 'sorted by name across pages';
+  assert (p1 -> 'rows' -> 0 ->> 'id') <> (p2 -> 'rows' -> 0 ->> 'id'), 'page 2 is different';
+  assert (public.hq_companies_page('', '{}', null, null, 1, 1000, false) ->> 'per_page')::int = 200, 'at most 200 a page';
+  assert json_array_length(public.hq_companies_page('', '{}', null, null, 1, null, false) -> 'rows') = 50, '50 a page by default';
+  r := public.hq_companies_page('island', '{}', null, null, 1, 50, false);
+  assert (r ->> 'total')::int = 1 and (r -> 'rows' -> 0 ->> 'name') = 'Island Traders', 'search';
+  r := public.hq_companies_page('', '{"plan": "paid"}', 'plan', true, 1, 200, false);
+  assert (r ->> 'total')::int >= 2 and not exists (select 1 from json_array_elements(r -> 'rows') x where (x ->> 'paid_n')::int = 0), 'paying only';
+  assert (r -> 'rows' -> 0 ->> 'paid_n')::int >= (r -> 'rows' -> 1 ->> 'paid_n')::int, 'sorted by plan, most first';
+  r := public.hq_companies_page('', '{"plan": "trial", "trial_days": 30}', 'trial', false, 1, 200, false);
+  assert not exists (select 1 from json_array_elements(r -> 'rows') x where (x ->> 'paid_n')::int > 0 or (x ->> 'trial_days')::int > 30), 'trial ending in 30 days';
+  r := public.hq_companies_page('', '{"status": "closed"}', null, null, 1, 200, false);
+  assert not exists (select 1 from json_array_elements(r -> 'rows') x where x ->> 'status' <> 'closed'), 'status filter';
+  r := public.hq_companies_page('', '{"open_tickets": true}', 'tickets', true, 1, 200, false);
+  assert (r ->> 'total')::int >= 1 and not exists (select 1 from json_array_elements(r -> 'rows') x where (x ->> 'tickets_open')::int = 0), 'open tickets';
+  r := public.hq_companies_page('', '{"follow_up": true}', null, null, 1, 200, false);
+  assert exists (select 1 from json_array_elements(r -> 'rows') x where x ->> 'name' = 'Sample Plumbing'), 'needs follow-up';
+  r := public.hq_companies_page('', '{"country": "Fiji"}', null, null, 1, 200, false);
+  assert not exists (select 1 from json_array_elements(r -> 'rows') x where coalesce(x ->> 'country', '') <> 'Fiji'), 'country';
+  r := public.hq_companies_page('sample plumbing', '{}', null, null, 1, 50, false);
+  assert (r -> 'rows' -> 0 ->> 'phone') = '+679 330 1234' and (r -> 'rows' -> 0 ->> 'owner_name') = 'Alex', 'owner and phone';
+  r := public.hq_companies_page('', '{"inactive_days": 30}', null, null, 1, 200, false);
+  assert not exists (select 1 from json_array_elements(r -> 'rows') x where (x ->> 'last_active_at')::timestamptz > now() - interval '30 days'), 'inactive 30 days';
+  perform public.hq_companies_page('', '{"plan": "paid"}', null, null, 1, 5000, true);
+end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin begin perform public.hq_companies_page('', '{}', null, null, 1, 50, false); raise exception 'customer listed businesses';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end; end $$;
+reset role;
+do $$ begin assert exists (select 1 from pg_temp.audit('customers.exported') where true), 'CSV export is logged'; end $$;
+
+-- --- Reports (reports.view) and the HQ home
+reset role;
+select set_config('test.ws_b', :'ws_b', false);
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_set_module(:'ws_b', 'pos', 'trial', (current_date + 2), null);
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ begin begin perform public.hq_reports(current_date - 30, current_date); raise exception 'support read reports';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end; end $$;
+select pg_temp.as_user('dddddddd-dddd-dddd-dddd-dddddddddddd');
+do $$ declare r json; begin
+  r := public.hq_reports(current_date - 90, current_date);
+  assert (r -> 'funnel' ->> 'signed_up')::int >= 5 and (r -> 'funnel' ->> 'business')::int >= 3 and (r -> 'funnel' ->> 'pc_linked')::int >= 1
+     and (r -> 'funnel' ->> 'program_used')::int >= 1, format('funnel: %s', r -> 'funnel');
+  assert json_array_length(r -> 'signups_by_week') >= 1 and json_array_length(r -> 'trials_by_week') >= 1, 'weekly';
+  assert exists (select 1 from json_array_elements(r -> 'trials_ending') x where x ->> 'name' = 'Corner Cafe' and (x ->> 'days_left')::int = 2), 'trials ending';
+  assert exists (select 1 from json_array_elements(r -> 'conversion') x where x ->> 'module' = 'pos' and (x ->> 'paid_30')::int >= 1), 'conversion';
+  assert (select (x ->> 'estimate')::numeric from json_array_elements(r -> 'revenue_by_month') x order by x ->> 'month' desc limit 1) >= 40, format('revenue estimate: %s', r -> 'revenue_by_month');
+  assert json_array_length(r -> 'leaving_by_month') >= 3 and (r -> 'support' ->> 'opened')::int >= 3, 'leaving and support';
+  assert (r -> 'support' -> 'open_by_status') is not null and (r -> 'support' ->> 'median_first_reply_hours') is not null, 'support numbers';
+  assert exists (select 1 from json_array_elements(r -> 'staff_week') x where x ->> 'who' = 'Help Desk' and (x ->> 'changes')::int >= 5), 'staff activity';
+  assert r::text not like '%Morning team%', 'no chat in reports';
+  begin perform public.hq_reports(current_date, current_date - 5); raise exception 'backwards range';
+  exception when others then assert sqlerrm like 'Choose a start date%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ declare a json; begin
+  a := public.hq_attention();
+  assert (a ->> 'unassigned')::int >= 0 and (a ->> 'overdue') is not null, 'tickets';
+  assert exists (select 1 from json_array_elements(a -> 'trials_3d') x where x ->> 'name' = 'Corner Cafe'), format('trials ending in 3 days: %s', a -> 'trials_3d');
+  assert json_array_length(a -> 'follow_ups') = 1 and (a -> 'follow_ups' -> 0 ->> 'due')::boolean, 'my follow-up due today';
+  assert (a ->> 'approvals') is null, 'support doesn''t approve, so no approvals count';
+end $$;
+select pg_temp.as_user('dddddddd-dddd-dddd-dddd-dddddddddddd');
+do $$ begin assert (public.hq_attention() ->> 'approvals')::int >= 1, 'finance sees approvals waiting'; end $$;
+reset role;
+
+-- --- the Riyeser account owner, team handover, the work queue and sign-ups
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+select public.hq_set_owner(:'ws_a', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ declare c json; r json; begin
+  c := public.hq_company_page(current_setting('test.ws_a')::uuid);
+  assert (c -> 'profile' ->> 'hq_owner_name') = 'Help Desk', 'Riyeser owner on the customer page';
+  r := public.hq_companies_page('', '{"mine": true}', null, null, 1, 50, false);
+  assert (r ->> 'total')::int = 1 and (r -> 'rows' -> 0 ->> 'hq_owner_name') = 'Help Desk', format('My customers: %s', r ->> 'total');
+  assert (r -> 'rows' -> 0 ->> 'next_follow_up') is not null and (c -> 'next_follow_up' ->> 'date') is not null, 'next promised follow-up';
+  begin perform public.hq_set_owner(current_setting('test.ws_a')::uuid, '11111111-1111-1111-1111-111111111111'); raise exception 'a customer as Riyeser owner';
+  exception when others then assert sqlerrm like 'Choose someone on the HQ team%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+do $$ begin begin perform public.hq_set_owner(current_setting('test.ws_a')::uuid, null); raise exception 'developer set the owner';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end; end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+select public.hq_handover_add('Harbour complaint: update the customer after 3 pm', null) as ho \gset
+select set_config('test.ho', :'ho', false);
+do $$ declare h json; q json; s json; begin
+  h := public.hq_handover();
+  assert (h -> 0 ->> 'note') like 'Harbour complaint%' and (h -> 0 ->> 'by') = 'Help Desk' and not (h -> 0 ->> 'done')::boolean, 'handover note';
+  perform public.hq_handover_done(current_setting('test.ho')::bigint);
+  begin perform public.hq_handover_done(current_setting('test.ho')::bigint); raise exception 'done twice';
+  exception when others then assert sqlerrm like 'That handover note is already done%', sqlerrm; end;
+  begin perform public.hq_handover_add('  ', null); raise exception 'empty handover';
+  exception when others then assert sqlerrm like 'Write the handover%', sqlerrm; end;
+  q := public.hq_work_queue();
+  assert (q -> 'counts' ->> 'new_signups') is not null and (q -> 'counts' ->> 'failed_payments') is null and (q -> 'counts' ->> 'open_complaints')::int >= 1, format('counts: %s', q -> 'counts');
+  assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'issue' like '%complaint' and x ->> 'action' = 'Reply'), 'complaints in the queue';
+  assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'action' = 'Extend' and x ->> 'business' = 'Corner Cafe'), format('renewals in the queue: %s', q -> 'queue');
+  assert exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'action' = 'Follow up'), 'my follow-ups in the queue';
+  assert not exists (select 1 from json_array_elements(q -> 'queue') x where x ->> 'action' = 'Approve'), 'support doesn''t approve';
+  s := public.hq_signups(30);
+  assert exists (select 1 from json_array_elements(s) x where x ->> 'name' = 'Corner Cafe' and (x ->> 'email_verified')::boolean and (x ->> 'on_trial')::boolean
+    and not (x ->> 'pc_linked')::boolean and not (x ->> 'program_used')::boolean), 'sign-up stages: not set up yet';
+  assert exists (select 1 from json_array_elements(s) x where x ->> 'name' = 'Island Traders' and (x ->> 'paying')::boolean), 'sign-up stages: paying';
+  assert s::text not like '%Morning team%', 'no chat in sign-ups';
+end $$;
+reset role;
+do $$ begin
+  assert exists (select 1 from pg_temp.audit('customer.owner_set') where details ->> 'now' = 'Help Desk') and exists (select 1 from pg_temp.audit('handover.added') where true)
+    and exists (select 1 from pg_temp.audit('handover.done') where true), 'owner and handover audited';
+  begin delete from public.hq_handover_notes; raise exception 'deleted handover'; exception when others then assert sqlerrm like 'Rows in hq_handover_notes are never deleted%', sqlerrm; end;
+end $$;
 -- privacy: none of HQ's new views contain customers' chat messages
 select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
 do $$ begin

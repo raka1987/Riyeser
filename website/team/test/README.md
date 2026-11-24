@@ -32,3 +32,9 @@
   database; phone widths. Exits 1 on failure. `rules-test.sql` covers the database side (who can report, read, send
   changes and take a password; the 5-minute window; HQ needs `link.support` plus the customer's grant).
 - HQ: `../../hq/test-hq-link.js` checks `hq-link.js` filling `#cpLink` (summary line, phones, Show password, not set up).
+- HQ customer page & reports: `rules-test.sql` also covers the customer page RPCs (contact details from sign-up, PCs'
+  programs via `report_programs`, only for members and their own PCs), staff-started tickets ("Message customer": seen by
+  the person it's to and the business's owners/admins only), logged calls and follow-ups, one-click licence actions (free
+  time goes through free periods: the 31-day limit and Approvals), the Companies list (filters, sorting, pages, CSV
+  export logged), Reports (`reports.view`), the work queue, team handover notes and the Riyeser account owner.
+  `help-test.js` also checks a "Message from Riyeser" ticket and "Your details". HQ: `../../hq/test-hq-customer.js`.

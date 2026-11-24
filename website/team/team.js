@@ -71,6 +71,14 @@
       async setAccess(ws, person, job, admin, branches) { ok(await sb.rpc('set_access', { ws, person, job_role: job, make_admin: !!admin, branch_ids: branches || [] })); },
       async removePerson(ws, person) { ok(await sb.from('members').delete().eq('workspace_id', ws).eq('user_id', person)); },
       async updateCompany(ws, profile) { ok(await sb.rpc('update_company', { ws, profile })); },
+      // Your own name (in this business) and phone (kept with your account, so Riyeser Support sees the current one)
+      async updateMyDetails(ws, uid, name, phone) {
+        if (name) ok(await sb.from('members').update({ display_name: name }).eq('workspace_id', ws).eq('user_id', uid));
+        const md = ((ok(await sb.auth.getUser()) || {}).user || {}).user_metadata || {};
+        const su = md.riyeser_signup && typeof md.riyeser_signup === 'object' ? md.riyeser_signup : {};
+        const r = ok(await sb.auth.updateUser({ data: { riyeser_signup: { ...su, you: name || su.you || '', phone: phone || '' } } }));
+        return (r && r.user) || null;
+      },
       async devices(ws) { return ok(await sb.from('devices').select('id, user_id, device_name, platform, app_version, last_seen').eq('workspace_id', ws).order('last_seen', { ascending: false })); },
       async unlinkDevice(id) { ok(await sb.from('devices').delete().eq('id', id)); },
       async aal() { return ok(await sb.auth.mfa.getAuthenticatorAssuranceLevel()); },
@@ -200,7 +208,10 @@
       msg('d-sam', 'u-sam', 'Can you approve the timesheets before 3? Pay run goes tonight.', 30)];
     const read = { 'c-general': ago(1400), 'c-jobs': ago(92), 'c-office': ago(61), 'c-exec': ago(200), 'd-sam': ago(40) };
     let listener = null;
-    const tix = []; const refs = [];
+    // a message Riyeser started (from HQ's "Message customer"): it waits for the customer's reply
+    const tix = [{ id: 't0', ref: 'T-10230', topic: 'other', subject: 'Welcome to Riyeser', status: 'waiting_customer', mine: true, from_riyeser: true, business: 'Sample Plumbing',
+      created_at: ago(300), updated_at: ago(300), read: '', messages: [{ id: 1, staff: true, mine: false, from: 'Riyeser Support', body: 'Hi! We\'re here if you need a hand setting up Riyeser Central or bringing your customers across. Just reply here.', at: ago(300) }] }];
+    const refs = [];
     const lo = { office_id: 'lo-demo', pc_name: 'OFFICE-PC', version: '1.1.0', state: 'running', addresses: ['192.168.1.20'], sip_port: 5060, address_stable: true, pc_mac: '3C:52:82:1A:2B:3C',
       licence: { active: true, state: 'trial', text: 'Free trial · 74 days left' }, first_seen: ago(20000), last_seen: ago(1),
       counts: { people: 4, groups: 2, phones_assigned: 3, phones_connected: 2, new_phones: 1, calls_in_progress: 0 },
@@ -231,6 +242,8 @@
         brs.forEach((b) => { b.people = b.people.filter((u) => u !== person); if (branches.includes(b.id)) b.people.push(person); }); },
       async removePerson(_w, person) { const i = ppl.findIndex((x) => x[0] === person); if (i >= 0) ppl.splice(i, 1); brs.forEach((b) => { b.people = b.people.filter((u) => u !== person); }); },
       async updateCompany(_w, pr) { Object.assign(company, Object.fromEntries(Object.entries(pr).filter(([, v]) => v !== undefined))); },
+      async updateMyDetails(_w, uid, name, phone) { const p = ppl.find((x) => x[0] === uid); if (p && name) p[1] = name;
+        me.user_metadata = { ...(me.user_metadata || {}), riyeser_signup: { ...((me.user_metadata || {}).riyeser_signup || {}), you: name, phone } }; return me; },
       async devices() { return devs.slice(); },
       async unlinkDevice(id) { const i = devs.findIndex((d) => d.id === id); if (i >= 0) devs.splice(i, 1); },
       async aal() { return { currentLevel: mfa.on ? 'aal2' : 'aal1', nextLevel: mfa.on ? 'aal2' : 'aal1' }; },
@@ -804,6 +817,7 @@
           <div class="hacts"><button class="btn" id="hco">✏️ ${admin ? (solo ? 'Edit my details' : 'Edit business details') : 'Business details'}</button>${admin && team ? `<button class="btn" id="hppl">👥 People · ${S.people.length}</button>
           <button class="btn" id="hreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button class="btn" id="hhist">🕘 History</button>` : ''}
           <button class="btn" id="hsec">🔐 Security</button></div></section>
+        ${myDetailsHtml(me, admin)}
         ${helpHtml()}
         ${lic ? `<h3 class="hsec">Your plan <small>${lic.seats ? `${lic.seats.used} of ${lic.seats.included + lic.seats.extra} people included${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
         <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link Plus (calls)']]
@@ -829,8 +843,31 @@
     on('#hcp', async () => { try { await navigator.clipboard.writeText(t.company_code); $app.querySelector('#hcp').textContent = 'Copied'; } catch { /* nothing */ } });
     const sw = $app.querySelector('#hsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
     on('#hhelp', () => getHelp()); on('#hrefund', () => (needs2step() ? security() : requestRefund()));
+    on('#hmine', () => editMyDetails(me)); on('#hmbiz', () => companyInfo(false));
     $app.querySelectorAll('[data-ticket]').forEach((b) => b.onclick = () => openTicket(b.dataset.ticket));
     if (params.has('help') && !S.helpShown) getHelp();
+  }
+
+  // ------------------------------------------------------------------ your details (so Riyeser has the right name and phone for you)
+  function myDetailsHtml(me, admin) {
+    const su = (S.user && S.user.user_metadata && S.user.user_metadata.riyeser_signup) || {};
+    return `<h3 class="hsec">Your details <small>So we can reach the right person. Only you can change these.</small></h3>
+      <div class="hplan hmine" id="hmyd"><div><span>Your name</span><b>${esc(me.display_name || su.you || '—')}</b></div><div><span>Phone</span><b>${esc(su.phone || '—')}</b></div>
+        <div><span>Email</span><b>${esc((S.user && S.user.email) || '')}</b></div>
+        <div class="hmbtns"><button class="btn sm" id="hmine">✏️ Change my details</button>${admin ? '<button class="btn sm" id="hmbiz">Business details</button>' : ''}</div></div>`;
+  }
+  function editMyDetails(me) {
+    const su = (S.user && S.user.user_metadata && S.user.user_metadata.riyeser_signup) || {};
+    modal(`<h3>✏️ Your details</h3><p>Your name shows to the people you work with. Your phone is for Riyeser Support, if we need to call you back.</p>
+      <form id="mdf"><label class="f"><span>Your name</span><input name="name" required maxlength="60" value="${esc(me.display_name || su.you || '')}" autocomplete="name"></label>
+      <label class="f"><span>Your phone</span><input name="phone" type="tel" maxlength="40" value="${esc(su.phone || '')}" autocomplete="tel"></label>
+      <div id="mderr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Save</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#mdf').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const name = String(f.get('name')).trim(); const phone = String(f.get('phone') || '').trim();
+        try { const u = await api.updateMyDetails(S.team.id, S.user.id, name, phone); if (u && u.user_metadata) S.user.user_metadata = u.user_metadata;
+          const p = S.people.find((x) => x.user_id === S.user.id); if (p && name) p.display_name = name; close(); renderHome(); }
+        catch (err) { d.querySelector('#mderr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; } };
+    });
   }
 
   // ------------------------------------------------------------------ help requests (support tickets) and refunds
@@ -853,7 +890,7 @@
     return `<h3 class="hsec">Help${unread ? ` <span class="badge">${unread}</span>` : ''} <small>Stuck, or something not right? Ask us. We usually reply within one business day.</small></h3>
       <div class="hhelp"><button class="btn p" id="hhelp">💬 Get help</button>${S.refunds !== null && S.tickets !== null && isAdmin() ? '<button class="btn" id="hrefund">↩️ Request a refund</button>' : ''}<a class="btn" href="/help.html">📖 Help Centre</a></div>
       ${S.tickets && S.tickets.length ? `<h3 class="hsec">Your help requests</h3><div class="hplan htix">${S.tickets.map((t) => `<button class="htk" data-ticket="${esc(t.id)}">
-        <span><b>${esc(t.subject)}</b><small>${esc(t.ref)} · ${t.mine ? 'you asked' : 'asked by someone in your business'} · ${ago(t.updated_at)}</small></span>
+        <span>${t.from_riyeser ? '<span class="pl riy">Message from Riyeser</span> ' : ''}<b>${esc(t.subject)}</b><small>${esc(t.ref)} · ${t.from_riyeser ? (t.mine ? 'Riyeser wrote to you' : 'Riyeser wrote to someone in your business') : t.mine ? 'you asked' : 'asked by someone in your business'} · ${ago(t.updated_at)}</small></span>
         <span class="htr">${Number(t.unread) ? `<span class="badge" title="New reply from Riyeser">${t.unread} new</span>` : ''}${pill(TSTATUS, t.status)}</span></button>`).join('')}</div>` : ''}
       ${S.refunds && S.refunds.length ? `<h3 class="hsec">Your refund requests</h3><div class="hplan hrf">${S.refunds.map((r) => `<div><span><b>${money2(r.amount, r.currency)} · ${esc(r.for_what)}</b>
         <small>${esc(r.ref)}${r.period ? ` · ${esc(r.period)}` : ''} · ${ago(r.created_at)}${r.amount_approved != null && r.status !== 'declined' && r.status !== 'submitted' && r.status !== 'reviewing' ? ` · ${money2(r.amount_approved, r.currency)} approved` : ''}${r.decision_reason ? `<br>${esc(r.decision_reason)}` : ''}</small></span>${pill(RSTATUS, r.status)}</div>`).join('')}</div>` : ''}`;
@@ -883,7 +920,7 @@
   }
   async function openTicket(id) {
     let t; try { t = await api.ticket(id); } catch (err) { alert(plainError(err)); return; }
-    modal(`<h3>${esc(t.subject)}</h3><p class="small">${esc(t.ref)} · ${pill(TSTATUS, t.status)}</p>
+    modal(`<h3>${esc(t.subject)}</h3><p class="small">${t.from_riyeser ? '<span class="pl riy">Message from Riyeser</span> ' : ''}${esc(t.ref)} · ${pill(TSTATUS, t.status)}</p>
       <div class="tconv">${(t.messages || []).map((m) => `<div class="tmsg${m.staff ? ' staff' : ' me'}"><small>${esc(m.staff ? 'Riyeser Support' : m.from || 'You')} · ${ago(m.at)}</small><div>${esc(m.body).replace(/\n/g, '<br>')}</div></div>`).join('')}</div>
       ${t.status === 'done' ? '<p class="small">This request is marked done. If you still need help, reply and we\'ll pick it up again.</p>' : ''}
       <form id="trf"><label class="f"><span>Your reply</span><textarea name="message" rows="3" maxlength="5000" required></textarea></label>

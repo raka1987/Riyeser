@@ -331,3 +331,7 @@ table.lo .btn { white-space: nowrap; } .lo-help-us p, .lo-card p { font-size: 14
 .pweye:hover, .pweye:focus-visible, .pweye.on { opacity: 1; background: #f1f5f9; }
 .capsnote { display: block; color: #b45309; font-weight: 600; font-size: 12.5px; margin-top: 4px; } .capsnote[hidden] { display: none; }
 .f .pwwrap { font-size: inherit; font-weight: inherit; margin: 0; color: inherit; }
+/* Riyeser home: your details; messages Riyeser started */
+.hmine > div span { color: var(--muted, #64708a); } .hmine > div b { font-weight: 600; overflow-wrap: anywhere; text-align: right; margin-left: 12px; }
+.hmine .hmbtns { justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.pl.riy, .hplan .pl.riy { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #e6efff; color: #1f62f0; vertical-align: 1px; }

@@ -1,4 +1,4 @@
-// Riyeser HQ phase 1 in demo mode: the Support inbox (reply, internal note, assign, escalate, saved replies), fix-up tools,
+// Riyeser HQ phase 1 in demo mode: the Support inbox (reply, internal note, assign, escalate, saved replies), fix-up tools (on the customer page),
 // refunds with a second approver, free periods (14 days applies; 90 days waits for another supervisor), Approvals,
 // permissions on the HQ team tab, Inactive accounts, Emails, History filters and CSV; phone widths; and the "old database" message.
 // Run: build the site, serve website/public on port 8090, then `node website/hq/test-hq-ops.js <screenshot folder>`.
@@ -11,8 +11,10 @@ const fs = require('fs');
   const as = async (name) => { await pg.selectOption('#demoAs', { label: name }); await pg.waitForSelector('#main > *'); };
   const tab = async (k) => { await pg.click(`[data-tab=${k}]`); await pg.waitForTimeout(250); };
   const fill = async (sel, v) => pg.fill(sel, v);
+  const open = async (name, id) => { await tab('companies'); await fill('#sf input', name); await pg.click('#sf button'); await pg.waitForSelector(`tr[data-co="${id}"]`); await pg.click(`tr[data-co="${id}"]`); await pg.waitForSelector('.cpage'); };
+  const cptab = async (k) => { await pg.click(`[data-cptab=${k}]`); await pg.waitForSelector(`#cpBody[data-tab=${k}]`); };
   await pg.goto('http://127.0.0.1:8090/hq/?demo'); await pg.waitForSelector('.tiles');
-  console.log('tabs:', await pg.evaluate(() => [...document.querySelectorAll('.tabs button')].map((x) => x.textContent)));
+  console.log('tabs:', await pg.evaluate(() => [...document.querySelectorAll('.snav .nv')].map((x) => x.textContent)));
 
   // --- Support: inbox, filters, timer, reply, internal note, assign, escalate
   await tab('support'); await pg.waitForSelector('.tk');
@@ -55,7 +57,7 @@ const fs = require('fs');
   await pg.screenshot({ path: out + '/hq-refunds.png' });
 
   // --- Free periods (as Riki): 14 days applies straight away; 90 days waits; Finance Fi approves; seen in Approvals and the company panel
-  await as('Riki (Owner)'); await tab('companies'); await pg.click('tr[data-co="w3"]'); await pg.waitForSelector('.panel');
+  await as('Riki (Owner)'); await open('northside', 'w3'); await cptab('programs');
   const posBefore = (await pg.textContent('#licCard tr[data-mod=pos] .pill')).trim();
   await pg.click('[data-fix=offer]'); await pg.waitForSelector('#of'); await pg.selectOption('#of [name=kind]', 'trial'); await pg.check('#of input[value=pos]');
   await fill('#of [name=amount]', '14'); await pg.selectOption('#of [name=why]', 'goodwill'); await fill('#of [name=reason]', 'Sorry about the printer trouble'); await pg.click('#of .btn.p');
@@ -64,39 +66,40 @@ const fs = require('fs');
   await fill('#of [name=amount]', '90'); await pg.selectOption('#of [name=why]', 'retention'); await fill('#of [name=reason]', 'Thinking of leaving; wants to try Bookings properly'); await pg.click('#of .btn.p');
   await pg.waitForTimeout(400); console.log('90 days:', await pg.evaluate(() => [...document.querySelectorAll('.flash')].pop().textContent), '| Bookings now:', (await pg.textContent('#licCard tr[data-mod=bookings] .pill')).trim());
   console.log('company panel offers:', await pg.evaluate(() => [...document.querySelectorAll('#offCard tr')].slice(1).map((r) => r.innerText.replace(/\s+/g, ' ')).join(' || ')));
-  await pg.screenshot({ path: out + '/hq-offers.png' }); await pg.click('#x');
+  await pg.screenshot({ path: out + '/hq-offers.png' }); await pg.click('#cpBack');
   await tab('approvals'); console.log('Riki sees his own waiting:', (await pg.textContent('#ao')).includes('someone else needs to approve it'));
   await as('Finance Fi (Finance)'); await tab('approvals');
   console.log('approvals tiles:', await pg.evaluate(() => [...document.querySelectorAll('.tile')].map((t) => t.innerText.replace(/\n/g, ' | '))));
   await pg.click('#ao [data-oact=yes]'); await pg.waitForTimeout(400);
   console.log('after approval:', await pg.evaluate(() => [...document.querySelectorAll('.tile')].map((t) => t.innerText.replace(/\n/g, ' | ')).slice(1, 3)));
   await pg.screenshot({ path: out + '/hq-approvals.png' });
-  await as('Riki (Owner)'); await tab('companies'); await pg.click('tr[data-co="w3"]'); await pg.waitForSelector('.panel');
+  await as('Riki (Owner)'); await open('northside', 'w3'); await cptab('programs');
   console.log('Bookings after approval:', (await pg.textContent('#licCard tr[data-mod=bookings] .pill')).trim(), '| offers:', await pg.evaluate(() => [...document.querySelectorAll('#offCard tr td:nth-child(3)')].map((x) => x.innerText.replace(/\s+/g, ' ')).join(' | ')));
 
   // --- a fix-up tool: reset two-step for a person (identity check), then close as duplicate; the panel's own HQ history
-  await pg.click('[data-r2fa="w3-p2"]'); await pg.waitForSelector('#fx'); await fill('#fx [name=how]', 'called back on the number on file'); await fill('#fx [name=reason]', 'Lost phone');
+  await cptab('people'); await pg.click('[data-r2fa="w3-p2"]'); await pg.waitForSelector('#fx'); await fill('#fx [name=how]', 'called back on the number on file'); await fill('#fx [name=reason]', 'Lost phone');
   await fill('#fx [name=ticket]', 'T-10236'); await pg.click('#fx .btn.p'); await pg.waitForSelector('.flash');
   console.log('2FA reset:', await pg.evaluate(() => [...document.querySelectorAll('.flash')].pop().textContent));
-  console.log('company HQ history:', await pg.evaluate(() => [...document.querySelectorAll('#coHist tr')].slice(0, 3).map((r) => r.innerText.replace(/\s+/g, ' ')).join(' || ')));
-  await pg.click('[data-fix=edit]'); await pg.waitForSelector('#fx'); await fill('#fx [name=phone]', '02 9000 0000'); await pg.click('#fx .btn.p'); await pg.waitForTimeout(200);
+  await cptab('history'); console.log('company HQ history:', await pg.evaluate(() => [...document.querySelectorAll('#coHist tr')].slice(0, 3).map((r) => r.innerText.replace(/\s+/g, ' ')).join(' || ')));
+  await cptab('overview'); await pg.click('#bizCard [data-fix=edit]'); await pg.waitForSelector('#fx'); await fill('#fx [name=phone]', '02 9000 0000'); await pg.click('#fx .btn.p'); await pg.waitForTimeout(200);
   console.log('edit without a reason:', await pg.evaluate(() => document.querySelector('#fx [name=reason]').validity.valueMissing)); await fill('#fx [name=reason]', 'Owner asked on the phone'); await pg.click('#fx .btn.p'); await pg.waitForTimeout(300);
   console.log('phone now:', await pg.evaluate(() => [...document.querySelectorAll('.kv dt')].find((x) => x.textContent === 'Phone').nextElementSibling.textContent));
-  await pg.screenshot({ path: out + '/hq-company-tools.png' }); await pg.click('#x');
-  await tab('companies'); await pg.selectOption('#sf select', 'closed'); await pg.waitForTimeout(300);
+  await pg.screenshot({ path: out + '/hq-company-tools.png' }); await pg.click('#cpBack');
+  await tab('companies'); await fill('#sf input', ''); await pg.selectOption('#sf select', 'closed'); await pg.waitForTimeout(300);
   console.log('status filter closed:', await pg.evaluate(() => [...document.querySelectorAll('#cl tr.click b')].map((x) => x.textContent)));
   await pg.click('tr[data-co="w7"]'); await pg.waitForSelector('.banner'); console.log('duplicate banner:', (await pg.textContent('.banner')).replace(/\s+/g, ' ').trim());
-  await pg.click('.banner [data-goco]'); await pg.waitForTimeout(300); console.log('link opens:', await pg.textContent('.panel h2')); await pg.click('#x');
+  await pg.click('.banner [data-goco]'); await pg.waitForTimeout(400); console.log('link opens:', await pg.textContent('.cpage h2')); await pg.click('#cpBack');
 
   // --- HQ team: permissions for a person
   await tab('team'); await pg.click('[data-perms=s2]'); await pg.waitForSelector('[data-pf=s2]');
   await pg.check('[data-pf=s2] input[value="business.close"]'); await pg.uncheck('[data-pf=s2] input[value="people.reset_2fa"]'); await pg.click('[data-pf=s2] .btn.p'); await pg.waitForTimeout(300);
   console.log('Help Desk role:', await pg.$eval('[data-role=s2]', (x) => x.value + ' · ' + x.parentElement.querySelector('small').textContent));
   await as('Help Desk (Support)');
-  console.log('Help Desk tabs:', await pg.evaluate(() => [...document.querySelectorAll('.tabs button')].map((x) => x.textContent.replace(/\d+$/, '')).join(', ')));
-  await tab('companies'); await pg.selectOption('#sf select', 'all'); await pg.waitForSelector('tr[data-co="w1"]'); await pg.click('tr[data-co="w1"]'); await pg.waitForSelector('.panel');
-  console.log('Help Desk tools:', await pg.evaluate(() => [...document.querySelectorAll('[data-fix]')].map((x) => x.textContent.trim()).join(', ')), '| reset 2FA buttons:', await pg.evaluate(() => document.querySelectorAll('[data-r2fa]').length));
-  await pg.click('#x'); await as('Riki (Owner)');
+  console.log('Help Desk tabs:', await pg.evaluate(() => [...document.querySelectorAll('.snav .nv')].map((x) => x.textContent.replace(/\d+$/, '')).join(', ')));
+  await tab('companies'); await pg.selectOption('#sf select', 'all'); await open('sample plumbing', 'w1');
+  console.log('Help Desk tools:', await pg.evaluate(() => [...document.querySelectorAll('[data-fix]')].map((x) => x.textContent.trim()).join(', ')));
+  await cptab('people'); console.log('reset 2FA buttons:', await pg.evaluate(() => document.querySelectorAll('[data-r2fa]').length));
+  await pg.click('#cpBack'); await as('Riki (Owner)');
   await tab('team'); console.log('settings:', await pg.evaluate(() => [...document.querySelectorAll('#setf input')].map((i) => i.name + '=' + i.value).join(', ')));
   await pg.screenshot({ path: out + '/hq-team.png', fullPage: true });
 
@@ -128,7 +131,8 @@ const fs = require('fs');
   for (const k of ['support', 'refunds', 'approvals', 'inactive', 'emails', 'team', 'history']) { await ph.click(`[data-tab=${k}]`); await ph.waitForTimeout(350); over[k] = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth); }
   await ph.click('[data-tab=support]'); await ph.waitForSelector('.tk'); await ph.click('.tk'); await ph.waitForSelector('.tview'); over.ticket = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   await ph.screenshot({ path: out + '/hq-support-phone.png' });
-  await ph.click('[data-tab=companies]'); await ph.waitForSelector('tr[data-co]'); await ph.click('tr[data-co="w1"]'); await ph.waitForSelector('.panel'); over.panel = await ph.evaluate(() => document.querySelector('.panel').scrollWidth - document.querySelector('.panel').clientWidth);
+  await ph.click('[data-tab=companies]'); await ph.waitForSelector('tr[data-co]'); await ph.fill('#sf input', 'sample plumbing'); await ph.click('#sf button'); await ph.waitForSelector('tr[data-co="w1"]');
+  await ph.click('tr[data-co="w1"]'); await ph.waitForSelector('.cpage'); await ph.waitForTimeout(300); over.customer_page = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   console.log('phone overflow:', JSON.stringify(over));
 
   // --- before team-chat.sql is re-run: the new screens say how to switch them on
@@ -148,7 +152,7 @@ const fs = require('fs');
     if (u.pathname.startsWith('/rest/v1/rpc/') && !OLD.includes(fn)) return json({ code: 'PGRST202', message: `Could not find the function public.${fn}` }, 404);
     return json([]); });
   await p3.goto('http://127.0.0.1:8090/hq/'); await p3.waitForSelector('.tiles', { timeout: 15000 });
-  console.log('old database tabs:', await p3.evaluate(() => [...document.querySelectorAll('.tabs button')].map((x) => x.textContent.replace(/\d+$/, '')).join(', ')));
+  console.log('old database tabs:', await p3.evaluate(() => [...document.querySelectorAll('.snav .nv')].map((x) => x.textContent.replace(/\d+$/, '')).join(', ')));
   await p3.click('[data-tab=support]'); await p3.waitForTimeout(500); console.log('old database Support:', (await p3.textContent('#main')).trim());
   await p3.click('[data-tab=team]'); await p3.waitForTimeout(500); console.log('old database HQ team still works:', await p3.evaluate(() => [...document.querySelectorAll('#staff b')].map((x) => x.textContent)));
   console.log('errors:', errs); await b.close();

@@ -3,7 +3,8 @@
 //  2. An owner asks for a refund; it shows under "Your refund requests".
 //  3. Before team-chat.sql is re-run (the new functions are missing): nothing breaks, the new parts hide, Get help points to the Help Centre.
 //  4. A closed business: a plain message at sign-in.
-//  5. Phone width: no sideways scrolling. Run: build the site, serve website/public on 8090, then `node website/team/test/help-test.js <shots>`.
+//  5. A message Riyeser started (HQ's "Message customer") shows as "Message from Riyeser" and can be answered; "Your details" (name, phone) can be changed.
+//  6. Phone width: no sideways scrolling. Run: build the site, serve website/public on 8090, then `node website/team/test/help-test.js <shots>`.
 const { chromium, devices } = require('playwright');
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const user = { id: 'aaaaaaaa-0000-4000-8000-000000000001', email: 'owner@sample.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
@@ -21,7 +22,9 @@ async function fakeServer(page, opts = {}) {
     if (u.pathname.startsWith('/rest/v1/rpc/')) st.calls.push(fn);
     if (opts.oldDatabase && NEW_RPCS.includes(fn)) return json({ code: 'PGRST202', message: `Could not find the function public.${fn} in the schema cache` }, 404);
     if (u.pathname === '/auth/v1/token') return json({ access_token: token(), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user });
+    if (u.pathname === '/auth/v1/user' && m === 'PUT') { st.userUpdate = body; return json({ ...user, user_metadata: body.data }); }
     if (u.pathname === '/auth/v1/user') return json(user);
+    if (u.pathname === '/rest/v1/members' && m === 'PATCH') { st.memberUpdate = { body, query: u.search }; return json([]); }
     if (u.pathname === '/rest/v1/members' && u.search.includes('workspaces')) return json(opts.closed ? [] : [{ role: 'owner', job_role: 'owner', display_name: 'Alex Sample', workspaces: { id: 'w1', name: 'Sample Plumbing', invite_code: 'AB12CD34', company_code: 'RIY-7K3M-Q2', kind: 'business', country: 'Fiji' } }]);
     if (u.pathname === '/rest/v1/members') return json([{ user_id: user.id, display_name: 'Alex Sample', role: 'owner', job_role: 'owner', extension: 101 }]);
     if (u.pathname === '/rest/v1/channels') return json([{ id: 'c1', kind: 'channel', name: 'general', topic: null }]);
@@ -34,7 +37,7 @@ async function fakeServer(page, opts = {}) {
       const msgs = [{ id: 1, staff: false, mine: true, from: 'Alex Sample', body: t.first, at: t.created_at }];
       if (st.staffReplied) msgs.push({ id: 2, staff: true, mine: false, from: 'Riyeser Support', body: 'Thanks Alex. Turn the printer off and on, then print a test page from POS → Settings.', at: new Date().toISOString() });
       (t.replies || []).forEach((x, i) => msgs.push({ id: 3 + i, staff: false, mine: true, from: 'Alex Sample', body: x, at: new Date().toISOString() }));
-      return json({ id: t.id, ref: t.ref, subject: t.subject, status: t.status === 'new' && st.staffReplied ? 'waiting_customer' : t.status, messages: msgs }); }
+      return json({ id: t.id, ref: t.ref, subject: t.subject, from_riyeser: !!t.from_riyeser, status: t.status === 'new' && st.staffReplied ? 'waiting_customer' : t.status, messages: msgs }); }
     if (fn === 'reply_ticket') { const t = st.tickets.find((x) => x.id === body.ticket); (t.replies = t.replies || []).push(body.message); t.status = 'waiting_us'; return json(null); }
     if (fn === 'my_refunds') return json(st.refunds);
     if (fn === 'request_refund') { st.lastRefund = body; st.refunds.unshift({ id: 'f1', ref: 'R-1042', for_what: body.for_what, period: body.period, amount: body.amount, currency: body.currency, status: 'submitted', created_at: new Date().toISOString() });
@@ -75,6 +78,19 @@ const signIn = async (pg, url) => { await pg.goto(url); await pg.waitForSelector
   await pg.click('#ok'); await pg.waitForSelector('.hrf');
   console.log('refund list:', (await pg.textContent('.hrf')).replace(/\s+/g, ' ').trim());
   console.log('touch_activity called once:', st.calls.filter((c) => c === 'touch_activity').length);
+  // 5. a message from Riyeser, and Your details
+  st.tickets.push({ id: 't9', ref: 'T-10240', subject: 'Your POS trial is nearly up', topic: 'billing', status: 'waiting_customer', mine: true, from_riyeser: true, business: 'Sample Plumbing',
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(), first: 'Hi Alex, would you like a hand choosing a plan?' });
+  await pg.reload(); await pg.waitForSelector('.htk');
+  const riy = await pg.evaluate(() => [...document.querySelectorAll('.htk')].map((x) => x.innerText.replace(/\s+/g, ' ')).find((x) => x.includes('Your POS trial')));
+  console.log('message from Riyeser:', riy);
+  await pg.click('.htk:has-text("Your POS trial")'); await pg.waitForSelector('.tconv');
+  console.log('opened:', (await pg.textContent('.mcard p.small')).replace(/\s+/g, ' ').trim());
+  await pg.fill('#trf textarea', 'Yes please, call me tomorrow.'); await pg.click('#trf .btn.p'); await pg.waitForTimeout(300);
+  console.log('customer replied:', JSON.stringify(st.tickets.find((x) => x.id === 't9').replies)); await pg.click('#cl');
+  console.log('your details:', (await pg.textContent('#hmyd')).replace(/\s+/g, ' ').trim());
+  await pg.click('#hmine'); await pg.waitForSelector('#mdf'); await pg.fill('#mdf [name=name]', 'Alex Sample-Smith'); await pg.fill('#mdf [name=phone]', '+679 330 9999'); await pg.click('#mdf .btn.p'); await pg.waitForTimeout(400);
+  console.log('saved: name ->', JSON.stringify(st.memberUpdate), '| phone ->', JSON.stringify(st.userUpdate), '| card:', (await pg.textContent('#hmyd')).replace(/\s+/g, ' ').trim());
   // 3. the live database before team-chat.sql is re-run
   const p2 = await b.newPage({ viewport: { width: 1280, height: 900 } }); p2.on('pageerror', (e) => errs.push('old db: ' + e.message));
   await fakeServer(p2, { oldDatabase: true }); await signIn(p2, 'http://127.0.0.1:8090/link/'); await p2.waitForSelector('.hco');
