@@ -186,3 +186,11 @@ a { color: var(--blue); }
 .gtabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: #f1f3f8; border-radius: 12px; padding: 4px; margin-top: 16px; }
 .gtabs button { border: 0; background: none; padding: 9px 6px; border-radius: 9px; font-weight: 700; color: var(--muted); }
 .gtabs button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(20, 30, 60, .15); }
+
+/* account screens (sign in, create account, company set-up, two-step): Riyeser's own look, not Team's */
+.acct { --brand: #1f62f0; --brand-2: #1a4fc4; --brand-l: #e6efff; }
+.acct .gate { background: linear-gradient(160deg, #f4f7ff, #e3ecff); }
+.acct .glogo img { border-radius: 0; object-fit: contain; }
+.acct .f input:focus { outline-color: rgba(31, 98, 240, .2); }
+.gback { display: inline-block; font-size: 13.5px; font-weight: 600; color: var(--muted); text-decoration: none; margin-bottom: 14px; } .gback:hover { color: var(--blue); }
+.gcancel { margin-top: 8px; }

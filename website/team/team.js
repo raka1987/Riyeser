@@ -263,21 +263,24 @@
   // ------------------------------------------------------------------ sign in / create account
   function gate(mode = 'in', note = '') {
     const join = params.get('join');
-    $app.className = '';
-    $app.innerHTML = `<div class="gate"><form class="gcard" id="gf">
-      <div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div>
+    $app.className = 'acct'; document.title = 'Riyeser';
+    $app.innerHTML = `<div class="gate"><form class="gcard" id="gf">${/Electron/.test(navigator.userAgent) ? '' : '<a class="gback" href="/">← Back to riyeser.com</a>'}
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${mode !== 'reset' ? `<div class="gtabs" role="tablist"><button type="button" role="tab" data-go="in" class="${mode === 'in' ? 'on' : ''}" aria-selected="${mode === 'in'}">Sign in</button><button type="button" role="tab" data-go="up" class="${mode === 'up' ? 'on' : ''}" aria-selected="${mode === 'up'}">Create account</button></div>` : ''}
-      <h1>${mode === 'up' ? 'Create your account' : mode === 'reset' ? 'Reset your password' : 'Sign in'}</h1>
-      <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. Use your work email.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'Chat with your team, alongside your Riyeser programs.'}</p>
+      <h1>${mode === 'up' ? 'Create your Riyeser account' : mode === 'reset' ? 'Reset your password' : 'Sign in to Riyeser'}</h1>
+      <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. One account for your company and every Riyeser program. Use your work email.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for your company, your team and all your Riyeser programs.'}</p>
       ${note}
       <label class="f"><span>Email</span><input type="email" name="email" autocomplete="email" required></label>
       ${mode !== 'reset' ? `<label class="f"><span>Password</span><input type="password" name="password" minlength="8" autocomplete="${mode === 'up' ? 'new-password' : 'current-password'}" required></label>` : ''}
       <button class="btn p w" type="submit">${mode === 'up' ? 'Create account' : mode === 'reset' ? 'Send the link' : 'Sign in'}</button>
+      ${mode === 'up' ? `<button type="button" class="btn w gcancel" id="gcancel">Cancel</button>` : ''}
       <div class="alt">${mode === 'in' ? `<button type="button" class="linkbtn" data-go="reset">Forgot password?</button></div>
       <div class="or">New to Riyeser?</div><button type="button" class="btn w" data-go="up">Create a free account</button><div class="alt" hidden>`
         : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div>
       <div class="alt"><a href="?demo">Try the demo first</a></div></form></div>`;
     $app.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => gate(b.dataset.go));
+    // Cancel: back to riyeser.com (in the Windows app, back to Sign in)
+    const cx = $app.querySelector('#gcancel'); if (cx) cx.onclick = () => (/Electron/.test(navigator.userAgent) ? gate('in') : location.assign('/'));
     $app.querySelector('#gf').onsubmit = async (e) => {
       e.preventDefault(); const f = new FormData(e.target); const btn = e.target.querySelector('button[type=submit]'); btn.disabled = true;
       try {
@@ -294,9 +297,9 @@
   // ------------------------------------------------------------------ create or join a team
   function setupTeam(note = '') {
     const join = params.get('join') || '';
-    $app.className = '';
+    $app.className = 'acct'; document.title = 'Riyeser';
     $app.innerHTML = `<div class="gate"><div class="gcard">
-      <div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div>
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${note}
       <form id="jf"><h1>Join your company</h1><p>Enter the Company ID (like RIY-7K3M-Q2) or your branch's code. Someone at your company approves you, then you're in.</p>
         <label class="f"><span>Company ID or branch code</span><input name="code" value="${esc(join)}" required autocapitalize="characters" placeholder="RIY-…"></label>
@@ -312,7 +315,7 @@
         <label class="f"><span>Country</span><select name="country"><option>Fiji</option><option>Australia</option><option>New Zealand</option><option>Other</option></select></label>
         <label class="f"><span>Your name</span><input name="you" required maxlength="60"></label>
         <button class="btn w">Create the company</button></form></details>
-      <div class="alt"><button class="linkbtn" id="so">Sign out</button></div></div></div>`;
+      <div class="alt"><button class="linkbtn" id="so">Cancel and sign out</button></div></div></div>`;
     const fail = (e) => setupTeam(`<div class="err">${esc(plainError(e))}</div>`);
     $app.querySelector('#jf').onsubmit = async (e) => {
       e.preventDefault(); const f = new FormData(e.target);
@@ -333,9 +336,9 @@
   let waitTimer = null;
   function waiting(company, declined) {
     clearInterval(waitTimer);
-    $app.className = '';
+    $app.className = 'acct'; document.title = 'Riyeser';
     $app.innerHTML = `<div class="gate"><div class="gcard">
-      <div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div>
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${declined ? `<h1>${esc(company)} didn't approve this</h1><p>Check with them, or ask to join with a different Company ID.</p><button class="btn p w" id="again">Try another code</button>`
         : `<h1>Waiting for ${esc(company)}</h1><p>We've asked them to let you in. As soon as an owner or admin approves you, you're in: this page checks by itself.</p>
           <div class="waitdots" aria-hidden="true"><i></i><i></i><i></i></div><button class="btn w" id="chk">Check now</button>`}
@@ -358,9 +361,9 @@
   // ---------------- two-step sign-in
   // At sign-in, when it's turned on: the 6-number code from the authenticator app.
   async function codeScreen(note = '') {
-    $app.className = '';
+    $app.className = 'acct'; document.title = 'Riyeser';
     $app.innerHTML = `<div class="gate"><form class="gcard" id="cs">
-      <div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div>
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       <h1>🔐 Enter your code</h1><p>Open your authenticator app and type the 6 numbers shown for Riyeser.</p>${note}
       <label class="f"><span>Code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn"></label>
       <button class="btn p w">Continue</button>
@@ -1028,7 +1031,7 @@
         return r && r.status === 'pending' ? waiting(r.company_name) : setupTeam(); }
       let last = null; try { last = localStorage.getItem('riyeser.team.last'); } catch { /* private mode */ }
       await loadTeam(S.teams.some((t) => t.id === last) ? last : S.teams[0].id);
-    } catch (e) { $app.className = ''; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
+    } catch (e) { $app.className = 'acct'; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
   setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);

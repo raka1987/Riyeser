@@ -23,7 +23,7 @@ const { chromium } = require('playwright');
 
   // sign in to an account with two-step on: asks for the code, then lets you in
   const p2 = await b.newPage({ viewport: { width: 1000, height: 800 } }); p2.on('pageerror', (e) => errs.push('signin: ' + e.message));
-  await p2.route('**/team/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
+  await p2.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
   const user = { id: 'aaaaaaaa-0000-4000-8000-000000000001', email: 'owner@sample.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
   const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
   const token = (aal) => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: user.id, aal, amr: [{ method: 'password', timestamp: 1 }], exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.sig`;

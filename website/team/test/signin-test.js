@@ -4,7 +4,7 @@ const { chromium } = require('playwright');
   const b = await chromium.launch(); const errs = []; const calls = [];
   const pg = await b.newPage({ viewport: { width: 1200, height: 800 } });
   pg.on('pageerror', (e) => errs.push(e.message));
-  await pg.route('**/team/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
+  await pg.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
   const user = { id: 'aaaaaaaa-0000-4000-8000-000000000001', email: 'owner@sample.test' };
   let teamMade = false;
   await pg.route('https://fake.supabase.test/**', async (r) => {

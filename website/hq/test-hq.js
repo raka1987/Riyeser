@@ -43,7 +43,7 @@ const { chromium, devices } = require('playwright');
   await ph.goto('http://127.0.0.1:8090/hq/?demo'); await ph.waitForSelector('.tiles');
   console.log('phone overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   // signed out, not configured -> the demo; real sign-in screen when configured
-  const p3 = await b.newPage(); await p3.route('**/team/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"k"};' }));
+  const p3 = await b.newPage(); await p3.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"k"};' }));
   await p3.route('https://fake.supabase.test/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{}' }));
   await p3.goto('http://127.0.0.1:8090/hq/'); await p3.waitForSelector('#g'); console.log('configured & signed out ->', await p3.textContent('#g h1'));
   console.log('errors:', errs); await b.close();

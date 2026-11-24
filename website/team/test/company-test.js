@@ -35,7 +35,7 @@ const { chromium, devices } = require('playwright');
 
   // ask to join -> waiting -> approved (pretend Supabase)
   const p2 = await b.newPage({ viewport: { width: 1000, height: 800 } }); p2.on('pageerror', (e) => errs.push('join: ' + e.message));
-  await p2.route('**/team/config.js', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
+  await p2.route('**/team/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
   const user = { id: 'aaaaaaaa-0000-4000-8000-000000000009', email: 'mere@sample.test' }; let approved = false; let asked = null;
   await p2.route('https://fake.supabase.test/**', async (r) => {
     const u = new URL(r.request().url()); const m = r.request().method();
