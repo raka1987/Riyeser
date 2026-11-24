@@ -29,10 +29,6 @@ execFileSync(process.execPath, [join(ROOT, 'build.mjs')], {
 const websiteFiles = [];
 (function walk(dir) { for (const f of readdirSync(dir)) { const p = join(dir, f); if (statSync(p).isDirectory()) walk(p); else websiteFiles.push(relative(OUT, p)); } })(OUT);
 
-// 2. The Services app: everything except its pages at the top (scripts, images, share page), pages in /app/.
-cpSync(SRC, OUT, { recursive: true, force: false, errorOnExist: false, filter: (src) => !APP_PAGES.includes(relative(SRC, src)) });
-mkdirSync(join(OUT, 'app'), { recursive: true });
-
 // Riyeser HQ (staff back office) at /hq/: not linked from the site, not indexed, staff sign-in only.
 cpSync(join(ROOT, 'hq'), join(OUT, 'hq'), { recursive: true, filter: (src) => !basename(src).startsWith('test-') });
 // 3. Riyeser Team (team chat) at /team/. Its database setup (team-chat.sql) stays in the repository only.
@@ -46,6 +42,13 @@ cpSync(join(ROOT, 'team'), join(OUT, 'team'), { recursive: true, filter: (src) =
     writeFileSync(f, readFileSync(f, 'utf8').replace(/(src|href)="([^":?#]+\.(?:js|css))"/g, (m, attr, url) => `${attr}="${url}?v=${stamp(join(dir, url))}"`));
   }
 }
+
+// As Built (the Services app) is only built in when ASBUILT_WEB=1, e.g. for the As Built Windows installer.
+const ASBUILT = process.env.ASBUILT_WEB === '1';
+if (ASBUILT) {
+// 2. The Services app: everything except its pages at the top (scripts, images, share page), pages in /app/.
+cpSync(SRC, OUT, { recursive: true, force: false, errorOnExist: false, filter: (src) => !APP_PAGES.includes(relative(SRC, src)) });
+mkdirSync(join(OUT, 'app'), { recursive: true });
 
 /** Replace text; stop the build if an expected piece isn't there (the app changed and needs a look). */
 function swap(text, file, pairs) {
@@ -81,6 +84,12 @@ writeFileSync(join(OUT, 'sw.js'), swap(readFileSync(join(SRC, 'sw.js'), 'utf8'),
   ['const n=e.request.mode==="navigate"?"/index.html":e.request;', 'if(e.request.mode==="navigate"&&!t.pathname.startsWith("/app/"))return;const n=e.request.mode==="navigate"?"/app/":e.request;'],
 ]));
 
+} else {
+  // As Built is off the website for now. Anyone whose browser kept the old As Built app (an offline copy) gets it
+  // cleared on their next visit, so riyeser.com shows the current website.
+  writeFileSync(join(OUT, 'sw.js'), "self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil((async()=>{for(const k of await caches.keys())await caches.delete(k);await self.registration.unregister();for(const c of await self.clients.matchAll({type:'window'}))c.navigate(c.url)})()));\n");
+}
+
 // 3. Links to the old /software/ address go to the same page at the top.
 for (const f of websiteFiles.filter((f) => f.endsWith('.html') && f !== '404.html')) {
   const to = '/' + f.replace(/(^|\/)index\.html$/, '$1');
@@ -88,4 +97,4 @@ for (const f of websiteFiles.filter((f) => f.endsWith('.html') && f !== '404.htm
   writeFileSync(join(OUT, 'software', f), `<!doctype html><meta charset="utf-8"><title>Moved — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${SITE}${to}"><script>location.replace(${JSON.stringify(to)}+location.search+location.hash)</script><p>Moved to <a href="${to}">${to}</a>.</p>`);
 }
 
-console.log('Combined site ready in', OUT, '(software website at /, Riyeser Services at /app/)');
+console.log('Combined site ready in', OUT, ASBUILT ? '(software website at /, As Built at /app/)' : '(software website at /; As Built left out)');

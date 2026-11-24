@@ -21,7 +21,7 @@ fs.copyFileSync(path.join(root, 'build/team/icon.ico'), path.join(root, 'src/ren
 // As Built's own copy of the app: the riyeser.com build, kept inside the installer so it works offline.
 if (!process.argv[2] || process.argv[2] === 'services') {
   const site = path.join(root, '..', 'website');
-  run('node', [path.join(site, 'build-combined.mjs')]);
+  run('node', [path.join(site, 'build-combined.mjs')], { ASBUILT_WEB: '1' });
   fs.rmSync(path.join(root, 'build', 'services-web'), { recursive: true, force: true });
   fs.cpSync(path.join(site, 'public'), path.join(root, 'build', 'services-web'), { recursive: true });
 }
