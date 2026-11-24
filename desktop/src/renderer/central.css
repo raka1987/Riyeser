@@ -200,3 +200,12 @@ h2.sec { font-size: 13px; font-weight: 700; color: var(--muted); text-transform:
 .planrows .pt { color: var(--muted, #5b6782); } .planrows .t-bad .pt { color: #b91c1c; font-weight: 600; } .planrows .t-warn .pt { color: #b45309; font-weight: 600; }
 .planrows .t-ok .pt { color: #15803d; font-weight: 600; }
 .planmeta { margin: 6px 0; font-size: 13.5px; }
+
+/* ---------- demo mode: a yellow banner across the top while practice data is shown ---------- */
+.demobar { display: flex; align-items: center; gap: 14px; height: 40px; box-sizing: border-box; padding: 0 16px; background: #ffd84d; color: #3a2c00; border-bottom: 1px solid #e0b800; font-size: 13.5px; }
+.demobar[hidden] { display: none; }
+.demobar .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.demobar .demo-leave { border: 1px solid #8a6d00; background: #fff6cc; color: #3a2c00; border-radius: 8px; padding: 4px 12px; font-weight: 600; cursor: pointer; }
+.demobar .demo-leave:hover { background: #fff; }
+body.demo .app { height: calc(100vh - 40px); }
+.wchoices.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }

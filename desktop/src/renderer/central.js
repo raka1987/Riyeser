@@ -133,6 +133,7 @@ function renderNav() {
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
     <button class="${view === 'company' ? 'on' : ''}" data-view="company">${icon('building')}Company</button>
+    ${demoState.on ? '' : `<button data-demo="try" title="Explore every program with made-up data">${icon('layers')}${esc(window.RiyeserDemo.TEXT.tryButton)}</button>`}
     <button data-lic="open">${icon('key')}Licence</button>
     <button data-help="central">${icon('help')}Help</button>`;
 }
@@ -306,6 +307,41 @@ bridge.on('update-progress', (p) => {
 });
 $('#checkupd').addEventListener('click', () => checkForUpdates(true, false));
 
+// ---------- demo mode: practice data for Sample Trading Co (%APPDATA%\Riyeser\demo.json) ----------
+let demoState = { on: false };
+function renderDemo() {
+  const bar = $('#demobar'); const html = window.RiyeserDemo.bannerHtml(demoState);
+  bar.hidden = !html; bar.innerHTML = html;
+  document.body.classList.toggle('demo', !!demoState.on);
+}
+async function loadDemo() { try { demoState = await bridge.call('demo:get'); } catch { demoState = { on: false }; } renderDemo(); renderNav(); return demoState; }
+function demoNote(msg) {
+  const box = $('#demonote'); box.hidden = !msg;
+  box.innerHTML = msg ? `<span style="font-size:24px">🧪</span><div class="grow"><b>Practice data not put away yet</b><div class="lbl">${esc(msg)}</div></div><button class="go" data-demo="retry">Try again</button>` : '';
+}
+async function startDemo() {
+  await bridge.call('demo:start');
+  await loadDemo(); await safe(refresh);
+  toast(`Demo mode is on. Open any program to explore ${window.RiyeserDemo.BUSINESS}.`);
+}
+async function leaveDemo(retry) {
+  const r = await bridge.call('demo:leave');
+  const m = window.RiyeserDemo.leaveMessage(r);
+  demoNote(m.ok ? '' : m.text);
+  toast(m.ok ? (retry ? 'The practice data is put away.' : m.text) : m.text);
+  await loadDemo(); await safe(refresh);
+  // never set up a company: offer the normal set-up now
+  if (r.neverSetUp && !retry && window.RiyeserCompany) window.RiyeserCompany.offerSetup();
+}
+window.RiyeserCentralDemo = { startDemo, loadDemo, state: () => demoState };
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-demo]'); if (!b) return;
+  const a = b.dataset.demo; const T = window.RiyeserDemo.TEXT;
+  if (a === 'try') { if (confirm(T.confirmTry)) safe(startDemo); }
+  if (a === 'leave') { if (confirm(T.confirmLeave)) safe(() => leaveDemo(false)); }
+  if (a === 'retry') safe(() => leaveDemo(true));
+});
+
 // ---------- licence: one free 90-day trial, then one licence for every Riyeser program ----------
 let lic = null;
 if (bridge && bridge.on) bridge.on('licence-changed', () => loadLicence());
@@ -434,6 +470,7 @@ $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign
   const v = await bridge.call('app:version').catch(() => '');
   document.title = `Riyeser Central ${v}`;
   $('#foot').textContent = `Version ${v}. Shows information from your other Riyeser programs and never changes it.`;
+  await loadDemo();
   await safe(refresh);
   checkForUpdates(false);
   loadLicence();

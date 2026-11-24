@@ -13,6 +13,7 @@ const { Index } = require('./core/indexer');
 const { upcomingMeetings } = require('./core/calendar');
 const sources = require('./central/sources');
 const online = require('./core/online');
+const demo = require('./central/demo');
 
 app.setName('Riyeser Central');
 // Central's data folder. Versions before 1.2 used "Riyser Central": move it across once so nothing is lost.
@@ -60,8 +61,15 @@ const PROGRAMS = [
 ];
 
 /** Start a program with arguments, separate from Central (it keeps running if Central closes). */
+// In demo mode the program is also told so in its environment (RIYESER_DEMO=1); it reads demo.json itself as well.
+const demoOn = () => { try { return demo.isOn(app.getPath('appData')); } catch { return false; } };
+function launchEnv() {
+  const env = { ...process.env }; delete env.RIYESER_DEMO;
+  if (demoOn()) env.RIYESER_DEMO = '1';
+  return env;
+}
 function launch(exe, args) {
-  const child = spawn(exe, args, { detached: true, stdio: 'ignore', cwd: path.dirname(exe) });
+  const child = spawn(exe, args, { detached: true, stdio: 'ignore', cwd: path.dirname(exe), env: launchEnv() });
   child.on('error', () => { /* reported by the program itself */ });
   child.unref();
 }
@@ -221,6 +229,7 @@ function registerIpc() {
     if (!exe) throw new Error(`${p.full} isn't installed on this computer yet (or I can't find it). Use “Locate…” to point me to it.`);
     // Quick access: programs that can open on a given screen (e.g. Accounting's Shop counter) get --page=<name>.
     if (page && (p.pages || []).includes(page) && /\.exe$/i.test(exe)) { launch(exe, [`--page=${page}`]); return true; }
+    if (demoOn() && /\.exe$/i.test(exe)) { launch(exe, []); return true; }   // demo mode: started with RIYESER_DEMO=1
     const err = await shell.openPath(exe);
     if (err) throw new Error(err);
     return true;
@@ -254,6 +263,17 @@ function registerIpc() {
     // program was removed) never shows old to-dos, balances or documents left behind on the PC.
     const installed = (id) => !!locate(PROGRAMS.find((x) => x.id === id));
     const deskInstalled = installed('desk'); const pdfInstalled = installed('pdf');
+    // Demo mode: practice figures only. Money and pay runs come from Accounting's and Payroll's demo records (so the
+    // numbers match what those programs show); to-dos and meetings are made up here; real recent files aren't shown.
+    const inDemo = demoOn(); const appDataDir = app.getPath('appData');
+    if (inDemo) {
+      const sample = demo.sampleToday();
+      let money = { found: false }; let payroll = { found: false, lastRun: null };
+      if (installed('accounting') || installed('accounting-basics')) { try { money = await sources.pendingPayments(demo.demoAccountingDb()); } catch (e) { money = { found: false, error: e.message }; } }
+      if (installed('payroll')) { try { payroll = await sources.lastPayRun(demo.demoPayrollDb(appDataDir)); } catch (e) { payroll = { found: false, lastRun: null, error: e.message }; } }
+      const tasks = deskInstalled ? sample.tasks : [];
+      return { demo: true, deskFound: deskInstalled, calendars: deskInstalled ? 1 : 0, meetings: deskInstalled ? sample.meetings : [], meetingErrors: [], tasks, taskCount: tasks.length, money, recent: [], payroll, organisedRoot: '' };
+    }
     const da = deskInstalled ? sources.deskAssistant(deskData()) : { found: false, settings: {}, tasks: [] };
     const open = (da.tasks || []).filter((t) => !t.done);
     const tasks = open.sort((a, b) => String(a.due || '9').localeCompare(String(b.due || '9'))).slice(0, 12);
@@ -318,6 +338,12 @@ function registerIpc() {
   handle('company:local', (profile, yourName) => on.setupLocal(profile || {}, yourName));
   handle('company:skip', () => { store.update('company-setup', {}, (o) => ({ ...(o || {}), skipped: true })); return true; });
   handle('company:copy', (text) => { clipboard.writeText(String(text || '')); return true; });
+  // ---------- demo mode (%APPDATA%\Riyeser\demo.json; every program reads it when it starts) ----------
+  const neverSetUp = () => { const setup = store.get('company-setup', {}) || {}; return !online.readCompany(appData) && !setup.skipped; };
+  handle('demo:get', () => ({ on: demo.isOn(appData), business: demo.BUSINESS, neverSetUp: neverSetUp() }));
+  handle('demo:start', () => { demo.start(appData); return { on: true, business: demo.BUSINESS }; });
+  handle('demo:leave', () => ({ ...demo.leave({ appData }), on: false, neverSetUp: neverSetUp() }));
+  try { demo.tidy({ appData }); } catch { /* tried again next start */ }
   // Was this PC unlinked by an admin? Checked once a day; the company file and all data stay as they are.
   handle('company:checkLinked', async () => {
     const ok = await on.stillLinked();
@@ -417,7 +443,7 @@ app.whenReady().then(async () => {
     const out = selfTest.slice('--self-test='.length);
     let money; try { money = await sources.pendingPayments(); } catch (e) { money = { error: e.message }; }
     let upd; try { upd = await updateStatus(true); } catch (e) { upd = { error: e.message }; }
-    fs.writeFileSync(out, JSON.stringify({ version: app.getVersion(), programs: programList(), money: { found: money.found, error: money.error || null }, installed: await installedVersions(), updates: upd, licence: licence.status(app.getPath('appData')) }, null, 2));
+    fs.writeFileSync(out, JSON.stringify({ version: app.getVersion(), programs: programList(), money: { found: money.found, error: money.error || null }, installed: await installedVersions(), updates: upd, licence: licence.status(app.getPath('appData')), demo: demo.isOn(app.getPath('appData')) }, null, 2));
     app.exit(0);
     return;
   }

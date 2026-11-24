@@ -2,8 +2,8 @@
 // First run: a full-window wizard to set up a new company, join an existing one (an admin approves it, like a friend
 // request), or set this PC up on its own. Afterwards, the Company page shows the profile and Company ID.
 // The profile is saved in %APPDATA%\Riyeser\company.json, so every Riyeser program fills in the company details itself.
-/* global $, esc, bridge, toast, safe, setView */
-const CO = { state: null, mode: null, screen: 'choice', create: false, poll: null, busy: false, err: '', note: '', last: null };
+/* global $, esc, bridge, toast, safe, setView, renderNav */
+const CO = { first: false, state: null, mode: null, screen: 'choice', create: false, poll: null, busy: false, err: '', note: '', last: null };
 const COUNTRIES = ['Fiji', 'Australia', 'New Zealand', 'Samoa', 'Tonga', 'Vanuatu', 'Papua New Guinea', 'Solomon Islands', 'Other'];
 const field = (n, label, v = '', extra = '') => `<label class="wf"><span>${label}</span><input name="${n}" value="${esc(v)}" ${extra}></label>`;
 const profileFields = (p = {}) => `<div class="wgrid">
@@ -30,6 +30,13 @@ function closeWizard() { $('#wizard').hidden = true; $('#wizard').innerHTML = ''
 const offlineNote = () => (CO.state && !CO.state.onlineReady
   ? '<p class="wnote">Online company linking is being switched on — set up this PC on its own for now. You can link it to your company online later from <b>Company</b>.</p>' : '');
 
+// The first step the first time: start blank (the normal set-up) or explore with demo data (Sample Trading Co).
+// Demo mode writes only demo.json: no company.json, so nothing is linked to a real online company.
+function showStart() {
+  CO.screen = 'start';
+  wiz(window.RiyeserDemo.startHtml());
+}
+
 function showChoice() {
   CO.screen = 'choice';
   const on = CO.state.onlineReady;
@@ -39,7 +46,7 @@ function showChoice() {
       <button class="wbig" data-w="join"${on ? '' : ' disabled'}><span class="wi">🤝</span><b>Join an existing company</b><small>Your company already uses Riyeser. Enter its Company ID or your branch code, and an admin approves you.</small></button>
       <button class="wbig" data-w="local"><span class="wi">💻</span><b>Just this PC for now</b><small>Set up the company details on this PC only. Link it to your company online any time.</small></button>
     </div>${offlineNote()}
-    <p class="wfoot"><button class="wlink" data-w="later">Set up later</button></p>`);
+    <p class="wfoot">${CO.first ? '<button class="wlink" data-w="start">Back</button> · ' : ''}<button class="wlink" data-w="later">Set up later</button></p>`);
 }
 
 function showAccount(next) {
@@ -138,6 +145,7 @@ function rerender() {
   if (s === 'joinform') return showJoinForm();
   if (s === 'local') return showLocal();
   if (s === 'waiting') return showWaiting(CO.state.pendingJoin && CO.state.pendingJoin.company_name);
+  if (s === 'start') return showStart();
   return showChoice();
 }
 
@@ -146,6 +154,9 @@ document.addEventListener('click', (e) => {
   const a = b.dataset.w;
   if (a === 'new' || a === 'join') return showAccount(a);
   if (a === 'local') return showLocal();
+  if (a === 'blank') return showChoice();
+  if (a === 'start') return showStart();
+  if (a === 'demo') return run(async () => { closeWizard(); CO.first = false; await window.RiyeserCentralDemo.startDemo(); });
   if (a === 'signup' || a === 'signin') { CO.create = a === 'signup'; return showAccount(CO.mode); }
   if (a === 'back') return showChoice();
   if (a === 'copy') { const t = ($('#wid') || $('#coid') || {}).textContent; safe(() => bridge.call('company:copy', t)).then(() => toast('Company ID copied')); return; }
@@ -184,15 +195,21 @@ function renderCoBar() {
 }
 function afterChange() { renderCompany(); renderCoBar(); if (typeof renderNav === 'function') renderNav(); }
 
-// On start: the wizard the first time, or the waiting screen if a request is still out.
+// After leaving demo mode, for someone who never set up a company: the normal set-up.
+async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state.skipped && !CO.state.pendingJoin) { CO.first = false; showChoice(); } }
+
+// On start: the wizard the first time (it starts with "How would you like to start?"), or the waiting screen if a
+// request is still out. Nothing is asked while demo mode is on, or once the company is set up.
 (async () => {
   try {
     const s = await coLoad();
     renderCompany(); renderCoBar();
-    if (s.pendingJoin) { showWaiting(s.pendingJoin.company_name); checkJoin(true); }
-    else if (!s.company && !s.skipped) showChoice();
+    let demo = null; try { demo = await bridge.call('demo:get'); } catch { /* normal mode */ }
+    const first = window.RiyeserDemo.firstScreen(s, demo);
+    if (first === 'waiting') { showWaiting(s.pendingJoin.company_name); checkJoin(true); }
+    else if (first === 'start') { CO.first = true; showStart(); }
     else if (s.company && s.company.mode === 'online') { await bridge.call('company:checkLinked').catch(() => null); await coLoad(); renderCoBar(); }
   } catch { /* the rest of Central works without it */ }
   setInterval(async () => { try { await bridge.call('company:checkLinked'); await coLoad(); renderCoBar(); } catch { /* offline */ } }, 24 * 3600 * 1000);
 })();
-window.RiyeserCompany = { renderCompany, showChoice, state: () => CO.state };
+window.RiyeserCompany = { renderCompany, showChoice, showStart, offerSetup, state: () => CO.state };
