@@ -31,7 +31,7 @@ const { chromium } = require('playwright');
   await pg.fill('input[name=email]', user.email); await pg.fill('input[name=password]', 'wrong-password'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.err'); console.log('2. wrong password:', await pg.textContent('.err'));
   await pg.fill('input[name=email]', user.email); await pg.fill('input[name=password]', 'right-password'); await pg.click('button[type=submit]');
-  await pg.waitForSelector('#cf'); console.log('3. signed in, no company yet ->', await pg.textContent('#cf h1'), '/', await pg.textContent('#tojoin')); await pg.fill('#cf input[name=team]', 'Sample Plumbing'); await pg.fill('#cf input[name=you]', 'Alex'); await pg.click('#cf button');
+  await pg.waitForSelector('#cf'); console.log('3. signed in, no company yet ->', await pg.textContent('#cf h1'), '/', await pg.textContent('#tojoin')); await pg.fill('#cf input[name=phone]', '+679 900 0000'); await pg.fill('#cf input[name=team]', 'Sample Plumbing'); await pg.fill('#cf input[name=you]', 'Alex'); await pg.click('#cf button');
   await pg.waitForSelector('#cidv'); console.log('4. company made, shows its ID:', await pg.textContent('#cidv')); await pg.click('#cl');
   await pg.waitForSelector('.hco'); console.log('   lands on the Riyeser home:', await pg.textContent('.hco h2'), '| tiles:', await pg.$$eval('.happ b', (x) => x.length)); await pg.click('#hchat');
   await pg.waitForSelector('#txt'); console.log('   chat open on:', await pg.textContent('#mhead h2'));

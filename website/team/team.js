@@ -21,6 +21,7 @@
     if (/Password should be/i.test(m)) return 'Choose a password of at least 8 characters.';
     if (/Signups not allowed/i.test(m)) return 'New accounts aren\'t open yet. Ask Riyeser to turn on sign-ups.';
     if (/Invalid TOTP|mfa_verification_failed|expired/i.test(m)) return 'That code isn\'t right. Type the 6 numbers your authenticator app shows now (they change every 30 seconds).';
+    if (/created_by_fkey|JWT|sub claim/i.test(m)) return 'Your sign-in has ended. Sign out, then sign in again.';
     if (/Failed to fetch|NetworkError/i.test(m)) return 'Can\'t reach Riyeser Team. Check your internet connection and try again.';
     return m;
   };
@@ -32,7 +33,13 @@
     let sub = null;
     return {
       demo: false,
-      async session() { return ok(await sb.auth.getSession()).session; },
+      async session() {
+        const s = ok(await sb.auth.getSession()).session; if (!s) return null;
+        // The browser can remember a sign-in for an account that was since removed: ask the server, and sign out if it's gone.
+        const { error } = await sb.auth.getUser();
+        if (error && [401, 403, 404].includes(error.status)) { await sb.auth.signOut({ scope: 'local' }).catch(() => {}); S.signedOutNote = true; return null; }
+        return s;
+      },
       onAuth(fn) { sb.auth.onAuthStateChange((_e, s) => fn(s)); },
       async signIn(email, password) { return ok(await sb.auth.signInWithPassword({ email, password })); },
       async signUp(email, password) {
@@ -303,6 +310,8 @@
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     const newForm = `<form id="cf"><h1>A few details</h1><p>Nearly done. This is how you'll appear in Riyeser.</p>
         <label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>
+        <label class="f"><span>Mobile number</span><input name="phone" type="tel" required maxlength="40" autocomplete="tel" placeholder="e.g. +679 912 3456"></label>
+        <label class="f"><span>Contact email</span><input name="email" type="email" required maxlength="120" autocomplete="email" value="${esc((S.user && S.user.email) || '')}"></label>
         <label class="f"><span>Business name (optional)</span><input name="team" maxlength="80" placeholder="Only if you have one"><small class="fhint">You can add it, and your ABN or TIN, later.</small></label>
         <label class="f"><span>Country</span><select name="country"><option>Fiji</option><option>Australia</option><option>New Zealand</option><option>Other</option></select></label>
         <button class="btn p w">Finish signing up</button></form>
@@ -332,7 +341,7 @@
       e.preventDefault(); const f = new FormData(e.target);
       // Everyone starts as an individual; a business name makes it a business account.
       const you = String(f.get('you')).trim(); const biz = String(f.get('team') || '').trim(); const kind = biz ? 'business' : 'personal';
-      try { await api.createTeam(biz || you, you, { kind, country: f.get('country') });
+      try { await api.createTeam(biz || you, you, { kind, country: f.get('country'), phone: String(f.get('phone') || '').trim(), email: String(f.get('email') || '').trim() });
         history.replaceState(null, '', location.pathname); await start(); if (S.team) companyInfo(true); } catch (err) { fail(err); }
     };
     $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
@@ -1099,7 +1108,8 @@
   async function start() {
     try {
       const s = await api.session();
-      if (!s) return gate(params.has('signup') ? 'up' : 'in');
+      if (!s) { const gone = S.signedOutNote; S.signedOutNote = false;
+        return gate(params.has('signup') ? 'up' : 'in', gone ? '<div class="err">That sign-in has ended (the account may have been removed). Sign in again, or create a new account.</div>' : ''); }
       S.user = s.user;
       S.home = !DEMO && !/Electron/.test(navigator.userAgent) && !params.has('chat');
       const lv = await api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' }));
