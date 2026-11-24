@@ -1,0 +1,76 @@
+name: HQ jobs
+
+# Riyeser HQ's regular jobs on the Riyeser Team database (see ops/RUNBOOK.md):
+#   every hour   the support sweep: tickets with no first reply in 24 hours are flagged overdue; tickets waiting on us
+#                for 48 hours are escalated one level ("No reply in 48 hours"). Both times are HQ settings.
+#   every day    the inactive-accounts sweep: warning emails 30 and 7 days before a free account closes, closing after
+#                12 months unused, and marking accounts closed for 2 years "ready for removal" (removal is never automatic).
+#   after each   queued emails are sent through Resend, once RESEND_API_KEY and EMAIL_FROM are added. Until then they
+#                stay queued and this says "email sending isn't set up yet" without failing.
+# Connects with the TEAM_DB_URL secret, like the nightly backups. Never prints email addresses or message text.
+on:
+  schedule:
+    - cron: "17 * * * *"       # every hour at :17
+    - cron: "41 14 * * *"      # 14:41 UTC every day (after midnight in Fiji): the inactive-accounts sweep too
+  workflow_dispatch:
+    inputs:
+      inactivity:
+        description: "Also run the inactive-accounts sweep"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency: { group: hq-jobs, cancel-in-progress: false }
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DB_URL: ${{ secrets.TEAM_DB_URL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      DAILY: ${{ (github.event_name == 'schedule' && github.event.schedule == '41 14 * * *') || (github.event_name == 'workflow_dispatch' && inputs.inactivity) }}
+    steps:
+      - name: Set up yet?
+        id: ready
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "::notice::HQ jobs aren't set up yet: the TEAM_DB_URL secret is missing (ops/RUNBOOK.md, Setting up backups)."
+            echo "ok=no" >> "$GITHUB_OUTPUT"
+          else echo "ok=yes" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.ready.outputs.ok == 'yes'
+        uses: actions/checkout@v5
+        with: { sparse-checkout: ops/hq-jobs }
+      - if: steps.ready.outputs.ok == 'yes'
+        name: PostgreSQL client
+        run: command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null; }
+      - if: steps.ready.outputs.ok == 'yes'
+        name: Database up to date?
+        id: db
+        run: |
+          have=$(psql "$DB_URL" -X -q -At -c "select to_regprocedure('public.hq_support_sweep()') is not null")
+          if [ "$have" != "t" ]; then
+            echo "::notice::The database doesn't have the HQ jobs yet: re-run website/team/team-chat.sql in Supabase's SQL Editor (ops/RUNBOOK.md)."
+            echo "ok=no" >> "$GITHUB_OUTPUT"
+          else echo "ok=yes" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.db.outputs.ok == 'yes'
+        name: Support sweep (overdue and escalations)
+        run: |
+          r=$(psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -c 'select public.hq_support_sweep()')
+          echo "Support sweep: $r"
+      - if: steps.db.outputs.ok == 'yes' && env.DAILY == 'true'
+        name: Inactive-accounts sweep
+        run: |
+          r=$(psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -c 'select public.hq_inactivity_sweep()')
+          echo "Inactive-accounts sweep: $r"
+      - if: steps.db.outputs.ok == 'yes'
+        name: Send queued emails
+        run: bash ops/hq-jobs/send-emails.sh
+      - if: failure()
+        name: Tell the owner
+        run: |
+          echo "### ⚠️ An HQ job failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "GitHub emails the owner about failed scheduled runs. Open the red step; see ops/RUNBOOK.md (HQ jobs)." >> "$GITHUB_STEP_SUMMARY"
