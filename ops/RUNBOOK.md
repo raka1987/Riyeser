@@ -228,7 +228,7 @@ history, which can't be changed or deleted. Write reasons without personal detai
 ## Prices (US dollars)
 
 All Riyeser prices are in US dollars, per business per month. Each paid program includes 3 users; each extra user is
-US$5 a month for that program. Accounting Basics US$25, Accounting Plus US$39 (it includes Basics, so a business pays
+US$7 a month for that program. Accounting Basics US$25, Accounting Plus US$39 (it includes Basics, so a business pays
 for one or the other), Payroll US$25, POS US$29, Bookings US$25, Riyeser Link Plus US$39, As Built US$29. Extra
 companies in Accounting US$10 each. Yearly = 10 months. Early bird = half the program and user amounts for 12 months.
 Riyeser Link chat files: 2 GB per business free, 20 GB with Link Plus, plus any extra granted in HQ (customer page →

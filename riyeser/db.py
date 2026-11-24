@@ -320,9 +320,9 @@ def migrate(db):
 
 
 # Riyeser prices in one place: US dollars a month per business (the same as riyeser.com/pricing.html).
-# Each paid program includes 3 users; each extra user is US$5 a month for that program. Plus includes Basics.
+# Each paid program includes 3 users; each extra user is US$7 a month for that program. Plus includes Basics.
 PRICE_USD = {"basic": 25, "plus": 39, "payroll": 25, "pos": 29, "bookings": 25, "calls": 39, "as_built": 29,
-             "extra_user": 5, "extra_company": 10}
+             "extra_user": 7, "extra_company": 10}
 PRICES = {k: f"US${v}" for k, v in PRICE_USD.items()}   # for screens: {{ prices.basic }} -> "US$25"
 
 # Edition names in one place: change them here and every screen follows.
