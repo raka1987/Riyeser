@@ -1,6 +1,6 @@
 name: HQ jobs
 
-# Riyeser HQ's regular jobs on the Riyeser Team database (see ops/RUNBOOK.md):
+# Riyeser HQ's regular jobs on the Riyeser Link (Riyeser Team) database (see ops/RUNBOOK.md):
 #   every hour   the support sweep: tickets with no first reply in 24 hours are flagged overdue; tickets waiting on us
 #                for 48 hours are escalated one level ("No reply in 48 hours"). Both times are HQ settings.
 #   every day    the inactive-accounts sweep: warning emails 30 and 7 days before a free account closes, closing after

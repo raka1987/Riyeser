@@ -1,7 +1,8 @@
 # Riyeser online services: backups, restores and bad days
 
 The online parts of Riyeser keep data in Supabase (PostgreSQL):
-- **Riyeser Team** (chat, calls, companies). This has its own Supabase project.
+- **Riyeser Link** (chat, calls, companies; it was called Riyeser Team). This has its own Supabase project,
+  still named for Riyeser Team; the tables, `team-chat.sql` and the `TEAM_DB_URL` secret keep their names.
 - **As Built** (projects, drawings, inspections). This has its own Supabase project.
 
 Everything else (Accounting, Payroll, POS, Bookings, Invoices) still keeps its data on each PC.
@@ -28,7 +29,7 @@ You need four things. Each is a value you paste into GitHub. **Never paste them 
 2. **Each database's connection string**
    - In Supabase, open the project, then **Connect** (top of the page), then **Session pooler**.
    - Copy the URI that starts `postgresql://postgres.` and put the database password in it.
-   - Do this once for the Riyeser Team project and once for the As Built project.
+   - Do this once for the Riyeser Link (Riyeser Team) project and once for the As Built project.
 3. **A backup passphrase**
    - Make a long one: 5–6 random words.
    - **Write it down and keep it somewhere safe that isn't the computer**, such as a password manager and a paper copy in a safe.
@@ -43,7 +44,7 @@ You need four things. Each is a value you paste into GitHub. **Never paste them 
 | `R2_BUCKET` | `riyeser-backups` |
 | `R2_ACCESS_KEY_ID` | from the R2 API token |
 | `R2_SECRET_ACCESS_KEY` | from the R2 API token |
-| `TEAM_DB_URL` | Riyeser Team connection string |
+| `TEAM_DB_URL` | Riyeser Link (Riyeser Team) connection string |
 | `ASBUILT_DB_URL` | As Built connection string |
 | `BACKUP_PASSPHRASE` | the passphrase |
 
@@ -55,12 +56,12 @@ If a secret is missing, the jobs just say "not set up yet" and don't fail.
 
 ## Riyeser HQ (riyeser.com/hq): the staff back office
 
-HQ runs on the Riyeser Team Supabase project. `team-chat.sql` already sets it up. HQ only ever sees account
-information: companies, people counts, branches, linked PCs and versions, trials, Team Calls and downloads.
+HQ runs on the Riyeser Link (Riyeser Team) Supabase project. `team-chat.sql` already sets it up. HQ only ever sees account
+information: companies, people counts, branches, linked PCs and versions, trials, Riyeser Link Plus and downloads.
 It never sees customers' messages, calls or books.
 
 **Make yourself the first owner (once):**
-1. Create your Riyeser account at riyeser.com/team, then turn on two-step sign-in there (🔐 Security).
+1. Create your Riyeser account at riyeser.com/link, then turn on two-step sign-in there (🔐 Security).
 2. In Supabase, open **SQL Editor** and run `select public.hq_make_owner('your@email', 'Your name');`
    This only works from the SQL Editor, never from a website.
 3. Sign in at **riyeser.com/hq**. To add staff, open **HQ team**: each person needs a Riyeser account with two-step sign-in, and you choose their role.
@@ -89,7 +90,18 @@ The Downloads page shows live totals straight away. Per-day numbers start the da
 
 Download totals include a few copies fetched by Riyeser's own release checks, so treat small numbers as roughly right.
 
-**Marking a company paid for Team Calls:** HQ → Companies → open the company → Team Calls → Paid until → Save.
+**Marking a company paid for Riyeser Link Plus:** HQ → Companies → open the company → Riyeser Link Plus (the `calls` module) → Paid until → Save.
+
+## Riyeser Team is now Riyeser Link: Supabase addresses (once)
+
+The chat app's main address is now **riyeser.com/link/**; riyeser.com/team/ still works (it serves the same app).
+In Supabase → the Riyeser Link (Riyeser Team) project → **Authentication → URL Configuration**:
+
+1. **Site URL**: `https://riyeser.com/link/`
+2. **Redirect URLs**: add `https://riyeser.com/link/` (keep `https://riyeser.com/team/` and `https://riyeser.com/hq/`).
+
+Until then, confirmation emails for sign-ups started on /link/ go to the Site URL instead, which still works.
+Re-running `team-chat.sql` (below) also updates the email wording and HQ's labels to riyeser.com/link and Riyeser Link Plus.
 
 ## After this release: re-run team-chat.sql in Supabase SQL Editor
 
@@ -97,7 +109,7 @@ Riyeser HQ phase 1 (support, fix-up tools, permissions, inactive accounts, email
 latest database rules. Until you do this, the website keeps working: the new customer parts stay hidden, and HQ shows
 "Run the latest team-chat.sql to switch this on".
 
-1. Open Supabase → the Riyeser Team project → **SQL Editor** → **New query**.
+1. Open Supabase → the Riyeser Link (Riyeser Team) project → **SQL Editor** → **New query**.
 2. Paste all of `website/team/team-chat.sql` (from the `module/desk-assistant` branch) and press **Run**.
    It is safe to run again: it only adds what's missing and never deletes data.
 3. Check it says "Success". Then open riyeser.com/hq: the Support, Refunds, Approvals, Inactive accounts and Emails tabs now work.
@@ -105,8 +117,8 @@ latest database rules. Until you do this, the website keeps working: the new cus
 
 ## Support in HQ
 
-Customers click **Get help** on their Riyeser home page (riyeser.com/team; Riyeser Central's **Get help** opens
-riyeser.com/team/?help). They choose a topic, write a subject and message, and get a number like **T-10234**.
+Customers click **Get help** on their Riyeser home page (riyeser.com/link; Riyeser Central's **Get help** opens
+riyeser.com/link/?help; the old riyeser.com/team address still works). They choose a topic, write a subject and message, and get a number like **T-10234**.
 They see Riyeser's replies on their home page (with a "new" badge) and by email once email is set up.
 
 In HQ → **Support**:
@@ -186,7 +198,7 @@ after a problem, sales promotion, other), a note and optionally the ticket numbe
 
 The owner's rule: **free** accounts close after **12 months** unused. **Paid** businesses (any paid program active)
 are never closed for this. The books on customers' PCs are never touched.
-- "Used" means anyone in the business signed in, opened riyeser.com/team, or Riyeser Central checked in.
+- "Used" means anyone in the business signed in, opened riyeser.com/link (or the old riyeser.com/team), or Riyeser Central checked in.
 - The daily HQ job emails the owner **30 days** and **7 days** before closing. An account that's already overdue gets
   the 7-day warning first, so nobody is closed without notice. Signing in before then resets the clock.
 - At 12 months it's closed with the reason "inactive". HQ → **Inactive accounts** lists accounts closing soon and those already closed.
@@ -252,9 +264,11 @@ One failed night is not an emergency: the previous 30 copies are still there. Tw
 
 **The whole database is lost or damaged:**
 1. Create a new Supabase project in the same region.
-2. In its SQL Editor, run `website/team/team-chat.sql` (for Riyeser Team).
+2. In its SQL Editor, run `website/team/team-chat.sql` (for Riyeser Link).
 3. Restore the data. Decrypt the newest good copy (as in `restore-drill.sh`), then run `pg_restore --no-owner --no-privileges --data-only -n auth -n public -d "<new connection string>" db.dump`.
-4. Put the new project's URL and key into `website/team/config.js` and publish the website.
+4. Put the new project's URL and key into `website/team/config.js` and publish the website (it is published to both
+   riyeser.com/link/config.js and riyeser.com/team/config.js). In the new project's Authentication → URL Configuration,
+   set Site URL `https://riyeser.com/link/` and Redirect URLs `https://riyeser.com/link/`, `https://riyeser.com/team/`, `https://riyeser.com/hq/`.
 5. Point `TEAM_DB_URL` at the new project, then run the backup and the drill.
 
 Practise steps 1–4 with a copy at least once before you need them.

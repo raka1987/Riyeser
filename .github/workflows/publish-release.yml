@@ -2,7 +2,7 @@ name: Publish Riyeser release
 
 # One button for a new public release of the Riyeser Windows programs:
 #   Actions → "Publish Riyeser release" → Run workflow
-# Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF, As Built, Riyeser Team and Riyeser Link (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
+# Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF, As Built, Riyeser Link (formerly Riyeser Team) and Riyeser Link Office (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
 # and Riyeser POS (main) and Riyeser Payroll (branch module/payroll) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
 # every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
 on:
@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   desktop:
-    name: Central, Desk Assistant, PDF, As Built, Team, Link
+    name: Central, Desk Assistant, PDF, As Built, Link, Link Office
     runs-on: windows-latest
     defaults: { run: { working-directory: desktop } }
     steps:
@@ -40,15 +40,16 @@ jobs:
         shell: pwsh
         run: |
           $apps = @(
-            @{ src = "dist-central\RiyeserCentral-Setup-*.exe";        out = "RiyeserCentral-Setup.exe";        name = "Riy*ser Central*" },
-            @{ src = "dist\RiyeserDeskAssistant-Setup-*.exe";        out = "RiyeserDeskAssistant-Setup.exe"; name = "Riyeser Desk Assistant*" },
-            @{ src = "dist-pdf\RiyeserPDF-Setup-*.exe";              out = "RiyeserPDF-Setup.exe";            name = "Riyeser PDF*" },
-            @{ src = "dist-services\RiyeserServices-Setup-*.exe";    out = "RiyeserServices-Setup.exe";       name = "As Built*" },
-            @{ src = "dist-team\RiyeserTeam-Setup-*.exe";            out = "RiyeserTeam-Setup.exe";           name = "Riyeser Team*" },
-            # Riyeser Link installs for the whole PC (HKLM), so its installer can add its Windows Firewall rule.
-            @{ src = "dist-link\RiyeserLink-Setup-*.exe";            out = "RiyeserLink-Setup.exe";           name = "Riyeser Link*"; machine = $true })
+            @{ id = "central"; src = "dist-central\RiyeserCentral-Setup-*.exe";        out = "RiyeserCentral-Setup.exe";        name = "Riy*ser Central*" },
+            @{ id = "desk"; src = "dist\RiyeserDeskAssistant-Setup-*.exe";        out = "RiyeserDeskAssistant-Setup.exe"; name = "Riyeser Desk Assistant*" },
+            @{ id = "pdf"; src = "dist-pdf\RiyeserPDF-Setup-*.exe";              out = "RiyeserPDF-Setup.exe";            name = "Riyeser PDF*" },
+            @{ id = "services"; src = "dist-services\RiyeserServices-Setup-*.exe";    out = "RiyeserServices-Setup.exe";       name = "As Built*" },
+            # Riyeser Link (formerly Riyeser Team): the same app and release file, so installed copies update in place.
+            @{ id = "team"; src = "dist-team\RiyeserTeam-Setup-*.exe";            out = "RiyeserTeam-Setup.exe";           name = "Riyeser Link [0-9]*" },
+            # Riyeser Link Office installs for the whole PC (HKLM), so its installer can add its Windows Firewall rule.
+            @{ id = "linkoffice"; src = "dist-linkoffice\RiyeserLinkOffice-Setup-*.exe"; out = "RiyeserLinkOffice-Setup.exe"; name = "Riyeser Link Office*"; machine = $true })
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          $versions = @()
+          $versions = @(); $ids = [ordered]@{}
           foreach ($a in $apps) {
             $setup = Get-ChildItem $a.src | Select-Object -First 1
             if (-not $setup) { throw "Missing installer: $($a.src)" }
@@ -58,9 +59,14 @@ jobs:
             if (-not $entry) { throw "Not installed: $($a.name)" }
             Write-Host "OK:" $entry.DisplayName
             $versions += "$($entry.DisplayName)"
+            $v = if ($entry.DisplayVersion) { $entry.DisplayVersion } else { ($entry.DisplayName -replace '^.*?(\d+(\.\d+)+)\s*$', '$1') }
+            $ids[$a.id] = "$v"
             Copy-Item $setup.FullName (Join-Path release $a.out)
           }
           $versions | Set-Content release\versions-desktop.txt
+          # versions.json: each program's version by its id. Riyeser Central (1.7 and later) reads it first, so older
+          # Centrals still find "team" (now listed as Riyeser Link) and offer the update.
+          $ids | ConvertTo-Json | Set-Content release\versions.json
       - uses: actions/upload-artifact@v4
         with: { name: desktop, path: desktop/release/*, if-no-files-found: error }
 
@@ -207,7 +213,7 @@ jobs:
             echo "### In this release"
             cat out/versions-*.txt | sed 's/^/- /'
             echo
-            echo "**Installing:** run the file. If Windows shows \"Windows protected your PC\", click **More info → Run anyway**. Each program installs for your Windows user (no admin rights needed) and updates over the old version, keeping your data. Riyeser Link installs for the whole PC, so Windows asks for permission once (it adds a firewall rule so the office's desk phones can reach it)."
+            echo "**Installing:** run the file. If Windows shows \"Windows protected your PC\", click **More info → Run anyway**. Each program installs for your Windows user (no admin rights needed) and updates over the old version, keeping your data. Riyeser Link (formerly Riyeser Team) updates over Riyeser Team, keeping your sign-in and chats. Riyeser Link Office installs for the whole PC, so Windows asks for permission once (it adds a firewall rule so the office's desk phones can reach it)."
             echo
             echo "Every installer was built, installed and checked on Windows before publishing."
           } > notes.md
@@ -228,7 +234,8 @@ jobs:
             out/RiyeserPDF-Setup.exe
             out/RiyeserServices-Setup.exe
             out/RiyeserTeam-Setup.exe
-            out/RiyeserLink-Setup.exe
+            out/RiyeserLinkOffice-Setup.exe
+            out/versions.json
             out/RiyeserAccountingBasics-Setup.exe
             out/RiyeserAccountingPlus-Setup.exe
             out/RiyeserAccounting-Setup.exe
