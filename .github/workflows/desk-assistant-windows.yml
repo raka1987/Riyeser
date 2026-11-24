@@ -130,7 +130,7 @@ jobs:
           $treport = "$env:RUNNER_TEMP\team.json"
           Start-Process -FilePath $team.FullName -ArgumentList "--hidden", "--self-test=$treport" -Wait
           $t = Get-Content $treport -Raw | ConvertFrom-Json
-          if (-not ($t.ok -and $t.loginItem -and $t.name -eq "Riyeser Link" -and $t.version -eq "1.1.0" -and $t.url -eq "https://riyeser.com/link/")) { throw "Riyeser Link didn't start properly: $($t | ConvertTo-Json -Compress)" }
+          if (-not ($t.ok -and $t.loginItem -and $t.name -eq "Riyeser Link" -and $t.version -eq "1.1.1" -and $t.url -eq "https://riyeser.com/link/")) { throw "Riyeser Link didn't start properly: $($t | ConvertTo-Json -Compress)" }
           if ($t.userData -ne "$env:APPDATA\Riyeser Team" -or $t.sessionData -ne "$env:APPDATA\Riyeser Team") { throw "Riyeser Link must keep its sign-in in the Riyeser Team folder: $($t | ConvertTo-Json -Compress)" }
           Write-Host "Riyeser Link" $t.version "starts, starts with Windows, and keeps its data in" $t.userData
           # Uninstalling Riyeser Link Office removes its firewall rule
