@@ -207,3 +207,19 @@ test('checklist: hide and show persist on this PC; the choice goes to the Riyese
   assert.deepEqual(cl.skippedIds(new Store(path.join(dir, 'data'))), ['team']);
   assert.deepEqual(cl.setSkipped(store, 'team', false), []);
 });
+
+test('desk phone item: only with Riyeser Link installed, done once a phone is assigned', () => {
+  const fs = require('fs'); const os = require('os'); const path = require('path');
+  const cl = require('../src/central/checklist');
+  const appData = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-'));
+  const base = { company: { mode: 'online', name: 'Sample Co' }, lic: {}, installed: ['central'], known: ['central', 'link'] };
+  assert.ok(!cl.build(base).items.some((i) => i.id === 'deskphone'), 'not shown without Link');
+  const withLink = { ...base, installed: ['central', 'link'] };
+  assert.deepEqual(cl.linkFacts(appData), { found: false, phones: 0 });
+  let item = cl.build({ ...withLink, link: cl.linkFacts(appData) }).items.find((i) => i.id === 'deskphone');
+  assert.ok(item && !item.done);
+  fs.mkdirSync(path.join(appData, 'Riyeser Link', 'data'), { recursive: true });
+  fs.writeFileSync(path.join(appData, 'Riyeser Link', 'data', 'phone-devices.json'), JSON.stringify({ phones: [{ mac: '001565aabbcc', ext: '101' }], found: [] }));
+  item = cl.build({ ...withLink, link: cl.linkFacts(appData) }).items.find((i) => i.id === 'deskphone');
+  assert.ok(item.done);
+});

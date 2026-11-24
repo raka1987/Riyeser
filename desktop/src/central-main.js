@@ -387,7 +387,7 @@ function registerIpc() {
     const soft = (p) => p.catch(() => ({ found: false }));
     const [acc, payroll] = await Promise.all([soft(checklist.accountingFacts(sources.accountingDbPath())), soft(checklist.payrollFacts(sources.payrollDbPath(appData)))]);
     const seats = lic.online && lic.online.seats;
-    return checklist.build({ company, lic, installed, known, names, acc, payroll, kind: businessKind(company),
+    return checklist.build({ company, lic, installed, known, names, acc, payroll, link: checklist.linkFacts(appData), kind: businessKind(company),
       members: seats && seats.used != null ? Number(seats.used) : null, skipped: checklist.skippedIds(store), hidden: checklistHidden() });
   });
   // Hide or show the card. Kept on this PC, and with the Riyeser account when signed in (so riyeser.com can follow it).

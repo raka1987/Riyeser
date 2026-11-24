@@ -96,7 +96,15 @@ const DETAIL_KEYS = ['name', 'address', 'phone', 'email', 'tax_number'];
  *   names: id -> name; acc / payroll: facts from the readers above; kind: 'personal' | 'business' | null;
  *   members: people in the company online (null when unknown); skipped: ids skipped; hidden: the card is hidden.
  */
-function build({ company = null, lic = {}, demo = false, installed = [], known = [], names = {}, acc = {}, payroll = {}, kind = null,
+/** Riyeser Link's desk phones, read from its settings file (%APPDATA%\\Riyeser Link\\data\\phone-devices.json). Read-only. */
+function linkFacts(appData) {
+  try {
+    const d = JSON.parse(require('fs').readFileSync(require('path').join(appData, 'Riyeser Link', 'data', 'phone-devices.json'), 'utf8')) || {};
+    return { found: true, phones: Array.isArray(d.phones) ? d.phones.length : 0 };
+  } catch { return { found: false, phones: 0 }; }
+}
+
+function build({ company = null, lic = {}, demo = false, installed = [], known = [], names = {}, acc = {}, payroll = {}, link = {}, kind = null,
   members = null, skipped = [], hidden = false } = {}) {
   if (demo) return { demo: true, hidden, items: [], done: 0, total: 0, allDone: false, planMissing: [] };
   const has = (id) => installed.includes(id);
@@ -140,9 +148,10 @@ function build({ company = null, lic = {}, demo = false, installed = [], known =
   if (onPlan('pos') || has('pos')) {
     add('sale', 'Make your first sale', 'Open the till and ring something up.', books.found && books.posSales > 0, run('pos', 'pos'));
   }
-  // TODO: "Connect a desk phone to Riyeser Link" (only when Riyeser Link, id "link", is installed; done when it reports
-  // at least one desk phone). Riyeser Link is being built alongside this; add the item once it saves something Central
-  // can read. Until then the item is left out.
+  if (has('link')) {
+    add('deskphone', 'Connect a desk phone to Riyeser Link', 'Plug a desk phone into the office network. Riyeser Link finds it, then you choose who it\'s for.',
+      !!(link && link.found && link.phones > 0), run('link'));
+  }
 
   for (const it of items) it.skipped = !it.done && skipped.includes(it.id);
   const done = items.filter((i) => i.done || i.skipped).length;
@@ -172,4 +181,4 @@ function setSkipped(store, id, skip = true) {
 }
 const skippedIds = (store) => prefsOf(store).skipped || [];
 
-module.exports = { isHidden, setHidden, setSkipped, skippedIds, MODULE_PROGRAMS, planModules, planToInstall, accountingFacts, payrollFacts, build, counts, _cache: cache };
+module.exports = { isHidden, setHidden, setSkipped, skippedIds, MODULE_PROGRAMS, planModules, planToInstall, accountingFacts, payrollFacts, linkFacts, build, counts, _cache: cache };
