@@ -64,13 +64,13 @@ jobs:
             const j = c.generateKeyPairSync('ed25519').privateKey.export({ format: 'jwk' });
             const v = Buffer.from(JSON.stringify({ kty: 'OKP', crv: 'Ed25519', d: j.d, x: j.x })).toString('base64url');
             process.stdout.write('LICENCE_SIGNING_KEY=' + v + '\n');
-          " | supabase secrets set --env-file /dev/stdin --project-ref "$PROJECT_REF" > /dev/null
+          " | supabase secrets set --yes --env-file /dev/stdin --project-ref "$PROJECT_REF" > /dev/null
           supabase secrets list --project-ref "$PROJECT_REF" | grep -qw LICENCE_SIGNING_KEY || { echo "The signing key didn't save."; exit 1; }
           echo "A new signing key was made and saved as the function secret LICENCE_SIGNING_KEY."
       - name: Deploy the licence function
         if: steps.ready.outputs.go == 'yes'
         # --no-verify-jwt: the public key is fetched without signing in; signing a licence checks the person's session itself
-        run: supabase functions deploy licence --project-ref "$PROJECT_REF" --no-verify-jwt
+        run: supabase functions deploy licence --yes --project-ref "$PROJECT_REF" --no-verify-jwt
       - name: Public key
         if: steps.ready.outputs.go == 'yes'
         run: |
