@@ -56,7 +56,7 @@ test('the heartbeat: address, licence, counts, phones and extensions, and never 
         recent: [{ from: '101', to: '0412345678', result: 'answered' }] }, { officeId: 'lo-test-0001', pcName: 'OFFICE-PC', version: '1.1.0', adapters: t.svc.adapters() });
       assert.strictEqual(p.office_id, 'lo-test-0001');
       assert.strictEqual(p.pc_name, 'OFFICE-PC'); assert.strictEqual(p.version, '1.1.0');
-      assert.deepStrictEqual(p.addresses, ['127.0.0.1']);
+      assert.strictEqual(p.addresses[0], '127.0.0.1', 'the address phones use comes first (other office adapters follow)');
       assert.strictEqual(p.sip_port, t.svc.pbx.port);
       assert.strictEqual(p.address_stable, true);
       assert.deepStrictEqual(p.licence, { active: true, state: 'trial', text: 'Free trial · 40 days left' });
