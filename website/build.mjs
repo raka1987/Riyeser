@@ -201,7 +201,7 @@ const SWOOSH = `<svg class="swoosh" viewBox="0 0 600 300" preserveAspectRatio="x
 const bandHero = ({ eyebrow, title, lead, img = '', up = '', extra = '' }) => `<div class="band-hero">${img ? `<img class="bgimg" src="${up}assets/photos/${img}" alt="">` : SWOOSH}<div class="c"><div class="inner">${eyebrow ? `<span class="eyebrow">${eyebrow}</span>` : ''}<h1>${title}</h1>${lead ? `<p class="lead">${lead}</p>` : ''}${extra}</div></div></div>`;
 // The three industries: real photos, and only what the programs really do.
 const INDUSTRIES = [
-  { id: 'retail', name: 'Retail & hospitality', icon: 'retail', photo: 'retail.webp', short: 'Manage stock, sales records and staff pay.',
+  { id: 'retail', name: 'Retail & hospitality', icon: 'retail', photo: 'team-cafe.webp', short: 'Manage stock, sales records and staff pay.',
     title: 'Retail & Hospitality', lead: 'Sell at the counter, keep stock under control and pay your staff, from one Windows PC.',
     h: 'Sales, stock and staff pay', p: 'Ring up sales on Riyeser POS, keep count of stock as it sells, and pay your team from their clock-in hours.',
     shot: 'accounting.webp', shotName: 'Riyeser Accounting', shotApp: 'accounting-basics', cta: ['accounting-basics', 'Explore Accounting Basics'],
@@ -210,7 +210,7 @@ const INDUSTRIES = [
       ['accounting-basics', ['Every till sale lands as a paid invoice, with GST right', 'Stock with average cost, stocktakes and reorder alerts', 'Free for 90 days, no card']],
       ['payroll', ['Staff clock in and out with a 4-digit PIN', 'Timesheets flow straight into the pay run', 'Payslips with year-to-date totals, printed, emailed or saved as PDFs']],
       ['central', ['What customers owe and what you owe, as soon as you open it', "Today's meetings and your to-do list", 'Every Riyeser program one click away']]] },
-  { id: 'accounting', name: 'Accounting practices', icon: 'practice', photo: 'accounting.webp', short: 'Keep client books and pay runs organised.',
+  { id: 'accounting', name: 'Accounting practices', icon: 'practice', photo: 'team-office.webp', short: 'Keep client books and pay runs organised.',
     title: 'Accounting Practices', lead: "Keep every client's books, pay runs and paperwork organised, with one sign-in.",
     h: 'Client books, one sign-in', p: "Run a separate company file for each client, switch between them from the top of the screen, and see everyone's cash, money owed and profit on one page.",
     shot: 'accounting.webp', shotName: 'Riyeser Accounting Plus', shotApp: 'accounting', cta: ['accounting', 'Explore Accounting Plus'],
@@ -220,7 +220,7 @@ const INDUSTRIES = [
   { id: 'trades', name: 'Trades & construction', icon: 'trades', photo: 'trades.webp', short: 'Track installations, inspections and handovers.',
     title: 'Trades & Construction', lead: 'Service mapping and inspections for trades and construction projects, with clear plans and on-site markups.',
     h: 'Service mapping and inspections', p: 'Map services on your plans as they go in, and carry out inspections with clear, marked-up drawings for the job.',
-    shot: 'services-trace.webp', shotName: 'As Built', shotApp: 'services', cta: ['services', 'Explore As Built'], photoTall: 'trades-tall.webp',
+    shot: 'services-trace.webp', shotName: 'As Built', shotApp: 'services', cta: ['services', 'Explore As Built'], photoTall: 'team-site-plans.webp',
     progs: [['bookings', ['Jobs at the customer\'s address, given to your staff', 'A day view for every tradie, with no double-booking', 'Invoice the job in one click when it\'s done']],
       ['services', ['Cables, pipes and ducts drawn on your PDF plans, end to end', 'Inspections, test results and photos on every item', 'Works with no signal on site; as-builts ready at handover']],
       ['pdf', ['Mark up drawings with clouds, arrows, boxes and stamps', 'Fill in and sign site forms', 'Read scanned drawings so they can be searched']],
@@ -262,6 +262,35 @@ const heroShot = (up) => `<div class="hshot">
   <div class="hfloat f1"><img src="${up}assets/apps/bookings.png" alt="" width="40" height="40"><div><small>Riyeser Bookings</small><b>Jo Smith · 10:00 today</b><span>Hot water service · Confirmed</span></div></div>
   <div class="hfloat f2"><img src="${up}assets/apps/invoices.png" alt="" width="40" height="40"><div><small>Riyeser Invoices</small><b>INV-1047 paid</b><span class="ok">$880.00 received</span></div></div>
 </div>`;
+// Real-life photos with little pop-ups from the programs (sample figures). One scene per program and industry.
+const SCENES = {
+  home: { img: 'team-workshop.webp', alt: 'Two people in a workshop checking their business on a laptop', pops: [
+    ['bookings', 'Riyeser Bookings', 'Jo Smith · 10:00 today', 'Hot water service · Confirmed', ''],
+    ['invoices', 'Riyeser Invoices', 'INV-1047 paid', '$880.00 received', 'ok'],
+    ['payroll', 'Riyeser Payroll', 'Pay run done', '4 staff · $6,240.50 net', '']] },
+  bookings: { img: 'team-site-plans.webp', alt: 'Two tradespeople on site checking the day\'s jobs on a tablet', pops: [
+    ['bookings', 'New job booked', 'Thu 7:30 · Lot 7 Hill Rd', 'Jordan · Hot water service', ''],
+    ['invoices', 'Job done', 'Invoice INV-1053 made', '$450.00 · sent to customer', 'ok']] },
+  invoices: { img: 'team-workshop.webp', alt: 'Two people in a workshop sending an invoice from a laptop', pops: [
+    ['invoices', 'Quote accepted', 'Q-0042 → INV-1054', 'Harbour Cafe · $1,320.00', ''],
+    ['invoices', 'Payment received', 'INV-1047 paid', '$880.00 · thank you sent', 'ok']] },
+  'accounting-basics': { img: 'team-warehouse.webp', alt: 'A shop owner packing orders next to a laptop', pops: [
+    ['accounting-basics', 'Stock received', '24 × Gift box (large)', 'Average cost updated', ''],
+    ['accounting-basics', 'Reorder alert', 'Packing tape is low', '6 left · reorder at 10', 'warn']] },
+  accounting: { img: 'team-office.webp', alt: 'A bookkeeper and a business owner going through the books on a laptop', pops: [
+    ['accounting', 'GST / BAS', 'BAS figures ready', 'Oct–Dec · G1, 1A and 1B worked out', ''],
+    ['accounting', 'Bank reconciled', 'Everything matched', '0 left to match · Nov', 'ok']] },
+  pos: { img: 'team-cafe.webp', alt: 'Two cafe owners checking the day\'s takings on a laptop', pops: [
+    ['pos', 'Riyeser POS', 'Sale · $14.50 · Card', 'Flat white, banana bread', ''],
+    ['bookings', 'Riyeser Bookings', 'Table 4 · 7:00 pm', '6 people · Confirmed', 'ok']] },
+  payroll: { img: 'team-site-laptop.webp', alt: 'A site supervisor and an electrician approving timesheets on a laptop', pops: [
+    ['payroll', 'Timesheets approved', 'Week ending 21 Nov', '4 staff · 152 hours', ''],
+    ['payroll', 'Pay run done', '$6,240.50 net', 'Payslips saved as PDFs', 'ok']] },
+};
+const photoPop = (key, up, cls = '') => { const sc = SCENES[key]; if (!sc) return ''; return `<div class="pscene ${cls}">
+  <img class="pscene-img" src="${up}assets/photos/${sc.img}" alt="${esc(sc.alt)}" width="1206" height="530"${cls === 'big' ? ' fetchpriority="high"' : ' loading="lazy"'}>
+  ${sc.pops.map(([app, k, b, sub, tone], i) => `<div class="hfloat pf${i + 1}"><img src="${up}assets/apps/${app}.png" alt="" width="40" height="40"><div><small>${esc(k)}</small><b>${esc(b)}</b><span class="${tone}">${esc(sub)}</span></div></div>`).join('')}
+</div>`; };
 const winFrame = (up, app, name, img, alt, w = 1400, h = 900) => `<div class="win"><div class="bar"><img src="${up}assets/${app === 'logo' ? 'logo-r.png' : `apps/${app}.png`}" alt="">${esc(name)}<span class="ctl">${svg('<path d="M5 12h14"/>')}${svg('<rect x="5" y="5" width="14" height="14" rx="1"/>')}${svg('<path d="M6 6l12 12M18 6L6 18"/>')}</span></div><img src="${up}assets/${img}" alt="${esc(alt)}" width="${w}" height="${h}"></div>`;
 const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p><span class="go">${ARR}</span></a>`;
 
@@ -372,7 +401,7 @@ page({
     <p class="fine">Windows 10 &amp; 11 · No account or card needed · Works offline</p>
     <div class="badges"><span class="chip">${svg('<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>')}Free tools + 90-day trials</span><span class="chip">${svg('<rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>')}Your data stays on your PC</span>${EARLY_BIRD ? `<a class="chip gold" href="${up}pricing.html#early">🐣 Early bird: 50% off your first year</a>` : ''}</div>
   </div>
-  ${heroShot(up)}
+  ${photoPop('home', up, 'big')}
 </div></div>
 
 <section class="finder" id="find"><div class="c">
@@ -488,6 +517,7 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
   </div>
   ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
 </div></div>
+${SCENES[p.id] ? `<section class="c scene-sec"><span class="eyebrow">In real life</span>${photoPop(p.id, up)}</section>` : ''}
 ${p.id.startsWith('accounting') ? `<section class="c" id="editions"><h2 class="h2">Accounting Basics or Accounting Plus</h2>${editionsBlock(up, { download: false })}</section>` : ''}
 <section class="c"${p.id.startsWith('accounting') ? ' style="padding-top:0"' : ''}><span class="eyebrow">Features</span><h2 class="h2">What it does</h2><p class="sub">${esc(p.one)}</p>
   <div class="fgrid">${p.features.map(([h, t], i) => `<div class="f"><div class="fi">${i + 1}</div><h4>${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div>
