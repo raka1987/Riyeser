@@ -120,10 +120,16 @@ test('time clock: any staff member clocks in/out on the office login with their 
   // a real shift: clock in, (started 3 hours ago), clock out
   await call('POST', '/api/staff/timeclock/punch', { user_id: sera.id, pin: sera.clock_pin }, office);
   let open = (await call('GET', `/api/staff/timesheets?user_id=${sera.id}`, null, admin)).data.find(t => !t.clock_out);
-  const earlier = new Date(Date.parse(open.clock_in + 'Z') - 3 * 36e5).toISOString().slice(0, 16);
+  // Up to 3 hours earlier, but never before midnight in Fiji (Payroll's "one shift per day" counts Fiji days), so the
+  // test gives the same answer at any time of day.
+  const startMs = Date.parse(open.clock_in + 'Z');
+  const fijiClock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Pacific/Fiji', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(startMs)).split(':').map(Number);
+  const sinceMidnightH = fijiClock[0] + fijiClock[1] / 60;
+  const backH = Math.max(0, Math.min(3, sinceMidnightH - 0.05));
+  const earlier = new Date(startMs - backH * 36e5).toISOString().slice(0, 16);
   const put = await call('PUT', `/api/staff/timesheets/${open.id}`, { clock_in: earlier, clock_out: '', notes: 'time clock' }, admin); assert.equal(put.status, 200, JSON.stringify(put.data));
   const out = await call('POST', '/api/staff/timeclock/punch', { user_id: sera.id, pin: sera.clock_pin }, office);
-  assert.equal(out.data.on_shift, false); assert.ok(out.data.shift_hours >= 2.9);
+  assert.equal(out.data.on_shift, false); assert.ok(out.data.shift_hours >= backH - 0.1, `shift_hours ${out.data.shift_hours} < ${backH}`);
   const ts = (await call('GET', `/api/staff/timesheets?user_id=${sera.id}`, null, admin)).data;
   assert.ok(ts.some(t => t.notes === 'time clock' && t.clock_out));
   // one shift per day: a second clock-in today is refused
