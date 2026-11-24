@@ -242,3 +242,4 @@ a { color: var(--blue); }
 .opt-set { border: 1px dashed var(--line); border-radius: 12px; padding: 4px 12px 2px; margin: 4px 0 14px; }
 .opt-set legend { font-weight: 700; color: var(--ink); font-size: 14px; padding: 0 6px; } .opt-set legend small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
 @media (max-width: 420px) { .f2 { grid-template-columns: 1fr; } }
+.f span small.opt { font-weight: 500; color: var(--muted); }

@@ -320,10 +320,10 @@
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     const newForm = `<form id="cf"><h1>A few details</h1><p>Nearly done. This is how you'll appear in Riyeser.</p>
         <label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>
-        <div class="f2"><label class="f"><span>Mobile number</span><input name="phone" type="tel" required maxlength="40" autocomplete="tel" placeholder="e.g. +679 912 3456"></label>
+        <div class="f2"><label class="f"><span>Mobile number <small class="opt">(optional)</small></span><input name="phone" type="tel" maxlength="40" autocomplete="tel" placeholder="e.g. +679 912 3456"></label>
           <label class="f"><span>Country</span><select name="country" autocomplete="country-name">${countryOptions()}</select></label></div>
         <label class="f"><span>Contact email</span><input name="email" type="email" required maxlength="120" autocomplete="email" value="${esc((S.user && S.user.email) || '')}"></label>
-        <fieldset class="opt-set"><legend>Business details <small>Optional. Add them now or later; they're used on your invoices and in your programs.</small></legend>
+        <fieldset class="opt-set"><legend>Business details <small>All optional. Add them now or later; they're used on your invoices and in your programs.</small></legend>
           <label class="f"><span>Business name</span><input name="team" maxlength="80" autocomplete="organization" placeholder="Only if you have one"></label>
           <div class="f2"><label class="f"><span>Legal name</span><input name="legal_name" maxlength="120" placeholder="If different"></label>
             <label class="f"><span>ABN / TIN</span><input name="tax_number" maxlength="40"></label></div>
