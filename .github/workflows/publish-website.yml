@@ -20,9 +20,10 @@ permissions:
 concurrency: { group: pages, cancel-in-progress: true }
 
 jobs:
-  deploy:
+  # Build and upload in one job, deploy in the next: deploying straight after the upload in the same job often
+  # failed with "Fetching artifact metadata failed" because GitHub hadn't registered the upload yet.
+  build:
     runs-on: ubuntu-latest
-    environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
     steps:
       - uses: actions/checkout@v5
         with: { ref: module/desk-assistant }
@@ -37,5 +38,14 @@ jobs:
           SITE_BASE: "${{ steps.pages.outputs.base_path }}/"
       - uses: actions/upload-pages-artifact@v4
         with: { path: website/public }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
+    steps:
+      - name: Give GitHub a moment to register the upload
+        run: sleep 15
       - id: deploy
         uses: actions/deploy-pages@v4
+        with: { timeout: 900000 }
