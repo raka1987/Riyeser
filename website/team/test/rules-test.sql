@@ -900,6 +900,271 @@ do $$ begin
 end $$;
 reset role;
 
+-- ===== Riyeser Link Office: status, phones, changes from the web, one-off password Show, "Let Riyeser help"
+reset role;
+insert into auth.users values ('c0c0c0c0-0000-4000-8000-000000000001', 'boss@link.test'), ('c0c0c0c0-0000-4000-8000-000000000002', 'desk@link.test'),
+  ('c0c0c0c0-0000-4000-8000-000000000003', 'frontpc@link.test'), ('c0c0c0c0-0000-4000-8000-000000000004', 'nosy@link.test'),
+  ('c0c0c0c0-0000-4000-8000-000000000005', 'phones@riyeser.test'), ('c0c0c0c0-0000-4000-8000-000000000006', 'books@riyeser.test'),
+  ('c0c0c0c0-0000-4000-8000-000000000007', 'code@riyeser.test');
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+select (public.create_company('Sample Phones Co', 'Pat', '{"country":"Fiji"}'::jsonb) ->> 'workspace_id') as ws_l \gset
+select set_config('test.ws_l', :'ws_l', false);
+reset role;
+insert into public.members (workspace_id, user_id, display_name, role) values (:'ws_l', 'c0c0c0c0-0000-4000-8000-000000000002', 'Desk Staff', 'member'),
+  (:'ws_l', 'c0c0c0c0-0000-4000-8000-000000000003', 'Front PC', 'member');
+insert into public.devices (id, workspace_id, user_id, device_name) values (gen_random_uuid(), :'ws_l', 'c0c0c0c0-0000-4000-8000-000000000003', 'Office PC');
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_add_staff('phones@riyeser.test', 'Phone Help', 'support');
+select public.hq_add_staff('books@riyeser.test', 'Books Fin', 'finance');
+select public.hq_add_staff('code@riyeser.test', 'Code Dev', 'developer');
+reset role;
+do $$ begin
+  assert 'link.support' = any(public.hq_all_perms()), 'link.support is a permission';
+  assert 'link.support' = any(public.hq_role_perms('support')) and 'link.support' = any(public.hq_role_perms('senior')), 'support and senior have it';
+  assert not ('link.support' = any(public.hq_role_perms('finance'))), 'finance does not';
+end $$;
+-- the heartbeat (from the PC linked to the business). Calls are counted, never listed.
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
+do $$ declare r json; ws uuid := current_setting('test.ws_l')::uuid; begin
+  r := public.link_office_report(ws, 'office-0001-abcd', jsonb_build_object(
+    'office_id', 'office-0001-abcd', 'pc_name', 'OFFICE-PC', 'version', '1.1.0', 'state', 'running', 'addresses', jsonb_build_array('192.168.1.20', 'not an address'),
+    'sip_port', 5060, 'address_stable', false, 'pc_mac', 'AA:BB:CC:DD:EE:FF', 'licence', jsonb_build_object('active', true, 'state', 'trial', 'text', 'Free trial · 40 days left'),
+    'counts', jsonb_build_object('people', 3, 'phones_assigned', 2, 'phones_connected', 1, 'calls_in_progress', 1),
+    'calls', jsonb_build_array(jsonb_build_object('from', '101', 'to', '0412345678')),
+    'phones', jsonb_build_array(jsonb_build_object('mac', '00:15:65:AA:BB:CC', 'vendor', 'yealink', 'model', 'T31P', 'extension', '101', 'assigned', true, 'registered', true,
+        'last_registered', '2026-11-24T09:58:00Z', 'ip', '192.168.1.31', 'password', 'NotStored123'),
+      jsonb_build_object('mac', '000b82112233', 'vendor', 'grandstream', 'assigned', false, 'ip', '192.168.1.40'),
+      jsonb_build_object('mac', 'nonsense')),
+    'extensions', jsonb_build_array(jsonb_build_object('extension', '101', 'name', 'Pat', 'type', 'person', 'registered', 1, 'desk_phones', 1, 'dnd', false),
+      jsonb_build_object('extension', '100', 'name', 'Head office', 'type', 'group', 'members', 2))));
+  assert (r ->> 'ok')::boolean and (r ->> 'pending')::int = 0, format('reported: %s', r);
+  perform public.link_office_report(ws, 'office-0001-abcd', '{"pc_name":"OFFICE-PC","version":"1.1.0","addresses":["192.168.1.20"],"sip_port":5060,"address_stable":false,"phones":[{"mac":"001565aabbcc","extension":"101","assigned":true,"registered":true,"ip":"192.168.1.31"},{"mac":"000b82112233","vendor":"grandstream","assigned":false}],"extensions":[{"extension":"101","name":"Pat","registered":1}],"counts":{"people":3,"calls_in_progress":1}}');
+end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.link_offices) = 1 and (select count(*) from public.link_office_phones) = 2, 'one office, two phones (bad MAC dropped, no duplicates)';
+  assert (select addresses from public.link_offices) = array['192.168.1.20'], 'only real addresses kept';
+  assert not (select address_stable from public.link_offices), 'not stable';
+  assert (select to_jsonb(o)::text from public.link_offices o) not like '%0412345678%', 'no numbers dialled kept';
+  assert (select coalesce(string_agg(to_jsonb(p)::text, ''), '') from public.link_office_phones p) not like '%NotStored%', 'nothing extra kept from a phone';
+  assert (select counts ->> 'calls_in_progress' from public.link_offices) = '1', 'calls in progress: a count only';
+end $$;
+-- someone who isn't in the business can't report or read; a member without an admin role or linked PC can't report
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000004'); set role authenticated;
+do $$ begin
+  begin perform public.link_office_report(current_setting('test.ws_l')::uuid, 'office-0001-abcd', '{}'); raise exception 'stranger reported';
+  exception when others then assert sqlerrm like 'Sign in to Riyeser Link Office%', sqlerrm; end;
+  begin perform public.link_status(current_setting('test.ws_l')::uuid); raise exception 'stranger read status';
+  exception when others then assert sqlerrm like 'You''re not in that company%', sqlerrm; end;
+  begin perform public.link_office_pending(current_setting('test.ws_l')::uuid, 'office-0001-abcd'); raise exception 'stranger polled';
+  exception when others then assert sqlerrm like 'Sign in to Riyeser Link Office%', sqlerrm; end;
+  assert (select count(*) from public.link_offices) = 0 and (select count(*) from public.link_office_phones) = 0, 'stranger sees no offices';
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000002');
+do $$ begin
+  begin perform public.link_office_report(current_setting('test.ws_l')::uuid, 'office-0002-abcd', '{}'); raise exception 'plain member reported';
+  exception when others then assert sqlerrm like 'Sign in to Riyeser Link Office%', sqlerrm; end;
+  -- members see their own business's offices
+  assert (select count(*) from public.link_offices) = 1 and (select count(*) from public.link_office_phones) = 2, 'member sees the office and phones';
+  assert json_array_length(public.link_status(current_setting('test.ws_l')::uuid) -> 'offices') = 1, 'member sees the status';
+  assert (public.link_status(current_setting('test.ws_l')::uuid) -> 'offices' -> 0 ->> 'pc_name') = 'OFFICE-PC', 'pc name';
+  -- only two-step admins can send changes
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":true}'); raise exception 'member sent a change';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+  assert (select count(*) from public.link_office_commands) = 0, 'members can''t see changes';
+end $$;
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ begin
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":true}'); raise exception 'owner without 2-step sent a change';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+  begin perform public.link_support_allow(current_setting('test.ws_l')::uuid); raise exception 'let Riyeser help without 2-step';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+-- the owner with two-step: changes go to the office, which applies them and says how it went
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('test.ws_l')::uuid; a uuid; b uuid; begin
+  a := public.link_command(ws, 'office-0001-abcd', 'assign_phone', '{"mac":"00-0B-82-11-22-33","extension":"102"}');
+  b := public.link_command(ws, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":true}');
+  perform public.link_command(ws, 'office-0001-abcd', 'add_phone', '{"mac":"000413445566","vendor":"snom","extension":"101"}');
+  perform public.link_command(ws, 'office-0001-abcd', 'new_password', '{"extension":"101"}');
+  perform public.link_command(ws, 'office-0001-abcd', 'unassign_phone', '{"mac":"001565aabbcc"}');
+  perform set_config('test.cmd_a', a::text, false); perform set_config('test.cmd_b', b::text, false);
+  assert (select data ->> 'mac' from public.link_office_commands where id = a) = '000b82112233', 'MAC tidied';
+  assert (public.link_command_state(a) ->> 'status') = 'pending', 'pending';
+  begin perform public.link_command(ws, 'office-0001-abcd', 'assign_phone', '{"mac":"12345","extension":"102"}'); raise exception 'bad MAC';
+  exception when others then assert sqlerrm like 'That isn''t a MAC address%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'add_phone', '{"mac":"000413445566","vendor":"acme","extension":"101"}'); raise exception 'bad maker';
+  exception when others then assert sqlerrm like 'Choose the phone''s maker%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-9999-zzzz', 'set_dnd', '{"extension":"101","on":true}'); raise exception 'unknown office';
+  exception when others then assert sqlerrm like 'That Riyeser Link Office hasn''t been in touch%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'reboot_pc', '{}'); raise exception 'unknown kind';
+  exception when others then assert sqlerrm like 'Riyeser Link Office doesn''t know%', sqlerrm; end;
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'link.set_dnd' and details ->> 'extension' = '101'), 'changes are in the history';
+end $$;
+-- B's owner can't send changes to this business
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":true}'); raise exception 'other owner sent a change';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+  begin perform public.link_command_state(current_setting('test.cmd_a')::uuid); raise exception 'other owner read a change';
+  exception when others then assert sqlerrm like 'That change isn''t one of yours%', sqlerrm; end;
+end $$;
+-- the office picks them up and answers
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003');
+do $$ declare p json; begin
+  p := public.link_office_pending(current_setting('test.ws_l')::uuid, 'office-0001-abcd');
+  assert json_array_length(p) = 5 and (p -> 0 ->> 'kind') = 'assign_phone', format('five waiting: %s', p);
+  perform public.link_office_done(current_setting('test.cmd_a')::uuid, true, null, null);
+  perform public.link_office_done(current_setting('test.cmd_b')::uuid, false, 'No one has that extension.', null);
+  assert json_array_length(public.link_office_pending(current_setting('test.ws_l')::uuid, 'office-0001-abcd')) = 3, 'three left';
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ begin
+  assert (public.link_command_state(current_setting('test.cmd_a')::uuid) ->> 'status') = 'done', 'done';
+  assert (public.link_command_state(current_setting('test.cmd_b')::uuid) ->> 'error') = 'No one has that extension.', 'failed with a plain reason';
+end $$;
+-- Show password: the browser's one-off public key goes to the office; the office sends back the password encrypted to it
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('test.ws_l')::uuid; r uuid; begin
+  begin perform public.link_command(ws, 'office-0001-abcd', 'reveal_password', '{"extension":"101"}'); raise exception 'show with no key';
+  exception when others then assert sqlerrm like 'This browser can''t show passwords safely%', sqlerrm; end;
+  r := public.link_command(ws, 'office-0001-abcd', 'reveal_password', jsonb_build_object('extension', '101', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('A', 342), 'e', 'AQAB', 'd', 'PRIVATE')));
+  perform set_config('test.rev', r::text, false);
+  assert (select data -> 'key' ->> 'd' from public.link_office_commands where id = r) is null, 'only the public part of the key is kept';
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'link.reveal_password' and actor = auth.uid()), 'every Show is in the history';
+end $$;
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003');
+select public.link_office_done(current_setting('test.rev')::uuid, true, null, 'U2NyYW1ibGVkUGFzc3dvcmQ=');
+-- another admin (or anyone else) can't take it; the asker can, once
+reset role;
+update public.members set role = 'admin' where workspace_id = :'ws_l' and user_id = 'c0c0c0c0-0000-4000-8000-000000000002';
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000002'); set role authenticated;
+do $$ begin
+  begin perform public.link_reveal_take(current_setting('test.rev')::uuid); raise exception 'another admin took the password';
+  exception when others then assert sqlerrm like 'There''s no password waiting for you%', sqlerrm; end;
+  assert (select count(*) from public.link_office_reveals) = 0, 'another admin can''t see the row';
+  assert not (public.link_command_state(current_setting('test.rev')::uuid) ->> 'ready')::boolean, 'not ready for someone else';
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ begin
+  assert (public.link_command_state(current_setting('test.rev')::uuid) ->> 'ready')::boolean, 'ready for the asker';
+  assert (select count(*) from public.link_office_reveals) = 1, 'the asker sees the row';
+  begin perform sealed from public.link_office_reveals; raise exception 'read the scrambled password directly';
+  exception when insufficient_privilege then null; end;
+  assert public.link_reveal_take(current_setting('test.rev')::uuid) = 'U2NyYW1ibGVkUGFzc3dvcmQ=', 'taken';
+  assert public.link_reveal_take(current_setting('test.rev')::uuid) is null, 'only once';
+end $$;
+reset role;
+do $$ begin assert (select sealed from public.link_office_reveals where command_id = current_setting('test.rev')::uuid) is null, 'blanked straight after'; end $$;
+-- one not taken in time: blanked after 5 minutes, and the row is no longer visible
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+select public.link_command(:'ws_l', 'office-0001-abcd', 'reveal_password', jsonb_build_object('extension', '101', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('B', 342), 'e', 'AQAB'))) as rev2 \gset
+select set_config('test.rev2', :'rev2', false);
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003');
+select public.link_office_done(:'rev2', true, null, 'QW5vdGhlck9uZQ==');
+reset role;
+update public.link_office_reveals set created_at = now() - interval '6 minutes', expires_at = now() - interval '1 minute' where command_id = :'rev2';
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ begin
+  assert (select count(*) from public.link_office_reveals where command_id = current_setting('test.rev2')::uuid) = 0, 'expired: not visible';
+  assert public.link_reveal_take(current_setting('test.rev2')::uuid) is null, 'expired: nothing to take';
+end $$;
+-- an office that answers too late gets nothing stored
+select public.link_command(:'ws_l', 'office-0001-abcd', 'reveal_password', jsonb_build_object('extension', '101', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('C', 342), 'e', 'AQAB'))) as rev3 \gset
+reset role;
+update public.link_office_commands set created_at = now() - interval '4 minutes 59 seconds' where id = :'rev3';
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
+select public.link_office_done(:'rev3', true, null, 'TGF0ZQ==');
+reset role;
+do $$ begin
+  -- no password copy outlives the 5 minutes: after any check-in, every expired or read one is blank
+  perform public.link_sweep();
+  assert not exists (select 1 from public.link_office_reveals where sealed is not null and (expires_at <= now() or read_at is not null)), 'nothing persists past the window';
+  assert not exists (select 1 from public.link_office_reveals where expires_at > created_at + interval '5 minutes'), 'never kept longer than 5 minutes';
+  assert not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name like 'link_%' and column_name ilike '%password%'), 'no password column anywhere';
+  assert not exists (select 1 from public.link_office_commands where data::text ilike '%password%'), 'no password in any change';
+  assert not exists (select 1 from public.audit_log where details::text like '%U2NyYW1ibGVk%' or details::text like '%QW5vdGhlck9uZQ%'), 'never in the history';
+end $$;
+-- HQ: hq_company_link needs customers.view; sending changes needs link.support AND the customer's "Let Riyeser help"
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000007'); set role authenticated;
+do $$ begin
+  begin perform public.hq_company_link(current_setting('test.ws_l')::uuid); raise exception 'developer saw the phones';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000006');
+do $$ declare j json; begin
+  j := public.hq_company_link(current_setting('test.ws_l')::uuid);
+  assert (j -> 'offices' -> 0 ->> 'pc_name') = 'OFFICE-PC' and json_array_length(j -> 'offices' -> 0 -> 'phones') = 2, format('finance sees the summary: %s', j);
+  assert not (j ->> 'can_help')::boolean and (j ->> 'support') is null, 'finance can''t help; no access given';
+  assert j::text not ilike '%password%' and j::text not like '%sealed%', 'no passwords in HQ';
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":false}'); raise exception 'finance sent a change';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ begin
+  assert (public.hq_company_link(current_setting('test.ws_l')::uuid) ->> 'can_help')::boolean, 'support can help';
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":false}'); raise exception 'support sent a change without the customer allowing it';
+  exception when others then assert sqlerrm like 'Ask the customer to press ''Let Riyeser help''%', sqlerrm; end;
+  begin perform public.link_support_allow(current_setting('test.ws_l')::uuid); raise exception 'support let itself in';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+-- the owner presses "Let Riyeser help": 1 hour, in both histories
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ declare r json; begin
+  r := public.link_support_allow(current_setting('test.ws_l')::uuid);
+  assert (r ->> 'until')::timestamptz between now() + interval '59 minutes' and now() + interval '61 minutes', 'one hour';
+  assert (public.link_status(current_setting('test.ws_l')::uuid) -> 'support' ->> 'until') is not null, 'the Phones page shows it';
+  assert exists (select 1 from public.audit_log where action = 'link.support_allowed'), 'in the business''s history';
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ declare c uuid; r uuid; begin
+  assert (public.hq_company_link(current_setting('test.ws_l')::uuid) -> 'support' ->> 'until') is not null, 'HQ sees until when';
+  c := public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":false}');
+  assert (public.link_command_state(c) ->> 'status') = 'pending', 'support can follow its own change';
+  r := public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'reveal_password', jsonb_build_object('extension', '101', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('D', 342), 'e', 'AQAB')));
+  perform set_config('test.hqrev', r::text, false);
+end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.link_office_commands where by_riyeser) = 2, 'marked as Riyeser';
+  assert exists (select 1 from public.hq_audit where action = 'link.reveal_password' and workspace_id = current_setting('test.ws_l')::uuid), 'HQ Show in the HQ history';
+  assert exists (select 1 from public.hq_audit where action = 'link.support_allowed' and workspace_id = current_setting('test.ws_l')::uuid), 'allowing it is in the HQ history';
+  assert exists (select 1 from public.audit_log where action = 'link.reveal_password' and actor is null and details ->> 'by' = 'Riyeser support'), 'customer sees "Riyeser support" showed it';
+end $$;
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
+select public.link_office_done(current_setting('test.hqrev')::uuid, true, null, 'SFFTaG93bg==');
+-- the customer ends it early: support can't take the password or send more
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+select public.link_support_end(:'ws_l');
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ begin
+  begin perform public.link_reveal_take(current_setting('test.hqrev')::uuid); raise exception 'took a password after access ended';
+  exception when others then assert sqlerrm like 'You can''t see this business''s phone passwords any more%', sqlerrm; end;
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":true}'); raise exception 'support sent a change after it ended';
+  exception when others then assert sqlerrm like 'Ask the customer%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin
+  assert exists (select 1 from public.audit_log where action = 'link.support_ended') and exists (select 1 from public.hq_audit where action = 'link.support_ended'), 'ending is in both histories';
+end $$;
+-- an expired grant counts for nothing
+reset role;
+insert into public.link_support_access (workspace_id, granted_by, granted_at, expires_at) values (:'ws_l', 'c0c0c0c0-0000-4000-8000-000000000001', now() - interval '2 hours', now() - interval '1 hour');
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005'); set role authenticated;
+do $$ begin
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'set_dnd', '{"extension":"101","on":true}'); raise exception 'expired grant worked';
+  exception when others then assert sqlerrm like 'Ask the customer%', sqlerrm; end;
+end $$;
+-- signed-out visitors: nothing
+reset role; set role anon;
+do $$ begin
+  begin perform public.link_status(current_setting('test.ws_l')::uuid); raise exception 'anon read status';
+  exception when insufficient_privilege then null; end;
+  begin perform count(*) from public.link_offices; raise exception 'anon read offices';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

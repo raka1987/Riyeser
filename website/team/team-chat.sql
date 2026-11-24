@@ -843,7 +843,7 @@ create or replace function public.hq_all_perms() returns text[] language sql imm
     'people.change_owner', 'business.close', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.assign',
     'support.saved_replies', 'support.escalate', 'support.level2', 'support.level3', 'refunds.view', 'refunds.request',
     'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'emails.manage', 'accounts.inactive',
-    'staff.manage', 'audit.view', 'settings.manage']
+    'staff.manage', 'audit.view', 'settings.manage', 'link.support']
 $$;
 create or replace function public.hq_role_perms(r text) returns text[] language sql immutable as $$
   select case r
@@ -853,10 +853,10 @@ create or replace function public.hq_role_perms(r text) returns text[] language 
       'offers.grant', 'offers.approve', 'emails.view']
     when 'support' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'refunds.view',
-      'refunds.request', 'offers.grant', 'emails.view']
+      'refunds.request', 'offers.grant', 'emails.view', 'link.support']
     when 'senior' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'people.change_owner', 'business.close', 'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies',
-      'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage']
+      'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support']
     when 'sales' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'support.view', 'offers.grant']
     when 'developer' then array['overview.view', 'downloads.view']
     else '{}'::text[] end
@@ -2630,3 +2630,387 @@ do $$ begin
     grant execute on function public.hq_inactivity_sweep(), public.hq_support_sweep() to service_role;
   end if;
 end $$;
+
+-- ===== Riyeser Link Office: status and phones =====
+-- Riyeser Link Office (the office phone system on one PC) reports how it's going every 5 minutes, and when a phone
+-- connects or is given to someone: the PC's name and version, the address to type into phones, the licence, counts,
+-- the desk phones and the extensions. Owners and admins see it on the Phones page of Riyeser Link, and can send it
+-- changes (give a phone to someone, add one by MAC address, Do not disturb, a new password). It checks for them
+-- every 30 seconds and says whether each worked. Riyeser support sees the same summary in HQ, and can make the same
+-- changes only for the hour after the customer presses "Let Riyeser help".
+-- PRIVACY: no calls, numbers dialled, recordings or audio ever come here: only how many calls are in progress.
+-- SIP PASSWORDS NEVER LIVE HERE. They're made and kept on the office PC. "Show" on the website makes a one-off key in
+-- the browser and asks the office PC for that extension's password; the PC encrypts it to that key, so this database
+-- only ever holds a scrambled copy that only that browser tab can read. It can be taken once, by the person who
+-- asked, within 5 minutes, and is blanked straight after (or when the 5 minutes are up). Every Show is in the history.
+-- Safe to re-run: it only adds what's missing.
+create table if not exists public.link_offices (
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  office_id text not null check (office_id ~ '^[A-Za-z0-9-]{8,64}$'),     -- made once by each Riyeser Link Office install
+  pc_name text check (length(pc_name) <= 80),
+  version text check (length(version) <= 40),
+  state text check (length(state) <= 40),                                  -- running, waiting-licence, stopping, error
+  addresses text[] not null default '{}',                                  -- this PC's office address(es); the first is the one phones use
+  sip_port int check (sip_port between 1 and 65535),
+  address_stable boolean not null default true,                            -- false after 3 address changes in 30 days
+  pc_mac text check (length(pc_mac) <= 20),                                -- for a DHCP reservation in the router
+  licence jsonb, counts jsonb, extensions jsonb not null default '[]',
+  reported_by uuid references auth.users(id) on delete set null,
+  first_seen timestamptz not null default now(),
+  last_seen timestamptz not null default now(),
+  primary key (workspace_id, office_id)
+);
+create table if not exists public.link_office_phones (
+  workspace_id uuid not null,
+  office_id text not null,
+  mac text not null check (mac ~ '^[0-9a-f]{12}$'),
+  vendor text check (length(vendor) <= 40),
+  model text check (length(model) <= 60),
+  extension text check (extension ~ '^[0-9]{2,4}$'),
+  assigned boolean not null default false,                                 -- false: a new phone found, not given to anyone yet
+  registered boolean not null default false,                               -- connected to Riyeser Link Office now
+  last_registered timestamptz,
+  ip text check (length(ip) <= 45),
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, office_id, mac),
+  foreign key (workspace_id, office_id) references public.link_offices (workspace_id, office_id) on delete cascade
+);
+create table if not exists public.link_office_commands (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  office_id text not null,
+  kind text not null check (kind in ('assign_phone', 'unassign_phone', 'add_phone', 'new_password', 'set_dnd', 'reveal_password')),
+  data jsonb not null default '{}' check (length(data::text) < 4000),     -- never a password (a Show holds only the browser's public key)
+  created_by uuid default auth.uid() references auth.users(id) on delete set null,
+  by_riyeser boolean not null default false,                               -- Riyeser support, while the customer allowed it
+  created_at timestamptz not null default now(),
+  status text not null default 'pending' check (status in ('pending', 'done', 'failed')),
+  done_at timestamptz,
+  error text check (length(error) <= 300)
+);
+create index if not exists link_office_commands_pending on public.link_office_commands (workspace_id, office_id, status, created_at);
+create table if not exists public.link_office_reveals (
+  command_id uuid primary key references public.link_office_commands(id) on delete cascade,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  extension text not null,
+  requested_by uuid not null references auth.users(id) on delete cascade,
+  sealed text check (length(sealed) <= 2000),     -- encrypted to the asking browser's one-off key; blanked once read or after 5 minutes
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '5 minutes',
+  read_at timestamptz,
+  check (expires_at <= created_at + interval '5 minutes')
+);
+create table if not exists public.link_support_access (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  granted_by uuid references auth.users(id) on delete set null,
+  granted_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  ended_at timestamptz,
+  ended_by uuid references auth.users(id) on delete set null,
+  check (expires_at <= granted_at + interval '61 minutes')
+);
+create index if not exists link_support_access_ws on public.link_support_access (workspace_id, expires_at desc);
+
+alter table public.link_offices enable row level security;
+alter table public.link_office_phones enable row level security;
+alter table public.link_office_commands enable row level security;
+alter table public.link_office_reveals enable row level security;
+alter table public.link_support_access enable row level security;
+revoke all on public.link_offices, public.link_office_phones, public.link_office_commands, public.link_office_reveals,
+  public.link_support_access from anon, authenticated;
+drop policy if exists lo_read on public.link_offices;
+create policy lo_read on public.link_offices for select to authenticated using (public.is_member(workspace_id));
+drop policy if exists lop_read on public.link_office_phones;
+create policy lop_read on public.link_office_phones for select to authenticated using (public.is_member(workspace_id));
+drop policy if exists loc_read on public.link_office_commands;
+create policy loc_read on public.link_office_commands for select to authenticated using (public.is_admin(workspace_id));
+drop policy if exists lor_read on public.link_office_reveals;
+create policy lor_read on public.link_office_reveals for select to authenticated using (requested_by = auth.uid() and expires_at > now());
+drop policy if exists lsa_read on public.link_support_access;
+create policy lsa_read on public.link_support_access for select to authenticated using (public.is_admin(workspace_id));
+grant select on public.link_offices, public.link_office_phones, public.link_office_commands, public.link_support_access to authenticated;
+-- the scrambled password itself is never readable directly: only once, through link_reveal_take()
+grant select (command_id, workspace_id, extension, requested_by, created_at, expires_at, read_at) on public.link_office_reveals to authenticated;
+
+-- ---------------------------------------------------------------- helpers (not callable from outside)
+create or replace function public.link_int(j jsonb) returns int language sql immutable as $$
+  select case when jsonb_typeof(j) = 'number' then least(greatest(round((j #>> '{}')::numeric), 0), 1000000)::int end
+$$;
+create or replace function public.link_bool(j jsonb) returns boolean language sql immutable as $$
+  select case when jsonb_typeof(j) = 'boolean' then (j #>> '{}')::boolean end
+$$;
+create or replace function public.link_text(j jsonb, n int) returns text language sql immutable as $$
+  select nullif(left(regexp_replace(case when jsonb_typeof(j) in ('string', 'number') then j #>> '{}' end, '[[:cntrl:]<>]', '', 'g'), n), '')
+$$;
+create or replace function public.link_time(j jsonb) returns timestamptz language plpgsql immutable as $$
+begin
+  if jsonb_typeof(j) <> 'string' or (j #>> '{}') !~ '^\d{4}-\d\d-\d\dT\d\d:\d\d' then return null; end if;
+  return (j #>> '{}')::timestamptz;
+exception when others then return null;
+end $$;
+create or replace function public.link_mac(t text) returns text language sql immutable as $$
+  select case when lower(regexp_replace(coalesce(t, ''), '[\s:.-]', '', 'g')) ~ '^[0-9a-f]{12}$' then lower(regexp_replace(t, '[\s:.-]', '', 'g')) end
+$$;
+-- Who may report for a business from its Link Office: someone in it who is an owner or admin, or whose PC is linked.
+create or replace function public.link_office_caller_ok(ws uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members m join workspaces w on w.id = m.workspace_id and w.status = 'active'
+    where m.workspace_id = ws and m.user_id = auth.uid()
+      and (m.role in ('owner', 'admin') or exists (select 1 from devices d where d.workspace_id = ws and d.user_id = auth.uid())))
+$$;
+create or replace function public.link_support_active(ws uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from link_support_access where workspace_id = ws and ended_at is null and expires_at > now())
+$$;
+-- Blank any password copy that was read or is past its 5 minutes, and give up on changes nobody picked up.
+create or replace function public.link_sweep() returns void
+  language sql security definer set search_path = public as $$
+  update link_office_reveals set sealed = null where sealed is not null and (read_at is not null or expires_at <= now());
+  delete from link_office_reveals where sealed is null and created_at < now() - interval '1 day';
+  update link_office_commands set status = 'failed', done_at = now(),
+      error = 'Riyeser Link Office didn''t answer within 5 minutes. Is the office PC on? Press Show again to try again.'
+    where status = 'pending' and kind = 'reveal_password' and created_at < now() - interval '5 minutes';
+  update link_office_commands set status = 'failed', done_at = now(),
+      error = 'Riyeser Link Office didn''t pick this up within a day. Is the office PC on and connected to the internet?'
+    where status = 'pending' and created_at < now() - interval '1 day';
+$$;
+create or replace function public.link_office_json(o link_offices) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('office_id', o.office_id, 'pc_name', o.pc_name, 'version', o.version, 'state', o.state, 'addresses', o.addresses,
+    'sip_port', o.sip_port, 'address_stable', o.address_stable, 'pc_mac', o.pc_mac, 'licence', o.licence, 'counts', o.counts,
+    'extensions', o.extensions, 'first_seen', o.first_seen, 'last_seen', o.last_seen,
+    'phones', (select coalesce(json_agg(json_build_object('mac', p.mac, 'vendor', p.vendor, 'model', p.model, 'extension', p.extension,
+        'assigned', p.assigned, 'registered', p.registered, 'last_registered', p.last_registered, 'ip', p.ip) order by p.assigned desc, p.extension, p.mac), '[]')
+      from link_office_phones p where p.workspace_id = o.workspace_id and p.office_id = o.office_id))
+$$;
+
+-- ---------------------------------------------------------------- Riyeser Link Office calls these
+-- The heartbeat. Only the listed parts of the payload are kept, each checked and cut to size. Returns how many
+-- changes are waiting, so the office can fetch them straight away.
+create or replace function public.link_office_report(ws uuid, office_id text, payload jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare p jsonb := coalesce(payload, '{}'::jsonb); the_office text := link_office_report.office_id;
+begin
+  if not link_office_caller_ok(ws) then
+    raise exception 'Sign in to Riyeser Link Office as the business''s owner or an admin, or link this PC to the business in Riyeser Central.';
+  end if;
+  if the_office is null or the_office !~ '^[A-Za-z0-9-]{8,64}$' then raise exception 'That isn''t a Riyeser Link Office id.'; end if;
+  if length(p::text) > 300000 then raise exception 'That report is too big.'; end if;
+  perform link_sweep();
+  insert into link_offices (workspace_id, office_id, pc_name, version, state, addresses, sip_port, address_stable, pc_mac, licence, counts, extensions, reported_by, last_seen)
+  values (ws, the_office, link_text(p -> 'pc_name', 80), link_text(p -> 'version', 40), link_text(p -> 'state', 40),
+    array(select a from jsonb_array_elements_text(case when jsonb_typeof(p -> 'addresses') = 'array' then p -> 'addresses' else '[]' end) with ordinality x(a, i)
+          where a ~ '^\d{1,3}(\.\d{1,3}){3}$' order by i limit 8),
+    case when link_int(p -> 'sip_port') between 1 and 65535 then link_int(p -> 'sip_port') end,
+    coalesce(link_bool(p -> 'address_stable'), true),
+    case when link_text(p -> 'pc_mac', 20) ~ '^[0-9A-Fa-f:-]{12,17}$' then link_text(p -> 'pc_mac', 20) end,
+    jsonb_build_object('active', coalesce(link_bool(p -> 'licence' -> 'active'), false), 'state', link_text(p -> 'licence' -> 'state', 20),
+      'text', link_text(p -> 'licence' -> 'text', 200)),
+    jsonb_build_object('people', link_int(p -> 'counts' -> 'people'), 'groups', link_int(p -> 'counts' -> 'groups'),
+      'phones_assigned', link_int(p -> 'counts' -> 'phones_assigned'), 'phones_connected', link_int(p -> 'counts' -> 'phones_connected'),
+      'new_phones', link_int(p -> 'counts' -> 'new_phones'), 'app_users', link_int(p -> 'counts' -> 'app_users'),
+      'calls_in_progress', link_int(p -> 'counts' -> 'calls_in_progress')),
+    coalesce((select jsonb_agg(jsonb_build_object('extension', e ->> 'extension', 'name', link_text(e -> 'name', 60),
+        'type', case when e ->> 'type' = 'group' then 'group' else 'person' end,
+        'registered', coalesce(link_int(e -> 'registered'), 0), 'desk_phones', coalesce(link_int(e -> 'desk_phones'), 0),
+        'app_users', coalesce(link_int(e -> 'app_users'), 0), 'dnd', coalesce(link_bool(e -> 'dnd'), false),
+        'members', link_int(e -> 'members')) order by e ->> 'extension')
+      from (select e from jsonb_array_elements(case when jsonb_typeof(p -> 'extensions') = 'array' then p -> 'extensions' else '[]' end) e
+            where jsonb_typeof(e) = 'object' and e ->> 'extension' ~ '^[0-9]{2,4}$' limit 1000) x), '[]'::jsonb),
+    auth.uid(), now())
+  on conflict (workspace_id, office_id) do update set pc_name = excluded.pc_name, version = excluded.version, state = excluded.state,
+    addresses = excluded.addresses, sip_port = excluded.sip_port, address_stable = excluded.address_stable, pc_mac = excluded.pc_mac,
+    licence = excluded.licence, counts = excluded.counts, extensions = excluded.extensions, reported_by = excluded.reported_by, last_seen = now();
+  -- the phones list is a copy of what the office has now (the office keeps the real list)
+  delete from link_office_phones where workspace_id = ws and office_id = the_office;
+  insert into link_office_phones (workspace_id, office_id, mac, vendor, model, extension, assigned, registered, last_registered, ip)
+  select distinct on (link_mac(ph ->> 'mac')) ws, the_office, link_mac(ph ->> 'mac'), link_text(ph -> 'vendor', 40), link_text(ph -> 'model', 60),
+    case when ph ->> 'extension' ~ '^[0-9]{2,4}$' then ph ->> 'extension' end,
+    coalesce(link_bool(ph -> 'assigned'), false), coalesce(link_bool(ph -> 'registered'), false), link_time(ph -> 'last_registered'),
+    case when link_text(ph -> 'ip', 45) ~ '^[0-9a-fA-F.:]{3,45}$' then link_text(ph -> 'ip', 45) end
+  from (select ph from jsonb_array_elements(case when jsonb_typeof(p -> 'phones') = 'array' then p -> 'phones' else '[]' end) ph
+        where jsonb_typeof(ph) = 'object' limit 500) x
+  where link_mac(ph ->> 'mac') is not null
+  order by link_mac(ph ->> 'mac'), coalesce(link_bool(ph -> 'assigned'), false) desc;
+  return json_build_object('ok', true, 'pending', (select count(*) from link_office_commands c where c.workspace_id = ws and c.office_id = the_office and c.status = 'pending'));
+end $$;
+
+-- Changes waiting for this office (it asks every 30 seconds; asking also counts as "still running").
+create or replace function public.link_office_pending(ws uuid, office_id text) returns json
+  language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare the_office text := link_office_pending.office_id;
+begin
+  if not link_office_caller_ok(ws) then raise exception 'Sign in to Riyeser Link Office as the business''s owner or an admin, or link this PC in Riyeser Central.'; end if;
+  perform link_sweep();
+  update link_offices set last_seen = now() where workspace_id = ws and office_id = the_office and last_seen < now() - interval '20 seconds';
+  return (select coalesce(json_agg(json_build_object('id', c.id, 'kind', c.kind, 'data', c.data, 'created_at', c.created_at) order by c.created_at), '[]')
+    from (select * from link_office_commands c where c.workspace_id = ws and c.office_id = the_office and c.status = 'pending' order by c.created_at limit 50) c);
+end $$;
+
+-- The office says how a change went. For a Show, "sealed" is the password encrypted to the asking browser's key.
+create or replace function public.link_office_done(command uuid, ok boolean, error text, sealed text) returns void
+  language plpgsql security definer set search_path = public as $$
+#variable_conflict use_variable
+declare c link_office_commands; why text := left(nullif(trim(coalesce(error, '')), ''), 300);
+begin
+  select * into c from link_office_commands where id = command for update;
+  if c.id is null or not link_office_caller_ok(c.workspace_id) then raise exception 'That change isn''t for this business.'; end if;
+  if c.status <> 'pending' then return; end if;
+  if ok and c.kind = 'reveal_password' then
+    if sealed is null or length(sealed) > 2000 or sealed !~ '^[A-Za-z0-9+/=_-]+$' then ok := false; why := 'Riyeser Link Office didn''t send the password back.';
+    elsif c.created_at < now() - interval '5 minutes' then ok := false; why := 'That took too long. Press Show again.';
+    else
+      insert into link_office_reveals (command_id, workspace_id, extension, requested_by, sealed, created_at, expires_at)
+      values (c.id, c.workspace_id, c.data ->> 'extension', c.created_by, sealed, now(), c.created_at + interval '5 minutes')   -- 5 minutes from pressing Show
+      on conflict (command_id) do nothing;
+    end if;
+  end if;
+  update link_office_commands set status = case when ok then 'done' else 'failed' end, done_at = now(),
+    error = case when ok then null else coalesce(why, 'Riyeser Link Office couldn''t do that.') end
+  where id = c.id;
+end $$;
+
+-- ---------------------------------------------------------------- the website and HQ call these
+-- A change for the office to make. Owners and admins with two-step sign-in; or Riyeser support (link.support) while
+-- the customer has pressed "Let Riyeser help". Every change goes in the business's history (and HQ's, for Riyeser).
+create or replace function public.link_command(ws uuid, office_id text, kind text, data jsonb) returns uuid
+  language plpgsql security definer set search_path = public as $$
+#variable_conflict use_variable
+declare d jsonb := coalesce(data, '{}'::jsonb); clean jsonb; mac text; ext text; by_hq boolean := false; cid uuid; k jsonb;
+  the_office text := link_command.office_id;
+begin
+  if public.is_admin(ws) then by_hq := false;
+  elsif hq_role() is not null then
+    if not hq_can('link.support') then raise exception 'Your HQ role can''t do that.'; end if;
+    if not link_support_active(ws) then raise exception 'Ask the customer to press ''Let Riyeser help'' on their Phones page first.'; end if;
+    by_hq := true;
+  else raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can change the phones.';
+  end if;
+  perform link_sweep();
+  if not exists (select 1 from link_offices o where o.workspace_id = ws and o.office_id = the_office) then
+    raise exception 'That Riyeser Link Office hasn''t been in touch yet.';
+  end if;
+  mac := link_mac(d ->> 'mac');
+  ext := case when d ->> 'extension' ~ '^[0-9]{2,4}$' then d ->> 'extension' end;
+  if kind in ('assign_phone', 'unassign_phone', 'add_phone') and mac is null then
+    raise exception 'That isn''t a MAC address. It''s 12 letters and numbers, on a sticker under the phone (like 00:15:65:12:34:56).';
+  end if;
+  if kind in ('assign_phone', 'add_phone', 'new_password', 'set_dnd', 'reveal_password') and ext is null then raise exception 'Choose an extension.'; end if;
+  if kind = 'assign_phone' or kind = 'add_phone' then
+    clean := jsonb_build_object('mac', mac, 'extension', ext);
+    if kind = 'add_phone' and coalesce(d ->> 'vendor', '') <> '' then
+      if d ->> 'vendor' not in ('yealink', 'grandstream', 'snom', 'polycom') then raise exception 'Choose the phone''s maker from the list.'; end if;
+      clean := clean || jsonb_build_object('vendor', d ->> 'vendor');
+    end if;
+  elsif kind = 'unassign_phone' then clean := jsonb_build_object('mac', mac);
+  elsif kind = 'new_password' then clean := jsonb_build_object('extension', ext);
+  elsif kind = 'set_dnd' then
+    if link_bool(d -> 'on') is null then raise exception 'Say whether Do not disturb is on or off.'; end if;
+    clean := jsonb_build_object('extension', ext, 'on', link_bool(d -> 'on'));
+  elsif kind = 'reveal_password' then
+    k := d -> 'key';   -- the browser's one-off public key (RSA-OAEP, SHA-256): the password comes back encrypted to it
+    if jsonb_typeof(k) <> 'object' or k ->> 'kty' <> 'RSA' or coalesce(k ->> 'n', '') !~ '^[A-Za-z0-9_-]+$' or length(k ->> 'n') not between 340 and 700 or coalesce(k ->> 'e', '') !~ '^[A-Za-z0-9_-]{1,8}$' then
+      raise exception 'This browser can''t show passwords safely. Try another browser, such as Chrome, Edge or Safari.';
+    end if;
+    clean := jsonb_build_object('extension', ext, 'key', jsonb_build_object('kty', 'RSA', 'alg', 'RSA-OAEP-256', 'n', k ->> 'n', 'e', k ->> 'e'));
+  else raise exception 'Riyeser Link Office doesn''t know how to do that.';
+  end if;
+  if (select count(*) from link_office_commands c where c.workspace_id = ws and c.status = 'pending') >= 50 then
+    raise exception 'There are already 50 changes waiting for Riyeser Link Office. Is the office PC on?';
+  end if;
+  insert into link_office_commands (workspace_id, office_id, kind, data, by_riyeser) values (ws, the_office, kind, clean, by_hq) returning id into cid;
+  insert into audit_log (workspace_id, action, details, actor)
+  values (ws, 'link.' || kind, jsonb_strip_nulls(jsonb_build_object('extension', ext, 'mac', mac, 'on', clean -> 'on', 'office_id', the_office,
+            'by', case when by_hq then 'Riyeser support' end)), case when by_hq then null else auth.uid() end);
+  if by_hq then perform hq_log('link.' || kind, jsonb_strip_nulls(jsonb_build_object('workspace_id', ws, 'office_id', the_office, 'extension', ext, 'mac', mac))); end if;
+  return cid;
+end $$;
+
+-- How a change is going: pending, done or failed (with a plain reason), and for a Show, whether it's ready to take.
+create or replace function public.link_command_state(command uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare c link_office_commands;
+begin
+  perform link_sweep();
+  select * into c from link_office_commands where id = command;
+  if c.id is null or not (public.is_admin(c.workspace_id) or (c.by_riyeser and c.created_by = auth.uid() and hq_can('link.support'))) then
+    raise exception 'That change isn''t one of yours.';
+  end if;
+  return json_build_object('id', c.id, 'kind', c.kind, 'status', c.status, 'error', c.error, 'created_at', c.created_at, 'done_at', c.done_at,
+    'ready', exists (select 1 from link_office_reveals r where r.command_id = c.id and r.requested_by = auth.uid() and r.sealed is not null
+                     and r.read_at is null and r.expires_at > now()));
+end $$;
+
+-- Take the (encrypted) password once. Only the person who asked, within 5 minutes; it's blanked straight away.
+create or replace function public.link_reveal_take(command uuid) returns text
+  language plpgsql security definer set search_path = public as $$
+declare r link_office_reveals; s text;
+begin
+  perform link_sweep();
+  select * into r from link_office_reveals where command_id = command for update;
+  if r.command_id is null or r.requested_by <> auth.uid() then raise exception 'There''s no password waiting for you.'; end if;
+  if not (public.is_admin(r.workspace_id) or (hq_can('link.support') and link_support_active(r.workspace_id))) then
+    raise exception 'You can''t see this business''s phone passwords any more.';
+  end if;
+  if r.sealed is null or r.read_at is not null or r.expires_at <= now() then return null; end if;
+  s := r.sealed;
+  update link_office_reveals set sealed = null, read_at = now() where command_id = r.command_id;
+  return s;
+end $$;
+
+-- What the Phones page shows: every Link Office of the business, its phones and extensions (never a password).
+create or replace function public.link_status(ws uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_member(ws) then raise exception 'You''re not in that company'; end if;
+  return json_build_object('now', now(), 'calls', public.calls_allowed(ws),
+    'offices', (select coalesce(json_agg(link_office_json(o) order by o.last_seen desc), '[]') from link_offices o where o.workspace_id = ws),
+    'support', (select json_build_object('until', a.expires_at, 'since', a.granted_at) from link_support_access a
+                where a.workspace_id = ws and a.ended_at is null and a.expires_at > now() order by a.expires_at desc limit 1));
+end $$;
+
+-- "Let Riyeser help": Riyeser support can make the same phone changes for 1 hour (or until the customer ends it).
+create or replace function public.link_support_allow(ws uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare until timestamptz := now() + interval '1 hour';
+begin
+  if not public.is_admin(ws) then raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can let Riyeser help.'; end if;
+  update link_support_access set ended_at = now(), ended_by = auth.uid() where workspace_id = ws and ended_at is null and expires_at > now();
+  insert into link_support_access (workspace_id, granted_by, expires_at) values (ws, auth.uid(), until);
+  insert into audit_log (workspace_id, action, details) values (ws, 'link.support_allowed', jsonb_build_object('until', until));
+  perform hq_log('link.support_allowed', jsonb_build_object('workspace_id', ws, 'until', until, 'by', 'customer'));
+  return json_build_object('until', until);
+end $$;
+create or replace function public.link_support_end(ws uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin(ws) then raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can do that.'; end if;
+  update link_support_access set ended_at = now(), ended_by = auth.uid() where workspace_id = ws and ended_at is null and expires_at > now();
+  if found then
+    insert into audit_log (workspace_id, action, details) values (ws, 'link.support_ended', '{}'::jsonb);
+    perform hq_log('link.support_ended', jsonb_build_object('workspace_id', ws, 'by', 'customer'));
+  end if;
+end $$;
+
+-- HQ: the business's Link Office, phones and extension counts (customers.view). No passwords: there are none here.
+create or replace function public.hq_company_link(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['customers.view']);
+  return json_build_object('now', now(), 'calls', public.calls_allowed(ws), 'can_help', hq_can('link.support'),
+    'offices', (select coalesce(json_agg(link_office_json(o) order by o.last_seen desc), '[]') from link_offices o where o.workspace_id = ws),
+    'support', (select json_build_object('until', a.expires_at, 'since', a.granted_at) from link_support_access a
+                where a.workspace_id = ws and a.ended_at is null and a.expires_at > now() order by a.expires_at desc limit 1));
+end $$;
+
+revoke all on function public.link_int(jsonb), public.link_bool(jsonb), public.link_text(jsonb, int), public.link_time(jsonb), public.link_mac(text),
+  public.link_office_caller_ok(uuid), public.link_support_active(uuid), public.link_sweep(), public.link_office_json(link_offices),
+  public.link_office_report(uuid, text, jsonb), public.link_office_pending(uuid, text), public.link_office_done(uuid, boolean, text, text),
+  public.link_command(uuid, text, text, jsonb), public.link_command_state(uuid), public.link_reveal_take(uuid), public.link_status(uuid),
+  public.link_support_allow(uuid), public.link_support_end(uuid), public.hq_company_link(uuid) from public, anon, authenticated;
+grant execute on function public.link_office_report(uuid, text, jsonb), public.link_office_pending(uuid, text), public.link_office_done(uuid, boolean, text, text),
+  public.link_command(uuid, text, text, jsonb), public.link_command_state(uuid), public.link_reveal_take(uuid), public.link_status(uuid),
+  public.link_support_allow(uuid), public.link_support_end(uuid), public.hq_company_link(uuid) to authenticated;

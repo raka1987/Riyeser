@@ -87,6 +87,10 @@ class PhoneService extends EventEmitter {
   /** The network adapters the owner can choose from (Settings), and which one is in use. */
   adapters() { const a = this.adapter(); return { current: a, list: localAddresses(this.ifaces()).map((x) => ({ name: x.name, address: x.address, mac: x.mac, virtual: x.virtual })) }; }
   async chooseAdapter(name) { this.setSettings({ adapter: name || '' }); await this.checkNetwork(); this.emit('change'); return this.adapters(); }
+  /** The address is "stable" until it has changed 3 times in 30 days (then phones may keep losing touch). */
+  addressStable(now = Date.now()) { return (this.settings().hostChanges || []).filter((c) => now - Date.parse(c.at) < 30 * 86400000).length < 3; }
+  /** This install's id for Riyeser Link online (made once, kept in phone-settings.json). */
+  officeId() { let id = this.settings().officeId; if (!id) { id = `lo-${require('crypto').randomUUID()}`; this.setSettings({ officeId: id }); } return id; }
   dismissIpNotice() { if (this.ipChanged && !this.ipChanged.unstable) this.ipChanged = null; this.emit('change'); }
   provisionerData() { const d = this.store.get('phone-devices', null) || {}; return { phones: d.phones || [], found: d.found || [] }; }
 
@@ -197,6 +201,7 @@ class PhoneService extends EventEmitter {
         state: waiting ? 'waiting for Link Plus' : (x.ip && regIps.has(x.ip)) ? 'connected' : x.lastFetch ? 'set up, not connected now' : 'waiting for the phone to ask for its settings' })),
       found, inProgress: snap.calls, recent: this.calls.list({ limit: 100 }),
       counts: { connected: new Set(snap.registrations.map((r) => r.ext)).size, onCalls: snap.calls.filter((c) => c.state === 'talking').length, phones: snap.registrations.length },
+      registrations: snap.registrations.map((r) => ({ ext: r.ext, ip: r.ip, device: r.device, since: r.since })), addressStable: this.addressStable(),
       blocked: snap.blocked, ipChanged: this.ipChanged || null, adapter: this.adapter(), allowPublic: !!this.settings().allowPublic, logs: this.logs.slice(-60).reverse(),
     };
   }

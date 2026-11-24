@@ -25,3 +25,10 @@
 - HQ: `../../hq/test-hq.js` (every tab in demo mode) and `../../hq/test-hq-ops.js` (Support, fix-ups, refunds with a
   second approver, free periods and Approvals, permissions, Inactive accounts, Emails, History filters and CSV, phone
   widths, and the "run the latest team-chat.sql" message on an older database).
+- `phones-test.js`: the Phones page (Riyeser Link Office, desk phones) against a pretend Supabase: the set-up guide with
+  no Link Office yet; the server address, extensions and desk phones from a heartbeat; a new phone → Give to… → the
+  change is sent and done; Set up a phone by hand → Show (a one-off key goes out, the password comes back encrypted to
+  it); Make a new password; Do not disturb; add by MAC; Let Riyeser help and End it now; the Link Plus upsell; an older
+  database; phone widths. Exits 1 on failure. `rules-test.sql` covers the database side (who can report, read, send
+  changes and take a password; the 5-minute window; HQ needs `link.support` plus the customer's grant).
+- HQ: `../../hq/test-hq-link.js` checks `hq-link.js` filling `#cpLink` (summary line, phones, Show password, not set up).

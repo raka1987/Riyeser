@@ -83,6 +83,39 @@ The formats follow each maker's published provisioning documentation, and the te
 
 Didn't appear? Use **Add a desk phone → Add phone** with the MAC address on the sticker under the phone. Or use **Set up a phone by hand** next to the person. It shows the server address (this PC's address), the username (the extension) and the password, to type into any SIP phone or app.
 
+## The Phones page on the website (1.1.0)
+
+Business owners and admins (and Riyeser support, when allowed) see and manage the desk phones at **riyeser.com/link → ☎ Phones** (from the Riyeser home tile, the **☎ Phones** button above the chat, or `riyeser.com/link/?phones`). Before 1.1.0 this was only on the office PC's own screen. The code is `src/link/cloud.js`. The database side is the section *Riyeser Link Office: status and phones* in `website/team/team-chat.sql`.
+
+**Heartbeat.** Every 5 minutes, and a few seconds after something changes (a phone connects or is given to someone, the address changes), Riyeser Link Office calls `link_office_report(ws, office_id, payload)`. The payload holds:
+
+- `office_id` (made once per install, in `phone-settings.json`), the PC name and version;
+- the address(es) to type into phones, the SIP port, whether the address is stable, and the PC's MAC address (for a DHCP reservation);
+- the licence state;
+- counts: people, groups, phones given out, phones connected, new phones, app users, and calls in progress (a count only);
+- the desk phones: MAC, maker and model, extension, connected or not, when last connected, LAN address;
+- the extensions: number, person or group name, how many devices are connected, desk phones, app users, Do not disturb.
+
+**No calls, numbers dialled, recordings or audio are ever sent.** `buildPayload` copies only the listed fields, and the tests check that call details and passwords never appear. The database keeps one row per office (`link_offices`) and a copy of its phones (`link_office_phones`). Only someone in the business who is an owner or admin, or whose PC is linked, can report. Everyone in the business can read it.
+
+**Changes from the website.** Owners and admins with two-step sign-in add rows to `link_office_commands` through `link_command`. The kinds are `assign_phone`, `unassign_phone`, `add_phone`, `new_password`, `set_dnd` and `reveal_password`. Riyeser Link Office asks for waiting changes every 30 seconds (`link_office_pending`), does each one, and marks it done or failed with a plain reason (`link_office_done`). The website shows "Sending to Riyeser Link Office…", then "Done" or the reason. Every change goes in the business's history (`audit_log`, `link.*`). Changes nobody picks up fail after a day.
+
+**SIP passwords: Show (the design).** Passwords are made and kept only on this PC (`phone-secrets.json`, sealed with Windows data protection). They are never stored online and never logged.
+
+1. **Show** in *Set up a phone by hand* makes a one-off RSA-OAEP (2048-bit, SHA-256) key pair in that browser tab, with WebCrypto. The private half can't be exported and never leaves the tab.
+2. The website sends a `reveal_password` change with the public half only. It is in the history at once: "looked at a phone password", with who did it, or "Riyeser support".
+3. Riyeser Link Office encrypts that extension's password to the public key (`sealFor`) and sends back only the scrambled text. The database keeps it in `link_office_reveals.sealed`, for at most 5 minutes from pressing Show.
+4. The tab takes it once with `link_reveal_take`. Only the person who asked can take it, and only while they are still an admin, or still allowed to help. The copy is blanked as it's read. Expired or read copies are blanked by every check-in (`link_sweep`). Nobody can read the `sealed` column directly: there is no column permission for it.
+5. The tab decrypts it and shows it until the box is closed.
+
+So even the database, its backups, Riyeser staff and anyone watching the network only ever see a scrambled copy that only that tab could open. That copy lives for 5 minutes at most. **Make a new password** never sends the new password anywhere: press Show afterwards.
+
+**Let Riyeser help.** On the Phones page an admin can press **Let Riyeser help**. That's a `link_support_access` row lasting 1 hour, written to both the business's history and HQ's. The admin can end it early. While it lasts, HQ staff with the `link.support` permission can make the same changes, including Show. Support and senior roles have that permission by default, and owners have all of them. Their changes are marked `by_riyeser`, written to `hq_audit`, and show in the customer's history as "Riyeser". HQ always sees the summary through `hq_company_link(ws)` (needs `customers.view`), shown by `website/hq/hq-link.js` in the customer page's `#cpLink`.
+
+**Offline.** With no internet, or not signed in, the phones carry on as normal. The heartbeat and changes simply wait. Until the online database has had the latest `team-chat.sql`, Riyeser Link Office tries again every half hour and the website shows the set-up guide. The status screen's **Settings** tab says whether the website can see the phones, and has **Send phone details to Riyeser Link now**.
+
+**The status screen.** It now opens on a **☎ Phones** tab. The server address is big at the top with **Copy**, next to two buttons, **Set up a phone by hand** and **+ Add a desk phone**, then the new phones found and the desk phones. People, Recent calls and Settings are the other tabs.
+
 ## The Windows Firewall rule
 
 Riyeser Link Office's installer adds **one** inbound Windows Firewall rule, named "Riyeser Link Office". The rule:
@@ -190,6 +223,7 @@ The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring
   - `provision.js` — plug-and-play answers and the settings server.
   - `directory.js` — people, ring groups, passwords and DND.
   - `sync.js` — Riyeser Link.
+  - `cloud.js` — the website's Phones page: heartbeat, changes, Show password.
   - `licence.js` — Riyeser Link Plus.
   - `calllog.js` — 90 days of recent calls.
   - `service.js` — puts it all together.
@@ -210,7 +244,8 @@ Data lives in `%APPDATA%\Riyeser Link Office\data\`:
 - `phone-devices.json` (phones, new phones, settings-fetch log)
 - `phone-calls.json`
 - `phone-dnd.json`
-- `phone-settings.json`
+- `phone-settings.json` (includes this install's `officeId`)
+- `phone-cloud.json` (when each desk phone was last connected)
 
 The log is in `%APPDATA%\Riyeser Link Office\logs\link.log`.
 

@@ -19,7 +19,7 @@ const selfTestArg = process.argv.find((a) => a.startsWith('--self-test='));
 if (!selfTestArg && !app.requestSingleInstanceLock()) app.quit();
 
 let win = null; let tray = null; let quitting = false; let toldAboutTray = false; let service = null; let store = null;
-let sleepNote = null; let firewall = null; let blocker = null;
+let sleepNote = null; let firewall = null; let blocker = null; let cloud = null;
 const startHidden = process.argv.includes('--hidden');
 const icon = (file) => path.join(__dirname, 'renderer', file);
 
@@ -87,6 +87,10 @@ function makeService() {
   const central = centralOnline({ appData, phoneStore: store, fetchFn });
   service = new PhoneService({ store, appData, clients: () => [own, central], seal, unseal, log: logLine });
   service.online = own;
+  // The Phones page on riyeser.com/link: a heartbeat every 5 minutes, and changes from the website every 30 seconds.
+  const { LinkCloud } = require('./link/cloud');
+  cloud = new LinkCloud({ service, clients: () => [own, central], appData, version: app.getVersion(), pcName: os.hostname() });
+  cloud.on('change', () => service.emit('change'));
   let pending = null;
   service.on('change', () => {   // tell the window, at most every 300 ms
     if (pending) return;
@@ -115,7 +119,7 @@ function handle(name, fn) {
 }
 function registerIpc() {
   handle('link:status', () => ({ ...service.status(), version: app.getVersion(), sleepNote, firewall, signedIn: !!service.online.session, startWithWindows: startsWithWindows(),
-    adapters: service.adapters() }));
+    adapters: service.adapters(), cloud: cloud ? cloud.state : null }));
   handle('link:assign', (mac, ext, vendor) => service.assign(mac, ext, vendor));
   handle('link:unassign', (mac) => service.unassign(mac));
   handle('link:ignore', (mac) => service.ignore(mac));
@@ -130,9 +134,11 @@ function registerIpc() {
   handle('link:dnd', (ext, on) => service.setDnd(ext, on));
   handle('link:copy', (text) => { clipboard.writeText(String(text || '')); return true; });
   handle('link:sync', () => service.sync());
-  handle('link:signIn', async (email, password) => { await service.online.signIn(String(email || '').trim(), String(password || '')); return service.sync(); });
+  handle('link:signIn', async (email, password) => { await service.online.signIn(String(email || '').trim(), String(password || '')); const r = await service.sync(); if (cloud) cloud.report('signed in').catch(() => null); return r; });
   handle('link:signOut', () => { service.online.signOut(); return true; });
   handle('link:openTeam', () => shell.openExternal(TEAM_URL).then(() => true));
+  handle('link:openPhonesPage', () => shell.openExternal(`${TEAM_URL}?phones`).then(() => true));
+  handle('link:report', () => (cloud ? cloud.report('button').then((r) => (cloud.poll().catch(() => 0), r)) : null));
   handle('link:recheck', async () => { await checkPc(); await service.sync().catch(() => null); return service.checkLicence(); });
   handle('link:firewall', async () => { firewall = await require('./link/windows').addFirewallRule(process.execPath, service.status().httpPort); return firewall; });
   handle('link:adapter', (name) => service.chooseAdapter(name));
@@ -160,7 +166,7 @@ function registerIpc() {
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
 app.on('before-quit', () => { quitting = true; });
-app.on('will-quit', () => { if (blocker != null && powerSaveBlocker.isStarted(blocker)) powerSaveBlocker.stop(blocker); if (service) service.stop(); });
+app.on('will-quit', () => { if (blocker != null && powerSaveBlocker.isStarted(blocker)) powerSaveBlocker.stop(blocker); if (cloud) cloud.stop(); if (service) service.stop(); });
 app.on('window-all-closed', () => { /* stays in the tray */ });
 
 app.whenReady().then(async () => {
@@ -183,6 +189,7 @@ app.whenReady().then(async () => {
   await service.start();
   checkPc().then(() => { if (win && !win.isDestroyed()) win.webContents.send('link:changed', true); });
   setTimeout(() => service.sync().catch(() => null), 3000);
+  cloud.start();   // with no internet it just waits; the phones never depend on it
   setInterval(() => service.sync().catch(() => null), 30 * 60 * 1000);
   setInterval(() => { service.checkLicence().catch(() => null); service.checkNetwork().catch(() => null); }, 60 * 1000);
   setInterval(() => checkPc(), 30 * 60 * 1000);

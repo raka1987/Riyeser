@@ -2,7 +2,7 @@
 const api = window.api; const T = window.LinkText;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let S = null; let shown = {}; let busy = false;
+let S = null; let shown = {}; let busy = false; let hand = null;   // hand: Set up a phone by hand (Phones tab): { ext, details, reveal }
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 3500); }
 async function safe(fn) { try { return await fn(); } catch (e) { toast(e.message); return null; } }
@@ -46,6 +46,30 @@ function renderNotices() {
 }
 
 const personOptions = (sel) => `<option value="">Who is it for?</option>${S.people.map((p) => `<option value="${esc(p.ext)}"${sel === p.ext ? ' selected' : ''}>${esc(p.name)} (${esc(p.ext)})</option>`).join('')}`;
+// ---------- the Phones tab: the address to type into phones, big, with the two things people come here to do
+function renderHero() {
+  const live = S.state === 'running';
+  $('#hero').innerHTML = `<div><small>${esc(T.SERVER_LABEL)}</small>
+      <div class="addr"><code id="srv">${esc(S.host || '…')}</code><span class="port">${esc(T.port(S.sipPort))}</span><button class="btn s sm" data-copy="${esc(S.host || '')}">Copy</button></div>
+      <div class="muted">${esc(T.SERVER_HINT)}</div>
+      ${S.addressStable === false ? `<div class="note warn" style="margin:8px 0 0">${esc(T.NOT_STABLE)}</div>` : ''}
+      <div class="muted cloudline">${esc(T.cloud(S.cloud))}${S.cloud && S.cloud.status === 'online' ? ' <button class="btn s sm" data-a="web">Open the Phones page on the website</button>' : ''}</div></div>
+    <div class="acts"><button class="btn" data-a="hand">☎ Set up a phone by hand</button><button class="btn" data-a="addphone">+ Add a desk phone</button>
+      ${live ? '' : `<span class="muted">${esc(T.NOT_RUNNING_HINT)}</span>`}</div>`;
+  $('#phcount').textContent = S.phones.length ? T.phoneCount(S.phones.length, S.phones.filter((x) => x.state === 'connected').length) : '';
+}
+function renderHand() {
+  $('#manualwho').innerHTML = `<option value="">Who is the phone for?</option>${S.people.map((p) => `<option value="${esc(p.ext)}"${hand && hand.ext === p.ext ? ' selected' : ''}>${esc(p.name)} (${esc(p.ext)})</option>`).join('')}`;
+  const m = hand && hand.details;
+  $('#manualout').innerHTML = m ? `<div class="manual">Type these into the phone's SIP account settings:<br>
+      Server address (SIP server, registrar): <code>${esc(m.server)}</code> &nbsp; Port: <code>${esc(m.port)}</code><br>
+      Username (and authentication name): <code>${esc(m.username)}</code><br>
+      Password: <code>${hand.reveal ? esc(m.password) : '••••••••••••••••'}</code>
+      <button class="btn s sm" data-handreveal="1">${hand.reveal ? 'Hide' : 'Show'}</button><button class="btn s sm" data-copy="${esc(m.password)}">Copy password</button>
+      <button class="btn s sm" data-reset="${esc(m.username)}">Make a new password</button><br>
+      <span class="muted">Transport: UDP. Leave the outbound proxy empty. Display name: ${esc(m.name)}.</span></div>` : '';
+}
+
 function renderFound() {
   $('#found').innerHTML = S.found.map((f) => `<div class="card"><div class="grow"><b>New phone found</b>${esc(f.vendorName)} ${esc(f.model || '')} · ${esc(f.macText)}${f.ip ? ` · at ${esc(f.ip)}` : ''}</div>
     <select data-found="${esc(f.mac)}">${personOptions('')}</select><button class="btn" data-give="${esc(f.mac)}">Give to this person</button><button class="btn s sm" data-ignore="${esc(f.mac)}">Not ours</button></div>`).join('');
@@ -86,7 +110,8 @@ function renderAccount() {
   const s = S.sync;
   const line = S.teamSyncedAt ? `People and ring groups came from Riyeser Link, last brought in ${esc(when(S.teamSyncedAt))}. They're kept on this PC, so the phones work without the internet.` : 'Sign in to your Riyeser account to bring in your team: their names, extensions and branches.';
   $('#account').innerHTML = `<p>${line}</p>${s && s.status === 'offline' ? `<p class="muted">${esc(s.error)}</p>` : ''}${s && s.status === 'local' ? `<p class="muted">${esc(s.why)}</p>` : ''}
-    <div class="row"><button class="btn s" data-a="sync">Bring in people from Riyeser Link now</button>${S.signedIn ? '<button class="btn s sm" data-a="signout">Sign out of Riyeser here</button>' : ''}</div>
+    <p class="muted">${esc(T.cloud(S.cloud))}</p>
+    <div class="row"><button class="btn s" data-a="sync">Bring in people from Riyeser Link now</button><button class="btn s" data-a="report">Send phone details to Riyeser Link now</button>${S.signedIn ? '<button class="btn s sm" data-a="signout">Sign out of Riyeser here</button>' : ''}</div>
     ${S.signedIn ? '' : `<form id="signin" class="row"><input id="em" type="email" placeholder="Riyeser account email" autocomplete="username"><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button class="btn">Sign in</button></form>
       <p class="muted">Already signed in on Riyeser Central? Riyeser Link Office uses that too when it can.</p>`}`;
 }
@@ -102,7 +127,12 @@ function renderAdvanced() {
     <div class="log">${S.logs.map((l) => `${esc(when(l.at))}  ${esc(l.text)}`).join('\n') || 'Nothing yet.'}</div>`;
 }
 
-function render() { if (!S) return; renderState(); renderNotices(); renderFound(); if (!busy) renderPeople(); renderGroups(); renderPhones(); renderCalls(); renderAccount(); if (!document.querySelector('.adv').open) renderAdvanced(); }
+function showTab(name) {
+  for (const b of document.querySelectorAll('.tabs button')) { const on = b.dataset.tab === name; b.classList.toggle('on', on); b.setAttribute('aria-selected', on); }
+  for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
+  try { localStorage.setItem('link.tab', name); } catch { /* fine */ }
+}
+function render() { if (!S) return; renderState(); renderNotices(); renderHero(); if (!$('#manualbox').hidden) renderHand(); renderFound(); if (!busy) renderPeople(); renderGroups(); renderPhones(); renderCalls(); renderAccount(); if (!document.querySelector('.adv').open) renderAdvanced(); }
 async function load() { const s = await safe(() => api.call('link:status')); if (s) { S = s; render(); } }
 let pending = null;
 api.on('link:changed', () => { clearTimeout(pending); pending = setTimeout(load, 150); });
@@ -117,7 +147,10 @@ document.addEventListener('click', async (e) => {
   if (d.copy != null) { await safe(() => api.call('link:copy', d.copy)); toast('Copied.'); return; }
   if (d.manual) { if (shown[d.manual]) delete shown[d.manual]; else shown[d.manual] = await safe(() => api.call('link:manual', d.manual)); renderPeople(); return; }
   if (d.reveal) { shown[d.reveal].reveal = !shown[d.reveal].reveal; renderPeople(); return; }
-  if (d.reset) { const m = await safe(() => api.call('link:resetPassword', d.reset)); if (m) { shown[d.reset] = { ...m, reveal: true }; renderPeople(); toast('New password made.'); } return; }
+  if (d.handreveal) { hand.reveal = !hand.reveal; renderHand(); return; }
+  if (d.reset) { const m = await safe(() => api.call('link:resetPassword', d.reset)); if (m) { if (shown[d.reset]) shown[d.reset] = { ...m, reveal: true };
+    if (hand && hand.ext === d.reset) hand = { ext: d.reset, details: m, reveal: true }; renderPeople(); renderHand(); toast('New password made.'); } return; }
+  if (d.tab) { showTab(d.tab); return; }
   if (d.remove) { if (confirm('Take this person off the phones? Their call history stays.')) { await safe(() => api.call('link:removePerson', d.remove)); load(); } return; }
   if (d.give) { const ext = document.querySelector(`select[data-found="${d.give}"]`).value; if (!ext) { toast('Choose who the phone is for.'); return; }
     if (await safe(() => api.call('link:assign', d.give, ext))) toast('Done. The phone sets itself up in a minute. If it doesn\'t, restart it.'); load(); return; }
@@ -127,6 +160,10 @@ document.addEventListener('click', async (e) => {
   b.disabled = true;
   try {
     if (a === 'team') await safe(() => api.call('link:openTeam'));
+    if (a === 'web') await safe(() => api.call('link:openPhonesPage'));
+    if (a === 'report') { const r = await safe(() => api.call('link:report')); if (r) toast(r.ok ? 'Sent to Riyeser Link.' : r.error); }
+    if (a === 'hand') { const box = $('#manualbox'); box.hidden = !box.hidden; if (!box.hidden) { renderHand(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#manualwho').focus(); } }
+    if (a === 'addphone') { const dd = $('#addphone'); dd.open = true; dd.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#mac').focus(); }
     if (a === 'recheck') { await safe(() => api.call('link:recheck')); toast(S && S.state === 'running' ? 'Riyeser Link Office is on.' : 'Checked.'); }
     if (a === 'sync') { const r = await safe(() => api.call('link:sync')); if (r) toast(r.status === 'synced' ? `Brought in ${r.people} people.` : (r.error || r.why)); }
     if (a === 'signout') await safe(() => api.call('link:signOut'));
@@ -140,6 +177,7 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.dataset.dnd) { await safe(() => api.call('link:dnd', t.dataset.dnd, t.checked)); load(); }
+  if (t.id === 'manualwho') { hand = t.value ? { ext: t.value, details: await safe(() => api.call('link:manual', t.value)), reveal: false } : null; renderHand(); }
   if (t.id === 'adapter') { await safe(() => api.call('link:adapter', t.value)); load(); }
   if (t.id === 'sww') await safe(() => api.call('link:startWithWindows', t.checked));
   if (t.id === 'pub') await safe(() => api.call('link:allowPublic', t.checked));
@@ -161,4 +199,5 @@ document.addEventListener('submit', async (e) => {
     load();
   }
 });
+try { const t = localStorage.getItem('link.tab'); if (t && document.querySelector(`[data-pane="${t}"]`)) showTab(t); } catch { /* the Phones tab */ }
 load();

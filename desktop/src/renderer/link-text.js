@@ -23,6 +23,18 @@
     personState: (p) => (p.dnd && p.state === 'ready' ? 'do not disturb' : p.state),
     device: (d) => (d === 'app' ? 'Riyeser Link app' : d === 'desk phone + app' || d === 'app + desk phone' ? 'desk phone and app' : d || '—'),
     result: (r) => ({ answered: 'answered', missed: 'missed', busy: 'busy', unavailable: 'not connected', declined: 'declined', failed: 'didn\'t connect' }[r] || r || ''),
+    SERVER_LABEL: 'Server address to type into phones',
+    port: (p) => `port ${p || 5060}`,
+    SERVER_HINT: 'Username: the person\'s extension. Password: under Set up a phone by hand. Desk phones from Yealink, Grandstream, Snom and Polycom set themselves up when you give them to someone.',
+    NOT_STABLE: 'This address has changed several times this month, so phones may lose touch. Ask your router to always give this PC the same address (a "DHCP reservation"): look for "Static lease" in its settings. This PC\'s MAC address is under Settings → Advanced.',
+    NOT_RUNNING_HINT: 'Phones can only connect while Riyeser Link Office is running.',
+    phoneCount: (n, on) => `${plural(n, 'phone')} · ${on} connected`,
+    /** Riyeser Link online (the Phones page on the website). */
+    cloud: (c) => (!c ? '' : c.status === 'online' ? `Your owners and admins can see these phones on riyeser.com/link (Phones)${c.at ? `, last sent ${new Date(c.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}.`
+      : c.status === 'local' ? 'This PC isn\'t linked to a Riyeser Online business, so the phones only show here.'
+      : c.status === 'not-yet' ? 'The Phones page on riyeser.com/link isn\'t switched on yet. Riyeser Link Office tries again by itself.'
+      : c.status === 'offline' ? `Can't reach Riyeser Link online right now, so the website's Phones page waits. The phones here work as normal.${c.error ? ` (${c.error})` : ''}`
+      : 'Connecting to Riyeser Link online…'),
     duration: (s) => (!s ? '' : s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim()),
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = T; else root.LinkText = T;
