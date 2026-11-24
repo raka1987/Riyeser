@@ -1,0 +1,41 @@
+name: HQ download counts
+
+# Once a day: total downloads of each installer (all releases) from GitHub, saved into Riyeser HQ so the
+# Downloads page can show downloads per day. Needs the HQ_INGEST_TOKEN secret (see ops/RUNBOOK.md, Riyeser HQ).
+on:
+  schedule:
+    - cron: "55 13 * * *"      # 13:55 UTC, before midnight in Fiji and Sydney
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    env:
+      HQ_INGEST_TOKEN: ${{ secrets.HQ_INGEST_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with: { ref: module/desk-assistant, sparse-checkout: website/team/config.js, sparse-checkout-cone-mode: false }
+      - name: Set up yet?
+        id: ready
+        run: |
+          url=$(grep -oP 'supabaseUrl:\s*"\K[^"]*' website/team/config.js || true)
+          key=$(grep -oP 'supabaseKey:\s*"\K[^"]*' website/team/config.js || true)
+          if [ -z "$url" ] || [ -z "$key" ] || [ -z "$HQ_INGEST_TOKEN" ]; then
+            echo "::notice::HQ download counts aren't set up yet. See ops/RUNBOOK.md (Riyeser HQ)."; echo "ok=no" >> "$GITHUB_OUTPUT"
+          else echo "ok=yes" >> "$GITHUB_OUTPUT"; echo "SB_URL=$url" >> "$GITHUB_ENV"; echo "SB_KEY=$key" >> "$GITHUB_ENV"; fi
+      - if: steps.ready.outputs.ok == 'yes'
+        name: Count and record
+        run: |
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[].assets[] | select(.name | endswith(".exe")) | [.name, .download_count] | @tsv' > counts.tsv
+          totals=$(jq -Rn 'reduce (inputs | split("\t")) as $r ({}; .[$r[0]] += ($r[1] | tonumber))' < counts.tsv)
+          echo "$totals" | jq -r 'to_entries | sort_by(-.value) | .[] | "\(.value)\t\(.key)"'
+          body=$(jq -n --arg token "$HQ_INGEST_TOKEN" --argjson totals "$totals" '{token: $token, totals: $totals}')
+          code=$(curl -s -o resp.txt -w '%{http_code}' -X POST "$SB_URL/rest/v1/rpc/hq_record_downloads" \
+            -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" --data "$body")
+          if [ "$code" != "200" ]; then echo "::error::HQ didn't accept the counts (HTTP $code): $(cat resp.txt)"; exit 1; fi
+          echo "Recorded $(cat resp.txt) installers."

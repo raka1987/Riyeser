@@ -53,6 +53,37 @@ You need four things. Each is a value you paste into GitHub. **Never paste them 
 
 If a secret is missing, the jobs just say "not set up yet" and don't fail.
 
+## Riyeser HQ (riyeser.com/hq): the staff back office
+
+HQ runs on the Riyeser Team Supabase project. `team-chat.sql` already sets it up. HQ only ever sees account
+information: companies, people counts, branches, linked PCs and versions, trials, Team Calls and downloads.
+It never sees customers' messages, calls or books.
+
+**Make yourself the first owner (once):**
+1. Create your Riyeser account at riyeser.com/team, then turn on two-step sign-in there (🔐 Security).
+2. In Supabase, open **SQL Editor** and run `select public.hq_make_owner('your@email', 'Your name');`
+   This only works from the SQL Editor, never from a website.
+3. Sign in at **riyeser.com/hq**. To add staff, open **HQ team**: each person needs a Riyeser account with two-step sign-in, and you choose their role.
+
+| Role | Can do |
+|---|---|
+| Owner | Everything, including HQ staff and the HQ history |
+| Finance | Companies, Team Calls paid-until, notes |
+| Support, Sales | Companies and notes |
+| Developer | Overview and downloads |
+
+**Daily download counts:**
+1. Make a long random token (5–6 random words).
+2. In the SQL Editor, run `select public.hq_set_ingest_token('the token');`
+3. Add the same token as the GitHub secret `HQ_INGEST_TOKEN`.
+4. Run **Actions → HQ download counts** once to check it works.
+
+The Downloads page shows live totals straight away. Per-day numbers start the day after the job's first run.
+
+Download totals include a few copies fetched by Riyeser's own release checks, so treat small numbers as roughly right.
+
+**Marking a company paid for Team Calls:** HQ → Companies → open the company → Team Calls → Paid until → Save.
+
 ## When a backup fails
 
 GitHub emails the repository owner when a scheduled job fails. Open the failed run, then the step with the red cross.
