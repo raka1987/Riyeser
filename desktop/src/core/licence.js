@@ -37,11 +37,65 @@ function ensureTrial(appData, now = Date.now()) {
 const days = (ms) => Math.max(0, Math.ceil(ms / DAY));
 const mask = (key) => (key ? `${String(key).slice(0, 4)}…${String(key).slice(-4)}` : null);
 
+// ---------- the company's licence from Riyeser online (when this PC is linked to an online company) ----------
+// Riyeser Central fetches it (core/online.js refreshLicence) and keeps it here under "online", next to the older
+// fields, so each Riyeser program can unlock its own paid module. It stays good for OFFLINE_GRACE_DAYS offline.
+const MODULE_NAMES = { basic: 'Accounting Basics', plus: 'Accounting Plus', payroll: 'Payroll', pos: 'POS', bookings: 'Bookings',
+  as_built: 'As Built', calls: 'Team Calls' };
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDate(ymd) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '')); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : ''; }
+function ago(iso, now) {
+  const mins = Math.round((now - Date.parse(iso)) / 60000);
+  if (!Number.isFinite(mins)) return 'never';
+  if (mins < 2) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)} h ago`;
+  const d = Math.round(mins / 1440); return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
+/** Save what Riyeser online said, keeping every other field (trial, licence key) as it was. */
+function saveOnline(appData, data, now = Date.now()) {
+  const d = read(appData);
+  d.online = { ...(data || {}), checkedAt: new Date(now).toISOString() };
+  write(appData, d);
+  return d.online;
+}
+
+/** One line per paid program, in plain words, plus users, companies and when it was last checked. null if none. */
+function onlinePlan(appData, now = Date.now(), d = read(appData)) {
+  const o = d.online;
+  if (!o || typeof o !== 'object') return null;
+  const stale = !(now - (Date.parse(o.checkedAt) || 0) < OFFLINE_GRACE_DAYS * DAY);
+  const mods = o.modules || {};
+  const rows = Object.keys(MODULE_NAMES).filter((id) => mods[id]).map((id) => {
+    const m = mods[id]; const name = MODULE_NAMES[id];
+    let text; let tone;
+    if (m.active && m.status === 'trial') {
+      const n = m.days_left != null ? m.days_left : null;
+      text = n != null ? `free trial, ${n} day${n === 1 ? '' : 's'} left` : 'free trial'; tone = n != null && n <= 14 ? 'warn' : 'trial';
+    } else if (m.active) { text = m.paid_until ? `paid until ${fmtDate(m.paid_until)}` : 'active'; tone = 'ok'; }
+    else if (m.status === 'cancelled') { text = 'cancelled — contact Riyeser'; tone = 'bad'; }
+    else { text = 'trial ended — contact Riyeser'; tone = 'bad'; }
+    return { id, name, text, tone, line: `${name}: ${text}` };
+  });
+  const seats = o.seats || {};
+  return { companyCode: o.company_code || '', rows, stale, checkedAt: o.checkedAt, checkedAgo: ago(o.checkedAt, now),
+    seatsIncluded: seats.included != null ? seats.included : 3, extraUsers: seats.extra || 0, usersUsed: seats.used != null ? seats.used : null,
+    extraCompanies: o.extra_companies || 0, billing: o.billing || 'monthly', earlyBird: !!o.early_bird,
+    message: stale ? 'Riyeser couldn\'t check your licence for 30 days: connect to the internet and open Riyeser Central.' : null };
+}
+
 /**
  * Where things stand:
  *   { mode: 'trial' | 'licensed' | 'expired', daysLeft, trialEnds, plan, email, key (masked), checkedAt, needsCheck, message }
  */
 function status(appData, now = Date.now()) {
+  const s = localStatus(appData, now);
+  const plan = onlinePlan(appData, now);
+  return plan ? { ...s, online: plan } : s;
+}
+
+function localStatus(appData, now = Date.now()) {
   const d = ensureTrial(appData, now);
   const trialEnds = Date.parse(d.trialStart) + TRIAL_DAYS * DAY;
   const base = { trialStart: d.trialStart, trialEnds: new Date(trialEnds).toISOString(), buyUrl: BUY_URL };
@@ -130,4 +184,4 @@ async function remove(appData, { fetchFn = globalThis.fetch, now = Date.now() } 
   return status(appData, now);
 }
 
-module.exports = { TRIAL_DAYS, OFFLINE_GRACE_DAYS, BUY_URL, licenceFile, read, ensureTrial, status, activate, recheck, remove };
+module.exports = { TRIAL_DAYS, OFFLINE_GRACE_DAYS, BUY_URL, MODULE_NAMES, licenceFile, read, ensureTrial, status, activate, recheck, remove, saveOnline, onlinePlan, fmtDate };

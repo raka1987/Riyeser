@@ -126,6 +126,17 @@ class Online {
     try { return !!(await this.rpc('device_still_linked', { ws: c.workspace_id, device: this.deviceId() })); } catch { return null; }
   }
 
+  // ---------- the company's licence (which paid programs are on), saved for every Riyeser program ----------
+  /** Fetch it and save it in licence.json under "online". null when it can't (offline, not an online company). */
+  async refreshLicence(now = Date.now()) {
+    const c = readCompany(this.appData);
+    if (!c || c.mode !== 'online' || !c.workspace_id || !this.session) return null;
+    let r;
+    try { r = await this.rpc('company_licence', { ws: c.workspace_id }); } catch { return null; }   // keep the last one
+    if (!r || typeof r !== 'object' || !r.modules) return null;
+    return require('./licence').saveOnline(this.appData, r, now);
+  }
+
   // ---------- set up or join ----------
   /** profile: {name, legal_name, tax_number, address, phone, email, country}; yourName: the person setting it up. */
   async createCompany(profile, yourName) {

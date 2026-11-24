@@ -205,6 +205,7 @@ function handle(name, fn) {
     try { return { ok: true, data: await fn(...args) }; } catch (e) { return { ok: false, error: e.message }; }
   });
 }
+let refreshOnlineLicence = async () => null;   // set up in registerIpc once the online helper exists
 function registerIpc() {
   handle('app:version', () => app.getVersion());
   handle('app:platform', () => process.platform);
@@ -282,6 +283,8 @@ function registerIpc() {
   // ---------- licence (one for the whole Riyeser suite; %APPDATA%\Riyeser\licence.json) ----------
   const appData = app.getPath('appData'); const lfetch = (u, o) => net.fetch(u, o);
   handle('central:licence', async () => { const s = licence.status(appData); return s.needsCheck ? licence.recheck(appData, { fetchFn: lfetch }) : s; });
+  // The company's plan from Riyeser online: when Central starts, once a day, and on "Check now".
+  handle('central:licenceRefresh', async () => { await refreshOnlineLicence(true); return licence.status(appData); });
   handle('central:licenceActivate', (key) => licence.activate(appData, key, { fetchFn: lfetch }));
   handle('central:licenceRemove', () => licence.remove(appData, { fetchFn: lfetch }));
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
@@ -293,6 +296,15 @@ function registerIpc() {
     return { company: online.readCompany(appData), onlineReady: await on.ready(), signedIn: s ? s.user.email : null,
       pendingJoin: setup.pendingJoin || null, skipped: !!setup.skipped, unlinked: !!setup.unlinked };
   };
+  refreshOnlineLicence = async (force) => {
+    const last = store.get('licence-online-at', 0) || 0;
+    if (!force && Date.now() - last < 20 * 3600 * 1000) return null;
+    const r = await on.refreshLicence().catch(() => null);
+    if (r) { store.set('licence-online-at', Date.now()); if (win && !win.isDestroyed()) win.webContents.send('licence-changed', true); }
+    return r;
+  };
+  setTimeout(() => refreshOnlineLicence(false), 5000);
+  setInterval(() => refreshOnlineLicence(false), 6 * 3600 * 1000);
   handle('company:get', () => companyState());
   handle('company:signIn', (email, password, create) => on.signIn(String(email || '').trim(), String(password || ''), !!create));
   handle('company:signOut', () => { on.signOut(); return true; });

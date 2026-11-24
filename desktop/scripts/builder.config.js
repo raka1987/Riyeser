@@ -11,7 +11,7 @@ const APPS = {
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
-    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.6.4', productName: 'Riyeser Central' } },
+    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.6.5', productName: 'Riyeser Central' } },
   // As Built was called Riyeser Services. Only the name people see changed: the app id, install folder (riyeser-services),
   // program file (Riyeser Services.exe), saved projects and release file (RiyeserServices-Setup.exe) stay the same,
   // so installed copies update in place and keep their projects.

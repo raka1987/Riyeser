@@ -306,9 +306,11 @@ $('#checkupd').addEventListener('click', () => checkForUpdates(true, false));
 
 // ---------- licence: one free 90-day trial, then one licence for every Riyeser program ----------
 let lic = null;
+if (bridge && bridge.on) bridge.on('licence-changed', () => loadLicence());
 async function loadLicence() { try { lic = await bridge.call('central:licence'); } catch { lic = null; } renderLicence(); }
 function licLine(s) {
   if (!s) return 'Licence';
+  if (s.online) return s.online.stale ? 'Plan needs checking' : 'Your plan';
   if (s.mode === 'trial') return `Free trial · ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left`;
   if (s.mode === 'licensed') return `Licensed${s.plan ? ` · ${s.plan}` : ''}`;
   return 'Licence needed';
@@ -316,6 +318,12 @@ function licLine(s) {
 function renderLicence() {
   $('#licbtn').textContent = licLine(lic);
   const bar = $('#licbar');
+  if (lic && lic.online) {   // the company's plan from Riyeser online
+    const o = lic.online; const ended = o.rows.filter((r) => r.tone === 'bad'); const soon = o.rows.filter((r) => r.tone === 'warn');
+    bar.hidden = !(o.stale || ended.length || soon.length);
+    if (!bar.hidden) bar.innerHTML = `<span style="font-size:24px">🔑</span><div class="grow"><b>${o.stale ? 'Your plan needs checking' : ended.length ? `${esc(ended.map((r) => r.name).join(', '))}: trial ended` : `${esc(soon.map((r) => r.name).join(', '))}: free trial ending soon`}</b><div class="lbl">${esc(o.message || 'Everything you\'ve made stays exactly where it is. Contact Riyeser to change your plan.')}</div></div><button class="go" data-lic="open">See your plan</button>`;
+    return;
+  }
   const show = lic && (lic.mode === 'expired' || (lic.mode === 'trial' && lic.daysLeft <= 14) || lic.message);
   bar.hidden = !show;
   if (show) {
@@ -324,7 +332,21 @@ function renderLicence() {
     bar.innerHTML = `<span style="font-size:24px">🔑</span><div class="grow">${text}</div><button class="go" data-lic="open">${lic.mode === 'licensed' ? 'Details' : 'Get a licence'}</button>`;
   }
 }
+function openPlan(o) {
+  const icon = { ok: '✅', trial: '🎁', warn: '⏳', bad: '⛔' };
+  $('#licbody').innerHTML = `<div class="state${o.stale ? ' bad' : ''}"><span class="big">${o.stale ? '🔑' : '🏢'}</span><div><b>Your Riyeser plan${o.companyCode ? ` · ${esc(o.companyCode)}` : ''}</b>
+      ${o.stale ? esc(o.message) : 'Set by Riyeser for your whole company. Every Riyeser program on this PC follows it.'}</div></div>
+    <ul class="planrows">${o.rows.map((r) => `<li class="t-${r.tone}"><span>${icon[r.tone] || ''}</span><b>${esc(r.name)}</b><span class="pt">${esc(r.text)}</span></li>`).join('')
+      || '<li><span></span><b>No paid programs yet</b><span class="pt">Central, Invoices, PDF, Desk Assistant and Team chat are free.</span></li>'}</ul>
+    <p class="planmeta">Users: ${o.seatsIncluded} included${o.extraUsers ? ` + ${o.extraUsers} extra` : ''}${o.usersUsed != null ? ` (${o.usersUsed} in use)` : ''} · Companies in Accounting: ${1 + o.extraCompanies} (1 included${o.extraCompanies ? ` + ${o.extraCompanies} extra` : ''})
+      · Billed ${o.billing === 'yearly' ? 'yearly' : 'monthly'}${o.earlyBird ? ' · 🐣 early bird' : ''}</p>
+    <p class="muted">Last checked ${esc(o.checkedAgo)}. Works offline for 30 days between checks.</p>
+    <div class="row"><button class="btn" data-lic="refresh">Check now</button><button class="btn s" data-lic="buy">See plans</button></div>
+    <p class="muted">Central, Invoices, PDF, Desk Assistant and Team chat are always free. To add or change a paid program, contact Riyeser.</p>`;
+  $('#licdlg').showModal();
+}
 function openLicence() {
+  if (lic && lic.online) return openPlan(lic.online);
   const s = lic || {}; const body = $('#licbody');
   const state = s.mode === 'licensed'
     ? `<div class="state"><span class="big">✅</span><div><b>Licensed${s.plan ? ` — ${esc(s.plan)}` : ''}</b>${s.email ? `${esc(s.email)} · ` : ''}key ${esc(s.key || '')}<div>Companies in Riyeser Accounting: ${1 + (s.extraCompanies || 0)} (1 included${s.extraCompanies ? ` + ${s.extraCompanies} extra` : ''})</div><div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleDateString() : '—'}. Works offline; it's re-checked now and then when you're online.</div></div></div>`
@@ -345,6 +367,7 @@ document.addEventListener('click', (e) => {
   const a = b.dataset.lic;
   if (a === 'open') openLicence();
   if (a === 'buy') safe(() => bridge.call('central:buy'));
+  if (a === 'refresh') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceRefresh'); renderLicence(); if (lic && lic.online) openPlan(lic.online); toast(lic && lic.online && !lic.online.stale ? 'Plan checked' : 'Couldn\'t reach Riyeser right now. Try again when you\'re online.'); } finally { b.disabled = false; } });
   if (a === 'activate') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceActivate', $('#lickey').value); renderLicence(); openLicence(); toast('Licence turned on — thank you!'); } finally { b.disabled = false; } });
   if (a === 'remove') safe(async () => { if (!confirm('Remove the licence from this PC?')) return; lic = await bridge.call('central:licenceRemove'); renderLicence(); openLicence(); });
 });
