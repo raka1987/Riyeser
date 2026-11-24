@@ -48,6 +48,18 @@ const isTime = s => /^\d{2}:\d{2}$/.test(String(s || ''));
 const str = (v, max = 500) => String(v ?? '').trim().slice(0, max);
 class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
 const bad = msg => { throw new HttpError(400, msg); };
+
+// ---------------------------------------------------------------- licence (licence.js)
+// The Windows program follows the company's Riyeser plan: after the free trial (or with an edited, copied or expired
+// licence) new pay runs and pay-rate changes are locked here on the server. Viewing, printing and the time clock
+// always work, and nothing is deleted. The hosted site and demo mode (practice records) aren't checked.
+// app.locals.payrollLicence can be swapped in tests.
+const payLicence = require('./licence');
+app.locals.payrollLicence = payLicence.checker({ enforce: process.env.DESKTOP === '1' && !DEMO, ownDir: process.env.DATA_DIR || DATA_DIR });
+const licenceNow = () => app.locals.payrollLicence();
+class LockedError extends HttpError { constructor(l) { super(402, l.message || payLicence.ENDED); this.locked = { home_url: l.homeUrl, price: l.price }; } }
+const needLicence = () => { const l = licenceNow(); if (!l.licensed) throw new LockedError(l); };
+const requireLicence = (req, res, next) => { try { needLicence(); next(); } catch (e) { next(e); } };
 const wrap = fn => (req, res, next) => { try { const r = fn(req, res, next); if (r && r.then) r.catch(next); } catch (e) { next(e); } };
 
 function localNowISO(tz) {
@@ -206,6 +218,10 @@ app.post('/api/auth/password', requireStaff, wrap((req, res) => {
 }));
 
 const BUILD = process.env.RENDER_GIT_COMMIT || String(Date.now());
+app.get('/api/staff/licence', requireStaff, (req, res) => {
+  const l = licenceNow();
+  res.json({ licensed: l.licensed, mode: l.mode, days_left: l.daysLeft ?? null, source: l.source, message: l.message || null, home_url: l.homeUrl, price: l.price });
+});
 app.get('/api/version', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ v: BUILD }); });
 app.get('/api/public/info', (req, res) => { const s = getSettings(); res.json({ company_name: s.company_name, today: todayIn(s.timezone), demo: DEMO }); });
 
@@ -248,6 +264,8 @@ function saveEmployee(req, id) {
   }
   if (b.pay_type !== undefined) o.pay_type = b.pay_type === 'salary' ? 'salary' : 'hourly';
   if (b.pay_rate !== undefined) o.pay_rate = Number(b.pay_rate) || 0;
+  // a new or changed pay rate needs Payroll's licence (the rest of the staff record can still be kept up to date)
+  if ((o.pay_type !== undefined && o.pay_type !== (before ? before.pay_type : 'hourly')) || (o.pay_rate !== undefined && o.pay_rate !== (before ? Number(before.pay_rate) || 0 : 0))) needLicence();
   if (b.clock_pin !== undefined) {
     const pin = String(b.clock_pin).trim();
     if (pin && !/^\d{4}$/.test(pin)) bad('Time-clock PIN must be 4 digits.');
@@ -671,9 +689,9 @@ const adminOnlyHours = (req, adjustments = {}) => {
   for (const a of Object.values(adjustments || {})) if (a && a.hours !== undefined && a.hours !== '') throw new HttpError(403, 'Changing hours in a pay run needs full Pay runs access.');
   return adjustments;
 };
-app.post('/api/staff/payroll/preview', requireArea('payroll', 2), wrap((req, res) =>
+app.post('/api/staff/payroll/preview', requireArea('payroll', 2), requireLicence, wrap((req, res) =>
   res.json({ lines: computePayroll(req.body.period_start, req.body.period_end, adminOnlyHours(req, req.body.adjustments)), settings: getSettings() })));
-app.post('/api/staff/payroll/runs', requireArea('payroll', 2), wrap((req, res) => {
+app.post('/api/staff/payroll/runs', requireArea('payroll', 2), requireLicence, wrap((req, res) => {
   const { period_start, period_end, pay_date } = req.body, adjustments = adminOnlyHours(req, req.body.adjustments);
   if (!isDate(pay_date)) bad('Choose a pay date.');
   const lines = computePayroll(period_start, period_end, adjustments);
@@ -718,7 +736,7 @@ function ytdOf(userId, periodEnd, draft = null, runId = null) {
 // otherwise a draft worked out now from the timesheets (marked DRAFT; a part pay period is in proportion).
 const dayAdd = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const dayCount = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5) + 1;
-function payslipsFor(from, to, userId) {
+function payslipsFor(from, to, userId, drafts = true) {
   if (!isDate(from) || !isDate(to) || to < from) bad('Choose the dates.');
   if (dayCount(from, to) > 400) bad('Choose a shorter range (up to about a year).');
   const out = [], seen = new Set();
@@ -728,7 +746,7 @@ function payslipsFor(from, to, userId) {
       LEFT JOIN users u ON u.id = p.user_id WHERE r.period_start <= ? AND r.period_end >= ? ${userId ? 'AND p.user_id = ?' : ''} ORDER BY r.id DESC`).all(b, a, ...(userId ? [userId] : []));
     const have = new Set();
     for (const p of finals) { if (have.has(p.user_id)) continue; have.add(p.user_id); if (!seen.has('f' + p.id)) { seen.add('f' + p.id); out.push({ ...p, status: 'final', ytd: ytdOf(p.user_id, p.period_end, null, p.run_id) }); } }
-    for (const l of computePayroll(a, b, {}, Math.min(1, dayCount(a, b) / dayCount(ps, pe)))) {
+    for (const l of drafts ? computePayroll(a, b, {}, Math.min(1, dayCount(a, b) / dayCount(ps, pe))) : []) {
       if ((userId && l.user_id !== userId) || have.has(l.user_id) || !(l.hours > 0 || l.pay_type === 'salary')) continue;
       const u = db.prepare('SELECT tin, fnpf_no, bank_account FROM users WHERE id = ?').get(l.user_id) || {};
       const d = { ...l, ...u, period_start: a, period_end: b, pay_date: '', status: 'draft', part: a !== ps || b !== pe, full_period: [ps, pe] };
@@ -739,10 +757,11 @@ function payslipsFor(from, to, userId) {
   return out.sort((x, y) => String(x.employee_name).localeCompare(String(y.employee_name)) || String(x.period_start).localeCompare(String(y.period_start)));
 }
 app.get('/api/staff/payslips/build', requireArea('payroll'), wrap((req, res) =>
-  res.json({ payslips: payslipsFor(req.query.from, req.query.to, req.query.user_id ? +req.query.user_id : null) })));
+  // without Payroll's licence: the payslips from finished pay runs (to see and print), but no new draft ones
+  res.json({ payslips: payslipsFor(req.query.from, req.query.to, req.query.user_id ? +req.query.user_id : null, licenceNow().licensed) })));
 // email each person their own payslip(s) for the dates (to the email on their Staff record)
 app.post('/api/staff/payslips/email', requireArea('payroll', 2), wrap(async (req, res) => {
-  const list = payslipsFor(req.body.from, req.body.to, req.body.user_id ? +req.body.user_id : null);
+  const list = payslipsFor(req.body.from, req.body.to, req.body.user_id ? +req.body.user_id : null, licenceNow().licensed);
   if (!list.length) bad('No payslips for these dates (no paid hours, or no pay rate set under Staff).');
   const by = {}; list.forEach(p => (by[p.user_id] = by[p.user_id] || []).push(p));
   const sent = [], missing = [];
@@ -788,7 +807,7 @@ const mail = () => app.locals.mail || {};
 require('./desktop')(app, { db, requireRole, requireArea, wrap, bad, str, getSettings, setSetting, hashPassword });
 require('./bank')(app, { db, requireRole, requireArea, audit, wrap, bad, str, isDate });
 require('./archive')(app, { db, DATA_DIR, DEFAULT_SETTINGS, requireRole, rateLimit, audit, wrap, bad, str, verifyPassword, getSettings, setSetting });
-require('./wages')(app, { db, requireRole, requireArea, must, audit, wrap, bad, HttpError, str, round2, isDate, getSettings, ROLE_RANK, newClockPin, hashPassword });
+require('./wages')(app, { db, requireRole, requireArea, must, audit, wrap, bad, HttpError, str, round2, isDate, getSettings, ROLE_RANK, newClockPin, hashPassword, requireLicence });
 // demo mode: the first time, fill the demo records with the made-up business (Sample Trading Co)
 if (DEMO) require('./demo').seed({ db, hashPassword, getSettings, setSetting, computePayroll, payPeriodOf, todayIn, addDays });
 
@@ -807,6 +826,7 @@ app.get('/api/staff/export/:what.csv', requireStaff, wrap((req, res) => {
 // ---------------------------------------------------------------- errors
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
+  if (err instanceof LockedError) return res.status(402).json({ error: err.message, locked: true, ...err.locked });
   if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
   console.error(err);

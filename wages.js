@@ -58,6 +58,7 @@ async function readWorkbook(buf) {
 
 module.exports = function wages(app, h) {
   const { db, requireRole, requireArea, must, audit, wrap, bad, str, getSettings, newClockPin, hashPassword } = h;
+  const requireLicence = h.requireLicence || ((req, res, next) => next());
 
   const staff = () => db.prepare('SELECT id, name, aliases, fnpf_no, bank_account FROM users ORDER BY name').all();
   const namesOf = u => [u.name, ...String(u.aliases || '').split(',')].map(norm).filter(Boolean);
@@ -154,7 +155,8 @@ module.exports = function wages(app, h) {
   }));
 
   // Save: for each person (sheet name) → an existing staff member, a new staff record, another person in the files (same person), or skip.
-  app.post('/api/staff/import/wages', requireArea('payroll', 2), wrap(async (req, res) => {
+  // (it sets pay rates, so it needs Payroll's licence: requireLicence from server.js; looking at a preview doesn't)
+  app.post('/api/staff/import/wages', requireArea('payroll', 2), requireLicence, wrap(async (req, res) => {
     must(req, 'employees', 2); must(req, 'pay_rates', 2);
     const b = req.body || {}, p = await preview(fromBody(b)), choice = b.people || {};
     const dest = {}; // group key → user id

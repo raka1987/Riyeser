@@ -8,7 +8,17 @@ const root = require(path.join(ROOT, 'package.json'));
 const electronVersion = require(path.join(__dirname, 'node_modules', 'electron', 'package.json')).version;
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
-for (const f of ['server.js', 'db.js', 'mailer.js', 'wages.js', 'bank.js', 'desktop.js', 'perms.js', 'archive.js', 'demo.js']) fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f));
+for (const f of ['server.js', 'db.js', 'mailer.js', 'wages.js', 'bank.js', 'desktop.js', 'perms.js', 'archive.js', 'demo.js', 'licence.js', 'signed-licence.js']) fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f));
+// The licence public key (Ed25519), so Payroll only trusts licences Riyeser signed (signed-licence.js). The release
+// workflow fetches it from the licence function's /public-key. Without it (licence signing not switched on yet) the
+// build accepts unsigned licences, as before. It's a public key: nothing secret goes into the build.
+{
+  const key = String(process.env.RIYESER_LICENCE_PUBLIC_KEY || '').trim();
+  if (key) {
+    if (Buffer.from(key, 'base64').length !== 32) throw new Error("RIYESER_LICENCE_PUBLIC_KEY isn't an Ed25519 public key (32 bytes, base64).");
+    fs.writeFileSync(path.join(OUT, 'licence-public-key.txt'), `${key}\n`); console.log('Licence public key built in:', key);
+  } else console.log('No licence public key: this build accepts unsigned licences (licence signing not switched on yet).');
+}
 fs.cpSync(path.join(ROOT, 'public'), path.join(OUT, 'public'), { recursive: true });
 for (const f of ['main.js', 'preload.js']) fs.copyFileSync(path.join(__dirname, f), path.join(OUT, f));
 fs.copyFileSync(path.join(__dirname, 'icon.png'), path.join(OUT, 'icon.png'));

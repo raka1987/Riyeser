@@ -67,9 +67,23 @@ async function go() {
   $$('.modal-bg .x').forEach(x => x.click()); // close any open dialog when changing page
   window.scrollTo(0, 0);
   renderMenu();
+  await drawLicence();
   try { await VIEWS[VIEW].render(); } catch (e) { view().innerHTML = `<div class="error">${esc(e.message)}</div>`; }
 }
 window.addEventListener('hashchange', go);
+
+// ------------------------------------------------------------------ licence (the server decides; this only shows it)
+// Without Payroll's licence: everything can still be seen and printed and the time clock works; new pay runs and
+// pay-rate changes are locked, with what to do and a button to the Riyeser home page.
+let LIC = { licensed: true };
+async function drawLicence() {
+  try { LIC = await api('/api/staff/licence'); } catch { LIC = { licensed: true }; }
+  const b = $('#lic-banner'); if (!b) return;
+  const show = !LIC.licensed || !!LIC.message;
+  b.hidden = !show;
+  b.className = `lic-banner${LIC.licensed ? ' soon' : ''}`;
+  b.innerHTML = show ? `<span>${LIC.licensed ? 'ℹ️' : '🔒'}</span><div class="grow">${esc(LIC.message || '')}</div>${LIC.licensed ? '' : `<a class="btn sm" href="${esc(LIC.home_url)}" target="_blank" rel="noopener">Open Riyeser home</a>`}` : '';
+}
 
 // ------------------------------------------------------------------ generic form helpers
 // def: { n: name, l: label, t: type, o: options, req, step, ph, full, dis }
@@ -609,6 +623,10 @@ async function renderPayroll() {
         runs, { onRow: 1, empty: 'No pay runs yet.' })}</div>
     <div class="panel" id="pr-rules"></div>`;
   bindRows(view(), runs, r => runModal(r.id));
+  if (!LIC.licensed) {   // new pay runs are locked (the server refuses them too); past pay runs stay open to see and print
+    $$('#pr-form input, #pr-form button').forEach(x => { x.disabled = true; });
+    $('#pr-preview').innerHTML = `<p class="small" style="margin:8px 0 0"><b>🔒 ${esc(LIC.message)}</b></p>`;
+  }
   drawPayRules();
   drawExport(runs);
   const adj = {};

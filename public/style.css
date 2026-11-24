@@ -578,3 +578,9 @@ body.tv.has-sponsors main.wrap { padding-bottom: 130px; }
   --display: "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
   --shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px rgba(14,42,71,.08);
 }
+
+/* Payroll's licence: locked (new pay runs and pay rates) or a note, above every page */
+.lic-banner{display:flex;align-items:center;gap:10px;margin:0 0 14px;padding:10px 14px;border-radius:12px;background:#fdecea;border:1px solid #f3b8b1;color:#7a1c12;font-size:.95rem}
+.lic-banner.soon{background:#fff7e6;border-color:#f5d48f;color:#6b4a00}
+.lic-banner .grow{flex:1}
+.lic-banner[hidden]{display:none}
