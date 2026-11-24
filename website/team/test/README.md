@@ -38,3 +38,8 @@
   time goes through free periods: the 31-day limit and Approvals), the Companies list (filters, sorting, pages, CSV
   export logged), Reports (`reports.view`), the work queue, team handover notes and the Riyeser account owner.
   `help-test.js` also checks a "Message from Riyeser" ticket and "Your details". HQ: `../../hq/test-hq-customer.js`.
+- `myphone-test.js`: ☎ My phone for every member against a pretend Supabase: a connected desk phone, no phone (the guide), Show my own
+  password (through `link_my_reveal`, encrypted to a one-off key, taken once), Do not disturb, Report a phone issue (prefilled), Call
+  someone, no extension, Link Plus off, no Link Office yet, an older database, the ways in, phone widths. `phones-test.js` also covers
+  Set up your office phones (5 steps), the Desk phones list's four statuses, Add desk phone through to Online, Replace phone,
+  Troubleshoot and Advanced setup being for admins only; `rules-test.sql` covers `link_my_*` and `name_phone`.

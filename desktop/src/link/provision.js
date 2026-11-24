@@ -8,7 +8,7 @@
 //   Polycom      /polycom/<mac>.cfg (+ <mac>-riyeser.cfg)
 // Settings hold the extension's password, so a file is only given to a phone the owner has assigned to someone, only
 // on the office network, and every fetch is logged (without the password).
-// phone-devices.json: { phones: [{ mac, ext, vendor, model, ip, addedAt, lastSeen, lastFetch }], found: [{ mac, vendor, model, ip, firstSeen, lastSeen }], fetches: [...] }
+// phone-devices.json: { phones: [{ mac, ext, vendor, model, ip, addedAt, lastSeen, lastFetch, label, location, note }], found: [{ mac, vendor, model, ip, firstSeen, lastSeen }], fetches: [...] }
 const http = require('http');
 const { EventEmitter } = require('events');
 const { isPrivate, v4 } = require('./netinfo');
@@ -139,12 +139,23 @@ class Provisioner extends EventEmitter {
     const f = d.found.find((x) => x.mac === m);
     const was = d.phones.find((x) => x.mac === m);
     const p = { mac: m, ext: String(ext), vendor: vendor || (was && was.vendor) || (f && f.vendor) || vendorKey('', m), model: (was && was.model) || (f && f.model) || '',
-      ip: (was && was.ip) || (f && f.ip) || '', addedAt: (was && was.addedAt) || new Date().toISOString(), lastSeen: (was && was.lastSeen) || (f && f.lastSeen) || null, lastFetch: (was && was.lastFetch) || null };
+      ip: (was && was.ip) || (f && f.ip) || '', addedAt: (was && was.addedAt) || new Date().toISOString(), lastSeen: (was && was.lastSeen) || (f && f.lastSeen) || null, lastFetch: (was && was.lastFetch) || null,
+      label: (was && was.label) || '', location: (was && was.location) || '', note: (was && was.note) || '' };
     d.phones = [...d.phones.filter((x) => x.mac !== m), p];
     d.found = d.found.filter((x) => x.mac !== m);
     this.save(d);
     this.log('info', `Phone ${prettyMac(m)} is now extension ${ext} (${this.directory.nameOf(ext)}).`);
     this.emit('assigned', p);
+    return p;
+  }
+  /** A desk phone's name ("Reception"), location (a branch) and a note (e.g. its S/N). Only for a phone given to someone. */
+  label(mac, { name = '', location = '', note = '' } = {}) {
+    const m = normaliseMac(mac); const d = this.data(); const p = d.phones.find((x) => x.mac === m);
+    if (!p) throw new Error('That phone isn\'t given to anyone yet.');
+    const clean = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n);
+    Object.assign(p, { label: clean(name, 40), location: clean(location, 60), note: clean(note, 60) });
+    this.save(d);
+    this.log('info', `Phone ${prettyMac(m)} is now called "${p.label || 'no name'}"${p.location ? ` at ${p.location}` : ''}.`);
     return p;
   }
   /** Stop giving settings to this phone. (It keeps what it already has until reset; change the password to lock it out.) */

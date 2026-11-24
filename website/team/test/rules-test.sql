@@ -1517,6 +1517,172 @@ do $$ begin
 end $$;
 reset role;
 
+-- ===== Riyeser Link: My phone (everyone sees their own extension, phones and password; Do not disturb for themselves)
+reset role;
+insert into auth.users values ('c0c0c0c0-0000-4000-8000-000000000008', 'kai@link.test'), ('c0c0c0c0-0000-4000-8000-000000000009', 'noext@link.test');
+insert into public.members (workspace_id, user_id, display_name, role, extension) values (:'ws_l', 'c0c0c0c0-0000-4000-8000-000000000008', 'Kai Member', 'member', 102),
+  (:'ws_l', 'c0c0c0c0-0000-4000-8000-000000000009', 'No Ext', 'member', null);
+update public.members set extension = 101 where workspace_id = :'ws_l' and user_id = 'c0c0c0c0-0000-4000-8000-000000000001';
+-- a fresh heartbeat: Kai's desk phone (named, with a location, settings fetched) and the owner's
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
+select public.link_office_report(:'ws_l', 'office-0001-abcd', '{"pc_name":"OFFICE-PC","state":"running","addresses":["192.168.1.20"],"sip_port":5060,"licence":{"active":true},
+  "counts":{"calls_made":3},
+  "phones":[{"mac":"001565aabbcc","extension":"101","assigned":true,"registered":true},
+            {"mac":"001565112233","vendor":"Yealink","model":"T31P","extension":"102","assigned":true,"registered":false,"name":"Reception<b>","location":"Head office","note":"S/N BP1","provisioned_at":"2026-11-24T09:00:00Z"},
+            {"mac":"000b82998877","assigned":false}],
+  "extensions":[{"extension":"100","name":"Head office","type":"group","members":2},{"extension":"101","name":"Pat","type":"person"},{"extension":"102","name":"Kai Member","type":"person","dnd":true}]}');
+reset role;
+do $$ begin
+  assert (select name from public.link_office_phones where mac = '001565112233') = 'Receptionb', 'name kept, cleaned';
+  assert (select location from public.link_office_phones where mac = '001565112233') = 'Head office', 'location kept';
+  assert (select provisioned_at from public.link_office_phones where mac = '001565112233') = '2026-11-24T09:00:00Z', 'last settings fetch kept';
+  assert (select counts ->> 'calls_made' from public.link_offices) = '3', 'calls made: a count only';
+end $$;
+-- a member, with only a password (no two-step sign-in), sees their own extension and phone, and no one else's
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000008'); set role authenticated;
+do $$ declare j json; ws uuid := current_setting('test.ws_l')::uuid; begin
+  j := public.link_my_phone(ws);
+  assert j ->> 'extension' = '102', format('my extension: %s', j);
+  assert json_array_length(j -> 'phones') = 1 and (j -> 'phones' -> 0 ->> 'mac') = '001565112233', 'only my phone';
+  assert (j -> 'phones' -> 0 ->> 'name') = 'Receptionb', 'its name';
+  assert j -> 'office' ->> 'address' = '192.168.1.20' and (j -> 'office' ->> 'sip_port')::int = 5060 and (j -> 'office' ->> 'online')::boolean, 'server, port, online';
+  assert (j ->> 'dnd')::boolean, 'my Do not disturb';
+  assert j -> 'first_group' ->> 'name' = 'Head office' and j -> 'first_group' ->> 'extension' = '100', 'first ring group';
+  assert j ->> 'owner_name' = 'Pat', 'who to ask';
+  assert j::text not like '%password%' and j::text not like '%sealed%', 'no passwords';
+  -- the admin tools stay admin-only
+  begin perform public.link_command(ws, 'office-0001-abcd', 'set_dnd', '{"extension":"102","on":false}'); raise exception 'member used link_command';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'name_phone', '{"mac":"001565112233","name":"Mine"}'); raise exception 'member named a phone';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+  begin perform public.link_my_reveal(ws, '{"kty":"RSA","n":"short","e":"AQAB"}'); raise exception 'weak key';
+  exception when others then assert sqlerrm like 'This browser can''t show passwords safely%', sqlerrm; end;
+end $$;
+-- Show my password: the change is for MY extension, whatever else is asked
+select public.link_my_reveal(:'ws_l', jsonb_build_object('kty', 'RSA', 'n', repeat('K', 342), 'e', 'AQAB', 'd', 'PRIVATE', 'extension', '101')) as myrev \gset
+select set_config('test.myrev', :'myrev', false);
+do $$ begin
+  assert (public.link_command_state(current_setting('test.myrev')::uuid) ->> 'status') = 'pending', 'I can follow my own Show';
+end $$;
+reset role;
+do $$ begin
+  assert (select data ->> 'extension' from public.link_office_commands where id = current_setting('test.myrev')::uuid) = '102', 'only my extension';
+  assert (select data -> 'key' ->> 'd' from public.link_office_commands where id = current_setting('test.myrev')::uuid) is null, 'only the public key kept';
+  assert exists (select 1 from public.audit_log where action = 'link.reveal_own' and actor = 'c0c0c0c0-0000-4000-8000-000000000008' and details ->> 'extension' = '102'), 'in the history as link.reveal_own';
+end $$;
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003');
+select public.link_office_done(:'myrev', true, null, 'S2FpUGFzc3dvcmQ=');
+-- someone else in the business can't follow it or take it
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000009'); set role authenticated;
+do $$ begin
+  begin perform public.link_command_state(current_setting('test.myrev')::uuid); raise exception 'another member followed my Show';
+  exception when others then assert sqlerrm like 'That change isn''t one of yours%', sqlerrm; end;
+  begin perform public.link_reveal_take(current_setting('test.myrev')::uuid); raise exception 'another member took my password';
+  exception when others then assert sqlerrm like 'There''s no password waiting for you%', sqlerrm; end;
+  -- no extension: nothing to show or change
+  begin perform public.link_my_reveal(current_setting('test.ws_l')::uuid, jsonb_build_object('kty', 'RSA', 'n', repeat('N', 342), 'e', 'AQAB')); raise exception 'no extension but showed';
+  exception when others then assert sqlerrm like 'You don''t have an extension yet%', sqlerrm; end;
+  begin perform public.link_my_dnd(current_setting('test.ws_l')::uuid, true); raise exception 'no extension but DND';
+  exception when others then assert sqlerrm like 'You don''t have an extension yet%', sqlerrm; end;
+  assert (public.link_my_phone(current_setting('test.ws_l')::uuid) ->> 'extension') is null, 'no extension';
+  assert json_array_length(public.link_my_phone(current_setting('test.ws_l')::uuid) -> 'phones') = 0, 'and no phones';
+end $$;
+-- I take it once
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000008'); set role authenticated;
+do $$ begin
+  assert (public.link_command_state(current_setting('test.myrev')::uuid) ->> 'ready')::boolean, 'ready for me';
+  assert public.link_reveal_take(current_setting('test.myrev')::uuid) = 'S2FpUGFzc3dvcmQ=', 'taken';
+  assert public.link_reveal_take(current_setting('test.myrev')::uuid) is null, 'only once';
+end $$;
+-- one not taken in time expires
+select public.link_my_reveal(:'ws_l', jsonb_build_object('kty', 'RSA', 'n', repeat('L', 342), 'e', 'AQAB')) as myrev2 \gset
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003');
+select public.link_office_done(:'myrev2', true, null, 'TGF0ZQ==');
+reset role;
+update public.link_office_reveals set created_at = now() - interval '6 minutes', expires_at = now() - interval '1 minute' where command_id = :'myrev2';
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000008'); set role authenticated;
+select set_config('test.myrev2', :'myrev2', false);
+do $$ begin assert public.link_reveal_take(current_setting('test.myrev2')::uuid) is null, 'expired: nothing to take'; end $$;
+reset role;
+do $$ begin assert (select sealed from public.link_office_reveals where command_id = current_setting('test.myrev2')::uuid) is null, 'expired copy blanked'; end $$;
+-- my extension changes before I take it: I can't take the old one's password
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000008'); set role authenticated;
+select public.link_my_reveal(:'ws_l', jsonb_build_object('kty', 'RSA', 'n', repeat('M', 342), 'e', 'AQAB')) as myrev3 \gset
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003');
+select public.link_office_done(:'myrev3', true, null, 'T2xkRXh0');
+reset role;
+update public.members set extension = 105 where workspace_id = :'ws_l' and user_id = 'c0c0c0c0-0000-4000-8000-000000000008';
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000008'); set role authenticated;
+select set_config('test.myrev3', :'myrev3', false);
+do $$ begin
+  begin perform public.link_reveal_take(current_setting('test.myrev3')::uuid); raise exception 'took a password for an extension that is not mine any more';
+  exception when others then assert sqlerrm like 'You can''t see this business''s phone passwords any more%', sqlerrm; end;
+end $$;
+reset role;
+update public.members set extension = 102 where workspace_id = :'ws_l' and user_id = 'c0c0c0c0-0000-4000-8000-000000000008';
+-- Do not disturb for myself only
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000008'); set role authenticated;
+select public.link_my_dnd(:'ws_l', false) as mydnd \gset
+reset role;
+select set_config('test.mydnd', :'mydnd', false);
+do $$ begin
+  assert (select data from public.link_office_commands where id = current_setting('test.mydnd')::uuid) = '{"on": false, "extension": "102"}'::jsonb, 'set_dnd for my extension';
+  assert exists (select 1 from public.audit_log where action = 'link.set_dnd_own' and actor = 'c0c0c0c0-0000-4000-8000-000000000008'), 'in the history';
+end $$;
+-- the owner, without two-step sign-in, can show their OWN password, but not anyone else's (admin rules unchanged)
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ declare c uuid; begin
+  c := public.link_my_reveal(current_setting('test.ws_l')::uuid, jsonb_build_object('kty', 'RSA', 'n', repeat('P', 342), 'e', 'AQAB'));
+  assert (public.link_command_state(c) ->> 'kind') = 'reveal_password', 'own Show without two-step';
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'reveal_password', jsonb_build_object('extension', '102', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('P', 342), 'e', 'AQAB')));
+    raise exception 'owner without two-step showed someone else''s';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin assert (select data ->> 'extension' from public.link_office_commands where kind = 'reveal_password' order by created_at desc limit 1) = '101', 'the owner''s own'; end $$;
+-- too many at once from one person
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000008'); set role authenticated;
+do $$ declare i int; begin
+  for i in 1..4 loop perform public.link_my_dnd(current_setting('test.ws_l')::uuid, true); end loop;
+  begin perform public.link_my_dnd(current_setting('test.ws_l')::uuid, true); raise exception 'no limit';
+  exception when others then assert sqlerrm like 'You''ve asked a few times already%', sqlerrm; end;
+end $$;
+-- someone from another business: nothing
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+do $$ begin
+  begin perform public.link_my_phone(current_setting('test.ws_l')::uuid); raise exception 'outsider read my phone';
+  exception when others then assert sqlerrm like 'You''re not in that company%', sqlerrm; end;
+  begin perform public.link_my_dnd(current_setting('test.ws_l')::uuid, true); raise exception 'outsider DND';
+  exception when others then assert sqlerrm like 'You''re not in that company%', sqlerrm; end;
+end $$;
+reset role; set role anon;
+do $$ begin
+  begin perform public.link_my_phone(current_setting('test.ws_l')::uuid); raise exception 'anon read my phone';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+-- name_phone (Desk phones list): owners and admins with two-step sign-in, checked and tidied
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ declare ws uuid := current_setting('test.ws_l')::uuid; c uuid; begin
+  c := public.link_command(ws, 'office-0001-abcd', 'name_phone', '{"mac":"00:15:65:11:22:33","name":" Front counter ","branch":"Head office","note":"S/N BP78459236","extra":"x"}');
+  assert (select data from public.link_office_commands where id = c) = '{"mac": "001565112233", "name": "Front counter", "branch": "Head office", "note": "S/N BP78459236"}'::jsonb, 'tidied';
+  assert exists (select 1 from public.audit_log where action = 'link.name_phone' and details ->> 'name' = 'Front counter'), 'in the history';
+  begin perform public.link_command(ws, 'office-0001-abcd', 'name_phone', '{"mac":"001565112233","name":"x","branch":"Nowhere"}'); raise exception 'unknown branch';
+  exception when others then assert sqlerrm like 'Choose the location from your branches%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'name_phone', json_build_object('mac', '001565112233', 'name', repeat('n', 41))::jsonb); raise exception 'long name';
+  exception when others then assert sqlerrm like 'Give the phone a short name%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'name_phone', '{"mac":"001565112233","name":"<script>"}'); raise exception 'markup in a name';
+  exception when others then assert sqlerrm like 'Give the phone a short name%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'name_phone', '{"mac":"nope","name":"Desk"}'); raise exception 'bad MAC';
+  exception when others then assert sqlerrm like 'That isn''t a MAC address%', sqlerrm; end;
+end $$;
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ begin
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'name_phone', '{"mac":"001565112233","name":"Desk"}'); raise exception 'named without two-step';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+reset role;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

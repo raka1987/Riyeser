@@ -150,6 +150,10 @@
       async linkCommand(ws, office, kind, data) { return ok(await sb.rpc('link_command', { ws, office_id: office, kind, data: data || {} })); },
       async linkCommandState(id) { return ok(await sb.rpc('link_command_state', { command: id })); },
       async linkRevealTake(id) { return ok(await sb.rpc('link_reveal_take', { command: id })); },
+      // My phone (everyone): null = the database hasn't had this release's team-chat.sql yet
+      async linkMyPhone(ws) { try { return ok(await sb.rpc('link_my_phone', { ws })); } catch (e) { if (/PGRST202|Could not find the function|schema cache/i.test(e.message || '')) return null; throw e; } },
+      async linkMyReveal(ws, key) { return ok(await sb.rpc('link_my_reveal', { ws, pub_key: key })); },
+      async linkMyDnd(ws, on) { return ok(await sb.rpc('link_my_dnd', { ws, dnd_on: !!on })); },
       async linkSupport(ws, allow) { return ok(await sb.rpc(allow ? 'link_support_allow' : 'link_support_end', { ws })); },
       async requestRefund(ws, r) { return ok(await sb.rpc('request_refund', { ws, for_what: r.for_what, period: r.period, invoice_ref: r.invoice_ref,
         amount: r.amount, currency: r.currency, reason_category: r.reason_category, explanation: r.explanation, ticket: null })); },
@@ -214,10 +218,10 @@
     const refs = [];
     const lo = { office_id: 'lo-demo', pc_name: 'OFFICE-PC', version: '1.1.0', state: 'running', addresses: ['192.168.1.20'], sip_port: 5060, address_stable: true, pc_mac: '3C:52:82:1A:2B:3C',
       licence: { active: true, state: 'trial', text: 'Free trial · 74 days left' }, first_seen: ago(20000), last_seen: ago(1),
-      counts: { people: 4, groups: 2, phones_assigned: 3, phones_connected: 2, new_phones: 1, calls_in_progress: 0 },
-      phones: [{ mac: '0015654a1b2c', vendor: 'Yealink', model: 'T31P', extension: '101', assigned: true, registered: true, last_registered: ago(0), ip: '192.168.1.31' },
-        { mac: '0015654a1b2d', vendor: 'Yealink', model: 'T33G', extension: '102', assigned: true, registered: true, last_registered: ago(0), ip: '192.168.1.32' },
-        { mac: '000b82c1d2e3', vendor: 'Grandstream', model: 'GRP2601P', extension: '201', assigned: true, registered: false, last_registered: ago(300), ip: '192.168.1.41' },
+      counts: { people: 4, groups: 2, phones_assigned: 3, phones_connected: 2, new_phones: 1, calls_in_progress: 0, calls_made: 12 },
+      phones: [{ mac: '0015654a1b2c', vendor: 'Yealink', model: 'T31P', extension: '101', assigned: true, registered: true, last_registered: ago(0), ip: '192.168.1.31', name: 'Front desk', location: 'Head office', provisioned_at: ago(2000) },
+        { mac: '0015654a1b2d', vendor: 'Yealink', model: 'T33G', extension: '102', assigned: true, registered: true, last_registered: ago(0), ip: '192.168.1.32', name: 'Manager', location: 'Head office', provisioned_at: ago(2000) },
+        { mac: '000b82c1d2e3', vendor: 'Grandstream', model: 'GRP2601P', extension: '201', assigned: true, registered: false, last_registered: ago(300), ip: '192.168.1.41', name: 'Workshop', location: 'Lautoka branch', provisioned_at: ago(2000) },
         { mac: '0015657d8e9f', vendor: 'Yealink', model: 'T31P', extension: null, assigned: false, registered: false, last_registered: null, ip: '192.168.1.44' }],
       extensions: [{ extension: '100', name: 'Head office', type: 'group', members: 2 }, { extension: '101', name: 'You', type: 'person', registered: 1, desk_phones: 1, app_users: 0, dnd: false },
         { extension: '102', name: 'Sam Taylor', type: 'person', registered: 2, desk_phones: 1, app_users: 1, dnd: false }, { extension: '200', name: 'Lautoka branch', type: 'group', members: 2 },
@@ -324,9 +328,12 @@
         setTimeout(async () => {
           const c = loCmds[id]; const ph = (m) => lo.phones.find((x) => x.mac === m); const mac = String(data.mac || '').replace(/[^0-9a-f]/gi, '').toLowerCase();
           const ext = lo.extensions.find((x) => x.extension === String(data.extension) && x.type === 'person');
-          if (kind !== 'unassign_phone' && !ext) { c.status = 'failed'; c.error = `No one has extension ${data.extension} on Riyeser Link Office.`; return; }
+          if (kind !== 'unassign_phone' && kind !== 'name_phone' && !ext) { c.status = 'failed'; c.error = `No one has extension ${data.extension} on Riyeser Link Office.`; return; }
           if (kind === 'assign_phone' || kind === 'add_phone') { const p = ph(mac) || (lo.phones.push({ mac, vendor: { yealink: 'Yealink', grandstream: 'Grandstream', snom: 'Snom', polycom: 'Polycom' }[data.vendor] || '', model: '', ip: null, registered: false, last_registered: null }), ph(mac));
-            Object.assign(p, { assigned: true, extension: ext.extension }); }
+            Object.assign(p, { assigned: true, extension: ext.extension });
+            // in the demo the phone fetches its settings after a few seconds, then connects
+            setTimeout(() => { p.provisioned_at = new Date().toISOString(); }, 4000); setTimeout(() => { p.registered = true; p.last_registered = new Date().toISOString(); }, 9000); }
+          if (kind === 'name_phone') { const p = ph(mac); if (!p || !p.assigned) { c.status = 'failed'; c.error = 'That phone isn\'t given to anyone yet.'; return; } Object.assign(p, { name: data.name || '', location: data.branch || '', note: data.note || '' }); }
           if (kind === 'unassign_phone') { const p = ph(mac); if (!p || !p.assigned) { c.status = 'failed'; c.error = 'That phone isn\'t given to anyone.'; return; } lo.phones = lo.phones.filter((x) => x !== p); }
           if (kind === 'set_dnd') ext.dnd = !!data.on;
           if (kind === 'new_password') loPw[ext.extension] = 'Demo' + Math.random().toString(36).slice(2, 14);
@@ -341,6 +348,12 @@
         return id; },
       async linkCommandState(id) { const c = loCmds[id]; return { ...c, ready: !!c.sealed, sealed: undefined }; },
       async linkRevealTake(id) { const c = loCmds[id]; const s = c.sealed || null; c.sealed = null; return s; },
+      async linkMyPhone() { const mine = String((ppl.find((q) => q[0] === AS) || [])[3] || ''); const x = lo.extensions.find((e) => e.extension === mine);
+        return { now: new Date().toISOString(), calls: true, extension: mine || null, owner_name: 'You', first_group: { extension: '100', name: 'Head office' }, dnd: !!(x && x.dnd),
+          office: { office_id: lo.office_id, pc_name: lo.pc_name, state: lo.state, address: lo.addresses[0], sip_port: lo.sip_port, last_seen: new Date().toISOString(), online: true, licence: lo.licence },
+          phones: lo.phones.filter((p) => p.assigned && p.extension === mine).map((p) => ({ ...p })) }; },
+      async linkMyReveal(w, key) { return this.linkCommand(w, lo.office_id, 'reveal_password', { extension: String((ppl.find((q) => q[0] === AS) || [])[3]), key }); },
+      async linkMyDnd(w, on) { return this.linkCommand(w, lo.office_id, 'set_dnd', { extension: String((ppl.find((q) => q[0] === AS) || [])[3]), on: !!on }); },
       async linkSupport(_w, allow) { loSupport = allow ? Date.now() + 3600e3 : null; return allow ? { until: new Date(loSupport).toISOString() } : null; },
       async requestRefund(_w, r) { const f = { id: 'f' + (refs.length + 1), ref: 'R-' + (1042 + refs.length), ...r, status: 'submitted', created_at: new Date().toISOString() }; refs.unshift(f); return { id: f.id, ref: f.ref }; },
     };
@@ -567,6 +580,7 @@
     'devices.delete': 'unlinked a PC', 'join_request.approved': 'approved a join request', 'join_request.declined': 'declined a join request',
     'link.assign_phone': 'gave a desk phone to someone', 'link.add_phone': 'added a desk phone', 'link.unassign_phone': 'took a desk phone off someone',
     'link.new_password': 'made a new phone password', 'link.set_dnd': 'changed Do not disturb', 'link.reveal_password': 'looked at a phone password (Set up a phone by hand)',
+    'link.reveal_own': 'looked at their own phone password (My phone)', 'link.set_dnd_own': 'changed their own Do not disturb', 'link.name_phone': 'named or moved a desk phone',
     'link.support_allowed': 'let Riyeser help with the phones for an hour', 'link.support_ended': 'ended Riyeser\'s help with the phones',
   };
   function histLine(h) {
@@ -682,6 +696,7 @@
     api.live(S.team.id, onLive);
     await openChannel(first && first.id, false);
     if (params.has('phones') && !S.phonesShown && isAdmin()) { S.phonesShown = true; phonesPage(S.home ? 'home' : 'chat'); }
+    else if ((params.has('myphone') || params.has('phones')) && !S.myShown) { S.myShown = true; S.phonesShown = true; myPhonePage(S.home ? 'home' : 'chat'); }
   }
 
   async function openChannel(id, toChat = true) {
@@ -756,7 +771,7 @@
     return `${/Electron/.test(navigator.userAgent) || DEMO ? '' : '<button class="tohome" id="tohome">← Riyeser home</button>'}<div class="team"><img src="icon.svg" alt=""><div>${S.teams.length > 1
       ? `<select id="tsw" aria-label="Switch team">${S.teams.map((t) => `<option value="${t.id}"${t.id === S.team.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
       : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}${S.team.company_code ? ` · ${esc(S.team.company_code)}` : ''}</small></div></div>
-    <div class="cobar"><button id="coinfo">🏢 Company</button>${isAdmin() ? `<button id="coppl">👥 People</button><button id="coreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button id="cohist">🕘 History</button><button id="cophones">☎ Phones</button>` : ''}<button id="cosec">🔐 Security</button></div>
+    <div class="cobar"><button id="coinfo">🏢 Company</button>${isAdmin() ? `<button id="coppl">👥 People</button><button id="coreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button id="cohist">🕘 History</button><button id="cophones">☎ Desk phones</button>` : ''}<button id="comyphone">☎ My phone</button><button id="coset">⚙ Settings</button><button id="cosec">🔐 Security</button></div>
     ${needs2step() ? '<button class="mfa-nag" id="mfanag">🔐 Owners and admins need <b>two-step sign-in</b> to approve people and change access. <u>Turn it on (2 minutes)</u></button>' : ''}
     <div class="sidescroll">
       <div class="sec">Channels <button id="addch" aria-label="Add a channel" title="Add a channel">+</button></div>
@@ -799,7 +814,7 @@
     if (S.homeLic === undefined || S.homeLicFor !== t.id) { S.homeLicFor = t.id; S.homeLic = admin ? await api.licence(t.id).catch(() => null) : null; }
     const lic = S.homeLic && S.homeLic.modules ? S.homeLic : null;
     await loadHelp();
-    if (S.view === 'phones') return;   // the Phones page opened meanwhile (riyeser.com/link/?phones)
+    if (S.view === 'phones' || S.view === 'myphone') return;   // the Phones or My phone page opened meanwhile (?phones, ?myphone)
     const unread = Object.values(S.unread || {}).reduce((a, b) => a + (b || 0), 0);
     const calls = lic && lic.modules && lic.modules.calls;
     $app.className = 'acct home'; window.scrollTo(0, 0);
@@ -827,14 +842,15 @@
           <small>Chat with the people you work with. Calls between you, your staff and other locations come with Riyeser Link Plus.</small>
           <span class="pl ok">Chat: free forever</span> ${calls ? licLine(lic, 'calls').replace('>Free trial', '>Calls: free trial').replace('>Paid', '>Calls: paid').replace('>Not active', '>Calls: not active') : '<span class="pl">Calls: free for 90 days</span>'}</div>
           <div class="hbtns"><button class="btn p sm" id="hchat">Open</button><a class="btn sm" href="${REL}RiyeserTeam-Setup.exe">⬇ Download for Windows</a></div></div>
-          ${admin ? `<button class="happ hphones" id="hphones"><span class="hpic" aria-hidden="true">☎</span><div><b>Phones</b><small>Desk phones and Riyeser Link Office: the server address for phones, who has which phone, passwords and Do not disturb.</small>${calls ? licLine(lic, 'calls').replace('>Free trial', '>Link Plus: free trial').replace('>Paid', '>Link Plus: paid').replace('>Not active', '>Link Plus: not active') : ''}</div><span class="go">Open →</span></button>` : ''}</div>
+          ${admin ? `<button class="happ hphones" id="hphones"><span class="hpic" aria-hidden="true">☎</span><div><b>Phones</b><small>Desk phones and Riyeser Link Office: the server address for phones, who has which phone, passwords and Do not disturb.</small>${calls ? licLine(lic, 'calls').replace('>Free trial', '>Link Plus: free trial').replace('>Paid', '>Link Plus: paid').replace('>Not active', '>Link Plus: not active') : ''}</div><span class="go">Open →</span></button>` : ''}
+          <button class="happ hphones" id="hmyphone"><span class="hpic" aria-hidden="true">☎</span><div><b>My phone</b><small>Your extension, your desk phone, and how to set it up. Do not disturb.</small></div><span class="go">Open →</span></button></div>
         <h3 class="hsec">Programs for your PC <small>Start with Riyeser Central: it installs and updates the rest.</small></h3>
         <div class="happs">${APPS.map(([id, n, d, file, key]) => `<a class="happ" href="${REL}${file}"><img src="/assets/apps/${id}.png" alt=""><div><b>${n}</b><small>${d}</small>${admin || key === 'free' ? licLine(lic, key) : ''}</div><span class="go">⬇ Download</span></a>`).join('')}</div>
         <p class="muted small hfoot">Windows 10 and 11. <a href="/help.html">Help Centre</a> · <a href="/pricing.html">Pricing</a></p>
       </main>`;
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
     on('#hchat', () => { S.home = false; render(); });
-    on('#hphones', () => phonesPage('home'));
+    on('#hphones', () => phonesPage('home')); on('#hmyphone', () => myPhonePage('home'));
     on('#hout', async () => { await api.signOut(); S.team = null; gate(); });
     on('#hco', () => companyInfo(false));
     on('#hppl', () => (needs2step() ? security() : peopleAccess()));
@@ -900,7 +916,8 @@
       <div class="mfoot"><button class="btn" id="cl">Close</button><a class="btn p" href="/help.html">Open the Help Centre</a></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }
   // The "Get help" form. ws: the business it's about (none for people without one).
-  function getHelp(ws = S.team ? S.team.id : null) {
+  // pre: { topic, subject, message } to fill in the form (e.g. "Report a phone issue").
+  function getHelp(ws = S.team ? S.team.id : null, pre = null) {
     S.helpShown = true;
     if (params.has('help')) { params.delete('help'); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '')); }
     if (S.tickets === null) return helpOff();
@@ -910,6 +927,7 @@
       <label class="f"><span>Message</span><textarea name="message" rows="5" maxlength="5000" required placeholder="What happened, and what were you trying to do?"></textarea></label>
       <div id="gherr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Send</button></div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
+      if (pre) { const g = d.querySelector('#ghf'); if (pre.topic) g.topic.value = pre.topic; if (pre.subject) g.subject.value = pre.subject; if (pre.message) { g.message.value = pre.message; g.message.focus(); g.message.setSelectionRange(g.message.value.length, g.message.value.length); } }
       d.querySelector('#ghf').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const btn = e.target.querySelector('.btn.p'); btn.disabled = true;
         try { const r = await api.openTicket(ws, String(f.get('topic')), String(f.get('subject')).trim(), String(f.get('message')).trim());
           d.querySelector('.mcard').innerHTML = `<h3>✅ Thanks, we've got it</h3><p>Your request number is <b class="code">${esc(r.ref)}</b>. We'll reply by email and here on your Riyeser home page.</p>
@@ -999,6 +1017,7 @@
     const rq = el.querySelector('#coreq'); if (rq) rq.onclick = () => (needs2step() ? security() : joinRequests());
     const hs = el.querySelector('#cohist'); if (hs) hs.onclick = showHistory;
     const cp = el.querySelector('#cophones'); if (cp) cp.onclick = () => phonesPage('chat');
+    el.querySelector('#comyphone').onclick = () => myPhonePage('chat'); el.querySelector('#coset').onclick = settingsMenu;
     el.querySelector('#cosec').onclick = security;
     const ng = el.querySelector('#mfanag'); if (ng) ng.onclick = security;
     const mg2 = el.querySelector('#mgbr'); if (mg2 && needs2step()) mg2.onclick = security;
@@ -1230,16 +1249,21 @@
     say(`<span class="spin sm"></span> ${esc(sending)}`);
     let id;
     try { id = await api.linkCommand(S.team.id, o.office_id, kind, data); } catch (err) { say(esc(plainError(err)), 'bad'); return null; }
+    return followCmd(id, show, { wantReveal });
+  }
+  // Follow a change already sent (by an admin, or by a member for their own extension) until it's done or failed.
+  async function followCmd(id, show, { wantReveal = false, page = 'phonesPage' } = {}) {
+    const say = (html, cls = '') => { if (show) show(html, cls); };
     const start = Date.now(); let slow = false;
     for (;;) {
       await new Promise((r) => setTimeout(r, Date.now() - start < 20000 ? 1500 : 4000));
       let st; try { st = await api.linkCommandState(id); } catch (err) { say(esc(plainError(err)), 'bad'); return null; }
       if (st.status === 'done' && wantReveal) { if (st.ready) return { id, st }; say('Riyeser Link Office didn\'t send the password back. Press Show again.', 'bad'); return null; }
-      if (st.status === 'done') { say(PH.DONE, 'ok'); setTimeout(() => refreshPhones(), 600); return { id, st }; }
+      if (st.status === 'done') { say(PH.DONE, 'ok'); if (page === 'phonesPage') setTimeout(() => refreshPhones(), 600); return { id, st }; }
       if (st.status === 'failed') { say(esc(st.error || 'That didn\'t work.'), 'bad'); return null; }
       if (!slow && Date.now() - start > 45000) { slow = true; say(`<span class="spin sm"></span> ${esc(PH.SLOW)}`, 'warn'); }
       if (Date.now() - start > (wantReveal ? 5 * 60000 : 10 * 60000)) return null;
-      if (!document.body.contains(document.getElementById('phonesPage'))) return null;
+      if (!document.body.contains(document.getElementById(page))) return null;
     }
   }
   function phMsg(html, cls = '') {
@@ -1269,27 +1293,25 @@
     const offices = (st && st.offices) || [];
     const o = offices.find((x) => x.office_id === S.lo.pick) || offices[0] || null;
     S.lo.office = o;
-    tabIcon(false); document.title = 'Phones · Riyeser';
-    $app.className = 'acct home'; window.scrollTo(0, 0);
-    const people = o ? o.extensions.filter((x) => x.type === 'person') : [];
+    tabIcon(false); document.title = 'Desk phones · Riyeser';
+    $app.className = 'acct home'; const keepY = S.view === 'phones' && document.getElementById('phonesPage') ? window.scrollY : 0;
     const phones = o ? o.phones : [];
     const found = phones.filter((p) => !p.assigned); const desk = phones.filter((p) => p.assigned);
-    const nameFor = (ext) => (o.extensions.find((x) => x.extension === ext) || {}).name || '';
     const dot = (on) => `<span class="dot ${on ? 'on' : ''}" title="${on ? 'Connected' : 'Not connected'}">${on ? '●' : '○'}</span>`;
     const phoneLine = (p) => `<span class="lo-ph">${esc([p.vendor, p.model].filter(Boolean).join(' ') || 'Desk phone')} <small class="mono">${esc(prettyMac(p.mac))}</small></span>`;
     const admin = isAdmin();
     let body = '';
-    if (!admin) body = '<div class="lo-card"><p>Only the business\'s owner and admins can see and change the desk phones.</p></div>';
+    if (!admin) body = '<div class="lo-card"><p>Only the business\'s owner and admins can see and change the desk phones. To set up your own phone, open <b>☎ My phone</b>.</p><button class="btn p" id="phmine">☎ My phone</button></div>';
     else if (!plus) body = `<div class="lo-card lo-up"><h2>⭐ Riyeser Link Plus</h2><p>${PH.UPSELL}</p><p class="muted small">Chat stays free either way.</p></div>`;
-    else if (!o) body = `<div class="lo-card"><h2>Set up desk phones</h2><p>Riyeser Link Office is the office phone system: it runs on one PC at the office, and the office's desk phones connect to it and call each other. Nothing has been set up yet.</p>
-        <ol class="lo-steps">${PH.GUIDE.map((x) => `<li>${x}</li>`).join('')}</ol>
+    else if (!o) body = `${setupHtml(setupSteps([], now))}<div class="lo-card"><h2>Set up desk phones</h2><p>Riyeser Link Office is the office phone system: it runs on one PC at the office, and the office's desk phones connect to it and call each other. Nothing has been set up yet.</p>
         <p>Once it's running, this page shows the address to type into phones, every desk phone and extension, and lets you give phones to people from here.</p>
         <p><a class="btn" href="/help/link.html#desk-phones">📖 Read the guide: Setting up desk phones</a></p>${st === null ? '<p class="muted small">Riyeser is finishing an update to this page. If Riyeser Link Office is already running, its details show here soon.</p>' : ''}</div>`;
     else {
       const [stText, stCls, stWhy] = officeState(o, now);
       const addr = (o.addresses || [])[0] || '';
       const support = st.support && new Date(st.support.until) > Date.now() ? st.support : null;
-      body = `${offices.length > 1 ? `<label class="lo-pick">Riyeser Link Office on <select id="lopick">${offices.map((x) => `<option value="${esc(x.office_id)}"${x === o ? ' selected' : ''}>${esc(x.pc_name || 'a PC')} · seen ${ago(x.last_seen)}</option>`).join('')}</select></label>` : ''}
+      body = `${setupHtml(setupSteps(offices, now))}
+      ${offices.length > 1 ? `<label class="lo-pick">Riyeser Link Office on <select id="lopick">${offices.map((x) => `<option value="${esc(x.office_id)}"${x === o ? ' selected' : ''}>${esc(x.pc_name || 'a PC')} · seen ${ago(x.last_seen)}</option>`).join('')}</select></label>` : ''}
       <section class="lo-card lo-top">
         <div class="lo-addr"><small>Server address to type into phones</small>
           <div class="lo-big"><code id="loaddr">${esc(addr || '—')}</code><span>port <b id="loport">${esc(o.sip_port || 5060)}</b></span><button class="btn sm" id="locopy">Copy</button></div>
@@ -1301,10 +1323,17 @@
           <dt>Licence</dt><dd>${o.licence && o.licence.active ? `<span class="pl ok">${esc(o.licence.text || 'On')}</span>` : `<span class="pl bad">${esc((o.licence && o.licence.text) || 'Riyeser Link Plus isn\'t active on this PC')}</span>`}</dd>
           <dt>Phones</dt><dd>${desk.length} · ${desk.filter((p) => p.registered).length} connected${(o.counts && o.counts.calls_in_progress) ? ` · ${o.counts.calls_in_progress} call${o.counts.calls_in_progress === 1 ? '' : 's'} now` : ''}</dd></dl>
       </section>
-      ${found.length ? `<h3 class="hsec">New phones found <small>Plugged in at the office, not given to anyone yet.</small></h3>
-        <div class="lo-found">${found.map((p) => `<div class="lo-new"><span>☎ <b>${phoneLine(p)}</b><small>${p.ip ? `at ${esc(p.ip)}` : ''}</small></span><button class="btn p sm" data-give="${esc(p.mac)}">Give to…</button></div>`).join('')}</div>` : ''}
+      ${found.length ? `<h3 class="hsec" id="lofoundh">New phones found <small>Plugged in at the office, not given to anyone yet.</small></h3>
+        <div class="lo-found">${found.map((p) => `<div class="lo-new"><span>☎ <b>${phoneLine(p)}</b><small>${p.ip ? `at ${esc(p.ip)}` : ''}</small></span><button class="btn p sm" data-give="${esc(p.mac)}">Give to…</button><button class="btn sm" data-wiz="${esc(p.mac)}">Name it and add…</button></div>`).join('')}</div>` : ''}
+      <div class="lo-dphead"><h3 class="hsec">Desk phones <small>Online · Configuring · Waiting for phone · Offline</small></h3><button class="btn p" id="loaddphone">+ Add desk phone</button></div>
+      ${desk.length ? `<div class="lo-tw"><table class="lo lo-dp"><thead><tr><th>Name</th><th>Extension</th><th>Location</th><th>Status</th><th>Last check-in</th><th><span class="sr">More</span></th></tr></thead><tbody>
+        ${desk.map((p) => `<tr data-mac="${esc(p.mac)}"><td data-l="Name"><span class="lo-nm"><span class="lo-ico" aria-hidden="true">☎</span><span><b>${esc(phoneLabel(p))}</b><small>${p.name ? modelLine(p) : `<span class="mono">${esc(prettyMac(p.mac))}</span>`}</small></span></span></td>
+          <td data-l="Extension"><b>${esc(p.extension)}</b> ${esc(extName(p.extension))}</td><td data-l="Location">${esc(p.location || '—')}</td>
+          <td data-l="Status">${statusPill(p, now)}</td><td data-l="Last check-in">${esc(checkIn(p))}</td>
+          <td class="lo-morec"><button class="btn sm lo-dots" data-more="${esc(p.mac)}" aria-label="More for ${esc(phoneLabel(p))}" title="View setup, troubleshoot, replace…">⋯</button></td></tr>`).join('')}</tbody></table></div>`
+        : '<p class="muted">No desk phones given to anyone yet.</p>'}
       <h3 class="hsec">Extensions <small>Each person's number. Their desk phones and Riyeser Link apps ring together.</small></h3>
-      <div class="lo-tw"><table class="lo"><thead><tr><th>Ext.</th><th>Person or group</th><th>Desk phones</th><th>App users</th><th>Do not disturb</th><th></th></tr></thead><tbody>
+      <div class="lo-tw"><table class="lo lo-ext"><thead><tr><th>Ext.</th><th>Person or group</th><th>Desk phones</th><th>App users</th><th>Do not disturb</th><th></th></tr></thead><tbody>
         ${o.extensions.map((x) => x.type === 'group'
           ? `<tr class="grp"><td data-l="Ext."><b>${esc(x.extension)}</b></td><td data-l="Group">${esc(x.name)} <small class="muted">ring group · ${x.members || 0} ${x.members === 1 ? 'person' : 'people'}</small></td><td data-l="Desk phones" class="muted">—</td><td data-l="App users" class="muted">—</td><td data-l="Do not disturb" class="muted">—</td><td></td></tr>`
           : `<tr><td data-l="Ext."><b>${esc(x.extension)}</b></td><td data-l="Person">${esc(x.name)}</td>
@@ -1312,46 +1341,37 @@
             <td data-l="App users">${x.app_users ? `${dot(true)} ${x.app_users}` : '<span class="muted">0</span>'}</td>
             <td data-l="Do not disturb"><label class="sw"><input type="checkbox" data-dnd="${esc(x.extension)}"${x.dnd ? ' checked' : ''} aria-label="Do not disturb for ${esc(x.name)}"><span></span></label></td>
             <td><button class="btn sm" data-hand="${esc(x.extension)}">Set up a phone by hand</button></td></tr>`).join('')}</tbody></table></div>
-      <h3 class="hsec">Desk phones <small>● connected now · ○ not connected</small></h3>
-      ${desk.length ? `<div class="lo-tw"><table class="lo"><thead><tr><th>Phone</th><th>For</th><th>Connected</th><th>Address</th><th></th></tr></thead><tbody>
-        ${desk.map((p) => `<tr><td data-l="Phone">${phoneLine(p)}</td><td data-l="For"><b>${esc(p.extension)}</b> ${esc(nameFor(p.extension))}</td>
-          <td data-l="Connected">${dot(p.registered)} ${p.registered ? 'Yes' : p.last_registered ? `No · last ${ago(p.last_registered)}` : 'Not yet'}</td><td data-l="Address" class="mono">${esc(p.ip || '—')}</td>
-          <td><button class="btn sm" data-unassign="${esc(p.mac)}">Remove from this person</button></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No desk phones given to anyone yet.</p>'}
-      <form class="lo-card lo-add" id="loadd"><h4>Add a desk phone by MAC address</h4><p class="muted small">For a phone that didn't show up by itself. The MAC address is 12 letters and numbers on a sticker under the phone.</p>
-        <div class="lo-addrow"><input name="mac" required placeholder="MAC address, e.g. 00:15:65:12:34:56" autocomplete="off" spellcheck="false" aria-label="MAC address">
-        <select name="vendor" aria-label="Maker"><option value="">Maker: not sure</option><option value="yealink">Yealink</option><option value="grandstream">Grandstream</option><option value="snom">Snom</option><option value="polycom">Polycom</option></select>
-        <select name="ext" required aria-label="Who is it for?"><option value="">Who is it for?</option>${people.map((x) => `<option value="${esc(x.extension)}">${esc(x.name)} (${esc(x.extension)})</option>`).join('')}</select>
-        <button class="btn p">Add phone</button></div></form>
       <section class="lo-card lo-help-us"><h4>🤝 Let Riyeser help</h4>${support
         ? `<p id="losupport">Riyeser support can see and change your phone set-up until <b>${esc(timeShort(support.until))}</b>. Everything they do is in your 🕘 History.</p><button class="btn" id="losupend">End it now</button>`
         : `<p id="losupport">Stuck? Give Riyeser support access to your phone set-up for 1 hour. They can do what you can on this page, including showing a phone's password to set it up with you. Everything they do is in your 🕘 History, and you can end it early.</p><button class="btn" id="losupon">Let Riyeser help</button>`}</section>`;
     }
-    $app.innerHTML = `<header class="htop"><button class="btn sm" id="phback">← ${S.phonesBack === 'home' ? 'Riyeser home' : 'Back to chat'}</button><b class="hbrand-t">☎ Phones</b><span class="hme">${esc(t.name)}</span></header>
+    $app.innerHTML = `<header class="htop"><button class="btn sm" id="phback">← ${S.phonesBack === 'home' ? 'Riyeser home' : 'Back to chat'}</button><b class="hbrand-t">⚙ Settings › ☎ Desk phones</b><span class="hme">${esc(t.name)}</span></header>
       <main class="hmain" id="phonesPage"><h1>${PH.TITLE}</h1><p class="muted lo-sub">Riyeser Link Office: the office phone system for ${esc(t.name)}.</p>
         ${S.lo.error ? `<div class="err">${esc(S.lo.error)}</div>` : ''}${needs2step() && admin ? '<button class="hnag" id="phmfa">🔐 Turn on <b>two-step sign-in</b> to change the phones. It takes 2 minutes.</button>' : ''}
         ${body}
         <h3 class="hsec">Good to know</h3><div class="lo-tips">${PH.HELP.map(([h, x]) => `<div><b>${h}</b><span>${esc(x)}</span></div>`).join('')}</div>
-        <p class="muted small hfoot"><a href="/help/link.html#desk-phones">Help: Setting up desk phones</a></p></main>`;
+        <p class="muted small hfoot"><a href="/help/link.html#desk-phones">Help: Setting up desk phones</a> · <a href="/help/link.html#own-desk-phone">Set up your own desk phone</a></p></main>`;
+    window.scrollTo(0, keepY);
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
     on('#phback', () => { clearInterval(S.loTimer); S.view = null; if (S.phonesBack === 'home') { S.home = true; renderHome(); } else { S.home = false; render(); } });
-    on('#phmfa', security);
+    on('#phmfa', security); on('#phmine', () => myPhonePage(S.phonesBack));
     on('#locopy', async () => { try { await navigator.clipboard.writeText($app.querySelector('#loaddr').textContent); $app.querySelector('#locopy').textContent = 'Copied'; } catch { /* select it */ } });
+    on('#loaddphone', () => addDeskPhone());
     const pk = $app.querySelector('#lopick'); if (pk) pk.onchange = () => { S.lo.pick = pk.value; drawPhones(); };
     on('#losupon', async () => { if (needs2step()) return security();
       if (!confirm('Let Riyeser support see and change your phone set-up for the next hour?')) return;
       try { await api.linkSupport(t.id, true); phMsg('Riyeser support can help for the next hour.', 'ok'); } catch (err) { phMsg(esc(plainError(err)), 'bad'); } refreshPhones(); });
     on('#losupend', async () => { try { await api.linkSupport(t.id, false); phMsg('Riyeser support can\'t change your phones any more.', 'ok'); } catch (err) { phMsg(esc(plainError(err)), 'bad'); } refreshPhones(); });
+    $app.querySelectorAll('[data-step]').forEach((b) => b.onclick = () => { const s = b.dataset.step;
+      if (s === 'show') S.loStepsOpen = true; if (s === 'hide') S.loStepsOpen = false; if (s === 'test') setTestTicked(true);
+      if (s === 'add') return addDeskPhone();
+      if (s === 'found') { const h = $app.querySelector('#lofoundh'); if (h) h.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+      drawPhones(); });
     $app.querySelectorAll('[data-hand]').forEach((b) => b.onclick = () => byHand(b.dataset.hand));
+    $app.querySelectorAll('[data-more]').forEach((b) => b.onclick = () => phoneMenu(b.dataset.more));
+    $app.querySelectorAll('[data-wiz]').forEach((b) => b.onclick = () => addDeskPhone(b.dataset.wiz));
     $app.querySelectorAll('[data-dnd]').forEach((c) => c.onchange = async () => { const r = await sendCmd('set_dnd', { extension: c.dataset.dnd, on: c.checked }, phMsg); if (!r) c.checked = !c.checked; });
-    $app.querySelectorAll('[data-unassign]').forEach((b) => b.onclick = () => {
-      if (!confirm('Remove this desk phone from its person? Riyeser Link Office stops giving it settings. To lock it out completely, also make a new password for that person.')) return;
-      sendCmd('unassign_phone', { mac: b.dataset.unassign }, phMsg); });
     $app.querySelectorAll('[data-give]').forEach((b) => b.onclick = () => giveTo(b.dataset.give));
-    const f = $app.querySelector('#loadd');
-    if (f) f.onsubmit = async (e) => { e.preventDefault(); const v = new FormData(f); const mac = String(v.get('mac') || '').replace(/[\s:.-]/g, '').toLowerCase();
-      if (!/^[0-9a-f]{12}$/.test(mac)) { phMsg('That isn\'t a MAC address. It\'s 12 letters and numbers, on a sticker under the phone (like 00:15:65:12:34:56).', 'bad'); return; }
-      const data = { mac, extension: String(v.get('ext')) }; if (v.get('vendor')) data.vendor = String(v.get('vendor'));
-      if (await sendCmd('add_phone', data, phMsg)) f.reset(); };
   }
   // A new phone found: choose who it's for.
   function giveTo(mac) {
@@ -1371,12 +1391,13 @@
   function byHand(ext) {
     const o = S.lo.office; const x = o.extensions.find((e) => e.extension === ext) || { name: '' };
     const addr = (o.addresses || [])[0] || ''; let pw = null; let busyShow = false;
-    modal(`<h3>Set up a phone by hand</h3><p><b>${esc(ext)}</b> · ${esc(x.name)}. Type these into the phone's SIP account settings, or into a SIP app such as Linphone or Zoiper.</p>
+    modal(`<h3>Set up a phone by hand <small class="lo-h3s">Advanced setup (manual SIP)</small></h3><p><b>${esc(ext)}</b> · ${esc(x.name)}. Type these into the phone's SIP account settings, or into a SIP app such as Linphone or Zoiper.</p>
       <dl class="lo-sip"><dt>Server address</dt><dd><code>${esc(addr)}</code><button class="btn sm" data-cp="${esc(addr)}">Copy</button></dd>
         <dt>Port</dt><dd><code>${esc(o.sip_port || 5060)}</code></dd>
         <dt>Username</dt><dd><code>${esc(ext)}</code><button class="btn sm" data-cp="${esc(ext)}">Copy</button></dd>
         <dt>Password</dt><dd><code id="pw">••••••••••••••••</code><button class="btn sm" id="show">Show</button><button class="btn sm" id="cppw">Copy</button></dd></dl>
       <p class="muted small">Authentication name: the same as the username. Transport: UDP. The phone must be on the same office network as ${esc(o.pc_name || 'the Riyeser Link Office PC')}. Showing a password is recorded in your company's 🕘 History.</p>
+      ${menusHtml('hmenus')}
       <div id="hstat" class="lo-stat"></div>
       <div class="mfoot"><button class="btn" id="newpw" style="margin-right:auto">Make a new password</button><button class="btn p" id="cl">Done</button></div>`, (d, close) => {
       const say = (h, c) => { const el = d.querySelector('#hstat'); el.className = `lo-stat ${c || ''}`; el.innerHTML = h; };
@@ -1407,6 +1428,354 @@
         const r = await sendCmd('new_password', { extension: ext }, say);
         if (r) say('New password made. Press <b>Show</b> to see it. Restart desk phones that Riyeser Link Office set up, so they get it.', 'ok');
       };
+    });
+  }
+
+  // ------------------------------------------------------------------ Desk phones list, Add desk phone, ⋯ menu (Settings → Desk phones)
+  // A desk phone's status: Online (connected now), Configuring (fetched its settings, not connected yet), Offline (was
+  // connected, isn't now), Waiting for phone (given to someone, hasn't asked for its settings yet). The same rules as
+  // Riyeser Link Office's own screen (desktop/src/renderer/link-text.js phoneStatus).
+  function phoneStatus(p, now = Date.now()) {
+    const t = (x) => (x ? Date.parse(x) : 0); const fetched = t(p.provisioned_at); const reg = t(p.last_registered);
+    if (p.registered) return ['Online', 'ok'];
+    if (fetched && fetched > reg && now - fetched < 15 * 60000) return ['Configuring', 'cfg'];
+    if (reg) return ['Offline', 'bad'];
+    if (fetched) return ['Configuring', 'cfg'];
+    return ['Waiting for phone', 'wait'];
+  }
+  const statusPill = (p, now) => { const [t, c] = phoneStatus(p, now); return `<span class="lo-pill ${c}" data-st="${esc(t)}"><i aria-hidden="true"></i>${esc(t)}</span>`; };
+  const phoneLabel = (p) => p.name || [p.vendor, p.model].filter(Boolean).join(' ') || 'Desk phone';
+  const modelLine = (p) => `${esc([p.vendor, p.model].filter(Boolean).join(' ') || 'Desk phone')} · <span class="mono">${esc(prettyMac(p.mac))}</span>`;
+  const checkIn = (p) => (p.registered ? 'Now' : p.last_registered ? ago(p.last_registered) : 'Never');
+  const SVG_PHONE = '<svg class="pic" viewBox="0 0 64 48" aria-hidden="true"><rect x="6" y="14" width="52" height="30" rx="5" fill="#e0f2f7" stroke="#0e7490" stroke-width="2"/><path d="M10 14c0-6 6-10 22-10s22 4 22 10" fill="none" stroke="#0e7490" stroke-width="5" stroke-linecap="round"/><rect x="14" y="19" width="18" height="9" rx="2" fill="#fff" stroke="#0e7490" stroke-width="1.5"/>'
+    + [0, 1, 2].map((r) => [0, 1, 2].map((c) => `<circle cx="${40 + c * 6}" cy="${21 + r * 7}" r="2" fill="#0e7490"/>`).join('')).join('') + '</svg>';
+  const SVG_SOCKET = '<svg class="pic" viewBox="0 0 64 48" aria-hidden="true"><rect x="8" y="6" width="34" height="36" rx="4" fill="#f8fafc" stroke="#64708a" stroke-width="2"/><path d="M17 18h16v12h-4v4h-8v-4h-4z" fill="#fff" stroke="#64708a" stroke-width="2"/><path d="M25 30c0 8 6 12 14 12h20" fill="none" stroke="#1f62f0" stroke-width="4" stroke-linecap="round"/><text x="25" y="15" font-size="6" text-anchor="middle" fill="#64708a" font-family="sans-serif">LAN</text></svg>';
+  // Where to type the details on common desk phones. Menus differ by model, so this stays general.
+  const PHONE_MENUS = [
+    ['Yealink', 'Type the phone\'s IP address into a web browser (press <b>OK</b> on the phone to see it). Sign in, then go to <b>Account → Register</b>. Turn <b>Line Active</b> on and fill in <b>Register Name</b> and <b>User Name</b> (your extension), <b>Password</b>, and <b>Server Host</b> (the server address) with port 5060.'],
+    ['Grandstream', 'Type the phone\'s IP address into a web browser (it\'s in the phone\'s <b>Status</b> menu). Sign in, then go to <b>Account → Account 1 → General Settings</b>. Set <b>Account Active</b> to Yes, then fill in <b>SIP Server</b>, <b>SIP User ID</b> and <b>Authenticate ID</b> (your extension) and <b>Authenticate Password</b>.'],
+    ['Snom', 'Type the phone\'s IP address into a web browser (it\'s under the phone\'s settings or info menu). Go to <b>Identity 1 → Login</b>, then fill in <b>Account</b> (your extension), <b>Password</b> and <b>Registrar</b> (the server address).'],
+    ['Polycom / Poly', 'Type the phone\'s IP address into a web browser, starting with https:// (it\'s under <b>Settings → Status → Network</b> on the phone). Sign in as Admin, then go to <b>Settings → Lines → Line 1</b>. Fill in <b>Address</b>, <b>Auth User ID</b> (your extension), <b>Password</b>, and <b>Server 1 Address</b> with port 5060.'],
+  ];
+  const menusHtml = (id) => `<details class="lo-menus" id="${id}"><summary>Where do I type these on my phone?</summary>
+    <p class="muted small">Every phone has a settings web page at its own IP address. There, the place for these details is usually called <b>Account</b> or <b>Line</b>, then <b>Register</b>. Menus differ by model, so check the phone's manual if yours looks different.</p>
+    <dl>${PHONE_MENUS.map(([m, t]) => `<dt>${m}</dt><dd>${t}</dd>`).join('')}</dl></details>`;
+  // The office PC's checklist when a phone won't connect.
+  function troubleHtml(p, o, now) {
+    const fresh = o && now - Date.parse(o.last_seen) < OFFLINE_AFTER;
+    return `<div class="lo-trouble"><h4>🛠 Troubleshoot</h4><ol class="lo-check">
+      <li><b>Power.</b> Is the phone's screen on? Many desk phones need power over the network cable (PoE) or their own power adapter.</li>
+      <li><b>Network cable in the LAN port.</b> Plug the cable from the wall (or the network switch) into the phone's <b>LAN</b> port, not its <b>PC</b> port.</li>
+      <li><b>Same office network.</b> The phone must be on the same office network as the Riyeser Link Office PC${o && o.pc_name ? ` (${esc(o.pc_name)})` : ''}. A phone at home or in another building can't reach it yet.</li>
+      <li><b>The office PC is on and online.</b> ${o ? `Riyeser Link Office last reported <b>${ago(o.last_seen)}</b>${fresh ? '.' : '. Check the PC is on, awake and connected to the internet.'}` : 'Riyeser Link Office hasn\'t reported in yet.'}</li>
+      <li><b>Restart the phone.</b> Unplug its power (or the network cable, for PoE) for 10 seconds, then plug it back in.</li></ol>
+      ${p ? `<p class="small muted">Last check-in: <b>${esc(checkIn(p))}</b> · Last settings fetch: <b>${p.provisioned_at ? esc(ago(p.provisioned_at)) : 'never'}</b></p>` : ''}
+      <button class="btn" data-report="${p ? esc(p.mac) : ''}">🛠 Report a phone issue</button></div>`;
+  }
+  // "Report a phone issue": the Get help form, filled in with the phone's details.
+  function reportPhone(p, ext, extra = '') {
+    const [st] = p ? phoneStatus(p) : ['No desk phone'];
+    const lines = [p ? `Phone: ${[p.vendor, p.model].filter(Boolean).join(' ') || 'Desk phone'}${p.name ? ` (${p.name})` : ''}` : 'Phone: none yet',
+      p ? `MAC: ${prettyMac(p.mac)}` : '', p ? `Connected: ${p.registered ? 'yes' : 'no'} (${st}, last check-in ${checkIn(p)})` : '', extra, '', 'What\'s happening: '].filter((x, i) => x || i > 3);
+    getHelp(S.team.id, { topic: 'program', subject: `Phone problem: extension ${ext || '?'}`, message: lines.join('\n') });
+  }
+  const testKey = () => `riyeser.link.testcall.${S.team.id}`;
+  const testTicked = () => { try { return localStorage.getItem(testKey()) === '1'; } catch { return false; } };
+  const setTestTicked = (v) => { try { if (v) localStorage.setItem(testKey(), '1'); else localStorage.removeItem(testKey()); } catch { /* private mode */ } };
+  // "Set up your office phones": 5 steps that tick themselves off from what Riyeser Link Office reports.
+  function setupSteps(offices, now) {
+    const phones = offices.flatMap((x) => x.phones || []); const last = offices[0];
+    const fresh = offices.some((x) => now - Date.parse(x.last_seen) < 10 * 60000);
+    const called = offices.some((x) => x.counts && ((x.counts.calls_made || 0) > 0 || (x.counts.calls_in_progress || 0) > 0));
+    return [
+      { t: 'Install Riyeser Link Office on a PC at the office that stays on.', s: 'Get it from <b>Riyeser Central → Get more apps</b>.', done: offices.length > 0, act: '<a class="btn sm" href="/help/link.html#desk-phones">How to install</a>' },
+      { t: 'Sign in on that PC.', s: last && !fresh ? `Riyeser Link Office last reported ${ago(last.last_seen)}. Is the PC on, and signed in to your Riyeser account?` : 'Open Riyeser Link Office and sign in with your Riyeser account. It brings in your people and extensions.', done: fresh },
+      { t: 'Plug in your desk phones.', s: 'Into a network socket at the office, and into power.', done: phones.length > 0, act: offices.length ? '<button class="btn sm" data-step="add">+ Add desk phone</button>' : '' },
+      { t: 'Give each phone to a person.', s: 'New phones show up below. Choose who each one is for.', done: phones.length > 0 && phones.every((p) => p.assigned), act: phones.some((p) => !p.assigned) ? '<button class="btn sm" data-step="found">New phones found</button>' : '' },
+      { t: 'Make a test call.', s: 'Pick up a desk phone and dial another extension.', done: called || testTicked(), act: offices.length ? '<button class="btn sm" data-step="test">Done</button>' : '' },
+    ];
+  }
+  function setupHtml(steps) {
+    const n = steps.filter((x) => x.done).length;
+    if (n === steps.length && !S.loStepsOpen) return '<div class="lo-setdone" id="losetup"><b>✓ Office phones are set up</b> · <button class="linkbtn" data-step="show">Show the steps</button></div>';
+    return `<section class="lo-card lo-setup" id="losetup"><div class="lo-sethead"><h2>Set up your office phones</h2><span class="muted small">${n} of ${steps.length} done</span></div>
+      <ol class="lo-tick">${steps.map((x, i) => `<li class="${x.done ? 'done' : ''}"><span class="tk" aria-hidden="true">${x.done ? '✓' : i + 1}</span><div><b>${x.t}</b><small>${x.s}</small></div>${!x.done && x.act ? x.act : ''}</li>`).join('')}</ol>
+      ${n === steps.length ? '<button class="linkbtn" data-step="hide">Hide the steps</button>' : ''}</section>`;
+  }
+  // The new phone's progress, live: Waiting for phone → Configuring → Online (checks every few seconds).
+  function liveStatus(box, mac, onOnline) {
+    const stages = ['Waiting for phone', 'Configuring', 'Online'];
+    const draw = () => {
+      const st = S.lo.status || {}; const now = st.now ? Date.parse(st.now) : Date.now();
+      const p = ((S.lo.office || {}).phones || []).find((x) => x.mac === mac);
+      const [t] = p ? phoneStatus(p, now) : ['Waiting for phone']; const cur = t === 'Offline' ? 0 : stages.indexOf(t);
+      box.innerHTML = `<div class="lo-live" data-st="${esc(t)}">${stages.map((s, i) => `<span class="${i < cur ? 'past' : i === cur ? 'now' : ''}">${i < cur ? '✓ ' : ''}${s}</span>`).join('<i aria-hidden="true">→</i>')}</div>`;
+      if (t === 'Online' && onOnline) { const f = onOnline; onOnline = null; f(); }
+      return t;
+    };
+    draw();
+    const tick = async () => {
+      if (!document.body.contains(box)) return;
+      try { S.lo.status = await api.linkStatus(S.team.id); const offs = (S.lo.status && S.lo.status.offices) || [];
+        S.lo.office = offs.find((x) => S.lo.office && x.office_id === S.lo.office.office_id) || offs[0] || S.lo.office; } catch { /* try again */ }
+      if (draw() !== 'Online') setTimeout(tick, 4000);
+    };
+    setTimeout(tick, 2500);
+  }
+  const people = () => ((S.lo.office || {}).extensions || []).filter((x) => x.type === 'person');
+  const extName = (ext) => (((S.lo.office || {}).extensions || []).find((x) => x.extension === ext) || {}).name || '';
+  const branchOptions = (cur) => `<option value="">No location</option>${S.branches.map((b) => `<option${b.name === cur ? ' selected' : ''}>${esc(b.name)}</option>`).join('')}`;
+  // Add desk phone: name → location → extension → identify the handset → plug it in (live status) → test call.
+  function addDeskPhone(preMac) {
+    const o = S.lo.office; if (!o) return; if (needs2step()) return security();
+    const w = { step: 1, name: '', branch: '', ext: '', pick: preMac || '', mac: '', vendor: '', sn: '' };
+    const found = () => (S.lo.office.phones || []).filter((p) => !p.assigned);
+    modal('<div id="wiz"></div>', (d, close) => {
+      const root = d.querySelector('#wiz');
+      const nav = (back, next, nextLabel = 'Next') => `<div class="mfoot">${back ? '<button type="button" class="btn" data-w="back">Back</button>' : '<button type="button" class="btn" data-w="close">Cancel</button>'}${next ? `<button class="btn p">${nextLabel}</button>` : ''}</div>`;
+      const head = (t) => `<p class="lo-wstep">Step ${w.step} of 6</p><h3>${t}</h3>`;
+      const draw = () => {
+        let h = '';
+        if (w.step === 1) h = `${head('Name the phone')}<p>So everyone knows which phone is which, like <b>Reception</b> or <b>Workshop</b>.</p>
+          <label class="f"><span>Phone name</span><input name="name" maxlength="40" required value="${esc(w.name)}" placeholder="e.g. Reception"></label>${nav(false, true)}`;
+        if (w.step === 2) h = `${head('Choose a location')}<p>Which branch is it at?</p><label class="f"><span>Location</span><select name="branch">${branchOptions(w.branch)}</select></label>${nav(true, true)}`;
+        if (w.step === 3) h = `${head('Choose the extension')}<p>Whose number rings on this phone?</p><div class="lo-pickx">${people().map((x) => `<label class="opt"><input type="radio" name="ext" value="${esc(x.extension)}"${w.ext === x.extension ? ' checked' : ''} required> <b>${esc(x.extension)}</b> ${esc(x.name)}</label>`).join('') || '<p class="muted">No one has an extension yet. Give people extensions under ⚙ Branches and extensions.</p>'}</div>
+          <p class="muted small">A shared phone, such as Reception? Give it to the person who sits there, or add a person called Reception on the Riyeser Link Office PC (People tab) and put them in the ring group. Callers can then ring the whole group.</p>${nav(true, true)}`;
+        if (w.step === 4) h = `${head('Identify the handset')}<p>Pick it from the new phones found, or type the details from the label under the phone.</p>
+          <div class="lo-pickx">${found().map((p) => `<label class="opt"><input type="radio" name="pick" value="${esc(p.mac)}"${w.pick === p.mac ? ' checked' : ''}> <b>New phone found:</b> ${modelLine(p)}${p.ip ? ` <small>at ${esc(p.ip)}</small>` : ''}</label>`).join('')}
+          <label class="opt"><input type="radio" name="pick" value=""${!w.pick ? ' checked' : ''}> <b>Type its MAC address</b></label>
+          <label class="opt lo-off" title="Coming with Riyeser Link Cloud"><input type="radio" disabled> Use a setup code <small>Coming with Riyeser Link Cloud.</small></label></div>
+          <div id="wtyped"${w.pick ? ' hidden' : ''}><div class="f2"><label class="f"><span>MAC address</span><input name="mac" value="${esc(w.mac)}" placeholder="e.g. 00:15:65:12:34:56" autocomplete="off" spellcheck="false"></label>
+            <label class="f"><span>S/N <small class="muted">(optional)</small></span><input name="sn" maxlength="40" value="${esc(w.sn)}" autocomplete="off" spellcheck="false"></label></div>
+            <label class="f"><span>Maker</span><select name="vendor"><option value="">Not sure</option>${['yealink', 'grandstream', 'snom', 'polycom'].map((v) => `<option value="${v}"${w.vendor === v ? ' selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}</select></label></div>
+          <details class="lo-label"><summary>Where's the label?</summary><img src="/assets/help/phone-label.webp" alt="The label under a desk phone, showing its MAC and S/N, above the LAN port" loading="lazy">
+            <p class="small muted">Turn the phone over. The label shows <b>MAC</b> (12 letters and numbers, like 00:15:65:12:34:56) and <b>S/N</b> (the serial number). It's often on the box too. Labels differ by model.</p></details>
+          <div id="wstat" class="lo-stat"></div>${nav(true, true, 'Add phone')}`;
+        if (w.step === 5) h = `${head('Plug it in')}<div class="lo-plug">${SVG_SOCKET}${SVG_PHONE}<p>Plug the network cable into the phone's <b>LAN</b> port (not the PC port), and plug in power if it has an adapter. It sets itself up in a minute or two.</p></div>
+          ${w.warn ? `<div class="lo-stat warn">${w.warn}</div>` : ''}<div id="wlive"></div><p class="muted small">Not moving? <button type="button" class="linkbtn" data-w="trouble">Troubleshoot</button></p><div id="wtrouble"></div>
+          <div class="mfoot"><button type="button" class="btn" data-w="close">Close</button><button class="btn p" id="wnext" disabled>Next: test call</button></div>`;
+        if (w.step === 6) h = `${head('Make a test call')}<p>Pick up the new phone and dial another extension${S.lo.office && (S.lo.office.extensions || []).find((x) => x.type === 'group') ? `, or ${esc(S.lo.office.extensions.find((x) => x.type === 'group').extension)} to ring ${esc(S.lo.office.extensions.find((x) => x.type === 'group').name)}` : ''}.</p>
+          <label class="opt"><input type="checkbox" name="ok"${testTicked() ? ' checked' : ''}> The test call worked</label>
+          <div class="mfoot"><button class="btn p">Finish</button></div>`;
+        root.innerHTML = `<form id="wf">${h}</form>`;
+        const f = root.querySelector('#wf'); const i = f.querySelector('input:not([type=radio]):not([type=checkbox]),select'); if (i && w.step < 4) i.focus();
+        f.querySelectorAll('[data-w]').forEach((b) => b.onclick = () => {
+          if (b.dataset.w === 'back') { w.step -= 1; draw(); } else if (b.dataset.w === 'close') { close(); refreshPhones(); }
+          else if (b.dataset.w === 'trouble') { const t = f.querySelector('#wtrouble'); const p = (S.lo.office.phones || []).find((x) => x.mac === w.mac); t.innerHTML = troubleHtml(p, S.lo.office, Date.now()); wireReport(t, w.ext); } });
+        f.querySelectorAll('input[name=pick]').forEach((r) => r.onchange = () => { f.querySelector('#wtyped').hidden = !!f.querySelector('input[name=pick]:checked').value; });
+        if (w.step === 5) liveStatus(f.querySelector('#wlive'), w.mac, () => { const n = f.querySelector('#wnext'); if (n) { n.disabled = false; n.focus(); } });
+        f.onsubmit = async (e) => {
+          e.preventDefault(); const v = new FormData(f);
+          if (w.step === 1) { w.name = String(v.get('name') || '').trim(); if (!w.name) return; }
+          if (w.step === 2) w.branch = String(v.get('branch') || '');
+          if (w.step === 3) { w.ext = String(v.get('ext') || ''); if (!w.ext) return; }
+          if (w.step === 4) {
+            let last = ''; const say = (html, cls) => { last = html; const el = f.querySelector('#wstat'); el.className = `lo-stat ${cls || ''}`; el.innerHTML = html; };
+            w.pick = String(v.get('pick') || ''); w.mac = String(v.get('mac') || ''); w.vendor = String(v.get('vendor') || ''); w.sn = String(v.get('sn') || '').trim();
+            const mac = (w.pick || w.mac).replace(/[\s:.-]/g, '').toLowerCase();
+            if (!/^[0-9a-f]{12}$/.test(mac)) { say('That isn\'t a MAC address. It\'s 12 letters and numbers, on the label under the phone (like 00:15:65:12:34:56).', 'bad'); return; }
+            w.mac = mac; f.querySelector('.btn.p').disabled = true;
+            const data = { mac, extension: w.ext }; if (!w.pick && w.vendor) data.vendor = w.vendor;
+            const r = await sendCmd(w.pick ? 'assign_phone' : 'add_phone', data, say, { sending: 'Adding the phone…' });
+            // the name and location are extras: an older Riyeser Link Office (or database) can't keep them yet, and the phone still works
+            w.warn = r && !(await sendCmd('name_phone', { mac, name: w.name, branch: w.branch, note: w.sn ? `S/N ${w.sn}` : '' }, say, { sending: 'Saving its name and location…' }))
+              ? `The phone is added, but its name and location weren't saved: ${last}` : '';
+            if (!r) { f.querySelector('.btn.p').disabled = false; const t = document.createElement('div'); t.innerHTML = troubleHtml(null, S.lo.office, Date.now()); f.querySelector('#wstat').after(t); wireReport(t, w.ext); return; }
+          }
+          if (w.step === 6) { setTestTicked(!!v.get('ok')); close(); refreshPhones(); return; }
+          w.step += 1; draw();
+        };
+      };
+      draw();
+    });
+  }
+  function wireReport(root, ext) {
+    root.querySelectorAll('[data-report]').forEach((b) => b.onclick = () => {
+      const p = ((S.lo.office || {}).phones || []).find((x) => x.mac === b.dataset.report);
+      reportPhone(p, ext || (p && p.extension), S.lo.office ? `Riyeser Link Office: ${S.lo.office.pc_name || 'office PC'}, last reported ${ago(S.lo.office.last_seen)}` : '');
+    });
+  }
+  // The ⋯ menu for one desk phone.
+  function phoneMenu(mac) {
+    const p = (S.lo.office.phones || []).find((x) => x.mac === mac); if (!p) return;
+    const [st] = phoneStatus(p, Date.parse((S.lo.status || {}).now || '') || Date.now());
+    modal(`<h3>${esc(phoneLabel(p))}</h3><p>${modelLine(p)} · extension <b>${esc(p.extension)}</b> ${esc(extName(p.extension))} · ${statusPill(p)}</p>
+      <div class="lo-acts">${st !== 'Online' ? '<button class="btn" data-m="view">View setup</button><button class="btn" data-m="trouble">Troubleshoot</button>' : '<button class="btn" data-m="view">View setup</button>'}
+        <button class="btn" data-m="replace">Replace phone</button>${isAdmin() ? '<button class="btn" data-m="adv">Advanced setup (manual SIP)</button>' : ''}
+        <button class="btn" data-m="rename">Rename / move location</button><button class="btn" data-m="remove">Remove from this person</button></div>
+      <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelectorAll('[data-m]').forEach((b) => b.onclick = () => { close(); const m = b.dataset.m;
+        if (m === 'view') viewSetup(mac); if (m === 'trouble') troubleshoot(mac); if (m === 'replace') replacePhone(mac);
+        if (m === 'adv') byHand(p.extension); if (m === 'rename') renamePhone(mac); if (m === 'remove') removePhone(mac); });
+    });
+  }
+  function viewSetup(mac) {
+    const o = S.lo.office; const p = o.phones.find((x) => x.mac === mac); if (!p) return;
+    modal(`<h3>Setup: ${esc(phoneLabel(p))}</h3><dl class="lo-kv lo-vs"><dt>Name</dt><dd>${esc(p.name || '—')}</dd><dt>Extension</dt><dd><b>${esc(p.extension)}</b> ${esc(extName(p.extension))}</dd>
+        <dt>Location</dt><dd>${esc(p.location || '—')}</dd><dt>Phone</dt><dd>${modelLine(p)}</dd>${p.note ? `<dt>Note</dt><dd>${esc(p.note)}</dd>` : ''}
+        <dt>Last check-in</dt><dd>${esc(checkIn(p))}</dd><dt>Settings fetched</dt><dd>${p.provisioned_at ? esc(ago(p.provisioned_at)) : 'Not yet'}</dd></dl>
+      <ol class="lo-steps"><li>Plug the network cable into the phone's <b>LAN</b> port, and plug in power if it has an adapter.</li><li>The phone asks the office for its settings (<b>Configuring</b>), then connects (<b>Online</b>). If it hasn't within a few minutes, restart it.</li><li>Make a test call: dial another extension.</li></ol>
+      <div id="vlive"></div><div class="mfoot"><button class="btn" data-t="1">Troubleshoot</button><button class="btn p" id="cl">Close</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = close; d.querySelector('[data-t]').onclick = () => { close(); troubleshoot(mac); };
+      liveStatus(d.querySelector('#vlive'), mac);
+    });
+  }
+  function troubleshoot(mac) {
+    const o = S.lo.office; const p = o.phones.find((x) => x.mac === mac);
+    modal(`<h3>${esc(p ? phoneLabel(p) : 'Desk phone')}: not connecting</h3>${p ? `<p>${modelLine(p)} · ${statusPill(p)}</p>` : ''}${troubleHtml(p, o, Date.parse((S.lo.status || {}).now || '') || Date.now())}
+      <div class="mfoot"><button class="btn p" id="cl">Close</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; wireReport(d, p && p.extension); });
+  }
+  function renamePhone(mac) {
+    const p = S.lo.office.phones.find((x) => x.mac === mac); if (!p) return;
+    modal(`<h3>Rename or move</h3><p>${modelLine(p)}</p><form id="rnf"><label class="f"><span>Phone name</span><input name="name" maxlength="40" value="${esc(p.name || '')}" placeholder="e.g. Reception"></label>
+      <label class="f"><span>Location</span><select name="branch">${branchOptions(p.location || '')}</select></label><div id="rstat" class="lo-stat"></div>
+      <div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Save</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      const say = (h, c) => { const el = d.querySelector('#rstat'); el.className = `lo-stat ${c || ''}`; el.innerHTML = h; };
+      d.querySelector('#rnf').onsubmit = async (e) => { e.preventDefault(); const v = new FormData(e.target);
+        if (await sendCmd('name_phone', { mac, name: String(v.get('name') || '').trim(), branch: String(v.get('branch') || ''), note: p.note || '' }, say)) setTimeout(close, 700); };
+    });
+  }
+  function removePhone(mac) {
+    modal('<h3>Remove this phone from its person?</h3><p>Riyeser Link Office stops giving it settings. To lock it out completely, also make a new password for that person.</p><div class="mfoot"><button class="btn" id="cl">Cancel</button><button class="btn p" id="ok">Remove</button></div>', (d, close) => {
+      d.querySelector('#cl').onclick = close; d.querySelector('#ok').onclick = () => { close(); sendCmd('unassign_phone', { mac }, phMsg); };
+    });
+  }
+  // Replace phone: the new handset keeps the extension, name and location; the old one stops getting its settings.
+  function replacePhone(mac) {
+    const o = S.lo.office; const old = o.phones.find((x) => x.mac === mac); if (!old) return;
+    const found = o.phones.filter((p) => !p.assigned);
+    modal(`<h3>Replace ${esc(phoneLabel(old))}</h3><p>Now: ${modelLine(old)} · extension <b>${esc(old.extension)}</b> ${esc(extName(old.extension))}</p>
+      <form id="rpf"><span class="pkh">The new phone</span><div class="lo-pickx">${found.map((p) => `<label class="opt"><input type="radio" name="pick" value="${esc(p.mac)}"> <b>New phone found:</b> ${modelLine(p)}</label>`).join('')}
+        <label class="opt"><input type="radio" name="pick" value="" checked> <b>Type its MAC address</b></label></div>
+        <div class="f2" id="rptyped"><label class="f"><span>MAC address</span><input name="mac" placeholder="e.g. 00:15:65:12:34:56" autocomplete="off" spellcheck="false"></label>
+          <label class="f"><span>Maker</span><select name="vendor"><option value="">Not sure</option><option value="yealink">Yealink</option><option value="grandstream">Grandstream</option><option value="snom">Snom</option><option value="polycom">Polycom</option></select></label></div>
+        <div class="lo-warn" id="rpprev">The old phone (MAC ${esc(prettyMac(old.mac))}) stops getting its settings now; it keeps working until it's restarted or reset. To lock it out straight away, also make a new password.
+          The new phone keeps extension <b>${esc(old.extension)}</b>${old.name ? `, the name <b>${esc(old.name)}</b>` : ''}${old.location ? ` and the location <b>${esc(old.location)}</b>` : ''}.</div>
+        <div id="rpstat" class="lo-stat"></div><div id="rplive"></div>
+        <div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p" id="rpgo">Replace phone</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = () => { close(); refreshPhones(); };
+      const f = d.querySelector('#rpf');
+      f.querySelectorAll('input[name=pick]').forEach((r) => r.onchange = () => { f.querySelector('#rptyped').hidden = !!f.querySelector('input[name=pick]:checked').value; });
+      const say = (h, c) => { const el = d.querySelector('#rpstat'); el.className = `lo-stat ${c || ''}`; el.innerHTML = h; };
+      f.onsubmit = async (e) => { e.preventDefault(); const v = new FormData(f);
+        const picked = String(v.get('pick') || ''); const nm = (picked || String(v.get('mac') || '')).replace(/[\s:.-]/g, '').toLowerCase();
+        if (!/^[0-9a-f]{12}$/.test(nm)) { say('That isn\'t a MAC address. It\'s 12 letters and numbers, on the label under the phone (like 00:15:65:12:34:56).', 'bad'); return; }
+        if (nm === old.mac) { say('That\'s the same phone. Choose the new one.', 'bad'); return; }
+        d.querySelector('#rpgo').disabled = true;
+        const data = { mac: nm, extension: old.extension }; if (!picked && v.get('vendor')) data.vendor = String(v.get('vendor'));
+        const ok = await sendCmd('unassign_phone', { mac: old.mac }, say, { sending: 'Taking the old phone off…' })
+          && await sendCmd(picked ? 'assign_phone' : 'add_phone', data, say, { sending: 'Giving the new phone the same extension…' });
+        if (!ok) { d.querySelector('#rpgo').disabled = false; return; }
+        if (old.name || old.location) await sendCmd('name_phone', { mac: nm, name: old.name || '', branch: old.location || '', note: '' }, say, { sending: 'Keeping its name and location…' });   // an extra: the phone works either way
+        say(`Replaced. Plug in the new phone: it keeps extension ${esc(old.extension)}.`, 'ok'); d.querySelector('#rpgo').hidden = true; d.querySelector('#cl').textContent = 'Close';
+        liveStatus(d.querySelector('#rplive'), nm);
+      };
+    });
+  }
+
+  // ------------------------------------------------------------------ ☎ My phone (everyone): my extension, my desk phone, how to set it up
+  async function myPhonePage(back) {
+    S.myBack = back || S.myBack || (S.home ? 'home' : 'chat'); S.view = 'myphone';
+    S.my = { data: undefined, pw: null, shown: false };
+    await loadMyPhone(); drawMyPhone();
+    clearInterval(S.myTimer); S.myTimer = setInterval(async () => {
+      if (!document.getElementById('myPhonePage')) { clearInterval(S.myTimer); return; }
+      if (document.hidden || document.querySelector('.modal') || S.my.busy) return;
+      await loadMyPhone(); drawMyPhone();
+    }, 20000);
+  }
+  async function loadMyPhone() { try { S.my.data = await api.linkMyPhone(S.team.id); S.my.error = null; } catch (e) { S.my.error = plainError(e); } }
+  function drawMyPhone() {
+    const t = S.team; const d = S.my.data || {}; const me = S.people.find((p) => p.user_id === S.user.id) || {};
+    const ext = d.extension != null ? String(d.extension) : (S.my.data === null && me.extension ? String(me.extension) : null);
+    const owner = d.owner_name || (S.people.find((p) => p.role === 'owner') || {}).display_name || 'the business owner';
+    const admin = isAdmin(); const calls = d.calls != null ? !!d.calls : !!(S.features && S.features.calls);
+    const o = d.office || null; const phones = d.phones || [];
+    const grp = d.first_group || (S.branches[0] && S.branches[0].extension ? { extension: String(S.branches[0].extension), name: S.branches[0].name } : null);
+    const addr = (o && o.address) || '';
+    tabIcon(false); document.title = 'My phone · Riyeser'; $app.className = 'acct home';
+    const ready = calls && o;
+    $app.innerHTML = `<header class="htop"><button class="btn sm" id="myback">← ${S.myBack === 'home' ? 'Riyeser home' : 'Back to chat'}</button><b class="hbrand-t">☎ My phone</b><span class="hme">${esc(t.name)}</span></header>
+      <main class="hmain" id="myPhonePage"><h1>My phone</h1>${S.my.error ? `<div class="err">${esc(S.my.error)}</div>` : ''}
+        <section class="lo-card my-ext"><small>Your extension</small>${ext ? `<p class="my-big" id="myext">Others call you by dialling <b>${esc(ext)}</b></p>`
+          : `<p id="myext">You don't have an extension yet. Ask ${esc(owner)} to give you one in People &amp; access.</p>`}</section>
+        ${!ready ? `<section class="lo-card" id="mynone">${admin ? `<p>Your business hasn't set up office phones yet.</p><button class="btn p" id="mytophones">☎ Open the Phones set-up guide</button>`
+          : `<p>Your business hasn't set up office phones yet. Ask ${esc(owner)}.</p>`}</section>` : `
+        <h3 class="hsec">Your desk phone${phones.length > 1 ? 's' : ''}</h3>
+        ${phones.length ? `<div class="hplan my-phones">${phones.map((p) => `<div><span>${SVG_PHONE}<span><b>${esc(phoneLabel(p))}</b><small>${modelLine(p)}</small></span></span>
+          <span class="my-st"><span class="dot ${p.registered ? 'on' : ''}">${p.registered ? '●' : '○'}</span> ${p.registered ? 'connected' : 'not connected'}<small>${p.registered ? 'now' : p.last_registered ? `last seen ${ago(p.last_registered)}` : 'not seen yet'}</small></span></div>`).join('')}</div>`
+          : '<p class="muted" id="mynophone">No desk phone yet.</p>'}
+        <section class="lo-card my-guide" id="myguide"><h2>Set up my desk phone</h2>
+          <ol class="lo-steps my-steps">
+            <li><div><div class="my-pics">${SVG_SOCKET}${SVG_PHONE}</div>Plug the phone into a network socket at the office (and into power, if it has an adapter).</div></li>
+            <li><div>Most phones set themselves up: your manager will see it appear and give it to you.</div></li>
+            <li><div>If it doesn't, type these into the phone's account settings:
+              ${ext ? `<dl class="lo-sip"><dt>Server address</dt><dd><code id="myaddr">${esc(addr || '—')}</code><button class="btn sm" data-cp="${esc(addr)}">Copy</button></dd>
+                <dt>Port</dt><dd><code id="myport">${esc(o.sip_port || 5060)}</code></dd>
+                <dt>Username / Account</dt><dd><code id="myuser">${esc(ext)}</code><button class="btn sm" data-cp="${esc(ext)}">Copy</button></dd>
+                <dt>Password</dt><dd><code id="mypw">${S.my.shown && S.my.pw ? esc(S.my.pw) : '••••••••••••••••'}</code><button class="btn sm" id="myshow">${S.my.shown && S.my.pw ? 'Hide' : 'Show'}</button><button class="btn sm" id="mycppw">Copy</button></dd></dl>
+                <div id="mystat" class="lo-stat"></div>
+                <p class="muted small">Your password is kept on the office PC, never online. Showing it is recorded in your business's history.</p>`
+                : '<p class="muted">You need an extension first.</p>'}
+              ${menusHtml('mymenus')}</div></li>
+            <li><div>Test it: dial another extension${grp ? `, e.g. <b>${esc(grp.extension)}</b> for ${esc(grp.name)}` : ''}.</div></li>
+          </ol></section>
+        ${ext ? `<section class="lo-card my-dnd"><label class="sw"><input type="checkbox" id="mydnd"${d.dnd ? ' checked' : ''} aria-label="Do not disturb"><span></span></label>
+          <div><b>Do not disturb</b><small>Your phones don't ring, and callers hear busy. You can also dial *78 (on) and *79 (off) on your desk phone.</small></div></section>` : ''}`}
+        <section class="lo-card"><h4>📞 Calls from this app</h4><p>You can also call people and branches from Riyeser Link itself, with Riyeser Link Plus.</p>${calls ? '<button class="btn" id="mycall">📞 Call someone</button>' : ''}</section>
+        <div class="lo-warn my-sos"><b>🚫 No emergency calls.</b> Office phones can only call each other. Keep a mobile or normal phone line for emergency calls (000, 111, 112, 911).</div>
+        <h3 class="hsec">Something wrong?</h3><div class="hhelp"><button class="btn" id="myreport">🛠 Report a phone issue</button><a class="btn" href="/help/link.html#own-desk-phone">📖 Help: Set up your own desk phone</a></div>
+      </main>`;
+    const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
+    on('#myback', () => { clearInterval(S.myTimer); S.view = null; S.my.pw = null; if (S.myBack === 'home') { S.home = true; renderHome(); } else { S.home = false; render(); } });
+    on('#mytophones', () => { clearInterval(S.myTimer); phonesPage(S.myBack); });
+    on('#mycall', dialPad);
+    on('#myreport', () => reportPhone(phones[0], ext, o ? `Riyeser Link Office last reported ${ago(o.last_seen)}` : ''));
+    $app.querySelectorAll('[data-cp]').forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.cp); b.textContent = 'Copied'; } catch { /* select it */ } });
+    const say = (h, c) => { const el = $app.querySelector('#mystat'); if (el) { el.className = `lo-stat ${c || ''}`; el.innerHTML = h; } };
+    const show = async () => {
+      if (S.my.pw) return S.my.pw; if (S.my.busy) return null; S.my.busy = true;
+      try {
+        const { kp, jwk } = await oneOffKey();
+        say(`<span class="spin sm"></span> ${esc('Asking Riyeser Link Office for your password…')}`);
+        const id = await api.linkMyReveal(t.id, jwk);
+        const r = await followCmd(id, say, { wantReveal: true, page: 'myPhonePage' });
+        if (!r) return null;
+        const sealed = await api.linkRevealTake(id);
+        if (!sealed) { say('That password was already shown, or 5 minutes have passed. Press Show again.', 'bad'); return null; }
+        S.my.pw = await openSealed(kp, sealed); S.my.shown = true;
+        $app.querySelector('#mypw').textContent = S.my.pw; $app.querySelector('#myshow').textContent = 'Hide';
+        say('Shown to you only, on this screen. It isn\'t kept anywhere online.', 'ok');
+        return S.my.pw;
+      } catch (err) { say(esc(plainError(err)), 'bad'); return null; } finally { S.my.busy = false; }
+    };
+    on('#myshow', async () => {
+      if (S.my.pw && S.my.shown) { S.my.shown = false; $app.querySelector('#mypw').textContent = '••••••••••••••••'; $app.querySelector('#myshow').textContent = 'Show'; return; }
+      if (S.my.pw) { S.my.shown = true; $app.querySelector('#mypw').textContent = S.my.pw; $app.querySelector('#myshow').textContent = 'Hide'; return; }
+      await show(); });
+    on('#mycppw', async () => { const v = await show(); if (!v) return; try { await navigator.clipboard.writeText(v); $app.querySelector('#mycppw').textContent = 'Copied'; } catch { /* shown instead */ } });
+    const dn = $app.querySelector('#mydnd');
+    if (dn) dn.onchange = async () => {
+      S.my.busy = true; const want = dn.checked;
+      try { const id = await api.linkMyDnd(t.id, want); const r = await followCmd(id, phMsg, { page: 'myPhonePage' });
+        if (r) { phMsg(want ? 'Do not disturb is on.' : 'Do not disturb is off.', 'ok'); if (S.my.data) S.my.data.dnd = want; } else dn.checked = !want; }
+      catch (err) { phMsg(esc(plainError(err)), 'bad'); dn.checked = !want; } finally { S.my.busy = false; }
+    };
+  }
+  // ⚙ Settings in Riyeser Link: everything about you and the business in one place.
+  function settingsMenu() {
+    const admin = isAdmin();
+    modal(`<h3>⚙ Settings</h3><div class="lo-acts lo-set">
+      <button class="btn" data-s="myphone"><b>☎ My phone</b><small>Your extension, your desk phone and how to set it up</small></button>
+      ${admin ? '<button class="btn" data-s="phones"><b>☎ Desk phones</b><small>Every desk phone in the business: add, replace, troubleshoot</small></button>' : ''}
+      <button class="btn" data-s="sec"><b>🔐 Security</b><small>Two-step sign-in</small></button>
+      <button class="btn" data-s="co"><b>🏢 Company</b><small>Business details and Company ID</small></button></div>
+      <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { close(); const s = b.dataset.s; const back = S.home ? 'home' : 'chat';
+        if (s === 'myphone') myPhonePage(back); if (s === 'phones') phonesPage(back); if (s === 'sec') security(); if (s === 'co') companyInfo(false); });
     });
   }
 
@@ -1637,6 +2006,6 @@
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
   setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);
-  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, requestRefund, phonesPage };
+  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, requestRefund, phonesPage, myPhonePage, settingsMenu };
   start();
 })();

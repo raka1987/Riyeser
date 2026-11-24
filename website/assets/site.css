@@ -574,3 +574,4 @@ section.finder { padding: 0; }
 .h3slide.on > img { transform: scale(1.06); }
 .h3dots { gap: 6px; } .h3dots button { font-size: 12px; padding: 4px 10px 4px 8px; }
 @media (prefers-reduced-motion: reduce) { .h3slide > img, .h3slide.on > img { transition: none; transform: none; } }
+.helpimg { display: block; width: 100%; max-width: 560px; height: auto; border-radius: 12px; border: 1px solid #e3e8f1; margin: 10px 0; }

@@ -355,6 +355,18 @@ test('wording: status line, licence message, address notice, emergency note', ()
   assert.strictEqual(T.EMERGENCY, 'Internal calls only. These phones can\'t call emergency services — keep a mobile or normal phone line for that.');
   assert.strictEqual(T.counts({ phones: 1, onCalls: 0 }), '1 phone connected · no calls right now');
   assert.strictEqual(T.duration(125), '2 min 5 s');
+  // Set up your office phones (5 steps) and the desk phone status pills
+  const st = (x) => T.setupSteps(x).map((y) => y.done);
+  assert.deepStrictEqual(st({ phones: [], found: [], recent: [] }), [true, false, false, false, false]);
+  assert.deepStrictEqual(st({ signedIn: true, phones: [], found: [{ mac: 'a' }], recent: [] }), [true, true, true, false, false]);
+  assert.deepStrictEqual(st({ source: 'team', phones: [{ mac: 'a' }], found: [], recent: [{ result: 'answered' }] }), [true, true, true, true, true]);
+  assert.strictEqual(T.setupSteps({})[0].text, 'Install Riyeser Link Office on a PC at the office that stays on.');
+  const now = Date.parse('2026-11-24T10:00:00Z');
+  assert.deepStrictEqual(T.phoneStatus({ registered: true }, now), ['Online', 'ok']);
+  assert.deepStrictEqual(T.phoneStatus({ provisioned_at: '2026-11-24T09:58:00Z' }, now), ['Configuring', 'cfg']);
+  assert.deepStrictEqual(T.phoneStatus({ last_registered: '2026-11-24T08:00:00Z', provisioned_at: '2026-11-24T07:00:00Z' }, now), ['Offline', 'bad']);
+  assert.deepStrictEqual(T.phoneStatus({}, now), ['Waiting for phone', 'wait']);
+  assert.strictEqual(T.howSetsUp('Bo Example'), 'How Bo Example sets up their phone');
   const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'link.html'), 'utf8');
   assert.ok(html.includes('Riyeser Link Office') && html.includes('Your office phone system'));
   assert.ok(html.includes('<b>Internal calls only.</b> These phones can\'t call emergency services — keep a mobile or normal phone line for that.'));

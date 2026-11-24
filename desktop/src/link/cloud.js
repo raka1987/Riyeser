@@ -38,7 +38,8 @@ function buildPayload(status, { officeId, pcName = '', version = '', adapters = 
     ...(status.phones || []).map((p) => {
       const on = p.state === 'connected';
       return { mac: p.mac, vendor: VENDORS[p.vendor] || '', model: p.model || '', extension: p.ext, assigned: true, registered: on,
-        last_registered: on ? iso(now) : (lastReg[p.mac] || null), ip: p.ip || null };
+        last_registered: on ? iso(now) : (lastReg[p.mac] || null), ip: p.ip || null,
+        name: p.label || '', location: p.location || '', note: p.note || '', provisioned_at: p.lastFetch || null };
     }),
     ...(status.found || []).map((f) => ({ mac: f.mac, vendor: VENDORS[f.vendor] || '', model: f.model || '', extension: null, assigned: false, registered: false,
       last_registered: null, ip: f.ip || null })),
@@ -57,7 +58,8 @@ function buildPayload(status, { officeId, pcName = '', version = '', adapters = 
     licence: { active: !!lic.active, state: lic.state || '', text: lic.text || lic.message || '' },
     counts: { people: (status.people || []).length, groups: (status.groups || []).length, phones_assigned: (status.phones || []).length,
       phones_connected: phones.filter((p) => p.registered).length, new_phones: (status.found || []).length,
-      app_users: regs.filter((r) => r.device === 'app').length, calls_in_progress: (status.inProgress || []).length },
+      app_users: regs.filter((r) => r.device === 'app').length, calls_in_progress: (status.inProgress || []).length,
+      calls_made: (status.recent || []).filter((c) => c.result === 'answered').length },   // a count only: "Make a test call" ticks itself
     phones, extensions,
   };
 }
@@ -86,6 +88,11 @@ function applyCommand(service, cmd) {
         person();
         const vendor = VENDOR_KEYS.includes(d.vendor) ? d.vendor : undefined;
         service.assign(mac(), ext, vendor); what = `added desk phone ${d.mac} for extension ${ext}`; break;
+      }
+      case 'name_phone': {
+        const m = mac();
+        if (!service.provisionerData().phones.some((p) => p.mac === m)) throw new Error('That phone isn\'t given to anyone yet.');
+        service.label(m, { name: d.name, location: d.branch, note: d.note }); what = `named phone ${d.mac} "${String(d.name || '').slice(0, 40)}"`; break;
       }
       case 'unassign_phone': {
         const m = mac();

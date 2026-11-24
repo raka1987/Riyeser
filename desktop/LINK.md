@@ -116,6 +116,24 @@ So even the database, its backups, Riyeser staff and anyone watching the network
 
 **The status screen.** It now opens on a **☎ Phones** tab. The server address is big at the top with **Copy**, next to two buttons, **Set up a phone by hand** and **+ Add a desk phone**, then the new phones found and the desk phones. People, Recent calls and Settings are the other tabs.
 
+## My phone, the Desk phones list and Add desk phone (1.1.1)
+
+**☎ My phone (everyone).** Every member sees their own phone at **riyeser.com/link → ☎ My phone** (the chat sidebar, the **My phone** tile on Riyeser home, **⚙ Settings → My phone**, or `?myphone`). It shows "Others call you by dialling 101", their desk phone(s) from the latest heartbeat, a numbered set-up guide (server address, port 5060, username = extension, password with **Show**), "Where do I type these on my phone?" for Yealink, Grandstream, Snom and Polycom, **Do not disturb**, **Call someone**, the no-emergency-calls note and **Report a phone issue** (Get help, filled in). The database side is the section *Riyeser Link: My phone* in `team-chat.sql`:
+
+- `link_my_phone(ws)`: my extension, my phones, the office address and port, online or not, the licence, the first ring group. Never a password.
+- `link_my_reveal(ws, pub_key)`: **Show** for my own extension only, with the same one-off RSA key design as above. Members don't need two-step sign-in for their own extension; admins still need it for anyone else's. In the history as `link.reveal_own`. `link_command_state` and `link_reveal_take` also let the asker follow and take it, but only while it's still their extension.
+- `link_my_dnd(ws, on)`: Do not disturb for my own extension (`link.set_dnd_own`).
+
+**Settings → Desk phones (owners and admins).** The Phones page is also **⚙ Settings → Desk phones** (`?phones` still works; members who open it get My phone). At the top, **Set up your office phones** has 5 steps that tick themselves off: installed (an office has reported), signed in (reported in the last 10 minutes), phones plugged in, every phone given to someone, and a test call (`counts.calls_made`, the number of answered calls kept on the PC, or a tick by hand kept in that browser). Then the **Desk phones** list: name, extension, location, status and last check-in, with **+ Add desk phone** above it and a **⋯** menu (View setup, Troubleshoot, Replace phone, Advanced setup (manual SIP), Rename / move location, Remove).
+
+- **Statuses:** **Online** (connected now), **Configuring** (fetched its settings but not connected yet), **Offline** (was connected, isn't now), **Waiting for phone** (given to someone, hasn't asked for its settings yet). Each phone in the heartbeat now carries `provisioned_at` (its last settings fetch, from `phone-devices.json` `lastFetch`).
+- **Names and locations:** a new change, `name_phone` {mac, name, branch, note}, stores a phone's name (up to 40 letters), its location (one of the business's branches) and a note (the S/N from Add desk phone) in `phone-devices.json` (`label`, `location`, `note`). They come back in the heartbeat as `name`, `location` and `note`. Admins only, checked by `link_command`.
+- **Add desk phone:** name → location → extension → identify the handset (a new phone found, or its MAC and optional S/N, with **Where's the label?**) → plug it in (live **Waiting for phone → Configuring → Online**) → test call. It sends `assign_phone` or `add_phone`, then `name_phone`.
+- **Replace phone:** sends `unassign_phone` for the old MAC, then `add_phone`/`assign_phone` for the new one on the same extension, then `name_phone` with the same name and location. The old phone keeps working until it's restarted or reset; make a new password to lock it out straight away.
+- **On the office PC:** the ☎ Phones tab has the same 5 steps (from its own state), the same names, locations and status pills, **Rename / location** and **Replace phone** (in-page dialogs, never `confirm()`), and "How [name] sets up their phone" next to each person.
+
+**Setup codes (planned, not built).** Codes typed on the handset need cloud provisioning, so they wait for Riyeser Link Cloud. Installer-issued codes are also later. For now **Add desk phone** shows "Use a setup code" switched off, marked "Coming with Riyeser Link Cloud".
+
 ## The Windows Firewall rule
 
 Riyeser Link Office's installer adds **one** inbound Windows Firewall rule, named "Riyeser Link Office". The rule:

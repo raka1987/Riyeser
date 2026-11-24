@@ -73,3 +73,16 @@ input { flex: 1 1 200px; }
 .hero .acts .btn { padding: 10px 16px; font-size: 15px; }
 .cloudline { font-size: 13px; }
 @media (max-width: 640px) { .hero { grid-template-columns: 1fr; } .hero .addr code { font-size: 24px; } }
+/* Set up your office phones (1.1.1), status pills, in-page forms */
+.setup .steps { list-style: none; padding: 0; margin: 6px 0 0; display: grid; gap: 6px; }
+.setup .steps li { display: flex; gap: 10px; align-items: center; }
+.setup .tick { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line); display: inline-grid; place-items: center; font-size: 13px; font-weight: 700; flex: none; }
+.setup li.done .tick { background: var(--ok); border-color: var(--ok); color: #fff; }
+.setup li.done .grow { color: var(--muted); }
+.okt { color: var(--ok); }
+.pill.bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.pill.cfg { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+.acts2 { display: flex; flex-wrap: wrap; gap: 4px; }
+dialog.askform { border: 0; border-radius: 14px; padding: 20px 22px; width: min(480px, calc(100% - 32px)); box-shadow: 0 20px 50px rgba(0,0,0,.35); background: var(--panel); color: var(--text); }
+dialog.askform h3 { margin: 0 0 8px; } dialog.askform label { display: grid; gap: 4px; margin: 10px 0; } dialog.askform label span { font-weight: 600; font-size: 13px; }
+dialog.askform input { flex: none; } .row.end { justify-content: flex-end; }

@@ -122,6 +122,8 @@ function registerIpc() {
     adapters: service.adapters(), cloud: cloud ? cloud.state : null }));
   handle('link:assign', (mac, ext, vendor) => service.assign(mac, ext, vendor));
   handle('link:unassign', (mac) => service.unassign(mac));
+  handle('link:label', (mac, fields) => service.label(mac, fields || {}));
+  handle('link:replace', (oldMac, newMac, vendor) => service.replacePhone(oldMac, newMac, vendor));
   handle('link:ignore', (mac) => service.ignore(mac));
   handle('link:addPerson', (name, ext) => service.addPerson({ name, ext }));
   handle('link:removePerson', (id) => service.removePerson(id));

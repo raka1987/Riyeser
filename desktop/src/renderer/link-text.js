@@ -35,6 +35,32 @@
       : c.status === 'not-yet' ? 'The Phones page on riyeser.com/link isn\'t switched on yet. Riyeser Link Office tries again by itself.'
       : c.status === 'offline' ? `Can't reach Riyeser Link online right now, so the website's Phones page waits. The phones here work as normal.${c.error ? ` (${c.error})` : ''}`
       : 'Connecting to Riyeser Link online…'),
+    /** "Set up your office phones": the same 5 steps as the website's Phones page, ticked off from this PC's own state. */
+    SETUP_TITLE: 'Set up your office phones',
+    SETUP_DONE: '✓ Office phones are set up',
+    setupSteps: (S) => {
+      const phones = (S && S.phones) || []; const found = (S && S.found) || [];
+      return [
+        { text: 'Install Riyeser Link Office on a PC at the office that stays on.', done: true },
+        { text: 'Sign in on that PC.', done: !!(S && (S.signedIn || S.source === 'team')), act: 'signin', actText: 'Sign in' },
+        { text: 'Plug in your desk phones.', done: phones.length + found.length > 0, act: 'addphone', actText: 'How' },
+        { text: 'Give each phone to a person.', done: phones.length > 0 && found.length === 0, act: 'found', actText: 'New phones found' },
+        { text: 'Make a test call.', done: ((S && S.recent) || []).some((c) => c.result === 'answered') || ((S && S.inProgress) || []).length > 0,
+          note: 'Pick up a desk phone and dial another extension, or a ring group like 100.' },
+      ];
+    },
+    /** A desk phone's status pill: Online, Configuring (fetched its settings, not connected yet), Offline (was connected), Waiting for phone. */
+    phoneStatus: (p, now = Date.now()) => {
+      const t = (x) => (x ? Date.parse(x) : 0);
+      const fetched = t(p.provisioned_at || p.lastFetch); const reg = t(p.last_registered || p.lastRegistered);
+      if (p.registered) return ['Online', 'ok'];
+      if (fetched && fetched > reg && now - fetched < 15 * 60000) return ['Configuring', 'cfg'];
+      if (reg) return ['Offline', 'bad'];
+      if (fetched) return ['Configuring', 'cfg'];
+      return ['Waiting for phone', 'wait'];
+    },
+    howSetsUp: (name) => `How ${name || 'this person'} sets up their phone`,
+    REPLACE_PREVIEW: (mac) => `The old phone (MAC ${mac}) stops getting its settings now. It keeps working until it's restarted or reset. To lock it out straight away, also make a new password.`,
     duration: (s) => (!s ? '' : s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim()),
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = T; else root.LinkText = T;

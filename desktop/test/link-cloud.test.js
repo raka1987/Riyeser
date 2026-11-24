@@ -108,6 +108,41 @@ test('changes from the website: give a phone, add one by MAC, take it off, new p
   } finally { t.close(); }
 });
 
+test('Desk phones list: name_phone (name, location, note), provisioned_at and calls_made in the heartbeat, and Replace phone', () => {
+  const t = make();
+  try {
+    t.svc.assign('001565aabbcc', '101');
+    assert.deepStrictEqual(applyCommand(t.svc, { id: 'n1', kind: 'name_phone', data: { mac: '00:15:65:AA:BB:CC', name: ' Reception<b> ', branch: 'Head office', note: 'S/N BP78459236' } }), { ok: true });
+    const ph = t.svc.provisionerData().phones.find((p) => p.mac === '001565aabbcc');
+    assert.deepStrictEqual([ph.label, ph.location, ph.note], ['Receptionb', 'Head office', 'S/N BP78459236'], 'kept in phone-devices.json, tidied');
+    assert.deepStrictEqual(applyCommand(t.svc, { id: 'n2', kind: 'name_phone', data: { mac: '001565999999', name: 'Nope' } }), { ok: false, error: 'That phone isn\'t given to anyone yet.' });
+    assert.strictEqual(applyCommand(t.svc, { id: 'n3', kind: 'name_phone', data: { mac: 'nonsense', name: 'Nope' } }).ok, false);
+    // giving the phone again (e.g. to someone else) keeps its name
+    t.svc.assign('001565aabbcc', '102');
+    assert.strictEqual(t.svc.provisionerData().phones.find((p) => p.mac === '001565aabbcc').label, 'Receptionb');
+    // the phone fetched its settings: provisioned_at in the heartbeat
+    t.svc.devices().logFetch({ mac: '001565aabbcc', ip: '192.168.1.31', file: '001565aabbcc.cfg', ok: true });
+    const p = buildPayload({ ...t.svc.status(), recent: [{ result: 'answered' }, { result: 'missed' }, { result: 'answered' }] }, { officeId: 'lo-test-0001' });
+    const row = p.phones.find((x) => x.mac === '001565aabbcc');
+    assert.deepStrictEqual([row.name, row.location, row.note], ['Receptionb', 'Head office', 'S/N BP78459236']);
+    assert.ok(row.provisioned_at && Date.now() - Date.parse(row.provisioned_at) < 60000, 'last settings fetch');
+    assert.strictEqual(p.counts.calls_made, 2, 'answered calls: a count only');
+    assert.ok(!JSON.stringify(p).includes('missed'), 'no call details');
+    // Replace phone (on the office PC): same extension, name and location; the old one stops getting settings
+    const r = t.svc.replacePhone('001565aabbcc', '00:15:65:12:34:56');
+    assert.deepStrictEqual([r.ext, r.label, r.location], ['102', 'Receptionb', 'Head office']);
+    assert.ok(!t.svc.provisionerData().phones.some((x) => x.mac === '001565aabbcc'), 'old phone off');
+    assert.strictEqual(t.svc.provisionerData().phones.find((x) => x.mac === '001565123456').ext, '102');
+    assert.throws(() => t.svc.replacePhone('001565123456', '001565123456'), /same phone/);
+    assert.throws(() => t.svc.replacePhone('001565123456', 'bad'), /isn't a MAC address/);
+    // from the website, Replace phone is two changes in a row: take the old one off, give the new one the same extension
+    assert.deepStrictEqual(applyCommand(t.svc, { id: 'x1', kind: 'unassign_phone', data: { mac: '001565123456' } }), { ok: true });
+    assert.deepStrictEqual(applyCommand(t.svc, { id: 'x2', kind: 'add_phone', data: { mac: '000b82112233', extension: '102' } }), { ok: true });
+    assert.deepStrictEqual(applyCommand(t.svc, { id: 'x3', kind: 'name_phone', data: { mac: '000b82112233', name: 'Receptionb', branch: 'Head office' } }), { ok: true });
+    assert.strictEqual(t.svc.status().phones.find((x) => x.mac === '000b82112233').label, 'Receptionb');
+  } finally { t.close(); }
+});
+
 test('Show password: encrypted to the browser\'s one-off key, so only that browser can read it', () => {
   const t = make();
   try {

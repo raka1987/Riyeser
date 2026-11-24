@@ -4,7 +4,7 @@
 // progress finish, then new phones and calls are refused. Nothing is deleted: people, phones and call history stay.
 const { EventEmitter } = require('events');
 const { Pbx } = require('./pbx');
-const { Provisioner, prettyMac, VENDORS } = require('./provision');
+const { Provisioner, prettyMac, normaliseMac, VENDORS } = require('./provision');
 const { Directory } = require('./directory');
 const { CallLog } = require('./calllog');
 const { callsLicence } = require('./licence');
@@ -161,6 +161,19 @@ class PhoneService extends EventEmitter {
   devices() { return this.prov || new Provisioner({ store: this.store, directory: this.directory, host: this.host }); }
   assign(mac, ext, vendor) { return this.devices().assign(mac, ext, { vendor }); }
   unassign(mac) { return this.devices().unassign(mac); }
+  label(mac, fields) { const r = this.devices().label(mac, fields); this.emit('change'); return r; }
+  /** Replace a desk phone: the new one gets the old one's extension, name, location and note; the old one stops getting settings. */
+  replacePhone(oldMac, newMac, vendor) {
+    const was = this.provisionerData().phones.find((x) => x.mac === normaliseMac(oldMac));
+    if (!was) throw new Error('That phone isn\'t given to anyone.');
+    if (!normaliseMac(newMac)) throw new Error('That isn\'t a MAC address. It\'s 12 letters and numbers, on a sticker under the phone (like 00:15:65:12:34:56).');
+    if (normaliseMac(newMac) === was.mac) throw new Error('That\'s the same phone.');
+    const p = this.assign(newMac, was.ext, vendor);
+    this.devices().label(p.mac, { name: was.label, location: was.location, note: '' });
+    this.unassign(was.mac);
+    this.emit('change');
+    return { ...p, label: was.label, location: was.location };
+  }
   ignore(mac) { return this.devices().ignore(mac); }
   addPerson(p) { const r = this.directory.addPerson(p); this.emit('change'); return r; }
   removePerson(id) { const r = this.directory.removePerson(id); this.emit('change'); return r; }
@@ -197,7 +210,8 @@ class PhoneService extends EventEmitter {
       state: this.state, error: this.error, host: this.host, sipPort: snap.port || this.opts.sipPort || 5060, httpPort: this.prov ? this.prov.httpPort : (this.opts.httpPort || 5080),
       licence: this.lic, business: d.business, source: d.source, teamSyncedAt: d.teamSyncedAt, skipped: d.skipped || [], sync: this.syncState,
       people, groups: this.directory.groups().map((g) => ({ ...g, names: g.members.map((m) => this.directory.nameOf(m)) })),
-      phones: phones.map((x) => ({ ...x, macText: prettyMac(x.mac), vendorName: VENDORS[x.vendor] || 'Desk phone', name: this.directory.nameOf(x.ext),
+      phones: phones.map((x) => ({ ...x, macText: prettyMac(x.mac), vendorName: VENDORS[x.vendor] || 'Desk phone', name: this.directory.nameOf(x.ext), registered: !!(x.ip && regIps.has(x.ip)),
+        lastRegistered: (x.ip && regIps.has(x.ip)) ? new Date().toISOString() : (((this.store.get('phone-cloud', {}) || {}).lastReg || {})[x.mac] || null),
         state: waiting ? 'waiting for Link Plus' : (x.ip && regIps.has(x.ip)) ? 'connected' : x.lastFetch ? 'set up, not connected now' : 'waiting for the phone to ask for its settings' })),
       found, inProgress: snap.calls, recent: this.calls.list({ limit: 100 }),
       counts: { connected: new Set(snap.registrations.map((r) => r.ext)).size, onCalls: snap.calls.filter((c) => c.state === 'talking').length, phones: snap.registrations.length },

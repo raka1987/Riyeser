@@ -15,6 +15,24 @@ function askYes(text, ok = 'Yes') {
     document.body.appendChild(d); d.showModal(); d.querySelector('button[value="no"]').focus();
   });
 }
+// A small form in an in-page dialog (no prompt()). fields: [{ name, label, value, type: 'text' | 'select', options: [[value, label]] }].
+// Resolves with { name: value } or null when cancelled.
+function askForm(title, intro, fields, ok = 'Save') {
+  return new Promise((resolve) => {
+    const d = document.createElement('dialog'); d.className = 'askform';
+    d.innerHTML = `<form method="dialog"><h3>${esc(title)}</h3>${intro ? `<p>${esc(intro)}</p>` : ''}${fields.map((f) => `<label><span>${esc(f.label)}</span>${f.type === 'select'
+      ? `<select name="${esc(f.name)}">${f.options.map(([v, l]) => `<option value="${esc(v)}"${v === f.value ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`
+      : `<input name="${esc(f.name)}" value="${esc(f.value || '')}" maxlength="${f.max || 60}" placeholder="${esc(f.placeholder || '')}" autocomplete="off" spellcheck="false">`}</label>`).join('')}
+      ${fields.preview ? `<p class="muted">${esc(fields.preview)}</p>` : ''}
+      <div class="row end"><button type="button" class="btn s" value="no">Cancel</button><button class="btn" value="yes">${esc(ok)}</button></div></form>`;
+    let out = null;
+    d.querySelector('[value=no]').onclick = () => d.close();
+    d.querySelector('form').onsubmit = () => { out = Object.fromEntries(new FormData(d.querySelector('form'))); };
+    d.addEventListener('close', () => { d.remove(); resolve(out); });
+    document.body.appendChild(d); d.showModal(); const i = d.querySelector('input,select'); if (i) i.focus();
+  });
+}
+let setupOpen = false;
 let S = null; let shown = {}; let busy = false; let hand = null;   // hand: Set up a phone by hand (Phones tab): { ext, details, reveal }
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 3500); }
@@ -83,6 +101,15 @@ function renderHand() {
       <span class="muted">Transport: UDP. Leave the outbound proxy empty. Display name: ${esc(m.name)}.</span></div>` : '';
 }
 
+// ---------- "Set up your office phones": 5 steps that tick themselves off; folded away once they're all done
+function renderSetup() {
+  const steps = T.setupSteps(S); const all = steps.every((x) => x.done);
+  $('#setup').innerHTML = all && !setupOpen
+    ? `<div class="row" style="margin:0"><b class="okt">${esc(T.SETUP_DONE)}</b><button class="btn s sm" data-a="setupopen">Show the steps</button></div>`
+    : `<div class="ph"><h2>${esc(T.SETUP_TITLE)}</h2><span class="muted">${steps.filter((x) => x.done).length} of ${steps.length} done</span>${all ? '<button class="btn s sm" data-a="setupopen">Hide</button>' : ''}</div>
+      <ol class="steps">${steps.map((x) => `<li class="${x.done ? 'done' : ''}"><span class="tick" aria-hidden="true">${x.done ? '✓' : ''}</span><span class="grow">${esc(x.text)}${x.note && !x.done ? `<small class="muted"> ${esc(x.note)}</small>` : ''}</span>
+        ${!x.done && x.act ? `<button class="btn s sm" data-a="step-${x.act}">${esc(x.actText)}</button>` : ''}</li>`).join('')}</ol>`;
+}
 function renderFound() {
   $('#found').innerHTML = S.found.map((f) => `<div class="card"><div class="grow"><b>New phone found</b>${esc(f.vendorName)} ${esc(f.model || '')} · ${esc(f.macText)}${f.ip ? ` · at ${esc(f.ip)}` : ''}</div>
     <select data-found="${esc(f.mac)}">${personOptions('')}</select><button class="btn" data-give="${esc(f.mac)}">Give to this person</button><button class="btn s sm" data-ignore="${esc(f.mac)}">Not ours</button></div>`).join('');
@@ -95,7 +122,7 @@ function renderPeople() {
     $('#people').innerHTML = `<div class="tw"><table><tr><th>Name</th><th>Extension</th><th>Device</th><th>State</th><th class="hide-sm">Do not disturb</th><th></th></tr>
       ${S.people.map((p) => `<tr><td>${esc(p.name)}</td><td><b>${esc(p.ext)}</b></td><td>${esc(T.device(p.device))}</td><td>${pill(T.personState(p))}</td>
         <td class="hide-sm"><input type="checkbox" data-dnd="${esc(p.ext)}"${p.dnd ? ' checked' : ''} aria-label="Do not disturb for ${esc(p.name)}"></td>
-        <td><button class="btn s sm" data-manual="${esc(p.ext)}">Set up a phone by hand</button>${p.source === 'local' ? ` <button class="btn s sm" data-remove="${esc(p.id)}">Remove</button>` : ''}</td></tr>
+        <td><button class="btn s sm" data-manual="${esc(p.ext)}">${esc(T.howSetsUp(p.name))}</button>${p.source === 'local' ? ` <button class="btn s sm" data-remove="${esc(p.id)}">Remove</button>` : ''}</td></tr>
         ${shown[p.ext] ? `<tr><td colspan="6"><div class="manual">Type these into any SIP phone or app:<br>Server address: <code>${esc(shown[p.ext].server)}</code> (port ${esc(shown[p.ext].port)})<br>
           Username: <code>${esc(shown[p.ext].username)}</code> &nbsp; Password: <code>${shown[p.ext].reveal ? esc(shown[p.ext].password) : '••••••••••••••••'}</code>
           <button class="btn s sm" data-reveal="${esc(p.ext)}">${shown[p.ext].reveal ? 'Hide' : 'Show'}</button><button class="btn s sm" data-copy="${esc(shown[p.ext].password)}">Copy password</button>
@@ -109,10 +136,14 @@ function renderGroups() {
   $('#groupsp').hidden = !S.groups.length;
   $('#groups').innerHTML = `<div class="tw"><table>${S.groups.map((g) => `<tr><td><b>${esc(g.ext)}</b></td><td>${esc(g.name)}</td><td class="muted">${g.names.length ? esc(g.names.join(', ')) : 'No one in it yet'}</td></tr>`).join('')}</table></div>`;
 }
+// The desk phones list: name, extension, location, status (Online, Configuring, Offline, Waiting for phone), last check-in
 function renderPhones() {
-  $('#phones').innerHTML = S.phones.length ? `<div class="tw"><table><tr><th>Phone</th><th>For</th><th>State</th><th></th></tr>${S.phones.map((x) => `<tr>
-    <td>${esc(x.vendorName)} ${esc(x.model || '')}<div class="muted">${esc(x.macText)}${x.ip ? ` · ${esc(x.ip)}` : ''}</div></td><td>${who(x.ext, x.name)}</td><td>${pill(x.state)}</td>
-    <td><button class="btn s sm" data-unassign="${esc(x.mac)}">Stop setting up</button></td></tr>`).join('')}</table></div>` : '<p class="muted">No desk phones yet.</p>';
+  const status = (x) => { if (/waiting for Link Plus/.test(x.state)) return pill(x.state); const [t, c] = T.phoneStatus(x); return `<span class="pill ${c}">${esc(t)}</span>`; };
+  $('#phones').innerHTML = S.phones.length ? `<div class="tw"><table><tr><th>Phone</th><th>Extension</th><th class="hide-sm">Location</th><th>Status</th><th class="hide-sm">Last check-in</th><th></th></tr>${S.phones.map((x) => `<tr>
+    <td><b>${esc(x.label || `${x.vendorName} ${x.model || ''}`.trim())}</b><div class="muted">${x.label ? `${esc(x.vendorName)} ${esc(x.model || '')} · ` : ''}${esc(x.macText)}${x.ip ? ` · ${esc(x.ip)}` : ''}</div></td>
+    <td>${who(x.ext, x.name)}</td><td class="hide-sm">${esc(x.location || '—')}</td><td>${status(x)}</td><td class="hide-sm">${x.lastSeen ? esc(when(x.lastSeen)) : '<span class="muted">Not yet</span>'}</td>
+    <td class="acts2"><button class="btn s sm" data-rename="${esc(x.mac)}">Rename / location</button><button class="btn s sm" data-replace="${esc(x.mac)}">Replace phone</button>
+      <button class="btn s sm" data-manual2="${esc(x.ext)}">${esc(T.howSetsUp(x.name))}</button><button class="btn s sm" data-unassign="${esc(x.mac)}">Stop setting up</button></td></tr>`).join('')}</table></div>` : '<p class="muted">No desk phones yet.</p>';
 }
 function renderCalls() {
   const live = S.inProgress.map((c) => `<tr><td>${esc(when(c.start))}</td><td>${who(c.from, c.fromName)}</td><td>${who(c.answeredBy || c.to, c.toName)}</td><td>${pill(c.state === 'talking' ? 'on a call now' : 'ringing')}</td><td></td></tr>`);
@@ -145,7 +176,7 @@ function showTab(name) {
   for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
   try { localStorage.setItem('link.tab', name); } catch { /* fine */ }
 }
-function render() { if (!S) return; renderState(); renderNotices(); renderHero(); if (!$('#manualbox').hidden) renderHand(); renderFound(); if (!busy) renderPeople(); renderGroups(); renderPhones(); renderCalls(); renderAccount(); if (!document.querySelector('.adv').open) renderAdvanced(); }
+function render() { if (!S) return; renderState(); renderNotices(); renderSetup(); renderHero(); if (!$('#manualbox').hidden) renderHand(); renderFound(); if (!busy) renderPeople(); renderGroups(); renderPhones(); renderCalls(); renderAccount(); if (!document.querySelector('.adv').open) renderAdvanced(); }
 async function load() { const s = await safe(() => api.call('link:status')); if (s) { S = s; render(); } }
 let pending = null;
 api.on('link:changed', () => { clearTimeout(pending); pending = setTimeout(load, 150); });
@@ -159,6 +190,19 @@ document.addEventListener('click', async (e) => {
   const d = b.dataset;
   if (d.copy != null) { await safe(() => api.call('link:copy', d.copy)); toast('Copied.'); return; }
   if (d.manual) { if (shown[d.manual]) delete shown[d.manual]; else shown[d.manual] = await safe(() => api.call('link:manual', d.manual)); renderPeople(); return; }
+  if (d.manual2) { showTab('people'); if (!shown[d.manual2]) shown[d.manual2] = await safe(() => api.call('link:manual', d.manual2)); renderPeople();
+    const r = document.querySelector(`[data-manual="${d.manual2}"]`); if (r) r.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  if (d.rename) { const x = S.phones.find((p) => p.mac === d.rename); if (!x) return;
+    const f = await askForm('Rename or move this phone', `${x.vendorName} ${x.model || ''} · ${x.macText}`, [{ name: 'name', label: 'Phone name', value: x.label || '', max: 40, placeholder: 'e.g. Reception' },
+      { name: 'location', label: 'Location', value: x.location || '', max: 60, placeholder: 'e.g. Head office' }]);
+    if (f && await safe(() => api.call('link:label', x.mac, { name: f.name, location: f.location, note: x.note || '' }))) toast('Saved.'); load(); return; }
+  if (d.replace) { const x = S.phones.find((p) => p.mac === d.replace); if (!x) return;
+    const fields = [{ name: 'mac', label: 'The new phone', type: 'select', value: '', options: [['', 'Type its MAC address below'], ...S.found.map((f) => [f.mac, `New phone found: ${f.vendorName} ${f.model || ''} · ${f.macText}`])] },
+      { name: 'typed', label: 'MAC address (on the label under the phone)', value: '', max: 20, placeholder: 'e.g. 00:15:65:12:34:56' }];
+    fields.preview = `${T.REPLACE_PREVIEW(x.macText)} The new phone keeps extension ${x.ext}${x.label ? `, the name ${x.label}` : ''}${x.location ? ` and the location ${x.location}` : ''}.`;
+    const f = await askForm(`Replace ${x.label || 'this phone'}`, `Now: ${x.vendorName} ${x.model || ''} · ${x.macText} · extension ${x.ext}`, fields, 'Replace phone');
+    if (!f) return; const mac = f.mac || f.typed; if (!mac) { toast('Choose the new phone, or type its MAC address.'); return; }
+    if (await safe(() => api.call('link:replace', x.mac, mac))) toast('Replaced. Plug in the new phone: it sets itself up in a minute.'); load(); return; }
   if (d.reveal) { shown[d.reveal].reveal = !shown[d.reveal].reveal; renderPeople(); return; }
   if (d.handreveal) { hand.reveal = !hand.reveal; renderHand(); return; }
   if (d.reset) { const m = await safe(() => api.call('link:resetPassword', d.reset)); if (m) { if (shown[d.reset]) shown[d.reset] = { ...m, reveal: true };
@@ -175,6 +219,10 @@ document.addEventListener('click', async (e) => {
     if (a === 'team') await safe(() => api.call('link:openTeam'));
     if (a === 'web') await safe(() => api.call('link:openPhonesPage'));
     if (a === 'report') { const r = await safe(() => api.call('link:report')); if (r) toast(r.ok ? 'Sent to Riyeser Link.' : r.error); }
+    if (a === 'setupopen') { setupOpen = !setupOpen; renderSetup(); }
+    if (a === 'step-signin') { showTab('settings'); const em = $('#em'); if (em) em.focus(); }
+    if (a === 'step-addphone') { const dd = $('#addphone'); dd.open = true; dd.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    if (a === 'step-found') { const fd = $('#found'); if (fd) fd.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     if (a === 'hand') { const box = $('#manualbox'); box.hidden = !box.hidden; if (!box.hidden) { renderHand(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#manualwho').focus(); } }
     if (a === 'addphone') { const dd = $('#addphone'); dd.open = true; dd.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#mac').focus(); }
     if (a === 'recheck') { await safe(() => api.call('link:recheck')); toast(S && S.state === 'running' ? 'Riyeser Link Office is on.' : 'Checked.'); }
