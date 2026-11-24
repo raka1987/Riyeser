@@ -1227,17 +1227,53 @@ create or replace function public.hq_set_calls_paid(ws uuid, until date) returns
   language plpgsql security definer set search_path = public as $$
 begin perform hq_set_module(ws, 'calls', 'active', null, until); end $$;
 
--- What each company pays per month, at list prices (an estimate: payments aren't connected yet).
--- Basics $20; each other program +$20; extra users $5; extra companies $10; yearly = 10 months for 12;
--- early bird = half price for the first 12 months.
+-- Riyeser list prices, in US dollars a month per business. This is the one place they're set: change a number here,
+-- re-run this file, and every HQ estimate follows. Free programs (Central, Invoices, PDF, Desk Assistant, Link chat) cost 0.
+create or replace function public.riyeser_price(item text) returns numeric
+  language sql immutable set search_path = public as $$
+  select (case item
+    when 'basic' then 25 when 'plus' then 39 when 'payroll' then 25 when 'pos' then 29 when 'bookings' then 25
+    when 'calls' then 39 when 'as_built' then 29
+    when 'users_included' then 3     -- people included in each paid program
+    when 'extra_user' then 5         -- each person over that, for each paid program
+    when 'extra_company' then 10     -- each extra company in Accounting
+    else 0 end)::numeric
+$$;
+
+-- One bill at list prices (US$). Each paid program: its price, plus US$5 for each person over 3 (for that program).
+-- Accounting Plus includes Basics, so Basics is never counted as well. Extra companies count only with Accounting.
+-- Yearly = 10 months. Early bird = half the program and user amounts (the caller says if it's still in its 12 months).
+create or replace function public.riyeser_bill(mods text[], people int, extra_companies int, billing text, early_bird boolean) returns numeric
+  language sql immutable set search_path = public as $$
+  with m as (select distinct x from unnest(coalesce(mods, '{}'::text[])) x
+             where x = any (array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls'])
+               and not (x = 'basic' and 'plus' = any (mods)))
+  select round((
+      coalesce((select sum(public.riyeser_price(x)
+                           + public.riyeser_price('extra_user') * greatest(0, coalesce(people, 0) - public.riyeser_price('users_included'))) from m), 0)
+        * case when coalesce(early_bird, false) then 0.5 else 1 end
+      + case when exists (select 1 from m where x in ('basic', 'plus'))
+             then public.riyeser_price('extra_company') * greatest(0, coalesce(extra_companies, 0)) else 0 end)
+    * case when billing = 'yearly' then 10 else 1 end, 2)
+$$;
+
+-- How many people a business pays for: everyone in it, or its licence seats (3 + extra users set in HQ) if that's more.
+create or replace function public.riyeser_people(ws uuid) returns int
+  language sql stable security definer set search_path = public as $$
+  select greatest((select count(*) from members where workspace_id = ws)::int,
+                  3 + coalesce((select extra_users from company_plans where workspace_id = ws), 0))
+$$;
+
+-- What each company pays per month, at list prices in US$ (an estimate: payments aren't connected yet).
+-- Paid programs only (not trials). Yearly billing is shown as its monthly share (10 months over 12).
 create or replace function public.company_monthly(ws uuid) returns numeric
   language sql stable security definer set search_path = public as $$
-  select round((
-      (select count(*) * 20 from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
-         where (public.module_state(ws, m) ->> 'status') = 'active')
-      + coalesce(p.extra_users, 0) * 5 + coalesce(p.extra_companies, 0) * 10)
-    * case when coalesce(p.billing, 'monthly') = 'yearly' then 10.0 / 12 else 1 end
-    * case when coalesce(p.early_bird, false) and p.early_bird_since > current_date - 365 then 0.5 else 1 end, 2)
+  select round(public.riyeser_bill(
+      array(select m from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+            where (public.module_state(ws, m) ->> 'status') = 'active'),
+      public.riyeser_people(ws), coalesce(p.extra_companies, 0), 'monthly',
+      coalesce(p.early_bird, false) and p.early_bird_since > current_date - 365)
+    * case when coalesce(p.billing, 'monthly') = 'yearly' then 10.0 / 12 else 1 end, 2)
   from (select 1) x left join company_plans p on p.workspace_id = ws
 $$;
 
@@ -1275,10 +1311,10 @@ end $$;
 
 revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_licence(uuid),
   public.hq_set_module(uuid, text, text, date, date), public.hq_set_plan(uuid, int, int, text, boolean), public.company_monthly(uuid),
-  public.hq_licences(), public.hq_company_licence(uuid) from public, anon;
+  public.hq_licences(), public.hq_company_licence(uuid), public.riyeser_people(uuid) from public, anon;
 grant execute on function public.company_licence(uuid), public.hq_set_module(uuid, text, text, date, date),
   public.hq_set_plan(uuid, int, int, text, boolean), public.hq_licences(), public.hq_company_licence(uuid) to authenticated;
-revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_monthly(uuid) from authenticated;
+revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_monthly(uuid), public.riyeser_people(uuid) from authenticated;
 
 -- ================================================================ Riyeser HQ, phase 1
 -- Support tickets (with escalations), fix-up tools, staff permissions, the full staff audit trail, inactive accounts,
@@ -2255,7 +2291,7 @@ create table if not exists public.refund_requests (
   period text check (length(period) <= 80),
   invoice_ref text check (length(invoice_ref) <= 80),                 -- free text until billing (phase 2)
   amount numeric(12, 2) not null check (amount > 0 and amount < 1000000),
-  currency text not null default 'FJD' check (currency in ('FJD', 'AUD', 'NZD', 'USD')),
+  currency text not null default 'USD' check (currency in ('FJD', 'AUD', 'NZD', 'USD')),   -- what was actually paid; US$ by default
   reason_category text not null check (reason_category in ('mistake', 'didnt_work', 'cancelled', 'duplicate', 'other')),
   explanation text check (length(explanation) <= 2000),
   status text not null default 'submitted' check (status in ('submitted', 'reviewing', 'approved', 'partly_approved', 'declined', 'paid')),
@@ -2275,6 +2311,7 @@ create table if not exists public.refund_requests (
   check (second_approver is null or second_approver is distinct from decided_by)   -- two different people, always
 );
 create index if not exists refund_requests_ws on public.refund_requests (workspace_id, created_at desc);
+alter table public.refund_requests alter column currency set default 'USD';   -- prices are in US dollars now
 create table if not exists public.account_credits (
   id bigint generated always as identity primary key,
   workspace_id uuid not null references public.workspaces(id),
@@ -2316,10 +2353,10 @@ $$;
 create or replace function public.refund_insert(ws uuid, by_customer uuid, by_staff uuid, ticket uuid, for_what text, period text, invoice_ref text,
     amount numeric, currency text, reason_category text, explanation text) returns json
   language plpgsql security definer set search_path = public as $$
-declare f refund_requests; tk support_tickets; cur text := upper(coalesce(nullif(currency, ''), 'FJD')); who uuid;
+declare f refund_requests; tk support_tickets; cur text := upper(coalesce(nullif(currency, ''), 'USD')); who uuid;
 begin
   if amount is null or amount <= 0 then raise exception 'Enter the amount you''d like back.'; end if;
-  if cur not in ('FJD', 'AUD', 'NZD', 'USD') then raise exception 'Choose FJD, AUD, NZD or USD.'; end if;
+  if cur not in ('FJD', 'AUD', 'NZD', 'USD') then raise exception 'Choose USD, FJD, AUD or NZD.'; end if;
   if reason_category not in ('mistake', 'didnt_work', 'cancelled', 'duplicate', 'other') then raise exception 'Choose a reason.'; end if;
   if length(trim(coalesce(for_what, ''))) = 0 then raise exception 'Say what the refund is for.'; end if;
   if ticket is not null then select * into tk from support_tickets where id = ticket; end if;
@@ -3494,6 +3531,7 @@ begin
         from devices d where d.workspace_id = ws),
     'licence', case when hq_can('licences.view') then licence_json(ws) end,
     'monthly', case when hq_can('licences.view') then company_monthly(ws) end,
+    'storage', case when hq_can('licences.view') then public.link_storage_json(ws) end,
     'requests_waiting', (select count(*) from join_requests j where j.workspace_id = ws and j.status = 'pending'),
     'notes', (select coalesce(json_agg(public.hq_note_json(n) order by n.pinned desc, n.created_at desc), '[]')
         from (select * from hq_notes where workspace_id = ws order by created_at desc limit 200) n),
@@ -3687,6 +3725,7 @@ declare q text := nullif(trim(coalesce(search, '')), ''); fl jsonb := coalesce(f
   f_plan text := nullif(fl ->> 'plan', ''); f_trial int; f_inactive int;
   f_tickets boolean := coalesce((fl ->> 'open_tickets')::boolean, false); f_follow boolean := coalesce((fl ->> 'follow_up')::boolean, false);
   f_mine boolean := coalesce((fl ->> 'mine')::boolean, false);
+  f_storage boolean := coalesce((fl ->> 'storage_80')::boolean, false);   -- Riyeser Link files over 80% of the limit
 begin
   perform hq_need(array['customers.view']);
   f_trial := case when (fl ->> 'trial_days') ~ '^[0-9]{1,4}$' then (fl ->> 'trial_days')::int end;
@@ -3732,6 +3771,7 @@ begin
         or (f_plan = 'free' and x.paid_n = 0 and x.trial_n = 0))
       and (f_trial is null or (x.trial_end is not null and x.trial_end <= current_date + f_trial))
       and (not f_tickets or x.tickets_open > 0)
+      and (not f_storage or public.link_storage_pct(x.id) >= 80)
       and (not f_follow or exists (select 1 from hq_notes n where n.workspace_id = x.id and n.follow_up is not null and n.follow_up_done_at is null)
            or exists (select 1 from support_tickets t where t.workspace_id = x.id and t.status in ('new', 'investigating', 'waiting_us')))
   ), ordered as (
@@ -3758,6 +3798,7 @@ begin
         'owner_email', (select u.email::text from auth.users u where u.id = o.owner_id),
         'phone', o.phone, 'tickets_open', o.tickets_open, 'people', (select count(*) from members m where m.workspace_id = o.id),
         'pcs', (select count(*) from devices d where d.workspace_id = o.id),
+        'storage_pct', public.link_storage_pct(o.id),
         'hq_owner_name', (select public.staff_name(w.hq_owner) from workspaces w where w.id = o.id),
         'next_follow_up', (select min(n.follow_up) from hq_notes n where n.workspace_id = o.id and n.follow_up is not null and n.follow_up_done_at is null)) order by o.rn), '[]')
       from ordered o where o.rn > off and o.rn <= off + lim),
@@ -3823,13 +3864,13 @@ begin
           paid as (select c.workspace_id, c.module, c.paid_since, c.paid_until from company_modules c
                    join workspaces w on w.id = c.workspace_id
                    where c.status in ('active', 'cancelled') and c.paid_since is not null),
-          per as (select mo.ms, p.workspace_id, count(*) as n from months mo join paid p on p.paid_since <= mo.me
+          per as (select mo.ms, p.workspace_id, count(*) as n, array_agg(p.module) as mods from months mo join paid p on p.paid_since <= mo.me
                     and coalesce(p.paid_until, 'infinity'::date) >= mo.ms
                     and not exists (select 1 from workspaces w where w.id = p.workspace_id and w.status <> 'active' and w.closed_at < mo.ms)
                   group by 1, 2),
-          amt as (select per.ms, (per.n * 20 + coalesce(pl.extra_users, 0) * 5 + coalesce(pl.extra_companies, 0) * 10)
-                     * case when coalesce(pl.billing, 'monthly') = 'yearly' then 10.0 / 12 else 1 end
-                     * case when coalesce(pl.early_bird, false) and pl.early_bird_since > per.ms - 365 then 0.5 else 1 end as a
+          amt as (select per.ms, public.riyeser_bill(per.mods, public.riyeser_people(per.workspace_id), coalesce(pl.extra_companies, 0), 'monthly',
+                       coalesce(pl.early_bird, false) and pl.early_bird_since > per.ms - 365)
+                     * case when coalesce(pl.billing, 'monthly') = 'yearly' then 10.0 / 12 else 1 end as a
                   from per left join company_plans pl on pl.workspace_id = per.workspace_id)
       select coalesce(json_agg(json_build_object('month', mo.ms,
           'estimate', round(coalesce((select sum(a.a) from amt a where a.ms = mo.ms), 0), 2),
@@ -3838,7 +3879,11 @@ begin
           'lost', (select count(*) from paid p where p.paid_until between mo.ms and mo.me and p.paid_until < current_date)) order by mo.ms), '[]')
       from months mo),
     'revenue_by_program', (select coalesce(json_agg(x order by x.paying desc, x.module), '[]') from (
-        select mm.m as module, count(c.*) as paying, count(c.*) * 20 as estimate
+        -- list price for each paying business (with its extra users); Basics counts nothing where Plus is paid too
+        select mm.m as module, count(c.*) as paying,
+          coalesce(sum(public.riyeser_bill(array[mm.m], public.riyeser_people(c.workspace_id), 0, 'monthly', false))
+            filter (where c.module is not null and not (mm.m = 'basic' and exists (select 1 from company_modules c2 where c2.workspace_id = c.workspace_id
+              and c2.module = 'plus' and c2.status = 'active' and (c2.paid_until is null or c2.paid_until >= current_date)))), 0) as estimate
         from unnest(mods) mm(m) left join (company_modules c join workspaces w on w.id = c.workspace_id and w.status = 'active')
           on c.module = mm.m and c.status = 'active' and (c.paid_until is null or c.paid_until >= current_date)
         group by mm.m) x),
@@ -4483,6 +4528,83 @@ end $$;
 drop trigger if exists messages_files_guard on public.messages;
 create trigger messages_files_guard before insert or update on public.messages for each row execute function public.messages_files_guard();
 
+-- ---------------------------------------------------------------- file storage for each business (Riyeser Link files)
+-- 2 GB per business on free chat, 20 GB with Riyeser Link Plus (trial or paid), plus any extra HQ grants (extra_storage_gb).
+-- An upload that would take the business over is refused (link_files_add below). Nothing is ever deleted automatically.
+alter table public.workspaces add column if not exists extra_storage_gb int not null default 0;
+do $$ begin
+  alter table public.workspaces add constraint workspaces_extra_storage_gb check (extra_storage_gb between 0 and 10000);
+exception when duplicate_object then null; end $$;
+
+-- Bytes of Riyeser Link files the business has stored (people in it, and HQ staff).
+create or replace function public.link_storage_used(ws uuid) returns bigint
+  language plpgsql stable security definer set search_path = public as $$
+declare n bigint := 0;
+begin
+  if ws is null or not (public.is_member(ws) or public.hq_can('customers.view') or public.hq_can('licences.view')) then
+    raise exception 'You''re not in that company';
+  end if;
+  if to_regclass('storage.objects') is not null then   -- only where Supabase Storage is there
+    execute 'select coalesce(sum(case when (metadata ->> ''size'') ~ ''^[0-9]{1,15}$'' then (metadata ->> ''size'')::bigint else 0 end), 0)
+             from storage.objects where bucket_id = ''link-files'' and name like $1' into n using ws::text || '/%';
+  end if;
+  return n;
+end $$;
+-- The business's limit in bytes: 2 GB, or 20 GB while Riyeser Link Plus is on, plus extra granted by HQ.
+create or replace function public.link_storage_limit(ws uuid) returns bigint
+  language sql stable security definer set search_path = public as $$
+  select ((case when public.calls_allowed(ws) then 20 else 2 end) + coalesce((select extra_storage_gb from workspaces where id = ws), 0))::bigint * 1073741824
+$$;
+-- Is there room for a file of this many bytes? (anyone in the business; the app asks before it uploads)
+create or replace function public.link_storage_fits(ws uuid, size bigint) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select public.link_storage_used(ws) + greatest(coalesce(size, 0), 0) <= public.link_storage_limit(ws)
+$$;
+-- The same for the upload rule, from the file's path and Storage's metadata (size in bytes). Internal.
+create or replace function public.link_storage_fits_path(path text, meta jsonb) returns boolean
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  if public.link_file_channel(path) is null or not public.is_member(split_part(path, '/', 1)::uuid) then return false; end if;
+  return public.link_storage_fits(split_part(path, '/', 1)::uuid,
+    case when (meta ->> 'size') ~ '^[0-9]{1,15}$' then (meta ->> 'size')::bigint else 0 end);
+end $$;
+-- What the app and HQ show: "1.2 GB of 2 GB used" (owners and admins of the business, and HQ).
+create or replace function public.link_storage_json(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare u bigint; l bigint;
+begin
+  if not (public.is_admin(ws) or public.hq_can('customers.view') or public.hq_can('licences.view')) then
+    raise exception 'Only owners and admins can see this.';
+  end if;
+  u := public.link_storage_used(ws); l := public.link_storage_limit(ws);
+  return json_build_object('used', u, 'limit', l, 'pct', case when l > 0 then round(u * 100.0 / l, 1) else 0 end,
+    'plus', public.calls_allowed(ws), 'extra_gb', (select extra_storage_gb from workspaces where id = ws));
+end $$;
+-- Percent of the limit used, for HQ's Companies list (HQ only).
+create or replace function public.link_storage_pct(ws uuid) returns numeric
+  language sql stable security definer set search_path = public as $$
+  select case when public.hq_can('customers.view') and public.link_storage_limit(ws) > 0
+    then round(public.link_storage_used(ws) * 100.0 / public.link_storage_limit(ws), 1) end
+$$;
+-- HQ: give a business extra file storage (the total extra, in GB), with a reason. In the HQ history.
+create or replace function public.hq_grant_storage(ws uuid, gb int, why text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare was int;
+begin
+  perform hq_need(array['licences.manage']);
+  select extra_storage_gb into was from workspaces where id = ws;
+  if was is null then raise exception 'That business doesn''t exist.'; end if;
+  if gb is null or gb < 0 or gb > 10000 then raise exception 'Choose 0 to 10000 GB of extra storage.'; end if;
+  if length(trim(coalesce(why, ''))) < 3 then raise exception 'Say why, so the team knows later.'; end if;
+  update workspaces set extra_storage_gb = gb where id = ws;
+  perform hq_log('licence.storage', jsonb_build_object('workspace_id', ws, 'extra_gb', jsonb_build_object('was', was, 'now', gb), 'reason', left(trim(why), 300)));
+  return public.link_storage_json(ws);
+end $$;
+revoke all on function public.link_storage_used(uuid), public.link_storage_limit(uuid), public.link_storage_fits(uuid, bigint),
+  public.link_storage_fits_path(text, jsonb), public.link_storage_json(uuid), public.link_storage_pct(uuid), public.hq_grant_storage(uuid, int, text) from public, anon;
+grant execute on function public.link_storage_used(uuid), public.link_storage_limit(uuid), public.link_storage_fits(uuid, bigint),
+  public.link_storage_fits_path(text, jsonb), public.link_storage_json(uuid), public.link_storage_pct(uuid), public.hq_grant_storage(uuid, int, text) to authenticated;
+
 -- The bucket and its rules, only where Supabase Storage is there (it always is on Supabase).
 do $$ begin
   if exists (select 1 from information_schema.tables where table_schema = 'storage' and table_name = 'objects')
@@ -4492,7 +4614,8 @@ do $$ begin
     execute 'drop policy if exists link_files_read on storage.objects';
     execute 'create policy link_files_read on storage.objects for select to authenticated using (bucket_id = ''link-files'' and public.link_file_ok(name))';
     execute 'drop policy if exists link_files_add on storage.objects';
-    execute 'create policy link_files_add on storage.objects for insert to authenticated with check (bucket_id = ''link-files'' and public.link_file_ok(name))';
+    execute 'create policy link_files_add on storage.objects for insert to authenticated with check (bucket_id = ''link-files'' and public.link_file_ok(name)
+      and public.link_storage_fits_path(name, metadata))';
   end if;
 end $$;
 

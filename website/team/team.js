@@ -10,6 +10,11 @@
   const DEMO = params.has('demo') || !CONFIGURED;
   const $app = document.getElementById('app');
   const NAME = 'Riyeser Link';
+  // Prices are in US dollars a month per business (the full list is on riyeser.com/pricing.html, from website/prices.mjs).
+  const PRICE_LINK_PLUS = 39;
+  const STORAGE_GB = { free: 2, plus: 20 };   // Riyeser Link files per business (the database enforces it: link_storage_limit)
+  const GB = 1073741824;
+  const usd = (n) => `US$${n % 1 ? n.toFixed(2) : n}`;
   // This page's own folder (/link/ or the old /team/), so signing out and the demo stay where they are.
   const HERE = location.pathname.replace(/[^/]*$/, '') || '/link/';
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -154,6 +159,9 @@
         return { path, name, size: file.size, type: file.type || '' };
       },
       async fileUrl(path, name) { return ok(await sb.storage.from('link-files').createSignedUrl(path, 120, { download: name })).signedUrl; },
+      // File storage (2 GB free, 20 GB with Link Plus): null on a database without this release's team-chat.sql.
+      async storage(ws) { return soft(sb.rpc('link_storage_json', { ws })); },
+      async storageFits(ws, size) { return soft(sb.rpc('link_storage_fits', { ws, size })); },
       liveExtra(ws, fns) {
         if (sub2) sb.removeChannel(sub2);
         sub2 = sb.channel('link-' + ws);
@@ -303,6 +311,9 @@
         { extension: '102', name: 'Sam Taylor', type: 'person', registered: 2, desk_phones: 1, app_users: 1, dnd: false }, { extension: '200', name: 'Lautoka branch', type: 'group', members: 2 },
         { extension: '201', name: 'Jordan Lee', type: 'person', registered: 0, desk_phones: 1, app_users: 0, dnd: false }, { extension: '202', name: 'Alex Nguyen', type: 'person', registered: 0, desk_phones: 0, app_users: 0, dnd: true }] };
     const loCmds = {}; const loPw = {}; let loN = 0; let loSupport = null;
+    // Demo file storage. sessionStorage 'riyeser.demo.storage': 'nearly' = 85% of the free 2 GB, 'full' = 1 MB left.
+    const demoStore = (() => { let k = ''; try { k = sessionStorage.getItem('riyeser.demo.storage') || ''; } catch { /* private window */ }
+      return k === 'full' ? { used: 2 * GB - 1048576, limit: 2 * GB, plus: false } : k === 'nearly' ? { used: 1.7 * GB, limit: 2 * GB, plus: false } : { used: 1.2 * GB, limit: 20 * GB, plus: true }; })();
     const reply = (ch, from, body, ms) => setTimeout(() => { const m = msg(ch, from, body, 0); m.created_at = new Date().toISOString(); msgs.push(m); listener && listener(m); }, ms);
     return {
       demo: true,
@@ -344,7 +355,7 @@
           { id: 1, at: t(2880), actor: 'u-me', action: 'workspaces.update', details: { phone: { was: '330 0000', now: '330 1234' } } }]; },
       async createTeam() { return ws; }, async joinTeam() { return ws; }, async newInvite() { return 'DEMO' + Math.floor(1000 + Math.random() * 9000); },
       async people() { return ppl.map(([user_id, display_name, role, extension, job_role]) => ({ user_id, display_name, role, extension, job_role: job_role || (role === 'owner' ? 'owner' : 'staff') })); },
-      async features() { return { calls: true, calls_paid: false, trial_days_left: 74 }; },
+      async features() { return { calls: demoStore.plus, calls_paid: false, trial_days_left: 74 }; },   // the storage knob below turns Link Plus off
       async branches() { return brs.map((b) => ({ ...b, people: b.people.slice() })); },
       async createBranch(_w, name) { const ext = Math.max(...brs.map((b) => b.extension)) + 100;
         brs.push({ id: 'b-' + Date.now(), name, code: name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'B') + '-' + Math.floor(1000 + Math.random() * 9000), extension: ext, people: [] }); },
@@ -366,7 +377,9 @@
       async pin(_w, ch, _u, on) { pinned = pinned.filter((x) => x !== ch); if (on) pinned.push(ch); },
       async lastMessages() { const out = {}; for (const m of [...msgs].sort((a, b) => b.created_at.localeCompare(a.created_at))) if (!out[m.channel_id]) out[m.channel_id] = { ...m }; return out; },
       async search(_w, q) { const t = q.toLowerCase(); return msgs.filter((m) => !m.deleted && m.body.toLowerCase().includes(t)).slice(-20).reverse().map((m) => ({ ...m })); },
-      async upload(_w, ch, file, name) { const path = `demo/${ch}/${Date.now().toString(36)}/${name}`; files[path] = URL.createObjectURL(file); return { path, name, size: file.size, type: file.type || '' }; },
+      async upload(_w, ch, file, name) { const path = `demo/${ch}/${Date.now().toString(36)}/${name}`; files[path] = URL.createObjectURL(file); demoStore.used += file.size; return { path, name, size: file.size, type: file.type || '' }; },
+      async storage() { const d = demoStore; return { used: d.used, limit: d.limit, pct: Math.round(d.used * 1000 / d.limit) / 10, plus: d.plus, extra_gb: 0 }; },
+      async storageFits(_w, size) { return demoStore.used + size <= demoStore.limit; },
       async fileUrl(path) { return files[path] || 'data:text/plain,' + encodeURIComponent('This demo file is gone. Files only last while the demo is open.'); },
       liveExtra(_w, fns) { onPres = fns.presence || null; onRx = fns.reaction || null; },
       callHistory() { const t = (m) => new Date(Date.now() - m * 60000).toISOString();
@@ -760,18 +773,21 @@
   }
 
   // The plan: each program's state, and people included (Company, and Billing & Subscription).
+  // "4 people · 3 included in each program, then US$5 a month each": users are charged per paid program.
+  const peopleText = (lic) => `${lic.seats.used} ${lic.seats.used === 1 ? 'person' : 'people'} · ${lic.seats.included} included per program`;
   function planHtml(lic) {
     return `<div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
         const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
         const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
         return `<div><span>${n}</span><span class="pl ${v.status === 'active' ? 'ok' : v.active ? (v.days_left <= 14 ? 'warn' : '') : 'bad'}">${txt}</span></div>`; }).join('')}
-        ${lic.seats ? `<div><span>People</span><span class="pl">${lic.seats.used} of ${lic.seats.included + lic.seats.extra} included${lic.early_bird ? ' · 🐣 early bird' : ''}</span></div>` : ''}</div>`;
+        ${lic.seats ? `<div><span>People</span><span class="pl">${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''}</span></div>` : ''}</div>`;
   }
   async function companyInfo(justMade) {
     const admin = isAdmin(); const t = S.team;
     const devs = admin ? await api.devices(t.id).catch(() => []) : [];
     let lic = admin ? await api.licence(t.id).catch(() => null) : null;
     if (!lic || !lic.modules || !lic.seats) lic = null;   // not set up online yet: no plan to show
+    const st = admin ? await api.storage(t.id).catch(() => null) : null;
     const field = (k, label, max = 120) => `<label class="f"><span>${label}</span><input name="${k}" value="${esc(t[k] || '')}" maxlength="${max}"${admin ? '' : ' readonly'}></label>`;
     modal(`<h3>${esc(t.name)}</h3>${justMade ? '<div class="ok">Your company is set up. Give your staff and branches the Company ID below: they ask to join, and you approve them.</div>' : ''}
       <div class="cid"><small>Company ID</small><span class="code" id="cidv">${esc(t.company_code || '')}</span><button class="btn sm" id="cpid">Copy</button></div>
@@ -780,6 +796,7 @@
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
       ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4>${planHtml(lic)}
         <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Riyeser Link chat. To change your plan, contact Riyeser.</p>` : ''}
+      ${st ? `<h4 style="margin:16px 0 6px">File storage</h4>${storageHtml(st)}` : ''}
       ${admin && devs.length ? `<h4 style="margin:16px 0 6px">Linked PCs</h4><div class="devs">${devs.map((dv) => `<div><span><b>${esc(dv.device_name || 'A PC')}</b><small>${esc(nameOf(dv.user_id))} · ${esc(dv.platform || '')} · seen ${ago(dv.last_seen)}</small></span><button type="button" class="btn sm" data-unlink="${dv.id}">Unlink</button></div>`).join('')}</div>` : ''}
       <div class="mfoot"><button type="button" class="btn" id="cl">Close</button>${admin ? '<button class="btn p">Save</button>' : ''}</div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
@@ -901,7 +918,7 @@
           <button class="btn" id="hsec">🔐 Security</button></div></section>
         ${myDetailsHtml(me, admin)}
         ${helpHtml()}
-        ${lic ? `<h3 class="hsec">Your plan <small>${lic.seats ? `${lic.seats.used} of ${lic.seats.included + lic.seats.extra} people included${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
+        ${lic ? `<h3 class="hsec">Your plan <small>${lic.seats ? `${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
         <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link Plus (calls)']]
           .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
         <h3 class="hsec">Riyeser Link</h3>
@@ -978,7 +995,7 @@
   const REFUND_FOR = ['Accounting Basics', 'Accounting Plus', 'Payroll', 'POS', 'Bookings', 'As Built', 'Riyeser Link Plus', 'My whole plan', 'Something else'];
   const REFUND_WHY = [['mistake', 'I was charged by mistake'], ['didnt_work', 'It didn\'t work for me'], ['cancelled', 'I cancelled'], ['duplicate', 'I was charged twice'], ['other', 'Something else']];
   const pill = (map, st) => { const [l, c] = map[st] || [st, '']; return `<span class="pl${c ? ' ' + c : ''}">${esc(l)}</span>`; };
-  const money2 = (n, c) => `${esc(c || 'FJD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const money2 = (n, c) => `${esc(c || 'USD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   // null = this part of Riyeser isn't switched on yet (the database hasn't been updated): hide it.
   async function loadHelp() {
     S.tickets = await api.myTickets().catch(() => null);
@@ -1095,7 +1112,7 @@
       <div class="rfrow"><label class="f"><span>Which period? <small class="opt">(e.g. November 2026)</small></span><input name="period" maxlength="80"></label>
       <label class="f"><span>Invoice or receipt number <small class="opt">(optional)</small></span><input name="invoice_ref" maxlength="80"></label></div>
       <div class="rfrow"><label class="f"><span>Amount</span><input name="amount" type="number" min="0.01" step="0.01" required inputmode="decimal"></label>
-      <label class="f"><span>Currency</span><select name="currency">${['FJD', 'AUD', 'NZD', 'USD'].map((c) => `<option>${c}</option>`).join('')}</select></label></div>
+      <label class="f"><span>Currency</span><select name="currency">${['USD', 'FJD', 'AUD', 'NZD'].map((c) => `<option${c === 'USD' ? ' selected' : ''}>${c}</option>`).join('')}</select></label></div>
       <label class="f"><span>Why?</span><select name="reason_category">${REFUND_WHY.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
       <label class="f"><span>Tell us a bit more</span><textarea name="explanation" rows="3" maxlength="2000" placeholder="What happened?"></textarea></label>
       <div id="rferr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Send request</button></div></form>`, (d, close) => {
@@ -1158,6 +1175,19 @@
   const REACTIONS = ['👍', '✅', '❤️', '😂', '🎉', '👀'];
   const EMOJI = ['😀', '😊', '😂', '😉', '😍', '🙏', '👍', '👏', '🙌', '💪', '✅', '❌', '🎉', '🔥', '⭐', '❤️', '👀', '🤔', '😅', '😢', '☕', '🚚', '🔧', '📞'];
   const MAX_FILE = 25 * 1024 * 1024;
+  // File storage for each business: the bar for owners and admins ("1.2 GB of 2 GB used"), a warning at 80%.
+  const gbText = (n) => { const g = n / GB; return `${g >= 10 || Number.isInteger(g) ? Math.round(g) : g.toFixed(1)} GB`; };
+  const usedText = (n) => (n < 0.1 * GB ? sizeText(n) : gbText(n));
+  const STORE_FULL = (plus) => (plus ? `Your business has used its ${STORAGE_GB.plus} GB of file storage. Free up space by asking your admin, or contact Riyeser for more.`
+    : `Your business has used its ${STORAGE_GB.free} GB of file storage. Free up space by asking your admin, or get ${STORAGE_GB.plus} GB with Riyeser Link Plus.`);
+  function storageHtml(st) {
+    if (!st || st.limit == null) return '';
+    const pct = Math.max(0, Math.min(100, Number(st.pct) || 0)); const warn = pct >= 80;
+    return `<div class="stor${warn ? ' warn' : ''}" id="stor"><div class="stor-h"><b>File storage</b><span>${usedText(Number(st.used) || 0)} of ${gbText(Number(st.limit))} used</span></div>
+      <div class="sbar" role="progressbar" aria-label="File storage used" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
+      ${warn ? `<p class="stor-w">⚠️ ${pct >= 100 ? 'Full.' : `${Math.round(pct)}% used.`} ${st.plus ? 'Ask people to free up space, or contact Riyeser for more.' : `Free up space, or get ${STORAGE_GB.plus} GB with Riyeser Link Plus.`}</p>` : ''}
+      <small class="muted">Files sent in Riyeser Link chats. ${STORAGE_GB.free} GB per business free; ${STORAGE_GB.plus} GB with Riyeser Link Plus. Nothing is ever deleted for you.</small></div>`;
+  }
   const personOf = (uid) => S.people.find((p) => p.user_id === uid) || null;
   const extOf = (uid) => (personOf(uid) || {}).extension || null;
   const plus = () => !!(S.features && S.features.calls);
@@ -1919,6 +1949,9 @@
     const big = list.find((x) => x.size > MAX_FILE); if (big) return tell(`${big.name} is over 25 MB. Send a smaller file, or share a link to it instead.`);
     const empty = list.find((x) => !x.size); if (empty) return tell(`${empty.name} is empty.`);
     const box = document.getElementById('upl'); const t = document.getElementById('txt'); const ch = S.ch;
+    const total = list.reduce((a, x) => a + x.size, 0);
+    const plusOn = !!(S.features && S.features.calls);
+    if ((await api.storageFits(S.team.id, total).catch(() => null)) === false) return tell(STORE_FULL(plusOn));
     box.hidden = false; const done = [];
     try {
       for (const x of list) {
@@ -1929,8 +1962,13 @@
       const text = t.value.trim(); const body = text || autoBody(files);
       const m = await api.send(S.team.id, ch.id, body, files); if (text) { t.value = ''; t.oninput(); }
       if (S.ch && S.ch.id === ch.id && !S.msgs.find((y) => y.id === m.id)) S.msgs.push(m); S.last[ch.id] = m; renderMsgs(true); renderList();
+      if (isAdmin() && !S.storeWarned) {   // owners and admins: a heads-up once storage passes 80%
+        const st = await api.storage(S.team.id).catch(() => null);
+        if (st && Number(st.pct) >= 80) { S.storeWarned = true; tell(`Your business has used ${usedText(Number(st.used))} of its ${gbText(Number(st.limit))} of file storage (${Math.round(Number(st.pct))}%). See Billing & Subscription.`, 'warn'); }
+      }
     } catch (err) {
       const msg = plainError(err);
+      if (/row-level|policy|403|Unauthorized/i.test(msg) && (await api.storageFits(S.team.id, total).catch(() => null)) === false) return tell(STORE_FULL(plusOn));
       tell(/bucket|not found|row-level|policy|files/i.test(msg) ? 'Files can\'t be sent here yet. Ask your business\'s owner to finish the Riyeser Link update.' : 'That file didn\'t send: ' + msg);
     } finally { box.hidden = true; box.innerHTML = ''; }
   }
@@ -1963,9 +2001,9 @@
   // Billing & Subscription (owners and admins): the plan, and how to change it.
   async function billing() {
     if (needs2step()) return security();
-    const lic = await api.licence(S.team.id).catch(() => null);
-    modal(`<h3>${ic('card')} Billing &amp; Subscription</h3>${lic && lic.modules ? planHtml(lic) : '<p>Your plan shows here once it\'s set up online.</p>'}
-      <p class="muted small">To change your plan, contact Riyeser. Riyeser Link chat is free forever; calls and desk phones come with Riyeser Link Plus.</p>
+    const [lic, st] = await Promise.all([api.licence(S.team.id).catch(() => null), api.storage(S.team.id).catch(() => null)]);
+    modal(`<h3>${ic('card')} Billing &amp; Subscription</h3>${lic && lic.modules ? planHtml(lic) : '<p>Your plan shows here once it\'s set up online.</p>'}${storageHtml(st)}
+      <p class="muted small">To change your plan, contact Riyeser. Riyeser Link chat is free forever; calls, desk phones and ${STORAGE_GB.plus} GB of files come with Riyeser Link Plus (${usd(PRICE_LINK_PLUS)} a month per business). All prices in US dollars.</p>
       <div class="mfoot"><a class="btn" href="/pricing.html" target="_blank" rel="noopener">See pricing</a><button class="btn p" id="cl">Done</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }
 
@@ -2048,7 +2086,7 @@
   // Calling a branch rings everyone in it; the first to answer takes the call. 30 seconds with no answer is a missed call.
   function upsell() {
     modal(`<h3>⭐ Riyeser Link Plus</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
-      <p><b>+$20 a month per business</b>, free for your first 90 days. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>
+      <p><b>${usd(PRICE_LINK_PLUS)} a month per business</b> (3 users included, then $5 a month each), free for your first 90 days. It also gives your business ${STORAGE_GB.plus} GB of chat files. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>
       <div class="mfoot"><button class="btn" id="cl">Not now</button><a class="btn p" href="/pricing.html" target="_blank" rel="noopener">See pricing</a></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }
 
@@ -2105,7 +2143,7 @@
   // password encrypted to it, so only this tab can read it. It's taken once, within 5 minutes, and is in the history.
   const PH = {
     TITLE: 'Desk phones',
-    UPSELL: 'Desk phones and calls come with <b>Riyeser Link Plus</b>. It\'s free for your first 90 days, then +$20 a month per business, with no call charges. To add it to your plan, contact Riyeser.',
+    UPSELL: `Desk phones and calls come with <b>Riyeser Link Plus</b>. It's free for your first 90 days, then ${usd(PRICE_LINK_PLUS)} a month per business (3 users included), with no call charges. To add it to your plan, contact Riyeser.`,
     GUIDE: ['Install <b>Riyeser Link Office</b> on a PC at the office that stays on (<b>Riyeser Central → Get more apps</b>).', 'Sign in with your Riyeser account.', 'Plug in desk phones.'],
     SENDING: 'Sending to Riyeser Link Office…', DONE: 'Done', SLOW: 'Riyeser Link Office hasn\'t picked this up yet. It checks every 30 seconds while the office PC is on and connected to the internet.',
     HELP: [['🔌 Power', 'Many desk phones don\'t come with a power adapter and expect power over the network cable (PoE). Buy the phone\'s power adapter, or a small PoE switch.'],
@@ -2164,7 +2202,7 @@
     let el = document.getElementById('phmsg');
     if (!el) { el = document.createElement('div'); el.id = 'phmsg'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
     el.className = `phmsg ${cls}`; el.innerHTML = html; el.hidden = false;
-    clearTimeout(phMsg.t); if (cls === 'ok' || cls === 'bad') phMsg.t = setTimeout(() => { el.hidden = true; }, cls === 'ok' ? 3500 : 9000);
+    clearTimeout(phMsg.t); if (cls === 'ok' || cls === 'bad' || cls === 'warn') phMsg.t = setTimeout(() => { el.hidden = true; }, cls === 'ok' ? 3500 : 9000);
   }
 
   async function refreshPhones() {

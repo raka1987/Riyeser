@@ -87,6 +87,9 @@ tick(); setInterval(tick, 60000);
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
 const ORDER = ['central', 'team', 'linkoffice', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
+// Free programs with a paid upgrade: a gold "★ Plus" pill (the same as on riyeser.com). Prices in US dollars a month per business.
+const PLUS = { team: 'Premium version available: Riyeser Link Plus adds calls, desk phones and 20 GB of files for US$39/month' };
+const plusPill = (id, act = true) => (PLUS[id] ? `<span class="pluspill"${act ? ' data-lic="buy" role="link" tabindex="0"' : ''} title="${esc(PLUS[id])}">★ Plus available</span>` : '');
 const LOOK = {
   team: { ic: 'chat', c: 'c-team', nav: 'Link', col: '#a21caf', blurb: 'Chat, and Link Plus calls' },   // Riyeser Link (program id still "team")
   linkoffice: { ic: 'phone', c: 'c-link', nav: 'Link Office', col: '#0e7490', blurb: 'Comes with Riyeser Link Plus' },
@@ -171,7 +174,7 @@ function renderCards() {
   $('#cards').hidden = !mine.length && !want.length;
   $('#cards').innerHTML = mine.map((p) => {
     const L = LOOK[p.id]; const c = cardLine(p.id);
-    return `<button class="pcard" data-open="${esc(p.id)}" title="Open ${esc(p.full)}"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}</b><span class="ps${c.alert ? ' bad' : ''}">${esc(c.s)}</span>${CHEV}</button>`;
+    return `<button class="pcard" data-open="${esc(p.id)}" title="Open ${esc(p.full)}"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}${PLUS[p.id] ? ` ${plusPill(p.id, false)}` : ''}</b><span class="ps${c.alert ? ' bad' : ''}">${esc(c.s)}</span>${CHEV}</button>`;
   }).join('') + want.map((p) => {
     const L = LOOK[p.id];
     return `<div class="pcard want"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}</b><span class="ps">On your plan, not installed yet</span>
@@ -251,7 +254,7 @@ function renderLayout() {
 function renderApps() {
   const others = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')))
     .map((p) => (p.id === 'accounting' && has('accounting-basics') ? { ...p, name: 'Upgrade to Accounting Plus' } : p));
-  $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc">${logo(p, 44)}<div><b>${esc(p.name)}</b><p>${esc(p.desc)}</p>
+  $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc">${logo(p, 44)}<div><b>${esc(p.name)}</b> ${plusPill(p.id)}<p>${esc(p.desc)}</p>
       <div class="row instrow" data-instrow="${esc(p.id)}">${installing === p.id ? instProgress() : `<button class="btn" data-install="${esc(p.id)}" title="Download and install it now">Install</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-help="${esc(p.id)}">Learn more</button><button class="link" data-get="${esc(p.id)}" title="Its page on riyeser.com">Download page</button><button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`}</div></div></div>`).join('')
     : '<div class="lbl">You have every Riyeser program.</div>';
 }
@@ -625,7 +628,7 @@ function openPlan(o) {
       ${o.stale ? esc(o.message) : 'Set by Riyeser for your whole company. Every Riyeser program on this PC follows it.'}</div></div>
     <ul class="planrows">${o.rows.map((r) => `<li class="t-${r.tone}"><span>${icon[r.tone] || ''}</span><b>${esc(r.name)}</b><span class="pt">${esc(r.text)}</span></li>`).join('')
       || '<li><span></span><b>No paid programs yet</b><span class="pt">Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are free.</span></li>'}</ul>
-    <p class="planmeta">Users: ${o.seatsIncluded} included${o.extraUsers ? ` + ${o.extraUsers} extra` : ''}${o.usersUsed != null ? ` (${o.usersUsed} in use)` : ''} · Companies in Accounting: ${1 + o.extraCompanies} (1 included${o.extraCompanies ? ` + ${o.extraCompanies} extra` : ''})
+    <p class="planmeta">Users: ${o.seatsIncluded} included in each paid program${o.extraUsers ? ` + ${o.extraUsers} extra` : ''}${o.usersUsed != null ? ` (${o.usersUsed} in use)` : ''} · Companies in Accounting: ${1 + o.extraCompanies} (1 included${o.extraCompanies ? ` + ${o.extraCompanies} extra` : ''})
       · Billed ${o.billing === 'yearly' ? 'yearly' : 'monthly'}${o.earlyBird ? ' · 🐣 early bird' : ''}</p>
     <p class="muted">Last checked ${esc(o.checkedAgo)}. Works offline for 30 days between checks.</p>
     <div class="row"><button class="btn" data-lic="refresh">Check now</button><button class="btn s" data-lic="buy">See plans</button></div>
@@ -646,7 +649,7 @@ function openLicence() {
     : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
       <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
       <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">Central, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business (3 users included), and Accounting Plus, Payroll and POS are +$20 each. As Built, for the building industry, is $20 a month on its own. 🐣 Early bird: 50% off your first year for the first 100 businesses. Every paid program is free for 90 days, no card. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+      <p class="muted">All prices in US dollars, per business per month. Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are free forever. Every paid program is free for 90 days, no card, then: Accounting Basics US$25, Accounting Plus $39 (it includes Basics), Payroll $25, POS $29, Bookings $25, Riyeser Link Plus $39 and As Built $29. Each includes 3 users; each extra user is $5 a month for that program. 🐣 Early bird: 50% off your first 12 months for the first 100 businesses. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
   $('#licdlg').showModal();
 }
 document.addEventListener('click', (e) => {

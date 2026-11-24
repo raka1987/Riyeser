@@ -331,3 +331,9 @@ main.wide { max-width: none; }
   .sws.open .sw-in { display: none; } .sws:not(.open) .sw-conv, .sws:not(.open) .sw-diag { display: none; }
   .tbar { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sw-conv .conv { max-height: none; } .cfoot select { flex: 1 1 100%; } .cfoot #thenl { flex: 1 1 100%; }
 }
+
+/* Riyeser Link file storage on the customer page */
+.storrow { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 4px 0 8px; }
+.sbar { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; margin-bottom: 8px; }
+.sbar i { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
+.sbar.warn i { background: var(--warn); }

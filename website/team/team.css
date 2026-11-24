@@ -680,3 +680,13 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
   .cb { flex: 1 1 calc(25% - 6px); }
   .tpick { grid-template-columns: 1fr; } .tcard { grid-template-columns: 110px 1fr; align-items: center; column-gap: 10px; } .tcard .tprev { grid-row: 1 / 3; height: 54px; } .apick { grid-template-columns: 1fr 1fr; }
 }
+
+/* File storage for the business (Billing & Subscription, Company): "1.2 GB of 2 GB used", amber from 80% */
+.stor { margin: 14px 0 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); }
+.stor-h { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; font-size: 14.5px; color: var(--ink); margin-bottom: 8px; }
+.stor-h span { font-weight: 700; }
+.sbar { height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--line) 80%, transparent); overflow: hidden; }
+.sbar i { display: block; height: 100%; border-radius: inherit; background: #2563eb; }
+.stor.warn .sbar i { background: #d97706; }
+.stor-w { margin: 8px 0 4px; font-size: 13.5px; font-weight: 600; color: #78350f; background: #fef3c7; border-radius: 8px; padding: 6px 10px; }
+.stor small { display: block; margin-top: 6px; }

@@ -22,8 +22,13 @@
   const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
   const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']];
   const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
-  const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
-  const cur = (n, c) => `${esc(c || 'FJD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  // List prices: US dollars a month per business (the same as riyeser_price() in team-chat.sql and website/prices.mjs).
+  // Each paid program includes 3 users, then US$5 a month each for that program; Plus includes Basics (never both).
+  const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 5, extra_company: 10 };
+  const GB = 1073741824;
+  const gbText = (n) => { const g = Number(n || 0) / GB; return `${g >= 10 || Number.isInteger(g) ? Math.round(g) : g.toFixed(1)} GB`; };
+  const money = (n) => 'US$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
+  const cur = (n, c) => `${esc(c || 'USD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const statusPill = (v) => (v.status === 'active' ? `<span class="pill ok">Paid${v.paid_until ? ` to ${day(v.paid_until)}` : ''}</span>`
     : v.status === 'trial' ? `<span class="pill${v.days_left <= 14 ? ' warn' : ''}">Trial · ${v.days_left} days</span>`
     : v.status === 'cancelled' ? (v.active ? `<span class="pill warn">Cancelled · works to ${day(v.paid_until)}</span>` : '<span class="pill bad">Cancelled</span>')
@@ -129,6 +134,7 @@
       downloadsDaily: (days) => rpc('hq_downloads', { days }),
       licences: () => rpc('hq_licences'), companyLicence: (ws) => rpc('hq_company_licence', { ws }),
       setModule: (ws, mod, status, trialEnd, paidTo) => rpc('hq_set_module', { ws, mod, new_status: status, trial_end: trialEnd || null, paid_to: paidTo || null }),
+      grantStorage: (ws, gb, why) => rpc('hq_grant_storage', { ws, gb, why }),
       setPlan: (ws, users, cos, billing, eb) => rpc('hq_set_plan', { ws, users_extra: users, companies_extra: cos, billing_period: billing, is_early_bird: eb }),
       settings: () => rpc('hq_get_settings'), setSetting: (k, v) => rpc('hq_set_setting', { setting: k, val: v }),
       // support
@@ -249,8 +255,18 @@
         else if (r.status === 'active') { const left = dd(r.paid_until); modules[m] = { status: left >= 0 ? 'active' : 'ended', active: left >= 0, trial_ends: null, paid_until: r.paid_until, days_left: left >= 0 ? left : null }; }
         else { const left = r.paid_until ? dd(r.paid_until) : -1; modules[m] = { status: 'cancelled', active: left >= 0, trial_ends: null, paid_until: r.paid_until, days_left: left >= 0 ? left : null }; } });
       const pl = plans[ws] || {}; return { workspace_id: ws, company_code: c.company_code, modules, seats: { included: 3, extra: pl.extra_users || 0, used: c.people }, extra_companies: pl.extra_companies || 0, billing: pl.billing || 'monthly', early_bird: !!pl.early_bird }; }
-    function demoMonthly(ws) { const l = demoLicence(ws); const n = Object.values(l.modules).filter((v) => v.status === 'active').length;
-      let m = n * 20 + l.seats.extra * 5 + l.extra_companies * 10; if (l.billing === 'yearly') m *= 10 / 12; if (l.early_bird) m *= 0.5; return Math.round(m * 100) / 100; }
+    function demoMonthly(ws) { const l = demoLicence(ws); let mods = Object.keys(l.modules).filter((m) => l.modules[m].status === 'active');
+      if (mods.includes('plus')) mods = mods.filter((m) => m !== 'basic');   // Plus includes Basics
+      const people = Math.max(l.seats.used || 0, PRICE.users_included + (l.seats.extra || 0)); const over = Math.max(0, people - PRICE.users_included);
+      let m = mods.reduce((a, x) => a + PRICE[x] + over * PRICE.extra_user, 0); if (l.early_bird) m *= 0.5;
+      if (mods.some((x) => x === 'basic' || x === 'plus')) m += l.extra_companies * PRICE.extra_company;
+      if (l.billing === 'yearly') m *= 10 / 12; return Math.round(m * 100) / 100; }
+    // Demo file storage (Riyeser Link files): 2 GB, 20 GB with Link Plus on, plus extra granted here.
+    const extraGb = {};
+    function demoStorage(ws) { const c = cos.find((x) => x.id === ws); const l = demoLicence(ws); const plus = !!(l.modules.calls && l.modules.calls.active);
+      const used = ws === 'w2' ? Math.round((plus ? 20 : 2) * 0.875 * GB)   // Harbour Cafe: nearly full, for "Storage over 80%"
+        : Math.round(([...String(ws)].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 10 + (c && c.people > 3 ? 8 : 1)) * 0.19 * GB);
+      const limit = ((plus ? 20 : 2) + (extraGb[ws] || 0)) * GB; return { used, limit, pct: Math.round(used * 1000 / limit) / 10, plus, extra_gb: extraGb[ws] || 0 }; }
     let nid = 4;
     const notes = { w1: [{ id: 1, kind: 'note', body: 'Called Alex: wants POS for the Lautoka branch next month.', at: t(2), by: 'Riki', author: 's1', pinned: false }],
       w2: [{ id: 2, kind: 'call', direction: 'in', contact: 'Mere', body: 'Asked about yearly billing for the second cafe.', at: t(1), by: 'Riki', author: 's1', follow_up: new Date().toISOString().slice(0, 10), pinned: false },
@@ -349,7 +365,7 @@
     function listRows() { return cos.map((c) => { const l = demoLicence(c.id); const vs = Object.entries(l.modules); const paid = vs.filter(([, v]) => v.status === 'active').map(([m]) => m);
       const tr = vs.filter(([, v]) => v.status === 'trial'); const te = tr.length ? tr.map(([, v]) => v.trial_ends).sort()[0] : null;
       return { id: c.id, name: c.name, company_code: c.company_code, country: c.country, created_at: c.created_at, status: c.status, kind: c.kind, last_active_at: c.last_active_at,
-        paid_n: paid.length, paid, trial_n: tr.length, trial_end: te, trial_days: te ? dd(te) : null, owner_name: c.owner_name, owner_email: c.owner_email, phone: c.owner_phone,
+        paid_n: paid.length, paid, trial_n: tr.length, trial_end: te, trial_days: te ? dd(te) : null, storage_pct: demoStorage(c.id).pct, owner_name: c.owner_name, owner_email: c.owner_email, phone: c.owner_phone,
         tickets_open: tickets.filter((x) => x.workspace_id === c.id && x.status !== 'done').length, people: c.people, pcs: c.pcs, hq_owner: c.hq_owner, hq_owner_name: nameOf(c.hq_owner),
         next_follow_up: nextFu(c.id) ? nextFu(c.id).date : null }; }); }
     function nextFu(ws) { const n = (notes[ws] || []).map(noteRow).filter((x) => x.follow_up && !x.follow_up_done_at).sort((a, b) => a.follow_up.localeCompare(b.follow_up))[0];
@@ -396,6 +412,9 @@
             ended: list.filter((x) => ['ended', 'cancelled', 'closed'].includes(x.l.modules[m].status)).length })), ending_soon: ending.sort((a, b) => a.days_left - b.days_left) }; },
       async companyLicence(ws) { return { licence: demoLicence(ws), monthly: demoMonthly(ws) }; },
       async setModule(ws, mod, status, te, pt) { need('licences.manage'); (mods[ws] = mods[ws] || {})[mod] = { status, trial_ends: te || null, paid_until: pt || null }; log('licence.module', { workspace_id: ws, module: mod, status }); },
+      async grantStorage(ws, gb, why) { need('licences.manage'); if (!(gb >= 0 && gb <= 10000)) throw new Error('Choose 0 to 10000 GB of extra storage.');
+        if (String(why || '').trim().length < 3) throw new Error('Say why, so the team knows later.');
+        log('licence.storage', { workspace_id: ws, extra_gb: { was: extraGb[ws] || 0, now: gb }, reason: why }); extraGb[ws] = gb; return demoStorage(ws); },
       async setPlan(ws, users, cosx, billing, eb) { need('licences.manage'); plans[ws] = { extra_users: users, extra_companies: cosx, billing, early_bird: eb }; log('licence.plan', { workspace_id: ws }); },
       async settings() { return { ...settings }; },
       async setSetting(k, v) { need('settings.manage'); settings[k] = Number(v); log('settings.changed', { setting: k, value: v }); },
@@ -542,7 +561,7 @@
           signup: x.role === 'owner' ? { you: x.name, phone: co.owner_phone, country: co.country, email: x.email, biz: co.name, tax_number: '50-12345-0-1' } : {} }));
         const open = tickets.filter((x) => x.workspace_id === ws && x.status !== 'done');
         c.profile = { ...c.profile, hq_owner: co.hq_owner, hq_owner_name: nameOf(co.hq_owner) };
-        return { ...c, people, next_follow_up: nextFu(ws), staff: staff.filter((x) => x.active).map((x) => ({ user_id: x.user_id, name: x.display_name })), owner: people.find((x) => x.role === 'owner') || null, pcs: pcsOf(co), licence: P.includes('licences.view') ? demoLicence(ws) : null, monthly: demoMonthly(ws),
+        return { ...c, people, next_follow_up: nextFu(ws), staff: staff.filter((x) => x.active).map((x) => ({ user_id: x.user_id, name: x.display_name })), owner: people.find((x) => x.role === 'owner') || null, pcs: pcsOf(co), licence: P.includes('licences.view') ? demoLicence(ws) : null, storage: P.includes('licences.view') ? demoStorage(ws) : null, monthly: demoMonthly(ws),
           notes: (notes[ws] || []).map(noteRow).sort((a, b) => (b.pinned - a.pinned) || String(b.at).localeCompare(String(a.at))),
           tickets_open: open.length, tickets_overdue: open.filter((x) => !x.first_reply_at && hours(x.created_at) > od).length, timeline: timelineOf(ws) }; },
       async messageCustomer(ws, person, topic, subject, body) { need('support.reply');
@@ -597,6 +616,7 @@
           && (!f.inactive_days || hours(c.last_active_at || c.created_at) / 24 > Number(f.inactive_days))
           && (!f.plan || (f.plan === 'paid' && c.paid_n > 0) || (f.plan === 'trial' && !c.paid_n && c.trial_n > 0) || (f.plan === 'free' && !c.paid_n && !c.trial_n))
           && (!f.trial_days || (c.trial_end && dd(c.trial_end) <= Number(f.trial_days))) && (!f.open_tickets || c.tickets_open > 0)
+          && (!f.storage_80 || c.storage_pct >= 80)
           && (!f.follow_up || (notes[c.id] || []).some((n) => n.follow_up && !n.follow_up_done_at) || tickets.some((x) => x.workspace_id === c.id && ['new', 'waiting_us'].includes(x.status))));
         const sk = o.sort || 'created'; const desc = o.desc == null ? sk === 'created' : !!o.desc;
         const key = { name: (c) => c.name.toLowerCase(), owner: (c) => (c.owner_name || '').toLowerCase() || null, phone: (c) => c.phone || null, plan: (c) => c.paid_n, trial: (c) => c.trial_days,
@@ -1024,12 +1044,13 @@
         <label class="f"><span>Country</span><select name="country"><option value="">Any</option>${(S.clCountries || []).map((c) => `<option${f.country === c.country ? ' selected' : ''}>${esc(c.country)}</option>`).join('')}</select></label>
         <label class="f"><span>Inactive for</span><select name="inactive_days">${opt([['', 'Any'], ['30', '30+ days'], ['60', '60+ days'], ['90', '90+ days']], f.inactive_days)}</select></label>
         <div class="row cfchecks"><label class="opt"><input type="checkbox" name="open_tickets"${f.open_tickets ? ' checked' : ''}> Has open tickets</label>
-          <label class="opt"><input type="checkbox" name="follow_up"${f.follow_up ? ' checked' : ''}> Needs follow-up</label><label class="opt"><input type="checkbox" name="mine"${f.mine ? ' checked' : ''}> My customers</label></div>
+          <label class="opt"><input type="checkbox" name="follow_up"${f.follow_up ? ' checked' : ''}> Needs follow-up</label><label class="opt"><input type="checkbox" name="mine"${f.mine ? ' checked' : ''}> My customers</label>
+          <label class="opt"><input type="checkbox" name="storage_80"${f.storage_80 ? ' checked' : ''}> Storage over 80%</label></div>
         <div class="row"><button type="button" class="btn sm" id="cclear">Clear filters</button><button type="button" class="btn sm" id="ccsv">⬇ Download CSV</button></div></form>
       <div id="cl" class="card scroll"><p class="muted">Loading…</p></div><div id="pager" class="pager"></div>`);
     const read = () => { const a = new FormData(m.querySelector('#sf')); const b = new FormData(m.querySelector('#cf'));
       const nf = { status: a.get('st') === 'all' ? '' : String(a.get('st')), plan: String(b.get('plan') || ''), trial_days: String(b.get('trial_days') || ''), country: String(b.get('country') || ''),
-        inactive_days: String(b.get('inactive_days') || ''), open_tickets: !!b.get('open_tickets'), follow_up: !!b.get('follow_up'), mine: !!b.get('mine') };
+        inactive_days: String(b.get('inactive_days') || ''), open_tickets: !!b.get('open_tickets'), follow_up: !!b.get('follow_up'), mine: !!b.get('mine'), storage_80: !!b.get('storage_80') };
       Object.keys(nf).forEach((k) => { if (!nf[k]) delete nf[k]; }); return { q: String(a.get('q') || '').trim(), f: nf }; };
     const apply = () => { const x = read(); Object.assign(st, x, { page: 1, view: viewOf(x.f) }); companies(); };
     m.querySelector('#sf').onsubmit = (e) => { e.preventDefault(); apply(); };
@@ -1046,13 +1067,13 @@
     if (r.old) m.querySelector('#cf').insertAdjacentHTML('afterbegin', '<p class="muted small" style="grid-column:1/-1">Filters, sorting and pages switch on once the latest <b>team-chat.sql</b> is run in Supabase (SQL Editor).</p>');
     const arrow = (k) => (st.sort === k ? (st.desc ? ' ↓' : ' ↑') : '');
     const rows = r.rows || [];
-    m.querySelector('#cl').innerHTML = rows.length ? `<table class="tbl ctbl"><tr>${CCOLS.map(([k, l]) => `<th${k === 'tickets' ? ' class="n"' : ''}><button class="sortb${st.sort === k ? ' on' : ''}" data-sort="${k}">${l}${arrow(k)}</button></th>`).join('')}<th>Riyeser owner</th><th>Follow-up</th></tr>
+    m.querySelector('#cl').innerHTML = rows.length ? `<table class="tbl ctbl"><tr>${CCOLS.map(([k, l]) => `<th${k === 'tickets' ? ' class="n"' : ''}><button class="sortb${st.sort === k ? ' on' : ''}" data-sort="${k}">${l}${arrow(k)}</button></th>`).join('')}<th>Riyeser owner</th><th>Follow-up</th>${rows.some((c) => c.storage_pct != null) ? '<th class="n">Storage</th>' : ''}</tr>
       ${rows.map((c) => `<tr class="click" data-co="${esc(c.id)}"><td><b>${esc(c.name)}</b><small class="code">${esc(c.company_code || '')}</small></td>
         <td>${esc(c.owner_name || '')}<small>${esc(c.owner_email || '')}</small></td><td class="nowrap">${esc(c.phone || '')}</td><td>${planCell(c)}</td>
         <td>${c.trial_days != null ? `${daysPill(c.trial_days)}<small>${day(c.trial_end)}</small>` : c.trial_days_left != null && c.paid_n == null ? `${daysPill(c.trial_days_left)}` : '<span class="muted">—</span>'}</td>
         <td>${ago(c.last_active_at || c.last_seen)}</td><td class="n">${c.tickets_open != null ? (c.tickets_open ? `<span class="pill warn">${num(c.tickets_open)}</span>` : '0') : ''}</td>
         <td>${pill(BSTAT, c.status || 'active')}</td><td class="nowrap">${c.hq_owner_name ? esc(c.hq_owner_name) : '<span class="muted">—</span>'}</td>
-        <td class="nowrap">${c.next_follow_up ? `<span class="pill${c.next_follow_up <= today() ? ' warn' : ''}">${day(c.next_follow_up)}</span>` : '<span class="muted">—</span>'}</td></tr>`).join('')}</table>`
+        <td class="nowrap">${c.next_follow_up ? `<span class="pill${c.next_follow_up <= today() ? ' warn' : ''}">${day(c.next_follow_up)}</span>` : '<span class="muted">—</span>'}</td>${rows.some((x) => x.storage_pct != null) ? `<td class="n">${c.storage_pct != null ? `<span class="pill${Number(c.storage_pct) >= 80 ? ' warn' : ''}">${Math.round(Number(c.storage_pct))}%</span>` : ''}</td>` : ''}</tr>`).join('')}</table>`
       : '<p class="muted">No companies match.</p>';
     const total = Number(r.total || 0); const from = total ? (st.page - 1) * PER_PAGE + 1 : 0; const to = Math.min(total, (st.page - 1) * PER_PAGE + rows.length);
     const pages = Math.max(1, Math.ceil(total / (r.old ? Math.max(1, total) : PER_PAGE)));
@@ -1085,7 +1106,7 @@
 
   function closePanel() { document.querySelectorAll('.modal').forEach((x) => x.remove()); }
   const HIST_ACTS = { 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link Plus paid-until',
-    'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
+    'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'licence.storage': 'granted extra file storage', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
     'staff.owner_made': 'made an HQ owner (SQL Editor)', 'ticket.viewed': 'opened a ticket', 'ticket.replied': 'replied to a ticket', 'ticket.note': 'added an internal note',
     'ticket.status': 'changed a ticket\'s status', 'ticket.priority': 'changed a ticket\'s priority', 'ticket.assigned': 'assigned a ticket', 'ticket.escalated': 'escalated a ticket',
     'ticket.deescalated': 'de-escalated a ticket', 'saved_reply.saved': 'saved a reply', 'saved_reply.retired': 'removed a saved reply', 'business.edited': 'edited business details',
@@ -1157,7 +1178,7 @@
     const by = (st) => MODULES.filter(([m]) => L.modules[m].status === st).map(([, n]) => n);
     const paid = by('active'); const trial = by('trial'); const soon = MODULES.map(([m]) => L.modules[m]).filter((v) => v.status === 'trial').map((v) => v.days_left);
     return `<div class="cpplan"><b>${paid.length ? `Paid: ${esc(paid.join(', '))}` : 'Nothing paid yet'}</b>${trial.length ? ` · Trial: ${trial.length === 7 ? 'every program' : esc(trial.join(', '))} (${Math.min(...soon)} days left)` : ''}
-      ${c.monthly != null ? ` · <span title="List price estimate until payments are connected">${money(c.monthly)} a month (estimate)</span>` : ''}${L.seats ? ` · ${L.seats.used} of ${L.seats.included + L.seats.extra} people` : ''}</div>`;
+      ${c.monthly != null ? ` · <span title="List price estimate until payments are connected">${money(c.monthly)} a month (estimate)</span>` : ''}${L.seats ? ` · ${L.seats.used} people (${L.seats.included} included in each program${L.seats.extra ? `, ${L.seats.extra} extra set` : ''})` : ''}</div>`;
   }
   function drawCompany() {
     const c = S.cp; const p = c.profile; const o = c.owner || {}; const id = p.id || S.cpId; const open = !p.status || p.status === 'active';
@@ -1293,12 +1314,23 @@
       ${!reported ? '<p class="muted small">"Installed on" fills in once their PCs run Riyeser Central 1.8.1 or later.</p>' : ''}
       <p class="muted small">Changes reach the business's PCs the next time Riyeser Central checks in (at start-up and daily).</p></div>
       <div class="card" style="margin-top:14px"><h3>Plan settings</h3><form id="plan" class="grid g3 planf">
-        <label class="f"><span>Extra users <small class="muted">(${L.seats.used} people, ${L.seats.included} included)</small></span><input type="number" min="0" name="users" value="${L.seats.extra}"${manage ? '' : ' disabled'}></label>
+        <label class="f"><span>Extra users <small class="muted">(${L.seats.used} people now; ${L.seats.included} included in each program, then US$${PRICE.extra_user} each per program)</small></span><input type="number" min="0" name="users" value="${L.seats.extra}"${manage ? '' : ' disabled'}></label>
         <label class="f"><span>Extra companies</span><input type="number" min="0" name="cos" value="${L.extra_companies}"${manage ? '' : ' disabled'}></label>
         <label class="f"><span>Billing</span><select name="billing"${manage ? '' : ' disabled'}><option value="monthly"${L.billing === 'monthly' ? ' selected' : ''}>Monthly</option><option value="yearly"${L.billing === 'yearly' ? ' selected' : ''}>Yearly (2 months free)</option></select></label>
         <label class="opt"><input type="checkbox" name="eb"${L.early_bird ? ' checked' : ''}${manage ? '' : ' disabled'}> Early bird: half price for the first 12 months</label>
         ${manage ? '<div><button class="btn p sm">Save plan</button></div>' : '<p class="muted small">Owners and Finance can change plans.</p>'}</form></div>
+      ${storageCard(c.storage, manage)}
       ${X && X.offers && X.offers.length ? `<div class="card scroll" id="offCard" style="margin-top:14px"><h3>Free periods <small>· ${X.offers.length}</small></h3>${offersTable(X.offers)}</div>` : ''}`;
+  }
+  // Riyeser Link file storage: used out of the limit, and Grant extra storage (licences.manage, with a reason).
+  function storageCard(st, manage) {
+    if (!st) return '';
+    const pct = Math.max(0, Math.min(100, Number(st.pct) || 0));
+    return `<div class="card" id="storCard" style="margin-top:14px"><h3>File storage <small>· Riyeser Link chat files · ${st.plus ? '20 GB with Link Plus' : '2 GB free'}${st.extra_gb ? ` + ${num(st.extra_gb)} GB extra` : ''}</small></h3>
+      <div class="storrow"><b>${gbText(st.used)} of ${gbText(st.limit)} used</b><span class="pill${pct >= 80 ? ' warn' : ' ok'}">${Math.round(pct)}%</span></div>
+      <div class="sbar${pct >= 80 ? ' warn' : ''}"><i style="width:${pct}%"></i></div>
+      <p class="muted small">Over the limit, new uploads are refused with a plain message. Nothing is ever deleted automatically.</p>
+      ${manage ? '<button class="btn sm" id="grantStor">Grant extra storage</button>' : '<p class="muted small">Owners and Finance can grant extra storage.</p>'}</div>`;
   }
   const offersTable = (list) => `<table class="tbl"><tr><th>Offer</th><th>What</th><th>Status</th><th>By</th></tr>
     ${list.map((o) => `<tr><td class="code">${esc(o.ref)}<small>${day(o.created_at)}</small></td><td>${o.days} days · ${esc(o.kind === 'account' ? 'all paid programs' : o.modules.map(modName).join(', '))}<small>${esc(OFFER_KIND[o.kind] || o.kind)} · ${esc((OFFER_WHY.find((w) => w[0] === o.reason_category) || [0, o.reason_category])[1])}: ${esc(o.reason)}</small></td>
@@ -1412,6 +1444,13 @@
     on('#cvMsg', () => messageCustomer()); on('#cvCall', logCall); on('#cvNote', () => addNote());
     const nf = el.querySelector('#nf'); if (nf) nf.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(nf);
       try { await api.noteAdd(id, { kind: 'note', body: String(f.get('body')).trim(), pinned: !!f.get('pin'), follow_up: String(f.get('fu') || '') || null }); await reloadCompany(); } catch (err) { alert(plain(err)); } };
+    on('#grantStor', () => dlg(`<h3>Grant extra storage</h3><p class="muted small">The total extra GB on top of 2 GB (or 20 GB with Link Plus). It's in the HQ history.</p>
+      <form id="gsf"><label class="f"><span>Extra storage (GB)</span><input name="gb" type="number" min="0" max="10000" step="1" required value="${(S.cp.storage && S.cp.storage.extra_gb) || 5}"></label>
+      <label class="f"><span>Why</span><input name="why" required minlength="3" maxlength="300" placeholder="e.g. Lots of site drawings"></label><div id="gserr"></div>
+      <div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Grant</button></div></form>`, (d, close) => {
+      d.querySelector('#gsf').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
+        try { await api.grantStorage(id, Number(f.get('gb')), String(f.get('why')).trim()); close(); await reloadCompany(); flash('Extra storage granted.'); }
+        catch (err) { d.querySelector('#gserr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; }));
     const pf = el.querySelector('#plan'); if (pf && can('licences.manage')) pf.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
       try { await api.setPlan(id, Number(f.get('users') || 0), Number(f.get('cos') || 0), String(f.get('billing')), !!f.get('eb')); await reloadCompany(); flash('Plan saved.'); } catch (err) { alert(plain(err)); } };
     const fb = el.querySelector('#fuBox'); if (fb) api.myFollowUps().then((fu) => { fb.innerHTML = followUpList(fu, id); wireAttention(fb, reloadCompany); }).catch((err) => { fb.innerHTML = missing(err) ? '<p class="muted small">Run the latest team-chat.sql to switch this on.</p>' : `<p class="muted small">${esc(plain(err))}</p>`; });
@@ -1679,7 +1718,7 @@
     const rfb = tv.querySelector('#trf'); if (rfb) rfb.onclick = () => dlg(`<h3>↩️ Refund request for this customer</h3><p class="muted small">Entered on their behalf from ${esc(t.ref)}. It goes to the Refunds queue for approval; they're emailed that we've got it.</p>
       <form id="rq"><label class="f"><span>What it's for</span><input name="for_what" required maxlength="120" placeholder="e.g. Accounting Basics"></label>
       <div class="grid g2"><label class="f"><span>Period</span><input name="period" maxlength="80" placeholder="e.g. November 2026"></label><label class="f"><span>Invoice reference</span><input name="invoice_ref" maxlength="80"></label>
-      <label class="f"><span>Amount</span><input name="amount" type="number" min="0.01" step="0.01" required></label><label class="f"><span>Currency</span><select name="currency"><option>FJD</option><option>AUD</option><option>NZD</option><option>USD</option></select></label></div>
+      <label class="f"><span>Amount</span><input name="amount" type="number" min="0.01" step="0.01" required></label><label class="f"><span>Currency</span><select name="currency"><option selected>USD</option><option>FJD</option><option>AUD</option><option>NZD</option></select></label></div>
       <label class="f"><span>Reason</span><select name="reason_category">${Object.entries(RWHY).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
       <label class="f"><span>What the customer said</span><textarea name="explanation" rows="3" maxlength="2000"></textarea></label>
       <div id="rqerr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Enter request</button></div></form>`, (d, close) => {
@@ -1998,7 +2037,7 @@
       <h3 class="h3">Revenue estimate <small class="muted">· list prices, an estimate until payments are connected</small></h3>
       <div class="banner est">Estimate until payments are connected: worked out from paid-until dates and plans at list prices, not from money received.</div>
       <div class="grid g2">
-        ${box('rRevenue', 'Monthly estimate by month', `now about ${money(r.monthly_now)} a month`, columnChart(rev, (x) => moLabel(x.month), (x) => Number(x.estimate), 'dollars (estimate)')
+        ${box('rRevenue', 'Monthly estimate by month', `now about ${money(r.monthly_now)} a month`, columnChart(rev, (x) => moLabel(x.month), (x) => Number(x.estimate), 'US dollars (estimate)')
           + table('revenue', ['Month', 'Estimate', 'Paying businesses', 'New paid programs', 'Lost programs'], rev.map((x) => [moLabel(x.month), { html: money(x.estimate), csv: x.estimate }, Number(x.paying), Number(x.new_paid), Number(x.lost)]), { num: [1, 2, 3, 4] }), 'revenue')}
         ${box('rProgram', 'By program', 'paying now', barList(r.revenue_by_program || [], (x) => modName(x.module), (x) => Number(x.paying))
           + table('revenue_program', ['Program', 'Paying businesses', 'A month (estimate)'], (r.revenue_by_program || []).map((x) => [modName(x.module), Number(x.paying), { html: money(x.estimate), csv: x.estimate }]), { num: [1, 2] }), 'revenue_program')}</div>

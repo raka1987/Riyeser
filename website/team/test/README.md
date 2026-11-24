@@ -59,3 +59,12 @@
   accents, contrast checks), Admin / Settings hidden for members, phone width (one panel at a time), files (link-files) and an
   older database. Saves screenshots to the folder given. `rules-test.sql` covers presence, reactions, pins and file rules.
 - Every browser test takes `LINK_BASE=http://127.0.0.1:8091` to use another port. Confirmations are in-page now (`#askyes`).
+- `pricing-test.js`: the website's prices (US dollars, per business per month, 3 users included in each program): the
+  calculator's worked examples (5 people with Accounting Plus + Payroll = US$84, Basics only = US$25, Link Plus with 4
+  people = US$44, Plus + Payroll + Link Plus with 5 people = US$133, never Basics and Plus both, yearly and early bird),
+  no FJD/AUD/NZD on the website, free programs listed before paid ones (Central first), and the gold "★ Plus" marker on
+  Riyeser Link. `rules-test.sql` checks the same sums in `riyeser_bill()` and `company_monthly()`.
+- `storage-test.js`: Riyeser Link file storage (2 GB a business free, 20 GB with Link Plus, plus extra from HQ): the bar
+  and the 80% warning in Billing & Subscription, the plain message when an upload would go over, and HQ's File storage
+  card, Grant extra storage and "Storage over 80%". `rules-test.sql` checks the upload rule, the limits, who can see the
+  usage and that granting needs `licences.manage`.

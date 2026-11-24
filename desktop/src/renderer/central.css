@@ -274,3 +274,7 @@ body.demo .app { height: calc(100vh - 40px); }
 .suppv .muted, .supbody .muted { font-size: 12.5px; color: var(--muted); margin: 6px 0 0; }
 .supstate { display: flex; gap: 12px; align-items: center; padding: 14px; border-radius: 10px; background: var(--head); margin: 4px 0 12px; } .supstate.ok { background: var(--ok-soft); } .supstate .big { font-size: 28px; } .supstate b { display: block; }
 .supbody .werr { background: var(--bad-soft); border-radius: 9px; padding: 8px 10px; margin-bottom: 8px; }
+
+/* "★ Plus available": a free program with a paid upgrade (Riyeser Link). Dark brown on gold, readable in light and dark. */
+.pluspill { display: inline-block; vertical-align: middle; background: #ffd25e; color: #3d2600; border: 1px solid #d9a520; border-radius: 99px; padding: 0 7px; font-size: 11px; font-weight: 800; line-height: 1.6; white-space: nowrap; cursor: pointer; }
+.pluspill:hover, .pluspill:focus-visible { background: #ffc531; outline: 2px solid #8a5a00; outline-offset: 1px; }

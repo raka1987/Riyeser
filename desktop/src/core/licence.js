@@ -127,7 +127,7 @@ function fromApi(r) {
     plan: [meta.product_name, meta.variant_name].filter(Boolean).join(' · ') || null,
     email: meta.customer_email || null,
     storeId: meta.store_id || null,
-    // Extra companies (Riyeser Accounting add-on, $10 a month each): set up in the shop as a variant named like "3 extra companies"
+    // Extra companies (Riyeser Accounting add-on, US$10 a month each): set up in the shop as a variant named like "3 extra companies"
     extraCompanies: Number((String(meta.variant_name || '').match(/(\d+)\s*extra\s*compan/i) || [])[1] || 0),
   };
 }

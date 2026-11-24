@@ -575,3 +575,45 @@ section.finder { padding: 0; }
 .h3dots { gap: 6px; } .h3dots button { font-size: 12px; padding: 4px 10px 4px 8px; }
 @media (prefers-reduced-motion: reduce) { .h3slide > img, .h3slide.on > img { transition: none; transform: none; } }
 .helpimg { display: block; width: 100%; max-width: 560px; height: auto; border-radius: 12px; border: 1px solid #e3e8f1; margin: 10px 0; }
+
+/* ---------- free / paid groups, the "★ Plus" marker, the price list ---------- */
+.mgrp { font-size: 12px; font-weight: 800; letter-spacing: .4px; text-transform: uppercase; color: var(--muted); padding: 10px 10px 4px; }
+.mgrp:not(:first-child) { border-top: 1px solid var(--line); margin-top: 6px; }
+.ghead { font-size: 15px; font-weight: 800; color: var(--muted); letter-spacing: .3px; text-transform: uppercase; margin: 26px 0 12px; text-align: inherit; }
+h2.ghead { font-size: 22px; text-transform: none; letter-spacing: -.3px; color: var(--ink); }
+.ghead:first-child { margin-top: 0; }
+.finder .ghead { text-align: center; margin: 18px 0 10px; } .finder .ghead:first-of-type { margin-top: 0; }
+/* gold pill: dark brown on gold (about 9:1), the same on light and dark pages */
+.pluspill { display: inline-flex; align-items: center; gap: 3px; vertical-align: middle; background: #ffd25e; color: #3d2600 !important; border: 1px solid #d9a520;
+  border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 800; line-height: 1.5; white-space: nowrap; cursor: pointer; text-decoration: none; }
+.pluspill:hover, .pluspill:focus-visible { background: #ffc531; outline: 2px solid #8a5a00; outline-offset: 1px; }
+.plusline { display: block; margin: 8px 0 0; font-size: 14px; color: #6b4500; background: #fff7e0; border: 1px solid #f4d98b; border-radius: 10px; padding: 7px 10px; cursor: pointer; text-decoration: none; }
+.plusline b { color: #3d2600; } .plusline:hover { border-color: #d9a520; }
+.frow .pluspill { font-size: 11px; padding: 0 6px; margin-top: 4px; }
+.usdnote { background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 0 0 22px; color: var(--ink); }
+.ptable-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 16px; background: var(--card); }
+.ptable { width: 100%; border-collapse: collapse; font-size: 15px; }
+.ptable th, .ptable td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.ptable thead th { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; background: var(--soft); }
+.ptable tr.grp th { background: var(--pale, var(--soft)); color: var(--ink); font-size: 14px; }
+.ptable tr:last-child td { border-bottom: 0; }
+.ptable .pn { display: flex; gap: 12px; align-items: center; } .ptable .pn small { display: block; color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+.ptable .ti { width: 34px; height: 34px; border-radius: 9px; flex: none; }
+.ptable .pr { white-space: nowrap; color: var(--ink); } .ptable .pr b { font-size: 18px; }
+.ptable tr:target td { background: #fff7e0; }
+.calc .brk { list-style: none; margin: 0 0 10px; padding: 0; text-align: left; font-size: 14.5px; }
+.calc .brk li { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.calc .brk li b { color: var(--ink); white-space: nowrap; }
+.calc .ebline { margin-top: 10px; font-weight: 700; color: #5c3a00; background: #fff7e0; border-radius: 10px; padding: 6px 10px; }
+.calc .ebline:empty { display: none; }
+@media (max-width: 640px) { .ptable th, .ptable td { padding: 10px; } .ptable thead { display: none; } .ptable td { display: block; border-bottom: 0; padding: 4px 12px; }
+  .ptable tr { display: block; border-bottom: 1px solid var(--line); padding: 8px 0; } .ptable tr.grp th { display: block; } }
+
+/* "What's free" on free programs: Included free, Limits (No limits in green) */
+.freeinfo { display: grid; gap: 4px; margin: 10px 0 4px; font-size: 14px; color: var(--text, var(--ink)); text-align: left; }
+.freeinfo b { color: var(--ink); }
+.freeinfo .ii { font-weight: 600; color: var(--muted); cursor: help; }
+.freeinfo .nolim { color: #157a3c; font-weight: 800; }
+.freeinfo .lim { color: #8a4b00; font-weight: 700; }
+.hero .freeinfo { max-width: 560px; background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 14px 0 6px; }
+.ptable .freeinfo { font-size: 13.5px; margin-top: 6px; }

@@ -418,13 +418,53 @@ do $$ declare l json; m numeric; begin
   assert (l -> 'modules' -> 'payroll' ->> 'status') = 'cancelled' and not (l -> 'modules' -> 'payroll' ->> 'active')::boolean, 'payroll cancelled, ended';
   assert (l ->> 'extra_companies')::int = 1, 'extra companies';
   m := ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric;
-  assert m = 20 + 20 + 2 * 5 + 10, format('monthly estimate: Basics 20 + Link Plus 20 (paid earlier) + 2 users 10 + 1 company 10 = 60, got %s', m);
-  assert ((public.hq_licences()) ->> 'monthly_estimate')::numeric >= 60, 'total estimate';
+  assert m = (25 + 2 * 5) + (39 + 2 * 5) + 10, format('monthly estimate (US$): Basics 25 + Link Plus 39 (paid earlier), each with 3 + 2 extra users at 5, + 1 company 10 = 94, got %s', m);
+  assert ((public.hq_licences()) ->> 'monthly_estimate')::numeric >= 94, 'total estimate';
   assert ((public.hq_licences()) ->> 'early_bird_left')::int = 100, 'early bird places';
 end $$;
--- yearly + early bird: 60 a month list -> x 10/12 -> half = 25
+-- Prices are in US$ a month per business: each paid program includes 3 people, then US$5 a person for that program
+do $$ begin
+  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', false) = 84, '5 people with Plus + Payroll = (39 + 10) + (25 + 10) = 84';
+  assert public.riyeser_bill(array['plus', 'payroll', 'calls'], 5, 0, 'monthly', false) = 133, 'Plus + Payroll + Link Plus, 5 people = 133';
+  assert public.riyeser_bill(array['basic'], 3, 0, 'monthly', false) = 25, '3 people with Basics only = 25';
+  assert public.riyeser_bill(array['basic'], 1, 0, 'monthly', false) = 25, 'fewer than 3 people is still 25';
+  assert public.riyeser_bill(array['basic', 'plus'], 3, 0, 'monthly', false) = 39, 'Basics and Plus both on = the Plus price only';
+  assert public.riyeser_bill(array['basic', 'plus'], 5, 0, 'monthly', false) = 49, 'Basics and Plus, 5 people: users counted once';
+  assert public.riyeser_bill(array['calls'], 4, 0, 'monthly', false) = 44, 'Link Plus with 4 people = 44';
+  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'yearly', false) = 840, 'yearly = 10 months';
+  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', true) = 42, 'early bird = half';
+  assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'yearly', true) = 420, 'yearly early bird';
+  assert public.riyeser_bill(array['calls'], 4, 0, 'yearly', false) = 440, 'Link Plus yearly';
+  assert public.riyeser_bill(array['basic'], 3, 2, 'monthly', false) = 45, 'extra companies 10 each';
+  assert public.riyeser_bill(array['basic'], 3, 1, 'monthly', true) = 22.5, 'early bird halves programs and users, not extra companies';
+  assert public.riyeser_bill(array['payroll'], 3, 2, 'monthly', false) = 25, 'extra companies only count with Accounting';
+  assert public.riyeser_bill(array['as_built', 'pos', 'bookings'], 3, 0, 'monthly', false) = 83, 'As Built 29, POS 29 and Bookings 25';
+  assert public.riyeser_bill(array[]::text[], 9, 0, 'monthly', false) = 0, 'free tools only = 0';
+  assert public.riyeser_bill(array['basic', 'basic', 'link', 'central', 'pdf'], 3, 0, 'monthly', false) = 25, 'free programs and repeats add nothing';
+  assert public.riyeser_price('plus') = 39 and public.riyeser_price('calls') = 39 and public.riyeser_price('payroll') = 25 and public.riyeser_price('extra_user') = 5, 'price list';
+end $$;
+-- The same on a real company (undone after): 5 people with Plus + Payroll paid, Basics paid as well, Link Plus off -> 84
+do $$ declare ws uuid := current_setting('test.ws_c')::uuid; m numeric; begin
+  begin
+    perform public.hq_set_module(ws, 'plus', 'active', null, current_date + 30);
+    perform public.hq_set_module(ws, 'payroll', 'active', null, current_date + 30);
+    perform public.hq_set_module(ws, 'calls', 'cancelled', null, null);
+    perform public.hq_set_plan(ws, 2, 0, 'monthly', false);
+    m := (public.hq_company_licence(ws) ->> 'monthly')::numeric;
+    assert m = 84, format('Plus + Payroll, 5 people = 84 (Basics not counted with Plus), got %s', m);
+    perform public.hq_set_plan(ws, 2, 0, 'yearly', false);
+    m := (public.hq_company_licence(ws) ->> 'monthly')::numeric;
+    assert m = 70, format('yearly: 840 a year = 70 a month, got %s', m);
+    perform public.hq_set_plan(ws, 2, 0, 'monthly', true);
+    m := (public.hq_company_licence(ws) ->> 'monthly')::numeric;
+    assert m = 42, format('early bird: 42, got %s', m);
+    raise exception 'undo the price check';
+  exception when others then if sqlerrm <> 'undo the price check' then raise; end if; end;
+end $$;
+-- yearly + early bird: (Basics 35 + Link Plus 49) half = 42, + 1 company 10 = 52 a month list -> x 10/12 = 43.33
 select public.hq_set_plan(:'ws_c', 2, 1, 'yearly', true);
-do $$ begin assert ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric = 25.00, 'yearly early bird'; end $$;
+do $$ begin assert ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric = 43.33,
+  format('yearly early bird, got %s', (public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly'); end $$;
 -- Riyeser Link Plus (was Team Calls) via the licence: cancelled and unpaid -> no calls; the old button sets it paid again
 select public.hq_set_module(:'ws_c', 'calls', 'cancelled', null, null);
 select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
@@ -2008,6 +2048,76 @@ do $$ begin
 end $$;
 select pg_temp.as_user('a7a7a7a4-0000-4000-8000-000000000004');
 do $$ begin assert (select count(*) from storage.objects) = 0, 'another business sees no files'; end $$;
+
+-- file storage: 2 GB a business on free chat, 20 GB with Link Plus, plus extra from HQ. Going over is refused; nothing is deleted.
+reset role;
+insert into public.company_modules (workspace_id, module, status) values (current_setting('lk.a')::uuid, 'calls', 'cancelled')
+  on conflict (workspace_id, module) do update set status = 'cancelled', paid_until = null;
+update public.workspaces set calls_paid_until = null where id = current_setting('lk.a')::uuid;
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003'); set role authenticated;   -- Rua (member)
+do $$ declare a text := current_setting('lk.a'); g text := current_setting('lk.g'); gb bigint := 1073741824; begin
+  assert public.link_storage_limit(a::uuid) = 2 * gb, 'free chat: 2 GB';
+  insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || g || '/aaaaaaaa11111111/big1.zip', jsonb_build_object('size', gb + gb / 2));
+  assert public.link_storage_used(a::uuid) = gb + gb / 2, format('used counts the sizes: %s', public.link_storage_used(a::uuid));
+  assert public.link_storage_fits(a::uuid, gb / 4) and not public.link_storage_fits(a::uuid, gb), 'room for a quarter GB, not a whole one';
+  begin insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || g || '/aaaaaaaa22222222/big2.zip', jsonb_build_object('size', gb));
+    raise exception 'went over 2 GB';
+  exception when insufficient_privilege then null; end;
+  insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || g || '/aaaaaaaa33333333/small.zip', jsonb_build_object('size', gb / 4));
+  begin perform public.link_storage_json(a::uuid); raise exception 'a member saw the storage panel';
+  exception when others then assert sqlerrm like 'Only owners and admins%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('a7a7a7a1-0000-4000-8000-000000000001');   -- Pip (owner)
+do $$ declare j json; begin
+  j := public.link_storage_json(current_setting('lk.a')::uuid);
+  assert (j ->> 'used')::bigint = 1879048192 and (j ->> 'limit')::bigint = 2147483648 and (j ->> 'pct')::numeric = 87.5 and not (j ->> 'plus')::boolean, format('storage panel: %s', j);
+end $$;
+select pg_temp.as_user('a7a7a7a4-0000-4000-8000-000000000004');   -- Sol, another business
+do $$ begin
+  begin perform public.link_storage_used(current_setting('lk.a')::uuid); raise exception 'saw another business''s storage';
+  exception when others then assert sqlerrm like 'You''re not in that company%', sqlerrm; end;
+  begin perform public.link_storage_json(current_setting('lk.a')::uuid); raise exception 'saw another business''s storage panel';
+  exception when others then assert sqlerrm like 'Only owners and admins%', sqlerrm; end;
+  assert public.link_storage_used(current_setting('lk.b')::uuid) = 0, 'own business: nothing yet';
+end $$;
+-- Link Plus on (trial): 20 GB, so the 1 GB file now fits
+reset role;
+update public.company_modules set status = 'trial', trial_ends = current_date + 10 where workspace_id = current_setting('lk.a')::uuid and module = 'calls';
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003'); set role authenticated;
+do $$ declare a text := current_setting('lk.a'); gb bigint := 1073741824; begin
+  assert public.link_storage_limit(a::uuid) = 20 * gb, 'Link Plus: 20 GB';
+  insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || current_setting('lk.g') || '/aaaaaaaa22222222/big2.zip', jsonb_build_object('size', gb));
+end $$;
+-- HQ: extra storage needs licences.manage and a reason, and is in the HQ history
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');   -- Help Desk (support)
+do $$ begin
+  assert ((public.hq_company_page(current_setting('lk.a')::uuid) -> 'storage') ->> 'limit')::bigint = 20::bigint * 1073741824, 'support sees the storage card';
+  begin perform public.hq_grant_storage(current_setting('lk.a')::uuid, 5, 'Big drawings'); raise exception 'support granted storage';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');   -- Riki (owner)
+do $$ declare j json; gb bigint := 1073741824; a uuid := current_setting('lk.a')::uuid; begin
+  begin perform public.hq_grant_storage(a, 5, ''); raise exception 'no reason';
+  exception when others then assert sqlerrm like 'Say why%', sqlerrm; end;
+  j := public.hq_grant_storage(a, 5, 'Lots of site drawings');
+  assert (j ->> 'limit')::bigint = 25 * gb and (j ->> 'extra_gb')::int = 5, format('Link Plus 20 + 5 extra: %s', j);
+  assert exists (select 1 from pg_temp.audit('licence.storage') x where x.details ->> 'reason' = 'Lots of site drawings'), 'in the HQ history';
+  j := public.hq_company_page(a) -> 'storage';
+  assert (j ->> 'used')::bigint = gb * 11 / 4, format('HQ storage card: %s', j);
+end $$;
+-- Link Plus ends: 2 + 5 GB; nothing is deleted, and "over 80%" finds it in HQ's Companies list
+reset role;
+update public.company_modules set status = 'cancelled', trial_ends = null where workspace_id = current_setting('lk.a')::uuid and module = 'calls';
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare r json; a uuid := current_setting('lk.a')::uuid; begin
+  perform public.hq_grant_storage(a, 1, 'Back to a small extra');
+  assert public.link_storage_limit(a) = 3::bigint * 1073741824, '2 GB + 1 extra';
+  assert (select count(*) from storage.objects where name like a::text || '/%' and bucket_id = 'link-files') >= 4, 'files kept';
+  r := public.hq_companies_page('Sample Link', '{"storage_80": true}', 'name', false, 1, 50, false);
+  assert (r ->> 'total')::int = 1 and ((r -> 'rows' -> 0) ->> 'storage_pct')::numeric > 80, format('storage over 80%%: %s', r -> 'rows');
+  r := public.hq_companies_page('Other Link', '{"storage_80": true}', 'name', false, 1, 50, false);
+  assert (r ->> 'total')::int = 0, 'Other Link Co is under 80%';
+end $$;
 reset role;
 do $$ begin
   assert (select public = false and file_size_limit = 26214400 from storage.buckets where id = 'link-files'), 'a private bucket, 25 MB';
