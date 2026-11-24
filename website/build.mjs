@@ -127,6 +127,18 @@ const PROGRAMS = [
       ['Meetings & to-dos', 'Connect your calendar; action items from meeting notes land on your to-do list.'],
     ],
     note: 'Desk Assistant never touches Windows or program files — only your own documents.' },
+  { id: 'team', name: 'Riyeser Team', short: 'Team chat', icon: '💬', file: null, link: '/team/?demo', linkLabel: 'Try the demo', shot: 'team-chat.webp',
+    one: 'Team chat for your business: channels for jobs and the office, direct messages, and live updates on your PC and phone. Free.',
+    pitch: 'Your whole team, in one conversation.',
+    features: [
+      ['Channels', 'A place for each topic: #jobs, #office, or one per site. Everyone in the team can see them.'],
+      ['Direct messages', 'Private one-to-one chats. Only the two of you can read them.'],
+      ['On the PC and the phone', 'In Riyeser Central on the PC, and in any web browser on phones and tablets, with nothing to install.'],
+      ['Points at your work', 'Type INV-1047 or Booking 12 and it stands out, so everyone knows which invoice or job you mean.'],
+      ['Unread at a glance', 'Unread counts on every channel and person, and on Team chat in Riyeser Central.'],
+      ['Invite with a link', 'Send your team one link. They make a free account and they\'re in. You can make a new link any time.'],
+    ],
+    note: 'Riyeser Team is online, so your team can chat from anywhere. Each business only ever sees its own team. Video calls and meetings are coming next.' },
   { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyeserPDF-Setup.exe',
     one: 'Open, fill in, sign, combine and edit PDFs — even scanned ones.',
     pitch: 'Drawings and forms, done on the PC.',
@@ -153,6 +165,7 @@ const CARD = {
   bookings: ['Jobs, appointments and table bookings on one calendar, then invoice them.', 'Jobs, appointments, tables'],
   payroll: ['Time clock, timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
   'desk-assistant': ['Sorts your files by type and year, and finds anything in seconds.', 'Sort and find your files'],
+  team: ['Channels, direct messages and live updates for your whole team. Free.', 'Team chat'],
   pdf: ['Open, fill in, sign, mark up and combine PDFs, even scanned ones.', 'Fill, sign and edit PDFs'],
   services: ['Map cables, pipes and ducts on your plans, with inspections and photos.', 'Services on your drawings'],
 };
@@ -283,6 +296,9 @@ const SCENES = {
   pos: { img: 'team-cafe.webp', alt: 'Two cafe owners checking the day\'s takings on a laptop', pops: [
     ['pos', 'Riyeser POS', 'Sale · $14.50 · Card', 'Flat white, banana bread', ''],
     ['bookings', 'Riyeser Bookings', 'Table 4 · 7:00 pm', '6 people · Confirmed', 'ok']] },
+  team: { img: 'team-site-laptop.webp', alt: 'A site supervisor and an electrician catching up with the team on a laptop', pops: [
+    ['team', '#jobs · Jordan Lee', 'Booking 12 done ✅', 'New unit installed and tested', ''],
+    ['team', 'Direct message · Sam', 'Can you approve timesheets?', 'Pay run goes tonight', '']] },
   payroll: { img: 'team-site-laptop.webp', alt: 'A site supervisor and an electrician approving timesheets on a laptop', pops: [
     ['payroll', 'Timesheets approved', 'Week ending 21 Nov', '4 staff · 152 hours', ''],
     ['payroll', 'Pay run done', '$6,240.50 net', 'Payslips saved as PDFs', 'ok']] },
@@ -295,7 +311,7 @@ const winFrame = (up, app, name, img, alt, w = 1400, h = 900) => `<div class="wi
 const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p><span class="go">${ARR}</span></a>`;
 
 const more = (t) => `<span class="more">${t} ${ARR}</span>`;
-const FREE_TOOLS = ['central', 'invoices', 'desk-assistant', 'pdf'];
+const FREE_TOOLS = ['central', 'invoices', 'team', 'desk-assistant', 'pdf'];
 const badgeOf = (p) => FREE_TOOLS.includes(p.id) ? '<span class="badge free">Free forever</span>' : '<span class="badge">Free trial</span>';
 
 /** assets/x.webp -> assets/x.webp?v=<content hash>, so browsers fetch new pictures and styles as soon as they change. */
@@ -463,7 +479,7 @@ ${ctaBlock(up, 'Get started free today', 'Download Riyeser Central, add the prog
 // ---------- all programs ----------
 page({
   path: 'programs.html', title: 'All programs — Riyeser', active: 'programs',
-  description: 'Every Riyeser program: Central, Invoices, Bookings, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and As Built.',
+  description: 'Every Riyeser program: Central, Invoices, Bookings, Team chat, Accounting Basics, Accounting Plus, Payroll, Desk Assistant, PDF and As Built.',
   body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
 <section class="c" style="padding-top:44px"><div class="grid">${PROGRAMS.filter((p) => p.id !== 'services').map((p) => progCard(p, up)).join('')}</div></section>
 <section class="c" style="padding-top:0"><h2 class="h2">For the building industry</h2><p class="sub">A separate program for trades and construction, priced on its own.</p><div class="grid">${progCard(prog('services'), up)}</div></section>
@@ -641,7 +657,7 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
   ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off your first year</b><p>For the first 100 businesses to buy. That's <b>$10 a month</b> for each program for 12 months, then the normal price. The offer ends when 100 businesses have it.</p></div></div>` : ''}
   <div class="plans plans3">
     <div class="plan"><span class="tag free">Free forever</span><div class="k">Free tools</div><div class="price">$0</div>
-      <ul class="ticks"><li>Riyeser Central — your home screen</li><li>Riyeser Invoices — quotes, invoices, getting paid</li><li>Riyeser PDF — fill, sign, combine, edit</li><li>Desk Assistant — sort and find every file</li></ul></div>
+      <ul class="ticks"><li>Riyeser Central — your home screen</li><li>Riyeser Invoices — quotes, invoices, getting paid</li><li>Riyeser Team — team chat</li><li>Riyeser PDF — fill, sign, combine, edit</li><li>Desk Assistant — sort and find every file</li></ul></div>
     <div class="plan best"><span class="tag">Start here</span><div class="k">Accounting Basics</div><div class="price">$20<small> / month per business</small></div>
       <ul class="ticks"><li><b>Free for 90 days</b></li><li>Invoices, quotes, customers and stock</li><li>Money in &amp; out, GST summary, profit &amp; loss</li><li>3 users included</li></ul></div>
     <div class="plan"><div class="k">Add programs</div><div class="price">+$20<small> / month each</small></div>
@@ -685,7 +701,7 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
 
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
-  <details open><summary>What's free?</summary><p>Riyeser Central, Riyeser Invoices, Riyeser PDF and the Desk Assistant file organiser are free forever — no time limit, no account, no card.</p></details>
+  <details open><summary>What's free?</summary><p>Riyeser Central, Riyeser Invoices, Riyeser Team (team chat), Riyeser PDF and the Desk Assistant file organiser are free forever — no time limit, no account, no card.</p></details>
   <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, Payroll, POS, Bookings, and As Built for the building industry — is free for 90 days from when you first open Riyeser Central. No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
   <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays on your computer and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS) or that program's screens (the others) wait until you buy it and enter the key in Riyeser Central. They unlock straight away.</p></details>
   <details><summary>Is it per person?</summary><p>No — per business. Each program is $20 a month for the whole business, with 3 people included. A 4th person and beyond is $5 a month each, for all your programs.</p></details>
@@ -773,7 +789,7 @@ ${searchScript(up)}
   <div>
     <div class="crumbs"><a href="${up}help.html">Help Centre</a> › ${esc(gName(g))}</div>
     <div class="hhead"><div class="icon i-${g.app}">${gIcon(g, up)}</div><div><h1>${esc(gName(g))}</h1><p>${esc(g.intro)}</p>
-      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
+      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'team' ? `<a class="btn p sm" href="/team/">Open Riyeser Team</a><a class="btn s sm" href="/team/?demo">Try the demo</a>`: g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
     ${searchBox(`Search the ${gName(g)} guide`)}
     ${g.groups.map((grp, i) => `<div class="hgroup" id="s${i + 1}"><h2><span class="num">${i + 1}</span>${esc(grp.title)}</h2><div class="faq">${grp.items.map(([id, q, a], j) => `<details id="${id}"${i === 0 && j === 0 ? ' open' : ''}><summary>${q}</summary>${a}</details>`).join('')}</div></div>`).join('')}
     <p class="hnone" id="hnone">Nothing in this guide matches that. Try the <a class="more" href="${up}help.html">Help Centre</a> search, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a>.</p>

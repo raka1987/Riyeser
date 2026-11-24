@@ -292,6 +292,7 @@ function registerIpc() {
     const guide = { central: 'central', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     return shell.openExternal(guide ? `https://riyeser.com/help/${guide}.html` : 'https://riyeser.com/help.html').then(() => true);
   });
+  handle('central:team', () => openTeam());
   handle('search:find', (opts) => {
     // Search uses Desk Assistant's file list: nothing (not an old list) when it isn't installed.
     if (!locate(PROGRAMS.find((x) => x.id === 'desk'))) return { total: 0, results: [], facets: { type: {}, year: {}, kind: {} } };
@@ -300,6 +301,27 @@ function registerIpc() {
   });
   handle('file:open', async (p) => { if (!fs.existsSync(p)) throw new Error('That file has moved or been deleted. Try searching for it.'); const err = await shell.openPath(p); if (err) throw new Error(err); return true; });
   handle('file:reveal', (p) => { shell.showItemInFolder(p); return true; });
+}
+
+// Riyeser Team (team chat) in its own window. It's the online chat at riyeser.com/team, with its sign-in kept
+// in its own storage so it stays signed in. Links people send open in the normal web browser.
+const TEAM_URL = 'https://riyeser.com/team/';
+let teamWin = null;
+function openTeam() {
+  if (teamWin && !teamWin.isDestroyed()) { if (teamWin.isMinimized()) teamWin.restore(); teamWin.show(); teamWin.focus(); return true; }
+  teamWin = new BrowserWindow({
+    width: 1100, height: 760, minWidth: 380, minHeight: 500, title: 'Riyeser Team',
+    icon: path.join(__dirname, 'renderer', process.platform === 'win32' ? 'icon-central.ico' : 'icon-central.png'),
+    webPreferences: { partition: 'persist:riyeser-team', contextIsolation: true, nodeIntegration: false, sandbox: true },
+  });
+  teamWin.removeMenu();
+  teamWin.loadURL(TEAM_URL);
+  const outside = (url) => { try { const u = new URL(url); return !(u.origin === new URL(TEAM_URL).origin && u.pathname.startsWith('/team/')); } catch { return true; } };
+  teamWin.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  teamWin.webContents.on('will-navigate', (e, url) => { if (outside(url)) { e.preventDefault(); if (/^https?:/i.test(url)) shell.openExternal(url); } });
+  teamWin.webContents.on('page-title-updated', (_e, title) => { if (win && !win.isDestroyed()) win.webContents.send('team:title', title); });
+  teamWin.on('closed', () => { teamWin = null; });
+  return true;
 }
 
 function createWindow() {

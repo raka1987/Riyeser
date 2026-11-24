@@ -4,6 +4,7 @@
 // even if old files from an earlier install are still on the PC.
 const $ = (s, el = document) => el.querySelector(s);
 const bridge = window.api;
+if (bridge && bridge.on) bridge.on('team:title', (t) => { const n = (/^\((\d+)\)/.exec(t || '') || [])[1]; const el = document.getElementById('teamtag'); if (el) { el.hidden = !n; el.textContent = n || ''; } });
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const moneyShort = (n) => `$${Math.round(Number(n || 0)).toLocaleString()}`;
@@ -35,6 +36,7 @@ const P = {
   plus: '<path d="M12 5v14M5 12h14"/>',
   store: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 11.5V20h13v-8.5"/><path d="M10 20v-5h4v5"/>',
   invoice: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M8 14h3"/>',
   sort: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13l2 2 4-4"/>',
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
@@ -124,6 +126,7 @@ function renderNav() {
   $('#nav').innerHTML = `<button class="${view === 'home' ? 'on' : ''}" data-view="home">${icon('home')}Home</button>
     ${mine.map((p) => `<button data-open="${esc(p.id)}" title="Open ${esc(p.full)}">${icon(LOOK[p.id].ic)}${esc(LOOK[p.id].nav || p.name)}${upFor.has(p.id) ? '<span class="tag">Update</span>' : ''}</button>`).join('')}
     <hr>
+    <button data-act="team">${icon('chat')}Team chat<span class="tag" id="teamtag" hidden></span></button>
     <button data-act="find">${icon('search')}Find a file</button>
     ${missing ? `<button class="${view === 'apps' ? 'on' : ''}" data-view="apps">${icon('grid')}Get more apps</button>` : ''}
     <button data-lic="open">${icon('key')}Licence</button>
@@ -380,6 +383,7 @@ document.addEventListener('click', (e) => {
   const act = e.target.closest('[data-act]');
   if (act) {
     if (act.dataset.act === 'find') { setView('home'); $('#q').focus(); }
+    if (act.dataset.act === 'team') safe(() => bridge.call('central:team'));
     if (act.dataset.act === 'pickpdf') safe(() => bridge.call('central:openPdf'));
     return;
   }

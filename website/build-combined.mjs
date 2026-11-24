@@ -1,6 +1,7 @@
 // Builds ONE site for riyeser.com:
 //   /        the Riyeser Group software website (website/build.mjs) - what people see when they open riyeser.com
 //   /app/    the Riyeser Services app (website/services, copied from the old riyeser.com)
+//   /team/   Riyeser Team, the team chat (website/team)
 //   node website/build-combined.mjs        -> website/public
 //
 // The Services app's scripts, images and client share page (/share.html) stay at the top of the domain, so
@@ -31,6 +32,9 @@ const websiteFiles = [];
 // 2. The Services app: everything except its pages at the top (scripts, images, share page), pages in /app/.
 cpSync(SRC, OUT, { recursive: true, force: false, errorOnExist: false, filter: (src) => !APP_PAGES.includes(relative(SRC, src)) });
 mkdirSync(join(OUT, 'app'), { recursive: true });
+
+// 3. Riyeser Team (team chat) at /team/. Its database setup (team-chat.sql) stays in the repository only.
+cpSync(join(ROOT, 'team'), join(OUT, 'team'), { recursive: true, filter: (src) => !src.endsWith('.sql') });
 
 /** Replace text; stop the build if an expected piece isn't there (the app changed and needs a look). */
 function swap(text, file, pairs) {

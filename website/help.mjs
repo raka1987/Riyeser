@@ -21,7 +21,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['updates', 'How do I update my programs?', `<ol><li>Open <b>Riyeser Central</b>. It checks for updates by itself.</li><li>When one is ready you'll see <b>An update is ready</b>. Click <b>Update</b> (or <b>Update all</b>).</li><li>Programs being updated close for a moment and open again. Your information is kept.</li></ol><p>To check straight away, click <b>Check for updates</b> at the bottom of Riyeser Central. You can also download the newest version from <a class="more" href="${up}downloads.html">Downloads</a> and run it over the old one.</p>`, true],
         ] },
         { title: 'Free trial and licence', items: [
-          ['trial', 'How does the free trial work?', '<p>Riyeser Central, Riyeser Invoices, PDF and Desk Assistant are free forever. Every paid program — <b>Accounting Basics</b>, Accounting Plus, Payroll, <b>Riyeser POS</b>, Bookings, and As Built for the building industry — is free for 90 days. No card and no sign-up. Each program shows how many days are left.</p><p>When the trial ends nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
+          ['trial', 'How does the free trial work?', '<p>Riyeser Central, Riyeser Invoices, Riyeser Team, PDF and Desk Assistant are free forever. Every paid program — <b>Accounting Basics</b>, Accounting Plus, Payroll, <b>Riyeser POS</b>, Bookings, and As Built for the building industry — is free for 90 days. No card and no sign-up. Each program shows how many days are left.</p><p>When the trial ends nothing is deleted and nothing is charged. Only new invoices (Basics), new till sales (POS) or the screens of the other programs wait until you enter a licence key in Riyeser Central.</p>', true],
           ['licence', 'How do I enter my licence key?', `<ol><li>Open <b>Riyeser Central</b> and click <b>Licence</b> at the bottom of the screen.</li><li>Paste the key from your receipt email into <b>Have a licence key?</b></li><li>Click <b>Turn on licence</b>.</li></ol><p>One licence covers every Riyeser program for that person. To buy one, click <b>See plans &amp; buy</b> or see <a class="more" href="${up}pricing.html">Pricing</a>.</p>`, true],
           ['licence-move', 'Moving my licence to another computer', '<p>On the old computer open Riyeser Central → <b>Licence</b> → <b>Remove licence from this PC</b>. That frees its place. Then enter the same key on the new computer.</p>'],
         ] },
@@ -80,6 +80,22 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['status', 'Confirm, start, finish or cancel', '<p>Open the booking and click <b>Confirm</b>, <b>Start</b> or <b>Mark done</b>. <b>Cancel this booking</b> and <b>Didn\'t show</b> keep it on record, crossed out on the calendar.</p>'],
           ['invoice', 'Invoice a job or appointment', '<p>Open it and click <b>Invoice this job</b>. A real invoice is made for the customer with the service\'s price and GST. Check it, then save a PDF or send it. It\'s in Riyeser Accounting and Invoices too. <b>List → Done, not invoiced yet</b> shows everything still waiting for an invoice.</p>', true],
           ['online', 'Can customers book online?', '<p>Not yet: bookings are made by your staff in the app for now. Online booking for customers is the next step.</p>'],
+        ] },
+      ],
+    },
+    {
+      id: 'team', blurb: 'Team chat: channels and direct messages.', app: 'team', name: 'Riyeser Team',
+      intro: 'Free team chat for your business, online so everyone can use it on the PC (Team chat in Riyeser Central) or a phone (riyeser.com/team). Each business only sees its own team.',
+      groups: [
+        { title: 'Getting started', items: [
+          ['start', 'Start a team for your business', '<ol><li>Click <b>Team chat</b> in Riyeser Central, or open <b>riyeser.com/team</b> on any device.</li><li>Click <b>Create an account</b>, enter your work email and a password, and confirm your email from the link we send.</li><li>Sign in, then under <b>Start a team for your business</b> enter the business name and your name.</li><li>You start with <b>#general</b> and <b>#jobs</b>. Add more channels with <b>+</b>.</li></ol>', true],
+          ['invite', 'Invite your staff', '<p>Click <b>+ Invite people</b> and send them the link. They create a free account and join with the code in the link. Owners and admins can click <b>New code</b> to stop the old link working.</p>', true],
+        ] },
+        { title: 'Chatting', items: [
+          ['dm', 'Send a private message', '<p>Click a person under <b>Direct messages</b>. Only the two of you can read it.</p>'],
+          ['refs', 'Point at an invoice or job', '<p>Type the number the way Riyeser shows it, for example <b>INV-1047</b>, <b>Q-0042</b> or <b>Booking 12</b>, and it stands out in the message. Type <b>@</b> and a name to get someone\'s attention.</p>'],
+          ['edit', 'Change or delete a message', '<p>Point at your message (or tap it on a phone) and click <b>Edit</b> or <b>Delete</b>. Edited messages say “(edited)”.</p>'],
+          ['calls', 'Can we do calls or video meetings?', '<p>Not yet. Calls and video meetings are the next step for Riyeser Team.</p>'],
         ] },
       ],
     },
