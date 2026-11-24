@@ -149,3 +149,38 @@ test('online: signed in, no business yet -> "A few details", filled in from what
   assert.deepEqual(on.signupDetails({ user_metadata: {} }), { your_name: '', name: '', tax_number: '', address: '', email: '', phone: '', country: '' });
   assert.equal(on.signupDetails({ user_metadata: { riyeser_signup: { you: 'Robin', biz: { name: 'Demo Repairs', address: '9 Test Ave' } } } }).address, '9 Test Ave');
 });
+
+test('online: the Riyeser programs on this PC are sent when it links and at the daily check-in; an older online service is fine', async () => {
+  const dir = tmp(); const srv = fakeServer(); let missing = false;
+  const fetchFn = async (url, opts) => {
+    if (new URL(url).pathname === '/rest/v1/rpc/report_programs') {
+      srv.calls.push(['/rest/v1/rpc/report_programs', JSON.parse(opts.body), opts.headers || {}]);
+      return missing ? { ok: false, status: 404, text: async () => JSON.stringify({ code: 'PGRST202', message: 'Could not find the function public.report_programs' }) }
+        : { ok: true, status: 204, text: async () => '' };
+    }
+    return srv.fetchFn(url, opts);
+  };
+  let installed = { central: '1.8.1', pos: '1.4.0', invoices: null, 'BAD ID': '1' };
+  const o = new on.Online({ store: new Store(path.join(dir, 'data')), fetchFn, appData: dir, appVersion: '1.8.1', deviceName: 'Front desk PC', programsFn: async () => installed });
+  await o.signIn('owner@a.test', 'right-password');
+  await o.createCompany({ name: 'Sample Plumbing', country: 'Fiji' }, 'Alex');
+  const sent = srv.calls.filter((x) => x[0] === '/rest/v1/rpc/report_programs');
+  assert.equal(sent.length, 1, 'sent once when the PC linked');
+  assert.equal(sent[0][1].ws, 'w1'); assert.equal(sent[0][1].device, o.deviceId());
+  assert.deepEqual(sent[0][1].programs, [{ id: 'central', version: '1.8.1' }, { id: 'invoices', version: null }, { id: 'pos', version: '1.4.0' }]);
+  assert.ok(srv.calls.findIndex((x) => x[0] === '/rest/v1/rpc/link_device') < srv.calls.findIndex((x) => x[0] === '/rest/v1/rpc/report_programs'), 'after linking');
+  // the daily check-in (licence refresh) sends the list again, with what's installed now
+  installed = { central: '1.8.1', pos: '1.5.0' };
+  assert.ok(await o.refreshLicence());
+  const again = srv.calls.filter((x) => x[0] === '/rest/v1/rpc/report_programs');
+  assert.equal(again.length, 2); assert.deepEqual(again[1][1].programs, [{ id: 'central', version: '1.8.1' }, { id: 'pos', version: '1.5.0' }]);
+  // an online service without report_programs yet: linking and the licence still work
+  missing = true;
+  assert.equal(await o.reportPrograms('w1'), false);
+  assert.ok(await o.refreshLicence(), 'licence still refreshed');
+  await o.linkDevice('w1');
+  // nothing to send without the installed-programs list, or when signed out
+  const plain = new on.Online({ store: new Store(path.join(tmp(), 'data')), fetchFn, appData: dir });
+  assert.equal(await plain.reportPrograms('w1'), null);
+  o.signOut(); assert.equal(await o.reportPrograms('w1'), null);
+});

@@ -76,9 +76,12 @@ function detailsToProfile(f) {
 }
 
 class Online {
-  /** store: Central's Store; fetchFn: (url, opts) => Response; appData: Electron's appData folder. */
-  constructor({ store, fetchFn, appData, appVersion = '', deviceName = '', platform = process.platform }) {
-    Object.assign(this, { store, fetchFn, appData, appVersion, deviceName, platform });
+  /**
+   * store: Central's Store; fetchFn: (url, opts) => Response; appData: Electron's appData folder;
+   * programsFn: async () => {programId: version} — the Riyeser programs installed on this PC (from updates.js).
+   */
+  constructor({ store, fetchFn, appData, appVersion = '', deviceName = '', platform = process.platform, programsFn = null }) {
+    Object.assign(this, { store, fetchFn, appData, appVersion, deviceName, platform, programsFn });
   }
 
   // ---------- the online service's address ----------
@@ -185,6 +188,21 @@ class Online {
   }
   async linkDevice(ws) {
     await this.rpc('link_device', { ws, device: this.deviceId(), device_name: this.deviceName || 'This PC', platform: this.platform, app_version: this.appVersion });
+    await this.reportPrograms(ws);
+  }
+  /**
+   * Tell Riyeser which Riyeser programs (and versions) are installed on this PC, so Riyeser Support can see them.
+   * Sent when the PC links and at the daily check-in. Never throws: false when it couldn't be sent (offline, or the
+   * online service doesn't have report_programs yet), null when there's nothing to send.
+   */
+  async reportPrograms(ws) {
+    if (!ws || typeof this.programsFn !== 'function' || !this.session) return null;
+    let installed;
+    try { installed = await this.programsFn(); } catch { return null; }
+    const programs = Object.entries(installed || {}).filter(([id]) => /^[a-z0-9-]{1,40}$/.test(id))
+      .map(([id, version]) => ({ id, version: version == null ? null : String(version).slice(0, 40) }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+    try { await this.rpc('report_programs', { ws, device: this.deviceId(), programs }); return true; } catch { return false; }
   }
   /** true / false, or null when it can't be checked (offline, not signed in, not an online company). */
   async stillLinked() {
@@ -198,8 +216,11 @@ class Online {
   async refreshLicence(now = Date.now()) {
     const c = readCompany(this.appData);
     if (!c || c.mode !== 'online' || !c.workspace_id || !this.session) return null;
+    // the daily check-in also reports the programs on this PC (it never holds up the licence)
+    const sent = this.reportPrograms(c.workspace_id);
     let r;
-    try { r = await this.rpc('company_licence', { ws: c.workspace_id }); } catch { return null; }   // keep the last one
+    try { r = await this.rpc('company_licence', { ws: c.workspace_id }); } catch { await sent; return null; }   // keep the last one
+    await sent;
     if (!r || typeof r !== 'object' || !r.modules) return null;
     return require('./licence').saveOnline(this.appData, r, now);
   }

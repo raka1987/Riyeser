@@ -325,7 +325,9 @@ function registerIpc() {
   handle('central:licenceRemove', () => licence.remove(appData, { fetchFn: lfetch }));
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
   // ---------- the company this PC belongs to (%APPDATA%\Riyeser\company.json; set up or join online) ----------
-  const on = new online.Online({ store, fetchFn: (u, o) => net.fetch(u, o), appData, appVersion: app.getVersion(), deviceName: os.hostname() });
+  // programsFn: the Riyeser programs installed on this PC, sent to Riyeser when the PC links and at the daily check-in
+  const on = new online.Online({ store, fetchFn: (u, o) => net.fetch(u, o), appData, appVersion: app.getVersion(), deviceName: os.hostname(),
+    programsFn: () => installedVersions() });
   const companyState = async () => {
     const setup = store.get('company-setup', {}) || {};
     const s = on.session;
