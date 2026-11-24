@@ -658,7 +658,7 @@ function openLicence() {
     : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
       <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
       <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">All prices in US dollars, per business per month. Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are free forever. Every paid program is free for 90 days, no card, then: Accounting Basics US$25, Accounting Plus $39 (it includes Basics), Payroll $25, POS $29, Bookings $25, Riyeser Link Plus $39 and As Built $29. Each includes 3 users; each extra user is $8 a month for that program. 🐣 Early bird: 50% off your first 12 months for the first 100 businesses. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+      <p class="muted">All prices in US dollars, per business per month. Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are free forever. Every paid program is free for 90 days, no card, then: Accounting Basics US$25, Accounting Plus $39 (it includes Basics), Payroll $25, POS $29, Bookings $25, Riyeser Link Plus $39 and As Built $29. Each includes 3 users; each extra user is $7 a month for that program. 🐣 Early bird: 50% off your first 12 months for the first 100 businesses. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
   $('#licdlg').showModal();
 }
 document.addEventListener('click', (e) => {

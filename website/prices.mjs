@@ -1,5 +1,5 @@
 // Riyeser prices: US dollars a month, per business (not per person). Change them here and every page follows.
-// Each paid program includes 3 users; each extra user is US$8 a month for that program.
+// Each paid program includes 3 users; each extra user is US$7 a month for that program.
 // The database keeps the same list in riyeser_price() (website/team/team-chat.sql) for HQ's estimates: change both.
 export const PRICE = {
   basic: 25,      // Accounting Basics
@@ -10,7 +10,7 @@ export const PRICE = {
   calls: 39,      // Riyeser Link Plus: calls, desk phones, Riyeser Link Office
   as_built: 29,
   users_included: 3,
-  extra_user: 8,
+  extra_user: 7,
   extra_company: 10,
 };
 // The paid programs, in the order they're listed: [module id, name].

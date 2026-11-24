@@ -23,8 +23,8 @@
   const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']];
   const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
   // List prices: US dollars a month per business (the same as riyeser_price() in team-chat.sql and website/prices.mjs).
-  // Each paid program includes 3 users, then US$8 a month each for that program; Plus includes Basics (never both).
-  const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 8, extra_company: 10 };
+  // Each paid program includes 3 users, then US$7 a month each for that program; Plus includes Basics (never both).
+  const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 7, extra_company: 10 };
   const GB = 1073741824;
   const gbText = (n) => { const g = Number(n || 0) / GB; return `${g >= 10 || Number.isInteger(g) ? Math.round(g) : g.toFixed(1)} GB`; };
   const money = (n) => 'US$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
