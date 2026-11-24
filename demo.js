@@ -37,14 +37,16 @@ function dataDir(base, env = process.env) {
 }
 
 // ---------- the made-up business ----------
-// The same people, pay types and rates as Riyeser Accounting's demo company (riyeser/demo.py), plus two more.
-const DETAILS = { company_name: `${BUSINESS} (demo)`, address: '12 Harbour St, Sydney NSW 2000', phone: '02 9000 1234', email: 'accounts@clearwater.example' };
+// The same people, pay types, rates and hours as Riyeser Accounting's demo company (DEMO_STAFF and DEMO_DETAILS in
+// riyeser/demo.py), so both programs show the same team. Keep the two in step: change one, change the other.
+const DETAILS = { company_name: `${BUSINESS} (demo)`, address: '12 Harbour St, Sydney NSW 2000', phone: '02 9000 1234', email: 'accounts@sampletrading.example' };
+// day: one weekday shift, so a week matches each person's standard hours (38, or 20 and 25 part time)
 const STAFF = [
-  { name: 'Mia Thompson', username: 'mia', position: 'Office manager', pay_type: 'salary', pay_rate: 78000, day: ['09:00', '17:00'] },
-  { name: 'Leo Nguyen', username: 'leo', position: 'Service technician', pay_type: 'hourly', pay_rate: 34.5, day: ['08:00', '16:00'] },
-  { name: 'Ava Patel', username: 'ava', position: 'Sales assistant (part time)', pay_type: 'hourly', pay_rate: 31, day: ['09:00', '13:00'] },
-  { name: 'Ruby Example', username: 'ruby', position: 'Warehouse hand', pay_type: 'hourly', pay_rate: 29, day: ['07:30', '15:30'] },
-  { name: 'Jack Sample', username: 'jack', position: 'Delivery driver', pay_type: 'hourly', pay_rate: 28.5, day: ['08:30', '16:30'] },
+  { name: 'Alex Sample', username: 'alex', position: 'Store manager', pay_type: 'salary', pay_rate: 78000, email: 'alex.sample@sampletrading.example', day: ['08:30', '16:06'] },
+  { name: 'Jamie Example', username: 'jamie', position: 'Service technician', pay_type: 'hourly', pay_rate: 34.5, email: 'jamie.example@sampletrading.example', day: ['07:30', '15:06'] },
+  { name: 'Robin Demo', username: 'robin', position: 'Service technician', pay_type: 'hourly', pay_rate: 33, email: 'robin.demo@sampletrading.example', day: ['08:00', '15:36'] },
+  { name: 'Casey Placeholder', username: 'casey', position: 'Shop assistant', pay_type: 'hourly', pay_rate: 31, email: 'casey.placeholder@sampletrading.example', day: ['09:00', '13:00'] },
+  { name: 'Morgan Testwell', username: 'morgan', position: 'Cafe barista', pay_type: 'hourly', pay_rate: 30, email: 'morgan.testwell@sampletrading.example', day: ['07:00', '12:00'] },
 ];
 
 /** Fill an empty demo payroll: settings, a demo/demo admin login, 5 staff, two weeks of timesheets and one finished pay run. */
@@ -61,7 +63,7 @@ function seed(h) {
     const ins = db.prepare(`INSERT INTO users(name, username, password_hash, role, position, email, pay_type, pay_rate, start_date, on_timeclock, employee_no, clock_pin)
       VALUES(?,?,?,'staff',?,?,?,?,?,1,?,?)`);
     const today = todayIn(getSettings().timezone);
-    const ids = STAFF.map((s, i) => ins.run(s.name, s.username, hashPassword(`${s.username}-demo-${i}`), s.position, `${s.username}@sample-trading.example`, s.pay_type, s.pay_rate,
+    const ids = STAFF.map((s, i) => ins.run(s.name, s.username, hashPassword(`${s.username}-demo-${i}`), s.position, s.email, s.pay_type, s.pay_rate,
       addDays(today, -200), `E${String(i + 1).padStart(3, '0')}`, String(1111 * (i + 1)).slice(0, 4)).lastInsertRowid);
     // the last full pay period (two weeks): a shift on every weekday, then the pay run for it
     const cur = payPeriodOf(today), prev = payPeriodOf(addDays(cur[0], -1));

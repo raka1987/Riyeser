@@ -62,7 +62,7 @@ test('demo on: the demo folder is used and filled with Sample Trading Co; demo /
   assert.equal(me.user.role, 'admin');
   assert.equal(me.settings.company_name, 'Sample Trading Co (demo)'); assert.equal(me.settings.setup_done, '1');
   const staff = (await call('GET', '/api/staff/employees', null, r.cookie)).data.filter(u => u.role === 'staff');
-  assert.deepEqual(staff.map(u => u.name).sort(), ['Ava Patel', 'Jack Sample', 'Leo Nguyen', 'Mia Thompson', 'Ruby Example']);
+  assert.deepEqual(staff.map(u => u.name).sort(), ['Alex Sample', 'Casey Placeholder', 'Jamie Example', 'Morgan Testwell', 'Robin Demo']);
   assert.ok(staff.some(u => u.pay_type === 'salary') && staff.some(u => u.pay_type === 'hourly'));
   assert.ok(!staff.some(u => u.name === 'Real Person'));
   const runs = (await call('GET', '/api/staff/payroll/runs', null, r.cookie)).data;
