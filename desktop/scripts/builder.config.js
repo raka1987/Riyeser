@@ -13,7 +13,7 @@ const APPS = {
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
-    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.8.4', productName: 'Riyeser Central' } },
+    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.8.5', productName: 'Riyeser Central' } },
   // As Built was called Riyeser Services. Only the name people see changed: the app id, install folder (riyeser-services),
   // program file (Riyeser Services.exe), saved projects and release file (RiyeserServices-Setup.exe) stay the same,
   // so installed copies update in place and keep their projects.
@@ -26,12 +26,12 @@ const APPS = {
   // (RiyeserTeam-Setup.exe) stay the same, so installed copies update in place and older Centrals still find it.
   team: { name: 'Riyeser Link', appId: 'com.riyeser.team', ico: 'build/team/icon.ico', out: 'dist-team', artifact: 'RiyeserTeam',
     executableName: 'Riyeser Team',
-    extraMetadata: { main: 'src/team-main.js', name: 'riyeser-team', version: '1.1.0', productName: 'Riyeser Link' } },
+    extraMetadata: { main: 'src/team-main.js', name: 'riyeser-team', version: '1.1.1', productName: 'Riyeser Link' } },
   // Riyeser Link Office installs for the whole PC (one Windows permission prompt) so its installer can add the Windows
   // Firewall rule that lets the office's desk phones reach it (build/link/installer.nsh; removed on uninstall).
   linkoffice: { name: 'Riyeser Link Office', appId: 'com.riyeser.linkoffice', ico: 'build/link/icon.ico', out: 'dist-linkoffice', artifact: 'RiyeserLinkOffice',
     perMachine: true, include: 'build/link/installer.nsh',
-    extraMetadata: { main: 'src/link-main.js', name: 'riyeser-linkoffice', version: '1.1.1', productName: 'Riyeser Link Office' } },
+    extraMetadata: { main: 'src/link-main.js', name: 'riyeser-linkoffice', version: '1.1.2', productName: 'Riyeser Link Office' } },
 };
 const a = APPS[which];
 

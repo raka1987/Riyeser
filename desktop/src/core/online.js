@@ -80,8 +80,9 @@ class Online {
    * store: Central's Store; fetchFn: (url, opts) => Response; appData: Electron's appData folder;
    * programsFn: async () => {programId: version} — the Riyeser programs installed on this PC (from updates.js).
    */
-  constructor({ store, fetchFn, appData, appVersion = '', deviceName = '', platform = process.platform, programsFn = null }) {
-    Object.assign(this, { store, fetchFn, appData, appVersion, deviceName, platform, programsFn });
+  /** shareDevice: Riyeser Central only: it writes this PC's id to %APPDATA%\Riyeser\device.json for the other programs. */
+  constructor({ store, fetchFn, appData, appVersion = '', deviceName = '', platform = process.platform, programsFn = null, shareDevice = false }) {
+    Object.assign(this, { store, fetchFn, appData, appVersion, deviceName, platform, programsFn, shareDevice });
   }
 
   // ---------- the online service's address ----------
@@ -181,9 +182,15 @@ class Online {
   rpc(name, args) { return this.call(`/rest/v1/rpc/${name}`, { method: 'POST', body: args || {} }); }
 
   // ---------- this PC ----------
+  // The PC's id: made once by Riyeser Central and kept in its store; Central also writes it to device.json, where the
+  // other programs read it (a signed licence names the PC it's for). Other apps use Central's id when there is one.
   deviceId() {
+    const signed = require('./signed-licence');
+    const shared = this.appData ? signed.readDeviceId(this.appData) : null;
+    if (!this.shareDevice && shared) return shared;
     let d = this.store.get('device', null);
     if (!d || !d.id) d = this.store.set('device', { id: crypto.randomUUID(), created: new Date().toISOString() });
+    if (this.shareDevice && this.appData && shared !== d.id) { try { signed.writeDeviceId(this.appData, d.id); } catch { /* tried again next time */ } }
     return d.id;
   }
   async linkDevice(ws) {
@@ -224,17 +231,31 @@ class Online {
   }
 
   // ---------- the company's licence (which paid programs are on), saved for every Riyeser program ----------
-  /** Fetch it and save it in licence.json under "online". null when it can't (offline, not an online company). */
+  /**
+   * Fetch it and save it in licence.json under "online". null when it can't (offline, not an online company).
+   * The signed licence comes from Riyeser's "licence" function (Ed25519, for this business and this PC) and is saved
+   * as it came, under online.signed. Until that function is switched on, the plan comes unsigned from company_licence.
+   */
   async refreshLicence(now = Date.now()) {
     const c = readCompany(this.appData);
     if (!c || c.mode !== 'online' || !c.workspace_id || !this.session) return null;
     // the daily check-in also reports the programs on this PC (it never holds up the licence)
     const sent = this.reportPrograms(c.workspace_id);
-    let r;
-    try { r = await this.rpc('company_licence', { ws: c.workspace_id }); } catch { await sent; return null; }   // keep the last one
+    const s = await this.signedLicence(c.workspace_id);
+    let r = s && s.licence;
+    if (!r) {
+      try { r = await this.rpc('company_licence', { ws: c.workspace_id }); } catch { await sent; return null; }   // keep the last one
+    }
     await sent;
     if (!r || typeof r !== 'object' || !r.modules) return null;
-    return require('./licence').saveOnline(this.appData, r, now);
+    return require('./licence').saveOnline(this.appData, r, now, s);
+  }
+  /** The signed licence from the "licence" function, or null (not switched on yet, offline, or an odd answer). */
+  async signedLicence(ws) {
+    try {
+      const s = await this.call('/functions/v1/licence', { method: 'POST', body: { ws, device: this.deviceId() } });
+      return s && typeof s === 'object' && typeof s.sig === 'string' && s.licence && s.workspace_id === ws ? s : null;
+    } catch { return null; }
   }
 
   // ---------- set up or join ----------

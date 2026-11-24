@@ -2139,6 +2139,28 @@ do $$ begin
   assert exists (select 1 from pg_constraint where conname = 'call_signals_kind_check' and pg_get_constraintdef(oid) like '%hold%'), 'hold signal';
 end $$;
 
+-- --- Signed licences: the licence function names a PC only when it's linked to the business, for people in it
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+do $$ declare ws uuid := current_setting('test.ws_a')::uuid; begin
+  assert public.licence_device_linked(ws, 'e1e1e1e1-0000-4000-8000-000000000001'), 'a PC linked to the business';
+  assert not public.licence_device_linked(ws, 'e1e1e1e1-0000-4000-8000-0000000000ff'), 'a PC that was never linked';
+  assert not public.licence_device_linked((select id from public.workspaces where name = 'Corner Cafe'), 'e1e1e1e1-0000-4000-8000-000000000001'), 'linked to another business';
+end $$;
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ begin assert public.licence_device_linked(current_setting('test.ws_a')::uuid, 'e1e1e1e1-0000-4000-8000-000000000001'), 'anyone in the business (not only who linked it)'; end $$;
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin
+  assert not public.licence_device_linked(current_setting('test.ws_a')::uuid, 'e1e1e1e1-0000-4000-8000-000000000001'), 'someone from another business learns nothing';
+  assert not public.licence_device_linked((select id from public.workspaces where name = 'Corner Cafe'), 'e1e1e1e1-0000-4000-8000-000000000001'), 'another business''s PC';
+end $$;
+reset role;
+set role anon;
+do $$ begin
+  begin perform public.licence_device_linked(current_setting('test.ws_a')::uuid, 'e1e1e1e1-0000-4000-8000-000000000001'); raise exception 'anon checked a PC';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

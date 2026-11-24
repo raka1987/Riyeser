@@ -8,6 +8,17 @@ const root = path.join(__dirname, '..');
 const run = (cmd, args, env = {}) => execFileSync(cmd, args, { cwd: root, stdio: 'inherit', shell: process.platform === 'win32', env: { ...process.env, ...env } });
 
 run('node', ['scripts/vendor.js']);
+// The licence public key (Ed25519), built into Central and Link Office so they only trust licences Riyeser signed.
+// The workflow fetches it from the licence function's /public-key; without it (signing not switched on yet) the build
+// accepts unsigned licences, as before. It's a public key: nothing secret is in the build.
+{
+  const keyFile = path.join(root, 'src', 'core', 'licence-public-key.txt');
+  const key = String(process.env.RIYESER_LICENCE_PUBLIC_KEY || '').trim();
+  if (key) {
+    if (Buffer.from(key, 'base64').length !== 32) throw new Error('RIYESER_LICENCE_PUBLIC_KEY isn\'t an Ed25519 public key (32 bytes, base64).');
+    fs.writeFileSync(keyFile, `${key}\n`); console.log('Licence public key built in:', key);
+  } else { fs.rmSync(keyFile, { force: true }); console.log('No licence public key: this build accepts unsigned licences (licence signing not switched on yet).'); }
+}
 // .ico files in the format Windows expects (BMP small sizes + PNG 256), if Python is available.
 for (const [src, out] of [['build/icon.png', 'build/icon.ico'], ['build/pdf/icon.png', 'build/pdf/icon.ico'], ['build/central/icon.png', 'build/central/icon.ico'], ['build/services/icon.png', 'build/services/icon.ico'], ['build/team/icon.png', 'build/team/icon.ico'], ['build/link/icon.png', 'build/link/icon.ico']]) {
   try { run(process.platform === 'win32' ? 'python' : 'python3', ['scripts/make-ico.py', src, out]); } catch { console.warn('Python not found - using the existing .ico files'); }

@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const signed = require('./signed-licence');
 
 const TRIAL_DAYS = 90;
 const OFFLINE_GRACE_DAYS = 30;
@@ -27,8 +28,15 @@ function write(appData, data) {
   return data;
 }
 
-/** The trial starts the first time any Riyeser program asks. */
+// Central's own data folder: one of the places the first-run date and the latest time seen are kept (signed-licence.js)
+const centralDir = (appData) => path.join(appData, 'Riyeser Central', 'data');
+
+/**
+ * The trial starts the first time any Riyeser program asks. It's kept in licence.json and in a marker in Central's
+ * data folder; the earlier of the two counts, so deleting licence.json doesn't start a new trial.
+ */
 function ensureTrial(appData, now = Date.now()) {
+  signed.localTrial({ appData, ownDir: centralDir(appData), now });
   const d = read(appData);
   if (!d.trialStart || Number.isNaN(Date.parse(d.trialStart))) { d.trialStart = new Date(now).toISOString(); write(appData, d); }
   return d;
@@ -42,6 +50,15 @@ const mask = (key) => (key ? `${String(key).slice(0, 4)}…${String(key).slice(-
 // fields, so each Riyeser program can unlock its own paid module. It stays good for OFFLINE_GRACE_DAYS offline.
 const MODULE_NAMES = { basic: 'Accounting Basics', plus: 'Accounting Plus', payroll: 'Payroll', pos: 'POS', bookings: 'Bookings',
   as_built: 'As Built', calls: 'Riyeser Link Plus' };   // calls: Riyeser Link Plus (Link calls and Riyeser Link Office)
+// What each paid program costs a month, for the "trial ended" messages. The same as riyeser.com (website/prices.mjs).
+const MODULE_PRICES = { basic: 'US$25/month', plus: 'US$39/month', payroll: 'US$25/month', pos: 'US$29/month', bookings: 'US$25/month',
+  as_built: 'US$29/month', calls: 'US$39/month' };
+const HOME_URL = 'https://riyeser.com/link/';   // the Riyeser home page, where paid programs are added
+/** What's locked, what still works, the price and where to add it, for a paid program that isn't on. */
+function lockedText(id) {
+  const name = MODULE_NAMES[id] || 'This program';
+  return `New work in ${name} is paused. You can still open, see and print everything. To carry on, add ${name} from your Riyeser home page (${MODULE_PRICES[id] || 'see riyeser.com'}).`;
+}
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 function fmtDate(ymd) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(ymd || '')); return m ? `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]} ${m[1]}` : ''; }
 function ago(iso, now) {
@@ -53,22 +70,40 @@ function ago(iso, now) {
   const d = Math.round(mins / 1440); return `${d} day${d === 1 ? '' : 's'} ago`;
 }
 
-/** Save what Riyeser online said, keeping every other field (trial, licence key) as it was. */
-function saveOnline(appData, data, now = Date.now()) {
+/**
+ * Save what Riyeser online said, keeping every other field (trial, licence key) as it was. signedLicence: the signed
+ * licence from the "licence" function, kept exactly as it came (online.signed), so every program can check it. When
+ * this check couldn't get a signed one, the last signed licence for the same business is kept: it's good until it expires.
+ */
+function saveOnline(appData, data, now = Date.now(), signedLicence = null) {
   const d = read(appData);
-  d.online = { ...(data || {}), checkedAt: new Date(now).toISOString() };
+  const prev = d.online && d.online.signed;
+  const keep = signedLicence || (prev && data && prev.workspace_id && prev.workspace_id === data.workspace_id ? prev : null);
+  d.online = { ...(data || {}), checkedAt: new Date(now).toISOString(), ...(keep ? { signed: keep } : {}) };
   write(appData, d);
   return d.online;
 }
+/** The online plan, only as far as it can be trusted (signed-licence.js check). */
+function trustedOnline(appData, now = Date.now()) { return signed.check({ appData, ownDir: centralDir(appData), now }); }
 
 /** One line per paid program, in plain words, plus users, companies and when it was last checked. null if none. */
 function onlinePlan(appData, now = Date.now(), d = read(appData)) {
-  const o = d.online;
-  if (!o || typeof o !== 'object') return null;
-  const stale = !(now - (Date.parse(o.checkedAt) || 0) < OFFLINE_GRACE_DAYS * DAY);
+  if (!d.online || typeof d.online !== 'object') return null;
+  const ev = trustedOnline(appData, now);
+  if (ev.state === 'invalid') {   // edited, copied, expired, clock put back, or an older Central's for too long
+    const mods = d.online.modules || {};
+    const rows = Object.keys(MODULE_NAMES).filter((id) => mods[id]).map((id) => ({ id, name: MODULE_NAMES[id], text: 'needs checking', tone: 'bad',
+      line: `${MODULE_NAMES[id]}: needs checking`, locked: lockedText(id), price: MODULE_PRICES[id] }));
+    return { companyCode: d.online.company_code || '', rows, stale: true, problem: ev.problem, checkedAt: d.online.checkedAt, checkedAgo: ago(d.online.checkedAt, now),
+      seatsIncluded: 3, extraUsers: 0, usersUsed: null, extraCompanies: 0, billing: 'monthly', earlyBird: false, homeUrl: HOME_URL, message: ev.message };
+  }
+  const o = ev.plan;
+  const stale = !(now < ev.expiresAt);
   const mods = o.modules || {};
   const rows = Object.keys(MODULE_NAMES).filter((id) => mods[id]).map((id) => {
-    const m = mods[id]; const name = MODULE_NAMES[id];
+    const live = signed.moduleState(o, id, now);
+    const m = { ...mods[id], active: live.active, status: live.active ? mods[id].status : (mods[id].active ? 'ended' : mods[id].status), days_left: live.daysLeft };
+    const name = MODULE_NAMES[id];
     let text; let tone;
     if (m.active && m.status === 'trial') {
       const n = m.days_left != null ? m.days_left : null;
@@ -77,13 +112,13 @@ function onlinePlan(appData, now = Date.now(), d = read(appData)) {
     else if (m.status === 'cancelled') { text = 'cancelled — contact Riyeser'; tone = 'bad'; }
     else if (m.status === 'closed') { text = 'business closed — contact Riyeser support'; tone = 'bad'; }   // HQ closed or suspended it
     else { text = 'trial ended — contact Riyeser'; tone = 'bad'; }
-    return { id, name, text, tone, line: `${name}: ${text}` };
+    return { id, name, text, tone, line: `${name}: ${text}`, ...(tone === 'bad' ? { locked: lockedText(id), price: MODULE_PRICES[id] } : {}) };
   });
   const seats = o.seats || {};
   return { companyCode: o.company_code || '', rows, stale, checkedAt: o.checkedAt, checkedAgo: ago(o.checkedAt, now),
     seatsIncluded: seats.included != null ? seats.included : 3, extraUsers: seats.extra || 0, usersUsed: seats.used != null ? seats.used : null,
-    extraCompanies: o.extra_companies || 0, billing: o.billing || 'monthly', earlyBird: !!o.early_bird,
-    message: stale ? 'Riyeser couldn\'t check your licence for 30 days: connect to the internet and open Riyeser Central.' : null };
+    extraCompanies: o.extra_companies || 0, billing: o.billing || 'monthly', earlyBird: !!o.early_bird, homeUrl: HOME_URL,
+    message: stale ? 'Riyeser couldn\'t check your licence for 30 days: connect to the internet and open Riyeser Central.' : (ev.message || null) };
 }
 
 /**
@@ -98,9 +133,12 @@ function status(appData, now = Date.now()) {
 
 function localStatus(appData, now = Date.now()) {
   const d = ensureTrial(appData, now);
-  const trialEnds = Date.parse(d.trialStart) + TRIAL_DAYS * DAY;
-  const base = { trialStart: d.trialStart, trialEnds: new Date(trialEnds).toISOString(), buyUrl: BUY_URL };
-  if (d.key && d.licence) {
+  const t = signed.localTrial({ appData, ownDir: centralDir(appData), now, write: false });
+  const trialEnds = t.ends;
+  const base = { trialStart: new Date(t.start).toISOString(), trialEnds: new Date(trialEnds).toISOString(), buyUrl: BUY_URL };
+  // A licence key (the older Lemon Squeezy keys) is only a local file, so once licences are signed it no longer unlocks
+  // anything here: the company's signed plan from Riyeser online does.
+  if (d.key && d.licence && !signed.builtInKey()) {
     const checked = Date.parse(d.licence.checkedAt || 0) || 0;
     const expiresAt = d.licence.expiresAt ? Date.parse(d.licence.expiresAt) : null;
     const offlineLeft = checked + OFFLINE_GRACE_DAYS * DAY - now;
@@ -113,7 +151,7 @@ function localStatus(appData, now = Date.now()) {
     if (active) return { ...base, mode: 'expired', key: mask(d.key), needsCheck: true, message: 'Your licence needs checking. Connect to the internet and open Riyeser Central.' };
     return { ...base, mode: 'expired', key: mask(d.key), needsCheck: false, message: d.licence.status === 'expired' ? 'Your subscription has ended. Renew it to keep adding new work.' : `This licence is ${d.licence.status || 'not active'}.` };
   }
-  if (now < trialEnds) return { ...base, mode: 'trial', daysLeft: days(trialEnds - now) };
+  if (t.active) return { ...base, mode: 'trial', daysLeft: t.daysLeft };
   return { ...base, mode: 'expired', daysLeft: 0, message: 'Your free trial has finished. Everything you made is still here — get a licence to keep adding new work.' };
 }
 
@@ -185,4 +223,5 @@ async function remove(appData, { fetchFn = globalThis.fetch, now = Date.now() } 
   return status(appData, now);
 }
 
-module.exports = { TRIAL_DAYS, OFFLINE_GRACE_DAYS, BUY_URL, MODULE_NAMES, licenceFile, read, ensureTrial, status, activate, recheck, remove, saveOnline, onlinePlan, fmtDate };
+module.exports = { TRIAL_DAYS, OFFLINE_GRACE_DAYS, BUY_URL, HOME_URL, MODULE_NAMES, MODULE_PRICES, lockedText, licenceFile, read, ensureTrial, status, activate, recheck, remove,
+  saveOnline, onlinePlan, trustedOnline, centralDir, fmtDate };

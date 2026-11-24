@@ -16,7 +16,9 @@ app.setName(NAME);
 app.setPath('userData', path.join(app.getPath('appData'), NAME));
 if (process.platform === 'win32') app.setAppUserModelId('com.riyeser.linkoffice');
 const selfTestArg = process.argv.find((a) => a.startsWith('--self-test='));
+const quitArg = require('./core/quit-arg');
 if (!selfTestArg && !app.requestSingleInstanceLock()) app.quit();
+else if (!selfTestArg && quitArg.wantsQuit(process.argv)) app.exit(0);   // asked to quit, and no copy was running
 
 let win = null; let tray = null; let quitting = false; let toldAboutTray = false; let service = null; let store = null;
 let sleepNote = null; let firewall = null; let blocker = null; let cloud = null;
@@ -166,7 +168,8 @@ function registerIpc() {
   handle('link:openLogs', () => shell.openPath(path.join(app.getPath('userData'), 'logs')).then(() => true));
 }
 
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+// A second copy: brings this one forward, or with --quit (Riyeser Central's "Close them for me") quits this one properly.
+app.on('second-instance', (_e, argv) => quitArg.onSecondInstance(argv, { quit: () => { quitting = true; app.quit(); }, show: () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } } }));
 app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => { if (blocker != null && powerSaveBlocker.isStarted(blocker)) powerSaveBlocker.stop(blocker); if (cloud) cloud.stop(); if (service) service.stop(); });
 app.on('window-all-closed', () => { /* stays in the tray */ });

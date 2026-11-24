@@ -94,6 +94,47 @@ function runningImages({ platform = process.platform, exec = execFile } = {}) {
 }
 const closeFirst = (names) => (names.length ? `Close these first: ${names.join(', ')}.` : '');
 
+/** The programs running on this PC with their process ids: [{ image, pid }] (tasklist), or null when it can't tell. */
+function runningProcesses({ platform = process.platform, exec = execFile } = {}) {
+  if (platform !== 'win32') return Promise.resolve([]);
+  return new Promise((resolve) => exec('tasklist', ['/fo', 'csv', '/nh'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, out) => {
+    if (err) return resolve(null);
+    resolve(String(out || '').split(/\r?\n/).map((l) => /^"([^"]+)","(\d+)"/.exec(l)).filter(Boolean).map((m) => ({ image: m[1], pid: Number(m[2]) })));
+  }));
+}
+const cantClose = (name) => `Couldn't close ${name}. Close it yourself, then press Check again.`;
+/**
+ * "Close them for me": close each open Riyeser program properly, then look again. Never forced, because a program
+ * might be saving. Riyeser Link and Link Office (quitArg) are asked to quit by starting them with --quit (they stay
+ * by the clock when their window is closed); every other program gets a normal close (taskkill /PID, never /F),
+ * the same as clicking its X. Waits up to timeoutMs for them to go.
+ * opts: { programs, list: () => [{image,pid}]|null, locate: (program) => exe|null, launch: (exe, args), exec, wait, timeoutMs, pollMs }
+ * -> { closed: [names], stillOpen: [names], message }
+ */
+async function closePrograms({ programs, list = () => runningProcesses(), locate = () => null, launch = () => {}, exec = execFile,
+  wait = (ms) => new Promise((r) => setTimeout(r, ms)), timeoutMs = 10000, pollMs = 500 }) {
+  const mine = (procs, p) => (procs || []).filter((x) => (p.exes || []).some((e) => e.toLowerCase() === String(x.image).toLowerCase()));
+  const first = await list();
+  if (!first) return { closed: [], stillOpen: [], message: 'Couldn\'t see which programs are open. Close them yourself, then press Check again.' };
+  const targets = programs.filter((p) => mine(first, p).length);
+  for (const p of targets) {
+    const exe = p.quitArg ? locate(p) : null;
+    if (exe) { try { launch(exe, ['--quit']); continue; } catch { /* fall back to a normal close */ } }
+    for (const x of mine(first, p)) {
+      // a normal close, like clicking the window's X: never /F (it could be part-way through saving)
+      await new Promise((r) => { try { exec('taskkill', ['/PID', String(x.pid)], { windowsHide: true }, () => r()); } catch { r(); } });
+    }
+  }
+  let left = targets;
+  for (let t = 0; left.length && t < timeoutMs; t += pollMs) {
+    await wait(pollMs);
+    const now = await list();
+    if (now) left = targets.filter((p) => mine(now, p).length);
+  }
+  const name = (p) => p.full || p.name;
+  return { closed: targets.filter((p) => !left.includes(p)).map(name), stillOpen: left.map(name), message: left.map((p) => cantClose(name(p))).join(' ') };
+}
+
 // ---------- putting it away ----------
 const writeJson = (file, data) => { const tmp = `${file}.tmp`; fs.writeFileSync(tmp, JSON.stringify(data, null, 2)); fs.renameSync(tmp, file); };
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
@@ -114,6 +155,15 @@ function putAway({ appData, env = process.env, home = os.homedir(), centralDir, 
       const back = rollBack(moved, rename);
       return { ok: false, failed: { id: s.id, name: s.name, dir: s.from, error: e.code || e.message }, ...back };
     }
+  }
+  // The licence marker (first-run date of the free trial, signed-licence.js) carries over, so a fresh start doesn't
+  // give a new 90-day trial. It's a copy: the one put away stays with everything else.
+  const shared = moved.find((s) => s.id === 'shared');
+  if (shared) {
+    try {
+      const m = path.join(shared.to, '.riyeser-licence.json');
+      if (fs.existsSync(m)) { fs.mkdirSync(shared.from, { recursive: true }); fs.copyFileSync(m, path.join(shared.from, '.riyeser-licence.json')); }
+    } catch { /* the trial date is also kept by each program's own marker */ }
   }
   const items = [...moved.map(({ id, name, from, to }) => ({ id, name, from, to, status: 'moved' })),
     ...(central ? [{ id: central.id, name: central.name, from: central.from, to: central.to, status: 'moves when Riyeser Central restarts' }] : [])];
@@ -229,5 +279,5 @@ function finishBringBack({ dir, m, rename, tries, wait, now }) {
   return { action: 'bring-back', ok: true, from: m.from, to: dir, aside };
 }
 
-module.exports = { LABEL, LOG, MARKER, CONFIRM, folders, plan, stamp, awayName, openPrograms, runningImages, closeFirst,
+module.exports = { LABEL, LOG, MARKER, CONFIRM, folders, plan, stamp, awayName, openPrograms, runningImages, runningProcesses, closePrograms, cantClose, closeFirst,
   putAway, failMessage, finishOnStart, sets, bringBack };

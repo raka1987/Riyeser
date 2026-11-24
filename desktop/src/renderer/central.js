@@ -406,12 +406,17 @@ function freshBox() {
   body.appendChild(box);
 }
 function freshReset() { const st = $('#freshstep'); if (!st) return; $('#freshbox').remove(); freshBox(); }
-async function freshStart() {
+// Riyeser Link stays by the clock when its window is closed, so say how to quit it (or Central can close it).
+const FRESH_LINK_HINT = '<b>Riyeser Link</b> keeps running by the clock so calls reach you: right-click its icon near the clock and choose Quit, or press <b>Close them for me</b>.';
+async function freshStart(note = '') {
   const st = $('#freshstep');
   st.innerHTML = '<span style="font-size:13px">Checking what’s open…</span>';
   const c = await bridge.call('fresh:check');
   if (c.open.length) {
-    st.innerHTML = `<p class="bad" style="font-size:13px;margin:0 0 8px"><b>Close these first: ${c.open.map(esc).join(', ')}.</b></p><button data-fresh="go">Check again</button> <button data-fresh="cancel">Cancel</button>`;
+    st.innerHTML = `<p class="bad" style="font-size:13px;margin:0 0 8px"><b>Close these first: ${c.open.map(esc).join(', ')}.</b></p>
+      ${c.open.includes('Riyeser Link') ? `<p style="font-size:12.5px;margin:0 0 8px">${FRESH_LINK_HINT}</p>` : ''}
+      ${note ? `<p class="bad" style="font-size:12.5px;margin:0 0 8px">${esc(note)}</p>` : ''}
+      <button data-fresh="go">Check again</button> <button data-fresh="close">Close them for me</button> <button data-fresh="cancel">Cancel</button>`;
     return;
   }
   st.innerHTML = `<div style="font-size:12.5px;margin-bottom:8px">These will be put away:<ul style="margin:4px 0 0 18px;padding:0">${c.folders.map((f) => `<li>${esc(f.name)} <span style="color:var(--muted)">${esc(short(f.dir))}</span></li>`).join('')}</ul></div>
@@ -449,7 +454,11 @@ document.addEventListener('click', (e) => {
   if (e.target.closest('#freshback')) return safe(freshBringBack);
   const b = e.target.closest('[data-fresh]'); if (!b) return;
   const a = b.dataset.fresh;
-  if (a === 'go') safe(freshStart);
+  if (a === 'go') safe(() => freshStart());
+  if (a === 'close') safe(async () => {
+    b.disabled = true; b.textContent = 'Closing…';
+    try { const r = await bridge.call('fresh:close'); await freshStart(r.message || ''); } finally { if (b.isConnected) { b.disabled = false; b.textContent = 'Close them for me'; } }
+  });
   if (a === 'cancel') freshReset();
   if (a === 'restore') safe(() => freshRestore(b.dataset.id));
 });
@@ -626,12 +635,12 @@ function openPlan(o) {
   const icon = { ok: '✅', trial: '🎁', warn: '⏳', bad: '⛔' };
   $('#licbody').innerHTML = `<div class="state${o.stale ? ' bad' : ''}"><span class="big">${o.stale ? '🔑' : '🏢'}</span><div><b>Your Riyeser plan${o.companyCode ? ` · ${esc(o.companyCode)}` : ''}</b>
       ${o.stale ? esc(o.message) : 'Set by Riyeser for your whole company. Every Riyeser program on this PC follows it.'}</div></div>
-    <ul class="planrows">${o.rows.map((r) => `<li class="t-${r.tone}"><span>${icon[r.tone] || ''}</span><b>${esc(r.name)}</b><span class="pt">${esc(r.text)}</span></li>`).join('')
+    <ul class="planrows">${o.rows.map((r) => `<li class="t-${r.tone}"><span>${icon[r.tone] || ''}</span><b>${esc(r.name)}</b><span class="pt">${esc(r.text)}</span>${r.locked ? `<span class="lk">${esc(r.locked)}</span>` : ''}</li>`).join('')
       || '<li><span></span><b>No paid programs yet</b><span class="pt">Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are free.</span></li>'}</ul>
     <p class="planmeta">Users: ${o.seatsIncluded} included in each paid program${o.extraUsers ? ` + ${o.extraUsers} extra` : ''}${o.usersUsed != null ? ` (${o.usersUsed} in use)` : ''} · Companies in Accounting: ${1 + o.extraCompanies} (1 included${o.extraCompanies ? ` + ${o.extraCompanies} extra` : ''})
       · Billed ${o.billing === 'yearly' ? 'yearly' : 'monthly'}${o.earlyBird ? ' · 🐣 early bird' : ''}</p>
     <p class="muted">Last checked ${esc(o.checkedAgo)}. Works offline for 30 days between checks.</p>
-    <div class="row"><button class="btn" data-lic="refresh">Check now</button><button class="btn s" data-lic="buy">See plans</button></div>
+    <div class="row"><button class="btn" data-lic="refresh">Check now</button>${o.rows.some((r) => r.locked) ? '<button class="btn" data-lic="home">Open Riyeser home</button>' : ''}<button class="btn s" data-lic="buy">See plans</button></div>
     <p class="muted">Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are always free. To add or change a paid program, contact Riyeser.</p>`;
   $('#licdlg').showModal();
 }
@@ -657,6 +666,7 @@ document.addEventListener('click', (e) => {
   const a = b.dataset.lic;
   if (a === 'open') openLicence();
   if (a === 'buy') safe(() => bridge.call('central:buy'));
+  if (a === 'home') safe(() => bridge.call('central:home'));
   if (a === 'refresh') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceRefresh'); renderLicence(); if (lic && lic.online) openPlan(lic.online); toast(lic && lic.online && !lic.online.stale ? 'Plan checked' : 'Couldn\'t reach Riyeser right now. Try again when you\'re online.'); } finally { b.disabled = false; } });
   if (a === 'activate') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceActivate', $('#lickey').value); renderLicence(); openLicence(); toast('Licence turned on — thank you!'); } finally { b.disabled = false; } });
   if (a === 'remove') safe(async () => { if (!(await askConfirm({ title: 'Remove the licence from this PC?', body: 'You can type the licence key in again any time.', ok: 'Remove it' }))) return; lic = await bridge.call('central:licenceRemove'); renderLicence(); openLicence(); });

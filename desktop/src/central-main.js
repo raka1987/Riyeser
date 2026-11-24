@@ -43,10 +43,10 @@ const PROGRAMS = [
   // the Link button opens it. Its folder and program file kept the old names (riyeser-team, Riyeser Team.exe) so it
   // updates in place; the Start menu and desktop shortcuts are called Riyeser Link now (Riyeser Team before 1.1).
   { id: 'team', name: 'Link', full: 'Riyeser Link', icon: '💬', desc: 'Chat for your business, and Link Plus calls. Chat is free.',
-    dirs: ['riyeser-team', 'Riyeser Team'], exes: ['Riyeser Team.exe'], links: ['Riyeser Link', 'Riyeser Team'] },
+    dirs: ['riyeser-team', 'Riyeser Team'], exes: ['Riyeser Team.exe'], links: ['Riyeser Link', 'Riyeser Team'], quitArg: true },   // quitArg: --quit closes it (Fresh start)
   // Riyeser Link Office: the office phone system, with Riyeser Link Plus. Installs for the whole PC (Program Files).
   { id: 'linkoffice', name: 'Link Office', full: 'Riyeser Link Office', icon: '☎', desc: 'Your office phone system: desk phones that ring each other. Comes with Riyeser Link Plus.',
-    dirs: ['Riyeser Link Office', 'riyeser-linkoffice'], exes: ['Riyeser Link Office.exe'], links: ['Riyeser Link Office'], machine: true },
+    dirs: ['Riyeser Link Office', 'riyeser-linkoffice'], exes: ['Riyeser Link Office.exe'], links: ['Riyeser Link Office'], machine: true, quitArg: true },
   { id: 'invoices', name: 'Invoices', full: 'Riyeser Invoices', icon: '🧾', desc: 'Quotes, invoices, customers and getting paid. Free forever.',
     dirs: ['Riyeser Invoices'], exes: ['Riyeser Invoices.exe'], links: ['Riyeser Invoices'], pages: ['invoice'] },
   // Bookings and scheduling (jobs, appointments, tables). Same company files as Accounting; installs next to it.
@@ -326,10 +326,13 @@ function registerIpc() {
   handle('central:licenceActivate', (key) => licence.activate(appData, key, { fetchFn: lfetch }));
   handle('central:licenceRemove', () => licence.remove(appData, { fetchFn: lfetch }));
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
+  handle('central:home', () => shell.openExternal(licence.HOME_URL));   // Riyeser home page: add a paid program there
   // ---------- the company this PC belongs to (%APPDATA%\Riyeser\company.json; set up or join online) ----------
   // programsFn: the Riyeser programs installed on this PC, sent to Riyeser when the PC links and at the daily check-in
   const on = new online.Online({ store, fetchFn: (u, o) => net.fetch(u, o), appData, appVersion: app.getVersion(), deviceName: os.hostname(),
-    programsFn: () => installedVersions() });
+    programsFn: () => installedVersions(), shareDevice: true });
+  // device.json: this PC's id for the other Riyeser programs (a signed licence names the PC it's for)
+  try { if (online.readCompany(appData)) on.deviceId(); } catch { /* tried again at the licence check */ }
   const companyState = async () => {
     const setup = store.get('company-setup', {}) || {};
     const s = on.session;
@@ -470,6 +473,11 @@ function registerIpc() {
     if (!r.ok) return { ...r, message: freshstart.failMessage(r) };
     restartSoon();
     return r;
+  });
+  // "Close them for me": each open Riyeser program is closed properly (never forced), then it looks again
+  handle('fresh:close', async () => {
+    const r = await freshstart.closePrograms({ programs: PROGRAMS, locate, launch });
+    return { ...r, open: await openNow() };
   });
   handle('fresh:sets', () => freshstart.sets(freshOpts()));
   handle('fresh:bringBack', async (id) => {

@@ -4629,3 +4629,17 @@ do $$ declare t text; begin
     end loop;
   end if;
 end $$;
+
+-- ===== Signed licences =====
+-- Licences are signed with Ed25519 by the "licence" Edge Function (supabase/functions/licence in the Riyeser repo,
+-- deployed by .github/workflows/deploy-licence-function.yml on main). It reads company_licence() as the signed-in
+-- person, so only someone in the business gets its licence, and names the PC only when that PC is linked to the
+-- business (Riyeser Central's link_device). Every Riyeser program then trusts a licence only with a good signature,
+-- for its business and, when it names one, for its PC. The private key is only a function secret, never in here.
+create or replace function public.licence_device_linked(ws uuid, device uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members where workspace_id = ws and user_id = auth.uid())
+     and exists (select 1 from devices where id = device and workspace_id = ws)
+$$;
+revoke all on function public.licence_device_linked(uuid, uuid) from public, anon;
+grant execute on function public.licence_device_linked(uuid, uuid) to authenticated;

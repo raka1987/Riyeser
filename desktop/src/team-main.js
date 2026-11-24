@@ -19,7 +19,9 @@ app.setName(NAME);
 // and settings live in %APPDATA%\Riyeser Team, and Windows knows the app by com.riyeser.team.
 { const keep = path.join(app.getPath('appData'), 'Riyeser Team'); app.setPath('userData', keep); app.setPath('sessionData', keep); }
 if (process.platform === 'win32') app.setAppUserModelId('com.riyeser.team');
+const quitArg = require('./core/quit-arg');
 if (!app.requestSingleInstanceLock()) app.quit();
+else if (quitArg.wantsQuit(process.argv)) app.exit(0);   // asked to quit, and no copy was running: nothing to do
 
 let win = null; let tray = null; let quitting = false; let toldAboutTray = false; let lastUnread = 0;
 const startHidden = process.argv.includes('--hidden');
@@ -95,7 +97,8 @@ function createTray() {
   tray.on('click', () => { if (win.isVisible() && win.isFocused()) win.hide(); else { win.show(); win.focus(); } });
 }
 
-app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+// A second copy: brings this one forward, or with --quit (Riyeser Central's "Close them for me") quits this one properly.
+app.on('second-instance', (_e, argv) => quitArg.onSecondInstance(argv, { quit: () => { quitting = true; app.quit(); }, show: () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } } }));
 app.on('before-quit', () => { quitting = true; });
 app.whenReady().then(() => {
   // Microphone, camera and notifications: only for riyeser.com.

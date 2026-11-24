@@ -192,3 +192,66 @@ test('Settings: the wording and the START FRESH check', () => {
   assert.ok(main.indexOf('freshstart.finishOnStart') < main.indexOf("app.setPath('userData'"));   // before anything opens Central's folder
   assert.ok(!/rmSync|unlinkSync|rmdirSync/.test(fs.readFileSync(path.join(__dirname, '..', 'src', 'central', 'freshstart.js'), 'utf8')));   // never deletes
 });
+
+// ---------- "Close them for me" ----------
+const quitArg = require('../src/core/quit-arg');
+const LINK = { name: 'Link', full: 'Riyeser Link', exes: ['Riyeser Team.exe'], quitArg: true };
+const PAY = { name: 'Payroll', full: 'Riyeser Payroll', exes: ['Riyeser Payroll.exe'] };
+const ACC = { name: 'Accounting Plus', full: 'Riyeser Accounting Plus', exes: ['Riyeser Accounting Plus.exe'] };
+/** A pretend Windows: the process list, and what closing does to it. */
+function windows(procs, { closes = () => true } = {}) {
+  const running = [...procs]; const launched = []; const killed = [];
+  return {
+    launched, killed,
+    list: async () => running.map((p) => ({ ...p })),
+    launch: (exe, args) => { launched.push([exe, args]); if (args.includes('--quit')) for (let i = running.length - 1; i >= 0; i--) if (running[i].image === 'Riyeser Team.exe') running.splice(i, 1); },
+    exec: (cmd, args, _o, cb) => { killed.push([cmd, ...args]); const pid = Number(args[args.indexOf('/PID') + 1]); const i = running.findIndex((p) => p.pid === pid); if (i >= 0 && closes(running[i])) running.splice(i, 1); cb(null, ''); },
+  };
+}
+test('close them for me: Riyeser Link is asked to quit with --quit; others get a normal close; then it looks again', async () => {
+  const w = windows([{ image: 'Riyeser Team.exe', pid: 10 }, { image: 'Riyeser Team.exe', pid: 11 }, { image: 'Riyeser Payroll.exe', pid: 20 }, { image: 'explorer.exe', pid: 1 }]);
+  const r = await fresh.closePrograms({ programs: [LINK, PAY, ACC], list: w.list, launch: w.launch, exec: w.exec, locate: (p) => `C:\\Programs\\${p.exes[0]}`, wait: async () => {} });
+  assert.deepStrictEqual(w.launched, [['C:\\Programs\\Riyeser Team.exe', ['--quit']]]);
+  assert.deepStrictEqual(w.killed, [['taskkill', '/PID', '20']]);
+  assert.deepStrictEqual(r.closed, ['Riyeser Link', 'Riyeser Payroll']); assert.deepStrictEqual(r.stillOpen, []); assert.strictEqual(r.message, '');
+});
+test('close them for me: never forced; a program that won\'t close is left open and the owner is asked', async () => {
+  const w = windows([{ image: 'Riyeser Accounting Plus.exe', pid: 30 }], { closes: () => false });   // e.g. it's asking to save
+  let waited = 0;
+  const r = await fresh.closePrograms({ programs: [ACC], list: w.list, launch: w.launch, exec: w.exec, wait: async (ms) => { waited += ms; } });
+  assert.ok(w.killed.every((k) => !k.includes('/F') && !k.includes('/f')), 'never taskkill /F');
+  assert.strictEqual(w.killed.length, 1);
+  assert.strictEqual(waited, 10000, 'waits up to 10 seconds');
+  assert.deepStrictEqual(r.stillOpen, ['Riyeser Accounting Plus']);
+  assert.strictEqual(r.message, 'Couldn\'t close Riyeser Accounting Plus. Close it yourself, then press Check again.');
+});
+test('close them for me: Riyeser Link not found on disk gets a normal close instead', async () => {
+  const w = windows([{ image: 'Riyeser Team.exe', pid: 10 }]);
+  await fresh.closePrograms({ programs: [LINK], list: w.list, launch: w.launch, exec: w.exec, locate: () => null, wait: async () => {} });
+  assert.deepStrictEqual(w.launched, []); assert.deepStrictEqual(w.killed, [['taskkill', '/PID', '10']]);
+});
+test('close them for me: the process list from tasklist, with ids', async () => {
+  const out = '"System Idle Process","0","Services","0","8 K"\r\n"Riyeser Team.exe","4242","Console","1","90,000 K"\r\n';
+  const procs = await fresh.runningProcesses({ platform: 'win32', exec: (c, a, o, cb) => cb(null, out) });
+  assert.deepStrictEqual(procs.find((p) => p.image === 'Riyeser Team.exe'), { image: 'Riyeser Team.exe', pid: 4242 });
+  assert.strictEqual(await fresh.runningProcesses({ platform: 'win32', exec: (c, a, o, cb) => cb(new Error('no')) }), null);
+});
+test('--quit: a second copy started with --quit makes the running Riyeser Link / Link Office quit; otherwise it shows', () => {
+  const did = [];
+  assert.strictEqual(quitArg.onSecondInstance(['Riyeser Team.exe', '--quit'], { quit: () => did.push('quit'), show: () => did.push('show') }), 'quit');
+  assert.strictEqual(quitArg.onSecondInstance(['Riyeser Team.exe', '--hidden'], { quit: () => did.push('quit'), show: () => did.push('show') }), 'show');
+  assert.deepStrictEqual(did, ['quit', 'show']);
+  for (const f of ['team-main.js', 'link-main.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
+    assert.match(src, /app\.on\('second-instance', \(_e, argv\) => quitArg\.onSecondInstance\(argv, \{ quit: \(\) => \{ quitting = true; app\.quit\(\); \}/, f);
+  }
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'team-main.js'), 'utf8'), /label: `Quit \$\{NAME\}`/);   // "Quit Riyeser Link" in its tray menu
+});
+test('fresh start keeps the free-trial marker, so it doesn\'t give a new trial', () => {
+  const p = pc();
+  fs.writeFileSync(path.join(p.appData, 'Riyeser', '.riyeser-licence.json'), '{"firstRun":"2026-01-01T00:00:00.000Z"}');
+  const r = fresh.putAway({ appData: p.appData, env: p.env, home: p.home, centralDir: p.centralDir, now: NOW });
+  assert.ok(r.ok);
+  assert.match(fs.readFileSync(path.join(p.appData, 'Riyeser', '.riyeser-licence.json'), 'utf8'), /2026-01-01/);
+  assert.ok(!fs.existsSync(path.join(p.appData, 'Riyeser', 'company.json')));
+});

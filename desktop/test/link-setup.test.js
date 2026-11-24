@@ -156,7 +156,7 @@ test('licence: trial and paid work; none, ended, cancelled and 30 days unchecked
     assert.strictEqual(callsLicence(appData, NOW).state, 'none');
     writeLicence(appData, plan({ status: 'trial', active: true, trial_ends: '2026-12-20', days_left: 26 }));
     let s = callsLicence(appData, NOW);
-    assert.deepStrictEqual([s.active, s.state, s.daysLeft], [true, 'trial', 27]);
+    assert.deepStrictEqual([s.active, s.state, s.daysLeft], [true, 'trial', 26]);   // whole days, as Riyeser online counts them
     assert.strictEqual(callsLicence(appData, Date.parse('2026-12-21T09:00:00Z')).active, false, 'the trial ends on its date even offline');
     writeLicence(appData, plan({ status: 'active', active: true, paid_until: '2027-11-30' }));
     s = callsLicence(appData, NOW);
