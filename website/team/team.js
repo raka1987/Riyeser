@@ -266,13 +266,15 @@
     $app.className = '';
     $app.innerHTML = `<div class="gate"><form class="gcard" id="gf">
       <div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div>
+      ${mode !== 'reset' ? `<div class="gtabs" role="tablist"><button type="button" role="tab" data-go="in" class="${mode === 'in' ? 'on' : ''}" aria-selected="${mode === 'in'}">Sign in</button><button type="button" role="tab" data-go="up" class="${mode === 'up' ? 'on' : ''}" aria-selected="${mode === 'up'}">Create account</button></div>` : ''}
       <h1>${mode === 'up' ? 'Create your account' : mode === 'reset' ? 'Reset your password' : 'Sign in'}</h1>
       <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. Use your work email.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'Chat with your team, alongside your Riyeser programs.'}</p>
       ${note}
       <label class="f"><span>Email</span><input type="email" name="email" autocomplete="email" required></label>
       ${mode !== 'reset' ? `<label class="f"><span>Password</span><input type="password" name="password" minlength="8" autocomplete="${mode === 'up' ? 'new-password' : 'current-password'}" required></label>` : ''}
       <button class="btn p w" type="submit">${mode === 'up' ? 'Create account' : mode === 'reset' ? 'Send the link' : 'Sign in'}</button>
-      <div class="alt">${mode === 'in' ? `New here? <button type="button" class="linkbtn" data-go="up">Create an account</button> · <button type="button" class="linkbtn" data-go="reset">Forgot password?</button>`
+      <div class="alt">${mode === 'in' ? `<button type="button" class="linkbtn" data-go="reset">Forgot password?</button></div>
+      <div class="or">New to Riyeser?</div><button type="button" class="btn w" data-go="up">Create a free account</button><div class="alt" hidden>`
         : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div>
       <div class="alt"><a href="?demo">Try the demo first</a></div></form></div>`;
     $app.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => gate(b.dataset.go));
@@ -1014,7 +1016,7 @@
   async function start() {
     try {
       const s = await api.session();
-      if (!s) return gate();
+      if (!s) return gate(params.has('signup') ? 'up' : 'in');
       S.user = s.user;
       const lv = await api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' }));
       S.aal = lv.currentLevel;

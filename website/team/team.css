@@ -182,3 +182,7 @@ a { color: var(--blue); }
 .plan > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line); font-size: 14px; } .plan > div:first-child { border-top: 0; }
 .pl { font-weight: 600; color: var(--muted); font-size: 13px; text-align: right; } .pl.ok { color: #15803d; } .pl.warn { color: #b45309; } .pl.bad { color: #b91c1c; }
 #cof h4, #cof .plan, #cof > p { grid-column: 1 / -1; }
+
+.gtabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: #f1f3f8; border-radius: 12px; padding: 4px; margin-top: 16px; }
+.gtabs button { border: 0; background: none; padding: 9px 6px; border-radius: 9px; font-weight: 700; color: var(--muted); }
+.gtabs button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(20, 30, 60, .15); }

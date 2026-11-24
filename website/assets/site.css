@@ -527,3 +527,8 @@ section.finder { padding: 0; }
   .nav.open .links > .dd.show > .menu-pop { display: block !important; position: static; min-width: 0; box-shadow: none; border: 0; border-left: 2px solid var(--line); border-radius: 0; padding: 2px 0 8px 10px; margin: 0 0 6px 6px; background: none; }
   .nav.open .menu-pop a { padding: 10px 8px; }
 }
+
+.links .mob-only { display: none; }
+@media (max-width: 900px) { .nav.open .links .mob-only { display: block; font-weight: 700; color: var(--blue-ink); } }
+.right .signin { white-space: nowrap; }
+@media (max-width: 1240px) { .right .signin .sx { display: none; } }
