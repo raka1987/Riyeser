@@ -34,13 +34,13 @@ const ACC = `CREATE TABLE company (id INTEGER PRIMARY KEY, name TEXT);
 const PAY = `CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, username TEXT UNIQUE, password_hash TEXT, role TEXT, active INTEGER NOT NULL DEFAULT 1);
   INSERT INTO users (name, username, password_hash, role) VALUES ('Administrator', 'admin', 'x', 'admin');`;
 
-test('checklist: the plan from licence.json, as programs to install (Plus covers Basics, the phone only once Central knows it)', () => {
+test('checklist: the plan from licence.json, as programs to install (Plus covers Basics, Riyeser Link only once Central knows it)', () => {
   const lic = { online: { modules: { basic: on(), plus: on('trial'), payroll: on('trial'), pos: off, bookings: on(), as_built: off, calls: on() } } };
   assert.deepEqual(cl.planModules(lic), ['basic', 'plus', 'bookings', 'payroll', 'calls']);   // active, including a running trial
   const want = cl.planToInstall(lic, { known: KNOWN, installed: ['payroll'], names: NAMES });
   assert.deepEqual(want.map((x) => x.id), ['team', 'bookings', 'accounting']);   // in Central's order; Payroll is installed already
   assert.deepEqual(want.map((x) => x.name), ['Riyeser Team', 'Bookings', 'Accounting Plus']);
-  assert.deepEqual(cl.planToInstall(lic, { known: [...KNOWN, 'phone'], installed: [], names: NAMES }).map((x) => x.id).includes('phone'), true);
+  assert.deepEqual(cl.planToInstall(lic, { known: [...KNOWN, 'link'], installed: [], names: NAMES }).map((x) => x.id).includes('link'), true);
   // Basics on its own: installing Accounting Plus already covers it
   const basic = { online: { modules: { basic: on() } } };
   assert.deepEqual(cl.planToInstall(basic, { known: KNOWN, installed: [] }).map((x) => x.id), ['accounting-basics']);
@@ -139,7 +139,7 @@ test('checklist: only what the business has (relevance)', () => {
   assert.equal(ids(r).includes('payroll'), true);
   assert.equal(ids(r).includes('bookings'), false);   // trial ended: not on the plan
   assert.equal(ids(r).includes('logo'), false);       // Accounting keeps no logo: no such step
-  assert.equal(ids(r).includes('phone'), false);      // not readable yet
+  assert.equal(ids(r).includes('link'), false);       // Riyeser Link's desk phones: not readable yet
 });
 
 test('checklist: skipping counts as done, and everything done says so', () => {

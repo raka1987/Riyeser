@@ -5,9 +5,9 @@ const fs = require('fs');
 
 // ---------- the plan (licence.json "online".modules) -> programs ----------
 // The same names Central uses everywhere: basic = Accounting Basics, plus = Accounting Plus, calls = Riyeser Team
-// (and the Riyeser Phone System once Central knows it), as_built = As Built (its program id is still "services").
+// (and Riyeser Link, id "link", once it's in Central's PROGRAMS), as_built = As Built (its program id is still "services").
 const MODULE_PROGRAMS = { basic: ['accounting-basics'], plus: ['accounting'], pos: ['pos'], bookings: ['bookings'], payroll: ['payroll'],
-  calls: ['team', 'phone'], as_built: ['services'] };
+  calls: ['team', 'link'], as_built: ['services'] };
 
 /** Module ids that are on the plan right now (active, which includes a running free trial). */
 function planModules(lic) {
@@ -17,7 +17,7 @@ function planModules(lic) {
 
 /**
  * Programs on the plan that aren't installed yet, in Central's order.
- * known: the program ids Central knows about (so "phone" only appears once Central has it); installed: ids installed.
+ * known: the program ids Central knows about (so "link" only appears once Central has it); installed: ids installed.
  * names: id -> display name. Accounting Plus covers Accounting Basics.
  */
 function planToInstall(lic, { known = [], installed = [], names = {} } = {}) {
@@ -140,8 +140,9 @@ function build({ company = null, lic = {}, demo = false, installed = [], known =
   if (onPlan('pos') || has('pos')) {
     add('sale', 'Make your first sale', 'Open the till and ring something up.', books.found && books.posSales > 0, run('pos', 'pos'));
   }
-  // TODO: "Connect a desk phone" (only when the Riyeser Phone System is installed, done when it reports a desk phone).
-  // The Phone System app is being built alongside this; add the item once it saves something Central can read.
+  // TODO: "Connect a desk phone to Riyeser Link" (only when Riyeser Link, id "link", is installed; done when it reports
+  // at least one desk phone). Riyeser Link is being built alongside this; add the item once it saves something Central
+  // can read. Until then the item is left out.
 
   for (const it of items) it.skipped = !it.done && skipped.includes(it.id);
   const done = items.filter((i) => i.done || i.skipped).length;
