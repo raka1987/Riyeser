@@ -1,4 +1,4 @@
-name: Riyeser Central + Desk Assistant + PDF + As Built (Windows)
+name: Riyeser Central + Desk Assistant + PDF + As Built + Team + Link (Windows)
 
 # Builds the Windows installers for Riyeser Central, Riyeser Desk Assistant and Riyeser PDF,
 # installs them on a clean Windows machine and checks they are registered.
@@ -50,13 +50,31 @@ jobs:
             if (-not $entry) { throw "Not listed in Installed apps: $($app.name)" }
             Write-Host "Listed as:" $entry.DisplayName "by" $entry.Publisher
           }
+          # Riyeser Link installs for the whole PC (Program Files, HKLM) and adds its Windows Firewall rule
+          $lsetup = Get-ChildItem "dist-link\RiyeserLink-Setup-*.exe" | Select-Object -First 1
+          Start-Process -FilePath $lsetup.FullName -ArgumentList "/S" -Wait
+          $link = @("$env:ProgramFiles\riyeser-link\Riyeser Link.exe", "$env:ProgramFiles\Riyeser Link\Riyeser Link.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $link) { $link = (Get-ChildItem "$env:ProgramFiles" -Depth 2 -Filter "Riyeser Link.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
+          if (-not $link) { throw "Installed app not found: Riyeser Link.exe" }
+          Write-Host "Installed:" $link
+          $lentry = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Link*"
+          if (-not $lentry) { throw "Not listed in Installed apps: Riyeser Link" }
+          Write-Host "Listed as:" $lentry.DisplayName "by" $lentry.Publisher
+          $rule = cmd /c 'netsh advfirewall firewall show rule name="Riyeser Link" verbose' | Out-String
+          if ($LASTEXITCODE -ne 0 -or $rule -notmatch "5060" -or $rule -notmatch [regex]::Escape($link)) { throw "Riyeser Link's firewall rule is missing: $rule" }
+          Write-Host "Firewall rule added for" $link
+          $lreport = "$env:RUNNER_TEMP\link.json"
+          Start-Process -FilePath $link -ArgumentList "--self-test=$lreport" -Wait
+          $l = Get-Content $lreport -Raw | ConvertFrom-Json
+          if (-not ($l.ok -and $l.sip -and $l.provisioning)) { throw "Riyeser Link's self-test failed: $($l | ConvertTo-Json -Compress)" }
+          Write-Host "Riyeser Link" $l.version "registers phones, connects a test call and sets up a desk phone"
           # Riyeser Central must find the other programs it opens
           $central = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Central.exe" | Select-Object -First 1
           $report = "$env:RUNNER_TEMP\central.json"
           Start-Process -FilePath $central.FullName -ArgumentList "--self-test=$report" -Wait
           $r = Get-Content $report -Raw | ConvertFrom-Json
           $r.programs | Format-Table id, status, where -AutoSize | Out-String | Write-Host
-          foreach ($id in @("desk", "pdf", "services", "team")) { if (($r.programs | Where-Object id -eq $id).status -ne "installed") { throw "Riyeser Central can't find $id" } }
+          foreach ($id in @("desk", "pdf", "services", "team", "link")) { if (($r.programs | Where-Object id -eq $id).status -ne "installed") { throw "Riyeser Central can't find $id" } }
           Write-Host "Riyeser Central" $r.version "finds Desk Assistant, PDF and As Built"
           # As Built must carry its own copy of the app (works with no internet)
           $svc = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Services.exe" | Select-Object -First 1
@@ -72,6 +90,14 @@ jobs:
           $t = Get-Content $treport -Raw | ConvertFrom-Json
           if (-not ($t.ok -and $t.loginItem)) { throw "Riyeser Team didn't start properly: $($t | ConvertTo-Json -Compress)" }
           Write-Host "Riyeser Team" $t.version "starts, and starts with Windows"
+          # Uninstalling Riyeser Link removes its firewall rule
+          $un = Get-ChildItem (Split-Path $link) -Filter "Uninstall*.exe" | Select-Object -First 1
+          Start-Process -FilePath $un.FullName -ArgumentList "/S" -Wait
+          $gone = $false
+          for ($i = 0; $i -lt 60 -and -not $gone; $i++) { Start-Sleep -Seconds 2; cmd /c 'netsh advfirewall firewall show rule name="Riyeser Link"' | Out-Null; $gone = ($LASTEXITCODE -ne 0) }
+          if (-not $gone) { throw "Riyeser Link's firewall rule is still there after uninstalling" }
+          Write-Host "Uninstalling Riyeser Link removed its firewall rule"
+          $global:LASTEXITCODE = 0
           $leftover = Get-ChildItem "$env:LOCALAPPDATA\Programs\desk-assistant\resources" -Directory | Where-Object Name -in @("python", "accounting")
           if ($leftover) { throw "Accounting files are still bundled" }
 
@@ -84,4 +110,5 @@ jobs:
             desktop/dist-central/RiyeserCentral-Setup-*.exe
             desktop/dist-services/RiyeserServices-Setup-*.exe
             desktop/dist-team/RiyeserTeam-Setup-*.exe
+            desktop/dist-link/RiyeserLink-Setup-*.exe
           if-no-files-found: error

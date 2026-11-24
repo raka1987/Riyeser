@@ -3,9 +3,10 @@
 //   DESK_APP=pdf     -> Riyeser PDF
 //   DESK_APP=services -> As Built, formerly Riyeser Services (the riyeser.com/app/ app in its own window)
 //   DESK_APP=team    -> Riyeser Team (team chat and Team Chat Plus calls, riyeser.com/team in its own window)
+//   DESK_APP=link    -> Riyeser Link (Riyeser Link: Office, the office phone system for desk phones)
 //   (default)        -> Riyeser Desk Assistant
 const base = require('../package.json').build;
-const which = ['pdf', 'central', 'services', 'team'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
+const which = ['pdf', 'central', 'services', 'team', 'link'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
 const pdf = which === 'pdf';
 const APPS = {
   assistant: { name: 'Riyeser Desk Assistant', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDeskAssistant' },
@@ -21,6 +22,11 @@ const APPS = {
     extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.2.0', productName: 'As Built' } },
   team: { name: 'Riyeser Team', appId: 'com.riyeser.team', ico: 'build/team/icon.ico', out: 'dist-team', artifact: 'RiyeserTeam',
     extraMetadata: { main: 'src/team-main.js', name: 'riyeser-team', version: '1.0.0', productName: 'Riyeser Team' } },
+  // Riyeser Link installs for the whole PC (one Windows permission prompt) so its installer can add the Windows
+  // Firewall rule that lets the office's desk phones reach it (build/link/installer.nsh; removed on uninstall).
+  link: { name: 'Riyeser Link', appId: 'com.riyeser.link', ico: 'build/link/icon.ico', out: 'dist-link', artifact: 'RiyeserLink',
+    perMachine: true, include: 'build/link/installer.nsh',
+    extraMetadata: { main: 'src/link-main.js', name: 'riyeser-link', version: '1.0.0', productName: 'Riyeser Link' } },
 };
 const a = APPS[which];
 
@@ -41,8 +47,9 @@ module.exports = {
   publish: null,
   win: { target: [{ target: 'nsis', arch: ['x64'] }], icon: a.ico, legalTrademarks: a.name },
   nsis: {
-    oneClick: true,            // one click: installs for this Windows user, no admin needed
-    perMachine: false,
+    oneClick: true,            // one click: installs for this Windows user, no admin needed (Riyeser Link: for the whole PC)
+    perMachine: !!a.perMachine,
+    ...(a.include ? { include: a.include } : {}),
     createDesktopShortcut: 'always',
     createStartMenuShortcut: true,
     shortcutName: a.name,

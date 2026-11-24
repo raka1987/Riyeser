@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Riyeser Link</title>
+  <link rel="stylesheet" href="link.css">
+</head>
+<body>
+  <header class="top">
+    <img src="logos/link.png" alt="" class="logo">
+    <div class="grow"><h1>Riyeser Link: Office</h1><div class="sub">Your office phone system<span id="biz"></span></div></div>
+    <span id="ver" class="muted"></span>
+  </header>
+  <main class="inner">
+    <section id="state" class="state" role="status"></section>
+    <p class="note sos"><b>Internal calls only.</b> These phones can't call emergency services — keep a mobile or normal phone line for that.</p>
+    <div id="notices"></div>
+    <section id="found"></section>
+    <section class="panel">
+      <div class="ph"><h2>People</h2><span id="pcount" class="muted"></span></div>
+      <div id="people"></div>
+      <div id="addperson"></div>
+    </section>
+    <section class="panel" id="groupsp"><div class="ph"><h2>Ring groups</h2><span class="muted">Dial the group's number to ring everyone in it at once</span></div><div id="groups"></div></section>
+    <section class="panel">
+      <div class="ph"><h2>Desk phones</h2></div>
+      <div id="phones"></div>
+      <details class="help" id="addphone">
+        <summary>Add a desk phone</summary>
+        <ol>
+          <li>Plug the phone into a network socket on the same office network as this PC.</li>
+          <li>Many desk phones don't come with a power adapter and expect power over the network cable (PoE). Buy the phone's power adapter, or a small PoE switch.</li>
+          <li>Turn the phone on. Yealink, Grandstream, Snom and Polycom phones ask the network who sets them up, and appear here as <b>New phone found</b>. Choose who it's for, then restart the phone if it hasn't set itself up within a minute.</li>
+          <li>Wi-Fi desk phones work too, once joined to the office Wi-Fi.</li>
+          <li>A phone in another building or at home won't reach it; that's coming with the cloud version.</li>
+        </ol>
+        <p class="muted">Phone didn't appear? Add it by its MAC address (12 letters and numbers on a sticker under the phone), or type the details from <b>Set up a phone by hand</b> next to the person into any SIP phone.</p>
+        <form id="macform" class="row">
+          <input id="mac" placeholder="MAC address, e.g. 00:15:65:12:34:56" autocomplete="off" spellcheck="false">
+          <select id="macwho"></select>
+          <button class="btn">Add phone</button>
+        </form>
+      </details>
+    </section>
+    <section class="panel">
+      <div class="ph"><h2>Recent calls</h2><span class="muted">Kept on this PC for 90 days</span></div>
+      <div id="calls"></div>
+    </section>
+    <section class="panel">
+      <div class="ph"><h2>Riyeser account</h2></div>
+      <div id="account"></div>
+    </section>
+    <details class="panel adv">
+      <summary><h2>Advanced</h2></summary>
+      <div id="advanced"></div>
+    </details>
+  </main>
+  <div id="toast" class="toast" hidden></div>
+  <script src="link-text.js"></script>
+  <script src="link.js"></script>
+</body>
+</html>

@@ -36,6 +36,9 @@ const PROGRAMS = [
   // Riyeser Team as its own desktop app (chat free; Team Chat Plus calls). When it's installed, Team chat opens it.
   { id: 'team', name: 'Team', full: 'Riyeser Team', icon: '💬', desc: 'Team chat for your business, and Team Chat Plus calls. Chat is free.',
     dirs: ['riyeser-team', 'Riyeser Team'], exes: ['Riyeser Team.exe'], links: ['Riyeser Team'] },
+  // Riyeser Link (Riyeser Link: Office): the office phone system, with Team Chat Plus. Installs for the whole PC (Program Files).
+  { id: 'link', name: 'Link', full: 'Riyeser Link', icon: '☎', desc: 'Your office phone system: desk phones that ring each other. Comes with Team Chat Plus.',
+    dirs: ['riyeser-link', 'Riyeser Link'], exes: ['Riyeser Link.exe'], links: ['Riyeser Link'], machine: true },
   { id: 'invoices', name: 'Invoices', full: 'Riyeser Invoices', icon: '🧾', desc: 'Quotes, invoices, customers and getting paid. Free forever.',
     dirs: ['Riyeser Invoices'], exes: ['Riyeser Invoices.exe'], links: ['Riyeser Invoices'], pages: ['invoice'] },
   // Bookings and scheduling (jobs, appointments, tables). Same company files as Accounting; installs next to it.
@@ -88,7 +91,8 @@ const exists = (p) => { try { return fs.statSync(p).isFile(); } catch { return f
 function locate(p) {
   const saved = (store.get('locations', {}))[p.id];
   if (saved && exists(saved)) return saved;
-  for (const d of p.dirs || []) for (const e of p.exes || []) { const f = path.join(localPrograms(), d, e); if (exists(f)) return f; }
+  const roots = [localPrograms(), ...(p.machine ? [process.env.ProgramW6432, process.env.ProgramFiles].filter(Boolean) : [])];
+  for (const root of roots) for (const d of p.dirs || []) for (const e of p.exes || []) { const f = path.join(root, d, e); if (exists(f)) return f; }
   if (process.platform === 'win32') {
     for (const dir of shortcutDirs()) for (const l of p.links || []) {
       const lnk = path.join(dir, `${l}.lnk`);
@@ -121,8 +125,10 @@ function searchIndex() {
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
 function installedVersions() {
   if (process.platform !== 'win32') return Promise.resolve(app.isPackaged ? { central: app.getVersion() } : {});
-  return new Promise((resolve) => execFile('reg', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall', '/s'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
-    (err, out) => { const v = updates.installedFromRegistry(out || ''); if (app.isPackaged) v.central = app.getVersion(); resolve(v); }));
+  const q = (key) => new Promise((resolve) => execFile('reg', ['query', key, '/s', '/reg:64'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, out) => resolve(out || '')));
+  // Most programs install for this Windows user (HKCU); Riyeser Link installs for the whole PC (HKLM).
+  return Promise.all([q('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall'), q('HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall')])
+    .then(([user, machine]) => { const v = { ...updates.installedFromRegistry(machine), ...updates.installedFromRegistry(user) }; if (app.isPackaged) v.central = app.getVersion(); return v; });
 }
 async function checkUpdates(force) {
   const cached = store.get('updateCheck', null);

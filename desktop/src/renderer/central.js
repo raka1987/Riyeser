@@ -38,6 +38,7 @@ const P = {
   store: '<path d="M4 9l1.5-5h13L20 9"/><path d="M4 9a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5.5 11.5V20h13v-8.5"/><path d="M10 20v-5h4v5"/>',
   invoice: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/>',
   chat: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
+  phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/>',
   calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M8 14h3"/>',
   sort: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 13l2 2 4-4"/>',
   layers: '<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
@@ -83,10 +84,11 @@ tick(); setInterval(tick, 60000);
 
 // ---------- the programs ----------
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
-const ORDER = ['central', 'team', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
+const ORDER = ['central', 'team', 'link', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
   team: { ic: 'chat', c: 'c-team', nav: 'Team', col: '#a21caf', blurb: 'Team chat and Team Chat Plus calls' },
+  link: { ic: 'phone', c: 'c-link', nav: 'Link', col: '#0e7490', blurb: 'Comes with Team Chat Plus' },
   invoices: { ic: 'invoice', c: 'c-inv', nav: 'Invoices', col: '#0284c7', blurb: 'Send invoices and get paid' },
   bookings: { ic: 'calendar', c: 'c-book', nav: 'Bookings', col: '#e11d48', blurb: 'Jobs, appointments and tables' },
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Books', col: '#16a05a', blurb: 'View and manage your accounts' },
@@ -117,7 +119,7 @@ const QUICK = [
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 // Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
-const LOGO = { team: 'team', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const LOGO = { team: 'team', link: 'link', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 const quickFor = (q) => (q.p === 'acc' ? accId() : q.p === 'invoices' && hasAcc() ? null : has(q.p) ? q.p : null);
 
@@ -152,6 +154,10 @@ function cardLine(id) {
     return { s: L.blurb };
   }
   if (id === 'payroll') { const r = (today.payroll || {}).lastRun; return { s: r ? `Last pay run ${fmtDate(r.pay_date)} · ${r.employees} staff` : L.blurb }; }
+  if (id === 'link') {   // its plan, like the other paid programs: Team Chat Plus
+    const row = lic && lic.online && (lic.online.rows || []).find((r) => r.id === 'calls');
+    return row ? { s: `Team Chat Plus · ${row.text}`, alert: row.tone === 'bad' } : { s: L.blurb };
+  }
   if (id === 'desk') { const n = today.taskCount ?? today.tasks.length; return { s: n ? `${n} to-do${n === 1 ? '' : 's'} waiting` : L.blurb }; }
   return { s: L.blurb };
 }
@@ -463,6 +469,7 @@ function licLine(s) {
 }
 function renderLicence() {
   $('#licbtn').textContent = licLine(lic);
+  if (today && has('link')) renderCards();   // Riyeser Link's card shows its plan
   const bar = $('#licbar');
   if (lic && lic.online) {   // the company's plan from Riyeser online
     const o = lic.online; const ended = o.rows.filter((r) => r.tone === 'bad'); const soon = o.rows.filter((r) => r.tone === 'warn');

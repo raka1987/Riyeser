@@ -37,7 +37,7 @@ test('licence: the plan in plain words, program by program', () => {
     'Payroll: trial ended — contact Riyeser',
     'POS: free trial, 40 days left',
     'Bookings: free trial, 7 days left',
-    'Team Calls: cancelled — contact Riyeser',
+    'Team Chat Plus: cancelled — contact Riyeser',
   ]);
   assert.deepEqual(p.rows.map((r) => r.tone), ['ok', 'bad', 'trial', 'warn', 'bad']);
   assert.equal(p.checkedAgo, '2 h ago'); assert.equal(p.stale, false); assert.equal(p.message, null);

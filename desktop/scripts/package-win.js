@@ -9,7 +9,7 @@ const run = (cmd, args, env = {}) => execFileSync(cmd, args, { cwd: root, stdio:
 
 run('node', ['scripts/vendor.js']);
 // .ico files in the format Windows expects (BMP small sizes + PNG 256), if Python is available.
-for (const [src, out] of [['build/icon.png', 'build/icon.ico'], ['build/pdf/icon.png', 'build/pdf/icon.ico'], ['build/central/icon.png', 'build/central/icon.ico'], ['build/services/icon.png', 'build/services/icon.ico'], ['build/team/icon.png', 'build/team/icon.ico']]) {
+for (const [src, out] of [['build/icon.png', 'build/icon.ico'], ['build/pdf/icon.png', 'build/pdf/icon.ico'], ['build/central/icon.png', 'build/central/icon.ico'], ['build/services/icon.png', 'build/services/icon.ico'], ['build/team/icon.png', 'build/team/icon.ico'], ['build/link/icon.png', 'build/link/icon.ico']]) {
   try { run(process.platform === 'win32' ? 'python' : 'python3', ['scripts/make-ico.py', src, out]); } catch { console.warn('Python not found - using the existing .ico files'); }
 }
 fs.copyFileSync(path.join(root, 'build/icon.ico'), path.join(root, 'src/renderer/icon.ico'));
@@ -17,6 +17,7 @@ fs.copyFileSync(path.join(root, 'build/pdf/icon.ico'), path.join(root, 'src/rend
 fs.copyFileSync(path.join(root, 'build/central/icon.ico'), path.join(root, 'src/renderer/icon-central.ico'));
 fs.copyFileSync(path.join(root, 'build/services/icon.ico'), path.join(root, 'src/renderer/icon-services.ico'));
 fs.copyFileSync(path.join(root, 'build/team/icon.ico'), path.join(root, 'src/renderer/icon-team.ico'));
+fs.copyFileSync(path.join(root, 'build/link/icon.ico'), path.join(root, 'src/renderer/icon-link.ico'));
 
 // As Built's own copy of the app: the riyeser.com build, kept inside the installer so it works offline.
 if (!process.argv[2] || process.argv[2] === 'services') {
@@ -27,7 +28,7 @@ if (!process.argv[2] || process.argv[2] === 'services') {
 }
 
 const only = process.argv[2];
-for (const app of ['assistant', 'pdf', 'central', 'services', 'team'].filter((a) => !only || a === only)) {
+for (const app of ['assistant', 'pdf', 'central', 'services', 'team', 'link'].filter((a) => !only || a === only)) {
   const out = app === 'assistant' ? 'dist' : `dist-${app}`;
   fs.rmSync(path.join(root, out), { recursive: true, force: true });
   run('npx', ['electron-builder', '--win', '--config', 'scripts/builder.config.js'], { DESK_APP: app });
