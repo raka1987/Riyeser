@@ -141,33 +141,60 @@ Re-running `team-chat.sql` (below) also updates the email wording and HQ's label
 
 ## After this release: re-run team-chat.sql in Supabase SQL Editor
 
-Riyeser HQ phase 1 (support, fix-up tools, permissions, inactive accounts, emails, refunds, free periods) needs the
-latest database rules. Until you do this, the website keeps working: the new customer parts stay hidden, and HQ shows
+Riyeser HQ (support and the Support workspace with diagnostic reports, fix-up tools, permissions, inactive accounts,
+emails, refunds, free periods) needs the latest database rules. Until you do this, the website keeps working: the new customer parts stay hidden, and HQ shows
 "Run the latest team-chat.sql to switch this on".
 
 1. Open Supabase → the Riyeser Link (Riyeser Team) project → **SQL Editor** → **New query**.
 2. Paste all of `website/team/team-chat.sql` (from the `module/desk-assistant` branch) and press **Run**.
    It is safe to run again: it only adds what's missing and never deletes data.
 3. Check it says "Success". Then open riyeser.com/hq: the Support, Refunds, Approvals, Inactive accounts and Emails tabs now work.
+   Until then, Support shows the older inbox (no product, promised updates or diagnostics), and Report an issue says it's still being switched on.
 4. Run **Actions → HQ jobs → Run workflow** once. It should finish green (emails stay queued until email is set up).
 
 ## Support in HQ
 
-Customers click **Get help** on their Riyeser home page (riyeser.com/link; Riyeser Central's **Get help** opens
-riyeser.com/link/?help; the old riyeser.com/team address still works). They choose a topic, write a subject and message, and get a number like **T-10234**.
-They see Riyeser's replies on their home page (with a "new" badge) and by email once email is set up.
+Customers ask for help from their Riyeser home page (riyeser.com/link, under **Help**; the old riyeser.com/team
+address still works):
+- **Get help**: a topic, subject and message. They get a number like **T-10234**.
+- **Report an issue**: which program, what happened, whether their work is blocked (Yes / No), optionally the version,
+  the error and a diagnostic reference from Riyeser Central (DG-4821). "Yes, blocked" makes the ticket high priority.
+- In **Riyeser Central** (1.8.3 and later): **Get help → Report an issue** does the same and adds the diagnostic details.
+  They see exactly what will be sent before sending, and need to be signed in with their Riyeser account. They get
+  "Thanks — your request number is T-10234. Reference DG-4821." and a link to it on riyeser.com.
 
-In HQ → **Support**:
-- **Inbox filters:** New, Waiting on us, Waiting on customer, Done, Mine, Unassigned, Overdue, Escalated, Level 2, Level 3.
-  Each ticket shows its age and the first-reply timer. It turns red after 24 hours without a first reply.
-- **Search** finds ticket numbers, subjects, business names, Business IDs, emails and words in messages.
-- **Reply to customer** emails them and puts the ticket on "Waiting on customer". When they reply, it goes back to "Waiting on us".
-- **Internal note**: only Riyeser staff see it. Customers never do.
-- **Saved replies**: insert a ready-made answer and edit it before sending. "Saved replies…" lets you add, change or remove them.
-- The business's summary sits beside each ticket (plan, people, PCs, notes), with a button to open its company panel.
-- Opening a ticket or a company is written to the HQ history ("ticket.viewed", "customer.viewed").
+What a diagnostic report holds (and nothing else): the program and its version, Riyeser Central's version, the Riyeser
+programs installed on that PC with versions, the Windows version, when it was made, the error they typed, and the last
+200 lines (64 KB at most) of that program's log if Central can find one (Riyeser Link Office:
+`%APPDATA%\Riyeser Link Office\logs\link.log`; Desk Assistant: its `smart-review.log`; other programs have none yet).
+Emails are masked (`x***@domain`), long numbers (bank, tax, card) are removed, and anything after "password" on a line
+is removed, in Central and again in the database. No invoices, payroll, customers, files, folder paths or messages.
 
-HQ never sees customers' chat messages or books. Support tickets are written to Riyeser, so staff reading them is fine.
+Each request on their home page shows its status in plain words, "We'll update you by …" when we've promised an
+update, and three buttons: **Reply**, **Still having an issue** (back to its owner's queue, Riyeser to act) and
+**Confirm fixed** (resolved). After Confirm fixed they can rate it 1–5 ("How did we do?") with an optional comment.
+Our emails link straight to the request: riyeser.com/link/?help#T-10234.
+
+In HQ → **Support** (three columns on a wide screen, one under the other on a phone):
+- **Support inbox**: My tickets, Waiting (on the customer), Unassigned, Overdue update (no first reply in 24 hours, or a
+  promised update missed), All. Filters: product, owner, status, level, topic. Each ticket says **Riyeser to act** or
+  **Customer to act**; a missed promised update makes its row red. Search also finds DG- references.
+- **The conversation**: set **Product**, **Status** (New, Investigating, In progress, Waiting on customer, Resolved)
+  and **Owner** at the top. **Reply to customer** emails them; **Add internal note** is for staff only (yellow). Each
+  keeps its own draft, and the line above the box says who will see it. **Log a call** puts a phone call in the thread
+  (staff only). Saved replies, escalation and refund requests are where they were.
+- **Product diagnostics**: the report's product, version, error and reference (looking at it needs the
+  `support.diagnostics` permission: Support, Senior, Developer and Owner have it), the versions on the business's PCs,
+  and the log lines. **🔎 DG-…** looks up any reference.
+- **Next update**: when the customer will hear from us next, and who sends it. Always set one when you reply to an
+  open problem. If it's missed, the row turns red, it shows in **Needs attention** on the Operations overview, and the
+  hourly HQ job adds an internal reminder to the ticket and emails the owner (staff only: the customer isn't emailed).
+- **Planned release** (free text, e.g. "Payroll 2.8.2") and **Linked bug** (a reference and an optional https link).
+- **Customer support notes**: the business's pinned notes, on every one of its tickets. Add or edit them here.
+- Opening a ticket, a diagnostic report or a company is written to the HQ history.
+
+HQ never sees customers' chat messages or books. Support tickets and diagnostic reports are written to Riyeser, so
+staff reading them is fine.
 
 ## Escalations
 

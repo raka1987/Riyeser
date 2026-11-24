@@ -3,6 +3,8 @@ name: HQ jobs
 # Riyeser HQ's regular jobs on the Riyeser Link (Riyeser Team) database (see ops/RUNBOOK.md):
 #   every hour   the support sweep: tickets with no first reply in 24 hours are flagged overdue; tickets waiting on us
 #                for 48 hours are escalated one level ("No reply in 48 hours"). Both times are HQ settings.
+#                A missed "next update to the customer" gets an internal reminder on the ticket and an email to its
+#                owner (staff only; the customer isn't emailed).
 #   every day    the inactive-accounts sweep: warning emails 30 and 7 days before a free account closes, closing after
 #                12 months unused, and marking accounts closed for 2 years "ready for removal" (removal is never automatic).
 #   after each   queued emails are sent through Resend, once RESEND_API_KEY and EMAIL_FROM are added. Until then they
@@ -57,7 +59,7 @@ jobs:
             echo "ok=no" >> "$GITHUB_OUTPUT"
           else echo "ok=yes" >> "$GITHUB_OUTPUT"; fi
       - if: steps.db.outputs.ok == 'yes'
-        name: Support sweep (overdue and escalations)
+        name: Support sweep (overdue, escalations and missed promised updates)
         run: |
           r=$(psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -c 'select public.hq_support_sweep()')
           echo "Support sweep: $r"

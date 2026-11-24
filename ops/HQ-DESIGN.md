@@ -75,9 +75,49 @@ Status for each item:
 |---|---|
 | Tickets with status, priority, level (escalation), assignee, overdue timer, saved replies, internal notes | Built now |
 | Staff-started tickets ("Message customer"), logged calls, follow-up dates and My follow-ups | Built now |
-| Who needs to act (Riyeser or the customer) | Built now (ticket status) |
-| Affected product and severity fields; linking cases to a shared incident with a next-update deadline | Later |
-| Customer satisfaction after a ticket | Later |
+| Who needs to act (Riyeser or the customer): "Riyeser to act" / "Customer to act" on every ticket | Built now (`who_acts`) |
+| The Support workspace: inbox, one conversation, Product diagnostics (three columns; stacked on narrow screens) | Built now |
+| Affected product on each ticket, with a product filter | Built now |
+| Next promised update (due time and owner), red when overdue, in Needs attention and the hourly sweep | Built now |
+| Diagnostic reports (DG-4821) from Riyeser Central's and riyeser.com's Report an issue | Built now |
+| Customer Reply / Still having an issue / Confirm fixed, and an optional 1–5 rating | Built now |
+| Known issues board (one known issue, many tickets, one workaround) | Later (`known_issue_id` is ready) |
+| Release tracking (the version with the fix, and whether the customer has updated) | Later (`fixed_in_version` is ready) |
+| Live chat (Start chat, Leave a message, availability) | Later |
+
+### The Support workspace (first release)
+
+From the owner's support guide (its mock-up is kept privately). The guide's **First release** is built: the inbox,
+customer replies, internal notes, diagnostic lookup and reminders for promised updates.
+
+- **Support inbox** (left): quick tabs My tickets (n), Waiting (n), Unassigned, Overdue update, All, and "Known issues
+  (soon)" switched off. Filters: product, owner, status, level, topic. Each row: product icon, title, business, ticket
+  number, product, status pill (New, Investigating, In progress, Waiting on customer, Resolved) and Riyeser to act /
+  Customer to act. A row is red when its next promised update is overdue.
+- **Conversation** (middle): title, business (links to the customer page), ticket number, Product, Status, Owner. One
+  thread: customer messages, replies, logged calls and yellow internal notes ("Internal note · only Riyeser staff see
+  this"). Two composer tabs, **Reply to customer** and **Add internal note**, each with its own draft and an audience
+  line ("The customer will see this and get an email" / "Only Riyeser staff"). Saved replies; Log a call.
+- **Product diagnostics** (right): the report's product, version, error and reference; the Riyeser programs and versions
+  on the business's PCs (`devices.programs`); Windows version and when it was reported; the log lines on request.
+  **Next update** ("Next update to customer: by 3:00 pm Fri (Maya)"), **Planned release** (free text for now),
+  **Linked bug** (reference and an optional https link), and **Customer support notes** (the business's pinned notes).
+- Diagnostic reports hold technical details only. Riyeser Central collects the program and its version, Central's
+  version, the installed Riyeser programs, the Windows version, the time, and the last 200 lines (64 KB) of the
+  program's log when it has one Central can read (today: Riyeser Link Office and Desk Assistant). Emails, long numbers
+  and anything after "password" are masked before the preview and again in the database. Never customer records.
+  Customers read only their own reports; HQ needs the `support.diagnostics` permission (Support, Senior, Developer, Owner).
+
+### Ready for the next releases
+
+- `support_tickets.known_issue_id` (uuid, empty for now): the known issues board adds a `support_known_issues` table
+  (title, product, affected versions, workaround, status, the developer bug) and points tickets at it, so one
+  workaround and one update reach every affected customer.
+- `support_tickets.fixed_in_version` (text, empty for now): release tracking fills it when the fix ships, and compares
+  it with `devices.programs` to show whether the customer has updated before asking them to Confirm fixed.
+- `planned_release`, `bug_ref` and `bug_url` stay as free text until Support and Development share the same ticket
+  history; then they become links to the release and the bug.
+- Live chat becomes another kind of message in the same ticket thread, so the history stays in one place.
 
 ## Retention and cancellations
 
