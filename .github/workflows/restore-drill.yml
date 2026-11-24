@@ -1,0 +1,69 @@
+name: Restore drill
+
+# Once a month: restore last night's backup of each online database into an empty, throwaway database here,
+# and check it: not tampered with, decrypts, every table has the same number of rows, and (for Riyeser Team) the
+# data hangs together and the row rules are on. A backup that's never been restored isn't a backup.
+on:
+  schedule:
+    - cron: "10 16 2 * *"      # the 2nd of every month, after the night's backup
+  workflow_dispatch:
+    inputs:
+      which:
+        description: "daily (last night) or monthly (this month's copy)"
+        type: choice
+        options: [daily, monthly]
+        default: daily
+
+permissions:
+  contents: read
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [team, asbuilt]
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_PASSWORD: drill-only, POSTGRES_DB: drill }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NAME: ${{ matrix.db }}
+      WHICH: ${{ inputs.which || 'daily' }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      RESTORE_DB_URL: postgresql://postgres:drill-only@localhost:5432/drill
+      HAS_DB: ${{ matrix.db == 'team' && secrets.TEAM_DB_URL != '' || matrix.db == 'asbuilt' && secrets.ASBUILT_DB_URL != '' }}
+    steps:
+      - name: Set up yet?
+        id: ready
+        run: |
+          if [ "$HAS_DB" != "true" ] || [ -z "$BACKUP_PASSPHRASE" ] || [ -z "$R2_BUCKET" ]; then
+            echo "::notice::Backups for '$NAME' aren't set up yet, so there's nothing to drill. See ops/RUNBOOK.md."
+            echo "ok=no" >> "$GITHUB_OUTPUT"
+          else echo "ok=yes" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.ready.outputs.ok == 'yes'
+        uses: actions/checkout@v5
+      - if: steps.ready.outputs.ok == 'yes'
+        name: PostgreSQL 17 tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - if: steps.ready.outputs.ok == 'yes'
+        name: Restore and check ${{ matrix.db }}
+        run: bash ops/backup/restore-drill.sh
+      - if: failure()
+        name: Tell the owner
+        run: |
+          echo "### ⚠️ The $NAME restore drill failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "Don't wait for a bad day: see ops/RUNBOOK.md (When a restore drill fails)." >> "$GITHUB_STEP_SUMMARY"

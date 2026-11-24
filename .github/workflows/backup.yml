@@ -1,0 +1,63 @@
+name: Nightly backups
+
+# Every night: a copy of each online database (Riyeser Team, As Built), encrypted with AES-256, stored in
+# Cloudflare R2 (a different company from Supabase). 30 daily copies and 12 monthly copies are kept.
+# Set-up and what to do on a bad day: ops/RUNBOOK.md. Until the secrets are added, this just says "not set up yet".
+on:
+  schedule:
+    - cron: "40 15 * * *"      # 15:40 UTC = about 2:40am Sydney / 3:40am Fiji
+  workflow_dispatch:
+    inputs:
+      monthly:
+        description: "Also save this as the month's copy"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency: { group: backups, cancel-in-progress: false }
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [team, asbuilt]
+    env:
+      NAME: ${{ matrix.db }}
+      DB_URL: ${{ matrix.db == 'team' && secrets.TEAM_DB_URL || secrets.ASBUILT_DB_URL }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      FORCE_MONTHLY: ${{ inputs.monthly && '1' || '' }}
+    steps:
+      - name: Set up yet?
+        id: ready
+        run: |
+          if [ -z "$DB_URL" ] || [ -z "$BACKUP_PASSPHRASE" ] || [ -z "$R2_BUCKET" ] || [ -z "$AWS_ACCESS_KEY_ID" ]; then
+            echo "::notice::Backups for '$NAME' aren't set up yet. See ops/RUNBOOK.md (Setting up backups)."
+            echo "ok=no" >> "$GITHUB_OUTPUT"
+          else echo "ok=yes" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.ready.outputs.ok == 'yes'
+        uses: actions/checkout@v5
+      - if: steps.ready.outputs.ok == 'yes'
+        name: PostgreSQL 17 tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - if: steps.ready.outputs.ok == 'yes'
+        name: Back up ${{ matrix.db }}
+        run: bash ops/backup/backup.sh
+      - if: failure()
+        name: Tell the owner
+        run: |
+          echo "### ⚠️ The $NAME backup failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "GitHub emails the owner about failed scheduled runs. See ops/RUNBOOK.md (When a backup fails)." >> "$GITHUB_STEP_SUMMARY"
