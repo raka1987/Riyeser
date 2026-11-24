@@ -339,8 +339,13 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
     <a href="${up}downloads.html"${active === 'downloads' ? ' class="on"' : ''}>Downloads</a>
   </nav>
   <div class="right"><a class="signin" href="${up}signin.html">Sign in</a><a class="btn p" href="${up}downloads.html">${WINDL}</a></div>
-  <button class="menu" aria-label="Menu" onclick="document.getElementById('nav').classList.toggle('open')">☰</button>
+  <button class="menu" aria-label="Menu" aria-expanded="false" onclick="var n=document.getElementById('nav');n.classList.toggle('open');this.setAttribute('aria-expanded',n.classList.contains('open'))">☰</button>
 </div></header>
+<script>/* phone menu: a tap on Programs, Industries or Help opens its list right there (a second tap goes to the page) */
+document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventListener('click',function(e){
+  var nav=document.getElementById('nav');if(!nav.classList.contains('open'))return;var d=a.parentNode;
+  if(!d.classList.contains('show')){e.preventDefault();document.querySelectorAll('.links > .dd.show').forEach(function(x){if(x!==d)x.classList.remove('show')});d.classList.add('show')}})});
+</script>
 <main>${body(up)}</main>
 <footer><div class="c">
   <div class="fcols">
