@@ -15,12 +15,15 @@ const sources = require('./central/sources');
 const online = require('./core/online');
 const demo = require('./central/demo');
 const checklist = require('./central/checklist');
+const freshstart = require('./central/freshstart');
 
 app.setName('Riyeser Central');
 // Central's data folder. Versions before 1.2 used "Riyser Central": move it across once so nothing is lost.
 {
   const dataNew = path.join(app.getPath('appData'), 'Riyeser Central');
   const dataOld = path.join(app.getPath('appData'), 'Riyser Central');
+  // A fresh start (Settings) left for this start: put Central's own folder away before anything opens it.
+  try { freshstart.finishOnStart({ dir: dataNew }); } catch { /* tried again next start */ }
   try { if (!fs.existsSync(dataNew) && fs.existsSync(dataOld)) fs.renameSync(dataOld, dataNew); } catch { /* keep going with a fresh folder */ }
   app.setPath('userData', dataNew);
 }
@@ -412,6 +415,31 @@ function registerIpc() {
     if (!locate(PROGRAMS.find((x) => x.id === 'desk'))) return { total: 0, results: [], facets: { type: {}, year: {}, kind: {} } };
     const da = sources.deskAssistant(deskData());
     return searchIndex().find(opts || {}, { organisedRoot: (da.settings && da.settings.organisedRoot) || '' });
+  });
+  // ---------- "Fresh start on this PC" (Settings): every Riyeser folder renamed away, never deleted ----------
+  const freshOpts = () => ({ appData, centralDir: app.getPath('userData') });
+  const openNow = async () => { const imgs = await freshstart.runningImages(); return imgs ? freshstart.openPrograms(PROGRAMS, imgs) : []; };
+  const restartSoon = () => setTimeout(() => { quitting = true; app.relaunch(); app.exit(0); }, 1500);
+  handle('fresh:check', async () => ({ open: await openNow(), folders: freshstart.plan(freshOpts()).map((f) => ({ name: f.name, dir: f.dir })), sets: freshstart.sets(freshOpts()) }));
+  handle('fresh:start', async (typed, signOut) => {
+    if (String(typed || '').trim() !== freshstart.CONFIRM) throw new Error(`Type ${freshstart.CONFIRM} to go ahead.`);
+    const open = await openNow();
+    if (open.length) return { ok: false, open, message: freshstart.closeFirst(open) };
+    const r = freshstart.putAway({ ...freshOpts(), keepSignIn: signOut === false, version: app.getVersion() });
+    if (!r.ok) return { ...r, message: freshstart.failMessage(r) };
+    restartSoon();
+    return r;
+  });
+  handle('fresh:sets', () => freshstart.sets(freshOpts()));
+  handle('fresh:bringBack', async (id) => {
+    const set = freshstart.sets(freshOpts()).find((s) => s.id === id);
+    if (!set) throw new Error('That fresh start isn’t on this PC any more.');
+    const open = await openNow();
+    if (open.length) return { ok: false, open, message: freshstart.closeFirst(open) };
+    const r = freshstart.bringBack({ set, centralDir: app.getPath('userData') });
+    if (!r.ok) return { ...r, message: `Nothing was brought back: ${r.failed.name} is in use (${r.failed.dir}). Close it and try again.` };
+    restartSoon();
+    return r;
   });
   handle('file:open', async (p) => { if (!fs.existsSync(p)) throw new Error('That file has moved or been deleted. Try searching for it.'); const err = await shell.openPath(p); if (err) throw new Error(err); return true; });
   handle('file:reveal', (p) => { shell.showItemInFolder(p); return true; });

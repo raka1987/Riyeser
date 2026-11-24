@@ -387,6 +387,70 @@ document.addEventListener('click', (e) => {
 $('#setbtn').addEventListener('click', () => { $('#sethide').checked = !(cl && cl.hidden); $('#setdlg').showModal(); });
 $('#sethide').addEventListener('change', (e) => safe(() => setChecklistHidden(!e.target.checked)));
 
+// Settings: "Fresh start on this PC". Every Riyeser folder on this PC is renamed away (never deleted), then Central
+// restarts at "How would you like to start?". Brought back from "Bring back a fresh start…".
+const FRESH_WORDS = 'START FRESH';
+const freshDate = (iso) => { try { return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return iso; } };
+function freshBox() {
+  const body = $('#setdlg .setbody'); if (!body || $('#freshbox')) return;
+  const box = document.createElement('div'); box.id = 'freshbox';
+  box.style.cssText = 'margin-top:18px;padding:14px 16px;border:1.5px solid var(--bad);border-radius:12px;background:var(--bad-soft)';
+  box.innerHTML = `<b class="bad">Fresh start on this PC</b>
+    <p style="margin:6px 0 10px;font-size:13px;line-height:1.45">Puts away everything Riyeser has saved on this PC — every program’s records, settings and sign-ins — so Riyeser starts like it’s brand new. <b>Nothing is deleted</b>: it’s all moved to folders named “before fresh start” and today’s date, and can be brought back. Your Riyeser account online isn’t affected.</p>
+    <div id="freshstep"><button id="freshgo" style="border:1px solid var(--bad);color:var(--bad);background:var(--panel);border-radius:9px;padding:7px 14px;font-weight:600">Start fresh…</button>
+    <button id="freshback" style="border:0;background:none;padding:0 0 0 12px;color:var(--muted);font-size:12.5px;text-decoration:underline">Bring back a fresh start…</button></div>`;
+  body.appendChild(box);
+}
+function freshReset() { const st = $('#freshstep'); if (!st) return; $('#freshbox').remove(); freshBox(); }
+async function freshStart() {
+  const st = $('#freshstep');
+  st.innerHTML = '<span style="font-size:13px">Checking what’s open…</span>';
+  const c = await bridge.call('fresh:check');
+  if (c.open.length) {
+    st.innerHTML = `<p class="bad" style="font-size:13px;margin:0 0 8px"><b>Close these first: ${c.open.map(esc).join(', ')}.</b></p><button data-fresh="go">Check again</button> <button data-fresh="cancel">Cancel</button>`;
+    return;
+  }
+  st.innerHTML = `<div style="font-size:12.5px;margin-bottom:8px">These will be put away:<ul style="margin:4px 0 0 18px;padding:0">${c.folders.map((f) => `<li>${esc(f.name)} <span style="color:var(--muted)">${esc(short(f.dir))}</span></li>`).join('')}</ul></div>
+    <label style="display:block;font-size:13px;margin-bottom:6px">Type <b>${FRESH_WORDS}</b> to go ahead<br><input id="freshtype" autocomplete="off" spellcheck="false" style="margin-top:4px;width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--text)"></label>
+    <label class="setrow" style="margin:8px 0 10px"><input type="checkbox" id="freshout" checked><span><b>Also sign out of my Riyeser account on this PC</b><small>Untick to stay signed in to Riyeser Central.</small></span></label>
+    <button id="freshdo" disabled style="border:0;border-radius:9px;padding:8px 14px;font-weight:600;background:var(--bad);color:#fff">Put it all away and restart</button> <button data-fresh="cancel">Cancel</button>
+    <p id="freshmsg" class="bad" style="font-size:13px;margin:8px 0 0" hidden></p>`;
+  const type = $('#freshtype'); type.focus();
+  type.addEventListener('input', () => { $('#freshdo').disabled = type.value.trim() !== FRESH_WORDS; });
+  $('#freshdo').addEventListener('click', () => safe(async () => {
+    $('#freshdo').disabled = true;
+    const r = await bridge.call('fresh:start', type.value.trim(), $('#freshout').checked);
+    if (!r.ok) { const m = $('#freshmsg'); m.hidden = false; m.textContent = r.message; $('#freshdo').disabled = false; return; }
+    st.innerHTML = '<p style="font-size:13px;margin:0"><b>All put away.</b> Riyeser Central is restarting like it’s brand new…</p>';
+  }));
+}
+async function freshBringBack() {
+  const st = $('#freshstep');
+  const c = await bridge.call('fresh:check');
+  if (!c.sets.length) { st.innerHTML = '<p style="font-size:13px;margin:0 0 8px">There’s no earlier fresh start on this PC to bring back.</p><button data-fresh="cancel">OK</button>'; return; }
+  st.innerHTML = `<div style="font-size:13px;margin-bottom:8px">Bring back what Riyeser had saved before a fresh start. What’s saved now is put away first (in folders named “before bringing back”), so nothing is lost.</div>
+    ${c.open.length ? `<p class="bad" style="font-size:13px;margin:0 0 8px"><b>Close these first: ${c.open.map(esc).join(', ')}.</b></p>` : ''}
+    ${c.sets.map((s) => `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-top:1px solid var(--line);font-size:13px"><span class="grow" style="flex:1">${esc(freshDate(s.at))} · ${s.items.length} folder${s.items.length === 1 ? '' : 's'}</span><button data-fresh="restore" data-id="${esc(s.id)}">Bring back</button></div>`).join('')}
+    <button data-fresh="cancel" style="margin-top:6px">Cancel</button><p id="freshmsg" class="bad" style="font-size:13px;margin:8px 0 0" hidden></p>`;
+}
+async function freshRestore(id) {
+  if (!confirm('Bring this back? What Riyeser has saved now is put away first, and Riyeser Central restarts.')) return;
+  const r = await bridge.call('fresh:bringBack', id);
+  if (!r.ok) { const m = $('#freshmsg'); if (m) { m.hidden = false; m.textContent = r.message; } return; }
+  $('#freshstep').innerHTML = '<p style="font-size:13px;margin:0"><b>Brought back.</b> Riyeser Central is restarting…</p>';
+}
+freshBox();
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#freshgo')) return safe(freshStart);
+  if (e.target.closest('#freshback')) return safe(freshBringBack);
+  const b = e.target.closest('[data-fresh]'); if (!b) return;
+  const a = b.dataset.fresh;
+  if (a === 'go') safe(freshStart);
+  if (a === 'cancel') freshReset();
+  if (a === 'restore') safe(() => freshRestore(b.dataset.id));
+});
+$('#setdlg').addEventListener('close', freshReset);
+
 // ---------- updates ----------
 function renderUpdates() {
   const box = $('#updates');
