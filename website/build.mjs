@@ -356,9 +356,9 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
     <a href="${up}pricing.html"${active === 'pricing' ? ' class="on"' : ''}>Pricing</a>
     <div class="dd"><a href="${up}help.html"${active === 'help' ? ' class="on"' : ''}>Help ${svg(LI.down)}</a><div class="menu-pop">${helpGuides({ EMAIL, SERVICES_APP, up }).map((g) => `<a href="${up}help/${g.id}.html"><img class="appicon i-${g.app}" src="${up}assets/apps/${g.app}.png" alt="" style="width:30px;height:30px;border-radius:8px">${esc(g.name)}</a>`).join('')}<a class="all" href="${up}help.html">Help Centre ${ARR}</a></div></div>
     <a href="${up}downloads.html"${active === 'downloads' ? ' class="on"' : ''}>Downloads</a>
-    <a class="mob-only" href="${up}signin.html">Sign in / Create account</a>
+    <a class="mob-only" href="/team/">Sign in / Create account</a>
   </nav>
-  <div class="right"><a class="signin" href="${up}signin.html">Sign in<span class="sx"> / Create account</span></a><a class="btn p" href="${up}downloads.html">${WINDL}</a></div>
+  <div class="right"><a class="signin" href="/team/">Sign in<span class="sx"> / Create account</span></a><a class="btn p" href="${up}downloads.html">${WINDL}</a></div>
   <button class="menu" aria-label="Menu" aria-expanded="false" onclick="var n=document.getElementById('nav');n.classList.toggle('open');this.setAttribute('aria-expanded',n.classList.contains('open'))">☰</button>
 </div></header>
 <script>/* phone menu: a tap on Programs, Industries or Help opens its list right there (a second tap goes to the page) */
@@ -373,7 +373,7 @@ document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventList
     <div><h4>Programs</h4>${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html">${p.short === 'Central' ? 'Riyeser Central' : p.short}</a>`).join('')}</div>
     <div><h4>Industries</h4>${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}">${esc(i.name)}</a>`).join('')}</div>
     <div><h4>Help</h4><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="mailto:${EMAIL}">${EMAIL}</a></div>
-    <div><h4>Riyeser</h4><a href="${up}pricing.html">Pricing</a><a href="${up}signin.html">Create an account</a><a href="${SERVICES_APP}/?signin">As Built sign in</a><a href="${up}terms.html">Terms of use</a></div>
+    <div><h4>Riyeser</h4><a href="${up}pricing.html">Pricing</a><a href="/team/?signup">Create an account</a><a href="${up}terms.html">Terms of use</a></div>
   </div>
   <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span>For Windows 10 &amp; 11 · Works offline · No account or card needed</span></div></div></footer>
 <script>/* Download buttons always point at the newest release file, whatever its exact name. */
@@ -514,20 +514,6 @@ ${ctaBlock(up, `Try Riyeser for ${esc(ind.name.toLowerCase())}`, 'Download Riyes
 }
 
 // ---------- As Built sign in (hands over to the real sign-in in the Services app) ----------
-page({
-  path: 'signin.html', title: 'Sign in to Riyeser', active: '',
-  description: 'Create your free Riyeser account or sign in: team chat, calls and your company.',
-  body: (up) => `<div class="signin-page"><img class="bgimg" src="${up}assets/photos/blueprint-roll.webp" alt="">
-  <div class="signbox"><img class="mark" src="${up}assets/logo-r.png" alt="">
-    <h1>Your Riyeser account</h1>
-    <p>One free account for your company: team chat, calls between branches, and linking your people and PCs together.</p>
-    <a class="btn p big" href="/team/?signup">Create a free account</a>
-    <a class="btn s big" href="/team/">Sign in</a>
-    <a class="forgot" href="/team/">Forgot password?</a>
-    <div class="alt"><p><b>Only using programs on your own PC?</b> You don't need an account. Just <a href="${up}downloads.html">download Riyeser Central</a>.</p>
-      <p><b>As Built</b> has its own sign-in: <a href="${SERVICES_APP}/?signin">sign in to As Built</a>.</p></div>
-  </div></div>`,
-});
 // ---------- program pages ----------
 for (const p of PROGRAMS.filter((x) => !x.custom)) {
   page({
@@ -823,7 +809,7 @@ cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 const SUBFOLDER = BASE !== '/';
 if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'signin.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...helpGuides({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`)];
+const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...helpGuides({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`)];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
 writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyeser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
 console.log('Built', urls.length, 'pages into', OUT);
