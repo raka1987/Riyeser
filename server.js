@@ -24,6 +24,16 @@ app.get('/', (req, res) => res.redirect('/staff'));
 }
 // demo mode: the yellow banner on every screen, and the demo sign-in on the login screen
 if (DEMO) {
+  // Riyeser Central left demo mode while Payroll was open: nothing more is done with the practice records
+  const ENDED = 'Demo mode has ended. Close this program and open it again.';
+  let checked = 0, ended = false;
+  app.use((req, res, next) => {
+    if (Date.now() - checked > 3000) { checked = Date.now(); ended = !require('./demo').isOn(); }
+    if (!ended) return next();
+    if (req.path.startsWith('/api/')) return res.status(503).json({ error: ENDED });
+    if (req.method === 'GET' && /^\/(staff(\.html)?)?$/.test(req.path)) return res.status(503).type('html').send(`<!doctype html><meta charset="utf-8"><title>Riyeser Payroll</title><body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0"><p style="font-size:18px">${ENDED}</p></body>`);
+    next();
+  });
   const demoPage = require('./demo').page(require('fs').readFileSync(path.join(__dirname, 'public', 'staff.html'), 'utf8'));
   app.get(['/staff', '/staff.html'], (req, res) => { res.set('Cache-Control', 'no-store'); res.type('html').send(demoPage); });
 }

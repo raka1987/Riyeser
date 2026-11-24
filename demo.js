@@ -11,7 +11,7 @@ const BUSINESS = 'Sample Trading Co';
 /** Where demo.json lives: RIYESER_DEMO_FILE (tests), else %APPDATA%\Riyeser (the same folder as company.json and licence.json). */
 function demoFile(env = process.env) {
   if (env.RIYESER_DEMO_FILE) return env.RIYESER_DEMO_FILE;
-  const appData = env.APPDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config'));
+  const appData = env.APPDATA || path.join(os.homedir(), '.config'); // the same lookup as Riyeser Accounting
   return path.join(appData, 'Riyeser', 'demo.json');
 }
 function readDemo(env = process.env) {
@@ -81,6 +81,7 @@ function seed(h) {
     for (const l of lines) slip.run(runId, l.user_id, l.employee_name, l.position, l.pay_type, l.pay_rate, l.hours, l.base_pay, l.allowances, l.gross, l.fnpf_employee, l.fnpf_employer, l.paye,
       l.other_deductions, l.net, l.notes, l.worked_hours, l.break_hours, JSON.stringify(l.deduction_lines), l.leave_hours || 0, l.leave_pay || 0, JSON.stringify(l.leave_lines || []));
     db.exec('COMMIT');
+    try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch { /* Riyeser Central sees it once Payroll closes */ }
     return true;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }

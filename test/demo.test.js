@@ -71,6 +71,14 @@ test('demo on: the demo folder is used and filled with Sample Trading Co; demo /
   assert.equal(run.payslips.length, 5);
   const ts = (await call('GET', `/api/staff/timesheets?from=${runs[0].period_start}&to=${runs[0].period_end}`, null, r.cookie)).data;
   assert.equal(ts.length, 50);   // 10 weekdays x 5 staff
+  // Central leaves demo mode while Payroll is open: it says so, and does nothing more with the practice records
+  const on = fs.readFileSync(DEMO_FILE, 'utf8');
+  fs.writeFileSync(DEMO_FILE, JSON.stringify({ on: false }));
+  await new Promise(res => setTimeout(res, 3300));
+  const gone = await call('GET', '/api/staff/payroll/runs', null, r.cookie);
+  assert.equal(gone.status, 503); assert.equal(gone.data.error, 'Demo mode has ended. Close this program and open it again.');
+  assert.match((await call('GET', '/staff')).data, /Demo mode has ended/);
+  fs.writeFileSync(DEMO_FILE, on);
   await stop();
   // a second start doesn't fill it again
   await start();
