@@ -53,7 +53,7 @@ async function contrast(pg, sel) {
     assert.match(await pg.$eval('.lk-logo', (e) => e.innerText.replace(/\s+/g, ' ')), /Li\. Riyeser Link Business Communications/);
     assert.strictEqual(await pg.getAttribute('#q', 'placeholder'), 'Search chats, people, calls…');
     assert.deepStrictEqual(await pg.$$eval('#lknav [data-nav] span:first-of-type', (x) => x.map((y) => y.textContent)), ['Home', 'Chat', 'Calls', 'Contacts', 'Teams / Channels', 'Devices']);
-    assert.ok(await pg.$('#lknav #cophones'), 'Desk Phones for the owner'); assert.ok(await pg.$('#adming #coppl') && await pg.$('#adming #cobill'), 'Admin / Settings for the owner');
+    assert.ok(await pg.$('#lknav #cophones'), 'Desk Phones for the owner'); assert.ok(await pg.$('#adming #coppl') && await pg.$('#adming #coplan') && !(await pg.$('#cobill')), 'Admin / Settings for the owner, with Plan & billing and no Billing & Subscription');
     assert.match(await text(pg, '#side .lk-tabs'), /^Chats \d+ Calls \d+ Voicemail 0$/);
     assert.deepStrictEqual(await pg.$$eval('#side .sec', (x) => x.map((y) => y.firstChild.textContent.trim())), ['Pinned', 'Channels', 'Direct messages']);
     assert.match(await text(pg, '#mhead h2'), /# general/); assert.match(await pg.getAttribute('#txt', 'placeholder'), /^Type a message in #general…$/);
@@ -216,7 +216,7 @@ async function contrast(pg, sel) {
 
     // 11. Admin / Settings hidden for members
     const jo = await ctx.newPage(); watch(jo, 'jordan'); await jo.goto(DEMO + '&as=u-jordan'); await jo.waitForSelector('#lknav');
-    assert.ok(!(await jo.$('#adming')) && !(await jo.$('#coppl')) && !(await jo.$('#cophones')) && !(await jo.$('#cobill')), 'no admin group for a member');
+    assert.ok(!(await jo.$('#adming')) && !(await jo.$('#coppl')) && !(await jo.$('#cophones')) && !(await jo.$('#cobill')) && !(await jo.$('#coplan')), 'no admin group (and no Plan & billing) for a member');
     assert.ok(await jo.$('#comyphone'), 'members get My phone'); assert.strictEqual(await text(jo, '#umr'), 'Staff');
     await jo.click('[data-nav=home]'); await jo.waitForSelector('.lk-card'); assert.ok(!(await jo.$('#hrequests')), 'no Requests card for a member');
     console.log('admin group hidden for members: ok'); await jo.close();

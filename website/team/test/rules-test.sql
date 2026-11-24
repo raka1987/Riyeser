@@ -2118,6 +2118,20 @@ do $$ declare r json; a uuid := current_setting('lk.a')::uuid; begin
   r := public.hq_companies_page('Other Link', '{"storage_80": true}', 'name', false, 1, 50, false);
   assert (r ->> 'total')::int = 0, 'Other Link Co is under 80%';
 end $$;
+-- No prices or money for people in the business: the licence they read has programs, dates and seats only;
+-- the money functions are HQ's alone (the owner sees prices on the website and in Plan & billing, not from the database).
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003'); set role authenticated;   -- Rua (member)
+do $$ declare l json; a uuid := current_setting('lk.a')::uuid; begin
+  l := public.company_licence(a);
+  assert (l -> 'modules' -> 'calls' ->> 'status') is not null and (l -> 'seats') is not null, 'programs, dates and seats are there';
+  assert l::text !~* '"(monthly|price|prices|amount|estimate)"\s*:', format('no money in the licence: %s', l);
+  begin perform public.company_monthly(a); raise exception 'a member read the monthly estimate';
+  exception when insufficient_privilege then null; end;
+  begin perform public.riyeser_people(a); raise exception 'a member read the people paid for';
+  exception when insufficient_privilege then null; end;
+  begin perform public.hq_company_licence(a); raise exception 'a member read HQ''s licence and estimate';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+end $$;
 reset role;
 do $$ begin
   assert (select public = false and file_size_limit = 26214400 from storage.buckets where id = 'link-files'), 'a private bucket, 25 MB';

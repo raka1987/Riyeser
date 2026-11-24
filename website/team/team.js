@@ -481,6 +481,8 @@
     features: { calls: false }, branches: [], requests: [], presence: {}, pinned: [], last: {}, rx: [], callLog: [], dial: {} };
   const JOBS = [['manager', 'Manager'], ['bookkeeper', 'Bookkeeper'], ['sales', 'Sales'], ['payroll', 'Payroll'], ['staff', 'Staff'], ['readonly', 'Read-only']];
   const isAdmin = () => !!S.team && (S.team.role === 'owner' || S.team.role === 'admin');
+  // Only the owner sees what the business pays (prices, the plan and billing). Admins run the team, not the bill.
+  const isOwner = () => !!S.team && S.team.role === 'owner';
   // Owners and admins need two-step sign-in before their admin powers work (the database checks this too).
   const needs2step = () => isAdmin() && S.aal !== 'aal2';
   const jobName = (j) => (JOBS.find((x) => x[0] === j) || [j, j === 'owner' ? 'Owner' : 'Staff'])[1];
@@ -772,7 +774,7 @@
     });
   }
 
-  // The plan: each program's state, and people included (Company, and Billing & Subscription).
+  // The plan: each program's state, and people included (the owner's Company panel).
   // "4 people · 3 included in each program, then US$5 a month each": users are charged per paid program.
   const peopleText = (lic) => `${lic.seats.used} ${lic.seats.used === 1 ? 'person' : 'people'} · ${lic.seats.included} included per program`;
   function planHtml(lic) {
@@ -787,16 +789,14 @@
     const devs = admin ? await api.devices(t.id).catch(() => []) : [];
     let lic = admin ? await api.licence(t.id).catch(() => null) : null;
     if (!lic || !lic.modules || !lic.seats) lic = null;   // not set up online yet: no plan to show
-    const st = admin ? await api.storage(t.id).catch(() => null) : null;
     const field = (k, label, max = 120) => `<label class="f"><span>${label}</span><input name="${k}" value="${esc(t[k] || '')}" maxlength="${max}"${admin ? '' : ' readonly'}></label>`;
     modal(`<h3>${esc(t.name)}</h3>${justMade ? '<div class="ok">Your company is set up. Give your staff and branches the Company ID below: they ask to join, and you approve them.</div>' : ''}
       <div class="cid"><small>Company ID</small><span class="code" id="cidv">${esc(t.company_code || '')}</span><button class="btn sm" id="cpid">Copy</button></div>
       <p class="muted small" style="margin:4px 0 14px">Everyone in the company, on every Riyeser program and PC, links with this ID. ${admin ? 'New people need your approval.' : ''}</p>
       <form id="cof">${field('name', 'Business name', 80)}${field('tax_number', 'ABN / TIN / Tax ID', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
-      ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4>${planHtml(lic)}
+      ${lic && isOwner() ? `<h4 style="margin:16px 0 6px">Your plan</h4>${planHtml(lic)}
         <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Riyeser Link chat. To change your plan, contact Riyeser.</p>` : ''}
-      ${st ? `<h4 style="margin:16px 0 6px">File storage</h4>${storageHtml(st)}` : ''}
       ${admin && devs.length ? `<h4 style="margin:16px 0 6px">Linked PCs</h4><div class="devs">${devs.map((dv) => `<div><span><b>${esc(dv.device_name || 'A PC')}</b><small>${esc(nameOf(dv.user_id))} · ${esc(dv.platform || '')} · seen ${ago(dv.last_seen)}</small></span><button type="button" class="btn sm" data-unlink="${dv.id}">Unlink</button></div>`).join('')}</div>` : ''}
       <div class="mfoot"><button type="button" class="btn" id="cl">Close</button>${admin ? '<button class="btn p">Save</button>' : ''}</div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
@@ -895,7 +895,9 @@
     tabIcon(false); document.title = 'Riyeser';
     const admin = isAdmin(); const t = S.team; const me = S.people.find((p) => p.user_id === S.user.id) || {};
     const solo = t.kind === 'personal'; const team = !solo || S.people.length > 1 || S.requests.length > 0;
-    if (S.homeLic === undefined || S.homeLicFor !== t.id) { S.homeLicFor = t.id; S.homeLic = admin ? await api.licence(t.id).catch(() => null) : null; }
+    const owner = isOwner();
+    if (S.homeLic === undefined || S.homeLicFor !== t.id) { S.homeLicFor = t.id; S.homeLic = admin ? await api.licence(t.id).catch(() => null) : null;
+      S.homeStore = owner ? await api.storage(t.id).catch(() => null) : null; }
     const lic = S.homeLic && S.homeLic.modules ? S.homeLic : null;
     await loadHelp();
     if (S.view === 'phones' || S.view === 'myphone') return;   // the Phones or My phone page opened meanwhile (?phones, ?myphone)
@@ -918,18 +920,19 @@
           <button class="btn" id="hsec">🔐 Security</button></div></section>
         ${myDetailsHtml(me, admin)}
         ${helpHtml()}
-        ${lic ? `<h3 class="hsec">Your plan <small>${lic.seats ? `${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
+        ${owner && lic ? `<h3 class="hsec" id="hplanv">Your plan <small>${lic.seats ? `${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
         <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link Plus (calls)']]
           .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
+        ${owner && S.homeStore ? `${lic ? '' : '<h3 class="hsec" id="hplanv">Your plan</h3>'}${storageHtml(S.homeStore)}` : ''}
         <h3 class="hsec">Riyeser Link</h3>
         <div class="happs"><div class="happ hteam"><img src="/assets/apps/link.png" alt=""><div><b>Riyeser Link${unread ? ` <span class="badge">${unread}</span>` : ''}</b>
           <small>Chat with the people you work with. Calls between you, your staff and other locations come with Riyeser Link Plus.</small>
-          <span class="pl ok">Chat: free forever</span> ${calls ? licLine(lic, 'calls').replace('>Free trial', '>Calls: free trial').replace('>Paid', '>Calls: paid').replace('>Not active', '>Calls: not active') : '<span class="pl">Calls: free for 90 days</span>'}</div>
+          <span class="pl ok">Chat: free forever</span> ${!owner ? '' : calls ? licLine(lic, 'calls').replace('>Free trial', '>Calls: free trial').replace('>Paid', '>Calls: paid').replace('>Not active', '>Calls: not active') : '<span class="pl">Calls: free for 90 days</span>'}</div>
           <div class="hbtns"><button class="btn p sm" id="hchat">Open</button><a class="btn sm" href="${REL}RiyeserTeam-Setup.exe">⬇ Download for Windows</a></div></div>
-          ${admin ? `<button class="happ hphones" id="hphones"><span class="hpic" aria-hidden="true">☎</span><div><b>Phones</b><small>Desk phones and Riyeser Link Office: the server address for phones, who has which phone, passwords and Do not disturb.</small>${calls ? licLine(lic, 'calls').replace('>Free trial', '>Link Plus: free trial').replace('>Paid', '>Link Plus: paid').replace('>Not active', '>Link Plus: not active') : ''}</div><span class="go">Open →</span></button>` : ''}
+          ${admin ? `<button class="happ hphones" id="hphones"><span class="hpic" aria-hidden="true">☎</span><div><b>Phones</b><small>Desk phones and Riyeser Link Office: the server address for phones, who has which phone, passwords and Do not disturb.</small>${calls && owner ? licLine(lic, 'calls').replace('>Free trial', '>Link Plus: free trial').replace('>Paid', '>Link Plus: paid').replace('>Not active', '>Link Plus: not active') : ''}</div><span class="go">Open →</span></button>` : ''}
           <button class="happ hphones" id="hmyphone"><span class="hpic" aria-hidden="true">☎</span><div><b>My phone</b><small>Your extension, your desk phone, and how to set it up. Do not disturb.</small></div><span class="go">Open →</span></button></div>
         <h3 class="hsec">Programs for your PC <small>Start with Riyeser Central: it installs and updates the rest.</small></h3>
-        <div class="happs">${APPS.map(([id, n, d, file, key]) => `<a class="happ" href="${REL}${file}"><img src="/assets/apps/${id}.png" alt=""><div><b>${n}</b><small>${d}</small>${admin || key === 'free' ? licLine(lic, key) : ''}</div><span class="go">⬇ Download</span></a>`).join('')}</div>
+        <div class="happs">${APPS.map(([id, n, d, file, key]) => `<a class="happ" href="${REL}${file}"><img src="/assets/apps/${id}.png" alt=""><div><b>${n}</b><small>${d}</small>${owner || key === 'free' ? licLine(lic, key) : ''}</div><span class="go">⬇ Download</span></a>`).join('')}</div>
         <p class="muted small hfoot">Windows 10 and 11. <a href="/help.html">Help Centre</a> · <a href="/pricing.html">Pricing</a></p>
       </main>`;
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
@@ -1180,6 +1183,7 @@
   const usedText = (n) => (n < 0.1 * GB ? sizeText(n) : gbText(n));
   const STORE_FULL = (plus) => (plus ? `Your business has used its ${STORAGE_GB.plus} GB of file storage. Free up space by asking your admin, or contact Riyeser for more.`
     : `Your business has used its ${STORAGE_GB.free} GB of file storage. Free up space by asking your admin, or get ${STORAGE_GB.plus} GB with Riyeser Link Plus.`);
+  const NEAR_FULL = 'Your business is close to its file storage limit. Ask the owner about Riyeser Link Plus.';
   function storageHtml(st) {
     if (!st || st.limit == null) return '';
     const pct = Math.max(0, Math.min(100, Number(st.pct) || 0)); const warn = pct >= 80;
@@ -1592,8 +1596,8 @@
           <button class="lk-ni sm" id="ad-phones">${ic('desk')}<span>Desk phones</span></button>
           <button class="lk-ni sm" id="cosec">${ic('shield')}<span>Security</span></button>
           <button class="lk-ni sm" id="cohist">${ic('clock')}<span>History</span></button>
-          <button class="lk-ni sm" id="cobill">${ic('card')}<span>Billing &amp; Subscription</span></button>
           <button class="lk-ni sm" disabled title="Coming soon">${ic('chart')}<span>Reports</span><span class="soon">soon</span></button>
+          ${isOwner() ? `<button class="lk-ni sm" id="coplan">${ic('card')}<span>Plan &amp; billing</span></button>` : ''}
         </div></div>` : ''}</div>
       <div class="lk-nfoot"><button class="lk-ni sm" id="coset">${ic('cog')}<span>Settings</span></button><button class="lk-ni sm lk-inv" id="inv">${ic('plus')}<span>Invite people</span></button></div>`;
     const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = () => { S.navOpen = false; paneClasses(); fn(); }; };
@@ -1602,7 +1606,7 @@
     on('#mfanag', security); on('#cophones', () => phonesPage('chat')); on('#ad-phones', () => phonesPage('chat')); on('#comyphone', () => myPhonePage('chat'));
     on('#coppl', () => (needs2step() ? security() : peopleAccess())); on('#coreq', () => (needs2step() ? security() : joinRequests()));
     on('#coinfo', () => companyInfo(false)); on('#mgbr', () => (needs2step() ? security() : manageBranches())); on('#cosec', security); on('#cohist', showHistory);
-    on('#cobill', billing); on('#coset', settingsMenu); on('#inv', invite);
+    on('#coplan', planBilling); on('#coset', settingsMenu); on('#inv', invite);
     const ah = el.querySelector('#adminh'); if (ah) ah.onclick = () => { S.adminShut = !S.adminShut; ah.parentElement.classList.toggle('shut', S.adminShut); ah.setAttribute('aria-expanded', String(!S.adminShut)); };
   }
   function setNav(k) {
@@ -1850,6 +1854,7 @@
           <h4>Files</h4>${files.length ? `<div class="lk-mini">${files.map((f) => `<button class="mi" data-ifile="${f.m}:${f.i}"><span class="lk-chic sm">${ic('file')}</span><span>${esc(f.name)}<small>${esc(sizeText(Number(f.size) || 0))}</small></span>${ic('dl')}</button>`).join('')}</div>` : '<p class="muted small">Files shared here show up here.</p>'}</div>`;
       }
     }
+    if (tab === 'info' && isAdmin() && S.storeInfo) body += filesUse(S.storeInfo);
     el.innerHTML = `<div class="lk-rhead"><button class="back" aria-label="Back">${ic('back')}</button><div class="lk-tabs" role="tablist"><button role="tab" data-rt="people" aria-selected="${tab === 'people'}" class="${tab === 'people' ? 'on' : ''}">People (${S.people.length})</button><button role="tab" data-rt="info" aria-selected="${tab === 'info'}" class="${tab === 'info' ? 'on' : ''}">Info</button></div>
       <button class="lk-ib lk-rclose" id="rclose" aria-label="Close the panel" title="Close">${ic('x')}</button></div><div class="lk-rbody">${body}</div>`;
     el.querySelector('.back').onclick = () => go(S.ch ? 'main' : 'list');
@@ -1865,6 +1870,14 @@
     const ipp = el.querySelector('#ippl'); if (ipp) ipp.onclick = peopleOf;
     el.querySelectorAll('[data-ifile]').forEach((b) => b.onclick = () => { const [mid, i] = b.dataset.ifile.split(':'); const m = S.msgs.find((x) => String(x.id) === mid); if (m) download(m.files[Number(i)]); });
     wireDial(el, 'qd');
+    if (tab === 'info' && isAdmin() && S.storeInfo === undefined) { S.storeInfo = null; api.storage(S.team.id).then((x) => { S.storeInfo = x || false; if (S.rightTab === 'info') renderRight(); }).catch(() => { S.storeInfo = false; }); }
+  }
+  // Admins: how much file storage the business uses, in the Info panel. No prices here.
+  function filesUse(st) {
+    if (!st || st.limit == null) return '';
+    const warn = Number(st.pct) >= 80;
+    return `<div class="lk-files-use${warn ? ' warn' : ''}" id="ifiles"><b>Files: ${usedText(Number(st.used) || 0)} of ${gbText(Number(st.limit))}</b>
+      <div class="sbar"><i style="width:${Math.min(100, Number(st.pct) || 0)}%"></i></div>${warn ? `<small>${esc(NEAR_FULL)}</small>` : ''}</div>`;
   }
   // the keypad (Quick dial in the right panel, and the Calls view)
   function dialHtml(p) {
@@ -1964,7 +1977,8 @@
       if (S.ch && S.ch.id === ch.id && !S.msgs.find((y) => y.id === m.id)) S.msgs.push(m); S.last[ch.id] = m; renderMsgs(true); renderList();
       if (isAdmin() && !S.storeWarned) {   // owners and admins: a heads-up once storage passes 80%
         const st = await api.storage(S.team.id).catch(() => null);
-        if (st && Number(st.pct) >= 80) { S.storeWarned = true; tell(`Your business has used ${usedText(Number(st.used))} of its ${gbText(Number(st.limit))} of file storage (${Math.round(Number(st.pct))}%). See Billing & Subscription.`, 'warn'); }
+        if (st && Number(st.pct) >= 80) { S.storeWarned = true; S.storeInfo = st;
+          tell(isOwner() ? `Your business has used ${usedText(Number(st.used))} of its ${gbText(Number(st.limit))} of file storage (${Math.round(Number(st.pct))}%). See Plan & billing.` : NEAR_FULL, 'warn'); }
       }
     } catch (err) {
       const msg = plainError(err);
@@ -1998,13 +2012,11 @@
     });
   }
 
-  // Billing & Subscription (owners and admins): the plan, and how to change it.
-  async function billing() {
-    if (needs2step()) return security();
-    const [lic, st] = await Promise.all([api.licence(S.team.id).catch(() => null), api.storage(S.team.id).catch(() => null)]);
-    modal(`<h3>${ic('card')} Billing &amp; Subscription</h3>${lic && lic.modules ? planHtml(lic) : '<p>Your plan shows here once it\'s set up online.</p>'}${storageHtml(st)}
-      <p class="muted small">To change your plan, contact Riyeser. Riyeser Link chat is free forever; calls, desk phones and ${STORAGE_GB.plus} GB of files come with Riyeser Link Plus (${usd(PRICE_LINK_PLUS)} a month per business). All prices in US dollars.</p>
-      <div class="mfoot"><a class="btn" href="/pricing.html" target="_blank" rel="noopener">See pricing</a><button class="btn p" id="cl">Done</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
+  // Plan & billing (the owner only): Riyeser home's plan section, with the file storage bar. Later: My Riyeser's Billing.
+  async function planBilling() {
+    if (!isOwner()) return;
+    S.home = true; await renderHome();
+    const x = document.getElementById('hplanv'); if (x) x.scrollIntoView({ block: 'start' });
   }
 
   function modal(html, wire) {
@@ -2086,8 +2098,8 @@
   // Calling a branch rings everyone in it; the first to answer takes the call. 30 seconds with no answer is a missed call.
   function upsell() {
     modal(`<h3>⭐ Riyeser Link Plus</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
-      <p><b>${usd(PRICE_LINK_PLUS)} a month per business</b> (3 users included, then $5 a month each), free for your first 90 days. It also gives your business ${STORAGE_GB.plus} GB of chat files. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>
-      <div class="mfoot"><button class="btn" id="cl">Not now</button><a class="btn p" href="/pricing.html" target="_blank" rel="noopener">See pricing</a></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
+      ${isOwner() ? `<p><b>${usd(PRICE_LINK_PLUS)} a month per business</b> (3 users included, then $5 a month each), free for your first 90 days. It also gives your business ${STORAGE_GB.plus} GB of chat files. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>` : `<p>Your business's free trial of calls has ended, so calls are paused. Chat keeps working as normal. Ask the owner about Riyeser Link Plus.</p>`}
+      <div class="mfoot"><button class="btn" id="cl">Not now</button>${isOwner() ? '<a class="btn p" href="/pricing.html" target="_blank" rel="noopener">See pricing</a>' : ''}</div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }
 
   function dialPad() {
@@ -2143,6 +2155,7 @@
   // password encrypted to it, so only this tab can read it. It's taken once, within 5 minutes, and is in the history.
   const PH = {
     TITLE: 'Desk phones',
+    UPSELL_TEAM: 'Desk phones and calls come with <b>Riyeser Link Plus</b>. Ask the owner about adding it.',
     UPSELL: `Desk phones and calls come with <b>Riyeser Link Plus</b>. It's free for your first 90 days, then ${usd(PRICE_LINK_PLUS)} a month per business (3 users included), with no call charges. To add it to your plan, contact Riyeser.`,
     GUIDE: ['Install <b>Riyeser Link Office</b> on a PC at the office that stays on (<b>Riyeser Central → Get more apps</b>).', 'Sign in with your Riyeser account.', 'Plug in desk phones.'],
     SENDING: 'Sending to Riyeser Link Office…', DONE: 'Done', SLOW: 'Riyeser Link Office hasn\'t picked this up yet. It checks every 30 seconds while the office PC is on and connected to the internet.',
@@ -2234,7 +2247,7 @@
     const admin = isAdmin();
     let body = '';
     if (!admin) body = '<div class="lo-card"><p>Only the business\'s owner and admins can see and change the desk phones. To set up your own phone, open <b>☎ My phone</b>.</p><button class="btn p" id="phmine">☎ My phone</button></div>';
-    else if (!plus) body = `<div class="lo-card lo-up"><h2>⭐ Riyeser Link Plus</h2><p>${PH.UPSELL}</p><p class="muted small">Chat stays free either way.</p></div>`;
+    else if (!plus) body = `<div class="lo-card lo-up"><h2>⭐ Riyeser Link Plus</h2><p>${isOwner() ? PH.UPSELL : PH.UPSELL_TEAM}</p><p class="muted small">Chat stays free either way.</p></div>`;
     else if (!o) body = `${setupHtml(setupSteps([], now))}<div class="lo-card"><h2>Set up desk phones</h2><p>Riyeser Link Office is the office phone system: it runs on one PC at the office, and the office's desk phones connect to it and call each other. Nothing has been set up yet.</p>
         <p>Once it's running, this page shows the address to type into phones, every desk phone and extension, and lets you give phones to people from here.</p>
         <p><a class="btn" href="/help/link.html#desk-phones">📖 Read the guide: Setting up desk phones</a></p>${st === null ? '<p class="muted small">Riyeser is finishing an update to this page. If Riyeser Link Office is already running, its details show here soon.</p>' : ''}</div>`;

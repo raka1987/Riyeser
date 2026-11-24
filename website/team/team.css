@@ -690,3 +690,7 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
 .stor.warn .sbar i { background: #d97706; }
 .stor-w { margin: 8px 0 4px; font-size: 13.5px; font-weight: 600; color: #78350f; background: #fef3c7; border-radius: 8px; padding: 6px 10px; }
 .stor small { display: block; margin-top: 6px; }
+/* Admins: "Files: 1.2 GB of 2 GB" in the Info panel (no prices) */
+.lk-files-use { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; font-size: 13.5px; }
+.lk-files-use .sbar { margin-top: 6px; } .lk-files-use small { display: block; margin-top: 6px; }
+.lk-files-use.warn .sbar i { background: #d97706; }

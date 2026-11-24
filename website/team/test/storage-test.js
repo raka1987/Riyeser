@@ -1,5 +1,6 @@
 // Riyeser Link file storage (2 GB a business free, 20 GB with Link Plus), in the demo:
-//  1. Billing & Subscription shows owners and admins "x GB of y GB used"; at 80% or more it warns.
+//  1. The owner's Plan & billing (Riyeser home) shows "x GB of y GB used" and warns at 80%; admins who aren't the owner
+//     get no Billing or Plan & billing and no prices, only "Files: x of y" in the Info panel.
 //  2. When the business is full, an upload is refused with a plain message (and nothing is sent).
 //  3. HQ: the customer page's File storage card, Grant extra storage (with a reason, in the HQ history), and the
 //     Companies list's "Storage over 80%" filter.
@@ -14,29 +15,44 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
 
 (async () => {
   const b = await chromium.launch(); const errs = [];
-  async function linkDemo(kind) {
+  async function linkDemo(kind, as = '') {
     const ctx = await b.newContext({ viewport: { width: 1366, height: 860 } });
     await ctx.addInitScript((k) => { try { if (k) sessionStorage.setItem('riyeser.demo.storage', k); } catch { /* */ } }, kind);
     const pg = await ctx.newPage(); pg.on('pageerror', (e) => errs.push(e.message));
-    await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('.item'); return pg;
+    await pg.goto(BASE + '/link/?demo' + (as ? '&as=' + as : '')); await pg.waitForSelector('.item'); return pg;
   }
-  async function openBilling(pg) {
-    if (!(await pg.isVisible('#cobill'))) await pg.click('#adminh');
-    await pg.click('#cobill'); await pg.waitForSelector('.modal #stor');
+  async function openPlan(pg) {   // the owner: Admin / Settings → Plan & billing opens Riyeser home's plan
+    if (!(await pg.isVisible('#coplan'))) await pg.click('#adminh');
+    await pg.click('#coplan'); await pg.waitForSelector('#hplanv'); await pg.waitForSelector('#stor');
   }
-  // 1. normal (Link Plus trial, 20 GB): a bar, no warning
+  // 1. the owner (Link Plus trial, 20 GB): Plan & billing, with the bar and no warning; no Billing item in Link
   let pg = await linkDemo('');
-  await openBilling(pg);
-  let t = (await pg.textContent('.modal #stor')).replace(/\s+/g, ' ');
-  check(/1\.2 GB of 20 GB used/.test(t) && !(await pg.$('.modal #stor.warn')), `Billing: storage bar (${t.slice(0, 60)})`);
-  check((await pg.textContent('.modal')).includes('US$39'), 'Billing: Link Plus price in US$');
+  check(!(await pg.$('#cobill')), 'Link: no "Billing & Subscription" in Admin / Settings');
+  check(!!(await pg.$('#coplan')), 'the owner sees "Plan & billing"');
+  await openPlan(pg);
+  let t = (await pg.textContent('#stor')).replace(/\s+/g, ' ');
+  check(/1\.2 GB of 20 GB used/.test(t) && !(await pg.$('#stor.warn')), `owner's plan view: storage bar (${t.slice(0, 60)})`);
+  check((await pg.textContent('body')).includes('To change your plan'), 'owner sees the plan and how to change it');
   await pg.close();
-  // 1b. nearly full (85% of the free 2 GB): the warning
+  // 1b. nearly full (85% of the free 2 GB): the owner's warning
   pg = await linkDemo('nearly');
-  await openBilling(pg);
-  t = (await pg.textContent('.modal #stor')).replace(/\s+/g, ' ');
-  check(t.includes('1.7 GB of 2 GB used') && !!(await pg.$('.modal #stor.warn')) && t.includes('85% used') && t.includes('20 GB with Riyeser Link Plus'), `80% warning (${t.slice(0, 120)})`);
-  if (out) await (await pg.$('.modal .mcard, .modal')).screenshot({ path: out + '/link-storage-bar.png' });
+  await openPlan(pg);
+  t = (await pg.textContent('#stor')).replace(/\s+/g, ' ');
+  check(t.includes('1.7 GB of 2 GB used') && !!(await pg.$('#stor.warn')) && t.includes('85% used') && t.includes('20 GB with Riyeser Link Plus'), `80% warning (${t.slice(0, 120)})`);
+  if (out) { await (await pg.$('#hplanv')).scrollIntoViewIfNeeded(); await pg.screenshot({ path: out + '/link-storage-bar.png' }); }
+  await pg.close();
+  // 1c. an admin who isn't the owner: no Billing, no Plan & billing, no prices; "Files: x of y" in the Info panel
+  pg = await linkDemo('nearly', 'u-sam');
+  if (await pg.$('#adminh')) { if (!(await pg.isVisible('#coppl'))) await pg.click('#adminh'); }
+  check(!!(await pg.$('#coppl')) && !(await pg.$('#cobill')) && !(await pg.$('#coplan')), 'admin: Admin / Settings, but no Billing and no Plan & billing');
+  await pg.click('[data-ch="c-jobs"]'); await pg.waitForTimeout(200); await pg.click('#infobtn'); await pg.waitForSelector('#ifiles');
+  t = (await pg.textContent('#ifiles')).replace(/\s+/g, ' ');
+  check(t.includes('Files: 1.7 GB of 2 GB') && t.includes('Ask the owner about Riyeser Link Plus') && !/US\$|\$\d/.test(t), `admin Info panel: ${t}`);
+  if (out) await pg.screenshot({ path: out + '/link-admin-info-files.png' });
+  check(!/US\$\d|\$\d+ a month/.test(await pg.textContent('#lknav')), 'admin: no prices in the Link menu');
+  await pg.click('[data-nav=home]'); await pg.waitForTimeout(800);
+  const home = await pg.textContent('body');
+  check(!home.includes('Your plan') && !home.includes('To change your plan') && !/US\$\d/.test(home) && !home.includes('Paid to'), 'admin: Riyeser home shows no plan, prices or billing');
   await pg.close();
   // 2. full: an upload is refused with the plain message
   pg = await linkDemo('full');
