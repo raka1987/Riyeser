@@ -8,7 +8,7 @@ const root = require(path.join(ROOT, 'package.json'));
 const electronVersion = require(path.join(__dirname, 'node_modules', 'electron', 'package.json')).version;
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
-for (const f of ['server.js', 'db.js', 'mailer.js', 'wages.js', 'bank.js', 'desktop.js', 'perms.js']) fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f));
+for (const f of ['server.js', 'db.js', 'mailer.js', 'wages.js', 'bank.js', 'desktop.js', 'perms.js', 'archive.js', 'demo.js']) fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f));
 fs.cpSync(path.join(ROOT, 'public'), path.join(OUT, 'public'), { recursive: true });
 for (const f of ['main.js', 'preload.js']) fs.copyFileSync(path.join(__dirname, f), path.join(OUT, f));
 fs.copyFileSync(path.join(__dirname, 'icon.png'), path.join(OUT, 'icon.png'));

@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer } = require('ws');
-const { db, DATA_DIR, DEFAULT_SETTINGS, hashPassword, verifyPassword, getSettings, setSetting, todayIn, addDays } = require('./db');
+const { db, DATA_DIR, DEMO, DEFAULT_SETTINGS, hashPassword, verifyPassword, getSettings, setSetting, todayIn, addDays } = require('./db');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -21,6 +21,11 @@ app.get('/', (req, res) => res.redirect('/staff'));
   app.use('/vendor/tesseract', express.static(path.join(dir('tesseract.js/package.json'), 'dist'), long));
   app.use('/vendor/tesseract-core', express.static(dir('tesseract.js-core/package.json'), long));
   app.use('/vendor/tessdata', express.static(path.join(dir('@tesseract.js-data/eng/package.json'), '4.0.0_best_int'), long));
+}
+// demo mode: the yellow banner on every screen, and the demo sign-in on the login screen
+if (DEMO) {
+  const demoPage = require('./demo').page(require('fs').readFileSync(path.join(__dirname, 'public', 'staff.html'), 'utf8'));
+  app.get(['/staff', '/staff.html'], (req, res) => { res.set('Cache-Control', 'no-store'); res.type('html').send(demoPage); });
 }
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
@@ -192,7 +197,7 @@ app.post('/api/auth/password', requireStaff, wrap((req, res) => {
 
 const BUILD = process.env.RENDER_GIT_COMMIT || String(Date.now());
 app.get('/api/version', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ v: BUILD }); });
-app.get('/api/public/info', (req, res) => { const s = getSettings(); res.json({ company_name: s.company_name, today: todayIn(s.timezone) }); });
+app.get('/api/public/info', (req, res) => { const s = getSettings(); res.json({ company_name: s.company_name, today: todayIn(s.timezone), demo: DEMO }); });
 
 // ---------------------------------------------------------------- staff: employees
 // on_timeclock left empty counts as "on the time clock": send it as 1 so the Staff form shows the box ticked
@@ -774,6 +779,8 @@ require('./desktop')(app, { db, requireRole, requireArea, wrap, bad, str, getSet
 require('./bank')(app, { db, requireRole, requireArea, audit, wrap, bad, str, isDate });
 require('./archive')(app, { db, DATA_DIR, DEFAULT_SETTINGS, requireRole, rateLimit, audit, wrap, bad, str, verifyPassword, getSettings, setSetting });
 require('./wages')(app, { db, requireRole, requireArea, must, audit, wrap, bad, HttpError, str, round2, isDate, getSettings, ROLE_RANK, newClockPin, hashPassword });
+// demo mode: the first time, fill the demo records with the made-up business (Sample Trading Co)
+if (DEMO) require('./demo').seed({ db, hashPassword, getSettings, setSetting, computePayroll, payPeriodOf, todayIn, addDays });
 
 app.get('/api/staff/export/:what.csv', requireStaff, wrap((req, res) => {
   const from = isDate(req.query.from) ? req.query.from : '0000-01-01', to = isDate(req.query.to) ? req.query.to : '9999-12-31';

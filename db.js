@@ -4,7 +4,11 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const demo = require('./demo');
+// Demo mode (%APPDATA%\Riyeser\demo.json says on): records go in <DATA_DIR>/demo, so the real ones are never touched.
+const REAL_DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+fs.mkdirSync(REAL_DATA_DIR, { recursive: true });
+const { dir: DATA_DIR, demo: DEMO } = demo.dataDir(REAL_DATA_DIR);
 fs.mkdirSync(DATA_DIR, { recursive: true });
 // records from before the rename (ark.db) carry on as payroll.db, with any changes still in the -wal file
 const OLD = path.join(DATA_DIR, 'ark.db'), DB_FILE = path.join(DATA_DIR, 'payroll.db');
@@ -167,6 +171,7 @@ function setSetting(k, v) { setSettingStmt.run(k, String(v)); }
 
 // ---------- first run: one Super admin login ----------
 function seed() {
+  if (DEMO) return; // demo mode makes its own demo / demo login (demo.js)
   if (db.prepare('SELECT COUNT(*) AS n FROM users').get().n > 0) return;
   const adminPw = process.env.ADMIN_PASSWORD || crypto.randomBytes(6).toString('base64url');
   db.prepare(`INSERT INTO users(name, username, password_hash, role, position, pay_type, pay_rate, on_timeclock) VALUES(?,?,?,?,?,?,?,0)`)
@@ -183,4 +188,4 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 seed();
-module.exports = { DATA_DIR, DEFAULT_SETTINGS, db, hashPassword, verifyPassword, getSettings, setSetting, todayIn, addDays };
+module.exports = { DATA_DIR, REAL_DATA_DIR, DEMO, DEFAULT_SETTINGS, db, hashPassword, verifyPassword, getSettings, setSetting, todayIn, addDays };

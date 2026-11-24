@@ -9,12 +9,17 @@ const net = require('net');
 if (!app.requestSingleInstanceLock()) { app.quit(); process.exit(0); }
 app.setAppUserModelId('com.riyeser.payroll');
 
-const DATA = path.join(app.getPath('userData'), 'payroll');
+const BASE = path.join(app.getPath('userData'), 'payroll');
+// Demo mode (%APPDATA%\Riyeser\demo.json, set from Riyeser Central): practice records in payroll\demo, and their
+// payslips and backups in Documents\Riyeser\Payroll\Demo, so nothing real is touched.
+const DEMO = require('./demo').isOn();
+const DATA = DEMO ? path.join(BASE, 'demo') : BASE;
 const HOME_DIR = path.join(app.getPath('documents'), 'Riyeser');
-const BACKUPS = path.join(HOME_DIR, 'Payroll', 'Backups');
-const PAYSLIPS = path.join(HOME_DIR, 'Payroll', 'Payslips');
+const PAY_HOME = DEMO ? path.join(HOME_DIR, 'Payroll', 'Demo') : path.join(HOME_DIR, 'Payroll');
+const BACKUPS = path.join(PAY_HOME, 'Backups');
+const PAYSLIPS = path.join(PAY_HOME, 'Payslips');
 for (const d of [DATA, BACKUPS, PAYSLIPS]) fs.mkdirSync(d, { recursive: true });
-Object.assign(process.env, { DESKTOP: '1', DATA_DIR: DATA, BACKUP_DIR: BACKUPS, NODE_ENV: 'production' });
+Object.assign(process.env, { DESKTOP: '1', DATA_DIR: BASE, BACKUP_DIR: BACKUPS, NODE_ENV: 'production' }); // db.js adds \demo itself
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 
 // ---------------------------------------------------------------- records from other files
@@ -66,7 +71,7 @@ function copyFolder(from) {
   if (from.backupsOnly) fs.cpSync(from.docs, path.join(BACKUPS, `From ${from.name}`), { recursive: true, force: false, errorOnExist: false });
   else for (const sub of ['Payslips', 'Backups']) if (fs.existsSync(path.join(from.docs, sub))) fs.cpSync(path.join(from.docs, sub), path.join(HOME_DIR, 'Payroll', sub), { recursive: true, force: false, errorOnExist: false });
 }
-if (!fs.existsSync(MOVED)) {
+if (!DEMO && !fs.existsSync(MOVED)) { // (demo records never bring in anything)
   try {
     const from = EARLIER.find(e => fs.existsSync(e.data));
     if (from && isEmpty()) bringIn(from);
@@ -123,7 +128,7 @@ async function start() {
   const port = (await portFree(37421)) ? 37421 : 0;          // the same address each time if it's free
   await new Promise(ok => server.listen(port, '127.0.0.1', ok));  // only this computer can reach payroll
   base = `http://127.0.0.1:${server.address().port}`;
-  win = new BrowserWindow({ width: 1300, height: 880, minWidth: 380, minHeight: 500, title: 'Riyeser Payroll', icon: path.join(__dirname, 'icon.png'),
+  win = new BrowserWindow({ width: 1300, height: 880, minWidth: 380, minHeight: 500, title: DEMO ? 'Riyeser Payroll (demo mode)' : 'Riyeser Payroll', icon: path.join(__dirname, 'icon.png'),
     backgroundColor: '#f3f5f8', webPreferences: { contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'preload.js') } });
   // payslips and timesheets open in a print window; web links open in the normal browser
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -183,7 +188,7 @@ function menu(web) {
       { label: 'Payroll help guide', accelerator: 'F1', click: () => shell.openExternal('https://riyeser.com/help/payroll.html') },
       { label: 'Email support', click: () => shell.openExternal('mailto:info@riyeser.com?subject=' + encodeURIComponent(`Riyeser Payroll ${app.getVersion()}`)) },
       { type: 'separator' },
-      { label: 'Where are my records?', click: () => dialog.showMessageBox(win, { type: 'info', message: 'Your records', detail: `Payroll records:\n${CUR}\n\nPayslip PDFs and daily backups:\n${path.join(HOME_DIR, 'Payroll')}\n\nCopy that folder to a USB stick or cloud drive now and then.` }) },
+      { label: 'Where are my records?', click: () => dialog.showMessageBox(win, { type: 'info', message: 'Your records', detail: `Payroll records:\n${CUR}\n\nPayslip PDFs and daily backups:\n${PAY_HOME}\n\nCopy that folder to a USB stick or cloud drive now and then.` }) },
       { label: `About Riyeser Payroll (version ${app.getVersion()})`, click: () => dialog.showMessageBox(win, { type: 'info', message: 'Riyeser Payroll', detail: `Version ${app.getVersion()}\nRiyeser Group\nTime clock, timesheets, pay runs, payslips, leave and pay history.` }) } ] },
   ]));
 }

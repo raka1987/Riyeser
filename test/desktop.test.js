@@ -15,7 +15,7 @@ async function call(method, url, body, cookie) {
   return { status: res.status, data, cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
 }
 before(async () => {
-  server = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT, HOST: '127.0.0.1', DATA_DIR, BACKUP_DIR, DESKTOP: '1', ADMIN_PASSWORD: '' }, stdio: 'ignore' });
+  server = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], { env: { ...process.env, PORT, HOST: '127.0.0.1', DATA_DIR, BACKUP_DIR, DESKTOP: '1', ADMIN_PASSWORD: '', RIYESER_DEMO_FILE: path.join(DATA_DIR, 'no-demo.json'), RIYESER_DEMO: '' }, stdio: 'ignore' });
   for (let i = 0; i < 50; i++) { try { await fetch(B + '/api/public/info'); return; } catch { await new Promise(r => setTimeout(r, 100)); } }
   throw new Error('Server did not start');
 });

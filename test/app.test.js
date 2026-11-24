@@ -36,7 +36,7 @@ async function login(username, password) {
 
 before(async () => {
   server = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT, DATA_DIR, ADMIN_PASSWORD: 'AdminPass123', TRUST_PROXY: '1' }, stdio: 'ignore',
+    env: { ...process.env, PORT, DATA_DIR, ADMIN_PASSWORD: 'AdminPass123', TRUST_PROXY: '1', RIYESER_DEMO_FILE: path.join(DATA_DIR, 'no-demo.json'), RIYESER_DEMO: '' }, stdio: 'ignore',
   });
   for (let i = 0; i < 50; i++) {
     try { await fetch(B + '/api/public/info'); return; } catch { await new Promise(r => setTimeout(r, 100)); }
