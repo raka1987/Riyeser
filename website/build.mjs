@@ -33,151 +33,62 @@ const ALL_PROGRAMS = [
   { id: 'central', name: 'Riyeser Central', short: 'Central', icon: 'R', file: 'RiyeserCentral-Setup.exe',
     one: 'The home screen for your business: money owed, today\'s meetings, to-dos and recent files — and every Riyeser program one click away.',
     pitch: 'Start your day knowing exactly what needs doing.',
-    shot: 'central-home.webp', shot2: 'central-home-dark.webp',
-    features: [
-      ['Money at a glance', 'What customers owe you, what\'s overdue, and the bills you need to pay — straight from Riyeser Accounting.'],
-      ['Today & to-dos', 'Your meetings and to-do list in one place, so nothing slips.'],
-      ['Find any file', 'One search box finds invoices, drawings and payslips by name, by the words inside, or by an old name.'],
-      ['Recent documents', 'Pick up where you left off with the files you opened last.'],
-      ['Only what you have', 'Shows just the programs you use — add more any time.'],
-      ['Light or dark', 'A modern look that\'s easy on the eyes, day or night.'],
-    ] },
+    shot: 'central-home.webp' },
   { id: 'invoices', name: 'Riyeser Invoices', short: 'Invoices', icon: '🧾', file: 'RiyeserInvoices-Setup.exe',
     one: 'Free invoicing for sole traders and small businesses: quotes, invoices, customers and getting paid. Free forever.',
-    pitch: 'Send invoices and get paid. Free.',
-    features: [
-      ['Quotes and invoices', 'Professional quotes and tax invoices with your business details, and turn a quote into an invoice in one click.'],
-      ['Customers', 'Keep every customer\'s details, invoices and statement in one place.'],
-      ['Getting paid', 'Record payments, part payments and payments against several invoices at once.'],
-      ['Who owes me', 'See who owes you and what\'s overdue at a glance.'],
-      ['PDF copies', 'Save any invoice or quote as a PDF to send or print.'],
-      ['Grows with you', 'Need stock, bills or reports? Accounting Basics opens the same company file, with everything already there.'],
-    ],
-    note: 'Riyeser Invoices is free forever: no time limit, no card and no invoice limit. It works on your PC, with no internet needed.' },
+    pitch: 'Send invoices and get paid. Free.' },
   { id: 'accounting-basics', name: 'Riyeser Accounting Basics', short: 'Accounting Basics', icon: '📗', file: 'RiyeserAccountingBasics-Setup.exe',
     one: `Invoicing, quotes, customers and stock for shops and sole traders. Free for 90 days, no card.`,
-    pitch: 'Invoice, get paid and keep stock.',
-    features: [
-      ['Quotes → invoices → payments', 'Send quotes, turn them into invoices, and record payments against several invoices at once.'],
-      ['Customers & suppliers', 'Contacts, bills and paying bills, with who owes you at a glance.'],
-      ['Stock', 'Stock items with average cost, stocktakes and reorder alerts.'],
-      ['Works with Riyeser POS', 'Selling at a counter? Add Riyeser POS, the till app. Every till sale shows here as a paid invoice, with stock and GST right.'],
-      ['Money in & out', 'Record what you spend and receive, with GST worked out for you.'],
-      ['Key reports', 'Profit & Loss, GST summary, who owes you, sales by customer and item, and stock reports.'],
-    ],
-    note: 'Need bank reconciliation, payroll or a Balance Sheet? Install Accounting Plus: it replaces Basics and opens your books exactly as they are.' },
+    pitch: 'Invoice, get paid and keep stock.' },
   { id: 'accounting', name: 'Riyeser Accounting Plus', short: 'Accounting Plus', icon: '📒', file: 'RiyeserAccountingPlus-Setup.exe',
     one: `Full double-entry books: everything in Basics plus banking, payroll, journals, jobs and budgets. Free for 90 days, no card. You pay for Plus instead of Basics, never both.`,
     pitch: 'Know who owes you, and who you owe.',
     shot: 'accounting.webp',
-    features: [
-      ['Everything in Basics', 'Quotes, invoices, payments, customers, suppliers and stock. Works with Riyeser POS too.'],
-      ['Banking', 'Spend and receive money, transfers, bank reconciliation and bank statement import.'],
-      ['Payroll', 'Pay runs that post straight to the books, payslips and leave.'],
-      ['GST / BAS', 'GST tax codes and a BAS summary (G1, 1A, 1B, W1, W2 and more).'],
-      ['Journals, jobs & budgets', 'General journal, job costing and monthly budgets with Budget vs Actual.'],
-      ['Every report', 'Profit & Loss, Balance Sheet, Trial Balance, aged receivables and payables, job P&L — print or export to Excel.'],
-    ],
     note: 'Built for Australian small businesses. Have your accountant check your setup before relying on it for tax.' },
   { id: 'pos', name: 'Riyeser POS', short: 'POS', icon: '🧾', file: 'RiyeserPOS-Setup.exe',
     one: `A touch-friendly till for retail shops or cafes and restaurants. Every sale goes straight into your books. Free for 90 days, no card.`,
     pitch: 'Sell at the counter. Books done automatically.',
     shot: 'pos-till.webp',
-    features: [
-      ['Retail or restaurant', 'Choose your setup in POS setup: barcode scanning and returns for shops, or tables, kitchen dockets and takeaway for cafes.'],
-      ['Fast selling', 'Photo product tiles, Favourites, categories, search or scan, and Hold a sale to come back to it.'],
-      ['Cash or card', 'A cash keypad that works out the change, card payments, and GST tax-invoice receipts.'],
-      ['Named tills', 'Till 1, Bar, Front counter — each sale records which till took it.'],
-      ['Straight into Accounting', 'Every sale is a proper invoice and payment, so stock, GST/BAS and reports update by themselves.'],
-      ['Sales & Today', 'Today\'s takings, sales by hour and best sellers, with receipts and voids kept in the audit trail.'],
-      ['Managers & close till', 'Manager PIN or card for voids, refunds and big discounts, then count the drawer and print the Z-report.'],
-    ],
-    note: 'Riyeser POS is its own app with its own installer. It opens the same company file as Riyeser Accounting Basics or Plus, so till sales show there as paid invoices. You don\'t need Accounting to use POS.' },
+    note: 'Riyeser POS is its own app. It opens the same company file as Accounting Basics or Plus, but you don\'t need Accounting to use it.' },
   { id: 'bookings', name: 'Riyeser Bookings', short: 'Bookings', icon: '📅', file: 'RiyeserBookings-Setup.exe',
     one: `Book and schedule trades jobs, appointments or restaurant tables, then invoice them in one click. Free for 90 days, no card.`,
-    pitch: 'Every job and appointment, on one calendar.',
-    features: [
-      ['Three kinds of business', 'Trades & site jobs at the customer\'s address, appointments at your place, or restaurant tables. Pick yours in Bookings setup.'],
-      ['Day and week calendar', 'A column for each staff member or table. Click an empty time to book it.'],
-      ['No double-booking', 'Riyeser warns you when a staff member or table is already taken, and checks a table has enough seats.'],
-      ['Status at a glance', 'Booked, confirmed, in progress, done, cancelled or no-show, colour-coded on the calendar.'],
-      ['Invoice in one click', '“Invoice this job” makes a real invoice, with the price of the service, in Riyeser Accounting or Invoices.'],
-      ['Done, not invoiced yet', 'One list shows every finished job still waiting for an invoice, so nothing slips.'],
-    ],
-    note: 'Riyeser Bookings is its own app. It opens the same company file as Riyeser Accounting, Invoices and POS, so customers are shared and invoices land there straight away. Customers booking online is coming next.' },
+    pitch: 'Every job and appointment, on one calendar.' },
   { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: PAYROLL_WIN ? 'RiyeserPayroll-Setup.exe' : null,
     one: `Time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click. Free for 90 days, no card.`,
     pitch: 'Pay day without the paperwork.',
-    features: [
-      ['Time clock', 'Staff tap their name and a 4-digit PIN to clock in and out; hours flow straight into timesheets.'],
-      ['Timesheets', 'Review and approve each week\'s hours before the pay run.'],
-      ['Pay runs', 'Weekly, fortnightly or monthly pay runs: preview first, then finalise, with PAYE and FNPF worked out from your pay rules.'],
-      ['Payslips', 'Payslips with year-to-date totals. Print, email, or save them all as PDFs — one each or all in one.'],
-      ['Leave', 'Annual and sick leave taken and left for every person.'],
-      ['Bank statement check', 'Reads your bank statement and matches the wage payments that went out.'],
-    ],
-    note: 'Records stay on your computer, with a backup made every day. Check the PAYE and FNPF rates in Payroll rules against the current rules before you pay staff.' },
+    note: 'Check the PAYE and FNPF rates in Payroll rules against the current rules before you pay staff.' },
   { id: 'desk-assistant', name: 'Riyeser Desk Assistant', short: 'Desk Assistant', icon: '🗂', file: 'RiyeserDeskAssistant-Setup.exe',
     one: 'Sorts every file by type and year, finds anything in seconds, finds duplicates, and keeps your to-dos.',
     pitch: 'Never lose a file again.',
-    shot: 'desk-find.webp',
-    features: [
-      ['Sort by type', 'Everything into Invoices › 2026, Drawings › 2026, Payroll › 2026… with a preview first and Undo after.'],
-      ['Find a file', 'Search by name, by the words inside, by company, or by a name it used to have — with type and year filters.'],
-      ['Copies found', 'Spots duplicates, even when one is a Word file and the other a PDF, and lets you archive the extras.'],
-      ['Where are my files?', 'Every move is recorded. See where anything went — or put everything back with one button.'],
-      ['Reads scans', 'Reads scanned PDFs and photos of receipts, so they can be filed and found too.'],
-      ['Meetings & to-dos', 'Connect your calendar; action items from meeting notes land on your to-do list.'],
-    ],
-    note: 'Desk Assistant never touches Windows or program files — only your own documents.' },
+    shot: 'desk-find.webp' },
   // Riyeser Link (formerly Riyeser Team). Its Windows installer keeps the old file name, so installed copies update in place.
   { id: 'link', name: 'Riyeser Link', short: 'Riyeser Link', icon: '💬', file: 'RiyeserTeam-Setup.exe', shot: 'team-chat.webp',
     one: 'Chat for your business: channels for jobs and the office, direct messages, and live updates on your PC and phone. Free. Add Link Plus for calls.',
     // A free program with a paid upgrade: shows the gold "★ Plus" marker wherever the program is listed.
     plus: { name: 'Riyeser Link Plus', module: 'calls', anchor: 'link-plus',
       what: `calls, desk phones and ${STORAGE_GB.plus} GB of chat file space`, line: `calls between people and branches, office desk phones, ${STORAGE_GB.plus} GB of space for files shared in chat (not hosting).` },
-    pitch: 'Your whole team, in one conversation.',
-    features: [
-      ['Channels', 'A place for each topic: #jobs, #office, or one per site, for everyone in the team.'],
-      ['Private chats', 'Executives, sales or managers only: choose exactly who is in. Nobody else can see the chat, or even that it exists.'],
-      ['Direct messages', 'Private one-to-one chats. Only the two of you can read them.'],
-      ['On the PC and the phone', 'The Riyeser Link app for Windows sits by the clock and starts with Windows, so calls and messages always reach you. On phones and tablets, use any web browser.'],
-      ['Points at your work', 'Type INV-1047 or Booking 12 and it stands out, so everyone knows which invoice or job you mean.'],
-      ['Unread at a glance', 'Unread counts on every channel and person, and on Riyeser Link in Riyeser Central.'],
-      ['Invite with a link', 'Send your team one link. They make a free account and they\'re in. You can make a new link any time.'],
-      ['⭐ Riyeser Link Plus: branches and extensions', 'Each branch gets a number (Head office 100, your next branch 200) and its own join code. Staff who join with it get the next extension automatically.'],
-      ['⭐ Riyeser Link Plus: call anyone', 'Call a person, dial an extension, or call a branch to ring everyone there: the first to answer takes it. Turn the camera on any time.'],
-    ],
-    note: `Chat is free, with ${STORAGE_GB.free} GB of file storage per business. Riyeser Link Plus is ${usd(PRICE.calls)} a month per business (${PRICE.users_included} users included, +${usd(PRICE.extra_user)} a month per extra user), free for 90 days: call any person or a whole branch, answer on any PC or phone you're signed in on, with no call charges, and ${STORAGE_GB.plus} GB of space for files shared in chat. This is chat file space only: it isn't website, email or cloud hosting. Each business only ever sees its own team.` },
+    pitch: 'Your whole team, in one conversation.' },
   { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyeserPDF-Setup.exe',
     one: 'Open, fill in, sign, combine and edit PDFs — even scanned ones.',
     pitch: 'Drawings and forms, done on the PC.',
-    shot: 'pdf.webp',
-    features: [
-      ['Edit text', 'Change the words in a PDF, add text, highlight, underline and strike out.'],
-      ['Fill & sign', 'Fill in forms, add your signature, ticks, crosses and today\'s date.'],
-      ['Mark up drawings', 'Boxes, circles, arrows, lines and stamps — perfect for site drawings.'],
-      ['Pages', 'Combine PDFs, reorder, rotate, extract and delete pages.'],
-      ['Scans', 'Turn scanned pages into searchable, editable text.'],
-      ['Convert', 'Make PDFs from pictures, Word and Excel — or turn a PDF back into Word.'],
-    ] },
+    shot: 'pdf.webp' },
   { id: 'services', name: 'As Built', short: 'As Built', icon: '🏗', file: SERVICES_WIN ? 'RiyeserServices-Setup.exe' : null, link: `${SERVICES_APP}/?demo`, linkLabel: 'Try the demo',
     one: 'Map every cable, pipe and duct on your drawings as it goes in — with inspections, test results and photos — and the as-builts are done at handover.',
     pitch: 'Map every service while the building goes up.', custom: true },
 ];
-// Short words for program cards and the Programs menu.
+// Short words for program cards (one line each) and the Programs menu.
 const CARD = {
-  central: ['Your home screen: money owed, meetings, to-dos and every Riyeser program.', 'Home screen and updates'],
-  invoices: ['Quotes, invoices, customers and getting paid. Free forever.', 'Free invoicing'],
-  'accounting-basics': ['Invoices, quotes, customers and stock. Free for 90 days.', 'Invoicing and stock'],
-  accounting: ['Full books: banking, reconciliation, BAS, payroll, journals, jobs and budgets.', 'Full books and banking'],
-  pos: ['A touch-friendly till for shops, cafes and restaurants. Free for 90 days.', 'The till for shops and cafes'],
-  bookings: ['Jobs, appointments and table bookings on one calendar, then invoice them.', 'Jobs, appointments, tables'],
-  payroll: ['Time clock, timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
-  'desk-assistant': ['Sorts your files by type and year, and finds anything in seconds.', 'Sort and find your files'],
-  link: ['Chat with your whole team: channels, direct messages and live updates. Free. Calls with Link Plus.', 'Chat and calls'],
-  pdf: ['Open, fill in, sign, mark up and combine PDFs, even scanned ones.', 'Fill, sign and edit PDFs'],
-  services: ['Map cables, pipes and ducts on your plans, with inspections and photos.', 'Services on your drawings'],
+  central: ['Your home screen for every program.', 'Home screen and updates'],
+  invoices: ['Quotes, invoices and getting paid.', 'Free invoicing'],
+  'accounting-basics': ['Invoices, quotes, customers and stock.', 'Invoicing and stock'],
+  accounting: ['Full books, banking, BAS and payroll.', 'Full books and banking'],
+  pos: ['A touch-friendly till for shops and cafes.', 'The till for shops and cafes'],
+  bookings: ['Jobs, appointments and table bookings.', 'Jobs, appointments, tables'],
+  payroll: ['Timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
+  'desk-assistant': ['Sorts and finds every file in seconds.', 'Sort and find your files'],
+  link: ['Team chat: channels and direct messages.', 'Chat and calls'],
+  pdf: ['Open, fill in, sign and combine PDFs.', 'Fill, sign and edit PDFs'],
+  services: ['Cables, pipes and ducts on your plans.', 'Services on your drawings'],
 };
 for (const p of ALL_PROGRAMS) [p.card, p.tag] = CARD[p.id];
 // Free programs first, then the paid ones. Every list on the site (menus, finder, grids, downloads, footer) uses this order.
@@ -207,12 +118,10 @@ const priceLong = (m) => `${usd(PRICE[m])} a month · ${USERS_LINE}`;
 /** Where space is tight (menu rows): "US$39/mo · 3 users incl." */
 const priceShort = (m) => `${usd(PRICE[m])}/mo · ${PRICE.users_included} users incl.`;
 const USERS_NOTE = `Every paid program includes ${PRICE.users_included} users; extra users ${usd(PRICE.extra_user)} a month each.`;
-/** The price box at the top of a paid program's page and its checklist. */
 /** Where the two buttons go: create an account (or sign in), then Riyeser home opens "Add to my plan" for these programs. */
 const BUY_LINK = (mods, buy, extra = '') => `/link/?signup&add=${mods}${extra}${buy ? '&buy=1' : ''}`;
 /** "Start free for 90 days" and "Buy now" for a paid program (m = its PRICE key). */
 const buyBtns = (m, cls = '') => `<div class="buybtns${cls ? ' ' + cls : ''}" data-buy="${m}"><a class="btn s sm" href="${BUY_LINK(m, false)}">Start free for 90 days</a><a class="btn p sm" href="${BUY_LINK(m, true)}">Buy now</a></div>`;
-const priceBox = (m, extra = 'Free for 90 days, no card') => `<div class="pricebox"><div><b>${usd(PRICE[m])}</b> a month per business</div><small>${PRICE.users_included} users included · +${usd(PRICE.extra_user)} a month per extra user${extra ? ` · ${extra}` : ''}</small></div>`;
 
 // ---------- what each program includes ----------
 // Checked against the programs themselves (November 2026): Accounting Basics / Plus, Invoices, POS and Bookings on main
@@ -220,9 +129,9 @@ const priceBox = (m, extra = 'Free for 90 days, no card') => `<div class="priceb
 // website/team/. Only what the program does today; "coming soon" only where the site already says so.
 const INCLUDES = {
   central: ['Every Riyeser program you have, one click away', 'Installs and updates Riyeser programs (Add a program)',
-    'Money owed to you and overdue invoices, from Riyeser Accounting', 'Your last pay run, from Riyeser Payroll',
+    'Money owed to you, overdue invoices and bills to pay, from Riyeser Accounting', 'Your last pay run, from Riyeser Payroll',
     "Today's meetings and to-dos, from Desk Assistant", 'Recent activity, invoices to chase and shortcuts (open the till, new invoice, new booking, run payroll)',
-    'One search box for all your files: by name, words inside or company', 'A getting-started checklist',
+    'One search box for all your files: by name, words inside, company or an old name', 'Recent documents: pick up the files you opened last', 'A getting-started checklist',
     'Demo mode: try every program with a made-up sample business', 'Your company and Riyeser licence in one place', 'Light and dark look'],
   invoices: ['Quotes and tax invoices with your business details', 'Turn a quote into an invoice in one click', 'Customers and customer statements',
     'Receive payments, including part payments and one payment across several invoices', 'Who owes me: what each customer owes and what is overdue',
@@ -236,17 +145,17 @@ const INCLUDES = {
     'Users and roles, and an audit trail', 'More than one company with one sign-in (extra companies charged separately)'],
   accounting: ['Everything in Accounting Basics', 'Bank reconciliation, with undo', 'Bank statement import (CSV): allocate or split each line in one click',
     'Transfer money between accounts', 'Payroll in your books: employees, pay runs, payslips with year-to-date totals and leave',
-    'General journal, reversing entries and search transactions', 'Jobs (job costing) and monthly budgets', 'Tax codes and a BAS / GST summary',
+    'General journal, reversing entries and search transactions', 'Jobs (job costing) and monthly budgets', 'Tax codes and a BAS / GST summary (G1, 1A, 1B, W1, W2 and more)',
     'Lock a period once it is lodged', 'Every report: Balance Sheet, Trial Balance, General Ledger, Budget vs Actual, cash movement, Job P&L and payroll summary'],
   pos: ['Retail or restaurant setup', 'Product tiles with photos, categories, Favourites, search and barcode scanning', 'Hold a sale and come back to it',
     'Tables, kitchen dockets and takeaway (restaurant setup)', 'Cash with the change worked out, or card', 'Tax-invoice receipts to print',
-    'Named tills, each opened with a float', 'Refunds, voids and big discounts need a manager PIN or card', 'Close the till: count the drawer and print the Z-report',
+    'Named tills (Till 1, Bar, Front counter), each opened with a float; every sale records its till', 'Refunds, voids and big discounts need a manager PIN or card, and stay in the audit trail', 'Close the till: count the drawer and print the Z-report',
     "Today's sales: takings, sales by hour, best sellers and how people paid", 'Products, stock and stocktake',
     'Every sale lands in your books as a paid invoice, with stock and GST updated'],
   bookings: ['Trades & site jobs, appointments, or restaurant tables', 'Day and week calendar, with a column for each staff member or table',
     'Warns you before double-booking a person or a table, and checks a table has enough seats', 'Booked, confirmed, in progress, done, cancelled and no-show, colour-coded',
     'Trades jobs with several visits, time and parts, at a fixed price or time and materials', 'Invoice a job in one click, in Riyeser Accounting or Invoices',
-    'One list of finished jobs still waiting for an invoice', 'Customers shared with your other Riyeser programs', 'Customers booking online: coming soon'],
+    'One list of finished jobs still waiting for an invoice', 'Opens the same company file as Accounting, Invoices and POS, so customers are shared', 'Customers booking online: coming soon'],
   payroll: ['Time clock on a shared PC: staff tap their name and a 4-digit PIN', 'Timesheets by person or as a list, with several shifts a day and supervisor approval',
     'Pay runs weekly, fortnightly, twice a month or monthly: preview, then finalise', 'PAYE and FNPF from the rates in your pay rules, unpaid break rules and regular deductions',
     'Payslips with year-to-date totals: print, save as PDFs or email', 'Staff can see their own payslips and timesheets',
@@ -255,10 +164,10 @@ const INCLUDES = {
   'desk-assistant': ['Sort by type: files into Organised › Type › Year, with a preview first', "Undo, and \"Where are my files?\" for every move, or put everything back",
     'Find a file by name, by the words inside, by company or by an old name, with type and year filters', 'Copies of the same file found, even a Word file and its PDF; extras archived, never deleted',
     'Reads scanned PDFs and photos so they can be filed and found', 'Organise new files, tidy the Desktop and clean up Downloads',
-    "Today: meetings from your calendar and the to-dos from your meeting notes", 'A built-in PDF editor', 'Optional AI sorting with your own AI key'],
+    "Today: meetings from your calendar and the to-dos from your meeting notes", 'A built-in PDF editor', 'Optional AI sorting with your own AI key', 'Only your own documents: never Windows or program files'],
   link: ['Channels for each topic, job or site', 'Private chats: only the people you choose can see them', 'Direct messages between two people',
     'Reactions, pinned chats and files shared in chat', 'INV-1047 or Booking 12 stands out in a message', 'Unread counts on every chat',
-    'Invite your team with one link', 'On your PC (the Riyeser Link app), in any web browser and on phones',
+    'Invite your team with one link', 'On your PC (the Riyeser Link app starts with Windows), in any web browser and on phones', 'Each business only ever sees its own team',
     `${STORAGE_GB.free} GB of chat file space per business, up to 25 MB a file`],
   'link-plus': ['Everything in free Riyeser Link', 'Call a person, dial an extension, or call a whole branch', 'Turn the camera on for video in any call',
     'Branches with their own number and join code; extensions given automatically', 'Office desk phones with Riyeser Link Office (Yealink, Grandstream, Snom and Polycom)',
@@ -305,11 +214,11 @@ const SHOTS = {
   pdf: [['pdf-markup', 1280, 800, 'Riyeser PDF with a site plan marked up: a red circle, an arrow, a note and a tick', 'Marking up a drawing'],
     ['pdf-tools', 1280, 800, 'The Riyeser PDF Tools menu: convert, split, page numbers, watermark and make smaller', 'More tools']],
 };
-const shotImg = (up, [f, w, h, alt]) => `<img src="${up}assets/shots/${f}-900.webp" srcset="${up}assets/shots/${f}-900.webp ${w > 900 ? 900 : 390}w, ${up}assets/shots/${f}.webp ${w}w" sizes="(max-width: 760px) 92vw, 560px" width="${w}" height="${h}" alt="${esc(alt)}" loading="lazy" decoding="async">`;
+// Not lazy: there are only two to four small pictures, and lazy ones showed blank in full-page captures.
+const shotImg = (up, [f, w, h, alt]) => `<img src="${up}assets/shots/${f}-900.webp" srcset="${up}assets/shots/${f}-900.webp ${w > 900 ? 900 : w}w, ${up}assets/shots/${f}.webp ${w}w" sizes="(max-width: 640px) 92vw, (max-width: 1000px) 46vw, 560px" width="${w}" height="${h}" alt="${esc(alt)}" decoding="async">`;
 /** A small gallery; each picture opens bigger in the lightbox (no libraries). */
-const gallery = (id, up) => { const list = SHOTS[id]; if (!list) return ''; return `<section class="c gal-sec" id="screens"><span class="eyebrow">Screenshots</span><h2 class="h2">See it in use</h2>
-  <p class="sub">The real program, filled in with a made-up sample business. Click a picture to see it bigger.</p>
-  <div class="gal">${list.map((s) => `<figure${s[5] ? ` class="${s[5]}"` : ''}><button type="button" class="shot" data-full="${up}assets/shots/${s[0]}.webp" data-cap="${esc(s[4])}" aria-label="${esc(`See bigger: ${s[4]}`)}">${shotImg(up, s)}</button><figcaption>${esc(s[4])}</figcaption></figure>`).join('')}</div>
+const gallery = (id, up) => { const list = SHOTS[id]; if (!list) return ''; return `<section class="c blk gal-sec" id="screens">${shead('See it in use', 'The real program, filled in with a made-up sample business. Click a picture to see it bigger.', 'Screenshots')}
+  <div class="gal g${list.length % 3 ? 2 : 3}">${list.map((s) => `<figure${s[5] ? ` class="${s[5]}"` : ''}><button type="button" class="shot" data-full="${up}assets/shots/${s[0]}.webp" data-cap="${esc(s[4])}" aria-label="${esc(`See bigger: ${s[4]}`)}">${shotImg(up, s)}</button><figcaption>${esc(s[4])}</figcaption></figure>`).join('')}</div>
 </section>
 <dialog class="lightbox" id="lb" aria-label="Screenshot"><button type="button" class="lb-x" aria-label="Close">×</button><button type="button" class="lb-nav lb-prev" aria-label="Previous picture">‹</button><figure><img alt=""><figcaption></figcaption></figure><button type="button" class="lb-nav lb-next" aria-label="Next picture">›</button></dialog>
 <script>(function(){var d=document.getElementById('lb');if(!d||!d.showModal)return;var b=[].slice.call(document.querySelectorAll('.gal .shot')),i=0,im=d.querySelector('img'),cap=d.querySelector('figcaption');
@@ -467,38 +376,6 @@ const heroShot = (up) => `<div class="hshot">
   <div class="hfloat f1"><img src="${up}assets/apps/bookings.png" alt="" width="40" height="40"><div><small>Riyeser Bookings</small><b>Jo Smith · 10:00 today</b><span>Hot water service · Confirmed</span></div></div>
   <div class="hfloat f2"><img src="${up}assets/apps/invoices.png" alt="" width="40" height="40"><div><small>Riyeser Invoices</small><b>INV-1047 paid</b><span class="ok">$880.00 received</span></div></div>
 </div>`;
-// Real-life photos with little pop-ups from the programs (sample figures). One scene per program and industry.
-const SCENES = {
-  home: { img: 'team-workshop.webp', alt: 'Two people in a workshop checking their business on a laptop', pops: [
-    ['bookings', 'Riyeser Bookings', 'Jo Smith · 10:00 today', 'Hot water service · Confirmed', ''],
-    ['invoices', 'Riyeser Invoices', 'INV-1047 paid', '$880.00 received', 'ok'],
-    ['payroll', 'Riyeser Payroll', 'Pay run done', '4 staff · $6,240.50 net', '']] },
-  bookings: { img: 'team-site-plans.webp', alt: 'Two tradespeople on site checking the day\'s jobs on a tablet', pops: [
-    ['bookings', 'New job booked', 'Thu 7:30 · Lot 7 Hill Rd', 'Jordan · Hot water service', ''],
-    ['invoices', 'Job done', 'Invoice INV-1053 made', '$450.00 · sent to customer', 'ok']] },
-  invoices: { img: 'team-workshop.webp', alt: 'Two people in a workshop sending an invoice from a laptop', pops: [
-    ['invoices', 'Quote accepted', 'Q-0042 → INV-1054', 'Harbour Cafe · $1,320.00', ''],
-    ['invoices', 'Payment received', 'INV-1047 paid', '$880.00 · thank you sent', 'ok']] },
-  'accounting-basics': { img: 'team-warehouse.webp', alt: 'A shop owner packing orders next to a laptop', pops: [
-    ['accounting-basics', 'Stock received', '24 × Gift box (large)', 'Average cost updated', ''],
-    ['accounting-basics', 'Reorder alert', 'Packing tape is low', '6 left · reorder at 10', 'warn']] },
-  accounting: { img: 'team-office.webp', alt: 'A bookkeeper and a business owner going through the books on a laptop', pops: [
-    ['accounting', 'GST / BAS', 'BAS figures ready', 'Oct–Dec · G1, 1A and 1B worked out', ''],
-    ['accounting', 'Bank reconciled', 'Everything matched', '0 left to match · Nov', 'ok']] },
-  pos: { img: 'team-cafe.webp', alt: 'Two cafe owners checking the day\'s takings on a laptop', pops: [
-    ['pos', 'Riyeser POS', 'Sale · $14.50 · Card', 'Flat white, banana bread', ''],
-    ['bookings', 'Riyeser Bookings', 'Table 4 · 7:00 pm', '6 people · Confirmed', 'ok']] },
-  link: { img: 'team-site-laptop.webp', alt: 'A site supervisor and an electrician catching up with the team on a laptop', pops: [
-    ['link', '#jobs · Jordan Lee', 'Booking 12 done ✅', 'New unit installed and tested', ''],
-    ['link', 'Direct message · Sam', 'Can you approve timesheets?', 'Pay run goes tonight', '']] },
-  payroll: { img: 'team-site-laptop.webp', alt: 'A site supervisor and an electrician approving timesheets on a laptop', pops: [
-    ['payroll', 'Timesheets approved', 'Week ending 21 Nov', '4 staff · 152 hours', ''],
-    ['payroll', 'Pay run done', '$6,240.50 net', 'Payslips saved as PDFs', 'ok']] },
-};
-const photoPop = (key, up, cls = '') => { const sc = SCENES[key]; if (!sc) return ''; return `<div class="pscene ${cls}">
-  <img class="pscene-img" src="${up}assets/photos/${sc.img}" alt="${esc(sc.alt)}" width="1206" height="530"${cls === 'big' ? ' fetchpriority="high"' : ' loading="lazy"'}>
-  ${sc.pops.map(([app, k, b, sub, tone], i) => `<div class="hfloat pf${i + 1}"><img src="${up}assets/apps/${app}.png" alt="" width="40" height="40"><div><small>${esc(k)}</small><b>${esc(b)}</b><span class="${tone}">${esc(sub)}</span></div></div>`).join('')}
-</div>`; };
 const winFrame = (up, app, name, img, alt, w = 1400, h = 900) => `<div class="win"><div class="bar"><img src="${up}assets/${app === 'logo' ? 'logo-r.png' : `apps/${app}.png`}" alt="">${esc(name)}<span class="ctl">${svg('<path d="M5 12h14"/>')}${svg('<rect x="5" y="5" width="14" height="14" rx="1"/>')}${svg('<path d="M6 6l12 12M18 6L6 18"/>')}</span></div><img src="${up}assets/${img}" alt="${esc(alt)}" width="${w}" height="${h}"></div>`;
 /** Free programs, a heading, then the paid ones: grp(list, (items) => html, (title) => heading html). */
 const grouped = (list, wrap, head) => [[FREE_HEAD, list.filter((p) => p.free)], [PAID_HEAD, list.filter((p) => !p.free)]]
@@ -515,9 +392,42 @@ const plusLine = (p, up, asLink = false) => (!p.plus ? '' : asLink
   : `<span class="plusline" role="link" tabindex="0" data-href="${plusHref(p, up)}">★ <b>${esc(p.plus.name)}</b> available: ${esc(p.plus.line)}</span>`);
 /** A paid program's price, users included and extra-user price (all from PRICE). */
 const priceTag = (p) => `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(USERS_LINE)}`;
-/** A program's checklist with its price at the top (program pages). */
-const includedCard = (key, name, m, up) => `<div class="inclcard${m ? '' : ' free'}"><div class="ih"><b>${esc(name)}</b>${m ? priceBox(m) : '<div class="pricebox free"><div><b>Free forever</b></div><small>No time limit, no card, no user charges</small></div>'}</div>${inclList(key)}${m ? `${buyBtns(m)}<a class="more" href="${up}pricing.html">All prices ${ARR}</a>` : ''}</div>`;
-const progCard = (p, up) => `<a class="card" href="${up}programs/${p.id}.html">${badgeOf(p)}${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}</h3><p>${esc(p.card || p.one)}</p>${p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}${plusLine(p, up)}<span class="go">${ARR}</span></a>`;
+/** A section heading: optional eyebrow, the title and an optional one-line summary (the same on every section). */
+const shead = (title, sub = '', eyebrow = '') => `<div class="shead">${eyebrow ? `<span class="eyebrow">${esc(eyebrow)}</span>` : ''}<h2 class="h2">${esc(title)}</h2>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</div>`;
+const firstSentence = (t) => t.split(/(?<=\.)\s+/)[0];
+/** A checklist card (program pages). With m (a PRICE key) it shows that price and the buy buttons. */
+const includedCard = (key, name, m, up, cls = '') => `<div class="inclcard${cls ? ` ${cls}` : ''}"${m ? ` id="${key}"` : ''}><div class="ih"><b>${esc(name)}</b><span class="ihp">${m ? `<b>${usd(PRICE[m])}</b> /month` : '<b class="free">Free</b> forever'}</span></div>
+  <small class="ihq">${m ? `${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user · free for 90 days` : 'No time limit, no card, no user charges'}</small>${inclList(key)}${m ? buyBtns(m) : ''}</div>`;
+/** The price card at the top of a program page. */
+const heroPrice = (p, up) => { const m = MOD[p.id];
+  if (m) return `<div class="hprice"><div class="hp-main"><b>${usd(PRICE[m])}</b><span>/month per business</span></div>
+    <div class="hp-sub">${PRICE.users_included} users included · +${usd(PRICE.extra_user)} a month per extra user</div><div class="hp-sub ok">Free for 90 days, no card</div>${buyBtns(m)}</div>`;
+  const f = FREE_INFO[p.id] || {};
+  return `<div class="hprice free"><div class="hp-main"><b>Free</b><span>forever</span></div>
+    <div class="hp-sub">No time limit, no card, no user charges</div>${f.lim ? `<div class="hp-sub">Only limit: ${esc(f.lim)}</div>` : ''}${f.up ? `<div class="hp-sub">${esc(f.up)}</div>` : ''}${p.plus ? `<a class="hp-plus" href="#${p.plus.anchor}">★ <b>${esc(p.plus.name)}</b>: ${esc(p.plus.what)}, ${usd(PRICE[p.plus.module])}/month ${ARR}</a>` : ''}</div>`; };
+// "Works with" on each program page: only links the programs really have (checked against INCLUDES and the industry pages).
+const RELATED = {
+  central: [['accounting-basics', 'Money owed and overdue invoices on your home screen'], ['payroll', 'Your last pay run on your home screen'], ['desk-assistant', "Today's meetings and to-dos on your home screen"]],
+  invoices: [['accounting-basics', 'Opens the same company file when you need more'], ['bookings', 'Invoice a finished job in one click'], ['central', 'Your home screen for every program']],
+  'accounting-basics': [['pos', 'Till sales land as paid invoices'], ['payroll', 'Pay runs brought into your books'], ['bookings', 'Invoice a finished job in one click']],
+  accounting: [['pos', 'Till sales land as paid invoices'], ['bookings', 'Invoice a finished job in one click'], ['central', 'Money owed, on your home screen']],
+  pos: [['accounting-basics', 'Every sale lands as a paid invoice'], ['bookings', 'Customers shared with the till'], ['central', 'Your home screen for every program']],
+  bookings: [['invoices', 'Invoice a finished job in one click'], ['accounting-basics', 'Job invoices land in your books'], ['pos', 'Customers shared with the till']],
+  payroll: [['accounting-basics', 'Pay runs brought into your books'], ['central', 'Your last pay run on your home screen']],
+  'desk-assistant': [['central', "Today's meetings and to-dos on your home screen"], ['pdf', 'Fill in, sign and edit the PDFs it finds']],
+  link: [['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out'], ['bookings', 'Type Booking 12 and it stands out']],
+  pdf: [['desk-assistant', 'Sorts and finds your PDFs, even scanned ones'], ['central', 'Your home screen for every program']],
+};
+/** A program card: icon, name, one line, then the price and "Learn more" pinned to the bottom (every card the same height). */
+const progCard = (p, up) => `<a class="card pcard2" href="${up}programs/${p.id}.html">${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}</h3><p>${esc(p.card || p.one)}</p>
+<div class="cfoot"><span class="cp">${p.free ? '<b class="free">Free</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
+<small class="cq">${p.plus ? `<span class="plusq" role="link" tabindex="0" data-href="${plusHref(p, up)}">★ ${esc(p.plus.name)} available</span>` : p.free ? 'No time limit, no card' : `${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user`}</small></div></a>`;
+/** The last tile in each group, so the 3-column grid has no gaps: a quiet summary with a link to the prices. */
+const groupTile = (free, up) => free
+  ? `<a class="card ptile" href="${up}pricing.html"><b>Free, for good</b><p>No time limit, no card and no user charges. The only limit is Riyeser Link's ${STORAGE_GB.free} GB of chat file space.</p><span class="more">See every price ${ARR}</span></a>`
+  : `<a class="card ptile" href="${up}pricing.html#calc"><b>Free for 90 days, no card</b><p>Then one price per business, with ${PRICE.users_included} users included. Pay yearly and get 2 months free.</p><span class="more">Work out your price ${ARR}</span></a>`;
+/** Free programs, then paid ones, each in a 3-column grid (2 on tablets, 1 on phones). */
+const progGrid = (list, up, head = (t) => `<h3 class="ghead">${esc(t)}</h3>`) => grouped(list, (l) => `<div class="grid pgrid">${l.map((p) => progCard(p, up)).join('')}${l.length % 3 ? groupTile(l[0].free, up) : ''}</div>`, head);
 
 const more = (t) => `<span class="more">${t} ${ARR}</span>`;
 const badgeOf = (p) => p.free ? '<span class="badge free">Free forever</span>' : '<span class="badge">Free trial</span>';
@@ -601,21 +511,21 @@ const freeLine = 'Free download · no sign-up · no card · works offline';
 
 // Riyeser Accounting comes in two editions: one download, the licence decides which one you get.
 const EDITIONS = [
-  { name: 'Accounting Basics', price: usd(PRICE.basic), small: `a month per business · ${USERS_LINE}`, tag: 'Free for 90 days',
+  { name: 'Accounting Basics', m: 'basic', app: 'accounting-basics',
     blurb: 'Everything a small shop or sole trader needs to invoice and keep stock.',
     has: ['Quotes, invoices and receiving payments', 'Customers, suppliers and bills', 'Stock items, stocktake and reorder alerts',
       'Simple money in and money out', 'Works with Riyeser POS, the till app', 'Profit & Loss, GST summary, who owes you, sales and stock reports'] },
-  { name: 'Accounting Plus', price: usd(PRICE.plus), small: `a month per business · ${USERS_LINE} · Basics included`, tag: 'Free for 90 days',
+  { name: 'Accounting Plus', m: 'plus', app: 'accounting',
     blurb: 'Everything in Basics, plus the tools for full books.',
     has: ['Everything in Accounting Basics', 'Bank reconciliation and bank statement import', 'Payroll and pay runs',
       'General journal and search transactions', 'Jobs and budgets', 'Balance Sheet, Trial Balance and every report'] },
 ];
-const editionsBlock = (up, { download = true } = {}) => `
-<div class="plans eds">${EDITIONS.map((e, i) => `<div class="plan${i ? ' best' : ''}"><span class="tag">${esc(e.tag)}</span><div class="k">${appImg(i ? 'accounting' : 'accounting-basics', up)}${esc(e.name)}</div>
-  <div class="price">${esc(e.price)}<small> ${esc(e.small)}</small></div><p>${esc(e.blurb)}</p>
-  <ul class="edlist">${e.has.map((h) => `<li>${esc(h)}</li>`).join('')}</ul>${buyBtns(i ? 'plus' : 'basic')}</div>`).join('')}</div>
-<p class="sub" style="margin-top:16px">You pay for one or the other, never both: Plus includes everything in Basics, so moving up is ${usd(PRICE.plus - PRICE.basic)} a month more. Two separate apps that open the same books. Move up to Plus or back down to Basics any time: install the other one and it replaces the first, with all your customers, invoices and stock carried over. Plus-only records (payroll, journals, jobs, budgets) are kept safe in Basics and come back in Plus.</p>
-${download ? `<div class="ctas" style="justify-content:flex-start;margin-top:6px"><a class="btn s" href="${RELEASES}/RiyeserAccountingBasics-Setup.exe">${DL} Download Accounting Basics — 90 days free</a><a class="btn p" href="${RELEASES}/RiyeserAccountingPlus-Setup.exe">${DL} Download Accounting Plus — 90 days free</a></div>` : ''}`;
+/** The Accounting Basics / Plus comparison: two equal cards, each price on its own line, and a short note. */
+const editionsBlock = (up) => `
+<div class="plans eds">${EDITIONS.map((e, i) => `<div class="plan${i ? ' best' : ''}"><div class="k">${appImg(e.app, up)}<b>${esc(e.name)}</b><span class="badge${i ? '' : ' free'}">Free for 90 days</span></div>
+  <div class="price">${usd(PRICE[e.m])}<small> /month</small></div><div class="psub">per business · ${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user</div><p>${esc(e.blurb)}</p>
+  <ul class="edlist">${e.has.map((h) => `<li>${esc(h)}</li>`).join('')}</ul>${buyBtns(e.m)}</div>`).join('')}</div>
+<p class="ednote">You pay for one or the other, never both: Plus includes everything in Basics for ${usd(PRICE.plus - PRICE.basic)} a month more. Switch either way any time; your books carry over, and Plus-only records wait safely in Basics.</p>`;
 const ctaBlock = (up, title = 'Try Riyeser free', text = 'Download, install in one click, and keep everything on your own computer.') => `
 <section class="c" style="padding-bottom:0"><div class="cta"><h2>${title}</h2><p>${text}</p>
 <div class="ctas"><a class="btn t big" href="${up}downloads.html">${WINDL}</a><a class="btn glass big" href="${up}help.html">Help Centre</a></div>
@@ -643,8 +553,8 @@ ${homeHero(up)}
   <span class="eyebrow">Programs</span>
   <h2 class="h2">One home screen. Every program you need.</h2>
   <p class="sub">Start with Riyeser Central, then add the programs you use. They all show up in Central.</p>
-  ${grouped(PROGRAMS, (l) => `<div class="grid">${l.map((p) => progCard(p, up)).join('')}</div>`, (t) => `<h3 class="ghead">${esc(t)}</h3>`)}
-  <div class="grid" style="margin-top:20px"><a class="card" href="${up}help.html">${li('rocket')}<h3>Help Centre</h3><p>Plain-English, step-by-step guides for every program.</p><span class="go">${ARR}</span></a></div>
+  ${progGrid(PROGRAMS, up)}
+  <a class="hstrip" href="${up}help.html">${li('rocket')}<span><b>Help Centre</b><small>Plain-English, step-by-step guides for every program.</small></span><span class="more">Open the Help Centre ${ARR}</span></a>
 </section>
 
 <section class="band-hero" id="how" style="border-top:1px solid var(--line)"><div class="c">
@@ -684,9 +594,9 @@ page({
   path: 'programs.html', title: 'All programs — Riyeser', active: 'programs',
   description: `Every Riyeser program: Central, Invoices, Bookings, Riyeser Link, Accounting Basics, Accounting Plus, Payroll, Desk Assistant${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
   body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
-<section class="c" style="padding-top:44px">${grouped(PROGRAMS.filter((p) => p.id !== 'services'), (l) => `<div class="grid">${l.map((p) => progCard(p, up)).join('')}</div>`, (t) => `<h2 class="h2 ghead">${esc(t)}</h2>`)}</section>
-${ASBUILT ? `<section class="c" style="padding-top:0"><h2 class="h2">For the building industry</h2><p class="sub">A separate program for trades and construction, priced on its own.</p><div class="grid">${progCard(prog('services'), up)}</div></section>` : ''}
-<section class="c" style="padding-top:0"><h2 class="h2">Accounting Basics or Accounting Plus?</h2>${editionsBlock(up)}</section>
+<section class="c blk first">${progGrid(PROGRAMS.filter((p) => p.id !== 'services'), up, (t) => `<div class="shead small"><h2>${esc(t)}</h2></div>`)}</section>
+${ASBUILT ? `<section class="c blk">${shead('For the building industry', 'A separate program for trades and construction, priced on its own.')}<div class="grid pgrid">${progCard(prog('services'), up)}</div></section>` : ''}
+<section class="c blk" id="editions">${shead('Accounting Basics or Accounting Plus?', 'Two editions of the same books. Pick the one that fits today, and switch any time.', 'Accounting')}${editionsBlock(up)}</section>
 ${ctaBlock(up, 'Start with Riyeser Central', "It's the home screen for every program, and it keeps them all up to date.")}`,
 });
 
@@ -715,33 +625,31 @@ ${ctaBlock(up, `Try Riyeser for ${esc(ind.name.toLowerCase())}`, 'Download Riyes
 // ---------- As Built sign in (hands over to the real sign-in in the Services app) ----------
 // ---------- program pages ----------
 for (const p of PROGRAMS.filter((x) => !x.custom)) {
+  const m = MOD[p.id];
+  const rel = (RELATED[p.id] || []).map(([id, why]) => [prog(id), why]).filter(([o]) => o && PROGRAMS.includes(o));
   page({
     path: `programs/${p.id}.html`, title: `${p.name} — ${p.pitch}`, active: 'programs',
     description: `${p.name}: ${p.one}`,
     body: (up) => `
-<div class="hero"><div class="c">
+<div class="hero phero"><div class="c">
   <div>
-    <div class="phead-who" style="display:flex;align-items:center;gap:18px;margin-bottom:18px">${iconBox(p, up)}<div><span class="eyebrow" style="margin:0">${esc(p.name)}</span>${badgeOf(p)}${p.plus ? ` ${plusPill(p, up, true)}` : ''}</div></div>
-    <h1>${esc(p.pitch)}</h1><p class="lead">${esc(p.one)}</p>${MOD[p.id] ? priceBox(MOD[p.id]) + buyBtns(MOD[p.id], 'hero') : ''}${freeInfo(p.id, up)}
+    <div class="phead-who">${iconBox(p, up)}<div><span class="eyebrow">${esc(p.name)}</span>${badgeOf(p)}</div></div>
+    <h1>${esc(p.pitch)}</h1><p class="lead">${esc(firstSentence(p.one))}</p>
+    ${heroPrice(p, up)}
     <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
     ${p.file ? `<p class="fine">Windows 10 &amp; 11 · No account or card needed</p>` : ''}
   </div>
   ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : SHOTS[p.id] ? winFrame(up, p.id, p.name, `shots/${SHOTS[p.id][0][0]}.webp`, SHOTS[p.id][0][3], SHOTS[p.id][0][1], SHOTS[p.id][0][2]) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
 </div></div>
-${SCENES[p.id] ? `<section class="c scene-sec"><span class="eyebrow">In real life</span>${photoPop(p.id, up)}</section>` : ''}
-<section class="c incl-sec" id="included"><span class="eyebrow">What's included</span><h2 class="h2">What you get</h2>
-  <div class="inclgrid">${includedCard(p.id, p.name, MOD[p.id], up)}${p.plus ? includedCard(p.plus.anchor, p.plus.name, p.plus.module, up) : ''}</div>
+<section class="c blk" id="included">${shead('What you get', p.plus ? `${p.name} is free. ${p.plus.name} adds ${p.plus.what}.` : '', "What's included")}
+  ${p.plus ? `<div class="inclgrid two">${includedCard(p.id, p.name, null, up)}${includedCard(p.plus.anchor, p.plus.name, p.plus.module, up, 'plus')}</div>` : `<div class="inclcard wide">${inclList(p.id)}</div>`}
+  ${p.note ? `<p class="pnote">${esc(p.note)}</p>` : ''}
 </section>
 ${gallery(p.id, up)}
-${p.id.startsWith('accounting') ? `<section class="c" id="editions"><h2 class="h2">Accounting Basics or Accounting Plus</h2>${editionsBlock(up, { download: false })}</section>` : ''}
-<section class="c"${p.id.startsWith('accounting') ? ' style="padding-top:0"' : ''}><span class="eyebrow">Features</span><h2 class="h2">What it does</h2><p class="sub">${esc(p.one)}</p>
-  <div class="fgrid">${p.features.map(([h, t], i) => `<div class="f"><div class="fi">${i + 1}</div><h4>${esc(h)}</h4><p>${esc(t)}</p></div>`).join('')}</div>
-  ${p.shot2 ? `<div style="margin-top:40px">${winFrame(up, p.id, p.name, p.shot2, `${p.name} in dark mode`, 1440, 900)}</div>` : ''}
-  ${p.note ? `<p class="note" style="margin-top:28px">${esc(p.note)}</p>` : ''}
-</section>
-<section class="c" style="padding-top:0"><h2 class="h2">Works even better together</h2><p class="sub">Every Riyeser program shows up in Riyeser Central, your home screen for the whole business.</p>
-  <div class="grid three">${PROGRAMS.filter((o) => o.id !== p.id).slice(0, 3).map((o) => progCard(o, up)).join('')}</div>
-</section>
+${p.id.startsWith('accounting') ? `<section class="c blk" id="editions">${shead('Accounting Basics or Accounting Plus?', 'Two editions of the same books. Pick the one that fits today, and switch any time.', 'Compare')}${editionsBlock(up)}</section>` : ''}
+${rel.length ? `<section class="c blk">${shead('Works with', 'Every Riyeser program shows up in Riyeser Central, your home screen for the whole business.')}
+  <div class="wrow">${rel.map(([o, why]) => `<a href="${up}programs/${o.id}.html">${appImg(o.id, up)}<span><b>${esc(o.short === 'Central' ? 'Riyeser Central' : o.short)}</b><small>${esc(why)}</small></span>${ARR}</a>`).join('')}</div>
+</section>` : ''}
 ${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}`,
   });
 }

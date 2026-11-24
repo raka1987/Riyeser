@@ -71,7 +71,7 @@ const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
   await pg.click('#programs a.card[href$="programs/link.html"] .pluspill'); await pg.waitForURL(/pricing\.html#link-plus/);
   check(true, 'the ★ Plus marker on a card goes to pricing.html#link-plus');
   await pg.goto(`${BASE}/programs.html`);
-  const all = await ids('main .grid a.card');
+  const all = await ids('main .grid a.card[href*="programs/"]');
   check(all[0] === 'central' && freeFirst(all), `All programs: free first (${all.join(', ')})`);
   check(await pg.$eval('main a.card[href$="programs/link.html"]', (a) => !!a.querySelector('.pluspill') && a.textContent.includes('Riyeser Link Plus available')), 'All programs: ★ Plus and the Link Plus line on Riyeser Link');
   // the pill is readable: dark text on gold
