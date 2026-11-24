@@ -53,13 +53,19 @@ def test_stale_online_licence_stops_paid_work(tmp_path):
     assert licence.status(NOW, p, product="basic")["mode"] == "licensed"
 
 
-def test_without_an_online_section_nothing_changes(tmp_path):
+def test_without_an_online_section_nothing_changes(tmp_path, monkeypatch):
     start = (NOW - timedelta(days=10)).isoformat()
     p = write(tmp_path, {"trialStart": start})
     st = licence.status(NOW, p, product="pos")
     assert st == {"mode": "trial", "days_left": 80, "buy_url": licence.BUY_URL}
     assert licence.status(NOW, p) == st                                   # the old call still works
-    assert licence.status(NOW, str(tmp_path / "missing.json")) == {"mode": "unknown"}
+    # licence.json gone: the hidden marker in Accounting's own folder still knows when the trial started
+    assert licence.status(NOW, str(tmp_path / "missing.json")) == st
+    # a PC where no Riyeser program has ever started a trial (before licences are signed): nothing to show
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    monkeypatch.setenv("RIYESER_HOME", str(fresh / "home"))
+    assert licence.status(NOW, str(fresh / "missing.json")) == {"mode": "unknown"}
     p = write(tmp_path, {"trialStart": start, "key": "K", "licence": {"status": "active", "checkedAt": NOW.isoformat(), "extraCompanies": 2}})
     assert licence.status(NOW, p, product="basic")["mode"] == "licensed" and licence.company_allowance(NOW, p, product="basic") == 3
 

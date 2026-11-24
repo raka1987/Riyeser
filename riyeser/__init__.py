@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.9.1"
+__version__ = "2.9.2"
 
 
 def create_app(test_config=None):
@@ -123,8 +123,10 @@ def create_app(test_config=None):
             ent, basic = dbmod.EDITIONS["enterprise"]["title"], dbmod.EDITIONS["basic"]["title"]
             from .edition import app_edition
             if g.company["plus_locked"]:
-                flash(f"Your free trial has ended, so this {ent} screen needs a licence. Enter one in Riyeser Central "
-                      f"(Licence). Nothing has been removed. Or switch to the free {basic} under Setup.", "error")
+                from .plan import PRICES
+                flash(f"Your free trial has ended, so this {ent} screen is locked. Nothing has been removed: it's kept "
+                      f"safe, and invoices, customers, stock and reports still work. To unlock it, add {ent} from your "
+                      f"Riyeser home page ({PRICES['plus']}), or switch to the free {basic} under Setup.", "error")
                 return redirect(url_for("core.dashboard"))
             if g.company["edition"] == "basic":
                 if app_edition() == "basic":
@@ -207,6 +209,15 @@ def create_app(test_config=None):
         except Exception:
             return None
     app.jinja_env.globals["free_plan"] = free_plan
+
+    def locked_notice(product):
+        """For the "trial ended" banners: what's locked, what still works, the price and the Riyeser home button."""
+        from . import plan as P
+        try:
+            return P.locked_notice(product)
+        except Exception:
+            return None
+    app.jinja_env.globals["locked_notice"] = locked_notice
     from .edition import app_edition, download_url
     app.jinja_env.globals["app_edition"] = app_edition
     app.jinja_env.globals["edition_download"] = download_url

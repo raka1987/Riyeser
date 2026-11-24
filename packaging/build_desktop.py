@@ -32,6 +32,20 @@ APP_NAME = {"basics": "Riyeser Accounting Basics", "plus": "Riyeser Accounting P
 ICON = ROOT / "packaging" / f"{EDITION}.ico"
 built = PKG / "_built_edition.py"
 built.write_text(f'APP_EDITION = "{EDITION}"\n', encoding="utf-8")
+# The licence public key (Ed25519), so the app only trusts licences Riyeser signed (riyeser/signed_licence.py).
+# The release workflow fetches it from the licence function's /public-key. Without it (licence signing not switched on
+# yet) the app accepts unsigned licences, as before. It's a public key: nothing secret goes into the build.
+key_file = PKG / "_licence_key.py"
+LICENCE_KEY = os.environ.get("RIYESER_LICENCE_PUBLIC_KEY", "").strip()
+if LICENCE_KEY:
+    import base64
+    if len(base64.b64decode(LICENCE_KEY, validate=True)) != 32:
+        sys.exit("RIYESER_LICENCE_PUBLIC_KEY isn't an Ed25519 public key (32 bytes, base64).")
+    key_file.write_text(f'PUBLIC_KEY = "{LICENCE_KEY}"\n', encoding="utf-8")
+    print("Licence public key built in:", LICENCE_KEY)
+else:
+    key_file.unlink(missing_ok=True)
+    print("No licence public key: this build accepts unsigned licences (licence signing not switched on yet).")
 
 args = [
     str(ROOT / "packaging" / "riyeser_desktop.py"),
@@ -45,6 +59,9 @@ args = [
     "--hidden-import", "riyeser.demo_mode",
     "--hidden-import", "riyeser._built_edition",
     "--hidden-import", "riyeser.licence",
+    "--hidden-import", "riyeser.signed_licence",
+    "--hidden-import", "riyeser.ed25519",
+    *(["--hidden-import", "riyeser._licence_key"] if LICENCE_KEY else []),
     "--hidden-import", "riyeser.companies",
     "--hidden-import", "riyeser.archive",
     "--hidden-import", "riyeser.perms",
@@ -67,4 +84,5 @@ try:
     PyInstaller.__main__.run(args)
 finally:
     built.unlink(missing_ok=True)  # running from source stays "pick per company"
+    key_file.unlink(missing_ok=True)  # and accepts unsigned licences
 print("Built", APP_NAME, "into", ROOT / "dist")

@@ -8,3 +8,4 @@ dist/
 *.egg-info/
 .venv/
 _built_edition.py
+_licence_key.py

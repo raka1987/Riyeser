@@ -15,6 +15,10 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install ".[dev]"
       - run: pytest -q
+      # the licence function's signing code, with the same test vectors as Accounting, Central and Payroll
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: v2.x }
+      - run: deno test --allow-read supabase/functions/licence
 
   build:
     needs: test
@@ -34,6 +38,27 @@ jobs:
         with: { python-version: "3.12" }
       - name: Install
         run: pip install . pyinstaller
+      - name: Licence public key (from Riyeser's licence function; none until licence signing is switched on)
+        shell: bash
+        run: |
+          # A public key, so it's fine in logs. 404: the function isn't deployed yet, so this build accepts unsigned
+          # licences as before. Anything else that isn't a good key stops the build rather than ship without one.
+          url="https://goaugynxeatzqzifpoes.supabase.co/functions/v1/licence/public-key"
+          code=000
+          for i in 1 2 3 4; do
+            code=$(curl -sS -o "$RUNNER_TEMP/licence-key.json" -w '%{http_code}' "$url") || code=000
+            if [ "$code" != 000 ] && [ "${code:0:1}" != 5 ]; then break; fi
+            sleep 10
+          done
+          if [ "$code" = 200 ]; then
+            key=$(node -e "const k=String(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).public_key||'');if(Buffer.from(k,'base64').length!==32)process.exit(1);process.stdout.write(k)" "$RUNNER_TEMP/licence-key.json") || { echo "The licence function's public key isn't a valid Ed25519 key"; exit 1; }
+            echo "RIYESER_LICENCE_PUBLIC_KEY=$key" >> "$GITHUB_ENV"
+            echo "Licence public key built in: $key"
+          elif [ "$code" = 404 ]; then
+            echo "Licence signing isn't set up yet: building without a public key (unsigned licences still work)."
+          else
+            echo "Couldn't fetch the licence public key (HTTP $code). Try again."; exit 1
+          fi
       - name: Build
         run: python packaging/build_desktop.py --edition ${{ matrix.edition }}
       - name: Smoke test (Linux)
