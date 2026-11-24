@@ -72,7 +72,11 @@
       async aal() { return ok(await sb.auth.mfa.getAuthenticatorAssuranceLevel()); },
       async factors() { const f = ok(await sb.auth.mfa.listFactors()); return (f.totp || []).filter((x) => x.status === 'verified'); },
       async enrol() { const r = ok(await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Riyeser ' + new Date().toISOString().slice(0, 16) }));
-        return { id: r.id, qr: r.totp.qr_code, secret: r.totp.secret }; },
+        // Supabase gives the QR code either as a data: address or as raw SVG text; always hand back something an <img> can show
+        const q = String(r.totp.qr_code || '').trim();
+        const raw = q.startsWith('<') ? q : (/^data:image\/svg\+xml;[^,]*,\s*</.test(q) ? q.slice(q.indexOf(',') + 1).trim() : '');   // supabase-js adds a data: prefix without encoding the SVG
+        const qr = raw ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(raw) : q;
+        return { id: r.id, qr, secret: r.totp.secret }; },
       async verifyCode(factorId, code) { ok(await sb.auth.mfa.challengeAndVerify({ factorId, code })); },
       async unenrol(factorId) { ok(await sb.auth.mfa.unenroll({ factorId })); },
       async licence(ws) { return ok(await sb.rpc('company_licence', { ws })); },
@@ -442,7 +446,7 @@
     try { en = await api.enrol(); } catch (err) { alert(plainError(err)); return; }
     modal(`<h3>🔐 Turn on two-step sign-in</h3>
       <ol class="steps"><li>Install an authenticator app on your phone, such as <b>Microsoft Authenticator</b> or <b>Google Authenticator</b> (free).</li>
-      <li>In the app, add an account and <b>scan this code</b>:<div class="qr"><img src="${en.qr}" alt="QR code to scan"></div>
+      <li>In the app, add an account and <b>scan this code</b>:<div class="qr"><img src="${esc(en.qr)}" alt="QR code to scan"></div>
         <small class="muted">Can't scan? Type this key instead: <code>${esc(en.secret)}</code></small></li>
       <li>Type the <b>6 numbers</b> the app shows:</li></ol>
       <form id="vf"><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn" aria-label="6-number code">
