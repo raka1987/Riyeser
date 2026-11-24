@@ -568,3 +568,9 @@ section.finder { padding: 0; }
   .h3slide .hfloat b { font-size: 12.5px; } .h3slide .hfloat span, .h3slide .hfloat small { font-size: 10.5px; } .h3dots button span { display: none; } .h3dots button { padding: 8px; } }
 .hero3 { padding: 0; } .h3text > .ctas { max-width: none; }
 @media (max-width: 900px) { .hero3 { padding: 0; } }
+/* the banner photos change every 8 seconds with a slow zoom, so it always feels alive */
+.h3slide { transition: opacity 1.6s ease; }
+.h3slide > img { transform: scale(1.0); transition: transform 9.5s ease-out; }
+.h3slide.on > img { transform: scale(1.06); }
+.h3dots { gap: 6px; } .h3dots button { font-size: 12px; padding: 4px 10px 4px 8px; }
+@media (prefers-reduced-motion: reduce) { .h3slide > img, .h3slide.on > img { transition: none; transform: none; } }

@@ -278,7 +278,7 @@ function homeHero(up) {
 </section>
 <script>(function(){var r=document.querySelector('.hero3');if(!r)return;var s=r.querySelectorAll('.h3slide'),d=r.querySelectorAll('.h3dots button'),i=0,t=null;
 function go(n){s[i].classList.remove('on');d[i].classList.remove('on');d[i].setAttribute('aria-selected','false');i=(n+s.length)%s.length;s[i].classList.add('on');d[i].classList.add('on');d[i].setAttribute('aria-selected','true');}
-var still=matchMedia('(prefers-reduced-motion: reduce)').matches;function play(){if(!still&&!t)t=setInterval(function(){go(i+1)},6500);}function stop(){clearInterval(t);t=null;}
+var still=matchMedia('(prefers-reduced-motion: reduce)').matches;function play(){if(!still&&!t)t=setInterval(function(){go(i+1)},8000);}function stop(){clearInterval(t);t=null;}
 d.forEach(function(b){b.addEventListener('click',function(){stop();go(+b.dataset.go);});});r.addEventListener('mouseenter',stop);r.addEventListener('mouseleave',play);
 document.addEventListener('visibilitychange',function(){document.hidden?stop():play();});play();})();</script>`;
 }
