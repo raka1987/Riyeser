@@ -19,12 +19,17 @@ def setup_company():
         name = request.form.get("name", "").strip() or "My Company Pty Ltd"
         pw = request.form.get("password") or "admin"
         init_db(name, pw, request.form.get("edition"))
+        from .. import company_profile
+        prof = company_profile.read()
+        if prof and request.form.get("use_profile", "1") == "1":
+            company_profile.apply_to_new_file(get_db(), prof)
         if request.form.get("demo"):
             from ..demo import seed_demo
             seed_demo(get_db())
         flash("Company file created. Sign in as 'admin'.", "ok")
         return redirect(url_for("auth.login"))
-    return render_template("auth/setup.html")
+    from .. import company_profile
+    return render_template("auth/setup.html", profile=company_profile.read())
 
 
 @bp.route("/login", methods=["GET", "POST"])
