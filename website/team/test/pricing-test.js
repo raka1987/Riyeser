@@ -61,7 +61,7 @@ const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
   await pg.goto(`${BASE}/index.html`);
   const menu = await ids('.menu-pop.progs a:not(.all)');
   check(menu[0] === 'central' && freeFirst(menu) && menu.length >= 10, `menu: Central first, free before paid (${menu.join(', ')})`);
-  check(await pg.$eval('.menu-pop.progs', (m) => [...m.querySelectorAll('.mgrp')].map((x) => x.textContent).join(' | ')) === 'Free forever | Free for 90 days, then from US$25/month', 'menu: the two headings');
+  check(await pg.$eval('.menu-pop.progs', (m) => [...m.querySelectorAll('.mgrp')].map((x) => x.textContent).join(' | ')) === 'Free forever | Free for 90 days, then:', 'menu: the two headings');
   check(await pg.$eval('.menu-pop.progs a[href$="programs/link.html"]', (a) => !!a.querySelector('.pluspill') && a.querySelector('.pluspill').title.includes('US$39/month')), 'menu: ★ Plus next to Riyeser Link, with the price');
   const finder = await ids('#find .frow a');
   check(finder[0] === 'central' && freeFirst(finder), `finder: Central first, free before paid (${finder.join(', ')})`);
