@@ -40,7 +40,7 @@ jobs:
           $old = "$env:RUNNER_TEMP\RiyeserTeam-old.exe"
           Invoke-WebRequest "https://github.com/raka1987/Riyeser/releases/latest/download/RiyeserTeam-Setup.exe" -OutFile $old
           Start-Process -FilePath $old -ArgumentList "/S" -Wait
-          $oldEntry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Team*"
+          $oldEntry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object { $_.DisplayName -like "Riyeser Team*" -or $_.DisplayName -like "Riyeser Link [0-9]*" }
           if (-not $oldEntry) { throw "The released Riyeser Team didn't install" }
           Write-Host "Released copy installed first:" $oldEntry.DisplayName
           $oldExe = (Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Team.exe" | Select-Object -First 1).FullName
