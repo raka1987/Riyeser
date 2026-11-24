@@ -15,14 +15,18 @@ WARN_DAYS = 14      # remind people in the last two weeks of the trial
 WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices"), "bookings": ("booking", "bookings")}
 
 
-def _status():
+# Each app's paid actions and the licence module that unlocks them (riyeser/licence.py MODULES).
+MODULE = {"pos": "pos", "basic": "basic", "bookings": "bookings"}
+
+
+def _status(product=None):
     from .licence import status
-    return status()
+    return status(product=MODULE.get(product, product)) if product else status()
 
 
 def subscribed(product=None):
     """True when this computer has an active Riyeser licence (kept up to date by Riyeser Central)."""
-    return _status()["mode"] == "licensed"
+    return _status(product)["mode"] == "licensed"
 
 
 def used(db, product):
@@ -38,7 +42,7 @@ def used(db, product):
 
 def plan(db, product):
     """{'product', 'licensed', 'trial', 'left' (trial days left), 'limit' (trial length), 'used', 'locked', 'warn', 'one', 'many'}"""
-    st = _status()
+    st = _status(product)
     licensed = st["mode"] == "licensed"
     # No licence file yet (Riyeser Central not installed or not opened): treat it as the start of the trial.
     trial = st["mode"] in ("trial", "unknown")
@@ -51,5 +55,11 @@ def plan(db, product):
 
 def capped_message(product):
     _, many = WHAT[product]
+    st = _status(product)
+    if st.get("stale"):
+        return st["message"]
+    if st.get("source") == "online":
+        return (f"This program isn't part of your Riyeser plan right now, so new {many} are paused. "
+                "Contact Riyeser or update your plan, then open Riyeser Central. Nothing has been deleted.")
     return (f"Your {TRIAL_DAYS}-day free trial has ended. Enter a Riyeser licence in Riyeser Central to keep adding "
             f"{many}. Nothing has been deleted.")
