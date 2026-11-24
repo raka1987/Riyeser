@@ -23,8 +23,8 @@
   const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']];
   const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
   // List prices: US dollars a month per business (the same as riyeser_price() in team-chat.sql and website/prices.mjs).
-  // Each paid program includes 3 users, then US$5 a month each for that program; Plus includes Basics (never both).
-  const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 5, extra_company: 10 };
+  // Each paid program includes 3 users, then US$8 a month each for that program; Plus includes Basics (never both).
+  const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 8, extra_company: 10 };
   const GB = 1073741824;
   const gbText = (n) => { const g = Number(n || 0) / GB; return `${g >= 10 || Number.isInteger(g) ? Math.round(g) : g.toFixed(1)} GB`; };
   const money = (n) => 'US$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
@@ -654,7 +654,7 @@
           trials_ending: ending,
           conversion: MODULES.map(([m]) => { const [p30, e30] = conv(30)(m); const [p90, e90] = conv(90)(m); return { module: m, paid_30: p30, ended_30: e30, paid_90: p90, ended_90: e90 }; }),
           revenue_by_month: months.map((ms) => { const me2 = mEnd(ms); const per = {}; paidRows.filter((r) => r.since <= me2 && r.until >= ms).forEach((r) => { per[r.ws] = (per[r.ws] || 0) + 1; });
-            const est = Object.entries(per).reduce((a, [ws, n]) => { const pl = plans[ws] || {}; let v = n * 20 + (pl.extra_users || 0) * 5 + (pl.extra_companies || 0) * 10; if (pl.billing === 'yearly') v *= 10 / 12; if (pl.early_bird) v *= 0.5; return a + v; }, 0);
+            const est = Object.entries(per).reduce((a, [ws, n]) => { const pl = plans[ws] || {}; let v = n * 20 + (pl.extra_users || 0) * PRICE.extra_user + (pl.extra_companies || 0) * 10; if (pl.billing === 'yearly') v *= 10 / 12; if (pl.early_bird) v *= 0.5; return a + v; }, 0);
             return { month: ms, estimate: Math.round(est * 100) / 100, paying: Object.keys(per).length, new_paid: paidRows.filter((r) => r.since >= ms && r.since <= me2).length,
               lost: paidRows.filter((r) => r.until >= ms && r.until <= me2 && r.until < td).length }; }),
           revenue_by_program: MODULES.map(([m]) => { const n = cos.filter((c) => L[c.id].modules[m].status === 'active').length; return { module: m, paying: n, estimate: n * 20 }; }).sort((a, b) => b.paying - a.paying),
