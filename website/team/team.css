@@ -230,3 +230,11 @@ a { color: var(--blue); }
 #app.home { height: auto; min-height: 100vh; min-height: 100dvh; }
 .hteam { grid-column: 1 / -1; } .hbtns { display: flex; flex-direction: column; gap: 6px; } .hbtns .btn { justify-content: center; white-space: nowrap; }
 @media (max-width: 700px) { .hteam { flex-wrap: wrap; } .hbtns { flex-direction: row; width: 100%; } .hbtns .btn { flex: 1; } }
+
+.kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.kind { position: relative; border: 1.5px solid var(--line); border-radius: 12px; padding: 12px; cursor: pointer; background: #fff; }
+.kind input { position: absolute; opacity: 0; pointer-events: none; } .kind b { display: block; color: var(--ink); } .kind small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 3px; line-height: 1.35; }
+.kind:has(input:checked) { border-color: var(--brand); background: var(--brand-l); box-shadow: 0 0 0 2px rgba(31, 98, 240, .15); }
+.kind:has(input:focus-visible) { outline: 3px solid rgba(31, 98, 240, .35); }
+@media (max-width: 420px) { .kinds { grid-template-columns: 1fr; } }
+.fhint { display: block; color: var(--muted); font-size: 12.5px; margin-top: 4px; }

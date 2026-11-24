@@ -545,6 +545,12 @@ grant select, delete on public.devices to authenticated;
 revoke all on public.join_requests, public.devices from anon;
 
 -- A new company: the team (with Head office on 100), its profile and Company ID. Joining it needs approval.
+-- Who it's for: 'personal' (just me: an individual, freelancer or sole trader) or 'business' (a family business or a team).
+alter table public.workspaces add column if not exists kind text not null default 'business';
+do $$ begin
+  alter table public.workspaces add constraint workspaces_kind check (kind in ('personal', 'business'));
+exception when duplicate_object then null; end $$;
+
 create or replace function public.create_company(company_name text, your_name text, profile jsonb) returns json
   language plpgsql security definer set search_path = public as $$
 declare ws uuid; pr jsonb := coalesce(profile, '{}'::jsonb);
@@ -553,7 +559,8 @@ begin
   update workspaces set require_approval = true, company_code = coalesce(company_code, make_company_code()),
     legal_name = nullif(trim(pr->>'legal_name'), ''), tax_number = nullif(trim(pr->>'tax_number'), ''),
     address = nullif(trim(pr->>'address'), ''), phone = nullif(trim(pr->>'phone'), ''),
-    email = nullif(trim(pr->>'email'), ''), country = nullif(trim(pr->>'country'), '')
+    email = nullif(trim(pr->>'email'), ''), country = nullif(trim(pr->>'country'), ''),
+    kind = case when pr->>'kind' = 'personal' then 'personal' else 'business' end
   where id = ws;
   update members set job_role = 'owner' where workspace_id = ws and user_id = auth.uid();
   return json_build_object('workspace_id', ws, 'company_code', (select company_code from workspaces where id = ws));
@@ -572,7 +579,8 @@ begin
     phone = case when pr ? 'phone' then nullif(trim(pr->>'phone'), '') else phone end,
     email = case when pr ? 'email' then nullif(trim(pr->>'email'), '') else email end,
     country = case when pr ? 'country' then nullif(trim(pr->>'country'), '') else country end,
-    require_approval = coalesce((pr->>'require_approval')::boolean, require_approval)
+    require_approval = coalesce((pr->>'require_approval')::boolean, require_approval),
+    kind = case when pr->>'kind' in ('personal', 'business') then pr->>'kind' else kind end
   where id = ws;
 end $$;
 

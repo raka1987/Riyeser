@@ -41,7 +41,11 @@
       async resetPassword(email) { return ok(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })); },
       async signOut() { if (sub) sb.removeChannel(sub); await sb.auth.signOut(); },
       async teams(uid) {
-        const rows = ok(await sb.from('members').select('role, job_role, display_name, workspaces(id, name, invite_code, company_code, legal_name, tax_number, address, phone, email, country, require_approval)').eq('user_id', uid));
+        const cols = 'id, name, invite_code, company_code, legal_name, tax_number, address, phone, email, country, require_approval';
+        // 'kind' (just me / business) arrived later: still works on a database that hasn't been updated yet
+        let res = await sb.from('members').select(`role, job_role, display_name, workspaces(${cols}, kind)`).eq('user_id', uid);
+        if (res.error) res = await sb.from('members').select(`role, job_role, display_name, workspaces(${cols})`).eq('user_id', uid);
+        const rows = ok(res);
         return rows.filter((r) => r.workspaces).map((r) => ({ ...r.workspaces, role: r.role, jobRole: r.job_role, myName: r.display_name }));
       },
       async createTeam(name, you, profile) { return ok(await sb.rpc('create_company', { company_name: name, your_name: you, profile: profile || {} })); },
@@ -268,7 +272,7 @@
       <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${mode !== 'reset' ? `<div class="gtabs" role="tablist"><button type="button" role="tab" data-go="in" class="${mode === 'in' ? 'on' : ''}" aria-selected="${mode === 'in'}">Sign in</button><button type="button" role="tab" data-go="up" class="${mode === 'up' ? 'on' : ''}" aria-selected="${mode === 'up'}">Create account</button></div>` : ''}
       <h1>${mode === 'up' ? 'Create your Riyeser account' : mode === 'reset' ? 'Reset your password' : 'Sign in to Riyeser'}</h1>
-      <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. One account for your company and every Riyeser program. Use your work email.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for your company, your team and all your Riyeser programs.'}</p>
+      <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. One account for you, your business and every Riyeser program.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for you, your business and all your Riyeser programs.'}</p>
       ${note}
       <label class="f"><span>Email</span><input type="email" name="email" autocomplete="email" required></label>
       ${mode !== 'reset' ? `<label class="f"><span>Password</span><input type="password" name="password" minlength="8" autocomplete="${mode === 'up' ? 'new-password' : 'current-password'}" required></label>` : ''}
@@ -298,22 +302,20 @@
   function setupTeam(note = '', mode = params.get('join') ? 'join' : 'new') {
     const join = params.get('join') || '';
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
-    const newForm = `<form id="cf"><h1>Set up your company</h1><p>Your company gets its own Company ID. Your staff and branches use it to join you, and every Riyeser program on your PCs links to it.</p>
-        <label class="f"><span>Business name</span><input name="team" required maxlength="80" placeholder="e.g. Sample Plumbing"></label>
-        <label class="f"><span>Legal name (optional)</span><input name="legal_name" maxlength="120"></label>
-        <label class="f"><span>ABN / TIN (optional)</span><input name="tax_number" maxlength="40"></label>
+    const newForm = `<form id="cf"><h1>A few details</h1><p>Nearly done. This is how you'll appear in Riyeser.</p>
+        <label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>
+        <label class="f"><span>Business name (optional)</span><input name="team" maxlength="80" placeholder="Only if you have one"><small class="fhint">You can add it, and your ABN or TIN, later.</small></label>
         <label class="f"><span>Country</span><select name="country"><option>Fiji</option><option>Australia</option><option>New Zealand</option><option>Other</option></select></label>
-        <label class="f"><span>Your name</span><input name="you" required maxlength="60"></label>
-        <button class="btn p w">Create my company</button></form>
-      <div class="or">Already work somewhere that uses Riyeser?</div>
-      <button type="button" class="btn w" id="tojoin">Join an existing company</button>`;
-    const joinForm = `<form id="jf"><h1>Join an existing company</h1><p>Enter the Company ID (like RIY-7K3M-Q2) or your branch's code. You'll get it from your manager. Someone at the company approves you, then you're in.</p>
-        <label class="f"><span>Company ID or branch code</span><input name="code" value="${esc(join)}" required autocapitalize="characters" placeholder="RIY-…"></label>
-        <label class="f"><span>Your name, as the company will see it</span><input name="you" required maxlength="60"></label>
+        <button class="btn p w">Finish signing up</button></form>
+      <div class="or">Joining someone else's business?</div>
+      <button type="button" class="btn w" id="tojoin">Join with their code</button>`;
+    const joinForm = `<form id="jf"><h1>Join someone's business</h1><p>Enter the code they gave you (like RIY-7K3M-Q2). They approve you, then you're in.</p>
+        <label class="f"><span>Their code</span><input name="code" value="${esc(join)}" required autocapitalize="characters" placeholder="RIY-…"></label>
+        <label class="f"><span>Your name, as they'll see it</span><input name="you" required maxlength="60"></label>
         <label class="f"><span>A note for them (optional)</span><input name="note" maxlength="300" placeholder="e.g. New at the Lautoka front desk"></label>
         <button class="btn p w">Ask to join</button></form>
-      <div class="or">Setting up your own business?</div>
-      <button type="button" class="btn w" id="tonew">Set up a new company</button>`;
+      <div class="or">Not joining anyone?</div>
+      <button type="button" class="btn w" id="tonew">Set up my own account</button>`;
     $app.innerHTML = `<div class="gate"><div class="gcard">
       <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${note}${mode === 'join' ? joinForm : newForm}
@@ -329,7 +331,9 @@
     };
     const cf = $app.querySelector('#cf'); if (cf) cf.onsubmit = async (e) => {
       e.preventDefault(); const f = new FormData(e.target);
-      try { await api.createTeam(String(f.get('team')), String(f.get('you')), { legal_name: f.get('legal_name'), tax_number: f.get('tax_number'), country: f.get('country') });
+      // Everyone starts as an individual; a business name makes it a business account.
+      const you = String(f.get('you')).trim(); const biz = String(f.get('team') || '').trim(); const kind = biz ? 'business' : 'personal';
+      try { await api.createTeam(biz || you, you, { kind, country: f.get('country') });
         history.replaceState(null, '', location.pathname); await start(); if (S.team) companyInfo(true); } catch (err) { fail(err); }
     };
     $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
@@ -639,6 +643,7 @@
   async function renderHome() {
     tabIcon(false); document.title = 'Riyeser';
     const admin = isAdmin(); const t = S.team; const me = S.people.find((p) => p.user_id === S.user.id) || {};
+    const solo = t.kind === 'personal'; const team = !solo || S.people.length > 1 || S.requests.length > 0;
     if (S.homeLic === undefined || S.homeLicFor !== t.id) { S.homeLicFor = t.id; S.homeLic = admin ? await api.licence(t.id).catch(() => null) : null; }
     const lic = S.homeLic && S.homeLic.modules ? S.homeLic : null;
     const unread = Object.values(S.unread || {}).reduce((a, b) => a + (b || 0), 0);
@@ -650,12 +655,12 @@
       <main class="hmain">
         <h1>Welcome${me.display_name ? ', ' + esc(me.display_name.split(' ')[0]) : ''}</h1>
         ${needs2step() ? '<button class="hnag" id="hmfa">🔐 Turn on <b>two-step sign-in</b> to approve people and change access. It takes 2 minutes.</button>' : ''}
-        <section class="hco"><div><small>Your company</small><h2>${esc(t.name)}</h2>
-          <div class="cid"><small>Company ID</small><span class="code">${esc(t.company_code || '')}</span><button class="btn sm" id="hcp">Copy</button></div>
-          <p class="muted small">Staff and branches use this ID to ask to join. Every Riyeser program on your PCs links with it.</p>
-          <dl class="hkv">${[['Legal name', t.legal_name], ['ABN / TIN', t.tax_number], ['Address', t.address], ['Phone', t.phone], ['Email', t.email], ['Country', t.country]]
+        <section class="hco"><div><small>${solo ? 'Your account' : 'Your business'}</small><h2>${esc(t.name)}</h2>
+          <div class="cid"><small>${solo ? 'Your Riyeser ID' : 'Business ID'}</small><span class="code">${esc(t.company_code || '')}</span><button class="btn sm" id="hcp">Copy</button></div>
+          <p class="muted small">${solo ? 'Your Riyeser programs link to your account with this ID. If someone helps you later, they can use it to join you.' : 'The people who help you use this ID to join. Every Riyeser program on your PCs links with it.'}</p>
+          <dl class="hkv">${[...(solo ? [] : [['Legal name', t.legal_name]]), ['ABN / TIN', t.tax_number], ['Address', t.address], ['Phone', t.phone], ['Email', t.email], ['Country', t.country]]
             .map(([k, v]) => `<dt>${k}</dt><dd>${v ? esc(v) : `<span class="muted">${admin ? 'Not added yet' : '—'}</span>`}</dd>`).join('')}</dl></div>
-          <div class="hacts"><button class="btn" id="hco">✏️ ${admin ? 'Edit company details' : 'Company details'}</button>${admin ? `<button class="btn" id="hppl">👥 People · ${S.people.length}</button>
+          <div class="hacts"><button class="btn" id="hco">✏️ ${admin ? (solo ? 'Edit my details' : 'Edit business details') : 'Business details'}</button>${admin && team ? `<button class="btn" id="hppl">👥 People · ${S.people.length}</button>
           <button class="btn" id="hreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button class="btn" id="hhist">🕘 History</button>` : ''}
           <button class="btn" id="hsec">🔐 Security</button></div></section>
         ${lic ? `<h3 class="hsec">Your plan <small>${lic.seats ? `${lic.seats.used} of ${lic.seats.included + lic.seats.extra} people included${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}To change your plan, contact Riyeser.</small></h3>
@@ -663,7 +668,7 @@
           .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
         <h3 class="hsec">Riyeser Team</h3>
         <div class="happs"><div class="happ hteam"><img src="/assets/apps/team.png" alt=""><div><b>Riyeser Team${unread ? ` <span class="badge">${unread}</span>` : ''}</b>
-          <small>Chat with your staff and branches. Calls between branches and extensions come with Team Chat Plus.</small>
+          <small>Chat with the people you work with. Calls between you, your staff and other locations come with Team Chat Plus.</small>
           <span class="pl ok">Chat: free forever</span> ${calls ? licLine(lic, 'calls').replace('>Free trial', '>Calls: free trial').replace('>Paid', '>Calls: paid').replace('>Not active', '>Calls: not active') : '<span class="pl">Calls: free for 90 days</span>'}</div>
           <div class="hbtns"><button class="btn p sm" id="hchat">Open</button><a class="btn sm" href="${REL}RiyeserTeam-Setup.exe">⬇ Download for Windows</a></div></div></div>
         <h3 class="hsec">Programs for your PC <small>Start with Riyeser Central: it installs and updates the rest.</small></h3>
