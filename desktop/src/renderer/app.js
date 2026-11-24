@@ -3,6 +3,19 @@ const $ = (s, el = document) => el.querySelector(s);
 const page = $('#page');
 const bridge = window.api;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// A yes/no box drawn in the page. Browser confirm() boxes can leave Windows unable to type into the window afterwards.
+function askYes(text, ok = 'Yes') {
+  return new Promise((resolve) => {
+    const d = document.createElement('dialog');
+    d.style.cssText = 'border:0;border-radius:14px;padding:20px 22px;max-width:440px;box-shadow:0 20px 50px rgba(0,0,0,.35);font:inherit';
+    d.innerHTML = `<p style="margin:0 0 16px;white-space:pre-line;line-height:1.45">${esc(text)}</p><div style="display:flex;gap:8px;justify-content:flex-end"><button value="no">Cancel</button><button value="yes" style="font-weight:700">${esc(ok)}</button></div>`;
+    let yes = false;
+    d.addEventListener('click', (e) => { const b = e.target.closest('button[value]'); if (b) { yes = b.value === 'yes'; d.close(); } });
+    d.addEventListener('close', () => { d.remove(); resolve(yes); });
+    document.body.appendChild(d); d.showModal(); d.querySelector('button[value="no"]').focus();
+  });
+}
 const fmtTime = (d) => new Date(d).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const fmtDay = (d) => new Date(d).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
 const fmtSize = (b) => b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1e3))} KB`;
@@ -928,7 +941,7 @@ const actions = {
   cleantrash: async () => {
     const paths = [...cleanSel];
     const size = cleanup.items.filter((i) => cleanSel.has(i.path)).reduce((n, i) => n + i.size, 0);
-    if (!confirm(`Move ${paths.length} item(s) (${fmtSize(size)}) to the Recycle Bin?\n\nYou can restore them from the Recycle Bin if you change your mind.`)) return;
+    if (!(await askYes(`Move ${paths.length} item(s) (${fmtSize(size)}) to the Recycle Bin?\n\nYou can restore them from the Recycle Bin if you change your mind.`, 'Move to Recycle Bin'))) return;
     const r = await bridge.call('cleanup:trash', paths);
     cleanup.items = cleanup.items.filter((i) => !r.done.includes(i.path));
     cleanSel = new Set();

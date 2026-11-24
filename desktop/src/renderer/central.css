@@ -257,3 +257,8 @@ body.demo .app { height: calc(100vh - 40px); }
 
 /* yes/no questions (askConfirm) */
 .askbody { padding: 22px 24px 20px; } .askbody h2 { margin: 0 0 8px; font-size: 19px; } .askbody p { margin: 0 0 16px; color: var(--muted); line-height: 1.5; }
+
+.acct { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; background: rgba(255,255,255,.08); font-size: 12.5px; line-height: 1.4; }
+.acct .acct-who { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct button { margin-top: 4px; }
+.acct .acct-in { background: #fff; color: #0f2150; border: 0; border-radius: 8px; padding: 5px 12px; font-weight: 700; cursor: pointer; }

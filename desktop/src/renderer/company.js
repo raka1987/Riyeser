@@ -20,7 +20,7 @@ const formData = (f) => Object.fromEntries([...new FormData(f).entries()].map(([
 // A password box with an eye button to see what was typed, and a Caps Lock warning under it.
 const pwField = (n, label, auto) => `<label class="wf"><span>${label}</span><span class="pwwrap"><input name="${n}" type="password" minlength="8" required autocomplete="${auto}" spellcheck="false"><button type="button" class="pweye" data-pweye aria-label="Show password" title="Show password">👁</button></span></label>`;
 
-async function coLoad() { CO.state = await bridge.call('company:get'); return CO.state; }
+async function coLoad() { CO.state = await bridge.call('company:get'); try { renderAcct(); } catch { /* sidebar not drawn yet */ } return CO.state; }
 
 // ---------------------------------------------------------------- the wizard
 function wiz(html) {
@@ -311,7 +311,14 @@ function renderCoBar() {
   bar.hidden = !show;
   if (show) bar.innerHTML = `<span style="font-size:24px">🔗</span><div class="grow"><b>This PC was unlinked from ${esc(s.company.name)}</b><div class="lbl">An admin removed it, or you left the company. Everything on this PC is still here.</div></div><button class="go" data-w="restart">Set up or join a business</button>`;
 }
-function afterChange() { renderCompany(); renderCoBar(); if (typeof renderNav === 'function') renderNav(); }
+// The bottom of the sidebar always says who's signed in, with a Sign in / Sign out button.
+function renderAcct() {
+  const el = $('#acct'); if (!el) return; const s = CO.state || {};
+  el.innerHTML = s.signedIn
+    ? `<span class="acct-who">👤 Signed in as <b>${esc(s.signedIn)}</b></span> <button data-w="signout">Sign out</button>`
+    : `<span class="acct-who">👤 Not signed in</span> <button class="acct-in" data-w="link">Sign in</button>`;
+}
+function afterChange() { renderAcct(); renderCompany(); renderCoBar(); if (typeof renderNav === 'function') renderNav(); }
 
 // After leaving demo mode, for someone who never set up a company: the normal set-up.
 async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state.skipped && !CO.state.pendingJoin && !CO.state.signedOut) { CO.first = false; showChoice(); } }
@@ -321,7 +328,7 @@ async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state
 (async () => {
   try {
     const s = await coLoad();
-    renderCompany(); renderCoBar();
+    renderCompany(); renderCoBar(); renderAcct();
     let demo = null; try { demo = await bridge.call('demo:get'); } catch { /* normal mode */ }
     const first = window.RiyeserDemo.firstScreen(s, demo);
     if (first === 'waiting') { showWaiting(s.pendingJoin.company_name); checkJoin(true); }
@@ -329,6 +336,6 @@ async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state
     else if (first === 'signedout') { if (typeof setView === 'function') setView('company'); }   // never the first-run choice again
     else if (s.company && s.company.mode === 'online') { await bridge.call('company:checkLinked').catch(() => null); await coLoad(); renderCoBar(); }
   } catch { /* the rest of Central works without it */ }
-  setInterval(async () => { try { await bridge.call('company:checkLinked'); await coLoad(); renderCoBar(); } catch { /* offline */ } }, 24 * 3600 * 1000);
+  setInterval(async () => { try { await bridge.call('company:checkLinked'); await coLoad(); renderCoBar(); renderAcct(); } catch { /* offline */ } }, 24 * 3600 * 1000);
 })();
 window.RiyeserCompany = { renderCompany, showChoice, showStart, offerSetup, state: () => CO.state };

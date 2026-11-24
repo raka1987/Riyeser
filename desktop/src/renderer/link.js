@@ -2,6 +2,19 @@
 const api = window.api; const T = window.LinkText;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// A yes/no box drawn in the page. Browser confirm() boxes can leave Windows unable to type into the window afterwards.
+function askYes(text, ok = 'Yes') {
+  return new Promise((resolve) => {
+    const d = document.createElement('dialog');
+    d.style.cssText = 'border:0;border-radius:14px;padding:20px 22px;max-width:440px;box-shadow:0 20px 50px rgba(0,0,0,.35);font:inherit';
+    d.innerHTML = `<p style="margin:0 0 16px;white-space:pre-line;line-height:1.45">${esc(text)}</p><div style="display:flex;gap:8px;justify-content:flex-end"><button value="no">Cancel</button><button value="yes" style="font-weight:700">${esc(ok)}</button></div>`;
+    let yes = false;
+    d.addEventListener('click', (e) => { const b = e.target.closest('button[value]'); if (b) { yes = b.value === 'yes'; d.close(); } });
+    d.addEventListener('close', () => { d.remove(); resolve(yes); });
+    document.body.appendChild(d); d.showModal(); d.querySelector('button[value="no"]').focus();
+  });
+}
 let S = null; let shown = {}; let busy = false; let hand = null;   // hand: Set up a phone by hand (Phones tab): { ext, details, reveal }
 
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 3500); }
@@ -151,11 +164,11 @@ document.addEventListener('click', async (e) => {
   if (d.reset) { const m = await safe(() => api.call('link:resetPassword', d.reset)); if (m) { if (shown[d.reset]) shown[d.reset] = { ...m, reveal: true };
     if (hand && hand.ext === d.reset) hand = { ext: d.reset, details: m, reveal: true }; renderPeople(); renderHand(); toast('New password made.'); } return; }
   if (d.tab) { showTab(d.tab); return; }
-  if (d.remove) { if (confirm('Take this person off the phones? Their call history stays.')) { await safe(() => api.call('link:removePerson', d.remove)); load(); } return; }
+  if (d.remove) { if (await askYes('Take this person off the phones? Their call history stays.', 'Take them off')) { await safe(() => api.call('link:removePerson', d.remove)); load(); } return; }
   if (d.give) { const ext = document.querySelector(`select[data-found="${d.give}"]`).value; if (!ext) { toast('Choose who the phone is for.'); return; }
     if (await safe(() => api.call('link:assign', d.give, ext))) toast('Done. The phone sets itself up in a minute. If it doesn\'t, restart it.'); load(); return; }
   if (d.ignore) { await safe(() => api.call('link:ignore', d.ignore)); load(); return; }
-  if (d.unassign) { if (confirm('Stop giving this phone its settings? It keeps what it has until it\'s reset. To lock it out, make a new password for its person.')) { await safe(() => api.call('link:unassign', d.unassign)); load(); } return; }
+  if (d.unassign) { if (await askYes('Stop giving this phone its settings? It keeps what it has until it\'s reset. To lock it out, make a new password for its person.')) { await safe(() => api.call('link:unassign', d.unassign)); load(); } return; }
   const a = d.a; if (!a) return;
   b.disabled = true;
   try {

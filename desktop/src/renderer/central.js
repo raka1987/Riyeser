@@ -434,7 +434,7 @@ async function freshBringBack() {
     <button data-fresh="cancel" style="margin-top:6px">Cancel</button><p id="freshmsg" class="bad" style="font-size:13px;margin:8px 0 0" hidden></p>`;
 }
 async function freshRestore(id) {
-  if (!confirm('Bring this back? What Riyeser has saved now is put away first, and Riyeser Central restarts.')) return;
+  if (!(await askConfirm({ title: 'Bring this back?', body: 'What Riyeser has saved now is put away first, and Riyeser Central restarts.', ok: 'Bring it back' }))) return;
   const r = await bridge.call('fresh:bringBack', id);
   if (!r.ok) { const m = $('#freshmsg'); if (m) { m.hidden = false; m.textContent = r.message; } return; }
   $('#freshstep').innerHTML = '<p style="font-size:13px;margin:0"><b>Brought back.</b> Riyeser Central is restarting…</p>';
@@ -533,7 +533,7 @@ document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-demo]'); if (!b) return;
   const a = b.dataset.demo; const T = window.RiyeserDemo.TEXT;
   if (a === 'try') safe(startDemo);
-  if (a === 'leave') { if (confirm(T.confirmLeave)) safe(() => leaveDemo(false)); }
+  if (a === 'leave') safe(async () => { if (await askConfirm({ title: 'Leave demo mode?', body: T.confirmLeave, ok: 'Leave demo mode' })) await leaveDemo(false); });
   if (a === 'retry') safe(() => leaveDemo(true));
 });
 
@@ -603,7 +603,7 @@ document.addEventListener('click', (e) => {
   if (a === 'buy') safe(() => bridge.call('central:buy'));
   if (a === 'refresh') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceRefresh'); renderLicence(); if (lic && lic.online) openPlan(lic.online); toast(lic && lic.online && !lic.online.stale ? 'Plan checked' : 'Couldn\'t reach Riyeser right now. Try again when you\'re online.'); } finally { b.disabled = false; } });
   if (a === 'activate') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceActivate', $('#lickey').value); renderLicence(); openLicence(); toast('Licence turned on — thank you!'); } finally { b.disabled = false; } });
-  if (a === 'remove') safe(async () => { if (!confirm('Remove the licence from this PC?')) return; lic = await bridge.call('central:licenceRemove'); renderLicence(); openLicence(); });
+  if (a === 'remove') safe(async () => { if (!(await askConfirm({ title: 'Remove the licence from this PC?', body: 'You can type the licence key in again any time.', ok: 'Remove it' }))) return; lic = await bridge.call('central:licenceRemove'); renderLicence(); openLicence(); });
 });
 $('#licbtn').addEventListener('click', openLicence);
 
