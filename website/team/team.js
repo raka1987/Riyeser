@@ -295,36 +295,39 @@
   }
 
   // ------------------------------------------------------------------ create or join a team
-  function setupTeam(note = '') {
+  function setupTeam(note = '', mode = params.get('join') ? 'join' : 'new') {
     const join = params.get('join') || '';
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
-    $app.innerHTML = `<div class="gate"><div class="gcard">
-      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
-      ${note}
-      <form id="jf"><h1>Join your company</h1><p>Enter the Company ID (like RIY-7K3M-Q2) or your branch's code. Someone at your company approves you, then you're in.</p>
-        <label class="f"><span>Company ID or branch code</span><input name="code" value="${esc(join)}" required autocapitalize="characters" placeholder="RIY-…"></label>
-        <label class="f"><span>Your name, as the company will see it</span><input name="you" required maxlength="60"></label>
-        <label class="f"><span>A note for them (optional)</span><input name="note" maxlength="300" placeholder="e.g. New at the Lautoka front desk"></label>
-        <button class="btn p w">Ask to join</button></form>
-      <div class="or">or</div>
-      <details class="newco"><summary>Set up a new company</summary>
-      <form id="cf" style="margin-top:12px">
+    const newForm = `<form id="cf"><h1>Set up your company</h1><p>Your company gets its own Company ID. Your staff and branches use it to join you, and every Riyeser program on your PCs links to it.</p>
         <label class="f"><span>Business name</span><input name="team" required maxlength="80" placeholder="e.g. Sample Plumbing"></label>
         <label class="f"><span>Legal name (optional)</span><input name="legal_name" maxlength="120"></label>
         <label class="f"><span>ABN / TIN (optional)</span><input name="tax_number" maxlength="40"></label>
         <label class="f"><span>Country</span><select name="country"><option>Fiji</option><option>Australia</option><option>New Zealand</option><option>Other</option></select></label>
         <label class="f"><span>Your name</span><input name="you" required maxlength="60"></label>
-        <button class="btn w">Create the company</button></form></details>
+        <button class="btn p w">Create my company</button></form>
+      <div class="or">Already work somewhere that uses Riyeser?</div>
+      <button type="button" class="btn w" id="tojoin">Join an existing company</button>`;
+    const joinForm = `<form id="jf"><h1>Join an existing company</h1><p>Enter the Company ID (like RIY-7K3M-Q2) or your branch's code. You'll get it from your manager. Someone at the company approves you, then you're in.</p>
+        <label class="f"><span>Company ID or branch code</span><input name="code" value="${esc(join)}" required autocapitalize="characters" placeholder="RIY-…"></label>
+        <label class="f"><span>Your name, as the company will see it</span><input name="you" required maxlength="60"></label>
+        <label class="f"><span>A note for them (optional)</span><input name="note" maxlength="300" placeholder="e.g. New at the Lautoka front desk"></label>
+        <button class="btn p w">Ask to join</button></form>
+      <div class="or">Setting up your own business?</div>
+      <button type="button" class="btn w" id="tonew">Set up a new company</button>`;
+    $app.innerHTML = `<div class="gate"><div class="gcard">
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      ${note}${mode === 'join' ? joinForm : newForm}
       <div class="alt"><button class="linkbtn" id="so">Cancel and sign out</button></div></div></div>`;
-    const fail = (e) => setupTeam(`<div class="err">${esc(plainError(e))}</div>`);
-    $app.querySelector('#jf').onsubmit = async (e) => {
+    const sw = $app.querySelector(mode === 'join' ? '#tonew' : '#tojoin'); sw.onclick = () => setupTeam('', mode === 'join' ? 'new' : 'join');
+    const fail = (e) => setupTeam(`<div class="err">${esc(plainError(e))}</div>`, mode);
+    const jf = $app.querySelector('#jf'); if (jf) jf.onsubmit = async (e) => {
       e.preventDefault(); const f = new FormData(e.target);
       try { const r = await api.requestJoin(String(f.get('code')), String(f.get('you')), String(f.get('note') || ''));
         history.replaceState(null, '', location.pathname);
         if (r.status === 'member') return start();
         waiting(r.company_name); } catch (err) { fail(err); }
     };
-    $app.querySelector('#cf').onsubmit = async (e) => {
+    const cf = $app.querySelector('#cf'); if (cf) cf.onsubmit = async (e) => {
       e.preventDefault(); const f = new FormData(e.target);
       try { await api.createTeam(String(f.get('team')), String(f.get('you')), { legal_name: f.get('legal_name'), tax_number: f.get('tax_number'), country: f.get('country') });
         history.replaceState(null, '', location.pathname); await start(); if (S.team) companyInfo(true); } catch (err) { fail(err); }
