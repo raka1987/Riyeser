@@ -3,7 +3,7 @@
 // request), or set this PC up on its own. Afterwards, the Company page shows the profile and Company ID.
 // The profile is saved in %APPDATA%\Riyeser\company.json, so every Riyeser program fills in the company details itself.
 /* global $, esc, bridge, toast, safe, setView, renderNav */
-const CO = { first: false, state: null, mode: null, screen: 'choice', create: false, poll: null, busy: false, err: '', note: '', last: null };
+const CO = { first: false, list: null, details: null, state: null, mode: null, screen: 'choice', create: false, poll: null, busy: false, err: '', note: '', last: null };
 const COUNTRIES = ['Fiji', 'Australia', 'New Zealand', 'Samoa', 'Tonga', 'Vanuatu', 'Papua New Guinea', 'Solomon Islands', 'Other'];
 const field = (n, label, v = '', extra = '') => `<label class="wf"><span>${label}</span><input name="${n}" value="${esc(v)}" ${extra}></label>`;
 const profileFields = (p = {}) => `<div class="wgrid">
@@ -28,7 +28,7 @@ function wiz(html) {
 }
 function closeWizard() { $('#wizard').hidden = true; $('#wizard').innerHTML = ''; clearInterval(CO.poll); CO.poll = null; }
 const offlineNote = () => (CO.state && !CO.state.onlineReady
-  ? '<p class="wnote">Online company linking is being switched on — set up this PC on its own for now. You can link it to your company online later from <b>Company</b>.</p>' : '');
+  ? '<p class="wnote">Signing in with a Riyeser account is being switched on. Set up this PC without an account for now, and sign in later from <b>Company</b>.</p>' : '');
 
 // The first step the first time: start blank (the normal set-up) or explore with demo data (Sample Trading Co).
 // Demo mode writes only demo.json: no company.json, so nothing is linked to a real online company.
@@ -37,41 +37,82 @@ function showStart() {
   wiz(window.RiyeserDemo.startHtml());
 }
 
+// "Start blank": sign in with the same Riyeser account as riyeser.com, and Central fills everything in from it.
 function showChoice() {
   CO.screen = 'choice';
   const on = CO.state.onlineReady;
-  wiz(`<h1>Welcome to Riyeser</h1><p class="wsub">First, let's set up your company. Every Riyeser program uses it, so you only type it once.</p>
-    <div class="wchoices">
-      <button class="wbig" data-w="new"${on ? '' : ' disabled'}><span class="wi">🏢</span><b>Set up a new company</b><small>You're the owner or manager. You'll get a Company ID to give your staff and branches.</small></button>
-      <button class="wbig" data-w="join"${on ? '' : ' disabled'}><span class="wi">🤝</span><b>Join an existing company</b><small>Your company already uses Riyeser. Enter its Company ID or your branch code, and an admin approves you.</small></button>
-      <button class="wbig" data-w="local"><span class="wi">💻</span><b>Just this PC for now</b><small>Set up the company details on this PC only. Link it to your company online any time.</small></button>
+  wiz(`<h1>Set up Riyeser on this PC</h1><p class="wsub">Sign in once and every Riyeser program on this PC gets your business details, so you never type them again.</p>
+    <button class="wbig wmain" data-w="signin"${on ? '' : ' disabled'}><span class="wi">🔑</span><b>Sign in with your Riyeser account</b><small>Use the same email and password as riyeser.com.</small></button>
+    <p class="wfoot wtight">Don't have one? <button class="wlink" data-w="signup"${on ? '' : ' disabled'}>Create a free account</button></p>
+    <div class="wchoices two wsmallrow">
+      <button class="wbig wsm" data-w="join"${on ? '' : ' disabled'}><span class="wi">🤝</span><b>Join with a code</b><small>Someone's business already uses Riyeser. Enter its Company ID or branch code, and they approve you.</small></button>
+      <button class="wbig wsm" data-w="local"><span class="wi">💻</span><b>Set up this PC without an account</b><small>Type your business details on this PC only. You can sign in later.</small></button>
     </div>${offlineNote()}
     <p class="wfoot">${CO.first ? '<button class="wlink" data-w="start">Back</button> · ' : ''}<button class="wlink" data-w="later">Set up later</button></p>`);
 }
 
+// next: 'signin' (then the account's business is found) or 'join' (then the code form)
 function showAccount(next) {
   CO.mode = next; CO.screen = 'account';
-  if (CO.state.signedIn) return next === 'new' ? showNewForm() : showJoinForm();
-  wiz(`<h1>${CO.create ? 'Create your Riyeser account' : 'Sign in to your Riyeser account'}</h1>
-    <p class="wsub">${next === 'new' ? 'You\'ll use it to look after your company and approve your staff.' : 'Use your own work email. It\'s the same account as Riyeser Team.'}</p>
+  if (CO.state.signedIn) return next === 'join' ? showJoinForm() : findBusiness();
+  wiz(`<h1>${CO.create ? 'Create your free Riyeser account' : 'Sign in with your Riyeser account'}</h1>
+    <p class="wsub">${CO.create ? 'You can use it on riyeser.com and in every Riyeser program.' : 'Use the same email and password as riyeser.com.'}</p>
     <form id="wf-acc">${field('email', 'Email', '', 'type="email" required autocomplete="email"')}
       <label class="wf"><span>Password</span><input name="password" type="password" minlength="8" required autocomplete="${CO.create ? 'new-password' : 'current-password'}"></label>
       <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">${CO.create ? 'Create account' : 'Sign in'}</button></div></form>
-    <p class="wfoot">${CO.create ? 'Already have an account? <button class="wlink" data-w="signin">Sign in</button>' : 'New to Riyeser? <button class="wlink" data-w="signup">Create an account</button>'}</p>`);
+    <p class="wfoot">${CO.create ? 'Already have an account? <button class="wlink" data-w="signin-form">Sign in</button>' : 'Don\'t have one? <button class="wlink" data-w="signup-form">Create a free account</button>'}</p>`);
   $('#wf-acc').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); run(async () => {
     const r = await bridge.call('company:signIn', f.email, f.password, CO.create);
     if (r && r.needsConfirm) { CO.create = false; CO.note = `Nearly there: open the link we emailed to ${f.email}, then sign in here.`; return showAccount(next); }
-    await coLoad(); return next === 'new' ? showNewForm() : showJoinForm();
+    await coLoad(); return next === 'join' ? showJoinForm() : findBusiness();
   }); };
 }
 
+// Signed in: one business -> linked straight away; several -> pick one; none -> "A few details".
+async function findBusiness() {
+  CO.screen = 'finding';
+  wiz('<h1>Looking up your account…</h1><p class="wsub">Finding the business your Riyeser account belongs to.</p>');
+  try {
+    const r = await bridge.call('company:afterSignIn'); await coLoad();
+    if (r.status === 'linked') return showWelcome(r);
+    if (r.status === 'choose') { CO.list = r.businesses; return showPick(); }
+    CO.details = r.details || {}; CO.last = null; return showNewForm();
+  } catch (e) { CO.err = e.message; return showChoice(); }
+}
+
+function showWelcome(r) {
+  CO.screen = 'welcome';
+  const c = r.company || {};
+  wiz(`<div class="wdone">👋</div><h1>Welcome back${r.firstName ? `, ${esc(r.firstName)}` : ''}.</h1>
+    <p class="wsub">This PC is now linked to <b>${esc(c.name)}</b>${c.company_code ? ` (${esc(c.company_code)})` : ''}. Your details are filled in for every Riyeser program.</p>
+    <div class="wrow"><button class="btn" data-w="done">Start using Riyeser</button></div>`);
+}
+
+function showPick() {
+  CO.screen = 'pick';
+  wiz(`<h1>Which business is this PC for?</h1><p class="wsub">Your Riyeser account belongs to more than one. You can change it later under <b>Company</b>.</p>
+    <div class="wpick">${(CO.list || []).map((b) => `<button class="wbig wsm" data-w="pick" data-ws="${esc(b.workspace_id)}"><b>${esc(b.name)}</b><small>${esc(b.company_code || '')}${b.role ? ` · ${esc(b.role)}` : ''}</small></button>`).join('')}</div>
+    <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button></div>`);
+}
+
+// No business yet: a few details. For a person on their own the business fields can stay empty.
+const opt = (n, label, v, extra = '') => field(n, `${label} (optional)`, v, extra);
 function showNewForm() {
   CO.screen = 'newform';
-  wiz(`<h1>Your company</h1><p class="wsub">Signed in as <b>${esc(CO.state.signedIn)}</b>. These details go on your invoices and documents.</p>
-    <form id="wf-new">${profileFields(CO.last || {})}${field('your_name', 'Your name', '', 'required maxlength="60" autocomplete="name"')}
-      <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">Create the company</button></div></form>`);
+  const d = CO.last || CO.details || {};
+  wiz(`<h1>A few details</h1><p class="wsub">Signed in as <b>${esc(CO.state.signedIn)}</b>. Only your name is needed. Anything else you add goes on your invoices and documents.</p>
+    <form id="wf-new"><div class="wgrid">
+      ${field('your_name', 'Your name', d.your_name, 'required maxlength="60" autocomplete="name"')}
+      ${opt('phone', 'Phone', d.phone, 'maxlength="40" autocomplete="tel"')}
+      ${field('name', 'Business name (optional)', d.name, 'maxlength="120" autocomplete="organization"')}
+      ${field('tax_number', 'ABN / TIN / Tax ID (optional)', d.tax_number, 'maxlength="40"')}
+      <label class="wf wide"><span>Business address (optional)</span><input name="address" value="${esc(d.address || '')}" maxlength="240" autocomplete="street-address"></label>
+      ${opt('email', 'Business email', d.email, 'type="email" maxlength="120" autocomplete="email"')}
+      <label class="wf"><span>Country</span><select name="country">${COUNTRIES.map((c) => `<option${(d.country || 'Fiji') === c ? ' selected' : ''}>${c}</option>`).join('')}</select></label>
+    </div>
+      <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">Finish setting up</button></div></form>`);
   $('#wf-new').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); CO.last = f; run(async () => {
-    const c = await bridge.call('company:create', f, f.your_name); await coLoad(); showCreated(c); }); };
+    const c = await bridge.call('company:details', f); await coLoad(); showCreated(c); }); };
 }
 
 function showCreated(c) {
@@ -125,7 +166,7 @@ function showDeclined(name) {
 
 function showLocal() {
   CO.screen = 'local';
-  wiz(`<h1>Company details for this PC</h1><p class="wsub">Saved on this PC only. Every Riyeser program here uses them. You can link this PC to your company online later.</p>
+  wiz(`<h1>Business details for this PC</h1><p class="wsub">Saved on this PC only. Every Riyeser program here uses them. You can sign in with your Riyeser account later.</p>
     <form id="wf-local">${profileFields((CO.state && CO.state.company) || CO.last || {})}${field('your_name', 'Your name', (CO.state && CO.state.company && CO.state.company.your_name) || '', 'maxlength="60" autocomplete="name"')}
       <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">Save</button></div></form>`);
   $('#wf-local').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); CO.last = f; run(async () => {
@@ -142,6 +183,8 @@ function rerender() {
   const s = CO.screen;
   if (s === 'account') return showAccount(CO.mode);
   if (s === 'newform') return showNewForm();
+  if (s === 'pick') return showPick();
+  if (s === 'finding') return showChoice();
   if (s === 'joinform') return showJoinForm();
   if (s === 'local') return showLocal();
   if (s === 'waiting') return showWaiting(CO.state.pendingJoin && CO.state.pendingJoin.company_name);
@@ -152,12 +195,14 @@ function rerender() {
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-w]'); if (!b || b.disabled) return;
   const a = b.dataset.w;
-  if (a === 'new' || a === 'join') return showAccount(a);
+  if (a === 'signin' || a === 'join') { CO.create = false; return showAccount(a); }
+  if (a === 'signup') { CO.create = true; return showAccount('signin'); }
+  if (a === 'pick') return run(async () => { const r = await bridge.call('company:link', b.dataset.ws); await coLoad(); showWelcome(r); });
   if (a === 'local') return showLocal();
   if (a === 'blank') return showChoice();
   if (a === 'start') return showStart();
   if (a === 'demo') return run(async () => { closeWizard(); CO.first = false; await window.RiyeserCentralDemo.startDemo(); });
-  if (a === 'signup' || a === 'signin') { CO.create = a === 'signup'; return showAccount(CO.mode); }
+  if (a === 'signup-form' || a === 'signin-form') { CO.create = a === 'signup-form'; return showAccount(CO.mode); }
   if (a === 'back') return showChoice();
   if (a === 'copy') { const t = ($('#wid') || $('#coid') || {}).textContent; safe(() => bridge.call('company:copy', t)).then(() => toast('Company ID copied')); return; }
   if (a === 'check') return checkJoin(false);
@@ -165,7 +210,7 @@ document.addEventListener('click', (e) => {
   if (a === 'later') { safe(() => bridge.call('company:skip')); closeWizard(); return; }
   if (a === 'done') { closeWizard(); afterChange(); return; }
   if (a === 'restart') { coLoad().then(showChoice); return; }
-  if (a === 'link') { coLoad().then(() => (CO.state.onlineReady ? showAccount('join') : (CO.err = 'Online company linking is being switched on. Try again soon.', showChoice()))); return; }
+  if (a === 'link') { coLoad().then(() => (CO.state.onlineReady ? showAccount('signin') : (CO.err = 'Online company linking is being switched on. Try again soon.', showChoice()))); return; }
   if (a === 'signout') { safe(async () => { await bridge.call('company:signOut'); await coLoad(); renderCompany(); toast('Signed out of Riyeser Online on this PC.'); }); }
 });
 
@@ -173,7 +218,7 @@ document.addEventListener('click', (e) => {
 function renderCompany() {
   const s = CO.state || {}; const c = s.company; const el = $('#companyv');
   if (!c) {
-    el.innerHTML = `<h2 class="sec">Company</h2><div class="panel cobox"><p>This PC isn't set up with a company yet.</p><div class="row"><button class="btn" data-w="restart">Set up or join a company</button></div></div>`;
+    el.innerHTML = `<h2 class="sec">Company</h2><div class="panel cobox"><p>This PC isn't set up with a business yet.</p><div class="row"><button class="btn" data-w="restart">Set up or join a business</button></div></div>`;
     return;
   }
   const row = (k, v) => (v ? `<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>` : '');
@@ -182,7 +227,7 @@ function renderCompany() {
       <div class="cohead"><span class="cologo">🏢</span><div><h3>${esc(c.name)}</h3><div class="lbl">${c.mode === 'online' ? `Linked online${s.signedIn ? ` · signed in as ${esc(s.signedIn)}` : ''}` : 'Set up on this PC only'}</div></div></div>
       ${c.company_code ? `<div class="wid sm"><span id="coid">${esc(c.company_code)}</span><button class="btn" data-w="copy">Copy</button></div><p class="lbl">Give this Company ID to staff and branches. They choose <b>Join an existing company</b> in Riyeser Central, and you approve them in Riyeser Team.</p>` : ''}
       <div class="kvs">${row('Legal name', c.legal_name)}${row('ABN / tax number', c.tax_number)}${row('Address', c.address)}${row('Phone', c.phone)}${row('Email', c.email)}${row('Country', c.country)}${row('You', c.your_name)}</div>
-      <div class="row">${c.mode !== 'online' ? '<button class="btn" data-w="link">Link this PC to an online company</button><button class="btn s" data-w="local">Edit details</button>' : ''}
+      <div class="row">${c.mode !== 'online' ? '<button class="btn" data-w="link">Sign in with your Riyeser account</button><button class="btn s" data-w="local">Edit details</button>' : ''}
         ${s.signedIn ? '<button class="btn s" data-w="signout">Sign out</button>' : ''}<button class="btn s" data-w="restart">Use a different company</button></div>
       <p class="lbl">Changing company never deletes anything: your books, files and settings on this PC stay where they are.</p>
     </div>`;
@@ -191,7 +236,7 @@ function renderCoBar() {
   const s = CO.state || {}; const bar = $('#cobar'); if (!bar) return;
   const show = s.unlinked && s.company;
   bar.hidden = !show;
-  if (show) bar.innerHTML = `<span style="font-size:24px">🔗</span><div class="grow"><b>This PC was unlinked from ${esc(s.company.name)}</b><div class="lbl">An admin removed it, or you left the company. Everything on this PC is still here.</div></div><button class="go" data-w="restart">Set up or join a company</button>`;
+  if (show) bar.innerHTML = `<span style="font-size:24px">🔗</span><div class="grow"><b>This PC was unlinked from ${esc(s.company.name)}</b><div class="lbl">An admin removed it, or you left the company. Everything on this PC is still here.</div></div><button class="go" data-w="restart">Set up or join a business</button>`;
 }
 function afterChange() { renderCompany(); renderCoBar(); if (typeof renderNav === 'function') renderNav(); }
 

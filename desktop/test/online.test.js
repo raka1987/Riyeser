@@ -28,18 +28,20 @@ test('online: company.json is written safely, kept, and never needs a name to be
 });
 
 // A pretend Riyeser Online that answers like the real one.
-function fakeServer({ configured = true } = {}) {
+function fakeServer({ configured = true, members = null, metadata = {} } = {}) {
   const calls = []; let joinStatus = 'pending';
   const res = (status, body) => ({ ok: status < 300, status, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) });
   const fetchFn = async (url, opts = {}) => {
     const u = new URL(url); const body = opts.body ? JSON.parse(opts.body) : null; calls.push([u.pathname, body, opts.headers || {}]);
     if (u.href.startsWith(on.CONFIG_URL)) return res(200, configured ? 'window.RIYESER_TEAM={supabaseUrl:"https://x.supabase.co",supabaseKey:"sb_publishable_k"};' : 'window.RIYESER_TEAM={supabaseUrl:"",supabaseKey:""};');
     if (u.pathname === '/auth/v1/token') return body.password === 'right-password'
-      ? res(200, { access_token: 'tok', refresh_token: 'r', expires_in: 3600, user: { id: 'u1', email: body.email } }) : res(400, { error_description: 'Invalid login credentials' });
+      ? res(200, { access_token: 'tok', refresh_token: 'r', expires_in: 3600, user: { id: 'u1', email: body.email, user_metadata: metadata } }) : res(400, { error_description: 'Invalid login credentials' });
     if (u.pathname === '/auth/v1/signup') return res(200, { id: 'u2', email: body.email });   // confirm-email projects send no session
     if (u.pathname === '/rest/v1/rpc/create_company') return res(200, { workspace_id: 'w1', company_code: 'RIY-7K3M-Q2' });
     if (u.pathname === '/rest/v1/rpc/request_join') return body.code === 'LAU-4821' ? res(200, { status: 'pending', company_name: 'Sample Plumbing', workspace_id: 'w9' }) : res(400, { message: 'That code isn\'t right.' });
     if (u.pathname === '/rest/v1/rpc/my_join_requests') return res(200, [{ id: 'r1', workspace_id: 'w9', company_name: 'Sample Plumbing', status: joinStatus, created_at: '2026-11-24T01:00:00Z' }]);
+    if (u.pathname === '/rest/v1/members' && members) return res(200, members);
+    if (u.pathname === '/rest/v1/rpc/company_licence') return res(200, { modules: { accounting: { on: true } }, plan: 'Riyeser' });
     if (u.pathname === '/rest/v1/members') return res(200, joinStatus === 'approved' ? [{ role: 'member', job_role: 'sales', display_name: 'Sam', workspaces: { id: 'w9', name: 'Sample Plumbing', company_code: 'RIY-AB12-CD', tax_number: '99', address: '1 Main St', phone: '', email: '', country: 'Fiji', legal_name: '' } }] : []);
     if (u.pathname === '/rest/v1/rpc/link_device') return res(200, '');
     if (u.pathname === '/rest/v1/rpc/device_still_linked') return res(200, 'false');
@@ -95,4 +97,55 @@ test('online: join with a branch code -> waits -> approved and linked; or declin
   assert.equal(await o.stillLinked(), false); assert.ok(on.readCompany(dir));
   const d = make(); await d.o.signIn('x@a.test', 'right-password'); await d.o.requestJoin('LAU-4821', 'X', ''); d.srv.decline();
   assert.deepEqual(await d.o.checkJoin(), { status: 'declined', company_name: 'Sample Plumbing' });
+});
+
+// Signing in with a Riyeser account (the same one as riyeser.com): Central finds the account's business itself.
+const ws = (id, name, code, extra = {}) => ({ role: 'owner', job_role: 'owner', display_name: 'Alex Sample', workspaces: { id, name, company_code: code, legal_name: '', tax_number: '', address: '', phone: '', email: '', country: 'Australia', ...extra } });
+
+test('online: signed in, the account has one business -> this PC is linked to it straight away, details filled in', async () => {
+  const { dir, srv, o } = make({ members: [ws('w5', 'Sample Trading Co', 'RIY-SAMP-01', { tax_number: '51 824 753 556', address: '12 Harbour St, Sampletown', phone: '02 9000 1234', email: 'accounts@sampletrading.example' })] });
+  await o.signIn('alex.sample@sampletrading.example', 'right-password');
+  const r = await o.afterSignIn();
+  assert.equal(r.status, 'linked'); assert.equal(r.firstName, 'Alex');
+  const c = on.readCompany(dir);
+  assert.deepEqual({ name: c.name, code: c.company_code, ws: c.workspace_id, mode: c.mode, tax: c.tax_number, address: c.address, phone: c.phone, email: c.email, country: c.country, you: c.your_name, signedIn: c.email_signed_in },
+    { name: 'Sample Trading Co', code: 'RIY-SAMP-01', ws: 'w5', mode: 'online', tax: '51 824 753 556', address: '12 Harbour St, Sampletown', phone: '02 9000 1234', email: 'accounts@sampletrading.example', country: 'Australia', you: 'Alex Sample', signedIn: 'alex.sample@sampletrading.example' });
+  assert.equal(srv.calls.find((x) => x[0] === '/rest/v1/rpc/link_device')[1].ws, 'w5');                   // this PC linked
+  assert.ok(srv.calls.some((x) => x[0] === '/rest/v1/rpc/company_licence'));                              // and its plan fetched
+  assert.ok(!srv.calls.some((x) => x[0] === '/rest/v1/rpc/create_company'));                               // nothing new made
+});
+
+test('online: signed in, the account has two businesses -> pick one, then it is linked', async () => {
+  const { dir, o } = make({ members: [ws('w5', 'Sample Trading Co', 'RIY-SAMP-01'), ws('w6', 'Example Cafe', 'RIY-EXMP-02', { address: '3 Bay Rd' })] });
+  await o.signIn('alex.sample@sampletrading.example', 'right-password');
+  const r = await o.afterSignIn();
+  assert.equal(r.status, 'choose');
+  assert.deepEqual(r.businesses.map((b) => [b.workspace_id, b.name, b.company_code]), [['w5', 'Sample Trading Co', 'RIY-SAMP-01'], ['w6', 'Example Cafe', 'RIY-EXMP-02']]);
+  assert.equal(on.readCompany(dir), null);   // nothing linked until one is chosen
+  const l = await o.linkBusiness('w6');
+  assert.equal(l.company.name, 'Example Cafe'); assert.equal(on.readCompany(dir).address, '3 Bay Rd'); assert.equal(on.readCompany(dir).workspace_id, 'w6');
+});
+
+test('online: signed in, no business yet -> "A few details", filled in from what was typed on riyeser.com', async () => {
+  const metadata = { riyeser_signup: { you: 'Casey Placeholder', phone: '0400 000 000', country: 'Australia', biz: 'Placeholder Plumbing', tax_number: '12 345 678 901', address: '1 Sample St, Sampletown', email: 'casey@placeholder.example' } };
+  const { dir, srv, o } = make({ members: [], metadata });
+  await o.signIn('casey.placeholder@sampletrading.example', 'right-password');
+  const r = await o.afterSignIn();
+  assert.equal(r.status, 'none');
+  assert.deepEqual(r.details, { your_name: 'Casey Placeholder', name: 'Placeholder Plumbing', tax_number: '12 345 678 901', address: '1 Sample St, Sampletown', email: 'casey@placeholder.example', phone: '0400 000 000', country: 'Australia' });
+  assert.equal(o.session.user.user_metadata.riyeser_signup.you, 'Casey Placeholder');   // kept with the session
+  assert.equal(on.readCompany(dir), null);
+  // a business name given: a business workspace named after it
+  const p = on.detailsToProfile(r.details);
+  assert.equal(p.name, 'Placeholder Plumbing'); assert.equal(p.kind, 'business');
+  await o.createCompany(p, r.details.your_name);
+  const create = srv.calls.find((x) => x[0] === '/rest/v1/rpc/create_company')[1];
+  assert.equal(create.company_name, 'Placeholder Plumbing'); assert.equal(create.your_name, 'Casey Placeholder'); assert.equal(create.profile.kind, 'business');
+  assert.equal(create.profile.legal_name, '');
+  // no business name: a personal workspace named after the person; nothing else needed
+  const solo = on.detailsToProfile({ your_name: 'Morgan Testwell', name: '', country: 'Fiji' });
+  assert.deepEqual(solo, { name: 'Morgan Testwell', kind: 'personal', tax_number: '', address: '', phone: '', email: '', country: 'Fiji' });
+  // nothing typed at sign-up: an empty form
+  assert.deepEqual(on.signupDetails({ user_metadata: {} }), { your_name: '', name: '', tax_number: '', address: '', email: '', phone: '', country: '' });
+  assert.equal(on.signupDetails({ user_metadata: { riyeser_signup: { you: 'Robin', biz: { name: 'Demo Repairs', address: '9 Test Ave' } } } }).address, '9 Test Ave');
 });

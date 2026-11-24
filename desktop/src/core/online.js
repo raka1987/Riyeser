@@ -53,6 +53,26 @@ function plain(status, body) {
   return status ? `Riyeser Online answered with an error (${status}). Please try again.` : 'Can\'t reach Riyeser Online. Check the internet connection.';
 }
 
+const firstName = (name, email) => String(name || '').trim().split(/\s+/)[0] || String(email || '').split('@')[0] || '';
+/** riyeser_signup from the account (riyeser.com's sign-up form) as the fields of the "A few details" form. */
+function signupDetails(user) {
+  const md = (user && user.user_metadata && user.user_metadata.riyeser_signup) || {};
+  const biz = md.biz && typeof md.biz === 'object' ? md.biz : { name: md.biz };
+  const s = (v) => (v == null ? '' : String(v).trim());
+  return { your_name: s(md.you), name: s(biz.name), tax_number: s(biz.tax_number || md.tax_number), address: s(biz.address || md.address),
+    email: s(biz.email || md.email), phone: s(md.phone), country: s(md.country) };
+}
+/**
+ * The "A few details" form as a new workspace: named after the business when one is given, else after the person,
+ * and marked personal or business.
+ */
+function detailsToProfile(f) {
+  const s = (v) => (v == null ? '' : String(v).trim());
+  const business = s(f.name);
+  return { name: business || s(f.your_name), kind: business ? 'business' : 'personal', tax_number: s(f.tax_number), address: s(f.address),
+    phone: s(f.phone), email: s(f.email), country: s(f.country) };
+}
+
 class Online {
   /** store: Central's Store; fetchFn: (url, opts) => Response; appData: Electron's appData folder. */
   constructor({ store, fetchFn, appData, appVersion = '', deviceName = '', platform = process.platform }) {
@@ -75,7 +95,9 @@ class Online {
   get session() { return (this.store.get('online', {}) || {}).session || null; }
   setSession(s) {
     const keep = s ? { access_token: s.access_token, refresh_token: s.refresh_token,
-      expires_at: s.expires_at || Math.floor(Date.now() / 1000) + (s.expires_in || 3600), user: { id: s.user && s.user.id, email: s.user && s.user.email } } : null;
+      expires_at: s.expires_at || Math.floor(Date.now() / 1000) + (s.expires_in || 3600),
+      // user_metadata keeps what was typed when the account was made on riyeser.com (riyeser_signup), to fill in the set-up
+      user: { id: s.user && s.user.id, email: s.user && s.user.email, user_metadata: (s.user && s.user.user_metadata) || (this.session && this.session.user && this.session.user.user_metadata) || {} } } : null;
     this.store.update('online', {}, (o) => ({ ...(o || {}), session: keep }));
   }
   async call(pathname, { method = 'GET', body, auth = true, headers = {} } = {}) {
@@ -141,6 +163,7 @@ class Online {
   /** profile: {name, legal_name, tax_number, address, phone, email, country}; yourName: the person setting it up. */
   async createCompany(profile, yourName) {
     const p = Object.fromEntries(PROFILE_KEYS.slice(1).map((k) => [k, String(profile[k] || '').trim()]));
+    if (profile.kind) p.kind = profile.kind === 'personal' ? 'personal' : 'business';
     const r = await this.rpc('create_company', { company_name: String(profile.name || '').trim(), your_name: String(yourName || '').trim(), profile: p });
     const out = writeCompany(this.appData, { mode: 'online', company_code: r.company_code, workspace_id: r.workspace_id, ...profile, your_name: yourName,
       email_signed_in: this.session && this.session.user.email, linked_at: new Date().toISOString() });
@@ -168,10 +191,37 @@ class Online {
     }
     return { status: 'pending', company_name: pj.company_name };
   }
-  async finishJoin(ws, yourName) {
+  /** The businesses the signed-in Riyeser account belongs to (its rows in members, with each workspace). */
+  async memberships() {
     const uid = this.session && this.session.user.id;
     const rows = await this.call(`/rest/v1/members?select=role,job_role,display_name,workspaces(id,name,company_code,legal_name,tax_number,address,phone,email,country)&user_id=eq.${encodeURIComponent(uid)}`);
-    const row = (rows || []).find((r) => r.workspaces && r.workspaces.id === ws);
+    return (Array.isArray(rows) ? rows : []).filter((r) => r.workspaces && r.workspaces.id);
+  }
+  async myBusinesses() {
+    return (await this.memberships()).map((r) => ({ workspace_id: r.workspaces.id, name: r.workspaces.name || '', company_code: r.workspaces.company_code || '',
+      role: r.role || '', display_name: r.display_name || '' }));
+  }
+  /** What was typed when the account was made on riyeser.com, ready for the "A few details" form. */
+  signupDetails() { return signupDetails(this.session && this.session.user); }
+  /**
+   * Right after signing in: one business -> this PC is linked to it now; several -> choose one; none -> the details form.
+   * { status: 'linked', company, firstName } | { status: 'choose', businesses } | { status: 'none', details }
+   */
+  async afterSignIn() {
+    const list = await this.myBusinesses();
+    if (list.length === 1) return { status: 'linked', ...(await this.linkBusiness(list[0].workspace_id)) };
+    if (list.length > 1) return { status: 'choose', businesses: list };
+    return { status: 'none', details: this.signupDetails() };
+  }
+  /** Link this PC to one of the account's businesses: company.json filled in from it, the PC linked, the licence fetched. */
+  async linkBusiness(ws) {
+    const company = await this.finishJoin(ws, '');
+    await this.refreshLicence().catch(() => null);
+    return { company, firstName: firstName(company.your_name, this.session && this.session.user.email) };
+  }
+  async finishJoin(ws, yourName) {
+    const rows = await this.memberships();
+    const row = rows.find((r) => r.workspaces.id === ws);
     if (!row) throw new Error('You\'re not in that company yet.');
     const w = row.workspaces;
     const out = writeCompany(this.appData, { mode: 'online', company_code: w.company_code, workspace_id: w.id, name: w.name, legal_name: w.legal_name,
@@ -188,4 +238,4 @@ class Online {
   }
 }
 
-module.exports = { Online, parseConfig, usable, companyFile, readCompany, writeCompany, CONFIG_URL, PROFILE_KEYS };
+module.exports = { Online, signupDetails, detailsToProfile, firstName, parseConfig, usable, companyFile, readCompany, writeCompany, CONFIG_URL, PROFILE_KEYS };

@@ -332,6 +332,11 @@ function registerIpc() {
   handle('company:signIn', (email, password, create) => on.signIn(String(email || '').trim(), String(password || ''), !!create));
   handle('company:signOut', () => { on.signOut(); return true; });
   handle('company:create', (profile, yourName) => on.createCompany(profile || {}, yourName));
+  // After signing in with a Riyeser account: link to its business (one), let them pick (several), or the details form (none)
+  const linked = (r) => { if (r && r.company && win && !win.isDestroyed()) win.webContents.send('licence-changed', true); return r; };
+  handle('company:afterSignIn', async () => linked(await on.afterSignIn()));
+  handle('company:link', async (ws) => linked({ status: 'linked', ...(await on.linkBusiness(String(ws || ''))) }));
+  handle('company:details', (f) => { const profile = online.detailsToProfile(f || {}); return on.createCompany(profile, String((f || {}).your_name || '').trim()); });
   handle('company:join', (code, yourName, note) => on.requestJoin(code, yourName, note));
   handle('company:checkJoin', () => on.checkJoin());
   handle('company:cancelJoin', () => { store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null })); return true; });

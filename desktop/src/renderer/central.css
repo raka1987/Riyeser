@@ -209,3 +209,7 @@ h2.sec { font-size: 13px; font-weight: 700; color: var(--muted); text-transform:
 .demobar .demo-leave:hover { background: #fff; }
 body.demo .app { height: calc(100vh - 40px); }
 .wchoices.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wbig.wmain { width: 100%; box-sizing: border-box; border-color: var(--accent); }
+.wfoot.wtight { margin: 10px 0 18px; }
+.wbig.wsm { padding: 12px 14px; } .wbig.wsm .wi { font-size: 20px; } .wbig.wsm b { font-size: 14px; } .wbig.wsm small { font-size: 12.5px; }
+.wpick { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; } .wpick .wbig { width: 100%; box-sizing: border-box; }
