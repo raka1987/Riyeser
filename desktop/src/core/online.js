@@ -30,8 +30,8 @@ function writeCompany(appData, data) {
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const clean = (v) => (v == null ? '' : String(v).trim().slice(0, 300));
   const out = { ...(readCompany(appData) || {}) };
-  for (const k of ['mode', 'company_code', 'workspace_id', ...PROFILE_KEYS.slice(1), 'name', 'your_name', 'email_signed_in', 'linked_at']) {
-    if (k in data) out[k] = k === 'mode' ? (data[k] === 'online' ? 'online' : 'local') : clean(data[k]);
+  for (const k of ['mode', 'company_code', 'workspace_id', ...PROFILE_KEYS.slice(1), 'name', 'kind', 'your_name', 'email_signed_in', 'linked_at']) {
+    if (k in data) out[k] = k === 'mode' ? (data[k] === 'online' ? 'online' : 'local') : k === 'kind' ? (data[k] === 'personal' ? 'personal' : data[k] ? 'business' : '') : clean(data[k]);
   }
   if (!out.name) throw new Error('Enter the company name.');
   out.linked_at = out.linked_at || new Date().toISOString();
@@ -231,6 +231,32 @@ class Online {
     this.store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null, skipped: false }));
     return out;
   }
+  // ---------- what the person chose in Central, kept with their Riyeser account (user metadata riyeser_prefs) ----------
+  /** Merge prefs into riyeser_prefs on the account (Supabase updateUser). false when not signed in or offline. */
+  async savePrefs(prefs) {
+    const s = this.session;
+    if (!s) return false;
+    const md = (s.user && s.user.user_metadata) || {};
+    const next = { ...(md.riyeser_prefs && typeof md.riyeser_prefs === 'object' ? md.riyeser_prefs : {}), ...(prefs || {}) };
+    let user;
+    try { user = await this.call('/auth/v1/user', { method: 'PUT', body: { data: { riyeser_prefs: next } } }); } catch { return false; }
+    const cur = this.session;
+    if (cur) this.store.update('online', {}, (o) => ({ ...(o || {}), session: { ...cur, user: { ...cur.user, user_metadata: (user && user.user_metadata) || { ...md, riyeser_prefs: next } } } }));
+    return true;
+  }
+  /** riyeser_prefs saved with the account (as last seen on this PC). */
+  prefs() { const md = this.session && this.session.user && this.session.user.user_metadata; return (md && md.riyeser_prefs && typeof md.riyeser_prefs === 'object') ? md.riyeser_prefs : {}; }
+  /** 'personal' | 'business' for the linked online business, or null when it can't be checked. */
+  async workspaceKind() {
+    const c = readCompany(this.appData);
+    if (!c || c.mode !== 'online' || !c.workspace_id || !this.session) return null;
+    try {
+      const rows = await this.call(`/rest/v1/workspaces?select=kind&id=eq.${encodeURIComponent(c.workspace_id)}`);
+      const k = Array.isArray(rows) && rows[0] && rows[0].kind;
+      return k === 'personal' || k === 'business' ? k : null;
+    } catch { return null; }
+  }
+
   setupLocal(profile, yourName) {
     const out = writeCompany(this.appData, { ...profile, your_name: yourName || '', mode: 'local', company_code: '', workspace_id: '' });
     this.store.update('company-setup', {}, (o) => ({ ...(o || {}), skipped: false }));

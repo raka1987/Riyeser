@@ -157,10 +157,16 @@ function cardLine(id) {
 function renderCards() {
   const mine = programs.filter((p) => p.status !== 'missing' && !(p.id === 'accounting-basics' && has('accounting')));
   const missing = programs.some((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')));
-  $('#cards').hidden = !mine.length;
+  // Programs on the plan that aren't installed yet: a tile with an Install button (it turns into the normal tile after).
+  const want = ((cl && cl.planMissing) || []).map((x) => programs.find((p) => p.id === x.id)).filter((p) => p && LOOK[p.id]);
+  $('#cards').hidden = !mine.length && !want.length;
   $('#cards').innerHTML = mine.map((p) => {
     const L = LOOK[p.id]; const c = cardLine(p.id);
     return `<button class="pcard" data-open="${esc(p.id)}" title="Open ${esc(p.full)}"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}</b><span class="ps${c.alert ? ' bad' : ''}">${esc(c.s)}</span>${CHEV}</button>`;
+  }).join('') + want.map((p) => {
+    const L = LOOK[p.id];
+    return `<div class="pcard want"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}</b><span class="ps">On your plan, not installed yet</span>
+      <div class="instrow" data-instrow="${esc(p.id)}">${installing === p.id ? instProgress() : `<button class="btn sm" data-install="${esc(p.id)}" title="Download and install it now">Install</button>`}</div></div>`;
   }).join('') + (missing ? `<button class="pcard add" data-view="apps"><span class="pi">${icon('plus', 30)}</span><b>Add a program</b><span class="ps">Install more Riyeser apps</span>${CHEV}</button>` : '');
 }
 function renderQuick() {
@@ -237,7 +243,7 @@ function renderApps() {
   const others = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')))
     .map((p) => (p.id === 'accounting' && has('accounting-basics') ? { ...p, name: 'Upgrade to Accounting Plus' } : p));
   $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc">${logo(p, 44)}<div><b>${esc(p.name)}</b><p>${esc(p.desc)}</p>
-      <div class="row" id="inst-${esc(p.id)}"><button class="btn" data-install="${esc(p.id)}" title="Download and install it now">Install</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-help="${esc(p.id)}">Learn more</button><button class="link" data-get="${esc(p.id)}" title="Its page on riyeser.com">Download page</button><button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button></div></div></div>`).join('')
+      <div class="row instrow" data-instrow="${esc(p.id)}">${installing === p.id ? instProgress() : `<button class="btn" data-install="${esc(p.id)}" title="Download and install it now">Install</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-help="${esc(p.id)}">Learn more</button><button class="link" data-get="${esc(p.id)}" title="Its page on riyeser.com">Download page</button><button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`}</div></div></div>`).join('')
     : '<div class="lbl">You have every Riyeser program.</div>';
 }
 function setView(v) {
@@ -247,30 +253,131 @@ function setView(v) {
   renderNav();
 }
 async function refresh() {
-  [programs, today] = await Promise.all([bridge.call('central:programs'), bridge.call('central:today')]);
+  [programs, today, cl] = await Promise.all([bridge.call('central:programs'), bridge.call('central:today'), bridge.call('central:checklist').catch(() => cl)]);
   programs.sort((a, b) => byOrder(a.id, b.id));
+  renderChecklist(); renderPlanBar();
   renderNav(); renderCards(); renderQuick(); renderActivity(); renderMoney(); renderToday(); renderTodo(); renderLayout(); renderApps();
 }
 
 // ---------- install a program from here (no trip to the website) ----------
 let installing = null;
-async function installApp(id) {
-  if (installing) { toast('One program is installing already. It won\'t be long.'); return; }
+const instProgress = () => '<div style="flex:1;min-width:140px"><b class="instmsg" style="font-size:13px">Getting ready…</b><div class="prog"><i class="instbar"></i></div></div>';
+/** Install one program with its quiet installer. quiet: no toasts (the plan banner says how it went). true when installed. */
+async function installApp(id, { quiet = false, then = true } = {}) {
+  if (installing) { if (!quiet) toast('One program is installing already. It won\'t be long.'); return false; }
   const p = programs.find((x) => x.id === id); installing = id;
-  const row = $(`#inst-${id}`);
-  if (row) row.innerHTML = `<div style="flex:1"><b id="instmsg" style="font-size:13px">Getting ready…</b><div class="prog"><i id="instbar"></i></div></div>`;
+  document.querySelectorAll(`[data-instrow="${id}"]`).forEach((row) => { row.innerHTML = instProgress(); });
+  let ok = false;
   try {
-    await bridge.call('central:install', id);
-    toast(`${p ? p.full : 'The program'} is installed. It's on your home screen now.`);
-  } catch (e) { toast(e.message); }
+    await bridge.call('central:install', id); ok = true;
+    if (!quiet) toast(`${p ? p.full : 'The program'} is installed. It's on your home screen now.`);
+  } catch (e) { if (!quiet) toast(e.message); }
   installing = null;
-  await safe(refresh);
+  if (then) await safe(refresh);
+  return ok;
 }
 bridge.on('install-progress', (x) => {
-  const msg = $('#instmsg'); const bar = $('#instbar'); if (!msg || x.id !== installing) return;
-  msg.textContent = x.stage === 'downloading' ? `Downloading… ${Math.round(x.pct * 100)}%` : x.stage === 'installing' ? 'Installing…' : 'Done';
-  bar.style.width = `${Math.round((x.stage === 'downloading' ? x.pct : 1) * 100)}%`;
+  if (x.id !== installing) return;
+  const text = x.stage === 'downloading' ? `Downloading… ${Math.round(x.pct * 100)}%` : x.stage === 'installing' ? 'Installing…' : 'Done';
+  const width = `${Math.round((x.stage === 'downloading' ? x.pct : 1) * 100)}%`;
+  document.querySelectorAll(`[data-instrow="${x.id}"]`).forEach((row) => {
+    const msg = row.querySelector('.instmsg'); const bar = row.querySelector('.instbar');
+    if (msg) msg.textContent = text; if (bar) bar.style.width = width;
+  });
+  if (planRun && planRun.id === x.id) { const bar = $('#planbar .instbar'); if (bar) bar.style.width = width; }
 });
+
+// ---------- "Your plan includes Payroll and Bookings. [Install them]" (top of Get more apps) ----------
+let planRun = null;   // { id, n, of } while the plan's programs are installing
+const andList = (names) => (names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+function renderPlanBar(failed) {
+  const box = $('#planbar'); if (!box) return;
+  const list = (cl && cl.planMissing) || [];
+  if (planRun) return;   // drawn by installPlan while it runs
+  if (failed && failed.length) {
+    box.hidden = false;
+    box.innerHTML = `<span style="font-size:24px">⚠️</span><div class="grow"><b>Couldn't install ${esc(andList(failed))}.</b><div class="lbl">Check your internet and try again.</div></div><button class="go" data-cl="plan">Try again</button>`;
+    return;
+  }
+  box.hidden = !list.length;
+  if (list.length) box.innerHTML = `<span style="font-size:24px">📦</span><div class="grow"><b>Your plan includes ${esc(andList(list.map((p) => p.name)))}.</b><div class="lbl">${list.length === 1 ? 'It isn\'t' : 'They aren\'t'} on this PC yet. One click installs ${list.length === 1 ? 'it' : 'them'}.</div></div><button class="go" data-cl="plan">Install ${list.length === 1 ? 'it' : 'them'}</button>`;
+}
+async function installPlan() {
+  if (planRun || installing) { toast('One program is installing already. It won\'t be long.'); return; }
+  const list = ((cl && cl.planMissing) || []).slice(); if (!list.length) return;
+  const box = $('#planbar'); const failed = [];
+  for (let i = 0; i < list.length; i++) {
+    planRun = { id: list[i].id, n: i + 1, of: list.length };
+    box.hidden = false;
+    box.innerHTML = `<span style="font-size:24px">⬇</span><div class="grow"><b>Installing ${esc(list[i].name)}… ${i + 1} of ${list.length}</b><div class="prog"><i class="instbar"></i></div><div class="lbl">You can keep using Central while it installs.</div></div>`;
+    if (!(await installApp(list[i].id, { quiet: true, then: false }))) failed.push(list[i].name);
+  }
+  planRun = null;
+  await safe(refresh);
+  renderPlanBar(failed);
+  toast(failed.length ? `Couldn't install ${andList(failed)}. Check your internet and try again.` : `${andList(list.map((p) => p.name))} ${list.length === 1 ? 'is' : 'are'} installed.`);
+}
+
+// ---------- "Getting started with Riyeser": a checklist that ticks itself from your real records ----------
+let cl = null;
+const CL_BTN = { wizard: 'Sign in', company: 'Check details', apps: 'Install them', team: 'Open Riyeser Team' };
+function clAction(it) {
+  const a = it.action || {}; const p = programs.find((x) => x.id === a.id); const name = p ? p.name : '';
+  if (a.kind === 'wizard') return `<button class="btn sm" data-w="link">${CL_BTN.wizard}</button>`;
+  if (a.kind === 'view' && a.view === 'apps') return (cl.planMissing || []).length ? `<button class="btn sm" data-cl="plan">${CL_BTN.apps}</button>` : '<button class="btn sm s" data-view="apps">Get more apps</button>';
+  if (a.kind === 'view') return `<button class="btn sm" data-view="${esc(a.view)}">${CL_BTN.company}</button>`;
+  if (a.kind === 'team') return `<button class="btn sm" data-act="team">${CL_BTN.team}</button>`;
+  if (a.kind === 'open') return `<button class="btn sm" data-open="${esc(a.id)}" data-page="${esc(a.page || '')}">Open ${esc(name)}</button>`;
+  if (a.kind === 'install') return `<span class="instrow" data-instrow="${esc(a.id)}">${installing === a.id ? instProgress() : `<button class="btn sm" data-install="${esc(a.id)}">Install ${esc(name || 'it')}</button>`}</span>`;
+  return '';
+}
+function renderChecklist() {
+  const box = $('#checklist'); if (!box) return;
+  box.hidden = !cl || cl.hidden;
+  if (box.hidden) return;
+  const head = (right) => `<div class="ph"><span class="grow">Getting started with Riyeser</span>${right}</div>`;
+  if (cl.demo) {   // demo mode: practice data, so there's nothing real to tick
+    box.className = 'panel cl off';
+    box.innerHTML = `${head('<button class="lnk" data-cl="hide">Hide getting started</button>')}<div class="empty">Leave demo mode to start your own checklist.</div>`;
+    return;
+  }
+  if (cl.allDone) {
+    box.className = 'panel cl alldone';
+    box.innerHTML = `<div class="cldone"><span style="font-size:26px">🎉</span><div class="grow"><b>You're all set up</b><div class="lbl">Everything on your getting-started list is done. Nice work.</div></div><button class="btn s" data-cl="hide">Hide this</button></div>`;
+    return;
+  }
+  box.className = 'panel cl';
+  const pct = cl.total ? Math.round((cl.done / cl.total) * 100) : 0;
+  box.innerHTML = `${head('<button class="lnk" data-cl="hide">Hide getting started</button>')}
+    <div class="clbar"><div class="prog"><i style="width:${pct}%"></i></div><span class="lbl">${cl.done} of ${cl.total} done</span></div>
+    <div class="clitems">${cl.items.map((it) => `<div class="cli${it.done ? ' done' : ''}${it.skipped ? ' skipped' : ''}">
+      <span class="clchk">${it.done ? '✓' : ''}</span>
+      <div class="grow"><b>${esc(it.title)}</b><small>${it.skipped ? 'Skipped' : esc(it.hint)}</small></div>
+      ${it.done ? '' : it.skipped ? `<button class="link" data-cl="unskip" data-id="${esc(it.id)}">Undo</button>` : `${clAction(it)}<button class="link" data-cl="skip" data-id="${esc(it.id)}" title="Not for me">Skip</button>`}
+    </div>`).join('')}</div>`;
+}
+async function loadChecklist() {
+  try { cl = await bridge.call('central:checklist'); } catch { return; }
+  renderChecklist(); renderPlanBar();
+  if (today) renderCards();
+}
+async function setChecklistHidden(hidden) {
+  const r = await bridge.call('central:checklistHide', hidden);
+  if (cl) cl.hidden = r.hidden;
+  renderChecklist();
+  const box = $('#sethide'); if (box) box.checked = !r.hidden;
+  toast(hidden ? 'Getting started is hidden. You can show it again in Settings.' : 'Getting started is back on your home screen.');
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-cl]'); if (!b) return;
+  const a = b.dataset.cl;
+  if (a === 'hide') safe(() => setChecklistHidden(true));
+  if (a === 'skip' || a === 'unskip') safe(async () => { await bridge.call('central:checklistSkip', b.dataset.id, a === 'skip'); await loadChecklist(); });
+  if (a === 'plan') { $('#qclear').click(); setView('apps'); safe(installPlan); }
+});
+// Settings (sidebar footer): show "Getting started" again.
+$('#setbtn').addEventListener('click', () => { $('#sethide').checked = !(cl && cl.hidden); $('#setdlg').showModal(); });
+$('#sethide').addEventListener('change', (e) => safe(() => setChecklistHidden(!e.target.checked)));
 
 // ---------- updates ----------
 function renderUpdates() {
@@ -478,4 +585,6 @@ $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign
   setInterval(() => { if ($('#results').hidden) safe(refresh); }, 5 * 60 * 1000);
   setInterval(() => checkForUpdates(false), 6 * 3600 * 1000);
   window.addEventListener('focus', () => { if ($('#results').hidden) safe(refresh); });
+  setInterval(() => { if (view === 'home' && $('#results').hidden && !document.hidden && !installing) loadChecklist(); }, 60 * 1000);
+  bridge.on('licence-changed', () => loadChecklist());
 })();

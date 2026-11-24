@@ -213,3 +213,25 @@ body.demo .app { height: calc(100vh - 40px); }
 .wfoot.wtight { margin: 10px 0 18px; }
 .wbig.wsm { padding: 12px 14px; } .wbig.wsm .wi { font-size: 20px; } .wbig.wsm b { font-size: 14px; } .wbig.wsm small { font-size: 12.5px; }
 .wpick { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; } .wpick .wbig { width: 100%; box-sizing: border-box; }
+
+/* ---------- getting started checklist ---------- */
+.cl { margin-bottom: 18px; }
+.cl .clbar { display: flex; align-items: center; gap: 12px; padding: 0 20px 6px; }
+.cl .clbar .prog { flex: 1; margin-top: 0; height: 8px; } .cl .clbar .prog i { background: var(--ok); }
+.cl .clbar .lbl { white-space: nowrap; font-weight: 600; }
+.clitems { padding: 4px 0 8px; }
+.cli { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.cli .grow { flex: 1; min-width: 200px; } .cli b { font-size: 13.5px; } .cli small { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
+.clchk { width: 20px; height: 20px; border-radius: 50%; border: 1.8px solid var(--muted); display: grid; place-items: center; font-size: 12px; font-weight: 800; flex: none; color: #fff; }
+.cli.done .clchk { background: var(--ok); border-color: var(--ok); }
+.cli.done b { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--line); }
+.cli.skipped .clchk { border-style: dashed; } .cli.skipped b { color: var(--muted); }
+.cli .instrow { display: inline-flex; }
+.btn.sm { padding: 6px 12px; font-size: 12.5px; }
+.cl.off { opacity: .6; } .cl.off .ph { padding-bottom: 4px; }
+.cldone { display: flex; align-items: center; gap: 14px; padding: 14px 20px; }
+.cldone .grow { flex: 1; } .cldone b { font-size: 15px; }
+.pcard.want { border-style: dashed; } .pcard.want .instrow { margin-top: 8px; width: 100%; }
+.setbody { padding: 12px 22px 22px; }
+.setrow { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; } .setrow input { margin-top: 3px; width: 16px; height: 16px; }
+.setrow small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }

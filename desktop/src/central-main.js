@@ -14,6 +14,7 @@ const { upcomingMeetings } = require('./core/calendar');
 const sources = require('./central/sources');
 const online = require('./core/online');
 const demo = require('./central/demo');
+const checklist = require('./central/checklist');
 
 app.setName('Riyeser Central');
 // Central's data folder. Versions before 1.2 used "Riyser Central": move it across once so nothing is lost.
@@ -355,6 +356,37 @@ function registerIpc() {
     if (ok !== null) store.update('company-setup', {}, (o) => ({ ...(o || {}), unlinked: ok === false }));
     return ok;
   });
+  // ---------- "Getting started with Riyeser": ticks itself from what's on this PC (read-only) ----------
+  // Personal or business: company.json when it was set up on this PC, else asked of Riyeser online once a day.
+  let kindBusy = null;
+  const businessKind = (company) => {
+    if (company && (company.kind === 'personal' || company.kind === 'business')) return company.kind;
+    const c = store.get('online-kind', null);
+    const fresh = c && company && c.ws === company.workspace_id && Date.now() - c.at < 24 * 3600 * 1000;
+    if (!fresh && !kindBusy && company && company.mode === 'online') {
+      kindBusy = on.workspaceKind().then((k) => { if (k) store.set('online-kind', { ws: company.workspace_id, kind: k, at: Date.now() }); })
+        .catch(() => {}).finally(() => { kindBusy = null; });
+    }
+    return c && company && c.ws === company.workspace_id ? c.kind : null;
+  };
+  const checklistHidden = () => checklist.isHidden(store, on);
+  handle('central:checklist', async () => {
+    const list = programList();
+    const installed = list.filter((p) => p.status === 'installed').map((p) => p.id);
+    const known = PROGRAMS.map((p) => p.id).filter((id) => updates.PRODUCTS.some((x) => x.id === id && !x.self));
+    const names = Object.fromEntries(PROGRAMS.map((p) => [p.id, p.id === 'team' ? p.full : p.name]));
+    if (demoOn()) return checklist.build({ demo: true, hidden: checklistHidden() });
+    const lic = licence.read(appData);
+    const company = online.readCompany(appData);
+    const soft = (p) => p.catch(() => ({ found: false }));
+    const [acc, payroll] = await Promise.all([soft(checklist.accountingFacts(sources.accountingDbPath())), soft(checklist.payrollFacts(sources.payrollDbPath(appData)))]);
+    const seats = lic.online && lic.online.seats;
+    return checklist.build({ company, lic, installed, known, names, acc, payroll, kind: businessKind(company),
+      members: seats && seats.used != null ? Number(seats.used) : null, skipped: checklist.skippedIds(store), hidden: checklistHidden() });
+  });
+  // Hide or show the card. Kept on this PC, and with the Riyeser account when signed in (so riyeser.com can follow it).
+  handle('central:checklistHide', (hidden) => checklist.setHidden(store, on, !!hidden));
+  handle('central:checklistSkip', (id, skip) => checklist.setSkipped(store, id, skip !== false));
   handle('central:updates', (force) => updateStatus(!!force));
   handle('central:installUpdates', (ids) => installUpdates(ids));
   handle('central:install', (id) => installProgram(id));

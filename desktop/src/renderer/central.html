@@ -12,7 +12,7 @@
     <aside class="side">
       <div class="logo"><img src="logo-r.png" alt=""><b>Riyeser Central</b></div>
       <nav class="nav" id="nav"></nav>
-      <div class="foot"><span id="foot"></span><br><button id="licbtn">Licence</button> · <button id="checkupd">Check for updates</button></div>
+      <div class="foot"><span id="foot"></span><br><button id="licbtn">Licence</button> · <button id="checkupd">Check for updates</button> · <button id="setbtn">Settings</button></div>
     </aside>
     <main class="main">
       <div class="inner">
@@ -29,6 +29,7 @@
         <section id="results" hidden></section>
 
         <section id="home">
+          <div id="checklist" class="panel cl" hidden></div>
           <div class="cards" id="cards"></div>
           <div class="cols">
             <div class="stack">
@@ -53,6 +54,7 @@
         <section id="companyv" hidden></section>
 
         <section id="appsv" hidden>
+          <div id="planbar" class="panel banner" hidden></div>
           <h2 class="sec">More Riyeser apps</h2>
           <div class="apps" id="apps"></div>
         </section>
@@ -62,6 +64,10 @@
   <dialog id="licdlg" class="licdlg">
     <form method="dialog" class="lichead"><b>Your Riyeser licence</b><button class="x" value="close" aria-label="Close">✕</button></form>
     <div id="licbody"></div>
+  </dialog>
+  <dialog id="setdlg" class="licdlg">
+    <form method="dialog" class="lichead"><b>Settings</b><button class="x" value="close" aria-label="Close">✕</button></form>
+    <div class="setbody"><label class="setrow"><input type="checkbox" id="sethide"><span><b>Show “Getting started” on the home screen</b><small>The checklist that helps you set up Riyeser. It ticks itself as you go.</small></span></label></div>
   </dialog>
   <div id="wizard" class="wiz" hidden></div>
   <div id="toast" class="toast"></div>
