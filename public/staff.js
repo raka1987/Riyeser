@@ -953,8 +953,10 @@ async function renderSettings() {
       `<div class="scroll"><table class="t perm-table"><thead><tr><th>Action</th><th>Everyone</th><th>Managers</th><th>Administrators only</th></tr></thead><tbody>
       ${Object.entries(LABELS).map(([a, l]) => `<tr><td data-l="Action">${esc(l)}</td>${['staff', 'manager', 'admin'].map(r => `<td data-l="${roleName(r)}"><input type="radio" name="${a}" value="${r}" ${(perms[a] || 'admin') === r ? 'checked' : ''} ${ro ? 'disabled' : ''} aria-label="${roleName(r)}"></td>`).join('')}</tr>`).join('')}
       </tbody></table></div>`)}
-    ${L('setup') >= 2 ? '<div class="panel" id="s-backup"></div><div class="panel" id="s-email"></div>' : ''}`;
+    ${L('setup') >= 2 ? '<div class="panel" id="s-backup"></div><div class="panel" id="s-email"></div>' : ''}
+    ${isAdmin() ? '<div class="panel" id="s-archives"></div><div class="panel danger-zone" id="s-again"></div>' : ''}`;
   if (L('setup') >= 2) drawBackups();
+  if (isAdmin()) drawStartAgain();
   if (ro) return;
   const save = async body => { try { S = await api('/api/staff/settings', { method: 'PUT', body }); toast('Settings saved'); await refreshMe(); } catch (e) { toast(e.message); } };
   $('#s-perms').onsubmit = e => { e.preventDefault(); save({ booking_permissions: JSON.stringify(Object.fromEntries(Object.keys(LABELS).map(a => [a, (formData(e.target)[a]) || 'admin']))) }); };
@@ -1107,6 +1109,47 @@ async function drawBackups() {
     ${B.backups.length ? `<details><summary class="small">${B.backups.length} backup${B.backups.length === 1 ? '' : 's'}</summary>${table([{ h: 'File', k: 'file' }, { h: 'Made', f: b => new Date(b.at).toLocaleString('en-FJ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) }, { h: 'Size', f: b => (b.size / 1024).toFixed(0) + ' KB', r: 1 }], B.backups)}</details>` : ''}
     <p class="small muted">To bring back a backup: menu <b>File → Restore from a backup…</b></p>`;
   $('#bk-now', host).onclick = async () => { try { const r = await api('/api/staff/backups', { body: {} }); toast(`✓ Backed up: ${r.file}`); drawBackups(); } catch (e) { toast(e.message); } };
+}
+
+// ------------------------------------------------------------------ start again (Super admin): archive a locked copy, then a blank start
+const fmtWhen = iso => iso ? new Date(iso).toLocaleString('en-FJ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+async function drawStartAgain() {
+  const host = $('#s-again'), list = $('#s-archives'); if (!host || !list) return;
+  const A = await api('/api/staff/archives');
+  list.innerHTML = `<h3>🗄️ Archived copies</h3>
+    <p class="small muted" style="margin-top:-4px">Each time Payroll is started again, the old records are saved here as a locked copy. They are never deleted. Each copy has a fingerprint, so you can check no-one has changed it.</p>
+    ${table([{ h: 'Saved', f: e => esc(fmtWhen(e.at)) }, { h: 'File', f: e => `<code style="overflow-wrap:anywhere">${esc(e.file)}</code>` }, { h: 'By', f: e => esc(e.by) }, { h: 'Reason', f: e => esc(e.reason) }, { h: 'Check', f: e => `<span class="arc-st" data-n="${e.n}"></span>` }], A.entries, { empty: 'No archived copies yet.' })}
+    ${A.entries.length ? '<div class="actions"><button class="btn sm ghost" id="arc-check">Check they haven\'t been changed</button></div><div id="arc-sum"></div>' : ''}
+    <p class="small muted">Folder: <code style="overflow-wrap:anywhere">${esc(A.folder)}</code></p>`;
+  const chk = $('#arc-check', list);
+  if (chk) chk.onclick = async () => {
+    chk.disabled = true;
+    try {
+      const C = await api('/api/staff/archives/check');
+      for (const e of C.entries) { const el = $(`.arc-st[data-n="${e.n}"]`, list); if (el) { el.className = `arc-st ${e.ok ? 'ok' : 'bad'}`; el.textContent = (e.ok ? '✓ ' : '⚠ ') + e.status; } }
+      $('#arc-sum', list).innerHTML = C.all_ok ? '<div class="note arc-ok">✓ All archived copies are unchanged and the log is intact.</div>'
+        : `<div class="error">⚠ Something has changed. ${C.chain_intact ? '' : 'The log of archived copies has been altered. '}Don't start again or delete anything. Keep this computer and its files as they are, and get advice.</div>`;
+    } catch (err) { toast(err.message); } finally { chk.disabled = false; }
+  };
+  host.innerHTML = `<h3>⚠️ Start again</h3>
+    <p>This clears Payroll back to a blank start: all staff, timesheets, pay runs, payslips, leave, pay history, bank payments and settings. Only your own login stays, with the same username and password.</p>
+    <p><b>Your current records are saved as a locked archive copy first. Nothing is deleted.</b> The copy is listed under Archived copies above.</p>
+    <form id="again-f"><div class="err"></div>
+    ${fieldsHTML([{ n: 'password', l: 'Your password', t: 'password', req: 1 }, { n: 'confirm', l: `Type ${A.confirm_word} to confirm`, req: 1, ph: A.confirm_word }, { n: 'reason', l: 'Reason (optional)', full: 1, ph: 'e.g. finished testing, starting for real' }])}
+    <div class="actions"><button class="btn danger">Start again</button></div></form>`;
+  const f = $('#again-f', host);
+  f.querySelector('[name=confirm]').setAttribute('autocomplete', 'off');
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const b = formData(f); $('.err', f).innerHTML = '';
+    if (!confirm('Start again? Your current records will be saved as a locked archive copy, then Payroll will be blank.')) return;
+    const btn = $('.btn.danger', f); btn.disabled = true;
+    try {
+      const r = await api('/api/staff/start-again', { body: b });
+      toast(`✓ Started again. Old records saved as ${r.file}`, 6000);
+      await refreshMe(); renderSettings();
+    } catch (err) { $('.err', f).innerHTML = `<div class="error">${esc(err.message)}</div>`; btn.disabled = false; }
+  };
 }
 
 // ------------------------------------------------------------------ desktop program: save payslips / timesheets as a PDF

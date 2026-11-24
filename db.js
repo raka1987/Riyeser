@@ -183,4 +183,4 @@ function addDays(dateStr, n) {
   return d.toISOString().slice(0, 10);
 }
 seed();
-module.exports = { DATA_DIR, db, hashPassword, verifyPassword, getSettings, setSetting, todayIn, addDays };
+module.exports = { DATA_DIR, DEFAULT_SETTINGS, db, hashPassword, verifyPassword, getSettings, setSetting, todayIn, addDays };

@@ -46,6 +46,9 @@ before(async () => {
 after(async () => {
   // Wait for the test server to close before removing its folder: on Windows an open database file can't be deleted.
   if (server.exitCode === null) await new Promise((r) => { server.once('exit', r); server.kill(); setTimeout(r, 5000); });
+  // the archive copies are read-only: make them writable so the throwaway folder can be removed (Windows needs this)
+  const arc = path.join(DATA_DIR, 'archive');
+  if (fs.existsSync(arc)) for (const f of fs.readdirSync(arc)) { try { fs.chmodSync(path.join(arc, f), 0o644); } catch { } }
   try { fs.rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* temp folder; Windows tidies it later */ }
 });
 
@@ -641,4 +644,104 @@ test('access by area: supervisor sees only their team, no pay rates; self-servic
   assert.ok(ch && /employees Hidden.*→.*employees View/.test(ch.details), JSON.stringify(ch));
   assert.ok(log.find(l => l.action === 'Changed pay or bank details' && l.details === 'Jone Team: pay_rate' && l.user_name === 'Pita Payroll'));
   assert.equal((await call('GET', '/api/staff/employees', null, jc)).status, 200); // takes effect straight away
+});
+
+// ---- Start again: a locked archive copy first, a fingerprint log that shows changes, then a blank start (keep these tests last)
+const crypto = require('node:crypto');
+const sha256 = b => crypto.createHash('sha256').update(b).digest('hex');
+const ARC = path.join(DATA_DIR, 'archive'), LEDGER = path.join(ARC, 'ledger.jsonl');
+const ledgerLines = () => fs.readFileSync(LEDGER, 'utf8').split('\n').filter(Boolean);
+const loginAt = async (n, u, p) => { const x = await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': `10.6.6.${n}` }, body: JSON.stringify({ username: u, password: p }) }); assert.equal(x.status, 200); return x.headers.get('set-cookie').split(';')[0]; };
+
+test('start again: Super admin only, with their password and the confirmation word', async () => {
+  const mgr = await call('POST', '/api/staff/employees', { name: 'Testy Manager', username: 'testymgr', password: 'mgrpass123', role: 'manager', perms: { employees: 3, pay_rates: 3, timesheets: 3, payroll: 3, leave: 3, reports: 3, setup: 3 } }, admin);
+  assert.equal(mgr.status, 200, JSON.stringify(mgr.data));
+  const mc = await loginAt(1, 'testymgr', 'mgrpass123');
+  for (const c of [staff, mc]) {
+    assert.equal((await call('POST', '/api/staff/start-again', { password: 'mgrpass123', confirm: 'START AGAIN' }, c)).status, 403);
+    assert.equal((await call('GET', '/api/staff/archives', null, c)).status, 403);
+    assert.equal((await call('GET', '/api/staff/archives/check', null, c)).status, 403);
+  }
+  const A = (await call('GET', '/api/staff/archives', null, admin)).data;
+  assert.equal(A.confirm_word, 'START AGAIN'); // no business name set yet
+  assert.deepEqual(A.entries, []);
+  await call('PUT', '/api/staff/settings', { company_name: 'Example Testing Co' }, admin);
+  assert.equal((await call('GET', '/api/staff/archives', null, admin)).data.confirm_word, 'Example Testing Co');
+  const wrongPw = await call('POST', '/api/staff/start-again', { password: 'nope', confirm: 'Example Testing Co' }, admin);
+  assert.equal(wrongPw.status, 400); assert.match(wrongPw.data.error, /password/i);
+  const wrongWord = await call('POST', '/api/staff/start-again', { password: 'AdminPass123', confirm: 'example testing co' }, admin);
+  assert.equal(wrongWord.status, 400); assert.match(wrongWord.data.error, /Example Testing Co/);
+  assert.ok(!fs.existsSync(LEDGER), 'nothing archived when refused');
+  assert.ok((await call('GET', '/api/staff/employees', null, admin)).data.length > 2, 'nothing cleared when refused');
+});
+
+test('start again: old records saved as a read-only copy matching the log; admin can still log in; business data gone; a second reset chains', async () => {
+  const r = await call('POST', '/api/staff/start-again', { password: 'AdminPass123', confirm: 'Example Testing Co', reason: 'finished testing' }, admin);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.match(r.data.file, /^payroll-\d{8}-\d{6}\.db$/);
+  const f1 = path.join(ARC, r.data.file);
+  assert.ok(fs.existsSync(f1));
+  assert.equal(fs.statSync(f1).mode & 0o222, 0, 'archive copy is read-only');
+  assert.equal(sha256(fs.readFileSync(f1)), r.data.sha256);
+  const L1 = ledgerLines(); assert.equal(L1.length, 1);
+  const e1 = JSON.parse(L1[0]);
+  assert.equal(e1.program, 'payroll'); assert.equal(e1.file, r.data.file); assert.equal(e1.sha256, r.data.sha256); assert.equal(e1.prev, 'genesis');
+  assert.equal(e1.bytes, fs.statSync(f1).size); assert.match(e1.by, /admin/); assert.equal(e1.reason, 'finished testing');
+  // the archive really holds the old records
+  const { DatabaseSync } = require('node:sqlite');
+  const old = new DatabaseSync(f1, { readOnly: true });
+  assert.ok(old.prepare("SELECT COUNT(*) AS n FROM users WHERE username = 'sera'").get().n === 1);
+  assert.ok(old.prepare('SELECT COUNT(*) AS n FROM timesheets').get().n > 0);
+  old.close();
+  // still logged in, and can log in again with the same password
+  assert.equal((await call('GET', '/api/auth/me', null, admin)).status, 200);
+  admin = await loginAt(2, 'admin', 'AdminPass123');
+  const emps = (await call('GET', '/api/staff/employees', null, admin)).data;
+  assert.deepEqual(emps.map(e => e.username), ['admin']);
+  assert.equal((await call('POST', '/api/auth/login', { username: 'sera', password: 'staffpass1' })).status, 401);
+  assert.deepEqual((await call('GET', '/api/staff/timesheets?from=2000-01-01&to=2100-12-31', null, admin)).data, []);
+  assert.deepEqual((await call('GET', '/api/staff/payroll/runs', null, admin)).data, []);
+  const s = (await call('GET', '/api/staff/settings', null, admin)).data;
+  assert.equal(s.company_name, 'My Company'); assert.equal(s.normal_week_hours, '40');
+  const log = (await call('GET', '/api/staff/audit', null, admin)).data;
+  assert.equal(log.length, 1); assert.equal(log[0].action, 'Started again (blank start)');
+  assert.ok(log[0].details.includes(r.data.file) && log[0].details.includes(r.data.sha256));
+  // second reset: the new log line carries the fingerprint of the first line
+  const r2 = await call('POST', '/api/staff/start-again', { password: 'AdminPass123', confirm: 'START AGAIN' }, admin);
+  assert.equal(r2.status, 200, JSON.stringify(r2.data));
+  assert.notEqual(r2.data.file, r.data.file);
+  const L2 = ledgerLines(); assert.equal(L2.length, 2); assert.equal(L2[0], L1[0], 'earlier lines are never rewritten');
+  assert.equal(JSON.parse(L2[1]).prev, sha256(L2[0]));
+  const C = (await call('GET', '/api/staff/archives/check', null, admin)).data;
+  assert.ok(C.all_ok && C.chain_intact, JSON.stringify(C));
+  assert.deepEqual(C.entries.map(e => e.status), ['Unchanged', 'Unchanged']);
+  assert.equal((await call('GET', '/api/staff/archives', null, admin)).data.entries.length, 2);
+});
+
+test('check archives: a changed archive file and an edited log line are reported; nothing can delete archives', async () => {
+  const L = ledgerLines(), e1 = JSON.parse(L[0]), f1 = path.join(ARC, e1.file);
+  // someone makes the file writable and adds a byte
+  fs.chmodSync(f1, 0o644); fs.appendFileSync(f1, Buffer.from([0])); fs.chmodSync(f1, 0o444);
+  let C = (await call('GET', '/api/staff/archives/check', null, admin)).data;
+  assert.equal(C.entries[0].status, 'File changed since it was archived'); assert.equal(C.entries[1].status, 'Unchanged');
+  assert.equal(C.all_ok, false); assert.equal(C.chain_intact, true);
+  // a missing file
+  const f2 = path.join(ARC, JSON.parse(L[1]).file), hidden = f2 + '.moved';
+  fs.renameSync(f2, hidden);
+  C = (await call('GET', '/api/staff/archives/check', null, admin)).data;
+  assert.equal(C.entries[1].status, 'File missing');
+  fs.renameSync(hidden, f2);
+  // someone edits the first log line to match the changed file: the chain shows it
+  const forged = JSON.stringify({ ...e1, sha256: sha256(fs.readFileSync(f1)) });
+  fs.writeFileSync(LEDGER, [forged, L[1]].join('\n') + '\n');
+  C = (await call('GET', '/api/staff/archives/check', null, admin)).data;
+  assert.equal(C.entries[0].status, 'Log entry altered'); assert.equal(C.entries[1].status, 'Unchanged');
+  assert.equal(C.chain_intact, false); assert.equal(C.all_ok, false);
+  // editing the newest line is caught too
+  fs.writeFileSync(LEDGER, [L[0], JSON.stringify({ ...JSON.parse(L[1]), reason: 'changed' })].join('\n') + '\n');
+  C = (await call('GET', '/api/staff/archives/check', null, admin)).data;
+  assert.equal(C.entries[1].status, 'Log entry altered'); assert.equal(C.chain_intact, false);
+  // no way to delete an archive copy or a log line
+  for (const u of ['/api/staff/archives', `/api/staff/archives/${e1.file}`, '/api/staff/archives/1']) assert.equal((await call('DELETE', u, null, admin)).status, 404, u);
+  assert.ok(fs.existsSync(f1) && fs.existsSync(f2));
 });

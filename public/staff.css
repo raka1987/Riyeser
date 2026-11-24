@@ -728,3 +728,5 @@ table.t.fit th:last-child, table.t.fit td:last-child { padding-right: 16px; }
 .br-row .ts-box { height: auto; min-height: 54px; }
 .acc-grid td, .acc-grid th { text-align: center; } .acc-grid td:first-child, .acc-grid th:first-child { text-align: left; }
 .acc-grid input[type=radio] { width: auto; accent-color: var(--green-700); transform: scale(1.2); }
+.arc-st { font-size: .82rem; font-weight: 600; white-space: nowrap; } .arc-st.ok { color: var(--green-700, #1f5b3a); } .arc-st.bad { color: var(--red, #b3261e); }
+.note.arc-ok { background: #eaf6ef; border-color: #a9d8bd; color: #1e6b45; }

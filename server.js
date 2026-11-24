@@ -4,7 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 const { WebSocketServer } = require('ws');
-const { db, hashPassword, verifyPassword, getSettings, setSetting, todayIn, addDays } = require('./db');
+const { db, DATA_DIR, DEFAULT_SETTINGS, hashPassword, verifyPassword, getSettings, setSetting, todayIn, addDays } = require('./db');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -772,6 +772,7 @@ require('./mailer')(app, { db, requireRole: () => requireArea('setup', 2), wrap,
 const mail = () => app.locals.mail || {};
 require('./desktop')(app, { db, requireRole, requireArea, wrap, bad, str, getSettings, setSetting, hashPassword });
 require('./bank')(app, { db, requireRole, requireArea, audit, wrap, bad, str, isDate });
+require('./archive')(app, { db, DATA_DIR, DEFAULT_SETTINGS, requireRole, rateLimit, audit, wrap, bad, str, verifyPassword, getSettings, setSetting });
 require('./wages')(app, { db, requireRole, requireArea, must, audit, wrap, bad, HttpError, str, round2, isDate, getSettings, ROLE_RANK, newClockPin, hashPassword });
 
 app.get('/api/staff/export/:what.csv', requireStaff, wrap((req, res) => {
