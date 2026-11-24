@@ -280,8 +280,7 @@
       ${mode === 'up' ? `<button type="button" class="btn w gcancel" id="gcancel">Cancel</button>` : ''}
       <div class="alt">${mode === 'in' ? `<button type="button" class="linkbtn" data-go="reset">Forgot password?</button></div>
       <div class="or">New to Riyeser?</div><button type="button" class="btn w" data-go="up">Create a free account</button><div class="alt" hidden>`
-        : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div>
-      <div class="alt"><a href="?demo">Try the demo first</a></div></form></div>`;
+        : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div></form></div>`;
     $app.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => gate(b.dataset.go));
     // Cancel: back to riyeser.com (in the Windows app, back to Sign in)
     const cx = $app.querySelector('#gcancel'); if (cx) cx.onclick = () => (/Electron/.test(navigator.userAgent) ? gate('in') : location.assign('/'));

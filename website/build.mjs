@@ -129,7 +129,7 @@ const ALL_PROGRAMS = [
       ['Meetings & to-dos', 'Connect your calendar; action items from meeting notes land on your to-do list.'],
     ],
     note: 'Desk Assistant never touches Windows or program files — only your own documents.' },
-  { id: 'team', name: 'Riyeser Team', short: 'Team chat', icon: '💬', file: 'RiyeserTeam-Setup.exe', link: '/team/?demo', linkLabel: 'Try the demo', shot: 'team-chat.webp',
+  { id: 'team', name: 'Riyeser Team', short: 'Team chat', icon: '💬', file: 'RiyeserTeam-Setup.exe', shot: 'team-chat.webp',
     one: 'Team chat for your business: channels for jobs and the office, direct messages, and live updates on your PC and phone. Free.',
     pitch: 'Your whole team, in one conversation.',
     features: [
@@ -789,7 +789,7 @@ ${searchScript(up)}
   <div>
     <div class="crumbs"><a href="${up}help.html">Help Centre</a> › ${esc(gName(g))}</div>
     <div class="hhead"><div class="icon i-${g.app}">${gIcon(g, up)}</div><div><h1>${esc(gName(g))}</h1><p>${esc(g.intro)}</p>
-      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'team' ? `<a class="btn p sm" href="/team/">Open Riyeser Team</a><a class="btn s sm" href="/team/?demo">Try the demo</a>`: g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
+      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'team' ? `<a class="btn p sm" href="/team/">Open Riyeser Team</a>`: g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
     ${searchBox(`Search the ${gName(g)} guide`)}
     ${g.groups.map((grp, i) => `<div class="hgroup" id="s${i + 1}"><h2><span class="num">${i + 1}</span>${esc(grp.title)}</h2><div class="faq">${grp.items.map(([id, q, a], j) => `<details id="${id}"${i === 0 && j === 0 ? ' open' : ''}><summary>${q}</summary>${a}</details>`).join('')}</div></div>`).join('')}
     <p class="hnone" id="hnone">Nothing in this guide matches that. Try the <a class="more" href="${up}help.html">Help Centre</a> search, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a>.</p>
