@@ -263,7 +263,7 @@
   // ------------------------------------------------------------------ sign in / create account
   function gate(mode = 'in', note = '') {
     const join = params.get('join');
-    $app.className = 'acct'; document.title = 'Riyeser';
+    $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><form class="gcard" id="gf">${/Electron/.test(navigator.userAgent) ? '' : '<a class="gback" href="/">← Back to riyeser.com</a>'}
       <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${mode !== 'reset' ? `<div class="gtabs" role="tablist"><button type="button" role="tab" data-go="in" class="${mode === 'in' ? 'on' : ''}" aria-selected="${mode === 'in'}">Sign in</button><button type="button" role="tab" data-go="up" class="${mode === 'up' ? 'on' : ''}" aria-selected="${mode === 'up'}">Create account</button></div>` : ''}
@@ -297,7 +297,7 @@
   // ------------------------------------------------------------------ create or join a team
   function setupTeam(note = '') {
     const join = params.get('join') || '';
-    $app.className = 'acct'; document.title = 'Riyeser';
+    $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><div class="gcard">
       <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${note}
@@ -336,7 +336,7 @@
   let waitTimer = null;
   function waiting(company, declined) {
     clearInterval(waitTimer);
-    $app.className = 'acct'; document.title = 'Riyeser';
+    $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><div class="gcard">
       <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${declined ? `<h1>${esc(company)} didn't approve this</h1><p>Check with them, or ask to join with a different Company ID.</p><button class="btn p w" id="again">Try another code</button>`
@@ -361,7 +361,7 @@
   // ---------------- two-step sign-in
   // At sign-in, when it's turned on: the 6-number code from the authenticator app.
   async function codeScreen(note = '') {
-    $app.className = 'acct'; document.title = 'Riyeser';
+    $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><form class="gcard" id="cs">
       <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       <h1>🔐 Enter your code</h1><p>Open your authenticator app and type the 6 numbers shown for Riyeser.</p>${note}
@@ -612,7 +612,13 @@
     <div class="me">${av(S.user.id, me.display_name || S.user.email)}<div class="nm">${esc(me.display_name || 'You')}<small>${esc(S.user.email || '')}</small></div><button id="out">Sign out</button></div>`;
   }
 
+  // The browser tab shows Riyeser's logo on the account screens, and Team's icon once inside chat.
+  function tabIcon(team) {
+    const l = document.getElementById('favicon'); if (!l) return;
+    l.type = team ? 'image/svg+xml' : 'image/png'; l.href = team ? 'icon.svg' : '/assets/logo-r.png';
+  }
   function render() {
+    tabIcon(true);
     $app.className = '';
     $app.innerHTML = `${demoBar()}<div class="shell${S.inChat ? ' inchat' : ''}"><aside class="side" id="side"></aside>
       <section class="main"><header class="mhead" id="mhead"></header><div class="msgs" id="msgs" aria-live="polite"></div>
