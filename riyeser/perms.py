@@ -127,6 +127,8 @@ def area_of(endpoint, view_args, args, db):
         return None
     if endpoint == "bookings.setup":
         return "setup" if request.method == "POST" else "bookings"
+    if endpoint == "bookings.starters":
+        return "setup"
     if bp == "bookings":
         return "bookings"
     if endpoint in ("pos.setup", "pos.set_mode", "pos.approvals"):

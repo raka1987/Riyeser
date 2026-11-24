@@ -83,16 +83,34 @@ def services(db, all_=False):
 
 
 def ensure_started(db):
-    """First time in: add starter staff/tables and services for this kind of business (all can be renamed)."""
-    if db.execute("SELECT 1 FROM booking_resources").fetchone():
-        return
-    m = M()
-    for i, name in enumerate(m["starter_who"]):
-        db.execute("INSERT INTO booking_resources (name, kind, capacity, colour) VALUES (?,?,?,?)",
-                   (name, m["kind"], 4 if m["kind"] == "table" else None, COLOURS[i % len(COLOURS)]))
-    for name, mins, price in m["starter_what"]:
-        db.execute("INSERT INTO booking_services (name, minutes, price) VALUES (?,?,?)", (name, mins, price))
-    db.commit()
+    """Nothing is added on its own any more: a new company starts blank. Returns True once there's someone or
+    something to book (staff, tables or rooms). Starters are added only on request, with add_starters()."""
+    return bool(db.execute("SELECT 1 FROM booking_resources").fetchone())
+
+
+def add_starters(db, key=None):
+    """The suggested staff/tables and services for this kind of business (all can be renamed). Only fills what's
+    empty, so pressing it twice adds nothing more. Returns how many were added."""
+    m = MODES[key or mode()]
+    n = 0
+    if not db.execute("SELECT 1 FROM booking_resources").fetchone():
+        for i, name in enumerate(m["starter_who"]):
+            db.execute("INSERT INTO booking_resources (name, kind, capacity, colour) VALUES (?,?,?,?)",
+                       (name, m["kind"], 4 if m["kind"] == "table" else None, COLOURS[i % len(COLOURS)]))
+            n += 1
+    if not db.execute("SELECT 1 FROM booking_services").fetchone():
+        for name, mins, price in m["starter_what"]:
+            db.execute("INSERT INTO booking_services (name, minutes, price) VALUES (?,?,?)", (name, mins, price))
+            n += 1
+    return n
+
+
+def _only_starters(db, key):
+    """Exactly the suggestions for that kind of business, untouched (so switching kind can swap them)."""
+    m = MODES[key]
+    who = [r["name"] for r in db.execute("SELECT name FROM booking_resources ORDER BY id")]
+    what = sorted(r["name"] for r in db.execute("SELECT name FROM booking_services"))
+    return bool(who or what) and who == m["starter_who"] and what == sorted(n for n, _, _ in m["starter_what"])
 
 
 def day_bookings(db, d, d2=None):
@@ -137,7 +155,6 @@ def plan_check(db):
 @bp.route("/")
 def calendar():
     db = get_db()
-    ensure_started(db)
     d = _day(request.args.get("d"))
     h1, h2 = _hours(db)
     res = resources(db)
@@ -169,7 +186,6 @@ def calendar():
 @bp.route("/week")
 def week():
     db = get_db()
-    ensure_started(db)
     d = _day(request.args.get("d"))
     start = d - timedelta(days=d.weekday())
     rows = day_bookings(db, start, start + timedelta(days=7))
@@ -215,7 +231,6 @@ def _form_lookups(db):
 @bp.route("/<int:bid>", methods=["GET", "POST"])
 def edit(bid=None):
     db = get_db()
-    ensure_started(db)
     b = db.execute("SELECT * FROM bookings WHERE id=?", (bid,)).fetchone() if bid else None
     if bid and not b:
         abort(404)
@@ -488,7 +503,6 @@ def _invoice_job(db, jid):
 @bp.route("/jobs")
 def jobs():
     db = get_db()
-    ensure_started(db)
     q = request.args.get("q", "").strip()
     sql = ("SELECT j.*, c.name customer, s.name service, doc.number inv_no,"
            " (SELECT MIN(starts_at) FROM bookings b WHERE b.job_id=j.id AND b.status IN ('booked','confirmed','started'))"
@@ -522,7 +536,6 @@ def jobs():
 @bp.route("/job/<int:jid>", methods=["GET", "POST"])
 def job(jid=None):
     db = get_db()
-    ensure_started(db)
     j = get_job(db, jid) if jid else None
     if request.method == "POST":
         return _save_job(jid)
@@ -693,7 +706,6 @@ def part_price(jid):
 @bp.route("/setup", methods=["GET", "POST"])
 def setup():
     db = get_db()
-    ensure_started(db)
     if request.method == "POST":
         return _save_setup()
     items = db.execute("SELECT id, name FROM items WHERE is_sold=1 ORDER BY name").fetchall()
@@ -702,20 +714,32 @@ def setup():
                            colours=COLOURS, labour_rate=g.company.get("bookings_labour_rate") or 0)
 
 
+@bp.route("/setup/starters", methods=["POST"])
+@guarded
+def starters():
+    db = get_db()
+    n = add_starters(db)
+    audit(db, "bookings_starters", f"{mode()}: {n} added")
+    flash(f"Added {n} suggestions. Rename them below to suit you." if n else "You already have staff and services.", "ok")
+    return redirect(url_for("bookings.setup"))
+
+
 @guarded
 def _save_setup():
     db = get_db()
     f = request.form
     new_mode = f.get("mode") if f.get("mode") in MODES else mode()
-    if new_mode != mode():
+    old_mode = mode()
+    if new_mode != old_mode:
         db.execute("UPDATE company SET bookings_mode=? WHERE id=1", (new_mode,))
         g.company["bookings_mode"] = new_mode
-        # Nothing booked yet: swap the starter staff/tables and services for the new kind of business.
-        if not db.execute("SELECT 1 FROM bookings").fetchone() and not db.execute("SELECT 1 FROM booking_jobs").fetchone():
+        nothing_booked = not db.execute("SELECT 1 FROM bookings").fetchone() and \
+            not db.execute("SELECT 1 FROM booking_jobs").fetchone()
+        # Nothing booked yet and only the suggestions added: swap them for the new kind of business's suggestions.
+        if nothing_booked and _only_starters(db, old_mode):
             db.execute("DELETE FROM booking_resources")
             db.execute("DELETE FROM booking_services")
-            db.commit()
-            ensure_started(db)
+            add_starters(db, new_mode)
             audit(db, "bookings_setup", new_mode)
             flash(f"Set up for {MODES[new_mode]['name'].lower()}. Rename the starters below to suit you.", "ok")
             return redirect(url_for("bookings.setup"))

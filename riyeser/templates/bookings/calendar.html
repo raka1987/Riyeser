@@ -6,7 +6,7 @@
 <a class="btn" href="{{ url_for('bookings.calendar', d=prev.isoformat()) }}" aria-label="Previous day">‹</a>{% if d != today %}<a class="btn" href="{{ url_for('bookings.calendar') }}">Today</a>{% endif %}<a class="btn" href="{{ url_for('bookings.calendar', d=next.isoformat()) }}" aria-label="Next day">›</a>
 <form class="bk-date"><input type="date" name="d" value="{{ d.isoformat() }}" onchange="this.form.submit()" aria-label="Go to date"></form>
 {% if can('bookings', 2) %}<a class="btn pri" href="{{ url_for('bookings.edit', d=d.isoformat()) }}">+ New {{ m.one }}</a>{% endif %}</div></div>
-{% if not cols %}<div class="card"><p>Add your {{ m.who|lower }} under <a href="{{ url_for('bookings.setup') }}">Bookings setup</a> to start booking.</p></div>{% else %}
+{% if not cols %}<div class="card"><h3>No {{ m.who|lower }} yet</h3><p>Add your {{ m.who|lower }} under <a href="{{ url_for('bookings.setup') }}">Bookings setup</a> to start booking. You can start with our suggestions there and rename them.</p>{% if can('setup') %}<a class="btn pri" href="{{ url_for('bookings.setup') }}">Go to Bookings setup</a>{% endif %}</div>{% else %}
 <div class="bk-day" style="--cols:{{ cols|length }};--rows:{{ slots|length }}">
   <div class="bk-times"><div class="bk-ch"></div>{% for s in slots %}<div class="bk-t">{% if s % 60 == 0 %}{{ '%02d:00'|format(s // 60) }}{% endif %}</div>{% endfor %}</div>
   {% for c in cols %}<div class="bk-col">

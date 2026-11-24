@@ -5,6 +5,11 @@ from .db import linked, to_cents
 from . import ledger as L
 
 
+# Made-up details the demo fills in. Start again doesn't carry these over to the blank company.
+DEMO_DETAILS = {"abn": "51 824 753 556", "address": "12 Harbour St, Sydney NSW 2000", "phone": "02 9000 1234",
+                "email": "accounts@clearwater.example"}
+
+
 def seed_demo(db):
     today = date.today()
 
@@ -13,8 +18,8 @@ def seed_demo(db):
 
     acc = {r["code"]: r["id"] for r in db.execute("SELECT id, code FROM accounts")}
     tc = {r["code"]: r["id"] for r in db.execute("SELECT id, code FROM tax_codes")}
-    db.execute("UPDATE company SET abn='51 824 753 556', address='12 Harbour St, Sydney NSW 2000',"
-               " phone='02 9000 1234', email='accounts@clearwater.example' WHERE id=1")
+    db.execute("UPDATE company SET abn=:abn, address=:address, phone=:phone, email=:email, is_demo=1 WHERE id=1",
+               DEMO_DETAILS)
 
     def contact(kind, name, terms=30, account=None, email=None):
         return db.execute("INSERT INTO contacts (kind, name, terms_days, default_account_id, tax_code_id, email)"

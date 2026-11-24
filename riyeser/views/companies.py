@@ -8,7 +8,7 @@ from werkzeug.security import check_password_hash
 
 from .. import companies as co
 from .. import perms
-from ..db import get_db, audit
+from ..db import get_db, audit, close_db
 from ..ledger import fy_start
 
 bp = Blueprint("companies", __name__, url_prefix="/companies")
@@ -83,9 +83,12 @@ def index():
             u = co.user_row(c["path"], username) if c["archived"] else None
             if u and u["role"] == "admin":
                 archived.append(c)
+    from .. import archive as ar
+    copies = list(reversed(ar.entries(co.data_folder())))[:8] if _is_admin_here() else []
     return render_template("companies/index.html", rows=rows, totals=totals, shown=shown, archived=archived,
                            can_add=_is_admin_here(), allowance=co.allowance(), in_use=len(co.active_ids()),
-                           room=co.can_add_another())
+                           room=co.can_add_another(), copies=copies,
+                           here_name=(co._details(co.path_of(co.current_id())) or {}).get("name", ""))
 
 
 @bp.route("/switch/<cid>", methods=["GET", "POST"])
@@ -125,7 +128,8 @@ def add():
         return redirect(url_for("companies.index"))
     f = request.form
     try:
-        cid = co.add_company(f.get("name"), f.get("abn"), f.get("edition") or None, owner=g.user, demo=bool(f.get("demo")))
+        cid = co.add_company(f.get("name"), f.get("abn"), f.get("edition") or None, owner=g.user,
+                             demo=f.get("start") == "demo" or bool(f.get("demo")))
     except ValueError as e:
         flash(str(e), "error")
         return redirect(url_for("companies.index"))
@@ -191,3 +195,71 @@ def archive(cid):
         session["uid"] = acc.get(other)
     flash("Company restored." if restore else "Company archived. Its books are kept; restore it any time from Companies.", "ok")
     return redirect(url_for("companies.index"))
+
+
+# ---------------------------------------------------------------- start again (administrators only)
+def _confirmed(f):
+    """The administrator's current password and the company's exact name. Returns an error message, or None."""
+    if not check_password_hash(g.user["password_hash"], f.get("password") or ""):
+        return "That password isn't right. Nothing has been changed."
+    name = (co._details(co.path_of(co.current_id())) or {}).get("name", "")
+    if (f.get("confirm_name") or "").strip() != name:
+        return f"Type the company's name exactly as shown ({name}) to confirm. Nothing has been changed."
+    return None
+
+
+@bp.route("/start-again", methods=["POST"])
+def start_again():
+    if not _is_admin_here():
+        abort(403)
+    why = _confirmed(request.form)
+    if why:
+        flash(why, "error")
+        return redirect(url_for("companies.index") + "#start-again")
+    reason = (request.form.get("reason") or "").strip()[:500]
+    username = g.user["username"]
+    close_db()  # the company file is rewritten below: don't hold it open
+    e = co.start_again(co.current_id(), username, reason)
+    flash(f"Started again with a blank company. Your old records are saved as a locked archive copy "
+          f"({e['file']}). Nothing was deleted.", "ok")
+    return redirect(url_for("companies.index"))
+
+
+@bp.route("/start-everything-again", methods=["POST"])
+def start_everything():
+    if not _is_admin_here():
+        abort(403)
+    username = g.user["username"]
+    if not co.admin_everywhere(username):
+        flash("Only someone who is an administrator in every company can start everything again. "
+              "You can still start this company again on its own.", "error")
+        return redirect(url_for("companies.index") + "#start-again")
+    why = _confirmed(request.form)
+    if why:
+        flash(why, "error")
+        return redirect(url_for("companies.index") + "#start-again")
+    reason = (request.form.get("reason") or "").strip()[:500]
+    acc = _access()
+    close_db()
+    done = co.start_everything_again(username, reason)
+    u = co.user_row(co.path_of(co.MAIN), username)
+    if u and co.MAIN in acc:
+        session["access"] = {co.MAIN: acc[co.MAIN]}
+        session["co"] = co.MAIN
+        session["uid"] = acc[co.MAIN]
+    else:
+        session.clear()
+        flash("Everything has started again. Sign in to the main company.", "ok")
+        return redirect(url_for("auth.login"))
+    flash(f"Everything has started again. {len(done)} compan{'y was' if len(done) == 1 else 'ies were'} saved as locked "
+          "archive copies first, and the other companies are archived (hidden). Nothing was deleted.", "ok")
+    return redirect(url_for("companies.index"))
+
+
+@bp.route("/archives")
+def check_archives():
+    if not _is_admin_here():
+        abort(403)
+    from .. import archive as ar
+    result = ar.check(co.data_folder(), co.path_of(co.MAIN))
+    return render_template("companies/archives.html", result=result, ar=ar)

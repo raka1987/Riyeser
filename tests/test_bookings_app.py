@@ -29,7 +29,9 @@ def test_bookings_app_shows_the_calendar_only(tmp_path, monkeypatch):
     r = c.get("/")
     assert r.status_code == 302 and r.headers["Location"].endswith("/bookings/")
     page = c.get("/bookings/").get_data(as_text=True)
-    assert "Riyeser Bookings" in page and "ed-book" in page and "Staff 1" in page   # starter staff for trades jobs
+    assert "Riyeser Bookings" in page and "ed-book" in page and "No staff yet" in page   # blank: nothing added
+    c.post("/bookings/setup/starters")
+    assert "Staff 1" in c.get("/bookings/").get_data(as_text=True)   # suggested staff for trades jobs
     for gone in ("Bank accounts", "General journal", "Enter bill", "Payroll"):
         assert gone not in page, gone
     for url in ("/banking/", "/purchase/new", "/inventory/", "/pos/"):
@@ -45,6 +47,8 @@ def test_each_kind_of_business(tmp_path, monkeypatch, mode, who):
     with app.app_context():
         get_db().execute("UPDATE company SET bookings_mode=?", (mode,))
         get_db().commit()
+    assert who not in c.get("/bookings/").get_data(as_text=True)
+    c.post("/bookings/setup/starters")
     page = c.get("/bookings/").get_data(as_text=True)
     assert who in page
     form = c.get("/bookings/new").get_data(as_text=True)
@@ -54,7 +58,7 @@ def test_each_kind_of_business(tmp_path, monkeypatch, mode, who):
 
 def test_book_clash_and_invoice(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
-    c.get("/bookings/")                                 # starts the staff list
+    c.post("/bookings/setup/starters")                  # the suggested staff and job types
     cust = _cust(app)
     staff = _one(app, "SELECT id FROM booking_resources")["id"]
     with app.app_context():
@@ -80,7 +84,7 @@ def test_book_clash_and_invoice(tmp_path, monkeypatch):
 
 def test_price_typed_on_the_booking_is_invoiced(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
-    c.get("/bookings/")
+    c.post("/bookings/setup/starters")                  # the suggested staff and job types
     cust = _cust(app)
     form = c.get("/bookings/new").get_data(as_text=True)
     assert 'name="price"' in form and "Price" in form
@@ -101,7 +105,7 @@ def test_price_typed_on_the_booking_is_invoiced(tmp_path, monkeypatch):
 
 def test_job_type_description_goes_on_the_invoice(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
-    c.get("/bookings/")
+    c.post("/bookings/setup/starters")                  # the suggested staff and job types
     cust = _cust(app)
     page = c.get("/bookings/setup").get_data(as_text=True)
     assert "Invoice description" in page and "Add a new job type" in page
@@ -128,7 +132,7 @@ def test_table_bigger_than_its_seats_is_refused(tmp_path, monkeypatch):
     with app.app_context():
         get_db().execute("UPDATE company SET bookings_mode='tables'")
         get_db().commit()
-    c.get("/bookings/")
+    c.post("/bookings/setup/starters")                  # the suggested staff and job types
     t = _one(app, "SELECT id FROM booking_resources WHERE name='Table 1'")["id"]
     assert "seats 4" in _book(c, title="Party", resource_id=t, party=8, time="19:00").get_data(as_text=True)
     assert "Booking saved" in _book(c, title="Party", resource_id=t, party=4, time="19:00").get_data(as_text=True)
@@ -181,7 +185,7 @@ def _setup_form(app, **extra):
 
 def test_switching_business_type_swaps_the_starters(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
-    c.get("/bookings/setup")
+    c.post("/bookings/setup/starters")                  # the suggested staff and job types
     r = c.post("/bookings/setup", data=_setup_form(app, mode="appointments"), follow_redirects=True)
     page = r.get_data(as_text=True)
     assert "Set up for appointments" in page and "Consultation" in page and "Call-out" not in page and "Services" in page
@@ -191,7 +195,7 @@ def test_switching_business_type_swaps_the_starters(tmp_path, monkeypatch):
 
 def test_add_several_and_remove_job_types_and_staff(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
-    c.get("/bookings/setup")
+    c.post("/bookings/setup/starters")                  # the suggested staff and job types
     form = _setup_form(app)
     form = list(form.items()) + [("svc_new", "Gas fitting"), ("svc_new_min", "90"), ("svc_new_price", "180"),
                                  ("svc_new", "Leak check"), ("svc_new_min", "30"), ("svc_new_price", "60"),
@@ -215,7 +219,7 @@ def test_add_several_and_remove_job_types_and_staff(tmp_path, monkeypatch):
 
 def _jobs_setup(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
-    c.get("/bookings/")
+    c.post("/bookings/setup/starters")                  # the suggested staff and job types
     cust = _cust(app, "Coral Coast Hotel")
     staff = _one(app, "SELECT id FROM booking_resources")["id"]
     return app, c, item, cust, staff

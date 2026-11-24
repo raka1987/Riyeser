@@ -312,6 +312,10 @@ def migrate(db):
                           b["document_id"], b["created_by"], b["created_at"])).lastrowid
         db.execute("UPDATE bookings SET job_id=? WHERE id=?", (jid, b["id"]))
     db.execute("CREATE INDEX IF NOT EXISTS bookings_job ON bookings(job_id)")
+    # Demo companies are marked, so every screen can say so. Start again keeps a ledger head here (riyeser/archive.py).
+    if "is_demo" not in {r["name"] for r in db.execute("PRAGMA table_info(company)")}:
+        db.execute("ALTER TABLE company ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0")
+    db.execute("CREATE TABLE IF NOT EXISTS archive_meta (key TEXT PRIMARY KEY, value TEXT)")
     db.commit()
 
 
@@ -370,8 +374,9 @@ def init_app(app):
         """Create a fresh company file."""
         path = app.config["DATABASE"]
         if os.path.exists(path):
-            os.remove(path)
+            _archive_before_replacing(path, "init-db from the command line")
         init_db()
+        _keep_ledger_head(path)
         print(f"Initialised {path} (login admin / admin)")
 
     @app.cli.command("seed-demo")
@@ -380,7 +385,22 @@ def init_app(app):
         from .demo import seed_demo
         path = app.config["DATABASE"]
         if os.path.exists(path):
-            os.remove(path)
+            _archive_before_replacing(path, "seed-demo from the command line")
         init_db("Clearwater Trading Pty Ltd")
         seed_demo(get_db())
+        _keep_ledger_head(path)
         print(f"Demo company created at {path} (login admin / admin)")
+
+
+def _archive_before_replacing(path, reason):
+    """Command-line tools that start a company file again keep a locked archive copy first (nothing is lost)."""
+    from . import archive
+    archive.archive_company(path, os.path.dirname(os.path.abspath(path)), "main", by="command line", reason=reason,
+                            main_db=path)
+    from datetime import datetime, timezone
+    os.replace(path, f"{path}.{datetime.now(timezone.utc):%Y%m%d-%H%M%S}.replaced")  # moved aside, never deleted
+
+
+def _keep_ledger_head(path):
+    from . import archive
+    archive.copy_head_into(path, os.path.dirname(os.path.abspath(path)))

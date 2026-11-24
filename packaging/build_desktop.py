@@ -45,6 +45,7 @@ args = [
     "--hidden-import", "riyeser._built_edition",
     "--hidden-import", "riyeser.licence",
     "--hidden-import", "riyeser.companies",
+    "--hidden-import", "riyeser.archive",
     "--hidden-import", "riyeser.perms",
     "--hidden-import", "riyeser.views.companies",
     "--collect-submodules", "riyeser",

@@ -216,3 +216,13 @@ a.bk-slot:hover{background:var(--brand-l,#eef4ff)}
 .bk-col-in{width:46px;height:34px;padding:2px;border:1px solid var(--line,#e2e8f0);border-radius:8px;background:#fff;cursor:pointer}
 .bk-col-in::-webkit-color-swatch-wrapper{padding:2px}.bk-col-in::-webkit-color-swatch{border:0;border-radius:5px}
 .bk-num{width:100px}.btn.sm{padding:5px 10px;font-size:13px}.bk-del{color:#b91c1c}
+/* Blank or demo, start again, archived copies */
+.picks{display:grid;gap:10px;margin-top:6px}.picks.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.pick{display:block;border:2px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;background:#fff}
+.pick:has(input:checked){border-color:var(--brand,#2563eb);background:var(--brand-l,#eef4ff)}
+.pick input{margin-right:6px}.pick small{display:block;color:var(--muted);margin-top:4px;font-size:12.5px}
+.flash.demo{background:#fef9c3;color:#713f12;border-color:#facc15}.flash.demo a{color:#713f12;font-weight:600;text-decoration:underline}
+.card.danger-panel{border:2px solid var(--err)}.card.danger-panel h3{color:var(--err)}
+.btn.danger.solid{background:var(--err);color:#fff;border-color:var(--err)}
+.arc-st{font-weight:600}.arc-st.ok{color:var(--ok)}.arc-st.bad{color:var(--err)}
+@media (max-width:900px){.picks.two{grid-template-columns:1fr}}

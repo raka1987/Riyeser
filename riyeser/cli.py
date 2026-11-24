@@ -9,7 +9,6 @@
 import argparse
 import os
 import secrets
-import shutil
 import sys
 import webbrowser
 from datetime import datetime
@@ -63,17 +62,18 @@ def cmd_init(args):
     db_path = _configure(args)
     if os.path.exists(db_path):
         if not args.force:
-            sys.exit(f"{db_path} already exists. Use --force to replace it (a backup is made first).")
-        shutil.copy2(db_path, f"{db_path}.{datetime.now():%Y%m%d-%H%M%S}.bak")
-        os.remove(db_path)
+            sys.exit(f"{db_path} already exists. Use --force to replace it (a locked archive copy is made first).")
+        from .db import _archive_before_replacing
+        _archive_before_replacing(db_path, "init --force from the command line")
     from . import create_app
-    from .db import init_db, get_db
+    from .db import init_db, get_db, _keep_ledger_head
     app = create_app()
     with app.app_context():
         init_db(args.name, args.password, args.edition)
         if args.demo:
             from .demo import seed_demo
             seed_demo(get_db())
+    _keep_ledger_head(db_path)
     print(f"Created {db_path}  (login: admin / {'<your password>' if args.password != 'admin' else 'admin'})")
 
 

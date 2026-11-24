@@ -1,6 +1,9 @@
 {% extends "base.html" %}{% block title %}Bookings setup{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Bookings setup</h1><p class="sub">What you book, who or what it's booked on, and what you offer.</p></div></div>
+{% if (not res or (not svcs and m.starter_what)) %}<div class="card" id="bk-starters"><h3>{{ 'Nothing set up yet' if not res and not svcs else 'Need a hand getting started?' }}</h3>
+<p class="muted">Add your own {{ m.who|lower }} below, or start with our suggestions and rename them to suit you: {{ (m.starter_who + m.starter_what|map(attribute=0)|list)|join(', ') }}.</p>
+{% if can('setup', 2) %}<form method="post" action="{{ url_for('bookings.starters') }}"><button class="btn pri">Add suggested {{ 'tables' if m.party else 'staff and services' }} for {{ m.name|lower }}</button></form>{% endif %}</div>{% endif %}
 <form method="post" id="bk-setup">
 <div class="card"><h3>What kind of business?</h3><p class="muted small">Choosing one saves straight away and changes the words and boxes on every Bookings screen.</p>
 <div class="bk-modes">{% for k, mm in modes.items() %}<label class="bk-mode"><input type="radio" name="mode" value="{{ k }}" {{ 'checked' if k == here }} onchange="this.form.requestSubmit()"><b>{{ mm.name }}</b><small>{% if k == 'jobs' %}Jobs at the customer's address, given to your staff. Invoice when the job's done.{% elif k == 'appointments' %}Appointments for a service with a staff member, at your place.{% else %}Tables for a party at a time. Works with Riyeser POS tables.{% endif %}</small></label>{% endfor %}</div>

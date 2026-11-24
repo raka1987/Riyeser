@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block title %}Archived copies{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Archived copies</h1><p class="sub">Every locked copy saved before a company started again, checked against its fingerprint in the log.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('companies.index') }}#start-again">Back to Companies</a><a class="btn pri" href="{{ url_for('companies.check_archives') }}">Check again</a></div></div>
+{% if not result.ok %}<div class="flash error">⚠ Something has changed. Don't start again or delete anything. Keep this computer and its files as they are, and get advice.</div>{% endif %}
+<div class="card"><p class="arc-st {{ 'ok' if result.ok else 'bad' }}" id="arc-summary">{{ result.summary }}</p>
+{% for p in result.problems %}<p class="arc-st bad">{{ p }}</p>{% endfor %}
+{% if result.rows %}<div class="tbl"><table><tr><th>When</th><th>Company</th><th>Who</th><th>Reason</th><th>Status</th></tr>
+{% for r in result.rows %}<tr><td style="white-space:nowrap">{{ (r.at or '')[:10] }} {{ (r.at or '')[11:16] }} UTC</td><td>{{ r.company_name }}</td><td>{{ r.by }}</td><td>{{ r.reason }}</td>
+<td class="arc-st {{ 'ok' if r.status == ar.UNCHANGED else 'bad' }}">{{ r.status }}<div class="muted small" style="font-weight:400">{{ r.file }}</div></td></tr>{% endfor %}</table></div>{% endif %}
+<p class="muted small" style="margin-top:10px">The copies are in the <code>archive</code> folder next to the company file. Each one is read-only, and its SHA-256 fingerprint is in <code>archive/ledger.jsonl</code>.</p></div>
+{% endblock %}

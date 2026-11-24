@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.7.0"
+__version__ = "2.8.0"
 
 
 def create_app(test_config=None):
@@ -142,6 +142,8 @@ def create_app(test_config=None):
 
     @app.errorhandler(403)
     def forbidden(_e):
+        if request.endpoint in ("companies.start_again", "companies.start_everything", "companies.check_archives"):
+            return render_template("companies/refused.html"), 403
         flash("Your user doesn't have permission to do that. Ask an administrator.", "error")
         return redirect(request.referrer or url_for("core.dashboard"))
 

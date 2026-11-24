@@ -41,7 +41,10 @@
     <div class="fields"><div class="wide"><label>Company name</label><input name="name" required placeholder="e.g. Harbourview Holdings Pty Ltd"></div>
       <div><label>ABN (optional)</label><input name="abn"></div>
       {% if not product.separate %}<div><label>Edition</label><select name="edition"><option value="enterprise">{{ editions.enterprise.name }} (licence)</option><option value="basic">{{ editions.basic.name }} ($20 a month, 90 days free)</option></select></div>{% endif %}
-      <label class="check wide"><input type="checkbox" name="demo" value="1"> Fill with demo data (for practice)</label></div>
+      <div class="wide picks two">
+        <label class="pick"><input type="radio" name="start" value="blank" checked> <b>Start blank (recommended)</b><small>Your own company. Nothing is filled in.</small></label>
+        <label class="pick"><input type="radio" name="start" value="demo"> <b>Explore with demo data</b><small>Practice data: made-up customers and invoices. Not for real books.</small></label>
+      </div></div>
     <button class="btn pri" style="margin-top:14px" {{ 'disabled title="Your plan has no free company places - extra companies are $10 a month each"' if not room }}>Add company</button>{% if not room %}<p class="muted small">Your plan's companies are all in use. Add an extra company ($10 a month) in Riyeser Central, or archive one you no longer use.</p>{% endif %}
   </form>
   <form class="card" method="post" action="{{ url_for('companies.import_file') }}" enctype="multipart/form-data">
@@ -49,6 +52,42 @@
     <input type="file" name="file" accept=".db,.sqlite,.riyeser" required>
     <button class="btn" style="margin-top:14px">Bring it in</button>
   </form>
+</div>
+{% endif %}
+
+{% if can_add %}
+<div class="grid g2" id="start-again" style="margin-top:22px">
+  <div class="card danger-panel">
+    <h3>Start again</h3>
+    <p>Clears {{ here_name }}'s records: customers, suppliers, invoices, quotes, bills, payments, bank transactions, stock, payroll, bookings and journals. Your company details, users and sign-ins, the chart of accounts and tax codes stay.</p>
+    <p><b>Your current records are saved as a locked archive copy first. Nothing is deleted.</b></p>
+    <form method="post" action="{{ url_for('companies.start_again') }}" data-confirm="Start {{ here_name }} again? Your current records are saved as a locked archive copy first, then this company is blank." autocomplete="off">
+      <div class="fields">
+        <div><label>Your password</label><input type="password" name="password" required autocomplete="current-password"></div>
+        <div><label>Type {{ here_name }} to confirm</label><input name="confirm_name" required placeholder="{{ here_name }}"></div>
+        <div class="wide"><label>Reason (optional)</label><input name="reason" maxlength="500" placeholder="e.g. Finished practising with the demo"></div>
+      </div>
+      <button class="btn danger solid" style="margin-top:14px">Start {{ here_name }} again</button>
+    </form>
+    <details style="margin-top:16px"><summary class="muted">Start everything again (every company)</summary>
+      <p class="muted small" style="margin-top:8px">For an administrator of every company. Each company is saved as a locked archive copy, the main company starts again blank, and the other companies are archived (hidden). Their files stay.</p>
+      <form method="post" action="{{ url_for('companies.start_everything') }}" data-confirm="Start everything again? Every company is saved as a locked archive copy first. The main company will be blank and the others archived." autocomplete="off">
+        <div class="fields">
+          <div><label>Your password</label><input type="password" name="password" required autocomplete="current-password"></div>
+          <div><label>Type {{ here_name }} to confirm</label><input name="confirm_name" required placeholder="{{ here_name }}"></div>
+          <div class="wide"><label>Reason (optional)</label><input name="reason" maxlength="500"></div>
+        </div>
+        <button class="btn danger" style="margin-top:14px">Start everything again</button>
+      </form></details>
+  </div>
+  <div class="card" id="archived-copies">
+    <h3>Archived copies</h3>
+    <p class="muted">A locked copy is saved every time a company starts again. They're never deleted.</p>
+    {% if copies %}<div class="tbl"><table><tr><th>When</th><th>Company</th><th>Who</th><th>Reason</th></tr>
+    {% for e in copies %}<tr><td style="white-space:nowrap">{{ (e.at or '')[:10] }} {{ (e.at or '')[11:16] }} UTC</td><td>{{ e.company_name }}</td><td>{{ e.by }}</td><td>{{ e.reason }}</td></tr>{% endfor %}</table></div>
+    {% else %}<p class="muted">No archived copies yet.</p>{% endif %}
+    <a class="btn" style="margin-top:12px" href="{{ url_for('companies.check_archives') }}">Check they haven't been changed</a>
+  </div>
 </div>
 {% endif %}
 

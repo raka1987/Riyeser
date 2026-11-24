@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block title %}Administrators only{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Administrators only</h1><p class="sub">Only an administrator of this company can start it again or check its archived copies.</p></div></div>
+<div class="card"><p>Ask an administrator. Nothing has been changed.</p><a class="btn" href="{{ url_for('companies.index') }}">Back to Companies</a></div>
+{% endblock %}

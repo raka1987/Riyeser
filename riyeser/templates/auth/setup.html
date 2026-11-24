@@ -16,6 +16,10 @@
   <label class="check" style="margin-top:6px"><input type="radio" name="edition" value="enterprise"> <span><b>{{ editions.enterprise.name }}</b> (free during the trial, then a licence) · everything: adds bank reconciliation, payroll, journals, jobs, budgets</span></label>
   <p class="muted" style="font-size:12px;margin:6px 0 0">You can upgrade later under Setup without losing anything.</p>
 {% endif %}
-  <label class="check" style="margin-top:14px"><input type="checkbox" name="demo" value="1"> Load demo data (sample customers, invoices, payroll)</label>
+  <label style="margin-top:14px">How do you want to start?</label>
+  <div class="picks">
+    <label class="pick"><input type="radio" name="start" value="blank" checked> <b>Start blank (recommended)</b><small>For your own company. Nothing is filled in: you add your own customers, products and invoices.</small></label>
+    <label class="pick"><input type="radio" name="start" value="demo"> <b>Explore with demo data</b><small>Practice data: made-up customers and invoices to try things out. Not for your real books.</small></label>
+  </div>
   <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Create company file</button>
 </form></div></body></html>

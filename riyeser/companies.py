@@ -212,3 +212,137 @@ def within_allowance(cid):
 def can_add_another():
     n = allowance()
     return n is None or len(active_ids()) < n
+
+
+# ------------------------------------------------------------------ start again (an archive copy is kept first)
+# Counters and the lock date belong to the old books, so a blank company starts them afresh.
+_NOT_CARRIED = {"id", "next_invoice_no", "next_bill_no", "lock_date", "is_demo"}
+
+
+def data_folder():
+    return _folder()
+
+
+def _rows(con, sql):
+    try:
+        return [dict(r) for r in con.execute(sql)]
+    except sqlite3.Error:
+        return []
+
+
+def _insert(db, table, row, cols):
+    keep = {k: v for k, v in row.items() if k in cols}
+    if keep:
+        db.execute(f"INSERT INTO {table} ({', '.join(keep)}) VALUES ({', '.join('?' for _ in keep)})",
+                   tuple(keep.values()))
+
+
+def reset_in_place(live_path):
+    """Make the company file blank again without replacing the file (Windows may hold it open): build a fresh
+    company file next to it, carry over the company details, every user (same sign-ins and access) and the audit
+    history, then copy the fresh file's contents over the live one. Call archive.archive_company first."""
+    from .db import init_db, get_db, EDITIONS
+    from .demo import DEMO_DETAILS
+    old = sqlite3.connect(live_path, timeout=30)
+    old.row_factory = sqlite3.Row
+    try:
+        comp = dict(old.execute("SELECT * FROM company WHERE id=1").fetchone())
+        users = _rows(old, "SELECT * FROM users ORDER BY id")
+        audits = _rows(old, "SELECT * FROM audit_log ORDER BY id")
+        meta = _rows(old, "SELECT * FROM archive_meta")
+    finally:
+        old.close()
+    tmp = f"{live_path}.fresh-{secrets.token_hex(4)}.db"
+    try:
+        with using(tmp):
+            init_db(comp["name"], secrets.token_urlsafe(16), comp.get("edition") if comp.get("edition") in EDITIONS else None)
+            db = get_db()
+            db.execute("PRAGMA foreign_keys = OFF")
+            cols = {r["name"] for r in db.execute("PRAGMA table_info(company)")}
+            keep = {k: v for k, v in comp.items() if k in cols and k not in _NOT_CARRIED}
+            if comp.get("is_demo"):  # the demo's made-up address and ABN don't belong in the real books
+                for k, v in DEMO_DETAILS.items():
+                    if keep.get(k) == v:
+                        keep[k] = None
+            keep["is_demo"] = 0
+            db.execute(f"UPDATE company SET {', '.join(f'{k}=?' for k in keep)} WHERE id=1", tuple(keep.values()))
+            db.execute("DELETE FROM users")  # the fresh file's own admin: replaced by the real users just below
+            ucols = {r["name"] for r in db.execute("PRAGMA table_info(users)")}
+            for u in users:
+                _insert(db, "users", u, ucols)
+            acols = {r["name"] for r in db.execute("PRAGMA table_info(audit_log)")}
+            for a in audits:
+                _insert(db, "audit_log", a, acols)
+            for m in meta:
+                _insert(db, "archive_meta", m, {"key", "value"})
+            db.commit()
+        fresh = sqlite3.connect(tmp)
+        live = sqlite3.connect(live_path, timeout=30)
+        try:
+            fresh.backup(live)
+        finally:
+            live.close()
+            fresh.close()
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)  # the temporary fresh file only; the old records are in the archive copy
+
+
+def _audit_into(path, user_id, details):
+    con = sqlite3.connect(path, timeout=30)
+    try:
+        con.execute("INSERT INTO audit_log (user_id, action, details) VALUES (?,?,?)", (user_id, "start_again", details))
+        con.commit()
+    finally:
+        con.close()
+
+
+def _describe(e):
+    return f"{e['file']} (SHA-256 {e['sha256']}, {e['bytes']} bytes)"
+
+
+def start_again(cid, username, reason=""):
+    """Archive one company, then make it blank. Returns the archive log entry."""
+    from . import archive
+    path = path_of(cid)
+    main = current_app.config["DATABASE"]
+    name = (_details(path) or {}).get("name") or ""
+    e = archive.archive_company(path, _folder(), cid, name, by=username, reason=reason, main_db=main)
+    reset_in_place(path)
+    archive.copy_head_into(main, _folder())
+    u = user_row(path, username)
+    _audit_into(path, u["id"] if u else None,
+                f"Started again by {username}. Old records kept in archive/{_describe(e)}."
+                + (f" Reason: {reason}" if reason else ""))
+    return e
+
+
+def admin_everywhere(username):
+    """True when this person is an active administrator in every company, archived ones included."""
+    for c in all_companies(include_archived=True):
+        u = user_row(c["path"], username)
+        if not u or u["role"] != "admin":
+            return False
+    return True
+
+
+def start_everything_again(username, reason=""):
+    """Archive every company file, make the main company blank, and archive (hide) every other company.
+    Their files stay where they are. Returns the archive log entries."""
+    from . import archive
+    main = current_app.config["DATABASE"]
+    companies = all_companies(include_archived=True)
+    done = [archive.archive_company(c["path"], _folder(), c["id"], c["name"], by=username, reason=reason, main_db=main)
+            for c in companies]
+    reset_in_place(main)
+    archive.copy_head_into(main, _folder())
+    for c in companies:
+        if c["id"] != MAIN:
+            set_archived(c["id"], True)
+    u = user_row(main, username)
+    _audit_into(main, u["id"] if u else None,
+                f"Started everything again by {username}. {len(done)} compan{'y' if len(done) == 1 else 'ies'} archived: "
+                + "; ".join(f"{e['company_name']}: archive/{_describe(e)}" for e in done)
+                + ". Other companies were archived (hidden); their files are kept."
+                + (f" Reason: {reason}" if reason else ""))
+    return done

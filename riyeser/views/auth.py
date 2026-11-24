@@ -23,9 +23,11 @@ def setup_company():
         prof = company_profile.read()
         if prof and request.form.get("use_profile", "1") == "1":
             company_profile.apply_to_new_file(get_db(), prof)
-        if request.form.get("demo"):
+        if request.form.get("start") == "demo" or request.form.get("demo"):
             from ..demo import seed_demo
             seed_demo(get_db())
+        from .. import archive
+        archive.copy_head_into(current_app.config["DATABASE"], os.path.dirname(os.path.abspath(current_app.config["DATABASE"])))
         flash("Company file created. Sign in as 'admin'.", "ok")
         return redirect(url_for("auth.login"))
     from .. import company_profile
