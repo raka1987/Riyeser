@@ -100,11 +100,11 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['refs', 'Point at an invoice or job', '<p>Type the number the way Riyeser shows it, for example <b>INV-1047</b>, <b>Q-0042</b> or <b>Booking 12</b>, and it stands out in the message. Type <b>@</b> and a name to get someone\'s attention.</p>'],
           ['edit', 'Change or delete a message', '<p>Point at your message (or tap it on a phone) and click <b>Edit</b> or <b>Delete</b>. Edited messages say “(edited)”.</p>'],
         ] },
-        { title: '⭐ Team Calls (premium)', items: [
+        { title: '⭐ Team Chat Plus (premium)', items: [
           ['calls-setup', 'Set up branches and extensions', '<ol><li>When you start a team you get <b>Head office</b> on <b>100</b>, and you\'re on <b>101</b>.</li><li>Click <b>⚙</b> next to Calls (owners and admins), type a branch name such as <b>Lautoka branch</b> and click <b>+ Add branch</b>. It gets the next number (200, 300…) and its own join code, like <b>LAU-4821</b>.</li><li>Give each branch\'s staff their branch code. When they join with it they go straight into that branch with the next extension (201, 202…).</li><li>To change someone\'s number, type it under <b>Extensions</b> and click <b>Save extensions</b>.</li></ol><p>There\'s nothing to set up on the devices: whatever PC or phone someone is signed in on is their extension. A shared front-desk PC can sign in as, for example, “Lautoka front desk”.</p>', true],
           ['calls-make', 'Make a call', '<p>Open someone\'s direct message and click <b>📞 Call</b>, click a branch under <b>Calls</b> to ring everyone there (the first to answer takes it), or click <b>⌨</b> and dial an extension. In a call you can <b>Mute</b>, turn the <b>Camera</b> on, and <b>Hang up</b>. A note like “📞 Call · 3:12” or “📞 Missed call” is left in your messages.</p>', true],
           ['calls-ring', 'Make sure calls ring', '<p>Calls ring wherever Riyeser Team is open. On a PC, open <b>Team chat</b> in Riyeser Central once: after that it keeps running in the background while Central is open, and pops up when someone calls. On a phone, keep riyeser.com/team open. The first time, allow the microphone when asked.</p>'],
-          ['calls-price', 'What do calls cost?', '<p>Team Calls is <b>+$20 a month per business</b>, free for your team\'s first 90 days. There are no call charges: calls go over your internet. Chat stays free either way.</p>'],
+          ['calls-price', 'What does Team Chat Plus cost?', '<p>Team Chat Plus (calls, branches and extensions) is <b>+$20 a month per business</b>, free for your team\'s first 90 days. There are no call charges: calls go over your internet. Chat stays free either way.</p>'],
         ] },
       ],
     },

@@ -495,7 +495,7 @@
       <p class="muted small" style="margin:4px 0 14px">Everyone in the company, on every Riyeser program and PC, links with this ID. ${admin ? 'New people need your approval.' : ''}</p>
       <form id="cof">${field('name', 'Business name', 80)}${field('legal_name', 'Legal name')}${field('tax_number', 'ABN / TIN', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
-      ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4><div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Calls']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
+      ${lic ? `<h4 style="margin:16px 0 6px">Your plan</h4><div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Chat Plus']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
         const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
         const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
         return `<div><span>${n}</span><span class="pl ${v.status === 'active' ? 'ok' : v.active ? (v.days_left <= 14 ? 'warn' : '') : 'bad'}">${txt}</span></div>`; }).join('')}
@@ -756,7 +756,7 @@
   }
 
 
-  // ================================================================== Riyeser Team Calls (premium)
+  // ================================================================== Team Chat Plus (premium)
   // Calls go directly between the two devices (WebRTC). The online service only carries the ringing and set-up.
   // Calling a branch rings everyone in it; the first to answer takes the call. 30 seconds with no answer is a missed call.
   function callsSideHtml() {
@@ -770,7 +770,7 @@
   }
 
   function upsell() {
-    modal(`<h3>⭐ Riyeser Team Calls</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
+    modal(`<h3>⭐ Team Chat Plus</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
       <p><b>+$20 a month per business</b>, free for your first 90 days. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>
       <div class="mfoot"><button class="btn" id="cl">Not now</button><a class="btn p" href="/pricing.html" target="_blank" rel="noopener">See pricing</a></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }

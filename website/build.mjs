@@ -138,10 +138,10 @@ const PROGRAMS = [
       ['Points at your work', 'Type INV-1047 or Booking 12 and it stands out, so everyone knows which invoice or job you mean.'],
       ['Unread at a glance', 'Unread counts on every channel and person, and on Team chat in Riyeser Central.'],
       ['Invite with a link', 'Send your team one link. They make a free account and they\'re in. You can make a new link any time.'],
-      ['⭐ Team Calls: branches and extensions', 'Each branch gets a number (Head office 100, your next branch 200) and its own join code. Staff who join with it get the next extension automatically.'],
-      ['⭐ Team Calls: call anyone', 'Call a person, dial an extension, or call a branch to ring everyone there: the first to answer takes it. Turn the camera on any time.'],
+      ['⭐ Team Chat Plus: branches and extensions', 'Each branch gets a number (Head office 100, your next branch 200) and its own join code. Staff who join with it get the next extension automatically.'],
+      ['⭐ Team Chat Plus: call anyone', 'Call a person, dial an extension, or call a branch to ring everyone there: the first to answer takes it. Turn the camera on any time.'],
     ],
-    note: 'Chat is free. Riyeser Team Calls is +$20 a month per business, free for 90 days: call any person or a whole branch, answer on any PC or phone you\'re signed in on, with no call charges. Each business only ever sees its own team.' },
+    note: 'Chat is free. Team Chat Plus is +$20 a month per business, free for 90 days: call any person or a whole branch, answer on any PC or phone you\'re signed in on, with no call charges. Each business only ever sees its own team.' },
   { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyeserPDF-Setup.exe',
     one: 'Open, fill in, sign, combine and edit PDFs — even scanned ones.',
     pitch: 'Drawings and forms, done on the PC.',
@@ -653,7 +653,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
 // ---------- pricing ----------
 page({
   path: 'pricing.html', title: 'Riyeser pricing — free tools, then $20 a month per business', active: 'pricing',
-  description: 'Riyeser Central, Invoices, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business; Accounting Plus, Payroll, POS, Bookings and Team Calls are +$20 each. As Built, for the building industry, is $20 a month on its own. Every paid program is free for 90 days, no card.',
+  description: 'Riyeser Central, Invoices, PDF and Desk Assistant are free forever. Accounting Basics is $20 a month per business; Accounting Plus, Payroll, POS, Bookings and Team Chat Plus are +$20 each. As Built, for the building industry, is $20 a month on its own. Every paid program is free for 90 days, no card.',
   body: (up) => `
 ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a month — per business, not per person.' })}
 <section class="c" style="padding-bottom:20px">
@@ -664,7 +664,7 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
     <div class="plan best"><span class="tag">Start here</span><div class="k">Accounting Basics</div><div class="price">$20<small> / month per business</small></div>
       <ul class="ticks"><li><b>Free for 90 days</b></li><li>Invoices, quotes, customers and stock</li><li>Money in &amp; out, GST summary, profit &amp; loss</li><li>3 users included</li></ul></div>
     <div class="plan"><div class="k">Add programs</div><div class="price">+$20<small> / month each</small></div>
-      <ul class="ticks"><li><b>Accounting Plus</b> — reconciling, bank import, BAS, jobs, budgets</li><li><b>Payroll</b> — timesheets, pay runs, payslips, leave</li><li><b>POS</b> — the till app for shops and cafes</li><li><b>Bookings</b> — jobs, appointments and table bookings</li><li><b>Team Calls</b> — calls between your people and branches</li></ul></div>
+      <ul class="ticks"><li><b>Accounting Plus</b> — reconciling, bank import, BAS, jobs, budgets</li><li><b>Payroll</b> — timesheets, pay runs, payslips, leave</li><li><b>POS</b> — the till app for shops and cafes</li><li><b>Bookings</b> — jobs, appointments and table bookings</li><li><b>Team Chat Plus</b> — calls between your people and branches</li></ul></div>
   </div>
   <div class="addon"><div class="big">➕</div><div><b>Extras</b><p>More than 3 people: <b>$5 a month</b> per extra user. Another company, trust or client's books: <b>$10 a month</b> per extra company. Every paid program is free for 90 days. No card.</p></div></div>
   <p class="sub" style="margin-top:22px"><b>Pay yearly and get 2 months free.</b> Prices in Australian dollars; any GST or local tax is shown before you pay.</p>
@@ -679,7 +679,7 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
         <label class="check"><input type="checkbox" data-m="payroll"> Payroll</label>
         <label class="check"><input type="checkbox" data-m="pos"> POS</label>
         <label class="check"><input type="checkbox" data-m="bookings"> Bookings</label>
-        <label class="check"><input type="checkbox" data-m="calls"> Team Calls</label>
+        <label class="check"><input type="checkbox" data-m="calls"> Team Chat Plus</label>
       </div>
       <p class="muted" style="margin:14px 0 4px">People using Riyeser</p>
       <div class="users"><button type="button" data-d="-1" aria-label="Fewer users">−</button><input id="users" type="number" min="1" max="500" value="3" aria-label="Number of users"><button type="button" data-d="1" aria-label="More users">+</button></div>
@@ -717,7 +717,7 @@ ${bandHero({ title: 'Pricing', lead: 'Start free. Add what you need for $20 a mo
 </section>
 ${ctaBlock(up, 'Start free today', 'Install Riyeser Central — the free tools are yours to keep, and every paid program is free to start.')}
 <script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},u=document.getElementById('users'),c=document.getElementById('cos'),y=document.getElementById('yearly');
-var NAMES={basic:'Accounting Basics',plus:'Accounting Plus',payroll:'Payroll',pos:'POS',bookings:'Bookings',calls:'Team Calls'};
+var NAMES={basic:'Accounting Basics',plus:'Accounting Plus',payroll:'Payroll',pos:'POS',bookings:'Bookings',calls:'Team Chat Plus'};
 function money(v){return '$'+v.toLocaleString('en-AU',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})}
 function draw(){
   var plus=document.querySelector('[data-m=plus]'),pos=document.querySelector('[data-m=pos]'),basic=document.querySelector('[data-m=basic]');

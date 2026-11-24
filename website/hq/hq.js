@@ -1,5 +1,5 @@
 /* Riyeser HQ: the back office for running Riyeser. Riyeser staff only, with two-step sign-in.
-   Shows account information (companies, people counts, branches, linked PCs and versions, trials, Team Calls,
+   Shows account information (companies, people counts, branches, linked PCs and versions, trials, Team Chat Plus,
    downloads, notes). It never sees customers' messages, calls or books: the database only offers hq_ summaries.
    Runs on the Riyeser Team Supabase project (../team/config.js). With ?demo, or before it's set up, sample data. */
 (() => {
@@ -16,7 +16,7 @@
     return m < 2 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
   const ROLES = [['owner', 'Owner'], ['finance', 'Finance'], ['support', 'Support'], ['sales', 'Sales'], ['developer', 'Developer']];
   const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
-  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Calls']];
+  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Team Chat Plus']];
   const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
   const money = (n) => '$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
   const statusPill = (v) => (v.status === 'active' ? `<span class="pill ok">Paid${v.paid_until ? ` to ${day(v.paid_until)}` : ''}</span>`
@@ -198,10 +198,10 @@
     main(`<h2>Overview</h2><p class="sub">How Riyeser is doing. Account information only: HQ never sees customers' messages or books.</p>
       <div class="tiles">${tile('Companies', num(o.companies), `+${num(o.companies_7d)} this week · +${num(o.companies_30d)} in 30 days`)}
         ${tile('People', num(o.people), 'in all companies')}${tile('Linked PCs', num(o.pcs), `${num(o.pcs_active_7d)} active this week`)}
-        ${tile('Team Calls', num(o.calls_paid) + ' paid', `${num(o.calls_trial)} on the free trial`)}</div>
+        ${tile('Team Chat Plus', num(o.calls_paid) + ' paid', `${num(o.calls_trial)} on the free trial`)}</div>
       <div class="grid g2"><div class="card"><h3>New companies per week</h3>${columnChart(wk, (r) => r.label, (r) => Number(r.companies), 'companies')}</div>
         <div class="card"><h3>Riyeser Central versions in use <small>· PCs seen in 30 days</small></h3>${barList(o.versions || [], (r) => r.version, (r) => Number(r.pcs))}</div>
-        <div class="card"><h3>Team Calls trials ending soon <small>· 14 days or less, not paid</small></h3>
+        <div class="card"><h3>Team Chat Plus trials ending soon <small>· 14 days or less, not paid</small></h3>
           ${(o.trials_ending || []).length ? `<table class="tbl"><tr><th>Company</th><th class="n">Days left</th></tr>${o.trials_ending.map((t) => `<tr class="click" data-co="${t.id}"><td><b>${esc(t.name)}</b><small>${esc(t.company_code)}</small></td><td class="n"><span class="pill warn">${t.days_left}</span></td></tr>`).join('')}</table>` : '<p class="muted small">None right now.</p>'}</div>
         <div class="card"><h3>Companies by country</h3>${barList(o.countries || [], (r) => r.country, (r) => Number(r.companies))}
           <p class="muted small" style="margin-top:12px">${num(o.requests_waiting)} join request${o.requests_waiting === 1 ? '' : 's'} waiting for a company admin · ${num(o.pcs_active_30d)} PCs active in 30 days</p></div></div>`)
@@ -216,7 +216,7 @@
     S.companies = await api.companies(q);
     const callsPill = (c) => (c.calls_paid_until && new Date(c.calls_paid_until) > new Date() ? `<span class="pill ok">Paid to ${day(c.calls_paid_until)}</span>`
       : c.trial_days_left > 0 ? `<span class="pill${c.trial_days_left <= 14 ? ' warn' : ''}">Trial · ${c.trial_days_left} days</span>` : '<span class="pill bad">Trial ended</span>');
-    m.querySelector('#cl').innerHTML = S.companies.length ? `<table class="tbl"><tr><th>Company</th><th>Owner</th><th>Country</th><th class="n">People</th><th class="n">PCs</th><th>Last seen</th><th>Team Calls</th><th>Joined</th></tr>
+    m.querySelector('#cl').innerHTML = S.companies.length ? `<table class="tbl"><tr><th>Company</th><th>Owner</th><th>Country</th><th class="n">People</th><th class="n">PCs</th><th>Last seen</th><th>Team Chat Plus</th><th>Joined</th></tr>
       ${S.companies.map((c) => `<tr class="click" data-co="${c.id}"><td><b>${esc(c.name)}</b><small class="code">${esc(c.company_code || '')}</small></td><td>${esc(c.owner_name || '')}<small>${esc(c.owner_email || '')}</small></td>
         <td>${esc(c.country || '')}</td><td class="n">${num(c.people)}</td><td class="n">${num(c.pcs)}</td><td>${ago(c.last_seen)}</td><td>${callsPill(c)}</td><td>${day(c.created_at)}</td></tr>`).join('')}</table>`
       : '<p class="muted">No companies match.</p>';
@@ -326,7 +326,7 @@
   }
 
   // ------------------------------------------------------------------ HQ history
-  const ACTS = { 'company.viewed': 'opened a company', 'note.added': 'added a note', 'calls.paid_until': 'changed Team Calls paid-until',
+  const ACTS = { 'company.viewed': 'opened a company', 'note.added': 'added a note', 'calls.paid_until': 'changed Team Chat Plus paid-until',
     'licence.module': 'changed a licence', 'licence.plan': 'changed a plan',
     'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.owner_made': 'made an HQ owner (SQL Editor)' };
   async function history() {
