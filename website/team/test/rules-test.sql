@@ -209,6 +209,78 @@ do $$ begin
 end $$;
 reset role;
 
+-- ===== Companies: Company ID, join requests (approve like a friend request), access, linked PCs
+reset role;
+insert into auth.users values ('66666666-6666-6666-6666-666666666666', 'boss@c.test'), ('77777777-7777-7777-7777-777777777777', 'newbie@c.test');
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666'); set role authenticated;
+select (public.create_company('Island Traders', 'Mere', '{"legal_name":"Island Traders Pte Ltd","tax_number":"50-12345-0-1","country":"Fiji"}'::jsonb)) as made \gset
+select (:'made'::json ->> 'workspace_id') as ws_c, (:'made'::json ->> 'company_code') as code_c \gset
+do $$ begin
+  assert (select company_code from public.workspaces where name = 'Island Traders') ~ '^RIY-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{2}$', 'company code format';
+  assert (select tax_number from public.workspaces where name = 'Island Traders') = '50-12345-0-1', 'profile saved';
+  assert (select job_role from public.members where user_id = auth.uid() and workspace_id = (select id from public.workspaces where name = 'Island Traders')) = 'owner', 'owner job role';
+end $$;
+select public.create_branch(:'ws_c', 'Nadi branch') as nadi \gset
+select code as nadi_code from public.branches where id = :'nadi' \gset
+select set_config('test.nadi_code', :'nadi_code', false);
+-- someone asks to join with the Nadi branch code: pending, and they can't see anything yet
+select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
+do $$ begin assert (public.request_join(current_setting('test.nadi_code'), 'Jone', 'New at Nadi') ->> 'status') = 'pending', 'pending'; end $$;
+do $$ begin
+  assert (select count(*) from public.workspaces where name = 'Island Traders') = 0, 'not in yet: cannot see the company';
+  assert (select status from public.my_join_requests() limit 1) = 'pending', 'sees own pending request';
+  assert (select company_name from public.my_join_requests() limit 1) = 'Island Traders', 'request shows the company name';
+  begin perform public.decide_join((select id from public.join_requests limit 1), true, 'manager', true, null); raise exception 'approved self';
+  exception when others then if sqlerrm = 'approved self' then raise; end if; end;
+  begin perform public.link_device((select workspace_id from public.join_requests limit 1), gen_random_uuid(), 'PC', 'win32', '1'); raise exception 'linked before approval';
+  exception when others then if sqlerrm = 'linked before approval' then raise; end if; end;
+end $$;
+-- asking twice keeps one request
+do $$ begin perform public.request_join(current_setting('test.nadi_code'), 'Jone Vula', null);
+  assert (select count(*) from public.my_join_requests() where status = 'pending') = 1, 'one pending request'; end $$;
+-- the owner sees it and approves as Sales in the Nadi branch
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+select id as req from public.join_requests where status = 'pending' \gset
+do $$ begin assert (select display_name from public.join_requests where status = 'pending') = 'Jone Vula', 'owner sees the request'; end $$;
+select public.decide_join(:'req', true, 'sales', false, null);
+do $$ begin
+  assert (select job_role from public.members where user_id = '77777777-7777-7777-7777-777777777777') = 'sales', 'approved as sales';
+  assert (select extension from public.members where user_id = '77777777-7777-7777-7777-777777777777') = 201, 'Nadi branch is 200, so 201';
+end $$;
+-- now Jone sees the company and links this PC; then the owner changes access to bookkeeper + admin, and removes the PC
+select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
+select gen_random_uuid() as pc \gset
+select set_config('test.pc', :'pc', false);
+select public.link_device(:'ws_c', :'pc', 'Nadi front desk', 'win32', '1.7.0');
+do $$ begin
+  assert (select count(*) from public.workspaces where name = 'Island Traders') = 1, 'in now';
+  assert public.device_still_linked((select id from public.workspaces where name = 'Island Traders'), (select id from public.devices limit 1)), 'linked';
+  begin perform public.set_access((select id from public.workspaces where name = 'Island Traders'), auth.uid(), 'manager', true, null); raise exception 'raised own access';
+  exception when others then if sqlerrm = 'raised own access' then raise; end if; end;
+end $$;
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+select public.set_access(:'ws_c', '77777777-7777-7777-7777-777777777777', 'bookkeeper', true, array[:'nadi']::uuid[]);
+do $$ begin assert (select role || '/' || job_role from public.members where user_id = '77777777-7777-7777-7777-777777777777') = 'admin/bookkeeper', 'access changed'; end $$;
+do $$ begin assert (select count(*) from public.devices) = 1, 'owner (admin) sees the company''s PCs'; end $$;
+delete from public.devices where id = :'pc';
+select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
+do $$ begin assert not public.device_still_linked((select id from public.workspaces where name = 'Island Traders'), current_setting('test.pc')::uuid), 'PC unlinked'; end $$;
+-- a declined request: nothing given; and a wrong code is refused plainly
+reset role;
+insert into auth.users values ('88888888-8888-8888-8888-888888888888', 'stranger@c.test');
+select pg_temp.as_user('88888888-8888-8888-8888-888888888888'); set role authenticated;
+select public.request_join(:'code_c', 'Stranger', null);
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+select public.decide_join((select id from public.join_requests where status = 'pending' limit 1), false, null, false, null);
+select pg_temp.as_user('88888888-8888-8888-8888-888888888888');
+do $$ begin
+  assert (select status from public.my_join_requests() limit 1) = 'declined', 'declined';
+  assert (select count(*) from public.workspaces) = 0, 'declined person sees nothing';
+  begin perform public.request_join('RIY-NOPE-00', 'X', null); raise exception 'bad code worked';
+  exception when others then assert sqlerrm like 'We couldn%', sqlerrm; end;
+end $$;
+reset role;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

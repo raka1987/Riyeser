@@ -40,13 +40,25 @@
       async resetPassword(email) { return ok(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })); },
       async signOut() { if (sub) sb.removeChannel(sub); await sb.auth.signOut(); },
       async teams(uid) {
-        const rows = ok(await sb.from('members').select('role, display_name, workspaces(id, name, invite_code)').eq('user_id', uid));
-        return rows.filter((r) => r.workspaces).map((r) => ({ ...r.workspaces, role: r.role, myName: r.display_name }));
+        const rows = ok(await sb.from('members').select('role, job_role, display_name, workspaces(id, name, invite_code, company_code, legal_name, tax_number, address, phone, email, country, require_approval)').eq('user_id', uid));
+        return rows.filter((r) => r.workspaces).map((r) => ({ ...r.workspaces, role: r.role, jobRole: r.job_role, myName: r.display_name }));
       },
-      async createTeam(name, you) { return ok(await sb.rpc('create_team', { team_name: name, your_name: you })); },
+      async createTeam(name, you, profile) { return ok(await sb.rpc('create_company', { company_name: name, your_name: you, profile: profile || {} })); },
+      async requestJoin(code, you, note) { return ok(await sb.rpc('request_join', { code, your_name: you, note: note || '' })); },
+      async myRequests() { return ok(await sb.rpc('my_join_requests')); },
+      async pendingRequests(ws) {
+        const r = ok(await sb.from('join_requests').select('id, display_name, email, branch_id, note, created_at').eq('workspace_id', ws).eq('status', 'pending').order('created_at'));
+        return r;
+      },
+      async decideJoin(id, approve, job, admin, branches) { ok(await sb.rpc('decide_join', { request: id, approve, job_role: job, make_admin: !!admin, branch_ids: branches || [] })); },
+      async setAccess(ws, person, job, admin, branches) { ok(await sb.rpc('set_access', { ws, person, job_role: job, make_admin: !!admin, branch_ids: branches || [] })); },
+      async removePerson(ws, person) { ok(await sb.from('members').delete().eq('workspace_id', ws).eq('user_id', person)); },
+      async updateCompany(ws, profile) { ok(await sb.rpc('update_company', { ws, profile })); },
+      async devices(ws) { return ok(await sb.from('devices').select('id, user_id, device_name, platform, app_version, last_seen').eq('workspace_id', ws).order('last_seen', { ascending: false })); },
+      async unlinkDevice(id) { ok(await sb.from('devices').delete().eq('id', id)); },
       async joinTeam(code, you) { return ok(await sb.rpc('join_team', { code, your_name: you })); },
       async newInvite(ws) { return ok(await sb.rpc('new_invite_code', { ws })); },
-      async people(ws) { return ok(await sb.from('members').select('user_id, display_name, role, extension').eq('workspace_id', ws).order('display_name')); },
+      async people(ws) { return ok(await sb.from('members').select('user_id, display_name, role, job_role, extension').eq('workspace_id', ws).order('display_name')); },
       async channels(ws) {
         const chans = ok(await sb.from('channels').select('id, kind, name, topic, created_by').eq('workspace_id', ws).eq('archived', false).order('name'));
         const dms = chans.filter((c) => c.kind !== 'channel').map((c) => c.id);
@@ -106,7 +118,11 @@
     const AS = /^u-(me|sam|jordan|alex)$/.test(params.get('as') || '') ? params.get('as') : 'u-me';
     const me = { id: AS, email: AS.slice(2) + '@sample.test' };
     const ws = 'w-demo';
-    const ppl = [['u-me', 'You', 'owner', 101], ['u-sam', 'Sam Taylor', 'admin', 102], ['u-jordan', 'Jordan Lee', 'member', 201], ['u-alex', 'Alex Nguyen', 'member', 202]];
+    const ppl = [['u-me', 'You', 'owner', 101, 'owner'], ['u-sam', 'Sam Taylor', 'admin', 102, 'manager'], ['u-jordan', 'Jordan Lee', 'member', 201, 'staff'], ['u-alex', 'Alex Nguyen', 'member', 202, 'sales']];
+    const company = { name: 'Sample Plumbing', company_code: 'RIY-7K3M-Q2', legal_name: 'Sample Plumbing Pty Ltd', tax_number: '12 345 678 901', address: '4 Harbour Rd, Suva', phone: '330 1234', email: 'office@sample.test', country: 'Fiji', require_approval: true };
+    const reqs = [{ id: 'r1', display_name: 'Mere Vula', email: 'mere@sample.test', branch_id: 'b-lau', note: 'New front desk at Lautoka', created_at: new Date(Date.now() - 25 * 60000).toISOString(), status: 'pending' }];
+    const devs = [{ id: 'd1', user_id: 'u-me', device_name: 'Head office PC', platform: 'Windows', app_version: '1.7.0', last_seen: new Date(Date.now() - 2 * 60000).toISOString() },
+      { id: 'd2', user_id: 'u-jordan', device_name: 'Lautoka front desk', platform: 'Windows', app_version: '1.7.0', last_seen: new Date(Date.now() - 3 * 3600000).toISOString() }];
     const brs = [{ id: 'b-head', name: 'Head office', code: 'HEA-3071', extension: 100, people: ['u-me', 'u-sam'] },
       { id: 'b-lau', name: 'Lautoka branch', code: 'LAU-4821', extension: 200, people: ['u-jordan', 'u-alex'] }];
     // Calls in the demo travel between browser tabs (open the demo again with ?demo&as=u-sam to be Sam).
@@ -144,9 +160,22 @@
       onAuth() {},
       async signIn() { return { user: me }; }, async signUp() { return { user: me }; }, async resetPassword() {},
       async signOut() { location.href = '/team/'; },
-      async teams() { return [{ id: ws, name: 'Sample Plumbing', invite_code: 'DEMO1234', role: 'owner', myName: 'You' }]; },
+      async teams() { return [{ id: ws, ...company, invite_code: 'DEMO1234', role: AS === 'u-me' ? 'owner' : AS === 'u-sam' ? 'admin' : 'member', myName: 'You' }]; },
+      async requestJoin(code) { return { status: 'pending', company_name: 'Sample Plumbing', workspace_id: ws, code }; },
+      async myRequests() { return []; },
+      async pendingRequests() { return reqs.filter((r) => r.status === 'pending'); },
+      async decideJoin(id, approve, job, admin, branches) { const r = reqs.find((x) => x.id === id); r.status = approve ? 'approved' : 'declined';
+        if (approve) { const uid = 'u-' + r.display_name.split(' ')[0].toLowerCase(); const b = brs.find((x) => x.id === ((branches && branches[0]) || r.branch_id)) || brs[0];
+          const ext = Math.max(b.extension, ...ppl.filter((q) => q[3] > b.extension && q[3] < b.extension + 100).map((q) => q[3])) + 1;
+          ppl.push([uid, r.display_name, admin ? 'admin' : 'member', ext, job]); (branches && branches.length ? branches : [b.id]).forEach((bid) => brs.find((x) => x.id === bid).people.push(uid)); } },
+      async setAccess(_w, person, job, admin, branches) { const q = ppl.find((x) => x[0] === person); if (q[2] !== 'owner') { q[2] = admin ? 'admin' : 'member'; q[4] = job; }
+        brs.forEach((b) => { b.people = b.people.filter((u) => u !== person); if (branches.includes(b.id)) b.people.push(person); }); },
+      async removePerson(_w, person) { const i = ppl.findIndex((x) => x[0] === person); if (i >= 0) ppl.splice(i, 1); brs.forEach((b) => { b.people = b.people.filter((u) => u !== person); }); },
+      async updateCompany(_w, pr) { Object.assign(company, Object.fromEntries(Object.entries(pr).filter(([, v]) => v !== undefined))); },
+      async devices() { return devs.slice(); },
+      async unlinkDevice(id) { const i = devs.findIndex((d) => d.id === id); if (i >= 0) devs.splice(i, 1); },
       async createTeam() { return ws; }, async joinTeam() { return ws; }, async newInvite() { return 'DEMO' + Math.floor(1000 + Math.random() * 9000); },
-      async people() { return ppl.map(([user_id, display_name, role, extension]) => ({ user_id, display_name, role, extension })); },
+      async people() { return ppl.map(([user_id, display_name, role, extension, job_role]) => ({ user_id, display_name, role, extension, job_role: job_role || (role === 'owner' ? 'owner' : 'staff') })); },
       async features() { return { calls: true, calls_paid: false, trial_days_left: 74 }; },
       async branches() { return brs.map((b) => ({ ...b, people: b.people.slice() })); },
       async createBranch(_w, name) { const ext = Math.max(...brs.map((b) => b.extension)) + 100;
@@ -195,7 +224,10 @@
 
   const api = DEMO ? demoBackend() : onlineBackend();
   const S = { user: null, teams: [], team: null, people: [], chans: [], unread: {}, ch: null, msgs: [], inChat: false, editing: null,
-    features: { calls: false }, branches: [] };
+    features: { calls: false }, branches: [], requests: [] };
+  const JOBS = [['manager', 'Manager'], ['bookkeeper', 'Bookkeeper'], ['sales', 'Sales'], ['payroll', 'Payroll'], ['staff', 'Staff'], ['readonly', 'Read-only']];
+  const isAdmin = () => !!S.team && (S.team.role === 'owner' || S.team.role === 'admin');
+  const jobName = (j) => (JOBS.find((x) => x[0] === j) || [j, j === 'owner' ? 'Owner' : 'Staff'])[1];
   const nameOf = (uid) => (S.people.find((p) => p.user_id === uid) || {}).display_name || 'Someone who left';
   const chanLabel = (c) => (c.kind === 'dm' ? nameOf(c.people.find((p) => p !== S.user.id) || S.user.id) : c.name);
   const demoBar = () => (DEMO ? `<div class="demo-bar">This is a demo with sample messages and calls${CONFIGURED ? ` · <a href="/team/">Sign in for real</a>` : ''} · <a href="/programs/team.html">About Riyeser Team</a></div>` : '');
@@ -236,20 +268,136 @@
     $app.innerHTML = `<div class="gate"><div class="gcard">
       <div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div>
       ${note}
-      <form id="jf"><h1>Join your team</h1><p>Use the invite link or code someone in your team sent you.</p>
-        <label class="f"><span>Invite code</span><input name="code" value="${esc(join)}" required autocapitalize="characters"></label>
-        <label class="f"><span>Your name, as the team will see it</span><input name="you" required maxlength="60"></label>
-        <button class="btn p w">Join the team</button></form>
+      <form id="jf"><h1>Join your company</h1><p>Enter the Company ID (like RIY-7K3M-Q2) or your branch's code. Someone at your company approves you, then you're in.</p>
+        <label class="f"><span>Company ID or branch code</span><input name="code" value="${esc(join)}" required autocapitalize="characters" placeholder="RIY-…"></label>
+        <label class="f"><span>Your name, as the company will see it</span><input name="you" required maxlength="60"></label>
+        <label class="f"><span>A note for them (optional)</span><input name="note" maxlength="300" placeholder="e.g. New at the Lautoka front desk"></label>
+        <button class="btn p w">Ask to join</button></form>
       <div class="or">or</div>
-      <form id="cf"><h1 style="font-size:19px">Start a team for your business</h1>
-        <label class="f"><span>Business or team name</span><input name="team" required maxlength="80" placeholder="e.g. Sample Plumbing"></label>
+      <details class="newco"><summary>Set up a new company</summary>
+      <form id="cf" style="margin-top:12px">
+        <label class="f"><span>Business name</span><input name="team" required maxlength="80" placeholder="e.g. Sample Plumbing"></label>
+        <label class="f"><span>Legal name (optional)</span><input name="legal_name" maxlength="120"></label>
+        <label class="f"><span>ABN / TIN (optional)</span><input name="tax_number" maxlength="40"></label>
+        <label class="f"><span>Country</span><select name="country"><option>Fiji</option><option>Australia</option><option>New Zealand</option><option>Other</option></select></label>
         <label class="f"><span>Your name</span><input name="you" required maxlength="60"></label>
-        <button class="btn w">Create the team</button></form>
+        <button class="btn w">Create the company</button></form></details>
       <div class="alt"><button class="linkbtn" id="so">Sign out</button></div></div></div>`;
-    const go = async (fn) => { try { await fn(); history.replaceState(null, '', location.pathname); await start(); } catch (e) { setupTeam(`<div class="err">${esc(plainError(e))}</div>`); } };
-    $app.querySelector('#jf').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); go(() => api.joinTeam(f.get('code'), f.get('you'))); };
-    $app.querySelector('#cf').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); go(() => api.createTeam(f.get('team'), f.get('you'))); };
+    const fail = (e) => setupTeam(`<div class="err">${esc(plainError(e))}</div>`);
+    $app.querySelector('#jf').onsubmit = async (e) => {
+      e.preventDefault(); const f = new FormData(e.target);
+      try { const r = await api.requestJoin(String(f.get('code')), String(f.get('you')), String(f.get('note') || ''));
+        history.replaceState(null, '', location.pathname);
+        if (r.status === 'member') return start();
+        waiting(r.company_name); } catch (err) { fail(err); }
+    };
+    $app.querySelector('#cf').onsubmit = async (e) => {
+      e.preventDefault(); const f = new FormData(e.target);
+      try { await api.createTeam(String(f.get('team')), String(f.get('you')), { legal_name: f.get('legal_name'), tax_number: f.get('tax_number'), country: f.get('country') });
+        history.replaceState(null, '', location.pathname); await start(); if (S.team) companyInfo(true); } catch (err) { fail(err); }
+    };
     $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
+  }
+
+  // Asked to join: wait for the company to approve (checks every 15 seconds).
+  let waitTimer = null;
+  function waiting(company, declined) {
+    clearInterval(waitTimer);
+    $app.className = '';
+    $app.innerHTML = `<div class="gate"><div class="gcard">
+      <div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div>
+      ${declined ? `<h1>${esc(company)} didn't approve this</h1><p>Check with them, or ask to join with a different Company ID.</p><button class="btn p w" id="again">Try another code</button>`
+        : `<h1>Waiting for ${esc(company)}</h1><p>We've asked them to let you in. As soon as an owner or admin approves you, you're in: this page checks by itself.</p>
+          <div class="waitdots" aria-hidden="true"><i></i><i></i><i></i></div><button class="btn w" id="chk">Check now</button>`}
+      <div class="alt"><button class="linkbtn" id="other">Use a different code</button> · <button class="linkbtn" id="so">Sign out</button></div></div></div>`;
+    const check = async () => {
+      try {
+        S.teams = await api.teams(S.user.id);
+        if (S.teams.length) { clearInterval(waitTimer); return start(); }
+        const r = (await api.myRequests())[0];
+        if (r && r.status === 'declined') { clearInterval(waitTimer); waiting(r.company_name, true); }
+      } catch { /* try again next time */ }
+    };
+    const on = (id, fn) => { const el = $app.querySelector(id); if (el) el.onclick = fn; };
+    on('#chk', check); on('#again', () => setupTeam()); on('#other', () => { clearInterval(waitTimer); setupTeam(); });
+    on('#so', async () => { clearInterval(waitTimer); await api.signOut(); gate(); });
+    if (!declined) waitTimer = setInterval(check, 15000);
+  }
+
+  // ---------------- company admin: requests, people & access, company profile and PCs
+  const branchTicks = (chosen, attr) => `<div class="pick">${S.branches.map((b) => `<label class="pk"><input type="checkbox" ${attr} value="${b.id}"${chosen.includes(b.id) ? ' checked' : ''}><span>${esc(b.name)}${b.extension ? ` · ${b.extension}` : ''}</span></label>`).join('') || '<p class="muted" style="padding:6px">No branches yet.</p>'}</div>`;
+  const jobSelect = (cur, name = 'job') => `<select name="${name}">${JOBS.map(([k, l]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
+  const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t).toLocaleDateString(); };
+  async function refreshCompany() {
+    [S.people, S.branches, S.teams] = await Promise.all([api.people(S.team.id), api.branches(S.team.id), api.teams(S.user.id)]);
+    S.team = S.teams.find((t) => t.id === S.team.id) || S.team;
+    S.requests = isAdmin() ? await api.pendingRequests(S.team.id).catch(() => []) : [];
+    renderSide();
+  }
+
+  function joinRequests() {
+    const body = () => `<h3>👋 Join requests</h3><p>People asking to join ${esc(S.team.name)}. Choose what they can do, then approve.</p>
+      ${S.requests.length ? S.requests.map((r) => { const br = S.branches.find((b) => b.id === r.branch_id);
+        return `<form class="req" data-req="${r.id}"><div class="rq-who">${av(r.id, r.display_name)}<div><b>${esc(r.display_name)}</b><small>${esc(r.email || '')}${br ? ` · asked for ${esc(br.name)}` : ''} · ${ago(r.created_at)}</small>${r.note ? `<p class="rq-note">“${esc(r.note)}”</p>` : ''}</div></div>
+          <div class="rq-grid"><label class="f"><span>Job role</span>${jobSelect('staff')}</label><label class="opt sm"><input type="checkbox" name="admin"> Admin (can approve people)</label></div>
+          <span class="pkh">Branches</span>${branchTicks(r.branch_id ? [r.branch_id] : [], 'name="br"')}
+          <div class="row2" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn sm" data-dec="${r.id}">Decline</button><button class="btn p sm">Approve</button></div></form>`; }).join('')
+        : '<div class="empty"><b>No requests right now</b>Give people the Company ID or a branch code, and they\'ll show up here.</div>'}
+      <div class="mfoot"><button class="btn" id="cl">Close</button></div>`;
+    modal(body(), function wire(d, close) {
+      d.querySelector('#cl').onclick = close;
+      const again = async () => { await refreshCompany(); d.querySelector('.mcard').innerHTML = body(); wire(d, close); };
+      d.querySelectorAll('[data-dec]').forEach((b) => b.onclick = async () => { if (!confirm('Decline this request?')) return;
+        try { await api.decideJoin(b.dataset.dec, false, null, false, []); } catch (err) { alert(plainError(err)); } again(); });
+      d.querySelectorAll('form[data-req]').forEach((f) => f.onsubmit = async (e) => { e.preventDefault();
+        const job = f.querySelector('[name=job]').value; const admin = f.querySelector('[name=admin]').checked;
+        const brs = [...f.querySelectorAll('[name=br]:checked')].map((x) => x.value);
+        try { await api.decideJoin(f.dataset.req, true, job, admin, brs); } catch (err) { alert(plainError(err)); } again(); });
+    });
+  }
+
+  function peopleAccess() {
+    const body = () => `<h3>People & access</h3><p>What each person can do and which branches they're in. Changes apply straight away, on every device.</p>
+      ${S.people.map((p) => { const mine = S.branches.filter((b) => b.people.includes(p.user_id)).map((b) => b.id); const owner = p.role === 'owner';
+        return `<details class="brm"><summary>${av(p.user_id, p.display_name)} <b>${esc(p.display_name)}</b> <span class="muted">${owner ? 'Owner' : jobName(p.job_role)}${p.role === 'admin' ? ' · admin' : ''}${p.extension ? ` · ${p.extension}` : ''}</span></summary>
+          <form data-person="${p.user_id}">${owner ? '<p class="muted">The owner can do everything.</p>' : `<div class="rq-grid"><label class="f"><span>Job role</span>${jobSelect(p.job_role)}</label>
+          <label class="opt sm"><input type="checkbox" name="admin"${p.role === 'admin' ? ' checked' : ''}> Admin (can approve people)</label></div>`}
+          <span class="pkh">Branches</span>${branchTicks(mine, 'name="br"')}
+          <div class="row2" style="justify-content:flex-end;margin-top:8px">${owner || p.user_id === S.user.id ? '' : `<button type="button" class="btn sm" data-remove="${p.user_id}" style="color:#b91c1c">Remove from company</button>`}<button class="btn p sm">Save</button></div></form></details>`; }).join('')}
+      <div class="mfoot"><button class="btn" id="cl">Close</button></div>`;
+    modal(body(), function wire(d, close) {
+      d.querySelector('#cl').onclick = close;
+      const again = async () => { await refreshCompany(); d.querySelector('.mcard').innerHTML = body(); wire(d, close); };
+      d.querySelectorAll('form[data-person]').forEach((f) => f.onsubmit = async (e) => { e.preventDefault();
+        const j = f.querySelector('[name=job]'); const a = f.querySelector('[name=admin]');
+        try { await api.setAccess(S.team.id, f.dataset.person, j ? j.value : 'staff', a ? a.checked : false, [...f.querySelectorAll('[name=br]:checked')].map((x) => x.value)); }
+        catch (err) { alert(plainError(err)); } again(); });
+      d.querySelectorAll('[data-remove]').forEach((b) => b.onclick = async () => {
+        if (!confirm(`Remove ${nameOf(b.dataset.remove)} from ${S.team.name}? They lose access on all their devices. Their old messages stay.`)) return;
+        try { await api.removePerson(S.team.id, b.dataset.remove); } catch (err) { alert(plainError(err)); } again(); });
+    });
+  }
+
+  async function companyInfo(justMade) {
+    const admin = isAdmin(); const t = S.team;
+    const devs = admin ? await api.devices(t.id).catch(() => []) : [];
+    const field = (k, label, max = 120) => `<label class="f"><span>${label}</span><input name="${k}" value="${esc(t[k] || '')}" maxlength="${max}"${admin ? '' : ' readonly'}></label>`;
+    modal(`<h3>${esc(t.name)}</h3>${justMade ? '<div class="ok">Your company is set up. Give your staff and branches the Company ID below: they ask to join, and you approve them.</div>' : ''}
+      <div class="cid"><small>Company ID</small><span class="code" id="cidv">${esc(t.company_code || '')}</span><button class="btn sm" id="cpid">Copy</button></div>
+      <p class="muted small" style="margin:4px 0 14px">Everyone in the company, on every Riyeser program and PC, links with this ID. ${admin ? 'New people need your approval.' : ''}</p>
+      <form id="cof">${field('name', 'Business name', 80)}${field('legal_name', 'Legal name')}${field('tax_number', 'ABN / TIN', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
+      ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
+      ${admin && devs.length ? `<h4 style="margin:16px 0 6px">Linked PCs</h4><div class="devs">${devs.map((dv) => `<div><span><b>${esc(dv.device_name || 'A PC')}</b><small>${esc(nameOf(dv.user_id))} · ${esc(dv.platform || '')} · seen ${ago(dv.last_seen)}</small></span><button type="button" class="btn sm" data-unlink="${dv.id}">Unlink</button></div>`).join('')}</div>` : ''}
+      <div class="mfoot"><button type="button" class="btn" id="cl">Close</button>${admin ? '<button class="btn p">Save</button>' : ''}</div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#cpid').onclick = async () => { try { await navigator.clipboard.writeText(t.company_code); d.querySelector('#cpid').textContent = 'Copied'; } catch { /* select it instead */ } };
+      d.querySelectorAll('[data-unlink]').forEach((b) => b.onclick = async () => { if (!confirm('Unlink this PC? It stops getting the company\'s information until someone links it again. Nothing is deleted.')) return;
+        try { await api.unlinkDevice(b.dataset.unlink); b.closest('div').remove(); } catch (err) { alert(plainError(err)); } });
+      d.querySelector('#cof').onsubmit = async (e) => { e.preventDefault(); if (!admin) return close();
+        const f = new FormData(e.target); const pr = Object.fromEntries(['name', 'legal_name', 'tax_number', 'address', 'phone', 'email', 'country'].map((k) => [k, String(f.get(k) || '')]));
+        pr.require_approval = !!f.get('require_approval');
+        try { await api.updateCompany(t.id, pr); await refreshCompany(); close(); } catch (err) { alert(plainError(err)); } };
+    });
   }
 
   // ------------------------------------------------------------------ the chat
@@ -258,6 +406,7 @@
     try { localStorage.setItem('riyeser.team.last', S.team.id); } catch { /* private mode */ }
     [S.people, S.chans, S.unread] = await Promise.all([api.people(S.team.id), api.channels(S.team.id), api.unread(S.team.id)]);
     [S.features, S.branches] = await Promise.all([api.features(S.team.id).catch(() => ({ calls: false })), api.branches(S.team.id).catch(() => [])]);
+    S.requests = isAdmin() ? await api.pendingRequests(S.team.id).catch(() => []) : [];
     Calls.listen();
     const first = S.chans.find((c) => c.name === 'general') || S.chans[0];
     api.live(S.team.id, onLive);
@@ -329,7 +478,8 @@
     const unreadBadge = (id) => (S.unread[id] ? `<span class="badge">${S.unread[id]}</span>` : '');
     return `<div class="team"><img src="icon.svg" alt=""><div>${S.teams.length > 1
       ? `<select id="tsw" aria-label="Switch team">${S.teams.map((t) => `<option value="${t.id}"${t.id === S.team.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
-      : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}</small></div></div>
+      : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}${S.team.company_code ? ` · ${esc(S.team.company_code)}` : ''}</small></div></div>
+    <div class="cobar"><button id="coinfo">🏢 Company</button>${isAdmin() ? `<button id="coppl">👥 People</button><button id="coreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button>` : ''}</div>
     <div class="sidescroll">
       <div class="sec">Channels <button id="addch" aria-label="Add a channel" title="Add a channel">+</button></div>
       ${chs.map((c) => `<button class="item${S.ch && S.ch.id === c.id ? ' on' : ''}${S.unread[c.id] ? ' unread' : ''}" data-ch="${c.id}"><span class="hash">${c.kind === 'private' ? '🔒' : '#'}</span><span class="nm">${esc(c.name)}</span>${unreadBadge(c.id)}</button>`).join('')}
@@ -366,6 +516,9 @@
     const mg = el.querySelector('#mgbr'); if (mg) mg.onclick = manageBranches;
     el.querySelector('#out').onclick = async () => { await api.signOut(); S.team = null; gate(); };
     const sw = el.querySelector('#tsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
+    el.querySelector('#coinfo').onclick = () => companyInfo(false);
+    const pp = el.querySelector('#coppl'); if (pp) pp.onclick = peopleAccess;
+    const rq = el.querySelector('#coreq'); if (rq) rq.onclick = joinRequests;
   }
   function renderHead() {
     const el = document.getElementById('mhead'); if (!el) return;
@@ -416,9 +569,9 @@
     document.body.appendChild(d); wire(d, () => d.remove());
   }
   function invite() {
-    const link = () => `${location.origin}/team/?join=${S.team.invite_code}`;
+    const link = () => `${location.origin}/team/?join=${S.team.company_code || S.team.invite_code}`;
     const admin = S.team.role === 'owner' || S.team.role === 'admin';
-    modal(`<h3>Invite people to ${esc(S.team.name)}</h3><p>Send them this link. They create a free account, then join with the code.</p>
+    modal(`<h3>Invite people to ${esc(S.team.name)}</h3><p>Send them this link, or the Company ID <b>${esc(S.team.company_code || '')}</b>. They create a free account and ask to join${S.team.require_approval ? ', then you approve them under 👋 Requests' : ''}.</p>
       <div class="copyrow"><input id="il" readonly value="${esc(link())}"><button class="btn p" id="cp">Copy</button></div>
       <p style="margin:14px 0 0">Or give them the code: <span class="code" id="ic">${esc(S.team.invite_code)}</span></p>
       ${S.branches.length ? `<p style="margin:16px 0 6px"><b>Joining a branch?</b> Use its code instead: they're put in that branch and given the next extension.</p>
@@ -745,12 +898,16 @@
       if (!s) return gate();
       S.user = s.user;
       S.teams = await api.teams(S.user.id);
-      if (!S.teams.length || (params.get('join') && !S.teams.some((t) => t.invite_code === params.get('join').toUpperCase()))) return setupTeam();
+      const jc = (params.get('join') || '').toUpperCase();
+      if (jc && !S.teams.some((t) => t.invite_code === jc || t.company_code === jc)) return setupTeam();
+      if (!S.teams.length) { const r = (await api.myRequests().catch(() => []))[0];
+        return r && r.status === 'pending' ? waiting(r.company_name) : setupTeam(); }
       let last = null; try { last = localStorage.getItem('riyeser.team.last'); } catch { /* private mode */ }
       await loadTeam(S.teams.some((t) => t.id === last) ? last : S.teams[0].id);
     } catch (e) { $app.className = ''; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="icon.svg" alt="">Riyeser Team</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
-  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls };
+  setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);
+  window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests };
   start();
 })();

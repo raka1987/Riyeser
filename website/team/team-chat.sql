@@ -435,7 +435,7 @@ create or replace function public.create_team(team_name text, your_name text) re
 declare ws uuid; b uuid;
 begin
   if auth.uid() is null then raise exception 'Sign in first'; end if;
-  insert into workspaces (name, created_by) values (trim(team_name), auth.uid()) returning id into ws;
+  insert into workspaces (name, created_by, company_code) values (trim(team_name), auth.uid(), make_company_code()) returning id into ws;
   insert into members (workspace_id, user_id, display_name, role) values (ws, auth.uid(), trim(your_name), 'owner');
   insert into channels (workspace_id, kind, name, topic, created_by)
     values (ws, 'channel', 'general', 'Everyone in the team', auth.uid()),
@@ -466,3 +466,211 @@ revoke all on function public.create_team(text, text), public.join_team(text, te
   public.next_extension(uuid, int), public.make_branch_code(text) from public, anon;
 grant execute on function public.create_team(text, text), public.join_team(text, text), public.create_branch(uuid, text),
   public.new_branch_code(uuid), public.set_extension(uuid, uuid, int) to authenticated;
+
+-- ================================================================ Riyeser companies
+-- One Company ID (e.g. RIY-7K3M-Q2) for the whole business, shared by every Riyeser program and PC. People and
+-- PCs join by asking (like a friend request); an owner or admin approves them, choosing their job role and branches.
+create or replace function public.make_company_code() returns text
+  language plpgsql volatile set search_path = public as $$
+declare abc text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; c text;   -- no 0/O or 1/I, so it's easy to read out
+begin
+  loop
+    c := 'RIY-';
+    for i in 1..4 loop c := c || substr(abc, 1 + floor(random() * length(abc))::int, 1); end loop;
+    c := c || '-';
+    for i in 1..2 loop c := c || substr(abc, 1 + floor(random() * length(abc))::int, 1); end loop;
+    exit when not exists (select 1 from workspaces where company_code = c);
+  end loop;
+  return c;
+end $$;
+
+alter table public.workspaces add column if not exists company_code text;
+alter table public.workspaces add column if not exists legal_name text check (length(legal_name) <= 120);
+alter table public.workspaces add column if not exists tax_number text check (length(tax_number) <= 40);
+alter table public.workspaces add column if not exists address text check (length(address) <= 300);
+alter table public.workspaces add column if not exists phone text check (length(phone) <= 40);
+alter table public.workspaces add column if not exists email text check (length(email) <= 120);
+alter table public.workspaces add column if not exists country text check (length(country) <= 60);
+alter table public.workspaces add column if not exists require_approval boolean not null default false;
+create unique index if not exists workspaces_company_code on public.workspaces (company_code);
+update public.workspaces set company_code = public.make_company_code() where company_code is null;
+
+alter table public.members add column if not exists job_role text not null default 'staff';
+alter table public.members drop constraint if exists members_job_role_check;
+alter table public.members add constraint members_job_role_check
+  check (job_role in ('owner', 'manager', 'bookkeeper', 'sales', 'payroll', 'staff', 'readonly'));
+update public.members set job_role = 'owner' where role = 'owner' and job_role = 'staff';
+
+create table if not exists public.join_requests (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  display_name text not null check (length(trim(display_name)) between 1 and 60),
+  email text,
+  branch_id uuid references public.branches(id) on delete set null,
+  note text check (length(note) <= 300),
+  status text not null default 'pending' check (status in ('pending', 'approved', 'declined')),
+  created_at timestamptz not null default now(),
+  decided_by uuid references auth.users(id) on delete set null,
+  decided_at timestamptz
+);
+create unique index if not exists join_requests_one_pending on public.join_requests (workspace_id, user_id) where status = 'pending';
+
+create table if not exists public.devices (
+  id uuid primary key,                         -- made on the PC once
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  device_name text check (length(device_name) <= 80),
+  platform text check (length(platform) <= 40),
+  app_version text check (length(app_version) <= 40),
+  linked_at timestamptz not null default now(),
+  last_seen timestamptz not null default now()
+);
+
+alter table public.join_requests enable row level security;
+alter table public.devices enable row level security;
+drop policy if exists jr_read on public.join_requests;
+create policy jr_read on public.join_requests for select to authenticated using (user_id = auth.uid() or public.is_admin(workspace_id));
+drop policy if exists dv_read on public.devices;
+create policy dv_read on public.devices for select to authenticated using (user_id = auth.uid() or public.is_admin(workspace_id));
+drop policy if exists dv_unlink on public.devices;
+create policy dv_unlink on public.devices for delete to authenticated using (user_id = auth.uid() or public.is_admin(workspace_id));
+grant select on public.join_requests to authenticated;
+grant select, delete on public.devices to authenticated;
+revoke all on public.join_requests, public.devices from anon;
+
+-- A new company: the team (with Head office on 100), its profile and Company ID. Joining it needs approval.
+create or replace function public.create_company(company_name text, your_name text, profile jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+declare ws uuid; pr jsonb := coalesce(profile, '{}'::jsonb);
+begin
+  ws := create_team(company_name, your_name);
+  update workspaces set require_approval = true, company_code = coalesce(company_code, make_company_code()),
+    legal_name = nullif(trim(pr->>'legal_name'), ''), tax_number = nullif(trim(pr->>'tax_number'), ''),
+    address = nullif(trim(pr->>'address'), ''), phone = nullif(trim(pr->>'phone'), ''),
+    email = nullif(trim(pr->>'email'), ''), country = nullif(trim(pr->>'country'), '')
+  where id = ws;
+  update members set job_role = 'owner' where workspace_id = ws and user_id = auth.uid();
+  return json_build_object('workspace_id', ws, 'company_code', (select company_code from workspaces where id = ws));
+end $$;
+
+create or replace function public.update_company(ws uuid, profile jsonb) returns void
+  language plpgsql security definer set search_path = public as $$
+declare pr jsonb := coalesce(profile, '{}'::jsonb);
+begin
+  if not is_admin(ws) then raise exception 'Only the company''s owner or an admin can change its details'; end if;
+  update workspaces set
+    name = coalesce(nullif(trim(pr->>'name'), ''), name),
+    legal_name = case when pr ? 'legal_name' then nullif(trim(pr->>'legal_name'), '') else legal_name end,
+    tax_number = case when pr ? 'tax_number' then nullif(trim(pr->>'tax_number'), '') else tax_number end,
+    address = case when pr ? 'address' then nullif(trim(pr->>'address'), '') else address end,
+    phone = case when pr ? 'phone' then nullif(trim(pr->>'phone'), '') else phone end,
+    email = case when pr ? 'email' then nullif(trim(pr->>'email'), '') else email end,
+    country = case when pr ? 'country' then nullif(trim(pr->>'country'), '') else country end,
+    require_approval = coalesce((pr->>'require_approval')::boolean, require_approval)
+  where id = ws;
+end $$;
+
+-- Ask to join with a Company ID (RIY-…), a branch code (LAU-…) or an invite code. Owners and admins approve.
+create or replace function public.request_join(code text, your_name text, note text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare ws uuid; b uuid; c text := upper(trim(code)); approval boolean; nm text;
+begin
+  if auth.uid() is null then raise exception 'Sign in first'; end if;
+  select id, workspace_id into b, ws from branches where branches.code = c;
+  if ws is null then select id into ws from workspaces where company_code = c or invite_code = c; end if;
+  if ws is null then raise exception 'We couldn''t find a company with that ID. Check it with the person who gave it to you.'; end if;
+  select name, require_approval into nm, approval from workspaces where id = ws;
+  if exists (select 1 from members where workspace_id = ws and user_id = auth.uid()) then
+    return json_build_object('status', 'member', 'company_name', nm, 'workspace_id', ws);
+  end if;
+  if not approval then
+    perform join_team(c, your_name);
+    return json_build_object('status', 'member', 'company_name', nm, 'workspace_id', ws);
+  end if;
+  insert into join_requests (workspace_id, user_id, display_name, email, branch_id, note)
+    values (ws, auth.uid(), trim(your_name), (select email from auth.users where id = auth.uid()), b, nullif(trim(coalesce(note, '')), ''))
+    on conflict (workspace_id, user_id) where status = 'pending'
+    do update set display_name = excluded.display_name, branch_id = excluded.branch_id, note = excluded.note, created_at = now();
+  return json_build_object('status', 'pending', 'company_name', nm, 'workspace_id', ws);
+end $$;
+
+create or replace function public.my_join_requests() returns table (id uuid, workspace_id uuid, company_name text, status text, created_at timestamptz)
+  language sql stable security definer set search_path = public as $$
+  select r.id, r.workspace_id, w.name, r.status, r.created_at from join_requests r join workspaces w on w.id = r.workspace_id
+  where r.user_id = auth.uid() order by r.created_at desc limit 20
+$$;
+
+-- Put someone's branches exactly as listed (only branches of that company), giving extensions for new ones.
+create or replace function public.set_person_branches(ws uuid, person uuid, branch_ids uuid[]) returns void
+  language plpgsql security definer set search_path = public as $$
+declare b uuid;
+begin
+  delete from branch_members bm using branches br
+    where bm.branch_id = br.id and br.workspace_id = ws and bm.user_id = person and not (br.id = any(coalesce(branch_ids, '{}')));
+  foreach b in array coalesce(branch_ids, '{}') loop
+    if exists (select 1 from branches where id = b and workspace_id = ws) then perform place_in_branch(b, person); end if;
+  end loop;
+end $$;
+
+-- Approve (with a job role, admin or not, and branches) or decline a request.
+create or replace function public.decide_join(request uuid, approve boolean, job_role text, make_admin boolean, branch_ids uuid[])
+  returns void language plpgsql security definer set search_path = public as $$
+declare r join_requests;
+begin
+  select * into r from join_requests where id = request;
+  if r.id is null or r.status <> 'pending' then raise exception 'That request has already been dealt with'; end if;
+  if not is_admin(r.workspace_id) then raise exception 'Only the company''s owner or an admin can approve people'; end if;
+  if approve then
+    if coalesce(job_role, 'staff') not in ('manager', 'bookkeeper', 'sales', 'payroll', 'staff', 'readonly') then
+      raise exception 'Choose a job role';
+    end if;
+    insert into members (workspace_id, user_id, display_name, role, job_role)
+      values (r.workspace_id, r.user_id, r.display_name, case when make_admin then 'admin' else 'member' end, coalesce(job_role, 'staff'))
+      on conflict (workspace_id, user_id) do nothing;
+    perform set_person_branches(r.workspace_id, r.user_id,
+      case when coalesce(array_length(branch_ids, 1), 0) > 0 then branch_ids when r.branch_id is not null then array[r.branch_id] else '{}' end);
+  end if;
+  update join_requests set status = case when approve then 'approved' else 'declined' end, decided_by = auth.uid(), decided_at = now()
+    where id = request;
+end $$;
+
+-- Change what someone can do later: job role, admin or not, and which branches.
+create or replace function public.set_access(ws uuid, person uuid, job_role text, make_admin boolean, branch_ids uuid[])
+  returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin(ws) then raise exception 'Only the company''s owner or an admin can change access'; end if;
+  if not exists (select 1 from members where workspace_id = ws and user_id = person) then raise exception 'That person isn''t in the company'; end if;
+  if exists (select 1 from members where workspace_id = ws and user_id = person and role = 'owner') then
+    perform set_person_branches(ws, person, branch_ids); return;       -- the owner always stays owner
+  end if;
+  if job_role not in ('manager', 'bookkeeper', 'sales', 'payroll', 'staff', 'readonly') then raise exception 'Choose a job role'; end if;
+  update members m set job_role = set_access.job_role, role = case when make_admin then 'admin' else 'member' end
+    where m.workspace_id = ws and m.user_id = person;
+  perform set_person_branches(ws, person, branch_ids);
+end $$;
+
+-- This PC, linked to the company (Riyeser Central calls this when it starts).
+create or replace function public.link_device(ws uuid, device uuid, device_name text, platform text, app_version text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not is_member(ws) then raise exception 'You''re not in that company'; end if;
+  insert into devices (id, workspace_id, user_id, device_name, platform, app_version)
+    values (device, ws, auth.uid(), left(device_name, 80), left(platform, 40), left(app_version, 40))
+  on conflict (id) do update set workspace_id = excluded.workspace_id, user_id = excluded.user_id, device_name = excluded.device_name,
+    platform = excluded.platform, app_version = excluded.app_version, last_seen = now();
+end $$;
+
+create or replace function public.device_still_linked(ws uuid, device uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select is_member(ws) and exists (select 1 from devices where id = device and workspace_id = ws and user_id = auth.uid())
+$$;
+
+revoke all on function public.make_company_code(), public.create_company(text, text, jsonb), public.update_company(uuid, jsonb),
+  public.request_join(text, text, text), public.my_join_requests(), public.set_person_branches(uuid, uuid, uuid[]),
+  public.decide_join(uuid, boolean, text, boolean, uuid[]), public.set_access(uuid, uuid, text, boolean, uuid[]),
+  public.link_device(uuid, uuid, text, text, text), public.device_still_linked(uuid, uuid) from public, anon;
+grant execute on function public.create_company(text, text, jsonb), public.update_company(uuid, jsonb),
+  public.request_join(text, text, text), public.my_join_requests(), public.decide_join(uuid, boolean, text, boolean, uuid[]),
+  public.set_access(uuid, uuid, text, boolean, uuid[]), public.link_device(uuid, uuid, text, text, text),
+  public.device_still_linked(uuid, uuid) to authenticated;

@@ -145,3 +145,27 @@ a { color: var(--blue); }
 .exts .av { width: 24px; height: 24px; font-size: 10px; border-radius: 6px; } .exts input { width: 84px; padding: 6px 8px; border: 1px solid #cfd6e4; border-radius: 8px; }
 .mcard { max-height: calc(100vh - 32px); overflow-y: auto; }
 @media (max-width: 760px) { #callbox.on { left: 10px; right: 10px; bottom: 10px; } .cwin, #callbox.video .cwin { width: 100%; } }
+/* companies: company bar, requests, people & access, company profile, waiting */
+.cobar { display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.08); flex-wrap: wrap; }
+.cobar button { background: rgba(255,255,255,.07); border: 0; color: var(--side-ink); border-radius: 8px; padding: 5px 9px; font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.cobar button:hover { background: rgba(255,255,255,.15); } .cobar .badge { font-size: 10.5px; padding: 0 6px; }
+.muted { color: var(--muted); } .small { font-size: 13px; }
+.req { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+.rq-who { display: flex; gap: 10px; align-items: flex-start; } .rq-who small { display: block; color: var(--muted); font-size: 12.5px; }
+.rq-note { margin: 6px 0 0 !important; font-style: italic; color: var(--text) !important; }
+.rq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; margin-top: 10px; }
+.rq-grid select, .f select { width: 100%; padding: 10px 11px; border: 1px solid #cfd6e4; border-radius: 10px; background: #fff; }
+.opt.sm { font-size: 13px; padding: 9px 10px; margin: 0 0 12px; }
+.brm summary { display: flex; align-items: center; gap: 8px; } .brm summary .av { width: 24px; height: 24px; font-size: 10px; border-radius: 6px; }
+.brm summary .muted { margin-left: auto; font-size: 12.5px; }
+.cid { display: flex; align-items: center; gap: 12px; background: var(--brand-l); border-radius: 12px; padding: 12px 14px; }
+.cid small { color: var(--brand-2); font-weight: 700; font-size: 12px; } .cid .code { flex: 1; font-size: 22px; }
+.devs > div { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); gap: 10px; }
+.devs small { display: block; color: var(--muted); font-size: 12.5px; }
+.newco summary { cursor: pointer; font-weight: 700; color: var(--ink); text-align: center; }
+.waitdots { display: flex; justify-content: center; gap: 8px; margin: 6px 0 16px; }
+.waitdots i { width: 10px; height: 10px; border-radius: 50%; background: var(--brand); animation: wd 1.2s infinite ease-in-out; } .waitdots i:nth-child(2) { animation-delay: .2s; } .waitdots i:nth-child(3) { animation-delay: .4s; }
+@keyframes wd { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }
+@media (max-width: 760px) { .rq-grid { grid-template-columns: 1fr; } }
+#cof { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; } #cof > *:not(label.f), #cof label.f:has([name=address]) { grid-column: 1 / -1; }
+@media (max-width: 760px) { #cof { grid-template-columns: 1fr; } }

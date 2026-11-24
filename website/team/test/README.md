@@ -9,3 +9,5 @@
 - `private-test.js`: private chats with chosen people. `calls-test.js`: real calls between browser tabs in the
   demo (fake microphone and camera): person to person, a branch (first to answer), declining, the dial pad,
   branches and extensions, and the premium upsell.
+- `company-test.js`: Company ID, join requests (approve with job role and branch), people & access, company details,
+  linked PCs, and ask-to-join → waiting → approved against a pretend server.

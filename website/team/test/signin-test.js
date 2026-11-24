@@ -16,8 +16,8 @@ const { chromium } = require('playwright');
       if (body.password !== 'right-password') return json({ error: 'invalid_grant', error_description: 'Invalid login credentials' }, 400);
       return json({ access_token: 'x.y.z', token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user });
     }
-    if (u.pathname === '/rest/v1/members' && path.includes('workspaces')) return json(teamMade ? [{ role: 'owner', display_name: 'Alex', workspaces: { id: 'w1', name: 'Sample Plumbing', invite_code: 'AB12CD34' } }] : []);
-    if (u.pathname === '/rest/v1/rpc/create_team') { teamMade = true; return json('w1'); }
+    if (u.pathname === '/rest/v1/members' && path.includes('workspaces')) return json(teamMade ? [{ role: 'owner', job_role: 'owner', display_name: 'Alex', workspaces: { id: 'w1', name: 'Sample Plumbing', invite_code: 'AB12CD34', company_code: 'RIY-7K3M-Q2' } }] : []);
+    if (u.pathname === '/rest/v1/rpc/create_company') { teamMade = true; return json({ workspace_id: 'w1', company_code: 'RIY-7K3M-Q2' }); }
     if (u.pathname === '/rest/v1/members') return json([{ user_id: user.id, display_name: 'Alex', role: 'owner' }]);
     if (u.pathname === '/rest/v1/channels') return json([{ id: 'c1', kind: 'channel', name: 'general', topic: 'Everyone in the team' }, { id: 'c2', kind: 'channel', name: 'jobs', topic: null }]);
     if (u.pathname === '/rest/v1/rpc/unread_counts') return json([]);
@@ -31,9 +31,10 @@ const { chromium } = require('playwright');
   await pg.fill('input[name=email]', user.email); await pg.fill('input[name=password]', 'wrong-password'); await pg.click('button[type=submit]');
   await pg.waitForSelector('.err'); console.log('2. wrong password:', await pg.textContent('.err'));
   await pg.fill('input[name=email]', user.email); await pg.fill('input[name=password]', 'right-password'); await pg.click('button[type=submit]');
-  await pg.waitForSelector('#cf'); console.log('3. signed in, no team yet ->', await pg.textContent('#jf h1'), '/', await pg.textContent('#cf h1'));
-  await pg.fill('#cf input[name=team]', 'Sample Plumbing'); await pg.fill('#cf input[name=you]', 'Alex'); await pg.click('#cf button');
-  await pg.waitForSelector('#txt'); console.log('4. team made, chat open on:', await pg.textContent('#mhead h2'));
+  await pg.waitForSelector('#jf'); console.log('3. signed in, no company yet ->', await pg.textContent('#jf h1'), '/', await pg.textContent('.newco summary'));
+  await pg.click('.newco summary'); await pg.fill('#cf input[name=team]', 'Sample Plumbing'); await pg.fill('#cf input[name=you]', 'Alex'); await pg.click('#cf button');
+  await pg.waitForSelector('#cidv'); console.log('4. company made, shows its ID:', await pg.textContent('#cidv')); await pg.click('#cl');
+  await pg.waitForSelector('#txt'); console.log('   chat open on:', await pg.textContent('#mhead h2'));
   await pg.fill('#txt', 'First message'); await pg.press('#txt', 'Enter'); await pg.waitForTimeout(400);
   console.log('5. sent:', await pg.evaluate(() => [...document.querySelectorAll('#msgs .mb')].map((x) => x.textContent.trim())));
   console.log('server calls:', [...new Set(calls)].join(', '));
