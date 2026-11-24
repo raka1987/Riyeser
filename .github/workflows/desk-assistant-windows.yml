@@ -39,7 +39,8 @@ jobs:
               @{ setup = "dist\RiyeserDeskAssistant-Setup-*.exe"; exe = "Riyeser Desk Assistant.exe"; name = "Riyeser Desk Assistant*" },
               @{ setup = "dist-pdf\RiyeserPDF-Setup-*.exe"; exe = "Riyeser PDF.exe"; name = "Riyeser PDF*" },
               @{ setup = "dist-central\RiyeserCentral-Setup-*.exe"; exe = "Riyeser Central.exe"; name = "Riyeser Central*" },
-              @{ setup = "dist-services\RiyeserServices-Setup-*.exe"; exe = "Riyeser Services.exe"; name = "As Built*" })) {
+              @{ setup = "dist-services\RiyeserServices-Setup-*.exe"; exe = "Riyeser Services.exe"; name = "As Built*" },
+              @{ setup = "dist-team\RiyeserTeam-Setup-*.exe"; exe = "Riyeser Team.exe"; name = "Riyeser Team*" })) {
             $setup = Get-ChildItem $app.setup | Select-Object -First 1
             Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
             $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter $app.exe | Select-Object -First 1
@@ -55,7 +56,7 @@ jobs:
           Start-Process -FilePath $central.FullName -ArgumentList "--self-test=$report" -Wait
           $r = Get-Content $report -Raw | ConvertFrom-Json
           $r.programs | Format-Table id, status, where -AutoSize | Out-String | Write-Host
-          foreach ($id in @("desk", "pdf", "services")) { if (($r.programs | Where-Object id -eq $id).status -ne "installed") { throw "Riyeser Central can't find $id" } }
+          foreach ($id in @("desk", "pdf", "services", "team")) { if (($r.programs | Where-Object id -eq $id).status -ne "installed") { throw "Riyeser Central can't find $id" } }
           Write-Host "Riyeser Central" $r.version "finds Desk Assistant, PDF and As Built"
           # As Built must carry its own copy of the app (works with no internet)
           $svc = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Services.exe" | Select-Object -First 1
@@ -64,6 +65,13 @@ jobs:
           $s = Get-Content $sreport -Raw | ConvertFrom-Json
           if (-not ($s.bundled -and $s.appPage -and $s.start)) { throw "As Built is missing its offline copy: $($s | ConvertTo-Json -Compress)" }
           Write-Host "As Built" $s.version "works offline (app files inside the program)"
+          # Riyeser Team starts, and sets itself to start with Windows (so calls can ring)
+          $team = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Team.exe" | Select-Object -First 1
+          $treport = "$env:RUNNER_TEMP\team.json"
+          Start-Process -FilePath $team.FullName -ArgumentList "--hidden", "--self-test=$treport" -Wait
+          $t = Get-Content $treport -Raw | ConvertFrom-Json
+          if (-not ($t.ok -and $t.loginItem)) { throw "Riyeser Team didn't start properly: $($t | ConvertTo-Json -Compress)" }
+          Write-Host "Riyeser Team" $t.version "starts, and starts with Windows"
           $leftover = Get-ChildItem "$env:LOCALAPPDATA\Programs\desk-assistant\resources" -Directory | Where-Object Name -in @("python", "accounting")
           if ($leftover) { throw "Accounting files are still bundled" }
 
@@ -75,4 +83,5 @@ jobs:
             desktop/dist-pdf/RiyeserPDF-Setup-*.exe
             desktop/dist-central/RiyeserCentral-Setup-*.exe
             desktop/dist-services/RiyeserServices-Setup-*.exe
+            desktop/dist-team/RiyeserTeam-Setup-*.exe
           if-no-files-found: error

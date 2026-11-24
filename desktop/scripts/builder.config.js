@@ -2,22 +2,25 @@
 //   DESK_APP=central -> Riyeser Central (the Riyeser Group home screen)
 //   DESK_APP=pdf     -> Riyeser PDF
 //   DESK_APP=services -> As Built, formerly Riyeser Services (the riyeser.com/app/ app in its own window)
+//   DESK_APP=team    -> Riyeser Team (team chat and Team Chat Plus calls, riyeser.com/team in its own window)
 //   (default)        -> Riyeser Desk Assistant
 const base = require('../package.json').build;
-const which = ['pdf', 'central', 'services'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
+const which = ['pdf', 'central', 'services', 'team'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
 const pdf = which === 'pdf';
 const APPS = {
   assistant: { name: 'Riyeser Desk Assistant', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDeskAssistant' },
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
-    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.6.5', productName: 'Riyeser Central' } },
+    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.6.6', productName: 'Riyeser Central' } },
   // As Built was called Riyeser Services. Only the name people see changed: the app id, install folder (riyeser-services),
   // program file (Riyeser Services.exe), saved projects and release file (RiyeserServices-Setup.exe) stay the same,
   // so installed copies update in place and keep their projects.
   services: { name: 'As Built', appId: 'com.riyeser.services', ico: 'build/services/icon.ico', out: 'dist-services', artifact: 'RiyeserServices',
     executableName: 'Riyeser Services',
     extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.2.0', productName: 'As Built' } },
+  team: { name: 'Riyeser Team', appId: 'com.riyeser.team', ico: 'build/team/icon.ico', out: 'dist-team', artifact: 'RiyeserTeam',
+    extraMetadata: { main: 'src/team-main.js', name: 'riyeser-team', version: '1.0.0', productName: 'Riyeser Team' } },
 };
 const a = APPS[which];
 

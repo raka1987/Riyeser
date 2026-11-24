@@ -83,9 +83,10 @@ tick(); setInterval(tick, 60000);
 
 // ---------- the programs ----------
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
-const ORDER = ['central', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
+const ORDER = ['central', 'team', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LOOK = {
+  team: { ic: 'chat', c: 'c-team', nav: 'Team', col: '#a21caf', blurb: 'Team chat and Team Chat Plus calls' },
   invoices: { ic: 'invoice', c: 'c-inv', nav: 'Invoices', col: '#0284c7', blurb: 'Send invoices and get paid' },
   bookings: { ic: 'calendar', c: 'c-book', nav: 'Bookings', col: '#e11d48', blurb: 'Jobs, appointments and tables' },
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Books', col: '#16a05a', blurb: 'View and manage your accounts' },
@@ -116,12 +117,13 @@ const QUICK = [
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 // Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
-const LOGO = { invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const LOGO = { team: 'team', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 const quickFor = (q) => (q.p === 'acc' ? accId() : q.p === 'invoices' && hasAcc() ? null : has(q.p) ? q.p : null);
 
 function renderNav() {
-  const mine = programs.filter((p) => p.status !== 'missing' && !(p.id === 'accounting-basics' && has('accounting')));
+  // Riyeser Team has its own Team chat button below, so it isn't listed twice.
+  const mine = programs.filter((p) => p.status !== 'missing' && p.id !== 'team' && !(p.id === 'accounting-basics' && has('accounting')));
   const upFor = new Set((upd.updates || []).map((u) => u.id));
   const missing = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting'))).length;
   $('#nav').innerHTML = `<button class="${view === 'home' ? 'on' : ''}" data-view="home">${icon('home')}Home</button>

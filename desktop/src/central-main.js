@@ -31,6 +31,9 @@ const localPrograms = () => path.join(process.env.LOCALAPPDATA || path.join(os.h
 // ---------- the programs ----------
 const PROGRAMS = [
   // Free invoicing on its own (free forever). Opens the same company files as Accounting and installs next to it.
+  // Riyeser Team as its own desktop app (chat free; Team Chat Plus calls). When it's installed, Team chat opens it.
+  { id: 'team', name: 'Team', full: 'Riyeser Team', icon: '💬', desc: 'Team chat for your business, and Team Chat Plus calls. Chat is free.',
+    dirs: ['riyeser-team', 'Riyeser Team'], exes: ['Riyeser Team.exe'], links: ['Riyeser Team'] },
   { id: 'invoices', name: 'Invoices', full: 'Riyeser Invoices', icon: '🧾', desc: 'Quotes, invoices, customers and getting paid. Free forever.',
     dirs: ['Riyeser Invoices'], exes: ['Riyeser Invoices.exe'], links: ['Riyeser Invoices'], pages: ['invoice'] },
   // Bookings and scheduling (jobs, appointments, tables). Same company files as Accounting; installs next to it.
@@ -224,7 +227,7 @@ function registerIpc() {
   });
   // A program that isn't installed yet: its page on riyeser.com, with the download.
   handle('central:get', async (id) => {
-    const page = { invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const page = { team: 'team', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     await shell.openExternal(page ? `https://riyeser.com/programs/${page}.html` : 'https://riyeser.com/downloads.html');
     return true;
   });
@@ -326,10 +329,11 @@ function registerIpc() {
   handle('central:install', (id) => installProgram(id));
   // Help: each program's guide in the Riyeser Help Centre.
   handle('central:help', (id) => {
-    const guide = { central: 'central', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const guide = { central: 'central', team: 'team', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     return shell.openExternal(guide ? `https://riyeser.com/help/${guide}.html` : 'https://riyeser.com/help.html').then(() => true);
   });
-  handle('central:team', () => openTeam());
+  // Team chat: the Riyeser Team app when it's installed (it rings by itself), otherwise Central's own Team window.
+  handle('central:team', async () => { const exe = teamApp(); if (exe) { const err = await shell.openPath(exe); if (err) throw new Error(err); return true; } return openTeam(); });
   handle('search:find', (opts) => {
     // Search uses Desk Assistant's file list: nothing (not an old list) when it isn't installed.
     if (!locate(PROGRAMS.find((x) => x.id === 'desk'))) return { total: 0, results: [], facets: { type: {}, year: {}, kind: {} } };
@@ -356,6 +360,7 @@ function teamSession() {
   return ses;
 }
 // After the first time Team is opened, it keeps running (hidden) while Central is open, so calls can ring.
+function teamApp() { try { return locate(PROGRAMS.find((x) => x.id === 'team')); } catch { return null; } }
 function openTeam(opts = {}) {
   if (teamWin && !teamWin.isDestroyed()) {
     if (!opts.background) { if (teamWin.isMinimized()) teamWin.restore(); teamWin.show(); teamWin.focus(); }
@@ -398,7 +403,8 @@ function createWindow() {
   win.on('closed', () => { win = null; quitting = true; if (teamWin && !teamWin.isDestroyed()) teamWin.destroy(); });
   // Team was used before: start it quietly in the background so calls can ring.
   let t = null; try { t = store.get('team', null); } catch { /* none yet */ }
-  if (t && t.background) setTimeout(() => openTeam({ background: true }), 4000);
+  // (not when the Riyeser Team app is installed: it rings by itself, and two windows would ring twice)
+  if (t && t.background && !teamApp()) setTimeout(() => openTeam({ background: true }), 4000);
 }
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
