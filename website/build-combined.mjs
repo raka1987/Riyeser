@@ -34,7 +34,7 @@ cpSync(SRC, OUT, { recursive: true, force: false, errorOnExist: false, filter: (
 mkdirSync(join(OUT, 'app'), { recursive: true });
 
 // 3. Riyeser Team (team chat) at /team/. Its database setup (team-chat.sql) stays in the repository only.
-cpSync(join(ROOT, 'team'), join(OUT, 'team'), { recursive: true, filter: (src) => !src.endsWith('.sql') });
+cpSync(join(ROOT, 'team'), join(OUT, 'team'), { recursive: true, filter: (src) => !src.endsWith('.sql') && !/[\/]team[\/]test([\/]|$)/.test(src) });
 
 /** Replace text; stop the build if an expected piece isn't there (the app changed and needs a look). */
 function swap(text, file, pairs) {

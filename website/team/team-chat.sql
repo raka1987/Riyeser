@@ -27,7 +27,7 @@ create table if not exists public.members (
 create table if not exists public.channels (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
-  kind text not null default 'channel' check (kind in ('channel', 'dm')),
+  kind text not null default 'channel',  -- channel (whole team), private (chosen people), dm
   name text check (kind = 'dm' or length(trim(name)) between 1 and 40),
   topic text check (length(topic) <= 200),
   dm_key text,                       -- for direct messages: the two people's ids, sorted, so there's only one per pair
@@ -36,8 +36,11 @@ create table if not exists public.channels (
   archived boolean not null default false,
   unique (workspace_id, dm_key)
 );
+-- Private channels (e.g. executives, sales): only the people added can see them. Safe to re-run.
+alter table public.channels drop constraint if exists channels_kind_check;
+alter table public.channels add constraint channels_kind_check check (kind in ('channel', 'private', 'dm'));
 
-create table if not exists public.channel_members (   -- who is in a direct message
+create table if not exists public.channel_members (   -- who is in a direct message or a private channel
   channel_id uuid not null references public.channels(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   primary key (channel_id, user_id)
@@ -109,11 +112,14 @@ create policy ch_add on public.channels for insert to authenticated
   with check (kind = 'channel' and public.is_member(workspace_id) and created_by = auth.uid());
 drop policy if exists ch_edit on public.channels;
 create policy ch_edit on public.channels for update to authenticated
-  using (kind = 'channel' and (created_by = auth.uid() or public.is_admin(workspace_id)))
-  with check (kind = 'channel' and public.is_member(workspace_id));
+  using (kind in ('channel', 'private') and public.can_see_channel(id) and (created_by = auth.uid() or public.is_admin(workspace_id)))
+  with check (kind in ('channel', 'private') and public.is_member(workspace_id));
 
 drop policy if exists cm_read on public.channel_members;
 create policy cm_read on public.channel_members for select to authenticated using (public.can_see_channel(channel_id));
+drop policy if exists cm_leave on public.channel_members;
+create policy cm_leave on public.channel_members for delete to authenticated
+  using (user_id = auth.uid() and exists (select 1 from public.channels c where c.id = channel_id and c.kind = 'private'));
 
 drop policy if exists msg_read on public.messages;
 create policy msg_read on public.messages for select to authenticated using (public.can_see_channel(channel_id));
@@ -202,6 +208,40 @@ begin
   return ch;
 end $$;
 
+-- A private channel: only the people chosen (and whoever makes it) can see it.
+create or replace function public.create_private_channel(ws uuid, channel_name text, channel_topic text, people uuid[])
+  returns uuid language plpgsql security definer set search_path = public as $$
+declare ch uuid;
+begin
+  if not is_member(ws) then raise exception 'You''re not in that team'; end if;
+  insert into channels (workspace_id, kind, name, topic, created_by)
+    values (ws, 'private', trim(channel_name), nullif(trim(coalesce(channel_topic, '')), ''), auth.uid()) returning id into ch;
+  insert into channel_members (channel_id, user_id)
+    select ch, m.user_id from members m
+    where m.workspace_id = ws and (m.user_id = auth.uid() or m.user_id = any(coalesce(people, '{}')))
+    on conflict do nothing;
+  return ch;
+end $$;
+
+-- Add or remove people in a private channel: its creator or a team owner/admin.
+create or replace function public.set_channel_people(ch uuid, add_people uuid[], remove_people uuid[])
+  returns void language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from channels where id = ch;
+  if c.id is null or c.kind <> 'private' then raise exception 'That isn''t a private channel'; end if;
+  if not (is_admin(c.workspace_id) or (c.created_by = auth.uid() and can_see_channel(ch))) then
+    raise exception 'Only whoever made this channel, or a team owner or admin, can change who''s in it';
+  end if;
+  insert into channel_members (channel_id, user_id)
+    select ch, m.user_id from members m where m.workspace_id = c.workspace_id and m.user_id = any(coalesce(add_people, '{}'))
+    on conflict do nothing;
+  delete from channel_members where channel_id = ch and user_id = any(coalesce(remove_people, '{}'));
+  if not exists (select 1 from channel_members where channel_id = ch) then
+    raise exception 'A private channel needs at least one person in it';
+  end if;
+end $$;
+
 -- Unread messages for each channel the person can see in a team.
 create or replace function public.unread_counts(ws uuid) returns table (channel_id uuid, unread bigint)
   language sql stable security definer set search_path = public as $$
@@ -215,9 +255,11 @@ create or replace function public.unread_counts(ws uuid) returns table (channel_
 $$;
 
 revoke all on function public.create_team(text, text), public.join_team(text, text), public.new_invite_code(uuid),
-  public.set_role(uuid, uuid, text), public.open_dm(uuid, uuid), public.unread_counts(uuid) from public, anon;
+  public.set_role(uuid, uuid, text), public.open_dm(uuid, uuid), public.unread_counts(uuid),
+  public.create_private_channel(uuid, text, text, uuid[]), public.set_channel_people(uuid, uuid[], uuid[]) from public, anon;
 grant execute on function public.create_team(text, text), public.join_team(text, text), public.new_invite_code(uuid),
-  public.set_role(uuid, uuid, text), public.open_dm(uuid, uuid), public.unread_counts(uuid) to authenticated;
+  public.set_role(uuid, uuid, text), public.open_dm(uuid, uuid), public.unread_counts(uuid),
+  public.create_private_channel(uuid, text, text, uuid[]), public.set_channel_people(uuid, uuid[], uuid[]) to authenticated;
 grant select, insert, update, delete on public.workspaces, public.members, public.channels, public.channel_members,
   public.messages, public.reads to authenticated;
 revoke all on public.workspaces, public.members, public.channels, public.channel_members, public.messages, public.reads

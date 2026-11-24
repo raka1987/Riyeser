@@ -92,6 +92,7 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
           ['invite', 'Invite your staff', '<p>Click <b>+ Invite people</b> and send them the link. They create a free account and join with the code in the link. Owners and admins can click <b>New code</b> to stop the old link working.</p>', true],
         ] },
         { title: 'Chatting', items: [
+          ['private', 'Make a private chat (executives, sales, managers)', '<ol><li>Click <b>+</b> next to Channels.</li><li>Give it a name, for example <b>executives</b> or <b>sales</b>.</li><li>Leave <b>Only people I choose</b> ticked (it\'s the default) and tick the people who should be in it.</li><li>Click <b>Add</b>.</li></ol><p>A private chat shows a 🔒. It doesn\'t show up at all for anyone who isn\'t in it, so nobody else even knows it\'s there. To change who\'s in it later, open it and click <b>People</b>: whoever made it, or a team owner or admin, can tick or untick people. Anyone in it can click <b>Leave this chat</b>.</p>', true],
           ['dm', 'Send a private message', '<p>Click a person under <b>Direct messages</b>. Only the two of you can read it.</p>'],
           ['refs', 'Point at an invoice or job', '<p>Type the number the way Riyeser shows it, for example <b>INV-1047</b>, <b>Q-0042</b> or <b>Booking 12</b>, and it stands out in the message. Type <b>@</b> and a name to get someone\'s attention.</p>'],
           ['edit', 'Change or delete a message', '<p>Point at your message (or tap it on a phone) and click <b>Edit</b> or <b>Delete</b>. Edited messages say “(edited)”.</p>'],

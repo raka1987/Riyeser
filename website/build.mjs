@@ -131,7 +131,8 @@ const PROGRAMS = [
     one: 'Team chat for your business: channels for jobs and the office, direct messages, and live updates on your PC and phone. Free.',
     pitch: 'Your whole team, in one conversation.',
     features: [
-      ['Channels', 'A place for each topic: #jobs, #office, or one per site. Everyone in the team can see them.'],
+      ['Channels', 'A place for each topic: #jobs, #office, or one per site, for everyone in the team.'],
+      ['Private chats', 'Executives, sales or managers only: choose exactly who is in. Nobody else can see the chat, or even that it exists.'],
       ['Direct messages', 'Private one-to-one chats. Only the two of you can read them.'],
       ['On the PC and the phone', 'In Riyeser Central on the PC, and in any web browser on phones and tablets, with nothing to install.'],
       ['Points at your work', 'Type INV-1047 or Booking 12 and it stands out, so everyone knows which invoice or job you mean.'],

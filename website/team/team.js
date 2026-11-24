@@ -48,14 +48,19 @@
       async newInvite(ws) { return ok(await sb.rpc('new_invite_code', { ws })); },
       async people(ws) { return ok(await sb.from('members').select('user_id, display_name, role').eq('workspace_id', ws).order('display_name')); },
       async channels(ws) {
-        const chans = ok(await sb.from('channels').select('id, kind, name, topic').eq('workspace_id', ws).eq('archived', false).order('name'));
-        const dms = chans.filter((c) => c.kind === 'dm').map((c) => c.id);
+        const chans = ok(await sb.from('channels').select('id, kind, name, topic, created_by').eq('workspace_id', ws).eq('archived', false).order('name'));
+        const dms = chans.filter((c) => c.kind !== 'channel').map((c) => c.id);
         const cm = dms.length ? ok(await sb.from('channel_members').select('channel_id, user_id').in('channel_id', dms)) : [];
         return chans.map((c) => ({ ...c, people: cm.filter((x) => x.channel_id === c.id).map((x) => x.user_id) }));
       },
       async createChannel(ws, uid, name, topic) {
         return ok(await sb.from('channels').insert({ workspace_id: ws, kind: 'channel', name, topic: topic || null, created_by: uid }).select('id').single()).id;
       },
+      async createPrivate(ws, name, topic, people) {
+        return ok(await sb.rpc('create_private_channel', { ws, channel_name: name, channel_topic: topic || '', people }));
+      },
+      async setPeople(ch, add, remove) { ok(await sb.rpc('set_channel_people', { ch, add_people: add, remove_people: remove })); },
+      async leave(ch, uid) { ok(await sb.from('channel_members').delete().eq('channel_id', ch).eq('user_id', uid)); },
       async openDm(ws, person) { return ok(await sb.rpc('open_dm', { ws, person })); },
       async messages(ch) {
         const rows = ok(await sb.from('messages').select('*').eq('channel_id', ch).order('created_at', { ascending: false }).limit(200));
@@ -84,6 +89,7 @@
     const chans = [{ id: 'c-general', kind: 'channel', name: 'general', topic: 'Everyone in the team', people: [] },
       { id: 'c-jobs', kind: 'channel', name: 'jobs', topic: 'Jobs, bookings and what\'s on today', people: [] },
       { id: 'c-office', kind: 'channel', name: 'office', topic: 'Invoices, bills and paperwork', people: [] },
+      { id: 'c-exec', kind: 'private', name: 'executives', topic: 'Owners and managers only', people: ['u-me', 'u-sam'], created_by: 'u-me' },
       { id: 'd-sam', kind: 'dm', name: null, topic: null, people: ['u-me', 'u-sam'] }];
     let n = 0; const msg = (ch, u, body, m) => ({ id: 'm' + (++n), channel_id: ch, workspace_id: ws, user_id: u, body, created_at: ago(m), edited_at: null, deleted: false });
     const msgs = [
@@ -94,8 +100,9 @@
       msg('c-jobs', 'u-jordan', 'Booking 12 done. Old unit removed, new 315L installed and tested. Photos in As Built.', 18),
       msg('c-office', 'u-sam', 'INV-1047 from Sample Customer Pty Ltd is 4 days overdue ($880). I\'ll give them a call.', 60),
       msg('c-office', 'u-sam', 'They paid! INV-1047 is cleared ✅', 8),
+      msg('c-exec', 'u-sam', 'Q3 numbers are in. Margins up 4% on last quarter. Can we talk pricing for next year on Friday?', 240),
       msg('d-sam', 'u-sam', 'Can you approve the timesheets before 3? Pay run goes tonight.', 30)];
-    const read = { 'c-general': ago(1400), 'c-jobs': ago(92), 'c-office': ago(61), 'd-sam': ago(40) };
+    const read = { 'c-general': ago(1400), 'c-jobs': ago(92), 'c-office': ago(61), 'c-exec': ago(200), 'd-sam': ago(40) };
     let listener = null;
     const reply = (ch, from, body, ms) => setTimeout(() => { const m = msg(ch, from, body, 0); m.created_at = new Date().toISOString(); msgs.push(m); listener && listener(m); }, ms);
     return {
@@ -108,7 +115,10 @@
       async createTeam() { return ws; }, async joinTeam() { return ws; }, async newInvite() { return 'DEMO' + Math.floor(1000 + Math.random() * 9000); },
       async people() { return ppl.map(([user_id, display_name, role]) => ({ user_id, display_name, role })); },
       async channels() { return chans.slice(); },
-      async createChannel(_w, _u, name, topic) { const id = 'c-' + name; chans.push({ id, kind: 'channel', name, topic, people: [] }); return id; },
+      async createChannel(_w, _u, name, topic) { const id = 'c-' + name; chans.push({ id, kind: 'channel', name, topic, people: [], created_by: 'u-me' }); return id; },
+      async createPrivate(_w, name, topic, people) { const id = 'p-' + name; chans.push({ id, kind: 'private', name, topic, people: ['u-me', ...people.filter((x) => x !== 'u-me')], created_by: 'u-me' }); return id; },
+      async setPeople(ch, add, remove) { const c = chans.find((x) => x.id === ch); c.people = [...new Set([...c.people, ...add])].filter((x) => !remove.includes(x)); },
+      async leave(ch) { const i = chans.findIndex((x) => x.id === ch); if (i >= 0) chans.splice(i, 1); },
       async openDm(_w, person) {
         let c = chans.find((x) => x.kind === 'dm' && x.people.includes(person));
         if (!c) { c = { id: 'd-' + person, kind: 'dm', name: null, topic: null, people: ['u-me', person] }; chans.push(c); }
@@ -260,7 +270,7 @@
   }
 
   function sideHtml() {
-    const chs = S.chans.filter((c) => c.kind === 'channel');
+    const chs = S.chans.filter((c) => c.kind !== 'dm');
     const others = S.people.filter((p) => p.user_id !== S.user.id);
     const dmFor = (uid) => S.chans.find((c) => c.kind === 'dm' && c.people.includes(uid));
     const me = S.people.find((p) => p.user_id === S.user.id) || {};
@@ -270,7 +280,7 @@
       : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}</small></div></div>
     <div class="sidescroll">
       <div class="sec">Channels <button id="addch" aria-label="Add a channel" title="Add a channel">+</button></div>
-      ${chs.map((c) => `<button class="item${S.ch && S.ch.id === c.id ? ' on' : ''}${S.unread[c.id] ? ' unread' : ''}" data-ch="${c.id}"><span class="hash">#</span><span class="nm">${esc(c.name)}</span>${unreadBadge(c.id)}</button>`).join('')}
+      ${chs.map((c) => `<button class="item${S.ch && S.ch.id === c.id ? ' on' : ''}${S.unread[c.id] ? ' unread' : ''}" data-ch="${c.id}"><span class="hash">${c.kind === 'private' ? '🔒' : '#'}</span><span class="nm">${esc(c.name)}</span>${unreadBadge(c.id)}</button>`).join('')}
       <div class="sec">Direct messages</div>
       ${others.map((p) => { const dm = dmFor(p.user_id); return `<button class="item${dm && S.ch && S.ch.id === dm.id ? ' on' : ''}${dm && S.unread[dm.id] ? ' unread' : ''}" data-dm="${p.user_id}">${av(p.user_id, p.display_name)}<span class="nm">${esc(p.display_name)}</span>${dm ? unreadBadge(dm.id) : ''}</button>`; }).join('')
         || '<p style="padding:4px 10px;color:var(--side-muted);font-size:13px">Invite your team to start chatting.</p>'}
@@ -305,9 +315,10 @@
     const el = document.getElementById('mhead'); if (!el) return;
     el.innerHTML = `<button class="back" aria-label="Back to channels">‹</button>${S.ch ? (S.ch.kind === 'dm'
       ? `${av(S.ch.people.find((p) => p !== S.user.id) || S.user.id, chanLabel(S.ch))}<div><h2>${esc(chanLabel(S.ch))}</h2><small>Direct message</small></div>`
-      : `<div><h2># ${esc(S.ch.name)}</h2><small>${esc(S.ch.topic || '')}</small></div>`) : ''}`;
+      : `<div style="flex:1;min-width:0"><h2>${S.ch.kind === 'private' ? '🔒' : '#'} ${esc(S.ch.name)}</h2><small>${S.ch.kind === 'private' ? `Private · ${S.ch.people.length} ${S.ch.people.length === 1 ? 'person' : 'people'}${S.ch.topic ? ' · ' : ''}` : ''}${esc(S.ch.topic || '')}</small></div>${S.ch.kind === 'private' ? '<button class="btn sm" id="ppl">People</button>' : ''}`) : ''}`;
     el.querySelector('.back').onclick = () => { S.inChat = false; document.querySelector('.shell').classList.remove('inchat'); };
-    const t = document.getElementById('txt'); if (t && S.ch) t.placeholder = S.ch.kind === 'dm' ? `Message ${chanLabel(S.ch)}` : `Message #${S.ch.name}`;
+    const pb = el.querySelector('#ppl'); if (pb) pb.onclick = peopleOf;
+    const t = document.getElementById('txt'); if (t && S.ch) t.placeholder = S.ch.kind === 'dm' ? `Message ${chanLabel(S.ch)}` : S.ch.kind === 'private' ? `Message ${S.ch.name} (private)` : `Message #${S.ch.name}`;
   }
   function renderMsgs(toBottom) {
     const el = document.getElementById('msgs'); if (!el) return;
@@ -361,17 +372,53 @@
         S.team.invite_code = await api.newInvite(S.team.id); d.querySelector('#il').value = link(); d.querySelector('#ic').textContent = S.team.invite_code; };
     });
   }
+  const tickList = (chosen, locked = []) => `<div class="pick">${S.people.map((p) => `<label class="pk"><input type="checkbox" name="p" value="${p.user_id}"${chosen.includes(p.user_id) ? ' checked' : ''}${locked.includes(p.user_id) ? ' disabled' : ''}>${av(p.user_id, p.display_name)}<span>${esc(p.display_name)}${p.user_id === S.user.id && p.display_name !== 'You' ? ' (you)' : ''}</span>${p.role !== 'member' ? `<small>${esc(p.role)}</small>` : ''}</label>`).join('')}</div>`;
+  const ticked = (d) => [...d.querySelectorAll('input[name=p]:checked')].map((x) => x.value);
+
   function addChannel() {
-    modal(`<h3>Add a channel</h3><p>Channels are for topics everyone in the team can see, like a job, a site or the office.</p>
-      <form id="nf"><label class="f"><span>Name</span><input name="name" required maxlength="40" placeholder="e.g. hill-rd-site"></label>
+    modal(`<h3>Add a chat</h3><p>For a topic, a job or a group of people.</p>
+      <form id="nf"><label class="f"><span>Name</span><input name="name" required maxlength="40" placeholder="e.g. sales, executives, hill-rd-site"></label>
       <label class="f"><span>What it's for (optional)</span><input name="topic" maxlength="200"></label>
+      <div class="f"><span>Who can see it?</span>
+        <label class="opt"><input type="radio" name="who" value="some" checked> <b>🔒 Only people I choose</b><small>Private: it doesn't even show up for anyone else</small></label>
+        <label class="opt"><input type="radio" name="who" value="all"> <b>Everyone in the team</b><small>Everyone sees it, including people who join later</small></label></div>
+      <div id="pickwrap"><span class="pkh">Choose who's in it</span>${tickList([S.user.id], [S.user.id])}</div>
       <div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Add</button></div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
+      d.querySelectorAll('input[name=who]').forEach((r) => r.onchange = () => { d.querySelector('#pickwrap').hidden = d.querySelector('input[name=who]:checked').value !== 'some'; });
       d.querySelector('#nf').onsubmit = async (e) => {
         e.preventDefault(); const f = new FormData(e.target);
         const name = String(f.get('name')).trim().toLowerCase().replace(/^#/, '').replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '').slice(0, 40);
         if (!name) return;
-        try { const id = await api.createChannel(S.team.id, S.user.id, name, String(f.get('topic') || '').trim()); S.chans = await api.channels(S.team.id); close(); openChannel(id); }
+        const topic = String(f.get('topic') || '').trim();
+        try {
+          const id = f.get('who') === 'some'
+            ? await api.createPrivate(S.team.id, name, topic, ticked(d).filter((x) => x !== S.user.id))
+            : await api.createChannel(S.team.id, S.user.id, name, topic);
+          S.chans = await api.channels(S.team.id); close(); openChannel(id);
+        } catch (err) { alert(plainError(err)); }
+      };
+    });
+  }
+
+  // Who's in a private chat. Whoever made it, or a team owner/admin, can change it; anyone in it can leave.
+  function peopleOf() {
+    const c = S.ch; if (!c || c.kind !== 'private') return;
+    const manage = c.created_by === S.user.id || S.team.role === 'owner' || S.team.role === 'admin';
+    modal(`<h3>🔒 ${esc(c.name)}</h3><p>${manage ? 'Tick who should be in this private chat. Only they can see it.' : 'Only these people can see this private chat.'}</p>
+      ${manage ? tickList(c.people) : `<div class="pick">${c.people.map((u) => `<div class="pk">${av(u, nameOf(u))}<span>${esc(nameOf(u))}${u === S.user.id ? ' (you)' : ''}</span></div>`).join('')}</div>`}
+      <div class="mfoot"><button class="btn" id="lv" style="margin-right:auto;color:#b91c1c">Leave this chat</button><button class="btn" id="cl">${manage ? 'Cancel' : 'Done'}</button>${manage ? '<button class="btn p" id="sv">Save</button>' : ''}</div>`, (d, close) => {
+      d.querySelector('#cl').onclick = close;
+      d.querySelector('#lv').onclick = async () => {
+        if (!confirm(`Leave ${c.name}? You won't see it again unless someone adds you back.`)) return;
+        try { await api.leave(c.id, S.user.id); S.chans = await api.channels(S.team.id); close(); openChannel((S.chans.find((x) => x.name === 'general') || S.chans[0] || {}).id, false); }
+        catch (err) { alert(plainError(err)); }
+      };
+      const sv = d.querySelector('#sv'); if (sv) sv.onclick = async () => {
+        const now = ticked(d); if (!now.length) { alert('Keep at least one person in the chat.'); return; }
+        const add = now.filter((u) => !c.people.includes(u)); const remove = c.people.filter((u) => !now.includes(u));
+        try { await api.setPeople(c.id, add, remove); S.chans = await api.channels(S.team.id); S.ch = S.chans.find((x) => x.id === c.id) || null; close();
+          if (!S.ch) openChannel((S.chans.find((x) => x.name === 'general') || S.chans[0] || {}).id, false); else { renderHead(); renderSide(); } }
         catch (err) { alert(plainError(err)); }
       };
     });

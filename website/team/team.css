@@ -100,3 +100,12 @@ a { color: var(--blue); }
   .msgs { padding: 8px 10px; } .composer { padding: 8px 10px calc(10px + env(safe-area-inset-bottom)); } .hint { display: none; }
   .macts { display: inline-flex; } .demo-bar { font-size: 12px; }
 }
+.opt { display: block; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 6px; cursor: pointer; font-size: 14px; }
+.opt:has(input:checked) { border-color: var(--brand); background: var(--brand-l); } .opt small { display: block; color: var(--muted); margin: 2px 0 0 22px; }
+.pkh { display: block; font-size: 13px; font-weight: 600; color: var(--ink); margin: 4px 0 6px; }
+.pick { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; padding: 4px; }
+.pk { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border-radius: 8px; font-size: 14.5px; cursor: pointer; }
+.pk:hover { background: #f7f8fb; } .pk .av { width: 26px; height: 26px; border-radius: 7px; font-size: 11px; } .pk span { flex: 1; } .pk small { color: var(--muted); font-size: 12px; text-transform: capitalize; }
+.mhead .btn.sm { flex: none; }
+.f .opt input, .pk input { width: auto; margin: 0 8px 0 0; vertical-align: -2px; }
+.pk span { flex: none; } .pk > span:not(.av) { flex: 1; } .pk .av { flex: none; }

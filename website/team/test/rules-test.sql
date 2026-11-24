@@ -76,6 +76,49 @@ do $$ begin
   exception when insufficient_privilege then null; end;
 end $$;
 reset role;
+-- Private channels: the owner (Alex) makes "executives" with Sam only. Jordan (a member of A) can't see it.
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+select public.create_private_channel(:'ws_a', 'executives', 'Owners and managers',
+  array['22222222-2222-2222-2222-222222222222']::uuid[]) as exec_ch \gset
+insert into public.messages (channel_id, workspace_id, body) values (:'exec_ch', :'ws_a', 'Exec only: Q3 margins');
+select set_config('test.exec', :'exec_ch', false);
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+do $$ begin assert exists (select 1 from public.messages where body = 'Exec only: Q3 margins'), 'Sam (added) sees it'; end $$;
+-- Sam isn't an admin and didn't make it, so can't add people
+do $$ begin
+  begin perform public.set_channel_people(current_setting('test.exec')::uuid, array['44444444-4444-4444-4444-444444444444']::uuid[], null);
+    raise exception 'Sam added someone';
+  exception when others then if sqlerrm = 'Sam added someone' then raise; end if; end;
+end $$;
+select pg_temp.as_user('44444444-4444-4444-4444-444444444444');
+do $$ begin
+  assert not exists (select 1 from public.channels where name = 'executives'), 'Jordan cannot see the private channel';
+  assert not exists (select 1 from public.messages where body like 'Exec only%'), 'Jordan cannot read it';
+end $$;
+-- Jordan can't post into it, even knowing its id
+do $$ begin
+  begin
+    insert into public.messages (channel_id, workspace_id, body)
+      values (current_setting('test.exec')::uuid, (select workspace_id from public.members limit 1), 'sneaky');
+    raise exception 'Jordan posted';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- the owner adds Jordan: now Jordan sees it; then Jordan leaves and can't again
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+select public.set_channel_people(:'exec_ch', array['44444444-4444-4444-4444-444444444444']::uuid[], null);
+select pg_temp.as_user('44444444-4444-4444-4444-444444444444');
+do $$ begin assert exists (select 1 from public.messages where body like 'Exec only%'), 'Jordan added, sees it'; end $$;
+delete from public.channel_members where channel_id = :'exec_ch' and user_id = '44444444-4444-4444-4444-444444444444';
+do $$ begin assert not exists (select 1 from public.channels where name = 'executives'), 'Jordan left'; end $$;
+-- Jordan can't leave (delete from) a direct message he's not in, or remove others from the private channel
+delete from public.channel_members where channel_id = :'exec_ch';
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin assert (select count(*) from public.channel_members where channel_id = current_setting('test.exec')::uuid) = 2, 'Alex and Sam still in'; end $$;
+-- the other business still sees nothing
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
+do $$ begin assert not exists (select 1 from public.channels where kind = 'private'), 'B sees no private channels'; end $$;
+reset role;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;
