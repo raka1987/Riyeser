@@ -715,3 +715,11 @@ def test_s24_statement_import_layouts_duplicates_skipped_rows_and_matching(clien
     # and it comes ticked on Reconcile
     rec = page(client.get(f"/banking/reconcile?account={bank}&date=2026-11-30"))
     assert f'value="{pay_line}" data-amt="22000" onchange="recUpd()" checked' in rec and "on statement" in rec
+
+
+# ------------------------------------------------------------------ F3 (README wording)
+def test_f3_readme_has_the_90_day_trial_wording_and_no_old_caps_or_prices():
+    from pathlib import Path
+    text = (Path(__file__).parent.parent / "README.md").read_text()
+    assert "first 50 invoices" not in text and "first 500 sales" not in text and "50 invoices" not in text
+    assert "Free for 90 days" in text and "US$" not in text

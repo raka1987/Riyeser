@@ -54,7 +54,7 @@ This code base ships as **three separate Windows apps**, so they're easy to look
 
 | | **Riyeser Accounting Basics** | **Riyeser Accounting Plus** | **Riyeser POS** |
 |---|---|---|---|
-| Price | Free for the first 50 invoices, then a Riyeser licence | Free for 90 days, then included in a Riyeser licence | Free for the first 500 sales, then a Riyeser licence |
+| Price | Free for 90 days, then a Riyeser licence | Free for 90 days, then a Riyeser licence | Free for 90 days, then a Riyeser licence |
 | Looks | Green, "B." logo | Blue, "P." logo | Teal, "Po." logo |
 | Has | Invoices, quotes, customers, suppliers, bills, stock, simple money in/out, key reports | Everything in Basics plus bank reconciliation, statement import, payroll, general journal, jobs, budgets, Balance Sheet and Trial Balance | The till: retail or restaurant, receipts, tables and kitchen dockets, manager approvals, refunds, close till, plus products, stock and customers |
 | Installer | `RiyeserAccountingBasics-Setup.exe` | `RiyeserAccountingPlus-Setup.exe` | `RiyeserPOS-Setup.exe` |
@@ -65,7 +65,7 @@ This code base ships as **three separate Windows apps**, so they're easy to look
 * **Plus after the trial without a licence:** the everyday screens keep working; the Plus-only screens lock (nothing removed) until a licence is entered in Riyeser Central.
 * Existing *Riyeser Accounting 1.x* installs update in place to Plus.
 * **Riyeser POS installs next to Accounting** (it never replaces Basics or Plus) and works without it. Each till sale is a paid tax invoice in the same company file, so Accounting's stock, GST and reports include it straight away. Accounting Basics and Plus don't have a till of their own: their **Riyeser POS** menu item opens POS, or offers the download.
-* **Free allowances:** Basics 50 invoices, POS 500 sales, with a warning at 80%. The caps live in one place, `riyeser/plan.py` (a `caps` entry in the licence file, set by Riyeser's server, overrides them). Reaching one never deletes or hides anything; only new invoices (Basics) or new till sales (POS) stop until a licence is entered in Riyeser Central. Quotes, payments, reports, past sales and close-till all keep working. Voided invoices and sales don't count, and till sales count toward POS, not Basics.
+* **90-day free trial:** every paid program is free for 90 days, with a reminder in the last two weeks. The rule lives in one place, `riyeser/plan.py` (the trial and licence come from Riyeser Central's licence file). When the trial ends without a licence nothing is deleted or hidden; only new invoices (Basics) or new till sales (POS) stop until a licence is entered in Riyeser Central. Quotes, payments, reports, past sales and close-till all keep working. Prices are on riyeser.com.
 
 Build one: `python packaging/build_desktop.py --edition basics` (or `plus`, or `pos`). Run from source with no edition baked in, each company picks Basic or Plus under **Setup → Company** instead (set `RIYESER_APP_EDITION=basics|plus|pos` to try any of the apps). The names live in one place, `EDITIONS` in `riyeser/db.py`; the edition logic is in `riyeser/edition.py`.
 
