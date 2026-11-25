@@ -1,6 +1,6 @@
 // Emails: timesheets, payslips and the daily / weekly timesheet reports. Sent through the company's own mailbox (SMTP),
 // set up by a Super admin in Settings → Email. Nothing is sent until it's switched on; every email is logged (sent or failed).
-// If the provider refuses for now (too many emails this hour), the email waits in a queue and is sent again later.
+// If the provider refuses for now (too many emails this hour) or can't be reached, the email waits in a queue and is sent again later.
 const nodemailer = require('nodemailer');
 
 module.exports = function mailer(app, h) {
@@ -31,18 +31,25 @@ module.exports = function mailer(app, h) {
     return transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: list.join(', '), subject, html: wrapHtml(html, s), replyTo: s.email || s.email_from })
       .then(() => { log(list.join(', '), subject, kind, 'sent'); return true; })
       .catch(e => {
-        // over the provider's hourly limit (or a temporary refusal): keep it and send it again later
-        if (isLimit(e) || (+e.responseCode >= 400 && +e.responseCode < 500)) {
+        // over the provider's hourly limit, a temporary refusal, or the server can't be reached (S33): keep it and send it again later
+        if (isLimit(e) || isConn(e) || (+e.responseCode >= 400 && +e.responseCode < 500)) {
           db.prepare('INSERT INTO email_queue(to_addr, subject, html, kind, tries, next_at, last_error) VALUES(?,?,?,?,1,?,?)').run(list.join(', '), subject, html, kind, Date.now() + 15 * 60000, String(e.message).slice(0, 300));
-          log(list.join(', '), subject, kind, 'waiting', 'Will send again in 15 minutes: ' + friendly(e));
-          if (force) throw new Error(friendly(e) + ' It has been saved and will send again automatically in 15 minutes.');
+          log(list.join(', '), subject, kind, 'waiting', 'Will send again in 15 minutes: ' + friendly(e, s));
+          if (force) throw Object.assign(new Error(friendly(e, s) + ' It has been saved and will send again automatically in 15 minutes.'), { queued: true });
           return false;
         }
-        log(list.join(', '), subject, kind, 'failed', e.message); if (force) throw e; return false;
+        log(list.join(', '), subject, kind, 'failed', e.message); if (force) throw Object.assign(new Error(friendly(e, s)), { raw: e.message }); return false;
       });
   }
   const isLimit = e => /too many messages|rate limit|quota|try again later|exceeded/i.test(String(e && (e.response || e.message) || ''));
-  const friendly = e => isLimit(e) ? "Your email provider's limit on emails per hour has been reached (Namecheap counts every email sent from the mailbox)." : String(e.message || e);
+  const isConn = e => ['ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'EDNS', 'ECONNREFUSED', 'ENOTFOUND', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH'].includes(e && e.code)
+    || /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EHOSTUNREACH|ENETUNREACH|getaddrinfo|Greeting never received|Connection timeout/i.test(String(e && e.message || ''));
+  // plain words for the person, not the raw SMTP / network error (that stays in the email log)
+  const friendly = (e, s = getSettings()) => isLimit(e) ? "Your email provider's limit on emails per hour has been reached."
+    : isConn(e) ? `Couldn't reach the email server (${s.smtp_host}:${+s.smtp_port || 587}). Check the internet connection and Settings → Email.`
+    : +e.responseCode >= 500 && /recipient|mailbox|address|user unknown|5\.1\./i.test(String(e.response || e.message)) ? 'The email address was refused by the email server. Check it on the Staff record.'
+    : +e.responseCode === 535 || /auth/i.test(String(e.message)) ? 'The email server refused the username or password (Settings → Email).'
+    : `The email server refused the email (${String(e.response || e.message || e).slice(0, 120)}).`;
   // resend waiting emails every few minutes (up to 8 tries, about 2 hours)
   setInterval(() => {
     const s = getSettings(); if (!s.smtp_host || !isEmail(s.email_from)) return;
@@ -263,7 +270,7 @@ module.exports = function mailer(app, h) {
       if (k === 'email_enabled') v = v === '1' || v === 'true' || b[k] === true ? '1' : '0';
       if (k === 'smtp_port' && v && !(+v > 0 && +v < 65536)) bad('Port must be a number, e.g. 587 or 465.');
       if (k === 'email_from' && v && !isEmail(v)) bad('"Send from" must be an email address.');
-      if (k === 'email_club_copy' && v && !v.split(/[,;\s]+/).filter(Boolean).every(isEmail)) bad('Club copy: enter email addresses, separated by commas.');
+      if (k === 'email_club_copy' && v && !v.split(/[,;\s]+/).filter(Boolean).every(isEmail)) bad('Send a copy to: enter email addresses, separated by commas.');
       if ((k === 'report_time_daily' || k === 'report_time_weekly') && v && !/^\d{2}:\d{2}$/.test(v)) bad('Report times must be like 18:30.');
       if (k === 'email_subs') { let o; try { o = JSON.parse(v || '{}'); } catch { bad('Bad email choices.'); } v = JSON.stringify(Object.fromEntries(Object.entries(o || {}).map(([w, l]) => [w, (Array.isArray(l) ? l : []).filter(x => TYPES.includes(x))]))); }
       setSetting(k, v);

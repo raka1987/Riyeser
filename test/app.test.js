@@ -273,6 +273,47 @@ test('email over the provider limit is kept and resent later, with a plain messa
   } finally { smtp.close(); }
 });
 
+test('S33: payslip emails carry on past a failure, report each person, and queue when the server can\'t be reached', async () => {
+  const net = require('node:net'); const got = [];
+  // a mail server that refuses one address and takes the others
+  const smtp = net.createServer(sock => { let data = false, buf = ''; sock.write('220 t\r\n');
+    sock.on('data', c => { buf += c; let i; while ((i = buf.indexOf('\r\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (data) { if (l === '.') { data = false; got.push(1); sock.write('250 OK\r\n'); } continue; }
+      const c4 = l.slice(0, 4).toUpperCase();
+      if (c4 === 'EHLO' || c4 === 'HELO') sock.write('250-t\r\n250 AUTH PLAIN\r\n');
+      else if (c4 === 'RCPT') sock.write(/bounce@/.test(l) ? '550 5.1.1 <bounce@club.test>: Recipient address rejected: User unknown\r\n' : '250 OK\r\n');
+      else if (c4 === 'DATA') { data = true; sock.write('354 go\r\n'); } else if (c4 === 'QUIT') { sock.write('221 bye\r\n'); sock.end(); } else sock.write('250 OK\r\n'); } }); });
+  await new Promise(r => smtp.listen(0, r));
+  const people = [];
+  for (const [n, email] of [['Aa Bounce', 'bounce@club.test'], ['Bb Good', 'good@club.test'], ['Cc NoMail', '']]) {
+    const e = (await call('POST', '/api/staff/employees', { name: n, username: n.replace(/\W/g, '').toLowerCase(), password: 'mailpass12', role: 'staff', pay_type: 'hourly', pay_rate: 10, email }, admin)).data;
+    await call('POST', '/api/staff/timesheets', { user_id: e.id, clock_in: '2029-01-09T08:00', clock_out: '2029-01-09T12:00' }, admin); people.push(e);
+  }
+  const only = r => ({ sent: r.sent.filter(n => /^(Aa|Bb|Cc) /.test(n)), missing: r.missing.filter(n => /^(Aa|Bb|Cc) /.test(n)), waiting: r.waiting.filter(x => /^(Aa|Bb|Cc) /.test(x.name)), failed: r.failed.filter(x => /^(Aa|Bb|Cc) /.test(x.name)) });
+  try {
+    await call('PUT', '/api/staff/email', { smtp_host: '127.0.0.1', smtp_port: String(smtp.address().port), smtp_secure: 'none', email_from: 'bookings@club.test' }, admin);
+    const r = await call('POST', '/api/staff/payslips/email', { from: '2029-01-08', to: '2029-01-14' }, admin);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    const o = only(r.data);
+    assert.deepEqual(o.sent, ['Bb Good']); assert.deepEqual(o.missing, ['Cc NoMail']); // the bounce didn't stop the people after it
+    assert.equal(o.failed.length, 1); assert.equal(o.failed[0].name, 'Aa Bounce'); assert.match(o.failed[0].reason, /email address was refused/);
+  } finally { smtp.close(); }
+  // the server can't be reached: every payslip waits to send again, with a plain message (not "connect ECONNREFUSED")
+  const closed = await new Promise(r => { const t = net.createServer(); t.listen(0, () => { const p = t.address().port; t.close(() => r(p)); }); });
+  await call('PUT', '/api/staff/email', { smtp_port: String(closed) }, admin);
+  const before = (await call('GET', '/api/staff/email', null, admin)).data.waiting;
+  const r2 = await call('POST', '/api/staff/payslips/email', { from: '2029-01-08', to: '2029-01-14' }, admin);
+  assert.equal(r2.status, 200, JSON.stringify(r2.data));
+  const o2 = only(r2.data);
+  assert.deepEqual(o2.waiting.map(x => x.name).sort(), ['Aa Bounce', 'Bb Good']); assert.deepEqual(o2.sent, []);
+  assert.match(o2.waiting[0].reason, /^Couldn't reach the email server \(127\.0\.0\.1:\d+\)\..*send again automatically/); assert.doesNotMatch(o2.waiting[0].reason, /ECONNREFUSED/);
+  assert.ok((await call('GET', '/api/staff/email', null, admin)).data.waiting >= before + 2);
+  // the copy field is called "Send a copy to"
+  const bad = await call('PUT', '/api/staff/email', { email_club_copy: 'not an email' }, admin);
+  assert.equal(bad.status, 400); assert.match(bad.data.error, /^Send a copy to:/);
+  for (const p of people) await call('PUT', `/api/staff/employees/${p.id}`, { active: false }, admin);
+});
+
 test('daily timesheets report: sent to the people ticked for it', async () => {
   const net = require('node:net'); const got = [];
   const smtp = net.createServer(sock => { let data = false, buf = '', msg = { to: [] }; sock.write('220 t\r\n');

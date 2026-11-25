@@ -318,7 +318,11 @@ function reportsModal(emps, cur) {
       if (F.kind.value === 'ps') {
         if (!confirm(p.user_id ? 'Email this person their payslip(s) for these dates?' : 'Email every staff member their own payslip(s) for these dates?')) { b.disabled = false; return; }
         const r = await api('/api/staff/payslips/email', { body: { from: p.from, to: p.to, ...(p.user_id ? { user_id: p.user_id } : {}) } });
-        toast(`${r.sent.length ? `✅ Payslips sent to ${r.sent.join(', ')}` : 'No payslips sent'}${r.missing.length ? ` · No email on record for ${r.missing.join(', ')} (Staff → Email)` : ''}`, 9000);
+        const why = l => [...new Set(l.map(x => x.reason))].join(' ');
+        toast([r.sent.length ? `✅ Sent to ${r.sent.join(', ')}.` : 'No payslips sent yet.',
+          (r.waiting || []).length ? `⏳ Will send again automatically: ${r.waiting.map(x => x.name).join(', ')}. ${why(r.waiting)}` : '',
+          (r.failed || []).length ? `❌ Not sent: ${r.failed.map(x => `${x.name} (${x.reason})`).join('; ')}` : '',
+          r.missing.length ? `No email on record for ${r.missing.join(', ')} (Staff → Email).` : ''].filter(Boolean).join(' · '), 12000);
       } else {
         const r = await api('/api/staff/timesheets/email', { body: { from: p.from, to: p.to, ...(p.user_id ? { user_id: p.user_id } : {}) } });
         toast(`✅ Timesheet sent to ${r.sent_to.join(', ')}`, 7000);
@@ -763,7 +767,7 @@ async function drawEmailSettings() {
   const SUBS = [['timesheets_daily', 'Daily timesheets', 'End of each day: every shift in / out, hours, unpaid break, paid hours, and who is still clocked in'],
     ['timesheets', 'Weekly timesheets', 'Monday morning: last week\'s shifts, hours, breaks and paid hours']];
   host.innerHTML = `<h3>📧 Emails <span class="chip ${on('email_enabled') ? '' : 'gray'}">${on('email_enabled') ? 'On' : 'Off'}</span></h3>
-    <p class="small muted" style="margin-top:-4px">Timesheets and payslips are sent from the company's own mailbox. For <b>Namecheap Private Email</b>: host <code>mail.privateemail.com</code>, port <code>465</code> (SSL), username = the full email address, password = that mailbox's password.</p>
+    <p class="small muted" style="margin-top:-4px">Timesheets and payslips are sent from the company's own mailbox. Use the SMTP details from your email provider (look for "SMTP settings" in its help): usually port <code>465</code> (SSL) or <code>587</code> (STARTTLS), username = the full email address, password = that mailbox's password (or an "app password" for Gmail and Microsoft 365).</p>
     <form id="em-form">
       <div class="grid2">
         <div class="field"><label>Send from (email address)</label><input name="email_from" value="${esc(E.email_from)}" placeholder="payroll@yourcompany.com"></div>
@@ -774,10 +778,10 @@ async function drawEmailSettings() {
         <div class="field"><label>Username</label><input name="smtp_user" value="${esc(E.smtp_user)}" placeholder="payroll@yourcompany.com" autocomplete="off"></div>
         <div class="field"><label>Password</label><input name="smtp_pass" type="password" autocomplete="new-password" placeholder="${E.has_password ? '•••••••• saved (type to change)' : 'Mailbox password'}"></div>
       </div>
-      <div class="field"><label>Company copy email(s)</label><input name="email_club_copy" value="${esc(E.email_club_copy)}" placeholder="office@yourcompany.com" style="max-width:420px"></div>
+      <div class="field"><label>Send a copy to (email addresses)</label><input name="email_club_copy" value="${esc(E.email_club_copy)}" placeholder="office@yourcompany.com" style="max-width:420px"></div>
       <div class="field"><b class="small">Who gets what</b> <span class="small muted">— tick the emails each person gets</span>
         <div class="scroll"><table class="t subs-table"><thead><tr><th>Who</th>${SUBS.map(([k, l, d]) => `<th class="c" title="${esc(d)}">${l}</th>`).join('')}</tr></thead><tbody>
-          <tr><td><b>Company copy</b><div class="small muted">${esc(E.email_club_copy || 'not set')}</div></td>${SUBS.map(([k]) => `<td class="c"><input type="checkbox" data-sub="club:${k}" ${(subs.club || []).includes(k) ? 'checked' : ''}></td>`).join('')}</tr>
+          <tr><td><b>Send a copy to</b><div class="small muted">${esc(E.email_club_copy || 'not set')}</div></td>${SUBS.map(([k]) => `<td class="c"><input type="checkbox" data-sub="club:${k}" ${(subs.club || []).includes(k) ? 'checked' : ''}></td>`).join('')}</tr>
           ${E.staff.filter(u => u.email).map(u => `<tr><td><b>${esc(u.name)}</b> <span class="chip ${u.role === 'admin' ? 'coral' : u.role === 'manager' ? '' : 'gray'}" style="font-size:.7rem">${u.role === 'admin' ? 'Administrator' : 'Staff'}</span><div class="small muted">${esc(u.email)}</div></td>${SUBS.map(([k]) => `<td class="c"><input type="checkbox" data-sub="${u.id}:${k}" ${(subs[u.id] || []).includes(k) ? 'checked' : ''}></td>`).join('')}</tr>`).join('')}
         </tbody></table></div>
         <div class="bar-tools" style="margin-top:8px"><label class="small">Daily timesheets at <input name="report_time_daily" type="time" value="${esc(E.report_time_daily || '18:30')}"></label>

@@ -832,14 +832,15 @@ app.post('/api/staff/payslips/email', requireArea('payroll', 2), wrap(async (req
   const list = payslipsFor(req.body.from, req.body.to, req.body.user_id ? +req.body.user_id : null, licenceNow().licensed);
   if (!list.length) bad('No payslips for these dates (no paid hours, or no pay rate set under Staff).');
   const by = {}; list.forEach(p => (by[p.user_id] = by[p.user_id] || []).push(p));
-  const sent = [], missing = [];
+  // S33: carry on through everyone and say per person what happened (sent, waiting to send again, not sent, no email)
+  const sent = [], missing = [], waiting = [], failed = [];
   for (const [uid, ps] of Object.entries(by)) {
     const u = db.prepare('SELECT name, email FROM users WHERE id = ?').get(+uid) || {};
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(u.email || '')) { missing.push(u.name || ps[0].employee_name); continue; }
     try { await mail().emailPayslips(u, ps); sent.push(u.name); }
-    catch (e) { if (e instanceof HttpError) throw e; bad(`Payslips didn't send yet: ${e.message}`); }
+    catch (e) { if (e instanceof HttpError) throw e; (e.queued ? waiting : failed).push({ name: u.name, reason: e.message }); }
   }
-  res.json({ sent, missing });
+  res.json({ sent, missing, waiting, failed });
 }));
 // everyone sees their own finalised payslips (employee self-service)
 app.get('/api/staff/payslips/mine', requireStaff, (req, res) =>
