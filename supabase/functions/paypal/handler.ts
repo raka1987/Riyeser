@@ -165,7 +165,19 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
   const route = path.split("/").pop();
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
+  // Practice (sandbox) mode is open only to Riyeser HQ staff who manage licences (the owner), signed in,
+  // so the owner can still test while customers never reach PayPal's practice site.
+  const hasBearer = /^Bearer\s+\S+/.test(req.headers.get("Authorization") ?? "");
+  let practice = false;
+  if (!s.ready && s.env === "sandbox" && s.webhooks && hasBearer) {
+    try { const r = await (deps.rpcAs ?? defaultRpcAs(env))(req)("hq_can", { perm: "licences.manage" }); practice = r.ok && r.body === true; }
+    catch { practice = false; }
+  }
+  const open = s.ready || practice;
+
   if (req.method === "GET" && route === "status") {
+    if (practice) return json(200, { ready: true, practice: true, env: s.env, credentials: s.credentials, webhooks: s.webhooks,
+      message: "Practice mode: only you (Riyeser HQ) can see Pay with PayPal. Use a PayPal sandbox buyer account." });
     return json(200, { ready: s.ready, env: s.env, credentials: s.credentials, webhooks: s.webhooks,
       message: s.ready ? "PayPal is set up." : !s.credentials ? "PayPal isn't set up yet." : !s.webhooks ? "Webhooks aren't verified yet: add PAYPAL_WEBHOOK_ID and deploy again."
         : "PayPal is in practice mode, so customers can't start paying. Switch PAYPAL_ENV to live (or set PAYPAL_ALLOW_PRACTICE=1 to test)." });
@@ -197,7 +209,8 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
 
   // subscribe and cancel: the owner, signed in
   if (route !== "subscribe" && route !== "cancel") return json(404, { error: "Not found." });
-  if (!s.ready) return json(503, { error: NOT_SET_UP });
+  // Cancelling an existing subscription always works once PayPal is set up; starting one needs `open`.
+  if (route === "cancel" ? !s.webhooks : !open) return json(503, { error: NOT_SET_UP });
   if (!/^Bearer\s+\S+/.test(req.headers.get("Authorization") ?? "")) return json(401, { error: "Sign in to your Riyeser account first." });
   let b: Record<string, unknown>;
   try { b = await req.json(); } catch { return json(400, { error: "Send { ws, modules, people, billing }." }); }

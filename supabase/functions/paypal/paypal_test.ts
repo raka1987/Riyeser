@@ -249,3 +249,19 @@ Deno.test("practice (sandbox) mode is closed to customers unless PAYPAL_ALLOW_PR
   const live = { env: env({ ...SANDBOX, PAYPAL_ENV: "live" }), fetch: p.f, ...db };
   assertEquals((await (await handle(new Request("https://x/functions/v1/paypal/status"), live)).json()).ready, true);
 });
+
+Deno.test("practice mode: HQ staff who manage licences (the owner), signed in, can see and use PayPal; customers can't", async () => {
+  forgetTokens(); const p = fakePayPal(); const db = fakeDb();
+  const { PAYPAL_ALLOW_PRACTICE: _, ...SANDBOX } = KEYS;
+  const hq = (req: Request): Rpc => async (name, args) =>
+    name === "hq_can" ? { ok: true, status: 200, body: req.headers.get("Authorization") === "Bearer owner-session" && args.perm === "licences.manage" }
+      : db.rpcAs(req)(name, args);
+  const d = { env: env(SANDBOX), fetch: p.f, ...db, rpcAs: hq };
+  const st = (h: Record<string, string>) => handle(new Request("https://x/functions/v1/paypal/status", { headers: h }), d).then((r) => r.json());
+  assertEquals((await st({})).ready, false, "signed out: closed");
+  assertEquals((await st({ Authorization: "Bearer customer-session" })).ready, false, "a customer: closed");
+  const me = await st({ Authorization: "Bearer owner-session" });
+  assertEquals([me.ready, me.practice], [true, true], "the owner: open, marked practice");
+  assertEquals((await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, { Authorization: "Bearer customer-session", Origin: "https://riyeser.com" }), d)).status, 503);
+  assertEquals((await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), d)).status, 200);
+});
