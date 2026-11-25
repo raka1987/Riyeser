@@ -77,6 +77,7 @@ def _save_transfer():
 
 
 # ------------------------------------------------------------------ reconciliation
+RECONCILE_PAGE = 500
 @bp.route("/reconcile", methods=["GET", "POST"])
 def reconcile():
     db = get_db()
@@ -85,7 +86,7 @@ def reconcile():
     lk = lookups(db)
     aid = opt_int(request.args.get("account")) or (lk["bank_accounts"][0]["id"] if lk["bank_accounts"] else None)
     stmt_date = request.args.get("date") or date.today().isoformat()
-    lines, rec_bal, last = [], 0, None
+    lines, rec_bal, last, more = [], 0, None, 0
     if aid:
         rec_bal = db.execute("SELECT COALESCE(SUM(debit-credit),0) b FROM journal_lines WHERE account_id=?"
                              " AND reconciliation_id IS NOT NULL", (aid,)).fetchone()["b"]
@@ -93,11 +94,17 @@ def reconcile():
         lines = collapse_pay(db.execute(
             "SELECT l.*, e.date, e.memo emo, e.reference, e.id eid, e.source_type, e.source_id FROM journal_lines l"
             " JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=? AND"
-            " l.reconciliation_id IS NULL AND e.date<=? ORDER BY e.date, e.id", (aid, stmt_date)).fetchall())
+            " l.reconciliation_id IS NULL AND e.date<=? ORDER BY e.date, e.id LIMIT ?",
+            (aid, stmt_date, RECONCILE_PAGE + 1)).fetchall())
+        if len(lines) > RECONCILE_PAGE:  # S52: the oldest lines first, a page at a time
+            lines = lines[:RECONCILE_PAGE]
+            more = db.execute("SELECT COUNT(*) FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+                              " WHERE l.account_id=? AND l.reconciliation_id IS NULL AND e.date<=?",
+                              (aid, stmt_date)).fetchone()[0]
         last = db.execute("SELECT * FROM reconciliations WHERE account_id=? ORDER BY id DESC LIMIT 1",
                           (aid,)).fetchone()
     return render_template("banking/reconcile.html", aid=aid, stmt_date=stmt_date, lines=lines, rec_bal=rec_bal,
-                           last=last, **lk)
+                           last=last, more=more, page_size=RECONCILE_PAGE, **lk)
 
 
 @guarded

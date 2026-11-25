@@ -1,15 +1,16 @@
 {% extends "base.html" %}{% block title %}{{ L.doc }}{% endblock %}
 {% from "_macros.html" import account_select, tax_select, job_select %}
-{% macro row(l=None) -%}
-<tr><td><select name="line_item"><option value="">—</option>{% for i in items %}<option value="{{ i.id }}" {{ 'selected' if l and l.item_id==i.id }}>{{ i.sku }}</option>{% endfor %}</select></td>
-<td><input name="line_description" value="{{ l.description if l }}"></td>
-<td><input name="line_qty" value="{{ '%g'|format(l.qty) if l else '' }}" class="right" style="width:70px"></td>
-<td><input name="line_price" value="{{ l.unit_price|cents if l }}" class="right" style="width:100px"></td>
-<td><input name="line_discount" value="{{ '%g'|format(l.discount_pct) if l and l.discount_pct }}" class="right" style="width:60px" placeholder="%"></td>
-<td>{{ account_select('line_account', accounts, l.account_id if l else default_account) }}</td>
-<td>{{ tax_select('line_tax', tax_codes, l.tax_code_id if l else default_tax) }}</td>
-<td>{{ job_select('line_job', jobs, l.job_id if l) }}</td>
-<td class="n line-total"></td><td><button type="button" class="btn sm del-row">✕</button></td></tr>
+{% macro row(l=None, n='') -%}
+{% set ln = 'Line ' ~ n ~ ' ' if n else 'Line ' %}
+<tr><td><select name="line_item" aria-label="{{ ln }}item"><option value="">—</option>{% for i in items %}<option value="{{ i.id }}" {{ 'selected' if l and l.item_id==i.id }}>{{ i.sku }}</option>{% endfor %}</select></td>
+<td><input name="line_description" aria-label="{{ ln }}description" value="{{ l.description if l }}"></td>
+<td><input name="line_qty" aria-label="{{ ln }}quantity" value="{{ '%g'|format(l.qty|abs if kind == 'credit' else l.qty) if l else '' }}" class="right" style="width:70px"></td>
+<td><input name="line_price" aria-label="{{ ln }}price" value="{{ l.unit_price|cents if l }}" class="right" style="width:100px"></td>
+<td><input name="line_discount" aria-label="{{ ln }}discount percent" value="{{ '%g'|format(l.discount_pct) if l and l.discount_pct }}" class="right" style="width:60px" placeholder="%"></td>
+<td>{{ account_select('line_account', accounts, l.account_id if l else default_account, label=ln ~ 'account') }}</td>
+<td>{{ tax_select('line_tax', tax_codes, l.tax_code_id if l else default_tax, label=ln ~ 'tax code') }}</td>
+<td>{{ job_select('line_job', jobs, l.job_id if l, label=ln ~ 'job') }}</td>
+<td class="n line-total"></td><td><button type="button" class="btn sm del-row" aria-label="Remove {{ ln|lower }}">✕</button></td></tr>
 {%- endmacro %}
 {% block content %}
 {% set st = doc.status if doc else preset_status %}
@@ -18,20 +19,20 @@
 <p class="sub">{{ L.title }} · {{ doc.number if doc else 'number assigned on save' }}</p></div></div>
 <form method="post" id="doc-form"><input type="hidden" name="kind" value="{{ kind }}">
 <div class="card"><div class="fields">
-<div><label>{{ L.contact }}</label><select name="contact_id" id="contact_id" required><option value="">Select…</option>
+<div><label for="contact_id">{{ L.contact }}</label><select name="contact_id" id="contact_id" required><option value="">Select…</option>
 {% for c in contacts %}<option value="{{ c.id }}" {{ 'selected' if (doc and doc.contact_id==c.id) or preset_contact==c.id }}>{{ c.name }}</option>{% endfor %}</select>
 <a href="{{ url_for('contacts.edit', kind=L.kind) }}" style="font-size:12px">+ new {{ L.kind }}</a></div>
-<div><label>Date</label><input type="date" name="date" id="date" value="{{ doc.date if doc else today() }}" required></div>
-<div><label>Due date</label><input type="date" name="due_date" id="due_date" value="{{ doc.due_date if doc }}"></div>
-<div><label>{{ 'Customer PO' if side=='sale' else 'Supplier invoice #' }}</label><input name="reference" value="{{ doc.reference or '' if doc }}"></div>
-{% if kind != 'credit' %}<div><label>Save as</label><select name="status">{% for k, v in [('open', L.doc ~ ' (post to ledger)'),('order','Order'),('quote','Quote')] %}<option value="{{ k }}" {{ 'selected' if st==k }}>{{ v }}</option>{% endfor %}</select></div>{% endif %}
+<div><label for="date">Date</label><input type="date" name="date" id="date" value="{{ doc.date if doc else today() }}" required></div>
+<div><label for="due_date">Due date</label><input type="date" name="due_date" id="due_date" value="{{ doc.due_date if doc }}"></div>
+<div><label for="doc-reference">{{ 'Customer PO' if side=='sale' else 'Supplier invoice #' }}</label><input id="doc-reference" name="reference" value="{{ doc.reference or '' if doc }}"></div>
+{% if kind != 'credit' %}<div><label for="doc-status">Save as</label><select id="doc-status" name="status">{% for k, v in [('open', L.doc ~ ' (post to ledger)'),('order','Order'),('quote','Quote')] %}<option value="{{ k }}" {{ 'selected' if st==k }}>{{ v }}</option>{% endfor %}</select></div>{% endif %}
 <label class="check"><input type="checkbox" name="tax_inclusive" id="tax_inclusive" value="1" {{ 'checked' if doc and doc.tax_inclusive }}> Prices include GST</label>
 </div></div>
 <div class="card"><table class="lines" id="lines"><thead><tr><th style="width:110px">Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th style="width:220px">Account</th><th>Tax</th><th>Job</th><th class="n">Amount</th><th></th></tr></thead>
-<tbody>{% if lines %}{% for l in lines %}{{ row(l) }}{% endfor %}{% else %}{{ row() }}{{ row() }}{{ row() }}{% endif %}</tbody></table>
+<tbody>{% if lines %}{% for l in lines %}{{ row(l, loop.index) }}{% endfor %}{% else %}{{ row(None, 1) }}{{ row(None, 2) }}{{ row(None, 3) }}{% endif %}</tbody></table>
 <template>{{ row() }}</template>
 <p><button type="button" class="btn sm" data-add-row="#lines">+ Add line</button></p>
-<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:260px"><label>Notes / terms (printed)</label><textarea name="notes" rows="3">{{ doc.notes or '' if doc }}</textarea></div>
+<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:260px"><label for="doc-notes">Notes / terms (printed)</label><textarea id="doc-notes" name="notes" rows="3">{{ doc.notes or '' if doc }}</textarea></div>
 <table class="totals"><tr><td>Subtotal</td><td class="n" id="t-sub"></td></tr><tr><td>GST</td><td class="n" id="t-tax"></td></tr><tr><td>Total</td><td class="n" id="t-total"></td></tr></table></div></div>
 {% if side == 'sale' %}<p><label class="check"><input type="checkbox" name="sell_anyway" value="1"> Sell anyway if there isn't enough in stock</label></p>{% endif %}
 <button class="btn pri">Save</button> <a class="btn" href="{{ url_for('documents.index', side=side) }}">Cancel</a>

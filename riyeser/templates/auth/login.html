@@ -6,9 +6,9 @@
 {{ flashes() }}
 {% if central_demo %}<div class="flash demo" role="status">Demo mode: sign in with <b>{{ demo_login[0] }}</b> / <b>{{ demo_login[1] }}</b></div>{% endif %}
 <form method="post">
-  {% if choices and choices|length > 1 %}<label>Company</label><select name="company" style="margin-bottom:12px">{% for c in choices %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>{% endif %}
-  <label>Username</label><input name="username" autofocus required>
-  <label style="margin-top:12px">Password</label><input name="password" type="password" required>
+  {% if choices and choices|length > 1 %}<label for="login-company">Company</label><select id="login-company" name="company" style="margin-bottom:12px">{% for c in choices %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select>{% endif %}
+  <label for="login-username">Username</label><input id="login-username" name="username" autocomplete="username" autofocus required>
+  <label for="login-password" style="margin-top:12px">Password</label><input id="login-password" name="password" type="password" autocomplete="current-password" required>
   <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Sign in</button>
 </form>
 <p style="text-align:center;margin:16px 0 0"><a href="{{ url_for('auth.forgot') }}">Forgot password?</a></p></div></body></html>

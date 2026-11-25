@@ -158,8 +158,12 @@ def rpt_trial_balance(db, p):
                 subtitle=f"As at {p['asof']} (income and expenses from {fys})" + ("" if td == tc else " ⚠ OUT OF BALANCE"))
 
 
+GL_DETAIL_MAX = 5000  # S52: lines on screen; the CSV export has them all
+
+
 def rpt_gl_detail(db, p):
-    rows = []
+    rows, shown, cut = [], 0, False
+    limit = None if p.get("csv") else GL_DETAIL_MAX
     for a in _accounts(db):
         opening = db.execute("SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN journal_entries e"
                              " ON e.id=l.entry_id WHERE l.account_id=? AND e.date<?", (a["id"], p["start"])
@@ -175,12 +179,20 @@ def rpt_gl_detail(db, p):
         run = opening
         for l in lines:
             run += l["debit"] - l["credit"]
+            shown += 1
+            if limit and shown > limit:
+                cut = True
+                continue
             rows.append(R([l["date"], f"#{l['eid']}", l["memo"] or l["emo"] or "", l["debit"] or "",
                            l["credit"] or "", run], link=None if l["masked"] else url_for("core.entry", eid=l["eid"]),
                          indent=1))
         rows.append(R(["", "", "Closing balance", "", "", run], "total"))
-    return dict(columns=["Date", "ID", "Memo", "Debit", "Credit", "Balance"], rows=rows,
-                subtitle=f"{p['start']} to {p['end']}", filters=["start", "end", "job"])
+    rep = dict(columns=["Date", "ID", "Memo", "Debit", "Credit", "Balance"], rows=rows,
+               subtitle=f"{p['start']} to {p['end']}", filters=["start", "end", "job"])
+    if cut:
+        rep["warning"] = (f"This period has {shown:,} lines; the first {GL_DETAIL_MAX:,} are shown (closing balances are "
+                          f"complete). Choose a shorter period, or Export CSV for every line.")
+    return rep
 
 
 def rpt_budget(db, p):
@@ -435,6 +447,9 @@ def show(name):
         abort(404)
     db = get_db()
     p = _params(db)
+    p["csv"] = request.args.get("format") == "csv"
+    if name == "gl_detail" and not request.args.get("start"):
+        p["start"] = date.fromisoformat(p["end"]).replace(day=1).isoformat()  # S52: this month unless asked
     rep = fn(db, p)
     rep["title"] = title
     if p["job"]:

@@ -590,3 +590,77 @@ def test_s19_s20_s21_bookings_past_dates_unpriced_parts_and_follow_up_jobs(tmp_p
     assert _one(app, "SELECT title FROM booking_jobs WHERE id=?", (nv["job_id"],))["title"].startswith("Follow-up to J-")
     c.post(f"/bookings/{nv['id']}/time", data={"hours": "0.5"})
     assert _one(app, "SELECT COUNT(*) n FROM booking_time WHERE job_id=?", (nv["job_id"],))["n"] == 1
+
+
+# ------------------------------------------------------------------ S52
+def test_s52_gl_detail_defaults_to_this_month_and_long_lists_are_cut(client, app, monkeypatch):
+    from datetime import date
+    from riyeser.views import reports, banking
+    with app.app_context():
+        db = get_db()
+        acc, _ = ids(db)
+        for i in range(30):
+            L.bank_transaction(db, "spend", acc["1-1110"], "2026-07-01" if i < 20 else date.today().isoformat(),
+                               [dict(account_id=acc["6-1500"], amount=100 + i)], memo=f"Line {i}")
+        db.commit()
+    html = page(client.get("/reports/gl_detail"))
+    assert f"{date.today().replace(day=1).isoformat()} to {date.today().isoformat()}" in html
+    assert "Line 25" in html and "Line 5<" not in html                 # only this month by default
+    monkeypatch.setattr(reports, "GL_DETAIL_MAX", 10)
+    html = page(client.get("/reports/gl_detail?start=2026-07-01"))
+    assert "the first 10 are shown" in html
+    csv = page(client.get("/reports/gl_detail?start=2026-07-01&format=csv"))
+    assert csv.count("Line ") == 60                                     # both sides of every line, all of them
+    monkeypatch.setattr(banking, "RECONCILE_PAGE", 7)
+    html = page(client.get(f"/banking/reconcile?account={acc['1-1110']}"))
+    assert html.count('class="rl"') == 7 and "30 unreconciled transactions" in html
+
+
+# ------------------------------------------------------------------ S53
+def _unlabelled(html, within=None):
+    """Form fields a screen reader can't name: no aria-label, no <label for=id>, not inside a <label>."""
+    from html.parser import HTMLParser
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.fields, self.fors, self.depth, self.tpl = [], set(), 0, 0
+
+        def handle_starttag(self, tag, attrs):
+            a = dict(attrs)
+            if tag == "template":
+                self.tpl += 1
+            if tag == "label":
+                self.depth += 1
+                if a.get("for"):
+                    self.fors.add(a["for"])
+            if tag in ("input", "select", "textarea") and a.get("type") not in ("hidden", "submit", "button") \
+                    and not self.tpl:
+                self.fields.append((a, self.depth > 0))
+
+        def handle_endtag(self, tag):
+            if tag == "label":
+                self.depth -= 1
+            if tag == "template":
+                self.tpl -= 1
+    p = P()
+    p.feed(html)
+    return [a.get("name") for a, in_label in p.fields
+            if not in_label and not a.get("aria-label") and a.get("id") not in p.fors]
+
+
+def test_s53_invoice_payment_and_login_fields_have_labels(client, app):
+    with app.app_context():
+        db = get_db()
+        cust, _ = _contacts(db)
+        acc, tc = ids(db)
+        L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-20"),
+                        [dict(description="x", qty=1, unit_price=100, account_id=acc["4-1000"])], "open")
+        db.commit()
+    assert _unlabelled(page(app.test_client().get("/login"))) == []
+    html = page(client.get("/sale/new"))
+    assert 'aria-label="Line 1 description"' in html and 'aria-label="Line 3 tax code"' in html
+    main = html[html.index('<form method="post" id="doc-form"'):]
+    assert _unlabelled(main) == []
+    pay = page(client.get(f"/sale/pay?contact={cust}"))
+    assert _unlabelled(pay[pay.index('<form method="post" id="pay-form"'):]) == []

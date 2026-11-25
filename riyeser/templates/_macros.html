@@ -2,8 +2,8 @@
 {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
 {%- endmacro %}
 
-{% macro account_select(name, accounts, selected=None, blank=True, id=None, only_bank=False, required=False, form=None) -%}
-<select name="{{ name }}"{% if id %} id="{{ id }}"{% endif %}{% if form %} form="{{ form }}"{% endif %}{% if required %} required{% endif %}>
+{% macro account_select(name, accounts, selected=None, blank=True, id=None, only_bank=False, required=False, form=None, label=None) -%}
+<select name="{{ name }}"{% if id %} id="{{ id }}"{% endif %}{% if form %} form="{{ form }}"{% endif %}{% if label %} aria-label="{{ label }}"{% endif %}{% if required %} required{% endif %}>
   {% if blank %}<option value="">—</option>{% endif %}
   {% for a in accounts %}{% if not only_bank or a.is_bank %}
   <option value="{{ a.id }}" data-tax="{{ a.tax_code_id or '' }}" {{ 'selected' if selected == a.id }}>{{ a.code }} {{ a.name }}</option>
@@ -11,14 +11,14 @@
 </select>
 {%- endmacro %}
 
-{% macro tax_select(name, tax_codes, selected=None, blank=True, form=None) -%}
-<select name="{{ name }}"{% if form %} form="{{ form }}"{% endif %}>{% if blank %}<option value="">—</option>{% endif %}
+{% macro tax_select(name, tax_codes, selected=None, blank=True, form=None, label=None) -%}
+<select name="{{ name }}"{% if form %} form="{{ form }}"{% endif %}{% if label %} aria-label="{{ label }}"{% endif %}>{% if blank %}<option value="">—</option>{% endif %}
   {% for t in tax_codes %}<option value="{{ t.id }}" {{ 'selected' if selected == t.id }}>{{ t.code }}</option>{% endfor %}
 </select>
 {%- endmacro %}
 
-{% macro job_select(name, jobs, selected=None) -%}
-<select name="{{ name }}"><option value="">—</option>
+{% macro job_select(name, jobs, selected=None, label=None) -%}
+<select name="{{ name }}"{% if label %} aria-label="{{ label }}"{% endif %}><option value="">—</option>
   {% for j in jobs %}<option value="{{ j.id }}" {{ 'selected' if selected == j.id }}>{{ j.code }}</option>{% endfor %}
 </select>
 {%- endmacro %}

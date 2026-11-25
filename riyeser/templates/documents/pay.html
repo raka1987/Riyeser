@@ -2,20 +2,20 @@
 {% from "_macros.html" import account_select %}
 {% block content %}
 <div class="head"><div><h1>{{ L.pay }}</h1><p class="sub">Apply a single payment across one or more open {{ L.doc|lower }}s.</p></div></div>
-<form class="filters"><div style="min-width:280px"><label>{{ L.contact }}</label><select name="contact" onchange="this.form.submit()"><option value="">Select…</option>
+<form class="filters"><div style="min-width:280px"><label for="pay-contact">{{ L.contact }}</label><select id="pay-contact" name="contact" onchange="this.form.submit()"><option value="">Select…</option>
 {% for c in contacts %}<option value="{{ c.id }}" {{ 'selected' if cid==c.id }}>{{ c.name }}</option>{% endfor %}</select></div></form>
 {% if cid %}
 <form method="post" id="pay-form" class="card"><input type="hidden" name="contact_id" value="{{ cid }}">
-<div class="fields"><div><label>{{ 'Deposit to' if side=='sale' else 'Pay from' }}</label>{{ account_select('bank_account_id', bank_accounts, default_bank, blank=False) }}</div>
-<div><label>Date</label><input type="date" name="date" value="{{ today() }}" required></div>
-<div><label>Reference</label><input name="reference" placeholder="EFT / cheque no."></div>
-<div><label>Memo</label><input name="memo"></div>
+<div class="fields"><div><label for="pay-bank">{{ 'Deposit to' if side=='sale' else 'Pay from' }}</label>{{ account_select('bank_account_id', bank_accounts, default_bank, blank=False, id='pay-bank') }}</div>
+<div><label for="pay-date">Date</label><input id="pay-date" type="date" name="date" value="{{ today() }}" required></div>
+<div><label for="pay-ref">Reference</label><input id="pay-ref" name="reference" placeholder="EFT / cheque no."></div>
+<div><label for="pay-memo">Memo</label><input id="pay-memo" name="memo"></div>
 <div><label for="pay-amount">Amount {{ 'received' if side=='sale' else 'paid' }} <small>(blank = the amounts applied)</small></label><input name="amount" id="pay-amount" class="right" inputmode="decimal"></div></div>
 <p class="muted">More than the amounts applied (or nothing applied, for a deposit) is kept as {{ 'the customer' if side=='sale' else 'the supplier' }}'s credit, to use on a later {{ L.doc|lower }} or refund.</p>
 <h2>Open {{ L.doc|lower }}s</h2>
 <table><tr><th>Number</th><th>Date</th><th>Due</th><th class="n">Total</th><th class="n">Balance due</th><th class="n" style="width:160px">Amount applied</th><th></th></tr>
 {% for d in docs %}{% set bal = d.total - d.amount_paid %}<tr><td>{{ d.number }}</td><td>{{ d.date }}</td><td>{{ d.due_date }}</td><td class="n">{{ d.total|money }}</td><td class="n">{{ bal|money }}</td>
-<td><input name="alloc_{{ d.id }}" id="alloc_{{ d.id }}" class="right"></td><td><button type="button" class="btn sm" data-fill="alloc_{{ d.id }}" data-amount="{{ bal|cents }}">Full</button></td></tr>
+<td><input name="alloc_{{ d.id }}" id="alloc_{{ d.id }}" class="right" aria-label="Amount applied to {{ d.number }}"></td><td><button type="button" class="btn sm" data-fill="alloc_{{ d.id }}" data-amount="{{ bal|cents }}" aria-label="Pay {{ d.number }} in full">Full</button></td></tr>
 {% else %}<tr><td colspan="7" class="muted">No open documents.</td></tr>{% endfor %}
 <tr class="grand"><td colspan="5">Total payment</td><td class="n" id="p-total"></td><td></td></tr></table>
 <p><button class="btn pri">Record payment</button></p></form>
@@ -24,7 +24,7 @@
 {% for c in credits %}<tr><td><a href="{{ url_for('documents.view', doc_id=c.id) }}">{{ c.number }}</a></td><td>{{ c.date }}</td><td class="n">{{ c.available|money }}</td>
 <td>{% if docs %}<form method="post" class="inline" action="{{ url_for('documents.credit_apply', cid=c.id) }}"><select name="document_id" aria-label="{{ L.doc }} to use {{ c.number }} on">{% for d in docs %}<option value="{{ d.id }}">{{ d.number }} ({{ (d.total - d.amount_paid)|money }} due)</option>{% endfor %}</select>
 <input name="amount" value="{{ c.available|cents }}" class="right" style="width:100px" aria-label="Amount to use"><button class="btn sm">Apply</button></form>{% else %}<span class="muted">No open {{ L.doc|lower }}s</span>{% endif %}</td>
-<td><form method="post" class="inline" action="{{ url_for('documents.credit_refund', cid=c.id) }}">{{ account_select('bank_account_id', bank_accounts, default_bank, blank=False) }}<input type="date" name="date" value="{{ today() }}" aria-label="Refund date">
+<td><form method="post" class="inline" action="{{ url_for('documents.credit_refund', cid=c.id) }}">{{ account_select('bank_account_id', bank_accounts, default_bank, blank=False, label='Refund from') }}<input type="date" name="date" value="{{ today() }}" aria-label="Refund date">
 <input name="amount" value="{{ c.available|cents }}" class="right" style="width:100px" aria-label="Amount to refund"><button class="btn sm">Refund</button></form></td></tr>{% endfor %}</table></div>{% endif %}
 {% endif %}
 {% endblock %}

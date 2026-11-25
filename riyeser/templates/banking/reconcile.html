@@ -6,6 +6,7 @@
 <div><label>Statement date</label><input type="date" name="date" value="{{ stmt_date }}"></div><div><button class="btn">Load</button></div></form>
 {% if last %}<p class="muted">Last reconciled to {{ last.statement_date }} at {{ last.statement_balance|money }}.
 <form method="post" class="inline" data-confirm="Undo last reconciliation?"><input type="hidden" name="account_id" value="{{ aid }}"><input type="hidden" name="undo" value="1"><button class="btn sm">Undo</button></form></p>{% endif %}
+{% if more %}<div class="flash warn" role="status">{{ more }} unreconciled transactions up to {{ stmt_date }}: the oldest {{ page_size }} are shown. Reconcile them (use the closing balance on an earlier statement), then load the next ones.</div>{% endif %}
 <form method="post" class="card" id="rec-form"><input type="hidden" name="account_id" value="{{ aid }}"><input type="hidden" name="statement_date" value="{{ stmt_date }}">
 <div class="fields"><div><label>Closing balance on statement</label><input name="statement_balance" id="stmt" required></div>
 <div class="kpi"><div class="lbl">Reconciled so far</div><div class="val" id="rec-calc">{{ rec_bal|money }}</div></div>
