@@ -1759,6 +1759,10 @@ alter table public.support_tickets add column if not exists bug_url text check (
 alter table public.support_tickets add column if not exists diag_id uuid references public.support_diagnostics(id) on delete set null;
 alter table public.support_tickets add column if not exists work_blocked boolean not null default false;
 alter table public.support_tickets add column if not exists resolved_at timestamptz;
+-- S3: help without signing in (the sign-in page, riyeser.com/link/?contact): who to reply to, by email
+alter table public.support_tickets add column if not exists guest_email text
+  check (guest_email is null or (length(guest_email) <= 254 and guest_email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'));
+alter table public.support_tickets add column if not exists guest_name text check (length(guest_name) <= 80);
 alter table public.support_tickets add column if not exists rating int check (rating between 1 and 5);
 alter table public.support_tickets add column if not exists rating_comment text check (length(rating_comment) <= 1000);
 alter table public.support_tickets add column if not exists rated_at timestamptz;
@@ -1846,6 +1850,34 @@ begin
     || 'https://riyeser.com/link/?help#' || t.ref || E'\n\n' || 'To add anything, open the request there and reply.', ws, t.id, null);
   return json_build_object('id', t.id, 'ref', t.ref);
 end $$;
+
+-- S3: a help request from someone who isn't signed in (or has no account): a ticket for Riyeser Support, and an
+-- automatic email with its number. Replies go to that email address. Limits: 3 an hour from one address, 200 a day in all.
+create or replace function public.guest_ticket(your_name text, your_email text, help_topic text, help_subject text, message text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; e text := lower(trim(coalesce(your_email, ''))); nm text := left(trim(coalesce(your_name, '')), 80);
+  tp text := coalesce(nullif(help_topic, ''), 'other');
+begin
+  if e !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' or length(e) > 254 then raise exception 'Type your email address, so we can reply.'; end if;
+  if nm = '' then raise exception 'Type your name.'; end if;
+  if length(trim(coalesce(help_subject, ''))) = 0 or length(trim(coalesce(message, ''))) = 0 then
+    raise exception 'Add a subject and a message, then send it again.'; end if;
+  if tp not in ('billing', 'signin', 'program', 'other') then tp := 'other'; end if;
+  if (select count(*) from support_tickets where guest_email = e and created_at > now() - interval '1 hour') >= 3 then
+    raise exception 'You''ve sent a few help requests already. We''ll reply to them by email soon.'; end if;
+  if (select count(*) from support_tickets where guest_email is not null and created_at > now() - interval '1 day') >= 200 then
+    raise exception 'We''re getting a lot of requests right now. Please email info@riyeser.com instead.'; end if;
+  insert into support_tickets (workspace_id, opened_by, topic, subject, status, last_customer_at, guest_email, guest_name)
+    values (null, null, tp, left(trim(help_subject), 150), 'new', now(), e, nm) returning * into t;
+  insert into support_messages (ticket_id, author, body) values (t.id, null, left(trim(message), 5000));
+  perform queue_email(null, e, 'ticket_received', 'We''ve got your help request (' || t.ref || ')',
+    'Hi ' || nm || ',' || E'\n\n' || 'Thanks for getting in touch. We''ve got your help request "' || t.subject || '".' || E'\n\n'
+    || 'Your request number is ' || t.ref || '. We''ll reply to this email address, usually within one business day.' || E'\n'
+    || 'If you write to us about it (info@riyeser.com), put ' || t.ref || ' in the subject.', null, t.id, null);
+  return json_build_object('ref', t.ref);
+end $$;
+revoke all on function public.guest_ticket(text, text, text, text, text) from public;
+grant execute on function public.guest_ticket(text, text, text, text, text) to anon, authenticated;
 
 create or replace function public.reply_ticket(ticket uuid, message text) returns void
   language plpgsql security definer set search_path = public as $$
@@ -1966,8 +1998,9 @@ begin
       'level', t.level, 'assignee', t.assignee, 'assignee_name', staff_name(t.assignee), 'workspace_id', t.workspace_id, 'created_at', t.created_at,
       'first_reply_at', t.first_reply_at, 'updated_at', t.updated_at, 'last_customer_at', t.last_customer_at, 'last_staff_at', t.last_staff_at,
       'overdue_at', t.overdue_at, 'opened_by', t.opened_by, 'staff_started', t.staff_started,
-      'opened_by_name', (select display_name from members m where m.workspace_id = t.workspace_id and m.user_id = t.opened_by),
-      'opened_by_email', (select email::text from auth.users u where u.id = t.opened_by),
+      'opened_by_name', coalesce((select display_name from members m where m.workspace_id = t.workspace_id and m.user_id = t.opened_by), t.guest_name),
+      'opened_by_email', coalesce((select email::text from auth.users u where u.id = t.opened_by), t.guest_email),
+      'guest', t.guest_email is not null,
       'product', t.product, 'who_acts', t.who_acts, 'work_blocked', t.work_blocked, 'next_update_due', t.next_update_due,
       'next_update_owner', t.next_update_owner, 'next_update_owner_name', staff_name(t.next_update_owner),
       'update_overdue', t.status <> 'done' and t.next_update_due < now(), 'planned_release', t.planned_release, 'bug_ref', t.bug_ref, 'bug_url', t.bug_url,
@@ -1985,7 +2018,8 @@ begin
         order by s.display_name), '[]') from hq_staff s where s.active),
     'messages', (select coalesce(json_agg(json_build_object('id', m.id, 'staff', m.is_staff, 'internal', m.internal, 'body', m.body, 'at', m.created_at,
         'kind', m.kind, 'call_direction', m.call_direction, 'call_with', m.call_with,
-        'from', case when m.author is null then 'Riyeser (automatic)' when m.is_staff then coalesce(staff_name(m.author), 'Riyeser staff')
+        'from', case when m.author is null and not m.is_staff and t.guest_email is not null then coalesce(t.guest_name, 'Guest') || ' <' || t.guest_email || '> (not signed in)'
+                     when m.author is null then 'Riyeser (automatic)' when m.is_staff then coalesce(staff_name(m.author), 'Riyeser staff')
                      else coalesce((select display_name from members mm where mm.workspace_id = t.workspace_id and mm.user_id = m.author),
                                    (select email::text from auth.users u where u.id = m.author), 'Customer') end) order by m.id), '[]')
       from support_messages m where m.ticket_id = t.id),
@@ -2018,6 +2052,11 @@ begin
   if st not in ('waiting_customer', 'waiting_us', 'investigating', 'done') then st := 'waiting_customer'; end if;
   update support_tickets set first_reply_at = coalesce(first_reply_at, now()), last_staff_at = now(), updated_at = now(), status = st,
     resolved_at = case when st = 'done' then coalesce(resolved_at, now()) end, assignee = coalesce(assignee, auth.uid()) where id = ticket;
+  if t.opened_by is null and t.guest_email is not null then   -- S3: not signed in: the reply goes by email only
+    perform queue_email(null, t.guest_email, 'ticket_reply', 'Re: ' || t.subject || ' (' || t.ref || ')',
+      'Hi ' || coalesce(t.guest_name, '') || ',' || E'\n\n' || 'Riyeser Support has replied to your help request ' || t.ref || ':' || E'\n\n' || trim(message) || E'\n\n'
+      || 'To reply, write to info@riyeser.com with ' || t.ref || ' in the subject.', null, t.id, null);
+  end if;
   if t.opened_by is not null then
     perform queue_email(t.opened_by, null, 'ticket_reply', 'Re: ' || t.subject || ' (' || t.ref || ')',
       'Hi,' || E'\n\n' || 'Riyeser Support has replied to your help request ' || t.ref || ':' || E'\n\n' || trim(message) || E'\n\n'

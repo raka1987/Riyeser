@@ -2741,5 +2741,39 @@ select 'payments ok' as billing;
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;
 reset role;
+reset role;
+-- S3: help without signing in: a ticket and an automatic email with its number; replies go by email; limits
+reset role; set role anon; select pg_temp.as_user('');
+select (public.guest_ticket('Mere Guest', ' Mere@Guest.test ', 'signin', 'Can''t sign in', 'I forgot which email I used.') ->> 'ref') as g_ref \gset
+select set_config('test.g_ref', :'g_ref', false);
+do $$ begin
+  assert current_setting('test.g_ref') like 'T-%', 'S3 a ticket number';
+  begin perform public.guest_ticket('X', 'not-an-email', 'other', 'Hi', 'Hi'); raise exception 'bad email';
+  exception when others then assert sqlerrm like 'Type your email%', sqlerrm; end;
+  begin perform public.guest_ticket('', 'a@b.test', 'other', 'Hi', 'Hi'); raise exception 'no name';
+  exception when others then assert sqlerrm like 'Type your name%', sqlerrm; end;
+  perform public.guest_ticket('Mere Guest', 'mere@guest.test', 'other', 'Two', 'Second');
+  perform public.guest_ticket('Mere Guest', 'mere@guest.test', 'other', 'Three', 'Third');
+  begin perform public.guest_ticket('Mere Guest', 'mere@guest.test', 'other', 'Four', 'Fourth'); raise exception 'no limit';
+  exception when others then assert sqlerrm like 'You''ve sent a few%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin
+  assert exists (select 1 from public.email_outbox where template = 'ticket_received' and to_address = 'mere@guest.test' and status = 'queued'
+    and subject like '%' || current_setting('test.g_ref') || '%' and body_text like '%request number is ' || current_setting('test.g_ref') || '%'), 'S3 the auto-reply has the ticket number';
+end $$;
+select set_config('test.g_id', (select id::text from public.support_tickets where ref = current_setting('test.g_ref')), false);
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'); set role authenticated;
+do $$ declare id uuid := current_setting('test.g_id')::uuid; t json; begin
+  t := public.hq_ticket(id);
+  assert t -> 'ticket' ->> 'opened_by_email' = 'mere@guest.test' and (t -> 'ticket' ->> 'guest')::boolean and t -> 'ticket' ->> 'opened_by_name' = 'Mere Guest', 'S3 HQ sees who to reply to';
+  assert t -> 'messages' -> 0 ->> 'from' = 'Mere Guest <mere@guest.test> (not signed in)', 'S3 HQ sees it is from a guest';
+  perform public.hq_ticket_reply(id, 'Hi Mere, it''s the one you got our receipts on.', false, null);
+end $$;
+reset role;
+do $$ begin
+  assert exists (select 1 from public.email_outbox where template = 'ticket_reply' and to_address = 'mere@guest.test' and body_text like '%receipts on%'), 'S3 the reply is emailed';
+end $$;
+reset role;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';

@@ -4,6 +4,8 @@
 //   S8  the invite link says "Join {business} on Riyeser"; the join form has the person's name already
 //   S59 someone removed sees "You're no longer part of {business}" instead of a bare set-up screen; their old messages show
 //       "{name} (left)"; an empty name on the join form says what's missing
+//   S3  help without signing in: ?help signed out offers it first, the sign-in page links to it, ?contact (the website's
+//       Contact support) opens it; it sends guest_ticket and shows the request number; missing details are named
 // Run: build the site, serve website/public on 8090 (or LINK_BASE), then `node website/team/test/people-test.js`. Exits 1 on failure.
 const { chromium } = require('playwright');
 const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';
@@ -21,6 +23,7 @@ function server(st) {
     st.calls.push(m + ' ' + p);
     if (p === '/auth/v1/token') return json({ access_token: token('aal1'), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user: st.user });
     if (p === '/auth/v1/user') return json(st.user);
+    if (p === '/rest/v1/rpc/guest_ticket') { st.guest = body(); if (st.guestFail) return json({ code: 'P0001', message: 'You\'ve sent a few help requests already. We\'ll reply to them by email soon.' }, 400); return json({ ref: 'T-10260' }); }
     if (p === '/rest/v1/rpc/invite_info') { st.inviteAsked = body().code; return json(body().code === 'RIY-7K3M-Q2' ? { name: 'Sample Plumbing' } : null); }
     if (p === '/rest/v1/members' && u.search.includes('workspaces')) return json(st.member ? [{ role: st.role, job_role: st.role, display_name: 'Alex', workspaces: { id: 'w1', name: 'Sample Plumbing', invite_code: 'AB12CD34', company_code: 'RIY-7K3M-Q2', kind: 'business' } }] : []);
     if (p === '/rest/v1/members') return json([{ user_id: st.user.id, display_name: 'Alex', role: st.role, job_role: st.role, extension: 101 }]);
@@ -90,6 +93,26 @@ async function signIn(pg, path = '/link/') {
     check(/no longer part of Sample Plumbing.*Ask the owner if this is a mistake/.test(await pg.textContent('#gonenote')), 'S59 removed: "You\'re no longer part of Sample Plumbing. Ask the owner…"');
     await pg.reload(); await pg.waitForSelector('.gcard'); await pg.waitForTimeout(300);
     check(!(await pg.$('#gonenote')), 'S59 said once');
+    await pg.close(); }
+
+  // ---- S3: help without signing in
+  { const st = { user, member: false, role: 'member', calls: [] }; const pg = await page(b, st, errs, 390);
+    await pg.goto(BASE + '/link/?help'); await pg.waitForSelector('#gf .ghelp');
+    check(/You don't have to sign in/.test(await pg.textContent('.ghelp')), 'S3 ?help signed out: help without signing in is offered first');
+    await pg.click('#gcontact1'); await pg.waitForSelector('#ctf');
+    await pg.click('#ctf button[type=submit]'); await pg.waitForSelector('#ctf .err'); check(/Type your name/.test(await pg.textContent('#ctf .err')), 'S3 missing name is named');
+    await pg.fill('#ctf [name=name]', 'Mere Guest'); await pg.fill('#ctf [name=email]', 'mere@'); await pg.click('#ctf button[type=submit]');
+    await pg.waitForSelector('#ctf .err'); check(/email address/.test(await pg.textContent('#ctf .err')) && await pg.inputValue('#ctf [name=name]') === 'Mere Guest', 'S3 a bad email is named, typing kept');
+    await pg.fill('#ctf [name=email]', 'mere@guest.test'); await pg.fill('#ctf [name=subject]', 'Can\'t sign in'); await pg.fill('#ctf [name=message]', 'I forgot which email I used.');
+    await pg.click('#ctf button[type=submit]'); await pg.waitForSelector('#ctsent');
+    check(/T-10260/.test(await pg.textContent('#ctsent')) && /mere@guest\.test/.test(await pg.textContent('#ctsent')), 'S3 sent: the request number and where the reply goes');
+    check(st.guest && st.guest.your_email === 'mere@guest.test' && st.guest.help_topic === 'signin' && st.guest.message === 'I forgot which email I used.', 'S3 guest_ticket gets the details');
+    await pg.click('#ctdone'); await pg.waitForSelector('#gf #gcontact'); check(true, 'S3 the sign-in page links to it ("Contact Riyeser support")');
+    st.guestFail = true; await pg.goto(BASE + '/link/?contact'); await pg.waitForSelector('#ctf');
+    check(true, 'S3 ?contact (Contact support on riyeser.com) opens the form');
+    await pg.fill('#ctf [name=name]', 'Mere'); await pg.fill('#ctf [name=email]', 'mere@guest.test'); await pg.fill('#ctf [name=subject]', 'x'); await pg.fill('#ctf [name=message]', 'y');
+    await pg.click('#ctf button[type=submit]'); await pg.waitForSelector('#ctf .err'); check(/a few help requests already/.test(await pg.textContent('#ctf .err')), 'S3 the limit reads plainly');
+    const site = await pg.goto(BASE + '/help.html'); check(site.ok() && !!(await pg.$('a[href="/link/?contact"]')), 'S3 the website links to it (Help Centre and footer)');
     await pg.close(); }
 
   check(!errs.length, 'no page errors ' + errs.join(' | '));

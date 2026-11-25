@@ -86,6 +86,8 @@
         return ok(await sb.auth.signUp({ email, password, options: { data: details ? { riyeser_signup: details } : {}, emailRedirectTo: location.origin + location.pathname + location.search } }));
       },
       async resetPassword(email) { return ok(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname })); },
+      // S3: a help request without signing in (a ticket; the reply comes by email)
+      async guestTicket(name, email, topic, subject, message) { return ok(await sb.rpc('guest_ticket', { your_name: name, your_email: email, help_topic: topic, help_subject: subject, message })); },
       async signOut() { if (sub) sb.removeChannel(sub); if (sub2) sb.removeChannel(sub2); await sb.auth.signOut(); },
       async teams(uid) {
         const cols = 'id, name, invite_code, company_code, legal_name, tax_number, address, phone, email, country, require_approval';
@@ -388,6 +390,7 @@
       async session() { return { user: me }; }, async stillThere() { return true; },
       onAuth() {},
       async signIn() { return { user: me }; }, async signUp() { return { user: me }; }, async resetPassword() {},
+      async guestTicket() { return { ref: 'T-10250' }; },
       async setPassword() {}, async checkPassword(_e, pw) { if (pw === 'wrong-password') throw new Error('Your current password isn\'t right.'); },
       async signOut() { location.href = HERE; },
       async teams() { return [{ id: ws, ...company, invite_code: 'DEMO1234', role: AS === 'u-me' ? 'owner' : AS === 'u-sam' ? 'admin' : 'member', myName: 'You' }]; },
@@ -613,6 +616,7 @@
       ${join ? '<div class="ok ginv" id="ginv" hidden></div>' : ''}
       <p>${join ? 'You\'ve been invited to a business on Riyeser. ' : ''}${mode === 'up' ? 'Free. One account for you, your business and every Riyeser program.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for you, your business and all your Riyeser programs.'}</p>
       ${note}
+      ${mode === 'in' && params.has('help') ? '<div class="ok ghelp"><b>Need help?</b> You don\'t have to sign in. <button type="button" class="linkbtn" id="gcontact1">Send us a message</button> and we\'ll reply by email.</div>' : ''}
       ${mode === 'up' ? '<label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>' : ''}
       <label class="f"><span>Email</span><input type="email" name="email" autocomplete="username email" required value="${esc(email)}"></label>
       ${mode !== 'reset' ? pwField('password', 'Password', mode === 'up' ? 'new-password' : 'current-password', mode === 'up' ? 'At least 8 characters.' : '') : ''}
@@ -622,9 +626,11 @@
       ${mode === 'up' ? `<button type="button" class="btn w gcancel" id="gcancel">Cancel</button>` : ''}
       <div class="alt">${mode === 'in' ? `<button type="button" class="linkbtn" data-go="reset">Forgot password?</button></div>
       <div class="or">New to Riyeser?</div><button type="button" class="btn w" data-go="up">Create a free account</button><div class="alt" hidden>`
-        : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div></form></div>`;
+        : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div>
+      <div class="alt gcontact">Can't sign in, or no account? <button type="button" class="linkbtn" id="gcontact">Contact Riyeser support</button></div></form></div>`;
     $app.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => gate(b.dataset.go)); wireCountry($app);
     wirePw($app);
+    $app.querySelectorAll('#gcontact, #gcontact1').forEach((b) => { b.onclick = () => contactForm(); });
     // S8: "Join {business} on Riyeser" on the invite link (the name only; nothing else before you sign in)
     if (join) inviteName(join).then((n) => { const el = $app.querySelector('#ginv'); if (n && el) { el.innerHTML = `<b>Join ${esc(n)} on Riyeser</b><br>Create a free account (or sign in), then ask to join. They'll approve you.`; el.hidden = false; } });
     // Cancel: back to riyeser.com (in the Windows app, back to Sign in)
@@ -641,6 +647,44 @@
         await start();
       } catch (err) { btn.disabled = false; gate(mode, `<div class="err">${esc(plainError(err))}</div>`, String(f.get('email') || '')); }
     };
+  }
+
+  // ---------------- S3: help without signing in (the sign-in page, ?help when signed out, and riyeser.com/link/?contact)
+  function contactForm(note = '', v = {}) {
+    $app.className = 'acct'; document.title = 'Contact Riyeser support'; tabIcon(false);
+    const val = (k) => esc(v[k] || '');
+    $app.innerHTML = `<div class="gate"><form class="gcard" id="ctf" novalidate>
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <h1>Contact Riyeser support</h1><p>No account or sign-in needed. We reply by email, usually within one business day.</p>${note}
+      <label class="f"><span>Your name</span><input name="name" maxlength="80" autocomplete="name" value="${val('name')}"></label>
+      <label class="f"><span>Your email</span><input name="email" type="email" maxlength="254" autocomplete="email" value="${val('email')}"></label>
+      <label class="f"><span>What's it about?</span><select name="topic">${[['signin', 'Signing in or my account'], ['billing', 'Paying or my plan'], ['program', 'A Riyeser program'], ['other', 'Something else']]
+        .map(([k, l]) => `<option value="${k}"${(v.topic || 'signin') === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="f"><span>Subject</span><input name="subject" maxlength="150" value="${val('subject')}"></label>
+      <label class="f"><span>Your message</span><textarea name="message" rows="5" maxlength="5000">${val('message')}</textarea></label>
+      <label class="hp" aria-hidden="true">Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label>
+      <p class="fhint">Please don't send passwords or bank details.</p>
+      <button class="btn p w" type="submit">Send</button>
+      <div class="alt"><button type="button" class="linkbtn" id="ctback">Back to sign in</button></div></form></div>`;
+    $app.querySelector('#ctback').onclick = () => { dropParams('contact'); gate('in'); };
+    $app.querySelector('[name=name]').focus();
+    $app.querySelector('#ctf').onsubmit = async (e) => {
+      e.preventDefault(); const f = new FormData(e.target); const g = (k) => String(f.get(k) || '').trim();
+      const v2 = { name: g('name'), email: g('email'), topic: g('topic'), subject: g('subject'), message: g('message') };
+      const miss = !v2.name ? 'Type your name.' : !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v2.email) ? 'Type your email address, so we can reply.' : !v2.subject || !v2.message ? 'Add a subject and a message.' : '';
+      if (miss) return contactForm(`<div class="err">${esc(miss)}</div>`, v2);
+      if (g('website')) return contactSent('T-' + Math.floor(10000 + Math.random() * 90000), v2.email);   // a robot filled the hidden box
+      e.target.querySelector('button[type=submit]').disabled = true;
+      try { const r = await api.guestTicket(v2.name, v2.email, v2.topic, v2.subject, v2.message); contactSent(r.ref, v2.email); }
+      catch (err) { contactForm(`<div class="err">${esc(plainError(err))}</div>`, v2); }
+    };
+  }
+  function contactSent(ref, email) {
+    $app.innerHTML = `<div class="gate"><div class="gcard" id="ctsent">
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <h1>✅ Thanks, we've got it</h1><p>Your request number is <b class="code">${esc(ref)}</b>. We've emailed a copy to <b>${esc(email)}</b>, and we'll reply there, usually within one business day.</p>
+      <button class="btn p w" id="ctdone">Back to sign in</button></div></div>`;
+    $app.querySelector('#ctdone').onclick = () => { dropParams('contact', 'help'); gate('in'); };
   }
 
   // ---------------- links from our account emails, and passwords (F1, F17)
@@ -3692,6 +3736,7 @@
       if (!s) { const gone = S.signedOutNote; S.signedOutNote = false;
         if (AUTH.error) { const why = AUTH.errorText; AUTH.error = ''; clearAuthLink();
           return gate('in', `<div class="err">${/expired|invalid/i.test(why) || !why ? 'That link has expired or has already been used. Sign in, or press Forgot password? for a new link.' : esc(why)}</div>`); }
+        if (params.has('contact')) return contactForm();
         return gate(params.has('signup') ? 'up' : 'in', gone ? '<div class="err">That sign-in has ended (the account may have been removed). Sign in again, or create a new account.</div>' : ''); }
       S.user = s.user; Theme.fromAccount(S.user);
       S.home = (!DEMO || params.has('help')) && !/Electron/.test(navigator.userAgent) && !params.has('chat');

@@ -108,3 +108,6 @@
 - `chat-test.js`: chat details in the demo: a counter near the 4,000-character limit and longer text sent as a .txt file (S9); on
   a phone, Back from a conversation shows the chat list and Back again the Riyeser home (S49, pretend Supabase);
   more checks are added to it for the round-20 fix list (see its header).
+  `people-test.js` also covers help without signing in (S3): `?help` signed out offers it first, the sign-in page links to it,
+  `?contact` (Contact support on riyeser.com) opens it, the request number shows; `rules-test.sql` (end) covers `guest_ticket`
+  (the auto-reply with the number, the limits, HQ sees who to reply to, HQ's reply is emailed).
