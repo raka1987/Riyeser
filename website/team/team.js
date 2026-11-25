@@ -60,12 +60,13 @@
     const soft = async (q) => { const r = await q; if (r.error) { if (missing(r.error)) return null; throw r.error; } return r.data; };
     return {
       demo: false,
-      async session() {
-        const s = ok(await sb.auth.getSession()).session; if (!s) return null;
-        // The browser can remember a sign-in for an account that was since removed: ask the server, and sign out if it's gone.
+      async session() { return ok(await sb.auth.getSession()).session || null; },
+      // The browser can remember a sign-in for an account that was since removed: ask the server, and sign out if it's gone.
+      // (Asked at the same time as the account's businesses, S4.)
+      async stillThere() {
         const { error } = await sb.auth.getUser();
-        if (error && [401, 403, 404].includes(error.status)) { await sb.auth.signOut({ scope: 'local' }).catch(() => {}); S.signedOutNote = true; return null; }
-        return s;
+        if (error && [401, 403, 404].includes(error.status)) { await sb.auth.signOut({ scope: 'local' }).catch(() => {}); S.signedOutNote = true; return false; }
+        return true;
       },
       onAuth(fn) { sb.auth.onAuthStateChange((ev, s) => fn(ev, s)); },
       // A new password: from the reset link, or Change password. Every other sign-in of this account (other devices) ends.
@@ -378,7 +379,7 @@
     const reply = (ch, from, body, ms) => setTimeout(() => { const m = msg(ch, from, body, 0); m.created_at = new Date().toISOString(); msgs.push(m); listener && listener(m); }, ms);
     return {
       demo: true,
-      async session() { return { user: me }; },
+      async session() { return { user: me }; }, async stillThere() { return true; },
       onAuth() {},
       async signIn() { return { user: me }; }, async signUp() { return { user: me }; }, async resetPassword() {},
       async setPassword() {}, async checkPassword(_e, pw) { if (pw === 'wrong-password') throw new Error('Your current password isn\'t right.'); },
@@ -979,15 +980,19 @@
     S.team = S.teams.find((t) => t.id === id) || S.teams[0];
     try { localStorage.setItem('riyeser.team.last', S.team.id); } catch { /* private mode */ }
     let all;
-    [S.people, all, S.unread] = await Promise.all([api.people(S.team.id), api.channels(S.team.id), api.unread(S.team.id), loadPrefs()]);
+    // S4: everything that doesn't depend on something else goes together
+    [S.people, all, S.unread, , S.features, S.branches, S.requests] = await Promise.all([api.people(S.team.id), api.channels(S.team.id), api.unread(S.team.id), loadPrefs(),
+      api.features(S.team.id).catch(() => ({ calls: false })), api.branches(S.team.id).catch(() => []), isAdmin() ? api.pendingRequests(S.team.id).catch(() => []) : []]);
     splitChans(all);
-    [S.features, S.branches] = await Promise.all([api.features(S.team.id).catch(() => ({ calls: false })), api.branches(S.team.id).catch(() => [])]);
-    S.requests = isAdmin() ? await api.pendingRequests(S.team.id).catch(() => []) : [];
     Calls.listen();
     const first = S.chans.find(isGeneral) || S.chans[0];
     api.live(S.team.id, onLive);
-    S.rxOff = false; S.ch = null; await loadWorkspace();
-    await openChannel(first && first.id, false);
+    S.rxOff = false; S.ch = null;
+    if (S.home) {   // the Riyeser home shows now; the chat loads behind it (Open waits for it)
+      renderHome();
+      S.wsReady = Promise.all([loadWorkspace(), openChannel(first && first.id, false, false)]);
+      await S.wsReady;
+    } else { S.wsReady = null; await loadWorkspace(); await openChannel(first && first.id, false); }
     if (params.has('phones') && !S.phonesShown && isAdmin()) { S.phonesShown = true; phonesPage(S.home ? 'home' : 'chat'); }
     else if ((params.has('myphone') || params.has('phones')) && !S.myShown) { S.myShown = true; S.phonesShown = true; myPhonePage(S.home ? 'home' : 'chat'); }
   }
@@ -1008,12 +1013,14 @@
     S.cprefs = Object.fromEntries((r || []).map((x) => [x.channel_id, { muted: !!x.muted, left: !!x.left_at }]));
   }
 
-  async function openChannel(id, toChat = true) {
+  async function openChannel(id, toChat = true, draw = true) {
     S.ch = S.chans.find((c) => c.id === id) || S.archived.find((c) => c.id === id) || null; S.editing = null;
-    S.msgs = S.ch ? await api.messages(S.ch.id) : [];
-    await loadReactions();
+    const ch = S.ch;
+    const [msgs] = await Promise.all([ch ? api.messages(ch.id) : [], loadReactions()]);
+    if (S.ch !== ch) return;   // another chat was opened meanwhile
+    S.msgs = msgs;
     if (toChat) { S.inChat = true; S.home = false; S.nav = 'chat'; S.listTab = 'chats'; S.pane = 'main'; S.navOpen = false; }
-    if (S.home) renderHome(); else render();
+    if (!draw) { /* drawn by whoever asked */ } else if (S.home) renderHome(); else render();
     if (S.ch) { await api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); }
   }
 
@@ -1073,20 +1080,35 @@
     if (v.status === 'trial') return `<span class="pl${v.days_left <= 14 ? ' warn' : ''}">Free trial${v.trial_ends ? ` to ${shortDay(v.trial_ends)}` : ''} · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left</span>`;
     return '<span class="pl bad">Not active</span>';
   }
+  // S4: the plan, file storage, billing and help requests load together, once per business; the home shows without
+  // waiting and fills them in when they're in.
+  function homeData(t) {
+    if (S.homeFor === t.id && S.homeData) return S.homeData;
+    S.homeFor = t.id; S.homeReady = false; S.billing = undefined;
+    const admin = isAdmin(); const owner = isOwner();
+    const lic = S.homeLic !== undefined && S.homeLicFor === t.id ? null
+      : (admin ? api.licence(t.id).catch(() => null) : Promise.resolve(null)).then((v) => { S.homeLic = v; S.homeLicFor = t.id; });
+    S.homeData = Promise.all([lic, (owner ? api.storage(t.id).catch(() => null) : Promise.resolve(null)).then((v) => { S.homeStore = v; }),
+      owner ? loadBilling() : null, loadHelp()]).then(() => { if (S.homeFor === t.id) S.homeReady = true; });
+    return S.homeData;
+  }
   async function renderHome() {
+    const t = S.team; const fresh = !(S.homeFor === t.id && S.homeReady);
+    const ready = homeData(t);
+    if (!fresh) await Promise.all([isOwner() && S.billing === undefined ? loadBilling() : null, loadHelp()]);
+    if (S.view === 'phones' || S.view === 'myphone') return;   // the Phones or My phone page opened meanwhile (?phones, ?myphone)
+    drawHome(true);
+    if (fresh) { await ready; if (S.home && S.team === t && !S.view && $app.querySelector('.hmain')) drawHome(false); }
+  }
+  function drawHome(top) {
     tabIcon(false); document.title = 'Riyeser';
     const admin = isAdmin(); const t = S.team; const me = S.people.find((p) => p.user_id === S.user.id) || {};
     const solo = t.kind === 'personal'; const team = !solo || S.people.length > 1 || S.requests.length > 0;
-    const owner = isOwner();
-    if (S.homeLic === undefined || S.homeLicFor !== t.id) { S.homeLicFor = t.id; S.homeLic = admin ? await api.licence(t.id).catch(() => null) : null;
-      S.homeStore = owner ? await api.storage(t.id).catch(() => null) : null; S.billing = undefined; }
-    if (owner && S.billing === undefined) await loadBilling();
+    const owner = isOwner(); const ready = !!S.homeReady;
     const lic = S.homeLic && S.homeLic.modules ? S.homeLic : null;
-    await loadHelp();
-    if (S.view === 'phones' || S.view === 'myphone') return;   // the Phones or My phone page opened meanwhile (?phones, ?myphone)
     const unread = Object.values(S.unread || {}).reduce((a, b) => a + (b || 0), 0);
     const calls = lic && lic.modules && lic.modules.calls;
-    $app.className = 'acct home'; window.scrollTo(0, 0);
+    $app.className = 'acct home'; if (top) window.scrollTo(0, 0);
     $app.innerHTML = `<header class="htop"><a class="hbrand" href="/"><img src="/assets/logo-r.png" alt="">Riyeser</a>
         ${S.teams.length > 1 ? `<select id="hsw" aria-label="Switch company">${S.teams.map((x) => `<option value="${x.id}"${x.id === t.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>` : ''}
         <span class="hme">${esc(me.display_name || S.user.email || '')}</span><button class="btn sm" id="hout">Sign out</button></header>
@@ -1108,6 +1130,7 @@
           .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
         ${owner && S.homeStore ? `${lic ? '' : '<h3 class="hsec" id="hplanv">Your plan</h3>'}${storageHtml(S.homeStore)}` : ''}
         ${owner ? billingHtml() : ''}
+        ${!ready && (owner || admin) ? '<p class="muted small hloading" id="hloading" role="status">Loading your plan and billing…</p>' : ''}
         <h3 class="hsec">Riyeser Link</h3>
         <div class="happs"><div class="happ hteam"><img src="/assets/apps/link.png" alt=""><div><b>Riyeser Link${unread ? ` <span class="badge">${unread}</span>` : ''}</b>
           <small>Chat with the people you work with. Calls between you, your staff and other locations come with Riyeser Link Plus.</small>
@@ -1120,7 +1143,7 @@
         <p class="muted small hfoot">Windows 10 and 11. <a href="/help.html">Help Centre</a> · <a href="/pricing.html">Pricing</a></p>
       </main>`;
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
-    on('#hchat', () => { S.home = false; render(); });
+    on('#hchat', async () => { if (S.wsReady) await S.wsReady.catch(() => {}); S.home = false; render(); });
     on('#hphones', () => phonesPage('home')); on('#hmyphone', () => myPhonePage('home'));
     on('#hout', async () => { await api.signOut(); S.team = null; gate(); });
     on('#hco', () => companyInfo(false));
@@ -1133,6 +1156,7 @@
     on('#hmine', () => editMyDetails(me)); on('#hmbiz', () => companyInfo(false));
     $app.querySelectorAll('[data-ticket]').forEach((b) => b.onclick = () => openTicket(b.dataset.ticket));
     wireBilling($app);
+    if (!ready) return;   // ?help, ?add, ?paid… open once the help requests and billing are in
     if (params.has('help') && !S.helpShown) helpLink();
     else billingLinks();
   }
@@ -1450,9 +1474,9 @@
   const money2 = (n, c) => `${esc(c || 'USD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   // null = this part of Riyeser isn't switched on yet (the database hasn't been updated): hide it.
   async function loadHelp() {
-    S.tickets = await api.myTickets().catch(() => null);
     // refunds show amounts, so only the owner sees and asks for them (the database checks this too)
-    S.refunds = S.team && isOwner() && !needs2step() ? await api.myRefunds(S.team.id).catch(() => null) : (S.team && isOwner() ? [] : null);
+    [S.tickets, S.refunds] = await Promise.all([api.myTickets().catch(() => null),
+      S.team && isOwner() && !needs2step() ? api.myRefunds(S.team.id).catch(() => null) : (S.team && isOwner() ? [] : null)]);
   }
   function helpHtml() {
     const unread = (S.tickets || []).reduce((a, t) => a + Number(t.unread || 0), 0);
@@ -3601,12 +3625,14 @@
         return gate(params.has('signup') ? 'up' : 'in', gone ? '<div class="err">That sign-in has ended (the account may have been removed). Sign in again, or create a new account.</div>' : ''); }
       S.user = s.user; Theme.fromAccount(S.user);
       S.home = (!DEMO || params.has('help')) && !/Electron/.test(navigator.userAgent) && !params.has('chat');
-      const lv = await api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' }));
+      const [still, lv, teams] = await Promise.all([api.stillThere(), api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' })), api.teams(S.user.id).catch((e) => e)]);
+      if (!still) return start();
       S.aal = lv.currentLevel;
       if (lv.nextLevel === 'aal2' && lv.currentLevel !== 'aal2') return codeScreen();
       if (AUTH.recovery) return newPasswordScreen();   // the reset link: choose a new password first
       if (AUTH.confirmed) { AUTH.confirmed = false; return confirmedScreen(); }
-      S.teams = await api.teams(S.user.id);
+      if (teams instanceof Error) throw teams;
+      S.teams = teams;
       touchActivity();
       const jc = (params.get('join') || '').toUpperCase();
       if (jc && !S.teams.some((t) => t.invite_code === jc || t.company_code === jc)) return setupTeam();

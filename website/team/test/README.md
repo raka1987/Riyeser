@@ -97,3 +97,5 @@
   a confirm-your-email link shows "Email confirmed" then carries on, and an expired link says so (F1); Supabase's "email rate limit
   exceeded" becomes a plain message with info@riyeser.com (F2); two-step set-up works with one click right after the page loads
   and again after Later, removes unfinished set-ups, and a page signed in before it was turned on elsewhere catches up (S6).
+- `speed-test.js`: the Riyeser home after sign-in and after a reload against a pretend Supabase where every call takes 300 ms
+  (`LATENCY=`): on screen in under 2 seconds, plan and billing filled in soon after, Open Riyeser Link works (S4).
