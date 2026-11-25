@@ -271,6 +271,7 @@ def test_wifi_fault_two_visits_one_invoice(tmp_path, monkeypatch):
     c.post(f"/bookings/job/{jid}/part-price", data={f"price_{patch}": "15"})
     # 5. one invoice for both visits: 2.5 h at $120 + the stock item + 2 patch leads
     sell = _one(app, "SELECT sell_price FROM items WHERE id=?", (item,))["sell_price"]
+    sell = round(sell * 1.1)  # the till's price: the job invoice is GST-inclusive (F9)
     r = c.post(f"/bookings/job/{jid}/invoice", follow_redirects=True)
     assert "Invoice made" in r.get_data(as_text=True)
     doc = _one(app, "SELECT * FROM documents")

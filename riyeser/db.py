@@ -330,8 +330,25 @@ def migrate(db):
     db.execute("CREATE TABLE IF NOT EXISTS archive_meta (key TEXT PRIMARY KEY, value TEXT)")
     if "kind" not in {r["name"] for r in db.execute("PRAGMA table_info(payruns)")}:
         db.execute("ALTER TABLE payruns ADD COLUMN kind TEXT NOT NULL DEFAULT 'regular'")  # regular, extra (bonus)
+    _job_parts_inc_gst(db)
     _unique_document_numbers(db)
     db.commit()
+
+
+def _job_parts_inc_gst(db):
+    """F9, once: parts on jobs not yet invoiced that took a stock item's ex-GST sell price get the GST-inclusive
+    price (a job invoice is GST-inclusive; the till already charged that). Prices typed in are left alone."""
+    db.execute("CREATE TABLE IF NOT EXISTS data_fixes (key TEXT PRIMARY KEY, done_at TEXT)")  # one-off corrections
+    if db.execute("SELECT 1 FROM data_fixes WHERE key='job_parts_inc_gst'").fetchone():
+        return
+    co = db.execute("SELECT gst_registered FROM company WHERE id=1").fetchone()
+    for m in [] if co and not co["gst_registered"] else db.execute("SELECT m.id, i.sell_price, COALESCE(t.rate, g.rate, 0) rate FROM booking_materials m"
+                        " JOIN booking_jobs j ON j.id=m.job_id JOIN items i ON i.id=m.item_id"
+                        " LEFT JOIN tax_codes t ON t.id=i.sale_tax_code_id LEFT JOIN tax_codes g ON g.code='GST'"
+                        " WHERE j.document_id IS NULL AND m.unit_price=i.sell_price AND i.sell_price>0").fetchall():
+        db.execute("UPDATE booking_materials SET unit_price=? WHERE id=?",
+                   (round_cents(m["sell_price"] * (1 + m["rate"] / 100.0)), m["id"]))
+    db.execute("INSERT INTO data_fixes (key, done_at) VALUES ('job_parts_inc_gst', datetime('now'))")
 
 
 def duplicate_numbers(db):

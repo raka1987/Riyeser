@@ -270,3 +270,29 @@ def test_f13_stock_value_always_equals_the_inventory_account(client, app):
     assert "type can&#39;t be" in r.get_data(as_text=True)
     with app.app_context():
         assert get_db().execute("SELECT type FROM accounts WHERE code='1-1200'").fetchone()[0] == "asset"
+
+
+# ------------------------------------------------------------------ F9
+def test_f9_job_invoice_charges_a_stock_part_at_the_till_price(tmp_path, monkeypatch):
+    from tests.test_bookings_app import _jobs_setup, _book, _one
+    from riyeser.views.pos import _price_inc
+    app, c, _item, cust, staff = _jobs_setup(tmp_path, monkeypatch)
+    c.post("/bookings/setup", data={"mode": "jobs", "open": "07:00", "close": "18:00", "labour_rate": "120"})
+    with app.app_context():
+        db = get_db()
+        gst = db.execute("SELECT id, rate FROM tax_codes WHERE code='GST'").fetchone()
+        inc = db.execute("SELECT id FROM accounts WHERE code='4-1000'").fetchone()[0]
+        pump = db.execute("INSERT INTO items (sku, name, sell_price, sale_tax_code_id, income_account_id) VALUES"
+                          " ('PP240','Pressure pump 240V',64900,?,?)", (gst["id"], inc)).lastrowid
+        till = _price_inc(db.execute("SELECT * FROM items WHERE id=?", (pump,)).fetchone(), gst["rate"])
+        db.commit()
+    assert till == 71390
+    c.post("/bookings/job/new", data={"contact_id": cust, "title": "Pump", "billing": "time"})
+    jid = _one(app, "SELECT id FROM booking_jobs")["id"]
+    _book(c, job_id=jid, contact_id=cust, resource_id=staff)
+    v = _one(app, "SELECT id FROM bookings ORDER BY id DESC")["id"]
+    c.post(f"/bookings/{v}/part", data={"item_id": pump, "qty": "1"})
+    c.post(f"/bookings/job/{jid}/invoice")
+    line = _one(app, "SELECT * FROM document_lines WHERE item_id=?", (pump,))
+    assert line["net_amount"] + line["tax_amount"] == till
+    assert (line["net_amount"], line["tax_amount"]) == (64900, 6490)

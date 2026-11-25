@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, g, abort
 
-from ..db import get_db, audit, to_cents
+from ..db import get_db, audit, to_cents, round_cents
 from ..ledger import save_document, PostingError
 from . import guarded, opt_int, opt_float
 
@@ -358,6 +358,13 @@ def _income_account(db):
     return r["id"] if r else None
 
 
+def item_price_inc(db, item):
+    """A stock item's sell price including its sale GST, the same as the till charges (views/pos.py _price_inc)."""
+    tid = item["sale_tax_code_id"] or _gst(db)
+    tc = db.execute("SELECT rate FROM tax_codes WHERE id=?", (tid,)).fetchone() if tid else None
+    return round_cents((item["sell_price"] or 0) * (1 + ((tc["rate"] if tc else 0) or 0) / 100.0))
+
+
 def _gst(db):
     if not (g.get("company") or {}).get("gst_registered", 1):
         r = db.execute("SELECT id FROM tax_codes WHERE code='FRE'").fetchone()
@@ -378,7 +385,9 @@ def invoice(bid):
 # ---------------------------------------------------------------- jobs: one job, many visits, one invoice
 
 def _sold_items(db):
-    return db.execute("SELECT id, name, sell_price FROM items WHERE is_sold=1 AND active=1 ORDER BY name").fetchall()
+    """Stock items for the parts list, with the price a job charges (inc GST)."""
+    return [dict(id=i["id"], name=i["name"], sell_price=item_price_inc(db, i)) for i in db.execute(
+        "SELECT id, name, sell_price, sale_tax_code_id FROM items WHERE is_sold=1 AND active=1 ORDER BY name")]
 
 
 def get_job(db, jid):
@@ -451,7 +460,7 @@ def job_charges(db, j):
         if j["service_item"]:
             item = db.execute("SELECT sell_price, sale_tax_code_id FROM items WHERE id=?", (j["service_item"],)).fetchone()
             if item and not line["unit_price"]:
-                line["unit_price"] = item["sell_price"] or 0
+                line["unit_price"] = item_price_inc(db, item)  # the invoice is GST-inclusive (F9)
             if item and item["sale_tax_code_id"]:
                 line["tax_code_id"] = item["sale_tax_code_id"]
         else:
@@ -663,7 +672,10 @@ def add_part(bid):
     qty = opt_float(f.get("qty"), 1)
     if qty <= 0:
         raise PostingError("Enter how many were used.")
-    price = to_cents(f.get("unit_price")) if (f.get("unit_price") or "").strip() else (item["sell_price"] if item else 0)
+    # prices on a job are GST-inclusive, like the labour rate and the till (F9): a stock item's price is its sell
+    # price (ex GST) plus its GST
+    price = to_cents(f.get("unit_price")) if (f.get("unit_price") or "").strip() else \
+        (item_price_inc(db, item) if item else 0)
     db.execute("INSERT INTO booking_materials (job_id, booking_id, item_id, description, qty, unit_price, user_id)"
                " VALUES (?,?,?,?,?,?,?)", (b["job_id"], bid, item["id"] if item else None, desc, qty, price, g.user["id"]))
     audit(db, "booking_part", f"#{bid} {desc}")
