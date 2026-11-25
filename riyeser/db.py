@@ -49,7 +49,8 @@ def cents_str(cents) -> str:
 # ---------------------------------------------------------------- connection
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(g.get("db_path") or current_app.config["DATABASE"])  # the company that's open
+        # the company that's open; several people can share it (riyeser serve), so wait for each other's writes
+        g.db = sqlite3.connect(g.get("db_path") or current_app.config["DATABASE"], timeout=30)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
@@ -59,6 +60,17 @@ def close_db(_e=None):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+
+def write_txn(db):
+    """Start the write transaction now (BEGIN IMMEDIATE) unless one is already open.
+
+    Call it before reading anything a write depends on (the next invoice number, the balance still due, stock on
+    hand, who was already paid): another person saving at the same moment then waits for this one to commit,
+    instead of both reading the same value and writing twice (F15). Already in a transaction = this connection has
+    written, so it already holds the write lock."""
+    if not db.in_transaction:
+        db.execute("BEGIN IMMEDIATE")
 
 
 def linked(db, key) -> int:
@@ -316,7 +328,31 @@ def migrate(db):
     if "is_demo" not in {r["name"] for r in db.execute("PRAGMA table_info(company)")}:
         db.execute("ALTER TABLE company ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0")
     db.execute("CREATE TABLE IF NOT EXISTS archive_meta (key TEXT PRIMARY KEY, value TEXT)")
+    _unique_document_numbers(db)
     db.commit()
+
+
+def duplicate_numbers(db):
+    """[(side, number, count)] of document numbers used more than once (older files, saved by two people at once)."""
+    return [tuple(r) for r in db.execute("SELECT side, number, COUNT(*) n FROM documents GROUP BY side, number"
+                                         " HAVING COUNT(*) > 1 ORDER BY side, number")]
+
+
+def _unique_document_numbers(db):
+    """One number per invoice (bill): UNIQUE(side, number) (F15). A file that already has duplicates keeps them as
+    they are (nothing is renumbered behind anyone's back) and opens as before; it's logged, and the index is added
+    once they're sorted out."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='documents_side_number'").fetchone():
+        return
+    dups = duplicate_numbers(db)
+    if dups:
+        import logging
+        logging.getLogger("riyeser").warning(
+            "This company file has %d document numbers used more than once (%s). They're kept as they are; new "
+            "numbers are still checked for duplicates.", len(dups),
+            ", ".join(f"{n} x{c}" for _s, n, c in dups[:10]))
+        return
+    db.execute("CREATE UNIQUE INDEX documents_side_number ON documents(side, number)")
 
 
 # Riyeser prices in one place: US dollars a month per business (the same as riyeser.com/pricing.html).

@@ -3,7 +3,7 @@ from datetime import date, timedelta
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 
-from ..db import get_db, to_cents, audit, linked, fmt_money
+from ..db import get_db, to_cents, audit, linked, fmt_money, write_txn
 from ..ledger import post_entry, reverse_entry, PostingError
 from ..payroll_calc import compute_pay, PERIODS
 from . import lookups, opt_int, opt_float, guarded
@@ -91,6 +91,7 @@ def run():
 @guarded
 def _process(freq, emps):
     db = get_db()
+    write_txn(db)  # checking who's already paid and paying them happen in one go (F15)
     f = request.form
     slips = []
     for e in emps:
