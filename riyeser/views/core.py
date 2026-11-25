@@ -234,6 +234,11 @@ def _save_company():
                 f.get("invoice_prefix") or "INV", f.get("bill_prefix") or "PO", int(f.get("next_invoice_no") or 1),
                 int(f.get("next_bill_no") or 1), int(f.get("default_terms_days") or 30)))
     db.execute("UPDATE company SET auto_pdf=? WHERE id=1", (1 if f.get("auto_pdf") else 0,))
+    cur = (f.get("currency") or "").strip().upper()
+    if cur:
+        if len(cur) != 3 or not cur.isalpha():
+            raise ValueError("Currency is a three-letter code, like AUD, FJD or NZD.")
+        db.execute("UPDATE company SET currency=? WHERE id=1", (cur,))
     if f.get("edition") == "enterprise" and not g.company["enterprise_allowed"]:
         from ..db import EDITIONS, PRICES
         flash(f"{EDITIONS['enterprise']['name']} needs a Riyeser licence. Enter one in Riyeser Central, then switch "

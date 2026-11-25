@@ -44,11 +44,17 @@ When a pay run is finalised, Riyeser Payroll writes one UTF-8 JSON file to `Docu
 |---|---|---|
 | Wages & Salaries | gross | |
 | Super / employer contribution expense | employer_contribution | |
-| PAYG / tax withheld payable | | tax_withheld + other_deductions |
-| Super / contribution payable | | employer_contribution |
+| PAYG / PAYE tax withheld payable | | tax_withheld |
+| Super / FNPF contribution payable | | employer_contribution |
+| Employee deductions payable (own FNPF, loans) | | other_deductions |
 | Bank account the user picks on import | | net |
 
-The accounts come from **Setup → Company → Default accounts**: wages, super expense, PAYG payable and super payable.
+On the first import the user chooses the account for each line (for Fiji, e.g. FNPF Expense, FNPF Payable and
+FRCS PAYE Payable); the choice is kept for later imports. Until then the defaults are the company's default accounts
+(wages, super expense, PAYG payable, super payable) and a new **2-1430 Payroll Deductions Payable** for deductions.
+
+**`currency`** must match the company's currency (Setup → Company details, default AUD). A pay run in another
+currency is refused rather than booked one-for-one (FJ$10,870 is not A$10,870).
 
 ## Accounting → Desk Assistant: PDFs
 

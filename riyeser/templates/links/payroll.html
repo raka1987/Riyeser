@@ -6,7 +6,11 @@
 <form method="post" id="imp"><div class="card"><div class="fields">
 <div><label>Wages were paid from</label>{{ account_select('bank_account_id', bank_accounts, default_bank, blank=False) }}</div>
 <div><label>Or choose a pay run file</label><input type="file" name="file" accept=".json,application/json"></div>
-<div><label>&nbsp;</label><button class="btn" name="upload" value="1">Import file</button></div></div></div>
+<div><label>&nbsp;</label><button class="btn" name="upload" value="1">Import file</button></div></div>
+<p class="muted">This company's books are in <b>{{ books_currency }}</b>. A pay run in another currency isn't imported.</p>
+<details {{ 'open' if first }}><summary><b>{{ 'Choose where each part goes (first import)' if first else 'Accounts used for imported pay runs' }}</b></summary>
+<div class="fields">{% for role, label in roles %}<div><label>{{ label }}</label>{% if role == 'deductions_payable' and not mapping[role] %}<select name="map_{{ role }}"><option value="">New account {{ deductions_account[0] }} {{ deductions_account[1] }}</option>{% for a in accounts %}<option value="{{ a.id }}">{{ a.code }} {{ a.name }}</option>{% endfor %}</select>{% else %}{{ account_select('map_' ~ role, accounts, mapping[role], blank=False) }}{% endif %}</div>{% endfor %}</div>
+<p class="muted">Fiji: employer FNPF is the employer contribution; the employee's own FNPF is a deduction. Your choice is kept for later imports.</p></details></div>
 <h2>Waiting in the inbox</h2>
 <div class="tbl"><table><tr><th>File</th><th>Pay date</th><th>Period</th><th class="n">Staff</th><th class="n">Gross</th><th class="n">Tax</th><th class="n">Contributions</th><th class="n">Net paid</th><th></th></tr>
 {% for f in files %}{% if f.error %}<tr><td>{{ f.name }}</td><td colspan="8" class="neg">{{ f.error }}</td></tr>

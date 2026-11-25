@@ -383,7 +383,10 @@ def test_import_payroll_payrun(client, app, tmp_path, monkeypatch):
         assert b[linked(db, "wages")] == 115000
         assert b[linked(db, "super_expense")] == 11500
         assert b[acc["1-1110"]] == -(55000 + 48000)
-        assert b[linked(db, "payg_payable")] == -(4800 + 2000 + 5200)
+        assert b[linked(db, "payg_payable")] == -(4800 + 2000)
+        # the employee's own deductions go to their own payable (S30)
+        ded = db.execute("SELECT id FROM accounts WHERE code='2-1430'").fetchone()[0]
+        assert b[ded] == -5200
         assert trial_balance_ok(db)
     assert (inbox / "Imported" / "2026-11-14 W46.json").exists()
     # the same pay run cannot be imported twice

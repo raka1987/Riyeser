@@ -427,3 +427,52 @@ def test_s45_the_fonts_ship_with_the_app():
     proj = root.parent
     assert '"fonts/*"' in (proj / "pyproject.toml").read_text()
     assert "PKG / 'fonts'" in (proj / "packaging" / "build_desktop.py").read_text()
+
+
+# ------------------------------------------------------------------ S30
+def test_s30_fiji_pay_run_currency_fnpf_and_first_import_accounts(client, app, tmp_path, monkeypatch):
+    import json as _json
+    monkeypatch.setenv("RIYESER_DOCS", str(tmp_path / "Riyeser"))
+    inbox = tmp_path / "Riyeser" / "Inbox" / "Payroll"
+    inbox.mkdir(parents=True)
+    run = {"format": "riyeser.payrun.v1", "source": "Riyeser Payroll", "payrun_id": "F12", "pay_date": "2026-11-14",
+           "currency": "FJD",
+           "employees": [{"name": "Iliesa", "gross": 10870, "tax_withheld": 1200, "employer_contribution": 1087,
+                          "other_deductions": 869.60}]}
+    (inbox / "F12.json").write_text(_json.dumps(run))
+    with app.app_context():
+        acc, _ = ids(get_db())
+    # an AUD company: refused, nothing posted
+    r = client.post("/links/payroll", data={"bank_account_id": acc["1-1110"], "name": "F12.json"},
+                    headers={"Referer": "/links/payroll"}, follow_redirects=True)
+    assert "This pay run is in FJD, but this company keeps its books in AUD" in r.get_data(as_text=True)
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM journal_entries").fetchone()[0] == 0
+    # the Fiji company keeps FJD books; the first import asks where each part goes
+    client.post("/setup/company", data={"name": "Test Co", "currency": "fjd", "fy_start_month": "1"})
+    page = client.get("/links/payroll").get_data(as_text=True)
+    assert "first import" in page and "employer FNPF" in page and "books are in <b>FJD</b>" in page
+    with app.app_context():
+        db = get_db()
+        fnpf_exp = db.execute("INSERT INTO accounts (code, name, type) VALUES ('6-5200','FNPF Expense','expense')").lastrowid
+        fnpf_pay = db.execute("INSERT INTO accounts (code, name, type) VALUES ('2-1440','FNPF Payable','liability')").lastrowid
+        paye = db.execute("INSERT INTO accounts (code, name, type) VALUES ('2-1450','FRCS PAYE Payable','liability')").lastrowid
+        db.commit()
+    client.post("/links/payroll", data={"bank_account_id": acc["1-1110"], "name": "F12.json",
+                                        "map_wages": acc["6-5000"], "map_contrib_expense": fnpf_exp,
+                                        "map_tax_payable": paye, "map_contrib_payable": fnpf_pay,
+                                        "map_deductions_payable": fnpf_pay})
+    with app.app_context():
+        db = get_db()
+        b = L.balances(db)
+        assert b[paye] == -120000                           # PAYE to its own payable
+        assert b[fnpf_pay] == -(108700 + 86960)             # employer + employee FNPF to FNPF Payable
+        assert b.get(acc["2-1410"], 0) == 0 and b.get(acc["2-1420"], 0) == 0 and b.get(acc["6-5100"], 0) == 0
+        assert b[fnpf_exp] == 108700
+    # the choice is kept: the next import uses it without asking again
+    run2 = dict(run, payrun_id="F13")
+    (inbox / "F13.json").write_text(_json.dumps(run2))
+    assert "first import" not in client.get("/links/payroll").get_data(as_text=True)
+    client.post("/links/payroll", data={"bank_account_id": acc["1-1110"], "name": "F13.json"})
+    with app.app_context():
+        assert L.balances(get_db())[paye] == -240000

@@ -60,19 +60,72 @@ def parse_payrun(raw):
                 currency=d.get("currency") or "", employees=emps, totals=tot)
 
 
-def import_payrun(db, pr, bank_account_id, file_name=None):
+# Where each part of an imported pay run is posted (S30). Chosen on the first import and kept for the next ones.
+ROLES = [("wages", "Gross wages (expense)"),
+         ("contrib_expense", "Employer contributions: super or employer FNPF (expense)"),
+         ("tax_payable", "Tax withheld: PAYG or PAYE (payable)"),
+         ("contrib_payable", "Employer contributions (payable)"),
+         ("deductions_payable", "Employee deductions: their own FNPF, loans (payable)")]
+DEDUCTIONS_ACCOUNT = ("2-1430", "Payroll Deductions Payable")
+
+
+def _deductions_default(db):
+    row = db.execute("SELECT id FROM accounts WHERE code=?", (DEDUCTIONS_ACCOUNT[0],)).fetchone()
+    if row:
+        return row["id"]
+    ntc = db.execute("SELECT id FROM tax_codes WHERE code='N-T'").fetchone()
+    return db.execute("INSERT INTO accounts (code, name, type, is_bank, tax_code_id) VALUES (?,?,'liability',0,?)",
+                      DEDUCTIONS_ACCOUNT + (ntc["id"] if ntc else None,)).lastrowid
+
+
+def import_accounts(db, create=False):
+    """{role: account_id}: the saved choice, else the defaults (the deductions account is made when needed)."""
+    saved = {r["role"]: r["account_id"] for r in db.execute("SELECT role, account_id FROM payroll_import_accounts")}
+    dflt = dict(wages=linked(db, "wages"), contrib_expense=linked(db, "super_expense"),
+                tax_payable=linked(db, "payg_payable"), contrib_payable=linked(db, "super_payable"))
+    if "deductions_payable" not in saved:
+        row = db.execute("SELECT id FROM accounts WHERE code=?", (DEDUCTIONS_ACCOUNT[0],)).fetchone()
+        dflt["deductions_payable"] = row["id"] if row else (_deductions_default(db) if create else None)
+    return {**dflt, **saved}
+
+
+def save_import_accounts(db, chosen):
+    valid = {r["id"] for r in db.execute("SELECT id FROM accounts WHERE active=1")}
+    for role, _label in ROLES:
+        aid = chosen.get(role)
+        if aid:
+            if aid not in valid:
+                raise PostingError("Choose an account for each part of the pay run.")
+            db.execute("INSERT OR REPLACE INTO payroll_import_accounts (role, account_id) VALUES (?,?)", (role, aid))
+
+
+def check_currency(db, pr):
+    """An FJD pay run can't go into AUD books as if FJ$1 were A$1 (S30)."""
+    books = (db.execute("SELECT currency FROM company WHERE id=1").fetchone()["currency"] or "AUD").upper()
+    cur = (pr.get("currency") or "").strip().upper()
+    if cur and cur != books:
+        raise PostingError(f"This pay run is in {cur}, but this company keeps its books in {books}. Import it into "
+                           f"the company that pays in {cur}, or set the currency in Setup, Company details.")
+
+
+def import_payrun(db, pr, bank_account_id, file_name=None, accounts=None):
     ensure_table(db)
     if db.execute("SELECT 1 FROM imported_payruns WHERE source=? AND payrun_id=?",
                   (pr["source"], pr["payrun_id"])).fetchone():
         raise PostingError(f"Pay run {pr['payrun_id']} has already been imported.")
+    check_currency(db, pr)
+    if accounts:
+        save_import_accounts(db, accounts)
+    a = import_accounts(db, create=True)
     t = pr["totals"]
-    lines = [dict(account_id=linked(db, "wages"), debit=t["gross"], memo="Gross wages"),
-             dict(account_id=linked(db, "super_expense"), debit=t["contrib"], memo="Employer contributions"),
-             dict(account_id=linked(db, "payg_payable"), credit=t["tax"], memo="Tax withheld"),
-             dict(account_id=linked(db, "super_payable"), credit=t["contrib"], memo="Employer contributions payable"),
+    lines = [dict(account_id=a["wages"], debit=t["gross"], memo="Gross wages"),
+             dict(account_id=a["contrib_expense"], debit=t["contrib"], memo="Employer contributions"),
+             dict(account_id=a["tax_payable"], credit=t["tax"], memo="Tax withheld"),
+             dict(account_id=a["contrib_payable"], credit=t["contrib"], memo="Employer contributions payable"),
              dict(account_id=bank_account_id, credit=t["net"], memo="Net wages paid")]
     if t["deductions"]:
-        lines.append(dict(account_id=linked(db, "payg_payable"), credit=t["deductions"], memo="Other deductions"))
+        lines.append(dict(account_id=a["deductions_payable"], credit=t["deductions"],
+                          memo="Employee deductions (own FNPF, loans)"))
     eid = post_entry(db, pr["pay_date"], f"{pr['source']} pay run {pr['payrun_id']} ({len(pr['employees'])} staff)",
                      "payroll_import", lines, reference=pr["payrun_id"])
     db.execute("UPDATE journal_entries SET source_id=? WHERE id=?", (eid, eid))
@@ -99,25 +152,31 @@ def payroll():
         except (PostingError, ValueError, OSError) as e:
             files.append(dict(name=f.name, pr=None, done=None, error=str(e)))
     history = db.execute("SELECT * FROM imported_payruns ORDER BY id DESC LIMIT 50").fetchall()
+    first = not db.execute("SELECT 1 FROM payroll_import_accounts").fetchone()
+    books = db.execute("SELECT currency FROM company WHERE id=1").fetchone()["currency"] or "AUD"
     return render_template("links/payroll.html", files=files, history=history, inbox=inbox(),
-                           default_bank=linked(db, "default_bank"), **lookups(db))
+                           default_bank=linked(db, "default_bank"), roles=ROLES, mapping=import_accounts(db),
+                           first=first, books_currency=books, deductions_account=DEDUCTIONS_ACCOUNT, **lookups(db))
 
 
 @guarded
 def _do_import():
     db = get_db()
     bank = int(request.form["bank_account_id"])
+    chosen = {role: opt_int(request.form.get(f"map_{role}")) for role, _l in ROLES}
+    if not any(chosen.values()):
+        chosen = None
     up = request.files.get("file")
     if up and up.filename:
         pr = parse_payrun(up.read().decode("utf-8-sig"))
-        eid = import_payrun(db, pr, bank, safe_name(up.filename))
+        eid = import_payrun(db, pr, bank, safe_name(up.filename), chosen)
     else:
         name = request.form.get("name", "")
         path = inbox() / safe_name(name)
         if not name or not path.is_file():
             raise PostingError("That pay run file is no longer in the inbox.")
         pr = parse_payrun(path.read_text(encoding="utf-8"))
-        eid = import_payrun(db, pr, bank, path.name)
+        eid = import_payrun(db, pr, bank, path.name, chosen)
         done = inbox() / "Imported"
         done.mkdir(exist_ok=True)
         try:

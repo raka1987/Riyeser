@@ -330,6 +330,10 @@ def migrate(db):
     db.execute("CREATE TABLE IF NOT EXISTS archive_meta (key TEXT PRIMARY KEY, value TEXT)")
     if "kind" not in {r["name"] for r in db.execute("PRAGMA table_info(payruns)")}:
         db.execute("ALTER TABLE payruns ADD COLUMN kind TEXT NOT NULL DEFAULT 'regular'")  # regular, extra (bonus)
+    if "currency" not in {r["name"] for r in db.execute("PRAGMA table_info(company)")}:
+        db.execute("ALTER TABLE company ADD COLUMN currency TEXT NOT NULL DEFAULT 'AUD'")  # the books' currency (S30)
+    db.execute("""CREATE TABLE IF NOT EXISTS payroll_import_accounts (
+        role TEXT PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id))""")  # S30: chosen on first import
     _job_parts_inc_gst(db)
     _unique_document_numbers(db)
     db.commit()

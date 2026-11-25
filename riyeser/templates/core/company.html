@@ -18,6 +18,7 @@
 <label class="check"><input type="checkbox" name="auto_pdf" value="1" {{ 'checked' if company.auto_pdf }}> Save a PDF of every invoice and bill into <b>{{ docs_root }}</b></label>
 <p class="muted" style="margin:6px 0 0">Riyeser Desk Assistant and the other Riyeser modules use this folder, so your documents are filed automatically.</p></div>
 <div class="card"><h3>Accounting preferences</h3><div class="fields">
+<div><label>Currency of the books</label><input name="currency" value="{{ company.currency or 'AUD' }}" maxlength="3" style="text-transform:uppercase" placeholder="AUD"></div>
 <div><label>Financial year starts (month)</label><select name="fy_start_month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if company.fy_start_month==m }}>{{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1] }}</option>{% endfor %}</select></div>
 <div><label>Lock periods up to (inclusive)</label><input type="date" name="lock_date" value="{{ company.lock_date or '' }}"></div>
 <div><label>Default credit terms (days)</label><input type="number" name="default_terms_days" value="{{ company.default_terms_days }}"></div>
