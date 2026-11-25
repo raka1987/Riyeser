@@ -69,9 +69,10 @@ def _save(iid):
             stock_adjust(db, iid, f.get("opening_date") or __import__("datetime").date.today().isoformat(), oq,
                          to_cents(f.get("opening_cost") or f.get("buy_price")), "Opening stock",
                          account_id=linked(db, "historical_balancing"))
-    db.execute("UPDATE items SET category=?, pos_favourite=?, block_oversell=? WHERE id=?",
+    codes = ",".join(dict.fromkeys(c.strip() for c in (f.get("barcodes") or "").replace("\n", ",").split(",") if c.strip()))
+    db.execute("UPDATE items SET category=?, pos_favourite=?, block_oversell=?, barcodes=? WHERE id=?",
                ((f.get("category") or "").strip() or None, 1 if f.get("pos_favourite") else 0,
-                1 if f.get("block_oversell") else 0, iid))
+                1 if f.get("block_oversell") else 0, codes or None, iid))
     _save_photo(db, iid, f)
     audit(db, "save_item", vals[0])
     flash(f"Item {vals[0]} saved.", "ok")

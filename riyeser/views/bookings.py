@@ -176,6 +176,8 @@ def calendar():
         (by_id.get(b["resource_id"]) or spare)["items"].append(item)
     if spare["items"]:
         cols.append(spare)
+    for c in cols:
+        _lanes(c["items"])  # M6: overlapping bookings side by side, not on top of each other
     slots = [(first + i * SLOT) for i in range((last - first + SLOT - 1) // SLOT)]
     counts = {k: sum(1 for b in rows if b["status"] == k) for k, _ in STATUSES}
     return render_template("bookings/calendar.html", d=d, cols=cols, slots=slots, rows=rows, counts=counts, m=M(),
@@ -227,6 +229,27 @@ def _form_lookups(db):
                                      " ORDER BY name").fetchall())
 
 
+def _lanes(items):
+    """Give each booking a lane (and how many lanes its overlapping group has)."""
+    items.sort(key=lambda i: (i["top"], -i["height"]))
+    group, ends_at = [], []
+    def close():
+        for it in group:
+            it["lanes"] = len(ends_at)
+    for it in items:
+        if group and it["top"] >= max(e for e in ends_at):
+            close()
+            group, ends_at = [], []
+        lane = next((n for n, e in enumerate(ends_at) if e <= it["top"]), None)
+        if lane is None:
+            lane = len(ends_at)
+            ends_at.append(0)
+        ends_at[lane] = it["top"] + it["height"]
+        it["lane"] = lane
+        group.append(it)
+    close()
+
+
 @bp.route("/new", methods=["GET", "POST"])
 @bp.route("/<int:bid>", methods=["GET", "POST"])
 def edit(bid=None):
@@ -235,11 +258,27 @@ def edit(bid=None):
     if bid and not b:
         abort(404)
     if request.method == "POST":
-        return _save(bid)
-    pre = dict(date=request.args.get("d") or date.today().isoformat(), time=request.args.get("t") or "",
-               resource_id=opt_int(request.args.get("r")), contact_id=opt_int(request.args.get("c")))
+        if bid:
+            return _save(bid)
+        try:  # M6: a new booking that can't be saved comes back with what was typed, and the reason once
+            resp = _save_core(None)
+            db.commit()
+            return resp
+        except (PostingError, ValueError) as e:
+            db.rollback()
+            flash(str(e), "error")
+        f = request.form
+        pre = dict(date=f.get("date") or date.today().isoformat(), time=f.get("time") or "",
+                   resource_id=opt_int(f.get("resource_id")), contact_id=opt_int(f.get("contact_id")),
+                   service_id=opt_int(f.get("service_id")), title=f.get("title"), address=f.get("address"),
+                   phone=f.get("phone"), notes=f.get("notes"), minutes=opt_int(f.get("minutes")),
+                   status=f.get("status"), party=opt_int(f.get("party")), price=to_cents(f.get("price"))
+                   if (f.get("price") or "").strip() else None, job_id=opt_int(f.get("job_id")))
+    else:
+        pre = dict(date=request.args.get("d") or date.today().isoformat(), time=request.args.get("t") or "",
+                   resource_id=opt_int(request.args.get("r")), contact_id=opt_int(request.args.get("c")))
     job = None
-    jid = (b["job_id"] if b else None) or opt_int(request.args.get("job"))
+    jid = (b["job_id"] if b else None) or opt_int(request.args.get("job")) or pre.get("job_id")
     if jid:
         job = db.execute("SELECT * FROM booking_jobs WHERE id=?", (jid,)).fetchone()
         if job and not b:   # a new visit on an existing job starts from the job's details
@@ -259,8 +298,11 @@ def edit(bid=None):
     return render_template("bookings/edit.html", b=b, pre=pre, inv=inv, job=job, **extra, **_form_lookups(db))
 
 
-@guarded
 def _save(bid):
+    return guarded(_save_core)(bid)
+
+
+def _save_core(bid):
     db = get_db()
     f = request.form
     m = M()

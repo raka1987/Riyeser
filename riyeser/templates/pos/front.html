@@ -225,7 +225,7 @@ function badge(i){if(!F.has('stock')||i.stock===null)return'';if(i.stock<=0)retu
 function drawGrid(){const q=$('#q').value.trim().toLowerCase();
   const list=ITEMS.filter(i=>(q||cat==='All'||(cat==='★'?i.fav:i.cat===cat))&&(!q||i.name.toLowerCase().includes(q)||i.sku.toLowerCase().includes(q)));
   $('#grid').innerHTML=list.map(i=>`<button class="pt ${F.has('stock')&&i.stock!==null&&i.stock<=0?'out':''}" style="--c:${i.color}" data-id="${i.id}">
-    <div class="ph">${i.photo?`<img src="${U.photo}${i.id}" alt="" loading="lazy">`:esc(initials(i.name))}${badge(i)}</div>
+    <div class="ph">${i.photo?`<img src="${U.photo}${i.id}" alt="" loading="lazy">`:esc(i.tile||initials(i.name))}${badge(i)}</div>
     <div class="ln1"><span>${esc(i.name)}${F.has('sku')?`<span class="sku">${esc(i.sku)}</span>`:''}</span><span class="n">${fmt(i.price)}</span></div></button>`).join('')
    ||`<div class="none">${q?'No items match “'+esc(q)+'”.':'No items here yet. Add products in Inventory, and tick “Show in Favourites” for the ones you sell most.'}</div>`;}
 function add(id){const it=ITEMS.find(i=>i.id==id);if(!it)return;const l=cart.find(c=>c.id==id&&!c.note&&!c.disc);
@@ -285,7 +285,9 @@ async function complete(){$('#complete').disabled=true;
     catch(e){updPay();return;}}
   let r=await fetch(U.sale,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   let d=await r.json().catch(()=>({ok:false,error:'Something went wrong. The sale was not saved.'}));
-  if(!d.ok&&d.confirm_stock&&confirm(d.error)){body.sell_anyway=true;  // S25: "Only 15 in stock. Sell anyway?"
+  for(let tries=0;!d.ok&&tries<3&&(d.confirm_key||d.reason_key);tries++){  // S25, M28: ask, then send again
+    if(d.confirm_key){if(!confirm(d.error))break;body[d.confirm_key]=true;}
+    else{const why=prompt(d.error);if(!why)break;body[d.reason_key]=why;}
     r=await fetch(U.sale,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     d=await r.json().catch(()=>({ok:false,error:'Something went wrong. The sale was not saved.'}));}
   if(!d.ok){$('#payErr').textContent=d.error;updPay();return;}
@@ -318,7 +320,7 @@ $('#lnSave').onclick=()=>{const l=cart[editIdx];if($('#lnNote'))l.note=$('#lnNot
 $('#lnRemove').onclick=()=>{cart.splice(editIdx,1);show('#mLine',false);draw();};
 $('#q').addEventListener('input',drawGrid);
 $('#q').addEventListener('keydown',e=>{if(e.key!=='Enter')return;e.preventDefault();const q=$('#q').value.trim().toLowerCase();if(!q)return;
-  const exact=F.has('scan')?ITEMS.find(i=>i.sku.toLowerCase()===q):null,m=ITEMS.filter(i=>i.name.toLowerCase().includes(q)||i.sku.toLowerCase().includes(q));
+  const exact=F.has('scan')?ITEMS.find(i=>i.sku.toLowerCase()===q||(i.barcodes||[]).includes(q)):null,m=ITEMS.filter(i=>i.name.toLowerCase().includes(q)||i.sku.toLowerCase().includes(q));
   const hit=exact||(m.length===1?m[0]:null);if(hit){add(hit.id);$('#q').value='';drawGrid();}else toast(m.length?'Several items match. Tap the right one.':'No item with that code or name');});
 // a barcode scanner types like a keyboard: send stray typing to the search box
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){$$('.modal').forEach(m=>m.classList.remove('show'));return;}

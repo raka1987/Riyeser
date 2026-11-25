@@ -179,6 +179,8 @@ def migrate(db):
         db.execute("ALTER TABLE company ADD COLUMN pos_mode TEXT NOT NULL DEFAULT 'retail'")
     if "category" not in {r["name"] for r in db.execute("PRAGMA table_info(items)")}:
         db.execute("ALTER TABLE items ADD COLUMN category TEXT")
+    if "barcodes" not in {r["name"] for r in db.execute("PRAGMA table_info(items)")}:
+        db.execute("ALTER TABLE items ADD COLUMN barcodes TEXT")  # M28: comma-separated, any number per item
     if "block_oversell" not in {r["name"] for r in db.execute("PRAGMA table_info(items)")}:
         db.execute("ALTER TABLE items ADD COLUMN block_oversell INTEGER NOT NULL DEFAULT 0")  # S25: never below 0
     db.execute("""CREATE TABLE IF NOT EXISTS pos_orders (

@@ -24,13 +24,13 @@ def check_lock(db, d):
 
 
 def post_entry(db, date, memo, source_type, lines, source_id=None, reference=None, contact_id=None,
-               reverses_id=None):
+               reverses_id=None, allow_empty=False):
     """lines: list of dicts with account_id, debit, credit and optional tax_code_id, job_id, memo."""
     if not date:
         raise PostingError("A date is required.")
     check_lock(db, date)
     lines = [l for l in lines if (l.get("debit") or 0) or (l.get("credit") or 0)]
-    if not lines:
+    if not lines and not allow_empty:
         raise PostingError("Transaction has no amounts.")
     for l in lines:
         if (l.get("debit") or 0) < 0 or (l.get("credit") or 0) < 0:
@@ -379,8 +379,9 @@ def post_document(db, doc_id):
                    memo=doc["number"]))
     contact = db.execute("SELECT name FROM contacts WHERE id=?", (doc["contact_id"],)).fetchone()
     memo = f"{'Sale' if sale else 'Purchase'}; {contact['name']}"
+    # a $0 sale (a free item, M28) still records the stock and its cost
     eid = post_entry(db, doc["date"], memo, "invoice" if sale else "bill", jl, source_id=doc_id,
-                     reference=doc["number"], contact_id=doc["contact_id"])
+                     reference=doc["number"], contact_id=doc["contact_id"], allow_empty=not doc["total"])
     # Inventory movements
     cogs_lines = []
     for l in cogs:

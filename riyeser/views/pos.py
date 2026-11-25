@@ -449,13 +449,39 @@ def shift_report(shid):
                            if sh["counts"] else [], now=_now())
 
 
+def tile_labels(rows):
+    """M5: the letters on tiles without a photo are different for every item: initials, else the item code."""
+    def initials(n):
+        return "".join(w[0] for w in n.split() if w[:1].isalnum())[:2].upper() or n[:2].upper()
+    count = {}
+    for r in rows:
+        count[initials(r["name"])] = count.get(initials(r["name"]), 0) + 1
+    out, used = {}, set()
+    for r in rows:
+        t = initials(r["name"])
+        if count[t] > 1:
+            t = (r["sku"] or t)[:5].upper()
+        base, n = t, 2
+        while t in used:
+            t, n = f"{base[:4]}{n}", n + 1
+        used.add(t)
+        out[r["id"]] = t
+    return out
+
+
+BIG_QTY = 1000          # M28: more than this of one item, or
+BIG_CHANGE = 1000_00    # more than $1,000 change, is checked first
+
+
 def _items(db):
     rows = db.execute("SELECT i.*, t.rate, (SELECT 1 FROM item_photos p WHERE p.item_id=i.id) has_photo"
                       " FROM items i LEFT JOIN tax_codes t ON t.id=i.sale_tax_code_id"
                       " WHERE i.active=1 AND i.is_sold=1 ORDER BY COALESCE(i.category,'~'), i.name").fetchall()
     cats = sorted({r["category"] for r in rows if r["category"]})
+    tiles = tile_labels(rows)
     color = {c: PALETTE[i % len(PALETTE)] for i, c in enumerate(cats)}
     return [dict(id=r["id"], sku=r["sku"], name=r["name"], price=_price_inc(r, r["rate"]), rate=r["rate"] or 0,
+                 tile=tiles[r["id"]], barcodes=[b.strip().lower() for b in (r["barcodes"] or "").split(",") if b.strip()],
                  cat=r["category"] or "Other", color=color.get(r["category"], "#475467"),
                  fav=bool(r["pos_favourite"]), photo=bool(r["has_photo"]),
                  stock=r["qty_on_hand"] if r["is_inventoried"] else None) for r in rows], cats
@@ -646,7 +672,11 @@ def sale():
         try:
             check_stock(db, lines, bool(data.get("sell_anyway")))  # S25
         except StockShort as e:
-            return jsonify(ok=False, error=str(e), confirm_stock=e.confirm), 409
+            return jsonify(ok=False, error=str(e), confirm_stock=e.confirm,
+                           confirm_key="sell_anyway" if e.confirm else None), 409
+        big = max(l["qty"] for l in lines)
+        if big > BIG_QTY and not data.get("confirm_big"):
+            return jsonify(ok=False, error=f"{big:g} of one item is a lot. Is that right?", confirm_key="confirm_big"), 409
         # A discount above the limit needs a manager (owners and managers approve their own).
         rules = approval_rules(db)
         top = max(l["discount_pct"] for l in lines)
@@ -670,9 +700,23 @@ def sale():
         tendered = round_cents(float(data.get("tendered") or 0) * 100) if method == "cash" else total
         if method == "cash" and tendered < total:
             raise PostingError("Cash tendered is less than the total.")
+        if method == "cash" and tendered - total > BIG_CHANGE and not data.get("confirm_big"):
+            db.rollback()
+            return jsonify(ok=False, error=f"Change of ${(tendered - total) / 100:,.2f}? Check the cash tendered.",
+                           confirm_key="confirm_big"), 409
         acct = linked(db, "pos_cash" if method == "cash" else "pos_card")
-        pid = record_payment(db, "in", cid, acct, today, [(doc_id, total)], reference="POS",
-                             memo=f"POS {METHODS[method]}")
+        if total == 0:  # M28: a free item (staff meal, giveaway) with a reason; nothing to pay
+            why = str(data.get("reason") or "").strip()[:120]
+            if not why:
+                db.rollback()
+                return jsonify(ok=False, error="A $0 sale needs a reason (for example staff meal or giveaway).",
+                               reason_key="reason"), 409
+            db.execute("UPDATE documents SET status='paid', notes=TRIM(COALESCE(notes,'') || ' Free: ' || ?) WHERE id=?",
+                       (why, doc_id))
+            pid = None
+        else:
+            pid = record_payment(db, "in", cid, acct, today, [(doc_id, total)], reference="POS",
+                                 memo=f"POS {METHODS[method]}")
         till = opt_int(data.get("till_id"))
         if till and not db.execute("SELECT 1 FROM pos_tills WHERE id=? AND active=1", (till,)).fetchone():
             till = None
@@ -778,7 +822,8 @@ def void(sid):
         self_approval(db, "void", sid, s["total"], reason or "Voided by manager")
     else:
         reason = use_approval(db, request.form.get("approval_id"), "void", sid)["reason"]
-    void_payment(db, s["payment_id"])
+    if s["payment_id"]:  # a free sale (M28) has no payment
+        void_payment(db, s["payment_id"])
     void_document(db, s["document_id"])
     db.execute("UPDATE pos_sales SET voided=1 WHERE id=?", (sid,))
     audit(db, "pos_void", f"#{sid}: {reason}")

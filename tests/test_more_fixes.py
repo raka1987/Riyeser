@@ -865,3 +865,50 @@ def test_m23_m24_duplicate_codes_and_journal_and_bank_account_checks(client, app
     client.post("/accounts/save", data=dict(form, confirm_unbank="1"))
     with app.app_context():
         assert get_db().execute("SELECT is_bank FROM accounts WHERE id=?", (acc["1-1110"],)).fetchone()[0] == 0
+
+
+# ------------------------------------------------------------------ M5, M6, M28
+def test_m5_tiles_have_different_letters():
+    from riyeser.views.pos import tile_labels
+    rows = [dict(id=1, name="Flat White", sku="FW1"), dict(id=2, name="Filtered water tap", sku="TAP-220"),
+            dict(id=3, name="Muffin", sku="")]
+    t = tile_labels(rows)
+    assert len(set(t.values())) == 3 and t[3] == "M" and t[1] == "FW1" and t[2] == "TAP-2"
+
+
+def test_m6_clash_keeps_the_typed_booking_and_overlaps_sit_side_by_side(tmp_path, monkeypatch):
+    from tests.test_bookings_app import _jobs_setup, _book, _one
+    app, c, item, cust, staff = _jobs_setup(tmp_path, monkeypatch)
+    _book(c, contact_id=cust, resource_id=staff, date="2026-12-01", time="10:00")
+    r = _book(c, contact_id=cust, resource_id=staff, date="2026-12-01", time="10:30", title="Second job")
+    html = page(r)
+    assert html.count("already has") == 1 and 'value="10:30"' in html and 'value="Second job"' in html
+    _book(c, contact_id=cust, resource_id=staff, date="2026-12-01", time="10:30", allow_overlap="1")
+    cal = page(c.get("/bookings/?d=2026-12-01"))
+    assert "width:calc((100% - 8px) / 2 - 3px)" in cal
+
+
+def test_m28_free_items_big_quantities_and_cash_and_barcodes(tmp_path, monkeypatch):
+    from tests.test_pos_app import make
+    app, c, coffee = make(tmp_path, monkeypatch, "pos")
+    free = {"method": "card", "lines": [{"item_id": coffee, "qty": 1, "discount_pct": 100}]}
+    d = c.post("/pos/sale", json=free).get_json()
+    assert not d["ok"] and d["reason_key"] == "reason"
+    assert c.post("/pos/sale", json=dict(free, reason="Staff meal")).get_json()["ok"]
+    big = {"method": "card", "lines": [{"item_id": coffee, "qty": 1000000}]}
+    d = c.post("/pos/sale", json=big).get_json()
+    assert not d["ok"] and d["confirm_key"] == "confirm_big"
+    cash = {"method": "cash", "tendered": 1000000, "lines": [{"item_id": coffee, "qty": 1}]}
+    d = c.post("/pos/sale", json=cash).get_json()
+    assert not d["ok"] and "Change of $999,995.60" in d["error"]
+    assert c.post("/pos/sale", json=dict(cash, confirm_big=True)).get_json()["ok"]
+    # barcodes: several per item, and the till matches them
+    with app.app_context():
+        sku = get_db().execute("SELECT sku, name FROM items WHERE id=?", (coffee,)).fetchone()
+    c.post(f"/inventory/{coffee}/edit", data={"sku": sku["sku"], "name": sku["name"], "is_sold": "1", "active": "1",
+                                             "barcodes": "9300601123456, 9300601999999"})
+    with app.app_context():
+        from riyeser.views.pos import _items
+        it = next(i for i in _items(get_db())[0] if i["id"] == coffee)
+    assert it["barcodes"] == ["9300601123456", "9300601999999"]
+    assert "(i.barcodes||[]).includes(q)" in page(c.get("/pos/"))
