@@ -354,7 +354,7 @@ footer .fbase { display: flex; flex-wrap: wrap; gap: 10px 24px; justify-content:
   .fgrid, .grid.three, .progrow, .plans { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .steps3 { grid-template-columns: 1fr; } .steps3 > .to { display: none; }
   .central-dl { grid-template-columns: auto 1fr; } .central-dl .sep { display: none; } .central-dl .act { grid-column: 1 / -1; }
-  .hpage { grid-template-columns: 1fr; gap: 0; } .hside { display: none; }
+  .hpage { grid-template-columns: minmax(0, 1fr); gap: 0; } .hside { display: none; }
   .band-hero .swoosh, .band-hero .bgimg { opacity: .3; width: 70%; }
   .steps4, .trades { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   footer .fcols { grid-template-columns: 1fr 1fr; }
@@ -836,4 +836,34 @@ details.phfold > summary { display: none; }
   footer .fcols > div:nth-child(2) { grid-column: 1 / -1; }
   footer .fcols > div:nth-child(2) a { display: inline-block; margin-right: 14px; }
   footer .fcols a { padding: 2px 0; } footer h4 { margin-bottom: 4px; } footer .fbase { margin-top: 18px; padding-top: 12px; }
+}
+
+/* Riyeser Link Office has no price of its own: "With Link Plus" (gold-brown, like the Link Plus marker) where a price would be */
+.badge.with { background: #fff7e0; color: #6b4500; }
+.menu-pop em.mprice.with, .frow .fprice.with { color: #8a5a00; }
+.cfoot .cp b.with { color: #8a5a00; }
+.hprice.with .hp-main b { color: #8a5a00; font-size: 26px; line-height: 1.2; letter-spacing: -.4px; }
+@media (max-width: 640px) { .hprice.with .hp-main b { font-size: 22px; } }
+
+/* "Find your program": every tile the same height (name on one line; ★ Plus beside the price, not under the name) */
+.frow a { width: 150px; }
+.frow .fname { white-space: nowrap; }
+.frow .fmeta { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: -4px; }
+.frow .fmeta .fprice { margin: 0; white-space: nowrap; } .frow .fmeta .pluspill { margin: 0; }
+.frow .pmo { display: none; }
+
+/* "Find your program" on a phone: a tidy list, one row per program (icon, name, then ★ Plus and the price on the right) */
+@media (max-width: 640px) {
+  .finder .ghead { text-align: left; margin: 22px 0 8px; }
+  .frow { display: grid; grid-template-columns: 1fr; gap: 0; background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .frow a { width: auto; display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 14px; text-align: left; padding: 10px 14px; font-size: 16px; line-height: 1.25; border-top: 1px solid var(--line); }
+  .frow a:first-child { border-top: 0; }
+  .frow img { width: 44px; height: 44px; border-radius: 11px; box-shadow: none; }
+  .frow a:hover img { transform: none; }
+  .frow .fname { white-space: normal; min-width: 0; }
+  .frow .fmeta { margin: 0; justify-content: flex-end; gap: 8px; }
+  .frow .fprice { font-size: 14px; font-weight: 700; color: var(--ink); text-align: right; }
+  .frow .pm { display: none; } .frow .pmo { display: inline; }
+  .frow .fprice.free { color: #157a3c; } .frow .fprice.with { color: #8a5a00; }
+  .finder .fnote { text-align: left; font-size: 13.5px; line-height: 1.5; margin-top: 10px; }
 }

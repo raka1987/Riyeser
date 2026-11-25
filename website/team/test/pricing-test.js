@@ -5,6 +5,9 @@
 //  2. No FJD, AUD or NZD prices anywhere on the website.
 //  3. Free programs come first everywhere programs are listed (menu, finder, All programs, Downloads), starting with
 //     Riyeser Central, and Riyeser Link has the gold "★ Plus" marker.
+//  4. Riyeser Link Office is listed right after Riyeser Link (home finder and programs, the Programs menu, Downloads, its own
+//     page and help page) with a Windows download, and never a price of its own: "With Link Plus", linked to #link-plus.
+//  5. Find your program on a phone is a tidy list: one row per program, names and prices on one line.
 // Run: build the site, serve website/public on 8090, then `node website/team/test/pricing-test.js [shots folder]`.
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -14,6 +17,9 @@ const SHOTS = process.argv[2];
 let failed = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failed++; };
 const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
+// Listed with the free programs, right after Riyeser Link, though it comes with Link Plus (no price of its own).
+const FREE_GROUP = [...FREE, 'link-office'];
+const LO_FILE = 'RiyeserLinkOffice-Setup.exe';
 
 (async () => {
   const b = await chromium.launch(); const errs = [];
@@ -57,7 +63,7 @@ const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
 
   // free first, then paid: the menu, the home finder, All programs, Downloads
   const ids = (sel) => pg.$$eval(sel, (as) => as.map((a) => (a.getAttribute('href') || '').replace(/^.*programs\//, '').replace('.html', '')));
-  const freeFirst = (list) => { const lastFree = Math.max(...list.map((x, i) => (FREE.includes(x) ? i : -1))); const firstPaid = list.findIndex((x) => !FREE.includes(x)); return firstPaid === -1 || lastFree < firstPaid; };
+  const freeFirst = (list) => { const lastFree = Math.max(...list.map((x, i) => (FREE_GROUP.includes(x) ? i : -1))); const firstPaid = list.findIndex((x) => !FREE_GROUP.includes(x)); return firstPaid === -1 || lastFree < firstPaid; };
   await pg.goto(`${BASE}/index.html`);
   const menu = await ids('.menu-pop.progs a:not(.all)');
   check(menu[0] === 'central' && freeFirst(menu) && menu.length >= 10, `menu: Central first, free before paid (${menu.join(', ')})`);
@@ -88,6 +94,36 @@ const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
   const dls = await pg.$$eval('.dl h3', (hs) => hs.map((h) => h.textContent));
   check(dls[0].includes('Riyeser Invoices') && dls.findIndex((t) => /Free trial/.test(t)) > dls.findIndex((t) => /Riyeser Link/.test(t)), 'Downloads: free first');
   check(await pg.$$eval('.dl', (ds) => ds.some((d) => d.textContent.includes('Riyeser Link') && d.querySelector('.pluspill'))), 'Downloads: ★ Plus on Riyeser Link');
+
+  // Riyeser Link Office: right after Riyeser Link everywhere, a Windows download, and no price of its own
+  const after = (list) => list.indexOf('link-office') === list.indexOf('link') + 1;
+  const lo = await pg.$eval('.dl:has(a[href$="programs/link-office.html"])', (d) => ({ t: d.textContent.replace(/\s+/g, ' '), dl: (d.querySelector('a.btn') || {}).href || '', plus: (d.querySelector('.cprice a') || {}).href || '' }));
+  check(dls.findIndex((t) => /Riyeser Link Office/.test(t)) === dls.findIndex((t) => /^Riyeser Link\b(?! Office)/.test(t)) + 1, 'Downloads: Link Office right after Riyeser Link');
+  check(lo.dl.endsWith(LO_FILE) && lo.plus.endsWith('pricing.html#link-plus') && lo.t.includes('Comes with Riyeser Link Plus') && !/US\$|a month/.test(lo.t), `Downloads: Link Office downloads ${LO_FILE}, "Comes with Riyeser Link Plus" (linked), no price`);
+  await pg.goto(`${BASE}/index.html`);
+  check(after(await ids('.menu-pop.progs a:not(.all)')) && after(await ids('#find .frow a')) && after(await ids('#programs .grid a.card[href*="programs/"]')), 'menu, finder and home programs: Link Office right after Riyeser Link');
+  const noPrice = async (sel) => { const t = await pg.$eval(sel, (a) => a.textContent.replace(/\s+/g, ' ')); return t.includes('With Link Plus') && !/US\$|\/mo|a month|\bFree\b/.test(t); };
+  check(await noPrice('.menu-pop.progs a[href$="programs/link-office.html"]') && await noPrice('#find .frow a[href$="programs/link-office.html"]') && await noPrice('#programs a.card[href$="programs/link-office.html"]'), 'menu, finder and home card: "With Link Plus", never a price or "Free"');
+  check(await pg.$eval('#programs a.card[href$="programs/link-office.html"] .plusq', (x) => x.dataset.href.endsWith('pricing.html#link-plus') && x.textContent.includes('Comes with Riyeser Link Plus')), 'home card: "Comes with Riyeser Link Plus" goes to #link-plus');
+  await pg.goto(`${BASE}/programs/link-office.html`);
+  const lop = await pg.textContent('main');
+  check((await pg.$eval('.phero a.btn.p', (a) => a.href + ' ' + a.textContent)).match(/RiyeserLinkOffice-Setup\.exe\s+Download for Windows/) && lop.includes('Comes with Riyeser Link Plus') && !/US\$/.test(lop)
+    && await pg.$eval('.hprice a.hp-plus', (a) => a.href.endsWith('pricing.html#link-plus')), 'Link Office page: Windows download, comes with Link Plus (linked), no price');
+  check(!/outside (phone )?numbers?/.test(lop) || lop.includes('Not yet'), 'Link Office page: no claim of outside calls');
+  await pg.goto(`${BASE}/help/link-office.html`);
+  check((await pg.$eval('.hhead a.btn.p', (a) => a.href)).endsWith(LO_FILE), 'Link Office help page with a Download button');
+  await pg.goto(`${BASE}/help/link.html#desk-phones`);
+  check(await pg.$$eval('#desk-phones a', (as) => as.some((a) => a.href.endsWith('programs/link-office.html'))), 'help/link.html#desk-phones links to the Link Office download');
+
+  // Find your program on a phone: one row per program, nothing wrapping, the price on the right
+  const fp = await b.newPage({ viewport: { width: 390, height: 844 } }); await fp.goto(`${BASE}/index.html`);
+  const rows = await fp.$$eval('#find .frow a', (as) => as.map((a) => { const r = a.getBoundingClientRect(); const n = a.querySelector('.fname').getBoundingClientRect(); const p = a.querySelector('.fprice').getBoundingClientRect();
+    return { h: Math.round(r.height), w: Math.round(r.width), oneName: n.height < 26, onePrice: p.height < 24, right: p.right > r.right - 30 }; }));
+  check(rows.length >= 11 && rows.every((r) => r.oneName && r.onePrice && r.right) && new Set(rows.map((r) => r.w)).size === 1 && Math.max(...rows.map((r) => r.h)) - Math.min(...rows.map((r) => r.h)) <= 2,
+    `phone finder: a list, every row the same size, names and prices on one line (${rows.length} rows)`);
+  check((await fp.evaluate(() => document.documentElement.scrollWidth)) <= 390, 'phone: no sideways scrolling on the home page');
+  if (SHOTS) await (await fp.$('#find')).screenshot({ path: path.join(SHOTS, 'finder-phone.png') });
+  await fp.close();
 
   // no FJD / AUD / NZD prices anywhere on the website (the built pages)
   const pub = path.join(__dirname, '..', '..', 'public');

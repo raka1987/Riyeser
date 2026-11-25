@@ -68,6 +68,12 @@ const ALL_PROGRAMS = [
     plus: { name: 'Riyeser Link Plus', module: 'calls', anchor: 'link-plus',
       what: `calls, desk phones and ${STORAGE_GB.plus} GB of chat file space`, line: `calls between people and branches, office desk phones, ${STORAGE_GB.plus} GB of space for files shared in chat (not hosting).` },
     pitch: 'Your whole team, in one conversation.' },
+  // Riyeser Link Office: the office phone system (one PC at the office; desk phones that ring each other). It comes with
+  // Riyeser Link Plus, so it never shows a price of its own: comesWith names the program whose upgrade (p.plus) includes it.
+  { id: 'link-office', name: 'Riyeser Link Office', short: 'Link Office', icon: '☎', file: 'RiyeserLinkOffice-Setup.exe', comesWith: 'link',
+    one: 'Your office phone system: install it on one PC at the office, plug in desk phones, and everyone gets an extension. Staff call each other free inside the office. Comes with Riyeser Link Plus.',
+    pitch: 'Desk phones that ring each other.',
+    note: 'Not yet: calls to and from outside phone numbers, and office phones away from the office. These phones can\'t call emergency services: keep a mobile or normal phone line for that.' },
   { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyeserPDF-Setup.exe',
     one: 'Open, fill in, sign, combine and edit PDFs — even scanned ones.',
     pitch: 'Drawings and forms, done on the PC.',
@@ -87,13 +93,15 @@ const CARD = {
   payroll: ['Timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
   'desk-assistant': ['Sorts and finds every file in seconds.', 'Sort and find your files'],
   link: ['Team chat: channels and direct messages.', 'Chat and calls'],
+  'link-office': ['Office desk phones that ring each other.', 'Office desk phones'],
   pdf: ['Open, fill in, sign and combine PDFs.', 'Fill, sign and edit PDFs'],
   services: ['Cables, pipes and ducts on your plans.', 'Services on your drawings'],
 };
 for (const p of ALL_PROGRAMS) [p.card, p.tag] = CARD[p.id];
 // Free programs first, then the paid ones. Every list on the site (menus, finder, grids, downloads, footer) uses this order.
+// Riyeser Link Office sits right after Riyeser Link: it isn't free (it comes with Link Plus), but it belongs next to Link.
 const FREE_TOOLS = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
-const ORDER = [...FREE_TOOLS, 'accounting-basics', 'accounting', 'pos', 'bookings', 'payroll', 'services'];
+const ORDER = ['central', 'invoices', 'link', 'link-office', 'pdf', 'desk-assistant', 'accounting-basics', 'accounting', 'pos', 'bookings', 'payroll', 'services'];
 ALL_PROGRAMS.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 for (const p of ALL_PROGRAMS) p.free = FREE_TOOLS.includes(p.id);
 const FREE_HEAD = 'Free forever';
@@ -172,6 +180,12 @@ const INCLUDES = {
   'link-plus': ['Everything in free Riyeser Link', 'Call a person, dial an extension, or call a whole branch', 'Turn the camera on for video in any call',
     'Branches with their own number and join code; extensions given automatically', 'Office desk phones with Riyeser Link Office (Yealink, Grandstream, Snom and Polycom)',
     "Answer on any PC or phone you're signed in on, with no call charges", 'A list of recent calls', `${STORAGE_GB.plus} GB of chat file space (not hosting)`],
+  'link-office': ['Install it on one Windows PC at the office that stays on, and sign in with your Riyeser account',
+    'It brings in your people, extensions and branches from Riyeser Link', 'Plug in Yealink, Grandstream, Snom and Polycom desk phones: they show up by themselves and set themselves up',
+    'Each person gets an extension number, like 101', 'Staff call each other free inside the office',
+    'Ring groups: "Front desk" rings several phones, and the first to answer gets the call', 'Staff can also answer office calls in the Riyeser Link app (My phone)',
+    'Other desk phones and phone apps can be set up by hand', 'Owners and admins see and manage every phone from the Phones page in Riyeser Link',
+    'Comes with Riyeser Link Plus: no separate price'],
   pdf: ['Open and view any PDF, and make Riyeser PDF your PDF app', 'Change the words in a PDF, add text, highlight, underline and strike through',
     'Fill in forms', 'Sign, tick, cross, add the date or a stamp (Approved, Paid, Received…)', 'Draw, boxes, circles, lines and arrows for marking up drawings',
     "White-out, and Redact that removes what's underneath for good", 'Combine PDFs, reorder, rotate, delete, extract and split pages',
@@ -211,13 +225,15 @@ const SHOTS = {
     ['link-calls', 1440, 900, 'Riyeser Link Plus calls: dial an extension or call a branch, with recent calls', 'Calls (Link Plus)'],
     ['link-desk-phones', 1440, 900, 'Riyeser Link desk phones page: set-up steps for Riyeser Link Office and the server address to type into phones', 'Desk phones (Link Plus)'],
     ['link-phone', 600, 1298, 'Riyeser Link on a phone: pinned chats, channels and direct messages', 'On a phone', 'tall']],
+  // The desk phones page in Riyeser Link (shown in a Riyeser Link window: shotOf), where Link Office's phones are managed.
+  'link-office': [['link-desk-phones', 1440, 900, 'Riyeser Link desk phones page: set-up steps for Riyeser Link Office and the server address to type into phones', 'Desk phones in Riyeser Link']],
   pdf: [['pdf-markup', 1280, 800, 'Riyeser PDF with a site plan marked up: a red circle, an arrow, a note and a tick', 'Marking up a drawing'],
     ['pdf-tools', 1280, 800, 'The Riyeser PDF Tools menu: convert, split, page numbers, watermark and make smaller', 'More tools']],
 };
 // Not lazy: there are only two to four small pictures, and lazy ones showed blank in full-page captures.
 const shotImg = (up, [f, w, h, alt]) => `<img src="${up}assets/shots/${f}-900.webp" srcset="${up}assets/shots/${f}-900.webp ${w > 900 ? 900 : w}w, ${up}assets/shots/${f}.webp ${w}w" sizes="(max-width: 640px) 92vw, (max-width: 1000px) 46vw, 560px" width="${w}" height="${h}" alt="${esc(alt)}" decoding="async">`;
 /** A small gallery; each picture opens bigger in the lightbox (no libraries). */
-const gallery = (id, up) => { const list = SHOTS[id]; if (!list) return ''; return `<section class="c blk gal-sec" id="screens">${shead('See it in use', 'The real program, filled in with a made-up sample business. Click a picture to see it bigger.', 'Screenshots')}
+const gallery = (id, up) => { const list = SHOTS[id]; if (!list || list.length < 2) return ''; /* one picture: it's already at the top */ return `<section class="c blk gal-sec" id="screens">${shead('See it in use', 'The real program, filled in with a made-up sample business. Click a picture to see it bigger.', 'Screenshots')}
   <div class="gal g${list.length % 3 ? 2 : 3}">${list.map((s) => `<figure${s[5] ? ` class="${s[5]}"` : ''}><button type="button" class="shot" data-full="${up}assets/shots/${s[0]}.webp" data-cap="${esc(s[4])}" aria-label="${esc(`See bigger: ${s[4]}`)}">${shotImg(up, s)}</button><figcaption>${esc(s[4])}</figcaption></figure>`).join('')}</div>
 </section>
 <dialog class="lightbox" id="lb" aria-label="Screenshot"><button type="button" class="lb-x" aria-label="Close">×</button><button type="button" class="lb-nav lb-prev" aria-label="Previous picture">‹</button><figure><img alt=""><figcaption></figcaption></figure><button type="button" class="lb-nav lb-next" aria-label="Next picture">›</button></dialog>
@@ -377,8 +393,9 @@ const heroShot = (up) => `<div class="hshot">
   <div class="hfloat f2"><img src="${up}assets/apps/invoices.png" alt="" width="40" height="40"><div><small>Riyeser Invoices</small><b>INV-1047 paid</b><span class="ok">$880.00 received</span></div></div>
 </div>`;
 const winFrame = (up, app, name, img, alt, w = 1400, h = 900) => `<div class="win"><div class="bar"><img src="${up}assets/${app === 'logo' ? 'logo-r.png' : `apps/${app}.png`}" alt="">${esc(name)}<span class="ctl">${svg('<path d="M5 12h14"/>')}${svg('<rect x="5" y="5" width="14" height="14" rx="1"/>')}${svg('<path d="M6 6l12 12M18 6L6 18"/>')}</span></div><img src="${up}assets/${img}" alt="${esc(alt)}" width="${w}" height="${h}"></div>`;
-/** Free programs, a heading, then the paid ones: grp(list, (items) => html, (title) => heading html). */
-const grouped = (list, wrap, head) => [[FREE_HEAD, list.filter((p) => p.free)], [PAID_HEAD, list.filter((p) => !p.free)]]
+/** Free programs, a heading, then the paid ones: grp(list, (items) => html, (title) => heading html).
+    Riyeser Link Office (comesWith) stays next to Riyeser Link, with "With Link Plus" where a price would be. */
+const grouped = (list, wrap, head) => [[FREE_HEAD, list.filter((p) => p.free || p.comesWith)], [PAID_HEAD, list.filter((p) => !p.free && !p.comesWith)]]
   .filter(([, l]) => l.length).map(([t, l]) => head(t) + wrap(l)).join('');
 // The "★ Plus" marker for a free program with a paid upgrade (p.plus). Inside another link (a card or menu item) it can't be
 // a link itself, so it's a span with data-href (the page script follows it); elsewhere it's a normal link.
@@ -390,6 +407,11 @@ const plusPill = (p, up, asLink = false) => (!p.plus ? '' : asLink
 const plusLine = (p, up, asLink = false) => (!p.plus ? '' : asLink
   ? `<a class="plusline" href="${plusHref(p, up)}">★ <b>${esc(p.plus.name)}</b> available: ${esc(p.plus.line)}</a>`
   : `<span class="plusline" role="link" tabindex="0" data-href="${plusHref(p, up)}">★ <b>${esc(p.plus.name)}</b> available: ${esc(p.plus.line)}</span>`);
+// A program that comes with another's upgrade (Riyeser Link Office with Link Plus) has no price of its own: these say so
+// and link to that upgrade's row on the pricing page.
+const withPlus = (p) => prog(p.comesWith).plus;
+const withHref = (p, up) => plusHref(prog(p.comesWith), up);
+const withShort = (p) => `With ${withPlus(p).name.replace('Riyeser ', '')}`;
 /** A paid program's price, users included and extra-user price (all from PRICE). */
 const priceTag = (p) => `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(USERS_LINE)}`;
 /** A section heading: optional eyebrow, the title and an optional one-line summary (the same on every section). */
@@ -400,6 +422,9 @@ const includedCard = (key, name, m, up, cls = '') => `<div class="inclcard${cls 
   <small class="ihq">${m ? `${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user · free for 90 days` : 'No time limit, no card, no user charges'}</small>${inclList(key)}${m ? buyBtns(m) : ''}</div>`;
 /** The price card at the top of a program page. */
 const heroPrice = (p, up) => { const m = MOD[p.id];
+  if (p.comesWith) return `<div class="hprice with"><div class="hp-main"><b>Comes with ${esc(withPlus(p).name)}</b></div>
+    <div class="hp-sub">No separate price. The Windows program is free to download, and it switches on when your business has ${esc(withPlus(p).name)}.</div>
+    <a class="hp-plus" href="${withHref(p, up)}">★ <b>${esc(withPlus(p).name)}</b>: ${esc(withPlus(p).what)} ${ARR}</a></div>`;
   if (m) return `<div class="hprice"><div class="hp-main"><b>${usd(PRICE[m])}</b><span>/month per business</span></div>
     <div class="hp-sub">${PRICE.users_included} users included · +${usd(PRICE.extra_user)} a month per extra user</div><div class="hp-sub ok">Free for 90 days, no card</div>${buyBtns(m)}</div>`;
   const f = FREE_INFO[p.id] || {};
@@ -415,13 +440,14 @@ const RELATED = {
   bookings: [['invoices', 'Invoice a finished job in one click'], ['accounting-basics', 'Job invoices land in your books'], ['pos', 'Customers shared with the till']],
   payroll: [['accounting-basics', 'Pay runs brought into your books'], ['central', 'Your last pay run on your home screen']],
   'desk-assistant': [['central', "Today's meetings and to-dos on your home screen"], ['pdf', 'Fill in, sign and edit the PDFs it finds']],
-  link: [['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out'], ['bookings', 'Type Booking 12 and it stands out']],
+  link: [['link-office', 'Office desk phones that ring each other (with Link Plus)'], ['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out']],
+  'link-office': [['link', 'See the desk phones, and answer office calls in the app (My phone)'], ['central', 'Installs it and keeps it up to date']],
   pdf: [['desk-assistant', 'Sorts and finds your PDFs, even scanned ones'], ['central', 'Your home screen for every program']],
 };
 /** A program card: icon, name, one line, then the price and "Learn more" pinned to the bottom (every card the same height). */
 const progCard = (p, up) => `<a class="card pcard2" href="${up}programs/${p.id}.html">${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}</h3><p>${esc(p.card || p.one)}</p>
-<div class="cfoot"><span class="cp">${p.free ? '<b class="free">Free</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
-<small class="cq">${p.plus ? `<span class="plusq" role="link" tabindex="0" data-href="${plusHref(p, up)}">★ ${esc(p.plus.name)} available</span>` : p.free ? 'No time limit, no card' : `${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user`}</small></div></a>`;
+<div class="cfoot"><span class="cp">${p.comesWith ? `<b class="with">${esc(withShort(p))}</b>` : p.free ? '<b class="free">Free</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
+<small class="cq">${p.comesWith ? `<span class="plusq" role="link" tabindex="0" data-href="${withHref(p, up)}">★ Comes with ${esc(withPlus(p).name)}</span>` : p.plus ? `<span class="plusq" role="link" tabindex="0" data-href="${plusHref(p, up)}">★ ${esc(p.plus.name)} available</span>` : p.free ? 'No time limit, no card' : `${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user`}</small></div></a>`;
 /** The last tile in each group, so the 3-column grid has no gaps: a quiet summary with a link to the prices. */
 const groupTile = (free, up) => free
   ? `<a class="card ptile" href="${up}pricing.html"><b>Free, for good</b><p>No time limit, no card and no user charges. The only limit is Riyeser Link's ${STORAGE_GB.free} GB of chat file space.</p><span class="more">See every price ${ARR}</span></a>`
@@ -430,7 +456,7 @@ const groupTile = (free, up) => free
 const progGrid = (list, up, head = (t) => `<h3 class="ghead">${esc(t)}</h3>`) => grouped(list, (l) => `<div class="grid pgrid">${l.map((p) => progCard(p, up)).join('')}${l.length % 3 ? groupTile(l[0].free, up) : ''}</div>`, head);
 
 const more = (t) => `<span class="more">${t} ${ARR}</span>`;
-const badgeOf = (p) => p.free ? '<span class="badge free">Free forever</span>' : '<span class="badge">Free trial</span>';
+const badgeOf = (p) => p.comesWith ? `<span class="badge with">${esc(withShort(p))}</span>` : p.free ? '<span class="badge free">Free forever</span>' : '<span class="badge">Free trial</span>';
 
 /** assets/x.webp -> assets/x.webp?v=<content hash>, so browsers fetch new pictures and styles as soon as they change. */
 const versionOf = {};
@@ -481,7 +507,7 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
 <header class="nav" id="nav"><div class="c">
   <a class="logo" href="${up}index.html"><img src="${up}assets/logo-r.png" alt="">Riyeser</a>
   <nav class="links">
-    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop progs">${grouped(PROGRAMS, (l) => `${l.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up, 'mi')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}<small>${esc(p.tag || '')}</small><em class="mprice${p.free ? ' free' : ''}">${p.free ? `Free${p.plus ? ` <i>· ${esc(p.plus.name.replace('Riyeser ', ''))} ${usd(PRICE[p.plus.module])}/mo</i>` : ''}` : esc(priceShort(MOD[p.id]))}</em></span></a>`).join('')}${l[0].free ? '' : `<p class="mnote">${esc(USERS_NOTE)}</p>`}</div>`, (t) => `<div class="mcol"><div class="mgrp">${esc(t)}</div>`)}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
+    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop progs">${grouped(PROGRAMS, (l) => `${l.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up, 'mi')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}<small>${esc(p.tag || '')}</small><em class="mprice${p.free ? ' free' : p.comesWith ? ' with' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? `Free${p.plus ? ` <i>· ${esc(p.plus.name.replace('Riyeser ', ''))} ${usd(PRICE[p.plus.module])}/mo</i>` : ''}` : esc(priceShort(MOD[p.id]))}</em></span></a>`).join('')}${l[0].free ? '' : `<p class="mnote">${esc(USERS_NOTE)}</p>`}</div>`, (t) => `<div class="mcol"><div class="mgrp">${esc(t)}</div>`)}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
     <div class="dd"><a href="${indLink(INDUSTRIES[0], up)}"${active === 'industries' ? ' class="on"' : ''}>Industries ${svg(LI.down)}</a><div class="menu-pop">${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}"><span class="li">${li(i.icon, '')}</span><span>${esc(i.name)}<small>${esc(i.short)}</small></span></a>`).join('')}</div></div>
     <a href="${up}pricing.html"${active === 'pricing' ? ' class="on"' : ''}>Pricing</a>
     <div class="dd"><a href="${up}help.html"${active === 'help' ? ' class="on"' : ''}>Help ${svg(LI.down)}</a><div class="menu-pop">${guidesFor({ EMAIL, SERVICES_APP, up }).map((g) => `<a href="${up}help/${g.id}.html"><img class="appicon i-${g.app}" src="${up}assets/apps/${g.app}.png" alt="" style="width:30px;height:30px;border-radius:8px">${esc(g.name)}</a>`).join('')}<a class="all" href="${up}help.html">Help Centre ${ARR}</a></div></div>
@@ -573,7 +599,7 @@ ${homeHero(up)}
 
 <section class="finder" id="find"><div class="c">
   <h2 class="h2">Find your program</h2>
-  ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span>${esc(p.short === 'Central' ? 'Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}</span><small class="fprice">${p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])} a month`}</small></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
+  ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span class="fname">${esc(p.short === 'Central' ? 'Central' : p.short)}</span><span class="fmeta">${p.plus ? plusPill(p, up) : ''}<small class="fprice${p.comesWith ? ' with' : p.free ? ' free' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])}<span class="pm"> a month</span><span class="pmo">/mo</span>`}</small></span></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
 </div></section>
 
 <section class="c">
@@ -625,7 +651,7 @@ ${ctaBlock(up, 'Get started free today', 'Download Riyeser Central, add the prog
 // ---------- all programs ----------
 page({
   path: 'programs.html', title: 'All programs — Riyeser', active: 'programs',
-  description: `Every Riyeser program: Central, Invoices, Bookings, Riyeser Link, Accounting Basics, Accounting Plus, Payroll, Desk Assistant${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
+  description: `Every Riyeser program: Central, Invoices, Bookings, Riyeser Link, Riyeser Link Office, Accounting Basics, Accounting Plus, Payroll, Desk Assistant${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
   body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
 <section class="c blk first">${progGrid(PROGRAMS.filter((p) => p.id !== 'services'), up, (t) => `<div class="shead small"><h2>${esc(t)}</h2></div>`)}</section>
 ${ASBUILT ? `<section class="c blk">${shead('For the building industry', 'A separate program for trades and construction, priced on its own.')}<div class="grid pgrid">${progCard(prog('services'), up)}</div></section>` : ''}
@@ -670,11 +696,11 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
     <h1>${esc(p.pitch)}</h1><p class="lead">${esc(firstSentence(p.one))}</p>
     ${heroPrice(p, up)}
     <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
-    ${p.file ? `<p class="fine">Windows 10 &amp; 11 · No account or card needed</p>` : ''}
+    ${p.file ? `<p class="fine">Windows 10 &amp; 11 · ${p.comesWith ? 'Sign in with your Riyeser account' : 'No account or card needed'}</p>` : ''}
   </div>
-  ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : SHOTS[p.id] ? winFrame(up, p.id, p.name, `shots/${SHOTS[p.id][0][0]}.webp`, SHOTS[p.id][0][3], SHOTS[p.id][0][1], SHOTS[p.id][0][2]) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
+  ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : SHOTS[p.id] ? winFrame(up, p.comesWith || p.id, prog(p.comesWith || p.id).name, `shots/${SHOTS[p.id][0][0]}.webp`, SHOTS[p.id][0][3], SHOTS[p.id][0][1], SHOTS[p.id][0][2]) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
 </div></div>
-<section class="c blk" id="included">${shead('What you get', p.plus ? `${p.name} is free. ${p.plus.name} adds ${p.plus.what}.` : '', "What's included")}
+<section class="c blk" id="included">${shead('What you get', p.plus ? `${p.name} is free. ${p.plus.name} adds ${p.plus.what}.` : p.comesWith ? `${p.name} comes with ${withPlus(p).name}. There's no separate price.` : '', "What's included")}
   ${p.plus ? `<div class="inclgrid two">${includedCard(p.id, p.name, null, up)}${includedCard(p.plus.anchor, p.plus.name, p.plus.module, up, 'plus')}</div>` : `<div class="inclcard wide">${inclList(p.id)}</div>`}
   ${p.note ? `<p class="pnote">${esc(p.note)}</p>` : ''}
 </section>
@@ -776,7 +802,7 @@ page({
 </section>
 <section class="c" style="padding-top:0">
   <h2 class="h2">Every program</h2><p class="sub">Or download a program on its own. Each one installs in one click and updates over the old version, so your information is kept.</p>
-  ${grouped(PROGRAMS.filter((p) => p.id !== 'central'), (l) => l.map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}${plusPill(p, up, true)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p>${p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}${plusLine(p, up, true)}</div>${p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join(''), (t) => `<h3 class="ghead">${esc(t)}</h3>`)}
+  ${grouped(PROGRAMS.filter((p) => p.id !== 'central'), (l) => l.map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}${plusPill(p, up, true)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p>${p.comesWith ? `<p class="cprice">Comes with <a class="more" href="${withHref(p, up)}">${esc(withPlus(p).name)}</a>. No separate price: it switches on when your business has ${esc(withPlus(p).name)}.</p>` : p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}${plusLine(p, up, true)}</div>${p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join(''), (t) => `<h3 class="ghead">${esc(t)}</h3>`)}
   <div class="note" style="margin-top:26px"><b>Windows says “Windows protected your PC”?</b> Click <b>More info</b>, then <b>Run anyway</b>. We're getting our programs signed so this goes away. The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates and your licence.</div>
 </section>
 ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the same button names you see on screen.')}`,
@@ -792,7 +818,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
     ['pos', 'POS', 'pos', 'The till for shops, cafes and restaurants. Every sale goes into your books.'],
     ['bookings', 'Bookings', 'bookings', 'Jobs, appointments and table bookings on one calendar.'],
     ['payroll', 'Payroll', 'payroll', 'Time clock, timesheets, pay runs, payslips and leave.'],
-    ['calls', 'Riyeser Link Plus', 'link', `Calls between your people and branches, office desk phones with Riyeser Link Office, and ${STORAGE_GB.plus} GB of space for files shared in chat (not hosting).`],
+    ['calls', 'Riyeser Link Plus', 'link', `Calls between your people and branches, office desk phones with <a class="more" href="programs/link-office.html">Riyeser Link Office</a>, and ${STORAGE_GB.plus} GB of space for files shared in chat (not hosting).`],
     ...(ASBUILT ? [['as_built', 'As Built', 'services', 'Services on your drawings, for the building industry. Doesn\'t need Accounting.']] : []),
   ];
   const FREE = [['central', 'Riyeser Central', 'Your home screen, and it installs and updates the rest'], ['invoices', 'Riyeser Invoices', 'Quotes, invoices and getting paid'],
