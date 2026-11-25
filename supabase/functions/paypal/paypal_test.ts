@@ -6,7 +6,7 @@
 //  - webhooks: the signature checked with PayPal (the event passed on byte for byte); a bad signature refused;
 //    each event handed to the database (which ignores repeats); a failed payment then its grace; cancel
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { forgetTokens, handle, type Rpc } from "./handler.ts";
+import { forgetTokens, handle, startTime, type Rpc } from "./handler.ts";
 
 const WS = "11111111-2222-4333-8444-555555555555";
 const ORDER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -48,7 +48,7 @@ function fakePayPal(opts: { signatureOk?: boolean; cancelStatus?: number } = {})
 }
 
 /** A pretend database: billing_start (as the owner), the service-role functions, and events applied once. */
-function fakeDb(opts: { owner?: boolean; early?: boolean } = {}) {
+function fakeDb(opts: { owner?: boolean; early?: boolean; startsOn?: string } = {}) {
   const st = { config: {} as Record<string, string>, created: [] as unknown[], events: new Map<string, string>(), applied: [] as string[],
     cancelled: [] as string[], grace: null as string | null, status: "pending", asCalls: [] as string[] };
   const rpcAs = (req: Request): Rpc => async (name, args) => {
@@ -58,7 +58,7 @@ function fakeDb(opts: { owner?: boolean; early?: boolean } = {}) {
       assertEquals(args.pay_method, "paypal");
       const people = Number(args.people);
       const amount = (args.mods as string[]).reduce((a, m) => a + ({ plus: 39, payroll: 25, calls: 39 } as Record<string, number>)[m] + 7 * Math.max(0, people - 3), 0) * (args.billing_period === "yearly" ? 10 : 1);
-      return { ok: true, status: 200, body: { id: ORDER, ref: "RI-10001", amount, first_amount: opts.early ? amount / 2 : null, early_bird: !!opts.early, early_cycles: opts.early ? (args.billing_period === "yearly" ? 1 : 12) : 0, module_names: [] } };
+      return { ok: true, status: 200, body: { id: ORDER, ref: "RI-10001", amount, first_amount: opts.early ? amount / 2 : null, early_bird: !!opts.early, early_cycles: opts.early ? (args.billing_period === "yearly" ? 1 : 12) : 0, module_names: [], starts_on: opts.startsOn ?? null } };
     }
     if (name === "billing_cancel_start") return { ok: true, status: 200, body: { order_id: ORDER, subscription_id: "I-SUB000001", env: "sandbox", paid_through: "2027-03-22" } };
     return { ok: false, status: 404, body: null };
@@ -160,6 +160,20 @@ Deno.test("subscribe with the early bird: half for the first 12 months, then the
   const plan = JSON.parse(p.calls.find((c) => c.path === "/v1/billing/plans")!.body);
   assertEquals(plan.billing_cycles.map((c: { tenure_type: string }) => c.tenure_type), ["TRIAL", "REGULAR"]);
   assertEquals(db.st.config["plan.monthly.eb"], "P-PLAN1");
+});
+
+Deno.test("S10: on a free trial the first charge waits for its end (start_time); today means straight away", async () => {
+  forgetTokens(); const p = fakePayPal();
+  const later = new Date(Date.now() + 40 * 864e5).toISOString().slice(0, 10);
+  const r = await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), { env: env(KEYS), fetch: p.f, ...fakeDb({ startsOn: later }) });
+  assertEquals(r.status, 200);
+  const sub = JSON.parse(p.calls.find((c) => c.path === "/v1/billing/subscriptions")!.body);
+  assertEquals(sub.start_time, `${later}T00:00:00Z`, "PayPal starts billing when the trial ends");
+  const today = new Date().toISOString().slice(0, 10);
+  await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), { env: env(KEYS), fetch: p.f, ...fakeDb({ startsOn: today }) });
+  assertEquals(JSON.parse(p.calls.filter((c) => c.path === "/v1/billing/subscriptions").pop()!.body).start_time, undefined, "trial over: charged now");
+  assertEquals(startTime(null), null); assertEquals(startTime("2020-01-01"), null); assertEquals(startTime("not a date"), null);
+  assertEquals(startTime("2027-02-22", Date.parse("2026-11-25T00:00:00Z")), "2027-02-22T00:00:00Z");
 });
 
 Deno.test("not the owner: the database's answer, and PayPal is never asked", async () => {

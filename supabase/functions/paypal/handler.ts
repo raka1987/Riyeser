@@ -134,6 +134,12 @@ async function planFor(s: Setup, f: typeof fetch, svc: Rpc, period: "monthly" | 
   return String(plan.id);
 }
 
+/** PayPal's start_time for a first-charge date (YYYY-MM-DD, UTC midnight), or null when that's not in the future. */
+export function startTime(day: unknown, now = Date.now()): string | null {
+  if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const t = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(t) && t > now + 60_000 ? new Date(t).toISOString().replace(/\.\d{3}Z$/, "Z") : null;
+}
 const price = (n: unknown) => ({ fixed_price: { value: Number(n).toFixed(2), currency_code: "USD" } });
 const SITES = ["https://riyeser.com", "https://www.riyeser.com"];
 function returnBase(req: Request, env: Env): string {
@@ -213,16 +219,20 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
     const period = b.billing === "yearly" ? "yearly" : "monthly";
     const st = await rpc("billing_start", { ws, mods, people: Math.trunc(Number(b.people) || 3), billing_period: period, pay_method: "paypal" });
     if (!st.ok) return json(st.status === 401 ? 401 : 403, { error: plainDbError(st.body) });
-    const o = st.body as { id: string; ref: string; amount: number; first_amount: number | null; early_bird: boolean; early_cycles: number; module_names: string[] };
+    const o = st.body as { id: string; ref: string; amount: number; first_amount: number | null; early_bird: boolean; early_cycles: number; module_names: string[]; starts_on?: string | null };
     const early = !!o.early_bird && o.first_amount != null && o.early_cycles > 0;
     const plan = await planFor(s, f, svc, period, early);
     const base = returnBase(req, env);
     const cycles = early
       ? [{ sequence: 1, total_cycles: o.early_cycles, pricing_scheme: price(o.first_amount) }, { sequence: 2, total_cycles: 0, pricing_scheme: price(o.amount) }]
       : [{ sequence: 1, total_cycles: 0, pricing_scheme: price(o.amount) }];
+    // The first charge waits for the end of the free trial (the database's starts_on, S10): PayPal's start_time.
+    // Today (or a date that isn't later than now) means PayPal charges straight away, as before.
+    const start = startTime(o.starts_on);
     const sub = await pp(s, f, "POST", "/v1/billing/subscriptions", {
       plan_id: plan,
       custom_id: o.id,
+      ...(start ? { start_time: start } : {}),
       plan: { billing_cycles: cycles },
       application_context: {
         brand_name: "Riyeser", locale: "en-AU", shipping_preference: "NO_SHIPPING", user_action: "SUBSCRIBE_NOW",
