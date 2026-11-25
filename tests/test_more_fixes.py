@@ -552,3 +552,41 @@ def test_s40_invoice_warns_before_selling_stock_you_dont_have(client, app):
         assert db.execute("SELECT qty_on_hand FROM items WHERE id=?", (pump,)).fetchone()[0] == -2
         # and cost of sales is posted at the buy price, not $0 (F13)
         assert L.balances(db)[acc["5-1000"]] == 1000
+
+
+# ------------------------------------------------------------------ S19, S20, S21
+def test_s19_s20_s21_bookings_past_dates_unpriced_parts_and_follow_up_jobs(tmp_path, monkeypatch):
+    from tests.test_bookings_app import _jobs_setup, _book, _one
+    app, c, item, cust, staff = _jobs_setup(tmp_path, monkeypatch)
+    c.post("/bookings/setup", data={"mode": "jobs", "open": "07:00", "close": "18:00", "labour_rate": "120"})
+    # S19: a new booking in the past asks first
+    r = _book(c, contact_id=cust, resource_id=staff, date="2025-01-01", past_ok="")
+    assert "is in the past" in page(r) and _one(app, "SELECT COUNT(*) n FROM bookings")["n"] == 0
+    _book(c, contact_id=cust, resource_id=staff, date="2025-01-01", past_ok="1")
+    assert _one(app, "SELECT COUNT(*) n FROM bookings")["n"] == 1
+    # S20: parts can't be negative, and unpriced parts are listed before invoicing
+    c.post("/bookings/job/new", data={"contact_id": cust, "title": "Leak", "billing": "time"})
+    jid = _one(app, "SELECT id FROM booking_jobs ORDER BY id DESC")["id"]
+    _book(c, job_id=jid, contact_id=cust, resource_id=staff)
+    v = _one(app, "SELECT id FROM bookings ORDER BY id DESC")["id"]
+    r = c.post(f"/bookings/{v}/part", data={"description": "Washer", "qty": "1", "unit_price": "-20"},
+               headers={"Referer": f"/bookings/{v}"}, follow_redirects=True)
+    assert "can&#39;t be below $0" in page(r)
+    c.post(f"/bookings/{v}/part", data={"description": "Tap", "qty": "1"})
+    c.post(f"/bookings/{v}/time", data={"hours": "1"})
+    r = c.post(f"/bookings/job/{jid}/invoice", headers={"Referer": f"/bookings/job/{jid}"}, follow_redirects=True)
+    assert "Price these parts first, then invoice: Tap" in page(r)
+    assert _one(app, "SELECT COUNT(*) n FROM documents")["n"] == 0
+    tap = _one(app, "SELECT id FROM booking_materials WHERE description='Tap'")["id"]
+    c.post(f"/bookings/job/{jid}/part-price", data={f"price_{tap}": "25"})
+    c.post(f"/bookings/job/{jid}/invoice")
+    assert _one(app, "SELECT total FROM documents")["total"] == 12000 + 2500
+    # S21: a visit booked on the invoiced job goes on a follow-up job that can log work
+    assert "Book a follow-up job" in page(c.get(f"/bookings/job/{jid}"))
+    r = _book(c, job_id=jid, contact_id=cust, resource_id=staff, date="2026-12-10")
+    assert "already invoiced, so this is on a new follow-up job" in page(r)
+    nv = _one(app, "SELECT * FROM bookings ORDER BY id DESC")
+    assert nv["job_id"] != jid
+    assert _one(app, "SELECT title FROM booking_jobs WHERE id=?", (nv["job_id"],))["title"].startswith("Follow-up to J-")
+    c.post(f"/bookings/{nv['id']}/time", data={"hours": "0.5"})
+    assert _one(app, "SELECT COUNT(*) n FROM booking_time WHERE job_id=?", (nv["job_id"],))["n"] == 1

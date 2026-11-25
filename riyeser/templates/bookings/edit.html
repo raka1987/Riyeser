@@ -25,6 +25,7 @@
   {% if m.address %}<div class="wide"><label>Job address</label><input name="address" id="bk-addr" value="{{ v.address or '' }}"></div>{% endif %}
   <div class="wide"><label>Notes</label><textarea name="notes" rows="2">{{ v.notes or '' }}</textarea></div>
   <label class="check"><input type="checkbox" name="allow_overlap" value="1"> Allow double-booking</label>
+  {% if not b %}<label class="check"><input type="checkbox" name="past_ok" value="1"> Save anyway if the time is in the past</label>{% endif %}
 </div>{% if can('bookings', 2) %}<p><button class="btn pri">Save</button> <a class="btn" href="{{ url_for('bookings.calendar', d=(v.starts_at[:10] if b else pre.date)) }}">Back to calendar</a></p>{% endif %}</form>
 {% if b and job and m.address and can('bookings', 2) %}
 <div class="bk-two">

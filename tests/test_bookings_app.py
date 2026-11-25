@@ -14,7 +14,7 @@ def _cust(app, name="Jo Smith"):
 
 
 def _book(c, **kw):
-    data = {"date": "2026-11-24", "time": "09:00", "minutes": "60", "status": "booked"}
+    data = {"date": "2026-11-24", "time": "09:00", "minutes": "60", "status": "booked", "past_ok": "1"}
     data.update({k: str(v) for k, v in kw.items()})
     return c.post("/bookings/new", data=data, follow_redirects=True)
 

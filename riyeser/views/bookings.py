@@ -279,10 +279,13 @@ def _save(bid):
         raise PostingError("Enter a date and time.")
     svc = db.execute("SELECT * FROM booking_services WHERE id=?", (opt_int(f.get("service_id")),)).fetchone()
     minutes = opt_int(f.get("minutes")) or (svc["minutes"] if svc else m["minutes"])
-    if minutes <= 0 or minutes > 24 * 60 * 14:
+    if minutes is None or minutes <= 0 or minutes > 24 * 60 * 14:
         raise PostingError("How long should it take? Enter the minutes.")
     rid = opt_int(f.get("resource_id"))
     status = f.get("status") if f.get("status") in dict(STATUSES) else "booked"
+    if not bid and status in ("booked", "confirmed") and start < datetime.now() and not f.get("past_ok"):
+        # S19: a new booking in the past is usually a typing mistake
+        raise PostingError(f"{start:%a %d %b %Y %H:%M} is in the past. Check the date, or tick 'Save anyway' to book it.")
     party = opt_int(f.get("party")) if m["party"] else None
     if status in ("booked", "confirmed", "started"):
         other = clash(db, rid, start, minutes, bid)
@@ -298,6 +301,17 @@ def _save(bid):
     jid = opt_int(f.get("job_id"))
     if bid:
         jid = db.execute("SELECT job_id FROM bookings WHERE id=?", (bid,)).fetchone()["job_id"] or jid
+    follow_of = None
+    if not bid and jid:
+        done = db.execute("SELECT * FROM booking_jobs WHERE id=?", (jid,)).fetchone()
+        if done and done["document_id"]:
+            # S21: an invoiced job is closed; a new visit starts a follow-up job, linked to it, that can log work
+            follow_of, jid = done, db.execute(
+                "INSERT INTO booking_jobs (contact_id, service_id, title, address, phone, notes, billing, created_by)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (done["contact_id"], done["service_id"], f"Follow-up to {job_no(done['id'])}"
+                 + (f": {done['title']}" if done["title"] else ""), done["address"], done["phone"],
+                 f"Follow-up to {job_no(done['id'])}, which was invoiced.", done["billing"], g.user["id"])).lastrowid
     price = to_cents(f.get("price")) if (f.get("price") or "").strip() else None
     if price is not None and price < 0:
         raise PostingError("The price can't be below $0. For money back, make a credit note.")  # S15
@@ -332,7 +346,9 @@ def _save(bid):
                          vals + (mode(), g.user["id"])).lastrowid
         audit(db, "booking_new", f"#{bid} {start:%Y-%m-%d %H:%M}")
     refresh_job(db, jid)
-    flash(("Visit" if m["address"] else m["one"].capitalize()) + " saved.", "ok")
+    flash(("Visit" if m["address"] else m["one"].capitalize()) + " saved." +
+          (f" {job_no(follow_of['id'])} was already invoiced, so this is on a new follow-up job, {job_no(jid)}."
+           if follow_of else ""), "ok")
     return redirect(url_for("bookings.calendar", d=start.date().isoformat()))
 
 
@@ -484,6 +500,10 @@ def _invoice_job(db, jid):
     if not j["contact_id"]:
         raise PostingError(f"Choose the customer on this {M()['one']} first, then invoice it.")
     lines, sm = job_charges(db, j)
+    if j["billing"] == "time":
+        unpriced = [p["description"] or p["item_name"] or "Part" for p in sm["parts"] if not p["unit_price"]]
+        if unpriced:  # S20: no part goes on the invoice at $0 by accident
+            raise PostingError("Price these parts first, then invoice: " + ", ".join(unpriced) + ".")
     if j["billing"] == "time" and sm["minutes"] and not sm["rate"]:
         raise PostingError("Set your hourly labour rate in Bookings setup first, then invoice this job.")
     if not lines or not sm["total"]:
@@ -676,6 +696,8 @@ def add_part(bid):
     qty = opt_float(f.get("qty"), 1)
     if qty <= 0:
         raise PostingError("Enter how many were used.")
+    if (f.get("unit_price") or "").strip() and to_cents(f.get("unit_price")) < 0:
+        raise PostingError("A part's price can't be below $0.")  # S20
     # prices on a job are GST-inclusive, like the labour rate and the till (F9): a stock item's price is its sell
     # price (ex GST) plus its GST
     price = to_cents(f.get("unit_price")) if (f.get("unit_price") or "").strip() else \
@@ -711,6 +733,8 @@ def part_price(jid):
         raise PostingError("This job is already invoiced.")
     for k, v in request.form.items():
         if k.startswith("price_") and v.strip():
+            if to_cents(v) < 0:
+                raise PostingError("A part's price can't be below $0.")  # S20
             db.execute("UPDATE booking_materials SET unit_price=? WHERE id=? AND job_id=?",
                        (to_cents(v), opt_int(k[6:]), jid))
     flash("Prices saved.", "ok")

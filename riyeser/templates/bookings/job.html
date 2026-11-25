@@ -4,7 +4,7 @@
 <div class="head"><div><h1>{{ ('Job ' ~ job_no(j.id)) if j else 'New job' }}</h1>
 <p class="sub">{% if j %}{{ j.customer or j.title or '' }} · <span class="bk-st st-{{ j.status }}">{{ (jstatuses|selectattr(0, 'equalto', j.status)|first)[1] }}</span>{% if j.next_action %} · {{ j.next_action }}{% endif %}{% else %}Log a job now and book its visits when you have a time.{% endif %}</p></div>
 <div class="actions">{% include "bookings/_nav.html" %}
-{% if j and can('bookings', 2) and not locked %}<a class="btn" href="{{ url_for('bookings.edit', job=j.id) }}">+ Book a visit</a>{% endif %}
+{% if j and can('bookings', 2) and not locked %}<a class="btn" href="{{ url_for('bookings.edit', job=j.id) }}">+ Book a visit</a>{% elif j and can('bookings', 2) %}<a class="btn" href="{{ url_for('bookings.edit', job=j.id) }}" title="This job is invoiced: the visit goes on a new follow-up job">+ Book a follow-up job</a>{% endif %}
 {% if inv %}<a class="btn pri" href="{{ url_for('documents.view', doc_id=inv.id) }}">Open invoice {{ inv.number }}</a>
 {% elif j and j.contact_id and can('sales', 2) %}<form method="post" action="{{ url_for('bookings.invoice_job', jid=j.id) }}"><button class="btn pri">Invoice this job</button></form>{% endif %}</div></div>
 
