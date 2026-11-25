@@ -1014,6 +1014,7 @@
     const first = S.chans.find(isGeneral) || S.chans[0];
     api.live(S.team.id, onLive);
     S.rxOff = false; S.ch = null;
+    Hist.start(S.home ? 'home' : narrow() && S.pane === 'main' ? 'main' : 'list');
     if (S.home) {   // the Riyeser home shows now; the chat loads behind it (Open waits for it)
       renderHome();
       S.wsReady = Promise.all([loadWorkspace(), openChannel(first && first.id, false, false)]);
@@ -1047,6 +1048,7 @@
     S.msgs = msgs;
     if (toChat) { S.inChat = true; S.home = false; S.nav = 'chat'; S.listTab = 'chats'; S.pane = 'main'; S.navOpen = false; }
     if (!draw) { /* drawn by whoever asked */ } else if (S.home) renderHome(); else render();
+    if (toChat && narrow()) Hist.move('main');   // S49
     if (S.ch) { await api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); }
   }
 
@@ -1169,7 +1171,7 @@
         <p class="muted small hfoot">Windows 10 and 11. <a href="/help.html">Help Centre</a> · <a href="/pricing.html">Pricing</a></p>
       </main>`;
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
-    on('#hchat', async () => { if (S.wsReady) await S.wsReady.catch(() => {}); S.home = false; render(); });
+    on('#hchat', async () => { if (S.wsReady) await S.wsReady.catch(() => {}); S.home = false; render(); Hist.move(narrow() ? S.pane || 'list' : 'list'); });
     on('#hphones', () => phonesPage('home')); on('#hmyphone', () => myPhonePage('home'));
     on('#hout', async () => { await api.signOut(); S.team = null; gate(); });
     on('#hco', () => companyInfo(false));
@@ -1190,7 +1192,7 @@
   function helpLink() {
     const h = decodeURIComponent(location.hash.replace(/^#/, '')).toUpperCase();
     const t = /^T-\d+$/.test(h) && (S.tickets || []).find((x) => x.ref === h);
-    if (t || h === 'REPORT') { S.helpShown = true; params.delete('help'); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '')); return t ? openTicket(t.id) : reportIssue(); }
+    if (t || h === 'REPORT') { S.helpShown = true; params.delete('help'); history.replaceState(history.state, '', location.pathname + (params.toString() ? '?' + params : '')); return t ? openTicket(t.id) : reportIssue(); }
     return getHelp();
   }
 
@@ -1218,7 +1220,7 @@
     const users = Math.max(1, Math.min(500, parseInt(params.get('users') || '', 10) || 0)) || null;
     return { add, users, period: params.get('period') === 'yearly' ? 'yearly' : 'monthly', buy: params.has('buy') };
   };
-  const dropParams = (...keys) => { keys.forEach((k) => params.delete(k)); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash); };
+  const dropParams = (...keys) => { keys.forEach((k) => params.delete(k)); history.replaceState(history.state, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash); };
 
   // What the home shows under Billing (null: this database hasn't had the payments part of team-chat.sql yet).
   async function loadBilling() {
@@ -1522,7 +1524,7 @@
   // pre: { topic, subject, message } to fill in the form (e.g. "Report a phone issue").
   function getHelp(ws = S.team ? S.team.id : null, pre = null) {
     S.helpShown = true;
-    if (params.has('help')) { params.delete('help'); history.replaceState(null, '', location.pathname + (params.toString() ? '?' + params : '')); }
+    if (params.has('help')) { params.delete('help'); history.replaceState(history.state, '', location.pathname + (params.toString() ? '?' + params : '')); }
     if (S.tickets === null) return helpOff();
     modal(`<h3>💬 Get help</h3><p>Tell us what's going on and we'll get back to you by email and here on your Riyeser home page.</p>
       <form id="ghf"><label class="f"><span>What's it about?</span><select name="topic">${TOPICS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
@@ -1996,7 +1998,36 @@
     sh.classList.toggle('inchat', S.pane === 'main'); sh.classList.toggle('inright', S.pane === 'right'); sh.classList.toggle('navopen', !!S.navOpen);
     sh.classList.toggle('rightshut', !!S.rightShut); sh.classList.toggle('navmini', !!S.navMini);
   }
-  function go(pane) { S.pane = pane; S.navOpen = false; paneClasses(); }
+  function go(pane) { S.pane = pane; S.navOpen = false; paneClasses(); if (narrow()) Hist.move(pane); }
+
+  // S49: the phone's Back button moves between Link's own screens (conversation -> chat list -> Riyeser home) instead of
+  // leaving riyeser.com/link. Each step deeper adds a browser history entry; Back (or an in-page back button) goes
+  // back through them. On a wide screen only home -> chat counts (the list and conversation are side by side).
+  const Hist = (() => {
+    const DEPTH = { home: 0, list: 1, main: 2, right: 3 };
+    let stack = []; let applying = false;
+    const top = () => stack[stack.length - 1];
+    function start(key) { stack = [key]; history.replaceState({ lk: key, i: 0 }, ''); }
+    function move(key) {
+      if (applying || !stack.length || key === top()) return;
+      if (DEPTH[key] > DEPTH[top()]) { stack.push(key); history.pushState({ lk: key, i: stack.length - 1 }, ''); return; }
+      const j = stack.lastIndexOf(key);
+      if (j >= 0) { applying = true; stack.length = j + 1; history.go(j - (history.state && Number.isInteger(history.state.i) ? history.state.i : j + 1)); setTimeout(() => { applying = false; }, 400); }
+      else { stack[stack.length - 1] = key; history.replaceState({ lk: key, i: stack.length - 1 }, ''); }
+    }
+    function show(key) {
+      if (key === 'home') { if (!S.home) { S.home = true; S.view = null; renderHome(); } return; }
+      if (S.home || S.view || !document.getElementById('lkshell')) { S.home = false; render(); }
+      if (narrow() && S.pane !== key) { S.pane = key; S.navOpen = false; paneClasses(); }
+    }
+    addEventListener('popstate', (e) => {
+      const st = e.state; if (!st || !st.lk || !stack.length) return;
+      stack.length = Math.min(stack.length, st.i + 1); while (stack.length < st.i + 1) stack.push(st.lk); stack[st.i] = st.lk;
+      document.querySelectorAll('.modal').forEach((m) => m.remove());
+      const was = applying; applying = true; try { show(st.lk); } finally { applying = was; }
+    });
+    return { start, move, get top() { return top(); } };
+  })();
   // Back-compat: the old name for "refresh the side panels".
   function renderSide() { if (!document.getElementById('lkshell')) return; renderTop(); renderNav(); renderList(); renderRight(); chatTitle(); }
 
@@ -2102,7 +2133,7 @@
       <button class="mi" id="out">${ic('out')}<span>Sign out</span></button>`, (d, close) => {
       const on = (id, fn) => { const b = d.querySelector(id); if (b) b.onclick = () => { close(); fn(); }; };
       on('#um-prof', () => editMyDetails(me)); on('#um-theme', appearance); on('#um-phone', () => myPhonePage('chat')); on('#um-sec', security); on('#um-pw', changePassword);
-      on('#um-co', () => companyInfo(false)); on('#tohome', () => { S.home = true; renderHome(); });
+      on('#um-co', () => companyInfo(false)); on('#tohome', () => { S.home = true; renderHome(); Hist.move('home'); });
       on('#out', async () => { await api.signOut(); S.team = null; gate(); });
     }, 'usermenu');
   }

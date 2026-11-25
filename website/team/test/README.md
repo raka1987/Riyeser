@@ -105,5 +105,6 @@
   {business}", their old messages show "{name} (left)", and an empty name on the join form says what's missing (S59).
   `rules-test.sql` covers the database side: the owners/admins email (once), `join_request_count`, `invite_info`, an
   extension for people who join without a branch, `former_members` (members only; the removed person reads nothing).
-- `chat-test.js`: chat details in the demo: a counter near the 4,000-character limit and longer text sent as a .txt file (S9);
+- `chat-test.js`: chat details in the demo: a counter near the 4,000-character limit and longer text sent as a .txt file (S9); on
+  a phone, Back from a conversation shows the chat list and Back again the Riyeser home (S49, pretend Supabase);
   more checks are added to it for the round-20 fix list (see its header).
