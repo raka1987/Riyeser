@@ -91,6 +91,8 @@ function registerPdfIpc({ handle, store, openEditor, getTheme = () => 'system', 
     const mime = /\.png$/i.test(f) ? 'image/png' : 'image/jpeg';
     return `data:${mime};base64,${fs.readFileSync(f).toString('base64')}`;
   });
+  // S46: a font from this PC for text the standard PDF fonts can't write ('latin', 'devanagari' or 'cjk'); null if none
+  handle('pdf:font', (script) => { const f = require('./core/pdf-fonts').findFont(String(script || '')); return f ? new Uint8Array(f.bytes) : null; });
   handle('pdf:read', (file) => {
     store.update('recentPdfs', [], (r) => [file, ...r.filter((x) => x !== file)].slice(0, 12));
     return new Uint8Array(fs.readFileSync(file));

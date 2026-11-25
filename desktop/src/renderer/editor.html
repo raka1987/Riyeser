@@ -13,6 +13,7 @@
       <button data-cmd="open" title="Open a PDF (Ctrl+O)">Open</button>
       <button class="primary" data-cmd="save" title="Save (Ctrl+S)">Save</button>
       <button data-cmd="saveas">Save as…</button>
+      <button data-cmd="protect" title="Protect the saved PDF with a password">🔒 Password…</button>
       <span class="sep"></span>
       <button data-cmd="undo" title="Undo (Ctrl+Z)">↶</button>
       <button data-cmd="redo" title="Redo (Ctrl+Y)">↷</button>
@@ -126,7 +127,9 @@
   </div>
   <div id="dlg" class="modal" hidden><div class="modalbox" id="dlgbox"></div></div>
   <div id="toast" class="toast"></div>
+  <script src="vendor/regenerator-runtime.js"></script>
   <script src="vendor/pdf-lib.min.js"></script>
+  <script src="vendor/fontkit.umd.min.js"></script>
   <script type="module" src="editor.js"></script>
 </body>
 </html>

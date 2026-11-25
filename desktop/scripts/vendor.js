@@ -9,5 +9,9 @@ copy('pdfjs-dist/build/pdf.min.mjs', 'pdf.min.mjs');
 copy('pdfjs-dist/build/pdf.worker.min.mjs', 'pdf.worker.min.mjs');
 copy('pdfjs-dist/cmaps', 'cmaps');
 copy('pdfjs-dist/standard_fonts', 'standard_fonts');
-copy('pdf-lib/dist/pdf-lib.min.js', 'pdf-lib.min.js');
+// The editor uses the @cantoo build of pdf-lib (opens and saves password-protected PDFs, S41) and fontkit (text in any
+// language, S46; fontkit's Indic shaping needs regenerator-runtime). Riyeser's own main process keeps pdf-lib.
+copy('@cantoo/pdf-lib/dist/pdf-lib.min.js', 'pdf-lib.min.js');
+copy('@pdf-lib/fontkit/dist/fontkit.umd.min.js', 'fontkit.umd.min.js');
+copy('regenerator-runtime/runtime.js', 'regenerator-runtime.js');
 console.log('PDF libraries copied to', path.relative(root, out));

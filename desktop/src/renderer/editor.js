@@ -1,6 +1,7 @@
 // PDF viewer + editor. pdf.js draws the pages; pdf-lib writes the changes into the PDF when you save.
 // Everything you add is kept as an editable object (text, boxes, signatures...) until you save.
 import * as pdfjsLib from './vendor/pdf.min.mjs';
+import * as T from './pdf-tools.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 const { PDFDocument, StandardFonts, rgb, degrees, BlendMode, LineCapStyle, pushGraphicsState, popGraphicsState, beginText, endText, setFontAndSize, setTextMatrix, showText, setTextRenderingMode, TextRenderingMode } = window.PDFLib;
@@ -15,6 +16,13 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const PX_PER_PT = 96 / 72;
+// The PDF library is the @cantoo build of pdf-lib, which opens and saves password-protected PDFs (S41).
+// A PDF opened with a password is read with it, and saved protected with the same password.
+const loadLib = (bytes) => (st.password != null || st.encrypted
+  ? PDFDocument.load(bytes, { password: st.password || '' })
+  : PDFDocument.load(bytes, { ignoreEncryption: true }));
+const pdfjsOpts = (bytes) => ({ data: bytes.slice(), cMapUrl: './vendor/cmaps/', cMapPacked: true, standardFontDataUrl: './vendor/standard_fonts/', isEvalSupported: false,
+  ...(st.password != null ? { password: st.password } : {}) });
 
 // ---------------- state ----------------
 const st = {
@@ -37,6 +45,8 @@ const st = {
   formValues: {},
   flatten: false,
   encrypted: false,
+  password: null,      // the password this PDF was opened with (S41)
+  protect: null,       // { password } to protect the file with when it's next saved (S41)
   pageNumbers: null,   // { format, position } when page numbers are switched on
 };
 let renderToken = 0;
@@ -65,10 +75,7 @@ function redo() { if (!st.redo.length) return; st.undo.push(snapshot()); restore
 
 // ---------------- loading ----------------
 async function loadBytes(bytes, { keepState = false } = {}) {
-  const task = pdfjsLib.getDocument({
-    data: bytes.slice(), cMapUrl: './vendor/cmaps/', cMapPacked: true,
-    standardFontDataUrl: './vendor/standard_fonts/', isEvalSupported: false,
-  });
+  const task = pdfjsLib.getDocument(pdfjsOpts(bytes));
   const doc = await task.promise;
   if (st.doc) st.doc.destroy();
   st.doc = doc;
@@ -98,15 +105,37 @@ async function openFile(file) {
     $('#docname').title = file;
     // A PDF the engine gets stuck on must not leave a grey window: give up after a while and use the backup viewer.
     const limit = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} took too long`)), ms))]);
-    st.firstShown = false; st.form = []; st.formValues = {}; st.encrypted = false; renderForm();
-    await limit(loadBytes(bytes), 20000, 'Opening the pages');
+    st.firstShown = false; st.form = []; st.formValues = {}; st.encrypted = false; st.password = null; st.protect = null; renderForm();
+    // S41: a password-protected PDF asks for its password (and again if it's wrong)
+    for (let wrong = false; ; wrong = true) {
+      try { await limit(loadBytes(bytes), 20000, 'Opening the pages'); break; } catch (e) {
+        if (T.openErrorMessage(e) !== 'password') throw e;
+        const pw = await askPassword(file.split(/[\\/]/).pop(), wrong && st.password != null);
+        if (pw == null) { st.password = null; $('#empty').hidden = false; toast('This PDF needs its password to open.'); return; }
+        st.password = pw; st.encrypted = true;
+      }
+    }
     setDirty(false);
     watchFirstPage(file);
     requestAnimationFrame(fitWidth);
   } catch (e) {
+    // M16: a damaged or incomplete file says so in plain words
+    const plain = T.openErrorMessage(e);
+    if (plain && plain !== 'password') { toast(plain); return; }
     toast(`This PDF couldn't be drawn here (${e.message}), so it's open in the basic viewer.`);
     bridge.call('pdf:basicView', file).catch(() => {});
   }
+}
+/** S41: ask for a PDF's password. null when cancelled. */
+async function askPassword(name, wrong) {
+  const r = await dialog(`<h2 style="margin-top:0">🔒 This PDF is password-protected</h2>
+    <p class="muted">${wrong ? '<b>That password isn\'t right.</b> ' : ''}Type the password for <b>${esc(name)}</b> to open it.</p>
+    <form id="pwform" class="dlgrow"><input id="pwin" type="password" style="flex:1" autocomplete="off"><button class="primary" data-dlg="ok">Open</button></form>
+    <div class="row"><span class="spacer"></span><button data-dlg="cancel">Cancel</button></div>`, (done) => {
+    const inp = $('#pwin'); inp.focus();
+    $('#pwform').onsubmit = (e) => { e.preventDefault(); done('ok'); };
+  });
+  return r === 'ok' ? $('#pwin').value : null;
 }
 
 /** Once the first page is showing: fillable fields, password protection and scanned pages (none of these hold up opening). */
@@ -115,7 +144,7 @@ async function afterFirstPage() {
   try {
     const [fields, meta] = await Promise.all([doc.getFieldObjects().catch(() => null), doc.getMetadata().catch(() => null)]);
     if (doc !== st.doc) return;
-    if (meta?.info?.EncryptFilterName) { st.encrypted = true; toast('This PDF is password-protected. You can view it, but saving changes may not work.'); }
+    if (meta?.info?.EncryptFilterName) { st.encrypted = true; if (st.password == null) st.password = ''; toast('This PDF is protected. When you save, it stays protected the same way.'); }
     if (fields && Object.keys(fields).length) await readForm();
   } catch { /* not a form */ }
   checkIfScanned().catch(() => {});
@@ -554,7 +583,8 @@ $('#pages').addEventListener('pointerdown', (e) => {
       if (layer) layer.lines = layer.lines.filter((l) => !(l.text === t.ocrLine.text && Math.abs(l.ax - t.ocrLine.ax) < 0.5 && Math.abs(l.ay - t.ocrLine.ay) < 0.5));
     }
     const family = /serif/i.test(t.family) && !/sans/i.test(t.family) ? 'TimesRoman' : /mono/i.test(t.family) ? 'Courier' : 'Helvetica';
-    addAnn(src, { id: newId(), type: 'whiteout', ax: t.x - 1, ay: t.y + 0.95 * t.h + 1, w: t.w + 2, h: 1.2 * t.h + 2, rot: 0 });
+    // replaces: on save, the old words under it are taken out of the page itself (S42), not just covered
+    addAnn(src, { id: newId(), type: 'whiteout', ax: t.x - 1, ay: t.y + 0.95 * t.h + 1, w: t.w + 2, h: 1.2 * t.h + 2, rot: 0, replaces: t.ocrLine ? null : t.str });
     const size = Math.round(t.h * 10) / 10;
     const a = addAnn(src, { id: newId(), type: 'text', text: t.str, size, font: family, bold: false, color: '#000000', ax: t.x, ay: t.y + 0.93 * size, rot: 0 });
     st.selected = a.id; drawOverlay(src);
@@ -658,7 +688,7 @@ window.addEventListener('pointerup', () => {
     if (d.x1 === undefined || Math.abs(d.x1 - d.x0) < 4 || Math.abs(d.y1 - d.y0) < 4) return;
     pushUndo();
     const color = st.tool === 'highlight' ? '#facc15' : st.tool === 'redact' ? '#000000' : $('#color').value;
-    if (st.tool === 'redact') toast('Blacked out. When you save, whatever is underneath is permanently removed from the file.');
+    if (st.tool === 'redact') toast('Blacked out. When you save, whatever is underneath is permanently removed: that page becomes a picture (its other words can\'t be searched or copied, and the file gets bigger). Use Recognise text afterwards to make it searchable again.');
     addAnn(d.src, { id: newId(), type: st.tool, color: st.tool === 'highlight' && $('#color').value !== '#1d4ed8' ? $('#color').value : color, ...boxFromView(d.src, Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0)) });
     drawOverlay(d.src);
   }
@@ -677,7 +707,7 @@ function setTool(t) {
   $$('[data-tool]').forEach((b) => b.classList.toggle('active', b.dataset.tool === t));
   if (t !== 'select') select(null);
   Object.keys(st.vps).forEach((s) => drawOverlay(+s));
-  if (t === 'edittext') toast('Click any text to change it. The old words are covered over (not removed from the file), so don\'t use this to hide private information.');
+  if (t === 'edittext') toast('Click any text to change it. When you save, the old words are taken out of the file too. To hide private information, use Redact.');
 }
 $('#tools').addEventListener('click', (e) => { const b = e.target.closest('[data-tool]'); if (b) setTool(b.dataset.tool); });
 
@@ -723,7 +753,7 @@ async function insertPdf() {
   const file = await bridge.call('pdf:openDialog', false);
   if (!file) return;
   const other = await bridge.call('pdf:read', file);
-  const base = await PDFDocument.load(st.bytes, { ignoreEncryption: true });
+  const base = await loadLib(st.bytes);
   const add = await PDFDocument.load(other, { ignoreEncryption: true });
   const start = base.getPageCount();
   const copied = await base.copyPages(add, add.getPageIndices());
@@ -743,7 +773,7 @@ async function insertPdf() {
 async function readForm() {
   st.form = []; st.formValues = {}; st.encrypted = false;
   try {
-    const doc = await PDFDocument.load(st.bytes, { ignoreEncryption: true });
+    const doc = await loadLib(st.bytes);
     st.encrypted = doc.isEncrypted;
     for (const f of doc.getForm().getFields()) {
       const name = f.getName();
@@ -780,23 +810,26 @@ $('#formfields').addEventListener('input', (e) => {
   clearTimeout(formTimer);
   formTimer = setTimeout(async () => { const keep = st.current; await loadBytes(await formFilled(st.bytes), { keepState: true }); scrollToPage(keep); }, 700);
 });
-function fillFormInto(doc) {
-  const form = doc.getForm();
-  for (const f of Object.values(st.formValues)) {
-    try {
-      if (f.kind === 'text') form.getTextField(f.name).setText(f.value);
-      else if (f.kind === 'check') f.value ? form.getCheckBox(f.name).check() : form.getCheckBox(f.name).uncheck();
-      else if (f.kind === 'radio') { if (f.value) form.getRadioGroup(f.name).select(f.value); }
-      else if (f.kind === 'select') { const fld = form.getField(f.name); if (f.value) fld.select(f.value); }
-    } catch (e) { console.warn('form field', f.name, e); }
-  }
-  return form;
+// S46: fonts for text in any language come from the PC (core/pdf-fonts.js), only when the standard ones can't write it
+const fontChooser = (doc) => T.fontChooser(window.PDFLib, doc, window.fontkit, (script) => bridge.call('pdf:font', script));
+function fillFormInto(doc, fontFor = fontChooser(doc)) {
+  return T.fillForm(window.PDFLib, doc, Object.values(st.formValues), fontFor);
 }
 async function formFilled(bytes) {
   if (!Object.keys(st.formValues).length) return bytes;
-  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
-  fillFormInto(doc);
+  const doc = await loadLib(bytes);
+  await fillFormInto(doc);
   return doc.save();
+}
+
+/** A page's own words with where they are (for Find, Edit text and Recognise text). */
+async function readPageText(src) {
+  const page = await st.doc.getPage(src + 1);
+  const tc = await page.getTextContent();
+  return tc.items.filter((it) => it.str && it.str.trim()).map((it) => {
+    const [a, b, c, d, e, f] = it.transform;
+    return { str: it.str, x: e, y: f, w: it.width, h: Math.hypot(c, d) || 10, upright: Math.abs(b) < 0.01 && Math.abs(c) < 0.01 && a > 0, family: tc.styles[it.fontName]?.fontFamily || 'sans-serif' };
+  });
 }
 
 // ---------------- find ----------------
@@ -810,14 +843,7 @@ async function runFind() {
   const hits = [];
   for (let i = 0; i < st.order.length; i++) {
     const src = st.order[i].src;
-    if (!st.text[src]) {
-      const page = await st.doc.getPage(src + 1);
-      const tc = await page.getTextContent();
-      st.text[src] = tc.items.filter((it) => it.str && it.str.trim()).map((it) => {
-        const [a, b, c, d, e, f] = it.transform;
-        return { str: it.str, x: e, y: f, w: it.width, h: Math.hypot(c, d) || 10, upright: Math.abs(b) < 0.01 && Math.abs(c) < 0.01 && a > 0, family: tc.styles[it.fontName]?.fontFamily || 'sans-serif' };
-      });
-    }
+    if (!st.text[src]) st.text[src] = await readPageText(src);
     st.text[src].forEach((t, ti) => { const at = t.str.toLowerCase().indexOf(q); if (at >= 0) hits.push({ i, src, ti, snip: t.str }); });
   }
   out.innerHTML = hits.length ? `<p class="muted">${hits.length} match(es)</p>${hits.slice(0, 200).map((h, k) => `<div data-hit="${k}"><b>p.${h.i + 1}</b> ${esc(h.snip.slice(0, 80))}</div>`).join('')}` : '<p class="muted">No matches.</p>';
@@ -943,13 +969,25 @@ function hexToRgb(hex) {
 }
 
 async function buildPdf(orderList = st.order) {
-  const doc = await PDFDocument.load(st.bytes, { ignoreEncryption: true });
+  const doc = await loadLib(st.bytes);
   const fonts = {};
+  const stdName = (name, bold) => ({ Helvetica: StandardFonts.Helvetica, HelveticaBold: StandardFonts.HelveticaBold, TimesRoman: StandardFonts.TimesRoman, TimesRomanBold: StandardFonts.TimesRomanBold, Courier: StandardFonts.Courier, CourierBold: StandardFonts.CourierBold }[`${name}${bold ? 'Bold' : ''}`] || StandardFonts.Helvetica);
   const font = async (name, bold) => {
     const key = `${name}${bold ? 'Bold' : ''}`;
-    const std = { Helvetica: StandardFonts.Helvetica, HelveticaBold: StandardFonts.HelveticaBold, TimesRoman: StandardFonts.TimesRoman, TimesRomanBold: StandardFonts.TimesRomanBold, Courier: StandardFonts.Courier, CourierBold: StandardFonts.CourierBold }[key] || StandardFonts.Helvetica;
-    return (fonts[key] = fonts[key] || await doc.embedFont(std));
+    return (fonts[key] = fonts[key] || await doc.embedFont(stdName(name, bold)));
   };
+  // S46: text in any language: a font from the PC when the standard one can't write it
+  const fontFor = fontChooser(doc);
+  const missing = new Set();
+  const textFont = async (text, name, bold) => { const r = await fontFor(text, stdName(name, bold)); if (r.missing) missing.add(text); return r.font; };
+  // S42: words replaced with "Edit text" are taken out of the page itself first (before anything new is drawn on it)
+  const replaced = {};
+  for (const [srcStr, list] of Object.entries(st.anns)) {
+    const boxes = list.filter((a) => a.type === 'whiteout' && a.replaces).map((a) => ({ x0: a.ax, y0: a.ay - a.h, x1: a.ax + a.w, y1: a.ay, old: a.replaces }));
+    if (!boxes.length || !doc.getPage(+srcStr)) continue;
+    try { T.removeTextInBoxes(window.PDFLib, doc, +srcStr, boxes); } catch (e) { console.warn('edit text', e); }
+    replaced[+srcStr] = boxes;
+  }
   const images = {};
   const pages = doc.getPages();
 
@@ -978,7 +1016,7 @@ async function buildPdf(orderList = st.order) {
         continue;
       }
       if (a.type === 'watermark') {
-        const f = await font('Helvetica', true);
+        const f = await textFont(a.text, 'Helvetica', true);
         const { width: pw, height: ph } = page.getSize();
         // as big as fits diagonally with a margin, measured with the real font
         const size = Math.min(120, (Math.hypot(pw, ph) * 0.62) / Math.max(1, f.widthOfTextAtSize(a.text, 1)));
@@ -1009,8 +1047,8 @@ async function buildPdf(orderList = st.order) {
       const P = (u, v) => ({ x: a.ax + right[0] * u + down[0] * v, y: a.ay + right[1] * u + down[1] * v });
       const rotate = degrees(a.rot);
       if (a.type === 'text') {
-        const f = await font(a.font, a.bold);
-        const safe = (line) => [...line].map((ch) => { try { f.encodeText(ch); return ch; } catch { return '?'; } }).join('');
+        const f = await textFont(a.text, a.font, a.bold);
+        const safe = (line) => T.safeText(f, line);
         a.text.split('\n').forEach((line, i) => {
           if (!line) return;
           const o = P(0, a.size * (0.93 + 1.2 * i));
@@ -1042,14 +1080,14 @@ async function buildPdf(orderList = st.order) {
       } else if (a.type === 'stamp') {
         const o = P(0, a.h);
         page.drawRectangle({ x: o.x, y: o.y, width: a.w, height: a.h, rotate, borderColor: hexToRgb(a.color), borderWidth: 2.5, color: rgb(1, 1, 1), opacity: 0.35, borderOpacity: 1 });
-        const f = await font('Helvetica', true);
         const main = a.text.toUpperCase();
+        const f = await textFont(main, 'Helvetica', true);
         const size = Math.min(a.h * 0.42, (a.w * 0.86) / Math.max(1, f.widthOfTextAtSize(main, 1)));
         const mw = f.widthOfTextAtSize(main, size);
         const mo = P((a.w - mw) / 2, a.sub ? a.h * 0.55 : a.h * 0.64);
         page.drawText(main, { x: mo.x, y: mo.y, size, font: f, color: hexToRgb(a.color), rotate });
         if (a.sub) {
-          const f2 = await font('Helvetica', false);
+          const f2 = await textFont(a.sub, 'Helvetica', false);
           const s2 = Math.min(a.h * 0.2, (a.w * 0.86) / Math.max(1, f2.widthOfTextAtSize(a.sub, 1)));
           const so = P((a.w - f2.widthOfTextAtSize(a.sub, s2)) / 2, a.h * 0.85);
           page.drawText(a.sub, { x: so.x, y: so.y, size: s2, font: f2, color: hexToRgb(a.color), rotate });
@@ -1061,18 +1099,14 @@ async function buildPdf(orderList = st.order) {
     }
   }
 
-  const form = fillFormInto(doc);
+  const form = await fillFormInto(doc, fontFor);
   if (st.flatten) { try { form.flatten(); } catch (e) { console.warn('flatten', e); } }
 
   // Rebuild the page list in the new order, applying rotations and dropping deleted pages.
   const keep = new Set(orderList.map((e) => e.src));
   pages.forEach((pg, i) => { if (!keep.has(i)) dropPageWidgets(doc, pg); });
-  for (let i = doc.getPageCount() - 1; i >= 0; i--) doc.removePage(i);
-  for (const entry of orderList) {
-    const pg = pages[entry.src];
-    doc.addPage(pg);
-    pg.setRotation(degrees((st.baseRot[entry.src] + entry.rot) % 360));
-  }
+  T.setPageOrder(window.PDFLib, doc, orderList.map((entry) => pages[entry.src]));
+  for (const entry of orderList) pages[entry.src].setRotation(degrees((st.baseRot[entry.src] + entry.rot) % 360));
   if (st.pageNumbers) {
     const f = await font('Helvetica', false);
     doc.getPages().forEach((pg, i) => {
@@ -1083,10 +1117,28 @@ async function buildPdf(orderList = st.order) {
     });
   }
   removeUnused(doc); // deleted pages and replaced content are really gone from the file
-  const bytes = await doc.save();
-  // Redaction: pages with blacked-out areas are turned into pictures, so the hidden text is really gone.
-  const redacted = orderList.map((e, i) => ((st.anns[e.src] || []).some((a) => a.type === 'redact') ? i : -1)).filter((i) => i >= 0);
-  return redacted.length ? flattenPages(bytes, redacted) : bytes;
+  // S41: a PDF opened with its password is saved with the same password; "Password…" sets a new one
+  const protectWith = st.protect ? st.protect.password : (st.password || null);
+  if (protectWith) doc.encrypt({ userPassword: protectWith, ownerPassword: protectWith, permissions: { printing: 'highResolution', copying: true, modifying: true, annotating: true, fillingForms: true } });
+  let bytes = await doc.save();
+  if (protectWith) { st.password = protectWith; st.encrypted = true; }
+  if (missing.size) toast(`Some letters couldn't be saved (no font on this PC has them): ${[...missing].join(', ').slice(0, 80)}`);
+  // S42: check the old words really are gone from each edited page; a page where they aren't is made a picture, like Redact
+  const flatten = new Set(orderList.map((e, i) => ((st.anns[e.src] || []).some((a) => a.type === 'redact') ? i : -1)).filter((i) => i >= 0));
+  const edited = orderList.map((e, i) => (replaced[e.src] ? i : -1)).filter((i) => i >= 0 && !flatten.has(i));
+  if (edited.length) {
+    const check = await pdfjsLib.getDocument(pdfjsOpts(bytes)).promise;
+    for (const i of edited) {
+      const items = (await (await check.getPage(i + 1)).getTextContent()).items;
+      const added = new Set((st.anns[orderList[i].src] || []).filter((a) => a.type === 'text').flatMap((a) => a.text.split('\n').map((l) => l.trim())));
+      const still = replaced[orderList[i].src].some((b) => items.some((it) => it.str && it.str.trim() && !added.has(it.str.trim()) && b.old.includes(it.str.trim()) && it.transform[4] >= Math.min(b.x0, b.x1) - 1 && it.transform[4] <= Math.max(b.x0, b.x1) && it.transform[5] >= Math.min(b.y0, b.y1) - 1 && it.transform[5] <= Math.max(b.y0, b.y1)));
+      if (still) flatten.add(i);
+    }
+    check.destroy();
+  }
+  // Redaction (and edited text that couldn't be taken out): those pages are turned into pictures, so the hidden text is really gone.
+  st.lastFlattened = [...flatten];
+  return flatten.size ? flattenPages(bytes, [...flatten].sort((x, y) => x - y)) : bytes;
 }
 
 /**
@@ -1134,8 +1186,8 @@ function dropPageWidgets(doc, page) {
 
 /** Replace the given pages with pictures of themselves (removes any text/objects underneath). */
 async function flattenPages(bytes, pageIndexes, { dpi = 200, quality = 0.9 } = {}) {
-  const src = await pdfjsLib.getDocument({ data: bytes.slice(), cMapUrl: './vendor/cmaps/', cMapPacked: true, standardFontDataUrl: './vendor/standard_fonts/', isEvalSupported: false }).promise;
-  const out = await PDFDocument.load(bytes);
+  const src = await pdfjsLib.getDocument(pdfjsOpts(bytes)).promise;
+  const out = await loadLib(bytes);
   for (const i of pageIndexes) {
     const page = await src.getPage(i + 1);
     const vp = page.getViewport({ scale: dpi / 72, rotation: 0 });
@@ -1171,7 +1223,13 @@ async function save(saveAs = false) {
     await readForm();
     await loadBytes(out);
     setDirty(false);
+    st.protect = null;
     toast(`Saved to ${target}. (The previous version was backed up.)`);
+    // M15: pages made into pictures (Redact) can't be searched any more: offer Recognise text for them
+    if ((st.lastFlattened || []).length) {
+      $('#scanbanner').innerHTML = `📷 ${st.lastFlattened.length === 1 ? 'The page you redacted is' : `The ${st.lastFlattened.length} pages you redacted are`} now a picture, so its words can't be searched or copied. <button class="primary" data-cmd="ocr">Recognise text</button>`;
+      $('#scanbanner').hidden = false;
+    }
   } catch (e) {
     console.error(e);
     toast(`Couldn't save: ${e.message}`);
@@ -1190,6 +1248,12 @@ async function extractPages() {
 let ocrBusy = false;
 async function recognisePages() {
   if (!st.doc || ocrBusy) return;
+  // S47: every page's own text is read first (not only the pages drawn on screen), so pages that already have words
+  // aren't recognised again (that doubled every word in searches and copies)
+  for (const o of st.order) {
+    if (st.text[o.src] || (st.anns[o.src] || []).some((a) => a.type === 'ocr')) continue;
+    st.text[o.src] = (await T.pageHasText(await st.doc.getPage(o.src + 1))) ? await readPageText(o.src) : [];
+  }
   const todo = st.order.map((o, i) => ({ ...o, i })).filter((o) => !(st.text[o.src] || []).length || (st.anns[o.src] || []).some((a) => a.type === 'ocr'));
   if (!todo.length) { toast('This PDF already contains text — nothing to recognise.'); return; }
   ocrBusy = true;
@@ -1319,7 +1383,7 @@ const tools = {
     if (!st.doc) return;
     const cur = await st.doc.getPage(st.order[st.current].src + 1);
     const [x0, y0, x1, y1] = cur.view;
-    const base = await PDFDocument.load(st.bytes, { ignoreEncryption: true });
+    const base = await loadLib(st.bytes);
     const start = base.getPageCount();
     base.addPage([x1 - x0, y1 - y0]);
     pushUndo();
@@ -1418,6 +1482,21 @@ const commands = {
   sigplace: placeSignature,
   sigupload: async () => { const d = await bridge.call('image:openDialog'); if (d) { sigUpload = await knockOutWhite(d); $('#sigimg').src = sigUpload; } },
   ocr: recognisePages,
+  // S41: "Protect with a password" (payslips, invoices): the file needs the password to open once it's saved
+  async protect() {
+    if (!st.doc) return;
+    const r = await dialog(`<h2 style="margin-top:0">🔒 Protect with a password</h2>
+      <p class="muted">Anyone opening the saved PDF will need this password. Keep it safe: it can't be recovered.</p>
+      <div class="dlgrow"><label>Password</label><input id="pw1" type="password" style="flex:1" autocomplete="new-password"></div>
+      <div class="dlgrow"><label>Again</label><input id="pw2" type="password" style="flex:1" autocomplete="new-password"></div>
+      <div class="row" style="margin-top:14px"><span class="spacer"></span><button data-dlg="cancel">Cancel</button><button class="primary" data-dlg="ok">Protect when I save</button></div>`, () => $('#pw1').focus());
+    if (r !== 'ok') return;
+    const a = $('#pw1').value; const b = $('#pw2').value;
+    if (!a) throw new Error('Type a password.');
+    if (a !== b) throw new Error('The two passwords don\'t match.');
+    st.protect = { password: a }; setDirty();
+    toast('Now save the PDF: it will need this password to open.');
+  },
   makedefault: async () => {
     const name = await bridge.call('pdf:makeDefault');
     toast(`Windows Settings is opening: choose “${name}” for .pdf and you're done.`);
