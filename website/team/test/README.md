@@ -99,3 +99,9 @@
   and again after Later, removes unfinished set-ups, and a page signed in before it was turned on elsewhere catches up (S6).
 - `speed-test.js`: the Riyeser home after sign-in and after a reload against a pretend Supabase where every call takes 300 ms
   (`LATENCY=`): on screen in under 2 seconds, plan and billing filled in soon after, Open Riyeser Link works (S4).
+- `people-test.js`: joining and leaving against a pretend Supabase: an owner without two-step sign-in still sees how many are
+  waiting (bell, Join requests, home) and the email link `?requests` opens Join requests (S7); the invite link says "Join
+  {business} on Riyeser" and the join form has the person's name (S8); a removed person sees "You're no longer part of
+  {business}", their old messages show "{name} (left)", and an empty name on the join form says what's missing (S59).
+  `rules-test.sql` covers the database side: the owners/admins email (once), `join_request_count`, `invite_info`, an
+  extension for people who join without a branch, `former_members` (members only; the removed person reads nothing).

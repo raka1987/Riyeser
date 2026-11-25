@@ -96,6 +96,10 @@
       async createTeam(name, you, profile) { return ok(await sb.rpc('create_company', { company_name: name, your_name: you, profile: profile || {} })); },
       async requestJoin(code, you, note) { return ok(await sb.rpc('request_join', { code, your_name: you, note: note || '' })); },
       async myRequests() { return ok(await sb.rpc('my_join_requests')); },
+      async inviteInfo(code) { return soft(sb.rpc('invite_info', { code })); },
+      async formerMembers(ws) { return soft(sb.rpc('former_members', { ws })); },
+      // S7: just the number waiting, for owners and admins before two-step sign-in (null: an older database)
+      async requestCount(ws) { return soft(sb.rpc('join_request_count', { ws })); },
       async pendingRequests(ws) {
         const r = ok(await sb.from('join_requests').select('id, display_name, email, branch_id, note, created_at').eq('workspace_id', ws).eq('status', 'pending').order('created_at'));
         return r;
@@ -387,7 +391,8 @@
       async teams() { return [{ id: ws, ...company, invite_code: 'DEMO1234', role: AS === 'u-me' ? 'owner' : AS === 'u-sam' ? 'admin' : 'member', myName: 'You' }]; },
       async requestJoin(code) { return { status: 'pending', company_name: 'Sample Plumbing', workspace_id: ws, code }; },
       async myRequests() { return []; },
-      async pendingRequests() { return reqs.filter((r) => r.status === 'pending'); },
+      async pendingRequests() { return reqs.filter((r) => r.status === 'pending'); }, async requestCount() { return reqs.filter((r) => r.status === 'pending').length; },
+      async inviteInfo() { return { name: company.name }; }, async formerMembers() { return [{ user_id: 'u-kim', display_name: 'Kim Lee' }]; },
       async decideJoin(id, approve, job, admin, branches) { const r = reqs.find((x) => x.id === id); r.status = approve ? 'approved' : 'declined';
         if (approve) { const uid = 'u-' + r.display_name.split(' ')[0].toLowerCase(); const b = brs.find((x) => x.id === ((branches && branches[0]) || r.branch_id)) || brs[0];
           const ext = Math.max(b.extension, ...ppl.filter((q) => q[3] > b.extension && q[3] < b.extension + 100).map((q) => q[3])) + 1;
@@ -574,7 +579,7 @@
   // Owners and admins need two-step sign-in before their admin powers work (the database checks this too).
   const needs2step = () => isAdmin() && S.aal !== 'aal2';
   const jobName = (j) => (JOBS.find((x) => x[0] === j) || [j, j === 'owner' ? 'Owner' : 'Staff'])[1];
-  const nameOf = (uid) => (S.people.find((p) => p.user_id === uid) || {}).display_name || 'Someone who left';
+  const nameOf = (uid) => (S.people.find((p) => p.user_id === uid) || {}).display_name || (S.former && S.former[uid] ? `${S.former[uid]} (left)` : 'Someone who left');
   const isGeneral = (c) => !!c && c.kind === 'channel' && c.name === 'general';
   const muted = (id) => !!((S.cprefs || {})[id] || {}).muted;
   // Who may rename, change the topic and archive: whoever made the channel, or an owner or admin (the database checks too).
@@ -603,7 +608,8 @@
       <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
       ${mode !== 'reset' ? `<div class="gtabs" role="tablist"><button type="button" role="tab" data-go="in" class="${mode === 'in' ? 'on' : ''}" aria-selected="${mode === 'in'}">Sign in</button><button type="button" role="tab" data-go="up" class="${mode === 'up' ? 'on' : ''}" aria-selected="${mode === 'up'}">Create account</button></div>` : ''}
       <h1>${mode === 'up' ? 'Create your Riyeser account' : mode === 'reset' ? 'Reset your password' : 'Sign in to Riyeser'}</h1>
-      <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. One account for you, your business and every Riyeser program.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for you, your business and all your Riyeser programs.'}</p>
+      ${join ? '<div class="ok ginv" id="ginv" hidden></div>' : ''}
+      <p>${join ? 'You\'ve been invited to a business on Riyeser. ' : ''}${mode === 'up' ? 'Free. One account for you, your business and every Riyeser program.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for you, your business and all your Riyeser programs.'}</p>
       ${note}
       ${mode === 'up' ? '<label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>' : ''}
       <label class="f"><span>Email</span><input type="email" name="email" autocomplete="username email" required value="${esc(email)}"></label>
@@ -617,6 +623,8 @@
         : `Already have an account? <button type="button" class="linkbtn" data-go="in">Sign in</button>`}</div></form></div>`;
     $app.querySelectorAll('[data-go]').forEach((b) => b.onclick = () => gate(b.dataset.go)); wireCountry($app);
     wirePw($app);
+    // S8: "Join {business} on Riyeser" on the invite link (the name only; nothing else before you sign in)
+    if (join) inviteName(join).then((n) => { const el = $app.querySelector('#ginv'); if (n && el) { el.innerHTML = `<b>Join ${esc(n)} on Riyeser</b><br>Create a free account (or sign in), then ask to join. They'll approve you.`; el.hidden = false; } });
     // Cancel: back to riyeser.com (in the Windows app, back to Sign in)
     const cx = $app.querySelector('#gcancel'); if (cx) cx.onclick = () => (/Electron/.test(navigator.userAgent) ? gate('in') : location.assign('/'));
     $app.querySelector('#gf').onsubmit = async (e) => {
@@ -691,6 +699,8 @@
     });
   }
 
+  const inviteName = async (code) => { if (!(code in (inviteName.k ||= {}))) inviteName.k[code] = await api.inviteInfo(code).then((r) => (r && r.name) || '').catch(() => ''); return inviteName.k[code]; };
+
   // ------------------------------------------------------------------ create or join a team
   // Every country, named in English, with its phone prefix (from the libphonenumber region list). Fiji, Australia and NZ first.
   const DIAL = Object.fromEntries('AC247,AD376,AE971,AF93,AG1,AI1,AL355,AM374,AO244,AR54,AS1,AT43,AU61,AW297,AX358,AZ994,BA387,BB1,BD880,BE32,BF226,BG359,BH973,BI257,BJ229,BL590,BM1,BN673,BO591,BQ599,BR55,BS1,BT975,BW267,BY375,BZ501,CA1,CC61,CD243,CF236,CG242,CH41,CI225,CK682,CL56,CM237,CN86,CO57,CR506,CU53,CV238,CW599,CX61,CY357,CZ420,DE49,DJ253,DK45,DM1,DO1,DZ213,EC593,EE372,EG20,EH212,ER291,ES34,ET251,FI358,FJ679,FK500,FM691,FO298,FR33,GA241,GB44,GD1,GE995,GF594,GG44,GH233,GI350,GL299,GM220,GN224,GP590,GQ240,GR30,GT502,GU1,GW245,GY592,HK852,HN504,HR385,HT509,HU36,ID62,IE353,IL972,IM44,IN91,IO246,IQ964,IR98,IS354,IT39,JE44,JM1,JO962,JP81,KE254,KG996,KH855,KI686,KM269,KN1,KP850,KR82,KW965,KY1,KZ7,LA856,LB961,LC1,LI423,LK94,LR231,LS266,LT370,LU352,LV371,LY218,MA212,MC377,MD373,ME382,MF590,MG261,MH692,MK389,ML223,MM95,MN976,MO853,MP1,MQ596,MR222,MS1,MT356,MU230,MV960,MW265,MX52,MY60,MZ258,NA264,NC687,NE227,NF672,NG234,NI505,NL31,NO47,NP977,NR674,NU683,NZ64,OM968,PA507,PE51,PF689,PG675,PH63,PK92,PL48,PM508,PR1,PS970,PT351,PW680,PY595,QA974,RE262,RO40,RS381,RU7,RW250,SA966,SB677,SC248,SD249,SE46,SG65,SH290,SI386,SJ47,SK421,SL232,SM378,SN221,SO252,SR597,SS211,ST239,SV503,SX1,SY963,SZ268,TA290,TC1,TD235,TG228,TH66,TJ992,TK690,TL670,TM993,TN216,TO676,TR90,TT1,TV688,TW886,TZ255,UA380,UG256,US1,UY598,UZ998,VA39,VC1,VE58,VG1,VI1,VN84,VU678,WF681,WS685,XK383,YE967,YT262,ZA27,ZM260,ZW263'.split(',').map((x) => [x.slice(0, 2), '+' + x.slice(2)]));
@@ -730,9 +740,10 @@
         <button class="btn p w">Finish signing up</button></form>
       <div class="or">Joining someone else's business?</div>
       <button type="button" class="btn w" id="tojoin">Join with their code</button>`;
-    const joinForm = `<form id="jf"><h1>Join someone's business</h1><p>Enter the code they gave you (like RIY-7K3M-Q2). They approve you, then you're in.</p>
+    const myName = md.you || (S.user && S.user.user_metadata && S.user.user_metadata.full_name) || '';
+    const joinForm = `<form id="jf" novalidate><h1 id="jfh">Join someone's business</h1><p>Enter the code they gave you (like RIY-7K3M-Q2). They approve you, then you're in.</p>
         <label class="f"><span>Their code</span><input name="code" value="${esc(join)}" required autocapitalize="characters" placeholder="RIY-…"></label>
-        <label class="f"><span>Your name, as they'll see it</span><input name="you" required maxlength="60"></label>
+        <label class="f"><span>Your name, as they'll see it</span><input name="you" required maxlength="60" autocomplete="name" value="${esc(myName)}"></label><div id="jferr"></div>
         <label class="f"><span>A note for them (optional)</span><input name="note" maxlength="300" placeholder="e.g. New at the Lautoka front desk"></label>
         <button class="btn p w">Ask to join</button></form>
       <div class="or">Not joining anyone?</div>
@@ -744,8 +755,12 @@
     wireCountry($app);
     const sw = $app.querySelector(mode === 'join' ? '#tonew' : '#tojoin'); sw.onclick = () => setupTeam('', mode === 'join' ? 'new' : 'join');
     const fail = (e) => setupTeam(`<div class="err">${esc(plainError(e))}</div>`, mode);
-    const jf = $app.querySelector('#jf'); if (jf) jf.onsubmit = async (e) => {
+    const jf = $app.querySelector('#jf');
+    if (jf && join) inviteName(join).then((n) => { const h = $app.querySelector('#jfh'); if (n && h) h.textContent = `Join ${n} on Riyeser`; });
+    if (jf) jf.onsubmit = async (e) => {
       e.preventDefault(); const f = new FormData(e.target);
+      const miss = !String(f.get('code') || '').trim() ? ['code', 'Type the code they gave you (like RIY-7K3M-Q2).'] : !String(f.get('you') || '').trim() ? ['you', 'Type your name, as they\'ll see it.'] : null;
+      if (miss) { jf.querySelector('#jferr').innerHTML = `<div class="err">${esc(miss[1])}</div>`; jf.querySelector(`[name=${miss[0]}]`).focus(); return; }
       try { const r = await api.requestJoin(String(f.get('code')), String(f.get('you')), String(f.get('note') || ''));
         history.replaceState(null, '', location.pathname);
         if (r.status === 'member') return start();
@@ -889,10 +904,18 @@
   const branchTicks = (chosen, attr) => `<div class="pick">${S.branches.map((b) => `<label class="pk"><input type="checkbox" ${attr} value="${b.id}"${chosen.includes(b.id) ? ' checked' : ''}><span>${esc(b.name)}${b.extension ? ` · ${b.extension}` : ''}</span></label>`).join('') || '<p class="muted" style="padding:6px">No branches yet.</p>'}</div>`;
   const jobSelect = (cur, name = 'job') => `<select name="${name}">${JOBS.map(([k, l]) => `<option value="${k}"${k === cur ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
   const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : new Date(t).toLocaleDateString(); };
+  // Join requests waiting (owners and admins). Before two-step sign-in only the number can be read (S7): the bell,
+  // Join requests and the home still show it, and opening them asks for two-step sign-in first.
+  async function loadRequests() {
+    if (!S.team || !(S.team.role === 'owner' || S.team.role === 'admin')) return [];
+    if (isAdmin() && !needs2step()) return (await api.pendingRequests(S.team.id).catch(() => null)) || [];
+    const n = await api.requestCount(S.team.id).catch(() => 0);
+    return Array.from({ length: Math.max(0, Number(n) || 0) }, () => ({ waiting: true }));
+  }
   async function refreshCompany() {
     [S.people, S.branches, S.teams] = await Promise.all([api.people(S.team.id), api.branches(S.team.id), api.teams(S.user.id)]);
     S.team = S.teams.find((t) => t.id === S.team.id) || S.team;
-    S.requests = isAdmin() ? await api.pendingRequests(S.team.id).catch(() => []) : [];
+    S.requests = await loadRequests();
     renderSide(); if (S.home) renderHome();
   }
 
@@ -978,11 +1001,12 @@
   // ------------------------------------------------------------------ the chat
   async function loadTeam(id) {
     S.team = S.teams.find((t) => t.id === id) || S.teams[0];
-    try { localStorage.setItem('riyeser.team.last', S.team.id); } catch { /* private mode */ }
+    try { localStorage.setItem('riyeser.team.last', S.team.id); localStorage.setItem('riyeser.member.' + S.user.id, JSON.stringify({ id: S.team.id, name: S.team.name })); } catch { /* private mode */ }
     let all;
     // S4: everything that doesn't depend on something else goes together
     [S.people, all, S.unread, , S.features, S.branches, S.requests] = await Promise.all([api.people(S.team.id), api.channels(S.team.id), api.unread(S.team.id), loadPrefs(),
-      api.features(S.team.id).catch(() => ({ calls: false })), api.branches(S.team.id).catch(() => []), isAdmin() ? api.pendingRequests(S.team.id).catch(() => []) : []]);
+      api.features(S.team.id).catch(() => ({ calls: false })), api.branches(S.team.id).catch(() => []), loadRequests(),
+      api.formerMembers(S.team.id).catch(() => null).then((r) => { S.former = Object.fromEntries((r || []).map((x) => [x.user_id, x.display_name])); })]);
     splitChans(all);
     Calls.listen();
     const first = S.chans.find(isGeneral) || S.chans[0];
@@ -3634,12 +3658,18 @@
       if (teams instanceof Error) throw teams;
       S.teams = teams;
       touchActivity();
+      // S59: removed from the business since last time: say so (once) instead of a bare set-up screen
+      let goneNote = '';
+      try { const k = 'riyeser.member.' + S.user.id; const was = JSON.parse(localStorage.getItem(k) || 'null');
+        if (was && was.id && !S.teams.some((t) => t.id === was.id)) { localStorage.removeItem(k);
+          goneNote = `<div class="warn" id="gonenote">You're no longer part of <b>${esc(was.name || 'that business')}</b>. Ask the owner if this is a mistake.</div>`; } } catch { /* private mode */ }
       const jc = (params.get('join') || '').toUpperCase();
-      if (jc && !S.teams.some((t) => t.invite_code === jc || t.company_code === jc)) return setupTeam();
+      if (jc && !S.teams.some((t) => t.invite_code === jc || t.company_code === jc)) return setupTeam(goneNote);
       if (!S.teams.length && !jc) { const closed = (await api.closedBusinesses().catch(() => []))[0]; if (closed) return closedScreen(closed); }
       if (!S.teams.length) { const r = (await api.myRequests().catch(() => []))[0];
         if (r && r.status === 'pending') return waiting(r.company_name);
         const d = (S.user.user_metadata || {}).riyeser_signup;
+        if (goneNote) return setupTeam(goneNote, 'join');
         if (d && d.you && !jc && !d.joining) {   // details given when the account was made: set it up now, no second form
           try { await api.createTeam(d.biz || d.you, d.you, { kind: d.biz ? 'business' : 'personal', country: d.country || '', phone: d.phone || '', email: d.email || S.user.email || '',
             legal_name: d.legal_name || '', tax_number: d.tax_number || '', address: d.address || '' });
@@ -3649,6 +3679,9 @@
         return setupTeam(); }
       let last = null; try { last = localStorage.getItem('riyeser.team.last'); } catch { /* private mode */ }
       await loadTeam(S.teams.some((t) => t.id === last) ? last : S.teams[0].id);
+      if (goneNote) phMsg(goneNote.replace(/<\/?div[^>]*>/g, ''), 'warn');
+      // S7: the link in "… asked to join" emails opens Join requests (two-step sign-in first)
+      if (params.has('requests') && isAdmin()) { dropParams('requests'); if (needs2step()) security(); else joinRequests(); }
     } catch (e) { $app.className = 'acct'; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
   }
   // Once per visit (at most hourly): tells Riyeser the account is in use, so it isn't closed for being inactive.
@@ -3658,7 +3691,7 @@
     if (due) Promise.resolve().then(() => api.touch()).catch(() => {});
   }
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
-  setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);
+  setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = await loadRequests().catch(() => S.requests); if (n.length !== S.requests.length) { S.requests = n; renderSide(); if (S.home && !S.view && $app.querySelector('.hmain')) drawHome(false); } } }, 60000);
   window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, reportIssue, requestRefund, phonesPage, myPhonePage, settingsMenu,
     presence: Presence, theme: Theme, appearance, newChat, changePassword };
   api.onAuth((ev) => { if (ev === 'PASSWORD_RECOVERY') AUTH.recovery = true; });

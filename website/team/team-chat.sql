@@ -461,6 +461,22 @@ begin
   end if;
 end $$;
 
+-- S8: someone who joins without a branch (the invite link or Company ID) still gets an extension: the next free number
+-- after the first branch's (101, 102… after Head office's 100). The owner or an admin can change it (set_extension).
+create or replace function public.give_extension(ws uuid, person uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare base int;
+begin
+  if not exists (select 1 from members where workspace_id = ws and user_id = person and extension is null) then return; end if;
+  select coalesce(min(extension), 100) into base from branches where workspace_id = ws and extension is not null and extension % 100 = 0;
+  update members set extension = coalesce(next_extension(ws, base),
+      (select min(n) from generate_series(100, 9999) n where n % 100 <> 0
+         and not exists (select 1 from members x where x.workspace_id = ws and x.extension = n)
+         and not exists (select 1 from branches x where x.workspace_id = ws and x.extension = n)))
+    where workspace_id = ws and user_id = person and extension is null;
+end $$;
+revoke all on function public.give_extension(uuid, uuid) from public, anon, authenticated;
+
 create or replace function public.create_team(team_name text, your_name text) returns uuid
   language plpgsql security definer set search_path = public as $$
 declare ws uuid; b uuid;
@@ -490,6 +506,7 @@ begin
   insert into members (workspace_id, user_id, display_name) values (ws, auth.uid(), trim(your_name))
     on conflict (workspace_id, user_id) do nothing;
   if b is not null then perform place_in_branch(b, auth.uid()); end if;
+  perform give_extension(ws, auth.uid());   -- S8
   return ws;
 end $$;
 
@@ -614,9 +631,10 @@ end $$;
 -- Ask to join with a Company ID (RIY-…), a branch code (LAU-…) or an invite code. Owners and admins approve.
 create or replace function public.request_join(code text, your_name text, note text) returns json
   language plpgsql security definer set search_path = public as $$
-declare ws uuid; b uuid; c text := upper(trim(code)); approval boolean; nm text;
+declare ws uuid; b uuid; c text := upper(trim(code)); approval boolean; nm text; fresh boolean; who text; o uuid;
 begin
   if auth.uid() is null then raise exception 'Sign in first'; end if;
+  if coalesce(trim(your_name), '') = '' then raise exception 'Type your name, as they''ll see it.'; end if;
   select id, workspace_id into b, ws from branches where branches.code = c;
   if ws is null then select id into ws from workspaces where company_code = c or invite_code = c; end if;
   if ws is null then raise exception 'We couldn''t find a company with that ID. Check it with the person who gave it to you.'; end if;
@@ -632,7 +650,17 @@ begin
   insert into join_requests (workspace_id, user_id, display_name, email, branch_id, note)
     values (ws, auth.uid(), trim(your_name), (select email from auth.users where id = auth.uid()), b, nullif(trim(coalesce(note, '')), ''))
     on conflict (workspace_id, user_id) where status = 'pending'
-    do update set display_name = excluded.display_name, branch_id = excluded.branch_id, note = excluded.note, created_at = now();
+    do update set display_name = excluded.display_name, branch_id = excluded.branch_id, note = excluded.note, created_at = now()
+    returning (xmax = 0) into fresh;
+  -- S7: tell the owners and admins (once per request, not again when the same person asks again)
+  if fresh then
+    who := trim(your_name) || coalesce(' (' || (select email from auth.users where id = auth.uid()) || ')', '');
+    for o in select user_id from members where workspace_id = ws and role in ('owner', 'admin') loop
+      perform queue_email(o, null, 'join_request', left(trim(your_name), 80) || ' asked to join ' || nm || ' on Riyeser',
+        who || ' asked to join ' || nm || ' on Riyeser.' || coalesce(E'\nTheir note: ' || nullif(trim(coalesce(note, '')), ''), '')
+        || E'\n\nApprove or decline them (sign in as an owner or admin):\nhttps://riyeser.com/link/?requests', ws, null, null);
+    end loop;
+  end if;
   return json_build_object('status', 'pending', 'company_name', nm, 'workspace_id', ws);
 end $$;
 
@@ -671,6 +699,7 @@ begin
       on conflict (workspace_id, user_id) do nothing;
     perform set_person_branches(r.workspace_id, r.user_id,
       case when coalesce(array_length(branch_ids, 1), 0) > 0 then branch_ids when r.branch_id is not null then array[r.branch_id] else '{}' end);
+    perform give_extension(r.workspace_id, r.user_id);   -- S8: no branch, still an extension
   end if;
   update join_requests set status = case when approve then 'approved' else 'declined' end, decided_by = auth.uid(), decided_at = now()
     where id = request;
@@ -715,6 +744,30 @@ begin
   end if;
   return linked;
 end $$;
+
+-- S8: the invite page says "Join {business} on Riyeser" before anyone signs in. Only the name of an open business,
+-- for a code that matches (a Company ID, invite code or branch code): nothing else.
+create or replace function public.invite_info(code text) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('name', w.name) from workspaces w
+  where w.status = 'active' and length(trim(coalesce($1, ''))) between 6 and 20
+    and (w.company_code = upper(trim($1)) or w.invite_code = upper(trim($1))
+         or exists (select 1 from branches b where b.workspace_id = w.id and b.code = upper(trim($1))))
+  limit 1
+$$;
+revoke all on function public.invite_info(text) from public;
+grant execute on function public.invite_info(text) to anon, authenticated;
+
+-- S7: how many people are waiting to join, for the business's owners and admins (the bell and Join requests). Only the
+-- number: it's there before two-step sign-in is on, so they know to turn it on and approve them (the names need it).
+create or replace function public.join_request_count(ws uuid) returns int
+  language sql stable security definer set search_path = public as $$
+  select case when exists (select 1 from members m join workspaces w on w.id = m.workspace_id
+      where m.workspace_id = ws and m.user_id = auth.uid() and m.role in ('owner', 'admin') and w.status = 'active')
+    then (select count(*)::int from join_requests where workspace_id = ws and status = 'pending') else 0 end
+$$;
+revoke all on function public.join_request_count(uuid) from public, anon;
+grant execute on function public.join_request_count(uuid) to authenticated;
 
 revoke all on function public.make_company_code(), public.create_company(text, text, jsonb), public.update_company(uuid, jsonb),
   public.request_join(text, text, text), public.my_join_requests(), public.set_person_branches(uuid, uuid, uuid[]),
@@ -778,6 +831,20 @@ do $$ declare t text; begin
   drop trigger if exists audit_join_requests on public.join_requests;
   create trigger audit_join_requests after update on public.join_requests for each row execute function public.audit_change();
 end $$;
+
+-- S59: people who were removed keep their name on what they wrote ("Sam Taylor (left)", not "Someone who left"):
+-- from the business's own change history, for anyone in the business. Names only, nothing else.
+create or replace function public.former_members(ws uuid) returns table (user_id uuid, display_name text)
+  language sql stable security definer set search_path = public as $$
+  select distinct on ((a.details ->> 'user_id')::uuid) (a.details ->> 'user_id')::uuid, a.details ->> 'display_name'
+  from audit_log a
+  where public.is_member(ws) and a.workspace_id = ws and a.action = 'members.delete' and a.details ? 'user_id'
+    and not exists (select 1 from members m where m.workspace_id = ws and m.user_id = (a.details ->> 'user_id')::uuid)
+  order by (a.details ->> 'user_id')::uuid, a.at desc
+$$;
+revoke all on function public.former_members(uuid) from public, anon;
+grant execute on function public.former_members(uuid) to authenticated;
+
 
 -- ================================================================ Riyeser HQ (for Riyeser's own staff)
 -- The back office for running Riyeser: companies, linked PCs and versions, trials, Riyeser Link Plus, downloads, notes.

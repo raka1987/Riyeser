@@ -229,7 +229,7 @@ do $$ begin
 end $$;
 select public.create_branch(:'ws_c', 'Nadi branch') as nadi \gset
 select code as nadi_code from public.branches where id = :'nadi' \gset
-select set_config('test.nadi_code', :'nadi_code', false);
+select set_config('test.nadi_code', :'nadi_code', false), set_config('test.code_c', :'code_c', false);
 -- someone asks to join with the Nadi branch code: pending, and they can't see anything yet
 select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
 do $$ begin assert (public.request_join(current_setting('test.nadi_code'), 'Jone', 'New at Nadi') ->> 'status') = 'pending', 'pending'; end $$;
@@ -245,6 +245,24 @@ end $$;
 -- asking twice keeps one request
 do $$ begin perform public.request_join(current_setting('test.nadi_code'), 'Jone Vula', null);
   assert (select count(*) from public.my_join_requests() where status = 'pending') = 1, 'one pending request'; end $$;
+-- S7: the owner is emailed once (not again when Jone asks again), and sees the count before two-step sign-in
+reset role;
+do $$ declare ws uuid := current_setting('test.ws_c')::uuid; begin
+  assert (select count(*) from public.email_outbox where workspace_id = ws and template = 'join_request' and status = 'queued'
+    and to_address = 'boss@c.test' and subject = 'Jone asked to join Island Traders on Riyeser' and body_text like '%newbie@c.test%'
+    and body_text like '%New at Nadi%' and body_text like '%riyeser.com/link/?requests%') = 1, 'S7 the owner is emailed once';
+end $$;
+select pg_temp.as_user_password_only('66666666-6666-6666-6666-666666666666'); set role authenticated;
+do $$ begin
+  assert public.join_request_count(current_setting('test.ws_c')::uuid) = 1, 'S7 the owner sees 1 waiting, even before two-step sign-in';
+  assert (select count(*) from public.join_requests where status = 'pending') = 0, 'S7 ...but not the names until two-step sign-in';
+end $$;
+select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
+do $$ begin
+  assert public.join_request_count(current_setting('test.ws_c')::uuid) = 0, 'S7 the person asking sees no count';
+  begin perform public.request_join(current_setting('test.nadi_code'), '  ', null); raise exception 'no name';
+  exception when others then assert sqlerrm like 'Type your name%', sqlerrm; end;
+end $$;
 -- the owner sees it and approves as Sales in the Nadi branch
 select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
 select id as req from public.join_requests where status = 'pending' \gset
@@ -285,6 +303,38 @@ do $$ begin
   assert (select count(*) from public.workspaces) = 0, 'declined person sees nothing';
   begin perform public.request_join('RIY-NOPE-00', 'X', null); raise exception 'bad code worked';
   exception when others then assert sqlerrm like 'We couldn%', sqlerrm; end;
+end $$;
+reset role;
+-- S8: joining with the Company ID (no branch) still gives an extension when approved; the invite page can show the name
+insert into auth.users values ('5a5a5a5a-0000-4000-8000-000000000059', 'helper@c.test');
+set role anon; select pg_temp.as_user('');
+do $$ begin
+  assert public.invite_info(current_setting('test.code_c')) ->> 'name' = 'Island Traders', 'S8 the invite page gets the business name';
+  assert public.invite_info(lower(current_setting('test.nadi_code'))) ->> 'name' = 'Island Traders', 'S8 ...with a branch code too';
+  assert public.invite_info('RIY-NOPE-00') is null and public.invite_info('') is null, 'S8 nothing for a wrong code';
+end $$;
+reset role; set role authenticated;
+select pg_temp.as_user('5a5a5a5a-0000-4000-8000-000000000059');
+select public.request_join(:'code_c', 'Hana Helper', null);
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+select public.decide_join((select id from public.join_requests where status = 'pending' and user_id = '5a5a5a5a-0000-4000-8000-000000000059'), true, 'staff', false, null);
+do $$ declare e int := (select extension from public.members where user_id = '5a5a5a5a-0000-4000-8000-000000000059');
+begin assert e between 101 and 199 and e not in (select extension from public.members where user_id <> '5a5a5a5a-0000-4000-8000-000000000059' and extension is not null), 'S8 an extension of their own: ' || coalesce(e::text, 'none'); end $$;
+-- S59: Hana writes, is removed; the others still see her name on it, she sees nothing
+select pg_temp.as_user('5a5a5a5a-0000-4000-8000-000000000059');
+insert into public.messages (channel_id, workspace_id, body)
+  select id, workspace_id, 'Hana here' from public.channels where workspace_id = current_setting('test.ws_c')::uuid and name = 'general';
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+delete from public.members where workspace_id = :'ws_c' and user_id = '5a5a5a5a-0000-4000-8000-000000000059';
+select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
+do $$ begin
+  assert (select display_name from public.former_members(current_setting('test.ws_c')::uuid) where user_id = '5a5a5a5a-0000-4000-8000-000000000059') = 'Hana Helper', 'S59 her name stays for the business';
+  assert (select count(*) from public.former_members(current_setting('test.ws_c')::uuid) where user_id = '77777777-7777-7777-7777-777777777777') = 0, 'S59 current members are not listed';
+end $$;
+select pg_temp.as_user('5a5a5a5a-0000-4000-8000-000000000059');
+do $$ begin
+  assert (select count(*) from public.former_members(current_setting('test.ws_c')::uuid)) = 0, 'S59 the removed person reads nothing';
+  assert (select count(*) from public.messages where body = 'Hana here') = 0, 'S59 nor the messages';
 end $$;
 reset role;
 
