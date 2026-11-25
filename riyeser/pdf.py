@@ -222,6 +222,11 @@ def payslip_pdf(db, slip_id) -> bytes:
             [f"Superannuation ({s['super_rate']:g}%) {s['super_fund'] or ''}", fmt_money(s["super"])],
             ["Annual leave accrued", f"{s['leave_accrued']:.2f} hrs"]]
     pdf.table(["", "This pay"], rows, [120, 58], ["L", "R"])
+    from .payroll_calc import NOT_FOR_REAL_PAY
+    pdf.ln(4)
+    pdf.set_font(FONT, "", 8)
+    pdf.set_text_color(150, 80, 0)
+    pdf.multi_cell(0, 4, NOT_FOR_REAL_PAY)  # F12
     return bytes(pdf.output())
 
 

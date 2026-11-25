@@ -2,6 +2,7 @@
 {% from "_macros.html" import account_select %}
 {% block content %}
 <div class="head"><div><h1>Run Payroll</h1><p class="sub">Edit hours and click <b>Recalculate</b>, then <b>Process</b>.</p></div></div>
+<div class="flash warn" role="alert">{{ payroll_warning }}</div>
 <form method="post" class="card">
 <div class="fields"><div><label>Frequency</label><select name="frequency" onchange="location='?frequency='+this.value">{% for f in frequencies %}<option {{ 'selected' if f==freq }}>{{ f }}</option>{% endfor %}</select></div>
 <div><label>Period start</label><input type="date" name="period_start" value="{{ start }}"></div><div><label>Period end</label><input type="date" name="period_end" value="{{ end }}"></div>

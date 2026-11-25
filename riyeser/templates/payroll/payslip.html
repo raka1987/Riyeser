@@ -1,5 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Payslip</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
 <body><div class="doc-print">
+<p class="muted" style="border:1px solid #f8d9a8;background:#fff4e5;padding:6px 10px;border-radius:6px">{{ payroll_warning }}</p>
 <div class="hdr"><div><h1>Payslip</h1><div class="muted">Period {{ s.period_start }} – {{ s.period_end }} · Paid {{ s.pay_date }}</div></div>
 <div class="right"><b>{{ company.name }}</b><br>{% if company.abn %}ABN {{ company.abn }}{% endif %}</div></div>
 <p><b>{{ s.first_name }} {{ s.last_name }}</b><br><span class="muted">{{ s.pay_basis|title }} · {{ s.pay_frequency }}{% if s.bank_bsb %} · Paid to BSB {{ s.bank_bsb }} Acc {{ s.bank_account }}{% endif %}</span></p>

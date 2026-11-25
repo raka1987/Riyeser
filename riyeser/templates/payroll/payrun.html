@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block title %}Pay Run{% endblock %}
 {% block content %}
+<div class="flash warn" role="alert">{{ payroll_warning }}</div>
 <div class="head"><div><h1>Pay run {{ r.pay_date }} {% if r.voided %}<span class="badge void">reversed</span>{% endif %}</h1><p class="sub">{{ r.frequency|title }} · {{ r.period_start }} to {{ r.period_end }}</p></div>
 <div class="actions"><a class="btn" href="{{ url_for('core.entry', eid=r.entry_id) }}">Journal #{{ r.entry_id }}</a>
 {% if not r.voided %}{% if lv('payroll') >= 3 %}<form method="post" class="inline" action="{{ url_for('payroll.void_run', rid=r.id) }}" data-confirm="Reverse this pay run?"><button class="btn danger">Reverse pay run</button></form>{% endif %}{% endif %}</div></div>

@@ -6,6 +6,13 @@ ATO's official Schedule 1 coefficient method - check before relying on it.
 """
 from .db import round_cents
 
+# F12: until the ATO's Schedule 1 (and STSL) formulas for the pay date's financial year are in, with coefficients
+# checked against the ATO's published tables, Australian payroll here is an estimate. Every pay run screen and
+# payslip says so. (Single Touch Payroll Phase 2 reporting isn't part of this program yet either.)
+NOT_FOR_REAL_PAY = ("Australian payroll in Riyeser Accounting is not for real pay runs yet: PAYG tax is an estimate, "
+                    "not the ATO's Schedule 1 tax tables, and Single Touch Payroll reporting isn't included. Check every "
+                    "amount with the ATO's tax withheld calculator before paying anyone.")
+
 PERIODS = {"weekly": 52, "fortnightly": 26, "monthly": 12}
 
 # (threshold, base tax, marginal rate) in dollars - 2024-25 resident rates

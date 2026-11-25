@@ -212,3 +212,19 @@ def test_s23_run_payroll_opens_on_the_staff_frequency_and_next_period(client, ap
     _run(client, emp, "76")
     html = page(client.get("/payroll/run"))
     assert 'name="period_start" value="2026-11-25"' in html and 'name="period_end" value="2026-12-08"' in html
+
+
+# ------------------------------------------------------------------ F12 (the safe part)
+def test_f12_australian_payroll_is_labelled_not_for_real_pay_runs(client, app):
+    from tests.test_batch2 import _pdf_text
+    with app.app_context():
+        db = get_db()
+        emp = _employee(db)
+        db.commit()
+    assert "not for real pay runs yet" in page(client.get("/payroll/run"))
+    r = _run(client, emp, "76")
+    assert "not for real pay runs yet" in page(r)                       # the pay run page
+    with app.app_context():
+        sid = get_db().execute("SELECT id FROM payslips").fetchone()[0]
+    assert "not for real pay runs yet" in page(client.get(f"/payroll/payslip/{sid}"))
+    assert "notforrealpayrunsyet" in _pdf_text(client.get(f"/payroll/payslip/{sid}?pdf=1").data)

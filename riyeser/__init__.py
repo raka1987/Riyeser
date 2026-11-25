@@ -38,6 +38,8 @@ def create_app(test_config=None):
                    "cost_of_sales": "Cost of Sales", "expense": "Expense", "other_income": "Other Income",
                    "other_expense": "Other Expense"}
     app.jinja_env.globals["TYPE_LABELS"] = TYPE_LABELS
+    from .payroll_calc import NOT_FOR_REAL_PAY
+    app.jinja_env.globals["payroll_warning"] = NOT_FOR_REAL_PAY  # F12
 
     @app.before_request
     def load_user():

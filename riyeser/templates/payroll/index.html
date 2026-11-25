@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block title %}Payroll{% endblock %}
 {% block content %}
+<div class="flash warn" role="alert">{{ payroll_warning }}</div>
 <div class="head"><div><h1>Payroll</h1><p class="sub">PAYG is an approximation of ATO withholding — verify before lodging.</p></div>
 <div class="actions"><a class="btn pri" href="{{ url_for('payroll.run') }}">Run payroll</a><a class="btn" href="{{ url_for('payroll.employee') }}">+ Employee</a>
 <a class="btn" href="{{ url_for('reports.show', name='payroll_summary') }}">Payroll summary</a></div></div>
