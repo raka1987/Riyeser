@@ -494,9 +494,12 @@ function pinPad(s) {
   </div>`);
   m.el.style.maxWidth = '380px';
   const dots = () => $$('.pin-dots i', m.el).forEach((d, i) => d.classList.toggle('f', i < pin.length));
-  const submit = async (override = false) => {
+  const submit = async (override = false, confirm_long = false) => {
     try {
-      const r = await api('/api/staff/timeclock/punch', { body: { user_id: s.id, pin, override } });
+      const r = await api('/api/staff/timeclock/punch', { body: { user_id: s.id, pin, override, confirm_long } }).catch(e => {
+        if (e.data && e.data.long_shift && confirm(e.message)) return api('/api/staff/timeclock/punch', { body: { user_id: s.id, pin, override, confirm_long: true } });
+        throw e;
+      });
       m.close();
       toast(r.cancelled ? `${r.name}: clock-in cancelled (tapped twice). Not on shift.` : r.on_shift ? `✓ ${r.name} clocked IN at ${fmtTime(r.at.slice(11, 16))}` : `✓ ${r.name} clocked OUT at ${fmtTime(r.at.slice(11, 16))} (${r.shift_hours}h shift)`, 4500);
       renderTimeclock();
@@ -636,7 +639,7 @@ async function renderPayroll() {
   $('#pr-extra').onchange = () => { const on = $('#pr-extra').checked; $('#pr-extra-why').hidden = $('#pr-extra-note').hidden = !on; $('#pr-preview').innerHTML = ''; };
   const preview = async () => {
     const body = { ...formData($('#pr-form')), adjustments: adj };
-    const { lines, already_paid: paid } = await api('/api/staff/payroll/preview', { body });
+    const { lines, already_paid: paid, warnings = [] } = await api('/api/staff/payroll/preview', { body });
     const ord = (window.__prSort = $('#pr-sort') ? $('#pr-sort').value : (window.__prSort || 'name'));
     lines.sort({ empno: (a, b) => String(a.employee_no || '').localeCompare(String(b.employee_no || ''), undefined, { numeric: true }) || a.employee_name.localeCompare(b.employee_name),
       hours: (a, b) => b.hours - a.hours, net: (a, b) => b.net - a.net }[ord] || ((a, b) => a.employee_name.localeCompare(b.employee_name)));
@@ -647,7 +650,7 @@ async function renderPayroll() {
         <td class="r"><input class="inline" type="number" step="0.01" data-a="${l.user_id}" value="${l.allowances || ''}"></td><td class="r">${money(l.gross, cur())}</td><td class="r">${money(l.fnpf_employee, cur())}</td><td class="r">${money(l.paye, cur())}</td>
         <td class="r">${l.regular_deductions ? `<div class="small muted" title="${esc(l.deduction_lines.map(d => d.name + ' ' + d.amount).join(', '))}">${money(l.regular_deductions, cur())} regular</div>` : ''}<input class="inline" type="number" step="0.01" data-o="${l.user_id}" value="${(adj[l.user_id] && adj[l.user_id].other_deductions) || ''}" placeholder="+ this pay"></td><td class="r"><b>${money(l.net, cur())}</b></td><td class="r">${money(l.fnpf_employer, cur())}</td></tr>`).join('')}
       <tr><td><b>Totals</b></td><td class="r">${sum('hours').toFixed(2)}</td><td></td><td></td><td class="r"><b>${money(sum('gross'), cur())}</b></td><td class="r">${money(sum('fnpf_employee'), cur())}</td><td class="r">${money(sum('paye'), cur())}</td><td></td><td class="r"><b>${money(sum('net'), cur())}</b></td><td class="r">${money(sum('fnpf_employer'), cur())}</td></tr>
-      </tbody></table></div>${paid ? `<div class="note" style="margin-top:10px"><b>${esc(paid.message)}</b> To pay a bonus on these dates instead, tick <b>Extra pay run (bonus)</b> above.</div>` : ''}<div class="actions">${paid ? '' : `<button class="btn coral" id="pr-final">${body.extra_run ? 'Finalise extra pay run' : 'Finalise pay run'}</button>`}<span class="small muted" style="align-self:center">Edit allowances/deductions and the totals recalculate.</span></div>`
+      </tbody></table></div>${warnings.length ? `<div class="note" style="margin-top:10px;border-color:var(--gold)"><b>⚠ Check these shifts before paying</b> (fix them in <a href="#/timesheets">Timesheets</a>, or change the hours here):<ul style="margin:4px 0 0">${warnings.map(w => `<li><b>${esc(w.name)}</b>: ${esc(w.text)}</li>`).join('')}</ul></div>` : ''}${paid ? `<div class="note" style="margin-top:10px"><b>${esc(paid.message)}</b> To pay a bonus on these dates instead, tick <b>Extra pay run (bonus)</b> above.</div>` : ''}<div class="actions">${paid ? '' : `<button class="btn coral" id="pr-final">${body.extra_run ? 'Finalise extra pay run' : 'Finalise pay run'}</button>`}<span class="small muted" style="align-self:center">Edit allowances/deductions and the totals recalculate.</span></div>`
       : `<div class="empty" style="margin-top:14px">No active staff with a pay rate. Set rates under <a href="#/employees">Staff</a>.</div>`;
     if ($('#pr-sort')) $('#pr-sort').onchange = () => preview();
     $$('[data-h]', $('#pr-preview')).forEach(i => i.onchange = () => {
@@ -659,6 +662,8 @@ async function renderPayroll() {
     });
     $$('[data-a],[data-o]', $('#pr-preview')).forEach(i => i.onchange = () => { const id = i.dataset.a || i.dataset.o; adj[id] = adj[id] || {}; adj[id][i.dataset.a ? 'allowances' : 'other_deductions'] = i.value; preview(); });
     if ($('#pr-final')) $('#pr-final').onclick = async () => {
+      if (warnings.length && !confirm(`These shifts look wrong:\n\n${warnings.map(w => `• ${w.name}: ${w.text}`).join('\n')}\n\nPay them as they are?`)) return;
+      if (warnings.length) body.confirm_warnings = true;
       if (!confirm(body.extra_run ? `Finalise an EXTRA pay run (${body.extra_reason || 'no reason given'}) for dates that may already be paid? Only the allowances entered are paid.` : 'Finalise this pay run? Payslips will be saved (print or email them from the pay run).')) return;
       try { const r = await api('/api/staff/payroll/runs', { body }); toast('Pay run saved'); await renderPayroll(); runModal(r.id); } catch (e) { toast(e.message); }
     };
@@ -1045,7 +1050,7 @@ $('#setup-form').onsubmit = async e => {
   catch (err) { $('#setup-err').innerHTML = `<div class="error">${esc(err.message)}</div>`; }
 };
 $('#logout').onclick = async () => { await api('/api/auth/logout', { body: {} }); location.reload(); };
-$('#clock-btn').onclick = async () => { let r; try { r = await api('/api/staff/clock', { body: {} }); } catch (e) { return toast(e.message, 5000); } toast(r.cancelled ? 'Clock-in cancelled (tapped twice). You are not on shift.' : r.on_shift ? 'Clocked in — have a good shift!' : 'Clocked out. Vinaka!'); await refreshMe(); if (VIEW === 'dashboard' || VIEW === 'timesheets') go(); };
+$('#clock-btn').onclick = async () => { let r; try { r = await api('/api/staff/clock', { body: {} }).catch(e => { if (e.data && e.data.long_shift && confirm(e.message)) return api('/api/staff/clock', { body: { confirm_long: true } }); throw e; }); } catch (e) { return toast(e.message, 5000); } toast(r.cancelled ? 'Clock-in cancelled (tapped twice). You are not on shift.' : r.on_shift ? 'Clocked in — have a good shift!' : 'Clocked out. Vinaka!'); await refreshMe(); if (VIEW === 'dashboard' || VIEW === 'timesheets') go(); };
 boot();
 
 // ------------------------------------------------------------------ bank statements: wage payments that left the bank

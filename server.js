@@ -46,7 +46,7 @@ const round2 = n => Math.round((Number(n) || 0) * 100) / 100;
 const isDate = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || ''));
 const isTime = s => /^\d{2}:\d{2}$/.test(String(s || ''));
 const str = (v, max = 500) => String(v ?? '').trim().slice(0, max);
-class HttpError extends Error { constructor(status, msg) { super(msg); this.status = status; } }
+class HttpError extends Error { constructor(status, msg, extra) { super(msg); this.status = status; this.extra = extra; } } // extra: more fields in the JSON answer
 const bad = msg => { throw new HttpError(400, msg); };
 
 // ---------------------------------------------------------------- licence (licence.js)
@@ -343,9 +343,12 @@ const deductionsOf = e => { try { return (JSON.parse(e.deductions || '[]') || []
 //  - no clocking in during a shift that's already recorded (e.g. 8:00am–5:00pm entered by a manager)
 //  - clocking out within 2 minutes of clocking in is a double tap: that clock-in is cancelled, not saved as 0 hours
 const fmt12h = s => { const [h, m] = s.slice(11, 16).split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
-function punch(userId, now, notes) {
+const LONG_SHIFT_HOURS = 12; // S31: a shift longer than this is probably a forgotten clock-out
+function punch(userId, now, notes, confirmLong = false) {
   const open = db.prepare('SELECT * FROM timesheets WHERE user_id = ? AND clock_out IS NULL ORDER BY id DESC LIMIT 1').get(userId);
   if (open) {
+    const h = round2(hoursOf({ clock_in: open.clock_in, clock_out: now }));
+    if (h > LONG_SHIFT_HOURS && !confirmLong) throw new HttpError(409, `This shift would be ${h} hours (clocked in ${open.clock_in.slice(0, 10)} at ${fmt12h(open.clock_in)}). Was a clock-out forgotten? Clock out anyway, or ask a manager to fix the timesheet.`, { long_shift: { hours: h, since: open.clock_in } });
     if (Date.parse(now + 'Z') - Date.parse(open.clock_in + 'Z') < 2 * 60 * 1000) {
       db.prepare('DELETE FROM timesheets WHERE id = ?').run(open.id);
       return { on_shift: false, cancelled: true, open };
@@ -370,7 +373,7 @@ function assertNoOverlap(userId, clockIn, clockOut, exceptId = 0) {
 }
 app.post('/api/staff/clock', requireStaff, wrap((req, res) => {
   const now = localNowISO(getSettings().timezone);
-  const r = punch(req.user.id, now, str(req.body.notes, 200));
+  const r = punch(req.user.id, now, str(req.body.notes, 200), req.body.confirm_long === true);
   broadcast({ type: 'shift' }, true);
   res.json({ on_shift: r.on_shift, at: now, cancelled: !!r.cancelled });
 }));
@@ -403,7 +406,7 @@ app.post('/api/staff/timeclock/punch', requirePerm('timeclock.use'), wrap((req, 
     throw new HttpError(403, 'Wrong PIN. Try again, or ask a manager to check your time-clock PIN.');
   }
   const now = localNowISO(getSettings().timezone);
-  const r = punch(u.id, now, override ? `time clock (by ${req.user.name})` : 'time clock');
+  const r = punch(u.id, now, override ? `time clock (by ${req.user.name})` : 'time clock', req.body.confirm_long === true);
   const open = r.open;
   if (open && override && !r.cancelled) db.prepare("UPDATE timesheets SET notes = trim(coalesce(notes,'') || ' · out by ' || ?) WHERE id = ?").run(req.user.name, open.id);
   broadcast({ type: 'shift' }, true);
@@ -581,6 +584,7 @@ function computePayroll(start, end, adjustments = {}, fraction = 1, extra = fals
   let brackets; try { brackets = JSON.parse(s.paye_brackets); } catch { brackets = []; }
   const emps = db.prepare(`SELECT * FROM users WHERE active = 1 AND pay_rate > 0 ORDER BY name`).all();
   const tsStmt = db.prepare(`SELECT * FROM timesheets WHERE user_id=? AND clock_out IS NOT NULL AND substr(clock_in,1,10) BETWEEN ? AND ?`);
+  const openStmt = db.prepare(`SELECT * FROM timesheets WHERE user_id=? AND clock_out IS NULL AND substr(clock_in,1,10) BETWEEN ? AND ?`);
   const rules = breakRules();
   return emps.map(e => {
     const shifts = tsStmt.all(e.id, start, end);
@@ -591,6 +595,10 @@ function computePayroll(start, end, adjustments = {}, fraction = 1, extra = fals
     if (adjusted && !(+adj.hours >= 0 && +adj.hours <= 400)) bad(`Check the hours for ${e.name}.`);
     if (adjusted && str(adj.hours_note, 200).trim().length < 3) bad(`Add a reason for changing ${e.name}'s hours.`);
     const hours = adjusted ? round2(+adj.hours) : fromSheets;
+    // S31: shifts to check before paying (not when an admin has set the hours, or in an extra run that pays no hours)
+    const warnings = extra || adjusted ? [] : [
+      ...shifts.filter(t => hoursOf(t) > LONG_SHIFT_HOURS).map(t => `${t.clock_in.slice(0, 10)}: a ${round2(hoursOf(t))} h shift (${fmt12h(t.clock_in)} to ${t.clock_out.slice(0, 10)} ${fmt12h(t.clock_out)}). Forgotten clock-out?`),
+      ...openStmt.all(e.id, start, end).map(t => `Still clocked in since ${t.clock_in.slice(0, 10)} ${fmt12h(t.clock_in)}: that shift isn't paid in this run.`)];
     const base = extra ? 0 : round2(e.pay_type === 'salary' ? e.pay_rate / periods * fraction : hours * e.pay_rate);
     // paid leave in these dates (annual, sick, other paid): hourly staff are paid leave days × hours a day; salary carries on as normal
     const leaveRows = extra ? [] : db.prepare('SELECT kind, days FROM staff_leave WHERE user_id = ? AND paid = 1 AND date_from BETWEEN ? AND ?').all(e.id, start, end);
@@ -607,7 +615,7 @@ function computePayroll(start, end, adjustments = {}, fraction = 1, extra = fals
     return { user_id: e.id, employee_name: e.name, employee_no: e.employee_no || '', position: e.position, pay_type: e.pay_type, pay_rate: e.pay_rate, tin: e.tin, fnpf_no: e.fnpf_no,
       bank_account: e.bank_account, hours, worked_hours: worked, break_hours: breaks, base_pay: base, allowances, gross, fnpf_employee, fnpf_employer, paye, other_deductions: other,
       deduction_lines: lines, leave_lines, leave_hours, leave_pay, regular_deductions: round2(other - round2(adj.other_deductions)),
-      timesheet_hours: fromSheets, hours_adjusted: adjusted, hours_note: adjusted ? str(adj.hours_note, 200).trim() : '',
+      timesheet_hours: fromSheets, hours_adjusted: adjusted, warnings, hours_note: adjusted ? str(adj.hours_note, 200).trim() : '',
       net: round2(gross - fnpf_employee - paye - other),
       notes: [adjusted ? `Hours adjusted ${fromSheets} → ${round2(+adj.hours)}: ${str(adj.hours_note, 200).trim()}` : '', str(adj.notes, 200)].filter(Boolean).join(' · ') };
   });
@@ -726,6 +734,7 @@ function alreadyPaid(start, end, userIds) {
     WHERE COALESCE(r.extra_reason, '') = '' AND r.period_start <= ? AND r.period_end >= ? AND p.user_id IN (${userIds.map(() => '?').join(',')}) ORDER BY r.id LIMIT 1`).get(end, start, ...userIds);
   return r ? { run_id: r.id, pay_date: r.pay_date, message: `These dates were already paid on ${r.pay_date} (pay run #${r.id}). Void that run first.` } : null;
 }
+const payWarnings = lines => lines.flatMap(l => (l.warnings || []).map(text => ({ user_id: l.user_id, name: l.employee_name, text })));
 function extraReason(b) {
   if (!extraRun(b)) return '';
   const why = str(b.extra_reason, 200).trim();
@@ -734,7 +743,7 @@ function extraReason(b) {
 }
 app.post('/api/staff/payroll/preview', requireArea('payroll', 2), requireLicence, wrap((req, res) => {
   const b = req.body || {}, extra = extraRun(b), lines = computePayroll(b.period_start, b.period_end, adminOnlyHours(req, b.adjustments), 1, extra);
-  res.json({ lines, settings: getSettings(), extra_run: extra, already_paid: extra ? null : alreadyPaid(b.period_start, b.period_end, lines.map(l => l.user_id)) });
+  res.json({ lines, settings: getSettings(), extra_run: extra, already_paid: extra ? null : alreadyPaid(b.period_start, b.period_end, lines.map(l => l.user_id)), warnings: payWarnings(lines) });
 }));
 app.post('/api/staff/payroll/runs', requireArea('payroll', 2), requireLicence, wrap((req, res) => {
   const { period_start, period_end, pay_date } = req.body, adjustments = adminOnlyHours(req, req.body.adjustments);
@@ -743,11 +752,13 @@ app.post('/api/staff/payroll/runs', requireArea('payroll', 2), requireLicence, w
   const lines = computePayroll(period_start, period_end, adjustments, 1, !!extra);
   if (!lines.length) bad('No paid employees to include. Set pay rates under Staff first.');
   if (extra && !lines.some(l => l.gross > 0)) bad('Enter the extra pay (allowances) for at least one person.');
+  const warn = payWarnings(lines);
+  if (warn.length && req.body.confirm_warnings !== true) throw new HttpError(409, `Check these shifts before finalising: ${warn.map(w => `${w.name}: ${w.text}`).join(' ')}`, { warnings: warn });
   const sum = k => round2(lines.reduce((a, l) => a + l[k], 0));
   db.exec('BEGIN');
   try {
     const clash = extra ? null : alreadyPaid(period_start, period_end, lines.map(l => l.user_id)); // inside the transaction: two finalises at once can't both pass
-    if (clash) throw Object.assign(new HttpError(409, clash.message), { already_paid: clash });
+    if (clash) throw new HttpError(409, clash.message, { already_paid: clash });
     const runId = db.prepare(`INSERT INTO payroll_runs(period_start, period_end, pay_date, created_by, total_gross, total_net, total_fnpf_employer, extra_reason) VALUES(?,?,?,?,?,?,?,?)`)
       .run(period_start, period_end, pay_date, req.user.id, sum('gross'), sum('net'), sum('fnpf_employer'), extra).lastInsertRowid;
     const ins = db.prepare(`INSERT INTO payslips(run_id, user_id, employee_name, position, pay_type, pay_rate, hours, base_pay, allowances, gross, fnpf_employee, fnpf_employer, paye, other_deductions, net, notes, worked_hours, break_hours, deduction_lines, leave_hours, leave_pay, leave_lines)
@@ -878,7 +889,7 @@ app.get('/api/staff/export/:what.csv', requireStaff, wrap((req, res) => {
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
   if (err instanceof LockedError) return res.status(402).json({ error: err.message, locked: true, ...err.locked });
-  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, ...(err.already_paid && { already_paid: err.already_paid }) });
+  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, ...(err.extra || {}) });
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
   console.error(err);
   res.status(500).json({ error: 'Something went wrong on the server.' });

@@ -20,7 +20,7 @@ async function api(url, opts = {}) {
   if (res.status === 401 && location.pathname.startsWith('/staff') && !url.startsWith('/api/auth/') && window.__loggedIn) {
     if (!window.__relogin) { window.__relogin = true; toast('Your login has expired — please log in again.'); setTimeout(() => location.reload(), 1500); }
   }
-  if (!res.ok) { const e = new Error((data && data.error) || `Request failed (${res.status})`); e.status = res.status; throw e; }
+  if (!res.ok) { const e = new Error((data && data.error) || `Request failed (${res.status})`); e.status = res.status; e.data = data; throw e; }
   return data;
 }
 

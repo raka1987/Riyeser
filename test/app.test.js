@@ -524,6 +524,35 @@ test('S28: a finalised pay run is written for Accounting (riyeser.payrun.v1); vo
   assert.ok(!fs.existsSync(path.join(inbox, r.data.accounting_file)));
 });
 
+test('S31: a forgotten clock-out (over 12 h) must be confirmed at clock-out, and is flagged and confirmed in the pay run', async () => {
+  const today = (await call('GET', '/api/public/info')).data.today;
+  const e = (await call('POST', '/api/staff/employees', { name: 'Long Shift', username: 'longshift', password: 'longshift1', role: 'staff', pay_type: 'hourly', pay_rate: 15 }, admin)).data;
+  const start = addDaysISO(today, -2);
+  assert.equal((await call('POST', '/api/staff/timesheets', { user_id: e.id, clock_in: `${start}T08:00` }, admin)).status, 200); // clocked in, never out
+  // the pay run preview says the open shift isn't paid
+  let pv = (await call('POST', '/api/staff/payroll/preview', { period_start: addDaysISO(today, -6), period_end: today }, admin)).data;
+  assert.ok(pv.warnings.some(w => w.user_id === e.id && /Still clocked in since/.test(w.text)));
+  // clocking out 2 days later asks first
+  const out = await call('POST', '/api/staff/timeclock/punch', { user_id: e.id, pin: e.clock_pin }, admin);
+  assert.equal(out.status, 409); assert.match(out.data.error, /Was a clock-out forgotten\?/); assert.ok(out.data.long_shift.hours > 12);
+  assert.ok((await call('GET', `/api/staff/timesheets?user_id=${e.id}`, null, admin)).data.every(t => !t.clock_out)); // not saved
+  const ok = await call('POST', '/api/staff/timeclock/punch', { user_id: e.id, pin: e.clock_pin, confirm_long: true }, admin);
+  assert.equal(ok.status, 200); assert.ok(ok.data.shift_hours > 12);
+  // the pay run shows the long shift and won't finalise until it's confirmed
+  const period = { period_start: addDaysISO(today, -6), period_end: today, pay_date: today };
+  pv = (await call('POST', '/api/staff/payroll/preview', period, admin)).data;
+  const w = pv.warnings.find(x => x.user_id === e.id); assert.ok(w); assert.match(w.text, /h shift .*Forgotten clock-out\?/);
+  const fin = await call('POST', '/api/staff/payroll/runs', period, admin);
+  assert.equal(fin.status, 409); assert.ok(fin.data.warnings.some(x => x.user_id === e.id)); assert.match(fin.data.error, /^Check these shifts before finalising/);
+  // an admin who corrects the hours clears that person's warning
+  const fixed = (await call('POST', '/api/staff/payroll/preview', { ...period, adjustments: { [e.id]: { hours: 8, hours_note: 'forgot to clock out' } } }, admin)).data;
+  assert.ok(!fixed.warnings.some(x => x.user_id === e.id));
+  const conf = await call('POST', '/api/staff/payroll/runs', { ...period, confirm_warnings: true }, admin);
+  assert.equal(conf.status, 200, JSON.stringify(conf.data));
+  assert.equal((await call('DELETE', `/api/staff/payroll/runs/${conf.data.id}`, null, admin)).status, 200); // leave these dates unpaid for later tests
+  await call('PUT', `/api/staff/employees/${e.id}`, { active: false }, admin);
+});
+
 test('wage reports: check the files, see the problems, import as pay history, year to date includes it', async () => {
   const oct = await wageBook([
     { sheet: 'Anil', name: 'Anill Prasad', fnpf: 'MN1', acct: '111', rate: 7, hours: [40, 40, 31.9, 39, 40] },
