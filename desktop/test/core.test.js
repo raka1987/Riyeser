@@ -693,14 +693,30 @@ test('Riyeser Central: Riyeser Link (formerly Riyeser Team) and Riyeser Link Off
   // Link Office is never mistaken for Riyeser Link, in either order
   assert.deepEqual(u.installedFromRegistry(reg('Riyeser Link Office', '1.0.0')), { linkoffice: '1.0.0' });
   assert.deepEqual(u.installedFromRegistry(reg('Riyeser Link Office', '1.0.0') + reg('Riyeser Link', '1.1.0')), { linkoffice: '1.0.0', team: '1.1.0' });
-  const files = ['RiyeserTeam-Setup.exe', 'RiyeserLinkOffice-Setup.exe'];
+  const files = ['RiyeserLink-Setup.exe', 'RiyeserTeam-Setup.exe', 'RiyeserLinkOffice-Setup.exe'];
   const asset = (n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 });
   const latest = u.latestFromRelease({ tag_name: 't', body: '- Riyeser Link Office 1.0.0\n- Riyeser Link 1.1.0', assets: files.map(asset) });
   assert.equal(latest.products.team.version, '1.1.0');
-  assert.match(latest.products.team.url, /RiyeserTeam-Setup\.exe$/);   // the same release file as before
+  assert.match(latest.products.team.url, /RiyeserLink-Setup\.exe$/);   // M3: the new name when the release has it
+  // a release from before M3 (only RiyeserTeam-Setup.exe) still updates Riyeser Link
+  const old = u.latestFromRelease({ tag_name: 't', body: '- Riyeser Link 1.1.0', assets: ['RiyeserTeam-Setup.exe'].map(asset) });
+  assert.match(old.products.team.url, /RiyeserTeam-Setup\.exe$/);
   assert.equal(latest.products.linkoffice.version, '1.0.0');
   assert.match(latest.products.linkoffice.url, /RiyeserLinkOffice-Setup\.exe$/);
   assert.deepEqual(u.availableUpdates(u.installedFromRegistry(reg('Riyeser Team', '1.0.0')), latest).map((x) => `${x.id} ${x.from}->${x.to}`), ['team 1.0.0->1.1.0']);
   // a release file that says versions.json (read by older Centrals as well) works too
   assert.equal(u.latestFromRelease({ tag_name: 't', body: '', assets: files.map(asset) }, { team: '1.1.0' }).products.team.version, '1.1.0');
+});
+
+test('M3: Riyeser Link\'s installer is RiyeserLink-Setup, with a RiyeserTeam-Setup copy for the old name', () => {
+  const prev = process.env.DESK_APP; process.env.DESK_APP = 'team';
+  delete require.cache[require.resolve('../scripts/builder.config.js')];
+  try {
+    const cfg = require('../scripts/builder.config.js');
+    assert.match(cfg.nsis.artifactName, /^RiyeserLink-Setup-/);
+  } finally { if (prev === undefined) delete process.env.DESK_APP; else process.env.DESK_APP = prev; delete require.cache[require.resolve('../scripts/builder.config.js')]; }
+  const pkg = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'package-win.js'), 'utf8');
+  assert.match(pkg, /RiyeserLink-Setup-.*RiyeserTeam-/s);
+  const team = require('../src/central/updates').PRODUCTS.find((p) => p.id === 'team');
+  assert.deepEqual([team.asset, team.oldAsset], ['RiyeserLink-Setup.exe', 'RiyeserTeam-Setup.exe']);
 });

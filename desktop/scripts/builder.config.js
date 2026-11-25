@@ -22,9 +22,10 @@ const APPS = {
     extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.2.0', productName: 'As Built' } },
   // Riyeser Link was called Riyeser Team. Only the name people see changed (window, tray, shortcuts, Installed apps,
   // Task Manager). The app id, install folder (riyeser-team, from the package name), program file (Riyeser Team.exe),
-  // data folder (%APPDATA%\Riyeser Team, set in team-main.js, with the sign-in and chats) and release file
-  // (RiyeserTeam-Setup.exe) stay the same, so installed copies update in place and older Centrals still find it.
-  team: { name: 'Riyeser Link', appId: 'com.riyeser.team', ico: 'build/team/icon.ico', out: 'dist-team', artifact: 'RiyeserTeam',
+  // data folder (%APPDATA%\Riyeser Team, set in team-main.js, with the sign-in and chats) stay the same, so installed
+  // copies update in place. M3: the installer is RiyeserLink-Setup; package-win.js also leaves a RiyeserTeam-Setup copy
+  // so the old download link and older Centrals (which look for RiyeserTeam-Setup.exe) keep working.
+  team: { name: 'Riyeser Link', appId: 'com.riyeser.team', ico: 'build/team/icon.ico', out: 'dist-team', artifact: 'RiyeserLink',
     executableName: 'Riyeser Team',
     extraMetadata: { main: 'src/team-main.js', name: 'riyeser-team', version: '1.1.1', productName: 'Riyeser Link' } },
   // Riyeser Link Office installs for the whole PC (one Windows permission prompt) so its installer can add the Windows

@@ -15,8 +15,9 @@ const PRODUCTS = [
   { id: 'accounting-basics', display: 'Riyeser Accounting Basics', asset: 'RiyeserAccountingBasics-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   // The till on its own (installs next to Accounting).
   { id: 'pos', display: 'Riyeser POS', asset: 'RiyeserPOS-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
-  // Riyeser Link was called Riyeser Team (same app, same release file): Windows lists it under either name.
-  { id: 'team', display: 'Riyeser Link', also: ['Riyeser Team'], asset: 'RiyeserTeam-Setup.exe', args: ['/S'] },
+  // Riyeser Link was called Riyeser Team (same app): Windows lists it under either name. M3: its release file is
+  // RiyeserLink-Setup.exe; releases also keep RiyeserTeam-Setup.exe (the old download links and older Centrals).
+  { id: 'team', display: 'Riyeser Link', also: ['Riyeser Team'], asset: 'RiyeserLink-Setup.exe', oldAsset: 'RiyeserTeam-Setup.exe', args: ['/S'] },
   // Installs for the whole PC, so Windows asks for permission when it installs or updates (for its firewall rule).
   { id: 'linkoffice', display: 'Riyeser Link Office', asset: 'RiyeserLinkOffice-Setup.exe', args: ['/S'] },
   { id: 'invoices', display: 'Riyeser Invoices', asset: 'RiyeserInvoices-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },

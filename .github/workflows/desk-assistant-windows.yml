@@ -58,6 +58,10 @@ jobs:
         run: |
           # Riyeser Link was called Riyeser Team. Install the released Riyeser Team first, so the new build is checked
           # as an update over it: same folder and program file, one Installed apps entry, sign-in folder kept.
+          # M3: the installer is RiyeserLink-Setup now, with a RiyeserTeam-Setup copy for the old name
+          $lk = Get-ChildItem "dist-team\RiyeserLink-Setup-*.exe" | Select-Object -First 1
+          $tm = Get-ChildItem "dist-team\RiyeserTeam-Setup-*.exe" | Select-Object -First 1
+          if (-not $lk -or -not $tm -or (Get-FileHash $lk.FullName).Hash -ne (Get-FileHash $tm.FullName).Hash) { throw "Expected RiyeserLink-Setup and the same file as RiyeserTeam-Setup in dist-team" }
           $old = "$env:RUNNER_TEMP\RiyeserTeam-old.exe"
           Invoke-WebRequest "https://github.com/raka1987/Riyeser/releases/latest/download/RiyeserTeam-Setup.exe" -OutFile $old
           Start-Process -FilePath $old -ArgumentList "/S" -Wait
@@ -72,7 +76,7 @@ jobs:
               @{ setup = "dist-pdf\RiyeserPDF-Setup-*.exe"; exe = "Riyeser PDF.exe"; name = "Riyeser PDF*" },
               @{ setup = "dist-central\RiyeserCentral-Setup-*.exe"; exe = "Riyeser Central.exe"; name = "Riyeser Central*" },
               @{ setup = "dist-services\RiyeserServices-Setup-*.exe"; exe = "Riyeser Services.exe"; name = "As Built*" },
-              @{ setup = "dist-team\RiyeserTeam-Setup-*.exe"; exe = "Riyeser Team.exe"; name = "Riyeser Link [0-9]*" })) {
+              @{ setup = "dist-team\RiyeserLink-Setup-*.exe"; exe = "Riyeser Team.exe"; name = "Riyeser Link [0-9]*" })) {
             $setup = Get-ChildItem $app.setup | Select-Object -First 1
             Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
             $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter $app.exe | Select-Object -First 1
@@ -152,6 +156,6 @@ jobs:
             desktop/dist-pdf/RiyeserPDF-Setup-*.exe
             desktop/dist-central/RiyeserCentral-Setup-*.exe
             desktop/dist-services/RiyeserServices-Setup-*.exe
-            desktop/dist-team/RiyeserTeam-Setup-*.exe
+            desktop/dist-team/RiyeserLink-Setup-*.exe
             desktop/dist-linkoffice/RiyeserLinkOffice-Setup-*.exe
           if-no-files-found: error

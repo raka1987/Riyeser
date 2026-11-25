@@ -53,4 +53,9 @@ for (const app of ['assistant', 'pdf', 'central', 'services', 'team', 'linkoffic
   const out = app === 'assistant' ? 'dist' : `dist-${app}`;
   fs.rmSync(path.join(root, out), { recursive: true, force: true });
   run('npx', ['electron-builder', '--win', '--config', 'scripts/builder.config.js'], { DESK_APP: app });
+  // M3: Riyeser Link's installer is RiyeserLink-Setup; a RiyeserTeam-Setup copy keeps the old name working
+  if (app === 'team') {
+    const dir = path.join(root, out);
+    for (const f of fs.readdirSync(dir).filter((n) => /^RiyeserLink-Setup-.*\.exe$/.test(n))) fs.copyFileSync(path.join(dir, f), path.join(dir, f.replace(/^RiyeserLink-/, 'RiyeserTeam-')));
+  }
 }
