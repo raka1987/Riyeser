@@ -229,6 +229,54 @@ def _form_lookups(db):
                                      " ORDER BY name").fetchall())
 
 
+# ---------------------------------------------------------------- reminders (S51)
+def reminder(db, bid):
+    """The reminder for one booking: {'to', 'subject', 'body', 'mailto'}; to is None without an email address."""
+    from urllib.parse import quote
+    b = db.execute("SELECT b.*, c.name cname, c.email cemail, s.name service FROM bookings b"
+                   " LEFT JOIN contacts c ON c.id=b.contact_id LEFT JOIN booking_services s ON s.id=b.service_id"
+                   " WHERE b.id=?", (bid,)).fetchone()
+    co = db.execute("SELECT name, phone, email FROM company WHERE id=1").fetchone()
+    when = datetime.fromisoformat(b["starts_at"])
+    what = b["service"] or b["title"] or M()["one"]
+    subject = f"Reminder: {what} on {when:%a %d %b} at {when:%H:%M} with {co['name']}"
+    body = (f"Hello {b['cname'] or ''},\n\nThis is a reminder of your {what.lower()} with {co['name']} on "
+            f"{when:%A %d %B %Y} at {when:%H:%M}" + (f", at {b['address']}" if b["address"] else "") + ".\n\n"
+            "To confirm, just reply to this email. To change the time, reply or call us"
+            + (f" on {co['phone']}" if co["phone"] else "") + f".\n\nThank you,\n{co['name']}")
+    to = (b["cemail"] or "").strip() or None
+    return dict(to=to, subject=subject, body=body, when=when, status=b["status"],
+                mailto=f"mailto:{quote(to or '')}?subject={quote(subject)}&body={quote(body)}")
+
+
+def schedule_reminder(db, bid):
+    """With email set up, the reminder is queued for 9am the day before (S51); a changed booking replaces it."""
+    from .. import mailer
+    db.execute("DELETE FROM email_queue WHERE kind='booking_reminder' AND ref_id=? AND status<>'sent'", (bid,))
+    r = reminder(db, bid)
+    if not r["to"] or r["status"] not in ("booked", "confirmed") or not mailer.settings(db):
+        return False
+    at = (r["when"] - timedelta(days=1)).replace(hour=9, minute=0, second=0)
+    if r["when"] <= datetime.now():
+        return False
+    mailer.queue(db, r["to"], r["subject"], r["body"], kind="booking_reminder", ref_id=bid,
+                 send_after=max(at, datetime.now()).isoformat(sep=" ", timespec="seconds"))
+    return True
+
+
+@bp.route("/<int:bid>/remind", methods=["POST"])
+@guarded
+def remind(bid):
+    """Send reminder: now, by email (when email is set up)."""
+    from .email import send_or_queue
+    db = get_db()
+    r = reminder(db, bid)
+    if not r["to"]:
+        raise PostingError("Add the customer's email address first.")
+    flash(send_or_queue(db, r["to"], r["subject"], r["body"], kind="booking_reminder_now", ref_id=bid), "ok")
+    return redirect(url_for("bookings.edit", bid=bid))
+
+
 def _lanes(items):
     """Give each booking a lane (and how many lanes its overlapping group has)."""
     items.sort(key=lambda i: (i["top"], -i["height"]))
@@ -295,7 +343,10 @@ def edit(bid=None):
                      parts=db.execute("SELECT * FROM booking_materials WHERE booking_id=? ORDER BY id", (b["id"],)).fetchall(),
                      items=_sold_items(db), outcomes=OUTCOMES,
                      visits=db.execute("SELECT COUNT(*) FROM bookings WHERE job_id=?", (job["id"],)).fetchone()[0])
-    return render_template("bookings/edit.html", b=b, pre=pre, inv=inv, job=job, **extra, **_form_lookups(db))
+    from .. import mailer
+    rem = reminder(db, b["id"]) if b else None
+    return render_template("bookings/edit.html", b=b, pre=pre, inv=inv, job=job, rem=rem,
+                           email_ready=bool(mailer.settings(db)), **extra, **_form_lookups(db))
 
 
 def _save(bid):
@@ -388,7 +439,9 @@ def _save_core(bid):
                          vals + (mode(), g.user["id"])).lastrowid
         audit(db, "booking_new", f"#{bid} {start:%Y-%m-%d %H:%M}")
     refresh_job(db, jid)
+    queued = schedule_reminder(db, bid)
     flash(("Visit" if m["address"] else m["one"].capitalize()) + " saved." +
+          (" A reminder email goes to the customer the day before." if queued else "") +
           (f" {job_no(follow_of['id'])} was already invoiced, so this is on a new follow-up job, {job_no(jid)}."
            if follow_of else ""), "ok")
     return redirect(url_for("bookings.calendar", d=start.date().isoformat()))

@@ -912,3 +912,36 @@ def test_m28_free_items_big_quantities_and_cash_and_barcodes(tmp_path, monkeypat
         it = next(i for i in _items(get_db())[0] if i["id"] == coffee)
     assert it["barcodes"] == ["9300601123456", "9300601999999"]
     assert "(i.barcodes||[]).includes(q)" in page(c.get("/pos/"))
+
+
+# ------------------------------------------------------------------ S51
+def test_s51_booking_reminders_queued_the_day_before_or_a_prepared_email(tmp_path, monkeypatch, smtp):
+    from datetime import date, timedelta
+    from riyeser import mailer
+    from tests.test_bookings_app import _jobs_setup, _book, _one
+    app, c, item, cust, staff = _jobs_setup(tmp_path, monkeypatch)
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE contacts SET email='guest@coral.test' WHERE id=?", (cust,))
+        db.commit()
+    day = (date.today() + timedelta(days=5)).isoformat()
+    # no email set up: the booking offers a prepared email to send yourself
+    _book(c, contact_id=cust, resource_id=staff, date=day, time="10:00")
+    bid = _one(app, "SELECT id FROM bookings ORDER BY id DESC")["id"]
+    html = page(c.get(f"/bookings/{bid}"))
+    assert "mailto:guest%40coral.test?subject=Reminder" in html and "opens your email program" in html
+    # with email set up: the reminder is queued for 9am the day before, and a Send reminder button sends now
+    _email_setup(c)
+    _book(c, contact_id=cust, resource_id=staff, date=day, time="14:00")
+    bid2 = _one(app, "SELECT id FROM bookings ORDER BY id DESC")["id"]
+    q = _one(app, "SELECT * FROM email_queue WHERE kind='booking_reminder' AND ref_id=?", (bid2,))
+    assert q["to_addr"] == "guest@coral.test" and q["send_after"].startswith(
+        (date.today() + timedelta(days=4)).isoformat() + " 09:00") and "To confirm, just reply" in q["body"]
+    with app.app_context():
+        db = get_db()
+        assert mailer.send_pending(db) == (0, 0)                                       # not due yet
+        assert mailer.send_pending(db, now=f"{day} 08:00:00") == (1, 0)                # due: sent
+    assert "Reminder:" in smtp.sent[-1]["Subject"] and "14:00" in smtp.sent[-1]["Subject"]
+    assert "Send reminder</button>" in page(c.get(f"/bookings/{bid}"))
+    r = c.post(f"/bookings/{bid}/remind", follow_redirects=True)
+    assert "Emailed to guest@coral.test" in page(r) and "10:00" in smtp.sent[-1]["Subject"]

@@ -155,6 +155,32 @@ def _audit_into(path, details):
         con.close()
 
 
+def send_due_email(app):
+    """Booking reminders and anything else waiting in the outbox go out in the background (S51), at most every
+    10 minutes per company, so no page waits for the email server."""
+    import threading
+    import time
+    if app.config.get("TESTING") and not app.config.get("SEND_EMAIL_IN_BACKGROUND"):
+        return
+    path = _here()
+    last = app.config.setdefault("_email_sent_at", {})
+    if time.time() - last.get(path, 0) < 600:
+        return
+    last[path] = time.time()
+
+    def run():
+        from .. import mailer
+        con = sqlite3.connect(path, timeout=30)
+        con.row_factory = sqlite3.Row
+        try:
+            mailer.send_pending(con)
+        except (OSError, sqlite3.Error) as e:
+            app.logger.warning("Sending queued email failed: %s", e)
+        finally:
+            con.close()
+    threading.Thread(target=run, daemon=True).start()
+
+
 def auto_backup(app):
     """Once a day per company file, the first time it's used that day (S38). Never stops the page loading."""
     if not app.config.get("AUTO_BACKUP", not app.config.get("TESTING")):

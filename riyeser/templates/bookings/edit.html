@@ -26,7 +26,7 @@
   <div class="wide"><label>Notes</label><textarea name="notes" rows="2">{{ v.notes or '' }}</textarea></div>
   <label class="check"><input type="checkbox" name="allow_overlap" value="1"> Allow double-booking</label>
   {% if not b %}<label class="check"><input type="checkbox" name="past_ok" value="1"> Save anyway if the time is in the past</label>{% endif %}
-</div>{% if can('bookings', 2) %}<p><button class="btn pri">Save</button> <a class="btn" href="{{ url_for('bookings.calendar', d=(v.starts_at[:10] if b else pre.date)) }}">Back to calendar</a></p>{% endif %}</form>
+</div>{% if rem and rem.status in ('booked', 'confirmed') %}<p>{% if rem.to and email_ready %}<button class="btn" formaction="{{ url_for('bookings.remind', bid=b.id) }}" formnovalidate>Send reminder</button>{% elif rem.to %}<a class="btn" href="{{ rem.mailto }}">Send reminder</a> <small class="muted">opens your email program with the reminder written</small>{% else %}<span class="muted">Add the customer's email address to send a reminder.</span>{% endif %}</p>{% endif %}{% if can('bookings', 2) %}<p><button class="btn pri">Save</button> <a class="btn" href="{{ url_for('bookings.calendar', d=(v.starts_at[:10] if b else pre.date)) }}">Back to calendar</a></p>{% endif %}</form>
 {% if b and job and m.address and can('bookings', 2) %}
 <div class="bk-two">
 {% if b.status in ('booked', 'confirmed', 'started') %}<form method="post" action="{{ url_for('bookings.finish', bid=b.id) }}" class="card"><h3>Finish this visit</h3>

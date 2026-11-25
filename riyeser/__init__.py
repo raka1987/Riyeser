@@ -110,8 +110,9 @@ def create_app(test_config=None):
                 and request.endpoint not in ("auth.logout", "auth.login", "auth.forgot"):
             abort(403)
         if g.user is not None:
-            from .views.backups import auto_backup
+            from .views.backups import auto_backup, send_due_email
             auto_backup(app)  # once a day per company (S38)
+            send_due_email(app)  # booking reminders when they're due (S51)
             g.over_allowance = not co.within_allowance(co.current_id())
             from .perms import check_request
             why = check_request(db)
@@ -248,7 +249,7 @@ def create_app(test_config=None):
 
 # Riyeser POS is the till plus what a shop needs to run it: products and stock, customers, users, help.
 # Everything else is Riyeser Accounting's, so POS sends people back to the till.
-POS_APP_AREAS = ("pos.", "inventory.", "contacts.", "companies.", "help.", "auth.")
+POS_APP_AREAS = ("pos.", "inventory.", "contacts.", "companies.", "help.", "auth.", "backups.", "email.")
 
 
 def _separate_app_redirect(endpoint):
@@ -280,7 +281,7 @@ def _separate_app_redirect(endpoint):
 
 # Riyeser Invoices (free): quotes, invoices, customers, receiving payments and who owes you. Everything else is
 # Riyeser Accounting's, and opens there with the same company file.
-INVOICES_APP_ENDPOINTS = ("companies.", "help.", "auth.")
+INVOICES_APP_ENDPOINTS = ("companies.", "help.", "auth.", "backups.", "email.")
 INVOICES_APP_EXACT = {"static", "core.company", "core.invoices_upgrade", "core.bookings_app", "documents.save_pdf"}
 
 
@@ -310,7 +311,8 @@ def _bookings_app_redirect(endpoint):
     home = url_for("bookings.calendar")
     if endpoint == "core.dashboard":
         return redirect(home)
-    if endpoint.startswith(("bookings.", "companies.", "help.", "auth.")) or endpoint in ("static", "core.company"):
+    if endpoint.startswith(("bookings.", "companies.", "help.", "auth.", "backups.", "email.")) or \
+            endpoint in ("static", "core.company"):
         return None
     if endpoint.startswith(("documents.", "contacts.")):
         try:
