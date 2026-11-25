@@ -371,3 +371,54 @@ def test_s15_booking_price_cannot_be_negative(tmp_path, monkeypatch):
     r = _book(c, contact_id=cust, resource_id=staff, price="-50")
     assert "can&#39;t be below $0" in page(r)
     assert _one(app, "SELECT COUNT(*) n FROM bookings")["n"] == 0
+
+
+# ------------------------------------------------------------------ S36, S44
+def test_s36_payment_details_print_on_invoices_and_statements(client, app):
+    from tests.test_batch2 import _pdf_text
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust, _ = _contacts(db)
+        db.commit()
+        f = {k: v for k, v in dict(db.execute("SELECT * FROM company").fetchone()).items() if v is not None}
+    f.update(bank_account_name="Test Co Pty Ltd", bank_bsb="062-000", bank_account_no="1234 5678",
+             payment_instructions="Use the invoice number as the reference")
+    client.post("/setup/company", data=f)
+    client.post("/sale/new", data=_inv_form(cust, [dict(description="x", qty="1", price="60", account=acc["4-1000"],
+                                                          tax=tc["GST"])]))
+    with app.app_context():
+        inv = get_db().execute("SELECT id FROM documents").fetchone()[0]
+    text = _pdf_text(client.get(f"/document/{inv}?pdf=1").data)
+    assert "Howtopay" in text and "BSB062-000" in text and "Account12345678" in text and "invoicenumberasthereference" in text
+    assert "BSB062-000" in _pdf_text(client.get(f"/cards/statement/{cust}?pdf=1").data)
+    assert "BSB 062-000" in page(client.get(f"/cards/statement/{cust}"))
+
+
+def test_s44_activity_statement_with_ageing_overdue_and_all_customers(client, app):
+    from tests.test_batch2 import _pdf_text
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust, sup = _contacts(db)
+        other = db.execute("INSERT INTO contacts (kind, name) VALUES ('customer','Zero Balance Ltd')").lastrowid
+        line = [dict(description="x", qty=1, unit_price=10000, account_id=acc["4-1000"], tax_code_id=tc["N-T"])]
+        L.save_document(db, "sale", dict(contact_id=cust, date="2026-09-01", due_date="2026-09-15"), line, "open")
+        i2 = L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-03", due_date="2026-12-03"), line, "open")
+        L.record_payment(db, "in", cust, acc["1-1110"], "2026-11-10", [(i2, 4000)])
+        L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-05"),
+                        [dict(description="y", qty=1, unit_price=500, account_id=acc["6-1500"], tax_code_id=tc["N-T"])],
+                        "open")
+        db.commit()
+    html = page(client.get(f"/cards/statement/{cust}?start=2026-11-01&end=2026-11-30"))
+    assert "Opening balance" in html and "$100.00" in html                  # September's invoice, carried in
+    assert "Payment received" in html and "-$40.00" in html
+    assert "Balance due at 2026-11-30" in html and "$160.00" in html
+    assert "Overdue:" in html and "76 days" in html                         # ageing: 61-90 days
+    assert html.count("$100.00") >= 2
+    sup_html = page(client.get(f"/cards/statement/{sup}?start=2026-11-01&end=2026-11-30"))
+    assert "Supplier" in sup_html and "Customer" not in sup_html
+    allp = page(client.get("/cards/statements?start=2026-11-01&end=2026-11-30"))
+    assert "C</td>" in allp and "Zero Balance Ltd" not in allp
+    text = _pdf_text(client.get("/cards/statements?pdf=1&start=2026-11-01&end=2026-11-30").data)
+    assert "Openingbalance" in text and "61–90DAYS" in text

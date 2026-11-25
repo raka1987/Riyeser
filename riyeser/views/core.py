@@ -235,6 +235,10 @@ def _save_company():
                 f.get("invoice_prefix") or "INV", f.get("bill_prefix") or "PO", int(f.get("next_invoice_no") or 1),
                 int(f.get("next_bill_no") or 1), int(f.get("default_terms_days") or 30)))
     db.execute("UPDATE company SET auto_pdf=? WHERE id=1", (1 if f.get("auto_pdf") else 0,))
+    db.execute("UPDATE company SET bank_name=?, bank_account_name=?, bank_bsb=?, bank_account_no=?,"
+               " payment_instructions=? WHERE id=1",
+               tuple((f.get(k) or "").strip() or None for k in ("bank_name", "bank_account_name", "bank_bsb",
+                                                                  "bank_account_no", "payment_instructions")))
     cur = (f.get("currency") or "").strip().upper()
     if cur:
         if len(cur) != 3 or not cur.isalpha():

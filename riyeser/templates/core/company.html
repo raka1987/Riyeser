@@ -9,6 +9,12 @@
 <div><label>Phone</label><input name="phone" value="{{ company.phone or '' }}"></div>
 <div><label>Email</label><input name="email" value="{{ company.email or '' }}"></div>
 <div class="wide"><label>Address</label><input name="address" value="{{ company.address or '' }}"></div></div></div>
+<div class="card"><h3>How customers pay you</h3><p class="muted">Printed as "How to pay" on invoices and statements.</p><div class="fields">
+<div><label for="bank_account_name">Account name</label><input id="bank_account_name" name="bank_account_name" value="{{ company.bank_account_name or '' }}"></div>
+<div><label for="bank_name">Bank</label><input id="bank_name" name="bank_name" value="{{ company.bank_name or '' }}"></div>
+<div><label for="bank_bsb">BSB</label><input id="bank_bsb" name="bank_bsb" value="{{ company.bank_bsb or '' }}"></div>
+<div><label for="bank_account_no">Account number</label><input id="bank_account_no" name="bank_account_no" value="{{ company.bank_account_no or '' }}"></div>
+<div class="wide"><label for="payment_instructions">Other payment instructions</label><input id="payment_instructions" name="payment_instructions" value="{{ company.payment_instructions or '' }}" placeholder="e.g. Please use the invoice number as the reference"></div></div></div>
 {% if product.separate %}<div class="card"><h3>Edition</h3><p style="margin:0">This is <b>{{ product.app }}</b>. <a href="{{ url_for('core.upgrade') }}">{{ 'Upgrade to ' ~ editions.enterprise.title if product.key == 'basic' else 'Switch to ' ~ editions.basic.title }} →</a> Your books stay exactly as they are.</p></div>
 {% else %}<div class="card"><h3>Edition</h3><div class="fields">
 <div><label>Riyeser Accounting edition</label><select name="edition"><option value="basic" {{ 'selected' if company.edition=='basic' }}>{{ editions.basic.name }} ({{ prices.basic }} a month per business, free for 90 days): invoicing, stock and inventory</option><option value="enterprise" {{ 'selected' if company.edition!='basic' }}{{ ' disabled' if not company.enterprise_allowed }}>{{ editions.enterprise.name }} (licence): everything</option></select></div>

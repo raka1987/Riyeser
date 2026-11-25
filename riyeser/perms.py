@@ -155,6 +155,8 @@ def area_of(endpoint, view_args, args, db):
             return ("sales" if r["direction"] == "in" else "purchases") if r else None
         return None
     if bp == "contacts":
+        if endpoint in ("contacts.statements_all", "contacts.email_statements"):
+            return "sales"
         if va.get("kind"):
             return _kind_area(va["kind"])
         if va.get("cid"):

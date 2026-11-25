@@ -1,0 +1,9 @@
+{% extends "base.html" %}{% block title %}Statements{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Customer statements</h1><p class="sub">Every customer with a balance, {{ start }} to {{ end }}.</p></div>
+<div class="actions"><a class="btn pri" href="?pdf=1&start={{ start }}&end={{ end }}">Print all (PDF)</a>{% if can_email is defined and can_email %} <form method="post" class="inline" action="{{ url_for('contacts.email_statements') }}"><input type="hidden" name="start" value="{{ start }}"><input type="hidden" name="end" value="{{ end }}"><button class="btn">Email statements</button></form>{% endif %}</div></div>
+<form class="filters"><div><label for="ss-start">From</label><input id="ss-start" type="date" name="start" value="{{ start }}"></div><div><label for="ss-end">To</label><input id="ss-end" type="date" name="end" value="{{ end }}"></div><div><button class="btn">Show</button></div></form>
+<div class="tbl"><table><tr><th>Customer</th><th>Email</th><th></th></tr>
+{% for c in people %}<tr><td>{{ c.name }}</td><td>{{ c.email or '' }}</td><td><a class="btn sm" href="{{ url_for('contacts.statement', cid=c.id, start=start, end=end) }}">Statement</a></td></tr>
+{% else %}<tr><td colspan="3" class="muted">No customer has a balance.</td></tr>{% endfor %}</table></div>
+{% endblock %}

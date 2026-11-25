@@ -72,16 +72,48 @@ def view(cid):
     return render_template("contacts/view.html", c=c, docs=docs, pays=pays, balance=balance, bks=bks)
 
 
+def _period():
+    from datetime import date
+    end = request.args.get("end") or date.today().isoformat()
+    start = request.args.get("start") or date.fromisoformat(end).replace(day=1).isoformat()
+    return start, end
+
+
 @bp.route("/statement/<int:cid>")
 def statement(cid):
+    """An activity statement for a period (S44), for customers and suppliers."""
+    from ..statements import statement as build, payment_details
     db = get_db()
     c = db.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone()
+    if not c:
+        abort(404)
+    start, end = _period()
     if request.args.get("pdf"):
         from flask import Response
         from .. import pdf as pdfmod
-        name = pdfmod.safe_name(f"Statement {c['name']} {__import__('datetime').date.today()}") + ".pdf"
-        return Response(pdfmod.statement_pdf(db, cid), mimetype="application/pdf",
+        name = pdfmod.safe_name(f"Statement {c['name']} {end}") + ".pdf"
+        return Response(pdfmod.statement_pdf(db, cid, start, end), mimetype="application/pdf",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
-    docs = db.execute("SELECT * FROM documents WHERE contact_id=? AND status='open' ORDER BY date", (cid,)).fetchall()
-    return render_template("contacts/statement.html", c=c, docs=docs,
-                           total=sum(d["total"] - d["amount_paid"] for d in docs))
+    return render_template("contacts/statement.html", st=build(db, cid, start, end), c=c,
+                           how_to_pay=payment_details(db.execute("SELECT * FROM company WHERE id=1").fetchone()))
+
+
+@bp.route("/statements")
+def statements_all():
+    """Every customer with a balance: one PDF to print, or email them all (S44)."""
+    from ..statements import with_balance
+    db = get_db()
+    start, end = _period()
+    people = with_balance(db, "customer")
+    if request.args.get("pdf"):
+        from flask import Response
+        from .. import pdf as pdfmod
+        doc = pdfmod._PDF(pdfmod._company(db))
+        for c in people:
+            pdfmod.statement_pdf(db, c["id"], start, end, pdf=doc)
+        if not people:
+            doc.add_page()
+            doc.notes("No customer has a balance.")
+        return Response(bytes(doc.output()), mimetype="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="Statements {end}.pdf"'})
+    return render_template("contacts/statements.html", people=people, start=start, end=end)

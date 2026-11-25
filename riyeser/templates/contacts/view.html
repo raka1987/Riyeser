@@ -6,7 +6,7 @@
 <div class="actions"><a class="btn" href="{{ url_for('contacts.edit', kind=c.kind, cid=c.id) }}">Edit</a>
 <a class="btn pri" href="{{ url_for('documents.edit', side=side, contact=c.id) }}">+ New {{ 'invoice' if side=='sale' else 'bill' }}</a>
 <a class="btn" href="{{ url_for('documents.pay', side=side, contact=c.id) }}">{{ 'Receive payment' if side=='sale' else 'Pay bills' }}</a>
-{% if side=='sale' %}<a class="btn" href="{{ url_for('contacts.statement', cid=c.id) }}">Statement</a>{% endif %}</div></div>
+<a class="btn" href="{{ url_for('contacts.statement', cid=c.id) }}">Statement</a></div></div>
 <div class="grid g3"><div class="card kpi"><div class="lbl">Balance owing</div><div class="val">{{ balance|money }}</div></div>
 <div class="card kpi"><div class="lbl">Credit terms</div><div class="val">{{ c.terms_days if c.terms_days is not none else company.default_terms_days }} days</div></div>
 <div class="card kpi"><div class="lbl">Credit limit</div><div class="val">{{ c.credit_limit|money if c.credit_limit else '—' }}</div>

@@ -143,6 +143,18 @@ class _PDF(FPDF):
             self.cell(50, 7, _t(label))
             self.cell(0, 7, _t(val), align="R", new_x="LMARGIN", new_y="NEXT")
 
+    def how_to_pay(self, db):
+        from .statements import payment_details
+        lines = payment_details(self.company)
+        if lines:
+            self.ln(5)
+            self.set_font(FONT, "B", 10)
+            self.set_text_color(*INK)
+            self.cell(0, 6, "How to pay", new_x="LMARGIN", new_y="NEXT")
+            self.set_font(FONT, "", 9.5)
+            for line in lines:
+                self.multi_cell(0, 5, _t(line), new_x="LMARGIN", new_y="NEXT")
+
     def notes(self, text):
         if text:
             self.ln(6)
@@ -195,23 +207,39 @@ def document_pdf(db, doc_id) -> bytes:
                 fmt_money(doc["total"] - doc["amount_paid"] if doc["status"] in ("open", "paid") else doc["total"])))
     pdf.totals(tot)
     pdf.notes(doc["notes"])
+    if doc["side"] == "sale" and doc["status"] in ("open", "paid") and (doc["kind"] or "invoice") == "invoice":
+        pdf.how_to_pay(db)
     return bytes(pdf.output())
 
 
-def statement_pdf(db, contact_id) -> bytes:
-    c = db.execute("SELECT * FROM contacts WHERE id=?", (contact_id,)).fetchone()
-    docs = db.execute("SELECT * FROM documents WHERE contact_id=? AND status='open' ORDER BY date",
-                      (contact_id,)).fetchall()
-    pdf = _PDF(_company(db))
+def statement_pdf(db, contact_id, start=None, end=None, pdf=None) -> bytes:
+    """An activity statement (S44); with pdf=, adds its pages to that PDF (statements for everyone at once)."""
+    from .statements import statement
+    end = end or date.today().isoformat()
+    start = start or date.fromisoformat(end).replace(day=1).isoformat()
+    st = statement(db, contact_id, start, end)
+    c = st["contact"]
+    own = pdf is None
+    pdf = pdf or _PDF(_company(db))
     pdf.add_page()
-    pdf.header_block("Statement", f"As at {date.today().isoformat()}", [])
-    pdf.party("Customer", c["name"], c["address"], c["abn"])
-    rows = [[d["number"], d["date"], d["due_date"] or "", fmt_money(d["total"]), fmt_money(d["amount_paid"]),
-             fmt_money(d["total"] - d["amount_paid"])] for d in docs]
-    pdf.table(["Invoice", "Date", "Due", "Total", "Paid", "Balance"], rows, [30, 26, 26, 34, 30, 32],
-              ["L", "L", "L", "R", "R", "R"])
-    pdf.totals([("Total due", fmt_money(sum(d["total"] - d["amount_paid"] for d in docs)))])
-    return bytes(pdf.output())
+    pdf.header_block("Statement", f"{start} to {end}", [("Balance", fmt_money(st["closing"]))])
+    pdf.party(st["label"], c["name"], c["address"], c["abn"])
+    rows = [[start, "Opening balance", "", "", fmt_money(st["opening"])]]
+    rows += [[a["date"], a["what"], a["ref"], fmt_money(a["amount"]), fmt_money(a["balance"])] for a in st["activity"]]
+    pdf.table(["Date", "Transaction", "Reference", "Amount", "Balance"], rows, [24, 58, 36, 30, 30],
+              ["L", "L", "L", "R", "R"])
+    pdf.ln(3)
+    pdf.table(st["buckets"], [[fmt_money(v) for v in st["ages"]]], [35.6] * 5, ["R"] * 5)
+    if st["overdue"]:
+        pdf.set_font(FONT, "B", 9.5)
+        pdf.set_text_color(180, 35, 24)
+        pdf.multi_cell(0, 5, "Overdue: " + ", ".join(f"{o['number']} ({o['days']} days, {fmt_money(o['due'])})"
+                                                   for o in st["overdue"]))
+        pdf.set_text_color(*INK)
+    pdf.totals([("Balance " + ("due" if st["closing"] >= 0 else "in credit"), fmt_money(st["closing"]))])
+    if st["side"] == "sale":
+        pdf.how_to_pay(db)
+    return bytes(pdf.output()) if own else b""
 
 
 def payslip_pdf(db, slip_id) -> bytes:
