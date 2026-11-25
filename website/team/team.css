@@ -508,6 +508,7 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
 .fnm { flex: 1; min-width: 0; } .fnm b { display: block; color: var(--ink); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .fnm small { color: var(--muted); font-size: 12px; }
 .composer { padding: 10px 18px 16px; flex: none; }
 .cbox { display: flex; gap: 4px; align-items: flex-end; border: 1px solid var(--field-line); border-radius: 14px; padding: 6px; background: var(--field); }
+.lk-cnt { display: block; text-align: right; font-size: 12px; color: var(--muted); padding: 4px 6px 0; } .lk-cnt.over { color: #dc2626; font-weight: 600; } .lk-cnt[hidden] { display: none; }
 .cbox:focus-within { border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
 .cbox textarea { flex: 1; border: 0; resize: none; max-height: 160px; min-height: 24px; padding: 8px 6px; outline: 0; line-height: 1.4; background: none; color: var(--ink); }
 .cbox > button:not(.lk-ib), #send { display: inline-grid; place-items: center; border: 0; background: var(--acc); color: var(--on-acc); border-radius: 10px; height: 36px; min-width: 40px; padding: 0 10px; font-weight: 700; }

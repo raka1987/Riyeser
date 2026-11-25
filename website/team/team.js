@@ -24,6 +24,7 @@
   const STORAGE_GB = { free: 2, plus: 20 };   // Riyeser Link files per business (the database enforces it: link_storage_limit)
   const GB = 1073741824;
   const usd = (n) => `US$${n % 1 ? n.toFixed(2) : n}`;
+  const MSG_MAX = 4000;   // the longest message (messages.body in team-chat.sql); longer text goes as a .txt file (S9)
   // This page's own folder (/link/ or the old /team/), so signing out and the demo stay where they are.
   const HERE = location.pathname.replace(/[^/]*$/, '') || '/link/';
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -46,6 +47,7 @@
     if (/Invalid TOTP|mfa_verification_failed|expired/i.test(m)) return 'That code isn\'t right. Type the 6 numbers your authenticator app shows now (they change every 30 seconds).';
     if (/created_by_fkey|JWT|sub claim/i.test(m)) return 'Your sign-in has ended. Sign out, then sign in again.';
     if (/Failed to fetch|NetworkError/i.test(m)) return 'Can\'t reach Riyeser Link. Check your internet connection and try again.';
+    if (/messages_body_check/i.test(m)) return `That message is too long. Messages can be up to ${MSG_MAX.toLocaleString('en')} characters: send long text as a file.`;
     if (/PGRST202|Could not find the function/i.test(m)) return 'This part of Riyeser is still being switched on. Use Get help for now.';
     return m;
   };
@@ -2270,6 +2272,7 @@
           <form class="composer" id="comp"><div class="lk-up" id="upl" hidden></div><div class="cbox"><button type="button" class="lk-ib" id="attach" aria-label="Attach a file" title="Attach a file (up to 25 MB)">${ic('clip')}</button>
           <button type="button" class="lk-ib" id="emo" aria-label="Add an emoji" title="Emoji">${ic('smile')}</button>
           <textarea id="txt" rows="1" placeholder="" aria-label="Message"></textarea><button id="send" disabled aria-label="Send" title="Send (Enter)">${ic('send')}</button></div>
+          <small class="lk-cnt" id="cnt" hidden aria-live="polite"></small>
           <input type="file" id="file" multiple hidden></form>`;
         wireComposer();
       }
@@ -2601,6 +2604,7 @@
     el.querySelectorAll('[data-edit]').forEach((f) => {
       const ta = f.querySelector('textarea');
       const save = async () => { const v = ta.value.trim(); const m = S.msgs.find((x) => x.id === f.dataset.edit);
+        if (v.length > MSG_MAX) return tell(`That's ${v.length.toLocaleString('en')} characters: a message can be up to ${MSG_MAX.toLocaleString('en')}.`);
         if (v && m && v !== m.body) { await api.edit(m.id, v); m.body = v; m.edited_at = new Date().toISOString(); } S.editing = null; renderMsgs(); };
       f.onsubmit = (e) => { e.preventDefault(); save(); };
       ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save(); } if (e.key === 'Escape') { S.editing = null; renderMsgs(); } };
@@ -2614,11 +2618,22 @@
   const safeName = (n) => (String(n || 'file').normalize('NFKD').replace(/[^\w.\- ]+/g, '').replace(/\s+/g, '_').replace(/^\.+/, '').slice(-100) || 'file');
   function wireComposer() {
     const f = document.getElementById('comp'); const t = document.getElementById('txt'); const b = document.getElementById('send');
-    const grow = () => { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 160) + 'px'; b.disabled = !t.value.trim() || !S.ch; };
+    const cnt = document.getElementById('cnt');
+    const grow = () => { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 160) + 'px'; b.disabled = !t.value.trim() || !S.ch;
+      // S9: a counter near the limit; over it, Send offers to send the text as a file
+      const n = t.value.trim().length; cnt.hidden = n < MSG_MAX - 500; cnt.classList.toggle('over', n > MSG_MAX);
+      cnt.textContent = n > MSG_MAX ? `${n.toLocaleString('en')} / ${MSG_MAX.toLocaleString('en')} characters: too long for one message. Send it as a text file.` : `${n.toLocaleString('en')} / ${MSG_MAX.toLocaleString('en')}`; };
     t.oninput = grow;
     t.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); f.requestSubmit(); } };
     f.onsubmit = async (e) => {
       e.preventDefault(); const body = t.value.trim(); if (!body || !S.ch) return;
+      if (body.length > MSG_MAX) {
+        if (!(await ask(`This is ${body.length.toLocaleString('en')} characters, and a message can be up to ${MSG_MAX.toLocaleString('en')}. Send it as a text file instead?`, { yes: 'Send as a .txt file', title: 'Too long for one message' }))) return;
+        const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+        t.value = ''; grow();
+        await sendFiles([new File([body], `message-${stamp}.txt`, { type: 'text/plain' })]);
+        return;
+      }
       t.value = ''; grow();
       try { const m = await api.send(S.team.id, S.ch.id, body); if (!S.msgs.find((x) => x.id === m.id)) S.msgs.push(m); S.last[S.ch.id] = m; renderMsgs(true); renderList(); }
       catch (err) { t.value = body; grow(); tell('That message didn\'t send: ' + plainError(err)); }
