@@ -49,6 +49,7 @@ jobs:
   desktop:
     name: Central, Desk Assistant, PDF, As Built, Link, Link Office
     runs-on: windows-latest
+    timeout-minutes: 45
     needs: licence-key
     # The licence public key, built into the program (empty until licence signing is switched on)
     env: { RIYESER_LICENCE_PUBLIC_KEY: "${{ needs.licence-key.outputs.key }}" }
@@ -107,6 +108,7 @@ jobs:
   accounting:
     name: Accounting Basics, Accounting Plus, POS, Invoices and Bookings
     runs-on: windows-latest
+    timeout-minutes: 45
     needs: licence-key
     # The licence public key, built into the program (empty until licence signing is switched on)
     env: { RIYESER_LICENCE_PUBLIC_KEY: "${{ needs.licence-key.outputs.key }}" }
@@ -178,6 +180,7 @@ jobs:
   payroll:
     name: Payroll
     runs-on: windows-latest
+    timeout-minutes: 45
     needs: licence-key
     # The licence public key, built into the program (empty until licence signing is switched on)
     env: { RIYESER_LICENCE_PUBLIC_KEY: "${{ needs.licence-key.outputs.key }}" }
