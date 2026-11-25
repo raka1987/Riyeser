@@ -5688,3 +5688,180 @@ do $$ begin
       public.billing_paypal_config_set(text, text, text), public.billing_paypal_event(text, text, jsonb, text) to service_role;
   end if;
 end $$;
+
+-- ================================================================ Website traffic (riyeser.com visits, for HQ Reports)
+-- Riyeser's own, privacy-friendly website analytics. The website's pages send one small note per page view to
+-- track_visit (with the publishable key; nothing else can write here). What's kept: when, the page, the website that
+-- linked to it (its name only), utm_source/medium/campaign, phone/tablet/desktop, the browser's name, the language and a
+-- rough region from the time zone. Never an IP address, the full browser details, cookies or anything that follows a
+-- person between visits: the "session" is a random id kept only while that browser tab is open, so HQ counts visits
+-- (sessions) and page views, not people. Browsers asking not to be tracked (Do Not Track, Global Privacy Control) send nothing.
+-- Read only by HQ staff with reports.view, through hq_traffic(). Raw rows are kept 13 months, daily totals 3 years (hq_traffic_sweep, run
+-- every day by .github/workflows/hq-jobs.yml).
+create table if not exists public.site_visits (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  session_id text not null check (length(session_id) between 8 and 40),
+  path text not null check (length(path) <= 80),
+  referrer_host text check (length(referrer_host) <= 100),
+  utm_source text check (length(utm_source) <= 60),
+  utm_medium text check (length(utm_medium) <= 60),
+  utm_campaign text check (length(utm_campaign) <= 80),
+  device text check (device in ('phone', 'tablet', 'desktop')),
+  browser text check (length(browser) <= 20),
+  lang text check (length(lang) <= 12),
+  region text check (length(region) <= 40)
+);
+-- Date ranges (12 months stays quick) and the per-session limit.
+create index if not exists site_visits_at on public.site_visits (at);
+create index if not exists site_visits_session on public.site_visits (session_id, at);
+alter table public.site_visits enable row level security;
+revoke all on public.site_visits from public, anon, authenticated;
+-- (no policies: writing goes through track_visit, reading through hq_traffic)
+
+-- A website page's address, tidied ('/pricing.html' -> '/pricing', '/index.html' -> '/'), or null if it isn't one of
+-- the website's pages (HQ, Riyeser Link, made-up addresses). Add new kinds of page here when the website gets them.
+create or replace function public.site_visit_path(p text) returns text language sql immutable as $$
+  select case when x ~ '^/((downloads|help|pricing|programs|terms)|(help|industries|programs)/[a-z0-9][a-z0-9-]{0,40})?$' then x end
+  from (select regexp_replace(regexp_replace(lower(split_part(split_part(left(coalesce(p, ''), 200), '?', 1), '#', 1)),
+    '(^|/)index\.html$', '\1'), '\.html$|/$', '') as x0) a
+  cross join lateral (select case when x0 = '' then '/' else x0 end as x) b
+$$;
+-- Short, printable text only.
+create or replace function public.site_visit_text(v text, n int) returns text language sql immutable as $$
+  select nullif(left(trim(regexp_replace(coalesce(v, ''), '[^[:print:]]|[<>"]', '', 'g')), n), '')
+$$;
+-- One page view from the website. Anything not right is quietly ignored (the page never waits for or shows this).
+-- At most 200 page views per session a day, so one tab can't flood it.
+create or replace function public.track_visit(s text, p text, r text default null, us text default null, um text default null,
+  uc text default null, d text default null, b text default null, l text default null, g text default null) returns void
+  language plpgsql security definer set search_path = public as $$
+declare pth text := site_visit_path(p); sid text := lower(left(coalesce(s, ''), 40));
+  ref text := regexp_replace(lower(left(trim(coalesce(r, '')), 120)), '^www\.', '');
+begin
+  if pth is null or sid !~ '^[a-z0-9]{8,40}$' then return; end if;
+  if (select count(*) from (select 1 from site_visits v where v.session_id = sid and v.at > now() - interval '1 day' limit 200) c) >= 200 then return; end if;
+  if ref !~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' or length(ref) > 100 or ref ~ '(^|\.)riyeser\.com$' then ref := null; end if;
+  insert into site_visits (session_id, path, referrer_host, utm_source, utm_medium, utm_campaign, device, browser, lang, region)
+  values (sid, pth, ref, site_visit_text(lower(us), 60), site_visit_text(lower(um), 60), site_visit_text(uc, 80),
+    case when d in ('phone', 'tablet', 'desktop') then d end,
+    case when b in ('Chrome', 'Safari', 'Firefox', 'Edge', 'Opera', 'Samsung', 'Other') then b end,
+    case when lower(l) ~ '^[a-z]{2,3}(-[a-z0-9]{2,4})?$' then lower(l) end,
+    case when g ~ '^[A-Za-z][A-Za-z .''-]{1,39}$' then g end);
+end $$;
+
+-- Daily totals, so a year of history stays quick: for each past UTC day, visits (sessions) and page views in total and
+-- by page, referrer (the first one in each session), campaign, device, browser and region. No session ids are kept
+-- here. A day is added once it's over (by hq_traffic when it's asked for, and by the daily sweep); today comes from the
+-- raw rows. A tab left open over midnight counts as a visit on both days.
+create table if not exists public.site_traffic_daily (
+  day date not null,
+  kind text not null check (kind in ('total', 'page', 'ref', 'camp', 'device', 'browser', 'region')),
+  k text not null default '',
+  visits int not null default 0,
+  views int not null default 0,
+  primary key (day, kind, k)
+);
+create table if not exists public.site_traffic_days (day date primary key, rolled_at timestamptz not null default now());
+alter table public.site_traffic_daily enable row level security;
+alter table public.site_traffic_days enable row level security;
+revoke all on public.site_traffic_daily, public.site_traffic_days from public, anon, authenticated;
+
+-- The daily numbers for days d1..d2, worked out from the raw page views.
+create or replace function public.site_traffic_compute(d1 date, d2 date)
+  returns table (day date, kind text, k text, visits bigint, views bigint) language sql stable set search_path = public as $$
+  with v as (select (x.at at time zone 'UTC')::date as day, x.* from site_visits x
+             where x.at >= (d1::timestamp at time zone 'UTC') and x.at < ((d2 + 1)::timestamp at time zone 'UTC')),
+       s as (select v.day, v.session_id, (array_agg(v.referrer_host order by v.at) filter (where v.referrer_host is not null))[1] as ref from v group by 1, 2)
+  select v.day, 'total', '', count(distinct v.session_id), count(*) from v group by 1
+  union all select v.day, 'page', v.path, count(distinct v.session_id), count(*) from v group by 1, 3
+  union all select s.day, 'ref', coalesce(s.ref, ''), count(*), 0 from s group by 1, 3
+  union all select v.day, 'camp', concat_ws(chr(9), coalesce(v.utm_source, ''), coalesce(v.utm_medium, ''), coalesce(v.utm_campaign, '')), count(distinct v.session_id), count(*)
+    from v where coalesce(v.utm_source, v.utm_medium, v.utm_campaign) is not null group by 1, 3
+  union all select v.day, 'device', coalesce(v.device, ''), count(distinct v.session_id), count(*) from v group by 1, 3
+  union all select v.day, 'browser', coalesce(v.browser, ''), count(distinct v.session_id), count(*) from v group by 1, 3
+  union all select v.day, 'region', coalesce(v.region, ''), count(distinct v.session_id), count(*) from v group by 1, 3
+$$;
+-- Adds the daily numbers for every finished day from d1 to d2 that doesn't have them yet. Returns how many days.
+create or replace function public.site_traffic_roll(d1 date, d2 date) returns int
+  language plpgsql security definer set search_path = public as $$
+declare todo date[]; a date; z date; utc_today date := (now() at time zone 'UTC')::date;
+begin
+  z := least(d2, utc_today - 1);
+  select array_agg(g::date), min(g::date), max(g::date) into todo, a, z from generate_series(d1, z, interval '1 day') g
+    where not exists (select 1 from site_traffic_days t where t.day = g::date);
+  if todo is null then return 0; end if;
+  insert into site_traffic_daily (day, kind, k, visits, views)
+    select c.day, c.kind, c.k, c.visits, c.views from site_traffic_compute(a, z) c where c.day = any(todo) on conflict do nothing;
+  insert into site_traffic_days (day) select unnest(todo) on conflict do nothing;
+  return cardinality(todo);
+end $$;
+
+-- Website traffic for HQ Reports (reports.view): headline numbers and the period before, visits by day (by week over
+-- 92 days), top pages, where visitors came from, devices, browsers, regions, and the funnel from a website visit to a
+-- paying business. Dates are UTC days. At most about 2 years.
+create or replace function public.hq_traffic(from_day date, to_day date) returns json
+  language plpgsql volatile security definer set search_path = public as $$
+declare utc_today date := (now() at time zone 'UTC')::date; f date := coalesce(from_day, utc_today - 29); t date := coalesce(to_day, utc_today);
+  n int; pf date; r json; wk boolean;
+begin
+  perform hq_need(array['reports.view']);
+  if t < f then raise exception 'Choose a start date before the end date.'; end if;
+  if t - f > 800 then f := t - 800; end if;
+  n := t - f + 1; pf := f - n; wk := n > 92;
+  perform site_traffic_roll(pf, t);
+  with d as materialized (
+         select x.day, x.kind, x.k, x.visits::bigint as visits, x.views::bigint as views from site_traffic_daily x where x.day between pf and t
+         union all select c.day, c.kind, c.k, c.visits, c.views from site_traffic_compute(greatest(pf, utc_today), t) c where t >= utc_today),
+       v as (select * from d where d.day >= f),
+       tot as (select * from v where kind = 'total'),
+       buckets as (select b::date as bd from generate_series(case when wk then date_trunc('week', f) else f end, t, case when wk then interval '7 days' else interval '1 day' end) b),
+       per as (select (case when wk then date_trunc('week', tot.day) else tot.day end)::date as bd, sum(tot.visits) as visits, sum(tot.views) as views from tot group by 1),
+       grp as (select kind, k, sum(visits) as visits, sum(views) as views from v where kind <> 'total' group by 1, 2),
+       ws as (select w.id from workspaces w where w.kind = 'business' and w.created_at >= f and w.created_at < t + 1)
+  select json_build_object('from', f, 'to', t, 'today', utc_today, 'bucket', case when wk then 'week' else 'day' end,
+    'visits', (select coalesce(sum(visits), 0) from tot), 'views', (select coalesce(sum(views), 0) from tot),
+    'prev', (select json_build_object('from', pf, 'to', f - 1, 'visits', coalesce(sum(visits), 0), 'views', coalesce(sum(views), 0)) from d where kind = 'total' and day < f),
+    'series', (select coalesce(json_agg(json_build_object('d', b.bd, 'visits', coalesce(p.visits, 0), 'views', coalesce(p.views, 0)) order by b.bd), '[]')
+        from buckets b left join per p on p.bd = b.bd),
+    'pages', (select coalesce(json_agg(json_build_object('path', k, 'views', views, 'visits', visits) order by views desc, k), '[]')
+        from (select * from grp where kind = 'page' order by views desc, k limit 25) x),
+    'referrers', (select coalesce(json_agg(json_build_object('host', k, 'visits', visits) order by visits desc, k), '[]')
+        from (select * from grp where kind = 'ref' order by visits desc, k limit 25) x),
+    'campaigns', (select coalesce(json_agg(json_build_object('source', nullif(split_part(k, chr(9), 1), ''), 'medium', nullif(split_part(k, chr(9), 2), ''),
+          'campaign', nullif(split_part(k, chr(9), 3), ''), 'visits', visits) order by visits desc), '[]')
+        from (select * from grp where kind = 'camp' order by visits desc, k limit 25) x),
+    'devices', (select coalesce(json_agg(json_build_object('k', k, 'visits', visits) order by visits desc), '[]') from grp where kind = 'device'),
+    'browsers', (select coalesce(json_agg(json_build_object('k', k, 'visits', visits) order by visits desc), '[]') from grp where kind = 'browser'),
+    'regions', (select coalesce(json_agg(json_build_object('k', k, 'visits', visits) order by visits desc), '[]')
+        from (select * from grp where kind = 'region' order by visits desc, k limit 20) x),
+    'funnel', json_build_object('visits', (select coalesce(sum(visits), 0) from tot),
+      'pricing', coalesce((select visits from grp where kind = 'page' and k = '/pricing'), 0),
+      'pricing_views', coalesce((select views from grp where kind = 'page' and k = '/pricing'), 0),
+      'signups', (select count(*) from auth.users au where au.created_at >= f and au.created_at < t + 1 and not exists (select 1 from hq_staff s where s.user_id = au.id)),
+      'trials', (select count(*) from ws),
+      'paid', (select count(*) from ws where exists (select 1 from company_modules c where c.workspace_id = ws.id and c.paid_since is not null)
+          or exists (select 1 from billing_payments bp where bp.workspace_id = ws.id and bp.status = 'completed'))))
+  into r;
+  return r;
+end $$;
+
+-- Every day (hq-jobs.yml): yesterday's (and any missed day's) totals are added, page views older than 13 months are
+-- deleted (their daily totals stay, with no session ids), and daily totals older than 3 years go too.
+create or replace function public.hq_traffic_sweep() returns json
+  language plpgsql security definer set search_path = public as $$
+declare k int; rolled int;
+begin
+  rolled := site_traffic_roll((now() at time zone 'UTC')::date - 400, (now() at time zone 'UTC')::date - 1);
+  delete from site_visits where at < now() - interval '13 months';
+  get diagnostics k = row_count;
+  delete from site_traffic_daily where day < current_date - interval '3 years';
+  delete from site_traffic_days where day < current_date - interval '3 years';
+  return json_build_object('deleted', k, 'days_added', rolled);
+end $$;
+
+revoke all on function public.site_visit_path(text), public.site_visit_text(text, int), public.hq_traffic_sweep(),
+  public.site_traffic_compute(date, date), public.site_traffic_roll(date, date),
+  public.track_visit(text, text, text, text, text, text, text, text, text, text), public.hq_traffic(date, date) from public, anon, authenticated;
+grant execute on function public.track_visit(text, text, text, text, text, text, text, text, text, text) to anon, authenticated;
+grant execute on function public.hq_traffic(date, date) to authenticated;

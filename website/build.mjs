@@ -441,6 +441,20 @@ function withVersions(html) {
   });
 }
 
+/** Website traffic (track_visit in team/team-chat.sql; HQ → Reports → Website traffic): one note per page view to Riyeser's
+    own database, on riyeser.com only. No cookies and nothing that outlives the browser tab (a random id in sessionStorage
+    counts visits); no IP address or full browser details are kept. Nothing is sent with Do Not Track or Global Privacy
+    Control on, or for robots, and a failed call never affects the page. */
+const TRAFFIC = (() => { const c = readFileSync(join(ROOT, 'team', 'config.js'), 'utf8'); const v = (k) => (new RegExp(k + ':\\s*"([^"]+)"').exec(c) || [])[1];
+  const url = v('supabaseUrl'); const key = v('supabaseKey'); if (!url || !key) return '';
+  return String.raw`<script>(function(){try{var n=navigator,L=location,h=L.hostname,u=n.userAgent;if(!/(^|\.)riyeser\.com$/.test(h)||(n.doNotTrack||self.doNotTrack)=='1'||n.globalPrivacyControl||n.webdriver||/bot|crawl|spider|slurp|headless|lighthouse|preview|facebook/i.test(u))return;
+var s,S,R=function(){return Math.random().toString(36).slice(2,12)};try{S=sessionStorage;s=S.getItem('rv');if(!s){s=R()+R();S.setItem('rv',s)}}catch(e){s=R()+R()}
+var q=new URLSearchParams(L.search),G=function(k){return q.get('utm_'+k)},r='',w=screen.width,z='',Z={Fiji:'Fiji',Auckland:'New Zealand',Apia:'Samoa',Tongatapu:'Tonga',Efate:'Vanuatu',Guadalcanal:'Solomon Islands',Port_Moresby:'Papua New Guinea'};
+try{r=new URL(document.referrer).hostname}catch(e){}try{z=Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){}var a=z.split('/');
+fetch('${url}/rest/v1/rpc/track_visit',{method:'POST',keepalive:true,headers:{apikey:'${key}','Content-Type':'application/json'},body:JSON.stringify({s:s,p:L.pathname,r:r==h?'':r,us:G('source'),um:G('medium'),uc:G('campaign'),d:w<640?'phone':w<1025?'tablet':'desktop',
+b:/Edg\//.test(u)?'Edge':/SamsungBrowser/.test(u)?'Samsung':/Firefox|FxiOS/.test(u)?'Firefox':/Chrome|CriOS/.test(u)?'Chrome':/Safari/.test(u)?'Safari':'Other',l:n.language,
+g:a[0]=='Australia'?a[0]:a[0]=='Pacific'?Z[a[1]]||'Pacific':/^(Asia|Europe|Africa)$/.test(a[0])?a[0]:a[0]=='America'?'Americas':'Other'})}).catch(function(){})}catch(e){}})()</script>`; })();
+
 function page({ path, title, description, active, body }) {
   const depth = path.split('/').length - 1;
   const up = depth ? '../'.repeat(depth) : '';
@@ -499,6 +513,7 @@ document.addEventListener('keydown',function(e){var x=e.target.closest&&e.target
 fetch('https://api.github.com/repos/raka1987/Riyeser/releases/latest').then(function(r){return r.ok?r.json():null}).then(function(rel){if(!rel)return;
 a.forEach(function(el){var want=el.href.split('/').pop().replace(/^Riye?ser/i,'').toLowerCase();
 var hit=(rel.assets||[]).filter(function(x){return x.name.replace(/^Riye?ser/i,'').toLowerCase()===want})[0];if(hit)el.href=hit.browser_download_url;});}).catch(function(){});})();</script>
+${TRAFFIC}
 </body>
 </html>
 `;

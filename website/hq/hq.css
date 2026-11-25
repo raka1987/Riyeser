@@ -456,3 +456,36 @@ main.wide { max-width: none; }
 .endtbl td { vertical-align: middle; } .endtbl td:first-child { overflow-wrap: anywhere; } .endtbl .n { width: 64px; }
 .licgrid { align-items: start; } .licgrid .card { min-width: 0; }
 .llout { max-height: 55vh; overflow-y: auto; } .llout .tbl td { vertical-align: middle; }
+
+/* website traffic (Reports) */
+.trbar { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin-bottom: 16px; } .trbar .chips { margin: 0; } .trbar #trcsv { margin-left: auto; }
+.trcustom[hidden] { display: none; } .trcustom { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 14px 16px; } .trcustom .f { margin: 0; min-width: 160px; } .trcustom .btn { height: 42px; }
+.trtiles { margin-bottom: 16px; } .trtiles .tile .d { margin-top: 4px; }
+.chg { font-weight: 700; color: var(--muted); } .chg.up { color: var(--ok); } .chg.down { color: var(--bad); }
+.trcard { margin-bottom: 16px; } .trg { margin-bottom: 0; } .trg .trcard { margin-bottom: 0; } .trg + .h3, .trg + .trpriv { margin-top: 22px; } .trg { gap: 16px; }
+.lc { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: 220px auto; column-gap: 10px; padding-top: 6px; }
+.lc-y { position: relative; width: 44px; } .lc-y span { position: absolute; right: 0; transform: translateY(-50%); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lc-plot { position: relative; outline: none; touch-action: pan-y; } .lc-plot:focus-visible { box-shadow: 0 0 0 2px var(--blue-l); border-radius: 6px; }
+.lc-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.lc-plot .g { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; } .lc-plot .base { stroke: #c9d2e3; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.lc-plot .area { fill: var(--bar); opacity: .1; } .lc-plot .ln { fill: none; stroke: var(--bar); stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.lc-cross { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed #9aa6bf; pointer-events: none; }
+.lc-dot { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; background: var(--bar); box-shadow: 0 0 0 2px #fff; pointer-events: none; }
+.lc-tip { position: absolute; top: 4px; transform: translateX(10px); background: var(--ink); color: #fff; font-size: 12.5px; line-height: 1.45; padding: 7px 10px; border-radius: 8px; white-space: nowrap; pointer-events: none; display: grid; z-index: 2; }
+.lc-tip[hidden], .lc-cross[hidden], .lc-dot[hidden] { display: none; }
+.lc-tip.mid { transform: translateX(-50%); top: -6px; } .lc-tip.flip { transform: translateX(calc(-100% - 10px)); } .lc-tip span { color: #c9d6f5; }
+.lc-x { grid-column: 2; position: relative; height: 26px; margin-top: 6px; } .lc-x span { position: absolute; transform: translateX(-50%); font-size: 12px; color: var(--muted); white-space: nowrap; }
+.lc-x span:first-child { transform: none; }
+.fnl { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.fnl li { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) 170px; align-items: center; gap: 14px; }
+.fnl .fl b { display: block; color: var(--ink); font-size: 14px; } .fnl small { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; margin-top: 1px; }
+.fnl .ft { height: 12px; background: #eef2f8; border-radius: 6px; overflow: hidden; } .fnl .ft i { display: block; height: 100%; background: var(--bar); border-radius: 6px; }
+.fnl .fv { text-align: right; } .fnl .fv b { font-size: 17px; color: var(--ink); font-variant-numeric: tabular-nums; }
+.fnote { margin: 16px 0 0; line-height: 1.5; }
+.pth { font-weight: 600; color: var(--ink); } .tbl td .pn { display: inline; color: var(--muted); margin-left: 4px; }
+.trpriv { max-width: 860px; line-height: 1.55; margin: 22px 0 4px; } .trpriv b { color: var(--ink); }
+@media (max-width: 900px) {
+  .trbar #trcsv { margin-left: 0; } .lc-x span:nth-child(even) { display: none; } .lc { grid-template-rows: 180px auto; } .lc-y { width: 34px; }
+  .fnl li { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; } .fnl .ft { grid-column: 1 / -1; grid-row: 2; } .fnl .fv small { display: none; }
+  .trcustom .f { min-width: 0; flex: 1 1 140px; }
+}

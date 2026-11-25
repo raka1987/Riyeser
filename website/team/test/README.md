@@ -115,3 +115,7 @@
   a customer while PayPal is in sandbox (no PayPal; bank transfer only with details), HQ's owner in sandbox ("Pay with PayPal
   (practice: only you see this)", the status call carries the sign-in), live mode, bank transfer with and without details,
   and neither way open ("Online payments are opening soon…" with the trial's end date). `rules-test.sql`: `my_billing.bank_ready`.
+- Website traffic: `rules-test.sql` checks `track_visit` (anyone can add a page view, only through it; addresses tidied,
+  non-website pages ignored, values checked and cut short, 200 a session a day), that nobody reads `site_visits` directly,
+  that `hq_traffic` needs `reports.view`, and the daily sweep (13 months of raw rows, daily totals kept). HQ:
+  `../../hq/test-hq-traffic.js` (Reports → Website traffic in demo mode, and the website's tracking script).

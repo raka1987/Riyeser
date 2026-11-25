@@ -2739,6 +2739,88 @@ end $$;
 reset role;
 select 'payments ok' as billing;
 
+-- ===== Website traffic: anyone can add a page view only through track_visit; only HQ with reports.view reads it
+reset role; set role anon; select pg_temp.as_user('');
+select public.track_visit('tab0000000000001', '/index.html', 'www.Google.com', 'Facebook', 'Social', 'Spring sale', 'phone', 'Chrome', 'en-AU', 'Fiji');
+select public.track_visit('tab0000000000001', '/pricing.html?x=1#top', 'riyeser.com', null, null, null, 'phone', 'Chrome', 'en-AU', 'Fiji');
+select public.track_visit('tab0000000000002', '/programs/payroll.html', '', null, null, null, 'desktop', 'Firefox', 'en', 'Australia');
+select public.track_visit('TAB0000000000003', '/pricing', 'news.example.org', repeat('x', 500), null, null, 'fridge', 'Netscape<script>', 'not a language', '<b>');
+-- ignored: not a website page, no session, a bad session id
+select public.track_visit('tab0000000000004', '/hq/', null);
+select public.track_visit('tab0000000000004', '/link/?signup', null);
+select public.track_visit('tab0000000000004', '/wp-admin/install.php', null);
+select public.track_visit('tab0000000000004', 'https://evil.test/', null);
+select public.track_visit(null, '/', null);
+select public.track_visit('a b', '/', null);
+do $$ begin
+  begin perform count(*) from public.site_visits; raise exception 'anon read site_visits';
+  exception when insufficient_privilege then null; end;
+  begin insert into public.site_visits (session_id, path) values ('tab0000000000009', '/'); raise exception 'anon inserted directly';
+  exception when insufficient_privilege then null; end;
+  begin perform public.hq_traffic(current_date - 7, current_date); raise exception 'anon read traffic';
+  exception when insufficient_privilege then null; when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+  begin perform public.hq_traffic_sweep(); raise exception 'anon ran the sweep';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- the per-session limit: 200 page views a day
+do $$ begin for i in 1..230 loop perform public.track_visit('flood00000000001', '/', null); end loop; end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.site_visits where session_id = 'flood00000000001') = 200, 'rate limit per session';
+  assert (select count(*) from public.site_visits where session_id <> 'flood00000000001') = 4, format('only the 4 real page views: %s', (select json_agg(path) from public.site_visits));
+  assert (select string_agg(path, ' ' order by id) from public.site_visits where session_id <> 'flood00000000001') = '/ /pricing /programs/payroll /pricing', 'paths tidied';
+  assert (select referrer_host from public.site_visits where session_id = 'tab0000000000001' order by id limit 1) = 'google.com', 'referrer: host only, no www';
+  assert (select referrer_host from public.site_visits where session_id = 'tab0000000000001' order by id desc limit 1) is null, 'our own site is not a referrer';
+  assert (select utm_source || '/' || utm_medium || '/' || utm_campaign from public.site_visits where session_id = 'tab0000000000001' order by id limit 1) = 'facebook/social/Spring sale', 'utm';
+  assert (select row(length(utm_source), device, browser, lang, region, session_id)::text from public.site_visits where session_id = 'tab0000000000003')
+    = '(60,,,,,tab0000000000003)', 'bad values dropped or cut short';
+  assert not exists (select 1 from information_schema.columns where table_name = 'site_visits' and column_name ~ 'ip|agent|user'), 'no IP or user agent column';
+end $$;
+-- signed-in customers can't read it either; HQ without reports.view can't; with it, it can
+insert into public.site_visits (at, session_id, path) values (now() - interval '14 months', 'old0000000000001', '/'), (now() - interval '20 days', 'prev000000000001', '/');
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+do $$ begin
+  begin perform count(*) from public.site_visits; raise exception 'customer read site_visits';
+  exception when insufficient_privilege then null; end;
+  begin perform public.hq_traffic(current_date - 7, current_date); raise exception 'customer read traffic';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ begin begin perform public.hq_traffic(current_date - 7, current_date); raise exception 'support read traffic';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end; end $$;
+select pg_temp.as_user('dddddddd-dddd-dddd-dddd-dddddddddddd');
+do $$ declare r json; y json; begin
+  r := public.hq_traffic(current_date - 6, current_date);
+  assert (r ->> 'visits')::int = 4 and (r ->> 'views')::int = 204, format('totals: %s %s', r ->> 'visits', r ->> 'views');
+  assert (r -> 'prev' ->> 'visits')::int = 0 and json_array_length(r -> 'series') = 7 and r ->> 'bucket' = 'day', 'previous period and days';
+  assert exists (select 1 from json_array_elements(r -> 'pages') x where x ->> 'path' = '/pricing' and (x ->> 'views')::int = 2), 'top pages';
+  assert exists (select 1 from json_array_elements(r -> 'referrers') x where x ->> 'host' = 'google.com' and (x ->> 'visits')::int = 1), 'referrers';
+  assert exists (select 1 from json_array_elements(r -> 'campaigns') x where x ->> 'campaign' = 'Spring sale'), 'campaigns';
+  assert exists (select 1 from json_array_elements(r -> 'regions') x where x ->> 'k' = 'Fiji'), 'regions';
+  assert (r -> 'funnel' ->> 'pricing')::int = 2 and (r -> 'funnel' ->> 'signups') is not null and (r -> 'funnel' ->> 'paid') is not null, format('funnel: %s', r -> 'funnel');
+  y := public.hq_traffic(current_date - 364, current_date);
+  assert y ->> 'bucket' = 'week' and (y ->> 'visits')::int = 5 and json_array_length(y -> 'series') between 52 and 54, 'a year, by week';
+  begin perform public.hq_traffic(current_date, current_date - 5); raise exception 'backwards range';
+  exception when others then assert sqlerrm like 'Choose a start date%', sqlerrm; end;
+  begin perform count(*) from public.site_visits; raise exception 'HQ read the raw table';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+do $$ begin
+  assert (public.hq_traffic_sweep() ->> 'deleted')::int = 1, 'the daily sweep removes views over 13 months old';
+  assert not exists (select 1 from public.site_visits where session_id = 'old0000000000001') and exists (select 1 from public.site_visits where session_id = 'prev000000000001'), 'and keeps the rest';
+end $$;
+-- the daily totals keep the history after the raw page views are gone (and hold no session ids)
+select pg_temp.as_user('dddddddd-dddd-dddd-dddd-dddddddddddd'); set role authenticated;
+do $$ begin
+  assert (public.hq_traffic(current_date - 600, current_date) ->> 'visits')::int = 6, 'the 14-month-old visit is still in the daily totals';
+  begin perform count(*) from public.site_traffic_daily; raise exception 'HQ read the daily table';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+do $$ begin assert not exists (select 1 from information_schema.columns where table_name = 'site_traffic_daily' and column_name like '%session%'), 'no session ids in the totals'; end $$;
+select 'website traffic ok' as traffic;
+
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)
 select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
 do $$ begin assert not exists (select 1 from public.messages where body = 'hack'), 'no hack message'; end $$;

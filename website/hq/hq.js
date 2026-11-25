@@ -210,6 +210,7 @@
       },
       notePin: (id, pin) => rpc('hq_note_pin', { note_id: id, pin }), followUpDone: (id) => rpc('hq_follow_up_done', { note_id: id }),
       myFollowUps: () => rpc('hq_my_follow_ups'), reports: (from, to) => rpc('hq_reports', { from_day: from, to_day: to }), attention: () => rpc('hq_attention'),
+      traffic: (from, to) => rpc('hq_traffic', { from_day: from, to_day: to }),
       setOwner: (ws, staff) => rpc('hq_set_owner', { ws, staff: staff || null }), workQueue: () => rpc('hq_work_queue'), signups: (days) => rpc('hq_signups', { days }),
       handover: () => rpc('hq_handover'), handoverAdd: (note, shiftDay) => rpc('hq_handover_add', { note, shift_day: shiftDay || null }), handoverDone: (id) => rpc('hq_handover_done', { note_id: id }),
       // Riyeser Link Office (added separately): only used when the database has these functions
@@ -754,6 +755,29 @@
             median_first_reply_hours: fs(tickets.filter((x) => x.first_reply_at && !x.staff_started && inR(x.created_at))), opened: tickets.filter((x) => inR(x.created_at)).length,
             by_topic: Object.entries(cnt(tickets.filter((x) => inR(x.created_at)), 'topic')).map(([topic, n]) => ({ topic, n })).sort((a, b) => b.n - a.n), satisfaction: null },
           staff_week: staffOf(hist.filter((h) => iso(h.at) >= monday)), staff_range: staffOf(hist.filter((h) => inR(h.at))) }; },
+      // Website traffic, made up: a steady daily pattern (quieter at weekends) growing over the year
+      async traffic(from, to) { need('reports.view'); const F = Date.parse(from + 'T00:00:00Z'); const T = Date.parse(to + 'T00:00:00Z');
+        if (T < F) throw new Error('Choose a start date before the end date.');
+        const rnd = (n) => ((n * 9301 + 49297) % 233280) / 233280;
+        const dayOf = (t) => { const n = Math.floor(t / 864e5); const age = (Date.now() - t) / 864e5; const wd = new Date(t).getUTCDay();
+          const visits = Math.max(0, Math.round((34 + (420 - age) * 0.1) * (wd === 0 ? 0.55 : wd === 6 ? 0.7 : 1) * (0.78 + rnd(n) * 0.44) + (n % 41 === 0 ? 60 : 0)));
+          return { d: iso(t), visits, views: Math.round(visits * (2.1 + rnd(n + 7) * 0.7)) }; };
+        const days = (a, b) => { const out = []; for (let t = a; t <= b; t += 864e5) out.push(dayOf(t)); return out; };
+        const cur = days(F, T); const n = cur.length; const prev = days(F - n * 864e5, F - 864e5); const sum = (l, k) => l.reduce((a, x) => a + x[k], 0);
+        const wk = n > 92; const mon = (d) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7)); return iso(x); };
+        const series = wk ? Object.values(cur.reduce((a, x) => { const k = mon(x.d); const w = a[k] = a[k] || { d: k, visits: 0, views: 0 }; w.visits += x.visits; w.views += x.views; return a; }, {})) : cur;
+        const V = sum(cur, 'visits'); const PV = sum(cur, 'views'); const share = (list) => list.map(([k, f]) => ({ k, visits: Math.round(V * f) })).filter((x) => x.visits);
+        const inR = (c) => { const t = Date.parse(c.created_at); return t >= F && t < T + 864e5; }; const biz = cos.filter((c) => inR(c) && c.kind === 'business');
+        return { from, to, today: iso(Date.now()), bucket: wk ? 'week' : 'day', visits: V, views: PV,
+          prev: { from: iso(F - n * 864e5), to: iso(F - 864e5), visits: sum(prev, 'visits'), views: sum(prev, 'views') }, series,
+          pages: [['/', 0.31], ['/pricing', 0.13], ['/programs', 0.1], ['/programs/accounting', 0.08], ['/downloads', 0.075], ['/programs/payroll', 0.06], ['/programs/pos', 0.05],
+            ['/help', 0.04], ['/industries/trades', 0.035], ['/programs/link', 0.03], ['/help/start', 0.025], ['/terms', 0.01]].map(([path, f], i) => ({ path, views: Math.round(PV * f), visits: Math.round(V * f * (1.4 - i * 0.04)) })),
+          referrers: share([['', 0.42], ['google.com', 0.31], ['facebook.com', 0.12], ['l.instagram.com', 0.05], ['bing.com', 0.035], ['linkedin.com', 0.02], ['fijisun.com.fj', 0.015]]).map((x) => ({ host: x.k, visits: x.visits })),
+          campaigns: [['facebook', 'social', 'Early bird'], ['newsletter', 'email', 'November update'], ['google', 'cpc', 'Payroll Fiji']].map(([source, medium, campaign], i) => ({ source, medium, campaign, visits: Math.round(V * [0.06, 0.025, 0.012][i]) })),
+          devices: share([['phone', 0.54], ['desktop', 0.38], ['tablet', 0.08]]), browsers: share([['Chrome', 0.58], ['Safari', 0.24], ['Edge', 0.1], ['Samsung', 0.05], ['Firefox', 0.03]]),
+          regions: share([['Fiji', 0.52], ['Australia', 0.2], ['New Zealand', 0.11], ['Samoa', 0.04], ['Tonga', 0.03], ['Asia', 0.04], ['Americas', 0.03], ['Europe', 0.02], ['Pacific', 0.01]]),
+          funnel: { visits: V, pricing: Math.round(V * 0.21), pricing_views: Math.round(V * 0.27), signups: Math.min(Math.round(V * 0.21), cos.filter(inR).length + Math.round(V * 0.004)),
+            trials: biz.length, paid: biz.filter((c) => Object.values(demoLicence(c.id).modules).some((m) => m.status === 'active')).length } }; },
       async setOwner(ws, who) { if (!['customers.edit', 'support.assign', 'licences.manage'].some((p) => permsOf(me()).includes(p))) throw new Error('Your HQ role can\'t do that.');
         const c = cos.find((x) => x.id === ws); const was = nameOf(c.hq_owner); c.hq_owner = who || null; log('customer.owner_set', { workspace_id: ws, was, now: nameOf(who) }); },
       async handover() { return handover.slice().sort((a, b) => (a.done - b.done) || b.id - a.id); },
@@ -847,13 +871,13 @@
     ['licences', 'Licences', can('licences.view')], ['approvals', 'Approvals', can('refunds.approve', 'offers.approve')], ['refunds', 'Refunds', can('refunds.view')],
     ['payments', 'Invoices & payments', can('licences.view')], ['support', 'Support', can('support.view', 'support.diagnostics')], ['inbox', 'Team Inbox', can('overview.view')],
     ['inactive', 'Inactive accounts', can('customers.view', 'accounts.inactive')], ['health', 'System health', can('overview.view')], ['emails', 'Emails', can('emails.view')],
-    ['downloads', 'Downloads', can('downloads.view')], ['reports', 'Reports', can('reports.view')], ['team', 'HQ team', true], ['history', 'History', can('audit.view')],
+    ['downloads', 'Downloads', can('downloads.view')], ['reports', 'Business reports', can('reports.view')], ['traffic', 'Website traffic', can('reports.view')], ['team', 'HQ team', true], ['history', 'History', can('audit.view')],
     ['settings', 'Settings', can('settings.manage')]].filter((x) => x[2]);
-  const VIEWS = () => ({ overview, companies, signups, licences, approvals, refunds, payments, support, inbox, inactive, health, emails, downloads, reports, team, history, settings });
+  const VIEWS = () => ({ overview, companies, signups, licences, approvals, refunds, payments, support, inbox, inactive, health, emails, downloads, reports, traffic, team, history, settings });
   // The left-hand menu: the same on every screen, showing only what this person's permissions allow.
   const NAV = [['Overview', '🏠', ['overview']], ['Customers', '👥', ['companies']], ['Signups', '🌱', ['signups']],
     ['Billing & Licences', '💳', ['licences', 'approvals', 'refunds', 'payments']], ['Support', '🎧', ['support']], ['Team Inbox', '💬', ['inbox']],
-    ['Retention', '🔁', ['inactive']], ['System Operations', '🛠️', ['health', 'emails', 'downloads']], ['Reports', '📊', ['reports']], ['Admin', '⚙️', ['team', 'history', 'settings']]];
+    ['Retention', '🔁', ['inactive']], ['System Operations', '🛠️', ['health', 'emails', 'downloads']], ['Reports', '📊', ['reports', 'traffic']], ['Admin', '⚙️', ['team', 'history', 'settings']]];
   const SOON = { inbox: 'soon' };
   // A group (Billing & Licences, System Operations, Admin) is a heading that folds its pages away (remembered); it isn't a
   // page itself, so only the page you're on is highlighted.
@@ -2488,6 +2512,97 @@
         ${box('rStaff2', 'Actions per staff member in this range', '', table('staff_range', ['Staff', 'Changes', 'Everything (with pages opened)'], (r.staff_range || []).map((x) => [x.who, Number(x.changes), Number(x.total)]), { num: [1, 2] }), 'staff_range')}</div>`;
     m.querySelectorAll('[data-csv]').forEach((b) => b.onclick = () => { const t = T[b.dataset.csv]; if (t) csvFile(`report-${b.dataset.csv}-${S.rr}d`, t.header, t.rows); });
     m.querySelectorAll('tr[data-co]').forEach((x) => x.onclick = () => openCompany(x.dataset.co, 'programs'));
+  }
+
+  // ------------------------------------------------------------------ Website traffic (reports.view): riyeser.com visits, from hq_traffic
+  const TR_RANGES = [[7, '7 days'], [30, '30 days'], [90, '90 days'], [365, '12 months'], ['custom', 'Custom']];
+  const TR_DEVICE = { phone: 'Phone', tablet: 'Tablet', desktop: 'Desktop', '': 'Not known' };
+  const pageName = (p) => ({ '/': 'Home', '/pricing': 'Pricing', '/programs': 'All programs', '/downloads': 'Downloads', '/help': 'Help Centre', '/terms': 'Terms of use' })[p] || '';
+  // One measure over time: a 2px line with a soft area, recessive grid, and a crosshair with the numbers on hover or arrow keys.
+  // The SVG stretches to the card; the labels are HTML so they stay readable at any width.
+  function lineChart(rows, label, tip) {
+    const n = rows.length; const vals = rows.map((r) => Number(r.visits) || 0); const raw = Math.max(1, ...vals);
+    const mag = 10 ** Math.floor(Math.log10(raw / 4 || 1)); const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((x) => x * 4 >= raw) || mag * 10; const max = step * 4;
+    const X = (i) => (n === 1 ? 500 : (i / (n - 1)) * 1000); const Y = (v) => 200 - (v / max) * 200;
+    const pts = vals.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+    const every = Math.max(1, Math.ceil(n / 6));
+    return `<div class="lc"><div class="lc-y" aria-hidden="true">${[4, 3, 2, 1, 0].map((k) => `<span style="top:${100 - k * 25}%">${num(step * k)}</span>`).join('')}</div>
+      <div class="lc-plot" tabindex="0" role="img" aria-label="Visits chart: ${esc(label(rows[0] || {}))} to ${esc(label(rows[n - 1] || {}))}, highest ${num(raw)}. Arrow keys step through it.">
+        <svg viewBox="0 0 1000 200" preserveAspectRatio="none" aria-hidden="true">${[1, 2, 3, 4].map((k) => `<line class="g" x1="0" x2="1000" y1="${200 - k * 50}" y2="${200 - k * 50}"/>`).join('')}<line class="base" x1="0" x2="1000" y1="200" y2="200"/>
+          ${n ? `<polygon class="area" points="0,200 ${pts} ${X(n - 1)},200"/><polyline class="ln" points="${pts}"/>` : ''}</svg>
+        <i class="lc-cross" hidden></i><i class="lc-dot" hidden></i><div class="lc-tip" hidden></div></div>
+      <div class="lc-x" aria-hidden="true">${rows.map((r, i) => (i % every === 0 ? `<span style="left:${X(i) / 10}%">${esc(label(r))}</span>` : '')).join('')}</div></div>`;
+  }
+  function wireLineChart(el, rows, tip) {
+    const plot = el.querySelector('.lc-plot'); if (!plot || !rows.length) return; const n = rows.length; const vals = rows.map((r) => Number(r.visits) || 0);
+    const max = (() => { const t = el.querySelectorAll('.lc-y span'); return Number(String(t[0].textContent).replace(/[^\d.]/g, '')) || 1; })();
+    const cross = plot.querySelector('.lc-cross'); const dot = plot.querySelector('.lc-dot'); const tp = plot.querySelector('.lc-tip'); let at = -1;
+    const show = (i) => { at = Math.max(0, Math.min(n - 1, i)); const x = n === 1 ? 50 : (at / (n - 1)) * 100; const y = 100 - (vals[at] / max) * 100;
+      cross.hidden = dot.hidden = tp.hidden = false; cross.style.left = dot.style.left = `${x}%`; dot.style.top = `${y}%`; tp.innerHTML = tip(rows[at]);
+      tp.style.left = `${x}%`; tp.classList.toggle('flip', x > 70); tp.classList.toggle('mid', x >= 30 && x <= 70); };
+    const hide = () => { cross.hidden = dot.hidden = tp.hidden = true; };
+    plot.addEventListener('pointermove', (e) => { const r = plot.getBoundingClientRect(); show(Math.round(((e.clientX - r.left) / r.width) * (n - 1))); });
+    plot.addEventListener('pointerleave', hide); plot.addEventListener('blur', hide);
+    plot.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { e.preventDefault(); show(at < 0 ? n - 1 : at + (e.key === 'ArrowRight' ? 1 : -1)); } });
+  }
+  async function traffic() {
+    const t0 = today(); S.tr = S.tr || { r: 30 }; const tr = S.tr;
+    const to = tr.r === 'custom' ? (tr.to || t0) : t0; const from = tr.r === 'custom' ? (tr.from || plusDays(t0, -29)) : plusDays(t0, -(tr.r - 1));
+    const m = main(`<h2>Website traffic</h2><p class="sub">Visits to riyeser.com: how many, which pages, where visitors come from, and how many go on to sign up and pay.</p>
+      <div class="trbar"><div class="chips" id="trr">${TR_RANGES.map(([k, l]) => `<button class="chip${tr.r === k ? ' on' : ''}" data-trr="${k}">${l}</button>`).join('')}</div>
+        <span class="muted small" id="trdates">${day(from)} to ${day(to)}</span><button class="btn sm" id="trcsv" disabled>⬇ Export CSV</button></div>
+      <form class="card trcustom" id="trc"${tr.r === 'custom' ? '' : ' hidden'}><label class="f"><span>From</span><input type="date" name="from" value="${esc(from)}" max="${esc(t0)}" required></label>
+        <label class="f"><span>To</span><input type="date" name="to" value="${esc(to)}" max="${esc(t0)}" required></label><button class="btn p">Show</button></form>
+      <div id="trp"><p class="muted">Loading…</p></div>`);
+    m.querySelectorAll('[data-trr]').forEach((b) => b.onclick = () => { const k = b.dataset.trr; S.tr = k === 'custom' ? { r: 'custom', from, to } : { r: Number(k) }; traffic(); });
+    m.querySelector('#trc').onsubmit = (e) => { e.preventDefault(); const f = new FormData(e.target); const a = String(f.get('from')); const z = String(f.get('to'));
+      if (z < a) { alert('Choose a start date before the end date.'); return; } S.tr = { r: 'custom', from: a, to: z }; traffic(); };
+    const r = await api.traffic(from, to);
+    const V = Number(r.visits || 0); const PV = Number(r.views || 0); const pv = r.prev || {}; const PVV = Number(pv.visits || 0); const PVW = Number(pv.views || 0);
+    const ppv = (a, b) => (b ? a / b : 0); const nDays = Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1; const span = r.bucket === 'week' ? 'week' : 'day';
+    const change = (now, was, dec) => { if (!was) return now ? '<span class="chg">new: none in the previous period</span>' : '<span class="chg">same as the previous period</span>';
+      const d = dec ? Math.round((now - was) * 100) / 100 : Math.round(((now - was) / was) * 100); if (!d) return '<span class="chg">same as the previous period</span>';
+      return `<span class="chg ${d > 0 ? 'up' : 'down'}">${d > 0 ? '▲' : '▼'} ${dec ? Math.abs(d).toFixed(1) : `${Math.abs(d)}%`}</span> <span>vs the previous ${num(nDays)} days</span>`; };
+    const fn = r.funnel || {}; const lbl = (x) => new Date(x.d + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const steps = [['Website visits', fn.visits, 'every visit in these dates'], ['Saw the pricing page', fn.pricing, `${num(fn.pricing_views)} pricing page views`],
+      ['Signed up', fn.signups, 'Riyeser accounts created'], ['Started a free trial', fn.trials, 'new businesses (trials start when a business is set up)'], ['Paid', fn.paid, 'of those new businesses, paying now or before']].map(([l, v, d]) => [l, Number(v || 0), d]);
+    const ofPrev = (i) => (i && steps[i - 1][1] ? `${(Math.round((steps[i][1] / steps[i - 1][1]) * 1000) / 10).toLocaleString()}% of the step before` : '');
+    const top = Math.max(1, steps[0][1]);
+    const list = (rows, name, key = 'visits') => barList(rows.map((x) => ({ l: name(x), v: Number(x[key] || 0) })), (x) => x.l, (x) => x.v);
+    const host = (h) => h || 'Direct or unknown';
+    const box = (id, title, sub, body, cls = '') => `<div class="card trcard${cls ? ' ' + cls : ''}" id="${id}"><h3>${title}${sub ? ` <small>· ${sub}</small>` : ''}</h3>${body}</div>`;
+    const pages = r.pages || []; const camps = r.campaigns || [];
+    m.querySelector('#trp').innerHTML = `
+      ${V ? '' : '<div class="banner est">No visits recorded in these dates yet. The website counts page views once it\'s published with this release.</div>'}
+      <div class="tiles trtiles">${tile('Visits', num(V), change(V, PVV))}${tile('Page views', num(PV), change(PV, PVW))}
+        ${tile('Pages per visit', V ? ppv(PV, V).toFixed(1) : '—', V && PVV ? change(ppv(PV, V), ppv(PVW, PVV), true) : '<span class="chg">a visit is one browser tab</span>')}
+        ${tile('Signed up', num(fn.signups), V ? `${(Math.round((Number(fn.signups || 0) / V) * 1000) / 10).toLocaleString()}% of visits` : 'Riyeser accounts created')}</div>
+      ${box('trChart', `Visits per ${span}`, `${day(from)} to ${day(to)}`, lineChart(r.series || [], lbl), 'wide')}
+      <div class="grid g2 trg">
+        ${box('trFunnel', 'From a visit to paying', '', `<ol class="fnl">${steps.map(([l, v, d], i) => `<li><div class="fl"><b>${l}</b><small>${esc(d)}</small></div>
+          <div class="ft"><i style="width:${Math.max(1.5, (v / top) * 100)}%"></i></div><div class="fv"><b>${num(v)}</b><small>${ofPrev(i)}</small></div></li>`).join('')}</ol>
+          <p class="muted small fnote">Visits are counted on the website; sign-ups, trials and payments are accounts and businesses created in these dates. Nothing links a visit to a person, so this compares totals, not individual journeys.</p>`)}
+        ${box('trPages', 'Top pages', 'page views', pages.length ? `<div class="scroll"><table class="tbl rtbl"><tr><th>Page</th><th class="n">Views</th><th class="n">Visits</th></tr>
+          ${pages.slice(0, 12).map((x) => `<tr><td><span class="pth">${esc(x.path)}</span>${pageName(x.path) ? ` <small class="pn">${esc(pageName(x.path))}</small>` : ''}</td><td class="n">${num(x.views)}</td><td class="n">${num(x.visits)}</td></tr>`).join('')}</table></div>` : '<p class="muted small">Nothing yet.</p>')}</div>
+      <h3 class="h3">Where visitors came from</h3><div class="grid g2 trg">
+        ${box('trRefs', 'Websites that linked here', 'visits', list((r.referrers || []).slice(0, 10), (x) => host(x.host)))}
+        ${box('trCamps', 'Campaigns', 'from utm_ links', camps.length ? `<div class="scroll"><table class="tbl rtbl"><tr><th>Campaign</th><th>Source · medium</th><th class="n">Visits</th></tr>
+          ${camps.slice(0, 10).map((x) => `<tr><td>${esc(x.campaign || '—')}</td><td>${esc([x.source, x.medium].filter(Boolean).join(' · ') || '—')}</td><td class="n">${num(x.visits)}</td></tr>`).join('')}</table></div>`
+          : '<p class="muted small">No campaign links used in these dates. Add <span class="code">?utm_source=…&amp;utm_campaign=…</span> to links you share to see them here.</p>')}</div>
+      <h3 class="h3">Visitors</h3><div class="grid g3 trg">
+        ${box('trDev', 'Devices', 'visits', list(r.devices || [], (x) => TR_DEVICE[x.k] || x.k))}
+        ${box('trReg', 'Regions', 'from the time zone', list((r.regions || []).slice(0, 8), (x) => x.k || 'Not known'))}
+        ${box('trBr', 'Browsers', 'visits', list(r.browsers || [], (x) => x.k || 'Not known'))}</div>
+      <p class="privacy trpriv"><b>What's collected:</b> for each page view, the page, the website that linked to it (its name only), any utm_ campaign tags, phone, tablet or desktop, the browser's name, the language and a rough region from the time zone. No cookies, no IP addresses and nothing that follows a person between visits: a visit is one browser tab. Browsers set to Do Not Track or Global Privacy Control aren't counted. Kept 13 months.</p>`;
+    wireLineChart(m.querySelector('#trChart'), r.series || [], (x) => `<b>${r.bucket === 'week' ? 'Week of ' : ''}${esc(day(x.d))}</b><span>${num(x.visits)} visits</span><span>${num(x.views)} page views</span>`);
+    const csv = m.querySelector('#trcsv'); csv.disabled = false;
+    csv.onclick = () => csvFile(`website-traffic-${from}-to-${to}`, ['Section', 'Item', 'Visits', 'Page views'], [
+      ['Total', `${from} to ${to}`, V, PV], ['Previous period', `${pv.from || ''} to ${pv.to || ''}`, PVV, PVW],
+      ...(r.series || []).map((x) => [r.bucket === 'week' ? 'Week starting' : 'Day', x.d, x.visits, x.views]),
+      ...pages.map((x) => ['Page', x.path, x.visits, x.views]), ...(r.referrers || []).map((x) => ['Came from', host(x.host), x.visits, '']),
+      ...camps.map((x) => ['Campaign', [x.campaign, x.source, x.medium].map((y) => y || '-').join(' / '), x.visits, '']),
+      ...(r.devices || []).map((x) => ['Device', TR_DEVICE[x.k] || x.k, x.visits, '']), ...(r.regions || []).map((x) => ['Region', x.k || 'Not known', x.visits, '']),
+      ...(r.browsers || []).map((x) => ['Browser', x.k || 'Not known', x.visits, '']), ...steps.map(([l, v]) => ['Funnel', l, v, ''])]);
   }
 
   // ------------------------------------------------------------------ HQ history: filters and CSV
