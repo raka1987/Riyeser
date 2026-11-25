@@ -13,5 +13,6 @@
 {% else %}<tr><td colspan="7" class="muted">No active {{ freq }} employees.</td></tr>{% endfor %}
 {% set ns = namespace(g=0,t=0,s=0,n=0) %}{% for e, p, inc in previews if inc %}{% set ns.g=ns.g+p.gross %}{% set ns.t=ns.t+p.tax %}{% set ns.s=ns.s+p.super %}{% set ns.n=ns.n+p.net %}{% endfor %}
 <tr class="grand"><td colspan="3">Totals (selected)</td><td class="n">{{ ns.g|money }}</td><td class="n">{{ ns.t|money }}</td><td class="n">{{ ns.s|money }}</td><td class="n">{{ ns.n|money }}</td></tr></table>
+<p><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" name="extra_run" value="1" {{ 'checked' if request.form.get('extra_run') }}> <b>Extra run (bonus)</b>: pay the selected people again for dates already paid</label></p>
 <p><button class="btn" name="action" value="preview">Recalculate</button> <button class="btn pri" name="action" value="process">Process pay run</button></p></form>
 {% endblock %}

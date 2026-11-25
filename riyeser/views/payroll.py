@@ -102,9 +102,16 @@ def _process(freq, emps):
         slips.append((e, p))
     if not slips:
         raise PostingError("Select at least one employee.")
+    start, end = f.get("period_start") or "", f.get("period_end") or ""
+    if not start or not end or start > end:
+        raise PostingError("Choose a pay period (the start on or before the end).")
+    extra = bool(f.get("extra_run"))
+    if not extra:
+        _refuse_paid_twice(db, [e for e, _p in slips], start, end)
     bank = int(f["bank_account_id"])
-    rid = db.execute("INSERT INTO payruns (pay_date, period_start, period_end, frequency, bank_account_id)"
-                     " VALUES (?,?,?,?,?)", (f["pay_date"], f["period_start"], f["period_end"], freq, bank)).lastrowid
+    rid = db.execute("INSERT INTO payruns (pay_date, period_start, period_end, frequency, bank_account_id, kind)"
+                     " VALUES (?,?,?,?,?,?)", (f["pay_date"], start, end, freq, bank,
+                                               "extra" if extra else "regular")).lastrowid
     wages, sup_exp = linked(db, "wages"), linked(db, "super_expense")
     payg, sup_pay = linked(db, "payg_payable"), linked(db, "super_payable")
     lines = []
@@ -119,13 +126,29 @@ def _process(freq, emps):
                    " VALUES (?,?,?,?,?,?,?,?)",
                    (rid, e["id"], p["hours"], p["gross"], p["tax"], p["super"], p["net"], p["leave"]))
         db.execute("UPDATE employees SET leave_hours=leave_hours+? WHERE id=?", (p["leave"], e["id"]))
-    eid = post_entry(db, f["pay_date"], f"Pay run {f['period_start']} to {f['period_end']}", "payrun", lines,
-                     source_id=rid)
+    memo = f"{'Extra pay run (bonus)' if extra else 'Pay run'} {start} to {end}"
+    eid = post_entry(db, f["pay_date"], memo, "payrun", lines, source_id=rid)
     db.execute("UPDATE payruns SET entry_id=? WHERE id=?", (eid, rid))
     total = sum(p["gross"] for _, p in slips)
     audit(db, "payrun", f"{len(slips)} employees, gross {fmt_money(total)}")
     flash(f"Pay run processed for {len(slips)} employees.", "ok")
     return redirect(url_for("payroll.payrun", rid=rid))
+
+
+def _refuse_paid_twice(db, emps, start, end):
+    """The same dates can't be paid twice (F11): a pay run (not reversed) that overlaps them for anyone included
+    stops this one. A deliberate extra run (a bonus) goes through the labelled "Extra run" option instead."""
+    for e in emps:
+        r = db.execute("SELECT r.id, r.pay_date, r.period_start, r.period_end FROM payslips s"
+                       " JOIN payruns r ON r.id=s.payrun_id JOIN journal_entries je ON je.id=r.entry_id"
+                       " WHERE s.employee_id=? AND je.voided=0 AND COALESCE(r.kind,'regular')='regular'"
+                       " AND r.period_start<=? AND r.period_end>=? ORDER BY r.pay_date LIMIT 1",
+                       (e["id"], end, start)).fetchone()
+        if r:
+            raise PostingError(
+                f"{e['first_name']} {e['last_name']}: these dates were already paid on {r['pay_date']} (pay run "
+                f"#{r['id']}, {r['period_start']} to {r['period_end']}). Void that run first, or tick "
+                f"\"Extra run (bonus)\" to pay extra on purpose.")
 
 
 @bp.route("/payrun/<int:rid>")

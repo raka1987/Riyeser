@@ -127,3 +127,47 @@ def test_f15_document_numbers_are_unique_and_old_duplicates_still_open(app, tmp_
     assert duplicate_numbers(con) == [("sale", "INV00003", 2)]
     assert not con.execute("SELECT 1 FROM sqlite_master WHERE name='documents_side_number'").fetchone()
     con.close()
+
+
+# ------------------------------------------------------------------ F11
+def _employee(db, first="Jo", last="Bloggs", freq="fortnightly"):
+    return db.execute("INSERT INTO employees (first_name, last_name, pay_basis, hourly_rate, std_hours, pay_frequency,"
+                      " tax_free_threshold, super_rate) VALUES (?,?,'hourly',3000,76,?,1,12)",
+                      (first, last, freq)).lastrowid
+
+
+def _pay(client, emp, start="2026-11-11", end="2026-11-24", **extra):
+    with client.application.app_context():
+        bank = get_db().execute("SELECT id FROM accounts WHERE code='1-1110'").fetchone()[0]
+    data = {"action": "process", "frequency": "fortnightly", "period_start": start, "period_end": end,
+            "pay_date": end, "bank_account_id": bank, f"inc_{emp}": "1", f"hours_{emp}": "76", **extra}
+    return client.post("/payroll/run", data=data, follow_redirects=True)
+
+
+def test_f11_same_pay_period_twice_is_refused_unless_extra_run(client, app):
+    with app.app_context():
+        db = get_db()
+        emp = _employee(db)
+        db.commit()
+    _pay(client, emp)
+    r = _pay(client, emp, start="2026-11-18", end="2026-12-01")       # overlaps 11-24 Nov
+    assert "already paid on 2026-11-24" in r.get_data(as_text=True)
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM payruns").fetchone()[0] == 1
+        leave = db.execute("SELECT leave_hours FROM employees WHERE id=?", (emp,)).fetchone()[0]
+    _pay(client, emp, start="2026-11-25", end="2026-12-08")           # the next fortnight is fine
+    r = _pay(client, emp, extra_run="1")                               # a bonus, on purpose
+    with app.app_context():
+        db = get_db()
+        runs = db.execute("SELECT kind FROM payruns ORDER BY id").fetchall()
+        assert [x[0] for x in runs] == ["regular", "regular", "extra"]
+        assert db.execute("SELECT memo FROM journal_entries WHERE source_type='payrun' ORDER BY id DESC"
+                          ).fetchone()[0].startswith("Extra pay run (bonus)")
+        first = db.execute("SELECT id FROM payruns ORDER BY id LIMIT 1").fetchone()[0]
+    # voiding the first run frees its dates again
+    client.post(f"/payroll/payrun/{first}/void")
+    _pay(client, emp)
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM payruns").fetchone()[0] == 4
+    assert leave > 0

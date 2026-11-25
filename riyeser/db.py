@@ -328,6 +328,8 @@ def migrate(db):
     if "is_demo" not in {r["name"] for r in db.execute("PRAGMA table_info(company)")}:
         db.execute("ALTER TABLE company ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0")
     db.execute("CREATE TABLE IF NOT EXISTS archive_meta (key TEXT PRIMARY KEY, value TEXT)")
+    if "kind" not in {r["name"] for r in db.execute("PRAGMA table_info(payruns)")}:
+        db.execute("ALTER TABLE payruns ADD COLUMN kind TEXT NOT NULL DEFAULT 'regular'")  # regular, extra (bonus)
     _unique_document_numbers(db)
     db.commit()
 
