@@ -98,6 +98,43 @@ def statement(cid):
                            how_to_pay=payment_details(db.execute("SELECT * FROM company WHERE id=1").fetchone()))
 
 
+def _statement_email(db, c, start, end):
+    from .. import pdf as pdfmod
+    from .email import send_or_queue
+    co = db.execute("SELECT name FROM company WHERE id=1").fetchone()["name"]
+    return send_or_queue(db, c["email"], f"Statement from {co}, {start} to {end}",
+                         f"Hello {c['name']},\n\nYour statement from {co} for {start} to {end} is attached.\n\n"
+                         f"Thank you,\n{co}",
+                         (pdfmod.safe_name(f"Statement {c['name']} {end}") + ".pdf",
+                          pdfmod.statement_pdf(db, c["id"], start, end)), "statement", c["id"])
+
+
+@bp.route("/statement/<int:cid>/email", methods=["POST"])
+@guarded
+def email_statement(cid):
+    db = get_db()
+    c = db.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone() or abort(404)
+    if not c["email"]:
+        raise ValueError(f"Add {c['name']}'s email address first.")
+    start, end = request.form.get("start"), request.form.get("end")
+    flash(_statement_email(db, c, start, end), "ok")
+    return redirect(url_for("contacts.statement", cid=cid, start=start, end=end))
+
+
+@bp.route("/statements/email", methods=["POST"])
+@guarded
+def email_statements():
+    from ..statements import with_balance
+    db = get_db()
+    start, end = request.form.get("start"), request.form.get("end")
+    people = [c for c in with_balance(db, "customer")]
+    done = [c["name"] for c in people if c["email"] and _statement_email(db, c, start, end)]
+    missing = [c["name"] for c in people if not c["email"]]
+    flash(f"Statements emailed or queued for {len(done)} customers." +
+          (f" No email address for: {', '.join(missing)}." if missing else ""), "ok")
+    return redirect(url_for("contacts.statements_all", start=start, end=end))
+
+
 @bp.route("/statements")
 def statements_all():
     """Every customer with a balance: one PDF to print, or email them all (S44)."""
@@ -116,4 +153,6 @@ def statements_all():
             doc.notes("No customer has a balance.")
         return Response(bytes(doc.output()), mimetype="application/pdf",
                         headers={"Content-Disposition": f'attachment; filename="Statements {end}.pdf"'})
-    return render_template("contacts/statements.html", people=people, start=start, end=end)
+    from .. import mailer
+    return render_template("contacts/statements.html", people=people, start=start, end=end,
+                           can_email=bool(mailer.settings(db)))

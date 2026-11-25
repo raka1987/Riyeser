@@ -422,3 +422,133 @@ def test_s44_activity_statement_with_ageing_overdue_and_all_customers(client, ap
     assert "C</td>" in allp and "Zero Balance Ltd" not in allp
     text = _pdf_text(client.get("/cards/statements?pdf=1&start=2026-11-01&end=2026-11-30").data)
     assert "Openingbalance" in text and "61–90DAYS" in text
+
+
+# ------------------------------------------------------------------ S18 (email, with a fake SMTP server)
+class FakeSMTP:
+    sent = []
+    fail = False
+
+    def __init__(self, host, port, timeout=None, **kw):
+        if FakeSMTP.fail:
+            raise OSError("connection refused")
+        self.host, self.port = host, port
+
+    def starttls(self, context=None):
+        pass
+
+    def login(self, user, pw):
+        self.user = user
+
+    def send_message(self, m):
+        FakeSMTP.sent.append(m)
+
+    def quit(self):
+        pass
+
+
+@pytest.fixture
+def smtp(monkeypatch):
+    import smtplib
+    FakeSMTP.sent, FakeSMTP.fail = [], False
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    return FakeSMTP
+
+
+def _email_setup(client):
+    client.post("/setup/email/", data={"smtp_host": "smtp.example.test", "smtp_port": "587", "smtp_security": "starttls",
+                                       "smtp_user": "me", "smtp_password": "secret-pw", "smtp_from": "accounts@testco.test"})
+
+
+def test_s18_email_invoice_quote_and_statements_with_pdf(client, app, smtp):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust = db.execute("INSERT INTO contacts (kind, name, email) VALUES ('customer','Nadi Traders','ap@nadi.test')"
+                          ).lastrowid
+        db.commit()
+    client.post("/sale/new", data=_inv_form(cust, [dict(description="x", qty="1", price="60", account=acc["4-1000"],
+                                                          tax=tc["GST"])]))
+    with app.app_context():
+        inv = get_db().execute("SELECT id FROM documents").fetchone()[0]
+    r = client.post(f"/document/{inv}/email", data={}, headers={"Referer": f"/document/{inv}"}, follow_redirects=True)
+    assert "Email isn&#39;t set up yet" in page(r)
+    _email_setup(client)
+    assert "Email" in page(client.get(f"/document/{inv}"))
+    r = client.post(f"/document/{inv}/email", data={}, follow_redirects=True)
+    assert "Emailed to ap@nadi.test" in page(r)
+    m = smtp.sent[-1]
+    assert m["To"] == "ap@nadi.test" and "Tax Invoice INV00001" in m["Subject"] and "accounts@testco.test" in m["From"]
+    att = [p for p in m.iter_attachments()]
+    assert att[0].get_filename().endswith(".pdf") and att[0].get_content()[:4] == b"%PDF"
+    assert "$66.00" in m.get_body().get_content()
+    # a quote
+    client.post("/sale/new", data=_inv_form(cust, [dict(description="q", qty="1", price="10", account=acc["4-1000"],
+                                                          tax=tc["GST"])], status="quote"))
+    with app.app_context():
+        q = get_db().execute("SELECT id FROM documents WHERE status='quote'").fetchone()[0]
+    client.post(f"/document/{q}/email", data={})
+    assert "Quote Q00001" in smtp.sent[-1]["Subject"]
+    # statements: one, and all customers with a balance
+    client.post(f"/cards/statement/{cust}/email", data={"start": "2026-11-01", "end": "2026-11-30"})
+    assert "Statement" in smtp.sent[-1]["Subject"]
+    n = len(smtp.sent)
+    r = client.post("/cards/statements/email", data={"start": "2026-11-01", "end": "2026-11-30"}, follow_redirects=True)
+    assert len(smtp.sent) == n + 1 and "emailed or queued for 1 customers" in page(r)
+    # a server that's down: the email waits in the outbox, and goes when it's back
+    smtp.fail = True
+    r = client.post(f"/document/{inv}/email", data={}, follow_redirects=True)
+    assert "Queued for ap@nadi.test" in page(r)
+    assert "connection refused" in page(client.get("/setup/email/"))
+    smtp.fail = False
+    client.post("/setup/email/send")
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM email_queue WHERE status<>'sent'").fetchone()[0] == 0
+
+
+# ------------------------------------------------------------------ S25, S40
+def test_s25_till_asks_before_selling_stock_you_dont_have(tmp_path, monkeypatch):
+    from tests.test_pos_app import make
+    app, c, _coffee = make(tmp_path, monkeypatch, "pos")
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        pump = db.execute("INSERT INTO items (sku, name, is_sold, is_inventoried, sell_price, income_account_id,"
+                          " expense_account_id, asset_account_id, sale_tax_code_id, buy_price) VALUES"
+                          " ('P','Pump',1,1,1000,?,?,?,?,500)", (acc["4-1000"], acc["5-1000"], acc["1-1300"], tc["GST"])
+                          ).lastrowid
+        L.stock_adjust(db, pump, "2026-11-01", 15, 500)
+        db.commit()
+    sale = {"method": "card", "lines": [{"item_id": pump, "qty": 16}]}
+    r = c.post("/pos/sale", json=sale)
+    d = r.get_json()
+    assert r.status_code == 409 and d["confirm_stock"] and "Only 15 Pump in stock" in d["error"] and "Sell anyway?" in d["error"]
+    assert c.post("/pos/sale", json=dict(sale, sell_anyway=True)).get_json()["ok"]
+    # an item set to never go below 0 is refused outright
+    with app.app_context():
+        db = get_db()
+        db.execute("UPDATE items SET block_oversell=1 WHERE id=?", (pump,))
+        db.commit()
+    d = c.post("/pos/sale", json=dict(sale, sell_anyway=True)).get_json()
+    assert not d["ok"] and not d["confirm_stock"] and "can&#39;t be sold below 0" not in d["error"]
+    assert "can't be sold below 0" in d["error"]
+
+
+def test_s40_invoice_warns_before_selling_stock_you_dont_have(client, app):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust, _ = _contacts(db)
+        pump = db.execute("INSERT INTO items (sku, name, is_sold, is_inventoried, sell_price, income_account_id,"
+                          " expense_account_id, asset_account_id, buy_price) VALUES ('P','Pump',1,1,1000,?,?,?,500)",
+                          (acc["4-1000"], acc["5-1000"], acc["1-1300"])).lastrowid
+        db.commit()
+    form = _inv_form(cust, [dict(item=pump, description="Pump", qty="2", price="10", account=acc["4-1000"], tax=tc["GST"])])
+    r = client.post("/sale/new", data=form, headers={"Referer": "/sale/new"}, follow_redirects=True)
+    assert "Only 0 Pump in stock" in page(r)
+    client.post("/sale/new", data=dict(form, sell_anyway="1"))
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT qty_on_hand FROM items WHERE id=?", (pump,)).fetchone()[0] == -2
+        # and cost of sales is posted at the buy price, not $0 (F13)
+        assert L.balances(db)[acc["5-1000"]] == 1000

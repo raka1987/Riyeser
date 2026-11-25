@@ -315,6 +315,35 @@ def save_document(db, side, header, lines, status, doc_id=None):
     return doc_id
 
 
+class StockShort(PostingError):
+    """Selling more than is on hand (S25, S40). confirm: False when the item is set to never sell below 0."""
+    def __init__(self, msg, confirm=True):
+        super().__init__(msg)
+        self.confirm = confirm
+
+
+def check_stock(db, lines, sell_anyway=False):
+    """Refuse a sale of more stock than is on hand unless sell_anyway (and the item allows it)."""
+    want = defaultdict(float)
+    for l in lines:
+        if l.get("item_id"):
+            want[l["item_id"]] += float(l.get("qty") or 0)
+    msgs, block = [], False
+    for iid, q in want.items():
+        it = db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
+        if not it or not it["is_inventoried"] or q <= 0 or q <= it["qty_on_hand"] + 1e-9:
+            continue
+        if it["block_oversell"]:
+            block = True
+            msgs.append(f"Only {max(it['qty_on_hand'], 0):g} {it['name']} in stock, and it can't be sold below 0.")
+        else:
+            msgs.append(f"Only {max(it['qty_on_hand'], 0):g} {it['name']} in stock (selling {q:g}).")
+    if block:
+        raise StockShort(" ".join(msgs), confirm=False)
+    if msgs and not sell_anyway:
+        raise StockShort(" ".join(msgs) + " Sell anyway?")
+
+
 def _stocked(db, l):
     if not l.get("item_id"):
         return False

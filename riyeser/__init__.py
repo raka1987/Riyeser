@@ -182,9 +182,10 @@ def create_app(test_config=None):
         return redirect(request.referrer or url_for("core.dashboard"))
 
     from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help, companies
-    from .views import bookings, backups
+    from .views import bookings, backups, email
     app.register_blueprint(auth.bp)
     app.register_blueprint(backups.bp)
+    app.register_blueprint(email.bp)
     app.register_blueprint(companies.bp)
     app.register_blueprint(core.bp)
     app.register_blueprint(contacts.bp)

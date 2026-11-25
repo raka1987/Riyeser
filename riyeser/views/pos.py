@@ -642,6 +642,11 @@ def sale():
                               description=f"{item['name']} ({note})" if note else item["name"]))
         if not lines:
             raise PostingError("Add at least one item.")
+        from ..ledger import check_stock, StockShort
+        try:
+            check_stock(db, lines, bool(data.get("sell_anyway")))  # S25
+        except StockShort as e:
+            return jsonify(ok=False, error=str(e), confirm_stock=e.confirm), 409
         # A discount above the limit needs a manager (owners and managers approve their own).
         rules = approval_rules(db)
         top = max(l["discount_pct"] for l in lines)

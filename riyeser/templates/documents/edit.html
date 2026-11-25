@@ -33,6 +33,7 @@
 <p><button type="button" class="btn sm" data-add-row="#lines">+ Add line</button></p>
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:260px"><label>Notes / terms (printed)</label><textarea name="notes" rows="3">{{ doc.notes or '' if doc }}</textarea></div>
 <table class="totals"><tr><td>Subtotal</td><td class="n" id="t-sub"></td></tr><tr><td>GST</td><td class="n" id="t-tax"></td></tr><tr><td>Total</td><td class="n" id="t-total"></td></tr></table></div></div>
+{% if side == 'sale' %}<p><label class="check"><input type="checkbox" name="sell_anyway" value="1"> Sell anyway if there isn't enough in stock</label></p>{% endif %}
 <button class="btn pri">Save</button> <a class="btn" href="{{ url_for('documents.index', side=side) }}">Cancel</a>
 </form>
 {% endblock %}

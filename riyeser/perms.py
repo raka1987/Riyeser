@@ -179,6 +179,8 @@ def area_of(endpoint, view_args, args, db):
         return "stock"
     if bp in ("payroll", "links"):
         return "payroll"
+    if bp == "email":
+        return "setup"
     if bp == "backups":
         return None  # anyone signed in can back up; restoring checks for an administrator itself
     if bp == "reports":

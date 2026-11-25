@@ -179,6 +179,8 @@ def migrate(db):
         db.execute("ALTER TABLE company ADD COLUMN pos_mode TEXT NOT NULL DEFAULT 'retail'")
     if "category" not in {r["name"] for r in db.execute("PRAGMA table_info(items)")}:
         db.execute("ALTER TABLE items ADD COLUMN category TEXT")
+    if "block_oversell" not in {r["name"] for r in db.execute("PRAGMA table_info(items)")}:
+        db.execute("ALTER TABLE items ADD COLUMN block_oversell INTEGER NOT NULL DEFAULT 0")  # S25: never below 0
     db.execute("""CREATE TABLE IF NOT EXISTS pos_orders (
         id INTEGER PRIMARY KEY,
         order_type TEXT NOT NULL DEFAULT 'retail',   -- retail (parked sale), dine_in, takeaway
@@ -354,6 +356,8 @@ def migrate(db):
         document_id INTEGER REFERENCES documents(id), refund_entry_id INTEGER REFERENCES journal_entries(id),
         amount INTEGER NOT NULL, date TEXT NOT NULL, voided INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    from . import mailer
+    mailer.ensure(db)  # S18: email settings and the outbox
     _job_parts_inc_gst(db)
     _unique_document_numbers(db)
     db.commit()

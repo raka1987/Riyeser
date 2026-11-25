@@ -19,6 +19,7 @@ document.getElementById('photoFile').addEventListener('change',e=>{const f=e.tar
 <label class="check"><input type="checkbox" name="is_sold" value="1" {{ 'checked' if not item or item.is_sold }}> I sell this item</label>
 <label class="check"><input type="checkbox" name="is_bought" value="1" {{ 'checked' if not item or item.is_bought }}> I buy this item</label>
 <label class="check"><input type="checkbox" name="is_inventoried" value="1" {{ 'checked' if item and item.is_inventoried }}> I inventory this item (track quantity &amp; cost)</label>
+<label class="check"><input type="checkbox" name="block_oversell" value="1" {{ 'checked' if item and item.block_oversell }}> Never sell more than is in stock (otherwise the till and invoices ask first)</label>
 <label class="check"><input type="checkbox" name="active" value="1" {{ 'checked' if not item or item.active }}> Active</label>
 <label class="check"><input type="checkbox" name="pos_favourite" value="1" {{ 'checked' if item and item.pos_favourite }}> Show in POS Favourites</label>
 <div class="wide"><label>Photo for the POS (optional)</label>

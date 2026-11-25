@@ -12,4 +12,5 @@
 {% if st.overdue %}<p class="neg" role="alert"><b>Overdue:</b> {% for o in st.overdue %}{{ o.number }} ({{ o.days }} days, {{ o.due|money }}){{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}
 {% if how_to_pay and st.side == 'sale' %}<h3>How to pay</h3>{% for l in how_to_pay %}<p style="margin:2px 0">{{ l }}</p>{% endfor %}{% endif %}
 <p class="noprint" style="margin-top:24px"><button class="btn pri" onclick="print()">Print</button> <a class="btn" href="?pdf=1&start={{ st.start }}&end={{ st.end }}">Download PDF</a> <a class="btn" href="{{ url_for('contacts.view', cid=c.id) }}">Back</a></p>
+{% if c.email %}<form method="post" class="noprint" action="{{ url_for('contacts.email_statement', cid=c.id) }}"><input type="hidden" name="start" value="{{ st.start }}"><input type="hidden" name="end" value="{{ st.end }}"><button class="btn">Email to {{ c.email }}</button></form>{% endif %}
 </div></body></html>

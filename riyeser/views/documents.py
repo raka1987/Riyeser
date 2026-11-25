@@ -114,6 +114,8 @@ def _save(side, doc_id):
         raise ValueError("Invalid status.")
     if side == "sale" and status == "open" and kind == "invoice":
         _check_free_invoices(db)
+        from ..ledger import check_stock
+        check_stock(db, lines, bool(f.get("sell_anyway")))  # S40: tick "Sell anyway" to go below 0
     was_quote = doc_id and db.execute("SELECT status FROM documents WHERE id=?", (doc_id,)).fetchone()["status"] == "quote"
     if was_quote and status != "quote":
         # S35: the quote keeps what was quoted; the order / invoice is a new document linked to it
@@ -200,6 +202,30 @@ def save_pdf(doc_id):
         flash(f"PDF saved to {path}", "ok")
     except OSError as e:
         flash(f"Could not write the PDF: {e}", "error")
+    return redirect(url_for("documents.view", doc_id=doc_id))
+
+
+@bp.route("/document/<int:doc_id>/email", methods=["POST"])
+@guarded
+def email(doc_id):
+    """Email an invoice, quote or credit note with its PDF (S18)."""
+    from .email import send_or_queue
+    db = get_db()
+    doc = db.execute("SELECT d.*, c.name cname, c.email cemail FROM documents d JOIN contacts c ON c.id=d.contact_id"
+                     " WHERE d.id=?", (doc_id,)).fetchone() or abort(404)
+    title = pdfmod.doc_title(doc)
+    to = (request.form.get("to") or doc["cemail"] or "").strip()
+    if not to:
+        raise ValueError(f"Add {doc['cname']}'s email address first (or type one in).")
+    name, _ = pdfmod.document_filename(db, doc_id)
+    due = doc["total"] - doc["amount_paid"]
+    body = request.form.get("message") or (
+        f"Hello {doc['cname']},\n\nPlease find attached {title.lower()} {doc['number']}"
+        + (f" for {pdfmod.fmt_money(due)}, due {doc['due_date']}" if doc["status"] == "open" and due > 0 and
+           doc["kind"] == "invoice" else "") + f".\n\nThank you,\n{g.company['name']}")
+    msg = send_or_queue(db, to, request.form.get("subject") or f"{title} {doc['number']} from {g.company['name']}",
+                        body, (name, pdfmod.document_pdf(db, doc_id)), "document", doc_id)
+    flash(msg, "ok")
     return redirect(url_for("documents.view", doc_id=doc_id))
 
 

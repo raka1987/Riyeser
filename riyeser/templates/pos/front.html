@@ -283,8 +283,11 @@ async function complete(){$('#complete').disabled=true;
     try{const ap=await requestApproval({action:'discount',amount:Math.ceil(top),what:'Discount of '+top+'%',
       detail:'Over the '+RULES.discount_limit+'% limit',amountLabel:'-'+fmt(off),verb:'Approve discount'});body.approval_id=ap.approval_id;}
     catch(e){updPay();return;}}
-  const r=await fetch(U.sale,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const d=await r.json().catch(()=>({ok:false,error:'Something went wrong. The sale was not saved.'}));
+  let r=await fetch(U.sale,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let d=await r.json().catch(()=>({ok:false,error:'Something went wrong. The sale was not saved.'}));
+  if(!d.ok&&d.confirm_stock&&confirm(d.error)){body.sell_anyway=true;  // S25: "Only 15 in stock. Sell anyway?"
+    r=await fetch(U.sale,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    d=await r.json().catch(()=>({ok:false,error:'Something went wrong. The sale was not saved.'}));}
   if(!d.ok){$('#payErr').textContent=d.error;updPay();return;}
   last=d;cart.forEach(l=>{const it=ITEMS.find(i=>i.id===l.id);if(it&&it.stock!==null)it.stock-=l.qty;});
   $('#give').innerHTML=method==='cash'?`<span>Give change</span><span class="n">${fmt(d.change)}</span>`:`<span>Paid by card</span><span class="n">${fmt(d.total)}</span>`;
