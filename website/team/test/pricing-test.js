@@ -97,6 +97,17 @@ const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
     else if (f.endsWith('.html') && /\b(FJD|AUD|NZD)\b|Australian dollars/.test(fs.readFileSync(p, 'utf8'))) bad.push(path.relative(pub, p)); } })(pub);
   check(!bad.length, `no FJD, AUD or NZD on the website pages ${bad.join(', ')}`);
 
+  // M1: the calculator only takes whole numbers from 1 to 500, and says what to do above 500
+  await pg.goto(`${BASE}/pricing.html`); await pg.uncheck('[data-m=basic]'); await pg.check('[data-m=pos]');
+  const typed = async (v) => { await pg.fill('#users', v); await pg.dispatchEvent('#users', 'input'); await pg.dispatchEvent('#users', 'change'); return [await pg.inputValue('#users'), await pg.textContent('#total')]; };
+  let r = await typed('100000'); check(r[0] === '500' && r[1] === 'US$3,508 a month' && await pg.isVisible('#usersmax'), `M1 100,000 people -> 500 shown and charged, "More than 500? Contact us" (${r})`);
+  r = await typed('0'); check(r[0] === '1' && r[1] === 'US$29 a month', `M1 0 -> 1 (${r})`);
+  r = await typed('-4'); check(r[0] === '1', `M1 -4 -> 1 (${r})`);
+  r = await typed('2.5'); check(r[0] === '3' && r[1] === 'US$29 a month', `M1 2.5 -> 3 (${r})`);
+  r = await typed(''); check(r[0] === '1', `M1 blank -> 1 when you leave the box (${r})`);
+  await pg.fill('#users', '500'); await pg.click('[data-d="1"]'); check(await pg.inputValue('#users') === '500', 'M1 + stops at 500');
+  await pg.fill('#cos', '7.2'); await pg.dispatchEvent('#cos', 'change'); check(await pg.inputValue('#cos') === '7', 'M1 companies: whole numbers too');
+
   const ph = await b.newPage({ viewport: { width: 390, height: 844 } }); await ph.goto(`${BASE}/pricing.html`);
   check((await ph.evaluate(() => document.documentElement.scrollWidth)) <= 390, 'phone: no sideways scrolling on Pricing');
   // S2: under about 3,000 px tall on a phone (it was 11,500): a card per program, swiped sideways; the calculator,

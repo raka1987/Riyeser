@@ -815,6 +815,7 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Each paid program has its own 
       <p class="muted small" id="plusnote" hidden>Accounting Plus includes everything in Basics, so Basics isn't charged as well.</p>
       <p class="muted" style="margin:14px 0 4px">People using Riyeser</p>
       <div class="users"><button type="button" data-d="-1" aria-label="Fewer people">−</button><input id="users" type="number" min="1" max="500" value="3" aria-label="Number of people"><button type="button" data-d="1" aria-label="More people">+</button></div>
+      <p class="muted small" id="usersmax" hidden>More than 500 people? <a class="more" href="/link/?contact">Contact us</a> for a price.</p>
       <p class="muted" style="margin:10px 0 4px">Companies in Accounting</p>
       <div class="users"><button type="button" data-c="-1" aria-label="Fewer companies">−</button><input id="cos" type="number" min="1" max="200" value="1" aria-label="Number of companies"><button type="button" data-c="1" aria-label="More companies">+</button></div>
       <label class="yr" style="margin-top:12px"><input id="yearly" type="checkbox"> Pay yearly (10 months for 12)</label></div>
@@ -866,6 +867,9 @@ var NAMES=${JSON.stringify(Object.fromEntries(ROWS.map(([m, n]) => [m, n])))};
 function money(v){v=Math.round(v*100)/100;return 'US$'+v.toLocaleString('en-AU',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})}
 function li(t,v){var l=document.createElement('li');var a=document.createElement('span');a.textContent=t;var b=document.createElement('b');b.textContent=v;l.appendChild(a);l.appendChild(b);return l}
 function box(m){return document.querySelector('[data-m='+m+']')}
+// M1: whole numbers from 1 to the most; the box shows what's charged (a blank box waits until you leave it)
+function whole(el,max,soft){var raw=String(el.value).trim(),v=Math.round(Number(raw));if(el===u){if(Number(raw)>max)el.dataset.over=1;else if(Number(raw)<max)delete el.dataset.over;document.getElementById('usersmax').hidden=!el.dataset.over}
+  if(raw===''||!isFinite(v)){if(!soft)el.value=1;return 1}v=Math.max(1,Math.min(max,v));if(String(v)!==raw&&(!soft||Number(raw)>max||Number(raw)<1||/[.,e]/i.test(raw)))el.value=v;return v}
 function draw(e){
   var basic=box('basic'),plus=box('plus');
   if(e&&e.target===plus&&plus.checked)basic.checked=false;   // Plus includes Basics: one or the other
@@ -873,7 +877,7 @@ function draw(e){
   if(basic.checked&&plus.checked)basic.checked=false;
   document.getElementById('plusnote').hidden=!plus.checked;
   var mods=[].slice.call(document.querySelectorAll('[data-m]')).filter(function(x){return x.checked}).map(function(x){return x.dataset.m});
-  var n=Math.max(1,Math.min(500,parseInt(u.value,10)||1)),k=Math.max(1,Math.min(200,parseInt(c.value,10)||1));
+  var n=whole(u,500,true),k=whole(c,200,true);
   var extra=Math.max(0,n-P.users_included),progs=0,per=document.getElementById('per');per.innerHTML='';
   mods.forEach(function(m){var v=P[m]+extra*P.extra_user;progs+=v;
     per.appendChild(li(NAMES[m]+(extra?' ('+money(P[m])+' + '+extra+' extra user'+(extra>1?'s':'')+' × '+money(P.extra_user)+')':' ('+P.users_included+' users included)'),money(v)))});
@@ -887,8 +891,9 @@ function draw(e){
   else{t.textContent=money(m)+' a month';note.textContent='After the 90-day free trial. Per business, not per person.'}
   if(EB&&eb){var e1=progs/2+cos;eb.textContent='🐣 Early bird: '+(y.checked?money(e1*10)+' for your first year':money(e1)+' a month for your first 12 months')+'.'}
 }
-document.querySelectorAll('[data-d]').forEach(function(x){x.addEventListener('click',function(){u.value=Math.max(1,(parseInt(u.value,10)||1)+parseInt(x.dataset.d,10));draw()})});
-document.querySelectorAll('[data-c]').forEach(function(x){x.addEventListener('click',function(){c.value=Math.max(1,(parseInt(c.value,10)||1)+parseInt(x.dataset.c,10));draw()})});
+document.querySelectorAll('[data-d]').forEach(function(x){x.addEventListener('click',function(){u.value=Math.max(1,Math.min(500,whole(u,500)+parseInt(x.dataset.d,10)));draw()})});
+document.querySelectorAll('[data-c]').forEach(function(x){x.addEventListener('click',function(){c.value=Math.max(1,Math.min(200,whole(c,200)+parseInt(x.dataset.c,10)));draw()})});
+u.addEventListener('change',function(){whole(u,500);draw()});c.addEventListener('change',function(){whole(c,200);draw()});
 document.querySelectorAll('[data-m]').forEach(function(x){x.addEventListener('change',draw)});
 u.addEventListener('input',function(){draw()});c.addEventListener('input',function(){draw()});y.addEventListener('change',function(){draw()});draw()})()</script>`,
   });
