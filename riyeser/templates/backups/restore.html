@@ -1,0 +1,16 @@
+{% extends "base.html" if not first else "backups/bare.html" %}{% block title %}Restore from a backup{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Restore from a backup</h1><p class="sub">Check this is the right backup before restoring.</p></div></div>
+<div class="card"><h3>{{ info.name }}</h3>
+<table><tr><th>In the backup</th><th class="n">Count</th>{% if current %}<th class="n">This company now</th>{% endif %}</tr>
+{% for k, v in info.counts.items() %}<tr><td>{{ k|capitalize }}</td><td class="n">{{ v }}</td>{% if current %}<td class="n">{{ current.counts[k] }}</td>{% endif %}</tr>{% endfor %}
+<tr><td>Latest transaction</td><td class="n">{{ info.last_date or '—' }}</td>{% if current %}<td class="n">{{ current.last_date or '—' }}</td>{% endif %}</tr></table></div>
+<form method="post" class="card">
+{% if first %}<p>This becomes your company file. Sign in afterwards with a user from the backup.</p>
+<button class="btn pri" name="action" value="over">Restore {{ info.name }}</button>
+{% else %}<p><b>Restore over this company</b> ({{ current.name }}): it's replaced by the backup. A copy of it as it is now is saved in the backups folder first, so nothing is lost.</p>
+<button class="btn pri" name="action" value="over" data-confirm="Replace {{ current.name }} with the backup?">Restore over this company</button>
+<p style="margin-top:14px"><b>Or bring it in as a separate company</b>, named "{{ copy_name }}"{% if not can_copy %} (your plan has no room for another company){% endif %}.</p>
+<button class="btn" name="action" value="copy" {{ 'disabled' if not can_copy }}>Bring in as "{{ copy_name }}"</button>{% endif %}
+<button class="btn" name="action" value="cancel" formnovalidate>Cancel</button></form>
+{% endblock %}

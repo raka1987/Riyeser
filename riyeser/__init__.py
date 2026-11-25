@@ -54,7 +54,7 @@ def create_app(test_config=None):
                 flash("This is the demo company. Leave demo mode from Riyeser Central.", "error")
                 return redirect(url_for("core.dashboard"))
         if not os.path.exists(app.config["DATABASE"]):
-            if request.endpoint not in ("auth.setup_company", "static"):
+            if request.endpoint not in ("auth.setup_company", "static", "backups.restore_upload", "backups.restore"):
                 return redirect(url_for("auth.setup_company"))
             return
         from . import companies as co
@@ -108,6 +108,8 @@ def create_app(test_config=None):
                 and request.endpoint not in ("auth.logout", "auth.login", "auth.forgot"):
             abort(403)
         if g.user is not None:
+            from .views.backups import auto_backup
+            auto_backup(app)  # once a day per company (S38)
             g.over_allowance = not co.within_allowance(co.current_id())
             from .perms import check_request
             why = check_request(db)
@@ -178,8 +180,9 @@ def create_app(test_config=None):
         return redirect(request.referrer or url_for("core.dashboard"))
 
     from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help, companies
-    from .views import bookings
+    from .views import bookings, backups
     app.register_blueprint(auth.bp)
+    app.register_blueprint(backups.bp)
     app.register_blueprint(companies.bp)
     app.register_blueprint(core.bp)
     app.register_blueprint(contacts.bp)

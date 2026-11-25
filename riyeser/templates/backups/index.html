@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% block title %}Backups{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Backups</h1><p class="sub">A backup of this company is made automatically once a day. The last {{ keep }} are kept.</p></div>
+<div class="actions"><form method="post" action="{{ url_for('backups.now') }}" class="inline"><button class="btn pri">Back up now</button></form>
+<form method="post" action="{{ url_for('backups.open_folder') }}" class="inline"><button class="btn">Open the backups folder</button></form></div></div>
+{% if remind %}<div class="flash warn" role="status">There's been no backup of this company in the last 7 days. Press <b>Back up now</b>.</div>{% endif %}
+<div class="card"><p style="margin:0">Backups are saved in <b>{{ folder }}</b>, outside the program's own folder, so they're still there after uninstalling, reinstalling or moving to a new PC (copy the {{ root }} folder across).</p>
+<form method="post" action="{{ url_for('backups.download') }}" style="margin-top:10px"><button class="btn">Back up and download a copy…</button> <span class="muted">to keep one somewhere else too, like a USB stick or OneDrive</span></form></div>
+<h2>Backups of this company</h2>
+<div class="tbl"><table><tr><th>When</th><th>File</th><th class="n">Size</th></tr>
+{% for b in backups %}<tr><td>{{ b.when.strftime('%d %b %Y %H:%M') }}</td><td>{{ b.name }}</td><td class="n">{{ '%.1f'|format(b.size / 1048576) }} MB</td></tr>
+{% else %}<tr><td colspan="3" class="muted">No backups yet.</td></tr>{% endfor %}</table></div>
+<h2>Restore from a backup…</h2>
+{% if is_admin %}<form method="post" action="{{ url_for('backups.restore_upload') }}" enctype="multipart/form-data" class="card">
+<label for="restore-file">Backup file (from anywhere: this folder, a USB stick, another PC)</label><input id="restore-file" type="file" name="file" accept=".db,application/octet-stream" required>
+<p class="muted">Next you'll see the company's name and what's in it, and choose to restore over this company (a copy of it as it is now is saved first) or bring it in as a separate company.</p>
+<button class="btn">Restore from a backup…</button></form>
+{% else %}<p class="muted">Only an administrator can restore a backup.</p>{% endif %}
+{% endblock %}

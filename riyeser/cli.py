@@ -82,13 +82,9 @@ def cmd_backup(args):
     db_path = _configure(args)
     if not os.path.exists(db_path):
         sys.exit("No company file to back up.")
-    import sqlite3
-    dest = Path(args.path or f"{db_path}.{datetime.now():%Y%m%d-%H%M%S}.bak")
-    src = sqlite3.connect(db_path)
-    out = sqlite3.connect(dest)
-    with out:
-        src.backup(out)  # safe online backup, even while the server is running
-    src.close(); out.close()
+    from . import backups
+    # safe online backup, even while the server is running; by default into Documents\Riyeser\Accounting\Backups
+    dest = backups.copy_db(db_path, Path(args.path)) if args.path else backups.backup_now(db_path)
     print(f"Backed up to {dest}")
 
 

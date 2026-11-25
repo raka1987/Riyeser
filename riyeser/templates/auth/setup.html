@@ -22,4 +22,10 @@
     <label class="pick"><input type="radio" name="start" value="demo"> <b>Explore with demo data</b><small>Practice data: made-up customers and invoices to try things out. Not for your real books.</small></label>
   </div>
   <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Create company file</button>
+</form>
+<form method="post" action="{{ url_for('backups.restore_upload') }}" enctype="multipart/form-data" style="margin-top:22px;border-top:1px solid var(--line);padding-top:14px">
+  <label for="restore-file"><b>Or restore from a backup…</b></label>
+  <p class="muted" style="font-size:12px;margin:4px 0 8px">Moved PC or reinstalled? Pick a Riyeser backup (.db) from anywhere, for example Documents\Riyeser\Accounting\Backups or a USB stick. You'll see what's in it before anything is restored.</p>
+  <input id="restore-file" type="file" name="file" accept=".db,application/octet-stream" required>
+  <button class="btn" style="margin-top:8px;width:100%;justify-content:center">Restore from a backup…</button>
 </form></div></body></html>

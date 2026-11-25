@@ -1,0 +1,4 @@
+{% from "_macros.html" import flashes %}
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %} · {{ product.app }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body class="{{ product.cls }}"><div class="login" style="max-width:640px">{{ flashes() }}{% block content %}{% endblock %}</div></body></html>

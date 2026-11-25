@@ -75,3 +75,24 @@ currency is refused rather than booked one-for-one (FJ$10,870 is not A$10,870).
 - The demo signs in on its own as `demo` (password `demo`, administrator). After signing out, the login page says "Demo mode: sign in with demo / demo".
 - The demo's staff are `riyeser.demo.DEMO_STAFF`; Riyeser Payroll's demo uses the same people.
 - Leaving demo mode: set `"on": false`, then rename `.riyeser\demo` to `.riyeser\demo-ended-<UTC stamp>` (never delete it). Close the programs first, or reopen them afterwards: a program that is still open shows "Demo mode has ended. Close this program and open it again." Next time demo is switched on, a fresh demo folder is made.
+
+## Accounting company files and backups (for Central's "Back up everything / Restore everything")
+
+**Company files** (all Accounting apps: Basics, Plus, Invoices, POS, Bookings share them):
+- Folder: `%USERPROFILE%\.riyeser\` (`~/.riyeser/` on Mac and Linux), or `RIYESER_HOME` when set. No installer or
+  uninstaller touches it.
+- The first company: `company.db`. Other companies: `companies\<id>.db`, listed in `companies.json`
+  (`[{"id", "file", "archived"}]`, `file` relative to the folder).
+- Each file is one SQLite database. Copy it with SQLite's online backup (or while no Accounting app is running).
+
+**Backups** (the owner's standard OWNER-BACKUP, the same in every Riyeser program):
+- Folder: `Documents\Riyeser\Accounting\Backups\<company file name without .db>\`, e.g. `Backups\company\` and
+  `Backups\acme-pty-ltd-3f2a1b\` (`RIYESER_DOCS` replaces `Documents\Riyeser`). Outside the install folder, so
+  backups survive uninstalling, reinstalling and moving PCs.
+- File names: `<YYYY-MM-DD HHMMSS> <company name>.db` (a before-restore copy ends in `(before restore).db`). Each is a
+  plain company file, which can be restored as it is.
+- Accounting makes one automatic backup a day of each company the first time it's opened that day, and keeps the last
+  30 per company. **Setup → Backups** has *Back up now*, *Open the backups folder*, a download copy, and *Restore from a
+  backup…* (pick a file anywhere, see the company name and counts, then restore over the company, saving a
+  before-restore copy first, or bring it in as "<name> (restored 25 Nov 2026)"). With no company yet, the first-run
+  screen offers *Restore from a backup…* next to creating a new company. `riyeser backup` writes to the same folder.
