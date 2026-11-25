@@ -513,7 +513,7 @@
           .filter((x) => !s || [x.ref, x.subject, x.business, x.opened_by_email, x.diag, ...tk(x.id).messages.map((m) => m.body)].some((v) => String(v || '').toLowerCase().includes(s)));
         const base = all.filter((x) => (!f.product || x.product === f.product) && (!f.owner || (f.owner === 'me' ? x.assignee === actor : f.owner === 'none' ? !x.assignee : x.assignee === f.owner))
           && (!f.status || (f.status === 'open' ? x.status !== 'done' : x.status === f.status)) && (!f.level || String(x.level) === String(f.level)) && (!f.topic || x.topic === f.topic));
-        const B = { mine: (x) => x.status !== 'done' && x.assignee === actor, waiting_customer: (x) => x.status === 'waiting_customer', unassigned: (x) => x.status !== 'done' && !x.assignee,
+        const B = { open: (x) => x.status !== 'done', mine: (x) => x.status !== 'done' && x.assignee === actor, waiting_customer: (x) => x.status === 'waiting_customer', unassigned: (x) => x.status !== 'done' && !x.assignee,
           overdue: (x) => x.status !== 'done' && (x.overdue || x.update_overdue), all: () => true };
         const counts = { open: base.filter((x) => x.status !== 'done').length }; Object.keys(B).forEach((k) => { counts[k] = base.filter(B[k]).length; });
         return { tickets: base.filter(B[box] || B.all).sort((a, b) => (b.update_overdue - a.update_overdue) || b.updated_at.localeCompare(a.updated_at)), counts, overdue_hours: od,
@@ -1027,7 +1027,7 @@
       ${ho && ho.missing ? '' : '<button class="btn w" id="hoAdd">Add handover note</button>'}</div>`;
   }
   function addHandover() {
-    dlg(`<h3>Add handover note</h3><p class="muted small">For whoever is on next. Every note is kept in the HQ history.</p><form id="hof"><label class="f"><span>Note</span><textarea name="note" rows="3" required maxlength="1000" placeholder="e.g. Harbour Cafe complaint: update the customer after 3 pm"></textarea></label>
+    dlg(`<h3>Add handover note</h3><p class="muted small">For whoever is on next. Every note is kept in the HQ history.</p><form id="hof"><label class="f"><span>Note</span><textarea name="note" rows="2" required maxlength="1000" placeholder="e.g. Harbour Cafe complaint: update the customer after 3 pm"></textarea></label>
       <label class="f"><span>Shift date</span><input type="date" name="day" value="${today()}"></label><div id="hoerr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Add note</button></div></form>`, (d, close) => {
       d.querySelector('#hof').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
         try { await api.handoverAdd(String(f.get('note')).trim(), String(f.get('day') || '') || null); close(); flash('Handover note added.'); overview(); } catch (err) { d.querySelector('#hoerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
@@ -1853,38 +1853,58 @@
   const refundPill = (f) => (f.waiting_second ? '<span class="pill warn">Waiting for second approval</span>' : pill(RSTAT, f.status));
 
   // ------------------------------------------------------------------ support: the Support workspace
-  // Three columns (one under the other on narrow screens): the inbox, the conversation, and Product diagnostics.
-  const QTABS = [['mine', 'My tickets'], ['waiting_customer', 'Waiting'], ['unassigned', 'Unassigned'], ['overdue', 'Overdue update'], ['all', 'All']];
-  const SF0 = { product: '', owner: '', status: 'open', level: '', topic: '' };
-  const timer = (t, od) => { if (t.first_reply_at) return `<span class="tmr">First reply in ${dur(hours(t.created_at, t.first_reply_at))}</span>`;
-    if (t.status === 'done') return '';
+  // Laid out like an email program: folders on the left (with live counts), the folder's tickets in the middle, and
+  // the open ticket on the right, with its details in a panel that folds away. On phones: a folder drop-down, the list,
+  // then the ticket (← back to the list).
+  const FOLDERS = [['open', 'Open'], ['mine', 'My tickets'], ['unassigned', 'Unassigned'], ['waiting_customer', 'Waiting on customer'], ['waiting_us', 'Waiting on Riyeser'],
+    ['overdue', 'Overdue update'], ['resolved', 'Resolved'], ['all', 'All']];
+  // Folders the database doesn't have by name: which box to ask for, and which of its tickets to keep.
+  const FOLDER_Q = { waiting_us: ['open', (t) => t.status !== 'waiting_customer'], resolved: ['all', (t) => t.status === 'done'] };
+  const folderCount = (k, c) => (k === 'waiting_us' ? (c.open != null && c.waiting_customer != null ? c.open - c.waiting_customer : null)
+    : k === 'resolved' ? (c.all != null && c.open != null ? c.all - c.open : null) : c[k]);
+  const folderName = (k) => (FOLDERS.find((f) => f[0] === k) || [0, 'Tickets'])[1];
+  const SF0 = { product: '', owner: '', level: '', topic: '' };
+  const FILTERS = () => [['product', 'Product', [['', 'All products'], ...PRODUCTS.map(([k, l]) => [k, l])]],
+    ['owner', 'Owner', [['', 'Anyone'], ['me', 'Me'], ['none', 'Nobody yet'], ...(S.supStaff || []).map((x) => [x.user_id, x.name])]],
+    ['level', 'Level', [['', 'Any level'], ['1', 'Level 1 · Support'], ['2', 'Level 2 · Senior'], ['3', 'Level 3 · Management']]],
+    ['topic', 'Topic', [['', 'Any topic'], ...Object.entries(TOPICS)]]];
+  const keep = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window: not remembered */ } } };
+  const phoneWidth = () => window.matchMedia('(max-width: 900px)').matches;
+  const timer = (t, od) => { if (t.first_reply_at || t.status === 'done') return '';
     const hh = hours(t.created_at); return `<span class="tmr${hh > od ? ' late' : ''}">No reply yet · ${dur(hh)}</span>`; };
   const actBadge = (w) => (w === 'riyeser' ? '<span class="act r">Riyeser to act</span>' : w === 'customer' ? '<span class="act c">Customer to act</span>' : '');
   const S_DRAFTS = {};   // each ticket's drafts: { reply, note } (kept while HQ is open)
   const localInput = (t) => { if (!t) return ''; const d = new Date(t); const z = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}T${z(d.getHours())}:${z(d.getMinutes())}`; };
   async function support() {
-    S.box = S.box || 'all'; S.tq = S.tq || ''; S.sf = S.sf || { ...SF0 };
+    S.box = S.box || keep.get('hq.supFolder') || 'open'; if (!FOLDERS.some((f) => f[0] === S.box)) S.box = 'open';
+    S.tq = S.tq || ''; S.sf = { ...SF0, ...(S.sf || {}) }; delete S.sf.status;
+    if (S.detOpen == null) S.detOpen = keep.get('hq.supDetails') !== '0';
     if (!can('support.view')) return diagnosticsOnly();
-    const sel = (name, label, opts, v) => `<label class="sfl"><span>${label}</span><select name="${name}" aria-label="${label}">${opts.map(([k, l]) => `<option value="${esc(k)}"${String(v) === String(k) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
-    const m = main(`<div class="sws" id="sws"><section class="card sw-in"><div class="swhead"><h2>Support inbox</h2>${can('support.diagnostics') ? '<button class="btn sm" id="dglook" title="Look up a diagnostic reference">🔎 DG-…</button>' : ''}</div>
-        <form class="search" id="tsf"><input name="q" value="${esc(S.tq)}" placeholder="Search tickets, businesses, DG-…" aria-label="Search tickets"><button class="btn">Search</button></form>
-        <div id="boxes"></div>
-        <form class="sfil" id="sfil">${sel('product', 'Product', [['', 'All products'], ...PRODUCTS.map(([k, l]) => [k, l])], S.sf.product)}
-          ${sel('owner', 'Owner', [['', 'Anyone'], ['me', 'Me'], ['none', 'Nobody yet']], S.sf.owner)}
-          ${sel('status', 'Status', [['open', 'Open (not resolved)'], ['', 'Any status'], ...TSTAT_ORDER.map((k) => [k, TSTAT[k][0]])], S.sf.status)}
-          ${sel('level', 'Level', [['', 'Any level'], ['1', 'Level 1 · Support'], ['2', 'Level 2 · Senior'], ['3', 'Level 3 · Management']], S.sf.level)}
-          ${sel('topic', 'Topic', [['', 'Any topic'], ...Object.entries(TOPICS)], S.sf.topic)}</form>
+    const m = main(`<div class="sws" id="sws">
+      <nav class="card sw-rail" aria-label="Ticket folders"><h2>Support inbox</h2><div id="boxes" class="folders"></div></nav>
+      <section class="card sw-in" id="swList">
+        <label class="foldsel"><span>Folder</span><select id="folderSel"></select></label>
+        <div class="swhead"><h3 id="folderName">${esc(folderName(S.box))}</h3>${can('support.diagnostics') ? '<button class="btn sm" id="dglook" title="Look up a diagnostic reference">🔎 DG-…</button>' : ''}</div>
+        <form class="search" id="tsf" role="search"><input name="q" type="search" value="${esc(S.tq)}" placeholder="Search tickets, businesses, DG-…" aria-label="Search tickets"><button class="btn sm">Search</button></form>
+        <div class="fbar"><div class="fdd"><button type="button" class="btn sm" id="filtBtn" aria-expanded="false" aria-controls="fpop">Filters</button>
+          <div class="fpop" id="fpop" hidden><form class="sfil" id="sfil"></form><div class="fpfoot"><button type="button" class="lnk" id="fclear2">Clear all</button><button type="button" class="btn sm p" id="fdone">Done</button></div></div></div>
+          <div class="fchips" id="fchips"></div></div>
         <div id="tl" class="tlist"><p class="muted">Loading…</p></div></section>
-      <section class="sw-conv" id="tv"></section><aside class="sw-diag" id="tdx"></aside></div>`);
+      <section class="sw-conv" id="tv"></section></div>`);
     m.classList.add('wide');
-    m.querySelector('#tsf').onsubmit = (e) => { e.preventDefault(); S.tq = String(new FormData(e.target).get('q')); loadInbox(); };
-    m.querySelector('#sfil').onchange = (e) => { S.sf[e.target.name] = e.target.value; loadInbox(); };
+    m.querySelector('#tsf').onsubmit = (e) => { e.preventDefault(); S.tq = String(new FormData(e.target).get('q')); loadInbox(true); };
+    const pop = m.querySelector('#fpop'); const fb = m.querySelector('#filtBtn');
+    const popShow = (on) => { pop.hidden = !on; fb.setAttribute('aria-expanded', String(on)); };
+    fb.onclick = () => popShow(pop.hidden); m.querySelector('#fdone').onclick = () => popShow(false);
+    m.querySelector('#fclear2').onclick = () => { S.sf = { ...SF0 }; popShow(false); loadInbox(true); };
+    m.querySelector('#sws').addEventListener('click', (e) => { if (!pop.hidden && !e.target.closest('.fdd')) popShow(false); });
+    m.querySelector('#sfil').onchange = (e) => { S.sf[e.target.name] = e.target.value; loadInbox(true); };
     const dl = m.querySelector('#dglook'); if (dl) dl.onclick = () => lookupDiag();
-    await loadInbox();
+    await loadInbox(!S.ticket);
     if (S.ticket) await openTicket(S.ticket);
-    else { m.querySelector('#tv').innerHTML = '<div class="card swempty"><p class="muted">Choose a ticket from the inbox.</p></div>'; }
   }
+  function openFolder(k) { S.box = k; keep.set('hq.supFolder', k); S.ticket = null; loadInbox(true); }
   // Developers (and anyone with support.diagnostics but not tickets): just the diagnostic lookup.
   async function diagnosticsOnly() {
     const m = main(`<h2>Support</h2><p class="sub">Look up a diagnostic report by its reference (it looks like DG-4821). Technical details only: never the customer's records.</p>
@@ -1901,28 +1921,59 @@
       d.querySelector('#dgf').onsubmit = async (e) => { e.preventDefault(); const out = d.querySelector('#dgout');
         try { const r = await api.diagnostic(String(new FormData(e.target).get('ref')).trim());
           out.innerHTML = `${diagCard(r.diagnostic, null, r.business)}${(r.tickets || []).length ? `<p class="small">Tickets: ${r.tickets.map((x) => `<button type="button" class="lnk" data-dgt="${esc(x.id)}">${esc(x.ref)}</button> ${esc(x.subject)}`).join(' · ')}</p>` : ''}`;
-          out.querySelectorAll('[data-dgt]').forEach((b) => b.onclick = () => { d.remove(); S.ticket = b.dataset.dgt; S.box = 'all'; S.sf = { ...SF0, status: '' }; go('#/support'); });
+          out.querySelectorAll('[data-dgt]').forEach((b) => b.onclick = () => { d.remove(); S.ticket = b.dataset.dgt; S.box = 'all'; S.sf = { ...SF0 }; go('#/support'); });
         } catch (err) { out.innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
   }
-  async function loadInbox() {
-    const r = await api.supportInbox(S.box, S.tq, S.sf); const od = Number(r.overdue_hours || 24);
-    const bx = document.getElementById('boxes'); if (!bx) return;
-    const c = r.counts || {};
-    bx.innerHTML = `<div class="chips qtabs" role="tablist">${QTABS.map(([k, l]) => `<button class="chip${S.box === k ? ' on' : ''}" data-box="${k}" role="tab" aria-selected="${S.box === k}">${l}${['mine', 'waiting_customer'].includes(k) && c[k] != null ? ` (${num(c[k])})` : k === 'overdue' && c[k] ? ` <b class="late">${num(c[k])}</b>` : ''}</button>`).join('')}
-      <button class="chip soon" disabled title="Coming in a later release">Known issues (soon)</button></div>${r.old ? '<p class="muted small">Run the latest <b>team-chat.sql</b> to switch on products, promised updates and the product filter.</p>' : ''}`;
-    bx.querySelectorAll('[data-box]').forEach((b) => b.onclick = () => { S.box = b.dataset.box; loadInbox(); });
-    const ow = document.querySelector('#sfil [name=owner]');
-    if (ow && r.staff && ow.options.length <= 3) { r.staff.forEach((x) => ow.add(new Option(x.name, x.user_id))); ow.value = S.sf.owner; }
-    const tl = document.getElementById('tl');
-    tl.innerHTML = (r.tickets || []).length ? r.tickets.map((t) => `<button class="tk${S.ticket === t.id ? ' on' : ''}${t.update_overdue ? ' late' : ''}" data-t="${esc(t.id)}">
-        <span class="tkic" aria-hidden="true">${prodIcon(t.product)}</span><span class="tkb">
-        <b>${esc(t.subject)}</b><small>${esc(t.business || t.opened_by_email || 'No business')} · <span class="code">${esc(t.ref)}</span>${t.product ? ` · ${esc(prodName(t.product))}` : ''}</small>
-        <span class="tk1">${pill(TSTAT, t.status)}${actBadge(t.who_acts)}${t.work_blocked && t.status !== 'done' ? ' <span class="pill bad">Work blocked</span>' : ''}${t.level > 1 ? ` <span class="pill">L${t.level}</span>` : ''}${t.overdue ? ' <span class="pill bad">Overdue</span>' : ''}</span>
-        ${t.next_update_due && t.status !== 'done' ? `<span class="tnu${t.update_overdue ? ' late' : ''}">${t.update_overdue ? 'Update overdue' : 'Update due'} ${esc(dueText(t.next_update_due))}${t.next_update_owner_name ? ` · ${esc(t.next_update_owner_name)}` : ''}</span>` : ''}
-        ${timer(t, od)}<small>${t.assignee_name ? `Owner: ${esc(t.assignee_name)}` : 'No owner yet'} · ${ago(t.updated_at)}</small></span></button>`).join('')
-      : `<p class="muted">${S.box === 'mine' ? 'Nothing assigned to you. 🎉' : 'Nothing here.'}</p>`;
-    tl.querySelectorAll('[data-t]').forEach((b) => b.onclick = () => openTicket(b.dataset.t));
+  // The Filters popover (Product, Owner, Level, Topic) and the active ones as chips you can remove.
+  function drawFilters() {
+    const f = document.getElementById('sfil'); const ch = document.getElementById('fchips'); if (!f || !ch) return;
+    f.innerHTML = FILTERS().map(([name, label, opts]) => `<label class="sfl"><span>${label}</span><select name="${name}" aria-label="${label}">${opts.map(([k, l]) => `<option value="${esc(k)}"${String(S.sf[name] || '') === String(k) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`).join('');
+    const on = FILTERS().filter(([name]) => S.sf[name]).map(([name, label, opts]) => [name, label, (opts.find(([k]) => String(k) === String(S.sf[name])) || [0, S.sf[name]])[1]]);
+    document.getElementById('filtBtn').textContent = on.length ? `Filters (${on.length})` : 'Filters';
+    ch.innerHTML = on.map(([name, label, v]) => `<button type="button" class="fchip" data-unf="${name}" title="Remove this filter">${esc(label)}: ${esc(v)} <span aria-hidden="true">✕</span></button>`).join('')
+      + (on.length ? '<button type="button" class="lnk" id="fclear">Clear</button>' : '');
+    ch.querySelectorAll('[data-unf]').forEach((b) => b.onclick = () => { S.sf[b.dataset.unf] = ''; loadInbox(true); });
+    const cl = ch.querySelector('#fclear'); if (cl) cl.onclick = () => { S.sf = { ...SF0 }; loadInbox(true); };
   }
+  async function loadInbox(autoOpen) {
+    const fq = FOLDER_Q[S.box] || [S.box, null];
+    const r = await api.supportInbox(fq[0], S.tq, { ...S.sf, status: '' }); const od = Number(r.overdue_hours || 24);
+    const bx = document.getElementById('boxes'); if (!bx) return;
+    if (r.staff) S.supStaff = r.staff;
+    const c = r.counts || {};
+    bx.innerHTML = FOLDERS.map(([k, l]) => { const n = folderCount(k, c);
+      return `<button class="fold${S.box === k ? ' on' : ''}${k === 'overdue' && n ? ' late' : ''}" data-box="${k}"${S.box === k ? ' aria-current="true"' : ''}><span>${l}</span>${n != null ? `<b>${num(n)}</b>` : ''}</button>`; }).join('')
+      + '<button class="fold soon" disabled title="Coming in a later release"><span>Known issues</span><small>soon</small></button>'
+      + (r.old ? '<p class="muted small">Run the latest <b>team-chat.sql</b> to switch on products, promised updates and the product filter.</p>' : '');
+    bx.querySelectorAll('[data-box]').forEach((b) => b.onclick = () => openFolder(b.dataset.box));
+    const fs = document.getElementById('folderSel');
+    fs.innerHTML = FOLDERS.map(([k, l]) => { const n = folderCount(k, c); return `<option value="${k}"${S.box === k ? ' selected' : ''}>${l}${n != null ? ` (${num(n)})` : ''}</option>`; }).join('');
+    fs.onchange = () => openFolder(fs.value);
+    document.getElementById('folderName').textContent = folderName(S.box);
+    drawFilters();
+    const list = (r.tickets || []).filter(fq[1] || (() => true)).sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+    const tl = document.getElementById('tl');
+    tl.innerHTML = list.length ? list.map((t) => `<button class="tk${S.ticket === t.id ? ' on' : ''}${t.update_overdue ? ' late' : ''}" data-t="${esc(t.id)}">
+        <span class="tkic" aria-hidden="true">${prodIcon(t.product)}</span><span class="tkb">
+        <span class="tkt"><b>${esc(t.subject)}</b><time datetime="${esc(t.updated_at)}">${ago(t.updated_at)}</time></span>
+        <small>${esc(t.business || t.opened_by_email || 'No business')} · <span class="code">${esc(t.ref)}</span>${t.product ? ` · ${esc(prodName(t.product))}` : ''}</small>
+        <span class="tk1">${pill(TSTAT, t.status)}${actBadge(t.who_acts)}${t.work_blocked && t.status !== 'done' ? ' <span class="pill bad">Work blocked</span>' : ''}${t.level > 1 ? ` <span class="pill">L${t.level}</span>` : ''}${t.overdue ? ' <span class="pill bad">Overdue</span>' : ''}
+          <span class="tkown">${t.assignee_name ? `Owner: ${esc(t.assignee_name)}` : 'No owner yet'}</span></span>
+        ${t.next_update_due && t.status !== 'done' ? `<span class="tnu${t.update_overdue ? ' late' : ''}">${t.update_overdue ? '● Update overdue' : 'Update due'} ${esc(dueText(t.next_update_due))}${t.next_update_owner_name ? ` · ${esc(t.next_update_owner_name)}` : ''}</span>` : ''}
+        ${timer(t, od)}</span></button>`).join('')
+      : `<p class="muted small tlnone">Nothing in ${esc(folderName(S.box))}${S.tq || Object.values(S.sf).some(Boolean) ? ' with this search or these filters' : ''}.</p>`;
+    tl.querySelectorAll('[data-t]').forEach((b) => b.onclick = () => openTicket(b.dataset.t));
+    // the right-hand side: the first ticket when a folder opens (not on a phone, where the list comes first), or a friendly empty state
+    const tv = document.getElementById('tv');
+    if (!list.length && (autoOpen || !S.ticket)) { S.ticket = null; document.getElementById('sws').classList.remove('open'); tv.innerHTML = emptyFolder(); return; }
+    if (autoOpen && list.length && !phoneWidth()) await openTicket(list[0].id);
+    else if (!S.ticket) tv.innerHTML = '<div class="card swempty"><div><p class="emo" aria-hidden="true">📨</p><h3>Choose a ticket</h3><p class="muted small">Pick one from the list to read it and reply.</p></div></div>';
+  }
+  const emptyFolder = () => { const k = S.box; const filtered = S.tq || Object.values(S.sf).some(Boolean);
+    const msg = filtered ? 'Nothing matches your search or filters here. Try clearing them.'
+      : ({ mine: 'Nothing is assigned to you right now.', unassigned: 'Every open ticket has an owner.', waiting_customer: 'No tickets are waiting for a customer to reply.',
+        waiting_us: 'Nothing is waiting on Riyeser. All caught up.', overdue: 'No promised updates are overdue. Nice work.', resolved: 'No resolved tickets yet.' })[k] || 'No tickets here.';
+    return `<div class="card swempty" id="swEmpty"><div><p class="emo" aria-hidden="true">${filtered ? '🔍' : '🎉'}</p><h3>${esc(folderName(k))}: all clear</h3><p class="muted">${msg}</p></div></div>`; };
   // The Product diagnostics card (also used by the lookup).
   function diagCard(d, product, business) {
     if (!d) return '';
@@ -1936,60 +1987,77 @@
   }
   async function openTicket(id) {
     S.ticket = id; document.querySelectorAll('.tk').forEach((b) => b.classList.toggle('on', b.dataset.t === id));
-    const tv = document.getElementById('tv'); const tdx = document.getElementById('tdx'); if (!tv) return;
+    const tv = document.getElementById('tv'); if (!tv) return;
     const r = await api.ticket(id);
     const t = r.ticket; const B = r.business; const staff = r.staff || (await api.staff().catch(() => [])).filter((x) => x.active).map((x) => ({ user_id: x.user_id, name: x.display_name, can_work: (x.perms || permsOf(x)).includes(LEVEL_PERM[t.level]) }));
     const workers = (lvl) => staff.filter((x) => (lvl === t.level ? x.can_work : true));
     const myId = S.me.id || (staff.find((x) => x.name === S.me.name) || {}).user_id;
     const dr = S_DRAFTS[id] = S_DRAFTS[id] || { reply: '', note: '', tab: 'reply' };
+    const body = (x) => `<div class="mb">${esc(x.body).replace(/\n/g, '<br>')}</div>`;
     const thread = r.messages.map((x) => (x.kind === 'call'
-      ? `<div class="msg call"><small><b>📞 Call · ${x.call_direction === 'in' ? 'they called us' : 'we called them'}${x.call_with ? ` · ${esc(x.call_with)}` : ''}</b> · ${esc(x.from)} · ${ago(x.at)} <span class="aud">only Riyeser staff see this</span></small><div>${esc(x.body).replace(/\n/g, '<br>')}</div></div>`
-      : x.internal ? `<div class="msg note"><small><b>Internal note · only Riyeser staff see this</b> · ${esc(x.from)} · ${ago(x.at)}</small><div>${esc(x.body).replace(/\n/g, '<br>')}</div></div>`
-        : `<div class="msg${x.staff ? ' staff' : ' mcust'}"><small><span class="mav" aria-hidden="true">${esc(initials(x.from))}</span><b>${esc(x.from)}</b>${x.staff ? ' · to the customer' : ''} · ${ago(x.at)} <span class="muted">${esc(whenFull(x.at))}</span></small><div>${esc(x.body).replace(/\n/g, '<br>')}</div></div>`)).join('');
+      ? `<div class="msg call"><small><b>📞 Call · ${x.call_direction === 'in' ? 'they called us' : 'we called them'}${x.call_with ? ` · ${esc(x.call_with)}` : ''}</b> · ${esc(x.from)} · ${ago(x.at)} <span class="aud">only staff see this</span></small>${body(x)}</div>`
+      : x.internal ? `<div class="msg note"><small><b>Internal note: only staff see this</b> · ${esc(x.from)} · ${ago(x.at)}</small>${body(x)}</div>`
+        : `<div class="msg${x.staff ? ' staff' : ' mcust'}"><small><span class="mav" aria-hidden="true">${esc(initials(x.from))}</span><b>${esc(x.from)}</b>${x.staff ? ' · to the customer' : ''} · ${ago(x.at)} <span class="muted">${esc(whenFull(x.at))}</span></small>${body(x)}</div>`)).join('');
     const ownerOpts = `<option value="">Nobody yet</option>${workers(t.level).map((x) => `<option value="${esc(x.user_id)}"${x.user_id === t.assignee ? ' selected' : ''}${!can('support.assign') && x.user_id !== myId && x.user_id !== t.assignee ? ' disabled' : ''}>${esc(x.name)}</option>`).join('')}`;
-    tv.innerHTML = `<div class="card tview"><button class="btn sm sup-back" id="tback">← Inbox</button>
-      <h2>${esc(t.subject)}</h2>
-      <div class="tsub">${B ? `<button class="lnk" data-goco="${esc(B.id)}">${esc(B.name)}</button>` : `<span>${esc(t.opened_by_email || 'No business')}</span>`} · <span>Ticket <span class="code">${esc(t.ref)}</span></span>
-        ${t.opened_by_name || t.opened_by_email ? `<span class="muted">· from ${esc(t.opened_by_name || '')} ${esc(t.opened_by_email || '')}</span>` : ''}</div>
-      <div class="tbar"><label><span>Product</span><select id="tprod"${r.can_work ? '' : ' disabled'}><option value="">Not set</option>${PRODUCTS.map(([k, l]) => `<option value="${k}"${k === t.product ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
-        <label><span>Status</span><select id="tst"${r.can_work ? '' : ' disabled'}>${TSTAT_ORDER.map((k) => `<option value="${k}"${k === t.status ? ' selected' : ''}>${TSTAT[k][0]}</option>`).join('')}</select></label>
-        <label><span>Owner</span><select id="tas"${can('support.assign') || r.can_work ? '' : ' disabled'}>${ownerOpts}</select></label>
-        <label><span>Priority</span><select id="tpr"${can('support.reply', 'support.assign') ? '' : ' disabled'}>${['low', 'normal', 'high', 'urgent'].map((k) => `<option${k === t.priority ? ' selected' : ''}>${k}</option>`).join('')}</select></label></div>
-      <div class="row small tpills">${pill(TSTAT, t.status)}${actBadge(t.who_acts)}<span class="pill">Level ${t.level} · ${LEVELS[t.level]}</span>${t.work_blocked && t.status !== 'done' ? '<span class="pill bad">Work blocked</span>' : ''}${t.overdue_at ? '<span class="pill bad">Overdue</span>' : ''}
-        ${t.rating ? `<span class="pill ok">Rated ${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</span>` : ''}<span class="muted">${esc(TOPICS[t.topic] || t.topic)} · opened ${ago(t.created_at)}</span>
-        <span style="flex:1"></span>${can('support.escalate') ? '<button class="btn sm" id="tesc">⬆ Escalate / ⬇ send back</button>' : ''}${can('support.saved_replies') ? '<button class="btn sm" id="tsr">Saved replies…</button>' : ''}
-        ${t.workspace_id && can('refunds.request', 'refunds.approve') ? '<button class="btn sm" id="trf">↩️ Refund request</button>' : ''}</div>
+    const prop = (label, html) => `<label class="tprop"><span>${label}</span>${html}</label>`;
+    const more = [can('support.escalate') && '<button type="button" id="tesc">⬆ Escalate / ⬇ send back</button>',
+      t.workspace_id && can('refunds.request', 'refunds.approve') && '<button type="button" id="trf">↩️ Refund request</button>',
+      '<button type="button" data-more="bug">🐞 Link a bug</button>', r.can_work && '<button type="button" id="tcall">📞 Log a call</button>',
+      t.status !== 'done' && '<button type="button" data-more="nu">🗓️ Set next update</button>'].filter(Boolean).join('');
+    const drawerMode = () => window.matchMedia('(max-width: 1679px)').matches;
+    tv.innerHTML = `<div class="tpane${S.detOpen ? '' : ' nodet'}" id="tpane"><div class="card tview">
+      <div class="thead"><button class="btn sm sup-back" id="tback">← ${esc(folderName(S.box))}</button>
+        <div class="ttl"><h2>${esc(t.subject)}</h2>
+          <div class="tsub">${B ? `<button class="lnk" data-goco="${esc(B.id)}">${esc(B.name)}</button>` : `<span>${esc(t.opened_by_email || 'No business')}</span>`}<span>·</span><span class="code">${esc(t.ref)}</span><span>·</span><span>opened ${ago(t.created_at)}</span><span>·</span><span>${esc(TOPICS[t.topic] || t.topic)}</span>
+            ${t.opened_by_name || t.opened_by_email ? `<span class="muted">· from ${esc(t.opened_by_name || '')} ${esc(t.opened_by_email || '')}</span>` : ''}</div></div>
+        <div class="tacts">${actBadge(t.who_acts)}<button type="button" class="btn sm" id="detBtn" aria-controls="tdx">Details</button>
+          <details class="dd tmore"><summary class="btn sm" id="tmore">⋯ More</summary><div class="ddm right">${more}</div></details></div></div>
+      <div class="tprops" id="tprops">${prop('Status', `<select id="tst"${r.can_work ? '' : ' disabled'}>${TSTAT_ORDER.map((k) => `<option value="${k}"${k === t.status ? ' selected' : ''}>${TSTAT[k][0]}</option>`).join('')}</select>`)}
+        ${prop('Owner', `<select id="tas"${can('support.assign') || r.can_work ? '' : ' disabled'}>${ownerOpts}</select>`)}
+        ${prop('Priority', `<select id="tpr"${can('support.reply', 'support.assign') ? '' : ' disabled'}>${['low', 'normal', 'high', 'urgent'].map((k) => `<option value="${k}"${k === t.priority ? ' selected' : ''}>${k[0].toUpperCase() + k.slice(1)}</option>`).join('')}</select>`)}
+        ${prop('Product', `<select id="tprod"${r.can_work ? '' : ' disabled'}><option value="">Not set</option>${PRODUCTS.map(([k, l]) => `<option value="${k}"${k === t.product ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`)}
+        <span class="tflags">Level ${t.level} · ${LEVELS[t.level]}${t.work_blocked && t.status !== 'done' ? ' <span class="pill bad">Work blocked</span>' : ''}${t.overdue_at ? ' <span class="pill bad">Overdue</span>' : ''}${t.rating ? ` <span class="pill ok">Rated ${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</span>` : ''}</span></div>
       ${t.rating_comment ? `<p class="small rcomment">“${esc(t.rating_comment)}”</p>` : ''}
       <div class="conv" id="thread">${thread}</div>
       ${r.can_work ? `<form id="rf" class="rbox${dr.tab === 'note' ? ' isnote' : ''}"><div class="ctabs" role="tablist">
           <button type="button" class="ctab${dr.tab === 'reply' ? ' on' : ''}" data-ctab="reply" role="tab" aria-selected="${dr.tab === 'reply'}">✉️ Reply to customer</button>
-          <button type="button" class="ctab${dr.tab === 'note' ? ' on' : ''}" data-ctab="note" role="tab" aria-selected="${dr.tab === 'note'}">📝 Add internal note</button></div>
-        <p class="aud" id="aud"></p>
-        <textarea name="reply" rows="5" maxlength="5000" placeholder="Type your reply to the customer…" aria-label="Reply to customer"${dr.tab === 'reply' ? '' : ' hidden'}>${esc(dr.reply)}</textarea>
-        <textarea name="note" rows="5" maxlength="5000" placeholder="For Riyeser staff: what you found, what's next…" aria-label="Internal note"${dr.tab === 'note' ? '' : ' hidden'}>${esc(dr.note)}</textarea>
+          <button type="button" class="ctab${dr.tab === 'note' ? ' on' : ''}" data-ctab="note" role="tab" aria-selected="${dr.tab === 'note'}">📝 Internal note</button>
+          <p class="aud" id="aud"></p></div>
+        <textarea name="reply" rows="2" maxlength="5000" placeholder="Type your reply to the customer…" aria-label="Reply to customer"${dr.tab === 'reply' ? '' : ' hidden'}>${esc(dr.reply)}</textarea>
+        <textarea name="note" rows="2" maxlength="5000" placeholder="For Riyeser staff: what you found, what's next…" aria-label="Internal note"${dr.tab === 'note' ? '' : ' hidden'}>${esc(dr.note)}</textarea>
         <div class="row cfoot" id="cfoot"></div></form>`
-        : `<div class="card"><p class="muted small">This ticket is with <b>${LEVELS[t.level]}</b> (level ${t.level}). Only staff who work that level can reply or add notes${can('support.escalate') ? ', or you can escalate it' : ''}.</p></div>`}
-      ${r.escalations.length ? `<div class="card small tesc"><h3>Escalations</h3>${r.escalations.map((e) => `<div>${e.to > e.from ? '⬆' : '⬇'} ${LEVELS[e.from]} → <b>${LEVELS[e.to]}</b> by ${esc(e.by)} · ${ago(e.at)}<br><span class="muted">${esc(e.reason)}</span></div>`).join('')}</div>` : ''}</div>`;
-    tdx.innerHTML = diagPanel(r);
+        : `<div class="cantwork"><p class="muted small">This ticket is with <b>${LEVELS[t.level]}</b> (level ${t.level}). Only staff who work that level can reply or add notes${can('support.escalate') ? ', or you can escalate it (⋯ More)' : ''}.</p></div>`}
+      </div><aside class="tdet" id="tdx" aria-label="Ticket details"></aside></div>`;
+    const tdx = tv.querySelector('#tdx'); tdx.innerHTML = diagPanel(r);
+    const pane = tv.querySelector('#tpane');
     const conv = tv.querySelector('#thread'); if (conv && conv.scrollHeight > conv.clientHeight) conv.scrollTop = conv.scrollHeight;
     const done = async () => { await loadInbox(); await openTicket(id); };
     const act = async (fn, ok) => { try { await fn(); if (ok) flash(ok); await done(); } catch (err) { flash(plain(err)); await done(); } };
-    tv.querySelector('#tback').onclick = () => { S.ticket = null; tv.innerHTML = ''; tdx.innerHTML = ''; document.querySelector('.sws').classList.remove('open'); document.querySelectorAll('.tk.on').forEach((b) => b.classList.remove('on')); };
+    tv.querySelector('#tback').onclick = () => { S.ticket = null; tv.innerHTML = ''; document.querySelector('.sws').classList.remove('open'); document.querySelectorAll('.tk.on').forEach((b) => b.classList.remove('on')); };
     document.querySelector('.sws').classList.add('open');
+    // Details: a column that folds away (remembered); on narrower screens a drawer
+    const detBtn = tv.querySelector('#detBtn'); const detSync = () => detBtn.setAttribute('aria-expanded', String(drawerMode() ? pane.classList.contains('drawer') : !pane.classList.contains('nodet')));
+    detBtn.onclick = () => { if (drawerMode()) pane.classList.toggle('drawer'); else { S.detOpen = !S.detOpen; keep.set('hq.supDetails', S.detOpen ? '1' : '0'); pane.classList.toggle('nodet', !S.detOpen); } detSync(); };
+    detSync();
+    const dc = tdx.querySelector('#detClose'); if (dc) dc.onclick = () => { pane.classList.remove('drawer'); detSync(); };
+    // ⋯ More
+    const menu = tv.querySelector('.tmore'); menu.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => menu.removeAttribute('open')));
+    menu.querySelectorAll('[data-more]').forEach((b) => b.onclick = () => { const x = tdx.querySelector(b.dataset.more === 'bug' ? '#bugEdit' : '#nuEdit'); if (x) x.click(); });
+    const tcall = tv.querySelector('#tcall'); if (tcall) tcall.onclick = () => logTicketCall(t, B, () => done());
     const rf = tv.querySelector('#rf');
     if (rf) {
       const saved = await api.savedReplies().catch(() => []);
       const ta = (k) => rf.querySelector(`textarea[name=${k}]`);
       const foot = () => { const note = dr.tab === 'note'; rf.classList.toggle('isnote', note);
         rf.querySelector('#aud').innerHTML = note ? '🔒 <b>Only Riyeser staff</b> see internal notes. The customer never does.' : '✉️ <b>The customer will see this and get an email.</b>';
-        rf.querySelector('#cfoot').innerHTML = note ? '<button type="button" class="btn sm" id="tcall">📞 Log a call</button><span style="flex:1"></span><button class="btn p note" id="savenote">Save internal note</button>'
-          : `${saved.length ? `<select id="ins" aria-label="Insert a saved reply"><option value="">Insert a saved reply…</option>${saved.map((x) => `<option value="${x.id}">${esc(x.title)}</option>`).join('')}</select>` : ''}
-            <button type="button" class="btn sm" id="tcall">📞 Log a call</button><span style="flex:1"></span>
+        rf.querySelector('#cfoot').innerHTML = note ? '<span style="flex:1"></span><button class="btn p note" id="savenote">Save internal note</button>'
+          : `${saved.length ? `<select id="ins" aria-label="Insert a saved reply"><option value="">Saved replies…</option>${saved.map((x) => `<option value="${x.id}">${esc(x.title)}</option>`).join('')}</select>` : ''}
+            ${can('support.saved_replies') ? '<button type="button" class="btn sm" id="tsr" title="Add or change saved replies">Manage</button>' : ''}<span style="flex:1"></span>
             <label class="small" id="thenl">Then <select name="then"><option value="waiting_customer">wait for the customer</option><option value="investigating">keep investigating</option><option value="waiting_us">keep it in progress</option><option value="done">mark resolved</option></select></label>
             <button class="btn p" id="send">Send reply</button>`;
         const ins = rf.querySelector('#ins'); if (ins) ins.onchange = () => { const x = saved.find((y) => String(y.id) === ins.value); if (!x) return; const a = ta('reply');
           const at = a.selectionStart || a.value.length; a.value = a.value.slice(0, at) + x.body + a.value.slice(at); dr.reply = a.value; ins.value = ''; a.focus(); };
-        rf.querySelector('#tcall').onclick = () => logTicketCall(t, B, () => done()); };
+        const srb = rf.querySelector('#tsr'); if (srb) srb.onclick = () => manageSaved(() => openTicket(id)); };
       foot();
       rf.querySelectorAll('[data-ctab]').forEach((b) => b.onclick = () => { dr.tab = b.dataset.ctab;
         rf.querySelectorAll('[data-ctab]').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); });
@@ -2016,7 +2084,6 @@
       d.querySelector('#ef').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target);
         try { await api.ticketEscalate(id, Number(f.get('level')), String(f.get('reason')).trim(), String(f.get('assign') || '') || null); close(); await done(); }
         catch (err) { d.querySelector('#eferr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
-    const srb = tv.querySelector('#tsr'); if (srb) srb.onclick = () => manageSaved(() => openTicket(id));
     const rfb = tv.querySelector('#trf'); if (rfb) rfb.onclick = () => dlg(`<h3>↩️ Refund request for this customer</h3><p class="muted small">Entered on their behalf from ${esc(t.ref)}. It goes to the Refunds queue for approval; they're emailed that we've got it.</p>
       <form id="rq"><label class="f"><span>What it's for</span><input name="for_what" required maxlength="120" placeholder="e.g. Accounting Basics"></label>
       <div class="grid g2"><label class="f"><span>Period</span><input name="period" maxlength="80" placeholder="e.g. November 2026"></label><label class="f"><span>Invoice reference</span><input name="invoice_ref" maxlength="80"></label>
@@ -2029,7 +2096,8 @@
           close(); flash(`Refund request ${x.ref} entered.`); await done(); } catch (err) { d.querySelector('#rqerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
     wireDiagPanel(tdx, r, staff, done);
   }
-  // The right-hand column: Product diagnostics, Next update, Linked bug, Customer support notes, the business.
+  // The Details panel: tidy sections (Customer, Next update & planned release, Diagnostics, Linked bug, Support notes),
+  // each folded to a one-line summary when there's nothing in it.
   function diagPanel(r) {
     const t = r.ticket; const B = r.business; const d = r.diagnostic;
     const apps = PRODUCT_APPS[t.product] || [];
@@ -2037,27 +2105,33 @@
       return `<li><b>${esc(p.name || 'A PC')}</b>${p.platform ? ` <span class="muted">${esc(p.platform === 'win32' ? 'Windows' : p.platform)}</span>` : ''}${p.version ? ` · Central ${esc(p.version)}` : ''}
         <span class="vers">${mine.map((x) => `<span class="pill blue">${esc(APP_NAMES[x.id] || x.id)} ${esc(x.version || '?')}</span>`).join('')}${other.map((x) => `<span class="vtag">${esc(APP_NAMES[x.id] || x.id)} ${esc(x.version || '?')}</span>`).join('')}${!(p.programs || []).length ? '<span class="muted">Programs not reported yet</span>' : ''}</span>
         <small class="muted">${p.programs_at ? `Reported ${ago(p.programs_at)}` : ''}${p.last_seen ? ` · last seen ${ago(p.last_seen)}` : ''}</small></li>`; }).join('');
+    const sec = (id, icon, title, line, open, html, cls = '') => `<details class="dsec${cls}" id="${id}"${open ? ' open' : ''}><summary><span class="dsi" aria-hidden="true">${icon}</span><span class="dst"><b>${title}</b><small>${line}</small></span></summary><div class="dsb">${html}</div></details>`;
     const nu = t.next_update_due ? `<p class="nuline${t.update_overdue ? ' late' : ''}">${t.update_overdue ? '⚠️ Overdue: next update to customer was due' : 'Next update to customer: by'} <b>${esc(dueText(t.next_update_due))}</b>${t.next_update_owner_name ? ` (${esc(t.next_update_owner_name)})` : ''}</p>`
       : '<p class="nuline muted">No update promised yet. Set when the customer will hear from us next.</p>';
-    return `<div class="card dcard" id="diagCard"><h3><span aria-hidden="true">📈</span> Product diagnostics</h3>
-        ${d ? diagCard(d, t.product) : r.diag_hidden ? '<p class="muted small">This ticket has a diagnostic report. Looking at it needs the <b>support.diagnostics</b> permission.</p>'
-          : `<dl class="kv dkv"><dt>Product</dt><dd><b>${esc(prodName(t.product))}</b></dd><dt>Reference</dt><dd class="muted">None yet</dd></dl><p class="muted small">No diagnostic report on this ticket. Ask the customer to use <b>Get help → Report an issue</b> in Riyeser Central, then look up the DG- reference they give you.</p>`}
-        ${r.pcs ? `<h4>Installed on their PCs</h4>${pcs ? `<ul class="pcl">${pcs}</ul>` : '<p class="muted small">No PCs linked yet.</p>'}` : ''}</div>
-      <div class="card nucard${t.update_overdue ? ' late' : ''}" id="nuCard"><h3><span aria-hidden="true">🗓️</span> Next update</h3>${nu}
-        ${t.status !== 'done' ? `<div class="row"><button class="btn sm" id="nuEdit">${t.next_update_due ? 'Edit' : 'Set next update'}</button>${t.next_update_due ? '<button class="btn sm" id="nuClear">Clear</button>' : ''}</div>` : ''}
-        <form id="prf" class="prf"><label class="f"><span>Planned release <small class="muted">(free text for now)</small></span><input name="planned_release" maxlength="80" value="${esc(t.planned_release || '')}" placeholder="e.g. Payroll 2.8.2"></label><button class="btn sm">Save</button></form></div>
-      <div class="card" id="bugCard"><h3><span aria-hidden="true">🐞</span> Linked bug</h3>
-        ${t.bug_ref || t.bug_url ? `<p class="bugl">${t.bug_url ? `<a href="${esc(t.bug_url)}" target="_blank" rel="noopener noreferrer"><b>${esc(t.bug_ref || 'Open the bug')}</b> ↗</a>` : `<b>${esc(t.bug_ref)}</b>`}</p>` : '<p class="muted small">No bug linked.</p>'}
-        <button class="btn sm" id="bugEdit">${t.bug_ref || t.bug_url ? 'Edit' : 'Link a bug'}</button></div>
-      ${r.support_notes ? `<div class="card" id="snCard"><h3><span aria-hidden="true">📌</span> Customer support notes</h3><p class="muted small">Pinned for ${esc(B ? B.name : 'this business')}: they show on every ticket.</p>
-        ${r.support_notes.length ? `<div class="snl">${r.support_notes.map((n) => `<div class="sn"><div>${esc(n.body)}</div><small>${esc(n.by || 'Riyeser')} · ${ago(n.at)}</small>
-          ${can('customers.notes') ? `<span class="snb"><button class="lnk" data-snedit="${esc(n.id)}">Edit</button> · <button class="lnk" data-snunpin="${esc(n.id)}">Unpin</button></span>` : ''}</div>`).join('')}</div>` : '<p class="muted small">None yet.</p>'}
-        ${can('customers.notes') ? '<button class="btn sm" id="snAdd">Add a support note</button>' : ''}</div>` : ''}
-      ${B ? `<div class="card" id="tbiz"><h3>${esc(B.name)} ${pill(BSTAT, B.status || 'active')}</h3><dl class="kv"><dt>Business ID</dt><dd class="code">${esc(B.company_code || '')}</dd>
+    const nuLine = t.next_update_due ? `${t.update_overdue ? 'Overdue · was due' : 'By'} ${esc(dueText(t.next_update_due))}${t.planned_release ? ` · ${esc(t.planned_release)}` : ''}` : t.planned_release ? `Release ${esc(t.planned_release)}` : 'No update promised';
+    const bugLine = t.bug_ref || t.bug_url ? esc(t.bug_ref || 'Linked') : 'No bug linked';
+    const notes = r.support_notes;
+    return `<div class="tdhead"><b>Details</b><button type="button" class="btn sm" id="detClose">Close</button></div>
+      ${sec('tbiz', '🏢', 'Customer', B ? `${esc(B.name)}${(B.paid || []).length ? ' · paying' : ''}` : 'Not linked to a business', true, B ? `<p class="dbiz"><b>${esc(B.name)}</b> ${pill(BSTAT, B.status || 'active')}</p><dl class="kv dkv"><dt>Business ID</dt><dd class="code">${esc(B.company_code || '')}</dd>
+        ${t.opened_by_name || t.opened_by_email ? `<dt>Contact</dt><dd>${esc(t.opened_by_name || '')}${t.opened_by_email ? `<small class="muted"> ${esc(t.opened_by_email)}</small>` : ''}</dd>` : ''}
         <dt>Plan</dt><dd>${(B.paid || []).length ? B.paid.map(modName).map(esc).join(', ') : 'Nothing paid'}${(B.trial || []).length ? `<small class="muted"> · trial: ${B.trial.map(modName).map(esc).join(', ')}</small>` : ''}</dd>
         <dt>People · PCs</dt><dd>${num(B.people)} · ${num(B.pcs)}</dd><dt>Last active</dt><dd>${ago(B.last_active_at)}</dd>${creditText(B.credit) ? `<dt>Credit</dt><dd>${creditText(B.credit)}</dd>` : ''}</dl>
-        <button class="btn sm" id="tco">Open customer page</button></div>` : '<div class="card"><p class="muted small">Not linked to a business.</p></div>'}
-      ${(r.refunds || []).length ? `<div class="card small"><h3>Refund requests</h3>${r.refunds.map((f) => `<div><span class="code">${esc(f.ref)}</span> ${cur(f.amount, f.currency)} · ${pill(RSTAT, f.status)}</div>`).join('')}</div>` : ''}`;
+        ${r.pcs ? `<h4>Installed on their PCs</h4>${pcs ? `<ul class="pcl">${pcs}</ul>` : '<p class="muted small">No PCs linked yet.</p>'}` : ''}
+        ${(r.refunds || []).length ? `<h4>Refund requests</h4>${r.refunds.map((f) => `<div class="small"><span class="code">${esc(f.ref)}</span> ${cur(f.amount, f.currency)} · ${pill(RSTAT, f.status)}</div>`).join('')}` : ''}
+        <button class="btn sm" id="tco">Open customer page</button>` : '<p class="muted small">Not linked to a business.</p>')}
+      ${sec('nuCard', '🗓️', 'Next update & planned release', nuLine, !!(t.next_update_due || t.planned_release), `${nu}
+        ${t.status !== 'done' ? `<div class="row"><button class="btn sm" id="nuEdit">${t.next_update_due ? 'Edit' : 'Set next update'}</button>${t.next_update_due ? '<button class="btn sm" id="nuClear">Clear</button>' : ''}</div>` : ''}
+        <form id="prf" class="prf"><label class="f"><span>Planned release <small class="muted">(free text for now)</small></span><input name="planned_release" maxlength="80" value="${esc(t.planned_release || '')}" placeholder="e.g. Payroll 2.8.2"></label><button class="btn sm">Save</button></form>`, t.update_overdue ? ' late' : '')}
+      ${sec('diagCard', '📈', 'Diagnostics', d ? `${esc(d.ref)} · ${esc(prodName(d.product || t.product))} ${esc(d.product_version || '')}` : r.diag_hidden ? 'Needs support.diagnostics' : 'No diagnostic report', !!d || !!r.diag_hidden,
+        d ? diagCard(d, t.product) : r.diag_hidden ? '<p class="muted small">This ticket has a diagnostic report. Looking at it needs the <b>support.diagnostics</b> permission.</p>'
+          : `<p class="muted small">No diagnostic report on this ticket. Ask the customer to use <b>Get help → Report an issue</b> in Riyeser Central, then look up the DG- reference they give you (🔎 DG-… above the list).</p>`)}
+      ${sec('bugCard', '🐞', 'Linked bug', bugLine, !!(t.bug_ref || t.bug_url), `${t.bug_ref || t.bug_url ? `<p class="bugl">${t.bug_url ? `<a href="${esc(t.bug_url)}" target="_blank" rel="noopener noreferrer"><b>${esc(t.bug_ref || 'Open the bug')}</b> ↗</a>` : `<b>${esc(t.bug_ref)}</b>`}</p>` : '<p class="muted small">No bug linked.</p>'}
+        <button class="btn sm" id="bugEdit">${t.bug_ref || t.bug_url ? 'Edit' : 'Link a bug'}</button>`)}
+      ${notes ? sec('snCard', '📌', 'Support notes', notes.length ? `${notes.length} pinned for ${esc(B ? B.name : 'this business')}` : 'No support notes', notes.length > 0, `<p class="muted small">Pinned for ${esc(B ? B.name : 'this business')}: they show on every ticket.</p>
+        ${notes.length ? `<div class="snl">${notes.map((n) => `<div class="sn"><div>${esc(n.body)}</div><small>${esc(n.by || 'Riyeser')} · ${ago(n.at)}</small>
+          ${can('customers.notes') ? `<span class="snb"><button class="lnk" data-snedit="${esc(n.id)}">Edit</button> · <button class="lnk" data-snunpin="${esc(n.id)}">Unpin</button></span>` : ''}</div>`).join('')}</div>` : '<p class="muted small">None yet.</p>'}
+        ${can('customers.notes') ? '<button class="btn sm" id="snAdd">Add a support note</button>' : ''}`) : ''}
+      ${r.escalations.length ? sec('tescs', '⬆', 'Escalations', `${r.escalations.length} · now ${esc(LEVELS[t.level])}`, false, r.escalations.map((e) => `<div class="small esc1">${e.to > e.from ? '⬆' : '⬇'} ${LEVELS[e.from]} → <b>${LEVELS[e.to]}</b> by ${esc(e.by)} · ${ago(e.at)}<br><span class="muted">${esc(e.reason)}</span></div>`).join('')) : ''}`;
   }
   function wireDiagPanel(el, r, staff, done) {
     const t = r.ticket; const B = r.business; const id = t.id;
@@ -2106,9 +2180,10 @@
       <form id="srn" class="card"><b class="small">Add one</b><input name="title" required maxlength="80" placeholder="Title"><textarea name="body" rows="3" required maxlength="5000" placeholder="The reply"></textarea><button class="btn sm p">Add</button></form>
       <div class="mfoot"><button class="btn" data-close>Close</button></div>`, (d, close) => {
       const again = async () => { close(); await manageSaved(after); if (after) after(); };
-      const run = async (fn) => { try { await fn(); await again(); } catch (err) { alert(plain(err)); } };
+      const run = async (fn) => { try { await fn(); await again(); } catch (err) { flash(plain(err)); } };
       d.querySelectorAll('form[data-sr]').forEach((f) => f.onsubmit = (e) => { e.preventDefault(); const x = new FormData(f); run(() => api.saveReply(Number(f.dataset.sr), String(x.get('title')), String(x.get('body')))); });
-      d.querySelectorAll('[data-retire]').forEach((b) => b.onclick = () => { if (confirm('Remove this saved reply?')) run(() => api.retireReply(Number(b.dataset.retire))); });
+      // asks in the page: the first click turns the button into "Remove it for good?"
+      d.querySelectorAll('[data-retire]').forEach((b) => b.onclick = () => { if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Remove it for good?'; b.classList.add('danger'); return; } run(() => api.retireReply(Number(b.dataset.retire))); });
       d.querySelector('#srn').onsubmit = (e) => { e.preventDefault(); const x = new FormData(e.target); run(() => api.saveReply(null, String(x.get('title')), String(x.get('body')))); };
     });
   }

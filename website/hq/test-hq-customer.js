@@ -102,7 +102,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   check(home.includes('Northside Dental'), 'My follow-ups on the HQ home');
   console.log('needs attention:', await pg.evaluate(() => [...document.querySelectorAll('#attn .aitem')].map((x) => x.innerText.replace(/\s+/g, ' ')).join(' | ')));
   check((await pg.$$('#attn .aitem')).length >= 6, 'Needs attention on the home page');
-  await pg.click('#attn [data-go="support:unassigned"]'); await pg.waitForSelector('.tk'); check(await pg.evaluate(() => location.hash) === '#/support' && (await pg.$eval('#boxes .chip.on', (x) => x.dataset.box)) === 'unassigned', 'an item opens the right page (unassigned tickets)');
+  await pg.click('#attn [data-go="support:unassigned"]'); await pg.waitForSelector('.tk'); check(await pg.evaluate(() => location.hash) === '#/support' && (await pg.$eval('#boxes .fold.on', (x) => x.dataset.box)) === 'unassigned', 'an item opens the right page (unassigned tickets)');
   await pg.click('[data-box=waiting_customer]'); await pg.waitForTimeout(300);
   check((await text('#tl')).includes('Your POS trial is nearly up'), 'the staff-started ticket is in the Support inbox (waiting on the customer)');
 
@@ -187,7 +187,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   const mine = await pg.evaluate(() => [...document.querySelectorAll('#cl tr.click b')].map((x) => x.textContent)); console.log('Help Desk\'s customers:', await text('#ctotal'));
   check(mine.includes('Northside Dental') && mine.includes('Sample Plumbing'), 'My customers');
   await pg.selectOption('#demoAs', { label: 'Riki (Owner)' }); await pg.waitForSelector('#main > *');
-  await tab('support'); await pg.click('.tk'); await pg.waitForSelector('#rf'); check((await text('#rf')).includes('Reply to customer') && (await text('#rf')).includes('Add internal note'), 'tickets: Reply to customer / Add internal note');
+  await tab('support'); await pg.click('.tk'); await pg.waitForSelector('#rf'); check((await text('#rf')).includes('Reply to customer') && (await text('#rf')).includes('Internal note'), 'tickets: Reply to customer / Internal note');
 
   // --- phone width: no sideways scrolling
   const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); ph.on('pageerror', (e) => errs.push('phone: ' + e.message)); const over = {};
