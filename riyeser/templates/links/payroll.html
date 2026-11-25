@@ -3,7 +3,7 @@
 {% block content %}
 <div class="head"><div><h1>Import from Riyeser Payroll</h1>
 <p class="sub">Riyeser Payroll saves each pay run into <b>{{ inbox }}</b>. Import it here to record wages, tax withheld and employer contributions in your books. Each pay run can only be imported once.</p></div></div>
-<form method="post" id="imp"><div class="card"><div class="fields">
+<form method="post" id="imp" enctype="multipart/form-data"><div class="card"><div class="fields">
 <div><label>Wages were paid from</label>{{ account_select('bank_account_id', bank_accounts, default_bank, blank=False) }}</div>
 <div><label>Or choose a pay run file</label><input type="file" name="file" accept=".json,application/json"></div>
 <div><label>&nbsp;</label><button class="btn" name="upload" value="1">Import file</button></div></div>
