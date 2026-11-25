@@ -304,6 +304,10 @@ def check(riyeser_dir, own_dir=None, now=None, public_key=None, write=True, lic_
                      "problem": None, "message": None})
     s = o.get("signed")
     if not isinstance(s, dict):
+        # An unsigned plan is only a file anyone can write (S13). It counts for 14 days (an older Riyeser Central on a
+        # PC that has already had a signed plan from Riyeser), and not at all on a PC that has never had one.
+        if not m["linked"]:
+            return done({"state": "invalid", "plan": None, "problem": "unsigned", "message": MESSAGES["update"]})
         if m["unsignedSince"] is None:
             m["unsignedSince"] = t
         until = m["unsignedSince"] + UNSIGNED_GRACE_DAYS * DAY

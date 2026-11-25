@@ -156,13 +156,25 @@ def test_transition_no_key_built_in_works_as_before(pc):
 
 
 def test_transition_older_central_gets_14_days_then_locked(key, pc):
-    p = pc(signed=None)
-    st = licence.status(NOW, p, product="basic")
+    """On a PC that has had a signed plan, an older Central's unsigned plan counts for 14 days."""
+    p = pc()
+    assert licence.status(NOW, p, product="basic")["mode"] == "licensed"          # a signed plan seen here first
+    edit(p, lambda d: (d["online"].pop("signed"), d["online"].update(checkedAt=iso(NOW + timedelta(days=1)))))
+    st = licence.status(NOW + timedelta(days=1), p, product="basic")
     assert st["mode"] == "licensed" and st["message"] == "Update Riyeser Central to keep your plan up to date."
     edit(p, lambda d: d["online"].update(checkedAt=iso(NOW + timedelta(days=13))))
-    assert licence.status(NOW + timedelta(days=13), p, product="basic")["mode"] == "licensed"
-    st = licence.status(NOW + timedelta(days=15), p, product="basic")
+    assert licence.status(NOW + timedelta(days=14), p, product="basic")["mode"] == "licensed"
+    st = licence.status(NOW + timedelta(days=16), p, product="basic")
     assert st["mode"] == "expired" and st["untrusted"] == "unsigned" and "Update Riyeser Central" in st["message"]
+
+
+def test_s13_unsigned_plan_on_a_pc_that_never_had_a_signed_one_unlocks_nothing(key, pc, tmp_path):
+    p = pc(signed=None)
+    st = licence.status(NOW, p, product="basic")
+    assert st["mode"] == "expired" and st["untrusted"] == "unsigned" and "Update Riyeser Central" in st["message"]
+    for marker in tmp_path.rglob(S.MARKER):                                         # deleting the markers doesn't help
+        marker.unlink()
+    assert licence.status(NOW + timedelta(days=1), p, product="basic")["mode"] == "expired"
 
 
 def test_key_licence_file_no_longer_unlocks_once_signed(key, tmp_path):
