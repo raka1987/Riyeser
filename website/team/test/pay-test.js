@@ -58,7 +58,8 @@ async function fakeServer(page, opts = {}) {
     const owner = !opts.role || opts.role === 'owner';
     if (['my_billing', 'billing_quote', 'billing_start'].includes(fn) && !owner) return json({ code: 'P0001', message: 'Only the business owner can see prices and pay for Riyeser.' }, 400);
     if (fn === 'billing_quote') { const amount = bill(body.mods, body.people, body.billing_period); const early = !opts.noEarly;
-      return json({ modules: body.mods, people: body.people, billing: body.billing_period, amount, early_bird: early, first_amount: early ? amount / 2 : null, early_cycles: early ? (body.billing_period === 'yearly' ? 1 : 12) : 0, due_now: early ? amount / 2 : amount }); }
+      return json({ modules: body.mods, people: body.people, billing: body.billing_period, amount, early_bird: early, first_amount: early ? amount / 2 : null, early_cycles: early ? (body.billing_period === 'yearly' ? 1 : 12) : 0, due_now: early ? amount / 2 : amount,
+        ...(opts.oldQuote ? {} : { charge_from: body.mods.includes('pos') ? day(0) : day(60), charged_today: body.mods.includes('pos') }) }); }
     if (fn === 'billing_start') { const amount = bill(body.mods, body.people, body.billing_period); const early = !opts.noEarly;
       const o = { id: 'o' + (st.orders.length + 1), ref: 'RI-' + (10001 + st.orders.length), method: body.pay_method, modules: body.mods, people: body.people, billing: body.billing_period, amount,
         first_amount: early ? amount / 2 : null, early_bird: early, early_cycles: early ? 12 : 0, total: early ? amount / 2 : amount, status: 'pending', due_date: body.pay_method === 'bank' ? day(14) : null,
@@ -160,6 +161,11 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   await pg.check('#apf input[value=yearly]'); await pg.waitForTimeout(200);
   check((await total()).includes('US$920.00') && (await total()).includes('× 10'), `yearly = 10 months (${await total()})`);
   check(await pg.isVisible('#appaypal') && await pg.isVisible('#apbank'), 'both ways to pay');
+  // S10: on a free trial nothing is charged today (PayPal starts at the trial's end); with a trial over, it says "Charged today"
+  check(/Nothing is charged today.*first payment is on .*when your free trial ends/.test(await pg.textContent('#apwhen')), `S10 says when the first charge is: ${await pg.textContent('#apwhen')}`);
+  await pg.check('#apf input[value=pos]'); await pg.waitForTimeout(250);
+  check(/Charged today/.test(await pg.textContent('#apwhen')), `S10 a program with no trial left: ${await pg.textContent('#apwhen')}`);
+  await pg.uncheck('#apf input[value=pos]'); await pg.waitForTimeout(150);
   await shot(pg, 'add-to-plan.png', '.mcard');
   await pg.check('#apf input[value=monthly]'); await pg.uncheck('#apf input[value=plus]'); await pg.uncheck('#apf input[value=payroll]'); await pg.check('#apf input[value=calls]');
   await pg.fill('#apf input[name=people]', '4'); await pg.dispatchEvent('#apf input[name=people]', 'input'); await pg.waitForTimeout(200);

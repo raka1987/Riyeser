@@ -4900,6 +4900,8 @@ create table if not exists public.billing_orders (
   updated_at timestamptz not null default now()
 );
 create index if not exists billing_orders_ws on public.billing_orders (workspace_id, created_at desc);
+-- The first charge (S10): the end of the free trial (or of what's paid), or today. PayPal starts billing then (start_time).
+alter table public.billing_orders add column if not exists starts_on date;
 create table if not exists public.billing_payments (
   id bigint generated always as identity primary key,
   order_id uuid not null references public.billing_orders(id) on delete cascade,
@@ -4988,10 +4990,15 @@ $$;
 create or replace function public.billing_terms(ws uuid, mods text[], people int, billing_period text) returns json
   language plpgsql stable security definer set search_path = public as $$
 declare m text[] := billing_mods(mods); p int := least(greatest(coalesce(people, 3), 1), 500); regular numeric; half numeric;
-  eb boolean := false; since date; months int; cycles int := 0;
+  eb boolean := false; since date; months int; cycles int := 0; charge date;
 begin
   if billing_period is null or billing_period not in ('monthly', 'yearly') then raise exception 'Choose monthly or yearly.'; end if;
   regular := riyeser_bill(m, p, 0, billing_period, false);
+  -- When the first payment is due (S10): never during a free trial. The earliest of each program's trial end (or the end
+  -- of what's already paid); today when one of them has nothing left. billing_extend counts paid time from the same dates.
+  select coalesce(min(greatest(current_date, case when s ->> 'status' = 'trial' then (s ->> 'trial_ends')::date
+      when s ->> 'status' in ('active', 'cancelled') and (s ->> 'active')::boolean then (s ->> 'paid_until')::date end)), current_date)
+    into charge from (select module_state(ws, x) s from unnest(m) x) q;
   select early_bird_since into since from company_plans where workspace_id = ws and early_bird;
   if since is not null then eb := since > current_date - 365;
   else
@@ -5006,6 +5013,7 @@ begin
   else eb := false; end if;
   return json_build_object('modules', to_json(m), 'people', p, 'billing', billing_period, 'currency', 'USD', 'amount', regular,
     'early_bird', eb, 'first_amount', half, 'early_cycles', cycles, 'due_now', coalesce(half, regular),
+    'charge_from', charge, 'charged_today', charge <= current_date,
     'users_included', riyeser_price('users_included'), 'extra_user', riyeser_price('extra_user'),
     'lines', (select coalesce(json_agg(json_build_object('module', x, 'name', module_label(x), 'price', riyeser_price(x),
         'extra_users', greatest(0, p - riyeser_price('users_included')::int),
@@ -5026,7 +5034,7 @@ create or replace function public.billing_order_json(o billing_orders, masked bo
     'module_names', (select json_agg(module_label(x)) from unnest(o.modules) x), 'people', o.people, 'billing', o.billing,
     'amount', o.amount, 'first_amount', o.first_amount, 'early_bird', o.early_bird, 'early_cycles', o.early_cycles,
     'total', coalesce(o.first_amount, o.amount), 'currency', o.currency, 'status', o.status, 'due_date', o.due_date,
-    'next_charge_at', o.next_charge_at,
+    'next_charge_at', o.next_charge_at, 'starts_on', o.starts_on,
     'next_amount', case when o.early_bird and (select count(*) from billing_payments p where p.order_id = o.id and p.status = 'completed') < o.early_cycles
                         then o.first_amount else o.amount end,
     'grace_until', o.grace_until, 'paid_through', o.paid_through, 'works_until', greatest(o.grace_until, o.paid_through), 'paid_at', o.paid_at, 'cancelled_at', o.cancelled_at, 'created_at', o.created_at,
@@ -5228,12 +5236,12 @@ begin
   end if;
   if (select count(*) from billing_orders where workspace_id = ws and status = 'pending' and created_at > now() - interval '1 day') >= 20 then
     raise exception 'That''s a lot of tries today. Contact Riyeser and we''ll help.'; end if;
-  -- a PayPal payment that was started but never approved is replaced by this one
+  -- a PayPal payment that was started but never approved is replaced by this one (and by a bank transfer invoice)
   update billing_orders set status = 'void', updated_at = now() where workspace_id = ws and method = 'paypal' and status = 'pending';
-  insert into billing_orders (workspace_id, method, modules, people, billing, amount, first_amount, early_bird, early_cycles, entity_id, due_date, created_by)
+  insert into billing_orders (workspace_id, method, modules, people, billing, amount, first_amount, early_bird, early_cycles, entity_id, due_date, created_by, starts_on)
   values (ws, pay_method, array(select json_array_elements_text(t -> 'modules')), (t ->> 'people')::int, billing_period,
     (t ->> 'amount')::numeric, (t ->> 'first_amount')::numeric, (t ->> 'early_bird')::boolean, (t ->> 'early_cycles')::int,
-    (billing_entity_now()).id, case when pay_method = 'bank' then current_date + 14 end, auth.uid())
+    (billing_entity_now()).id, case when pay_method = 'bank' then current_date + 14 end, auth.uid(), (t ->> 'charge_from')::date)
   returning * into o;
   perform billing_issue_invoice(o.id);
   return billing_order_json(o, false);
@@ -5323,6 +5331,26 @@ begin
   insert into hq_settings (key, value) values ('paypal.' || env || '.' || k, v) on conflict (key) do update set value = excluded.value;
 end $$;
 
+-- Paying by PayPal replaces an open bank transfer invoice for the same programs (S10): once PayPal has the subscription
+-- (activated or paid), those invoices are cancelled, so nobody is asked to pay twice. Returns the invoice numbers.
+create or replace function public.billing_void_replaced(oid uuid) returns text[]
+  language plpgsql security definer set search_path = public as $$
+declare o billing_orders; refs text[];
+begin
+  select * into o from billing_orders where id = oid;
+  if o.id is null or o.method <> 'paypal' then return '{}'; end if;
+  with v as (update billing_orders set status = 'void', cancelled_at = now(), updated_at = now()
+    where workspace_id = o.workspace_id and method = 'bank' and status = 'pending' and id <> o.id and modules <@ o.modules returning ref)
+  select coalesce(array_agg(ref order by ref), '{}') into refs from v;
+  if cardinality(refs) > 0 then
+    perform queue_email_owners(o.workspace_id, 'billing_invoice_replaced', 'Your Riyeser invoice ' || array_to_string(refs, ', ') || ' is cancelled',
+      'You now pay for ' || array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ') || ' by PayPal, so the bank transfer invoice '
+      || array_to_string(refs, ', ') || E' for the same programs is cancelled. There''s nothing to pay on it.\n\nIf you already sent the money, reply to this email and we''ll sort it out.');
+  end if;
+  return refs;
+end $$;
+revoke all on function public.billing_void_replaced(uuid) from public, anon, authenticated;
+
 -- One PayPal webhook (its signature already checked by the function). Each event id is applied once only.
 -- Returns what happened: 'duplicate', 'ignored', 'unknown subscription', 'activated', 'paid', 'amount mismatch',
 -- 'payment failed', 'suspended', 'cancelled'.
@@ -5352,6 +5380,7 @@ begin
     if event_type = 'BILLING.SUBSCRIPTION.ACTIVATED' then
       update billing_orders set status = case when status in ('pending', 'suspended') then 'active' else status end,
         next_charge_at = coalesce(nb, next_charge_at), updated_at = now() where id = o.id;
+      perform billing_void_replaced(o.id);
       res := 'activated';
     elsif event_type = 'PAYMENT.SALE.COMPLETED' then
       amt := nullif(resource #>> '{amount,total}', '')::numeric; curr := resource #>> '{amount,currency}';
@@ -5370,6 +5399,7 @@ begin
           update billing_payments set period_to = upto where provider_ref = resource ->> 'id';
           -- every payment: the customer's copy of the receipt, and an email with its number, what it was for and a link
           perform billing_issue_receipt((select id from billing_payments where provider_ref = resource ->> 'id'), true);
+          perform billing_void_replaced(o.id);
           res := 'paid';
         else res := 'duplicate payment'; end if;
       end if;

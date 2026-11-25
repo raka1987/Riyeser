@@ -2481,8 +2481,17 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; b json; o json; begin
 end $$;
 
 -- ---- PayPal: the function starts it; webhooks (each applied once) do the rest
+-- S10: the first charge is when the free trial ends (PayPal's start_time), never today while it's free
+do $$ declare a uuid := current_setting('pay.a')::uuid; q json; te date := current_setting('pay.te')::date; o json; begin
+  q := public.billing_quote(a, array['calls'], 4, 'monthly');
+  assert (q ->> 'charge_from')::date = te and not (q ->> 'charged_today')::boolean, 'S10 on a free trial: first charge when it ends ' || (q ->> 'charge_from');
+  -- S10: open bank transfer invoices before PayPal: one for the same program, one for another
+  o := public.billing_start(a, array['calls'], 4, 'monthly', 'bank'); perform set_config('pay.s10same', o ->> 'ref', false);
+  o := public.billing_start(a, array['bookings'], 3, 'monthly', 'bank'); perform set_config('pay.s10other', o ->> 'ref', false);
+end $$;
 do $$ declare a uuid := current_setting('pay.a')::uuid; o json; begin
   o := public.billing_start(a, array['calls'], 4, 'monthly', 'paypal');
+  assert (o ->> 'starts_on')::date = current_setting('pay.te')::date, 'S10 the PayPal order starts when the trial ends: ' || (o ->> 'starts_on');
   assert (o ->> 'amount')::numeric = 46 and (o ->> 'first_amount')::numeric = 23 and (o ->> 'early_cycles')::int = 12, 'Link Plus, 4 people: 46, early bird 23';
   perform set_config('pay.o1', o ->> 'id', false);
   o := public.billing_start(a, array['calls'], 4, 'monthly', 'paypal');   -- started again: the first (never approved) is replaced
@@ -2500,8 +2509,24 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; r text; te date := curre
   exception when others then assert sqlerrm like 'That payment isn''t waiting%', sqlerrm; end;
   assert public.billing_paypal_event('WH-1', 'BILLING.SUBSCRIPTION.ACTIVATED', '{"id": "I-PAYCO0SUB123456"}', 'sandbox') = 'duplicate', 'the same event twice: ignored';
   assert (public.module_state(a, 'calls') ->> 'status') = 'trial', 'activated alone switches nothing on: the payment does';
+  -- S10: PayPal for Link Plus replaces the open bank invoice for Link Plus (and says so), not the one for Bookings
+  assert (select status from public.billing_orders where ref = current_setting('pay.s10same')) = 'void', 'S10 the bank invoice for the same program is cancelled';
+  assert exists (select 1 from public.email_outbox where workspace_id = a and template = 'billing_invoice_replaced' and status = 'queued'
+     and subject like '%' || current_setting('pay.s10same') || '%'), 'S10 the owner is told that invoice is cancelled';
+  assert (select status from public.billing_orders where ref = current_setting('pay.s10other')) = 'pending', 'S10 an invoice for other programs stays open';
+  update public.billing_orders set status = 'void', cancelled_at = now() where ref = current_setting('pay.s10other');   -- tidy: later counts
+  -- S10: a program whose trial is over is charged today (and the page says so); with one still on trial, still today
+  if not exists (select 1 from public.company_modules where workspace_id = a and module = 'bookings') then
+    perform public.licence_set_module(a, 'bookings', 'trial', current_date - 1, null);
+    assert (public.billing_terms(a, array['bookings'], 3, 'monthly') ->> 'charged_today')::boolean, 'S10 trial over: charged today';
+    assert (public.billing_terms(a, array['bookings', 'calls'], 3, 'monthly') ->> 'charge_from')::date = current_date, 'S10 one trial over: today';
+    delete from public.company_modules where workspace_id = a and module = 'bookings';
+  end if;
   r := public.billing_paypal_event('WH-2', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox');
   assert r = 'paid', r;
+  -- S10: every PayPal payment's receipt is emailed (queued in email_outbox until email sending is set up)
+  assert exists (select 1 from public.email_outbox e join public.billing_payments p on e.body_text like '%Receipt: ' || p.ref || '%'
+     where p.provider_ref = 'SALE-0001' and e.template = 'billing_paid' and e.status = 'queued'), 'S10 the PayPal receipt email is queued';
   assert (select paid_until from public.company_modules where workspace_id = a and module = 'calls') = (te + interval '1 month')::date, 'Link Plus paid from the end of its trial';
   assert public.billing_paypal_event('WH-2', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox') = 'duplicate', 'duplicate webhook';
   assert public.billing_paypal_event('WH-2b', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox') = 'duplicate payment', 'same sale, new event id: counted once';

@@ -1233,7 +1233,7 @@
       <p class="muted small" id="apnote" hidden>Accounting Plus includes everything in Basics, so you pay for one or the other.</p>
       <div class="f2 apopts"><label class="f"><span>People using Riyeser</span><input name="people" type="number" min="1" max="500" value="${people0}" inputmode="numeric"></label>
         <div class="f"><span>Pay</span><label class="opt sm"><input type="radio" name="period" value="monthly"${period !== 'yearly' ? ' checked' : ''}> Monthly</label><label class="opt sm"><input type="radio" name="period" value="yearly"${period === 'yearly' ? ' checked' : ''}> Yearly (10 months for 12)</label></div></div>
-      <ul class="brk" id="apbrk"></ul><div class="aptotal" id="aptotal"></div><p class="muted small" id="apeb"></p>
+      <ul class="brk" id="apbrk"></ul><div class="aptotal" id="aptotal"></div><p class="muted small" id="apeb"></p><p class="small" id="apwhen"></p><p class="muted small" id="aprepl" hidden></p>
       <p class="muted small">Your free days aren't lost: paid time starts when each program's free trial ends. You can cancel any time.</p>
       <div id="aperr"></div>
       ${sub ? `<div class="ok">You already pay by PayPal (${esc(sub.ref)}). To change that plan, cancel it under Billing first (it keeps working to the end of what's paid), then pay for the new plan here. Or pay for extra programs by bank transfer.</div>` : ''}
@@ -1255,12 +1255,21 @@
         d.querySelector('#aptotal').innerHTML = bill.mods.length ? `${r.period === 'yearly' ? `<b>${money(bill.total)}</b> a year <small>(${usd(bill.monthly)} a month × 10)</small>` : `<b>${money(bill.total)}</b> a month`}` : '';
         d.querySelector('.appay').hidden = !bill.mods.length;
         // the database's quote: the same total, and the early bird if this business can have it
-        const n = ++qn; quote = null; d.querySelector('#apeb').textContent = '';
-        if (!bill.mods.length) return;
+        // (the early bird and when-charged lines keep their text until the new quote is in, so nothing jumps under the pointer)
+        const n = ++qn; quote = null;
+        // S10: choosing PayPal replaces an open bank transfer invoice for the same programs
+        const repl = ((S.billing && S.billing.orders) || []).filter((o) => o.method === 'bank' && o.status === 'pending' && bill.mods.length && (o.modules || []).every((m) => bill.mods.includes(m)));
+        d.querySelector('#aprepl').hidden = !repl.length || !(S.paypal && S.paypal.ready && !sub);
+        d.querySelector('#aprepl').textContent = repl.length ? `If you pay with PayPal, your open bank transfer invoice ${repl.map((o) => o.ref).join(', ')} for these programs is cancelled once PayPal confirms, so you never pay twice.` : '';
+        if (!bill.mods.length) { d.querySelector('#apeb').textContent = ''; d.querySelector('#apwhen').textContent = ''; return; }
         try { const q = await api.billingQuote(S.team.id, bill.mods, r.people, r.period); if (n !== qn) return; quote = q;
           if (Math.abs(Number(q.amount) - bill.total) > 0.005) d.querySelector('#aptotal').innerHTML = `<b>${money(q.amount)}</b> a ${r.period === 'yearly' ? 'year' : 'month'}`;
+          // S10: when the first payment is taken: never during the free trial (PayPal starts then), else today
+          d.querySelector('#apwhen').innerHTML = !q.charge_from ? '' : q.charged_today === false
+            ? `🗓 <b>Nothing is charged today.</b> With PayPal, your first payment is on <b>${esc(longDay(q.charge_from))}</b>, when your free trial ends.`
+            : `<b>Charged today</b> when you pay with PayPal: ${money(q.due_now)}.`;
           d.querySelector('#apeb').innerHTML = q.early_bird ? `🐣 <b>Early bird:</b> ${money(q.first_amount)} a ${r.period === 'yearly' ? 'year for your first year' : `month for your first ${q.early_cycles} months`}, then ${money(q.amount)}.` : '';
-        } catch { /* the total above stands; paying checks again */ }
+        } catch { if (n === qn) { d.querySelector('#apeb').textContent = ''; d.querySelector('#apwhen').textContent = ''; } /* the total above stands; paying checks again */ }
       };
       f.querySelectorAll('input').forEach((i) => { i.addEventListener('change', draw); i.addEventListener('input', draw); });
       draw();
