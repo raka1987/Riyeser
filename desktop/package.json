@@ -5,7 +5,7 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.js",
+    "test": "node --test --test-timeout=120000 --test-force-exit test/*.test.js",
     "dist": "electron-builder",
     "dist:win": "node scripts/package-win.js assistant",
     "dist:mac": "electron-builder --mac",
