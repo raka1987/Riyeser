@@ -489,9 +489,11 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
     <a class="mob-only" href="/link/">Sign in / Create account</a>
   </nav>
   <div class="right"><a class="signin" href="/link/">Sign in<span class="sx"> / Create account</span></a><a class="btn p" href="${up}downloads.html">${WINDL}</a></div>
-  <button class="menu" aria-label="Menu" aria-expanded="false" onclick="var n=document.getElementById('nav');n.classList.toggle('open');this.setAttribute('aria-expanded',n.classList.contains('open'))">☰</button>
+  <button class="menu" aria-label="Menu" aria-expanded="false">☰</button>
 </div></header>
-<script>/* phone menu: a tap on Programs, Industries or Help opens its list right there (a second tap goes to the page) */
+<script>/* the phone menu button (no inline onclick: the Content-Security-Policy allows only these listed scripts) */
+document.querySelector('#nav .menu').addEventListener('click',function(){var n=document.getElementById('nav');n.classList.toggle('open');this.setAttribute('aria-expanded',n.classList.contains('open'))});
+/* phone menu: a tap on Programs, Industries or Help opens its list right there (a second tap goes to the page) */
 document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventListener('click',function(e){
   var nav=document.getElementById('nav');if(!nav.classList.contains('open'))return;var d=a.parentNode;
   if(!d.classList.contains('show')){e.preventDefault();document.querySelectorAll('.links > .dd.show').forEach(function(x){if(x!==d)x.classList.remove('show')});d.classList.add('show')}})});
@@ -509,6 +511,8 @@ document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventList
 <script>/* the "★ Plus" markers inside cards and menus open the pricing page's section */
 document.addEventListener('click',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(!x)return;e.preventDefault();e.stopPropagation();location.href=x.getAttribute('data-href')},true);
 document.addEventListener('keydown',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(x&&(e.key==='Enter'||e.key===' ')){e.preventDefault();location.href=x.getAttribute('data-href')}});</script>
+<script>/* the Help Centre search button: open the first result, or go to the box */
+document.querySelectorAll('[data-gosearch]').forEach(function(b){b.addEventListener('click',function(){var a=document.querySelector('#hres a');if(a)location.href=a.href;else document.getElementById('hq').focus()})});</script>
 <script>/* Download buttons always point at the newest release file, whatever its exact name. */
 (function(){var a=[].slice.call(document.querySelectorAll('a[href*="/releases/latest/download/"]'));if(!a.length||!window.fetch)return;
 fetch('https://api.github.com/repos/raka1987/Riyeser/releases/latest').then(function(r){return r.ok?r.json():null}).then(function(rel){if(!rel)return;
@@ -520,7 +524,18 @@ ${TRAFFIC}
 `;
   const file = join(OUT, path);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, withVersions(html));
+  writeFileSync(file, withCsp(withVersions(html)));
+}
+
+// A Content-Security-Policy for every page: our own files, the inline scripts on that page (by their SHA-256), and
+// GitHub's API (the download buttons find the newest installer). Nothing else may load or run. (frame-ancestors and
+// the other headers can't be set from a <meta>: they belong in Cloudflare, see F16.)
+function withCsp(html) {
+  const hashes = [...new Set([...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
+    .map((m) => `'sha256-${createHash('sha256').update(m[1], 'utf8').digest('base64')}'`))];
+  const csp = ["default-src 'self'", `script-src 'self' ${hashes.join(' ')}`, "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self' data:",
+    "connect-src 'self' https://api.github.com", "frame-src 'none'", "object-src 'none'", "base-uri 'self'", "form-action 'self'"].join('; ');
+  return html.replace('<meta charset="utf-8">', `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">`);
 }
 
 const freeLine = 'Free download · no sign-up · no card · works offline';
@@ -908,7 +923,7 @@ u.addEventListener('input',function(){draw()});c.addEventListener('input',functi
   const gName = (g) => (g.id === 'accounting-basics' || g.id === 'accounting' ? `Accounting ${g.name.replace('Accounting ', '')}` : g.name);
   const countQ = (g) => g.groups.reduce((n, x) => n + x.items.length, 0);
   const plain = (h) => h.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
-  const searchBox = (ph) => `<div class="hsearch-wrap">${SEARCH}<input class="hsearch" id="hq" type="search" placeholder="${ph}" autocomplete="off" aria-label="Search help"><button class="go" type="button" aria-label="Search" onclick="var a=document.querySelector('#hres a');if(a)location.href=a.href;else document.getElementById('hq').focus()">${SEARCH}</button></div>`;
+  const searchBox = (ph) => `<div class="hsearch-wrap">${SEARCH}<input class="hsearch" id="hq" type="search" placeholder="${ph}" autocomplete="off" aria-label="Search help"><button class="go" type="button" aria-label="Search" data-gosearch="1">${SEARCH}</button></div>`;
   // Every question in every guide, for the search box (title, guide, link, words).
   const INDEX = (up) => guides(up).flatMap((g) => g.groups.flatMap((grp) => grp.items.map(([id, q, a]) => [q, gName(g), g.app, `${up}help/${g.id}.html#${id}`, plain(a).slice(0, 400)])));
   const searchScript = (up) => `<script>(function(){var IX=${JSON.stringify(INDEX(up)).replace(/</g, '\\u003c')},box=document.getElementById('hq'),out=document.getElementById('hres');

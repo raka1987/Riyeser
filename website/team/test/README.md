@@ -122,3 +122,5 @@
 - `a11y-test.js` (M21): small grey text on the home and pricing cards at least 4.5:1, heading levels in order, "Skip to content"
   first on Tab, Link's avatar initials at least 4.5:1, no button inside a button, a focus ring on "Search people", and the sign-in
   email box `autocomplete="username"`. With `AXE=path/to/axe.min.js` it also runs axe-core on those pages (all clean now).
+- `csp-test.js`: the website's Content-Security-Policy (a `<meta>` on every page from build.mjs; scripts only by SHA-256): nothing
+  refused on eight pages, fonts and images load, the phone menu, calculator, Help search and Sign in work, an injected script is refused.
