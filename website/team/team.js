@@ -1245,6 +1245,13 @@
     if (S.billingLinked) return; S.billingLinked = true;
     if (params.has('paid')) { const ref = params.get('paid'); dropParams('paid', 'subscription_id', 'ba_token', 'token'); return paidReturn(ref); }
     if (params.has('paycancel')) { dropParams('paycancel', 'subscription_id', 'ba_token', 'token'); return tell('You didn\'t finish at PayPal, so nothing was charged. You can pay again under Billing.', 'warn'); }
+    // From a billing email: ?receipt=RR-… or ?invoice=RI-… opens that receipt or invoice
+    for (const k of ['receipt', 'invoice']) {
+      if (!params.has(k)) continue; const ref = String(params.get(k) || '').toUpperCase(); dropParams(k); const b = S.billing || {};
+      const x = k === 'receipt' ? (b.payments || []).find((y) => y.ref === ref) : (b.orders || []).find((y) => y.ref === ref);
+      if (!x) return tell(`We couldn't find ${k} ${ref} for this business. Billing on this page lists them all.`, 'warn');
+      return k === 'receipt' ? printDoc(receiptHtml(x), `Receipt ${ref}`) : invoiceView(x);
+    }
     if (params.has('add')) { const p = payParams(); dropParams('add', 'buy', 'users', 'period', 'signup'); if (p.add.length || p.buy) return addToPlan(p); }
     return null;
   }
@@ -1265,7 +1272,10 @@
   }
   const docTable = (rows, total, label) => `<table class="pd-lines"><tr><th>Description</th><th class="num">US$</th></tr>${rows.map(([t, v]) => `<tr><td>${esc(t)}</td><td class="num">${Number(v).toFixed(2)}</td></tr>`).join('')}
     <tr class="pd-total"><td>${label}</td><td class="num">${money(total)}</td></tr></table>`;
+  // The copy Riyeser kept when it was issued (billdoc.js draws it; HQ shows the same); older ones are drawn from the order.
+  const keptDoc = (x) => (x && x.doc && window.RiyeserBillDoc ? x.doc : null);
   function invoiceHtml(o) {
+    if (keptDoc(o)) return window.RiyeserBillDoc.html(o.doc, { paid: o.status === 'paid', paidAt: o.paid_at });
     const bank = (o.seller && o.seller.bank) || {}; const has = !!String(bank.account_number || '').trim();
     return `<div class="pd-head">${sellerBlock(o.seller)}<div class="pd-title"><h1>Invoice</h1><div>No. <b>${esc(o.ref)}</b></div><div>Date ${longDay(o.created_at)}</div><div>Due ${longDay(o.due_date)}</div></div></div>
       ${buyerBlock()}${docTable(linesFor(o), o.total, 'Total to pay (US dollars)')}
@@ -1274,6 +1284,7 @@
       ${o.status === 'paid' ? `<p class="pd-stamp">PAID${o.paid_at ? ` ${longDay(o.paid_at)}` : ''}</p>` : ''}<p class="pd-foot">Thank you for using Riyeser.</p>`;
   }
   function receiptHtml(p) {
+    if (keptDoc(p)) return window.RiyeserBillDoc.html(p.doc);
     const o = { modules: p.modules, people: p.people, billing: p.billing, amount: p.amount };
     return `<div class="pd-head">${sellerBlock(p.seller)}<div class="pd-title"><h1>Receipt</h1><div>No. <b>${esc(p.ref)}</b></div><div>Paid ${longDay(p.at)}</div><div>For invoice ${esc(p.order_ref)}</div></div></div>
       ${buyerBlock()}${docTable([[`Riyeser: ${orderWhat(o)}${p.period_to ? `, paid until ${longDay(p.period_to)}` : ''}`, p.amount]], p.amount, 'Paid (US dollars)')}

@@ -65,6 +65,15 @@ async function fakeServer(page, opts = {}) {
         created_at: new Date().toISOString(), seller };
       st.orders.unshift(o); return json(o); }
     if (fn === 'billing_cancel_invoice') { const o = st.orders.find((x) => x.ref === body.invoice_ref); o.status = 'void'; return json(null); }
+    if (fn === 'my_billing' && opts.kept) {
+      // the database's kept copy of a receipt (billing_documents), as issued: different wording from today's details
+      const doc = { kind: 'receipt', ref: 'RR-20001', issued_at: '2026-10-01T02:00:00Z', order_ref: 'RI-20001', seller: { ...seller, name: 'Riyeser (as issued)' },
+        buyer: { name: 'Sample Plumbing', legal_name: 'Sample Plumbing Ltd (as issued)', email: 'old@sample.test', company_code: 'RIY-7K3M-Q2', contact: { name: 'Alex Sample' } },
+        what: 'Payroll · 1 person · monthly', period_from: '2026-10-01', period_to: '2026-11-01', lines: [{ text: 'Riyeser: Payroll · 1 person · monthly, 1 Oct 2026 – 1 Nov 2026', amount: 25 }],
+        total: 25, currency: 'USD', method: 'paypal', method_ref: '…AB12CD' };
+      return json({ licence: lic, subscription: null, orders: [], payments: [{ id: 9, ref: 'RR-20001', order_ref: 'RI-20001', method: 'paypal', status: 'completed', amount: 25, currency: 'USD', at: doc.issued_at, period_to: '2026-11-01', modules: ['payroll'], module_names: ['Payroll'], people: 1, billing: 'monthly', seller, doc }],
+        seller, grace_days: 7, paypal_manage_url: 'https://www.sandbox.paypal.com/myaccount/autopay/' });
+    }
     if (fn === 'my_billing') {
       // back from PayPal: the webhook lands after a couple of looks
       const pp = st.orders.find((o) => o.method === 'paypal' && o.status !== 'void');
@@ -207,6 +216,15 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   check((await fp.textContent('#hbsub')).includes('Payment didn\'t go through') && (await fp.textContent('#hbsub')).includes(grace), `failed payment: works until the exact date (${grace})`);
   check((await fp.textContent('#hbpay')).includes('Didn\'t go through'), 'the failed payment is in the history');
   void fst;
+
+  // ---- the kept copy of a receipt: a billing email's link (?receipt=RR-…) opens it, exactly as issued ("1 person")
+  const kp = await newPage(1280); await fakeServer(kp, { kept: true });
+  await kp.goto(`${BASE}/link/?receipt=RR-20001`); await signIn(kp); await kp.waitForSelector('#printdoc', { timeout: 15000 });
+  const kd = (await kp.textContent('#printdoc')).replace(/\s+/g, ' ');
+  check(kd.includes('RR-20001') && kd.includes('Riyeser (as issued)') && kd.includes('Sample Plumbing Ltd (as issued)') && kd.includes('Payroll · 1 person · monthly') && kd.includes('Reference …AB12CD'),
+    'a receipt link opens the copy kept when it was issued');
+  check(!/[?&]receipt=/.test(kp.url()), 'the link is tidied from the address bar');
+  check((await kp.textContent('#hbpay')).includes('Payroll'), 'Payment history says what was paid for');
 
   // ---- PayPal not set up: bank transfer only
   const np = await newPage(1280); await fakeServer(np, { noPayPal: true, noEarly: true });

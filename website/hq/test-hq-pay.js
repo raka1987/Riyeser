@@ -18,6 +18,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   await pg.goto(`${BASE}/hq/?demo`); await pg.waitForSelector('.tiles');
   // the overview: failed payments counted, both kinds in the work queue
   check(/Failed payments\s*1/.test(await text('.ccards')), 'Overview: 1 failed payment');
+  check(/Payments received\s*US\$25\s*1 payment in the last 7 days/.test(await text('#payRecv')) && (await pg.getAttribute('#payRecv', 'href')) === '#/payments', `Overview: payments received in 7 days, linking to Invoices & payments (${await text('#payRecv')})`);
   const kinds = await pg.$$eval('#queue tr[data-kind]', (rs) => rs.map((r) => r.dataset.kind + ': ' + r.querySelector('.pill').textContent));
   check(kinds.some((k) => k === 'payment: Payment failed') && kinds.some((k) => /^invoice: Invoice (unpaid|overdue)$/.test(k)), `work queue: ${kinds.filter((k) => /payment|invoice/.test(k)).join(', ')}`);
   // Invoices & payments
@@ -51,6 +52,34 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   await pg.goto(`${BASE}/hq/?demo#/company/w2/money`); await pg.waitForSelector('#coBilling');
   check((await text('#coBilling')).includes('RI-10002') && (await text('#coBilling')).includes('…7Q2X9K') && (await text('#coPays')).includes('…4T7Y2A'), 'Money tab: invoices and payments, ids masked');
   await shot(pg, 'hq-customer-money.png', '#cpBody');
+  // what each payment was for; "1 person"; the early bird amount; the receipt number opens the customer's copy
+  const forCell = await text('#coPayTbl tr:nth-child(2) td.forc');
+  check(/^Accounting Basics, POS, Riyeser Link Plus · 9 people · monthly · .+ – .+\d{4}$/.test(forCell), `Payments: For says what was paid for (${forCell})`);
+  await pg.click('#coPayTbl [data-doc="RR-10002"]'); await pg.waitForSelector('#printdoc');
+  const doc = await text('#printdoc');
+  check(doc.includes('Receipt') && doc.includes('RR-10002') && doc.includes('Harbour Cafe Pty Ltd') && doc.includes('Contact: Mere') && doc.includes('US$177.00') && doc.includes('Paid by PayPal'), 'the customer\'s copy of the receipt');
+  check(await pg.isVisible('#docPrint') && await pg.isVisible('#docResend') && await pg.isVisible('#docOther'), 'Print, Resend, Send to a different email');
+  await pg.click('#docResend'); await pg.waitForSelector('#rsGo');
+  check((await text('.modal:last-child .mcard')).includes('mere@harbour.test'), 'Resend: says where it goes'); await pg.click('#rsGo'); await pg.waitForTimeout(300);
+  check((await flash()).includes('RR-10002 sent to mere@harbour.test'), `resent: ${await flash()}`);
+  await pg.click('#docOther'); await pg.waitForSelector('#rsf'); await pg.fill('#rsf [name=to]', 'nope'); await pg.click('#rsGo');
+  check(!!(await pg.$('#rsStep1:not([hidden])')), 'a bad address: the form stops it');
+  await pg.fill('#rsf [name=to]', 'Accounts@Harbour.test'); await pg.check('#rsf [name=fix]'); await pg.click('#rsGo');
+  check((await text('#rsCheck')).includes('Accounts@Harbour.test') && (await text('#rsCheck')).includes('billing email'), 'asks to check the address first');
+  await pg.click('#rsGo'); await pg.waitForTimeout(400);
+  check((await flash()).includes('sent to accounts@harbour.test') && (await flash()).includes('billing email is updated') && !(await pg.$('#printdoc')), `sent to another address: ${await flash()}`);
+  await pg.goto(`${BASE}/hq/?demo#/company/w2/money`); await pg.waitForSelector('#coBilling');
+  await pg.goto(`${BASE}/hq/?demo#/history`); await pg.waitForTimeout(500);
+  check((await text('#main')).includes('sent an invoice or receipt again') && (await text('#main')).includes('ac…@harbour.test'), 'resends are in the HQ history, address shortened');
+  await pg.goto(`${BASE}/hq/?demo#/company/w1/money`); await pg.waitForSelector('#coBilling');
+  const inv = await text('#coOrders');
+  check(inv.includes('5 people') && /US\$46 \(early bird\)\s*then US\$92 a month/.test(inv), `invoice row: people, early bird wording (${inv.slice(0, 160)})`);
+  await pg.click('#coOrders [data-doc="RI-10003"]'); await pg.waitForSelector('#printdoc');
+  check((await text('#printdoc')).includes('Invoice') && (await text('#printdoc')).includes('Early bird'), 'the invoice copy opens too'); await pg.click('.modal [data-close]');
+  // Programs as Support (no licences.manage): the list, no Manage buttons
+  await pg.selectOption('#demoAs', 's2'); await pg.waitForTimeout(400); await pg.goto(`${BASE}/hq/?demo#/company/w2/programs`); await pg.waitForSelector('#licCard');
+  check((await pg.$$('#licCard tr[data-mod]')).length > 0 && !(await pg.$('#licCard [data-manage]')), 'Support: sees the programs, no Manage buttons');
+  await pg.selectOption('#demoAs', (await pg.$$eval('#demoAs option', (o) => o[0].value))); await pg.waitForTimeout(400);
   // Support can look but not mark paid
   await pg.goto(`${BASE}/hq/?demo#/payments`); await pg.waitForSelector('#ppcard');
   await pg.selectOption('#demoAs', 's2'); await pg.waitForTimeout(400); await pg.goto(`${BASE}/hq/?demo#/payments`);

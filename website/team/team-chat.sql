@@ -2275,6 +2275,7 @@ begin
     update refund_requests set explanation = '[removed]', invoice_ref = null where workspace_id = ws;
     update email_outbox set to_address = null, subject = '[removed]', body_text = '[removed]', body_html = null,
       status = case when status = 'queued' then 'held' else status end where workspace_id = ws;
+    update billing_documents set doc = jsonb_set(doc, '{buyer,contact}', '{"name": "Removed person"}'::jsonb) where workspace_id = ws;
     update workspaces set name = 'Removed business', legal_name = null, tax_number = null, address = null, phone = null, email = null,
       removal_state = 'removed', removed_at = now() where id = ws;
     n := n + 1;
@@ -4896,6 +4897,32 @@ create table if not exists public.billing_events (
   received_at timestamptz not null default now(),
   result text
 );
+-- The customer's copy of every invoice and receipt, exactly as issued: the seller, the business and its contact, the
+-- lines, the period, the amounts and how it was paid. Written once when it's issued, so later changes to prices or
+-- details never alter it (only an owner-approved account removal blanks the contact person). The business's owner
+-- sees it under Billing on Riyeser home; HQ (licences.view) opens it from the number and can send it again.
+create table if not exists public.billing_documents (
+  id bigint generated always as identity primary key,
+  kind text not null check (kind in ('invoice', 'receipt')),
+  ref text not null unique,                        -- RI-… (invoice) or RR-… (receipt)
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  order_id uuid references public.billing_orders(id) on delete cascade,
+  payment_id bigint references public.billing_payments(id) on delete cascade,
+  doc jsonb not null,
+  issued_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+create index if not exists billing_documents_ws on public.billing_documents (workspace_id, issued_at desc);
+create unique index if not exists billing_documents_payment on public.billing_documents (payment_id) where payment_id is not null;
+alter table public.billing_documents enable row level security;
+revoke all on public.billing_documents from anon, authenticated;
+create or replace function public.billing_documents_keep() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'UPDATE' and current_setting('riyeser.removing', true) = 'on' then return new; end if;
+  raise exception 'Invoices and receipts are kept exactly as issued.';
+end $$;
+drop trigger if exists billing_documents_keep on public.billing_documents;
+create trigger billing_documents_keep before update or delete on public.billing_documents for each row execute function public.billing_documents_keep();
 alter table public.billing_entities enable row level security;
 alter table public.billing_orders enable row level security;
 alter table public.billing_payments enable row level security;
@@ -4976,7 +5003,8 @@ create or replace function public.billing_order_json(o billing_orders, masked bo
     'grace_until', o.grace_until, 'paid_through', o.paid_through, 'works_until', greatest(o.grace_until, o.paid_through), 'paid_at', o.paid_at, 'cancelled_at', o.cancelled_at, 'created_at', o.created_at,
     'paypal_env', o.paypal_env, 'paypal_id', case when masked then billing_mask(o.paypal_subscription_id) end,
     'paid_reference', case when masked then o.paid_reference end, 'marked_paid_by', case when masked then staff_name(o.marked_paid_by) end,
-    'seller', (select e.details from billing_entities e where e.id = o.entity_id))
+    'seller', (select e.details from billing_entities e where e.id = o.entity_id),
+    'doc', (select d.doc from billing_documents d where d.order_id = o.id and d.kind = 'invoice' limit 1))
 $$;
 create or replace function public.billing_payment_json(p billing_payments, masked boolean) returns json
   language sql stable security definer set search_path = public as $$
@@ -4984,9 +5012,119 @@ create or replace function public.billing_payment_json(p billing_payments, maske
     'currency', p.currency, 'at', p.at, 'period_to', p.period_to, 'note', p.note, 'modules', to_json(o.modules),
     'module_names', (select json_agg(module_label(x)) from unnest(o.modules) x), 'people', o.people, 'billing', o.billing,
     'provider_ref', case when masked then (case when p.method = 'paypal' then billing_mask(p.provider_ref) else p.bank_reference end) end,
-    'seller', (select e.details from billing_entities e where e.id = p.entity_id))
+    'period_from', case when p.period_to is not null then (p.period_to - case when o.billing = 'yearly' then interval '1 year' else interval '1 month' end)::date end,
+    'seller', (select e.details from billing_entities e where e.id = p.entity_id),
+    'doc', (select d.doc from billing_documents d where d.payment_id = p.id))
   from billing_orders o where o.id = p.order_id
 $$;
+
+-- ---------------------------------------------------------------- the customer's copy of each invoice and receipt
+-- "Accounting Basics, Payroll · 1 person · monthly"
+create or replace function public.billing_what(o billing_orders) returns text
+  language sql stable security definer set search_path = public as $$
+  select array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ') || ' · ' || o.people
+    || case when o.people = 1 then ' person' else ' people' end || ' · ' || o.billing
+$$;
+-- The business as it is now (for a document being issued): its details and the owner as the contact person.
+create or replace function public.billing_buyer(ws uuid) returns jsonb
+  language sql stable security definer set search_path = public as $$
+  select jsonb_build_object('name', w.name, 'legal_name', w.legal_name, 'address', w.address, 'tax_number', w.tax_number,
+    'email', w.email, 'phone', w.phone, 'country', w.country, 'company_code', w.company_code,
+    'contact', (select jsonb_build_object('name', m.display_name, 'email', u.email::text) from members m left join auth.users u on u.id = m.user_id
+                where m.workspace_id = ws and m.role = 'owner' order by m.joined_at limit 1))
+  from workspaces w where w.id = ws
+$$;
+-- An invoice's lines: each program at its price (people included, then extra people), and the early bird discount.
+-- The same as the website's invoice; if the prices have changed since, one line with the amount on the invoice.
+create or replace function public.billing_lines(o billing_orders) returns jsonb
+  language plpgsql stable security definer set search_path = public as $$
+declare k int := case when o.billing = 'yearly' then 10 else 1 end; inc int := riyeser_price('users_included')::int;
+  extra int := greatest(0, o.people - riyeser_price('users_included')::int); rows jsonb := '[]'::jsonb; tot numeric := 0; x text; v numeric;
+begin
+  foreach x in array billing_mods(o.modules) loop
+    v := riyeser_bill(array[x], o.people, 0, 'monthly', false) * k; tot := tot + v;
+    rows := rows || jsonb_build_array(jsonb_build_object('text', module_label(x)
+      || case when extra > 0 then ', with ' || extra || ' extra ' || case when extra = 1 then 'person' else 'people' end || ' × ' || billing_money(riyeser_price('extra_user'))
+              else ', ' || inc || ' people included' end
+      || case when k = 10 then ' (a year: 10 months)' else ' (a month)' end, 'amount', v));
+  end loop;
+  if abs(tot - o.amount) > 0.005 then rows := jsonb_build_array(jsonb_build_object('text', 'Riyeser: ' || billing_what(o), 'amount', o.amount)); end if;
+  if o.first_amount is not null and o.first_amount < o.amount then
+    rows := rows || jsonb_build_array(jsonb_build_object('text', '🐣 Early bird: half price for the first 12 months', 'amount', o.first_amount - o.amount));
+  end if;
+  return rows;
+end $$;
+-- Who billing emails go to: the owner(s) and the business's own email, once each.
+create or replace function public.billing_contacts(ws uuid) returns text[]
+  language sql stable security definer set search_path = public as $$
+  select coalesce(array_agg(distinct a), '{}'::text[]) from (
+    select lower(u.email::text) a from members m join auth.users u on u.id = m.user_id where m.workspace_id = ws and m.role = 'owner'
+    union select lower(trim(w.email)) from workspaces w where w.id = ws) x
+  where a ~ '^[^@\s]+@[^@\s]+$'
+$$;
+-- "li…@pay.test": an address in the HQ history without keeping it whole.
+create or replace function public.billing_mask_email(e text) returns text language sql immutable as $$
+  select case when e is null or position('@' in e) = 0 then null else left(split_part(e, '@', 1), 2) || '…@' || split_part(e, '@', 2) end
+$$;
+-- The email for a document: its number, what it was for, the amount, and the link to view or print it.
+create or replace function public.billing_doc_email(d jsonb, again boolean) returns text[]
+  language sql stable security definer set search_path = public as $$
+  select case when d ->> 'kind' = 'receipt' then array[
+    case when again then 'Your Riyeser receipt ' || (d ->> 'ref') else 'Thanks, your Riyeser payment is in' end,
+    case when again then 'Here is your receipt again.' else 'Thanks, we received your payment.' end
+      || E'\n\nReceipt: ' || (d ->> 'ref')
+      || E'\nAmount: ' || billing_money((d ->> 'total')::numeric) || ' by ' || case when d ->> 'method' = 'paypal' then 'PayPal' else 'bank transfer' end
+      || E'\nFor: ' || (d ->> 'what')
+      || coalesce(E'\nPeriod: ' || to_char((d ->> 'period_from')::date, 'FMDD Mon YYYY') || ' – ' || to_char((d ->> 'period_to')::date, 'FMDD Mon YYYY'), '')
+      || coalesce(E'\nPaid until ' || to_char((d ->> 'period_to')::date, 'FMDD Month YYYY') || '.', '')
+      || E'\n\nView or print your receipt (sign in as the business owner):\nhttps://riyeser.com/link/?receipt=' || (d ->> 'ref')]
+  else array['Your Riyeser invoice ' || (d ->> 'ref'),
+    'Invoice: ' || (d ->> 'ref') || E'\nAmount: ' || billing_money((d ->> 'total')::numeric)
+      || coalesce(', due ' || to_char((d ->> 'due_date')::date, 'FMDD Month YYYY'), '')
+      || E'\nFor: ' || (d ->> 'what')
+      || E'\n\nPay by bank transfer and quote ' || (d ->> 'ref') || E' as the reference. The bank details are on the invoice:\nhttps://riyeser.com/link/?invoice=' || (d ->> 'ref')]
+  end
+$$;
+-- Issue a bank transfer invoice's copy (once).
+create or replace function public.billing_issue_invoice(oid uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare o billing_orders;
+begin
+  select * into o from billing_orders where id = oid;
+  if o.id is null or o.method <> 'bank' then return; end if;
+  insert into billing_documents (kind, ref, workspace_id, order_id, doc, issued_at)
+  values ('invoice', o.ref, o.workspace_id, o.id, jsonb_build_object('kind', 'invoice', 'ref', o.ref, 'issued_at', o.created_at, 'due_date', o.due_date,
+    'seller', (select e.details from billing_entities e where e.id = o.entity_id), 'buyer', billing_buyer(o.workspace_id),
+    'what', billing_what(o), 'modules', to_jsonb(o.modules), 'people', o.people, 'billing', o.billing,
+    'lines', billing_lines(o), 'total', coalesce(o.first_amount, o.amount), 'regular_amount', o.amount, 'early_bird', o.early_bird,
+    'currency', o.currency, 'method', 'bank', 'reference', o.ref), o.created_at)
+  on conflict (ref) do nothing;
+end $$;
+-- Issue a receipt's copy (once) for a completed payment; send: email it to the owner(s) and the business's email.
+create or replace function public.billing_issue_receipt(pid bigint, send boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+declare p billing_payments; o billing_orders; d jsonb; pf date; m text[]; a text;
+begin
+  select * into p from billing_payments where id = pid;
+  if p.id is null or p.status <> 'completed' or p.ref is null then return; end if;
+  select * into o from billing_orders where id = p.order_id;
+  pf := case when p.period_to is not null then (p.period_to - case when o.billing = 'yearly' then interval '1 year' else interval '1 month' end)::date end;
+  d := jsonb_build_object('kind', 'receipt', 'ref', p.ref, 'issued_at', p.at, 'order_ref', o.ref,
+    'seller', (select e.details from billing_entities e where e.id = p.entity_id), 'buyer', billing_buyer(p.workspace_id),
+    'what', billing_what(o), 'modules', to_jsonb(o.modules), 'people', o.people, 'billing', o.billing,
+    'period_from', pf, 'period_to', p.period_to,
+    'lines', jsonb_build_array(jsonb_build_object('text', 'Riyeser: ' || billing_what(o)
+      || coalesce(', ' || to_char(pf, 'FMDD Mon YYYY') || ' – ' || to_char(p.period_to, 'FMDD Mon YYYY'), '')
+      || case when p.amount < o.amount - 0.005 then ' (early bird)' else '' end, 'amount', p.amount)),
+    'total', p.amount, 'currency', p.currency, 'method', p.method,
+    'method_ref', case when p.method = 'paypal' then billing_mask(p.provider_ref) end);
+  insert into billing_documents (kind, ref, workspace_id, order_id, payment_id, doc, issued_at)
+  values ('receipt', p.ref, p.workspace_id, o.id, p.id, d, p.at) on conflict do nothing;
+  if found and send then
+    m := billing_doc_email(d, false);
+    foreach a in array billing_contacts(p.workspace_id) loop perform queue_email(null, a, 'billing_paid', m[1], m[2], p.workspace_id, null, null); end loop;
+  end if;
+end $$;
 
 -- Payment received: extend each program on the order by a month or a year. The first time, from the end of its free
 -- trial (or today); after that, from the end of what's paid. Also the plan's people and billing period.
@@ -5068,6 +5206,7 @@ begin
     (t ->> 'amount')::numeric, (t ->> 'first_amount')::numeric, (t ->> 'early_bird')::boolean, (t ->> 'early_cycles')::int,
     (billing_entity_now()).id, case when pay_method = 'bank' then current_date + 14 end, auth.uid())
   returning * into o;
+  perform billing_issue_invoice(o.id);
   return billing_order_json(o, false);
 end $$;
 
@@ -5200,11 +5339,8 @@ begin
         if found then
           upto := billing_extend(o.id);
           update billing_payments set period_to = upto where provider_ref = resource ->> 'id';
-          if o.status = 'pending' or o.paid_through is null then
-            perform queue_email_owners(o.workspace_id, 'billing_paid', 'Thanks, your Riyeser payment is in',
-              'We received ' || billing_money(amt) || ' by PayPal for ' || array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ')
-              || E'.\n\nPaid until ' || to_char(upto, 'FMDD Month YYYY') || '. Your receipt is on your Riyeser home page, under Billing.');
-          end if;
+          -- every payment: the customer's copy of the receipt, and an email with its number, what it was for and a link
+          perform billing_issue_receipt((select id from billing_payments where provider_ref = resource ->> 'id'), true);
           res := 'paid';
         else res := 'duplicate payment'; end if;
       end if;
@@ -5266,6 +5402,7 @@ begin
   return json_build_object(
     'orders', (select coalesce(json_agg(billing_order_json(o, true) order by o.created_at desc), '[]') from billing_orders o where o.workspace_id = ws and o.status <> 'void'),
     'payments', (select coalesce(json_agg(billing_payment_json(p, true) order by p.at desc), '[]') from billing_payments p where p.workspace_id = ws),
+    'contacts', to_json(billing_contacts(ws)),   -- where invoices and receipts are emailed (the owners and the business's email)
     'can_mark_paid', hq_can('licences.manage'));
 end $$;
 -- A bank transfer came in: mark its invoice paid (Owner, Finance), which switches the programs on. In the HQ history.
@@ -5288,10 +5425,7 @@ begin
   update billing_payments set period_to = upto where ref = rcpt;
   perform hq_log('billing.bank_paid', jsonb_build_object('workspace_id', o.workspace_id, 'invoice', o.ref, 'receipt', rcpt,
     'amount', paid_amount, 'paid_until', upto));
-  perform queue_email_owners(o.workspace_id, 'billing_paid', 'Thanks, your Riyeser payment is in',
-    'We received your bank transfer of ' || billing_money(paid_amount) || ' for invoice ' || o.ref || E'.\n\n'
-    || array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ') || ' paid until ' || to_char(upto, 'FMDD Month YYYY')
-    || '. Your receipt is on your Riyeser home page, under Billing.');
+  perform billing_issue_receipt((select id from billing_payments where ref = rcpt), true);
   return json_build_object('receipt', rcpt, 'paid_until', upto);
 end $$;
 -- The Billing entity: who sells Riyeser (on every invoice and receipt). Each change is a new version.
@@ -5314,6 +5448,55 @@ begin
   perform hq_log('billing.entity_changed', jsonb_build_object('name', d ->> 'name', 'bank_set', coalesce(d #>> '{bank,account_number}', '') <> ''));
 end $$;
 
+-- HQ: send an invoice or receipt again, to the business's billing emails (licences.view), or to another address
+-- (a wrong email); update_contact also makes that the business's email (customers.edit or licences.manage). In the HQ history: who,
+-- which document, when, and where to (the address shortened; the full one is on the email itself, in Emails).
+create or replace function public.hq_billing_resend(doc_ref text, to_email text, update_contact boolean) returns json
+  language plpgsql security definer set search_path = public as $$
+declare d billing_documents; addr text := lower(trim(coalesce(to_email, ''))); sent text[]; a text; m text[];
+begin
+  perform hq_need(array['licences.view']);
+  select * into d from billing_documents where ref = upper(trim(coalesce(doc_ref, '')));
+  if d.id is null then raise exception 'There''s no invoice or receipt with that number.'; end if;
+  if addr <> '' then
+    if addr !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' or length(addr) > 120 then raise exception 'Check the email address.'; end if;
+    if coalesce(update_contact, false) then
+      perform hq_need(array['customers.edit', 'licences.manage']);
+      update workspaces set email = addr where id = d.workspace_id;
+    end if;
+    sent := array[addr];
+  else
+    sent := billing_contacts(d.workspace_id);
+    if cardinality(sent) = 0 then raise exception 'This business has no email to send it to. Use "Send to a different email".'; end if;
+  end if;
+  m := billing_doc_email(d.doc, true);
+  foreach a in array sent loop perform queue_email(null, a, 'billing_resend', m[1], m[2], d.workspace_id, null, null); end loop;
+  perform hq_log('billing.doc_resent', jsonb_build_object('workspace_id', d.workspace_id, 'ref', d.ref, 'kind', d.kind,
+    'to', (select jsonb_agg(billing_mask_email(x)) from unnest(sent) x), 'other_address', addr <> '',
+    'contact_updated', addr <> '' and coalesce(update_contact, false)));
+  return json_build_object('ref', d.ref, 'to', to_json(sent), 'contact_updated', addr <> '' and coalesce(update_contact, false));
+end $$;
+-- HQ Overview: payments received in the last few days (count and US$ total). Read only.
+create or replace function public.hq_payments_received(days int) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare n int := least(greatest(coalesce(days, 7), 1), 366);
+begin
+  perform hq_need(array['licences.view']);
+  return (select json_build_object('days', n, 'count', count(*), 'total', coalesce(sum(amount), 0))
+    from billing_payments where status = 'completed' and currency = 'USD' and at > now() - make_interval(days => n));
+end $$;
+-- Once: the customer's copy of invoices and receipts issued before copies were kept (from what's stored for them).
+do $$ declare r record; begin
+  for r in select o.id from billing_orders o where o.method = 'bank' and o.status <> 'void'
+      and not exists (select 1 from billing_documents d where d.ref = o.ref) order by o.created_at loop
+    perform billing_issue_invoice(r.id);
+  end loop;
+  for r in select p.id from billing_payments p where p.status = 'completed' and p.ref is not null
+      and not exists (select 1 from billing_documents d where d.payment_id = p.id) order by p.at loop
+    perform billing_issue_receipt(r.id, false);
+  end loop;
+end $$;
+
 -- ---------------------------------------------------------------- who can call what
 revoke all on function public.billing_mods(text[]), public.billing_mask(text), public.billing_money(numeric), public.billing_entity_now(),
   public.billing_terms(uuid, text[], int, text), public.billing_is_owner(uuid), public.billing_order_json(billing_orders, boolean),
@@ -5322,11 +5505,15 @@ revoke all on function public.billing_mods(text[]), public.billing_mask(text), p
   public.billing_cancel_start(uuid), public.billing_cancel_invoice(uuid, text),
   public.billing_paypal_created(uuid, text, text), public.billing_paypal_cancelled(uuid), public.billing_paypal_config(text),
   public.billing_paypal_config_set(text, text, text), public.billing_paypal_event(text, text, jsonb, text),
-  public.hq_billing(), public.hq_company_billing(uuid), public.hq_billing_mark_paid(text, text, numeric), public.hq_set_billing_entity(jsonb)
+  public.hq_billing(), public.hq_company_billing(uuid), public.hq_billing_mark_paid(text, text, numeric), public.hq_set_billing_entity(jsonb),
+  public.billing_what(billing_orders), public.billing_buyer(uuid), public.billing_lines(billing_orders), public.billing_contacts(uuid),
+  public.billing_mask_email(text), public.billing_doc_email(jsonb, boolean), public.billing_issue_invoice(uuid), public.billing_issue_receipt(bigint, boolean),
+  public.hq_billing_resend(text, text, boolean), public.hq_payments_received(int)
   from public, anon, authenticated;
 grant execute on function public.billing_quote(uuid, text[], int, text), public.billing_start(uuid, text[], int, text, text), public.my_billing(uuid),
   public.billing_cancel_start(uuid), public.billing_cancel_invoice(uuid, text),
-  public.hq_billing(), public.hq_company_billing(uuid), public.hq_billing_mark_paid(text, text, numeric), public.hq_set_billing_entity(jsonb) to authenticated;
+  public.hq_billing(), public.hq_company_billing(uuid), public.hq_billing_mark_paid(text, text, numeric), public.hq_set_billing_entity(jsonb),
+  public.hq_billing_resend(text, text, boolean), public.hq_payments_received(int) to authenticated;
 -- Only the paypal Edge Function (Supabase's service role) records PayPal's side.
 do $$ begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then

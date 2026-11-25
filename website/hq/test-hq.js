@@ -18,7 +18,7 @@ const { chromium, devices } = require('playwright');
   await pg.fill('#sf input', 'sample plumbing'); await pg.click('#sf button'); await pg.waitForTimeout(200);
   await pg.click('tr[data-co="w1"]'); await pg.waitForSelector('.cpage'); await pg.click('[data-cptab=programs]'); await pg.waitForSelector('#licCard');
   console.log('licence now:', await pg.evaluate(() => [...document.querySelectorAll('#licCard tr[data-mod]')].map((r) => r.cells[0].innerText + ': ' + r.cells[1].innerText.replace(/\s+/g, ' ')).join(' | ')));
-  await pg.click('tr[data-mod=pos] [data-q=paid_until]'); await pg.fill('#qa [name=until]', '2027-06-30'); await pg.fill('#qa [name=reason]', 'Paid by bank transfer'); await pg.click('#qa .btn.p'); await pg.waitForTimeout(300);
+  await pg.click('tr[data-mod=pos] [data-manage]'); await pg.click('#mgl [data-q=paid_until]'); await pg.fill('#qa [name=until]', '2027-06-30'); await pg.fill('#qa [name=reason]', 'Paid by bank transfer'); await pg.click('#qa .btn.p'); await pg.waitForTimeout(300);
   console.log('POS now:', (await pg.textContent('tr[data-mod=pos] .pill')).trim(), (await pg.textContent('tr[data-mod=pos] td:nth-child(3)')).trim());
   await pg.fill('#plan [name=users]', '4'); await pg.selectOption('#plan [name=billing]', 'yearly'); await pg.click('#plan .btn'); await pg.waitForTimeout(300);
   console.log('licence heading:', (await pg.textContent('#licCard h3')).trim());

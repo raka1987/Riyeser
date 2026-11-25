@@ -140,6 +140,13 @@
       // payments: PayPal subscriptions and bank transfer invoices (team-chat.sql), and the paypal function's status
       billing: () => rpc('hq_billing'), markPaid: (ref, bankRef, amount) => rpc('hq_billing_mark_paid', { invoice_ref: ref, bank_reference: bankRef, paid_amount: amount }),
       setBillingEntity: (d) => rpc('hq_set_billing_entity', { details: d }),
+      resendDoc: (ref, to, update) => rpc('hq_billing_resend', { doc_ref: ref, to_email: to || null, update_contact: !!update }),
+      // payments received in the last few days; an older database: worked out from the latest payments
+      async paymentsReceived(days) {
+        try { return await rpc('hq_payments_received', { days }); } catch (e) { if (!missing(e)) throw e; }
+        const b = await rpc('hq_billing'); const since = Date.now() - days * 864e5; const ps = (b.payments || []).filter((p) => p.status === 'completed' && new Date(p.at) >= since);
+        return { days, count: ps.length, total: ps.reduce((a, p) => a + Number(p.amount || 0), 0) };
+      },
       async paypalStatus() { try { const r = await fetch(`${CFG.supabaseUrl}/functions/v1/paypal/status`, { headers: { apikey: CFG.supabaseKey } }); return r.ok ? await r.json() : { deployed: false }; } catch { return { deployed: false }; } },
       // support
       tickets: (box, q) => rpc('hq_tickets', { box, search: q || '' }), ticket: (id) => rpc('hq_ticket', { ticket: id }),
@@ -241,7 +248,7 @@
     let actor = 's1';
     const me = () => staff.find((s) => s.user_id === actor); const nameOf = (id) => (staff.find((s) => s.user_id === id) || {}).display_name || null;
     const need = (p) => { if (!permsOf(me()).includes(p)) throw new Error('Your HQ role can\'t do that.'); };
-    const mods = { w2: { basic: { status: 'active', paid_until: t(-300).slice(0, 10) }, pos: { status: 'active', paid_until: t(-300).slice(0, 10) }, calls: { status: 'active', paid_until: t(-200).slice(0, 10) } },
+    const mods = { g20: { bookings: { status: 'active', paid_until: t(-26).slice(0, 10) } }, w2: { basic: { status: 'active', paid_until: t(-300).slice(0, 10) }, pos: { status: 'active', paid_until: t(-300).slice(0, 10) }, calls: { status: 'active', paid_until: t(-200).slice(0, 10) } },
       w1: { basic: { status: 'active', paid_until: t(-20).slice(0, 10) }, payroll: { status: 'cancelled', paid_until: t(5).slice(0, 10) } } };
     for (let i = 6; i <= 118; i += 6) mods['g' + i] = { basic: { status: 'active', paid_until: t(-20 - i).slice(0, 10), paid_since: t(i % 50).slice(0, 10) }, ...(i % 12 ? {} : { pos: { status: 'active', paid_until: t(-40 - i).slice(0, 10), paid_since: t(i % 30).slice(0, 10) } }) };
     mods.w1.basic.paid_since = t(120).slice(0, 10); mods.w2.basic.paid_since = t(200).slice(0, 10); mods.w2.pos.paid_since = t(20).slice(0, 10); mods.w2.calls.paid_since = t(35).slice(0, 10);
@@ -255,8 +262,32 @@
       { id: 'o3', workspace_id: 'g12', ref: 'RI-10001', method: 'paypal', modules: ['basic'], module_names: ['Accounting Basics'], people: 3, billing: 'monthly', amount: 25, total: 25, status: 'payment_failed', paypal_id: '…H8LM3P', paypal_env: 'sandbox', grace_until: t(-5).slice(0, 10), paid_through: t(1).slice(0, 10), next_charge_at: t(-2), created_at: t(40), updated_at: t(2) }];
     const bPays = [{ id: 1, workspace_id: 'w2', order_ref: 'RI-10002', ref: 'RR-10002', method: 'paypal', status: 'completed', amount: 177, currency: 'USD', at: t(18), period_to: t(-12).slice(0, 10), provider_ref: '…4T7Y2A', module_names: ['Accounting Basics', 'POS', 'Riyeser Link Plus'] },
       { id: 2, workspace_id: 'g12', order_ref: 'RI-10001', ref: 'RR-10001', method: 'paypal', status: 'completed', amount: 25, currency: 'USD', at: t(31), period_to: t(1).slice(0, 10), provider_ref: '…9K2W1D', module_names: ['Accounting Basics'] },
-      { id: 3, workspace_id: 'g12', order_ref: 'RI-10001', ref: null, method: 'paypal', status: 'failed', amount: 25, currency: 'USD', at: t(2), note: 'PayPal couldn\'t take the payment.', module_names: ['Accounting Basics'] }];
+      { id: 3, workspace_id: 'g12', order_ref: 'RI-10001', ref: null, method: 'paypal', status: 'failed', amount: 25, currency: 'USD', at: t(2), note: 'PayPal couldn\'t take the payment.', module_names: ['Accounting Basics'] },
+      { id: 4, workspace_id: 'g20', order_ref: 'RI-10004', ref: 'RR-10003', method: 'bank', status: 'completed', amount: 25, currency: 'USD', at: t(4), period_to: t(-26).slice(0, 10), provider_ref: 'ANZ 55120', module_names: ['Bookings'] }];
+    bOrders.push({ id: 'o4', workspace_id: 'g20', ref: 'RI-10004', method: 'bank', modules: ['bookings'], module_names: ['Bookings'], people: 1, billing: 'monthly', amount: 25, first_amount: null, total: 25, status: 'paid', due_date: t(-5).slice(0, 10), paid_at: t(4), paid_through: t(-26).slice(0, 10), paid_reference: 'ANZ 55120', marked_paid_by: 'Finance Fi', created_at: t(9) });
     const bizOf = (o) => ({ ...o, business: (cos.find((c) => c.id === o.workspace_id) || {}).name, workspace_id: o.workspace_id });
+    // The customer's copy of each invoice and receipt, made once (as the database keeps them when they're issued).
+    const bDocs = {};
+    const whatOf = (o) => `${(o.module_names || []).join(', ')} · ${o.people} ${o.people === 1 ? 'person' : 'people'} · ${o.billing}`;
+    const dmy = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    const buyerOf = (ws) => { const c = cos.find((x) => x.id === ws) || {};
+      return { name: c.name, legal_name: c.name + ' Pty Ltd', address: c.address || 'Suva', tax_number: c.tax_number || '50-12345-0-1', email: c.email || c.owner_email, company_code: c.company_code, contact: { name: c.owner_name, email: c.owner_email } }; };
+    const linesOf = (o) => { const k = o.billing === 'yearly' ? 10 : 1; const extra = Math.max(0, o.people - PRICE.users_included);
+      const rows = o.modules.map((m) => ({ text: `${modName(m)}${extra ? `, with ${extra} extra ${extra === 1 ? 'person' : 'people'} × US$${PRICE.extra_user}.00` : `, ${PRICE.users_included} people included`}${k === 10 ? ' (a year: 10 months)' : ' (a month)'}`, amount: (PRICE[m] + extra * PRICE.extra_user) * k }));
+      if (Math.abs(rows.reduce((a, r) => a + r.amount, 0) - o.amount) > 0.005) return [{ text: 'Riyeser: ' + whatOf(o), amount: o.amount }];
+      if (o.first_amount != null && o.first_amount < o.amount) rows.push({ text: '🐣 Early bird: half price for the first 12 months', amount: o.first_amount - o.amount }); return rows; };
+    const docOrder = (o) => (o.method !== 'bank' ? null : bDocs[o.ref] || (bDocs[o.ref] = { kind: 'invoice', ref: o.ref, issued_at: o.created_at, due_date: o.due_date, seller: JSON.parse(JSON.stringify(entity)),
+      buyer: buyerOf(o.workspace_id), what: whatOf(o), lines: linesOf(o), total: o.total, currency: 'USD', method: 'bank', reference: o.ref }));
+    const orderOf = (p) => bOrders.find((o) => o.ref === p.order_ref) || {};
+    const periodFrom = (p, o) => (p.period_to ? addMonths(p.period_to, o.billing === 'yearly' ? -12 : -1) : null);
+    const docPay = (p) => { if (p.status !== 'completed' || !p.ref) return null; if (bDocs[p.ref]) return bDocs[p.ref]; const o = orderOf(p); const pf = periodFrom(p, o);
+      return (bDocs[p.ref] = { kind: 'receipt', ref: p.ref, issued_at: p.at, order_ref: o.ref, seller: JSON.parse(JSON.stringify(entity)), buyer: buyerOf(p.workspace_id), what: whatOf(o),
+        period_from: pf, period_to: p.period_to, lines: [{ text: `Riyeser: ${whatOf(o)}${pf ? `, ${dmy(pf)} – ${dmy(p.period_to)}` : ''}${p.amount < o.amount - 0.005 ? ' (early bird)' : ''}`, amount: p.amount }],
+        total: p.amount, currency: 'USD', method: p.method, method_ref: p.method === 'paypal' ? p.provider_ref : null }); };
+    const orderOut = (o) => ({ ...o, next_amount: o.method === 'paypal' && o.first_amount != null ? o.first_amount : o.amount, doc: docOrder(o) });
+    const payOut = (p) => { const o = orderOf(p); return { ...p, modules: o.modules, module_names: o.module_names || p.module_names, people: o.people, billing: o.billing, period_from: periodFrom(p, o), doc: docPay(p) }; };
+    const contactsOf = (ws) => { const c = cos.find((x) => x.id === ws) || {}; return [...new Set([c.owner_email, c.email].filter(Boolean).map((x) => x.toLowerCase()))]; };
+    const maskEmail = (e) => `${e.split('@')[0].slice(0, 2)}…@${e.split('@')[1]}`;
     const paypalSeen = { env: 'sandbox', last_webhook_at: h(3), last_webhook_type: 'PAYMENT.SALE.COMPLETED' };
     const today = () => new Date(new Date().toISOString().slice(0, 10));
     const dd = (a) => Math.round((new Date(a) - today()) / 864e5);
@@ -406,7 +437,7 @@
           requests_waiting: 1, notes: notes[ws] || [],
           extra: { credit: credits[ws] || {}, tickets: P.includes('support.view') ? tickets.filter((x) => x.workspace_id === ws) : null,
             refunds: P.includes('refunds.view') ? refunds.filter((f) => f.workspace_id === ws).map(rowOf) : null, offers: offers.filter((o) => o.workspace_id === ws),
-            billing: P.includes('licences.view') ? { orders: bOrders.filter((o) => o.workspace_id === ws), payments: bPays.filter((x) => x.workspace_id === ws), can_mark_paid: P.includes('licences.manage') } : null,
+            billing: P.includes('licences.view') ? { orders: bOrders.filter((o) => o.workspace_id === ws).map(orderOut), payments: bPays.filter((x) => x.workspace_id === ws).map(payOut), can_mark_paid: P.includes('licences.manage'), contacts: contactsOf(ws) } : null,
             history: P.includes('audit.view') ? hist.filter((x) => x.workspace_id === ws) : null } }; },
       async setCallsPaid(ws, until) { cos.find((x) => x.id === ws).calls_paid_until = until + 'T23:59:59Z'; log('calls.paid_until', { workspace_id: ws, until }); },
       async addNote(ws, body) { return this.noteAdd(ws, { kind: 'note', body }); },
@@ -435,8 +466,8 @@
       async settings() { return { ...settings }; },
       async setSetting(k, v) { need('settings.manage'); settings[k] = Number(v); log('settings.changed', { setting: k, value: v }); },
       async billing() { need('licences.view'); const P = permsOf(me());
-        return { failed: bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).map(bizOf), unpaid: bOrders.filter((o) => o.method === 'bank' && o.status === 'pending').map(bizOf),
-          payments: bPays.slice().sort((a, b) => b.at.localeCompare(a.at)).map(bizOf), paypal: { ...paypalSeen, events_7d: 14, subscriptions: bOrders.filter((o) => o.method === 'paypal' && o.status !== 'cancelled').length },
+        return { failed: bOrders.filter((o) => ['payment_failed', 'suspended'].includes(o.status)).map(orderOut).map(bizOf), unpaid: bOrders.filter((o) => o.method === 'bank' && o.status === 'pending').map(orderOut).map(bizOf),
+          payments: bPays.slice().sort((a, b) => b.at.localeCompare(a.at)).map(payOut).map(bizOf), paypal: { ...paypalSeen, events_7d: 14, subscriptions: bOrders.filter((o) => o.method === 'paypal' && o.status !== 'cancelled').length },
           entity: JSON.parse(JSON.stringify(entity)), bank_ready: !!entity.bank.account_number, grace_days: settings['billing.grace_days'],
           can_mark_paid: P.includes('licences.manage'), can_edit_entity: P.includes('settings.manage') || P.includes('licences.manage') }; },
       async markPaid(ref, bankRef, amount) { need('licences.manage'); const o = bOrders.find((x) => x.ref === String(ref).trim().toUpperCase() && x.method === 'bank');
@@ -448,7 +479,18 @@
           const to = addMonths(base, o.billing === 'yearly' ? 12 : 1); (mods[o.workspace_id] = mods[o.workspace_id] || {})[m] = { status: 'active', paid_until: to, paid_since: iso(Date.now()) }; upto = !upto || to > upto ? to : upto; });
         Object.assign(o, { status: 'paid', paid_at: now(), paid_through: upto, paid_reference: String(bankRef).trim(), marked_paid_by: me().display_name });
         const rc = 'RR-' + (10001 + bPays.length); bPays.unshift({ id: bPays.length + 1, workspace_id: o.workspace_id, order_ref: o.ref, ref: rc, method: 'bank', status: 'completed', amount: Number(amount), currency: 'USD', at: now(), period_to: upto, provider_ref: String(bankRef).trim(), module_names: o.module_names });
-        log('billing.bank_paid', { workspace_id: o.workspace_id, invoice: o.ref, receipt: rc, amount: Number(amount), paid_until: upto }); return { receipt: rc, paid_until: upto }; },
+        log('billing.bank_paid', { workspace_id: o.workspace_id, invoice: o.ref, receipt: rc, amount: Number(amount), paid_until: upto });
+        docPay(bPays[0]); contactsOf(o.workspace_id).forEach((a) => queue(a, 'Thanks, your Riyeser payment is in', 'billing_paid', o.workspace_id)); return { receipt: rc, paid_until: upto }; },
+      async paymentsReceived(days) { need('licences.view'); const ps = bPays.filter((p) => p.status === 'completed' && (Date.now() - new Date(p.at)) / 864e5 <= days); return { days, count: ps.length, total: ps.reduce((a, p) => a + p.amount, 0) }; },
+      async resendDoc(ref, to, update) { need('licences.view'); const P = permsOf(me()); const r = String(ref || '').trim().toUpperCase();
+        bOrders.forEach(docOrder); bPays.forEach(docPay); const d = bDocs[r]; if (!d) throw new Error('There\'s no invoice or receipt with that number.');
+        const ws = (bOrders.find((o) => o.ref === (d.kind === 'invoice' ? d.ref : d.order_ref)) || {}).workspace_id; const addr = String(to || '').trim().toLowerCase();
+        if (addr && (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr) || addr.length > 120)) throw new Error('Check the email address.');
+        if (addr && update) { if (!['customers.edit', 'licences.manage'].some((x) => P.includes(x))) throw new Error('Your HQ role can\'t do that.'); cos.find((x) => x.id === ws).email = addr; }
+        const sent = addr ? [addr] : contactsOf(ws); if (!sent.length) throw new Error('This business has no email to send it to. Use "Send to a different email".');
+        sent.forEach((a) => queue(a, d.kind === 'receipt' ? `Your Riyeser receipt ${d.ref}` : `Your Riyeser invoice ${d.ref}`, 'billing_resend', ws));
+        log('billing.doc_resent', { workspace_id: ws, ref: d.ref, kind: d.kind, to: sent.map(maskEmail), other_address: !!addr, contact_updated: !!(addr && update) });
+        return { ref: d.ref, to: sent, contact_updated: !!(addr && update) }; },
       async setBillingEntity(d) { if (!['settings.manage', 'licences.manage'].some((x) => permsOf(me()).includes(x))) throw new Error('Your HQ role can\'t do that.');
         if (String(d.name || '').trim().length < 2) throw new Error('Type the business name that sells Riyeser.');
         entity = { name: d.name.trim(), address: (d.address || '').trim(), tax_label: (d.tax_label || '').trim() || 'ABN', tax_number: (d.tax_number || '').trim(), email: (d.email || '').trim(),
@@ -901,13 +943,14 @@
   async function overview() {
     main('<p class="muted">Loading…</p>');
     const soft = (p) => p.catch((e) => (missing(e) ? { missing: true } : null));
-    const [o, wq, a, ho, off] = await Promise.all([api.overview().catch(() => null), soft(api.workQueue()), soft(api.attention()), soft(api.handover()),
-      api.linkOffline ? api.linkOffline().catch(() => undefined) : undefined]);
+    const [o, wq, a, ho, off, pr] = await Promise.all([api.overview().catch(() => null), soft(api.workQueue()), soft(api.attention()), soft(api.handover()),
+      api.linkOffline ? api.linkOffline().catch(() => undefined) : undefined, can('licences.view') && api.paymentsReceived ? api.paymentsReceived(7).catch(() => null) : null]);
     const cn = (wq && !wq.missing && wq.counts) || {}; const q = (wq && !wq.missing && wq.queue) || [];
     const wk = o ? (o.signups_by_week || []).map((w) => ({ ...w, label: new Date(w.week).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) })) : [];
     const m = main(`<h2>Operations overview</h2><p class="sub">Good to see you, ${esc(String(S.me.name || '').split(' ')[0])}. Account information only: HQ never sees customers' messages or books.</p>
       <div class="ops"><div class="opsl">
         <div class="ccards">${card('👤', 'blue', 'New signups', num(cn.new_signups ?? (o && o.companies_7d)), 'this week')}${card('💳', 'red', 'Failed payments', cn.failed_payments == null ? '—' : num(cn.failed_payments), 'PayPal, in their grace period')}
+          ${pr ? `<a class="ccard click" id="payRecv" href="#/payments" title="Open Invoices &amp; payments"><span class="cic green" aria-hidden="true">💵</span><div><div class="k">Payments received</div><div class="v">${money(pr.total)}</div><div class="d">${num(pr.count)} payment${Number(pr.count) === 1 ? '' : 's'} in the last 7 days</div></div></a>` : ''}
           ${card('🔄', 'green', 'Renewals due', cn.renewals_due == null ? '—' : num(cn.renewals_due), 'trials and paid, next 7 days')}${card('⚠️', 'amber', 'Open complaints', cn.open_complaints == null ? '—' : num(cn.open_complaints), 'open support tickets')}</div>
         <div class="card" id="queueCard"><h3>Needs attention <small>· ${q.length ? `${q.length} item${q.length === 1 ? '' : 's'} for you` : 'nothing waiting'}</small></h3>
           ${wq && wq.missing ? '<p class="muted small">Run the latest <b>team-chat.sql</b> in Supabase (SQL Editor) to switch on the work queue.</p>'
@@ -1032,17 +1075,75 @@
   // ------------------------------------------------------------------ Invoices & payments: PayPal, bank transfers, the Billing entity
   const ORDER_ST = { pending: ['Waiting', 'warn'], active: ['Active', 'ok'], paid: ['Paid', 'ok'], payment_failed: ['Payment failed', 'bad'], suspended: ['Payments stopped', 'bad'], cancelled: ['Cancelled', ''], void: ['Cancelled', ''] };
   const orderPill = (o) => { const [l, c] = ORDER_ST[o.status] || [o.status, '']; return `<span class="pill ${c}">${esc(l)}</span>`; };
-  const orderWhat = (o) => `${(o.module_names || o.modules || []).join(', ')} · ${o.people} people · ${o.billing}`;
+  const people = (n) => `${n} ${Number(n) === 1 ? 'person' : 'people'}`;
+  const orderWhat = (o) => `${(o.module_names || o.modules || []).join(', ')} · ${people(o.people)} · ${o.billing}`;
+  // "22 Feb – 22 Mar 2027"
+  const dayRange = (a, b) => { if (!a || !b) return ''; const A = new Date(a + 'T00:00:00'); const Bd = new Date(b + 'T00:00:00');
+    return `${A.toLocaleDateString(undefined, A.getFullYear() === Bd.getFullYear() ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' })} – ${day(b)}`; };
+  const perWord = (o) => (o.billing === 'yearly' ? 'a year' : 'a month');
+  // "US$52 (early bird) · then US$104 a month"
+  const orderAmount = (o) => (o.first_amount != null && Number(o.first_amount) < Number(o.amount)
+    ? `<span class="nowrap">${money(o.first_amount)} (early bird)</span><small>then ${money(o.amount)} ${perWord(o)}</small>` : `${money(o.total)}<small>${perWord(o)}</small>`);
+  // An invoice or receipt number: it opens the customer's copy (when the database has kept one).
+  const docRef = (ref, doc, extra) => { if (!ref) return '<span class="code">—</span>'; if (!doc) return `<span class="code">${esc(ref)}</span>`;
+    S.docs = S.docs || {}; S.docs[ref] = { doc, ...extra }; return `<button class="lnk doc" data-doc="${esc(ref)}" title="Open the customer's copy">${esc(ref)}</button>`; };
   const ordersTable = (list, id, biz, mark) => `<table class="tbl" id="${id}"><tr>${biz ? '<th>Business</th>' : ''}<th>Invoice</th><th>What</th><th>Amount</th><th>How</th><th>State</th>${mark ? '<th></th>' : ''}</tr>
-    ${list.map((o) => `<tr>${biz ? `<td><button class="lnk" data-goco="${esc(o.workspace_id)}" data-cptab="money"><b>${esc(o.business || '')}</b></button></td>` : ''}<td class="code">${esc(o.ref)}<small>${day(o.created_at)}</small></td>
-      <td>${esc(orderWhat(o))}</td><td class="nowrap">${money(o.total)}${o.first_amount != null && o.method === 'paypal' ? `<small>then ${money(o.amount)}</small>` : ''}</td>
+    ${list.map((o) => `<tr>${biz ? `<td><button class="lnk" data-goco="${esc(o.workspace_id)}" data-cptab="money"><b>${esc(o.business || '')}</b></button></td>` : ''}<td class="nowrap">${docRef(o.ref, o.doc, { ws: o.workspace_id, paid: o.status === 'paid', paidAt: o.paid_at })}<small>${day(o.created_at)}</small></td>
+      <td>${esc(orderWhat(o))}</td><td>${orderAmount(o)}</td>
       <td>${o.method === 'paypal' ? `PayPal${o.paypal_id ? `<small class="code">${esc(o.paypal_id)}</small>` : ''}` : 'Bank transfer'}</td>
       <td>${orderPill(o)}<small>${o.status === 'pending' && o.due_date ? `due ${day(o.due_date)}` : o.status === 'payment_failed' && o.grace_until ? `works until ${day(o.grace_until)}` : o.paid_through ? `paid to ${day(o.paid_through)}` : ''}${o.paid_reference ? ` · ref ${esc(o.paid_reference)}` : ''}${o.marked_paid_by ? ` · by ${esc(o.marked_paid_by)}` : ''}</small></td>
       ${mark ? `<td>${o.method === 'bank' && o.status === 'pending' ? `<button class="btn sm p" data-markpaid="${esc(o.ref)}" data-amount="${esc(o.total)}">Mark bank transfer paid</button>` : ''}</td>` : ''}</tr>`).join('')}</table>`;
-  const paysTable = (list, id, biz) => `<table class="tbl" id="${id}"><tr><th>When</th>${biz ? '<th>Business</th>' : ''}<th>Receipt</th><th>Amount</th><th>How</th><th>State</th></tr>
-    ${list.map((p) => `<tr><td>${day(p.at)}</td>${biz ? `<td><button class="lnk" data-goco="${esc(p.workspace_id)}" data-cptab="money">${esc(p.business || '')}</button></td>` : ''}<td class="code">${esc(p.ref || '—')}<small>${esc(p.order_ref || '')}</small></td>
+  // What a payment was for: "Accounting Basics, Payroll · 3 people · monthly · 22 Feb – 22 Mar 2027"
+  const payFor = (p) => [(p.module_names || []).join(', '), p.people ? people(p.people) : '', p.billing || '', dayRange(p.period_from, p.period_to)].filter(Boolean).join(' · ');
+  const paysTable = (list, id, biz) => `<table class="tbl" id="${id}"><tr><th>When</th>${biz ? '<th>Business</th>' : ''}<th>Receipt</th><th>For</th><th>Amount</th><th>How</th><th>State</th></tr>
+    ${list.map((p) => `<tr><td class="nowrap">${day(p.at)}</td>${biz ? `<td><button class="lnk" data-goco="${esc(p.workspace_id)}" data-cptab="money">${esc(p.business || '')}</button></td>` : ''}<td class="nowrap">${docRef(p.ref, p.doc, { ws: p.workspace_id })}<small class="code">${esc(p.order_ref || '')}</small></td>
+      <td class="forc">${esc(payFor(p))}</td>
       <td>${p.amount != null ? money(p.amount) : ''}</td><td>${p.method === 'paypal' ? 'PayPal' : 'Bank transfer'}${p.provider_ref ? `<small class="code">${esc(p.provider_ref)}</small>` : ''}</td>
       <td>${p.status === 'completed' ? '<span class="pill ok">Paid</span>' : `<span class="pill bad">Failed</span>${p.note ? `<small>${esc(p.note)}</small>` : ''}`}</td></tr>`).join('')}</table>`;
+  // The customer's copy of an invoice or receipt, exactly as they see it, with Print / Save as PDF and Resend.
+  function docView(ref) {
+    const x = (S.docs || {})[ref]; if (!x) return; const d = x.doc; const R = window.RiyeserBillDoc;
+    dlg(`<div class="printdoc" id="printdoc">${R ? R.html(d, { paid: x.paid, paidAt: x.paidAt }) : '<p>Couldn\'t load the document view.</p>'}</div>
+      <p class="muted small noprint" style="margin:10px 0 0">The customer's copy, kept exactly as issued on ${day(d.issued_at)}. The owner sees the same under Billing on their Riyeser home.</p>
+      <div class="mfoot noprint docacts"><button type="button" class="btn" data-close>Close</button><button type="button" class="btn" id="docResend">✉️ Resend to customer</button>
+        <button type="button" class="btn" id="docOther">Send to a different email…</button><button type="button" class="btn p" id="docPrint">🖨 Print or save as PDF</button></div>`, (m) => {
+      m.classList.add('printing'); m.querySelector('.mcard').classList.add('paper');
+      m.querySelector('#docPrint').onclick = () => { const t = document.title; document.title = `${d.kind === 'receipt' ? 'Receipt' : 'Invoice'} ${d.ref}`; window.print(); document.title = t; };
+      m.querySelector('#docResend').onclick = () => resendDoc(ref, x.ws);
+      m.querySelector('#docOther').onclick = () => resendOther(ref, x.ws);
+    });
+  }
+  const knownContacts = (ws) => { const c = S.cp; return c && (c.profile.id || S.cpId) === ws && c.extra && c.extra.billing && c.extra.billing.contacts ? c.extra.billing.contacts : null; };
+  function resendDoc(ref, ws) {
+    const to = knownContacts(ws);
+    dlg(`<h3>✉️ Resend ${esc(ref)}</h3><p class="small">It goes to ${to && to.length ? to.map((a) => `<b>${esc(a)}</b>`).join(', ') : 'the business\'s billing emails (the owner and the business\'s email)'}, with a link to view and print it.</p>
+      <p class="muted small">It's recorded in the HQ history: who sent it, where to, and when.</p><div id="rserr"></div>
+      <div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button type="button" class="btn p" id="rsGo">Send it</button></div>`, (d, close) => {
+      d.querySelector('#rsGo').onclick = async (e) => { e.target.disabled = true;
+        try { const r = await api.resendDoc(ref, null, false); close(); flash(`${r.ref} sent to ${r.to.join(', ')}.`); }
+        catch (err) { e.target.disabled = false; d.querySelector('#rserr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+    });
+  }
+  function resendOther(ref, ws) {
+    const canFix = can('customers.edit', 'licences.manage');
+    dlg(`<h3>Send ${esc(ref)} to a different email</h3><p class="muted small">For when the customer's email is wrong or they want a copy somewhere else.</p>
+      <form id="rsf"><div id="rsStep1"><label class="f"><span>Email address</span><input type="email" name="to" required maxlength="120" placeholder="accounts@business.com" autocomplete="off"></label>
+        ${canFix ? '<label class="opt"><input type="checkbox" name="fix"> Also make this the business\'s billing email (for future invoices and receipts)</label>' : ''}</div>
+      <div id="rsStep2" hidden><div class="impact" id="rsCheck"></div></div><div id="rserr"></div>
+      <div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button type="button" class="btn" id="rsBack" hidden>Change it</button><button class="btn p" id="rsGo">Next</button></div></form>`, (d, close) => {
+      const f = d.querySelector('#rsf'); let sure = false;
+      d.querySelector('#rsBack').onclick = () => { sure = false; d.querySelector('#rsStep1').hidden = false; d.querySelector('#rsStep2').hidden = true; d.querySelector('#rsBack').hidden = true; d.querySelector('#rsGo').textContent = 'Next'; };
+      f.onsubmit = async (e) => { e.preventDefault(); const to = String(f.to.value).trim(); const fix = !!(f.fix && f.fix.checked);
+        if (!sure) { sure = true; d.querySelector('#rsStep1').hidden = true; d.querySelector('#rsStep2').hidden = false; d.querySelector('#rsBack').hidden = false;
+          d.querySelector('#rsCheck').innerHTML = `<div>Send <b>${esc(ref)}</b> to <b id="rsAddr">${esc(to)}</b>?</div>${fix ? '<div>This also becomes the business\'s billing email.</div>' : ''}<div class="muted small">Check the address carefully: it's recorded in the HQ history.</div>`;
+          d.querySelector('#rsGo').textContent = 'Yes, send it'; return; }
+        const btn = d.querySelector('#rsGo'); btn.disabled = true;
+        try { const r = await api.resendDoc(ref, to, fix); close(); document.querySelectorAll('.modal.printing').forEach((x) => x.remove());
+          if (r.contact_updated && S.cp && document.getElementById('cpBody')) await reloadCompany();
+          flash(`${r.ref} sent to ${r.to.join(', ')}.${r.contact_updated ? ' The business\'s billing email is updated.' : ''}`); }
+        catch (err) { btn.disabled = false; d.querySelector('#rserr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+    });
+  }
   function markPaidDlg(ref, amount, after) {
     dlg(`<h3>Mark bank transfer paid</h3><p class="muted small">Only when the money is in Riyeser's bank account. This switches the programs on straight away, emails the owner a receipt, and goes in the HQ history.</p>
       <form id="mp"><label class="f"><span>Invoice</span><input name="ref" value="${esc(ref)}" readonly></label>
@@ -1084,6 +1185,7 @@
       <div class="card scroll" id="paysCard"><h3>Payments</h3>${b.payments.length ? paysTable(b.payments, 'paysTbl', true) : '<p class="muted small">No payments yet.</p>'}</div>
       ${entityCard(b)}`);
     m.querySelectorAll('[data-markpaid]').forEach((x) => x.onclick = () => markPaidDlg(x.dataset.markpaid, x.dataset.amount, payments));
+    m.querySelectorAll('[data-doc]').forEach((x) => x.onclick = () => docView(x.dataset.doc));
     const ef = m.querySelector('#entf'); if (ef && b.can_edit_entity) ef.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(ef); const d = { bank: {} };
       for (const [k, v] of f.entries()) { if (k.startsWith('bank.')) d.bank[k.slice(5)] = String(v); else d[k] = String(v); }
       try { await api.setBillingEntity(d); flash('Billing entity saved. New invoices use it.'); payments(); } catch (err) { flash(plain(err)); } };
@@ -1205,7 +1307,7 @@
   }
 
   function closePanel() { document.querySelectorAll('.modal').forEach((x) => x.remove()); }
-  const HIST_ACTS = { 'billing.bank_paid': 'marked a bank transfer paid', 'billing.entity_changed': 'changed the billing entity', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link Plus paid-until',
+  const HIST_ACTS = { 'billing.bank_paid': 'marked a bank transfer paid', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'changed the billing entity', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link Plus paid-until',
     'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'licence.storage': 'granted extra file storage', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
     'staff.owner_made': 'made an HQ owner (SQL Editor)', 'ticket.viewed': 'opened a ticket', 'ticket.replied': 'replied to a ticket', 'ticket.note': 'added an internal note',
     'ticket.status': 'changed a ticket\'s status', 'ticket.priority': 'changed a ticket\'s priority', 'ticket.assigned': 'assigned a ticket', 'ticket.escalated': 'escalated a ticket',
@@ -1219,7 +1321,8 @@
     'ticket.started': 'messaged the customer', 'call.logged': 'logged a call', 'note.pinned': 'pinned a note', 'note.unpinned': 'unpinned a note', 'follow_up.done': 'ticked off a follow-up',
     'licence.unlocked': 'unlocked a program', 'licence.paid_until': 'marked a program paid', 'licence.paused': 'paused a program', 'licence.cancelled': 'cancelled a program',
     'customers.exported': 'downloaded the businesses list', 'customer.owner_set': 'set the Riyeser owner', 'handover.added': 'added a handover note', 'handover.done': 'ticked off a handover note' };
-  const histExtra = (h) => { const d = h.details || {}; return [h.ticket || d.ticket, d.refund, d.offer, d.module ? modName(d.module) : null, d.status, d.reason, d.email, d.until, d.role, LEVELS[d.to] ? 'to ' + LEVELS[d.to] : null].filter(Boolean).join(' · '); };
+  const histExtra = (h) => { const d = h.details || {}; return [h.ticket || d.ticket, d.refund, d.offer, d.module ? modName(d.module) : null, d.status, d.reason, d.email, d.until, d.role, LEVELS[d.to] ? 'to ' + LEVELS[d.to] : null,
+    h.action === 'billing.doc_resent' ? [d.ref, Array.isArray(d.to) ? 'to ' + d.to.join(', ') : '', d.contact_updated ? 'billing email updated' : ''].filter(Boolean).join(' ') : null].filter(Boolean).join(' · '); };
 
   // ------------------------------------------------------------------ the customer page (#/company/<id>/<tab>)
   const CPTABS = [['overview', 'Overview'], ['programs', 'Programs'], ['pcs', 'PCs & programs'], ['people', 'People'], ['conversations', 'Conversations'],
@@ -1275,9 +1378,10 @@
   }
   function planSummary(c) {
     const L = c.licence; if (!L) return '';
-    const by = (st) => MODULES.filter(([m]) => L.modules[m].status === st).map(([, n]) => n);
-    const paid = by('active'); const trial = by('trial'); const soon = MODULES.map(([m]) => L.modules[m]).filter((v) => v.status === 'trial').map((v) => v.days_left);
-    return `<div class="cpplan"><b>${paid.length ? `Paid: ${esc(paid.join(', '))}` : 'Nothing paid yet'}</b>${trial.length ? ` · Trial: ${trial.length === 7 ? 'every program' : esc(trial.join(', '))} (${Math.min(...soon)} days left)` : ''}
+    const shown = MODULES.filter(([m]) => showMod(c, m));
+    const by = (st) => shown.filter(([m]) => L.modules[m].status === st).map(([, n]) => n);
+    const paid = by('active'); const trial = by('trial'); const soon = shown.map(([m]) => L.modules[m]).filter((v) => v.status === 'trial').map((v) => v.days_left);
+    return `<div class="cpplan"><b>${paid.length ? `Paid: ${esc(paid.join(', '))}` : 'Nothing paid yet'}</b>${trial.length ? ` · Trial: ${trial.length === shown.length ? 'every program' : esc(trial.join(', '))} (${Math.min(...soon)} days left)` : ''}
       ${c.monthly != null ? ` · <span title="List price estimate until payments are connected">${money(c.monthly)} a month (estimate)</span>` : ''}${L.seats ? ` · ${L.seats.used} people (${L.seats.included} included in each program${L.seats.extra ? `, ${L.seats.extra} extra set` : ''})` : ''}</div>`;
   }
   function drawCompany() {
@@ -1354,7 +1458,7 @@
   const MOD_ICON = { basic: '📗', plus: '📒', payroll: '🧾', pos: '🛒', bookings: '📅', as_built: '🏗️', calls: '📞' };
   function enabledModules(c) {
     const L = c.licence; if (!L) return '';
-    return `<div class="card" id="modsCard"><h3>Enabled modules</h3><div class="mods">${MODULES.map(([m, n]) => { const v = L.modules[m]; const on = !!v.active;
+    return `<div class="card" id="modsCard"><h3>Enabled modules</h3><div class="mods">${MODULES.filter(([m]) => showMod(c, m)).map(([m, n]) => { const v = L.modules[m]; const on = !!v.active;
       return `<button class="mod${on ? ' on' : ''}" data-cpgo="programs"><span class="mic" aria-hidden="true">${MOD_ICON[m]}</span><span><b>${n}</b><small>${v.status === 'active' ? 'Paid' : v.status === 'trial' ? `Trial · ${v.days_left} days` : v.status === 'cancelled' && on ? 'Cancelled, still on' : 'Not active'}</small></span><span class="mck" aria-hidden="true">${on ? '✓' : '–'}</span></button>`; }).join('')}</div></div>`;
   }
   // --- Overview: business details, the contact person, notes, quick actions, follow-ups
@@ -1389,30 +1493,60 @@
   const noteHtml = (n) => `<div class="nt${n.kind === 'call' ? ' call' : ''}">${esc(n.body)}<small>${n.pinned ? '📌 pinned · ' : ''}${n.kind === 'call' ? `📞 ${n.direction === 'in' ? 'They called us' : 'We called them'}${n.contact ? ` · ${esc(n.contact)}` : ''} · ` : ''}${esc(n.by || 'Riyeser')} · ${ago(n.at)}${n.follow_up ? ` · follow up ${n.follow_up_done_at ? '✓ done' : day(n.follow_up)}` : ''}
     ${n.id && can('customers.notes') && n.pinned != null ? ` · <button class="lnk" data-pin="${esc(n.id)}" data-on="${n.pinned ? '' : '1'}">${n.pinned ? 'Unpin' : 'Pin'}</button>` : ''}${n.id && n.follow_up && !n.follow_up_done_at && can('customers.notes') ? ` · <button class="lnk" data-fudone="${esc(n.id)}">Follow-up done</button>` : ''}</small></div>`;
 
-  // --- Programs: one row per program, with one-click actions
+  // --- Programs: a summary of the plan, one tidy row per paid or trial program (Manage opens the actions), free programs folded
+  const untilOf = (v) => (v.status === 'trial' || (v.status === 'ended' && !v.paid_until) ? v.trial_ends : v.paid_until);
+  const pcsText = (n) => (n ? `${n} PC${n === 1 ? '' : 's'}` : 'Not installed');
+  // As Built is hidden on the website: only show it when this business has it paid or installed.
+  const showMod = (c, m) => { if (m !== 'as_built') return true; const v = c.licence.modules[m];
+    return ['active', 'cancelled'].includes(v.status) || !!v.paid_until || (c.pcs || []).some((d) => (d.programs || []).some((x) => x.id === MOD_APP[m])); };
+  // The plan in plain words, from the payments data (never made up): PayPal subscription, bank invoices, or the trial.
+  function planWords(c) {
+    const L = c.licence; const B = (c.extra && c.extra.billing) || {}; const orders = B.orders || []; const out = [];
+    const sub = orders.find((o) => o.method === 'paypal' && ['active', 'payment_failed', 'suspended'].includes(o.status));
+    const per = (o) => (o.billing === 'yearly' ? 'a year' : 'a month');
+    if (sub) {
+      if (sub.status === 'active') out.push(`Paying <b>${money(sub.next_amount != null ? sub.next_amount : sub.amount)} ${per(sub)}</b> by PayPal${sub.next_charge_at ? ` · next charge ${day(sub.next_charge_at)}` : ''}`);
+      else if (sub.status === 'payment_failed') out.push(`<span class="pill bad">PayPal payment failed</span> works until ${day(sub.grace_until || sub.works_until || sub.paid_through)}`);
+      else out.push('<span class="pill bad">PayPal stopped the subscription</span>');
+    }
+    const paidBank = orders.filter((o) => o.method === 'bank' && o.status === 'paid').sort((a, b) => String(b.paid_at || b.created_at).localeCompare(String(a.paid_at || a.created_at)))[0];
+    if (paidBank && !sub) out.push(`Paid <b>${money(paidBank.total)}</b> by bank transfer${paidBank.paid_through ? ` · paid until ${day(paidBank.paid_through)}` : ''}`);
+    orders.filter((o) => o.method === 'bank' && o.status === 'pending').forEach((o) => out.push(`Invoice ${esc(o.ref)} for <b>${money(o.total)}</b> waiting · due ${day(o.due_date)}`));
+    const vals = MODULES.filter(([m]) => showMod(c, m)).map(([m]) => L.modules[m]);
+    if (!out.length) {
+      const paid = vals.filter((v) => v.status === 'active').map((v) => v.paid_until).filter(Boolean).sort();
+      const trials = vals.filter((v) => v.status === 'trial').map((v) => v.trial_ends).filter(Boolean).sort();
+      if (paid.length) out.push(`Paid until <b>${day(paid[0])}</b> <span class="muted">(marked paid in HQ; no online payment)</span>`);
+      else if (trials.length) out.push(`On free trial · ends <b>${day(trials[0])}</b>`);
+      else out.push('No paid programs and no trial running');
+    }
+    return out;
+  }
   function tabPrograms(c) {
     const L = c.licence; if (!L) return '<div class="card"><p class="muted">Your HQ role can\'t see licences.</p></div>';
     const X = c.extra; const open = !c.profile.status || c.profile.status === 'active'; const lim = S.limitDays || 31;
-    const installs = (app) => (c.pcs || []).filter((d) => (d.programs || []).some((x) => x.id === app)).length; const reported = (c.pcs || []).some((d) => d.programs_at);
-    const pcsCell = (app) => (reported ? (installs(app) ? `${installs(app)} PC${installs(app) === 1 ? '' : 's'}` : '<span class="muted">none</span>') : '<span class="muted">—</span>');
+    const pcs = c.pcs || []; const reported = pcs.some((d) => d.programs_at);
+    const installs = (app) => pcs.filter((d) => (d.programs || []).some((x) => x.id === app)).length;
+    const pcsCell = (app) => (reported ? `<span${installs(app) ? '' : ' class="muted"'}>${pcsText(installs(app))}</span>` : '<span class="muted">—</span>');
     const grant = can('offers.grant') && !c.old; const manage = can('licences.manage');
-    const acts = (m, v) => { if (!open) return '';
-      const b = (act, label, extra = '', cls = '') => `<button class="btn sm${cls}" data-q="${act}" data-mod="${m}"${extra}>${label}</button>`; const out = [];
-      if (grant && (trialish(v) || v.status === 'active')) [7, 30, 90].forEach((n) => out.push(b('extend', `+${n} days`, ` data-days="${n}"`, n > lim ? ' over' : '')));
-      if ((grant && trialish(v) && !(v.status === 'trial' && v.days_left >= 30)) || (manage && !trialish(v) && v.status !== 'active')) out.push(b('unlock', 'Unlock now', '', ' p'));
-      if (manage) out.push(b('paid_until', 'Mark paid until…'));
-      if (manage && v.active) out.push(b('pause', 'Pause'));
-      if (manage && (v.status === 'active' || v.status === 'trial')) out.push(b('cancel', 'Cancel'));
-      return out.join(''); };
-    return `<div class="card scroll" id="licCard"><h3>Programs <small>· ${c.monthly != null ? `${money(c.monthly)} a month (list price estimate)` : ''}${grant ? ` · free time up to ${lim} days applies straight away; more goes to Approvals` : ''}</small></h3>
-      <table class="tbl lic"><tr><th>Program</th><th>Status</th><th>Until</th><th>Days left</th><th>Installed on</th>${open && (grant || manage) ? '<th>Actions</th>' : ''}</tr>
-      ${MODULES.map(([m, name]) => { const v = L.modules[m]; const [lbl, cl] = modState(v); const until = v.status === 'trial' || (v.status === 'ended' && !v.paid_until) ? v.trial_ends : v.paid_until;
+    const rows = MODULES.filter(([m]) => showMod(c, m));
+    const vals = rows.map(([m]) => L.modules[m]);
+    const nPaid = vals.filter((v) => v.status === 'active').length; const nTrial = vals.filter((v) => v.status === 'trial').length;
+    const nEnded = vals.filter((v) => ['ended', 'cancelled'].includes(v.status) && !v.active).length;
+    const counts = [`${nPaid} paid`, `${nTrial} on trial`, nEnded ? `${nEnded} ended` : ''].filter(Boolean).join(' · ');
+    const freePcs = reported ? pcs.filter((d) => (d.programs || []).some((x) => FREE_PROGRAMS.some(([a]) => a === x.id))).length : null;
+    return `<div class="card progsum" id="progSum"><div class="psmain"><h3>Plan</h3>${planWords(c).map((l) => `<p class="psline">${l}</p>`).join('')}
+        <p class="pscount" id="progCounts">${counts}</p></div>
+        <div class="psacts">${grant && open && nTrial ? '<button class="btn sm" id="addFree">🎁 Add free time…</button>' : ''}</div></div>
+      <div class="card scroll" id="licCard"><h3>Paid and trial programs</h3>
+      <table class="tbl lic progtbl"><tr><th>Program</th><th>Status</th><th>Until</th><th>Installed on</th>${open && manage ? '<th class="r"></th>' : ''}</tr>
+      ${rows.map(([m, name]) => { const v = L.modules[m]; const [lbl, cl] = modState(v); const until = untilOf(v);
         return `<tr data-mod="${m}"><td><b>${name}</b></td><td><span class="pill${cl ? ' ' + cl : ''}">${lbl}</span>${v.status === 'cancelled' && v.active ? '<small>works until the end</small>' : ''}</td>
-          <td class="nowrap">${until ? day(until) : '<span class="muted">—</span>'}</td><td>${v.active ? daysPill(v.days_left) : '<span class="muted">—</span>'}</td><td>${pcsCell(MOD_APP[m])}</td>
-          ${open && (grant || manage) ? `<td><div class="qbtns">${acts(m, v)}</div></td>` : ''}</tr>`; }).join('')}
-      ${FREE_PROGRAMS.map(([app, name]) => `<tr class="free"><td>${name}</td><td><span class="pill ok">Free</span></td><td><span class="muted">—</span></td><td><span class="muted">—</span></td><td>${pcsCell(app)}</td>${open && (grant || manage) ? '<td></td>' : ''}</tr>`).join('')}</table>
-      ${!reported ? '<p class="muted small">"Installed on" fills in once their PCs run Riyeser Central 1.8.1 or later.</p>' : ''}
-      <p class="muted small">Changes reach the business's PCs the next time Riyeser Central checks in (at start-up and daily).</p></div>
+          <td class="nowrap">${until ? `Until ${day(until)}${v.active && v.days_left != null ? `<small>${v.days_left <= 0 ? 'ends today' : `${num(v.days_left)} day${v.days_left === 1 ? '' : 's'} left`}</small>` : ''}` : '<span class="muted">—</span>'}</td>
+          <td>${pcsCell(MOD_APP[m])}</td>${open && manage ? `<td class="r"><button class="btn sm" data-manage="${m}">Manage</button></td>` : ''}</tr>`; }).join('')}</table>
+      <details class="freeprogs" id="freeProgs"><summary><span class="muted">Free programs:</span> ${FREE_PROGRAMS.map(([, n]) => n).join(', ')}${freePcs != null ? ` · <span class="muted">installed on ${pcsText(freePcs).replace('Not installed', 'no PCs yet')}</span>` : ''}</summary>
+        <table class="tbl"><tr><th>Program</th><th>Installed on</th></tr>${FREE_PROGRAMS.map(([app, name]) => `<tr class="free"><td>${name}</td><td>${pcsCell(app)}</td></tr>`).join('')}</table></details>
+      <p class="muted small progfoot">${!reported ? '"Installed on" fills in once their PCs run Riyeser Central 1.8.1 or later. ' : ''}Changes reach the business's PCs the next time Riyeser Central checks in (at start-up and daily).${grant ? ` Free time up to ${lim} days applies straight away; more goes to Approvals.` : ''}</p></div>
       <div class="card" style="margin-top:14px"><h3>Plan settings</h3><form id="plan" class="grid g3 planf">
         <label class="f"><span>Extra users <small class="muted">(${L.seats.used} people now; ${L.seats.included} included in each program, then US$${PRICE.extra_user} each per program)</small></span><input type="number" min="0" name="users" value="${L.seats.extra}"${manage ? '' : ' disabled'}></label>
         <label class="f"><span>Extra companies</span><input type="number" min="0" name="cos" value="${L.extra_companies}"${manage ? '' : ' disabled'}></label>
@@ -1435,6 +1569,59 @@
   const offersTable = (list) => `<table class="tbl"><tr><th>Offer</th><th>What</th><th>Status</th><th>By</th></tr>
     ${list.map((o) => `<tr><td class="code">${esc(o.ref)}<small>${day(o.created_at)}</small></td><td>${o.days} days · ${esc(o.kind === 'account' ? 'all paid programs' : o.modules.map(modName).join(', '))}<small>${esc(OFFER_KIND[o.kind] || o.kind)} · ${esc((OFFER_WHY.find((w) => w[0] === o.reason_category) || [0, o.reason_category])[1])}: ${esc(o.reason)}</small></td>
       <td>${offerPill(o)}${o.ends_at ? `<small>to ${day(o.ends_at)}</small>` : ''}</td><td>${esc(o.requested_by_name || '')}${o.approved_by_name ? `<small>${o.status === 'declined' ? 'declined' : 'approved'} by ${esc(o.approved_by_name)}</small>` : ''}</td></tr>`).join('')}</table>`;
+  // Manage one program: the actions in one small dialog. Each opens the confirm below (reason, ticket, HQ history).
+  function manageProgram(mod) {
+    const c = S.cp; const v = c.licence.modules[mod]; const name = modName(mod); const lim = S.limitDays || 31; const td = today();
+    const grant = can('offers.grant') && !c.old; const manage = can('licences.manage'); const [lbl, cl] = modState(v); const until = untilOf(v);
+    const base = (v.status === 'active' ? v.paid_until : v.trial_ends) || td; const from = base > td ? base : td;
+    const canExtend = grant && (trialish(v) || v.status === 'active');
+    const canUnlock = (grant && trialish(v) && !(v.status === 'trial' && v.days_left >= 30)) || (manage && !trialish(v) && v.status !== 'active');
+    const row = (title, note, btns) => `<div class="mgrow"><div><b>${title}</b><small>${note}</small></div><div class="mgbtns">${btns}</div></div>`;
+    dlg(`<h3>Manage ${esc(name)}</h3><p class="mgnow"><span class="pill${cl ? ' ' + cl : ''}">${lbl}</span> ${until ? `until <b>${day(until)}</b>` : ''}${v.active && v.days_left != null ? ` <span class="muted">· ${num(v.days_left)} days left</span>` : ''}</p>
+      <div class="mglist" id="mgl">
+      ${canExtend ? row('Add free time', `From ${day(from)}. Up to ${lim} days applies straight away; more goes to Approvals.`,
+        [7, 30, 90].map((n) => `<button class="btn sm${n > lim ? ' over' : ''}" data-q="extend" data-days="${n}">+${n} days</button>`).join('')
+        + `<span class="mgcustom"><span class="muted small">or until</span><input type="date" id="mgDate" min="${plusDays(from, 1)}" aria-label="Free time until"><button class="btn sm" id="mgDateGo">Add to date</button></span>`) : ''}
+      ${canUnlock ? row('Unlock now', trialish(v) ? 'A 30-day free trial from today.' : 'Turns it back on, paid until a date you choose.', '<button class="btn sm p" data-q="unlock">Unlock now</button>') : ''}
+      ${manage ? row('Mark paid until…', 'For when they\'ve paid another way. Unlocks at the next check-in.', '<button class="btn sm" data-q="paid_until">Mark paid until…</button>') : ''}
+      ${manage && v.active ? row('Pause', 'Stops it now. Their books are never touched; unlock it again any time.', '<button class="btn sm" data-q="pause">Pause</button>') : ''}
+      ${manage && (v.status === 'active' || v.status === 'trial') ? row('Cancel / end access', v.status === 'active' ? `Keeps working until ${day(v.paid_until)}, then stops.` : 'The free trial ends now.', '<button class="btn sm danger" data-q="cancel">Cancel…</button>') : ''}
+      </div><div id="mgerr"></div><div class="mfoot"><button type="button" class="btn" data-close>Close</button></div>`, (d, close) => {
+      d.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => { close(); quickAction(mod, b.dataset.q, Number(b.dataset.days) || null); });
+      const go = d.querySelector('#mgDateGo'); if (go) go.onclick = () => { const to = d.querySelector('#mgDate').value;
+        const n = to ? Math.round((new Date(to + 'T00:00:00Z') - new Date(from + 'T00:00:00Z')) / 864e5) : 0;
+        if (n < 1) { d.querySelector('#mgerr').innerHTML = `<div class="err">Choose a date after ${esc(day(from))}.</div>`; return; }
+        close(); quickAction(mod, 'extend', n); };
+    });
+  }
+  // Add free time to several trial programs at once (one free period, through the same 31-day rule and Approvals).
+  function addFreeTime() {
+    const c = S.cp; const L = c.licence; const lim = S.limitDays || 31; const td = today();
+    const trials = MODULES.filter(([m]) => showMod(c, m) && L.modules[m].status === 'trial');
+    dlg(`<h3>🎁 Add free time</h3><p class="muted small">Adds days to each chosen free trial. Up to <b>${lim} days</b> applies straight away; more waits for a supervisor in Approvals. The customer is emailed when it applies; they never see the reason.</p>
+      <form id="aft"><div class="pick">${trials.map(([m, n]) => `<label class="opt"><input type="checkbox" name="m" value="${m}" checked> ${n} <small class="muted">until ${day(L.modules[m].trial_ends)}</small></label>`).join('')}</div>
+      <div class="chips daychips" role="radiogroup" aria-label="How long">${[7, 30, 90].map((n) => `<label class="chip"><input type="radio" name="days" value="${n}"${n === 30 ? ' checked' : ''}> +${n} days</label>`).join('')}
+        <label class="chip"><input type="radio" name="days" value="custom"> Other <input type="number" name="custom" min="1" max="1000" value="14" aria-label="Number of days"> days</label></div>
+      <div class="impact" id="aftImpact"></div>
+      <div class="grid g2"><label class="f"><span>Reason</span><select name="why">${OFFER_WHY.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+      <label class="f"><span>Ticket number <small class="muted">(optional)</small></span><input name="ticket" placeholder="T-10234" maxlength="20"></label></div>
+      <label class="f"><span>Note <small class="muted">(required, staff only: it goes in the HQ history for good, so no personal details)</small></span><input name="reason" required minlength="4" maxlength="300"></label>
+      <div id="afterr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p" id="aftGo">Add free time</button></div></form>`, (d, close) => {
+      const f = d.querySelector('#aft');
+      const days = () => { const x = f.querySelector('[name=days]:checked').value; return x === 'custom' ? Math.max(0, parseInt(f.custom.value, 10) || 0) : Number(x); };
+      const sync = () => { const n = days(); const chosen = [...f.querySelectorAll('[name=m]:checked')].map((x) => x.value);
+        d.querySelector('#aftImpact').innerHTML = chosen.length && n ? `${chosen.map((m) => { const te = L.modules[m].trial_ends; const b = te > td ? te : td; return `<div><b>${esc(modName(m))}</b> will run until <b>${day(plusDays(b, n))}</b></div>`; }).join('')}
+          ${n > lim ? `<div class="warnline">${n} days is over the ${lim}-day limit, so it goes to Approvals first.</div>` : ''}` : '<div class="muted">Choose at least one program and a number of days.</div>';
+        d.querySelector('#aftGo').textContent = n > lim ? 'Ask for approval' : 'Add free time'; };
+      f.oninput = sync; f.onchange = sync; sync();
+      f.onsubmit = async (e) => { e.preventDefault(); const fd = new FormData(f); const mods = fd.getAll('m').map(String); const n = days();
+        if (!mods.length || !n) { d.querySelector('#afterr').innerHTML = '<div class="err">Choose at least one program and a number of days.</div>'; return; }
+        try { const r = await api.grantOffer(c.profile.id || S.cpId, { kind: 'trial', modules: mods, amount: n, unit: 'days', why: String(fd.get('why')), reason: String(fd.get('reason')).trim(), ticket: String(fd.get('ticket') || '').trim() });
+          close(); await reloadCompany(); badges();
+          flash(r.status === 'applied' ? `${r.ref}: ${r.days} free days applied to ${mods.length} program${mods.length === 1 ? '' : 's'}.` : `${r.ref}: ${r.days} days is over the ${r.limit}-day limit, so it's waiting for a supervisor in Approvals.`);
+        } catch (err) { d.querySelector('#afterr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+    });
+  }
   // The small confirm for a one-click action: what it does, a reason (category and note) and an optional ticket.
   function quickAction(mod, act, days) {
     const c = S.cp; const v = c.licence.modules[mod]; const name = modName(mod); const lim = S.limitDays || 31; const td = today();
@@ -1448,8 +1635,14 @@
       : act === 'pause' ? 'Stops it now. The books on their PCs are never touched, and you can unlock it again any time.'
       : v.status === 'active' ? `It keeps working until <b>${day(v.paid_until)}</b>, then stops.` : 'The free trial ends now.';
     const why = paidish ? QWHY_PAID : OFFER_WHY;
+    // What the customer will see happen (the service impact), in one plain line.
+    const impact = act === 'extend' ? `${name} will run until <b>${day(plusDays(from, days))}</b>${days > lim ? ' (once approved)' : ''}.`
+      : act === 'unlock' ? (paidish ? `${name} switches on at the next check-in.` : `${name} will run until <b>${day(plusDays(td, 30))}</b>.`)
+      : act === 'paid_until' ? `${name} will run until the date below.`
+      : act === 'pause' ? `${name} will stop today (${day(td)}).`
+      : v.status === 'active' ? `${name} will stop on <b>${day(v.paid_until)}</b>.` : `${name} will stop today (${day(td)}).`;
     const dateField = act === 'paid_until' || (act === 'unlock' && paidish) ? `<label class="f"><span>Paid until</span><input type="date" name="until" required min="${td}" value="${act === 'unlock' ? plusDays(td, 30) : v.paid_until && v.paid_until >= td ? plusDays(v.paid_until, 30) : plusDays(td, 30)}"></label>` : '';
-    dlg(`<h3>${title}</h3><p class="muted small">${intro}</p><form id="qa">${dateField}
+    dlg(`<h3>${title}</h3><p class="muted small">${intro}</p><div class="impact" id="qaImpact">${impact}</div><form id="qa">${dateField}
       <div class="grid g2"><label class="f"><span>Reason</span><select name="why">${why.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
       <label class="f"><span>Ticket number <small class="muted">(optional)</small></span><input name="ticket" placeholder="T-10234" maxlength="20"></label></div>
       <label class="f"><span>Note <small class="muted">(required, staff only: it goes in the HQ history for good, so no personal details)</small></span><input name="reason" required minlength="4" maxlength="300"></label>
@@ -1543,12 +1736,14 @@
     el.querySelectorAll('[data-gotab]').forEach((b) => b.onclick = () => go('#/' + b.dataset.gotab));
     el.querySelectorAll('[data-markpaid]').forEach((b) => b.onclick = () => markPaidDlg(b.dataset.markpaid, b.dataset.amount, reloadCompany));
     el.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => quickAction(b.dataset.mod, b.dataset.q, Number(b.dataset.days) || null));
+    el.querySelectorAll('[data-manage]').forEach((b) => b.onclick = () => manageProgram(b.dataset.manage));
+    el.querySelectorAll('[data-doc]').forEach((b) => b.onclick = () => docView(b.dataset.doc));
     el.querySelectorAll('[data-tk]').forEach((r) => r.onclick = () => { S.ticket = r.dataset.tk; go('#/support'); });
     el.querySelectorAll('[data-pin]').forEach((b) => b.onclick = async () => { try { await api.notePin(Number(b.dataset.pin), !!b.dataset.on); await reloadCompany(); } catch (err) { alert(plain(err)); } });
     el.querySelectorAll('[data-fudone]').forEach((b) => b.onclick = async (e) => { e.stopPropagation(); try { await api.followUpDone(Number(b.dataset.fudone)); flash('Follow-up ticked off.'); await reloadCompany(); } catch (err) { alert(plain(err)); } });
     el.querySelectorAll('[data-msgto]').forEach((b) => b.onclick = () => messageCustomer(b.dataset.msgto));
     const on = (sel, fn) => { const x = el.querySelector(sel); if (x) x.onclick = fn; };
-    on('#cvMsg', () => messageCustomer()); on('#cvCall', logCall); on('#cvNote', () => addNote());
+    on('#cvMsg', () => messageCustomer()); on('#cvCall', logCall); on('#cvNote', () => addNote()); on('#addFree', addFreeTime);
     const nf = el.querySelector('#nf'); if (nf) nf.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(nf);
       try { await api.noteAdd(id, { kind: 'note', body: String(f.get('body')).trim(), pinned: !!f.get('pin'), follow_up: String(f.get('fu') || '') || null }); await reloadCompany(); } catch (err) { alert(plain(err)); } };
     on('#grantStor', () => dlg(`<h3>Grant extra storage</h3><p class="muted small">The total extra GB on top of 2 GB (or 20 GB with Link Plus). It's in the HQ history.</p>

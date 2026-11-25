@@ -2567,6 +2567,79 @@ do $$ begin
   begin update public.billing_entities set details = '{}'; raise exception 'edited an entity';
   exception when others then assert sqlerrm like 'Rows in billing_entities%', sqlerrm; end;
 end $$;
+
+-- ---- the customer's copy of every invoice and receipt: kept as issued; the owner and HQ only; send it again
+reset role;
+do $$ declare a uuid := current_setting('pay.a')::uuid; d jsonb; n int; begin
+  select doc into d from public.billing_documents where ref = current_setting('pay.inv1');
+  assert d ->> 'kind' = 'invoice' and d -> 'buyer' ->> 'name' = 'Pay Co' and d -> 'buyer' -> 'contact' ->> 'name' = 'Lisi'
+     and d -> 'buyer' -> 'contact' ->> 'email' = 'lisi@pay.test', 'invoice copy: the business and its contact';
+  assert (d ->> 'total')::numeric = 46 and jsonb_array_length(d -> 'lines') = 3 and d -> 'seller' ->> 'name' = 'Riyeser'
+     and d ->> 'what' = 'Accounting Plus, Payroll · 5 people · monthly', 'invoice copy: lines (2 programs + early bird), total, seller';
+  assert (select sum((x ->> 'amount')::numeric) from jsonb_array_elements(d -> 'lines') x) = 46, 'the lines add up';
+  select doc into d from public.billing_documents where kind = 'receipt' and workspace_id = a and doc ->> 'method' = 'bank';
+  assert (d ->> 'total')::numeric = 46 and d ->> 'order_ref' = current_setting('pay.inv1') and d ->> 'period_to' is not null
+     and d -> 'lines' -> 0 ->> 'text' like '%(early bird)', 'bank receipt copy: amount, invoice, period';
+  assert exists (select 1 from public.email_outbox where workspace_id = a and template = 'billing_paid' and to_address = 'lisi@pay.test'
+     and body_text like '%Receipt: ' || (d ->> 'ref') || '%' and body_text like '%US$46.00%' and body_text like '%Accounting Plus, Payroll%'
+     and body_text like '%riyeser.com/link/?receipt=' || (d ->> 'ref') || '%'), 'receipt email: number, amount, what, link';
+  select count(*) into n from public.billing_documents where workspace_id = a and kind = 'receipt' and doc ->> 'method' = 'paypal';
+  assert n = 2, 'a copy for each PayPal payment (not for failed or mismatched ones): ' || n;
+  assert (select count(*) from public.email_outbox where workspace_id = a and template = 'billing_paid') = 3, 'every payment is emailed';
+  assert exists (select 1 from public.billing_documents where workspace_id = a and doc ->> 'method_ref' = '…E-0001'), 'PayPal id masked on the receipt';
+  -- details change later: the copies don't
+  update public.workspaces set name = 'Pay Co Renamed', email = 'accounts@payco.test' where id = a;
+  assert (select doc -> 'buyer' ->> 'name' from public.billing_documents where ref = current_setting('pay.inv1')) = 'Pay Co', 'the copy keeps the old name';
+  begin update public.billing_documents set doc = '{}' where workspace_id = a; raise exception 'edited a receipt';
+  exception when others then assert sqlerrm like 'Invoices and receipts are kept exactly as issued%', sqlerrm; end;
+  begin delete from public.billing_documents where workspace_id = a; raise exception 'deleted a receipt';
+  exception when others then assert sqlerrm like 'Invoices and receipts are kept exactly as issued%', sqlerrm; end;
+  assert public.billing_contacts(a) @> array['lisi@pay.test', 'accounts@payco.test'] and cardinality(public.billing_contacts(a)) = 2, 'billing emails: owner + business email';
+end $$;
+set role authenticated;
+select pg_temp.as_user_password_only('b1b1b1b1-0000-4000-8000-000000000001');
+do $$ declare b json := public.my_billing(current_setting('pay.a')::uuid); begin
+  assert (select x -> 'doc' ->> 'ref' from json_array_elements(b -> 'orders') x where x ->> 'ref' = current_setting('pay.inv1')) = current_setting('pay.inv1'), 'the owner has the invoice copy';
+  assert (select count(*) from json_array_elements(b -> 'payments') x where x -> 'doc' ->> 'kind' = 'receipt') = 3, 'and each receipt copy';
+  begin perform count(*) from public.billing_documents; raise exception 'read documents';
+  exception when insufficient_privilege then null; end;
+  begin perform public.hq_billing_resend(current_setting('pay.inv1'), null, false); raise exception 'customer resent';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+  begin perform public.hq_payments_received(7); raise exception 'customer saw payments';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+end $$;
+-- HQ sales (licences.view, not customers.edit) can send it again, but not change the business's email
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
+do $$ declare a uuid := current_setting('pay.a')::uuid; r json; p json; begin
+  r := public.hq_billing_resend(current_setting('pay.inv1'), null, false);
+  assert json_array_length(r -> 'to') = 2, 'resent to the owner and the business email';
+  r := public.hq_billing_resend(lower(current_setting('pay.inv1')), ' Right@PayCo.test ', false);
+  assert r -> 'to' ->> 0 = 'right@payco.test' and not (r ->> 'contact_updated')::boolean, 'resent to another address';
+  begin perform public.hq_billing_resend(current_setting('pay.inv1'), 'not-an-email', false); raise exception 'bad email';
+  exception when others then assert sqlerrm like 'Check the email address%', sqlerrm; end;
+  begin perform public.hq_billing_resend(current_setting('pay.inv1'), 'x@payco.test', true); raise exception 'sales changed the email';
+  exception when others then assert sqlerrm like 'Your HQ role can''t%', sqlerrm; end;
+  begin perform public.hq_billing_resend('RR-0', null, false); raise exception 'no such doc';
+  exception when others then assert sqlerrm like 'There''s no invoice or receipt%', sqlerrm; end;
+  p := public.hq_payments_received(7);
+  assert (p ->> 'count')::int = 3 and (p ->> 'total')::numeric = 92 and (p ->> 'days')::int = 7, 'payments received in 7 days: 3, US$92';
+  assert (select count(*) from json_array_elements(public.hq_company_billing(a) -> 'payments') x where x -> 'doc' ->> 'kind' = 'receipt') = 3, 'HQ sees the copies';
+end $$;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');
+do $$ declare a uuid := current_setting('pay.a')::uuid; begin
+  perform public.hq_billing_resend(current_setting('pay.inv1'), 'fixed@payco.test', true);
+end $$;
+reset role;
+do $$ declare a uuid := current_setting('pay.a')::uuid; begin
+  assert (select email from public.workspaces where id = a) = 'fixed@payco.test', 'finance (licences.manage) fixed the business email';
+  assert (select count(*) from public.email_outbox where workspace_id = a and template = 'billing_resend') = 4, 'each resend queued';
+  assert exists (select 1 from public.email_outbox where workspace_id = a and template = 'billing_resend' and to_address = 'right@payco.test'
+     and subject = 'Your Riyeser invoice ' || current_setting('pay.inv1') and body_text like '%?invoice=' || current_setting('pay.inv1') || '%'), 'the invoice email';
+  assert exists (select 1 from public.hq_audit where action = 'billing.doc_resent' and workspace_id = a and actor = 'b1b1b1b1-0000-4000-8000-000000000006'
+     and details -> 'to' ->> 0 = 'ri…@payco.test' and (details ->> 'other_address')::boolean), 'in the HQ history: who, where (shortened)';
+  assert exists (select 1 from public.hq_audit where action = 'billing.doc_resent' and (details ->> 'contact_updated')::boolean
+     and actor = 'b1b1b1b1-0000-4000-8000-000000000005'), 'the email change is in the history too';
+end $$;
 select 'payments ok' as billing;
 
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)

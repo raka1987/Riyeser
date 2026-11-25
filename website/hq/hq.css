@@ -223,7 +223,10 @@ main { max-width: 1320px; margin: 0; width: 100%; }
 /* Operations overview */
 .ops { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; } .opsl, .opsr { display: grid; gap: 14px; min-width: 0; }
 .opsr { position: sticky; top: 76px; }
-.ccards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ccards { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+.ccards .ccard .v { font-size: clamp(22px, 2vw, 30px); } .ccards .ccard { padding: 14px; gap: 10px; }
+@media (max-width: 1600px) { .ccards .cic { display: none; } }
+a.ccard.click { text-decoration: none; color: inherit; } a.ccard.click:hover { border-color: var(--blue); box-shadow: 0 6px 18px -12px rgba(31, 98, 240, .6); }
 .ccard { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; display: flex; gap: 12px; align-items: flex-start; }
 .ccard .k { font-size: 13px; font-weight: 600; color: var(--ink); } .ccard .v { font-size: 30px; font-weight: 800; color: var(--ink); line-height: 1.1; margin-top: 4px; font-variant-numeric: tabular-nums; } .ccard .d { font-size: 12px; color: var(--muted); }
 .cic { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; font-size: 18px; flex: none; }
@@ -337,3 +340,47 @@ main.wide { max-width: none; }
 .sbar { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; margin-bottom: 8px; }
 .sbar i { display: block; height: 100%; border-radius: inherit; background: var(--blue); }
 .sbar.warn i { background: var(--warn); }
+
+/* the customer page: Programs (plan summary, one tidy row per program, free programs folded) */
+.progsum { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin-bottom: 14px; }
+.progsum .psmain { flex: 1 1 320px; min-width: 0; } .progsum h3 { margin-bottom: 8px; }
+.psline { margin: 0 0 4px; font-size: 15px; color: var(--ink); overflow-wrap: anywhere; } .psline .pill { margin-right: 4px; }
+.pscount { margin: 8px 0 0; font-size: 13.5px; color: var(--muted); font-weight: 600; }
+.psacts { display: flex; gap: 8px; flex-wrap: wrap; }
+.progtbl td { padding: 12px 10px; vertical-align: middle; } .progtbl td small { margin-top: 2px; }
+.tbl th.r, .tbl td.r { text-align: right; width: 1%; white-space: nowrap; }
+.freeprogs { margin-top: 2px; padding-top: 12px; font-size: 14px; }
+.freeprogs summary { cursor: pointer; color: var(--text); list-style-position: inside; } .freeprogs summary::marker { color: var(--muted); }
+.freeprogs .tbl { margin-top: 10px; } .freeprogs .tbl td { color: var(--text); }
+.progfoot { margin: 12px 0 0; }
+.btn.danger { color: var(--bad); border-color: #f3c4c4; } .btn.over { border-style: dashed; }
+.mgnow { margin: 4px 0 12px; font-size: 14px; }
+.mglist { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.mgrow { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 14px; border-top: 1px solid var(--line); }
+.mgrow:first-child { border-top: 0; } .mgrow > div:first-child { flex: 1 1 200px; min-width: 0; }
+.mgrow b { display: block; color: var(--ink); font-size: 14px; } .mgrow small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.mgbtns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mgcustom { display: inline-flex; gap: 6px; align-items: center; } .mgcustom input { padding: 5px 7px; border: 1px solid #cfd6e4; border-radius: 8px; font-size: 13px; }
+.impact { background: var(--blue-l); color: var(--ink); border-radius: 10px; padding: 9px 12px; margin: 8px 0 12px; font-size: 14px; display: grid; gap: 2px; }
+.impact .warnline { color: var(--warn); font-weight: 600; margin-top: 4px; }
+.daychips { margin: 6px 0 4px; } .daychips .chip { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.daychips .chip:has(input:checked) { background: var(--ink); border-color: var(--ink); color: #fff; }
+.daychips input[type=radio] { margin: 0; accent-color: var(--blue); } .daychips input[type=number] { width: 56px; padding: 2px 6px; border: 1px solid #cfd6e4; border-radius: 6px; font-size: 13px; }
+@media (max-width: 640px) {
+  .progtbl tr:first-child { display: none; } .progtbl, .progtbl tbody, .progtbl tr { display: block; }
+  .progtbl tr { border-bottom: 1px solid var(--line); padding: 10px 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .progtbl td { border: 0; padding: 0; } .progtbl td:nth-child(1) { grid-column: 1; } .progtbl td:nth-child(2) { grid-column: 2; text-align: right; }
+  .progtbl td:nth-child(3) { grid-column: 1; } .progtbl td:nth-child(4) { grid-column: 1; } .progtbl td.r { grid-column: 2; grid-row: 2 / span 2; align-self: center; width: auto; }
+  .mgcustom { flex-wrap: wrap; }
+}
+
+/* invoices and receipts: the customer's copy, numbers that open it, Resend */
+.lnk.doc { font-family: ui-monospace, Consolas, monospace; font-weight: 700; letter-spacing: 1px; color: var(--blue); text-align: left; }
+.mcard.paper { max-width: 880px; }
+.tbl td.forc { min-width: 220px; }
+@media print {
+  body > *:not(.modal.printing) { display: none !important; }
+  .modal.printing { position: static !important; background: none !important; padding: 0 !important; display: block !important; }
+  .modal.printing .mcard { box-shadow: none !important; border: 0 !important; max-width: none !important; max-height: none !important; overflow: visible !important; padding: 0 !important; background: #fff !important; }
+  .modal.printing .noprint { display: none !important; }
+}
