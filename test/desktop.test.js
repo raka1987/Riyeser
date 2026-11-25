@@ -56,3 +56,55 @@ test('desktop: backups are made on demand (Super admin only) and are a full copy
   const list = (await call('GET', '/api/staff/backups', null, owner)).data;
   assert.equal(list.desktop, true); assert.ok(list.backups.some(x => x.file === b.data.file)); assert.ok(list.last);
 });
+
+// OWNER-RESTORE: restore is easy to find, works from a fresh-start folder, and nothing is removed on uninstall
+test('OWNER-RESTORE: restore from a backup or a "(before fresh start …)" payroll.db; Settings and first-run buttons; uninstall keeps the records', async () => {
+  const R = require('../desktop/restore');
+  const { DatabaseSync } = require('node:sqlite');
+  const root = path.join(DATA_DIR, 'restore'), appData = path.join(root, 'AppData'), userData = path.join(appData, 'Riyeser Payroll');
+  fs.mkdirSync(path.join(userData, 'payroll'), { recursive: true });
+  const make = (file, staff, run = true) => { fs.mkdirSync(path.dirname(file), { recursive: true }); const d = new DatabaseSync(file);
+    d.exec("PRAGMA journal_mode = WAL; CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT); CREATE TABLE timesheets (id INTEGER PRIMARY KEY); CREATE TABLE settings (key TEXT, value TEXT); CREATE TABLE payroll_runs (id INTEGER PRIMARY KEY); CREATE TABLE pay_history (id INTEGER PRIMARY KEY);");
+    for (const n of staff) d.prepare('INSERT INTO users(name) VALUES(?)').run(n);
+    if (run) d.exec('INSERT INTO payroll_runs DEFAULT VALUES'); return d; };
+  // a fresh start put the records away; the last changes are still in the -wal file, and the files are read-only
+  const older = path.join(appData, 'Riyeser Payroll (before fresh start 2026-11-01 0800)', 'payroll', 'payroll.db');
+  const newer = path.join(appData, 'Riyeser Payroll (before fresh start 2026-11-24 0912)', 'payroll', 'payroll.db');
+  make(older, ['Old Admin', 'Old Staff']).close();
+  const open = make(newer, ['Admin', 'Mere Staff', 'Jone Staff']); // left open: its rows are only in payroll.db-wal
+  for (const f of [newer, newer + '-wal']) if (fs.existsSync(f)) fs.chmodSync(f, 0o444);
+  make(path.join(appData, 'Riyeser Payroll (before fresh start 2026-11-20 1000)', 'payroll', 'payroll.db'), ['Only Admin'], false).close(); // empty payroll: not offered
+  fs.mkdirSync(path.join(appData, 'Riyeser Payroll (before fresh start 2026-11-21 1000)')); // no records: not offered
+  const found = R.freshStartRecords(userData);
+  assert.deepEqual(found.map(f => f.when), ['2026-11-24 0912', '2026-11-01 0800']);
+  assert.equal(found[0].file, newer); assert.equal(R.describe(found[0].sum), '3 staff, 0 shifts, 1 pay runs, 0 weeks of pay history');
+  // the picker accepts that payroll.db: a complete, writable copy with the -wal changes
+  const pending = path.join(userData, 'payroll', 'restore-pending.db');
+  R.payrollCopy(newer, pending, root);
+  const got = new DatabaseSync(pending);
+  assert.deepEqual(got.prepare('SELECT name FROM users ORDER BY id').all().map(r => r.name), ['Admin', 'Mere Staff', 'Jone Staff']);
+  got.prepare("INSERT INTO settings VALUES ('x', 'y')").run(); got.close(); // writable
+  open.close();
+  // a file that isn't payroll records is refused
+  const other = path.join(root, 'other.db'); { const d = new DatabaseSync(other); d.exec('CREATE TABLE notes (t TEXT)'); d.close(); }
+  assert.throws(() => R.payrollCopy(other, pending, root), /isn't payroll records/);
+  // a backup chosen from the Settings list must be a backup file in the backups folder
+  const bk = path.join(root, 'Backups'); make(path.join(bk, 'payroll-manual-2026-11-25-10-00.db'), ['A']).close();
+  assert.equal(R.backupFile(bk, 'payroll-manual-2026-11-25-10-00.db'), path.join(bk, 'payroll-manual-2026-11-25-10-00.db'));
+  for (const bad of ['../payroll.db', 'payroll.db', '..\\payroll-x.db', 'payroll-manual-2026-01-01.db']) assert.throws(() => R.backupFile(bk, bad), new RegExp("isn't one of the backups|isn't in the backups folder"));
+  // the app: the Settings panel has "Restore from a backup…" next to "Back up now" and a Restore button per backup,
+  // with the menu's real name; the first-run screen offers a restore; the program wires them to the same restore
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'public', 'staff.js'), 'utf8'), html = fs.readFileSync(path.join(__dirname, '..', 'public', 'staff.html'), 'utf8');
+  assert.match(ui, /id="bk-now">Back up now<\/button>\$\{canRestore \? '<button class="btn sm ghost" id="bk-restore">Restore from a backup…<\/button>'/);
+  assert.match(ui, /data-restore="\$\{esc\(b\.file\)\}">Restore<\/button>/);
+  assert.match(ui, /menu <b>Payroll → Restore from a backup…<\/b>/); assert.doesNotMatch(ui, /File → Restore/);
+  assert.match(html, /id="setup-restore"[\s\S]*Restore from a backup…/);
+  const main = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'main.js'), 'utf8'), pre = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'preload.js'), 'utf8');
+  assert.match(pre, /restore: name => ipcRenderer\.invoke\('riyser:restore', name\)/);
+  assert.match(main, /ipcMain\.handle\('riyser:restore'/); assert.match(main, /R\.freshStartRecords\(app\.getPath\('userData'\)\)/);
+  assert.match(main, /payroll-before-restore-/); // the current records are backed up before a restore is swapped in
+  // uninstall: the installer keeps the app data, and nothing in the program removes Documents\Riyeser\Payroll\Backups
+  const prep = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'prepare.js'), 'utf8');
+  assert.match(prep, /deleteAppDataOnUninstall: false/); assert.doesNotMatch(prep, /include:|\.nsh/); // no custom uninstall script
+  assert.match(prep, /'main\.js', 'preload\.js', 'restore\.js'/); // restore.js goes in the build
+});

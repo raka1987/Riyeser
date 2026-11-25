@@ -1088,6 +1088,8 @@ $('#login-form').onsubmit = async e => {
   try { await api('/api/auth/login', { body: formData(e.target) }); location.hash = '#/dashboard'; location.reload(); }
   catch (err) { $('#login-err').innerHTML = `<div class="error">${esc(err.message)}</div>`; }
 };
+// OWNER-RESTORE: a new PC or a reinstall starts with no records: bring them back from a backup instead of starting fresh
+if (window.riyser && window.riyser.restore && $('#setup-restore')) { $('#setup-restore').hidden = false; $('#setup-restore button').onclick = () => window.riyser.restore(); }
 $('#setup-form').onsubmit = async e => {
   e.preventDefault();
   const v = formData(e.target);
@@ -1174,12 +1176,16 @@ async function drawBackups() {
   const host = $('#s-backup'); if (!host) return;
   const B = await api('/api/staff/backups');
   if (!B.desktop) { host.remove(); return; }
+  const canRestore = !!(window.riyser && window.riyser.restore);
   host.innerHTML = `<h3>💾 Backups</h3>
     <p class="small muted" style="margin-top:-4px">Your records are kept on this computer. A backup copy is made automatically once a day (the last ${B.keep} are kept). Copy the backups folder to a USB stick or cloud drive now and then, in case this computer is lost or breaks.</p>
     <p class="small">Backups folder: <code style="overflow-wrap:anywhere">${esc(B.folder)}</code><br>Last backup: <b>${B.last ? new Date(B.last).toLocaleString('en-FJ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'not yet'}</b></p>
-    <div class="actions"><button class="btn sm" id="bk-now">Back up now</button></div>
-    ${B.backups.length ? `<details><summary class="small">${B.backups.length} backup${B.backups.length === 1 ? '' : 's'}</summary>${table([{ h: 'File', k: 'file' }, { h: 'Made', f: b => new Date(b.at).toLocaleString('en-FJ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) }, { h: 'Size', f: b => (b.size / 1024).toFixed(0) + ' KB', r: 1 }], B.backups)}</details>` : ''}
-    <p class="small muted">To bring back a backup: menu <b>File → Restore from a backup…</b></p>`;
+    <div class="actions"><button class="btn sm" id="bk-now">Back up now</button>${canRestore ? '<button class="btn sm ghost" id="bk-restore">Restore from a backup…</button>' : ''}</div>
+    ${B.backups.length ? `<details><summary class="small">${B.backups.length} backup${B.backups.length === 1 ? '' : 's'}</summary>${table([{ h: 'File', k: 'file' }, { h: 'Made', f: b => new Date(b.at).toLocaleString('en-FJ', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) }, { h: 'Size', f: b => (b.size / 1024).toFixed(0) + ' KB', r: 1 },
+      ...(canRestore ? [{ h: '', f: b => `<button class="btn sm ghost" data-restore="${esc(b.file)}">Restore</button>` }] : [])], B.backups)}</details>` : ''}
+    <p class="small muted">To bring back a backup: <b>Restore from a backup…</b> here, or the menu <b>Payroll → Restore from a backup…</b>. A copy of the records as they are now is saved first, then Payroll restarts.</p>`;
+  if ($('#bk-restore', host)) $('#bk-restore', host).onclick = () => window.riyser.restore();
+  $$('[data-restore]', host).forEach(b => b.onclick = () => window.riyser.restore(b.dataset.restore));
   $('#bk-now', host).onclick = async () => { try { const r = await api('/api/staff/backups', { body: {} }); toast(`✓ Backed up: ${r.file}`); drawBackups(); } catch (e) { toast(e.message); } };
 }
 

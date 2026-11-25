@@ -47,7 +47,23 @@ and bank detail changes and deletions are kept in an audit trail.
 - **Records:** `%APPDATA%\Riyeser Payroll\payroll\payroll.db`, on the computer only. The first start asks for the owner's login.
 - **Earlier versions:** records from the earlier "Riyser" program are brought in the first time (the old files are kept).
 - **Backups:** a copy every day in `Documents\Riyeser\Payroll\Backups` (the last 30 are kept), plus **Payroll → Back up now** and
-  **Payroll → Restore from a backup…**.
+  **Payroll → Restore from a backup…** (also in **Settings → Backups**, with a **Restore** button on each backup, and on the
+  first-run screen of a new PC or a reinstall). Restoring backs up the current records first, then restarts. It also offers
+  records put away by Central's "Fresh start on this PC" (`%APPDATA%\Riyeser Payroll (before fresh start …)\payroll\payroll.db`).
+- **Uninstalling** never removes the records or `Documents\Riyeser` (the installer is built with `deleteAppDataOnUninstall: false`).
+
+### Where Payroll keeps its files (for backing up everything)
+| What | Path (Windows) |
+|---|---|
+| Records (one SQLite file; copy it with its `-wal` file, or use a backup) | `%APPDATA%\Riyeser Payroll\payroll\payroll.db` |
+| Locked copies from **Start again** and their log | `%APPDATA%\Riyeser Payroll\payroll\archive\` |
+| Demo-mode records | `%APPDATA%\Riyeser Payroll\payroll\demo\payroll.db` |
+| Daily and manual backups (`payroll-daily-….db`, `payroll-manual-….db`, `payroll-before-restore-….db`) | `Documents\Riyeser\Payroll\Backups\` |
+| Payslip PDFs | `Documents\Riyeser\Payroll\Payslips\` |
+| Demo backups and payslips | `Documents\Riyeser\Payroll\Demo\` |
+| Pay runs written for Riyeser Accounting (`riyeser.payrun.v1`) | `Documents\Riyeser\Inbox\Payroll\` |
+
+The Accounting inbox follows `RIYESER_DOCS` when that is set. A backup file can be restored on any PC with **Restore from a backup…**.
 
 ## Before paying staff from it
 Check the PAYE brackets and FNPF rates against the current FRCS and FNPF rules (Settings and Payroll → Payroll rules).

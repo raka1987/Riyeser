@@ -20,7 +20,7 @@ for (const f of ['server.js', 'db.js', 'mailer.js', 'wages.js', 'bank.js', 'desk
   } else console.log('No licence public key: this build accepts unsigned licences (licence signing not switched on yet).');
 }
 fs.cpSync(path.join(ROOT, 'public'), path.join(OUT, 'public'), { recursive: true });
-for (const f of ['main.js', 'preload.js']) fs.copyFileSync(path.join(__dirname, f), path.join(OUT, f));
+for (const f of ['main.js', 'preload.js', 'restore.js']) fs.copyFileSync(path.join(__dirname, f), path.join(OUT, f));
 fs.copyFileSync(path.join(__dirname, 'icon.png'), path.join(OUT, 'icon.png'));
 fs.mkdirSync(path.join(OUT, 'build'), { recursive: true });
 fs.copyFileSync(path.join(__dirname, 'icon.png'), path.join(OUT, 'build', 'icon.png'));

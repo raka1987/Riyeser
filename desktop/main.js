@@ -23,30 +23,9 @@ Object.assign(process.env, { DESKTOP: '1', DATA_DIR: BASE, BACKUP_DIR: BACKUPS, 
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 
 // ---------------------------------------------------------------- records from other files
-// A payroll records file (a backup, or an earlier program's records) copied in as one complete file:
-// changes still in its -wal companion are included, and it must really be a payroll records file.
-const { DatabaseSync } = require('node:sqlite');
-function payrollCopy(src, dest) {
-  const tmp = fs.mkdtempSync(path.join(app.getPath('temp'), 'riyeser-in-'));
-  try {
-    for (const ext of ['', '-wal', '-shm']) if (fs.existsSync(src + ext)) fs.copyFileSync(src + ext, path.join(tmp, 'in.db' + ext));
-    let d; try { d = new DatabaseSync(path.join(tmp, 'in.db')); } catch { throw new Error("That file can't be opened as payroll records."); }
-    try {
-      const t = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('users', 'timesheets', 'settings')").all();
-      if (t.length < 3) throw new Error("That file isn't payroll records. Choose a backup (payroll-….db) or a records file (payroll.db).");
-      fs.rmSync(dest, { force: true });
-      d.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
-    } finally { d.close(); }
-  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
-}
-// what's in a records file, in plain words
-function summary(file) {
-  let d; try { d = new DatabaseSync(file, { readOnly: true }); } catch { return null; }
-  try {
-    const n = q => { try { return d.prepare(q).get().n; } catch { return 0; } };
-    return { staff: n('SELECT COUNT(*) AS n FROM users'), shifts: n('SELECT COUNT(*) AS n FROM timesheets'), runs: n('SELECT COUNT(*) AS n FROM payroll_runs'), history: n('SELECT COUNT(*) AS n FROM pay_history') };
-  } finally { d.close(); }
-}
+// checking, copying and describing records files, and finding records put away by a fresh start: restore.js
+const R = require('./restore');
+const payrollCopy = (src, dest) => R.payrollCopy(src, dest, app.getPath('temp')), summary = R.summary;
 const CUR = path.join(DATA, 'payroll.db');
 // this program's records from before the file was renamed (ark.db) carry on as payroll.db
 { const OLD = path.join(DATA, 'ark.db');
@@ -141,22 +120,45 @@ async function start() {
   menu(web);
 }
 
+// Restore (menu, Settings → Backups, or the first-run screen): pick a records file, see what's in it, then the current
+// records are backed up and the chosen ones are swapped in on restart. `file` is a backup chosen from the Settings list.
+// Records put away by Riyeser Central's fresh start (%APPDATA%\Riyeser Payroll (before fresh start …)) are offered too.
+async function restore(file) {
+  let src = file || null;
+  if (!src) {
+    const fresh = DEMO ? [] : R.freshStartRecords(app.getPath('userData'));
+    if (fresh.length) {
+      const pick = (await dialog.showMessageBox(win, { type: 'question', message: 'Restore payroll records', cancelId: fresh.length + 1,
+        detail: `Records put away by a fresh start were found on this computer:\n${fresh.map(f => `• ${f.when}: ${R.describe(f.sum)}`).join('\n')}`,
+        buttons: [...fresh.map(f => `From before the fresh start on ${f.when}`), 'Choose a backup file…', 'Cancel'] })).response;
+      if (pick < fresh.length) src = fresh[pick].file; else if (pick > fresh.length) return;
+    }
+  }
+  if (!src) {
+    const r = await dialog.showOpenDialog(win, { title: 'Restore payroll from a backup', defaultPath: BACKUPS, properties: ['openFile'],
+      filters: [{ name: 'Payroll records (payroll-….db backups, or payroll.db)', extensions: ['db'] }, { name: 'All files', extensions: ['*'] }] });
+    if (r.canceled || !r.filePaths[0]) return;
+    src = r.filePaths[0];
+  }
+  if (path.resolve(src).toLowerCase() === path.resolve(CUR).toLowerCase()) return dialog.showErrorBox("Can't restore that file", 'That is the records file Payroll is using now. Choose a backup.');
+  const sum = summary(src);
+  const ok = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Restore and restart', 'Cancel'], defaultId: 1, cancelId: 1, message: 'Restore this payroll backup?',
+    detail: `Payroll will go back to how it was in:\n${src}${sum ? `\n(${R.describe(sum)})` : ''}\n\nA copy of the records as they are now is saved in the backups folder first. Riyeser Payroll restarts.` });
+  if (ok.response !== 0) return;
+  try { payrollCopy(src, PENDING); } catch (e) { return dialog.showErrorBox("Can't restore that file", e.message); }
+  app.relaunch(); app.exit(0);
+}
+ipcMain.handle('riyser:restore', async (e, name) => {
+  try { await restore(name ? R.backupFile(BACKUPS, name) : null); return { ok: true }; }
+  catch (err) { dialog.showErrorBox("Can't restore that backup", err.message); return { ok: false }; }
+});
+
 function menu(web) {
   const backupNow = async () => {
     try { const f = web.locals.backup('manual'); await dialog.showMessageBox(win, { type: 'info', message: 'Payroll backed up', detail: `Saved ${f} in\n${BACKUPS}` }); }
     catch (e) { dialog.showErrorBox('Backup failed', e.message); }
   };
-  const restore = async () => {
-    const r = await dialog.showOpenDialog(win, { title: 'Restore payroll from a backup', defaultPath: BACKUPS, properties: ['openFile'],
-      filters: [{ name: 'Payroll backups', extensions: ['db'] }, { name: 'All files', extensions: ['*'] }] });
-    if (r.canceled || !r.filePaths[0]) return;
-    const sum = summary(r.filePaths[0]);
-    const ok = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Restore and restart', 'Cancel'], defaultId: 1, cancelId: 1, message: 'Restore this payroll backup?',
-      detail: `Payroll will go back to how it was in:\n${path.basename(r.filePaths[0])}${sum ? `\n(${sum.staff} staff, ${sum.shifts} shifts, ${sum.runs} pay runs, ${sum.history} weeks of pay history)` : ''}\n\nA copy of the records as they are now is saved in the backups folder first. Riyeser Payroll restarts.` });
-    if (ok.response !== 0) return;
-    try { payrollCopy(r.filePaths[0], PENDING); } catch (e) { return dialog.showErrorBox("Can't restore that file", e.message); }
-    app.relaunch(); app.exit(0);
-  };
+
   const fromEarlier = async () => {
     const found = EARLIER.filter(e => fs.existsSync(e.data));
     if (!found.length) return dialog.showMessageBox(win, { type: 'info', message: 'No records from an earlier version on this computer', detail: `Looked in:\n${EARLIER.map(e => e.data).join('\n')}\n\nIf you have a backup file instead, use Payroll → Restore from a backup… and choose it.` });
@@ -175,7 +177,7 @@ function menu(web) {
     { label: 'Payroll', submenu: [
       { label: 'Back up now', accelerator: 'CmdOrCtrl+B', click: backupNow },
       { label: 'Open the backups folder', click: () => shell.openPath(BACKUPS) },
-      { label: 'Restore from a backup…', click: restore },
+      { label: 'Restore from a backup…', click: () => restore() },
       { label: 'Bring in records from an earlier version…', click: fromEarlier },
       { label: 'Open the payslips folder', click: () => shell.openPath(PAYSLIPS) },
       { type: 'separator' },
