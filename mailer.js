@@ -289,7 +289,9 @@ module.exports = function mailer(app, h) {
   const alreadySent = list => { const q = db.prepare('SELECT at FROM payslip_sent WHERE user_id = ? AND period_start = ? AND period_end = ?');
     return list.map(p => ({ p, r: q.get(p.user_id, p.period_start, p.period_end) })).filter(x => x.r).map(x => ({ user_id: x.p.user_id, name: x.p.employee_name, period_start: x.p.period_start, period_end: x.p.period_end, at: x.r.at })); };
 
-  app.locals.mail = { emailTimesheet, emailPayslips, alreadySent, payslipPdf, timesheetHtml: (from, to, userId, o) => periodTimesheet(from, to, userId, o) };
+  // ready: email is switched on and set up (Settings → Email); send: one email, in the background (forgot.js)
+  const ready = (s = getSettings()) => s.email_enabled === '1' && !!s.smtp_host && isEmail(s.email_from);
+  app.locals.mail = { send, ready, emailTimesheet, emailPayslips, alreadySent, payslipPdf, timesheetHtml: (from, to, userId, o) => periodTimesheet(from, to, userId, o) };
 
   // ---- admin: email settings, test, recent emails
   app.get('/api/staff/email', requireRole('admin'), (req, res) => {

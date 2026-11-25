@@ -1088,6 +1088,92 @@ $('#login-form').onsubmit = async e => {
   try { await api('/api/auth/login', { body: formData(e.target) }); location.hash = '#/dashboard'; location.reload(); }
   catch (err) { $('#login-err').innerHTML = `<div class="error">${esc(err.message)}</div>`; }
 };
+// "Forgot password?" (forgot.js on the server): an emailed code, or the business owner's Riyeser account. In-page only.
+$('#forgot-link').onclick = async e => {
+  e.preventDefault();
+  let o = { email: false, owner_linked: false };
+  try { o = await api('/api/auth/forgot'); } catch { }
+  const m = openModal('<div id="fp"></div>'), box = $('#fp', m.el);
+  const err = (form, x) => { $('.err', form).innerHTML = `<div class="error">${esc(x.message)}</div>`; };
+  const busy = (form, on) => { for (const b of $$('button', form)) b.disabled = on; };
+  const pwFields = `<div class="field"><label>New password (at least 8 characters)</label><input name="password" type="password" autocomplete="new-password" required minlength="8"></div>
+    <div class="field"><label>New password again</label><input name="password2" type="password" autocomplete="new-password" required minlength="8"></div>`;
+  const done = (msg, username) => {
+    box.innerHTML = `<h3>Password changed</h3><div class="success">${esc(msg)}</div><div class="actions" style="margin-top:14px"><button class="btn" id="fp-ok">Back to sign in</button></div>`;
+    $('#fp-ok', box).onclick = () => { m.close(); const f = $('#login-form'); f.username.value = username || ''; f.password.value = ''; $('#login-err').innerHTML = ''; f.password.focus(); };
+  };
+  const start = () => {
+    box.innerHTML = `<h3>Forgot your password?</h3>
+      ${o.email ? `<p class="small muted">Staff with an email address in Payroll can get a reset code by email.</p><button class="btn" id="fp-email" style="width:100%">Email me a reset code</button>` : '<p class="small muted">Email isn\'t set up in Payroll, so reset codes can\'t be emailed.</p>'}
+      <button class="btn ghost" id="fp-owner" style="width:100%;margin-top:10px">I'm the business owner: reset with my Riyeser account</button>
+      <p class="small muted" style="margin-top:14px">Not the owner? Ask your Super admin to set a new password for you (Staff → your name → Reset password).</p>`;
+    if ($('#fp-email', box)) $('#fp-email', box).onclick = emailStep;
+    $('#fp-owner', box).onclick = ownerStep;
+  };
+  // ---- 1. an emailed code
+  const emailStep = () => {
+    box.innerHTML = `<h3>Email me a reset code</h3><form id="fp-f"><div class="err"></div>
+      <div class="field"><label>Your username or email address</label><input name="who" autocomplete="username" autocapitalize="none" required value="${esc($('#login-form').username.value)}"></div>
+      <div class="actions"><button class="btn">Send the code</button><button type="button" class="btn ghost" id="fp-back">Back</button></div></form>`;
+    $('#fp-back', box).onclick = start;
+    $('#fp-f', box).onsubmit = async ev => {
+      ev.preventDefault(); const f = ev.target, who = f.who.value.trim(); busy(f, true);
+      try { const r = await api('/api/auth/forgot/email', { body: { who } }); codeStep(who, r.message); } catch (x) { err(f, x); busy(f, false); }
+    };
+  };
+  const codeStep = (who, msg) => {
+    box.innerHTML = `<h3>Type the code and a new password</h3><div class="success" style="margin-bottom:12px">${esc(msg)}</div><form id="fp-f"><div class="err"></div>
+      <div class="field"><label>6-digit code from the email</label><input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required></div>${pwFields}
+      <div class="actions"><button class="btn">Change my password</button><button type="button" class="btn ghost" id="fp-again">Send a new code</button></div></form>`;
+    $('#fp-again', box).onclick = emailStep;
+    $('#fp-f', box).onsubmit = async ev => {
+      ev.preventDefault(); const f = ev.target; busy(f, true);
+      try { const r = await api('/api/auth/forgot/email/reset', { body: { who, ...formData(f) } }); done(r.message, r.username); } catch (x) { err(f, x); busy(f, false); }
+    };
+  };
+  // ---- 2. the business owner's Riyeser account
+  const ownerStep = () => {
+    if (!o.owner_linked) {
+      box.innerHTML = `<h3>Reset with your Riyeser account</h3><div class="error">${esc(o.not_linked || 'Sign in to Riyeser Central on this PC first, then try again.')}</div>
+        <p class="small muted">Riyeser Central links this PC to your business. Open Riyeser Central, sign in with your Riyeser account, then come back here and choose "Forgot password?" again.</p>
+        <div class="actions"><button class="btn ghost" id="fp-back">Back</button></div>`;
+      $('#fp-back', box).onclick = start; return;
+    }
+    box.innerHTML = `<h3>Reset with your Riyeser account</h3>
+      <p class="small muted">Sign in with the Riyeser account you use for Riyeser Central. Payroll checks with Riyeser that you're the owner of <b>${esc(o.business || 'this business')}</b>. Your Riyeser password is only sent to Riyeser, and isn't kept.</p>
+      <form id="fp-f"><div class="err"></div>
+      <div class="field"><label>Riyeser account email</label><input name="email" type="email" autocomplete="email" required></div>
+      <div class="field"><label>Riyeser account password</label><input name="password" type="password" autocomplete="current-password" required></div>
+      <div class="actions"><button class="btn">Continue</button><button type="button" class="btn ghost" id="fp-back">Back</button></div></form>`;
+    $('#fp-back', box).onclick = start;
+    $('#fp-f', box).onsubmit = async ev => {
+      ev.preventDefault(); const f = ev.target; busy(f, true);
+      try { const r = await api('/api/auth/forgot/owner/start', { body: formData(f) }); if (r.needs_code) mfaStep(r.ticket); else pickStep(r); } catch (x) { err(f, x); busy(f, false); }
+    };
+  };
+  const mfaStep = ticket => {
+    box.innerHTML = `<h3>Two-step sign-in</h3><p class="small muted">Type the 6-digit code from your authenticator app.</p><form id="fp-f"><div class="err"></div>
+      <div class="field"><label>Code</label><input name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required></div>
+      <div class="actions"><button class="btn">Continue</button><button type="button" class="btn ghost" id="fp-back">Start again</button></div></form>`;
+    $('#fp-back', box).onclick = ownerStep;
+    $('#fp-f', box).onsubmit = async ev => {
+      ev.preventDefault(); const f = ev.target; busy(f, true);
+      try { pickStep(await api('/api/auth/forgot/owner/code', { body: { ticket, code: f.code.value } })); } catch (x) { err(f, x); busy(f, false); }
+    };
+  };
+  const pickStep = r => {
+    box.innerHTML = `<h3>Set a new Super admin password</h3><div class="success" style="margin-bottom:12px">You're confirmed as the owner of ${esc(r.business || 'this business')}.</div>
+      <form id="fp-f"><div class="err"></div>
+      <div class="field"><label>Which login?</label><select name="user_id" required>${r.admins.map(a => `<option value="${a.id}">${esc(a.name)} (${esc(a.username)})${a.main ? ', the main login' : ''}</option>`).join('')}</select></div>${pwFields}
+      <p class="small muted">Anyone signed in with this login on another screen is signed out. The audit trail records the change.</p>
+      <div class="actions"><button class="btn">Set the new password</button></div></form>`;
+    $('#fp-f', box).onsubmit = async ev => {
+      ev.preventDefault(); const f = ev.target; busy(f, true);
+      try { const x = await api('/api/auth/forgot/owner/reset', { body: { ticket: r.ticket, ...formData(f) } }); done(x.message, x.username); } catch (x) { err(f, x); busy(f, false); }
+    };
+  };
+  start();
+};
 // OWNER-RESTORE: a new PC or a reinstall starts with no records: bring them back from a backup instead of starting fresh
 if (window.riyser && window.riyser.restore && $('#setup-restore')) { $('#setup-restore').hidden = false; $('#setup-restore button').onclick = () => window.riyser.restore(); }
 $('#setup-form').onsubmit = async e => {

@@ -299,6 +299,8 @@ function saveEmployee(req, id) {
     const pay = SENSITIVE.filter(k => k !== 'deductions' && String(before[k] ?? '') !== String(after[k] ?? ''));
     if (pay.length) audit(req, 'Changed pay or bank details', `${after.name}: ${pay.join(', ')}`);
     if (before.active !== after.active) audit(req, after.active ? 'Switched staff member on' : 'Switched staff member off', after.name);
+    // a password reset by an administrator: that person is signed out everywhere else and their wrong-PIN counters start again
+    if (o.password_hash && id !== req.user.id) { db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id); for (const k of ['u', 'm', 'r']) clockFails.delete(k + id); audit(req, 'Reset a password', after.name); }
   }
   return shapeEmp(req, after);
 }
@@ -968,6 +970,9 @@ function csv(res, filename, rows) {
 }
 require('./mailer')(app, { db, requireRole: () => requireArea('setup', 2), wrap, bad, str, getSettings, setSetting });
 const mail = () => app.locals.mail || {};
+// "Forgot password?" (forgot.js). After a reset: the person's wrong-PIN counters and this device's login limit start again.
+require('./forgot')(app, { db, hashPassword, audit, rateLimit, wrap, bad, HttpError, str, getSettings, failsOf: k => failsOf(k),
+  clearLockouts: (uid, req) => { for (const k of ['u', 'm', 'r']) clockFails.delete(k + uid); hits.delete(req.ip + '/api/auth/login'); } });
 require('./desktop')(app, { db, requireRole, requireArea, wrap, bad, str, getSettings, setSetting, hashPassword });
 require('./bank')(app, { db, requireRole, requireArea, audit, wrap, bad, str, isDate });
 require('./archive')(app, { db, DATA_DIR, DEFAULT_SETTINGS, requireRole, rateLimit, audit, wrap, bad, str, verifyPassword, getSettings, setSetting });
