@@ -478,30 +478,46 @@ do $$ declare l json; m numeric; begin
   assert (l -> 'modules' -> 'payroll' ->> 'status') = 'cancelled' and not (l -> 'modules' -> 'payroll' ->> 'active')::boolean, 'payroll cancelled, ended';
   assert (l ->> 'extra_companies')::int = 1, 'extra companies';
   m := ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric;
-  assert m = (25 + 2 * 7) + (39 + 2 * 7) + 10, format('monthly estimate (US$): Basics 25 + Link Plus 39 (paid earlier), each with 3 + 2 extra users at 7, + 1 company 10 = 102, got %s', m);
-  assert ((public.hq_licences()) ->> 'monthly_estimate')::numeric >= 102, 'total estimate';
+  assert m = (25 + 2 * 7) + (20 + 2 * 7) + 10, format('monthly estimate (US$): Basics 25 + Riyeser Link 20 (paid earlier), each with 3 + 2 extra users at 7, + 1 company 10 = 83, got %s', m);
+  assert ((public.hq_licences()) ->> 'monthly_estimate')::numeric >= 83, 'total estimate';
   assert ((public.hq_licences()) ->> 'early_bird_left')::int = 100, 'early bird places';
 end $$;
 -- Prices are in US$ a month per business: each paid program includes 3 people, then US$7 a person for that program
 do $$ begin
   assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', false) = 92, '5 people with Plus + Payroll = (39 + 14) + (25 + 14) = 92';
-  assert public.riyeser_bill(array['plus', 'payroll', 'calls'], 5, 0, 'monthly', false) = 145, 'Plus + Payroll + Link Plus, 5 people = 145';
+  assert public.riyeser_bill(array['plus', 'payroll', 'calls'], 5, 0, 'monthly', false) = 126, 'Plus + Payroll + Riyeser Link, 5 people = 92 + 20 + 14 = 126';
   assert public.riyeser_bill(array['basic'], 3, 0, 'monthly', false) = 25, '3 people with Basics only = 25';
   assert public.riyeser_bill(array['basic'], 1, 0, 'monthly', false) = 25, 'fewer than 3 people is still 25';
   assert public.riyeser_bill(array['basic', 'plus'], 3, 0, 'monthly', false) = 39, 'Basics and Plus both on = the Plus price only';
   assert public.riyeser_bill(array['basic', 'plus'], 5, 0, 'monthly', false) = 53, 'Basics and Plus, 5 people: users counted once';
-  assert public.riyeser_bill(array['calls'], 4, 0, 'monthly', false) = 46, 'Link Plus with 4 people = 39 + 7 = 46';
+  assert public.riyeser_bill(array['calls'], 4, 0, 'monthly', false) = 27, 'Riyeser Link with 4 people = 20 + 7 = 27';
   assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'yearly', false) = 920, 'yearly = 10 months';
   assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'monthly', true) = 46, 'early bird = half';
   assert public.riyeser_bill(array['plus', 'payroll'], 5, 0, 'yearly', true) = 460, 'yearly early bird';
-  assert public.riyeser_bill(array['calls'], 4, 0, 'yearly', false) = 460, 'Link Plus yearly';
+  assert public.riyeser_bill(array['calls'], 4, 0, 'yearly', false) = 270, 'Riyeser Link yearly';
   assert public.riyeser_bill(array['basic'], 3, 2, 'monthly', false) = 45, 'extra companies 10 each';
   assert public.riyeser_bill(array['basic'], 3, 1, 'monthly', true) = 22.5, 'early bird halves programs and users, not extra companies';
   assert public.riyeser_bill(array['payroll'], 3, 2, 'monthly', false) = 25, 'extra companies only count with Accounting';
   assert public.riyeser_bill(array['as_built', 'pos', 'bookings'], 3, 0, 'monthly', false) = 83, 'As Built 29, POS 29 and Bookings 25';
   assert public.riyeser_bill(array[]::text[], 9, 0, 'monthly', false) = 0, 'free tools only = 0';
   assert public.riyeser_bill(array['basic', 'basic', 'link', 'central', 'pdf'], 3, 0, 'monthly', false) = 25, 'free programs and repeats add nothing';
-  assert public.riyeser_price('plus') = 39 and public.riyeser_price('calls') = 39 and public.riyeser_price('payroll') = 25 and public.riyeser_price('extra_user') = 7, 'price list';
+  assert public.riyeser_price('plus') = 39 and public.riyeser_price('calls') = 20 and public.riyeser_price('payroll') = 25 and public.riyeser_price('extra_user') = 7
+    and public.riyeser_price('extra_till') = 15 and public.riyeser_price('bundle_business') = 99, 'price list';
+  -- pricing v2 bundles: the bundle price replaces its programs' prices; extra users (US$7) and tills (US$15) still count
+  assert public.riyeser_bill(array['basic', 'pos', 'calls'], 3, 0, 'monthly', false) = 59, 'Shop bundle = 59 (74 separately)';
+  assert public.riyeser_bill(array['basic', 'pos', 'calls'], 5, 0, 'monthly', false) = 87, 'Shop, 5 people: 59 + 2 extra in Basics and Link (POS has unlimited cashiers) = 87';
+  assert public.riyeser_bill(array['calls', 'payroll', 'basic'], 3, 0, 'monthly', false) = 59, 'Office bundle = 59 (70 separately)';
+  assert public.riyeser_bill(array['plus', 'payroll', 'pos', 'bookings', 'calls'], 3, 0, 'monthly', false) = 99, 'Business bundle = 99 (138 separately)';
+  assert public.riyeser_bill(array['plus', 'payroll', 'pos', 'bookings', 'calls', 'as_built'], 3, 0, 'monthly', false) = 128, 'Business + As Built = 128';
+  assert public.riyeser_bill(array['basic', 'pos', 'payroll', 'calls'], 3, 0, 'monthly', false) = 84, 'Shop (saves most) + Payroll 25 = 84';
+  assert public.riyeser_bill(array['basic', 'plus', 'pos', 'calls'], 3, 0, 'monthly', false) = 88, 'Plus instead of Basics: no Shop bundle, 39 + 29 + 20';
+  assert public.riyeser_bill(array['plus', 'payroll', 'pos', 'bookings', 'calls'], 3, 0, 'monthly', true) = 49.5, 'early bird halves bundles too';
+  assert public.riyeser_bill(array['plus', 'payroll', 'pos', 'bookings', 'calls'], 3, 0, 'yearly', false) = 990, 'Business yearly = 10 months';
+  assert public.riyeser_bill(array['pos'], 9, 0, 'monthly', false) = 29, 'POS: unlimited cashiers';
+  assert (public.riyeser_plan(array['pos'], 3, null, 3, 0, 'monthly', false) ->> 'total')::numeric = 59, 'POS with 3 tills = 29 + 2 x 15';
+  assert (public.riyeser_plan(array['basic', 'pos', 'calls'], 3, '{"basic": 4, "calls": 8}', 2, 0, 'monthly', false) ->> 'total')::numeric = 59 + 7 + 35 + 15,
+    'Shop with users per program (Basics 4, Link 8) and 2 tills';
+  assert public.riyeser_plan(array['basic', 'pos', 'calls'], 3, null, 1, 0, 'monthly', false) ->> 'bundle' = 'shop', 'says which bundle';
 end $$;
 -- The same on a real company (undone after): 5 people with Plus + Payroll paid, Basics paid as well, Link Plus off -> 84
 do $$ declare ws uuid := current_setting('test.ws_c')::uuid; m numeric; begin
@@ -521,9 +537,9 @@ do $$ declare ws uuid := current_setting('test.ws_c')::uuid; m numeric; begin
     raise exception 'undo the price check';
   exception when others then if sqlerrm <> 'undo the price check' then raise; end if; end;
 end $$;
--- yearly + early bird: (Basics 39 + Link Plus 53) half = 46, + 1 company 10 = 56 a month list -> x 10/12 = 46.67
+-- yearly + early bird: (Basics 39 + Riyeser Link 34) half = 36.50, + 1 company 10 = 46.50 a month list -> x 10/12 = 38.75
 select public.hq_set_plan(:'ws_c', 2, 1, 'yearly', true);
-do $$ begin assert ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric = 46.67,
+do $$ begin assert ((public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly')::numeric = 38.75,
   format('yearly early bird, got %s', (public.hq_company_licence(current_setting('test.ws_c')::uuid)) ->> 'monthly'); end $$;
 -- Riyeser Link Plus (was Team Calls) via the licence: cancelled and unpaid -> no calls; the old button sets it paid again
 select public.hq_set_module(:'ws_c', 'calls', 'cancelled', null, null);
@@ -2121,19 +2137,30 @@ end $$;
 select pg_temp.as_user('a7a7a7a4-0000-4000-8000-000000000004');
 do $$ begin assert (select count(*) from storage.objects) = 0, 'another business sees no files'; end $$;
 
--- file storage: 2 GB a business on free chat, 20 GB with Link Plus, plus extra from HQ. Going over is refused; nothing is deleted.
+-- file storage: 20 GB a business with Riyeser Link, plus extra from HQ. Going over is refused; with Link off nothing new can
+-- be uploaded (read-only); nothing is deleted.
 reset role;
 insert into public.company_modules (workspace_id, module, status) values (current_setting('lk.a')::uuid, 'calls', 'cancelled')
   on conflict (workspace_id, module) do update set status = 'cancelled', paid_until = null;
 update public.workspaces set calls_paid_until = null where id = current_setting('lk.a')::uuid;
 select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003'); set role authenticated;   -- Rua (member)
 do $$ declare a text := current_setting('lk.a'); g text := current_setting('lk.g'); gb bigint := 1073741824; begin
-  assert public.link_storage_limit(a::uuid) = 2 * gb, 'free chat: 2 GB';
+  assert public.link_storage_limit(a::uuid) = 20 * gb, 'Riyeser Link: 20 GB';
+  assert not public.link_storage_fits(a::uuid, 1), 'Link off: no room for anything new';
+  begin insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || g || '/aaaaaaaa00000000/off.zip', jsonb_build_object('size', 10));
+    raise exception 'uploaded with Link off';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- Riyeser Link on (trial): uploads up to 20 GB
+reset role;
+update public.company_modules set status = 'trial', trial_ends = current_date + 10 where workspace_id = current_setting('lk.a')::uuid and module = 'calls';
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003'); set role authenticated;
+do $$ declare a text := current_setting('lk.a'); g text := current_setting('lk.g'); gb bigint := 1073741824; begin
   insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || g || '/aaaaaaaa11111111/big1.zip', jsonb_build_object('size', gb + gb / 2));
   assert public.link_storage_used(a::uuid) = gb + gb / 2, format('used counts the sizes: %s', public.link_storage_used(a::uuid));
-  assert public.link_storage_fits(a::uuid, gb / 4) and not public.link_storage_fits(a::uuid, gb), 'room for a quarter GB, not a whole one';
-  begin insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || g || '/aaaaaaaa22222222/big2.zip', jsonb_build_object('size', gb));
-    raise exception 'went over 2 GB';
+  assert public.link_storage_fits(a::uuid, gb / 4) and not public.link_storage_fits(a::uuid, 19 * gb), 'room for a quarter GB, not 19 more';
+  begin insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || g || '/aaaaaaaa22222222/huge.zip', jsonb_build_object('size', 19 * gb));
+    raise exception 'went over 20 GB';
   exception when insufficient_privilege then null; end;
   insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || g || '/aaaaaaaa33333333/small.zip', jsonb_build_object('size', gb / 4));
   begin perform public.link_storage_json(a::uuid); raise exception 'a member saw the storage panel';
@@ -2142,7 +2169,7 @@ end $$;
 select pg_temp.as_user('a7a7a7a1-0000-4000-8000-000000000001');   -- Pip (owner)
 do $$ declare j json; begin
   j := public.link_storage_json(current_setting('lk.a')::uuid);
-  assert (j ->> 'used')::bigint = 1879048192 and (j ->> 'limit')::bigint = 2147483648 and (j ->> 'pct')::numeric = 87.5 and not (j ->> 'plus')::boolean, format('storage panel: %s', j);
+  assert (j ->> 'used')::bigint = 1879048192 and (j ->> 'limit')::bigint = 21474836480 and (j ->> 'pct')::numeric = 8.8 and (j ->> 'plus')::boolean, format('storage panel: %s', j);
 end $$;
 select pg_temp.as_user('a7a7a7a4-0000-4000-8000-000000000004');   -- Sol, another business
 do $$ begin
@@ -2152,12 +2179,9 @@ do $$ begin
   exception when others then assert sqlerrm like 'Only owners and admins%', sqlerrm; end;
   assert public.link_storage_used(current_setting('lk.b')::uuid) = 0, 'own business: nothing yet';
 end $$;
--- Link Plus on (trial): 20 GB, so the 1 GB file now fits
-reset role;
-update public.company_modules set status = 'trial', trial_ends = current_date + 10 where workspace_id = current_setting('lk.a')::uuid and module = 'calls';
+-- a 1 GB file fits too
 select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003'); set role authenticated;
 do $$ declare a text := current_setting('lk.a'); gb bigint := 1073741824; begin
-  assert public.link_storage_limit(a::uuid) = 20 * gb, 'Link Plus: 20 GB';
   insert into storage.objects (bucket_id, name, metadata) values ('link-files', a || '/' || current_setting('lk.g') || '/aaaaaaaa22222222/big2.zip', jsonb_build_object('size', gb));
 end $$;
 -- HQ: extra storage needs licences.manage and a reason, and is in the HQ history
@@ -2172,18 +2196,20 @@ do $$ declare j json; gb bigint := 1073741824; a uuid := current_setting('lk.a')
   begin perform public.hq_grant_storage(a, 5, ''); raise exception 'no reason';
   exception when others then assert sqlerrm like 'Say why%', sqlerrm; end;
   j := public.hq_grant_storage(a, 5, 'Lots of site drawings');
-  assert (j ->> 'limit')::bigint = 25 * gb and (j ->> 'extra_gb')::int = 5, format('Link Plus 20 + 5 extra: %s', j);
+  assert (j ->> 'limit')::bigint = 25 * gb and (j ->> 'extra_gb')::int = 5, format('Riyeser Link 20 + 5 extra: %s', j);
   assert exists (select 1 from pg_temp.audit('licence.storage') x where x.details ->> 'reason' = 'Lots of site drawings'), 'in the HQ history';
   j := public.hq_company_page(a) -> 'storage';
   assert (j ->> 'used')::bigint = gb * 11 / 4, format('HQ storage card: %s', j);
 end $$;
--- Link Plus ends: 2 + 5 GB; nothing is deleted, and "over 80%" finds it in HQ's Companies list
+-- Riyeser Link ends: still 20 + extra GB, nothing is deleted, and "over 80%" finds it in HQ's Companies list
 reset role;
+insert into storage.objects (bucket_id, name, metadata) select 'link-files', current_setting('lk.a') || '/' || current_setting('lk.g') || '/aaaaaaaa44444444/site.zip',
+  jsonb_build_object('size', 17::bigint * 1073741824);
 update public.company_modules set status = 'cancelled', trial_ends = null where workspace_id = current_setting('lk.a')::uuid and module = 'calls';
 select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
 do $$ declare r json; a uuid := current_setting('lk.a')::uuid; begin
   perform public.hq_grant_storage(a, 1, 'Back to a small extra');
-  assert public.link_storage_limit(a) = 3::bigint * 1073741824, '2 GB + 1 extra';
+  assert public.link_storage_limit(a) = 21::bigint * 1073741824, '20 GB + 1 extra';
   assert (select count(*) from storage.objects where name like a::text || '/%' and bucket_id = 'link-files') >= 4, 'files kept';
   r := public.hq_companies_page('Sample Link', '{"storage_80": true}', 'name', false, 1, 50, false);
   assert (r ->> 'total')::int = 1 and ((r -> 'rows' -> 0) ->> 'storage_pct')::numeric > 80, format('storage over 80%%: %s', r -> 'rows');
@@ -2425,6 +2451,13 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; q json; begin
   assert (q ->> 'early_bird')::boolean and (q ->> 'first_amount')::numeric = 46 and (q ->> 'early_cycles')::int = 12, 'early bird: half for 12 months';
   q := public.billing_quote(a, array['basic', 'plus', 'plus', 'link'], 3, 'yearly');
   assert (q ->> 'amount')::numeric = 390 and json_array_length(q -> 'modules') = 1, 'Basics and Plus = Plus only; free programs ignored; yearly = 10 months';
+  -- pricing v2: users per program, POS tills, bundles; Riyeser Link counts at least everyone in the business
+  q := public.billing_quote(a, array['basic', 'pos', 'calls'], 3, 'monthly', '{"basic": 5, "calls": 1}', 3);
+  assert (q ->> 'bundle') = 'shop' and (q ->> 'tills')::int = 3 and (q -> 'users' ->> 'calls')::int = (select count(*) from public.members where workspace_id = a)
+    and (q ->> 'amount')::numeric = 59 + 14 + 7 * greatest(0, (q -> 'users' ->> 'calls')::int - 3) + 30, format('Shop bundle quote: %s', q);
+  assert json_array_length(q -> 'lines') = 1 and (q -> 'lines' -> 0 ->> 'name') = 'Shop bundle', 'one bundle line';
+  q := public.billing_quote(a, array['plus', 'payroll', 'pos', 'bookings', 'calls'], 3, 'monthly');
+  assert (q ->> 'bundle') = 'business' and (q ->> 'bundle_saves')::numeric = 39, format('Business bundle saves 39: %s', q);
   begin perform public.billing_quote(a, array['plus'], 3, 'weekly'); raise exception 'weekly';
   exception when others then assert sqlerrm like 'Choose monthly or yearly%', sqlerrm; end;
   begin perform public.billing_start(a, array['link', 'pdf'], 3, 'monthly', 'bank'); raise exception 'free only';
@@ -2554,7 +2587,7 @@ end $$;
 do $$ declare a uuid := current_setting('pay.a')::uuid; o json; begin
   o := public.billing_start(a, array['calls'], 4, 'monthly', 'paypal');
   assert (o ->> 'starts_on')::date = current_setting('pay.te')::date, 'S10 the PayPal order starts when the trial ends: ' || (o ->> 'starts_on');
-  assert (o ->> 'amount')::numeric = 46 and (o ->> 'first_amount')::numeric = 23 and (o ->> 'early_cycles')::int = 12, 'Link Plus, 4 people: 46, early bird 23';
+  assert (o ->> 'amount')::numeric = 27 and (o ->> 'first_amount')::numeric = 13.5 and (o ->> 'early_cycles')::int = 12, 'Riyeser Link, 4 people: 27, early bird 13.50';
   perform set_config('pay.o1', o ->> 'id', false);
   o := public.billing_start(a, array['calls'], 4, 'monthly', 'paypal');   -- started again: the first (never approved) is replaced
   perform set_config('pay.o2', o ->> 'id', false);
@@ -2584,25 +2617,25 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; r text; te date := curre
     assert (public.billing_terms(a, array['bookings', 'calls'], 3, 'monthly') ->> 'charge_from')::date = current_date, 'S10 one trial over: today';
     delete from public.company_modules where workspace_id = a and module = 'bookings';
   end if;
-  r := public.billing_paypal_event('WH-2', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox');
+  r := public.billing_paypal_event('WH-2', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "13.50", "currency": "USD"}}', 'sandbox');
   assert r = 'paid', r;
   -- S10: every PayPal payment's receipt is emailed (queued in email_outbox until email sending is set up)
   assert exists (select 1 from public.email_outbox e join public.billing_payments p on e.body_text like '%Receipt: ' || p.ref || '%'
      where p.provider_ref = 'SALE-0001' and e.template = 'billing_paid' and e.status = 'queued'), 'S10 the PayPal receipt email is queued';
   assert (select paid_until from public.company_modules where workspace_id = a and module = 'calls') = (te + interval '1 month')::date, 'Link Plus paid from the end of its trial';
-  assert public.billing_paypal_event('WH-2', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox') = 'duplicate', 'duplicate webhook';
-  assert public.billing_paypal_event('WH-2b', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox') = 'duplicate payment', 'same sale, new event id: counted once';
+  assert public.billing_paypal_event('WH-2', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "13.50", "currency": "USD"}}', 'sandbox') = 'duplicate', 'duplicate webhook';
+  assert public.billing_paypal_event('WH-2b', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0001", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "13.50", "currency": "USD"}}', 'sandbox') = 'duplicate payment', 'same sale, new event id: counted once';
   assert public.billing_paypal_event('WH-3', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0002", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "5.00", "currency": "USD"}}', 'sandbox') = 'amount mismatch', 'too little: recorded, not applied';
-  assert public.billing_paypal_event('WH-3b', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0003", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "AUD"}}', 'sandbox') = 'amount mismatch', 'wrong currency: not applied';
+  assert public.billing_paypal_event('WH-3b', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0003", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "13.50", "currency": "AUD"}}', 'sandbox') = 'amount mismatch', 'wrong currency: not applied';
   assert (select paid_until from public.company_modules where workspace_id = a and module = 'calls') = (te + interval '1 month')::date, 'mismatches extended nothing';
   assert (select count(*) from public.billing_payments where workspace_id = a and method = 'paypal' and status = 'completed') = 1, 'one PayPal payment';
   -- a failed payment: a grace period to an exact date (7 days), then a retry that works
-  r := public.billing_paypal_event('WH-4', 'BILLING.SUBSCRIPTION.PAYMENT.FAILED', '{"id": "I-PAYCO0SUB123456", "billing_info": {"last_failed_payment": {"amount": {"value": "23.00"}}}}', 'sandbox');
+  r := public.billing_paypal_event('WH-4', 'BILLING.SUBSCRIPTION.PAYMENT.FAILED', '{"id": "I-PAYCO0SUB123456", "billing_info": {"last_failed_payment": {"amount": {"value": "13.50"}}}}', 'sandbox');
   assert r = 'payment failed', r;
   select grace_until into g from public.billing_orders where id = current_setting('pay.o2')::uuid;
   assert g = current_date + 7 and (select status from public.billing_orders where id = current_setting('pay.o2')::uuid) = 'payment_failed', 'grace until today + 7';
   assert exists (select 1 from public.email_outbox where workspace_id = a and template = 'billing_failed' and body_text like '%' || to_char(g, 'FMDD Month YYYY') || '%'), 'the email gives the date';
-  assert public.billing_paypal_event('WH-5', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0004", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "23.00", "currency": "USD"}}', 'sandbox') = 'paid', 'retry paid';
+  assert public.billing_paypal_event('WH-5', 'PAYMENT.SALE.COMPLETED', '{"id": "SALE-0004", "billing_agreement_id": "I-PAYCO0SUB123456", "amount": {"total": "13.50", "currency": "USD"}}', 'sandbox') = 'paid', 'retry paid';
   assert (select status from public.billing_orders where id = current_setting('pay.o2')::uuid) = 'active'
      and (select grace_until from public.billing_orders where id = current_setting('pay.o2')::uuid) is null, 'back to active, no grace';
   assert (select paid_until from public.company_modules where workspace_id = a and module = 'calls') = (te + interval '2 months')::date, 'a second month';
@@ -2618,7 +2651,7 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; b json; begin
   begin perform public.billing_cancel_start(a); raise exception 'cancelled without two-step';
   exception when others then assert sqlerrm like 'Turn on two-step sign-in%', sqlerrm; end;
   b := public.my_billing(a);
-  assert b -> 'subscription' ->> 'status' = 'active' and (b -> 'subscription' ->> 'next_amount')::numeric = 23, 'next charge: early bird 23';
+  assert b -> 'subscription' ->> 'status' = 'active' and (b -> 'subscription' ->> 'next_amount')::numeric = 13.5, 'next charge: early bird 13.50';
   assert b ->> 'paypal_manage_url' like 'https://www.sandbox.paypal.com/%', 'manage link for sandbox';
   assert (select count(*) from json_array_elements(b -> 'payments') x where x ->> 'status' = 'failed') >= 1, 'failed payment in the history';
 end $$;
@@ -2709,7 +2742,7 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; r json; p json; begin
   begin perform public.hq_billing_resend('RR-0', null, false); raise exception 'no such doc';
   exception when others then assert sqlerrm like 'There''s no invoice or receipt%', sqlerrm; end;
   p := public.hq_payments_received(7);
-  assert (p ->> 'count')::int = 3 and (p ->> 'total')::numeric = 92 and (p ->> 'days')::int = 7, 'payments received in 7 days: 3, US$92';
+  assert (p ->> 'count')::int = 3 and (p ->> 'total')::numeric = 73 and (p ->> 'days')::int = 7, format('payments received in 7 days: 3, US$73 (13.50 + 13.50 + 46): %s', p);
   assert (select count(*) from json_array_elements(public.hq_company_billing(a) -> 'payments') x where x -> 'doc' ->> 'kind' = 'receipt') = 3, 'HQ sees the copies';
 end $$;
 select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000005');
@@ -2869,5 +2902,55 @@ do $$ begin
   assert exists (select 1 from public.email_outbox where template = 'ticket_reply' and to_address = 'mere@guest.test' and body_text like '%receipts on%'), 'S3 the reply is emailed';
 end $$;
 reset role;
+-- Pricing v2: Riyeser Link is a paid program (module 'calls'). Off: chat is read-only (reading works, sending, editing
+-- and reactions don't); nothing is deleted.
+select set_config('v2.ws', :'ws_a', false), set_config('v2.gen', :'gen_a', false);
+insert into public.company_modules (workspace_id, module, status) values (:'ws_a', 'calls', 'cancelled')
+  on conflict (workspace_id, module) do update set status = 'cancelled', paid_until = null, trial_ends = null;
+update public.workspaces set calls_paid_until = null where id = :'ws_a';
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+do $$ declare ws uuid := current_setting('v2.ws')::uuid; ch uuid := current_setting('v2.gen')::uuid; f json; begin
+  f := public.team_features(ws);
+  assert not (f ->> 'link')::boolean and f ->> 'link_status' = 'cancelled', format('Link off: %s', f);
+  assert (select count(*) from public.messages where channel_id = ch) > 0, 'old messages still readable';
+  begin insert into public.messages (channel_id, workspace_id, body) values (ch, ws, 'still on?'); raise exception 'sent with Link off';
+  exception when insufficient_privilege then null; end;
+  begin update public.messages set body = 'changed' where channel_id = ch and user_id = auth.uid(); raise exception 'edited with Link off';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+update public.company_modules set status = 'trial', trial_ends = current_date + 30 where workspace_id = :'ws_a' and module = 'calls';
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+do $$ declare ws uuid := current_setting('v2.ws')::uuid; ch uuid := current_setting('v2.gen')::uuid; begin
+  assert (public.team_features(ws) ->> 'link')::boolean, 'Link on (trial)';
+  insert into public.messages (channel_id, workspace_id, body) values (ch, ws, 'Back on Riyeser Link');
+end $$;
+reset role;
+-- the accountant or bookkeeper is free: one of them doesn't count as a Link user
+do $$ declare ws uuid := current_setting('v2.ws')::uuid; n int := (select count(*) from public.members where workspace_id = current_setting('v2.ws')::uuid); begin
+  assert public.link_people(ws) = n, 'everyone counts';
+  update public.members set job_role = 'bookkeeper' where workspace_id = ws and role <> 'owner'
+    and user_id = (select user_id from public.members where workspace_id = ws and role <> 'owner' order by joined_at limit 1);
+  assert public.link_people(ws) = n - 1, 'the bookkeeper is free';
+  assert public.module_label('calls') = 'Riyeser Link', 'calls is shown as Riyeser Link';
+  update public.members set job_role = 'staff' where workspace_id = ws and job_role = 'bookkeeper';
+end $$;
+-- Existing businesses that used Link chat for free get 90 days from when the new file is first run, once.
+do $$ declare old uuid; paid uuid; long uuid; begin
+  insert into public.workspaces (name, company_code, created_at) values ('V2 old', public.make_company_code(), now() - interval '400 days') returning id into old;
+  insert into public.workspaces (name, company_code, created_at) values ('V2 paid', public.make_company_code(), now() - interval '400 days') returning id into paid;
+  insert into public.workspaces (name, company_code, created_at) values ('V2 long', public.make_company_code(), now() - interval '400 days') returning id into long;
+  insert into public.company_modules (workspace_id, module, status, paid_until) values (paid, 'calls', 'active', current_date + 100);
+  insert into public.company_modules (workspace_id, module, status, trial_ends) values (long, 'calls', 'trial', current_date + 120);
+  assert not public.calls_allowed(old), 'an old business: Link off before the change';
+  delete from public.riyeser_once where key = 'pricing_v2_link_trial';
+  perform public.pricing_v2_link_trial();
+  assert (public.module_state(old, 'calls') ->> 'trial_ends')::date = current_date + 90 and public.calls_allowed(old), '90 days from now';
+  assert (select status = 'active' and paid_until = current_date + 100 from public.company_modules where workspace_id = paid and module = 'calls'), 'paid: unchanged';
+  assert (public.module_state(long, 'calls') ->> 'trial_ends')::date = current_date + 120, 'a longer trial is kept';
+  update public.company_modules set trial_ends = current_date + 5 where workspace_id = old and module = 'calls';
+  perform public.pricing_v2_link_trial();   -- re-running the file: nothing is reset
+  assert (public.module_state(old, 'calls') ->> 'trial_ends')::date = current_date + 5, 'only once';
+end $$;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';

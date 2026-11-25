@@ -290,10 +290,10 @@ grant update (name) on public.workspaces to authenticated;
 grant update (display_name) on public.members to authenticated;
 grant update (name, topic) on public.channels to authenticated;   -- archiving goes through channel_archive (below)
 
--- ================================================================ Riyeser Link Plus calls (premium; was Team Calls)
+-- ================================================================ Riyeser Link calls (was Team Calls, then Link Plus)
 -- Calls between people in a team, and to a branch (rings everyone there; the first to answer takes it).
 -- The call itself goes directly between the two devices (WebRTC); these rows only carry the ringing and set-up.
--- Premium: free for the team's first 90 days, then only while calls_paid_until is in the future.
+-- Part of the paid Riyeser Link program (module 'calls'): free for the first 90 days, then while it's paid.
 -- Riyeser sets that when a business pays:  update public.workspaces set calls_paid_until = '2027-12-31' where id = '…';
 alter table public.workspaces add column if not exists calls_paid_until timestamptz;
 
@@ -857,7 +857,7 @@ grant execute on function public.former_members(uuid) to authenticated;
 
 
 -- ================================================================ Riyeser HQ (for Riyeser's own staff)
--- The back office for running Riyeser: companies, linked PCs and versions, trials, Riyeser Link Plus, downloads, notes.
+-- The back office for running Riyeser: companies, linked PCs and versions, trials, Riyeser Link, downloads, notes.
 -- PRIVACY: HQ only sees account information. Nothing here reads customers' messages, chats, calls or books.
 -- Staff need two-step sign-in. Make yourself the first owner in Supabase's SQL Editor (not from the website):
 --   select public.hq_make_owner('you@example.com', 'Your name');
@@ -1177,8 +1177,9 @@ grant execute on function public.hq_me(), public.hq_overview(), public.hq_compan
 grant execute on function public.hq_record_downloads(text, jsonb) to anon, authenticated;
 
 -- ================================================================ Licences online (per company, per program)
--- Paid programs: basic (Accounting Basics), plus (Accounting Plus), payroll, pos, bookings, as_built, calls (Riyeser Link Plus).
--- Free programs (Central, Invoices, PDF, Desk Assistant, Riyeser Link chat) aren't listed: they're always free.
+-- Paid programs: basic (Accounting Basics), plus (Accounting Plus), bookings, calls (Riyeser Link: chat, calls, desk phones
+-- and Riyeser Link Office; the id 'calls' is kept from when it was Link Plus), payroll, pos, as_built.
+-- Free programs (Central, Desk Assistant, Invoices, PDF) aren't listed: they're always free.
 -- With no row, a program is on its free trial: 90 days from when the company joined Riyeser online.
 -- Riyeser HQ (owners, finance) sets each one: trial (with its end date), active (paid until), or cancelled.
 -- Riyeser Central reads company_licence() and the programs on the PC unlock what's active.
@@ -1200,10 +1201,20 @@ create table if not exists public.company_plans (
   early_bird_since date,
   updated_at timestamptz not null default now()
 );
+-- Pricing v2: users per program ({module: count}) and POS tills, from the last payment (or HQ).
+alter table public.company_plans add column if not exists users jsonb;
+alter table public.company_plans add column if not exists tills int not null default 1;
 alter table public.company_modules enable row level security;
 alter table public.company_plans enable row level security;
 revoke all on public.company_modules, public.company_plans from anon, authenticated;   -- read through company_licence()
 
+-- Riyeser Link's users: everyone in the business who chats or takes calls, except one accountant or bookkeeper (job
+-- role 'bookkeeper', not the owner), who is free and never counts as a user.
+create or replace function public.link_people(ws uuid) returns int
+  language sql stable security definer set search_path = public as $$
+  select greatest(0, (select count(*) from members where workspace_id = ws)::int
+    - case when exists (select 1 from members where workspace_id = ws and job_role = 'bookkeeper' and role <> 'owner') then 1 else 0 end)
+$$;
 -- One program's state today: {status, active, trial_ends, paid_until, days_left}
 create or replace function public.module_state(ws uuid, mod text) returns json
   language plpgsql stable security definer set search_path = public as $$
@@ -1234,8 +1245,9 @@ create or replace function public.licence_json(ws uuid) returns json
   language sql stable security definer set search_path = public as $$
   select json_build_object(
     'workspace_id', w.id, 'company_code', w.company_code, 'checked_at', now(), 'business_status', w.status,
-    'modules', (select json_object_agg(m, public.module_state(w.id, m)) from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m),
-    'seats', json_build_object('included', 3, 'extra', coalesce(p.extra_users, 0), 'used', (select count(*) from members where workspace_id = w.id)),
+    'modules', (select json_object_agg(m, public.module_state(w.id, m)) from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m),
+    'seats', json_build_object('included', 3, 'extra', coalesce(p.extra_users, 0), 'used', public.link_people(w.id),
+      'users', p.users, 'tills', coalesce(p.tills, 1), 'accountant_free', true),
     'extra_companies', coalesce(p.extra_companies, 0), 'billing', coalesce(p.billing, 'monthly'), 'early_bird', coalesce(p.early_bird, false))
   from workspaces w left join company_plans p on p.workspace_id = w.id where w.id = ws
 $$;
@@ -1259,9 +1271,46 @@ create or replace function public.team_features(ws uuid) returns json
   select json_build_object('calls', public.calls_allowed(ws),
     'calls_paid', (public.module_state(ws, 'calls') ->> 'status') = 'active' or coalesce(w.calls_paid_until > now(), false),
     'calls_paid_until', coalesce((public.module_state(ws, 'calls') ->> 'paid_until'), w.calls_paid_until::date::text),
-    'trial_days_left', coalesce((public.module_state(ws, 'calls') ->> 'days_left')::int, 0))
+    'trial_days_left', coalesce((public.module_state(ws, 'calls') ->> 'days_left')::int, 0),
+    -- Riyeser Link (pricing v2): chat, calls and phones are one paid program. Off: chat is read-only (nothing deleted).
+    'link', public.calls_allowed(ws), 'link_status', public.module_state(ws, 'calls') ->> 'status',
+    'link_trial_ends', public.module_state(ws, 'calls') ->> 'trial_ends')
   from workspaces w where w.id = ws and public.is_member(ws)
 $$;
+
+-- Riyeser Link off (its 90 days are over and it isn't paid): chat is read-only. Everything stays readable; nobody can
+-- send, edit or react until Link is added on the Riyeser home page. (Messages Riyeser itself adds are not affected.)
+drop policy if exists msg_send on public.messages;
+create policy msg_send on public.messages for insert to authenticated
+  with check (user_id = auth.uid() and public.can_see_channel(channel_id)
+              and workspace_id = (select workspace_id from public.channels where id = channel_id)
+              and public.calls_allowed(workspace_id));
+drop policy if exists msg_edit on public.messages;
+create policy msg_edit on public.messages for update to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid() and public.can_see_channel(channel_id) and public.calls_allowed(workspace_id));
+
+-- Pricing v2, once: businesses that were using Riyeser Link chat for free get 90 days of Riyeser Link from the day this
+-- file is first run with it (so nobody is locked out straight away). Re-running never resets it (riyeser_once marker).
+-- Businesses already paying for it (Link Plus) keep what they have; a longer trial is never shortened.
+create table if not exists public.riyeser_once (key text primary key, at timestamptz not null default now());
+alter table public.riyeser_once enable row level security;
+revoke all on public.riyeser_once from anon, authenticated;
+create or replace function public.pricing_v2_link_trial() returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not exists (select 1 from public.riyeser_once where key = 'pricing_v2_link_trial') then
+    insert into public.company_modules (workspace_id, module, status, trial_ends)
+      select w.id, 'calls', 'trial', current_date + 90 from public.workspaces w
+      where not (coalesce(w.calls_paid_until > now(), false)
+                 or exists (select 1 from public.company_modules c where c.workspace_id = w.id and c.module = 'calls' and c.status = 'active'
+                            and (c.paid_until is null or c.paid_until >= current_date)))
+    on conflict (workspace_id, module) do update set status = 'trial',
+      trial_ends = greatest(excluded.trial_ends, public.company_modules.trial_ends, public.company_modules.paid_until), updated_at = now();
+    insert into public.riyeser_once (key) values ('pricing_v2_link_trial');
+  end if;
+end $$;
+revoke all on function public.pricing_v2_link_trial() from public, anon, authenticated;
+select public.pricing_v2_link_trial();
 
 -- HQ: set one program for a company (owners and finance).
 -- The licence change itself (no permission check: only called by checked hq_ functions).
@@ -1311,52 +1360,115 @@ create or replace function public.hq_set_calls_paid(ws uuid, until date) returns
   language plpgsql security definer set search_path = public as $$
 begin perform hq_set_module(ws, 'calls', 'active', null, until); end $$;
 
--- Riyeser list prices, in US dollars a month per business. This is the one place they're set: change a number here,
--- re-run this file, and every HQ estimate follows. Free programs (Central, Invoices, PDF, Desk Assistant, Link chat) cost 0.
+-- Riyeser list prices, in US dollars a month per business (pricing v2). This is the one place they're set: change a
+-- number here, re-run this file, and every HQ estimate and bill follows (website/prices.mjs has the same list).
+-- Free programs (Central, Desk Assistant, Invoices, PDF) cost 0.
 create or replace function public.riyeser_price(item text) returns numeric
   language sql immutable set search_path = public as $$
   select (case item
-    when 'basic' then 25 when 'plus' then 39 when 'payroll' then 25 when 'pos' then 29 when 'bookings' then 25
-    when 'calls' then 39 when 'as_built' then 29
-    when 'users_included' then 3     -- people included in each paid program
-    when 'extra_user' then 7         -- each person over that, for each paid program
+    when 'basic' then 25 when 'plus' then 39 when 'bookings' then 25 when 'calls' then 20   -- calls = Riyeser Link
+    when 'payroll' then 25 when 'pos' then 29 when 'as_built' then 29
+    when 'users_included' then 3     -- users included in each paid program (POS: unlimited cashiers instead)
+    when 'extra_user' then 7         -- each user over that, for each paid program
+    when 'tills_included' then 1     -- POS: checkout counters included
+    when 'extra_till' then 15        -- each extra till
     when 'extra_company' then 10     -- each extra company in Accounting
+    when 'bundle_shop' then 59 when 'bundle_office' then 59 when 'bundle_business' then 99
     else 0 end)::numeric
 $$;
 
--- One bill at list prices (US$). Each paid program: its price, plus US$7 for each person over 3 (for that program).
--- Accounting Plus includes Basics, so Basics is never counted as well. Extra companies count only with Accounting.
--- Yearly = 10 months. Early bird = half the program and user amounts (the caller says if it's still in its 12 months).
-create or replace function public.riyeser_bill(mods text[], people int, extra_companies int, billing text, early_bird boolean) returns numeric
+-- The bundles: [id, name, programs]. Each program in a bundle still includes 3 users (extra users US$7, tills US$15).
+create or replace function public.riyeser_bundles() returns table (id text, name text, mods text[], price numeric)
   language sql immutable set search_path = public as $$
-  with m as (select distinct x from unnest(coalesce(mods, '{}'::text[])) x
-             where x = any (array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls'])
-               and not (x = 'basic' and 'plus' = any (mods)))
-  select round((
-      coalesce((select sum(public.riyeser_price(x)
-                           + public.riyeser_price('extra_user') * greatest(0, coalesce(people, 0) - public.riyeser_price('users_included'))) from m), 0)
-        * case when coalesce(early_bird, false) then 0.5 else 1 end
-      + case when exists (select 1 from m where x in ('basic', 'plus'))
-             then public.riyeser_price('extra_company') * greatest(0, coalesce(extra_companies, 0)) else 0 end)
-    * case when billing = 'yearly' then 10 else 1 end, 2)
+  select b.id, b.name, b.mods, public.riyeser_price('bundle_' || b.id) from (values
+    ('shop', 'Shop bundle', array['basic', 'pos', 'calls']),
+    ('office', 'Office bundle', array['basic', 'payroll', 'calls']),
+    ('business', 'Business bundle', array['plus', 'bookings', 'calls', 'payroll', 'pos'])) b(id, name, mods)
 $$;
 
--- How many people a business pays for: everyone in it, or its licence seats (3 + extra users set in HQ) if that's more.
+-- One plan at list prices (US$), with its lines. Each paid program: its price, then US$7 for each user over 3 (for that
+-- program; users: {module: count}, anyone missing counts as people). POS has unlimited cashiers: 1 till included, then
+-- US$15 a till. Accounting Plus includes Basics (never both). When the programs contain a bundle, the bundle's price
+-- replaces those programs' prices (the one that saves most). Extra companies count only with Accounting.
+-- Yearly = 10 months. Early bird = half the program, bundle, user and till amounts (not extra companies).
+create or replace function public.riyeser_plan(mods text[], people int, users jsonb, tills int, extra_companies int, billing text, early_bird boolean)
+  returns jsonb language plpgsql immutable set search_path = public as $$
+declare m text[]; b record; best record; save numeric; best_save numeric := 0; x text; n int; ex int; lines jsonb := '[]'::jsonb;
+  sub numeric := 0; inc int := riyeser_price('users_included')::int; t int := greatest(coalesce(tills, 1), 1); u jsonb := '{}'::jsonb;
+  rest text[]; v numeric; extras numeric; ext_users int; total numeric; best_id text;
+begin
+  select coalesce(array_agg(o.m order by o.ord), '{}'::text[]) into m
+    from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) with ordinality o(m, ord)
+    where o.m = any (coalesce(mods, '{}'::text[])) and not (o.m = 'basic' and 'plus' = any (mods));
+  foreach x in array m loop
+    n := case when users is not null and jsonb_typeof(users -> x) = 'number' then (users ->> x)::numeric::int else coalesce(people, inc) end;
+    u := u || jsonb_build_object(x, least(greatest(n, 1), 10000));
+  end loop;
+  for b in select * from riyeser_bundles() loop
+    if b.mods <@ m then
+      save := (select sum(riyeser_price(y)) from unnest(b.mods) y) - b.price;
+      if save > best_save then best_save := save; best := b; best_id := b.id; end if;
+    end if;
+  end loop;
+  rest := m;
+  if best_save > 0 then
+    ext_users := 0; extras := 0;
+    foreach x in array best.mods loop
+      if x <> 'pos' then ext_users := ext_users + greatest(0, (u ->> x)::int - inc); end if;
+    end loop;
+    extras := ext_users * riyeser_price('extra_user') + case when 'pos' = any (best.mods) then (t - 1) * riyeser_price('extra_till') else 0 end;
+    lines := lines || jsonb_build_array(jsonb_build_object('module', 'bundle_' || best.id, 'bundle', best.id, 'name', best.name,
+      'modules', to_jsonb(best.mods), 'price', best.price, 'list_price', best.price + best_save, 'extra_users', ext_users,
+      'extra_tills', case when 'pos' = any (best.mods) then t - 1 else 0 end, 'monthly', best.price + extras));
+    sub := sub + best.price + extras;
+    rest := array(select y from unnest(m) y where y <> all (best.mods));
+  end if;
+  foreach x in array rest loop
+    ex := case when x = 'pos' then 0 else greatest(0, (u ->> x)::int - inc) end;
+    v := riyeser_price(x) + ex * riyeser_price('extra_user') + case when x = 'pos' then (t - 1) * riyeser_price('extra_till') else 0 end;
+    lines := lines || jsonb_build_array(jsonb_build_object('module', x, 'name', public.module_label(x), 'price', riyeser_price(x),
+      'users', case when x <> 'pos' then (u ->> x)::int end, 'extra_users', ex, 'extra_tills', case when x = 'pos' then t - 1 else 0 end, 'monthly', v));
+    sub := sub + v;
+  end loop;
+  total := round((sub * case when coalesce(early_bird, false) then 0.5 else 1 end
+      + case when m && array['basic', 'plus'] then riyeser_price('extra_company') * greatest(0, coalesce(extra_companies, 0)) else 0 end)
+    * case when billing = 'yearly' then 10 else 1 end, 2);
+  return jsonb_build_object('modules', to_jsonb(m), 'users', u, 'tills', case when 'pos' = any (m) then t else 0 end,
+    'bundle', best_id, 'bundle_saves', best_save, 'lines', lines, 'total', total);
+end $$;
+
+-- One bill at list prices (US$): riyeser_plan with the same number of users in each program and 1 POS till.
+-- (Bundles apply here too.) The early bird flag: the caller says if it's still in its 12 months.
+create or replace function public.riyeser_bill(mods text[], people int, extra_companies int, billing text, early_bird boolean) returns numeric
+  language sql immutable set search_path = public as $$
+  select (public.riyeser_plan(mods, people, null, 1, extra_companies, billing, early_bird) ->> 'total')::numeric
+$$;
+
+-- How many people a business pays for (each program, unless the plan says otherwise): everyone in it (the free
+-- accountant left out), or its licence seats (3 + extra users set in HQ) if that's more.
 create or replace function public.riyeser_people(ws uuid) returns int
   language sql stable security definer set search_path = public as $$
-  select greatest((select count(*) from members where workspace_id = ws)::int,
-                  3 + coalesce((select extra_users from company_plans where workspace_id = ws), 0))
+  select greatest(public.link_people(ws), 3 + coalesce((select extra_users from company_plans where workspace_id = ws), 0))
+$$;
+-- The users per program for a business's estimate: what its plan says (from its last payment or HQ), else
+-- riyeser_people; Riyeser Link never fewer than the people in it (the free accountant left out).
+create or replace function public.riyeser_users(ws uuid) returns jsonb
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select users from company_plans where workspace_id = ws and jsonb_typeof(users) = 'object'), '{}'::jsonb)
+    || jsonb_build_object('calls', greatest(public.link_people(ws),
+         coalesce((select (users ->> 'calls')::int from company_plans where workspace_id = ws and jsonb_typeof(users -> 'calls') = 'number'),
+                  public.riyeser_people(ws))))
 $$;
 
 -- What each company pays per month, at list prices in US$ (an estimate: payments aren't connected yet).
 -- Paid programs only (not trials). Yearly billing is shown as its monthly share (10 months over 12).
 create or replace function public.company_monthly(ws uuid) returns numeric
   language sql stable security definer set search_path = public as $$
-  select round(public.riyeser_bill(
-      array(select m from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+  select round((public.riyeser_plan(
+      array(select m from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
             where (public.module_state(ws, m) ->> 'status') = 'active'),
-      public.riyeser_people(ws), coalesce(p.extra_companies, 0), 'monthly',
-      coalesce(p.early_bird, false) and p.early_bird_since > current_date - 365)
+      public.riyeser_people(ws), public.riyeser_users(ws), coalesce(p.tills, 1), coalesce(p.extra_companies, 0), 'monthly',
+      coalesce(p.early_bird, false) and p.early_bird_since > current_date - 365) ->> 'total')::numeric
     * case when coalesce(p.billing, 'monthly') = 'yearly' then 10.0 / 12 else 1 end, 2)
   from (select 1) x left join company_plans p on p.workspace_id = ws
 $$;
@@ -1378,7 +1490,7 @@ begin
         -- businesses with it on at least one PC (Riyeser Central reports the programs on each PC)
         'installed', (select count(distinct d.workspace_id) from devices d where coalesce(d.programs, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id',
            case m when 'basic' then 'accounting-basics' when 'plus' then 'accounting' when 'as_built' then 'services' when 'calls' then 'team' else m end)))))
-      from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m),
+      from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m),
     -- real money: what active PayPal subscriptions charge (at their next charge) and paid bank invoices still running,
     -- as a monthly figure (a year's price / 12)
     'monthly_recurring', (select coalesce(round(sum(case when x.billing = 'yearly' then x.amt / 12 else x.amt end), 2), 0) from (
@@ -1392,7 +1504,7 @@ begin
     'ending_soon', (select coalesce(json_agg(x order by x.days_left), '[]') from (
         select w.id, w.name, w.company_code, m as module, (public.module_state(w.id, m) ->> 'status') as status,
                (public.module_state(w.id, m) ->> 'days_left')::int as days_left
-        from workspaces w, unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+        from workspaces w, unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
         where (public.module_state(w.id, m) ->> 'days_left')::int between 0 and 14) x)
   ) into r;
   return r;
@@ -1403,7 +1515,7 @@ create or replace function public.hq_licence_businesses(mod text, st text) retur
   language plpgsql stable security definer set search_path = public as $$
 begin
   perform hq_need(array['licences.view']);
-  if mod is null or mod <> all (array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) then raise exception 'Choose a program.'; end if;
+  if mod is null or mod <> all (array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) then raise exception 'Choose a program.'; end if;
   if st is null or st not in ('paid', 'trial', 'ended') then raise exception 'Choose paid, trial or ended.'; end if;
   return (select coalesce(json_agg(json_build_object('id', x.id, 'name', x.name, 'company_code', x.company_code, 'country', x.country,
       'status', x.s ->> 'status', 'until', coalesce(x.s ->> 'paid_until', x.s ->> 'trial_ends'), 'days_left', (x.s ->> 'days_left')::int) order by x.name), '[]')
@@ -1424,10 +1536,11 @@ end $$;
 
 revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_licence(uuid),
   public.hq_set_module(uuid, text, text, date, date), public.hq_set_plan(uuid, int, int, text, boolean), public.company_monthly(uuid),
-  public.hq_licences(), public.hq_company_licence(uuid), public.riyeser_people(uuid) from public, anon;
+  public.hq_licences(), public.hq_company_licence(uuid), public.riyeser_people(uuid), public.link_people(uuid), public.riyeser_users(uuid) from public, anon;
 grant execute on function public.company_licence(uuid), public.hq_set_module(uuid, text, text, date, date),
   public.hq_set_plan(uuid, int, int, text, boolean), public.hq_licences(), public.hq_company_licence(uuid) to authenticated;
-revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_monthly(uuid), public.riyeser_people(uuid) from authenticated;
+revoke all on function public.module_state(uuid, text), public.licence_json(uuid), public.company_monthly(uuid), public.riyeser_people(uuid),
+  public.link_people(uuid), public.riyeser_users(uuid) from authenticated;
 
 -- ================================================================ Riyeser HQ, phase 1
 -- Support tickets (with escalations), fix-up tools, staff permissions, the full staff audit trail, inactive accounts,
@@ -1986,9 +2099,9 @@ begin
   return (select json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'status', w.status, 'kind', w.kind,
     'country', w.country, 'last_active_at', w.last_active_at,
     'people', (select count(*) from members m where m.workspace_id = w.id), 'pcs', (select count(*) from devices d where d.workspace_id = w.id),
-    'paid', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+    'paid', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
              where (public.module_state(w.id, m) ->> 'status') = 'active'),
-    'trial', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+    'trial', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
              where (public.module_state(w.id, m) ->> 'status') = 'trial'),
     'monthly', public.company_monthly(w.id), 'credit', public.credit_json(w.id),
     'notes', (select coalesce(json_agg(json_build_object('body', n.body, 'at', n.created_at, 'by', public.staff_name(n.author)) order by n.created_at desc), '[]')
@@ -2742,7 +2855,7 @@ create trigger no_delete before delete on public.offers for each row execute fun
 
 create or replace function public.module_label(m text) returns text language sql immutable as $$
   select case m when 'basic' then 'Accounting Basics' when 'plus' then 'Accounting Plus' when 'payroll' then 'Payroll' when 'pos' then 'POS'
-    when 'bookings' then 'Bookings' when 'as_built' then 'As Built' when 'calls' then 'Riyeser Link Plus' else m end
+    when 'bookings' then 'Bookings' when 'as_built' then 'As Built' when 'calls' then 'Riyeser Link' else m end
 $$;
 
 -- Apply a free period now (uses the licence functions). Returns {module: {was, now}}.
@@ -2791,7 +2904,7 @@ begin
   if tr ~ '^[0-9]+$' then tr := 'T-' || tr; end if;
   if tr is not null and not exists (select 1 from support_tickets where ref = tr) then raise exception 'There''s no ticket %.', tr; end if;
   if kind = 'account' then
-    select array_agg(m) into mods from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m
+    select array_agg(m) into mods from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
       where (module_state(ws, m) ->> 'status') = 'active';
     if mods is null then raise exception 'This business has no paid programs. Extend a trial instead.'; end if;
   else
@@ -3904,7 +4017,7 @@ begin
   ), lic as (
     select b.id, count(*) filter (where x.st = 'paid') as paid_n, count(*) filter (where x.st = 'trial') as trial_n,
       min(x.te) filter (where x.st = 'trial') as trial_end
-    from base b cross join unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) mm(m)
+    from base b cross join unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) mm(m)
     left join company_modules c on c.workspace_id = b.id and c.module = mm.m
     cross join lateral (select coalesce(c.trial_ends, b.created_at::date + 90) as te,
       case when b.status <> 'active' then 'closed'
@@ -3974,7 +4087,7 @@ create or replace function public.hq_reports(from_day date, to_day date) returns
   language plpgsql stable security definer set search_path = public as $$
 declare f date := coalesce(from_day, current_date - 90); t date := coalesce(to_day, current_date); r json;
   od numeric := hq_setting_num('support.overdue_hours', 24);
-  mods text[] := array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls'];
+  mods text[] := array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built'];
 begin
   perform hq_need(array['reports.view']);
   if t < f then raise exception 'Choose a start date before the end date.'; end if;
@@ -4097,7 +4210,7 @@ begin
     'emails_failed', case when hq_can('emails.view') then (select count(*) from email_outbox where status in ('failed', 'held')) end,
     'trials_3d', case when hq_can('customers.view') then (select coalesce(json_agg(x order by x.days_left, x.name), '[]') from (
         select w.id, w.name, w.company_code, min(z.te) - current_date as days_left, array_agg(mm.m order by mm.m) as modules
-        from workspaces w cross join unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) mm(m)
+        from workspaces w cross join unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) mm(m)
         left join company_modules c on c.workspace_id = w.id and c.module = mm.m
         cross join lateral (select coalesce(c.trial_ends, w.created_at::date + 90) as te) z
         where w.status = 'active' and (c.module is null or c.status = 'trial') and z.te between current_date and current_date + 3
@@ -4180,7 +4293,7 @@ begin
   perform hq_need(array['overview.view']);
   with ending as (
     select w.id, min(z.te) as ends, bool_or(z.paid) as paid, array_agg(distinct mm.m) as modules
-    from workspaces w cross join unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) mm(m)
+    from workspaces w cross join unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) mm(m)
     left join company_modules c on c.workspace_id = w.id and c.module = mm.m
     cross join lateral (select case when c.status = 'active' then c.paid_until else coalesce(c.trial_ends, w.created_at::date + 90) end as te,
                                coalesce(c.status = 'active', false) as paid) z
@@ -4254,7 +4367,7 @@ begin
   return (select coalesce(json_agg(x order by x.created_at desc), '[]') from (
     select w.id, w.name, w.company_code, w.country, w.kind, w.created_at, w.status, public.staff_name(w.hq_owner) as hq_owner_name,
       o.display_name as owner_name, u.email::text as owner_email, u.email_confirmed_at is not null as email_verified,
-      exists (select 1 from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) mm(m)
+      exists (select 1 from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) mm(m)
               where (public.module_state(w.id, mm.m) ->> 'status') in ('trial', 'active')) as on_trial,
       exists (select 1 from devices dv where dv.workspace_id = w.id) as pc_linked,
       exists (select 1 from devices dv where dv.workspace_id = w.id and dv.programs_at is not null
@@ -4623,7 +4736,8 @@ drop policy if exists rx_read on public.message_reactions;
 create policy rx_read on public.message_reactions for select to authenticated using (public.can_see_channel(channel_id));
 drop policy if exists rx_add on public.message_reactions;
 create policy rx_add on public.message_reactions for insert to authenticated
-  with check (user_id = auth.uid() and public.can_see_channel(channel_id));
+  with check (user_id = auth.uid() and public.can_see_channel(channel_id)
+              and public.calls_allowed((select workspace_id from public.channels where id = channel_id)));
 drop policy if exists rx_remove on public.message_reactions;
 create policy rx_remove on public.message_reactions for delete to authenticated using (user_id = auth.uid());
 grant select, insert, delete on public.message_reactions to authenticated;
@@ -4698,7 +4812,8 @@ drop trigger if exists messages_files_guard on public.messages;
 create trigger messages_files_guard before insert or update on public.messages for each row execute function public.messages_files_guard();
 
 -- ---------------------------------------------------------------- file storage for each business (Riyeser Link files)
--- 2 GB per business on free chat, 20 GB with Riyeser Link Plus (trial or paid), plus any extra HQ grants (extra_storage_gb).
+-- 20 GB per business with Riyeser Link (trial or paid), plus any extra HQ grants (extra_storage_gb). While Link is off,
+-- nothing new can be uploaded (files already there stay, and can still be opened).
 -- An upload that would take the business over is refused (link_files_add below). Nothing is ever deleted automatically.
 alter table public.workspaces add column if not exists extra_storage_gb int not null default 0;
 do $$ begin
@@ -4719,15 +4834,15 @@ begin
   end if;
   return n;
 end $$;
--- The business's limit in bytes: 2 GB, or 20 GB while Riyeser Link Plus is on, plus extra granted by HQ.
+-- The business's limit in bytes: 20 GB with Riyeser Link, plus extra granted by HQ.
 create or replace function public.link_storage_limit(ws uuid) returns bigint
   language sql stable security definer set search_path = public as $$
-  select ((case when public.calls_allowed(ws) then 20 else 2 end) + coalesce((select extra_storage_gb from workspaces where id = ws), 0))::bigint * 1073741824
+  select (20 + coalesce((select extra_storage_gb from workspaces where id = ws), 0))::bigint * 1073741824
 $$;
 -- Is there room for a file of this many bytes? (anyone in the business; the app asks before it uploads)
 create or replace function public.link_storage_fits(ws uuid, size bigint) returns boolean
   language sql stable security definer set search_path = public as $$
-  select public.link_storage_used(ws) + greatest(coalesce(size, 0), 0) <= public.link_storage_limit(ws)
+  select public.calls_allowed(ws) and public.link_storage_used(ws) + greatest(coalesce(size, 0), 0) <= public.link_storage_limit(ws)
 $$;
 -- The same for the upload rule, from the file's path and Storage's metadata (size in bytes). Internal.
 create or replace function public.link_storage_fits_path(path text, meta jsonb) returns boolean
@@ -5016,6 +5131,10 @@ create table if not exists public.billing_orders (
   updated_at timestamptz not null default now()
 );
 create index if not exists billing_orders_ws on public.billing_orders (workspace_id, created_at desc);
+-- Pricing v2: users per program ({module: count}), POS tills, and the bundle the price came from.
+alter table public.billing_orders add column if not exists users jsonb;
+alter table public.billing_orders add column if not exists tills int not null default 1;
+alter table public.billing_orders add column if not exists bundle text;
 -- The first charge (S10): the end of the free trial (or of what's paid), or today. PayPal starts billing then (start_time).
 alter table public.billing_orders add column if not exists starts_on date;
 create table if not exists public.billing_payments (
@@ -5087,7 +5206,7 @@ create trigger billing_entities_keep before update or delete on public.billing_e
 create or replace function public.billing_mods(mods text[]) returns text[]
   language sql immutable set search_path = public as $$
   select coalesce(array_agg(u.m order by u.ord), '{}'::text[])
-  from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) with ordinality u(m, ord)
+  from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) with ordinality u(m, ord)
   where u.m = any (coalesce(mods, '{}'::text[])) and not (u.m = 'basic' and 'plus' = any (mods))
 $$;
 -- "…AB12CD": PayPal's ids in HQ, all but the last 6 characters hidden.
@@ -5103,13 +5222,24 @@ create or replace function public.billing_entity_now() returns billing_entities
 $$;
 -- What this business would pay: the regular amount, and the early bird price for its first 12 months if it has it
 -- (or can still get it: fewer than 100 businesses have it and this one hasn't paid before).
-create or replace function public.billing_terms(ws uuid, mods text[], people int, billing_period text) returns json
+-- users: {module: users} (anyone missing: people); Riyeser Link counts at least everyone in the business (the free
+-- accountant left out). tills: POS checkout counters (1 included). Bundles are applied by riyeser_plan.
+drop function if exists public.billing_terms(uuid, text[], int, text);
+create or replace function public.billing_terms(ws uuid, mods text[], people int, billing_period text, users jsonb default null, tills int default 1) returns json
   language plpgsql stable security definer set search_path = public as $$
 declare m text[] := billing_mods(mods); p int := least(greatest(coalesce(people, 3), 1), 500); regular numeric; half numeric;
-  eb boolean := false; since date; months int; cycles int := 0; charge date;
+  eb boolean := false; since date; months int; cycles int := 0; charge date; u jsonb := '{}'::jsonb; mx text; n int; plan jsonb;
+  t int := least(greatest(coalesce(tills, 1), 1), 100);
 begin
   if billing_period is null or billing_period not in ('monthly', 'yearly') then raise exception 'Choose monthly or yearly.'; end if;
-  regular := riyeser_bill(m, p, 0, billing_period, false);
+  foreach mx in array m loop
+    n := case when users is not null and jsonb_typeof(users) = 'object' and jsonb_typeof(users -> mx) = 'number' then (users ->> mx)::numeric::int else p end;
+    n := least(greatest(n, 1), 500);
+    if mx = 'calls' then n := greatest(n, link_people(ws)); end if;
+    u := u || jsonb_build_object(mx, n);
+  end loop;
+  plan := riyeser_plan(m, p, u, t, 0, billing_period, false);
+  regular := (plan ->> 'total')::numeric;
   -- When the first payment is due (S10): never during a free trial. The earliest of each program's trial end (or the end
   -- of what's already paid); today when one of them has nothing left. billing_extend counts paid time from the same dates.
   select coalesce(min(greatest(current_date, case when s ->> 'status' = 'trial' then (s ->> 'trial_ends')::date
@@ -5123,7 +5253,7 @@ begin
     since := current_date;
   end if;
   if eb and regular > 0 then
-    half := riyeser_bill(m, p, 0, billing_period, true);
+    half := (riyeser_plan(m, p, u, t, 0, billing_period, true) ->> 'total')::numeric;
     months := (extract(year from age(current_date, since)) * 12 + extract(month from age(current_date, since)))::int;
     cycles := case when billing_period = 'yearly' then 1 else greatest(1, 12 - months) end;
   else eb := false; end if;
@@ -5131,9 +5261,9 @@ begin
     'early_bird', eb, 'first_amount', half, 'early_cycles', cycles, 'due_now', coalesce(half, regular),
     'charge_from', charge, 'charged_today', charge <= current_date,
     'users_included', riyeser_price('users_included'), 'extra_user', riyeser_price('extra_user'),
-    'lines', (select coalesce(json_agg(json_build_object('module', x, 'name', module_label(x), 'price', riyeser_price(x),
-        'extra_users', greatest(0, p - riyeser_price('users_included')::int),
-        'monthly', riyeser_bill(array[x], p, 0, 'monthly', false)) order by o), '[]') from unnest(m) with ordinality t(x, o)));
+    'tills_included', riyeser_price('tills_included'), 'extra_till', riyeser_price('extra_till'),
+    'users', u, 'tills', plan -> 'tills', 'bundle', plan ->> 'bundle', 'bundle_saves', (plan ->> 'bundle_saves')::numeric,
+    'lines', plan -> 'lines');
 end $$;
 
 -- The owner of the business (signed in; two-step sign-in is only needed to cancel).
@@ -5148,6 +5278,7 @@ create or replace function public.billing_order_json(o billing_orders, masked bo
   language sql stable security definer set search_path = public as $$
   select json_build_object('id', o.id, 'ref', o.ref, 'method', o.method, 'modules', to_json(o.modules),
     'module_names', (select json_agg(module_label(x)) from unnest(o.modules) x), 'people', o.people, 'billing', o.billing,
+    'users', o.users, 'tills', o.tills, 'bundle', o.bundle,
     'amount', o.amount, 'first_amount', o.first_amount, 'early_bird', o.early_bird, 'early_cycles', o.early_cycles,
     'total', coalesce(o.first_amount, o.amount), 'currency', o.currency, 'status', o.status, 'due_date', o.due_date,
     'next_charge_at', o.next_charge_at, 'starts_on', o.starts_on,
@@ -5175,7 +5306,8 @@ $$;
 -- "Accounting Basics, Payroll · 1 person · monthly"
 create or replace function public.billing_what(o billing_orders) returns text
   language sql stable security definer set search_path = public as $$
-  select array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ') || ' · ' || o.people
+  select coalesce((select b.name || ': ' from riyeser_bundles() b where b.id = o.bundle), '')
+    || array_to_string(array(select module_label(x) from unnest(o.modules) x), ', ') || ' · ' || o.people
     || case when o.people = 1 then ' person' else ' people' end || ' · ' || o.billing
 $$;
 -- The business as it is now (for a document being issued): its details and the owner as the contact person.
@@ -5192,13 +5324,16 @@ $$;
 create or replace function public.billing_lines(o billing_orders) returns jsonb
   language plpgsql stable security definer set search_path = public as $$
 declare k int := case when o.billing = 'yearly' then 10 else 1 end; inc int := riyeser_price('users_included')::int;
-  extra int := greatest(0, o.people - riyeser_price('users_included')::int); rows jsonb := '[]'::jsonb; tot numeric := 0; x text; v numeric;
+  extra int; tills int; rows jsonb := '[]'::jsonb; tot numeric := 0; l jsonb; v numeric;
 begin
-  foreach x in array billing_mods(o.modules) loop
-    v := riyeser_bill(array[x], o.people, 0, 'monthly', false) * k; tot := tot + v;
-    rows := rows || jsonb_build_array(jsonb_build_object('text', module_label(x)
-      || case when extra > 0 then ', with ' || extra || ' extra ' || case when extra = 1 then 'person' else 'people' end || ' × ' || billing_money(riyeser_price('extra_user'))
-              else ', ' || inc || ' people included' end
+  for l in select * from jsonb_array_elements(riyeser_plan(o.modules, o.people, o.users, o.tills, 0, 'monthly', false) -> 'lines') loop
+    v := (l ->> 'monthly')::numeric * k; tot := tot + v; extra := (l ->> 'extra_users')::int; tills := (l ->> 'extra_tills')::int;
+    rows := rows || jsonb_build_array(jsonb_build_object('text', (l ->> 'name')
+      || case when l ? 'bundle' then ' (' || array_to_string(array(select module_label(y) from jsonb_array_elements_text(l -> 'modules') y), ', ') || ')' else '' end
+      || case when extra > 0 then ', with ' || extra || ' extra ' || case when extra = 1 then 'user' else 'users' end || ' × ' || billing_money(riyeser_price('extra_user'))
+              when l ->> 'module' = 'pos' then ', unlimited cashiers'
+              else ', ' || inc || ' users included' || case when l ? 'bundle' then ' in each program' else '' end end
+      || case when tills > 0 then ', ' || tills || ' extra ' || case when tills = 1 then 'till' else 'tills' end || ' × ' || billing_money(riyeser_price('extra_till')) else '' end
       || case when k = 10 then ' (a year: 10 months)' else ' (a month)' end, 'amount', v));
   end loop;
   if abs(tot - o.amount) > 0.005 then rows := jsonb_build_array(jsonb_build_object('text', 'Riyeser: ' || billing_what(o), 'amount', o.amount)); end if;
@@ -5302,9 +5437,12 @@ begin
   update billing_orders set paid_through = latest, grace_until = null, updated_at = now(),
     status = case when o.method = 'bank' then 'paid' when o.status = 'cancelled' then 'cancelled' else 'active' end,
     paid_at = coalesce(paid_at, now()) where id = oid;
-  insert into company_plans (workspace_id, extra_users, billing, early_bird, early_bird_since)
-    values (o.workspace_id, greatest(0, o.people - 3), o.billing, o.early_bird, case when o.early_bird then current_date end)
+  insert into company_plans (workspace_id, extra_users, billing, early_bird, early_bird_since, users, tills)
+    values (o.workspace_id, greatest(0, o.people - 3), o.billing, o.early_bird, case when o.early_bird then current_date end, o.users,
+            case when 'pos' = any (o.modules) then o.tills else 1 end)
   on conflict (workspace_id) do update set extra_users = greatest(company_plans.extra_users, excluded.extra_users), billing = excluded.billing,
+    users = case when jsonb_typeof(excluded.users) = 'object' then coalesce(company_plans.users, '{}'::jsonb) || excluded.users else company_plans.users end,
+    tills = case when 'pos' = any (o.modules) then excluded.tills else company_plans.tills end,
     early_bird = company_plans.early_bird or excluded.early_bird,
     early_bird_since = coalesce(company_plans.early_bird_since, excluded.early_bird_since), updated_at = now();
   return latest;
@@ -5330,21 +5468,23 @@ end $$;
 
 -- ---------------------------------------------------------------- the owner (Riyeser home: Add to my plan / Pay, Billing)
 -- The price for a plan, as the database works it out (the website shows the same).
-create or replace function public.billing_quote(ws uuid, mods text[], people int, billing_period text) returns json
+drop function if exists public.billing_quote(uuid, text[], int, text);
+create or replace function public.billing_quote(ws uuid, mods text[], people int, billing_period text, users jsonb default null, tills int default 1) returns json
   language plpgsql stable security definer set search_path = public as $$
 begin
   if not billing_is_owner(ws) then raise exception 'Only the business owner can see prices and pay for Riyeser.'; end if;
-  return billing_terms(ws, mods, people, billing_period);
+  return billing_terms(ws, mods, people, billing_period, users, tills);
 end $$;
 
 -- Start paying: a PayPal subscription (the paypal function finishes it) or a bank transfer invoice.
-create or replace function public.billing_start(ws uuid, mods text[], people int, billing_period text, pay_method text) returns json
+drop function if exists public.billing_start(uuid, text[], int, text, text);
+create or replace function public.billing_start(ws uuid, mods text[], people int, billing_period text, pay_method text, users jsonb default null, tills int default 1) returns json
   language plpgsql security definer set search_path = public as $$
 declare t json; o billing_orders;
 begin
   if not billing_is_owner(ws) then raise exception 'Only the business owner can pay for Riyeser.'; end if;
   if pay_method is null or pay_method not in ('paypal', 'bank') then raise exception 'Choose PayPal or bank transfer.'; end if;
-  t := billing_terms(ws, mods, people, billing_period);
+  t := billing_terms(ws, mods, people, billing_period, users, tills);
   if (t ->> 'amount')::numeric <= 0 then raise exception 'Choose at least one paid program.'; end if;
   if pay_method = 'paypal' and exists (select 1 from billing_orders where workspace_id = ws and method = 'paypal'
       and status in ('active', 'payment_failed', 'suspended')) then
@@ -5354,10 +5494,12 @@ begin
     raise exception 'That''s a lot of tries today. Contact Riyeser and we''ll help.'; end if;
   -- a PayPal payment that was started but never approved is replaced by this one (and by a bank transfer invoice)
   update billing_orders set status = 'void', updated_at = now() where workspace_id = ws and method = 'paypal' and status = 'pending';
-  insert into billing_orders (workspace_id, method, modules, people, billing, amount, first_amount, early_bird, early_cycles, entity_id, due_date, created_by, starts_on)
+  insert into billing_orders (workspace_id, method, modules, people, billing, amount, first_amount, early_bird, early_cycles, entity_id, due_date, created_by, starts_on,
+    users, tills, bundle)
   values (ws, pay_method, array(select json_array_elements_text(t -> 'modules')), (t ->> 'people')::int, billing_period,
     (t ->> 'amount')::numeric, (t ->> 'first_amount')::numeric, (t ->> 'early_bird')::boolean, (t ->> 'early_cycles')::int,
-    (billing_entity_now()).id, case when pay_method = 'bank' then current_date + 14 end, auth.uid(), (t ->> 'charge_from')::date)
+    (billing_entity_now()).id, case when pay_method = 'bank' then current_date + 14 end, auth.uid(), (t ->> 'charge_from')::date,
+    (t -> 'users')::jsonb, coalesce(nullif((t ->> 'tills')::int, 0), 1), t ->> 'bundle')
   returning * into o;
   perform billing_issue_invoice(o.id);
   return billing_order_json(o, false);
@@ -5676,9 +5818,9 @@ end $$;
 
 -- ---------------------------------------------------------------- who can call what
 revoke all on function public.billing_mods(text[]), public.billing_mask(text), public.billing_money(numeric), public.billing_entity_now(),
-  public.billing_terms(uuid, text[], int, text), public.billing_is_owner(uuid), public.billing_order_json(billing_orders, boolean),
+  public.billing_terms(uuid, text[], int, text, jsonb, int), public.billing_is_owner(uuid), public.billing_order_json(billing_orders, boolean),
   public.billing_payment_json(billing_payments, boolean), public.billing_extend(uuid), public.billing_apply_cancel(uuid),
-  public.billing_quote(uuid, text[], int, text), public.billing_start(uuid, text[], int, text, text), public.my_billing(uuid),
+  public.billing_quote(uuid, text[], int, text, jsonb, int), public.billing_start(uuid, text[], int, text, text, jsonb, int), public.my_billing(uuid),
   public.billing_cancel_start(uuid), public.billing_cancel_invoice(uuid, text),
   public.billing_paypal_created(uuid, text, text), public.billing_paypal_cancelled(uuid), public.billing_paypal_config(text),
   public.billing_paypal_config_set(text, text, text), public.billing_paypal_event(text, text, jsonb, text),
@@ -5687,7 +5829,7 @@ revoke all on function public.billing_mods(text[]), public.billing_mask(text), p
   public.billing_mask_email(text), public.billing_doc_email(jsonb, boolean), public.billing_issue_invoice(uuid), public.billing_issue_receipt(bigint, boolean),
   public.hq_billing_resend(text, text, boolean), public.hq_payments_received(int)
   from public, anon, authenticated;
-grant execute on function public.billing_quote(uuid, text[], int, text), public.billing_start(uuid, text[], int, text, text), public.my_billing(uuid),
+grant execute on function public.billing_quote(uuid, text[], int, text, jsonb, int), public.billing_start(uuid, text[], int, text, text, jsonb, int), public.my_billing(uuid),
   public.billing_cancel_start(uuid), public.billing_cancel_invoice(uuid, text),
   public.hq_billing(), public.hq_company_billing(uuid), public.hq_billing_mark_paid(text, text, numeric), public.hq_set_billing_entity(jsonb),
   public.hq_billing_resend(text, text, boolean), public.hq_payments_received(int) to authenticated;
