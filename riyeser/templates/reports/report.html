@@ -7,6 +7,7 @@
 {% if 'asof' in rep.filters %}<div><label>As at</label><input type="date" name="asof" value="{{ p.asof }}"></div>{% endif %}
 {% if 'job' in rep.filters %}<div><label>Job</label><select name="job"><option value="">All</option>{% for j in jobs %}<option value="{{ j.id }}" {{ 'selected' if p.job==j.id }}>{{ j.code }} {{ j.name }}</option>{% endfor %}</select></div>{% endif %}
 <div><button class="btn pri">Run report</button></div></form>{% endif %}
+{% if rep.warning %}<div class="flash error" role="alert">{{ rep.warning }}</div>{% endif %}
 <div class="tbl"><table><tr>{% for c in rep.columns %}<th class="{{ 'n' if not loop.first }}">{{ c }}</th>{% endfor %}</tr>
 {% for r in rep.rows %}<tr class="{{ r.kind }} {{ 'click' if r.link }}" {% if r.link %}data-href="{{ r.link }}"{% endif %}>
 {% for c in r.cells %}{% if c is number %}<td class="n {{ 'neg' if c < 0 }}">{{ c|money }}</td>{% else %}<td class="{{ 'i1' if loop.first and r.indent }}">{{ c }}</td>{% endif %}{% endfor %}</tr>

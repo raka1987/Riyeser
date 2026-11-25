@@ -171,3 +171,102 @@ def test_f11_same_pay_period_twice_is_refused_unless_extra_run(client, app):
     with app.app_context():
         assert get_db().execute("SELECT COUNT(*) FROM payruns").fetchone()[0] == 4
     assert leave > 0
+
+
+# ------------------------------------------------------------------ F13 + S54 + S55
+def _stock_vs_gl(db):
+    from riyeser.ledger import balances
+    value = round(sum(r["qty_on_hand"] * r["avg_cost"] for r in db.execute("SELECT * FROM items WHERE is_inventoried=1")))
+    gl = balances(db).get(db.execute("SELECT id FROM accounts WHERE code='1-1300'").fetchone()[0], 0)
+    return value, gl
+
+
+def _item(db, acc, sku, buy=0):
+    return db.execute("INSERT INTO items (sku, name, is_inventoried, income_account_id, expense_account_id,"
+                      " asset_account_id, sell_price, buy_price) VALUES (?,?,1,?,?,?,1000,?)",
+                      (sku, sku, acc["4-1000"], acc["5-1000"], acc["1-1300"], buy)).lastrowid
+
+
+def test_f13_stock_value_always_equals_the_inventory_account(client, app):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust, sup = _contacts(db)
+        pump = _item(db, acc, "PUMP")
+
+        def bill(item, qty, cost, account=None):
+            return L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-01"),
+                                   [dict(item_id=item, qty=qty, unit_price=cost, tax_code_id=tc["GST"],
+                                         account_id=account)], "open")
+
+        def sell(item, qty):
+            return L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-02"),
+                                   [dict(item_id=item, qty=qty, unit_price=1000, tax_code_id=tc["GST"])], "open")
+        b5 = bill(pump, 10, 500)
+        bill(pump, 10, 700)
+        sell(pump, 5)
+        L.stock_adjust(db, pump, "2026-11-03", -1, memo="Stocktake")        # count 14
+        assert _stock_vs_gl(db) == (8400, 8400)
+        # 1. void a bill after the average has blended: out at the bill's own $5
+        L.void_document(db, b5)
+        assert _stock_vs_gl(db) == (3400, 3400)
+        # 2. sell before you buy, then buy
+        hose = _item(db, acc, "HOSE")
+        sell(hose, 2)
+        bill(hose, 10, 500)
+        assert _stock_vs_gl(db) == (7400, 7400)
+        # 3. a stock item billed to an expense account still goes to Inventory
+        bill(hose, 10, 500, account=acc["6-1500"])
+        assert _stock_vs_gl(db) == (12400, 12400)
+        # a bill whose stock has since been sold can't simply be voided
+        tap = _item(db, acc, "TAP")
+        bt = bill(tap, 2, 500)
+        sell(tap, 1)
+        db.commit()
+        with pytest.raises(L.PostingError, match="already been sold"):
+            L.void_document(db, bt)
+        db.rollback()
+        assert _stock_vs_gl(db) == (12900, 12900)
+    # 4. a stocktake can't be negative
+    r = client.post("/inventory/count", data={"date": "2026-11-04", f"count_{pump}": "-5"}, follow_redirects=True)
+    assert "can&#39;t be below 0" in r.get_data(as_text=True)
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT qty_on_hand FROM items WHERE id=?", (pump,)).fetchone()[0] == 4
+        assert _stock_vs_gl(db) == (12900, 12900)
+    page = client.get("/reports/inventory_valuation").get_data(as_text=True)
+    assert "doesn&#39;t match the Inventory account" not in page
+    # S54: "not stocked" with stock on hand is refused
+    r = client.post(f"/inventory/{pump}/edit", data={"sku": "PUMP", "name": "Pump", "active": "1"},
+                    follow_redirects=True)
+    assert "Stocktake it to 0 first" in r.get_data(as_text=True)
+    with app.app_context():
+        assert get_db().execute("SELECT is_inventoried FROM items WHERE id=?", (pump,)).fetchone()[0] == 1
+    # S55: journals can't post to Inventory, Trade Debtors or Trade Creditors; GST only as a GST adjustment
+    for code in ("1-1300", "1-1200", "2-1200"):
+        r = client.post("/journal/new", data={"date": "2026-11-05", "memo": "x",
+                                              "line_account": [str(acc[code]), str(acc["3-1000"])],
+                                              "line_debit": ["300", ""], "line_credit": ["", "300"]},
+                        follow_redirects=True)
+        assert "can&#39;t post to the" in r.get_data(as_text=True)
+    gst = {"date": "2026-11-05", "memo": "GST fix", "line_account": [str(acc["2-1310"]), str(acc["6-2000"])],
+           "line_debit": ["10", ""], "line_credit": ["", "10"]}
+    assert "can&#39;t post to the GST" in client.post("/journal/new", data=gst, follow_redirects=True).get_data(as_text=True)
+    assert "recorded" in client.post("/journal/new", data=dict(gst, gst_adjustment="1"),
+                                     follow_redirects=True).get_data(as_text=True)
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM journal_entries WHERE source_type='journal'").fetchone()[0] == 1
+        assert _stock_vs_gl(db) == (12900, 12900)
+        # the valuation report shows a red warning if they ever differ
+        L.general_journal(db, "2026-11-05", "forced", [dict(account_id=acc["1-1300"], debit=500),
+                                                       dict(account_id=acc["3-1000"], credit=500)])
+        db.commit()
+    assert "doesn&#39;t match the Inventory account" in client.get("/reports/inventory_valuation").get_data(as_text=True)
+    # S55: the type of a linked account can't be changed
+    r = client.post("/accounts/save", data={"id": acc["1-1200"], "code": "1-1200", "name": "Trade Debtors",
+                                            "type": "expense", "active": "1"},
+                    headers={"Referer": "/accounts"}, follow_redirects=True)
+    assert "type can&#39;t be" in r.get_data(as_text=True)
+    with app.app_context():
+        assert get_db().execute("SELECT type FROM accounts WHERE code='1-1200'").fetchone()[0] == "asset"

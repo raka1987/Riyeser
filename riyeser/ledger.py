@@ -113,20 +113,62 @@ def stock_in(db, item_id, qty, unit_cost, date, source_type, source_id=None, mem
         new_c = (old_q * old_c + qty * unit_cost) / new_q
     else:
         new_c = unit_cost
+    # Stock sold before it was bought (on hand below 0) went out at the last known cost; the units now carry this
+    # purchase's cost, so the difference goes to cost of sales and the Inventory account still matches (F13).
+    correction = round_cents(old_q * old_c + qty * unit_cost - new_q * new_c) if old_q < 0 else 0
     db.execute("UPDATE items SET qty_on_hand=?, avg_cost=? WHERE id=?", (new_q, new_c, item_id))
     db.execute("INSERT INTO stock_movements (item_id, date, qty, unit_cost, source_type, source_id, memo)"
                " VALUES (?,?,?,?,?,?,?)", (item_id, date, qty, unit_cost, source_type, source_id, memo))
+    if correction:
+        _stock_value_entry(db, item, date, correction, item["expense_account_id"] or linked(db, "cogs"),
+                           "Stock cost correction (sold before bought)")
+
+
+def _stock_value_entry(db, item, date, too_high, other_account, memo):
+    """The Inventory account is too_high cents above the stock's value (negative: below): bring it into line."""
+    asset = item["asset_account_id"] or linked(db, "inventory")
+    lines = [dict(account_id=other_account, debit=too_high, memo=memo),
+             dict(account_id=asset, credit=too_high, memo=memo)]
+    eid = post_entry(db, date, f"{memo}: {item['sku']}", "stock_adj", lines)
+    db.execute("UPDATE journal_entries SET source_id=? WHERE id=?", (eid, eid))
+    return eid
+
+
+def last_cost(item):
+    """What a unit costs when there's none on hand to average: the last average cost, else the item's buy price."""
+    return item["avg_cost"] if item["avg_cost"] and item["avg_cost"] > 0 else float(item["buy_price"] or 0)
 
 
 def stock_out(db, item_id, qty, date, source_type, source_id=None, memo=None):
-    """Remove qty at average cost; returns total cost in cents."""
+    """Remove qty at average cost; returns total cost in cents. With nothing on hand to average (selling before
+    buying), the last known cost is used, so cost of sales is never left at $0 (F13)."""
     write_txn(db)
     item = db.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
-    cost = item["avg_cost"]
-    db.execute("UPDATE items SET qty_on_hand=qty_on_hand-? WHERE id=?", (qty, item_id))
+    cost = last_cost(item)
+    db.execute("UPDATE items SET qty_on_hand=qty_on_hand-?, avg_cost=? WHERE id=?", (qty, cost, item_id))
     db.execute("INSERT INTO stock_movements (item_id, date, qty, unit_cost, source_type, source_id, memo)"
                " VALUES (?,?,?,?,?,?,?)", (item_id, date, -qty, cost, source_type, source_id, memo))
     return round_cents(cost * qty)
+
+
+def _unstock_bill(db, m, doc):
+    """Voiding a bill takes its stock out at the bill's own unit cost (the ledger reversal removes exactly that),
+    and re-averages what's left (F13)."""
+    item = db.execute("SELECT * FROM items WHERE id=?", (m["item_id"],)).fetchone()
+    new_q = item["qty_on_hand"] - m["qty"]
+    remaining = item["qty_on_hand"] * item["avg_cost"] - round_cents(m["qty"] * m["unit_cost"])
+    if new_q > 1e-9 and remaining >= 0:
+        new_c, too_high = remaining / new_q, 0
+    else:
+        new_c = item["avg_cost"]
+        too_high = round_cents(remaining - max(new_q, 0) * new_c)
+    db.execute("UPDATE items SET qty_on_hand=?, avg_cost=? WHERE id=?", (max(new_q, 0), new_c, item["id"]))
+    db.execute("INSERT INTO stock_movements (item_id, date, qty, unit_cost, source_type, source_id, memo)"
+               " VALUES (?,?,?,?,?,?,?)", (item["id"], doc["date"], -m["qty"], m["unit_cost"], "void", doc["id"],
+                                           "Void " + doc["number"]))
+    if too_high:
+        _stock_value_entry(db, item, doc["date"], too_high, linked(db, "stock_adjust"),
+                           f"Stock value after voiding {doc['number']}")
 
 
 def stock_adjust(db, item_id, date, qty_change, unit_cost=None, memo="Inventory adjustment", account_id=None):
@@ -141,7 +183,7 @@ def stock_adjust(db, item_id, date, qty_change, unit_cost=None, memo="Inventory 
         value = round_cents(cost * qty_change)
         lines = [dict(account_id=asset, debit=value), dict(account_id=adj_acct, credit=value)]
     else:
-        value = round_cents(item["avg_cost"] * -qty_change)
+        value = round_cents(last_cost(item) * -qty_change)
         lines = [dict(account_id=adj_acct, debit=value), dict(account_id=asset, credit=value)]
     eid = post_entry(db, date, f"{memo}: {item['sku']} {qty_change:+g}", "stock_adj", lines)
     if qty_change > 0:
@@ -188,11 +230,12 @@ def save_document(db, side, header, lines, status, doc_id=None):
             continue
         if l.get("item_id"):
             item = db.execute("SELECT * FROM items WHERE id=?", (l["item_id"],)).fetchone()
-            if not l.get("account_id"):
-                if item["is_inventoried"] and side == "purchase":
-                    l["account_id"] = item["asset_account_id"] or linked(db, "inventory")
-                else:
-                    l["account_id"] = item["income_account_id"] if side == "sale" else item["expense_account_id"]
+            if item["is_inventoried"] and side == "purchase":
+                # a stocked item always goes to its stock (asset) account, so the Inventory account follows the
+                # stock (F13); an expense account picked on the line is ignored
+                l["account_id"] = item["asset_account_id"] or linked(db, "inventory")
+            elif not l.get("account_id"):
+                l["account_id"] = item["income_account_id"] if side == "sale" else item["expense_account_id"]
             if not l.get("description"):
                 l["description"] = item["name"]
         if not l.get("account_id"):
@@ -310,13 +353,21 @@ def void_document(db, doc_id):
     if doc["amount_paid"]:
         raise PostingError("Document has payments applied; void the payments first.")
     if doc["entry_id"]:
+        moves = db.execute("SELECT * FROM stock_movements WHERE source_type IN ('invoice','bill') AND source_id=?",
+                           (doc_id,)).fetchall()
+        for m in moves:
+            if m["qty"] > 0:
+                it = db.execute("SELECT sku, qty_on_hand FROM items WHERE id=?", (m["item_id"],)).fetchone()
+                if it["qty_on_hand"] < m["qty"] - 1e-9:
+                    raise PostingError(
+                        f"Some of {it['sku']} on this bill has already been sold or used ({it['qty_on_hand']:g} left "
+                        f"of {m['qty']:g}). Enter a supplier credit or a stock adjustment instead of voiding.")
         reverse_entry(db, doc["entry_id"])
-        for m in db.execute("SELECT * FROM stock_movements WHERE source_type IN ('invoice','bill') AND source_id=?",
-                            (doc_id,)).fetchall():
+        for m in moves:
             if m["qty"] < 0:
                 stock_in(db, m["item_id"], -m["qty"], m["unit_cost"], doc["date"], "void", doc_id, "Void " + doc["number"])
             else:
-                stock_out(db, m["item_id"], m["qty"], doc["date"], "void", doc_id, "Void " + doc["number"])
+                _unstock_bill(db, m, doc)
     db.execute("UPDATE documents SET status='void' WHERE id=?", (doc_id,))
     audit(db, "void_document", doc["number"])
 
@@ -427,6 +478,39 @@ def transfer(db, from_id, to_id, date, amount, memo=None):
                      [dict(account_id=to_id, debit=amount), dict(account_id=from_id, credit=amount)])
     audit(db, "transfer", fmt_money(amount))
     return eid
+
+
+def control_accounts(db):
+    """{account_id: (what it is, what to use instead)} for accounts other records keep in step (S55): customers'
+    and suppliers' balances, stock, and GST."""
+    out = {}
+    for key, what, use in (("receivables", "Trade Debtors", "an invoice, a credit or a customer payment"),
+                           ("payables", "Trade Creditors", "a bill, a credit or a supplier payment"),
+                           ("inventory", "Inventory", "a bill, a sale or a stock adjustment"),
+                           ("gst_collected", "GST", "an invoice or bill with a tax code"),
+                           ("gst_paid", "GST", "an invoice or bill with a tax code")):
+        row = db.execute("SELECT account_id FROM linked_accounts WHERE key=?", (key,)).fetchone()
+        if row:
+            out.setdefault(row["account_id"], (what, use))
+    for r in db.execute("SELECT DISTINCT asset_account_id a FROM items WHERE is_inventoried=1 AND asset_account_id"
+                        " IS NOT NULL"):
+        out.setdefault(r["a"], ("Inventory", "a bill, a sale or a stock adjustment"))
+    for r in db.execute("SELECT collected_account_id c, paid_account_id p FROM tax_codes"):
+        for a in (r["c"], r["p"]):
+            if a:
+                out.setdefault(a, ("GST", "an invoice or bill with a tax code"))
+    return out
+
+
+def check_journal_lines(db, lines, gst_ok=False):
+    """Journals can't post straight to Trade Debtors, Trade Creditors or Inventory: the customer/supplier balances
+    and stock wouldn't follow (S55). GST accounts only when it's deliberately a GST adjustment."""
+    ctl = control_accounts(db)
+    for l in lines:
+        hit = ctl.get(l.get("account_id"))
+        if hit and (l.get("debit") or l.get("credit")) and not (gst_ok and hit[0] == "GST"):
+            extra = " (or tick \"This is a GST adjustment\")" if hit[0] == "GST" else ""
+            raise PostingError(f"A journal can't post to the {hit[0]} control account: use {hit[1]}{extra}.")
 
 
 def general_journal(db, date, memo, lines, reference=None):

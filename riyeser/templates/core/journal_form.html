@@ -14,5 +14,7 @@
 <template><tr><td>{{ account_select('line_account', accounts) }}</td><td><input name="line_debit" class="right"></td><td><input name="line_credit" class="right"></td>
 <td>{{ tax_select('line_tax', tax_codes) }}</td><td>{{ job_select('line_job', jobs) }}</td><td><input name="line_memo"></td><td><button type="button" class="btn sm del-row">✕</button></td></tr></template>
 <p><button type="button" class="btn sm" data-add-row="#jl">+ Add line</button></p>
+<p class="muted">Trade Debtors, Trade Creditors and Inventory can't be used here: their customer, supplier and stock records wouldn't follow. Use an invoice, bill, payment or stock adjustment.</p>
+<p><label style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" name="gst_adjustment" value="1"> This is a GST adjustment (lets the journal use the GST accounts)</label></p>
 <button class="btn pri">Record</button></form>
 {% endblock %}

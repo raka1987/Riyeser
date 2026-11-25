@@ -2,7 +2,7 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, g, abort
 
 from ..db import get_db, audit, to_cents, linked
-from ..ledger import general_journal, reverse_entry, balances, fy_start, PostingError
+from ..ledger import general_journal, reverse_entry, balances, fy_start, PostingError, check_journal_lines
 from . import lookups, opt_int, form_lines, guarded, admin_only
 from ..perms import can, PAYROLL_SOURCES
 
@@ -74,6 +74,13 @@ def save_account():
     if not vals[0] or not vals[1]:
         raise ValueError("Code and name are required.")
     if aid:
+        old = db.execute("SELECT * FROM accounts WHERE id=?", (aid,)).fetchone()
+        used = db.execute("SELECT key FROM linked_accounts WHERE account_id=? UNION SELECT 'tax' FROM tax_codes"
+                          " WHERE collected_account_id=? OR paid_account_id=?", (aid, aid, aid)).fetchone()
+        if old and used and old["type"] != vals[2]:
+            # S55: a linked account (Trade Debtors, GST, Wages...) keeps its type, or the reports put it in the wrong place
+            raise ValueError(f"{old['code']} {old['name']} is used automatically by Riyeser, so its type can't be "
+                             f"changed. Link another account first (Setup, Linked accounts).")
         db.execute("UPDATE accounts SET code=?, name=?, type=?, is_bank=?, tax_code_id=?, description=?, active=?"
                    " WHERE id=?", vals + (aid,))
     else:
@@ -146,6 +153,7 @@ def _save_journal():
             continue
         lines.append(dict(account_id=int(l["account"]), debit=to_cents(l["debit"]), credit=to_cents(l["credit"]),
                           tax_code_id=opt_int(l["tax"]), job_id=opt_int(l["job"]), memo=l["memo"]))
+    check_journal_lines(db, lines, gst_ok=bool(request.form.get("gst_adjustment")))
     eid = general_journal(db, request.form["date"], request.form.get("memo"), lines, request.form.get("reference"))
     flash(f"Journal #{eid} recorded.", "ok")
     return redirect(url_for("core.entry", eid=eid))

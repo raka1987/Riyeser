@@ -354,10 +354,17 @@ def rpt_inventory_valuation(db, p):
         tot += v
         rows.append(R([i["sku"], i["name"], f"{i['qty_on_hand']:g}", round(i["avg_cost"]), v],
                       link=url_for("inventory.view", iid=i["id"])))
-    gl = balances(db).get(linked(db, "inventory"), 0)
+    accts = {linked(db, "inventory")} | {r[0] for r in db.execute(
+        "SELECT DISTINCT asset_account_id FROM items WHERE is_inventoried=1 AND asset_account_id IS NOT NULL")}
+    b = balances(db)
+    gl = sum(b.get(a, 0) for a in accts)
     rows.append(R(["", "Total inventory value", "", "", tot], "grand"))
     rows.append(R(["", "Inventory GL account balance", "", "", gl], "total"))
-    return dict(columns=["SKU", "Item", "On hand", "Avg cost", "Value"], rows=rows, subtitle="Current", filters=[])
+    rep = dict(columns=["SKU", "Item", "On hand", "Avg cost", "Value"], rows=rows, subtitle="Current", filters=[])
+    if gl != tot:
+        rep["warning"] = (f"The stock value ({fmt_money(tot)}) doesn't match the Inventory account ({fmt_money(gl)}): "
+                          f"{fmt_money(gl - tot)} out. Check journals or bills posted to the Inventory account.")
+    return rep
 
 
 def rpt_reorder(db, p):

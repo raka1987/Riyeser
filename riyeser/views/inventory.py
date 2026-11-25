@@ -48,6 +48,11 @@ def _save(iid):
             opt_int(f.get("asset_account_id")) if inv else None, opt_int(f.get("sale_tax_code_id")),
             opt_int(f.get("purchase_tax_code_id")), opt_float(f.get("reorder_level")), 1 if f.get("active") else 0)
     if iid:
+        old = db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
+        if old and old["is_inventoried"] and not inv and abs(old["qty_on_hand"]) > 1e-9:
+            # S54: the stock value would vanish while the Inventory account keeps it
+            raise ValueError(f"{old['sku']} has {old['qty_on_hand']:g} on hand. Stocktake it to 0 first, then untick "
+                             f"\"I inventory this item\".")
         db.execute("UPDATE items SET sku=?, name=?, description=?, is_sold=?, is_bought=?, is_inventoried=?,"
                    " sell_price=?, buy_price=?, income_account_id=?, expense_account_id=?, asset_account_id=?,"
                    " sale_tax_code_id=?, purchase_tax_code_id=?, reorder_level=?, active=? WHERE id=?", vals + (iid,))
@@ -139,7 +144,13 @@ def _save_count(items):
         v = request.form.get(f"count_{it['id']}", "").strip()
         if v == "":
             continue
-        diff = round(float(v) - it["qty_on_hand"], 4)
+        try:
+            counted = float(v)
+        except ValueError:
+            raise ValueError(f"{it['sku']}: enter the count as a number.")
+        if counted < 0:
+            raise ValueError(f"{it['sku']}: a count can't be below 0.")  # F13
+        diff = round(counted - it["qty_on_hand"], 4)
         if diff:
             stock_adjust(db, it["id"], request.form["date"], diff, None, "Stocktake")
             n += 1
