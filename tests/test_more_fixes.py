@@ -945,3 +945,11 @@ def test_s51_booking_reminders_queued_the_day_before_or_a_prepared_email(tmp_pat
     assert "Send reminder</button>" in page(c.get(f"/bookings/{bid}"))
     r = c.post(f"/bookings/{bid}/remind", follow_redirects=True)
     assert "Emailed to guest@coral.test" in page(r) and "10:00" in smtp.sent[-1]["Subject"]
+
+
+def test_version_is_the_same_in_the_package_and_pyproject():
+    import re
+    from pathlib import Path
+    import riyeser
+    toml = (Path(__file__).parent.parent / "pyproject.toml").read_text()
+    assert re.search(r'^version = "(.+)"', toml, re.M).group(1) == riyeser.__version__
