@@ -22,6 +22,7 @@
 <div class="nb"><label>Opening balance date</label><input type="date" name="opening_date"></div>
 <div class="wide"><label>Description</label><input name="description" id="af-desc"></div>
 <label class="check"><input type="checkbox" name="is_bank" value="1" id="af-bank"> Bank / credit card account</label>
+<label class="check"><input type="checkbox" name="confirm_unbank" value="1"> Hide it anyway (if unticking bank account on one with money in it)</label>
 <label class="check"><input type="checkbox" name="active" value="1" id="af-active" checked> Active</label>
 <div><button class="btn pri">Save account</button> <a class="btn" href="{{ url_for('core.accounts') }}">Clear</a></div>
 </form></div>

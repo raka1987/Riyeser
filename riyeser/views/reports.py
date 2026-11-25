@@ -58,10 +58,18 @@ def _accounts(db):
 
 
 # ------------------------------------------------------------------ accounts reports
+def year_back(d):
+    """The same calendar date a year earlier (29 Feb becomes 28 Feb)."""
+    x = date.fromisoformat(d)
+    try:
+        return x.replace(year=x.year - 1).isoformat()
+    except ValueError:
+        return x.replace(year=x.year - 1, day=28).isoformat()
+
+
 def rpt_pnl(db, p):
     bal = balances(db, start=p["start"], end=p["end"], job_id=p["job"])
-    prior_start = add_days(p["start"], -365)
-    prior = balances(db, start=prior_start, end=add_days(p["end"], -365), job_id=p["job"])
+    prior = balances(db, start=year_back(p["start"]), end=year_back(p["end"]), job_id=p["job"])  # M12
     rows, totals, ptotals = [], {}, {}
     for typ, label in SECTIONS_PL:
         accts = [a for a in _accounts(db) if a["type"] == typ and (bal.get(a["id"]) or prior.get(a["id"]))]
@@ -276,7 +284,8 @@ def rpt_gst(db, p):
 
 def rpt_gst_detail(db, p):
     rows = []
-    for t in db.execute("SELECT * FROM tax_codes ORDER BY code").fetchall():
+    # M11: not-reportable amounts (owner's capital, transfers, loans) aren't sales or purchases for GST
+    for t in db.execute("SELECT * FROM tax_codes WHERE kind<>'not_reportable' ORDER BY code").fetchall():
         r = db.execute("SELECT COALESCE(SUM(CASE WHEN a.type IN ('income','other_income') THEN l.credit-l.debit END),0) s,"
                        " COALESCE(SUM(CASE WHEN a.type NOT IN ('income','other_income') THEN l.debit-l.credit END),0) pu"
                        " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id JOIN accounts a"
@@ -301,9 +310,14 @@ def _aged(db, p, side):
     paid = {r["document_id"]: r["amt"] for r in db.execute(
         "SELECT a.document_id, SUM(a.amount) amt FROM payment_allocations a JOIN payments pm ON pm.id=a.payment_id"
         " WHERE pm.voided=0 AND pm.date<=? GROUP BY a.document_id", (p["asof"],))}
+    # credit notes and unapplied payments used on invoices, or refunded (S17, S43), by then
+    used_on = {r[0]: r[1] for r in db.execute("SELECT document_id, SUM(amount) FROM credit_uses WHERE voided=0 AND"
+                                               " document_id IS NOT NULL AND date<=? GROUP BY document_id", (p["asof"],))}
+    used_of = {r[0]: r[1] for r in db.execute("SELECT credit_id, SUM(amount) FROM credit_uses WHERE voided=0 AND"
+                                               " date<=? GROUP BY credit_id", (p["asof"],))}
     by_contact = {}
     for d in docs:
-        due = d["total"] - paid.get(d["id"], 0)
+        due = d["total"] - paid.get(d["id"], 0) - used_on.get(d["id"], 0) + used_of.get(d["id"], 0)
         if due == 0:
             continue  # credits (negative balances) are kept, so the total matches Trade Debtors / Creditors (S27)
         days = (date.fromisoformat(p["asof"]) - date.fromisoformat(d["due_date"] or d["date"])).days

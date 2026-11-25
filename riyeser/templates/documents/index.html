@@ -15,5 +15,6 @@
 {% for d in rows %}<tr class="click" data-href="{{ url_for('documents.view', doc_id=d.id) }}"><td><b>{{ d.number }}</b></td><td>{{ d.date }}</td><td>{{ d.cname }}</td><td>{{ d.reference or '' }}</td>
 <td>{{ d.due_date or '' }}</td><td>{{ st(d, today) }}</td><td class="n">{{ d.total|money }}</td><td class="n">{{ (d.total-d.amount_paid)|money0 if d.status=='open' }}</td></tr>
 {% else %}<tr><td colspan="8" class="muted">Nothing here.</td></tr>{% endfor %}
+{% if capped %}<tr><td colspan="8" class="muted">Showing the latest 500. Search for a number or {{ L.contact|lower }} to see older ones.</td></tr>{% endif %}
 {% if rows %}<tr class="grand"><td colspan="6">{{ rows|length }} documents</td><td class="n">{{ rows|sum(attribute='total')|money }}</td><td></td></tr>{% endif %}</table></div>
 {% endblock %}

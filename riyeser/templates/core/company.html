@@ -31,7 +31,7 @@
 <label class="check"><input type="checkbox" name="gst_registered" value="1" {{ 'checked' if company.gst_registered }}> Registered for GST</label>
 <div><label>Invoice prefix</label><input name="invoice_prefix" value="{{ company.invoice_prefix }}"></div>
 <div><label>Next invoice no.</label><input type="number" name="next_invoice_no" value="{{ company.next_invoice_no }}"></div>
-<div><label>Bill / PO prefix</label><input name="bill_prefix" value="{{ company.bill_prefix }}"></div>
+<div><label>Bill prefix</label><input name="bill_prefix" value="{{ company.bill_prefix }}"></div>
 <div><label>Next bill no.</label><input type="number" name="next_bill_no" value="{{ company.next_bill_no }}"></div></div></div>
 <div class="card"><h3>Default accounts</h3><p class="muted">Control accounts used automatically by sales, purchases, inventory and payroll.</p><div class="fields">
 {% for l in linked_rows %}<div><label>{{ l.key.replace('_',' ')|title }}</label>{{ account_select('linked_' ~ l.key, accounts, l.account_id, blank=False) }}</div>{% endfor %}</div></div>

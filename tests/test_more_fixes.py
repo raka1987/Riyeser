@@ -723,3 +723,145 @@ def test_f3_readme_has_the_90_day_trial_wording_and_no_old_caps_or_prices():
     text = (Path(__file__).parent.parent / "README.md").read_text()
     assert "first 50 invoices" not in text and "first 500 sales" not in text and "50 invoices" not in text
     assert "Free for 90 days" in text and "US$" not in text
+
+
+# ------------------------------------------------------------------ M items
+def _setup_sale(app):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust, sup = _contacts(db)
+        db.commit()
+    return acc, tc, cust, sup
+
+
+def test_m2_huge_amounts_are_checked_first(client, app):
+    acc, tc, cust, _ = _setup_sale(app)
+    form = _inv_form(cust, [dict(description="x", qty="1", price="99999999999", account=acc["4-1000"], tax=tc["GST"])])
+    r = client.post("/sale/new", data=form, headers={"Referer": "/sale/new"}, follow_redirects=True)
+    assert "far more than this business" in page(r)
+    client.post("/sale/new", data=dict(form, amount_checked="1"))
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 1
+
+
+def test_m10_after_the_trial_a_typed_invoice_is_kept_as_a_quote(client, app, monkeypatch):
+    from riyeser.views import documents as D
+    acc, tc, cust, _ = _setup_sale(app)
+    monkeypatch.setattr(D, "_free_invoices_capped", lambda db: True)
+    r = client.post("/sale/new", data=_inv_form(cust, [dict(description="x", qty="1", price="5", account=acc["4-1000"],
+                                                             tax=tc["GST"])]), follow_redirects=True)
+    assert "saved as quote Q00001" in page(r)
+    with app.app_context():
+        assert get_db().execute("SELECT status FROM documents").fetchone()[0] == "quote"
+
+
+def test_m11_m12_gst_detail_and_last_year(app):
+    from tests.test_batch2 import _report
+    from riyeser.views.reports import year_back
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        L.general_journal(db, "2026-11-02", "Capital", [dict(account_id=acc["1-1110"], debit=498500, tax_code_id=tc["N-T"]),
+                                                       dict(account_id=acc["3-1000"], credit=498500, tax_code_id=tc["N-T"])])
+        db.commit()
+    rep = _report(app, "gst_detail", start="2026-11-01", end="2026-11-30")
+    assert all(r["cells"][0] != "N-T" for r in rep["rows"])
+    assert year_back("2028-07-01") == "2027-07-01" and year_back("2028-02-29") == "2027-02-28"
+
+
+def test_m13_bills_have_their_own_prefix_and_purchase_orders_keep_po(client, app):
+    acc, tc, _cust, sup = _setup_sale(app)
+    with app.app_context():
+        db = get_db()
+        line = [dict(description="x", qty=1, unit_price=100, account_id=acc["6-1500"])]
+        b = L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-20"), line, "open")
+        po = L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-20"), line, "order")
+        num = lambda i: db.execute("SELECT number FROM documents WHERE id=?", (i,)).fetchone()[0]
+        assert num(b) == "BILL00001" and num(po) == "PO00001"
+        L.convert_document(db, po, "open")
+        assert num(po) == "BILL00002"
+
+
+def test_m14_stock_adjustment_needs_a_cost_and_counts_must_be_numbers(client, app):
+    acc, tc, _c, _s = _setup_sale(app)
+    with app.app_context():
+        db = get_db()
+        bolt = db.execute("INSERT INTO items (sku, name, is_inventoried, asset_account_id) VALUES ('BOLT','Bolt',1,?)",
+                          (acc["1-1300"],)).lastrowid
+        db.commit()
+    r = client.post(f"/inventory/{bolt}/adjust", data={"date": "2026-11-20", "qty": "5"},
+                    headers={"Referer": f"/inventory/{bolt}"}, follow_redirects=True)
+    assert "enter a unit cost" in page(r)
+    r = client.post("/inventory/count", data={"date": "2026-11-20", f"count_{bolt}": "ten"},
+                    headers={"Referer": "/inventory/count"}, follow_redirects=True)
+    assert "Count for BOLT must be a number" in page(r)
+
+
+def test_m17_m19_payment_date_and_account_are_checked(client, app):
+    acc, tc, cust, _ = _setup_sale(app)
+    with app.app_context():
+        db = get_db()
+        inv = L.save_document(db, "sale", dict(contact_id=cust, date="2026-09-01"),
+                              [dict(description="x", qty=1, unit_price=1000, account_id=acc["4-1000"])], "open")
+        db.commit()
+    base = {"contact_id": cust, "bank_account_id": acc["1-1110"], "date": "2026-01-01", f"alloc_{inv}": "10"}
+    r = client.post("/sale/pay", data=base, headers={"Referer": "/sale/pay"}, follow_redirects=True)
+    assert "is before the date of INV00001" in page(r)
+    r = client.post("/sale/pay", data=dict(base, date="2026-09-05", bank_account_id=acc["4-1000"]),
+                    headers={"Referer": "/sale/pay"}, follow_redirects=True)
+    assert "Choose a bank or credit card account" in page(r)
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 0
+    client.post("/sale/pay", data=dict(base, date_ok="1"))
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM payments").fetchone()[0] == 1
+
+
+def test_m18_lock_date_changes_are_recorded(client, app):
+    with app.app_context():
+        db = get_db()
+        f = {k: v for k, v in dict(db.execute("SELECT * FROM company").fetchone()).items() if v is not None}
+    client.post("/setup/company", data=dict(f, lock_date="2026-09-30"))
+    client.post("/setup/company", data=dict(f, lock_date=""))
+    with app.app_context():
+        log = [r[0] for r in get_db().execute("SELECT details FROM audit_log WHERE action='lock_date' ORDER BY id")]
+    assert log == ["Lock date changed from (none) to 30/09/2026 by admin",
+                   "Lock date changed from 30/09/2026 to (none) by admin"]
+
+
+def test_m22_long_lists_say_they_stop_at_500(client, app, monkeypatch):
+    acc, tc, cust, _ = _setup_sale(app)
+    with app.app_context():
+        db = get_db()
+        for i in range(501):
+            db.execute("INSERT INTO documents (side, status, number, contact_id, date) VALUES ('sale','open',?,?,'2026-11-01')",
+                       (f"X{i}", cust))
+        db.commit()
+    assert "Showing the latest 500" in page(client.get("/sale/list"))
+
+
+def test_m23_m24_duplicate_codes_and_journal_and_bank_account_checks(client, app):
+    acc, tc, _c, _s = _setup_sale(app)
+    r = client.post("/accounts/save", data={"code": "1-1110", "name": "Another", "type": "asset"},
+                    headers={"Referer": "/accounts"}, follow_redirects=True)
+    assert r.status_code == 200 and "Code 1-1110 is already used by Business Cheque Account" in page(r)
+    client.post("/inventory/new", data={"sku": "W1", "name": "Widget", "active": "1"})
+    r = client.post("/inventory/new", data={"sku": "w1", "name": "Other", "active": "1"},
+                    headers={"Referer": "/inventory/new"}, follow_redirects=True)
+    assert "SKU w1 is already used by Widget" in page(r)
+    j = lambda dr, cr: {"date": "2026-11-05", "memo": "x", "line_account": [str(acc["6-1500"]), str(acc["3-1000"])],
+                        "line_debit": [dr, ""], "line_credit": [cr, "100"]}
+    assert "either a debit or a credit" in page(client.post("/journal/new", data=j("100", "5"), headers={"Referer": "/journal/new"}, follow_redirects=True))
+    assert "enter positive amounts" in page(client.post("/journal/new", data=j("-100", ""), headers={"Referer": "/journal/new"}, follow_redirects=True))
+    with app.app_context():
+        db = get_db()
+        L.general_journal(db, "2026-11-05", "cash in", [dict(account_id=acc["1-1110"], debit=5000),
+                                                       dict(account_id=acc["3-1000"], credit=5000)])
+        db.commit()
+    form = {"id": acc["1-1110"], "code": "1-1110", "name": "Business Cheque Account", "type": "asset"}
+    r = client.post("/accounts/save", data=form, headers={"Referer": "/accounts"}, follow_redirects=True)
+    assert "This bank account has $50.00 in it" in page(r)
+    client.post("/accounts/save", data=dict(form, confirm_unbank="1"))
+    with app.app_context():
+        assert get_db().execute("SELECT is_bank FROM accounts WHERE id=?", (acc["1-1110"],)).fetchone()[0] == 0

@@ -6,5 +6,6 @@
 {% for p in rows %}<tr style="{{ 'background:#f0faf8' if p.id==hl }}"><td>{{ p.date }}</td><td>{{ p.cname }}</td><td>{{ p.bank }}</td><td>{{ p.reference or '' }}</td><td>{{ p.memo or '' }}</td><td class="n">{{ p.amount|money }}</td>
 <td>{% if p.voided %}<span class="badge void">void</span>{% else %}<a class="btn sm" href="{{ url_for('core.entry', eid=p.entry_id) }}">Journal</a>
 <form method="post" class="inline" action="{{ url_for('documents.payment_void', pid=p.id) }}" data-confirm="Void this payment? Invoices/bills will re-open."><button class="btn sm danger">Void</button></form>{% endif %}</td></tr>
-{% else %}<tr><td colspan="7" class="muted">No payments yet.</td></tr>{% endfor %}</table></div>
+{% else %}<tr><td colspan="7" class="muted">No payments yet.</td></tr>{% endfor %}
+{% if capped %}<tr><td colspan="7" class="muted">Showing the latest 500 payments.</td></tr>{% endif %}</table></div>
 {% endblock %}

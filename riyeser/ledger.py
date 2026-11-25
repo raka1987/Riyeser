@@ -179,7 +179,9 @@ def stock_adjust(db, item_id, date, qty_change, unit_cost=None, memo="Inventory 
     adj_acct = account_id or linked(db, "stock_adjust")
     asset = item["asset_account_id"] or linked(db, "inventory")
     if qty_change > 0:
-        cost = unit_cost if unit_cost is not None else item["avg_cost"]
+        cost = unit_cost if unit_cost else last_cost(item)
+        if not cost:
+            raise PostingError(f"{item['sku']} has never been bought, so there's no cost to use: enter a unit cost.")
         value = round_cents(cost * qty_change)
         lines = [dict(account_id=asset, debit=value), dict(account_id=adj_acct, credit=value)]
     else:
@@ -293,7 +295,8 @@ def save_document(db, side, header, lines, status, doc_id=None):
     else:
         if credit and status != "open":
             raise PostingError("A credit note is saved straight away (it can't be a quote or an order).")
-        series = "credit" if credit else ("quote" if status == "quote" else None)
+        series = "credit" if credit else ("quote" if status == "quote" else
+                                          "order" if status == "order" and side == "purchase" else None)
         number = (header.get("number") or "").strip() or next_number(db, side, series)
         if _number_taken(db, side, number):
             raise PostingError(f"{'Invoice' if side == 'sale' else 'Bill'} number {number} is already used.")
@@ -424,6 +427,8 @@ def convert_document(db, doc_id, to_status):
         return new
     if to_status == "order":
         return doc_id
+    if doc["side"] == "purchase":  # M13: a purchase order (PO…) becomes a bill with a bill number
+        db.execute("UPDATE documents SET number=? WHERE id=?", (next_number(db, "purchase"), doc_id))
     post_document(db, doc_id)
     audit(db, "convert_document", f"{doc['number']} -> {to_status}")
     return doc_id
@@ -478,6 +483,9 @@ def record_payment(db, direction, contact_id, bank_account_id, date, allocations
         if amt < 0 or amt > doc["total"] - doc["amount_paid"]:
             raise PostingError(f"Amount for {doc['number']} exceeds the balance due.")
         total += amt
+    bank = db.execute("SELECT is_bank FROM accounts WHERE id=?", (bank_account_id,)).fetchone()
+    if not bank or not bank["is_bank"]:
+        raise PostingError("Choose a bank or credit card account for the payment.")  # M19
     received = total if amount is None else amount
     if received < total:
         raise PostingError(f"The amounts applied ({fmt_money(total)}) are more than the payment ({fmt_money(received)}).")
@@ -582,6 +590,9 @@ def refund_credit(db, credit_id, bank_account_id, date, amount, reference=None):
         raise PostingError("That credit isn't available.")
     if amount <= 0 or amount > credit_available(cr):
         raise PostingError(f"Refund up to {fmt_money(credit_available(cr))}.")
+    bank = db.execute("SELECT is_bank FROM accounts WHERE id=?", (bank_account_id,)).fetchone()
+    if not bank or not bank["is_bank"]:
+        raise PostingError("Choose a bank or credit card account for the refund.")
     sale = cr["side"] == "sale"
     control = linked(db, "receivables" if sale else "payables")
     contact = db.execute("SELECT name FROM contacts WHERE id=?", (cr["contact_id"],)).fetchone()

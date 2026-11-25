@@ -18,6 +18,7 @@
 <td><input name="alloc_{{ d.id }}" id="alloc_{{ d.id }}" class="right" aria-label="Amount applied to {{ d.number }}"></td><td><button type="button" class="btn sm" data-fill="alloc_{{ d.id }}" data-amount="{{ bal|cents }}" aria-label="Pay {{ d.number }} in full">Full</button></td></tr>
 {% else %}<tr><td colspan="7" class="muted">No open documents.</td></tr>{% endfor %}
 <tr class="grand"><td colspan="5">Total payment</td><td class="n" id="p-total"></td><td></td></tr></table>
+<p><label class="check"><input type="checkbox" name="date_ok" value="1"> Save anyway if the payment is dated before the {{ L.doc|lower }}</label></p>
 <p><button class="btn pri">Record payment</button></p></form>
 {% if credits %}<h2>Credit available</h2>
 <div class="tbl"><table><tr><th>Credit</th><th>Date</th><th class="n">Available</th><th>Use on</th><th>Refund</th></tr>

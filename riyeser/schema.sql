@@ -12,7 +12,7 @@ CREATE TABLE company (
     lock_date TEXT,                              -- no postings on/before this date
     gst_registered INTEGER NOT NULL DEFAULT 1,
     invoice_prefix TEXT NOT NULL DEFAULT 'INV',
-    bill_prefix TEXT NOT NULL DEFAULT 'PO',
+    bill_prefix TEXT NOT NULL DEFAULT 'BILL',
     next_invoice_no INTEGER NOT NULL DEFAULT 1,
     next_bill_no INTEGER NOT NULL DEFAULT 1,
     default_terms_days INTEGER NOT NULL DEFAULT 30

@@ -47,6 +47,9 @@ def _save(iid):
             opt_int(f.get("income_account_id")), opt_int(f.get("expense_account_id")),
             opt_int(f.get("asset_account_id")) if inv else None, opt_int(f.get("sale_tax_code_id")),
             opt_int(f.get("purchase_tax_code_id")), opt_float(f.get("reorder_level")), 1 if f.get("active") else 0)
+    other = db.execute("SELECT name FROM items WHERE sku=? COLLATE NOCASE AND id IS NOT ?", (vals[0], iid)).fetchone()
+    if other:
+        raise ValueError(f"SKU {vals[0]} is already used by {other['name']}.")  # M23
     if iid:
         old = db.execute("SELECT * FROM items WHERE id=?", (iid,)).fetchone()
         if old and old["is_inventoried"] and not inv and abs(old["qty_on_hand"]) > 1e-9:
@@ -148,7 +151,7 @@ def _save_count(items):
         try:
             counted = float(v)
         except ValueError:
-            raise ValueError(f"{it['sku']}: enter the count as a number.")
+            raise ValueError(f"Count for {it['sku']} must be a number.")  # M14
         if counted < 0:
             raise ValueError(f"{it['sku']}: a count can't be below 0.")  # F13
         diff = round(counted - it["qty_on_hand"], 4)

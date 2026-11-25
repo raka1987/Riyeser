@@ -349,7 +349,7 @@ def migrate(db):
     db.execute("""CREATE TABLE IF NOT EXISTS number_series (
         key TEXT PRIMARY KEY, prefix TEXT NOT NULL, next_no INTEGER NOT NULL DEFAULT 1)""")
     for key, prefix in (("quote_sale", "Q"), ("quote_purchase", "PQ"), ("credit_sale", "CN"), ("credit_purchase", "SC"),
-                        ("payment_credit_sale", "CR"), ("payment_credit_purchase", "SCR")):
+                        ("payment_credit_sale", "CR"), ("payment_credit_purchase", "SCR"), ("order_purchase", "PO")):
         db.execute("INSERT OR IGNORE INTO number_series (key, prefix) VALUES (?,?)", (key, prefix))
     db.execute("""CREATE TABLE IF NOT EXISTS credit_uses (
         id INTEGER PRIMARY KEY, credit_id INTEGER NOT NULL REFERENCES documents(id),
@@ -362,6 +362,11 @@ def migrate(db):
         account_id INTEGER PRIMARY KEY REFERENCES accounts(id), mapping TEXT NOT NULL, date_order TEXT)""")
     from . import mailer
     mailer.ensure(db)  # S18: email settings and the outbox
+    db.execute("CREATE TABLE IF NOT EXISTS data_fixes (key TEXT PRIMARY KEY, done_at TEXT)")  # one-off corrections
+    if not db.execute("SELECT 1 FROM data_fixes WHERE key='bill_prefix'").fetchone():
+        # M13: bills get their own prefix (purchase orders keep PO); bills already numbered keep their numbers
+        db.execute("UPDATE company SET bill_prefix='BILL' WHERE bill_prefix='PO'")
+        db.execute("INSERT INTO data_fixes (key, done_at) VALUES ('bill_prefix', datetime('now'))")
     _job_parts_inc_gst(db)
     _unique_document_numbers(db)
     db.commit()

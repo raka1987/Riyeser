@@ -74,7 +74,15 @@ def save_account():
             opt_int(f.get("tax_code_id")), f.get("description"), 1 if f.get("active", "1") else 0)
     if not vals[0] or not vals[1]:
         raise ValueError("Code and name are required.")
+    other = db.execute("SELECT name FROM accounts WHERE code=? AND id IS NOT ?", (vals[0], aid)).fetchone()
+    if other:
+        raise ValueError(f"Code {vals[0]} is already used by {other['name']}.")  # M23
     if aid:
+        was = db.execute("SELECT is_bank FROM accounts WHERE id=?", (aid,)).fetchone()
+        bal = balances(db).get(aid, 0)
+        if was and was["is_bank"] and not vals[3] and bal and not f.get("confirm_unbank"):
+            raise ValueError(f"This bank account has {__import__('riyeser.db', fromlist=['x']).fmt_money(bal)} in it. "
+                             "Unticking 'bank account' hides it from Banking: tick 'Hide it anyway' to go ahead.")  # M24
         old = db.execute("SELECT * FROM accounts WHERE id=?", (aid,)).fetchone()
         used = db.execute("SELECT key FROM linked_accounts WHERE account_id=? UNION SELECT 'tax' FROM tax_codes"
                           " WHERE collected_account_id=? OR paid_account_id=?", (aid, aid, aid)).fetchone()
@@ -150,10 +158,15 @@ def journal_new():
 def _save_journal():
     db = get_db()
     lines = []
-    for l in form_lines(["account", "debit", "credit", "tax", "job", "memo"]):
+    for n, l in enumerate(form_lines(["account", "debit", "credit", "tax", "job", "memo"]), 1):
         if not l["account"]:
             continue
-        lines.append(dict(account_id=int(l["account"]), debit=to_cents(l["debit"]), credit=to_cents(l["credit"]),
+        dr, cr = to_cents(l["debit"]), to_cents(l["credit"])
+        if dr < 0 or cr < 0:
+            raise PostingError(f"Line {n}: enter positive amounts (a credit goes in the Credit column).")  # M24
+        if dr and cr:
+            raise PostingError(f"Line {n}: a line is either a debit or a credit, not both.")  # M24
+        lines.append(dict(account_id=int(l["account"]), debit=dr, credit=cr,
                           tax_code_id=opt_int(l["tax"]), job_id=opt_int(l["job"]), memo=l["memo"]))
     check_journal_lines(db, lines, gst_ok=bool(request.form.get("gst_adjustment")))
     eid = general_journal(db, request.form["date"], request.form.get("memo"), lines, request.form.get("reference"))
@@ -227,6 +240,11 @@ def company():
 def _save_company():
     db = get_db()
     f = request.form
+    old_lock = db.execute("SELECT lock_date FROM company WHERE id=1").fetchone()[0]
+    if (f.get("lock_date") or None) != old_lock:
+        fmt = lambda d: __import__("datetime").date.fromisoformat(d).strftime("%d/%m/%Y") if d else "(none)"
+        audit(db, "lock_date", f"Lock date changed from {fmt(old_lock)} to {fmt(f.get('lock_date') or None)} by "
+                               f"{g.user['username']}")  # M18
     db.execute("UPDATE company SET name=?, abn=?, address=?, phone=?, email=?, fy_start_month=?, lock_date=?,"
                " gst_registered=?, invoice_prefix=?, bill_prefix=?, next_invoice_no=?, next_bill_no=?,"
                " default_terms_days=? WHERE id=1",

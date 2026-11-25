@@ -37,7 +37,7 @@ def index(side):
         sql += " AND d.status=?"; p.append(status)
     sql += " ORDER BY d.date DESC, d.id DESC LIMIT 500"
     rows = db.execute(sql, p).fetchall()
-    return render_template("documents/index.html", rows=rows, side=side, L=L, status=status, q=q,
+    return render_template("documents/index.html", rows=rows, side=side, L=L, status=status, q=q, capped=len(rows) >= 500,
                            today=date.today().isoformat())
 
 
@@ -112,6 +112,11 @@ def _save(side, doc_id):
     status = "open" if kind == "credit" else f.get("status", "open")
     if status not in ("quote", "order", "open"):
         raise ValueError("Invalid status.")
+    capped_quote = False
+    if side == "sale" and status == "open" and kind == "invoice" and _free_invoices_capped(db):
+        status, capped_quote = "quote", True  # M10: the typed invoice is kept, as a quote
+    if status == "open" and not f.get("amount_checked"):
+        _check_big(db, side, lines, header)  # M2
     if side == "sale" and status == "open" and kind == "invoice":
         _check_free_invoices(db)
         from ..ledger import check_stock
@@ -124,6 +129,11 @@ def _save(side, doc_id):
     else:
         did = save_document(db, side, header, lines, status, doc_id)
     doc = db.execute("SELECT number, tax_total FROM documents WHERE id=?", (did,)).fetchone()
+    if capped_quote:
+        from .. import plan as P
+        flash(f"{P.capped_message('basic')} Your invoice is saved as quote {doc['number']}: convert it to an invoice "
+              "once the licence is in.", "warn")
+        return redirect(url_for("documents.view", doc_id=did))
     flash(f"{doc['number']} saved.", "ok")
     if side == "sale" and kind == "invoice" and status == "open" and not doc["tax_total"] \
             and g.company.get("gst_registered", 1):
@@ -178,6 +188,25 @@ def free_invoices_apply():
         return False  # Riyeser Invoices is free forever
     c = g.get("company") or {}
     return c.get("edition") == "basic" or bool(c.get("plus_locked"))
+
+
+def _free_invoices_capped(db):
+    from .. import plan as P
+    return free_invoices_apply() and P.plan(db, "basic")["locked"]
+
+
+BIG_FLOOR = 1_000_000_00  # $1,000,000
+
+
+def _check_big(db, side, lines, header):
+    """M2: an amount far above the business's usual ones is checked first (a slip of the keyboard)."""
+    from ..ledger import calc_line
+    total = sum(abs(calc_line(l["qty"], l["unit_price"], l["discount_pct"], 0, False)[0]) for l in lines)
+    top = db.execute("SELECT MAX(ABS(total)) FROM documents WHERE side=? AND status IN ('open','paid')",
+                     (side,)).fetchone()[0] or 0
+    if total > max(top * 10, BIG_FLOOR):
+        raise PostingError(f"{pdfmod.fmt_money(total)} is far more than this business's usual amounts. Check it, then "
+                           "tick \"Amount checked\" and save again.")
 
 
 def _check_free_invoices(db):
@@ -273,6 +302,12 @@ def _save_payment(side):
     db = get_db()
     f = request.form
     allocs = [(int(k[6:]), to_cents(v)) for k, v in f.items() if k.startswith("alloc_") and v.strip()]
+    if not f.get("date_ok"):  # M17
+        for d_id, _a in allocs:
+            d = db.execute("SELECT number, date FROM documents WHERE id=?", (d_id,)).fetchone()
+            if d and f["date"] < d["date"]:
+                raise PostingError(f"{f['date']} is before the date of {d['number']} ({d['date']}). Check the date, "
+                                   "or tick \"Save anyway\".")
     amount = to_cents(f["amount"]) if (f.get("amount") or "").strip() else None
     pid = record_payment(db, "in" if side == "sale" else "out", int(f["contact_id"]), int(f["bank_account_id"]),
                          f["date"], allocs, f.get("reference"), f.get("memo") or None, amount=amount)
@@ -313,7 +348,8 @@ def payments(side):
         "SELECT p.*, c.name cname, a.name bank FROM payments p JOIN contacts c ON c.id=p.contact_id"
         " JOIN accounts a ON a.id=p.bank_account_id WHERE p.direction=? ORDER BY p.date DESC, p.id DESC LIMIT 500",
         ("in" if side == "sale" else "out",)).fetchall()
-    return render_template("documents/payments.html", rows=rows, side=side, L=L, hl=opt_int(request.args.get("hl")))
+    return render_template("documents/payments.html", rows=rows, side=side, L=L, hl=opt_int(request.args.get("hl")),
+                           capped=len(rows) >= 500)
 
 
 @bp.route("/payment/<int:pid>/void", methods=["POST"])
