@@ -283,6 +283,7 @@ document.addEventListener('click', (e) => {
   if (a === 'check') return checkJoin(false);
   if (a === 'cancel-join') return run(async () => { await bridge.call('company:cancelJoin'); await coLoad(); showJoinForm(); });
   if (a === 'later') { safe(() => bridge.call('company:skip')); closeWizard(); return; }
+  if (a === 'restore') { if (window.RiyeserBackup) window.RiyeserBackup.restoreEverything(); return; }   // OWNER-BACKUP
   if (a === 'done') { closeWizard(); afterChange(); return; }
   if (a === 'restart') { CO.fromCompany = false; coLoad().then(showChoice); return; }
   if (a === 'link' || a === 'co-signup') {

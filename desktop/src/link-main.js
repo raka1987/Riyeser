@@ -21,7 +21,7 @@ if (!selfTestArg && !app.requestSingleInstanceLock()) app.quit();
 else if (!selfTestArg && quitArg.wantsQuit(process.argv)) app.exit(0);   // asked to quit, and no copy was running
 
 let win = null; let tray = null; let quitting = false; let toldAboutTray = false; let service = null; let store = null;
-let sleepNote = null; let firewall = null; let blocker = null; let cloud = null;
+let sleepNote = null; let firewall = null; let blocker = null; let cloud = null; let backups = null;
 const startHidden = process.argv.includes('--hidden');
 const icon = (file) => path.join(__dirname, 'renderer', file);
 
@@ -66,6 +66,8 @@ function createTray() {
     { label: `Open ${NAME}`, click: () => { win.show(); win.focus(); } },
     { type: 'separator' },
     { label: 'Start with Windows', type: 'checkbox', checked: startsWithWindows(), click: (item) => { startWithWindows(item.checked); tray.setContextMenu(menu()); } },
+    { type: 'separator' },
+    ...backups.menuItems(),   // OWNER-BACKUP
     { type: 'separator' },
     { label: `Quit ${NAME} (the phones stop working)`, click: () => { quitting = true; app.quit(); } },
   ]);
@@ -169,6 +171,9 @@ function registerIpc() {
     service.emit('change');
     return out;
   });
+  handle('backup:now', async () => (await backups.backUpNow({ quiet: true })).file);   // OWNER-BACKUP
+  handle('backup:restore', () => backups.restoreFromBackup());
+  handle('backup:folder', () => backups.openFolder().then(() => true));
   handle('link:openLogs', () => shell.openPath(path.join(app.getPath('userData'), 'logs')).then(() => true));
 }
 
@@ -188,6 +193,11 @@ app.whenReady().then(async () => {
     app.exit(0);
     return;
   }
+  // OWNER-BACKUP: Documents\Riyeser\Link Office\Backups; a restore asked for before the restart is done before the data opens
+  backups = require('./core/backup-ui').backupUi({ app, dialog, shell, name: NAME, win: () => win, beforeRestart: () => { quitting = true; if (service) service.stop(); },
+    spec: require('./core/backup-specs').programSpec('linkoffice', { appData: app.getPath('appData') }) });
+  await backups.applyPending().catch(() => null);
+  const freshPc = !fs.existsSync(path.join(app.getPath('userData'), 'data', 'setup.json'));
   makeService();
   // First run: start with Windows (it can be switched off from the tray icon or the screen).
   if (!store.get('setup', null)) { startWithWindows(true); store.set('setup', { startWithWindows: true, at: new Date().toISOString() }); }
@@ -202,4 +212,7 @@ app.whenReady().then(async () => {
   setInterval(() => service.sync().catch(() => null), 30 * 60 * 1000);
   setInterval(() => { service.checkLicence().catch(() => null); service.checkNetwork().catch(() => null); }, 60 * 1000);
   setInterval(() => checkPc(), 30 * 60 * 1000);
+  backups.startDaily();
+  if (backups.pendingResult) setTimeout(() => backups.showPendingResult(), 1500);
+  else if (freshPc && !startHidden) setTimeout(() => backups.firstRunOffer().catch(() => {}), 1500);   // a new PC: start fresh or restore
 });

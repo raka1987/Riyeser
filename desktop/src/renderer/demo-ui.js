@@ -37,7 +37,8 @@
   function startHtml() {
     return `<h1>${TEXT.startTitle}</h1><p class="wsub">You can change your mind later.</p>
     <button class="wbig wmain wprimary" data-w="blank"><span class="wi">📄</span><b>${TEXT.blankTitle}</b><small>${TEXT.blankSub}</small></button>
-    <div class="wsecond"><button class="wbig wsm" data-w="demo"><span class="wi">🧪</span><b>${TEXT.demoTitle}</b><small>${esc(TEXT.demoSub)}</small></button></div>`;
+    <div class="wsecond"><button class="wbig wsm" data-w="demo"><span class="wi">🧪</span><b>${TEXT.demoTitle}</b><small>${esc(TEXT.demoSub)}</small></button></div>
+    <p class="wfoot">New PC, or Windows reinstalled? <button class="wlink" data-w="restore">Restore everything from a backup…</button></p>`;
   }
 
   /** The yellow banner across Central while demo mode is on ('' when it's off). */

@@ -167,6 +167,8 @@ function renderAdvanced() {
     <p><label><input type="checkbox" id="pub"${S.allowPublic ? ' checked' : ''}> Allow phones from outside the office network (not recommended: it lets strangers try passwords)</label></p>
     <p><b>Settings file.</b> People, extensions, ring groups and phone assignments in one file, to move to a new PC or to Riyeser Link Cloud later. It holds the phones' passwords, so keep it safe.</p>
     <div class="row"><button class="btn s" data-a="export">Export settings</button><button class="btn s" data-a="import">Import settings</button><button class="btn s" data-a="logs">Open the log folder</button></div>
+    <div class="row"><button class="btn s" data-a="backupnow">Back up now</button><button class="btn s" data-a="backuprestore">Restore from a backup…</button><button class="btn s" data-a="backupfolder">Open the backups folder</button></div>
+    <p class="muted">A backup is made every day into Documents\\Riyeser\\Link Office\\Backups (the last 30 are kept). Desk phone passwords stay encrypted for this Windows account.</p>
     <p class="muted">Phones connect on port ${esc(S.sipPort)} (SIP) and fetch their settings from port ${esc(S.httpPort)}.</p>
     <div class="log">${S.logs.map((l) => `${esc(when(l.at))}  ${esc(l.text)}`).join('\n') || 'Nothing yet.'}</div>`;
 }
@@ -233,6 +235,9 @@ document.addEventListener('click', async (e) => {
     if (a === 'export') { const f = await safe(() => api.call('link:export')); if (f) toast('Settings saved. Keep the file safe: it holds the phones\' passwords.'); }
     if (a === 'import') { const r = await safe(() => api.call('link:import')); if (r) toast(`Imported ${r.people} people, ${r.groups} groups and ${r.phones} phones.`); }
     if (a === 'logs') await safe(() => api.call('link:openLogs'));
+    if (a === 'backupnow') { const f = await safe(() => api.call('backup:now')); if (f) toast(`Backed up: ${f.split(/[\\/]/).pop()}`); }
+    if (a === 'backuprestore') await safe(() => api.call('backup:restore'));
+    if (a === 'backupfolder') await safe(() => api.call('backup:folder'));
   } finally { b.disabled = false; load(); }
 });
 document.addEventListener('change', async (e) => {

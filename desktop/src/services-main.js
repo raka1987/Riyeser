@@ -141,6 +141,8 @@ function buildMenu() {
       { label: 'Work on this PC only…', click: () => workOnThisPc() },
       { label: 'How I work…', click: () => win && win.loadURL(`${START}?choose`) },
       { type: 'separator' },
+      ...(backups ? backups.menuItems() : []),
+      { type: 'separator' },
       { role: 'reload' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { role: 'togglefullscreen' }, { type: 'separator' },
       { label: 'About', click: () => dialog.showMessageBox(win, { title: 'As Built', message: `As Built ${app.getVersion()}`, detail: `Riyeser Group · riyeser.com\nProjects on this PC are kept in:\n${app.getPath('userData')}` }) },
       { role: 'quit' },
@@ -150,7 +152,16 @@ function buildMenu() {
 }
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-app.whenReady().then(() => {
+// OWNER-BACKUP: As Built's projects on this PC, backed up to Documents\Riyeser\As Built\Backups
+let backups = null;
+app.whenReady().then(async () => {
+  const selfTest = process.argv.some((a) => a.startsWith('--self-test='));
+  if (!selfTest) {
+    backups = require('./core/backup-ui').backupUi({ app, dialog, shell, name: 'As Built', win: () => win,
+      spec: require('./core/backup-specs').programSpec('services', { appData: app.getPath('appData') }) });
+    await backups.applyPending().catch(() => null);   // before the window opens the projects
+  }
+  const freshPc = !fs.existsSync(path.join(app.getPath('userData'), 'Local Storage')) && !fs.existsSync(path.join(app.getPath('userData'), 'IndexedDB'));
   serveLocalCopy(session.defaultSession);
   // Camera (site photos), clipboard and full screen for the app; nothing else.
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
@@ -168,5 +179,8 @@ app.whenReady().then(() => {
   }
   buildMenu();
   createWindow();
+  backups.startDaily();
+  if (backups.pendingResult) setTimeout(() => backups.showPendingResult(), 1500);
+  else if (freshPc) setTimeout(() => backups.firstRunOffer().catch(() => {}), 1500);
 });
 app.on('window-all-closed', () => app.quit());

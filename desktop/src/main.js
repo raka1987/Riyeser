@@ -487,8 +487,14 @@ function handle(name, fn) {
   });
 }
 
+// OWNER-BACKUP: Back up now / Restore from a backup / the backups folder (Documents\Riyeser\Desk Assistant\Backups)
+let backups = null;
 function registerIpc() {
-  handle('settings:get', () => ({ ...getSettings(), hasEmailPassword: !!getSecret('emailPassword'), hasAiKey: !!getSecret('aiKey'), hotkey: HOTKEY, aiModels: AI_MODELS }));
+  handle('backup:status', () => backups.status());
+  handle('backup:now', async () => (await backups.backUpNow({ quiet: true })).file);
+  handle('backup:restore', () => backups.restoreFromBackup());
+  handle('backup:folder', () => backups.openFolder().then(() => true));
+  handle('settings:get', () => ({ ...getSettings(), hasEmailPassword: !!getSecret('emailPassword'), hasAiKey: !!getSecret('aiKey'), hotkey: HOTKEY, aiModels: AI_MODELS, backupFolder: backups ? backups.folder() : '' }));
   handle('settings:set', (s) => {
     if (typeof s.emailPassword === 'string' && s.emailPassword) setSecret('emailPassword', s.emailPassword);
     if (typeof s.aiKey === 'string') { if (s.aiKey === '__clear__') setSecret('aiKey', ''); else if (s.aiKey) setSecret('aiKey', s.aiKey); }
@@ -1038,6 +1044,11 @@ app.on('second-instance', (_e, argv, _cwd, data) => {
 app.whenReady().then(async () => {
   if (uninstalling) { await runUninstall(APP_INFO); app.quit(); return; }
   if (!pdfArg(process.argv) && !process.argv.includes('--hidden')) showSplash();   // M8: feedback before the set-up below
+  // OWNER-BACKUP: a restore asked for before the restart is done now, before anything opens the data
+  backups = require('./core/backup-ui').backupUi({ app, dialog, shell, name: 'Riyeser Desk Assistant', win: () => mainWin,
+    spec: require('./core/backup-specs').programSpec('desk', { appData: app.getPath('appData') }) });
+  const freshPc = !fs.existsSync(path.join(app.getPath('userData'), 'data', 'settings.json'));
+  await backups.applyPending().catch(() => null);
   store = new Store(path.join(app.getPath('userData'), 'data'));
   index = new Index(store);
   fixFolderLocations();
@@ -1064,9 +1075,16 @@ app.whenReady().then(async () => {
     { label: `Quick search (${HOTKEY.replace('CommandOrControl', process.platform === 'darwin' ? 'Cmd' : 'Ctrl')})`, click: toggleSearch },
     { label: 'Tidy my folders now', click: () => showMain('organise') },
     { type: 'separator' },
+    ...backups.menuItems(),
+    { type: 'separator' },
     { label: 'Quit', click: () => { app.isQuitting = true; app.quit(); } },
   ]));
   tray.on('click', () => showMain());
+
+  // OWNER-BACKUP: one automatic backup a day; on a PC with no Desk Assistant data yet, offer to restore one
+  backups.startDaily();
+  if (backups.pendingResult) setTimeout(() => backups.showPendingResult(), 1500);
+  else if (freshPc && !process.argv.includes('--hidden') && !pdfArg(process.argv)) setTimeout(() => backups.firstRunOffer().catch(() => {}), 1500);
 
   // Background jobs
   const safe = (fn) => () => fn().catch((e) => console.error(e.message));

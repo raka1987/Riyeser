@@ -812,7 +812,7 @@ Object.assign(pages, {
       <button style="margin-top:8px" data-act="addfolder" data-key="${key}">+ Add folder</button>`;
     const learned = await bridge.call('learn:list').catch(() => []);
     const myRules = await bridge.call('rules:list').catch(() => []);
-    const sections = [['s-sorting', '🗂 Sorting'], ['s-rules', '📐 Rules'], ['s-learned', '🧠 Learned'], ['s-appearance', '🎨 Appearance'], ['s-calendars', '📅 Calendars'], ['s-email', '✉ Email'], ['s-pdf', '📕 PDF'], ['s-ai', '✨ AI'], ['s-general', '⚙ General'], ['s-uninstall', '🗑 Uninstall']];
+    const sections = [['s-sorting', '🗂 Sorting'], ['s-rules', '📐 Rules'], ['s-learned', '🧠 Learned'], ['s-appearance', '🎨 Appearance'], ['s-calendars', '📅 Calendars'], ['s-email', '✉ Email'], ['s-pdf', '📕 PDF'], ['s-ai', '✨ AI'], ['s-backup', '💾 Backups'], ['s-general', '⚙ General'], ['s-uninstall', '🗑 Uninstall']];
     page.innerHTML = `<h1>Settings</h1><p class="sub">Everything stays on this computer. Passwords and keys are encrypted with your system keychain.</p>
       <div class="settingsnav">${sections.map(([id, label]) => `<button data-act="jump" data-id="${id}">${label}</button>`).join('')}</div>
       <div class="grid">
@@ -849,6 +849,8 @@ Object.assign(pages, {
           <button class="primary" style="margin-top:8px">Save email settings</button></form></div>
       <div class="card" id="s-pdf"><h2>PDF editor</h2><p class="muted small">Open, edit, fill in and sign PDFs. Every save keeps a backup of the previous version.</p>
         <div class="row"><button data-act="go" data-page="pdf">Open the PDF editor</button>${platform === 'win32' ? '<button data-act="pdfdefault">Set as my PDF app</button>' : ''}<button data-act="pdfbackups">Open PDF backups folder</button></div></div>
+      <div class="card" id="s-backup"><h2>Backups</h2><p class="muted small">Desk Assistant backs itself up once a day (the last 30 are kept) into <span class="path">${esc(settings.backupFolder || 'Documents\\Riyeser\\Desk Assistant\\Backups')}</span>, outside the program, so uninstalling or reinstalling never removes them. Copy that folder to a USB stick or OneDrive to move to a new PC.</p>
+        <div class="row"><button data-act="backupnow">Back up now</button><button data-act="backuprestore">Restore from a backup…</button><button data-act="backupfolder">Open the backups folder</button></div></div>
       <div class="card" id="s-ai"><h2>Smarter sorting with AI (optional)</h2><p class="muted small">Add an Anthropic API key and files I'm unsure about are sent to Claude to identify (first ~4,000 characters of text only). Leave blank to keep everything 100% offline.</p>
         <label class="row small" style="margin-bottom:8px"><input type="checkbox" id="aiall" ${s.aiCheckAll ? 'checked' : ''} ${s.hasAiKey ? '' : 'disabled'}> Double-check <b>every</b> document with AI, not just the ones I'm unsure about (slower; uses your API credit)</label>
         <label class="row small" style="margin-bottom:8px">Model <select id="aimodel">${(s.aiModels || []).map((m) => `<option value="${esc(m.id)}" ${m.id === s.aiModel ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>
@@ -1134,6 +1136,9 @@ const actions = {
     if (f) { await saveSettings({ calendars: [...settings.calendars, { name: f.split(/[\\/]/).pop().replace(/\.ics$/i, ''), path: f }] }); await bridge.call('meetings:get', true); render(); }
   },
   delcal: async (el) => { await saveSettings({ calendars: settings.calendars.filter((_, i) => i !== +el.dataset.i) }); render(); },
+  backupnow: async () => { const f = await bridge.call('backup:now'); toast(`Backed up: ${f.split(/[\\/]/).pop()}`); },
+  backuprestore: () => bridge.call('backup:restore'),
+  backupfolder: () => bridge.call('backup:folder'),
   clearai: async () => { await saveSettings({ aiKey: '__clear__' }); toast('AI key removed'); render(); },
 };
 

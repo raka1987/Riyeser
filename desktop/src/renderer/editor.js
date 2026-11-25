@@ -1482,6 +1482,10 @@ const commands = {
   sigplace: placeSignature,
   sigupload: async () => { const d = await bridge.call('image:openDialog'); if (d) { sigUpload = await knockOutWhite(d); $('#sigimg').src = sigUpload; } },
   ocr: recognisePages,
+  // OWNER-BACKUP: the program's own backups (Riyeser PDF: signatures and recent files; in Desk Assistant, Desk Assistant's)
+  backupnow: async () => { const f = await bridge.call('backup:now'); toast(`Backed up: ${String(f).split(/[\\/]/).pop()}`); },
+  backuprestore: () => bridge.call('backup:restore'),
+  backupfolder: () => bridge.call('backup:folder'),
   // S41: "Protect with a password" (payslips, invoices): the file needs the password to open once it's saved
   async protect() {
     if (!st.doc) return;

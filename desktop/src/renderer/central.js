@@ -453,6 +453,37 @@ async function freshRestore(id) {
   if (!r.ok) { const m = $('#freshmsg'); if (m) { m.hidden = false; m.textContent = r.message; } return; }
   $('#freshstep').innerHTML = '<p style="font-size:13px;margin:0"><b>Brought back.</b> Riyeser Central is restarting…</p>';
 }
+// Settings: Backups (OWNER-BACKUP). "Back up everything…" makes one file with every Riyeser program's data on this PC;
+// "Restore everything from a backup…" puts it all back (before-restore copies first) and restarts Central.
+function backupBox() {
+  const body = $('#setdlg .setbody'); if (!body || $('#backupbox')) return;
+  const box = document.createElement('div'); box.id = 'backupbox';
+  box.style.cssText = 'margin-top:18px;padding:14px 16px;border:1px solid var(--line);border-radius:12px';
+  box.innerHTML = `<b>Backups</b>
+    <p style="margin:6px 0 10px;font-size:13px;line-height:1.45">Riyeser backs up every program on this PC once a day (the last 30 are kept) into <b>Documents\\Riyeser</b>, outside the programs, so uninstalling or reinstalling never removes them. Moving to a new PC? Copy that folder (or one backup file) to a USB stick or OneDrive.</p>
+    <button data-bk="all">Back up everything…</button> <button data-bk="restore">Restore everything from a backup…</button> <button data-bk="folder">Open the backups folder</button>
+    <p id="bkmsg" style="font-size:13px;margin:8px 0 0" hidden></p>`;
+  body.appendChild(box);
+}
+const bkMsg = (t, bad) => { const m = $('#bkmsg'); if (m) { m.hidden = false; m.className = bad ? 'bad' : ''; m.textContent = t; } else toast(t); };
+async function restoreEverything() {
+  const pick = await bridge.call('backup:pick'); if (!pick) return;
+  if (!(await askConfirm({ title: 'Restore from this backup?', body: `${pick.summary}\n\nEvery Riyeser program in it goes back to how it was then. A copy of everything as it is now is saved first ("before restore"). Close the other Riyeser programs; Riyeser Central restarts.`, ok: 'Restore and restart' }))) return;
+  const r = await bridge.call('backup:restoreAll', pick.file);
+  if (!r.ok) { bkMsg(`${r.message} Then try again.`, true); return; }
+  bkMsg('Restoring… Riyeser Central is restarting.');
+}
+window.RiyeserBackup = { restoreEverything: () => safe(restoreEverything) };
+backupBox();
+document.addEventListener('click', (e) => {
+  const k = e.target.closest('[data-bk]'); if (!k) return;
+  if (k.dataset.bk === 'all') safe(async () => { k.disabled = true; try { const r = await bridge.call('backup:all'); bkMsg(`Backed up ${r.parts.length} part${r.parts.length === 1 ? '' : 's'} into ${r.file}`); } finally { k.disabled = false; } });
+  if (k.dataset.bk === 'restore') safe(restoreEverything);
+  if (k.dataset.bk === 'folder') safe(() => bridge.call('backup:folder'));
+});
+// after a restore, say how it went (once)
+bridge.call('backup:result').then((r) => { if (r) toast(r.ok ? `Restored from your backup. What was here before is saved in ${r.before}` : `The restore didn't work: ${r.error} Nothing was changed.`); }).catch(() => {});
+
 freshBox();
 document.addEventListener('click', (e) => {
   if (e.target.closest('#freshgo')) return safe(freshStart);
@@ -520,7 +551,7 @@ function demoNote(msg) {
 function askConfirm({ title, body, ok, cancel = 'Cancel' }) {
   return new Promise((resolve) => {
     const d = document.createElement('dialog'); d.className = 'licdlg askdlg';
-    d.innerHTML = `<div class="askbody"><h2>${esc(title)}</h2><p>${esc(body)}</p>
+    d.innerHTML = `<div class="askbody"><h2>${esc(title)}</h2><p style="white-space:pre-line">${esc(body)}</p>
       <div class="wrow"><button class="btn s" value="no">${esc(cancel)}</button><button class="btn" value="yes">${esc(ok)}</button></div></div>`;
     let answer = false;
     d.addEventListener('click', (e) => { const b = e.target.closest('button[value]'); if (b) { answer = b.value === 'yes'; d.close(); } });

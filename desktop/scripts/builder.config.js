@@ -19,7 +19,7 @@ const APPS = {
   // so installed copies update in place and keep their projects.
   services: { name: 'As Built', appId: 'com.riyeser.services', ico: 'build/services/icon.ico', out: 'dist-services', artifact: 'RiyeserServices',
     executableName: 'Riyeser Services',
-    extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.2.0', productName: 'As Built' } },
+    extraMetadata: { main: 'src/services-main.js', name: 'riyeser-services', version: '1.2.1', productName: 'As Built' } },
   // Riyeser Link was called Riyeser Team. Only the name people see changed (window, tray, shortcuts, Installed apps,
   // Task Manager). The app id, install folder (riyeser-team, from the package name), program file (Riyeser Team.exe),
   // data folder (%APPDATA%\Riyeser Team, set in team-main.js, with the sign-in and chats) stay the same, so installed

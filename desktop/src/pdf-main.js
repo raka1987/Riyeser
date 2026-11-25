@@ -42,7 +42,16 @@ app.on('second-instance', (_e, argv, _cwd, data) => {
 
 app.whenReady().then(async () => {
   if (uninstalling) { await runUninstall(APP_INFO); app.quit(); return; }
+  // OWNER-BACKUP: saved signatures and recent files, backed up daily to Documents\Riyeser\PDF\Backups
+  const backups = require('./core/backup-ui').backupUi({ app, dialog: require('electron').dialog, shell: require('electron').shell, name: 'Riyeser PDF',
+    win: () => require('electron').BrowserWindow.getFocusedWindow(), spec: require('./core/backup-specs').programSpec('pdf', { appData: app.getPath('appData') }) });
+  await backups.applyPending().catch(() => null);
   store = new Store(path.join(app.getPath('userData'), 'data'));
+  backups.startDaily();
+  handle('backup:now', async () => (await backups.backUpNow({ quiet: true })).file);
+  handle('backup:restore', () => backups.restoreFromBackup());
+  handle('backup:folder', () => backups.openFolder().then(() => true));
+  if (backups.pendingResult) setTimeout(() => backups.showPendingResult(), 2000);
   applyTheme(store.get('theme', 'system'));
   registerInstalledApp(APP_INFO).catch(() => {});
   require('./core/ocr').configure({ cacheDir: path.join(app.getPath('userData'), 'ocr') });

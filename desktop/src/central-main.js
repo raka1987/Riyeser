@@ -494,6 +494,30 @@ function registerIpc() {
     return { ...r, open: await openNow() };
   });
   handle('fresh:sets', () => freshstart.sets(freshOpts()));
+  // ---------- OWNER-BACKUP: "Back up everything" and "Restore everything from a backup" ----------
+  // One file, Documents\Riyeser\Central\Backups\Riyeser backup <date>.zip, with every installed Riyeser program's data
+  // (backup-specs.js says which folders). A restore is done on Central's restart, before anything opens the data.
+  const B = require('./core/backup'); const specs = require('./core/backup-specs');
+  const docs = () => ({ documents: app.getPath('documents') });
+  const installedIds = () => programList().filter((p) => p.status === 'installed').map((p) => p.id);
+  handle('backup:status', () => ({ folder: B.backupsDir('Everything', docs()), backups: B.listBackups(B.backupsDir('Everything', docs())).slice(0, 5).map((b) => ({ name: b.name, when: b.when })) }));
+  handle('backup:all', async () => { const r = await B.createBackup(specs.everythingSpec({ appData }, installedIds()), docs()); return { file: r.file, parts: r.parts }; });
+  handle('backup:folder', () => { fs.mkdirSync(B.backupsDir('Everything', docs()), { recursive: true }); return shell.openPath(B.backupsDir('Everything', docs())).then(() => true); });
+  handle('backup:pick', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Restore from a Riyeser backup', defaultPath: B.backupsDir('Everything', docs()), properties: ['openFile'], filters: [{ name: 'Riyeser backups', extensions: ['zip'] }] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const info = await B.describeBackup(r.filePaths[0]);
+    return { file: r.filePaths[0], program: info.program, summary: B.summary(info) };
+  });
+  handle('backup:restoreAll', async (file) => {
+    const open = await openNow();
+    if (open.length) return { ok: false, open, message: freshstart.closeFirst(open) };
+    await B.describeBackup(file);
+    B.scheduleRestore(app.getPath('userData'), file);
+    restartSoon();
+    return { ok: true };
+  });
+  handle('backup:result', () => { const r = backupResult; backupResult = null; return r; });
   handle('fresh:bringBack', async (id) => {
     const set = freshstart.sets(freshOpts()).find((s) => s.id === id);
     if (!set) throw new Error('That fresh start isn’t on this PC any more.');
@@ -573,8 +597,19 @@ function createWindow() {
 }
 
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } });
+let backupResult = null;   // OWNER-BACKUP: what a restore on this start did (shown once the window is up)
 app.whenReady().then(async () => {
   nativeTheme.themeSource = 'system';
+  if (!process.argv.some((a) => a.startsWith('--self-test='))) {
+    // a "Restore everything" asked for before the restart: done now, before Central (or anything) opens the data
+    const B = require('./core/backup');
+    backupResult = await B.applyPendingRestore(app.getPath('userData'), require('./core/backup-specs').everythingSpec({ appData: app.getPath('appData') }),
+      { documents: app.getPath('documents') }).catch((e) => ({ ok: false, error: e.message }));
+    // the automatic backup of everything: once a day, the last 30 kept
+    const daily = () => B.dailyBackup(require('./core/backup-specs').everythingSpec({ appData: app.getPath('appData') }, programList().filter((p) => p.status === 'installed').map((p) => p.id)),
+      { documents: app.getPath('documents') }).catch(() => null);
+    setTimeout(daily, 90 * 1000); setInterval(daily, 6 * 3600 * 1000);
+  }
   store = new Store(path.join(app.getPath('userData'), 'data'));
   // Used by the Windows build check: write what Central can see, then quit.
   const selfTest = process.argv.find((a) => a.startsWith('--self-test='));
