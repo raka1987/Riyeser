@@ -6,6 +6,7 @@
 //       "{name} (left)"; an empty name on the join form says what's missing
 //   S3  help without signing in: ?help signed out offers it first, the sign-in page links to it, ?contact (the website's
 //       Contact support) opens it; it sends guest_ticket and shows the request number; missing details are named
+//   M4  the sign-up country is this computer's (time zone or language), or blank: not Fiji for everyone
 // Run: build the site, serve website/public on 8090 (or LINK_BASE), then `node website/team/test/people-test.js`. Exits 1 on failure.
 const { chromium } = require('playwright');
 const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';
@@ -114,6 +115,16 @@ async function signIn(pg, path = '/link/') {
     await pg.click('#ctf button[type=submit]'); await pg.waitForSelector('#ctf .err'); check(/a few help requests already/.test(await pg.textContent('#ctf .err')), 'S3 the limit reads plainly');
     const site = await pg.goto(BASE + '/help.html'); check(site.ok() && !!(await pg.$('a[href="/link/?contact"]')), 'S3 the website links to it (Help Centre and footer)');
     await pg.close(); }
+
+  // ---- M4: the sign-up country
+  for (const [tz, loc, want, dial] of [['Australia/Sydney', 'en-AU', 'Australia', '+61'], ['Pacific/Fiji', 'en-US', 'Fiji', '+679'], ['Europe/Berlin', 'de-DE', 'Germany', '+49'], ['UTC', 'en', '', '']]) {
+    const ctx = await b.newContext({ timezoneId: tz, locale: loc, viewport: { width: 1000, height: 900 } }); const pg = await ctx.newPage(); pg.on('pageerror', (e) => errs.push(e.message));
+    await pg.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"sb_publishable_test"};' }));
+    await pg.goto(BASE + '/link/?signup'); await pg.waitForSelector('#gf select[name=country]');
+    const v = await pg.inputValue('#gf select[name=country]'); const ph = await pg.getAttribute('#gf input[name=phone]', 'placeholder');
+    check(v === want && (dial ? ph.includes(dial) : !/\+679/.test(ph)), `M4 ${tz} / ${loc}: country "${v || '(choose)'}", phone hint "${ph}"`);
+    await ctx.close();
+  }
 
   check(!errs.length, 'no page errors ' + errs.join(' | '));
   await b.close();
