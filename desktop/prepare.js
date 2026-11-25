@@ -8,7 +8,7 @@ const root = require(path.join(ROOT, 'package.json'));
 const electronVersion = require(path.join(__dirname, 'node_modules', 'electron', 'package.json')).version;
 fs.rmSync(OUT, { recursive: true, force: true });
 fs.mkdirSync(OUT, { recursive: true });
-for (const f of ['server.js', 'db.js', 'mailer.js', 'wages.js', 'bank.js', 'desktop.js', 'perms.js', 'archive.js', 'demo.js', 'licence.js', 'signed-licence.js', 'pdf.js']) fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f));
+for (const f of ['server.js', 'db.js', 'mailer.js', 'wages.js', 'bank.js', 'desktop.js', 'perms.js', 'archive.js', 'demo.js', 'licence.js', 'signed-licence.js', 'pdf.js', 'forgot.js', 'payweek.js']) fs.copyFileSync(path.join(ROOT, f), path.join(OUT, f));
 // The licence public key (Ed25519), so Payroll only trusts licences Riyeser signed (signed-licence.js). The release
 // workflow fetches it from the licence function's /public-key. Without it (licence signing not switched on yet) the
 // build accepts unsigned licences, as before. It's a public key: nothing secret goes into the build.
@@ -18,6 +18,13 @@ for (const f of ['server.js', 'db.js', 'mailer.js', 'wages.js', 'bank.js', 'desk
     if (Buffer.from(key, 'base64').length !== 32) throw new Error("RIYESER_LICENCE_PUBLIC_KEY isn't an Ed25519 public key (32 bytes, base64).");
     fs.writeFileSync(path.join(OUT, 'licence-public-key.txt'), `${key}\n`); console.log('Licence public key built in:', key);
   } else console.log('No licence public key: this build accepts unsigned licences (licence signing not switched on yet).');
+}
+// every program file the back office loads must be in the list above (Payroll 2.2.3 left out forgot.js and payweek.js and
+// would not start): check each require('./…') now, so a missing file stops the build here instead of in the installed app
+for (const f of fs.readdirSync(OUT).filter(f => f.endsWith('.js'))) {
+  for (const [, dep] of fs.readFileSync(path.join(OUT, f), 'utf8').matchAll(/require\('\.\/([\w-]+)(?:\.js)?'\)/g)) {
+    if (!fs.existsSync(path.join(OUT, `${dep}.js`))) throw new Error(`${f} needs ${dep}.js: add it to the file list in desktop/prepare.js`);
+  }
 }
 fs.cpSync(path.join(ROOT, 'public'), path.join(OUT, 'public'), { recursive: true });
 for (const f of ['main.js', 'preload.js', 'restore.js']) fs.copyFileSync(path.join(__dirname, f), path.join(OUT, f));
