@@ -970,6 +970,8 @@ function csv(res, filename, rows) {
 }
 require('./mailer')(app, { db, requireRole: () => requireArea('setup', 2), wrap, bad, str, getSettings, setSetting });
 const mail = () => app.locals.mail || {};
+// OWNER-PAYWEEK (payweek.js): "Start next pay week" and "Copy last week's hours" on the Pay runs screen
+require('./payweek')(app, { db, requireArea, wrap, bad, HttpError, isDate, isStamp, addDays, round2, getSettings, todayIn, payPeriodOf, alreadyPaid, assertNoOverlap, inScope, audit, broadcast });
 // "Forgot password?" (forgot.js). After a reset: the person's wrong-PIN counters and this device's login limit start again.
 require('./forgot')(app, { db, hashPassword, audit, rateLimit, wrap, bad, HttpError, str, getSettings, failsOf: k => failsOf(k),
   clearLockouts: (uid, req) => { for (const k of ['u', 'm', 'r']) clockFails.delete(k + uid); hits.delete(req.ip + '/api/auth/login'); } });
