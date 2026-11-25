@@ -98,7 +98,9 @@ def test_pos_and_basics_use_their_own_modules(tmp_path, monkeypatch):
 
 def test_basics_app_follows_the_basic_module(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "basics")
-    _online_file(tmp_path, {"basic": TRIAL, "pos": ENDED})
+    # trial end from today (the page counts the days left from the real date)
+    trial = dict(TRIAL, trial_ends=(datetime.now(timezone.utc) + timedelta(days=40)).date().isoformat())
+    _online_file(tmp_path, {"basic": trial, "pos": ENDED})
     page = c.get("/").get_data(as_text=True)
     assert "Free trial · 40 days left" in page
     _online_file(tmp_path, {"basic": PAID})
