@@ -17,6 +17,11 @@ const STILL = 'You can still see and print everything.';
 const ADD = `To run new pay runs, add Payroll from your Riyeser home page (${PRICE}).`;
 const ENDED = `Payroll's free trial has ended. ${STILL} ${ADD}`;
 const DAY = 86400000;
+// OWNER-BANNER: an unsigned plan (Central not signed in or linked since a fresh start, or an older Central) counts for
+// 14 days. Say what actually fixes it, and until when (the last day, in Fiji time like the rest of Payroll).
+const lastDay = (ms) => new Date(ms - 1).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Pacific/Fiji' });
+const REFRESH = (until) => `Open Riyeser Central and sign in to your Riyeser account to refresh your plan (until ${lastDay(until)}).`;
+const REFRESH_LATE = 'Your plan couldn\'t be confirmed: open Riyeser Central and sign in to your Riyeser account to refresh it.';
 
 const appDataDir = (env = process.env) => env.APPDATA || path.join(os.homedir(), '.config');   // as Accounting and demo.js
 
@@ -27,19 +32,22 @@ const appDataDir = (env = process.env) => env.APPDATA || path.join(os.homedir(),
  */
 function status({ appData = appDataDir(), ownDir = null, now = Date.now(), publicKey } = {}) {
   const out = (o) => ({ homeUrl: HOME_URL, price: PRICE, problem: null, ...o });
-  const ev = signed.check({ appData, ownDir, now, ...(publicKey !== undefined ? { publicKey } : {}) });
+  let ev = signed.check({ appData, ownDir, now, ...(publicKey !== undefined ? { publicKey } : {}) });
   if (ev.state === 'trusted' || ev.state === 'unsigned') {
     if (!(now < ev.expiresAt)) {
       return out({ licensed: false, mode: 'ended', source: 'online', problem: 'expired', message: `${signed.MESSAGES.expired} ${STILL} ${ADD}` });
     }
     const m = signed.moduleState(ev.plan, MODULE, now);
-    const note = ev.message ? ` ${ev.message}` : '';   // e.g. "Update Riyeser Central to keep your plan up to date."
-    if (m.active && m.status === 'trial') return out({ licensed: true, mode: 'trial', daysLeft: m.daysLeft, source: 'online', message: ev.message || null });
-    if (m.active) return out({ licensed: true, mode: 'licensed', daysLeft: m.daysLeft, paidUntil: m.paidUntil, source: 'online', message: ev.message || null });
+    const grace = ev.problem === 'unsigned' ? { graceUntil: new Date(ev.expiresAt).toISOString() } : {};
+    const info = ev.problem === 'unsigned' ? REFRESH(ev.expiresAt) : ev.message;
+    const note = info ? ` ${info}` : '';   // e.g. "Update Riyeser Central to keep your plan up to date."
+    if (m.active && m.status === 'trial') return out({ licensed: true, mode: 'trial', daysLeft: m.daysLeft, source: 'online', message: info || null, ...grace });
+    if (m.active) return out({ licensed: true, mode: 'licensed', daysLeft: m.daysLeft, paidUntil: m.paidUntil, source: 'online', message: info || null, ...grace });
     const why = m.status === 'cancelled' ? `Payroll isn't on your Riyeser plan right now. ${STILL} ${ADD}` : ENDED;
-    return out({ licensed: false, mode: 'ended', source: 'online', message: `${why}${note}` });
+    return out({ licensed: false, mode: 'ended', source: 'online', message: `${why}${note}`, ...grace });
   }
   if (ev.state === 'invalid') {
+    if (ev.problem === 'unsigned') ev = { ...ev, message: REFRESH_LATE };
     // no licence: a PC that has had a real plan from Riyeser gets no new local trial
     const t = signed.localTrial({ appData, ownDir, now });
     if (!t.linked && t.active) return out({ licensed: true, mode: 'trial', daysLeft: t.daysLeft, source: 'local', problem: ev.problem, message: ev.message });

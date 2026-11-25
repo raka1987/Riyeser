@@ -111,10 +111,13 @@ test('licence rules: trial, paid, ended, cheating and the clock', async (t) => {
   await t.test('a trial ends on its own date even offline', () => { assert.strictEqual(st(pc({ plan: TRIAL }), Date.parse('2027-01-04T01:00:00Z')).licensed, false); });
   await t.test('an older Central\'s unsigned licence: 14 days with "Update Riyeser Central", then locked', () => {
     const p = pc({ signed: null });
-    const s = st(p); assert.strictEqual(s.licensed, true); assert.match(s.message, /Update Riyeser Central to keep your plan up to date/);
+    const s = st(p); assert.strictEqual(s.licensed, true);
+    assert.strictEqual(s.message, 'Open Riyeser Central and sign in to your Riyeser account to refresh your plan (until 8 December 2026).');
+    assert.strictEqual(s.graceUntil, new Date(NOW + 14 * DAY).toISOString());
     edit(p, (d) => { d.online.checkedAt = new Date(NOW + 13 * DAY).toISOString(); });
     assert.strictEqual(st(p, NOW + 13 * DAY).licensed, true);
     const late = st(p, NOW + 15 * DAY); assert.deepStrictEqual([late.licensed, late.problem], [false, 'unsigned']);
+    assert.match(late.message, /^Your plan couldn't be confirmed: open Riyeser Central and sign in to your Riyeser account to refresh it\. You can still see and print everything\./);
   });
   await t.test('the local trial: deleting licence.json doesn\'t restart it, and winding the clock back gives nothing', () => {
     const p = pc({ online: false, trialStart: new Date(NOW - 100 * DAY).toISOString() });
@@ -189,5 +192,28 @@ test('API: licensed (and an edited licence isn\'t)', async () => {
     edit(p, (d) => { d.online.signed.licence.modules.payroll = PAID.modules.payroll; });
     useLicence(p);
     assert.strictEqual((await call('POST', '/api/staff/payroll/runs', { period_start: '2026-11-01', period_end: '2026-11-14', pay_date: '2026-11-15' })).status, 402);
+  } finally { S.useKeyForTests(null); }
+});
+
+test('OWNER-BANNER: an unsigned online plan within its 14 days doesn\'t block pay runs', async () => {
+  S.useKeyForTests(PUB);
+  try {
+    const p = pc({ signed: null });   // licence.json has the plan, but unsigned (Central not signed in since a fresh start)
+    useLicence(p);
+    const l = (await call('GET', '/api/staff/licence')).data;
+    assert.strictEqual(l.licensed, true); assert.strictEqual(l.grace_until, new Date(NOW + 14 * DAY).toISOString());
+    assert.match(l.message, /^Open Riyeser Central and sign in to your Riyeser account to refresh your plan \(until 8 December 2026\)\.$/);
+    assert.strictEqual((await call('GET', '/api/staff/payroll/next-period')).status, 200);
+    const pv = await call('POST', '/api/staff/payroll/preview', { period_start: '2026-11-16', period_end: '2026-11-22' });
+    assert.strictEqual(pv.status, 200, JSON.stringify(pv.data)); assert.ok(pv.data.lines.length);
+    const run = await call('POST', '/api/staff/payroll/runs', { period_start: '2026-11-16', period_end: '2026-11-22', pay_date: '2026-11-23' });
+    assert.strictEqual(run.status, 200, JSON.stringify(run.data));
+    const emp = (await call('GET', '/api/staff/employees')).data.find((e) => e.username === 'sera');
+    assert.strictEqual((await call('PUT', `/api/staff/employees/${emp.id}`, { pay_rate: 8 })).status, 200);   // pay rates too
+    // day 13 of the 14: still fine; after the 14 days: locked
+    app.locals.payrollLicence = licence.checker({ enforce: true, appData: p.appData, ownDir: p.ownDir, now: () => NOW + 13 * DAY });
+    assert.strictEqual((await call('POST', '/api/staff/payroll/preview', { period_start: '2026-11-23', period_end: '2026-11-29' })).status, 200);
+    app.locals.payrollLicence = licence.checker({ enforce: true, appData: p.appData, ownDir: p.ownDir, now: () => NOW + 15 * DAY });
+    assert.strictEqual((await call('POST', '/api/staff/payroll/preview', { period_start: '2026-11-23', period_end: '2026-11-29' })).status, 402);
   } finally { S.useKeyForTests(null); }
 });

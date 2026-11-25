@@ -220,7 +220,7 @@ app.post('/api/auth/password', requireStaff, wrap((req, res) => {
 const BUILD = process.env.RENDER_GIT_COMMIT || String(Date.now());
 app.get('/api/staff/licence', requireStaff, (req, res) => {
   const l = licenceNow();
-  res.json({ licensed: l.licensed, mode: l.mode, days_left: l.daysLeft ?? null, source: l.source, message: l.message || null, home_url: l.homeUrl, price: l.price });
+  res.json({ licensed: l.licensed, mode: l.mode, days_left: l.daysLeft ?? null, source: l.source, message: l.message || null, grace_until: l.graceUntil || null, home_url: l.homeUrl, price: l.price });
 });
 app.get('/api/version', (req, res) => { res.set('Cache-Control', 'no-store'); res.json({ v: BUILD }); });
 app.get('/api/public/info', (req, res) => { const s = getSettings(); res.json({ company_name: s.company_name, today: todayIn(s.timezone), demo: DEMO }); });

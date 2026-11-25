@@ -191,7 +191,7 @@ function check({ appData, ownDir = null, now = Date.now(), publicKey, write = tr
     // an older Riyeser Central saved it: it counts for 14 days from when this program first saw it, then not
     if (m.unsignedSince == null) m.unsignedSince = now;
     const until = m.unsignedSince + UNSIGNED_GRACE_DAYS * DAY;
-    if (now < until) return done({ state: 'unsigned', plan: unsignedPlan, checkedAt, expiresAt: Math.min(until, checkedAt + OFFLINE_GRACE_DAYS * DAY), problem: 'unsigned', message: MESSAGES.update });
+    if (now < until) return done({ state: 'unsigned', plan: unsignedPlan, checkedAt, expiresAt: Math.min(until, checkedAt + OFFLINE_GRACE_DAYS * DAY), problem: 'unsigned', message: MESSAGES.update, graceUntil: until });
     return done({ state: 'invalid', plan: null, problem: 'unsigned', message: MESSAGES.update });
   }
   const bad = (problem, message = MESSAGES.invalid) => done({ state: 'invalid', plan: null, problem, message });

@@ -79,10 +79,14 @@ let LIC = { licensed: true };
 async function drawLicence() {
   try { LIC = await api('/api/staff/licence'); } catch { LIC = { licensed: true }; }
   const b = $('#lic-banner'); if (!b) return;
-  const show = !LIC.licensed || !!LIC.message;
+  // OWNER-BANNER: on the Dashboard and Payroll pages only; a notice (Payroll still works) can be hidden for the day
+  const hideKey = () => `${today()}|${LIC.message || ''}`;
+  let hiddenToday = false; try { hiddenToday = localStorage.getItem('lic-banner-hidden') === hideKey(); } catch { }
+  const show = ['dashboard', 'payroll'].includes(VIEW) && (!LIC.licensed || (!!LIC.message && !hiddenToday));
   b.hidden = !show;
   b.className = `lic-banner${LIC.licensed ? ' soon' : ''}`;
-  b.innerHTML = show ? `<span>${LIC.licensed ? 'ℹ️' : '🔒'}</span><div class="grow">${esc(LIC.message || '')}</div>${LIC.licensed ? '' : `<a class="btn sm" href="${esc(LIC.home_url)}" target="_blank" rel="noopener">Open Riyeser home</a>`}` : '';
+  b.innerHTML = show ? `<span>${LIC.licensed ? 'ℹ️' : '🔒'}</span><div class="grow">${esc(LIC.message || '')}${LIC.licensed && LIC.grace_until ? '<div class="small">Pay runs carry on as normal until then.</div>' : ''}</div>${LIC.licensed ? '<button type="button" class="btn sm ghost" id="lic-hide">Hide for today</button>' : `<a class="btn sm" href="${esc(LIC.home_url)}" target="_blank" rel="noopener">Open Riyeser home</a>`}` : '';
+  if ($('#lic-hide')) $('#lic-hide').onclick = () => { try { localStorage.setItem('lic-banner-hidden', hideKey()); } catch { } b.hidden = true; };
 }
 
 // ------------------------------------------------------------------ generic form helpers
