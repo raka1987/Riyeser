@@ -9,7 +9,7 @@
 <div class="tbl"><table><tr><th>Date</th><th>Description</th><th class="n">Amount</th><th>Allocate to</th><th>Tax</th><th></th></tr>
 {% for r in rows %}<tr><td>{{ r.date }}</td><td>{{ r.description }}</td><td class="n {{ 'neg' if r.amount < 0 }}">{{ r.amount|money }}</td>
 {% if r.entry_id %}<td colspan="3"><a href="{{ url_for('core.entry', eid=r.entry_id) }}">Allocated → #{{ r.entry_id }}</a></td>
-{% else %}<td>{{ account_select('account_id', accounts)|replace('<select', '<select form="f' ~ r.id ~ '" required') }}</td><td>{{ tax_select('tax_code_id', tax_codes)|replace('<select', '<select form="f' ~ r.id ~ '"') }}</td>
+{% else %}<td>{{ account_select('account_id', accounts, form='f' ~ r.id, required=True) }}</td><td>{{ tax_select('tax_code_id', tax_codes, form='f' ~ r.id) }}</td>
 <td style="white-space:nowrap"><form id="f{{ r.id }}" method="post" class="inline" action="{{ url_for('banking.allocate', fid=r.id) }}"><button class="btn sm pri">Allocate</button></form>
 <a class="btn sm" href="{{ url_for('banking.money', kind='receive' if r.amount > 0 else 'spend', feed=r.id, account=aid, date=r.date, payee=r.description) }}">Split…</a>
 {% if lv('banking') >= 3 %}<form method="post" class="inline" action="{{ url_for('banking.feed_delete', fid=r.id) }}"><button class="btn sm danger">✕</button></form>{% endif %}</td>{% endif %}</tr>

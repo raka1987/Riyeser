@@ -3,9 +3,9 @@ import csv
 import io
 from datetime import date
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
 
-from ..db import get_db, to_cents, audit, linked, fmt_money
+from ..db import get_db, to_cents, audit, linked, fmt_money, write_txn
 from ..ledger import bank_transaction, transfer, balances, PostingError
 from . import lookups, opt_int, form_lines, guarded
 
@@ -194,12 +194,18 @@ def _parse_date(s):
 @guarded
 def allocate(fid):
     db = get_db()
+    write_txn(db)  # two people allocating the same line: only the first one posts
     fl = db.execute("SELECT * FROM bank_feed_lines WHERE id=?", (fid,)).fetchone()
+    if not fl:
+        abort(404)
     if fl["entry_id"]:
         raise ValueError("Already allocated.")
+    acct = opt_int(request.form.get("account_id"))
+    if not acct:
+        raise ValueError("Choose the account to allocate this line to.")
     kind = "receive" if fl["amount"] > 0 else "spend"
     eid = bank_transaction(db, kind, fl["account_id"], fl["date"],
-                           [dict(account_id=int(request.form["account_id"]), amount=abs(fl["amount"]),
+                           [dict(account_id=acct, amount=abs(fl["amount"]),
                                  tax_code_id=opt_int(request.form.get("tax_code_id")))],
                            payee=fl["description"], memo=fl["description"])
     db.execute("UPDATE bank_feed_lines SET entry_id=? WHERE id=?", (eid, fid))

@@ -296,3 +296,33 @@ def test_f9_job_invoice_charges_a_stock_part_at_the_till_price(tmp_path, monkeyp
     line = _one(app, "SELECT * FROM document_lines WHERE item_id=?", (pump,))
     assert line["net_amount"] + line["tax_amount"] == till
     assert (line["net_amount"], line["tax_amount"]) == (64900, 6490)
+
+
+# ------------------------------------------------------------------ F10
+def test_f10_bank_statement_import_dropdowns_and_allocate(client, app):
+    import io
+    with app.app_context():
+        acc, tc = ids(get_db())
+    csv_text = "Date,Description,Amount\n2026-11-03,Officeworks,-55.00\n04/11/2026,Customer deposit,220.00\n"
+    client.post("/banking/feed", data={"account_id": acc["1-1110"],
+                                       "file": (io.BytesIO(csv_text.encode()), "statement.csv")},
+                content_type="multipart/form-data")
+    page = client.get(f"/banking/feed?account={acc['1-1110']}").get_data(as_text=True)
+    assert "&lt;select" not in page
+    with app.app_context():
+        fid = get_db().execute("SELECT id FROM bank_feed_lines WHERE description='Officeworks'").fetchone()[0]
+    assert f'<select name="account_id" form="f{fid}" required>' in page
+    assert f'<select name="tax_code_id" form="f{fid}">' in page
+    r = client.post(f"/banking/feed/{fid}/allocate", data={"account_id": acc["6-1500"], "tax_code_id": tc["GST"]},
+                    follow_redirects=True)
+    assert r.status_code == 200 and "Statement line allocated" in r.get_data(as_text=True)
+    with app.app_context():
+        db = get_db()
+        eid = db.execute("SELECT entry_id FROM bank_feed_lines WHERE id=?", (fid,)).fetchone()[0]
+        lines = {r["account_id"]: (r["debit"], r["credit"]) for r in
+                 db.execute("SELECT * FROM journal_lines WHERE entry_id=?", (eid,))}
+        assert lines[acc["6-1500"]] == (5000, 0) and lines[acc["1-1110"]] == (0, 5500)
+    # allocating again is refused, not posted twice
+    client.post(f"/banking/feed/{fid}/allocate", data={"account_id": acc["6-1500"]}, headers={"Referer": "/banking/feed"})
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM journal_entries WHERE source_type='spend'").fetchone()[0] == 1
