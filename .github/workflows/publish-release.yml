@@ -95,6 +95,8 @@ jobs:
             $ids[$a.id] = "$v"
             Copy-Item $setup.FullName (Join-Path release $a.out)
           }
+          # M3: Riyeser Link's installer under its new name too (the same file; RiyeserTeam-Setup.exe stays for old links and Centrals).
+          Copy-Item (Join-Path release "RiyeserTeam-Setup.exe") (Join-Path release "RiyeserLink-Setup.exe")
           $versions | Set-Content release\versions-desktop.txt
           # versions.json: each program's version by its id. Riyeser Central (1.7 and later) reads it first, so older
           # Centrals still find "team" (now listed as Riyeser Link) and offer the update.
@@ -272,6 +274,7 @@ jobs:
             out/RiyeserPDF-Setup.exe
             out/RiyeserServices-Setup.exe
             out/RiyeserTeam-Setup.exe
+            out/RiyeserLink-Setup.exe
             out/RiyeserLinkOffice-Setup.exe
             out/versions.json
             out/RiyeserAccountingBasics-Setup.exe
