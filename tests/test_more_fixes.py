@@ -151,3 +151,27 @@ def test_owner_backup_first_run_offers_restore(tmp_path, monkeypatch):
     assert bk.describe(tmp_path / "new" / "company.db")["name"] == "Moved PC Pty Ltd"
     c.post("/login", data={"username": "admin", "password": "admin"})
     assert c.get("/").status_code == 200
+
+
+# ------------------------------------------------------------------ S37
+def test_s37_password_rules_lockout_and_taken_username(client, app):
+    r = client.post("/users/save", data={"username": "sam", "password": "1", "preset": "sales"},
+                    headers={"Referer": "/users"}, follow_redirects=True)
+    assert "at least 8 characters" in page(r)
+    client.post("/users/save", data={"username": "sam", "password": "long-enough", "preset": "sales"})
+    r = client.post("/users/save", data={"username": "Sam", "password": "another-one", "preset": "sales"},
+                    headers={"Referer": "/users"}, follow_redirects=True)
+    assert "That username is taken" in page(r)
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM users WHERE username LIKE 'sam'").fetchone()[0] == 1
+    # five wrong passwords, then sign-in waits (even with the right one), longer each time
+    c = app.test_client()
+    for _ in range(5):
+        assert c.post("/login", data={"username": "admin", "password": "wrong"}).status_code == 200
+    r = c.post("/login", data={"username": "admin", "password": "admin"})
+    assert r.status_code == 429 and "Try again in 30 seconds" in page(r)
+    fails = app.config["_login_fails"]
+    key = next(iter(fails))
+    fails[key] = (fails[key][0], 0)          # the wait is over
+    assert c.post("/login", data={"username": "admin", "password": "admin"}).status_code == 302
+    assert key not in fails

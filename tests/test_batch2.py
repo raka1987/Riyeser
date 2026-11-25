@@ -349,9 +349,9 @@ def test_f14_no_one_without_payroll_access_can_find_anyones_pay(client, app):
         rid = slips[0]["payrun_id"]
         acc, _ = ids(db)
     secrets = ["Alice", "Zephyrine", "Bob", "Quixley"] + [fmt_money(s[k]) for s in slips for k in ("net", "gross", "tax")]
-    client.post("/users/save", data={"username": "rita", "password": "pw", "preset": "readonly"})
+    client.post("/users/save", data={"username": "rita", "password": "pw-staff1", "preset": "readonly"})
     rita = app.test_client()
-    rita.post("/login", data={"username": "rita", "password": "pw"})
+    rita.post("/login", data={"username": "rita", "password": "pw-staff1"})
     pages = [f"/banking/reconcile?account={bank}&date=2026-11-30"]
     pages += [f"/accounts/{acc[c]}?start=2026-07-01&end=2026-11-30" for c in ("1-1110", "6-5000", "2-1410", "2-1420", "6-5100")]
     pages += ["/reports/gl_detail?start=2026-07-01&end=2026-11-30",

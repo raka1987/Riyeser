@@ -9,7 +9,7 @@
 {% if profile %}<div class="flash ok" style="margin-bottom:12px">Filled in from your Riyeser company profile{% if profile.company_code %} ({{ profile.company_code }}){% endif %}: {{ profile.name }}{% if profile.tax_number %} · ABN {{ profile.tax_number }}{% endif %}. Change anything you need later under Setup.</div>
   <input type="hidden" name="use_profile" value="1">{% endif %}
   <label>Company name</label><input name="name" placeholder="My Company Pty Ltd" value="{{ profile.name if profile else '' }}" required>
-  <label style="margin-top:12px">Admin password</label><input name="password" type="password" required minlength="4">
+  <label style="margin-top:12px">Admin password</label><input name="password" type="password" required minlength="8">
 {% if not product.separate %}
   <label style="margin-top:14px">Edition</label>
   <label class="check"><input type="radio" name="edition" value="basic" checked> <span><b>{{ editions.basic.name }}</b> ({{ prices.basic }} a month per business, free for 90 days) · invoices, quotes, customers, stock items, inventory reports</span></label>

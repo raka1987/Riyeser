@@ -179,9 +179,9 @@ def test_web_flow_invoice_and_receive_payment(client, app):
 
 
 def test_viewer_is_read_only(client, app):
-    client.post("/users/save", data={"username": "v", "password": "pw", "role": "viewer"})
+    client.post("/users/save", data={"username": "v", "password": "pw-staff1", "role": "viewer"})
     c2 = app.test_client()
-    c2.post("/login", data={"username": "v", "password": "pw"})
+    c2.post("/login", data={"username": "v", "password": "pw-staff1"})
     assert c2.get("/").status_code == 200
     c2.post("/cards/customer/new", data={"name": "Nope", "active": "1"})
     with app.app_context():
@@ -215,13 +215,13 @@ def test_forgot_password_only_in_desktop_mode(tmp_path):
         c = app.test_client()
         page = c.get("/forgot").get_data(as_text=True)
         assert ("Set new password" in page) == local
-        c.post("/forgot", data={"username": "admin", "password": "newpw", "confirm": "newpw"})
-        r = c.post("/login", data={"username": "admin", "password": "newpw"})
+        c.post("/forgot", data={"username": "admin", "password": "newpw-123", "confirm": "newpw-123"})
+        r = c.post("/login", data={"username": "admin", "password": "newpw-123"})
         assert (r.status_code == 302) == local
         # a remote computer can never reset, even in desktop mode
-        r = c.post("/forgot", data={"username": "admin", "password": "hack", "confirm": "hack"},
+        r = c.post("/forgot", data={"username": "admin", "password": "hack-1234", "confirm": "hack-1234"},
                    environ_base={"REMOTE_ADDR": "192.168.1.50"})
-        assert c.post("/login", data={"username": "admin", "password": "hack"}).status_code == 200
+        assert c.post("/login", data={"username": "admin", "password": "hack-1234"}).status_code == 200
 
 
 def test_cli_reset_password(tmp_path):
@@ -237,9 +237,9 @@ def test_cli_reset_password(tmp_path):
 def test_basic_edition_menus_and_guard(tmp_path):
     app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "b.db")})
     with app.app_context():
-        init_db("Shop", "pw", "basic")
+        init_db("Shop", "pw-staff1", "basic")
     c = app.test_client()
-    c.post("/login", data={"username": "admin", "password": "pw"})
+    c.post("/login", data={"username": "admin", "password": "pw-staff1"})
     home = c.get("/").get_data(as_text=True)
     assert "Accounting Basics" in home and "Stock items" in home and "Run payroll" not in home
     # enterprise-only screens redirect to the dashboard
@@ -266,14 +266,14 @@ def test_migrates_old_company_file(tmp_path):
     path = tmp_path / "old.db"
     app = create_app({"TESTING": True, "DATABASE": str(path)})
     with app.app_context():
-        init_db("Old Co", "pw")
+        init_db("Old Co", "pw-staff1")
     con = sqlite3.connect(path)  # simulate a file made before editions and POS existed
     con.executescript("ALTER TABLE company DROP COLUMN edition; DROP TABLE pos_sales;"
                       " DELETE FROM linked_accounts WHERE key LIKE 'pos_%';")
     con.commit(); con.close()
     app2 = create_app({"TESTING": True, "DATABASE": str(path)})
     c = app2.test_client()
-    c.post("/login", data={"username": "admin", "password": "pw"})
+    c.post("/login", data={"username": "admin", "password": "pw-staff1"})
     assert c.get("/").status_code == 200
     con = sqlite3.connect(path)
     assert con.execute("SELECT edition FROM company").fetchone()[0] == "enterprise"
@@ -510,15 +510,15 @@ def test_pos_setup_needs_full_setup_access(app):
     _pos_setup(app)
     a = app.test_client()
     a.post("/login", data={"username": "admin", "password": "admin"})
-    a.post("/users/save", data={"username": "sam", "password": "pw", "preset": "sales"})
-    a.post("/users/save", data={"username": "bob", "password": "pw", "preset": "bookkeeper"})
+    a.post("/users/save", data={"username": "sam", "password": "pw-staff1", "preset": "sales"})
+    a.post("/users/save", data={"username": "bob", "password": "pw-staff1", "preset": "bookkeeper"})
     s = app.test_client()
-    s.post("/login", data={"username": "sam", "password": "pw"})
+    s.post("/login", data={"username": "sam", "password": "pw-staff1"})
     assert s.get("/pos/").status_code == 200
     assert s.get("/pos/setup").status_code in (302, 403)  # sales staff can't even open it
     s.post("/pos/setup", data={"mode": "restaurant", "mode_changed": "1"})
     b = app.test_client()
-    b.post("/login", data={"username": "bob", "password": "pw"})
+    b.post("/login", data={"username": "bob", "password": "pw-staff1"})
     assert b.get("/pos/setup").status_code == 200  # a bookkeeper can look...
     b.post("/pos/setup", data={"mode": "restaurant", "mode_changed": "1"})  # ...but not change it
     with app.app_context():
@@ -565,9 +565,9 @@ def test_pos_tills_photos_favourites_and_today(client, app):
 def _staff(app, name="sam", preset="sales"):
     a = app.test_client()
     a.post("/login", data={"username": "admin", "password": "admin"})
-    a.post("/users/save", data={"username": name, "password": "pw", "preset": preset})
+    a.post("/users/save", data={"username": name, "password": "pw-staff1", "preset": preset})
     s = app.test_client()
-    s.post("/login", data={"username": name, "password": "pw"})
+    s.post("/login", data={"username": name, "password": "pw-staff1"})
     return s
 
 

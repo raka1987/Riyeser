@@ -39,7 +39,7 @@ def test_new_company_file_uses_the_profile(tmp_path, monkeypatch, edition):
     c = app.test_client()
     page = c.get("/setup").get_data(as_text=True)
     assert "Filled in from your Riyeser company profile" in page and 'value="Sample Plumbing"' in page and "RIY-7K3M-Q2" in page
-    c.post("/setup", data={"name": "Sample Plumbing", "password": "admin", "use_profile": "1"})
+    c.post("/setup", data={"name": "Sample Plumbing", "password": "admin123", "use_profile": "1"})
     with app.app_context():
         row = get_db().execute("SELECT name, abn, address, phone, email FROM company").fetchone()
     assert tuple(row) == ("Sample Plumbing", "12 345 678 901", "4 Elm St, Suva", "+679 330 0000", "office@sample.test")
@@ -50,6 +50,6 @@ def test_no_profile_works_as_before(tmp_path, monkeypatch):
     app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "new.db")})
     c = app.test_client()
     assert "Filled in from" not in c.get("/setup").get_data(as_text=True)
-    c.post("/setup", data={"name": "Corner Cafe", "password": "admin"})
+    c.post("/setup", data={"name": "Corner Cafe", "password": "admin123"})
     with app.app_context():
         assert get_db().execute("SELECT name, abn FROM company").fetchone()[0] == "Corner Cafe"

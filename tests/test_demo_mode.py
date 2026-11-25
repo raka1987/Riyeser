@@ -79,11 +79,11 @@ def test_no_demo_json_uses_the_normal_folder(env, monkeypatch):
     assert app.config["DATABASE"] == str(env / "data" / "company.db") and not app.config["DEMO_MODE"]
     page = c.get("/login", follow_redirects=True).get_data(as_text=True)
     assert "Demo mode: sign in" not in page
-    c.post("/setup", data={"name": "My Real Books", "password": "secret"})
+    c.post("/setup", data={"name": "My Real Books", "password": "secret12"})
     assert q(env / "data" / "company.db", "SELECT name, is_demo FROM company") == [("My Real Books", 0)]
     assert not (env / "data" / "demo").exists()
     assert c.get("/").status_code == 302                       # no automatic sign-in for real books
-    c.post("/login", data={"username": "admin", "password": "secret"})
+    c.post("/login", data={"username": "admin", "password": "secret12"})
     assert BANNER not in c.get("/").get_data(as_text=True)
 
 
@@ -187,7 +187,7 @@ def test_pos_demo_has_items_and_a_sale_shows_in_accounting(env, monkeypatch):
 def test_demo_off_goes_back_to_the_real_books(env, monkeypatch):
     real = env / "data" / "company.db"
     app = app_for(env, monkeypatch)                                    # real books made first, in normal mode
-    app.test_client().post("/setup", data={"name": "My Real Books", "password": "secret"})
+    app.test_client().post("/setup", data={"name": "My Real Books", "password": "secret12"})
     before = real.read_bytes()
     set_demo(env, True)
     demo = app_for(env, monkeypatch, "plus")
@@ -203,7 +203,7 @@ def test_demo_off_goes_back_to_the_real_books(env, monkeypatch):
     assert app.config["DATABASE"] == str(real) and not app.config["DEMO_MODE"]
     c = app.test_client()
     assert c.get("/").status_code == 302                               # real books: sign in as usual
-    c.post("/login", data={"username": "admin", "password": "secret"})
+    c.post("/login", data={"username": "admin", "password": "secret12"})
     page = c.get("/").get_data(as_text=True)
     assert "Demo company" not in page and BANNER not in page
     assert q(real, "SELECT name, is_demo FROM company") == [("My Real Books", 0)]

@@ -71,11 +71,11 @@ def test_access_is_per_company(app):
     a.post("/companies/add", data={"name": "Payroll Co"})
     pid = [i for i in company_ids(a) if i != "main"][0]
     # Sam: sales staff, given the same sign-in and access in Payroll Co too
-    a.post("/users/save", data={"username": "sam", "password": "pw", "preset": "sales", "also": pid})
+    a.post("/users/save", data={"username": "sam", "password": "pw-staff1", "preset": "sales", "also": pid})
     a.get(f"/companies/switch/{pid}")
     users = a.get("/users").get_data(as_text=True)
     assert "sam" in users
-    s = login(app, "sam", "pw")
+    s = login(app, "sam", "pw-staff1")
     assert s.get("/payroll/").status_code == 302          # first company: no payroll
     assert s.get(f"/companies/switch/{pid}").status_code == 302
     assert "Payroll Co" in s.get("/").get_data(as_text=True)
@@ -227,6 +227,6 @@ def test_new_company_file_takes_the_app_edition(tmp_path, monkeypatch):
     c = app.test_client()
     page = c.get("/setup").get_data(as_text=True)
     assert "Riyeser Accounting Basics" in page and 'name="edition"' not in page
-    c.post("/setup", data={"name": "Corner Shop", "password": "pass1"})
+    c.post("/setup", data={"name": "Corner Shop", "password": "pass1234"})
     with app.app_context():
         assert get_db().execute("SELECT edition FROM company").fetchone()[0] == "basic"

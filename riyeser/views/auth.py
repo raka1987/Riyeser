@@ -17,7 +17,10 @@ def setup_company():
         return redirect(url_for("auth.login"))
     if request.method == "POST":
         name = request.form.get("name", "").strip() or "My Company Pty Ltd"
-        pw = request.form.get("password") or "admin"
+        pw = request.form.get("password") or ""
+        if len(pw) < MIN_PASSWORD:
+            flash(f"Choose an admin password of at least {MIN_PASSWORD} characters.", "error")
+            return redirect(url_for("auth.setup_company"))
         init_db(name, pw, request.form.get("edition"))
         from .. import company_profile
         prof = company_profile.read()
@@ -34,6 +37,32 @@ def setup_company():
     return render_template("auth/setup.html", profile=company_profile.read())
 
 
+MIN_PASSWORD = 8          # S37
+FREE_TRIES = 5            # wrong passwords in a row before sign-in waits
+FIRST_WAIT = 30           # seconds after the 5th; doubles each time after, up to 15 minutes
+
+
+def check_password_rules(pw):
+    if len(pw or "") < MIN_PASSWORD:
+        raise ValueError(f"Choose a password of at least {MIN_PASSWORD} characters.")
+
+
+def _fails():
+    return current_app.config.setdefault("_login_fails", {})
+
+
+def _wait_left(key, now):
+    n, until = _fails().get(key, (0, 0))
+    return max(0, int(until - now + 0.999)) if n >= FREE_TRIES else 0
+
+
+def _failed(key, now):
+    n, _until = _fails().get(key, (0, 0))
+    n += 1
+    wait = min(FIRST_WAIT * 2 ** (n - FREE_TRIES), 900) if n >= FREE_TRIES else 0
+    _fails()[key] = (n, now + wait)
+
+
 @bp.route("/login", methods=["GET", "POST"])
 def login():
     from .. import companies as co
@@ -43,14 +72,26 @@ def login():
         path = co.path_of(cid) if any(c["id"] == cid for c in choices) else None
         if not path:
             cid, path = co.MAIN, co.path_of(co.MAIN)
+        import time
+        uname = request.form.get("username", "").strip()
+        key, now = (path, uname.lower()), time.time()
+        left = _wait_left(key, now)
+        if left:
+            flash(f"Too many wrong passwords for {uname}. Try again in {left} seconds.", "error")
+            return render_template("auth/login.html", choices=choices), 429
         with co.using(path):
             db = get_db()
-            u = db.execute("SELECT * FROM users WHERE username=? AND active=1",
-                           (request.form.get("username", "").strip(),)).fetchone()
+            u = db.execute("SELECT * FROM users WHERE username=? AND active=1", (uname,)).fetchone()
             ok = bool(u and check_password_hash(u["password_hash"], request.form.get("password", "")))
             if ok:
                 audit(db, "login", u["username"])
-                db.commit()
+            else:
+                audit(db, "login_failed", uname[:60])
+            db.commit()
+        if ok:
+            _fails().pop(key, None)
+        else:
+            _failed(key, now)
         if ok:
             session.clear()
             access = co.access_after_login(u["username"], u["password_hash"])
@@ -85,8 +126,8 @@ def forgot():
         u = db.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
         if not u:
             flash("No user with that username.", "error")
-        elif len(pw) < 4:
-            flash("Choose a password of at least 4 characters.", "error")
+        elif len(pw) < MIN_PASSWORD:
+            flash(f"Choose a password of at least {MIN_PASSWORD} characters.", "error")
         elif pw != request.form.get("confirm", ""):
             flash("The two passwords don't match.", "error")
         else:
@@ -148,12 +189,16 @@ def save_user():
         db.execute("UPDATE users SET full_name=?, role=?, active=?, perms=? WHERE id=?",
                    (f.get("full_name"), role, active, None if role == "admin" else json.dumps(levels), uid))
         if f.get("password"):
+            check_password_rules(f["password"])
             db.execute("UPDATE users SET password_hash=? WHERE id=?", (generate_password_hash(f["password"]), uid))
         name = db.execute("SELECT username FROM users WHERE id=?", (uid,)).fetchone()["username"]
         audit(db, "save_user", f"{name}: {role}" + ("" if role == "admin" else " " + ", ".join(f"{a}={v}" for a, v in levels.items())))
     else:
-        if not f.get("username") or not f.get("password"):
+        if not f.get("username", "").strip() or not f.get("password"):
             raise ValueError("Username and password are required.")
+        check_password_rules(f["password"])
+        if db.execute("SELECT 1 FROM users WHERE username=? COLLATE NOCASE", (f["username"].strip(),)).fetchone():
+            raise ValueError(f"That username is taken: {f['username'].strip()}. Choose another, or edit that user.")
         preset = f.get("preset") or ("role:" + f["role"] if f.get("role") else "readonly")
         if preset.startswith("role:") and preset[5:] in ("admin", "accountant", "viewer"):
             role, levels = preset[5:], None  # older forms / scripts: a plain role

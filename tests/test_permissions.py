@@ -25,10 +25,10 @@ def admin(app):
 
 
 def add_user(app, name, preset):
-    r = admin(app).post("/users/save", data={"username": name, "password": "pw", "preset": preset})
+    r = admin(app).post("/users/save", data={"username": name, "password": "pw-staff1", "preset": preset})
     assert r.status_code == 302
     c = app.test_client()
-    c.post("/login", data={"username": name, "password": "pw"})
+    c.post("/login", data={"username": name, "password": "pw-staff1"})
     return c
 
 
@@ -100,7 +100,7 @@ def test_admin_sets_levels_and_last_admin_is_protected(app):
     with app.app_context():
         saved = json.loads(get_db().execute("SELECT perms FROM users WHERE id=?", (uid,)).fetchone()["perms"])
     assert saved["purchases"] == 3 and saved["sales"] == 0
-    b = app.test_client(); b.post("/login", data={"username": "bob", "password": "pw"})
+    b = app.test_client(); b.post("/login", data={"username": "bob", "password": "pw-staff1"})
     assert b.get("/purchase/list").status_code == 200 and b.get("/sale/list").status_code == 302
     # the only administrator can't take away their own admin rights
     me = count(app, "SELECT id FROM users WHERE username='admin'")
@@ -113,7 +113,7 @@ def test_admin_sets_levels_and_last_admin_is_protected(app):
 def test_existing_users_keep_working(app):
     # users made before this change follow their role
     a = admin(app)
-    a.post("/users/save", data={"username": "acc", "password": "pw", "role": "accountant"})
-    c = app.test_client(); c.post("/login", data={"username": "acc", "password": "pw"})
+    a.post("/users/save", data={"username": "acc", "password": "pw-staff1", "role": "accountant"})
+    c = app.test_client(); c.post("/login", data={"username": "acc", "password": "pw-staff1"})
     for url in ["/payroll/", "/sale/list", "/purchase/list", "/banking/", "/reports/pnl"]:
         assert c.get(url).status_code == 200, url

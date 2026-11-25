@@ -9,8 +9,8 @@
 <form method="post">
   <label>Username</label>
   <select name="username">{% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.full_name %} ({{ u.full_name }}){% endif %} · {{ u.role }}</option>{% endfor %}</select>
-  <label style="margin-top:12px">New password</label><input name="password" type="password" required minlength="4" autocomplete="new-password">
-  <label style="margin-top:12px">Confirm new password</label><input name="confirm" type="password" required minlength="4" autocomplete="new-password">
+  <label style="margin-top:12px">New password</label><input name="password" type="password" required minlength="8" autocomplete="new-password">
+  <label style="margin-top:12px">Confirm new password</label><input name="confirm" type="password" required minlength="8" autocomplete="new-password">
   <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Set new password</button>
 </form>
 {% else %}
