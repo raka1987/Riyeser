@@ -1,6 +1,5 @@
 """Banking: money in and out, transfers, bank reconciliation, bank statement import."""
-import csv
-import io
+import json
 from datetime import date
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
@@ -103,6 +102,10 @@ def reconcile():
                               (aid, stmt_date)).fetchone()[0]
         last = db.execute("SELECT * FROM reconciliations WHERE account_id=? ORDER BY id DESC LIMIT 1",
                           (aid,)).fetchone()
+        seen = {r[0] for r in db.execute("SELECT line_id FROM bank_feed_lines WHERE account_id=? AND line_id IS NOT NULL",
+                                         (aid,))}
+        for l in lines:  # S24: lines on an imported statement come ticked
+            l["on_statement"] = any(i in seen for i in l["ids"])
     return render_template("banking/reconcile.html", aid=aid, stmt_date=stmt_date, lines=lines, rec_bal=rec_bal,
                            last=last, more=more, page_size=RECONCILE_PAGE, **lk)
 
@@ -157,45 +160,84 @@ def feed():
     aid = opt_int(request.args.get("account")) or (lk["bank_accounts"][0]["id"] if lk["bank_accounts"] else None)
     rows = db.execute("SELECT * FROM bank_feed_lines WHERE account_id=? ORDER BY (entry_id IS NOT NULL), date",
                       (aid,)).fetchall()
-    return render_template("banking/feed.html", aid=aid, rows=rows, **lk)
+    saved = db.execute("SELECT * FROM bank_import_maps WHERE account_id=?", (aid,)).fetchone()
+    mapping = json.loads(saved["mapping"]) if saved else {}
+    return render_template("banking/feed.html", aid=aid, rows=rows, matches={r["id"]: _suggest(db, r) for r in rows
+                                                                            if not r["entry_id"]},
+                           mapping=mapping, date_order=(saved["date_order"] if saved else None) or "dmy", **lk)
+
+
+def _suggest(db, fl):
+    """Transactions already in the books that look like this statement line (S24): same bank account and amount,
+    within a week, not reconciled, not matched to another line."""
+    from datetime import timedelta
+    d = date.fromisoformat(fl["date"])
+    return db.execute(
+        "SELECT l.id, e.id eid, e.date, COALESCE(l.memo, e.memo) memo FROM journal_lines l"
+        " JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=? AND l.debit-l.credit=? AND"
+        " l.reconciliation_id IS NULL AND e.voided=0 AND e.date BETWEEN ? AND ? AND l.id NOT IN"
+        " (SELECT line_id FROM bank_feed_lines WHERE line_id IS NOT NULL) ORDER BY ABS(julianday(e.date)-julianday(?))"
+        " LIMIT 3", (fl["account_id"], fl["amount"], (d - timedelta(days=7)).isoformat(),
+                     (d + timedelta(days=7)).isoformat(), fl["date"])).fetchall()
 
 
 @guarded
 def _import_feed():
+    from .. import bank_import
     db = get_db()
     aid = int(request.form["account_id"])
     file = request.files.get("file")
     if not file or not file.filename:
         raise ValueError("Choose a CSV file.")
-    text = file.read().decode("utf-8-sig")
-    n = 0
-    for row in csv.reader(io.StringIO(text)):
-        if len(row) < 3:
-            continue
-        d, desc, amt = row[0].strip(), row[1].strip(), row[2].strip()
-        try:
-            cents = to_cents(amt)
-        except ValueError:
-            continue  # header row
-        d = _parse_date(d)
-        if not d:
+    text = file.read().decode("utf-8-sig", errors="replace")
+    chosen = {role: opt_int(request.form.get(f"col_{role}")) for role in bank_import.ROLES}
+    chosen = {k: v - 1 for k, v in chosen.items() if v}                     # the form counts columns from 1
+    saved = db.execute("SELECT * FROM bank_import_maps WHERE account_id=?", (aid,)).fetchone()
+    order = request.form.get("date_order") or (saved["date_order"] if saved else None) or "dmy"
+    lines, skipped, used = bank_import.read(text, chosen, order, json.loads(saved["mapping"]) if saved else None)
+    if lines:  # remembered for this bank account (S24)
+        db.execute("INSERT OR REPLACE INTO bank_import_maps (account_id, mapping, date_order) VALUES (?,?,?)",
+                   (aid, json.dumps(used), order))
+    write_txn(db)
+    n = dup = 0
+    for l in lines:
+        if db.execute("SELECT 1 FROM bank_feed_lines WHERE account_id=? AND date=? AND amount=? AND"
+                      " COALESCE(description,'')=?", (aid, l["date"], l["amount"], l["description"])).fetchone():
+            dup += 1
             continue
         db.execute("INSERT INTO bank_feed_lines (account_id, date, description, amount) VALUES (?,?,?,?)",
-                   (aid, d, desc, cents))
+                   (aid, l["date"], l["description"], l["amount"]))
         n += 1
-    audit(db, "bank_import", f"{n} lines")
-    flash(f"Imported {n} statement lines.", "ok")
+    audit(db, "bank_import", f"{n} lines, {dup} already imported, {len(skipped)} skipped")
+    flash(f"Imported {n} statement lines." + (f" {dup} were already imported, so they were skipped." if dup else ""),
+          "ok" if n or dup else "error")
+    if skipped:
+        flash("Not imported: " + "; ".join(f"row {r}: {why}" if r else why for r, why in skipped[:15])
+              + (f"; and {len(skipped) - 15} more" if len(skipped) > 15 else "") + ".", "warn")
     return redirect(url_for("banking.feed", account=aid))
 
 
 def _parse_date(s):
-    from datetime import datetime
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y", "%d-%m-%Y"):
-        try:
-            return datetime.strptime(s, fmt).date().isoformat()
-        except ValueError:
-            pass
-    return None
+    from .. import bank_import
+    return bank_import.parse_date(s)
+
+
+@bp.route("/feed/<int:fid>/match", methods=["POST"])
+@guarded
+def feed_match(fid):
+    """This statement line is a transaction already in the books (a payment, money in or out): link them."""
+    db = get_db()
+    write_txn(db)
+    fl = db.execute("SELECT * FROM bank_feed_lines WHERE id=?", (fid,)).fetchone() or abort(404)
+    if fl["entry_id"]:
+        raise ValueError("Already allocated.")
+    lid = opt_int(request.form.get("line_id"))
+    if lid not in {m["id"] for m in _suggest(db, fl)}:
+        raise ValueError("That transaction doesn't match this statement line.")
+    eid = db.execute("SELECT entry_id FROM journal_lines WHERE id=?", (lid,)).fetchone()[0]
+    db.execute("UPDATE bank_feed_lines SET entry_id=?, line_id=? WHERE id=?", (eid, lid, fid))
+    flash("Matched: nothing new was posted, and it's ticked on Reconcile.", "ok")
+    return redirect(url_for("banking.feed", account=fl["account_id"]))
 
 
 @bp.route("/feed/<int:fid>/allocate", methods=["POST"])
@@ -216,7 +258,8 @@ def allocate(fid):
                            [dict(account_id=acct, amount=abs(fl["amount"]),
                                  tax_code_id=opt_int(request.form.get("tax_code_id")))],
                            payee=fl["description"], memo=fl["description"])
-    db.execute("UPDATE bank_feed_lines SET entry_id=? WHERE id=?", (eid, fid))
+    line = db.execute("SELECT id FROM journal_lines WHERE entry_id=? AND account_id=?", (eid, fl["account_id"])).fetchone()
+    db.execute("UPDATE bank_feed_lines SET entry_id=?, line_id=? WHERE id=?", (eid, line["id"] if line else None, fid))
     flash("Statement line allocated.", "ok")
     return redirect(url_for("banking.feed", account=fl["account_id"]))
 

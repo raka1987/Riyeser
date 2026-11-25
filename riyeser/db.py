@@ -356,6 +356,10 @@ def migrate(db):
         document_id INTEGER REFERENCES documents(id), refund_entry_id INTEGER REFERENCES journal_entries(id),
         amount INTEGER NOT NULL, date TEXT NOT NULL, voided INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    if "line_id" not in {r["name"] for r in db.execute("PRAGMA table_info(bank_feed_lines)")}:
+        db.execute("ALTER TABLE bank_feed_lines ADD COLUMN line_id INTEGER REFERENCES journal_lines(id)")  # S24
+    db.execute("""CREATE TABLE IF NOT EXISTS bank_import_maps (
+        account_id INTEGER PRIMARY KEY REFERENCES accounts(id), mapping TEXT NOT NULL, date_order TEXT)""")
     from . import mailer
     mailer.ensure(db)  # S18: email settings and the outbox
     _job_parts_inc_gst(db)

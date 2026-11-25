@@ -12,8 +12,8 @@
 <div class="kpi"><div class="lbl">Reconciled so far</div><div class="val" id="rec-calc">{{ rec_bal|money }}</div></div>
 <div class="kpi"><div class="lbl">Out of balance</div><div class="val" id="rec-diff">—</div></div></div>
 <table><tr><th><input type="checkbox" onclick="document.querySelectorAll('.rl').forEach(c=>{c.checked=this.checked});recUpd()"></th><th>Date</th><th>ID</th><th>Memo</th><th class="n">Deposit</th><th class="n">Withdrawal</th></tr>
-{% for l in lines %}<tr><td><input type="checkbox" class="rl" name="line" value="{{ l.ids|join(',') }}" data-amt="{{ l.debit - l.credit }}" onchange="recUpd()"></td><td>{{ l.date }}</td><td><a href="{{ url_for('core.entry', eid=l.eid) }}">#{{ l.eid }}</a></td>
-<td>{{ l.memo or l.emo or '' }}</td><td class="n">{{ l.debit|money0 }}</td><td class="n">{{ l.credit|money0 }}</td></tr>{% else %}<tr><td colspan="6" class="muted">No unreconciled transactions up to this date.</td></tr>{% endfor %}</table>
+{% for l in lines %}<tr><td><input type="checkbox" class="rl" name="line" value="{{ l.ids|join(',') }}" data-amt="{{ l.debit - l.credit }}" onchange="recUpd()" {{ 'checked' if l.on_statement }} aria-label="Reconcile #{{ l.eid }}"></td><td>{{ l.date }}</td><td><a href="{{ url_for('core.entry', eid=l.eid) }}">#{{ l.eid }}</a></td>
+<td>{{ l.memo or l.emo or '' }}{% if l.on_statement %} <span class="badge paid">on statement</span>{% endif %}</td><td class="n">{{ l.debit|money0 }}</td><td class="n">{{ l.credit|money0 }}</td></tr>{% else %}<tr><td colspan="6" class="muted">No unreconciled transactions up to this date.</td></tr>{% endfor %}</table>
 <p><button class="btn pri">Reconcile</button></p></form>
 {% endblock %}
 {% block scripts %}<script>
@@ -22,5 +22,5 @@ function recUpd(){let t=REC0;document.querySelectorAll('.rl:checked').forEach(c=
 const f=n=>(n<0?'-$':'$')+(Math.abs(n)/100).toLocaleString('en-AU',{minimumFractionDigits:2});
 document.getElementById('rec-calc').textContent=f(t);const s=Math.round(parseFloat((document.getElementById('stmt').value||'0').replace(/[,$]/g,''))*100);
 const d=s-t;const el=document.getElementById('rec-diff');el.textContent=d?f(d):'$0.00 ✓';el.className='val '+(d?'neg':'');}
-document.getElementById('stmt').addEventListener('input',recUpd);
+document.getElementById('stmt').addEventListener('input',recUpd);recUpd();
 </script>{% endblock %}

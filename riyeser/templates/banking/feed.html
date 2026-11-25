@@ -5,12 +5,16 @@
 <form class="filters"><div style="min-width:260px"><label>Account</label>{{ account_select('account', bank_accounts, aid, blank=False) }}</div><div><button class="btn">Show</button></div></form>
 <form method="post" enctype="multipart/form-data" class="card"><input type="hidden" name="account_id" value="{{ aid }}">
 <div class="fields"><div><label>Statement CSV</label><input type="file" name="file" accept=".csv,text/csv"></div><div><label>&nbsp;</label><button class="btn pri">Import</button></div></div>
-<p class="muted">Columns: Date (YYYY-MM-DD or DD/MM/YYYY), Description, Amount (negative = withdrawal). A header row is skipped automatically.</p></form>
+<p class="muted">Any bank's CSV: the columns are found from the header row (Date, Description, Amount, or Debit and Credit), or from the values when there's no header. Lines already imported are skipped. Change the columns here if they're read wrongly; your choice is remembered for this account.</p>
+<details><summary>Columns and date order</summary><div class="fields">
+{% for role, label in [('date','Date'),('description','Description'),('amount','Amount'),('debit','Debit (money out)'),('credit','Credit (money in)')] %}<div><label for="col_{{ role }}">{{ label }} column</label><input id="col_{{ role }}" name="col_{{ role }}" inputmode="numeric" style="width:70px" placeholder="auto" value="{{ (mapping[role] + 1) if role in mapping else '' }}"></div>{% endfor %}
+<div><label for="date_order">Dates are</label><select id="date_order" name="date_order">{% for k, v in [('dmy','Day/month/year'),('mdy','Month/day/year (US)')] %}<option value="{{ k }}" {{ 'selected' if date_order == k }}>{{ v }}</option>{% endfor %}</select></div></div></details></form>
 <div class="tbl"><table><tr><th>Date</th><th>Description</th><th class="n">Amount</th><th>Allocate to</th><th>Tax</th><th></th></tr>
 {% for r in rows %}<tr><td>{{ r.date }}</td><td>{{ r.description }}</td><td class="n {{ 'neg' if r.amount < 0 }}">{{ r.amount|money }}</td>
 {% if r.entry_id %}<td colspan="3"><a href="{{ url_for('core.entry', eid=r.entry_id) }}">Allocated → #{{ r.entry_id }}</a></td>
 {% else %}<td>{{ account_select('account_id', accounts, form='f' ~ r.id, required=True) }}</td><td>{{ tax_select('tax_code_id', tax_codes, form='f' ~ r.id) }}</td>
 <td style="white-space:nowrap"><form id="f{{ r.id }}" method="post" class="inline" action="{{ url_for('banking.allocate', fid=r.id) }}"><button class="btn sm pri">Allocate</button></form>
+{% for m in matches.get(r.id, []) %}<form method="post" class="inline" action="{{ url_for('banking.feed_match', fid=r.id) }}"><input type="hidden" name="line_id" value="{{ m.id }}"><button class="btn sm" title="Already in the books: {{ m.memo or '' }}">Match #{{ m.eid }} {{ m.date }}</button></form>{% endfor %}
 <a class="btn sm" href="{{ url_for('banking.money', kind='receive' if r.amount > 0 else 'spend', feed=r.id, account=aid, date=r.date, payee=r.description) }}">Split…</a>
 {% if lv('banking') >= 3 %}<form method="post" class="inline" action="{{ url_for('banking.feed_delete', fid=r.id) }}"><button class="btn sm danger">✕</button></form>{% endif %}</td>{% endif %}</tr>
 {% else %}<tr><td colspan="6" class="muted">No statement lines.</td></tr>{% endfor %}</table></div>

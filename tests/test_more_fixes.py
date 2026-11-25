@@ -664,3 +664,54 @@ def test_s53_invoice_payment_and_login_fields_have_labels(client, app):
     assert _unlabelled(main) == []
     pay = page(client.get(f"/sale/pay?contact={cust}"))
     assert _unlabelled(pay[pay.index('<form method="post" id="pay-form"'):]) == []
+
+
+# ------------------------------------------------------------------ S24
+def _import(client, bank, text, **form):
+    return client.post("/banking/feed", data={"account_id": bank, "file": (io.BytesIO(text.encode()), "s.csv"), **form},
+                       content_type="multipart/form-data", follow_redirects=True)
+
+
+def test_s24_statement_import_layouts_duplicates_skipped_rows_and_matching(client, app):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust, _ = _contacts(db)
+        inv = L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-01"),
+                              [dict(description="x", qty=1, unit_price=22000, account_id=acc["4-1000"],
+                                    tax_code_id=tc["N-T"])], "open")
+        L.record_payment(db, "in", cust, acc["1-1110"], "2026-11-04", [(inv, 22000)])
+        db.commit()
+    bank = acc["1-1110"]
+    # CommBank: date, amount, description, balance, no header
+    cba = "03/11/2026,-55.00,OFFICEWORKS 123,1000.00\n05/11/2026,+220.00,TRANSFER FROM C,1220.00\n"
+    r = _import(client, bank, cba)
+    assert "Imported 2 statement lines" in page(r)
+    # the same file again: nothing doubled
+    assert "2 were already imported" in page(_import(client, bank, cba))
+    # Debit/Credit columns, "(40.00)", a bad row reported
+    dc = "Date,Narrative,Debit,Credit\n06/11/2026,Bank fee,(4.00),\n07/11/2026,Interest,,1.25\nxx,Broken,1,\n"
+    r = _import(client, bank, dc)
+    assert "Imported 2 statement lines" in page(r) and "row 4: the date" in page(r)
+    # US dates, chosen once and remembered for the account
+    us = "Date,Description,Amount\n11/08/2026,Coffee,-4.50\n"
+    _import(client, bank, us, date_order="mdy")
+    with app.app_context():
+        db = get_db()
+        got = {r["description"]: (r["date"], r["amount"]) for r in db.execute("SELECT * FROM bank_feed_lines")}
+        assert got["OFFICEWORKS 123"] == ("2026-11-03", -5500) and got["Bank fee"] == ("2026-11-06", -400)
+        assert got["Interest"] == ("2026-11-07", 125) and got["Coffee"] == ("2026-11-08", -450)
+        fid = db.execute("SELECT id FROM bank_feed_lines WHERE description='TRANSFER FROM C'").fetchone()[0]
+        pay_line = db.execute("SELECT l.id FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+                              " WHERE e.source_type='receipt' AND l.account_id=?", (bank,)).fetchone()[0]
+    # the $220 deposit is the customer's payment already recorded: matched, not posted again
+    html = page(client.get(f"/banking/feed?account={bank}"))
+    assert "Match #" in html
+    client.post(f"/banking/feed/{fid}/match", data={"line_id": pay_line})
+    with app.app_context():
+        db = get_db()
+        assert db.execute("SELECT COUNT(*) FROM journal_entries WHERE source_type='receive'").fetchone()[0] == 0
+        assert L.balances(db)[bank] == 22000
+    # and it comes ticked on Reconcile
+    rec = page(client.get(f"/banking/reconcile?account={bank}&date=2026-11-30"))
+    assert f'value="{pay_line}" data-amt="22000" onchange="recUpd()" checked' in rec and "on statement" in rec
