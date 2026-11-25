@@ -232,7 +232,7 @@ module.exports = function mailer(app, h) {
         ${p.pay_type === 'hourly' && +p.break_hours ? `<tr><td ${l} style="color:#666">Hours worked ${(+p.worked_hours).toFixed(2)} − unpaid breaks ${(+p.break_hours).toFixed(2)}</td><td></td></tr>` : ''}
         <tr><td ${l}>${p.pay_type === 'hourly' ? `Paid hours ${(+p.hours).toFixed(2)} × ${money(p.pay_rate)}` : 'Salary'}</td><td ${r}>${money(p.base_pay)}</td></tr>
         ${+p.allowances ? `<tr><td ${l}>Allowances</td><td ${r}>${money(p.allowances)}</td></tr>` : ''}
-        ${(typeof p.leave_lines === 'string' ? JSON.parse(p.leave_lines || '[]') : (p.leave_lines || [])).map(x => `<tr><td ${l}>${({ annual: 'Annual leave', sick: 'Sick leave', other: 'Other paid leave' })[x.kind] || 'Leave'} ${x.days} day${x.days === 1 ? '' : 's'}${x.late ? ` (earlier dates: ${esc((x.dates || []).join(', '))})` : ''}</td><td ${r}>${x.amount ? money(x.amount) : 'paid in salary'}</td></tr>`).join('')}
+        ${(typeof p.leave_lines === 'string' ? JSON.parse(p.leave_lines || '[]') : (p.leave_lines || [])).map(x => `<tr><td ${l}>${({ annual: 'Annual leave', sick: 'Sick leave', other: 'Other paid leave', payout: 'Unused annual leave paid out' })[x.kind] || 'Leave'} ${x.days} day${x.days === 1 ? '' : 's'}${x.late ? ` (earlier dates: ${esc((x.dates || []).join(', '))})` : ''}</td><td ${r}>${x.amount ? money(x.amount) : 'paid in salary'}</td></tr>`).join('')}
         <tr><td ${l}><b>Gross pay</b></td><td ${r}><b>${money(p.gross)}</b></td></tr>
         <tr><td ${l}>FNPF employee contribution</td><td ${r}>−${money(p.fnpf_employee)}</td></tr>
         <tr><td ${l}>PAYE tax</td><td ${r}>−${money(p.paye)}</td></tr>

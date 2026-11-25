@@ -575,10 +575,42 @@ async function renderEmployees() {
     <div class="panel" style="padding:0">${table([{ h: 'Name', f: e => `<b>${esc(e.name)}</b><div class="small muted">@${esc(e.username)}</div>` }, { h: 'Position', k: 'position' },
       { h: 'Access', f: e => `${accessChip(e)}${e.team_only && e.role !== 'admin' ? ' <span class="small muted">own team</span>' : ''}${e.supervisor_id ? `<div class="small muted">Supervisor: ${esc((rows.find(x => x.id === e.supervisor_id) || {}).name || '—')}</div>` : ''}${isAdmin() ? ` <button class="btn sm ghost" data-acc="${e.id}">Access</button>` : ''}` },
       ...(L('pay_rates') >= 1 ? [{ h: 'Pay', f: e => e.pay_rate ? `${money(e.pay_rate, cur())}${e.pay_type === 'hourly' ? '/hr' : '/yr'}` : '—', r: 1 }] : []), { h: 'Phone', k: 'phone' },
-      { h: 'Status', f: e => e.active ? '<span class="status open">active</span>' : '<span class="status cancelled">inactive</span>' }], rows, { onRow: 1 })}</div>`;
+      { h: 'Status', f: e => (e.active ? '<span class="status open">active</span>' : `<span class="status cancelled">${e.end_date ? `finished ${esc(fmtDate(e.end_date))}` : 'inactive'}</span>`)
+        + (e.active && e.pay_rate && L('employees') >= 3 && L('payroll') >= 2 ? ` <button class="btn sm ghost" data-fin="${e.id}" title="Final pay with unused annual leave paid out">Finish employment…</button>` : '') }], rows, { onRow: 1 })}</div>`;
   if ($('#e-new')) $('#e-new').onclick = () => editModal('New staff member', defs(true), { pay_type: 'hourly', active: 1, on_timeclock: 1 }, v => api('/api/staff/employees', { body: v }).then(e => { renderEmployees(); if (isAdmin()) accessModal(e, rows); }), { wide: true });
   $$('[data-acc]').forEach(b => b.onclick = () => accessModal(rows.find(e => e.id == b.dataset.acc), rows));
+  $$('[data-fin]').forEach(b => b.onclick = ev => { ev.stopPropagation(); finishModal(rows.find(e => e.id == b.dataset.fin)); });
   bindRows(view(), rows, e => editModal(e.name, defs(false), { ...e, password: '' }, v => { if (!v.password) delete v.password; if (!v.clock_pin) delete v.clock_pin; return api(`/api/staff/employees/${e.id}`, { method: 'PUT', body: v }).then(renderEmployees); }, { wide: true, readOnly: !canEdit }));
+}
+// S57: Finish employment: their last day, the final pay (from the day after their last pay run) with unused annual leave paid out
+function finishModal(e) {
+  const m = openModal(`<h2 style="font-size:1.4rem">Finish employment: ${esc(e.name)}</h2>
+    <form id="fin" class="bar-tools" style="margin:0"><label class="small">Last day <input type="date" name="end_date" value="${today()}" required></label>
+      <label class="small">Pay date <input type="date" name="pay_date" value="${today()}" required></label><button class="btn sm">Work out final pay</button></form>
+    <div id="fin-out"></div>
+    <p class="small muted">The final pay is saved as a pay run (labelled "Final pay"). ${esc(e.name)} is then marked as finished: they can't log in and aren't in later pay runs. FNPF and FRCS returns aren't made here.</p>`, { wide: true });
+  const F = $('#fin', m.el);
+  F.onsubmit = async ev => {
+    ev.preventDefault();
+    const body = Object.fromEntries(new FormData(F));
+    try {
+      const p = await api(`/api/staff/employees/${e.id}/finish/preview`, { body }), l = p.line || {};
+      const lv = (l.leave_lines || []).find(x => x.kind === 'payout');
+      $('#fin-out', m.el).innerHTML = `<table class="t" style="margin-top:10px"><tbody>
+        <tr><td>Final period</td><td class="r">${fmtDate(p.period_start)} – ${fmtDate(p.period_end)}</td></tr>
+        <tr><td>Pay for the period</td><td class="r">${money(l.base_pay || 0, cur())}</td></tr>
+        <tr><td>Unused annual leave paid out</td><td class="r">${p.unused_annual_days} days${lv ? ` · ${money(lv.amount, cur())}` : ''}</td></tr>
+        <tr><td><b>Gross</b></td><td class="r"><b>${money(l.gross || 0, cur())}</b></td></tr><tr><td>FNPF (employee) / PAYE</td><td class="r">−${money(l.fnpf_employee || 0, cur())} / −${money(l.paye || 0, cur())}</td></tr>
+        <tr><td><b>Net</b></td><td class="r"><b>${money(l.net || 0, cur())}</b></td></tr></tbody></table>
+        ${p.warnings.length ? `<div class="note"><b>⚠ Check these shifts:</b> ${p.warnings.map(w => esc(w.text)).join(' ')}</div>` : ''}
+        ${p.already_paid ? `<div class="note"><b>${esc(p.already_paid.message)}</b></div>` : `<div class="actions"><button class="btn coral" id="fin-go">Finalise final pay and finish employment</button></div>`}`;
+      if ($('#fin-go', m.el)) $('#fin-go', m.el).onclick = async () => {
+        if (!confirm(`Finish ${e.name}'s employment on ${body.end_date} and save the final pay of ${money(l.net || 0, cur())}?${p.warnings.length ? '\n\nThe shift warnings above will be paid as they are.' : ''}`)) return;
+        try { const r = await api(`/api/staff/employees/${e.id}/finish`, { body: { ...body, confirm_warnings: p.warnings.length > 0 } }); m.close(); toast(`${e.name}: final pay saved and employment finished`); renderEmployees(); location.hash = '#/payroll'; setTimeout(() => runModal(r.id), 300); }
+        catch (err) { toast(err.message, 8000); }
+      };
+    } catch (err) { toast(err.message, 8000); }
+  };
 }
 // Administrator: what this person can see and change, area by area (or a preset), and their supervisor
 function accessModal(e, everyone) {
@@ -632,7 +664,7 @@ async function renderPayroll() {
       <p class="small muted" id="pr-extra-note" hidden style="margin:6px 0 0"><b>Extra pay run:</b> no wages, leave or regular deductions are paid again. Enter the bonus in Allowances for each person (PAYE and FNPF are worked out on it). It's labelled "Extra" in Past pay runs.</p><div id="pr-preview"></div></div>
     <div class="panel" id="pr-export"></div>
     <div class="panel"><h3>Past pay runs <a class="btn sm ghost" href="/api/staff/export/payslips.csv">Export all payslips CSV</a></h3>
-      ${table([{ h: 'Pay date', f: r => fmtDate(r.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) + (r.extra_reason ? ` <span class="chip" title="${esc(r.extra_reason)}">Extra: ${esc(r.extra_reason)}</span>` : '') }, { h: 'Period', f: r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}` },
+      ${table([{ h: 'Pay date', f: r => fmtDate(r.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) + (r.extra_reason ? ` <span class="chip" title="${esc(r.extra_reason)}">Extra: ${esc(r.extra_reason)}</span>` : '') + (r.note ? ` <span class="chip gray" title="${esc(r.note)}">${esc(r.note.split(' (')[0])}</span>` : '') }, { h: 'Period', f: r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}` },
         { h: 'Staff', k: 'employees', r: 1 }, { h: 'Gross', f: r => money(r.total_gross, cur()), r: 1 }, { h: 'Net', f: r => money(r.total_net, cur()), r: 1 }, { h: 'Employer FNPF', f: r => money(r.total_fnpf_employer, cur()), r: 1 }, { h: 'By', k: 'created_by_name' }],
         runs, { onRow: 1, empty: 'No pay runs yet.' })}</div>
     <div class="panel" id="pr-rules"></div>`;
@@ -724,7 +756,7 @@ function payslipHTML(p, run) {
       ${/Hours adjusted /.test(p.notes || '') ? `<tr><td class="small" style="color:#8a5a00">${esc((p.notes.match(/Hours adjusted [^·]*/) || [''])[0].trim())}</td><td></td></tr>` : ''}
       <tr><td>${p.pay_type === 'hourly' ? `Paid hours ${p.hours} × ${money(p.pay_rate, cur())}` : 'Salary'}</td><td class="r">${money(p.base_pay, cur())}</td></tr>
       ${p.allowances ? `<tr><td>Allowances</td><td class="r">${money(p.allowances, cur())}</td></tr>` : ''}
-      ${(() => { let lv = []; try { lv = typeof p.leave_lines === 'string' ? JSON.parse(p.leave_lines || '[]') : (p.leave_lines || []); } catch { } return lv.map(x => `<tr><td>${({ annual: 'Annual leave', sick: 'Sick leave', other: 'Other paid leave' })[x.kind] || 'Leave'} ${x.days} day${x.days === 1 ? '' : 's'}${x.late ? ` <span class="small muted">(earlier dates: ${esc((x.dates || []).join(', '))})</span>` : ''}${x.amount ? ` (${x.hours} h)` : ''}</td><td class="r">${x.amount ? money(x.amount, cur()) : '<span class="small muted">in salary</span>'}</td></tr>`).join(''); })()}
+      ${(() => { let lv = []; try { lv = typeof p.leave_lines === 'string' ? JSON.parse(p.leave_lines || '[]') : (p.leave_lines || []); } catch { } return lv.map(x => `<tr><td>${({ annual: 'Annual leave', sick: 'Sick leave', other: 'Other paid leave', payout: 'Unused annual leave paid out' })[x.kind] || 'Leave'} ${x.days} day${x.days === 1 ? '' : 's'}${x.late ? ` <span class="small muted">(earlier dates: ${esc((x.dates || []).join(', '))})</span>` : ''}${x.amount ? ` (${x.hours} h)` : ''}</td><td class="r">${x.amount ? money(x.amount, cur()) : '<span class="small muted">in salary</span>'}</td></tr>`).join(''); })()}
       <tr><td><b>Gross pay</b></td><td class="r"><b>${money(p.gross, cur())}</b></td></tr>
       <tr><td>FNPF employee contribution</td><td class="r">−${money(p.fnpf_employee, cur())}</td></tr>
       <tr><td>PAYE tax</td><td class="r">−${money(p.paye, cur())}</td></tr>
@@ -743,7 +775,7 @@ function printHTML(html) { const w = window.open('', '_blank'); w.document.write
 async function runModal(id) {
   const { run, payslips } = await api(`/api/staff/payroll/runs/${id}`);
   const m = openModal(`<h2 style="font-size:1.5rem">Pay run — ${fmtDate(run.pay_date, { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
-    <p class="muted">${run.extra_reason ? `<span class="chip">Extra pay run: ${esc(run.extra_reason)}</span> ` : ''}${run.period_start} to ${run.period_end} · Gross ${money(run.total_gross, cur())} · Net ${money(run.total_net, cur())} · Employer FNPF ${money(run.total_fnpf_employer, cur())}</p>
+    <p class="muted">${run.extra_reason ? `<span class="chip">Extra pay run: ${esc(run.extra_reason)}</span> ` : ''}${run.note ? `<span class="chip gray">${esc(run.note)}</span> ` : ''}${run.period_start} to ${run.period_end} · Gross ${money(run.total_gross, cur())} · Net ${money(run.total_net, cur())} · Employer FNPF ${money(run.total_fnpf_employer, cur())}</p>
     ${table([{ h: 'Employee', k: 'employee_name' }, { h: 'Hours', k: 'hours', r: 1 }, { h: 'Gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'FNPF', f: p => money(p.fnpf_employee, cur()), r: 1 }, { h: 'PAYE', f: p => money(p.paye, cur()), r: 1 }, { h: 'Net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }, { h: '', f: p => `<button class="btn sm ghost" data-ps="${p.id}">Payslip</button>` }], payslips)}
     <div class="actions"><button class="btn sm" id="print-all">Print all payslips</button>${window.riyser ? '<button class="btn sm ghost" id="pdf-all">Save all as PDF</button>' : ''}${L('payroll') >= 3 ? '<button class="btn sm danger" id="del-run">Void (delete) run</button>' : ''}</div>`, { wide: true });
   $$('[data-ps]', m.el).forEach(b => b.onclick = () => printHTML(payslipHTML(payslips.find(p => p.id == b.dataset.ps), run)));

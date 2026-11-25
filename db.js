@@ -161,6 +161,8 @@ const DEFAULT_SETTINGS = {
 };
 // S56: the pay run that paid a leave record (leave entered after its dates were paid goes in the next pay run)
 try { db.exec('ALTER TABLE staff_leave ADD COLUMN paid_in_run INTEGER'); } catch { /* already there */ }
+// S57: a final pay (Finish employment) is labelled on its run; the person's last day is kept
+for (const [t, c] of [['payroll_runs', "note TEXT DEFAULT ''"], ['users', "end_date TEXT DEFAULT ''"]]) { try { db.exec(`ALTER TABLE ${t} ADD COLUMN ${c}`); } catch { /* already there */ } }
 // F11: an extra pay run (bonus) on top of dates already paid carries its reason; '' = a normal pay run
 try { db.exec("ALTER TABLE payroll_runs ADD COLUMN extra_reason TEXT DEFAULT ''"); } catch { /* already there */ }
 const getSettingStmt = db.prepare('SELECT value FROM settings WHERE key = ?');

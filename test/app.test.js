@@ -656,6 +656,37 @@ test('S56: leave: balance warning, days must fit the dates, no overlaps, annual 
   await call('PUT', `/api/staff/employees/${e.id}`, { active: false }, admin);
 });
 
+test('S57: Finish employment: final pay from the day after their last pay run, unused annual leave paid out, then finished', async () => {
+  const e = (await call('POST', '/api/staff/employees', { name: 'Last Day', username: 'lastday', password: 'lastday12', role: 'staff', pay_type: 'hourly', pay_rate: 10, start_date: '2032-01-01' }, admin)).data;
+  await call('PUT', '/api/staff/leave/balances', { year: '2032', leave_annual_days: 10, leave_day_hours: 8 }, admin);
+  const loginFrom = (ip) => fetch(B + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': ip }, body: JSON.stringify({ username: 'lastday', password: 'lastday12' }) });
+  const ck = (await loginFrom('10.57.0.1')).headers.get('set-cookie').split(';')[0];
+  for (const d of ['2032-01-26', '2032-02-02', '2032-02-03']) await call('POST', '/api/staff/timesheets', { user_id: e.id, clock_in: `${d}T08:00`, clock_out: `${d}T16:00` }, admin);
+  assert.equal((await call('POST', '/api/staff/payroll/runs', { period_start: '2032-01-26', period_end: '2032-02-01', pay_date: '2032-02-02' }, admin)).status, 200);
+  assert.equal((await call('POST', '/api/staff/leave', { user_id: e.id, kind: 'annual', date_from: '2032-01-27', days: 1 }, admin)).status, 200); // 9 days left
+  // staff can't do it
+  assert.equal((await call('POST', `/api/staff/employees/${e.id}/finish`, { end_date: '2032-02-04', pay_date: '2032-02-05' }, staff)).status, 403);
+  const pv = (await call('POST', `/api/staff/employees/${e.id}/finish/preview`, { end_date: '2032-02-04' }, admin)).data;
+  assert.equal(pv.period_start, '2032-02-02'); assert.equal(pv.period_end, '2032-02-04'); assert.equal(pv.unused_annual_days, 9);
+  const out = pv.line.leave_lines.find(x => x.kind === 'payout');
+  assert.equal(out.days, 9); assert.equal(out.amount, 720); // 9 days x 8 h x $10
+  assert.equal(pv.line.base_pay, 160); assert.equal(pv.line.leave_pay, 80 + 720); // + the leave day entered after the last pay run (S56)
+  assert.equal(pv.line.gross, 960);
+  const fin = await call('POST', `/api/staff/employees/${e.id}/finish`, { end_date: '2032-02-04', pay_date: '2032-02-05' }, admin);
+  assert.equal(fin.status, 200, JSON.stringify(fin.data)); assert.equal(fin.data.unused_annual_days, 9);
+  const run = (await call('GET', `/api/staff/payroll/runs/${fin.data.id}`, null, admin)).data;
+  assert.match(run.run.note, /^Final pay: Last Day \(last day 2032-02-04, 9 days' annual leave paid out\)/);
+  assert.equal(run.payslips.length, 1); assert.equal(run.payslips[0].gross, 960);
+  // finished: not active, last day kept, can't log in, leave balance used up, not in later pay runs
+  const me = (await call('GET', '/api/staff/employees', null, admin)).data.find(x => x.id === e.id);
+  assert.equal(me.active, 0); assert.equal(me.end_date, '2032-02-04');
+  assert.equal((await loginFrom('10.57.0.2')).status, 401); assert.equal((await call('GET', '/api/auth/me', null, ck)).status, 401);
+  assert.ok((await call('GET', '/api/staff/leave?year=2032', null, admin)).data.rows.some(r => r.user_id === e.id && r.notes === 'Paid out on finishing' && r.days === 9 && r.paid === 0));
+  assert.ok(!(await call('POST', '/api/staff/payroll/preview', { period_start: '2032-02-02', period_end: '2032-02-08' }, admin)).data.lines.some(l => l.user_id === e.id));
+  assert.equal((await call('POST', `/api/staff/employees/${e.id}/finish`, { end_date: '2032-02-04', pay_date: '2032-02-05' }, admin)).status, 400); // only once
+  assert.ok((await call('GET', '/api/staff/audit', null, admin)).data.some(a => a.action === 'Finished employment' && /Last Day/.test(a.details)));
+});
+
 test('wage reports: check the files, see the problems, import as pay history, year to date includes it', async () => {
   const oct = await wageBook([
     { sheet: 'Anil', name: 'Anill Prasad', fnpf: 'MN1', acct: '111', rate: 7, hours: [40, 40, 31.9, 39, 40] },

@@ -228,7 +228,7 @@ app.get('/api/public/info', (req, res) => { const s = getSettings(); res.json({ 
 // ---------------------------------------------------------------- staff: employees
 // on_timeclock left empty counts as "on the time clock": send it as 1 so the Staff form shows the box ticked
 // (an empty value showed unticked, and saving the form then took the person off the timesheets)
-const EMP_FIELDS = "id, name, username, role, position, phone, email, pay_type, pay_rate, tin, fnpf_no, bank_name, bank_account_name, bank_account, aliases, start_date, active, created_at, clock_pin, COALESCE(timesheet_admin, 0) AS timesheet_admin, COALESCE(on_timeclock, 1) AS on_timeclock, employee_no, perms, COALESCE(preset, '') AS preset, supervisor_id, COALESCE(team_only, 0) AS team_only";
+const EMP_FIELDS = "id, name, username, role, position, phone, email, pay_type, pay_rate, tin, fnpf_no, bank_name, bank_account_name, bank_account, aliases, start_date, COALESCE(end_date, '') AS end_date, active, created_at, clock_pin, COALESCE(timesheet_admin, 0) AS timesheet_admin, COALESCE(on_timeclock, 1) AS on_timeclock, employee_no, perms, COALESCE(preset, '') AS preset, supervisor_id, COALESCE(team_only, 0) AS team_only";
 // pay rates and bank details: only for people with access to them
 const SENSITIVE = ['pay_type', 'pay_rate', 'tin', 'fnpf_no', 'bank_name', 'bank_account_name', 'bank_account', 'deductions'];
 const shapeEmp = (req, e) => { if (!e) return e; const o = { ...e, access: P.permsOf(e) }; delete o.perms; if (!canArea(req, 'pay_rates')) for (const k of SENSITIVE) delete o[k]; return o; };
@@ -582,13 +582,13 @@ function payForRange(from, to) {
 }
 app.locals.computePayroll = (from, to) => payForRange(from, to);
 app.locals.payPeriodOf = d => payPeriodOf(d); // timesheet emails / print show pay to those allowed
-function computePayroll(start, end, adjustments = {}, fraction = 1, extra = false) { // fraction: share of a pay period (part periods)
+function computePayroll(start, end, adjustments = {}, fraction = 1, extra = false, onlyUser = 0) { // fraction: share of a pay period (part periods)
   // extra (F11): an extra pay run (bonus) on dates already paid: only the allowances / deductions entered for it, no wages, leave or regular deductions again
   if (!isDate(start) || !isDate(end) || end < start) bad('Choose a valid pay period.');
   const s = getSettings();
   const periods = +s.pay_periods_per_year || 26, eeRate = +s.fnpf_employee_rate || 0, erRate = +s.fnpf_employer_rate || 0;
   let brackets; try { brackets = JSON.parse(s.paye_brackets); } catch { brackets = []; }
-  const emps = db.prepare(`SELECT * FROM users WHERE active = 1 AND pay_rate > 0 ORDER BY name`).all();
+  const emps = db.prepare(`SELECT * FROM users WHERE active = 1 AND pay_rate > 0 ORDER BY name`).all().filter(e => !onlyUser || e.id === onlyUser);
   const tsStmt = db.prepare(`SELECT * FROM timesheets WHERE user_id=? AND clock_out IS NOT NULL AND substr(clock_in,1,10) BETWEEN ? AND ?`);
   const leaveStmt = db.prepare(`SELECT l.id, l.kind, l.days, l.date_from FROM staff_leave l WHERE l.user_id = ? AND l.paid = 1
     AND (l.paid_in_run IS NULL OR l.paid_in_run NOT IN (SELECT id FROM payroll_runs))
@@ -616,6 +616,10 @@ function computePayroll(start, end, adjustments = {}, fraction = 1, extra = fals
     const leave_lines = Object.values(leaveRows.reduce((a, l) => { const late = l.date_from < start, k = l.kind + (late ? ':late' : '');
       const x = a[k] = a[k] || { kind: l.kind, days: 0, hours: 0, amount: 0, ...(late && { late: true, dates: [] }) }; x.days = round2(x.days + l.days); if (late) x.dates.push(l.date_from); return a; }, {}))
       .map(l => ({ ...l, hours: round2(l.days * (+s.leave_day_hours || 8)), amount: e.pay_type === 'salary' ? 0 : round2(l.days * (+s.leave_day_hours || 8) * e.pay_rate) }));
+    // S57: Finish employment pays out the unused annual leave (hourly: days × hours a day × rate; salary: days × salary ÷ 260 working days)
+    const payoutDays = round2(adj.leave_payout_days);
+    if (payoutDays > 0) leave_lines.push({ kind: 'payout', days: payoutDays, hours: round2(payoutDays * (+s.leave_day_hours || 8)),
+      amount: round2(e.pay_type === 'salary' ? payoutDays * e.pay_rate / 260 : payoutDays * (+s.leave_day_hours || 8) * e.pay_rate) });
     const leave_hours = round2(leave_lines.reduce((a, l) => a + l.hours, 0)), leave_pay = round2(leave_lines.reduce((a, l) => a + l.amount, 0));
     // regular deductions set on the staff member (loan, union …) + anything added for this pay run
     const lines = (extra ? [] : deductionsOf(e)).map(d => ({ ...d, amount: round2(d.amount * fraction) })).filter(d => d.amount > 0);
@@ -797,23 +801,66 @@ app.post('/api/staff/payroll/runs', requireArea('payroll', 2), requireLicence, w
   if (extra && !lines.some(l => l.gross > 0)) bad('Enter the extra pay (allowances) for at least one person.');
   const warn = payWarnings(lines);
   if (warn.length && req.body.confirm_warnings !== true) throw new HttpError(409, `Check these shifts before finalising: ${warn.map(w => `${w.name}: ${w.text}`).join(' ')}`, { warnings: warn });
+  const runId = saveRun(req, { period_start, period_end, pay_date, lines, extra });
+  if (extra) audit(req, 'Extra pay run', `Paid ${pay_date} (${period_start} to ${period_end}): ${extra}`);
+  const file = writePayrunFile(runId);
+  res.json({ id: runId, extra_run: !!extra, ...(file && { accounting_file: path.basename(file) }) });
+}));
+// save a pay run and its payslips in one transaction (normal, extra, or a final pay); after() runs inside it
+function saveRun(req, { period_start, period_end, pay_date, lines, extra = '', note = '', after = null }) {
   const sum = k => round2(lines.reduce((a, l) => a + l[k], 0));
   db.exec('BEGIN');
   try {
     const clash = extra ? null : alreadyPaid(period_start, period_end, lines.map(l => l.user_id)); // inside the transaction: two finalises at once can't both pass
     if (clash) throw new HttpError(409, clash.message, { already_paid: clash });
-    const runId = db.prepare(`INSERT INTO payroll_runs(period_start, period_end, pay_date, created_by, total_gross, total_net, total_fnpf_employer, extra_reason) VALUES(?,?,?,?,?,?,?,?)`)
-      .run(period_start, period_end, pay_date, req.user.id, sum('gross'), sum('net'), sum('fnpf_employer'), extra).lastInsertRowid;
+    const runId = db.prepare(`INSERT INTO payroll_runs(period_start, period_end, pay_date, created_by, total_gross, total_net, total_fnpf_employer, extra_reason, note) VALUES(?,?,?,?,?,?,?,?,?)`)
+      .run(period_start, period_end, pay_date, req.user.id, sum('gross'), sum('net'), sum('fnpf_employer'), extra, note).lastInsertRowid;
     const ins = db.prepare(`INSERT INTO payslips(run_id, user_id, employee_name, position, pay_type, pay_rate, hours, base_pay, allowances, gross, fnpf_employee, fnpf_employer, paye, other_deductions, net, notes, worked_hours, break_hours, deduction_lines, leave_hours, leave_pay, leave_lines)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     for (const l of lines) ins.run(runId, l.user_id, l.employee_name, l.position, l.pay_type, l.pay_rate, l.hours, l.base_pay, l.allowances, l.gross, l.fnpf_employee, l.fnpf_employer, l.paye, l.other_deductions, l.net, l.notes, l.worked_hours, l.break_hours, JSON.stringify(l.deduction_lines), l.leave_hours || 0, l.leave_pay || 0, JSON.stringify(l.leave_lines || []));
     const paidLeave = db.prepare('UPDATE staff_leave SET paid_in_run = ? WHERE id = ?');
     for (const l of lines) for (const id of l.leave_ids || []) paidLeave.run(runId, id); // S56: paid once
+    if (after) after(runId);
     db.exec('COMMIT');
-    if (extra) audit(req, 'Extra pay run', `Paid ${pay_date} (${period_start} to ${period_end}): ${extra}`);
-    const file = writePayrunFile(runId);
-    res.json({ id: runId, extra_run: !!extra, ...(file && { accounting_file: path.basename(file) }) });
+    return runId;
   } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+// S57: Finish employment: the final pay (from the day after their last pay run to their last day, with the unused annual
+// leave paid out), then the person is marked as finished (not active). The FNPF / FRCS returns are not made here.
+function finalPay(uid, b) {
+  const u = db.prepare('SELECT * FROM users WHERE id = ?').get(uid); if (!u) throw new HttpError(404, 'Not found');
+  if (!u.active) bad(`${u.name} has already finished.`);
+  if (u.role === 'admin' && !db.prepare("SELECT 1 FROM users WHERE role = 'admin' AND active = 1 AND id != ?").get(uid)) bad('This is the last active administrator. Make someone else an administrator first.');
+  if (!(u.pay_rate > 0)) bad(`${u.name} has no pay rate, so there's no final pay to work out. Untick Active on their Staff record instead.`);
+  const end = isDate(b.end_date) ? b.end_date : bad('Choose their last day.');
+  const last = db.prepare(`SELECT MAX(r.period_end) AS d FROM payroll_runs r JOIN payslips p ON p.run_id = r.id WHERE p.user_id = ? AND COALESCE(r.extra_reason, '') = ''`).get(uid).d;
+  const start = isDate(b.period_start) ? b.period_start : last && last < end ? dayAdd(last, 1) : payPeriodOf(end)[0];
+  if (start > end) bad(`Their pay is already done up to ${last}. Choose a last day after that, or void that pay run first.`);
+  const [ps, pe] = payPeriodOf(start), fraction = Math.min(1, dayCount(start, end) / dayCount(ps, pe));
+  const s = getSettings(), unused = Math.max(0, leaveLeft(uid, end.slice(0, 4), 'annual', s));
+  const adj = { ...((b.adjustments || {})[uid] || {}), leave_payout_days: unused };
+  const lines = computePayroll(start, end, { [uid]: adj }, fraction, false, uid);
+  return { u, start, end, unused, lines, warnings: payWarnings(lines), already_paid: alreadyPaid(start, end, [uid]) };
+}
+app.post('/api/staff/employees/:id/finish/preview', requireArea('payroll', 2), requireLicence, wrap((req, res) => {
+  const f = finalPay(+req.params.id, req.body || {});
+  res.json({ period_start: f.start, period_end: f.end, unused_annual_days: f.unused, line: f.lines[0], warnings: f.warnings, already_paid: f.already_paid });
+}));
+app.post('/api/staff/employees/:id/finish', requireArea('payroll', 2), requireArea('employees', 3), requireLicence, wrap((req, res) => {
+  const b = req.body || {}, f = finalPay(+req.params.id, b);
+  if (!isDate(b.pay_date)) bad('Choose a pay date.');
+  if (f.warnings.length && b.confirm_warnings !== true) throw new HttpError(409, `Check these shifts before finalising: ${f.warnings.map(w => w.text).join(' ')}`, { warnings: f.warnings });
+  const note = `Final pay: ${f.u.name} (last day ${f.end}${f.unused ? `, ${f.unused} days' annual leave paid out` : ''})`;
+  const runId = saveRun(req, { period_start: f.start, period_end: f.end, pay_date: b.pay_date, lines: f.lines, note, after: id => {
+    // the leave paid out is recorded as taken, so the balance is 0; it isn't paid again
+    if (f.unused) db.prepare("INSERT INTO staff_leave(user_id, kind, date_from, date_to, days, paid, notes, created_by, created_at, paid_in_run) VALUES(?, 'annual', ?, ?, ?, 0, 'Paid out on finishing', ?, ?, ?)")
+      .run(f.u.id, f.end, f.end, f.unused, req.user.id, new Date().toISOString(), id);
+    db.prepare('UPDATE users SET active = 0, end_date = ? WHERE id = ?').run(f.end, f.u.id);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(f.u.id);
+  } });
+  audit(req, 'Finished employment', `${note}. Paid ${b.pay_date}.`);
+  const file = writePayrunFile(runId);
+  res.json({ id: runId, unused_annual_days: f.unused, ...(file && { accounting_file: path.basename(file) }) });
 }));
 app.get('/api/staff/payroll/runs', requireArea('payroll'), (req, res) =>
   res.json(db.prepare(`SELECT r.*, u.name AS created_by_name, (SELECT COUNT(*) FROM payslips p WHERE p.run_id=r.id) AS employees FROM payroll_runs r LEFT JOIN users u ON u.id=r.created_by ORDER BY r.pay_date DESC, r.id DESC`).all()));
