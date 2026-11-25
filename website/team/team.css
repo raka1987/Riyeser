@@ -511,6 +511,7 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
 .fnm { flex: 1; min-width: 0; } .fnm b { display: block; color: var(--ink); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .fnm small { color: var(--muted); font-size: 12px; }
 .composer { padding: 10px 18px 16px; flex: none; }
 .cbox { display: flex; gap: 4px; align-items: flex-end; border: 1px solid var(--field-line); border-radius: 14px; padding: 6px; background: var(--field); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .lk-cnt { display: block; text-align: right; font-size: 12px; color: var(--muted); padding: 4px 6px 0; } .lk-cnt.over { color: #dc2626; font-weight: 600; } .lk-cnt[hidden] { display: none; }
 .cbox:focus-within { border-color: var(--acc); box-shadow: 0 0 0 3px var(--acc-soft); }
 .cbox textarea { flex: 1; border: 0; resize: none; max-height: 160px; min-height: 24px; padding: 8px 6px; outline: 0; line-height: 1.4; background: none; color: var(--ink); }
@@ -571,10 +572,11 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
 .lk-rclose { margin: 0 6px 6px 0; width: 30px; height: 30px; } .lk-rclose .ic { width: 16px; height: 16px; }
 .lk-rbody { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
 .lk-psearch { display: flex; align-items: center; gap: 8px; margin: 10px 12px 4px; padding: 0 10px; border: 1px solid var(--field-line); background: var(--field); border-radius: 10px; color: var(--muted); }
-.lk-psearch input { flex: 1; min-width: 0; border: 0; background: none; padding: 8px 0; color: var(--ink); outline: 0; } .lk-psearch .ic { width: 16px; height: 16px; }
+.lk-psearch input { flex: 1; min-width: 0; border: 0; background: none; padding: 8px 0; color: var(--ink); outline: 0; }
+.lk-psearch:focus-within { border-color: var(--acc, #2563eb); box-shadow: 0 0 0 3px var(--acc-soft, rgba(37, 99, 235, .25)); }   /* M21: a visible focus ring */ .lk-psearch .ic { width: 16px; height: 16px; }
 .lk-people { padding: 4px 8px; }
 .lk-person { display: flex; align-items: center; gap: 10px; padding: 7px 6px; border-radius: 10px; min-width: 0; }
-.lk-person[role=button] { cursor: pointer; } .lk-person[role=button]:hover { background: var(--hover); }
+.lk-person.clk { cursor: pointer; } .lk-person.clk:hover { background: var(--hover); } .lk-person .lk-pn[role=button]:focus-visible { outline: 2px solid var(--acc, #2563eb); outline-offset: 2px; border-radius: 6px; }
 .lk-person .av { width: 34px; height: 34px; }
 .lk-pn { flex: 1; min-width: 0; } .lk-pn b { display: block; color: var(--ink); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .lk-pn b small { color: var(--muted); font-weight: 500; }
 .lk-pst { display: block; color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -28,7 +28,7 @@
   // This page's own folder (/link/ or the old /team/), so signing out and the demo stay where they are.
   const HERE = location.pathname.replace(/[^/]*$/, '') || '/link/';
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const COLOURS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#db2777', '#65a30d', '#7c3aed', '#0d9488'];
+  const COLOURS = ['#2563eb', '#15803d', '#b45309', '#9333ea', '#dc2626', '#0e7490', '#be185d', '#4d7c0f', '#7c3aed', '#0f766e'];   // M21: white initials >= 4.5:1
   const colourOf = (id) => COLOURS[[...String(id)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % COLOURS.length];
   const initials = (n) => (String(n || '').trim().split(/\s+/).map((w) => (w.match(/[\p{L}\p{N}]/u) || [''])[0]).join('').slice(0, 2) || '?').toUpperCase();   // M9: letters and numbers only
   const av = (id, name, cls = '') => `<span class="av ${cls}" style="background:${colourOf(id)}" aria-hidden="true">${esc(initials(name))}</span>`;
@@ -622,7 +622,7 @@
       ${note}
       ${mode === 'in' && params.has('help') ? '<div class="ok ghelp"><b>Need help?</b> You don\'t have to sign in. <button type="button" class="linkbtn" id="gcontact1">Send us a message</button> and we\'ll reply by email.</div>' : ''}
       ${mode === 'up' ? '<label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>' : ''}
-      <label class="f"><span>Email</span><input type="email" name="email" autocomplete="username email" required value="${esc(email)}"></label>
+      <label class="f"><span>Email</span><input type="email" name="email" autocomplete="username" required value="${esc(email)}"></label>
       ${mode !== 'reset' ? pwField('password', 'Password', mode === 'up' ? 'new-password' : 'current-password', mode === 'up' ? 'At least 8 characters.' : '') : ''}
       ${mode === 'up' ? pwField('password2', 'Confirm password', 'new-password', '') : ''}<div id="gerr"></div>
       ${mode === 'up' ? detailsFields(!!join) : ''}
@@ -2654,8 +2654,9 @@
     el.querySelectorAll('[data-rt]').forEach((b) => b.onclick = () => { S.rightTab = b.dataset.rt; renderRight(); });
     el.querySelectorAll('[data-callp]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); Calls.start({ user: b.dataset.callp }); });
     el.querySelectorAll('[data-vidp]').forEach((b) => b.onclick = () => Calls.start({ user: b.dataset.vidp, video: true }));
-    el.querySelectorAll('.lk-person[data-person]').forEach((r) => { if (r.dataset.person !== S.user.id) { r.tabIndex = 0; r.setAttribute('role', 'button'); r.setAttribute('aria-label', `Message ${nameOf(r.dataset.person)}`);
-      r.onclick = () => openDm(r.dataset.person); r.onkeydown = (e) => { if (e.key === 'Enter') openDm(r.dataset.person); }; } });
+    el.querySelectorAll('.lk-person[data-person]').forEach((r) => { if (r.dataset.person !== S.user.id) { r.classList.add('clk'); r.onclick = () => openDm(r.dataset.person);
+      const pn = r.querySelector('.lk-pn'); if (pn) { pn.tabIndex = 0; pn.setAttribute('role', 'button'); pn.setAttribute('aria-label', `Message ${nameOf(r.dataset.person)}`);
+        pn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDm(r.dataset.person); } }; } } });   // M21
     const ps = el.querySelector('#psearch'); if (ps) ps.oninput = () => { S.pq = ps.value; const pos = ps.selectionStart; renderRight(); const n = document.getElementById('psearch'); n.focus(); n.setSelectionRange(pos, pos); };
     const qh = el.querySelector('#qdh'); if (qh) qh.onclick = () => { S.qdShut = !S.qdShut; renderRight(); };
     const ip = el.querySelector('#ipin'); if (ip) ip.onclick = () => togglePin(S.ch.id);

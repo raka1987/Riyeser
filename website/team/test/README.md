@@ -119,3 +119,6 @@
   non-website pages ignored, values checked and cut short, 200 a session a day), that nobody reads `site_visits` directly,
   that `hq_traffic` needs `reports.view`, and the daily sweep (13 months of raw rows, daily totals kept). HQ:
   `../../hq/test-hq-traffic.js` (Reports → Website traffic in demo mode, and the website's tracking script).
+- `a11y-test.js` (M21): small grey text on the home and pricing cards at least 4.5:1, heading levels in order, "Skip to content"
+  first on Tab, Link's avatar initials at least 4.5:1, no button inside a button, a focus ring on "Search people", and the sign-in
+  email box `autocomplete="username"`. With `AXE=path/to/axe.min.js` it also runs axe-core on those pages (all clean now).

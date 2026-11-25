@@ -43,7 +43,7 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
   // see what you typed: the eye shows and hides the password
   const eye = '.pwwrap:has([name=password]) .pweye';
   console.log('   autocomplete:', await pg.getAttribute('[name=email]', 'autocomplete'), '/', await pg.getAttribute('[name=password]', 'autocomplete'), '/', await pg.getAttribute('[name=password2]', 'autocomplete'));
-  if (await pg.getAttribute('[name=email]', 'autocomplete') !== 'username email' || await pg.getAttribute('[name=password2]', 'autocomplete') !== 'new-password') errs.push('autocomplete attributes');
+  if (await pg.getAttribute('[name=email]', 'autocomplete') !== 'username' || await pg.getAttribute('[name=password2]', 'autocomplete') !== 'new-password') errs.push('autocomplete attributes');
   await pg.click(eye);
   const shown = [await pg.getAttribute('[name=password]', 'type'), await pg.getAttribute(eye, 'aria-label')];
   await pg.click(eye);
