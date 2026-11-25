@@ -326,3 +326,57 @@ def test_f10_bank_statement_import_dropdowns_and_allocate(client, app):
     client.post(f"/banking/feed/{fid}/allocate", data={"account_id": acc["6-1500"]}, headers={"Referer": "/banking/feed"})
     with app.app_context():
         assert get_db().execute("SELECT COUNT(*) FROM journal_entries WHERE source_type='spend'").fetchone()[0] == 1
+
+
+# ------------------------------------------------------------------ F14
+def test_f14_no_one_without_payroll_access_can_find_anyones_pay(client, app):
+    from riyeser.db import fmt_money
+    with app.app_context():
+        db = get_db()
+        e1 = _employee(db, "Alice", "Zephyrine")
+        e2 = db.execute("INSERT INTO employees (first_name, last_name, pay_basis, hourly_rate, std_hours, pay_frequency,"
+                        " tax_free_threshold, super_rate) VALUES ('Bob','Quixley','hourly',4123,76,'fortnightly',1,12)"
+                        ).lastrowid
+        db.commit()
+        bank = db.execute("SELECT id FROM accounts WHERE code='1-1110'").fetchone()[0]
+    client.post("/payroll/run", data={"action": "process", "frequency": "fortnightly", "period_start": "2026-11-11",
+                                      "period_end": "2026-11-24", "pay_date": "2026-11-24", "bank_account_id": bank,
+                                      f"inc_{e1}": "1", f"hours_{e1}": "76", f"inc_{e2}": "1", f"hours_{e2}": "76"})
+    with app.app_context():
+        db = get_db()
+        slips = db.execute("SELECT * FROM payslips").fetchall()
+        assert len(slips) == 2
+        rid = slips[0]["payrun_id"]
+        acc, _ = ids(db)
+    secrets = ["Alice", "Zephyrine", "Bob", "Quixley"] + [fmt_money(s[k]) for s in slips for k in ("net", "gross", "tax")]
+    client.post("/users/save", data={"username": "rita", "password": "pw", "preset": "readonly"})
+    rita = app.test_client()
+    rita.post("/login", data={"username": "rita", "password": "pw"})
+    pages = [f"/banking/reconcile?account={bank}&date=2026-11-30"]
+    pages += [f"/accounts/{acc[c]}?start=2026-07-01&end=2026-11-30" for c in ("1-1110", "6-5000", "2-1410", "2-1420", "6-5100")]
+    pages += ["/reports/gl_detail?start=2026-07-01&end=2026-11-30",
+              "/reports/gl_detail?start=2026-07-01&end=2026-11-30&format=csv",
+              "/journal?q=Pay", "/journal", "/", "/setup/audit"]
+    for url in pages:
+        r = rita.get(url)
+        assert r.status_code == 200, url
+        page = r.get_data(as_text=True)
+        for s in secrets:
+            assert s not in page, (url, s)
+    page = rita.get(f"/banking/reconcile?account={bank}&date=2026-11-30").get_data(as_text=True)
+    total_net = sum(s["net"] for s in slips)
+    assert f"Wages (pay run {rid})" in page and f'data-amt="{-total_net}"' in page
+    # the register still adds up: one wages line with the run's total
+    assert fmt_money(total_net) in rita.get(f"/accounts/{bank}?start=2026-07-01&end=2026-11-30").get_data(as_text=True)
+    # the payroll officer (and admin) still see each person
+    page = client.get(f"/banking/reconcile?account={bank}&date=2026-11-30").get_data(as_text=True)
+    assert "Alice Zephyrine" in page and "Bob Quixley" in page
+    # reconciling the one line reconciles every person's line in it
+    with app.app_context():
+        line_ids = [r[0] for r in get_db().execute("SELECT id FROM journal_lines WHERE account_id=? AND credit>0",
+                                                   (bank,))]
+    client.post("/banking/reconcile", data={"account_id": bank, "statement_date": "2026-11-30",
+                                            "statement_balance": f"-{total_net / 100:.2f}",
+                                            "line": ",".join(map(str, line_ids))})
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM journal_lines WHERE reconciliation_id IS NOT NULL").fetchone()[0] == 2

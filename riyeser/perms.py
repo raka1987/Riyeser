@@ -37,6 +37,42 @@ PRESETS = {
 }
 PAYROLL_SOURCES = ("payrun", "payroll_import")
 
+
+def pay_label(row):
+    """'Wages (pay run 12)': how a pay run reads for people who can't see payroll."""
+    ref = row["source_id"] if row["source_type"] == "payrun" else (row["reference"] or row["source_id"])
+    return f"Wages (pay run {ref})"
+
+
+def collapse_pay(rows, show=None):
+    """Ledger lines as dicts, each with 'ids' (the journal line ids it stands for) and 'masked'.
+
+    For people without Payroll access (F14), each pay run's lines on one account become a single line,
+    "Wages (pay run 12)", with the total and no names, so no one's pay can be picked out. Rows need eid (or
+    entry_id), account_id, debit, credit, memo, source_type, source_id and reference."""
+    show = can("payroll") if show is None else show
+    out, groups = [], {}
+    for r in rows:
+        d = dict(r)
+        d["ids"], d["masked"] = [d.get("id")], False
+        if show or d.get("source_type") not in PAYROLL_SOURCES:
+            out.append(d)
+            continue
+        key = (d.get("eid") or d.get("entry_id"), d.get("account_id"))
+        if key in groups:
+            g_ = groups[key]
+            g_["debit"] += d["debit"] or 0
+            g_["credit"] += d["credit"] or 0
+            g_["ids"].append(d.get("id"))
+            continue
+        d.update(memo=pay_label(d), emo=pay_label(d), masked=True, job_id=None)
+        groups[key] = d
+        out.append(d)
+    for d in groups.values():  # a debit and a credit on one account in the same run: show the net only
+        net = (d["debit"] or 0) - (d["credit"] or 0)
+        d["debit"], d["credit"] = max(net, 0), max(-net, 0)
+    return out
+
 # Actions that remove or cancel something: they need Full.
 DESTRUCTIVE = {"documents.void", "documents.delete", "documents.payment_void", "banking.feed_delete", "core.reverse",
                "payroll.void_run", "pos.cancel_order"}

@@ -89,10 +89,11 @@ def reconcile():
     if aid:
         rec_bal = db.execute("SELECT COALESCE(SUM(debit-credit),0) b FROM journal_lines WHERE account_id=?"
                              " AND reconciliation_id IS NOT NULL", (aid,)).fetchone()["b"]
-        lines = db.execute("SELECT l.*, e.date, e.memo emo, e.reference, e.id eid FROM journal_lines l"
-                           " JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=? AND"
-                           " l.reconciliation_id IS NULL AND e.date<=? ORDER BY e.date, e.id",
-                           (aid, stmt_date)).fetchall()
+        from ..perms import collapse_pay
+        lines = collapse_pay(db.execute(
+            "SELECT l.*, e.date, e.memo emo, e.reference, e.id eid, e.source_type, e.source_id FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=? AND"
+            " l.reconciliation_id IS NULL AND e.date<=? ORDER BY e.date, e.id", (aid, stmt_date)).fetchall())
         last = db.execute("SELECT * FROM reconciliations WHERE account_id=? ORDER BY id DESC LIMIT 1",
                           (aid,)).fetchone()
     return render_template("banking/reconcile.html", aid=aid, stmt_date=stmt_date, lines=lines, rec_bal=rec_bal,
@@ -113,7 +114,7 @@ def _save_reconcile():
             audit(db, "undo_reconcile", str(last["id"]))
             flash("Last reconciliation undone.", "ok")
         return redirect(url_for("banking.reconcile", account=aid))
-    ids = [int(x) for x in f.getlist("line")]
+    ids = [int(x) for v in f.getlist("line") for x in v.split(",") if x.strip()]  # a pay run's line stands for several
     stmt = to_cents(f["statement_balance"])
     rec_bal = db.execute("SELECT COALESCE(SUM(debit-credit),0) b FROM journal_lines WHERE account_id=?"
                          " AND reconciliation_id IS NOT NULL", (aid,)).fetchone()["b"]

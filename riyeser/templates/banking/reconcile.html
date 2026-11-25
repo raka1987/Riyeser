@@ -11,7 +11,7 @@
 <div class="kpi"><div class="lbl">Reconciled so far</div><div class="val" id="rec-calc">{{ rec_bal|money }}</div></div>
 <div class="kpi"><div class="lbl">Out of balance</div><div class="val" id="rec-diff">—</div></div></div>
 <table><tr><th><input type="checkbox" onclick="document.querySelectorAll('.rl').forEach(c=>{c.checked=this.checked});recUpd()"></th><th>Date</th><th>ID</th><th>Memo</th><th class="n">Deposit</th><th class="n">Withdrawal</th></tr>
-{% for l in lines %}<tr><td><input type="checkbox" class="rl" name="line" value="{{ l.id }}" data-amt="{{ l.debit - l.credit }}" onchange="recUpd()"></td><td>{{ l.date }}</td><td><a href="{{ url_for('core.entry', eid=l.eid) }}">#{{ l.eid }}</a></td>
+{% for l in lines %}<tr><td><input type="checkbox" class="rl" name="line" value="{{ l.ids|join(',') }}" data-amt="{{ l.debit - l.credit }}" onchange="recUpd()"></td><td>{{ l.date }}</td><td><a href="{{ url_for('core.entry', eid=l.eid) }}">#{{ l.eid }}</a></td>
 <td>{{ l.memo or l.emo or '' }}</td><td class="n">{{ l.debit|money0 }}</td><td class="n">{{ l.credit|money0 }}</td></tr>{% else %}<tr><td colspan="6" class="muted">No unreconciled transactions up to this date.</td></tr>{% endfor %}</table>
 <p><button class="btn pri">Reconcile</button></p></form>
 {% endblock %}

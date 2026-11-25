@@ -8,6 +8,7 @@ from flask import Blueprint, render_template, request, Response, url_for, abort,
 from ..db import get_db, linked, fmt_money
 from ..ledger import balances, fy_start, add_days
 from . import opt_int
+from ..perms import collapse_pay
 
 bp = Blueprint("reports", __name__, url_prefix="/reports")
 
@@ -153,10 +154,11 @@ def rpt_gl_detail(db, p):
         opening = db.execute("SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN journal_entries e"
                              " ON e.id=l.entry_id WHERE l.account_id=? AND e.date<?", (a["id"], p["start"])
                              ).fetchone()["b"]
-        lines = db.execute("SELECT l.*, e.date, e.memo emo, e.reference, e.id eid FROM journal_lines l"
-                           " JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=? AND e.date BETWEEN ? AND ?"
-                           + (" AND l.job_id=?" if p["job"] else "") + " ORDER BY e.date, e.id",
-                           (a["id"], p["start"], p["end"]) + ((p["job"],) if p["job"] else ())).fetchall()
+        lines = collapse_pay(db.execute(
+            "SELECT l.*, e.date, e.memo emo, e.reference, e.id eid, e.source_type, e.source_id FROM journal_lines l"
+            " JOIN journal_entries e ON e.id=l.entry_id WHERE l.account_id=? AND e.date BETWEEN ? AND ?"
+            + (" AND l.job_id=?" if p["job"] else "") + " ORDER BY e.date, e.id",
+            (a["id"], p["start"], p["end"]) + ((p["job"],) if p["job"] else ())).fetchall())
         if not lines:
             continue
         rows.append(R([f"{a['code']} {a['name']}", "", "", "", "", opening], "header"))
@@ -164,7 +166,8 @@ def rpt_gl_detail(db, p):
         for l in lines:
             run += l["debit"] - l["credit"]
             rows.append(R([l["date"], f"#{l['eid']}", l["memo"] or l["emo"] or "", l["debit"] or "",
-                           l["credit"] or "", run], link=url_for("core.entry", eid=l["eid"]), indent=1))
+                           l["credit"] or "", run], link=None if l["masked"] else url_for("core.entry", eid=l["eid"]),
+                         indent=1))
         rows.append(R(["", "", "Closing balance", "", "", run], "total"))
     return dict(columns=["Date", "ID", "Memo", "Debit", "Credit", "Balance"], rows=rows,
                 subtitle=f"{p['start']} to {p['end']}", filters=["start", "end", "job"])

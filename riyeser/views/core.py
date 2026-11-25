@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from ..db import get_db, audit, to_cents, linked
 from ..ledger import general_journal, reverse_entry, balances, fy_start, PostingError, check_journal_lines
 from . import lookups, opt_int, form_lines, guarded, admin_only
-from ..perms import can, PAYROLL_SOURCES
+from ..perms import can, PAYROLL_SOURCES, collapse_pay
 
 bp = Blueprint("core", __name__)
 
@@ -108,10 +108,11 @@ def account_ledger(aid):
     end = request.args.get("end") or __import__("datetime").date.today().isoformat()
     opening = db.execute("SELECT COALESCE(SUM(l.debit-l.credit),0) b FROM journal_lines l JOIN journal_entries e"
                          " ON e.id=l.entry_id WHERE l.account_id=? AND e.date<?", (aid, start)).fetchone()["b"]
-    rows = db.execute("SELECT l.*, e.date, e.memo emo, e.reference, e.source_type, e.source_id, e.id eid"
-                      " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
-                      " WHERE l.account_id=? AND e.date BETWEEN ? AND ?" + _hide_payroll_sql() + " ORDER BY e.date, e.id",
-                      (aid, start, end)).fetchall()
+    # pay runs stay in the register (so it adds up), as one "Wages (pay run n)" line for people without payroll
+    rows = collapse_pay(db.execute("SELECT l.*, e.date, e.memo emo, e.reference, e.source_type, e.source_id, e.id eid"
+                                   " FROM journal_lines l JOIN journal_entries e ON e.id=l.entry_id"
+                                   " WHERE l.account_id=? AND e.date BETWEEN ? AND ? ORDER BY e.date, e.id",
+                                   (aid, start, end)).fetchall())
     return render_template("core/account_ledger.html", acct=acct, rows=rows, opening=opening, start=start, end=end)
 
 
@@ -332,6 +333,7 @@ def _save_budgets(months, year):
 
 @bp.route("/setup/audit")
 def audit_log():
-    rows = get_db().execute("SELECT a.*, u.username FROM audit_log a LEFT JOIN users u ON u.id=a.user_id"
+    hide = "" if can("payroll") else (" WHERE a.action NOT IN ('payrun','void_payrun','save_employee','payroll_import')")
+    rows = get_db().execute("SELECT a.*, u.username FROM audit_log a LEFT JOIN users u ON u.id=a.user_id" + hide +
                             " ORDER BY a.id DESC LIMIT 500").fetchall()
     return render_template("core/audit.html", rows=rows)
