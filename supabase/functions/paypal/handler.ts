@@ -71,7 +71,11 @@ export function setup(env: Env): Setup {
   const secret = (env("PAYPAL_CLIENT_SECRET") ?? "").trim();
   const webhookId = (env("PAYPAL_WEBHOOK_ID") ?? "").trim();
   const credentials = !!(mode && clientId && secret);
-  return { env: mode, clientId, secret, webhookId, credentials, webhooks: credentials && !!webhookId, ready: credentials && !!webhookId };
+  // Customers can only start paying in live mode. Practice (sandbox) mode stays closed to the public unless
+  // PAYPAL_ALLOW_PRACTICE=1 is set, so nobody is sent to PayPal's practice site by mistake. Webhooks still work.
+  const allowPractice = (env("PAYPAL_ALLOW_PRACTICE") ?? "").trim() === "1";
+  const open = credentials && !!webhookId && (mode === "live" || allowPractice);
+  return { env: mode, clientId, secret, webhookId, credentials, webhooks: credentials && !!webhookId, ready: open };
 }
 export const apiBase = (mode: "sandbox" | "live") => (mode === "live" ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com");
 
@@ -163,7 +167,8 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
 
   if (req.method === "GET" && route === "status") {
     return json(200, { ready: s.ready, env: s.env, credentials: s.credentials, webhooks: s.webhooks,
-      message: s.ready ? "PayPal is set up." : !s.credentials ? "PayPal isn't set up yet." : "Webhooks aren't verified yet: add PAYPAL_WEBHOOK_ID and deploy again." });
+      message: s.ready ? "PayPal is set up." : !s.credentials ? "PayPal isn't set up yet." : !s.webhooks ? "Webhooks aren't verified yet: add PAYPAL_WEBHOOK_ID and deploy again."
+        : "PayPal is in practice mode, so customers can't start paying. Switch PAYPAL_ENV to live (or set PAYPAL_ALLOW_PRACTICE=1 to test)." });
   }
   if (req.method !== "POST") return json(405, { error: "Use POST." });
   const svc = deps.rpcService ?? defaultRpcService(env);

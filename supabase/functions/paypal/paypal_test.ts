@@ -10,7 +10,7 @@ import { forgetTokens, handle, startTime, type Rpc } from "./handler.ts";
 
 const WS = "11111111-2222-4333-8444-555555555555";
 const ORDER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-const KEYS = { PAYPAL_CLIENT_ID: "test-client", PAYPAL_CLIENT_SECRET: "test-secret", PAYPAL_ENV: "sandbox", PAYPAL_WEBHOOK_ID: "WH-ID-1" };
+const KEYS = { PAYPAL_CLIENT_ID: "test-client", PAYPAL_CLIENT_SECRET: "test-secret", PAYPAL_ENV: "sandbox", PAYPAL_WEBHOOK_ID: "WH-ID-1", PAYPAL_ALLOW_PRACTICE: "1" };
 
 /** A pretend PayPal: just enough of the REST API, remembering every call. */
 function fakePayPal(opts: { signatureOk?: boolean; cancelStatus?: number } = {}) {
@@ -236,4 +236,16 @@ Deno.test("wrong PayPal keys: a plain message, no details", async () => {
 Deno.test("CORS: the website can call it", async () => {
   const r = await handle(new Request("https://x/functions/v1/paypal/subscribe", { method: "OPTIONS" }), { env: env({}) });
   assertEquals(r.status, 204); assertStringIncludes(r.headers.get("Access-Control-Allow-Headers")!, "authorization");
+});
+
+Deno.test("practice (sandbox) mode is closed to customers unless PAYPAL_ALLOW_PRACTICE=1; live is open; webhooks still work", async () => {
+  forgetTokens(); const p = fakePayPal(); const db = fakeDb();
+  const { PAYPAL_ALLOW_PRACTICE: _, ...SANDBOX } = KEYS;
+  const d = { env: env(SANDBOX), fetch: p.f, ...db };
+  const st = await (await handle(new Request("https://x/functions/v1/paypal/status"), d)).json();
+  assertEquals([st.ready, st.credentials, st.webhooks, st.env], [false, true, true, "sandbox"]);
+  assertEquals((await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), d)).status, 503);
+  assertEquals(p.calls.length, 0, "nothing was sent to PayPal");
+  const live = { env: env({ ...SANDBOX, PAYPAL_ENV: "live" }), fetch: p.f, ...db };
+  assertEquals((await (await handle(new Request("https://x/functions/v1/paypal/status"), live)).json()).ready, true);
 });
