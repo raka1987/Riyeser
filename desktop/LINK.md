@@ -1,14 +1,14 @@
 # Riyeser Link Office
 
-Riyeser Link is Riyeser's chat and calls (the app at riyeser.com/link, formerly Riyeser Team). Its paid tier,
-**Riyeser Link Plus**, adds calls and the office phone system, which comes in two forms:
+Riyeser Link is Riyeser's chat and calls (the app at riyeser.com/link, formerly Riyeser Team), a paid program since pricing v2
+(it took in the old Riyeser Link). It includes calls and the office phone system, which comes in two forms:
 
 - **Riyeser Link Office** runs on one PC in the office. That's this program, `Riyeser Link Office.exe`.
 - **Riyeser Link Cloud** will be hosted by Riyeser, in a later phase.
 
 Both use the same extensions, ring groups and desk-phone set-up. A business can move from one to the other without setting anything up again (see *Moving between Office and Cloud*).
 
-Riyeser Link Office comes with **Riyeser Link Plus** (the `calls` module of the Riyeser plan).
+Riyeser Link Office comes with **Riyeser Link** (the `calls` module of the Riyeser plan).
 
 > **Internal calls only.** These phones can't call emergency services — keep a mobile or normal phone line for that.
 
@@ -188,8 +188,8 @@ Three changes in 30 days mark the address as not stable. If the PC has several n
 
 - **Signed in to Riyeser.** When the PC is signed in (Riyeser Central's sign-in, or Riyeser Link Office's own), Riyeser Link Office brings in the Riyeser Link members with their extensions, the branches (as ring groups) and the business name. It does this every 30 minutes and saves everything on this PC, so the phones keep working with no internet, indefinitely. It never renews Central's sign-in itself, so the two programs can't trip each other up.
 - **Not signed in.** People can be added by hand. Hand-added people never get an emergency number (111, 112).
-- **Licence.** Riyeser Link Office works while Riyeser Link Plus is on: in its free trial (the same 90 days as every paid program) or paid. That's read from `%APPDATA%\Riyeser\licence.json`, and it keeps working for 30 days without the internet.
-- **When it isn't on.** Riyeser Link Office still installs and opens, but doesn't start the phone system. The screen says: "Riyeser Link Office comes with **Riyeser Link Plus**. Start your free trial or add Link Plus from your Riyeser home page." It has a button to open Riyeser Link, and phones show as "waiting for Riyeser Link Plus".
+- **Licence.** Riyeser Link Office works while Riyeser Link is on: in its free trial (the same 90 days as every paid program) or paid. That's read from `%APPDATA%\Riyeser\licence.json`, and it keeps working for 30 days without the internet.
+- **When it isn't on.** Riyeser Link Office still installs and opens, but doesn't start the phone system. The screen says: "Riyeser Link Office comes with **Riyeser Link**. Start your free trial or add Riyeser Link from your Riyeser home page (Add to my plan)." It has a button to open Riyeser Link, and phones show as "waiting for Riyeser Link".
 - **If it lapses while running.** Calls in progress finish. New phones and calls are then refused, and it pauses. Nothing is deleted.
 
 ## Moving between Office and Cloud
@@ -242,7 +242,7 @@ The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring
   - `directory.js` — people, ring groups, passwords and DND.
   - `sync.js` — Riyeser Link.
   - `cloud.js` — the website's Phones page: heartbeat, changes, Show password.
-  - `licence.js` — Riyeser Link Plus.
+  - `licence.js` — Riyeser Link.
   - `calllog.js` — 90 days of recent calls.
   - `service.js` — puts it all together.
   - `portable.js` — export and import.

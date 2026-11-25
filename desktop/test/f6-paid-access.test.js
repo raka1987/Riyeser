@@ -138,7 +138,7 @@ test('F6: pay -> link the PC -> still licensed 15 and 45 days later (Central, Li
     for (const d of [15, 45]) {
       assert.strictEqual(seen[d].trusted, 'trusted', `day ${d}: signed licence trusted`);
       assert.strictEqual(seen[d].central, 'ok', `day ${d}: Central shows Accounting Basics paid`);
-      assert.strictEqual(seen[d].link, true, `day ${d}: Riyeser Link Plus on`);
+      assert.strictEqual(seen[d].link, true, `day ${d}: Riyeser Link on`);
       if (seen[d].accounting) {
         assert.strictEqual(seen[d].accounting.mode, 'licensed', `day ${d}: Accounting says licensed: ${JSON.stringify(seen[d].accounting)}`);
         assert.strictEqual(seen[d].accounting.source, 'online');

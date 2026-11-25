@@ -146,7 +146,7 @@ test('people added by hand get the next free extension, never an emergency numbe
   rmTmp(dir);
 });
 
-// ---------- licence (Link Plus) ----------
+// ---------- licence (Riyeser Link) ----------
 test('licence: trial and paid work; none, ended, cancelled and 30 days unchecked do not; the offline grace keeps it going', () => {
   const appData = tmp('appdata');
   try {
@@ -178,7 +178,7 @@ const serviceEnv = async (licenceFn, extra = {}) => {
   return { dir, appData, store, svc, close: async () => { await svc.stop(); rmTmp(dir); rmTmp(appData); } };
 };
 
-test('without Link Plus the phone system does not start, and says why', async () => {
+test('without Riyeser Link the phone system does not start, and says why', async () => {
   const env = await serviceEnv((a) => callsLicence(a));
   try {
     env.svc.addPerson({ name: 'Alex Sample', ext: '101' });
@@ -187,9 +187,9 @@ test('without Link Plus the phone system does not start, and says why', async ()
     assert.strictEqual(env.svc.pbx, null);
     const st = env.svc.status();
     assert.strictEqual(st.state, 'waiting-licence');
-    assert.strictEqual(st.licence.message, 'Riyeser Link Office comes with Riyeser Link Plus. Start your free trial or add Link Plus from your Riyeser home page.');
-    assert.strictEqual(st.phones[0].state, 'waiting for Link Plus');
-    assert.strictEqual(st.people[0].state, 'waiting for Link Plus');
+    assert.strictEqual(st.licence.message, 'Riyeser Link Office comes with Riyeser Link. Start your free trial or add Riyeser Link from your Riyeser home page (Add to my plan).');
+    assert.strictEqual(st.phones[0].state, 'waiting for Riyeser Link');
+    assert.strictEqual(st.people[0].state, 'waiting for Riyeser Link');
     // switched on (trial): it starts
     writeLicence(env.appData, plan({ status: 'trial', active: true, days_left: 60 }, new Date().toISOString()));
     await env.svc.checkLicence();
@@ -198,7 +198,7 @@ test('without Link Plus the phone system does not start, and says why', async ()
   } finally { await env.close(); }
 });
 
-test('paid Link Plus: phones register and call', async () => {
+test('paid Riyeser Link: phones register and call', async () => {
   const env = await serviceEnv(() => ({ active: true, state: 'paid' }));
   try {
     env.svc.addPerson({ name: 'Alex Sample', ext: '101' }); env.svc.addPerson({ name: 'Bo Example', ext: '102' });

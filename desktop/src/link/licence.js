@@ -1,4 +1,4 @@
-// Is Riyeser Link Office switched on? It comes with Link Plus: the 'calls' module of the company's Riyeser plan.
+// Is Riyeser Link Office switched on? It comes with Riyeser Link: the 'calls' module of the company's Riyeser plan.
 // The plan is saved in %APPDATA%\Riyeser\licence.json under "online" by Riyeser Central (and by this app when it's
 // signed in). It works while 'calls' is on its free trial (the same 90 days as every paid program) or paid, and keeps
 // working for 30 days without the internet. Nothing here deletes anything.
@@ -7,15 +7,15 @@ const licence = require('../core/licence');
 const signed = require('../core/signed-licence');
 
 const TEAM_URL = 'https://riyeser.com/link/';
-const NEEDS_PLUS = 'Riyeser Link Office comes with Riyeser Link Plus. Start your free trial or add Link Plus from your Riyeser home page.';
+const NEEDS_PLUS = 'Riyeser Link Office comes with Riyeser Link. Start your free trial or add Riyeser Link from your Riyeser home page (Add to my plan).';
 // what's paused, what still works, the price and where to add it (the same pattern as every paid program)
-const LOCKED = `Link Plus isn't on, so office calls are paused. Your people, phones and call history are kept, and Riyeser Link chat still works. To carry on, add Link Plus from your Riyeser home page (${licence.MODULE_PRICES.calls}).`;
-const STALE = 'Riyeser couldn\'t check your Link Plus plan for 30 days. Connect this PC to the internet and open Riyeser Central.';
+const LOCKED = `Riyeser Link isn't on, so office calls are paused. Your people, phones and call history are kept, and nothing is deleted. To carry on, add Riyeser Link from your Riyeser home page: Add to my plan (${licence.MODULE_PRICES.calls}).`;
+const STALE = 'Riyeser couldn\'t check your Riyeser Link plan for 30 days. Connect this PC to the internet and open Riyeser Central.';
 
 
 /**
  * { active, state: 'trial' | 'paid' | 'none' | 'ended' | 'stale', daysLeft, text, message }
- *   none   no Riyeser plan on this PC (not signed in, or Link Plus not on the plan)
+ *   none   no Riyeser plan on this PC (not signed in, or Riyeser Link not on the plan)
  *   ended  the trial finished or the plan was cancelled
  *   stale  not checked for 30 days (connect to the internet)
  */
@@ -38,9 +38,9 @@ function callsLicence(appData, now = Date.now()) {
   }
   if (live.status === 'trial') {
     const daysLeft = live.daysLeft;
-    return { active: true, state: 'trial', daysLeft, text: daysLeft != null ? `Link Plus free trial, ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : 'Link Plus free trial', message: ev.message || null };
+    return { active: true, state: 'trial', daysLeft, text: daysLeft != null ? `Riyeser Link free trial, ${daysLeft} day${daysLeft === 1 ? '' : 's'} left` : 'Riyeser Link free trial', message: ev.message || null };
   }
-  return { active: true, state: 'paid', text: m.paid_until ? `Link Plus, paid until ${licence.fmtDate(m.paid_until)}` : 'Link Plus', message: ev.message || null };
+  return { active: true, state: 'paid', text: m.paid_until ? `Riyeser Link, paid until ${licence.fmtDate(m.paid_until)}` : 'Riyeser Link', message: ev.message || null };
 }
 
 module.exports = { callsLicence, NEEDS_PLUS, LOCKED, TEAM_URL };

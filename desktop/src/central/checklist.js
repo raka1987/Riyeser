@@ -4,7 +4,7 @@
 const fs = require('fs');
 
 // ---------- the plan (licence.json "online".modules) -> programs ----------
-// The same names Central uses everywhere: basic = Accounting Basics, plus = Accounting Plus, calls = Riyeser Link Plus:
+// The same names Central uses everywhere: basic = Accounting Basics, plus = Accounting Plus, calls = Riyeser Link:
 // the Riyeser Link app (program id still "team") and Riyeser Link Office (id "linkoffice", once it's in Central's PROGRAMS),
 // as_built = As Built (its program id is still "services").
 const MODULE_PROGRAMS = { basic: ['accounting-basics'], plus: ['accounting'], pos: ['pos'], bookings: ['bookings'], payroll: ['payroll'],

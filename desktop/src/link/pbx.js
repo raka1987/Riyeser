@@ -325,7 +325,7 @@ class Pbx extends EventEmitter {
   onRegister(req, src) {
     const to = sip.parseNameAddr(sip.getHeader(req, 'to'));
     const ext = sip.userOf(to.parsed);
-    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Link Plus)');
+    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Riyeser Link)');
     if (!this.authenticate(req, src, false, ext)) return;
     const map = this.bindings.get(ext) || new Map();
     const contacts = sip.getAll(req, 'contact');
@@ -362,7 +362,7 @@ class Pbx extends EventEmitter {
 
   // ---------- INVITE (a new call) ----------
   onInvite(req, src) {
-    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Link Plus)');
+    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Riyeser Link)');
     const caller = this.authenticate(req, src, true);
     if (!caller) return;
     const key = this.txKey(req);
@@ -634,7 +634,7 @@ class Pbx extends EventEmitter {
   onSubscribe(req, src) {
     const ev = String(sip.getHeader(req, 'event') || '');
     if (!/^ua-profile\b/i.test(ev)) return this.reply(req, 489, null, { headers: [['allow-events', 'ua-profile']] });
-    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Link Plus)');
+    if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Riyeser Link)');
     const params = sip.parseParams(ev.slice(ev.indexOf(';') + 1));
     const from = sip.parseNameAddr(sip.getHeader(req, 'from'));
     let mac = null;

@@ -40,13 +40,13 @@ const localPrograms = () => path.join(process.env.LOCALAPPDATA || path.join(os.h
 // ---------- the programs ----------
 const PROGRAMS = [
   // Free invoicing on its own (free forever). Opens the same company files as Accounting and installs next to it.
-  // Riyeser Link (formerly Riyeser Team) as its own desktop app (chat free; Link Plus calls). When it's installed,
+  // Riyeser Link (formerly Riyeser Team) as its own desktop app (chat and calls, a paid program). When it's installed,
   // the Link button opens it. Its folder and program file kept the old names (riyeser-team, Riyeser Team.exe) so it
   // updates in place; the Start menu and desktop shortcuts are called Riyeser Link now (Riyeser Team before 1.1).
-  { id: 'team', name: 'Link', full: 'Riyeser Link', icon: '💬', desc: 'Chat for your business, and Link Plus calls. Chat is free.',
+  { id: 'team', name: 'Link', full: 'Riyeser Link', icon: '💬', desc: 'Chat, calls and desk phones for your business. Free for 90 days.',
     dirs: ['riyeser-team', 'Riyeser Team'], exes: ['Riyeser Team.exe'], links: ['Riyeser Link', 'Riyeser Team'], quitArg: true },   // quitArg: --quit closes it (Fresh start)
-  // Riyeser Link Office: the office phone system, with Riyeser Link Plus. Installs for the whole PC (Program Files).
-  { id: 'linkoffice', name: 'Link Office', full: 'Riyeser Link Office', icon: '☎', desc: 'Your office phone system: desk phones that ring each other. Comes with Riyeser Link Plus.',
+  // Riyeser Link Office: the office phone system, with Riyeser Link. Installs for the whole PC (Program Files).
+  { id: 'linkoffice', name: 'Link Office', full: 'Riyeser Link Office', icon: '☎', desc: 'Your business\'s phone lines: the office phone system, with desk phones, extensions and ring groups. Comes with Riyeser Link.',
     dirs: ['Riyeser Link Office', 'riyeser-linkoffice'], exes: ['Riyeser Link Office.exe'], links: ['Riyeser Link Office'], machine: true, quitArg: true },
   { id: 'invoices', name: 'Invoices', full: 'Riyeser Invoices', icon: '🧾', desc: 'Quotes, invoices, customers and getting paid. Free forever.',
     dirs: ['Riyeser Invoices'], exes: ['Riyeser Invoices.exe'], links: ['Riyeser Invoices'], pages: ['invoice'] },
@@ -264,7 +264,7 @@ function registerIpc() {
   });
   // A program that isn't installed yet: its page on riyeser.com, with the download.
   handle('central:get', async (id) => {
-    const page = { team: 'link', linkoffice: 'link', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const page = { team: 'link', linkoffice: 'link-office', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     await shell.openExternal(page ? `https://riyeser.com/programs/${page}.html` : 'https://riyeser.com/downloads.html');
     return true;
   });
@@ -437,7 +437,7 @@ function registerIpc() {
   handle('central:install', (id) => installProgram(id));
   // Help: each program's guide in the Riyeser Help Centre.
   handle('central:help', (id) => {
-    const guide = { central: 'central', team: 'link', linkoffice: 'link', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
+    const guide = { central: 'central', team: 'link', linkoffice: 'link-office', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' }[id];
     return shell.openExternal(guide ? `https://riyeser.com/help/${guide}.html` : 'https://riyeser.com/help.html').then(() => true);
   });
   // Get help: ask Riyeser Support on riyeser.com (signs in, then opens the "Get help" form).
@@ -536,7 +536,7 @@ function registerIpc() {
 // sign-in kept in its own storage (still called riyeser-team) so it stays signed in. Links open in the web browser.
 const TEAM_URL = 'https://riyeser.com/link/';
 let teamWin = null; let quitting = false;
-// Microphone and camera (for Link Plus calls) and notifications, only for riyeser.com, only in the Link window.
+// Microphone and camera (for Riyeser Link calls) and notifications, only for riyeser.com, only in the Link window.
 function teamSession() {
   const ses = session.fromPartition('persist:riyeser-team');
   if (!ses.__riyeserPerms) {

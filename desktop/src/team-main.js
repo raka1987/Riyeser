@@ -1,4 +1,4 @@
-// Riyeser Link for Windows (formerly Riyeser Team): the chat and Link Plus calls (riyeser.com/link) as its own desktop app.
+// Riyeser Link for Windows (formerly Riyeser Team): the chat and calls (riyeser.com/link) as its own desktop app.
 // It sits by the clock and starts with Windows, so messages and calls reach people even when no other Riyeser
 // program is open. Closing the window keeps it running (Quit from the tray icon closes it). The unread count shows
 // on the taskbar icon, and an incoming call brings the window forward.

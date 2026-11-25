@@ -7,7 +7,8 @@
 // F3: prices come from the one price list (core/prices.js, sent with the licence status), never from text here.
 (function (root) {
   // Central's program ids -> the plan's module ids. Programs not listed here are free.
-  const MODULE = { 'accounting-basics': 'basic', accounting: 'plus', pos: 'pos', bookings: 'bookings', payroll: 'payroll', services: 'as_built', linkoffice: 'calls' };
+  // Riyeser Link (team) and Riyeser Link Office are both the 'calls' module (Riyeser Link, a paid program).
+  const MODULE = { 'accounting-basics': 'basic', accounting: 'plus', bookings: 'bookings', team: 'calls', linkoffice: 'calls', payroll: 'payroll', pos: 'pos', services: 'as_built' };
   const SIGN_IN_TITLE = 'Sign in to your Riyeser account to unlock your plan';
   const SIGN_IN_TEXT = 'Your plan comes with your Riyeser account: sign in once on this PC and every Riyeser program on it follows your plan. '
     + 'Paid on riyeser.com? Sign in with the same email.';
@@ -34,10 +35,10 @@
     return { module: mod, text: 'Free for 90 days', alert: false, tone: 'trial' };
   }
 
-  /** The "Premium version available" line on Riyeser Link, with the price from the price list. */
-  function plusText(prices) {
+  /** What Riyeser Link includes, with the price from the price list (Riyeser Link Office comes with it). */
+  function linkText(prices) {
     const p = prices && prices.monthly && prices.monthly.calls;
-    return `Premium version available: Riyeser Link Plus adds calls, desk phones and 20 GB of files${p ? ` for ${p}` : ''}`;
+    return `Riyeser Link: chat, calls, desk phones and Riyeser Link Office${p ? `, ${p}` : ''}`;
   }
 
   /** The licence window's sign-in part (in place of the old licence key box). esc: the page's HTML escaper. */
@@ -48,7 +49,7 @@
       ${prices ? `<p class="muted">${esc(prices)}</p>` : ''}`;
   }
 
-  const api = { MODULE, SIGN_IN_TITLE, SIGN_IN_TEXT, programStatus, plusText, signInHtml };
+  const api = { MODULE, SIGN_IN_TITLE, SIGN_IN_TEXT, programStatus, linkText, signInHtml };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.RiyeserLicenceUi = api;
 }(typeof window !== 'undefined' ? window : null));

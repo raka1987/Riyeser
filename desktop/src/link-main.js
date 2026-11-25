@@ -2,7 +2,7 @@
 // It registers the office's desk phones (and, next, the Riyeser Link app) and connects calls between them on the
 // office network. It sits by the clock, starts with Windows and keeps the PC awake while it runs; closing the window
 // keeps it running (Quit from the tray icon). Internal calls only: no outside numbers and no emergency calls.
-// It works only while Link Plus is on (trial or paid); everything is kept on this PC, so it runs with no internet.
+// It works only while Riyeser Link is on (trial or paid); everything is kept on this PC, so it runs with no internet.
 const { app, BrowserWindow, Tray, Menu, shell, ipcMain, powerSaveBlocker, safeStorage, net, Notification, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -106,7 +106,7 @@ function makeService() {
 function updateTray() {
   if (!tray || !service) return;
   const s = service.status();
-  tray.setToolTip(s.state === 'running' ? `${NAME} · ${s.counts.phones} phone${s.counts.phones === 1 ? '' : 's'} connected${s.counts.onCalls ? ` · ${s.counts.onCalls} on calls` : ''}` : `${NAME} · ${s.state === 'waiting-licence' ? 'waiting for Link Plus' : 'not running'}`);
+  tray.setToolTip(s.state === 'running' ? `${NAME} · ${s.counts.phones} phone${s.counts.phones === 1 ? '' : 's'} connected${s.counts.onCalls ? ` · ${s.counts.onCalls} on calls` : ''}` : `${NAME} · ${s.state === 'waiting-licence' ? 'waiting for Riyeser Link' : 'not running'}`);
   if (s.found.length > service.prevFound && Notification.isSupported()) new Notification({ title: NAME, body: 'New phone found. Open Riyeser Link Office to say who it\'s for.' }).show();
   service.prevFound = s.found.length;
 }

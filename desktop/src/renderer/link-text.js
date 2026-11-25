@@ -7,10 +7,10 @@
     counts: (c) => `${plural(c.phones, 'phone')} connected · ${c.onCalls ? `${plural(c.onCalls, 'call')} in progress` : 'no calls right now'}`,
     WAITING_TITLE: 'Riyeser Link Office isn\'t switched on yet',
     STOPPING_TITLE: 'Riyeser Link Office is finishing the calls in progress',
-    /** The licence message as HTML, with Riyeser Link Plus in bold (text must already be escaped). */
-    boldPlus: (escaped) => escaped.replace('Riyeser Link Plus', '<b>Riyeser Link Plus</b>'),
-    NEEDS_PLUS: 'Riyeser Link Office comes with Riyeser Link Plus. Start your free trial or add Link Plus from your Riyeser home page.',
-    STOPPING: 'Link Plus isn\'t active any more. Calls in progress can finish, then Riyeser Link Office pauses. Nothing is deleted: people, phones and calls stay ready for when it\'s back on.',
+    /** The licence message as HTML, with Riyeser Link in bold (text must already be escaped). */
+    boldPlus: (escaped) => escaped.replace(/Riyeser Link(?! Office)/, '<b>Riyeser Link</b>'),
+    NEEDS_PLUS: 'Riyeser Link Office comes with Riyeser Link. Start your free trial or add Riyeser Link from your Riyeser home page (Add to my plan).',
+    STOPPING: 'Riyeser Link isn\'t active any more. Calls in progress can finish, then Riyeser Link Office pauses. Nothing is deleted: people, phones and calls stay ready for when it\'s back on.',
     ipChanged: (ip) => `This PC's network address changed (was ${ip.from}, now ${ip.to}). Phones are being updated. To stop this happening, ask your router to always give this PC the same address. Look for 'DHCP reservation' or 'Static lease' in your router's settings.`,
     IP_UNSTABLE: 'This has happened several times this month, so phones may keep losing touch until the router always gives this PC the same address.',
     ipSteps: (mac, ip) => [

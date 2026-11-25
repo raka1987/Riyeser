@@ -1,6 +1,6 @@
 // Riyeser Link Office's engine: the SIP server, the desk-phone set-up server, people, recent calls and the licence,
 // put together. The Electron app (phone-main.js) shows it; the self-test and the tests drive it directly.
-// It only starts the phone system while Link Plus is on (trial or paid). If it lapses while running, calls in
+// It only starts the phone system while Riyeser Link is on (trial or paid). If it lapses while running, calls in
 // progress finish, then new phones and calls are refused. Nothing is deleted: people, phones and call history stay.
 const { EventEmitter } = require('events');
 const { Pbx } = require('./pbx');
@@ -99,10 +99,10 @@ class PhoneService extends EventEmitter {
     this.lic = this.licence();
     if (this.lic.active) {
       if (!this.pbx) await this.startPbx();
-      else if (!this.pbx.accepting) { this.pbx.setAccepting(true); this.state = 'running'; this.log('info', 'Link Plus is on again. Phones can connect and call.'); }
+      else if (!this.pbx.accepting) { this.pbx.setAccepting(true); this.state = 'running'; this.log('info', 'Riyeser Link is on again. Phones can connect and call.'); }
     } else if (this.pbx) {
       if (this.pbx.accepting) {
-        this.log('warn', 'Link Plus isn\'t active any more. Calls in progress can finish; new calls and phones are refused.');
+        this.log('warn', 'Riyeser Link isn\'t active any more. Calls in progress can finish; new calls and phones are refused.');
         this.state = 'stopping';
         this.pbx.setAccepting(false);   // 'idle' (below) stops the phone system once the last call ends
       }
@@ -143,7 +143,7 @@ class PhoneService extends EventEmitter {
     this.pbx = null; this.prov = null;
     if (pbx) await pbx.stop().catch(() => {});
     if (prov) await prov.stop().catch(() => {});
-    if (why === 'licence') { this.state = 'waiting-licence'; this.log('info', 'Riyeser Link Office is paused until Link Plus is on. People, phones and call history are kept.'); }
+    if (why === 'licence') { this.state = 'waiting-licence'; this.log('info', 'Riyeser Link Office is paused until Riyeser Link is on. People, phones and call history are kept.'); }
     this.emit('change');
   }
   async stop() { clearInterval(this.timer); await this.stopPbx(); }
@@ -199,7 +199,7 @@ class PhoneService extends EventEmitter {
       const regs = regsBy.get(p.ext) || [];
       const kinds = [...new Set(regs.map((r) => r.device))];
       const assigned = phones.filter((x) => x.ext === p.ext);
-      const state = waiting ? 'waiting for Link Plus' : busy.get(p.ext) || (regs.length ? 'ready' : 'not connected');
+      const state = waiting ? 'waiting for Riyeser Link' : busy.get(p.ext) || (regs.length ? 'ready' : 'not connected');
       return { id: p.id, name: p.name, ext: p.ext, source: p.source, dnd: this.directory.dnd(p.ext), device: kinds.length ? kinds.join(' + ') : assigned.length ? 'desk phone' : '',
         connected: regs.length > 0, state, ips: regs.map((r) => r.ip) };
     });
@@ -212,7 +212,7 @@ class PhoneService extends EventEmitter {
       people, groups: this.directory.groups().map((g) => ({ ...g, names: g.members.map((m) => this.directory.nameOf(m)) })),
       phones: phones.map((x) => ({ ...x, macText: prettyMac(x.mac), vendorName: VENDORS[x.vendor] || 'Desk phone', name: this.directory.nameOf(x.ext), registered: !!(x.ip && regIps.has(x.ip)),
         lastRegistered: (x.ip && regIps.has(x.ip)) ? new Date().toISOString() : (((this.store.get('phone-cloud', {}) || {}).lastReg || {})[x.mac] || null),
-        state: waiting ? 'waiting for Link Plus' : (x.ip && regIps.has(x.ip)) ? 'connected' : x.lastFetch ? 'set up, not connected now' : 'waiting for the phone to ask for its settings' })),
+        state: waiting ? 'waiting for Riyeser Link' : (x.ip && regIps.has(x.ip)) ? 'connected' : x.lastFetch ? 'set up, not connected now' : 'waiting for the phone to ask for its settings' })),
       found, inProgress: snap.calls, recent: this.calls.list({ limit: 100 }),
       counts: { connected: new Set(snap.registrations.map((r) => r.ext)).size, onCalls: snap.calls.filter((c) => c.state === 'talking').length, phones: snap.registrations.length },
       registrations: snap.registrations.map((r) => ({ ext: r.ext, ip: r.ip, device: r.device, since: r.since })), addressStable: this.addressStable(),

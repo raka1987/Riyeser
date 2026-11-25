@@ -2,7 +2,7 @@
 //   DESK_APP=central -> Riyeser Central (the Riyeser Group home screen)
 //   DESK_APP=pdf     -> Riyeser PDF
 //   DESK_APP=services -> As Built, formerly Riyeser Services (the riyeser.com/app/ app in its own window)
-//   DESK_APP=team    -> Riyeser Link, formerly Riyeser Team (chat, and Link Plus calls: riyeser.com/link in its own window)
+//   DESK_APP=team    -> Riyeser Link, formerly Riyeser Team (chat and calls: riyeser.com/link in its own window)
 //   DESK_APP=linkoffice -> Riyeser Link Office (the office phone system for desk phones)
 //   (default)        -> Riyeser Desk Assistant
 const base = require('../package.json').build;

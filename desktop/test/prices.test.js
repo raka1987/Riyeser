@@ -27,7 +27,7 @@ test('F3: Central\'s licence window, cards and messages carry no prices of their
   assert.ok(s.includes(`each extra user is US$${prices.PRICE.extra_user}`));
   assert.ok(s.includes(`Extra companies in Accounting: US$${prices.PRICE.extra_company}`));
   assert.strictEqual(licence.MODULE_PRICES.plus, `US$${prices.PRICE.plus}/month`);
-  assert.match(LUI.plusText(prices.forWindow()), new RegExp(`for US\\$${prices.PRICE.calls}/month`));
+  assert.match(LUI.linkText(prices.forWindow()), new RegExp(`US\\$${prices.PRICE.calls}/month`));
   const a = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-'));
   assert.deepStrictEqual(licence.status(a).prices, prices.forWindow());   // sent to the window with the licence status
 });
@@ -61,7 +61,8 @@ test('S12: program cards say where each paid program really stands', () => {
   assert.ok(ended.alert); assert.match(ended.text, /sign in to unlock your plan/);
   assert.doesNotMatch(ended.text, /Included in your licence/);
   // free programs have no plan line
-  for (const id of ['invoices', 'desk', 'pdf', 'team', 'central']) assert.strictEqual(LUI.programStatus(id, plan), null);
+  for (const id of ['invoices', 'desk', 'pdf', 'central']) assert.strictEqual(LUI.programStatus(id, plan), null);
+  assert.strictEqual(LUI.programStatus('team', plan).module, 'calls');   // Riyeser Link is a paid program (pricing v2)
   // nothing says "Included in your licence" (it sat under "Licence needed")
   assert.doesNotMatch(src('central-main.js'), /Included in your licence/);
 });

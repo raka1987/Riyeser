@@ -34,12 +34,12 @@ test('licence: the plan in plain words, program by program', () => {
   const p = licence.onlinePlan(dir, NOW);
   assert.deepEqual(p.rows.map((r) => r.line), [
     'Accounting Basics: paid until 30 Jun 2027',
+    'Bookings: free trial, 7 days left',
+    'Riyeser Link: cancelled — contact Riyeser',
     'Payroll: trial ended — contact Riyeser',
     'POS: free trial, 40 days left',
-    'Bookings: free trial, 7 days left',
-    'Riyeser Link Plus: cancelled — contact Riyeser',
-  ]);
-  assert.deepEqual(p.rows.map((r) => r.tone), ['ok', 'bad', 'trial', 'warn', 'bad']);
+  ]);   // the paid programs A to Z, as everywhere (pricing v2)
+  assert.deepEqual(p.rows.map((r) => r.tone), ['ok', 'warn', 'bad', 'bad', 'trial']);
   assert.equal(p.checkedAgo, '2 h ago'); assert.equal(p.stale, false); assert.equal(p.message, null);
   assert.equal(p.extraUsers, 2); assert.equal(p.usersUsed, 4); assert.equal(p.extraCompanies, 1); assert.equal(p.billing, 'yearly'); assert.equal(p.earlyBird, true);
   const st = licence.status(dir, NOW); assert.ok(st.online); assert.equal(st.online.companyCode, 'RIY-7K3M-Q2');

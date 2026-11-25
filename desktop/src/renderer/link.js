@@ -138,7 +138,7 @@ function renderGroups() {
 }
 // The desk phones list: name, extension, location, status (Online, Configuring, Offline, Waiting for phone), last check-in
 function renderPhones() {
-  const status = (x) => { if (/waiting for Link Plus/.test(x.state)) return pill(x.state); const [t, c] = T.phoneStatus(x); return `<span class="pill ${c}">${esc(t)}</span>`; };
+  const status = (x) => { if (/waiting for Riyeser Link/.test(x.state)) return pill(x.state); const [t, c] = T.phoneStatus(x); return `<span class="pill ${c}">${esc(t)}</span>`; };
   $('#phones').innerHTML = S.phones.length ? `<div class="tw"><table><tr><th>Phone</th><th>Extension</th><th class="hide-sm">Location</th><th>Status</th><th class="hide-sm">Last check-in</th><th></th></tr>${S.phones.map((x) => `<tr>
     <td><b>${esc(x.label || `${x.vendorName} ${x.model || ''}`.trim())}</b><div class="muted">${x.label ? `${esc(x.vendorName)} ${esc(x.model || '')} · ` : ''}${esc(x.macText)}${x.ip ? ` · ${esc(x.ip)}` : ''}</div></td>
     <td>${who(x.ext, x.name)}</td><td class="hide-sm">${esc(x.location || '—')}</td><td>${status(x)}</td><td class="hide-sm">${x.lastSeen ? esc(when(x.lastSeen)) : '<span class="muted">Not yet</span>'}</td>
