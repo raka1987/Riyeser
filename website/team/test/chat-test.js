@@ -3,6 +3,7 @@
 //       database error); the database's own refusal reads plainly
 //   M9  "(edited)" on edited messages; your own extension says so; no channel call buttons until group calls; initials
 //       without punctuation; "Seen" in direct messages
+//   M27 a shared .exe (or other program) says "This is a program…" and asks before downloading; clicking a file's name opens it
 //   M20 on a 390 px phone: the Riyeser ID on one line; Sign out, Copy and the home's buttons at least 44 px tall
 //   S49 on a phone, Back from a conversation shows the chat list, and Back again the Riyeser home (against a pretend Supabase)
 // Run: build the site, serve website/public on 8090 (or LINK_BASE), then `node website/team/test/chat-test.js`. Exits 1 on failure.
@@ -48,6 +49,21 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     const qd = await pg.$('#qdn'); if (!qd) { await pg.click('[data-nav=calls]'); await pg.waitForSelector('#qdn'); }
     await pg.fill('#qdn', '101'); await pg.dispatchEvent('#qdn', 'input'); check(await pg.textContent('#qdw') === 'That\'s your own extension', 'M9 dialling your own extension says so');
     await pg.fill('#qdn', '999'); await pg.dispatchEvent('#qdn', 'input'); check(await pg.textContent('#qdw') === 'No one on that number', 'M9 an unused number still says "No one on that number"');
+    await pg.close(); }
+
+  // ---- M27: files
+  { const pg = await open(1280);
+    await pg.click('[data-ch="c-jobs"]'); await pg.waitForSelector('.fcard');
+    const got = Promise.race([pg.waitForEvent('download', { timeout: 5000 }).then(() => 'download'), pg.waitForEvent('popup', { timeout: 5000 }).then(() => 'popup')]).catch(() => 'nothing');
+    await pg.click('.fcard button.fnm'); check(await got !== 'nothing', `M27 clicking a file's name opens it (${await got})`);
+    await pg.setInputFiles('#file', { name: 'Invoice_viewer.exe', mimeType: 'application/octet-stream', buffer: Buffer.from('MZ not really a program') });
+    await pg.waitForFunction(() => /Invoice_viewer\.exe/.test(document.getElementById('msgs').textContent), null, { timeout: 8000 });
+    const last = await pg.$$eval('#msgs .msg', (x) => x[x.length - 1].textContent);
+    check(/This is a program\. Only open it if you trust the sender\./.test(last), 'M27 an .exe says "This is a program. Only open it if you trust the sender."');
+    await pg.click('#msgs .msg:last-child .fcard button.fnm'); await pg.waitForSelector('#askyes');
+    check(/is a program/.test(await pg.textContent('.mcard')) && /Download anyway/.test(await pg.textContent('#askyes')), 'M27 opening it asks first ("Download anyway")');
+    await pg.click('#askno'); check(!(await pg.$('#askyes')), 'M27 Cancel downloads nothing');
+    const pdf = await pg.$$eval('.fcard .frisk', (x) => x.length); check(pdf === 1, 'M27 an ordinary PDF has no warning');
     await pg.close(); }
 
   // ---- M20: phone sizes on the Riyeser home

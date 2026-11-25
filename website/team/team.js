@@ -2022,8 +2022,10 @@
   function filesHtml(m) {
     if (!m.files || !m.files.length || m.deleted) return '';
     return `<div class="fcards">${m.files.map((f, i) => `<div class="fcard"><span class="fic">${ic('file')}<small>${esc(((f.name.split('.').pop() || '').slice(0, 4)).toUpperCase())}</small></span>
-      <span class="fnm"><b>${esc(f.name)}</b><small>${esc(sizeText(Number(f.size) || 0))}</small></span><button class="lk-ib" data-file="${i}" aria-label="Download ${esc(f.name)}" title="Download">${ic('dl')}</button></div>`).join('')}</div>`;
+      <button type="button" class="fnm" data-file="${i}" title="Open ${esc(f.name)}"><b>${esc(f.name)}</b><small>${esc(sizeText(Number(f.size) || 0))}</small>${isProgram(f.name) ? '<small class="frisk">⚠ This is a program. Only open it if you trust the sender.</small>' : ''}</button><button class="lk-ib" data-file="${i}" aria-label="Download ${esc(f.name)}" title="Download">${ic('dl')}</button></div>`).join('')}</div>`;
   }
+  // M27: programs and scripts that run when opened
+  const isProgram = (name) => /\.(exe|msi|msix|appx|bat|cmd|com|scr|pif|ps1|vbs|vbe|js|jse|wsf|hta|jar|lnk|reg|cpl|apk|dmg|pkg|sh)$/i.test(String(name || ''));
   function msgsHtml() {
     if (!S.ch) return `<div class="empty"><b>No channels yet</b>Add one with + next to Channels.</div>`;
     if (!S.msgs.length) return `<div class="empty"><b>${S.ch.kind === 'dm' ? 'Say hello 👋' : `Welcome to #${esc(S.ch.name)}`}</b>${esc(S.ch.topic || 'Nothing here yet. Write the first message below.')}</div>`;
@@ -2724,6 +2726,7 @@
   }
   async function download(f) {
     if (!f) return;
+    if (isProgram(f.name) && !(await ask(`${f.name} is a program. Only open it if you trust the sender and were expecting it.`, { yes: 'Download anyway', title: '⚠ This is a program' }))) return;
     try { const url = await api.fileUrl(f.path, f.name); const a = document.createElement('a'); a.href = url; a.download = f.name; a.rel = 'noopener'; a.target = '_blank'; document.body.appendChild(a); a.click(); a.remove(); }
     catch (err) { tell('That file couldn\'t be opened: ' + plainError(err)); }
   }
