@@ -99,6 +99,17 @@ const FREE = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
 
   const ph = await b.newPage({ viewport: { width: 390, height: 844 } }); await ph.goto(`${BASE}/pricing.html`);
   check((await ph.evaluate(() => document.documentElement.scrollWidth)) <= 390, 'phone: no sideways scrolling on Pricing');
+  // S2: under about 3,000 px tall on a phone (it was 11,500): a card per program, swiped sideways; the calculator,
+  // the Basics/Plus comparison, "Good to know" and the questions fold (one tap opens them; a link to #calc opens it)
+  const tall = await ph.evaluate(() => document.documentElement.scrollHeight);
+  check(tall < 3300, `S2 phone: Pricing is ${tall} px tall at 390 px (was about 11,500)`);
+  check(await ph.evaluate(() => [...document.querySelectorAll('.ptable tbody.gcards')].every((t) => t.scrollWidth > t.clientWidth + 100 && getComputedStyle(t).overflowX === 'auto')), 'S2 phone: the price cards swipe sideways');
+  check(await ph.isVisible('tr[data-row=plus] .buybtns a:has-text("Buy now")') || !!(await ph.$('tr[data-row=plus] .buybtns a')), 'S2 phone: every card keeps its buttons');
+  check(await ph.isHidden('#calc .calc') && await ph.isHidden('#accounting .plans, #accounting .eds') , 'S2 phone: the calculator and the comparison start folded');
+  await ph.click('#calc summary'); check(await ph.isVisible('#calc .calc') && await ph.isVisible('#users'), 'S2 phone: one tap opens the calculator');
+  await ph.click('section.faq details.phfold > summary'); check(await ph.isVisible('section.faq details details summary'), 'S2 phone: one tap shows the questions');
+  await ph.goto(`${BASE}/pricing.html#calc`); check(await ph.isVisible('#users'), 'S2 phone: a link to #calc opens the calculator');
+  await pg.goto(`${BASE}/pricing.html`); check(await pg.isVisible('#calc .calc') && await pg.isHidden('#calc summary'), 'S2 desktop: unchanged (calculator open, no fold)');
   if (SHOTS) await ph.screenshot({ path: path.join(SHOTS, 'pricing-phone.png'), fullPage: true });
   check(!errs.length, `no page errors ${errs.join(' | ')}`);
   await b.close();

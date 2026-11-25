@@ -778,16 +778,22 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Each paid program has its own 
   <h2 class="h2" style="margin-top:8px">Price list</h2>
   <div class="ptable-wrap"><table class="ptable">
     <thead><tr><th>Program</th><th>Price per business</th></tr></thead>
-    <tbody>
-      <tr class="grp"><th colspan="2">${esc(FREE_HEAD)}</th></tr>
+    <tbody class="gh">
+      <tr class="grp"><th colspan="2">${esc(FREE_HEAD)} <span class="swipe" aria-hidden="true">Swipe for more →</span></th></tr></tbody>
+    <tbody class="gcards">
       ${FREE.map(([id, n]) => `<tr data-free="${id}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b>${id === 'link' ? ` ${plusPill(prog('link'), up, true)}` : ''}${freeInfo(id, up)}${inclDetails(id, n)}</span></span></td><td class="pr"><b>Free forever</b><small>No user charges</small></td></tr>`).join('')}
-      <tr class="grp"><th colspan="2">${esc(PAID_HEAD)} <span class="gnote">${esc(USERS_NOTE)}</span></th></tr>
+    </tbody><tbody class="gh">
+      <tr class="grp"><th colspan="2">${esc(PAID_HEAD)} <span class="gnote">${esc(USERS_NOTE)}</span> <span class="swipe" aria-hidden="true">Swipe for more →</span></th></tr></tbody>
+    <tbody class="gcards">
       ${ROWS.map(([m, n, id, d]) => `<tr${m === 'calls' ? ' id="link-plus"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(m === 'calls' ? 'link-plus' : id, n)}</span></span></td><td class="pr"><b>${usd(P[m])}</b> a month<small>${P.users_included} users included<br>+${usd(P.extra_user)} a month per extra user</small>${buyBtns(m, 'row')}</td></tr>`).join('')}
     </tbody></table></div>
+  <details class="phfold addfold" open><summary>Good to know: extra people, companies and paying yearly</summary>
   <div class="addon"><div class="big">➕</div><div><b>Good to know</b><p>Each paid program includes ${P.users_included} users. Each extra person is <b>$${P.extra_user} a month for each paid program</b> they use. Another company, trust or client's books in Accounting: <b>$${P.extra_company} a month</b> each. Pay yearly: pay for 10 months and get 12. Riyeser Link chat: space for files shared in chat, ${STORAGE_GB.free} GB of file storage per business free; ${STORAGE_GB.plus} GB with Link Plus. Every paid program is free for 90 days, no card.</p></div></div>
+  </details>
 </section>
 
 <section class="c" id="calc">
+  <details class="phfold" open><summary>Work out your price (calculator)</summary>
   <div class="calc">
     <div><h2>Work out your price</h2><p class="muted">Tick the programs and enter how many people will use them.</p>
       <div class="mods">${ROWS.map(([m, n]) => `<label class="check"><input type="checkbox" data-m="${m}"${m === 'basic' ? ' checked' : ''}> ${n} <small class="muted">$${P[m]}</small></label>`).join('')}</div>
@@ -801,11 +807,14 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Each paid program has its own 
       <div class="buybtns calcbtns" id="calcbuy"><a class="btn s" id="calcfree" href="${BUY_LINK('basic', false)}">Start free for 90 days</a><a class="btn p" id="calcpay" href="${BUY_LINK('basic', true)}">Buy this plan</a></div>
       <p class="muted small" style="margin:10px 0 0">All prices in US dollars. Pay by PayPal (card or PayPal balance) or bank transfer.</p></div>
   </div>
+  </details>
 </section>
 
 <section class="c" id="accounting">
   <h2 class="h2">Accounting Basics or Accounting Plus?</h2>
+  <details class="phfold" open><summary>Compare Basics and Plus</summary>
   ${editionsBlock(up)}
+  </details>
 </section>
 
 ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
@@ -817,6 +826,7 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
 
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
+  <details class="phfold" open><summary>Show the questions ▾</summary>
   <details open><summary>Is it per person?</summary><p>No — per business. Each paid program is one price for the whole business, with ${P.users_included} users included. After that, each extra person is $${P.extra_user} a month for each paid program. For example, 5 people using Accounting Plus and Payroll is ($${P.plus} + 2 × $${P.extra_user}) + ($${P.payroll} + 2 × $${P.extra_user}) = <b>${usd(P.plus + P.payroll + 4 * P.extra_user)} a month</b>. The free programs have no user charges.</p></details>
   <details><summary>Why US dollars?</summary><p>Riyeser is used by businesses in more than one country, so one price in one currency keeps it simple and fair for everyone. Your bank or card changes it into your own currency when you pay. Any GST or local tax is shown before you pay.</p></details>
   <details><summary>Basics or Plus?</summary><p>Start with Accounting Basics (${usd(P.basic)} a month) if you need invoices, stock and simple money in and out. Choose Accounting Plus (${usd(P.plus)} a month) for bank reconciliation, payroll in your books, BAS, journals, jobs and budgets. Plus includes everything in Basics, so you only ever pay for one: moving up is $${P.plus - P.basic} a month more, and your books carry straight over.</p></details>
@@ -831,7 +841,10 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
   ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months, on each program and its extra users (not on extra companies) — for example ${half(P.basic)} instead of $${P.basic} a month for Accounting Basics. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
   <details><summary>How do I buy?</summary><p>Press <b>Buy now</b> next to a program (or <b>Buy this plan</b> in the price calculator). Create your free Riyeser account, or sign in, and choose how many people and monthly or yearly. Then pay with <b>PayPal</b> (a card or your PayPal balance; it renews by itself until you cancel) or by <b>bank transfer</b> (we give you an invoice with the bank details and a reference; the program switches on when the money arrives). Your free days aren't lost: paid time starts when your 90-day trial ends. Questions? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Buying Riyeser')}">${EMAIL}</a>.</p></details>
+  </details>
 </section>
+<script>/* S2: on a phone the long parts start folded (a link to one of them opens it) */
+if(matchMedia('(max-width: 640px)').matches)document.querySelectorAll('details.phfold').forEach(function(d){var keep=false;try{keep=!!location.hash&&(!!d.querySelector(location.hash)||d.parentNode.matches(location.hash))}catch(e){}if(!keep)d.open=false});</script>
 ${ctaBlock(up, 'Start free today', 'Install Riyeser Central — the free tools are yours to keep, and every paid program is free to start.')}
 <script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},P=${JSON.stringify(P)},u=document.getElementById('users'),c=document.getElementById('cos'),y=document.getElementById('yearly');
 var NAMES=${JSON.stringify(Object.fromEntries(ROWS.map(([m, n]) => [m, n])))};
