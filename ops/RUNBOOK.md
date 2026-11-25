@@ -403,7 +403,8 @@ The job never prints email addresses or message text in its logs. After 3 failed
 
 ## HQ jobs (`.github/workflows/hq-jobs.yml`)
 
-Every hour it runs the support sweep. Once a day it also runs the inactive-accounts sweep. Then it sends queued
+Every hour it runs the support sweep. Once a day it also runs the inactive-accounts sweep and the website traffic sweep
+(adds yesterday's daily totals for HQ → Reports → Website traffic, deletes page views older than 13 months). Then it sends queued
 emails if email is set up. It uses the `TEAM_DB_URL` secret, the same one as the backups. If the database hasn't had
 the latest `team-chat.sql` yet, it says so and stops without failing. When it fails, open the red step. A connection
 error usually means `TEAM_DB_URL` changed. Run it again by hand with **Run workflow**.
