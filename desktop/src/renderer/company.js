@@ -78,8 +78,21 @@ function showAccount(next) {
     run(async () => {
       const r = await bridge.call('company:signIn', f.email, f.password, make);
       if (r && r.needsConfirm) { CO.create = false; CO.note = `Nearly there: open the link we emailed to ${f.email}, then sign in here.`; return showAccount(next); }
+      if (r && r.needsCode) return showCode(next);   // S11: two-step sign-in is on for this account
       await coLoad(); return next === 'join' ? showJoinForm() : findBusiness();
     }); };
+}
+
+// S11: the second step of signing in, for accounts with two-step sign-in (an authenticator app) turned on.
+function showCode(next) {
+  CO.screen = 'code';
+  wiz(`<h1>Two-step sign-in</h1><p class="wsub">Open your authenticator app and type the 6-digit code for Riyeser.</p>
+    <form id="wf-code" autocomplete="off">${field('code', 'Code', '', 'inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" required autocomplete="one-time-code"')}
+      <div class="werr" id="wf-msg" hidden></div>
+      <div class="wrow"><button type="button" class="btn s" data-w="signin-form">Back</button><button class="btn">Verify</button></div></form>`);
+  const form = $('#wf-code'); form.code.focus();
+  form.onsubmit = (e) => { e.preventDefault(); const f = formData(e.target);
+    run(async () => { await bridge.call('company:verifyCode', f.code); await coLoad(); return next === 'join' ? showJoinForm() : findBusiness(); }); };
 }
 
 // "Forgot password?": Riyeser emails a reset link. The same words whether or not there's an account for that email.

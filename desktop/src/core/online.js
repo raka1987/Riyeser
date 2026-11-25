@@ -55,6 +55,12 @@ function plain(status, body) {
   return status ? `Riyeser Online answered with an error (${status}). Please try again.` : 'Can\'t reach Riyeser. Check your internet and try again.';
 }
 
+/** The account's verified authenticator-app factor (two-step sign-in), or null. */
+function mfaFactor(user) {
+  const list = (user && Array.isArray(user.factors)) ? user.factors : [];
+  return list.find((f) => f && f.status === 'verified' && (f.factor_type === 'totp' || !f.factor_type) && f.id) || null;
+}
+
 const firstName = (name, email) => String(name || '').trim().split(/\s+/)[0] || String(email || '').split('@')[0] || '';
 /** riyeser_signup from the account (riyeser.com's sign-up form) as the fields of the "A few details" form. */
 function signupDetails(user) {
@@ -137,7 +143,40 @@ class Online {
       this.setSession(r); return { email };
     }
     const r = await this.call('/auth/v1/token?grant_type=password', { method: 'POST', auth: false, body: { email, password } });
+    // S11: an account with two-step sign-in turned on (a verified authenticator app) isn't signed in until its code
+    // is checked. The password-only session (AAL1) is held in memory only, never saved, until verifyCode().
+    const factor = mfaFactor(r && r.user);
+    if (factor) {
+      this.pendingMfa = { session: r, factorId: factor.id, email, at: Date.now() };
+      this.setSession(null);
+      return { email, needsCode: true };
+    }
+    this.pendingMfa = null;
     this.setSession(r); return { email };
+  }
+  /**
+   * The second step: the 6-digit code from the authenticator app (Supabase mfa.challenge then mfa.verify, by REST).
+   * The session that comes back is AAL2, and only that one is saved.
+   */
+  async verifyCode(code) {
+    const p = this.pendingMfa;
+    if (!p || Date.now() - p.at > 10 * 60 * 1000) { this.pendingMfa = null; throw new Error('Sign in again: the two-step sign-in timed out.'); }
+    code = String(code || '').replace(/\s+/g, '');
+    if (!/^\d{6}$/.test(code)) throw new Error('Type the 6-digit code from your authenticator app.');
+    const headers = { Authorization: `Bearer ${p.session.access_token}` };
+    const id = encodeURIComponent(p.factorId);
+    const ch = await this.call(`/auth/v1/factors/${id}/challenge`, { method: 'POST', auth: false, headers, body: {} });
+    let r;
+    try {
+      r = await this.call(`/auth/v1/factors/${id}/verify`, { method: 'POST', auth: false, headers, body: { challenge_id: ch && ch.id, code } });
+    } catch (e) {
+      if (e.status === 400 || e.status === 422 || /invalid|code/i.test(e.message)) throw new Error('That code isn\'t right. Type the newest code from your authenticator app.');
+      throw e;
+    }
+    if (!r || !r.access_token) throw new Error('That code isn\'t right. Type the newest code from your authenticator app.');
+    this.pendingMfa = null;
+    this.setSession({ ...r, user: r.user || p.session.user });
+    return { email: p.email };
   }
   /** Just the session (Riyeser Link Office uses this too). Central's "Sign out" is signOutOfPC below. */
   signOut() { this.setSession(null); }
@@ -363,4 +402,4 @@ class Online {
   }
 }
 
-module.exports = { Online, signupDetails, detailsToProfile, firstName, parseConfig, usable, companyFile, readCompany, writeCompany, CONFIG_URL, PROFILE_KEYS, RECOVER_REDIRECT };
+module.exports = { Online, mfaFactor, signupDetails, detailsToProfile, firstName, parseConfig, usable, companyFile, readCompany, writeCompany, CONFIG_URL, PROFILE_KEYS, RECOVER_REDIRECT };

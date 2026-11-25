@@ -352,6 +352,7 @@ function registerIpc() {
   setInterval(() => refreshOnlineLicence(false), 6 * 3600 * 1000);
   handle('company:get', () => companyState());
   handle('company:signIn', (email, password, create) => on.signIn(String(email || '').trim(), String(password || ''), !!create));
+  handle('company:verifyCode', (code) => on.verifyCode(code));   // S11: two-step sign-in
   handle('company:recover', (email) => on.recover(email));
   // "Sign out" on the Company page: company.json and licence.json's online part are put away (renamed, never deleted)
   handle('company:signOut', () => {

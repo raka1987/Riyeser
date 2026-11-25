@@ -138,7 +138,11 @@ function registerIpc() {
   handle('link:dnd', (ext, on) => service.setDnd(ext, on));
   handle('link:copy', (text) => { clipboard.writeText(String(text || '')); return true; });
   handle('link:sync', () => service.sync());
-  handle('link:signIn', async (email, password) => { await service.online.signIn(String(email || '').trim(), String(password || '')); const r = await service.sync(); if (cloud) cloud.report('signed in').catch(() => null); return r; });
+  handle('link:signIn', async (email, password) => {
+    const si = await service.online.signIn(String(email || '').trim(), String(password || ''));
+    // S11: two-step sign-in needs its code; Riyeser Central asks for it, and this PC's plan follows from there
+    if (si && si.needsCode) throw new Error('This account uses two-step sign-in. Sign in in Riyeser Central (Company page), which asks for your code, then open Riyeser Link Office again.');
+    const r = await service.sync(); if (cloud) cloud.report('signed in').catch(() => null); return r; });
   handle('link:signOut', () => { service.online.signOut(); return true; });
   handle('link:openTeam', () => shell.openExternal(TEAM_URL).then(() => true));
   handle('link:openPhonesPage', () => shell.openExternal(`${TEAM_URL}?phones`).then(() => true));
