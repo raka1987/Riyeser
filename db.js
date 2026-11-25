@@ -159,6 +159,8 @@ const DEFAULT_SETTINGS = {
     { from: 270000, to: null, rate: 33 },
   ]),
 };
+// F11: an extra pay run (bonus) on top of dates already paid carries its reason; '' = a normal pay run
+try { db.exec("ALTER TABLE payroll_runs ADD COLUMN extra_reason TEXT DEFAULT ''"); } catch { /* already there */ }
 const getSettingStmt = db.prepare('SELECT value FROM settings WHERE key = ?');
 const setSettingStmt = db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) if (!getSettingStmt.get(k)) setSettingStmt.run(k, v);

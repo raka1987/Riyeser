@@ -573,7 +573,8 @@ function payForRange(from, to) {
 }
 app.locals.computePayroll = (from, to) => payForRange(from, to);
 app.locals.payPeriodOf = d => payPeriodOf(d); // timesheet emails / print show pay to those allowed
-function computePayroll(start, end, adjustments = {}, fraction = 1) { // fraction: share of a pay period (part periods)
+function computePayroll(start, end, adjustments = {}, fraction = 1, extra = false) { // fraction: share of a pay period (part periods)
+  // extra (F11): an extra pay run (bonus) on dates already paid: only the allowances / deductions entered for it, no wages, leave or regular deductions again
   if (!isDate(start) || !isDate(end) || end < start) bad('Choose a valid pay period.');
   const s = getSettings();
   const periods = +s.pay_periods_per_year || 26, eeRate = +s.fnpf_employee_rate || 0, erRate = +s.fnpf_employer_rate || 0;
@@ -590,14 +591,14 @@ function computePayroll(start, end, adjustments = {}, fraction = 1) { // fractio
     if (adjusted && !(+adj.hours >= 0 && +adj.hours <= 400)) bad(`Check the hours for ${e.name}.`);
     if (adjusted && str(adj.hours_note, 200).trim().length < 3) bad(`Add a reason for changing ${e.name}'s hours.`);
     const hours = adjusted ? round2(+adj.hours) : fromSheets;
-    const base = round2(e.pay_type === 'salary' ? e.pay_rate / periods * fraction : hours * e.pay_rate);
+    const base = extra ? 0 : round2(e.pay_type === 'salary' ? e.pay_rate / periods * fraction : hours * e.pay_rate);
     // paid leave in these dates (annual, sick, other paid): hourly staff are paid leave days × hours a day; salary carries on as normal
-    const leaveRows = db.prepare('SELECT kind, days FROM staff_leave WHERE user_id = ? AND paid = 1 AND date_from BETWEEN ? AND ?').all(e.id, start, end);
+    const leaveRows = extra ? [] : db.prepare('SELECT kind, days FROM staff_leave WHERE user_id = ? AND paid = 1 AND date_from BETWEEN ? AND ?').all(e.id, start, end);
     const leave_lines = Object.values(leaveRows.reduce((a, l) => { const k = l.kind; (a[k] = a[k] || { kind: k, days: 0, hours: 0, amount: 0 }).days = round2(a[k].days + l.days); return a; }, {}))
       .map(l => ({ ...l, hours: round2(l.days * (+s.leave_day_hours || 8)), amount: e.pay_type === 'salary' ? 0 : round2(l.days * (+s.leave_day_hours || 8) * e.pay_rate) }));
     const leave_hours = round2(leave_lines.reduce((a, l) => a + l.hours, 0)), leave_pay = round2(leave_lines.reduce((a, l) => a + l.amount, 0));
     // regular deductions set on the staff member (loan, union …) + anything added for this pay run
-    const lines = deductionsOf(e).map(d => ({ ...d, amount: round2(d.amount * fraction) })).filter(d => d.amount > 0);
+    const lines = (extra ? [] : deductionsOf(e)).map(d => ({ ...d, amount: round2(d.amount * fraction) })).filter(d => d.amount > 0);
     if (round2(adj.other_deductions)) lines.push({ name: str(adj.deduction_note, 60) || 'Other (this pay)', amount: round2(adj.other_deductions) });
     const allowances = round2(adj.allowances), other = round2(lines.reduce((a, d) => a + d.amount, 0));
     const gross = round2(base + allowances + leave_pay);
@@ -689,23 +690,45 @@ const adminOnlyHours = (req, adjustments = {}) => {
   for (const a of Object.values(adjustments || {})) if (a && a.hours !== undefined && a.hours !== '') throw new HttpError(403, 'Changing hours in a pay run needs full Pay runs access.');
   return adjustments;
 };
-app.post('/api/staff/payroll/preview', requireArea('payroll', 2), requireLicence, wrap((req, res) =>
-  res.json({ lines: computePayroll(req.body.period_start, req.body.period_end, adminOnlyHours(req, req.body.adjustments)), settings: getSettings() })));
+// F11: the same dates can't be paid twice. An existing pay run (a normal one, not an extra run) whose dates overlap these, for anyone
+// in this run, blocks it until that run is voided (Delete run). A deliberate extra run (bonus) is a separate, labelled option.
+const extraRun = b => b.extra_run === true || b.extra_run === 1 || b.extra_run === '1' || b.extra_run === 'true';
+function alreadyPaid(start, end, userIds) {
+  if (!userIds.length) return null;
+  const r = db.prepare(`SELECT DISTINCT r.id, r.pay_date FROM payroll_runs r JOIN payslips p ON p.run_id = r.id
+    WHERE COALESCE(r.extra_reason, '') = '' AND r.period_start <= ? AND r.period_end >= ? AND p.user_id IN (${userIds.map(() => '?').join(',')}) ORDER BY r.id LIMIT 1`).get(end, start, ...userIds);
+  return r ? { run_id: r.id, pay_date: r.pay_date, message: `These dates were already paid on ${r.pay_date} (pay run #${r.id}). Void that run first.` } : null;
+}
+function extraReason(b) {
+  if (!extraRun(b)) return '';
+  const why = str(b.extra_reason, 200).trim();
+  if (why.length < 3) bad('Say what the extra pay run is for (e.g. Christmas bonus).');
+  return why;
+}
+app.post('/api/staff/payroll/preview', requireArea('payroll', 2), requireLicence, wrap((req, res) => {
+  const b = req.body || {}, extra = extraRun(b), lines = computePayroll(b.period_start, b.period_end, adminOnlyHours(req, b.adjustments), 1, extra);
+  res.json({ lines, settings: getSettings(), extra_run: extra, already_paid: extra ? null : alreadyPaid(b.period_start, b.period_end, lines.map(l => l.user_id)) });
+}));
 app.post('/api/staff/payroll/runs', requireArea('payroll', 2), requireLicence, wrap((req, res) => {
   const { period_start, period_end, pay_date } = req.body, adjustments = adminOnlyHours(req, req.body.adjustments);
   if (!isDate(pay_date)) bad('Choose a pay date.');
-  const lines = computePayroll(period_start, period_end, adjustments);
+  const extra = extraReason(req.body);
+  const lines = computePayroll(period_start, period_end, adjustments, 1, !!extra);
   if (!lines.length) bad('No paid employees to include. Set pay rates under Staff first.');
+  if (extra && !lines.some(l => l.gross > 0)) bad('Enter the extra pay (allowances) for at least one person.');
   const sum = k => round2(lines.reduce((a, l) => a + l[k], 0));
   db.exec('BEGIN');
   try {
-    const runId = db.prepare(`INSERT INTO payroll_runs(period_start, period_end, pay_date, created_by, total_gross, total_net, total_fnpf_employer) VALUES(?,?,?,?,?,?,?)`)
-      .run(period_start, period_end, pay_date, req.user.id, sum('gross'), sum('net'), sum('fnpf_employer')).lastInsertRowid;
+    const clash = extra ? null : alreadyPaid(period_start, period_end, lines.map(l => l.user_id)); // inside the transaction: two finalises at once can't both pass
+    if (clash) throw Object.assign(new HttpError(409, clash.message), { already_paid: clash });
+    const runId = db.prepare(`INSERT INTO payroll_runs(period_start, period_end, pay_date, created_by, total_gross, total_net, total_fnpf_employer, extra_reason) VALUES(?,?,?,?,?,?,?,?)`)
+      .run(period_start, period_end, pay_date, req.user.id, sum('gross'), sum('net'), sum('fnpf_employer'), extra).lastInsertRowid;
     const ins = db.prepare(`INSERT INTO payslips(run_id, user_id, employee_name, position, pay_type, pay_rate, hours, base_pay, allowances, gross, fnpf_employee, fnpf_employer, paye, other_deductions, net, notes, worked_hours, break_hours, deduction_lines, leave_hours, leave_pay, leave_lines)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     for (const l of lines) ins.run(runId, l.user_id, l.employee_name, l.position, l.pay_type, l.pay_rate, l.hours, l.base_pay, l.allowances, l.gross, l.fnpf_employee, l.fnpf_employer, l.paye, l.other_deductions, l.net, l.notes, l.worked_hours, l.break_hours, JSON.stringify(l.deduction_lines), l.leave_hours || 0, l.leave_pay || 0, JSON.stringify(l.leave_lines || []));
     db.exec('COMMIT');
-    res.json({ id: runId });
+    if (extra) audit(req, 'Extra pay run', `Paid ${pay_date} (${period_start} to ${period_end}): ${extra}`);
+    res.json({ id: runId, extra_run: !!extra });
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }));
 app.get('/api/staff/payroll/runs', requireArea('payroll'), (req, res) =>
@@ -742,8 +765,8 @@ function payslipsFor(from, to, userId, drafts = true) {
   const out = [], seen = new Set();
   for (let cs = from; cs <= to; ) {
     const [ps, pe] = payPeriodOf(cs), a = ps > from ? ps : from, b = pe < to ? pe : to;
-    const finals = db.prepare(`SELECT p.*, r.period_start, r.period_end, r.pay_date, u.tin, u.fnpf_no, u.bank_account FROM payslips p JOIN payroll_runs r ON r.id = p.run_id
-      LEFT JOIN users u ON u.id = p.user_id WHERE r.period_start <= ? AND r.period_end >= ? ${userId ? 'AND p.user_id = ?' : ''} ORDER BY r.id DESC`).all(b, a, ...(userId ? [userId] : []));
+    const finals = db.prepare(`SELECT p.*, r.period_start, r.period_end, r.pay_date, r.extra_reason, u.tin, u.fnpf_no, u.bank_account FROM payslips p JOIN payroll_runs r ON r.id = p.run_id
+      LEFT JOIN users u ON u.id = p.user_id WHERE r.period_start <= ? AND r.period_end >= ? ${userId ? 'AND p.user_id = ?' : ''} ORDER BY (COALESCE(r.extra_reason, '') <> '') , r.id DESC`).all(b, a, ...(userId ? [userId] : []));
     const have = new Set();
     for (const p of finals) { if (have.has(p.user_id)) continue; have.add(p.user_id); if (!seen.has('f' + p.id)) { seen.add('f' + p.id); out.push({ ...p, status: 'final', ytd: ytdOf(p.user_id, p.period_end, null, p.run_id) }); } }
     for (const l of drafts ? computePayroll(a, b, {}, Math.min(1, dayCount(a, b) / dayCount(ps, pe))) : []) {
@@ -827,7 +850,7 @@ app.get('/api/staff/export/:what.csv', requireStaff, wrap((req, res) => {
 app.use('/api', (req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, req, res, next) => {
   if (err instanceof LockedError) return res.status(402).json({ error: err.message, locked: true, ...err.locked });
-  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message, ...(err.already_paid && { already_paid: err.already_paid }) });
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON' });
   console.error(err);
   res.status(500).json({ error: 'Something went wrong on the server.' });

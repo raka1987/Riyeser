@@ -615,10 +615,13 @@ async function renderPayroll() {
         <label class="small">to <input type="date" name="period_end" value="${end}" required></label>
         <label class="small">Pay date <input type="date" name="pay_date" value="${today()}" required></label>
         <button class="btn sm">Preview</button>
-      </form><div id="pr-preview"></div></div>
+        <label class="small" title="Only for a deliberate extra payment (e.g. a bonus) on dates already paid"><input type="checkbox" name="extra_run" id="pr-extra"> Extra pay run (bonus) on dates already paid</label>
+        <label class="small" id="pr-extra-why" hidden>What for <input name="extra_reason" maxlength="200" placeholder="e.g. Christmas bonus"></label>
+      </form>
+      <p class="small muted" id="pr-extra-note" hidden style="margin:6px 0 0"><b>Extra pay run:</b> no wages, leave or regular deductions are paid again. Enter the bonus in Allowances for each person (PAYE and FNPF are worked out on it). It's labelled "Extra" in Past pay runs.</p><div id="pr-preview"></div></div>
     <div class="panel" id="pr-export"></div>
     <div class="panel"><h3>Past pay runs <a class="btn sm ghost" href="/api/staff/export/payslips.csv">Export all payslips CSV</a></h3>
-      ${table([{ h: 'Pay date', f: r => fmtDate(r.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) }, { h: 'Period', f: r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}` },
+      ${table([{ h: 'Pay date', f: r => fmtDate(r.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) + (r.extra_reason ? ` <span class="chip" title="${esc(r.extra_reason)}">Extra: ${esc(r.extra_reason)}</span>` : '') }, { h: 'Period', f: r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}` },
         { h: 'Staff', k: 'employees', r: 1 }, { h: 'Gross', f: r => money(r.total_gross, cur()), r: 1 }, { h: 'Net', f: r => money(r.total_net, cur()), r: 1 }, { h: 'Employer FNPF', f: r => money(r.total_fnpf_employer, cur()), r: 1 }, { h: 'By', k: 'created_by_name' }],
         runs, { onRow: 1, empty: 'No pay runs yet.' })}</div>
     <div class="panel" id="pr-rules"></div>`;
@@ -630,9 +633,10 @@ async function renderPayroll() {
   drawPayRules();
   drawExport(runs);
   const adj = {};
+  $('#pr-extra').onchange = () => { const on = $('#pr-extra').checked; $('#pr-extra-why').hidden = $('#pr-extra-note').hidden = !on; $('#pr-preview').innerHTML = ''; };
   const preview = async () => {
     const body = { ...formData($('#pr-form')), adjustments: adj };
-    const { lines } = await api('/api/staff/payroll/preview', { body });
+    const { lines, already_paid: paid } = await api('/api/staff/payroll/preview', { body });
     const ord = (window.__prSort = $('#pr-sort') ? $('#pr-sort').value : (window.__prSort || 'name'));
     lines.sort({ empno: (a, b) => String(a.employee_no || '').localeCompare(String(b.employee_no || ''), undefined, { numeric: true }) || a.employee_name.localeCompare(b.employee_name),
       hours: (a, b) => b.hours - a.hours, net: (a, b) => b.net - a.net }[ord] || ((a, b) => a.employee_name.localeCompare(b.employee_name)));
@@ -643,7 +647,7 @@ async function renderPayroll() {
         <td class="r"><input class="inline" type="number" step="0.01" data-a="${l.user_id}" value="${l.allowances || ''}"></td><td class="r">${money(l.gross, cur())}</td><td class="r">${money(l.fnpf_employee, cur())}</td><td class="r">${money(l.paye, cur())}</td>
         <td class="r">${l.regular_deductions ? `<div class="small muted" title="${esc(l.deduction_lines.map(d => d.name + ' ' + d.amount).join(', '))}">${money(l.regular_deductions, cur())} regular</div>` : ''}<input class="inline" type="number" step="0.01" data-o="${l.user_id}" value="${(adj[l.user_id] && adj[l.user_id].other_deductions) || ''}" placeholder="+ this pay"></td><td class="r"><b>${money(l.net, cur())}</b></td><td class="r">${money(l.fnpf_employer, cur())}</td></tr>`).join('')}
       <tr><td><b>Totals</b></td><td class="r">${sum('hours').toFixed(2)}</td><td></td><td></td><td class="r"><b>${money(sum('gross'), cur())}</b></td><td class="r">${money(sum('fnpf_employee'), cur())}</td><td class="r">${money(sum('paye'), cur())}</td><td></td><td class="r"><b>${money(sum('net'), cur())}</b></td><td class="r">${money(sum('fnpf_employer'), cur())}</td></tr>
-      </tbody></table></div><div class="actions"><button class="btn coral" id="pr-final">Finalise pay run</button><span class="small muted" style="align-self:center">Edit allowances/deductions and the totals recalculate.</span></div>`
+      </tbody></table></div>${paid ? `<div class="note" style="margin-top:10px"><b>${esc(paid.message)}</b> To pay a bonus on these dates instead, tick <b>Extra pay run (bonus)</b> above.</div>` : ''}<div class="actions">${paid ? '' : `<button class="btn coral" id="pr-final">${body.extra_run ? 'Finalise extra pay run' : 'Finalise pay run'}</button>`}<span class="small muted" style="align-self:center">Edit allowances/deductions and the totals recalculate.</span></div>`
       : `<div class="empty" style="margin-top:14px">No active staff with a pay rate. Set rates under <a href="#/employees">Staff</a>.</div>`;
     if ($('#pr-sort')) $('#pr-sort').onchange = () => preview();
     $$('[data-h]', $('#pr-preview')).forEach(i => i.onchange = () => {
@@ -655,7 +659,7 @@ async function renderPayroll() {
     });
     $$('[data-a],[data-o]', $('#pr-preview')).forEach(i => i.onchange = () => { const id = i.dataset.a || i.dataset.o; adj[id] = adj[id] || {}; adj[id][i.dataset.a ? 'allowances' : 'other_deductions'] = i.value; preview(); });
     if ($('#pr-final')) $('#pr-final').onclick = async () => {
-      if (!confirm('Finalise this pay run? Payslips will be saved (print or email them from the pay run).')) return;
+      if (!confirm(body.extra_run ? `Finalise an EXTRA pay run (${body.extra_reason || 'no reason given'}) for dates that may already be paid? Only the allowances entered are paid.` : 'Finalise this pay run? Payslips will be saved (print or email them from the pay run).')) return;
       try { const r = await api('/api/staff/payroll/runs', { body }); toast('Pay run saved'); await renderPayroll(); runModal(r.id); } catch (e) { toast(e.message); }
     };
   };
@@ -701,7 +705,7 @@ async function drawPayRules() {
 function payslipHTML(p, run) {
   let ded = []; try { ded = typeof p.deduction_lines === 'string' ? JSON.parse(p.deduction_lines || '[]') : (p.deduction_lines || []); } catch { }
   return `<div class="payslip"><div style="display:flex;gap:14px;align-items:center"><h3 style="margin:0">${esc(S.company_name)} — Payslip</h3></div><p class="small muted">${esc(S.address || '')}</p>
-    <table><tr><td><b>${esc(p.employee_name)}</b><br><span class="small muted">${esc(p.position || '')}</span></td><td class="r small">Pay date: ${esc(run.pay_date || "not paid yet (draft)")}<br>Period: ${esc(run.period_start)} to ${esc(run.period_end)}<br>TIN: ${esc(p.tin || '—')} · FNPF: ${esc(p.fnpf_no || '—')}</td></tr></table>
+    <table><tr><td><b>${esc(p.employee_name)}</b><br><span class="small muted">${esc(p.position || '')}</span></td><td class="r small">${run.extra_reason ? `<b>Extra pay: ${esc(run.extra_reason)}</b><br>` : ''}Pay date: ${esc(run.pay_date || "not paid yet (draft)")}<br>Period: ${esc(run.period_start)} to ${esc(run.period_end)}<br>TIN: ${esc(p.tin || '—')} · FNPF: ${esc(p.fnpf_no || '—')}</td></tr></table>
     <table style="margin-top:10px">
       ${p.pay_type === 'hourly' && p.break_hours ? `<tr><td class="small muted">Hours worked ${p.worked_hours} − unpaid breaks ${p.break_hours}</td><td></td></tr>` : ''}
       ${/Hours adjusted /.test(p.notes || '') ? `<tr><td class="small" style="color:#8a5a00">${esc((p.notes.match(/Hours adjusted [^·]*/) || [''])[0].trim())}</td><td></td></tr>` : ''}
@@ -726,13 +730,13 @@ function printHTML(html) { const w = window.open('', '_blank'); w.document.write
 async function runModal(id) {
   const { run, payslips } = await api(`/api/staff/payroll/runs/${id}`);
   const m = openModal(`<h2 style="font-size:1.5rem">Pay run — ${fmtDate(run.pay_date, { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
-    <p class="muted">${run.period_start} to ${run.period_end} · Gross ${money(run.total_gross, cur())} · Net ${money(run.total_net, cur())} · Employer FNPF ${money(run.total_fnpf_employer, cur())}</p>
+    <p class="muted">${run.extra_reason ? `<span class="chip">Extra pay run: ${esc(run.extra_reason)}</span> ` : ''}${run.period_start} to ${run.period_end} · Gross ${money(run.total_gross, cur())} · Net ${money(run.total_net, cur())} · Employer FNPF ${money(run.total_fnpf_employer, cur())}</p>
     ${table([{ h: 'Employee', k: 'employee_name' }, { h: 'Hours', k: 'hours', r: 1 }, { h: 'Gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'FNPF', f: p => money(p.fnpf_employee, cur()), r: 1 }, { h: 'PAYE', f: p => money(p.paye, cur()), r: 1 }, { h: 'Net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }, { h: '', f: p => `<button class="btn sm ghost" data-ps="${p.id}">Payslip</button>` }], payslips)}
-    <div class="actions"><button class="btn sm" id="print-all">Print all payslips</button>${window.riyser ? '<button class="btn sm ghost" id="pdf-all">Save all as PDF</button>' : ''}${L('payroll') >= 3 ? '<button class="btn sm danger" id="del-run">Delete run</button>' : ''}</div>`, { wide: true });
+    <div class="actions"><button class="btn sm" id="print-all">Print all payslips</button>${window.riyser ? '<button class="btn sm ghost" id="pdf-all">Save all as PDF</button>' : ''}${L('payroll') >= 3 ? '<button class="btn sm danger" id="del-run">Void (delete) run</button>' : ''}</div>`, { wide: true });
   $$('[data-ps]', m.el).forEach(b => b.onclick = () => printHTML(payslipHTML(payslips.find(p => p.id == b.dataset.ps), run)));
   $('#print-all', m.el).onclick = () => printHTML(payslips.map(p => payslipHTML(p, run)).join(''));
   if ($('#pdf-all', m.el)) $('#pdf-all', m.el).onclick = () => savePdf(`Payslips paid ${run.pay_date} (${run.period_start} to ${run.period_end})`, payslips.map(p => payslipHTML(p, run)).join(''));
-  if ($('#del-run', m.el)) $('#del-run', m.el).onclick = async () => { if (confirm('Delete this pay run and its payslips?')) { await api(`/api/staff/payroll/runs/${id}`, { method: 'DELETE' }); m.close(); renderPayroll(); } };
+  if ($('#del-run', m.el)) $('#del-run', m.el).onclick = async () => { if (confirm('Void this pay run? It and its payslips are deleted, so these dates can be paid again.')) { await api(`/api/staff/payroll/runs/${id}`, { method: 'DELETE' }); m.close(); renderPayroll(); } };
 }
 async function renderMyPayslips() {
   const rows = await api('/api/staff/payslips/mine');

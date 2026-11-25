@@ -445,6 +445,64 @@ async function wageBook(people) {
   return Buffer.from(await wb.xlsx.writeBuffer()).toString('base64');
 }
 
+test('F11: finalising the same pay period twice is refused (server side), until the first run is voided', async () => {
+  const emp = (await call('POST', '/api/staff/employees', { name: 'Twice Paid', username: 'twicepaid', password: 'twicepaid1', role: 'staff', pay_type: 'hourly', pay_rate: 10 }, admin)).data;
+  await call('POST', '/api/staff/timesheets', { user_id: emp.id, clock_in: '2028-06-05T08:00', clock_out: '2028-06-05T16:00' }, admin);
+  const period = { period_start: '2028-06-05', period_end: '2028-06-11' };
+  const first = await call('POST', '/api/staff/payroll/runs', { ...period, pay_date: '2028-06-12' }, admin);
+  assert.equal(first.status, 200, JSON.stringify(first.data));
+  // the same dates again: refused with the run's pay date and number, and nothing saved
+  const again = await call('POST', '/api/staff/payroll/runs', { ...period, pay_date: '2028-06-13' }, admin);
+  assert.equal(again.status, 409);
+  assert.equal(again.data.error, `These dates were already paid on 2028-06-12 (pay run #${first.data.id}). Void that run first.`);
+  assert.equal(again.data.already_paid.run_id, first.data.id);
+  // overlapping dates (not exactly the same) are refused too
+  assert.equal((await call('POST', '/api/staff/payroll/runs', { period_start: '2028-06-10', period_end: '2028-06-16', pay_date: '2028-06-17' }, admin)).status, 409);
+  const runs = (await call('GET', '/api/staff/payroll/runs', null, admin)).data.filter(r => r.period_start <= '2028-06-16' && r.period_end >= '2028-06-05');
+  assert.equal(runs.length, 1);
+  // the preview says so before Finalise (the app shows the message and no Finalise button)
+  const pv = (await call('POST', '/api/staff/payroll/preview', period, admin)).data;
+  assert.equal(pv.already_paid.run_id, first.data.id); assert.match(pv.already_paid.message, /^These dates were already paid on 2028-06-12/);
+  // next week is fine
+  assert.equal((await call('POST', '/api/staff/payroll/preview', { period_start: '2028-06-12', period_end: '2028-06-18' }, admin)).data.already_paid, null);
+  // voiding (deleting) the first run lets the dates be paid again
+  assert.equal((await call('DELETE', `/api/staff/payroll/runs/${first.data.id}`, null, admin)).status, 200);
+  const redo = await call('POST', '/api/staff/payroll/runs', { ...period, pay_date: '2028-06-12' }, admin);
+  assert.equal(redo.status, 200, JSON.stringify(redo.data));
+});
+
+test('F11: a labelled extra pay run (bonus) can be paid on dates already paid; it pays only the bonus', async () => {
+  const emp = (await call('GET', '/api/staff/employees', null, admin)).data.find(e => e.username === 'twicepaid');
+  const period = { period_start: '2028-06-05', period_end: '2028-06-11', pay_date: '2028-06-20' };
+  const normal = (await call('GET', '/api/staff/payroll/runs', null, admin)).data.find(r => r.period_start === '2028-06-05' && !r.extra_reason);
+  assert.ok(normal, 'the normal run from the test before');
+  // the extra run needs its own option and a reason
+  assert.equal((await call('POST', '/api/staff/payroll/runs', { ...period, adjustments: { [emp.id]: { allowances: 50 } } }, admin)).status, 409);
+  const noWhy = await call('POST', '/api/staff/payroll/runs', { ...period, extra_run: true, adjustments: { [emp.id]: { allowances: 50 } } }, admin);
+  assert.equal(noWhy.status, 400); assert.match(noWhy.data.error, /what the extra pay run is for/);
+  assert.equal((await call('POST', '/api/staff/payroll/runs', { ...period, extra_run: true, extra_reason: 'Nothing entered' }, admin)).status, 400); // no bonus amounts
+  // the preview of an extra run: no wages again, no "already paid" block
+  const pv = (await call('POST', '/api/staff/payroll/preview', { ...period, extra_run: true, adjustments: { [emp.id]: { allowances: 50 } } }, admin)).data;
+  assert.equal(pv.already_paid, null); assert.equal(pv.extra_run, true);
+  const pl = pv.lines.find(l => l.user_id === emp.id); assert.equal(pl.base_pay, 0); assert.equal(pl.gross, 50);
+  const extra = await call('POST', '/api/staff/payroll/runs', { ...period, extra_run: true, extra_reason: 'Mid-year bonus', adjustments: { [emp.id]: { allowances: 50 } } }, admin);
+  assert.equal(extra.status, 200, JSON.stringify(extra.data)); assert.equal(extra.data.extra_run, true);
+  const run = (await call('GET', `/api/staff/payroll/runs/${extra.data.id}`, null, admin)).data;
+  assert.equal(run.run.extra_reason, 'Mid-year bonus');
+  const slip = run.payslips.find(p => p.user_id === emp.id);
+  assert.equal(slip.base_pay, 0); assert.equal(slip.hours, 8); assert.equal(slip.gross, 50); assert.equal(slip.fnpf_employee, 4);
+  const listed = (await call('GET', '/api/staff/payroll/runs', null, admin)).data.find(r => r.id === extra.data.id);
+  assert.equal(listed.extra_reason, 'Mid-year bonus');
+  // the normal run is still the payslip for those dates, and its dates are still blocked for a normal run
+  const ps = (await call('GET', `/api/staff/payslips/build?from=2028-06-05&to=2028-06-11&user_id=${emp.id}`, null, admin)).data.payslips;
+  assert.equal(ps[0].run_id, normal.id);
+  assert.equal((await call('POST', '/api/staff/payroll/runs', { ...period }, admin)).status, 409);
+  // an extra run doesn't block a normal run: void the normal one and the dates can be paid again
+  assert.equal((await call('DELETE', `/api/staff/payroll/runs/${normal.id}`, null, admin)).status, 200);
+  assert.equal((await call('POST', '/api/staff/payroll/runs', { ...period }, admin)).status, 200);
+  assert.ok((await call('GET', '/api/staff/audit', null, admin)).data.some(a => a.action === 'Extra pay run' && /Mid-year bonus/.test(a.details)));
+});
+
 test('wage reports: check the files, see the problems, import as pay history, year to date includes it', async () => {
   const oct = await wageBook([
     { sheet: 'Anil', name: 'Anill Prasad', fnpf: 'MN1', acct: '111', rate: 7, hours: [40, 40, 31.9, 39, 40] },
