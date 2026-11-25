@@ -9,7 +9,7 @@ authors = [{name = "Riyeser Group"}]
 description = "Riyeser Accounting (a Riyeser Group module) - double-entry business accounting (sales, purchases, banking, inventory, payroll, GST/BAS, reports)"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["flask>=3.0", "waitress>=3.0", "pywebview>=5", "fpdf2>=2.7"]
+dependencies = ["flask>=3.0", "waitress>=3.0", "pywebview>=5", "fpdf2>=2.7.5", "uharfbuzz>=0.39"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pypdf>=4"]
@@ -25,7 +25,7 @@ packages = ["riyeser", "riyeser.views"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-riyeser = ["schema.sql", "static/*", "templates/*.html", "templates/*/*.html"]
+riyeser = ["schema.sql", "static/*", "templates/*.html", "templates/*/*.html", "fonts/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

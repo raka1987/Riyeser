@@ -55,6 +55,8 @@ args = [
     "--add-data", f"{PKG / 'templates'}{sep}riyeser/templates",
     "--add-data", f"{PKG / 'static'}{sep}riyeser/static",
     "--add-data", f"{PKG / 'schema.sql'}{sep}riyeser",
+    "--add-data", f"{PKG / 'fonts'}{sep}riyeser/fonts",   # the Unicode fonts embedded in PDFs (and their licences)
+    "--hidden-import", "uharfbuzz",
     "--hidden-import", "riyeser.demo",
     "--hidden-import", "riyeser.demo_mode",
     "--hidden-import", "riyeser._built_edition",

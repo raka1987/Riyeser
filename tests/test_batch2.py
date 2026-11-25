@@ -380,3 +380,50 @@ def test_f14_no_one_without_payroll_access_can_find_anyones_pay(client, app):
                                             "line": ",".join(map(str, line_ids))})
     with app.app_context():
         assert get_db().execute("SELECT COUNT(*) FROM journal_lines WHERE reconciliation_id IS NOT NULL").fetchone()[0] == 2
+
+
+# ------------------------------------------------------------------ S45
+def _pdf_text(data):
+    import io
+    from pypdf import PdfReader
+    text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(data)).pages)
+    return "".join(text.split())  # pypdf adds spaces between shaped Devanagari glyph runs; compare without them
+
+
+def test_s45_pdfs_print_non_english_names_exactly(client, app):
+    names = ["Nguyễn Văn An", "Nadī", "tānoa", "राम कुमार शर्मा", "Ōtautahi Tūī"]
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust = db.execute("INSERT INTO contacts (kind, name, address) VALUES ('customer','Nguyễn Văn An',"
+                          " 'Queens Rd, Nadī')").lastrowid
+        hindi = db.execute("INSERT INTO contacts (kind, name) VALUES ('customer','राम कुमार शर्मा')").lastrowid
+        doc = L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-20", notes="Ōtautahi Tūī"),
+                              [dict(description="tānoa (kava bowl)", qty=1, unit_price=12000,
+                                    account_id=acc["4-1000"], tax_code_id=tc["GST"])], "open")
+        L.save_document(db, "sale", dict(contact_id=hindi, date="2026-11-20"),
+                        [dict(description="तानोआ", qty=1, unit_price=100, account_id=acc["4-1000"])], "open")
+        emp = _employee(db, "Sitiveni", "Rabukā")
+        db.commit()
+    inv = _pdf_text(client.get(f"/document/{doc}?pdf=1").data)
+    for n in names[:3] + names[4:]:
+        assert "".join(n.split()) in inv, n
+    assert "?" not in inv.replace("?pdf", "")
+    st = _pdf_text(client.get(f"/cards/statement/{hindi}?pdf=1").data)
+    assert "".join("राम कुमार शर्मा".split()) in st
+    _pay(client, emp)
+    with app.app_context():
+        sid = get_db().execute("SELECT id FROM payslips").fetchone()[0]
+    assert "SitiveniRabukā" in _pdf_text(client.get(f"/payroll/payslip/{sid}?pdf=1").data)
+
+
+def test_s45_the_fonts_ship_with_the_app():
+    from pathlib import Path
+    import riyeser
+    root = Path(riyeser.__file__).parent
+    for f in ("DejaVuSans.ttf", "DejaVuSans-Bold.ttf", "NotoSansDevanagari-Regular.ttf", "NotoSansDevanagari-Bold.ttf",
+              "LICENSE-DejaVu.txt", "LICENSE-NotoSansDevanagari-OFL.txt"):
+        assert (root / "fonts" / f).is_file(), f
+    proj = root.parent
+    assert '"fonts/*"' in (proj / "pyproject.toml").read_text()
+    assert "PKG / 'fonts'" in (proj / "packaging" / "build_desktop.py").read_text()
