@@ -11,10 +11,12 @@ const os = require('os');
 const signed = require('./signed-licence');
 
 const MODULE = 'payroll';
-const PRICE = 'US$25/month';   // keep in step with riyeser.com's price for Payroll
+const PRICE = 'US$25/month';   // keep in step with riyeser.com's price for Payroll (pricing v2: unchanged)
+// What the price includes (pricing v2): 3 office users (who run pay or approve timesheets), unlimited employees.
+const INCLUDES = '3 office users included, unlimited employees';
 const HOME_URL = 'https://riyeser.com/link/';   // the Riyeser home page, where Payroll is added to the plan
 const STILL = 'You can still see and print everything.';
-const ADD = `To run new pay runs, add Payroll from your Riyeser home page (${PRICE}).`;
+const ADD = `To run new pay runs, add Payroll from your Riyeser home page (${PRICE}, ${INCLUDES}).`;
 const ENDED = `Payroll's free trial has ended. ${STILL} ${ADD}`;
 const DAY = 86400000;
 // OWNER-BANNER: an unsigned plan (Central not signed in or linked since a fresh start, or an older Central) counts for

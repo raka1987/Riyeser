@@ -79,7 +79,7 @@ test('licence rules: trial, paid, ended, cheating and the clock', async (t) => {
   await t.test('ended: the message, the price and the button', () => {
     const s = st(pc({ plan: ENDED }));
     assert.strictEqual(s.licensed, false);
-    assert.strictEqual(s.message, 'Payroll\'s free trial has ended. You can still see and print everything. To run new pay runs, add Payroll from your Riyeser home page (US$25/month).');
+    assert.strictEqual(s.message, 'Payroll\'s free trial has ended. You can still see and print everything. To run new pay runs, add Payroll from your Riyeser home page (US$25/month, 3 office users included, unlimited employees).');
     assert.strictEqual(s.homeUrl, 'https://riyeser.com/link/');
     const local = st(pc({ online: false }));   // a PC that was never online, after its 90 days
     assert.strictEqual(local.licensed, false); assert.strictEqual(local.message, licence.ENDED);
