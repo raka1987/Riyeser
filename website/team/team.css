@@ -800,3 +800,10 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
   .modal.printing .mcard { box-shadow: none !important; border: 0 !important; max-width: none !important; max-height: none !important; overflow: visible !important; padding: 0 !important; background: #fff !important; }
   .modal.printing .noprint { display: none !important; }
 }
+
+/* M20: phones: the Riyeser ID on one line, and buttons big enough to tap (at least 44 px) */
+@media (max-width: 760px) {
+  .cid { flex-wrap: wrap; gap: 6px 10px; } .cid small { flex: 1 0 100%; }
+  .cid .code { font-size: 19px; letter-spacing: 1px; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+  .acct .btn.sm, .home .btn.sm, .htop .btn, .cid .btn, .hmine .btn, .hacts .btn { min-height: 44px; padding-top: 10px; padding-bottom: 10px; font-size: 14px; }
+}

@@ -3,6 +3,7 @@
 //       database error); the database's own refusal reads plainly
 //   M9  "(edited)" on edited messages; your own extension says so; no channel call buttons until group calls; initials
 //       without punctuation; "Seen" in direct messages
+//   M20 on a 390 px phone: the Riyeser ID on one line; Sign out, Copy and the home's buttons at least 44 px tall
 //   S49 on a phone, Back from a conversation shows the chat list, and Back again the Riyeser home (against a pretend Supabase)
 // Run: build the site, serve website/public on 8090 (or LINK_BASE), then `node website/team/test/chat-test.js`. Exits 1 on failure.
 const { chromium } = require('playwright');
@@ -47,6 +48,16 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     const qd = await pg.$('#qdn'); if (!qd) { await pg.click('[data-nav=calls]'); await pg.waitForSelector('#qdn'); }
     await pg.fill('#qdn', '101'); await pg.dispatchEvent('#qdn', 'input'); check(await pg.textContent('#qdw') === 'That\'s your own extension', 'M9 dialling your own extension says so');
     await pg.fill('#qdn', '999'); await pg.dispatchEvent('#qdn', 'input'); check(await pg.textContent('#qdw') === 'No one on that number', 'M9 an unused number still says "No one on that number"');
+    await pg.close(); }
+
+  // ---- M20: phone sizes on the Riyeser home
+  { const pg = await b.newPage({ viewport: { width: 390, height: 844 } }); pg.on('pageerror', (e) => errs.push(e.message));
+    await pg.goto(`${BASE}/link/?demo&help`); await pg.waitForSelector('.hco'); await pg.evaluate(() => document.querySelectorAll('.modal').forEach((m) => m.remove()));
+    const r = await pg.evaluate(() => { const c = document.querySelector('.cid .code'); return { h: c.getBoundingClientRect().height, lh: parseFloat(getComputedStyle(c).lineHeight),
+      small: [...document.querySelectorAll('#hout, #hcp, .hmine button, .hacts button')].filter((x) => x.getBoundingClientRect().height < 44).map((x) => x.textContent.trim()) }; });
+    check(r.h < (r.lh || 28) * 1.5, `M20 the Riyeser ID is on one line (${Math.round(r.h)} px)`);
+    check(!r.small.length, `M20 buttons at least 44 px tall ${r.small.join(', ')}`);
+    check(await pg.evaluate(() => document.documentElement.scrollWidth) <= 390, 'M20 no sideways scrolling');
     await pg.close(); }
 
   // ---- S49: the phone's Back button
