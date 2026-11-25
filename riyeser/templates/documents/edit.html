@@ -7,15 +7,16 @@
 <td><input name="line_price" value="{{ l.unit_price|cents if l }}" class="right" style="width:100px"></td>
 <td><input name="line_discount" value="{{ '%g'|format(l.discount_pct) if l and l.discount_pct }}" class="right" style="width:60px" placeholder="%"></td>
 <td>{{ account_select('line_account', accounts, l.account_id if l else default_account) }}</td>
-<td>{{ tax_select('line_tax', tax_codes, l.tax_code_id if l else none) }}</td>
+<td>{{ tax_select('line_tax', tax_codes, l.tax_code_id if l else default_tax) }}</td>
 <td>{{ job_select('line_job', jobs, l.job_id if l) }}</td>
 <td class="n line-total"></td><td><button type="button" class="btn sm del-row">✕</button></td></tr>
 {%- endmacro %}
 {% block content %}
 {% set st = doc.status if doc else preset_status %}
-<div class="head"><div><h1>{{ 'Edit' if doc else 'New' }} {{ {'quote':'Quote','order':'Order','open':L.doc}[st] }}</h1>
+<div class="head"><div><h1>{{ 'Edit' if doc else 'New' }} {{ ('Credit note' if side == 'sale' else 'Supplier credit') if kind == 'credit' else {'quote':'Quote','order':'Order','open':L.doc}[st] }}</h1>
+{% if kind == 'credit' %}<p class="sub">Enter what's credited as positive amounts. It reduces what {{ 'the customer owes' if side == 'sale' else 'you owe the supplier' }}, with GST, and can be used on {{ L.doc|lower }}s or refunded.</p>{% endif %}
 <p class="sub">{{ L.title }} · {{ doc.number if doc else 'number assigned on save' }}</p></div></div>
-<form method="post" id="doc-form">
+<form method="post" id="doc-form"><input type="hidden" name="kind" value="{{ kind }}">
 <div class="card"><div class="fields">
 <div><label>{{ L.contact }}</label><select name="contact_id" id="contact_id" required><option value="">Select…</option>
 {% for c in contacts %}<option value="{{ c.id }}" {{ 'selected' if (doc and doc.contact_id==c.id) or preset_contact==c.id }}>{{ c.name }}</option>{% endfor %}</select>
@@ -23,7 +24,7 @@
 <div><label>Date</label><input type="date" name="date" id="date" value="{{ doc.date if doc else today() }}" required></div>
 <div><label>Due date</label><input type="date" name="due_date" id="due_date" value="{{ doc.due_date if doc }}"></div>
 <div><label>{{ 'Customer PO' if side=='sale' else 'Supplier invoice #' }}</label><input name="reference" value="{{ doc.reference or '' if doc }}"></div>
-<div><label>Save as</label><select name="status">{% for k, v in [('open', L.doc ~ ' (post to ledger)'),('order','Order'),('quote','Quote')] %}<option value="{{ k }}" {{ 'selected' if st==k }}>{{ v }}</option>{% endfor %}</select></div>
+{% if kind != 'credit' %}<div><label>Save as</label><select name="status">{% for k, v in [('open', L.doc ~ ' (post to ledger)'),('order','Order'),('quote','Quote')] %}<option value="{{ k }}" {{ 'selected' if st==k }}>{{ v }}</option>{% endfor %}</select></div>{% endif %}
 <label class="check"><input type="checkbox" name="tax_inclusive" id="tax_inclusive" value="1" {{ 'checked' if doc and doc.tax_inclusive }}> Prices include GST</label>
 </div></div>
 <div class="card"><table class="lines" id="lines"><thead><tr><th style="width:110px">Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th style="width:220px">Account</th><th>Tax</th><th>Job</th><th class="n">Amount</th><th></th></tr></thead>

@@ -4,6 +4,7 @@
 <div class="head"><div><h1>{{ L.title }} Register</h1></div>
 <div class="actions"><a class="btn pri" href="{{ url_for('documents.edit', side=side) }}">+ New {{ L.doc|lower }}</a>
 <a class="btn" href="{{ url_for('documents.edit', side=side, status='quote') }}">+ Quote</a>
+<a class="btn" href="{{ url_for('documents.edit', side=side, kind='credit') }}">+ {{ 'Credit note' if side == 'sale' else 'Supplier credit' }}</a>
 <a class="btn" href="{{ url_for('documents.edit', side=side, status='order') }}">+ Order</a>
 <a class="btn" href="{{ url_for('documents.pay', side=side) }}">{{ L.pay }}</a>
 <a class="btn" href="{{ url_for('documents.payments', side=side) }}">Payments</a></div></div>

@@ -34,10 +34,11 @@ def dashboard():
     ap = db.execute("SELECT COALESCE(SUM(total-amount_paid),0) s, COUNT(*) n FROM documents"
                     " WHERE side='purchase' AND status='open'").fetchone()
     overdue = db.execute("SELECT d.*, c.name cname FROM documents d JOIN contacts c ON c.id=d.contact_id"
-                         " WHERE d.side='sale' AND d.status='open' AND d.due_date < ? ORDER BY d.due_date LIMIT 8",
+                         " WHERE d.side='sale' AND d.status='open' AND d.kind='invoice' AND d.due_date < ?"
+                         " ORDER BY d.due_date LIMIT 8",
                          (today,)).fetchall()
     bills_due = db.execute("SELECT d.*, c.name cname FROM documents d JOIN contacts c ON c.id=d.contact_id"
-                           " WHERE d.side='purchase' AND d.status='open' ORDER BY d.due_date LIMIT 8").fetchall()
+                           " WHERE d.side='purchase' AND d.status='open' AND d.kind='invoice' ORDER BY d.due_date LIMIT 8").fetchall()
     low_stock = db.execute("SELECT * FROM items WHERE is_inventoried=1 AND active=1 AND qty_on_hand<=reorder_level"
                            " ORDER BY sku LIMIT 8").fetchall()
     # monthly income vs expense for last 6 months of FY

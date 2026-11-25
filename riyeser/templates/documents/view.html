@@ -1,7 +1,8 @@
 {% extends "base.html" %}{% block title %}{{ doc.number }}{% endblock %}
 {% from "_macros.html" import status %}
 {% block content %}
-<div class="head"><div><h1>{{ {'quote':'Quote','order':'Order'}.get(doc.status, L.doc) }} {{ doc.number }} {{ status(doc, today()) }}</h1>
+{% set kname = {'credit': ('Credit note' if doc.side == 'sale' else 'Supplier credit'), 'payment_credit': 'Account credit'}.get(doc.kind) %}
+<div class="head"><div><h1>{{ kname or {'quote':'Quote','order':'Order'}.get(doc.status, L.doc) }} {{ doc.number }} {{ status(doc, today()) }}</h1>
 <p class="sub"><a href="{{ url_for('contacts.view', cid=doc.contact_id) }}">{{ doc.cname }}</a> · {{ doc.date }}{% if doc.due_date %} · due {{ doc.due_date }}{% endif %}{% if doc.reference %} · Ref {{ doc.reference }}{% endif %}</p></div>
 <div class="actions">
 <a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, pdf=1) }}">Download PDF</a>
@@ -9,11 +10,12 @@
 <a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, print=1) }}" target="_blank">Print</a>
 {% if doc.status in ('quote','order') %}
 <a class="btn" href="{{ url_for('documents.edit', side=doc.side, doc_id=doc.id) }}">Edit</a>
+{% if doc.converted_to %}<a class="btn" href="{{ url_for('documents.view', doc_id=doc.converted_to) }}">Converted: open the {{ L.doc|lower }} / order</a>{% else %}
 {% if doc.status=='quote' %}<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="order"><button class="btn">Convert to order</button></form>{% endif %}
-<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="open"><button class="btn pri">Convert to {{ L.doc|lower }}</button></form>
+<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="open"><button class="btn pri">Convert to {{ L.doc|lower }}</button></form>{% endif %}
 {% if lv('sales' if doc.side == 'sale' else 'purchases') >= 3 %}<form method="post" class="inline" action="{{ url_for('documents.delete', doc_id=doc.id) }}" data-confirm="Delete this {{ doc.status }}?"><button class="btn danger">Delete</button></form>{% endif %}
 {% endif %}
-{% if doc.status=='open' %}<a class="btn pri" href="{{ url_for('documents.pay', side=doc.side, contact=doc.contact_id) }}">{{ L.pay }}</a>{% endif %}
+{% if doc.status=='open' %}<a class="btn pri" href="{{ url_for('documents.pay', side=doc.side, contact=doc.contact_id) }}">{{ 'Use or refund this credit' if doc.kind != 'invoice' else L.pay }}</a>{% endif %}
 {% if doc.status=='open' and not doc.amount_paid %}{% if lv('sales' if doc.side == 'sale' else 'purchases') >= 3 %}<form method="post" class="inline" action="{{ url_for('documents.void', doc_id=doc.id) }}" data-confirm="Void {{ doc.number }}? A reversing entry will be posted."><button class="btn danger">Void</button></form>{% endif %}{% endif %}
 {% if doc.entry_id %}<a class="btn" href="{{ url_for('core.entry', eid=doc.entry_id) }}">Journal #{{ doc.entry_id }}</a>{% endif %}
 </div></div>

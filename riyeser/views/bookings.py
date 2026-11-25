@@ -299,6 +299,8 @@ def _save(bid):
     if bid:
         jid = db.execute("SELECT job_id FROM bookings WHERE id=?", (bid,)).fetchone()["job_id"] or jid
     price = to_cents(f.get("price")) if (f.get("price") or "").strip() else None
+    if price is not None and price < 0:
+        raise PostingError("The price can't be below $0. For money back, make a credit note.")  # S15
     jvals = (cid, svc["id"] if svc else None, (f.get("title") or "").strip() or None,
              (f.get("address") or "").strip() or None, (f.get("phone") or "").strip() or None)
     if not jid:
@@ -580,6 +582,8 @@ def _save_job(jid):
     svc = opt_int(f.get("service_id"))
     billing = f.get("billing") if f.get("billing") in dict(BILLING) else "fixed"
     price = to_cents(f.get("price")) if (f.get("price") or "").strip() else None
+    if price is not None and price < 0:
+        raise PostingError("The price can't be below $0. For money back, make a credit note.")  # S15
     vals = (cid, svc, title, (f.get("address") or "").strip() or None, (f.get("phone") or "").strip() or None,
             (f.get("notes") or "").strip() or None, billing, price)
     if jid:

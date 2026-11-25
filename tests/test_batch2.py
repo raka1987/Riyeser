@@ -519,10 +519,12 @@ def test_s27_aged_reports_include_credit_balances(app):
         other = db.execute("INSERT INTO contacts (kind, name) VALUES ('customer','D')").lastrowid
         line = lambda amt, a: [dict(description="x", qty=1, unit_price=amt, account_id=acc[a], tax_code_id=tc["N-T"])]
         L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-01"), line(30000, "4-1000"), "open")
-        L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-02"), line(-5000, "4-1000"), "open")
-        L.save_document(db, "sale", dict(contact_id=other, date="2026-11-02"), line(-5000, "4-1000"), "open")
+        # credits: credit notes (S17) are negative balances
+        L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-02", kind="credit"), line(5000, "4-1000"), "open")
+        L.save_document(db, "sale", dict(contact_id=other, date="2026-11-02", kind="credit"), line(5000, "4-1000"), "open")
         L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-01"), line(20000, "6-1500"), "open")
-        L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-03"), line(-2500, "6-1500"), "open")
+        L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-03", kind="credit"), line(2500, "6-1500"),
+                        "open")
         db.commit()
         b = L.balances(db)
     ar = _report(app, "aged_receivables", asof="2026-11-30")

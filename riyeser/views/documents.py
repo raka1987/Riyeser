@@ -7,7 +7,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from ..db import get_db, to_cents, linked
 from .. import pdf as pdfmod
 from ..ledger import save_document, convert_document, void_document, record_payment, void_payment, add_days, \
-    PostingError
+    PostingError, credits_for, apply_credit, refund_credit, credit_available
 from . import lookups, opt_int, opt_float, form_lines, guarded
 
 bp = Blueprint("documents", __name__)
@@ -70,9 +70,14 @@ def edit(side, doc_id=None):
                                   account=c["default_account_id"], tax=c["tax_code_id"]) for c in contacts}
     tax_json = {t["id"]: t["rate"] for t in lk["tax_codes"]}
     default_account = linked(db, "default_income" if side == "sale" else "default_expense")
+    # S14: a typed line starts with the default account's tax code (GST), not "no tax", when registered for GST
+    acct = db.execute("SELECT tax_code_id FROM accounts WHERE id=?", (default_account,)).fetchone()
+    default_tax = acct["tax_code_id"] if acct and g.company.get("gst_registered", 1) else None
+    kind = "credit" if (request.args.get("kind") == "credit" and not doc) else "invoice"
     return render_template("documents/edit.html", side=side, L=L, doc=doc, lines=lines, contacts=contacts,
                            items=items, item_json=json.dumps(item_json), contact_json=json.dumps(contact_json),
-                           tax_json=json.dumps(tax_json), default_account=default_account,
+                           tax_json=json.dumps(tax_json), default_account=default_account, default_tax=default_tax,
+                           kind=kind,
                            preset_status=request.args.get("status", "open"),
                            preset_contact=opt_int(request.args.get("contact")), **lk)
 
@@ -81,24 +86,47 @@ def edit(side, doc_id=None):
 def _save(side, doc_id):
     db = get_db()
     f = request.form
+    kind = "credit" if f.get("kind") == "credit" else "invoice"
     header = dict(contact_id=opt_int(f.get("contact_id")), date=f["date"], due_date=f.get("due_date") or None,
-                  reference=f.get("reference"), notes=f.get("notes"), tax_inclusive=bool(f.get("tax_inclusive")))
+                  reference=f.get("reference"), notes=f.get("notes"), tax_inclusive=bool(f.get("tax_inclusive")),
+                  kind=kind)
     if not header["due_date"]:
         header["due_date"] = add_days(header["date"], g.company["default_terms_days"])
     lines = []
-    for l in form_lines(["item", "description", "qty", "price", "discount", "account", "tax", "job"]):
+    for n, l in enumerate(form_lines(["item", "description", "qty", "price", "discount", "account", "tax", "job"]), 1):
+        raw = (l["qty"] or "").strip()
+        try:
+            qty = float(raw.replace(",", "")) if raw else 1.0
+        except ValueError:
+            if l["item"] or l["description"].strip() or l["price"].strip():
+                raise PostingError(f"Line {n}: quantity must be a number (you typed \"{raw}\").")  # S16
+            qty = 1.0
+        try:
+            price = to_cents(l["price"])
+        except ValueError:
+            raise PostingError(f"Line {n}: price must be an amount (you typed \"{l['price']}\").")
         lines.append(dict(item_id=opt_int(l["item"]), description=l["description"].strip(),
-                          qty=opt_float(l["qty"], 1.0), unit_price=to_cents(l["price"]),
+                          qty=qty, unit_price=price,
                           discount_pct=opt_float(l["discount"]), account_id=opt_int(l["account"]),
                           tax_code_id=opt_int(l["tax"]), job_id=opt_int(l["job"])))
-    status = f.get("status", "open")
+    status = "open" if kind == "credit" else f.get("status", "open")
     if status not in ("quote", "order", "open"):
         raise ValueError("Invalid status.")
-    if side == "sale" and status == "open":
+    if side == "sale" and status == "open" and kind == "invoice":
         _check_free_invoices(db)
-    did = save_document(db, side, header, lines, status, doc_id)
-    doc = db.execute("SELECT number FROM documents WHERE id=?", (did,)).fetchone()
+    was_quote = doc_id and db.execute("SELECT status FROM documents WHERE id=?", (doc_id,)).fetchone()["status"] == "quote"
+    if was_quote and status != "quote":
+        # S35: the quote keeps what was quoted; the order / invoice is a new document linked to it
+        save_document(db, side, header, lines, "quote", doc_id)
+        did = convert_document(db, doc_id, status)
+    else:
+        did = save_document(db, side, header, lines, status, doc_id)
+    doc = db.execute("SELECT number, tax_total FROM documents WHERE id=?", (did,)).fetchone()
     flash(f"{doc['number']} saved.", "ok")
+    if side == "sale" and kind == "invoice" and status == "open" and not doc["tax_total"] \
+            and g.company.get("gst_registered", 1):
+        flash(f"{doc['number']} has no GST on it. If it should, void it and enter it again with the GST tax code.",
+              "warn")  # S14
     if status == "open":
         _auto_pdf(db, did)
     return redirect(url_for("documents.view", doc_id=did))
@@ -133,11 +161,12 @@ def convert(doc_id):
     doc = db.execute("SELECT side FROM documents WHERE id=?", (doc_id,)).fetchone()
     if doc and doc["side"] == "sale" and to == "open":
         _check_free_invoices(db)
-    convert_document(db, doc_id, to)
-    flash("Document converted.", "ok")
+    new = convert_document(db, doc_id, to)
+    num = db.execute("SELECT number FROM documents WHERE id=?", (new,)).fetchone()["number"]
+    flash(f"Converted: {num}." + (" The quote is kept as it was." if new != doc_id else ""), "ok")
     if to == "open":
-        _auto_pdf(db, doc_id)
-    return redirect(url_for("documents.view", doc_id=doc_id))
+        _auto_pdf(db, new)
+    return redirect(url_for("documents.view", doc_id=new))
 
 
 def free_invoices_apply():
@@ -202,14 +231,15 @@ def pay(side):
     if request.method == "POST":
         return _save_payment(side)
     cid = opt_int(request.args.get("contact"))
-    contacts = db.execute("SELECT * FROM contacts WHERE kind=? AND id IN (SELECT contact_id FROM documents"
-                          " WHERE side=? AND status='open') ORDER BY name", (L["kind"], side)).fetchall()
-    docs = []
+    # every active customer: a deposit or prepayment can come before any invoice (S43)
+    contacts = db.execute("SELECT * FROM contacts WHERE kind=? AND active=1 ORDER BY name", (L["kind"],)).fetchall()
+    docs, credits = [], []
     if cid:
-        docs = db.execute("SELECT * FROM documents WHERE side=? AND contact_id=? AND status='open' ORDER BY due_date",
-                          (side, cid)).fetchall()
+        docs = db.execute("SELECT * FROM documents WHERE side=? AND contact_id=? AND status='open' AND kind='invoice'"
+                          " ORDER BY due_date", (side, cid)).fetchall()
+        credits = [dict(c, available=credit_available(c)) for c in credits_for(db, cid, side)]
     return render_template("documents/pay.html", side=side, L=L, contacts=contacts, cid=cid, docs=docs,
-                           default_bank=linked(db, "default_bank"), **lookups(db))
+                           credits=credits, default_bank=linked(db, "default_bank"), **lookups(db))
 
 
 @guarded
@@ -217,10 +247,37 @@ def _save_payment(side):
     db = get_db()
     f = request.form
     allocs = [(int(k[6:]), to_cents(v)) for k, v in f.items() if k.startswith("alloc_") and v.strip()]
+    amount = to_cents(f["amount"]) if (f.get("amount") or "").strip() else None
     pid = record_payment(db, "in" if side == "sale" else "out", int(f["contact_id"]), int(f["bank_account_id"]),
-                         f["date"], allocs, f.get("reference"), f.get("memo") or None)
-    flash("Payment recorded.", "ok")
+                         f["date"], allocs, f.get("reference"), f.get("memo") or None, amount=amount)
+    extra = db.execute("SELECT number, total FROM documents WHERE payment_id=? AND kind='payment_credit'",
+                       (pid,)).fetchone()
+    flash("Payment recorded." + (f" {pdfmod.fmt_money(-extra['total'])} is kept as credit ({extra['number']}): use it on "
+                                 f"a later {LABELS[side]['doc'].lower()} or refund it." if extra else ""), "ok")
     return redirect(url_for("documents.payments", side=side, hl=pid))
+
+
+@bp.route("/credit/<int:cid>/apply", methods=["POST"])
+@guarded
+def credit_apply(cid):
+    db = get_db()
+    cr = db.execute("SELECT * FROM documents WHERE id=?", (cid,)).fetchone() or abort(404)
+    apply_credit(db, cid, opt_int(request.form.get("document_id")), to_cents(request.form.get("amount")),
+                 request.form.get("date") or None)
+    flash("Credit applied.", "ok")
+    return redirect(url_for("documents.pay", side=cr["side"], contact=cr["contact_id"]))
+
+
+@bp.route("/credit/<int:cid>/refund", methods=["POST"])
+@guarded
+def credit_refund(cid):
+    db = get_db()
+    cr = db.execute("SELECT * FROM documents WHERE id=?", (cid,)).fetchone() or abort(404)
+    f = request.form
+    refund_credit(db, cid, int(f["bank_account_id"]), f.get("date") or date.today().isoformat(), to_cents(f.get("amount")),
+                  f.get("reference"))
+    flash("Refund recorded.", "ok")
+    return redirect(url_for("documents.pay", side=cr["side"], contact=cr["contact_id"]))
 
 
 @bp.route("/<side>/payments")

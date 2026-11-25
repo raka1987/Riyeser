@@ -160,6 +160,11 @@ DOC_TITLES = {("sale", "quote"): "Quote", ("sale", "order"): "Sales Order",
 
 
 def doc_title(doc):
+    kind = doc["kind"] if "kind" in doc.keys() else "invoice"
+    if kind == "credit":
+        return "Adjustment Note" if doc["side"] == "sale" else "Supplier Credit"
+    if kind == "payment_credit":
+        return "Account Credit"
     return DOC_TITLES.get((doc["side"], doc["status"]), "Tax Invoice" if doc["side"] == "sale" else "Bill")
 
 

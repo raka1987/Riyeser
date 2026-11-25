@@ -334,6 +334,22 @@ def migrate(db):
         db.execute("ALTER TABLE company ADD COLUMN currency TEXT NOT NULL DEFAULT 'AUD'")  # the books' currency (S30)
     db.execute("""CREATE TABLE IF NOT EXISTS payroll_import_accounts (
         role TEXT PRIMARY KEY, account_id INTEGER NOT NULL REFERENCES accounts(id))""")  # S30: chosen on first import
+    dcols = {r["name"] for r in db.execute("PRAGMA table_info(documents)")}
+    for col, ddl in (("kind", "TEXT NOT NULL DEFAULT 'invoice'"),  # invoice, credit (credit note), payment_credit
+                     ("converted_to", "INTEGER REFERENCES documents(id)"),  # S35: a quote keeps its record
+                     ("payment_id", "INTEGER REFERENCES payments(id)")):     # S43: the payment a credit came from
+        if col not in dcols:
+            db.execute(f"ALTER TABLE documents ADD COLUMN {col} {ddl}")
+    db.execute("""CREATE TABLE IF NOT EXISTS number_series (
+        key TEXT PRIMARY KEY, prefix TEXT NOT NULL, next_no INTEGER NOT NULL DEFAULT 1)""")
+    for key, prefix in (("quote_sale", "Q"), ("quote_purchase", "PQ"), ("credit_sale", "CN"), ("credit_purchase", "SC"),
+                        ("payment_credit_sale", "CR"), ("payment_credit_purchase", "SCR")):
+        db.execute("INSERT OR IGNORE INTO number_series (key, prefix) VALUES (?,?)", (key, prefix))
+    db.execute("""CREATE TABLE IF NOT EXISTS credit_uses (
+        id INTEGER PRIMARY KEY, credit_id INTEGER NOT NULL REFERENCES documents(id),
+        document_id INTEGER REFERENCES documents(id), refund_entry_id INTEGER REFERENCES journal_entries(id),
+        amount INTEGER NOT NULL, date TEXT NOT NULL, voided INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
     _job_parts_inc_gst(db)
     _unique_document_numbers(db)
     db.commit()

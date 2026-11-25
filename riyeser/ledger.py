@@ -196,19 +196,28 @@ def stock_adjust(db, item_id, date, qty_change, unit_cost=None, memo="Inventory 
 
 
 # ================================================================== documents
-def next_number(db, side):
+def next_number(db, side, series=None):
     """The next free number, inside the write transaction (two people saving at once get different numbers).
-    A number already used (typed in by hand earlier) is skipped."""
+    A number already used (typed in by hand earlier) is skipped. series: None (invoices / bills), 'quote' (S35),
+    'credit' (credit notes, S17) or 'payment_credit' (S43), each with its own prefix."""
     write_txn(db)
-    c = db.execute("SELECT * FROM company WHERE id=1").fetchone()
-    prefix, col = (c["invoice_prefix"], "next_invoice_no") if side == "sale" else (c["bill_prefix"], "next_bill_no")
-    no = c[col]
+    if series:
+        key = f"{series}_{side}"
+        r = db.execute("SELECT prefix, next_no FROM number_series WHERE key=?", (key,)).fetchone()
+        prefix, no = (r["prefix"], r["next_no"]) if r else (series[:2].upper(), 1)
+    else:
+        c = db.execute("SELECT * FROM company WHERE id=1").fetchone()
+        prefix, col = (c["invoice_prefix"], "next_invoice_no") if side == "sale" else (c["bill_prefix"], "next_bill_no")
+        no = c[col]
     while True:
         n = f"{prefix}{no:05d}"
         no += 1
         if not db.execute("SELECT 1 FROM documents WHERE side=? AND number=?", (side, n)).fetchone():
             break
-    db.execute(f"UPDATE company SET {col}=? WHERE id=1", (no,))
+    if series:
+        db.execute("INSERT OR REPLACE INTO number_series (key, prefix, next_no) VALUES (?,?,?)", (key, prefix, no))
+    else:
+        db.execute(f"UPDATE company SET {col}=? WHERE id=1", (no,))
     return n
 
 
@@ -224,10 +233,22 @@ def save_document(db, side, header, lines, status, doc_id=None):
     if not header.get("contact_id"):
         raise PostingError("Choose a customer/supplier.")
     write_txn(db)
+    kind = header.get("kind") or "invoice"
+    if kind not in ("invoice", "credit"):
+        raise PostingError("Invalid document type.")
+    credit = kind == "credit"
     clean = []
-    for l in lines:
+    for n, l in enumerate(lines, 1):
         if not (l.get("item_id") or l.get("description") or l.get("unit_price")):
             continue
+        try:
+            l["qty"] = float(l.get("qty") if l.get("qty") not in (None, "") else 0)
+        except (TypeError, ValueError):
+            raise PostingError(f"Line {n}: quantity must be a number.")  # S16
+        if credit:
+            if l["qty"] < 0 or (l.get("unit_price") or 0) < 0:
+                raise PostingError(f"Line {n}: enter a credit note's amounts as positive numbers.")
+            l["qty"] = -l["qty"]  # a credit note is stored as negative amounts, so balances net off by themselves
         if l.get("item_id"):
             item = db.execute("SELECT * FROM items WHERE id=?", (l["item_id"],)).fetchone()
             if item["is_inventoried"] and side == "purchase":
@@ -250,6 +271,15 @@ def save_document(db, side, header, lines, status, doc_id=None):
     subtotal = sum(l["net_amount"] for l in clean)
     tax_total = sum(l["tax_amount"] for l in clean)
     total = subtotal + tax_total
+    word = "invoice" if side == "sale" else "bill"
+    if not credit and total < 0:
+        raise PostingError(f"An {word} can't be below $0. Create a credit note instead." if side == "sale" else
+                           "A bill can't be below $0. Enter a supplier credit instead.")  # S15
+    if credit and total >= 0:
+        raise PostingError("A credit note needs an amount.")
+    if credit and side == "purchase" and any(_stocked(db, l) for l in clean):
+        raise PostingError("For stock sent back to a supplier, use a stock adjustment; a supplier credit is for "
+                           "amounts only.")
     if doc_id:
         doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
         if doc["status"] not in ("quote", "order"):
@@ -261,15 +291,18 @@ def save_document(db, side, header, lines, status, doc_id=None):
                     status, doc_id))
         db.execute("DELETE FROM document_lines WHERE document_id=?", (doc_id,))
     else:
-        number = (header.get("number") or "").strip() or next_number(db, side)
+        if credit and status != "open":
+            raise PostingError("A credit note is saved straight away (it can't be a quote or an order).")
+        series = "credit" if credit else ("quote" if status == "quote" else None)
+        number = (header.get("number") or "").strip() or next_number(db, side, series)
         if _number_taken(db, side, number):
             raise PostingError(f"{'Invoice' if side == 'sale' else 'Bill'} number {number} is already used.")
         doc_id = db.execute(
             "INSERT INTO documents (side, status, number, contact_id, date, due_date, reference, notes, tax_inclusive,"
-            " subtotal, tax_total, total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            " subtotal, tax_total, total, kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (side, status, number, header["contact_id"], header["date"], header.get("due_date"),
              header.get("reference"), header.get("notes"), 1 if header.get("tax_inclusive") else 0,
-             subtotal, tax_total, total)).lastrowid
+             subtotal, tax_total, total, kind)).lastrowid
     for l in clean:
         db.execute("INSERT INTO document_lines (document_id, item_id, description, qty, unit_price, discount_pct,"
                    " account_id, tax_code_id, job_id, net_amount, tax_amount) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -280,6 +313,13 @@ def save_document(db, side, header, lines, status, doc_id=None):
         post_document(db, doc_id)
     audit(db, f"{side}_{status}", f"document {doc_id}")
     return doc_id
+
+
+def _stocked(db, l):
+    if not l.get("item_id"):
+        return False
+    r = db.execute("SELECT is_inventoried FROM items WHERE id=?", (l["item_id"],)).fetchone()
+    return bool(r and r["is_inventoried"])
 
 
 def post_document(db, doc_id):
@@ -317,11 +357,12 @@ def post_document(db, doc_id):
             continue
         if sale:
             cost = stock_out(db, item["id"], l["qty"], doc["date"], "invoice", doc_id, doc["number"])
-            if cost:
-                cogs_lines.append(dict(account_id=item["expense_account_id"] or linked(db, "cogs"), debit=cost,
-                                       job_id=l["job_id"], memo=f"COGS {item['sku']}"))
-                cogs_lines.append(dict(account_id=item["asset_account_id"] or linked(db, "inventory"), credit=cost,
+            if cost:  # negative on a credit note: the goods come back, so cost of sales goes the other way
+                cogs_lines.append(dict(account_id=item["expense_account_id"] or linked(db, "cogs"),
+                                       debit=max(cost, 0), credit=max(-cost, 0), job_id=l["job_id"],
                                        memo=f"COGS {item['sku']}"))
+                cogs_lines.append(dict(account_id=item["asset_account_id"] or linked(db, "inventory"),
+                                       debit=max(-cost, 0), credit=max(cost, 0), memo=f"COGS {item['sku']}"))
         else:
             unit = l["net_amount"] / l["qty"] if l["qty"] else 0
             stock_in(db, item["id"], l["qty"], unit, doc["date"], "bill", doc_id, doc["number"])
@@ -335,14 +376,28 @@ def post_document(db, doc_id):
 
 
 def convert_document(db, doc_id, to_status):
+    """An order becomes the invoice (bill). A quote is kept as it was quoted (S35): the order or invoice is a new
+    document with its own number, linked from the quote. Returns the id of the order / invoice."""
+    write_txn(db)
     doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     if doc["status"] not in ("quote", "order"):
         raise PostingError("Only quotes/orders can be converted.")
+    if doc["converted_to"]:
+        raise PostingError(f"{doc['number']} has already been converted.")
+    if doc["status"] == "quote":
+        lines = [dict(r) for r in db.execute("SELECT * FROM document_lines WHERE document_id=? ORDER BY id", (doc_id,))]
+        header = dict(contact_id=doc["contact_id"], date=_date.today().isoformat(), due_date=doc["due_date"],
+                      reference=doc["reference"] or doc["number"], notes=doc["notes"],
+                      tax_inclusive=bool(doc["tax_inclusive"]))
+        new = save_document(db, doc["side"], header, lines, "order" if to_status == "order" else "open")
+        db.execute("UPDATE documents SET converted_to=? WHERE id=?", (new, doc_id))
+        audit(db, "convert_document", f"{doc['number']} -> document {new}")
+        return new
     if to_status == "order":
-        db.execute("UPDATE documents SET status='order' WHERE id=?", (doc_id,))
-    else:
-        post_document(db, doc_id)
+        return doc_id
+    post_document(db, doc_id)
     audit(db, "convert_document", f"{doc['number']} -> {to_status}")
+    return doc_id
 
 
 def void_document(db, doc_id):
@@ -350,6 +405,8 @@ def void_document(db, doc_id):
     doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     if doc["status"] == "void":
         raise PostingError("Already void.")
+    if doc["kind"] == "payment_credit":
+        raise PostingError("This credit is part of a payment: void the payment instead.")
     if doc["amount_paid"]:
         raise PostingError("Document has payments applied; void the payments first.")
     if doc["entry_id"]:
@@ -373,28 +430,38 @@ def void_document(db, doc_id):
 
 
 # =================================================================== payments
-def record_payment(db, direction, contact_id, bank_account_id, date, allocations, reference=None, memo=None):
-    """allocations: list of (document_id, amount_cents)."""
+def record_payment(db, direction, contact_id, bank_account_id, date, allocations, reference=None, memo=None,
+                   amount=None):
+    """allocations: list of (document_id, amount_cents). amount: what was received (paid); more than the
+    allocations leaves the rest as the customer's (supplier's) credit (S43), and with no allocations it's a
+    deposit. Returns the payment id."""
     allocations = [(d, a) for d, a in allocations if a]
-    if not allocations:
+    if not allocations and not amount:
         raise PostingError("Enter an amount against at least one document.")
     write_txn(db)  # the balance due is read and paid in one go: two people can't both pay the same invoice
     total = 0
     side = "sale" if direction == "in" else "purchase"
     for doc_id, amt in allocations:
         doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
-        if not doc or doc["side"] != side or doc["contact_id"] != int(contact_id) or doc["status"] != "open":
+        if not doc or doc["side"] != side or doc["contact_id"] != int(contact_id) or doc["status"] != "open" \
+                or (doc["kind"] or "invoice") != "invoice":
             raise PostingError("Invalid document allocation.")
         if amt < 0 or amt > doc["total"] - doc["amount_paid"]:
             raise PostingError(f"Amount for {doc['number']} exceeds the balance due.")
         total += amt
+    received = total if amount is None else amount
+    if received < total:
+        raise PostingError(f"The amounts applied ({fmt_money(total)}) are more than the payment ({fmt_money(received)}).")
+    if received <= 0:
+        raise PostingError("Enter the amount received.")
+    extra = received - total
     control = linked(db, "receivables" if direction == "in" else "payables")
     contact = db.execute("SELECT name FROM contacts WHERE id=?", (contact_id,)).fetchone()
     if direction == "in":
-        lines = [dict(account_id=bank_account_id, debit=total), dict(account_id=control, credit=total)]
+        lines = [dict(account_id=bank_account_id, debit=received), dict(account_id=control, credit=received)]
         m = memo or f"Payment; {contact['name']}"
     else:
-        lines = [dict(account_id=control, debit=total), dict(account_id=bank_account_id, credit=total)]
+        lines = [dict(account_id=control, debit=received), dict(account_id=bank_account_id, credit=received)]
         m = memo or f"Payment to {contact['name']}"
     # each document is paid only up to what's still due (a second payment of the same invoice changes no row)
     db.execute("SAVEPOINT record_payment")
@@ -409,14 +476,21 @@ def record_payment(db, direction, contact_id, bank_account_id, date, allocations
     db.execute("RELEASE record_payment")
     pid = db.execute("INSERT INTO payments (direction, contact_id, bank_account_id, date, amount, reference, memo)"
                      " VALUES (?,?,?,?,?,?,?)",
-                     (direction, contact_id, bank_account_id, date, total, reference, m)).lastrowid
+                     (direction, contact_id, bank_account_id, date, received, reference, m)).lastrowid
     eid = post_entry(db, date, m, "receipt" if direction == "in" else "payment", lines, source_id=pid,
                      reference=reference, contact_id=contact_id)
     db.execute("UPDATE payments SET entry_id=? WHERE id=?", (eid, pid))
     for doc_id, amt in allocations:
         db.execute("INSERT INTO payment_allocations (payment_id, document_id, amount) VALUES (?,?,?)",
                    (pid, doc_id, amt))
-    audit(db, "payment_" + direction, f"{fmt_money(total)} {contact['name']}")
+    if extra:
+        # the rest stays with the customer as credit: a credit line on their account, used later or refunded
+        db.execute("INSERT INTO documents (side, status, number, contact_id, date, due_date, reference, notes,"
+                   " subtotal, tax_total, total, kind, payment_id) VALUES (?,?,?,?,?,?,?,?,?,0,?,?,?)",
+                   (side, "open", next_number(db, side, "payment_credit"), contact_id, date, date, reference,
+                    f"Unapplied payment of {fmt_money(received)}", -extra, -extra, "payment_credit", pid))
+    audit(db, "payment_" + direction, f"{fmt_money(received)} {contact['name']}" +
+          (f" ({fmt_money(extra)} left as credit)" if extra else ""))
     return pid
 
 
@@ -425,12 +499,74 @@ def void_payment(db, payment_id):
     p = db.execute("SELECT * FROM payments WHERE id=?", (payment_id,)).fetchone()
     if not p or p["voided"]:
         raise PostingError("Payment not found or already void.")
+    cr = db.execute("SELECT * FROM documents WHERE payment_id=? AND kind='payment_credit'", (payment_id,)).fetchone()
+    if cr and cr["amount_paid"]:
+        raise PostingError(f"Part of this payment's credit ({cr['number']}) has been used or refunded. Undo that first.")
     reverse_entry(db, p["entry_id"])
     for a in db.execute("SELECT * FROM payment_allocations WHERE payment_id=?", (payment_id,)).fetchall():
         db.execute("UPDATE documents SET amount_paid=amount_paid-?, status='open' WHERE id=?",
                    (a["amount"], a["document_id"]))
+    if cr:
+        db.execute("UPDATE documents SET status='void' WHERE id=?", (cr["id"],))
     db.execute("UPDATE payments SET voided=1 WHERE id=?", (payment_id,))
     audit(db, "void_payment", str(payment_id))
+
+
+# ============================================================ credits (S17, S43)
+def credit_available(doc):
+    """What's left to use on a credit note or unapplied payment (positive cents)."""
+    return -(doc["total"] - doc["amount_paid"])
+
+
+def credits_for(db, contact_id, side):
+    return db.execute("SELECT * FROM documents WHERE contact_id=? AND side=? AND status='open' AND kind IN"
+                      " ('credit','payment_credit') AND total-amount_paid<0 ORDER BY date, id",
+                      (contact_id, side)).fetchall()
+
+
+def apply_credit(db, credit_id, document_id, amount, date=None):
+    """Use a credit note or unapplied payment against an invoice (bill) of the same customer (supplier)."""
+    write_txn(db)
+    cr = db.execute("SELECT * FROM documents WHERE id=?", (credit_id,)).fetchone()
+    doc = db.execute("SELECT * FROM documents WHERE id=?", (document_id,)).fetchone()
+    if not cr or cr["kind"] not in ("credit", "payment_credit") or cr["status"] != "open":
+        raise PostingError("That credit isn't available.")
+    if not doc or doc["kind"] != "invoice" or doc["status"] != "open" or doc["contact_id"] != cr["contact_id"] \
+            or doc["side"] != cr["side"]:
+        raise PostingError("Choose an open invoice of the same customer.")
+    if amount <= 0 or amount > credit_available(cr) or amount > doc["total"] - doc["amount_paid"]:
+        raise PostingError(f"Enter up to {fmt_money(min(credit_available(cr), doc['total'] - doc['amount_paid']))}.")
+    db.execute("UPDATE documents SET amount_paid=amount_paid+?, status=CASE WHEN amount_paid+?>=total THEN 'paid'"
+               " ELSE 'open' END WHERE id=?", (amount, amount, document_id))
+    db.execute("UPDATE documents SET amount_paid=amount_paid-?, status=CASE WHEN total-(amount_paid-?)>=0 THEN 'paid'"
+               " ELSE 'open' END WHERE id=?", (amount, amount, credit_id))
+    db.execute("INSERT INTO credit_uses (credit_id, document_id, amount, date) VALUES (?,?,?,?)",
+               (credit_id, document_id, amount, date or _date.today().isoformat()))
+    audit(db, "apply_credit", f"{cr['number']} -> {doc['number']} {fmt_money(amount)}")
+
+
+def refund_credit(db, credit_id, bank_account_id, date, amount, reference=None):
+    """Pay a customer's credit back to them (or a supplier's credit back to us)."""
+    write_txn(db)
+    cr = db.execute("SELECT * FROM documents WHERE id=?", (credit_id,)).fetchone()
+    if not cr or cr["kind"] not in ("credit", "payment_credit") or cr["status"] != "open":
+        raise PostingError("That credit isn't available.")
+    if amount <= 0 or amount > credit_available(cr):
+        raise PostingError(f"Refund up to {fmt_money(credit_available(cr))}.")
+    sale = cr["side"] == "sale"
+    control = linked(db, "receivables" if sale else "payables")
+    contact = db.execute("SELECT name FROM contacts WHERE id=?", (cr["contact_id"],)).fetchone()
+    lines = ([dict(account_id=control, debit=amount), dict(account_id=bank_account_id, credit=amount)] if sale else
+             [dict(account_id=bank_account_id, debit=amount), dict(account_id=control, credit=amount)])
+    eid = post_entry(db, date, f"Refund of {cr['number']}; {contact['name']}", "refund", lines,
+                     reference=reference or cr["number"], contact_id=cr["contact_id"])
+    db.execute("UPDATE journal_entries SET source_id=? WHERE id=?", (credit_id, eid))
+    db.execute("UPDATE documents SET amount_paid=amount_paid-?, status=CASE WHEN total-(amount_paid-?)>=0 THEN 'paid'"
+               " ELSE 'open' END WHERE id=?", (amount, amount, credit_id))
+    db.execute("INSERT INTO credit_uses (credit_id, refund_entry_id, amount, date) VALUES (?,?,?,?)",
+               (credit_id, eid, amount, date))
+    audit(db, "refund_credit", f"{cr['number']} {fmt_money(amount)}")
+    return eid
 
 
 # ==================================================================== banking
