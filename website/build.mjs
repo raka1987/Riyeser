@@ -535,8 +535,8 @@ const SUPABASE_ORIGIN = (() => { try { const m = /supabaseUrl:\s*"([^"]+)"/.exec
 function withCsp(html) {
   const hashes = [...new Set([...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
     .map((m) => `'sha256-${createHash('sha256').update(m[1], 'utf8').digest('base64')}'`))];
-  const csp = ["default-src 'self'", `script-src 'self' ${hashes.join(' ')}`, "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self' data:",
-    `connect-src 'self' https://api.github.com${SUPABASE_ORIGIN ? ' ' + SUPABASE_ORIGIN : ''}`, "frame-src 'none'", "object-src 'none'", "base-uri 'self'", "form-action 'self'"].join('; ');
+  const csp = ["default-src 'self'", `script-src 'self' https://static.cloudflareinsights.com ${hashes.join(' ')}`, "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self' data:",
+    `connect-src 'self' https://api.github.com https://cloudflareinsights.com${SUPABASE_ORIGIN ? ' ' + SUPABASE_ORIGIN : ''}`, "frame-src 'none'", "object-src 'none'", "base-uri 'self'", "form-action 'self'"].join('; ');
   return html.replace('<meta charset="utf-8">', `<meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">`);
 }
 

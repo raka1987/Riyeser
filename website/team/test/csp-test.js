@@ -22,7 +22,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   for (const path of pages) {
     const pg = await open(path);
     const meta = await pg.$eval('meta[http-equiv="Content-Security-Policy"]', (m) => m.content).catch(() => '');
-    check(/default-src 'self'/.test(meta) && /script-src 'self' 'sha256-/.test(meta) && !/unsafe-inline'[^;]*;?\s*style/.test(meta.split('script-src')[1].split(';')[0]), `${path}: has the policy (scripts by hash only)`);
+    check(/default-src 'self'/.test(meta) && /script-src 'self' (https:\/\/static\.cloudflareinsights\.com )?'sha256-/.test(meta) && !/unsafe-inline'[^;]*;?\s*style/.test(meta.split('script-src')[1].split(';')[0]), `${path}: has the policy (scripts by hash only)`);
     if (path === '/index.html') check(/connect-src [^;]*https:\/\/[a-z0-9]+\.supabase\.co/.test(meta), 'website traffic (track_visit) may reach Riyeser\'s Supabase project');
     const fonts = await pg.evaluate(() => document.fonts.status);
     const imgs = await pg.$$eval('img', (x) => x.filter((i) => i.getAttribute('src') && i.complete && i.naturalWidth === 0 && i.getAttribute('loading') !== 'lazy').map((i) => i.src));
