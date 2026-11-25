@@ -50,9 +50,10 @@ const mask = (key) => (key ? `${String(key).slice(0, 4)}…${String(key).slice(-
 // fields, so each Riyeser program can unlock its own paid module. It stays good for OFFLINE_GRACE_DAYS offline.
 const MODULE_NAMES = { basic: 'Accounting Basics', plus: 'Accounting Plus', payroll: 'Payroll', pos: 'POS', bookings: 'Bookings',
   as_built: 'As Built', calls: 'Riyeser Link Plus' };   // calls: Riyeser Link Plus (Link calls and Riyeser Link Office)
-// What each paid program costs a month, for the "trial ended" messages. The same as riyeser.com (website/prices.mjs).
-const MODULE_PRICES = { basic: 'US$25/month', plus: 'US$39/month', payroll: 'US$25/month', pos: 'US$29/month', bookings: 'US$25/month',
-  as_built: 'US$29/month', calls: 'US$39/month' };
+// What each paid program costs a month, for the "trial ended" messages: from the one price list (core/prices.js,
+// the same as riyeser.com's website/prices.mjs).
+const prices = require('./prices');
+const MODULE_PRICES = Object.fromEntries(Object.keys(MODULE_NAMES).map((id) => [id, prices.monthly(id)]));
 const HOME_URL = 'https://riyeser.com/link/';   // the Riyeser home page, where paid programs are added
 /** What's locked, what still works, the price and where to add it, for a paid program that isn't on. */
 function lockedText(id) {
@@ -126,7 +127,7 @@ function onlinePlan(appData, now = Date.now(), d = read(appData)) {
  *   { mode: 'trial' | 'licensed' | 'expired', daysLeft, trialEnds, plan, email, key (masked), checkedAt, needsCheck, message }
  */
 function status(appData, now = Date.now()) {
-  const s = localStatus(appData, now);
+  const s = { ...localStatus(appData, now), prices: prices.forWindow() };
   const plan = onlinePlan(appData, now);
   return plan ? { ...s, online: plan } : s;
 }

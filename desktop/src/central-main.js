@@ -55,7 +55,7 @@ const PROGRAMS = [
   // Two separate apps that share the same books. The old single "Riyeser Accounting" 1.x counts as Plus.
   { id: 'accounting-basics', name: 'Accounting Basics', full: 'Riyeser Accounting Basics', icon: '📗', desc: 'Invoicing, quotes, customers and stock. Free for 90 days.',
     dirs: ['Riyeser Accounting Basics'], exes: ['Riyeser Accounting Basics.exe'], links: ['Riyeser Accounting Basics'], pages: ['invoice'] },
-  { id: 'accounting', name: 'Accounting Plus', full: 'Riyeser Accounting Plus', icon: '📒', desc: 'Full books: banking, payroll, journals, jobs and budgets. Included in your licence.',
+  { id: 'accounting', name: 'Accounting Plus', full: 'Riyeser Accounting Plus', icon: '📒', desc: 'Full books: banking, payroll, journals, jobs and budgets. Free for 90 days.',
     dirs: ['Riyeser Accounting Plus', 'Riyeser Accounting'], exes: ['Riyeser Accounting Plus.exe', 'Riyeser Accounting.exe'], links: ['Riyeser Accounting Plus', 'Riyeser Accounting'], pages: ['invoice'] },
   // The till on its own. It opens the same company files as Accounting and installs next to it.
   { id: 'pos', name: 'POS', full: 'Riyeser POS', icon: '🧾', desc: 'The till for shops, cafes and restaurants. Free for 90 days.',
@@ -323,7 +323,7 @@ function registerIpc() {
   handle('central:licence', async () => { const s = licence.status(appData); return s.needsCheck ? licence.recheck(appData, { fetchFn: lfetch }) : s; });
   // The company's plan from Riyeser online: when Central starts, once a day, and on "Check now".
   handle('central:licenceRefresh', async () => { await refreshOnlineLicence(true); return licence.status(appData); });
-  handle('central:licenceActivate', (key) => licence.activate(appData, key, { fetchFn: lfetch }));
+  // S12: no licence keys to type any more: the plan comes from the Riyeser account (Company page sign-in)
   handle('central:licenceRemove', () => licence.remove(appData, { fetchFn: lfetch }));
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
   handle('central:home', () => shell.openExternal(licence.HOME_URL));   // Riyeser home page: add a paid program there

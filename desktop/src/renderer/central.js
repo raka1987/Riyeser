@@ -87,9 +87,11 @@ tick(); setInterval(tick, 60000);
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
 const ORDER = ['central', 'team', 'linkoffice', 'invoices', 'bookings', 'accounting-basics', 'accounting', 'pos', 'payroll', 'desk', 'pdf', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
-// Free programs with a paid upgrade: a gold "★ Plus" pill (the same as on riyeser.com). Prices in US dollars a month per business.
-const PLUS = { team: 'Premium version available: Riyeser Link Plus adds calls, desk phones and 20 GB of files for US$39/month' };
-const plusPill = (id, act = true) => (PLUS[id] ? `<span class="pluspill"${act ? ' data-lic="buy" role="link" tabindex="0"' : ''} title="${esc(PLUS[id])}">★ Plus available</span>` : '');
+// Free programs with a paid upgrade: a gold "★ Plus" pill (the same as on riyeser.com). The price comes from the one
+// price list (core/prices.js), sent with the licence status.
+const LUI = window.RiyeserLicenceUi;
+const plusInfo = (id) => (id === 'team' ? LUI.plusText(lic && lic.prices) : null);
+const plusPill = (id, act = true) => (plusInfo(id) ? `<span class="pluspill"${act ? ' data-lic="buy" role="link" tabindex="0"' : ''} title="${esc(plusInfo(id))}">★ Plus available</span>` : '');
 const LOOK = {
   team: { ic: 'chat', c: 'c-team', nav: 'Link', col: '#a21caf', blurb: 'Chat, and Link Plus calls' },   // Riyeser Link (program id still "team")
   linkoffice: { ic: 'phone', c: 'c-link', nav: 'Link Office', col: '#0e7490', blurb: 'Comes with Riyeser Link Plus' },
@@ -173,8 +175,11 @@ function renderCards() {
   const want = ((cl && cl.planMissing) || []).map((x) => programs.find((p) => p.id === x.id)).filter((p) => p && LOOK[p.id]);
   $('#cards').hidden = !mine.length && !want.length;
   $('#cards').innerHTML = mine.map((p) => {
-    const L = LOOK[p.id]; const c = cardLine(p.id);
-    return `<button class="pcard" data-open="${esc(p.id)}" title="Open ${esc(p.full)}"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}${PLUS[p.id] ? ` ${plusPill(p.id, false)}` : ''}</b><span class="ps${c.alert ? ' bad' : ''}">${esc(c.s)}</span>${CHEV}</button>`;
+    const L = LOOK[p.id]; let c = cardLine(p.id);
+    // a paid program's card says where it really stands (S12): paid, free trial, trial ended
+    const st = p.id !== 'linkoffice' ? LUI.programStatus(p.id, lic) : null;
+    if (st && (st.alert || c.s === L.blurb)) c = { s: st.text, alert: st.alert };
+    return `<button class="pcard" data-open="${esc(p.id)}" title="Open ${esc(p.full)}"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}${plusInfo(p.id) ? ` ${plusPill(p.id, false)}` : ''}</b><span class="ps${c.alert ? ' bad' : ''}">${esc(c.s)}</span>${CHEV}</button>`;
   }).join('') + want.map((p) => {
     const L = LOOK[p.id];
     return `<div class="pcard want"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}</b><span class="ps">On your plan, not installed yet</span>
@@ -254,7 +259,7 @@ function renderLayout() {
 function renderApps() {
   const others = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')))
     .map((p) => (p.id === 'accounting' && has('accounting-basics') ? { ...p, name: 'Upgrade to Accounting Plus' } : p));
-  $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc">${logo(p, 44)}<div><b>${esc(p.name)}</b> ${plusPill(p.id)}<p>${esc(p.desc)}</p>
+  $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc">${logo(p, 44)}<div><b>${esc(p.name)}</b> ${plusPill(p.id)}<p>${esc(p.desc)}</p>${(() => { const st = LUI.programStatus(p.id, lic); return st ? `<p class="lbl${st.alert ? ' bad' : ''}">${esc(st.text)}</p>` : ''; })()}
       <div class="row instrow" data-instrow="${esc(p.id)}">${installing === p.id ? instProgress() : `<button class="btn" data-install="${esc(p.id)}" title="Download and install it now">Install</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-help="${esc(p.id)}">Learn more</button><button class="link" data-get="${esc(p.id)}" title="Its page on riyeser.com">Download page</button><button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`}</div></div></div>`).join('')
     : '<div class="lbl">You have every Riyeser program.</div>';
 }
@@ -615,7 +620,7 @@ function licLine(s) {
 }
 function renderLicence() {
   $('#licbtn').textContent = licLine(lic);
-  if (today && has('linkoffice')) renderCards();   // Riyeser Link Office's card shows its plan
+  if (today) renderCards();   // the paid programs' cards show where they stand on the plan
   const bar = $('#licbar');
   if (lic && lic.online) {   // the company's plan from Riyeser online
     const o = lic.online; const ended = o.rows.filter((r) => r.tone === 'bad'); const soon = o.rows.filter((r) => r.tone === 'warn');
@@ -628,7 +633,7 @@ function renderLicence() {
   if (show) {
     const text = lic.mode === 'trial' ? `<b>${lic.daysLeft} day${lic.daysLeft === 1 ? '' : 's'} left in your free trial</b><div class="lbl">Get a licence any time — everything you've made stays exactly where it is.</div>`
       : `<b>${lic.mode === 'licensed' ? 'Licence check due' : 'Licence needed'}</b><div class="lbl">${esc(lic.message || '')}</div>`;
-    bar.innerHTML = `<span style="font-size:24px">🔑</span><div class="grow">${text}</div><button class="go" data-lic="open">${lic.mode === 'licensed' ? 'Details' : 'Get a licence'}</button>`;
+    bar.innerHTML = `<span style="font-size:24px">🔑</span><div class="grow">${text}</div><button class="go" data-lic="open">${lic.mode === 'licensed' ? 'Details' : 'Unlock your plan'}</button>`;
   }
 }
 function openPlan(o) {
@@ -650,15 +655,12 @@ function openLicence() {
   const state = s.mode === 'licensed'
     ? `<div class="state"><span class="big">✅</span><div><b>Licensed${s.plan ? ` — ${esc(s.plan)}` : ''}</b>${s.email ? `${esc(s.email)} · ` : ''}key ${esc(s.key || '')}<div>Companies in Riyeser Accounting: ${1 + (s.extraCompanies || 0)} (1 included${s.extraCompanies ? ` + ${s.extraCompanies} extra` : ''})</div><div class="muted">Checked ${s.checkedAt ? new Date(s.checkedAt).toLocaleDateString() : '—'}. Works offline; it's re-checked now and then when you're online.</div></div></div>`
     : s.mode === 'trial'
-      ? `<div class="state"><span class="big">🎁</span><div><b>Free trial — ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left</b>Every Riyeser program is included until ${new Date(s.trialEnds).toLocaleDateString()}. No card needed.</div></div>`
+      ? `<div class="state"><span class="big">🎁</span><div><b>Free trial — ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} left</b>Every paid Riyeser program is free until ${new Date(s.trialEnds).toLocaleDateString()}. No card needed.</div></div>`
       : `<div class="state bad"><span class="big">🔑</span><div><b>Licence needed</b>${esc(s.message || '')}</div></div>`;
   body.innerHTML = `${state}
     ${s.mode === 'licensed' ? `<div class="row"><button class="btn s" data-lic="remove">Remove licence from this PC</button><button class="btn s" data-lic="buy">Manage plan</button></div>
       <p class="muted">Removing frees this computer's place so you can use the licence on another PC.</p>`
-    : `<label for="lickey"><b>Have a licence key?</b> It's in your receipt email.</label>
-      <input id="lickey" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false">
-      <div class="row"><button class="btn" data-lic="activate">Turn on licence</button><button class="btn s" data-lic="buy">See plans &amp; buy</button></div>
-      <p class="muted">All prices in US dollars, per business per month. Central, Invoices, PDF, Desk Assistant and Riyeser Link chat are free forever. Every paid program is free for 90 days, no card, then: Accounting Basics US$25, Accounting Plus $39 (it includes Basics), Payroll $25, POS $29, Bookings $25, Riyeser Link Plus $39 and As Built $29. Each includes 3 users; each extra user is $7 a month for that program. 🐣 Early bird: 50% off your first 12 months for the first 100 businesses. Extra companies in Accounting: $10 a month each. Turning on a key needs the internet once; after that it works offline.</p>`}`;
+    : LUI.signInHtml(s, esc, false)}`;
   $('#licdlg').showModal();
 }
 document.addEventListener('click', (e) => {
@@ -668,7 +670,7 @@ document.addEventListener('click', (e) => {
   if (a === 'buy') safe(() => bridge.call('central:buy'));
   if (a === 'home') safe(() => bridge.call('central:home'));
   if (a === 'refresh') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceRefresh'); renderLicence(); if (lic && lic.online) openPlan(lic.online); toast(lic && lic.online && !lic.online.stale ? 'Plan checked' : 'Couldn\'t reach Riyeser right now. Try again when you\'re online.'); } finally { b.disabled = false; } });
-  if (a === 'activate') safe(async () => { b.disabled = true; try { lic = await bridge.call('central:licenceActivate', $('#lickey').value); renderLicence(); openLicence(); toast('Licence turned on — thank you!'); } finally { b.disabled = false; } });
+  if (a === 'signin') { $('#licdlg').close(); $('#qclear').click(); setView('company'); }   // the Company page's Riyeser account sign-in
   if (a === 'remove') safe(async () => { if (!(await askConfirm({ title: 'Remove the licence from this PC?', body: 'You can type the licence key in again any time.', ok: 'Remove it' }))) return; lic = await bridge.call('central:licenceRemove'); renderLicence(); openLicence(); });
 });
 $('#licbtn').addEventListener('click', openLicence);
