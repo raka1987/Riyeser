@@ -16,7 +16,7 @@ const crypto = require('crypto');
 
 const DAY = 86400000;
 const CLOCK_SLACK_MS = 48 * 3600 * 1000;   // the PC clock may be this far behind the latest time seen
-const UNSIGNED_GRACE_DAYS = 14;            // an older Central's unsigned licence still counts this long
+const UNSIGNED_GRACE_DAYS = 14;            // an older Central's unsigned licence still counts this long (only after a signed one)
 const TRIAL_DAYS = 90;
 const OFFLINE_GRACE_DAYS = 30;
 const MARKER = '.riyeser-licence.json';    // kept in each program's own data folder, and in %APPDATA%\Riyeser
@@ -167,9 +167,11 @@ function moduleState(plan, mod, now = Date.now()) {
  * opts: { appData, ownDir (this program's data folder), now, publicKey (default: built in), write (default true) }
  * -> { state, plan, expiresAt, checkedAt, problem, message, signed }
  *   state 'trusted'   a signed licence that checks out: use plan
- *         'unsigned'  no public key built in yet (or an older Central within its 14 days): use plan as before
+ *         'unsigned'  no public key built in yet (or an older Central within its 14 days, on a PC that has had a
+ *                     signed plan): use plan as before
  *         'none'      no online plan on this PC
- *         'invalid'   edited, copied, for another business or PC, expired, clock put back, or unsigned for too long:
+ *         'invalid'   edited, copied, for another business or PC, expired, clock put back, unsigned on a PC that never had a
+ *                     signed plan, or unsigned for too long:
  *                     counts as no licence (problem says which, message says what to do)
  */
 function check({ appData, ownDir = null, now = Date.now(), publicKey, write = true } = {}) {
@@ -188,7 +190,9 @@ function check({ appData, ownDir = null, now = Date.now(), publicKey, write = tr
   }
   const s = o.signed;
   if (!s || typeof s !== 'object') {
-    // an older Riyeser Central saved it: it counts for 14 days from when this program first saw it, then not
+    // An unsigned plan is only a file anyone can write (S13). It counts for 14 days (an older Riyeser Central on a PC
+    // that has already had a signed plan from Riyeser), and not at all on a PC that has never had one.
+    if (!m.linked) return done({ state: 'invalid', plan: null, problem: 'unsigned', message: MESSAGES.update });
     if (m.unsignedSince == null) m.unsignedSince = now;
     const until = m.unsignedSince + UNSIGNED_GRACE_DAYS * DAY;
     if (now < until) return done({ state: 'unsigned', plan: unsignedPlan, checkedAt, expiresAt: Math.min(until, checkedAt + OFFLINE_GRACE_DAYS * DAY), problem: 'unsigned', message: MESSAGES.update });

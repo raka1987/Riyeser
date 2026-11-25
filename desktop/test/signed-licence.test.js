@@ -140,21 +140,34 @@ test('transition: with no key built in, unsigned licences work exactly as before
   assert.strictEqual(basicRow(a).tone, 'ok');
   assert.strictEqual(callsLicence(a, NOW).active, true);
 }));
-test('transition: once a key is built in, an older Central\'s unsigned licence gets 14 days, with "Update Riyeser Central"', () => withKey(PUB, () => {
-  const a = pc({ signed: null });
-  const first = licence.trustedOnline(a, NOW);
+test('transition: once a key is built in, an older Central\'s unsigned licence gets 14 days on a PC that has had a signed plan, with "Update Riyeser Central"', () => withKey(PUB, () => {
+  const a = pc();
+  assert.strictEqual(licence.trustedOnline(a, NOW).state, 'trusted');   // a signed plan seen here first
+  licence.saveOnline(a, PLAN, NOW + DAY);                               // then an older Central writes an unsigned one
+  edit(a, (d) => { delete d.online.signed; });
+  const first = licence.trustedOnline(a, NOW + DAY);
   assert.strictEqual(first.state, 'unsigned'); assert.match(first.message, /Update Riyeser Central to keep your plan up to date/);
-  assert.match(licence.onlinePlan(a, NOW).message, /Update Riyeser Central/);
+  assert.match(licence.onlinePlan(a, NOW + DAY).message, /Update Riyeser Central/);
   const c = callsLicence(a, NOW + 5 * DAY); assert.ok(c.active); assert.match(c.message, /Update Riyeser Central/);
-  licence.saveOnline(a, PLAN, NOW + 13 * DAY);   // still unsigned a fortnight on
-  assert.strictEqual(licence.trustedOnline(a, NOW + 13 * DAY).state, 'unsigned');
-  const late = licence.trustedOnline(a, NOW + 15 * DAY);
+  assert.strictEqual(licence.trustedOnline(a, NOW + 14 * DAY).state, 'unsigned');
+  const late = licence.trustedOnline(a, NOW + 16 * DAY);
   assert.deepStrictEqual([late.state, late.problem], ['invalid', 'unsigned']);
   assert.match(late.message, /Update Riyeser Central/);
-  assert.strictEqual(callsLicence(a, NOW + 15 * DAY).active, false);
+  assert.strictEqual(callsLicence(a, NOW + 16 * DAY).active, false);
   // once Central is updated, the signed licence works straight away
-  licence.saveOnline(a, PLAN, NOW + 16 * DAY, sign(PLAN, { issued: NOW + 16 * DAY }));
-  assert.strictEqual(licence.trustedOnline(a, NOW + 16 * DAY).state, 'trusted');
+  licence.saveOnline(a, PLAN, NOW + 17 * DAY, sign(PLAN, { issued: NOW + 17 * DAY }));
+  assert.strictEqual(licence.trustedOnline(a, NOW + 17 * DAY).state, 'trusted');
+}));
+test('S13: a hand-written unsigned plan on a PC that never had a signed one unlocks nothing, even after deleting the markers', () => withKey(PUB, () => {
+  const a = pc({ signed: null });
+  const ev = licence.trustedOnline(a, NOW);
+  assert.deepStrictEqual([ev.state, ev.problem], ['invalid', 'unsigned']);
+  assert.match(ev.message, /Update Riyeser Central/);
+  assert.strictEqual(basicRow(a).tone, 'bad');
+  assert.strictEqual(callsLicence(a, NOW).active, false);
+  for (const d of [path.join(a, 'Riyeser'), path.join(a, 'Riyeser Central', 'data'), path.join(a, 'Riyeser Link Office', 'data')]) fs.rmSync(path.join(d, S.MARKER), { force: true });
+  assert.strictEqual(licence.trustedOnline(a, NOW + DAY).state, 'invalid');
+  assert.strictEqual(callsLicence(a, NOW + DAY).active, false);
 }));
 test('a check that only got an unsigned answer keeps the last signed licence (same business)', () => withKey(PUB, () => {
   const a = pc();
