@@ -339,7 +339,7 @@ const breakRules = () => { try { return (JSON.parse(getSettings().payroll_breaks
 const breakOf = (t, rules = breakRules()) => { const h = hoursOf(t); const r = rules.filter(x => h > +x.after_hours).sort((a, b) => b.minutes - a.minutes)[0]; return r ? Math.min(h, r.minutes / 60) : 0; };
 const deductionsOf = e => { try { return (JSON.parse(e.deductions || '[]') || []).filter(d => d && d.name && +d.amount > 0).map(d => ({ name: String(d.name).slice(0, 60), amount: round2(d.amount) })); } catch { return []; } };
 // Clock in / out rules (time clock PIN screen and the staff 'Clock in' button):
-//  - one shift per person per day: a second clock-in the same day is refused (a manager adjusts the timesheet)
+//  - several shifts a day are fine (split shifts, S32), as long as they don't overlap
 //  - no clocking in during a shift that's already recorded (e.g. 8:00am–5:00pm entered by a manager)
 //  - clocking out within 2 minutes of clocking in is a double tap: that clock-in is cancelled, not saved as 0 hours
 const fmt12h = s => { const [h, m] = s.slice(11, 16).split(':').map(Number); return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')}${h < 12 ? 'am' : 'pm'}`; };
@@ -353,14 +353,13 @@ function punch(userId, now, notes, confirmLong = false) {
       db.prepare('DELETE FROM timesheets WHERE id = ?').run(open.id);
       return { on_shift: false, cancelled: true, open };
     }
+    const o = db.prepare('SELECT * FROM timesheets WHERE user_id = ? AND id != ? AND clock_in > ? AND clock_in < ? LIMIT 1').get(userId, open.id, open.clock_in, now);
+    if (o) bad(`A shift is already recorded from ${o.clock_in.slice(0, 10)} ${fmt12h(o.clock_in)}, inside this one. Ask a manager to fix the timesheet.`);
     db.prepare('UPDATE timesheets SET clock_out = ? WHERE id = ?').run(now, open.id);
     return { on_shift: false, open };
   }
-  const day = now.slice(0, 10);
   const covering = db.prepare('SELECT * FROM timesheets WHERE user_id = ? AND clock_in <= ? AND clock_out > ? LIMIT 1').get(userId, now, now);
   if (covering) bad(`A shift is already recorded ${fmt12h(covering.clock_in)}–${fmt12h(covering.clock_out)} today. Ask a manager to adjust the timesheet.`);
-  const done = db.prepare('SELECT * FROM timesheets WHERE user_id = ? AND substr(clock_in,1,10) = ? ORDER BY clock_in LIMIT 1').get(userId, day);
-  if (done) bad(`Already clocked in today (${fmt12h(done.clock_in)}${done.clock_out ? '–' + fmt12h(done.clock_out) : ''}). One shift per day: ask a manager to adjust the timesheet.`);
   db.prepare('INSERT INTO timesheets(user_id, clock_in, notes) VALUES(?,?,?)').run(userId, now, notes);
   return { on_shift: true };
 }
@@ -395,15 +394,22 @@ app.get('/api/staff/timeclock', requirePerm('timeclock.use'), wrap((req, res) =>
   });
   res.json({ now, staff: rows });
 }));
+// S32: wrong PINs are counted per staff member (one person's mistakes don't lock the office PC for everyone), and
+// clocking someone in without their PIN needs the signed-in manager's own PIN
+const failsOf = key => { const nowMs = Date.now(), f = (clockFails.get(key) || []).filter(x => nowMs - x < 10 * 60 * 1000); clockFails.set(key, f); return f; };
 app.post('/api/staff/timeclock/punch', requirePerm('timeclock.use'), wrap((req, res) => {
-  const key = req.ip, nowMs = Date.now();
-  const fails = (clockFails.get(key) || []).filter(x => nowMs - x < 10 * 60 * 1000);
-  if (fails.length >= 10) throw new HttpError(429, 'Too many wrong PINs. Please wait 10 minutes or ask a manager.');
   const u = db.prepare('SELECT id, name, clock_pin FROM users WHERE id = ? AND active = 1').get(+req.body.user_id);
-  const override = req.body.override === true && canTimesheets(req.user) && inScope(req.user, 'timesheets', +req.body.user_id, 2);
-  if (!u || (!override && (!u.clock_pin || String(req.body.pin || '').trim() !== u.clock_pin))) {
-    fails.push(nowMs); clockFails.set(key, fails);
-    throw new HttpError(403, 'Wrong PIN. Try again, or ask a manager to check your time-clock PIN.');
+  if (!u) throw new HttpError(404, 'Choose your name.');
+  const override = req.body.override === true;
+  if (override) {
+    if (!(canTimesheets(req.user) && inScope(req.user, 'timesheets', u.id, 2))) throw new HttpError(403, 'Clocking someone in without their PIN needs timesheet access.');
+    const mf = failsOf('m' + req.user.id), mine = db.prepare('SELECT clock_pin FROM users WHERE id = ?').get(req.user.id) || {};
+    if (mf.length >= 10) throw new HttpError(429, `Too many wrong PINs for ${req.user.name}. Please wait 10 minutes.`);
+    if (!mine.clock_pin || String(req.body.manager_pin || '').trim() !== mine.clock_pin) { mf.push(Date.now()); throw new HttpError(403, `Enter your own PIN, ${req.user.name}, to clock ${u.name} in or out without theirs.`); }
+  } else {
+    const fails = failsOf('u' + u.id);
+    if (fails.length >= 10) throw new HttpError(429, `Too many wrong PINs for ${u.name}. Please wait 10 minutes or ask a manager.`);
+    if (!u.clock_pin || String(req.body.pin || '').trim() !== u.clock_pin) { fails.push(Date.now()); throw new HttpError(403, 'Wrong PIN. Try again, or ask a manager to check your time-clock PIN.'); }
   }
   const now = localNowISO(getSettings().timezone);
   const r = punch(u.id, now, override ? `time clock (by ${req.user.name})` : 'time clock', req.body.confirm_long === true);

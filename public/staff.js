@@ -490,14 +490,16 @@ function pinPad(s) {
       <div class="muted small">${s.on_shift ? `On shift since ${fmtTime(s.since.slice(11, 16))}` : 'Enter your 4-digit PIN'}</div></div>
     <div class="pin-dots">${'<i></i>'.repeat(4)}</div><div class="pin-err"></div>
     <div class="pin-keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, '⌫'].map(k => `<button type="button" data-k="${k}">${k}</button>`).join('')}</div>
-    ${canTS() ? `<button type="button" class="btn ghost sm" id="no-pin" style="width:100%;margin-top:14px">${s.on_shift ? 'Clock out' : 'Clock in'} without PIN (recorded as done by ${esc(ME.name.split(' ')[0])})</button>` : ''}
+    ${canTS() ? `<button type="button" class="btn ghost sm" id="no-pin" style="width:100%;margin-top:14px">${s.on_shift ? 'Clock out' : 'Clock in'} without their PIN (${esc(ME.name.split(' ')[0])} enters their own PIN)</button>` : ''}
   </div>`);
   m.el.style.maxWidth = '380px';
   const dots = () => $$('.pin-dots i', m.el).forEach((d, i) => d.classList.toggle('f', i < pin.length));
-  const submit = async (override = false, confirm_long = false) => {
+  let byManager = false; // S32: "without their PIN" = the signed-in manager types their own PIN on the same pad
+  const submit = async () => {
+    const body = byManager ? { user_id: s.id, override: true, manager_pin: pin } : { user_id: s.id, pin };
     try {
-      const r = await api('/api/staff/timeclock/punch', { body: { user_id: s.id, pin, override, confirm_long } }).catch(e => {
-        if (e.data && e.data.long_shift && confirm(e.message)) return api('/api/staff/timeclock/punch', { body: { user_id: s.id, pin, override, confirm_long: true } });
+      const r = await api('/api/staff/timeclock/punch', { body }).catch(e => {
+        if (e.data && e.data.long_shift && confirm(e.message)) return api('/api/staff/timeclock/punch', { body: { ...body, confirm_long: true } });
         throw e;
       });
       m.close();
@@ -511,7 +513,7 @@ function pinPad(s) {
     if (pin.length === 4) submit();
   };
   $$('.pin-keys button', m.el).forEach(b => b.onclick = () => press(b.dataset.k));
-  if ($('#no-pin', m.el)) $('#no-pin', m.el).onclick = () => submit(true);
+  if ($('#no-pin', m.el)) $('#no-pin', m.el).onclick = () => { byManager = true; pin = ''; dots(); $('.pinpad .muted.small', m.el).textContent = `${ME.name}: enter YOUR PIN to do this for ${s.name}`; $('#no-pin', m.el).remove(); };
   const keyh = e => { if (!document.body.contains(m.el)) return document.removeEventListener('keydown', keyh); if (/^\d$/.test(e.key)) press(e.key); if (e.key === 'Backspace') press('⌫'); };
   document.addEventListener('keydown', keyh);
 }

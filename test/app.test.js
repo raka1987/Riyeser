@@ -132,9 +132,6 @@ test('time clock: any staff member clocks in/out on the office login with their 
   assert.equal(out.data.on_shift, false); assert.ok(out.data.shift_hours >= backH - 0.1, `shift_hours ${out.data.shift_hours} < ${backH}`);
   const ts = (await call('GET', `/api/staff/timesheets?user_id=${sera.id}`, null, admin)).data;
   assert.ok(ts.some(t => t.notes === 'time clock' && t.clock_out));
-  // one shift per day: a second clock-in today is refused
-  const again = await call('POST', '/api/staff/timeclock/punch', { user_id: sera.id, pin: sera.clock_pin }, office);
-  assert.equal(again.status, 400); assert.match(again.data.error, /One shift per day/);
   // a manager can't add a shift that overlaps one already recorded
   const day = ts[0].clock_in.slice(0, 10);
   assert.equal((await call('POST', '/api/staff/timesheets', { user_id: sera.id, clock_in: earlier, clock_out: ts.find(t => t.notes === 'time clock').clock_out }, admin)).status, 400);
@@ -176,12 +173,12 @@ test('front-of-house staff ticked for timesheets can enter and change times for 
   const d2 = futureWeekday(45);
   assert.equal((await call('POST', '/api/staff/timesheets', { user_id: meStaff.id, clock_in: `${d2}T08:00`, clock_out: `${d2}T12:00` }, staff)).status, 200);
   assert.equal((await call('POST', '/api/staff/timesheets', { user_id: r.data.id, clock_in: `${d2}T08:00`, clock_out: `${d2}T12:00` }, staff)).status, 403);
-  // clock someone in/out on the office PC without their PIN (clear today's shift from the earlier test first: one shift a day)
+  // clock someone in/out on the office PC without their PIN (clear today's shift from the earlier test first)
   const todayISO = (await call('GET', '/api/public/info')).data.today;
   for (const t of (await call('GET', `/api/staff/timesheets?user_id=${sera.id}&from=${todayISO}&to=${todayISO}`, null, foh)).data) await call('DELETE', `/api/staff/timesheets/${t.id}`, null, admin);
-  const p1 = await call('POST', '/api/staff/timeclock/punch', { user_id: sera.id, override: true }, foh);
+  const p1 = await call('POST', '/api/staff/timeclock/punch', { user_id: sera.id, override: true, manager_pin: r.data.clock_pin }, foh);
   assert.equal(p1.status, 200); assert.equal(p1.data.on_shift, true);
-  await call('POST', '/api/staff/timeclock/punch', { user_id: sera.id, override: true }, foh);
+  await call('POST', '/api/staff/timeclock/punch', { user_id: sera.id, override: true, manager_pin: r.data.clock_pin }, foh);
   // still no manager powers
   assert.equal((await call('GET', '/api/staff/employees', null, foh)).status, 403);
   assert.equal((await call('POST', '/api/staff/payroll/preview', { period_start: day, period_end: day }, foh)).status, 403);
@@ -551,6 +548,35 @@ test('S31: a forgotten clock-out (over 12 h) must be confirmed at clock-out, and
   assert.equal(conf.status, 200, JSON.stringify(conf.data));
   assert.equal((await call('DELETE', `/api/staff/payroll/runs/${conf.data.id}`, null, admin)).status, 200); // leave these dates unpaid for later tests
   await call('PUT', `/api/staff/employees/${e.id}`, { active: false }, admin);
+});
+
+test('S32: shared time clock: wrong PINs lock only that person; no-PIN needs the manager\'s PIN; split shifts allowed', async () => {
+  const mk = async n => (await call('POST', '/api/staff/employees', { name: `Split ${n}`, username: `split${n.toLowerCase()}`, password: 'splitpass1', role: 'staff' }, admin)).data;
+  const a = await mk('A'), b = await mk('B');
+  const wrong = p => (p === '0000' ? '1111' : '0000');
+  for (let i = 0; i < 10; i++) assert.equal((await call('POST', '/api/staff/timeclock/punch', { user_id: a.id, pin: wrong(a.clock_pin) }, admin)).status, 403);
+  const locked = await call('POST', '/api/staff/timeclock/punch', { user_id: a.id, pin: a.clock_pin }, admin);
+  assert.equal(locked.status, 429); assert.match(locked.data.error, /Split A/);
+  // someone else at the same PC isn't locked out
+  const bIn = await call('POST', '/api/staff/timeclock/punch', { user_id: b.id, pin: b.clock_pin }, admin);
+  assert.equal(bIn.status, 200, JSON.stringify(bIn.data)); assert.equal(bIn.data.on_shift, true);
+  // split shift: first shift (moved an hour earlier), clock out, then clock in again the same day
+  const open = (await call('GET', `/api/staff/timesheets?user_id=${b.id}`, null, admin)).data.find(t => !t.clock_out);
+  const earlier = new Date(Date.parse(open.clock_in + 'Z') - 60 * 6e4).toISOString().slice(0, 16);
+  assert.equal((await call('PUT', `/api/staff/timesheets/${open.id}`, { clock_in: earlier, clock_out: '', notes: 'time clock' }, admin)).status, 200);
+  assert.equal((await call('POST', '/api/staff/timeclock/punch', { user_id: b.id, pin: b.clock_pin }, admin)).data.on_shift, false);
+  const again = await call('POST', '/api/staff/timeclock/punch', { user_id: b.id, pin: b.clock_pin }, admin);
+  assert.equal(again.status, 200, JSON.stringify(again.data)); assert.equal(again.data.on_shift, true);
+  // without their PIN: the signed-in manager's own PIN is needed
+  const mgrPin = (await call('GET', '/api/auth/me', null, admin)).data.user.clock_pin;
+  const noPin = await call('POST', '/api/staff/timeclock/punch', { user_id: b.id, override: true }, admin);
+  assert.equal(noPin.status, 403); assert.match(noPin.data.error, /Enter your own PIN/);
+  assert.equal((await call('POST', '/api/staff/timeclock/punch', { user_id: b.id, override: true, manager_pin: wrong(mgrPin) }, admin)).status, 403);
+  const byMgr = await call('POST', '/api/staff/timeclock/punch', { user_id: b.id, override: true, manager_pin: mgrPin }, admin);
+  assert.equal(byMgr.status, 200, JSON.stringify(byMgr.data)); assert.equal(byMgr.data.cancelled, true); // straight back out = double tap
+  const shifts = (await call('GET', `/api/staff/timesheets?user_id=${b.id}`, null, admin)).data;
+  assert.equal(shifts.length, 1); assert.ok(shifts[0].clock_out);
+  for (const p of [a, b]) await call('PUT', `/api/staff/employees/${p.id}`, { active: false }, admin);
 });
 
 test('wage reports: check the files, see the problems, import as pay history, year to date includes it', async () => {
