@@ -8,7 +8,7 @@
 //     Configuring -> Online as the heartbeat changes, then the test call. 7. Replace phone (unassign the old one, add the
 //     new one on the same extension, keep the name and location). 8. Troubleshoot, and Report a phone issue (prefilled).
 //  9. Advanced setup (manual SIP) is for admins only. 10. Let Riyeser help. 11. All steps done: folded away.
-// 12. Not on Link Plus: the upsell. 13. An older database: the steps, no errors. 14. Phone width: no sideways scrolling.
+// 12. Riyeser Link paused: how to add it. 13. An older database: the steps, no errors. 14. Phone width: no sideways scrolling.
 // Run: build the site, serve website/public on 8090, then `node website/team/test/phones-test.js <shots>`. Exits 1 on any failure.
 const { chromium, devices } = require('playwright');
 const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
@@ -20,7 +20,7 @@ const token = () => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: user.id, 
 const PASSWORD = 'Hk7mPx2vRt9wQs4n';   // made up: "the office PC's" password for extension 101
 const ago = (m) => new Date(Date.now() - m * 60000).toISOString();
 const office = (more = {}) => ({ office_id: 'lo-0001', pc_name: 'OFFICE-PC', version: '1.1.1', state: 'running', addresses: ['192.168.1.20'], sip_port: 5060, address_stable: false,
-  pc_mac: '3C:52:82:1A:2B:3C', licence: { active: true, state: 'active', text: 'Riyeser Link Plus' }, first_seen: ago(5000), last_seen: ago(2),
+  pc_mac: '3C:52:82:1A:2B:3C', licence: { active: true, state: 'active', text: 'Riyeser Link' }, first_seen: ago(5000), last_seen: ago(2),
   counts: { people: 3, groups: 1, phones_assigned: 4, phones_connected: 1, new_phones: 1, calls_in_progress: 0, calls_made: 0 },
   phones: [{ mac: '001565aabbcc', vendor: 'Yealink', model: 'T31P', extension: '101', assigned: true, registered: true, last_registered: ago(0), ip: '192.168.1.31', name: 'Reception', location: 'Head office', provisioned_at: ago(3000) },
     { mac: '000b82112233', vendor: 'Grandstream', model: 'GRP2601P', extension: '102', assigned: true, registered: false, last_registered: ago(90), ip: '192.168.1.32', name: 'Accounts', location: 'Head office', provisioned_at: ago(3000) },
@@ -264,10 +264,10 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.deepStrictEqual((await steps(p12)).map((x) => x[0]), ['✓', '✓', '✓', '✓', '·']);
     await p12.click('[data-step="test"]'); await p12.waitForSelector('.lo-setdone'); console.log('test call ticked by hand: folded away');
 
-    // 12. not on Link Plus: the upsell
+    // 12. Riyeser Link paused: how to add it
     const p8 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p8.on('pageerror', (e) => errs.push(e.message));
     await fakeServer(p8, { noPlus: true, offices: [office()] }); await signIn(p8, BASE + '/link/?phones'); await p8.waitForSelector('.lo-up');
-    assert.match(await text(p8, '.lo-up p'), /^Desk phones and calls come with Riyeser Link Plus\./);
+    assert.match(await text(p8, '.lo-up p'), /^Riyeser Link is paused, so desk phones and calls are paused too\./);
 
     // 13. an older database: the steps, nothing breaks
     const p9 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p9.on('pageerror', (e) => errs.push('old db: ' + e.message));

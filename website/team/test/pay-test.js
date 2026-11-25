@@ -23,9 +23,14 @@ const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
 const user = { id: 'aaaaaaaa-0000-4000-8000-000000000001', email: 'owner@sample.test', factors: [{ id: 'f1', factor_type: 'totp', status: 'verified' }] };
 const token = (aal = 'aal2') => `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: user.id, aal, amr: [{ method: 'totp', timestamp: 1 }], exp: Math.floor(Date.now() / 1000) + 3600, role: 'authenticated' })}.sig`;
 const WS = 'bbbbbbbb-0000-4000-8000-000000000001';
-const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 7 };
-const bill = (mods, people, period, early) => { const m = mods.filter((x) => !(x === 'basic' && mods.includes('plus')));
-  return m.reduce((a, x) => a + PRICE[x] + PRICE.extra_user * Math.max(0, people - 3), 0) * (period === 'yearly' ? 10 : 1) * (early ? 0.5 : 1); };
+// Pricing v2 (the same sums as riyeser_plan): users per program ({module: n}, else people), POS tills, bundles.
+const PRICE = { basic: 25, plus: 39, bookings: 25, calls: 20, payroll: 25, pos: 29, as_built: 29, users_included: 3, extra_user: 7, tills_included: 1, extra_till: 15 };
+const BUNDLES = [{ mods: ['basic', 'pos', 'calls'], price: 59 }, { mods: ['basic', 'payroll', 'calls'], price: 59 }, { mods: ['plus', 'bookings', 'calls', 'payroll', 'pos'], price: 99 }];
+const bill = (mods, people, period, early, users, tills) => { const m = mods.filter((x) => !(x === 'basic' && mods.includes('plus')));
+  const u = (x) => (users && users[x]) || people; const ex = (x) => (x === 'pos' ? Math.max(0, (tills || 1) - 1) * PRICE.extra_till : PRICE.extra_user * Math.max(0, u(x) - 3));
+  let best = null; let save = 0; BUNDLES.forEach((b) => { if (b.mods.every((x) => m.includes(x))) { const v = b.mods.reduce((a, x) => a + PRICE[x], 0) - b.price; if (v > save) { save = v; best = b; } } });
+  const sum = m.reduce((a, x) => a + PRICE[x] + ex(x), 0) - save;
+  return sum * (period === 'yearly' ? 10 : 1) * (early ? 0.5 : 1); };
 const day = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
 const printShot = async (pg, name) => { if (!SHOTS) return; await pg.emulateMedia({ media: 'print' }); await pg.screenshot({ path: path.join(SHOTS, name), fullPage: true }); await pg.emulateMedia({ media: 'screen' }); };
 const shot = async (pg, name, sel) => { if (!SHOTS) return; fs.mkdirSync(SHOTS, { recursive: true });
@@ -57,10 +62,10 @@ async function fakeServer(page, opts = {}) {
     if (opts.oldDatabase && ['my_billing', 'billing_quote', 'billing_start'].includes(fn)) return json({ code: 'PGRST202', message: `Could not find the function public.${fn} in the schema cache` }, 404);
     const owner = !opts.role || opts.role === 'owner';
     if (['my_billing', 'billing_quote', 'billing_start'].includes(fn) && !owner) return json({ code: 'P0001', message: 'Only the business owner can see prices and pay for Riyeser.' }, 400);
-    if (fn === 'billing_quote') { const amount = bill(body.mods, body.people, body.billing_period); const early = !opts.noEarly;
+    if (fn === 'billing_quote') { const amount = bill(body.mods, body.people, body.billing_period, false, body.users, body.tills); const early = !opts.noEarly;
       return json({ modules: body.mods, people: body.people, billing: body.billing_period, amount, early_bird: early, first_amount: early ? amount / 2 : null, early_cycles: early ? (body.billing_period === 'yearly' ? 1 : 12) : 0, due_now: early ? amount / 2 : amount,
         ...(opts.oldQuote ? {} : { charge_from: body.mods.includes('pos') ? day(0) : day(60), charged_today: body.mods.includes('pos') }) }); }
-    if (fn === 'billing_start') { const amount = bill(body.mods, body.people, body.billing_period); const early = !opts.noEarly;
+    if (fn === 'billing_start') { const amount = bill(body.mods, body.people, body.billing_period, false, body.users, body.tills); const early = !opts.noEarly;
       const o = { id: 'o' + (st.orders.length + 1), ref: 'RI-' + (10001 + st.orders.length), method: body.pay_method, modules: body.mods, people: body.people, billing: body.billing_period, amount,
         first_amount: early ? amount / 2 : null, early_bird: early, early_cycles: early ? 12 : 0, total: early ? amount / 2 : amount, status: 'pending', due_date: body.pay_method === 'bank' ? day(14) : null,
         created_at: new Date().toISOString(), seller };
@@ -89,7 +94,7 @@ async function fakeServer(page, opts = {}) {
     if (u.pathname === '/functions/v1/paypal/subscribe') {
       st.subscribeBody = body; st.subscribeAuth = r.request().headers().authorization;
       const o = { id: 'o' + (st.orders.length + 1), ref: 'RI-' + (10001 + st.orders.length), method: 'paypal', modules: body.modules, people: body.people, billing: body.billing,
-        amount: bill(body.modules, body.people, body.billing), early_bird: true, early_cycles: 12, status: 'pending', created_at: new Date().toISOString(), seller };
+        amount: bill(body.modules, body.people, body.billing, false, body.users, body.tills), early_bird: true, early_cycles: 12, status: 'pending', created_at: new Date().toISOString(), seller };
       o.first_amount = o.amount / 2; o.total = o.first_amount; st.orders.unshift(o);
       // instead of PayPal's page, straight back as if approved
       st.approved = true; return json({ approve_url: `${BASE}/link/?paid=${o.ref}&subscription_id=I-SUB0001&ba_token=BA-1&token=EC-1`, ref: o.ref });
@@ -115,18 +120,19 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   const web = await newPage(1300);
   await web.goto(`${BASE}/pricing.html`);
   const rows = await web.$$eval('tr[data-row]', (rs) => rs.map((r) => [r.dataset.row, [...r.querySelectorAll('.buybtns a')].map((a) => [a.textContent, a.getAttribute('href')])]));
-  check(rows.length >= 6 && rows.every(([m, l]) => l.length === 2 && l[0][0] === 'Start free for 90 days' && l[0][1] === `/link/?signup&add=${m}` && l[1][0] === 'Buy now' && l[1][1] === `/link/?signup&add=${m}&buy=1`),
+  check(rows.length >= 6 && rows.filter(([m]) => m !== 'link-office').every(([m, l]) => l.length === 2 && l[0][0] === 'Start free for 90 days' && l[0][1] === `/link/?signup&add=${m}` && l[1][0] === 'Buy now' && l[1][1] === `/link/?signup&add=${m}&buy=1`),
     `pricing rows: Start free + Buy now on every paid program (${rows.map((r) => r[0]).join(', ')})`);
   const eds = await web.$$eval('#accounting .plan .buybtns', (x) => x.map((d) => d.dataset.buy));
   check(eds.join() === 'basic,plus', `pricing checklists: Basics and Plus cards have the buttons (${eds})`);
-  await web.uncheck('[data-m=basic]'); await web.check('[data-m=plus]'); await web.check('[data-m=payroll]'); await web.fill('#users', '5'); await web.dispatchEvent('#users', 'input'); await web.check('#yearly');
+  await web.uncheck('[data-m=basic]'); await web.check('[data-m=plus]'); await web.check('[data-m=payroll]');
+  for (const m of ['plus', 'payroll']) { await web.fill(`[data-u=${m}]`, '5'); await web.dispatchEvent(`[data-u=${m}]`, 'input'); } await web.check('#yearly');
   check((await web.textContent('#total')) === 'US$920 a year', 'calculator: 920 a year');
-  check(await web.getAttribute('#calcpay', 'href') === '/link/?signup&add=plus,payroll&users=5&period=yearly&buy=1' && (await web.textContent('#calcpay')) === 'Buy this plan', `calculator: Buy this plan carries the plan (${await web.getAttribute('#calcpay', 'href')})`);
-  check(await web.getAttribute('#calcfree', 'href') === '/link/?signup&add=plus,payroll&users=5&period=yearly', 'calculator: Start free carries it too');
+  check(await web.getAttribute('#calcpay', 'href') === '/link/?signup&add=plus,payroll&u=plus:5,payroll:5&period=yearly&buy=1' && (await web.textContent('#calcpay')) === 'Buy this plan', `calculator: Buy this plan carries the plan (${await web.getAttribute('#calcpay', 'href')})`);
+  check(await web.getAttribute('#calcfree', 'href') === '/link/?signup&add=plus,payroll&u=plus:5,payroll:5&period=yearly', 'calculator: Start free carries it too');
   await web.uncheck('#yearly'); await web.uncheck('[data-m=plus]'); await web.uncheck('[data-m=payroll]');
   check(await web.isHidden('#calcbuy'), 'calculator: no buy buttons with nothing ticked');
   await web.check('[data-m=plus]');
-  await (await web.$('#link-plus')).scrollIntoViewIfNeeded();
+  await (await web.$('#link')).scrollIntoViewIfNeeded();
   if (SHOTS) { const box = await web.evaluate(() => { const t = document.querySelector('.ptable-wrap').getBoundingClientRect(); const g = [...document.querySelectorAll('.ptable tr.grp')].pop().getBoundingClientRect();
     return { x: t.left, y: g.top + scrollY, width: t.width, height: t.bottom - g.top }; });
     await web.screenshot({ path: path.join(SHOTS, 'pricing-buttons.png'), fullPage: true, clip: box }); }
@@ -146,15 +152,24 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   await pg.click('button[type=submit]'); await pg.waitForSelector('#gf .ok');
   check(st.signup && st.signup.redirectTo === `${BASE}/link/?signup&add=calls&buy=1`, `the confirmation email comes back with the program (${st.signup && st.signup.redirectTo})`);
   await signIn(pg); await pg.waitForSelector('#apf');
-  check(await pg.isChecked('#apf input[value=calls]') && !(await pg.isChecked('#apf input[value=plus]')), 'after sign-in: Add to my plan, Riyeser Link Plus ticked');
+  check(await pg.isChecked('#apf input[value=calls]') && !(await pg.isChecked('#apf input[value=plus]')), 'after sign-in: Add to my plan, Riyeser Link ticked');
   check(!(await pg.evaluate(() => location.search)).includes('add='), 'the address is tidied');
   // ---- 3. the total
   const total = () => pg.textContent('#aptotal');
-  await pg.fill('#apf input[name=people]', '4'); await pg.dispatchEvent('#apf input[name=people]', 'input'); await pg.waitForTimeout(150);
-  check((await total()).includes('US$46.00') && (await pg.textContent('#apbrk')).includes('1 extra person × US$7'), `Link Plus, 4 people = US$46 (${await total()})`);
+  const users = async (m, n) => { await pg.fill(`#apf input[data-u=${m}]`, String(n)); await pg.dispatchEvent(`#apf input[data-u=${m}]`, 'input'); };
+  await users('calls', 4); await pg.waitForTimeout(150);
+  check((await total()).includes('US$27.00') && (await pg.textContent('#apbrk')).includes('1 extra user × US$7'), `Riyeser Link, 4 people = US$27 (${await total()})`);
+  // a bundle: Shop ticks Accounting Basics, POS and Riyeser Link, and the bundle price shows
+  await pg.click('[data-bundle=shop]'); await pg.waitForTimeout(200);
+  check(await pg.isChecked('#apf input[value=basic]') && await pg.isChecked('#apf input[value=pos]') && (await pg.textContent('#apbrk')).includes('Shop bundle') && (await total()).includes('US$66.00'),
+    `Shop bundle: 59 + 1 extra Link user = US$66 (${await total()})`);
+  await users('pos', 2); await pg.waitForTimeout(200);
+  check((await total()).includes('US$81.00') && (await pg.textContent('#apbrk')).includes('1 extra till × US$15'), `a second till: US$81 (${await total()})`);
+  await shot(pg, 'add-to-plan-bundle.png', '.mcard');
+  await users('pos', 1); await pg.uncheck('#apf input[value=basic]'); await pg.uncheck('#apf input[value=pos]');
   await pg.check('#apf input[value=plus]'); await pg.check('#apf input[value=basic]');
   check(!(await pg.isChecked('#apf input[value=plus]')) && await pg.isChecked('#apf input[value=basic]'), 'Basics and Plus: one or the other');
-  await pg.check('#apf input[value=plus]'); await pg.fill('#apf input[name=people]', '5'); await pg.dispatchEvent('#apf input[name=people]', 'input'); await pg.uncheck('#apf input[value=calls]'); await pg.check('#apf input[value=payroll]');
+  await pg.check('#apf input[value=plus]'); await users('plus', 5); await users('payroll', 5); await pg.uncheck('#apf input[value=calls]'); await pg.check('#apf input[value=payroll]');
   await pg.waitForTimeout(200);
   check((await total()).includes('US$92.00'), `Plus + Payroll, 5 people = US$92 (${await total()})`);
   check((await pg.textContent('#apeb')).includes('US$46.00 a month for your first 12 months'), `early bird from the database (${await pg.textContent('#apeb')})`);
@@ -168,12 +183,12 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   await pg.uncheck('#apf input[value=pos]'); await pg.waitForTimeout(150);
   await shot(pg, 'add-to-plan.png', '.mcard');
   await pg.check('#apf input[value=monthly]'); await pg.uncheck('#apf input[value=plus]'); await pg.uncheck('#apf input[value=payroll]'); await pg.check('#apf input[value=calls]');
-  await pg.fill('#apf input[name=people]', '4'); await pg.dispatchEvent('#apf input[name=people]', 'input'); await pg.waitForTimeout(200);
+  await users('calls', 4); await pg.waitForTimeout(200);
   await shot(pg, 'paypal-choice.png', '.mcard');
   // ---- 4. PayPal: away and back
   await pg.click('#appaypal'); await pg.waitForURL(/\?paid=RI-/); await pg.waitForSelector('#pdmsg');
   check((await pg.textContent('.mcard h3')).includes('Thanks, we\'re confirming your payment'), 'back from PayPal: "Thanks, we\'re confirming your payment"');
-  check(JSON.stringify(st.subscribeBody) === JSON.stringify({ ws: WS, modules: ['calls'], people: 4, billing: 'monthly' }) && /^Bearer /.test(st.subscribeAuth || ''), 'the paypal function gets the plan, with the owner\'s sign-in');
+  check(JSON.stringify(st.subscribeBody) === JSON.stringify({ ws: WS, modules: ['calls'], people: 4, billing: 'monthly', users: { calls: 4 }, tills: 1 }) && /^Bearer /.test(st.subscribeAuth || ''), 'the paypal function gets the plan, with the owner\'s sign-in');
   await shot(pg, 'paypal-confirming.png', '.mcard');
   await pg.waitForFunction(() => /Payment confirmed/.test((document.querySelector('.mcard h3') || {}).textContent || ''), null, { timeout: 15000 });
   check((await pg.textContent('#pdmsg')).includes('paid until'), `confirmed: ${(await pg.textContent('#pdmsg')).trim()}`);
@@ -198,7 +213,7 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   // ---- 6. Billing
   await pg.waitForSelector('#hbsub');
   const billing = (await pg.textContent('.hbill')).replace(/\s+/g, ' ');
-  check(billing.includes('PayPal subscription') && billing.includes('Next charge US$23.00') && billing.includes('RI-10002') && billing.includes('Payment history') && billing.includes('RR-10001'), 'Billing: subscription, next charge, invoices, payment history');
+  check(billing.includes('PayPal subscription') && billing.includes('Next charge US$13.50') && billing.includes('RI-10002') && billing.includes('Payment history') && billing.includes('RR-10001'), 'Billing: subscription, next charge, invoices, payment history');
   check(await pg.getAttribute('.hbill a:has-text("Manage in PayPal")', 'href') === 'https://www.sandbox.paypal.com/myaccount/autopay/', 'Manage in PayPal');
   await (await pg.$('#hbill')).scrollIntoViewIfNeeded(); await shot(pg, 'owner-billing.png', '.hbill');
   await pg.click('[data-rcpt="RR-10001"]'); await pg.waitForSelector('#printdoc');
@@ -268,7 +283,7 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   await (await ph.$('tr[data-row=plus]')).scrollIntoViewIfNeeded(); await shot(ph, 'pricing-buttons-phone.png', 'tr[data-row=plus]');
   await ph.goto(`${BASE}/programs/payroll.html`); check((await noScroll(ph)) <= 0, 'phone: program page fits');
   await ph.goto(`${BASE}/link/?signup&add=plus,payroll&users=5&buy=1`); await signIn(ph); await ph.waitForSelector('#apf');
-  check(await ph.isChecked('#apf input[value=plus]') && await ph.isChecked('#apf input[value=payroll]') && (await ph.inputValue('#apf input[name=people]')) === '5', 'phone: the calculator\'s plan arrives');
+  check(await ph.isChecked('#apf input[value=plus]') && await ph.isChecked('#apf input[value=payroll]') && (await ph.inputValue('#apf input[data-u=plus]')) === '5' && (await ph.inputValue('#apf input[data-u=payroll]')) === '5', 'phone: the calculator\'s plan arrives (users=5 from an older link)');
   check((await noScroll(ph)) <= 0, 'phone: Add to my plan fits');
   await shot(ph, 'add-to-plan-phone.png');
   await ph.click('#apbank'); await ph.waitForSelector('#invref'); await shot(ph, 'bank-transfer-invoice-phone.png');
@@ -282,7 +297,11 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   const fromJs = (f) => { const m = fs.readFileSync(path.join(root, f), 'utf8').match(/const PRICE = (\{[^}]+\})/); return Function(`return (${m[1]})`)(); };
   const sql = fs.readFileSync(path.join(root, 'team', 'team-chat.sql'), 'utf8').match(/function public\.riyeser_price\(item text\)[\s\S]*?\$\$;/)[0];
   const fromSql = Object.fromEntries([...sql.matchAll(/when '(\w+)' then (\d+)/g)].map((x) => [x[1], Number(x[2])]));
-  const keys = ['basic', 'plus', 'payroll', 'pos', 'bookings', 'calls', 'as_built', 'users_included', 'extra_user', 'extra_company'];
+  const keys = ['basic', 'plus', 'payroll', 'pos', 'bookings', 'calls', 'as_built', 'users_included', 'extra_user', 'tills_included', 'extra_till', 'extra_company'];
+  const sqlB = Object.fromEntries(['shop', 'office', 'business'].map((k) => [k, fromSql['bundle_' + k]]));
+  check(site.BUNDLES.every((x) => sqlB[x.id] === x.price), `riyeser_price() has the same bundle prices as prices.mjs (${JSON.stringify(sqlB)})`);
+  for (const f of ['team/team.js', 'hq/hq.js']) { const src = fs.readFileSync(path.join(root, f), 'utf8');
+    check(site.BUNDLES.every((x) => src.includes(`id: '${x.id}', name: '${x.name}', mods: ${JSON.stringify(x.mods).replace(/"/g, "'").replace(/,/g, ', ')}, price: ${x.price}`)), `${f} has the same bundles as prices.mjs`); }
   for (const [name, list] of [['team.js', fromJs('team/team.js')], ['hq.js', fromJs('hq/hq.js')], ['riyeser_price()', fromSql]]) {
     const diff = keys.filter((k) => list[k] !== site.PRICE[k]);
     check(!diff.length, `${name} has the same prices as prices.mjs${diff.length ? ': differs on ' + diff.join(', ') : ''}`);

@@ -1,5 +1,5 @@
 /* Riyeser HQ: the back office for running Riyeser. Riyeser staff only, with two-step sign-in.
-   Shows account information (companies, people counts, branches, linked PCs and versions, trials, Riyeser Link Plus,
+   Shows account information (companies, people counts, branches, linked PCs and versions, trials, Riyeser Link,
    downloads, notes), support tickets, refunds, free periods and the staff history. It never sees customers' chat
    messages, calls or books: the database only offers hq_ summaries. Support tickets are written to Riyeser, so HQ sees those.
    Every button is checked again by the database (hq_need); the website only hides what you can't do.
@@ -20,11 +20,27 @@
   const dur = (h) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
   const ROLES = [['owner', 'Owner'], ['finance', 'Finance'], ['support', 'Support'], ['senior', 'Senior support'], ['sales', 'Sales'], ['developer', 'Developer']];
   const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
-  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']];
+  // The paid programs A to Z (as everywhere else). 'calls' is Riyeser Link (chat, calls, desk phones, Link Office).
+  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built']];
   const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
   // List prices: US dollars a month per business (the same as riyeser_price() in team-chat.sql and website/prices.mjs).
   // Each paid program includes 3 users, then US$7 a month each for that program; Plus includes Basics (never both).
-  const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 7, extra_company: 10 };
+  // POS: 1 till included (unlimited cashiers), US$15 a till after. Bundles replace their programs' prices (riyeser_plan).
+  const PRICE = { basic: 25, plus: 39, bookings: 25, calls: 20, payroll: 25, pos: 29, as_built: 29, users_included: 3, extra_user: 7, tills_included: 1, extra_till: 15, extra_company: 10 };
+  const BUNDLES = [{ id: 'shop', name: 'Shop', mods: ['basic', 'pos', 'calls'], price: 59 }, { id: 'office', name: 'Office', mods: ['basic', 'payroll', 'calls'], price: 59 },
+    { id: 'business', name: 'Business', mods: ['plus', 'bookings', 'calls', 'payroll', 'pos'], price: 99 }];
+  /** The same sums as riyeser_plan in team-chat.sql: each program + US$7 per user over 3 (POS: tills), the best bundle. */
+  function planOf(mods, users, tills) {
+    const m = MODULES.map((x) => x[0]).filter((k) => mods.includes(k) && !(k === 'basic' && mods.includes('plus')));
+    const u = (k) => Math.max(1, Number(typeof users === 'number' ? users : (users || {})[k]) || PRICE.users_included); const t = Math.max(1, Number(tills) || 1);
+    let best = null; let save = 0;
+    BUNDLES.forEach((b) => { if (!b.mods.every((x) => m.includes(x))) return; const v = b.mods.reduce((a, x) => a + PRICE[x], 0) - b.price; if (v > save) { save = v; best = b; } });
+    const ex = (list) => list.reduce((a, x) => a + (x === 'pos' ? (t - 1) * PRICE.extra_till : Math.max(0, u(x) - PRICE.users_included) * PRICE.extra_user), 0);
+    const lines = [];
+    if (best) lines.push({ name: `${best.name} bundle (${best.mods.map(modName).join(', ')})`, bundle: best.id, monthly: best.price + ex(best.mods) });
+    m.filter((k) => !best || !best.mods.includes(k)).forEach((k) => lines.push({ name: modName(k), module: k, monthly: PRICE[k] + ex([k]) }));
+    return { mods: m, bundle: best ? best.id : null, lines, total: lines.reduce((a, l) => a + l.monthly, 0) };
+  }
   const GB = 1073741824;
   const gbText = (n) => { const g = Number(n || 0) / GB; return `${g >= 10 || Number.isInteger(g) ? Math.round(g) : g.toFixed(1)} GB`; };
   const money = (n) => 'US$' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: Number(n) % 1 ? 2 : 0, maximumFractionDigits: 2 });
@@ -259,10 +275,10 @@
     // payments in the demo: Harbour Cafe pays by PayPal, Sample Plumbing has a bank transfer invoice waiting, one PayPal payment failed
     let entity = { name: 'Riyeser', address: '', tax_label: 'ABN', tax_number: '', email: 'info@riyeser.com', bank: { account_name: '', bank_name: '', bsb: '', account_number: '', swift: '', note: '' } };
     const bOrders = [
-      { id: 'o1', workspace_id: 'w2', ref: 'RI-10002', method: 'paypal', modules: ['basic', 'pos', 'calls'], module_names: ['Accounting Basics', 'POS', 'Riyeser Link Plus'], people: 9, billing: 'monthly', amount: 177, first_amount: null, total: 177, status: 'active', paypal_id: '…7Q2X9K', paypal_env: 'sandbox', next_charge_at: t(-12), paid_through: t(-12).slice(0, 10), created_at: t(18) },
+      { id: 'o1', workspace_id: 'w2', ref: 'RI-10002', method: 'paypal', modules: ['basic', 'pos', 'calls'], module_names: ['Accounting Basics', 'POS', 'Riyeser Link'], bundle: 'shop', people: 9, billing: 'monthly', amount: 143, first_amount: null, total: 143, status: 'active', paypal_id: '…7Q2X9K', paypal_env: 'sandbox', next_charge_at: t(-12), paid_through: t(-12).slice(0, 10), created_at: t(18) },
       { id: 'o2', workspace_id: 'w1', ref: 'RI-10003', method: 'bank', modules: ['plus', 'payroll'], module_names: ['Accounting Plus', 'Payroll'], people: 5, billing: 'monthly', amount: 92, first_amount: 46, early_bird: true, total: 46, status: 'pending', due_date: t(-9).slice(0, 10), created_at: t(5) },
       { id: 'o3', workspace_id: 'g12', ref: 'RI-10001', method: 'paypal', modules: ['basic'], module_names: ['Accounting Basics'], people: 3, billing: 'monthly', amount: 25, total: 25, status: 'payment_failed', paypal_id: '…H8LM3P', paypal_env: 'sandbox', grace_until: t(-5).slice(0, 10), paid_through: t(1).slice(0, 10), next_charge_at: t(-2), created_at: t(40), updated_at: t(2) }];
-    const bPays = [{ id: 1, workspace_id: 'w2', order_ref: 'RI-10002', ref: 'RR-10002', method: 'paypal', status: 'completed', amount: 177, currency: 'USD', at: t(18), period_to: t(-12).slice(0, 10), provider_ref: '…4T7Y2A', module_names: ['Accounting Basics', 'POS', 'Riyeser Link Plus'] },
+    const bPays = [{ id: 1, workspace_id: 'w2', order_ref: 'RI-10002', ref: 'RR-10002', method: 'paypal', status: 'completed', amount: 143, currency: 'USD', at: t(18), period_to: t(-12).slice(0, 10), provider_ref: '…4T7Y2A', module_names: ['Accounting Basics', 'POS', 'Riyeser Link'] },
       { id: 2, workspace_id: 'g12', order_ref: 'RI-10001', ref: 'RR-10001', method: 'paypal', status: 'completed', amount: 25, currency: 'USD', at: t(31), period_to: t(1).slice(0, 10), provider_ref: '…9K2W1D', module_names: ['Accounting Basics'] },
       { id: 3, workspace_id: 'g12', order_ref: 'RI-10001', ref: null, method: 'paypal', status: 'failed', amount: 25, currency: 'USD', at: t(2), note: 'PayPal couldn\'t take the payment.', module_names: ['Accounting Basics'] },
       { id: 4, workspace_id: 'g20', order_ref: 'RI-10004', ref: 'RR-10003', method: 'bank', status: 'completed', amount: 25, currency: 'USD', at: t(4), period_to: t(-26).slice(0, 10), provider_ref: 'ANZ 55120', module_names: ['Bookings'] }];
@@ -274,8 +290,8 @@
     const dmy = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     const buyerOf = (ws) => { const c = cos.find((x) => x.id === ws) || {};
       return { name: c.name, legal_name: c.name + ' Pty Ltd', address: c.address || 'Suva', tax_number: c.tax_number || '50-12345-0-1', email: c.email || c.owner_email, company_code: c.company_code, contact: { name: c.owner_name, email: c.owner_email } }; };
-    const linesOf = (o) => { const k = o.billing === 'yearly' ? 10 : 1; const extra = Math.max(0, o.people - PRICE.users_included);
-      const rows = o.modules.map((m) => ({ text: `${modName(m)}${extra ? `, with ${extra} extra ${extra === 1 ? 'person' : 'people'} × US$${PRICE.extra_user}.00` : `, ${PRICE.users_included} people included`}${k === 10 ? ' (a year: 10 months)' : ' (a month)'}`, amount: (PRICE[m] + extra * PRICE.extra_user) * k }));
+    const linesOf = (o) => { const k = o.billing === 'yearly' ? 10 : 1;
+      const rows = planOf(o.modules, o.users || o.people, o.tills).lines.map((l) => ({ text: `${l.name}${k === 10 ? ' (a year: 10 months)' : ' (a month)'}`, amount: l.monthly * k }));
       if (Math.abs(rows.reduce((a, r) => a + r.amount, 0) - o.amount) > 0.005) return [{ text: 'Riyeser: ' + whatOf(o), amount: o.amount }];
       if (o.first_amount != null && o.first_amount < o.amount) rows.push({ text: '🐣 Early bird: half price for the first 12 months', amount: o.first_amount - o.amount }); return rows; };
     const docOrder = (o) => (o.method !== 'bank' ? null : bDocs[o.ref] || (bDocs[o.ref] = { kind: 'invoice', ref: o.ref, issued_at: o.created_at, due_date: o.due_date, seller: JSON.parse(JSON.stringify(entity)),
@@ -305,16 +321,16 @@
       const pl = plans[ws] || {}; return { workspace_id: ws, company_code: c.company_code, modules, seats: { included: 3, extra: pl.extra_users || 0, used: c.people }, extra_companies: pl.extra_companies || 0, billing: pl.billing || 'monthly', early_bird: !!pl.early_bird }; }
     function demoMonthly(ws) { const l = demoLicence(ws); let mods = Object.keys(l.modules).filter((m) => l.modules[m].status === 'active');
       if (mods.includes('plus')) mods = mods.filter((m) => m !== 'basic');   // Plus includes Basics
-      const people = Math.max(l.seats.used || 0, PRICE.users_included + (l.seats.extra || 0)); const over = Math.max(0, people - PRICE.users_included);
-      let m = mods.reduce((a, x) => a + PRICE[x] + over * PRICE.extra_user, 0); if (l.early_bird) m *= 0.5;
+      const people = Math.max(l.seats.used || 0, PRICE.users_included + (l.seats.extra || 0));
+      let m = planOf(mods, people, l.seats.tills || 1).total; if (l.early_bird) m *= 0.5;
       if (mods.some((x) => x === 'basic' || x === 'plus')) m += l.extra_companies * PRICE.extra_company;
       if (l.billing === 'yearly') m *= 10 / 12; return Math.round(m * 100) / 100; }
-    // Demo file storage (Riyeser Link files): 2 GB, 20 GB with Link Plus on, plus extra granted here.
+    // Demo file storage (Riyeser Link files): 20 GB, plus extra granted here (nothing new uploads while Link is off).
     const extraGb = {};
     function demoStorage(ws) { const c = cos.find((x) => x.id === ws); const l = demoLicence(ws); const plus = !!(l.modules.calls && l.modules.calls.active);
-      const used = ws === 'w2' ? Math.round((plus ? 20 : 2) * 0.875 * GB)   // Harbour Cafe: nearly full, for "Storage over 80%"
+      const used = ws === 'w2' ? Math.round(20 * 0.875 * GB)   // Harbour Cafe: nearly full, for "Storage over 80%"
         : Math.round(([...String(ws)].reduce((a, ch) => a + ch.charCodeAt(0), 0) % 10 + (c && c.people > 3 ? 8 : 1)) * 0.19 * GB);
-      const limit = ((plus ? 20 : 2) + (extraGb[ws] || 0)) * GB; return { used, limit, pct: Math.round(used * 1000 / limit) / 10, plus, extra_gb: extraGb[ws] || 0 }; }
+      const limit = (20 + (extraGb[ws] || 0)) * GB; return { used, limit, pct: Math.round(used * 1000 / limit) / 10, plus, extra_gb: extraGb[ws] || 0 }; }
     let nid = 4;
     const notes = { w1: [{ id: 1, kind: 'note', body: 'Called Alex: wants POS for the Lautoka branch next month.', at: t(2), by: 'Riki', author: 's1', pinned: false }],
       w2: [{ id: 2, kind: 'call', direction: 'in', contact: 'Mere', body: 'Asked about yearly billing for the second cafe.', at: t(1), by: 'Riki', author: 's1', follow_up: new Date().toISOString().slice(0, 10), pinned: false },
@@ -1009,7 +1025,7 @@
         ${attentionHtml(a, off)}
         ${o ? `<h3 class="h3">Riyeser at a glance</h3><div class="tiles">${tile('Companies', num(o.companies), `+${num(o.companies_7d)} this week · +${num(o.companies_30d)} in 30 days`)}
           ${tile('People', num(o.people), 'in all companies')}${tile('Linked PCs', num(o.pcs), `${num(o.pcs_active_7d)} active this week`)}
-          ${tile('Riyeser Link Plus', num(o.calls_paid) + ' paid', `${num(o.calls_trial)} on the free trial`)}</div>
+          ${tile('Riyeser Link', num(o.calls_paid) + ' paid', `${num(o.calls_trial)} on the free trial`)}</div>
         <div class="grid g2"><div class="card"><h3>New companies per week</h3>${columnChart(wk, (r) => r.label, (r) => Number(r.companies), 'companies')}</div>
           <div class="card"><h3>Riyeser Central versions in use <small>· PCs seen in 30 days</small></h3>${barList(o.versions || [], (r) => r.version, (r) => Number(r.pcs))}</div>
           <div class="card"><h3>Companies by country</h3>${barList(o.countries || [], (r) => r.country, (r) => Number(r.companies))}
@@ -1273,7 +1289,7 @@
   const CCOLS = [['name', 'Business'], ['owner', 'Owner'], ['phone', 'Phone'], ['plan', 'Plan'], ['trial', 'Trial ends'], ['last_active', 'Last active'], ['tickets', 'Tickets'], ['status', 'Status']];
   const SORT_DESC_FIRST = { plan: true, last_active: false, tickets: true, created: true };
   const PER_PAGE = 50;
-  const planCell = (c) => (c.paid_n == null ? (c.calls_paid_until && new Date(c.calls_paid_until) > new Date() ? '<span class="pill ok">Link Plus paid</span>' : '<span class="pill">—</span>')
+  const planCell = (c) => (c.paid_n == null ? (c.calls_paid_until && new Date(c.calls_paid_until) > new Date() ? '<span class="pill ok">Riyeser Link paid</span>' : '<span class="pill">—</span>')
     : c.paid_n > 0 ? `<span class="pill ok">${c.paid_n} paid</span><small>${esc((c.paid || []).map(modName).join(', '))}</small>`
     : c.trial_n > 0 ? '<span class="pill">Trial</span>' : '<span class="pill">Free</span>');
   async function companies() {
@@ -1351,7 +1367,7 @@
   }
 
   function closePanel() { document.querySelectorAll('.modal').forEach((x) => x.remove()); }
-  const HIST_ACTS = { 'billing.bank_paid': 'marked a bank transfer paid', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'changed the billing entity', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link Plus paid-until',
+  const HIST_ACTS = { 'billing.bank_paid': 'marked a bank transfer paid', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'changed the billing entity', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link paid-until',
     'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'licence.storage': 'granted extra file storage', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
     'staff.owner_made': 'made an HQ owner (SQL Editor)', 'ticket.viewed': 'opened a ticket', 'ticket.replied': 'replied to a ticket', 'ticket.note': 'added an internal note',
     'ticket.status': 'changed a ticket\'s status', 'ticket.priority': 'changed a ticket\'s priority', 'ticket.assigned': 'assigned a ticket', 'ticket.escalated': 'escalated a ticket',
@@ -1499,7 +1515,7 @@
         try { await api.setOwner(c.profile.id || S.cpId, String(new FormData(e.target).get('staff') || '') || null); close(); await reloadCompany(); flash('Riyeser owner saved.'); }
         catch (err) { d.querySelector('#soerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
   }
-  const MOD_ICON = { basic: '📗', plus: '📒', payroll: '🧾', pos: '🛒', bookings: '📅', as_built: '🏗️', calls: '📞' };
+  const MOD_ICON = { basic: '📗', plus: '📒', payroll: '🧾', pos: '🛒', bookings: '📅', as_built: '🏗️', calls: '💬' };
   function enabledModules(c) {
     const L = c.licence; if (!L) return '';
     return `<div class="card" id="modsCard"><h3>Enabled modules</h3><div class="mods">${MODULES.filter(([m]) => showMod(c, m)).map(([m, n]) => { const v = L.modules[m]; const on = !!v.active;
@@ -1604,7 +1620,7 @@
   function storageCard(st, manage) {
     if (!st) return '';
     const pct = Math.max(0, Math.min(100, Number(st.pct) || 0));
-    return `<div class="card" id="storCard" style="margin-top:14px"><h3>File storage <small>· Riyeser Link chat files · ${st.plus ? '20 GB with Link Plus' : '2 GB free'}${st.extra_gb ? ` + ${num(st.extra_gb)} GB extra` : ''}</small></h3>
+    return `<div class="card" id="storCard" style="margin-top:14px"><h3>File storage <small>· Riyeser Link chat files · ${st.plus ? '20 GB with Riyeser Link' : '20 GB, read-only while Riyeser Link is off'}${st.extra_gb ? ` + ${num(st.extra_gb)} GB extra` : ''}</small></h3>
       <div class="storrow"><b>${gbText(st.used)} of ${gbText(st.limit)} used</b><span class="pill${pct >= 80 ? ' warn' : ' ok'}">${Math.round(pct)}%</span></div>
       <div class="sbar${pct >= 80 ? ' warn' : ''}"><i style="width:${pct}%"></i></div>
       <p class="muted small">Over the limit, new uploads are refused with a plain message. Nothing is ever deleted automatically.</p>
@@ -1790,7 +1806,7 @@
     on('#cvMsg', () => messageCustomer()); on('#cvCall', logCall); on('#cvNote', () => addNote()); on('#addFree', addFreeTime);
     const nf = el.querySelector('#nf'); if (nf) nf.onsubmit = async (e) => { e.preventDefault(); const f = new FormData(nf);
       try { await api.noteAdd(id, { kind: 'note', body: String(f.get('body')).trim(), pinned: !!f.get('pin'), follow_up: String(f.get('fu') || '') || null }); await reloadCompany(); } catch (err) { alert(plain(err)); } };
-    on('#grantStor', () => dlg(`<h3>Grant extra storage</h3><p class="muted small">The total extra GB on top of 2 GB (or 20 GB with Link Plus). It's in the HQ history.</p>
+    on('#grantStor', () => dlg(`<h3>Grant extra storage</h3><p class="muted small">The total extra GB on top of the 20 GB that comes with Riyeser Link. It's in the HQ history.</p>
       <form id="gsf"><label class="f"><span>Extra storage (GB)</span><input name="gb" type="number" min="0" max="10000" step="1" required value="${(S.cp.storage && S.cp.storage.extra_gb) || 5}"></label>
       <label class="f"><span>Why</span><input name="why" required minlength="3" maxlength="300" placeholder="e.g. Lots of site drawings"></label><div id="gserr"></div>
       <div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Grant</button></div></form>`, (d, close) => {

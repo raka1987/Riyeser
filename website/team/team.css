@@ -812,3 +812,20 @@ fieldset.yn input { width: auto; margin: 0; padding: 0; }
   .acct .btn.sm, .home .btn.sm, .htop .btn, .cid .btn, .hmine .btn, .hacts .btn { min-height: 44px; padding-top: 10px; padding-bottom: 10px; font-size: 14px; }
 }
 :root[data-theme="dark"] .fcard .frisk { color: #fbbf24; }
+
+/* ---------- pricing v2: Add to my plan (bundles, a number for each program) and Riyeser Link paused ---------- */
+.apbund { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 12px; }
+.apb { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel, #fff); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; text-align: left; }
+.apb small { color: var(--muted); font-size: 11.5px; } .apb.pop { border-color: var(--brand); } .apb.on { background: var(--brand-l); border-color: var(--brand); }
+.apm { flex-direction: column; gap: 6px; cursor: default; }
+.apm .apmc { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.apm .apn { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; color: var(--muted); padding-left: 24px; opacity: .5; }
+.apm.on .apn { opacity: 1; }
+.apm .apn input { width: 72px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 14px; text-align: center; color: var(--ink); background: var(--panel, #fff); }
+.apm:has(.apmc input:checked) { border-color: var(--brand); background: var(--brand-l); }
+#apbrk li.bundle span { font-weight: 700; color: var(--ink); } #apbrk li.save span { color: #157a3c; font-weight: 700; }
+.lk-archbar.lk-lock { border-color: #f4d98b; background: #fff7e0; color: #3d2600; } .lk-archbar.lk-lock b { color: #3d2600; } .lk-archbar.lk-lock > .ic { color: #8a5a00; }
+.hnote.lk-lock { display: block; margin: 0 0 12px; padding: 12px 14px; border: 1px solid #f4d98b; border-radius: 12px; background: #fff7e0; color: #3d2600; font-size: 14.5px; line-height: 1.5; }
+.hnote.lk-lock .btn { margin-left: 6px; }
+:root[data-theme="dark"] .lk-archbar.lk-lock, :root[data-theme="dark"] .hnote.lk-lock { background: #2a2110; border-color: #5c4413; color: #f3dca8; }
+:root[data-theme="dark"] .lk-archbar.lk-lock b, :root[data-theme="dark"] .hnote.lk-lock b { color: #fbe7b8; }

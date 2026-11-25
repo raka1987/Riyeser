@@ -1,10 +1,10 @@
-// Riyeser Link file storage (2 GB a business free, 20 GB with Link Plus), in the demo:
+// Riyeser Link file storage (20 GB a business with Riyeser Link; nothing new while it's paused), in the demo:
 //  1. The owner's Plan & billing (Riyeser home) shows "x GB of y GB used" and warns at 80%; admins who aren't the owner
 //     get no Billing or Plan & billing and no prices, only "Files: x of y" in the Info panel.
 //  2. When the business is full, an upload is refused with a plain message (and nothing is sent).
 //  3. HQ: the customer page's File storage card, Grant extra storage (with a reason, in the HQ history), and the
 //     Companies list's "Storage over 80%" filter.
-// The demo's storage is set with sessionStorage 'riyeser.demo.storage' ('nearly' = 85% of 2 GB, 'full' = 1 MB left).
+// The demo's storage is set with sessionStorage 'riyeser.demo.storage' ('nearly' = 85% of 20 GB, 'full' = 1 MB left, 'off' = Riyeser Link paused).
 // Run: build the site, serve website/public on 8090, then `node website/team/test/storage-test.js [shots folder]`.
 const { chromium } = require('playwright');
 const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';
@@ -25,7 +25,7 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     if (!(await pg.isVisible('#coplan'))) await pg.click('#adminh');
     await pg.click('#coplan'); await pg.waitForSelector('#hplanv'); await pg.waitForSelector('#stor');
   }
-  // 1. the owner (Link Plus trial, 20 GB): Plan & billing, with the bar and no warning; no Billing item in Link
+  // 1. the owner (Riyeser Link trial, 20 GB): Plan & billing, with the bar and no warning; no Billing item in Link
   let pg = await linkDemo('');
   check(!(await pg.$('#cobill')), 'Link: no "Billing & Subscription" in Admin / Settings');
   check(!!(await pg.$('#coplan')), 'the owner sees "Plan & billing"');
@@ -34,11 +34,11 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   check(/1\.2 GB of 20 GB used/.test(t) && !(await pg.$('#stor.warn')), `owner's plan view: storage bar (${t.slice(0, 60)})`);
   check((await pg.textContent('body')).includes('To change your plan'), 'owner sees the plan and how to change it');
   await pg.close();
-  // 1b. nearly full (85% of the free 2 GB): the owner's warning
+  // 1b. nearly full (85% of the 20 GB): the owner's warning
   pg = await linkDemo('nearly');
   await openPlan(pg);
   t = (await pg.textContent('#stor')).replace(/\s+/g, ' ');
-  check(t.includes('1.7 GB of 2 GB used') && !!(await pg.$('#stor.warn')) && t.includes('85% used') && t.includes('Upgrade to Riyeser Link Plus for 20 GB, or contact Riyeser support.')
+  check(t.includes('17 GB of 20 GB used') && !!(await pg.$('#stor.warn')) && t.includes('85% used') && t.includes('Contact Riyeser support for more space.')
     && t.includes('space for files shared in Link chats (not website, email or cloud hosting)') && !/free up space/i.test(t), `80% warning (${t.slice(0, 160)})`);
   check(!!(await pg.$('#hrefund')), 'the owner can ask for a refund on Riyeser home');
   if (out) { await (await pg.$('#hplanv')).scrollIntoViewIfNeeded(); await pg.screenshot({ path: out + '/link-storage-bar.png' }); }
@@ -49,7 +49,7 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   check(!!(await pg.$('#coppl')) && !(await pg.$('#cobill')) && !(await pg.$('#coplan')), 'admin: Admin / Settings, but no Billing and no Plan & billing');
   await pg.click('[data-ch="c-jobs"]'); await pg.waitForTimeout(200); await pg.click('#infobtn'); await pg.waitForSelector('#ifiles');
   t = (await pg.textContent('#ifiles')).replace(/\s+/g, ' ');
-  check(t.includes('Files: 1.7 GB of 2 GB') && t.includes('Ask the owner about Riyeser Link Plus') && !/US\$|\$\d/.test(t), `admin Info panel: ${t}`);
+  check(t.includes('Files: 17 GB of 20 GB') && t.includes('Ask the owner to contact Riyeser support') && !/US\$|\$\d/.test(t), `admin Info panel: ${t}`);
   if (out) await pg.screenshot({ path: out + '/link-admin-info-files.png' });
   check(!/US\$\d|\$\d+ a month/.test(await pg.textContent('#lknav')), 'admin: no prices in the Link menu');
   await pg.click('[data-nav=home]'); await pg.waitForTimeout(800);
@@ -63,7 +63,7 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   await pg.setInputFiles('#file', { name: 'site-photos.zip', mimeType: 'application/zip', buffer: Buffer.alloc(2 * 1024 * 1024, 1) });
   await pg.waitForSelector('#phmsg:not([hidden])');
   t = await pg.textContent('#phmsg');
-  check(t === 'Your business has used its 2 GB of space for files shared in Link chats (not website, email or cloud hosting). Upgrade to Riyeser Link Plus for 20 GB, or contact Riyeser support.', `refused: "${t}"`);
+  check(t === 'Your business has used its 20 GB of space for files shared in Link chats (not website, email or cloud hosting). Contact Riyeser support for more space.', `refused: "${t}"`);
   check((await pg.$$eval('#msgs .msg', (m) => m.length)) === before, 'nothing was sent');
   if (out) await pg.screenshot({ path: out + '/link-storage-full.png' });
   // a small file still fits

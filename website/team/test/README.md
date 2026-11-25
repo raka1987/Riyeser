@@ -9,7 +9,7 @@
   `oldaddress-test.js` checks the old address, /team/, still works (`?signup`, `?join=`, a sign-in link's `#...`).
 - `private-test.js`: private chats with chosen people. `calls-test.js`: real calls between browser tabs in the
   demo (fake microphone and camera): person to person, a branch (first to answer), declining, the dial pad,
-  branches and extensions, and the premium upsell.
+  branches and extensions, and Riyeser Link paused.
 - `company-test.js`: Company ID, join requests (approve with job role and branch), people & access, company details,
   linked PCs, and ask-to-join → waiting → approved against a pretend server.
 - `mfa-test.js`: two-step sign-in (set up with a QR code, the reminder for owners/admins, admin screens waiting for
@@ -28,7 +28,7 @@
 - `phones-test.js`: the Phones page (Riyeser Link Office, desk phones) against a pretend Supabase: the set-up guide with
   no Link Office yet; the server address, extensions and desk phones from a heartbeat; a new phone → Give to… → the
   change is sent and done; Set up a phone by hand → Show (a one-off key goes out, the password comes back encrypted to
-  it); Make a new password; Do not disturb; add by MAC; Let Riyeser help and End it now; the Link Plus upsell; an older
+  it); Make a new password; Do not disturb; add by MAC; Let Riyeser help and End it now; Riyeser Link paused; an older
   database; phone widths. Exits 1 on failure. `rules-test.sql` covers the database side (who can report, read, send
   changes and take a password; the 5-minute window; HQ needs `link.support` plus the customer's grant).
 - HQ: `../../hq/test-hq-link.js` checks `hq-link.js` filling `#cpLink` (summary line, phones, Show password, not set up).
@@ -40,7 +40,7 @@
   `help-test.js` also checks a "Message from Riyeser" ticket and "Your details". HQ: `../../hq/test-hq-customer.js`.
 - `myphone-test.js`: ☎ My phone for every member against a pretend Supabase: a connected desk phone, no phone (the guide), Show my own
   password (through `link_my_reveal`, encrypted to a one-off key, taken once), Do not disturb, Report a phone issue (prefilled), Call
-  someone, no extension, Link Plus off, no Link Office yet, an older database, the ways in, phone widths. `phones-test.js` also covers
+  someone, no extension, Riyeser Link off, no Link Office yet, an older database, the ways in, phone widths. `phones-test.js` also covers
   Set up your office phones (5 steps), the Desk phones list's four statuses, Add desk phone through to Online, Replace phone,
   Troubleshoot and Advanced setup being for admins only; `rules-test.sql` covers `link_my_*` and `name_phone`.
 - Support workspace: `rules-test.sql` covers `support_report` (one diagnostic report and one ticket; logs, emails, long
@@ -66,15 +66,19 @@
   database). `rules-test.sql` covers the database side (who may rename and archive, two-step sign-in for admins,
   #general, read-only archived channels, mute and leave are each person's own, another business can't touch any of it).
 - Every browser test takes `LINK_BASE=http://127.0.0.1:8091` to use another port. Confirmations are in-page now (`#askyes`).
-- `pricing-test.js`: the website's prices (US dollars, per business per month, 3 users included in each program): the
-  calculator's worked examples (US$7 for each person over 3, per paid program: 5 people with Accounting Plus + Payroll = US$92,
-  Basics only = US$25, Link Plus with 4 people = US$46, Plus + Payroll + Link Plus with 5 people = US$145, never Basics and Plus both, yearly and early bird),
-  no FJD/AUD/NZD on the website, free programs listed before paid ones (Central first), and the gold "★ Plus" marker on
-  Riyeser Link. `rules-test.sql` checks the same sums in `riyeser_bill()` and `company_monthly()`.
-- `storage-test.js`: Riyeser Link file storage (2 GB a business free, 20 GB with Link Plus, plus extra from HQ): the bar
-  and the 80% warning in Billing & Subscription, the plain message when an upload would go over, and HQ's File storage
-  card, Grant extra storage and "Storage over 80%". `rules-test.sql` checks the upload rule, the limits, who can see the
-  usage and that granting needs `licences.manage`.
+- `pricing-test.js`: the website's prices (pricing v2: US dollars, per business per month, 3 users included in each program;
+  Riyeser Link US$20 is a paid program; POS 1 till and unlimited cashiers, US$15 a till; bundles Shop US$59, Office US$59,
+  Business US$99): the bundle cards, the price list (Link Office "With Riyeser Link", no price), the calculator's worked
+  examples with a number per program (Plus + Payroll, 5 users = US$92; Link with 4 = US$27; Shop = US$59; Business = US$99;
+  POS with 3 tills = US$59; the Business bundle tip; never Basics and Plus both; yearly and early bird), no FJD/AUD/NZD and nothing
+  left of the old Link Plus on the website, free programs then paid ones each A to Z everywhere (menu, finder, cards, downloads, footer), the
+  phone footer in Free and Paid columns and the home hero as one still picture on a phone. `rules-test.sql` checks the same
+  sums in `riyeser_plan()`, `riyeser_bill()` and `company_monthly()`.
+- `storage-test.js`: Riyeser Link file storage (20 GB a business with Riyeser Link, plus extra from HQ; nothing new uploads
+  while Riyeser Link is paused): the bar and the 80% warning in Billing & Subscription, the plain message when an upload would
+  go over, and HQ's File storage card, Grant extra storage and "Storage over 80%". `rules-test.sql` checks the upload rule,
+  the limits, who can see the usage and that granting needs `licences.manage`, and that chat is read-only while Riyeser Link
+  is off (no sending, editing or reactions), the free accountant, and the once-only 90-day Link trial for existing businesses.
 - `pay-test.js`: paying for Riyeser against a pretend Supabase and a pretend `paypal` function, at desktop and 390px: every paid
   program's **Start free for 90 days** and **Buy now** (pricing rows and checklists, program pages) and the calculator's **Buy this
   plan** go to `/link/?signup&add=…` (the sign-up email's link keeps it); after sign-in **Add to my plan** opens for those programs

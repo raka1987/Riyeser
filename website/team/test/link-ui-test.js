@@ -83,7 +83,7 @@ async function contrast(pg, sel) {
     assert.deepStrictEqual(P['Ana Ruiz'].slice(1), ['Offline', 'Ext. 103', 'pd st-offline']);
     assert.match(await text(pg, '[data-rt=people]'), /^People \(5\)$/);
     await pg.fill('#psearch', '20'); assert.deepStrictEqual(await pg.$$eval('#plist .lk-pn b', (x) => x.map((y) => y.textContent)), ['Jordan Lee', 'Alex Nguyen']); await pg.fill('#psearch', '');
-    assert.strictEqual((await pg.$$('#plist [data-callp]')).length, 4, 'a call button for each other person (Link Plus)');
+    assert.strictEqual((await pg.$$('#plist [data-callp]')).length, 4, 'a call button for each other person (Riyeser Link on)');
 
     // 2. status picker, and Away after 10 minutes idle
     const myStatus = () => text(pg, '#stbtn');

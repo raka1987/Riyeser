@@ -30,7 +30,7 @@
     const t = (m) => new Date(Date.now() - m * 60000).toISOString();
     return D.data || (D.data = { now: new Date().toISOString(), calls: true, can_help: true, support: { until: new Date(Date.now() + 42 * 60000).toISOString() },
       offices: [{ office_id: 'lo-demo', pc_name: 'OFFICE-PC', version: '1.1.0', state: 'running', addresses: ['192.168.1.20'], sip_port: 5060, address_stable: true, pc_mac: '3C:52:82:1A:2B:3C',
-        licence: { active: true, state: 'active', text: 'Riyeser Link Plus' }, last_seen: t(2), counts: { calls_in_progress: 1 },
+        licence: { active: true, state: 'active', text: 'Riyeser Link' }, last_seen: t(2), counts: { calls_in_progress: 1 },
         phones: [['0015654a1b2c', 'Yealink', 'T31P', '101', true], ['0015654a1b2d', 'Yealink', 'T33G', '102', true], ['000b82c1d2e3', 'Grandstream', 'GRP2601P', '201', true],
           ['000b82c1d2e4', 'Grandstream', 'GRP2601P', '202', true], ['0004134a5b6c', 'Snom', 'D735', '103', true], ['0015657d8e9f', 'Yealink', 'T31P', '104', false]]
           .map(([m, v, mo, e, on], i) => ({ mac: m, vendor: v, model: mo, extension: e, assigned: true, registered: on, last_registered: t(on ? 0 : 200), ip: `192.168.1.${31 + i}` }))
@@ -65,7 +65,7 @@
     if (!o) return 'Link Office: not set up';
     const now = data.now ? Date.parse(data.now) : Date.now();
     const fresh = now - new Date(o.last_seen) < OFFLINE_AFTER;
-    const state = !fresh ? 'offline, last on' : o.state === 'running' ? 'running on' : o.state === 'waiting-licence' ? 'waiting for Link Plus on' : o.state === 'error' ? 'not running on' : 'starting on';
+    const state = !fresh ? 'offline, last on' : o.state === 'running' ? 'running on' : o.state === 'waiting-licence' ? 'waiting for Riyeser Link on' : o.state === 'error' ? 'not running on' : 'starting on';
     const desk = (o.phones || []).filter((p) => p.assigned); const found = (o.phones || []).length - desk.length;
     return `Link Office: ${state} ${o.pc_name || 'a PC'} · v${o.version || '?'} · last seen ${ago(o.last_seen)} · ${desk.length} phone${desk.length === 1 ? '' : 's'} (${desk.filter((p) => p.registered).length} connected)`
       + `${found ? ` · ${found} new phone${found === 1 ? '' : 's'} found` : ''} · address ${(o.addresses || [])[0] || 'unknown'}${o.sip_port && o.sip_port !== 5060 ? `:${o.sip_port}` : ''} (${o.address_stable === false ? 'not stable' : 'stable'})`;

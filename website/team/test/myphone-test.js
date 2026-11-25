@@ -3,7 +3,7 @@
 //  2. Show my own password: a one-off key goes out through link_my_reveal (not the admin link_command), the password comes
 //     back encrypted to it, taken once. 3. Do not disturb for myself. 4. Report a phone issue: Get help, filled in.
 //  5. Call someone opens the dial pad. 6. A member with no desk phone: "No desk phone yet." and the guide.
-//  7. No extension yet. 8. Link Plus off, and no Link Office yet: friendly text (members: ask the owner; admins: the
+//  7. No extension yet. 8. Riyeser Link off, and no Link Office yet: friendly text (members: ask the owner; admins: the
 //     Phones set-up guide). 9. An older database. 10. The ways in: chat sidebar, Riyeser home tile, ⚙ Settings.
 // 11. Phone width: no sideways scrolling.
 // Run: build the site, serve website/public on 8090, then `node website/team/test/myphone-test.js <shots>`. Exits 1 on any failure.
@@ -140,9 +140,9 @@ const text = (pg, sel) => pg.textContent(sel).then((t) => t.replace(/\s+/g, ' ')
     assert.strictEqual(await text(p7, '#myext'), 'You don\'t have an extension yet. Ask Pat Owner to give you one in People & access.');
     assert.ok(!(await p7.$('#myshow')) && !(await p7.$('#mydnd')), 'nothing to show or switch');
 
-    // 8. Link Plus off / no Link Office yet
+    // 8. Riyeser Link off / no Link Office yet
     const [p8] = await page({ noPlus: true, my: mine({ calls: false }) }); await p8.waitForSelector('#mynone');
-    console.log('Link Plus off:', await text(p8, '#mynone'));
+    console.log('Riyeser Link off:', await text(p8, '#mynone'));
     assert.strictEqual(await text(p8, '#mynone'), 'Your business hasn\'t set up office phones yet. Ask Pat Owner.'); assert.ok(!(await p8.$('#mycall')));
     await p8.screenshot({ path: out + '/myphone-noplus.png', fullPage: true });
     const [p8b] = await page({ my: mine({ office: null, phones: [] }) }); await p8b.waitForSelector('#mynone');

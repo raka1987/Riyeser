@@ -54,10 +54,10 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   await shot(pg, 'hq-customer-money.png', '#cpBody');
   // what each payment was for; "1 person"; the early bird amount; the receipt number opens the customer's copy
   const forCell = await text('#coPayTbl tr:nth-child(2) td.forc');
-  check(/^Accounting Basics, POS, Riyeser Link Plus · 9 people · monthly · .+ – .+\d{4}$/.test(forCell), `Payments: For says what was paid for (${forCell})`);
+  check(/^Accounting Basics, POS, Riyeser Link · 9 people · monthly · .+ – .+\d{4}$/.test(forCell), `Payments: For says what was paid for (${forCell})`);
   await pg.click('#coPayTbl [data-doc="RR-10002"]'); await pg.waitForSelector('#printdoc');
   const doc = await text('#printdoc');
-  check(doc.includes('Receipt') && doc.includes('RR-10002') && doc.includes('Harbour Cafe Pty Ltd') && doc.includes('Contact: Mere') && doc.includes('US$177.00') && doc.includes('Paid by PayPal'), 'the customer\'s copy of the receipt');
+  check(doc.includes('Receipt') && doc.includes('RR-10002') && doc.includes('Harbour Cafe Pty Ltd') && doc.includes('Contact: Mere') && doc.includes('US$143.00') && doc.includes('Paid by PayPal'), 'the customer\'s copy of the receipt');
   check(await pg.isVisible('#docPrint') && await pg.isVisible('#docResend') && await pg.isVisible('#docOther'), 'Print, Resend, Send to a different email');
   await pg.click('#docResend'); await pg.waitForSelector('#rsGo');
   check((await text('.modal:last-child .mcard')).includes('mere@harbour.test'), 'Resend: says where it goes'); await pg.click('#rsGo'); await pg.waitForTimeout(300);

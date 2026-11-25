@@ -18,10 +18,13 @@
   const NAME = 'Riyeser Link';
   // Prices are in US dollars a month per business (the full list is on riyeser.com/pricing.html, from website/prices.mjs).
   // PRICE is the same list as PRICE in website/prices.mjs and riyeser_price() in team-chat.sql (pay-test.js checks they agree).
-  const PRICE = { basic: 25, plus: 39, payroll: 25, pos: 29, bookings: 25, calls: 39, as_built: 29, users_included: 3, extra_user: 7, extra_company: 10 };
-  const PRICE_LINK_PLUS = PRICE.calls;
-  const PRICE_EXTRA_USER = PRICE.extra_user;   // each person after the 3 included, a month, per paid program
-  const STORAGE_GB = { free: 2, plus: 20 };   // Riyeser Link files per business (the database enforces it: link_storage_limit)
+  // Pricing v2: Riyeser Link (module 'calls') is a paid program; POS has tills (1 included) instead of users; bundles.
+  const PRICE = { basic: 25, plus: 39, bookings: 25, calls: 20, payroll: 25, pos: 29, as_built: 29, users_included: 3, extra_user: 7, tills_included: 1, extra_till: 15, extra_company: 10 };
+  const BUNDLES = [{ id: 'shop', name: 'Shop', mods: ['basic', 'pos', 'calls'], price: 59 }, { id: 'office', name: 'Office', mods: ['basic', 'payroll', 'calls'], price: 59 },
+    { id: 'business', name: 'Business', mods: ['plus', 'bookings', 'calls', 'payroll', 'pos'], price: 99, popular: true }];
+  const PRICE_LINK = PRICE.calls;
+  const PRICE_EXTRA_USER = PRICE.extra_user;   // each user after the 3 included, a month, per paid program
+  const STORAGE_GB = { link: 20 };   // Riyeser Link files per business (the database enforces it: link_storage_limit)
   const GB = 1073741824;
   const usd = (n) => `US$${n % 1 ? n.toFixed(2) : n}`;
   const MSG_MAX = 4000;   // the longest message (messages.body in team-chat.sql); longer text goes as a .txt file (S9)
@@ -56,6 +59,11 @@
   function onlineBackend() {
     const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, storageKey: 'riyeser.team.session' } });
     const ok = ({ data, error }) => { if (error) throw error; return data; };
+    const billingRpc = async (fn, args, users, tills) => {
+      const r = await sb.rpc(fn, { ...args, users: users || null, tills: tills || 1 });
+      if (r.error && /could not find|does not exist|PGRST202/i.test(`${r.error.code || ''} ${r.error.message || ''}`)) return ok(await sb.rpc(fn, args));
+      return ok(r);
+    };
     let sub = null; let sub2 = null;
     // Parts of this release's team-chat.sql that a database may not have yet: those calls give null and the app hides them.
     const missing = (e) => /PGRST20[25]|42P01|42883|Could not find|schema cache|does not exist/i.test(String((e && (e.message || e.code)) || ''));
@@ -206,7 +214,7 @@
         return { path, name, size: file.size, type: file.type || '' };
       },
       async fileUrl(path, name) { return ok(await sb.storage.from('link-files').createSignedUrl(path, 120, { download: name })).signedUrl; },
-      // File storage (2 GB free, 20 GB with Link Plus): null on a database without this release's team-chat.sql.
+      // File storage (20 GB with Riyeser Link): null on a database without this release's team-chat.sql.
       async storage(ws) { return soft(sb.rpc('link_storage_json', { ws })); },
       async storageFits(ws, size) { return soft(sb.rpc('link_storage_fits', { ws, size })); },
       liveExtra(ws, fns) {
@@ -257,8 +265,9 @@
       async myRefunds(ws) { return ok(await sb.rpc('my_refunds', { ws })) || []; },
       // Paying (the owner): null = this database hasn't had the payments part of team-chat.sql yet (Billing then hides).
       async myBilling(ws) { return soft(sb.rpc('my_billing', { ws })); },
-      async billingQuote(ws, mods, people, period) { return ok(await sb.rpc('billing_quote', { ws, mods, people, billing_period: period })); },
-      async billingStart(ws, mods, people, period, how) { return ok(await sb.rpc('billing_start', { ws, mods, people, billing_period: period, pay_method: how })); },
+      // users: {module: users}; tills: POS tills. A database before pricing v2 doesn't take them: asked again without.
+      async billingQuote(ws, mods, people, period, users, tills) { return billingRpc('billing_quote', { ws, mods, people, billing_period: period }, users, tills); },
+      async billingStart(ws, mods, people, period, how, users, tills) { return billingRpc('billing_start', { ws, mods, people, billing_period: period, pay_method: how }, users, tills); },
       async billingCancelInvoice(ws, ref) { ok(await sb.rpc('billing_cancel_invoice', { ws, invoice_ref: ref })); },
       // The paypal Edge Function (supabase/functions/paypal on main). Its status says whether PayPal is set up.
       async paypal(route, body) {
@@ -272,7 +281,7 @@
         return j;
       },
       async paypalStatus() { try { return await this.paypal('status'); } catch { return { ready: false }; } },
-      async paypalSubscribe(ws, mods, people, period) { return this.paypal('subscribe', { ws, modules: mods, people, billing: period }); },
+      async paypalSubscribe(ws, mods, people, period, users, tills) { return this.paypal('subscribe', { ws, modules: mods, people, billing: period, users: users || null, tills: tills || 1 }); },
       async paypalCancel(ws) { return this.paypal('cancel', { ws }); },
       // Riyeser Link Office (desk phones). null = the database hasn't had this release's team-chat.sql yet.
       async linkStatus(ws) { try { return ok(await sb.rpc('link_status', { ws })); } catch (e) { if (/PGRST202|Could not find the function|schema cache/i.test(e.message || '')) return null; throw e; } },
@@ -384,9 +393,11 @@
         { extension: '102', name: 'Sam Taylor', type: 'person', registered: 2, desk_phones: 1, app_users: 1, dnd: false }, { extension: '200', name: 'Lautoka branch', type: 'group', members: 2 },
         { extension: '201', name: 'Jordan Lee', type: 'person', registered: 0, desk_phones: 1, app_users: 0, dnd: false }, { extension: '202', name: 'Alex Nguyen', type: 'person', registered: 0, desk_phones: 0, app_users: 0, dnd: true }] };
     const loCmds = {}; const loPw = {}; let loN = 0; let loSupport = null;
-    // Demo file storage. sessionStorage 'riyeser.demo.storage': 'nearly' = 85% of the free 2 GB, 'full' = 1 MB left.
+    // Demo file storage and Riyeser Link. sessionStorage 'riyeser.demo.storage': 'nearly' = 85% of the 20 GB, 'full' = 1 MB
+    // left, 'off' = Riyeser Link paused (its 90 days over, not paid: chat read-only).
     const demoStore = (() => { let k = ''; try { k = sessionStorage.getItem('riyeser.demo.storage') || ''; } catch { /* private window */ }
-      return k === 'full' ? { used: 2 * GB - 1048576, limit: 2 * GB, plus: false } : k === 'nearly' ? { used: 1.7 * GB, limit: 2 * GB, plus: false } : { used: 1.2 * GB, limit: 20 * GB, plus: true }; })();
+      return k === 'full' ? { used: 20 * GB - 1048576, limit: 20 * GB, plus: true } : k === 'nearly' ? { used: 17 * GB, limit: 20 * GB, plus: true }
+        : k === 'off' ? { used: 1.2 * GB, limit: 20 * GB, plus: false } : { used: 1.2 * GB, limit: 20 * GB, plus: true }; })();
     const reply = (ch, from, body, ms) => setTimeout(() => { const m = msg(ch, from, body, 0); m.created_at = new Date().toISOString(); msgs.push(m); listener && listener(m); }, ms);
     return {
       demo: true,
@@ -431,7 +442,7 @@
           { id: 1, at: t(2880), actor: 'u-me', action: 'workspaces.update', details: { phone: { was: '330 0000', now: '330 1234' } } }]; },
       async createTeam() { return ws; }, async joinTeam() { return ws; }, async newInvite() { return 'DEMO' + Math.floor(1000 + Math.random() * 9000); },
       async people() { return ppl.map(([user_id, display_name, role, extension, job_role]) => ({ user_id, display_name, role, extension, job_role: job_role || (role === 'owner' ? 'owner' : 'staff') })); },
-      async features() { return { calls: demoStore.plus, calls_paid: false, trial_days_left: 74 }; },   // the storage knob below turns Link Plus off
+      async features() { return { calls: demoStore.plus, link: demoStore.plus, link_status: demoStore.plus ? 'trial' : 'ended', calls_paid: false, trial_days_left: 74 }; },   // the storage knob below turns Riyeser Link off
       async branches() { return brs.map((b) => ({ ...b, people: b.people.slice() })); },
       async createBranch(_w, name) { const ext = Math.max(...brs.map((b) => b.extension)) + 100;
         brs.push({ id: 'b-' + Date.now(), name, code: name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase().padEnd(3, 'B') + '-' + Math.floor(1000 + Math.random() * 9000), extension: ext, people: [] }); },
@@ -1026,7 +1037,7 @@
   // "4 people · 3 included in each program, then US$7 a month each" (PRICE_EXTRA_USER): users are charged per paid program.
   const peopleText = (lic) => `${lic.seats.used} ${lic.seats.used === 1 ? 'person' : 'people'} · ${lic.seats.included} included per program`;
   function planHtml(lic) {
-    return `<div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
+    return `<div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
         const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
         const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
         return `<div><span>${n}</span><span class="pl ${v.status === 'active' ? 'ok' : v.active ? (v.days_left <= 14 ? 'warn' : '') : 'bad'}">${txt}</span></div>`; }).join('')}
@@ -1213,17 +1224,18 @@
         ${myDetailsHtml(me, admin)}
         ${helpHtml()}
         ${owner && lic ? `<h3 class="hsec" id="hplanv">Your plan <small>${lic.seats ? `${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}${S.billing ? 'To add programs or pay, use Billing below.' : 'To change your plan, contact Riyeser.'}</small></h3>
-        <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link Plus (calls)']]
+        <div class="hplan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS']]
           .filter(([k]) => lic.modules[k]).map(([k, n]) => `<div><span>${n}</span>${licLine(lic, k)}</div>`).join('')}</div>` : ''}
         ${owner && S.homeStore ? `${lic ? '' : '<h3 class="hsec" id="hplanv">Your plan</h3>'}${storageHtml(S.homeStore)}` : ''}
         ${owner ? billingHtml() : ''}
         ${!ready && (owner || admin) ? '<p class="muted small hloading" id="hloading" role="status">Loading your plan and billing…</p>' : ''}
         <h3 class="hsec">Riyeser Link</h3>
+        ${linkOff() ? `<div class="hnote lk-lock" id="hlinkoff" role="status"><b>Riyeser Link is paused: chat is read-only.</b> Its 90 free days have ended. Everyone can still read every message, and nothing is deleted. ${owner ? `To send messages and make calls again, add Riyeser Link to your plan (${usd(PRICE_LINK)} a month, ${PRICE.users_included} people included). <button class="btn p sm" id="haddlink">Add Riyeser Link</button>` : `To send messages again, ask the owner to add Riyeser Link on the Riyeser home page (Add to my plan).`}</div>` : ''}
         <div class="happs"><div class="happ hteam"><img src="/assets/apps/link.png" alt=""><div><b>Riyeser Link${unread ? ` <span class="badge">${unread}</span>` : ''}</b>
-          <small>Chat with the people you work with. Calls between you, your staff and other locations come with Riyeser Link Plus.</small>
-          <span class="pl ok">Chat: free forever</span> ${!owner ? '' : calls ? licLine(lic, 'calls').replace('>Free trial', '>Calls: free trial').replace('>Paid', '>Calls: paid').replace('>Not active', '>Calls: not active') : '<span class="pl">Calls: free for 90 days</span>'}</div>
+          <small>Chat and calls with the people you work with, your staff and other locations, and your office desk phones. ${usd(PRICE_LINK)} a month, free for 90 days.</small>
+          ${linkOff() ? `<span class="pl bad">Read-only</span>` : ''} ${!owner ? '' : calls ? licLine(lic, 'calls') : '<span class="pl">Free for 90 days</span>'}</div>
           <div class="hbtns"><button class="btn p sm" id="hchat">Open</button><a class="btn sm" href="${REL}RiyeserTeam-Setup.exe">⬇ Download for Windows</a></div></div>
-          ${admin ? `<button class="happ hphones" id="hphones"><span class="hpic" aria-hidden="true">☎</span><div><b>Phones</b><small>Desk phones and Riyeser Link Office: the server address for phones, who has which phone, passwords and Do not disturb.</small>${calls && owner ? licLine(lic, 'calls').replace('>Free trial', '>Link Plus: free trial').replace('>Paid', '>Link Plus: paid').replace('>Not active', '>Link Plus: not active') : ''}</div><span class="go">Open →</span></button>` : ''}
+          ${admin ? `<button class="happ hphones" id="hphones"><span class="hpic" aria-hidden="true">☎</span><div><b>Phones</b><small>Desk phones and Riyeser Link Office: the server address for phones, who has which phone, passwords and Do not disturb.</small>${calls && owner ? licLine(lic, 'calls') : ''}</div><span class="go">Open →</span></button>` : ''}
           <button class="happ hphones" id="hmyphone"><span class="hpic" aria-hidden="true">☎</span><div><b>My phone</b><small>Your extension, your desk phone, and how to set it up. Do not disturb.</small></div><span class="go">Open →</span></button></div>
         <h3 class="hsec">Programs for your PC <small>Start with Riyeser Central: it installs and updates the rest.</small></h3>
         <div class="happs">${APPS.map(([id, n, d, file, key]) => `<a class="happ" href="${REL}${file}"><img src="/assets/apps/${id}.png" alt=""><div><b>${n}</b><small>${d}</small>${owner || key === 'free' ? licLine(lic, key) : ''}</div><span class="go">⬇ Download</span></a>`).join('')}</div>
@@ -1232,6 +1244,7 @@
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
     on('#hchat', async () => { if (S.wsReady) await S.wsReady.catch(() => {}); S.home = false; render(); Hist.move(narrow() ? S.pane || 'list' : 'list'); });
     on('#hphones', () => phonesPage('home')); on('#hmyphone', () => myPhonePage('home'));
+    on('#haddlink', () => addToPlan({ add: ['calls'], buy: true }));
     on('#hout', async () => { await api.signOut(); S.team = null; gate(); });
     on('#hco', () => companyInfo(false));
     on('#hppl', () => (needs2step() ? security() : peopleAccess()));
@@ -1261,23 +1274,39 @@
   // riyeser_bill in team-chat.sql); the database works it out again when you pay (billing_start), early bird included.
   // Pay with PayPal (card or PayPal balance) goes through the paypal function to PayPal and back (?paid=RI-…);
   // bank transfer makes an invoice with the bank details. Only the owner can pay or see billing (the database checks).
-  const PAID_MODS = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['payroll', 'Payroll'], ['pos', 'POS'], ['bookings', 'Bookings'], ['as_built', 'As Built'], ['calls', 'Riyeser Link Plus']];
+  const PAID_MODS = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built']];
+  // What the number next to each program counts (POS: tills, with unlimited cashiers)
+  const UNIT = { calls: 'People', payroll: 'Office users', bookings: 'Staff calendars', pos: 'Tills' };
   const modLabel = (m) => (PAID_MODS.find((x) => x[0] === m) || [m, m])[1];
   const money = (n) => `US$${Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const longDay = (d) => (d ? new Date(String(d).length === 10 ? d + 'T00:00:00' : d).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : '');
-  /** The same sum as riyeser_bill (no extra companies): each program + PRICE.extra_user for each person over 3; yearly x 10. */
-  function billFor(mods, people, period, early = false) {
+  /** The same sums as riyeser_plan in the database (and planPrice in website/prices.mjs), no extra companies:
+   *  each program + US$7 for each user over 3 (users: {module: n}), POS 1 till included + US$15 a till, and the bundle
+   *  that saves most when the programs contain one; yearly x 10. */
+  function billFor(mods, users, period, early = false, tills = 1) {
     const m = PAID_MODS.map((x) => x[0]).filter((k) => mods.includes(k) && !(k === 'basic' && mods.includes('plus')));
-    const extra = Math.max(0, people - PRICE.users_included);
-    const lines = m.map((k) => ({ module: k, name: modLabel(k), price: PRICE[k], extra, monthly: PRICE[k] + extra * PRICE.extra_user }));
+    const u = (k) => Math.max(1, Math.round(Number(typeof users === 'number' ? users : (users || {})[k]) || PRICE.users_included));
+    const t = Math.max(1, Math.round(Number(tills) || 1));
+    let best = null; let save = 0;
+    BUNDLES.forEach((b) => { if (!b.mods.every((x) => m.includes(x))) return; const v = b.mods.reduce((a, x) => a + PRICE[x], 0) - b.price; if (v > save) { save = v; best = b; } });
+    const ex = (list) => { let eu = 0; let et = 0; list.forEach((x) => { if (x === 'pos') et = Math.max(0, t - PRICE.tills_included); else eu += Math.max(0, u(x) - PRICE.users_included); }); return [eu, et]; };
+    const lines = [];
+    if (best) { const [eu, et] = ex(best.mods); lines.push({ bundle: best.id, name: `${best.name} bundle`, mods: best.mods, price: best.price, extra: eu, tills: et, monthly: best.price + eu * PRICE.extra_user + et * PRICE.extra_till }); }
+    m.filter((k) => !best || !best.mods.includes(k)).forEach((k) => { const [eu, et] = ex([k]); lines.push({ module: k, name: modLabel(k), price: PRICE[k], extra: eu, tills: et, monthly: PRICE[k] + eu * PRICE.extra_user + et * PRICE.extra_till }); });
     const monthly = lines.reduce((a, l) => a + l.monthly, 0);
     const total = Math.round(monthly * (period === 'yearly' ? 10 : 1) * (early ? 0.5 : 1) * 100) / 100;
-    return { mods: m, lines, monthly, total };
+    return { mods: m, lines, monthly, total, bundle: best ? best.id : null, saves: save };
   }
+  /** "Shop bundle (Accounting Basics, POS, Riyeser Link), 2 extra users × US$7, 1 extra till × US$15" */
+  const lineText = (l, incl = true) => `${l.name}${l.bundle ? ` (${l.mods.map(modLabel).join(', ')})` : ''}${l.extra ? `, ${l.extra} extra ${l.extra === 1 ? 'user' : 'users'} × ${usd(PRICE.extra_user)}` : ''}${l.tills ? `, ${l.tills} extra ${l.tills === 1 ? 'till' : 'tills'} × ${usd(PRICE.extra_till)}` : ''}${!incl || l.extra || l.tills ? '' : l.module === 'pos' ? ', 1 till, unlimited cashiers' : `, ${PRICE.users_included} users included`}`;
   const payParams = () => {
     const add = (params.get('add') || '').split(',').map((x) => x.trim().toLowerCase()).filter((x) => PAID_MODS.some((p) => p[0] === x));
-    const users = Math.max(1, Math.min(500, parseInt(params.get('users') || '', 10) || 0)) || null;
-    return { add, users, period: params.get('period') === 'yearly' ? 'yearly' : 'monthly', buy: params.has('buy') };
+    // users=5 (every program, from older links) or u=basic:5,calls:8 (users per program); tills=2 (POS)
+    const one = Math.max(1, Math.min(500, parseInt(params.get('users') || '', 10) || 0)) || null;
+    const users = {}; if (one) add.forEach((m) => { users[m] = one; });
+    (params.get('u') || '').split(',').forEach((x) => { const [m, n] = x.split(':'); const v = parseInt(n, 10); if (PAID_MODS.some((p) => p[0] === m) && v > 0) users[m] = Math.min(500, v); });
+    const tills = Math.max(1, Math.min(100, parseInt(params.get('tills') || '', 10) || 1));
+    return { add, users: Object.keys(users).length ? users : null, tills, period: params.get('period') === 'yearly' ? 'yearly' : 'monthly', buy: params.has('buy') };
   };
   const dropParams = (...keys) => { keys.forEach((k) => params.delete(k)); history.replaceState(history.state, '', location.pathname + (params.toString() ? '?' + params : '') + location.hash); };
 
@@ -1286,7 +1315,7 @@
     if (!isOwner()) { S.billing = null; return; }
     [S.billing, S.paypal] = await Promise.all([api.myBilling(S.team.id).catch(() => null), S.paypal ? S.paypal : api.paypalStatus().catch(() => ({ ready: false }))]);
   }
-  const orderWhat = (o) => `${(o.modules || []).map(modLabel).join(', ')} · ${o.people} ${o.people === 1 ? 'person' : 'people'} · ${o.billing === 'yearly' ? 'yearly' : 'monthly'}`;
+  const orderWhat = (o) => `${o.bundle ? `${(BUNDLES.find((b) => b.id === o.bundle) || { name: o.bundle }).name} bundle: ` : ''}${(o.modules || []).map(modLabel).join(', ')} · ${o.people} ${o.people === 1 ? 'person' : 'people'} · ${o.billing === 'yearly' ? 'yearly' : 'monthly'}`;
   function subLine(o) {
     const until = o.works_until || o.paid_through;
     if (o.status === 'pending') return '<span class="pl">Waiting for PayPal to confirm</span>';
@@ -1324,7 +1353,7 @@
   }
 
   // "Add to my plan": the programs, how many people, monthly or yearly, the total, and the two ways to pay.
-  async function addToPlan({ add = [], users = null, period = 'monthly', buy = true } = {}) {
+  async function addToPlan({ add = [], users = null, tills = 1, period = 'monthly', buy = true } = {}) {
     if (!isOwner()) {
       const ownerP = S.people.find((p) => p.role === 'owner');
       return modal(`<h3>Add to the plan</h3><p>Only the owner of ${esc(S.team.name)}${ownerP ? ` (${esc(ownerP.display_name)})` : ''} can pay for Riyeser. Ask them to sign in at riyeser.com/link and choose <b>Add to my plan</b>.</p>
@@ -1340,14 +1369,19 @@
     const bankOn = S.billing.bank_ready !== undefined ? !!S.billing.bank_ready : !!String((((S.billing.seller || {}).bank) || {}).account_number || '').trim();
     let chosen = add.length ? add.slice() : [];
     if (chosen.includes('plus')) chosen = chosen.filter((m) => m !== 'basic');
-    const people0 = users || Math.max(PRICE.users_included, (lic.seats && lic.seats.used) || S.people.length || 1);
+    // Riyeser Link counts everyone in the business (the database never charges for fewer); the rest start at the 3 included
+    const linkPeople = Math.max(PRICE.users_included, (lic.seats && lic.seats.used) || S.people.length || 1);
+    const planUsers = (lic.seats && lic.seats.users) || {};
+    const u0 = (m) => (m === 'pos' ? Math.max(1, Number(tills) || (lic.seats && lic.seats.tills) || 1) : Math.max(m === 'calls' ? linkPeople : 1, Number((users || {})[m] || planUsers[m]) || (m === 'calls' ? linkPeople : PRICE.users_included)));
     const state = (m) => { const v = L[m] || {}; return v.status === 'active' ? `Paid to ${shortDay(v.paid_until)}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' && v.active ? `Works to ${shortDay(v.paid_until)}` : 'Not active'; };
     modal(`<h3>${buy ? '➕ Add to my plan / Pay' : '➕ Add to my plan'}</h3>
-      <p>${buy ? 'Choose what to pay for.' : 'You\'re on the 90-day free trial: nothing to pay today. When you\'re ready, choose what to pay for here.'} Prices are per business, in US dollars, with ${PRICE.users_included} people included in each program.</p>
-      <form id="apf"><div class="apmods">${PAID_MODS.filter(([m]) => m !== 'as_built' || chosen.includes(m)).map(([m, n]) => `<label class="apm"><input type="checkbox" name="m" value="${m}"${chosen.includes(m) ? ' checked' : ''}><span><b>${n}</b><small>${usd(PRICE[m])} a month · ${esc(state(m))}</small></span></label>`).join('')}</div>
+      <p>${buy ? 'Choose what to pay for.' : 'You\'re on the 90-day free trial: nothing to pay today. When you\'re ready, choose what to pay for here.'} Prices are per business, in US dollars, with ${PRICE.users_included} users included in each program (POS: 1 till and unlimited cashiers). Your accountant is free.</p>
+      <div class="apbund" id="apbund"><span class="muted small">Bundles:</span>${BUNDLES.map((b) => `<button type="button" class="apb${b.popular ? ' pop' : ''}" data-bundle="${b.id}"><b>${b.name}</b> ${usd(b.price)}<small>${b.mods.map(modLabel).join(' · ')}</small></button>`).join('')}</div>
+      <form id="apf"><div class="apmods">${PAID_MODS.filter(([m]) => m !== 'as_built' || chosen.includes(m)).map(([m, n]) => `<div class="apm" data-row="${m}"><label class="apmc"><input type="checkbox" name="m" value="${m}"${chosen.includes(m) ? ' checked' : ''}><span><b>${n}</b><small>${usd(PRICE[m])} a month · ${esc(state(m))}</small></span></label>
+        <label class="apn"><span>${esc(UNIT[m] || 'Users')}</span><input name="u_${m}" data-u="${m}" type="number" min="${m === 'calls' ? linkPeople : 1}" max="${m === 'pos' ? 100 : 500}" value="${u0(m)}" inputmode="numeric" aria-label="${esc(`${UNIT[m] || 'Users'} for ${n}`)}"></label></div>`).join('')}</div>
       <p class="muted small" id="apnote" hidden>Accounting Plus includes everything in Basics, so you pay for one or the other.</p>
-      <div class="f2 apopts"><label class="f"><span>People using Riyeser</span><input name="people" type="number" min="1" max="500" value="${people0}" inputmode="numeric"></label>
-        <div class="f"><span>Pay</span><label class="opt sm"><input type="radio" name="period" value="monthly"${period !== 'yearly' ? ' checked' : ''}> Monthly</label><label class="opt sm"><input type="radio" name="period" value="yearly"${period === 'yearly' ? ' checked' : ''}> Yearly (10 months for 12)</label></div></div>
+      <p class="muted small">Riyeser Link counts everyone in your business who chats or takes calls (${linkPeople} now). Payroll counts office staff who run pay or approve timesheets; staff who only clock in are free.</p>
+      <div class="f2 apopts"><div class="f"><span>Pay</span><label class="opt sm"><input type="radio" name="period" value="monthly"${period !== 'yearly' ? ' checked' : ''}> Monthly</label><label class="opt sm"><input type="radio" name="period" value="yearly"${period === 'yearly' ? ' checked' : ''}> Yearly (10 months for 12)</label></div></div>
       <ul class="brk" id="apbrk"></ul><div class="aptotal" id="aptotal"></div><p class="muted small" id="apeb"></p><p class="small" id="apwhen"></p><p class="muted small" id="aprepl" hidden></p>
       <p class="muted small">Your free days aren't lost: paid time starts when each program's free trial ends. You can cancel any time.</p>
       <div id="aperr"></div>
@@ -1360,13 +1394,21 @@
       d.querySelector('.mcard').classList.add('wide');
       const f = d.querySelector('#apf'); let quote = null; let qn = 0;
       const read = () => { const mods = [...f.querySelectorAll('input[name=m]:checked')].map((x) => x.value);
-        return { mods, people: Math.max(1, Math.min(500, parseInt(f.people.value, 10) || 1)), period: f.querySelector('input[name=period]:checked').value }; };
+        const users = {}; let tl = 1;
+        f.querySelectorAll('input[data-u]').forEach((x) => { const m = x.dataset.u; const v = Math.max(Number(x.min) || 1, Math.min(Number(x.max) || 500, parseInt(x.value, 10) || 1)); if (m === 'pos') tl = v; else if (mods.includes(m)) users[m] = v; });
+        const people = Math.max(1, ...Object.values(users));
+        return { mods, users, tills: tl, people, period: f.querySelector('input[name=period]:checked').value }; };
+      d.querySelectorAll('[data-bundle]').forEach((b) => b.onclick = () => { const x = BUNDLES.find((y) => y.id === b.dataset.bundle);
+        f.querySelectorAll('input[name=m]').forEach((c) => { if (x.mods.includes(c.value)) c.checked = true; else if ((c.value === 'basic' && x.mods.includes('plus')) || (c.value === 'plus' && x.mods.includes('basic'))) c.checked = false; }); draw(); });
       const draw = async (e) => {
         const t = e && e.target; const bx = (m) => f.querySelector(`input[value=${m}]`);
         if (t === bx('plus') && t.checked) bx('basic').checked = false; if (t === bx('basic') && t.checked) bx('plus').checked = false;
-        const r = read(); const bill = billFor(r.mods, r.people, r.period);
+        const r = read(); const bill = billFor(r.mods, r.users, r.period, false, r.tills);
         d.querySelector('#apnote').hidden = !r.mods.includes('plus');
-        d.querySelector('#apbrk').innerHTML = bill.lines.map((l) => `<li><span>${esc(l.name)} (${usd(l.price)}${l.extra ? ` + ${l.extra} extra ${l.extra === 1 ? 'person' : 'people'} × ${usd(PRICE.extra_user)}` : `, ${PRICE.users_included} people included`})</span><b>${usd(l.monthly)}</b></li>`).join('')
+        f.querySelectorAll('.apm').forEach((row) => row.classList.toggle('on', r.mods.includes(row.dataset.row)));
+        d.querySelectorAll('[data-bundle]').forEach((b) => b.classList.toggle('on', bill.bundle === b.dataset.bundle));
+        d.querySelector('#apbrk').innerHTML = bill.lines.map((l) => `<li${l.bundle ? ' class="bundle"' : ''}><span>${esc(`${l.name}${l.bundle ? ` (${l.mods.map(modLabel).join(', ')})` : ''} (${usd(l.price)}${l.extra ? ` + ${l.extra} extra ${l.extra === 1 ? 'user' : 'users'} × ${usd(PRICE.extra_user)}` : ''}${l.tills ? ` + ${l.tills} extra ${l.tills === 1 ? 'till' : 'tills'} × ${usd(PRICE.extra_till)}` : ''}${l.extra || l.tills ? '' : l.module === 'pos' ? ', 1 till, unlimited cashiers' : `, ${PRICE.users_included} users included`})`)}</span><b>${usd(l.monthly)}</b></li>`).join('')
+          + (bill.bundle ? `<li class="save"><span>✓ Bundle price: you save ${usd(bill.saves)} a month</span><b></b></li>` : '')
           || '<li><span>Tick a program</span><b>US$0</b></li>';
         d.querySelector('#aptotal').innerHTML = bill.mods.length ? `${r.period === 'yearly' ? `<b>${money(bill.total)}</b> a year <small>(${usd(bill.monthly)} a month × 10)</small>` : `<b>${money(bill.total)}</b> a month`}` : '';
         d.querySelector('.appay').hidden = !bill.mods.length || (!ppOn && !bankOn);
@@ -1382,7 +1424,7 @@
         d.querySelector('#aprepl').hidden = !repl.length || !(S.paypal && S.paypal.ready && !sub);
         d.querySelector('#aprepl').textContent = repl.length ? `If you pay with PayPal, your open bank transfer invoice ${repl.map((o) => o.ref).join(', ')} for these programs is cancelled once PayPal confirms, so you never pay twice.` : '';
         if (!bill.mods.length) { d.querySelector('#apeb').textContent = ''; d.querySelector('#apwhen').textContent = ''; return; }
-        try { const q = await api.billingQuote(S.team.id, bill.mods, r.people, r.period); if (n !== qn) return; quote = q;
+        try { const q = await api.billingQuote(S.team.id, bill.mods, r.people, r.period, r.users, r.tills); if (n !== qn) return; quote = q;
           if (Math.abs(Number(q.amount) - bill.total) > 0.005) d.querySelector('#aptotal').innerHTML = `<b>${money(q.amount)}</b> a ${r.period === 'yearly' ? 'year' : 'month'}`;
           // S10: when the first payment is taken: never during the free trial (PayPal starts then), else today
           d.querySelector('#apwhen').innerHTML = !q.charge_from ? '' : q.charged_today === false
@@ -1396,16 +1438,16 @@
       d.querySelector('#cl').onclick = close;
       const fail = (err) => { d.querySelector('#aperr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; d.querySelectorAll('.appay button').forEach((b) => { b.disabled = false; }); };
       const go = (how) => async () => {
-        const r = read(); const bill = billFor(r.mods, r.people, r.period);
+        const r = read(); const bill = billFor(r.mods, r.users, r.period, false, r.tills);
         if (!bill.mods.length) return fail(new Error('Tick at least one program.'));
         d.querySelectorAll('.appay button').forEach((b) => { b.disabled = true; }); d.querySelector('#aperr').innerHTML = '';
         try {
           if (how === 'paypal') {
             d.querySelector('#aperr').innerHTML = '<div class="ok">Taking you to PayPal…</div>';
-            const x = await api.paypalSubscribe(S.team.id, bill.mods, r.people, r.period);
+            const x = await api.paypalSubscribe(S.team.id, bill.mods, r.people, r.period, r.users, r.tills);
             location.assign(x.approve_url); return;
           }
-          const o = await api.billingStart(S.team.id, bill.mods, r.people, r.period, 'bank');
+          const o = await api.billingStart(S.team.id, bill.mods, r.people, r.period, 'bank', r.users, r.tills);
           close(); await loadBilling(); if (S.home) await renderHome(); invoiceView(o, true);
         } catch (err) { fail(err); }
       };
@@ -1480,7 +1522,7 @@
       if (!x) return tell(`We couldn't find ${k} ${ref} for this business. Billing on this page lists them all.`, 'warn');
       return k === 'receipt' ? printDoc(receiptHtml(x), `Receipt ${ref}`) : invoiceView(x);
     }
-    if (params.has('add')) { const p = payParams(); dropParams('add', 'buy', 'users', 'period', 'signup'); if (p.add.length || p.buy) return addToPlan(p); }
+    if (params.has('add')) { const p = payParams(); dropParams('add', 'buy', 'users', 'u', 'tills', 'period', 'signup'); if (p.add.length || p.buy) return addToPlan(p); }
     return null;
   }
 
@@ -1491,10 +1533,10 @@
   }
   const buyerBlock = () => { const t = S.team; return `<div class="pd-to"><small>Bill to</small><b>${esc(t.legal_name || t.name)}</b>${[t.address, t.tax_number ? `Tax number ${t.tax_number}` : '', t.email, t.company_code ? `Riyeser ID ${t.company_code}` : ''].filter(Boolean).map((l) => `<div>${esc(l)}</div>`).join('')}</div>`; };
   function linesFor(o) {
-    const bill = billFor(o.modules || [], o.people || 3, o.billing);
+    const bill = billFor(o.modules || [], o.users || o.people || 3, o.billing, false, o.tills || 1);
     const k = o.billing === 'yearly' ? 10 : 1;
     if (Math.abs(bill.total - Number(o.amount)) > 0.005) return [[`Riyeser: ${orderWhat(o)}`, Number(o.amount)]];
-    const rows = bill.lines.map((l) => [`${l.name}${l.extra ? `, with ${l.extra} extra ${l.extra === 1 ? 'person' : 'people'} × ${usd(PRICE.extra_user)}` : `, ${PRICE.users_included} people included`}${k === 10 ? ' (a year: 10 months)' : ' (a month)'}`, l.monthly * k]);
+    const rows = bill.lines.map((l) => [`${lineText(l)}${k === 10 ? ' (a year: 10 months)' : ' (a month)'}`, l.monthly * k]);
     if (o.first_amount != null && Number(o.first_amount) < Number(o.amount)) rows.push(['🐣 Early bird: half price for the first 12 months', Number(o.first_amount) - Number(o.amount)]);
     return rows;
   }
@@ -1564,7 +1606,7 @@
     const soon = Math.abs(d - Date.now()) < 6 * 864e5; return `${tm} ${d.toLocaleDateString('en-AU', { weekday: 'short' })}${soon ? '' : ' ' + d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}`; };
   const RSTATUS = { submitted: ['Received', ''], reviewing: ['Being looked at', ''], approved: ['Approved', 'ok'], partly_approved: ['Partly approved', 'ok'],
     declined: ['Not approved', 'bad'], paid: ['Paid', 'ok'] };
-  const REFUND_FOR = ['Accounting Basics', 'Accounting Plus', 'Payroll', 'POS', 'Bookings', 'As Built', 'Riyeser Link Plus', 'My whole plan', 'Something else'];
+  const REFUND_FOR = ['Accounting Basics', 'Accounting Plus', 'Bookings', 'Riyeser Link', 'Payroll', 'POS', 'As Built', 'My whole plan', 'Something else'];
   const REFUND_WHY = [['mistake', 'I was charged by mistake'], ['didnt_work', 'It didn\'t work for me'], ['cancelled', 'I cancelled'], ['duplicate', 'I was charged twice'], ['other', 'Something else']];
   const pill = (map, st) => { const [l, c] = map[st] || [st, '']; return `<span class="pl${c ? ' ' + c : ''}">${esc(l)}</span>`; };
   const money2 = (n, c) => `${esc(c || 'USD')} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1756,22 +1798,25 @@
   const gbText = (n) => { const g = n / GB; return `${g >= 10 || Number.isInteger(g) ? Math.round(g) : g.toFixed(1)} GB`; };
   const usedText = (n) => (n < 0.1 * GB ? sizeText(n) : gbText(n));
   // The storage is only space for files shared in Link chats (not website, email or cloud hosting). Chat files can't be
-  // deleted yet, so the full / nearly full messages point to Link Plus or Riyeser support, never "free up space".
+  // deleted yet, so the full / nearly full messages point to Riyeser support (or adding Riyeser Link), never "free up space".
   const STORE_WHAT = 'space for files shared in Link chats (not website, email or cloud hosting)';
-  const STORE_MORE = (plus) => (plus ? 'Contact Riyeser support for more space.' : `Upgrade to Riyeser Link Plus for ${STORAGE_GB.plus} GB, or contact Riyeser support.`);
-  const STORE_FULL = (plus) => `Your business has used its ${plus ? STORAGE_GB.plus : STORAGE_GB.free} GB of ${STORE_WHAT}. ${STORE_MORE(plus)}`;
-  const NEAR_FULL = 'Your business is close to its file storage limit. Ask the owner about Riyeser Link Plus.';
+  const STORE_MORE = (plus) => (plus ? 'Contact Riyeser support for more space.' : `Add Riyeser Link to your plan to upload again (${STORAGE_GB.link} GB), or contact Riyeser support.`);
+  const STORE_FULL = (plus) => (plus ? `Your business has used its ${STORAGE_GB.link} GB of ${STORE_WHAT}. ${STORE_MORE(true)}` : `Riyeser Link is paused, so new files can't be sent. ${STORE_MORE(false)}`);
+  const NEAR_FULL = 'Your business is close to its file storage limit. Ask the owner to contact Riyeser support.';
   function storageHtml(st) {
     if (!st || st.limit == null) return '';
     const pct = Math.max(0, Math.min(100, Number(st.pct) || 0)); const warn = pct >= 80;
     return `<div class="stor${warn ? ' warn' : ''}" id="stor"><div class="stor-h"><b>File storage</b><span>${usedText(Number(st.used) || 0)} of ${gbText(Number(st.limit))} used</span></div>
       <div class="sbar" role="progressbar" aria-label="File storage used" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
       ${warn ? `<p class="stor-w">⚠️ ${pct >= 100 ? 'Full.' : `${Math.round(pct)}% used.`} ${STORE_MORE(!!st.plus)}</p>` : ''}
-      <small class="muted">This is ${STORE_WHAT}: ${STORAGE_GB.free} GB per business free; ${STORAGE_GB.plus} GB with Riyeser Link Plus. Nothing is ever deleted for you.</small></div>`;
+      <small class="muted">This is ${STORE_WHAT}: ${STORAGE_GB.link} GB per business with Riyeser Link. Nothing is ever deleted for you.</small></div>`;
   }
   const personOf = (uid) => S.people.find((p) => p.user_id === uid) || null;
   const extOf = (uid) => (personOf(uid) || {}).extension || null;
   const plus = () => !!(S.features && S.features.calls);
+  // Riyeser Link off: its trial is over and it isn't paid (team_features.link false). A database before pricing v2 has
+  // no 'link' at all, and chat stays as it was.
+  function linkOff() { return !!(S.features && S.features.link === false); }
   const otherIn = (c) => (c && c.kind === 'dm' ? c.people.find((p) => p !== S.user.id) || S.user.id : null);
   const dmWith = (uid) => S.chans.find((c) => c.kind === 'dm' && c.people.includes(uid) && (uid !== S.user.id || c.people.every((p) => p === uid)));
   const sizeText = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${Math.round(n / 1024)} KB` : `${(n / 1048576).toFixed(1)} MB`);
@@ -2332,7 +2377,7 @@
     } else if (tab === 'calls') {
       const f = S.features || {}; const me = personOf(S.user.id) || {};
       const trial = f.calls && !f.calls_paid && f.trial_days_left != null ? `<span class="trialtag">Trial · ${f.trial_days_left} days left</span>` : '';
-      body = `<div class="sidescroll" id="lscroll">${secHead('branches', 'Ring a branch', `${f.calls ? trial : '<span class="trialtag prem">⭐ Premium</span>'}<span><button id="dial" aria-label="Dial an extension" title="Dial an extension">${ic('grid')}</button></span>`)}
+      body = `<div class="sidescroll" id="lscroll">${secHead('branches', 'Ring a branch', `${f.calls ? trial : '<span class="trialtag prem">Paused</span>'}<span><button id="dial" aria-label="Dial an extension" title="Dial an extension">${ic('grid')}</button></span>`)}
         ${secBody('branches', `${S.branches.map((b) => `<div class="lk-row"><button class="item" data-callbranch="${b.id}" title="Rings everyone in ${esc(b.name)}"><span class="lk-chic" aria-hidden="true">${ic('phone')}</span><span class="lk-rb"><span class="lk-r1"><span class="nm">${esc(b.name)}</span>${b.extension ? `<span class="ext">${b.extension}</span>` : ''}</span><span class="lk-r2"><span class="pv">${b.people.length} ${b.people.length === 1 ? 'person' : 'people'} ring together</span></span></span></button></div>`).join('') || '<p class="lk-none">No branches yet.</p>'}
         ${me.extension ? `<p class="myext">Your extension: <b>${me.extension}</b></p>` : ''}`)}
         ${secHead('calls', 'Recent calls')}${secBody('calls', callRows(S.callLog || [], 30))}</div>`;
@@ -2413,7 +2458,7 @@
       return `<h1>Your workspace</h1><p class="lk-sub">Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}${me.display_name && me.display_name !== 'You' ? ', ' + esc(me.display_name.split(' ')[0]) : ''}. Here's what's happening at ${esc(S.team.name)}.</p>
         <div class="lk-cards">
         ${card(`${ic('chat')} Recent conversations`, recent.length ? `<div class="lk-mini">${recent.map((c) => `<button class="mi" data-go-ch="${c.id}">${c.kind === 'dm' ? `<span class="lk-av">${av(otherIn(c), chanLabel(c))}${Presence.dot(otherIn(c))}</span>` : `<span class="lk-chic sm">${c.kind === 'private' ? ic('lock') : ic('hash')}</span>`}<span>${S.pinned.includes(c.id) ? `<span class="pinmark">${ic('pin')}</span>` : ''}${esc(chanLabel(c))}<small>${S.last[c.id] ? esc(S.last[c.id].body.slice(0, 60)) : esc(c.topic || '')}</small></span>${S.unread[c.id] ? `<span class="badge">${S.unread[c.id]}</span>` : ''}</button>`).join('')}</div>` : '<p class="muted">Pinned chats and unread messages show here.</p>', '', 'hrecent')}
-        ${card(`${ic('phone')} Quick call`, plus() ? `<form class="lk-qc" id="qcf"><input id="qci" placeholder="Search name or extension" autocomplete="off" aria-label="Name or extension"><button class="btn p" id="qcgo">${ic('phone')} Call</button></form><div class="lk-mini" id="qcr"></div>` : `<p class="muted">Calls between your people and branches come with <b>Riyeser Link Plus</b>.</p><button class="btn" id="qcup">See Riyeser Link Plus</button>`, '', 'hquick')}
+        ${card(`${ic('phone')} Quick call`, plus() ? `<form class="lk-qc" id="qcf"><input id="qci" placeholder="Search name or extension" autocomplete="off" aria-label="Name or extension"><button class="btn p" id="qcgo">${ic('phone')} Call</button></form><div class="lk-mini" id="qcr"></div>` : `<p class="muted">Riyeser Link is paused, so calls are paused too.</p><button class="btn" id="qcup">How to turn it back on</button>`, '', 'hquick')}
         ${card(`${ic('missed')} Missed calls`, missed.length ? `<div class="lk-mini">${missed.map((c) => `<div class="mi"><span class="lk-av">${c.peer ? av(c.peer, callWho(c)) : ''}</span><span>${esc(callWho(c))}<small>${esc(whenShort(c.at))}${callExt(c) ? ` · Ext. ${callExt(c)}` : ''}</small></span>
           ${c.peer && plus() ? `<button class="lk-ib" data-callp="${c.peer}" aria-label="Call back ${esc(callWho(c))}" title="Call back">${ic('phone')}</button>` : ''}${c.peer ? `<button class="lk-ib" data-dmp="${c.peer}" aria-label="Message ${esc(callWho(c))}" title="Send a message">${ic('chat')}</button>` : ''}</div>`).join('')}</div>` : '<p class="muted">No missed calls. Nice.</p>', '', 'hmissed')}
         ${card(`${ic('hash')} Team channels`, `<div class="lk-mini">${chans.map((c) => `<button class="mi" data-go-ch="${c.id}"><span class="lk-chic sm">${c.kind === 'private' ? ic('lock') : ic('hash')}</span><span>${esc(c.name)}<small>${esc(c.topic || '')}</small></span>${S.unread[c.id] ? `<span class="badge">${S.unread[c.id]}</span>` : ''}</button>`).join('')}</div><button class="linkbtn" data-nav-go="channels">All channels →</button>`, '', 'hchans')}
@@ -2422,7 +2467,7 @@
         </div>`;
     }
     if (k === 'calls') {
-      return `<h1>Calls</h1><p class="lk-sub">${plus() ? 'Ring a person or a whole branch. Calls go straight between devices, with no call charges.' : 'Calls come with <b>Riyeser Link Plus</b>: free for your first 90 days.'}</p>
+      return `<h1>Calls</h1><p class="lk-sub">${plus() ? 'Ring a person or a whole branch. Calls go straight between devices, with no call charges.' : 'Riyeser Link is paused, so calls are paused too. Add Riyeser Link on the Riyeser home page (Add to my plan).'}</p>
         <div class="lk-cards two">${card(`${ic('grid')} Dial`, dialHtml('vd'), 'lk-qd')}${card(`${ic('clock')} Recent calls`, `<div class="lk-mini lk-calls">${callRows(S.callLog || [], 50)}</div>`)}</div>`;
     }
     if (k === 'contacts') {
@@ -2611,12 +2656,21 @@
     try { await api.rejoinChannel(id); await loadPrefs(); await loadChans(); openChannel(id); } catch (err) { tell(plainError(err)); }
   }
   // An archived channel is read-only: the box to type in is swapped for a note (and Unarchive, for whoever may).
+  // Riyeser Link off (its 90 days over, not paid): every chat is read-only the same way, with how to add it.
   function composerState() {
     const f = document.getElementById('comp'); if (!f) return;
-    const c = S.ch; const ro = !!(c && c.archived); f.hidden = ro;
+    const c = S.ch; const off = linkOff(); const ro = !!(c && c.archived) || off; f.hidden = ro;
     let bar = document.getElementById('archbar');
     if (!ro) { if (bar) bar.remove(); return; }
     if (!bar) { bar = document.createElement('div'); bar.id = 'archbar'; bar.className = 'lk-archbar'; bar.setAttribute('role', 'status'); f.before(bar); }
+    if (off) {
+      const ownerP = S.people.find((p) => p.role === 'owner');
+      bar.className = 'lk-archbar lk-lock';
+      bar.innerHTML = `${ic('lock')}<span><b>Riyeser Link is paused, so chat is read-only.</b> Its 90 free days have ended. You can still read every message; nothing is deleted. ${isOwner() ? `To send messages again, add Riyeser Link to your plan (${usd(PRICE_LINK)} a month, ${PRICE.users_included} people included).` : `To send messages again, ask the owner${ownerP && ownerP.user_id !== S.user.id ? ` (${esc(ownerP.display_name)})` : ''} to add Riyeser Link on the Riyeser home page: <b>Add to my plan</b>.`}</span>${isOwner() ? '<button class="btn sm p" id="addlink">Add Riyeser Link</button>' : ''}`;
+      const a = bar.querySelector('#addlink'); if (a) a.onclick = () => addToPlan({ add: ['calls'], buy: true });
+      return;
+    }
+    bar.className = 'lk-archbar';
     const man = canManage(c) && !S.cprefsOff;
     bar.innerHTML = `${ic('archive')}<span><b>This channel is archived.</b> It's read-only: the messages are kept, but no one can post here.${man ? '' : ' Whoever made it, or an owner or admin, can bring it back.'}</span>${man ? '<button class="btn sm p" id="unarch">Unarchive</button>' : ''}`;
     const u = bar.querySelector('#unarch'); if (u) u.onclick = () => (c.created_by !== S.user.id && needs2step() ? security() : archiveChan(c, false));
@@ -2900,13 +2954,14 @@
   }
 
 
-  // ================================================================== Riyeser Link Plus (premium)
+  // ================================================================== calls (part of Riyeser Link)
   // Calls go directly between the two devices (WebRTC). The online service only carries the ringing and set-up.
   // Calling a branch rings everyone in it; the first to answer takes the call. 30 seconds with no answer is a missed call.
+  // With Riyeser Link off (its 90 days over, not paid), calls are paused like chat.
   function upsell() {
-    modal(`<h3>⭐ Riyeser Link Plus</h3><p>Calls between your people and branches, on the PC and phone: ring a person or a whole branch, answer on any device you're signed in on, with no call charges.</p>
-      ${isOwner() ? `<p><b>${usd(PRICE_LINK_PLUS)} a month per business</b> (3 users included, then ${usd(PRICE_EXTRA_USER)} a month each), free for your first 90 days. It also gives your business ${STORAGE_GB.plus} GB of ${STORE_WHAT}. Your trial has ended, so calls are paused. Chat keeps working as normal.</p>` : `<p>Your business's free trial of calls has ended, so calls are paused. Chat keeps working as normal. Ask the owner about Riyeser Link Plus.</p>`}
-      <div class="mfoot"><button class="btn" id="cl">Not now</button>${isOwner() ? '<a class="btn p" href="/pricing.html" target="_blank" rel="noopener">See pricing</a>' : ''}</div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
+    modal(`<h3>📞 Riyeser Link is paused</h3><p>Calls, desk phones and sending messages are paused because Riyeser Link's 90 free days have ended. Nothing is deleted: everyone can still read every chat.</p>
+      ${isOwner() ? `<p>To carry on, add <b>Riyeser Link</b> to your plan: <b>${usd(PRICE_LINK)} a month per business</b> (3 users included, then ${usd(PRICE_EXTRA_USER)} a month each), with ${STORAGE_GB.link} GB of ${STORE_WHAT} and no call charges.</p>` : '<p>Ask the owner to add Riyeser Link on the Riyeser home page (<b>Add to my plan</b>).</p>'}
+      <div class="mfoot"><button class="btn" id="cl">Not now</button>${isOwner() ? '<button class="btn p" id="upadd">Add Riyeser Link</button>' : ''}</div>`, (d, close) => { d.querySelector('#cl').onclick = close; const a = d.querySelector('#upadd'); if (a) a.onclick = () => { close(); addToPlan({ add: ['calls'], buy: true }); }; });
   }
 
   function dialPad() {
@@ -2962,8 +3017,8 @@
   // password encrypted to it, so only this tab can read it. It's taken once, within 5 minutes, and is in the history.
   const PH = {
     TITLE: 'Desk phones',
-    UPSELL_TEAM: 'Desk phones and calls come with <b>Riyeser Link Plus</b>. Ask the owner about adding it.',
-    UPSELL: `Desk phones and calls come with <b>Riyeser Link Plus</b>. It's free for your first 90 days, then ${usd(PRICE_LINK_PLUS)} a month per business (3 users included), with no call charges. To add it to your plan, contact Riyeser.`,
+    UPSELL_TEAM: 'Riyeser Link is paused, so desk phones and calls are paused too. Ask the owner to add Riyeser Link on the Riyeser home page (Add to my plan).',
+    UPSELL: `Riyeser Link is paused, so desk phones and calls are paused too. Riyeser Link (chat, calls, desk phones and Riyeser Link Office) is ${usd(PRICE_LINK)} a month per business (3 users included), with no call charges. Add it on the Riyeser home page: <b>Add to my plan</b>.`,
     GUIDE: ['Install <b>Riyeser Link Office</b> on a PC at the office that stays on (<b>Riyeser Central → Get more apps</b>, or <a href="/downloads.html">riyeser.com → Downloads</a>).', 'Sign in with your Riyeser account.', 'Plug in desk phones.'],
     SENDING: 'Sending to Riyeser Link Office…', DONE: 'Done', SLOW: 'Riyeser Link Office hasn\'t picked this up yet. It checks every 30 seconds while the office PC is on and connected to the internet.',
     HELP: [['🔌 Power', 'Many desk phones don\'t come with a power adapter and expect power over the network cable (PoE). Buy the phone\'s power adapter, or a small PoE switch.'],
@@ -2978,7 +3033,7 @@
     const fresh = now - new Date(o.last_seen) < OFFLINE_AFTER;
     if (!fresh) return ['Offline', 'bad', `Last heard from ${ago(o.last_seen)}. Is the office PC on and connected to the internet?`];
     if (o.state === 'running') return ['Running', 'ok', ''];
-    if (o.state === 'waiting-licence' || o.state === 'stopping') return ['Waiting for Riyeser Link Plus', 'warn', 'Riyeser Link Office is installed but not switched on, because Riyeser Link Plus isn\'t active.'];
+    if (o.state === 'waiting-licence' || o.state === 'stopping') return ['Waiting for Riyeser Link', 'warn', 'Riyeser Link Office is installed but not switched on, because Riyeser Link isn\'t active for your business.'];
     if (o.state === 'error') return ['Not running', 'bad', 'Riyeser Link Office couldn\'t start. Open it on the office PC to see why.'];
     return ['Starting', '', ''];
   }
@@ -3054,7 +3109,7 @@
     const admin = isAdmin();
     let body = '';
     if (!admin) body = '<div class="lo-card"><p>Only the business\'s owner and admins can see and change the desk phones. To set up your own phone, open <b>☎ My phone</b>.</p><button class="btn p" id="phmine">☎ My phone</button></div>';
-    else if (!plus) body = `<div class="lo-card lo-up"><h2>⭐ Riyeser Link Plus</h2><p>${isOwner() ? PH.UPSELL : PH.UPSELL_TEAM}</p><p class="muted small">Chat stays free either way.</p></div>`;
+    else if (!plus) body = `<div class="lo-card lo-up"><h2>Riyeser Link is paused</h2><p>${isOwner() ? PH.UPSELL : PH.UPSELL_TEAM}</p><p class="muted small">Nothing is deleted: people, phones and extensions are kept.</p></div>`;
     else if (!o) body = `${setupHtml(setupSteps([], now))}<div class="lo-card"><h2>Set up desk phones</h2><p>Riyeser Link Office is the office phone system: it runs on one PC at the office, and the office's desk phones connect to it and call each other. Nothing has been set up yet.</p>
         <p>Once it's running, this page shows the address to type into phones, every desk phone and extension, and lets you give phones to people from here.</p>
         <p><a class="btn" href="/help/link.html#desk-phones">📖 Read the guide: Setting up desk phones</a></p>${st === null ? '<p class="muted small">Riyeser is finishing an update to this page. If Riyeser Link Office is already running, its details show here soon.</p>' : ''}</div>`;
@@ -3072,7 +3127,7 @@
         </div>
         <dl class="lo-kv"><dt>Riyeser Link Office</dt><dd><span class="pl ${stCls}" id="lostate">${esc(stText)}</span>${stWhy ? `<small>${esc(stWhy)}</small>` : ''}</dd>
           <dt>Last seen</dt><dd id="loseen">${ago(o.last_seen)}</dd><dt>PC</dt><dd>${esc(o.pc_name || '—')}</dd><dt>Version</dt><dd>${esc(o.version || '—')}</dd>
-          <dt>Licence</dt><dd>${o.licence && o.licence.active ? `<span class="pl ok">${esc(o.licence.text || 'On')}</span>` : `<span class="pl bad">${esc((o.licence && o.licence.text) || 'Riyeser Link Plus isn\'t active on this PC')}</span>`}</dd>
+          <dt>Licence</dt><dd>${o.licence && o.licence.active ? `<span class="pl ok">${esc(o.licence.text || 'On')}</span>` : `<span class="pl bad">${esc((o.licence && o.licence.text) || 'Riyeser Link isn\'t active on this PC')}</span>`}</dd>
           <dt>Phones</dt><dd>${desk.length} · ${desk.filter((p) => p.registered).length} connected${(o.counts && o.counts.calls_in_progress) ? ` · ${o.counts.calls_in_progress} call${o.counts.calls_in_progress === 1 ? '' : 's'} now` : ''}</dd></dl>
       </section>
       ${found.length ? `<h3 class="hsec" id="lofoundh">New phones found <small>Plugged in at the office, not given to anyone yet.</small></h3>
@@ -3476,7 +3531,7 @@
           </ol></section>
         ${ext ? `<section class="lo-card my-dnd"><label class="sw"><input type="checkbox" id="mydnd"${d.dnd ? ' checked' : ''} aria-label="Do not disturb"><span></span></label>
           <div><b>Do not disturb</b><small>Your phones don't ring, and callers hear busy. You can also dial *78 (on) and *79 (off) on your desk phone.</small></div></section>` : ''}`}
-        <section class="lo-card"><h4>📞 Calls from this app</h4><p>You can also call people and branches from Riyeser Link itself, with Riyeser Link Plus.</p>${calls ? '<button class="btn" id="mycall">📞 Call someone</button>' : ''}</section>
+        <section class="lo-card"><h4>📞 Calls from this app</h4><p>You can also call people and branches from Riyeser Link itself.</p>${calls ? '<button class="btn" id="mycall">📞 Call someone</button>' : ''}</section>
         <div class="lo-warn my-sos"><b>🚫 No emergency calls.</b> Office phones can only call each other. Keep a mobile or normal phone line for emergency calls (000, 111, 112, 911).</div>
         <h3 class="hsec">Something wrong?</h3><div class="hhelp"><button class="btn" id="myreport">🛠 Report a phone issue</button><a class="btn" href="/help/link.html#own-desk-phone">📖 Help: Set up your own desk phone</a></div>
       </main>`;

@@ -1,6 +1,8 @@
 # Riyeser Link (riyeser.com/link), formerly Riyeser Team
 
-Free chat, plus **Riyeser Link Plus** (premium: +$20 a month per business, free for each team's first 90 days).
+Chat, calls, desk phones and Riyeser Link Office in one paid program (pricing v2: US$20 a month per business, 3 users
+included, free for each team's first 90 days; it took in the old Riyeser Link Plus). When it isn't on, chat is read-only:
+everyone can still read every message, and nothing is deleted.
 
 This folder is published twice, unchanged: at **riyeser.com/link/** (the address to use) and at **riyeser.com/team/**
 (the old address, kept so older Riyeser Team desktop apps, Centrals, invite links and sign-up emails keep working).
@@ -15,13 +17,10 @@ the `calls` licence module and the sign-in storage keep their old `team` names; 
    `https://riyeser.com/link/`, `https://riyeser.com/team/` and `https://riyeser.com/hq/`.
 4. Put the Project URL and Publishable key in `config.js`. Until then the page shows the demo.
 
-## Marking a business as paid for Riyeser Link Plus
-In SQL Editor (find the team by its name):
-
-    update public.workspaces set calls_paid_until = '2027-12-31' where name = 'Sample Plumbing';
-
-Calls work while `calls_paid_until` is in the future, or during the team's first 90 days. Nobody can change this
-from the app.
+## Marking a business as paid for Riyeser Link
+Use Riyeser HQ (Licences, or the customer's Programs tab), or the owner pays on their Riyeser home (Add to my plan).
+Riyeser Link (the `calls` module) works during its free trial or while it's paid; the older `calls_paid_until` still
+counts too. Nobody can change this from the app.
 
 ## Calls
 Calls go directly between devices (WebRTC); the database only carries the ringing (`call_signals`).
