@@ -260,7 +260,8 @@
       async billingCancelInvoice(ws, ref) { ok(await sb.rpc('billing_cancel_invoice', { ws, invoice_ref: ref })); },
       // The paypal Edge Function (supabase/functions/paypal on main). Its status says whether PayPal is set up.
       async paypal(route, body) {
-        const s = body ? ok(await sb.auth.getSession()).session : null;
+        // Signed in: always with the person's sign-in, status too (OWNER-PAYOFF: the function shows practice mode only to HQ's owner)
+        const s = ok(await sb.auth.getSession()).session;
         const r = await fetch(`${CFG.supabaseUrl}/functions/v1/paypal/${route}`, { method: body ? 'POST' : 'GET',
           headers: { apikey: CFG.supabaseKey, ...(s ? { Authorization: `Bearer ${s.access_token}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
           body: body ? JSON.stringify(body) : undefined });
@@ -1319,6 +1320,10 @@
     if (!S.billing) return modal('<h3>Add to my plan</h3><p>Paying online is still being switched on. Email info@riyeser.com with the programs you want, and we\'ll send you an invoice.</p><div class="mfoot"><button class="btn p" id="cl">OK</button></div>', (d, close) => { d.querySelector('#cl').onclick = close; });
     const lic = S.billing.licence || {}; const L = lic.modules || {};
     const sub = S.billing.subscription && ['active', 'payment_failed', 'suspended'].includes(S.billing.subscription.status) ? S.billing.subscription : null;
+    // OWNER-PAYOFF: PayPal only when the function says it's open (practice mode: HQ's owner only); bank transfer only once
+    // the Billing entity has bank details (my_billing.bank_ready; an older database: the seller's account number)
+    const ppReady = !!(S.paypal && S.paypal.ready); const practice = ppReady && !!S.paypal.practice; const ppOn = ppReady && !sub;
+    const bankOn = S.billing.bank_ready !== undefined ? !!S.billing.bank_ready : !!String((((S.billing.seller || {}).bank) || {}).account_number || '').trim();
     let chosen = add.length ? add.slice() : [];
     if (chosen.includes('plus')) chosen = chosen.filter((m) => m !== 'basic');
     const people0 = users || Math.max(PRICE.users_included, (lic.seats && lic.seats.used) || S.people.length || 1);
@@ -1333,9 +1338,10 @@
       <p class="muted small">Your free days aren't lost: paid time starts when each program's free trial ends. You can cancel any time.</p>
       <div id="aperr"></div>
       ${sub ? `<div class="ok">You already pay by PayPal (${esc(sub.ref)}). To change that plan, cancel it under Billing first (it keeps working to the end of what's paid), then pay for the new plan here. Or pay for extra programs by bank transfer.</div>` : ''}
-      <div class="appay"><button type="button" class="btn p" id="appaypal"${S.paypal && S.paypal.ready && !sub ? '' : ' hidden'}>Pay with PayPal <small>card or PayPal balance</small></button>
-        <button type="button" class="btn" id="apbank">Pay by bank transfer <small>we give you an invoice</small></button></div>
-      ${S.paypal && S.paypal.ready ? '' : '<p class="muted small" id="apnopp">Paying by PayPal isn\'t switched on yet, so it\'s bank transfer for now.</p>'}
+      <div class="appay"><button type="button" class="btn p" id="appaypal"${ppOn ? '' : ' hidden'}>${practice ? 'Pay with PayPal (practice: only you see this)' : 'Pay with PayPal'} <small>card or PayPal balance</small></button>
+        <button type="button" class="btn" id="apbank"${bankOn ? '' : ' hidden'}>Pay by bank transfer <small>we give you an invoice</small></button></div>
+      ${ppReady || !bankOn ? '' : '<p class="muted small" id="apnopp">Paying by PayPal isn\'t switched on yet, so it\'s bank transfer for now.</p>'}
+      <div class="ok" id="apsoon" hidden></div>
       <div class="mfoot"><button type="button" class="btn" id="cl">${buy ? 'Cancel' : 'Not now'}</button></div></form>`, (d, close) => {
       d.querySelector('.mcard').classList.add('wide');
       const f = d.querySelector('#apf'); let quote = null; let qn = 0;
@@ -1349,7 +1355,11 @@
         d.querySelector('#apbrk').innerHTML = bill.lines.map((l) => `<li><span>${esc(l.name)} (${usd(l.price)}${l.extra ? ` + ${l.extra} extra ${l.extra === 1 ? 'person' : 'people'} × ${usd(PRICE.extra_user)}` : `, ${PRICE.users_included} people included`})</span><b>${usd(l.monthly)}</b></li>`).join('')
           || '<li><span>Tick a program</span><b>US$0</b></li>';
         d.querySelector('#aptotal').innerHTML = bill.mods.length ? `${r.period === 'yearly' ? `<b>${money(bill.total)}</b> a year <small>(${usd(bill.monthly)} a month × 10)</small>` : `<b>${money(bill.total)}</b> a month`}` : '';
-        d.querySelector('.appay').hidden = !bill.mods.length;
+        d.querySelector('.appay').hidden = !bill.mods.length || (!ppOn && !bankOn);
+        // no way to pay yet: say so, with the free trial's end (the earliest of the ticked programs still on trial)
+        const soon = d.querySelector('#apsoon'); soon.hidden = !bill.mods.length || ppOn || bankOn;
+        if (!soon.hidden) { const te = bill.mods.map((m) => (L[m] || {})).filter((v) => v.status === 'trial' && v.trial_ends).map((v) => v.trial_ends).sort()[0];
+          soon.textContent = `Online payments are opening soon. ${te ? `Your free trial runs until ${shortDay(te)}` : 'Your 90-day free trial starts today'}, so there's nothing to pay yet.`; }
         // the database's quote: the same total, and the early bird if this business can have it
         // (the early bird and when-charged lines keep their text until the new quote is in, so nothing jumps under the pointer)
         const n = ++qn; quote = null;

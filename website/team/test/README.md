@@ -111,3 +111,7 @@
   `people-test.js` also covers help without signing in (S3): `?help` signed out offers it first, the sign-in page links to it,
   `?contact` (Contact support on riyeser.com) opens it, the request number shows; `rules-test.sql` (end) covers `guest_ticket`
   (the auto-reply with the number, the limits, HQ sees who to reply to, HQ's reply is emailed).
+- `payoff-test.js` (OWNER-PAYOFF): the ways to pay in Add to my plan against a pretend paypal function like the deployed one:
+  a customer while PayPal is in sandbox (no PayPal; bank transfer only with details), HQ's owner in sandbox ("Pay with PayPal
+  (practice: only you see this)", the status call carries the sign-in), live mode, bank transfer with and without details,
+  and neither way open ("Online payments are opening soon…" with the trial's end date). `rules-test.sql`: `my_billing.bank_ready`.

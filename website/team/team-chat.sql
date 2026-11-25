@@ -5368,7 +5368,9 @@ begin
                from billing_orders o where o.workspace_id = ws and o.status <> 'void'),
     'payments', (select coalesce(json_agg(billing_payment_json(p, false) order by p.at desc), '[]')
                  from (select * from billing_payments where workspace_id = ws order by at desc limit 200) p),
-    'seller', (billing_entity_now()).details,
+    -- OWNER-PAYOFF: whether bank transfer can be offered (the bank numbers themselves only come with an invoice)
+    'seller', (billing_entity_now()).details - 'bank',
+    'bank_ready', coalesce(trim((billing_entity_now()).details #>> '{bank,account_number}'), '') <> '',
     'grace_days', hq_setting_num('billing.grace_days', 7),
     'paypal_manage_url', case when coalesce(cur.paypal_env, (select value from hq_settings where key = 'paypal.env')) = 'sandbox'
       then 'https://www.sandbox.paypal.com/myaccount/autopay/' else 'https://www.paypal.com/myaccount/autopay/' end);

@@ -241,12 +241,16 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   check((await np.textContent('.mcard')).includes('US$25.00'), 'Basics by bank: US$25.00');
   await np.click('.mcard #cl');
 
-  // ---- no bank details yet
+  // an unpaid invoice can be cancelled (in-page question)
+  await np.waitForSelector('[data-inv]'); await np.click('[data-inv]'); await np.waitForSelector('#invcancel');
+  await np.click('#invcancel'); await np.waitForSelector('#askyes'); await np.click('#askyes'); await np.waitForTimeout(400);
+  check(!(await np.textContent('.hbill')).includes('Due '), 'an unpaid invoice can be cancelled (in-page question)');
+
+  // ---- no bank details yet and no PayPal (OWNER-PAYOFF): no payment buttons, "opening soon" with the trial's end
   const nb = await newPage(1280); await fakeServer(nb, { noPayPal: true, noBank: true });
-  await nb.goto(`${BASE}/link/?add=pos&buy=1`); await signIn(nb); await nb.waitForSelector('#apf'); await nb.click('#apbank'); await nb.waitForSelector('#invref');
-  check((await nb.textContent('#invnobank')).includes('Riyeser will email you the bank details'), 'no bank details yet: we\'ll email them');
-  await nb.click('#invcancel'); await nb.waitForSelector('#askyes'); await nb.click('#askyes'); await nb.waitForTimeout(400);
-  check(!(await nb.textContent('.hbill')).includes('Due '), 'an unpaid invoice can be cancelled (in-page question)');
+  await nb.goto(`${BASE}/link/?add=pos&buy=1`); await signIn(nb); await nb.waitForSelector('#apf'); await nb.waitForTimeout(200);
+  check(await nb.isHidden('#appaypal') && await nb.isHidden('#apbank') && /Online payments are opening soon\. Your (free trial runs until|90-day free trial starts today).*nothing to pay yet/.test(await nb.textContent('#apsoon')),
+    `OWNER-PAYOFF payments not open: no buttons, ${await nb.textContent('#apsoon')}`);
 
   // ---- 7. an admin: no prices, no billing
   const ad = await newPage(1280); const ast = await fakeServer(ad, { role: 'admin' });

@@ -2461,6 +2461,7 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; o json; b json; begin
   assert o ->> 'ref' like 'RI-1%' and o ->> 'status' = 'pending' and (o ->> 'amount')::numeric = 92 and (o ->> 'total')::numeric = 46, 'invoice for 46 (early bird of 92)';
   assert (o ->> 'due_date')::date = current_date + 14 and o -> 'seller' ->> 'name' = 'Riyeser' and o -> 'seller' ->> 'tax_label' = 'ABN', 'due in 14 days, seller from the Billing entity';
   assert coalesce(o -> 'seller' -> 'bank' ->> 'account_number', '') = '', 'bank details blank until HQ adds them';
+  assert not (public.my_billing(a) ->> 'bank_ready')::boolean, 'OWNER-PAYOFF: no bank details yet, so no bank transfer offered';
   perform set_config('pay.inv1', o ->> 'ref', false);
   b := public.my_billing(a);
   assert json_array_length(b -> 'orders') = 1 and b -> 'licence' -> 'modules' -> 'plus' ->> 'status' = 'trial', 'not paid yet: still the free trial';
@@ -2522,6 +2523,7 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; b json; o json; begin
   assert (select x -> 'seller' ->> 'name' from json_array_elements(b -> 'orders') x where x ->> 'ref' = current_setting('pay.inv1')) = 'Riyeser', 'old invoice keeps the old seller';
   assert (select x -> 'seller' ->> 'name' from json_array_elements(b -> 'payments') x limit 1) = 'Riyeser', 'old receipt keeps the old seller';
   assert b -> 'seller' ->> 'name' = 'Riyeser Pty Ltd', 'the current seller';
+  assert (b ->> 'bank_ready')::boolean and b -> 'seller' -> 'bank' is null, 'OWNER-PAYOFF: bank transfer offered once the details are in; the numbers only come on an invoice';
   o := public.billing_start(a, array['pos'], 3, 'yearly', 'bank');
   assert o -> 'seller' -> 'bank' ->> 'bsb' = '032-000' and o -> 'seller' ->> 'tax_number' = '12 345 678 901', 'a new invoice has the new details and bank';
   assert (o ->> 'early_bird')::boolean and (o ->> 'total')::numeric = 145 and (o ->> 'amount')::numeric = 290, 'still early bird (in its 12 months): half of 290';
