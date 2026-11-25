@@ -413,10 +413,12 @@ def _unique_document_numbers(db):
     db.execute("CREATE UNIQUE INDEX documents_side_number ON documents(side, number)")
 
 
-# Riyeser prices in one place: US dollars a month per business (the same as riyeser.com/pricing.html).
+# Riyeser prices in one place: US dollars a month per business (the same as riyeser.com/pricing.html, pricing v2).
 # Each paid program includes 3 users; each extra user is US$7 a month for that program. Plus includes Basics.
-PRICE_USD = {"basic": 25, "plus": 39, "payroll": 25, "pos": 29, "bookings": 25, "calls": 39, "as_built": 29,
-             "extra_user": 7, "extra_company": 10}
+# calls = Riyeser Link (chat, calls, desk phones, Riyeser Link Office). POS: 1 till included (unlimited cashiers),
+# US$15 a month for each extra till. Bundles (Shop, Office, Business) are worked out by the database (riyeser_plan).
+PRICE_USD = {"basic": 25, "plus": 39, "bookings": 25, "calls": 20, "payroll": 25, "pos": 29, "as_built": 29,
+             "extra_user": 7, "extra_till": 15, "extra_company": 10}
 PRICES = {k: f"US${v}" for k, v in PRICE_USD.items()}   # for screens: {{ prices.basic }} -> "US$25"
 
 # Edition names in one place: change them here and every screen follows.

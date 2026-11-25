@@ -48,16 +48,19 @@ function fakePayPal(opts: { signatureOk?: boolean; cancelStatus?: number } = {})
 }
 
 /** A pretend database: billing_start (as the owner), the service-role functions, and events applied once. */
-function fakeDb(opts: { owner?: boolean; early?: boolean; startsOn?: string } = {}) {
+function fakeDb(opts: { owner?: boolean; early?: boolean; startsOn?: string; oldDb?: boolean } = {}) {
   const st = { config: {} as Record<string, string>, created: [] as unknown[], events: new Map<string, string>(), applied: [] as string[],
-    cancelled: [] as string[], grace: null as string | null, status: "pending", asCalls: [] as string[] };
+    cancelled: [] as string[], grace: null as string | null, status: "pending", asCalls: [] as string[], startArgs: [] as Record<string, unknown>[] };
   const rpcAs = (req: Request): Rpc => async (name, args) => {
     st.asCalls.push(`${name}:${req.headers.get("Authorization")}`);
     if (opts.owner === false) return { ok: false, status: 400, body: { message: "Only the business owner can pay for Riyeser." } };
     if (name === "billing_start") {
-      assertEquals(args.pay_method, "paypal");
+      assertEquals(args.pay_method, "paypal"); st.startArgs.push(args);
+      // a database before pricing v2: no users or tills
+      if (opts.oldDb && ("users" in args || "tills" in args)) return { ok: false, status: 404, body: { code: "PGRST202", message: "Could not find the function public.billing_start" } };
       const people = Number(args.people);
-      const amount = (args.mods as string[]).reduce((a, m) => a + ({ plus: 39, payroll: 25, calls: 39 } as Record<string, number>)[m] + 7 * Math.max(0, people - 3), 0) * (args.billing_period === "yearly" ? 10 : 1);
+      const users = (args.users ?? {}) as Record<string, number>;
+      const amount = (args.mods as string[]).reduce((a, m) => a + ({ plus: 39, payroll: 25, calls: 20 } as Record<string, number>)[m] + 7 * Math.max(0, (users[m] ?? people) - 3), 0) * (args.billing_period === "yearly" ? 10 : 1);
       return { ok: true, status: 200, body: { id: ORDER, ref: "RI-10001", amount, first_amount: opts.early ? amount / 2 : null, early_bird: !!opts.early, early_cycles: opts.early ? (args.billing_period === "yearly" ? 1 : 12) : 0, module_names: [], starts_on: opts.startsOn ?? null } };
     }
     if (name === "billing_cancel_start") return { ok: true, status: 200, body: { order_id: ORDER, subscription_id: "I-SUB000001", env: "sandbox", paid_through: "2027-03-22" } };
@@ -146,7 +149,7 @@ Deno.test("subscribe: the database's price, one product and plan made once, the 
   await handle(post("subscribe", { ws: WS, modules: ["calls"], people: 3, billing: "yearly" }, owner), d);
   assertEquals(db.st.config["plan.yearly"], "P-PLAN2");
   const y = JSON.parse(p.calls.filter((c) => c.path === "/v1/billing/subscriptions").pop()!.body);
-  assertEquals(y.plan.billing_cycles[0].pricing_scheme.fixed_price.value, "390.00", "Link Plus yearly = 10 months");
+  assertEquals(y.plan.billing_cycles[0].pricing_scheme.fixed_price.value, "200.00", "Riyeser Link yearly = 10 months");
   // nothing secret in any answer
   assert(!JSON.stringify(b).includes("test-secret") && !JSON.stringify(b).includes("A21-token"));
 });
@@ -156,7 +159,7 @@ Deno.test("subscribe with the early bird: half for the first 12 months, then the
   const r = await handle(post("subscribe", { ws: WS, modules: ["calls"], people: 4, billing: "monthly" }, owner), { env: env(KEYS), fetch: p.f, ...db });
   assertEquals(r.status, 200);
   const sub = JSON.parse(p.calls.find((c) => c.path === "/v1/billing/subscriptions")!.body);
-  assertEquals(sub.plan.billing_cycles.map((c: { total_cycles: number; pricing_scheme: { fixed_price: { value: string } } }) => [c.total_cycles, c.pricing_scheme.fixed_price.value]), [[12, "23.00"], [0, "46.00"]]);
+  assertEquals(sub.plan.billing_cycles.map((c: { total_cycles: number; pricing_scheme: { fixed_price: { value: string } } }) => [c.total_cycles, c.pricing_scheme.fixed_price.value]), [[12, "13.50"], [0, "27.00"]]);
   const plan = JSON.parse(p.calls.find((c) => c.path === "/v1/billing/plans")!.body);
   assertEquals(plan.billing_cycles.map((c: { tenure_type: string }) => c.tenure_type), ["TRIAL", "REGULAR"]);
   assertEquals(db.st.config["plan.monthly.eb"], "P-PLAN1");
@@ -264,4 +267,22 @@ Deno.test("practice mode: HQ staff who manage licences (the owner), signed in, c
   assertEquals([me.ready, me.practice], [true, true], "the owner: open, marked practice");
   assertEquals((await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, { Authorization: "Bearer customer-session", Origin: "https://riyeser.com" }), d)).status, 503);
   assertEquals((await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), d)).status, 200);
+});
+
+Deno.test("subscribe (pricing v2): users per program and tills go to the database; an older database is asked without them", async () => {
+  forgetTokens(); const p = fakePayPal(); const db = fakeDb();
+  const r = await handle(post("subscribe", { ws: WS, modules: ["plus", "calls"], people: 8, billing: "monthly", users: { plus: 4, calls: 8, "x": "junk" }, tills: 2 }, owner), { env: env(KEYS), fetch: p.f, ...db });
+  assertEquals(r.status, 200);
+  assertEquals(db.st.startArgs[0].users, { plus: 4, calls: 8 }, "users per program, junk left out");
+  assertEquals(db.st.startArgs[0].tills, 2);
+  const sub = JSON.parse(p.calls.find((c) => c.path === "/v1/billing/subscriptions")!.body);
+  assertEquals(sub.plan.billing_cycles[0].pricing_scheme.fixed_price.value, "101.00", "Plus 39 + 7, Link 20 + 5 × 7");
+  forgetTokens(); const p2 = fakePayPal(); const old = fakeDb({ oldDb: true });
+  const r2 = await handle(post("subscribe", { ws: WS, modules: ["calls"], people: 4, billing: "monthly", users: { calls: 4 }, tills: 1 }, owner), { env: env(KEYS), fetch: p2.f, ...old });
+  assertEquals(r2.status, 200, "an older database still works");
+  assertEquals(old.st.startArgs.length, 2); assert(!("users" in old.st.startArgs[1]));
+  // no users and one till: asked exactly as before
+  forgetTokens(); const p3 = fakePayPal(); const plain = fakeDb();
+  await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), { env: env(KEYS), fetch: p3.f, ...plain });
+  assertEquals(Object.keys(plain.st.startArgs[0]).sort(), ["billing_period", "mods", "pay_method", "people", "ws"]);
 });

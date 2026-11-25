@@ -57,7 +57,7 @@ If a secret is missing, the jobs just say "not set up yet" and don't fail.
 ## Riyeser HQ (riyeser.com/hq): the staff back office
 
 HQ runs on the Riyeser Link (Riyeser Team) Supabase project. `team-chat.sql` already sets it up. HQ only ever sees account
-information: companies, people counts, branches, linked PCs and versions, trials, Riyeser Link Plus and downloads.
+information: companies, people counts, branches, linked PCs and versions, trials, Riyeser Link and downloads.
 It never sees customers' messages, calls or books.
 
 **Make yourself the first owner (once):**
@@ -90,7 +90,7 @@ The Downloads page shows live totals straight away. Per-day numbers start the da
 
 Download totals include a few copies fetched by Riyeser's own release checks, so treat small numbers as roughly right.
 
-**Marking a company paid for Riyeser Link Plus:** HQ → Customers → open the business → Programs → Riyeser Link Plus → **Mark paid until…**.
+**Marking a company paid for Riyeser Link:** HQ → Customers → open the business → Programs → Riyeser Link → **Mark paid until…**.
 Customers who pay online (PayPal or bank transfer) don't need this: see "Taking payments" below.
 
 ### Using HQ
@@ -138,7 +138,7 @@ In Supabase → the Riyeser Link (Riyeser Team) project → **Authentication →
 2. **Redirect URLs**: add `https://riyeser.com/link/` (keep `https://riyeser.com/team/` and `https://riyeser.com/hq/`).
 
 Until then, confirmation emails for sign-ups started on /link/ go to the Site URL instead, which still works.
-Re-running `team-chat.sql` (below) also updates the email wording and HQ's labels to riyeser.com/link and Riyeser Link Plus.
+Re-running `team-chat.sql` (below) also updates the email wording and HQ's labels to riyeser.com/link and Riyeser Link.
 
 ## After this release: re-run team-chat.sql in Supabase SQL Editor
 
@@ -228,17 +228,32 @@ history, which can't be changed or deleted. Write reasons without personal detai
 
 ## Prices (US dollars)
 
-All Riyeser prices are in US dollars, per business per month. Each paid program includes 3 users; each extra user is
-US$7 a month for that program. Accounting Basics US$25, Accounting Plus US$39 (it includes Basics, so a business pays
-for one or the other), Payroll US$25, POS US$29, Bookings US$25, Riyeser Link Plus US$39, As Built US$29. Extra
-companies in Accounting US$10 each. Yearly = 10 months. Early bird = half the program and user amounts for 12 months.
-Riyeser Link chat files: 2 GB per business free, 20 GB with Link Plus, plus any extra granted in HQ (customer page →
-Programs → File storage → **Grant extra storage**, with a reason; needs "Manage licences").
+All Riyeser prices are in US dollars, per business per month (pricing v2). Free forever: Central, Desk Assistant,
+Invoices, PDF. Each paid program is free for 90 days, then includes 3 users; each extra user is US$7 a month for that
+program. Accounting Basics US$25, Accounting Plus US$39 (it includes Basics, so a business pays for one or the other),
+Bookings US$25 (3 staff calendars), Riyeser Link US$20 (chat, calls, desk phones, Riyeser Link Office and 20 GB of chat
+files; users = everyone who chats or takes calls), Payroll US$25 (3 office users who run pay or approve timesheets;
+unlimited employees), POS US$29 (1 till and unlimited cashiers; US$15 a month per extra till), As Built US$29. One login
+for the business's accountant or bookkeeper is free (job role Bookkeeper; it doesn't count as a Link user).
+Bundles (each program still includes 3 users; extra users US$7, tills US$15): Shop = Accounting Basics + POS + Riyeser
+Link US$59 (US$74 separately); Office = Accounting Basics + Payroll + Riyeser Link US$59 (US$70); Business = Accounting
+Plus + Bookings + Riyeser Link + Payroll + POS US$99 (US$138). Billing applies the bundle that saves most by itself when
+the programs chosen contain one. Extra companies in Accounting US$10 each. Yearly = 10 months (2 months free). Early bird
+= half the program, bundle, user and till amounts for 12 months (first 100 businesses).
+Riyeser Link chat files: 20 GB per business, plus any extra granted in HQ (customer page → Programs → File storage →
+**Grant extra storage**, with a reason; needs "Manage licences"). While Riyeser Link is off (trial over, not paid),
+chat is read-only: messages can be read, nothing new is sent or uploaded, and nothing is deleted.
+
+**Pricing v2 change-over (once):** businesses that used Riyeser Link chat free before got 90 days of Riyeser Link from
+the first time the pricing v2 `team-chat.sql` was run (marked in `riyeser_once`, so re-running doesn't reset it).
+The paypal function on main passes users per program and tills to the database: redeploy it (deploy-paypal-function)
+after running the new `team-chat.sql`; until then PayPal orders count the same users for every program and 1 till.
 
 To change a price, change it in all of these, then re-run `website/team/team-chat.sql` and publish the website:
 `riyeser_price()` in `website/team/team-chat.sql` (HQ's estimates and what customers are charged), `website/prices.mjs`
-(the website), `PRICE` in `website/hq/hq.js` (the HQ demo), `PRICE` in `website/team/team.js` (Add to my plan), `PRICE_USD` in
-`riyeser/db.py` (Accounting's screens) and the licence text in `desktop/src/renderer/central.js`.
+(the website, with BUNDLES), `PRICE`/`BUNDLES` in `website/hq/hq.js` (the HQ demo), `PRICE`/`BUNDLES` in
+`website/team/team.js` (Add to my plan), `desktop/src/core/prices.js` (Central), `PRICE_USD` in `riyeser/db.py`
+(Accounting's screens). Bundle prices are `bundle_shop`, `bundle_office` and `bundle_business` in `riyeser_price()`.
 `website/team/test/pay-test.js` fails if the first four don't agree. A price change applies to new payments; PayPal
 subscriptions already running keep the price they started with (cancel and pay again to move one to the new price).
 

@@ -2,7 +2,8 @@
 //
 //   GET  /functions/v1/paypal/status      -> { ready, env, credentials, webhooks, message }   (no sign-in: the website
 //                                            and HQ use it to show or hide "Pay with PayPal")
-//   POST /functions/v1/paypal/subscribe   { ws, modules, people, billing }   (the owner's Supabase session)
+//   POST /functions/v1/paypal/subscribe   { ws, modules, people, billing, users?, tills? }   (the owner's Supabase session;
+//                                         pricing v2: users per program {module: n} and POS tills, both optional)
 //                                         -> { approve_url, ref }   (the owner approves at PayPal, then comes back)
 //   POST /functions/v1/paypal/cancel      { ws }   (the owner, with two-step sign-in) -> { ok, works_until }
 //   POST /functions/v1/paypal/webhook     PayPal's webhooks: the signature is checked with PayPal's
@@ -11,8 +12,8 @@
 // THE DESIGN: one PayPal subscription per business for its whole plan. PayPal has two plans per billing period
 // (monthly, yearly; and the same with an early bird first year), each with a placeholder price, and each subscription
 // sets its own price when it's made (the "plan" override on POST /v1/billing/subscriptions). So one approval covers
-// any mix of programs and people, and the total is always the database's (billing_start uses riyeser_bill, the same
-// price list as the website). Plans and the product are made the first time they're needed and remembered in the
+// any mix of programs and people, and the total is always the database's (billing_start uses riyeser_plan, the same
+// price list as the website, bundles included). Plans and the product are made the first time they're needed and remembered in the
 // database (billing_paypal_config), separately for sandbox and live.
 //
 // The amount, the programs and who may pay are all decided by the database AS THE CALLER (billing_start checks they
@@ -235,7 +236,16 @@ export async function handle(req: Request, deps: Deps = {}): Promise<Response> {
 
     const mods = Array.isArray(b.modules) ? b.modules.map(String).slice(0, 10) : [];
     const period = b.billing === "yearly" ? "yearly" : "monthly";
-    const st = await rpc("billing_start", { ws, mods, people: Math.trunc(Number(b.people) || 3), billing_period: period, pay_method: "paypal" });
+    const args: Record<string, unknown> = { ws, mods, people: Math.trunc(Number(b.people) || 3), billing_period: period, pay_method: "paypal" };
+    // Pricing v2: users per program and POS tills go to the database as they are (it checks and caps them). A database
+    // that hasn't had the pricing v2 team-chat.sql yet doesn't take them: then it's asked again without.
+    const users = b.users && typeof b.users === "object" && !Array.isArray(b.users)
+      ? Object.fromEntries(Object.entries(b.users as Record<string, unknown>).slice(0, 10).map(([k, v]) => [String(k).slice(0, 20), Math.trunc(Number(v) || 0)]).filter(([, v]) => (v as number) > 0))
+      : null;
+    const tills = Math.trunc(Number(b.tills) || 1);
+    const extra = users && Object.keys(users).length ? { users, tills } : tills > 1 ? { tills } : null;
+    let st = await rpc("billing_start", extra ? { ...args, ...extra } : args);
+    if (extra && !st.ok && /PGRST202|could not find|does not exist/i.test(JSON.stringify(st.body ?? ""))) st = await rpc("billing_start", args);
     if (!st.ok) return json(st.status === 401 ? 401 : 403, { error: plainDbError(st.body) });
     const o = st.body as { id: string; ref: string; amount: number; first_amount: number | null; early_bird: boolean; early_cycles: number; module_names: string[]; starts_on?: string | null };
     const early = !!o.early_bird && o.first_amount != null && o.early_cycles > 0;
