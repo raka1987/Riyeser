@@ -590,6 +590,10 @@ function computePayroll(start, end, adjustments = {}, fraction = 1, extra = fals
   let brackets; try { brackets = JSON.parse(s.paye_brackets); } catch { brackets = []; }
   const emps = db.prepare(`SELECT * FROM users WHERE active = 1 AND pay_rate > 0 ORDER BY name`).all();
   const tsStmt = db.prepare(`SELECT * FROM timesheets WHERE user_id=? AND clock_out IS NOT NULL AND substr(clock_in,1,10) BETWEEN ? AND ?`);
+  const leaveStmt = db.prepare(`SELECT l.id, l.kind, l.days, l.date_from FROM staff_leave l WHERE l.user_id = ? AND l.paid = 1
+    AND (l.paid_in_run IS NULL OR l.paid_in_run NOT IN (SELECT id FROM payroll_runs))
+    AND (l.date_from BETWEEN ? AND ? OR (l.date_from < ? AND EXISTS (SELECT 1 FROM payroll_runs r JOIN payslips p ON p.run_id = r.id WHERE p.user_id = l.user_id
+      AND COALESCE(r.extra_reason, '') = '' AND r.period_start <= l.date_from AND r.period_end >= l.date_from AND r.created_at <= replace(substr(l.created_at, 1, 19), 'T', ' '))))`);
   const openStmt = db.prepare(`SELECT * FROM timesheets WHERE user_id=? AND clock_out IS NULL AND substr(clock_in,1,10) BETWEEN ? AND ?`);
   const rules = breakRules();
   return emps.map(e => {
@@ -607,8 +611,10 @@ function computePayroll(start, end, adjustments = {}, fraction = 1, extra = fals
       ...openStmt.all(e.id, start, end).map(t => `Still clocked in since ${t.clock_in.slice(0, 10)} ${fmt12h(t.clock_in)}: that shift isn't paid in this run.`)];
     const base = extra ? 0 : round2(e.pay_type === 'salary' ? e.pay_rate / periods * fraction : hours * e.pay_rate);
     // paid leave in these dates (annual, sick, other paid): hourly staff are paid leave days × hours a day; salary carries on as normal
-    const leaveRows = extra ? [] : db.prepare('SELECT kind, days FROM staff_leave WHERE user_id = ? AND paid = 1 AND date_from BETWEEN ? AND ?').all(e.id, start, end);
-    const leave_lines = Object.values(leaveRows.reduce((a, l) => { const k = l.kind; (a[k] = a[k] || { kind: k, days: 0, hours: 0, amount: 0 }).days = round2(a[k].days + l.days); return a; }, {}))
+    // S56: also leave on earlier dates that was entered after those dates were paid (it was never paid), once
+    const leaveRows = extra ? [] : leaveStmt.all(e.id, start, end, start);
+    const leave_lines = Object.values(leaveRows.reduce((a, l) => { const late = l.date_from < start, k = l.kind + (late ? ':late' : '');
+      const x = a[k] = a[k] || { kind: l.kind, days: 0, hours: 0, amount: 0, ...(late && { late: true, dates: [] }) }; x.days = round2(x.days + l.days); if (late) x.dates.push(l.date_from); return a; }, {}))
       .map(l => ({ ...l, hours: round2(l.days * (+s.leave_day_hours || 8)), amount: e.pay_type === 'salary' ? 0 : round2(l.days * (+s.leave_day_hours || 8) * e.pay_rate) }));
     const leave_hours = round2(leave_lines.reduce((a, l) => a + l.hours, 0)), leave_pay = round2(leave_lines.reduce((a, l) => a + l.amount, 0));
     // regular deductions set on the staff member (loan, union …) + anything added for this pay run
@@ -620,7 +626,7 @@ function computePayroll(start, end, adjustments = {}, fraction = 1, extra = fals
     const paye = round2(annualTax(gross * periods / fraction, brackets) / periods * fraction); // a part period is taxed in proportion
     return { user_id: e.id, employee_name: e.name, employee_no: e.employee_no || '', position: e.position, pay_type: e.pay_type, pay_rate: e.pay_rate, tin: e.tin, fnpf_no: e.fnpf_no,
       bank_account: e.bank_account, hours, worked_hours: worked, break_hours: breaks, base_pay: base, allowances, gross, fnpf_employee, fnpf_employer, paye, other_deductions: other,
-      deduction_lines: lines, leave_lines, leave_hours, leave_pay, regular_deductions: round2(other - round2(adj.other_deductions)),
+      deduction_lines: lines, leave_lines, leave_ids: leaveRows.map(l => l.id), leave_hours, leave_pay, regular_deductions: round2(other - round2(adj.other_deductions)),
       timesheet_hours: fromSheets, hours_adjusted: adjusted, warnings, hours_note: adjusted ? str(adj.hours_note, 200).trim() : '',
       net: round2(gross - fnpf_employee - paye - other),
       notes: [adjusted ? `Hours adjusted ${fromSheets} → ${round2(+adj.hours)}: ${str(adj.hours_note, 200).trim()}` : '', str(adj.notes, 200)].filter(Boolean).join(' · ') };
@@ -634,6 +640,35 @@ app.get('/api/staff/payroll/rules', requireArea('payroll'), (req, res) => {
     deductions: canArea(req, 'pay_rates') ? db.prepare('SELECT id, name, deductions FROM users WHERE active = 1 AND pay_rate > 0 ORDER BY name').all().map(u => ({ id: u.id, name: u.name, deductions: deductionsOf(u) })) : [] });
 });
 const leaveAdj = (uid, y, k) => round2((db.prepare('SELECT days FROM leave_adjust WHERE user_id = ? AND year = ? AND kind = ?').get(uid, String(y), k) || {}).days || 0);
+// S56: unused annual leave carries into the next year. It starts from the person's start date (or their first leave
+// record) so nobody gets years of leave they never had. A balance an admin saved before carry-over existed (note '')
+// already included what they carried, so nothing is added on top of it; balances saved now are stored with note 'v2'.
+const leaveTaken = (uid, y, k) => round2(db.prepare("SELECT COALESCE(SUM(days), 0) AS d FROM staff_leave WHERE user_id = ? AND kind = ? AND substr(date_from, 1, 4) = ?").get(uid, k, String(y)).d);
+function leaveFirstYear(uid) {
+  const u = db.prepare('SELECT start_date FROM users WHERE id = ?').get(uid) || {};
+  const ys = [isDate(u.start_date) ? +u.start_date.slice(0, 4) : null, +(db.prepare('SELECT MIN(substr(date_from, 1, 4)) AS y FROM staff_leave WHERE user_id = ?').get(uid).y || 0) || null,
+    +(db.prepare("SELECT MIN(year) AS y FROM leave_adjust WHERE user_id = ? AND kind = 'annual'").get(uid).y || 0) || null].filter(Boolean);
+  return ys.length ? Math.min(...ys) : null;
+}
+function annualCarry(uid, y, s = getSettings(), first = leaveFirstYear(uid), depth = 0, saving = false) {
+  y = +y; if (!first || y - 1 < first || depth > 40) return 0;
+  const row = db.prepare("SELECT note FROM leave_adjust WHERE user_id = ? AND year = ? AND kind = 'annual'").get(uid, String(y));
+  if (row && row.note !== 'v2' && !saving) return 0;
+  const prevLeft = (+s.leave_annual_days || 0) + leaveAdj(uid, y - 1, 'annual') + annualCarry(uid, y - 1, s, first, depth + 1) - leaveTaken(uid, y - 1, 'annual');
+  return round2(Math.max(0, prevLeft));
+}
+// days left of a kind of leave in a year (annual includes what was carried over)
+const leaveLeft = (uid, y, k, s = getSettings()) => round2((k === 'annual' ? +s.leave_annual_days || 0 : +s.leave_sick_days || 0) + leaveAdj(uid, y, k) + (k === 'annual' ? annualCarry(uid, y, s) : 0) - leaveTaken(uid, y, k));
+// S56: check a leave record: the days fit the dates, it doesn't overlap other leave, and (unless confirmed) it fits the balance
+function checkLeave(uid, kind, from, to, days, exceptId, allowOver) {
+  if (days > dayCount(from, to)) bad(`${days} days doesn't fit ${from === to ? `one day (${from})` : `${from} to ${to} (${dayCount(from, to)} days)`}. Check the dates or the number of days.`);
+  const o = db.prepare('SELECT * FROM staff_leave WHERE user_id = ? AND id != ? AND date_from <= ? AND date_to >= ? LIMIT 1').get(uid, exceptId || 0, to, from);
+  if (o) bad(`That overlaps leave already recorded (${LEAVE_KINDS[o.kind] || o.kind}, ${o.date_from}${o.date_to !== o.date_from ? ' to ' + o.date_to : ''}). Edit that one instead.`);
+  if ((kind === 'annual' || kind === 'sick') && !allowOver) {
+    const y = from.slice(0, 4), left = round2(leaveLeft(uid, y, kind) + (exceptId ? (db.prepare('SELECT kind, days, date_from FROM staff_leave WHERE id = ?').all(exceptId).filter(r => r.kind === kind && r.date_from.slice(0, 4) === y)[0] || { days: 0 }).days : 0));
+    if (days > left) throw new HttpError(409, `That's more ${LEAVE_KINDS[kind].toLowerCase()} than ${(db.prepare('SELECT name FROM users WHERE id = ?').get(uid) || {}).name || 'they'} has left in ${y}: ${days} days asked, ${left} left (it would leave ${round2(left - days)}). Save anyway?`, { over_balance: { kind, left, days, after: round2(left - days) } });
+  }
+}
 // Accruals (leave): Admin and Super admin enter, edit and save balances; Super admin removes a record. Staff: no access. Balances = yearly entitlement − taken this calendar year.
 const LEAVE_KINDS = { annual: 'Annual leave', sick: 'Sick leave', other: 'Other paid leave', unpaid: 'Unpaid leave' };
 app.get('/api/staff/leave', requireArea('leave'), wrap((req, res) => {
@@ -641,8 +676,8 @@ app.get('/api/staff/leave', requireArea('leave'), wrap((req, res) => {
   const rows = db.prepare(`SELECT l.*, u.name FROM staff_leave l JOIN users u ON u.id = l.user_id WHERE substr(l.date_from, 1, 4) = ? ORDER BY l.date_from DESC, l.id DESC`).all(y);
   const people = db.prepare("SELECT id, name FROM users WHERE active = 1 AND COALESCE(on_timeclock, 1) = 1 ORDER BY name").all().map(u => {
     const t = k => round2(rows.filter(r => r.user_id === u.id && r.kind === k).reduce((a, r) => a + r.days, 0));
-    const aa = leaveAdj(u.id, y, 'annual'), sa = leaveAdj(u.id, y, 'sick');
-    return { ...u, annual_adj: aa, sick_adj: sa, annual_taken: t('annual'), annual_left: round2((+s.leave_annual_days || 0) + aa - t('annual')), sick_taken: t('sick'), sick_left: round2((+s.leave_sick_days || 0) + sa - t('sick')), other_taken: t('other'), unpaid_taken: t('unpaid') };
+    const aa = leaveAdj(u.id, y, 'annual'), sa = leaveAdj(u.id, y, 'sick'), carry = annualCarry(u.id, y, s);
+    return { ...u, annual_adj: aa, sick_adj: sa, annual_carried: carry, annual_taken: t('annual'), annual_left: round2((+s.leave_annual_days || 0) + carry + aa - t('annual')), sick_taken: t('sick'), sick_left: round2((+s.leave_sick_days || 0) + sa - t('sick')), other_taken: t('other'), unpaid_taken: t('unpaid') };
   });
   res.json({ year: y, rows, people, kinds: LEAVE_KINDS, settings: { leave_annual_days: s.leave_annual_days, leave_sick_days: s.leave_sick_days, leave_day_hours: s.leave_day_hours } });
 }));
@@ -653,6 +688,7 @@ app.post('/api/staff/leave', requireArea('leave', 2), wrap((req, res) => {
   const to = isDate(b.date_to) ? b.date_to : b.date_from; if (to < b.date_from) bad('The last day is before the first day.');
   const days = round2(b.days); if (!(days > 0 && days <= 60)) bad('Enter the number of days (e.g. 1, 0.5, 3).');
   if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(+b.user_id)) bad('Choose the staff member.');
+  checkLeave(+b.user_id, b.kind, b.date_from, to, days, 0, b.allow_over === true || b.allow_over === 'true');
   db.prepare('INSERT INTO staff_leave(user_id, kind, date_from, date_to, days, paid, notes, created_by, created_at) VALUES(?,?,?,?,?,?,?,?,?)')
     .run(+b.user_id, b.kind, b.date_from, to, days, b.kind === 'unpaid' ? 0 : 1, str(b.notes, 200), req.user.id, new Date().toISOString());
   res.json({ ok: true });
@@ -662,12 +698,12 @@ app.put('/api/staff/leave/balances', requireArea('leave', 2), wrap((req, res) =>
   const b = req.body || {}, y = /^\d{4}$/.test(String(b.year || '')) ? String(b.year) : bad('Choose the year.'), s = getSettings();
   for (const k of ['leave_annual_days', 'leave_sick_days', 'leave_day_hours']) if (b[k] !== undefined && b[k] !== '') { const v = +b[k]; if (!(v >= 0 && v <= 60)) bad('Check the leave numbers.'); setSetting(k, String(v)); }
   const s2 = getSettings();
-  const up = db.prepare('INSERT INTO leave_adjust(user_id, year, kind, days) VALUES(?,?,?,?) ON CONFLICT(user_id, year, kind) DO UPDATE SET days = excluded.days');
+  const up = db.prepare("INSERT INTO leave_adjust(user_id, year, kind, days, note) VALUES(?,?,?,?,'v2') ON CONFLICT(user_id, year, kind) DO UPDATE SET days = excluded.days, note = 'v2'");
   for (const p of Array.isArray(b.people) ? b.people : []) for (const [k, ent] of [['annual', +s2.leave_annual_days || 0], ['sick', +s2.leave_sick_days || 0]]) {
     const want = p[k + '_left']; if (want === undefined || want === '' || want === null) continue;
     if (!(+want >= -60 && +want <= 200)) bad('Check the days left.');
     const taken = round2(db.prepare("SELECT COALESCE(SUM(days), 0) AS d FROM staff_leave WHERE user_id = ? AND kind = ? AND substr(date_from, 1, 4) = ?").get(+p.id, k, y).d);
-    up.run(+p.id, y, k, round2(+want - ent + taken));
+    up.run(+p.id, y, k, round2(+want - ent - (k === 'annual' ? annualCarry(+p.id, y, s2, leaveFirstYear(+p.id), 0, true) : 0) + taken)); // the saved "left" includes what was carried over
   }
   res.json({ ok: true });
 }));
@@ -677,6 +713,7 @@ app.put('/api/staff/leave/:id', requireArea('leave', 2), wrap((req, res) => {
   const from = b.date_from !== undefined ? b.date_from : cur.date_from, to = b.date_to !== undefined ? b.date_to : cur.date_to;
   if (!isDate(from) || !isDate(to) || to < from) bad('Check the dates.');
   const days = b.days !== undefined ? round2(b.days) : cur.days; if (!(days > 0 && days <= 60)) bad('Enter the number of days (e.g. 1, 0.5, 3).');
+  checkLeave(cur.user_id, kind, from, to, days, cur.id, b.allow_over === true || b.allow_over === 'true');
   db.prepare('UPDATE staff_leave SET kind = ?, date_from = ?, date_to = ?, days = ?, paid = ?, notes = ? WHERE id = ?').run(kind, from, to, days, kind === 'unpaid' ? 0 : 1, str(b.notes !== undefined ? b.notes : cur.notes, 200), cur.id);
   res.json({ ok: true });
 }));
@@ -770,6 +807,8 @@ app.post('/api/staff/payroll/runs', requireArea('payroll', 2), requireLicence, w
     const ins = db.prepare(`INSERT INTO payslips(run_id, user_id, employee_name, position, pay_type, pay_rate, hours, base_pay, allowances, gross, fnpf_employee, fnpf_employer, paye, other_deductions, net, notes, worked_hours, break_hours, deduction_lines, leave_hours, leave_pay, leave_lines)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     for (const l of lines) ins.run(runId, l.user_id, l.employee_name, l.position, l.pay_type, l.pay_rate, l.hours, l.base_pay, l.allowances, l.gross, l.fnpf_employee, l.fnpf_employer, l.paye, l.other_deductions, l.net, l.notes, l.worked_hours, l.break_hours, JSON.stringify(l.deduction_lines), l.leave_hours || 0, l.leave_pay || 0, JSON.stringify(l.leave_lines || []));
+    const paidLeave = db.prepare('UPDATE staff_leave SET paid_in_run = ? WHERE id = ?');
+    for (const l of lines) for (const id of l.leave_ids || []) paidLeave.run(runId, id); // S56: paid once
     db.exec('COMMIT');
     if (extra) audit(req, 'Extra pay run', `Paid ${pay_date} (${period_start} to ${period_end}): ${extra}`);
     const file = writePayrunFile(runId);
@@ -797,7 +836,7 @@ function ytdOf(userId, periodEnd, draft = null, runId = null) {
   const taken = k => round2((lv.find(l => l.kind === k) || {}).days || 0), adj = k => leaveAdj(userId, y, k);
   return { year: y, pays: rows.length + (draft ? 1 : 0), history_weeks: hist.length, hours: sum('hours'), gross: sum('gross'), paye: sum('paye'), fnpf_employee: sum('fnpf_employee'), fnpf_employer: sum('fnpf_employer'),
     fnpf_total: round2(sum('fnpf_employee') + sum('fnpf_employer')), deductions: sum('other_deductions'), net: sum('net'), leave_pay: sum('leave_pay'),
-    annual_taken: taken('annual'), annual_left: round2((+s.leave_annual_days || 0) + adj('annual') - taken('annual')), sick_taken: taken('sick'), sick_left: round2((+s.leave_sick_days || 0) + adj('sick') - taken('sick')),
+    annual_taken: taken('annual'), annual_left: round2((+s.leave_annual_days || 0) + annualCarry(userId, y, s) + adj('annual') - taken('annual')), sick_taken: taken('sick'), sick_left: round2((+s.leave_sick_days || 0) + adj('sick') - taken('sick')),
     other_taken: taken('other'), unpaid_taken: taken('unpaid') };
 }
 // Payslips for any dates and any person: per pay period, the finalised payslip from a pay run if there is one,

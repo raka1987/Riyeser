@@ -620,6 +620,42 @@ test('S32: shared time clock: wrong PINs lock only that person; no-PIN needs the
   for (const p of [a, b]) await call('PUT', `/api/staff/employees/${p.id}`, { active: false }, admin);
 });
 
+test('S56: leave: balance warning, days must fit the dates, no overlaps, annual leave carries over, late leave is paid next pay run', async () => {
+  const e = (await call('POST', '/api/staff/employees', { name: 'Leave Carry', username: 'leavecarry', password: 'leavecarry1', role: 'staff', pay_type: 'hourly', pay_rate: 10, start_date: '2030-01-01' }, admin)).data;
+  await call('PUT', '/api/staff/leave/balances', { year: '2030', leave_annual_days: 10, leave_day_hours: 8 }, admin);
+  const left = async (y) => (await call('GET', `/api/staff/leave?year=${y}`, null, admin)).data.people.find(p => p.id === e.id);
+  // (b) the days must fit the dates; the same dates can't be entered twice
+  const oneDay = await call('POST', '/api/staff/leave', { user_id: e.id, kind: 'annual', date_from: '2030-03-04', date_to: '2030-03-04', days: 20 }, admin);
+  assert.equal(oneDay.status, 400); assert.match(oneDay.data.error, /20 days doesn't fit one day/);
+  assert.equal((await call('POST', '/api/staff/leave', { user_id: e.id, kind: 'annual', date_from: '2030-03-04', date_to: '2030-03-06', days: 3 }, admin)).status, 200);
+  const twice = await call('POST', '/api/staff/leave', { user_id: e.id, kind: 'sick', date_from: '2030-03-05', days: 1 }, admin);
+  assert.equal(twice.status, 400); assert.match(twice.data.error, /overlaps leave already recorded/);
+  assert.equal((await left(2030)).annual_left, 7);
+  // (c) unused annual leave carries into the next year
+  const y31 = await left(2031); assert.equal(y31.annual_carried, 7); assert.equal(y31.annual_left, 17);
+  // (a) more than the balance is refused unless confirmed
+  const over = await call('POST', '/api/staff/leave', { user_id: e.id, kind: 'annual', date_from: '2031-05-01', date_to: '2031-05-28', days: 20 }, admin);
+  assert.equal(over.status, 409); assert.equal(over.data.over_balance.left, 17); assert.equal(over.data.over_balance.after, -3); assert.match(over.data.error, /Save anyway\?/);
+  assert.equal((await call('POST', '/api/staff/leave', { user_id: e.id, kind: 'annual', date_from: '2031-05-01', date_to: '2031-05-28', days: 20, allow_over: true }, admin)).status, 200);
+  assert.equal((await left(2031)).annual_left, -3);
+  // a saved balance includes what was carried over
+  assert.equal((await call('PUT', '/api/staff/leave/balances', { year: '2031', people: [{ id: e.id, annual_left: 5 }] }, admin)).status, 200);
+  assert.equal((await left(2031)).annual_left, 5);
+  // (d) leave entered after its dates were paid goes in the next pay run, once
+  await call('POST', '/api/staff/timesheets', { user_id: e.id, clock_in: '2031-08-04T08:00', clock_out: '2031-08-04T16:00' }, admin);
+  assert.equal((await call('POST', '/api/staff/payroll/runs', { period_start: '2031-08-04', period_end: '2031-08-10', pay_date: '2031-08-11' }, admin)).status, 200);
+  assert.equal((await call('POST', '/api/staff/leave', { user_id: e.id, kind: 'annual', date_from: '2031-08-05', date_to: '2031-08-06', days: 2 }, admin)).status, 200);
+  const next = { period_start: '2031-08-11', period_end: '2031-08-17', pay_date: '2031-08-18' };
+  const line = (await call('POST', '/api/staff/payroll/preview', next, admin)).data.lines.find(l => l.user_id === e.id);
+  assert.equal(line.leave_pay, 160); assert.equal(line.leave_lines[0].late, true); assert.deepEqual(line.leave_lines[0].dates, ['2031-08-05']);
+  const run = await call('POST', '/api/staff/payroll/runs', next, admin); assert.equal(run.status, 200, JSON.stringify(run.data));
+  const slip = (await call('GET', `/api/staff/payroll/runs/${run.data.id}`, null, admin)).data.payslips.find(p => p.user_id === e.id);
+  assert.equal(slip.leave_pay, 160);
+  const after = (await call('POST', '/api/staff/payroll/preview', { period_start: '2031-08-18', period_end: '2031-08-24' }, admin)).data.lines.find(l => l.user_id === e.id);
+  assert.equal(after.leave_pay, 0); // not paid twice
+  await call('PUT', `/api/staff/employees/${e.id}`, { active: false }, admin);
+});
+
 test('wage reports: check the files, see the problems, import as pay history, year to date includes it', async () => {
   const oct = await wageBook([
     { sheet: 'Anil', name: 'Anill Prasad', fnpf: 'MN1', acct: '111', rate: 7, hours: [40, 40, 31.9, 39, 40] },

@@ -159,6 +159,8 @@ const DEFAULT_SETTINGS = {
     { from: 270000, to: null, rate: 33 },
   ]),
 };
+// S56: the pay run that paid a leave record (leave entered after its dates were paid goes in the next pay run)
+try { db.exec('ALTER TABLE staff_leave ADD COLUMN paid_in_run INTEGER'); } catch { /* already there */ }
 // F11: an extra pay run (bonus) on top of dates already paid carries its reason; '' = a normal pay run
 try { db.exec("ALTER TABLE payroll_runs ADD COLUMN extra_reason TEXT DEFAULT ''"); } catch { /* already there */ }
 const getSettingStmt = db.prepare('SELECT value FROM settings WHERE key = ?');

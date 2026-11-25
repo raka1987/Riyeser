@@ -258,11 +258,13 @@ async function leaveModal(emps, year, editing = false) {
   const F = $('#lv', m.el);
   const days = () => { const a = F.date_from.value, b = F.date_to.value; if (!a || !b || b < a) return; let n = 0; for (let d = a; d <= b; d = addDays(d, 1)) { const w = new Date(d + 'T00:00:00Z').getUTCDay(); if (w !== 0 && w !== 6) n++; } F.days.value = n || 1; };
   F.date_from.onchange = () => { if (F.date_to.value < F.date_from.value) F.date_to.value = F.date_from.value; days(); }; F.date_to.onchange = days;
-  F.onsubmit = async e => { e.preventDefault(); try { await api('/api/staff/leave', { body: Object.fromEntries(new FormData(F)) }); toast('Leave saved'); again(); } catch (err) { toast(err.message, 6000); } };
+  // S56: more than the balance asks first (the server refuses it otherwise)
+  const overOk = (fn, body) => fn(body).catch(err => { if (err.data && err.data.over_balance && confirm(err.message)) return fn({ ...body, allow_over: true }); throw err; });
+  F.onsubmit = async e => { e.preventDefault(); try { await overOk(b => api('/api/staff/leave', { body: b }), Object.fromEntries(new FormData(F))); toast('Leave saved'); again(); } catch (err) { toast(err.message, 6000); } };
   $$('[data-lvedit]', m.el).forEach(b => b.onclick = () => {
     const r = L.rows.find(x => x.id == b.dataset.lvedit);
     editModal(`Edit leave — ${r.name}`, [{ n: 'kind', l: 'Type', t: 'select', o: Object.entries(L.kinds) }, { n: 'days', l: 'Days', t: 'number', step: '0.5' }, { n: 'date_from', l: 'From', t: 'date' }, { n: 'date_to', l: 'To', t: 'date' }, { n: 'notes', l: 'Note', full: 1 }],
-      r, v => api(`/api/staff/leave/${r.id}`, { method: 'PUT', body: v }).then(() => again()));
+      r, v => overOk(b => api(`/api/staff/leave/${r.id}`, { method: 'PUT', body: b }), v).then(() => again()));
   });
   $$('[data-lvdel]', m.el).forEach(b => b.onclick = async () => { if (!confirm('Remove this leave?')) return; await api(`/api/staff/leave/${b.dataset.lvdel}`, { method: 'DELETE' }); again(); });
   $('#lv-prev', m.el).onclick = () => again(+y - 1); $('#lv-next', m.el).onclick = () => again(+y + 1);
@@ -722,7 +724,7 @@ function payslipHTML(p, run) {
       ${/Hours adjusted /.test(p.notes || '') ? `<tr><td class="small" style="color:#8a5a00">${esc((p.notes.match(/Hours adjusted [^·]*/) || [''])[0].trim())}</td><td></td></tr>` : ''}
       <tr><td>${p.pay_type === 'hourly' ? `Paid hours ${p.hours} × ${money(p.pay_rate, cur())}` : 'Salary'}</td><td class="r">${money(p.base_pay, cur())}</td></tr>
       ${p.allowances ? `<tr><td>Allowances</td><td class="r">${money(p.allowances, cur())}</td></tr>` : ''}
-      ${(() => { let lv = []; try { lv = typeof p.leave_lines === 'string' ? JSON.parse(p.leave_lines || '[]') : (p.leave_lines || []); } catch { } return lv.map(x => `<tr><td>${({ annual: 'Annual leave', sick: 'Sick leave', other: 'Other paid leave' })[x.kind] || 'Leave'} ${x.days} day${x.days === 1 ? '' : 's'}${x.amount ? ` (${x.hours} h)` : ''}</td><td class="r">${x.amount ? money(x.amount, cur()) : '<span class="small muted">in salary</span>'}</td></tr>`).join(''); })()}
+      ${(() => { let lv = []; try { lv = typeof p.leave_lines === 'string' ? JSON.parse(p.leave_lines || '[]') : (p.leave_lines || []); } catch { } return lv.map(x => `<tr><td>${({ annual: 'Annual leave', sick: 'Sick leave', other: 'Other paid leave' })[x.kind] || 'Leave'} ${x.days} day${x.days === 1 ? '' : 's'}${x.late ? ` <span class="small muted">(earlier dates: ${esc((x.dates || []).join(', '))})</span>` : ''}${x.amount ? ` (${x.hours} h)` : ''}</td><td class="r">${x.amount ? money(x.amount, cur()) : '<span class="small muted">in salary</span>'}</td></tr>`).join(''); })()}
       <tr><td><b>Gross pay</b></td><td class="r"><b>${money(p.gross, cur())}</b></td></tr>
       <tr><td>FNPF employee contribution</td><td class="r">−${money(p.fnpf_employee, cur())}</td></tr>
       <tr><td>PAYE tax</td><td class="r">−${money(p.paye, cur())}</td></tr>
