@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { helpGuides } from './help.mjs';
-import { PRICE, STORAGE_GB, usd } from './prices.mjs';
+import { PRICE, STORAGE_GB, BUNDLES, separately, planPrice, usd } from './prices.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.OUT_DIR || join(ROOT, 'public');
@@ -62,16 +62,14 @@ const ALL_PROGRAMS = [
     pitch: 'Never lose a file again.',
     shot: 'desk-find.webp' },
   // Riyeser Link (formerly Riyeser Team). Its Windows installer keeps the old file name, so installed copies update in place.
+  // A paid program (module 'calls'): chat, calls, desk phones and Riyeser Link Office in one (it took in Link Plus).
   { id: 'link', name: 'Riyeser Link', short: 'Riyeser Link', icon: '💬', file: 'RiyeserTeam-Setup.exe', shot: 'team-chat.webp',
-    one: 'Chat for your business: channels for jobs and the office, direct messages, and live updates on your PC and phone. Free. Add Link Plus for calls.',
-    // A free program with a paid upgrade: shows the gold "★ Plus" marker wherever the program is listed.
-    plus: { name: 'Riyeser Link Plus', module: 'calls', anchor: 'link-plus',
-      what: `calls, desk phones and ${STORAGE_GB.plus} GB of chat file space`, line: `calls between people and branches, office desk phones, ${STORAGE_GB.plus} GB of space for files shared in chat (not hosting).` },
+    one: `Chat and calls for your business: channels for jobs and the office, direct messages, calls between people and branches, office desk phones, and ${STORAGE_GB.link} GB for files shared in chat. Free for 90 days, no card.`,
     pitch: 'Your whole team, in one conversation.' },
-  // Riyeser Link Office: the office phone system (one PC at the office; desk phones that ring each other). It comes with
-  // Riyeser Link Plus, so it never shows a price of its own: comesWith names the program whose upgrade (p.plus) includes it.
+  // Riyeser Link Office: the business's phone lines / office phone system (one PC at the office; desk phones that ring
+  // each other). It comes with Riyeser Link, so it never shows a price of its own (comesWith).
   { id: 'link-office', name: 'Riyeser Link Office', short: 'Link Office', icon: '☎', file: 'RiyeserLinkOffice-Setup.exe', comesWith: 'link',
-    one: 'Your office phone system: install it on one PC at the office, plug in desk phones, and everyone gets an extension. Staff call each other free inside the office. Comes with Riyeser Link Plus.',
+    one: 'Your business\'s phone lines: the office phone system. Install it on one PC at the office, plug in desk phones, and everyone gets an extension, with ring groups, and calls can be answered in the Riyeser Link app too. Staff call each other free inside the office. Comes with Riyeser Link.',
     pitch: 'Desk phones that ring each other.',
     note: 'Not yet: calls to and from outside phone numbers, and office phones away from the office. These phones can\'t call emergency services: keep a mobile or normal phone line for that.' },
   { id: 'pdf', name: 'Riyeser PDF', short: 'PDF', icon: '📕', file: 'RiyeserPDF-Setup.exe',
@@ -92,40 +90,44 @@ const CARD = {
   bookings: ['Jobs, appointments and table bookings.', 'Jobs, appointments, tables'],
   payroll: ['Timesheets, pay runs, payslips and leave.', 'Pay runs and payslips'],
   'desk-assistant': ['Sorts and finds every file in seconds.', 'Sort and find your files'],
-  link: ['Team chat: channels and direct messages.', 'Chat and calls'],
-  'link-office': ['Office desk phones that ring each other.', 'Office desk phones'],
+  link: ['Chat, calls and desk phones for your team.', 'Chat, calls and phones'],
+  'link-office': ['Your office phone system: desk phones and extensions.', 'Office phone system'],
   pdf: ['Open, fill in, sign and combine PDFs.', 'Fill, sign and edit PDFs'],
   services: ['Cables, pipes and ducts on your plans.', 'Services on your drawings'],
 };
 for (const p of ALL_PROGRAMS) [p.card, p.tag] = CARD[p.id];
-// Free programs first, then the paid ones. Every list on the site (menus, finder, grids, downloads, footer) uses this order.
-// Riyeser Link Office sits right after Riyeser Link: it isn't free (it comes with Link Plus), but it belongs next to Link.
-const FREE_TOOLS = ['central', 'invoices', 'link', 'pdf', 'desk-assistant'];
-const ORDER = ['central', 'invoices', 'link', 'link-office', 'pdf', 'desk-assistant', 'accounting-basics', 'accounting', 'pos', 'bookings', 'payroll', 'services'];
+// Free programs first, then the paid ones, each group A to Z. Every list on the site (menus, finder, grids, downloads,
+// footer, pricing) uses this order. Riyeser Link Office sits right after Riyeser Link (it comes with it).
+const FREE_TOOLS = ['central', 'desk-assistant', 'invoices', 'pdf'];
+const ORDER = ['central', 'desk-assistant', 'invoices', 'pdf', 'accounting-basics', 'accounting', 'bookings', 'link', 'link-office', 'payroll', 'pos', 'services'];
 ALL_PROGRAMS.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 for (const p of ALL_PROGRAMS) p.free = FREE_TOOLS.includes(p.id);
 const FREE_HEAD = 'Free forever';
-// What each free program includes, and its real limits (checked against the code: only Riyeser Link has one, file storage,
-// plus 25 MB a file). null = no limits. Shown on the pricing page and on each free program's page.
+// What each free program includes, and its real limits. null = no limits. Shown on the pricing page and on each free
+// program's page.
 const FREE_INFO = {
   central: { inc: 'Your home screen: installs and updates every Riyeser program, today\'s meetings, to-dos, file search and the first-day checklist.', lim: null },
   invoices: { inc: 'Unlimited quotes, invoices, customers and payments received, who owes you, and PDF copies to print or attach to your email.', lim: null,
     up: `For stock, bills, money in and out and reports, move up to Accounting Basics (${usd(PRICE.basic)}/month): it opens the same company file.` },
-  link: { inc: 'Unlimited people, messages, channels and direct messages, on your PC, in a web browser and on your phone.',
-    lim: `${STORAGE_GB.free} GB of space per business for files shared in chat (up to 25 MB a file). Not a hosting service.` },
   pdf: { inc: 'Open, fill in, sign, edit, combine and split PDFs, and read scanned pages.', lim: null },
   'desk-assistant': { inc: 'Sorts your files by type and year, finds anything by name or by the words inside, spots copies, and keeps your to-dos.', lim: null,
     note: 'Optional AI sorting uses your own AI key, if you add one.' },
 };
 // ---------- prices next to each program (every number from prices.mjs) ----------
-// Each paid program's entry in PRICE. Riyeser Link is free; its paid upgrade (Link Plus) is p.plus.module.
-const MOD = { 'accounting-basics': 'basic', accounting: 'plus', pos: 'pos', bookings: 'bookings', payroll: 'payroll', services: 'as_built' };
+// Each paid program's entry in PRICE (Riyeser Link is the 'calls' module).
+const MOD = { 'accounting-basics': 'basic', accounting: 'plus', bookings: 'bookings', link: 'calls', payroll: 'payroll', pos: 'pos', services: 'as_built' };
 const USERS_LINE = `${PRICE.users_included} users included · +${usd(PRICE.extra_user)} a month per extra user`;
-/** e.g. "US$39 a month · 3 users included · +US$x a month per extra user" (all from PRICE) */
-const priceLong = (m) => `${usd(PRICE[m])} a month · ${USERS_LINE}`;
+/** What's included in each paid program's price, in plain words (all numbers from PRICE). */
+const INCL = {
+  pos: [`1 till (checkout counter) included · unlimited cashiers`, `+${usd(PRICE.extra_till)} a month per extra till`],
+  payroll: [`${PRICE.users_included} office users included · unlimited employees`, `+${usd(PRICE.extra_user)} a month per extra office user`],
+  bookings: [`${PRICE.users_included} staff calendars included`, `+${usd(PRICE.extra_user)} a month per extra calendar`],
+};
+const inclOf = (m) => INCL[m] || [`${PRICE.users_included} users included`, `+${usd(PRICE.extra_user)} a month per extra user`];
+const inclLine = (m) => inclOf(m).join(' · ');
 /** Where space is tight (menu rows): "US$39/mo · 3 users incl." */
-const priceShort = (m) => `${usd(PRICE[m])}/mo · ${PRICE.users_included} users incl.`;
-const USERS_NOTE = `Every paid program includes ${PRICE.users_included} users; extra users ${usd(PRICE.extra_user)} a month each.`;
+const priceShort = (m) => `${usd(PRICE[m])}/mo · ${m === 'pos' ? '1 till incl.' : `${PRICE.users_included} users incl.`}`;
+const USERS_NOTE = `Every paid program includes ${PRICE.users_included} users (POS: 1 till and unlimited cashiers); extra users ${usd(PRICE.extra_user)} a month each. Your accountant signs in free.`;
 /** Where the two buttons go: create an account (or sign in), then Riyeser home opens "Add to my plan" for these programs. */
 const BUY_LINK = (mods, buy, extra = '') => `/link/?signup&add=${mods}${extra}${buy ? '&buy=1' : ''}`;
 /** "Start free for 90 days" and "Buy now" for a paid program (m = its PRICE key). */
@@ -175,17 +177,18 @@ const INCLUDES = {
     "Today: meetings from your calendar and the to-dos from your meeting notes", 'A built-in PDF editor', 'Optional AI sorting with your own AI key', 'Only your own documents: never Windows or program files'],
   link: ['Channels for each topic, job or site', 'Private chats: only the people you choose can see them', 'Direct messages between two people',
     'Reactions, pinned chats and files shared in chat', 'INV-1047 or Booking 12 stands out in a message', 'Unread counts on every chat',
+    'Call a person, dial an extension, or call a whole branch', 'Turn the camera on for video in any call',
+    'Branches with their own number and join code; extensions given automatically',
+    'Office desk phones with Riyeser Link Office, your office phone system (Yealink, Grandstream, Snom and Polycom)',
+    "Answer on any PC or phone you're signed in on, with no call charges", 'A list of recent calls',
     'Invite your team with one link', 'On your PC (the Riyeser Link app starts with Windows), in any web browser and on phones', 'Each business only ever sees its own team',
-    `${STORAGE_GB.free} GB of chat file space per business, up to 25 MB a file`],
-  'link-plus': ['Everything in free Riyeser Link', 'Call a person, dial an extension, or call a whole branch', 'Turn the camera on for video in any call',
-    'Branches with their own number and join code; extensions given automatically', 'Office desk phones with Riyeser Link Office (Yealink, Grandstream, Snom and Polycom)',
-    "Answer on any PC or phone you're signed in on, with no call charges", 'A list of recent calls', `${STORAGE_GB.plus} GB of chat file space (not hosting)`],
+    `${STORAGE_GB.link} GB of space per business for files shared in chat, up to 25 MB a file (not hosting)`],
   'link-office': ['Install it on one Windows PC at the office that stays on, and sign in with your Riyeser account',
     'It brings in your people, extensions and branches from Riyeser Link', 'Plug in Yealink, Grandstream, Snom and Polycom desk phones: they show up by themselves and set themselves up',
     'Each person gets an extension number, like 101', 'Staff call each other free inside the office',
     'Ring groups: "Front desk" rings several phones, and the first to answer gets the call', 'Staff can also answer office calls in the Riyeser Link app (My phone)',
     'Other desk phones and phone apps can be set up by hand', 'Owners and admins see and manage every phone from the Phones page in Riyeser Link',
-    'Comes with Riyeser Link Plus: no separate price'],
+    'Comes with Riyeser Link: no separate price'],
   pdf: ['Open and view any PDF, and make Riyeser PDF your PDF app', 'Change the words in a PDF, add text, highlight, underline and strike through',
     'Fill in forms', 'Sign, tick, cross, add the date or a stamp (Approved, Paid, Received…)', 'Draw, boxes, circles, lines and arrows for marking up drawings',
     "White-out, and Redact that removes what's underneath for good", 'Combine PDFs, reorder, rotate, delete, extract and split pages',
@@ -222,8 +225,8 @@ const SHOTS = {
   'desk-assistant': [['desk-search', 1280, 560, 'Desk Assistant Find a file: a search for a customer name finds two invoices, filed under Organised, Invoices, 2026', 'Find a file'],
     ['desk-today', 1280, 300, "Desk Assistant Today screen with meetings and the to-dos taken from meeting notes", "Today's to-dos"]],
   link: [['link-chat', 1440, 900, 'Riyeser Link demo: the jobs channel with messages, reactions and a shared job sheet, and the team list with extensions', 'Team chat'],
-    ['link-calls', 1440, 900, 'Riyeser Link Plus calls: dial an extension or call a branch, with recent calls', 'Calls (Link Plus)'],
-    ['link-desk-phones', 1440, 900, 'Riyeser Link desk phones page: set-up steps for Riyeser Link Office and the server address to type into phones', 'Desk phones (Link Plus)'],
+    ['link-calls', 1440, 900, 'Riyeser Link calls: dial an extension or call a branch, with recent calls', 'Calls'],
+    ['link-desk-phones', 1440, 900, 'Riyeser Link desk phones page: set-up steps for Riyeser Link Office and the server address to type into phones', 'Desk phones'],
     ['link-phone', 600, 1298, 'Riyeser Link on a phone: pinned chats, channels and direct messages', 'On a phone', 'tall']],
   // The desk phones page in Riyeser Link (shown in a Riyeser Link window: shotOf), where Link Office's phones are managed.
   'link-office': [['link-desk-phones', 1440, 900, 'Riyeser Link desk phones page: set-up steps for Riyeser Link Office and the server address to type into phones', 'Desk phones in Riyeser Link']],
@@ -243,14 +246,16 @@ b.forEach(function(x,n){x.addEventListener('click',function(){show(n);d.showModa
 d.querySelector('.lb-x').addEventListener('click',function(){d.close()});d.querySelector('.lb-prev').addEventListener('click',function(){show(i-1)});d.querySelector('.lb-next').addEventListener('click',function(){show(i+1)});
 d.addEventListener('click',function(e){if(e.target===d)d.close()});d.addEventListener('keydown',function(e){if(e.key==='ArrowLeft')show(i-1);if(e.key==='ArrowRight')show(i+1)});
 d.addEventListener('close',function(){var x=b[i];if(x)x.focus()})})()</script>`; };
-const freeInfo = (id, up) => { const f = FREE_INFO[id]; if (!f) return ''; const p = prog(id);
+const freeInfo = (id) => { const f = FREE_INFO[id]; if (!f) return '';
   return `<div class="freeinfo"><div><b>Included free:</b> ${esc(f.inc)}</div>
     <div><b>Limits <span class="ii" title="${esc(f.lim ? 'The only limit on this free program' : 'No limits on this free program: no time limit, no card')}">ⓘ</span>:</b> ${f.lim ? `<span class="lim">${esc(f.lim)}</span>` : '<span class="nolim">No limits</span>'}${f.note ? ` <span class="muted">${esc(f.note)}</span>` : ''}</div>
-    ${f.up ? `<div class="muted">${esc(f.up)}</div>` : ''}${p && p.plus ? plusLine(p, up, true) : ''}</div>`; };
+    ${f.up ? `<div class="muted">${esc(f.up)}</div>` : ''}</div>`; };
 // No single "from" price: each paid program shows its own price next to its name.
 const PAID_HEAD = 'Free for 90 days, then:';
 rmSync(OUT, { recursive: true, force: true });
-const guidesFor = (o) => helpGuides(o).filter((g) => ASBUILT || g.id !== 'services');
+// Help guides: Getting started first, then the programs in the site's order (free A to Z, then paid A to Z).
+const guidesFor = (o) => helpGuides(o).filter((g) => ASBUILT || g.id !== 'services')
+  .sort((a, b) => (a.id === 'start' ? -1 : b.id === 'start' ? 1 : ORDER.indexOf(a.id) - ORDER.indexOf(b.id)));
 const PROGRAMS = ALL_PROGRAMS.filter((p) => ASBUILT || p.id !== 'services');
 const prog = (id) => ALL_PROGRAMS.find((p) => p.id === id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -352,7 +357,7 @@ function homeHero(up) {
 </section>
 <script>(function(){var r=document.querySelector('.hero3');if(!r)return;var s=r.querySelectorAll('.h3slide'),d=r.querySelectorAll('.h3dots button'),i=0,t=null;
 function go(n){s[i].classList.remove('on');d[i].classList.remove('on');d[i].setAttribute('aria-selected','false');i=(n+s.length)%s.length;s[i].classList.add('on');d[i].classList.add('on');d[i].setAttribute('aria-selected','true');}
-var still=matchMedia('(prefers-reduced-motion: reduce)').matches;function play(){if(!still&&!t)t=setInterval(function(){go(i+1)},8000);}function stop(){clearInterval(t);t=null;}
+var still=matchMedia('(prefers-reduced-motion: reduce)').matches||matchMedia('(max-width: 640px)').matches;   /* phones: one still picture */function play(){if(!still&&!t)t=setInterval(function(){go(i+1)},8000);}function stop(){clearInterval(t);t=null;}
 d.forEach(function(b){b.addEventListener('click',function(){stop();go(+b.dataset.go);});});r.addEventListener('mouseenter',stop);r.addEventListener('mouseleave',play);
 document.addEventListener('visibilitychange',function(){document.hidden?stop():play();});play();})();</script>`;
 }
@@ -394,42 +399,32 @@ const heroShot = (up) => `<div class="hshot">
 </div>`;
 const winFrame = (up, app, name, img, alt, w = 1400, h = 900) => `<div class="win"><div class="bar"><img src="${up}assets/${app === 'logo' ? 'logo-r.png' : `apps/${app}.png`}" alt="">${esc(name)}<span class="ctl">${svg('<path d="M5 12h14"/>')}${svg('<rect x="5" y="5" width="14" height="14" rx="1"/>')}${svg('<path d="M6 6l12 12M18 6L6 18"/>')}</span></div><img src="${up}assets/${img}" alt="${esc(alt)}" width="${w}" height="${h}"></div>`;
 /** Free programs, a heading, then the paid ones: grp(list, (items) => html, (title) => heading html).
-    Riyeser Link Office (comesWith) stays next to Riyeser Link, with "With Link Plus" where a price would be. */
-const grouped = (list, wrap, head) => [[FREE_HEAD, list.filter((p) => p.free || p.comesWith)], [PAID_HEAD, list.filter((p) => !p.free && !p.comesWith)]]
+    Riyeser Link Office (comesWith) is in the paid group right after Riyeser Link, with "With Riyeser Link" where a price would be. */
+const grouped = (list, wrap, head) => [[FREE_HEAD, list.filter((p) => p.free)], [PAID_HEAD, list.filter((p) => !p.free)]]
   .filter(([, l]) => l.length).map(([t, l]) => head(t) + wrap(l)).join('');
-// The "★ Plus" marker for a free program with a paid upgrade (p.plus). Inside another link (a card or menu item) it can't be
-// a link itself, so it's a span with data-href (the page script follows it); elsewhere it's a normal link.
-const plusTitle = (p) => `Premium version available: ${p.plus.name} adds ${p.plus.what} for ${usd(PRICE[p.plus.module])}/month`;
-const plusHref = (p, up) => `${up}pricing.html#${p.plus.anchor}`;
-const plusPill = (p, up, asLink = false) => (!p.plus ? '' : asLink
-  ? `<a class="pluspill" href="${plusHref(p, up)}" title="${esc(plusTitle(p))}">★ Plus</a>`
-  : `<span class="pluspill" role="link" tabindex="0" data-href="${plusHref(p, up)}" title="${esc(plusTitle(p))}">★ Plus</span>`);
-const plusLine = (p, up, asLink = false) => (!p.plus ? '' : asLink
-  ? `<a class="plusline" href="${plusHref(p, up)}">★ <b>${esc(p.plus.name)}</b> available: ${esc(p.plus.line)}</a>`
-  : `<span class="plusline" role="link" tabindex="0" data-href="${plusHref(p, up)}">★ <b>${esc(p.plus.name)}</b> available: ${esc(p.plus.line)}</span>`);
-// A program that comes with another's upgrade (Riyeser Link Office with Link Plus) has no price of its own: these say so
-// and link to that upgrade's row on the pricing page.
-const withPlus = (p) => prog(p.comesWith).plus;
-const withHref = (p, up) => plusHref(prog(p.comesWith), up);
-const withShort = (p) => `With ${withPlus(p).name.replace('Riyeser ', '')}`;
+// A program that comes with another (Riyeser Link Office with Riyeser Link) has no price of its own: these say so and
+// link to that program's row on the pricing page.
+const withName = (p) => prog(p.comesWith).name;
+const withHref = (p, up) => `${up}pricing.html#${p.comesWith}`;
+const withShort = (p) => `With ${withName(p)}`;
 /** A paid program's price, users included and extra-user price (all from PRICE). */
-const priceTag = (p) => `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(USERS_LINE)}`;
+const priceTag = (p) => `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(inclLine(MOD[p.id]))}`;
 /** A section heading: optional eyebrow, the title and an optional one-line summary (the same on every section). */
 const shead = (title, sub = '', eyebrow = '') => `<div class="shead">${eyebrow ? `<span class="eyebrow">${esc(eyebrow)}</span>` : ''}<h2 class="h2">${esc(title)}</h2>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</div>`;
 const firstSentence = (t) => t.split(/(?<=\.)\s+/)[0];
 /** A checklist card (program pages). With m (a PRICE key) it shows that price and the buy buttons. */
 const includedCard = (key, name, m, up, cls = '') => `<div class="inclcard${cls ? ` ${cls}` : ''}"${m ? ` id="${key}"` : ''}><div class="ih"><b>${esc(name)}</b><span class="ihp">${m ? `<b>${usd(PRICE[m])}</b> /month` : '<b class="free">Free</b> forever'}</span></div>
-  <small class="ihq">${m ? `${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user · free for 90 days` : 'No time limit, no card, no user charges'}</small>${inclList(key)}${m ? buyBtns(m) : ''}</div>`;
+  <small class="ihq">${m ? `${esc(inclLine(m))} · free for 90 days` : 'No time limit, no card, no user charges'}</small>${inclList(key)}${m ? buyBtns(m) : ''}</div>`;
 /** The price card at the top of a program page. */
 const heroPrice = (p, up) => { const m = MOD[p.id];
-  if (p.comesWith) return `<div class="hprice with"><div class="hp-main"><b>Comes with ${esc(withPlus(p).name)}</b></div>
-    <div class="hp-sub">No separate price. The Windows program is free to download, and it switches on when your business has ${esc(withPlus(p).name)}.</div>
-    <a class="hp-plus" href="${withHref(p, up)}">★ <b>${esc(withPlus(p).name)}</b>: ${esc(withPlus(p).what)} ${ARR}</a></div>`;
+  if (p.comesWith) { const w = MOD[p.comesWith]; return `<div class="hprice with"><div class="hp-main"><b>Comes with ${esc(withName(p))}</b></div>
+    <div class="hp-sub">No separate price. The Windows program is free to download, and it switches on when your business has ${esc(withName(p))} (${usd(PRICE[w])} a month, free for 90 days).</div>
+    <a class="hp-plus" href="${withHref(p, up)}"><b>${esc(withName(p))}</b>: chat, calls, desk phones and this office phone system, ${usd(PRICE[w])}/month ${ARR}</a>${buyBtns(w)}</div>`; }
   if (m) return `<div class="hprice"><div class="hp-main"><b>${usd(PRICE[m])}</b><span>/month per business</span></div>
-    <div class="hp-sub">${PRICE.users_included} users included · +${usd(PRICE.extra_user)} a month per extra user</div><div class="hp-sub ok">Free for 90 days, no card</div>${buyBtns(m)}</div>`;
+    <div class="hp-sub">${esc(inclLine(m))}</div><div class="hp-sub">Or ${usd(PRICE[m] * 10)} a year: 2 months free</div><div class="hp-sub ok">Free for 90 days, no card</div>${buyBtns(m)}</div>`;
   const f = FREE_INFO[p.id] || {};
   return `<div class="hprice free"><div class="hp-main"><b>Free</b><span>forever</span></div>
-    <div class="hp-sub">No time limit, no card, no user charges</div>${f.lim ? `<div class="hp-sub">Only limit: ${esc(f.lim)}</div>` : ''}${f.up ? `<div class="hp-sub">${esc(f.up)}</div>` : ''}${p.plus ? `<a class="hp-plus" href="#${p.plus.anchor}">★ <b>${esc(p.plus.name)}</b>: ${esc(p.plus.what)}, ${usd(PRICE[p.plus.module])}/month ${ARR}</a>` : ''}</div>`; };
+    <div class="hp-sub">No time limit, no card, no user charges</div>${f.lim ? `<div class="hp-sub">Only limit: ${esc(f.lim)}</div>` : ''}${f.up ? `<div class="hp-sub">${esc(f.up)}</div>` : ''}</div>`; };
 // "Works with" on each program page: only links the programs really have (checked against INCLUDES and the industry pages).
 const RELATED = {
   central: [['accounting-basics', 'Money owed and overdue invoices on your home screen'], ['payroll', 'Your last pay run on your home screen'], ['desk-assistant', "Today's meetings and to-dos on your home screen"]],
@@ -440,17 +435,17 @@ const RELATED = {
   bookings: [['invoices', 'Invoice a finished job in one click'], ['accounting-basics', 'Job invoices land in your books'], ['pos', 'Customers shared with the till']],
   payroll: [['accounting-basics', 'Pay runs brought into your books'], ['central', 'Your last pay run on your home screen']],
   'desk-assistant': [['central', "Today's meetings and to-dos on your home screen"], ['pdf', 'Fill in, sign and edit the PDFs it finds']],
-  link: [['link-office', 'Office desk phones that ring each other (with Link Plus)'], ['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out']],
+  link: [['link-office', 'Your office phone system: desk phones that ring each other'], ['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out']],
   'link-office': [['link', 'See the desk phones, and answer office calls in the app (My phone)'], ['central', 'Installs it and keeps it up to date']],
   pdf: [['desk-assistant', 'Sorts and finds your PDFs, even scanned ones'], ['central', 'Your home screen for every program']],
 };
 /** A program card: icon, name, one line, then the price and "Learn more" pinned to the bottom (every card the same height). */
-const progCard = (p, up) => `<a class="card pcard2" href="${up}programs/${p.id}.html">${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}</h3><p>${esc(p.card || p.one)}</p>
+const progCard = (p, up) => `<a class="card pcard2" href="${up}programs/${p.id}.html">${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p>
 <div class="cfoot"><span class="cp">${p.comesWith ? `<b class="with">${esc(withShort(p))}</b>` : p.free ? '<b class="free">Free</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
-<small class="cq">${p.comesWith ? `<span class="plusq" role="link" tabindex="0" data-href="${withHref(p, up)}">★ Comes with ${esc(withPlus(p).name)}</span>` : p.plus ? `<span class="plusq" role="link" tabindex="0" data-href="${plusHref(p, up)}">★ ${esc(p.plus.name)} available</span>` : p.free ? 'No time limit, no card' : `${PRICE.users_included} users incl. · +${usd(PRICE.extra_user)} per extra user`}</small></div></a>`;
+<small class="cq">${p.comesWith ? 'No separate price' : p.free ? 'No time limit, no card' : esc(inclOf(MOD[p.id])[0])}</small></div></a>`;
 /** The last tile in each group, so the 3-column grid has no gaps: a quiet summary with a link to the prices. */
 const groupTile = (free, up) => free
-  ? `<a class="card ptile" href="${up}pricing.html"><b>Free, for good</b><p>No time limit, no card and no user charges. The only limit is Riyeser Link's ${STORAGE_GB.free} GB of chat file space.</p><span class="more">See every price ${ARR}</span></a>`
+  ? `<a class="card ptile" href="${up}pricing.html"><b>Free, for good</b><p>No time limit, no card and no user charges.</p><span class="more">See every price ${ARR}</span></a>`
   : `<a class="card ptile" href="${up}pricing.html#calc"><b>Free for 90 days, no card</b><p>Then one price per business, with ${PRICE.users_included} users included. Pay yearly and get 2 months free.</p><span class="more">Work out your price ${ARR}</span></a>`;
 /** Free programs, then paid ones, each in a 3-column grid (2 on tablets, 1 on phones). */
 const progGrid = (list, up, head = (t) => `<h3 class="ghead">${esc(t)}</h3>`) => grouped(list, (l) => `<div class="grid pgrid">${l.map((p) => progCard(p, up)).join('')}${l.length % 3 ? groupTile(l[0].free, up) : ''}</div>`, head);
@@ -507,7 +502,7 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
 <header class="nav" id="nav"><div class="c">
   <a class="logo" href="${up}index.html"><img src="${up}assets/logo-r.png" alt="">Riyeser</a>
   <nav class="links">
-    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop progs">${grouped(PROGRAMS, (l) => `${l.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up, 'mi')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}${p.plus ? ` ${plusPill(p, up)}` : ''}<small>${esc(p.tag || '')}</small><em class="mprice${p.free ? ' free' : p.comesWith ? ' with' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? `Free${p.plus ? ` <i>· ${esc(p.plus.name.replace('Riyeser ', ''))} ${usd(PRICE[p.plus.module])}/mo</i>` : ''}` : esc(priceShort(MOD[p.id]))}</em></span></a>`).join('')}${l[0].free ? '' : `<p class="mnote">${esc(USERS_NOTE)}</p>`}</div>`, (t) => `<div class="mcol"><div class="mgrp">${esc(t)}</div>`)}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
+    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop progs">${grouped(PROGRAMS, (l) => `${l.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up, 'mi')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}<small>${esc(p.tag || '')}</small><em class="mprice${p.free ? ' free' : p.comesWith ? ' with' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : esc(priceShort(MOD[p.id]))}</em></span></a>`).join('')}${l[0].free ? '' : `<p class="mnote">${esc(USERS_NOTE)}</p>`}</div>`, (t) => `<div class="mcol"><div class="mgrp">${esc(t)}</div>`)}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
     <div class="dd"><a href="${indLink(INDUSTRIES[0], up)}"${active === 'industries' ? ' class="on"' : ''}>Industries ${svg(LI.down)}</a><div class="menu-pop">${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}"><span class="li">${li(i.icon, '')}</span><span>${esc(i.name)}<small>${esc(i.short)}</small></span></a>`).join('')}</div></div>
     <a href="${up}pricing.html"${active === 'pricing' ? ' class="on"' : ''}>Pricing</a>
     <div class="dd"><a href="${up}help.html"${active === 'help' ? ' class="on"' : ''}>Help ${svg(LI.down)}</a><div class="menu-pop">${guidesFor({ EMAIL, SERVICES_APP, up }).map((g) => `<a href="${up}help/${g.id}.html"><img class="appicon i-${g.app}" src="${up}assets/apps/${g.app}.png" alt="" style="width:30px;height:30px;border-radius:8px">${esc(g.name)}</a>`).join('')}<a class="all" href="${up}help.html">Help Centre ${ARR}</a></div></div>
@@ -528,13 +523,17 @@ document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventList
 <footer><div class="c">
   <div class="fcols">
     <div><a class="logo" href="${up}index.html"><img src="${up}assets/logo-r.png" alt="">Riyeser</a><p style="margin:0;max-width:300px">Windows software for small businesses. Work offline and keep your records on your PC.</p></div>
-    <div><h2 class="fh">Programs</h2>${PROGRAMS.map((p) => `<a href="${up}programs/${p.id}.html">${p.short === 'Central' ? 'Riyeser Central' : p.short}</a>`).join('')}</div>
-    <div><h2 class="fh">Industries</h2>${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}">${esc(i.name)}</a>`).join('')}</div>
-    <div><h2 class="fh">Help</h2><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="/link/?contact">Contact support</a><a href="mailto:${EMAIL}">${EMAIL}</a></div>
-    <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="/link/?signup">Create an account</a><a href="${up}terms.html">Terms of use</a></div>
+    <div class="fprogs"><h2 class="fh">Programs</h2><div class="fpcols">
+      <div><h3 class="fsub">Free</h3>${PROGRAMS.filter((p) => p.free).map((p) => `<a href="${up}programs/${p.id}.html">${p.short === 'Central' ? 'Riyeser Central' : p.short}</a>`).join('')}</div>
+      <div><h3 class="fsub">Paid</h3>${PROGRAMS.filter((p) => !p.free).map((p) => `<a href="${up}programs/${p.id}.html">${p.short === 'Central' ? 'Riyeser Central' : p.short}</a>`).join('')}</div></div></div>
+    <div class="flinks">
+      <div><h2 class="fh">Industries</h2>${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}">${esc(i.name)}</a>`).join('')}</div>
+      <div><h2 class="fh">Help</h2><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="/link/?contact">Contact support</a><a class="fmail" href="mailto:${EMAIL}">${EMAIL}</a></div>
+      <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="/link/?signup">Create an account</a><a href="${up}terms.html">Terms of use</a></div>
+    </div>
   </div>
-  <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span>For Windows 10 &amp; 11 · Works offline · No account or card needed</span></div></div></footer>
-<script>/* the "★ Plus" markers inside cards and menus open the pricing page's section */
+  <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span class="fwin"><span>For Windows 10 &amp; 11</span><span>Works offline</span><span>No account or card needed</span></span></div></div></footer>
+<script>/* links inside cards and menus (data-href) */
 document.addEventListener('click',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(!x)return;e.preventDefault();e.stopPropagation();location.href=x.getAttribute('data-href')},true);
 document.addEventListener('keydown',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(x&&(e.key==='Enter'||e.key===' ')){e.preventDefault();location.href=x.getAttribute('data-href')}});</script>
 <script>/* the Help Centre search button: open the first result, or go to the box */
@@ -599,7 +598,7 @@ ${homeHero(up)}
 
 <section class="finder" id="find"><div class="c">
   <h2 class="h2">Find your program</h2>
-  ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span class="fname">${esc(p.short === 'Central' ? 'Central' : p.short)}</span><span class="fmeta">${p.plus ? plusPill(p, up) : ''}<small class="fprice${p.comesWith ? ' with' : p.free ? ' free' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])}<span class="pm"> a month</span><span class="pmo">/mo</span>`}</small></span></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
+  ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span class="fname">${esc(p.short === 'Central' ? 'Central' : p.short)}</span><span class="fmeta"><small class="fprice${p.comesWith ? ' with' : p.free ? ' free' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])}<span class="pm"> a month</span><span class="pmo">/mo</span>`}</small></span></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
 </div></section>
 
 <section class="c">
@@ -638,7 +637,7 @@ ${homeHero(up)}
 <section class="c" style="padding-top:0;max-width:920px">
   <h2 class="h2 center">Frequently asked questions</h2>
   <div class="faq" style="margin-top:26px">
-  <details><summary>What does it cost?</summary><p>Riyeser Central, Riyeser Invoices, Riyeser Link chat, PDF and the Desk Assistant file organiser are free forever. Every paid program is free for 90 days with no card. After that, each one is a set price per business — not per person — with 3 users included: Accounting Basics ${usd(PRICE.basic)} a month, Accounting Plus $${PRICE.plus} (it includes Basics), Payroll $${PRICE.payroll}, POS $${PRICE.pos}, Bookings $${PRICE.bookings} and Riyeser Link Plus $${PRICE.calls}.${ASBUILT ? ` As Built, for the building industry, is $${PRICE.as_built}.` : ''} More people are $${PRICE.extra_user} a month each, for each program. All prices are in US dollars, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Riyeser Central, Desk Assistant, Riyeser Invoices and PDF are free forever. Every paid program is free for 90 days with no card. After that, each one is a set price per business — not per person — with 3 users included: Accounting Basics ${usd(PRICE.basic)} a month, Accounting Plus ${usd(PRICE.plus)} (it includes Basics), Bookings ${usd(PRICE.bookings)}, Riyeser Link ${usd(PRICE.calls)} (chat, calls and office phones), Payroll ${usd(PRICE.payroll)} (unlimited employees) and POS ${usd(PRICE.pos)} (1 till, unlimited cashiers).${ASBUILT ? ` As Built, for the building industry, is ${usd(PRICE.as_built)}.` : ''} Extra users are ${usd(PRICE.extra_user)} a month each, for each program, and your accountant signs in free. Bundles save more: ${BUNDLES.map((x) => `${x.name} ${usd(x.price)}`).join(', ')}. All prices are in US dollars, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline.${ASBUILT ? ' As Built can optionally sync to an online account so phones, clients and staff can see your projects.' : ' Riyeser Link (chat and calls) is the one part that runs online.'}</p></details>
   <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11.${ASBUILT ? ' As Built also works in any web browser, on phones and tablets.' : ' Riyeser Link also works in any web browser, on phones and tablets.'}</p></details>
   <details><summary>Where do I start?</summary><p>Download Riyeser Central. It's the home screen for every program and shows you what else you can add. The <a class="more" href="${up}help/start.html">Getting started guide</a> walks you through it.</p></details>
@@ -700,8 +699,8 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
   </div>
   ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : SHOTS[p.id] ? winFrame(up, p.comesWith || p.id, prog(p.comesWith || p.id).name, `shots/${SHOTS[p.id][0][0]}.webp`, SHOTS[p.id][0][3], SHOTS[p.id][0][1], SHOTS[p.id][0][2]) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
 </div></div>
-<section class="c blk" id="included">${shead('What you get', p.plus ? `${p.name} is free. ${p.plus.name} adds ${p.plus.what}.` : p.comesWith ? `${p.name} comes with ${withPlus(p).name}. There's no separate price.` : '', "What's included")}
-  ${p.plus ? `<div class="inclgrid two">${includedCard(p.id, p.name, null, up)}${includedCard(p.plus.anchor, p.plus.name, p.plus.module, up, 'plus')}</div>` : `<div class="inclcard wide">${inclList(p.id)}</div>`}
+<section class="c blk" id="included">${shead('What you get', p.comesWith ? `${p.name} comes with ${withName(p)}. There's no separate price.` : '', "What's included")}
+  <div class="inclcard wide">${inclList(p.id)}</div>
   ${p.note ? `<p class="pnote">${esc(p.note)}</p>` : ''}
 </section>
 ${gallery(p.id, up)}
@@ -802,68 +801,99 @@ page({
 </section>
 <section class="c" style="padding-top:0">
   <h2 class="h2">Every program</h2><p class="sub">Or download a program on its own. Each one installs in one click and updates over the old version, so your information is kept.</p>
-  ${grouped(PROGRAMS.filter((p) => p.id !== 'central'), (l) => l.map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}${plusPill(p, up, true)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p>${p.comesWith ? `<p class="cprice">Comes with <a class="more" href="${withHref(p, up)}">${esc(withPlus(p).name)}</a>. No separate price: it switches on when your business has ${esc(withPlus(p).name)}.</p>` : p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}${plusLine(p, up, true)}</div>${p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join(''), (t) => `<h3 class="ghead">${esc(t)}</h3>`)}
+  ${grouped(PROGRAMS.filter((p) => p.id !== 'central'), (l) => l.map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p>${p.comesWith ? `<p class="cprice">Comes with <a class="more" href="${withHref(p, up)}">${esc(withName(p))}</a>. No separate price: it switches on when your business has ${esc(withName(p))}.</p>` : p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}</div>${p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join(''), (t) => `<h3 class="ghead">${esc(t)}</h3>`)}
   <div class="note" style="margin-top:26px"><b>Windows says “Windows protected your PC”?</b> Click <b>More info</b>, then <b>Run anyway</b>. We're getting our programs signed so this goes away. The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates and your licence.</div>
 </section>
 ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the same button names you see on screen.')}`,
 });
 
 // ---------- pricing ----------
-// Every number comes from PRICE (website/prices.mjs). The calculator works the same way as HQ's estimate (riyeser_bill in team-chat.sql).
+// Every number comes from PRICE and BUNDLES (website/prices.mjs). The calculator uses planPrice (the same sums as
+// riyeser_plan in team-chat.sql, which billing and HQ use): bundles are applied by themselves.
 {
   const P = PRICE;
   const ROWS = [
     ['basic', 'Accounting Basics', 'accounting-basics', 'Invoices, quotes, customers, stock, money in and out, GST and profit &amp; loss.'],
     ['plus', 'Accounting Plus', 'accounting', 'Everything in Basics, plus bank reconciliation, statement import, payroll, BAS, journals, jobs and budgets. You pay for Plus <b>instead of</b> Basics, never both.'],
-    ['pos', 'POS', 'pos', 'The till for shops, cafes and restaurants. Every sale goes into your books.'],
     ['bookings', 'Bookings', 'bookings', 'Jobs, appointments and table bookings on one calendar.'],
-    ['payroll', 'Payroll', 'payroll', 'Time clock, timesheets, pay runs, payslips and leave.'],
-    ['calls', 'Riyeser Link Plus', 'link', `Calls between your people and branches, office desk phones with <a class="more" href="programs/link-office.html">Riyeser Link Office</a>, and ${STORAGE_GB.plus} GB of space for files shared in chat (not hosting).`],
+    ['calls', 'Riyeser Link', 'link', `Chat, calls between your people and branches, office desk phones with <a class="more" href="programs/link-office.html">Riyeser Link Office</a>, and ${STORAGE_GB.link} GB of space for files shared in chat (not hosting).`],
+    ['link-office', 'Riyeser Link Office', 'link-office', 'Your business\'s phone lines: the office phone system, with desk phones, extensions and ring groups, answered on desk phones or in the Riyeser Link app.'],
+    ['payroll', 'Payroll', 'payroll', 'Time clock, timesheets, pay runs, payslips and leave. Staff who only clock in or see their payslips are free.'],
+    ['pos', 'POS', 'pos', 'The till for shops, cafes and restaurants. Every sale goes into your books.'],
     ...(ASBUILT ? [['as_built', 'As Built', 'services', 'Services on your drawings, for the building industry. Doesn\'t need Accounting.']] : []),
   ];
-  const FREE = [['central', 'Riyeser Central', 'Your home screen, and it installs and updates the rest'], ['invoices', 'Riyeser Invoices', 'Quotes, invoices and getting paid'],
-    ['link', 'Riyeser Link', `Chat for your team, with ${STORAGE_GB.free} GB of file storage per business`], ['pdf', 'Riyeser PDF', 'Fill, sign, combine and edit PDFs'],
-    ['desk-assistant', 'Desk Assistant', 'Sort and find every file']];
+  const CALC = ROWS.filter(([m]) => PRICE[m] != null);
+  // What the number next to each program in the calculator counts
+  const UNIT = { pos: 'Tills', payroll: 'Office users', bookings: 'Staff calendars', calls: 'People' };
+  const FREE = [['central', 'Riyeser Central', 'Your home screen, and it installs and updates the rest'], ['desk-assistant', 'Desk Assistant', 'Sort and find every file'],
+    ['invoices', 'Riyeser Invoices', 'Quotes, invoices and getting paid'], ['pdf', 'Riyeser PDF', 'Fill, sign, combine and edit PDFs']];
   const half = (n) => usd(n / 2);
+  const NAME = Object.fromEntries(CALC.map(([m, n]) => [m, n]));
+  const APP = Object.fromEntries(CALC.map(([m, , id]) => [m, id]));
+  const big = BUNDLES.find((x) => x.popular) || BUNDLES[BUNDLES.length - 1];
+  const bundleCard = (x, up) => `<div class="plan bundle${x.popular ? ' best' : ''}" id="bundle-${x.id}">${x.popular ? '<span class="tag">Most popular</span>' : ''}
+    <div class="k"><b>${esc(x.name)}</b><small>${esc(x.who)}</small></div>
+    <div class="price">${usd(x.price)}<small> /month</small></div>
+    <div class="psub"><s>${usd(separately(x))}</s> if bought one by one</div>
+    <div class="psub"><b class="save">You save ${usd(separately(x) - x.price)} a month</b></div>
+    <div class="psub">Or ${usd(x.price * 10)} a year: 2 months free</div>
+    <ul class="bmods">${x.mods.map((m) => `<li>${appImg(APP[m], up, 'bi')}<span>${esc(NAME[m])}</span><small>${usd(P[m])}</small></li>`).join('')}</ul>
+    <p class="bnote">${P.users_included} users included in each program. Extra users ${usd(P.extra_user)} a month${x.mods.includes('pos') ? `, extra tills ${usd(P.extra_till)}` : ''}.</p>
+    ${buyBtns(x.mods.join(','))}</div>`;
   page({
-    path: 'pricing.html', title: 'Riyeser pricing — free tools, and one price per program per business', active: 'pricing',
-    description: `All prices in US dollars, per business per month, with 3 users included in each program. Riyeser Central, Invoices, Link chat, PDF and Desk Assistant are free forever. Accounting Basics is ${usd(P.basic)}, Accounting Plus ${usd(P.plus)}, Payroll ${usd(P.payroll)}, POS ${usd(P.pos)}, Bookings ${usd(P.bookings)} and Riyeser Link Plus ${usd(P.calls)}. Every paid program is free for 90 days, no card.`,
+    path: 'pricing.html', title: 'Riyeser pricing — free tools, one price per program, and bundles', active: 'pricing',
+    description: `All prices in US dollars, per business per month, with 3 users included in each program. Riyeser Central, Desk Assistant, Invoices and PDF are free forever. Accounting Basics is ${usd(P.basic)}, Accounting Plus ${usd(P.plus)}, Bookings ${usd(P.bookings)}, Riyeser Link ${usd(P.calls)}, Payroll ${usd(P.payroll)} and POS ${usd(P.pos)}. Bundles from ${usd(Math.min(...BUNDLES.map((x) => x.price)))}. Every paid program is free for 90 days, no card.`,
     body: (up) => `
-${bandHero({ title: 'Pricing', lead: `Start free. Each paid program has its own price per business per month, shown next to it below, with ${P.users_included} users included.` })}
+${bandHero({ title: 'Pricing', lead: `Start free. Pay only for the programs you use: one price per business per month, with ${P.users_included} users included in each. Take programs together in a bundle and pay less.` })}
 <section class="c" style="padding-bottom:10px">
-  <p class="usdnote" id="usd"><b>All prices in US dollars (US$)</b>, per business, per month. Any GST or local tax is shown before you pay.</p>
-  ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off for your first 12 months</b><p>For the first 100 businesses to buy. Half price on each program and its extra users for 12 months (extra companies in Accounting stay full price) — for example Accounting Basics is ${half(P.basic)} a month instead of $${P.basic} — then the normal price. The offer ends when 100 businesses have it.</p></div></div>` : ''}
+  <p class="usdnote" id="usd"><b>All prices in US dollars (US$)</b>, per business, per month. Any GST or local tax is shown before you pay. Pay yearly and get 2 months free.</p>
+  ${EARLY_BIRD ? `<div class="earlybox" id="early"><div class="big">🐣</div><div><b>Early bird: 50% off for your first 12 months</b><p>For the first 100 businesses to buy. Half price on each program, bundle and extra user for 12 months (extra companies in Accounting stay full price) — for example Accounting Basics is ${half(P.basic)} a month instead of ${usd(P.basic)}, and the ${esc(big.name)} bundle ${half(big.price)} instead of ${usd(big.price)} — then the normal price. The offer ends when 100 businesses have it.</p></div></div>` : ''}
 
-  <h2 class="h2" style="margin-top:8px">Price list</h2>
+  <div id="bundles">
+  <h2 class="h2" style="margin-top:8px">Bundles</h2>
+  <p class="sub">Programs that work together, for one lower price. You can move up to a bigger bundle any time, and billing always gives you the bundle price when your programs make one.</p>
+  <p class="bswipe" aria-hidden="true">Swipe for more bundles →</p>
+  <div class="plans bundles">${BUNDLES.map((x) => bundleCard(x, up)).join('')}</div>
+  </div>
+
+  <h2 class="h2" style="margin-top:44px">Price list</h2>
   <div class="ptable-wrap"><table class="ptable">
     <thead><tr><th>Program</th><th>Price per business</th></tr></thead>
     <tbody class="gh">
       <tr class="grp"><th colspan="2">${esc(FREE_HEAD)} <span class="swipe" aria-hidden="true">Swipe for more →</span></th></tr></tbody>
     <tbody class="gcards">
-      ${FREE.map(([id, n]) => `<tr data-free="${id}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b>${id === 'link' ? ` ${plusPill(prog('link'), up, true)}` : ''}${freeInfo(id, up)}${inclDetails(id, n)}</span></span></td><td class="pr"><b>Free forever</b><small>No user charges</small></td></tr>`).join('')}
+      ${FREE.map(([id, n]) => `<tr data-free="${id}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b>${freeInfo(id)}${inclDetails(id, n)}</span></span></td><td class="pr"><b>Free forever</b><small>No user charges</small></td></tr>`).join('')}
     </tbody><tbody class="gh">
       <tr class="grp"><th colspan="2">${esc(PAID_HEAD)} <span class="gnote">${esc(USERS_NOTE)}</span> <span class="swipe" aria-hidden="true">Swipe for more →</span></th></tr></tbody>
     <tbody class="gcards">
-      ${ROWS.map(([m, n, id, d]) => `<tr${m === 'calls' ? ' id="link-plus"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(m === 'calls' ? 'link-plus' : id, n)}</span></span></td><td class="pr"><b>${usd(P[m])}</b> a month<small>${P.users_included} users included<br>+${usd(P.extra_user)} a month per extra user</small>${buyBtns(m, 'row')}</td></tr>`).join('')}
+      ${ROWS.map(([m, n, id, d]) => m === 'link-office'
+        ? `<tr id="link-office" data-row="link-office"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b class="with">With Riyeser Link</b><small>No separate price: it comes with <a href="#link">Riyeser Link</a></small></td></tr>`
+        : `<tr${m === 'calls' ? ' id="link"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b>${usd(P[m])}</b> a month<small>${inclOf(m).join('<br>')}<br>Or ${usd(P[m] * 10)} a year (2 months free)</small>${buyBtns(m, 'row')}</td></tr>`).join('')}
     </tbody></table></div>
-  <details class="phfold addfold" open><summary>Good to know: extra people, companies and paying yearly</summary>
-  <div class="addon"><div class="big">➕</div><div><b>Good to know</b><p>Each paid program includes ${P.users_included} users. Each extra person is <b>$${P.extra_user} a month for each paid program</b> they use. Another company, trust or client's books in Accounting: <b>$${P.extra_company} a month</b> each. Pay yearly: pay for 10 months and get 12. Riyeser Link chat: space for files shared in chat, ${STORAGE_GB.free} GB of file storage per business free; ${STORAGE_GB.plus} GB with Link Plus. Every paid program is free for 90 days, no card.</p></div></div>
+  <details class="phfold addfold" open><summary>Good to know: users, tills, your accountant, companies and paying yearly</summary>
+  <div class="addon"><div class="big">➕</div><div><b>Good to know</b><ul class="gk">
+    <li><b>Users:</b> each paid program includes ${P.users_included} users, then <b>${usd(P.extra_user)} a month</b> for each extra user of that program. Users are the people who use it: who signs in to the books (Accounting), whose calendar is booked (Bookings), who chats or takes calls (Riyeser Link), and who runs pay or approves timesheets (Payroll).</li>
+    <li><b>Payroll:</b> unlimited employees. Staff who only clock in or see their payslips are free.</li>
+    <li><b>POS:</b> unlimited cashiers, with 1 till (checkout counter) included. Each extra till is <b>${usd(P.extra_till)} a month</b>.</li>
+    <li><b>Your accountant is free:</b> one login for your accountant or bookkeeper, which doesn't count as a user.</li>
+    <li><b>Another company</b>, trust or client's books in Accounting: <b>${usd(P.extra_company)} a month</b> each.</li>
+    <li><b>Pay yearly:</b> pay for 10 months and get 12 (2 months free).</li>
+    <li><b>Every paid program is free for 90 days</b>, no card.</li></ul></div></div>
   </details>
 </section>
 
 <section class="c" id="calc">
   <details class="phfold" open><summary>Work out your price (calculator)</summary>
   <div class="calc">
-    <div><h2>Work out your price</h2><p class="muted">Tick the programs and enter how many people will use them.</p>
-      <div class="mods">${ROWS.map(([m, n]) => `<label class="check"><input type="checkbox" data-m="${m}"${m === 'basic' ? ' checked' : ''}> ${n} <small class="muted">$${P[m]}</small></label>`).join('')}</div>
+    <div><h2>Work out your price</h2><p class="muted">Tick the programs you want and say how many use each one.</p>
+      <div class="cmods">${CALC.map(([m, n]) => `<div class="cmod" data-row="${m}"><label class="check"><input type="checkbox" data-m="${m}"${m === 'basic' ? ' checked' : ''}> ${n} <small class="muted">${usd(P[m])}</small></label>
+        <div class="users sm" data-for="${m}"><span class="ul">${esc(UNIT[m] || 'Users')}</span><button type="button" data-step="-1" aria-label="${esc(`Fewer for ${n}`)}">−</button><input type="number" min="1" max="${m === 'pos' ? 100 : 500}" value="${m === 'pos' ? 1 : P.users_included}" data-u="${m}" aria-label="${esc(`${UNIT[m] || 'Users'} for ${n}`)}"><button type="button" data-step="1" aria-label="${esc(`More for ${n}`)}">+</button></div></div>`).join('')}</div>
       <p class="muted small" id="plusnote" hidden>Accounting Plus includes everything in Basics, so Basics isn't charged as well.</p>
-      <p class="muted" style="margin:14px 0 4px">People using Riyeser</p>
-      <div class="users"><button type="button" data-d="-1" aria-label="Fewer people">−</button><input id="users" type="number" min="1" max="500" value="3" aria-label="Number of people"><button type="button" data-d="1" aria-label="More people">+</button></div>
-      <p class="muted small" id="usersmax" hidden>More than 500 people? <a class="more" href="/link/?contact">Contact us</a> for a price.</p>
+      <p class="muted small" id="usersmax" hidden>More than 500 users? <a class="more" href="/link/?contact">Contact us</a> for a price.</p>
       <p class="muted" style="margin:10px 0 4px">Companies in Accounting</p>
       <div class="users"><button type="button" data-c="-1" aria-label="Fewer companies">−</button><input id="cos" type="number" min="1" max="200" value="1" aria-label="Number of companies"><button type="button" data-c="1" aria-label="More companies">+</button></div>
       <label class="yr" style="margin-top:12px"><input id="yearly" type="checkbox"> Pay yearly (10 months for 12)</label></div>
-    <div class="out"><ul class="brk" id="per"></ul><div class="total" id="total"></div><div class="muted" id="note"></div>${EARLY_BIRD ? '<div class="ebline" id="eb"></div>' : ''}
+    <div class="out"><ul class="brk" id="per"></ul><div class="total" id="total"></div><div class="muted" id="note"></div><div class="bundleline" id="bline"></div>${EARLY_BIRD ? '<div class="ebline" id="eb"></div>' : ''}
       <div class="buybtns calcbtns" id="calcbuy"><a class="btn s" id="calcfree" href="${BUY_LINK('basic', false)}">Start free for 90 days</a><a class="btn p" id="calcpay" href="${BUY_LINK('basic', true)}">Buy this plan</a></div>
       <p class="muted small" style="margin:10px 0 0">All prices in US dollars. Pay by PayPal (card or PayPal balance) or bank transfer.</p></div>
   </div>
@@ -887,32 +917,36 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
 <section class="c faq" style="max-width:860px">
   <h2 class="h2">Questions</h2>
   <details class="phfold" open><summary>Show the questions ▾</summary>
-  <details open><summary>Is it per person?</summary><p>No — per business. Each paid program is one price for the whole business, with ${P.users_included} users included. After that, each extra person is ${usd(P.extra_user)} a month for each paid program. For example, a business with 5 people using Accounting Plus and Payroll:</p><ul class="ex"><li>Accounting Plus: ${usd(P.plus)}, plus 2 extra people at ${usd(P.extra_user)} each (${usd(2 * P.extra_user)}) = <b>${usd(P.plus + 2 * P.extra_user)}</b></li><li>Payroll: ${usd(P.payroll)}, plus 2 extra people at ${usd(P.extra_user)} each (${usd(2 * P.extra_user)}) = <b>${usd(P.payroll + 2 * P.extra_user)}</b></li><li>Total: <b>${usd(P.plus + P.payroll + 4 * P.extra_user)} a month</b></li></ul><p> The free programs have no user charges.</p></details>
+  <details open><summary>Is it per person?</summary><p>No — per business. Each paid program is one price for the whole business, with ${P.users_included} users included. After that, each extra user is ${usd(P.extra_user)} a month for that program. For example, a business where 5 people use Accounting Plus and Riyeser Link, and 2 office staff run Payroll for 12 employees:</p><ul class="ex"><li>Accounting Plus: ${usd(P.plus)}, plus 2 extra users at ${usd(P.extra_user)} each (${usd(2 * P.extra_user)}) = <b>${usd(P.plus + 2 * P.extra_user)}</b></li><li>Riyeser Link: ${usd(P.calls)}, plus 2 extra users at ${usd(P.extra_user)} each (${usd(2 * P.extra_user)}) = <b>${usd(P.calls + 2 * P.extra_user)}</b></li><li>Payroll: ${usd(P.payroll)}. The 2 office staff are within the ${P.users_included} included, and the 12 employees who clock in are free = <b>${usd(P.payroll)}</b></li><li>Total: <b>${usd(P.plus + P.calls + P.payroll + 4 * P.extra_user)} a month</b></li></ul><p>Their accountant signs in free. The free programs have no user charges.</p></details>
+  <details><summary>How do bundles work?</summary><p>A bundle is a set of programs for one lower price: Shop (Accounting Basics, POS and Riyeser Link) ${usd(BUNDLES[0].price)}, Office (Accounting Basics, Payroll and Riyeser Link) ${usd(BUNDLES[1].price)}, and Business (Accounting Plus, Bookings, Riyeser Link, Payroll and POS) ${usd(big.price)}. Each program in a bundle still includes ${P.users_included} users; extra users are ${usd(P.extra_user)} a month and extra tills ${usd(P.extra_till)}. You don't have to choose a bundle: when the programs you pick make one, you're charged the bundle price by itself. Move up to a bigger bundle any time. The early bird half price applies to bundles too.</p></details>
   <details><summary>Why US dollars?</summary><p>Riyeser is used by businesses in more than one country, so one price in one currency keeps it simple and fair for everyone. Your bank or card changes it into your own currency when you pay. Any GST or local tax is shown before you pay.</p></details>
-  <details><summary>Basics or Plus?</summary><p>Start with Accounting Basics (${usd(P.basic)} a month) if you need invoices, stock and simple money in and out. Choose Accounting Plus (${usd(P.plus)} a month) for bank reconciliation, payroll in your books, BAS, journals, jobs and budgets. Plus includes everything in Basics, so you only ever pay for one: moving up is $${P.plus - P.basic} a month more, and your books carry straight over.</p></details>
-  <details><summary>Are the free programs really free?</summary><p>Yes. Riyeser Central, Riyeser Invoices, Riyeser Link chat, Riyeser PDF and Desk Assistant are free forever, with no card and no time limit. The only limit is Riyeser Link's ${STORAGE_GB.free} GB of file storage per business (up to 25 MB a file). The paid programs are optional: add them only if you need them.</p></details>
-  <details><summary>What's free?</summary><p>Riyeser Central, Riyeser Invoices, Riyeser Link chat (with ${STORAGE_GB.free} GB of file storage per business), Riyeser PDF and the Desk Assistant file organiser are free forever — no time limit and no card.</p></details>
-  <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, POS, Bookings, Payroll and Riyeser Link Plus${ASBUILT ? ', and As Built for the building industry' : ''} — is free for 90 days. No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
-  <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays on your computer and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS) or that program's screens (the others) wait until you buy it. They unlock straight away.</p></details>
-  <details><summary>How much file storage do I get in Riyeser Link?</summary><p>${STORAGE_GB.free} GB of chat files per business on free chat, and ${STORAGE_GB.plus} GB with Riyeser Link Plus. Owners and admins can see how much is used in Billing &amp; Subscription. This is only space for the files people send in Link chats (photos, PDFs, documents). It is not website hosting, email hosting, cloud backup or a cloud phone system, and no plan includes those. Nothing is ever deleted for you: when you're full, new uploads wait until you upgrade to Link Plus or contact Riyeser support.</p></details>
-  <details><summary>Is hosting included?</summary><p>No. Riyeser programs run on your own PCs, and your company files stay with you. The file space in Riyeser Link is only for files shared in chat. Website hosting, email hosting and hosted (cloud) phone systems are not part of any plan. If Riyeser offers them later, they will be separate services with their own prices.</p></details>
-  <details><summary>How do extra companies work?</summary><p>Your plan includes one company in Riyeser Accounting. Groups, trusts and bookkeepers can add more for $${P.extra_company} a month per extra company, with one sign-in. If you stop paying for one, its books stay — they open read-only until you add it back.</p></details>
-  <details><summary>How does paying yearly work?</summary><p>Pay for 10 months and get 12: the yearly price is 10 times the monthly price.</p></details>
-  ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months, on each program and its extra users (not on extra companies) — for example ${half(P.basic)} instead of $${P.basic} a month for Accounting Basics. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
+  <details><summary>Basics or Plus?</summary><p>Start with Accounting Basics (${usd(P.basic)} a month) if you need invoices, stock and simple money in and out. Choose Accounting Plus (${usd(P.plus)} a month) for bank reconciliation, payroll in your books, BAS, journals, jobs and budgets. Plus includes everything in Basics, so you only ever pay for one: moving up is ${usd(P.plus - P.basic)} a month more, and your books carry straight over.</p></details>
+  <details><summary>Are the free programs really free?</summary><p>Yes. Riyeser Central, Desk Assistant, Riyeser Invoices and Riyeser PDF are free forever, with no card, no time limit and no user charges. The paid programs are optional: add them only if you need them.</p></details>
+  <details><summary>Is Riyeser Link free?</summary><p>Riyeser Link is now a paid program (${usd(P.calls)} a month, ${P.users_included} users included, free for 90 days). It covers everything in one: chat, calls, desk phones, Riyeser Link Office (your office phone system) and ${STORAGE_GB.link} GB of space for files shared in chat. Businesses that already used Riyeser Link get 90 free days from the change. If it isn't paid after that, your chats stay and can still be read; only sending new messages waits until Riyeser Link is added from your Riyeser home page. Nothing is deleted.</p></details>
+  <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, Bookings, Riyeser Link, Payroll and POS${ASBUILT ? ', and As Built for the building industry' : ''} — is free for 90 days. No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
+  <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS), new messages and calls (Riyeser Link) or that program's screens (the others) wait until you buy it. They unlock straight away.</p></details>
+  <details><summary>How much file storage do I get in Riyeser Link?</summary><p>${STORAGE_GB.link} GB of chat files per business. Owners and admins can see how much is used in Billing &amp; Subscription. This is only space for the files people send in Link chats (photos, PDFs, documents). It is not website hosting, email hosting or cloud backup. Nothing is ever deleted for you: when you're full, new uploads wait until you make room or contact Riyeser support.</p></details>
+  <details><summary>Is hosting included?</summary><p>No. Riyeser programs run on your own PCs, and your company files stay with you. The file space in Riyeser Link is only for files shared in chat. Website hosting and email hosting are not part of any plan. If Riyeser offers them later, they will be separate services with their own prices.</p></details>
+  <details><summary>How do extra companies work?</summary><p>Your plan includes one company in Riyeser Accounting. Groups, trusts and bookkeepers can add more for ${usd(P.extra_company)} a month per extra company, with one sign-in. If you stop paying for one, its books stay — they open read-only until you add it back.</p></details>
+  <details><summary>How does paying yearly work?</summary><p>Pay for 10 months and get 12: the yearly price is 10 times the monthly price, so 2 months are free. It works the same for bundles.</p></details>
+  ${EARLY_BIRD ? `<details><summary>How does the early bird offer work?</summary><p>The first 100 businesses to buy pay half price for their first 12 months, on each program, bundle and extra user (not on extra companies) — for example ${half(P.basic)} instead of ${usd(P.basic)} a month for Accounting Basics. After 12 months the normal price applies. Once 100 businesses have it, the offer ends; we won't extend it or run a fake countdown.</p></details>` : ''}
   <details><summary>Can I cancel?</summary><p>Yes, any time. You keep everything you made, and can always open and export it.</p></details>
-  <details><summary>How do I buy?</summary><p>Press <b>Buy now</b> next to a program (or <b>Buy this plan</b> in the price calculator). Create your free Riyeser account, or sign in, and choose how many people and monthly or yearly. Then pay with <b>PayPal</b> (a card or your PayPal balance; it renews by itself until you cancel) or by <b>bank transfer</b> (we give you an invoice with the bank details and a reference; the program switches on when the money arrives). Your free days aren't lost: paid time starts when your 90-day trial ends. Questions? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Buying Riyeser')}">${EMAIL}</a>.</p></details>
+  <details><summary>How do I buy?</summary><p>Press <b>Buy now</b> next to a program or bundle (or <b>Buy this plan</b> in the price calculator). Create your free Riyeser account, or sign in, and choose how many users and monthly or yearly. Then pay with <b>PayPal</b> (a card or your PayPal balance; it renews by itself until you cancel) or by <b>bank transfer</b> (we give you an invoice with the bank details and a reference; the program switches on when the money arrives). Your free days aren't lost: paid time starts when your 90-day trial ends. Questions? Email <a class="more" href="mailto:${EMAIL}?subject=${encodeURIComponent('Buying Riyeser')}">${EMAIL}</a>.</p></details>
   </details>
 </section>
 <script>/* S2: on a phone the long parts start folded (a link to one of them opens it) */
 if(matchMedia('(max-width: 640px)').matches)document.querySelectorAll('details.phfold').forEach(function(d){var keep=false;try{keep=!!location.hash&&(!!d.querySelector(location.hash)||d.parentNode.matches(location.hash))}catch(e){}if(!keep)d.open=false});</script>
 ${ctaBlock(up, 'Start free today', 'Install Riyeser Central — the free tools are yours to keep, and every paid program is free to start.')}
-<script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},P=${JSON.stringify(P)},u=document.getElementById('users'),c=document.getElementById('cos'),y=document.getElementById('yearly');
-var NAMES=${JSON.stringify(Object.fromEntries(ROWS.map(([m, n]) => [m, n])))};
+<script>(function(){var EB=${EARLY_BIRD ? 'true' : 'false'},P=${JSON.stringify(P)},B=${JSON.stringify(BUNDLES)},c=document.getElementById('cos'),y=document.getElementById('yearly');
+var NAMES=${JSON.stringify(NAME)};
+var planPrice=${planPrice.toString()};
 function money(v){v=Math.round(v*100)/100;return 'US$'+v.toLocaleString('en-AU',{minimumFractionDigits:v%1?2:0,maximumFractionDigits:2})}
-function li(t,v){var l=document.createElement('li');var a=document.createElement('span');a.textContent=t;var b=document.createElement('b');b.textContent=v;l.appendChild(a);l.appendChild(b);return l}
+function li(t,v,cls){var l=document.createElement('li');if(cls)l.className=cls;var a=document.createElement('span');a.textContent=t;var b=document.createElement('b');b.textContent=v;l.appendChild(a);l.appendChild(b);return l}
 function box(m){return document.querySelector('[data-m='+m+']')}
+function ubox(m){return document.querySelector('[data-u='+m+']')}
+function plural(n,one,many){return n+' '+(n===1?one:many)}
 // M1: whole numbers from 1 to the most; the box shows what's charged (a blank box waits until you leave it)
-function whole(el,max,soft){var raw=String(el.value).trim(),v=Math.round(Number(raw));if(el===u){if(Number(raw)>max)el.dataset.over=1;else if(Number(raw)<max)delete el.dataset.over;document.getElementById('usersmax').hidden=!el.dataset.over}
+function whole(el,max,soft){var raw=String(el.value).trim(),v=Math.round(Number(raw));if(el.dataset.u){if(Number(raw)>max)el.dataset.over=1;else if(Number(raw)<max)delete el.dataset.over;document.getElementById('usersmax').hidden=!document.querySelector('[data-u][data-over]')}
   if(raw===''||!isFinite(v)){if(!soft)el.value=1;return 1}v=Math.max(1,Math.min(max,v));if(String(v)!==raw&&(!soft||Number(raw)>max||Number(raw)<1||/[.,e]/i.test(raw)))el.value=v;return v}
 function draw(e){
   var basic=box('basic'),plus=box('plus');
@@ -921,25 +955,33 @@ function draw(e){
   if(basic.checked&&plus.checked)basic.checked=false;
   document.getElementById('plusnote').hidden=!plus.checked;
   var mods=[].slice.call(document.querySelectorAll('[data-m]')).filter(function(x){return x.checked}).map(function(x){return x.dataset.m});
-  var n=whole(u,500,true),k=whole(c,200,true);
-  var extra=Math.max(0,n-P.users_included),progs=0,per=document.getElementById('per');per.innerHTML='';
-  mods.forEach(function(m){var v=P[m]+extra*P.extra_user;progs+=v;
-    per.appendChild(li(NAMES[m]+(extra?' ('+money(P[m])+' + '+extra+' extra user'+(extra>1?'s':'')+' × '+money(P.extra_user)+')':' ('+P.users_included+' users included)'),money(v)))});
-  var acc=mods.indexOf('basic')>=0||mods.indexOf('plus')>=0,cos=acc?(k-1)*P.extra_company:0;
+  [].slice.call(document.querySelectorAll('.cmod')).forEach(function(r){r.classList.toggle('on',mods.indexOf(r.dataset.row)>=0)});
+  var users={},tills=1;mods.forEach(function(m){var el=ubox(m);if(!el)return;var n=whole(el,+el.max,true);if(m==='pos')tills=n;else users[m]=n});
+  var k=whole(c,200,true),pl=planPrice(P,B,mods,users,tills),per=document.getElementById('per');per.innerHTML='';
+  pl.lines.forEach(function(l){var bits=[];if(l.extraUsers)bits.push(plural(l.extraUsers,'extra user','extra users')+' × '+money(P.extra_user));if(l.extraTills)bits.push(plural(l.extraTills,'extra till','extra tills')+' × '+money(P.extra_till));
+    var nm=l.bundle?l.name+' ('+l.mods.map(function(m){return NAMES[m]}).join(', ')+')':NAMES[l.module];
+    per.appendChild(li(nm+' ('+money(l.price)+(bits.length?' + '+bits.join(' + '):l.module==='pos'?', 1 till, unlimited cashiers':', '+P.users_included+' users included')+')',money(l.monthly),l.bundle?'bundle':''))});
+  var acc=pl.mods.indexOf('basic')>=0||pl.mods.indexOf('plus')>=0,cos=acc?(k-1)*P.extra_company:0;
   if(cos)per.appendChild(li((k-1)+' extra compan'+(k-1>1?'ies':'y')+' × '+money(P.extra_company),money(cos)));
-  var m=progs+cos,t=document.getElementById('total'),note=document.getElementById('note'),eb=document.getElementById('eb');
-  var q='/link/?signup&add='+mods.join(',')+(n!==P.users_included?'&users='+n:'')+(y.checked?'&period=yearly':''),cb=document.getElementById('calcbuy');
-  cb.hidden=!mods.length;document.getElementById('calcfree').href=q;document.getElementById('calcpay').href=q+'&buy=1';
-  if(!mods.length){per.appendChild(li('Free tools only','US$0'));t.textContent='US$0 a month';note.textContent='Central, Invoices, Link chat, PDF and Desk Assistant are free forever.';if(eb)eb.textContent='';return}
+  var m=pl.total+cos,t=document.getElementById('total'),note=document.getElementById('note'),eb=document.getElementById('eb'),bl=document.getElementById('bline');
+  var u=pl.mods.filter(function(x){return x!=='pos'&&users[x]!==P.users_included}).map(function(x){return x+':'+users[x]}).join(',');
+  var q='/link/?signup&add='+pl.mods.join(',')+(u?'&u='+u:'')+(tills>1&&pl.mods.indexOf('pos')>=0?'&tills='+tills:'')+(y.checked?'&period=yearly':''),cb=document.getElementById('calcbuy');
+  cb.hidden=!pl.mods.length;document.getElementById('calcfree').href=q;document.getElementById('calcpay').href=q+'&buy=1';
+  bl.textContent='';
+  if(!pl.mods.length){per.appendChild(li('Free tools only','US$0'));t.textContent='US$0 a month';note.textContent='Central, Desk Assistant, Invoices and PDF are free forever.';if(eb)eb.textContent='';return}
   if(y.checked){t.textContent=money(m*10)+' a year';note.textContent=money(m)+' a month × 10: 2 months free.'}
   else{t.textContent=money(m)+' a month';note.textContent='After the 90-day free trial. Per business, not per person.'}
-  if(EB&&eb){var e1=progs/2+cos;eb.textContent='🐣 Early bird: '+(y.checked?money(e1*10)+' for your first year':money(e1)+' a month for your first 12 months')+'.'}
+  var top=B.filter(function(x){return x.popular})[0],big=planPrice(P,B,pl.mods.concat(top.mods),users,tills),msg=pl.bundle?'✓ Bundle price: you save '+money(pl.saves)+' a month.':'';
+  if(pl.bundle!==top.id&&big.bundle===top.id&&big.total<=pl.total+0.001)msg+=(msg?' ':'')+'Tip: the '+top.name+' bundle has all of these and more for '+money(big.total)+' a month.';
+  bl.textContent=msg;
+  if(EB&&eb){var e1=pl.total/2+cos;eb.textContent='🐣 Early bird: '+(y.checked?money(e1*10)+' for your first year':money(e1)+' a month for your first 12 months')+'.'}
 }
-document.querySelectorAll('[data-d]').forEach(function(x){x.addEventListener('click',function(){u.value=Math.max(1,Math.min(500,whole(u,500)+parseInt(x.dataset.d,10)));draw()})});
+document.querySelectorAll('[data-step]').forEach(function(x){x.addEventListener('click',function(){var el=x.parentNode.querySelector('[data-u]'),mx=+el.max;el.value=Math.max(1,Math.min(mx,whole(el,mx)+parseInt(x.dataset.step,10)));var cb=box(el.dataset.u);if(!cb.checked){cb.checked=true;draw({target:cb})}else draw()})});
 document.querySelectorAll('[data-c]').forEach(function(x){x.addEventListener('click',function(){c.value=Math.max(1,Math.min(200,whole(c,200)+parseInt(x.dataset.c,10)));draw()})});
-u.addEventListener('change',function(){whole(u,500);draw()});c.addEventListener('change',function(){whole(c,200);draw()});
+document.querySelectorAll('[data-u]').forEach(function(el){el.addEventListener('change',function(){whole(el,+el.max);draw()});el.addEventListener('input',function(){draw()})});
+c.addEventListener('change',function(){whole(c,200);draw()});
 document.querySelectorAll('[data-m]').forEach(function(x){x.addEventListener('change',draw)});
-u.addEventListener('input',function(){draw()});c.addEventListener('input',function(){draw()});y.addEventListener('change',function(){draw()});draw()})()</script>`,
+c.addEventListener('input',function(){draw()});y.addEventListener('change',function(){draw()});draw()})()</script>`,
   });
 }
 

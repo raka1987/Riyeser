@@ -867,3 +867,85 @@ details.phfold > summary { display: none; }
   .frow .fprice.free { color: #157a3c; } .frow .fprice.with { color: #8a5a00; }
   .finder .fnote { text-align: left; font-size: 13.5px; line-height: 1.5; margin-top: 10px; }
 }
+
+/* Home hero on phones: one still picture and the text, no slideshow. (The owner's iPhone showed an empty band with only
+   the slide dots: no fades, zooms or stacked layers here, so there's nothing for a phone browser to get wrong.) */
+.h3slides { overflow: hidden; }
+@media (max-width: 640px) {
+  .hero3 { display: block; min-height: 0; background: #f7f4ef; overflow: visible; }
+  .h3slides { position: relative; top: auto; right: auto; bottom: auto; left: auto; height: auto; min-height: 0; }
+  .h3slide { position: relative; top: auto; right: auto; bottom: auto; left: auto; opacity: 1; transition: none; }
+  .h3slide:not(:first-child) { display: none; }
+  .h3slide > img, .h3slide.on > img { position: static; width: 100%; height: auto; aspect-ratio: 16 / 10; object-fit: cover; transform: none; transition: none; }
+  .h3slide::after { display: none; }
+  .h3slide .hfloat { opacity: 1; transform: none; transition: none; }
+  .h3dots { display: none; }
+  .h3text { padding-top: 18px; padding-bottom: 36px; }
+}
+
+/* ---------- pricing v2: bundles ---------- */
+.plans.bundles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s3, 20px); margin-top: 18px; align-items: stretch; }
+.plans.bundles .plan { display: flex; flex-direction: column; padding: 30px 26px 26px; }
+.plans.bundles .plan.best { border: 2px solid var(--blue); box-shadow: 0 18px 40px -24px rgba(11, 92, 255, .45); }
+.plans.bundles .k { display: block; text-transform: none; letter-spacing: 0; font-size: inherit; color: inherit; }
+.plans.bundles .k b { display: block; font-size: 22px; color: var(--ink); font-family: var(--display); letter-spacing: -.3px; }
+.plans.bundles .k small { display: block; color: var(--muted); font-size: 14px; margin-top: 2px; }
+.plans.bundles .price { font-size: 42px; margin: 14px 0 4px; line-height: 1.1; white-space: nowrap; }
+.plans.bundles .psub { color: var(--muted); font-size: 14px; margin: 2px 0; }
+.plans.bundles .psub s { color: var(--faint, #8a94a6); }
+.plans.bundles .psub .save { color: #157a3c; }
+.bmods { list-style: none; margin: 16px 0 12px; padding: 14px 0 0; border-top: 1px solid var(--line); flex: 1 0 auto; }
+.bmods li { display: flex; align-items: center; gap: 10px; padding: 6px 0; color: var(--ink); font-weight: 600; font-size: 15px; }
+.bmods li span { flex: 1; } .bmods li small { color: var(--muted); font-weight: 500; font-size: 13px; }
+.bmods .bi { width: 28px; height: 28px; border-radius: 8px; flex: none; }
+.bnote { font-size: 13.5px !important; line-height: 1.5; margin: 0 0 14px !important; }
+.plans.bundles .buybtns { margin-top: auto; }
+.ptable .pr b.with { color: #8a5a00; font-size: 16px; }
+.addon ul.gk { margin: 6px 0 0; padding-left: 18px; color: var(--muted); } .addon ul.gk li { margin: 4px 0; line-height: 1.5; }
+/* the calculator: a number next to each ticked program (users, office users, staff calendars or tills) */
+.cmods { display: grid; gap: 8px; margin: 12px 0 6px; }
+.cmod { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+.cmod .check { font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 8px; margin: 0; }
+.cmod .users.sm { margin: 0; max-width: none; align-items: center; gap: 6px; opacity: .45; }
+.cmod.on { border-color: var(--blue); } .cmod.on .users.sm { opacity: 1; }
+.users.sm .ul { font-size: 12.5px; color: var(--muted); margin-right: 4px; white-space: nowrap; }
+.users.sm button { width: 34px; height: 34px; font-size: 18px; border-radius: 10px; padding: 0; }
+.users.sm input { width: 58px; flex: none; font-size: 16px; padding: 5px; border-radius: 10px; }
+.calc .brk li.bundle span { font-weight: 700; color: var(--ink); }
+.calc .bundleline { margin-top: 8px; font-weight: 700; color: #157a3c; font-size: 14.5px; } .calc .bundleline:empty { display: none; }
+.calc { align-items: start; }
+@media (max-width: 1000px) { .plans.bundles { grid-template-columns: 1fr; max-width: 560px; } }
+@media (max-width: 640px) {
+  .plans.bundles .plan { padding: 26px 18px 20px; } .plans.bundles .price { font-size: 34px; }
+  .cmod { padding: 8px 10px; } .users.sm .ul { width: 100%; margin: 0; } .cmod .users.sm { flex-wrap: wrap; }
+  .calc .cmods { font-size: 14px; }
+}
+
+/* ---------- footer (pricing v2 tidy-up): Programs in two columns (Free, Paid), then Industries, Help and Riyeser ---------- */
+footer .fcols { grid-template-columns: 1.1fr 1.5fr 1.9fr; gap: 32px; }
+footer .fpcols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+footer h3.fsub { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--faint, #8a94a6); margin: 0 0 6px; font-family: inherit; font-weight: 700; }
+footer .flinks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 24px; }
+footer a.fmail { overflow-wrap: anywhere; }
+footer .fbase .fwin { display: flex; flex-wrap: wrap; gap: 4px 0; }
+footer .fbase .fwin > span + span::before { content: "·"; margin: 0 8px; }
+@media (max-width: 1000px) { footer .fcols { grid-template-columns: 1fr 1fr; } footer .fcols > div:first-child { grid-column: 1 / -1; } }
+@media (max-width: 640px) {
+  footer .fcols { grid-template-columns: 1fr; gap: 22px; }
+  footer .fcols > div:nth-child(2) { grid-column: auto; }
+  footer .fcols > div:nth-child(2) a { display: block; margin-right: 0; }
+  footer .fpcols, footer .flinks { grid-template-columns: 1fr 1fr; gap: 18px 18px; }
+  footer .flinks > div:last-child { grid-column: 1 / -1; }
+  footer .flinks > div:last-child a { display: inline-block; margin-right: 18px; }
+  footer .fcols a { padding: 5px 0; }
+  footer .fbase { flex-direction: column; align-items: flex-start; gap: 6px; }
+}
+/* bundles on a phone: cards side by side, swiped sideways (like the price list) */
+@media (max-width: 640px) {
+  .plans.bundles { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 16px 2px 14px; margin: 0 -4px; max-width: none; overscroll-behavior-x: contain; }
+  .plans.bundles .plan { flex: 0 0 calc(100vw - 76px); scroll-snap-align: start; }
+  .plans.bundles .bmods { margin: 12px 0 10px; padding-top: 10px; } .bmods li { padding: 3px 0; font-size: 14px; }
+}
+.bswipe { display: none; } @media (max-width: 640px) { .bswipe { display: block; color: var(--muted); font-size: 12.5px; margin: 6px 0 0; } }
+@media (max-width: 640px) { footer .fbase .fwin { flex-direction: column; gap: 2px; } footer .fbase .fwin > span + span::before { content: none; } }
+@media (min-width: 1001px) { footer .fcols { grid-template-columns: 1fr 1.25fr 2.35fr; } footer .flinks { grid-template-columns: 1.3fr 1.1fr 1fr; } footer .fcols a { white-space: nowrap; } }

@@ -32,8 +32,8 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   }
   // what the pages do still works
   { const pg = await open('/pricing.html');
-    await pg.check('[data-m=plus]'); await pg.fill('#users', '5'); await pg.dispatchEvent('#users', 'input');
-    check((await pg.textContent('#total')) === 'US$53 a month' && /add=plus&users=5/.test(await pg.getAttribute('#calcpay', 'href')), 'pricing: the calculator works (Plus, 5 people = US$53)');
+    await pg.check('[data-m=plus]'); await pg.fill('[data-u=plus]', '5'); await pg.dispatchEvent('[data-u=plus]', 'input');
+    check((await pg.textContent('#total')) === 'US$53 a month' && /add=plus&u=plus:5/.test(await pg.getAttribute('#calcpay', 'href')), 'pricing: the calculator works (Plus, 5 users = US$53)');
     const bad = await pg.evaluate(() => { const s = document.createElement('script'); s.textContent = 'window.__ran = 1'; document.body.appendChild(s); return window.__ran === 1; });
     check(!bad, 'an injected inline script is refused');
     await pg.close(); }
