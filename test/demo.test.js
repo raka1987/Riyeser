@@ -61,6 +61,7 @@ test('demo on: the demo folder is used and filled with Sample Trading Co; demo /
   const me = (await call('GET', '/api/auth/me', null, r.cookie)).data;
   assert.equal(me.user.role, 'admin');
   assert.equal(me.settings.company_name, 'Sample Trading Co (demo)'); assert.equal(me.settings.setup_done, '1');
+  assert.match(me.settings.address, /Suva, Fiji/); assert.doesNotMatch(me.settings.address, /Sydney/); // M7: a Fiji address in the email footer
   const staff = (await call('GET', '/api/staff/employees', null, r.cookie)).data.filter(u => u.role === 'staff');
   assert.deepEqual(staff.map(u => u.name).sort(), ['Alex Sample', 'Casey Placeholder', 'Jamie Example', 'Morgan Testwell', 'Robin Demo']);
   assert.ok(staff.some(u => u.pay_type === 'salary') && staff.some(u => u.pay_type === 'hourly'));

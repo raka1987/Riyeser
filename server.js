@@ -915,8 +915,17 @@ app.get('/api/staff/payslips/build', requireArea('payroll'), wrap((req, res) =>
   res.json({ payslips: payslipsFor(req.query.from, req.query.to, req.query.user_id ? +req.query.user_id : null, licenceNow().licensed) })));
 // email each person their own payslip(s) for the dates (to the email on their Staff record)
 app.post('/api/staff/payslips/email', requireArea('payroll', 2), wrap(async (req, res) => {
-  const list = payslipsFor(req.body.from, req.body.to, req.body.user_id ? +req.body.user_id : null, licenceNow().licensed);
+  // a pay run's payslips (M7: "Email payslips" on the pay run), or any dates
+  let list;
+  if (req.body.run_id) {
+    const run = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(+req.body.run_id); if (!run) throw new HttpError(404, 'Not found');
+    list = db.prepare(`SELECT p.*, r.period_start, r.period_end, r.pay_date, r.extra_reason, u.tin, u.fnpf_no, u.bank_account FROM payslips p JOIN payroll_runs r ON r.id = p.run_id LEFT JOIN users u ON u.id = p.user_id WHERE p.run_id = ? ORDER BY p.employee_name`)
+      .all(run.id).map(p => ({ ...p, status: 'final', ytd: ytdOf(p.user_id, p.period_end, null, run.id) }));
+  } else list = payslipsFor(req.body.from, req.body.to, req.body.user_id ? +req.body.user_id : null, licenceNow().licensed);
   if (!list.length) bad('No payslips for these dates (no paid hours, or no pay rate set under Staff).');
+  // M7: sending a pay period again asks first
+  const again = mail().alreadySent(list);
+  if (again.length && req.body.resend !== true) throw new HttpError(409, `Payslips for these dates were already emailed to ${[...new Set(again.map(x => x.name))].join(', ')}. Send them again?`, { already_sent: again });
   const by = {}; list.forEach(p => (by[p.user_id] = by[p.user_id] || []).push(p));
   // S33: carry on through everyone and say per person what happened (sent, waiting to send again, not sent, no email)
   const sent = [], missing = [], waiting = [], failed = [];

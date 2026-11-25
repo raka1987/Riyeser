@@ -302,7 +302,7 @@ test('S33: payslip emails carry on past a failure, report each person, and queue
   const closed = await new Promise(r => { const t = net.createServer(); t.listen(0, () => { const p = t.address().port; t.close(() => r(p)); }); });
   await call('PUT', '/api/staff/email', { smtp_port: String(closed) }, admin);
   const before = (await call('GET', '/api/staff/email', null, admin)).data.waiting;
-  const r2 = await call('POST', '/api/staff/payslips/email', { from: '2029-01-08', to: '2029-01-14' }, admin);
+  const r2 = await call('POST', '/api/staff/payslips/email', { from: '2029-01-08', to: '2029-01-14', resend: true }, admin);
   assert.equal(r2.status, 200, JSON.stringify(r2.data));
   const o2 = only(r2.data);
   assert.deepEqual(o2.waiting.map(x => x.name).sort(), ['Aa Bounce', 'Bb Good']); assert.deepEqual(o2.sent, []);
@@ -312,6 +312,41 @@ test('S33: payslip emails carry on past a failure, report each person, and queue
   const bad = await call('PUT', '/api/staff/email', { email_club_copy: 'not an email' }, admin);
   assert.equal(bad.status, 400); assert.match(bad.data.error, /^Send a copy to:/);
   for (const p of people) await call('PUT', `/api/staff/employees/${p.id}`, { active: false }, admin);
+});
+
+test('M7: payslip email: PDF attached, thousands separators, asks before sending a period again, sent from the pay run', async () => {
+  const net = require('node:net'); const got = [];
+  const smtp = net.createServer(sock => { let data = false, buf = '', msg = { to: [], body: '' }; sock.write('220 t\r\n');
+    sock.on('data', c => { buf += c; let i; while ((i = buf.indexOf('\r\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 2);
+      if (data) { if (l === '.') { data = false; got.push(msg); msg = { to: [], body: '' }; sock.write('250 OK\r\n'); } else msg.body += l + '\n'; continue; }
+      const c4 = l.slice(0, 4).toUpperCase();
+      if (c4 === 'EHLO' || c4 === 'HELO') sock.write('250-t\r\n250 AUTH PLAIN\r\n'); else if (c4 === 'RCPT') { msg.to.push(l.slice(8).replace(/[<>]/g, '')); sock.write('250 OK\r\n'); }
+      else if (c4 === 'DATA') { data = true; sock.write('354 go\r\n'); } else if (c4 === 'QUIT') { sock.write('221 bye\r\n'); sock.end(); } else sock.write('250 OK\r\n'); } }); });
+  await new Promise(r => smtp.listen(0, r));
+  const e = (await call('POST', '/api/staff/employees', { name: 'Big Earner', username: 'bigearner', password: 'bigearner1', role: 'staff', pay_type: 'hourly', pay_rate: 200, email: 'big@club.test' }, admin)).data;
+  await call('POST', '/api/staff/timesheets', { user_id: e.id, clock_in: '2029-02-05T08:00', clock_out: '2029-02-05T16:00' }, admin);
+  try {
+    await call('PUT', '/api/staff/email', { smtp_host: '127.0.0.1', smtp_port: String(smtp.address().port), smtp_secure: 'none', email_from: 'bookings@club.test' }, admin);
+    const run = await call('POST', '/api/staff/payroll/runs', { period_start: '2029-02-05', period_end: '2029-02-11', pay_date: '2029-02-12' }, admin);
+    assert.equal(run.status, 200, JSON.stringify(run.data));
+    // "Email payslips" on the pay run
+    const r = await call('POST', '/api/staff/payslips/email', { run_id: run.data.id }, admin);
+    assert.equal(r.status, 200, JSON.stringify(r.data)); assert.ok(r.data.sent.includes('Big Earner'));
+    const t0 = Date.now(); while (!got.some(m => m.to.includes('big@club.test')) && Date.now() - t0 < 4000) await new Promise(x => setTimeout(x, 50));
+    const raw = got.find(m => m.to.includes('big@club.test')).body.replace(/\n[ \t]+/g, ' '); // unfold long headers
+    const qp = raw.replace(/=\n/g, '').replace(/=([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    assert.match(qp, /FJ\$1,500\.00/); // thousands separator
+    assert.match(raw, /Content-Disposition: attachment; filename="Payslip Big Earner 2029-02-05 to 2029-02-11\.pdf"/);
+    const b64 = raw.split(/Content-Type: application\/pdf[^\n]*\n/)[1].split(/\n\n/)[1].split(/\n--/)[0].replace(/\s/g, '');
+    const pdf = Buffer.from(b64, 'base64').toString('latin1');
+    assert.match(pdf, /^%PDF-1\.4/); assert.match(pdf, /%%EOF\n$/); assert.match(pdf, /\(Big Earner\)/); assert.match(pdf, /\(FJ\$1,500\.00\)/); assert.match(pdf, /\(Net pay\)/);
+    // the same period again asks first
+    const again = await call('POST', '/api/staff/payslips/email', { run_id: run.data.id }, admin);
+    assert.equal(again.status, 409); assert.match(again.data.error, /already emailed to Big Earner/); assert.equal(again.data.already_sent[0].user_id, e.id);
+    assert.equal((await call('POST', '/api/staff/payslips/email', { from: '2029-02-05', to: '2029-02-11', user_id: e.id }, admin)).status, 409); // by dates too
+    assert.equal((await call('POST', '/api/staff/payslips/email', { run_id: run.data.id, resend: true }, admin)).status, 200);
+  } finally { smtp.close(); }
+  await call('PUT', `/api/staff/employees/${e.id}`, { active: false }, admin);
 });
 
 test('daily timesheets report: sent to the people ticked for it', async () => {

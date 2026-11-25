@@ -319,12 +319,8 @@ function reportsModal(emps, cur) {
       const p = q();
       if (F.kind.value === 'ps') {
         if (!confirm(p.user_id ? 'Email this person their payslip(s) for these dates?' : 'Email every staff member their own payslip(s) for these dates?')) { b.disabled = false; return; }
-        const r = await api('/api/staff/payslips/email', { body: { from: p.from, to: p.to, ...(p.user_id ? { user_id: p.user_id } : {}) } });
-        const why = l => [...new Set(l.map(x => x.reason))].join(' ');
-        toast([r.sent.length ? `✅ Sent to ${r.sent.join(', ')}.` : 'No payslips sent yet.',
-          (r.waiting || []).length ? `⏳ Will send again automatically: ${r.waiting.map(x => x.name).join(', ')}. ${why(r.waiting)}` : '',
-          (r.failed || []).length ? `❌ Not sent: ${r.failed.map(x => `${x.name} (${x.reason})`).join('; ')}` : '',
-          r.missing.length ? `No email on record for ${r.missing.join(', ')} (Staff → Email).` : ''].filter(Boolean).join(' · '), 12000);
+        const r = await emailPayslips({ from: p.from, to: p.to, ...(p.user_id ? { user_id: p.user_id } : {}) });
+        toast(emailResult(r), 12000);
       } else {
         const r = await api('/api/staff/timesheets/email', { body: { from: p.from, to: p.to, ...(p.user_id ? { user_id: p.user_id } : {}) } });
         toast(`✅ Timesheet sent to ${r.sent_to.join(', ')}`, 7000);
@@ -771,13 +767,22 @@ function payslipHTML(p, run) {
         ...(p.ytd.other_taken ? [['Other paid leave (days)', p.ytd.other_taken]] : []), ...(p.ytd.unpaid_taken ? [['Unpaid leave (days)', p.ytd.unpaid_taken]] : [])]
         .map(([k, v]) => `<tr><td class="small">${k}</td><td class="r small">${v}</td></tr>`).join('')}</table>` : ''}</div>`;
 }
+// M7: email payslips (any dates, or a pay run's); asks before sending a pay period again
+const emailPayslips = body => api('/api/staff/payslips/email', { body }).catch(e => {
+  if (e.data && e.data.already_sent && confirm(`${e.message}\n\n${e.data.already_sent.map(x => `• ${x.name}: sent ${new Date(x.at).toLocaleString()}`).join('\n')}`)) return api('/api/staff/payslips/email', { body: { ...body, resend: true } });
+  throw e;
+});
+const emailResult = r => { const why = l => [...new Set(l.map(x => x.reason))].join(' ');
+  return [r.sent.length ? `✅ Sent to ${r.sent.join(', ')}.` : 'No payslips sent yet.', (r.waiting || []).length ? `⏳ Will send again automatically: ${r.waiting.map(x => x.name).join(', ')}. ${why(r.waiting)}` : '',
+    (r.failed || []).length ? `❌ Not sent: ${r.failed.map(x => `${x.name} (${x.reason})`).join('; ')}` : '', r.missing.length ? `No email on record for ${r.missing.join(', ')} (Staff → Email).` : ''].filter(Boolean).join(' · '); };
 function printHTML(html) { const w = window.open('', '_blank'); w.document.write(`<html><head><title>Payslip</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/staff.css"><style>body{background:#fff;padding:30px}.payslip{page-break-after:always;max-width:640px;margin:0 auto 40px}</style></head><body>${html}<script>setTimeout(()=>print(),400)<\/script></body></html>`); w.document.close(); }
 async function runModal(id) {
   const { run, payslips } = await api(`/api/staff/payroll/runs/${id}`);
   const m = openModal(`<h2 style="font-size:1.5rem">Pay run — ${fmtDate(run.pay_date, { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
     <p class="muted">${run.extra_reason ? `<span class="chip">Extra pay run: ${esc(run.extra_reason)}</span> ` : ''}${run.note ? `<span class="chip gray">${esc(run.note)}</span> ` : ''}${run.period_start} to ${run.period_end} · Gross ${money(run.total_gross, cur())} · Net ${money(run.total_net, cur())} · Employer FNPF ${money(run.total_fnpf_employer, cur())}</p>
     ${table([{ h: 'Employee', k: 'employee_name' }, { h: 'Hours', k: 'hours', r: 1 }, { h: 'Gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'FNPF', f: p => money(p.fnpf_employee, cur()), r: 1 }, { h: 'PAYE', f: p => money(p.paye, cur()), r: 1 }, { h: 'Net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }, { h: '', f: p => `<button class="btn sm ghost" data-ps="${p.id}">Payslip</button>` }], payslips)}
-    <div class="actions"><button class="btn sm" id="print-all">Print all payslips</button>${window.riyser ? '<button class="btn sm ghost" id="pdf-all">Save all as PDF</button>' : ''}${L('payroll') >= 3 ? '<button class="btn sm danger" id="del-run">Void (delete) run</button>' : ''}</div>`, { wide: true });
+    <div class="actions"><button class="btn sm" id="print-all">Print all payslips</button>${window.riyser ? '<button class="btn sm ghost" id="pdf-all">Save all as PDF</button>' : ''}<button class="btn sm ghost" id="mail-run">Email payslips</button>${L('payroll') >= 3 ? '<button class="btn sm danger" id="del-run">Void (delete) run</button>' : ''}</div>`, { wide: true });
+  $('#mail-run', m.el).onclick = async () => { if (!confirm('Email each person in this pay run their payslip (with a PDF)?')) return; try { toast(emailResult(await emailPayslips({ run_id: id })), 12000); } catch (e) { toast(e.message, 8000); } };
   $$('[data-ps]', m.el).forEach(b => b.onclick = () => printHTML(payslipHTML(payslips.find(p => p.id == b.dataset.ps), run)));
   $('#print-all', m.el).onclick = () => printHTML(payslips.map(p => payslipHTML(p, run)).join(''));
   if ($('#pdf-all', m.el)) $('#pdf-all', m.el).onclick = () => savePdf(`Payslips paid ${run.pay_date} (${run.period_start} to ${run.period_end})`, payslips.map(p => payslipHTML(p, run)).join(''));

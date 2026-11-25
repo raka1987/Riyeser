@@ -39,7 +39,7 @@ function dataDir(base, env = process.env) {
 // ---------- the made-up business ----------
 // The same people, pay types, rates and hours as Riyeser Accounting's demo company (DEMO_STAFF and DEMO_DETAILS in
 // riyeser/demo.py), so both programs show the same team. Keep the two in step: change one, change the other.
-const DETAILS = { company_name: `${BUSINESS} (demo)`, address: '12 Harbour St, Sydney NSW 2000', phone: '02 9000 1234', email: 'accounts@sampletrading.example' };
+const DETAILS = { company_name: `${BUSINESS} (demo)`, address: '12 Victoria Parade, Suva, Fiji', phone: '+679 330 1234', email: 'accounts@sampletrading.example' };
 // day: one weekday shift, so a week matches each person's standard hours (38, or 20 and 25 part time)
 const STAFF = [
   { name: 'Alex Sample', username: 'alex', position: 'Store manager', pay_type: 'salary', pay_rate: 78000, email: 'alex.sample@sampletrading.example', day: ['08:30', '16:06'] },

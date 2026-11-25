@@ -8,6 +8,9 @@ module.exports = function mailer(app, h) {
   db.exec(`CREATE TABLE IF NOT EXISTS app_secrets (key TEXT PRIMARY KEY, value TEXT)`);
   // emails the provider turned away for now (e.g. too many sent this hour): sent again later
   db.exec(`CREATE TABLE IF NOT EXISTS email_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, to_addr TEXT, subject TEXT, html TEXT, kind TEXT, tries INTEGER DEFAULT 0, next_at INTEGER, last_error TEXT DEFAULT '')`);
+  try { db.exec('ALTER TABLE email_queue ADD COLUMN attach TEXT'); } catch { /* already there */ } // attachments kept for the resend (M7)
+  // M7: payslips already emailed for a pay period, so a second send asks first
+  db.exec(`CREATE TABLE IF NOT EXISTS payslip_sent (user_id INTEGER NOT NULL, period_start TEXT NOT NULL, period_end TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (user_id, period_start, period_end))`);
   db.exec(`CREATE TABLE IF NOT EXISTS email_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, to_addr TEXT, subject TEXT, kind TEXT, status TEXT, error TEXT DEFAULT '')`);
   const secret = k => (db.prepare('SELECT value FROM app_secrets WHERE key = ?').get(k) || {}).value || '';
   const KEYS = ['email_enabled', 'smtp_host', 'smtp_port', 'smtp_secure', 'smtp_user', 'email_from', 'email_from_name', 'email_club_copy', 'email_staff_ids', 'email_subs', 'report_time_daily', 'report_time_weekly', 'site_url'];
@@ -22,18 +25,20 @@ module.exports = function mailer(app, h) {
   const log = (to, subject, kind, status, error = '') => db.prepare('INSERT INTO email_log(at, to_addr, subject, kind, status, error) VALUES(?,?,?,?,?,?)')
     .run(new Date().toISOString(), String(to).slice(0, 300), String(subject).slice(0, 200), kind, status, String(error || '').slice(0, 300));
   // send in the background: a slow or failing email never holds up the page
-  function send(to, subject, html, kind, { force = false } = {}) {
+  const toAtt = a => (a || []).map(x => ({ filename: x.filename, content: Buffer.isBuffer(x.content) ? x.content : Buffer.from(x.content, 'base64'), contentType: x.contentType }));
+  function send(to, subject, html, kind, { force = false, attachments = [] } = {}) {
     const s = getSettings();
     const list = [...new Set((Array.isArray(to) ? to : [to]).map(x => String(x || '').trim()).filter(isEmail))];
     if (!list.length) return Promise.resolve(false);
     if (!force && s.email_enabled !== '1') return Promise.resolve(false);
     if (!s.smtp_host || !isEmail(s.email_from)) { log(list.join(', '), subject, kind, 'failed', 'Email is not set up (Settings → Email)'); return Promise.resolve(false); }
-    return transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: list.join(', '), subject, html: wrapHtml(html, s), replyTo: s.email || s.email_from })
+    return transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: list.join(', '), subject, html: wrapHtml(html, s), replyTo: s.email || s.email_from, attachments: toAtt(attachments) })
       .then(() => { log(list.join(', '), subject, kind, 'sent'); return true; })
       .catch(e => {
         // over the provider's hourly limit, a temporary refusal, or the server can't be reached (S33): keep it and send it again later
         if (isLimit(e) || isConn(e) || (+e.responseCode >= 400 && +e.responseCode < 500)) {
-          db.prepare('INSERT INTO email_queue(to_addr, subject, html, kind, tries, next_at, last_error) VALUES(?,?,?,?,1,?,?)').run(list.join(', '), subject, html, kind, Date.now() + 15 * 60000, String(e.message).slice(0, 300));
+          db.prepare('INSERT INTO email_queue(to_addr, subject, html, kind, tries, next_at, last_error, attach) VALUES(?,?,?,?,1,?,?,?)').run(list.join(', '), subject, html, kind, Date.now() + 15 * 60000, String(e.message).slice(0, 300),
+            JSON.stringify(toAtt(attachments).map(x => ({ filename: x.filename, contentType: x.contentType, content: x.content.toString('base64') }))));
           log(list.join(', '), subject, kind, 'waiting', 'Will send again in 15 minutes: ' + friendly(e, s));
           if (force) throw Object.assign(new Error(friendly(e, s) + ' It has been saved and will send again automatically in 15 minutes.'), { queued: true });
           return false;
@@ -56,7 +61,7 @@ module.exports = function mailer(app, h) {
     const due = db.prepare('SELECT * FROM email_queue WHERE next_at <= ? ORDER BY id LIMIT 10').all(Date.now());
     for (const q of due) {
       db.prepare('UPDATE email_queue SET next_at = ? WHERE id = ?').run(Date.now() + 10 * 60000, q.id); // don't pick it twice
-      transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: q.to_addr, subject: q.subject, html: wrapHtml(q.html, s), replyTo: s.email || s.email_from })
+      transport(s).sendMail({ from: { name: s.email_from_name || s.company_name, address: s.email_from }, to: q.to_addr, subject: q.subject, html: wrapHtml(q.html, s), replyTo: s.email || s.email_from, attachments: toAtt((() => { try { return JSON.parse(q.attach || '[]'); } catch { return []; } })()) })
         .then(() => { db.prepare('DELETE FROM email_queue WHERE id = ?').run(q.id); log(q.to_addr, q.subject, q.kind, 'sent', q.tries ? `sent after ${q.tries} wait${q.tries > 1 ? 's' : ''}` : ''); })
         .catch(e => {
           if (q.tries >= 8) { db.prepare('DELETE FROM email_queue WHERE id = ?').run(q.id); log(q.to_addr, q.subject, q.kind, 'failed', 'Gave up after 8 tries: ' + e.message); return; }
@@ -68,7 +73,8 @@ module.exports = function mailer(app, h) {
     <div style="background:#12355b;color:#fff;padding:16px 20px;border-radius:10px 10px 0 0"><b style="font-size:18px">${esc(s.company_name)}</b></div>
     <div style="border:1px solid #e3e0d6;border-top:0;padding:18px 20px;border-radius:0 0 10px 10px">${body}
     <p style="color:#777;font-size:12px;margin-top:22px">${esc(s.company_name)}${s.address ? ' · ' + esc(s.address) : ''}${s.phone ? ' · ' + esc(s.phone) : ''}</p></div></div>`;
-  const money = v => `${getSettings().currency === 'FJD' ? 'FJ$' : getSettings().currency + ' '}${(+v || 0).toFixed(2)}`;
+  // M7: thousands separators, as on screen (FJ$1,500.00)
+  const money = v => `${getSettings().currency === 'FJD' ? 'FJ$' : getSettings().currency + ' '}${(+v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const t12 = t => { const [hh, mm] = String(t || '0:0').split(':').map(Number); return `${((hh + 11) % 12) + 1}:${String(mm).padStart(2, '0')}${hh < 12 ? 'am' : 'pm'}`; };
   const dLong = d => new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
   const table = rows => `<table style="width:100%;border-collapse:collapse;margin:10px 0">${rows.filter(Boolean).map(([k, v]) => `<tr><td style="padding:6px 0;color:#666;width:40%">${k}</td><td style="padding:6px 0"><b>${v}</b></td></tr>`).join('')}</table>`;
@@ -248,13 +254,42 @@ module.exports = function mailer(app, h) {
           .map(([k, v]) => `<tr><td style="padding:3px 0;border-top:1px solid #eee">${k}</td><td style="text-align:right;padding:3px 0;border-top:1px solid #eee">${v}</td></tr>`).join('')}</table>` : ''}
     </div>`;
   }
+  // M7: the same payslip as a PDF page (attached to the email)
+  const { pdf, payslipPage } = require('./pdf');
+  function payslipPdfPage(p) {
+    const s = getSettings(), J = v => { try { return typeof v === 'string' ? JSON.parse(v || '[]') : (v || []); } catch { return []; } };
+    const ded = J(p.deduction_lines), lv = J(p.leave_lines), LV = { annual: 'Annual leave', sick: 'Sick leave', other: 'Other paid leave', payout: 'Unused annual leave paid out' };
+    const rows = [
+      ...(p.pay_type === 'hourly' && +p.break_hours ? [[`Hours worked ${(+p.worked_hours).toFixed(2)} - unpaid breaks ${(+p.break_hours).toFixed(2)}`, '']] : []),
+      [p.pay_type === 'hourly' ? `Paid hours ${(+p.hours).toFixed(2)} x ${money(p.pay_rate)}` : 'Salary', money(p.base_pay)],
+      ...(+p.allowances ? [['Allowances', money(p.allowances)]] : []),
+      ...lv.map(x => [`${LV[x.kind] || 'Leave'} ${x.days} day${x.days === 1 ? '' : 's'}${x.late ? ` (earlier dates: ${(x.dates || []).join(', ')})` : ''}`, x.amount ? money(x.amount) : 'paid in salary']),
+      Object.assign(['Gross pay', money(p.gross)], { bold: true }),
+      ['FNPF employee contribution', '-' + money(p.fnpf_employee)], ['PAYE tax', '-' + money(p.paye)],
+      ...(ded.length ? ded.map(d => [d.name, '-' + money(d.amount)]) : +p.other_deductions ? [['Other deductions', '-' + money(p.other_deductions)]] : []),
+      Object.assign(['Net pay', money(p.net)], { bold: true, big: true, rule: true }),
+      Object.assign(['Employer FNPF contribution', money(p.fnpf_employer)], { gray: true }),
+      ...(p.ytd ? [{ heading: `Year to date (${p.ytd.year})` }, ['Gross pay', money(p.ytd.gross)], ['PAYE tax', money(p.ytd.paye)], ['FNPF total', money(p.ytd.fnpf_total)], ['Net pay', money(p.ytd.net)],
+        ['Annual leave', `${p.ytd.annual_taken} taken, ${p.ytd.annual_left} left`], ['Sick leave', `${p.ytd.sick_taken} taken, ${p.ytd.sick_left} left`]] : [])];
+    return payslipPage({ title: `${s.company_name} - Payslip${p.status === 'draft' ? ' (DRAFT - not finalised)' : ''}`, rows,
+      lines: [s.address || '', `${p.employee_name}${p.position ? ' - ' + p.position : ''}`, `Period: ${dLong(p.period_start)} - ${dLong(p.period_end)}`, p.pay_date ? `Pay date: ${dLong(p.pay_date)}` : 'Not paid yet (draft)',
+        `TIN: ${p.tin || '-'}   FNPF: ${p.fnpf_no || '-'}`].filter(Boolean) });
+  }
+  const payslipPdf = list => pdf(list.map(payslipPdfPage));
   async function emailPayslips(u, list) {
     const s = getSettings(); if (!s.smtp_host || !isEmail(s.email_from)) bad('Email is not set up yet (Settings → Email).');
     const a = list[0].period_start, b = list[list.length - 1].period_end;
-    await send(u.email, `Payslip: ${u.name}, ${dLong(a)}${a !== b ? ' – ' + dLong(b) : ''}`, list.map(payslipHtml).join(''), 'payslip', { force: true });
+    const file = `Payslip ${u.name.replace(/[\\/:*?"<>|]/g, '')} ${a}${a !== b ? ' to ' + b : ''}.pdf`;
+    await send(u.email, `Payslip: ${u.name}, ${dLong(a)}${a !== b ? ' – ' + dLong(b) : ''}`, list.map(payslipHtml).join('') + '<p style="color:#666;font-size:12px">The payslip is also attached as a PDF.</p>', 'payslip',
+      { force: true, attachments: [{ filename: file, content: payslipPdf(list), contentType: 'application/pdf' }] });
+    const mark = db.prepare('INSERT INTO payslip_sent(user_id, period_start, period_end, at) VALUES(?,?,?,?) ON CONFLICT(user_id, period_start, period_end) DO UPDATE SET at = excluded.at');
+    for (const p of list) mark.run(p.user_id, p.period_start, p.period_end, new Date().toISOString());
   }
+  // who was already sent a payslip for these pay periods (M7: ask before sending again)
+  const alreadySent = list => { const q = db.prepare('SELECT at FROM payslip_sent WHERE user_id = ? AND period_start = ? AND period_end = ?');
+    return list.map(p => ({ p, r: q.get(p.user_id, p.period_start, p.period_end) })).filter(x => x.r).map(x => ({ user_id: x.p.user_id, name: x.p.employee_name, period_start: x.p.period_start, period_end: x.p.period_end, at: x.r.at })); };
 
-  app.locals.mail = { emailTimesheet, emailPayslips, timesheetHtml: (from, to, userId, o) => periodTimesheet(from, to, userId, o) };
+  app.locals.mail = { emailTimesheet, emailPayslips, alreadySent, payslipPdf, timesheetHtml: (from, to, userId, o) => periodTimesheet(from, to, userId, o) };
 
   // ---- admin: email settings, test, recent emails
   app.get('/api/staff/email', requireRole('admin'), (req, res) => {
