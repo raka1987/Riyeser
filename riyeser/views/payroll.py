@@ -63,24 +63,81 @@ def _save_employee(eid):
     return redirect(url_for("payroll.employee", eid=eid))
 
 
+# S22: hours a person can work in one pay period (more is a typing mistake)
+MAX_HOURS = {"weekly": 60, "fortnightly": 120, "monthly": 260}
+DAYS = {"weekly": 7, "fortnightly": 14, "monthly": 30}
+
+
+def parse_hours(e, freq, raw, confirmed=False):
+    """Hours typed for one person: None (their standard hours), or a number from 0 to the period's maximum.
+    Above their normal hours needs the "hours checked" tick."""
+    if raw in (None, "") or not str(raw).strip():
+        return None
+    name = f"{e['first_name']} {e['last_name']}"
+    try:
+        h = float(str(raw).replace(",", "").strip())
+    except ValueError:
+        raise PostingError(f"{name}: hours must be a number (you typed \"{raw}\").")
+    if h < 0:
+        raise PostingError(f"{name}: hours can't be below 0.")
+    if h > MAX_HOURS[freq]:
+        raise PostingError(f"{name}: {h:g} hours is more than anyone can work in a {freq[:-2] if freq != 'monthly' else 'month'}"
+                           f" period (up to {MAX_HOURS[freq]}). Check the hours.")
+    normal = e["std_hours"] or 0
+    if normal and h > normal * 1.25 and not confirmed:
+        raise PostingError(f"{name}: {h:g} hours is more than their normal {normal:g}. Tick \"Hours checked\" if "
+                           f"that's right.")
+    return h
+
+
+def _default_frequency(db):
+    """S23: the last pay run's frequency, else the one most active staff are paid on."""
+    last = db.execute("SELECT frequency FROM payruns ORDER BY pay_date DESC, id DESC LIMIT 1").fetchone()
+    if last and db.execute("SELECT 1 FROM employees WHERE active=1 AND pay_frequency=?", (last[0],)).fetchone():
+        return last[0]
+    row = db.execute("SELECT pay_frequency, COUNT(*) n FROM employees WHERE active=1 GROUP BY pay_frequency"
+                     " ORDER BY n DESC LIMIT 1").fetchone()
+    return row[0] if row else "weekly"
+
+
+def _next_period(db, freq):
+    """The period after the last one paid on this frequency, else the one ending today."""
+    last = db.execute("SELECT r.period_end FROM payruns r JOIN journal_entries je ON je.id=r.entry_id"
+                      " WHERE r.frequency=? AND je.voided=0 AND COALESCE(r.kind,'regular')='regular'"
+                      " ORDER BY r.period_end DESC LIMIT 1", (freq,)).fetchone()
+    if last:
+        start = date.fromisoformat(last[0]) + timedelta(days=1)
+        if freq == "monthly":
+            nxt = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
+            end = nxt - timedelta(days=1) if start.day == 1 else start + timedelta(days=29)
+        else:
+            end = start + timedelta(days=DAYS[freq] - 1)
+        return start.isoformat(), end.isoformat()
+    end = date.today()
+    return (end - timedelta(days=DAYS[freq] - 1)).isoformat(), end.isoformat()
+
+
 @bp.route("/run", methods=["GET", "POST"])
 def run():
     db = get_db()
-    freq = request.values.get("frequency", "weekly")
+    freq = request.values.get("frequency") or _default_frequency(db)
     if freq not in PERIODS:
         abort(400)
     emps = db.execute("SELECT * FROM employees WHERE active=1 AND pay_frequency=? ORDER BY last_name",
                       (freq,)).fetchall()
     if request.method == "POST" and request.form.get("action") == "process":
         return _process(freq, emps)
-    days = {"weekly": 7, "fortnightly": 14, "monthly": 30}[freq]
-    end = request.values.get("period_end") or date.today().isoformat()
-    start = request.values.get("period_start") or (date.fromisoformat(end) - timedelta(days=days - 1)).isoformat()
+    nstart, nend = _next_period(db, freq)
+    end = request.values.get("period_end") or nend
+    start = request.values.get("period_start") or nstart
     pay_date = request.values.get("pay_date") or end
     previews = []
     for e in emps:
-        hrs = request.form.get(f"hours_{e['id']}")
-        hrs = opt_float(hrs, None) if hrs not in (None, "") else None
+        try:
+            hrs = parse_hours(e, freq, request.form.get(f"hours_{e['id']}"), True)
+        except PostingError as err:
+            flash(str(err), "error")
+            hrs = None
         p = compute_pay(e, freq, hrs)
         previews.append((e, p, request.method == "GET" or request.form.get(f"inc_{e['id']}")))
     return render_template("payroll/run.html", freq=freq, previews=previews, start=start, end=end,
@@ -97,8 +154,8 @@ def _process(freq, emps):
     for e in emps:
         if not f.get(f"inc_{e['id']}"):
             continue
-        hrs = f.get(f"hours_{e['id']}")
-        p = compute_pay(e, freq, opt_float(hrs, None) if hrs not in (None, "") else None)
+        hrs = parse_hours(e, freq, f.get(f"hours_{e['id']}"), bool(f.get("hours_checked")))
+        p = compute_pay(e, freq, hrs)
         slips.append((e, p))
     if not slips:
         raise PostingError("Select at least one employee.")

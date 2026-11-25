@@ -175,3 +175,40 @@ def test_s37_password_rules_lockout_and_taken_username(client, app):
     fails[key] = (fails[key][0], 0)          # the wait is over
     assert c.post("/login", data={"username": "admin", "password": "admin"}).status_code == 302
     assert key not in fails
+
+
+# ------------------------------------------------------------------ S22, S23
+def _run(client, emp, hours, **extra):
+    with client.application.app_context():
+        bank = get_db().execute("SELECT id FROM accounts WHERE code='1-1110'").fetchone()[0]
+    data = {"action": "process", "frequency": "fortnightly", "period_start": "2026-11-11", "period_end": "2026-11-24",
+            "pay_date": "2026-11-24", "bank_account_id": bank, f"inc_{emp}": "1", f"hours_{emp}": hours, **extra}
+    return client.post("/payroll/run", data=data, headers={"Referer": "/payroll/run"}, follow_redirects=True)
+
+
+def test_s22_impossible_hours_are_refused(client, app):
+    with app.app_context():
+        db = get_db()
+        emp = _employee(db)
+        db.commit()
+    assert "can&#39;t be below 0" in page(_run(client, emp, "-10"))
+    assert "more than anyone can work" in page(_run(client, emp, "500"))
+    assert "hours must be a number" in page(_run(client, emp, "abc"))
+    assert "more than their normal 76" in page(_run(client, emp, "110"))
+    with app.app_context():
+        assert get_db().execute("SELECT COUNT(*) FROM payruns").fetchone()[0] == 0
+    _run(client, emp, "110", hours_checked="1")         # overtime, confirmed
+    with app.app_context():
+        assert get_db().execute("SELECT hours FROM payslips").fetchone()[0] == 110
+
+
+def test_s23_run_payroll_opens_on_the_staff_frequency_and_next_period(client, app):
+    with app.app_context():
+        db = get_db()
+        emp = _employee(db)                                # fortnightly
+        db.commit()
+    html = page(client.get("/payroll/run"))
+    assert "<option selected>fortnightly</option>" in html and "No active weekly employees" not in html
+    _run(client, emp, "76")
+    html = page(client.get("/payroll/run"))
+    assert 'name="period_start" value="2026-11-25"' in html and 'name="period_end" value="2026-12-08"' in html
