@@ -30,7 +30,7 @@
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const COLOURS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#dc2626', '#0891b2', '#db2777', '#65a30d', '#7c3aed', '#0d9488'];
   const colourOf = (id) => COLOURS[[...String(id)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7) % COLOURS.length];
-  const initials = (n) => (String(n || '?').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2) || '?').toUpperCase();
+  const initials = (n) => (String(n || '').trim().split(/\s+/).map((w) => (w.match(/[\p{L}\p{N}]/u) || [''])[0]).join('').slice(0, 2) || '?').toUpperCase();   // M9: letters and numbers only
   const av = (id, name, cls = '') => `<span class="av ${cls}" style="background:${colourOf(id)}" aria-hidden="true">${esc(initials(name))}</span>`;
   const plainError = (e) => {
     const m = (e && (e.message || e.error_description || e.msg)) || String(e); const code = String((e && (e.code || e.error_code)) || '');
@@ -221,6 +221,8 @@
       },
       async edit(id, body) { ok(await sb.from('messages').update({ body }).eq('id', id)); },
       async remove(id) { ok(await sb.from('messages').update({ deleted: true, body: '(deleted)' }).eq('id', id)); },
+      // M9: when the other person last read a direct message (null on a database without this release's team-chat.sql)
+      async dmSeen(ch) { return soft(sb.rpc('dm_seen', { ch })); },
       async markRead(ch, uid) { await sb.from('reads').upsert({ channel_id: ch, user_id: uid, last_read_at: new Date().toISOString() }); },
       async unread(ws) { const r = ok(await sb.rpc('unread_counts', { ws })); return Object.fromEntries(r.map((x) => [x.channel_id, Number(x.unread)])); },
       async features(ws) { return ok(await sb.rpc('team_features', { ws })) || { calls: false }; },
@@ -510,6 +512,7 @@
       async edit(id, body) { const m = msgs.find((x) => x.id === id); if (m) { m.body = body; m.edited_at = new Date().toISOString(); } },
       async remove(id) { const m = msgs.find((x) => x.id === id); if (m) { m.deleted = true; m.body = '(deleted)'; } },
       async markRead(ch) { read[ch] = new Date().toISOString(); },
+      async dmSeen(ch) { return ch === 'd-sam' ? new Date().toISOString() : null; },   // in the demo Sam has read everything
       async unread() {
         const out = {};
         for (const c of chans) out[c.id] = msgs.filter((m) => m.channel_id === c.id && m.user_id !== 'u-me' && !m.deleted && m.created_at > (read[c.id] || '')).length;
@@ -1104,6 +1107,7 @@
     if (toChat) { S.inChat = true; S.home = false; S.nav = 'chat'; S.listTab = 'chats'; S.pane = 'main'; S.navOpen = false; }
     if (!draw) { /* drawn by whoever asked */ } else if (S.home) renderHome(); else render();
     if (toChat && narrow()) Hist.move('main');   // S49
+    if (S.ch && S.ch.kind === 'dm') loadSeen();
     if (S.ch) { await api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); }
   }
 
@@ -1115,7 +1119,7 @@
       if (i >= 0) S.msgs[i] = m; else S.msgs.push(m);
       renderMsgs(true); renderList();
       if (!document.hidden) api.markRead(S.ch.id, S.user.id);
-    } else if (m.user_id !== S.user.id && !m.deleted) {
+    } else if (m.user_id !== S.user.id && !m.deleted && !m.edited_at) {   // M9: an edit isn't a new message
       S.unread[m.channel_id] = (S.unread[m.channel_id] || 0) + 1;
       if (!S.allChans.find((c) => c.id === m.channel_id)) loadChans().then(renderSide); else renderSide();
     }
@@ -1917,7 +1921,7 @@
   function seeCalls() { S.callSeen = Date.now(); try { localStorage.setItem(callKey() + '.seen', String(S.callSeen)); } catch { /* private mode */ } }
   const callWho = (c) => (c.peer ? nameOf(c.peer) : c.label || 'A branch');
   const callExt = (c) => (c.peer ? extOf(c.peer) : (S.branches.find((b) => b.id === c.branch) || {}).extension);
-  const callLine = (c) => ({ missed: 'Missed', declined: 'Declined', answered: c.dir === 'in' ? 'Incoming' : 'Outgoing', 'no answer': 'No answer', cancelled: 'Cancelled', elsewhere: 'Answered elsewhere' }[c.result] || c.result);
+  const callLine = (c) => ({ missed: 'Missed', declined: 'Declined', offline: 'Not online', answered: c.dir === 'in' ? 'Incoming' : 'Outgoing', 'no answer': 'No answer', cancelled: 'Cancelled', elsewhere: 'Answered elsewhere' }[c.result] || c.result);
 
   // ---- what you folded away: the left menu, the right panel and each list section. Kept in this browser, for each person.
   const UI = (() => {
@@ -2032,15 +2036,26 @@
       const showText = !(m.files && m.files.length && m.body === autoBody(m.files)) || m.deleted;
       const body = S.editing === m.id
         ? `<form class="cbox" data-edit="${m.id}"><textarea rows="2">${esc(m.body)}</textarea><button>Save</button></form>`
-        : `${showText ? `<div class="mb${m.deleted ? ' gone' : ''}${mine ? ' mine' : ''}">${m.deleted ? 'Message deleted' : fmt(m.body)}${m.edited_at && !m.deleted ? ' <span class="edited">(edited)</span>' : ''}</div>` : ''}${filesHtml(m)}`;
+        : `${showText ? `<div class="mb${m.deleted ? ' gone' : ''}${mine ? ' mine' : ''}">${m.deleted ? 'Message deleted' : fmt(m.body)}${m.edited_at && !m.deleted ? ` <span class="edited" title="Edited ${esc(new Date(m.edited_at).toLocaleString())}">(edited)</span>` : ''}</div>` : ''}${filesHtml(m)}`;
       const acts = m.deleted || S.ch.archived ? '' : `<span class="macts">${S.rxOff ? '' : `<button data-act="react" aria-label="Add a reaction" title="React">${ic('smile')}</button>`}${mine ? '<button data-act="edit">Edit</button><button data-act="del">Delete</button>' : ''}</span>`;
       out += `<div class="msg${cont ? ' cont' : ''}" data-id="${m.id}">${av(m.user_id, nameOf(m.user_id))}<div class="mc">
         ${cont ? '' : `<div class="mt"><b>${esc(nameOf(m.user_id))}</b><time datetime="${m.created_at}">${esc(timeOf(d))}</time></div>`}
         ${body}${rxHtml(m)}</div>${acts}</div>`;
       prev = m;
     }
+    // M9: "Seen" under your last message in a direct message, once the other person has read it
+    const lastMine = [...S.msgs].reverse().find((m) => !m.deleted);
+    if (S.ch.kind === 'dm' && lastMine && lastMine.user_id === S.user.id && S.seen && S.seen.ch === S.ch.id && S.seen.at && S.seen.at >= lastMine.created_at)
+      out += `<div class="lk-seen" id="seen" title="${esc(new Date(S.seen.at).toLocaleString())}">Seen</div>`;
     return out;
   }
+  async function loadSeen() {
+    const ch = S.ch; if (!ch || ch.kind !== 'dm' || !api.dmSeen) return;
+    const at = await api.dmSeen(ch.id).catch(() => null);
+    if (S.ch !== ch) return; const was = S.seen && S.seen.ch === ch.id ? S.seen.at : undefined;
+    S.seen = { ch: ch.id, at: at || null }; if (was !== S.seen.at) renderMsgs();
+  }
+  setInterval(() => { if (S.ch && S.ch.kind === 'dm' && !document.hidden && !S.home) loadSeen(); }, 20000);
 
   // ---- the shell
   function render(force) {
@@ -2476,8 +2491,8 @@
       <div class="lk-ht">${c.kind === 'dm' ? `<h2>${esc(chanLabel(c))}</h2><small>${esc(Presence.text(o))}${extOf(o) ? ` · Ext. ${extOf(o)}` : ''}</small>`
         : `<h2>${c.kind === 'private' ? '🔒' : '#'} ${esc(c.name)}${c.archived ? ' <span class="lk-pill arch">Archived</span>' : ''}${muted(c.id) ? ` <span class="mutei" title="Muted">${ic('mute')}</span>` : ''}</h2><small>${c.kind === 'private' ? `Private · ${c.people.length} ${c.people.length === 1 ? 'person' : 'people'}${c.topic ? ' · ' : ''}` : ''}${esc(c.topic || '')}</small>`}</div>
       <div class="lk-hacts">
-        <button class="lk-ib" id="vidbtn" aria-label="Video call" title="Video call">${ic('video')}</button>
-        <button class="lk-ib" id="${c.kind === 'dm' ? 'calldm' : 'callch'}" aria-label="${c.kind === 'dm' ? `Call ${esc(chanLabel(c))}` : 'Call someone in this chat'}" title="Call">${ic('phone')}</button>
+        ${c.kind === 'dm' ? `<button class="lk-ib" id="vidbtn" aria-label="Video call" title="Video call">${ic('video')}</button>
+        <button class="lk-ib" id="calldm" aria-label="Call ${esc(chanLabel(c))}" title="Call">${ic('phone')}</button>` : ''}
         <button class="lk-hb" id="ppl" aria-label="People in this chat: ${count}" title="People">${ic('users')}<span>${count}</span></button>
         <button class="lk-ib" id="infobtn" aria-label="Chat info" title="Info">${ic('info')}</button>
         <button class="lk-ib" id="morebtn" aria-haspopup="menu" aria-label="More: rename, members, mute, archive" title="More: rename, members, mute, archive">${ic('more')}</button>
@@ -2485,8 +2500,7 @@
     el.querySelector('.back').onclick = () => go('list');
     const pb = el.querySelector('#ppl'); pb.onclick = () => (c.kind === 'private' ? peopleOf() : showRight('people'));
     el.querySelector('#infobtn').onclick = () => showRight('info');
-    const call = (video) => (c.kind === 'dm' ? Calls.start({ user: o, video }) : pickToCall(video));
-    el.querySelector('#vidbtn').onclick = () => call(true); el.querySelector(c.kind === 'dm' ? '#calldm' : '#callch').onclick = () => call(false);
+    if (c.kind === 'dm') { el.querySelector('#vidbtn').onclick = () => Calls.start({ user: o, video: true }); el.querySelector('#calldm').onclick = () => Calls.start({ user: o, video: false }); }   // M9
     el.querySelector('#morebtn').onclick = (e) => chanMenu(e.currentTarget, c);
     el.querySelector('#rtog').onclick = toggleRight;
     composerState();
@@ -2665,6 +2679,8 @@
       <div class="lk-dw" id="${p}w" aria-live="polite"></div>
       <div class="lk-dcall"><button type="button" class="lk-green" id="${p}call" aria-label="Call">${ic('phone')}</button><button type="button" class="lk-vbtn" id="${p}vid" aria-label="Video call">${ic('video')}</button></div>`;
   }
+  // M9: your own number says so
+  const noOne = (v) => { const me = S.people.find((q) => q.user_id === S.user.id); return me && me.extension && Number(String(v).trim()) === me.extension ? 'That\'s your own extension' : 'No one on that number'; };
   function findDial(v) {
     const x = Number(String(v).trim()); if (!x) return null;
     const p = S.people.find((q) => q.extension === x && q.user_id !== S.user.id); if (p) return { user: p.user_id, label: p.display_name };
@@ -2672,7 +2688,7 @@
   }
   function wireDial(root, p) {
     const n = root.querySelector(`#${p}n`); if (!n) return; const w = root.querySelector(`#${p}w`);
-    const show = () => { S.dial[p] = n.value; const t = findDial(n.value); w.textContent = n.value ? (t ? `${t.label}${t.user ? ' · ' + Presence.text(t.user) : ''}` : 'No one on that number') : ''; };
+    const show = () => { S.dial[p] = n.value; const t = findDial(n.value); w.textContent = n.value ? (t ? `${t.label}${t.user ? ' · ' + Presence.text(t.user) : ''}` : noOne(n.value)) : ''; };
     if (n.value) show();
     n.oninput = () => { n.value = n.value.replace(/[^0-9*#]/g, '').slice(0, 4); show(); };
     root.querySelectorAll(`[data-${p}k]`).forEach((k) => k.onclick = () => { n.value = (n.value + k.getAttribute(`data-${p}k`)).slice(0, 4); show(); });
@@ -2898,7 +2914,7 @@
       const n = d.querySelector('#dpn'); const who = d.querySelector('#dpw');
       const find = (v) => { const x = Number(v); const p = S.people.find((q) => q.extension === x && q.user_id !== S.user.id); if (p) return { user: p.user_id, label: p.display_name };
         const b = S.branches.find((q) => q.extension === x); return b ? { branch: b.id, label: b.name + ' (everyone)' } : null; };
-      const show = () => { const t = find(n.value); who.textContent = n.value ? (t ? t.label : 'No one on that number') : ''; };
+      const show = () => { const t = find(n.value); who.textContent = n.value ? (t ? t.label : noOne(n.value)) : ''; };
       n.oninput = show; n.focus();
       d.querySelectorAll('[data-k]').forEach((k) => k.onclick = () => { n.value = k.dataset.k === '⌫' ? n.value.slice(0, -1) : (n.value + k.dataset.k).slice(0, 4); show(); });
       d.querySelector('#cl').onclick = close;
@@ -3619,7 +3635,9 @@
       if (!call) return;
       tone('out');
       for (const to of targets) send(to, 'ring', { from_name: myName(), via: t.branch ? label : null });
-      call.timeout = setTimeout(() => { if (call && call.status === 'calling') { for (const to of call.targets) send(to, 'cancel'); finish('No answer', true); } }, 30000);
+      // M9: nobody it rings is online: 8 seconds (another tab may still wake up), then "… isn't online"; else 30 seconds
+      const allOff = !Presence.off && targets.every((u) => Presence.info(u).status === 'offline');
+      call.timeout = setTimeout(() => { if (call && call.status === 'calling') { for (const to of call.targets) send(to, 'cancel'); finish(allOff ? `${label} isn't online` : 'No answer', true); } }, allOff ? 8000 : 30000);
     }
 
     function newPc() {
@@ -3646,7 +3664,7 @@
         if (call && call.status !== 'ended') { api.signal(S.team.id, sig.call_id, from, 'busy').catch(() => {}); return; }
         if (!S.features.calls) return;
         if (Presence.status() === 'dnd') {   // Do not disturb: they hear "can't take the call", you see it as missed
-          api.signal(S.team.id, sig.call_id, from, 'decline').catch(() => {});
+          api.signal(S.team.id, sig.call_id, from, 'decline', { dnd: true }).catch(() => {});
           logCall({ id: sig.call_id, dir: 'in', peer: from, at: new Date().toISOString(), dur: 0, result: 'missed', via: pl.via || null }); return;
         }
         call = { id: sig.call_id, dir: 'in', status: 'incoming', peer: from, via: pl.via || null, pendingIce: [], at: new Date().toISOString() };
@@ -3676,7 +3694,7 @@
         }
         if (k === 'accept' && from !== call.peer) { api.signal(S.team.id, call.id, from, 'taken').catch(() => {}); return; }
         if ((k === 'decline' || k === 'busy') && call.status === 'calling') {
-          call.targets.delete(from); if (!call.targets.size) { clearTimeout(call.timeout); finish(k === 'busy' ? `${call.label} is on another call` : `${call.label} can't take the call right now`, true); }
+          call.targets.delete(from); if (!call.targets.size) { clearTimeout(call.timeout); finish(k === 'busy' ? `${call.label} is on another call` : pl.dnd || pl.mic ? `${call.label} can't take the call right now` : `${call.label} declined the call`, true); }
           return;
         }
         if (k === 'answer' && call.pc) { await call.pc.setRemoteDescription(pl); await flushIce(); return; }
@@ -3689,7 +3707,7 @@
     async function answer() {
       if (!call || call.status !== 'incoming') return;
       stopTone(); call.status = 'connecting'; draw();
-      try { call.local = await mic(); } catch (e) { send(call.peer, 'decline'); finish(e.message); return; }
+      try { call.local = await mic(); } catch (e) { send(call.peer, 'decline', { mic: true }); finish(e.message); return; }
       call.pc = newPc();
       call.local.getTracks().forEach((tr) => call.pc.addTrack(tr, call.local));
       send(call.peer, 'accept');
@@ -3716,7 +3734,8 @@
     async function finish(note, missed) {
       if (!call) return;
       const c = call; call = null; stopTone(); clearTimeout(c.timeout);
-      const result = c.startedAt ? 'answered' : c.dir === 'in' ? (note === 'Declined' ? 'declined' : note === 'Answered by someone else' ? 'elsewhere' : 'missed') : note === 'Cancelled' ? 'cancelled' : 'no answer';
+      const result = c.startedAt ? 'answered' : c.dir === 'in' ? (note === 'Declined' ? 'declined' : note === 'Answered by someone else' ? 'elsewhere' : 'missed')
+        : note === 'Cancelled' ? 'cancelled' : / declined the call$/.test(note) ? 'declined' : / isn't online$/.test(note) ? 'offline' : 'no answer';
       try { logCall({ id: c.id, dir: c.dir, peer: c.peer || null, branch: c.branch || null, label: c.peer ? null : c.label, via: c.via || null, at: c.at || new Date().toISOString(),
         dur: c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) : 0, result }); } catch { /* history is a nice-to-have */ }
       try { c.pc && c.pc.close(); } catch { /* closed */ }

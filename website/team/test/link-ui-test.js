@@ -57,7 +57,8 @@ async function contrast(pg, sel) {
     assert.match(await text(pg, '#side .lk-tabs'), /^Chats \d+ Calls \d+ Voicemail 0$/);
     assert.deepStrictEqual(await pg.$$eval('#side .sec', (x) => x.map((y) => y.firstChild.textContent.trim())), ['Pinned', 'Channels', 'Direct messages']);
     assert.match(await text(pg, '#mhead h2'), /# general/); assert.match(await pg.getAttribute('#txt', 'placeholder'), /^Type a message in #general…$/);
-    for (const id of ['#vidbtn', '#callch', '#ppl', '#infobtn', '#morebtn', '#attach', '#emo', '#send']) assert.ok(await pg.$(id), id);
+    for (const id of ['#ppl', '#infobtn', '#morebtn', '#attach', '#emo', '#send']) assert.ok(await pg.$(id), id);
+    for (const id of ['#vidbtn', '#callch']) assert.ok(!(await pg.$(id)), id + ' hidden in a channel until group calls exist (M9)');
     const day = await pg.$$eval('#msgs .day', (x) => x.map((y) => y.textContent)); assert.ok(day.includes('Today'), 'Today divider');
     assert.ok(await pg.$('#msgs .msg.cont'), 'grouped by author');
     await pg.screenshot({ path: out + '/link-dark-desktop.png' });
@@ -175,7 +176,7 @@ async function contrast(pg, sel) {
     // Sam calls you; you decline
     await sam.click('[data-dm="u-me"]'); await sam.click('#calldm'); assert.ok(await until(pg, 'incoming'));
     assert.match(await pg.title(), /^📞 Incoming call from Sam Taylor \(ext\. 102\)/);
-    await pg.click('#c-dec'); assert.ok(await until(sam, 'ended')); assert.match(await sam.evaluate(() => window.RiyeserTeam.calls.current.note), /can't take the call/);
+    await pg.click('#c-dec'); assert.ok(await until(sam, 'ended')); assert.match(await sam.evaluate(() => window.RiyeserTeam.calls.current.note), /declined the call/);
     await pg.waitForTimeout(2700); assert.match(await pg.title(), /Riyeser Link$/);
     await pg.click('[data-tab=calls]'); assert.match(await itext(pg, '.lk-callrow'), /Sam Taylor .* Declined/); await pg.click('[data-tab=chats]');
     // Do not disturb: a call doesn't ring you; Sam hears you can't take it, you see it as missed

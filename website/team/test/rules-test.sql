@@ -45,6 +45,16 @@ select public.open_dm(:'ws_a', '22222222-2222-2222-2222-222222222222') as dm \gs
 do $$ begin assert public.open_dm((select id from public.workspaces limit 1), '22222222-2222-2222-2222-222222222222')
   = (select id from public.channels where kind='dm'), 'one DM per pair'; end $$;
 insert into public.messages (channel_id, workspace_id, body) values (:'dm', :'ws_a', 'Private: your pay rise is approved');
+-- M9: "Seen": Alex sees when Sam read the DM; nobody else can ask
+select set_config('test.dm', :'dm', false);
+do $$ begin assert public.dm_seen(current_setting('test.dm')::uuid) is null, 'M9 not read yet'; end $$;
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222');
+insert into public.reads (channel_id) values (:'dm');
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin assert public.dm_seen(current_setting('test.dm')::uuid) is not null, 'M9 Alex sees that Sam read it'; end $$;
+select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
+do $$ begin assert public.dm_seen(current_setting('test.dm')::uuid) is null, 'M9 someone outside the DM learns nothing'; end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
 select pg_temp.as_user('44444444-4444-4444-4444-444444444444');
 select public.join_team(:'code_a', 'Jordan');
 do $$ begin

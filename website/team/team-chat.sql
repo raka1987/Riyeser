@@ -758,6 +758,16 @@ $$;
 revoke all on function public.invite_info(text) from public;
 grant execute on function public.invite_info(text) to anon, authenticated;
 
+-- M9: "Seen" in a direct message: when the other person last read it. Only for the people in that DM.
+create or replace function public.dm_seen(ch uuid) returns timestamptz
+  language sql stable security definer set search_path = public as $$
+  select max(r.last_read_at) from reads r join channels c on c.id = r.channel_id
+  where r.channel_id = $1 and c.kind = 'dm' and r.user_id <> auth.uid()
+    and exists (select 1 from channel_members m where m.channel_id = $1 and m.user_id = auth.uid())
+$$;
+revoke all on function public.dm_seen(uuid) from public, anon;
+grant execute on function public.dm_seen(uuid) to authenticated;
+
 -- S7: how many people are waiting to join, for the business's owners and admins (the bell and Join requests). Only the
 -- number: it's there before two-step sign-in is on, so they know to turn it on and approve them (the names need it).
 create or replace function public.join_request_count(ws uuid) returns int
