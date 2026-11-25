@@ -476,3 +476,56 @@ def test_s30_fiji_pay_run_currency_fnpf_and_first_import_accounts(client, app, t
     client.post("/links/payroll", data={"bank_account_id": acc["1-1110"], "name": "F13.json"})
     with app.app_context():
         assert L.balances(get_db())[paye] == -240000
+
+
+# ------------------------------------------------------------------ S26 + S27
+def _report(app, name, **args):
+    from flask import g
+    from riyeser.views import reports as rp
+    with app.test_request_context(f"/reports/{name}"):
+        g.user, g.company = None, None
+        db = get_db()
+        p = dict(start=args.get("start"), end=args.get("end"), job=None, asof=args.get("asof"))
+        return getattr(rp, f"rpt_{name}")(db, p)
+
+
+def _cells(rep):
+    return {r["cells"][1] if len(r["cells"]) > 3 else r["cells"][0]: r["cells"] for r in rep["rows"]}
+
+
+def test_s26_trial_balance_this_financial_year_with_retained_earnings(app):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust, _ = _contacts(db)
+        for d, amt in (("2026-03-10", 100000), ("2026-08-10", 120000), ("2026-11-20", 50000)):
+            L.save_document(db, "sale", dict(contact_id=cust, date=d),
+                            [dict(description="Work", qty=1, unit_price=amt, account_id=acc["4-1000"],
+                                  tax_code_id=tc["N-T"])], "open")
+        db.commit()
+    rep = _report(app, "trial_balance", asof="2026-11-30")
+    rows = _cells(rep)
+    assert rows["Sales - Products"][3] == 170000          # this financial year (from 1 Jul 2026) only
+    assert rows["Retained Earnings"][3] == 100000          # last year's profit
+    assert rows["Total"][2] == rows["Total"][3]
+    assert "OUT OF BALANCE" not in rep["subtitle"]
+
+
+def test_s27_aged_reports_include_credit_balances(app):
+    with app.app_context():
+        db = get_db()
+        acc, tc = ids(db)
+        cust, sup = _contacts(db)
+        other = db.execute("INSERT INTO contacts (kind, name) VALUES ('customer','D')").lastrowid
+        line = lambda amt, a: [dict(description="x", qty=1, unit_price=amt, account_id=acc[a], tax_code_id=tc["N-T"])]
+        L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-01"), line(30000, "4-1000"), "open")
+        L.save_document(db, "sale", dict(contact_id=cust, date="2026-11-02"), line(-5000, "4-1000"), "open")
+        L.save_document(db, "sale", dict(contact_id=other, date="2026-11-02"), line(-5000, "4-1000"), "open")
+        L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-01"), line(20000, "6-1500"), "open")
+        L.save_document(db, "purchase", dict(contact_id=sup, date="2026-11-03"), line(-2500, "6-1500"), "open")
+        db.commit()
+        b = L.balances(db)
+    ar = _report(app, "aged_receivables", asof="2026-11-30")
+    ap = _report(app, "aged_payables", asof="2026-11-30")
+    assert ar["rows"][-1]["cells"][-1] == b[acc["1-1200"]] == 20000
+    assert ap["rows"][-1]["cells"][-1] == -b[acc["2-1200"]] == 17500

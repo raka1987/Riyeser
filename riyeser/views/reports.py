@@ -133,10 +133,20 @@ def _type(accts, aid):
 
 
 def rpt_trial_balance(db, p):
+    """Balance sheet accounts to date; income and expenses for this financial year only, with earlier years' profit
+    in Retained Earnings (S26), as the Balance Sheet does."""
     bal = balances(db, end=p["asof"])
+    fys = fy_start(db, p["asof"])
+    accts = _accounts(db)
+    this_year = balances(db, start=fys, end=p["asof"])
+    before = balances(db, end=add_days(fys, -1))
+    ret_id = linked(db, "retained_earnings")
+    pl_before = sum(v for k, v in before.items() if _type(accts, k) in INCOME + EXPENSE)  # debit - credit
     rows, td, tc = [], 0, 0
-    for a in _accounts(db):
-        v = bal.get(a["id"], 0)
+    for a in accts:
+        v = this_year.get(a["id"], 0) if a["type"] in INCOME + EXPENSE else bal.get(a["id"], 0)
+        if a["id"] == ret_id:
+            v += pl_before
         if not v:
             continue
         d, c = (v, 0) if v > 0 else (0, -v)
@@ -145,7 +155,7 @@ def rpt_trial_balance(db, p):
                       link=url_for("core.account_ledger", aid=a["id"], start="1900-01-01", end=p["asof"])))
     rows.append(R(["", "Total", td, tc], "grand"))
     return dict(columns=["Code", "Account", "Debit", "Credit"], rows=rows, filters=["asof"],
-                subtitle=f"As at {p['asof']}" + ("" if td == tc else " ⚠ OUT OF BALANCE"))
+                subtitle=f"As at {p['asof']} (income and expenses from {fys})" + ("" if td == tc else " ⚠ OUT OF BALANCE"))
 
 
 def rpt_gl_detail(db, p):
@@ -282,8 +292,8 @@ def _aged(db, p, side):
     by_contact = {}
     for d in docs:
         due = d["total"] - paid.get(d["id"], 0)
-        if due <= 0:
-            continue
+        if due == 0:
+            continue  # credits (negative balances) are kept, so the total matches Trade Debtors / Creditors (S27)
         days = (date.fromisoformat(p["asof"]) - date.fromisoformat(d["due_date"] or d["date"])).days
         idx = 0 if days <= 0 else 1 if days <= 30 else 2 if days <= 60 else 3 if days <= 90 else 4
         by_contact.setdefault((d["contact_id"], d["cname"]), []).append((d, due, idx))
