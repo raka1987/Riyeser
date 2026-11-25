@@ -55,6 +55,8 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
   pg = await page();
   const exp = Math.floor(Date.now() / 1000) + 3600;
   await pg.goto(`${BASE}/team/#access_token=x.y.z&expires_at=${exp}&expires_in=3600&refresh_token=r&token_type=bearer&type=signup`);
+  // a confirm-your-email link (type=signup) says "Email confirmed" first (F1), then carries on
+  await pg.waitForSelector('#confirmed', { timeout: 10000 }); await pg.click('#cgo');
   await pg.waitForSelector('.hco, #txt', { timeout: 10000 });
   console.log('3. email link on /team/ signed in:', userAsked, '| address now:', await pg.evaluate(() => location.pathname + location.search + location.hash));
   if (!userAsked) fail('the #access_token link was not used');

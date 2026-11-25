@@ -7,6 +7,12 @@
   const CFG = window.RIYESER_TEAM || {};
   const CONFIGURED = !!(CFG.supabaseUrl && CFG.supabaseKey);
   const params = new URLSearchParams(location.search);
+  // A link from one of our account emails (Supabase): #access_token=…&type=signup (confirm your email), type=recovery
+  // (reset your password), or #error_code=otp_expired&error_description=… when the link is old or was used already.
+  // Read now: the sign-in library takes these out of the address as it signs in.
+  const AUTH = (() => { const h = new URLSearchParams(location.hash.replace(/^#/, '')); const type = h.has('access_token') ? (h.get('type') || '') : '';
+    return { type, recovery: type === 'recovery', confirmed: ['signup', 'email_change', 'invite'].includes(type),
+      error: h.has('access_token') ? '' : (h.get('error_code') || h.get('error') || params.get('error_code') || ''), errorText: h.get('error_description') || params.get('error_description') || '' }; })();
   const DEMO = params.has('demo') || !CONFIGURED;
   const $app = document.getElementById('app');
   const NAME = 'Riyeser Link';
@@ -26,11 +32,16 @@
   const initials = (n) => (String(n || '?').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2) || '?').toUpperCase();
   const av = (id, name, cls = '') => `<span class="av ${cls}" style="background:${colourOf(id)}" aria-hidden="true">${esc(initials(name))}</span>`;
   const plainError = (e) => {
-    const m = (e && (e.message || e.error_description || e.msg)) || String(e);
+    const m = (e && (e.message || e.error_description || e.msg)) || String(e); const code = String((e && (e.code || e.error_code)) || '');
     if (/Invalid login/i.test(m)) return 'That email or password isn\'t right.';
     if (/Email not confirmed/i.test(m)) return 'Please confirm your email first: open the link we emailed you, then sign in.';
     if (/already registered/i.test(m)) return 'There\'s already an account with that email. Sign in instead.';
     if (/Password should be/i.test(m)) return 'Choose a password of at least 8 characters.';
+    if (/should be different from the old|same_password/i.test(m + ' ' + code)) return 'That\'s the password you have now. Choose a different one.';
+    // Supabase's sender stops after a few emails an hour ("email rate limit exceeded"), or can't send at all
+    if (/email rate limit|over_email_send_rate_limit|error sending .*email|email_send|smtp/i.test(m + ' ' + code)) return 'We couldn\'t send the email just now. Try again in a few minutes or contact info@riyeser.com';
+    if (/over_request_rate_limit|request rate limit|for security purposes, you can only request/i.test(m + ' ' + code)) return 'Too many tries just now. Wait a minute, then try again.';
+    if (/friendly name .* already exists|mfa_factor_name_conflict/i.test(m + ' ' + code)) return 'Two-step sign-in couldn\'t start just now. Close this box and press Turn on two-step sign-in again.';
     if (/Signups not allowed/i.test(m)) return 'New accounts aren\'t open yet. Ask Riyeser to turn on sign-ups.';
     if (/Invalid TOTP|mfa_verification_failed|expired/i.test(m)) return 'That code isn\'t right. Type the 6 numbers your authenticator app shows now (they change every 30 seconds).';
     if (/created_by_fkey|JWT|sub claim/i.test(m)) return 'Your sign-in has ended. Sign out, then sign in again.';
@@ -56,7 +67,16 @@
         if (error && [401, 403, 404].includes(error.status)) { await sb.auth.signOut({ scope: 'local' }).catch(() => {}); S.signedOutNote = true; return null; }
         return s;
       },
-      onAuth(fn) { sb.auth.onAuthStateChange((_e, s) => fn(s)); },
+      onAuth(fn) { sb.auth.onAuthStateChange((ev, s) => fn(ev, s)); },
+      // A new password: from the reset link, or Change password. Every other sign-in of this account (other devices) ends.
+      async setPassword(password) { ok(await sb.auth.updateUser({ password })); await sb.auth.signOut({ scope: 'others' }).catch(() => {}); },
+      // Change password asks for the current one: checked with a separate, throwaway sign-in so this page's own stays as it is.
+      async checkPassword(email, password) {
+        const c = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'riyeser.pwcheck' } });
+        const r = await c.auth.signInWithPassword({ email, password });
+        if (r.error) { if (/Invalid login/i.test(r.error.message || '')) throw new Error('Your current password isn\'t right.'); throw r.error; }
+        await c.auth.signOut({ scope: 'local' }).catch(() => {});
+      },
       async signIn(email, password) { return ok(await sb.auth.signInWithPassword({ email, password })); },
       async signUp(email, password, details) {
         // details (name, contact, optional business) are kept with the account and used to set it up after the email is confirmed
@@ -95,7 +115,13 @@
       async unlinkDevice(id) { ok(await sb.from('devices').delete().eq('id', id)); },
       async aal() { return ok(await sb.auth.mfa.getAuthenticatorAssuranceLevel()); },
       async factors() { const f = ok(await sb.auth.mfa.listFactors()); return (f.totp || []).filter((x) => x.status === 'verified'); },
-      async enrol() { const r = ok(await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Riyeser ' + new Date().toISOString().slice(0, 16) }));
+      async enrol() {
+        // Set-ups that were started and never finished (Later, or the box closed) would block a new one: remove them first.
+        const all = ok(await sb.auth.mfa.listFactors()).all || [];
+        for (const f of all) if (f.status !== 'verified') await sb.auth.mfa.unenroll({ factorId: f.id }).catch(() => {});
+        // A name of its own each time (the full time and a random part), so pressing the button again always works
+        const name = 'Riyeser ' + new Date().toISOString().replace('T', ' ').slice(0, 19) + ' ' + Math.random().toString(36).slice(2, 7);
+        const r = ok(await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: name }));
         // Supabase gives the QR code either as a data: address or as raw SVG text; always hand back something an <img> can show
         const q = String(r.totp.qr_code || '').trim();
         const raw = q.startsWith('<') ? q : (/^data:image\/svg\+xml;[^,]*,\s*</.test(q) ? q.slice(q.indexOf(',') + 1).trim() : '');   // supabase-js adds a data: prefix without encoding the SVG
@@ -355,6 +381,7 @@
       async session() { return { user: me }; },
       onAuth() {},
       async signIn() { return { user: me }; }, async signUp() { return { user: me }; }, async resetPassword() {},
+      async setPassword() {}, async checkPassword(_e, pw) { if (pw === 'wrong-password') throw new Error('Your current password isn\'t right.'); },
       async signOut() { location.href = HERE; },
       async teams() { return [{ id: ws, ...company, invite_code: 'DEMO1234', role: AS === 'u-me' ? 'owner' : AS === 'u-sam' ? 'admin' : 'member', myName: 'You' }]; },
       async requestJoin(code) { return { status: 'pending', company_name: 'Sample Plumbing', workspace_id: ws, code }; },
@@ -568,7 +595,7 @@
       i.addEventListener('keydown', check); i.addEventListener('keyup', check); i.addEventListener('blur', () => { caps.hidden = true; });
     });
   }
-  function gate(mode = 'in', note = '') {
+  function gate(mode = 'in', note = '', email = '') {
     const join = params.get('join');
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><form class="gcard" id="gf">${/Electron/.test(navigator.userAgent) ? '' : '<a class="gback" href="/">← Back to riyeser.com</a>'}
@@ -578,7 +605,7 @@
       <p>${join ? 'You\'ve been invited to a team. ' : ''}${mode === 'up' ? 'Free. One account for you, your business and every Riyeser program.' : mode === 'reset' ? 'We\'ll email you a link to choose a new password.' : 'One account for you, your business and all your Riyeser programs.'}</p>
       ${note}
       ${mode === 'up' ? '<label class="f"><span>Your name</span><input name="you" required maxlength="60" autocomplete="name"></label>' : ''}
-      <label class="f"><span>Email</span><input type="email" name="email" autocomplete="username email" required></label>
+      <label class="f"><span>Email</span><input type="email" name="email" autocomplete="username email" required value="${esc(email)}"></label>
       ${mode !== 'reset' ? pwField('password', 'Password', mode === 'up' ? 'new-password' : 'current-password', mode === 'up' ? 'At least 8 characters.' : '') : ''}
       ${mode === 'up' ? pwField('password2', 'Confirm password', 'new-password', '') : ''}<div id="gerr"></div>
       ${mode === 'up' ? detailsFields(!!join) : ''}
@@ -601,8 +628,66 @@
           if (!r.session) return gate('in', '<div class="ok">Nearly there: open the link we just emailed you, then sign in here.</div>');
         } else await api.signIn(f.get('email'), f.get('password'));
         await start();
-      } catch (err) { btn.disabled = false; gate(mode, `<div class="err">${esc(plainError(err))}</div>`); }
+      } catch (err) { btn.disabled = false; gate(mode, `<div class="err">${esc(plainError(err))}</div>`, String(f.get('email') || '')); }
     };
+  }
+
+  // ---------------- links from our account emails, and passwords (F1, F17)
+  const clearAuthLink = () => { if (/access_token|error_code|error_description/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search); };
+  // "Confirm your email address": the link signs you in; say so before carrying on to set-up.
+  function confirmedScreen() {
+    clearAuthLink();
+    $app.className = 'acct'; document.title = 'Email confirmed · Riyeser'; tabIcon(false);
+    $app.innerHTML = `<div class="gate"><div class="gcard" id="confirmed">
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <h1>✅ Email confirmed</h1><p>Thanks. Your Riyeser account is ready and you're signed in as <b>${esc(S.user.email || '')}</b>.</p>
+      <button class="btn p w" id="cgo">Continue</button></div></div>`;
+    const b = $app.querySelector('#cgo'); b.focus(); b.onclick = () => start();
+  }
+  // The "Reset your password" link signs you in for this one job: choose the new password (twice).
+  function newPasswordScreen(note = '') {
+    clearAuthLink();
+    $app.className = 'acct'; document.title = 'Choose a new password · Riyeser'; tabIcon(false);
+    $app.innerHTML = `<div class="gate"><form class="gcard" id="npf">
+      <div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div>
+      <h1>Choose a new password</h1><p>For <b>${esc(S.user.email || '')}</b>. Your old password stops working, and you're signed out on your other devices.</p>${note}
+      ${pwField('password', 'New password', 'new-password', 'At least 8 characters.')}${pwField('password2', 'Type it again', 'new-password', '')}
+      <button class="btn p w" type="submit">Save my new password</button>
+      <div class="alt"><button type="button" class="linkbtn" id="so">Cancel and sign out</button></div></form></div>`;
+    wirePw($app); $app.querySelector('[name=password]').focus();
+    $app.querySelector('#so').onclick = async () => { AUTH.recovery = false; await api.signOut(); gate(); };
+    $app.querySelector('#npf').onsubmit = async (e) => {
+      e.preventDefault(); const f = new FormData(e.target); const pw = String(f.get('password') || '');
+      if (pw.length < 8) return newPasswordScreen('<div class="err">Choose a password of at least 8 characters.</div>');
+      if (pw !== f.get('password2')) return newPasswordScreen('<div class="err">The two passwords don\'t match.</div>');
+      e.target.querySelector('button[type=submit]').disabled = true;
+      try { await api.setPassword(pw); AUTH.recovery = false; await start(); phMsg('✅ Your new password is saved. Use it next time you sign in.', 'ok'); }
+      catch (err) { newPasswordScreen(`<div class="err">${esc(plainError(err))}</div>`); }
+    };
+  }
+  // 🔑 Change password (signed in): the current password, the new one twice, and the code when two-step sign-in is on.
+  async function changePassword() {
+    const mfaOn = (await api.factors().catch(() => [])).length > 0;
+    modal(`<h3>🔑 Change password</h3><p>For <b>${esc(S.user.email || '')}</b>. You'll be signed out on your other devices.</p>
+      <form id="cpf">${pwField('current', 'Current password', 'current-password', '')}${pwField('password', 'New password', 'new-password', 'At least 8 characters.')}${pwField('password2', 'Type the new one again', 'new-password', '')}
+      ${mfaOn ? '<label class="f"><span>Code from your authenticator app</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn"></label>' : ''}
+      <div id="cperr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p" type="submit">Change password</button></div></form>`, (d, close) => {
+      wirePw(d); d.querySelector('#cl').onclick = close;
+      const err = (t) => { d.querySelector('#cperr').innerHTML = `<div class="err">${esc(t)}</div>`; };
+      d.querySelector('#cpf').onsubmit = async (e) => {
+        e.preventDefault(); const f = new FormData(e.target); const pw = String(f.get('password') || ''); const btn = e.target.querySelector('button[type=submit]');
+        if (pw.length < 8) return err('Choose a new password of at least 8 characters.');
+        if (pw !== f.get('password2')) return err('The two new passwords don\'t match.');
+        if (pw === f.get('current')) return err('That\'s the password you have now. Choose a different one.');
+        btn.disabled = true;
+        try {
+          await api.checkPassword(S.user.email, String(f.get('current') || ''));
+          if (mfaOn) { const fa = (await api.factors())[0]; await api.verifyCode(fa.id, String(f.get('code') || '').trim()); S.aal = 'aal2'; }
+          await api.setPassword(pw); close();
+          modal('<h3>✅ Password changed</h3><p>Use your new password next time you sign in. Your other devices have been signed out.</p><div class="mfoot"><button class="btn p" id="cl">Done</button></div>', (dd, c2) => { dd.querySelector('#cl').onclick = c2; });
+        } catch (x) { btn.disabled = false; err(plainError(x)); }
+      };
+    });
   }
 
   // ------------------------------------------------------------------ create or join a team
@@ -723,12 +808,26 @@
 
   // Turn two-step sign-in on (scan a QR code, type the code) or off.
   async function security() {
-    const on = (await api.factors().catch(() => [])).length > 0;
+    const facs = await api.factors().catch(() => []); const on = facs.length > 0;
+    // Turned on since this page signed in (on another device or tab): one code brings this page up to date.
+    if (on && S.aal !== 'aal2') {
+      modal(`<h3>🔐 Two-step sign-in is on</h3><p>It was turned on for your account after this page signed in. Type the 6 numbers your authenticator app shows to use it here.</p>
+        <form id="vf"><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn" aria-label="6-number code"><div id="vferr"></div>
+        <div class="mfoot"><button type="button" class="btn" id="cl">Later</button><button class="btn p">Continue</button></div></form>`, (d, close) => {
+        d.querySelector('#cl').onclick = close; d.querySelector('#vf input').focus();
+        d.querySelector('#vf').onsubmit = async (e) => {
+          e.preventDefault();
+          try { await api.verifyCode(facs[0].id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; close(); await refreshCompany(); phMsg('✅ Two-step sign-in is on for this page too.', 'ok'); }
+          catch (err) { d.querySelector('#vferr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; }
+        };
+      });
+      return;
+    }
     if (on) {
       modal(`<h3>🔐 Two-step sign-in is on</h3><p>Signing in needs your password and a code from your authenticator app. That stops someone who learns your password.</p>
         ${isAdmin() ? '<p><b>As an owner or admin you need it</b> to approve people, change access and see the history.</p>' : ''}
-        <div class="mfoot"><button class="btn" id="off" style="margin-right:auto;color:#b91c1c">Turn it off</button><button class="btn p" id="cl">Done</button></div>`, (d, close) => {
-        d.querySelector('#cl').onclick = close;
+        <div class="mfoot"><button class="btn" id="off" style="margin-right:auto;color:#b91c1c">Turn it off</button><button class="btn" id="tocpw">🔑 Change password</button><button class="btn p" id="cl">Done</button></div>`, (d, close) => {
+        d.querySelector('#cl').onclick = close; d.querySelector('#tocpw').onclick = () => { close(); changePassword(); };
         d.querySelector('#off').onclick = async () => {
           if (!(await ask(isAdmin() ? 'Turn off two-step sign-in? Your admin powers stop until you turn it on again.' : 'Turn off two-step sign-in?'))) return;
           try { const f = (await api.factors())[0]; await api.unenrol(f.id); S.aal = 'aal1'; close(); renderSide(); } catch (err) { tell(plainError(err)); }
@@ -748,7 +847,7 @@
       d.querySelector('#cl').onclick = async () => { try { await api.unenrol(en.id); } catch { /* not finished: nothing to undo */ } close(); };
       d.querySelector('#vf').onsubmit = async (e) => {
         e.preventDefault();
-        try { await api.verifyCode(en.id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; close(); await refreshCompany();
+        try { await api.verifyCode(en.id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; close(); await refreshCompany().catch(() => renderSide());
           modal('<h3>✅ Two-step sign-in is on</h3><p>Next time you sign in, Riyeser asks for a code from your authenticator app.</p><div class="mfoot"><button class="btn p" id="cl">Done</button></div>', (dd, c2) => { dd.querySelector('#cl').onclick = c2; }); }
         catch (err) { tell(plainError(err)); }
       };
@@ -1001,7 +1100,7 @@
             .map(([k, v]) => `<dt>${k}</dt><dd>${v ? esc(v) : `<span class="muted">${admin ? 'Not added yet' : '—'}</span>`}</dd>`).join('')}</dl></div>
           <div class="hacts"><button class="btn" id="hco">✏️ ${admin ? (solo ? 'Edit my details' : 'Edit business details') : 'Business details'}</button>${admin && team ? `<button class="btn" id="hppl">👥 People · ${S.people.length}</button>
           <button class="btn" id="hreq">👋 Requests${S.requests.length ? ` <span class="badge">${S.requests.length}</span>` : ''}</button><button class="btn" id="hhist">🕘 History</button>` : ''}
-          <button class="btn" id="hsec">🔐 Security</button></div></section>
+          <button class="btn" id="hsec">🔐 Security</button><button class="btn" id="hpw">🔑 Change password</button></div></section>
         ${myDetailsHtml(me, admin)}
         ${helpHtml()}
         ${owner && lic ? `<h3 class="hsec" id="hplanv">Your plan <small>${lic.seats ? `${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''} · ` : ''}${S.billing ? 'To add programs or pay, use Billing below.' : 'To change your plan, contact Riyeser.'}</small></h3>
@@ -1027,7 +1126,7 @@
     on('#hco', () => companyInfo(false));
     on('#hppl', () => (needs2step() ? security() : peopleAccess()));
     on('#hreq', () => (needs2step() ? security() : joinRequests()));
-    on('#hhist', showHistory); on('#hsec', security); on('#hmfa', security);
+    on('#hhist', showHistory); on('#hsec', security); on('#hpw', changePassword); on('#hmfa', security);
     on('#hcp', async () => { try { await navigator.clipboard.writeText(t.company_code); $app.querySelector('#hcp').textContent = 'Copied'; } catch { /* nothing */ } });
     const sw = $app.querySelector('#hsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
     on('#hhelp', () => getHelp()); on('#hreport', () => reportIssue()); on('#hrefund', () => (needs2step() ? security() : requestRefund()));
@@ -1938,11 +2037,12 @@
       <button class="mi" id="um-theme">${ic('palette')}<span>Theme<small>${esc((THEMES.find((t) => t[0] === Theme.get().theme) || THEMES[0])[1])} · ${esc((ACCENTS.find((a) => a[0] === Theme.get().accent) || ACCENTS[0])[1].replace(' (Riyeser Link)', ''))}</small></span></button>
       <button class="mi" id="um-phone">${ic('desk')}<span>My phone</span></button>
       <button class="mi" id="um-sec">${ic('shield')}<span>Security<small>Two-step sign-in</small></span></button>
+      <button class="mi" id="um-pw">${ic('shield')}<span>Change password</span></button>
       <button class="mi" id="um-co">${ic('building')}<span>${esc(S.team.name)}<small>Company details</small></span></button>
       ${desk ? '' : `<button class="mi" id="tohome">${ic('back')}<span>Riyeser home</span></button>`}
       <button class="mi" id="out">${ic('out')}<span>Sign out</span></button>`, (d, close) => {
       const on = (id, fn) => { const b = d.querySelector(id); if (b) b.onclick = () => { close(); fn(); }; };
-      on('#um-prof', () => editMyDetails(me)); on('#um-theme', appearance); on('#um-phone', () => myPhonePage('chat')); on('#um-sec', security);
+      on('#um-prof', () => editMyDetails(me)); on('#um-theme', appearance); on('#um-phone', () => myPhonePage('chat')); on('#um-sec', security); on('#um-pw', changePassword);
       on('#um-co', () => companyInfo(false)); on('#tohome', () => { S.home = true; renderHome(); });
       on('#out', async () => { await api.signOut(); S.team = null; gate(); });
     }, 'usermenu');
@@ -3237,11 +3337,12 @@
       ${admin ? '<button class="btn" data-s="phones"><b>☎ Desk phones</b><small>Every desk phone in the business: add, replace, troubleshoot</small></button>' : ''}
       <button class="btn" data-s="look"><b>🎨 Appearance</b><small>Dark, light or match your computer, and your accent colour</small></button>
       <button class="btn" data-s="sec"><b>🔐 Security</b><small>Two-step sign-in</small></button>
+      <button class="btn" data-s="pw"><b>🔑 Change password</b><small>Your current password, then the new one</small></button>
       <button class="btn" data-s="co"><b>🏢 Company</b><small>Business details and Company ID</small></button></div>
       <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
       d.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { close(); const s = b.dataset.s; const back = S.home ? 'home' : 'chat';
-        if (s === 'myphone') myPhonePage(back); if (s === 'phones') phonesPage(back); if (s === 'sec') security(); if (s === 'co') companyInfo(false); if (s === 'look') appearance(); });
+        if (s === 'myphone') myPhonePage(back); if (s === 'phones') phonesPage(back); if (s === 'sec') security(); if (s === 'pw') changePassword(); if (s === 'co') companyInfo(false); if (s === 'look') appearance(); });
     });
   }
 
@@ -3486,12 +3587,16 @@
     try {
       const s = await api.session();
       if (!s) { const gone = S.signedOutNote; S.signedOutNote = false;
+        if (AUTH.error) { const why = AUTH.errorText; AUTH.error = ''; clearAuthLink();
+          return gate('in', `<div class="err">${/expired|invalid/i.test(why) || !why ? 'That link has expired or has already been used. Sign in, or press Forgot password? for a new link.' : esc(why)}</div>`); }
         return gate(params.has('signup') ? 'up' : 'in', gone ? '<div class="err">That sign-in has ended (the account may have been removed). Sign in again, or create a new account.</div>' : ''); }
       S.user = s.user; Theme.fromAccount(S.user);
       S.home = (!DEMO || params.has('help')) && !/Electron/.test(navigator.userAgent) && !params.has('chat');
       const lv = await api.aal().catch(() => ({ currentLevel: 'aal1', nextLevel: 'aal1' }));
       S.aal = lv.currentLevel;
       if (lv.nextLevel === 'aal2' && lv.currentLevel !== 'aal2') return codeScreen();
+      if (AUTH.recovery) return newPasswordScreen();   // the reset link: choose a new password first
+      if (AUTH.confirmed) { AUTH.confirmed = false; return confirmedScreen(); }
       S.teams = await api.teams(S.user.id);
       touchActivity();
       const jc = (params.get('join') || '').toUpperCase();
@@ -3520,6 +3625,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
   setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = (await api.pendingRequests(S.team.id).catch(() => S.requests)) || []; if (n.length !== S.requests.length) { S.requests = n; renderSide(); } } }, 60000);
   window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, reportIssue, requestRefund, phonesPage, myPhonePage, settingsMenu,
-    presence: Presence, theme: Theme, appearance, newChat };
+    presence: Presence, theme: Theme, appearance, newChat, changePassword };
+  api.onAuth((ev) => { if (ev === 'PASSWORD_RECOVERY') AUTH.recovery = true; });
   start();
 })();

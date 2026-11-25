@@ -91,3 +91,9 @@
   twice, wrong amount or currency, unknown subscriptions), a failed payment's grace, retry, cancel (works to the paid date),
   masked ids for HQ; only the service role records PayPal's side. The function itself: `supabase/functions/paypal` on `main`
   (`deno test supabase/functions/paypal`).
+- `password-test.js`: passwords and email links against a pretend Supabase that keeps the account's password: the reset link
+  asks for a new password (twice, at least 8; the code first when two-step sign-in is on), then the old one fails and the new one
+  works and other devices are signed out (F17); 🔑 Change password (current password checked, a code when two-step sign-in is on);
+  a confirm-your-email link shows "Email confirmed" then carries on, and an expired link says so (F1); Supabase's "email rate limit
+  exceeded" becomes a plain message with info@riyeser.com (F2); two-step set-up works with one click right after the page loads
+  and again after Later, removes unfinished set-ups, and a page signed in before it was turned on elsewhere catches up (S6).
