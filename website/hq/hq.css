@@ -440,3 +440,19 @@ main.wide { max-width: none; }
   .modal.printing .mcard { box-shadow: none !important; border: 0 !important; max-width: none !important; max-height: none !important; overflow: visible !important; padding: 0 !important; background: #fff !important; }
   .modal.printing .noprint { display: none !important; }
 }
+
+/* the left menu: group headings fold their pages away (they aren't pages) */
+.nv.ngrp .ncar { font-size: 11px; color: #a9bbe6; transition: transform .15s; } .nv.ngrp[aria-expanded="false"] .ncar { transform: rotate(-90deg); }
+.nv.ngrp[aria-expanded="true"] .tb { display: none; }
+.nv.ngrp.cur[aria-expanded="false"] { color: #fff; box-shadow: inset 3px 0 0 var(--blue); }
+.nkids { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; } .nkids[hidden] { display: none; }
+@media (max-width: 900px) { .nv.ngrp { display: none; } .nkids, .nkids[hidden] { display: contents !important; } }
+
+/* Licences: real figures, a tidy By program table, a list per program and status */
+.tile .d .est { color: var(--muted); opacity: .85; }
+.lictbl td, .lictbl th { vertical-align: middle; } .lictbl td { height: 46px; padding-top: 0; padding-bottom: 0; }
+.lictbl .n { width: 90px; } .numl { font-weight: 700; font-variant-numeric: tabular-nums; }
+.lictbl tr.click:hover td, .endtbl tr.click:hover td { background: #f7f9ff; }
+.endtbl td { vertical-align: middle; } .endtbl td:first-child { overflow-wrap: anywhere; } .endtbl .n { width: 64px; }
+.licgrid { align-items: start; } .licgrid .card { min-width: 0; }
+.llout { max-height: 55vh; overflow-y: auto; } .llout .tbl td { vertical-align: middle; }

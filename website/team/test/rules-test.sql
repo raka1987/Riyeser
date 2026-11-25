@@ -2640,6 +2640,26 @@ do $$ declare a uuid := current_setting('pay.a')::uuid; begin
   assert exists (select 1 from public.hq_audit where action = 'billing.doc_resent' and (details ->> 'contact_updated')::boolean
      and actor = 'b1b1b1b1-0000-4000-8000-000000000005'), 'the email change is in the history too';
 end $$;
+-- HQ Licences: real recurring money, installs per program, and the businesses on a program
+set role authenticated;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
+do $$ declare l json := public.hq_licences(); b json; begin
+  assert (l ->> 'monthly_recurring')::numeric >= 46 and (l ->> 'recurring_count')::int >= 1, 'monthly recurring: the paid bank invoice still running (' || (l ->> 'monthly_recurring') || ')';
+  assert (select count(*) from json_array_elements(l -> 'modules') x where x ->> 'installed' is not null) = 7, 'installs counted for each program';
+  b := public.hq_licence_businesses('plus', 'paid');
+  assert exists (select 1 from json_array_elements(b) x where x ->> 'id' = current_setting('pay.a') and x ->> 'status' = 'active' and x ->> 'until' is not null), 'Pay Co is on Accounting Plus, paid';
+  assert not exists (select 1 from json_array_elements(public.hq_licence_businesses('plus', 'trial')) x where x ->> 'id' = current_setting('pay.a')), 'and not on its trial';
+  begin perform public.hq_licence_businesses('plus', 'weird'); raise exception 'bad status';
+  exception when others then assert sqlerrm like 'Choose paid, trial or ended%', sqlerrm; end;
+  begin perform public.hq_licence_businesses('nope', 'paid'); raise exception 'bad program';
+  exception when others then assert sqlerrm like 'Choose a program%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000001');
+do $$ begin
+  begin perform public.hq_licence_businesses('plus', 'paid'); raise exception 'customer listed businesses';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+end $$;
+reset role;
 select 'payments ok' as billing;
 
 -- A's owner still has exactly the messages A wrote (B's attempt didn't land)

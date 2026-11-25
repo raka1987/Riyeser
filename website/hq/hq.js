@@ -133,6 +133,7 @@
       },
       downloadsDaily: (days) => rpc('hq_downloads', { days }),
       licences: () => rpc('hq_licences'), companyLicence: (ws) => rpc('hq_company_licence', { ws }),
+      licenceBusinesses: (mod, st) => rpc('hq_licence_businesses', { mod, st }),
       setModule: (ws, mod, status, trialEnd, paidTo) => rpc('hq_set_module', { ws, mod, new_status: status, trial_end: trialEnd || null, paid_to: paidTo || null }),
       grantStorage: (ws, gb, why) => rpc('hq_grant_storage', { ws, gb, why }),
       setPlan: (ws, users, cos, billing, eb) => rpc('hq_set_plan', { ws, users_extra: users, companies_extra: cos, billing_period: billing, is_early_bird: eb }),
@@ -456,7 +457,14 @@
         return { monthly_estimate: list.reduce((a, x) => a + demoMonthly(x.c.id), 0), paying_companies: list.filter((x) => demoMonthly(x.c.id) > 0).length,
           early_bird_used: Object.values(plans).filter((x) => x.early_bird).length + 37, early_bird_left: 100 - 37 - Object.values(plans).filter((x) => x.early_bird).length,
           modules: MODULES.map(([m]) => ({ module: m, active_paid: list.filter((x) => x.l.modules[m].status === 'active').length, on_trial: list.filter((x) => x.l.modules[m].status === 'trial').length,
-            ended: list.filter((x) => ['ended', 'cancelled', 'closed'].includes(x.l.modules[m].status)).length })), ending_soon: ending.sort((a, b) => a.days_left - b.days_left) }; },
+            ended: list.filter((x) => ['ended', 'cancelled', 'closed'].includes(x.l.modules[m].status)).length,
+            installed: list.filter((x) => pcsOf(x.c).some((d) => (d.programs || []).some((p) => p.id === ({ basic: 'accounting-basics', plus: 'accounting', as_built: 'services', calls: 'team' }[m] || m)))).length })),
+          ending_soon: ending.sort((a, b) => a.days_left - b.days_left), ...(() => { const td = iso(Date.now());
+            const rec = bOrders.filter((o) => (o.method === 'paypal' && ['active', 'payment_failed'].includes(o.status)) || (o.method === 'bank' && o.status === 'paid' && o.paid_through >= td));
+            return { recurring_count: rec.length, monthly_recurring: Math.round(rec.reduce((a, o) => { const x = o.method === 'paypal' ? (o.first_amount != null ? o.first_amount : o.amount) : o.total; return a + (o.billing === 'yearly' ? x / 12 : x); }, 0) * 100) / 100 }; })() }; },
+      async licenceBusinesses(mod, st) { need('licences.view'); const want = { paid: ['active'], trial: ['trial'], ended: ['ended', 'cancelled', 'closed'] }[st];
+        return cos.map((c) => ({ c, v: demoLicence(c.id).modules[mod] })).filter((x) => x.v && want.includes(x.v.status)).sort((a, b) => a.c.name.localeCompare(b.c.name))
+          .map(({ c, v }) => ({ id: c.id, name: c.name, company_code: c.company_code, country: c.country, status: v.status, until: v.paid_until || v.trial_ends, days_left: v.days_left })); },
       async companyLicence(ws) { return { licence: demoLicence(ws), monthly: demoMonthly(ws) }; },
       async setModule(ws, mod, status, te, pt) { need('licences.manage'); (mods[ws] = mods[ws] || {})[mod] = { status, trial_ends: te || null, paid_until: pt || null }; log('licence.module', { workspace_id: ws, module: mod, status }); },
       async grantStorage(ws, gb, why) { need('licences.manage'); if (!(gb >= 0 && gb <= 10000)) throw new Error('Choose 0 to 10000 GB of extra storage.');
@@ -847,11 +855,16 @@
     ['Billing & Licences', '💳', ['licences', 'approvals', 'refunds', 'payments']], ['Support', '🎧', ['support']], ['Team Inbox', '💬', ['inbox']],
     ['Retention', '🔁', ['inactive']], ['System Operations', '🛠️', ['health', 'emails', 'downloads']], ['Reports', '📊', ['reports']], ['Admin', '⚙️', ['team', 'history', 'settings']]];
   const SOON = { inbox: 'soon' };
+  // A group (Billing & Licences, System Operations, Admin) is a heading that folds its pages away (remembered); it isn't a
+  // page itself, so only the page you're on is highlighted.
+  const navClosed = () => { try { return JSON.parse(localStorage.getItem('hq.navClosed') || '[]'); } catch { return []; } };
   function navHtml() {
-    const ok = TABS(); const label = (k) => (ok.find((x) => x[0] === k) || [k, k])[1];
+    const ok = TABS(); const label = (k) => (ok.find((x) => x[0] === k) || [k, k])[1]; const shut = navClosed();
     return NAV.map(([name, icon, views]) => { const v = views.filter((k) => ok.some((x) => x[0] === k)); if (!v.length) return '';
-      const head = `<button class="nv" data-tab="${v[0]}" data-sec="${views.join(' ')}"><span class="ni" aria-hidden="true">${icon}</span><span class="nl">${name}</span>${v.length === 1 && SOON[v[0]] ? `<em class="soon">${SOON[v[0]]}</em>` : ''}<span class="tb" data-badge="${v.length === 1 ? v[0] : ''}"></span></button>`;
-      return v.length === 1 ? head : head + v.map((k) => `<button class="nv nsub" data-tab="${k}"><span class="nl">${label(k)}</span>${SOON[k] ? `<em class="soon">${SOON[k]}</em>` : ''}<span class="tb" data-badge="${k}"></span></button>`).join(''); }).join('');
+      if (v.length === 1) return `<button class="nv" data-tab="${v[0]}"><span class="ni" aria-hidden="true">${icon}</span><span class="nl">${v.length === 1 && views.length > 1 ? label(v[0]) : name}</span>${SOON[v[0]] ? `<em class="soon">${SOON[v[0]]}</em>` : ''}<span class="tb" data-badge="${v[0]}"></span></button>`;
+      const open = !shut.includes(name); const id = 'ng-' + name.toLowerCase().replace(/[^a-z]+/g, '-');
+      return `<button type="button" class="nv ngrp" data-grp="${esc(name)}" aria-expanded="${open}" aria-controls="${id}"><span class="ni" aria-hidden="true">${icon}</span><span class="nl">${name}</span><span class="tb" data-gbadge="${esc(name)}"></span><span class="ncar" aria-hidden="true">▾</span></button>
+        <div class="nkids" id="${id}" data-of="${esc(name)}"${open ? '' : ' hidden'}>${v.map((k) => `<button class="nv nsub" data-tab="${k}"><span class="nl">${label(k)}</span>${SOON[k] ? `<em class="soon">${SOON[k]}</em>` : ''}<span class="tb" data-badge="${k}"></span></button>`).join('')}</div>`; }).join('');
   }
   function shell() {
     if (!TABS().some((x) => x[0] === S.tab)) S.tab = TABS()[0][0];
@@ -863,6 +876,9 @@
         <div class="me"><span class="av">${esc(ini)}</span><span class="mn">${esc(S.me.name)} <small>${esc(roleName(S.me.role))}</small></span><button id="so" class="btn sm">Sign out</button></div></header>
       <main id="main"></main></div></div>`;
     $app.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { S.ticket = null; go('#/' + b.dataset.tab); });
+    $app.querySelectorAll('.ngrp').forEach((g) => g.onclick = () => { const open = g.getAttribute('aria-expanded') !== 'true'; g.setAttribute('aria-expanded', String(open));
+      $app.querySelector(`.nkids[data-of="${CSS.escape(g.dataset.grp)}"]`).hidden = !open;
+      const shut = navClosed().filter((x) => x !== g.dataset.grp); if (!open) shut.push(g.dataset.grp); try { localStorage.setItem('hq.navClosed', JSON.stringify(shut)); } catch { /* not remembered */ } });
     $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
     $app.querySelector('#gsearch').onsubmit = (e) => { e.preventDefault(); const q = String(new FormData(e.target).get('q') || '').trim();
       S.cl = { ...(S.cl || { f: {}, sort: 'created', desc: true, view: 'all' }), q, page: 1 }; e.target.reset(); go('#/companies'); };
@@ -877,7 +893,9 @@
   function route() {
     if (!document.getElementById('main')) return;
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
-    const mark = (k) => $app.querySelectorAll('.snav [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.sec ? b.dataset.sec.split(' ').includes(k) : b.dataset.tab === k));
+    const mark = (k) => { $app.querySelectorAll('.snav [data-tab]').forEach((b) => { b.classList.toggle('on', b.dataset.tab === k); if (b.dataset.tab === k) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+      // a folded group with the current page in it shows a quiet marker
+      $app.querySelectorAll('.ngrp').forEach((g) => g.classList.toggle('cur', !!$app.querySelector(`.nkids[data-of="${CSS.escape(g.dataset.grp)}"] [data-tab="${k}"]`))); };
     const cm = /^company\/([^/]+)(?:\/([a-z]+))?/.exec(h);
     if (cm && can('customers.view')) { closePanel(); mark('companies'); companyPage(cm[1], cm[2]).catch(showErr); return; }
     const t = h.split('/')[0];
@@ -892,7 +910,9 @@
   });
   // Counts on the tabs: new support tickets and things waiting for a second approval.
   async function badges() {
-    const set = (k, n) => { const el = $app.querySelector(`[data-badge="${k}"]`); if (el) el.textContent = n ? String(n) : ''; };
+    const set = (k, n) => { const el = $app.querySelector(`[data-badge="${k}"]`); if (el) el.textContent = n ? String(n) : '';
+      // a group heading adds up its pages' counts (shown while it's folded)
+      $app.querySelectorAll('[data-gbadge]').forEach((g) => { const t = [...$app.querySelectorAll(`.nkids[data-of="${CSS.escape(g.dataset.gbadge)}"] [data-badge]`)].reduce((a, x) => a + (Number(x.textContent) || 0), 0); g.textContent = t ? String(t) : ''; }); };
     if (can('support.view')) api.tickets('open', '').then((r) => set('support', (r.counts || {}).new + (r.counts || {}).waiting_us || 0)).catch(() => {});
     if (can('refunds.approve', 'offers.approve')) api.approvals().then((r) => set('approvals', (r.refunds || []).length + (r.offers || []).length)).catch(() => {});
   }
@@ -2291,15 +2311,46 @@
   // ------------------------------------------------------------------ licences
   async function licences() {
     main('<p class="muted">Loading…</p>');
-    const L = await api.licences();
-    main(`<h2>Licences</h2><p class="sub">Who pays for what. The money figure is an estimate at list prices until payments are connected.</p>
-      <div class="tiles">${tile('Monthly income (estimate)', money(L.monthly_estimate), `${money(L.monthly_estimate * 12)} a year`)}${tile('Paying companies', num(L.paying_companies), 'at least one paid program')}
-        ${tile('Early bird places left', num(L.early_bird_left), `of 100 · ${num(L.early_bird_used)} taken`)}${tile('Ending in 14 days', num((L.ending_soon || []).length), 'trials and paid periods')}</div>
-      <div class="grid g2"><div class="card scroll"><h3>By program</h3><table class="tbl"><tr><th>Program</th><th class="n">Paid</th><th class="n">On trial</th><th class="n">Ended</th></tr>
-        ${(L.modules || []).map((m) => `<tr><td>${esc(modName(m.module))}</td><td class="n">${num(m.active_paid)}</td><td class="n">${num(m.on_trial)}</td><td class="n">${num(m.ended)}</td></tr>`).join('')}</table></div>
-      <div class="card scroll"><h3>Ending soon <small>· follow up before they lapse</small></h3>${(L.ending_soon || []).length ? `<table class="tbl"><tr><th>Company</th><th>Program</th><th class="n">Days</th></tr>
-        ${L.ending_soon.map((x) => `<tr class="click" data-co="${x.id}"><td><b>${esc(x.name)}</b><small class="code">${esc(x.company_code || '')}</small></td><td>${esc(modName(x.module))} <small>${x.status === 'trial' ? 'free trial' : 'paid period'}</small></td><td class="n"><span class="pill warn">${x.days_left}</span></td></tr>`).join('')}</table>`
-        : '<p class="muted small">Nothing ending in the next 14 days.</p>'}</div></div>`).querySelectorAll('[data-co]').forEach((r) => r.onclick = () => openCompany(r.dataset.co));
+    const [L, pr] = await Promise.all([api.licences(), api.paymentsReceived ? api.paymentsReceived(30).catch(() => null) : null]);
+    const real = L.monthly_recurring != null;
+    // As Built is hidden on the website: only show its row once someone has it paid or installed
+    const rows = (L.modules || []).filter((m) => m.module !== 'as_built' || Number(m.active_paid) > 0 || Number(m.installed) > 0);
+    // Ending soon: one row per business (its programs together), soonest first; As Built only when its row shows
+    const showAb = rows.some((x) => x.module === 'as_built'); const ends = [];
+    (L.ending_soon || []).filter((x) => x.module !== 'as_built' || showAb).forEach((x) => { const g = ends.find((y) => y.id === x.id && y.status === x.status && y.days_left === x.days_left);
+      if (g) g.mods.push(x.module); else ends.push({ ...x, mods: [x.module] }); });
+    const cell = (m, k, st) => `<td class="n">${Number(m[k]) ? `<button class="lnk numl" data-lmod="${m.module}" data-lst="${st}" title="Show these businesses">${num(m[k])}</button>` : '<span class="muted">0</span>'}</td>`;
+    const m = main(`<h2>Licences</h2><p class="sub">Who pays for what. Money figures come from real payments; the list-price estimate is shown for comparison.</p>
+      <div class="tiles">${tile('Received last 30 days', pr ? money(pr.total) : '—', pr ? `${num(pr.count)} payment${Number(pr.count) === 1 ? '' : 's'} · <a href="#/payments">Invoices &amp; payments</a>` : 'payments not connected yet')}
+        ${tile('Monthly recurring', real ? money(L.monthly_recurring) : '—', `${real ? `${num(L.recurring_count)} subscription${Number(L.recurring_count) === 1 ? '' : 's'} and paid invoices · ` : ''}<span class="est">list-price estimate ${money(L.monthly_estimate)}</span>`)}
+        ${tile('Paying companies', num(L.paying_companies), 'at least one paid program')}
+        ${tile('Early bird places left', num(L.early_bird_left), `of 100 · ${num(L.early_bird_used)} taken`)}</div>
+      <div class="grid g2 licgrid"><div class="card scroll"><h3>By program <small>· click a row or a number to see the businesses</small></h3><table class="tbl lictbl" id="licTbl"><thead><tr><th>Program</th><th class="n">Paid</th><th class="n">On trial</th><th class="n">Ended</th></tr></thead><tbody>
+        ${rows.map((x) => `<tr class="click" data-lrow="${x.module}"><td><b>${esc(modName(x.module))}</b></td>${cell(x, 'active_paid', 'paid')}${cell(x, 'on_trial', 'trial')}${cell(x, 'ended', 'ended')}</tr>`).join('')}</tbody></table></div>
+      <div class="card" id="endSoon"><h3>Ending soon <small>· next 14 days · follow up before they lapse</small></h3>${ends.length ? `<table class="tbl endtbl"><thead><tr><th>Company</th><th>Programs</th><th class="n">Days</th></tr></thead><tbody>
+        ${ends.map((x, i) => `<tr class="click${i >= 12 ? ' more' : ''}" data-co="${x.id}"${i >= 12 ? ' hidden' : ''}><td><b>${esc(x.name)}</b><small class="code">${esc(x.company_code || '')}</small></td><td>${x.mods.length >= rows.length ? 'Every program' : esc(x.mods.map(modName).join(', '))} <small>${x.status === 'trial' ? 'free trial' : 'paid period'}</small></td><td class="n"><span class="pill ${x.days_left <= 3 ? 'bad' : 'warn'}">${x.days_left}</span></td></tr>`).join('')}</tbody></table>
+        ${ends.length > 12 ? `<button type="button" class="btn sm" id="endAll">Show all ${num(ends.length)}</button>` : ''}`
+        : '<p class="muted small">Nothing ending in the next 14 days.</p>'}</div></div>`);
+    const ea = m.querySelector('#endAll'); if (ea) ea.onclick = () => { m.querySelectorAll('.endtbl tr.more').forEach((r) => { r.hidden = false; }); ea.remove(); };
+    m.querySelectorAll('[data-co]').forEach((r) => r.onclick = () => openCompany(r.dataset.co));
+    m.querySelectorAll('[data-lst]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); licenceList(b.dataset.lmod, b.dataset.lst); });
+    m.querySelectorAll('[data-lrow]').forEach((r) => r.onclick = () => { const x = rows.find((y) => y.module === r.dataset.lrow);
+      licenceList(x.module, Number(x.active_paid) ? 'paid' : Number(x.on_trial) ? 'trial' : 'ended'); });
+  }
+  // The businesses on one program, by status (Paid / On trial / Ended); a row opens the customer's Programs tab.
+  function licenceList(mod, st) {
+    const ST = [['paid', 'Paid'], ['trial', 'On trial'], ['ended', 'Ended']];
+    dlg(`<h3>${esc(modName(mod))}</h3><div class="chips" id="llst">${ST.map(([k, l]) => `<button type="button" class="chip${k === st ? ' on' : ''}" data-st="${k}">${l}</button>`).join('')}</div>
+      <div id="llout" class="scroll llout"><p class="muted">Loading…</p></div><div class="mfoot"><button type="button" class="btn" data-close>Close</button></div>`, (d, close) => {
+      const load = async (s2) => { d.querySelectorAll('#llst .chip').forEach((c) => c.classList.toggle('on', c.dataset.st === s2)); const out = d.querySelector('#llout');
+        try { const list = await api.licenceBusinesses(mod, s2);
+          out.innerHTML = list.length ? `<table class="tbl" id="llTbl"><thead><tr><th>Business</th><th>Until</th><th class="n">Days left</th></tr></thead><tbody>${list.map((x) => `<tr class="click" data-llco="${esc(x.id)}"><td><b>${esc(x.name)}</b><small class="code">${esc(x.company_code || '')}</small></td>
+            <td>${x.until ? day(x.until) : '<span class="muted">—</span>'}${x.status === 'cancelled' ? '<small>cancelled</small>' : ''}</td><td class="n">${x.days_left != null ? num(x.days_left) : '<span class="muted">—</span>'}</td></tr>`).join('')}</tbody></table>
+            <p class="muted small">${num(list.length)} business${list.length === 1 ? '' : 'es'}.</p>` : '<p class="muted small">None.</p>';
+          out.querySelectorAll('[data-llco]').forEach((r) => r.onclick = () => { close(); openCompany(r.dataset.llco, 'programs'); });
+        } catch (err) { out.innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+      d.querySelectorAll('#llst [data-st]').forEach((c) => c.onclick = () => load(c.dataset.st)); load(st);
+    });
   }
 
   // ------------------------------------------------------------------ downloads

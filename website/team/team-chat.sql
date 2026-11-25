@@ -1297,8 +1297,21 @@ begin
     'modules', (select json_agg(json_build_object('module', m,
         'active_paid', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'active'),
         'on_trial', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'trial'),
-        'ended', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') in ('ended', 'cancelled', 'closed')))) 
+        'ended', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') in ('ended', 'cancelled', 'closed')),
+        -- businesses with it on at least one PC (Riyeser Central reports the programs on each PC)
+        'installed', (select count(distinct d.workspace_id) from devices d where coalesce(d.programs, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id',
+           case m when 'basic' then 'accounting-basics' when 'plus' then 'accounting' when 'as_built' then 'services' when 'calls' then 'team' else m end)))))
       from unnest(array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) m),
+    -- real money: what active PayPal subscriptions charge (at their next charge) and paid bank invoices still running,
+    -- as a monthly figure (a year's price / 12)
+    'monthly_recurring', (select coalesce(round(sum(case when x.billing = 'yearly' then x.amt / 12 else x.amt end), 2), 0) from (
+        select o.billing, case when o.method = 'paypal' and o.early_bird
+            and (select count(*) from billing_payments p where p.order_id = o.id and p.status = 'completed') < o.early_cycles then o.first_amount
+          when o.method = 'paypal' then o.amount else coalesce(o.first_amount, o.amount) end as amt
+        from billing_orders o where (o.method = 'paypal' and o.status in ('active', 'payment_failed'))
+          or (o.method = 'bank' and o.status = 'paid' and o.paid_through >= current_date)) x),
+    'recurring_count', (select count(*) from billing_orders o where (o.method = 'paypal' and o.status in ('active', 'payment_failed'))
+          or (o.method = 'bank' and o.status = 'paid' and o.paid_through >= current_date)),
     'ending_soon', (select coalesce(json_agg(x order by x.days_left), '[]') from (
         select w.id, w.name, w.company_code, m as module, (public.module_state(w.id, m) ->> 'status') as status,
                (public.module_state(w.id, m) ->> 'days_left')::int as days_left
@@ -1307,6 +1320,22 @@ begin
   ) into r;
   return r;
 end $$;
+
+-- HQ Licences: the businesses on one program, by status (paid, trial, ended), for the By program table. Read only.
+create or replace function public.hq_licence_businesses(mod text, st text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['licences.view']);
+  if mod is null or mod <> all (array['basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls']) then raise exception 'Choose a program.'; end if;
+  if st is null or st not in ('paid', 'trial', 'ended') then raise exception 'Choose paid, trial or ended.'; end if;
+  return (select coalesce(json_agg(json_build_object('id', x.id, 'name', x.name, 'company_code', x.company_code, 'country', x.country,
+      'status', x.s ->> 'status', 'until', coalesce(x.s ->> 'paid_until', x.s ->> 'trial_ends'), 'days_left', (x.s ->> 'days_left')::int) order by x.name), '[]')
+    from (select w.id, w.name, w.company_code, w.country, public.module_state(w.id, mod) s from workspaces w) x
+    where case st when 'paid' then x.s ->> 'status' = 'active' when 'trial' then x.s ->> 'status' = 'trial'
+      else x.s ->> 'status' in ('ended', 'cancelled', 'closed') end);
+end $$;
+revoke all on function public.hq_licence_businesses(text, text) from public, anon;
+grant execute on function public.hq_licence_businesses(text, text) to authenticated;
 
 -- HQ company detail now includes the licence and the monthly estimate.
 create or replace function public.hq_company_licence(ws uuid) returns json

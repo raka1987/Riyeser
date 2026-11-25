@@ -86,6 +86,24 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   await pg.waitForTimeout(500);
   const asSupport = await text('#main');
   check(asSupport.includes('Invoices & payments') && !(await pg.$('[data-markpaid]')) && !!(await pg.$('#entf [name=name][readonly]')), 'Support: sees it, no Mark paid, entity read-only');
+  // the left menu: a group heading folds its pages away and is never itself highlighted
+  await pg.selectOption('#demoAs', (await pg.$$eval('#demoAs option', (o) => o[0].value))); await pg.waitForTimeout(400);
+  await pg.goto(`${BASE}/hq/?demo#/licences`); await pg.waitForSelector('#licTbl');
+  check(!(await pg.$('.ngrp[data-tab]')) && (await pg.$$eval('.snav .on', (l) => l.map((x) => x.textContent.trim()))).join() === 'Licences', 'only the page is highlighted, not its group');
+  await pg.click('.ngrp[data-grp="Billing & Licences"]'); check(await pg.isHidden('[data-tab=licences]') && (await pg.getAttribute('.ngrp[data-grp="Billing & Licences"]', 'aria-expanded')) === 'false' && (await pg.evaluate(() => location.hash)) === '#/licences', 'the group heading folds its pages (it isn\'t a page)');
+  await pg.reload(); await pg.waitForSelector('#licTbl'); check(await pg.isHidden('[data-tab=licences]'), 'and stays folded');
+  await pg.click('.ngrp[data-grp="Billing & Licences"]'); check(await pg.isVisible('[data-tab=licences]'), 'unfolds again');
+  // Licences: real figures, As Built hidden, a list per program and status, fits the screen
+  const lic = await text('#main');
+  check(!lic.includes('until payments are connected') && /Received last 30 days\s*US\$\d/.test(lic) && /Monthly recurring\s*US\$\d/.test(lic) && lic.includes('list-price estimate'), 'Licences: received in 30 days and monthly recurring, the estimate as a quiet extra');
+  check(!(await pg.$('#licTbl [data-lrow=as_built]')), 'As Built hidden (nobody has it paid or installed)');
+  check(await pg.$$eval('#licTbl tbody tr', (r) => r.every((x) => [...x.cells].slice(1).every((c) => getComputedStyle(c).textAlign === 'right')) && new Set(r.map((x) => Math.round(x.getBoundingClientRect().height))).size === 1), 'numbers right-aligned, rows the same height');
+  await pg.click('#licTbl [data-lmod=pos][data-lst=paid]'); await pg.waitForSelector('#llTbl');
+  check((await text('.mcard h3')) === 'POS' && (await pg.$$('#llTbl tbody tr')).length === 10 && (await text('#llst .chip.on')) === 'Paid', 'a number opens the businesses on that program and status');
+  await pg.click('#llst [data-st=trial]'); await pg.waitForTimeout(300); check((await pg.$$('#llTbl tbody tr')).length === 112, 'switch to On trial');
+  await pg.click('#llTbl tbody tr'); await pg.waitForSelector('#licCard'); check(/#\/company\/.+\/programs$/.test(await pg.evaluate(() => location.hash)), 'a business opens its Programs tab');
+  await pg.goto(`${BASE}/hq/?demo#/licences`); await pg.waitForSelector('#licTbl');
+  check(await pg.$eval('#endSoon', (x) => x.scrollWidth <= x.clientWidth + 1) && (await pg.evaluate(() => document.documentElement.scrollWidth - innerWidth)) <= 0, 'Ending soon fits, no sideways scroll');
   // phone
   const ph = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 }); ph.on('pageerror', (e) => errs.push(e.message)); ph.on('dialog', (d) => { pops.push(d.message()); d.dismiss(); });
   await ph.goto(`${BASE}/hq/?demo#/payments`); await ph.waitForSelector('#ppcard');
