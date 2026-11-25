@@ -13,7 +13,7 @@ const organizer = require('./core/organizer');
 const { upcomingMeetings, companiesInMeeting } = require('./core/calendar');
 const { fetchAndSort } = require('./core/email');
 const { extractActionItems } = require('./core/actions');
-const { createAI } = require('./core/ai');
+const { createAI, MODELS: AI_MODELS, DEFAULT_MODEL: AI_DEFAULT } = require('./core/ai');
 const { analyseFolder } = require('./core/cleanup');
 const safety = require('./core/safety');
 const { planEverything, removeEmptiedFolders } = require('./core/everything');
@@ -68,7 +68,7 @@ function defaults() {
     calendars: [],
     reminderMinutes: 10,
     email: { host: '', port: 993, secure: true, user: '', mailbox: 'INBOX', saveAttachments: true },
-    aiModel: 'claude-opus-5-5',
+    aiModel: AI_DEFAULT,   // M26: the cheapest model; Settings -> AI lets people choose
     onboarded: false,
   };
 }
@@ -98,7 +98,12 @@ function fixFolderLocations() {
   });
 }
 
-const getSettings = () => ({ ...defaults(), ...store.get('settings', {}) });
+const getSettings = () => {
+  const s = { ...defaults(), ...store.get('settings', {}) };
+  // M26: earlier versions saved the most expensive model as the default without anyone choosing it
+  if (!s.aiModelChosen) s.aiModel = AI_DEFAULT;
+  return s;
+};
 function setSettings(s) {
   const clean = { ...s };
   delete clean.emailPassword; delete clean.aiKey; // secrets are stored separately, encrypted
@@ -329,12 +334,26 @@ function showMain(page) {
   if (page) mainWin.webContents.send('navigate', page);
 }
 
+// M8: the first start on a new PC can take several seconds (Windows checks every new file). A small "Getting things
+// ready…" window shows straight away, and closes when the main window is ready.
+let splashWin = null;
+function showSplash() {
+  try {
+    splashWin = new BrowserWindow({ width: 420, height: 220, frame: false, resizable: false, show: true, center: true, skipTaskbar: false,
+      title: 'Riyeser Desk Assistant', icon: iconPath(), webPreferences: { contextIsolation: true, nodeIntegration: false } });
+    splashWin.removeMenu();
+    splashWin.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+  } catch { splashWin = null; }
+}
+function closeSplash() { if (splashWin && !splashWin.isDestroyed()) splashWin.close(); splashWin = null; }
+
 function createMain() {
   mainWin = new BrowserWindow({
-    width: 1200, height: 800, minWidth: 900, minHeight: 600, title: 'Riyeser Desk Assistant', icon: iconPath(),
+    width: 1200, height: 800, minWidth: 900, minHeight: 600, title: 'Riyeser Desk Assistant', icon: iconPath(), show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   mainWin.removeMenu();
+  mainWin.once('ready-to-show', () => { mainWin.show(); closeSplash(); });
   mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWin.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); mainWin.hide(); } });
 }
@@ -469,7 +488,7 @@ function handle(name, fn) {
 }
 
 function registerIpc() {
-  handle('settings:get', () => ({ ...getSettings(), hasEmailPassword: !!getSecret('emailPassword'), hasAiKey: !!getSecret('aiKey'), hotkey: HOTKEY }));
+  handle('settings:get', () => ({ ...getSettings(), hasEmailPassword: !!getSecret('emailPassword'), hasAiKey: !!getSecret('aiKey'), hotkey: HOTKEY, aiModels: AI_MODELS }));
   handle('settings:set', (s) => {
     if (typeof s.emailPassword === 'string' && s.emailPassword) setSecret('emailPassword', s.emailPassword);
     if (typeof s.aiKey === 'string') { if (s.aiKey === '__clear__') setSecret('aiKey', ''); else if (s.aiKey) setSecret('aiKey', s.aiKey); }
@@ -1018,6 +1037,7 @@ app.on('second-instance', (_e, argv, _cwd, data) => {
 
 app.whenReady().then(async () => {
   if (uninstalling) { await runUninstall(APP_INFO); app.quit(); return; }
+  if (!pdfArg(process.argv) && !process.argv.includes('--hidden')) showSplash();   // M8: feedback before the set-up below
   store = new Store(path.join(app.getPath('userData'), 'data'));
   index = new Index(store);
   fixFolderLocations();

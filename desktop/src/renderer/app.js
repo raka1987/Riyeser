@@ -418,7 +418,7 @@ const pages = {
       <p class="sub">Checks <span class="path">${esc(short(folder))}</span> <button class="link" data-act="cleansetfolder">change</button> for things you probably don't need. Nothing is deleted without your OK, and anything you remove goes to the <b>Recycle Bin</b>, so you can get it back.</p>
       <div class="row" style="margin-bottom:16px"><button class="primary" data-act="cleanscan">${cleanup ? 'Check again' : 'Check my Downloads'}</button>
         <span class="small muted">Treat as unused after</span><select id="stale">${[30, 60, 90, 180, 365].map((d) => `<option value="${d}" ${d === (settings.staleDays || 90) ? 'selected' : ''}>${d} days</option>`).join('')}</select>
-        <span class="spacer"></span>${cleanup ? `<button class="primary" data-act="cleantrash" ${cleanSel.size ? '' : 'disabled'}>Move ${cleanSel.size} to Recycle Bin (${fmtSize(selSize)})</button>` : ''}</div>
+        <span class="spacer"></span>${cleanup ? `<button class="primary" data-act="cleantrash" ${cleanSel.size ? '' : 'disabled hidden'}>Move ${cleanSel.size} to Recycle Bin (${fmtSize(selSize)})</button>` : ''}</div>
       ${!cleanup ? '<div class="card empty">Press “Check my Downloads” to start.</div>' : `
       <div class="card"><div class="row"><h2 style="margin:0">Safe to delete (${groups.delete.length} · ${total(groups.delete)})</h2><span class="spacer"></span><button class="link" data-act="cleanselall" data-v="delete">Select all</button></div>
         <p class="muted small">Old installers, zips you've already unzipped, unfinished downloads and exact copies of files already in your Organised folder.</p>${rows(groups.delete, true)}</div>
@@ -769,7 +769,7 @@ Object.assign(pages, {
       ${!settings.email.host ? '<div class="card empty">Connect a mailbox in <a href="#settings">Settings → Email</a>.</div>' : ''}
       ${emails.length ? `<div class="tabs">${cats.map((c) => `<button data-act="efilter" data-c="${esc(c)}" class="${c === emailFilter ? 'active' : ''}">${esc(c)} (${count(c)})</button>`).join('')}</div>
       <div class="card"><ul class="list">${shown.map((e) => `<li><div class="grow">
-        <div class="row">${e.unread ? '<b>●</b>' : ''}<b class="ellipsis">${esc(e.subject)}</b>${e.urgent ? '<span class="pill bad">urgent</span>' : ''}${e.needsReply ? '<span class="pill warn">reply</span>' : ''}${e.company ? `<span class="pill">${esc(e.company)}</span>` : ''}<span class="spacer"></span><span class="small muted">${fmtDay(e.date)}</span></div>
+        <div class="row">${e.unread ? '<b>●</b>' : ''}<b class="ellipsis">${esc(e.subject)}</b>${e.warning ? `<span class="pill bad" title="${esc(e.warning)}">⚠ check the sender</span>` : ''}${e.urgent ? '<span class="pill bad">urgent</span>' : ''}${e.needsReply ? '<span class="pill warn">reply</span>' : ''}${e.company ? `<span class="pill">${esc(e.company)}</span>` : ''}<span class="spacer"></span><span class="small muted">${fmtDay(e.date)}</span></div>
         <div class="small muted">${esc(e.from)} · ${esc(e.category)}${e.attachments.length ? ` · 📎 ${e.attachments.map((a) => esc(a.filename)).join(', ')}` : ''}</div>
         <div class="small muted ellipsis">${esc(e.preview)}</div></div></li>`).join('') || '<div class="empty">Nothing here.</div>'}</ul></div>` : ''}`;
   },
@@ -851,6 +851,7 @@ Object.assign(pages, {
         <div class="row"><button data-act="go" data-page="pdf">Open the PDF editor</button>${platform === 'win32' ? '<button data-act="pdfdefault">Set as my PDF app</button>' : ''}<button data-act="pdfbackups">Open PDF backups folder</button></div></div>
       <div class="card" id="s-ai"><h2>Smarter sorting with AI (optional)</h2><p class="muted small">Add an Anthropic API key and files I'm unsure about are sent to Claude to identify (first ~4,000 characters of text only). Leave blank to keep everything 100% offline.</p>
         <label class="row small" style="margin-bottom:8px"><input type="checkbox" id="aiall" ${s.aiCheckAll ? 'checked' : ''} ${s.hasAiKey ? '' : 'disabled'}> Double-check <b>every</b> document with AI, not just the ones I'm unsure about (slower; uses your API credit)</label>
+        <label class="row small" style="margin-bottom:8px">Model <select id="aimodel">${(s.aiModels || []).map((m) => `<option value="${esc(m.id)}" ${m.id === s.aiModel ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></label>
         <form id="aiform" class="row"><input id="aikey" type="password" style="flex:1" placeholder="${s.hasAiKey ? 'Key saved (type to replace)' : 'sk-ant-…'}"><button>Save</button>${s.hasAiKey ? '<button type="button" data-act="clearai">Remove key</button>' : ''}</form></div>
       <div class="card" id="s-appearance"><h2>Appearance</h2>
         <div class="row">${['system', 'light', 'dark'].map((t) => `<label class="themeopt ${(s.theme || 'system') === t ? 'on' : ''}"><input type="radio" name="theme" value="${t}" ${(s.theme || 'system') === t ? 'checked' : ''}><span class="swatch ${t}"></span>${t === 'system' ? 'Same as Windows' : t === 'light' ? 'Light' : 'Dark'}</label>`).join('')}</div>
@@ -897,6 +898,7 @@ Object.assign(pages, {
       await saveSettings({ email: { ...s.email, host: $('#ehost').value.trim(), port: +$('#eport').value || 993, user: $('#euser').value.trim(), saveAttachments: $('#eatt').checked, autoCheck: $('#eauto').checked }, emailPassword: $('#epass').value });
       toast('Email settings saved'); render();
     });
+    if ($('#aimodel')) $('#aimodel').addEventListener('change', async (e) => { await saveSettings({ aiModel: e.target.value, aiModelChosen: true }); toast('AI model saved'); });
     $('#aiform').addEventListener('submit', async (e) => {
       e.preventDefault();
       const k = $('#aikey').value.trim();
@@ -1165,7 +1167,7 @@ document.addEventListener('change', (e) => {
     e.target.checked ? cleanSel.add(e.target.dataset.csel) : cleanSel.delete(e.target.dataset.csel);
     const btn = page.querySelector('[data-act="cleantrash"]');
     const size = cleanup.items.filter((i) => cleanSel.has(i.path)).reduce((n, i) => n + i.size, 0);
-    if (btn) { btn.disabled = !cleanSel.size; btn.textContent = `Move ${cleanSel.size} to Recycle Bin (${fmtSize(size)})`; }
+    if (btn) { btn.disabled = !cleanSel.size; btn.hidden = !cleanSel.size; btn.textContent = `Move ${cleanSel.size} to Recycle Bin (${fmtSize(size)})`; }
   }
   if (e.target.dataset.settype !== undefined && e.target.value) safe(async () => {
     const it = await bridge.call('review:setType', e.target.dataset.settype, e.target.value);

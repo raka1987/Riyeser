@@ -275,3 +275,4 @@ nav { overflow-y: auto; }
 .flabel { font-size: 12px; font-weight: 600; color: var(--muted); width: 42px; }
 .fchip { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--card, var(--bg)); cursor: pointer; }
 .fchip.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+.ready-note { margin: 18vh auto 0; max-width: 420px; text-align: center; font-size: 16px; }

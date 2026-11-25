@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
+  <title>Riyeser Desk Assistant</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+      font: 15px "Segoe UI", system-ui, sans-serif; background: #f6f7fb; color: #1f2430; -webkit-app-region: drag; }
+    @media (prefers-color-scheme: dark) { body { background: #1b1e26; color: #e8eaf0; } }
+    img { width: 56px; height: 56px; }
+    .bar { width: 160px; height: 4px; border-radius: 2px; background: rgba(127,127,127,.25); overflow: hidden; }
+    .bar i { display: block; width: 40%; height: 100%; background: #6a4be0; animation: go 1.2s ease-in-out infinite; }
+    @keyframes go { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+    small { opacity: .7; }
+  </style>
+</head>
+<body>
+  <img src="icon.png" alt="">
+  <b>Getting things ready…</b>
+  <div class="bar"><i></i></div>
+  <small>The first start on a new PC takes a few seconds.</small>
+</body>
+</html>

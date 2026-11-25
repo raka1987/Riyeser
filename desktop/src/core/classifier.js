@@ -130,13 +130,16 @@ function detectCompany(fileName, text, companies = [], ownNames = []) {
   const name = norm(fileName);
   const body = norm(text).slice(0, 10000);
 
-  // 1. Companies the user has told us about win - they are the most reliable.
+  // 1. Companies the user has told us about win - they are the most reliable. An email address counts too, written
+  // without the spaces (M25: mere@coastalcafe.com.fj is the known customer "Coastal Cafe").
   let best = null;
+  const mailDomains = [...String(text || '').slice(0, 10000).matchAll(EMAIL_DOMAIN_RE)].map((m) => m[1].toLowerCase().replace(/-/g, ''));
   for (const c of companies) {
     if (isOwnCompany(c.name, ownNames)) continue;
     const terms = [c.name, ...(c.aliases || [])].map(norm).filter(Boolean);
     let score = 0;
     for (const t of terms) score += countMatches(name, t) * 5 + Math.min(countMatches(body, t), 5);
+    for (const t of terms) { const compact = t.replace(/[^a-z0-9]/g, ''); if (compact.length >= 4 && mailDomains.includes(compact)) score += 3; }
     if (score > 0 && (!best || score > best.score)) best = { company: c.name, companyType: c.type || 'Companies', score, known: true };
   }
   if (best) return best;
