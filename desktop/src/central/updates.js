@@ -43,9 +43,11 @@ function latestFromRelease(release, versionsJson = null) {
       const m = String(release.body || '').match(new RegExp(`^\\s*[-*]\\s*(?:${names})\\s+v?(\\d+(?:\\.\\d+){1,3})`, 'mi'));
       version = m ? m[1] : null;
     }
-    if (asset && version && ALLOWED_DOWNLOAD.test(asset.browser_download_url)) out[p.id] = { version, url: asset.browser_download_url, size: asset.size };
+    // digest: the SHA-256 GitHub publishes for the file ("sha256:…"), checked after downloading (S58)
+    if (asset && version && ALLOWED_DOWNLOAD.test(asset.browser_download_url)) out[p.id] = { version, url: asset.browser_download_url, size: asset.size, name: asset.name, digest: asset.digest || null };
   }
-  return { tag: release.tag_name, name: release.name, published: release.published_at, products: out };
+  const sig = (release.assets || []).find((a) => a.name === 'installers.sig.json' && ALLOWED_DOWNLOAD.test(a.browser_download_url));
+  return { tag: release.tag_name, name: release.name, published: release.published_at, products: out, manifestUrl: sig ? sig.browser_download_url : null };
 }
 
 /** Installed versions from `reg query HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall /s` output. */
@@ -74,7 +76,8 @@ function installedFromRegistry(text) {
 /** Which installed programs have a newer version. ownVersion: this Central's version. */
 function availableUpdates(installed, latest) {
   return PRODUCTS.filter((p) => installed[p.id] && latest.products[p.id] && newer(latest.products[p.id].version, installed[p.id]))
-    .map((p) => ({ id: p.id, name: p.display, from: installed[p.id], to: latest.products[p.id].version, url: latest.products[p.id].url, size: latest.products[p.id].size, self: !!p.self, args: p.args }));
+    .map((p) => ({ id: p.id, name: p.display, from: installed[p.id], to: latest.products[p.id].version, url: latest.products[p.id].url, size: latest.products[p.id].size, self: !!p.self, args: p.args,
+      file: latest.products[p.id].name || p.asset, digest: latest.products[p.id].digest || null }));
 }
 
 module.exports = { RELEASE_API, PRODUCTS, newer, latestFromRelease, installedFromRegistry, availableUpdates, ALLOWED_DOWNLOAD };

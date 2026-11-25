@@ -4,6 +4,7 @@
 const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, session, clipboard } = require('electron');
 const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
+const installerCheck = require('./central/installer-check');
 const licence = require('./core/licence');
 const path = require('path');
 const fs = require('fs');
@@ -149,6 +150,9 @@ async function checkUpdates(force) {
   const vj = (release.assets || []).find((a) => a.name === 'versions.json');
   if (vj) { try { versionsJson = await (await net.fetch(vj.browser_download_url, { headers: { 'User-Agent': 'Riyeser-Central' } })).json(); } catch { /* use the release notes */ } }
   const latest = updates.latestFromRelease(release, versionsJson);
+  // S58: the release's signed list of installer hashes (checked before any installer runs)
+  latest.manifest = null;
+  if (latest.manifestUrl) { try { latest.manifest = await (await net.fetch(latest.manifestUrl, { headers: { 'User-Agent': 'Riyeser-Central' } })).json(); } catch { /* checked (and refused if needed) at install */ } }
   store.set('updateCheck', { at: Date.now(), result: { latest } });
   return { latest, installed: await installedVersions() };
 }
@@ -167,6 +171,12 @@ async function download(url, file, onProgress) {
   for (;;) { const { done, value } = await reader.read(); if (done) break; got += value.length; out.write(Buffer.from(value)); onProgress(total ? got / total : 0); }
   await new Promise((r) => out.end(r));
   if (total && fs.statSync(file).size !== total) throw new Error('The download was incomplete. Please try again.');
+}
+/** S58: refuse to run an installer that isn't the one Riyeser published (installer-check.js has the rule). */
+async function verifyDownload(file, name, digest, latest) {
+  const r = await installerCheck.checkInstaller({ file, name, manifest: latest && latest.manifest, digest });
+  if (!r.ok) { try { fs.rmSync(file, { force: true }); } catch { /* temp file */ } throw new Error(r.error); }
+  return r;
 }
 /** Run a downloaded installer quietly and wait for it to finish. */
 function runInstaller(file, args, name) {
@@ -191,6 +201,7 @@ async function installProgram(id) {
   const file = path.join(dir, path.basename(new URL(item.url).pathname));
   send('install-progress', { id, stage: 'downloading', pct: 0 });
   await download(item.url, file, (pct) => send('install-progress', { id, stage: 'downloading', pct }));
+  await verifyDownload(file, item.name || path.basename(file), item.digest, r.latest);
   send('install-progress', { id, stage: 'installing', pct: 1 });
   await runInstaller(file, product.args, product.display);
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp folder */ }
@@ -200,6 +211,7 @@ async function installProgram(id) {
 
 async function installUpdates(ids) {
   const st = await updateStatus(false);
+  const latest = (await checkUpdates(false)).latest;   // the cached release, with its signed list
   const todo = st.updates.filter((u) => !ids || ids.includes(u.id)).sort((a, b) => a.self - b.self); // Central last
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyser-update-'));
   const done = [];
@@ -207,6 +219,7 @@ async function installUpdates(ids) {
     const file = path.join(dir, path.basename(new URL(u.url).pathname));
     send('update-progress', { id: u.id, name: u.name, stage: 'downloading', pct: 0 });
     await download(u.url, file, (pct) => send('update-progress', { id: u.id, name: u.name, stage: 'downloading', pct }));
+    await verifyDownload(file, u.file || path.basename(file), u.digest, latest);
     if (process.platform !== 'win32') throw new Error('Updates install on Windows only.');
     if (u.self) {
       // Central updates itself: close, install quietly, then open again.

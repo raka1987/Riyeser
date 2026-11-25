@@ -19,6 +19,16 @@ run('node', ['scripts/vendor.js']);
     fs.writeFileSync(keyFile, `${key}\n`); console.log('Licence public key built in:', key);
   } else { fs.rmSync(keyFile, { force: true }); console.log('No licence public key: this build accepts unsigned licences (licence signing not switched on yet).'); }
 }
+// S58: the release public key (Ed25519), built into Central so it only runs installers listed in the release's signed
+// installers.sig.json. Without it (release signing not switched on yet) Central checks GitHub's SHA-256 when there is one.
+{
+  const keyFile = path.join(root, 'src', 'central', 'release-public-key.txt');
+  const key = String(process.env.RIYESER_RELEASE_PUBLIC_KEY || '').trim();
+  if (key) {
+    if (Buffer.from(key, 'base64').length !== 32) throw new Error('RIYESER_RELEASE_PUBLIC_KEY isn\'t an Ed25519 public key (32 bytes, base64).');
+    fs.writeFileSync(keyFile, `${key}\n`); console.log('Release public key built in:', key);
+  } else { fs.rmSync(keyFile, { force: true }); console.log('No release public key: installers are checked against GitHub\'s SHA-256 only (release signing not switched on yet).'); }
+}
 // .ico files in the format Windows expects (BMP small sizes + PNG 256), if Python is available.
 for (const [src, out] of [['build/icon.png', 'build/icon.ico'], ['build/pdf/icon.png', 'build/pdf/icon.ico'], ['build/central/icon.png', 'build/central/icon.ico'], ['build/services/icon.png', 'build/services/icon.ico'], ['build/team/icon.png', 'build/team/icon.ico'], ['build/link/icon.png', 'build/link/icon.ico']]) {
   try { run(process.platform === 'win32' ? 'python' : 'python3', ['scripts/make-ico.py', src, out]); } catch { console.warn('Python not found - using the existing .ico files'); }

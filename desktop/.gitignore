@@ -6,3 +6,4 @@ dist-ci/
 dist-central/
 dist-services/
 src/core/licence-public-key.txt
+src/central/release-public-key.txt
