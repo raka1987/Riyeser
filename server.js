@@ -690,6 +690,33 @@ const adminOnlyHours = (req, adjustments = {}) => {
   for (const a of Object.values(adjustments || {})) if (a && a.hours !== undefined && a.hours !== '') throw new HttpError(403, 'Changing hours in a pay run needs full Pay runs access.');
   return adjustments;
 };
+// S28: each finalised pay run is written for Riyeser Accounting as Documents\Riyeser\Inbox\Payroll\<pay date> <payrun_id>.json
+// (format riyeser.payrun.v1, INTEGRATION.md on main). The desktop program sets RIYESER_DOCS; the web version and demo mode write none.
+const payrunInbox = () => (process.env.RIYESER_DOCS && !DEMO ? path.join(process.env.RIYESER_DOCS, 'Inbox', 'Payroll') : null);
+const payrunId = r => `${r.pay_date}-R${r.id}-${String(r.created_at || '').replace(/\D/g, '').slice(0, 14)}${r.extra_reason ? '-X' : ''}`; // unique even after "start again" restarts the numbers
+const payrunFileName = r => `${r.pay_date} ${payrunId(r)}.json`;
+function payrunDoc(runId) {
+  const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(runId), s = getSettings();
+  const slips = db.prepare('SELECT * FROM payslips WHERE run_id = ? ORDER BY employee_name').all(runId);
+  return { r, doc: { format: 'riyeser.payrun.v1', source: 'Riyeser Payroll', payrun_id: payrunId(r), pay_date: r.pay_date, period_start: r.period_start, period_end: r.period_end,
+    currency: s.currency || 'FJD', ...(r.extra_reason && { note: `Extra pay run: ${r.extra_reason}` }),
+    employees: slips.map(p => ({ name: p.employee_name, gross: round2(p.gross), tax_withheld: round2(p.paye), employer_contribution: round2(p.fnpf_employer),
+      other_deductions: round2(p.fnpf_employee + p.other_deductions), net: round2(p.net) })) } };
+}
+function writePayrunFile(runId) {
+  const dir = payrunInbox(); if (!dir) return null;
+  try {
+    const { r, doc } = payrunDoc(runId), fs = require('fs'), file = path.join(dir, payrunFileName(r));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file + '.tmp', JSON.stringify(doc, null, 2), 'utf8'); fs.renameSync(file + '.tmp', file); // Accounting never sees half a file
+    return file;
+  } catch (e) { console.error('Pay run file not written:', e.message); return null; }
+}
+// a voided run's file is taken back if Accounting hasn't imported it yet (an imported one is reversed in Accounting)
+function removePayrunFile(r) {
+  const dir = payrunInbox(); if (!dir || !r) return;
+  try { require('fs').rmSync(path.join(dir, payrunFileName(r)), { force: true }); } catch { }
+}
 // F11: the same dates can't be paid twice. An existing pay run (a normal one, not an extra run) whose dates overlap these, for anyone
 // in this run, blocks it until that run is voided (Delete run). A deliberate extra run (bonus) is a separate, labelled option.
 const extraRun = b => b.extra_run === true || b.extra_run === 1 || b.extra_run === '1' || b.extra_run === 'true';
@@ -728,7 +755,8 @@ app.post('/api/staff/payroll/runs', requireArea('payroll', 2), requireLicence, w
     for (const l of lines) ins.run(runId, l.user_id, l.employee_name, l.position, l.pay_type, l.pay_rate, l.hours, l.base_pay, l.allowances, l.gross, l.fnpf_employee, l.fnpf_employer, l.paye, l.other_deductions, l.net, l.notes, l.worked_hours, l.break_hours, JSON.stringify(l.deduction_lines), l.leave_hours || 0, l.leave_pay || 0, JSON.stringify(l.leave_lines || []));
     db.exec('COMMIT');
     if (extra) audit(req, 'Extra pay run', `Paid ${pay_date} (${period_start} to ${period_end}): ${extra}`);
-    res.json({ id: runId, extra_run: !!extra });
+    const file = writePayrunFile(runId);
+    res.json({ id: runId, extra_run: !!extra, ...(file && { accounting_file: path.basename(file) }) });
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }));
 app.get('/api/staff/payroll/runs', requireArea('payroll'), (req, res) =>
@@ -739,7 +767,7 @@ app.get('/api/staff/payroll/runs/:id', requireArea('payroll'), wrap((req, res) =
   res.json({ run, payslips: db.prepare(`SELECT p.*, u.tin, u.fnpf_no, u.bank_account FROM payslips p LEFT JOIN users u ON u.id=p.user_id WHERE run_id=? ORDER BY employee_name`).all(run.id)
     .map(p => ({ ...p, ytd: ytdOf(p.user_id, run.period_end, null, run.id) })) });
 }));
-app.delete('/api/staff/payroll/runs/:id', requireArea('payroll', 3), (req, res) => { const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(+req.params.id); db.prepare('DELETE FROM payroll_runs WHERE id=?').run(+req.params.id); if (r) audit(req, 'Deleted a pay run', `Paid ${r.pay_date} (${r.period_start} to ${r.period_end})`); res.json({ ok: true }); });
+app.delete('/api/staff/payroll/runs/:id', requireArea('payroll', 3), (req, res) => { const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(+req.params.id); db.prepare('DELETE FROM payroll_runs WHERE id=?').run(+req.params.id); removePayrunFile(r); if (r) audit(req, 'Deleted a pay run', `Paid ${r.pay_date} (${r.period_start} to ${r.period_end})`); res.json({ ok: true }); });
 // Year to date (calendar / tax year of the period end): finalised payslips in that year up to this one (+ this draft),
 // and leave taken this year against the yearly entitlement
 function ytdOf(userId, periodEnd, draft = null, runId = null) {

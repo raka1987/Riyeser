@@ -19,7 +19,7 @@ const PAY_HOME = DEMO ? path.join(HOME_DIR, 'Payroll', 'Demo') : path.join(HOME_
 const BACKUPS = path.join(PAY_HOME, 'Backups');
 const PAYSLIPS = path.join(PAY_HOME, 'Payslips');
 for (const d of [DATA, BACKUPS, PAYSLIPS]) fs.mkdirSync(d, { recursive: true });
-Object.assign(process.env, { DESKTOP: '1', DATA_DIR: BASE, BACKUP_DIR: BACKUPS, NODE_ENV: 'production' }); // db.js adds \demo itself
+Object.assign(process.env, { DESKTOP: '1', DATA_DIR: BASE, BACKUP_DIR: BACKUPS, NODE_ENV: 'production', RIYESER_DOCS: process.env.RIYESER_DOCS || HOME_DIR }); // db.js adds \demo itself
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 
 // ---------------------------------------------------------------- records from other files

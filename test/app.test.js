@@ -36,7 +36,7 @@ async function login(username, password) {
 
 before(async () => {
   server = spawn(process.execPath, ['--no-warnings', path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT, DATA_DIR, ADMIN_PASSWORD: 'AdminPass123', TRUST_PROXY: '1', RIYESER_DEMO_FILE: path.join(DATA_DIR, 'no-demo.json'), RIYESER_DEMO: '' }, stdio: 'ignore',
+    env: { ...process.env, PORT, DATA_DIR, ADMIN_PASSWORD: 'AdminPass123', TRUST_PROXY: '1', RIYESER_DEMO_FILE: path.join(DATA_DIR, 'no-demo.json'), RIYESER_DEMO: '', RIYESER_DOCS: path.join(DATA_DIR, 'docs') }, stdio: 'ignore',
   });
   for (let i = 0; i < 50; i++) {
     try { await fetch(B + '/api/public/info'); return; } catch { await new Promise(r => setTimeout(r, 100)); }
@@ -501,6 +501,27 @@ test('F11: a labelled extra pay run (bonus) can be paid on dates already paid; i
   assert.equal((await call('DELETE', `/api/staff/payroll/runs/${normal.id}`, null, admin)).status, 200);
   assert.equal((await call('POST', '/api/staff/payroll/runs', { ...period }, admin)).status, 200);
   assert.ok((await call('GET', '/api/staff/audit', null, admin)).data.some(a => a.action === 'Extra pay run' && /Mid-year bonus/.test(a.details)));
+});
+
+test('S28: a finalised pay run is written for Accounting (riyeser.payrun.v1); voiding it takes the file back', async () => {
+  const inbox = path.join(DATA_DIR, 'docs', 'Inbox', 'Payroll');
+  const emp = (await call('POST', '/api/staff/employees', { name: 'File Person', username: 'fileperson', password: 'fileperson1', role: 'staff', pay_type: 'hourly', pay_rate: 20 }, admin)).data;
+  await call('POST', '/api/staff/timesheets', { user_id: emp.id, clock_in: '2028-09-04T08:00', clock_out: '2028-09-04T18:00' }, admin);
+  const r = await call('POST', '/api/staff/payroll/runs', { period_start: '2028-09-04', period_end: '2028-09-10', pay_date: '2028-09-11', adjustments: { [emp.id]: { other_deductions: 5 } } }, admin);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.match(r.data.accounting_file, new RegExp(`^2028-09-11 2028-09-11-R${r.data.id}-\\d{14}\\.json$`));
+  const doc = JSON.parse(fs.readFileSync(path.join(inbox, r.data.accounting_file), 'utf8'));
+  assert.equal(doc.format, 'riyeser.payrun.v1'); assert.equal(doc.source, 'Riyeser Payroll'); assert.equal(doc.currency, 'FJD');
+  assert.equal(doc.pay_date, '2028-09-11'); assert.equal(doc.period_start, '2028-09-04'); assert.equal(doc.period_end, '2028-09-10');
+  assert.equal(r.data.accounting_file, `${doc.pay_date} ${doc.payrun_id}.json`);
+  const slips = (await call('GET', `/api/staff/payroll/runs/${r.data.id}`, null, admin)).data.payslips;
+  assert.equal(doc.employees.length, slips.length);
+  const e = doc.employees.find(x => x.name === 'File Person'), p = slips.find(x => x.user_id === emp.id);
+  assert.equal(e.gross, 200); assert.equal(e.tax_withheld, p.paye); assert.equal(e.employer_contribution, p.fnpf_employer);
+  assert.equal(e.other_deductions, round(p.fnpf_employee + 5)); assert.equal(e.net, p.net);
+  for (const x of doc.employees) assert.equal(x.net, round(x.gross - x.tax_withheld - x.other_deductions)); // INTEGRATION.md: net = gross - tax - other
+  assert.equal((await call('DELETE', `/api/staff/payroll/runs/${r.data.id}`, null, admin)).status, 200);
+  assert.ok(!fs.existsSync(path.join(inbox, r.data.accounting_file)));
 });
 
 test('wage reports: check the files, see the problems, import as pay history, year to date includes it', async () => {
