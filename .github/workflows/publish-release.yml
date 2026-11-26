@@ -12,6 +12,10 @@ on:
         description: "What's new (optional, shown on the release page)"
         required: false
         default: ""
+      desktop_ref:
+        description: "Branch or commit for Central, Desk Assistant, PDF, As Built, Link and Link Office"
+        required: false
+        default: module/desk-assistant
 
 permissions:
   contents: write
@@ -56,7 +60,7 @@ jobs:
     defaults: { run: { working-directory: desktop } }
     steps:
       - uses: actions/checkout@v4
-        with: { ref: module/desk-assistant }
+        with: { ref: "${{ inputs.desktop_ref || 'module/desk-assistant' }}" }
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - uses: actions/setup-python@v5
