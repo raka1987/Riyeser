@@ -372,6 +372,20 @@ function assertNoOverlap(userId, clockIn, clockOut, exceptId = 0) {
     .get(userId, exceptId, clockOut || clockIn.slice(0, 10) + 'T23:59', clockIn);
   if (o) bad(`That overlaps another shift (${o.clock_in.slice(0, 10)} ${fmt12h(o.clock_in)}–${o.clock_out ? fmt12h(o.clock_out) : 'still on shift'}). Edit that one instead.`);
 }
+// OWNER-QUICKEDIT (2.2.5): a shift on a day already paid (a finalised normal pay run with a payslip for that person)
+// can't be changed, deleted or added to: the payslip would no longer match. Void that pay run first.
+const PAID_RUN_SQL = `(SELECT r.id FROM payroll_runs r JOIN payslips p ON p.run_id = r.id WHERE p.user_id = t.user_id AND COALESCE(r.extra_reason, '') = ''
+    AND r.period_start <= substr(t.clock_in, 1, 10) AND r.period_end >= substr(t.clock_in, 1, 10) ORDER BY r.id LIMIT 1) AS paid_run_id`;
+const paidRunStmt = () => db.prepare(`SELECT r.id, r.pay_date FROM payroll_runs r JOIN payslips p ON p.run_id = r.id WHERE p.user_id = ? AND COALESCE(r.extra_reason, '') = ''
+  AND r.period_start <= ? AND r.period_end >= ? ORDER BY r.id LIMIT 1`);
+function assertNotPaid(userId, ...stamps) {
+  const q = paidRunStmt();
+  for (const st of stamps.filter(Boolean)) {
+    const d = String(st).slice(0, 10), r = q.get(userId, d, d);
+    if (r) throw new HttpError(409, `${d} is already paid (pay run #${r.id}, paid ${r.pay_date}). Paid days can't be changed. To change it, delete that pay run first (Payroll → Past pay runs).`, { paid: { run_id: r.id, pay_date: r.pay_date, date: d } });
+  }
+}
+const shiftText = t => `${t.clock_in.slice(0, 10)} ${fmt12h(t.clock_in)}–${t.clock_out ? fmt12h(t.clock_out) : 'open'}`;
 app.post('/api/staff/clock', requireStaff, wrap((req, res) => {
   const now = localNowISO(getSettings().timezone);
   const r = punch(req.user.id, now, str(req.body.notes, 200), req.body.confirm_long === true);
@@ -469,7 +483,7 @@ app.get('/api/staff/timesheets', requireStaff, wrap((req, res) => {
   else { w.push('COALESCE(u.on_timeclock, 1) = 1'); const [sw, sp] = scopeSql(by, 't.user_id'); w.push(sw); p.push(...sp); } // all staff = those on the time clock
   if (isDate(req.query.from)) { w.push('substr(t.clock_in,1,10) >= ?'); p.push(req.query.from); }
   if (isDate(req.query.to)) { w.push('substr(t.clock_in,1,10) <= ?'); p.push(req.query.to); }
-  const rows = db.prepare(`SELECT t.*, u.name, COALESCE(u.employee_no, '') AS employee_no, (SELECT name FROM users a WHERE a.id = t.approved_by) AS approved_by_name FROM timesheets t JOIN users u ON u.id=t.user_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY t.clock_in DESC LIMIT 1000`).all(...p);
+  const rows = db.prepare(`SELECT t.*, u.name, COALESCE(u.employee_no, '') AS employee_no, (SELECT name FROM users a WHERE a.id = t.approved_by) AS approved_by_name, ${PAID_RUN_SQL} FROM timesheets t JOIN users u ON u.id=t.user_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY t.clock_in DESC LIMIT 1000`).all(...p);
   const rules = breakRules();
   res.json(rows.map(r => { const b = breakOf(r, rules); return { ...r, hours: round2(hoursOf(r)), break_hours: round2(b), paid_hours: round2(hoursOf(r) - b) }; }));
 }));
@@ -480,6 +494,7 @@ app.post('/api/staff/timesheets', requireStaff, wrap((req, res) => {
   ownOnly(req, user_id);
   if (!isStamp(clock_in) || (clock_out && !isStamp(clock_out))) bad('Use valid start/finish times.');
   if (clock_out && clock_out <= clock_in) bad('Finish must be after start.');
+  assertNotPaid(+user_id, clock_in);
   assertNoOverlap(+user_id, clock_in, clock_out);
   const by = tsUnlockOf(req), note = str(notes, 200) + (by ? `${notes ? ' · ' : ''}entered by ${by.name} (PIN)` : '');
   db.prepare('INSERT INTO timesheets(user_id, clock_in, clock_out, notes) VALUES(?,?,?,?)').run(+user_id, clock_in, clock_out || null, note.slice(0, 250));
@@ -498,6 +513,7 @@ app.post('/api/staff/timesheets/bulk', requireStaff, wrap((req, res) => {
       ownOnly(req, u.id);
       if (!isStamp(x.clock_in) || !isStamp(x.clock_out)) bad('Enter the date, start and finish times.');
       if (x.clock_out <= x.clock_in) bad('Finish must be after start.');
+      assertNotPaid(u.id, x.clock_in);
       assertNoOverlap(u.id, x.clock_in, x.clock_out);
       const note = (str(x.notes, 200) + (by ? `${x.notes ? ' · ' : ''}entered by ${by.name} (PIN)` : '')).slice(0, 250);
       db.prepare('INSERT INTO timesheets(user_id, clock_in, clock_out, notes) VALUES(?,?,?,?)').run(u.id, x.clock_in, x.clock_out, note);
@@ -508,22 +524,26 @@ app.post('/api/staff/timesheets/bulk', requireStaff, wrap((req, res) => {
   res.json({ saved: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length, results });
 }));
 app.put('/api/staff/timesheets/:id', requireStaff, wrap((req, res) => {
-  const owner = db.prepare('SELECT user_id FROM timesheets WHERE id = ?').get(+req.params.id);
+  const owner = db.prepare('SELECT t.*, u.name FROM timesheets t JOIN users u ON u.id = t.user_id WHERE t.id = ?').get(+req.params.id);
   if (!owner) throw new HttpError(404, 'Not found');
   if (!(canTimesheets(req.user) && inScope(req.user, 'timesheets', owner.user_id, 2)) && !(tsUnlockOf(req) && inScope({ id: tsUnlockOf(req).user_id }, 'timesheets', owner.user_id, 2))) throw new HttpError(403, "You don't have add & edit access to these timesheets. Ask an administrator.");
   const { clock_in, clock_out, notes } = req.body;
   if (!isStamp(clock_in) || (clock_out && !isStamp(clock_out))) bad('Use valid start/finish times.');
   if (clock_out && clock_out <= clock_in) bad('Finish must be after start.');
-  const cur = db.prepare('SELECT user_id FROM timesheets WHERE id = ?').get(+req.params.id);
-  if (cur) assertNoOverlap(cur.user_id, clock_in, clock_out, +req.params.id);
+  assertNotPaid(owner.user_id, owner.clock_in, clock_in);   // neither the day it was on nor the day it moves to
+  assertNoOverlap(owner.user_id, clock_in, clock_out, +req.params.id);
   const by = tsUnlockOf(req); if (by && !String(notes || '').includes(`by ${by.name} (PIN)`)) req.body.notes = `${notes ? notes + ' · ' : ''}edited by ${by.name} (PIN)`;
   db.prepare('UPDATE timesheets SET clock_in=?, clock_out=?, notes=?, approved_by = NULL, approved_at = NULL WHERE id=?').run(clock_in, clock_out || null, str(req.body.notes, 250), +req.params.id);
+  const after = { clock_in, clock_out: clock_out || null };
+  if (owner.clock_in !== after.clock_in || (owner.clock_out || null) !== after.clock_out) audit(req, 'Changed a shift', `${owner.name}: ${shiftText(owner)} → ${shiftText(after)}`);
+  broadcast({ type: 'shift' }, true);
   res.json({ ok: true });
 }));
 app.delete('/api/staff/timesheets/:id', requireArea('timesheets', 3), wrap((req, res) => {
   const t = db.prepare('SELECT t.*, u.name FROM timesheets t JOIN users u ON u.id = t.user_id WHERE t.id = ?').get(+req.params.id); if (!t) throw new HttpError(404, 'Not found');
   if (!inScope(req.user, 'timesheets', t.user_id, 3)) throw new HttpError(403, "That person isn't in your team.");
-  db.prepare('DELETE FROM timesheets WHERE id=?').run(t.id); audit(req, 'Deleted a shift', `${t.name}: ${t.clock_in} – ${t.clock_out || 'open'}`); res.json({ ok: true });
+  assertNotPaid(t.user_id, t.clock_in);
+  db.prepare('DELETE FROM timesheets WHERE id=?').run(t.id); broadcast({ type: 'shift' }, true); audit(req, 'Deleted a shift', `${t.name}: ${t.clock_in} – ${t.clock_out || 'open'}`); res.json({ ok: true });
 }));
 // a supervisor (or anyone with add & edit access) approves shifts; approval is shown on the timesheets and cleared if the shift changes
 app.post('/api/staff/timesheets/:id/approve', requireArea('timesheets', 2), wrap((req, res) => {
@@ -533,6 +553,23 @@ app.post('/api/staff/timesheets/:id/approve', requireArea('timesheets', 2), wrap
   const on = req.body.approved !== false;
   db.prepare('UPDATE timesheets SET approved_by = ?, approved_at = ? WHERE id = ?').run(on ? req.user.id : null, on ? new Date().toISOString() : null, t.id);
   res.json({ ok: true, approved: on });
+}));
+// OWNER-QUICKEDIT (2.2.5): "Approve all" on the pay run: every finished, unapproved shift in these dates for the people in
+// the approver's scope (not their own shifts, as on Timesheets). dry_run: only say how many.
+app.post('/api/staff/timesheets/approve-all', requireArea('timesheets', 2), wrap((req, res) => {
+  const b = req.body || {};
+  if (!isDate(b.from) || !isDate(b.to) || b.to < b.from) bad('Choose the dates.');
+  const rows = db.prepare(`SELECT t.*, u.name FROM timesheets t JOIN users u ON u.id = t.user_id WHERE t.clock_out IS NOT NULL AND t.approved_by IS NULL
+    AND substr(t.clock_in, 1, 10) BETWEEN ? AND ? AND t.user_id != ? AND u.active = 1 ORDER BY u.name, t.clock_in`).all(b.from, b.to, req.user.id)
+    .filter(t => inScope(req.user, 'timesheets', t.user_id, 2) && (!b.user_id || t.user_id === +b.user_id));
+  const people = [...new Set(rows.map(t => t.name))], hours = round2(rows.reduce((a, t) => a + hoursOf(t), 0));
+  if (b.dry_run !== true && rows.length) {
+    const up = db.prepare('UPDATE timesheets SET approved_by = ?, approved_at = ? WHERE id = ?'), at = new Date().toISOString();
+    db.exec('BEGIN'); try { for (const t of rows) up.run(req.user.id, at, t.id); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
+    audit(req, 'Approved shifts', `${rows.length} shift${rows.length === 1 ? '' : 's'} for ${people.length} ${people.length === 1 ? 'person' : 'people'}, ${b.from} to ${b.to}`);
+    broadcast({ type: 'shift' }, true);
+  }
+  res.json({ shifts: rows.length, people: people.length, names: people, hours, approved: b.dry_run === true ? 0 : rows.length });
 }));
 
 // ---------------------------------------------------------------- staff: payroll
@@ -561,7 +598,10 @@ function payPeriodOf(date, s = getSettings()) {
 app.get('/api/staff/payroll/period', requireStaff, wrap((req, res) => {
   const d = isDate(req.query.date) ? req.query.date : todayIn(getSettings().timezone);
   const cur = payPeriodOf(d), prev = payPeriodOf(addDays(cur[0], -1)), next = payPeriodOf(addDays(cur[1], 1));
-  res.json({ current: cur, previous: prev, next });
+  // OWNER-QUICKEDIT (2.2.5): the period the pay run is on (the day after the last finalised normal pay run), so
+  // Timesheets opens on the same dates as Payroll and the hours match
+  const n = app.locals.nextPayPeriod ? app.locals.nextPayPeriod() : null;
+  res.json({ current: cur, previous: prev, next, open: n ? [n.start, n.end] : prev });
 }));
 // Pay for any dates (timesheet print / email): split into pay periods from the start date (a weekly / fortnightly / …
 // length), work each out (a part period in proportion), and add them up per person
@@ -642,9 +682,10 @@ app.get('/api/staff/payroll/rules', requireArea('payroll'), (req, res) => {
   const s = getSettings();
   const t = todayIn(s.timezone), cur = payPeriodOf(t, s);
   res.json({ breaks: breakRules(), fnpf_employee_rate: +s.fnpf_employee_rate || 0, fnpf_employer_rate: +s.fnpf_employer_rate || 0, pay_periods_per_year: +s.pay_periods_per_year || 26,
-    pay_cycle_start: s.pay_cycle_start || '', period_now: cur, period_last: payPeriodOf(addDays(cur[0], -1), s), period_next: payPeriodOf(addDays(cur[1], 1), s),
+    pay_cycle_start: s.pay_cycle_start || '', new_payrun_hours: NEW_PAYRUN_HOURS.includes(s.new_payrun_hours) ? s.new_payrun_hours : 'ask', period_now: cur, period_last: payPeriodOf(addDays(cur[0], -1), s), period_next: payPeriodOf(addDays(cur[1], 1), s),
     deductions: canArea(req, 'pay_rates') ? db.prepare('SELECT id, name, deductions FROM users WHERE active = 1 AND pay_rate > 0 ORDER BY name').all().map(u => ({ id: u.id, name: u.name, deductions: deductionsOf(u) })) : [] });
 });
+const NEW_PAYRUN_HOURS = ['ask', 'copy', 'empty'];   // OWNER-QUICKEDIT: when starting a new pay run (Payroll rules)
 const leaveAdj = (uid, y, k) => round2((db.prepare('SELECT days FROM leave_adjust WHERE user_id = ? AND year = ? AND kind = ?').get(uid, String(y), k) || {}).days || 0);
 // S56: unused annual leave carries into the next year. It starts from the person's start date (or their first leave
 // record) so nobody gets years of leave they never had. A balance an admin saved before carry-over existed (note '')
@@ -735,6 +776,7 @@ app.put('/api/staff/payroll/rules', requireArea('setup', 2), wrap((req, res) => 
   }
   for (const k of ['fnpf_employee_rate', 'fnpf_employer_rate']) if (b[k] !== undefined) { const v = +b[k]; if (!(v >= 0 && v <= 50)) bad('FNPF % must be between 0 and 50.'); setSetting(k, String(v)); }
   if (b.pay_periods_per_year !== undefined) { const v = +b.pay_periods_per_year; if (![12, 24, 26, 52].includes(v)) bad('Pay periods per year: 12, 24, 26 or 52.'); setSetting('pay_periods_per_year', String(v)); }
+  if (b.new_payrun_hours !== undefined) { if (!NEW_PAYRUN_HOURS.includes(b.new_payrun_hours)) bad('Choose: ask me each time, always copy last week, or always start empty.'); setSetting('new_payrun_hours', b.new_payrun_hours); }
   if (b.pay_cycle_start !== undefined) { if (b.pay_cycle_start && !isDate(b.pay_cycle_start)) bad('Pay period start must be a date.'); setSetting('pay_cycle_start', b.pay_cycle_start || ''); }
   if (Array.isArray(b.deductions)) for (const d of b.deductions) {
     const list = (Array.isArray(d.deductions) ? d.deductions : []).map(x => ({ name: str(x.name, 60).trim(), amount: round2(x.amount) })).filter(x => x.name && x.amount > 0);
@@ -952,6 +994,8 @@ app.put('/api/staff/settings', requireArea('setup', 2), wrap((req, res) => {
     if (k === 'paye_brackets') { try { const b = JSON.parse(v); if (!Array.isArray(b)) throw 0; } catch { bad('PAYE brackets must be a JSON list.'); } }
     if (['normal_start', 'normal_finish'].includes(k) && !isTime(v)) bad('Times must be like 09:00.');
     if (k === 'normal_week_hours' && !(+v > 0 && +v <= 100)) bad('Normal week hours must be between 1 and 100.');
+    if (k === 'new_payrun_hours' && !NEW_PAYRUN_HOURS.includes(v)) bad('Choose: ask me each time, always copy last week, or always start empty.');
+    if (k === 'payroll_open_period') continue;   // set by "Start next pay run" only
     if (k === 'booking_permissions') {
       let p; try { p = typeof v === 'string' ? JSON.parse(v) : v; } catch { bad('Permissions must be JSON.'); }
       for (const [a, r] of Object.entries(p || {})) if (!PERMISSION_LABELS[a] || !ROLE_RANK[r]) bad(`Bad permission ${a}=${r}`);
@@ -971,7 +1015,7 @@ function csv(res, filename, rows) {
 require('./mailer')(app, { db, requireRole: () => requireArea('setup', 2), wrap, bad, str, getSettings, setSetting });
 const mail = () => app.locals.mail || {};
 // OWNER-PAYWEEK (payweek.js): "Start next pay week" and "Copy last week's hours" on the Pay runs screen
-require('./payweek')(app, { db, requireArea, wrap, bad, HttpError, isDate, isStamp, addDays, round2, getSettings, todayIn, payPeriodOf, alreadyPaid, assertNoOverlap, inScope, audit, broadcast });
+require('./payweek')(app, { db, requireArea, wrap, bad, HttpError, isDate, isStamp, addDays, round2, getSettings, setSetting, todayIn, payPeriodOf, alreadyPaid, assertNoOverlap, inScope, audit, broadcast, levelOf: (u, a) => P.levelOf(u, a) });
 // "Forgot password?" (forgot.js). After a reset: the person's wrong-PIN counters and this device's login limit start again.
 require('./forgot')(app, { db, hashPassword, audit, rateLimit, wrap, bad, HttpError, str, getSettings, failsOf: k => failsOf(k),
   clearLockouts: (uid, req) => { for (const k of ['u', 'm', 'r']) clockFails.delete(k + uid); hits.delete(req.ip + '/api/auth/login'); } });

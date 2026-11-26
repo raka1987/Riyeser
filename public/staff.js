@@ -212,12 +212,16 @@ function tsPersonCards(rows, emps, f) {
     const paid = list.reduce((a, r) => a + (r.clock_out ? (r.paid_hours ?? r.hours) : 0), 0), days = new Set(list.map(r => r.clock_in.slice(0, 10))).size;
     const flag = r => !r.clock_out ? '<span class="ts-flag">still clocked in</span>' : r.hours > 12 ? '<span class="ts-flag">over 12 h — forgot to clock out?</span>' : r.hours < 0.25 ? '<span class="ts-flag">under 15 min</span>' : '';
     const warn = list.filter(r => flag(r)).length;
-    return `<div class="panel ts-card"><div class="ts-head"><div><b>${esc(P.name)}</b>${P.no ? ` <span class="small muted">${esc(P.no)}</span>` : ''}</div>
+    const span = f.from && f.to ? Math.round((Date.parse(f.to) - Date.parse(f.from)) / 864e5) + 1 : 99;
+    // the Add row picks a day of these dates (the first weekday with no hours), or any date when the dates are long
+    const have = new Set(list.map(r => r.clock_in.slice(0, 10))), dl = span <= 31 ? QE.days(f.from, f.to) : [];
+    const pick = dl.find(d => !have.has(d) && ![0, 6].includes(new Date(d + 'T00:00:00Z').getUTCDay()) && d <= today()) || (dl.includes(day) ? day : dl[dl.length - 1]);
+    const dateBox = dl.length ? `<select name="d" aria-label="Day">${dl.map(d => `<option value="${d}" ${d === pick ? 'selected' : ''}>${QE.dayShort(d)}</option>`).join('')}</select>` : `<input type="date" name="d" value="${day}" aria-label="Date">`;
+    return `<div class="panel ts-card" data-card="${id}"><div class="ts-head"><div><b>${esc(P.name)}</b>${P.no ? ` <span class="small muted">${esc(P.no)}</span>` : ''}</div>
         <div class="ts-sum"><span><b>${days}</b> day${days === 1 ? '' : 's'}</span><span><b>${paid.toFixed(2)}</b> paid h</span>${warn ? `<span class="ts-flag">⚠ ${warn}</span>` : ''}</div></div>
-      ${list.length ? `<div class="ts-lines">${list.map(r => `<div class="ts-line ${canTS() ? 'tap' : ''}" ${canTS() ? `data-ts="${r.id}"` : ''}>
-          <span>${fmtDate(r.clock_in.slice(0, 10), { weekday: 'short', day: 'numeric' })}</span><span>${fmtTime(r.clock_in.slice(11, 16))}–${r.clock_out ? fmtTime(r.clock_out.slice(11, 16)) : '…'}</span>
-          <span class="r">${r.clock_out ? `${r.hours.toFixed(2)}h${r.break_hours ? ` → <b>${(r.paid_hours ?? r.hours).toFixed(2)}</b>` : ''}` : ''}${r.approved_by ? ` <span title="Approved by ${esc(r.approved_by_name || '')}" style="color:var(--green-700)">✓</span>` : ''}</span>${flag(r) ? `<div class="ts-wide">${flag(r)}</div>` : ''}${r.notes ? `<div class="ts-wide small muted">${esc(r.notes)}</div>` : ''}</div>`).join('')}</div>` : '<p class="small muted" style="margin:6px 0">No shifts in these dates.</p>'}
-      ${canTS() ? `<form class="ts-quick" data-qu="${id}"><label class="ts-box ts-qdate"><span>Date</span><input type="date" name="d" value="${day}"></label><label class="ts-box"><span>Start</span><input type="time" name="a" value="${S.normal_start || '09:00'}"></label><label class="ts-box"><span>Finish</span><input type="time" name="b" value="${S.normal_finish || '17:00'}"></label><button class="btn sm">Add</button></form>` : ''}</div>`;
+      ${list.length ? `<div class="ts-lines">${list.map(r => QE.lineHTML(r)).join('')}</div>` : '<p class="small muted" style="margin:6px 0">No shifts in these dates.</p>'}
+      ${canTS() && !(list.length && list.every(r => r.paid_run_id)) ? `<div class="ts-cardfoot">${span <= 31 ? `<button type="button" class="btn sm ghost ts-wk" data-wk="${id}" title="All the days in these dates, each one editable">${span <= 7 ? 'Edit week' : 'Edit days'}</button>` : ''}
+        <form class="ts-add" data-qu="${id}" aria-label="Add a shift for ${esc(P.name)}">${dateBox}<input type="time" name="a" value="${S.normal_start || '09:00'}" aria-label="Start"><span class="muted">–</span><input type="time" name="b" value="${S.normal_finish || '17:00'}" aria-label="Finish"><button class="btn sm">+ Add</button></form></div>` : ''}</div>`;
   }).join('')}</div>`;
 }
 // Accruals: annual / sick leave balances this year. Admin and Super admin: Edit → change allowances and days left → Save;
@@ -333,7 +337,20 @@ function reportsModal(emps, cur) {
     b.disabled = false;
   };
 }
-async function renderTimesheets(f = { from: addDays(today(), -13), to: today() }) {
+// OWNER-QUICKEDIT (2.2.5): Timesheets opens on the pay period the pay run is on (the day after the last finalised pay
+// run), the same dates as Payroll, so the hours on the cards match the pay run. Payroll's "Timesheets for these dates"
+// opens it on that pay run's dates.
+async function tsDefaultRange() {
+  if (window.__tsRange) { const r = window.__tsRange; window.__tsRange = null; return r; }
+  try {
+    const pp = await api('/api/staff/payroll/period'), o = pp.open;
+    return o && o[1] >= addDays(today(), -35) && o[0] <= addDays(today(), 31) ? o : pp.current;   // a long-unpaid period: this one instead
+  } catch { return [addDays(today(), -13), today()]; }
+}
+async function renderTimesheets(f) {
+  if (!f || !f.from) { const [a, b] = await tsDefaultRange(); f = { ...(f || {}), from: a, to: b }; }
+  let PP = null; try { PP = await api(`/api/staff/payroll/period?date=${f.from}`); } catch { }
+  const isPeriod = PP && PP.current[0] === f.from && PP.current[1] === f.to, isOpen = isPeriod && PP.open && PP.open[0] === f.from && PP.open[1] === f.to;
   const qs = new URLSearchParams(f).toString();
   const qsNoSort = new URLSearchParams(Object.fromEntries(Object.entries(f).filter(([k]) => k !== 'sort'))).toString();
   const rows = await api(`/api/staff/timesheets?${qsNoSort}`);
@@ -349,6 +366,11 @@ async function renderTimesheets(f = { from: addDays(today(), -13), to: today() }
       <select id="t-quick" title="Quick dates"><option value="">Quick dates…</option><option value="pp">This pay period</option><option value="lp">Last pay period</option><option value="tw">This week</option><option value="lw">Last week</option><option value="tf">This fortnight</option><option value="tm">This month</option><option value="lm">Last month</option></select>
       <select id="t-sort" title="Order">${[['date_desc', 'Newest'], ['date_asc', 'Oldest'], ['name', 'Name A–Z'], ['empno', 'Emp. no.']].map(([k, l]) => `<option value="${k}" ${(f.sort || 'date_desc') === k ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>
       </div>
+    ${PP ? (isPeriod ? `<div class="ts-period"><button type="button" class="btn sm ghost" id="t-pprev" title="Previous pay period" aria-label="Previous pay period">‹</button>
+        <div class="ts-period-mid"><span class="ts-period-k">Pay period</span><b>${esc(QE.period(f.from, f.to))}</b>${isOpen ? '<span class="chip">the pay run you\'re working on</span>' : ''}</div>
+        <button type="button" class="btn sm ghost" id="t-pnext" title="Next pay period" aria-label="Next pay period">›</button></div>`
+      : `<div class="ts-period off"><div class="ts-period-mid"><span class="ts-period-k">Dates</span><b>${esc(QE.period(f.from, f.to))}</b><span class="small muted">not one pay period, so these totals can differ from the pay run</span></div>
+        <button type="button" class="btn sm" id="t-pp">Show the pay period (${esc(QE.period(PP.open[0], PP.open[1], false))})</button></div>`) : ''}
     <div class="ts-actions">
       ${tsUnlocked() ? `<span class="chip">🔓 ${esc(window.__tsUnlock.name)} · until ${new Date(window.__tsUnlock.until).toLocaleTimeString('en-FJ', { hour: 'numeric', minute: '2-digit' })}</span><button class="btn sm ghost" id="t-lock">Lock</button>`
         : ''}
@@ -467,7 +489,14 @@ async function renderTimesheets(f = { from: addDays(today(), -13), to: today() }
   // change a shift: Admin and up; delete: Super admin only
   const editShift = r => shiftModal({ title: `Shift — ${r.name}`, r });
   if (canTS() && f.view === 'list') bindRows(view(), rows, editShift);
-  if (canTS()) $$('[data-ts]').forEach(el => el.onclick = () => editShift(rows.find(r => r.id == el.dataset.ts)));
+  // OWNER-QUICKEDIT: click a line to change it in place; the bin deletes; Edit week opens the person's days side by side
+  const redraw = () => renderTimesheets(f);
+  $$('.ts-lines', view()).forEach(box => QE.bind(box, rows, { onChanged: redraw, more: editShift }));
+  $$('[data-wk]').forEach(b => b.onclick = () => { const e = emps.find(x => x.id == b.dataset.wk) || {}, r0 = rows.find(r => r.user_id == b.dataset.wk) || {};
+    QE.personPanel({ user_id: +b.dataset.wk, name: e.name || r0.name || '', sub: e.position || '', start: f.from, end: f.to, onChanged: async () => { await redraw(); return null; }, more: editShift }); });
+  if ($('#t-pprev')) $('#t-pprev').onclick = () => renderTimesheets({ ...f, from: PP.previous[0], to: PP.previous[1] });
+  if ($('#t-pnext')) $('#t-pnext').onclick = () => renderTimesheets({ ...f, from: PP.next[0], to: PP.next[1] });
+  if ($('#t-pp')) $('#t-pp').onclick = () => renderTimesheets({ ...f, from: PP.open[0], to: PP.open[1] });
 }
 
 // ------------------------------------------------------------------ shared time clock (office PC)
@@ -646,22 +675,35 @@ async function renderAudit() {
 }
 
 // ------------------------------------------------------------------ payroll
-async function renderPayroll() {
+// OWNER-NEXTRUN (2.2.5): the Payroll page starts with the pay period in big letters. When the last pay run is finalised
+// and the next period hasn't been started, a big "Start next pay run (Thu 26 Nov – Wed 2 Dec)" button does it in one
+// click: it opens the next period and copies last week's hours (or starts empty: the owner's choice, or Payroll rules'
+// "When starting a new pay run"), then shows the pay run table for it. Finalising shows the same button straight away.
+// state: { period: [from, to], flash: 'message', finalised: { id, start, end, pay_date, people, net } }
+async function renderPayroll(state = {}) {
   const runs = await api('/api/staff/payroll/runs');
-  let end = addDays(today(), -1), start = addDays(end, -13);
-  try { const pp = await api('/api/staff/payroll/period'); [start, end] = pp.previous; } catch { } // the last completed pay period
+  let N = null; if (L('payroll') >= 2) { try { N = await api('/api/staff/payroll/next-period'); } catch { } }
+  let start, end;
+  if (state.period) [start, end] = state.period;
+  else if (N) [start, end] = [N.start, N.end];   // the period straight after the last pay run (the one to pay next)
+  else { end = addDays(today(), -1); start = addDays(end, -13); try { const pp = await api('/api/staff/payroll/period'); [start, end] = pp.previous; } catch { } }
+  const word = N && N.frequency === 'weekly' ? 'week' : 'pay period';
+  const canCopy = L('timesheets') >= 2 && L('payroll') >= 2;
+  const waiting = !!(N && !N.started && N.last_run && !state.period);   // last run finalised, next one not started yet
   view().innerHTML = `
     <div class="note">PAYE and FNPF are calculated from the rates in <a href="#/settings">Settings</a> (defaults: FNPF 8% employee / 10% employer, PAYE resident brackets). <b>Check these against current FRCS & FNPF rules before paying staff.</b></div>
-    <div class="panel"><h3>New pay run</h3><div id="pr-next"></div>
+    <div id="pr-hero"></div>
+    <div class="panel"><h3>Pay run</h3>
       <form id="pr-form" class="bar-tools" style="margin:0">
         <label class="small">Period from <input type="date" name="period_start" value="${start}" required></label>
         <label class="small">to <input type="date" name="period_end" value="${end}" required></label>
         <label class="small">Pay date <input type="date" name="pay_date" value="${today()}" required></label>
-        <button class="btn sm">Preview</button>
+        <button class="btn sm">${waiting ? 'Preview' : 'Show pay run'}</button>
         <label class="small" title="Only for a deliberate extra payment (e.g. a bonus) on dates already paid"><input type="checkbox" name="extra_run" id="pr-extra"> Extra pay run (bonus) on dates already paid</label>
         <label class="small" id="pr-extra-why" hidden>What for <input name="extra_reason" maxlength="200" placeholder="e.g. Christmas bonus"></label>
       </form>
-      <p class="small muted" id="pr-extra-note" hidden style="margin:6px 0 0"><b>Extra pay run:</b> no wages, leave or regular deductions are paid again. Enter the bonus in Allowances for each person (PAYE and FNPF are worked out on it). It's labelled "Extra" in Past pay runs.</p><div id="pr-copy"></div><div id="pr-preview"></div></div>
+      <p class="small muted" id="pr-extra-note" hidden style="margin:6px 0 0"><b>Extra pay run:</b> no wages, leave or regular deductions are paid again. Enter the bonus in Allowances for each person (PAYE and FNPF are worked out on it). It's labelled "Extra" in Past pay runs.</p>
+      <div id="pr-next"></div><div id="pr-preview"></div></div>
     <div class="panel" id="pr-export"></div>
     <div class="panel"><h3>Past pay runs <a class="btn sm ghost" href="/api/staff/export/payslips.csv">Export all payslips CSV</a></h3>
       ${table([{ h: 'Pay date', f: r => fmtDate(r.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) + (r.extra_reason ? ` <span class="chip" title="${esc(r.extra_reason)}">Extra: ${esc(r.extra_reason)}</span>` : '') + (r.note ? ` <span class="chip gray" title="${esc(r.note)}">${esc(r.note.split(' (')[0])}</span>` : '') }, { h: 'Period', f: r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}` },
@@ -676,22 +718,100 @@ async function renderPayroll() {
   drawPayRules();
   drawExport(runs);
   const adj = {};
+  let LINES = [];
+  const period = () => [$('#pr-form').period_start.value, $('#pr-form').period_end.value];
   $('#pr-extra').onchange = () => { const on = $('#pr-extra').checked; $('#pr-extra-why').hidden = $('#pr-extra-note').hidden = !on; $('#pr-preview').innerHTML = ''; };
+
+  // ---- the top of the page: what to do next
+  const startBtn = (n, id = 'pr-start') => `<button type="button" class="btn coral pr-big" id="${id}">▶ Start next pay run (${esc(QE.period(n.start, n.end, false))})</button>`;
+  const drawHero = async () => {
+    const host = $('#pr-hero'); if (!host) return;
+    if (state.finalised) {   // straight after "Finalise pay run"
+      const F = state.finalised;
+      host.innerHTML = `<div class="panel pr-done"><div class="pr-done-tick" aria-hidden="true">✓</div><div class="grow">
+          <div class="pr-k">Pay run finalised</div><h2>${esc(QE.period(F.start, F.end))}</h2>
+          <p class="muted">${F.people} payslip${F.people === 1 ? '' : 's'} saved · net pay ${money(F.net, cur())} · pay date ${esc(fmtDate(F.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }))}</p>
+          <div class="pr-hero-btns">${N && !N.started ? startBtn(N) : ''}<button type="button" class="btn ghost" id="pr-slips">Print or email payslips</button></div>
+          ${N && !N.started ? `<p class="small muted" style="margin:8px 0 0">Next: the ${esc(N.frequency || '')} pay period straight after this one. You choose whether to copy this ${word}'s hours.</p>` : ''}</div></div>`;
+      $('#pr-slips').onclick = () => runModal(F.id);
+      if ($('#pr-start')) $('#pr-start').onclick = () => startNext(N);
+      return;
+    }
+    const [a, b] = period(), onNext = N && a === N.start && b === N.end;
+    let ap = null; if (L('timesheets') >= 2 && a && b && !waiting) { try { ap = await api('/api/staff/timesheets/approve-all', { body: { from: a, to: b, dry_run: true } }); } catch { } }
+    const paidRun = runs.find(r => !r.extra_reason && !r.note && r.period_start <= b && r.period_end >= a);
+    host.innerHTML = `${waiting ? `<div class="panel pr-hero pr-wait"><div class="grow"><div class="pr-k">Last pay run</div>
+          <h2><span class="pr-ok">✓</span> ${esc(QE.period(N.last_run.period_start, N.last_run.period_end))} is finalised</h2>
+          <p class="muted" style="margin:2px 0 14px">Paid ${esc(fmtDate(N.last_run.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }))}. The next ${esc(N.frequency || '')} pay period is ${esc(QE.period(N.start, N.end))}${N.entries ? ` (${N.entries} timesheet entr${N.entries === 1 ? 'y' : 'ies'} in it already)` : ''}.</p>
+          ${startBtn(N)}<p class="small muted" style="margin:10px 0 0">${N.new_payrun_hours === 'copy' ? `Copies last ${word}'s hours (you can edit them).` : N.new_payrun_hours === 'empty' ? "Starts with no hours (you enter them)." : `You choose: copy last ${word}'s hours, or start empty.`} <a href="#/payroll" id="pr-to-rules">Change this in Payroll rules</a>.</p></div></div>`
+      : `<div class="panel pr-hero"><div class="pr-hero-top"><div class="grow"><div class="pr-k">Pay period</div><h2>${esc(QE.period(a, b))}</h2>
+          <div class="small muted">${paidRun ? `<b>paid</b> in pay run #${paidRun.id}` : `${N && N.frequency ? esc(N.frequency) + ' · ' : ''}not paid yet`}${onNext && N.last_run ? ` · straight after pay run #${N.last_run.id}` : ''}</div></div>
+          <div class="pr-hero-btns">${canCopy && !paidRun ? `<button type="button" class="btn sm ghost" id="pr-copy-go">⧉ Copy last ${word}'s hours</button>` : ''}
+            ${ap && ap.shifts ? `<button type="button" class="btn sm ghost" id="pr-approve">✓ Approve all (${ap.shifts})</button>` : ''}
+            <button type="button" class="btn sm ghost" id="pr-ts">Timesheets for these dates →</button></div></div>
+        ${onNext && N.copied_unapproved ? `<div class="note pr-copied">${state.flash ? `<b>✓ ${esc(state.flash)}</b><br>The ${N.copied_unapproved} copied shift${N.copied_unapproved === 1 ? " isn't" : "s aren't"} approved yet.` : `<b>${N.copied_unapproved} shift${N.copied_unapproved === 1 ? ' was' : 's were'} copied from last ${word} and ${N.copied_unapproved === 1 ? "isn't" : "aren't"} approved yet.</b>`} Click a name below to see and change that person's days.${ap && ap.shifts ? ' When they look right, <b>Approve all</b>.' : ''}</div>`
+          : state.flash ? `<div class="note pr-flash">✓ ${esc(state.flash)}</div>` : ''}
+        <div id="pr-approve-box"></div></div>`}`;
+    if ($('#pr-start')) $('#pr-start').onclick = () => startNext(N);
+    if ($('#pr-to-rules')) $('#pr-to-rules').onclick = e => { e.preventDefault(); const r = $('#pr-newrun') || $('#pr-rules'); if (r) { r.scrollIntoView({ behavior: 'smooth', block: 'center' }); if (r.focus) setTimeout(() => r.focus(), 400); } };
+    if ($('#pr-ts')) $('#pr-ts').onclick = () => { window.__tsRange = period(); location.hash = '#/timesheets'; };
+    if ($('#pr-copy-go')) $('#pr-copy-go').onclick = async () => {
+      const [x, y] = period();
+      try { copyModal(await api('/api/staff/payroll/copy-hours/preview', { body: { period_start: x, period_end: y } })); } catch (e) { toast(e.message, 6000); }
+    };
+    if ($('#pr-approve')) $('#pr-approve').onclick = () => {
+      const box = $('#pr-approve-box');
+      box.innerHTML = `<div class="pr-confirm"><span>Approve <b>${ap.shifts} shift${ap.shifts === 1 ? '' : 's'}</b> for <b>${ap.people} ${ap.people === 1 ? 'person' : 'people'}</b> (${ap.hours.toFixed(2)} hours) in ${esc(QE.period(a, b, false))}?<span class="small muted"> ${esc(ap.names.join(', '))}.</span></span>
+        <button type="button" class="btn sm" id="pr-ap-yes">Approve all</button><button type="button" class="btn sm ghost" id="pr-ap-no">Cancel</button></div>`;
+      $('#pr-ap-no').onclick = () => { box.innerHTML = ''; };
+      $('#pr-ap-yes').onclick = async () => {
+        $('#pr-ap-yes').disabled = true;
+        try { const r = await api('/api/staff/timesheets/approve-all', { body: { from: a, to: b } }); toast(`✓ ${r.approved} shift${r.approved === 1 ? '' : 's'} approved`); state.flash = '';
+          try { N = await api('/api/staff/payroll/next-period'); } catch { } drawHero(); }
+        catch (e) { toast(e.message, 6000); $('#pr-ap-yes').disabled = false; }
+      };
+    };
+  };
+  // "Start next pay run": copy last week's hours, or start empty (asked, unless Payroll rules say which)
+  const chooseMode = n => new Promise(resolve => {
+    let done = false;
+    const m = openModal(`<h2 style="font-size:1.4rem;margin-bottom:2px">Start next pay run</h2><p class="muted" style="margin:0 0 16px">${esc(QE.period(n.start, n.end))}</p>
+      <div class="pr-choices">
+        <button type="button" class="pr-choice" data-m="copy" ${canCopy ? '' : 'disabled'}><b>Copy last ${word}'s hours</b><span>(you can edit them)</span>
+          <small>${canCopy ? `The same days and times as ${esc(QE.period(n.last_run ? n.last_run.period_start : '', n.last_run ? n.last_run.period_end : '', false))}, saved as unapproved timesheet entries. People on leave, finished staff and anyone with hours already are skipped.` : 'Needs Add & edit access to Timesheets.'}</small></button>
+        <button type="button" class="pr-choice" data-m="empty"><b>Start empty</b><span>(I'll enter hours myself)</span><small>No hours are added. Enter them in Timesheets, or click a name in the pay run. You can still copy last ${word}'s hours later.</small></button>
+      </div>
+      <p class="small muted" style="margin:14px 0 0">To stop being asked, choose in <b>Payroll rules → When starting a new pay run</b>.</p>`, { onClose: () => { if (!done) resolve(null); } });
+    m.el.style.maxWidth = '560px';
+    $$('[data-m]', m.el).forEach(b => b.onclick = () => { done = true; m.close(); resolve(b.dataset.m); });
+  });
+  const startNext = async n => {
+    let pref = n.new_payrun_hours; try { pref = (await api('/api/staff/payroll/rules')).new_payrun_hours || pref; } catch { }   // as saved just now in Payroll rules
+    const mode = pref === 'ask' || !pref ? await chooseMode({ ...n, new_payrun_hours: pref }) : pref;
+    if (!mode) return;
+    $$('.pr-big').forEach(b => { b.disabled = true; b.textContent = mode === 'copy' ? 'Copying hours…' : 'Starting…'; });
+    try { const r = await api('/api/staff/payroll/next-run', { body: { mode } }); await renderPayroll({ period: [r.start, r.end], flash: r.message }); window.scrollTo(0, 0); }
+    catch (e) { toast(e.message, 7000); renderPayroll(state); }
+  };
+
   const preview = async () => {
     const body = { ...formData($('#pr-form')), adjustments: adj };
-    checkCopy(body.period_start, body.period_end);
     const { lines, already_paid: paid, warnings = [] } = await api('/api/staff/payroll/preview', { body });
+    LINES = lines;
     const ord = (window.__prSort = $('#pr-sort') ? $('#pr-sort').value : (window.__prSort || 'name'));
     lines.sort({ empno: (a, b) => String(a.employee_no || '').localeCompare(String(b.employee_no || ''), undefined, { numeric: true }) || a.employee_name.localeCompare(b.employee_name),
       hours: (a, b) => b.hours - a.hours, net: (a, b) => b.net - a.net }[ord] || ((a, b) => a.employee_name.localeCompare(b.employee_name)));
     const sum = k => lines.reduce((a, l) => a + l[k], 0);
-    $('#pr-preview').innerHTML = lines.length ? `<div class="bar-tools" style="margin:12px 0 0"><select id="pr-sort">${[['name', 'Person A–Z'], ['empno', 'Employee no.'], ['hours', 'Most hours'], ['net', 'Highest pay']].map(([k, l]) => `<option value="${k}" ${ord === k ? 'selected' : ''}>Order: ${l}</option>`).join('')}</select></div><div class="scroll" style="margin-top:8px"><table class="t"><thead><tr><th>Employee</th><th class="r">Hours</th><th class="r">Base</th><th class="r">Allowances</th><th class="r">Gross</th><th class="r">FNPF (ee)</th><th class="r">PAYE</th><th class="r">Other ded.</th><th class="r">Net</th><th class="r">FNPF (er)</th></tr></thead><tbody>
-      ${lines.map(l => `<tr><td><b>${esc(l.employee_name)}</b>${l.employee_no ? ` <span class="small muted">${esc(l.employee_no)}</span>` : ''}<div class="small muted">${l.pay_type === 'hourly' ? `${money(l.pay_rate, cur())}/hr` : 'Salary'}</div></td><td class="r">${isAdmin() && l.pay_type === 'hourly' ? `<input class="inline" type="number" step="0.25" min="0" data-h="${l.user_id}" value="${l.hours.toFixed(2)}" title="Admin: change the hours paid (a reason is asked)">` : l.hours.toFixed(2)}
+    const hrsCell = l => isAdmin() && l.pay_type === 'hourly'
+      ? `<input class="inline" type="number" step="0.25" min="0" data-h="${l.user_id}" value="${l.hours.toFixed(2)}" title="Admin: change the hours paid (a reason is asked)"><button type="button" class="pr-days" data-pp="${l.user_id}" title="See and change ${esc(l.employee_name)}'s days">days ›</button>`
+      : `<button type="button" class="pr-hrs" data-pp="${l.user_id}" title="See and change ${esc(l.employee_name)}'s days">${l.hours.toFixed(2)}</button>`;
+    $('#pr-preview').innerHTML = lines.length ? `<div class="bar-tools" style="margin:12px 0 0"><select id="pr-sort">${[['name', 'Person A–Z'], ['empno', 'Employee no.'], ['hours', 'Most hours'], ['net', 'Highest pay']].map(([k, l]) => `<option value="${k}" ${ord === k ? 'selected' : ''}>Order: ${l}</option>`).join('')}</select><span class="small muted" style="align-self:center">Click a name to see and change that person's days.</span></div><div class="scroll" style="margin-top:8px"><table class="t pr-table"><thead><tr><th>Employee</th><th class="r">Hours</th><th class="r">Base</th><th class="r">Allowances</th><th class="r">Gross</th><th class="r">FNPF (ee)</th><th class="r">PAYE</th><th class="r">Other ded.</th><th class="r">Net</th><th class="r">FNPF (er)</th></tr></thead><tbody>
+      ${lines.map(l => `<tr data-row="${l.user_id}"><td><button type="button" class="pr-name" data-pp="${l.user_id}">${esc(l.employee_name)}</button>${l.employee_no ? ` <span class="small muted">${esc(l.employee_no)}</span>` : ''}<div class="small muted">${l.pay_type === 'hourly' ? `${money(l.pay_rate, cur())}/hr` : 'Salary'}</div></td><td class="r">${hrsCell(l)}
           ${l.hours_adjusted ? `<div class="small" style="color:var(--gold)">adjusted from ${l.timesheet_hours.toFixed(2)}: ${esc(l.hours_note)}</div>` : l.break_hours ? `<div class="small muted">${l.worked_hours.toFixed(2)} − ${l.break_hours.toFixed(2)} break</div>` : ''}</td><td class="r">${money(l.base_pay, cur())}</td>
         <td class="r"><input class="inline" type="number" step="0.01" data-a="${l.user_id}" value="${l.allowances || ''}"></td><td class="r">${money(l.gross, cur())}</td><td class="r">${money(l.fnpf_employee, cur())}</td><td class="r">${money(l.paye, cur())}</td>
         <td class="r">${l.regular_deductions ? `<div class="small muted" title="${esc(l.deduction_lines.map(d => d.name + ' ' + d.amount).join(', '))}">${money(l.regular_deductions, cur())} regular</div>` : ''}<input class="inline" type="number" step="0.01" data-o="${l.user_id}" value="${(adj[l.user_id] && adj[l.user_id].other_deductions) || ''}" placeholder="+ this pay"></td><td class="r"><b>${money(l.net, cur())}</b></td><td class="r">${money(l.fnpf_employer, cur())}</td></tr>`).join('')}
       <tr><td><b>Totals</b></td><td class="r">${sum('hours').toFixed(2)}</td><td></td><td></td><td class="r"><b>${money(sum('gross'), cur())}</b></td><td class="r">${money(sum('fnpf_employee'), cur())}</td><td class="r">${money(sum('paye'), cur())}</td><td></td><td class="r"><b>${money(sum('net'), cur())}</b></td><td class="r">${money(sum('fnpf_employer'), cur())}</td></tr>
-      </tbody></table></div>${warnings.length ? `<div class="note" style="margin-top:10px;border-color:var(--gold)"><b>⚠ Check these shifts before paying</b> (fix them in <a href="#/timesheets">Timesheets</a>, or change the hours here):<ul style="margin:4px 0 0">${warnings.map(w => `<li><b>${esc(w.name)}</b>: ${esc(w.text)}</li>`).join('')}</ul></div>` : ''}${paid ? `<div class="note" style="margin-top:10px"><b>${esc(paid.message)}</b> To pay a bonus on these dates instead, tick <b>Extra pay run (bonus)</b> above.</div>` : ''}<div class="actions">${paid ? '' : `<button class="btn coral" id="pr-final">${body.extra_run ? 'Finalise extra pay run' : 'Finalise pay run'}</button>`}<span class="small muted" style="align-self:center">Edit allowances/deductions and the totals recalculate.</span></div>`
+      </tbody></table></div>${warnings.length ? `<div class="note" style="margin-top:10px;border-color:var(--gold)"><b>⚠ Check these shifts before paying</b> (click the name to fix them, or change the hours here):<ul style="margin:4px 0 0">${warnings.map(w => `<li><b>${esc(w.name)}</b>: ${esc(w.text)}</li>`).join('')}</ul></div>` : ''}${paid ? `<div class="note" style="margin-top:10px"><b>${esc(paid.message)}</b> To pay a bonus on these dates instead, tick <b>Extra pay run (bonus)</b> above.</div>` : ''}<div class="actions">${paid ? '' : `<button class="btn coral" id="pr-final">${body.extra_run ? 'Finalise extra pay run' : 'Finalise pay run'}</button>`}<span class="small muted" style="align-self:center">Edit allowances/deductions and the totals recalculate.</span></div>`
       : `<div class="empty" style="margin-top:14px">No active staff with a pay rate. Set rates under <a href="#/employees">Staff</a>.</div>`;
     if ($('#pr-sort')) $('#pr-sort').onchange = () => preview();
     $$('[data-h]', $('#pr-preview')).forEach(i => i.onchange = () => {
@@ -702,37 +822,38 @@ async function renderPayroll() {
       adj[id].hours = i.value; adj[id].hours_note = why.trim(); preview();
     });
     $$('[data-a],[data-o]', $('#pr-preview')).forEach(i => i.onchange = () => { const id = i.dataset.a || i.dataset.o; adj[id] = adj[id] || {}; adj[id][i.dataset.a ? 'allowances' : 'other_deductions'] = i.value; preview(); });
+    // OWNER-QUICKEDIT: a person's days in this pay period, editable in a side panel; the pay run behind it re-works after each change
+    $$('[data-pp]', $('#pr-preview')).forEach(b => b.onclick = () => {
+      const l = lines.find(x => x.user_id == b.dataset.pp); if (!l) return;
+      const [x, y] = period();
+      $$('tr.pr-on').forEach(t => t.classList.remove('pr-on')); const tr = $(`tr[data-row="${l.user_id}"]`); if (tr) tr.classList.add('pr-on');
+      QE.personPanel({ user_id: l.user_id, name: l.employee_name, sub: l.pay_type === 'hourly' ? `${money(l.pay_rate, cur())}/hr` : 'Salary', start: x, end: y, line: l,
+        onChanged: async () => { await preview(); drawHero(); const t2 = $(`tr[data-row="${l.user_id}"]`); if (t2) t2.classList.add('pr-on'); return LINES.find(z => z.user_id === l.user_id) || null; },
+        onClose: () => $$('tr.pr-on').forEach(t => t.classList.remove('pr-on')) });
+    });
     if ($('#pr-final')) $('#pr-final').onclick = async () => {
       if (warnings.length && !confirm(`These shifts look wrong:\n\n${warnings.map(w => `• ${w.name}: ${w.text}`).join('\n')}\n\nPay them as they are?`)) return;
       if (warnings.length) body.confirm_warnings = true;
       if (!confirm(body.extra_run ? `Finalise an EXTRA pay run (${body.extra_reason || 'no reason given'}) for dates that may already be paid? Only the allowances entered are paid.` : 'Finalise this pay run? Payslips will be saved (print or email them from the pay run).')) return;
-      try { const r = await api('/api/staff/payroll/runs', { body }); toast('Pay run saved'); await renderPayroll(); runModal(r.id); } catch (e) { toast(e.message); }
+      $('#pr-final').disabled = true;
+      try {
+        const r = await api('/api/staff/payroll/runs', { body });
+        toast('Pay run saved');
+        await renderPayroll({ finalised: { id: r.id, start: body.period_start, end: body.period_end, pay_date: body.pay_date, people: lines.length, net: Math.round(sum('net') * 100) / 100 } });
+        window.scrollTo(0, 0);
+      } catch (e) { toast(e.message); $('#pr-final').disabled = false; }
     };
   };
-  $('#pr-form').onsubmit = e => { e.preventDefault(); preview().catch(err => toast(err.message)); };
-  // OWNER-PAYWEEK: "Start next pay week" (straight after the last pay run) and "Copy last week's hours" (in-page only)
+  $('#pr-form').onsubmit = e => { e.preventDefault(); drawHero(); preview().catch(err => toast(err.message)); };
+  // other recent pay periods (paid or not), to pick a different one
   const setPeriod = (a, b) => { const f = $('#pr-form'); f.period_start.value = a; f.period_end.value = b; };
-  const loadNext = async () => {
-    let n; try { n = await api('/api/staff/payroll/next-period'); } catch { return; }
-    const word = n.frequency === 'weekly' ? 'pay week' : 'pay period';
-    $('#pr-next').innerHTML = `<div class="bar-tools" style="margin:0 0 6px"><button type="button" class="btn sm coral" id="pr-next-go" ${LIC.licensed ? '' : 'disabled'}>▶ Start next ${word}: ${esc(n.label)}</button>
-      <span class="small muted">${n.last_run ? `the ${esc(n.frequency)} period straight after pay run #${n.last_run.id}` : 'no pay runs yet'}</span></div>
-      <ul class="small" style="margin:0 0 10px;padding-left:18px">${n.periods.map(p => `<li>${esc(p.label)}: ${p.paid ? `<b>paid</b> (run #${p.run_id})` : `<b>not paid yet</b>${p.current ? ' (this period)' : ''}`} · ${p.entries} timesheet entr${p.entries === 1 ? 'y' : 'ies'}${p.paid ? '' : ` · <a href="#" data-per="${p.start}|${p.end}">choose</a>`}</li>`).join('')}</ul>`;
-    const go = (a, b) => { setPeriod(a, b); if ($('#pr-extra').checked) { $('#pr-extra').checked = false; $('#pr-extra').onchange(); } preview().catch(err => toast(err.message)); };
-    $('#pr-next-go').onclick = () => go(n.start, n.end);
-    $$('[data-per]', $('#pr-next')).forEach(a => a.onclick = e => { e.preventDefault(); const [s, t] = a.dataset.per.split('|'); go(s, t); });
+  const drawOther = () => {
+    if (!N) return;
+    $('#pr-next').innerHTML = `<details class="pr-other"><summary class="small">Other pay periods</summary>
+      <ul class="small" style="margin:6px 0 4px;padding-left:18px">${N.periods.map(p => `<li>${esc(p.label)}: ${p.paid ? `<b>paid</b> (run #${p.run_id})` : `<b>not paid yet</b>${p.current ? ' (this period)' : ''}`} · ${p.entries} timesheet entr${p.entries === 1 ? 'y' : 'ies'}${p.paid ? '' : ` · <a href="#" data-per="${p.start}|${p.end}">choose</a>`}</li>`).join('')}</ul></details>`;
+    $$('[data-per]', $('#pr-next')).forEach(a => a.onclick = e => { e.preventDefault(); const [s, t] = a.dataset.per.split('|'); renderPayroll({ period: [s, t] }); });
   };
   const stampPlus = (ci, h) => new Date(Date.parse(ci + 'Z') + Math.round(h * 60) * 60000).toISOString().slice(0, 16);
-  const checkCopy = async (a, b) => {
-    const host = $('#pr-copy'); host.innerHTML = '';
-    if (!ME.timesheets || !a || !b || $('#pr-extra').checked) return;
-    let p; try { p = await api('/api/staff/payroll/copy-hours/preview', { body: { period_start: a, period_end: b } }); } catch { return; }   // e.g. already paid: the preview says so
-    const can = p.people.some(x => x.rows.some(r => !r.skip));
-    if (!can || p.entries >= p.previous_entries) return;
-    host.innerHTML = `<div class="note" style="margin-top:10px">${p.entries ? `Only ${p.entries} timesheet entr${p.entries === 1 ? 'y' : 'ies'}` : 'No timesheet entries'} for ${esc(p.label)} (the period before, ${esc(p.from_label)}, had ${p.previous_entries}).
-      <button type="button" class="btn sm" id="pr-copy-go" style="margin-left:8px">Copy last week's hours…</button></div>`;
-    $('#pr-copy-go').onclick = () => copyModal(p);
-  };
   const copyModal = p => {
     const m = openModal(`<h3>Copy hours into ${esc(p.label)}</h3>
       <p class="small muted">From ${esc(p.from_label)}: the same days, start and finish times. Untick anyone or any shift you don't want, and change the hours if they're different this time. They're saved as normal, unapproved timesheet entries marked "copied from ${esc(p.from_label)}", so you can still edit or approve them in Timesheets.</p>
@@ -761,12 +882,18 @@ async function renderPayroll() {
       try {
         const r = await api('/api/staff/payroll/copy-hours', { body: { period_start: p.start, period_end: p.end, entries: list.map(c => ({ user_id: +c.k.split(':')[0], clock_in: c.r.clock_in, clock_out: stampPlus(c.r.clock_in, c.h) })) } });
         if (r.failed) { $('.err', el).innerHTML = `<div class="error">${r.saved} saved. Not saved: ${r.results.filter(x => !x.ok).map(x => esc(x.error)).join(' ')}</div>`; $('#cp-save', el).disabled = false; return; }
-        m.close(); toast(`${r.saved} shift${r.saved === 1 ? '' : 's'} copied`); loadNext(); preview().catch(err => toast(err.message));
+        m.close(); toast(`${r.saved} shift${r.saved === 1 ? '' : 's'} copied`);
+        const people = new Set(r.results.filter(x => x.ok).map(x => x.user_id)).size;
+        renderPayroll({ period: [p.start, p.end], flash: `Copied ${people} ${people === 1 ? "person's" : "people's"} hours from ${p.from_label}. Check and change anything that's different.` });
       } catch (e) { $('.err', el).innerHTML = `<div class="error">${esc(e.message)}</div>`; $('#cp-save', el).disabled = false; }
     };
+    if (!p.people.some(x => x.rows.some(r => !r.skip))) $('.err', el).innerHTML = `<div class="note" style="margin-top:10px">Nothing to copy: ${p.people.length ? 'everyone already has hours on those days (or is on leave)' : `nobody has hours in ${esc(p.from_label)}`}.</div>`;
     redraw();
   };
-  loadNext();
+  drawOther();
+  await drawHero();
+  // the pay run table for the period, ready to edit (not while waiting for "Start next pay run", or straight after finalising)
+  if (LIC.licensed && !waiting && !state.finalised && L('payroll') >= 2) await preview().catch(err => { $('#pr-preview').innerHTML = `<div class="error" style="margin-top:12px">${esc(err.message)}</div>`; });
 }
 // Payroll rules: unpaid breaks, FNPF %, regular deductions per person (admin edits, managers see)
 async function drawPayRules() {
@@ -789,6 +916,8 @@ async function drawPayRules() {
           <div class="field"><label>Pay period starts on <span class="muted">(any date a period began)</span></label><input type="date" id="pr-cycle" value="${esc(R.pay_cycle_start || '')}" ${ro ? 'disabled' : ''}></div>
           <div class="field"><label>How often (pay periods a year)</label><select id="pr-pp" ${ro ? 'disabled' : ''}>${[[52, 'Weekly (52)'], [26, 'Fortnightly (26)'], [24, 'Twice a month (24)'], [12, 'Monthly (12)']].map(([v, l]) => `<option value="${v}" ${R.pay_periods_per_year === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
         <p class="small" style="margin:4px 0">📅 This pay period: <b>${fmtDate(R.period_now[0])} – ${fmtDate(R.period_now[1])}</b> · last: ${fmtDate(R.period_last[0])} – ${fmtDate(R.period_last[1])} · next: ${fmtDate(R.period_next[0])} – ${fmtDate(R.period_next[1])}</p>
+        <div class="field" style="margin-top:8px"><label>When starting a new pay run</label><select id="pr-newrun" ${ro ? 'disabled' : ''}>${[['ask', 'Ask me each time'], ['copy', "Always copy last week's hours"], ['empty', 'Always start empty']].map(([v, l]) => `<option value="${v}" ${(R.new_payrun_hours || 'ask') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <div class="small muted">"Start next pay run" on this page. Copied hours are unapproved timesheet entries you can change. With "start empty", you can still copy them later.</div></div>
         <p class="small muted">PAYE tax brackets are in <a href="#/settings">Settings → Payroll</a>.</p></div></div>
     <b class="small">Regular deductions each pay</b><p class="small muted" style="margin:2px 0 6px">One per line, e.g. <code>Staff loan: 20</code>. Taken automatically every pay run and shown on the payslip.</p>
     <div class="ded-grid">${R.deductions.map(u => `<div class="field"><label>${esc(u.name)}</label><textarea rows="2" data-ded="${u.id}" placeholder="None" ${ro ? 'disabled' : ''}>${esc(dedText(u.deductions))}</textarea></div>`).join('') || '<p class="small muted">Staff with a pay rate show here.</p>'}</div>
@@ -801,7 +930,7 @@ async function drawPayRules() {
     const deductions = $$('[data-ded]', host).map(t => ({ id: +t.dataset.ded, deductions: t.value.split('\n').map(l => { const m = l.match(/^(.+?)[:=\-–]\s*\$?\s*([\d.]+)\s*$/); return m ? { name: m[1].trim(), amount: +m[2] } : null; }).filter(Boolean) }));
     const bad = $$('[data-ded]', host).some(t => t.value.split('\n').some(l => l.trim() && !/^(.+?)[:=\-–]\s*\$?\s*([\d.]+)\s*$/.test(l)));
     if (bad) return toast('Write each deduction as "Name: amount", e.g. Staff loan: 20');
-    try { await api('/api/staff/payroll/rules', { method: 'PUT', body: { breaks, deductions, fnpf_employee_rate: $('#pr-ee', host).value, fnpf_employer_rate: $('#pr-er', host).value, pay_periods_per_year: $('#pr-pp', host).value, pay_cycle_start: $('#pr-cycle', host).value } }); toast('Payroll rules saved: now in effect'); await drawPayRules(); try { await refreshMe(); } catch { } if ($('#pr-preview') && $('#pr-preview').innerHTML.trim()) $('#pr-form button').click(); }
+    try { await api('/api/staff/payroll/rules', { method: 'PUT', body: { breaks, deductions, fnpf_employee_rate: $('#pr-ee', host).value, fnpf_employer_rate: $('#pr-er', host).value, pay_periods_per_year: $('#pr-pp', host).value, pay_cycle_start: $('#pr-cycle', host).value, new_payrun_hours: $('#pr-newrun', host).value } }); toast('Payroll rules saved: now in effect'); await drawPayRules(); try { await refreshMe(); } catch { } if ($('#pr-preview') && $('#pr-preview').innerHTML.trim()) $('#pr-form button').click(); }
     catch (e) { toast(e.message); }
   };
 }

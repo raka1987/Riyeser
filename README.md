@@ -30,9 +30,11 @@ and bank detail changes and deletions are kept in an audit trail.
 
 ## What's in it
 - **Time clock** on a shared PC: each person taps their name and types their own 4-digit PIN.
-- **Timesheets**: by person or as a list, multi-shift entry, week grids with running totals, supervisor approval, print and email.
+- **Timesheets**: by person or as a list, opening on the pay run's pay period; click a day's line to change it in place (paid
+  days are locked), Edit week, multi-shift entry, week grids with running totals, supervisor approval, print and email.
 - **Payroll**: normal week 40 hours by default, weekly pay, FNPF and PAYE rates in Settings, unpaid break rules, regular
-  deductions per person. Pay runs: preview, then finalise.
+  deductions per person. Pay runs: preview, then finalise. **Start next pay run** opens the next period in one click and
+  copies last week's hours (or starts empty, as chosen in Payroll rules); click a name to change that person's days.
 - **Payslips** with year-to-date totals. Print, save as PDF or email them. Everyone can see their own.
 - **Leave**: annual and sick leave entitlement, leave taken and balances.
 - **Import wage reports**: monthly Excel wage reports (one sheet per person, a row per week), checked for problems before saving.

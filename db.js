@@ -139,6 +139,8 @@ const DEFAULT_SETTINGS = {
   normal_finish: '17:00',
   pay_periods_per_year: '52',     // weekly, like the wage reports
   pay_cycle_start: '',            // a date a pay period started on (sets the day pay periods start); blank = Mondays
+  new_payrun_hours: 'ask',        // "Start next pay run": ask | copy (always copy last week's hours) | empty (always start with no hours)
+  payroll_open_period: '',        // the pay period "Start next pay run" last started: {"start","end","mode",…} (payweek.js)
   // emails (Settings → Email): off until the company's mailbox is set up and tested
   email_enabled: '0', smtp_host: '', smtp_port: '465', smtp_secure: 'ssl', smtp_user: '', email_from: '', email_from_name: '',
   email_club_copy: '', email_staff_ids: '', site_url: '',

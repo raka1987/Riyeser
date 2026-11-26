@@ -8,8 +8,13 @@
 // by the period's length: the same days and the same start and finish times. People who already have an entry that
 // day, leave days, people who are switched off or finished, and dates already paid are skipped. Salaried staff need no
 // hours. The entries show on Timesheets like any others (edit, approve, delete), and the pay run reads them as usual.
+//
+// OWNER-NEXTRUN (2.2.5): "Start next pay run" does it in one step: it opens the next period (as above) and, if the owner
+// chooses (or Payroll rules say "always copy"), copies last period's hours into it as unapproved entries, with the same
+// skips. Some businesses enter hours by hand, so "Start empty" is the other choice. The period it started is kept in
+// the payroll_open_period setting, so a second click (or a second computer) opens the same period and copies nothing again.
 module.exports = function payweek(app, h) {
-  const { db, requireArea, wrap, bad, HttpError, isDate, isStamp, addDays, round2, getSettings, todayIn, payPeriodOf, alreadyPaid, assertNoOverlap, inScope, audit, broadcast } = h;
+  const { db, requireArea, wrap, bad, HttpError, isDate, isStamp, addDays, round2, getSettings, setSetting, todayIn, payPeriodOf, alreadyPaid, assertNoOverlap, inScope, audit, broadcast, levelOf } = h;
   const dayCount = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5) + 1;
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const dm = d => `${+d.slice(8)} ${MON[+d.slice(5, 7) - 1]}`;
@@ -39,8 +44,13 @@ module.exports = function payweek(app, h) {
   }
   app.locals.nextPayPeriod = nextPeriod;
 
+  /** The period "Start next pay run" last started, if it is still the next one to pay. */
+  const openPeriod = (n = nextPeriod()) => { let o = null; try { o = JSON.parse(getSettings().payroll_open_period || 'null'); } catch { } return o && o.start === n.start && o.end === n.end ? o : null; };
+  const copiedUnapproved = (a, b) => db.prepare("SELECT COUNT(*) AS n FROM timesheets t JOIN users u ON u.id = t.user_id WHERE u.active = 1 AND t.approved_by IS NULL AND t.notes LIKE 'copied from %' AND substr(t.clock_in, 1, 10) BETWEEN ? AND ?").get(a, b).n;
+  const unapproved = (a, b) => db.prepare('SELECT COUNT(*) AS n FROM timesheets t JOIN users u ON u.id = t.user_id WHERE u.active = 1 AND t.approved_by IS NULL AND t.clock_out IS NOT NULL AND substr(t.clock_in, 1, 10) BETWEEN ? AND ?').get(a, b).n;
+
   app.get('/api/staff/payroll/next-period', requireArea('payroll', 2), wrap((req, res) => {
-    const n = nextPeriod(), s = getSettings(), today = todayIn(s.timezone);
+    const n = nextPeriod(), s = getSettings(), today = todayIn(s.timezone), o = openPeriod(n);
     // recent periods: the last few paid, then each one not paid yet up to today (at least the next one)
     const paid = db.prepare(`SELECT id, period_start, period_end, pay_date FROM payroll_runs WHERE ${NORMAL} ORDER BY period_end DESC, id DESC LIMIT 3`).all().reverse()
       .map(r => ({ start: r.period_start, end: r.period_end, label: range(r.period_start, r.period_end), paid: true, run_id: r.id, pay_date: r.pay_date, entries: entriesIn(r.period_start, r.period_end) }));
@@ -49,7 +59,10 @@ module.exports = function payweek(app, h) {
       const r = paidRun(a, b);
       open.push({ start: a, end: b, label: range(a, b), paid: !!r, run_id: r ? r.id : null, entries: entriesIn(a, b), current: a <= today && today <= b });
     }
-    res.json({ ...n, label: range(n.start, n.end), periods: [...paid, ...open] });
+    // started: "Start next pay run" opened it, or it's over and has hours in it already (entered before 2.2.5, say)
+    const entries = entriesIn(n.start, n.end);
+    res.json({ ...n, label: range(n.start, n.end), periods: [...paid, ...open], started: !!o || (entries > 0 && n.end < today), open_period: o, entries,
+      copied_unapproved: copiedUnapproved(n.start, n.end), unapproved: unapproved(n.start, n.end), new_payrun_hours: ['ask', 'copy', 'empty'].includes(s.new_payrun_hours) ? s.new_payrun_hours : 'ask' });
   }));
 
   // ---- Copy last week's hours
@@ -84,10 +97,8 @@ module.exports = function payweek(app, h) {
     p.people = p.people.filter(x => inScope(req.user, 'timesheets', x.user_id, 2));
     res.json(p);
   }));
-  app.post('/api/staff/payroll/copy-hours', requireArea('payroll', 2), requireArea('timesheets', 2), wrap((req, res) => {
-    const b = req.body || {}, p = plan(b.period_start, b.period_end);
-    const list = Array.isArray(b.entries) ? b.entries.slice(0, 500) : [];
-    if (!list.length) bad('Tick at least one shift to copy.');
+  /** Save copied shifts (each checked against the plan again); one that fails comes back with the reason. */
+  function insertCopies(req, p, list) {
     const ok = new Map(p.people.map(x => [x.user_id, x]));
     const note = `copied from ${p.from_label}`, results = [];
     const ins = db.prepare('INSERT INTO timesheets(user_id, clock_in, clock_out, notes) VALUES(?,?,?,?)');
@@ -110,11 +121,43 @@ module.exports = function payweek(app, h) {
         if (leaveOn.get(person.user_id, d, d)) bad(`${person.name} is on leave on ${d}.`);
         assertNoOverlap(person.user_id, x.clock_in, x.clock_out);
         ins.run(person.user_id, x.clock_in, x.clock_out, note); added.add(`${person.user_id}:${d}`);
-        results.push({ i, ok: true });
+        results.push({ i, ok: true, user_id: person.user_id });
       } catch (e) { results.push({ i, ok: false, error: e.message }); }
     });
     const saved = results.filter(r => r.ok).length;
     if (saved) { audit(req, 'Copied hours', `${saved} shift${saved === 1 ? '' : 's'} into ${p.label}, ${note}`); broadcast({ type: 'shift' }, true); }
-    res.json({ saved, failed: results.length - saved, results, note });
+    return { saved, failed: results.length - saved, results, note };
+  }
+  app.post('/api/staff/payroll/copy-hours', requireArea('payroll', 2), requireArea('timesheets', 2), wrap((req, res) => {
+    const b = req.body || {}, p = plan(b.period_start, b.period_end);
+    const list = Array.isArray(b.entries) ? b.entries.slice(0, 500) : [];
+    if (!list.length) bad('Tick at least one shift to copy.');
+    res.json(insertCopies(req, p, list));
+  }));
+
+  // ---- Start next pay run (one click): open the next period, and copy last period's hours or start empty
+  app.post('/api/staff/payroll/next-run', requireArea('payroll', 2), wrap((req, res) => {
+    const b = req.body || {}, s = getSettings(), n = nextPeriod(), label = range(n.start, n.end);
+    const word = n.frequency === 'weekly' ? 'last week' : 'the last pay period';
+    const was = openPeriod(n);
+    if (was) return res.json({ ...n, label, mode: was.mode, already_started: true, copied_people: 0, copied_shifts: 0,
+      message: `${label} is already started${was.mode === 'copy' ? ` (${was.copied_people || 0} people's hours were copied from ${word})` : ''}. Nothing was copied again.` });
+    const setting = ['ask', 'copy', 'empty'].includes(s.new_payrun_hours) ? s.new_payrun_hours : 'ask';
+    const mode = ['copy', 'empty'].includes(b.mode) ? b.mode : setting === 'ask' ? bad("Choose: copy last week's hours, or start empty.") : setting;
+    if (mode === 'copy' && levelOf(req.user, 'timesheets') < 2) throw new HttpError(403, "Copying hours needs Add & edit access to Timesheets. Start empty instead, or ask an administrator.");
+    let copied = { saved: 0, results: [] }, salaried = [];
+    if (mode === 'copy') {
+      const p = plan(n.start, n.end); salaried = p.salaried;
+      const list = p.people.filter(x => inScope(req.user, 'timesheets', x.user_id, 2))
+        .flatMap(x => x.rows.filter(r => !r.skip).map(r => ({ user_id: x.user_id, clock_in: r.clock_in, clock_out: r.clock_out })));
+      if (list.length) copied = insertCopies(req, p, list);
+    }
+    const people = new Set(copied.results.filter(r => r.ok).map(r => r.user_id)).size;
+    setSetting('payroll_open_period', JSON.stringify({ start: n.start, end: n.end, mode, copied_people: people, copied_shifts: copied.saved, at: new Date().toISOString(), by: req.user.id }));
+    audit(req, 'Started a pay run', `${label}: ${mode === 'copy' ? `copied ${copied.saved} shift${copied.saved === 1 ? '' : 's'} for ${people} ${people === 1 ? 'person' : 'people'} from ${word}` : 'started empty'}`);
+    const message = mode === 'empty' ? `${label} started with no hours. Enter each person's hours, or copy ${word}'s hours if they're the same.`
+      : people ? `Copied ${people} ${people === 1 ? "person's" : "people's"} hours from ${word}. Check and change anything that's different.`
+        : `Nothing to copy from ${word} (no hours then, or everyone already has hours). Enter the hours below.`;
+    res.json({ ...n, label, mode, already_started: false, copied_people: people, copied_shifts: copied.saved, not_copied: copied.results.filter(r => !r.ok).map(r => r.error), salaried, message });
   }));
 };
