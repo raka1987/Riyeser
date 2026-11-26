@@ -14,4 +14,6 @@
 {% for l in lines %}<tr><td><a href="{{ url_for('core.account_ledger', aid=l.account_id) }}">{{ l.code }} {{ l.name }}</a></td><td>{{ l.memo or '' }}</td><td>{{ l.tcode or '' }}</td><td>{{ l.jcode or '' }}</td>
 <td class="n">{{ l.debit|money0 }}</td><td class="n">{{ l.credit|money0 }}</td></tr>{% endfor %}
 <tr class="grand"><td colspan="4">Total</td><td class="n">{{ lines|sum(attribute='debit')|money }}</td><td class="n">{{ lines|sum(attribute='credit')|money }}</td></tr></table></div>
+{% if payrun_roster %}{% import "links/_roster.html" as hours %}<h2>Hours: rostered vs paid</h2>
+<p>{{ hours.summary(payrun_roster) }}</p>{{ hours.table(payrun_roster) }}{% endif %}
 {% endblock %}

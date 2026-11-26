@@ -227,3 +227,5 @@ a.bk-slot:hover{background:var(--brand-l,#eef4ff)}
 .btn.danger.solid{background:var(--err);color:#fff;border-color:var(--err)}
 .arc-st{font-weight:600}.arc-st.ok{color:var(--ok)}.arc-st.bad{color:var(--err)}
 @media (max-width:900px){.picks.two{grid-template-columns:1fr}}
+/* Riyeser Payroll 2.3.1: rostered vs paid hours on imported pay runs */
+.hrs-over{color:var(--warn)}.hrs-under{color:var(--text,inherit)}.hrs-row td{background:#fbfbfa;padding-top:4px}.hrs-row summary{cursor:pointer;font-size:13px}.hrs-tbl{margin:8px 0 4px;box-shadow:none}.hrs-tbl table{min-width:0}

@@ -375,6 +375,7 @@ def migrate(db):
     _job_parts_inc_gst(db)
     _unique_document_numbers(db)
     _crm_and_expense_tables(db)
+    _payrun_roster(db)
     db.commit()
 
 
@@ -402,6 +403,11 @@ def _stock_and_quotes(db):
         ("booking_job_id", "INTEGER REFERENCES booking_jobs(id)"),   # a quote: the Bookings job made from it
         ("source_document_id", "INTEGER REFERENCES documents(id)"),  # a bill: the purchase order it received
         ("received_at", "TEXT")))            # a purchase order: everything on it has been received
+
+
+def _payrun_roster(db):
+    """Riyeser Payroll 2.3.1: rostered vs paid hours kept with an imported pay run (JSON, NULL for older files)."""
+    _add_columns(db, "imported_payruns", (("roster", "TEXT"),))
 
 
 def _crm_and_expense_tables(db):

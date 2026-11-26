@@ -5,6 +5,7 @@ Documents\\Riyeser\\Inbox\\Payroll (format: see INTEGRATION.md). Accounting list
 here and posts each one once as a summary journal.
 """
 import json
+import math
 import shutil
 from datetime import date
 
@@ -31,6 +32,49 @@ def ensure_table(db):
         employees INTEGER, gross INTEGER, entry_id INTEGER REFERENCES journal_entries(id),
         file_name TEXT, imported_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
         UNIQUE(source, payrun_id))""")
+    if "roster" not in {r["name"] for r in db.execute("PRAGMA table_info(imported_payruns)")}:
+        db.execute("ALTER TABLE imported_payruns ADD COLUMN roster TEXT")  # same as db._payrun_roster
+
+
+# Riyeser Payroll 2.3.1 adds, per employee, rostered_hours / paid_hours / hours_difference / hours_source when the
+# pay period had a published roster. Optional: files without them import as before; they never change the amounts.
+HOURS_FROM = {"clock": "time clock", "roster": "from the roster", "typed": "typed", "copied": "copied",
+              "mixed": "mixed", "none": "no timesheets"}
+
+
+def _hours(v):
+    if isinstance(v, bool):
+        return None
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return round(x, 2) if math.isfinite(x) and abs(x) < 100000 else None
+
+
+def parse_roster(employees):
+    """The rostered vs paid hours in a pay run file, or None when it has none (older Payroll, no roster)."""
+    rows = []
+    for e in employees:
+        r, p = _hours(e.get("rostered_hours")), _hours(e.get("paid_hours"))
+        if r is None or p is None:
+            continue
+        src = str(e.get("hours_source") or "")[:20]
+        rows.append(dict(name=str(e.get("name") or "Employee")[:120], rostered=r, paid=p, diff=round(p - r, 2),
+                         source=src, source_label=HOURS_FROM.get(src, src)))
+    if not rows:
+        return None
+    tot = {k: round(sum(x[k] for x in rows), 2) for k in ("rostered", "paid")}
+    tot["diff"] = round(tot["paid"] - tot["rostered"], 2)
+    return dict(employees=rows, total=tot, from_roster=sum(1 for x in rows if x["source"] == "roster"))
+
+
+def load_roster(text):
+    try:
+        r = json.loads(text) if text else None
+    except ValueError:
+        return None
+    return r if isinstance(r, dict) and r.get("employees") else None
 
 
 def parse_payrun(raw):
@@ -57,7 +101,8 @@ def parse_payrun(raw):
     tot = {k: sum(e[k] for e in emps) for k in ("gross", "tax", "contrib", "deductions", "net")}
     return dict(source=d.get("source") or "Riyeser Payroll", payrun_id=str(d["payrun_id"]), pay_date=d["pay_date"],
                 period=f"{d.get('period_start', '')} to {d.get('period_end', '')}".strip(" to"),
-                currency=d.get("currency") or "", employees=emps, totals=tot)
+                currency=d.get("currency") or "", employees=emps, totals=tot,
+                roster=parse_roster(d["employees"]))
 
 
 # Where each part of an imported pay run is posted (S30). Chosen on the first import and kept for the next ones.
@@ -129,9 +174,10 @@ def import_payrun(db, pr, bank_account_id, file_name=None, accounts=None):
     eid = post_entry(db, pr["pay_date"], f"{pr['source']} pay run {pr['payrun_id']} ({len(pr['employees'])} staff)",
                      "payroll_import", lines, reference=pr["payrun_id"])
     db.execute("UPDATE journal_entries SET source_id=? WHERE id=?", (eid, eid))
-    db.execute("INSERT INTO imported_payruns (source, payrun_id, pay_date, employees, gross, entry_id, file_name)"
-               " VALUES (?,?,?,?,?,?,?)", (pr["source"], pr["payrun_id"], pr["pay_date"], len(pr["employees"]),
-                                           t["gross"], eid, file_name))
+    roster = pr.get("roster")
+    db.execute("INSERT INTO imported_payruns (source, payrun_id, pay_date, employees, gross, entry_id, file_name, roster)"
+               " VALUES (?,?,?,?,?,?,?,?)", (pr["source"], pr["payrun_id"], pr["pay_date"], len(pr["employees"]),
+                                             t["gross"], eid, file_name, json.dumps(roster) if roster else None))
     audit(db, "payroll_import", f"{pr['payrun_id']} gross {fmt_money(t['gross'])}")
     return eid
 
@@ -151,7 +197,8 @@ def payroll():
             files.append(dict(name=f.name, pr=pr, done=done, error=None))
         except (PostingError, ValueError, OSError) as e:
             files.append(dict(name=f.name, pr=None, done=None, error=str(e)))
-    history = db.execute("SELECT * FROM imported_payruns ORDER BY id DESC LIMIT 50").fetchall()
+    history = [dict(h, roster=load_roster(h["roster"]))
+               for h in db.execute("SELECT * FROM imported_payruns ORDER BY id DESC LIMIT 50").fetchall()]
     first = not db.execute("SELECT 1 FROM payroll_import_accounts").fetchone()
     books = db.execute("SELECT currency FROM company WHERE id=1").fetchone()["currency"] or "AUD"
     return render_template("links/payroll.html", files=files, history=history, inbox=inbox(),

@@ -199,7 +199,13 @@ def entry(eid):
     if e and e["source_type"] in PAYROLL_SOURCES and not can("payroll"):
         abort(403)
     reversal = db.execute("SELECT id FROM journal_entries WHERE reverses_id=?", (eid,)).fetchone()
-    return render_template("core/entry.html", e=e, lines=lines, reversal=reversal)
+    payrun_roster = None
+    if e and e["source_type"] == "payroll_import":  # Riyeser Payroll 2.3.1: rostered vs paid hours, when the file had them
+        from .links import ensure_table, load_roster
+        ensure_table(db)
+        row = db.execute("SELECT roster FROM imported_payruns WHERE entry_id=?", (eid,)).fetchone()
+        payrun_roster = load_roster(row["roster"]) if row else None
+    return render_template("core/entry.html", e=e, lines=lines, reversal=reversal, payrun_roster=payrun_roster)
 
 
 @bp.route("/entry/<int:eid>/reverse", methods=["POST"])

@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block title %}Import from Riyeser Payroll{% endblock %}
 {% from "_macros.html" import account_select %}
+{% import "links/_roster.html" as hours %}
 {% block content %}
 <div class="head"><div><h1>Import from Riyeser Payroll</h1>
 <p class="sub">Riyeser Payroll saves each pay run into <b>{{ inbox }}</b>. Import it here to record wages, tax withheld and employer contributions in your books. Each pay run can only be imported once.</p></div></div>
@@ -17,9 +18,9 @@
 {% else %}{% set t = f.pr.totals %}<tr><td>{{ f.name }}<br><span class="muted">{{ f.pr.source }} · {{ f.pr.payrun_id }}{% if f.pr.currency %} · {{ f.pr.currency }}{% endif %}</span></td>
 <td>{{ f.pr.pay_date }}</td><td>{{ f.pr.period }}</td><td class="n">{{ f.pr.employees|length }}</td><td class="n">{{ t.gross|money }}</td><td class="n">{{ t.tax|money }}</td>
 <td class="n">{{ t.contrib|money }}</td><td class="n">{{ t.net|money }}</td>
-<td>{% if f.done %}<a class="badge paid" href="{{ url_for('core.entry', eid=f.done.entry_id) }}">imported</a>{% else %}<button class="btn sm pri" name="name" value="{{ f.name }}">Import</button>{% endif %}</td></tr>{% endif %}
+<td>{% if f.done %}<a class="badge paid" href="{{ url_for('core.entry', eid=f.done.entry_id) }}">imported</a>{% else %}<button class="btn sm pri" name="name" value="{{ f.name }}">Import</button>{% endif %}</td></tr>{% if f.pr.roster %}{{ hours.details(f.pr.roster, 9) }}{% endif %}{% endif %}
 {% else %}<tr><td colspan="9" class="muted">No pay runs waiting. When Riyeser Payroll finishes a pay run it appears here.</td></tr>{% endfor %}</table></div></form>
 {% if history %}<h2>Imported</h2><div class="tbl"><table><tr><th>When</th><th>Pay run</th><th>Pay date</th><th class="n">Staff</th><th class="n">Gross</th><th></th></tr>
 {% for h in history %}<tr><td>{{ h.imported_at }}</td><td>{{ h.payrun_id }}</td><td>{{ h.pay_date }}</td><td class="n">{{ h.employees }}</td><td class="n">{{ h.gross|money }}</td>
-<td><a class="btn sm" href="{{ url_for('core.entry', eid=h.entry_id) }}">Journal</a></td></tr>{% endfor %}</table></div>{% endif %}
+<td><a class="btn sm" href="{{ url_for('core.entry', eid=h.entry_id) }}">Journal</a></td></tr>{% if h.roster %}{{ hours.details(h.roster, 6) }}{% endif %}{% endfor %}</table></div>{% endif %}
 {% endblock %}

@@ -37,6 +37,33 @@ When a pay run is finalised, Riyeser Payroll writes one UTF-8 JSON file to `Docu
 - **`other_deductions`** is optional. It covers the employee's own FNPF share, loans and other deductions.
 - **`net`** must equal `gross − tax_withheld − other_deductions`. If you leave it out, it is calculated for you.
 - **`payrun_id`** together with `source` must be unique. Accounting refuses to import the same pay run twice. Reversing the import in Accounting allows it to be imported again.
+- **Unknown fields are ignored.** A newer Payroll can add fields; an older Accounting imports the file as before.
+
+**Rostered vs paid hours** (optional, Riyeser Payroll 2.3.1 and later). Written only when the pay period has a
+**published** roster in Payroll, for hourly staff (not salary, not an extra/bonus pay run). Files without them (older
+Payroll, no roster) import exactly as before. They are information for the accountant: they never change the amounts
+posted.
+
+```json
+  "employees": [
+    {"name": "Iliesa", "gross": 650.00, "tax_withheld": 48.00, "employer_contribution": 65.00,
+     "other_deductions": 52.00, "net": 550.00,
+     "rostered_hours": 38, "paid_hours": 40.5, "hours_difference": 2.5, "hours_source": "roster"}
+  ],
+  "roster_summary": {"rostered_hours": 38, "paid_hours": 40.5, "hours_difference": 2.5, "employees": 1, "from_roster": 1}
+```
+
+- **`rostered_hours`**: the person's shifts in the period on the published roster, each start to finish less the
+  roster's break (draft, unpublished changes don't count).
+- **`paid_hours`**: the hours paid (worked less Payroll's unpaid breaks, or the hours an admin set in the pay run).
+- **`hours_difference`**: `paid_hours − rostered_hours` (+ over the roster, − under).
+- **`hours_source`**: how the hours got into Payroll: `clock` (time clock / Clock in), `roster` (Fill from the roster),
+  `copied` (Copy last week's hours), `typed` (entered or changed by hand, or set in the pay run), `mixed` (more than
+  one; then `hours_sources` gives the hours of each, e.g. `{"clock": 30, "typed": 8}`) or `none` (no timesheets).
+- **`roster_summary`**: the run's totals of the above, how many people have them, and how many were filled from the roster.
+
+Accounting shows these per employee and in total (Rostered h, Paid h, Difference, "hours from roster") on the inbox
+list, in the import history and on the imported journal, and keeps them with the import (`imported_payruns.roster`).
 
 **What Accounting posts** (one summary journal, dated `pay_date`):
 

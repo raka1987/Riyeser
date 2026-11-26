@@ -1,0 +1,9 @@
+{# Riyeser Payroll 2.3.1: rostered hours (published roster) vs paid hours in an imported pay run. Over in amber. #}
+{% macro hrs(x) %}{{ '%g'|format(x) }} h{% endmacro %}
+{% macro diff(x) %}{% if x > 0 %}<b class="hrs-over">+{{ hrs(x) }}</b>{% elif x < 0 %}<b class="hrs-under">&minus;{{ hrs(-x) }}</b>{% else %}<span class="muted">&plusmn;0 h</span>{% endif %}{% endmacro %}
+{% macro summary(r) %}Rostered {{ hrs(r.total.rostered) }} &middot; paid {{ hrs(r.total.paid) }} &middot; {{ diff(r.total.diff) }}{% if r.from_roster %} &middot; <span class="muted">{{ r.from_roster }} {{ "person's" if r.from_roster == 1 else "people's" }} hours from the roster</span>{% endif %}{% endmacro %}
+{% macro table(r) %}<div class="tbl hrs-tbl"><table><tr><th>Employee</th><th class="n">Rostered h</th><th class="n">Paid h</th><th class="n">Difference</th><th>Hours from</th></tr>
+{% for x in r.employees %}<tr><td>{{ x.name }}</td><td class="n">{{ '%g'|format(x.rostered) }}</td><td class="n">{{ '%g'|format(x.paid) }}</td><td class="n">{{ diff(x.diff) }}</td><td>{% if x.source == 'roster' %}<span class="badge open">hours from roster</span>{% else %}<span class="muted">{{ x.source_label or '' }}</span>{% endif %}</td></tr>{% endfor %}
+<tr class="grand"><td>Total</td><td class="n">{{ '%g'|format(r.total.rostered) }}</td><td class="n">{{ '%g'|format(r.total.paid) }}</td><td class="n">{{ diff(r.total.diff) }}</td><td></td></tr></table></div>
+<p class="muted small">Rostered: the published roster in Riyeser Payroll (shift less its break). Paid: the hours paid. For information only: the amounts posted don't change.</p>{% endmacro %}
+{% macro details(r, cols) %}<tr class="hrs-row"><td colspan="{{ cols }}"><details><summary>Hours: {{ summary(r) }}</summary>{{ table(r) }}</details></td></tr>{% endmacro %}
