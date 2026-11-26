@@ -149,7 +149,8 @@ const text = (pg, sel) => pg.textContent(sel).then((t) => t.replace(/\s+/g, ' ')
     assert.strictEqual(await text(p8b, '#mynone'), 'Your business hasn\'t set up office phones yet. Ask Pat Owner.');
     const [p8c] = await page({ admin: true, my: mine({ office: null, phones: [] }) }); await p8c.waitForSelector('#mytophones');
     console.log('admin, no Link Office:', await text(p8c, '#mynone'));
-    await p8c.click('#mytophones'); await p8c.waitForSelector('#phonesPage'); console.log('-> Phones set-up guide');
+    await p8c.click('#mytophones'); await p8c.waitForTimeout(1500); assert.ok(!(await p8c.$('#phonesPage')), 'Desk phones waits for two-step sign-in');
+    console.log('-> an admin without two-step sign-in is asked to set it up before Desk phones (Management)');
 
     // 9. an older database: the extension from People & access, no errors
     const [p9] = await page({ oldDatabase: true }); await p9.waitForSelector('#myPhonePage');
@@ -159,12 +160,14 @@ const text = (pg, sel) => pg.textContent(sel).then((t) => t.replace(/\s+/g, ' ')
     const [p10] = await page({}, BASE + '/link/'); await p10.waitForSelector('#hmyphone');
     console.log('home tile:', await text(p10, '#hmyphone'));
     await p10.click('#hmyphone'); await p10.waitForSelector('#myPhonePage'); await p10.click('#myback'); await p10.waitForSelector('#hchat');
-    await p10.click('#hchat'); await p10.waitForSelector('#comyphone');
-    assert.ok(!(await p10.$('#cophones')), 'members don\'t get the Desk phones button');
-    await p10.click('#comyphone'); await p10.waitForSelector('#myPhonePage'); assert.match(await text(p10, '#myback'), /Back to chat/);
-    await p10.click('#myback'); await p10.waitForSelector('#coset'); await p10.click('#coset'); await p10.waitForSelector('[data-s=myphone]');
-    assert.ok(!(await p10.$('[data-s=phones]')), 'Settings: no Desk phones for members');
-    await p10.click('[data-s=myphone]'); await p10.waitForSelector('#myPhonePage'); console.log('chat sidebar, home tile, ⚙ Settings: ok');
+    await p10.click('#hchat'); await p10.waitForSelector('#lkshell');
+    assert.ok(!(await p10.$('#cophones')) && !(await p10.$('#um-mgmt')), 'members don\'t get Desk phones or Management');
+    await p10.click('#umenu'); await p10.click('#coset'); await p10.waitForSelector('#comyphone');
+    assert.ok(!(await p10.$('#set-mgmt')), 'Settings: no Management for members');
+    await p10.click('#comyphone'); await p10.waitForSelector('#myPhonePage'); assert.match(await text(p10, '#myback'), /Back to Settings/);
+    await p10.click('#myback'); await p10.waitForSelector('#comyphone');
+    await p10.click('#umenu'); await p10.click('#um-phone'); await p10.waitForSelector('#vmyph'); await p10.click('#vmyph'); await p10.waitForSelector('#myPhonePage');
+    console.log('home tile, Settings → My phone, the menu under your picture → My phone and devices: ok');
 
     // 11. phone width
     const mob = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); mob.on('pageerror', (e) => errs.push('phone: ' + e.message));

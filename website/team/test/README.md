@@ -52,16 +52,22 @@
   "How did we do?" and the `?help#T-…` email link. HQ: `../../hq/test-hq-support.js` (three columns, filters, assign,
   status, separate drafts with the audience line, Log a call, Next update, diagnostics, support notes, phone width).
   Riyeser Central: `desktop/test/diagnostics.test.js` (scrubbing, 200 lines / 64 KB, the preview is what's sent).
-- `link-ui-test.js`: the Riyeser Link workspace (phase 1) in the demo and against a pretend Supabase: the panels (nav, list,
-  conversation, People / Info), the status picker and Away after 10 idle minutes, reactions, pin and unpin, New chat, presence
-  and extensions in the People panel, Quick dial, the floating call bar between two tabs (mute, hold, audio, end, chat while
-  calling), an incoming call (Answer / Decline, the 📞 title, Do not disturb), themes (dark, light, match my computer, six
-  accents, contrast checks), Admin / Settings hidden for members, phone width (one panel at a time), files (link-files) and an
-  older database. Saves screenshots to the folder given. `rules-test.sql` covers presence, reactions, pins and file rules.
-- `channel-menu-test.js`: the ⋯ channel menu (header, hover and right-click in the list): Rename, Edit topic, Members, Mute,
+- `link-ui-test.js`: the Riyeser Link workspace (concept A: one list, one chat) in the demo and against a pretend Supabase: the
+  slim top bar and two panels (All · Channels · People · Unread, one badge a row, pinned at the top), Calls (with Voicemail)
+  and People as views, details (ⓘ) only when asked for; your status (Available, Busy / Do not disturb, At lunch, Away,
+  Unavailable; 30 min / 1 hour / until a time, then back to Available; Away after 10 idle minutes; On a call and Offline
+  can't be chosen) next to names; reactions, pins, New chat, files; the keypad only from Call or Calls; the call pill between
+  two tabs (mute, hold, audio, end, nothing covered, "On a call" by itself and back afterwards); an incoming call (Answer /
+  Decline, the 📞 title); Busy, At lunch and Unavailable don't ring (the caller is told; a ring the database refuses doesn't
+  ring either); Management locked (a fresh code each time, the demo's code shown, locks after 15 idle minutes, Lock now, a
+  reload); staff never see Management or any admin item; themes and contrast; phone width (Chats · Calls · People · Settings
+  along the bottom, a chat full screen, the status menu); files (link-files); an older database. `rules-test.sql` covers
+  presence, the new statuses and "until", no ringing on Busy / At lunch / Unavailable, desk phone "On a call", owner-only
+  admins, reactions, pins and file rules.
+- `channel-menu-test.js`: the ⋯ channel menu (header, hover and right-click in the list; on a phone the chat's own ⋯): Rename, Edit topic, Members, Mute,
   Pin, Leave / Join again, Archive (the in-page question, the folded Archived section, read-only, Unarchive); #general can't
-  be archived, renamed or left; a member only sees what they may do; folding the left menu, the right panel and each list
-  section, remembered per person after a reload (Enter, Ctrl + [ and Ctrl + ]); phone width; light and dark; against a
+  be archived, renamed or left; a member only sees what they may do; the details (ⓘ) only on demand (Ctrl + ]) and the
+  filter chips; phone width; light and dark; against a
   pretend Supabase (channel_rename / channel_archive / channel_mute, the database's refusal in the dialog, an older
   database). `rules-test.sql` covers the database side (who may rename and archive, two-step sign-in for admins,
   #general, read-only archived channels, mute and leave are each person's own, another business can't touch any of it).

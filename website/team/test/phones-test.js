@@ -31,6 +31,8 @@ const office = (more = {}) => ({ office_id: 'lo-0001', pc_name: 'OFFICE-PC', ver
     { extension: '102', name: 'Bo Example', type: 'person', registered: 0, desk_phones: 1, app_users: 0, dnd: false }, { extension: '103', name: 'Cam Test', type: 'person', registered: 1, desk_phones: 2, app_users: 1, dnd: false }],
   ...more });
 
+// Management (and so Desk phones) asks for a fresh two-step code each time: the pretend server takes 246810
+async function unlock(p, code = '246810') { await p.waitForSelector('#mgucode'); await p.fill('#mgucode', code); await p.click('#mgugo'); }
 async function fakeServer(page, opts = {}) {
   const st = { calls: [], commands: [], taken: 0, support: null, offices: opts.offices || [], tickets: [] };
   const role = opts.member ? 'member' : 'owner';
@@ -44,6 +46,10 @@ async function fakeServer(page, opts = {}) {
     if (opts.oldDatabase && fn.startsWith('link_')) return json({ code: 'PGRST202', message: `Could not find the function public.${fn} in the schema cache` }, 404);
     if (u.pathname === '/auth/v1/token') return json({ access_token: token(), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user });
     if (u.pathname === '/auth/v1/user') return json(user);
+    // Management's fresh code (a new challenge and verify on the two-step factor)
+    if (u.pathname === '/auth/v1/factors/f1/challenge') { (st.calls || []).push('mfa_challenge'); return json({ id: 'ch1', expires_at: Math.floor(Date.now() / 1000) + 300 }); }
+    if (u.pathname === '/auth/v1/factors/f1/verify') { const code = JSON.parse(r.request().postData()).code; if (code !== '246810') return json({ code: 'mfa_verification_failed', msg: 'Invalid TOTP code entered' }, 422);
+      return json({ access_token: token(), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r2', user }); }
     if (u.pathname === '/rest/v1/members' && u.search.includes('workspaces')) return json([{ role, job_role: role, display_name: 'Alex Sample', workspaces: { id: 'w1', name: 'Sample Plumbing', invite_code: 'AB12CD34', company_code: 'RIY-7K3M-Q2', kind: 'business', country: 'Fiji' } }]);
     if (u.pathname === '/rest/v1/members') return json([{ user_id: user.id, display_name: 'Alex Sample', role, job_role: role, extension: 101 }]);
     if (u.pathname === '/rest/v1/channels') return json([{ id: 'c1', kind: 'channel', name: 'general', topic: null }]);
@@ -93,18 +99,18 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     const p1 = await b.newPage({ viewport: { width: 1280, height: 900 } }); p1.on('pageerror', (e) => errs.push(e.message));
     await fakeServer(p1); await signIn(p1, BASE + '/link/'); await p1.waitForSelector('#hphones');
     console.log('home tile:', await text(p1, '#hphones'));
-    await p1.click('#hphones'); await p1.waitForSelector('.lo-setup');
+    await p1.click('#hphones'); await unlock(p1); await p1.waitForSelector('.lo-setup');
     const s1 = await steps(p1); console.log('steps, nothing yet:', s1);
     assert.deepStrictEqual(s1, ['· Install Riyeser Link Office on a PC at the office that stays on.', '· Sign in on that PC.', '· Plug in your desk phones.', '· Give each phone to a person.', '· Make a test call.']);
     assert.strictEqual(await p1.getAttribute('.lo-setup a.btn', 'href'), '/help/link.html#desk-phones');
-    assert.match(await text(p1, '.hbrand-t'), /Settings › ☎ Desk phones/);
+    assert.match(await text(p1, '.hbrand-t'), /Management › ☎ Desk phones/);
     await p1.screenshot({ path: out + '/phones-guide.png', fullPage: true });
     await p1.click('#phback'); await p1.waitForSelector('.hco'); console.log('back to Riyeser home: ok');
 
     // 2. with a heartbeat, straight from riyeser.com/link/?phones
     const pg = await b.newPage({ viewport: { width: 1280, height: 900 } }); pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
     const st = await fakeServer(pg, { offices: [office()] });
-    await signIn(pg, BASE + '/link/?phones'); await pg.waitForSelector('#loaddr');
+    await signIn(pg, BASE + '/link/?phones'); await unlock(pg); await pg.waitForSelector('#loaddr');
     console.log('server address:', await text(pg, '#loaddr'), 'port', await text(pg, '#loport'), '| state:', await text(pg, '#lostate'), '| seen:', await text(pg, '#loseen'));
     assert.strictEqual(await text(pg, '#loaddr'), '192.168.1.20'); assert.strictEqual(await text(pg, '#loport'), '5060'); assert.strictEqual(await text(pg, '#lostate'), 'Running');
     const warn = await text(pg, '.lo-warn'); assert.match(warn, /DHCP reservation/); assert.match(warn, /3C:52:82:1A:2B:3C/);
@@ -245,38 +251,41 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.strictEqual(await text(pg, '.lo-setdone'), '✓ Office phones are set up · Show the steps');
     await pg.click('[data-step="show"]'); await pg.waitForSelector('.lo-setup'); await pg.click('[data-step="hide"]'); await pg.waitForSelector('.lo-setdone');
 
-    // the chat sidebar: ☎ Desk phones, and ⚙ Settings → Desk phones
-    await pg.click('#phback'); await pg.waitForSelector('.hco'); await pg.click('#hchat'); await pg.waitForSelector('#cophones');
-    await pg.click('#cophones'); await pg.waitForSelector('#loaddr'); await pg.click('#phback'); await pg.waitForSelector('#coset');
-    await pg.click('#coset'); await pg.waitForSelector('[data-s=phones]');
+    // Management → Desk phones (a fresh two-step code first), and back to Management
+    await pg.click('#phback'); await pg.waitForSelector('.hco'); await pg.click('#hchat'); await pg.waitForSelector('#lkshell');
+    await pg.click('#umenu'); await pg.click('#um-mgmt'); await pg.waitForSelector('#cophones');   // still unlocked from opening Desk phones
+    await pg.evaluate(() => window.RiyeserTeam.management.lock()); await pg.waitForSelector('#mgcode');   // locked again: a fresh code
+    await pg.fill('#mgcode', '111111'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgerr:not([hidden])');
+    await pg.fill('#mgcode', '246810'); await pg.click('#mgunlock'); await pg.waitForSelector('#cophones');
     await pg.screenshot({ path: out + '/settings-menu.png' });
-    await pg.click('[data-s=phones]'); await pg.waitForSelector('#loaddr'); console.log('⚙ Settings → Desk phones: ok');
+    await pg.click('#cophones'); await pg.waitForSelector('#loaddr'); assert.match(await text(pg, '#phback'), /Back to Management/);
+    await pg.click('#phback'); await pg.waitForSelector('#mgopen'); console.log('Management → Desk phones: ok');
 
     // 11. real calls made: step 5 ticks itself (no tick by hand)
     const p11 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p11.on('pageerror', (e) => errs.push(e.message));
     const done = office(); done.phones = done.phones.filter((p) => p.assigned); done.counts.calls_made = 4;
-    await fakeServer(p11, { offices: [done] }); await signIn(p11, BASE + '/link/?phones'); await p11.waitForSelector('.lo-setdone');
+    await fakeServer(p11, { offices: [done] }); await signIn(p11, BASE + '/link/?phones'); await unlock(p11); await p11.waitForSelector('.lo-setdone');
     await p11.screenshot({ path: out + '/phones-allset.png' });
     // no calls reported: "Done" by hand
     const p12 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p12.on('pageerror', (e) => errs.push(e.message));
     const nocall = office(); nocall.phones = nocall.phones.filter((p) => p.assigned);
-    await fakeServer(p12, { offices: [nocall] }); await signIn(p12, BASE + '/link/?phones'); await p12.waitForSelector('[data-step="test"]');
+    await fakeServer(p12, { offices: [nocall] }); await signIn(p12, BASE + '/link/?phones'); await unlock(p12); await p12.waitForSelector('[data-step="test"]');
     assert.deepStrictEqual((await steps(p12)).map((x) => x[0]), ['✓', '✓', '✓', '✓', '·']);
     await p12.click('[data-step="test"]'); await p12.waitForSelector('.lo-setdone'); console.log('test call ticked by hand: folded away');
 
     // 12. Riyeser Link paused: how to add it
     const p8 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p8.on('pageerror', (e) => errs.push(e.message));
-    await fakeServer(p8, { noPlus: true, offices: [office()] }); await signIn(p8, BASE + '/link/?phones'); await p8.waitForSelector('.lo-up');
+    await fakeServer(p8, { noPlus: true, offices: [office()] }); await signIn(p8, BASE + '/link/?phones'); await unlock(p8); await p8.waitForSelector('.lo-up');
     assert.match(await text(p8, '.lo-up p'), /^Riyeser Link is paused, so desk phones and calls are paused too\./);
 
     // 13. an older database: the steps, nothing breaks
     const p9 = await b.newPage({ viewport: { width: 1100, height: 800 } }); p9.on('pageerror', (e) => errs.push('old db: ' + e.message));
-    await fakeServer(p9, { oldDatabase: true }); await signIn(p9, BASE + '/link/?phones'); await p9.waitForSelector('.lo-setup');
+    await fakeServer(p9, { oldDatabase: true }); await signIn(p9, BASE + '/link/?phones'); await unlock(p9); await p9.waitForSelector('.lo-setup');
     assert.ok(!(await p9.$('#phonesPage .err')));
 
     // 14. phone width
     const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); ph.on('pageerror', (e) => errs.push('phone: ' + e.message));
-    await fakeServer(ph, { offices: [office()] }); await signIn(ph, BASE + '/link/?phones'); await ph.waitForSelector('#loaddr');
+    await fakeServer(ph, { offices: [office()] }); await signIn(ph, BASE + '/link/?phones'); await unlock(ph); await ph.waitForSelector('#loaddr');
     const over = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth); console.log('phone overflow:', over);
     assert.strictEqual(over, 0);
     await ph.screenshot({ path: out + '/phones-phone.png', fullPage: true });
@@ -287,7 +296,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
 
     // the demo works too
     const pd = await b.newPage(); pd.on('pageerror', (e) => errs.push('demo: ' + e.message));
-    await pd.goto(BASE + '/link/?demo&phones'); await pd.waitForSelector('#loaddr'); console.log('demo ?phones:', await text(pd, '#loaddr'));
+    await pd.goto(BASE + '/link/?demo&phones'); await unlock(pd, '123456'); await pd.waitForSelector('#loaddr'); console.log('demo ?phones:', await text(pd, '#loaddr'));
     assert.deepStrictEqual((await rows(pd)).map((x) => x.st), ['Online', 'Online', 'Offline']);
   } catch (e) { failed = true; console.error('FAILED:', e.message); }
   console.log('errors:', errs); await b.close();

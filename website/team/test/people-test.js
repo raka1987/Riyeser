@@ -62,9 +62,9 @@ async function signIn(pg, path = '/link/') {
     check(/Requests\s*2/.test(await pg.textContent('#hreq')), 'S7 home: Requests shows 2 waiting before two-step sign-in');
     await pg.waitForSelector('.mcard #vf', { timeout: 5000 }); check(true, 'S7 the ?requests link from the email opens two-step set-up first (names need it)');
     check(!(await pg.evaluate(() => location.search)).includes('requests'), 'S7 the address is tidied');
-    await pg.click('.mcard #cl'); await pg.click('#hchat'); await pg.waitForSelector('#bellc');
-    check(await pg.textContent('#bellc') === '2' && await pg.isVisible('#bellc'), 'S7 the bell counts the 2 join requests');
-    await pg.click('#bell'); check(/2 join requests/.test(await pg.textContent('.bellmenu, #bellmenu, .popmenu').catch(() => pg.textContent('body'))), 'S7 the bell menu says "2 join requests"');
+    await pg.click('.mcard #cl'); await pg.click('#hchat'); await pg.waitForSelector('#lkshell');
+    await pg.click('#umenu'); await pg.waitForSelector('#um-mgmt');
+    check(await pg.textContent('#um-mgmt .badge') === '2', 'S7 the menu under your picture shows the 2 join requests next to Management');
     // S59b: the removed person's message keeps their name
     await pg.keyboard.press('Escape');
     check(/Sam Taylor \(left\)/.test(await pg.textContent('#msgs')), 'S59 a removed person\'s message shows "Sam Taylor (left)"');

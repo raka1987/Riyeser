@@ -10,16 +10,17 @@ const URL = BASE + '/link/?demo';
   const open = async (as) => { const p = await ctx.newPage(); p.on('pageerror', (e) => errs.push(as + ': ' + e.message)); p.on('dialog', (d) => d.accept());
     await p.goto(URL + (as ? '&as=' + as : '')); await p.waitForSelector('.item'); return p; };
   const status = (p) => p.evaluate(() => { const c = window.RiyeserTeam.calls.current; return c ? c.status : 'none'; });
-  const tab = async (p, t) => { await p.click(`[data-tab="${t}"]`); await p.waitForTimeout(100); };
+  const tab = async (p, t) => { await p.evaluate((k) => window.RiyeserTeam.setNav(k), t === 'chats' ? 'chat' : t); await p.waitForTimeout(100); };
+  const callDm = async (p) => { await p.click('#callbtn'); await p.click('#calldm'); };   // the green Call button, then Voice call
   const until = async (p, want, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { if ((await status(p)) === want) return true; await p.waitForTimeout(100); } return false; };
 
   const me = await open(''); const jordan = await open('u-jordan');
   await me.waitForTimeout(300); await tab(me, 'calls');
   console.log('Calls tab:', await me.evaluate(() => [...document.querySelectorAll('[data-callbranch]')].map((x) => x.textContent.replace(/\s+/g, ' ').trim())),
-    '| my ext:', await me.textContent('.myext'));
+    '| my ext:', await me.textContent('#mview .lk-sub b'));
 
   // 1. person to person
-  await tab(me, 'chats'); await me.click('[data-dm="u-jordan"]'); await me.waitForTimeout(200); await me.click('#calldm');
+  await tab(me, 'chats'); await me.click('[data-dm="u-jordan"]'); await me.waitForTimeout(200); await callDm(me);
   console.log('1. Jordan rings:', await until(jordan, 'incoming'), '| title:', await jordan.title());
   await jordan.screenshot({ path: out + '/call-incoming.png' });
   await jordan.click('#c-ans');
@@ -43,17 +44,17 @@ const URL = BASE + '/link/?demo';
   await jordan.click('#c-end'); await until(me, 'ended'); await me.waitForTimeout(2700);
 
   // 3. declining
-  await tab(me, 'chats'); await me.click('[data-dm="u-jordan"]'); await me.click('#calldm'); await until(jordan, 'incoming'); await jordan.click('#c-dec');
+  await tab(me, 'chats'); await me.click('[data-dm="u-jordan"]'); await callDm(me); await until(jordan, 'incoming'); await jordan.click('#c-dec');
   console.log('3. declined ->', await until(me, 'ended') && await me.evaluate(() => window.RiyeserTeam.calls.current.note));
   await me.waitForTimeout(2700);
 
   // 4. dial pad
-  await tab(me, 'calls'); await me.click('#dial'); await me.click('[data-k="2"]'); await me.click('[data-k="0"]'); await me.click('[data-k="2"]');
+  await tab(me, 'chats'); await me.click('#callbtn'); await me.click('#callkeys'); await me.click('[data-k="2"]'); await me.click('[data-k="0"]'); await me.click('[data-k="2"]');
   console.log('4. dial 202 ->', await me.textContent('#dpw')); await me.fill('#dpn', '200'); await me.dispatchEvent('#dpn', 'input'); console.log('   dial 200 ->', await me.textContent('#dpw'));
   await me.click('#cl');
 
   // 5. branches and extensions (owner)
-  await me.click('#mgbr'); await me.fill('#nb input', 'Nadi branch'); await me.click('#nb button'); await me.waitForTimeout(300);
+  await tab(me, 'manage'); await me.fill('#mgcode', '123456'); await me.click('#mgunlock'); await me.waitForSelector('#mgbr'); await me.click('#mgbr'); await me.fill('#nb input', 'Nadi branch'); await me.click('#nb button'); await me.waitForTimeout(300);
   console.log('5. new branch:', await me.evaluate(() => window.RiyeserTeam.state.branches.map((x) => `${x.name} ${x.extension} ${x.code}`)));
   await me.fill('[data-ext="u-alex"]', '101'); await me.click('#sx'); await me.waitForTimeout(300);
   console.log('   taken number refused, Alex still:', await me.evaluate(() => window.RiyeserTeam.state.people.find((p) => p.user_id === 'u-alex').extension));
@@ -63,14 +64,14 @@ const URL = BASE + '/link/?demo';
   // 6. one tab alone: a demo call that "answers"; and premium off shows the upsell
   await jordan.close(); await alex.close();
   const solo = await (await b.newContext({ permissions: ['microphone'] })).newPage(); solo.on('pageerror', (e) => errs.push('solo: ' + e.message));
-  await solo.goto(URL); await solo.waitForSelector('.item'); await solo.click('[data-dm="u-sam"]'); await solo.click('#calldm');
+  await solo.goto(URL); await solo.waitForSelector('.item'); await solo.click('[data-dm="u-sam"]'); await callDm(solo);
   const t = Date.now(); let st; while (Date.now() - t < 6000 && (st = await status(solo)) !== 'live') await solo.waitForTimeout(150);
   console.log('6. solo demo call:', st, '|', await solo.textContent('.cwho small'));
   await solo.click('#c-end'); await solo.waitForTimeout(2700);
-  await solo.evaluate(() => { window.RiyeserTeam.state.features = { calls: false }; }); await solo.click('#calldm');
+  await solo.evaluate(() => { window.RiyeserTeam.state.features = { calls: false }; }); await solo.click('#callbtn');
   console.log('   premium off ->', await solo.textContent('.modal h3'));
   const ph = await (await b.newContext({ ...devices['iPhone 13'], permissions: ['microphone'] })).newPage();
-  await ph.goto(URL); await ph.waitForSelector('.item'); await ph.tap('[data-dm="u-sam"]'); await ph.tap('#calldm'); await ph.waitForTimeout(400);
+  await ph.goto(URL); await ph.waitForSelector('.item'); await ph.tap('[data-dm="u-sam"]'); await ph.tap('#callbtn'); await ph.tap('#calldm'); await ph.waitForTimeout(400);
   await ph.screenshot({ path: out + '/call-phone.png' });
   console.log('   phone overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   console.log('errors:', errs); await b.close();

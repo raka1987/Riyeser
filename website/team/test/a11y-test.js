@@ -46,7 +46,7 @@ const CONTRAST = () => {
 
   // ---- Riyeser Link
   { const pg = await page('/link/?demo');
-    await pg.waitForSelector('#lknav'); await pg.click('[data-nav=contacts]').catch(() => {}); await pg.waitForTimeout(300);
+    await pg.waitForSelector('#lkshell'); await pg.click('#infobtn'); await pg.waitForTimeout(300);   // the details (ⓘ): members with their status
     const avs = await pg.$$eval('.av', (x) => x.filter((e) => e.textContent.trim()).map((e) => [e.textContent, window.__contrast(e)]));
     check(avs.length > 3 && avs.every(([, c]) => c >= 4.5), `M21 Link: white initials at least 4.5:1 on every avatar (lowest ${Math.min(...avs.map((a) => a[1])).toFixed(2)})`);
     const nested = await pg.$$eval('[role=button]', (x) => x.filter((e) => e.querySelector('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')).map((e) => e.className));
