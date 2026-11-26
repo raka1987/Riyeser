@@ -250,6 +250,160 @@ const freeInfo = (id) => { const f = FREE_INFO[id]; if (!f) return '';
   return `<div class="freeinfo"><div><b>Included free:</b> ${esc(f.inc)}</div>
     <div><b>Limits <span class="ii" title="${esc(f.lim ? 'The only limit on this free program' : 'No limits on this free program: no time limit, no card')}">ⓘ</span>:</b> ${f.lim ? `<span class="lim">${esc(f.lim)}</span>` : '<span class="nolim">No limits</span>'}${f.note ? ` <span class="muted">${esc(f.note)}</span>` : ''}</div>
     ${f.up ? `<div class="muted">${esc(f.up)}</div>` : ''}</div>`; };
+// ---------- home page "See it in action": each program's real screen with a short guided tour ----------
+// Each step points at a spot on a screenshot (x, y in % of that picture, picked by looking at it) with one plain line on
+// what it does for the business (checked against INCLUDES and the help guides). A step can show another screenshot of
+// the same program; the frame keeps the first one's shape and taller pictures are cut off at the bottom, so every spot
+// must sit inside the first picture's height (checked below; `frame` picks another picture's shape). `prog` is the program page, `m` its PRICE key.
+const DEMO = [
+  { id: 'invoices', label: 'Invoices', prog: 'invoices', finder: ['invoices'],
+    head: 'Send invoices and get paid. Free.', ticks: ['Free forever: unlimited quotes, invoices and customers', 'Print or save any invoice as a PDF to attach to your email', 'Works on your PC, even with no internet'],
+    steps: [['invoices-list', 57, 17, 'Make a quote or an invoice in a few clicks.'],
+      ['invoices-list', 30, 27, 'Customer said yes? Turn the quote into an invoice in one click.'],
+      ['invoices-list', 74, 74, "See who's paid and who's overdue at a glance."],
+      ['invoices-list', 79, 17, 'Record payments as they come in, even part payments.']] },
+  { id: 'accounting', label: 'Accounting', prog: 'accounting-basics', m: 'basic', finder: ['accounting-basics', 'accounting'],
+    head: 'Know where your money is.', ticks: ['Quotes, invoices, bills and stock, with GST worked out', 'Profit & Loss, GST summary and who owes you', 'Till sales from Riyeser POS land as paid invoices'],
+    steps: [['basics-dash', 46, 31, 'Income, expenses and profit, the moment you open it.'],
+      ['basics-dash', 80, 52, 'Know who owes you money, and who you owe.'],
+      ['basics-dash', 28, 85, 'Overdue invoices listed, ready to chase.'],
+      ['basics-dash', 71, 13, 'Add an invoice, a bill or money in and out from the top.']] },
+  { id: 'bookings', label: 'Bookings', prog: 'bookings', m: 'bookings', finder: ['bookings'],
+    head: 'Every job and appointment, on one calendar.', ticks: ['Trades jobs, appointments or restaurant tables', 'A column for each staff member or table, with no double-booking', 'Invoice a finished job in one click'],
+    steps: [['bookings-week', 37, 50, "The week's jobs on one calendar: who's going, and where."],
+      ['bookings-week', 73, 5, 'Book a job with the customer, time, staff member and address.'],
+      ['bookings-edit', 92, 13, "When the job's done, invoice it in one click."]] },
+  { id: 'pos', label: 'POS', prog: 'pos', m: 'pos', finder: ['pos'],
+    head: 'Sell at the counter. Books done automatically.', ticks: ['For retail shops, or cafes and restaurants with tables and kitchen dockets', 'Cash with the change worked out, or card, and receipts to print', 'Every sale lands in your books, with stock and GST updated'],
+    steps: [['pos-till', 22, 55, 'Tap a product to sell it, or scan its barcode.'],
+      ['pos-till', 79, 24, 'The sale adds up as you go. Hold it and come back later.'],
+      ['pos-till', 54, 7, 'End of day: count the drawer and print the Z-report.'],
+      ['pos-sales', 24, 28, "Today's takings, GST and best sellers, as you go."]] },
+  { id: 'payroll', label: 'Payroll', prog: 'payroll', m: 'payroll', finder: ['payroll'], frame: 'payroll-run',
+    head: 'Pay day without the paperwork.', ticks: ['Time clock with a 4-digit PIN for each person', 'Weekly, fortnightly or monthly pay runs, for unlimited employees', 'Payslips with year-to-date totals, printed, emailed or saved as PDFs'],
+    steps: [['payroll-timesheets', 6, 20, 'Staff clock in and out with their own 4-digit PIN.'],
+      ['payroll-timesheets', 47, 44, 'Hours land in timesheets, ready to check and approve.'],
+      ['payroll-run', 60, 26, 'Run pay with PAYE and FNPF worked out for you.'],
+      ['payroll-run', 77, 47, 'Payslips for everyone: print, email or save as PDFs.']] },
+  { id: 'link', label: 'Riyeser Link', prog: 'link', m: 'calls', finder: ['link'], phone: 'link-phone', live: '/link/?demo',
+    head: 'Your whole team, in one conversation.', ticks: ['Team chat and calls on the PC, in the browser and on phones', 'Office desk phones with Riyeser Link Office, included', 'Invite your team with one link'],
+    steps: [['link-chat', 13, 23, 'A channel for each job, site or topic, plus direct messages.'],
+      ['link-chat', 37, 29, 'Type Booking 12 or INV-1047 and it stands out.'],
+      ['link-chat', 40, 64, `Share job sheets, photos and files (${STORAGE_GB.link} GB included).`],
+      ['link-calls', 81, 60, 'Call a person or a whole branch, with no call charges.']] },
+  { id: 'link-office', label: 'Link Office', prog: 'link-office', m: 'calls', finder: ['link-office'],
+    head: 'Desk phones that ring each other.', ticks: ['Each person gets an extension, like 101', 'Ring groups: "Front desk" rings several phones at once', 'Answer office calls in the Riyeser Link app too'],
+    note: 'Not yet: calls to and from outside phone numbers.',
+    steps: [['link-desk-phones', 34, 28, 'Install it on one PC at the office and sign in.'],
+      ['link-desk-phones', 30, 41, 'Plug in desk phones: they show up by themselves.'],
+      ['link-desk-phones', 30, 48, 'Give each phone to a person: staff call each other free.'],
+      ['link-desk-phones', 63, 66, "See that it's running and how many phones are connected."]] },
+  { id: 'desk-assistant', label: 'Desk Assistant', prog: 'desk-assistant', finder: ['desk-assistant'],
+    head: 'Never lose a file again.', ticks: ['Free forever', 'Finds copies of the same file; extras are archived, never deleted', 'Reads scanned PDFs and photos so they can be found'],
+    steps: [['desk-search', 60, 26, 'Find any file by its name, the words inside or a company.'],
+      ['desk-search', 27, 40, 'Narrow it down by type and year.'],
+      ['desk-search', 30, 72, 'Files sorted into folders by type and year.'],
+      ['desk-search', 9, 29, 'See where every file went, or put everything back.']] },
+  { id: 'pdf', label: 'PDF', prog: 'pdf', finder: ['pdf'],
+    head: 'Drawings and forms, done on the PC.', ticks: ['Free forever', 'Fill in forms, and Redact removes what is underneath for good', 'Reads the text in scanned pages'],
+    steps: [['pdf-markup', 44, 70, 'Mark up drawings with circles, arrows and notes.'],
+      ['pdf-markup', 4, 12, 'Sign, tick and date forms without printing.'],
+      ['pdf-markup', 17, 7, 'Change the words in a PDF, or add your own.'],
+      ['pdf-tools', 21, 52, 'Combine, split, convert to Word or make smaller.']] },
+  { id: 'central', label: 'Central', prog: 'central', finder: ['central'],
+    head: 'Start your day knowing exactly what needs doing.', ticks: ['Free forever', "Today's meetings and to-dos, and money owed to you", 'Try every program with a made-up sample business'],
+    steps: [['central-home', 39, 28, 'Every Riyeser program you have, one click away.'],
+      ['central-home', 73, 31, 'Money owed and overdue invoices, as soon as you open it.'],
+      ['central-home', 72, 50, 'Add a program: it installs and updates itself.'],
+      ['central-home', 82, 78, 'Shortcuts to the till, a new invoice, booking or pay run.']] },
+];
+const SHOT_DIM = Object.fromEntries(Object.values(SHOTS).flat().map(([f, w, h, alt]) => [f, { w, h, alt }]));
+for (const d of DEMO) {
+  const first = SHOT_DIM[d.frame || d.steps[0][0]];
+  for (const s of d.steps) {
+    const k = SHOT_DIM[s[0]];
+    if (!k) throw new Error(`DEMO ${d.id}: no screenshot ${s[0]} in SHOTS`);
+    // the spot's height in the frame (taller pictures are cut at the frame's bottom)
+    s.fy = s[2] * (k.h / k.w) / (first.h / first.w);
+    if (k.h / k.w < first.h / first.w - 0.001 || s.fy > 94) throw new Error(`DEMO ${d.id}: ${s[0]} step falls outside the frame`);
+  }
+}
+const demoTabOf = Object.fromEntries(DEMO.flatMap((d) => d.finder.map((f) => [f, d.id])));
+/** The price line under a demo's name (every number from PRICE). */
+const demoPrice = (d) => {
+  const p = prog(d.prog);
+  if (p.comesWith) return `<b>Comes with Riyeser Link</b> · free for 90 days, then <b>${usd(PRICE[d.m])}</b> a month`;
+  if (!d.m) return '<b class="free">Free</b> forever · no card, no time limit';
+  return `<b class="ok">Free for 90 days</b>, then <b>${usd(PRICE[d.m])}</b> a month · ${esc(inclOf(d.m)[0])}`;
+};
+function demoSection(up) {
+  const img = (f, i, lazy, on, sizes) => { const k = SHOT_DIM[f];
+    return `<img class="dm-img${on ? ' on' : ''}" data-k="${f}" src="${up}assets/shots/${f}-900.webp" srcset="${up}assets/shots/${f}-900.webp ${Math.min(900, k.w)}w, ${up}assets/shots/${f}.webp ${k.w}w" sizes="${sizes}" width="${k.w}" height="${k.h}" alt="${esc(k.alt)}"${lazy ? ' loading="lazy"' : ''} decoding="async">`; };
+  return `<section class="demo" id="demo" aria-labelledby="demo-h"><div class="c">
+  <div class="shead"><span class="eyebrow">See it in action</span><h2 class="h2" id="demo-h">Watch each program do the work</h2><p class="sub">Real screens with a made-up sample business. Pick a program.</p></div>
+  <div class="dm-tabs" role="tablist" aria-label="Programs">${DEMO.map((d, i) => `<button type="button" role="tab" id="dm-t-${d.id}" aria-controls="dm-p-${d.id}" aria-selected="${i === 0}" tabindex="${i ? -1 : 0}" data-id="${d.id}"><img src="${up}assets/apps/${d.prog}.png" alt="" width="28" height="28">${esc(d.label)}</button>`).join('')}</div>
+  ${DEMO.map((d, i) => { const p = prog(d.prog); const shots = [...new Set(d.steps.map((s) => s[0]))]; const k0 = SHOT_DIM[d.frame || shots[0]];
+    const start = d.m ? `<a class="btn p" href="${BUY_LINK(d.m, false)}">Start free</a>` : `<a class="btn p" href="${dl(p)}">${WINLOGO} Download free</a>`;
+    return `<div class="dm-panel" role="tabpanel" id="dm-p-${d.id}" aria-labelledby="dm-t-${d.id}" data-id="${d.id}">
+    <div class="dm-stage">
+      <div class="dm-shots${d.phone ? ' has-phone' : ''}">
+        <div class="dm-win"><div class="dm-bar"><i></i><i></i><i></i><span><img src="${up}assets/apps/${(prog(p.comesWith || d.prog)).id}.png" alt="" width="18" height="18">${esc(prog(p.comesWith || d.prog).name)}</span></div>
+          <div class="dm-scr" style="aspect-ratio:${k0.w} / ${k0.h}"><div class="dm-zoom">${shots.map((f, n) => img(f, n, i > 0 || n > 0, n === 0, d.phone ? '(max-width: 760px) 70vw, 600px' : '(max-width: 760px) 92vw, 760px')).join('')}
+            ${d.steps.map((s, n) => `<span class="dm-hot${n === 0 ? ' on' : ''}${s[1] > 58 ? ' r' : ''}${s.fy > 55 ? ' up' : ''}" style="left:${s[1]}%;top:${+s.fy.toFixed(1)}%" data-x="${s[1]}" data-y="${+s.fy.toFixed(1)}" aria-hidden="true"><b></b><i>${n + 1}</i><em>${esc(s[3])}</em></span>`).join('')}</div></div></div>
+        ${d.phone ? `<div class="dm-phone">${img(d.phone, 0, i > 0, true, '(max-width: 760px) 24vw, 180px').replace('dm-img on', 'dm-pimg')}</div>` : ''}
+      </div>
+      <div class="dm-ctl"><ol class="dm-steps">${d.steps.map((s, n) => `<li class="dm-step${n === 0 ? ' on' : ''}" data-k="${s[0]}"><button type="button"${n === 0 ? ' aria-current="step"' : ''}><span class="n">${n + 1}</span><span class="t">${esc(s[3])}</span><span class="dm-prog"><i></i></span></button></li>`).join('')}</ol>
+        <button type="button" class="dm-pause" aria-label="Pause the tour"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="pa" d="M8 5v14M16 5v14"/><path class="pl" d="M7 5l12 7-12 7z"/></svg></button></div>
+    </div>
+    <div class="dm-info">
+      <div class="dm-name"><img src="${up}assets/apps/${d.prog}.png" alt="" width="52" height="52"><div><h3>${esc(p.name)}</h3><span>${esc(p.tag)}</span></div></div>
+      <p class="dm-head">${esc(d.head)}</p>
+      <ul class="ticks">${d.ticks.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+      <p class="dm-price">${demoPrice(d)}</p>${d.id === 'accounting' ? `<p class="dm-alt">Need full books, bank reconciliation and BAS? <a href="${up}programs/accounting.html">Accounting Plus</a> is ${usd(PRICE.plus)} a month.</p>` : ''}${d.note ? `<p class="dm-alt">${esc(d.note)}</p>` : ''}
+      <div class="dm-btns">${start}<a class="btn s" href="${up}programs/${d.prog}.html">Learn more ${ARR}</a>${d.live ? `<a class="btn s dm-live" href="${d.live}">${PLAY} Try the live demo</a>` : ''}</div>
+    </div>
+  </div>`; }).join('')}
+</div></section>
+<script>(function(){var R=document.getElementById('demo');if(!R)return;
+var tabs=[].slice.call(R.querySelectorAll('[role=tab]')),list=R.querySelector('[role=tablist]'),P=tabs.map(function(t){return document.getElementById(t.getAttribute('aria-controls'))});
+var mm=function(q){return window.matchMedia&&matchMedia(q).matches},paused=mm('(prefers-reduced-motion: reduce)'),hold=0,seen=!('IntersectionObserver' in window),cur=0,step=0;
+function state(){R.classList.toggle('play',!paused&&!hold&&seen&&!document.hidden);R.classList.toggle('paused',paused);P.forEach(function(p){var b=p.querySelector('.dm-pause');b.setAttribute('aria-label',paused?'Play the tour':'Pause the tour')})}
+function go(s){var p=P[cur],st=p.querySelectorAll('.dm-step'),h=p.querySelectorAll('.dm-hot');step=(s+st.length)%st.length;var k=st[step].getAttribute('data-k');
+for(var i=0;i<st.length;i++){st[i].classList.remove('on');h[i].classList.remove('on');st[i].querySelector('button').removeAttribute('aria-current')}
+void p.offsetWidth;st[step].classList.add('on');h[step].classList.add('on');st[step].querySelector('button').setAttribute('aria-current','step');
+[].forEach.call(p.querySelectorAll('.dm-img'),function(im){im.classList.toggle('on',im.getAttribute('data-k')===k)});zoom()}
+/* phones: the picture is small, so it zooms in on the step's spot */
+function zoom(){var p=P[cur],z=p.querySelector('.dm-zoom'),h=p.querySelectorAll('.dm-hot')[step],s=mm('(max-width: 760px)')?(p.querySelector('.has-phone')?1.7:1.9):1;
+var c=function(v){return Math.min(0,Math.max(100-100*s,v))},x=c(50-s*h.getAttribute('data-x')),y=c(50-s*h.getAttribute('data-y'));
+z.style.transform=s>1?'translate('+x+'%,'+y+'%) scale('+s+')':'';z.style.setProperty('--s',s)}
+addEventListener('resize',function(){zoom()});
+function sel(n,focus){cur=(n+tabs.length)%tabs.length;tabs.forEach(function(t,i){var on=i===cur;t.setAttribute('aria-selected',on);t.tabIndex=on?0:-1;P[i].hidden=!on});
+var t=tabs[cur];if(list.scrollWidth>list.clientWidth){try{list.scrollTo({left:t.offsetLeft-(list.clientWidth-t.offsetWidth)/2,behavior:'smooth'})}catch(e){list.scrollLeft=t.offsetLeft}}
+if(focus)t.focus();go(0)}
+tabs.forEach(function(t,i){t.addEventListener('click',function(){sel(i)})});
+list.addEventListener('keydown',function(e){var k=e.key,n=k==='ArrowRight'||k==='ArrowDown'?cur+1:k==='ArrowLeft'||k==='ArrowUp'?cur-1:k==='Home'?0:k==='End'?tabs.length-1:null;if(n===null)return;e.preventDefault();sel(n,true)});
+P.forEach(function(p){[].forEach.call(p.querySelectorAll('.dm-step button'),function(b,i){b.addEventListener('click',function(){go(i)})});
+[].forEach.call(p.querySelectorAll('.dm-prog i'),function(x){x.addEventListener('animationend',function(){if(x.closest('.dm-step.on'))go(step+1)})});
+p.querySelector('.dm-pause').addEventListener('click',function(){paused=!paused;state()});
+var stage=p.querySelector('.dm-shots');stage.addEventListener('click',function(){paused=!paused;state()});
+p.addEventListener('mouseenter',function(e){if(mm('(hover: hover)')){hold++;state()}});p.addEventListener('mouseleave',function(){if(mm('(hover: hover)')){hold=Math.max(0,hold-1);state()}});
+p.addEventListener('focusin',function(e){var v=false;try{v=e.target.matches(':focus-visible')}catch(x){}if(!v)return;p.dataset.f||(p.dataset.f=1,hold++);state()});p.addEventListener('focusout',function(e){if(!p.contains(e.relatedTarget)&&p.dataset.f){delete p.dataset.f;hold=Math.max(0,hold-1);state()}})});
+if(!seen)new IntersectionObserver(function(es){seen=es[0].isIntersecting;state()},{threshold:.3}).observe(R);
+document.addEventListener('visibilitychange',state);
+function fromHash(){var m=/^#demo-([\\w-]+)$/.exec(location.hash),i=m?tabs.map(function(t){return t.getAttribute('data-id')}).indexOf(m[1]):-1;if(i>=0){sel(i);R.scrollIntoView()}}
+/* Find your program: a click shows that program here (a new tab or window still opens its page) */
+[].forEach.call(document.querySelectorAll('#find a[data-demo]'),function(a){a.addEventListener('click',function(e){if(e.ctrlKey||e.metaKey||e.shiftKey||e.altKey||e.button)return;
+var i=tabs.map(function(t){return t.getAttribute('data-id')}).indexOf(a.getAttribute('data-demo'));if(i<0)return;e.preventDefault();sel(i);
+try{history.replaceState(null,'','#demo-'+a.getAttribute('data-demo'))}catch(x){}R.scrollIntoView({behavior:mm('(prefers-reduced-motion: reduce)')?'auto':'smooth'});tabs[i].focus({preventScroll:true})})});
+sel(0);fromHash();addEventListener('hashchange',fromHash);state();})();</script>`;
+}
+/** Phones: a small "Start free" bar once the hero has scrolled away (closed with ×, for this visit). */
+const MBAR = `<div class="mbar" id="mbar" hidden><span><b>Riyeser</b><small>Free tools forever · paid programs free for 90 days</small></span><a class="btn p sm" href="/link/?signup">Start free</a><button type="button" class="mbar-x" aria-label="Close">×</button></div>
+<script>(function(){var b=document.getElementById('mbar'),h=document.querySelector('.hero3');if(!b||!h||!('IntersectionObserver' in window))return;var x=false;try{x=sessionStorage.getItem('mbar-x')==='1'}catch(e){}if(x)return;
+var past=false,foot=false,f=document.querySelector('footer');function show(){var on=past&&!foot&&!x&&matchMedia('(max-width: 760px)').matches;b.hidden=!on;document.body.classList.toggle('has-mbar',on)}
+new IntersectionObserver(function(es){past=!es[0].isIntersecting&&es[0].boundingClientRect.top<0;show()}).observe(h);
+if(f)new IntersectionObserver(function(es){foot=es[0].isIntersecting;show()}).observe(f);
+b.querySelector('.mbar-x').addEventListener('click',function(){x=true;try{sessionStorage.setItem('mbar-x','1')}catch(e){}show()});addEventListener('resize',show)})();</script>`;
 // No single "from" price: each paid program shows its own price next to its name.
 const PAID_HEAD = 'Free for 90 days, then:';
 rmSync(OUT, { recursive: true, force: true });
@@ -598,8 +752,10 @@ ${homeHero(up)}
 
 <section class="finder" id="find"><div class="c">
   <h2 class="h2">Find your program</h2>
-  ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span class="fname">${esc(p.short === 'Central' ? 'Central' : p.short)}</span><span class="fmeta"><small class="fprice${p.comesWith ? ' with' : p.free ? ' free' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])}<span class="pm"> a month</span><span class="pmo">/mo</span>`}</small></span></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
+  ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"${demoTabOf[p.id] ? ` data-demo="${demoTabOf[p.id]}"` : ''}><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span class="fname">${esc(p.short === 'Central' ? 'Central' : p.short)}</span><span class="fmeta"><small class="fprice${p.comesWith ? ' with' : p.free ? ' free' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])}<span class="pm"> a month</span><span class="pmo">/mo</span>`}</small></span></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
 </div></section>
+
+${demoSection(up)}
 
 <section class="c">
   <h2 class="h2">Built for your industry</h2>
@@ -644,7 +800,8 @@ ${homeHero(up)}
   <details><summary>What if I get stuck?</summary><p>The <a class="more" href="${up}help.html">Help Centre</a> has a step-by-step guide for every program, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a> and a real person will reply.</p></details>
   </div>
 </section>
-${ctaBlock(up, 'Get started free today', 'Download Riyeser Central, add the programs you need, and keep everything on your own computer.')}`,
+${ctaBlock(up, 'Get started free today', 'Download Riyeser Central, add the programs you need, and keep everything on your own computer.')}
+${MBAR}`,
 });
 
 // ---------- all programs ----------
