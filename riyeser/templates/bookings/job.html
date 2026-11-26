@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block title %}{{ job_no(j.id) if j else 'New job' }}{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='bookings_site.css') }}">
 {% set v = j or {} %}{% set locked = j and j.document_id %}
 <div class="head"><div><h1>{{ ('Job ' ~ job_no(j.id)) if j else 'New job' }}</h1>
 <p class="sub">{% if j %}{{ j.customer or j.title or '' }} · <span class="bk-st st-{{ j.status }}">{{ (jstatuses|selectattr(0, 'equalto', j.status)|first)[1] }}</span>{% if j.next_action %} · {{ j.next_action }}{% endif %}{% else %}Log a job now and book its visits when you have a time.{% endif %}</p></div>
@@ -23,23 +24,31 @@
 
 {% if j %}
 <div class="card"><h3>Visits</h3>
-<div class="tbl"><table><tr><th>When</th><th>{{ m.who_one|capitalize }}</th><th>Status</th><th>Outcome</th></tr>
-{% for b in visits %}<tr class="click" data-href="{{ url_for('bookings.edit', bid=b.id) }}"><td><a href="{{ url_for('bookings.edit', bid=b.id) }}">{{ b.starts_at[:10] }} {{ b.starts_at[11:16] }}</a></td><td>{{ b.resource or '' }}</td><td><span class="bk-st st-{{ b.status }}">{{ bstatuses[b.status] }}</span></td><td>{{ outcomes[b.outcome] if b.outcome else '' }}{% if b.outcome_note %}<br><small class="muted">{{ b.outcome_note }}</small>{% endif %}</td></tr>
-{% else %}<tr><td colspan="4" class="muted">No visits booked yet.{% if can('bookings', 2) %} <a href="{{ url_for('bookings.edit', job=j.id) }}">Book the first visit</a>{% endif %}</td></tr>{% endfor %}</table></div></div>
+<div class="tbl"><table><tr><th>When</th><th>{{ m.who_one|capitalize }}</th><th>Status</th><th>Outcome</th><th>On site</th></tr>
+{% for b in visits %}<tr class="click" data-href="{{ url_for('bookings.edit', bid=b.id) }}"><td><a href="{{ url_for('bookings.edit', bid=b.id) }}">{{ b.starts_at[:10] }} {{ b.starts_at[11:16] }}</a></td><td>{{ b.resource or '' }}</td><td><span class="bk-st st-{{ b.status }}">{{ bstatuses[b.status] }}</span></td><td>{{ outcomes[b.outcome] if b.outcome else '' }}{% if b.outcome_note %}<br><small class="muted">{{ b.outcome_note }}</small>{% endif %}</td><td>{% if b.status not in ('cancelled', 'no_show') %}<a class="btn sm" href="{{ url_for('bookings.site', bid=b.id) }}">{{ 'Signed · open' if b.id in signed else 'Open' }}</a>{% endif %}{% if b.arrived_at %}<br><small class="muted">{{ b.arrived_at[11:16] }}{{ ('–' ~ b.left_at[11:16]) if b.left_at }}</small>{% endif %}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">No visits booked yet.{% if can('bookings', 2) %} <a href="{{ url_for('bookings.edit', job=j.id) }}">Book the first visit</a>{% endif %}</td></tr>{% endfor %}</table></div></div>
+
+<div class="card" id="sheet"><h3>Job sheet</h3>
+<p class="muted small">Everything recorded on site: times, work done, checklist, parts, photos and the customer's signature. Open a visit's On site page to add to it.</p>
+{% if photos %}<div class="site-photos">{% for p in photos %}<figure><a href="{{ url_for('bookings.site_photo_file', pid=p.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('bookings.site_photo_file', pid=p.id, thumb=1) }}" alt="{{ p.kind|capitalize }} photo{{ ': ' ~ p.caption if p.caption }}" loading="lazy"></a><figcaption><b>{{ p.kind|capitalize }}</b>{% if p.caption %} · {{ p.caption }}{% endif %}</figcaption></figure>{% endfor %}</div>{% endif %}
+<div class="site-row"><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id) }}" target="_blank" rel="noopener">View job sheet (PDF)</a><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id, download=1) }}">Download</a>
+{% if can('bookings', 2) and email_ready %}<form method="post" action="{{ url_for('bookings.job_sheet_email', jid=j.id) }}" class="site-row" style="margin:0"><input type="email" name="to" value="{{ cemail or '' }}" placeholder="Customer's email" aria-label="Customer's email" required><button class="btn">Email job sheet</button></form>{% endif %}</div>
+{% if not email_ready %}<p class="muted small">To email the job sheet from here, set up email in Setup, Email.</p>{% endif %}
+</div>
 
 <div class="bk-two">
 <div class="card"><h3>Logged on this job</h3>
 <div class="tbl"><table class="bk-cmp"><tr><th>What</th><th>Visit</th><th class="n">Qty</th><th class="n">Value</th><th></th></tr>
-{% for t in times %}<tr><td>Labour{% if t.note %} · {{ t.note }}{% endif %}{% if t.who %} <small class="muted">({{ t.who }})</small>{% endif %}</td><td>{{ t.starts_at[:10] if t.starts_at else '' }}</td><td class="n">{{ '%g' % (t.minutes / 60) }} h</td><td class="n">{{ (((t.minutes / 60) * sm.rate)|round|int)|money if sm.rate else '' }}</td><td>{% if not locked and can('bookings', 2) %}<form method="post" action="{{ url_for('bookings.remove_entry', jid=j.id) }}"><input type="hidden" name="kind" value="time"><input type="hidden" name="id" value="{{ t.id }}"><button class="btn sm">Remove</button></form>{% endif %}</td></tr>{% endfor %}
+{% for t in times %}<tr><td>Labour{% if t.note %} · {{ t.note }}{% endif %}{% if t.who %} <small class="muted">({{ t.who }})</small>{% endif %}</td><td>{{ t.starts_at[:10] if t.starts_at else '' }}</td><td class="n">{{ '%g' % ((t.minutes / 60)|round(2)) }} h</td>{% set tr = sm.time_rates.get(t.id, sm.rate) %}<td class="n">{{ (((t.minutes / 60) * tr)|round|int)|money if tr else '' }}</td><td>{% if not locked and can('bookings', 2) %}<form method="post" action="{{ url_for('bookings.remove_entry', jid=j.id) }}"><input type="hidden" name="kind" value="time"><input type="hidden" name="id" value="{{ t.id }}"><button class="btn sm">Remove</button></form>{% endif %}</td></tr>{% endfor %}
 {% for p in sm.parts %}<tr><td>{{ p.description or p.item_name }}</td><td></td><td class="n">{{ '%g' % p.qty }}</td><td class="n">{{ ((p.qty * p.unit_price)|round|int)|money if p.unit_price else 'price to add' }}</td><td>{% if not locked and can('bookings', 2) %}<form method="post" action="{{ url_for('bookings.remove_entry', jid=j.id) }}"><input type="hidden" name="kind" value="part"><input type="hidden" name="id" value="{{ p.id }}"><button class="btn sm">Remove</button></form>{% endif %}</td></tr>{% endfor %}
 {% if not times and not sm.parts %}<tr><td colspan="5" class="muted">No time or parts logged yet. Add them on each visit.</td></tr>{% endif %}
 <tr class="tot"><td>Total logged</td><td></td><td class="n">{{ '%g' % sm.hours }} h</td><td class="n">{{ (sm.labour_value + sm.parts_value)|money }}</td><td></td></tr></table></div>
 {% set unpriced = sm.parts|selectattr('unit_price', 'equalto', 0)|list %}
 {% if unpriced and not locked and can('bookings', 2) %}<form method="post" action="{{ url_for('bookings.part_price', jid=j.id) }}" class="bk-inline"><b>Price the one-off parts:</b>{% for p in unpriced %}<input name="price_{{ p.id }}" placeholder="{{ p.description }} each" inputmode="decimal" aria-label="Price of {{ p.description }}">{% endfor %}<button class="btn">Save prices</button></form>{% endif %}
-{% if j.billing == 'time' and sm.hours and not sm.rate %}<p class="note">Set your hourly labour rate in <a href="{{ url_for('bookings.setup') }}">Bookings setup</a> to charge for time.</p>{% endif %}
+{% if j.billing == 'time' and sm.hours and sm.unrated %}<p class="note">Set your hourly labour rate in <a href="{{ url_for('bookings.setup') }}">Bookings setup</a> to charge for time.</p>{% endif %}
 </div>
 <div class="card"><h3>What the invoice will charge</h3>
-<p class="muted small">{% if j.billing == 'time' %}Time and materials: hours at {{ sm.rate|money }} an hour, plus parts.{% else %}Fixed price: the agreed price only. Logged hours and parts are shown for costing and aren't charged on top.{% endif %}</p>
+<p class="muted small">{% if j.billing == 'time' %}Time and materials: hours at {{ (sm.rate|money ~ ' an hour') if sm.labour|length <= 1 else 'each job type or staff rate' }}, plus parts.{% else %}Fixed price: the agreed price only. Logged hours and parts are shown for costing and aren't charged on top.{% endif %}</p>
 <div class="tbl"><table class="bk-cmp"><tr><th>Line</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Amount</th></tr>
 {% for l in lines %}<tr><td>{{ l.description }}</td><td class="n">{{ '%g' % l.qty }}</td><td class="n">{{ l.unit_price|money }}</td><td class="n">{{ l.amount|money }}</td></tr>
 {% else %}<tr><td colspan="4" class="muted">{% if j.billing == 'time' %}Nothing to charge yet.{% else %}No price yet. Type the agreed price above and press Save.{% endif %}</td></tr>{% endfor %}

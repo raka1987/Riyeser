@@ -328,6 +328,8 @@ def migrate(db):
                           b["document_id"], b["created_by"], b["created_at"])).lastrowid
         db.execute("UPDATE bookings SET job_id=? WHERE id=?", (jid, b["id"]))
     db.execute("CREATE INDEX IF NOT EXISTS bookings_job ON bookings(job_id)")
+    from .jobsite import ensure_schema as _job_site_schema
+    _job_site_schema(db)  # on-site job sheets: times, checklists, photos, sign-off (riyeser/jobsite.py)
     # Demo companies are marked, so every screen can say so. Start again keeps a ledger head here (riyeser/archive.py).
     if "is_demo" not in {r["name"] for r in db.execute("PRAGMA table_info(company)")}:
         db.execute("ALTER TABLE company ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0")

@@ -505,7 +505,7 @@ def _sold_items(db):
 
 def get_job(db, jid):
     j = db.execute("SELECT j.*, c.name customer, s.name service, s.description service_desc, s.price service_price,"
-                   " s.item_id service_item FROM booking_jobs j LEFT JOIN contacts c ON c.id=j.contact_id"
+                   " s.item_id service_item, s.labour_rate service_rate FROM booking_jobs j LEFT JOIN contacts c ON c.id=j.contact_id"
                    " LEFT JOIN booking_services s ON s.id=j.service_id WHERE j.id=?", (jid,)).fetchone()
     return j or abort(404)
 
@@ -547,9 +547,10 @@ def job_charges(db, j):
     visits = db.execute("SELECT * FROM bookings WHERE job_id=? AND status NOT IN ('cancelled','no_show')"
                         " ORDER BY starts_at", (j["id"],)).fetchall()
     minutes = db.execute("SELECT COALESCE(SUM(minutes),0) FROM booking_time WHERE job_id=?", (j["id"],)).fetchone()[0]
+    labour, time_rates = labour_groups(db, j)
     parts = db.execute("SELECT m.*, i.name item_name, i.sale_tax_code_id FROM booking_materials m"
                        " LEFT JOIN items i ON i.id=m.item_id WHERE m.job_id=? ORDER BY m.id", (j["id"],)).fetchall()
-    rate = (g.get("company") or {}).get("bookings_labour_rate") or 0
+    rate = labour[0]["rate"] if len(labour) == 1 else ((g.get("company") or {}).get("bookings_labour_rate") or 0)
     hours = round(minutes / 60.0, 2)
     gst = _gst(db)
     what = j["service_desc"] or j["service"] or j["title"] or M()["one"].capitalize()
@@ -557,9 +558,12 @@ def job_charges(db, j):
     desc = what + (f" — {days}" if days else "") + (f", {j['address']}" if j["address"] else "")
     lines = []
     if j["billing"] == "time":
-        if hours:
-            lines.append(dict(description=f"Labour — {desc}", qty=hours, unit_price=rate, discount_pct=0,
-                              tax_code_id=gst, account_id=_income_account(db)))
+        for grp in labour:  # one labour line per rate: the job type's, a staff member's, or the company's
+            if grp["minutes"]:
+                lines.append(dict(description="Labour" + (f" ({grp['label']})" if grp["label"] and len(labour) > 1
+                                                          else "") + f" — {desc}",
+                                  qty=round(grp["minutes"] / 60.0, 2), unit_price=grp["rate"], discount_pct=0,
+                                  tax_code_id=gst, account_id=_income_account(db)))
         for p in parts:
             line = dict(description=p["description"] or p["item_name"] or "Parts", qty=p["qty"],
                         unit_price=p["unit_price"], discount_pct=0, tax_code_id=p["sale_tax_code_id"] or gst,
@@ -582,10 +586,34 @@ def job_charges(db, j):
             lines.append(line)
     for l in lines:
         l["amount"] = round(float(l["qty"]) * (l["unit_price"] or 0))
-    summary = dict(visits=visits, minutes=minutes, hours=hours, rate=rate, parts=parts,
-                   parts_value=sum(round(p["qty"] * p["unit_price"]) for p in parts), labour_value=round(hours * rate),
+    summary = dict(visits=visits, minutes=minutes, hours=hours, rate=rate, parts=parts, labour=labour,
+                   time_rates=time_rates, unrated=any(grp["minutes"] and not grp["rate"] for grp in labour),
+                   parts_value=sum(round(p["qty"] * p["unit_price"]) for p in parts),
+                   labour_value=sum(round(round(grp["minutes"] / 60.0, 2) * grp["rate"]) for grp in labour),
                    total=sum(l["amount"] for l in lines))
     return lines, summary
+
+
+def labour_groups(db, j):
+    """The job's logged time grouped by the rate it's charged at: the job type's labour rate if it has one, else the
+    rate of the staff member on that visit, else the company's hourly labour rate (Bookings setup).
+    Returns ([{rate, label, minutes}], {booking_time id: rate})."""
+    company = (g.get("company") or {}).get("bookings_labour_rate") or 0
+    svc_rate = j["service_rate"] if "service_rate" in j.keys() else None
+    groups, by_id = {}, {}
+    for t in db.execute("SELECT t.id, t.minutes, r.name rname, r.labour_rate rrate FROM booking_time t"
+                        " LEFT JOIN bookings b ON b.id=t.booking_id LEFT JOIN booking_resources r ON r.id=b.resource_id"
+                        " WHERE t.job_id=? ORDER BY t.id", (j["id"],)):
+        if svc_rate:
+            key = (svc_rate, None)
+        elif t["rrate"]:
+            key = (t["rrate"], t["rname"])
+        else:
+            key = (company, None)
+        grp = groups.setdefault(key, dict(rate=key[0], label=key[1], minutes=0))
+        grp["minutes"] += t["minutes"] or 0
+        by_id[t["id"]] = key[0]
+    return list(groups.values()), by_id
 
 
 def _invoice_job(db, jid):
@@ -601,7 +629,7 @@ def _invoice_job(db, jid):
         unpriced = [p["description"] or p["item_name"] or "Part" for p in sm["parts"] if not p["unit_price"]]
         if unpriced:  # S20: no part goes on the invoice at $0 by accident
             raise PostingError("Price these parts first, then invoice: " + ", ".join(unpriced) + ".")
-    if j["billing"] == "time" and sm["minutes"] and not sm["rate"]:
+    if j["billing"] == "time" and sm["minutes"] and sm["unrated"]:
         raise PostingError("Set your hourly labour rate in Bookings setup first, then invoice this job.")
     if not lines or not sm["total"]:
         one = M()["one"]
@@ -614,10 +642,12 @@ def _invoice_job(db, jid):
     terms = (g.get("company") or {}).get("default_terms_days") or 14
     today = date.today()
     first = db.execute("SELECT notes FROM bookings WHERE job_id=? ORDER BY starts_at LIMIT 1", (jid,)).fetchone()
+    from ..jobsite import signed_note
+    notes = "\n".join(n for n in ((first["notes"] if first else None), signed_note(db, jid)) if n)
     doc_id = quoted or save_document(db, "sale", dict(contact_id=j["contact_id"], date=today.isoformat(),
                                             due_date=(today + timedelta(days=terms)).isoformat(),
                                             reference=f"Job {job_no(jid)}",
-                                            notes=(first["notes"] if first else None) or "", tax_inclusive=True),
+                                            notes=notes, tax_inclusive=True),
                            lines, "open")
     db.execute("UPDATE booking_jobs SET document_id=?, status='completed', next_action=NULL,"
                " updated_at=datetime('now','localtime') WHERE id=?", (doc_id, jid))
@@ -679,8 +709,21 @@ def job(jid=None):
                    visits=db.execute("SELECT b.*, r.name resource FROM bookings b LEFT JOIN booking_resources r"
                                      " ON r.id=b.resource_id WHERE b.job_id=? ORDER BY b.starts_at", (jid,)).fetchall(),
                    inv=db.execute("SELECT id, number, status, total FROM documents WHERE id=?",
-                                  (j["document_id"],)).fetchone() if j["document_id"] else None)
+                                  (j["document_id"],)).fetchone() if j["document_id"] else None,
+                   **_site_bits(db, j))
     return render_template("bookings/job.html", **ctx)
+
+
+def _site_bits(db, j):
+    """For the job page: the job sheet's photos, which visits are signed, and how to email the sheet."""
+    from .. import mailer
+    c = db.execute("SELECT email FROM contacts WHERE id=?", (j["contact_id"],)).fetchone() if j["contact_id"] else None
+    return dict(photos=db.execute("SELECT id, kind, caption FROM booking_photos WHERE job_id=? ORDER BY booking_id,"
+                                  " CASE kind WHEN 'before' THEN 0 WHEN 'after' THEN 1 ELSE 2 END, id",
+                                  (j["id"],)).fetchall(),
+                signed={r[0] for r in db.execute("SELECT booking_id FROM booking_signoffs WHERE job_id=? AND"
+                                                 " status='signed'", (j["id"],))},
+                cemail=c["email"] if c else None, email_ready=bool(mailer.settings(db)))
 
 
 @guarded
@@ -733,6 +776,9 @@ def _visit(db, bid):
     b = db.execute("SELECT * FROM bookings WHERE id=?", (bid,)).fetchone() or abort(404)
     if b["job_id"] and db.execute("SELECT document_id FROM booking_jobs WHERE id=?", (b["job_id"],)).fetchone()[0]:
         raise PostingError("This job is already invoiced. Void the invoice to change its time or parts.")
+    from ..jobsite import is_signed
+    if is_signed(db, bid):
+        raise PostingError("The customer has signed this visit's job sheet, so it's locked. A manager can unlock it.")
     return b
 
 
@@ -815,6 +861,10 @@ def remove_entry(jid):
     if j["document_id"]:
         raise PostingError("This job is already invoiced. Void the invoice to change its time or parts.")
     table = {"time": "booking_time", "part": "booking_materials"}.get(request.form.get("kind")) or abort(400)
+    from ..jobsite import is_signed
+    row = db.execute(f"SELECT booking_id FROM {table} WHERE id=? AND job_id=?", (opt_int(request.form.get("id")), jid)).fetchone()
+    if row and is_signed(db, row["booking_id"]):
+        raise PostingError("The customer has signed that visit's job sheet, so it's locked. A manager can unlock it.")
     db.execute(f"DELETE FROM {table} WHERE id=? AND job_id=?", (opt_int(request.form.get("id")), jid))
     audit(db, "booking_remove", f"job {jid} {table}")
     flash("Removed.", "ok")
@@ -929,6 +979,8 @@ def _save_setup():
             db.execute("INSERT INTO booking_services (name, description, minutes, price, item_id) VALUES (?,?,?,?,?)",
                        (name.strip(), (at(descs, i) or "").strip() or None, opt_int(at(mins, i)) or 60,
                         to_cents(at(prices, i) or 0), opt_int(at(items, i))))
+    from .bookings_site import save_setup_extras
+    save_setup_extras(db, f)  # on-site checklists and labour rates per job type and staff member
     audit(db, "bookings_setup", new_mode)
     flash("Bookings setup saved.", "ok")
     return redirect(url_for("bookings.setup"))
@@ -942,3 +994,6 @@ def customer_bookings(db, cid):
                           " WHERE b.contact_id=? ORDER BY b.starts_at DESC LIMIT 20", (cid,)).fetchall()
     except Exception:
         return []
+
+
+from . import bookings_site  # noqa: E402,F401  the on-site job sheet's pages (same blueprint)
