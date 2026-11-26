@@ -1058,3 +1058,16 @@ section.demo { padding: 64px 0 72px; background: linear-gradient(180deg, var(--s
 @media (prefers-reduced-motion: reduce) { .mbar { animation: none; } }
 @media (min-width: 761px) { .mbar { display: none !important; } }
 body.has-mbar { padding-bottom: 76px; }
+/* "Watch the demo": the button (a play icon and the length) and the video player, a modal <dialog> */
+.vbtn .vlen { font-weight: 600; color: var(--muted); font-size: .86em; font-variant-numeric: tabular-nums; }
+.vbtn:hover .vlen { color: inherit; }
+.vbox { border: 0; padding: 0; background: transparent; width: min(1100px, 94vw); max-width: 94vw; max-height: 96vh; overflow: visible; color: #fff; }
+.vbox::backdrop { background: rgba(5, 12, 30, .88); }
+.vbox-top { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.vbox h2 { flex: 1; min-width: 0; color: #fff; font-size: 17px; line-height: 1.3; font-family: var(--font); font-weight: 700; }
+.vbox-x { flex: none; width: 46px; height: 46px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .16); color: #fff; font-size: 30px; line-height: 1; cursor: pointer; }
+.vbox-x:hover { background: rgba(255, 255, 255, .3); }
+.vbox-x:focus-visible, .vbox video:focus-visible { outline: 3px solid #8db0ff; outline-offset: 2px; }
+.vbox video { display: block; width: 100%; height: auto; max-height: calc(96vh - 110px); aspect-ratio: 1280 / 800; background: #000; border-radius: 12px; }
+.vbox-note { margin: 8px 0 0; font-size: 13.5px; color: rgba(255, 255, 255, .75); }
+@media (max-width: 640px) { .vbox { width: 100vw; max-width: 100vw; } .vbox-top, .vbox-note { padding: 0 12px; } .vbox video { border-radius: 0; } .ctas .vbtn { width: 100%; } }

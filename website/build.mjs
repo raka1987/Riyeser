@@ -378,6 +378,37 @@ const demoPrice = (d) => {
   if (!d.m) return '<b class="free">Free</b> forever · no card, no time limit';
   return `<b class="ok">Free for 90 days</b>, then <b>${usd(PRICE[d.m])}</b> a month · ${esc(inclOf(d.m)[0])}`;
 };
+// ---------- "Watch the demo": a short screen recording of each program (assets/videos/<id>.mp4 and a .webp poster) ----------
+// Recorded from the real program filled in with the made-up sample business, with captions and no sound. [seconds, title]
+// The video and its poster only load when someone opens the player.
+const VIDEOS = {
+  invoices: [48, 'Riyeser Invoices: a quote, accepted, made into an invoice and printed'],
+  accounting: [41, 'Riyeser Accounting: Today, ordering low stock and approving an expense claim'],
+  bookings: [50, 'Riyeser Bookings: a job on site, a photo, the customer signs, then the invoice'],
+  pos: [41, 'Riyeser POS: ringing up a sale and paying by card on the practice terminal'],
+  payroll: [52, 'Riyeser Payroll: roster, timesheets and a pay run with rostered and paid hours'],
+  link: [43, 'Riyeser Link: team chat, your status and a call'],
+  'link-office': [35, 'Riyeser Link Office: a new desk phone, given to a person, and a call'],
+  'desk-assistant': [50, 'Riyeser Desk Assistant: find a file, sort Downloads and Desktop, find copies'],
+  pdf: [51, 'Riyeser PDF: mark up a drawing, tick, sign and date it, and more tools'],
+  central: [42, 'Riyeser Central: demo mode and your home screen for the business'],
+};
+// Which video each program page shows (both Accounting editions share one).
+const videoOf = (id) => (id === 'accounting-basics' ? 'accounting' : VIDEOS[id] ? id : null);
+const mmss = (n) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`;
+const videoBtn = (vid, up, cls = 'btn s') => (VIDEOS[vid] ? `<button type="button" class="${cls} vbtn" data-src="${up}assets/videos/${vid}.mp4" data-poster="${up}assets/videos/${vid}.webp" data-title="${esc(VIDEOS[vid][1])}" aria-haspopup="dialog">${PLAY} Watch the demo <span class="vlen">${mmss(VIDEOS[vid][0])}</span></button>` : '');
+/** The video player (one per page): a modal dialog with the browser's own controls; Esc or × closes it and stops the video. */
+const videoBox = () => `<dialog class="vbox" id="vbox" aria-labelledby="vbox-h"><div class="vbox-top"><h2 id="vbox-h">Demo</h2><button type="button" class="vbox-x" aria-label="Close the video">×</button></div>
+<video controls playsinline preload="none" width="1280" height="800"></video><p class="vbox-note">No sound. A made-up sample business.</p></dialog>
+<script>(function(){var d=document.getElementById('vbox');if(!d)return;var v=d.querySelector('video'),h=document.getElementById('vbox-h'),x=d.querySelector('.vbox-x'),from=null;
+function open(b){from=b;h.textContent=b.getAttribute('data-title');var s=b.getAttribute('data-src');if(v.getAttribute('src')!==s){v.poster=b.getAttribute('data-poster');v.src=s}
+if(d.showModal)d.showModal();else d.setAttribute('open','');x.focus();var p=v.play();if(p&&p.catch)p.catch(function(){})}
+function close(){if(d.close&&d.open)d.close();else{d.removeAttribute('open');v.pause()}}
+d.addEventListener('close',function(){v.pause();if(from)from.focus()});
+x.addEventListener('click',close);d.addEventListener('click',function(e){if(e.target===d)close()});
+d.addEventListener('keydown',function(e){if(e.key==='Escape'){e.preventDefault();close();return}if(e.key!=='Tab')return;var f=[x,v],i=f.indexOf(document.activeElement);
+if(e.shiftKey&&i<=0){e.preventDefault();f[f.length-1].focus()}else if(!e.shiftKey&&i===f.length-1){e.preventDefault();f[0].focus()}});
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.vbtn');if(b){e.preventDefault();open(b)}})})()</script>`;
 function demoSection(up) {
   const img = (f, i, lazy, on, sizes) => { const k = SHOT_DIM[f];
     return `<img class="dm-img${on ? ' on' : ''}" data-k="${f}" src="${up}assets/shots/${f}-900.webp" srcset="${up}assets/shots/${f}-900.webp ${Math.min(900, k.w)}w, ${up}assets/shots/${f}.webp ${k.w}w" sizes="${sizes}" width="${k.w}" height="${k.h}" alt="${esc(k.alt)}"${lazy ? ' loading="lazy"' : ''} decoding="async">`; };
@@ -402,7 +433,7 @@ function demoSection(up) {
       <p class="dm-head">${esc(d.head)}</p>
       <ul class="ticks">${d.ticks.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
       <p class="dm-price">${demoPrice(d)}</p>${d.id === 'accounting' ? `<p class="dm-alt">Need full books, bank reconciliation and BAS? <a href="${up}programs/accounting.html">Accounting Plus</a> is ${usd(PRICE.plus)} a month.</p>` : ''}${d.note ? `<p class="dm-alt">${esc(d.note)}</p>` : ''}
-      <div class="dm-btns">${start}<a class="btn s" href="${up}programs/${d.prog}.html">Learn more ${ARR}</a>${d.live ? `<a class="btn s dm-live" href="${d.live}">${PLAY} Try the live demo</a>` : ''}</div>
+      <div class="dm-btns">${start}${videoBtn(d.id, up)}<a class="btn s" href="${up}programs/${d.prog}.html">Learn more ${ARR}</a>${d.live ? `<a class="btn s dm-live" href="${d.live}">${PLAY} Try the live demo</a>` : ''}</div>
     </div>
   </div>`; }).join('')}
 </div></section>
@@ -437,7 +468,8 @@ function fromHash(){var m=/^#demo-([\\w-]+)$/.exec(location.hash),i=m?tabs.map(f
 [].forEach.call(document.querySelectorAll('#find a[data-demo]'),function(a){a.addEventListener('click',function(e){if(e.ctrlKey||e.metaKey||e.shiftKey||e.altKey||e.button)return;
 var i=tabs.map(function(t){return t.getAttribute('data-id')}).indexOf(a.getAttribute('data-demo'));if(i<0)return;e.preventDefault();sel(i);
 try{history.replaceState(null,'','#demo-'+a.getAttribute('data-demo'))}catch(x){}R.scrollIntoView({behavior:mm('(prefers-reduced-motion: reduce)')?'auto':'smooth'});tabs[i].focus({preventScroll:true})})});
-sel(0);fromHash();addEventListener('hashchange',fromHash);state();})();</script>`;
+sel(0);fromHash();addEventListener('hashchange',fromHash);state();})();</script>
+${videoBox()}`;
 }
 /** Phones: a small "Start free" bar once the hero has scrolled away (closed with ×, for this visit). */
 const MBAR = `<div class="mbar" id="mbar" hidden><span><b>Riyeser</b><small>Free tools forever · paid programs free for 90 days</small></span><a class="btn p sm" href="/link/?signup">Start free</a><button type="button" class="mbar-x" aria-label="Close">×</button></div>
@@ -893,7 +925,7 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
     <div class="phead-who">${iconBox(p, up)}<div><span class="eyebrow">${esc(p.name)}</span>${badgeOf(p)}</div></div>
     <h1>${esc(p.pitch)}</h1><p class="lead">${esc(firstSentence(p.one))}</p>
     ${heroPrice(p, up)}
-    <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
+    <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}${videoOf(p.id) ? videoBtn(videoOf(p.id), up, 'btn s big') : ''}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
     ${p.file ? `<p class="fine">Windows 10 &amp; 11 · ${p.comesWith ? 'Sign in with your Riyeser account' : 'No account or card needed'}</p>` : ''}
   </div>
   ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : SHOTS[p.id] ? winFrame(up, p.comesWith || p.id, prog(p.comesWith || p.id).name, `shots/${SHOTS[p.id][0][0]}.webp`, SHOTS[p.id][0][3], SHOTS[p.id][0][1], SHOTS[p.id][0][2]) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
@@ -907,7 +939,8 @@ ${p.id.startsWith('accounting') ? `<section class="c blk" id="editions">${shead(
 ${rel.length ? `<section class="c blk">${shead('Works with', 'Every Riyeser program shows up in Riyeser Central, your home screen for the whole business.')}
   <div class="wrow">${rel.map(([o, why]) => `<a href="${up}programs/${o.id}.html">${appImg(o.id, up)}<span><b>${esc(o.short === 'Central' ? 'Riyeser Central' : o.short)}</b><small>${esc(why)}</small></span>${ARR}</a>`).join('')}</div>
 </section>` : ''}
-${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}`,
+${ctaBlock(up, p.file ? `Get ${p.name}` : 'Start with Riyeser Central')}
+${videoOf(p.id) ? videoBox() : ''}`,
   });
 }
 
