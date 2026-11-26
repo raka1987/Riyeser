@@ -1,0 +1,41 @@
+name: Update the Riyeser Link database
+
+# Runs website/team/team-chat.sql (from module/desk-assistant) on the Riyeser Link (Riyeser Team) Supabase database,
+# the same as pasting it into Supabase's SQL Editor and pressing Run. The file is safe to re-run.
+# It all runs as one transaction: if any part fails, nothing is changed.
+# Connects with the TEAM_DB_URL secret, like the nightly backups and HQ jobs. Started by hand only.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to take team-chat.sql from"
+        default: module/desk-assistant
+        required: true
+
+permissions:
+  contents: read
+
+concurrency: { group: team-database, cancel-in-progress: false }
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DB_URL: ${{ secrets.TEAM_DB_URL }}
+    steps:
+      - name: Set up yet?
+        run: |
+          if [ -z "$DB_URL" ]; then
+            echo "::error::The TEAM_DB_URL secret is missing. Add it under Settings → Secrets and variables → Actions (ops/RUNBOOK.md, Setting up backups)."
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+        with: { ref: "${{ inputs.ref }}", sparse-checkout: website/team/team-chat.sql, sparse-checkout-cone-mode: false }
+      - name: PostgreSQL client
+        run: command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null; }
+      - name: Run team-chat.sql
+        run: |
+          echo "team-chat.sql from ${{ inputs.ref }} at $(git rev-parse --short HEAD), sha1 $(sha1sum website/team/team-chat.sql | cut -c1-12)"
+          psql "$DB_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction -f website/team/team-chat.sql > /dev/null
+          echo "Done: the Riyeser Link database is up to date."
