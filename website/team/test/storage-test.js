@@ -21,14 +21,18 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
     const pg = await ctx.newPage(); pg.on('pageerror', (e) => errs.push(e.message));
     await pg.goto(BASE + '/link/?demo' + (as ? '&as=' + as : '')); await pg.waitForSelector('.item'); return pg;
   }
-  async function openPlan(pg) {   // the owner: Admin / Settings → Plan & billing opens Riyeser home's plan
-    if (!(await pg.isVisible('#coplan'))) await pg.click('#adminh');
+  async function manage(pg) {   // Management, unlocked with the demo code
+    await pg.evaluate(() => window.RiyeserTeam.setNav('manage')); await pg.fill('#mgcode', '123456'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgopen');
+  }
+  async function openPlan(pg) {   // the owner: Management → Billing & plan opens Riyeser home's plan
+    if (!(await pg.$('#coplan'))) await manage(pg);
     await pg.click('#coplan'); await pg.waitForSelector('#hplanv'); await pg.waitForSelector('#stor');
   }
   // 1. the owner (Riyeser Link trial, 20 GB): Plan & billing, with the bar and no warning; no Billing item in Link
   let pg = await linkDemo('');
-  check(!(await pg.$('#cobill')), 'Link: no "Billing & Subscription" in Admin / Settings');
-  check(!!(await pg.$('#coplan')), 'the owner sees "Plan & billing"');
+  await manage(pg);
+  check(!(await pg.$('#cobill')), 'Link: no "Billing & Subscription" in Management');
+  check(!!(await pg.$('#coplan')), 'the owner sees "Billing & plan" in Management');
   await openPlan(pg);
   let t = (await pg.textContent('#stor')).replace(/\s+/g, ' ');
   check(/1\.2 GB of 20 GB used/.test(t) && !(await pg.$('#stor.warn')), `owner's plan view: storage bar (${t.slice(0, 60)})`);
@@ -45,16 +49,18 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
   await pg.close();
   // 1c. an admin who isn't the owner: no Billing, no Plan & billing, no prices; "Files: x of y" in the Info panel
   pg = await linkDemo('nearly', 'u-sam');
-  if (await pg.$('#adminh')) { if (!(await pg.isVisible('#coppl'))) await pg.click('#adminh'); }
-  check(!!(await pg.$('#coppl')) && !(await pg.$('#cobill')) && !(await pg.$('#coplan')), 'admin: Admin / Settings, but no Billing and no Plan & billing');
+  await manage(pg);
+  check(!!(await pg.$('#coppl')) && !(await pg.$('#cobill')) && !(await pg.$('#coplan')), 'admin: Management, but no Billing and no Billing & plan');
+  check(!/US\$\d|\$\d+ a month/.test(await pg.textContent('#mview')), 'admin: no prices in Management');
   await pg.click('[data-ch="c-jobs"]'); await pg.waitForTimeout(200); await pg.click('#infobtn'); await pg.waitForSelector('#ifiles');
   t = (await pg.textContent('#ifiles')).replace(/\s+/g, ' ');
   check(t.includes('Files: 17 GB of 20 GB') && t.includes('Ask the owner to contact Riyeser support') && !/US\$|\$\d/.test(t), `admin Info panel: ${t}`);
   if (out) await pg.screenshot({ path: out + '/link-admin-info-files.png' });
-  check(!/US\$\d|\$\d+ a month/.test(await pg.textContent('#lknav')), 'admin: no prices in the Link menu');
-  await pg.click('[data-nav=home]'); await pg.waitForTimeout(800);
-  const home = await pg.textContent('body');
-  check(!home.includes('Your plan') && !home.includes('To change your plan') && !/US\$\d/.test(home) && !home.includes('Paid to'), 'admin: Riyeser home shows no plan, prices or billing');
+  await pg.click('#umenu'); const um = await pg.textContent('.usermenu'); await pg.keyboard.press('Escape');
+  check(!/US\$\d|\$\d+ a month/.test(um + await pg.textContent('#lktop')), 'admin: no prices in the top bar or the menu under your picture');
+  await pg.evaluate(() => window.RiyeserTeam.setNav('settings')); await pg.waitForTimeout(300);
+  const home = await pg.textContent('#mview');
+  check(!home.includes('Your plan') && !home.includes('To change your plan') && !/US\$\d/.test(home) && !home.includes('Paid to'), 'admin: Settings shows no plan, prices or billing');
   await pg.close();
   // 2. full: an upload is refused with the plain message
   pg = await linkDemo('full');

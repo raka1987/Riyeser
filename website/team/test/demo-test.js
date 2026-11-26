@@ -13,8 +13,8 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
   console.log('after send + live reply:', (await texts('#msgs .mb')).slice(-2));
   await pg.screenshot({ path: out + '/team-desktop.png' });
   await pg.click('[data-dm="u-sam"]'); await pg.waitForTimeout(200); console.log('dm header:', await pg.textContent('#mhead h2'));
-  await pg.click('#inv'); await pg.waitForSelector('.modal'); console.log('invite link:', await pg.inputValue('#il')); await pg.click('#cl');
-  await pg.click('#addch'); await pg.fill('input[name=name]', 'Hill Rd Site'); await pg.click('.modal .btn.p'); await pg.waitForTimeout(200);
+  await pg.click('#umenu'); await pg.click('#coset'); await pg.click('#inv'); await pg.waitForSelector('.modal'); console.log('invite link (Settings):', await pg.inputValue('#il')); await pg.click('#cl');
+  await pg.click('#newchat'); await pg.click('#ncch'); await pg.fill('input[name=name]', 'Hill Rd Site'); await pg.click('.modal .btn.p'); await pg.waitForTimeout(200);
   console.log('new channel:', await pg.textContent('#mhead h2'));
   await pg.click('[data-ch="c-jobs"]'); await pg.waitForTimeout(200);
   const mine = await pg.$$('.msg:has([data-act="edit"])'); const lastMine = mine[mine.length - 1]; await lastMine.hover(); await (await lastMine.$('[data-act="edit"]')).click();
@@ -26,7 +26,7 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
     'overflow', await pp.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   await pp.screenshot({ path: out + '/team-phone-list.png' });
   await pp.tap('[data-ch="c-jobs"]'); await pp.waitForTimeout(300); await pp.screenshot({ path: out + '/team-phone-chat.png' });
-  await pp.tap('.back'); console.log('back to list:', !(await pp.evaluate(() => document.querySelector('.shell').classList.contains('inchat'))));
+  await pp.tap('#mhead .back'); console.log('back to list:', !(await pp.evaluate(() => document.querySelector('.shell').classList.contains('inchat'))));
   const g = await b.newPage(); await g.goto(BASE + '/link/'); await g.waitForTimeout(500);
   console.log('not set up yet -> demo?', await g.evaluate(() => window.RiyeserTeam && window.RiyeserTeam.demo));
   console.log('errors:', errs); await b.close();

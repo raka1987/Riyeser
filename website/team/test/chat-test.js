@@ -15,7 +15,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
 (async () => {
   const b = await chromium.launch(); const errs = [];
   const open = async (w, q = '') => { const pg = await b.newPage({ viewport: { width: w, height: 860 } }); pg.on('pageerror', (e) => errs.push(e.message));
-    await pg.goto(`${BASE}/link/?demo${q}`); await pg.waitForSelector('#lknav'); return pg; };
+    await pg.goto(`${BASE}/link/?demo${q}`); await pg.waitForSelector('#lkshell'); return pg; };
 
   // ---- S9: long messages
   { const pg = await open(1280);
@@ -34,21 +34,23 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
 
   // ---- M9: wording
   { const pg = await open(1280);
-    check(!(await pg.$('#vidbtn')) && !(await pg.$('#callch')), 'M9 #general: no call or video buttons (group calls aren\'t here yet)');
+    await pg.click('#callbtn'); await pg.waitForSelector('.callmenu');
+    check(!(await pg.$('#vidbtn')) && !!(await pg.$('.callmenu [data-cw]')), 'M9 #general: Call lists one person at a time, no video (group calls aren\'t here yet)');
+    await pg.keyboard.press('Escape');
     await pg.fill('#txt', 'Typo hree'); await pg.press('#txt', 'Enter'); await pg.waitForTimeout(200);
     await pg.hover('#msgs .msg:last-child'); await pg.click('#msgs .msg:last-child [data-act=edit]');
     await pg.fill('#msgs [data-edit] textarea', 'Typo here'); await pg.press('#msgs [data-edit] textarea', 'Enter'); await pg.waitForTimeout(200);
     check(/Typo here\s*\(edited\)/.test(await pg.textContent('#msgs .msg:last-child')), 'M9 an edited message says "(edited)"');
-    await pg.click('[data-dm="u-sam"]'); await pg.waitForSelector('#calldm');
-    check(!!(await pg.$('#vidbtn')), 'M9 a direct message keeps Call and Video');
+    await pg.click('[data-dm="u-sam"]'); await pg.click('#callbtn'); await pg.waitForSelector('#calldm');
+    check(!!(await pg.$('#vidbtn')), 'M9 a direct message keeps Call and Video'); await pg.keyboard.press('Escape');
     await pg.fill('#txt', 'Are the timesheets done?'); await pg.press('#txt', 'Enter'); await pg.waitForTimeout(200);
     await pg.click('[data-dm="u-alex"]'); await pg.waitForTimeout(150); await pg.click('[data-dm="u-sam"]'); await pg.waitForSelector('#seen', { timeout: 4000 });
     check(true, 'M9 "Seen" under your message once they\'ve read it');
     await pg.click('[data-dm="u-alex"]'); await pg.fill('#txt', 'See you at 3'); await pg.press('#txt', 'Enter'); await pg.waitForTimeout(300);
     check(!(await pg.$('#seen')), 'M9 no "Seen" before they\'ve read it');
-    const qd = await pg.$('#qdn'); if (!qd) { await pg.click('[data-nav=calls]'); await pg.waitForSelector('#qdn'); }
-    await pg.fill('#qdn', '101'); await pg.dispatchEvent('#qdn', 'input'); check(await pg.textContent('#qdw') === 'That\'s your own extension', 'M9 dialling your own extension says so');
-    await pg.fill('#qdn', '999'); await pg.dispatchEvent('#qdn', 'input'); check(await pg.textContent('#qdw') === 'No one on that number', 'M9 an unused number still says "No one on that number"');
+    await pg.click('#tbcalls'); await pg.waitForSelector('#vdn');
+    await pg.fill('#vdn', '101'); await pg.dispatchEvent('#vdn', 'input'); check(await pg.textContent('#vdw') === 'That\'s your own extension', 'M9 dialling your own extension says so');
+    await pg.fill('#vdn', '999'); await pg.dispatchEvent('#vdn', 'input'); check(await pg.textContent('#vdw') === 'No one on that number', 'M9 an unused number still says "No one on that number"');
     await pg.close(); }
 
   // ---- M27: files

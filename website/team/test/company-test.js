@@ -6,8 +6,9 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   const pg = await b.newPage({ viewport: { width: 1280, height: 860 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-  await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('#lknav');
-  console.log('team header:', (await pg.textContent('.team small')).trim(), '| admin group:', (await pg.textContent('#adming')).replace(/\s+/g, ' ').trim());
+  await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('#lkshell');
+  await pg.click('#umenu'); await pg.click('#um-mgmt'); await pg.fill('#mgcode', '123456'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgopen');
+  console.log('business:', (await pg.textContent('#lkbiz')).trim(), '| Management:', (await pg.$$eval('.lk-tile b', (x) => x.map((e) => e.textContent))).join(' | '));
   // approve Mere as Sales in Lautoka
   await pg.click('#coreq'); await pg.waitForSelector('form[data-req]');
   console.log('request:', (await pg.textContent('.rq-who')).replace(/\s+/g, ' ').trim(), '| Lautoka pre-ticked:', await pg.isChecked('form[data-req] input[name=br][value="b-lau"]'));
@@ -17,7 +18,7 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
   const mere = await pg.evaluate(() => window.RiyeserTeam.state.people.find((p) => p.display_name === 'Mere Vula'));
   console.log('approved:', mere && `${mere.display_name} ${mere.job_role} ext ${mere.extension}`, '| requests left:', await pg.evaluate(() => window.RiyeserTeam.state.requests.length));
   await pg.click('#cl');
-  // change Jordan to Bookkeeper + admin, in both branches
+  // change Jordan to Bookkeeper + admin (the owner can), in both branches
   await pg.click('#coppl'); await pg.waitForSelector('details.brm summary');
   const jf = 'form[data-person="u-jordan"]';
   await pg.click(`details:has(${jf}) summary`); await pg.selectOption(`${jf} select[name=job]`, 'bookkeeper'); await pg.check(`${jf} input[name=admin]`);
@@ -59,9 +60,12 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
   await p2.waitForSelector('.waitdots'); console.log('waiting screen:', await p2.textContent('.gcard h1'), '| sent:', JSON.stringify(asked));
   await p2.screenshot({ path: out + '/company-waiting.png' });
   approved = true; await p2.click('#chk'); await p2.waitForSelector('.hco', { timeout: 8000 });
-  console.log('approved -> Riyeser home:', await p2.textContent('.hco h2'), '| staff see no admin buttons:', !(await p2.$('#hreq'))); await p2.click('#hchat'); await p2.waitForSelector('#lknav');
-  console.log('approved -> in the company:', (await p2.textContent('.team b')).trim(), '| no admin buttons for staff:', !(await p2.$('#coreq')) && !(await p2.$('#adming')));
-  const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); await ph.goto(BASE + '/link/?demo'); await ph.waitForSelector('#lknav', { state: 'attached' });
-  await ph.tap('#burger'); await ph.waitForTimeout(250); await ph.tap('#coreq'); await ph.waitForSelector('form[data-req]'); console.log('phone overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
+  console.log('approved -> Riyeser home:', await p2.textContent('.hco h2'), '| staff see no admin buttons:', !(await p2.$('#hreq'))); await p2.click('#hchat'); await p2.waitForSelector('#lkshell');
+  await p2.click('#umenu'); const staffMenu = await p2.textContent('.usermenu'); await p2.keyboard.press('Escape');
+  await p2.evaluate(() => window.RiyeserTeam.setNav('settings'));
+  console.log('approved -> in the company:', (await p2.textContent('#lkbiz b')).trim(), '| no Management for staff:', !/Management/.test(staffMenu) && !(await p2.$('#set-mgmt')) && !(await p2.$('#coreq')));
+  const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); await ph.goto(BASE + '/link/?demo'); await ph.waitForSelector('#lkshell');
+  await ph.tap('[data-nav=settings]'); await ph.tap('#set-mgmt'); await ph.fill('#mgcode', '123456'); await ph.tap('#mgunlock'); await ph.waitForSelector('#coreq');
+  await ph.tap('#coreq'); await ph.waitForSelector('form[data-req]'); console.log('phone overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
   console.log('errors:', errs); await b.close();
 })();

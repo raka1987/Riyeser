@@ -5,22 +5,28 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   const pg = await b.newPage({ viewport: { width: 1280, height: 860 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-  await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('#lknav');
-  console.log('owner with two-step: nag shown?', !!(await pg.$('#mfanag')), '| admin group:', (await pg.textContent('#adming')).replace(/\s+/g, ' ').trim());
+  await pg.goto(BASE + '/link/?demo'); await pg.waitForSelector('#lkshell');
+  const nav = (k) => pg.evaluate((x) => window.RiyeserTeam.setNav(x), k);
+  await nav('settings'); console.log('owner with two-step: nag shown?', !!(await pg.$('#mfanag')));
+  // Management: a code first, then the tools
+  await nav('manage'); await pg.waitForSelector('#mgcode'); await pg.fill('#mgcode', '123456'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgopen');
+  console.log('Management tools:', (await pg.$$eval('.lk-tile b', (x) => x.map((e) => e.textContent))).join(' | '));
   // history
   await pg.click('#cohist'); await pg.waitForSelector('.hist');
   console.log('history:', await pg.evaluate(() => [...document.querySelectorAll('.hl')].map((x) => x.textContent.replace(/\s+/g, ' ').trim()).slice(0, 3)));
   await pg.screenshot({ path: out + '/mfa-history.png' }); await pg.click('#cl');
-  // turn it off: the nag appears, and People leads to set-up instead
+  // turn it off: Management locks and only offers setting it up; Settings shows the reminder
   await pg.click('#cosec'); await pg.waitForSelector('#off'); await pg.click('#off'); await pg.click('#askyes'); await pg.waitForTimeout(300);
-  console.log('after turning off: nag shown?', !!(await pg.$('#mfanag')));
-  await pg.click('#coppl'); await pg.waitForSelector('#vf');
-  console.log('People asks for set-up first:', await pg.textContent('.mcard h3'), '| QR shown:', await pg.isVisible('.qr img'));
+  console.log('after turning off: Management shows only the set-up step?', !!(await pg.$('#mg-setup')) && !(await pg.$('#coppl')) && !(await pg.$('#mgcode')));
+  await nav('settings'); console.log('after turning off: nag shown?', !!(await pg.$('#mfanag')));
+  await nav('manage'); await pg.click('#mg-setup'); await pg.waitForSelector('#vf');
+  console.log('Management asks for set-up first:', await pg.textContent('.mcard h3'), '| QR shown:', await pg.isVisible('.qr img'));
   await pg.screenshot({ path: out + '/mfa-setup.png' });
   await pg.fill('#vf input', '12'); await pg.click('#vf .btn.p'); await pg.waitForTimeout(200);
   await pg.fill('#vf input', '123456'); await pg.click('#vf .btn.p'); await pg.waitForSelector('.mcard h3:has-text("is on")');
-  console.log('turned on:', await pg.textContent('.mcard h3'), '| nag gone:', !(await pg.$('#mfanag')));
-  await pg.click('#cl'); await pg.click('#coppl'); await pg.waitForSelector('details.brm'); console.log('People opens now:', await pg.textContent('.mcard h3'));
+  console.log('turned on:', await pg.textContent('.mcard h3'));
+  await pg.click('#cl'); await pg.click('#coppl'); await pg.waitForSelector('details.brm'); console.log('People opens now (the code just typed unlocked Management):', await pg.textContent('.mcard h3'));
+  await pg.click('#cl'); await nav('settings'); console.log('nag gone:', !(await pg.$('#mfanag')));
 
   // sign in to an account with two-step on: asks for the code, then lets you in
   const p2 = await b.newPage({ viewport: { width: 1000, height: 800 } }); p2.on('pageerror', (e) => errs.push('signin: ' + e.message));
@@ -49,7 +55,8 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=ht
   await p2.waitForSelector('#cs'); console.log('after password -> asks for code:', await p2.textContent('#cs h1'));
   await p2.screenshot({ path: out + '/mfa-code.png' });
   await p2.fill('#cs input', '111111'); await p2.click('#cs .btn.p'); await p2.waitForSelector('#cs .err'); console.log('wrong code:', await p2.textContent('#cs .err'));
-  await p2.fill('#cs input', '246810'); await p2.click('#cs .btn.p'); await p2.waitForSelector('#lknav', { timeout: 8000 });
-  console.log('right code -> in:', (await p2.textContent('.team b')).trim(), '| owner nag shown (should be no):', !!(await p2.$('#mfanag')));
+  await p2.fill('#cs input', '246810'); await p2.click('#cs .btn.p'); await p2.waitForSelector('#lkshell', { timeout: 8000 });
+  await p2.evaluate(() => window.RiyeserTeam.setNav('settings'));
+  console.log('right code -> in:', (await p2.textContent('#lkbiz b')).trim(), '| owner nag shown (should be no):', !!(await p2.$('#mfanag')));
   console.log('errors:', errs); await b.close();
 })();

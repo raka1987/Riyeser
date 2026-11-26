@@ -1,11 +1,14 @@
 // The Riyeser Link workspace (phase 1), in the demo and against a pretend Supabase:
-//  1. The three panels (nav, list, conversation) and the right panel (People / Info), header and Admin / Settings.
-//  2. The status picker (Busy, Do not disturb, a status message, back to Available) and Away after 10 minutes idle.
+//  1. Concept A: a slim top bar, one list (All · Channels · People · Unread) and the chat; Calls and People as views.
+//  2. Your status: Available, Busy / Do not disturb, At lunch, Away, Unavailable, "for how long", back to Available when
+//     the time is up, and Away after 10 minutes idle. On a call and Offline can't be chosen.
 //  3. Reactions: add and take back. 4. Pin and unpin a chat. 5. New chat: one person (a DM), and a few (a private chat).
-//  6. The People panel: presence and extensions. 7. Quick dial. 8. The floating call bar between two tabs: mute, hold, end,
-//     and chat while calling. 9. An incoming call: Answer and Decline, the 📞 title. 10. Themes: dark, light, match my
+//  6. Status next to names (details ⓘ, list). 7. The keypad only when asked for. 8. The call pill between two tabs: mute,
+//     hold, end, chat while calling, "On a call" by itself. 9. An incoming call: Answer and Decline, the 📞 title; Busy,
+//     At lunch and Unavailable don't ring (the caller is told; the database refuses too). 10. Themes: dark, light, match my
 //     computer, accents, contrast spot checks, saved with the account; Riyeser home stays light and blue.
-// 11. Admin / Settings is hidden for members. 12. Phone width (390px): one panel at a time, back buttons, no sideways scroll.
+// 11. Management: locked, a fresh code each time, locks again after 15 idle minutes; staff never see it or any admin item.
+// 12. Phone width (390px): Chats · Calls · People · Settings along the bottom, a chat full screen, no sideways scroll.
 // 13. Files: send one, see the card, the 25 MB limit; against the pretend server the upload goes to the private link-files store.
 // 14. A database that hasn't had this release's team-chat.sql: nothing breaks, reactions hide, pins fall back to the account.
 // Screenshots (dark and light, desktop and phone) go to the folder given. Exits 1 on any failure.
@@ -42,63 +45,79 @@ async function contrast(pg, sel) {
   try {
     const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['microphone', 'camera'] });
     const pg = await ctx.newPage(); watch(pg, 'me');
-    await pg.goto(DEMO); await pg.waitForSelector('#lknav [data-nav]');
+    await pg.goto(DEMO); await pg.waitForSelector('#lkshell .item');
 
-    // 1. the layout
+    // 1. the layout (concept A): a slim top bar, then two panels (one list, one chat); details only on demand
     const box = async (sel) => pg.$eval(sel, (e) => { const r = e.getBoundingClientRect(); return { x: Math.round(r.x), w: Math.round(r.width), h: Math.round(r.height) }; });
-    const [nav, list, main, right] = [await box('#lknav'), await box('#side'), await box('#main'), await box('#lkright')];
-    console.log('panels:', { nav, list, main, right });
-    assert.ok(nav.w > 150 && list.w > 250 && main.w > 400 && right.w > 250, 'four columns showing');
-    assert.ok(nav.x < list.x && list.x < main.x && main.x < right.x, 'nav | list | conversation | people, left to right');
-    assert.match(await pg.$eval('.lk-logo', (e) => e.innerText.replace(/\s+/g, ' ')), /Li\. Riyeser Link Business Communications/);
-    assert.strictEqual(await pg.getAttribute('#q', 'placeholder'), 'Search chats, people, calls…');
-    assert.deepStrictEqual(await pg.$$eval('#lknav [data-nav] span:first-of-type', (x) => x.map((y) => y.textContent)), ['Home', 'Chat', 'Calls', 'Contacts', 'Teams / Channels', 'Devices']);
-    assert.ok(await pg.$('#lknav #cophones'), 'Desk Phones for the owner'); assert.ok(await pg.$('#adming #coppl') && await pg.$('#adming #coplan') && !(await pg.$('#cobill')), 'Admin / Settings for the owner, with Plan & billing and no Billing & Subscription');
-    assert.match(await text(pg, '#side .lk-tabs'), /^Chats \d+ Calls \d+ Voicemail 0$/);
-    assert.deepStrictEqual(await pg.$$eval('#side .sec', (x) => x.map((y) => y.firstChild.textContent.trim())), ['Pinned', 'Channels', 'Direct messages']);
-    assert.match(await text(pg, '#mhead h2'), /# general/); assert.match(await pg.getAttribute('#txt', 'placeholder'), /^Type a message in #general…$/);
-    for (const id of ['#ppl', '#infobtn', '#morebtn', '#attach', '#emo', '#send']) assert.ok(await pg.$(id), id);
-    for (const id of ['#vidbtn', '#callch']) assert.ok(!(await pg.$(id)), id + ' hidden in a channel until group calls exist (M9)');
+    const [list, main] = [await box('#side'), await box('#main')];
+    console.log('panels:', { list, main });
+    assert.ok(list.w > 250 && main.w > 800 && list.x < main.x, 'two panels: the list, then the chat filling the rest');
+    assert.ok(!(await pg.isVisible('#lkright')) && !(await pg.isVisible('#lknav')), 'no details panel and no tab bar until asked for');
+    assert.strictEqual(await text(pg, '#lkbiz'), 'Sample Plumbing');
+    assert.strictEqual(await pg.getAttribute('#q', 'placeholder'), 'Search chats and people');
+    for (const id of ['#tbcalls', '#tbpeople', '#stbtn', '#umenu']) assert.ok(await pg.isVisible(id), id + ' in the top bar');
+    for (const id of ['#bell', '#helpbtn', '#adming', '#coppl', '#cophones', '#qd', '#rtog', '#ppl']) assert.ok(!(await pg.$(id)), id + ' is gone (no clutter)');
+    assert.deepStrictEqual(await pg.$$eval('#side [data-filter]', (x) => x.map((y) => y.textContent)), ['All', 'Channels', 'People', 'Unread']);
+    assert.strictEqual(await text(pg, '#newchat'), 'New');
+    assert.deepStrictEqual(await pg.$$eval('#side .sec', (x) => x.length), 0, 'one list: channels and people together');
+    const [order, pinnedIds] = await pg.evaluate(() => { const S = window.RiyeserTeam.state;
+      return [[...document.querySelectorAll('#lscroll .item')].map((el) => el.dataset.ch || (S.chans.find((c) => c.kind === 'dm' && c.people.includes(el.dataset.dm)) || {}).id), S.pinned]; });
+    assert.ok(pinnedIds.length >= 1); assert.deepStrictEqual(order.slice(0, pinnedIds.length), pinnedIds, 'pinned at the top');
+    assert.ok(await pg.evaluate(() => [...document.querySelectorAll('#lscroll .lk-row')].every((r) => r.querySelectorAll('.badge').length <= 1)), 'at most one badge on each row');
+    assert.match(await text(pg, '#mhead h2'), /# general/); assert.strictEqual(await pg.getAttribute('#txt', 'placeholder'), 'Message #general');
+    for (const id of ['#callbtn', '#infobtn', '#morebtn', '#attach', '#emo', '#send']) assert.ok(await pg.$(id), id);
+    assert.strictEqual(await text(pg, '#callbtn'), 'Call');
     const day = await pg.$$eval('#msgs .day', (x) => x.map((y) => y.textContent)); assert.ok(day.includes('Today'), 'Today divider');
     assert.ok(await pg.$('#msgs .msg.cont'), 'grouped by author');
     await pg.screenshot({ path: out + '/link-dark-desktop.png' });
-    // the voicemail tab and the calls tab
-    await pg.click('[data-tab=voicemail]'); assert.match(await text(pg, '.lk-vm'), /Coming with Riyeser Link Office voicemail/);
-    await pg.click('[data-tab=calls]'); assert.ok((await pg.$$('.lk-callrow')).length >= 3, 'call history'); await pg.click('[data-tab=chats]');
-    // Home: the six cards (Requests for owners/admins)
-    await pg.click('[data-nav=home]'); await pg.waitForSelector('#hdevices .mi, #hdevices .muted');
-    assert.deepStrictEqual(await pg.$$eval('.lk-card h3', (x) => x.map((y) => y.textContent.trim())), ['Recent conversations', 'Quick call', 'Missed calls', 'Team channels', 'Requests', 'My devices']);
-    await pg.waitForFunction(() => /T31P|desk phone/i.test(document.querySelector('#hdevices').textContent));
-    console.log('home my devices:', await text(pg, '#hdevices'));
-    await pg.screenshot({ path: out + '/link-dark-home.png' });
-    await pg.click('[data-nav=chat]');
+    // Calls (with Voicemail) and People are views, not columns
+    await pg.click('#tbcalls'); await pg.waitForSelector('#mview[data-view=calls]');
+    assert.ok((await pg.$$('.lk-callrow')).length >= 3, 'call history'); assert.match(await text(pg, '#vmcard'), /Coming with Riyeser Link Office voicemail/);
+    assert.ok(await pg.isVisible('#side'), 'the list stays beside a view');
+    await pg.click('#tbpeople'); await pg.waitForSelector('#cdir'); await pg.click('#vclose'); await pg.waitForSelector('#mhead');
 
-    // 6. People panel: presence and extensions
+    // 6. status shows next to names: the details (ⓘ) list members with status and extension
+    await pg.click('#infobtn'); await pg.waitForSelector('#plist');
     const people = await pg.$$eval('#plist .lk-person', (x) => x.map((r) => [r.querySelector('.lk-pn b').textContent.trim(), r.querySelector('.lk-pst').textContent.trim(), r.querySelector('.lk-ext').textContent.trim(), r.querySelector('.pd').className]));
     console.log('people:', people.map((p) => p.slice(0, 3).join(' / ')));
     const P = Object.fromEntries(people.map((p) => [p[0], p]));
     assert.deepStrictEqual(P['Sam Taylor'].slice(1), ['Available', 'Ext. 102', 'pd st-available']);
-    assert.deepStrictEqual(P['Jordan Lee'].slice(1), ['On a call', 'Ext. 201', 'pd st-call']);
+    assert.deepStrictEqual(P['Jordan Lee'].slice(1), ['On a call', 'Ext. 201', 'pd st-call'], 'On a call (a desk phone call) shows by itself');
     assert.match(P['Alex Nguyen'][1], /^Away \(1\dm\)$/); assert.strictEqual(P['Alex Nguyen'][3], 'pd st-away');
-    assert.deepStrictEqual(P['Ana Ruiz'].slice(1), ['Offline', 'Ext. 103', 'pd st-offline']);
-    assert.match(await text(pg, '[data-rt=people]'), /^People \(5\)$/);
-    await pg.fill('#psearch', '20'); assert.deepStrictEqual(await pg.$$eval('#plist .lk-pn b', (x) => x.map((y) => y.textContent)), ['Jordan Lee', 'Alex Nguyen']); await pg.fill('#psearch', '');
+    assert.match(P['Ana Ruiz'][1], /^At lunch 🍽 until \d{1,2}:\d\d/); assert.strictEqual(P['Ana Ruiz'][3], 'pd st-lunch');
+    await pg.fill('#psearch', '20'); assert.deepStrictEqual(await pg.$$eval('#plist .lk-pn b', (x) => x.map((y) => y.textContent)), ['Alex Nguyen', 'Jordan Lee']); await pg.fill('#psearch', '');
     assert.strictEqual((await pg.$$('#plist [data-callp]')).length, 4, 'a call button for each other person (Riyeser Link on)');
+    assert.match(await text(pg, '[data-dm="u-ana"] .pv'), /At lunch/, 'status in the list too');
+    await pg.click('#rclose'); assert.ok(!(await pg.$('#lkshell.details')));
 
-    // 2. status picker, and Away after 10 minutes idle
+    // 2. the status menu: the five choices, "for how long", a note; Away after 10 minutes idle
     const myStatus = () => text(pg, '#stbtn');
-    await pg.click('#stbtn'); await pg.click('[data-st=busy]'); assert.strictEqual(await myStatus(), 'In the office today');
-    await pg.click('#stbtn'); await pg.fill('#stf input', ''); await pg.click('#stf .btn'); assert.strictEqual(await myStatus(), 'Busy');
-    assert.strictEqual(await pg.$eval('#stbtn .pd', (x) => x.className), 'pd st-busy');
-    await pg.click('#stbtn'); await pg.click('[data-st=dnd]'); assert.strictEqual(await myStatus(), 'Do not disturb');
-    await pg.click('#stbtn'); await pg.fill('#stf input', 'At the Elm St job'); await pg.click('#stf .btn'); assert.strictEqual(await myStatus(), 'At the Elm St job');
-    await pg.click('#stbtn'); await pg.fill('#stf input', ''); await pg.click('#stf .btn');
-    await pg.click('#stbtn'); await pg.click('[data-st=available]'); assert.strictEqual(await myStatus(), 'Available');
+    await pg.click('#stbtn'); await pg.waitForSelector('.stmenu');
+    assert.deepStrictEqual(await pg.$$eval('.stmenu [data-st]', (x) => x.map((y) => y.dataset.st)), ['available', 'dnd', 'lunch', 'away', 'unavailable'], 'Available, Busy / Do not disturb, At lunch, Away, Unavailable');
+    assert.ok(!(await pg.$('.stmenu [data-st=offline]')) && !(await pg.$('.stmenu [data-st=call]')), 'On a call and Offline can\'t be chosen');
+    await pg.click('[data-st=dnd]'); assert.strictEqual(await myStatus(), 'Busy · Do not disturb'); assert.strictEqual(await pg.$eval('#stbtn .pd', (x) => x.className), 'pd st-dnd');
+    await pg.click('[data-st=lunch]'); assert.strictEqual(await myStatus(), 'At lunch 🍽');
+    await pg.click('[data-until="60"]'); assert.match(await myStatus(), /^At lunch 🍽 until \d{1,2}:\d\d/, 'At lunch for 1 hour');
+    await pg.screenshot({ path: out + '/link-status-menu.png' });
+    await pg.selectOption('#sttime', { index: 3 }); assert.match(await myStatus(), /until/, 'until a time');
+    await pg.fill('#stf input', 'At the Elm St job'); await pg.click('#stf .btn'); assert.strictEqual(await pg.evaluate(() => window.RiyeserTeam.state.myText), 'At the Elm St job');
+    // the time is up: back to Available by itself
+    await pg.evaluate(() => window.RiyeserTeam.presence.tick(Date.parse(window.RiyeserTeam.state.myUntil) + 60000));
+    assert.strictEqual(await pg.evaluate(() => window.RiyeserTeam.state.myManual), null, 'the chosen status ends when its time is up'); assert.doesNotMatch(await myStatus(), /lunch/);
+    await pg.mouse.move(400, 400); await pg.mouse.move(410, 410); await pg.keyboard.press('Shift'); assert.strictEqual(await myStatus(), 'Available', 'back to Available');
+    await pg.click('#stbtn'); await pg.click('[data-st=unavailable]'); assert.strictEqual(await myStatus(), 'Unavailable'); assert.strictEqual(await pg.$eval('#stbtn .pd', (x) => x.className), 'pd st-unavailable');
+    await pg.click('[data-st=away]'); assert.strictEqual(await myStatus(), 'Away');
+    await pg.click('[data-st=available]'); assert.strictEqual(await myStatus(), 'Available'); assert.ok(!(await pg.$('.stmenu')), 'Available closes the menu');
+    // one tap on your picture: status first, then the rest
+    await pg.click('#umenu'); await pg.waitForSelector('.usermenu [data-st]');
+    assert.deepStrictEqual(await pg.$$eval('.usermenu .mi:not([data-st])', (x) => x.map((y) => y.id)), ['um-phone', 'coset', 'um-mgmt', 'um-help', 'out']);
+    await pg.click('.usermenu [data-st=dnd]'); assert.strictEqual(await myStatus(), 'Busy · Do not disturb'); await pg.click('.usermenu [data-st=available]');
+    await pg.keyboard.press('Escape');
     await pg.evaluate(() => window.RiyeserTeam.presence.tick(Date.now() + 11 * 60000));
     assert.match(await myStatus(), /^Away \(1\dm\)$/); assert.strictEqual(await pg.$eval('#stbtn .pd', (x) => x.className), 'pd st-away');
     console.log('after 11 idle minutes:', await myStatus());
     await pg.mouse.move(400, 400); await pg.mouse.move(420, 420); await pg.keyboard.press('Shift');
-    assert.strictEqual(await myStatus(), 'Available'); console.log('status picker and auto-away: ok');
+    assert.strictEqual(await myStatus(), 'Available'); console.log('status menu, until, and auto-away: ok');
 
     // 3. reactions: add and take back
     const chip = (id, e) => pg.$eval(`.msg[data-id="${id}"] [data-rx="${e}"]`, (x) => [x.querySelector('span').textContent, x.getAttribute('aria-pressed')]).catch(() => null);
@@ -110,22 +129,21 @@ async function contrast(pg, sel) {
     await pg.click('.msg[data-id="m2"] [data-rx="😂"]'); assert.strictEqual(await chip('m2', '😂'), null);
     console.log('reactions add and remove: ok');
 
-    // 4. pin and unpin
-    const section = (id) => pg.evaluate((cid) => { let sec = ''; for (const n of document.querySelector('#lscroll').children) { if (n.classList.contains('sec')) sec = n.firstChild.textContent.trim(); if (n.querySelector && n.querySelector(`[data-ch="${cid}"]`)) return sec; } return null; }, id);
-    assert.strictEqual(await section('c-office'), 'Channels');
-    await pg.hover('[data-ch="c-office"]'); await pg.click('[data-pin="c-office"]'); assert.strictEqual(await section('c-office'), 'Pinned');
-    await pg.hover('[data-ch="c-office"]'); await pg.click('[data-pin="c-office"]'); assert.strictEqual(await section('c-office'), 'Channels');
-    await pg.click('[data-ch="c-office"]'); await pg.click('#morebtn'); await pg.click('#mpin'); assert.strictEqual(await section('c-office'), 'Pinned');
-    await pg.click('#morebtn'); assert.match(await text(pg, '#mpin'), /Unpin this chat/); await pg.click('#mpin'); assert.strictEqual(await section('c-office'), 'Channels');
+    // 4. pin and unpin: pinned chats go to the top, with a pin mark
+    const first = () => pg.evaluate(() => { const ids = [...document.querySelectorAll('#lscroll .item')].map((e) => e.dataset.ch); const n = window.RiyeserTeam.state.pinned.length; return ids.indexOf('c-office') > -1 && ids.indexOf('c-office') < n ? 'c-office' : 'not pinned'; });   // up with the pinned chats
+    await pg.click('[data-ch="c-office"]'); await pg.click('#morebtn'); await pg.click('#mpin'); assert.strictEqual(await first(), 'c-office');
+    assert.ok(await pg.$('[data-ch="c-office"] .pinmark'));
+    await pg.click('#morebtn'); assert.match(await text(pg, '#mpin'), /Unpin this chat/); await pg.click('#mpin'); assert.ok(!(await pg.$('[data-ch="c-office"] .pinmark')));
+    await pg.click('#infobtn'); await pg.click('#ipin'); assert.strictEqual(await first(), 'c-office', 'Pin from the details too'); await pg.click('#ipin'); await pg.click('#rclose');
     console.log('pin and unpin: ok');
 
     // 5. New chat: one person, then a few
     await pg.click('#newchat'); await pg.waitForSelector('#ncf'); await pg.check('#ncf input[value="u-ana"]'); await pg.click('#ncgo');
-    await pg.waitForFunction(() => /Ana Ruiz/.test(document.querySelector('#mhead h2').textContent)); assert.ok(await pg.$('#calldm'));
+    await pg.waitForFunction(() => /Ana Ruiz/.test(document.querySelector('#mhead h2').textContent)); assert.ok(await pg.$('#callbtn'));
     await pg.click('#newchat'); await pg.fill('#ncq', 'a'); await pg.check('#ncf input[value="u-sam"]'); await pg.check('#ncf input[value="u-alex"]');
     assert.strictEqual(await text(pg, '#ncgo'), 'Start group chat (3)'); await pg.fill('#ncf input[name=name]', 'Yard crew'); await pg.click('#ncgo');
     await pg.waitForFunction(() => /yard-crew/.test(document.querySelector('#mhead h2').textContent));
-    assert.match(await text(pg, '#mhead small'), /^Private · 3 people/); console.log('new chat: DM and group: ok');
+    assert.match(await text(pg, '#mhead small'), /^3 people/); console.log('new chat: DM and group: ok');
 
     // 13. files (demo): send one, see the card; over 25 MB is refused
     await pg.click('[data-ch="c-jobs"]');
@@ -136,28 +154,36 @@ async function contrast(pg, sel) {
     await pg.click('.msg:last-child [data-file="0"]'); const d1 = await dl; assert.ok(d1 && d1.suggestedFilename() === 'Site_plan_v2.pdf', 'download');
     await pg.setInputFiles('#file', { name: 'huge.zip', mimeType: 'application/zip', buffer: Buffer.alloc(25 * 1024 * 1024 + 1) });
     await pg.waitForSelector('#phmsg:not([hidden])'); assert.match(await text(pg, '#phmsg'), /huge\.zip is over 25 MB/);
-    await pg.click('#infobtn'); assert.match(await text(pg, '.lk-info'), /Site_plan_v2\.pdf/); await pg.click('[data-rt=people]');
+    await pg.click('#infobtn'); assert.match(await text(pg, '.lk-info'), /Site_plan_v2\.pdf/); await pg.click('#rclose');
     console.log('files: ok');
 
-    // 7. Quick dial
-    for (const k of ['2', '0', '2']) await pg.click(`[data-qdk="${k}"]`);
-    assert.match(await text(pg, '#qdw'), /^Alex Nguyen · Away/);
-    await pg.fill('#qdn', '200'); await pg.dispatchEvent('#qdn', 'input'); assert.strictEqual(await text(pg, '#qdw'), 'Lautoka branch (everyone)');
-    await pg.fill('#qdn', '999'); await pg.dispatchEvent('#qdn', 'input'); assert.strictEqual(await text(pg, '#qdw'), 'No one on that number');
-    assert.ok(await pg.$('#qdcall.lk-green') && await pg.$('#qdvid'), 'green call and video buttons');
+    // 7. the keypad only when asked for: Call → Keypad, and on Calls
+    await pg.click('#callbtn'); await pg.waitForSelector('.callmenu'); assert.ok(await pg.$('.callmenu [data-cw]') && !(await pg.$('.callmenu #vidbtn')), 'a channel: call one person');
+    await pg.click('#callkeys'); await pg.waitForSelector('#dpn'); await pg.click('.modal #cl');
+    await pg.click('#tbcalls'); await pg.waitForSelector('#vdn');
+    for (const k of ['2', '0', '2']) await pg.click(`[data-vdk="${k}"]`);
+    assert.match(await text(pg, '#vdw'), /^Alex Nguyen · Away/);
+    await pg.fill('#vdn', '200'); await pg.dispatchEvent('#vdn', 'input'); assert.strictEqual(await text(pg, '#vdw'), 'Lautoka branch (everyone)');
+    await pg.fill('#vdn', '999'); await pg.dispatchEvent('#vdn', 'input'); assert.strictEqual(await text(pg, '#vdw'), 'No one on that number');
+    assert.ok(await pg.$('#vdcall.lk-green') && await pg.$('#vdvid'), 'green call and video buttons');
+    await pg.click('#vclose');
 
-    // 8 and 9: two tabs (you, and Sam with ?as=u-sam): the floating call bar, and the incoming call
-    const sam = await ctx.newPage(); watch(sam, 'sam'); await sam.goto(DEMO + '&as=u-sam'); await sam.waitForSelector('#lknav'); await pg.waitForTimeout(400);
-    await pg.fill('#qdn', '102'); await pg.dispatchEvent('#qdn', 'input'); assert.match(await text(pg, '#qdw'), /^Sam Taylor/); await pg.click('#qdcall');
+    // 8 and 9: two tabs (you, and Sam with ?as=u-sam): the call pill, and the incoming call
+    const sam = await ctx.newPage(); watch(sam, 'sam'); await sam.goto(DEMO + '&as=u-sam'); await sam.waitForSelector('#lkshell .item'); await pg.waitForTimeout(400);
+    await pg.click('[data-dm="u-sam"]'); await pg.click('#callbtn'); await pg.waitForSelector('#calldm'); assert.match(await text(pg, '#calldm'), /Voice call/); await pg.click('#calldm');
     assert.ok(await until(sam, 'incoming'), 'Sam rings');
     await sam.waitForSelector('#callbox.ringing'); console.log('incoming card:', await itext(sam, '#callbox .cwho > div'), '| title:', await sam.title());
     assert.match(await itext(sam, '#callbox .cwho > div'), /^You Ext\. 101 · Incoming call$/); assert.match(await sam.title(), /^📞 Incoming call from You \(ext\. 101\)/);
     assert.ok(await sam.$('#c-ans') && await sam.$('#c-dec'));
     await sam.screenshot({ path: out + '/link-incoming.png' });
     await sam.click('#c-ans'); assert.ok(await until(pg, 'live') && await until(sam, 'live'), 'both live');
-    await pg.waitForSelector('#callbox.bar #ctime');
-    assert.match(await itext(pg, '#callbox .cwho > div'), /^Sam Taylor Ext\. 102 · \d:\d\d$/);
-    assert.deepStrictEqual(await pg.$$eval('#callbox .cb', (x) => x.map((y) => y.querySelector('span').textContent + (y.disabled ? ' (off)' : ''))), ['Mute', 'Hold', 'Audio', 'Camera', 'Transfer (off)', 'Conference (off)', 'End call']);
+    await pg.waitForSelector('#callbox.pill #ctime');
+    assert.match(await itext(pg, '#callbox .cwho'), /^ST Sam Taylor Ext\. 102 · \d:\d\d$/);
+    // the pill sits above the page: the chat moves down, nothing is covered
+    const pill = await box('#callbox .cpill'); const head = await box('#lktop');
+    const tops = await pg.evaluate(() => [document.querySelector('#callbox').getBoundingClientRect().bottom, document.querySelector('#app').getBoundingClientRect().top + parseFloat(getComputedStyle(document.querySelector('#app')).paddingTop)]);
+    assert.ok(tops[0] <= tops[1] + 1 && pill.h <= 48, `the call pill doesn't cover the page (${JSON.stringify(tops)}, ${JSON.stringify(head)})`);
+    assert.deepStrictEqual(await pg.$$eval('#callbox .cb', (x) => x.map((y) => y.querySelector('span').textContent + (y.disabled ? ' (off)' : ''))), ['Mute', 'Hold', 'Audio', 'Camera', 'End']);
     await pg.click('#c-mute'); assert.deepStrictEqual(await pg.evaluate(() => { const c = window.RiyeserTeam.calls.current; return [c.muted, c.local.getAudioTracks()[0].enabled]; }), [true, false]);
     assert.strictEqual(await text(pg, '#c-mute span'), 'Unmute'); await pg.click('#c-mute');
     await pg.click('#c-hold'); assert.deepStrictEqual(await pg.evaluate(() => { const c = window.RiyeserTeam.calls.current; return [c.held, c.local.getAudioTracks()[0].enabled, document.getElementById('ra').muted]; }), [true, false, true]);
@@ -165,41 +191,77 @@ async function contrast(pg, sel) {
     await pg.screenshot({ path: out + '/link-callbar-hold.png' });
     await pg.click('#c-hold'); assert.strictEqual(await pg.evaluate(() => window.RiyeserTeam.calls.current.held), false);
     await pg.click('#c-audio'); await pg.waitForSelector('#ain'); assert.ok((await pg.$$('#ain option')).length >= 1, 'microphones listed'); await pg.keyboard.press('Escape');
-    // chat while calling: the bar stays on every view
-    await pg.fill('#txt', 'Talking to Sam now'); await pg.press('#txt', 'Enter'); await pg.click('[data-nav=contacts]'); assert.ok(await pg.isVisible('#callbox.bar'), 'bar stays on Contacts');
-    await sam.waitForFunction(() => document.querySelector('#plist .lk-person[data-person="u-me"] .lk-pst').textContent === 'On a call', null, { timeout: 8000 });
+    // chat while calling; "On a call" is automatic (and can't be chosen), then back to what you had
+    await pg.fill('#txt', 'Talking to Sam now'); await pg.press('#txt', 'Enter'); await pg.click('#tbpeople'); assert.ok(await pg.isVisible('#callbox.pill'), 'the pill stays on People');
+    await sam.click('#infobtn');
+    await sam.waitForFunction(() => /^On a call/.test(document.querySelector('#plist .lk-person[data-person="u-me"] .lk-pst').textContent), null, { timeout: 8000 });
     assert.strictEqual(await text(pg, '#stbtn'), 'On a call'); console.log('Sam sees me: On a call');
     await pg.click('#c-end'); assert.ok(await until(sam, 'ended'), 'Sam sees it end');
-    await pg.click('[data-nav=chat]'); await pg.click('[data-tab=calls]');
-    assert.match(await itext(pg, '.lk-callrow'), /Sam Taylor .* Outgoing · \d:\d\d · Ext\. 102$/); await pg.click('[data-tab=chats]');
+    await pg.waitForFunction(() => document.querySelector('#stbtn').textContent.trim() === 'Available'); console.log('after the call: back to Available');
+    await pg.click('#tbcalls');
+    assert.match(await itext(pg, '.lk-callrow'), /Sam Taylor .* Outgoing( · \d:\d\d)? · Ext\. 102$/); await pg.click('#vclose');
     await pg.waitForTimeout(2700);
     // Sam calls you; you decline
-    await sam.click('[data-dm="u-me"]'); await sam.click('#calldm'); assert.ok(await until(pg, 'incoming'));
+    await sam.click('[data-dm="u-me"]'); await sam.click('#callbtn'); await sam.click('#calldm'); assert.ok(await until(pg, 'incoming'));
     assert.match(await pg.title(), /^📞 Incoming call from Sam Taylor \(ext\. 102\)/);
     await pg.click('#c-dec'); assert.ok(await until(sam, 'ended')); assert.match(await sam.evaluate(() => window.RiyeserTeam.calls.current.note), /declined the call/);
     await pg.waitForTimeout(2700); assert.match(await pg.title(), /Riyeser Link$/);
-    await pg.click('[data-tab=calls]'); assert.match(await itext(pg, '.lk-callrow'), /Sam Taylor .* Declined/); await pg.click('[data-tab=chats]');
-    // Do not disturb: a call doesn't ring you; Sam hears you can't take it, you see it as missed
-    await pg.click('#stbtn'); await pg.click('[data-st=dnd]'); await sam.waitForTimeout(2700); await sam.click('#calldm');
-    assert.ok(await until(sam, 'ended')); assert.strictEqual(await status(pg), 'none', 'no ringing in DND');
+    await pg.click('#tbcalls'); assert.match(await itext(pg, '.lk-callrow'), /Sam Taylor .* Declined/); await pg.click('#vclose');
+    // Busy / Do not disturb, At lunch, Unavailable: calls don't ring you; Sam is told before it rings, and nothing rings here
+    for (const st of ['dnd', 'lunch', 'unavailable']) {
+      await pg.click('#stbtn'); await pg.click(`[data-st=${st}]`); await pg.keyboard.press('Escape'); await sam.waitForTimeout(600);
+      await sam.click('#callbtn'); assert.match(await text(sam, '#calldm small'), /won't ring/, 'the Call menu already says so');
+      await sam.click('#calldm'); await sam.waitForSelector('#callbox.ended');
+      assert.match(await text(sam, '#callbox'), /You is (busy \(Do not disturb\)|at lunch|unavailable), so the call didn't ring/);
+      assert.strictEqual(await status(pg), 'none', 'no ringing on ' + st); await sam.waitForTimeout(4800);
+    }
+    // and if it rings anyway (Sam's screen hadn't caught up), the database refuses it and you don't ring
+    await pg.click('#stbtn'); await pg.click('[data-st=dnd]'); await pg.keyboard.press('Escape'); await sam.waitForTimeout(600);
+    await sam.evaluate(() => { const p = window.RiyeserTeam.state.presence['u-me']; p.manual = null; p.status = 'available'; });
+    await sam.evaluate(() => window.RiyeserTeam.calls.start({ user: 'u-me' })); assert.ok(await until(sam, 'ended'), 'Sam\'s call ends');
+    assert.match(await sam.evaluate(() => window.RiyeserTeam.calls.current.note), /can't take calls right now/); assert.strictEqual(await status(pg), 'none', 'still no ringing');
+    await sam.screenshot({ path: out + '/link-dnd-caller.png' });
     await pg.click('#stbtn'); await pg.click('[data-st=available]');
-    console.log('call bar (mute, hold, audio, end), incoming answer/decline, DND: ok');
+    console.log('call pill (mute, hold, audio, end), On a call, incoming answer/decline, Busy / At lunch / Unavailable don\'t ring: ok');
     await sam.close();
+
+    // 11. Management: locked; a fresh code every time; locks again after 15 minutes without use
+    await pg.click('#umenu'); assert.match(await text(pg, '#um-mgmt'), /Locked/); await pg.click('#um-mgmt'); await pg.waitForSelector('#mglocked');
+    assert.ok(!(await pg.$('#coppl')), 'nothing in Management before the code'); assert.match(await text(pg, '.mghint'), /123456/, 'the demo shows its code');
+    await pg.screenshot({ path: out + '/link-manage-locked.png' });
+    await pg.fill('#mgcode', '000000'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgerr:not([hidden])'); assert.match(await text(pg, '#mgerr'), /isn't right/);
+    await pg.fill('#mgcode', '123456'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgopen');
+    assert.deepStrictEqual(await pg.$$eval('.lk-tile', (x) => x.map((y) => y.id)), ['coppl', 'coreq', 'coinfo', 'mgbr', 'cophones', 'cosec', 'cohist', 'coplan']);
+    assert.match(await text(pg, '#coreq'), /1 waiting/);
+    await pg.screenshot({ path: out + '/link-manage-open.png' });
+    await pg.click('#coppl'); await pg.waitForSelector('details.brm');
+    // 15 minutes without use: it locks, and the open tool closes
+    await pg.evaluate(() => window.RiyeserTeam.management.tick(Date.now() + 16 * 60000)); await pg.waitForSelector('#mglocked');
+    assert.ok(!(await pg.$('.modal')) && !(await pg.$('#coppl')), 'locked again after 15 idle minutes; People & access closed');
+    // using it keeps it open; Lock now; and a reload locks it
+    await pg.fill('#mgcode', '123456'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgopen');
+    await pg.evaluate(() => window.RiyeserTeam.management.tick(Date.now() + 10 * 60000)); await pg.click('#mgopen span');
+    await pg.evaluate(() => window.RiyeserTeam.management.tick(Date.now() + 20 * 60000)); assert.ok(await pg.$('#mgopen'), 'still open: used 10 minutes ago');
+    await pg.click('#mglock'); await pg.waitForSelector('#mglocked');
+    await pg.fill('#mgcode', '123456'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgopen');
+    await pg.reload(); await pg.waitForSelector('#lkshell .item'); assert.strictEqual(await pg.evaluate(() => window.RiyeserTeam.management.open), false, 'a reload locks it');
+    await pg.evaluate(() => window.RiyeserTeam.setNav('chat'));
+    console.log('Management lock: ok');
 
     // 10. themes
     const html = () => pg.evaluate(() => [document.documentElement.dataset.theme, document.documentElement.dataset.accent, document.documentElement.dataset.scope]);
     assert.deepStrictEqual(await html(), ['dark', 'purple', 'link'], 'dark navy/purple by default');
     const checks = async (label) => {
-      await pg.click('[data-nav=chat]'); await pg.click('[data-ch="c-general"]');
-      const r = { text: await contrast(pg, '.msg:not(.cont) .mb'), muted: await contrast(pg, '.lk-r2 .pv'), button: await contrast(pg, '.lk-new'), nav: await contrast(pg, '.lk-ni.on span'),
-        heading: await contrast(pg, '#mhead h2'), pill: await contrast(pg, '.rxc span'), badge: await contrast(pg, '#side .badge'), tab: await contrast(pg, '.lk-tabs button.on') };
+      await pg.evaluate(() => window.RiyeserTeam.setNav('chat')); await pg.click('[data-ch="c-general"]');
+      const r = { text: await contrast(pg, '.msg:not(.cont) .mb'), muted: await contrast(pg, '.lk-r2 .pv'), button: await contrast(pg, '.lk-new'), business: await contrast(pg, '#lkbiz b'),
+        heading: await contrast(pg, '#mhead h2'), pill: await contrast(pg, '.rxc span'), badge: await contrast(pg, '#side .badge'), chip: await contrast(pg, '.chip.on'), call: await contrast(pg, '#callbtn span') };
       console.log(`contrast ${label}:`, JSON.stringify(r));
       for (const [k, v] of Object.entries(r)) assert.ok(v >= 4.5, `${label}: ${k} contrast ${v} is below 4.5`);
     };
     await checks('dark/purple');
     for (const a of ['blue', 'teal', 'green', 'orange', 'pink']) { await pg.evaluate((x) => window.RiyeserTeam.theme.set({ accent: x }, false), a); await checks('dark/' + a); }
     // through Settings → Appearance
-    await pg.click('#coset'); await pg.click('[data-s=look]'); await pg.waitForSelector('.tpick');
+    await pg.click('#umenu'); await pg.click('#coset'); await pg.click('#set-look'); await pg.waitForSelector('.tpick');
     await pg.click('.tcard:has(input[value=light])'); await pg.click('.acc:has(input[value=teal])');
     assert.deepStrictEqual(await html(), ['light', 'teal', 'link']); await pg.screenshot({ path: out + '/link-appearance.png' }); await pg.click('.mcard #cl');
     for (const a of ['purple', 'blue', 'teal', 'green', 'orange', 'pink']) { await pg.evaluate((x) => window.RiyeserTeam.theme.set({ accent: x }, false), a); await checks('light/' + a); }
@@ -211,16 +273,24 @@ async function contrast(pg, sel) {
     // kept in this browser for next time, and with the account
     await pg.evaluate(() => window.RiyeserTeam.theme.set({ theme: 'light', accent: 'orange' }));
     assert.deepStrictEqual(await pg.evaluate(() => window.RiyeserTeam.state.user.user_metadata.riyeser_prefs), { theme: 'light', accent: 'orange' });
-    await pg.reload(); await pg.waitForSelector('#lknav'); assert.deepStrictEqual(await html(), ['light', 'orange', 'link']);
+    await pg.reload(); await pg.waitForSelector('#lkshell'); assert.deepStrictEqual(await html(), ['light', 'orange', 'link']);
     console.log('themes: ok');
     await pg.evaluate(() => window.RiyeserTeam.theme.set({ theme: 'dark', accent: 'purple' }));
 
-    // 11. Admin / Settings hidden for members
-    const jo = await ctx.newPage(); watch(jo, 'jordan'); await jo.goto(DEMO + '&as=u-jordan'); await jo.waitForSelector('#lknav');
-    assert.ok(!(await jo.$('#adming')) && !(await jo.$('#coppl')) && !(await jo.$('#cophones')) && !(await jo.$('#cobill')) && !(await jo.$('#coplan')), 'no admin group (and no Plan & billing) for a member');
-    assert.ok(await jo.$('#comyphone'), 'members get My phone'); assert.strictEqual(await text(jo, '#umr'), 'Staff');
-    await jo.click('[data-nav=home]'); await jo.waitForSelector('.lk-card'); assert.ok(!(await jo.$('#hrequests')), 'no Requests card for a member');
-    console.log('admin group hidden for members: ok'); await jo.close();
+    // 11b. staff never see Management or anything for admins: not in the menu, Settings, the top bar or a badge
+    const jo = await ctx.newPage(); watch(jo, 'jordan'); await jo.goto(DEMO + '&as=u-jordan'); await jo.waitForSelector('#lkshell .item');
+    await jo.click('#umenu'); const jm = await text(jo, '.usermenu');
+    assert.ok(!/Management|Join request|People & access|Billing/.test(jm) && !(await jo.$('.usermenu .badge')), 'no Management in the menu for staff: ' + jm);
+    assert.deepStrictEqual(await jo.$$eval('.usermenu .mi:not([data-st])', (x) => x.map((y) => y.id)), ['um-phone', 'coset', 'um-help', 'out']); await jo.keyboard.press('Escape');
+    await jo.evaluate(() => window.RiyeserTeam.setNav('settings')); await jo.waitForSelector('.lk-set');
+    const js = await text(jo, '#mview');
+    assert.ok(!/Management|join request|waiting to join|People & access|Branches & extensions|History|Billing/i.test(js) && !(await jo.$('#set-mgmt')) && !(await jo.$('#mfanag')), 'Settings has nothing for admins: ' + js.slice(0, 200));
+    assert.ok(await jo.$('#comyphone') && await jo.$('#set-2fa') && await jo.$('#set-look') && await jo.$('#inv'), 'staff: My phone, two-step, appearance, invite');
+    await jo.screenshot({ path: out + '/link-staff-settings.png' });
+    await jo.evaluate(() => window.RiyeserTeam.setNav('manage')); assert.ok(!(await jo.$('#mglocked')) && !(await jo.$('#coppl')), 'Management can\'t even be opened by staff');
+    for (const id of ['#coppl', '#coreq', '#cophones', '#cobill', '#coplan', '#um-mgmt', '#mgcode', '.lk-udot']) assert.ok(!(await jo.$(id)), id + ' never shows for staff');
+    assert.ok(!(await jo.evaluate(() => document.body.innerText)).match(/join request|Management/i), 'no admin words anywhere');
+    console.log('staff see no Management or admin items: ok'); await jo.close();
     await ctx.close();
 
     // 12. phone width: one panel at a time, with back buttons, no sideways scroll
@@ -229,20 +299,24 @@ async function contrast(pg, sel) {
       await mc.addInitScript((t) => { try { localStorage.setItem('riyeser.link.look', JSON.stringify({ theme: t, accent: 'purple' })); } catch { /* */ } }, theme);
       const ph = await mc.newPage(); watch(ph, 'phone-' + theme); await ph.goto(DEMO); await ph.waitForSelector('#side .item');
       assert.strictEqual(await ph.viewportSize().width, 390);
-      const vis = () => ph.evaluate(() => ['#lknav', '#side', '#main', '#lkright'].filter((s) => { const r = document.querySelector(s).getBoundingClientRect(); return r.width > 0 && r.right > 0 && r.left < innerWidth; }));
-      assert.deepStrictEqual(await vis(), ['#side'], 'starts on the list'); assert.strictEqual(await over(ph), 0);
+      const vis = () => ph.evaluate(() => ['#lktop', '#side', '#main', '#lkright', '#lknav'].filter((s) => { const r = document.querySelector(s).getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > 0 && r.left < innerWidth; }));
+      assert.deepStrictEqual(await vis(), ['#lktop', '#side', '#lknav'], 'starts on the list, with the tab bar'); assert.strictEqual(await over(ph), 0);
+      assert.deepStrictEqual(await ph.$$eval('#lknav [data-nav] span', (x) => x.map((y) => y.textContent)), ['Chats', 'Calls', 'People', 'Settings']);
+      assert.strictEqual(await text(ph, '#ptitle'), 'Chats'); assert.ok(await ph.isVisible('#fabnew'), 'the + button for a new chat');
       await ph.screenshot({ path: out + `/link-${theme}-phone-list.png` });
-      await ph.tap('[data-ch="c-general"]'); await ph.waitForTimeout(150); assert.deepStrictEqual(await vis(), ['#main']); assert.strictEqual(await over(ph), 0);
+      await ph.tap('[data-ch="c-general"]'); await ph.waitForTimeout(150); assert.deepStrictEqual(await vis(), ['#main'], 'a chat opens full screen'); assert.strictEqual(await over(ph), 0);
       await ph.screenshot({ path: out + `/link-${theme}-phone-chat.png` });
       await ph.tap('#infobtn'); await ph.waitForTimeout(150); assert.deepStrictEqual(await vis(), ['#lkright']); assert.strictEqual(await over(ph), 0);
       await ph.tap('#lkright .back'); await ph.waitForTimeout(150); assert.deepStrictEqual(await vis(), ['#main']);
-      await ph.tap('#mhead .back'); await ph.waitForTimeout(150); assert.deepStrictEqual(await vis(), ['#side']);
-      await ph.tap('#burger'); await ph.waitForTimeout(300); assert.ok((await vis()).includes('#lknav'), 'the nav opens over the list'); assert.strictEqual(await over(ph), 0);
-      await ph.screenshot({ path: out + `/link-${theme}-phone-nav.png` });
-      await ph.tap('[data-nav=contacts]'); await ph.waitForTimeout(250); assert.deepStrictEqual(await vis(), ['#main']); assert.strictEqual(await over(ph), 0);
-      await ph.tap('.lk-vback'); await ph.waitForTimeout(150); assert.deepStrictEqual(await vis(), ['#side']);
+      await ph.tap('#mhead .back'); await ph.waitForTimeout(150); assert.deepStrictEqual(await vis(), ['#lktop', '#side', '#lknav']);
+      for (const [k, t] of [['calls', 'Calls'], ['people', 'People'], ['settings', 'Settings']]) {
+        await ph.tap(`#lknav [data-nav=${k}]`); await ph.waitForTimeout(200); assert.deepStrictEqual(await vis(), ['#lktop', '#main', '#lknav'], k);
+        assert.strictEqual(await text(ph, '#ptitle'), t); assert.strictEqual(await over(ph), 0); await ph.screenshot({ path: out + `/link-${theme}-phone-${k}.png` });
+      }
+      await ph.tap('#umenu'); await ph.waitForSelector('.usermenu [data-st]'); assert.strictEqual(await over(ph), 0); await ph.screenshot({ path: out + `/link-${theme}-phone-status.png` }); await ph.keyboard.press('Escape');
+      await ph.tap('#lknav [data-nav=chat]'); await ph.waitForTimeout(150); assert.deepStrictEqual(await vis(), ['#lktop', '#side', '#lknav']);
       if (theme === 'dark') {
-        await ph.tap('[data-dm="u-sam"]'); await ph.tap('#calldm'); const t0 = Date.now(); while (Date.now() - t0 < 6000 && (await status(ph)) !== 'live') await ph.waitForTimeout(150);
+        await ph.tap('[data-dm="u-sam"]'); await ph.tap('#callbtn'); await ph.tap('#calldm'); const t0 = Date.now(); while (Date.now() - t0 < 6000 && (await status(ph)) !== 'live') await ph.waitForTimeout(150);
         assert.strictEqual(await over(ph), 0); await ph.screenshot({ path: out + '/link-dark-phone-call.png' }); await ph.click('#c-end');
       }
       await mc.close();
@@ -263,7 +337,7 @@ async function contrast(pg, sel) {
         const json = (x, s = 200) => r.fulfill({ status: s, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(x) });
         if (m === 'OPTIONS') return r.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
         if (u.pathname.startsWith('/rest/v1/rpc/')) st.rpc.push([fn, body]); else if (u.pathname.startsWith('/rest/v1/')) st.rest.push([m, u.pathname.slice(9), u.search, body]);
-        if (old && /^link_presence/.test(fn)) return json({ code: 'PGRST202', message: `Could not find the function public.${fn} in the schema cache` }, 404);
+        if (old && /^link_(presence|status)/.test(fn)) return json({ code: 'PGRST202', message: `Could not find the function public.${fn} in the schema cache` }, 404);
         if (old && /message_reactions|channel_pins/.test(u.pathname)) return json({ code: 'PGRST205', message: `Could not find the table 'public.${u.pathname.split('/').pop()}' in the schema cache` }, 404);
         if (u.pathname === '/auth/v1/token') return json({ access_token: token(), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r', user });
         if (u.pathname === '/auth/v1/user' && m === 'PUT') { st.userPut.push(body); user.user_metadata = { ...user.user_metadata, ...body.data }; return json(user); }
@@ -297,17 +371,25 @@ async function contrast(pg, sel) {
     await fp.click('#hchat'); await fp.waitForSelector('#txt');
     assert.deepStrictEqual(await fp.evaluate(() => [document.documentElement.dataset.theme, document.documentElement.dataset.accent]), ['dark', 'pink'], 'the workspace takes your look');
     await fp.evaluate(() => window.RiyeserTeam.theme.set({ theme: 'light', accent: 'teal' }, false));
-    assert.strictEqual(await text(fp, '#stbtn'), 'Back at 2', 'my saved status comes back');
-    assert.strictEqual(await text(fp, '#plist .lk-person[data-person="bbbbbbbb-0000-4000-8000-000000000002"] .lk-pst'), 'Do not disturb');
-    const pres = fs.rpc.filter(([f]) => f === 'link_presence_set').pop(); console.log('presence sent:', JSON.stringify(pres[1]));
-    assert.deepStrictEqual(pres[1], { ws: W, st: 'busy', manual_choice: 'busy', custom: 'Back at 2', on_a_call: false });
+    assert.strictEqual(await text(fp, '#stbtn'), 'Busy · Do not disturb', 'my saved status comes back (the older Busy is Busy / Do not disturb now)');
+    await fp.click('#infobtn');
+    assert.strictEqual(await text(fp, '#plist .lk-person[data-person="bbbbbbbb-0000-4000-8000-000000000002"] .lk-pst'), 'Busy · Do not disturb');
+    assert.strictEqual(await text(fp, '#plist .lk-person[data-person="aaaaaaaa-0000-4000-8000-000000000001"] .lk-pst'), 'Busy · Do not disturb · Back at 2');
+    await fp.click('#rclose');
+    const pres = fs.rpc.filter(([f]) => f === 'link_status_set').pop(); console.log('status sent:', JSON.stringify(pres[1]));
+    assert.deepStrictEqual(pres[1], { ws: W, st: 'dnd', manual_choice: 'dnd', custom: 'Back at 2', on_a_call: false, until_at: null });
+    await fp.click('#stbtn'); await fp.click('[data-st=lunch]'); await fp.click('[data-until="30"]'); await fp.keyboard.press('Escape'); await fp.waitForTimeout(200);
+    const lunch = fs.rpc.filter(([f]) => f === 'link_status_set').pop()[1];
+    assert.ok(lunch.st === 'lunch' && lunch.manual_choice === 'lunch' && Math.abs(Date.parse(lunch.until_at) - Date.now() - 30 * 60000) < 60000, 'At lunch for 30 minutes: ' + JSON.stringify(lunch));
+    assert.ok(fs.rpc.some(([f, x]) => f === 'link_my_dnd' && x.dnd_on === true) || fs.rpc.filter(([f]) => f === 'link_my_dnd').length === 0, 'the desk phone follows');
+    await fp.click('#stbtn'); await fp.click('[data-st=available]'); await fp.waitForTimeout(200);
     // reactions
     assert.strictEqual(await text(fp, '.rxc'), '🎉 1'); await fp.click('.rxc');
     const rxPost = fs.rest.find(([m, p]) => m === 'POST' && p === 'message_reactions'); assert.deepStrictEqual(rxPost[3], { message_id: 'aaaa0000-0000-4000-8000-000000000001', emoji: '🎉' });
     await fp.click('.rxc.me'); const rxDel = fs.rest.find(([m, p]) => m === 'DELETE' && p === 'message_reactions');
     assert.match(rxDel[2], /message_id=eq\.aaaa0000.*user_id=eq\.aaaaaaaa.*emoji=eq\./);
     // pins
-    await fp.hover(`[data-ch="${G}"]`); await fp.click(`[data-pin="${G}"]`); const pinPost = fs.rest.find(([m, p]) => m === 'POST' && p === 'channel_pins');
+    await fp.click('#morebtn'); await fp.click('#mpin'); const pinPost = fs.rest.find(([m, p]) => m === 'POST' && p === 'channel_pins');
     assert.deepStrictEqual(pinPost[3], { channel_id: G, user_id: user.id });
     // a file: into link-files/<business>/<chat>/<random>/<name>, then the message lists it
     await fp.setInputFiles('#file', { name: 'Quote 12.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF sample') });
@@ -329,13 +411,13 @@ async function contrast(pg, sel) {
     await op.goto(BASE + '/link/?chat'); await op.waitForSelector('#gf'); await op.fill('input[name=email]', user.email); await op.fill('input[name=password]', 'a-good-password'); await op.click('button[type=submit]');
     await op.waitForSelector('#txt');
     assert.ok(!(await op.$('[data-act=react]')) && !(await op.$('.rxc')), 'no reactions before the database update');
-    assert.strictEqual(await text(op, '#plist .lk-person[data-person="bbbbbbbb-0000-4000-8000-000000000002"] .lk-pst'), 'Offline');
-    await op.hover(`[data-ch="${G}"]`); await op.click(`[data-pin="${G}"]`); await op.waitForTimeout(300);
+    await op.click('#infobtn'); assert.strictEqual(await text(op, '#plist .lk-person[data-person="bbbbbbbb-0000-4000-8000-000000000002"] .lk-pst'), 'Offline'); await op.click('#rclose');
+    await op.click('#morebtn'); await op.click('#mpin'); await op.waitForTimeout(300);
     assert.deepStrictEqual(os.userPut.pop().data.riyeser_prefs.pinned, [G], 'pins kept with the account instead');
-    await op.click('#stbtn'); await op.click('[data-st=busy]'); assert.strictEqual(await text(op, '#stbtn'), 'Busy');
-    assert.strictEqual(os.rpc.filter(([f]) => f === 'link_presence_set').length, 0, 'no presence writes to a database without them');
+    await op.click('#stbtn'); await op.click('[data-st=dnd]'); assert.strictEqual(await text(op, '#stbtn'), 'Busy · Do not disturb');
+    assert.strictEqual(os.rpc.filter(([f]) => f === 'link_presence_set' || f === 'link_status_set').length, 0, 'no status writes to a database without them');
     console.log('older database: ok');
-  } catch (e) { failed = true; console.error('FAILED:', e.message); }
+  } catch (e) { failed = true; console.error('FAILED:', e.message, (e.stack || '').split('\n').find((l) => l.includes('link-ui-test')) || ''); }
   console.log('errors:', errs); await b.close();
   if (failed || errs.length) process.exit(1);
   console.log('LINK WORKSPACE TESTS PASSED');

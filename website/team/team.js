@@ -145,6 +145,12 @@
         const qr = raw ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(raw) : q;
         return { id: r.id, qr, secret: r.totp.secret }; },
       async verifyCode(factorId, code) { ok(await sb.auth.mfa.challengeAndVerify({ factorId, code })); },
+      // Management: a fresh code each time (a new challenge and verify on the two-step factor)
+      async stepUp(code) {
+        const f = ((ok(await sb.auth.mfa.listFactors()).totp) || []).find((x) => x.status === 'verified');
+        if (!f) throw new Error('Turn on two-step sign-in first (Settings, Sign-in and security).');
+        ok(await sb.auth.mfa.challengeAndVerify({ factorId: f.id, code }));
+      },
       async unenrol(factorId) { ok(await sb.auth.mfa.unenroll({ factorId })); },
       async licence(ws) { return ok(await sb.rpc('company_licence', { ws })); },
       async history(ws) { return ok(await sb.from('audit_log').select('id, at, actor, action, details').eq('workspace_id', ws).order('at', { ascending: false }).limit(200)); },
@@ -187,7 +193,13 @@
         return (r && r.user) || null;
       },
       async presence(ws) { return soft(sb.rpc('link_presence', { ws })); },
-      async setPresence(ws, p) { ok(await sb.rpc('link_presence_set', { ws, st: p.status, manual_choice: p.manual || null, custom: p.text || '', on_a_call: !!p.on_call })); },
+      async setPresence(ws, p) {
+        const r = await sb.rpc('link_status_set', { ws, st: p.status, manual_choice: p.manual || null, custom: p.text || '', on_a_call: !!p.on_call, until_at: p.until || null });
+        if (!r.error || !/PGRST202|Could not find|schema cache/i.test(String(r.error.message || r.error.code))) return ok(r);
+        // a database before "your status": At lunch and Unavailable are Away there, with no "until"
+        const old = (x) => (x === 'lunch' || x === 'unavailable' ? 'away' : x);
+        ok(await sb.rpc('link_presence_set', { ws, st: old(p.status), manual_choice: p.manual ? old(p.manual) : null, custom: p.text || '', on_a_call: !!p.on_call }));
+      },
       async reactions(ch) { return soft(sb.from('message_reactions').select('message_id, user_id, emoji').eq('channel_id', ch)); },
       async react(_ws, msg, uid, emoji, on) {
         if (on) ok(await sb.from('message_reactions').insert({ message_id: msg, emoji }));
@@ -329,9 +341,9 @@
     const now = Date.now(); const ago = (m) => new Date(now - m * 60000).toISOString();
     // Who's around in the demo. Other demo tabs (?demo&as=u-sam) tell each other their real status.
     const pres = { 'u-sam': { user_id: 'u-sam', status: 'available', custom_text: '', on_call: false, fresh: true },
-      'u-jordan': { user_id: 'u-jordan', status: 'busy', custom_text: '', on_call: true, fresh: true },
+      'u-jordan': { user_id: 'u-jordan', status: 'available', custom_text: '', on_call: false, desk_call: true, fresh: true },   // on a desk phone call
       'u-alex': { user_id: 'u-alex', status: 'away', custom_text: '', on_call: false, away_since: ago(10), fresh: true },
-      'u-ana': { user_id: 'u-ana', status: 'offline', custom_text: '', on_call: false, fresh: false },
+      'u-ana': { user_id: 'u-ana', status: 'lunch', manual: 'lunch', custom_text: '', on_call: false, until_at: new Date(now + 40 * 60000).toISOString(), fresh: true },
       'u-me': { user_id: 'u-me', status: 'available', custom_text: 'In the office today', on_call: false, fresh: true } };
     let myPres = null;
     if (bus) {
@@ -412,11 +424,14 @@
       async myRequests() { return []; },
       async pendingRequests() { return reqs.filter((r) => r.status === 'pending'); }, async requestCount() { return reqs.filter((r) => r.status === 'pending').length; },
       async inviteInfo() { return { name: company.name }; }, async formerMembers() { return [{ user_id: 'u-kim', display_name: 'Kim Lee' }]; },
-      async decideJoin(id, approve, job, admin, branches) { const r = reqs.find((x) => x.id === id); r.status = approve ? 'approved' : 'declined';
+      async decideJoin(id, approve, job, admin, branches) { if (approve && admin && AS !== 'u-me') throw new Error('Only the owner can make someone an admin.');
+        const r = reqs.find((x) => x.id === id); r.status = approve ? 'approved' : 'declined';
         if (approve) { const uid = 'u-' + r.display_name.split(' ')[0].toLowerCase(); const b = brs.find((x) => x.id === ((branches && branches[0]) || r.branch_id)) || brs[0];
           const ext = Math.max(b.extension, ...ppl.filter((q) => q[3] > b.extension && q[3] < b.extension + 100).map((q) => q[3])) + 1;
           ppl.push([uid, r.display_name, admin ? 'admin' : 'member', ext, job]); (branches && branches.length ? branches : [b.id]).forEach((bid) => brs.find((x) => x.id === bid).people.push(uid)); } },
-      async setAccess(_w, person, job, admin, branches) { const q = ppl.find((x) => x[0] === person); if (q[2] !== 'owner') { q[2] = admin ? 'admin' : 'member'; q[4] = job; }
+      async setAccess(_w, person, job, admin, branches) { const q = ppl.find((x) => x[0] === person);
+        if (AS !== 'u-me' && q[2] !== 'owner' && (q[2] === 'admin') !== !!admin) throw new Error('Only the owner can make someone an admin or take it away.');
+        if (q[2] !== 'owner') { q[2] = admin ? 'admin' : 'member'; q[4] = job; }
         brs.forEach((b) => { b.people = b.people.filter((u) => u !== person); if (branches.includes(b.id)) b.people.push(person); }); },
       async removePerson(_w, person) { const i = ppl.findIndex((x) => x[0] === person); if (i >= 0) ppl.splice(i, 1); brs.forEach((b) => { b.people = b.people.filter((u) => u !== person); }); },
       async updateCompany(_w, pr) { Object.assign(company, Object.fromEntries(Object.entries(pr).filter(([, v]) => v !== undefined))); },
@@ -428,6 +443,8 @@
       async factors() { return mfa.on ? [{ id: 'f1', status: 'verified' }] : []; },
       async enrol() { return { id: 'f1', secret: 'JBSWY3DPEHPK3PXP', qr: 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 21 21"><rect width="21" height="21" fill="#fff"/>' + [...Array(120)].map((_, i) => `<rect x="${(i * 7) % 21}" y="${Math.floor(i * 7 / 21) % 21}" width="1" height="1"/>`).join('') + '<rect x="0" y="0" width="7" height="7" fill="none" stroke="#000"/><rect x="14" y="0" width="7" height="7" fill="none" stroke="#000"/><rect x="0" y="14" width="7" height="7" fill="none" stroke="#000"/></svg>') }; },
       async verifyCode(_f, code) { if (!/^\d{6}$/.test(code)) throw new Error('That code isn\'t right. Check the 6 numbers in your authenticator app.'); mfa.on = true; },
+      async stepUp(code) { if (!mfa.on) throw new Error('Turn on two-step sign-in first (Settings, Sign-in and security).');
+        if (code !== '123456') throw new Error('That code isn\'t right. In the demo, the code is 123456.'); },
       async unenrol() { mfa.on = false; },
       async licence() { const d = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
         return { modules: { basic: { status: 'active', active: true, paid_until: d(200), days_left: 200 }, plus: { status: 'trial', active: true, trial_ends: d(10), days_left: 10 },
@@ -454,7 +471,7 @@
       // ---- the Link workspace in the demo
       async savePrefs(p) { me.user_metadata = { ...(me.user_metadata || {}), riyeser_prefs: { ...((me.user_metadata || {}).riyeser_prefs || {}), ...p } }; return me; },
       async presence() { return Object.values(pres).filter((x) => ppl.some((q) => q[0] === x.user_id)).map((x) => ({ ...x, manual: x.user_id === AS ? x.manual : null })); },
-      async setPresence(_w, p) { myPres = { user_id: AS, status: p.status, manual: p.manual || null, custom_text: p.text || '', on_call: !!p.on_call, away_since: p.away_since || null };
+      async setPresence(_w, p) { myPres = { user_id: AS, status: p.status, manual: p.manual || null, custom_text: p.text || '', on_call: !!p.on_call, away_since: p.away_since || null, until_at: p.until || null };
         pres[AS] = { ...myPres, fresh: true }; if (bus) bus.postMessage({ presence: myPres }); },
       async reactions(ch) { const ids = new Set(msgs.filter((m) => m.channel_id === ch).map((m) => m.id)); return rx.filter((r) => ids.has(r.message_id)).map((r) => ({ ...r })); },
       async react(_w, msgId, uid, emoji, on) {
@@ -473,6 +490,9 @@
         return [{ id: 'h1', dir: 'in', peer: 'u-alex', at: t(35), dur: 0, result: 'missed' }, { id: 'h2', dir: 'out', peer: 'u-sam', at: t(80), dur: 252, result: 'answered' },
           { id: 'h3', dir: 'in', peer: 'u-jordan', at: t(200), dur: 95, result: 'answered' }, { id: 'h4', dir: 'out', branch: 'b-lau', label: 'Lautoka branch', at: t(1500), dur: 0, result: 'no answer' }]; },
       async signal(_w, call, to, kind, payload) {
+        const q = pres[to];   // like the database: no ringing someone on Busy / Do not disturb, At lunch or Unavailable
+        if (kind === 'ring' && q && ['dnd', 'busy', 'lunch', 'unavailable'].includes(q.manual || q.status) && !(q.until_at && Date.parse(q.until_at) <= Date.now()))
+          throw new Error('new row violates row-level security policy for table "call_signals"');
         const m = { call_id: call, from_user: AS, to_user: to, to, kind, payload: payload || null, created_at: new Date().toISOString() };
         if (bus && online.has(to)) bus.postMessage(m);
         else if (kind === 'ring' && onSig && online.size === 1) setTimeout(() => onSig({ ...m, from_user: to, to_user: AS, kind: 'accept', payload: { demo: true } }), 2200);
@@ -622,6 +642,7 @@
     });
   }
   function gate(mode = 'in', note = '', email = '') {
+    Mgmt.reset(); document.documentElement.classList.remove('oncall');   // signed out: Management locks
     const join = params.get('join');
     $app.className = 'acct'; document.title = 'Riyeser'; tabIcon(false);
     $app.innerHTML = `<div class="gate"><form class="gcard" id="gf">${/Electron/.test(navigator.userAgent) ? '' : '<a class="gback" href="/">← Back to riyeser.com</a>'}
@@ -904,7 +925,7 @@
         d.querySelector('#cl').onclick = close; d.querySelector('#vf input').focus();
         d.querySelector('#vf').onsubmit = async (e) => {
           e.preventDefault();
-          try { await api.verifyCode(facs[0].id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; close(); await refreshCompany(); phMsg('✅ Two-step sign-in is on for this page too.', 'ok'); }
+          try { await api.verifyCode(facs[0].id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; S.mfaOn = true; close(); await refreshCompany(); phMsg('✅ Two-step sign-in is on for this page too.', 'ok'); }
           catch (err) { d.querySelector('#vferr').innerHTML = `<div class="err">${esc(plainError(err))}</div>`; }
         };
       });
@@ -917,7 +938,7 @@
         d.querySelector('#cl').onclick = close; d.querySelector('#tocpw').onclick = () => { close(); changePassword(); };
         d.querySelector('#off').onclick = async () => {
           if (!(await ask(isAdmin() ? 'Turn off two-step sign-in? Your admin powers stop until you turn it on again.' : 'Turn off two-step sign-in?'))) return;
-          try { const f = (await api.factors())[0]; await api.unenrol(f.id); S.aal = 'aal1'; close(); renderSide(); } catch (err) { tell(plainError(err)); }
+          try { const f = (await api.factors())[0]; await api.unenrol(f.id); S.aal = 'aal1'; S.mfaOn = false; close(); Mgmt.lock(); renderSide(); if (S.nav === 'settings' || S.nav === 'manage') renderMain(); } catch (err) { tell(plainError(err)); }
         };
       });
       return;
@@ -934,7 +955,8 @@
       d.querySelector('#cl').onclick = async () => { try { await api.unenrol(en.id); } catch { /* not finished: nothing to undo */ } close(); };
       d.querySelector('#vf').onsubmit = async (e) => {
         e.preventDefault();
-        try { await api.verifyCode(en.id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; close(); await refreshCompany().catch(() => renderSide());
+        try { await api.verifyCode(en.id, String(new FormData(e.target).get('code')).trim()); S.aal = 'aal2'; S.mfaOn = true; close(); if (isAdmin()) Mgmt.begin();   // a code just typed: Management opens
+          await refreshCompany().catch(() => renderSide()); if (S.nav === 'settings' || S.nav === 'manage') renderMain();
           modal('<h3>✅ Two-step sign-in is on</h3><p>Next time you sign in, Riyeser asks for a code from your authenticator app.</p><div class="mfoot"><button class="btn p" id="cl">Done</button></div>', (dd, c2) => { dd.querySelector('#cl').onclick = c2; }); }
         catch (err) { tell(plainError(err)); }
       };
@@ -994,7 +1016,7 @@
     const body = () => `<h3>👋 Join requests</h3><p>People asking to join ${esc(S.team.name)}. Choose what they can do, then approve.</p>
       ${S.requests.length ? S.requests.map((r) => { const br = S.branches.find((b) => b.id === r.branch_id);
         return `<form class="req" data-req="${r.id}"><div class="rq-who">${av(r.id, r.display_name)}<div><b>${esc(r.display_name)}</b><small>${esc(r.email || '')}${br ? ` · asked for ${esc(br.name)}` : ''} · ${ago(r.created_at)}</small>${r.note ? `<p class="rq-note">“${esc(r.note)}”</p>` : ''}</div></div>
-          <div class="rq-grid"><label class="f"><span>Job role</span>${jobSelect('staff')}</label><label class="opt sm"><input type="checkbox" name="admin"> Admin (can approve people)</label></div>
+          <div class="rq-grid"><label class="f"><span>Job role</span>${jobSelect('staff')}</label><label class="opt sm"${isOwner() ? '' : ' title="Only the owner can make someone an admin"'}><input type="checkbox" name="admin"${isOwner() ? '' : ' disabled'}> Admin (the owner and IT staff)</label></div>
           <span class="pkh">Branches</span>${branchTicks(r.branch_id ? [r.branch_id] : [], 'name="br"')}
           <div class="row2" style="justify-content:flex-end;margin-top:8px"><button type="button" class="btn sm" data-dec="${r.id}">Decline</button><button class="btn p sm">Approve</button></div></form>`; }).join('')
         : '<div class="empty"><b>No requests right now</b>Give people the Company ID or a branch code, and they\'ll show up here.</div>'}
@@ -1012,13 +1034,13 @@
   }
 
   function peopleAccess() {
-    const body = () => `<h3>People & access</h3><p>What each person can do and which branches they're in. Changes apply straight away, on every device.</p>
+    const body = () => `<h3>People & access</h3><p>What each person can do and which branches they're in. Changes apply straight away, on every device.${isOwner() ? '' : ' Only the owner can make someone an admin or take it away.'}</p>
       ${S.people.map((p) => { const mine = S.branches.filter((b) => b.people.includes(p.user_id)).map((b) => b.id); const owner = p.role === 'owner';
         return `<details class="brm"><summary>${av(p.user_id, p.display_name)} <b>${esc(p.display_name)}</b> <span class="muted">${owner ? 'Owner' : jobName(p.job_role)}${p.role === 'admin' ? ' · admin' : ''}${p.extension ? ` · ${p.extension}` : ''}</span></summary>
           <form data-person="${p.user_id}">${owner ? '<p class="muted">The owner can do everything.</p>' : `<div class="rq-grid"><label class="f"><span>Job role</span>${jobSelect(p.job_role)}</label>
-          <label class="opt sm"><input type="checkbox" name="admin"${p.role === 'admin' ? ' checked' : ''}> Admin (can approve people)</label></div>`}
+          <label class="opt sm"${isOwner() ? '' : ' title="Only the owner can make someone an admin or take it away"'}><input type="checkbox" name="admin"${p.role === 'admin' ? ' checked' : ''}${isOwner() ? '' : ' disabled'}> Admin (the owner and IT staff)</label></div>`}
           <span class="pkh">Branches</span>${branchTicks(mine, 'name="br"')}
-          <div class="row2" style="justify-content:flex-end;margin-top:8px">${owner || p.user_id === S.user.id ? '' : `<button type="button" class="btn sm" data-remove="${p.user_id}" style="color:#b91c1c">Remove from company</button>`}<button class="btn p sm">Save</button></div></form></details>`; }).join('')}
+          <div class="row2" style="justify-content:flex-end;margin-top:8px">${owner || p.user_id === S.user.id || (p.role === 'admin' && !isOwner()) ? '' : `<button type="button" class="btn sm" data-remove="${p.user_id}" style="color:#b91c1c">Remove from company</button>`}<button class="btn p sm">Save</button></div></form></details>`; }).join('')}
       <div class="mfoot"><button class="btn" id="cl">Close</button></div>`;
     modal(body(), function wire(d, close) {
       d.querySelector('#cl').onclick = close;
@@ -1071,6 +1093,7 @@
 
   // ------------------------------------------------------------------ the chat
   async function loadTeam(id) {
+    if (S.team && S.team.id !== id) { Mgmt.reset(); if (S.nav === 'manage') S.nav = 'chat'; }   // another business: Management locks
     S.team = S.teams.find((t) => t.id === id) || S.teams[0];
     try { localStorage.setItem('riyeser.team.last', S.team.id); localStorage.setItem('riyeser.member.' + S.user.id, JSON.stringify({ id: S.team.id, name: S.team.name })); } catch { /* private mode */ }
     let all;
@@ -1089,12 +1112,12 @@
       S.wsReady = Promise.all([loadWorkspace(), openChannel(first && first.id, false, false)]);
       await S.wsReady;
     } else { S.wsReady = null; await loadWorkspace(); await openChannel(first && first.id, false); }
-    if (params.has('phones') && !S.phonesShown && isAdmin()) { S.phonesShown = true; phonesPage(S.home ? 'home' : 'chat'); }
+    if (params.has('phones') && !S.phonesShown && isAdmin()) { S.phonesShown = true; mg(() => phonesPage(S.home ? 'home' : 'manage'))(); }
     else if ((params.has('myphone') || params.has('phones')) && !S.myShown) { S.myShown = true; S.phonesShown = true; myPhonePage(S.home ? 'home' : 'chat'); }
   }
 
   // The channels: S.chans are the ones in your list; S.archived are read-only, under Archived; S.leftChans are everyone
-  // channels you left (Teams / Channels lets you join again). S.allChans is all of them.
+  // channels you left (Browse channels lets you join again). S.allChans is all of them.
   function splitChans(all) {
     const left = (c) => c.kind === 'channel' && !!(S.cprefs[c.id] || {}).left;
     S.allChans = all || [];
@@ -1115,7 +1138,7 @@
     const [msgs] = await Promise.all([ch ? api.messages(ch.id) : [], loadReactions()]);
     if (S.ch !== ch) return;   // another chat was opened meanwhile
     S.msgs = msgs;
-    if (toChat) { S.inChat = true; S.home = false; S.nav = 'chat'; S.listTab = 'chats'; S.pane = 'main'; S.navOpen = false; }
+    if (toChat) { S.inChat = true; S.home = false; S.nav = 'chat'; S.pane = 'main'; if (!wideRight()) S.details = false; }
     if (!draw) { /* drawn by whoever asked */ } else if (S.home) renderHome(); else render();
     if (toChat && narrow()) Hist.move('main');   // S49
     if (S.ch && S.ch.kind === 'dm') loadSeen();
@@ -1243,13 +1266,11 @@
       </main>`;
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
     on('#hchat', async () => { if (S.wsReady) await S.wsReady.catch(() => {}); S.home = false; render(); Hist.move(narrow() ? S.pane || 'list' : 'list'); });
-    on('#hphones', () => phonesPage('home')); on('#hmyphone', () => myPhonePage('home'));
+    on('#hphones', mg(() => phonesPage('home'))); on('#hmyphone', () => myPhonePage('home'));
     on('#haddlink', () => addToPlan({ add: ['calls'], buy: true }));
     on('#hout', async () => { await api.signOut(); S.team = null; gate(); });
     on('#hco', () => companyInfo(false));
-    on('#hppl', () => (needs2step() ? security() : peopleAccess()));
-    on('#hreq', () => (needs2step() ? security() : joinRequests()));
-    on('#hhist', showHistory); on('#hsec', security); on('#hpw', changePassword); on('#hmfa', security);
+    on('#hppl', mg(peopleAccess)); on('#hreq', mg(joinRequests)); on('#hhist', mg(showHistory)); on('#hsec', security); on('#hpw', changePassword); on('#hmfa', security);
     on('#hcp', async () => { try { await navigator.clipboard.writeText(t.company_code); $app.querySelector('#hcp').textContent = 'Copied'; } catch { /* nothing */ } });
     const sw = $app.querySelector('#hsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
     on('#hhelp', () => getHelp()); on('#hreport', () => reportIssue()); on('#hrefund', () => (needs2step() ? security() : requestRefund()));
@@ -1759,9 +1780,9 @@
     l.type = team ? 'image/svg+xml' : 'image/png'; l.href = team ? 'icon.svg' : '/assets/logo-r.png';
   }
   // ================================================================== the Riyeser Link workspace (phase 1)
-  // Header (search, status, notifications, help, you) · left nav (Workspace, and Admin / Settings for owners and admins)
-  // · the list (Chats / Calls / Voicemail) · the conversation or a view · the right panel (People / Info, Quick dial).
-  // On a phone, one panel at a time with back buttons.
+  // Concept A: a slim top bar (business, search, Calls, People, your status, you) · one list (channels and people together)
+  // · the chat or a view (Calls, People, My phone and devices, Settings, Management) · details (ⓘ) only when asked for.
+  // On a phone, one screen at a time, with Chats · Calls · People · Settings along the bottom.
   const ic = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${IC[n] || ''}</svg>`;
   const IC = {
     home: '<path d="M3 11 12 4l9 7"/><path d="M5 10v10h5v-6h4v6h5V10"/>', chat: '<path d="M4 5h16v11H9l-5 4z"/>',
@@ -1790,7 +1811,14 @@
     mute: '<path d="M6 16V11a6 6 0 0 1 9.5-4.9M18 11v5l2 2H8"/><path d="M10 20a2 2 0 0 0 4 0M3 3l18 18"/>', leave: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>',
     in: '<path d="M18 6 6 18M6 9v9h9"/>', outc: '<path d="M6 18 18 6M9 6h9v9"/>', missed: '<path d="M18 6 6 18M6 9v9h9"/>', x: '<path d="M6 6l12 12M18 6 6 18"/>',
   };
-  const STATUS = { available: 'Available', busy: 'Busy', away: 'Away', dnd: 'Do not disturb', offline: 'Offline' };
+  // Your status: what you can choose (Available, Busy / Do not disturb, At lunch, Away, Unavailable), and what shows by itself.
+  const STATUS = { available: 'Available', dnd: 'Busy · Do not disturb', busy: 'Busy · Do not disturb', lunch: 'At lunch 🍽', away: 'Away', unavailable: 'Unavailable', call: 'On a call', offline: 'Offline' };
+  const CHOICES = [['available', 'Available', 'Calls and messages come through'], ['dnd', 'Busy · Do not disturb', 'Calls don\'t ring you; messages arrive quietly'],
+    ['lunch', 'At lunch 🍽', 'Calls don\'t ring you'], ['away', 'Away', 'Calls still ring you'], ['unavailable', 'Unavailable', 'Calls don\'t ring you']];
+  const NO_RING = ['dnd', 'lunch', 'unavailable'];   // these don't ring (the database refuses to ring them too)
+  // older choices: Busy is Busy / Do not disturb now, and "Appear offline" is Unavailable
+  const normManual = (m) => (m === 'busy' ? 'dnd' : m === 'offline' ? 'unavailable' : CHOICES.some((c) => c[0] === m) && m !== 'available' ? m : null);
+  const clock = (t) => new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   const REACTIONS = ['👍', '✅', '❤️', '😂', '🎉', '👀'];
   const EMOJI = ['😀', '😊', '😂', '😉', '😍', '🙏', '👍', '👏', '🙌', '💪', '✅', '❌', '🎉', '🔥', '⭐', '❤️', '👀', '🤔', '😅', '😢', '☕', '🚚', '🔧', '📞'];
   const MAX_FILE = 25 * 1024 * 1024;
@@ -1836,78 +1864,154 @@
   }
   const tell = (text, cls = 'bad') => phMsg(esc(text), cls);
 
-  // ---- presence: Available, Busy, Away (after 10 minutes idle), Do not disturb, Offline, and "On a call"
+  // ---- your status: Available, Busy / Do not disturb, At lunch, Away, Unavailable (you choose, optionally "until" a time).
+  // Away also comes by itself after 10 minutes without using Riyeser Link. Never chosen: "On a call" (while a call is
+  // going on, in this app or on your desk phone) and "Offline" (Riyeser Link isn't open).
   const Presence = (() => {
     const AWAY_AFTER = 10 * 60000; const BEAT = 60000; const STALE = 3 * 60000;
-    let lastActive = Date.now(); let awaySince = null; let lastSent = ''; let lastBeat = 0; let timer = null; let off = false; let fakeNow = null;
+    let lastActive = Date.now(); let awaySince = null; let lastSent = ''; let lastBeat = 0; let timer = null; let off = false; let fakeNow = null; let ticks = 0;
     const now = () => fakeNow || Date.now();
     const onCall = () => { const c = Calls.current; return !!(c && ['live', 'connecting', 'calling'].includes(c.status)); };
+    const timeUp = (u) => !!u && Date.parse(u) <= now();
     function mine() {
-      const m = S.myManual; let st;
-      if (m === 'dnd' || m === 'offline') st = m; else if (onCall()) st = 'busy'; else if (m) st = m; else st = now() - lastActive > AWAY_AFTER ? 'away' : 'available';
+      const m = S.myManual || null; const st = m || (now() - lastActive > AWAY_AFTER ? 'away' : 'available');
       if (st === 'away' && !awaySince) awaySince = new Date(m === 'away' ? now() : lastActive).toISOString();   // "Away (12m)": since they last used Riyeser Link
       if (st !== 'away') awaySince = null;
-      return { user_id: S.user.id, status: st, manual: m || null, custom_text: S.myText || '', on_call: onCall() && st !== 'offline', away_since: awaySince, fresh: true, at: Date.now() };
+      return { user_id: S.user.id, status: st, manual: m, custom_text: S.myText || '', on_call: onCall(), desk_call: !!S.myDesk, until_at: m ? S.myUntil || null : null,
+        away_since: awaySince, fresh: true, at: Date.now() };
     }
     function info(uid) {
       if (S.user && uid === S.user.id) return mine();
-      const p = S.presence[uid];
-      if (!p || !p.fresh || Date.now() - (p.at || 0) > STALE || p.status === 'offline') return { status: 'offline', custom_text: '', on_call: false };
-      return p;
+      const p = S.presence[uid]; const desk = !!(p && p.desk_call);
+      if (!p || !p.fresh || Date.now() - (p.at || 0) > STALE || p.status === 'offline') return { status: 'offline', custom_text: '', on_call: false, desk_call: desk };
+      const st = p.status === 'busy' ? 'dnd' : p.status;
+      if (p.until_at && timeUp(p.until_at) && st !== 'available') return { ...p, status: 'available', until_at: null, custom_text: '' };
+      return { ...p, status: st };
     }
+    const calling = (p) => !!(p.on_call || p.desk_call);
+    // "At lunch until 1:00 pm", "Busy · Do not disturb", "On a call", "Away (12m)", "Offline"
     function text(uid) {
       const p = info(uid);
+      if (calling(p)) return 'On a call';
       if (p.status === 'offline') return 'Offline';
-      if (p.on_call) return 'On a call';
-      if (p.status === 'away') { const m = p.away_since ? Math.max(1, Math.round((now() - Date.parse(p.away_since)) / 60000)) : 0; return p.custom_text || `Away${m ? ` (${m < 60 ? m + 'm' : Math.round(m / 60) + 'h'})` : ''}`; }
-      return p.custom_text || STATUS[p.status] || 'Available';
+      // Away by itself (not chosen): since when
+      if (p.status === 'away' && !p.until_at && !(uid === S.user.id && S.myManual)) {
+        const m = p.away_since ? Math.max(1, Math.round((now() - Date.parse(p.away_since)) / 60000)) : 0;
+        return `Away${m ? ` (${m < 60 ? m + 'm' : Math.round(m / 60) + 'h'})` : ''}`; }
+      return (STATUS[p.status] || 'Available') + (p.until_at ? ` until ${clock(p.until_at)}` : '');
     }
-    const dot = (uid) => { const p = info(uid); return `<i class="pd st-${p.on_call && p.status !== 'offline' ? 'call' : p.status}" title="${esc(text(uid))}"></i>`; };
+    const note = (uid) => info(uid).custom_text || '';
+    const cls = (uid) => { const p = info(uid); return calling(p) ? 'call' : p.status; };
+    const dot = (uid) => `<i class="pd st-${cls(uid)}" title="${esc(text(uid))}"></i>`;
+    // Busy / Do not disturb, At lunch and Unavailable don't ring (whether or not their Riyeser Link is open now).
+    function quiet(uid) {
+      if (S.user && uid === S.user.id) return NO_RING.includes(S.myManual);
+      const p = S.presence[uid]; if (!p) return false;
+      const chosen = p.manual || (p.status !== 'offline' ? p.status : null);
+      return NO_RING.includes(chosen === 'busy' ? 'dnd' : chosen) && !timeUp(p.until_at);
+    }
     async function send(force) {
       if (!S.team || off) return;
-      const p = mine(); const key = [p.status, p.manual, p.custom_text, p.on_call].join('|');
+      const p = mine(); const key = [p.status, p.manual, p.custom_text, p.on_call, p.until_at].join('|');
       if (!force && key === lastSent && Date.now() - lastBeat < BEAT) return;
       lastSent = key; lastBeat = Date.now();
-      try { await api.setPresence(S.team.id, { status: p.status, manual: p.manual, text: p.custom_text, on_call: p.on_call, away_since: p.away_since }); }
+      try { await api.setPresence(S.team.id, { status: p.status, manual: p.manual, text: p.custom_text, on_call: p.on_call, away_since: p.away_since, until: p.until_at }); }
       catch (e) { if (/PGRST202|Could not find|schema cache|does not exist/i.test(String(e && e.message))) off = true; }
     }
     function changed() { send(); paintMine(); }
-    function tick(at) { if (at) fakeNow = at; const before = lastSent; send(); if (lastSent !== before) { paintMine(); paintOthers(); } }
+    function tick(at) {
+      if (at) fakeNow = at;
+      if (S.myManual && timeUp(S.myUntil)) { choose('available'); return; }   // "until 1pm" is over: Available again
+      const before = lastSent; send(); if (lastSent !== before) { paintMine(); paintOthers(); }
+      if (++ticks % 4 === 0 && S.team && !off) load(true).then(paintOthers).catch(() => {});   // desk phone calls (Riyeser Link Office) each minute
+    }
     function active() { const was = now() - lastActive > AWAY_AFTER; lastActive = Date.now(); fakeNow = null; if (was) changed(); }
     function start() {
       if (timer) return;
       ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((e) => addEventListener(e, active, { passive: true }));
       let mv = 0; addEventListener('pointermove', () => { if (Date.now() - mv > 5000) { mv = Date.now(); active(); } }, { passive: true });
       document.addEventListener('visibilitychange', () => { if (!document.hidden) active(); });
-      addEventListener('pagehide', () => { if (S.team && !off) api.setPresence(S.team.id, { status: 'offline', manual: S.myManual || null, text: S.myText || '', on_call: false }).catch(() => {}); });
+      addEventListener('pagehide', () => { if (S.team && !off) api.setPresence(S.team.id, { status: 'offline', manual: S.myManual || null, text: S.myText || '', on_call: false, until: S.myManual ? S.myUntil || null : null }).catch(() => {}); });
       timer = setInterval(() => tick(), 15000);
     }
-    async function load() {
-      S.presence = {}; off = false;
+    async function load(again) {
+      if (!again) { S.presence = {}; off = false; }
       const rows = await api.presence(S.team.id).catch(() => null);
-      if (rows === null) { off = true; return; }
+      if (rows === null) { if (!again) off = true; return; }
       for (const r of rows) {
-        if (r.user_id === S.user.id) { if (S.myManual === undefined) { S.myManual = r.manual || null; S.myText = r.custom_text || ''; } continue; }
+        if (r.user_id === S.user.id) { S.myDesk = !!r.desk_call;
+          if (S.myManual === undefined) { S.myManual = normManual(r.manual); S.myText = r.custom_text || ''; S.myUntil = r.until_at || null; } continue; }
         S.presence[r.user_id] = { ...r, at: Date.now() };
       }
     }
-    function onRow(r) { if (!r || !r.user_id || r.user_id === S.user.id) return; S.presence[r.user_id] = { ...r, fresh: r.status !== 'offline', at: Date.now() }; paintOthers(); }
-    // a status change from the picker (DND also switches Do not disturb on the desk phone, where there is one)
-    async function choose(manual, txt) {
-      const wasDnd = S.myManual === 'dnd'; S.myManual = manual === 'available' ? null : manual; if (txt !== undefined) S.myText = txt;
+    function onRow(r) { if (!r || !r.user_id || r.user_id === S.user.id) return; const was = S.presence[r.user_id] || {};
+      S.presence[r.user_id] = { desk_call: was.desk_call, ...r, fresh: r.status !== 'offline', at: Date.now() }; paintOthers(); }
+    // A choice from the status menu. until: an ISO time, or null for "until I change it". Busy / Do not disturb, At lunch
+    // and Unavailable also turn on Do not disturb on your desk phone (Riyeser Link Office), and back off afterwards.
+    async function choose(manual, opts = {}) {
+      const wasQuiet = NO_RING.includes(S.myManual); const m = normManual(manual);
+      if (m !== S.myManual) S.myUntil = null;
+      S.myManual = m; if ('until' in opts) S.myUntil = m ? opts.until : null; if (!m) S.myUntil = null;
+      if (opts.text !== undefined) S.myText = opts.text;
       lastActive = Date.now(); changed();
-      if ((S.myManual === 'dnd') !== wasDnd && api.linkMyDnd) api.linkMyDnd(S.team.id, S.myManual === 'dnd').catch(() => {});
+      const nowQuiet = NO_RING.includes(S.myManual);
+      if (nowQuiet !== wasQuiet && api.linkMyDnd) api.linkMyDnd(S.team.id, nowQuiet).catch(() => {});
     }
-    return { start, load, onRow, info, text, dot, choose, changed, tick, status: () => mine().status, get off() { return off; } };
+    return { start, load, onRow, info, text, note, dot, cls, quiet, choose, changed, tick, status: () => mine().status, get off() { return off; } };
   })();
   function paintMine() {
-    const p = Presence.info(S.user.id); const b = document.getElementById('stbtn');
-    if (b) { b.innerHTML = `${Presence.dot(S.user.id)}<span class="stt">${esc(Presence.text(S.user.id))}</span>${ic('down')}`; b.dataset.st = p.status; }
-    document.querySelectorAll(`.pd-me`).forEach((x) => { x.outerHTML = Presence.dot(S.user.id).replace('class="pd', 'class="pd pd-me'); });
+    const b = document.getElementById('stbtn');
+    if (b) { b.innerHTML = `${Presence.dot(S.user.id)}<span class="stt">${esc(Presence.text(S.user.id))}</span>${ic('down')}`; b.dataset.st = Presence.cls(S.user.id); }
+    document.querySelectorAll('.pd-me').forEach((x) => { x.outerHTML = Presence.dot(S.user.id).replace('class="pd', 'class="pd pd-me'); });
   }
   function paintOthers() {
     if (!document.getElementById('lkshell')) return;
-    renderList(); renderRight(); if (S.nav === 'contacts' || S.nav === 'home') renderMain();
+    renderList(); renderRight(); if (S.nav === 'people') { if (!document.activeElement || document.activeElement.id !== 'cfind') renderMain(); } else if (S.nav === 'chat' && S.ch && S.ch.kind === 'dm') renderHead();
+  }
+
+  // ---- Management (owners and admins): locked. Opening it asks for a fresh code from the authenticator app (two-step
+  // sign-in), every time; it locks again after 15 minutes without anything done in it, and when you sign out or reload.
+  // The database still checks two-step sign-in (aal2) for every change, whatever this page shows.
+  const Mgmt = (() => {
+    const IDLE = 15 * 60000; let last = 0; let fake = null; let timer = null;
+    const now = () => fake || Date.now();
+    const open = () => !!last && isAdmin() && now() - last < IDLE;
+    const inside = () => S.nav === 'manage' || S.view === 'phones' || !!document.querySelector('.modal[data-mgmt]');
+    function touch() { if (open() && inside()) last = now(); }
+    function lock() {
+      const was = !!last; last = 0;
+      document.querySelectorAll('.modal[data-mgmt]').forEach((m) => m.remove());
+      if (S.view === 'phones') { clearInterval(S.loTimer); S.view = null; S.nav = 'manage'; if (S.home) { S.home = false; } render(); }
+      else if (S.nav === 'manage' && document.getElementById('lkshell')) renderMain();
+      if (was) renderTop();
+    }
+    function check() { if (last && now() - last >= IDLE) lock(); }
+    function begin() { last = now(); fake = null; if (!timer) timer = setInterval(check, 20000); }
+    // A fresh code (Supabase Auth MFA: a new challenge and verify). In the demo, the code is 123456.
+    async function unlock(code) {
+      const c = String(code || '').replace(/\s+/g, '');
+      if (!/^\d{6}$/.test(c)) throw new Error('Type the 6 numbers your authenticator app shows.');
+      await api.stepUp(c); S.aal = 'aal2'; begin();
+    }
+    ['pointerdown', 'keydown'].forEach((e) => addEventListener(e, () => { if (last) { check(); touch(); } }, { capture: true, passive: true }));
+    return { open, lock, unlock, begin, touch, reset() { last = 0; }, idle: IDLE, tick(at) { fake = at; check(); }, get left() { return last ? Math.max(0, IDLE - (now() - last)) : 0; } };
+  })();
+  // Opens a Management tool once Management is unlocked (asks for the code first when it isn't).
+  function mg(fn) {
+    return (...a) => { if (!isAdmin()) return; if (Mgmt.open()) return fn(...a); return unlockBox(() => fn(...a)); };
+  }
+  async function unlockBox(then) {
+    const facs = await api.factors().catch(() => []);
+    if (!facs.length) return security();   // no two-step sign-in yet: setting it up is the only step
+    modal(`<h3>${ic('lock')} Management is locked</h3><p>Type the 6 numbers your authenticator app shows for Riyeser. It locks again after 15 minutes without use.</p>
+      <form id="mguf"><input name="code" id="mgucode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn" aria-label="6-number code">
+      ${DEMO ? '<p class="muted small mghint">Demo: the code is <b>123456</b>.</p>' : ''}<p class="ferr" id="mguerr" role="alert" hidden></p>
+      <div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p" id="mgugo">Unlock</button></div></form>`, (d, close) => {
+      d.querySelector('#cl').onclick = close; d.querySelector('#mgucode').focus();
+      d.querySelector('#mguf').onsubmit = async (e) => { e.preventDefault(); const err = d.querySelector('#mguerr');
+        try { await Mgmt.unlock(d.querySelector('#mgucode').value); close(); renderTop(); if (then) then(); }
+        catch (x) { err.textContent = plainError(x); err.hidden = false; d.querySelector('#mgucode').select(); } };
+    });
   }
 
   // ---- your look: Dark (navy/purple, the default), Light, or Match my computer, and an accent colour.
@@ -1968,7 +2072,7 @@
   const callExt = (c) => (c.peer ? extOf(c.peer) : (S.branches.find((b) => b.id === c.branch) || {}).extension);
   const callLine = (c) => ({ missed: 'Missed', declined: 'Declined', offline: 'Not online', answered: c.dir === 'in' ? 'Incoming' : 'Outgoing', 'no answer': 'No answer', cancelled: 'Cancelled', elsewhere: 'Answered elsewhere' }[c.result] || c.result);
 
-  // ---- what you folded away: the left menu, the right panel and each list section. Kept in this browser, for each person.
+  // ---- what you folded away (the Archived section) and whether the details panel is open. Kept in this browser, for each person.
   const UI = (() => {
     let v = { shut: {} }; let key = '';
     function load(uid) {
@@ -1977,19 +2081,11 @@
     }
     const save = () => { if (key) try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* private mode */ } };
     return { load, get: (k) => v[k], set: (k, x) => { v[k] = x; save(); },
-      // Archived starts folded; everything else starts open
+      // Archived starts folded
       shut: (k) => (k in v.shut ? !!v.shut[k] : k === 'archived'), setShut: (k, on) => { v.shut[k] = !!on; save(); } };
   })();
-  const wideRight = () => matchMedia('(min-width: 1181px)').matches;   // wide enough for the right panel beside the chat
-  function toggleNav() {
-    S.navMini = !S.navMini; UI.set('navMini', S.navMini); paneClasses(); renderNav();
-    const t = document.getElementById('navtog'); if (t) t.focus();
-  }
-  function toggleRight() {
-    if (!wideRight()) { if (S.pane === 'right') go(S.ch ? 'main' : 'list'); else showRight(S.rightTab || 'people'); return; }
-    S.rightShut = !S.rightShut; UI.set('rightShut', S.rightShut); if (S.rightShut && S.pane === 'right') S.pane = 'main';
-    paneClasses(); renderHead();
-  }
+  const wideRight = () => matchMedia('(min-width: 1281px)').matches;   // wide enough for the details panel beside the chat
+  function toggleRight() { if (S.details || S.pane === 'right') closeDetails(); else showRight(); }
   function toggleSec(k) {
     UI.setShut(k, !UI.shut(k)); renderList();
     const b = document.querySelector(`[data-sect="${k}"]`); if (b) b.focus();
@@ -1997,24 +2093,23 @@
   // A list section's heading: click (or Enter / Space) to fold it away or open it again
   function secHead(k, label, extra = '', count = 0) {
     const shut = UI.shut(k);
-    return `<div class="sec${shut ? ' shut' : ''}" data-sec="${k}"><button class="sech" data-sect="${k}" aria-expanded="${!shut}" aria-controls="sb-${k}" title="${shut ? 'Show' : 'Hide'} ${esc(label)}">${ic('down')}${esc(label)}${count ? `<span class="badge${k === 'archived' ? ' dim' : ''}">${count}</span>` : ''}</button>${extra}</div>`;
+    return `<div class="sec${shut ? ' shut' : ''}" data-sec="${k}"><button class="sech" data-sect="${k}" aria-expanded="${!shut}" aria-controls="sb-${k}" title="${shut ? 'Show' : 'Hide'} ${esc(label)}">${ic('down')}${esc(label)}${count ? `<span class="badge dim">${count}</span>` : ''}</button>${extra}</div>`;
   }
   const secBody = (k, html) => `<div class="secb" id="sb-${k}"${UI.shut(k) ? ' hidden' : ''}>${html}</div>`;
   let keysOn = false;
   function wireKeys() {
     if (keysOn) return; keysOn = true;
-    // Ctrl + [ folds the left menu; Ctrl + ] the right panel (not inside a dialog)
+    // Ctrl + ] opens or closes the details panel (not inside a dialog)
     addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || !document.getElementById('lkshell') || document.querySelector('.modal')) return;
-      if (e.code === 'BracketLeft' || e.key === '[') { e.preventDefault(); if (!narrow()) toggleNav(); else { S.navOpen = !S.navOpen; paneClasses(); } }
-      else if (e.code === 'BracketRight' || e.key === ']') { e.preventDefault(); toggleRight(); }
+      if ((e.code === 'BracketRight' || e.key === ']') && S.nav === 'chat' && S.ch) { e.preventDefault(); toggleRight(); }
     });
   }
 
   // ---- loading what the workspace shows
   async function loadWorkspace() {
-    UI.load(S.user.id); S.navMini = !!UI.get('navMini'); S.rightShut = !!UI.get('rightShut'); wireKeys();
-    S.nav = S.nav || 'chat'; S.listTab = S.listTab || 'chats'; S.rightTab = S.rightTab || 'people'; S.pane = S.pane || 'list';
+    UI.load(S.user.id); wireKeys();
+    S.nav = S.nav || 'chat'; S.pane = S.pane || 'list'; S.filter = S.filter || 'all';
     S.myManual = undefined; S.myText = '';
     const [pins, last] = await Promise.all([api.pins(S.team.id, S.user.id).catch(() => null), api.lastMessages(S.team.id).catch(() => ({})), Presence.load()]);
     if (S.myManual === undefined) S.myManual = null;
@@ -2028,7 +2123,7 @@
   async function togglePin(ch) {
     const on = !S.pinned.includes(ch);
     S.pinned = on ? [...S.pinned, ch] : S.pinned.filter((x) => x !== ch);
-    renderList(); renderHead(); if (S.rightTab === 'info') renderRight();
+    renderList(); renderHead(); renderRight();
     try {
       if (S.pinsOff) await api.savePrefs({ pinned: S.pinned }); else await api.pin(S.team.id, ch, S.user.id, on);
     } catch (err) { S.pinned = on ? S.pinned.filter((x) => x !== ch) : [...S.pinned, ch]; renderList(); tell(plainError(err)); }
@@ -2104,27 +2199,30 @@
   }
   setInterval(() => { if (S.ch && S.ch.kind === 'dm' && !document.hidden && !S.home) loadSeen(); }, 20000);
 
-  // ---- the shell
+  // ---- the shell (concept A): a slim top bar; below it two panels, the conversation list and the open chat (or a view:
+  // Calls, People, My phone and devices, Settings, Management). Details (ⓘ) open as a side sheet only when asked for.
+  // On a phone: one screen at a time, with a bottom tab bar (Chats · Calls · People · Settings).
   function render(force) {
     S.view = null; tabIcon(true);
-    if (S.nav === undefined || !S.listTab) { S.nav = S.nav || 'chat'; S.listTab = S.listTab || 'chats'; S.rightTab = S.rightTab || 'people'; S.pane = S.pane || (S.inChat ? 'main' : 'list'); }
-    if (!force && document.getElementById('lkshell')) { paneClasses(); renderTop(); renderNav(); renderList(); renderMain(); renderRight(); return; }
+    if (!S.nav) S.nav = 'chat';
+    if (!S.pane) S.pane = S.inChat ? 'main' : 'list';
+    if (!force && document.getElementById('lkshell')) { paneClasses(); renderTop(); renderTabs(); renderList(); renderMain(); renderRight(); return; }
     $app.className = 'lk';
-    $app.innerHTML = `${demoBar()}<div class="shell" id="lkshell"><header class="lk-top" id="lktop"></header><nav class="lk-nav" id="lknav" aria-label="Workspace"></nav>
-      <section class="lk-list" id="side" aria-label="Chats"></section><section class="main" id="main"></section><aside class="lk-right" id="lkright" aria-label="People and info"></aside>
-      <div class="lk-scrim" id="scrim"></div></div>`;
-    paneClasses();
-    document.getElementById('scrim').onclick = () => { S.navOpen = false; if (S.pane === 'right' && !narrow()) S.pane = 'main'; paneClasses(); };
-    renderTop(); renderNav(); renderList(); renderMain(); renderRight(); paneClasses();
+    $app.innerHTML = `${demoBar()}<div class="shell" id="lkshell"><header class="lk-top" id="lktop"></header>
+      <section class="lk-list" id="side" aria-label="Chats"></section><section class="main" id="main"></section><aside class="lk-right" id="lkright" aria-label="Details"></aside>
+      <nav class="lk-tabbar" id="lknav" aria-label="Riyeser Link"></nav><div class="lk-scrim" id="scrim"></div></div>`;
+    document.getElementById('scrim').onclick = closeDetails;
+    renderTop(); renderTabs(); renderList(); renderMain(); renderRight(); paneClasses();
   }
   const narrow = () => matchMedia('(max-width: 760px)').matches;
   function paneClasses() {
     const sh = document.getElementById('lkshell'); if (!sh) return;
-    S.inChat = S.pane === 'main' || S.pane === 'right';
-    sh.classList.toggle('inchat', S.pane === 'main'); sh.classList.toggle('inright', S.pane === 'right'); sh.classList.toggle('navopen', !!S.navOpen);
-    sh.classList.toggle('rightshut', !!S.rightShut); sh.classList.toggle('navmini', !!S.navMini);
+    S.inChat = S.nav === 'chat' && (S.pane === 'main' || S.pane === 'right');
+    sh.classList.toggle('inchat', S.nav === 'chat' && S.pane === 'main'); sh.classList.toggle('inright', S.pane === 'right');
+    sh.classList.toggle('inview', S.nav !== 'chat' && S.pane !== 'right'); sh.classList.toggle('details', !!S.details && S.nav === 'chat');
+    sh.dataset.nav = S.nav;
   }
-  function go(pane) { S.pane = pane; S.navOpen = false; paneClasses(); if (narrow()) Hist.move(pane); }
+  function go(pane) { S.pane = pane; if (pane !== 'right' && !wideRight()) S.details = false; paneClasses(); if (narrow()) Hist.move(pane); }
 
   // S49: the phone's Back button moves between Link's own screens (conversation -> chat list -> Riyeser home) instead of
   // leaving riyeser.com/link. Each step deeper adds a browser history entry; Back (or an in-page back button) goes
@@ -2144,7 +2242,7 @@
     function show(key) {
       if (key === 'home') { if (!S.home) { S.home = true; S.view = null; renderHome(); } return; }
       if (S.home || S.view || !document.getElementById('lkshell')) { S.home = false; render(); }
-      if (narrow() && S.pane !== key) { S.pane = key; S.navOpen = false; paneClasses(); }
+      if (narrow() && S.pane !== key) { S.pane = key; if (key !== 'right') S.details = false; paneClasses(); }
     }
     addEventListener('popstate', (e) => {
       const st = e.state; if (!st || !st.lk || !stack.length) return;
@@ -2154,41 +2252,54 @@
     });
     return { start, move, get top() { return top(); } };
   })();
-  // Back-compat: the old name for "refresh the side panels".
-  function renderSide() { if (!document.getElementById('lkshell')) return; renderTop(); renderNav(); renderList(); renderRight(); chatTitle(); }
+  // Refresh everything round the conversation (the list, the top bar, the tab bar, details).
+  function renderSide() { if (!document.getElementById('lkshell')) return; renderTop(); renderTabs(); renderList(); renderRight(); chatTitle(); }
 
-  // ---- header: logo, search, status, notifications, help, you
+  const TITLES = { chat: 'Chats', calls: 'Calls', people: 'People', devices: 'My phone and devices', settings: 'Settings', manage: 'Management', channels: 'Channels' };
+  // ---- the top bar: logo, business, search, Calls and People, your status, you
   function renderTop() {
     const el = document.getElementById('lktop'); if (!el) return;
     const me = personOf(S.user.id) || {};
-    const role = S.team.role === 'owner' ? 'Owner' : S.team.role === 'admin' ? 'Admin' : jobName(me.job_role || 'staff');
-    const n = bellCount();
+    const missed = missedNew();
     if (!el.dataset.ready) {
       el.dataset.ready = '1';
-      el.innerHTML = `<button class="lk-ib lk-burger" id="burger" aria-label="Menu">${ic('menu')}</button>
-        <div class="lk-logo"><span class="lk-li" aria-hidden="true">Li.</span><span class="lk-lt"><b>Riyeser Link</b><small>Business Communications</small></span></div>
-        <div class="lk-search" id="srch" role="search">${ic('search')}<input id="q" type="search" autocomplete="off" placeholder="Search chats, people, calls…" aria-label="Search chats, people and calls"><div class="lk-pop lk-sres" id="sres" hidden></div></div>
+      el.innerHTML = `<div class="lk-brand"><span class="lk-li" aria-hidden="true">Li.</span><span class="lk-biz" id="lkbiz"></span></div>
+        <b class="lk-ptitle" id="ptitle"></b>
+        <div class="lk-search" id="srch" role="search">${ic('search')}<input id="q" type="search" autocomplete="off" placeholder="Search chats and people" aria-label="Search chats and people"><div class="lk-pop lk-sres" id="sres" hidden></div></div>
+        <span class="lk-sp"></span>
         <button class="lk-ib lk-sbtn" id="srchbtn" aria-label="Search">${ic('search')}</button>
+        <button class="lk-tb" id="tbcalls" aria-label="Calls">${ic('phone')}<span>Calls</span><b class="badge" id="tbmiss" hidden></b></button>
+        <button class="lk-tb" id="tbpeople" aria-label="People">${ic('users')}<span>People</span></button>
         <button class="lk-status" id="stbtn" aria-haspopup="true" aria-label="Your status"></button>
-        <button class="lk-ib" id="bell" aria-label="Notifications">${ic('bell')}<span class="badge" id="bellc" hidden></span></button>
-        <button class="lk-ib" id="helpbtn" aria-label="Help">${ic('help')}</button>
-        <button class="lk-user" id="umenu" aria-haspopup="true"><span id="umav"></span><span class="lk-un"><b id="umn"></b><small id="umr"></small></span>${ic('down')}</button>`;
-      el.querySelector('#burger').onclick = () => { S.navOpen = !S.navOpen; paneClasses(); };
+        <button class="lk-user" id="umenu" aria-haspopup="true" aria-label="You: your status, Settings and more"><span id="umav"></span></button>`;
       el.querySelector('#srchbtn').onclick = () => { el.classList.toggle('searching'); el.querySelector('#q').focus(); };
+      el.querySelector('#q').addEventListener('blur', () => setTimeout(() => el.classList.remove('searching'), 220));
       wireSearch(el.querySelector('#q'), el.querySelector('#sres'));
       el.querySelector('#stbtn').onclick = (e) => statusMenu(e.currentTarget);
-      el.querySelector('#bell').onclick = (e) => bellMenu(e.currentTarget);
-      el.querySelector('#helpbtn').onclick = (e) => helpMenu(e.currentTarget);
       el.querySelector('#umenu').onclick = (e) => userMenu(e.currentTarget);
+      el.querySelector('#tbcalls').onclick = () => setNav('calls');
+      el.querySelector('#tbpeople').onclick = () => setNav('people');
     }
+    el.querySelector('#lkbiz').innerHTML = S.teams.length > 1
+      ? `<select id="tsw" aria-label="Switch company">${S.teams.map((t) => `<option value="${t.id}"${t.id === S.team.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
+      : `<b>${esc(S.team.name)}</b>`;
+    const sw = el.querySelector('#tsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
+    el.querySelector('#ptitle').textContent = TITLES[S.nav] || 'Chats';
+    el.querySelector('#tbcalls').classList.toggle('on', S.nav === 'calls'); el.querySelector('#tbpeople').classList.toggle('on', S.nav === 'people');
+    const tm = el.querySelector('#tbmiss'); tm.hidden = !missed; tm.textContent = missed;
     el.querySelector('#umav').innerHTML = `<span class="lk-av">${av(S.user.id, me.display_name || S.user.email)}${Presence.dot(S.user.id).replace('class="pd', 'class="pd pd-me')}</span>`;
-    el.querySelector('#umn').textContent = me.display_name || 'You'; el.querySelector('#umr').textContent = role;
-    const bc = el.querySelector('#bellc'); bc.hidden = !n; bc.textContent = n;
     paintMine();
+  }
+  // ---- the bottom tab bar on a phone
+  function renderTabs() {
+    const el = document.getElementById('lknav'); if (!el) return;
+    const un = unreadTotal(); const missed = missedNew(); const cur = S.nav === 'manage' || S.nav === 'devices' ? 'settings' : S.nav === 'channels' ? 'chat' : S.nav;
+    const tab = (k, icon, label, n = 0) => `<button data-nav="${k}"${cur === k ? ' class="on" aria-current="page"' : ''}>${ic(icon)}<span>${label}</span>${n ? `<b class="badge">${n}</b>` : ''}</button>`;
+    el.innerHTML = tab('chat', 'chat', 'Chats', un) + tab('calls', 'phone', 'Calls', missed) + tab('people', 'users', 'People') + tab('settings', 'cog', 'Settings');
+    el.querySelectorAll('[data-nav]').forEach((b) => b.onclick = () => setNav(b.dataset.nav));
   }
   // Unread in your list: muted chats, archived ones and channels you left don't count (nor in the tab title the desktop apps read).
   const unreadTotal = () => (S.chans || []).reduce((a, c) => a + (muted(c.id) ? 0 : (S.unread || {})[c.id] || 0), 0);
-  const bellCount = () => unreadTotal() + missedNew() + (isAdmin() ? S.requests.length : 0);
 
   // A small menu under a button. Closes on Escape or a click elsewhere.
   // at: { x, y } opens it at that point instead (a right-click).
@@ -2214,61 +2325,73 @@
     return d;
   }
   const closePops = () => document.querySelectorAll('.lk-menu').forEach((x) => x.remove());
+
+  // ---- your status: the choices, and "for how long" (until I change it, 30 minutes, 1 hour, until a time)
+  function statusHtml(withNote) {
+    const cur = S.myManual || 'available'; const p = Presence.info(S.user.id);
+    return `<div class="mh">Your status</div><div class="stchoices">${CHOICES.map(([k, n, h]) => `<button class="mi${cur === k ? ' on' : ''}" data-st="${k}" role="menuitemradio" aria-checked="${cur === k}"><i class="pd st-${k}"></i><span>${n}<small>${h}</small></span></button>`).join('')}</div>
+      ${S.myManual ? `<div class="stuntil"><span>For how long?</span><div class="lk-chips" role="group" aria-label="For how long">
+        <button type="button" class="chip${!S.myUntil ? ' on' : ''}" data-until="none">Until I change it</button><button type="button" class="chip" data-until="30">30 min</button><button type="button" class="chip" data-until="60">1 hour</button>
+        <select class="chip chtime${S.myUntil ? ' on' : ''}" id="sttime" aria-label="Until a time"><option value="">Until a time…</option>${untilTimes().map((t) => `<option value="${t.toISOString()}"${S.myUntil && Math.abs(Date.parse(S.myUntil) - t) < 60000 ? ' selected' : ''}>Until ${esc(clock(t))}</option>`).join('')}</select></div>
+        ${S.myUntil ? `<small class="muted">Back to Available at ${esc(clock(S.myUntil))}.</small>` : ''}</div>` : ''}
+      ${withNote ? `<form class="mform" id="stf"><label><span>Note for the team (optional)</span><input name="t" maxlength="80" placeholder="e.g. At the Elm St job" value="${esc(S.myText || '')}"></label><button class="btn sm">Save</button></form>` : ''}
+      <div class="mnote">${p.on_call || p.desk_call ? 'You\'re on a call, so others see <b>On a call</b> until it ends.' : '<b>On a call</b> and <b>Offline</b> show by themselves.'}</div>`;
+  }
+  function wireStatus(d, close, again) {
+    d.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => { Presence.choose(b.dataset.st); renderRight(); if (b.dataset.st === 'available') close(); else again(); });
+    d.querySelectorAll('[data-until]').forEach((b) => b.onclick = () => { const v = b.dataset.until;
+      Presence.choose(S.myManual, { until: v === 'none' ? null : new Date(Date.now() + Number(v) * 60000).toISOString() }); again(); });
+    const tm = d.querySelector('#sttime'); if (tm) tm.onchange = () => { if (!tm.value) return; Presence.choose(S.myManual, { until: tm.value }); again(); };
+    const f = d.querySelector('#stf'); if (f) f.onsubmit = (e) => { e.preventDefault(); const t = String(new FormData(e.target).get('t') || '').replace(/[<>]/g, '').trim(); close(); Presence.choose(S.myManual || 'available', { text: t }); renderRight(); };
+  }
+  // "Until 1:00 pm": each half hour for the next 10 hours (plus the time already chosen)
+  function untilTimes() {
+    const t = new Date(); t.setSeconds(0, 0); t.setMinutes(t.getMinutes() < 30 ? 30 : 60);
+    const out = Array.from({ length: 20 }, (_, i) => new Date(t.getTime() + i * 30 * 60000));
+    if (S.myUntil && !out.some((x) => Math.abs(x - Date.parse(S.myUntil)) < 60000)) out.unshift(new Date(S.myUntil));
+    return out;
+  }
   function statusMenu(anchor) {
-    const cur = Presence.info(S.user.id);
-    popMenu(anchor, `<div class="mh">Your status</div>${[['available', 'Available', 'Away after 10 minutes without using Riyeser Link'], ['busy', 'Busy', ''], ['dnd', 'Do not disturb', 'Calls don\'t ring you; your desk phone too'], ['away', 'Away', ''], ['offline', 'Appear offline', '']]
-      .map(([k, n, h]) => `<button class="mi${(S.myManual || 'available') === k ? ' on' : ''}" data-st="${k}" role="menuitemradio" aria-checked="${(S.myManual || 'available') === k}"><i class="pd st-${k}"></i><span>${n}${h ? `<small>${h}</small>` : ''}</span></button>`).join('')}
-      <form class="mform" id="stf"><label><span>Status message</span><input name="t" maxlength="80" placeholder="e.g. At the Elm St job" value="${esc(S.myText || '')}"></label><button class="btn sm">Save</button></form>
-      <div class="mnote">${cur.on_call ? 'You\'re on a call, so others see <b>On a call</b>.' : ''}</div>`, (d, close) => {
-      d.querySelectorAll('[data-st]').forEach((b) => b.onclick = () => { close(); Presence.choose(b.dataset.st); renderRight(); });
-      d.querySelector('#stf').onsubmit = (e) => { e.preventDefault(); const t = String(new FormData(e.target).get('t') || '').replace(/[<>]/g, '').trim(); close(); Presence.choose(S.myManual || 'available', t); renderRight(); };
-    }, 'stmenu');
+    popMenu(anchor, statusHtml(true), function w(d, close) { wireStatus(d, close, () => { d.innerHTML = statusHtml(true); w(d, close); }); }, 'stmenu');
   }
-  function bellMenu(anchor) {
-    const unread = S.chans.filter((c) => S.unread[c.id] && !muted(c.id));
-    const missed = (S.callLog || []).filter((c) => c.result === 'missed').slice(0, 5);
-    popMenu(anchor, `<div class="mh">Notifications</div>
-      ${unread.length ? unread.map((c) => `<button class="mi" data-go-ch="${c.id}">${c.kind === 'dm' ? av(otherIn(c), chanLabel(c)) : `<span class="hash">${c.kind === 'private' ? ic('lock') : '#'}</span>`}<span>${esc(chanLabel(c))}<small>${S.unread[c.id]} unread</small></span></button>`).join('') : ''}
-      ${missed.map((c) => `<button class="mi" data-go-calls="1"><span class="hash miss">${ic('missed')}</span><span>Missed call: ${esc(callWho(c))}<small>${esc(whenShort(c.at))}</small></span></button>`).join('')}
-      ${isAdmin() && S.requests.length ? `<button class="mi" data-go-req="1"><span class="hash">👋</span><span>${S.requests.length} join request${S.requests.length === 1 ? '' : 's'}<small>People asking to join ${esc(S.team.name)}</small></span></button>` : ''}
-      ${!unread.length && !missed.length && !(isAdmin() && S.requests.length) ? '<p class="mnote">You\'re all caught up.</p>' : ''}`, (d, close) => {
-      d.querySelectorAll('[data-go-ch]').forEach((b) => b.onclick = () => { close(); openChannel(b.dataset.goCh); });
-      d.querySelectorAll('[data-go-calls]').forEach((b) => b.onclick = () => { close(); S.listTab = 'calls'; seeCalls(); renderList(); renderTop(); go('list'); });
-      const rq = d.querySelector('[data-go-req]'); if (rq) rq.onclick = () => { close(); needs2step() ? security() : joinRequests(); };
-    }, 'bellmenu');
+  // One tap on your picture: your status first, then My phone, Settings, Management (owners and admins), Help, Sign out.
+  function userMenu(anchor) {
+    const me = personOf(S.user.id) || {}; const desk = /Electron/.test(navigator.userAgent) || DEMO; const waiting = isAdmin() ? S.requests.length : 0;
+    const html = () => `<div class="mh mhu">${av(S.user.id, me.display_name || 'You')}<span><b>${esc(me.display_name || 'You')}</b><small>${esc(S.user.email || '')}</small></span></div>
+      ${statusHtml(false)}<div class="msep"></div>
+      <button class="mi" id="um-phone">${ic('desk')}<span>My phone and devices</span></button>
+      <button class="mi" id="coset">${ic('cog')}<span>Settings</span></button>
+      ${isAdmin() ? `<button class="mi" id="um-mgmt">${ic(Mgmt.open() ? 'shield' : 'lock')}<span>Management<small>${Mgmt.open() ? 'Unlocked' : 'Locked: needs your code'}</small></span>${waiting ? `<span class="badge" title="${waiting} asking to join">${waiting}</span>` : ''}</button>` : ''}
+      <button class="mi" id="um-help">${ic('help')}<span>Help</span></button>
+      ${desk ? '' : `<button class="mi" id="tohome">${ic('back')}<span>Riyeser home</span></button>`}
+      <button class="mi" id="out">${ic('out')}<span>Sign out</span></button>`;
+    popMenu(anchor, html(), function w(d, close) {
+      wireStatus(d, close, () => { d.innerHTML = html(); w(d, close); });
+      const on = (id, fn) => { const b = d.querySelector(id); if (b) b.onclick = () => { close(); fn(); }; };
+      on('#um-phone', () => setNav('devices')); on('#coset', () => setNav('settings')); on('#um-mgmt', () => setNav('manage'));
+      on('#um-help', () => helpMenu(anchor)); on('#tohome', () => { S.home = true; renderHome(); Hist.move('home'); });
+      on('#out', signOut);
+    }, 'usermenu');
   }
+  async function signOut() { Mgmt.lock(); await api.signOut(); S.team = null; gate(); }
   function helpMenu(anchor) {
     popMenu(anchor, `<div class="mh">Help</div><a class="mi" href="/help/link.html" target="_blank" rel="noopener">${ic('help')}<span>Riyeser Link Help Centre<small>Chat, calls and desk phones</small></span></a>
       <button class="mi" id="hgh">${ic('chat')}<span>Ask Riyeser for help<small>We usually reply within one business day</small></span></button>
       <button class="mi" id="hks">${ic('grid')}<span>Keyboard tips</span></button>`, (d, close) => {
       d.querySelector('#hgh').onclick = () => { close(); getHelp(); };
-      d.querySelector('#hks').onclick = () => { close(); modal(`<h3>Keyboard tips</h3><dl class="kbd"><dt>Enter</dt><dd>Send</dd><dt>Shift + Enter</dt><dd>New line</dd><dt>Esc</dt><dd>Stop editing, close a menu</dd><dt>/</dt><dd>Search</dd><dt>Ctrl + [</dt><dd>Make the left menu smaller, or bigger again</dd><dt>Ctrl + ]</dt><dd>Hide or show the People and details panel</dd><dt>Right-click a chat</dt><dd>Rename, mute, pin, leave or archive it</dd></dl>
-        <p class="muted small">Type INV-1047, Q-0042 or Booking 12 in a message to point at one.</p><div class="mfoot"><button class="btn p" id="cl">Done</button></div>`, (m, c) => { m.querySelector('#cl').onclick = c; }); };
+      d.querySelector('#hks').onclick = () => { close(); keyTips(); };
     });
   }
-  function userMenu(anchor) {
-    const me = personOf(S.user.id) || {}; const desk = /Electron/.test(navigator.userAgent) || DEMO;
-    popMenu(anchor, `<div class="mh mhu">${av(S.user.id, me.display_name || 'You')}<span><b>${esc(me.display_name || 'You')}</b><small>${esc(S.user.email || '')}</small></span></div>
-      <button class="mi" id="um-prof">${ic('user')}<span>My profile</span></button>
-      <button class="mi" id="um-theme">${ic('palette')}<span>Theme<small>${esc((THEMES.find((t) => t[0] === Theme.get().theme) || THEMES[0])[1])} · ${esc((ACCENTS.find((a) => a[0] === Theme.get().accent) || ACCENTS[0])[1].replace(' (Riyeser Link)', ''))}</small></span></button>
-      <button class="mi" id="um-phone">${ic('desk')}<span>My phone</span></button>
-      <button class="mi" id="um-sec">${ic('shield')}<span>Security<small>Two-step sign-in</small></span></button>
-      <button class="mi" id="um-pw">${ic('shield')}<span>Change password</span></button>
-      <button class="mi" id="um-co">${ic('building')}<span>${esc(S.team.name)}<small>Company details</small></span></button>
-      ${desk ? '' : `<button class="mi" id="tohome">${ic('back')}<span>Riyeser home</span></button>`}
-      <button class="mi" id="out">${ic('out')}<span>Sign out</span></button>`, (d, close) => {
-      const on = (id, fn) => { const b = d.querySelector(id); if (b) b.onclick = () => { close(); fn(); }; };
-      on('#um-prof', () => editMyDetails(me)); on('#um-theme', appearance); on('#um-phone', () => myPhonePage('chat')); on('#um-sec', security); on('#um-pw', changePassword);
-      on('#um-co', () => companyInfo(false)); on('#tohome', () => { S.home = true; renderHome(); Hist.move('home'); });
-      on('#out', async () => { await api.signOut(); S.team = null; gate(); });
-    }, 'usermenu');
+  function keyTips() {
+    modal(`<h3>Keyboard tips</h3><dl class="kbd"><dt>Enter</dt><dd>Send</dd><dt>Shift + Enter</dt><dd>New line</dd><dt>Esc</dt><dd>Stop editing, close a menu</dd><dt>/</dt><dd>Search</dd><dt>Ctrl + ]</dt><dd>Open or close a chat's details</dd><dt>Right-click a chat</dt><dd>Rename, mute, pin, leave or archive it</dd></dl>
+      <p class="muted small">Type INV-1047, Q-0042 or Booking 12 in a message to point at one.</p><div class="mfoot"><button class="btn p" id="cl">Done</button></div>`, (m, c) => { m.querySelector('#cl').onclick = c; });
   }
   function wireSearch(input, box) {
     let t = null; let seq = 0;
     const hide = () => { box.hidden = true; };
     input.addEventListener('blur', () => setTimeout(hide, 200));
     input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { input.value = ''; hide(); input.blur(); } });
-    addEventListener('keydown', (e) => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '') && document.getElementById('q')) { e.preventDefault(); document.getElementById('q').focus(); } });
+    addEventListener('keydown', (e) => { if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '') && document.getElementById('q')) { e.preventDefault(); const q = document.getElementById('q'); if (narrow()) document.getElementById('lktop').classList.add('searching'); q.focus(); } });
     input.oninput = () => { clearTimeout(t); const q = input.value.trim(); if (!q) return hide(); t = setTimeout(() => run(q), 180); };
     async function run(q) {
       const my = ++seq; const ql = q.toLowerCase();
@@ -2285,60 +2408,26 @@
         box.hidden = false;
         box.querySelectorAll('[data-sp]').forEach((b) => b.onmousedown = (e) => { e.preventDefault(); hide(); input.value = ''; openDm(b.dataset.sp); });
         box.querySelectorAll('[data-sc],[data-sm]').forEach((b) => b.onmousedown = (e) => { e.preventDefault(); hide(); input.value = ''; openChannel(b.dataset.sc || b.dataset.sm); });
-        box.querySelectorAll('[data-scl]').forEach((b) => b.onmousedown = (e) => { e.preventDefault(); hide(); input.value = ''; S.listTab = 'calls'; renderList(); go('list'); });
+        box.querySelectorAll('[data-scl]').forEach((b) => b.onmousedown = (e) => { e.preventDefault(); hide(); input.value = ''; setNav('calls'); });
       };
       draw(null);
       if (q.length >= 2) draw(await api.search(S.team.id, q).catch(() => []));
     }
   }
 
-  // ---- left nav
-  function renderNav() {
-    const el = document.getElementById('lknav'); if (!el) return;
-    const admin = isAdmin(); const tip = (label) => ` aria-label="${label}"${S.navMini ? ` title="${label}"` : ''}`;
-    const item = (k, icon, label, extra = '', id = '') => `<button class="lk-ni${S.nav === k ? ' on' : ''}" data-nav="${k}"${id ? ` id="${id}"` : ''}${tip(label)}>${ic(icon)}<span>${label}</span>${extra}</button>`;
-    const unread = unreadTotal(); const missed = missedNew();
-    el.innerHTML = `<div class="team"><span class="lk-tico" aria-hidden="true">${esc(initials(S.team.name))}</span><div>${S.teams.length > 1
-      ? `<select id="tsw" aria-label="Switch company">${S.teams.map((t) => `<option value="${t.id}"${t.id === S.team.id ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`
-      : `<b>${esc(S.team.name)}</b>`}<small>${S.people.length} ${S.people.length === 1 ? 'person' : 'people'}${S.team.company_code ? ` · ${esc(S.team.company_code)}` : ''}</small></div></div>
-      ${needs2step() ? '<button class="mfa-nag" id="mfanag">🔐 Owners and admins need <b>two-step sign-in</b> to approve people and change access. <u>Turn it on (2 minutes)</u></button>' : ''}
-      <div class="lk-nscroll"><div class="lk-nh">Workspace</div>
-      ${item('home', 'home', 'Home')}${item('chat', 'chat', 'Chat', unread ? `<span class="badge">${unread}</span>` : '')}${item('calls', 'phone', 'Calls', missed ? `<span class="badge">${missed}</span>` : '')}
-      ${item('contacts', 'users', 'Contacts')}${item('channels', 'hash', 'Teams / Channels')}
-      ${admin ? `<button class="lk-ni" id="cophones">${ic('desk')}<span>Desk Phones</span></button>` : `<button class="lk-ni" id="comyphone">${ic('desk')}<span>My phone</span></button>`}
-      ${item('devices', 'monitor', 'Devices')}
-      ${admin ? `<div class="lk-admin${S.adminShut ? ' shut' : ''}"><button class="lk-ah" id="adminh" aria-expanded="${!S.adminShut}">${ic('cog')}<span>Admin / Settings</span>${ic('down')}</button>
-        <div class="lk-ag" id="adming">
-          <button class="lk-ni sm" id="coppl">${ic('users')}<span>People &amp; access</span></button>
-          <button class="lk-ni sm" id="coreq">${ic('user')}<span>Join requests</span>${S.requests.length ? `<span class="badge">${S.requests.length}</span>` : ''}</button>
-          <button class="lk-ni sm" id="coinfo">${ic('building')}<span>Company</span></button>
-          <button class="lk-ni sm" id="mgbr">${ic('branch')}<span>Branches &amp; extensions</span></button>
-          <button class="lk-ni sm" id="ad-phones">${ic('desk')}<span>Desk phones</span></button>
-          <button class="lk-ni sm" id="cosec">${ic('shield')}<span>Security</span></button>
-          <button class="lk-ni sm" id="cohist">${ic('clock')}<span>History</span></button>
-          <button class="lk-ni sm" disabled title="Coming soon">${ic('chart')}<span>Reports</span><span class="soon">soon</span></button>
-          ${isOwner() ? `<button class="lk-ni sm" id="coplan">${ic('card')}<span>Plan &amp; billing</span></button>` : ''}
-        </div></div>` : ''}</div>
-      <div class="lk-nfoot"><button class="lk-ni sm" id="coset"${tip('Settings')}>${ic('cog')}<span>Settings</span></button><button class="lk-ni sm lk-inv" id="inv"${tip('Invite people')}>${ic('plus')}<span>Invite people</span></button>
-        <button class="lk-ni sm lk-navtog" id="navtog" aria-expanded="${!S.navMini}" aria-label="${S.navMini ? 'Show the full menu' : 'Make the menu smaller'}" title="${S.navMini ? 'Show the full menu' : 'Make the menu smaller'} (Ctrl + [)">${ic(S.navMini ? 'navopen' : 'navshut')}<span>Make the menu smaller</span></button></div>`;
-    const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = () => { S.navOpen = false; paneClasses(); fn(); }; };
-    el.querySelectorAll('[data-nav]').forEach((b) => b.onclick = () => setNav(b.dataset.nav));
-    const sw = el.querySelector('#tsw'); if (sw) sw.onchange = () => loadTeam(sw.value);
-    on('#mfanag', security); on('#cophones', () => phonesPage('chat')); on('#ad-phones', () => phonesPage('chat')); on('#comyphone', () => myPhonePage('chat'));
-    on('#coppl', () => (needs2step() ? security() : peopleAccess())); on('#coreq', () => (needs2step() ? security() : joinRequests()));
-    on('#coinfo', () => companyInfo(false)); on('#mgbr', () => (needs2step() ? security() : manageBranches())); on('#cosec', security); on('#cohist', showHistory);
-    on('#coplan', planBilling); on('#coset', settingsMenu); on('#inv', invite);
-    el.querySelector('#navtog').onclick = toggleNav;
-    const ah = el.querySelector('#adminh'); if (ah) ah.onclick = () => { S.adminShut = !S.adminShut; ah.parentElement.classList.toggle('shut', S.adminShut); ah.setAttribute('aria-expanded', String(!S.adminShut)); };
-  }
+  // Chat, Calls, People, My phone and devices, Settings, Management, Channels
   function setNav(k) {
-    S.nav = k; S.navOpen = false; closePops();
-    if (k === 'chat') { S.listTab = 'chats'; renderNav(); renderList(); renderMain(); go(narrow() ? 'list' : 'main'); return; }
-    if (k === 'calls') { S.listTab = 'calls'; seeCalls(); renderTop(); }
-    renderNav(); renderList(); renderMain(); go('main');
+    if (k === 'manage' && !isAdmin()) k = 'settings';
+    S.nav = k; closePops(); if (k !== 'chat') S.details = false;
+    if (k === 'calls') seeCalls();
+    if (k === 'chat') { S.pane = narrow() ? 'list' : 'main'; } else S.pane = 'list';
+    if (S.home || S.view || !document.getElementById('lkshell')) { S.home = false; render(); } else { renderTop(); renderTabs(); renderList(); renderMain(); renderRight(); }
+    paneClasses(); if (narrow()) Hist.move('list');
+    const m = document.getElementById('main'); if (m && k !== 'chat') m.scrollTop = 0;
   }
 
-  // ---- the list: Chats / Calls / Voicemail
+  // ---- the list: channels and people together, newest first (pinned at the top), with All · Channels · People · Unread
+  const FILTERS = [['all', 'All'], ['channels', 'Channels'], ['people', 'People'], ['unread', 'Unread']];
   function chatRow(c, uid) {
     const ch = c || null; const id = ch ? ch.id : null; const lm = id ? S.last[id] : null; const un = id ? S.unread[id] || 0 : 0;
     const dm = uid || (ch && ch.kind === 'dm' ? otherIn(ch) : null);
@@ -2349,48 +2438,38 @@
       : dm ? esc(Presence.text(dm)) : esc((ch && ch.topic) || 'No messages yet');
     const pinned = id && S.pinned.includes(id); const mu = id && muted(id); const arch = !!(ch && ch.archived);
     return `<div class="lk-row${arch ? ' arch' : ''}"><button class="item${on ? ' on' : ''}${un && !arch ? ' unread' : ''}${mu ? ' muted' : ''}" ${dm ? `data-dm="${dm}"` : `data-ch="${id}"`}>${pic}
-      <span class="lk-rb"><span class="lk-r1"><span class="nm">${esc(label)}</span>${mu ? `<span class="mutei" title="Muted">${ic('mute')}</span>` : ''}${lm ? `<time>${esc(whenShort(lm.created_at))}</time>` : dm && extOf(dm) ? `<span class="ext">${extOf(dm)}</span>` : ''}</span>
+      <span class="lk-rb"><span class="lk-r1"><span class="nm">${esc(label)}</span>${pinned ? `<span class="pinmark" title="Pinned">${ic('pin')}</span>` : ''}${mu ? `<span class="mutei" title="Muted">${ic('mute')}</span>` : ''}${lm ? `<time>${esc(whenShort(lm.created_at))}</time>` : ''}</span>
       <span class="lk-r2"><span class="pv">${prev}</span>${un && !arch ? `<span class="badge${mu ? ' dim' : ''}">${un}</span>` : ''}</span></span></button>
-      ${id ? `<button class="lk-more" data-cmenu="${id}" aria-haspopup="menu" aria-label="More for ${esc(label)}" title="More: rename, mute, archive…">${ic('more')}</button>` : ''}
-      ${id && !arch ? `<button class="lk-pin${pinned ? ' on' : ''}" data-pin="${id}" aria-label="${pinned ? 'Unpin' : 'Pin'} ${esc(label)}" title="${pinned ? 'Unpin' : 'Pin to the top'}">${ic('pin')}</button>` : ''}</div>`;
+      ${id ? `<button class="lk-more" data-cmenu="${id}" aria-haspopup="menu" aria-label="More for ${esc(label)}" title="More: pin, mute, rename…">${ic('more')}</button>` : ''}</div>`;
+  }
+  function convos() {
+    const at = (c) => (c && S.last[c.id] ? S.last[c.id].created_at : '');
+    const rows = [...S.chans.filter((c) => c.kind !== 'dm').map((c) => ({ c })),
+      ...S.people.filter((p) => p.user_id !== S.user.id).map((p) => ({ c: dmWith(p.user_id) || null, uid: p.user_id }))];
+    const pin = (r) => (r.c ? S.pinned.indexOf(r.c.id) : -1);
+    return rows.sort((a, b) => {
+      const pa = pin(a); const pb = pin(b);
+      if (pa >= 0 || pb >= 0) return pa < 0 ? 1 : pb < 0 ? -1 : pa - pb;
+      return at(b.c).localeCompare(at(a.c)) || (!!b.c - !!a.c) || (a.uid ? 1 : 0) - (b.uid ? 1 : 0)
+        || (a.uid ? nameOf(a.uid) : a.c.name).localeCompare(b.uid ? nameOf(b.uid) : b.c.name);
+    });
   }
   function renderList() {
     const el = document.getElementById('side'); if (!el) return;
-    const tab = S.listTab || 'chats'; const missed = missedNew(); const unread = unreadTotal();
-    let body = '';
-    if (tab === 'chats') {
-      const pinned = S.pinned.map((id) => S.chans.find((c) => c.id === id)).filter(Boolean);
-      const chs = S.chans.filter((c) => c.kind !== 'dm' && !S.pinned.includes(c.id));
-      const others = S.people.filter((p) => p.user_id !== S.user.id).filter((p) => { const d = dmWith(p.user_id); return !(d && S.pinned.includes(d.id)); })
-        .sort((a, b) => { const la = S.last[(dmWith(a.user_id) || {}).id]; const lb = S.last[(dmWith(b.user_id) || {}).id];
-          return (lb ? lb.created_at : '').localeCompare(la ? la.created_at : '') || a.display_name.localeCompare(b.display_name); });
-      // a folded section still shows how many unread messages are in it
-      const un = (list) => list.reduce((a, c) => a + (c && !muted(c.id) ? S.unread[c.id] || 0 : 0), 0);
-      const dmRows = others.map((p) => dmWith(p.user_id));
-      body = `<button class="lk-new" id="newchat">${ic('plus')} New chat</button><div class="sidescroll" id="lscroll">
-        ${pinned.length ? `${secHead('pinned', 'Pinned', '', UI.shut('pinned') ? un(pinned) : 0)}${secBody('pinned', pinned.map((c) => chatRow(c)).join(''))}` : ''}
-        ${secHead('channels', 'Channels', `<button id="addch" aria-label="Add a channel" title="Add a channel">${ic('plus')}</button>`, UI.shut('channels') ? un(chs) : 0)}
-        ${secBody('channels', chs.map((c) => chatRow(c)).join('') || '<p class="lk-none">No channels yet.</p>')}
-        ${secHead('dms', 'Direct messages', `<button id="adddm" aria-label="Message someone" title="Message someone">${ic('plus')}</button>`, UI.shut('dms') ? un(dmRows) : 0)}
-        ${secBody('dms', others.map((p) => chatRow(dmWith(p.user_id), p.user_id)).join('') || '<p class="lk-none">Invite your team to start chatting.</p>')}
-        ${S.archived.length ? `${secHead('archived', 'Archived', '', S.archived.length)}${secBody('archived', `<p class="lk-none lk-archnote">Hidden for everyone and read-only. The messages are kept.</p>${S.archived.map((c) => chatRow(c)).join('')}`)}` : ''}</div>`;
-    } else if (tab === 'calls') {
-      const f = S.features || {}; const me = personOf(S.user.id) || {};
-      const trial = f.calls && !f.calls_paid && f.trial_days_left != null ? `<span class="trialtag">Trial · ${f.trial_days_left} days left</span>` : '';
-      body = `<div class="sidescroll" id="lscroll">${secHead('branches', 'Ring a branch', `${f.calls ? trial : '<span class="trialtag prem">Paused</span>'}<span><button id="dial" aria-label="Dial an extension" title="Dial an extension">${ic('grid')}</button></span>`)}
-        ${secBody('branches', `${S.branches.map((b) => `<div class="lk-row"><button class="item" data-callbranch="${b.id}" title="Rings everyone in ${esc(b.name)}"><span class="lk-chic" aria-hidden="true">${ic('phone')}</span><span class="lk-rb"><span class="lk-r1"><span class="nm">${esc(b.name)}</span>${b.extension ? `<span class="ext">${b.extension}</span>` : ''}</span><span class="lk-r2"><span class="pv">${b.people.length} ${b.people.length === 1 ? 'person' : 'people'} ring together</span></span></span></button></div>`).join('') || '<p class="lk-none">No branches yet.</p>'}
-        ${me.extension ? `<p class="myext">Your extension: <b>${me.extension}</b></p>` : ''}`)}
-        ${secHead('calls', 'Recent calls')}${secBody('calls', callRows(S.callLog || [], 30))}</div>`;
-    } else {
-      body = `<div class="sidescroll" id="lscroll"><div class="lk-vm">${ic('vm')}<b>No voicemail</b><p>Coming with Riyeser Link Office voicemail. Messages people leave on your extension will show here.</p></div></div>`;
-    }
-    el.innerHTML = `<div class="lk-tabs" role="tablist"><button role="tab" data-tab="chats" aria-selected="${tab === 'chats'}" class="${tab === 'chats' ? 'on' : ''}">Chats${unread ? ` <span class="badge">${unread}</span>` : ''}</button>
-      <button role="tab" data-tab="calls" aria-selected="${tab === 'calls'}" class="${tab === 'calls' ? 'on' : ''}">Calls${missed ? ` <span class="badge">${missed}</span>` : ''}</button>
-      <button role="tab" data-tab="voicemail" aria-selected="${tab === 'voicemail'}" class="${tab === 'voicemail' ? 'on' : ''}">Voicemail <span class="cnt" id="vmc">0</span></button></div>${body}`;
-    el.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => { S.listTab = b.dataset.tab; if (S.listTab === 'calls') { seeCalls(); renderTop(); renderNav(); } renderList(); });
+    const f = S.filter || 'all';
+    const rows = convos().filter((r) => f === 'all' || (f === 'channels' ? !r.uid : f === 'people' ? !!r.uid : !!(r.c && S.unread[r.c.id] && !muted(r.c.id))));
+    const empty = { all: 'Invite your team to start chatting.', channels: 'No channels yet. Press + New to add one.', people: 'No one else is here yet. Invite your team.', unread: 'You\'re all caught up.' }[f];
+    const keep = document.getElementById('lscroll'); const y = keep ? keep.scrollTop : 0;
+    el.innerHTML = `<div class="lk-lhead"><h2>Chats</h2><button class="lk-new" id="newchat">${ic('plus')}<span>New</span></button></div>
+      <div class="lk-chips" role="tablist" aria-label="Show">${FILTERS.map(([k, n]) => `<button role="tab" class="chip${f === k ? ' on' : ''}" data-filter="${k}" aria-selected="${f === k}">${n}</button>`).join('')}</div>
+      <div class="sidescroll" id="lscroll">${rows.map((r) => chatRow(r.c, r.uid)).join('') || `<p class="lk-none">${empty}</p>`}
+        ${S.archived.length && f !== 'unread' && f !== 'people' ? `${secHead('archived', 'Archived', '', S.archived.length)}${secBody('archived', `<p class="lk-none lk-archnote">Hidden for everyone and read-only. The messages are kept.</p>${S.archived.map((c) => chatRow(c)).join('')}`)}` : ''}
+        ${f === 'all' || f === 'channels' ? `<button class="linkbtn lk-browse" id="browsech">Browse channels${S.leftChans.length ? ` · join one you left` : ''}</button>` : ''}</div>
+      <button class="lk-fab" id="fabnew" aria-label="New chat">${ic('plus')}</button>`;
+    const ls = document.getElementById('lscroll'); if (ls) ls.scrollTop = y;
+    el.querySelectorAll('[data-filter]').forEach((b) => b.onclick = () => { S.filter = b.dataset.filter; renderList(); });
     el.querySelectorAll('[data-ch]').forEach((b) => b.onclick = () => openChannel(b.dataset.ch));
     el.querySelectorAll('[data-dm]').forEach((b) => b.onclick = () => openDm(b.dataset.dm));
-    el.querySelectorAll('[data-pin]').forEach((b) => b.onclick = () => togglePin(b.dataset.pin));
     el.querySelectorAll('[data-sect]').forEach((b) => b.onclick = () => toggleSec(b.dataset.sect));
     const chOf = (id) => S.chans.find((c) => c.id === id) || S.archived.find((c) => c.id === id);
     el.querySelectorAll('[data-cmenu]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); const c = chOf(b.dataset.cmenu); if (c) chanMenu(b, c); });
@@ -2399,10 +2478,8 @@
       const c = b.dataset.ch ? chOf(b.dataset.ch) : dmWith(b.dataset.dm); if (!c) return;
       e.preventDefault(); chanMenu(b, c, e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : null);
     });
-    el.querySelectorAll('[data-callbranch]').forEach((b) => b.onclick = () => Calls.start({ branch: b.dataset.callbranch }));
-    el.querySelectorAll('[data-redial]').forEach((b) => b.onclick = () => redial(b.dataset.redial));
     const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = fn; };
-    on('#newchat', newChat); on('#addch', addChannel); on('#adddm', newChat); on('#dial', dialPad);
+    on('#newchat', newChat); on('#fabnew', newChat); on('#browsech', () => setNav('channels'));
     chatTitle();
   }
   function callRows(list, n) {
@@ -2420,7 +2497,7 @@
     openChannel(id);
   }
 
-  // ---- the middle: a conversation, or Home / Calls / Contacts / Teams / Devices
+  // ---- the main panel: the conversation, or a view
   function renderMain() {
     const el = document.getElementById('main'); if (!el) return;
     if (S.nav === 'chat') {
@@ -2436,43 +2513,37 @@
       renderHead(); renderMsgs(true);
       return;
     }
-    el.innerHTML = `<div class="lk-view" id="mview"><button class="back lk-vback" aria-label="Back">${ic('back')}</button>${viewHtml(S.nav)}</div>`;
-    el.querySelector('.lk-vback').onclick = () => go('list');
+    const k = S.nav;
+    el.innerHTML = `<div class="lk-view" id="mview" data-view="${k}"><div class="lk-vtop"><h1>${esc(TITLES[k] || '')}</h1>
+      <button class="lk-ib lk-vclose" id="vclose" aria-label="Back to chat" title="Back to chat">${ic('x')}</button></div>${viewHtml(k)}</div>`;
+    el.querySelector('#vclose').onclick = () => setNav('chat');
     wireView(el);
   }
-  function card(title, body, cls = '', id = '') { return `<section class="lk-card ${cls}"${id ? ` id="${id}"` : ''}><h3>${title}</h3>${body}</section>`; }
+  function card(title, body, cls = '', id = '') { return `<section class="lk-card ${cls}"${id ? ` id="${id}"` : ''}>${title ? `<h3>${title}</h3>` : ''}${body}</section>`; }
   function personRow(p, actions = true) {
-    const me = p.user_id === S.user.id;
+    const me = p.user_id === S.user.id; const note = Presence.note(p.user_id);
     return `<div class="lk-person" data-person="${p.user_id}"><span class="lk-av">${av(p.user_id, p.display_name)}${Presence.dot(p.user_id)}</span>
-      <span class="lk-pn"><b>${esc(p.display_name)}${me && p.display_name !== 'You' ? ' <small>(You)</small>' : ''}</b><small class="lk-pst">${esc(Presence.text(p.user_id))}</small></span>
+      <span class="lk-pn"><b>${esc(p.display_name)}${me && p.display_name !== 'You' ? ' <small>(You)</small>' : ''}</b><small class="lk-pst">${esc(Presence.text(p.user_id))}${note ? ` · ${esc(note)}` : ''}</small></span>
       ${p.extension ? `<span class="lk-ext">Ext. ${p.extension}</span>` : '<span class="lk-ext"></span>'}
-      ${actions && !me ? `${plus() ? `<button class="lk-call" data-callp="${p.user_id}" aria-label="Call ${esc(p.display_name)}" title="Call">${ic('phone')}</button>` : ''}` : ''}</div>`;
+      ${actions && !me && plus() ? `<button class="lk-call" data-callp="${p.user_id}" aria-label="Call ${esc(p.display_name)}" title="Call">${ic('phone')}</button>` : ''}</div>`;
   }
+  // a small row of settings: what it is, what it says now, and a button
+  const setRow = (icon, title, sub, btn = '') => `<div class="lk-srow">${ic(icon)}<span><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span>${btn}</div>`;
   function viewHtml(k) {
     const me = personOf(S.user.id) || {};
-    if (k === 'home') {
-      const recent = [...S.chans].filter((c) => S.pinned.includes(c.id) || S.unread[c.id] || S.last[c.id])
-        .sort((a, b) => (S.pinned.includes(b.id) - S.pinned.includes(a.id)) || ((S.unread[b.id] ? 1 : 0) - (S.unread[a.id] ? 1 : 0)) || String((S.last[b.id] || {}).created_at || '').localeCompare(String((S.last[a.id] || {}).created_at || ''))).slice(0, 6);
-      const missed = (S.callLog || []).filter((c) => c.result === 'missed').slice(0, 4);
-      const chans = S.chans.filter((c) => c.kind !== 'dm').slice(0, 6);
-      return `<h1>Your workspace</h1><p class="lk-sub">Good ${new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}${me.display_name && me.display_name !== 'You' ? ', ' + esc(me.display_name.split(' ')[0]) : ''}. Here's what's happening at ${esc(S.team.name)}.</p>
-        <div class="lk-cards">
-        ${card(`${ic('chat')} Recent conversations`, recent.length ? `<div class="lk-mini">${recent.map((c) => `<button class="mi" data-go-ch="${c.id}">${c.kind === 'dm' ? `<span class="lk-av">${av(otherIn(c), chanLabel(c))}${Presence.dot(otherIn(c))}</span>` : `<span class="lk-chic sm">${c.kind === 'private' ? ic('lock') : ic('hash')}</span>`}<span>${S.pinned.includes(c.id) ? `<span class="pinmark">${ic('pin')}</span>` : ''}${esc(chanLabel(c))}<small>${S.last[c.id] ? esc(S.last[c.id].body.slice(0, 60)) : esc(c.topic || '')}</small></span>${S.unread[c.id] ? `<span class="badge">${S.unread[c.id]}</span>` : ''}</button>`).join('')}</div>` : '<p class="muted">Pinned chats and unread messages show here.</p>', '', 'hrecent')}
-        ${card(`${ic('phone')} Quick call`, plus() ? `<form class="lk-qc" id="qcf"><input id="qci" placeholder="Search name or extension" autocomplete="off" aria-label="Name or extension"><button class="btn p" id="qcgo">${ic('phone')} Call</button></form><div class="lk-mini" id="qcr"></div>` : `<p class="muted">Riyeser Link is paused, so calls are paused too.</p><button class="btn" id="qcup">How to turn it back on</button>`, '', 'hquick')}
-        ${card(`${ic('missed')} Missed calls`, missed.length ? `<div class="lk-mini">${missed.map((c) => `<div class="mi"><span class="lk-av">${c.peer ? av(c.peer, callWho(c)) : ''}</span><span>${esc(callWho(c))}<small>${esc(whenShort(c.at))}${callExt(c) ? ` · Ext. ${callExt(c)}` : ''}</small></span>
-          ${c.peer && plus() ? `<button class="lk-ib" data-callp="${c.peer}" aria-label="Call back ${esc(callWho(c))}" title="Call back">${ic('phone')}</button>` : ''}${c.peer ? `<button class="lk-ib" data-dmp="${c.peer}" aria-label="Message ${esc(callWho(c))}" title="Send a message">${ic('chat')}</button>` : ''}</div>`).join('')}</div>` : '<p class="muted">No missed calls. Nice.</p>', '', 'hmissed')}
-        ${card(`${ic('hash')} Team channels`, `<div class="lk-mini">${chans.map((c) => `<button class="mi" data-go-ch="${c.id}"><span class="lk-chic sm">${c.kind === 'private' ? ic('lock') : ic('hash')}</span><span>${esc(c.name)}<small>${esc(c.topic || '')}</small></span>${S.unread[c.id] ? `<span class="badge">${S.unread[c.id]}</span>` : ''}</button>`).join('')}</div><button class="linkbtn" data-nav-go="channels">All channels →</button>`, '', 'hchans')}
-        ${isAdmin() ? card(`${ic('user')} Requests`, S.requests.length ? `<p><b>${S.requests.length}</b> ${S.requests.length === 1 ? 'person is' : 'people are'} asking to join ${esc(S.team.name)}.</p><button class="btn p" id="hreqs">Review requests</button>` : '<p class="muted">No one is waiting to join. Share your Company ID to invite people.</p><button class="btn" id="hinv">Invite people</button>', '', 'hrequests') : ''}
-        ${card(`${ic('desk')} My devices`, `<div id="hdev"><p class="muted">Loading…</p></div>`, '', 'hdevices')}
-        </div>`;
-    }
     if (k === 'calls') {
-      return `<h1>Calls</h1><p class="lk-sub">${plus() ? 'Ring a person or a whole branch. Calls go straight between devices, with no call charges.' : 'Riyeser Link is paused, so calls are paused too. Add Riyeser Link on the Riyeser home page (Add to my plan).'}</p>
-        <div class="lk-cards two">${card(`${ic('grid')} Dial`, dialHtml('vd'), 'lk-qd')}${card(`${ic('clock')} Recent calls`, `<div class="lk-mini lk-calls">${callRows(S.callLog || [], 50)}</div>`)}</div>`;
+      const f = S.features || {};
+      const trial = f.calls && !f.calls_paid && f.trial_days_left != null ? `<span class="trialtag">Free trial · ${f.trial_days_left} days left</span>` : '';
+      return `<p class="lk-sub">${plus() ? `Call a person or a whole branch. Calls go straight between devices, with no call charges.${me.extension ? ` Your extension is <b>${me.extension}</b>.` : ''}` : 'Riyeser Link is paused, so calls are paused too.'} ${trial}</p>
+        <div class="lk-cols">
+          <div class="lk-colmain">${card(`${ic('clock')} Recent calls`, `<div class="lk-mini lk-calls">${callRows(S.callLog || [], 50)}</div>`)}
+            ${S.branches.length ? card(`${ic('branch')} Ring a branch`, `<div class="lk-mini">${S.branches.map((b) => `<button class="mi" data-callbranch="${b.id}"><span class="lk-chic sm">${ic('phone')}</span><span>${esc(b.name)}<small>${b.people.length} ${b.people.length === 1 ? 'person rings' : 'people ring'} together${b.extension ? ` · Ext. ${b.extension}` : ''}</small></span></button>`).join('')}</div>`) : ''}
+            ${card(`${ic('vm')} Voicemail`, '<p class="muted">Coming with Riyeser Link Office voicemail. Messages people leave on your extension will show here.</p>', 'lk-quiet', 'vmcard')}</div>
+          <div class="lk-colside">${plus() ? card(`${ic('grid')} Keypad`, dialHtml('vd'), 'lk-qd') : card('', '<p class="muted">Riyeser Link is paused, so calls are paused too.</p><button class="btn" id="qcup">How to turn it back on</button>')}</div></div>`;
     }
-    if (k === 'contacts') {
-      return `<h1>Contacts</h1><p class="lk-sub">Everyone at ${esc(S.team.name)}, their status and extension.</p>
-        <input class="lk-find" id="cfind" placeholder="Search people…" aria-label="Search people">
+    if (k === 'people') {
+      return `<p class="lk-sub">Everyone at ${esc(S.team.name)}: their status and extension.</p>
+        <input class="lk-find" id="cfind" placeholder="Search name or extension" aria-label="Search people" value="${esc(S.cq || '')}">
         <div class="lk-dir" id="cdir">${S.people.map((p) => `<div class="lk-drow" data-name="${esc(p.display_name.toLowerCase())} ${p.extension || ''}">${personRow(p, false)}<span class="lk-job">${esc(p.role === 'owner' ? 'Owner' : jobName(p.job_role))}</span>
           <span class="lk-dact">${p.user_id !== S.user.id ? `<button class="btn sm" data-dmp="${p.user_id}">${ic('chat')} Message</button>${plus() ? `<button class="btn sm" data-callp="${p.user_id}">${ic('phone')} Call</button>` : ''}` : ''}</span></div>`).join('')}</div>
         ${S.branches.length ? `<h2 class="lk-h2">Branches</h2><div class="lk-dir">${S.branches.map((b) => `<div class="lk-drow"><div class="lk-person"><span class="lk-chic">${ic('branch')}</span><span class="lk-pn"><b>${esc(b.name)}</b><small class="lk-pst">${b.people.length} ${b.people.length === 1 ? 'person' : 'people'} · rings everyone</small></span>${b.extension ? `<span class="lk-ext">Ext. ${b.extension}</span>` : ''}</div><span class="lk-job"></span><span class="lk-dact">${plus() ? `<button class="btn sm" data-callbranch="${b.id}">${ic('phone')} Call</button>` : ''}</span></div>`).join('')}</div>` : ''}`;
@@ -2480,39 +2551,102 @@
     if (k === 'channels') {
       const chs = S.chans.filter((c) => c.kind !== 'dm');
       const chCard = (c, extra = '') => `<button class="lk-card lk-chcard${c.archived ? ' arch' : ''}" data-go-ch="${c.id}"><span class="lk-chic">${c.archived ? ic('archive') : c.kind === 'private' ? ic('lock') : ic('hash')}</span><b>${esc(c.name)}</b><small>${esc(c.topic || (c.kind === 'private' ? 'Private' : 'Everyone in the team'))}</small>
-          <span class="lk-chm">${c.kind === 'private' ? `${c.people.length} ${c.people.length === 1 ? 'person' : 'people'} · private` : `${S.people.length} people`}${extra}${S.unread[c.id] && !c.archived ? ` · <span class="badge">${S.unread[c.id]}</span>` : ''}</span></button>`;
-      return `<div class="lk-vh"><div><h1>Teams / Channels</h1><p class="lk-sub">Channels everyone can see, and private ones you're in.</p></div><button class="btn p" id="vnewch">${ic('plus')} New channel</button></div>
+          <span class="lk-chm">${c.kind === 'private' ? `${c.people.length} ${c.people.length === 1 ? 'person' : 'people'} · private` : `${S.people.length} people`}${extra}</span></button>`;
+      return `<div class="lk-vh"><p class="lk-sub">Channels everyone can see, and private ones you're in.</p><button class="btn p" id="vnewch">${ic('plus')} New channel</button></div>
         <div class="lk-cards">${chs.map((c) => chCard(c)).join('')}</div>
         ${S.leftChans.length ? `<h2 class="lk-h2">Channels you left</h2><div class="lk-dir">${S.leftChans.map((c) => `<div class="lk-drow"><div class="lk-person"><span class="lk-chic">${ic('hash')}</span><span class="lk-pn"><b>${esc(c.name)}</b><small class="lk-pst">${esc(c.topic || 'Everyone in the team')}</small></span></div><span class="lk-job"></span><span class="lk-dact"><button class="btn sm" data-rejoin="${c.id}">${ic('plus')} Join again</button></span></div>`).join('')}</div>` : ''}
         ${S.archived.length ? `<h2 class="lk-h2">Archived</h2><p class="lk-sub">Hidden for everyone and read-only. The messages are kept${S.archived.some(canManage) ? '; open one to bring it back' : ''}.</p><div class="lk-cards">${S.archived.map((c) => chCard(c, ' · archived')).join('')}</div>` : ''}`;
     }
     if (k === 'devices') {
-      return `<h1>Devices</h1><p class="lk-sub">Your desk phone, and the PCs and apps you're signed in on.</p><div class="lk-cards two">
+      return `<p class="lk-sub">Your extension, your desk phone, and the PCs and apps you're signed in on.</p><div class="lk-cards two">
         ${card(`${ic('desk')} My desk phone`, '<div id="vdesk"><p class="muted">Loading…</p></div>')}${card(`${ic('monitor')} My PCs`, '<div id="vpcs"><p class="muted">Loading…</p></div>')}</div>`;
     }
+    if (k === 'settings') return settingsHtml(me);
+    if (k === 'manage') return manageHtml();
     return '';
+  }
+  // Settings: about you (everyone). The business's own settings are in Management (owners and admins).
+  function settingsHtml(me) {
+    const th = Theme.get(); const look = `${(THEMES.find((t) => t[0] === th.theme) || THEMES[0])[1]} · ${(ACCENTS.find((a) => a[0] === th.accent) || ACCENTS[0])[1].replace(' (Riyeser Link)', '')}`;
+    const np = 'Notification' in window ? Notification.permission : 'unsupported';
+    const desk = /Electron/.test(navigator.userAgent) || DEMO; const twoOn = S.aal === 'aal2';
+    const role = S.team.role === 'owner' ? 'Owner' : S.team.role === 'admin' ? 'Admin' : jobName(me.job_role || 'staff');
+    return `<div class="lk-set">
+      ${card('', `<div class="lk-me"><span class="lk-av">${av(S.user.id, me.display_name || 'You', 'big')}${Presence.dot(S.user.id).replace('class="pd', 'class="pd pd-me')}</span>
+        <span><b>${esc(me.display_name || 'You')}</b><small>${esc(S.user.email || '')} · ${esc(role)}${me.extension ? ` · Ext. ${me.extension}` : ''}</small></span>
+        <button class="btn sm" id="set-prof">${ic('edit')} Edit</button></div>`, '', 'setme')}
+      ${card('Your status', setRow('user', esc(Presence.text(S.user.id)), 'Calls don\'t ring you while you\'re Busy, At lunch or Unavailable.', '<button class="btn sm" id="set-status">Change</button>'))}
+      ${card('Notifications', `${setRow('bell', 'Incoming calls', np === 'granted' ? 'Shown on this device, even when Riyeser Link is behind other windows.' : np === 'denied' ? 'Blocked in this browser. Allow them in the site settings.' : np === 'unsupported' ? 'This browser can\'t show them.' : 'Allow them so you see who\'s calling.',
+          np === 'default' ? '<button class="btn sm" id="set-notif">Allow</button>' : '')}
+        ${setRow('mute', 'Quiet chats', 'Mute a chat from its ⋯ menu: its messages won\'t add to your unread count.')}`)}
+      ${card('Appearance', setRow('palette', 'Theme and colour', esc(look), '<button class="btn sm" id="set-look">Change</button>'))}
+      ${card('Sign-in and security', `${needs2step() ? '<button class="mfa-nag" id="mfanag">🔐 Owners and admins need <b>two-step sign-in</b> to use Management. <u>Turn it on (2 minutes)</u></button>' : ''}
+        ${setRow('shield', 'Two-step sign-in', twoOn ? 'On: signing in needs a code from your authenticator app.' : 'Off. Turn it on so a stolen password isn\'t enough.', `<button class="btn sm" id="set-2fa">${twoOn ? 'Manage' : 'Turn on'}</button>`)}
+        ${setRow('lock', 'Password', '', '<button class="btn sm" id="set-pw">Change</button>')}`)}
+      ${card('My phone and devices', setRow('desk', me.extension ? `Extension ${me.extension}` : 'No extension yet', 'Your desk phone, Do not disturb, and the PCs you\'re signed in on.', '<button class="btn sm" id="comyphone">My phone</button><button class="btn sm" id="set-dev">Devices</button>'))}
+      ${card('Company', `${setRow('building', esc(S.team.name), `Company ID <b class="mono">${esc(S.team.company_code || '')}</b>`, `<button class="btn sm" id="inv">${ic('plus')} Invite people</button>${isAdmin() ? '' : '<button class="btn sm" id="set-co">Details</button>'}`)}
+        ${isAdmin() ? setRow(Mgmt.open() ? 'shield' : 'lock', 'Management', `People, join requests, branches, desk phones, security, history${isOwner() ? ', billing' : ''}.${S.requests.length ? ` <b>${S.requests.length} waiting to join.</b>` : ''}`, '<button class="btn sm" id="set-mgmt">Open</button>') : ''}`)}
+      ${card('Help', setRow('help', 'Riyeser Link Help Centre', 'Chat, calls and desk phones, step by step.', `<a class="btn sm" href="/help/link.html" target="_blank" rel="noopener">Open</a><button class="btn sm" id="set-help">Ask us</button>`))}
+      <div class="lk-setfoot">${desk ? '' : `<button class="btn" id="tohome">${ic('back')} Riyeser home</button>`}<button class="btn" id="out">${ic('out')} Sign out</button></div></div>`;
+  }
+  // Management: locked until a fresh code; then every tool for the business. Owners and admins only.
+  function manageHtml() {
+    if (!isAdmin()) return '';
+    if (needs2step() && !S.mfaOn) return `<div class="lk-lockcard" id="mglocked">${ic('shield')}<h2>Turn on two-step sign-in first</h2>
+      <p>Management changes who can do what in ${esc(S.team.name)}, so it needs a code from an authenticator app on your phone as well as your password.</p>
+      <button class="btn p" id="mg-setup">${ic('shield')} Turn on two-step sign-in</button></div>`;
+    if (!Mgmt.open()) return `<form class="lk-lockcard" id="mglocked">${ic('lock')}<h2>Management is locked</h2>
+      <p>Type the 6 numbers your authenticator app shows for Riyeser. It locks again after 15 minutes without use.</p>
+      <input name="code" id="mgcode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required class="dpn" aria-label="6-number code">
+      ${DEMO ? '<p class="muted small mghint">Demo: the code is <b>123456</b>.</p>' : ''}<p class="ferr" id="mgerr" role="alert" hidden></p>
+      <button class="btn p" id="mgunlock">Unlock</button></form>`;
+    const tile = (id, icon, title, sub, extra = '') => `<button class="lk-tile" id="${id}">${ic(icon)}<span><b>${title}</b><small>${sub}</small></span>${extra}</button>`;
+    const n = S.requests.length;
+    return `<div class="lk-mgbar" id="mgopen">${ic('shield')}<span>Unlocked. It locks again after 15 minutes without use.</span><button class="btn sm" id="mglock">${ic('lock')} Lock now</button></div>
+      <div class="lk-tiles">
+      ${tile('coppl', 'users', 'People &amp; access', 'Job roles, admins and branches')}
+      ${tile('coreq', 'user', 'Join requests', n ? `${n} waiting for you` : 'No one waiting', n ? `<span class="badge">${n}</span>` : '')}
+      ${tile('coinfo', 'building', 'Company', 'Business details, Company ID, linked PCs')}
+      ${tile('mgbr', 'branch', 'Branches &amp; extensions', 'Branch join codes and who\'s in each')}
+      ${tile('cophones', 'desk', 'Desk phones', 'Riyeser Link Office and every desk phone')}
+      ${tile('cosec', 'shield', 'Security', 'Two-step sign-in and your password')}
+      ${tile('cohist', 'clock', 'History', 'Who changed what, and when')}
+      ${isOwner() ? tile('coplan', 'card', 'Billing &amp; plan', 'Your plan, payments and file storage') : ''}
+      </div><p class="muted small lk-mgnote">Admins are for the owner and IT staff. Only the owner can make someone an admin.</p>`;
   }
   function wireView(el) {
     el.querySelectorAll('[data-go-ch]').forEach((b) => b.onclick = () => openChannel(b.dataset.goCh));
     el.querySelectorAll('[data-rejoin]').forEach((b) => b.onclick = () => rejoinChan(b.dataset.rejoin));
-    el.querySelectorAll('[data-nav-go]').forEach((b) => b.onclick = () => setNav(b.dataset.navGo));
     el.querySelectorAll('[data-callp]').forEach((b) => b.onclick = () => Calls.start({ user: b.dataset.callp }));
     el.querySelectorAll('[data-dmp]').forEach((b) => b.onclick = () => openDm(b.dataset.dmp));
     el.querySelectorAll('[data-callbranch]').forEach((b) => b.onclick = () => Calls.start({ branch: b.dataset.callbranch }));
     el.querySelectorAll('[data-redial]').forEach((b) => b.onclick = () => redial(b.dataset.redial));
     const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = fn; };
-    on('#hreqs', () => (needs2step() ? security() : joinRequests())); on('#hinv', invite); on('#vnewch', addChannel); on('#qcup', upsell);
+    on('#vnewch', addChannel); on('#qcup', upsell);
     wireDial(el, 'vd');
-    const cf = el.querySelector('#cfind'); if (cf) cf.oninput = () => { const q = cf.value.trim().toLowerCase(); el.querySelectorAll('#cdir .lk-drow').forEach((r) => { r.hidden = !!q && !r.dataset.name.includes(q); }); };
-    const qci = el.querySelector('#qci');
-    if (qci) {
-      const find = () => { const q = qci.value.trim().toLowerCase(); return q ? S.people.filter((p) => p.user_id !== S.user.id && (p.display_name.toLowerCase().includes(q) || String(p.extension || '').startsWith(q))).slice(0, 4) : []; };
-      const show = () => { const r = find(); el.querySelector('#qcr').innerHTML = r.map((p) => `<button class="mi" type="button" data-callp="${p.user_id}"><span class="lk-av">${av(p.user_id, p.display_name)}${Presence.dot(p.user_id)}</span><span>${esc(p.display_name)}<small>${esc(Presence.text(p.user_id))}${p.extension ? ` · Ext. ${p.extension}` : ''}</small></span>${ic('phone')}</button>`).join('');
-        el.querySelectorAll('#qcr [data-callp]').forEach((b) => b.onclick = () => Calls.start({ user: b.dataset.callp })); };
-      qci.oninput = show;
-      el.querySelector('#qcf').onsubmit = (e) => { e.preventDefault(); const t = findDial(qci.value) || (find()[0] ? { user: find()[0].user_id } : null); if (t) Calls.start(t); else { el.querySelector('#qcr').innerHTML = '<p class="muted small">No one by that name or extension.</p>'; } };
+    const cf = el.querySelector('#cfind');   // kept while statuses change underneath
+    if (cf) { cf.oninput = () => { S.cq = cf.value; const q = cf.value.trim().toLowerCase(); el.querySelectorAll('#cdir .lk-drow').forEach((r) => { r.hidden = !!q && !r.dataset.name.includes(q); }); }; if (S.cq) cf.oninput(); }
+    if (el.querySelector('#vdesk')) fillDevices(el);
+    // Settings
+    const me = personOf(S.user.id) || {};
+    on('#set-prof', () => editMyDetails(me)); on('#set-status', (e) => statusMenu(e.currentTarget)); on('#set-look', appearance);
+    on('#set-notif', () => Notification.requestPermission().then(() => renderMain()).catch(() => {}));
+    on('#set-2fa', security); on('#mfanag', security); on('#set-pw', changePassword); on('#comyphone', () => myPhonePage('settings')); on('#set-dev', () => setNav('devices'));
+    on('#inv', invite); on('#set-co', () => companyInfo(false)); on('#set-mgmt', () => setNav('manage')); on('#set-help', getHelp);
+    on('#tohome', () => { S.home = true; renderHome(); Hist.move('home'); }); on('#out', signOut);
+    // Management
+    on('#mg-setup', security); on('#mglock', () => Mgmt.lock());
+    const lf = el.querySelector('form#mglocked');
+    if (lf) {
+      if (S.mfaOn === undefined) api.factors().then((f) => { S.mfaOn = f.length > 0; if (!S.mfaOn && S.nav === 'manage') renderMain(); }).catch(() => {});
+      if (!narrow()) setTimeout(() => { const c = el.querySelector('#mgcode'); if (c) c.focus(); }, 0);
+      lf.onsubmit = async (e) => { e.preventDefault(); const err = el.querySelector('#mgerr'); el.querySelector('#mgunlock').disabled = true;
+        try { await Mgmt.unlock(el.querySelector('#mgcode').value); await refreshCompany().catch(() => {}); renderMain(); renderTop(); }
+        catch (x) { err.textContent = plainError(x); err.hidden = false; el.querySelector('#mgunlock').disabled = false; el.querySelector('#mgcode').select(); } };
     }
-    if (el.querySelector('#hdev') || el.querySelector('#vdesk')) fillDevices(el);
+    const t = (id, fn) => on(id, () => (Mgmt.open() ? fn() : renderMain()));
+    t('#coppl', peopleAccess); t('#coreq', joinRequests); t('#coinfo', () => companyInfo(false)); t('#mgbr', manageBranches); t('#cophones', () => phonesPage('manage'));
+    t('#cosec', security); t('#cohist', showHistory); t('#coplan', planBilling);
   }
   async function fillDevices(el) {
     const [my, devs] = await Promise.all([api.linkMyPhone(S.team.id).catch(() => null), api.devices(S.team.id).catch(() => [])]);
@@ -2522,48 +2656,52 @@
       : `<p class="muted">${ext ? `No desk phone on extension ${esc(ext)} yet.` : 'No extension or desk phone yet.'}</p>`;
     const pcHtml = mine.length ? mine.map((d) => `<div class="mi"><span class="lk-chic sm">${ic('monitor')}</span><span>${esc(d.device_name || 'A PC')}<small>${esc(d.platform || '')}${d.app_version ? ' · ' + esc(d.app_version) : ''} · seen ${esc(ago(d.last_seen))}</small></span></div>`).join('')
       : '<p class="muted">No PCs linked yet. Riyeser Central links a PC when you sign in on it.</p>';
-    const h = el.querySelector('#hdev'); if (h) { h.innerHTML = `<div class="lk-mini">${phoneHtml}${mine.length ? `<div class="mi"><span class="lk-chic sm">${ic('monitor')}</span><span>${mine.length} PC${mine.length === 1 ? '' : 's'} linked<small>${esc(mine[0].device_name || '')}</small></span></div>` : ''}</div><button class="linkbtn" data-nav-go="devices">All my devices →</button>`;
-      h.querySelector('[data-nav-go]').onclick = () => setNav('devices'); }
-    const vd = el.querySelector('#vdesk'); if (vd) { vd.innerHTML = `<div class="lk-mini">${phoneHtml}</div><button class="btn" id="vmyph">${ic('desk')} Open My phone</button>`; vd.querySelector('#vmyph').onclick = () => myPhonePage('chat'); }
+    const vd = el.querySelector('#vdesk'); if (vd) { vd.innerHTML = `<div class="lk-mini">${phoneHtml}</div><button class="btn" id="vmyph">${ic('desk')} Open My phone</button>`; vd.querySelector('#vmyph').onclick = () => myPhonePage('devices'); }
     const vp = el.querySelector('#vpcs'); if (vp) vp.innerHTML = `<div class="lk-mini">${pcHtml}<div class="mi"><span class="lk-chic sm">${ic('chat')}</span><span>This ${/Electron/.test(navigator.userAgent) ? 'Riyeser Link app' : 'browser'}<small>Signed in now</small></span><span class="lk-pill ok">Online</span></div></div>`;
   }
 
-  // ---- conversation header
+  // ---- conversation header: who or what, a green Call button, ⓘ details and ⋯
   function renderHead() {
     const el = document.getElementById('mhead'); if (!el) return;
     const c = S.ch;
-    if (!c) { el.innerHTML = '<button class="back" aria-label="Back to chats">‹</button><div class="lk-ht"><h2>No chat open</h2></div>'; el.querySelector('.back').onclick = () => go('list'); return; }
+    if (!c) { el.innerHTML = `<button class="back" aria-label="Back to chats">${ic('back')}</button><div class="lk-ht"><h2>No chat open</h2></div>`; el.querySelector('.back').onclick = () => go('list'); return; }
     const o = otherIn(c); const count = c.kind === 'channel' ? S.people.length : c.people.length;
     el.innerHTML = `<button class="back" aria-label="Back to chats">${ic('back')}</button>${c.kind === 'dm' ? `<span class="lk-av">${av(o, chanLabel(c))}${Presence.dot(o)}</span>` : `<span class="lk-chic hd${c.kind === 'private' ? ' prv' : ''}" aria-hidden="true">${c.kind === 'private' ? ic('lock') : ic('hash')}</span>`}
-      <div class="lk-ht">${c.kind === 'dm' ? `<h2>${esc(chanLabel(c))}</h2><small>${esc(Presence.text(o))}${extOf(o) ? ` · Ext. ${extOf(o)}` : ''}</small>`
-        : `<h2>${c.kind === 'private' ? '🔒' : '#'} ${esc(c.name)}${c.archived ? ' <span class="lk-pill arch">Archived</span>' : ''}${muted(c.id) ? ` <span class="mutei" title="Muted">${ic('mute')}</span>` : ''}</h2><small>${c.kind === 'private' ? `Private · ${c.people.length} ${c.people.length === 1 ? 'person' : 'people'}${c.topic ? ' · ' : ''}` : ''}${esc(c.topic || '')}</small>`}</div>
+      <div class="lk-ht">${c.kind === 'dm' ? `<h2>${esc(chanLabel(c))}</h2><small>${esc(Presence.text(o))}${Presence.note(o) ? ` · ${esc(Presence.note(o))}` : ''}${extOf(o) ? ` · Ext. ${extOf(o)}` : ''}</small>`
+        : `<h2>${c.kind === 'private' ? '🔒' : '#'} ${esc(c.name)}${c.archived ? ' <span class="lk-pill arch">Archived</span>' : ''}${muted(c.id) ? ` <span class="mutei" title="Muted">${ic('mute')}</span>` : ''}</h2><small>${count} ${count === 1 ? 'person' : 'people'}${c.topic ? ` · ${esc(c.topic)}` : ''}</small>`}</div>
       <div class="lk-hacts">
-        ${c.kind === 'dm' ? `<button class="lk-ib" id="vidbtn" aria-label="Video call" title="Video call">${ic('video')}</button>
-        <button class="lk-ib" id="calldm" aria-label="Call ${esc(chanLabel(c))}" title="Call">${ic('phone')}</button>` : ''}
-        <button class="lk-hb" id="ppl" aria-label="People in this chat: ${count}" title="People">${ic('users')}<span>${count}</span></button>
-        <button class="lk-ib" id="infobtn" aria-label="Chat info" title="Info">${ic('info')}</button>
-        <button class="lk-ib" id="morebtn" aria-haspopup="menu" aria-label="More: rename, members, mute, archive" title="More: rename, members, mute, archive">${ic('more')}</button>
-        <button class="lk-ib lk-rtog${S.rightShut ? '' : ' on'}" id="rtog" aria-expanded="${!S.rightShut}" aria-label="${S.rightShut ? 'Show' : 'Hide'} the People and details panel" title="${S.rightShut ? 'Show' : 'Hide'} the People and details panel (Ctrl + ])">${ic('panelr')}</button></div>`;
+        ${c.archived ? '' : `<button class="lk-callb" id="callbtn" aria-haspopup="menu" aria-label="Call">${ic('phone')}<span>Call</span></button>`}
+        <button class="lk-ib${S.details ? ' on' : ''}" id="infobtn" aria-label="Details" aria-expanded="${!!S.details}" title="Details (Ctrl + ])">${ic('info')}</button>
+        <button class="lk-ib" id="morebtn" aria-haspopup="menu" aria-label="More: pin, mute, rename, members, archive" title="More">${ic('more')}</button></div>`;
     el.querySelector('.back').onclick = () => go('list');
-    const pb = el.querySelector('#ppl'); pb.onclick = () => (c.kind === 'private' ? peopleOf() : showRight('people'));
-    el.querySelector('#infobtn').onclick = () => showRight('info');
-    if (c.kind === 'dm') { el.querySelector('#vidbtn').onclick = () => Calls.start({ user: o, video: true }); el.querySelector('#calldm').onclick = () => Calls.start({ user: o, video: false }); }   // M9
+    el.querySelector('#infobtn').onclick = toggleRight;
+    const cb = el.querySelector('#callbtn'); if (cb) cb.onclick = (e) => callMenu(e.currentTarget);
     el.querySelector('#morebtn').onclick = (e) => chanMenu(e.currentTarget, c);
-    el.querySelector('#rtog').onclick = toggleRight;
     composerState();
     const t = document.getElementById('txt');
-    if (t) t.placeholder = c.kind === 'dm' ? `Type a message to ${chanLabel(c)}…` : c.kind === 'private' ? `Type a message in 🔒 ${c.name}…` : `Type a message in #${c.name}…`;
+    if (t) t.placeholder = c.kind === 'dm' ? `Message ${chanLabel(c)}` : c.kind === 'private' ? `Message 🔒 ${c.name}` : `Message #${c.name}`;
   }
-  function pickToCall(video) {
+  // The green Call button: a person (voice or video), or someone in this channel, or the keypad.
+  function callMenu(anchor) {
     if (!plus()) return upsell();
-    const who = (S.ch.kind === 'private' ? S.ch.people : S.people.map((p) => p.user_id)).filter((u) => u !== S.user.id);
-    modal(`<h3>${video ? 'Video call' : 'Call'} someone in ${esc(S.ch.kind === 'dm' ? chanLabel(S.ch) : '#' + S.ch.name)}</h3><p>Group calls are coming. For now, call one person.</p>
-      <div class="lk-mini">${who.map((u) => `<button class="mi" data-cw="${u}"><span class="lk-av">${av(u, nameOf(u))}${Presence.dot(u)}</span><span>${esc(nameOf(u))}<small>${esc(Presence.text(u))}${extOf(u) ? ` · Ext. ${extOf(u)}` : ''}</small></span>${ic(video ? 'video' : 'phone')}</button>`).join('')}</div>
-      <div class="mfoot"><button class="btn" id="cl">Cancel</button></div>`, (d, close) => {
-      d.querySelector('#cl').onclick = close; d.querySelectorAll('[data-cw]').forEach((b) => b.onclick = () => { close(); Calls.start({ user: b.dataset.cw, video }); });
-    });
+    const c = S.ch; if (!c) return;
+    const who = (u) => `<span class="lk-av">${av(u, nameOf(u))}${Presence.dot(u)}</span><span>${esc(nameOf(u))}<small>${Presence.quiet(u) ? `${esc(Presence.text(u))}: won't ring` : esc(Presence.text(u))}${extOf(u) ? ` · Ext. ${extOf(u)}` : ''}</small></span>`;
+    let body;
+    if (c.kind === 'dm') { const o = otherIn(c);
+      body = `<div class="mh">Call ${esc(nameOf(o))}</div><button class="mi" id="calldm">${ic('phone')}<span>Voice call<small>${Presence.quiet(o) ? `${esc(Presence.text(o))}: won't ring` : esc(Presence.text(o))}${extOf(o) ? ` · Ext. ${extOf(o)}` : ''}</small></span></button>
+        <button class="mi" id="vidbtn">${ic('video')}<span>Video call</span></button>`;
+    } else {
+      const ppl = (c.kind === 'private' ? c.people : S.people.map((p) => p.user_id)).filter((u) => u !== S.user.id);
+      body = `<div class="mh">Call someone in ${esc(c.kind === 'private' ? c.name : '#' + c.name)}</div><div class="lk-mini callpick">${ppl.map((u) => `<button class="mi" data-cw="${u}">${who(u)}</button>`).join('') || '<p class="mnote">No one else is in this chat.</p>'}</div>
+        <p class="mnote">Group calls are coming. For now, call one person.</p>`;
+    }
+    popMenu(anchor, `${body}<div class="msep"></div><button class="mi" id="callkeys">${ic('grid')}<span>Keypad<small>Dial an extension or a branch</small></span></button>`, (d, close) => {
+      const on = (id, fn) => { const b = d.querySelector(id); if (b) b.onclick = () => { close(); fn(); }; };
+      const o = otherIn(c);
+      on('#calldm', () => Calls.start({ user: o, video: false })); on('#vidbtn', () => Calls.start({ user: o, video: true })); on('#callkeys', dialPad);   // M9
+      d.querySelectorAll('[data-cw]').forEach((b) => b.onclick = () => { close(); Calls.start({ user: b.dataset.cw }); });
+    }, 'callmenu');
   }
-
   // ---- the channel menu (⋯ in the conversation header, and ⋯ / right-click on a chat in the list)
   // Everyone: Members, Mute, Pin, Mark as read, Leave. Whoever made it, or an owner or admin: Rename, Edit topic, Archive.
   // #general can't be archived, renamed or left. Archiving hides it for everyone, read-only; it can be brought back.
@@ -2581,7 +2719,7 @@
       ${!arch ? mi('mpin', 'pin', pinned ? 'Unpin this chat' : 'Pin this chat') : ''}
       ${S.unread[c.id] ? mi('mread', 'chat', 'Mark as read') : ''}
       ${!dm && !at ? mi('minfo', 'info', 'Channel info') : ''}
-      ${!dm && !gen && (c.kind === 'private' || newDb) ? mi('mleave', 'leave', 'Leave', c.kind === 'private' ? 'Someone can add you back' : 'You can join again from Teams / Channels', ' warn') : ''}
+      ${!dm && !gen && (c.kind === 'private' || newDb) ? mi('mleave', 'leave', 'Leave', c.kind === 'private' ? 'Someone can add you back' : 'You can join again from Browse channels', ' warn') : ''}
       ${man && !gen && !arch ? mi('marchive', 'archive', 'Archive', 'Hides it for everyone; you can bring it back', ' warn') : ''}
       ${man && arch ? mi('munarchive', 'archive', 'Unarchive', 'Bring it back for everyone') : ''}
       ${gen && !dm ? '<p class="mnote">#general is for everyone, so it can\'t be archived or left.</p>'
@@ -2591,8 +2729,8 @@
       // an owner/admin who isn't the channel's maker needs two-step sign-in first (the database checks this too)
       const mg = (fn) => () => (c.created_by !== S.user.id && needs2step() ? security() : fn());
       on('#mrename', mg(() => renameChan(c, 'name'))); on('#mtopic', mg(() => renameChan(c, 'topic')));
-      on('#mmembers', () => (c.kind === 'private' ? peopleOf(c) : (S.ch && S.ch.id === c.id ? showRight('info') : openChannel(c.id).then(() => showRight('info')))));
-      on('#mmute', () => muteChan(c)); on('#mpin', () => togglePin(c.id)); on('#minfo', () => showRight('info'));
+      on('#mmembers', () => (c.kind === 'private' ? peopleOf(c) : (S.ch && S.ch.id === c.id ? showRight() : openChannel(c.id).then(() => showRight()))));
+      on('#mmute', () => muteChan(c)); on('#mpin', () => togglePin(c.id)); on('#minfo', () => showRight());
       on('#mread', () => { api.markRead(c.id, S.user.id); S.unread[c.id] = 0; renderSide(); });
       on('#mleave', () => leaveChan(c)); on('#marchive', mg(() => archiveChan(c, true))); on('#munarchive', mg(() => archiveChan(c, false)));
     }, 'chmenu', at);
@@ -2644,12 +2782,12 @@
   }
   async function leaveChan(c, closeBox) {
     const priv = c.kind === 'private';
-    if (!(await ask(priv ? `Leave ${c.name}? You won't see it again unless someone adds you back.` : `Leave #${c.name}? It goes from your list. You can join again from Teams / Channels.`, { yes: 'Leave', title: 'Leave this channel?' }))) return;
+    if (!(await ask(priv ? `Leave ${c.name}? You won't see it again unless someone adds you back.` : `Leave #${c.name}? It goes from your list. You can join again from Browse channels, at the bottom of your chats.`, { yes: 'Leave', title: 'Leave this channel?' }))) return;
     try {
       if (S.cprefsOff) await api.leave(c.id, S.user.id); else await api.leaveChannel(c.id);
       await loadPrefs(); await loadChans(); if (closeBox) closeBox();
       if (S.ch && S.ch.id === c.id) await toGeneral(); else afterChanChange();
-      tell(priv ? `You left ${c.name}.` : `You left #${c.name}. Join again any time from Teams / Channels.`, 'ok');
+      tell(priv ? `You left ${c.name}.` : `You left #${c.name}. Join again any time from Browse channels.`, 'ok');
     } catch (err) { tell(plainError(err)); }
   }
   async function rejoinChan(id) {
@@ -2676,50 +2814,48 @@
     const u = bar.querySelector('#unarch'); if (u) u.onclick = () => (c.created_by !== S.user.id && needs2step() ? security() : archiveChan(c, false));
   }
 
-  // ---- right panel: People (n) / Info, and Quick dial
-  function showRight(tab) { S.rightTab = tab; if (S.rightShut) { S.rightShut = false; UI.set('rightShut', false); renderHead(); } renderRight(); if (narrow() || matchMedia('(max-width: 1180px)').matches) go('right'); else paneClasses(); }
+  // ---- details (ⓘ): a side sheet, only when asked for. A person: status, extension, Call. A channel: members, files, settings.
+  function showRight() {
+    if (!S.ch) return; S.details = true;
+    if (narrow()) { renderRight(); go('right'); } else { renderRight(); paneClasses(); renderHead(); }
+  }
+  function closeDetails() { S.details = false; if (S.pane === 'right') S.pane = 'main'; paneClasses(); if (narrow()) Hist.move('main'); renderHead(); }
   function renderRight() {
     const el = document.getElementById('lkright'); if (!el) return;
-    const tab = S.rightTab || 'people'; const q = (S.pq || '').toLowerCase();
-    const list = [...S.people].sort((a, b) => (b.user_id === S.user.id) - (a.user_id === S.user.id) || (Number(a.extension) || 9999) - (Number(b.extension) || 9999))
-      .filter((p) => !q || p.display_name.toLowerCase().includes(q) || String(p.extension || '').startsWith(q));
-    let body = '';
-    if (tab === 'people') {
-      body = `<div class="lk-psearch">${ic('search')}<input id="psearch" placeholder="Search people…" aria-label="Search people" value="${esc(S.pq || '')}"></div>
-        <div class="lk-people" id="plist">${list.map((p) => personRow(p)).join('') || '<p class="lk-none">No one matches.</p>'}</div>
-        <section class="lk-qd${S.qdShut ? ' shut' : ''}" id="qd"><button class="lk-qdh" id="qdh" aria-expanded="${!S.qdShut}">${ic('grid')}<span>Quick Dial</span>${ic('down')}</button><div class="lk-qdb">${dialHtml('qd')}</div></section>`;
-    } else {
-      const c = S.ch;
-      if (!c) body = '<p class="lk-none">Open a chat to see its details.</p>';
-      else {
-        const o = otherIn(c); const files = S.msgs.filter((m) => m.files && m.files.length && !m.deleted).flatMap((m) => m.files.map((f, i) => ({ ...f, m: m.id, i }))).slice(-8).reverse();
-        const ppl = c.kind === 'channel' ? S.people.map((p) => p.user_id) : c.people;
-        body = `<div class="lk-info">${c.kind === 'dm' ? `<div class="lk-icard"><span class="lk-av big">${av(o, nameOf(o), 'big')}${Presence.dot(o)}</span><b>${esc(nameOf(o))}</b><small>${esc(Presence.text(o))}${extOf(o) ? ` · Ext. ${extOf(o)}` : ''}</small>
-            ${plus() ? `<div class="row2"><button class="btn sm" data-callp="${o}">${ic('phone')} Call</button><button class="btn sm" data-vidp="${o}">${ic('video')} Video</button></div>` : ''}</div>`
+    const c = S.ch; let body = '';
+    if (!c) body = '<p class="lk-none">Open a chat to see its details.</p>';
+    else {
+      const o = otherIn(c); const q = (S.pq || '').toLowerCase();
+      const files = S.msgs.filter((m) => m.files && m.files.length && !m.deleted).flatMap((m) => m.files.map((f, i) => ({ ...f, m: m.id, i }))).slice(-8).reverse();
+      const ppl = (c.kind === 'channel' ? S.people.map((p) => p.user_id) : c.people).map((u) => personOf(u)).filter(Boolean)
+        .sort((a, b) => (b.user_id === S.user.id) - (a.user_id === S.user.id) || a.display_name.localeCompare(b.display_name))
+        .filter((p) => !q || p.display_name.toLowerCase().includes(q) || String(p.extension || '').startsWith(q));
+      const pinned = S.pinned.includes(c.id); const mu = muted(c.id);
+      body = `<div class="lk-info">${c.kind === 'dm' ? `<div class="lk-icard"><span class="lk-av big">${av(o, nameOf(o), 'big')}${Presence.dot(o)}</span><b>${esc(nameOf(o))}</b><small>${esc(Presence.text(o))}${extOf(o) ? ` · Ext. ${extOf(o)}` : ''}</small>
+            ${Presence.note(o) ? `<small class="lk-inote">“${esc(Presence.note(o))}”</small>` : ''}
+            ${plus() ? `<div class="row2"><button class="btn sm lk-greenb" data-callp="${o}">${ic('phone')} Call</button><button class="btn sm" data-vidp="${o}">${ic('video')} Video</button></div>` : ''}</div>`
           : `<div class="lk-icard"><span class="lk-chic big">${c.kind === 'private' ? ic('lock') : ic('hash')}</span><b>${esc(c.name)}</b><small>${esc(c.topic || (c.kind === 'private' ? 'Private chat' : 'Everyone in the team'))}</small></div>`}
-          <button class="btn w" id="ipin">${ic('pin')} ${S.pinned.includes(c.id) ? 'Unpin this chat' : 'Pin this chat'}</button>
-          ${c.kind !== 'dm' ? `<h4>${c.kind === 'private' ? 'Who\'s in it' : 'Members'} · ${ppl.length}</h4><div class="lk-people">${ppl.map((u) => personOf(u)).filter(Boolean).map((p) => personRow(p)).join('')}</div>${c.kind === 'private' ? '<button class="btn sm" id="ippl">Change who\'s in it</button>' : ''}` : ''}
+          <div class="lk-iacts"><button class="btn sm" id="ipin">${ic('pin')} ${pinned ? 'Unpin' : 'Pin'}</button>${S.cprefsOff ? '' : `<button class="btn sm" id="imute">${ic('mute')} ${mu ? 'Unmute' : 'Mute'}</button>`}
+            ${c.kind !== 'dm' ? `<button class="btn sm" id="iset" aria-haspopup="menu">${ic('cog')} Channel settings</button>` : ''}</div>
+          ${c.kind !== 'dm' ? `<h4>${c.kind === 'private' ? 'Who\'s in it' : 'Members'} · ${c.kind === 'channel' ? S.people.length : c.people.length}</h4>
+            <div class="lk-psearch">${ic('search')}<input id="psearch" placeholder="Search people" aria-label="Search people" value="${esc(S.pq || '')}"></div>
+            <div class="lk-people" id="plist">${ppl.map((p) => personRow(p)).join('') || '<p class="lk-none">No one matches.</p>'}</div>${c.kind === 'private' ? '<button class="btn sm" id="ippl">Change who\'s in it</button>' : ''}` : ''}
           <h4>Files</h4>${files.length ? `<div class="lk-mini">${files.map((f) => `<button class="mi" data-ifile="${f.m}:${f.i}"><span class="lk-chic sm">${ic('file')}</span><span>${esc(f.name)}<small>${esc(sizeText(Number(f.size) || 0))}</small></span>${ic('dl')}</button>`).join('')}</div>` : '<p class="muted small">Files shared here show up here.</p>'}</div>`;
-      }
     }
-    if (tab === 'info' && isAdmin() && S.storeInfo) body += filesUse(S.storeInfo);
-    el.innerHTML = `<div class="lk-rhead"><button class="back" aria-label="Back">${ic('back')}</button><div class="lk-tabs" role="tablist"><button role="tab" data-rt="people" aria-selected="${tab === 'people'}" class="${tab === 'people' ? 'on' : ''}">People (${S.people.length})</button><button role="tab" data-rt="info" aria-selected="${tab === 'info'}" class="${tab === 'info' ? 'on' : ''}">Info</button></div>
-      <button class="lk-ib lk-rclose" id="rclose" aria-label="Close the panel" title="Close">${ic('x')}</button></div><div class="lk-rbody">${body}</div>`;
-    el.querySelector('.back').onclick = () => go(S.ch ? 'main' : 'list');
-    el.querySelector('#rclose').onclick = () => { if (wideRight()) { S.rightShut = true; UI.set('rightShut', true); } if (S.pane === 'right') S.pane = 'main'; paneClasses(); renderHead(); };
-    el.querySelectorAll('[data-rt]').forEach((b) => b.onclick = () => { S.rightTab = b.dataset.rt; renderRight(); });
+    if (c && isAdmin() && S.storeInfo) body = body.replace(/<\/div>$/, filesUse(S.storeInfo) + '</div>');
+    el.innerHTML = `<div class="lk-rhead"><button class="back" aria-label="Back">${ic('back')}</button><h3>Details</h3>
+      <button class="lk-ib lk-rclose" id="rclose" aria-label="Close details" title="Close">${ic('x')}</button></div><div class="lk-rbody">${body}</div>`;
+    el.querySelector('.back').onclick = closeDetails; el.querySelector('#rclose').onclick = closeDetails;
     el.querySelectorAll('[data-callp]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); Calls.start({ user: b.dataset.callp }); });
     el.querySelectorAll('[data-vidp]').forEach((b) => b.onclick = () => Calls.start({ user: b.dataset.vidp, video: true }));
     el.querySelectorAll('.lk-person[data-person]').forEach((r) => { if (r.dataset.person !== S.user.id) { r.classList.add('clk'); r.onclick = () => openDm(r.dataset.person);
       const pn = r.querySelector('.lk-pn'); if (pn) { pn.tabIndex = 0; pn.setAttribute('role', 'button'); pn.setAttribute('aria-label', `Message ${nameOf(r.dataset.person)}`);
         pn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDm(r.dataset.person); } }; } } });   // M21
     const ps = el.querySelector('#psearch'); if (ps) ps.oninput = () => { S.pq = ps.value; const pos = ps.selectionStart; renderRight(); const n = document.getElementById('psearch'); n.focus(); n.setSelectionRange(pos, pos); };
-    const qh = el.querySelector('#qdh'); if (qh) qh.onclick = () => { S.qdShut = !S.qdShut; renderRight(); };
-    const ip = el.querySelector('#ipin'); if (ip) ip.onclick = () => togglePin(S.ch.id);
-    const ipp = el.querySelector('#ippl'); if (ipp) ipp.onclick = peopleOf;
+    const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = fn; };
+    on('#ipin', () => togglePin(S.ch.id)); on('#imute', () => muteChan(S.ch)); on('#ippl', () => peopleOf()); on('#iset', (e) => chanMenu(e.currentTarget, S.ch));
     el.querySelectorAll('[data-ifile]').forEach((b) => b.onclick = () => { const [mid, i] = b.dataset.ifile.split(':'); const m = S.msgs.find((x) => String(x.id) === mid); if (m) download(m.files[Number(i)]); });
-    wireDial(el, 'qd');
-    if (tab === 'info' && isAdmin() && S.storeInfo === undefined) { S.storeInfo = null; api.storage(S.team.id).then((x) => { S.storeInfo = x || false; if (S.rightTab === 'info') renderRight(); }).catch(() => { S.storeInfo = false; }); }
+    if (c && isAdmin() && S.storeInfo === undefined && S.details) { S.storeInfo = null; api.storage(S.team.id).then((x) => { S.storeInfo = x || false; if (S.details) renderRight(); }).catch(() => { S.storeInfo = false; }); }
   }
   // Admins: how much file storage the business uses, in the Info panel. No prices here.
   function filesUse(st) {
@@ -2885,6 +3021,8 @@
 
   function modal(html, wire) {
     const d = document.createElement('div'); d.className = 'modal'; d.innerHTML = `<div class="mcard" role="dialog" aria-modal="true">${html}</div>`;
+    // opened from Management: closes when Management locks again
+    if (S.nav === 'manage' && !S.home && !S.view && Mgmt.open()) d.dataset.mgmt = '1';
     d.onclick = (e) => { if (e.target === d) d.remove(); };
     document.body.appendChild(d); wire(d, () => d.remove());
   }
@@ -3152,7 +3290,7 @@
         ? `<p id="losupport">Riyeser support can see and change your phone set-up until <b>${esc(timeShort(support.until))}</b>. Everything they do is in your 🕘 History.</p><button class="btn" id="losupend">End it now</button>`
         : `<p id="losupport">Stuck? Give Riyeser support access to your phone set-up for 1 hour. They can do what you can on this page, including showing a phone's password to set it up with you. Everything they do is in your 🕘 History, and you can end it early.</p><button class="btn" id="losupon">Let Riyeser help</button>`}</section>`;
     }
-    $app.innerHTML = `<header class="htop"><button class="btn sm" id="phback">← ${S.phonesBack === 'home' ? 'Riyeser home' : 'Back to chat'}</button><b class="hbrand-t">⚙ Settings › ☎ Desk phones</b><span class="hme">${esc(t.name)}</span></header>
+    $app.innerHTML = `<header class="htop"><button class="btn sm" id="phback">← ${backLabel(S.phonesBack)}</button><b class="hbrand-t">Management › ☎ Desk phones</b><span class="hme">${esc(t.name)}</span></header>
       <main class="hmain" id="phonesPage"><h1>${PH.TITLE}</h1><p class="muted lo-sub">Riyeser Link Office: the office phone system for ${esc(t.name)}.</p>
         ${S.lo.error ? `<div class="err">${esc(S.lo.error)}</div>` : ''}${needs2step() && admin ? '<button class="hnag" id="phmfa">🔐 Turn on <b>two-step sign-in</b> to change the phones. It takes 2 minutes.</button>' : ''}
         ${body}
@@ -3160,7 +3298,7 @@
         <p class="muted small hfoot"><a href="/help/link.html#desk-phones">Help: Setting up desk phones</a> · <a href="/help/link.html#own-desk-phone">Set up your own desk phone</a></p></main>`;
     window.scrollTo(0, keepY);
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
-    on('#phback', () => { clearInterval(S.loTimer); S.view = null; if (S.phonesBack === 'home') { S.home = true; renderHome(); } else { S.home = false; render(); } });
+    on('#phback', () => { clearInterval(S.loTimer); S.view = null; goBack(S.phonesBack); });
     on('#phmfa', security); on('#phmine', () => myPhonePage(S.phonesBack));
     on('#locopy', async () => { try { await navigator.clipboard.writeText($app.querySelector('#loaddr').textContent); $app.querySelector('#locopy').textContent = 'Copied'; } catch { /* select it */ } });
     on('#loaddphone', () => addDeskPhone());
@@ -3483,6 +3621,12 @@
   }
 
   // ------------------------------------------------------------------ ☎ My phone (everyone): my extension, my desk phone, how to set it up
+  // Back from the Desk phones and My phone pages: to Riyeser home, or the Link view they came from.
+  const backLabel = (b) => ({ home: 'Riyeser home', manage: 'Back to Management', settings: 'Back to Settings', devices: 'Back to My phone and devices' })[b] || 'Back to chat';
+  function goBack(b) {
+    if (b === 'home') { S.home = true; renderHome(); return; }
+    S.home = false; S.nav = ['manage', 'settings', 'devices'].includes(b) ? b : 'chat'; S.pane = S.nav === 'chat' && S.ch && !narrow() ? 'main' : 'list'; render();
+  }
   async function myPhonePage(back) {
     S.myBack = back || S.myBack || (S.home ? 'home' : 'chat'); S.view = 'myphone';
     S.my = { data: undefined, pw: null, shown: false };
@@ -3504,7 +3648,7 @@
     const addr = (o && o.address) || '';
     tabIcon(false); document.title = 'My phone · Riyeser'; $app.className = 'acct home';
     const ready = calls && o;
-    $app.innerHTML = `<header class="htop"><button class="btn sm" id="myback">← ${S.myBack === 'home' ? 'Riyeser home' : 'Back to chat'}</button><b class="hbrand-t">☎ My phone</b><span class="hme">${esc(t.name)}</span></header>
+    $app.innerHTML = `<header class="htop"><button class="btn sm" id="myback">← ${backLabel(S.myBack)}</button><b class="hbrand-t">☎ My phone</b><span class="hme">${esc(t.name)}</span></header>
       <main class="hmain" id="myPhonePage"><h1>My phone</h1>${S.my.error ? `<div class="err">${esc(S.my.error)}</div>` : ''}
         <section class="lo-card my-ext"><small>Your extension</small>${ext ? `<p class="my-big" id="myext">Others call you by dialling <b>${esc(ext)}</b></p>`
           : `<p id="myext">You don't have an extension yet. Ask ${esc(owner)} to give you one in People &amp; access.</p>`}</section>
@@ -3536,8 +3680,8 @@
         <h3 class="hsec">Something wrong?</h3><div class="hhelp"><button class="btn" id="myreport">🛠 Report a phone issue</button><a class="btn" href="/help/link.html#own-desk-phone">📖 Help: Set up your own desk phone</a></div>
       </main>`;
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
-    on('#myback', () => { clearInterval(S.myTimer); S.view = null; S.my.pw = null; if (S.myBack === 'home') { S.home = true; renderHome(); } else { S.home = false; render(); } });
-    on('#mytophones', () => { clearInterval(S.myTimer); phonesPage(S.myBack); });
+    on('#myback', () => { clearInterval(S.myTimer); S.view = null; S.my.pw = null; goBack(S.myBack); });
+    on('#mytophones', mg(() => { clearInterval(S.myTimer); phonesPage(S.myBack === 'home' ? 'home' : 'manage'); }));
     on('#mycall', dialPad);
     on('#myreport', () => reportPhone(phones[0], ext, o ? `Riyeser Link Office last reported ${ago(o.last_seen)}` : ''));
     $app.querySelectorAll('[data-cp]').forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.cp); b.textContent = 'Copied'; } catch { /* select it */ } });
@@ -3571,22 +3715,8 @@
       catch (err) { phMsg(esc(plainError(err)), 'bad'); dn.checked = !want; } finally { S.my.busy = false; }
     };
   }
-  // ⚙ Settings in Riyeser Link: everything about you and the business in one place.
-  function settingsMenu() {
-    const admin = isAdmin();
-    modal(`<h3>⚙ Settings</h3><div class="lo-acts lo-set">
-      <button class="btn" data-s="myphone"><b>☎ My phone</b><small>Your extension, your desk phone and how to set it up</small></button>
-      ${admin ? '<button class="btn" data-s="phones"><b>☎ Desk phones</b><small>Every desk phone in the business: add, replace, troubleshoot</small></button>' : ''}
-      <button class="btn" data-s="look"><b>🎨 Appearance</b><small>Dark, light or match your computer, and your accent colour</small></button>
-      <button class="btn" data-s="sec"><b>🔐 Security</b><small>Two-step sign-in</small></button>
-      <button class="btn" data-s="pw"><b>🔑 Change password</b><small>Your current password, then the new one</small></button>
-      <button class="btn" data-s="co"><b>🏢 Company</b><small>Business details and Company ID</small></button></div>
-      <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => {
-      d.querySelector('#cl').onclick = close;
-      d.querySelectorAll('[data-s]').forEach((b) => b.onclick = () => { close(); const s = b.dataset.s; const back = S.home ? 'home' : 'chat';
-        if (s === 'myphone') myPhonePage(back); if (s === 'phones') phonesPage(back); if (s === 'sec') security(); if (s === 'pw') changePassword(); if (s === 'co') companyInfo(false); if (s === 'look') appearance(); });
-    });
-  }
+  // ⚙ Settings: the Settings view (about you; the business's own settings are in Management).
+  function settingsMenu() { setNav('settings'); }
 
   const Calls = (() => {
     const ICE = CFG.iceServers || [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
@@ -3607,12 +3737,15 @@
     }
     function stopTone() { clearInterval(toneTimer); toneTimer = null; }
 
-    // ---- the floating phone: a call bar bottom-right on every view (chat while you call), and the incoming-call card
+    // ---- the call pill: a slim bar across the top while you're on a call (the page moves down for it, so it never
+    // covers the chat), a card for an incoming call, and a bigger window with video.
     function box() { let b = document.getElementById('callbox'); if (!b) { b = document.createElement('div'); b.id = 'callbox'; document.body.appendChild(b); } return b; }
     const fmtTime = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
     const extLine = () => { const e = call.peer ? extOf(call.peer) : call.branch ? (S.branches.find((b) => b.id === call.branch) || {}).extension : null; return e ? `Ext. ${e}` : ''; };
     function draw() {
       const b = box();
+      const pill = !!call && call.status !== 'incoming' && !(call.cam || call.remoteVideo);
+      document.documentElement.classList.toggle('oncall', pill);
       if (!call) { b.innerHTML = ''; b.className = ''; return; }
       const who = call.peer ? nameOf(call.peer) : call.label; const ext = extLine();
       const sub = call.status === 'incoming' ? `${ext ? ext + ' · ' : ''}Incoming call${call.via ? ` to ${esc(call.via)}` : ''}`
@@ -3620,20 +3753,22 @@
         : call.status === 'live' ? `${ext ? ext + ' · ' : ''}<span id="ctime">${fmtTime(Date.now() - call.startedAt)}</span>${call.held ? ' · <b class="chold">On hold</b>' : ''}${call.remoteHeld ? ' · <b class="chold">They put you on hold</b>' : ''}${call.sim ? ' · demo call, no sound' : ''}`
         : esc(call.note || 'Call ended');
       const live = call.status === 'live';
-      b.className = 'on' + (call.status === 'incoming' ? ' ringing' : ' bar') + (call.cam || call.remoteVideo ? ' video' : '') + (call.cam && call.remoteVideo ? ' both' : '');
+      b.className = 'on' + (call.status === 'incoming' ? ' ringing' : pill ? ' pill' : ' bar') + (call.status === 'ended' ? ' ended' : '') + (call.cam || call.remoteVideo ? ' video' : '') + (call.cam && call.remoteVideo ? ' both' : '');
       const btn = (id, icon, label, extra = '') => `<button class="cb${extra}" id="${id}" title="${label}" aria-label="${label}">${ic(icon)}<span>${label}</span></button>`;
-      b.innerHTML = `<div class="cwin" role="dialog" aria-label="${call.status === 'incoming' ? 'Incoming call' : 'Call'}">
-        <video id="rv" autoplay playsinline ${call.remoteVideo ? '' : 'hidden'}></video><video id="lv" autoplay playsinline muted ${call.cam ? '' : 'hidden'}></video>
-        <div class="cwho">${call.peer ? `<span class="lk-av">${av(call.peer, who, 'big')}</span>` : `<span class="av big lk-brav">${ic('phone')}</span>`}<div><b>${esc(who || '')}</b><small>${sub}</small></div></div>
-        <div class="cbtns">${call.status === 'incoming'
-          ? `<button class="cb no" id="c-dec">${ic('hang')}<span>Decline</span></button><button class="cb yes" id="c-ans">${ic('phone')}<span>Answer</span></button>`
-          : call.status === 'ended' ? '' : `${btn('c-mute', call.muted ? 'micoff' : 'mic', call.muted ? 'Unmute' : 'Mute', call.muted ? ' off' : '')}
+      const ctl = call.status === 'ended' ? '' : `${btn('c-mute', call.muted ? 'micoff' : 'mic', call.muted ? 'Unmute' : 'Mute', call.muted ? ' off' : '')}
             ${btn('c-hold', 'pause', call.held ? 'Resume' : 'Hold', call.held ? ' off' : '').replace('<button', live ? '<button' : '<button disabled')}
             ${btn('c-audio', 'speaker', 'Audio')}
             ${live && !call.sim ? btn('c-cam', 'cam', call.cam ? 'Camera off' : 'Camera', call.cam ? ' off' : '') : ''}
-            <button class="cb soon" id="c-xfer" disabled title="Transfer: coming soon">${ic('xfer')}<span>Transfer</span><i>soon</i></button>
-            <button class="cb soon" id="c-conf" disabled title="Conference: coming soon">${ic('conf')}<span>Conference</span><i>soon</i></button>
-            <button class="cb no" id="c-end" title="${live ? 'End call' : 'Cancel'}">${ic('hang')}<span>${live ? 'End call' : 'Cancel'}</span></button>`}</div>
+            <button class="cb no" id="c-end" title="${live ? 'End call' : 'Cancel'}" aria-label="${live ? 'End call' : 'Cancel'}">${ic('hang')}<span>${live ? 'End' : 'Cancel'}</span></button>`;
+      const pic = (big) => (call.peer ? `<span class="lk-av">${av(call.peer, who, big ? 'big' : '')}${Presence.dot(call.peer)}</span>` : `<span class="av${big ? ' big' : ''} lk-brav">${ic('phone')}</span>`);
+      b.innerHTML = pill
+        ? `<div class="cpill${live ? ' live' : ''}" role="region" aria-label="Call"><span class="cwho">${pic(false)}<span><b>${esc(who || '')}</b><small>${sub}</small></span></span>
+            <span class="cbtns">${ctl}</span><video id="rv" autoplay playsinline hidden></video><video id="lv" autoplay playsinline muted hidden></video><audio id="ra" autoplay></audio></div>`
+        : `<div class="cwin" role="dialog" aria-label="${call.status === 'incoming' ? 'Incoming call' : 'Call'}">
+        <video id="rv" autoplay playsinline ${call.remoteVideo ? '' : 'hidden'}></video><video id="lv" autoplay playsinline muted ${call.cam ? '' : 'hidden'}></video>
+        <div class="cwho">${pic(true)}<div><b>${esc(who || '')}</b><small>${sub}</small></div></div>
+        <div class="cbtns">${call.status === 'incoming'
+          ? `<button class="cb no" id="c-dec">${ic('hang')}<span>Decline</span></button><button class="cb yes" id="c-ans">${ic('phone')}<span>Answer</span></button>` : ctl}</div>
         <audio id="ra" autoplay></audio></div>`;
       const on = (id, fn) => { const e = b.querySelector(id); if (e) e.onclick = fn; };
       on('#c-ans', answer); on('#c-dec', decline); on('#c-end', () => hangup()); on('#c-mute', mute); on('#c-cam', camera); on('#c-hold', hold); on('#c-audio', (e) => audioMenu(e.currentTarget));
@@ -3642,6 +3777,11 @@
       ra.muted = !!call.held; if (call.sinkId && ra.setSinkId) ra.setSinkId(call.sinkId).catch(() => {});
       if (call.camTrack) b.querySelector('#lv').srcObject = new MediaStream([call.camTrack]);
       if (typeof Presence !== 'undefined' && S.team) Presence.changed();
+    }
+    // Someone on Busy / Do not disturb, At lunch or Unavailable: their phone doesn't ring, and you're told so.
+    function notNow(label, why) {
+      const c = { id: uuid(), status: 'ended', note: `${label} is ${why}, so the call didn't ring. Send a message instead.` }; call = c; draw();
+      setTimeout(() => { if (call === c) { call = null; draw(); } }, 4500);
     }
     setInterval(() => { const t = document.getElementById('ctime'); if (t && call && call.startedAt) t.textContent = fmtTime(Date.now() - call.startedAt); }, 1000);
     // Mute and Hold: on hold, your microphone and camera stop and you don't hear them; they see "On hold".
@@ -3686,14 +3826,26 @@
       let targets; let label;
       if (t.branch) { const b = S.branches.find((x) => x.id === t.branch); if (!b) return;
         targets = b.people.filter((u) => u !== S.user.id); label = b.name;
-        if (!targets.length) return tell(`Nobody else is in ${b.name} yet. Add people under ⚙ Branches and extensions.`); }
-      else { targets = [t.user]; label = nameOf(t.user); }
+        if (!targets.length) return tell(`Nobody else is in ${b.name} yet. The owner or an admin adds people in Management, Branches and extensions.`);
+        targets = targets.filter((u) => !Presence.quiet(u));
+        if (!targets.length) return notNow(`Everyone in ${b.name}`, 'busy or away from their desk'); }
+      else { if (Presence.quiet(t.user)) { const p = S.presence[t.user] || {};
+          return notNow(nameOf(t.user), { lunch: 'at lunch', unavailable: 'unavailable' }[normManual(p.manual || p.status)] || 'busy (Do not disturb)'); }
+        targets = [t.user]; label = nameOf(t.user); }
       call = { id: uuid(), dir: 'out', status: 'calling', targets: new Set(targets), label, branch: t.branch || null, peer: t.user || null, pendingIce: [], wantVideo: !!(t.video && t.user), at: new Date().toISOString() };
       draw();
       try { call.local = await mic(); } catch (e) { call = null; draw(); return tell(e.message); }
       if (!call) return;
       tone('out');
-      for (const to of targets) send(to, 'ring', { from_name: myName(), via: t.branch ? label : null });
+      const me = call;
+      for (const to of targets) {
+        api.signal(S.team.id, call.id, to, 'ring', { from_name: myName(), via: t.branch ? label : null }).catch((e) => {
+          // the database refused: they've just chosen Busy / Do not disturb, At lunch or Unavailable
+          if (call !== me || call.status !== 'calling') return;
+          if (!/row-level|policy|403/i.test(String(e && e.message))) { console.warn('call signal', e); return; }
+          call.targets.delete(to); if (!call.targets.size) { clearTimeout(call.timeout); finish(`${label} can't take calls right now (busy or away)`, true); }
+        });
+      }
       // M9: nobody it rings is online: 8 seconds (another tab may still wake up), then "… isn't online"; else 30 seconds
       const allOff = !Presence.off && targets.every((u) => Presence.info(u).status === 'offline');
       call.timeout = setTimeout(() => { if (call && call.status === 'calling') { for (const to of call.targets) send(to, 'cancel'); finish(allOff ? `${label} isn't online` : 'No answer', true); } }, allOff ? 8000 : 30000);
@@ -3722,7 +3874,7 @@
       if (k === 'ring') {
         if (call && call.status !== 'ended') { api.signal(S.team.id, sig.call_id, from, 'busy').catch(() => {}); return; }
         if (!S.features.calls) return;
-        if (Presence.status() === 'dnd') {   // Do not disturb: they hear "can't take the call", you see it as missed
+        if (Presence.quiet(S.user.id)) {   // Busy / Do not disturb, At lunch, Unavailable: it doesn't ring; they're told, you see it as missed
           api.signal(S.team.id, sig.call_id, from, 'decline', { dnd: true }).catch(() => {});
           logCall({ id: sig.call_id, dir: 'in', peer: from, at: new Date().toISOString(), dur: 0, result: 'missed', via: pl.via || null }); return;
         }
@@ -3753,7 +3905,7 @@
         }
         if (k === 'accept' && from !== call.peer) { api.signal(S.team.id, call.id, from, 'taken').catch(() => {}); return; }
         if ((k === 'decline' || k === 'busy') && call.status === 'calling') {
-          call.targets.delete(from); if (!call.targets.size) { clearTimeout(call.timeout); finish(k === 'busy' ? `${call.label} is on another call` : pl.dnd || pl.mic ? `${call.label} can't take the call right now` : `${call.label} declined the call`, true); }
+          call.targets.delete(from); if (!call.targets.size) { clearTimeout(call.timeout); finish(k === 'busy' ? `${call.label} is on another call` : pl.dnd || pl.mic ? `${call.label} is busy and can't take calls right now` : `${call.label} declined the call`, true); }
           return;
         }
         if (k === 'answer' && call.pc) { await call.pc.setRemoteDescription(pl); await flushIce(); return; }
@@ -3870,7 +4022,7 @@
       await loadTeam(S.teams.some((t) => t.id === last) ? last : S.teams[0].id);
       if (goneNote) phMsg(goneNote.replace(/<\/?div[^>]*>/g, ''), 'warn');
       // S7: the link in "… asked to join" emails opens Join requests (two-step sign-in first)
-      if (params.has('requests') && isAdmin()) { dropParams('requests'); if (needs2step()) security(); else joinRequests(); }
+      if (params.has('requests') && isAdmin()) { dropParams('requests'); if (!S.home) setNav('manage'); mg(joinRequests)(); }
     } catch (e) { $app.className = 'acct'; $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="/assets/logo-r.png" alt="">Riyeser</div><div class="err">${esc(plainError(e))}</div><button class="btn p w" onclick="location.reload()">Try again</button></div></div>`; }
   }
   // Once per visit (at most hourly): tells Riyeser the account is in use, so it isn't closed for being inactive.
@@ -3882,7 +4034,9 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && S.ch && S.user) { api.markRead(S.ch.id, S.user.id); S.unread[S.ch.id] = 0; renderSide(); } });
   setInterval(async () => { if (S.team && isAdmin() && !document.hidden) { const n = await loadRequests().catch(() => S.requests); if (n.length !== S.requests.length) { S.requests = n; renderSide(); if (S.home && !S.view && $app.querySelector('.hmain')) drawHome(false); } } }, 60000);
   window.RiyeserTeam = { state: S, demo: DEMO, calls: Calls, companyInfo, peopleAccess, joinRequests, security, showHistory, getHelp, reportIssue, requestRefund, phonesPage, myPhonePage, settingsMenu,
-    presence: Presence, theme: Theme, appearance, newChat, changePassword };
+    presence: Presence, theme: Theme, appearance, newChat, changePassword, setNav,
+    // tests: the Management lock (tick moves its clock on, e.g. 16 minutes, to check it locks again)
+    management: { get open() { return Mgmt.open(); }, lock: () => Mgmt.lock(), tick: (at) => Mgmt.tick(at), idle: Mgmt.idle } };
   api.onAuth((ev) => { if (ev === 'PASSWORD_RECOVERY') AUTH.recovery = true; });
   start();
 })();
