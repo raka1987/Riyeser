@@ -2,7 +2,7 @@ name: Publish Riyeser release
 
 # One button for a new public release of the Riyeser Windows programs:
 #   Actions → "Publish Riyeser release" → Run workflow
-# Builds Riyeser Central, Riyeser Desk Assistant, Riyeser PDF, As Built, Riyeser Link (formerly Riyeser Team) and Riyeser Link Office (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
+# Builds Riyeser Central, Riyeser Documents (formerly Riyeser Desk Assistant), Riyeser PDF, As Built, Riyeser Link (formerly Riyeser Team) and Riyeser Link Office (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
 # and Riyeser POS (main) and Riyeser Payroll (branch module/payroll) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
 # every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
 on:
@@ -13,7 +13,7 @@ on:
         required: false
         default: ""
       desktop_ref:
-        description: "Branch or commit for Central, Desk Assistant, PDF, As Built, Link and Link Office"
+        description: "Branch or commit for Central, Documents, PDF, As Built, Link and Link Office"
         required: false
         default: module/desk-assistant
 
@@ -51,7 +51,7 @@ jobs:
           fi
 
   desktop:
-    name: Central, Desk Assistant, PDF, As Built, Link, Link Office
+    name: Central, Documents, PDF, As Built, Link, Link Office
     runs-on: windows-latest
     timeout-minutes: 45
     needs: licence-key
@@ -78,7 +78,9 @@ jobs:
         run: |
           $apps = @(
             @{ id = "central"; src = "dist-central\RiyeserCentral-Setup-*.exe";        out = "RiyeserCentral-Setup.exe";        name = "Riy*ser Central*" },
-            @{ id = "desk"; src = "dist\RiyeserDeskAssistant-Setup-*.exe";        out = "RiyeserDeskAssistant-Setup.exe"; name = "Riyeser Desk Assistant*" },
+            # Riyeser Documents (formerly Riyeser Desk Assistant): its build leaves a RiyeserDeskAssistant-Setup copy, and Windows
+            # lists it as "Riyeser Documents" (an older build as "Riyeser Desk Assistant"): "Riyeser D*" matches either.
+            @{ id = "desk"; src = "dist\RiyeserDeskAssistant-Setup-*.exe";        out = "RiyeserDeskAssistant-Setup.exe"; name = "Riyeser D*" },
             @{ id = "pdf"; src = "dist-pdf\RiyeserPDF-Setup-*.exe";              out = "RiyeserPDF-Setup.exe";            name = "Riyeser PDF*" },
             @{ id = "services"; src = "dist-services\RiyeserServices-Setup-*.exe";    out = "RiyeserServices-Setup.exe";       name = "As Built*" },
             # Riyeser Link (formerly Riyeser Team): the same app and release file, so installed copies update in place.
@@ -102,6 +104,9 @@ jobs:
           }
           # M3: Riyeser Link's installer under its new name too (the same file; RiyeserTeam-Setup.exe stays for old links and Centrals).
           Copy-Item (Join-Path release "RiyeserTeam-Setup.exe") (Join-Path release "RiyeserLink-Setup.exe")
+          # Riyeser Documents' installer under its new name too (the same file; RiyeserDeskAssistant-Setup.exe stays for
+          # old download links and older Centrals). versions.json keeps the id "desk", which every Central looks for.
+          Copy-Item (Join-Path release "RiyeserDeskAssistant-Setup.exe") (Join-Path release "RiyeserDocuments-Setup.exe")
           $versions | Set-Content release\versions-desktop.txt
           # versions.json: each program's version by its id. Riyeser Central (1.7 and later) reads it first, so older
           # Centrals still find "team" (now listed as Riyeser Link) and offer the update.
@@ -260,7 +265,7 @@ jobs:
             echo "### In this release"
             cat out/versions-*.txt | sed 's/^/- /'
             echo
-            echo "**Installing:** run the file. If Windows shows \"Windows protected your PC\", click **More info → Run anyway**. Each program installs for your Windows user (no admin rights needed) and updates over the old version, keeping your data. Riyeser Link (formerly Riyeser Team) updates over Riyeser Team, keeping your sign-in and chats. Riyeser Link Office installs for the whole PC, so Windows asks for permission once (it adds a firewall rule so the office's desk phones can reach it)."
+            echo "**Installing:** run the file. If Windows shows \"Windows protected your PC\", click **More info → Run anyway**. Each program installs for your Windows user (no admin rights needed) and updates over the old version, keeping your data. Riyeser Link (formerly Riyeser Team) updates over Riyeser Team, keeping your sign-in and chats. Riyeser Documents (formerly Riyeser Desk Assistant) updates over Desk Assistant. Riyeser Link Office installs for the whole PC, so Windows asks for permission once (it adds a firewall rule so the office's desk phones can reach it)."
             echo
             echo "Every installer was built, installed and checked on Windows before publishing."
           } > notes.md
@@ -277,6 +282,7 @@ jobs:
           make_latest: "true"
           files: |
             out/RiyeserCentral-Setup.exe
+            out/RiyeserDocuments-Setup.exe
             out/RiyeserDeskAssistant-Setup.exe
             out/RiyeserPDF-Setup.exe
             out/RiyeserServices-Setup.exe
