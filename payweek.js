@@ -62,7 +62,7 @@ module.exports = function payweek(app, h) {
     // started: "Start next pay run" opened it, or it's over and has hours in it already (entered before 2.2.5, say)
     const entries = entriesIn(n.start, n.end);
     res.json({ ...n, label: range(n.start, n.end), periods: [...paid, ...open], started: !!o || (entries > 0 && n.end < today), open_period: o, entries,
-      copied_unapproved: copiedUnapproved(n.start, n.end), unapproved: unapproved(n.start, n.end), new_payrun_hours: ['ask', 'copy', 'empty'].includes(s.new_payrun_hours) ? s.new_payrun_hours : 'ask' });
+      copied_unapproved: copiedUnapproved(n.start, n.end), unapproved: unapproved(n.start, n.end), new_payrun_hours: ['ask', 'copy', 'empty', 'roster'].includes(s.new_payrun_hours) ? s.new_payrun_hours : 'ask' });
   }));
 
   // ---- Copy last week's hours
@@ -141,10 +141,10 @@ module.exports = function payweek(app, h) {
     const word = n.frequency === 'weekly' ? 'last week' : 'the last pay period';
     const was = openPeriod(n);
     if (was) return res.json({ ...n, label, mode: was.mode, already_started: true, copied_people: 0, copied_shifts: 0,
-      message: `${label} is already started${was.mode === 'copy' ? ` (${was.copied_people || 0} people's hours were copied from ${word})` : ''}. Nothing was copied again.` });
-    const setting = ['ask', 'copy', 'empty'].includes(s.new_payrun_hours) ? s.new_payrun_hours : 'ask';
-    const mode = ['copy', 'empty'].includes(b.mode) ? b.mode : setting === 'ask' ? bad("Choose: copy last week's hours, or start empty.") : setting;
-    if (mode === 'copy' && levelOf(req.user, 'timesheets') < 2) throw new HttpError(403, "Copying hours needs Add & edit access to Timesheets. Start empty instead, or ask an administrator.");
+      message: `${label} is already started${was.mode === 'copy' ? ` (${was.copied_people || 0} people's hours were copied from ${word})` : was.mode === 'roster' ? ` (${was.copied_people || 0} people's hours were filled from the roster)` : ''}. Nothing was copied again.` });
+    const setting = ['ask', 'copy', 'empty', 'roster'].includes(s.new_payrun_hours) ? s.new_payrun_hours : 'ask';
+    const mode = ['copy', 'empty', 'roster'].includes(b.mode) ? b.mode : setting === 'ask' ? bad("Choose: copy last week's hours, fill them from the roster, or start empty.") : setting;
+    if (mode !== 'empty' && levelOf(req.user, 'timesheets') < 2) throw new HttpError(403, `${mode === 'roster' ? 'Filling hours from the roster' : 'Copying hours'} needs Add & edit access to Timesheets. Start empty instead, or ask an administrator.`);
     let copied = { saved: 0, results: [] }, salaried = [];
     if (mode === 'copy') {
       const p = plan(n.start, n.end); salaried = p.salaried;
@@ -152,12 +152,17 @@ module.exports = function payweek(app, h) {
         .flatMap(x => x.rows.filter(r => !r.skip).map(r => ({ user_id: x.user_id, clock_in: r.clock_in, clock_out: r.clock_out })));
       if (list.length) copied = insertCopies(req, p, list);
     }
-    const people = new Set(copied.results.filter(r => r.ok).map(r => r.user_id)).size;
+    // OWNER-ROSTER (roster.js): hourly staff with no clock times in the period get the hours of their published shifts
+    let filled = null;
+    if (mode === 'roster') { filled = app.locals.rosterFill(req, n.start, n.end); copied = { saved: filled.saved, results: [] }; }
+    const people = filled ? filled.people : new Set(copied.results.filter(r => r.ok).map(r => r.user_id)).size;
     setSetting('payroll_open_period', JSON.stringify({ start: n.start, end: n.end, mode, copied_people: people, copied_shifts: copied.saved, at: new Date().toISOString(), by: req.user.id }));
-    audit(req, 'Started a pay run', `${label}: ${mode === 'copy' ? `copied ${copied.saved} shift${copied.saved === 1 ? '' : 's'} for ${people} ${people === 1 ? 'person' : 'people'} from ${word}` : 'started empty'}`);
+    audit(req, 'Started a pay run', `${label}: ${mode === 'copy' ? `copied ${copied.saved} shift${copied.saved === 1 ? '' : 's'} for ${people} ${people === 1 ? 'person' : 'people'} from ${word}` : mode === 'roster' ? `filled ${copied.saved} shift${copied.saved === 1 ? '' : 's'} for ${people} ${people === 1 ? 'person' : 'people'} from the roster` : 'started empty'}`);
     const message = mode === 'empty' ? `${label} started with no hours. Enter each person's hours, or copy ${word}'s hours if they're the same.`
+      : mode === 'roster' ? (people ? `Filled ${people} ${people === 1 ? "person's" : "people's"} hours from the roster (people with no clock times). Check and change anything that's different.`
+        : `Nothing to fill from the roster (${filled.published_weeks ? 'everyone on it clocked in, or has hours already' : 'no published roster for these dates'}). Enter the hours below.`)
       : people ? `Copied ${people} ${people === 1 ? "person's" : "people's"} hours from ${word}. Check and change anything that's different.`
         : `Nothing to copy from ${word} (no hours then, or everyone already has hours). Enter the hours below.`;
-    res.json({ ...n, label, mode, already_started: false, copied_people: people, copied_shifts: copied.saved, not_copied: copied.results.filter(r => !r.ok).map(r => r.error), salaried, message });
+    res.json({ ...n, label, mode, already_started: false, copied_people: people, copied_shifts: copied.saved, not_copied: filled ? filled.failed : copied.results.filter(r => !r.ok).map(r => r.error), salaried, message, ...(filled && { clocked: filled.clocked }) });
   }));
 };

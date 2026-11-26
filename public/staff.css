@@ -846,3 +846,113 @@ table.t.fit th:last-child, table.t.fit td:last-child { padding-right: 16px; }
 .qp-day.we .qp-dl { color: var(--muted); font-weight: 600; }
 .qp-help { margin: 12px 0 0; }
 .ql-why svg { flex: none; }
+
+/* OWNER-ROSTER (2.3.0): the Roster page (roster.js) */
+.pr-choices:has(> :nth-child(3)) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ro-top { display: grid; gap: 10px; margin-bottom: 12px; }
+.ro-top .ts-period { margin: 0; }
+.ro-thisweek { border: 0; cursor: pointer; font: inherit; font-size: .75rem; }
+.ro-pub { border-radius: 12px; padding: 10px 14px; font-size: .9rem; }
+.ro-pub.draft { background: #fff8e6; border: 1px solid #f0dfb1; color: #6d5413; }
+.ro-pub.pending { background: #fdf0e6; border: 1px solid #f3c9a6; color: #7a3d0f; }
+.ro-pub.ok { background: #e9f4ee; border: 1px solid #b9dcc8; color: #1e5a3c; }
+.ro-tools { margin-bottom: 14px; }
+.ro-tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.ro-tiles .tile .v { font-size: clamp(1.3rem, 2.4vw, 1.8rem); }
+.ro-wv { color: #b3261e; }
+.ro-flash { font-size: .92rem; }
+.ro-gridpanel { padding: 0; overflow: hidden; }
+.ro-gridwrap { max-height: none; }
+table.ro-grid { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: .85rem; min-width: 860px; }
+.ro-grid th, .ro-grid td { border-bottom: 1px solid #e8ecf1; border-right: 1px solid #eef1f5; padding: 6px; vertical-align: top; text-align: left; }
+.ro-grid thead th { font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: #fff; padding: 10px 6px; }
+.ro-grid thead th span { font-size: .95rem; color: var(--ink); letter-spacing: 0; }
+.ro-grid thead th.today, .ro-grid td.today { background: #f2f7fd; }
+.ro-grid th.ro-p { width: 168px; position: sticky; left: 0; background: #fff; z-index: 1; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.ro-grid thead th.ro-p { font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; }
+.ro-grid tfoot th, .ro-grid tfoot td { background: #f6f8fb; font-size: .82rem; border-bottom: 0; }
+.ro-grid tr.ro-openrow th, .ro-grid tr.ro-openrow td { background: #fffaf0; }
+.ro-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ro-who b { overflow-wrap: anywhere; }
+.ro-tot { font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ro-tot b { color: var(--ink); }
+.ro-cell { min-height: 64px; position: relative; }
+.ro-cell.over { background: #e4eef9 !important; box-shadow: inset 0 0 0 2px var(--green-600); }
+.ro-cell.lv { background: repeating-linear-gradient(135deg, #fff 0 8px, #f4f7f2 8px 16px); }
+.ro-shift { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; background: var(--green-100); border: 1px solid #c3d6ec; border-left: 4px solid var(--green-600); border-radius: 8px; padding: 4px 6px; margin: 0 0 4px; cursor: pointer; line-height: 1.25; }
+.ro-shift:hover, .ro-shift:focus-visible { border-color: var(--green-700); outline: none; box-shadow: 0 0 0 2px #c3d6ec; }
+.ro-shift b { font-size: .82rem; white-space: nowrap; }
+.ro-shift .ro-role { font-size: .72rem; color: var(--muted); overflow-wrap: anywhere; }
+.ro-shift.open { background: #fff4dc; border-color: #f0d9a4; border-left-color: var(--gold); }
+.ro-shift.warn { border-left-color: #c0392b; }
+.ro-shift.st-removed { opacity: .6; background: #f3f3f3; border-left-color: #999; }
+.ro-shift.st-removed b { text-decoration: line-through; }
+.ro-shift.dragging { opacity: .45; }
+.ro-st { display: inline-block; font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 1px 6px; border-radius: 999px; background: #fde2cc; color: #8a3b0b; }
+.ro-st.inl { vertical-align: 1px; }
+.ro-shift.st-new .ro-st { background: #dbeafe; color: #1e40af; }
+.ro-shift.st-removed .ro-st { background: #e5e5e5; color: #555; }
+.ro-w { color: #c0392b; font-size: .8rem; }
+.ro-leave { font-size: .72rem; font-weight: 600; color: #3b6b3f; margin: 0 0 4px; }
+.ro-add { display: block; width: 100%; border: 1px dashed #c9d3df; background: transparent; color: var(--green-700); border-radius: 8px; padding: 1px 0; cursor: pointer; font-size: 1rem; line-height: 1.3; opacity: .55; }
+.ro-cell:hover .ro-add, .ro-add:focus-visible { opacity: 1; background: #f4f8fd; }
+.ro-hint { margin: 0; padding: 8px 14px 12px; }
+.ro-warns ul { margin: 0; padding-left: 20px; font-size: .9rem; }
+.ro-warns li { margin: 2px 0; }
+.ro-help summary { cursor: pointer; }
+.ro-help ol { margin: 10px 0 0; padding-left: 20px; } .ro-help li { margin: 4px 0; }
+.ro-phone { display: none; }
+.ro-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.ro-form .ro-full { grid-column: 1 / -1; }
+.ro-form .ts-box input, .ro-form .ts-box select { width: 100%; }
+.ro-live { margin: 0; color: var(--ink); }
+.ro-repeat { border-top: 1px solid var(--line); padding-top: 10px; }
+.ro-repdays { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 8px; }
+.ro-text { width: 100%; font: .88rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; border: 1px solid var(--line); border-radius: 10px; padding: 10px; resize: vertical; background: #f9fafb; }
+/* what staff see */
+.ro-mine h3 { justify-content: flex-start; }
+.ro-week { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 16px; }
+.ro-dayp h3 { font-size: 1rem; justify-content: flex-start; }
+.ro-dayp.today { box-shadow: var(--shadow), inset 0 3px 0 var(--green-600); }
+.ro-line { display: grid; grid-template-columns: 122px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; padding: 6px 0; border-top: 1px solid #eef1f5; font-size: .9rem; }
+.ro-line:first-of-type { border-top: 0; }
+.ro-line.me { background: #eef6ff; margin: 0 -8px; padding: 6px 8px; border-radius: 8px; }
+.ro-line.open .ro-ln b { color: var(--gold); }
+.ro-line.now .ro-lt { color: var(--green-700); font-weight: 700; }
+.ro-lt { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ro-note { display: block; }
+/* the time clock: their shifts under the PIN pad */
+.ro-clock:empty { display: none; }
+.ro-clock { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; text-align: left; }
+.ro-clock-k { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin-bottom: 4px; }
+.ro-cl { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; font-size: .9rem; padding: 3px 0; }
+.ro-cl b { min-width: 86px; } .ro-cl small { flex-basis: 100%; color: var(--muted); padding-left: 94px; }
+.ro-cl.now b { color: var(--green-700); }
+/* Timesheets: early / late against the roster */
+.rt { color: var(--muted); } .rt-late { color: #b3261e; font-weight: 700; } .rt-early { color: #8a5a00; font-weight: 600; } .rt-ok { color: #1e6b45; font-weight: 600; }
+@media (max-width: 760px) {
+  .ro-gridpanel { display: none; }
+  .ro-phone { display: block; }
+  .ro-daytabs { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px; }
+  .ro-dt { display: flex; flex-direction: column; align-items: center; gap: 0; border: 1.5px solid var(--line); background: #fff; border-radius: 10px; padding: 6px 0; cursor: pointer; font: inherit; color: inherit; min-width: 0; }
+  .ro-dt span { font-size: .68rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; }
+  .ro-dt b { font-size: 1.05rem; line-height: 1.2; } .ro-dt small { font-size: .66rem; color: var(--muted); }
+  .ro-dt.today { border-color: #9cbfe6; }
+  .ro-dt.on { background: var(--green-800); border-color: var(--green-800); color: #fff; } .ro-dt.on span, .ro-dt.on small { color: #cfe0f3; }
+  .ro-dayh { font-size: 1.05rem; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; margin: 4px 0 8px; }
+  .ro-pcard { background: #fff; border-radius: 12px; box-shadow: var(--shadow); padding: 10px 12px; margin-bottom: 8px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 10px; align-items: start; }
+  .ro-pcard.open { background: #fffaf0; }
+  .ro-pc-h { grid-column: 1 / -1; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  .ro-pc-s { min-width: 0; } .ro-pc-s .ro-shift { margin-bottom: 4px; }
+  .ro-padd { align-self: center; }
+  .ro-tools .btn.coral { grid-column: 1 / -1; }
+  .ro-line { grid-template-columns: 112px minmax(0, 1fr) auto; } .ro-lt { font-size: .84rem; }
+  .ro-week { grid-template-columns: 1fr; }
+  .pr-choices:has(> :nth-child(3)) { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) { .ro-form { grid-template-columns: 1fr 1fr; } .ro-tiles { grid-template-columns: 1fr 1fr; } }
+.ro-shift b { white-space: normal; }
+.ro-shift .ro-note-c { flex-basis: 100%; font-size: .7rem; font-style: italic; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-tools > [hidden] { display: none !important; }   /* a hidden box in a phone toolbar takes no room (Payroll's "What for") */
+/* Timesheets' week grid on a phone: scrolls inside its box instead of widening the page */
+.panel[style*="padding:0"] > .scroll:has(> table.days-t) { overflow-x: auto; }

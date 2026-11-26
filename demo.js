@@ -49,8 +49,44 @@ const STAFF = [
   { name: 'Morgan Testwell', username: 'morgan', position: 'Cafe barista', pay_type: 'hourly', pay_rate: 30, email: 'morgan.testwell@sampletrading.example', day: ['07:00', '12:00'] },
 ];
 
+// OWNER-ROSTER (2.3.0): the demo roster. This week is published (with an open Saturday cafe shift, and one shift changed
+// after publishing so "changed" shows); next week is copied from it as a draft, not published yet.
+const ROLE = { 'Store manager': 'Office', 'Service technician': 'Workshop', 'Shop assistant': 'Till', 'Cafe barista': 'Cafe' };
+function seedRoster(h) {
+  const { db, getSettings, setSetting, todayIn, addDays } = h;
+  if (getSettings().demo_roster_seeded === '1') return false;
+  try { db.prepare('SELECT 1 FROM roster_shifts LIMIT 1').all(); } catch { return false; }   // roster.js not loaded
+  const today = todayIn(getSettings().timezone), mon = addDays(today, -((new Date(today + 'T00:00:00Z').getUTCDay() + 6) % 7)), at = new Date().toISOString();
+  const users = db.prepare("SELECT id, username FROM users WHERE username IN (" + STAFF.map(() => '?').join(',') + ')').all(...STAFF.map(s => s.username));
+  const ins = db.prepare(`INSERT INTO roster_shifts(user_id, date, start, finish, break_min, role, note, published, pub_user_id, pub_date, pub_start, pub_finish, pub_break_min, pub_role, pub_note, created_at, updated_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const add = (uid, d, a, b, role, note, pub) => ins.run(uid, d, a, b, 0, role, note, pub ? 1 : 0, pub ? uid : null, pub ? d : null, pub ? a : null, pub ? b : null, pub ? 0 : null, pub ? role : null, pub ? note : null, at, at).lastInsertRowid;
+  db.exec('BEGIN');
+  try {
+    for (const [week, pub] of [[mon, true], [addDays(mon, 7), false]]) {
+      for (let i = 0; i < 5; i++) {
+        const d = addDays(week, i);
+        STAFF.forEach(s => { const u = users.find(x => x.username === s.username); if (u) add(u.id, d, s.day[0], s.day[1], ROLE[s.position] || '', i === 4 && s.username === 'robin' ? 'Stocktake after close' : '', pub); });
+      }
+      add(null, addDays(week, 5), '08:00', '12:00', 'Cafe', 'Saturday market', pub);
+    }
+    // published, then Casey's Thursday changed (a draft until it's published again)
+    db.prepare('INSERT OR IGNORE INTO roster_weeks(week_start, published_at, published_by_name, first_published_at, times) VALUES(?,?,?,?,1)').run(mon, at, 'Demo Admin', at);
+    const casey = users.find(x => x.username === 'casey');
+    if (casey) db.prepare("UPDATE roster_shifts SET start = '10:00', finish = '14:00' WHERE user_id = ? AND date = ?").run(casey.id, addDays(mon, 3));
+    setSetting('demo_roster_seeded', '1');
+    db.exec('COMMIT');
+    return true;
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
 /** Fill an empty demo payroll: settings, a demo/demo admin login, 5 staff, two weeks of timesheets and one finished pay run. */
 function seed(h) {
+  const r = seedPay(h);
+  seedRoster(h);
+  return r;
+}
+function seedPay(h) {
   const { db, hashPassword, getSettings, setSetting, computePayroll, payPeriodOf, todayIn, addDays } = h;
   if (getSettings().demo_seeded === '1') return false;
   db.exec('BEGIN');
@@ -95,4 +131,4 @@ function page(html) {
   return html.replace(/<body([^>]*)>/, `<body$1>\n  ${BANNER}`).replace('<div id="login-err"></div>', `${LOGIN_HINT}<div id="login-err"></div>`);
 }
 
-module.exports = { BUSINESS, DETAILS, STAFF, demoFile, readDemo, isOn, dataDir, stamp, seed, page, BANNER, LOGIN_HINT };
+module.exports = { BUSINESS, DETAILS, STAFF, demoFile, readDemo, isOn, dataDir, stamp, seed, seedRoster, page, BANNER, LOGIN_HINT };

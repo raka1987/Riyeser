@@ -32,6 +32,13 @@ and bank detail changes and deletions are kept in an audit trail.
 - **Time clock** on a shared PC: each person taps their name and types their own 4-digit PIN.
 - **Timesheets**: by person or as a list, opening on the pay run's pay period; click a day's line to change it in place (paid
   days are locked), Edit week, multi-shift entry, week grids with running totals, supervisor approval, print and email.
+- **Roster**: plan the week on a grid of people and days: shifts with start, finish, unpaid break, role or area and a note;
+  copy last week, repeat a shift on other days, drag a shift to another day or person (Ctrl copies), open shifts (nobody yet).
+  Warnings for overlapping shifts, leave already booked, shifts over 12 hours and weeks over the normal week. Hours and
+  estimated wages per person and for the week. **Publish roster**: staff see their shifts on the time clock (after tapping
+  their name) and on the Roster page, printed (or saved as PDF), or as plain text for WhatsApp / SMS. Changes after
+  publishing are marked until it's published again; staff then see them marked "changed". Timesheets show early / late
+  against the published roster, and **Start next pay run** can fill hours from it for people who don't clock in.
 - **Payroll**: normal week 40 hours by default, weekly pay, FNPF and PAYE rates in Settings, unpaid break rules, regular
   deductions per person. Pay runs: preview, then finalise. **Start next pay run** opens the next period in one click and
   copies last week's hours (or starts empty, as chosen in Payroll rules); click a name to change that person's days.

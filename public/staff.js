@@ -20,6 +20,7 @@ const VIEWS = {
   dashboard: { title: 'Dashboard', group: 'Today', render: renderDashboard },
   timeclock: { title: 'Time clock', group: 'Today', render: renderTimeclock, show: () => CAN.has('timeclock.use') },
   timesheets: { title: 'Timesheets', group: 'People', render: renderTimesheets },
+  roster: { title: 'Roster', group: 'People', render: () => renderRoster() },   // OWNER-ROSTER (roster.js)
   employees: { title: 'Staff', group: 'People', render: renderEmployees, show: () => L('employees') >= 1 },
   payroll: { title: 'Payroll', group: 'Pay', render: renderPayroll, show: () => L('payroll') >= 1 },
   history: { title: 'Pay history', group: 'Pay', render: renderHistory, show: () => L('payroll') >= 1 },
@@ -396,7 +397,7 @@ async function renderTimesheets(f) {
       }).join('') + '</div>'; })()}
     <div class="chips no-print" style="margin:4px 0 10px"><button class="chip ${(f.view || 'person') === 'person' ? '' : 'gray'}" data-tv="person">By person</button><button class="chip ${f.view === 'list' ? '' : 'gray'}" data-tv="list">All shifts</button></div>
     ${(f.view || 'person') === 'list' ? `<div class="panel" style="padding:0">${table([{ h: 'Staff', f: r => `${esc(r.name)}${r.employee_no ? ` <span class="small muted">${esc(r.employee_no)}</span>` : ''}` }, { h: 'Date', f: r => fmtDate(r.clock_in.slice(0, 10)) }, { h: 'In', f: r => fmtTime(r.clock_in.slice(11)) },
-      { h: 'Out', f: r => r.clock_out ? fmtTime(r.clock_out.slice(11)) : '<span class="status open">on shift</span>' }, { h: 'Hours', f: r => r.hours.toFixed(2), r: 1 }, { h: 'Unpaid break', f: r => r.break_hours ? `−${(r.break_hours * 60).toFixed(0)} min` : '·', r: 1 }, { h: 'Paid hours', f: r => `<b>${(r.paid_hours ?? r.hours).toFixed(2)}</b>`, r: 1 }, { h: 'Notes', k: 'notes' }],
+      { h: 'Out', f: r => r.clock_out ? fmtTime(r.clock_out.slice(11)) : '<span class="status open">on shift</span>' }, { h: 'Hours', f: r => r.hours.toFixed(2), r: 1 }, { h: 'Unpaid break', f: r => r.break_hours ? `−${(r.break_hours * 60).toFixed(0)} min` : '·', r: 1 }, { h: 'Paid hours', f: r => `<b>${(r.paid_hours ?? r.hours).toFixed(2)}</b>`, r: 1 }, { h: 'Roster', f: r => QE.rosterText(r) || '<span class="muted">·</span>' }, { h: 'Notes', k: 'notes' }],
       rows, { onRow: canTS(), empty: 'No shifts in this period. Use "Clock in" in the sidebar to start a shift.' })}</div>` : tsPersonCards(rows, emps, f)}`;
   if ($('#t-lock')) $('#t-lock').onclick = () => { window.__tsUnlock = null; toast('Timesheets locked'); renderTimesheets(f); };
   if ($('#t-pin')) $('#t-pin').onclick = () => {
@@ -525,9 +526,11 @@ function pinPad(s) {
       <div class="muted small">${s.on_shift ? `On shift since ${fmtTime(s.since.slice(11, 16))}` : 'Enter your 4-digit PIN'}</div></div>
     <div class="pin-dots">${'<i></i>'.repeat(4)}</div><div class="pin-err"></div>
     <div class="pin-keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, '⌫'].map(k => `<button type="button" data-k="${k}">${k}</button>`).join('')}</div>
+    <div class="ro-clock" id="ro-clock" aria-live="polite"></div>
     ${canTS() ? `<button type="button" class="btn ghost sm" id="no-pin" style="width:100%;margin-top:14px">${s.on_shift ? 'Clock out' : 'Clock in'} without their PIN (${esc(ME.name.split(' ')[0])} enters their own PIN)</button>` : ''}
   </div>`);
   m.el.style.maxWidth = '380px';
+  rosterOnClock($('#ro-clock', m.el), s.id);   // OWNER-ROSTER: their published shifts
   const dots = () => $$('.pin-dots i', m.el).forEach((d, i) => d.classList.toggle('f', i < pin.length));
   let byManager = false; // S32: "without their PIN" = the signed-in manager types their own PIN on the same pad
   const submit = async () => {
@@ -538,7 +541,7 @@ function pinPad(s) {
         throw e;
       });
       m.close();
-      toast(r.cancelled ? `${r.name}: clock-in cancelled (tapped twice). Not on shift.` : r.on_shift ? `✓ ${r.name} clocked IN at ${fmtTime(r.at.slice(11, 16))}` : `✓ ${r.name} clocked OUT at ${fmtTime(r.at.slice(11, 16))} (${r.shift_hours}h shift)`, 4500);
+      toast(r.cancelled ? `${r.name}: clock-in cancelled (tapped twice). Not on shift.` : r.on_shift ? `✓ ${r.name} clocked IN at ${fmtTime(r.at.slice(11, 16))}${rosterPunchText(r)}` : `✓ ${r.name} clocked OUT at ${fmtTime(r.at.slice(11, 16))} (${r.shift_hours}h shift)${rosterPunchText(r)}`, r.roster ? 6000 : 4500);
       renderTimeclock();
     } catch (e) { pin = ''; dots(); $('.pin-err', m.el).textContent = e.message; $('.pin-dots', m.el).classList.add('shake'); setTimeout(() => $('.pin-dots', m.el) && $('.pin-dots', m.el).classList.remove('shake'), 500); }
   };
@@ -743,10 +746,10 @@ async function renderPayroll(state = {}) {
     host.innerHTML = `${waiting ? `<div class="panel pr-hero pr-wait"><div class="grow"><div class="pr-k">Last pay run</div>
           <h2><span class="pr-ok">✓</span> ${esc(QE.period(N.last_run.period_start, N.last_run.period_end))} is finalised</h2>
           <p class="muted" style="margin:2px 0 14px">Paid ${esc(fmtDate(N.last_run.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }))}. The next ${esc(N.frequency || '')} pay period is ${esc(QE.period(N.start, N.end))}${N.entries ? ` (${N.entries} timesheet entr${N.entries === 1 ? 'y' : 'ies'} in it already)` : ''}.</p>
-          ${startBtn(N)}<p class="small muted" style="margin:10px 0 0">${N.new_payrun_hours === 'copy' ? `Copies last ${word}'s hours (you can edit them).` : N.new_payrun_hours === 'empty' ? "Starts with no hours (you enter them)." : `You choose: copy last ${word}'s hours, or start empty.`} <a href="#/payroll" id="pr-to-rules">Change this in Payroll rules</a>.</p></div></div>`
+          ${startBtn(N)}<p class="small muted" style="margin:10px 0 0">${N.new_payrun_hours === 'copy' ? `Copies last ${word}'s hours (you can edit them).` : N.new_payrun_hours === 'roster' ? "Fills hours from the roster for people who don't clock in (you can edit them)." : N.new_payrun_hours === 'empty' ? "Starts with no hours (you enter them)." : `You choose: copy last ${word}'s hours, fill them from the roster, or start empty.`} <a href="#/payroll" id="pr-to-rules">Change this in Payroll rules</a>.</p></div></div>`
       : `<div class="panel pr-hero"><div class="pr-hero-top"><div class="grow"><div class="pr-k">Pay period</div><h2>${esc(QE.period(a, b))}</h2>
           <div class="small muted">${paidRun ? `<b>paid</b> in pay run #${paidRun.id}` : `${N && N.frequency ? esc(N.frequency) + ' · ' : ''}not paid yet`}${onNext && N.last_run ? ` · straight after pay run #${N.last_run.id}` : ''}</div></div>
-          <div class="pr-hero-btns">${canCopy && !paidRun ? `<button type="button" class="btn sm ghost" id="pr-copy-go">⧉ Copy last ${word}'s hours</button>` : ''}
+          <div class="pr-hero-btns">${canCopy && !paidRun ? `<button type="button" class="btn sm ghost" id="pr-copy-go">⧉ Copy last ${word}'s hours</button><button type="button" class="btn sm ghost" id="pr-roster-go" title="Hours from the published roster, for people who don't clock in">📅 Fill from roster</button>` : ''}
             ${ap && ap.shifts ? `<button type="button" class="btn sm ghost" id="pr-approve">✓ Approve all (${ap.shifts})</button>` : ''}
             <button type="button" class="btn sm ghost" id="pr-ts">Timesheets for these dates →</button></div></div>
         ${onNext && N.copied_unapproved ? `<div class="note pr-copied">${state.flash ? `<b>✓ ${esc(state.flash)}</b><br>The ${N.copied_unapproved} copied shift${N.copied_unapproved === 1 ? " isn't" : "s aren't"} approved yet.` : `<b>${N.copied_unapproved} shift${N.copied_unapproved === 1 ? ' was' : 's were'} copied from last ${word} and ${N.copied_unapproved === 1 ? "isn't" : "aren't"} approved yet.</b>`} Click a name below to see and change that person's days.${ap && ap.shifts ? ' When they look right, <b>Approve all</b>.' : ''}</div>`
@@ -758,6 +761,10 @@ async function renderPayroll(state = {}) {
     if ($('#pr-copy-go')) $('#pr-copy-go').onclick = async () => {
       const [x, y] = period();
       try { copyModal(await api('/api/staff/payroll/copy-hours/preview', { body: { period_start: x, period_end: y } })); } catch (e) { toast(e.message, 6000); }
+    };
+    if ($('#pr-roster-go')) $('#pr-roster-go').onclick = async () => {
+      const [x, y] = period();
+      try { rosterFillModal(await api('/api/staff/payroll/roster-hours/preview', { body: { period_start: x, period_end: y } })); } catch (e) { toast(e.message, 6000); }
     };
     if ($('#pr-approve')) $('#pr-approve').onclick = () => {
       const box = $('#pr-approve-box');
@@ -779,17 +786,19 @@ async function renderPayroll(state = {}) {
       <div class="pr-choices">
         <button type="button" class="pr-choice" data-m="copy" ${canCopy ? '' : 'disabled'}><b>Copy last ${word}'s hours</b><span>(you can edit them)</span>
           <small>${canCopy ? `The same days and times as ${esc(QE.period(n.last_run ? n.last_run.period_start : '', n.last_run ? n.last_run.period_end : '', false))}, saved as unapproved timesheet entries. People on leave, finished staff and anyone with hours already are skipped.` : 'Needs Add & edit access to Timesheets.'}</small></button>
+        <button type="button" class="pr-choice" data-m="roster" ${canCopy ? '' : 'disabled'}><b>Fill from the roster</b><span>(for people who don't clock in)</span>
+          <small>${canCopy ? "Hourly staff with no clock times in these dates get the hours of their published roster shifts, saved as unapproved timesheet entries. Anyone who clocked in keeps their own hours." : 'Needs Add & edit access to Timesheets.'}</small></button>
         <button type="button" class="pr-choice" data-m="empty"><b>Start empty</b><span>(I'll enter hours myself)</span><small>No hours are added. Enter them in Timesheets, or click a name in the pay run. You can still copy last ${word}'s hours later.</small></button>
       </div>
       <p class="small muted" style="margin:14px 0 0">To stop being asked, choose in <b>Payroll rules → When starting a new pay run</b>.</p>`, { onClose: () => { if (!done) resolve(null); } });
-    m.el.style.maxWidth = '560px';
+    m.el.style.maxWidth = '780px';
     $$('[data-m]', m.el).forEach(b => b.onclick = () => { done = true; m.close(); resolve(b.dataset.m); });
   });
   const startNext = async n => {
     let pref = n.new_payrun_hours; try { pref = (await api('/api/staff/payroll/rules')).new_payrun_hours || pref; } catch { }   // as saved just now in Payroll rules
     const mode = pref === 'ask' || !pref ? await chooseMode({ ...n, new_payrun_hours: pref }) : pref;
     if (!mode) return;
-    $$('.pr-big').forEach(b => { b.disabled = true; b.textContent = mode === 'copy' ? 'Copying hours…' : 'Starting…'; });
+    $$('.pr-big').forEach(b => { b.disabled = true; b.textContent = mode === 'copy' ? 'Copying hours…' : mode === 'roster' ? 'Filling hours from the roster…' : 'Starting…'; });
     try { const r = await api('/api/staff/payroll/next-run', { body: { mode } }); await renderPayroll({ period: [r.start, r.end], flash: r.message }); window.scrollTo(0, 0); }
     catch (e) { toast(e.message, 7000); renderPayroll(state); }
   };
@@ -890,6 +899,30 @@ async function renderPayroll(state = {}) {
     if (!p.people.some(x => x.rows.some(r => !r.skip))) $('.err', el).innerHTML = `<div class="note" style="margin-top:10px">Nothing to copy: ${p.people.length ? 'everyone already has hours on those days (or is on leave)' : `nobody has hours in ${esc(p.from_label)}`}.</div>`;
     redraw();
   };
+  // OWNER-ROSTER: hours from the published roster for hourly staff with no clock times in these dates
+  const rosterFillModal = p => {
+    const can = p.people.filter(x => x.rows.some(r => !r.skip));
+    const m = openModal(`<h3>Fill hours from the roster</h3><p class="small muted">${esc(QE.period(p.start, p.end))}. For hourly staff with no clock times in these dates: the start and finish of each published roster shift, saved as unapproved timesheet entries noted "from the roster". Payroll's unpaid break rules apply as usual. Change them in Timesheets or by clicking a name in the pay run.</p>
+      ${p.clocked.length ? `<p class="small"><b>Keep their own clock times:</b> ${p.clocked.map(c => esc(c.name)).join(', ')}.</p>` : ''}
+      <div class="scroll"><table class="t"><thead><tr><th></th><th>Person / day</th><th>Start – finish</th><th class="r">Hours</th></tr></thead><tbody>
+      ${p.people.map(x => `<tr><td><input type="checkbox" data-fu="${x.user_id}" ${x.rows.some(r => !r.skip) ? 'checked' : 'disabled'}></td><td colspan="2"><b>${esc(x.name)}</b></td><td class="r"><b>${x.total.toFixed(2)}</b></td></tr>
+        ${x.rows.map(r => `<tr class="${r.skip ? 'muted' : ''}"><td></td><td>${esc(fmtDate(r.date))}${r.role ? ` <span class="small muted">${esc(r.role)}</span>` : ''}</td><td>${r.skip ? `<span class="small">Skipped: ${esc(r.skip)}</span>` : `${fmtTime(r.clock_in.slice(11))} – ${fmtTime(r.clock_out.slice(11))}`}</td><td class="r">${r.skip ? '' : r.hours.toFixed(2)}</td></tr>`).join('')}`).join('')
+        || `<tr><td colspan="4" class="muted">${p.published_weeks ? 'Nobody to fill: everyone on the roster has clock times, or is salaried.' : 'There is no published roster for these dates. Plan and publish it on the Roster page first.'}</td></tr>`}
+      </tbody></table></div><div class="err"></div>
+      <div class="actions"><button class="btn coral" id="rf-save" ${can.length ? '' : 'disabled'}>Fill hours</button><button class="btn ghost" id="rf-cancel">Cancel</button></div>`, { wide: true });
+    const el = m.el;
+    $('#rf-cancel', el).onclick = m.close;
+    $('#rf-save', el).onclick = async () => {
+      const ids = $$('[data-fu]', el).filter(c => c.checked && !c.disabled).map(c => +c.dataset.fu);
+      if (!ids.length) return toast('Tick at least one person');
+      $('#rf-save', el).disabled = true;
+      try {
+        const r = await api('/api/staff/payroll/roster-hours', { body: { period_start: p.start, period_end: p.end, user_ids: ids } });
+        m.close();
+        renderPayroll({ period: [p.start, p.end], flash: `Filled ${r.people} ${r.people === 1 ? "person's" : "people's"} hours from the roster (${r.saved} shift${r.saved === 1 ? '' : 's'}).${r.failed.length ? ` Not filled: ${r.failed.join(' ')}` : ''} Check and change anything that's different.` });
+      } catch (e) { $('.err', el).innerHTML = `<div class="error">${esc(e.message)}</div>`; $('#rf-save', el).disabled = false; }
+    };
+  };
   drawOther();
   await drawHero();
   // the pay run table for the period, ready to edit (not while waiting for "Start next pay run", or straight after finalising)
@@ -916,8 +949,8 @@ async function drawPayRules() {
           <div class="field"><label>Pay period starts on <span class="muted">(any date a period began)</span></label><input type="date" id="pr-cycle" value="${esc(R.pay_cycle_start || '')}" ${ro ? 'disabled' : ''}></div>
           <div class="field"><label>How often (pay periods a year)</label><select id="pr-pp" ${ro ? 'disabled' : ''}>${[[52, 'Weekly (52)'], [26, 'Fortnightly (26)'], [24, 'Twice a month (24)'], [12, 'Monthly (12)']].map(([v, l]) => `<option value="${v}" ${R.pay_periods_per_year === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div></div>
         <p class="small" style="margin:4px 0">📅 This pay period: <b>${fmtDate(R.period_now[0])} – ${fmtDate(R.period_now[1])}</b> · last: ${fmtDate(R.period_last[0])} – ${fmtDate(R.period_last[1])} · next: ${fmtDate(R.period_next[0])} – ${fmtDate(R.period_next[1])}</p>
-        <div class="field" style="margin-top:8px"><label>When starting a new pay run</label><select id="pr-newrun" ${ro ? 'disabled' : ''}>${[['ask', 'Ask me each time'], ['copy', "Always copy last week's hours"], ['empty', 'Always start empty']].map(([v, l]) => `<option value="${v}" ${(R.new_payrun_hours || 'ask') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
-          <div class="small muted">"Start next pay run" on this page. Copied hours are unapproved timesheet entries you can change. With "start empty", you can still copy them later.</div></div>
+        <div class="field" style="margin-top:8px"><label>When starting a new pay run</label><select id="pr-newrun" ${ro ? 'disabled' : ''}>${[['ask', 'Ask me each time'], ['copy', "Always copy last week's hours"], ['roster', "Always fill from the roster (people who don't clock in)"], ['empty', 'Always start empty']].map(([v, l]) => `<option value="${v}" ${(R.new_payrun_hours || 'ask') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <div class="small muted">"Start next pay run" on this page. Copied or filled hours are unapproved timesheet entries you can change. With "start empty", you can still copy them later.</div></div>
         <p class="small muted">PAYE tax brackets are in <a href="#/settings">Settings → Payroll</a>.</p></div></div>
     <b class="small">Regular deductions each pay</b><p class="small muted" style="margin:2px 0 6px">One per line, e.g. <code>Staff loan: 20</code>. Taken automatically every pay run and shown on the payslip.</p>
     <div class="ded-grid">${R.deductions.map(u => `<div class="field"><label>${esc(u.name)}</label><textarea rows="2" data-ded="${u.id}" placeholder="None" ${ro ? 'disabled' : ''}>${esc(dedText(u.deductions))}</textarea></div>`).join('') || '<p class="small muted">Staff with a pay rate show here.</p>'}</div>
@@ -1273,6 +1306,7 @@ async function watchForUpdates() {
 function onLive(msg) {
   if (msg.type === 'shift' && VIEW === 'dashboard') renderDashboard();
   if (msg.type === 'shift' && VIEW === 'timeclock' && !document.querySelector('.pinpad')) renderTimeclock();
+  if (msg.type === 'roster' && VIEW === 'roster' && !document.querySelector('.modal-bg')) renderRoster();
 }
 $('#login-form').onsubmit = async e => {
   e.preventDefault();

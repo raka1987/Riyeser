@@ -433,7 +433,9 @@ app.post('/api/staff/timeclock/punch', requirePerm('timeclock.use'), wrap((req, 
   if (open && override && !r.cancelled) db.prepare("UPDATE timesheets SET notes = trim(coalesce(notes,'') || ' · out by ' || ?) WHERE id = ?").run(req.user.name, open.id);
   broadcast({ type: 'shift' }, true);
   const shift = open && !r.cancelled ? round2(hoursOf({ clock_in: open.clock_in, clock_out: now })) : null;
-  res.json({ name: u.name, on_shift: r.on_shift, at: now, shift_hours: shift, cancelled: !!r.cancelled });
+  // OWNER-ROSTER: the rostered start (clocking in) or finish (clocking out), to say early or late
+  const rostered = r.cancelled || !app.locals.rosterPunch ? null : app.locals.rosterPunch(u.id, now, r.on_shift, open);
+  res.json({ name: u.name, on_shift: r.on_shift, at: now, shift_hours: shift, cancelled: !!r.cancelled, roster: rostered });
 }));
 
 app.post('/api/staff/timesheets/email', requireStaff, wrap(async (req, res) => {
@@ -485,7 +487,8 @@ app.get('/api/staff/timesheets', requireStaff, wrap((req, res) => {
   if (isDate(req.query.to)) { w.push('substr(t.clock_in,1,10) <= ?'); p.push(req.query.to); }
   const rows = db.prepare(`SELECT t.*, u.name, COALESCE(u.employee_no, '') AS employee_no, (SELECT name FROM users a WHERE a.id = t.approved_by) AS approved_by_name, ${PAID_RUN_SQL} FROM timesheets t JOIN users u ON u.id=t.user_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY t.clock_in DESC LIMIT 1000`).all(...p);
   const rules = breakRules();
-  res.json(rows.map(r => { const b = breakOf(r, rules); return { ...r, hours: round2(hoursOf(r)), break_hours: round2(b), paid_hours: round2(hoursOf(r) - b) }; }));
+  const out = rows.map(r => { const b = breakOf(r, rules); return { ...r, hours: round2(hoursOf(r)), break_hours: round2(b), paid_hours: round2(hoursOf(r) - b) }; });
+  res.json(app.locals.rosterCompare ? app.locals.rosterCompare(out) : out);   // OWNER-ROSTER: early / late against the published roster
 }));
 const isStamp = s => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(s || ''));
 const ownOnly = (req, uid) => { if (!tsScope(req, uid)) throw new HttpError(403, 'You can enter your own shifts. Entering for other staff needs the timesheet tick (or Admin).'); };
@@ -685,7 +688,7 @@ app.get('/api/staff/payroll/rules', requireArea('payroll'), (req, res) => {
     pay_cycle_start: s.pay_cycle_start || '', new_payrun_hours: NEW_PAYRUN_HOURS.includes(s.new_payrun_hours) ? s.new_payrun_hours : 'ask', period_now: cur, period_last: payPeriodOf(addDays(cur[0], -1), s), period_next: payPeriodOf(addDays(cur[1], 1), s),
     deductions: canArea(req, 'pay_rates') ? db.prepare('SELECT id, name, deductions FROM users WHERE active = 1 AND pay_rate > 0 ORDER BY name').all().map(u => ({ id: u.id, name: u.name, deductions: deductionsOf(u) })) : [] });
 });
-const NEW_PAYRUN_HOURS = ['ask', 'copy', 'empty'];   // OWNER-QUICKEDIT: when starting a new pay run (Payroll rules)
+const NEW_PAYRUN_HOURS = ['ask', 'copy', 'empty', 'roster'];   // OWNER-QUICKEDIT: when starting a new pay run (Payroll rules)
 const leaveAdj = (uid, y, k) => round2((db.prepare('SELECT days FROM leave_adjust WHERE user_id = ? AND year = ? AND kind = ?').get(uid, String(y), k) || {}).days || 0);
 // S56: unused annual leave carries into the next year. It starts from the person's start date (or their first leave
 // record) so nobody gets years of leave they never had. A balance an admin saved before carry-over existed (note '')
@@ -776,7 +779,7 @@ app.put('/api/staff/payroll/rules', requireArea('setup', 2), wrap((req, res) => 
   }
   for (const k of ['fnpf_employee_rate', 'fnpf_employer_rate']) if (b[k] !== undefined) { const v = +b[k]; if (!(v >= 0 && v <= 50)) bad('FNPF % must be between 0 and 50.'); setSetting(k, String(v)); }
   if (b.pay_periods_per_year !== undefined) { const v = +b.pay_periods_per_year; if (![12, 24, 26, 52].includes(v)) bad('Pay periods per year: 12, 24, 26 or 52.'); setSetting('pay_periods_per_year', String(v)); }
-  if (b.new_payrun_hours !== undefined) { if (!NEW_PAYRUN_HOURS.includes(b.new_payrun_hours)) bad('Choose: ask me each time, always copy last week, or always start empty.'); setSetting('new_payrun_hours', b.new_payrun_hours); }
+  if (b.new_payrun_hours !== undefined) { if (!NEW_PAYRUN_HOURS.includes(b.new_payrun_hours)) bad('Choose: ask me each time, always copy last week, always fill from the roster, or always start empty.'); setSetting('new_payrun_hours', b.new_payrun_hours); }
   if (b.pay_cycle_start !== undefined) { if (b.pay_cycle_start && !isDate(b.pay_cycle_start)) bad('Pay period start must be a date.'); setSetting('pay_cycle_start', b.pay_cycle_start || ''); }
   if (Array.isArray(b.deductions)) for (const d of b.deductions) {
     const list = (Array.isArray(d.deductions) ? d.deductions : []).map(x => ({ name: str(x.name, 60).trim(), amount: round2(x.amount) })).filter(x => x.name && x.amount > 0);
@@ -994,7 +997,7 @@ app.put('/api/staff/settings', requireArea('setup', 2), wrap((req, res) => {
     if (k === 'paye_brackets') { try { const b = JSON.parse(v); if (!Array.isArray(b)) throw 0; } catch { bad('PAYE brackets must be a JSON list.'); } }
     if (['normal_start', 'normal_finish'].includes(k) && !isTime(v)) bad('Times must be like 09:00.');
     if (k === 'normal_week_hours' && !(+v > 0 && +v <= 100)) bad('Normal week hours must be between 1 and 100.');
-    if (k === 'new_payrun_hours' && !NEW_PAYRUN_HOURS.includes(v)) bad('Choose: ask me each time, always copy last week, or always start empty.');
+    if (k === 'new_payrun_hours' && !NEW_PAYRUN_HOURS.includes(v)) bad('Choose: ask me each time, always copy last week, always fill from the roster, or always start empty.');
     if (k === 'payroll_open_period') continue;   // set by "Start next pay run" only
     if (k === 'booking_permissions') {
       let p; try { p = typeof v === 'string' ? JSON.parse(v) : v; } catch { bad('Permissions must be JSON.'); }
@@ -1017,6 +1020,9 @@ const mail = () => app.locals.mail || {};
 // OWNER-PAYWEEK (payweek.js): "Start next pay week" and "Copy last week's hours" on the Pay runs screen
 require('./payweek')(app, { db, requireArea, wrap, bad, HttpError, isDate, isStamp, addDays, round2, getSettings, setSetting, todayIn, payPeriodOf, alreadyPaid, assertNoOverlap, inScope, audit, broadcast, levelOf: (u, a) => P.levelOf(u, a) });
 // "Forgot password?" (forgot.js). After a reset: the person's wrong-PIN counters and this device's login limit start again.
+// OWNER-ROSTER (roster.js): the week's roster, publishing it, and comparing clock times with it
+require('./roster')(app, { db, requireStaff, requireArea, requirePerm, wrap, bad, HttpError, isDate, isTime, str, round2, addDays, getSettings, todayIn, localNowISO,
+  inScope, scopeSql, levelOf: (u, a) => P.levelOf(u, a), audit, broadcast, alreadyPaid, assertNoOverlap });
 require('./forgot')(app, { db, hashPassword, audit, rateLimit, wrap, bad, HttpError, str, getSettings, failsOf: k => failsOf(k),
   clearLockouts: (uid, req) => { for (const k of ['u', 'm', 'r']) clockFails.delete(k + uid); hits.delete(req.ip + '/api/auth/login'); } });
 require('./desktop')(app, { db, requireRole, requireArea, wrap, bad, str, getSettings, setSetting, hashPassword });

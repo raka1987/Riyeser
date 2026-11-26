@@ -37,6 +37,16 @@ const QE = (() => {
   const hoursText = r => !r.clock_out ? '' : `<b>${paidH(r).toFixed(2)}</b>h`;
   const hoursTitle = r => !r.clock_out ? 'Still clocked in' : r.break_hours ? `${r.hours.toFixed(2)} h worked − ${Math.round(r.break_hours * 60)} min unpaid break = ${paidH(r).toFixed(2)} h paid` : `${r.hours.toFixed(2)} h paid`;
   const flag = r => !r.clock_out ? 'still clocked in' : r.hours > 12 ? 'over 12 h: forgot to clock out?' : r.hours < 0.25 ? 'under 15 min' : '';
+  // OWNER-ROSTER (2.3.0): against the published roster: "Rostered 9:00am–5:00pm · 7 min late · left 15 min early"
+  const minText = m => { m = Math.abs(m); return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`; };
+  function rosterText(r) {
+    const x = r.roster; if (!x) return '';
+    const bits = [];
+    if (x.in_min >= 5) bits.push(`<span class="rt-late">${minText(x.in_min)} late</span>`); else if (x.in_min <= -5) bits.push(`<span class="rt-early">${minText(x.in_min)} early</span>`);
+    if (x.out_min != null) { if (x.out_min <= -5) bits.push(`<span class="rt-late">left ${minText(x.out_min)} early</span>`); else if (x.out_min >= 5) bits.push(`<span class="rt-early">${minText(x.out_min)} over</span>`); }
+    if (!bits.length) bits.push('<span class="rt-ok">on time</span>');
+    return `<span class="rt" title="Compared with the published roster">Rostered ${fmtTime(x.start)}–${fmtTime(x.finish)} · ${bits.join(' · ')}</span>`;
+  }
 
   /** One shift as a line. date: show the day (off in the panel, which has the day on the left). */
   function lineHTML(r, { date = true } = {}) {
@@ -48,7 +58,7 @@ const QE = (() => {
       <span class="ql-t">${fmtTime(r.clock_in.slice(11, 16))}–${r.clock_out ? fmtTime(r.clock_out.slice(11, 16)) : '…'}</span>
       <span class="ql-h" title="${esc(hoursTitle(r))}">${hoursText(r)}</span>${state}
       ${canDelete(r) ? `<button type="button" class="ql-bin" title="Delete this shift" aria-label="Delete this shift">${ICON.bin}</button>` : '<span></span>'}
-      ${f ? `<div class="ql-wide"><span class="ts-flag">${f}</span></div>` : ''}${r.notes ? `<div class="ql-wide small muted">${esc(r.notes)}</div>` : ''}</div>`;
+      ${f ? `<div class="ql-wide"><span class="ts-flag">${f}</span></div>` : ''}${r.roster ? `<div class="ql-wide small">${rosterText(r)}</div>` : ''}${r.notes ? `<div class="ql-wide small muted">${esc(r.notes)}</div>` : ''}</div>`;
   }
 
   /** The start / finish editor (in a line, or on an empty day in the panel). */
@@ -228,5 +238,5 @@ const QE = (() => {
     return { close, reload: load };
   }
 
-  return { lineHTML, bind, bindAdd, personPanel, period, dayShort, dayLong, days, closeOpen };
+  return { lineHTML, bind, bindAdd, personPanel, period, dayShort, dayLong, days, closeOpen, rosterText };
 })();

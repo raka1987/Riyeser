@@ -103,7 +103,7 @@ test('Start next pay run: "ask" needs a choice; copy opens the period and copies
   let n = (await call('GET', '/api/staff/payroll/next-period', null, admin)).data;
   assert.deepEqual([n.start, n.end, n.started, n.last_run.id], ['2031-03-13', '2031-03-19', false, run1]);
   const ask = await call('POST', '/api/staff/payroll/next-run', {}, admin);
-  assert.equal(ask.status, 400); assert.match(ask.data.error, /copy last week's hours, or start empty/);
+  assert.equal(ask.status, 400); assert.match(ask.data.error, /copy last week's hours, fill them from the roster, or start empty/);
   const r = await call('POST', '/api/staff/payroll/next-run', { mode: 'copy' }, admin);
   assert.equal(r.status, 200, JSON.stringify(r.data));
   // Ana: all 5 days; Ben: only Thu 13 (he has the others already); Cal is salaried

@@ -72,6 +72,15 @@ test('demo on: the demo folder is used and filled with Sample Trading Co; demo /
   assert.equal(run.payslips.length, 5);
   const ts = (await call('GET', `/api/staff/timesheets?from=${runs[0].period_start}&to=${runs[0].period_end}`, null, r.cookie)).data;
   assert.equal(ts.length, 50);   // 10 weekdays x 5 staff
+  // OWNER-ROSTER: this week's roster is published (an open Saturday shift, one change not published yet); next week is a draft
+  const ro = (await call('GET', '/api/staff/roster', null, r.cookie)).data;
+  assert.ok(ro.published); assert.equal(ro.totals.shifts, 25); assert.equal(ro.totals.open, 1); assert.equal(ro.pending.changed, 1);
+  const pub = (await call('GET', '/api/staff/roster/published', null, r.cookie)).data;
+  assert.equal(pub.people.length, 5); assert.match(pub.text, /OPEN SHIFT \(ask to take it\): 8am-12pm Cafe|OPEN SHIFT \(ask to take it\): 8:00am-12:00pm Cafe/);
+  const nextWeek = (await call('GET', `/api/staff/roster?week=${ro.days[6]}`, null, r.cookie)).data;
+  assert.equal(nextWeek.week_start, ro.days[0]);
+  const wk2 = (await call('GET', `/api/staff/roster?week=${new Date(Date.parse(ro.week_start) + 7 * 864e5).toISOString().slice(0, 10)}`, null, r.cookie)).data;
+  assert.equal(wk2.published, null); assert.equal(wk2.totals.shifts, 25);
   // Central leaves demo mode while Payroll is open: it says so, and does nothing more with the practice records
   const on = fs.readFileSync(DEMO_FILE, 'utf8');
   fs.writeFileSync(DEMO_FILE, JSON.stringify({ on: false }));
