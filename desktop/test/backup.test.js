@@ -190,11 +190,11 @@ test('every program has Back up now, Restore from a backup… and the backups fo
   const src = (f) => fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8');
   const ui = src('core/backup-ui.js');
   for (const label of ['Back up now', 'Restore from a backup…', 'Open the backups folder', 'Start fresh']) assert.ok(ui.includes(`'${label}'`), label);
-  // Desk Assistant: tray menu, Settings, first run, daily
-  const desk = src('main.js'); const deskUi = src('renderer/app.js');
+  // Riyeser Documents (was Desk Assistant): tray menu, Settings, first run, daily
+  const desk = src('main.js'); const deskUi = src('renderer/documents.js');
   assert.match(desk, /\.\.\.backups\.menuItems\(\)/); assert.match(desk, /backups\.startDaily\(\)/); assert.match(desk, /backups\.firstRunOffer\(\)/);
   assert.match(desk, /await backups\.applyPending\(\)[\s\S]*store = new Store\(/);
-  assert.match(deskUi, /data-act="backupnow">Back up now<\/button><button data-act="backuprestore">Restore from a backup…<\/button><button data-act="backupfolder">Open the backups folder<\/button>/);
+  assert.match(deskUi, /data-bk="now">Back up now<\/button><button class="btn" type="button" data-bk="restore">Restore from a backup…<\/button><button class="btn ghost" type="button" data-bk="folder">Open the backups folder<\/button>/);
   // Link Office: tray menu, its screen, first run, daily
   const lo = src('link-main.js');
   assert.match(lo, /\.\.\.backups\.menuItems\(\)/); assert.match(lo, /backups\.startDaily\(\)/); assert.match(lo, /firstRunOffer/);

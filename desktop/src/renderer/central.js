@@ -98,7 +98,7 @@ const LOOK = {
   accounting: { ic: 'book', c: 'c-acc', nav: 'Books', col: '#1a5fd6', blurb: 'View and manage your accounts' },
   pos: { ic: 'store', c: 'c-pos', nav: 'POS', col: '#0f8f82', blurb: 'Open the till and ring up sales' },
   payroll: { ic: 'people', c: 'c-pay', nav: 'Payroll', col: '#5b54d6', blurb: 'Run payroll and manage staff' },
-  desk: { ic: 'folder', c: 'c-desk', nav: 'Desk Assistant', col: '#6a4be0', blurb: 'Sort and find every file' },
+  desk: { ic: 'folder', c: 'c-desk', nav: 'Documents', col: '#0e7c86', blurb: 'Scan, file and find documents' },   // Riyeser Documents (was Desk Assistant)
   pdf: { ic: 'pdf', c: 'c-pdf', nav: 'PDF', col: '#d6423a', blurb: 'Fill in, sign and combine PDFs' },
   services: { ic: 'hat', c: 'c-svc', col: '#d98a0b', blurb: 'Keep job records up to date' }, // services: shown by its own name (As Built)
 };
@@ -115,8 +115,8 @@ const QUICK = [
   { p: 'bookings', ic: 'calendar', t: 'New booking', s: 'Jobs, appointments, tables' },
   { p: 'invoices', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' }, // free Invoices, when Accounting isn't installed
   { p: 'payroll', ic: 'people', t: 'Run payroll', s: 'Timesheets to payslips', page: 'payrun' },
-  { p: 'desk', ic: 'sort', t: 'Sort new files', s: 'Downloads, Desktop, phone', page: 'organise' },
-  { p: 'desk', ic: 'search', t: 'Find a file', s: 'Search every folder', act: 'find' },
+  { p: 'desk', ic: 'folder', t: 'Documents Inbox', s: 'New scans and uploads to file' },
+  { p: 'desk', ic: 'search', t: 'Find a document', s: 'Names and text inside scans', act: 'find' },
   { p: 'pdf', ic: 'pdf', t: 'Open a PDF', s: 'Fill in, sign or edit', act: 'pickpdf' },
   { p: 'pdf', ic: 'layers', t: 'Combine PDFs', s: 'Join files into one', page: 'combine' },
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
@@ -162,7 +162,7 @@ function cardLine(id) {
     const row = lic && lic.online && (lic.online.rows || []).find((r) => r.id === 'calls');
     return row ? { s: `Riyeser Link · ${row.text}`, alert: row.tone === 'bad' } : { s: L.blurb };
   }
-  if (id === 'desk') { const n = today.taskCount ?? today.tasks.length; return { s: n ? `${n} to-do${n === 1 ? '' : 's'} waiting` : L.blurb }; }
+  if (id === 'desk') { if (today.documents) return { s: L.blurb }; const n = today.taskCount ?? today.tasks.length; return { s: n ? `${n} to-do${n === 1 ? '' : 's'} waiting` : L.blurb }; }
   return { s: L.blurb };
 }
 function renderCards() {
@@ -228,7 +228,7 @@ function renderMoney() {
     : '<div class="empty">Every invoice is paid. 🎉</div>';
 }
 function renderToday() {
-  const box = $('#todayp'); box.hidden = !has('desk'); // calendars live in Desk Assistant
+  const box = $('#todayp'); box.hidden = !has('desk') || !!today.documents; // calendars lived in Desk Assistant (not in Riyeser Documents)
   if (box.hidden) return;
   if (!today.calendars) { $('#today').innerHTML = '<div class="empty">Connect a calendar in Desk Assistant → Settings → Calendars to see your meetings here.</div>'; return; }
   $('#today').innerHTML = today.meetings.length ? today.meetings.slice(0, 5).map((m) => `<div class="li"><span class="h">${isToday(m.start) ? (m.allDay ? 'All day' : fmtTime(m.start)) : fmtDay(m.start)}</span><span class="grow">${esc(m.title)}${m.location ? ` <span class="lbl">· ${esc(m.location)}</span>` : ''}</span>${m.link ? `<a href="${esc(m.link)}" target="_blank">Join</a>` : ''}</div>`).join('')
@@ -236,7 +236,7 @@ function renderToday() {
   if (today.meetingErrors.length) $('#today').innerHTML += `<div class="empty warn">Couldn't read: ${esc(today.meetingErrors.join(', '))}</div>`;
 }
 function renderTodo() {
-  const box = $('#todop'); box.hidden = !has('desk'); // the to-do list belongs to Desk Assistant
+  const box = $('#todop'); box.hidden = !has('desk') || !!today.documents; // the to-do list belonged to Desk Assistant (not in Riyeser Documents)
   if (box.hidden) return;
   $('#todo').innerHTML = today.tasks.length ? today.tasks.slice(0, 5).map((x) => `<div class="li"><span class="chk"></span><span class="grow">${esc(x.text)}</span>${x.due ? `<span class="lbl warn">${esc(fmtDate(x.due))}</span>` : ''}</div>`).join('')
       + ((today.taskCount ?? today.tasks.length) > 5 ? `<div class="empty" style="padding-top:8px">+ ${(today.taskCount ?? today.tasks.length) - 5} more in Desk Assistant</div>` : '')
@@ -721,7 +721,7 @@ async function runSearch() {
         <div style="margin:3px 0"><span class="pill">${esc(x.type)}</span><span class="pill">${esc(x.year)}</span><span class="pill">${esc(x.kind)}</span>${x.company ? `<span class="pill">${esc(x.company)}</span>` : ''}</div>
         <div class="p">${esc(short(x.dir))}${x.snippet ? ` · …${esc(x.snippet)}…` : ''}</div></div>
         <button data-file="${esc(x.path)}">Open</button><button data-reveal="${esc(x.path)}">Show</button></div>`).join('')
-      : `<div class="lbl" style="padding:12px 0 16px">No matches.${has('desk') ? ' If you just saved it, open Desk Assistant → Find a file → “Re-scan my folders”.' : ' Search uses Riyeser Desk Assistant’s file list — install it to search all your files.'}</div>`}</div>`;
+      : `<div class="lbl" style="padding:12px 0 16px">No matches.${has('desk') ? (today && today.documents ? ' Search covers the documents in Riyeser Documents.' : ' If you just saved it, open Desk Assistant → Find a file → “Re-scan my folders”.') : ' Search uses Riyeser Documents’ list — install it to search your documents.'}</div>`}</div>`;
 }
 
 // ---------- events ----------

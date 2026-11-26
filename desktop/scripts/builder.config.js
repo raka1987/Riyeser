@@ -4,16 +4,24 @@
 //   DESK_APP=services -> As Built, formerly Riyeser Services (the riyeser.com/app/ app in its own window)
 //   DESK_APP=team    -> Riyeser Link, formerly Riyeser Team (chat and calls: riyeser.com/link in its own window)
 //   DESK_APP=linkoffice -> Riyeser Link Office (the office phone system for desk phones)
-//   (default)        -> Riyeser Desk Assistant
+//   (default)        -> Riyeser Documents (formerly Riyeser Desk Assistant)
 const base = require('../package.json').build;
 const which = ['pdf', 'central', 'services', 'team', 'linkoffice'].includes(process.env.DESK_APP) ? process.env.DESK_APP : 'assistant';
 const pdf = which === 'pdf';
 const APPS = {
-  assistant: { name: 'Riyeser Desk Assistant', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDeskAssistant' },
+  // Riyeser Documents was Riyeser Desk Assistant. The name people see (window, shortcuts, Installed apps) and the
+  // installer (RiyeserDocuments-Setup) changed; the app id, install folder (desk-assistant, from the package name),
+  // program file (Riyeser Desk Assistant.exe) and data folder (%APPDATA%\Desk Assistant, set in main.js) stay the same,
+  // so installed copies update in place and older Centrals still find it. package-win.js also leaves a
+  // RiyeserDeskAssistant-Setup copy for the old download link and older Centrals. Its own version (1.0.0), so
+  // Riyeser PDF keeps the package version.
+  assistant: { name: 'Riyeser Documents', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDocuments',
+    executableName: 'Riyeser Desk Assistant',
+    extraMetadata: { name: 'desk-assistant', version: '1.0.0', productName: 'Riyeser Documents', description: 'Riyeser Documents (Riyeser Group): scan, file and find the office\'s documents.' } },
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
     extraMetadata: { main: 'src/pdf-main.js', name: 'desk-pdf' } },
   central: { name: 'Riyeser Central', appId: 'com.riyeser.central', ico: 'build/central/icon.ico', out: 'dist-central', artifact: 'RiyeserCentral',
-    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.8.8', productName: 'Riyeser Central' } },
+    extraMetadata: { main: 'src/central-main.js', name: 'riyeser-central', version: '1.8.9', productName: 'Riyeser Central' } },
   // As Built was called Riyeser Services. Only the name people see changed: the app id, install folder (riyeser-services),
   // program file (Riyeser Services.exe), saved projects and release file (RiyeserServices-Setup.exe) stay the same,
   // so installed copies update in place and keep their projects.
