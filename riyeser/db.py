@@ -369,9 +369,36 @@ def migrate(db):
         # M13: bills get their own prefix (purchase orders keep PO); bills already numbered keep their numbers
         db.execute("UPDATE company SET bill_prefix='BILL' WHERE bill_prefix='PO'")
         db.execute("INSERT INTO data_fixes (key, done_at) VALUES ('bill_prefix', datetime('now'))")
+    _stock_and_quotes(db)
     _job_parts_inc_gst(db)
     _unique_document_numbers(db)
     db.commit()
+
+
+def _add_columns(db, table, cols):
+    have = {r["name"] for r in db.execute(f"PRAGMA table_info({table})")}
+    for col, ddl in cols:
+        if col not in have:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+
+
+def _stock_and_quotes(db):
+    """Reordering (preferred supplier, reorder-up-to, receiving purchase orders in parts) and quotes customers
+    accept or decline (riyeser/views/stock.py, riyeser/views/quotes.py). Only adds columns."""
+    _add_columns(db, "items", (("reorder_up_to", "REAL"),                               # order back up to this many
+                               ("supplier_id", "INTEGER REFERENCES contacts(id)")))      # preferred supplier
+    _add_columns(db, "document_lines", (("qty_received", "REAL NOT NULL DEFAULT 0"),))  # purchase order lines
+    _add_columns(db, "documents", (
+        ("valid_until", "TEXT"),             # a quote: valid until this date, then it shows as Expired
+        ("quote_status", "TEXT"),            # a sale quote: NULL = waiting, 'accepted', 'declined'
+        ("quote_status_at", "TEXT"),         # when it was accepted / declined
+        ("quote_status_by", "TEXT"),         # who recorded it (user), or 'customer' when accepted online
+        ("accepted_name", "TEXT"),           # the customer's name, typed as their signature
+        ("accepted_source", "TEXT"),         # in_person, phone, email, accepted_online (from the cloud, later)
+        ("quote_status_note", "TEXT"),       # why it was declined, or anything else worth keeping
+        ("booking_job_id", "INTEGER REFERENCES booking_jobs(id)"),   # a quote: the Bookings job made from it
+        ("source_document_id", "INTEGER REFERENCES documents(id)"),  # a bill: the purchase order it received
+        ("received_at", "TEXT")))            # a purchase order: everything on it has been received
 
 
 def _job_parts_inc_gst(db):

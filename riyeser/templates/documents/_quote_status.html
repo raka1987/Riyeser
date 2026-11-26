@@ -1,0 +1,31 @@
+<div class="card qst">
+<style>.qst details{margin-top:12px}.qst summary{cursor:pointer;display:inline-block}.qst form .fields{margin-top:12px}.qst .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}</style>
+<h3>Customer's answer</h3>
+{% if qstate == 'accepted' %}
+<p style="margin:0"><span class="badge paid">Accepted</span>
+{% if doc.quote_status == 'accepted' %} {{ doc.quote_status_at }}{% if doc.accepted_source %} · {{ sources.get(doc.accepted_source, doc.accepted_source) }}{% endif %}{% if doc.quote_status_by %} · recorded by {{ doc.quote_status_by }}{% endif %}{% else %} Turned into an invoice or order.{% endif %}</p>
+{% if doc.accepted_name %}<p style="margin:8px 0 0">Signed: <b style="font-style:italic">{{ doc.accepted_name }}</b></p>{% endif %}
+{% if doc.quote_status_note %}<p class="muted" style="margin:6px 0 0">{{ doc.quote_status_note }}</p>{% endif %}
+<p class="muted" style="margin:8px 0 0">Next: {% if doc.converted_to %}it has been invoiced.{% else %}press <b>Make the invoice</b>{% if bookings_on and not job %}, or <b>Make a booking job</b> to schedule the work in Riyeser Bookings (you can do both){% endif %}.{% endif %}</p>
+{% elif qstate == 'declined' %}
+<p style="margin:0"><span class="badge void">Declined</span> {{ doc.quote_status_at }}{% if doc.quote_status_by %} · recorded by {{ doc.quote_status_by }}{% endif %}</p>
+{% if doc.quote_status_note %}<p class="muted" style="margin:6px 0 0">{{ doc.quote_status_note }}</p>{% endif %}
+{% else %}
+<p style="margin:0">{% if qstate == 'expired' %}<span class="badge open">Expired</span> This quote was valid until {{ doc.valid_until }}. You can still mark it accepted, or edit it to give a new date.
+{% else %}<span class="badge quote">Waiting</span> {% if doc.valid_until %}Valid until <b>{{ doc.valid_until }}</b>.{% endif %} When the customer says yes or no, record it here.{% endif %}</p>
+{% if lv('sales') >= 2 %}
+<details{% if qstate == 'waiting' %} open{% endif %}><summary class="btn pri">Mark accepted</summary>
+<form method="post" action="{{ url_for('documents.quote_accept', doc_id=doc.id) }}"><div class="fields">
+<div><label for="q-name">Customer's name (signature, optional)</label><input id="q-name" name="accepted_name" placeholder="e.g. Sam Jones" autocomplete="off"></div>
+<div><label for="q-src">How did they accept?</label><select id="q-src" name="source">{% for k, v in sources.items() if k != 'accepted_online' %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+<div class="wide"><label for="q-note">Note (optional)</label><input id="q-note" name="note" placeholder="e.g. Wants it done before Christmas"></div>
+</div><div class="row"><button class="btn pri">Save: accepted</button></div></form></details>
+<details><summary class="btn">Declined</summary>
+<form method="post" action="{{ url_for('documents.quote_decline', doc_id=doc.id) }}"><div class="fields">
+<div class="wide"><label for="q-why">Why (optional)</label><input id="q-why" name="note" placeholder="e.g. Went with another quote"></div>
+</div><div class="row"><button class="btn danger">Save: declined</button></div></form></details>
+{% endif %}
+{% endif %}
+{% if qstate in ('accepted', 'declined') and doc.quote_status and not doc.converted_to and lv('sales') >= 2 %}
+<form method="post" class="inline" action="{{ url_for('documents.quote_undo', doc_id=doc.id) }}" style="margin-top:10px;display:block"><button class="btn sm">Undo: back to waiting</button></form>{% endif %}
+</div>

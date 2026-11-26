@@ -14,6 +14,8 @@
 <div class="card"><h2 id="sales">Invoices &amp; customers</h2><ul>
 <li><b>New Invoice</b>: choose a customer, then add lines. Picking a stock item fills in the price, account and GST. Tick <b>Prices include GST</b> if your prices are GST-inclusive.</li>
 <li><b>Save as</b> lets you keep a <b>Quote</b> or <b>Order</b>. Open it later and press <b>Convert to invoice</b>.</li>
+<li><b>Quotes</b>: each quote has a <b>Valid until</b> date (30 days unless you choose another), printed on its PDF. Open the quote and press <b>Mark accepted</b> when the customer says yes (type their name as a signature if you like) or <b>Declined</b> if they say no. A quote still waiting after its date shows as <b>Expired</b>. Under <b>Quotes</b>, the Waiting, Accepted, Declined and Expired buttons show just those.</li>
+<li>From an accepted quote, <b>Make the invoice</b> copies its lines onto a new invoice (the quote is kept as it was). If you use Riyeser Bookings, <b>Make a booking job</b> adds a job there with the customer, their address and the quote's lines and price, ready to book a time. Invoicing that job uses the quote's lines, so nothing is charged twice.</li>
 <li><b>Receive Payments</b>: pick the customer and enter what they paid against each invoice. One payment can cover several invoices.</li>
 <li>Made a mistake? A posted invoice can't be edited. <b>Void</b> it (this reverses the books and returns the stock) and enter it again. Void any payment on it first.</li>
 <li><b>Download PDF</b> gives you a PDF to email. <b>Statement</b> on the customer's card shows everything they owe.</li></ul></div>
@@ -23,6 +25,8 @@
 <li><b>Receive Stock (Bill)</b>: enter the supplier's bill with the stock items and quantities. Stock goes up and you owe the supplier. Use <b>Pay Bills</b> when you pay.</li>
 <li><b>Stocktake</b>: type what you counted. The differences are posted as an inventory adjustment.</li>
 <li>Set a <b>reorder level</b> on each item to see it on the dashboard and in <b>Items to Reorder</b> when stock runs low.</li>
+<li><b>Stock → Low stock &amp; reorder</b> lists everything at or below its reorder level, with how many are already on order and how many to order. Give an item a <b>Reorder up to</b> level and a <b>Preferred supplier</b> (Edit the item) and the list fills them in. Tick what you want and press <b>Order these</b>: you get one <b>purchase order</b> for each supplier, to check and then email or print.</li>
+<li>When the delivery arrives, open the purchase order and press <b>Receive goods</b>. Type how many of each line came (all of it, or part). This brings the stock in and makes the bill; anything still to come stays on the order for next time. If the rest isn't coming, close the order.</li>
 <li>The <b>Category</b> (e.g. Coffee, Hardware) decides which tab the item shows under in Riyeser POS.</li></ul></div>
 
 {% include "help/_pos_card.html" %}

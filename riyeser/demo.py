@@ -137,6 +137,7 @@ def seed_demo(db):
             L.record_payment(db, "in", c, acc["1-1110"], d(days - 12), [(inv, _total(db, inv))])
     L.save_document(db, "sale", dict(contact_id=cust[2], date=d(2), due_date=d(-28), notes="Valid 30 days"),
                     [dict(item_id=items[1], qty=2, unit_price=_price(db, items[1]), tax_code_id=tc["GST"])], "quote")
+    seed_stock_and_quotes(db, cust, supp, items, tc, d)
 
     # Monthly overheads
     for m in (120, 90, 60, 30):
@@ -202,6 +203,55 @@ def seed_demo(db):
                    (acc["1-1110"], d(days), desc, to_cents(amt)))
     seed_bookings(db, cust)
     db.commit()
+
+
+def seed_stock_and_quotes(db, cust, supp, items, tc, d):
+    """Low stock to reorder (preferred suppliers, a part-received purchase order) and quotes in every state."""
+    from .views.receiving import receive
+    from .views.quotes import mark_accepted, mark_declined
+    for i, up_to in zip(items[:3], (400, 30, 100)):
+        db.execute("UPDATE items SET supplier_id=?, reorder_up_to=? WHERE id=?", (supp[0], up_to, i))
+    aqua = db.execute("INSERT INTO contacts (kind, name, terms_days, tax_code_id, email) VALUES"
+                      " ('supplier', 'Aqua Parts Direct', 30, ?, 'orders@aquaparts.example')", (tc["GST"],)).lastrowid
+    inv_ids = db.execute("SELECT income_account_id, expense_account_id, asset_account_id FROM items WHERE id=?",
+                         (items[0],)).fetchone()
+    new = []
+    for sku, name, sell, buy, level, up_to, sup in (("HSG-400", "Filter housing kit", 129, 54, 10, 40, supp[0]),
+                                                    ("WSH-500", "Tap washer pack", 12, 4.5, 6, 30, None)):
+        new.append(db.execute(
+            "INSERT INTO items (sku, name, category, sell_price, buy_price, is_inventoried, income_account_id,"
+            " expense_account_id, asset_account_id, sale_tax_code_id, purchase_tax_code_id, reorder_level,"
+            " reorder_up_to, supplier_id) VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?)",
+            (sku, name, "Filters" if sku.startswith("HSG") else "Taps", to_cents(sell), to_cents(buy),
+             inv_ids["income_account_id"], inv_ids["expense_account_id"], inv_ids["asset_account_id"], tc["GST"],
+             tc["GST"], level, up_to, sup)).lastrowid)
+    L.save_document(db, "purchase", dict(contact_id=supp[0], date=d(60), due_date=d(30), reference="PW-9310"),
+                    [dict(item_id=new[0], qty=12, unit_price=to_cents(54), tax_code_id=tc["GST"])], "open")
+    L.save_document(db, "purchase", dict(contact_id=aqua, date=d(50), due_date=d(20), reference="APD-118"),
+                    [dict(item_id=new[1], qty=20, unit_price=to_cents(4.5), tax_code_id=tc["GST"])], "open")
+    L.save_document(db, "sale", dict(contact_id=cust[2], date=d(12), due_date=d(-2)),
+                    [dict(item_id=new[0], qty=9, unit_price=_price(db, new[0]), tax_code_id=tc["GST"]),
+                     dict(item_id=new[1], qty=16, unit_price=_price(db, new[1]), tax_code_id=tc["GST"])], "open")
+    # a purchase order for pumps: 4 of the 10 have arrived so far
+    po = L.save_document(db, "purchase", dict(contact_id=supp[0], date=d(9), due_date=d(-21), reference="PO for pumps"),
+                         [dict(item_id=items[1], qty=10, unit_price=to_cents(315), tax_code_id=tc["GST"])], "order")
+    line = db.execute("SELECT id FROM document_lines WHERE document_id=?", (po,)).fetchone()[0]
+    receive(db, po, {line: 4}, d(4), "PW-9402")
+    # quotes: waiting (the one above), accepted, declined and expired
+    db.execute("UPDATE documents SET valid_until=? WHERE side='sale' AND status='quote'", (d(-28),))
+
+    def quote(c, days, lines, valid, notes=None):
+        q = L.save_document(db, "sale", dict(contact_id=c, date=d(days), due_date=d(days - 14), notes=notes),
+                            [dict(item_id=i, qty=n, unit_price=_price(db, i), tax_code_id=tc["GST"]) for i, n in lines],
+                            "quote")
+        db.execute("UPDATE documents SET valid_until=? WHERE id=?", (d(valid), q))
+        return q
+    q = quote(cust[0], 6, [(items[2], 4), (items[3], 3)], -24, "Install four filtered taps in the staff kitchens.")
+    mark_accepted(db, q, "Sam Bayside", "in_person", by="Alex Sample", at=d(1) + " 10:15")
+    q = quote(cust[3], 20, [(items[1], 1), (items[3], 2)], -10)
+    mark_declined(db, q, "Went with another quote")
+    db.execute("UPDATE documents SET quote_status_by='Alex Sample', quote_status_at=? WHERE id=?", (d(8) + " 15:40", q))
+    quote(cust[1], 45, [(items[0], 24)], 15)
 
 
 def seed_bookings(db, customers=None):

@@ -25,5 +25,11 @@
 
 {% macro status(doc, today=None) -%}
 {% if doc.status == 'open' and today and doc.due_date and doc.due_date < today %}<span class="badge over">Overdue</span>
+{% elif doc.status == 'quote' and doc.side == 'sale' and (doc.quote_status == 'accepted' or doc.converted_to) %}<span class="badge paid">Accepted</span>
+{% elif doc.status == 'quote' and doc.side == 'sale' and doc.quote_status == 'declined' %}<span class="badge void">Declined</span>
+{% elif doc.status == 'quote' and doc.side == 'sale' and today and doc.valid_until and doc.valid_until < today %}<span class="badge open">Expired</span>
+{% elif doc.status == 'quote' and doc.side == 'sale' %}<span class="badge quote">Waiting</span>
+{% elif doc.status == 'order' and doc.side == 'purchase' and doc.received_at %}<span class="badge paid">Received</span>
+{% elif doc.status == 'order' and doc.side == 'purchase' and doc.recv %}<span class="badge open">Part received</span>
 {% else %}<span class="badge {{ doc.status }}">{{ {'open':'Open','paid':'Paid','void':'Void','quote':'Quote','order':'Order'}[doc.status] }}</span>{% endif %}
 {%- endmacro %}

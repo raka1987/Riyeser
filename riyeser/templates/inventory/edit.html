@@ -38,6 +38,9 @@ document.getElementById('photoFile').addEventListener('change',e=>{const f=e.tar
 <div><label>Tax code when sold</label>{{ tax_select('sale_tax_code_id', tax_codes, item.sale_tax_code_id if item else (tax_codes|selectattr('code','equalto','GST')|first).id) }}</div>
 <div><label>Tax code when bought</label>{{ tax_select('purchase_tax_code_id', tax_codes, item.purchase_tax_code_id if item else (tax_codes|selectattr('code','equalto','GST')|first).id) }}</div>
 <div><label>Reorder level</label><input name="reorder_level" value="{{ '%g'|format(item.reorder_level) if item else 0 }}"></div>
+<div><label for="reorder_up_to">Reorder up to (optional)</label><input id="reorder_up_to" name="reorder_up_to" inputmode="decimal" value="{{ '%g'|format(item.reorder_up_to) if item and item.reorder_up_to }}" placeholder="e.g. 40">
+<p class="muted" style="margin:4px 0 0;font-size:12.5px">When stock falls to the reorder level, Low stock suggests ordering back up to this many.</p></div>
+<div><label for="supplier_id">Preferred supplier</label><select id="supplier_id" name="supplier_id"><option value="">—</option>{% for s in suppliers %}<option value="{{ s.id }}" {{ 'selected' if item and item.supplier_id == s.id }}>{{ s.name }}</option>{% endfor %}</select></div>
 {% if not item %}<div><label>Opening quantity</label><input name="opening_qty"></div><div><label>Opening unit cost</label><input name="opening_cost"></div>
 <div><label>Opening date</label><input type="date" name="opening_date" value="{{ today() }}"></div>{% endif %}
 </div><p><button class="btn pri">Save item</button></p></form>

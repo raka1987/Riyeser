@@ -1,0 +1,37 @@
+{% extends "base.html" %}{% block title %}Receive {{ po.number }}{% endblock %}
+{% block content %}
+<style>
+.rc-tbl input{width:90px;text-align:right}
+@media (max-width:700px){
+  .rc-tbl table,.rc-tbl tbody,.rc-tbl tr,.rc-tbl td{display:block;width:100%}
+  .rc-tbl tr.hd{display:none}.rc-tbl tr{border-bottom:1px solid var(--line);padding:10px 12px}
+  .rc-tbl td{border:0;padding:3px 0;text-align:left!important}
+  .rc-tbl td[data-l]::before{content:attr(data-l) ": ";color:var(--muted);font-size:12.5px}
+}
+</style>
+<div class="head"><div><h1>Receive goods: {{ po.number }}</h1>
+<p class="sub">{{ po.cname }} · ordered {{ po.date }}. Type how many of each line arrived (all of it, or just what came in
+this delivery). This makes a bill for what arrived, brings the stock in, and keeps the rest on the order for later.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('documents.view', doc_id=po.id) }}">Back to the order</a></div></div>
+<form method="post">
+<div class="card"><div class="fields">
+<div><label for="rc-date">Date received</label><input type="date" id="rc-date" name="date" value="{{ today() }}" required></div>
+<div><label for="rc-ref">Supplier's invoice or delivery number</label><input id="rc-ref" name="reference" placeholder="optional"></div>
+</div></div>
+<div class="tbl rc-tbl"><table>
+<tr class="hd"><th>Item</th><th>Description</th><th class="n">Ordered</th><th class="n">Already in</th><th class="n">Still to come</th><th class="n">Arrived now</th><th class="n">Unit price</th></tr>
+{% for l in lines %}<tr>
+<td><b>{{ l.sku or '' }}</b></td><td>{{ l.description or '' }}</td>
+<td class="n" data-l="Ordered">{{ '%g'|format(l.qty) }}</td><td class="n" data-l="Already in">{{ '%g'|format(l.qty_received) }}</td>
+<td class="n" data-l="Still to come">{{ '%g'|format(l.left) }}</td>
+<td class="n" data-l="Arrived now">{% if l.left > 0 %}<input name="recv_{{ l.id }}" inputmode="decimal" value="{{ '%g'|format(l.left) }}" aria-label="How many {{ l.description }} arrived">{% else %}<span class="badge paid">All in</span>{% endif %}</td>
+<td class="n" data-l="Unit price">{% if l.left > 0 %}<input name="price_{{ l.id }}" inputmode="decimal" value="{{ l.unit_price|cents }}" aria-label="Unit price for {{ l.description }}">{% endif %}</td>
+</tr>{% endfor %}</table></div>
+<p class="muted" style="font-size:13px">Change the unit price if the supplier's invoice differs from the order.</p>
+<p><button class="btn pri">Receive and make the bill</button></p>
+</form>
+{% if bills %}<div class="card"><h3>Bills already made from this order</h3><table>{% for b in bills %}
+<tr class="click" data-href="{{ url_for('documents.view', doc_id=b.id) }}"><td><b>{{ b.number }}</b></td><td>{{ b.date }}</td><td class="n">{{ b.total|money }}</td><td>{% if b.status == 'void' %}<span class="badge void">Void</span>{% endif %}</td></tr>{% endfor %}</table>
+<form method="post" style="margin-top:12px" data-confirm="Close {{ po.number }}? Nothing more will be expected on it."><input type="hidden" name="close" value="1">
+<button class="btn">The rest isn't coming: close this order</button></form></div>{% endif %}
+{% endblock %}

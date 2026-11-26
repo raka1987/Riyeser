@@ -496,7 +496,11 @@ def register():
     tills = _tills(db)
     shifts = {t["id"]: bool(open_shift(db, t["id"])) for t in tills}
     floats = {t["id"]: _last_float(db, t["id"]) for t in tills}
-    return render_template("pos/front.html", items_json=json.dumps(items), cats=cats, customers=customers,
+    low = 0
+    if _sees_low_stock():
+        low = db.execute("SELECT COUNT(*) FROM items WHERE is_inventoried=1 AND active=1 AND is_sold=1"
+                         " AND qty_on_hand<=reorder_level").fetchone()[0]
+    return render_template("pos/front.html", items_json=json.dumps(items), cats=cats, customers=customers, low_count=low,
                            walk_in=WALK_IN, methods=METHODS, mode=mode, features=sorted(features),
                            tills=tills, shifts=shifts, floats=floats, **approval_ctx(db))
 
@@ -736,8 +740,15 @@ def sale():
     except (PostingError, ValueError, KeyError, TypeError) as e:
         db.rollback()
         return jsonify(ok=False, error=str(e) or "Could not complete the sale."), 400
-    return jsonify(ok=True, sale_id=sid, total=total, change=tendered - total,
+    from .reorder import low_after_sale
+    low = low_after_sale(db, [l["item_id"] for l in lines]) if _sees_low_stock() else []  # a warning, never a block
+    return jsonify(ok=True, sale_id=sid, total=total, change=tendered - total, low_stock=low,
                    receipt_url=url_for("pos.receipt", sid=sid))
+
+
+def _sees_low_stock():
+    """Managers (who can approve at the till) and people who look after stock see the low-stock warnings."""
+    return self_approves() or perms.can("stock", perms.EDIT)
 
 
 def _sale(db, sid):

@@ -30,15 +30,23 @@ def index(side):
     db = get_db()
     status = request.args.get("status", "open")
     q = request.args.get("q", "")
-    sql = ("SELECT d.*, c.name cname FROM documents d JOIN contacts c ON c.id=d.contact_id"
-           " WHERE d.side=? AND (c.name LIKE ? OR d.number LIKE ?)")
+    sql = ("SELECT d.*, c.name cname, (SELECT SUM(qty_received) FROM document_lines x WHERE x.document_id=d.id) recv"
+           " FROM documents d JOIN contacts c ON c.id=d.contact_id WHERE d.side=? AND (c.name LIKE ? OR d.number LIKE ?)")
     p = [side, f"%{q}%", f"%{q}%"]
     if status != "all":
         sql += " AND d.status=?"; p.append(status)
+    if status == "order":
+        sql += " AND d.received_at IS NULL"  # a purchase order that's all in (or closed) is finished: see All
+    qs = request.args.get("qs", "") if side == "sale" and status == "quote" else ""
+    if qs:
+        from .quotes import filter_sql
+        more, args = filter_sql(qs, date.today().isoformat())
+        sql += more; p += args
     sql += " ORDER BY d.date DESC, d.id DESC LIMIT 500"
     rows = db.execute(sql, p).fetchall()
+    from .quotes import FILTERS
     return render_template("documents/index.html", rows=rows, side=side, L=L, status=status, q=q, capped=len(rows) >= 500,
-                           today=date.today().isoformat())
+                           today=date.today().isoformat(), qs=qs, quote_filters=FILTERS)
 
 
 @bp.route("/<side>/new", methods=["GET", "POST"])
@@ -53,6 +61,11 @@ def edit(side, doc_id=None):
         doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
         if doc["status"] not in ("quote", "order"):
             flash("Posted documents can't be edited. Void and re-enter instead.", "error")
+            return redirect(url_for("documents.view", doc_id=doc_id))
+        from .receiving import received_any
+        if received_any(db, doc_id) or doc["received_at"]:
+            flash("Goods have already been received on this order, so it can't be changed. Receive the rest, or "
+                  "close it and make a new order.", "error")
             return redirect(url_for("documents.view", doc_id=doc_id))
         lines = db.execute("SELECT * FROM document_lines WHERE document_id=?", (doc_id,)).fetchall()
     contacts = db.execute("SELECT * FROM contacts WHERE kind=? AND active=1 ORDER BY name", (L["kind"],)).fetchall()
@@ -122,12 +135,21 @@ def _save(side, doc_id):
         from ..ledger import check_stock
         check_stock(db, lines, bool(f.get("sell_anyway")))  # S40: tick "Sell anyway" to go below 0
     was_quote = doc_id and db.execute("SELECT status FROM documents WHERE id=?", (doc_id,)).fetchone()["status"] == "quote"
+    from . import quotes
+    if doc_id and status != "quote":
+        quotes.check_convertible(db, doc_id)
+        from .receiving import received_any
+        if received_any(db, doc_id):
+            raise PostingError("Goods have already been received on this order, so it can't be changed.")
     if was_quote and status != "quote":
         # S35: the quote keeps what was quoted; the order / invoice is a new document linked to it
         save_document(db, side, header, lines, "quote", doc_id)
         did = convert_document(db, doc_id, status)
+        quotes.after_convert(db, doc_id, did)
     else:
         did = save_document(db, side, header, lines, status, doc_id)
+    if side == "sale" and (status == "quote" or was_quote):
+        quotes.set_valid_until(db, doc_id if was_quote else did, f.get("valid_until"), header["date"])
     doc = db.execute("SELECT number, tax_total FROM documents WHERE id=?", (did,)).fetchone()
     if capped_quote:
         from .. import plan as P
@@ -162,7 +184,19 @@ def view(doc_id):
         return Response(pdfmod.document_pdf(db, doc_id), mimetype="application/pdf",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
     tpl = "documents/print.html" if request.args.get("print") else "documents/view.html"
-    return render_template(tpl, doc=doc, lines=lines, pays=pays, L=LABELS[doc["side"]])
+    from . import quotes, receiving
+    from .. import perms
+    extra = dict(qstate=quotes.state(doc), sources=quotes.SOURCES)
+    if extra["qstate"]:
+        extra["bookings_on"] = quotes.uses_bookings(db) and perms.can("bookings", perms.EDIT)
+        extra["job"] = db.execute("SELECT id FROM booking_jobs WHERE id=?", (doc["booking_job_id"],)).fetchone() \
+            if doc["booking_job_id"] else None
+    if doc["side"] == "purchase" and doc["status"] == "order":
+        extra["rcv"] = receiving.receiving_status(db, doc)
+    if doc["source_document_id"]:
+        extra["source_doc"] = db.execute("SELECT id, number FROM documents WHERE id=?",
+                                         (doc["source_document_id"],)).fetchone()
+    return render_template(tpl, doc=doc, lines=lines, pays=pays, L=LABELS[doc["side"]], **extra)
 
 
 @bp.route("/document/<int:doc_id>/convert", methods=["POST"])
@@ -173,7 +207,13 @@ def convert(doc_id):
     doc = db.execute("SELECT side FROM documents WHERE id=?", (doc_id,)).fetchone()
     if doc and doc["side"] == "sale" and to == "open":
         _check_free_invoices(db)
+    from . import quotes
+    from .receiving import received_any
+    quotes.check_convertible(db, doc_id)
+    if received_any(db, doc_id):
+        raise PostingError("Part of this order has already been received. Use \"Receive goods\" for the rest.")
     new = convert_document(db, doc_id, to)
+    quotes.after_convert(db, doc_id, new)
     num = db.execute("SELECT number FROM documents WHERE id=?", (new,)).fetchone()["number"]
     flash(f"Converted: {num}." + (" The quote is kept as it was." if new != doc_id else ""), "ok")
     if to == "open":
@@ -251,7 +291,9 @@ def email(doc_id):
     body = request.form.get("message") or (
         f"Hello {doc['cname']},\n\nPlease find attached {title.lower()} {doc['number']}"
         + (f" for {pdfmod.fmt_money(due)}, due {doc['due_date']}" if doc["status"] == "open" and due > 0 and
-           doc["kind"] == "invoice" else "") + f".\n\nThank you,\n{g.company['name']}")
+           doc["kind"] == "invoice" else "")
+        + (f", valid until {doc['valid_until']}" if doc["status"] == "quote" and doc["valid_until"] else "")
+        + f".\n\nThank you,\n{g.company['name']}")
     msg = send_or_queue(db, to, request.form.get("subject") or f"{title} {doc['number']} from {g.company['name']}",
                         body, (name, pdfmod.document_pdf(db, doc_id)), "document", doc_id)
     flash(msg, "ok")
@@ -262,6 +304,8 @@ def email(doc_id):
 @guarded
 def void(doc_id):
     void_document(get_db(), doc_id)
+    from .receiving import undo_receipt
+    undo_receipt(get_db(), doc_id)  # a bill from a purchase order: those goods are "still to come" again
     flash("Document voided and reversed in the ledger.", "ok")
     return redirect(url_for("documents.view", doc_id=doc_id))
 
@@ -273,6 +317,11 @@ def delete(doc_id):
     doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     if doc["status"] not in ("quote", "order"):
         raise ValueError("Only quotes and orders can be deleted.")
+    from .receiving import received_any
+    if received_any(db, doc_id):
+        raise ValueError("Goods have been received on this order, so it's kept. Close it instead if nothing more is "
+                         "coming.")
+    db.execute("UPDATE documents SET source_document_id=NULL WHERE source_document_id=?", (doc_id,))
     db.execute("DELETE FROM documents WHERE id=?", (doc_id,))
     flash(f"{doc['number']} deleted.", "ok")
     return redirect(url_for("documents.index", side=doc["side"], status=doc["status"]))
@@ -360,3 +409,6 @@ def payment_void(pid):
     void_payment(db, pid)
     flash("Payment voided.", "ok")
     return redirect(url_for("documents.payments", side="sale" if p["direction"] == "in" else "purchase"))
+
+
+from . import quotes, receiving  # noqa: E402,F401  (their routes are on this blueprint)

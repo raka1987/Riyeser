@@ -1,0 +1,41 @@
+{% extends "base.html" %}{% block title %}Low stock{% endblock %}
+{% block content %}
+<style>
+.low-tbl input.q{width:80px;text-align:right}.low-tbl select{min-width:170px}
+.low-tbl .why{display:block;color:var(--muted);font-size:12px}
+@media (max-width:700px){
+  .low-tbl table,.low-tbl tbody,.low-tbl tr,.low-tbl td{display:block;width:100%}
+  .low-tbl tr.hd{display:none}
+  .low-tbl tr{border-bottom:1px solid var(--line);padding:10px 12px}
+  .low-tbl td{border:0;padding:3px 0;text-align:left!important}
+  .low-tbl td[data-l]::before{content:attr(data-l) ": ";color:var(--muted);font-size:12.5px}
+  .low-tbl select{width:100%;min-width:0}
+}
+</style>
+<div class="head"><div><h1>Low stock</h1>
+<p class="sub">Items with stock at or below their reorder level. The order quantity brings each one back up to its
+"reorder up to" level (or twice the reorder level when that isn't set), less what's already on order. Change any number
+before ordering.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('documents.index', side='purchase', status='order') }}">Purchase orders</a>
+<a class="btn" href="{{ url_for('inventory.index') }}">All stock items</a></div></div>
+{% if not rows %}<div class="card"><p style="margin:0">Nothing is low on stock right now. Set a <b>reorder level</b> on each item
+(Edit the item) to have it show here when it runs low.</p></div>
+{% else %}
+<form method="post" action="{{ url_for('inventory.order') }}">
+<div class="tbl low-tbl"><table>
+<tr class="hd"><th>Order</th><th>Item</th><th class="n">On hand</th><th class="n">Reorder level</th><th class="n">On order</th><th class="n">Order qty</th><th>Supplier</th></tr>
+{% for i in rows %}<tr>
+<td>{% if can_order %}<label class="check"><input type="checkbox" name="pick" value="{{ i.id }}" {{ 'checked' if i.suggested > 0 }} aria-label="Order {{ i.name }}"> <span class="muted" style="font-size:12.5px">Order</span></label>{% endif %}</td>
+<td><a href="{{ url_for('inventory.view', iid=i.id) }}"><b>{{ i.sku }}</b> {{ i.name }}</a>{% if i.on_order and not i.suggested %}<span class="why">Enough is already on order.</span>{% endif %}</td>
+<td class="n" data-l="On hand">{{ '%g'|format(i.qty_on_hand) }}</td>
+<td class="n" data-l="Reorder level">{{ '%g'|format(i.reorder_level) }}{% if i.reorder_up_to %} <span class="muted">(up to {{ '%g'|format(i.reorder_up_to) }})</span>{% endif %}</td>
+<td class="n" data-l="On order">{{ '%g'|format(i.on_order) if i.on_order else '—' }}</td>
+<td class="n" data-l="Order qty">{% if can_order %}<input class="q" name="qty_{{ i.id }}" inputmode="decimal" value="{{ i.suggested or '' }}" aria-label="How many {{ i.name }} to order">{% else %}{{ i.suggested }}{% endif %}</td>
+<td data-l="Supplier">{% if can_order %}<select name="supplier_{{ i.id }}" aria-label="Supplier for {{ i.name }}"><option value="">Choose…</option>{% for s in suppliers %}<option value="{{ s.id }}" {{ 'selected' if i.order_supplier == s.id }}>{{ s.name }}</option>{% endfor %}</select>
+{% if not i.preferred and i.order_supplier %}<span class="why">Last bought from. Saved as the preferred supplier when you order.</span>{% endif %}{% else %}{{ i.supplier_name or '—' }}{% endif %}</td>
+</tr>{% endfor %}</table></div>
+{% if can_order %}<p style="margin-top:14px"><button class="btn pri">Order these</button>
+<span class="muted" style="margin-left:8px;font-size:13px">Makes one purchase order for each supplier. Nothing is sent until you email or print it.</span></p>{% else %}
+<p class="muted">Purchase orders are made in Riyeser Accounting (Stock → Low stock), by someone who can add purchases.</p>{% endif %}
+</form>{% endif %}
+{% endblock %}

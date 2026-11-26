@@ -190,6 +190,11 @@ def document_pdf(db, doc_id) -> bytes:
     meta = [("Date", doc["date"])]
     if doc["due_date"] and doc["status"] not in ("quote",):
         meta.append(("Due", doc["due_date"]))
+    if doc["status"] == "quote" and doc["valid_until"]:
+        meta.append(("Valid until", doc["valid_until"]))
+    if doc["status"] == "quote" and doc["quote_status"] == "accepted":
+        meta.append(("Accepted", (doc["quote_status_at"] or "")[:10]
+                     + (f" by {doc['accepted_name']}" if doc["accepted_name"] else "")))
     if doc["reference"]:
         meta.append(("Reference", doc["reference"]))
     pdf.header_block(title, doc["number"], meta)

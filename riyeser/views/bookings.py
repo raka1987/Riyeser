@@ -594,6 +594,8 @@ def _invoice_job(db, jid):
         return redirect(url_for("documents.view", doc_id=j["document_id"]))
     if not j["contact_id"]:
         raise PostingError(f"Choose the customer on this {M()['one']} first, then invoice it.")
+    from .quotes import invoice_from_quote, link_job_invoice
+    quoted = invoice_from_quote(db, jid)  # a job made from a quote, at its price: the invoice has the quote's lines
     lines, sm = job_charges(db, j)
     if j["billing"] == "time":
         unpriced = [p["description"] or p["item_name"] or "Part" for p in sm["parts"] if not p["unit_price"]]
@@ -612,7 +614,7 @@ def _invoice_job(db, jid):
     terms = (g.get("company") or {}).get("default_terms_days") or 14
     today = date.today()
     first = db.execute("SELECT notes FROM bookings WHERE job_id=? ORDER BY starts_at LIMIT 1", (jid,)).fetchone()
-    doc_id = save_document(db, "sale", dict(contact_id=j["contact_id"], date=today.isoformat(),
+    doc_id = quoted or save_document(db, "sale", dict(contact_id=j["contact_id"], date=today.isoformat(),
                                             due_date=(today + timedelta(days=terms)).isoformat(),
                                             reference=f"Job {job_no(jid)}",
                                             notes=(first["notes"] if first else None) or "", tax_inclusive=True),
@@ -621,6 +623,7 @@ def _invoice_job(db, jid):
                " updated_at=datetime('now','localtime') WHERE id=?", (doc_id, jid))
     db.execute("UPDATE bookings SET document_id=?, status=CASE WHEN status IN ('booked','confirmed','started')"
                " THEN 'done' ELSE status END, updated_at=datetime('now','localtime') WHERE job_id=?", (doc_id, jid))
+    link_job_invoice(db, jid, doc_id)
     audit(db, "booking_invoice", f"job {jid} -> document {doc_id}")
     flash("Invoice made. You can print or email it from here.", "ok")
     return redirect(url_for("documents.view", doc_id=doc_id))

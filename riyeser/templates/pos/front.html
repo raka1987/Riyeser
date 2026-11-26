@@ -100,6 +100,8 @@ body{overflow:hidden;user-select:none}
 .pcts{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.pcts button{border:1.5px solid var(--line2);background:#fff;border-radius:10px;padding:8px 14px;font-weight:700}
 #cashArea{display:flex;flex-direction:column;gap:12px}#cashArea[hidden],#cardArea[hidden]{display:none}
 #pOpen .donec{margin:16px auto;gap:10px}#pOpen .keys button{min-height:48px}#pOpen .quick button{min-height:48px}
+.lowwarn{display:block;margin:0 0 10px;padding:9px 14px;border-radius:12px;background:var(--warn-bg);color:var(--warn);font-weight:600;font-size:14px;text-decoration:none}
+#lowNote{color:var(--warn);font-weight:600;font-size:13.5px}
 @media (max-width:1100px){.sell{grid-template-columns:minmax(0,1fr) 340px}}
 @media (max-width:820px){body{overflow:auto}.sell{display:flex;flex-direction:column;height:auto}.grid{max-height:none}.paygrid{grid-template-columns:1fr}}
 {% endblock %}
@@ -111,6 +113,7 @@ body{overflow:hidden;user-select:none}
     <label class="srch"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <input id="q" placeholder="{{ 'Search or scan an item' if 'scan' in f else 'Search the menu' if mode == 'restaurant' else 'Search for an item' }}" autocomplete="off" autofocus>
       <svg class="ic" viewBox="0 0 24 24"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M8 8v8M11 8v8M14 8v8M17 8v8"/></svg></label>
+    {% if low_count %}<a class="lowwarn" href="{{ url_for('inventory.low') }}">{{ low_count }} item{{ 's are' if low_count != 1 else ' is' }} low on stock. See the list</a>{% endif %}
     <div class="catrow" id="cats"></div>
     <div class="grid" id="grid"></div>
   </section>
@@ -187,6 +190,7 @@ body{overflow:hidden;user-select:none}
     <button class="btn" id="noRc"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/></svg>No receipt</button>
   </div>
   <div style="font-size:13.5px;color:var(--muted)" id="doneNote"></div>
+  <div id="lowNote" hidden></div>
 </div></section>
 
 <!-- line editor -->
@@ -294,6 +298,7 @@ async function complete(){$('#complete').disabled=true;
   last=d;cart.forEach(l=>{const it=ITEMS.find(i=>i.id===l.id);if(it&&it.stock!==null)it.stock-=l.qty;});
   $('#give').innerHTML=method==='cash'?`<span>Give change</span><span class="n">${fmt(d.change)}</span>`:`<span>Paid by card</span><span class="n">${fmt(d.total)}</span>`;
   $('#doneNote').textContent='Saved to Accounting · stock updated';
+  const ln=$('#lowNote');if(ln){ln.hidden=!(d.low_stock&&d.low_stock.length);ln.textContent=ln.hidden?'':'Low on stock: '+d.low_stock.join(', ');}
   show('#pPay',false);show('#pDone',true);reset();loadOrders();drawGrid();}
 function newSale(){show('#pDone',false);$('#q').focus();}
 // events

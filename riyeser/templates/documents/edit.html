@@ -24,6 +24,8 @@
 <a href="{{ url_for('contacts.edit', kind=L.kind) }}" style="font-size:12px">+ new {{ L.kind }}</a></div>
 <div><label for="date">Date</label><input type="date" name="date" id="date" value="{{ doc.date if doc else today() }}" required></div>
 <div><label for="due_date">Due date</label><input type="date" name="due_date" id="due_date" value="{{ doc.due_date if doc }}"></div>
+{% if side == 'sale' and kind != 'credit' %}<div id="valid-box"{% if st != 'quote' %} hidden{% endif %}><label for="valid_until">Quote valid until</label><input type="date" name="valid_until" id="valid_until" value="{{ doc.valid_until or '' if doc }}">
+<p class="muted" style="margin:4px 0 0;font-size:12.5px">Leave empty for 30 days. After this date the quote shows as Expired.</p></div>{% endif %}
 <div><label for="doc-reference">{{ 'Customer PO' if side=='sale' else 'Supplier invoice #' }}</label><input id="doc-reference" name="reference" value="{{ doc.reference or '' if doc }}"></div>
 {% if kind != 'credit' %}<div><label for="doc-status">Save as</label><select id="doc-status" name="status">{% for k, v in [('open', L.doc ~ ' (post to ledger)'),('order','Order'),('quote','Quote')] %}<option value="{{ k }}" {{ 'selected' if st==k }}>{{ v }}</option>{% endfor %}</select></div>{% endif %}
 <label class="check"><input type="checkbox" name="tax_inclusive" id="tax_inclusive" value="1" {{ 'checked' if doc and doc.tax_inclusive }}> Prices include GST</label>
@@ -39,4 +41,4 @@
 <button class="btn pri">Save</button> <a class="btn" href="{{ url_for('documents.index', side=side) }}">Cancel</a>
 </form>
 {% endblock %}
-{% block scripts %}<script>window.RIYESER_ITEMS={{ item_json|safe }};window.RIYESER_CONTACTS={{ contact_json|safe }};window.RIYESER_TAX={{ tax_json|safe }};</script>{% endblock %}
+{% block scripts %}<script>(function(){var s=document.getElementById('doc-status'),b=document.getElementById('valid-box');if(s&&b)s.addEventListener('change',function(){b.hidden=s.value!=='quote';});})();</script><script>window.RIYESER_ITEMS={{ item_json|safe }};window.RIYESER_CONTACTS={{ contact_json|safe }};window.RIYESER_TAX={{ tax_json|safe }};</script>{% endblock %}

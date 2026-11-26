@@ -3,23 +3,32 @@
 {% block content %}
 {% set kname = {'credit': ('Credit note' if doc.side == 'sale' else 'Supplier credit'), 'payment_credit': 'Account credit'}.get(doc.kind) %}
 <div class="head"><div><h1>{{ kname or {'quote':'Quote','order':'Order'}.get(doc.status, L.doc) }} {{ doc.number }} {{ status(doc, today()) }}</h1>
-<p class="sub"><a href="{{ url_for('contacts.view', cid=doc.contact_id) }}">{{ doc.cname }}</a> · {{ doc.date }}{% if doc.due_date %} · due {{ doc.due_date }}{% endif %}{% if doc.reference %} · Ref {{ doc.reference }}{% endif %}</p></div>
+<p class="sub"><a href="{{ url_for('contacts.view', cid=doc.contact_id) }}">{{ doc.cname }}</a> · {{ doc.date }}{% if qstate %}{% if doc.valid_until %} · valid until {{ doc.valid_until }}{% endif %}{% elif doc.due_date %} · due {{ doc.due_date }}{% endif %}{% if doc.reference %} · Ref {{ doc.reference }}{% endif %}</p></div>
 <div class="actions">
 <a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, pdf=1) }}">Download PDF</a>
 <form method="post" class="inline" action="{{ url_for('documents.save_pdf', doc_id=doc.id) }}"><button class="btn" title="Save into Documents\Riyeser for Riyeser Desk Assistant">Save to Riyeser folder</button></form>
 <a class="btn" href="{{ url_for('documents.view', doc_id=doc.id, print=1) }}" target="_blank">Print</a>
 <form method="post" class="inline" action="{{ url_for('documents.email', doc_id=doc.id) }}"><input name="to" type="email" value="{{ doc.cemail or '' }}" placeholder="email address" aria-label="Email to" style="width:190px"><button class="btn">Email {{ 'quote' if doc.status == 'quote' else 'it' }}</button></form>
 {% if doc.status in ('quote','order') %}
-<a class="btn" href="{{ url_for('documents.edit', side=doc.side, doc_id=doc.id) }}">Edit</a>
-{% if doc.converted_to %}<a class="btn" href="{{ url_for('documents.view', doc_id=doc.converted_to) }}">Converted: open the {{ L.doc|lower }} / order</a>{% else %}
+{% set is_po = doc.side == 'purchase' and doc.status == 'order' %}
+{% set got = rcv and rcv.received > 0 %}
+{% if not got and not doc.received_at %}<a class="btn" href="{{ url_for('documents.edit', side=doc.side, doc_id=doc.id) }}">Edit</a>{% endif %}
+{% if is_po %}{% if not doc.received_at %}<a class="btn pri" href="{{ url_for('documents.receive_goods', doc_id=doc.id) }}">Receive goods</a>{% endif %}
+{% elif doc.converted_to %}<a class="btn" href="{{ url_for('documents.view', doc_id=doc.converted_to) }}">Converted: open the {{ L.doc|lower }} / order</a>{% elif qstate != 'declined' %}
 {% if doc.status=='quote' %}<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="order"><button class="btn">Convert to order</button></form>{% endif %}
-<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="open"><button class="btn pri">Convert to {{ L.doc|lower }}</button></form>{% endif %}
-{% if lv('sales' if doc.side == 'sale' else 'purchases') >= 3 %}<form method="post" class="inline" action="{{ url_for('documents.delete', doc_id=doc.id) }}" data-confirm="Delete this {{ doc.status }}?"><button class="btn danger">Delete</button></form>{% endif %}
+<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="open"><button class="btn{{ ' pri' if qstate in (None, 'accepted') }}">{{ 'Make the invoice' if qstate == 'accepted' else 'Convert to ' ~ L.doc|lower }}</button></form>{% endif %}
+{% if qstate == 'accepted' and bookings_on and not job %}<form method="post" class="inline" action="{{ url_for('documents.quote_job', doc_id=doc.id) }}"><button class="btn">Make a booking job</button></form>{% endif %}
+{% if job %}<a class="btn" href="{{ url_for('bookings.job', jid=job.id) }}">Open job J-{{ '%04d'|format(job.id) }}</a>{% endif %}
+{% if lv('sales' if doc.side == 'sale' else 'purchases') >= 3 and not got %}<form method="post" class="inline" action="{{ url_for('documents.delete', doc_id=doc.id) }}" data-confirm="Delete this {{ doc.status }}?"><button class="btn danger">Delete</button></form>{% endif %}
 {% endif %}
 {% if doc.status=='open' %}<a class="btn pri" href="{{ url_for('documents.pay', side=doc.side, contact=doc.contact_id) }}">{{ 'Use or refund this credit' if doc.kind != 'invoice' else L.pay }}</a>{% endif %}
 {% if doc.status=='open' and not doc.amount_paid %}{% if lv('sales' if doc.side == 'sale' else 'purchases') >= 3 %}<form method="post" class="inline" action="{{ url_for('documents.void', doc_id=doc.id) }}" data-confirm="Void {{ doc.number }}? A reversing entry will be posted."><button class="btn danger">Void</button></form>{% endif %}{% endif %}
 {% if doc.entry_id %}<a class="btn" href="{{ url_for('core.entry', eid=doc.entry_id) }}">Journal #{{ doc.entry_id }}</a>{% endif %}
 </div></div>
+{% if qstate %}{% include "documents/_quote_status.html" %}{% endif %}
+{% if rcv %}<div class="card"><h3>Receiving</h3><p style="margin:0">{% if doc.received_at %}Finished on {{ doc.received_at[:10] }}: {{ '%g'|format(rcv.received) }} of {{ '%g'|format(rcv.ordered) }} received.{% elif rcv.received %}{{ '%g'|format(rcv.received) }} of {{ '%g'|format(rcv.ordered) }} received so far. Press <b>Receive goods</b> when the rest arrives.{% else %}Nothing received yet. When the delivery comes, press <b>Receive goods</b>: it brings the stock in and makes the bill.{% endif %}</p>
+{% if rcv.bills %}<p class="muted" style="margin:8px 0 0">Bills: {% for b in rcv.bills %}<a href="{{ url_for('documents.view', doc_id=b.id) }}">{{ b.number }}</a>{{ ' (void)' if b.status == 'void' }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}</div>{% endif %}
+{% if source_doc %}<p class="muted">Goods received on purchase order <a href="{{ url_for('documents.view', doc_id=source_doc.id) }}">{{ source_doc.number }}</a>.</p>{% endif %}
 <div class="tbl"><table><tr><th>Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th>Account</th><th>Tax</th><th>Job</th><th class="n">Net</th><th class="n">GST</th></tr>
 {% for l in lines %}<tr><td>{{ l.sku or '' }}</td><td>{{ l.description or '' }}</td><td class="n">{{ '%g'|format(l.qty) }}</td><td class="n">{{ l.unit_price|money }}</td>
 <td class="n">{{ '%g%%'|format(l.discount_pct) if l.discount_pct }}</td><td>{{ l.acode }}</td><td>{{ l.tcode or '' }}</td><td>{{ l.jcode or '' }}</td><td class="n">{{ l.net_amount|money }}</td><td class="n">{{ l.tax_amount|money }}</td></tr>{% endfor %}

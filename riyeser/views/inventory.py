@@ -31,8 +31,9 @@ def edit(iid=None):
     defaults = dict(income=linked(db, "default_income"), cogs=linked(db, "cogs"), asset=linked(db, "inventory"))
     cats = [r[0] for r in db.execute("SELECT DISTINCT category FROM items WHERE category IS NOT NULL ORDER BY 1")]
     has_photo = bool(iid and db.execute("SELECT 1 FROM item_photos WHERE item_id=?", (iid,)).fetchone())
+    suppliers = db.execute("SELECT id, name FROM contacts WHERE kind='supplier' AND active=1 ORDER BY name").fetchall()
     return render_template("inventory/edit.html", item=item, defaults=defaults, categories=cats, has_photo=has_photo,
-                           **lookups(db))
+                           suppliers=suppliers, **lookups(db))
 
 
 @guarded
@@ -73,6 +74,11 @@ def _save(iid):
     db.execute("UPDATE items SET category=?, pos_favourite=?, block_oversell=?, barcodes=? WHERE id=?",
                ((f.get("category") or "").strip() or None, 1 if f.get("pos_favourite") else 0,
                 1 if f.get("block_oversell") else 0, codes or None, iid))
+    up_to = opt_float(f.get("reorder_up_to"))
+    if up_to is not None and up_to < 0:
+        raise ValueError("\"Reorder up to\" can't be below 0.")
+    db.execute("UPDATE items SET reorder_up_to=?, supplier_id=? WHERE id=?",
+               (up_to or None, opt_int(f.get("supplier_id")), iid))
     _save_photo(db, iid, f)
     audit(db, "save_item", vals[0])
     flash(f"Item {vals[0]} saved.", "ok")
@@ -161,3 +167,6 @@ def _save_count(items):
             n += 1
     flash(f"Stocktake posted: {n} adjustments.", "ok")
     return redirect(url_for("inventory.index"))
+
+
+from . import reorder  # noqa: E402,F401  (low stock and reordering: its routes are on this blueprint)
