@@ -362,7 +362,7 @@ function punch(userId, now, notes, confirmLong = false) {
   }
   const covering = db.prepare('SELECT * FROM timesheets WHERE user_id = ? AND clock_in <= ? AND clock_out > ? LIMIT 1').get(userId, now, now);
   if (covering) bad(`A shift is already recorded ${fmt12h(covering.clock_in)}–${fmt12h(covering.clock_out)} today. Ask a manager to adjust the timesheet.`);
-  db.prepare('INSERT INTO timesheets(user_id, clock_in, notes) VALUES(?,?,?)').run(userId, now, notes);
+  db.prepare("INSERT INTO timesheets(user_id, clock_in, notes, source) VALUES(?,?,?,'clock')").run(userId, now, notes);
   return { on_shift: true };
 }
 // a manager's entry can't overlap another shift for the same person
@@ -538,6 +538,7 @@ app.put('/api/staff/timesheets/:id', requireStaff, wrap((req, res) => {
   const by = tsUnlockOf(req); if (by && !String(notes || '').includes(`by ${by.name} (PIN)`)) req.body.notes = `${notes ? notes + ' · ' : ''}edited by ${by.name} (PIN)`;
   db.prepare('UPDATE timesheets SET clock_in=?, clock_out=?, notes=?, approved_by = NULL, approved_at = NULL WHERE id=?').run(clock_in, clock_out || null, str(req.body.notes, 250), +req.params.id);
   const after = { clock_in, clock_out: clock_out || null };
+  if (owner.source === 'clock' && (owner.clock_in !== after.clock_in || (owner.clock_out || null) !== after.clock_out)) db.prepare("UPDATE timesheets SET source = '' WHERE id = ?").run(+req.params.id); // times changed by hand: typed
   if (owner.clock_in !== after.clock_in || (owner.clock_out || null) !== after.clock_out) audit(req, 'Changed a shift', `${owner.name}: ${shiftText(owner)} → ${shiftText(after)}`);
   broadcast({ type: 'shift' }, true);
   res.json({ ok: true });
@@ -800,10 +801,38 @@ const payrunFileName = r => `${r.pay_date} ${payrunId(r)}.json`;
 function payrunDoc(runId) {
   const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(runId), s = getSettings();
   const slips = db.prepare('SELECT * FROM payslips WHERE run_id = ? ORDER BY employee_name').all(runId);
-  return { r, doc: { format: 'riyeser.payrun.v1', source: 'Riyeser Payroll', payrun_id: payrunId(r), pay_date: r.pay_date, period_start: r.period_start, period_end: r.period_end,
+  const out = { r, doc: { format: 'riyeser.payrun.v1', source: 'Riyeser Payroll', payrun_id: payrunId(r), pay_date: r.pay_date, period_start: r.period_start, period_end: r.period_end,
     currency: s.currency || 'FJD', ...(r.extra_reason && { note: `Extra pay run: ${r.extra_reason}` }),
     employees: slips.map(p => ({ name: p.employee_name, gross: round2(p.gross), tax_withheld: round2(p.paye), employer_contribution: round2(p.fnpf_employer),
       other_deductions: round2(p.fnpf_employee + p.other_deductions), net: round2(p.net) })) } };
+  // 2.3.1: rostered hours vs paid hours, only when the period has a published roster (older Accounting ignores these fields)
+  const rv = rosterVsPaid(r.period_start, r.period_end, slipPeople(slips), !!r.extra_reason);
+  if (rv) {
+    slips.forEach((p, i) => { const x = rv.rows.find(y => y.user_id === p.user_id); if (x) { const { user_id, name, ...f } = x; Object.assign(out.doc.employees[i], f); } });
+    out.doc.roster_summary = rv.total;
+  }
+  return out;
+}
+// 2.3.1 (owner approved): "rostered 38 h, paid 40.5 h, +2.5 h". Rostered: the PUBLISHED roster only, each shift's start to
+// finish less the roster's break. Paid: the hours paid (worked less Payroll's unpaid breaks, or the hours an admin set).
+// Hourly staff only (salary isn't paid by the hour). How the hours were sourced, from the timesheet entries in the period:
+// clock (time clock / Clock in), roster (Fill from the roster), copied (Copy last week's hours), typed (entered or
+// changed by hand, or hours set in the pay run); 'mixed' (with hours_sources) when more than one, 'none' with no entries.
+const shiftSource = t => t.source === 'clock' ? 'clock' : /^from the roster/i.test(t.notes || '') ? 'roster' : /^copied from/i.test(t.notes || '') ? 'copied' : /^time clock/i.test(t.notes || '') ? 'clock' : 'typed';
+const slipPeople = slips => slips.map(p => ({ user_id: p.user_id, name: p.employee_name, pay_type: p.pay_type, hours: p.hours, adjusted: /^Hours adjusted /.test(p.notes || '') }));
+function rosterVsPaid(start, end, people, extra = false) {
+  if (extra || !app.locals.rosterHours) return null;
+  const rostered = app.locals.rosterHours(start, end); if (!rostered) return null;   // no published roster in these dates
+  const ts = db.prepare('SELECT clock_in, clock_out, notes, source FROM timesheets WHERE user_id = ? AND clock_out IS NOT NULL AND substr(clock_in, 1, 10) BETWEEN ? AND ?');
+  const rows = people.filter(p => p.pay_type !== 'salary' && (rostered.has(p.user_id) || +p.hours > 0)).map(p => {
+    const by = {}; for (const t of ts.all(p.user_id, start, end)) { const k = shiftSource(t); by[k] = round2((by[k] || 0) + hoursOf(t)); }
+    const kinds = Object.keys(by), ros = round2(rostered.get(p.user_id) || 0), paid = round2(p.hours);
+    return { user_id: p.user_id, name: p.name, rostered_hours: ros, paid_hours: paid, hours_difference: round2(paid - ros),
+      hours_source: p.adjusted ? 'typed' : kinds.length === 1 ? kinds[0] : kinds.length ? 'mixed' : 'none', ...(!p.adjusted && kinds.length > 1 && { hours_sources: by }) };
+  });
+  if (!rows.length) return null;
+  const sum = k => round2(rows.reduce((a, x) => a + x[k], 0));
+  return { rows, total: { rostered_hours: sum('rostered_hours'), paid_hours: sum('paid_hours'), hours_difference: sum('hours_difference'), employees: rows.length, from_roster: rows.filter(x => x.hours_source === 'roster').length } };
 }
 function writePayrunFile(runId) {
   const dir = payrunInbox(); if (!dir) return null;
@@ -837,7 +866,8 @@ function extraReason(b) {
 }
 app.post('/api/staff/payroll/preview', requireArea('payroll', 2), requireLicence, wrap((req, res) => {
   const b = req.body || {}, extra = extraRun(b), lines = computePayroll(b.period_start, b.period_end, adminOnlyHours(req, b.adjustments), 1, extra);
-  res.json({ lines, settings: getSettings(), extra_run: extra, already_paid: extra ? null : alreadyPaid(b.period_start, b.period_end, lines.map(l => l.user_id)), warnings: payWarnings(lines) });
+  const roster = rosterVsPaid(b.period_start, b.period_end, lines.map(l => ({ user_id: l.user_id, name: l.employee_name, pay_type: l.pay_type, hours: l.hours, adjusted: l.hours_adjusted })), extra);
+  res.json({ lines, settings: getSettings(), extra_run: extra, already_paid: extra ? null : alreadyPaid(b.period_start, b.period_end, lines.map(l => l.user_id)), warnings: payWarnings(lines), roster });
 }));
 app.post('/api/staff/payroll/runs', requireArea('payroll', 2), requireLicence, wrap((req, res) => {
   const { period_start, period_end, pay_date } = req.body, adjustments = adminOnlyHours(req, req.body.adjustments);
@@ -914,8 +944,9 @@ app.get('/api/staff/payroll/runs', requireArea('payroll'), (req, res) =>
 app.get('/api/staff/payroll/runs/:id', requireArea('payroll'), wrap((req, res) => {
   const run = db.prepare('SELECT * FROM payroll_runs WHERE id=?').get(+req.params.id);
   if (!run) throw new HttpError(404, 'Not found');
-  res.json({ run, payslips: db.prepare(`SELECT p.*, u.tin, u.fnpf_no, u.bank_account FROM payslips p LEFT JOIN users u ON u.id=p.user_id WHERE run_id=? ORDER BY employee_name`).all(run.id)
-    .map(p => ({ ...p, ytd: ytdOf(p.user_id, run.period_end, null, run.id) })) });
+  const payslips = db.prepare(`SELECT p.*, u.tin, u.fnpf_no, u.bank_account FROM payslips p LEFT JOIN users u ON u.id=p.user_id WHERE run_id=? ORDER BY employee_name`).all(run.id)
+    .map(p => ({ ...p, ytd: ytdOf(p.user_id, run.period_end, null, run.id) }));
+  res.json({ run, payslips, roster: rosterVsPaid(run.period_start, run.period_end, slipPeople(payslips), !!run.extra_reason) });
 }));
 app.delete('/api/staff/payroll/runs/:id', requireArea('payroll', 3), (req, res) => { const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(+req.params.id); db.prepare('DELETE FROM payroll_runs WHERE id=?').run(+req.params.id); removePayrunFile(r); if (r) audit(req, 'Deleted a pay run', `Paid ${r.pay_date} (${r.period_start} to ${r.period_end})`); res.json({ ok: true }); });
 // Year to date (calendar / tax year of the period end): finalised payslips in that year up to this one (+ this draft),

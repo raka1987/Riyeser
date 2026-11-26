@@ -39,6 +39,8 @@ and bank detail changes and deletions are kept in an audit trail.
   their name) and on the Roster page, printed (or saved as PDF), or as plain text for WhatsApp / SMS. Changes after
   publishing are marked until it's published again; staff then see them marked "changed". Timesheets show early / late
   against the published roster, and **Start next pay run** can fill hours from it for people who don't clock in.
+  Pay runs show **Rostered / Paid / Difference** for hourly staff (e.g. rostered 38 h, paid 40.5 h, +2.5 h) and how the
+  hours came in (time clock, from the roster, typed, copied); the pay run file for Riyeser Accounting carries the same.
 - **Payroll**: normal week 40 hours by default, weekly pay, FNPF and PAYE rates in Settings, unpaid break rules, regular
   deductions per person. Pay runs: preview, then finalise. **Start next pay run** opens the next period in one click and
   copies last week's hours (or starts empty, as chosen in Payroll rules); click a name to change that person's days.

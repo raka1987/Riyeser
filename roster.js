@@ -366,6 +366,8 @@ module.exports = function roster(app, h) {
     return { saved, people, failed: results.filter(r => !r.ok).map(r => r.error), clocked: p.clocked, published_weeks: p.published_weeks };
   }
   app.locals.rosterFill = fill;
+  // 2.3.1: each person's rostered hours in these dates from the PUBLISHED roster (shift less its break); null when nothing is published
+  app.locals.rosterHours = (a, b) => { const rows = pubRows(a, b).filter(x => x.user_id); if (!rows.length) return null; const m = new Map(); for (const x of rows) m.set(x.user_id, round2((m.get(x.user_id) || 0) + x.hours)); return m; };
   app.post('/api/staff/payroll/roster-hours/preview', requireArea('payroll', 2), requireArea('timesheets', 2), wrap((req, res) => { const b = req.body || {}; res.json(fillPlan(req, b.period_start, b.period_end)); }));
   app.post('/api/staff/payroll/roster-hours', requireArea('payroll', 2), requireArea('timesheets', 2), wrap((req, res) => {
     const b = req.body || {}, only = Array.isArray(b.user_ids) ? b.user_ids.map(Number) : null;
