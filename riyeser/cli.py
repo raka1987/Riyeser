@@ -88,26 +88,14 @@ def cmd_backup(args):
     print(f"Backed up to {dest}")
 
 
+RESET_GONE = ("There's no command-line password reset: anyone at this computer could have used it.\n"
+              "Ask an administrator to set a new password under Setup > Users & Roles, or click 'Forgot password?'\n"
+              "on the sign-in screen of the desktop app: you'll need a code emailed to you, or the business owner's\n"
+              "Riyeser account.")
+
+
 def cmd_reset_password(args):
-    import getpass
-    db_path = _configure(args)
-    if not os.path.exists(db_path):
-        sys.exit(f"No company file at {db_path}.")
-    import sqlite3
-    from werkzeug.security import generate_password_hash
-    con = sqlite3.connect(db_path)
-    if not con.execute("SELECT 1 FROM users WHERE username=?", (args.username,)).fetchone():
-        names = ", ".join(r[0] for r in con.execute("SELECT username FROM users"))
-        sys.exit(f"No user '{args.username}'. Users in this file: {names}")
-    pw = args.password or getpass.getpass(f"New password for {args.username}: ")
-    if not args.password and pw != getpass.getpass("Confirm: "):
-        sys.exit("Passwords don't match.")
-    if len(pw) < 4:
-        sys.exit("Password must be at least 4 characters.")
-    con.execute("UPDATE users SET password_hash=?, active=1 WHERE username=?", (generate_password_hash(pw), args.username))
-    con.execute("INSERT INTO audit_log (action, details) VALUES ('password_reset', ?)", (f"{args.username} via command line",))
-    con.commit()
-    print(f"Password for '{args.username}' changed.")
+    sys.exit(RESET_GONE)
 
 
 def cmd_desktop(args):
@@ -142,9 +130,8 @@ def main(argv=None):
     i.add_argument("--edition", choices=["basic", "enterprise"], default=None)
     i.add_argument("--force", action="store_true")
     i.set_defaults(fn=cmd_init)
-    r = sub.add_parser("reset-password", help="set a new password for a user (default admin)")
-    r.add_argument("username", nargs="?", default="admin")
-    r.add_argument("--password", help="new password (prompted if omitted)")
+    r = sub.add_parser("reset-password", help=argparse.SUPPRESS)  # removed: explains what to do instead
+    r.add_argument("rest", nargs=argparse.REMAINDER)
     r.set_defaults(fn=cmd_reset_password)
     b = sub.add_parser("backup", help="back up the company file")
     b.add_argument("path", nargs="?")

@@ -226,6 +226,24 @@ history, which can't be changed or deleted. Write reasons without personal detai
 - **Close as duplicate:** for a business that signed up twice. Choose the business to keep. The panel links to it.
 - **Give a free period:** see "Free periods and approvals".
 
+### A customer forgot a password in a desktop program (Accounting, Invoices, Bookings, POS, Payroll)
+
+We can't reset these passwords: they live in the company file on the customer's PC. **Forgot password?** on the
+sign-in screen (desktop app only, on that PC) offers two ways, and both need proof:
+- **Email me a code:** only when the program can send email (Setup → Company details → Email) and the person has an
+  email address saved under Users & Roles. A 6-digit code, good once for 15 minutes, at most 3 an hour; 5 wrong tries
+  cancel it. The screen says the same thing whether or not the username or email exists.
+- **I'm the business owner:** the owner signs in with their Riyeser account (email, password and two-step code if they
+  have one). It only works on a PC linked to their business (signed in to Riyeser Central on it) and only for the
+  person who is the **owner** of that business. Then they choose the user and set a new password.
+
+There is no reset without proof, and no command-line reset (`riyeser reset-password` was removed). If neither way
+works: an administrator can set a new password under Setup → Users & Roles; if the owner lost their Riyeser
+password, they use "Forgot password?" on riyeser.com (an emailed link); if they lost their two-step phone, see
+"Reset two-step sign-in" above, and check who they are first. If the PC isn't linked, change the owner or link the PC
+through Central — never by editing the company file for them. Every reset is in the program's audit log
+("password_reset", with who and how).
+
 ## Prices (US dollars)
 
 All Riyeser prices are in US dollars, per business per month (pricing v2). Free forever: Central, Desk Assistant,

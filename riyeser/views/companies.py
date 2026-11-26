@@ -103,6 +103,8 @@ def switch(cid):
             u = co.user_row(path, g.user["username"])
             if u and check_password_hash(u["password_hash"], request.form.get("password", "")):
                 acc[cid] = u["id"]
+                from .auth import pw_mark
+                session["pwv"] = {**(session.get("pwv") or {}), cid: pw_mark(u["password_hash"])}
             else:
                 flash("That password isn't right for this company.", "error")
         if cid not in acc:

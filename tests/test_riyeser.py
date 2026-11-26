@@ -207,31 +207,29 @@ def test_reconcile(client, app):
                                 (line,)).fetchone()["reconciliation_id"]
 
 
-def test_forgot_password_only_in_desktop_mode(tmp_path):
+def test_forgot_password_never_resets_without_proof(tmp_path):
     for local in (False, True):
         app = create_app({"TESTING": True, "DATABASE": str(tmp_path / f"f{local}.db"), "LOCAL_RESET": local})
         with app.app_context():
-            init_db("Co", "oldpw")
+            init_db("Co", "oldpw-123")
         c = app.test_client()
         page = c.get("/forgot").get_data(as_text=True)
-        assert ("Set new password" in page) == local
+        assert "<select" not in page and 'name="username"' not in page
+        # the old form (pick a user, type a password) does nothing any more
         c.post("/forgot", data={"username": "admin", "password": "newpw-123", "confirm": "newpw-123"})
-        r = c.post("/login", data={"username": "admin", "password": "newpw-123"})
-        assert (r.status_code == 302) == local
-        # a remote computer can never reset, even in desktop mode
-        r = c.post("/forgot", data={"username": "admin", "password": "hack-1234", "confirm": "hack-1234"},
-                   environ_base={"REMOTE_ADDR": "192.168.1.50"})
-        assert c.post("/login", data={"username": "admin", "password": "hack-1234"}).status_code == 200
+        assert c.post("/login", data={"username": "admin", "password": "newpw-123"}).status_code == 200
+        assert c.post("/login", data={"username": "admin", "password": "oldpw-123"}).status_code == 302
 
 
-def test_cli_reset_password(tmp_path):
+def test_cli_reset_password_is_gone(tmp_path):
     from riyeser.cli import main
     db = str(tmp_path / "c.db")
-    main(["--db", db, "init", "--password", "orig"])
-    main(["--db", db, "reset-password", "admin", "--password", "fresh"])
+    main(["--db", db, "init", "--password", "orig-pass1"])
+    with pytest.raises(SystemExit) as e:
+        main(["--db", db, "reset-password", "admin", "--password", "fresh-pass"])
+    assert "Forgot password?" in str(e.value)
     app = create_app({"TESTING": True, "DATABASE": db})
-    r = app.test_client().post("/login", data={"username": "admin", "password": "fresh"})
-    assert r.status_code == 302
+    assert app.test_client().post("/login", data={"username": "admin", "password": "fresh-pass"}).status_code == 200
 
 
 def test_basic_edition_menus_and_guard(tmp_path):

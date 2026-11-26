@@ -44,9 +44,11 @@ The builds are unsigned. Windows SmartScreen will warn ("More info → Run anywa
 
 ## Forgot your password?
 
-* **Desktop app:** click **Forgot password?** on the sign-in screen. This works only in the desktop app on the computer that holds the company file, so nobody else on the network can use it.
-* **Other users:** an administrator can set a new password under **Setup → Users & Roles**.
-* **Command line:** run `riyeser reset-password admin` on the computer that holds the company file.
+* **Ask an administrator:** they can set a new password under **Setup → Users & Roles**.
+* **Desktop app:** click **Forgot password?** on the sign-in screen (only in the desktop app, on the computer that holds the company file). It needs proof, the same two ways as Riyeser Payroll:
+  * **Email me a code** (when email is set up and the person's email address is saved under Users & Roles): a 6-digit code, good once for 15 minutes, at most 3 an hour, 5 wrong tries cancel it.
+  * **I'm the business owner:** the owner signs in with their Riyeser account (and two-step code, if they have one). The PC must be linked to their business in Riyeser Central, and they must be its owner. Then they choose the user and set the new password.
+* There is no reset without proof, and no command-line reset. Every reset is in the audit log, and the person's other sessions are signed out.
 
 ## Three apps: Accounting Basics, Accounting Plus and Riyeser POS
 

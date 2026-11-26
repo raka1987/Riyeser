@@ -172,6 +172,8 @@ def migrate(db):
     """Bring an older company file up to date. Safe to run repeatedly."""
     if "perms" not in {r["name"] for r in db.execute("PRAGMA table_info(users)")}:
         db.execute("ALTER TABLE users ADD COLUMN perms TEXT")  # per-area levels (riyeser/perms.py)
+    from .password_reset import ensure_table
+    ensure_table(db)  # users.email (for "Forgot password?" codes) and the codes themselves
     cols = {r["name"] for r in db.execute("PRAGMA table_info(company)")}
     if "edition" not in cols:
         db.execute("ALTER TABLE company ADD COLUMN edition TEXT NOT NULL DEFAULT 'enterprise'")

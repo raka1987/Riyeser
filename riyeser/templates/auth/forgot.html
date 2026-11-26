@@ -1,22 +1,77 @@
 {% from "_macros.html" import flashes %}
+{% macro company_field(selected=None) %}{% if choices and choices|length > 1 %}<label for="fp-company">Company</label><select id="fp-company" name="company" style="margin-bottom:12px">{% for c in choices %}<option value="{{ c.id }}" {{ 'selected' if c.id == selected }}>{{ c.name }}</option>{% endfor %}</select>{% elif selected %}<input type="hidden" name="company" value="{{ selected }}">{% endif %}{% endmacro %}
+{% macro new_password_fields() %}
+  <label for="fp-pw" style="margin-top:12px">New password</label><input id="fp-pw" name="password" type="password" required minlength="8" autocomplete="new-password">
+  <label for="fp-pw2" style="margin-top:12px">Type the new password again</label><input id="fp-pw2" name="confirm" type="password" required minlength="8" autocomplete="new-password">
+  <p class="muted small" style="margin:6px 0 0">At least 8 characters.</p>
+{% endmacro %}
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reset password · {{ product.app }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<title>Reset password · {{ product.app }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<style>.login .way{border-top:1px solid var(--line);margin-top:20px;padding-top:16px}.login .way h2{font-size:16px;margin:0 0 4px}
+.login .way p{margin:0 0 12px}@media (max-width:440px){.login{margin:16px;padding:22px}}</style></head>
 <body class="{{ product.cls }}"><div class="login">
 <div class="brand" style="color:var(--ink);padding:0 0 10px"><div class="logo" style="color:#fff">{{ product.letter }}</div><div>Reset password<small>{{ company.name if company }}</small></div></div>
 {{ flashes() }}
-{% if allowed %}
-<p class="muted">You're using Riyeser on the computer that holds this company file, so you can set a new password here.</p>
-<form method="post">
-  <label>Username</label>
-  <select name="username">{% for u in users %}<option value="{{ u.username }}">{{ u.username }}{% if u.full_name %} ({{ u.full_name }}){% endif %} · {{ u.role }}</option>{% endfor %}</select>
-  <label style="margin-top:12px">New password</label><input name="password" type="password" required minlength="8" autocomplete="new-password">
-  <label style="margin-top:12px">Confirm new password</label><input name="confirm" type="password" required minlength="8" autocomplete="new-password">
+{% if not allowed %}
+<p>Ask your Riyeser administrator to set a new password for you under <b>Setup → Users &amp; Roles</b>.</p>
+<p class="muted">If you are the administrator, open the Riyeser desktop app on the computer that holds the company file and click <b>Forgot password?</b> there. You'll need a code emailed to you, or the business owner's Riyeser account.</p>
+
+{% elif step == 'code' %}
+<p class="muted">Type the 6-digit code from the email and choose your new password.</p>
+<form method="post" action="{{ url_for('auth.forgot_email_reset') }}">
+  {{ company_field(company_id) }}
+  <label for="fp-who">Username or email address</label><input id="fp-who" name="who" value="{{ who }}" autocomplete="username" required>
+  <label for="fp-code" style="margin-top:12px">Code from the email</label><input id="fp-code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus>
+  {{ new_password_fields() }}
   <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Set new password</button>
 </form>
+<p style="text-align:center;margin:12px 0 0"><a href="{{ url_for('auth.forgot') }}">Ask for a new code</a></p>
+
+{% elif step == 'owner_code' %}
+<p class="muted">Your Riyeser account has two-step sign-in. Type the 6-digit code from your authenticator app.</p>
+<form method="post" action="{{ url_for('auth.forgot_owner_code') }}">
+  <label for="fp-totp">Two-step code</label><input id="fp-totp" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{6,7}" maxlength="7" required autofocus>
+  <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Continue</button>
+</form>
+
+{% elif step == 'owner_pick' %}
+<p class="muted">You're signed in as the owner of <b>{{ business.name if business and business.name else 'this business' }}</b>. Choose whose password to reset and type the new one.</p>
+<form method="post" action="{{ url_for('auth.forgot_owner_reset') }}">
+  <label for="fp-user">User</label>
+  <select id="fp-user" name="user" required>{% for c in companies %}{% if companies|length > 1 %}<optgroup label="{{ c.name }}">{% endif %}{% for u in c.users %}<option value="{{ c.id }}:{{ u.id }}">{{ u.username }}{% if u.full_name %} ({{ u.full_name }}){% endif %}{% if u.role == 'admin' %} · administrator{% endif %}</option>{% endfor %}{% if companies|length > 1 %}</optgroup>{% endif %}{% endfor %}</select>
+  {{ new_password_fields() }}
+  <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Set new password</button>
+</form>
+
 {% else %}
-<p>Ask your Riyeser administrator to reset it for you under <b>Setup → Users &amp; Roles</b>.</p>
-<p class="muted">If you are the administrator, open the <b>Riyeser Accounting desktop app</b> on the computer that holds the company file and click <b>Forgot password?</b> there. Or run this on that computer:</p>
-<pre style="background:#f2f4f7;padding:10px;border-radius:6px">riyeser reset-password admin</pre>
+<p class="muted" style="margin-top:0">To keep the books safe, you need to prove who you are. Choose one:</p>
+<div class="way">
+  <h2>Email me a code</h2>
+  {% if email_ready %}
+  <p class="muted">We'll send a 6-digit code to the email address your administrator saved for you.</p>
+  <form method="post" action="{{ url_for('auth.forgot_email') }}">
+    {{ company_field() }}
+    <label for="fp-who">Username or email address</label><input id="fp-who" name="who" autocomplete="username" required>
+    <button class="btn pri" style="margin-top:14px;width:100%;justify-content:center">Send me a code</button>
+  </form>
+  {% else %}
+  <p class="muted">Not available: email sending isn't set up in this app yet (an administrator can set it up under Setup → Company details → Email).</p>
+  {% endif %}
+</div>
+<div class="way">
+  <h2>I'm the business owner</h2>
+  {% if business %}
+  <p class="muted">Sign in with your Riyeser account (the one you use in Riyeser Central). Then you can set a new password for any user{% if business.name %} of <b>{{ business.name }}</b>{% endif %}.</p>
+  <form method="post" action="{{ url_for('auth.forgot_owner') }}">
+    <label for="fp-oe">Riyeser email</label><input id="fp-oe" name="email" type="email" autocomplete="email" required>
+    <label for="fp-op" style="margin-top:12px">Riyeser password</label><input id="fp-op" name="password" type="password" autocomplete="current-password" required>
+    <button class="btn" style="margin-top:14px;width:100%;justify-content:center">Sign in with Riyeser</button>
+  </form>
+  {% else %}
+  <p class="muted">{{ not_linked }}</p>
+  {% endif %}
+</div>
+<p class="muted small" style="margin:16px 0 0">Or ask your administrator to set a new password under Setup → Users &amp; Roles.</p>
 {% endif %}
 <p style="text-align:center;margin:16px 0 0"><a href="{{ url_for('auth.login') }}">Back to sign in</a></p>
 </div></body></html>

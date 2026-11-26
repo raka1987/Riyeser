@@ -14,6 +14,7 @@
     <div><b>{{ u.username }}</b>{% if not u.active %} <span class="badge void">inactive</span>{% endif %}<div class="muted">{{ u.full_name or '' }}</div></div>
     <div class="user-fields">
       <div><label>Full name</label><input name="full_name" value="{{ u.full_name or '' }}"></div>
+      <div><label>Email (for password reset codes)</label><input name="email" type="email" value="{{ u.email or '' }}" autocomplete="off"></div>
       <div><label>Type</label><select name="role" class="role-sel">
         <option value="admin" {{ 'selected' if u.role=='admin' }}>Administrator</option>
         <option value="accountant" {{ 'selected' if u.role=='accountant' }}>Staff</option>
@@ -39,12 +40,13 @@
   <h3>Add a user</h3>
   <div class="fields">
     <div><label>Username</label><input name="username" required autocomplete="off"></div><div><label>Full name</label><input name="full_name"></div>
+    <div><label>Email (for password reset codes)</label><input name="email" type="email" autocomplete="off"></div>
     <div><label>Password</label><input name="password" type="password" required minlength="8" autocomplete="new-password"></div>
     <div><label>Starting access</label><select name="preset">{% for key, (name, _) in presets.items() %}<option value="{{ key }}" {{ 'selected' if key == 'readonly' }}>{{ name }}</option>{% endfor %}<option value="admin">Administrator</option></select></div>
     <div><label>&nbsp;</label><button class="btn pri">Add user</button></div>
   </div>
   {% if others %}<div class="also" style="margin-top:12px"><span class="muted">Also give them access in:</span>{% for c in others %}<label class="check"><input type="checkbox" name="also" value="{{ c.id }}"> {{ c.name }}</label>{% endfor %}</div>{% endif %}
-  <p class="muted small" style="margin:10px 0 0">You can fine-tune each area after adding them.</p>
+  <p class="muted small" style="margin:10px 0 0">You can fine-tune each area after adding them. With an email address saved (and email set up), a person who forgets their password can get a reset code by email.</p>
 </form>
 {% endblock %}
 {% block scripts %}<script>

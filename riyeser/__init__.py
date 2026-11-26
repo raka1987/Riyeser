@@ -7,7 +7,7 @@ from flask import Flask, g, session, redirect, url_for, request, abort, flash, r
 from . import db as dbmod
 from .db import fmt_money, cents_str, get_db
 
-__version__ = "2.10.0"
+__version__ = "2.10.1"
 
 
 def create_app(test_config=None):
@@ -77,6 +77,15 @@ def create_app(test_config=None):
             migrated.add(here)
         if uid:
             g.user = db.execute("SELECT * FROM users WHERE id=? AND active=1", (uid,)).fetchone()
+            marks = session.get("pwv")
+            if g.user is not None and isinstance(marks, dict):
+                from .views.auth import pw_mark
+                here_id, mark = session.get("co") or co.MAIN, pw_mark(g.user["password_hash"])
+                if marks.get(here_id, mark) != mark:  # the password was changed or reset since: sign in again
+                    session.clear()
+                    g.user = None
+                elif here_id not in marks:
+                    session["pwv"] = {**marks, here_id: mark}
         g.company = db.execute("SELECT * FROM company WHERE id=1").fetchone()
         if g.company is not None:
             from .licence import enterprise_allowed
@@ -102,12 +111,14 @@ def create_app(test_config=None):
                 session["access"] = {co.MAIN: u["id"]}
                 session["co"] = co.MAIN
                 session["uid"] = u["id"]
+                from .views.auth import pw_mark
+                session["pwv"] = {co.MAIN: pw_mark(u["password_hash"])}
                 g.user = u
-        public = ("auth.login", "auth.setup_company", "auth.forgot", "static")
+        public = ("auth.login", "auth.setup_company", "static", "auth.forgot", "auth.forgot_email", "auth.forgot_email_reset", "auth.forgot_owner", "auth.forgot_owner_code", "auth.forgot_owner_reset")
         if g.user is None and request.endpoint not in public:
             return redirect(url_for("auth.login", next=request.path))
         if g.user is not None and request.method == "POST" and g.user["role"] == "viewer" \
-                and request.endpoint not in ("auth.logout", "auth.login", "auth.forgot"):
+                and request.endpoint not in ("auth.logout", "auth.login", "auth.forgot", "auth.forgot_email", "auth.forgot_email_reset", "auth.forgot_owner", "auth.forgot_owner_code", "auth.forgot_owner_reset"):
             abort(403)
         if g.user is not None:
             from .views.backups import auto_backup, send_due_email
