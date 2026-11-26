@@ -20,6 +20,20 @@ def _hide_payroll_sql():
 
 @bp.route("/")
 def dashboard():
+    """Today: the home screen. One look at the day: sales, money in, who owes, bills due, stock, bookings, follow-ups."""
+    from .today import today_data
+    return render_template("core/today.html", **today_data(get_db()))
+
+
+@bp.route("/today")
+def today():
+    """The same Today screen, for Riyeser POS (where the till is the home screen)."""
+    return dashboard()
+
+
+@bp.route("/overview")
+def overview():
+    """The business at a glance: the year's figures, bank balances and recent transactions."""
     db = get_db()
     today = g.get("today") or __import__("datetime").date.today().isoformat()
     start = fy_start(db, today)

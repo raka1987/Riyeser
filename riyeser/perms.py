@@ -22,6 +22,8 @@ AREAS = [
     ("stock", "Stock", "Stock items, stocktake and adjustments"),
     ("bookings", "Bookings", "The bookings calendar: jobs, appointments and table bookings"),
     ("payroll", "Payroll", "Employees, pay rates, pay runs and payslips"),
+    ("expenses", "Expense claims", "Staff paid for something and want it back. Add & edit: claim your own. "
+                                   "Full: see everyone's, approve or decline, and pay them back"),
     ("accounts", "Accounts & reports", "Chart of accounts, journals, transaction search, financial reports and GST/BAS"),
     ("setup", "Setup", "Company details, tax codes, jobs, budgets and the audit trail"),
 ]
@@ -30,9 +32,9 @@ PRESETS = {
     "owner": ("Owner / manager", {a: FULL for a in AREA_KEYS}),
     "bookkeeper": ("Bookkeeper", {**{a: FULL for a in AREA_KEYS}, "setup": EDIT}),
     "sales": ("Sales staff", {"sales": EDIT, "bookings": EDIT, "purchases": HIDDEN, "banking": HIDDEN, "stock": VIEW, "payroll": HIDDEN,
-                              "accounts": HIDDEN, "setup": HIDDEN}),
+                              "accounts": HIDDEN, "setup": HIDDEN, "expenses": EDIT}),
     "payroll": ("Payroll officer", {"sales": HIDDEN, "bookings": VIEW, "purchases": HIDDEN, "banking": VIEW, "stock": HIDDEN, "payroll": FULL,
-                                    "accounts": HIDDEN, "setup": HIDDEN}),
+                                    "accounts": HIDDEN, "setup": HIDDEN, "expenses": EDIT}),
     "readonly": ("Read-only (no payroll)", {**{a: VIEW for a in AREA_KEYS}, "payroll": HIDDEN}),
 }
 PAYROLL_SOURCES = ("payrun", "payroll_import")
@@ -104,6 +106,10 @@ def levels_for(user):
             for a in AREA_KEYS:
                 if a in custom and int(custom[a]) in (HIDDEN, VIEW, EDIT, FULL):
                     base[a] = int(custom[a])
+            if "expenses" not in custom:
+                # Saved before expense claims existed: everyone may claim their own; whoever has Full on
+                # Purchases (bills) approves them.
+                base["expenses"] = FULL if base["purchases"] == FULL else EDIT
         except (ValueError, TypeError):
             pass
     if user["role"] == "viewer":  # a viewer never changes anything, whatever is saved
@@ -179,6 +185,8 @@ def area_of(endpoint, view_args, args, db):
         return "stock"
     if bp in ("payroll", "links"):
         return "payroll"
+    if bp == "expenses":
+        return "expenses"
     if bp == "email":
         return "setup"
     if bp == "backups":

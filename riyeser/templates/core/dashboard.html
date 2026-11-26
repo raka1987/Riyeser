@@ -1,7 +1,7 @@
-{% extends "base.html" %}{% block title %}Dashboard{% endblock %}
+{% extends "base.html" %}{% block title %}Business overview{% endblock %}
 {% from "_macros.html" import status %}
 {% block content %}
-<div class="head"><div><div class="greet" id="greet">Welcome back</div><h1>Dashboard</h1><p class="sub">Financial year from {{ fy_start }} · as at {{ today }}</p></div>
+<div class="head"><div><div class="greet" id="greet">Welcome back</div><h1>Business overview</h1><p class="sub">Financial year from {{ fy_start }} · as at {{ today }}</p></div>
 <div class="actions">{% if can('sales', 2) %}<a class="btn pri" href="{{ url_for('documents.edit', side='sale') }}">+ Invoice</a>{% endif %}
 {% if can('purchases', 2) %}<a class="btn" href="{{ url_for('documents.edit', side='purchase') }}">+ Bill</a>{% endif %}
 {% if can('banking', 2) %}<a class="btn" href="{{ url_for('banking.money', kind='spend') }}">Money out</a>

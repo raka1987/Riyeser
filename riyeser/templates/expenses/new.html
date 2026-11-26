@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}New expense claim{% endblock %}
+{% block content %}
+{% include "_crm_styles.html" %}
+<div class="head"><div><h1>New expense claim</h1><p class="sub">Paid for something for the business with your own money? Fill this in and attach the receipt. A manager approves it and you're paid back.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('expenses.index') }}">Back to claims</a></div></div>
+<form method="post" enctype="multipart/form-data" class="card" style="max-width:760px">
+<div class="fields">
+  <div><label for="x-date">Date you paid</label><input id="x-date" type="date" name="date" value="{{ today() }}" required></div>
+  {% if manager %}<div><label for="x-who">Who paid (who gets the money back)</label><input id="x-who" name="claimant" value="{{ me }}" list="x-people" required><datalist id="x-people">{% for p in people %}<option value="{{ p }}">{% endfor %}</datalist></div>
+  {% else %}<div><label>Who paid</label><input value="{{ me }}" disabled aria-label="Who paid"></div>{% endif %}
+  <div><label for="x-sup">Where from (shop or supplier)</label><input id="x-sup" name="supplier" placeholder="e.g. Officeworks" autocomplete="off"></div>
+  <div><label for="x-acc">What was it for?</label><select id="x-acc" name="account_id" required>{% for a in accounts %}<option value="{{ a.id }}" {{ 'selected' if a.id == default_account }}>{{ a.name }}</option>{% endfor %}</select></div>
+  <div><label for="x-amt">Amount paid (including GST)</label><input id="x-amt" name="amount" inputmode="decimal" placeholder="0.00" required></div>
+  {% if gst %}<div><label for="x-gst">GST on the receipt</label><input id="x-gst" name="gst" inputmode="decimal" placeholder="0.00"><div class="muted small">We fill in 1/11 of the amount. Change it if the receipt shows a different GST, or 0 if there's none.</div></div>{% endif %}
+  <div class="wide"><label for="x-note">Note <span class="muted">(optional)</span></label><textarea id="x-note" name="note" rows="2" placeholder="e.g. Printer ink for the front office"></textarea></div>
+  <div class="wide"><label for="x-rc">Receipt: a photo or a PDF</label><input id="x-rc" type="file" name="receipt" accept="image/*,application/pdf"><div class="muted small">On a phone you can take a photo of the receipt. Up to 10 MB.</div></div>
+</div>
+<div class="actions" style="margin-top:16px"><button class="btn pri">Send claim</button><a class="btn" href="{{ url_for('expenses.index') }}">Cancel</a></div>
+</form>
+{% endblock %}
+{% block scripts %}<script>(function(){var a=document.getElementById("x-amt"),t=document.getElementById("x-gst");if(!a||!t)return;var touched=false;
+t.addEventListener("input",function(){touched=true});a.addEventListener("input",function(){if(touched)return;var v=parseFloat(a.value.replace(/[$,]/g,""));t.value=isNaN(v)?"":(Math.round(v/11*100)/100).toFixed(2)})})()</script>{% endblock %}

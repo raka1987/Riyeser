@@ -1,0 +1,52 @@
+<style>
+/* Today screen, customer timeline and expense claims (cards stack on a phone) */
+.td-kpis{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:16px}
+.td-kpis .card{margin:0;padding:16px 18px}.td-kpis a.card{display:block;color:inherit}.td-kpis a.card:hover{text-decoration:none;border-color:var(--brand)}
+.td-kpis .val{font-size:24px}.td-kpis .note b{color:var(--err)}
+.td-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start}
+.td-grid>.card{margin:0;padding:16px 18px;min-width:0}
+.td-card h3{display:flex;align-items:baseline;gap:8px;font-size:15px;margin-bottom:10px}.td-card h3 a{margin-left:auto;font-size:12.5px;font-weight:600;white-space:nowrap}
+.td-card h3 .cnt{font-size:12px;font-weight:700;background:var(--brand-l);color:var(--brand);border-radius:99px;padding:1px 8px}
+.td-list{list-style:none;margin:0;padding:0}
+.td-list li{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);min-width:0}
+.td-list li:first-child{border-top:0}
+.td-list .main{flex:1;min-width:0}.td-list .main b,.td-list .main span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.td-list .main span{color:var(--muted);font-size:12.5px}
+.td-list .amt{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.td-list a.row{display:flex;gap:10px;align-items:center;flex:1;min-width:0;color:inherit}.td-list a.row:hover{text-decoration:none}.td-list a.row:hover b{color:var(--brand)}
+.td-list .when{font-weight:700;font-variant-numeric:tabular-nums;min-width:44px}
+.td-empty{color:var(--muted);margin:4px 0}
+.td-list form{margin:0}
+/* customer page */
+.cu-tot{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:16px}.cu-tot .card{margin:0;padding:16px 18px}
+.cu-cols{display:grid;gap:16px;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);align-items:start}
+.cu-cols>.card,.cu-cols>div>.card{margin-top:0}
+.tl{list-style:none;margin:0;padding:0}
+.tl li{display:flex;gap:12px;padding:10px 0;border-top:1px solid var(--line);min-width:0}.tl li:first-child{border-top:0}
+.tl .dot{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;background:#eef1f4;color:#475467}
+.tl .dot.inv{background:#fff4e5;color:var(--warn)}.tl .dot.pay{background:var(--ok-bg);color:var(--ok)}.tl .dot.quo{background:#eaf0ff;color:#3346b3}
+.tl .dot.crd{background:#f3e8ff;color:#6b21a8}.tl .dot.bk{background:#ffe4e6;color:#9f1239}.tl .dot.note{background:var(--accent-l);color:#0e7c70}
+.tl .dot.exp{background:#e0f2fe;color:#075985}
+.tl .body{flex:1;min-width:0}.tl .top1{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+.tl .top1 b{overflow-wrap:anywhere}.tl .top1 .amt{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tl .meta{color:var(--muted);font-size:12.5px}.tl .text{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:2px}
+.tl a.lnk{color:inherit}.tl a.lnk:hover b{color:var(--brand)}
+.tl-filter{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.tl-filter a{padding:4px 11px;border:1px solid var(--line);border-radius:99px;font-size:12.5px;font-weight:600;color:var(--muted)}
+.tl-filter a.on{background:var(--brand-l);border-color:var(--brand);color:var(--brand)}.tl-filter a:hover{text-decoration:none}
+.fu{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fff4e5;border:1px solid #f8d9a8;border-radius:10px;padding:8px 10px;margin-top:6px;font-size:13px}
+.fu.done{background:#f1f5f9;border-color:var(--line);color:var(--muted)}.fu form{margin:0 0 0 auto}
+.stack>*+*{margin-top:12px}
+/* expense claims */
+.xc-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.xc-tabs a{padding:6px 13px;border:1px solid var(--line);border-radius:99px;font-weight:600;color:var(--muted);background:#fff}
+.xc-tabs a.on{background:var(--brand);border-color:var(--brand);color:#fff}.xc-tabs a:hover{text-decoration:none}
+.xc-tabs a .n{opacity:.8;margin-left:4px}
+.badge.waiting{background:#fff4e5;color:var(--warn)}.badge.approved{background:#eaf0ff;color:#3346b3}
+.badge.declined{background:var(--err-bg);color:var(--err)}
+.xc-cards{display:none}
+.xc-pay{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.xc-receipt img{max-width:100%;max-height:520px;border:1px solid var(--line);border-radius:10px}
+@media (max-width:900px){.cu-cols,.td-grid{grid-template-columns:minmax(0,1fr)}.cu-cols>#notes{order:-1}
+  .xc-table{display:none}.xc-cards{display:block}}
+</style>
