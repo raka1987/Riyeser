@@ -134,7 +134,7 @@ create policy mem_rename_self on public.members for update to authenticated
   using (user_id = auth.uid()) with check (user_id = auth.uid());
 drop policy if exists mem_remove on public.members;
 create policy mem_remove on public.members for delete to authenticated
-  using (user_id = auth.uid() and role <> 'owner' or public.is_admin(workspace_id) and role <> 'owner');
+  using (user_id = auth.uid() and role <> 'owner' or public.is_owner(workspace_id) and role <> 'owner' or public.is_admin(workspace_id) and role = 'member');
 
 drop policy if exists ch_read on public.channels;
 create policy ch_read on public.channels for select to authenticated using (public.can_see_channel(id));
@@ -690,6 +690,10 @@ begin
   select * into r from join_requests where id = request;
   if r.id is null or r.status <> 'pending' then raise exception 'That request has already been dealt with'; end if;
   if not is_admin(r.workspace_id) then raise exception 'Only the company''s owner or an admin can approve people'; end if;
+  -- Admin is for the owner and IT staff: only the owner can make someone an admin.
+  if approve and coalesce(make_admin, false) and not is_owner(r.workspace_id) then
+    raise exception 'Only the owner can make someone an admin.';
+  end if;
   if approve then
     if coalesce(job_role, 'staff') not in ('manager', 'bookkeeper', 'sales', 'payroll', 'staff', 'readonly') then
       raise exception 'Choose a job role';
@@ -715,6 +719,10 @@ begin
     perform set_person_branches(ws, person, branch_ids); return;       -- the owner always stays owner
   end if;
   if job_role not in ('manager', 'bookkeeper', 'sales', 'payroll', 'staff', 'readonly') then raise exception 'Choose a job role'; end if;
+  -- Only the owner can make someone an admin or take it away (an admin can still change an admin's job role and branches).
+  if not is_owner(ws) and coalesce(make_admin, false) <> exists (select 1 from members where workspace_id = ws and user_id = person and role = 'admin') then
+    raise exception 'Only the owner can make someone an admin or take it away.';
+  end if;
   update members m set job_role = set_access.job_role, role = case when make_admin then 'admin' else 'member' end
     where m.workspace_id = ws and m.user_id = person;
   perform set_person_branches(ws, person, branch_ids);
@@ -3289,6 +3297,7 @@ begin
         'type', case when e ->> 'type' = 'group' then 'group' else 'person' end,
         'registered', coalesce(link_int(e -> 'registered'), 0), 'desk_phones', coalesce(link_int(e -> 'desk_phones'), 0),
         'app_users', coalesce(link_int(e -> 'app_users'), 0), 'dnd', coalesce(link_bool(e -> 'dnd'), false),
+        'in_call', coalesce(link_bool(e -> 'in_call'), false),   -- "On a call" in Riyeser Link (yes or no only: no numbers or call details)
         'members', link_int(e -> 'members')) order by e ->> 'extension')
       from (select e from jsonb_array_elements(case when jsonb_typeof(p -> 'extensions') = 'array' then p -> 'extensions' else '[]' end) e
             where jsonb_typeof(e) = 'object' and e ->> 'extension' ~ '^[0-9]{2,4}$' limit 1000) x), '[]'::jsonb),
@@ -4697,17 +4706,9 @@ begin
     away_since = case when excluded.status <> 'away' then null else coalesce(presence.away_since, now()) end;
 end $$;
 
--- Everyone's status in a business I'm in, with "fresh" worked out on the database's clock.
-create or replace function public.link_presence(ws uuid) returns table (user_id uuid, status text, manual text, custom_text text, on_call boolean,
-  away_since timestamptz, updated_at timestamptz, fresh boolean, now timestamptz)
-  language sql stable security definer set search_path = public as $$
-  select p.user_id, p.status, case when p.user_id = auth.uid() then p.manual end, p.custom_text, p.on_call, p.away_since, p.updated_at,
-         p.status <> 'offline' and p.updated_at > now() - interval '3 minutes', now()
-  from presence p join members m on m.workspace_id = p.workspace_id and m.user_id = p.user_id
-  where p.workspace_id = ws and public.is_member(ws)
-$$;
-revoke all on function public.link_presence_set(uuid, text, text, text, boolean), public.link_presence(uuid) from public, anon;
-grant execute on function public.link_presence_set(uuid, text, text, text, boolean), public.link_presence(uuid) to authenticated;
+-- Everyone's status in a business I'm in: link_presence, in "Riyeser Link: your status" below.
+revoke all on function public.link_presence_set(uuid, text, text, text, boolean) from public, anon;
+grant execute on function public.link_presence_set(uuid, text, text, text, boolean) to authenticated;
 
 -- ---------------------------------------------------------------- reactions: 👍 ✅ ❤️ 😂 🎉 👀 on a message
 -- Only people who can see the message can react, only as themselves, and only take back their own.
@@ -6017,3 +6018,90 @@ revoke all on function public.site_visit_path(text), public.site_visit_text(text
   public.track_visit(text, text, text, text, text, text, text, text, text, text), public.hq_traffic(date, date) from public, anon, authenticated;
 grant execute on function public.track_visit(text, text, text, text, text, text, text, text, text, text) to anon, authenticated;
 grant execute on function public.hq_traffic(date, date) to authenticated;
+
+-- ===== Riyeser Link: your status (Available, Busy / Do not disturb, At lunch, Away, Unavailable) =====
+-- What people choose with one tap on their picture, optionally "until" a time (then it goes back to Available by itself).
+-- "On a call" and "Offline" are never chosen: On a call shows while a call is going on, in the Riyeser Link app or on a
+-- desk phone (Riyeser Link Office says yes or no for each extension, nothing more); Offline when Riyeser Link isn't open.
+-- Busy / Do not disturb, At lunch and Unavailable don't ring: the database refuses to ring them, and the caller is told.
+-- Safe to re-run.
+alter table public.presence add column if not exists until_at timestamptz;
+alter table public.presence drop constraint if exists presence_status_check;
+alter table public.presence add constraint presence_status_check
+  check (status in ('available', 'busy', 'away', 'dnd', 'lunch', 'unavailable', 'offline'));
+alter table public.presence drop constraint if exists presence_manual_check;
+alter table public.presence add constraint presence_manual_check
+  check (manual in ('available', 'busy', 'away', 'dnd', 'lunch', 'unavailable', 'offline'));
+
+-- My status in this business. manual_choice is what I picked (null = Available); until_at is when it goes back.
+create or replace function public.link_status_set(ws uuid, st text, manual_choice text, custom text, on_a_call boolean, until_at timestamptz)
+  returns void language plpgsql security definer set search_path = public as $$
+declare t text := nullif(trim(coalesce(custom, '')), ''); m text := nullif(manual_choice, 'available'); u timestamptz := link_status_set.until_at;
+begin
+  if auth.uid() is null or not is_member(ws) then raise exception 'You''re not in that company.'; end if;
+  if st is null or st not in ('available', 'busy', 'away', 'dnd', 'lunch', 'unavailable', 'offline') then
+    raise exception 'Choose Available, Busy, At lunch, Away or Unavailable.'; end if;
+  if m is not null and m not in ('busy', 'away', 'dnd', 'lunch', 'unavailable') then
+    raise exception 'Choose Available, Busy, At lunch, Away or Unavailable. On a call and Offline are set by themselves.'; end if;
+  if t is not null and (length(t) > 80 or t ~ '[<>]') then raise exception 'Keep your status short: up to 80 letters, no < or >.'; end if;
+  if m is null then u := null; end if;
+  if u is not null and (u < now() - interval '1 minute' or u > now() + interval '7 days') then
+    raise exception 'Choose an "until" time in the next 7 days.'; end if;
+  insert into presence (workspace_id, user_id, status, manual, custom_text, on_call, away_since, until_at, updated_at)
+    values (ws, auth.uid(), st, m, t, coalesce(on_a_call, false), case when st = 'away' then now() end, u, now())
+  on conflict (workspace_id, user_id) do update set status = excluded.status, manual = excluded.manual, custom_text = excluded.custom_text,
+    on_call = excluded.on_call, until_at = excluded.until_at, updated_at = now(),
+    away_since = case when excluded.status <> 'away' then null else coalesce(presence.away_since, now()) end;
+end $$;
+
+-- On a call on a desk phone: Riyeser Link Office reported this person's extension in a call in the last 10 minutes.
+create or replace function public.link_desk_call(ws uuid, person uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select exists (select 1 from members m join link_offices o on o.workspace_id = m.workspace_id
+                   cross join lateral jsonb_array_elements(case when jsonb_typeof(o.extensions) = 'array' then o.extensions else '[]' end) e
+                 where m.workspace_id = ws and m.user_id = person and m.extension is not null
+                   and o.last_seen > now() - interval '10 minutes'
+                   and e ->> 'extension' = m.extension::text and coalesce(e ->> 'in_call', '') = 'true')
+$$;
+
+-- Does a call ring this person? Not while they've chosen Busy / Do not disturb, At lunch or Unavailable (until its time is up).
+create or replace function public.link_rings(ws uuid, person uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select not exists (select 1 from presence p where p.workspace_id = ws and p.user_id = person
+                     and p.manual in ('dnd', 'busy', 'lunch', 'unavailable') and (p.until_at is null or p.until_at > now()))
+$$;
+
+-- Everyone's status in a business I'm in. A chosen status whose "until" has passed reads as Available; desk_call says a
+-- desk phone call is going on (shown as On a call even when their Riyeser Link isn't open).
+do $$ begin
+  if exists (select 1 from pg_proc where proname = 'link_presence' and pronamespace = 'public'::regnamespace
+             and pg_get_function_result(oid) not like '%desk_call%') then
+    drop function public.link_presence(uuid);
+  end if;
+end $$;
+create or replace function public.link_presence(ws uuid) returns table (user_id uuid, status text, manual text, custom_text text, on_call boolean,
+  away_since timestamptz, updated_at timestamptz, fresh boolean, now timestamptz, until_at timestamptz, desk_call boolean)
+  language sql stable security definer set search_path = public as $$
+  select m.user_id,
+         coalesce(case when p.until_at <= now() and p.status in ('busy', 'dnd', 'lunch', 'away', 'unavailable') then 'available' else p.status end, 'offline'),
+         case when m.user_id = auth.uid() and (p.until_at is null or p.until_at > now()) then p.manual end,
+         case when p.until_at is null or p.until_at > now() then p.custom_text end,
+         coalesce(p.on_call, false), p.away_since, coalesce(p.updated_at, now()),
+         coalesce(p.status <> 'offline' and p.updated_at > now() - interval '3 minutes', false), now(),
+         case when p.until_at > now() then p.until_at end,
+         public.link_desk_call(ws, m.user_id)
+  from members m left join presence p on p.workspace_id = m.workspace_id and p.user_id = m.user_id
+  where m.workspace_id = ws and public.is_member(ws) and (p.user_id is not null or public.link_desk_call(ws, m.user_id))
+$$;
+revoke all on function public.link_status_set(uuid, text, text, text, boolean, timestamptz), public.link_presence(uuid),
+  public.link_desk_call(uuid, uuid), public.link_rings(uuid, uuid) from public, anon;
+grant execute on function public.link_status_set(uuid, text, text, text, boolean, timestamptz), public.link_presence(uuid),
+  public.link_desk_call(uuid, uuid), public.link_rings(uuid, uuid) to authenticated;
+
+-- A call only rings someone who takes calls right now (the app tells the caller "… is busy and can't take calls").
+drop policy if exists cs_send on public.call_signals;
+create policy cs_send on public.call_signals for insert to authenticated
+  with check (from_user = auth.uid() and to_user <> auth.uid() and public.is_member(workspace_id)
+              and exists (select 1 from public.members m where m.workspace_id = call_signals.workspace_id and m.user_id = to_user)
+              and public.calls_allowed(workspace_id)
+              and (kind <> 'ring' or public.link_rings(workspace_id, to_user)));

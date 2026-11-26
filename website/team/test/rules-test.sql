@@ -2952,5 +2952,100 @@ do $$ declare old uuid; paid uuid; long uuid; begin
   perform public.pricing_v2_link_trial();   -- re-running the file: nothing is reset
   assert (public.module_state(old, 'calls') ->> 'trial_ends')::date = current_date + 5, 'only once';
 end $$;
+-- ===== Riyeser Link: your status (At lunch until 1pm, Busy / Do not disturb doesn't ring, On a call from a desk phone)
+-- and admins: only the owner can make or take away an admin. Uses Sample Link Co (Pip owner, Quinn and Rua members).
+reset role; set role authenticated;
+select pg_temp.as_user('a7a7a7a2-0000-4000-8000-000000000002');
+do $$ declare a uuid := current_setting('lk.a')::uuid; begin
+  perform public.link_status_set(a, 'lunch', 'lunch', 'Back at 1', false, now() + interval '1 hour');
+  assert (select status || '/' || manual || '/' || (until_at > now()) from public.link_presence(a) where user_id = auth.uid()) = 'lunch/lunch/true', 'At lunch until a time';
+  begin perform public.link_status_set(a, 'offline', 'offline', null, false, null); raise exception 'chose Offline';
+  exception when others then assert sqlerrm like 'Choose Available%set by themselves%', sqlerrm; end;
+  begin perform public.link_status_set(a, 'lunch', 'lunch', null, false, now() + interval '9 days'); raise exception 'until in 9 days';
+  exception when others then assert sqlerrm like 'Choose an "until" time%', sqlerrm; end;
+  begin perform public.link_status_set(a, 'sleeping', null, null, false, null); raise exception 'bad status';
+  exception when others then assert sqlerrm like 'Choose Available%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003');
+do $$ declare a uuid := current_setting('lk.a')::uuid; q uuid := 'a7a7a7a2-0000-4000-8000-000000000002'; begin
+  assert (select status from public.link_presence(a) where user_id = q) = 'lunch', 'Rua sees Quinn is at lunch';
+  assert (select manual from public.link_presence(a) where user_id = q) is null, 'but not what Quinn chose';
+  assert not public.link_rings(a, q), 'At lunch doesn''t ring';
+  begin insert into public.call_signals (workspace_id, call_id, to_user, kind) values (a, gen_random_uuid(), q, 'ring'); raise exception 'rang someone at lunch';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- Busy / Do not disturb and Unavailable don't ring either; Away and Available do
+select pg_temp.as_user('a7a7a7a2-0000-4000-8000-000000000002');
+do $$ declare a uuid := current_setting('lk.a')::uuid; q uuid := 'a7a7a7a2-0000-4000-8000-000000000002'; st text; begin
+  foreach st in array array['dnd', 'unavailable', 'away', 'available'] loop
+    perform public.link_status_set(a, st, st, null, false, null);
+    assert public.link_rings(a, q) = (st in ('away', 'available')), 'rings when ' || st;
+  end loop;
+  assert (select manual from public.presence where user_id = q) is null, 'Available is stored as no choice';
+  perform public.link_status_set(a, 'dnd', 'dnd', null, false, null);
+end $$;
+select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003');
+do $$ declare a uuid := current_setting('lk.a')::uuid; q uuid := 'a7a7a7a2-0000-4000-8000-000000000002'; begin
+  begin insert into public.call_signals (workspace_id, call_id, to_user, kind) values (a, gen_random_uuid(), q, 'ring'); raise exception 'rang someone on Do not disturb';
+  exception when insufficient_privilege then null; end;
+  insert into public.call_signals (workspace_id, call_id, to_user, kind) values (a, gen_random_uuid(), q, 'cancel');   -- other signals still go
+end $$;
+-- the "until" time passes: Available again, and calls ring
+reset role;
+update public.presence set manual = 'lunch', status = 'lunch', until_at = now() - interval '1 minute' where user_id = 'a7a7a7a2-0000-4000-8000-000000000002';
+set role authenticated; select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003');
+do $$ declare a uuid := current_setting('lk.a')::uuid; q uuid := 'a7a7a7a2-0000-4000-8000-000000000002'; begin
+  assert (select status from public.link_presence(a) where user_id = q) = 'available', 'until passed: Available';
+  assert public.link_rings(a, q), 'until passed: rings';
+  insert into public.call_signals (workspace_id, call_id, to_user, kind) values (a, gen_random_uuid(), q, 'ring');
+end $$;
+-- On a call on a desk phone: Riyeser Link Office says the extension is in a call (yes or no only)
+reset role;
+update public.members set extension = 301 where user_id = 'a7a7a7a3-0000-4000-8000-000000000003' and workspace_id = current_setting('lk.a')::uuid;
+set role authenticated; select pg_temp.as_user('a7a7a7a1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('lk.a')::uuid; r uuid := 'a7a7a7a3-0000-4000-8000-000000000003'; begin
+  perform public.link_office_report(a, 'office-lk01-abcd', '{"state":"running","extensions":[{"extension":"301","name":"Rua","in_call":true,"number":"0400111222"},{"extension":"302","name":"Nobody"}]}');
+  assert (select e ->> 'in_call' from public.link_offices o, jsonb_array_elements(o.extensions) e where o.workspace_id = a and e ->> 'extension' = '301') = 'true', 'in_call kept';
+  assert not exists (select 1 from public.link_offices o, jsonb_array_elements(o.extensions) e where o.workspace_id = a and e ? 'number'), 'nothing else about the call is kept';
+  assert (select desk_call from public.link_presence(a) where user_id = r), 'Rua is On a call on the desk phone';
+  assert not (select desk_call from public.link_presence(a) where user_id = 'a7a7a7a2-0000-4000-8000-000000000002'), 'Quinn isn''t';
+  perform public.link_office_report(a, 'office-lk01-abcd', '{"state":"running","extensions":[{"extension":"301","name":"Rua","in_call":false}]}');
+  assert not (select desk_call from public.link_presence(a) where user_id = r), 'call over';
+end $$;
+reset role;
+update public.link_offices set extensions = '[{"extension":"301","in_call":true}]', last_seen = now() - interval '20 minutes' where office_id = 'office-lk01-abcd';
+set role authenticated; select pg_temp.as_user('a7a7a7a1-0000-4000-8000-000000000001');
+do $$ begin assert not public.link_desk_call(current_setting('lk.a')::uuid, 'a7a7a7a3-0000-4000-8000-000000000003'), 'an office not heard from for 20 minutes doesn''t count'; end $$;
+select pg_temp.as_user('a7a7a7a4-0000-4000-8000-000000000004');
+do $$ begin assert (select count(*) from public.link_presence(current_setting('lk.a')::uuid)) = 0, 'another business sees no status'; end $$;
+-- Admins: only the owner makes or takes away an admin; an admin can't, and can't remove another admin
+select pg_temp.as_user('a7a7a7a1-0000-4000-8000-000000000001');
+select public.set_access(current_setting('lk.a')::uuid, 'a7a7a7a2-0000-4000-8000-000000000002', 'manager', true, '{}');
+select public.set_access(current_setting('lk.a')::uuid, 'a7a7a7a3-0000-4000-8000-000000000003', 'staff', true, '{}');
+reset role;
+insert into auth.users (id, email) values ('a7a7a7a5-0000-4000-8000-000000000005', 'tui@lk.test');
+insert into public.join_requests (workspace_id, user_id, display_name) values (current_setting('lk.a')::uuid, 'a7a7a7a5-0000-4000-8000-000000000005', 'Tui');
+set role authenticated; select pg_temp.as_user('a7a7a7a2-0000-4000-8000-000000000002');
+do $$ declare a uuid := current_setting('lk.a')::uuid; rq uuid; begin
+  begin perform public.set_access(a, 'a7a7a7a3-0000-4000-8000-000000000003', 'staff', false, '{}'); raise exception 'admin took admin away';
+  exception when others then assert sqlerrm like 'Only the owner can make someone an admin%', sqlerrm; end;
+  perform public.set_access(a, 'a7a7a7a3-0000-4000-8000-000000000003', 'sales', true, '{}');   -- the job role, yes
+  assert (select job_role || '/' || role from public.members where workspace_id = a and user_id = 'a7a7a7a3-0000-4000-8000-000000000003') = 'sales/admin', 'job changed, still admin';
+  delete from public.members where workspace_id = a and user_id = 'a7a7a7a3-0000-4000-8000-000000000003';
+  assert exists (select 1 from public.members where workspace_id = a and user_id = 'a7a7a7a3-0000-4000-8000-000000000003'), 'an admin can''t remove another admin';
+  select id into rq from public.join_requests where workspace_id = a and status = 'pending';
+  begin perform public.decide_join(rq, true, 'staff', true, '{}'); raise exception 'admin made a new admin';
+  exception when others then assert sqlerrm like 'Only the owner can make someone an admin%', sqlerrm; end;
+  perform public.decide_join(rq, true, 'staff', false, '{}');
+  assert (select role from public.members where workspace_id = a and user_id = 'a7a7a7a5-0000-4000-8000-000000000005') = 'member', 'approved as staff';
+  delete from public.members where workspace_id = a and user_id = 'a7a7a7a5-0000-4000-8000-000000000005';
+  assert not exists (select 1 from public.members where workspace_id = a and user_id = 'a7a7a7a5-0000-4000-8000-000000000005'), 'an admin can remove a member';
+end $$;
+select pg_temp.as_user('a7a7a7a1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('lk.a')::uuid; begin
+  perform public.set_access(a, 'a7a7a7a3-0000-4000-8000-000000000003', 'staff', false, '{}');
+  assert (select role from public.members where workspace_id = a and user_id = 'a7a7a7a3-0000-4000-8000-000000000003') = 'member', 'the owner takes admin away';
+end $$;
+reset role;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';
