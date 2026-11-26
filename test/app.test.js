@@ -225,7 +225,8 @@ test('payroll rules: unpaid breaks come off paid hours; regular deductions on th
   const day = futureWeekday(30);
   // two shifts: 8h (over 5h: 30 min break) and 4h (no break)
   await call('POST', '/api/staff/timesheets', { user_id: emp.id, clock_in: `${day}T08:00`, clock_out: `${day}T16:00` }, admin);
-  const d2 = futureWeekday(31);
+  // the next weekday after `day` (futureWeekday(31) can land on the same Monday as futureWeekday(30) over a weekend)
+  let d2 = addDaysISO(day, 1); while ([0, 6].includes(new Date(d2 + 'T00:00:00Z').getUTCDay())) d2 = addDaysISO(d2, 1);
   await call('POST', '/api/staff/timesheets', { user_id: emp.id, clock_in: `${d2}T08:00`, clock_out: `${d2}T12:00` }, admin);
   assert.equal((await call('PUT', '/api/staff/payroll/rules', { breaks: [{ after_hours: 5, minutes: 30 }] }, staff)).status, 403);
   const save = await call('PUT', '/api/staff/payroll/rules', { breaks: [{ after_hours: 5, minutes: 30 }], deductions: [{ id: emp.id, deductions: [{ name: 'Staff loan', amount: 20 }] }] }, admin);
