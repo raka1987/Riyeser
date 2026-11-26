@@ -1,4 +1,5 @@
-// Desk Assistant: M8 (first start), M25 (email sorting), M26 (the AI model it uses).
+// Desk Assistant (now Riyeser Documents): M8 (first start), and the email-sorting (M25) and AI-model (M26) helpers it
+// left in core/ for later use.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs'); const path = require('path');
@@ -43,7 +44,6 @@ test('M25: a lookalike bank email gets "check the sender", not "urgent"; the rea
   // a known company's name in someone else's domain
   const copy = categorise({ from: 'billing@coastalcafe-payments.top', subject: 'Update your payment details', text: 'Please update your payment details today.' }, settings);
   assert.ok(copy.warning);
-  assert.match(src('renderer/app.js'), /check the sender/);
 });
 
 // ---------- M26 ----------
@@ -63,11 +63,6 @@ test('M26: sorting uses the smallest, cheapest model unless people choose anothe
   const r = await ai.createAI(null, undefined, { client }).classify('a.pdf', 'Tax invoice', settings);
   assert.strictEqual(r.docType, 'Invoices');
   assert.deepStrictEqual(sent.map(([w, p]) => [w, p.model]), [['messages', 'claude-haiku-5-5']]);
-  // main.js: the default, earlier saved defaults moved over, and a choice in Settings
-  assert.match(src('main.js'), /aiModel: AI_DEFAULT/);
-  assert.match(src('main.js'), /if \(!s\.aiModelChosen\) s\.aiModel = AI_DEFAULT/);
-  assert.match(src('renderer/app.js'), /id="aimodel"/);
-  assert.match(src('renderer/app.js'), /aiModelChosen: true/);
 });
 
 // ---------- M8 ----------
@@ -77,13 +72,7 @@ test('M8: a "Getting things ready…" screen on first start, and the slow librar
   assert.ok(main.indexOf('showSplash()', ready) > ready && main.indexOf('showSplash()', ready) < main.indexOf('new Store(', ready), 'splash before the set-up');
   assert.match(main, /once\('ready-to-show', \(\) => \{ mainWin\.show\(\); closeSplash\(\); \}\)/);
   assert.match(src('renderer/splash.html'), /Getting things ready…/);
-  assert.match(src('renderer/index.html'), /<main id="page"><div class="ready-note"[^>]*><b>Getting things ready…<\/b>/);
   const loaded = execFileSync(process.execPath, ['-e', `require(${JSON.stringify(path.join(__dirname, '..', 'src', 'core', 'email.js'))}); require(${JSON.stringify(path.join(__dirname, '..', 'src', 'core', 'ai.js'))});
     console.log(JSON.stringify(Object.keys(require.cache).filter((k) => /node_modules[\\\\/](imapflow|mailparser|@anthropic-ai)/.test(k)).length))`], { encoding: 'utf8' });
   assert.strictEqual(loaded.trim(), '0');
-});
-test('M8: no "Move 0 to Recycle Bin" when nothing is selected', () => {
-  const app = src('renderer/app.js');
-  assert.match(app, /data-act="cleantrash" \$\{cleanSel\.size \? '' : 'disabled hidden'\}/);
-  assert.match(app, /btn\.hidden = !cleanSel\.size/);
 });

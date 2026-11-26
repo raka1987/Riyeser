@@ -6,7 +6,9 @@ const ALLOWED_DOWNLOAD = /^https:\/\/(github\.com\/raka1987\/Riyeser\/releases\/
 // Each program: its name in Windows' installed-apps list, the release file, and how to install it silently.
 const PRODUCTS = [
   { id: 'central', display: 'Riyeser Central', also: ['Riyser Central'], asset: 'RiyeserCentral-Setup.exe', oldAsset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
-  { id: 'desk', display: 'Riyeser Desk Assistant', asset: 'RiyeserDeskAssistant-Setup.exe', args: ['/S'] },
+  // Riyeser Documents was Riyeser Desk Assistant (same app): Windows lists it under either name. Its release file is
+  // RiyeserDocuments-Setup.exe; releases also keep RiyeserDeskAssistant-Setup.exe (old download links and older Centrals).
+  { id: 'desk', display: 'Riyeser Documents', also: ['Riyeser Desk Assistant'], asset: 'RiyeserDocuments-Setup.exe', oldAsset: 'RiyeserDeskAssistant-Setup.exe', args: ['/S'] },
   { id: 'pdf', display: 'Riyeser PDF', asset: 'RiyeserPDF-Setup.exe', oldAsset: 'RiyserPDF-Setup.exe', args: ['/S'] },
   // The old "Riyser" hub (Riyser 1.x) counts as Payroll, so Central offers to replace it with Riyeser Payroll.
   { id: 'payroll', display: 'Riyeser Payroll', alsoRe: /^Riyser\s+\d/i, asset: 'RiyeserPayroll-Setup.exe', args: ['/S'] },

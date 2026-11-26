@@ -66,8 +66,9 @@ const PROGRAMS = [
     dirs: ['riyeser-payroll', 'Riyeser Payroll', 'riyeser', 'Riyeser', 'riyser', 'Riyser'], exes: ['Riyeser Payroll.exe', 'Riyeser.exe', 'Riyser.exe'],
     links: ['Riyeser Payroll', 'Riyeser', 'Riyser'], // Riyeser Payroll 2.0+; older builds were a hub called Riyser
     portable: /^RiyeserPayroll-Portable(?:-\d+(?:\.\d+){1,3})?\.exe$/i }, // the portable copy (no installer), on the desktop or in Downloads
-  { id: 'desk', name: 'Desk Assistant', full: 'Riyeser Desk Assistant', icon: '🗂', desc: 'Sort files by type, find anything, meetings and to-dos.',
-    dirs: ['desk-assistant'], exes: ['Riyeser Desk Assistant.exe', 'Desk Assistant.exe'], links: ['Riyeser Desk Assistant', 'Desk Assistant'] },
+  // Riyeser Documents was Riyeser Desk Assistant (same app id, install folder and program file): found under either name.
+  { id: 'desk', name: 'Documents', full: 'Riyeser Documents', icon: '🗂', desc: 'Scan, file and find the office\'s documents.',
+    dirs: ['desk-assistant'], exes: ['Riyeser Documents.exe', 'Riyeser Desk Assistant.exe', 'Desk Assistant.exe'], links: ['Riyeser Documents', 'Riyeser Desk Assistant', 'Desk Assistant'] },
   { id: 'pdf', name: 'PDF', full: 'Riyeser PDF', icon: '📕', desc: 'Open, fill in, sign, combine and edit PDFs.',
     dirs: ['desk-pdf'], exes: ['Riyeser PDF.exe', 'Desk PDF.exe'], links: ['Riyeser PDF', 'Desk PDF'] },
   { id: 'services', name: 'As Built', full: 'As Built', icon: '🏗', desc: 'Building services on your drawings, with photos, tests and QA.',
@@ -333,6 +334,8 @@ function registerIpc() {
     // program was removed) never shows old to-dos, balances or documents left behind on the PC.
     const installed = (id) => !!locate(PROGRAMS.find((x) => x.id === id));
     const deskInstalled = installed('desk'); const pdfInstalled = installed('pdf');
+    // Riyeser Documents (Desk Assistant 1.0 and later) has no to-dos or calendars: don't show the ones Desk Assistant left.
+    const documents = deskInstalled && fs.existsSync(path.join(deskData(), 'documents.json'));
     // Demo mode: practice figures only. Money and pay runs come from Accounting's and Payroll's demo records (so the
     // numbers match what those programs show); to-dos and meetings are made up here; real recent files aren't shown.
     const inDemo = demoOn(); const appDataDir = app.getPath('appData');
@@ -341,14 +344,14 @@ function registerIpc() {
       let money = { found: false }; let payroll = { found: false, lastRun: null };
       if (installed('accounting') || installed('accounting-basics')) { try { money = await sources.pendingPayments(demo.demoAccountingDb()); } catch (e) { money = { found: false, error: e.message }; } }
       if (installed('payroll')) { try { payroll = await sources.lastPayRun(demo.demoPayrollDb(appDataDir)); } catch (e) { payroll = { found: false, lastRun: null, error: e.message }; } }
-      const tasks = deskInstalled ? sample.tasks : [];
-      return { demo: true, deskFound: deskInstalled, calendars: deskInstalled ? 1 : 0, meetings: deskInstalled ? sample.meetings : [], meetingErrors: [], tasks, taskCount: tasks.length, money, recent: [], payroll, organisedRoot: '' };
+      const tasks = deskInstalled && !documents ? sample.tasks : [];
+      return { demo: true, documents, deskFound: deskInstalled, calendars: deskInstalled && !documents ? 1 : 0, meetings: deskInstalled && !documents ? sample.meetings : [], meetingErrors: [], tasks, taskCount: tasks.length, money, recent: [], payroll, organisedRoot: '' };
     }
     const da = deskInstalled ? sources.deskAssistant(deskData()) : { found: false, settings: {}, tasks: [] };
-    const open = (da.tasks || []).filter((t) => !t.done);
+    const open = documents ? [] : (da.tasks || []).filter((t) => !t.done);
     const tasks = open.sort((a, b) => String(a.due || '9').localeCompare(String(b.due || '9'))).slice(0, 12);
     let meetings = []; let meetingErrors = [];
-    const cals = (da.settings && da.settings.calendars) || [];
+    const cals = documents ? [] : (da.settings && da.settings.calendars) || [];
     if (cals.length) {
       try {
         const r = await Promise.race([upcomingMeetings(cals, { days: 2 }), new Promise((_, rej) => setTimeout(() => rej(new Error('calendar took too long')), 12000))]);
@@ -371,7 +374,7 @@ function registerIpc() {
     let payroll = { found: false, lastRun: null };
     if (installed('payroll')) { try { payroll = await sources.lastPayRun(sources.payrollDbPath(app.getPath('appData'))); } catch (e) { payroll = { found: false, lastRun: null, error: e.message }; } }
     const organisedRoot = deskInstalled ? ((da.settings && da.settings.organisedRoot) || '') : '';
-    return { deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, taskCount: open.length, money, recent, payroll, organisedRoot };
+    return { documents, deskFound: da.found, calendars: cals.length, meetings, meetingErrors, tasks, taskCount: open.length, money, recent, payroll, organisedRoot };
   });
   // ---------- licence (one for the whole Riyeser suite; %APPDATA%\Riyeser\licence.json) ----------
   const appData = app.getPath('appData'); const lfetch = (u, o) => net.fetch(u, o);

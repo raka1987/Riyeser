@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:">
+  <title>Riyeser Documents</title>
+  <link rel="stylesheet" href="documents.css">
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="f-top">
+      <div class="f-brand"><span class="logo" aria-hidden="true">Do.</span><span>Riyeser Documents</span></div>
+      <label class="f-search"><span class="ic-s" data-icon="search"></span><input id="q" type="search" placeholder="Search names and text inside scans" aria-label="Search all documents" autocomplete="off"></label>
+      <div class="f-topact">
+        <button class="btn pri" type="button" id="scanbtn"><span data-icon="scan"></span><span class="lbl">Scan</span></button>
+        <button class="btn" type="button" id="uploadbtn"><span data-icon="upload"></span><span class="lbl">Upload</span></button>
+        <button class="avatar" type="button" id="avatar" aria-haspopup="menu" aria-expanded="false" title="You, settings and help">?</button>
+      </div>
+    </header>
+    <div class="banner warn" id="offline" role="status" hidden></div>
+    <div class="banner demo" id="demobar" role="status" hidden>Demo: a sample library for Sample Trading Co. Nothing here is real, and your own documents aren't touched.</div>
+    <div class="f-body" id="body">
+      <nav class="f-nav" aria-label="Places and folders" id="nav"></nav>
+      <main class="f-main" id="main">
+        <div class="f-head">
+          <div style="min-width:0"><div class="f-crumbs" id="crumbs"></div><h1 id="title">Inbox</h1><div class="f-sub" id="sub"></div></div>
+          <div class="f-headact" id="headact"></div>
+        </div>
+        <div class="chips" id="subfolders" hidden></div>
+        <div class="f-tools" id="tools">
+          <div class="f-seg" role="group" aria-label="Show" id="types"></div>
+          <span class="f-grow"></span>
+          <label class="f-sel"><span>From</span><select id="from"><option value="">Anyone</option><option>Office printer</option><option>Scanner</option><option>Phone</option><option>Email</option><option>Upload</option><option>A program</option></select></label>
+          <label class="f-sel"><span>Sort</span><select id="sort"><option value="new">Newest first</option><option value="old">Oldest first</option><option value="name">Name A–Z</option><option value="size">Largest first</option></select></label>
+        </div>
+        <div class="selbar" id="selbar" hidden></div>
+        <div class="f-table" role="table" aria-label="Documents" id="table">
+          <div class="f-tr f-th" role="row"><span role="columnheader">Name</span><span role="columnheader">Location</span><span role="columnheader">Added</span><span role="columnheader" class="f-r">Size</span></div>
+          <div id="rows" role="rowgroup"></div>
+        </div>
+        <div id="pageview" hidden></div>
+      </main>
+      <aside class="f-side" id="side" aria-label="Selected document"></aside>
+    </div>
+  </div>
+  <div class="drop" id="drop" hidden><div><b>Drop to add to the Inbox</b><span>Riyeser Documents keeps a copy; your original stays where it is.</span></div></div>
+  <div class="menu" id="menu" role="menu" hidden></div>
+  <dialog id="dlg" aria-labelledby="dlgtitle"><form method="dialog" id="dlgform"></form></dialog>
+  <aside class="help" id="help" aria-label="Help" hidden></aside>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <script type="module" src="documents.js"></script>
+</body>
+</html>
