@@ -15,12 +15,12 @@ bp = Blueprint("help", __name__, url_prefix="/help")
 # which help section each part of the app belongs to
 SECTION_FOR = {"core": "accounts", "documents": "sales", "contacts": "sales", "banking": "banking",
                "inventory": "stock", "payroll": "payroll", "reports": "reports", "pos": "pos", "links": "modules",
-               "auth": "users", "help": "start"}
+               "auth": "users", "help": "start", "expenses": "expenses"}
 
 
 def section_for(endpoint):
     bp_name = (endpoint or "").split(".")[0]
-    if endpoint in ("core.dashboard",):
+    if endpoint in ("core.dashboard", "core.today", "core.overview"):
         return "start"
     if endpoint in ("core.company", "core.tax_codes", "core.jobs", "core.budgets", "core.audit_log"):
         return "setup"

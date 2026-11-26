@@ -19,8 +19,10 @@ def _invoice(c, cust, item, status="open"):
 
 def test_invoices_app_shows_only_invoicing(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "invoices")
-    r = c.get("/")
-    assert r.status_code == 302 and r.headers["Location"].endswith("/sale/list")
+    home = c.get("/").get_data(as_text=True)   # Today is the home screen, with the cards Invoices has
+    assert "Unpaid invoices" in home and "Money in this week" in home
+    for gone in ("Bills due", "Low stock", "Today's bookings", "Expense claims"):
+        assert gone not in home, gone
     page = c.get("/sale/list").get_data(as_text=True)
     assert "Riyeser Invoices" in page and "ed-inv" in page and "Free forever" in page
     for gone in ("Bank accounts", "General journal", "Enter bill", "Stock items", "Payroll", "Search transactions"):

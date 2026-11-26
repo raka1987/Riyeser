@@ -2,13 +2,13 @@
 {% block content %}
 <style>.help h2{scroll-margin-top:16px;margin-top:28px}.help li{margin:4px 0}.help .card{max-width:900px}.toc a{display:inline-block;margin:0 12px 6px 0}</style>
 <div class="head"><div><h1>Riyeser Accounting help</h1><p class="sub">Version {{ version }} · a Riyeser Group module. Can't find the answer? Download <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a> and send it with your question.</p></div></div>
-<div class="card toc">{% for k, t in [('start','Getting started'),('sales','Invoices & customers'),('stock','Stock & suppliers'),('pos','Riyeser POS'),('banking','Money & banking'),('payroll','Payroll'),('reports','Reports'),('accounts','Accounts & journals'),('setup','Setup & editions'),('users','Users & passwords'),('modules','Other Riyeser modules'),('trouble','Troubleshooting')] %}<a href="#{{ k }}">{{ t }}</a>{% endfor %}</div>
+<div class="card toc">{% for k, t in [('start','Getting started'),('sales','Invoices & customers'),('stock','Stock & suppliers'),('pos','Riyeser POS'),('banking','Money & banking'),('expenses','Expense claims'),('payroll','Payroll'),('reports','Reports'),('accounts','Accounts & journals'),('setup','Setup & editions'),('users','Users & passwords'),('modules','Other Riyeser modules'),('trouble','Troubleshooting')] %}<a href="#{{ k }}">{{ t }}</a>{% endfor %}</div>
 <div class="help">
 <div class="card"><h2 id="start">Getting started</h2><ol>
 <li><b>Setup → Company</b>: enter your business name, ABN, address and when your financial year starts.</li>
 <li>Add your <b>customers</b> and <b>suppliers</b>, and your <b>stock items</b> with buy and sell prices.</li>
 <li>Already trading? Enter opening balances: <b>Setup → Accounts</b> for bank balances, and opening quantity and cost on each new stock item.</li>
-<li>Start invoicing. The <b>Dashboard</b> shows cash, who owes you, bills due and low stock.</li></ol>
+<li>Start invoicing. <b>Today</b>, the home screen, shows today's sales, money in this week, unpaid invoices (overdue first), bills due, low stock, today's bookings and the calls you said you'd make. It only shows what your Riyeser app has, and what your user is allowed to see. <b>Business overview</b> (on Today) has the year's figures, bank balances and recent transactions.</li></ol>
 <p class="muted">Every transaction is double-entry, so the reports always balance. You never type debits and credits for normal work.</p></div>
 
 <div class="card"><h2 id="sales">Invoices &amp; customers</h2><ul>
@@ -18,7 +18,9 @@
 <li>From an accepted quote, <b>Make the invoice</b> copies its lines onto a new invoice (the quote is kept as it was). If you use Riyeser Bookings, <b>Make a booking job</b> adds a job there with the customer, their address and the quote's lines and price, ready to book a time. Invoicing that job uses the quote's lines, so nothing is charged twice.</li>
 <li><b>Receive Payments</b>: pick the customer and enter what they paid against each invoice. One payment can cover several invoices.</li>
 <li>Made a mistake? A posted invoice can't be edited. <b>Void</b> it (this reverses the books and returns the stock) and enter it again. Void any payment on it first.</li>
-<li><b>Download PDF</b> gives you a PDF to email. <b>Statement</b> on the customer's card shows everything they owe.</li></ul></div>
+<li><b>Download PDF</b> gives you a PDF to email. <b>Statement</b> on the customer's card shows everything they owe.</li>
+<li><b>The customer's page</b> (click a customer) shows what they owe now, what they paid this financial year and when you were last in touch, then one list of everything with them, newest first: quotes, orders, invoices, payments, credit notes, bookings and notes. Use the buttons above the list to see just one kind.</li>
+<li><b>Notes and call-backs</b>: on the customer's page, write what happened in <b>Add a note</b> (it keeps the date and who wrote it). Put a date in <b>Call back on</b> and it shows on the Today screen from that day until you press <b>Done</b>. Suppliers' pages work the same way.</li></ul></div>
 
 <div class="card"><h2 id="stock">Stock &amp; suppliers</h2><ul>
 <li>Tick <b>I inventory this item</b> to track quantity and cost. Riyeser uses <b>average cost</b>: each purchase updates the average, and each sale records cost of goods sold automatically.</li>
@@ -36,6 +38,12 @@
 <li><b>Bank Reconciliation</b> ({{ editions.enterprise.name }}): enter your statement's closing balance and tick the transactions that appear on it until the difference is $0.00.</li>
 <li><b>Bank Statement Import</b> ({{ editions.enterprise.name }}): load a CSV from your bank, then allocate each line to an account in one click.</li>
 <li><b>Banking your cash takings</b>: use <b>Transfer Money</b> from <i>Undeposited Funds</i> to your bank account when you deposit the till cash.</li></ul></div>
+
+<div class="card"><h2 id="expenses">Expense claims</h2><ul>
+<li>For {{ editions.basic.title }} and {{ editions.enterprise.title }}. When staff pay for something for the business with their own money (fuel, parts, a train fare), they claim it back under <b>Expense claims → New expense claim</b>: the date, where from, what it was for, the amount including GST, the GST on the receipt, a note, and a photo or PDF of the receipt.</li>
+<li>A manager sees the claims <b>Waiting</b>, checks the receipt, and presses <b>Approve</b> or <b>Decline</b> (with a reason the staff member can read).</li>
+<li>Approving puts it in the books: choose <b>Owe it to them</b> to make a bill payable to the staff member (pay it under <b>Pay bills</b>; the claim then shows <b>Paid</b>), or <b>Already paid them back</b> to record the money paid out of a bank account. The expense and its GST go in the account chosen, so it's on the GST report.</li>
+<li>Who can do what is set under <b>Setup → Users &amp; roles</b>, area <b>Expense claims</b>: <i>Add &amp; edit</i> lets someone claim their own; <i>Full</i> lets them see everyone's and approve. People who aren't administrators can't approve their own claims.</li></ul></div>
 
 <div class="card"><h2 id="payroll">Payroll</h2><ul>
 <li>With <b>Riyeser Payroll</b>: finished pay runs appear under <b>Import from Payroll</b>. Import each one to record wages, tax withheld and employer contributions.</li>

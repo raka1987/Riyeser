@@ -1,24 +1,61 @@
 {% extends "base.html" %}{% block title %}{{ c.name }}{% endblock %}
 {% from "_macros.html" import status %}
 {% block content %}
+{% include "_crm_styles.html" %}
 {% set side = 'sale' if c.kind=='customer' else 'purchase' %}
-<div class="head"><div><h1>{{ c.name }}</h1><p class="sub">{{ c.kind|title }}{% if c.abn %} · ABN {{ c.abn }}{% endif %}{% if c.email %} · {{ c.email }}{% endif %}{% if c.phone %} · {{ c.phone }}{% endif %}</p></div>
+{% macro by(full, name) %}{{ full or name or 'someone' }}{% endmacro %}
+<div class="head"><div><h1>{{ c.name }}</h1><p class="sub">{{ c.kind|title }}{% if c.contact_person %} · {{ c.contact_person }}{% endif %}{% if c.abn %} · ABN {{ c.abn }}{% endif %}{% if c.email %} · <a href="mailto:{{ c.email }}">{{ c.email }}</a>{% endif %}{% if c.phone %} · <a href="tel:{{ c.phone|replace(' ', '') }}">{{ c.phone }}</a>{% endif %}</p></div>
 <div class="actions"><a class="btn" href="{{ url_for('contacts.edit', kind=c.kind, cid=c.id) }}">Edit</a>
-<a class="btn pri" href="{{ url_for('documents.edit', side=side, contact=c.id) }}">+ New {{ 'invoice' if side=='sale' else 'bill' }}</a>
+{% if not pos_here %}<a class="btn pri" href="{{ url_for('documents.edit', side=side, contact=c.id) }}">+ New {{ 'invoice' if side=='sale' else 'bill' }}</a>
 <a class="btn" href="{{ url_for('documents.pay', side=side, contact=c.id) }}">{{ 'Receive payment' if side=='sale' else 'Pay bills' }}</a>
-<a class="btn" href="{{ url_for('contacts.statement', cid=c.id) }}">Statement</a></div></div>
-<div class="grid g3"><div class="card kpi"><div class="lbl">Balance owing</div><div class="val">{{ balance|money }}</div></div>
-<div class="card kpi"><div class="lbl">Credit terms</div><div class="val">{{ c.terms_days if c.terms_days is not none else company.default_terms_days }} days</div></div>
-<div class="card kpi"><div class="lbl">Credit limit</div><div class="val">{{ c.credit_limit|money if c.credit_limit else '—' }}</div>
-{% if c.credit_limit and balance > c.credit_limit %}<div class="note neg">Over limit</div>{% endif %}</div></div>
-<h2>Documents</h2>
-<div class="tbl"><table><tr><th>Number</th><th>Date</th><th>Due</th><th>Status</th><th class="n">Total</th><th class="n">Balance</th></tr>
-{% for d in docs %}<tr class="click" data-href="{{ url_for('documents.view', doc_id=d.id) }}"><td>{{ d.number }}</td><td>{{ d.date }}</td><td>{{ d.due_date or '' }}</td><td>{{ status(d, today()) }}</td>
-<td class="n">{{ d.total|money }}</td><td class="n">{{ (d.total-d.amount_paid)|money0 if d.status=='open' }}</td></tr>{% else %}<tr><td colspan="6" class="muted">None.</td></tr>{% endfor %}</table></div>
-<h2>Payments</h2>
-<div class="tbl"><table><tr><th>Date</th><th>Bank</th><th>Reference</th><th class="n">Amount</th><th></th></tr>
-{% for p in pays %}<tr><td>{{ p.date }}</td><td>{{ p.bank }}</td><td>{{ p.reference or '' }}</td><td class="n">{{ p.amount|money }}</td><td>{% if p.voided %}<span class="badge void">void</span>{% endif %}</td></tr>{% else %}<tr><td colspan="5" class="muted">None.</td></tr>{% endfor %}</table></div>
-{% if bks %}<h3 style="margin-top:22px">Bookings</h3>
-<div class="tbl"><table><tr><th>When</th><th>What</th><th>With</th><th>Status</th></tr>
-{% for b in bks %}<tr class="click" data-href="{{ url_for('core.bookings_app') if product.bookings_separate else url_for('bookings.edit', bid=b.id) }}"><td>{{ b.starts_at[:10] }} {{ b.starts_at[11:16] }}</td><td>{{ b.service or b.title or '' }}</td><td>{{ b.resource or '' }}</td><td><span class="bk-st st-{{ b.status }}">{{ b.status|replace('_', '-')|capitalize }}</span></td></tr>{% endfor %}</table></div>
-{% endif %}{% endblock %}
+<a class="btn" href="{{ url_for('contacts.statement', cid=c.id) }}">Statement</a>{% endif %}</div></div>
+
+<div class="cu-tot">
+  <div class="card kpi"><div class="lbl">{{ 'Owes you now' if side=='sale' else 'You owe now' }}</div><div class="val {{ 'neg' if overdue }}">{{ balance|money }}</div>
+    <div class="note">{% if overdue %}{{ overdue|money }} overdue{% elif balance > 0 %}nothing overdue{% elif balance < 0 %}in credit{% else %}all paid up{% endif %}{% if c.credit_limit %} · limit {{ c.credit_limit|money }}{% if balance > c.credit_limit %} <span class="neg">over limit</span>{% endif %}{% endif %}</div></div>
+  <div class="card kpi"><div class="lbl">{{ 'Paid you this year' if side=='sale' else 'You paid this year' }}</div><div class="val">{{ paid_year|money }}</div><div class="note">since {{ year_from }} (financial year)</div></div>
+  <div class="card kpi"><div class="lbl">Last contact</div><div class="val">{{ last or '—' }}</div><div class="note">{% if last_ago is not none %}{{ 'today' if last_ago == 0 else 'yesterday' if last_ago == 1 else last_ago ~ ' days ago' }}{% else %}nothing yet{% endif %} · terms {{ c.terms_days if c.terms_days is not none else company.default_terms_days }} days</div></div>
+</div>
+
+<div class="cu-cols">
+<div class="card"><h3>Everything with {{ c.name }}</h3>
+<div class="tl-filter">{% for k, label in shows %}<a class="{{ 'on' if show == k }}" href="{{ url_for('contacts.view', cid=c.id, show=k) if k != 'all' else url_for('contacts.view', cid=c.id) }}">{{ label }} · {{ counts[k] }}</a>{% endfor %}</div>
+{% if items %}<ul class="tl">
+{% for i in items %}<li><div class="dot {{ i.dot }}" aria-hidden="true">{{ i.short }}</div><div class="body">
+{% if i.doc %}{% set d = i.doc %}
+  <div class="top1">{% if i.link %}<a class="lnk" href="{{ i.link }}"><b>{{ i.title }}</b></a>{% else %}<b>{{ i.title }}</b>{% endif %} {% if d.kind == 'invoice' %}{{ status(d, today) }}{% elif d.status == 'void' %}<span class="badge void">Void</span>{% endif %}<span class="amt">{{ i.amount|money }}</span></div>
+  <div class="meta">{{ d.date }}{% if d.kind == 'invoice' and d.status == 'open' %} · {{ (d.total - d.amount_paid)|money }} still to pay{% if d.due_date %}, due {{ d.due_date }}{% endif %}{% elif d.kind != 'invoice' and d.status == 'open' and d.total != d.amount_paid %} · {{ (d.amount_paid - d.total)|money }} credit left{% endif %}{% if d.converted_to %} · accepted: turned into an order or invoice{% endif %}{% if d.reference %} · ref {{ d.reference }}{% endif %}</div>
+{% elif i.pay %}{% set p = i.pay %}
+  <div class="top1"><b>{{ i.title }}</b>{% if p.voided %} <span class="badge void">Void</span>{% endif %}<span class="amt">{{ i.amount|money }}</span></div>
+  <div class="meta">{{ p.date }} · {{ p.bank }}{% if p.reference %} · {{ p.reference }}{% endif %}{% if i.paid_for %} · for {{ i.paid_for|join(', ') }}{% endif %}</div>
+{% elif i.booking %}{% set b = i.booking %}
+  <div class="top1"><a class="lnk" href="{{ i.link }}"><b>{{ i.title }}</b></a> <span class="bk-st st-{{ b.status }}">{{ b.status|replace('_', ' ')|capitalize }}</span></div>
+  <div class="meta">Booking {{ b.starts_at[:10] }} {{ b.starts_at[11:16] }}{% if b.resource %} · with {{ b.resource }}{% endif %}{% if b.title and b.service %} · {{ b.title }}{% endif %}</div>
+{% elif i.note %}{% set n = i.note %}
+  <div class="top1"><b>Note</b><span class="meta">{{ n.date }} · {{ by(n.ufull, n.uname) }}</span></div>
+  <div class="text">{{ n.note }}</div>
+  {% if n.follow_up_on %}<div class="fu{{ ' done' if n.done_at }}">{% if n.done_at %}Follow-up done {{ n.done_at[:10] }}{% if n.dfull or n.dname %} by {{ by(n.dfull, n.dname) }}{% endif %}{% else %}Call back on <b>{{ n.follow_up_on }}</b>{% if n.follow_up_on < today %} <span class="neg">(overdue)</span>{% endif %}{% endif %}
+  {% if can_note %}<form method="post" action="{{ url_for('contacts.note_done', cid=c.id, nid=n.id) }}"><button class="btn sm">{{ 'Open again' if n.done_at else 'Done' }}</button></form>{% endif %}</div>{% endif %}
+  {% if can_full or (can_note and n.user_id == user.id) %}<form method="post" action="{{ url_for('contacts.note_delete', cid=c.id, nid=n.id) }}" onsubmit="return confirm('Delete this note?')" style="margin-top:4px"><button class="btn sm danger">Delete note</button></form>{% endif %}
+{% endif %}
+</div></li>{% endfor %}</ul>
+{% else %}<p class="muted">Nothing here yet.{% if show == 'all' %} Quotes, invoices, payments{{ ', bookings' if c.kind == 'customer' }} and notes for {{ c.name }} will show here as they happen.{% endif %}</p>{% endif %}
+</div>
+
+<div class="stack" id="notes">
+{% if can_note %}<div class="card" style="margin:0"><h3>Add a note</h3>
+<form method="post" action="{{ url_for('contacts.note_add', cid=c.id) }}" class="stack">
+  <div><label for="n-note">What happened?</label><textarea id="n-note" name="note" rows="3" required placeholder="Rang about the overdue invoice. Will pay on Friday."></textarea></div>
+  <div class="fields" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr))"><div><label for="n-date">Date</label><input id="n-date" type="date" name="date" value="{{ today }}"></div>
+  <div><label for="n-fu">Call back on <span class="muted">(optional)</span></label><input id="n-fu" type="date" name="follow_up_on"></div></div>
+  <p class="muted small" style="margin:0">A call-back date puts a reminder on the Today screen from that day until you mark it done.</p>
+  <div><button class="btn pri">Add note</button></div>
+</form></div>{% endif %}
+<div class="card" style="margin:0"><h3>Follow-ups</h3>
+{% if follow %}<ul class="td-list">{% for n in follow %}<li><div class="main"><b class="{{ 'neg' if n.follow_up_on < today }}">{{ n.follow_up_on }}{% if n.follow_up_on < today %} (overdue){% elif n.follow_up_on == today %} (today){% endif %}</b><span>{{ n.note }}</span></div>
+{% if can_note %}<form method="post" action="{{ url_for('contacts.note_done', cid=c.id, nid=n.id) }}"><button class="btn sm">Done</button></form>{% endif %}</li>{% endfor %}</ul>
+{% else %}<p class="td-empty">No follow-ups waiting.</p>{% endif %}</div>
+{% if c.notes %}<div class="card" style="margin:0"><h3>About {{ c.name }}</h3><div class="tl"><div class="text">{{ c.notes }}</div></div></div>{% endif %}
+</div>
+</div>
+{% endblock %}

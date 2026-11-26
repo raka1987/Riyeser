@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Expense claims{% endblock %}
+{% block content %}
+{% include "_crm_styles.html" %}
+<div class="head"><div><h1>Expense claims</h1><p class="sub">{% if manager %}Staff paid for something for the business and want the money back. Check each claim and its receipt, then approve or decline it.{% else %}Paid for something for the business? Claim it back here with a photo of the receipt.{% endif %}</p></div>
+<div class="actions">{% if can('expenses', 2) %}<a class="btn pri" href="{{ url_for('expenses.new') }}">+ New expense claim</a>{% endif %}</div></div>
+
+<div class="xc-tabs" role="tablist">{% for k, label in statuses + [('all', 'All')] %}<a class="{{ 'on' if show == k }}" href="{{ url_for('expenses.index', show=k, who=who or None) }}">{{ label }}<span class="n">{{ counts.get(k, 0) }}</span></a>{% endfor %}</div>
+{% if manager and people|length > 1 %}<form class="filters" method="get"><input type="hidden" name="show" value="{{ show }}"><div><label for="who">Whose claims</label><select id="who" name="who" onchange="this.form.submit()"><option value="">Everyone</option>{% for p in people %}<option {{ 'selected' if p == who }}>{{ p }}</option>{% endfor %}</select></div></form>{% endif %}
+
+{% macro st(x) %}<span class="badge {{ x.status }}">{{ dict(statuses)[x.status] }}</span>{% endmacro %}
+{% if rows %}
+<div class="tbl xc-table"><table><tr><th>Date</th>{% if manager %}<th>Who</th>{% endif %}<th>Supplier</th><th>What for</th><th>Status</th><th class="n">GST</th><th class="n">Amount</th></tr>
+{% for x in rows %}<tr class="click" data-href="{{ url_for('expenses.view', xid=x.id) }}"><td>{{ x.date }}</td>{% if manager %}<td>{{ x.claimant }}</td>{% endif %}<td>{{ x.supplier or '' }}{% if not x.has_receipt %} <span class="muted small">(no receipt)</span>{% endif %}</td><td>{{ x.aname or '' }}{% if x.note %}<div class="muted small">{{ x.note }}</div>{% endif %}</td>
+<td>{{ st(x) }}{% if x.status == 'declined' and x.reason %}<div class="muted small">{{ x.reason }}</div>{% endif %}</td><td class="n">{{ x.gst|money0 }}</td><td class="n">{{ x.amount|money }}</td></tr>{% endfor %}
+<tr class="total"><td colspan="{{ 6 if manager else 5 }}">{{ rows|length }} claim{{ '' if rows|length == 1 else 's' }}</td><td class="n">{{ total|money }}</td></tr></table></div>
+<div class="card xc-cards" style="padding:6px 16px"><ul class="td-list">{% for x in rows %}<li><a class="row" href="{{ url_for('expenses.view', xid=x.id) }}"><div class="main"><b>{{ x.supplier or x.aname or 'Expense' }}</b><span>{{ x.date }}{% if manager %} · {{ x.claimant }}{% endif %} · {{ x.aname or '' }}</span></div>
+<div style="text-align:right"><div class="amt">{{ x.amount|money }}</div>{{ st(x) }}</div></a></li>{% endfor %}</ul>
+<p class="muted small" style="margin:8px 0">{{ rows|length }} claim{{ '' if rows|length == 1 else 's' }} · {{ total|money }}</p></div>
+{% else %}<div class="card"><p class="muted" style="margin:0">{% if show == 'waiting' %}No claims waiting.{% if manager %} You're all caught up.{% endif %}{% else %}No {{ 'claims' if show == 'all' else dict(statuses)[show]|lower ~ ' claims' }} yet.{% endif %}
+{% if can('expenses', 2) %} <a href="{{ url_for('expenses.new') }}">Make a new expense claim</a>.{% endif %}</p></div>{% endif %}
+{% endblock %}

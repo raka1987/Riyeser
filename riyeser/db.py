@@ -374,6 +374,7 @@ def migrate(db):
     _stock_and_quotes(db)
     _job_parts_inc_gst(db)
     _unique_document_numbers(db)
+    _crm_and_expense_tables(db)
     db.commit()
 
 
@@ -401,6 +402,30 @@ def _stock_and_quotes(db):
         ("booking_job_id", "INTEGER REFERENCES booking_jobs(id)"),   # a quote: the Bookings job made from it
         ("source_document_id", "INTEGER REFERENCES documents(id)"),  # a bill: the purchase order it received
         ("received_at", "TEXT")))            # a purchase order: everything on it has been received
+
+
+def _crm_and_expense_tables(db):
+    """Notes and follow-ups on a customer's (supplier's) page, and staff expense claims with their receipts."""
+    db.execute("""CREATE TABLE IF NOT EXISTS contact_notes (
+        id INTEGER PRIMARY KEY, contact_id INTEGER NOT NULL REFERENCES contacts(id), date TEXT NOT NULL,
+        note TEXT NOT NULL, follow_up_on TEXT,          -- "call back on": shows on the Today screen from this date
+        done_at TEXT, done_by INTEGER REFERENCES users(id), user_id INTEGER REFERENCES users(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("CREATE INDEX IF NOT EXISTS contact_notes_contact ON contact_notes(contact_id)")
+    db.execute("""CREATE TABLE IF NOT EXISTS expense_claims (
+        id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id),   -- who entered it
+        claimant TEXT NOT NULL,                         -- who is paid back (the staff member)
+        date TEXT NOT NULL, supplier TEXT, amount INTEGER NOT NULL,      -- cents, including GST
+        gst INTEGER NOT NULL DEFAULT 0, account_id INTEGER REFERENCES accounts(id), note TEXT,
+        status TEXT NOT NULL DEFAULT 'waiting',         -- waiting, approved, declined, paid
+        reason TEXT, decided_by INTEGER REFERENCES users(id), decided_at TEXT,
+        pay_how TEXT,                                   -- bill (owed to the staff member) or bank (paid already)
+        contact_id INTEGER REFERENCES contacts(id), document_id INTEGER REFERENCES documents(id),
+        entry_id INTEGER REFERENCES journal_entries(id),
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS expense_receipts (
+        claim_id INTEGER PRIMARY KEY REFERENCES expense_claims(id), filename TEXT, mime TEXT NOT NULL,
+        data BLOB NOT NULL)""")
 
 
 def _job_parts_inc_gst(db):

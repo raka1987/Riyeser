@@ -1,5 +1,5 @@
 """Contacts: customers and suppliers."""
-from flask import Blueprint, render_template, request, redirect, url_for, flash, abort
+from flask import Blueprint, render_template, request, redirect, url_for, flash, abort, g
 
 from ..db import get_db, audit, to_cents
 from . import lookups, opt_int, guarded
@@ -58,18 +58,78 @@ def _save(kind, cid):
 
 @bp.route("/view/<int:cid>")
 def view(cid):
+    """The customer's (supplier's) page: totals, one timeline of everything with them, notes and follow-ups."""
+    from .timeline import contact_page
     db = get_db()
     c = db.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone()
     if not c:
         abort(404)
-    docs = db.execute("SELECT * FROM documents WHERE contact_id=? ORDER BY date DESC, id DESC", (cid,)).fetchall()
-    pays = db.execute("SELECT p.*, a.name bank FROM payments p JOIN accounts a ON a.id=p.bank_account_id"
-                      " WHERE contact_id=? ORDER BY date DESC", (cid,)).fetchall()
-    balance = sum(d["total"] - d["amount_paid"] for d in docs if d["status"] == "open")
-    from .bookings import customer_bookings
+    return render_template("contacts/view.html", c=c, **contact_page(db, c, request.args.get("show", "all")))
+
+
+@bp.route("/view/<int:cid>/note", methods=["POST"])
+@guarded
+def note_add(cid):
+    from datetime import date
+    db = get_db()
+    c = db.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone() or abort(404)
+    f = request.form
+    text = (f.get("note") or "").strip()
+    follow = (f.get("follow_up_on") or "").strip() or None
+    if not text:
+        raise ValueError("Write the note first (for example: Rang about the overdue invoice, will pay Friday).")
+    when = (f.get("date") or "").strip() or date.today().isoformat()
+    for v in (when, follow):
+        if v:
+            try:
+                date.fromisoformat(v)
+            except ValueError:
+                raise ValueError("Enter dates like 2026-11-30.")
+    db.execute("INSERT INTO contact_notes (contact_id, date, note, follow_up_on, user_id) VALUES (?,?,?,?,?)",
+               (cid, when, text, follow, g.user["id"] if g.get("user") else None))
+    audit(db, "contact_note", f"{c['name']}" + (f" follow up {follow}" if follow else ""))
+    flash("Note added." + (f" It will show on the Today screen on {follow}." if follow else ""), "ok")
+    return redirect(url_for("contacts.view", cid=cid) + "#notes")
+
+
+def _note(db, cid, nid):
+    n = db.execute("SELECT * FROM contact_notes WHERE id=? AND contact_id=?", (nid, cid)).fetchone()
+    if not n:
+        abort(404)
+    return n
+
+
+@bp.route("/view/<int:cid>/note/<int:nid>/done", methods=["POST"])
+@guarded
+def note_done(cid, nid):
+    db = get_db()
+    n = _note(db, cid, nid)
+    if n["done_at"]:
+        db.execute("UPDATE contact_notes SET done_at=NULL, done_by=NULL WHERE id=?", (nid,))
+        flash("Follow-up opened again.", "ok")
+    else:
+        db.execute("UPDATE contact_notes SET done_at=datetime('now','localtime'), done_by=? WHERE id=?",
+                   (g.user["id"] if g.get("user") else None, nid))
+        flash("Follow-up done.", "ok")
+    if request.form.get("back") == "today":
+        return redirect(url_for("core.dashboard"))
+    return redirect(url_for("contacts.view", cid=cid) + "#notes")
+
+
+@bp.route("/view/<int:cid>/note/<int:nid>/delete", methods=["POST"])
+@guarded
+def note_delete(cid, nid):
     from .. import perms
-    bks = customer_bookings(db, cid) if c["kind"] == "customer" and perms.can("bookings") else []
-    return render_template("contacts/view.html", c=c, docs=docs, pays=pays, balance=balance, bks=bks)
+    db = get_db()
+    c = db.execute("SELECT kind FROM contacts WHERE id=?", (cid,)).fetchone()
+    n = _note(db, cid, nid)
+    area = "sales" if c["kind"] == "customer" else "purchases"
+    if n["user_id"] != g.user["id"] and not perms.can(area, perms.FULL):
+        raise ValueError("Only the person who wrote this note, or someone with Full access, can delete it.")
+    db.execute("DELETE FROM contact_notes WHERE id=?", (nid,))
+    audit(db, "contact_note_delete", f"note {nid}")
+    flash("Note deleted.", "ok")
+    return redirect(url_for("contacts.view", cid=cid) + "#notes")
 
 
 def _period():

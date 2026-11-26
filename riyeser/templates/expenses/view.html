@@ -1,0 +1,54 @@
+{% extends "base.html" %}{% block title %}Expense claim {{ x.id }}{% endblock %}
+{% block content %}
+{% include "_crm_styles.html" %}
+<div class="head"><div><h1>{{ x.amount|money }} <span class="badge {{ x.status }}" style="vertical-align:middle">{{ statuses[x.status] }}</span></h1>
+<p class="sub">Expense claim {{ x.id }} · {{ x.claimant }} · paid {{ x.date }}{% if x.supplier %} at {{ x.supplier }}{% endif %}</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('expenses.index', show=x.status) }}">Back to claims</a>
+{% if x.status == 'waiting' and (own or manager) %}<form method="post" action="{{ url_for('expenses.withdraw', xid=x.id) }}" onsubmit="return confirm('Withdraw this claim? It will be removed.')"><button class="btn danger">Withdraw</button></form>{% endif %}</div></div>
+
+<div class="cu-cols">
+<div class="stack">
+<div class="card" style="margin:0"><h3>The claim</h3>
+<table>
+<tr><td class="muted">Who paid</td><td>{{ x.claimant }}{% if x.ufull or x.uname %}{% if (x.ufull or x.uname) != x.claimant %} <span class="muted">(entered by {{ x.ufull or x.uname }})</span>{% endif %}{% endif %}</td></tr>
+<tr><td class="muted">Date paid</td><td>{{ x.date }}</td></tr>
+<tr><td class="muted">Where from</td><td>{{ x.supplier or '—' }}</td></tr>
+<tr><td class="muted">What for</td><td>{{ x.aname or '—' }}{% if can('accounts') and x.acode %} <span class="muted">({{ x.acode }})</span>{% endif %}</td></tr>
+<tr><td class="muted">Amount</td><td><b>{{ x.amount|money }}</b>{% if x.gst %} including {{ x.gst|money }} GST{% endif %}</td></tr>
+{% if x.note %}<tr><td class="muted">Note</td><td style="white-space:pre-wrap">{{ x.note }}</td></tr>{% endif %}
+<tr><td class="muted">Sent</td><td>{{ x.created_at }}</td></tr>
+{% if x.decided_at %}<tr><td class="muted">{{ 'Declined' if x.status == 'declined' else 'Approved' }}</td><td>{{ x.decided_at }}{% if x.dfull or x.dname %} by {{ x.dfull or x.dname }}{% endif %}</td></tr>{% endif %}
+{% if x.reason %}<tr><td class="muted">{{ 'Why it was declined' if x.status == 'declined' else 'Note' }}</td><td><b>{{ x.reason }}</b></td></tr>{% endif %}
+{% if x.pay_how == 'bill' %}<tr><td class="muted">Paid back</td><td>As bill {% if can('purchases') %}<a href="{{ url_for('documents.view', doc_id=x.document_id) }}">{{ x.doc_no }}</a>{% else %}{{ x.doc_no }}{% endif %} owed to {{ x.claimant }}{% if x.doc_status == 'open' %}: {{ x.doc_due|money }} still to pay.{% if can('purchases', 2) %} <a href="{{ url_for('documents.pay', side='purchase', contact=x.contact_id) }}">Pay it now</a>{% endif %}{% elif x.doc_status == 'paid' %}: paid.{% endif %}</td></tr>
+{% elif x.pay_how == 'bank' %}<tr><td class="muted">Paid back</td><td>Paid from the bank{% if can('accounts') and x.entry_id %} (<a href="{{ url_for('core.entry', eid=x.entry_id) }}">transaction #{{ x.entry_id }}</a>){% endif %}</td></tr>{% endif %}
+</table></div>
+
+{% if x.status == 'waiting' and manager %}
+{% if own and not admin %}<div class="card flash warn" style="margin:0">This is your own claim, so someone else needs to approve it (or an administrator).</div>
+{% else %}
+<div class="card" style="margin:0"><h3>Approve</h3>
+<form method="post" action="{{ url_for('expenses.decide', xid=x.id) }}" class="stack"><input type="hidden" name="action" value="approve">
+<div class="xc-pay">
+<label class="pick"><input type="radio" name="pay_how" value="bill" checked> <b>Owe it to {{ x.claimant }}</b><small>Makes a bill for {{ x.amount|money }} to {{ x.claimant }}. Pay it later under Pay bills (on its own or with their pay).</small></label>
+<label class="pick"><input type="radio" name="pay_how" value="bank"> <b>Already paid them back</b><small>Records the money paid out of a bank account now.</small></label>
+</div>
+<div class="fields" id="bankbits"><div><label for="x-bank">Paid from</label><select id="x-bank" name="bank_account_id">{% for a in bank_accounts %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}</select></div>
+<div><label for="x-on">Date paid back</label><input id="x-on" type="date" name="paid_on" value="{{ today }}"></div></div>
+<div><button class="btn pri">Approve {{ x.amount|money }}</button></div>
+</form></div>
+<div class="card" style="margin:0"><h3>Decline</h3>
+<form method="post" action="{{ url_for('expenses.decide', xid=x.id) }}" class="stack"><input type="hidden" name="action" value="decline">
+<div><label for="x-why">Why? {{ x.claimant }} will see this.</label><input id="x-why" name="reason" required placeholder="e.g. No receipt attached. Please add it and claim again."></div>
+<div><button class="btn danger">Decline</button></div></form></div>
+{% endif %}{% elif x.status == 'waiting' %}<div class="card" style="margin:0"><p class="muted" style="margin:0">Waiting for a manager to approve it.</p></div>{% endif %}
+</div>
+
+<div class="card xc-receipt" style="margin:0"><h3>Receipt</h3>
+{% if x.rmime %}{% if x.rmime.startswith('image/') and x.rmime not in ('image/heic', 'image/heif') %}<a href="{{ url_for('expenses.receipt', xid=x.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('expenses.receipt', xid=x.id) }}" alt="Receipt for claim {{ x.id }}"></a>
+{% else %}<p>{{ x.rname or 'Receipt' }}</p>{% endif %}
+<p><a class="btn sm" href="{{ url_for('expenses.receipt', xid=x.id) }}" target="_blank" rel="noopener">Open</a> <a class="btn sm" href="{{ url_for('expenses.receipt', xid=x.id, download=1) }}">Download</a></p>
+{% else %}<p class="muted">No receipt attached.</p>{% endif %}</div>
+</div>
+{% endblock %}
+{% block scripts %}<script>(function(){var b=document.getElementById("bankbits");if(!b)return;function s(){var v=document.querySelector("input[name=pay_how]:checked");b.style.display=v&&v.value==="bank"?"":"none"}
+document.querySelectorAll("input[name=pay_how]").forEach(function(r){r.addEventListener("change",s)});s()})()</script>{% endblock %}

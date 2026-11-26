@@ -1,0 +1,71 @@
+{% extends "base.html" %}{% block title %}Today{% endblock %}
+{% block content %}
+{% include "_crm_styles.html" %}
+{% set pos_here = product.key == 'pos' %}
+{% macro doc_link(d) -%}{{ url_for('contacts.view', cid=d.contact_id) if pos_here else url_for('documents.view', doc_id=d.id) }}{%- endmacro %}
+<div class="head"><div><div class="greet" id="greet">Welcome back</div><h1>Today</h1><p class="sub">{{ label }}{% if user.full_name %} · {{ user.full_name }}{% endif %}</p></div>
+<div class="actions">
+{% if not pos_here and can('sales', 2) %}<a class="btn pri" href="{{ url_for('documents.edit', side='sale') }}">+ Invoice</a>
+<a class="btn" href="{{ url_for('documents.pay', side='sale') }}">Receive a payment</a>{% endif %}
+{% if pos_here and can('sales') %}<a class="btn pri" href="{{ url_for('pos.register') }}">Open the till</a>{% endif %}
+{% if f.expenses and can('expenses', 2) %}<a class="btn" href="{{ url_for('expenses.new') }}">+ Expense claim</a>{% endif %}
+{% if f.overview and (can('accounts') or can('banking')) %}<a class="btn" href="{{ url_for('core.overview') }}">Business overview</a>{% endif %}
+</div></div>
+
+{% if sales is defined or owe is defined %}
+<div class="td-kpis">
+{% if sales is defined %}
+  <a class="card kpi" href="{{ url_for('pos.sales') if pos_here else url_for('documents.index', side='sale') }}"><div class="lbl">Today's sales</div><div class="val">{{ sales.s|money }}</div><div class="note">{{ sales.n }} sale{{ '' if sales.n == 1 else 's' }} today</div></a>
+  <a class="card kpi" href="{{ url_for('contacts.index', kind='customer') if pos_here else url_for('documents.payments', side='sale') }}"><div class="lbl">Money in this week</div><div class="val">{{ money_in.s|money }}</div><div class="note">{{ money_in.n }} payment{{ '' if money_in.n == 1 else 's' }} from customers since Monday</div></a>
+  <a class="card kpi" href="{{ url_for('contacts.index', kind='customer') if pos_here else url_for('documents.index', side='sale') if product.key == 'bookings' else url_for('reports.show', name='aged_receivables') }}"><div class="lbl">Customers owe you</div><div class="val">{{ owed.s|money }}</div><div class="note">{{ owed.n }} unpaid invoice{{ '' if owed.n == 1 else 's' }}{% if owed.over_n %} · <b>{{ owed.over_s|money }} overdue</b>{% endif %}</div></a>
+{% endif %}
+{% if owe is defined %}
+  <a class="card kpi" href="{{ url_for('documents.pay', side='purchase') }}"><div class="lbl">Bills due this week</div><div class="val">{{ owe.s|money }}</div><div class="note">You owe suppliers on {{ owe.n }} bill{{ '' if owe.n == 1 else 's' }} due by next week</div></a>
+{% endif %}
+</div>
+{% endif %}
+
+<div class="td-grid">
+{% if unpaid is defined %}
+<div class="card td-card"><h3>Unpaid invoices{% if owed.over_n %} <span class="cnt">{{ owed.over_n }} overdue</span>{% endif %}{% if not pos_here %}<a href="{{ url_for('documents.index', side='sale') }}">All invoices →</a>{% endif %}</h3>
+{% if unpaid %}<ul class="td-list">{% for d in unpaid %}<li><a class="row" href="{{ doc_link(d) }}"><div class="main"><b>{{ d.cname }}</b><span>{{ d.number }} · {% if d.overdue %}<span class="neg" style="display:inline">overdue, was due {{ d.due_date }}</span>{% elif d.due_date %}due {{ d.due_date }}{% else %}no due date{% endif %}</span></div>
+<span class="amt">{{ (d.total - d.amount_paid)|money }}</span></a></li>{% endfor %}</ul>
+{% else %}<p class="td-empty">Every invoice is paid. Nothing to chase.</p>{% endif %}</div>
+{% endif %}
+
+{% if follow_ups is defined %}
+<div class="card td-card"><h3>Follow-ups due{% if follow_ups %} <span class="cnt">{{ follow_ups|length }}</span>{% endif %}</h3>
+{% if follow_ups %}<ul class="td-list">{% for n in follow_ups %}<li><a class="row" href="{{ url_for('contacts.view', cid=n.contact_id) }}#notes"><div class="main"><b>{{ n.cname }}</b><span>{% if n.follow_up_on < today %}<span class="neg" style="display:inline">was due {{ n.follow_up_on }}</span>{% else %}today{% endif %} · {{ n.note }}</span></div></a>
+{% if can('sales' if n.ckind == 'customer' else 'purchases', 2) %}<form method="post" action="{{ url_for('contacts.note_done', cid=n.contact_id, nid=n.id) }}"><input type="hidden" name="back" value="today"><button class="btn sm" title="Mark this follow-up done">Done</button></form>{% endif %}</li>{% endfor %}</ul>
+{% else %}<p class="td-empty">No calls or follow-ups due. Add one from a customer's page ("Call back on…").</p>{% endif %}</div>
+{% endif %}
+
+{% if bookings is defined %}
+<div class="card td-card"><h3>Today's bookings{% if bookings %} <span class="cnt">{{ bookings|length }}</span>{% endif %}<a href="{{ url_for('core.bookings_app') if product.bookings_separate else url_for('bookings.calendar') }}">Calendar →</a></h3>
+{% if bookings %}<ul class="td-list">{% for b in bookings %}<li><a class="row" href="{{ url_for('core.bookings_app') if product.bookings_separate else url_for('bookings.edit', bid=b.id) }}"><span class="when">{{ b.starts_at[11:16] }}</span><div class="main"><b>{{ b.customer or b.title or 'Booking' }}</b><span>{{ b.service or b.title or '' }}{% if b.resource %} · {{ b.resource }}{% endif %}</span></div>
+<span class="bk-st st-{{ b.status }}">{{ b.status|replace('_', ' ')|capitalize }}</span></a></li>{% endfor %}</ul>
+{% else %}<p class="td-empty">Nothing booked for today.</p>{% endif %}</div>
+{% endif %}
+
+{% if bills is defined %}
+<div class="card td-card"><h3>Bills due{% if bills %} <span class="cnt">{{ bills|length }}</span>{% endif %}<a href="{{ url_for('documents.pay', side='purchase') }}">Pay bills →</a></h3>
+{% if bills %}<ul class="td-list">{% for d in bills %}<li><a class="row" href="{{ url_for('documents.view', doc_id=d.id) }}"><div class="main"><b>{{ d.cname }}</b><span>{{ d.number }} · {% if d.overdue %}<span class="neg" style="display:inline">overdue, was due {{ d.due_date }}</span>{% elif d.due_date %}due {{ d.due_date }}{% else %}no due date{% endif %}</span></div>
+<span class="amt">{{ (d.total - d.amount_paid)|money }}</span></a></li>{% endfor %}</ul>
+{% else %}<p class="td-empty">No bills due in the next week.</p>{% endif %}</div>
+{% endif %}
+
+{% if low_stock is defined %}
+<div class="card td-card"><h3>Low stock{% if low_stock %} <span class="cnt">{{ low_stock|length }}</span>{% endif %}<a href="{{ url_for('reports.show', name='reorder') if not pos_here else url_for('inventory.index') }}">Reorder list →</a></h3>
+{% if low_stock %}<ul class="td-list">{% for i in low_stock %}<li><a class="row" href="{{ url_for('inventory.view', iid=i.id) }}"><div class="main"><b>{{ i.name }}</b><span>{{ i.sku }} · reorder at {{ '%g'|format(i.reorder_level) }}</span></div>
+<span class="amt {{ 'neg' if i.qty_on_hand <= 0 }}">{{ '%g'|format(i.qty_on_hand) }} left</span></a></li>{% endfor %}</ul>
+{% else %}<p class="td-empty">Every item is above its reorder level.</p>{% endif %}</div>
+{% endif %}
+
+{% if claims is defined %}
+<div class="card td-card"><h3>Expense claims to approve{% if claims.n %} <span class="cnt">{{ claims.n }}</span>{% endif %}<a href="{{ url_for('expenses.index', show='waiting') }}">Open claims →</a></h3>
+{% if claims.n %}<p style="margin:0">{{ claims.n }} claim{{ '' if claims.n == 1 else 's' }} for {{ claims.s|money }} {{ 'is' if claims.n == 1 else 'are' }} waiting for you to approve or decline.</p>
+{% else %}<p class="td-empty">No expense claims waiting.</p>{% endif %}</div>
+{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script>(function(){var h=new Date().getHours();document.getElementById("greet").textContent=h<12?"Good morning":h<17?"Good afternoon":"Good evening"})()</script>{% endblock %}

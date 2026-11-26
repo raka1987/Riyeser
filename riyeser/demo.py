@@ -202,6 +202,7 @@ def seed_demo(db):
         db.execute("INSERT INTO bank_feed_lines (account_id, date, description, amount) VALUES (?,?,?,?)",
                    (acc["1-1110"], d(days), desc, to_cents(amt)))
     seed_bookings(db, cust)
+    seed_crm(db, cust, items, acc, tc)
     db.commit()
 
 
@@ -252,6 +253,99 @@ def seed_stock_and_quotes(db, cust, supp, items, tc, d):
     mark_declined(db, q, "Went with another quote")
     db.execute("UPDATE documents SET quote_status_by='Alex Sample', quote_status_at=? WHERE id=?", (d(8) + " 15:40", q))
     quote(cust[1], 45, [(items[0], 24)], 15)
+
+
+def _receipt_pdf(shop, lines, total):
+    """A made-up receipt, so the demo's expense claims have something to look at."""
+    from fpdf import FPDF
+    p = FPDF(format=(80, 120))
+    p.set_margins(6, 6)
+    p.add_page()
+    p.set_font("Helvetica", "B", 12)
+    p.cell(0, 7, shop, new_x="LMARGIN", new_y="NEXT", align="C")
+    p.set_font("Helvetica", "", 8)
+    p.cell(0, 5, "TAX INVOICE  (sample receipt for the demo)", new_x="LMARGIN", new_y="NEXT", align="C")
+    p.ln(3)
+    for what, amt in lines:
+        p.cell(48, 5, what)
+        p.cell(0, 5, f"${amt:,.2f}", new_x="LMARGIN", new_y="NEXT", align="R")
+    p.ln(2)
+    p.set_font("Helvetica", "B", 10)
+    p.cell(48, 6, "TOTAL inc GST")
+    p.cell(0, 6, f"${total:,.2f}", new_x="LMARGIN", new_y="NEXT", align="R")
+    p.set_font("Helvetica", "", 8)
+    p.cell(0, 5, f"GST included ${total / 11:,.2f}", new_x="LMARGIN", new_y="NEXT", align="R")
+    return bytes(p.output())
+
+
+def seed_crm(db, cust, items, acc, tc):
+    """The customer page, Today screen and expense claims: a sale today, notes and follow-ups on the customers, and
+    staff expense claims in every state."""
+    from .views.expenses import claim_lines, staff_contact
+    today = date.today()
+
+    def d(days_ago):
+        return (today - timedelta(days=days_ago)).isoformat()
+
+    admin = (db.execute("SELECT id FROM users WHERE role='admin' ORDER BY id").fetchone() or [None])[0]
+    # pumps are running low, so Low stock on the Today screen has something to show
+    db.execute("UPDATE items SET reorder_level=qty_on_hand+3 WHERE sku='PMP-200'")
+    # a sale today, paid straight away, so Today's sales and Money in this week have something
+    inv = L.save_document(db, "sale", dict(contact_id=cust[1], date=d(0), due_date=d(-14)), [
+        dict(item_id=items[3], qty=3, unit_price=_price(db, items[3]), tax_code_id=tc["GST"])], "open")
+    L.record_payment(db, "in", cust[1], acc["1-1110"], d(0), [(inv, _total(db, inv))], "EFT")
+    notes = [  # (customer, days ago, note, follow up in n days (negative = overdue), done)
+        (0, 12, "Rang Sam about the overdue invoice. Says the cheque is in the post.", None, False),
+        (0, 4, "Asked for a quote on two more filtered water taps for the new cafe.", 0, False),
+        (1, 20, "Met at their gym. Happy with the pump service; wants a yearly service plan.", -2, False),
+        (2, 2, "Sent the pump quote. They want to think about it over the weekend.", 5, False),
+        (3, 30, "Called to confirm the office install date.", -25, True),
+    ]
+    for c, ago, text, follow, done in notes:
+        db.execute("INSERT INTO contact_notes (contact_id, date, note, follow_up_on, done_at, done_by, user_id)"
+                   " VALUES (?,?,?,?,?,?,?)",
+                   (cust[c], d(ago), text, d(-follow) if follow is not None else None,
+                    d(ago - 5) + " 10:15:00" if done else None, admin if done else None, admin))
+    acct = lambda code: acc[code]
+    claims = [  # (who, days ago, shop, amount, gst, account, note, status, receipt lines)
+        ("Jamie Example", 1, "Sample Fuel Station", 94.15, 8.56, "6-1800", "Fuel for the service van", "waiting",
+         [("Unleaded 48.3 L", 94.15)]),
+        ("Casey Placeholder", 3, "Sample Office Store", 86.90, 7.90, "6-1500", "Printer ink and paper for the counter",
+         "waiting", [("Ink cartridge x2", 64.90), ("A4 paper", 22.00)]),
+        ("Robin Demo", 9, "Sample Hardware", 42.50, 3.86, "6-1900", "Fittings for a customer job", "bill",
+         [("Brass fittings", 42.50)]),
+        ("Alex Sample", 16, "Sample Airlines", 389.00, 35.36, "6-2200", "Flight to the Brisbane trade show", "bank",
+         [("SYD-BNE return", 389.00)]),
+        ("Morgan Testwell", 6, "Corner Cafe", 27.00, 2.45, "6-1000", "Coffees for a client meeting", "declined", None),
+    ]
+    for who, ago, shop, amount, gst, code, note, status, receipt in claims:
+        xid = db.execute("INSERT INTO expense_claims (user_id, claimant, date, supplier, amount, gst, account_id, note)"
+                         " VALUES (?,?,?,?,?,?,?,?)",
+                         (admin, who, d(ago), shop, to_cents(amount), to_cents(gst), acct(code), note)).lastrowid
+        if receipt:
+            db.execute("INSERT INTO expense_receipts (claim_id, filename, mime, data) VALUES (?,?,?,?)",
+                       (xid, f"receipt-{xid}.pdf", "application/pdf", _receipt_pdf(shop, receipt, amount)))
+        x = db.execute("SELECT * FROM expense_claims WHERE id=?", (xid,)).fetchone()
+        lines = claim_lines(db, x)
+        if status == "declined":
+            db.execute("UPDATE expense_claims SET status='declined', reason=?, decided_by=?, decided_at=? WHERE id=?",
+                       ("No receipt. Please ask the cafe for one and claim again.", admin, d(ago - 1) + " 09:00:00", xid))
+        elif status == "bill":
+            cid = staff_contact(db, who)
+            doc = L.save_document(db, "purchase", dict(contact_id=cid, date=x["date"], due_date=d(ago - 14),
+                                                       reference=f"Claim {xid}", notes=f"Expense claim {xid} from {who}",
+                                                       tax_inclusive=True),
+                                  [dict(description=l["description"], qty=1, unit_price=l["amount"],
+                                        account_id=l["account_id"], tax_code_id=l["tax_code_id"]) for l in lines], "open")
+            db.execute("UPDATE expense_claims SET status='approved', pay_how='bill', contact_id=?, document_id=?,"
+                       " decided_by=?, decided_at=? WHERE id=?", (cid, doc, admin, d(ago - 1) + " 09:00:00", xid))
+        elif status == "bank":
+            eid = L.bank_transaction(db, "spend", acc["1-1110"], d(ago - 2),
+                                     [dict(account_id=l["account_id"], amount=l["amount"], tax_code_id=l["tax_code_id"],
+                                           memo=l["memo"]) for l in lines],
+                                     payee=who, reference=f"Claim {xid}", memo=f"Expense claim {xid}: {who}")
+            db.execute("UPDATE expense_claims SET status='paid', pay_how='bank', entry_id=?, decided_by=?, decided_at=?"
+                       " WHERE id=?", (eid, admin, d(ago - 2) + " 09:00:00", xid))
 
 
 def seed_bookings(db, customers=None):

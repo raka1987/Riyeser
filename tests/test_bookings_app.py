@@ -26,8 +26,9 @@ def _one(app, sql, args=()):
 
 def test_bookings_app_shows_the_calendar_only(tmp_path, monkeypatch):
     app, c, item = make(tmp_path, monkeypatch, "bookings")
-    r = c.get("/")
-    assert r.status_code == 302 and r.headers["Location"].endswith("/bookings/")
+    home = c.get("/")   # Today is the home screen: today's bookings, who owes you, follow-ups
+    assert home.status_code == 200 and "Today's bookings" in home.get_data(as_text=True)
+    assert "Bills due" not in home.get_data(as_text=True) and "Low stock" not in home.get_data(as_text=True)
     page = c.get("/bookings/").get_data(as_text=True)
     assert "Riyeser Bookings" in page and "ed-book" in page and "No staff yet" in page   # blank: nothing added
     c.post("/bookings/setup/starters")
