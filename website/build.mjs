@@ -224,7 +224,7 @@ const SHOTS = {
     ['payroll-timeclock', 1440, 472, 'Riyeser Payroll time clock: staff tap their name to clock in or out', 'The time clock']],
   'desk-assistant': [['desk-search', 1280, 560, 'Desk Assistant Find a file: a search for a customer name finds two invoices, filed under Organised, Invoices, 2026', 'Find a file'],
     ['desk-today', 1280, 300, "Desk Assistant Today screen with meetings and the to-dos taken from meeting notes", "Today's to-dos"]],
-  link: [['link-chat', 1440, 900, 'Riyeser Link demo: the jobs channel with messages, reactions and a shared job sheet, and the team list with extensions', 'Team chat'],
+  link: [['link-chat', 1440, 900, 'Riyeser Link demo: one list of chats and people on the left, the jobs channel with messages, reactions and a shared job sheet, and your status at the top', 'Team chat'],
     ['link-calls', 1440, 900, 'Riyeser Link calls: dial an extension or call a branch, with recent calls', 'Calls'],
     ['link-desk-phones', 1440, 900, 'Riyeser Link desk phones page: set-up steps for Riyeser Link Office and the server address to type into phones', 'Desk phones'],
     ['link-phone', 600, 1298, 'Riyeser Link on a phone: pinned chats, channels and direct messages', 'On a phone', 'tall']],
