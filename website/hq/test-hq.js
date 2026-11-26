@@ -1,11 +1,12 @@
 // Riyeser HQ in demo mode: every tab, a customer page, Mark paid until, plan, notes, staff, history; plus a phone.
-// Run: build the site, serve website/public on port 8090, then `node website/hq/test-hq.js <screenshot folder>`.
+// Run: build the site, serve website/public on port 8090 (or set HQ_URL), then `node website/hq/test-hq.js <screenshot folder>`.
 const { chromium, devices } = require('playwright');
+const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
 (async () => {
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
   const pg = await b.newPage({ viewport: { width: 1366, height: 900 } });
   pg.on('pageerror', (e) => errs.push(e.message)); pg.on('dialog', (d) => d.accept());
-  await pg.goto('http://127.0.0.1:8090/hq/?demo'); await pg.waitForSelector('.tiles');
+  await pg.goto(BASE + '/hq/?demo'); await pg.waitForSelector('.tiles');
   console.log('tabs:', await pg.evaluate(() => [...document.querySelectorAll('.snav .nv')].map((x) => x.textContent)));
   console.log('tiles:', await pg.evaluate(() => [...document.querySelectorAll('.tile')].map((t) => t.innerText.replace(/\n/g, ' | '))));
   console.log('noindex:', await pg.getAttribute('meta[name=robots]', 'content'));
@@ -41,11 +42,33 @@ const { chromium, devices } = require('playwright');
   await pg.click('[data-tab=history]'); await pg.waitForSelector('.tbl');
   console.log('history:', await pg.evaluate(() => [...document.querySelectorAll('.tbl tr')].slice(1, 4).map((r) => r.innerText.replace(/\s+/g, ' '))));
   const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); ph.on('pageerror', (e) => errs.push('phone: ' + e.message));
-  await ph.goto('http://127.0.0.1:8090/hq/?demo'); await ph.waitForSelector('.tiles');
+  await ph.goto(BASE + '/hq/?demo'); await ph.waitForSelector('.tiles');
   console.log('phone overflow:', await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth));
+  // phone widths (360 and 390): a compact bar with a Menu (every page, the current one marked; closes on a choice, Escape or a tap outside),
+  // every page and a customer page without sideways scrolling, and tables shown as cards (one column, "Label: value").
+  const bad = [];
+  for (const [w, h] of [[390, 844], [360, 780]]) {
+    const pp = await (await b.newContext({ viewport: { width: w, height: h }, isMobile: true, hasTouch: true })).newPage(); pp.on('pageerror', (e) => errs.push(`${w}: ${e.message}`));
+    await pp.goto(BASE + '/hq/?demo'); await pp.waitForSelector('.tiles');
+    if (!(await pp.isVisible('.mbar #mnav')) || await pp.isVisible('.side')) bad.push(`${w}: no compact bar`);
+    await pp.click('#mnav'); if (!(await pp.isVisible('#mmenu'))) bad.push(`${w}: Menu does not open`);
+    if ((await pp.textContent('#mmenu .mmi.on .nl')).trim() !== 'Overview') bad.push(`${w}: current page not marked`);
+    await pp.keyboard.press('Escape'); if (await pp.isVisible('#mmenu')) bad.push(`${w}: Escape does not close the Menu`);
+    await pp.click('#mnav'); await pp.click('#mbarT'); if (await pp.isVisible('#mmenu')) bad.push(`${w}: a tap outside does not close the Menu`);
+    const tabs = await pp.evaluate(() => [...document.querySelectorAll('#mmenu [data-tab]')].map((x) => x.dataset.tab)); const over = {};
+    for (const k of tabs) { await pp.click('#mnav'); await pp.click(`#mmenu [data-tab=${k}]`); await pp.waitForTimeout(k === 'downloads' || k === 'traffic' ? 1500 : 450);
+      if (await pp.isVisible('#mmenu')) bad.push(`${w}: Menu stays open after choosing ${k}`);
+      const r = await pp.evaluate(() => ({ o: document.documentElement.scrollWidth - document.documentElement.clientWidth, t: document.getElementById('mbarT').textContent,
+        rows: [...document.querySelectorAll('#main table.tbl tr:not(.thr):not([hidden])')].filter((tr) => tr.offsetParent).map((tr) => tr.getBoundingClientRect().width > tr.parentElement.getBoundingClientRect().width + 1 || getComputedStyle(tr).display !== 'flex').filter(Boolean).length }));
+      over[k] = r.o; if (r.o > 0) bad.push(`${w} ${k}: ${r.o}px sideways scroll`); if (r.rows) bad.push(`${w} ${k}: ${r.rows} table rows not shown as cards`); }
+    for (const hh of ['#/company/w1', '#/company/w1/programs', '#/company/w1/people', '#/company/w1/money']) { await pp.evaluate((x) => { location.hash = x; }, hh); await pp.waitForTimeout(500);
+      const o = await pp.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); over[hh] = o; if (o > 0) bad.push(`${w} ${hh}: ${o}px sideways scroll`); }
+    console.log(`phone ${w}px overflow:`, JSON.stringify(over)); await pp.context().close();
+  }
+  console.log(bad.length ? 'PHONE CHECK FAILED: ' + bad.join(' | ') : 'phone check (360 and 390): compact bar and Menu, no sideways scroll on any page, tables as cards'); if (bad.length) process.exitCode = 1;
   // signed out, not configured -> the demo; real sign-in screen when configured
   const p3 = await b.newPage(); await p3.route('**/link/config.js*', (r) => r.fulfill({ contentType: 'text/javascript', body: 'window.RIYESER_TEAM={supabaseUrl:"https://fake.supabase.test",supabaseKey:"k"};' }));
   await p3.route('https://fake.supabase.test/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{}' }));
-  await p3.goto('http://127.0.0.1:8090/hq/'); await p3.waitForSelector('#g'); console.log('configured & signed out ->', await p3.textContent('#g h1'));
+  await p3.goto(BASE + '/hq/'); await p3.waitForSelector('#g'); console.log('configured & signed out ->', await p3.textContent('#g h1'));
   console.log('errors:', errs); await b.close();
 })();

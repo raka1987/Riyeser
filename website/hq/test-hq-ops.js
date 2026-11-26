@@ -1,8 +1,9 @@
 // Riyeser HQ phase 1 in demo mode: the Support inbox (reply, internal note, assign, escalate, saved replies), fix-up tools (on the customer page),
 // refunds with a second approver, free periods (14 days applies; 90 days waits for another supervisor), Approvals,
 // permissions on the HQ team tab, Inactive accounts, Emails, History filters and CSV; phone widths; and the "old database" message.
-// Run: build the site, serve website/public on port 8090, then `node website/hq/test-hq-ops.js <screenshot folder>`.
+// Run: build the site, serve website/public on port 8090 (or set HQ_URL), then `node website/hq/test-hq-ops.js <screenshot folder>`.
 const { chromium, devices } = require('playwright');
+const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
 const fs = require('fs');
 (async () => {
   const b = await chromium.launch(); const errs = []; const out = process.argv[2] || '.';
@@ -13,7 +14,7 @@ const fs = require('fs');
   const fill = async (sel, v) => pg.fill(sel, v);
   const open = async (name, id) => { await tab('companies'); await fill('#sf input', name); await pg.click('#sf button'); await pg.waitForSelector(`tr[data-co="${id}"]`); await pg.click(`tr[data-co="${id}"]`); await pg.waitForSelector('.cpage'); };
   const cptab = async (k) => { await pg.click(`[data-cptab=${k}]`); await pg.waitForSelector(`#cpBody[data-tab=${k}]`); };
-  await pg.goto('http://127.0.0.1:8090/hq/?demo'); await pg.waitForSelector('.tiles');
+  await pg.goto(BASE + '/hq/?demo'); await pg.waitForSelector('.tiles');
   console.log('tabs:', await pg.evaluate(() => [...document.querySelectorAll('.snav .nv')].map((x) => x.textContent)));
 
   // --- Support: inbox, filters, timer, reply, internal note, assign, escalate
@@ -127,11 +128,13 @@ const fs = require('fs');
 
   // --- phone widths: no sideways scrolling on the new screens
   const ph = await (await b.newContext({ ...devices['iPhone 13'] })).newPage(); ph.on('pageerror', (e) => errs.push('phone: ' + e.message)); ph.on('dialog', (d) => d.accept());
-  await ph.goto('http://127.0.0.1:8090/hq/?demo'); await ph.waitForSelector('.tiles'); const over = {};
-  for (const k of ['support', 'refunds', 'approvals', 'inactive', 'emails', 'team', 'history']) { await ph.click(`[data-tab=${k}]`); await ph.waitForTimeout(350); over[k] = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth); }
-  await ph.click('[data-tab=support]'); await ph.waitForSelector('.tk'); await ph.click('.tk'); await ph.waitForSelector('.tview'); over.ticket = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+  await ph.goto(BASE + '/hq/?demo'); await ph.waitForSelector('.tiles'); const over = {};
+  // on a phone the pages are in the Menu
+  const pick = async (k) => { await ph.click('#mnav'); await ph.click(`#mmenu [data-tab=${k}]`); await ph.waitForTimeout(350); };
+  for (const k of ['support', 'refunds', 'approvals', 'inactive', 'emails', 'team', 'history']) { await pick(k); over[k] = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth); }
+  await pick('support'); await ph.waitForSelector('.tk'); await ph.click('.tk'); await ph.waitForSelector('.tview'); over.ticket = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   await ph.screenshot({ path: out + '/hq-support-phone.png' });
-  await ph.click('[data-tab=companies]'); await ph.waitForSelector('tr[data-co]'); await ph.fill('#sf input', 'sample plumbing'); await ph.click('#sf button'); await ph.waitForSelector('tr[data-co="w1"]');
+  await pick('companies'); await ph.waitForSelector('tr[data-co]'); await ph.fill('#sf input', 'sample plumbing'); await ph.click('#sf button'); await ph.waitForSelector('tr[data-co="w1"]');
   await ph.click('tr[data-co="w1"]'); await ph.waitForSelector('.cpage'); await ph.waitForTimeout(300); over.customer_page = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   console.log('phone overflow:', JSON.stringify(over));
 
@@ -151,7 +154,7 @@ const fs = require('fs');
     if (fn === 'hq_staff_list') return json([{ user_id: 'u1', display_name: 'Riki', role: 'owner', active: true, email: 'riki@riyeser.test', added_at: new Date().toISOString() }]);
     if (u.pathname.startsWith('/rest/v1/rpc/') && !OLD.includes(fn)) return json({ code: 'PGRST202', message: `Could not find the function public.${fn}` }, 404);
     return json([]); });
-  await p3.goto('http://127.0.0.1:8090/hq/'); await p3.waitForSelector('.tiles', { timeout: 15000 });
+  await p3.goto(BASE + '/hq/'); await p3.waitForSelector('.tiles', { timeout: 15000 });
   console.log('old database tabs:', await p3.evaluate(() => [...document.querySelectorAll('.snav .nv')].map((x) => x.textContent.replace(/\d+$/, '')).join(', ')));
   await p3.click('[data-tab=support]'); await p3.waitForTimeout(500); console.log('old database Support:', (await p3.textContent('#main')).trim());
   await p3.click('[data-tab=team]'); await p3.waitForTimeout(500); console.log('old database HQ team still works:', await p3.evaluate(() => [...document.querySelectorAll('#staff b')].map((x) => x.textContent)));

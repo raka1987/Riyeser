@@ -913,12 +913,26 @@
       return `<button type="button" class="nv ngrp" data-grp="${esc(name)}" aria-expanded="${open}" aria-controls="${id}"><span class="ni" aria-hidden="true">${icon}</span><span class="nl">${name}</span><span class="tb" data-gbadge="${esc(name)}"></span><span class="ncar" aria-hidden="true">▾</span></button>
         <div class="nkids" id="${id}" data-of="${esc(name)}"${open ? '' : ' hidden'}>${v.map((k) => `<button class="nv nsub" data-tab="${k}"><span class="nl">${label(k)}</span>${SOON[k] ? `<em class="soon">${SOON[k]}</em>` : ''}<span class="tb" data-badge="${k}"></span></button>`).join('')}</div>`; }).join('');
   }
+  // On a phone the left-hand menu is a compact bar (logo, the page you're on, Menu, you) and the Menu button opens every
+  // page in its group, the current one marked.
+  function phoneMenuHtml() {
+    const ok = TABS(); const label = (k) => (ok.find((x) => x[0] === k) || [k, k])[1];
+    return NAV.map(([name, icon, views]) => { const v = views.filter((k) => ok.some((x) => x[0] === k)); if (!v.length) return '';
+      const item = (k, txt, ic) => `<button class="mmi" data-tab="${k}"><span class="ni" aria-hidden="true">${ic}</span><span class="nl">${txt}</span>${SOON[k] ? `<em class="soon">${SOON[k]}</em>` : ''}<span class="tb" data-badge="${k}"></span></button>`;
+      if (v.length === 1) return item(v[0], views.length > 1 ? label(v[0]) : name, icon);
+      return `<div class="mmg"><div class="mmh">${icon} ${name}</div>${v.map((k) => item(k, label(k), '')).join('')}</div>`; }).join('');
+  }
   function shell() {
     if (!TABS().some((x) => x[0] === S.tab)) S.tab = TABS()[0][0];
     const ini = initials(S.me.name);
     $app.innerHTML = `${DEMO ? `<div class="demo">Demo with sample data. Nothing here is real. <label>Acting as <select id="demoAs" aria-label="Demo staff member">${api.staffList().map((s) => `<option value="${s.user_id}"${s.display_name === S.me.name ? ' selected' : ''}>${esc(s.display_name)} (${esc(roleName(s.role))})</option>`).join('')}</select></label></div>` : ''}
       <div class="frame"><aside class="side"><div class="brand"><img src="../assets/logo-r.png" alt="">Riyeser HQ</div><nav class="snav" aria-label="HQ">${navHtml()}</nav>
         <p class="sfoot">Staff only · account information, never customers' messages or books</p></aside>
+      <header class="mbar"><img src="../assets/logo-r.png" alt="Riyeser HQ" class="mlogo"><span class="mbt" id="mbarT"></span>
+        <button type="button" id="mnav" class="mnav" aria-expanded="false" aria-controls="mmenu">Menu <span class="tb" data-mbadge></span></button>
+        <button type="button" class="av mav2" id="mme" aria-label="${esc(S.me.name)}, open the menu">${esc(ini)}</button></header>
+      <div class="mmenu" id="mmenu" hidden><nav class="mml" aria-label="HQ sections">${phoneMenuHtml()}</nav>
+        <div class="mmfoot"><span class="av">${esc(ini)}</span><span class="mmwho">${esc(S.me.name)} <small>${esc(roleName(S.me.role))}</small></span><button type="button" id="so2" class="btn sm">Sign out</button></div></div>
       <div class="mcol"><header class="mtop"><form id="gsearch" class="gsearch" role="search"><input name="q" placeholder="Search customers by name, Company ID, ABN, phone or email…" aria-label="Search customers"></form>
         <div class="me"><span class="av">${esc(ini)}</span><span class="mn">${esc(S.me.name)} <small>${esc(roleName(S.me.role))}</small></span><button id="so" class="btn sm">Sign out</button></div></header>
       <main id="main"></main></div></div>`;
@@ -926,10 +940,19 @@
     $app.querySelectorAll('.ngrp').forEach((g) => g.onclick = () => { const open = g.getAttribute('aria-expanded') !== 'true'; g.setAttribute('aria-expanded', String(open));
       $app.querySelector(`.nkids[data-of="${CSS.escape(g.dataset.grp)}"]`).hidden = !open;
       const shut = navClosed().filter((x) => x !== g.dataset.grp); if (!open) shut.push(g.dataset.grp); try { localStorage.setItem('hq.navClosed', JSON.stringify(shut)); } catch { /* not remembered */ } });
-    $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
+    $app.querySelector('#so').onclick = $app.querySelector('#so2').onclick = async () => { await api.signOut(); gate(); };
+    const mm = $app.querySelector('#mmenu'); const mb = $app.querySelector('#mnav');
+    const menu = (open) => { if (open) mm.style.top = Math.max(0, $app.querySelector('.mbar').getBoundingClientRect().bottom) + 'px'; mm.hidden = !open; mb.setAttribute('aria-expanded', String(open)); document.body.classList.toggle('mmopen', open);
+      if (open) { const cur = mm.querySelector('.mmi.on') || mm.querySelector('.mmi'); if (cur) cur.focus(); } };
+    mb.onclick = () => menu(mm.hidden); $app.querySelector('#mme').onclick = () => menu(mm.hidden);
+    mm.onclick = (e) => { if (e.target === mm || e.target.closest('[data-tab]')) menu(false); };
+    document.onkeydown = (e) => { if (e.key === 'Escape' && !mm.hidden) { menu(false); mb.focus(); } };
+    document.onclick = (e) => { if (!mm.hidden && !e.target.closest('#mmenu, #mnav, #mme')) menu(false); };
+    S.menu = menu;
     $app.querySelector('#gsearch').onsubmit = (e) => { e.preventDefault(); const q = String(new FormData(e.target).get('q') || '').trim();
       S.cl = { ...(S.cl || { f: {}, sort: 'created', desc: true, view: 'all' }), q, page: 1 }; e.target.reset(); go('#/companies'); };
     const das = $app.querySelector('#demoAs'); if (das) das.onchange = async () => { api.asStaff(das.value); await loadMe(); closePanel(); shell(); };
+    if (matchMedia('(max-width: 640px)').matches) $app.querySelector('#gsearch input').placeholder = 'Search customers…';
     route();
     badges();
   }
@@ -940,7 +963,9 @@
   function route() {
     if (!document.getElementById('main')) return;
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
-    const mark = (k) => { $app.querySelectorAll('.snav [data-tab]').forEach((b) => { b.classList.toggle('on', b.dataset.tab === k); if (b.dataset.tab === k) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    const mark = (k) => { const t = $app.querySelector('#mbarT'); if (t) t.textContent = (TABS().find((x) => x[0] === k) || [k, k])[1];
+      if (S.menu) S.menu(false);
+      $app.querySelectorAll('.snav [data-tab], .mml [data-tab]').forEach((b) => { b.classList.toggle('on', b.dataset.tab === k); if (b.dataset.tab === k) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
       // a folded group with the current page in it shows a quiet marker
       $app.querySelectorAll('.ngrp').forEach((g) => g.classList.toggle('cur', !!$app.querySelector(`.nkids[data-of="${CSS.escape(g.dataset.grp)}"] [data-tab="${k}"]`))); };
     const cm = /^company\/([^/]+)(?:\/([a-z]+))?/.exec(h);
@@ -957,12 +982,36 @@
   });
   // Counts on the tabs: new support tickets and things waiting for a second approval.
   async function badges() {
-    const set = (k, n) => { const el = $app.querySelector(`[data-badge="${k}"]`); if (el) el.textContent = n ? String(n) : '';
+    const set = (k, n) => { $app.querySelectorAll(`[data-badge="${k}"]`).forEach((el) => { el.textContent = n ? String(n) : ''; });
+      const mb = $app.querySelector('[data-mbadge]'); if (mb) { const t = [...$app.querySelectorAll('.mml [data-badge]')].reduce((a, x) => a + (Number(x.textContent) || 0), 0); mb.textContent = t ? String(t) : ''; }
       // a group heading adds up its pages' counts (shown while it's folded)
       $app.querySelectorAll('[data-gbadge]').forEach((g) => { const t = [...$app.querySelectorAll(`.nkids[data-of="${CSS.escape(g.dataset.gbadge)}"] [data-badge]`)].reduce((a, x) => a + (Number(x.textContent) || 0), 0); g.textContent = t ? String(t) : ''; }); };
     if (can('support.view')) api.tickets('open', '').then((r) => set('support', (r.counts || {}).new + (r.counts || {}).waiting_us || 0)).catch(() => {});
     if (can('refunds.approve', 'offers.approve')) api.approvals().then((r) => set('approvals', (r.refunds || []).length + (r.offers || []).length)).catch(() => {});
   }
+  // On a phone every table shows each row as a card: the first cell is the title, the others are "Label: value" lines
+  // (labels from the header cells), and a cell of buttons sits full width at the bottom. The CSS does the layout.
+  const cardTables = (root) => root.querySelectorAll('table.tbl:not(.progtbl)').forEach((t) => {
+    const rows = [...t.rows]; const head = rows.find((r) => r.cells.length && [...r.cells].every((c) => c.tagName === 'TH')); t.classList.add('tcards');
+    const names = []; if (head) { head.classList.add('thr'); [...head.cells].forEach((c) => { for (let i = 0; i < (c.colSpan || 1); i++) names.push(c.textContent.replace(/[▲▼↑↓⇅]/g, '').trim()); }); }
+    rows.forEach((r) => { if (r === head || r.dataset.cardOk === String(r.cells.length)) return; r.dataset.cardOk = String(r.cells.length); let col = 0;
+      // the title: the business or person (a link to it, or the bold name) among the first columns, else the first cell
+      const cells = [...r.cells]; const who = (c) => c && c.querySelector('[data-goco], .cust, b, strong');
+      // a tick-box column on its own goes to the card's top right corner
+      if (cells.length > 1 && !cells[0].textContent.trim() && cells[0].querySelector('input[type=checkbox]')) { cells[0].classList.add('tchk'); cells.shift(); col = 1; }
+      let ti = who(cells[0]) || !cells[0] || cells[0].colSpan > 1 ? 0 : cells.slice(1, 3).findIndex((c) => c.querySelector('[data-goco], .cust')) + 1;
+      if (ti > 0 && cells[ti].querySelector('.btn:not(.cp)')) ti = 0;
+      cells.forEach((c, i) => { const span = c.colSpan || 1; const name = span === 1 ? names[col] || '' : ''; col += span;
+        if (i === ti) { c.classList.add('tttl'); if (c.tagName === 'TH') c.classList.add('tth'); return; }
+        const ctl = c.querySelector('button:not(.cp):not(.lnk), .btn:not(.cp), select, details, input:not([type=checkbox]):not([type=radio])');
+        const txt = c.textContent.trim();
+        if (span > 1 && r.cells.length === 1) c.classList.add('tfull');
+        else if (ctl && (!name || !txt || [...c.children].every((k) => k.matches('button, .btn, details, form, .nact, .qbtns, .row')))) c.classList.add('tacts');
+        else if (!txt && !c.querySelector('img, svg, input, .ck, .pill, .avatar')) c.classList.add('tempty');
+        else if (name && !c.hasAttribute('data-label')) c.setAttribute('data-label', name); }); });
+  });
+  let cardQ = 0;
+  new MutationObserver(() => { if (!cardQ) cardQ = requestAnimationFrame(() => { cardQ = 0; cardTables(document); }); }).observe(document.body, { childList: true, subtree: true });
   const main = (html) => { const m = document.getElementById('main'); m.className = ''; m.innerHTML = html; return m; };
 
   // A small dialog. wire(d, close) sets up its buttons.

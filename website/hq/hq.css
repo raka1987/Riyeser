@@ -51,6 +51,7 @@ h2 { color: var(--ink); margin: 0 0 4px; font-size: 22px; } .sub { color: var(--
 .bars .b:hover i { background: var(--bar-hover); }
 .bars .b .tip { position: absolute; bottom: calc(100% - 14px); background: var(--ink); color: #fff; font-size: 12px; padding: 3px 7px; border-radius: 6px; white-space: nowrap; opacity: 0; pointer-events: none; transform: translateY(-4px); }
 .bars .b:hover .tip, .bars .b:focus .tip { opacity: 1; }
+.bars { overflow-x: clip; } .bars .b:nth-last-child(-n+3) .tip { right: 0; } .bars .b:nth-child(-n+2) .tip { left: 0; } /* hover labels stay inside the chart (no sideways scroll) */
 .xlab { display: flex; gap: 6px; margin-top: 5px; } .xlab span { flex: 1; text-align: center; font-size: 11px; color: var(--muted); min-width: 0; overflow: hidden; white-space: nowrap; }
 .hbars { display: grid; gap: 7px; }
 .hb { display: grid; grid-template-columns: 150px 1fr 60px; align-items: center; gap: 10px; font-size: 13.5px; }
@@ -259,10 +260,8 @@ a.ccard.click { text-decoration: none; color: inherit; } a.ccard.click:hover { b
 .soonc { max-width: 720px; } .soonc p { line-height: 1.55; }
 @media (max-width: 1150px) { .ops, .cplayout { grid-template-columns: 1fr; } .opsr, .cptl { position: static; } .ccards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) {
-  .frame { grid-template-columns: 1fr; } .side { position: static; height: auto; padding: 8px 10px; flex-direction: row; align-items: center; gap: 8px; overflow: hidden; }
-  .side .brand { padding: 0; font-size: 0; } .side .brand img { width: 24px; height: 24px; } .snav { flex-direction: row; overflow-x: auto; gap: 2px; }
-  .nv { width: auto; white-space: nowrap; padding: 7px 10px; font-size: 13.5px; } .nv.nsub { padding: 7px 10px; } .nv .ni { display: none; } .sfoot { display: none; }
-  .mtop { position: static; padding: 10px 14px; flex-wrap: wrap; } .gsearch { flex-basis: 100%; max-width: none; order: 2; } .mtop .me .mn { display: none; }
+  .frame { grid-template-columns: minmax(0, 1fr); } .side { display: none; }
+  .mtop { position: static; padding: 10px 16px; } .gsearch { flex: 1 1 100%; max-width: none; } .mtop .me { display: none; }
   .ccards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; } .ccard { padding: 10px; } .ccard .v { font-size: 24px; } .cic { display: none; }
   .ddm { right: auto; left: 0; } .ddm.right { left: auto; right: 0; } .ddm.wide { min-width: 240px; }
   .cpline span + span { padding-left: 0; border-left: 0; } .cptitle h2 { font-size: 22px; }
@@ -499,3 +498,76 @@ main.wide { max-width: none; }
   .fnl li { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; } .fnl .ft { grid-column: 1 / -1; grid-row: 2; } .fnl .fv small { display: none; }
   .trcustom .f { min-width: 0; flex: 1 1 140px; }
 }
+
+/* phones and small tablets: a compact bar (logo, this page, Menu, you) instead of the left-hand menu; Menu opens every page */
+.mbar, .mmenu { display: none; }
+@media (max-width: 900px) {
+  .mbar { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px; background: var(--nav); color: #fff; position: sticky; top: 0; z-index: 25; }
+  .mlogo { width: 24px; height: 24px; filter: brightness(0) invert(1); flex: none; }
+  .mbt { flex: 1; min-width: 0; font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mnav { flex: none; display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25); color: #fff; border-radius: 9px; padding: 6px 12px; font-weight: 600; font-size: 14px; }
+  .mnav::before { content: ''; width: 14px; height: 10px; background: linear-gradient(#fff 0 0) top / 100% 2px no-repeat, linear-gradient(#fff 0 0) center / 100% 2px no-repeat, linear-gradient(#fff 0 0) bottom / 100% 2px no-repeat; }
+  .mnav[aria-expanded="true"] { background: #fff; color: var(--nav); } .mnav[aria-expanded="true"]::before { filter: invert(1); }
+  .mnav .tb:not(:empty), .mmi .tb:not(:empty) { background: #f43f5e; color: #fff; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 0 6px; }
+  .mav2 { border: 0; width: 32px; height: 32px; padding: 0; }
+  .mmenu:not([hidden]) { display: block; position: fixed; inset: 52px 0 0 0; z-index: 24; background: rgba(15, 20, 40, .45); overflow-y: auto; overscroll-behavior: contain; }
+  .mml { background: #fff; padding: 8px 16px 4px; display: grid; gap: 2px; box-shadow: 0 16px 30px -16px rgba(0,0,0,.4); }
+  .mmi { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-radius: 10px; padding: 11px 12px; font-size: 15px; font-weight: 600; color: var(--ink); }
+  .mmi .ni { width: 22px; text-align: center; } .mmi .nl { flex: 1; min-width: 0; }
+  .mmi:hover { background: var(--bg); } .mmi.on { background: var(--blue-l); color: var(--blue); box-shadow: inset 3px 0 0 var(--blue); }
+  .mmi .soon { font-style: normal; font-size: 10.5px; font-weight: 700; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
+  .mmg { border-top: 1px solid var(--line); padding: 6px 0 4px; margin-top: 4px; } .mmg + .mmi { border-top: 1px solid var(--line); margin-top: 4px; border-radius: 0; }
+  .mmh { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); padding: 6px 12px 4px; }
+  .mmg .mmi { padding-left: 44px; } .mmg .mmi .ni { display: none; }
+  .mmfoot { display: flex; align-items: center; gap: 10px; background: #fff; border-top: 1px solid var(--line); padding: 12px 16px 16px; font-size: 14px; color: var(--ink); }
+  .mmwho { flex: 1; min-width: 0; overflow-wrap: anywhere; } .mmwho small { display: block; color: var(--muted); }
+  body.mmopen { overflow: hidden; }
+  main { padding: 16px; }
+}
+
+/* phones: every table is a list of cards (see cardTables in hq.js); no sideways scrolling anywhere */
+@media (max-width: 640px) {
+  main, .card, .tile, .ccard, .mcard, .panel { overflow-wrap: anywhere; }
+  .card { padding: 14px; } main .card.scroll { overflow-x: visible; }
+  .tbl.tcards, .tbl.tcards > tbody, .tbl.tcards > thead, .tbl.tcards > tfoot { display: block; width: 100%; }
+  .tbl.tcards tr.thr, .tbl.tcards > thead { display: none; }
+  .tbl.tcards tr { display: flex; flex-direction: column; gap: 3px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .tbl.tcards tr:last-child { border-bottom: 0; } .card > .tbl.tcards tr:first-child:not(.thr), .card > .tbl.tcards tr.thr + tr { padding-top: 4px; }
+  .tbl.tcards td, .tbl.tcards th.tth { display: block; border: 0; padding: 0; text-align: left !important; width: auto !important; min-width: 0 !important; max-width: none; height: auto; white-space: normal; background: none; overflow-wrap: anywhere; font-size: 14px; }
+  .tbl.tcards td.tttl, .tbl.tcards th.tth { order: -1; font-size: 15px; color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 2px; }
+  .tbl.tcards td[data-label]::before { content: attr(data-label) ": "; color: var(--muted); font-weight: 600; font-size: 13px; }
+  .tbl.tcards td[data-label] > small:first-child, .tbl.tcards td[data-label] > div:first-child, .tbl.tcards td[data-label] > .progs:first-child, .tbl.tcards td[data-label] > .cust:first-child { margin-top: 2px; }
+  .tbl.tcards tr[hidden], .tbl.tcards td.tempty { display: none; }
+  .tbl.tcards tr { position: relative; } .tbl.tcards td.tchk { position: absolute; top: 12px; right: 0; } .tbl.tcards td.tchk ~ td.tttl { padding-right: 32px; }
+  .tbl.tcards td.tchk input { width: 20px; height: 20px; margin: 0; }
+  .tbl.tcards.rolegrid tr:not(.thr) { flex-flow: row wrap; gap: 2px 14px; } .tbl.tcards.rolegrid td.tttl { flex: 1 1 100%; }
+  .tbl.tcards td.tacts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tbl.tcards td.tacts > .btn, .tbl.tcards td.tacts > button, .tbl.tcards td.tacts > select { flex: 1 1 auto; justify-content: center; }
+  .tbl.tcards td.tacts > .nact, .tbl.tcards td.tacts > .row, .tbl.tcards td.tacts > .qbtns, .tbl.tcards td.tacts > form { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+  .tbl.tcards td.tacts .nact > .btn, .tbl.tcards td.tacts .nact > .dd:first-child, .tbl.tcards td.tacts .row > .btn { flex: 1 1 auto; }
+  .tbl.tcards td.tacts .dd > summary.btn { width: 100%; }
+  .tbl.tcards td.tfull { padding: 0; }
+  .tbl.tcards tr.click:hover td { background: none; } .tbl.tcards tr.click:active { background: #f7f9ff; }
+  .tbl.tcards tr.free td { background: none; }
+  .tbl.tcards .nowrap { white-space: normal; }
+  .tbl.tcards td .ddm { left: 0; right: auto; max-width: calc(100vw - 48px); } .tbl.tcards td.tacts .dd:last-child:not(:first-child) .ddm { left: auto; right: 0; }
+  .tbl.tcards td.n, .tbl.tcards td.r { text-align: left; }
+  .tiles, .ccards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tile { padding: 12px; min-width: 0; } .tile .v { font-size: 24px; } .tile .k, .tile .d { overflow-wrap: anywhere; }
+  .ccard { min-width: 0; } .ccard > div { min-width: 0; }
+  .g2, .g3, .grid { grid-template-columns: minmax(0, 1fr); }
+  .kv { grid-template-columns: minmax(90px, 36%) minmax(0, 1fr); } .kv dd { overflow-wrap: anywhere; min-width: 0; }
+  .hb { grid-template-columns: minmax(0, 40%) minmax(0, 1fr) auto; }
+  .search, .row, .chips, .nform, .mfoot, .cpacts { flex-wrap: wrap; }
+  .search > input, .search > select { min-width: 0; } .search > .btn { flex: none; }
+  .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } .filters > * { min-width: 0; } .filters > .row { grid-column: 1 / -1; } .filters input:not([type=checkbox]):not([type=radio]), .filters select { width: 100%; min-width: 0; }
+  .pick, .pgrid { grid-template-columns: minmax(0, 1fr); }
+  .chips { gap: 6px; } .chip { white-space: nowrap; }
+  .mcard { padding: 18px 16px; } .mfoot .btn { flex: 1 1 auto; }
+  h2 { font-size: 20px; overflow-wrap: anywhere; }
+  .cptabs { flex-wrap: wrap; gap: 6px; border-bottom: 0; overflow: visible; }
+  .cptabs button { border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 6px 12px; margin: 0; font-size: 13.5px; }
+  .cptabs button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+}
+@media (max-width: 340px) { .tiles, .ccards { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 380px) { .mbar { gap: 8px; } .mbt { font-size: 15px; } .mnav { padding: 6px 10px; } }
