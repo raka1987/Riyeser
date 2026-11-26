@@ -588,6 +588,46 @@ grant select on public.join_requests to authenticated;
 grant select, delete on public.devices to authenticated;
 revoke all on public.join_requests, public.devices from anon;
 
+-- One PC counts once. A "Fresh start" in Riyeser Central (or reinstalling it) links the same PC again under a new id.
+-- When a PC links or reports in, older rows for the same computer name and the same person in that business are marked
+-- replaced (retired_at, and replaced_by the row that took over): kept, never deleted, and no longer counted in HQ.
+alter table public.devices add column if not exists retired_at timestamptz;
+alter table public.devices add column if not exists replaced_by uuid;
+do $$ begin
+  alter table public.devices add constraint devices_replaced_by foreign key (replaced_by) references public.devices(id) on delete set null;
+exception when duplicate_object then null; end $$;
+-- A PC HQ counts: not replaced, and seen in the last 60 days.
+create or replace function public.pc_active(d public.devices) returns boolean language sql stable as $$
+  select d.retired_at is null and d.last_seen > now() - interval '60 days'
+$$;
+-- Mark the older rows for this PC (same name, same person, same business) as replaced by this one.
+create or replace function public.retire_older_pcs(ws uuid, device uuid) returns void
+  language sql security definer set search_path = public as $$
+  update devices o set retired_at = now(), replaced_by = n.id
+  from devices n
+  where n.id = device and n.workspace_id = ws and nullif(trim(n.device_name), '') is not null
+    and o.workspace_id = ws and o.user_id = n.user_id and o.id <> n.id and o.retired_at is null
+    and lower(trim(o.device_name)) = lower(trim(n.device_name))
+$$;
+revoke all on function public.retire_older_pcs(uuid, uuid) from public, anon, authenticated;
+-- The rows already there (from before this was added): same business, person and name, the most recently seen stays.
+-- Run each time this file is run (safe to repeat: rows already marked are left as they are).
+create or replace function public.retire_duplicate_pcs() returns int
+  language sql security definer set search_path = public as $$
+  with k as (
+    select distinct on (workspace_id, user_id, lower(trim(device_name))) id, workspace_id, user_id, lower(trim(device_name)) as nm
+    from devices where nullif(trim(device_name), '') is not null
+    order by workspace_id, user_id, lower(trim(device_name)), (retired_at is null) desc, last_seen desc, linked_at desc, id),
+  u as (
+    update devices o set retired_at = now(), replaced_by = k.id from k
+    where o.workspace_id = k.workspace_id and o.user_id = k.user_id and lower(trim(o.device_name)) = k.nm
+      and o.id <> k.id and o.retired_at is null
+    returning 1)
+  select count(*)::int from u
+$$;
+revoke all on function public.retire_duplicate_pcs() from public, anon, authenticated;
+do $$ begin perform public.retire_duplicate_pcs(); end $$;
+
 -- A new company: the team (with Head office on 100), its profile and Company ID. Joining it needs approval.
 -- Who it's for: 'personal' (just me: an individual, freelancer or sole trader) or 'business' (a family business or a team).
 alter table public.workspaces add column if not exists kind text not null default 'business';
@@ -736,7 +776,8 @@ begin
   insert into devices (id, workspace_id, user_id, device_name, platform, app_version)
     values (device, ws, auth.uid(), left(device_name, 80), left(platform, 40), left(app_version, 40))
   on conflict (id) do update set workspace_id = excluded.workspace_id, user_id = excluded.user_id, device_name = excluded.device_name,
-    platform = excluded.platform, app_version = excluded.app_version, last_seen = now();
+    platform = excluded.platform, app_version = excluded.app_version, last_seen = now(), retired_at = null, replaced_by = null;
+  perform retire_older_pcs(ws, device);   -- the same PC linked before (e.g. before a Fresh start) counts once
 end $$;
 
 create or replace function public.device_still_linked(ws uuid, device uuid) returns boolean
@@ -1001,9 +1042,9 @@ begin
     'companies_7d', (select count(*) from workspaces where created_at > now() - interval '7 days'),
     'companies_30d', (select count(*) from workspaces where created_at > now() - interval '30 days'),
     'people', (select count(*) from members),
-    'pcs', (select count(*) from devices),
-    'pcs_active_7d', (select count(*) from devices where last_seen > now() - interval '7 days'),
-    'pcs_active_30d', (select count(*) from devices where last_seen > now() - interval '30 days'),
+    'pcs', (select count(*) from devices d where public.pc_active(d)),
+    'pcs_active_7d', (select count(*) from devices where retired_at is null and last_seen > now() - interval '7 days'),
+    'pcs_active_30d', (select count(*) from devices where retired_at is null and last_seen > now() - interval '30 days'),
     'requests_waiting', (select count(*) from join_requests where status = 'pending'),
     'calls_paid', (select count(*) from workspaces where calls_paid_until > now()),
     'calls_trial', (select count(*) from workspaces where created_at > now() - interval '90 days' and coalesce(calls_paid_until, '-infinity') <= now()),
@@ -1031,7 +1072,7 @@ begin
   select w.id, w.name, w.company_code, w.country, w.created_at,
     (select count(*) from members m where m.workspace_id = w.id),
     (select count(*) from branches b where b.workspace_id = w.id),
-    (select count(*) from devices d where d.workspace_id = w.id),
+    (select count(*) from devices d where d.workspace_id = w.id and public.pc_active(d)),
     (select max(d.last_seen) from devices d where d.workspace_id = w.id),
     w.calls_paid_until, greatest(0, 90 - extract(day from now() - w.created_at)::int),
     (select m.display_name from members m where m.workspace_id = w.id and m.role = 'owner' limit 1),
@@ -1496,7 +1537,7 @@ begin
         'on_trial', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'trial'),
         'ended', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') in ('ended', 'cancelled', 'closed')),
         -- businesses with it on at least one PC (Riyeser Central reports the programs on each PC)
-        'installed', (select count(distinct d.workspace_id) from devices d where coalesce(d.programs, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id',
+        'installed', (select count(distinct d.workspace_id) from devices d where public.pc_active(d) and coalesce(d.programs, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id',
            case m when 'basic' then 'accounting-basics' when 'plus' then 'accounting' when 'as_built' then 'services' when 'calls' then 'team' else m end)))))
       from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m),
     -- real money: what active PayPal subscriptions charge (at their next charge) and paid bank invoices still running,
@@ -2106,7 +2147,7 @@ create or replace function public.business_summary(ws uuid) returns json
 begin
   return (select json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'status', w.status, 'kind', w.kind,
     'country', w.country, 'last_active_at', w.last_active_at,
-    'people', (select count(*) from members m where m.workspace_id = w.id), 'pcs', (select count(*) from devices d where d.workspace_id = w.id),
+    'people', (select count(*) from members m where m.workspace_id = w.id), 'pcs', (select count(*) from devices d where d.workspace_id = w.id and public.pc_active(d)),
     'paid', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
              where (public.module_state(w.id, m) ->> 'status') = 'active'),
     'trial', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
@@ -3001,7 +3042,7 @@ begin
   return (select coalesce(json_agg(x order by x.created_at desc), '[]') from (
     select w.id, w.name, w.company_code, w.country, w.created_at, w.status, w.kind, w.last_active_at, w.duplicate_of, w.removal_state,
       (select count(*) from members m where m.workspace_id = w.id) as people,
-      (select count(*) from devices d where d.workspace_id = w.id) as pcs,
+      (select count(*) from devices d where d.workspace_id = w.id and public.pc_active(d)) as pcs,
       (select max(d.last_seen) from devices d where d.workspace_id = w.id) as last_seen,
       w.calls_paid_until, greatest(0, 90 - extract(day from now() - w.created_at)::int) as trial_days_left,
       (select m.display_name from members m where m.workspace_id = w.id and m.role = 'owner' limit 1) as owner_name,
@@ -3705,7 +3746,8 @@ create index if not exists refund_requests_status on public.refund_requests (sta
 create index if not exists offers_status on public.offers (status);
 
 -- ---------------------------------------------------------------- Riyeser Central: the programs on each PC
--- Central sends this when it links the PC and at its daily check-in. Only for someone in the business, and only
+-- Central sends this when it links the PC, at its daily check-in, and soon after its list of installed programs
+-- changes (it installed or updated one, or one appeared on its home screen). Only for someone in the business, and only
 -- for a PC they linked. programs: [{"id": "pos", "version": "1.4.0"}, ...] (or {"pos": "1.4.0", ...}).
 create or replace function public.report_programs(ws uuid, device uuid, programs jsonb) returns void
   language plpgsql security definer set search_path = public as $$
@@ -3723,7 +3765,9 @@ begin
     from jsonb_array_elements(arr) e
     where jsonb_typeof(e) = 'object' and coalesce(e ->> 'id', '') ~ '^[a-z0-9-]{1,40}$'
     order by e ->> 'id' limit 60) y;
-  update devices d set programs = clean, programs_at = now(), last_seen = now() where d.id = device and d.workspace_id = ws;
+  update devices d set programs = clean, programs_at = now(), last_seen = now(), retired_at = null, replaced_by = null
+    where d.id = device and d.workspace_id = ws;
+  perform retire_older_pcs(ws, device);
 end $$;
 
 -- ---------------------------------------------------------------- helpers (only called by the checked hq_ functions)
@@ -3806,7 +3850,9 @@ begin
         'people', (select count(*) from branch_members bm where bm.branch_id = b.id)) order by b.extension), '[]') from branches b where b.workspace_id = ws),
     'pcs', (select coalesce(json_agg(json_build_object('id', d.id, 'name', d.device_name, 'platform', d.platform, 'version', d.app_version,
         'last_seen', d.last_seen, 'linked_at', d.linked_at, 'programs', coalesce(d.programs, '[]'::jsonb), 'programs_at', d.programs_at,
-        'person', (select m.display_name from members m where m.workspace_id = ws and m.user_id = d.user_id)) order by d.last_seen desc), '[]')
+        'person', (select m.display_name from members m where m.workspace_id = ws and m.user_id = d.user_id),
+        -- active: counted (not replaced by a newer link of the same PC, seen in 60 days); the others show as Older PCs
+        'active', public.pc_active(d), 'retired_at', d.retired_at, 'replaced_by', d.replaced_by) order by public.pc_active(d) desc, d.last_seen desc), '[]')
         from devices d where d.workspace_id = ws),
     'licence', case when hq_can('licences.view') then licence_json(ws) end,
     'monthly', case when hq_can('licences.view') then company_monthly(ws) end,
@@ -4076,7 +4122,7 @@ begin
         'trial_n', o.trial_n, 'trial_end', o.trial_end, 'trial_days', o.trial_days, 'owner_name', o.owner_name,
         'owner_email', (select u.email::text from auth.users u where u.id = o.owner_id),
         'phone', o.phone, 'tickets_open', o.tickets_open, 'people', (select count(*) from members m where m.workspace_id = o.id),
-        'pcs', (select count(*) from devices d where d.workspace_id = o.id),
+        'pcs', (select count(*) from devices d where d.workspace_id = o.id and public.pc_active(d)),
         'storage_pct', public.link_storage_pct(o.id),
         'hq_owner_name', (select public.staff_name(w.hq_owner) from workspaces w where w.id = o.id),
         'next_follow_up', (select min(n.follow_up) from hq_notes n where n.workspace_id = o.id and n.follow_up is not null and n.follow_up_done_at is null)) order by o.rn), '[]')
@@ -4382,7 +4428,7 @@ begin
       exists (select 1 from devices dv where dv.workspace_id = w.id and dv.programs_at is not null
               and exists (select 1 from jsonb_array_elements(dv.programs) p where p ->> 'id' <> 'central')) as program_used,
       exists (select 1 from company_modules c where c.workspace_id = w.id and c.status = 'active') as paying,
-      (select coalesce(jsonb_agg(distinct p ->> 'id'), '[]') from devices dv, jsonb_array_elements(coalesce(dv.programs, '[]')) p where dv.workspace_id = w.id) as installed,
+      (select coalesce(jsonb_agg(distinct p ->> 'id'), '[]') from devices dv, jsonb_array_elements(coalesce(dv.programs, '[]')) p where dv.workspace_id = w.id and public.pc_active(dv)) as installed,
       (select count(*) from members m where m.workspace_id = w.id) as people,
       public.next_follow_up(w.id) as next_follow_up
     from workspaces w

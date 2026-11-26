@@ -39,6 +39,27 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
     link: async () => { await pg.waitForSelector('#cpLink .lnk-sum'); check((await text('#cpLink .lnk-sum')).startsWith('Link Office:') && (await pg.getAttribute('#cpLink', 'data-ws')) === 'w1', 'Link tab: #cpLink with data-ws, filled by hq-link.js'); } };
   for (const t of ['programs', 'pcs', 'people', 'conversations', 'money', 'history', 'link']) { await cptab(t); check((await text('#cpBody')).length > 20, `tab ${t} shows something`); if (extra[t]) await extra[t](); }
   check(await pg.evaluate(() => location.hash) === '#/company/w1/link', 'each tab has an address too');
+
+  // --- which PCs: "N PCs" counts each PC once (not one linked again after a Fresh start, not one unseen for 60 days) and opens the list
+  await cptab('programs');
+  const cell = (m) => text(`#licCard tr[data-mod=${m}] td:nth-child(4)`);
+  console.log('installed on:', await pg.evaluate(() => [...document.querySelectorAll('#licCard tr[data-mod]')].map((r) => r.dataset.mod + ' ' + r.cells[3].innerText.trim()).join(' | ')));
+  check((await cell('basic')).startsWith('3 PCs'), `Accounting Basics on 3 PCs, not 4 (the head office PC linked again counts once): ${await cell('basic')}`);
+  check(!(await pg.isVisible('#licCard tr.pcsrow[data-pcsof=accounting-basics]')), 'the PC list starts folded');
+  await pg.click('#licCard [data-pcsfor=accounting-basics]');
+  check(await pg.isVisible('#licCard tr.pcsrow[data-pcsof=accounting-basics]') && (await pg.getAttribute('#licCard [data-pcsfor=accounting-basics]', 'aria-expanded')) === 'true', 'clicking "3 PCs" opens the list');
+  const pl = await text('#licCard tr.pcsrow[data-pcsof=accounting-basics]'); console.log('PC list:', pl);
+  check((await pg.$$('#licCard tr.pcsrow[data-pcsof=accounting-basics] .pclist li')).length === 3, 'one line per PC');
+  check(pl.includes('Head office PC') && pl.includes('linked by Alex') && pl.includes('seen today') && /seen (yesterday|\d+ days ago)/.test(pl), 'each PC: its name, who linked it, last seen ("today", "3 days ago")');
+  check(pl.includes('Accounting Basics 2.3.0') && pl.includes('POS 1.3.9'), 'and the programs and versions it reported');
+  check(/Older PCs \(not seen since .+\): Head office PC \(linked again since\)/.test(pl) && !!(await pg.$('#licCard tr.pcsrow[data-pcsof=accounting-basics] .oldpcs.muted')), 'the PC as it was before it was linked again: a muted "Older PCs (not seen since …)" line');
+  await pg.click('#licCard [data-pcsfor=accounting-basics]'); check(!(await pg.isVisible('#licCard tr.pcsrow[data-pcsof=accounting-basics]')), 'and closes again');
+  await pg.click('#licCard [data-pcsfor=accounting-basics]');
+  await (await pg.$('#licCard')).screenshot({ path: out + '/hq-customer-pc-list.png' });
+  await pg.click('#freeProgs summary'); const inv = await text('#freeProgs tr.free:has-text("Invoices")'); console.log('Invoices:', inv);
+  check(/Invoices\s*(\d+ PCs?|Not installed)/.test(inv), 'free programs count active PCs too');
+  await cptab('pcs');
+  check((await text('#pcsCard h3')).includes('· 3') && (await text('#olderPcs')).includes('Older PCs (not seen since') && (await text('#olderPcs')).includes('Old reception PC'), 'PCs & programs: 3 linked PCs, the older ones in a quiet line');
   await pg.goBack(); await pg.waitForSelector('#cl table'); check(await pg.evaluate(() => location.hash) === '#/companies', 'Back goes to the list');
   await pg.goForward(); await pg.waitForSelector('.cpage'); await pg.click('#cpBack'); await pg.waitForSelector('#cl table'); check(true, 'the ← Companies link goes back too');
 
@@ -50,7 +71,8 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   check(/On free trial · ends/.test(sum) && /\d+ paid · \d+ on trial/.test(sum), 'summary: the plan in plain words, and the counts');
   check(!(await pg.$('#licCard tr[data-mod=as_built]')), 'As Built hidden (not paid, not installed)');
   check((await pg.$$('#licCard [data-manage]')).length === (await pg.$$('#licCard tr[data-mod]')).length && !(await pg.$('#licCard [data-q]')), 'one Manage button per row, no action buttons in the rows');
-  check(!(await pg.isVisible('#freeProgs table')) && (await text('#freeProgs summary')).startsWith('Free programs: Riyeser Central, Invoices, PDF, Desk Assistant, Riyeser Link'), 'free programs: one quiet line, folded');
+  check(!(await pg.isVisible('#freeProgs table')) && (await text('#freeProgs summary')).startsWith('Free programs: Riyeser Central, Invoices, PDF, Desk Assistant ·'), 'free programs: one quiet line, folded (Riyeser Link is paid, not listed here)');
+  check(!!(await pg.$('#licCard tr[data-mod=calls]')) && !(await text('#freeProgs summary')).includes('Riyeser Link') && !(await pg.$('#freeProgs [data-pcsfor=team]')), 'Riyeser Link is in the paid and trial programs');
   await pg.click('#freeProgs summary'); check(await pg.isVisible('#freeProgs tr.free'), 'free programs: expand for each one\'s installs');
   const before = await until('bookings');
   await pg.click('#licCard [data-manage=bookings]'); await pg.waitForSelector('#mgl');

@@ -411,7 +411,14 @@
     function pcsOf(c) { const names = ['Head office PC', 'Front counter', 'Lautoka front desk', 'Manager laptop']; const owner = c.owner_name;
       return Array.from({ length: c.id.startsWith('g') ? c.pcs : Math.max(1, Math.min(4, c.pcs)) }, (_, i) => ({ id: c.id + '-d' + i, name: names[i], platform: 'Windows', version: i === 1 ? '1.8.0' : '1.8.1',
         last_seen: t(i * 1.5 + 0.01), linked_at: t(30 + i), person: i % 2 ? 'Jordan Lee' : owner,
-        programs: i === 3 ? null : APPS.filter(([id], k) => k < 3 + ((i + c.name.length) % 4) || (c.id === 'w2' && id === 'payroll')).map(([id, v]) => ({ id, version: i === 1 && id === 'pos' ? '1.3.9' : i === 1 && id === 'payroll' ? '2.8.0' : v })), programs_at: i === 3 ? null : t(i + 0.1) })); }
+        programs: i === 3 ? null : APPS.filter(([id], k) => k < 3 + ((i + c.name.length) % 4) || (c.id === 'w2' && id === 'payroll')).map(([id, v]) => ({ id, version: i === 1 && id === 'pos' ? '1.3.9' : i === 1 && id === 'payroll' ? '2.8.0' : v })), programs_at: i === 3 ? null : t(i + 0.1), active: true })); }
+    // PCs HQ no longer counts (the customer page lists them as Older PCs): Sample Plumbing's head office PC as it was
+    // linked before a Fresh start in Riyeser Central (replaced by its new link), and a PC not seen for 75 days.
+    function olderPcsOf(c) { if (c.id !== 'w1') return [];
+      return [{ id: 'w1-old0', name: 'Head office PC', platform: 'Windows', version: '1.8.0', last_seen: t(21), linked_at: t(200), person: c.owner_name, retired_at: t(20), replaced_by: 'w1-d0', active: false,
+          programs: [{ id: 'central', version: '1.8.0' }, { id: 'accounting-basics', version: '2.2.0' }, { id: 'pos', version: '1.3.9' }], programs_at: t(21) },
+        { id: 'w1-old1', name: 'Old reception PC', platform: 'Windows', version: '1.7.2', last_seen: t(75), linked_at: t(300), person: 'Jordan Lee', retired_at: null, active: false,
+          programs: [{ id: 'central', version: '1.7.2' }, { id: 'invoices', version: '1.1.0' }], programs_at: t(75) }]; }
     const noteRow = (n) => ({ follow_up: null, follow_up_done_at: null, direction: null, contact: null, pinned: false, kind: 'note', ...n });
     function timelineOf(ws) { const P = permsOf(me()); const out = [];
       if (P.includes('support.view')) tickets.filter((x) => x.workspace_id === ws).forEach((x) => out.push({ kind: 'ticket', at: x.created_at, id: x.id, ref: x.ref, title: x.subject, status: x.status, by_staff: !!x.staff_started, detail: x.topic, who: x.staff_started ? x.started_by_name : x.opened_by_name, extra: String(x.level) }));
@@ -665,7 +672,7 @@
           signup: x.role === 'owner' ? { you: x.name, phone: co.owner_phone, country: co.country, email: x.email, biz: co.name, tax_number: '50-12345-0-1' } : {} }));
         const open = tickets.filter((x) => x.workspace_id === ws && x.status !== 'done');
         c.profile = { ...c.profile, hq_owner: co.hq_owner, hq_owner_name: nameOf(co.hq_owner) };
-        return { ...c, people, next_follow_up: nextFu(ws), staff: staff.filter((x) => x.active).map((x) => ({ user_id: x.user_id, name: x.display_name })), owner: people.find((x) => x.role === 'owner') || null, pcs: pcsOf(co), licence: P.includes('licences.view') ? demoLicence(ws) : null, storage: P.includes('licences.view') ? demoStorage(ws) : null, monthly: demoMonthly(ws),
+        return { ...c, people, next_follow_up: nextFu(ws), staff: staff.filter((x) => x.active).map((x) => ({ user_id: x.user_id, name: x.display_name })), owner: people.find((x) => x.role === 'owner') || null, pcs: pcsOf(co).concat(olderPcsOf(co)), licence: P.includes('licences.view') ? demoLicence(ws) : null, storage: P.includes('licences.view') ? demoStorage(ws) : null, monthly: demoMonthly(ws),
           notes: (notes[ws] || []).map(noteRow).sort((a, b) => (b.pinned - a.pinned) || String(b.at).localeCompare(String(a.at))),
           tickets_open: open.length, tickets_overdue: open.filter((x) => !x.first_reply_at && hours(x.created_at) > od).length, timeline: timelineOf(ws) }; },
       async messageCustomer(ws, person, topic, subject, body) { need('support.reply');
@@ -1387,7 +1394,8 @@
   // ------------------------------------------------------------------ the customer page (#/company/<id>/<tab>)
   const CPTABS = [['overview', 'Overview'], ['programs', 'Programs'], ['pcs', 'PCs & programs'], ['people', 'People'], ['conversations', 'Conversations'],
     ['money', 'Money'], ['history', 'History'], ['link', 'Link']];
-  const FREE_PROGRAMS = [['central', 'Riyeser Central'], ['invoices', 'Invoices'], ['pdf', 'PDF'], ['desk', 'Desk Assistant'], ['team', 'Riyeser Link']];
+  // Free programs (Riyeser Link is a paid program since pricing v2: it's the 'calls' row in the paid list)
+  const FREE_PROGRAMS = [['central', 'Riyeser Central'], ['invoices', 'Invoices'], ['pdf', 'PDF'], ['desk', 'Desk Assistant']];
   // Riyeser Central's name for each program (desktop/src/central/updates.js)
   const MOD_APP = { basic: 'accounting-basics', plus: 'accounting', payroll: 'payroll', pos: 'pos', bookings: 'bookings', as_built: 'services', calls: 'team' };
   const APP_NAME = { central: 'Central', 'accounting-basics': 'Accounting Basics', accounting: 'Accounting Plus', payroll: 'Payroll', pos: 'POS', bookings: 'Bookings',
@@ -1556,6 +1564,19 @@
   // --- Programs: a summary of the plan, one tidy row per paid or trial program (Manage opens the actions), free programs folded
   const untilOf = (v) => (v.status === 'trial' || (v.status === 'ended' && !v.paid_until) ? v.trial_ends : v.paid_until);
   const pcsText = (n) => (n ? `${n} PC${n === 1 ? '' : 's'}` : 'Not installed');
+  // A PC HQ counts: not replaced by a newer link of the same PC (Central's Fresh start), and seen in the last 60 days.
+  // The database says so (active); for an older database, worked out the same way here.
+  const pcActive = (d) => (d.active != null ? !!d.active : !d.retired_at && !!d.last_seen && daysSince(d.last_seen) <= 60);
+  const pcHas = (app) => (d) => (d.programs || []).some((x) => x.id === app);
+  // "today", "yesterday", "3 days ago" (calendar days)
+  const seenWords = (t) => { if (!t) return 'never'; const a = new Date(t); const b = new Date(); a.setHours(0, 0, 0, 0); b.setHours(0, 0, 0, 0);
+    const n = Math.round((b - a) / 864e5); return n <= 0 ? 'today' : n === 1 ? 'yesterday' : `${num(n)} days ago`; };
+  const pcProgs = (d, app) => (d.programs ? `<div class="progs">${d.programs.filter((x) => x.id !== 'central').map((x) => `<span class="prog${x.id === app ? ' on' : ''}">${esc(APP_NAME[x.id] || x.id)}${x.version ? ` <small>${esc(x.version)}</small>` : ''}</span>`).join('') || '<span class="muted small">Only Central</span>'}</div>`
+    : '<span class="muted small">Programs not reported yet</span>');
+  // One PC in a list: its Windows name, who linked it, when it was last seen, and the programs (with versions) it reported.
+  const pcLine = (d, app) => `<li><div class="pcl1"><b>${esc(d.name || 'A PC')}</b> <span class="muted">· linked by ${esc(d.person || 'someone who has left')} · seen ${seenWords(d.last_seen)}</span></div>${pcProgs(d, app)}</li>`;
+  // The PCs that don't count any more, in one quiet line: "Older PCs (not seen since 6 Nov 2026): Head office PC (linked again since)".
+  const olderLine = (old) => (old.length ? `<p class="muted small oldpcs">Older PCs (not seen since ${day(old.map((d) => d.last_seen).filter(Boolean).sort().pop())}): ${old.map((d) => `${esc(d.name || 'A PC')}${d.retired_at ? ' <span class="nowrap">(linked again since)</span>' : ''}`).join(', ')}</p>` : '');
   // As Built is hidden on the website: only show it when this business has it paid or installed.
   const showMod = (c, m) => { if (m !== 'as_built') return true; const v = c.licence.modules[m];
     return ['active', 'cancelled'].includes(v.status) || !!v.paid_until || (c.pcs || []).some((d) => (d.programs || []).some((x) => x.id === MOD_APP[m])); };
@@ -1585,16 +1606,20 @@
   function tabPrograms(c) {
     const L = c.licence; if (!L) return '<div class="card"><p class="muted">Your HQ role can\'t see licences.</p></div>';
     const X = c.extra; const open = !c.profile.status || c.profile.status === 'active'; const lim = S.limitDays || 31;
-    const pcs = c.pcs || []; const reported = pcs.some((d) => d.programs_at);
-    const installs = (app) => pcs.filter((d) => (d.programs || []).some((x) => x.id === app)).length;
-    const pcsCell = (app) => (reported ? `<span${installs(app) ? '' : ' class="muted"'}>${pcsText(installs(app))}</span>` : '<span class="muted">—</span>');
+    const all = c.pcs || []; const pcs = all.filter(pcActive); const older = all.filter((d) => !pcActive(d)); const reported = all.some((d) => d.programs_at);
+    const installs = (app) => pcs.filter(pcHas(app)).length;
+    // "2 PCs" opens the list of those PCs underneath (and any older PC that had it)
+    const pcsCell = (app) => { if (!reported) return '<span class="muted">—</span>'; const n = installs(app); const any = n || older.some(pcHas(app));
+      return any ? `<button class="lnk pcsbtn${n ? '' : ' muted'}" data-pcsfor="${esc(app)}" aria-expanded="false">${pcsText(n)} <span class="caret" aria-hidden="true">▾</span></button>` : `<span class="muted">${pcsText(n)}</span>`; };
+    const pcsRow = (app, cols) => (reported && (installs(app) || older.some(pcHas(app))) ? `<tr class="pcsrow" data-pcsof="${esc(app)}" hidden><td colspan="${cols}">
+        ${installs(app) ? `<ul class="pcl pclist">${pcs.filter(pcHas(app)).map((d) => pcLine(d, app)).join('')}</ul>` : ''}${olderLine(older.filter(pcHas(app)))}</td></tr>` : '');
     const grant = can('offers.grant') && !c.old; const manage = can('licences.manage');
     const rows = MODULES.filter(([m]) => showMod(c, m));
     const vals = rows.map(([m]) => L.modules[m]);
     const nPaid = vals.filter((v) => v.status === 'active').length; const nTrial = vals.filter((v) => v.status === 'trial').length;
     const nEnded = vals.filter((v) => ['ended', 'cancelled'].includes(v.status) && !v.active).length;
     const counts = [`${nPaid} paid`, `${nTrial} on trial`, nEnded ? `${nEnded} ended` : ''].filter(Boolean).join(' · ');
-    const freePcs = reported ? pcs.filter((d) => (d.programs || []).some((x) => FREE_PROGRAMS.some(([a]) => a === x.id))).length : null;
+    const freePcs = reported ? pcs.filter((d) => (d.programs || []).some((x) => FREE_PROGRAMS.some(([a]) => a === x.id))).length : null;   // active PCs only
     return `<div class="card progsum" id="progSum"><div class="psmain"><h3>Plan</h3>${planWords(c).map((l) => `<p class="psline">${l}</p>`).join('')}
         <p class="pscount" id="progCounts">${counts}</p></div>
         <div class="psacts">${grant && open && nTrial ? '<button class="btn sm" id="addFree">🎁 Add free time…</button>' : ''}</div></div>
@@ -1603,9 +1628,9 @@
       ${rows.map(([m, name]) => { const v = L.modules[m]; const [lbl, cl] = modState(v); const until = untilOf(v);
         return `<tr data-mod="${m}"><td><b>${name}</b></td><td><span class="pill${cl ? ' ' + cl : ''}">${lbl}</span>${v.status === 'cancelled' && v.active ? '<small>works until the end</small>' : ''}</td>
           <td class="nowrap">${until ? `Until ${day(until)}${v.active && v.days_left != null ? `<small>${v.days_left <= 0 ? 'ends today' : `${num(v.days_left)} day${v.days_left === 1 ? '' : 's'} left`}</small>` : ''}` : '<span class="muted">—</span>'}</td>
-          <td>${pcsCell(MOD_APP[m])}</td>${open && manage ? `<td class="r"><button class="btn sm" data-manage="${m}">Manage</button></td>` : ''}</tr>`; }).join('')}</table>
+          <td>${pcsCell(MOD_APP[m])}</td>${open && manage ? `<td class="r"><button class="btn sm" data-manage="${m}">Manage</button></td>` : ''}</tr>${pcsRow(MOD_APP[m], open && manage ? 5 : 4)}`; }).join('')}</table>
       <details class="freeprogs" id="freeProgs"><summary><span class="muted">Free programs:</span> ${FREE_PROGRAMS.map(([, n]) => n).join(', ')}${freePcs != null ? ` · <span class="muted">installed on ${pcsText(freePcs).replace('Not installed', 'no PCs yet')}</span>` : ''}</summary>
-        <table class="tbl"><tr><th>Program</th><th>Installed on</th></tr>${FREE_PROGRAMS.map(([app, name]) => `<tr class="free"><td>${name}</td><td>${pcsCell(app)}</td></tr>`).join('')}</table></details>
+        <table class="tbl"><tr><th>Program</th><th>Installed on</th></tr>${FREE_PROGRAMS.map(([app, name]) => `<tr class="free"><td>${name}</td><td>${pcsCell(app)}</td></tr>${pcsRow(app, 2)}`).join('')}</table></details>
       <p class="muted small progfoot">${!reported ? '"Installed on" fills in once their PCs run Riyeser Central 1.8.1 or later. ' : ''}Changes reach the business's PCs the next time Riyeser Central checks in (at start-up and daily).${grant ? ` Free time up to ${lim} days applies straight away; more goes to Approvals.` : ''}</p></div>
       <div class="card" style="margin-top:14px"><h3>Plan settings</h3><form id="plan" class="grid g3 planf">
         <label class="f"><span>Extra users <small class="muted">(${L.seats.used} people now; ${L.seats.included} included in each program, then US$${PRICE.extra_user} each per program)</small></span><input type="number" min="0" name="users" value="${L.seats.extra}"${manage ? '' : ' disabled'}></label>
@@ -1721,12 +1746,13 @@
 
   // --- PCs & programs
   function tabPcs(c) {
-    const pcs = c.pcs || [];
+    const pcs = (c.pcs || []).filter(pcActive); const older = (c.pcs || []).filter((d) => !pcActive(d));
     return `<div class="card scroll" id="pcsCard"><h3>Linked PCs <small>· ${pcs.length}</small></h3>${pcs.length ? `<table class="tbl" id="pcsTbl"><tr><th>PC</th><th>Person</th><th>Central</th><th>Last seen</th><th>Riyeser programs installed</th></tr>
       ${pcs.map((d) => `<tr><td><b>${esc(d.name || 'A PC')}</b><small>${esc(d.platform === 'win32' ? 'Windows' : d.platform || '')}${d.linked_at ? ` · linked ${day(d.linked_at)}` : ''}</small></td><td>${esc(d.person || '')}</td>
         <td class="nowrap">${esc(d.version || '?')}</td><td>${ago(d.last_seen)}</td>
         <td>${d.programs ? `<div class="progs">${d.programs.filter((x) => x.id !== 'central').map((x) => `<span class="prog">${esc(APP_NAME[x.id] || x.id)}${x.version ? ` <small>${esc(x.version)}</small>` : ''}</span>`).join('') || '<span class="muted small">Only Central</span>'}</div>${d.programs_at ? `<small>as of ${ago(d.programs_at)}</small>` : ''}`
-          : '<span class="muted small">Not reported yet (Riyeser Central 1.8.1 sends this)</span>'}</td></tr>`).join('')}</table>` : '<p class="muted small">No PCs linked yet.</p>'}</div>
+          : '<span class="muted small">Not reported yet (Riyeser Central 1.8.1 sends this)</span>'}</td></tr>`).join('')}</table>` : `<p class="muted small">${older.length ? 'No PCs seen in the last 60 days.' : 'No PCs linked yet.'}</p>`}
+      ${older.length ? `<div id="olderPcs">${olderLine(older)}</div>` : ''}</div>
       <div class="card" style="margin-top:14px"><h3>Branches</h3>${(c.branches || []).map((b) => `<div class="small">${esc(b.name)} <span class="muted">· ${b.extension || ''} · ${b.people} people</span></div>`).join('') || '<p class="muted small">None.</p>'}</div>`;
   }
   // --- People
@@ -1797,6 +1823,9 @@
     el.querySelectorAll('[data-markpaid]').forEach((b) => b.onclick = () => markPaidDlg(b.dataset.markpaid, b.dataset.amount, reloadCompany));
     el.querySelectorAll('[data-q]').forEach((b) => b.onclick = () => quickAction(b.dataset.mod, b.dataset.q, Number(b.dataset.days) || null));
     el.querySelectorAll('[data-manage]').forEach((b) => b.onclick = () => manageProgram(b.dataset.manage));
+    el.querySelectorAll('[data-pcsfor]').forEach((b) => b.onclick = () => {
+      const row = b.closest('table').querySelector(`tr.pcsrow[data-pcsof="${b.dataset.pcsfor}"]`); if (!row) return;
+      row.hidden = !row.hidden; b.setAttribute('aria-expanded', String(!row.hidden)); });
     el.querySelectorAll('[data-doc]').forEach((b) => b.onclick = () => docView(b.dataset.doc));
     el.querySelectorAll('[data-tk]').forEach((r) => r.onclick = () => { S.ticket = r.dataset.tk; go('#/support'); });
     el.querySelectorAll('[data-pin]').forEach((b) => b.onclick = async () => { try { await api.notePin(Number(b.dataset.pin), !!b.dataset.on); await reloadCompany(); } catch (err) { alert(plain(err)); } });

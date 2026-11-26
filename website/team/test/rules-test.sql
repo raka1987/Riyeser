@@ -1091,6 +1091,75 @@ select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
 do $$ begin begin perform public.hq_company_page(current_setting('test.ws_a')::uuid); raise exception 'customer opened HQ';
   exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end; end $$;
 
+-- --- One PC counts once: Central's Fresh start links the same PC again under a new id; the older row is marked replaced
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+select public.link_device(:'ws_a', 'e1e1e1e1-0000-4000-8000-000000000002', 'front desk PC ', 'win32', '1.8.8');
+reset role;
+do $$ begin
+  assert (select retired_at is not null and replaced_by = 'e1e1e1e1-0000-4000-8000-000000000002' from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000001'),
+    'the older link of the same PC (same name, same person) is marked replaced';
+  assert (select retired_at is null and replaced_by is null from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000002'), 'the new link counts';
+  assert (select programs is not null from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000001'), 'the old row is kept as it was, never deleted';
+end $$;
+-- someone else's PC with the same name, and another of the owner's PCs, stay separate
+select pg_temp.as_user('22222222-2222-2222-2222-222222222222'); set role authenticated;
+select public.link_device(:'ws_a', 'e1e1e1e1-0000-4000-8000-000000000003', 'Front desk PC', 'win32', '1.8.8');
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+select public.link_device(:'ws_a', 'e1e1e1e1-0000-4000-8000-000000000004', 'Office laptop', 'win32', '1.8.8');
+-- the old id reporting again (an old Central still running) takes over, and the new one takes it back
+select public.report_programs(:'ws_a', 'e1e1e1e1-0000-4000-8000-000000000001', '{"central": "1.8.7"}');
+reset role;
+do $$ begin
+  assert (select retired_at is null from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000001')
+     and (select replaced_by = 'e1e1e1e1-0000-4000-8000-000000000001' from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000002'), 'reporting in marks the other row replaced';
+end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111'); set role authenticated;
+select public.report_programs(:'ws_a', 'e1e1e1e1-0000-4000-8000-000000000002',
+  '{"central": "1.8.8", "payroll": "2.2.3", "team": "1.1.0", "accounting-basics": "2.3.0"}');
+reset role;
+do $$ begin
+  assert (select retired_at is not null from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000001'), 'back to the newest';
+  assert (select retired_at is null from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000003'), 'another person''s PC with the same name stays';
+  assert (select retired_at is null from public.devices where id = 'e1e1e1e1-0000-4000-8000-000000000004'), 'a PC with another name stays';
+end $$;
+-- the duplicates already in the database: same business, person and name, the most recently seen one stays (safe to repeat)
+insert into public.devices (id, workspace_id, user_id, device_name, platform, app_version, linked_at, last_seen) values
+  ('e1e1e1e1-0000-4000-8000-0000000000a1', :'ws_a', '22222222-2222-2222-2222-222222222222', 'Back office', 'win32', '1.8.5', now() - interval '40 days', now() - interval '30 days'),
+  ('e1e1e1e1-0000-4000-8000-0000000000a2', :'ws_a', '22222222-2222-2222-2222-222222222222', 'BACK OFFICE', 'win32', '1.8.7', now() - interval '20 days', now() - interval '1 day'),
+  ('e1e1e1e1-0000-4000-8000-0000000000a3', :'ws_a', '22222222-2222-2222-2222-222222222222', 'Back office', 'win32', '1.8.6', now() - interval '30 days', now() - interval '25 days');
+do $$ declare n int; begin
+  n := public.retire_duplicate_pcs();
+  assert n = 2, format('two older rows marked: %s', n);
+  assert (select retired_at is null from public.devices where id = 'e1e1e1e1-0000-4000-8000-0000000000a2'), 'the most recently seen stays';
+  assert (select count(*) from public.devices where id in ('e1e1e1e1-0000-4000-8000-0000000000a1', 'e1e1e1e1-0000-4000-8000-0000000000a3')
+          and retired_at is not null and replaced_by = 'e1e1e1e1-0000-4000-8000-0000000000a2') = 2, 'the older two are replaced by it';
+  assert public.retire_duplicate_pcs() = 0, 'running it again changes nothing';
+  assert (select count(*) from public.devices where workspace_id = current_setting('test.ws_a')::uuid and retired_at is not null
+          and lower(trim(device_name)) = 'front desk pc' and user_id = '11111111-1111-1111-1111-111111111111') = 1, 'and leaves the rows already sorted out';
+end $$;
+-- not seen for 61 days: not counted either
+update public.devices set last_seen = now() - interval '61 days' where id = 'e1e1e1e1-0000-4000-8000-000000000004';
+select count(*) as pcs_expected from public.devices d where d.workspace_id = :'ws_a' and d.retired_at is null and d.last_seen > now() - interval '60 days' \gset
+do $$ begin assert has_function_privilege('authenticated', 'public.retire_duplicate_pcs()', 'execute') = false
+  and has_function_privilege('authenticated', 'public.retire_older_pcs(uuid, uuid)', 'execute') = false, 'only the database marks PCs replaced'; end $$;
+select set_config('test.pcs_expected', :'pcs_expected', false);
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ declare c json; n int := current_setting('test.pcs_expected')::int; r json; begin
+  c := public.hq_company_page(current_setting('test.ws_a')::uuid);
+  assert (select count(*) from json_array_elements(c -> 'pcs') d where (d ->> 'active')::boolean) = n, format('the page marks %s PCs active: %s', n, c -> 'pcs');
+  assert (select (d ->> 'active')::boolean = false and d ->> 'replaced_by' = 'e1e1e1e1-0000-4000-8000-000000000002' and d ->> 'retired_at' is not null
+          from json_array_elements(c -> 'pcs') d where d ->> 'id' = 'e1e1e1e1-0000-4000-8000-000000000001'), 'the replaced PC is there, not active, with what replaced it';
+  assert (select (d ->> 'active')::boolean = false from json_array_elements(c -> 'pcs') d where d ->> 'id' = 'e1e1e1e1-0000-4000-8000-000000000004'), 'not seen in 60 days: not active';
+  assert (select (d ->> 'active')::boolean and d ->> 'name' = 'front desk PC ' and d ->> 'person' = 'Alex'
+            and (d -> 'programs')::jsonb @> '[{"id": "payroll", "version": "2.2.3"}]'
+          from json_array_elements(c -> 'pcs') d where d ->> 'id' = 'e1e1e1e1-0000-4000-8000-000000000002'), 'the PC: its name, who linked it, programs and versions';
+  assert (select count(*) from json_array_elements(c -> 'pcs') d where (d ->> 'active')::boolean and (d -> 'programs')::jsonb @> '[{"id": "payroll"}]') = 1, 'Payroll on one PC';
+  assert (select count(*) from json_array_elements(c -> 'pcs') d where (d ->> 'active')::boolean and (d -> 'programs')::jsonb @> '[{"id": "pos"}]') = 0, 'the old PC''s programs aren''t counted';
+  assert (select (c2.pcs)::int from public.hq_companies('Sample Plumbing') c2 where c2.id = current_setting('test.ws_a')::uuid) = n, 'the companies list counts active PCs';
+  r := public.hq_companies_page('Sample Plumbing', '{}', null, null, 1, 50, false);
+  assert (select (x ->> 'pcs')::int from json_array_elements(r -> 'rows') x where (x ->> 'id')::uuid = current_setting('test.ws_a')::uuid) = n, 'and the paged list';
+end $$;
+
 -- --- Message customer: a ticket Riyeser starts, seen only by the person it's to (and the business's owners/admins)
 select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 select (public.hq_message_customer(:'ws_a', '44444444-4444-4444-4444-444444444444', 'billing', 'Your trial ends soon', 'Hi Jordan, would you like help choosing a plan?') ->> 'id') as t_staff \gset
