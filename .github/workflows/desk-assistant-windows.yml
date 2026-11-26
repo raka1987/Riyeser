@@ -1,6 +1,6 @@
-name: Riyeser Central + Desk Assistant + PDF + As Built + Link + Link Office (Windows)
+name: Riyeser Central + Documents + PDF + As Built + Link + Link Office (Windows)
 
-# Builds the Windows installers for Riyeser Central, Riyeser Desk Assistant and Riyeser PDF,
+# Builds the Windows installers for Riyeser Central, Riyeser Documents (formerly Desk Assistant), Riyeser PDF and the rest,
 # installs them on a clean Windows machine and checks they are registered.
 on:
   push:
@@ -71,8 +71,23 @@ jobs:
           $oldExe = (Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Team.exe" | Select-Object -First 1).FullName
           New-Item -ItemType Directory -Force -Path "$env:APPDATA\Riyeser Team" | Out-Null
           Set-Content "$env:APPDATA\Riyeser Team\update-check.txt" "kept"
+          # Riyeser Documents was Riyeser Desk Assistant: install the released Desk Assistant first, so the new build is
+          # checked as an update over it (same folder and program file, one Installed apps entry, data folder kept).
+          $doc = Get-ChildItem "dist\RiyeserDocuments-Setup-*.exe" | Select-Object -First 1
+          $dac = Get-ChildItem "dist\RiyeserDeskAssistant-Setup-*.exe" | Select-Object -First 1
+          if (-not $doc -or -not $dac -or (Get-FileHash $doc.FullName).Hash -ne (Get-FileHash $dac.FullName).Hash) { throw "Expected RiyeserDocuments-Setup and the same file as RiyeserDeskAssistant-Setup in dist" }
+          $oldDa = "$env:RUNNER_TEMP\RiyeserDeskAssistant-old.exe"
+          Invoke-WebRequest "https://github.com/raka1987/Riyeser/releases/latest/download/RiyeserDeskAssistant-Setup.exe" -OutFile $oldDa
+          Start-Process -FilePath $oldDa -ArgumentList "/S" -Wait
+          Get-Process -Name "Riyeser Desk Assistant" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $oldDaEntry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object { $_.DisplayName -like "Riyeser Desk Assistant*" -or $_.DisplayName -like "Riyeser Documents*" }
+          if (-not $oldDaEntry) { throw "The released Riyeser Desk Assistant didn't install" }
+          Write-Host "Released copy installed first:" $oldDaEntry.DisplayName
+          $oldDaExe = (Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Desk Assistant.exe" | Select-Object -First 1).FullName
+          New-Item -ItemType Directory -Force -Path "$env:APPDATA\Desk Assistant\data" | Out-Null
+          Set-Content "$env:APPDATA\Desk Assistant\data\kept.txt" "kept"
           foreach ($app in @(
-              @{ setup = "dist\RiyeserDeskAssistant-Setup-*.exe"; exe = "Riyeser Desk Assistant.exe"; name = "Riyeser Desk Assistant*" },
+              @{ setup = "dist\RiyeserDocuments-Setup-*.exe"; exe = "Riyeser Desk Assistant.exe"; name = "Riyeser Documents*" },
               @{ setup = "dist-pdf\RiyeserPDF-Setup-*.exe"; exe = "Riyeser PDF.exe"; name = "Riyeser PDF*" },
               @{ setup = "dist-central\RiyeserCentral-Setup-*.exe"; exe = "Riyeser Central.exe"; name = "Riyeser Central*" },
               @{ setup = "dist-services\RiyeserServices-Setup-*.exe"; exe = "Riyeser Services.exe"; name = "As Built*" },
@@ -96,6 +111,25 @@ jobs:
           if (-not (Test-Path "$desk\Riyeser Link.lnk")) { throw "No Riyeser Link desktop shortcut after the update" }
           if (Test-Path "$desk\Riyeser Team.lnk") { Write-Warning "The old Riyeser Team desktop shortcut is still there" }
           Write-Host "Updated in place:" $teamEntries[0].DisplayName "at" $newExe
+          # The update over the released Desk Assistant: one entry (now Riyeser Documents 1.x), same program file, data kept
+          $docEntries = @(Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object { $_.DisplayName -like "Riyeser Desk Assistant*" -or $_.DisplayName -like "Riyeser Documents*" })
+          if ($docEntries.Count -ne 1 -or $docEntries[0].DisplayName -notlike "Riyeser Documents 1.*") { throw "Expected one Installed apps entry, Riyeser Documents 1.x, found: $($docEntries.DisplayName)" }
+          $docExe = (Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Desk Assistant.exe" | Select-Object -First 1).FullName
+          if ($docExe -ne $oldDaExe) { throw "Riyeser Documents moved: was $oldDaExe, now $docExe" }
+          if ((Get-Content "$env:APPDATA\Desk Assistant\data\kept.txt" -Raw).Trim() -ne "kept") { throw "The Desk Assistant data folder wasn't kept" }
+          if (-not (Test-Path "$desk\Riyeser Documents.lnk")) { throw "No Riyeser Documents desktop shortcut after the update" }
+          if (Test-Path "$desk\Riyeser Desk Assistant.lnk") { Write-Warning "The old Riyeser Desk Assistant desktop shortcut is still there" }
+          Write-Host "Updated in place:" $docEntries[0].DisplayName "at" $docExe
+          # Riyeser Documents' own check: makes a library, adds a bank statement, it's suggested for Accounts > Bank statements
+          # and filed there; the scanner script (Windows' WIA scan window) is valid PowerShell
+          $dreport = "$env:RUNNER_TEMP\documents.json"
+          Start-Process -FilePath $docExe -ArgumentList "--self-test=$dreport" -Wait
+          $dr = Get-Content $dreport -Raw | ConvertFrom-Json
+          $docVersion = [regex]::Match((Get-Content scripts\builder.config.js -Raw), "name: 'desk-assistant', version: '([^']+)'").Groups[1].Value
+          if (-not ($dr.ok -and $dr.name -eq "Riyeser Documents" -and $dr.version -eq $docVersion)) { throw "Riyeser Documents' self-test failed: $($dr | ConvertTo-Json -Compress)" }
+          $perr = $null; [System.Management.Automation.Language.Parser]::ParseFile($dr.scannerScriptPath, [ref]$null, [ref]$perr) | Out-Null
+          if ($perr.Count) { throw "The scanner script doesn't parse: $($perr | Out-String)" }
+          Write-Host "Riyeser Documents" $dr.version "files a document into" $dr.suggestion "and its scanner script parses"
           # Riyeser Link Office installs for the whole PC (Program Files, HKLM) and adds its Windows Firewall rule
           $lsetup = Get-ChildItem "dist-linkoffice\RiyeserLinkOffice-Setup-*.exe" | Select-Object -First 1
           Start-Process -FilePath $lsetup.FullName -ArgumentList "/S" -Wait
@@ -121,7 +155,7 @@ jobs:
           $r = Get-Content $report -Raw | ConvertFrom-Json
           $r.programs | Format-Table id, status, where -AutoSize | Out-String | Write-Host
           foreach ($id in @("desk", "pdf", "services", "team", "linkoffice")) { if (($r.programs | Where-Object id -eq $id).status -ne "installed") { throw "Riyeser Central can't find $id" } }
-          Write-Host "Riyeser Central" $r.version "finds Desk Assistant, PDF, As Built, Riyeser Link and Riyeser Link Office"
+          Write-Host "Riyeser Central" $r.version "finds Documents, PDF, As Built, Riyeser Link and Riyeser Link Office"
           # As Built must carry its own copy of the app (works with no internet)
           $svc = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Services.exe" | Select-Object -First 1
           $sreport = "$env:RUNNER_TEMP\services.json"
@@ -152,6 +186,7 @@ jobs:
         with:
           name: Riyeser-Windows-installers
           path: |
+            desktop/dist/RiyeserDocuments-Setup-*.exe
             desktop/dist/RiyeserDeskAssistant-Setup-*.exe
             desktop/dist-pdf/RiyeserPDF-Setup-*.exe
             desktop/dist-central/RiyeserCentral-Setup-*.exe

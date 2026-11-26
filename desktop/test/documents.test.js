@@ -92,6 +92,15 @@ test('a shared network folder that is briefly unreachable: the last list is show
   assert.ok(lib.addFile(put(dir, 'c.txt', 'y')));
 });
 
+test('folders can\'t point outside the library or into its own special folders', async () => {
+  const { lib, dir } = newLib();
+  const d = await addAndRead(lib, put(dir, 'x.txt', 'hello'));
+  for (const bad of ['../outside', 'Accounts/../../outside', '_Recycle bin', '_Riyeser', '.hidden', '']) assert.throws(() => lib.fileDoc(d.id, bad), /isn't a folder in the library|Pick a folder/, bad);
+  assert.strictEqual(lib.createFolder('Sales/../../evil'), 'Sales/evil', 'dots are dropped, never followed');
+  assert.throws(() => lib.createFolder('_Scans'), /can't start with _/);
+  assert.strictEqual(lib.createFolder('Sales/Customers.'), 'Sales/Customers');
+});
+
 test('two PCs saving at once don\'t lose each other\'s changes (lock file); a stale lock is cleared', () => {
   const { lib, as, dir } = newLib();
   const other = as(JAMIE);
@@ -206,7 +215,7 @@ test('move, rename (the old name still finds it), delete to the Recycle bin, res
   const svc = createService({ lib: () => lib, me: () => OWNER, settings: () => ({}), saveSettings() {} });
   assert.strictEqual(svc['docs:list']({ q: 'lease.txt' }).total, 1, 'the old name still finds it');
   const gone = lib.remove(d.id);
-  assert.strictEqual(gone.status, 'deleted'); assert.strictEqual(gone.deletedFrom, 'Admin/Property');
+  assert.strictEqual(gone.status, 'deleted'); assert.strictEqual(gone.deletedFrom, 'Admin/Property'); assert.strictEqual(gone.name, 'Lease renewal 2027.txt', 'shown under its own name in the bin');
   assert.ok(gone.rel.startsWith(`${SPECIAL.bin}/`)); assert.ok(fs.existsSync(lib.docPath(gone))); assert.ok(!fs.existsSync(lib.abs('Admin/Property/Lease renewal 2027.txt')));
   assert.strictEqual(svc['docs:list']({ place: 'bin' }).items[0].daysLeft >= 0, true);
   assert.strictEqual(svc['docs:list']({ q: 'lease' }).total, 0, 'deleted documents aren\'t in search');

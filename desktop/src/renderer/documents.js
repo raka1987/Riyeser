@@ -493,7 +493,7 @@ const TABS = {
     return `<div class="box"><b>Backups</b><p class="note" style="margin:0">Riyeser Documents backs up its settings on this PC every day. Your documents are ordinary files in the library folder: include that folder in your office backup.</p>
       <div class="row2"><button class="btn" type="button" data-bk="now">Back up now</button><button class="btn" type="button" data-bk="restore">Restore from a backup…</button><button class="btn ghost" type="button" data-bk="folder">Open the backups folder</button></div></div>
       <div class="box"><b>About</b><p class="note" style="margin:0">Riyeser Documents ${esc(S.nav.version)} by Riyeser Group. Formerly Riyeser Desk Assistant. Free for 3 users.</p>
-      <div class="row2"><button class="btn" type="button" data-act="help">${icon('help')}Help</button><button class="btn ghost" type="button" data-weblink="https://riyeser.com/help/documents.html">Help on riyeser.com</button></div></div>
+      <div class="row2"><button class="btn" type="button" data-act="help">${icon('help')}Help</button><button class="btn ghost" type="button" data-weblink="https://riyeser.com/help/">Help on riyeser.com</button></div></div>
       <div class="box info"><b>Coming next</b><p class="note" style="margin:0;color:var(--ink)">Riyeser cloud sync between offices, share links, links for customers to send you files, and access for your accountant.</p></div>${s.demo ? '' : ''}`;
   },
 };
@@ -595,7 +595,7 @@ function openHelp() {
     ${sec('Folders and access', '<p>The owner sets who can see each folder in <b>Settings › People & access</b>: No access (hidden), View, Add, Edit or Full. The owner always has Full access. Tick <b>Private</b> on a document to keep it to yourself, the owner and people with Full access.</p><p>On a shared network folder, Windows\' own folder permissions are the hard lock: set them too for folders like Payroll & HR.</p>')}
     ${sec('One library for the whole office', '<p>Put the library on a shared folder (Settings › Library), for example <b>\\\\OFFICE-PC\\Riyeser Documents</b>. Every PC that uses it sees the same documents. If that PC is off for a while, the others show what they saw last and catch up when it\'s back.</p>')}
     ${sec('Coming later', '<p>Riyeser cloud sync and linking offices, share links, links for customers to send you files, access for your accountant, and making bills and staff records straight from a document.</p>')}
-    <button class="btn" type="button" data-weblink="https://riyeser.com/help/documents.html">${icon('open')}More help on riyeser.com</button>`;
+    <button class="btn" type="button" data-weblink="https://riyeser.com/help/">${icon('open')}More help on riyeser.com</button>`;
   h.hidden = false;
 }
 

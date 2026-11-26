@@ -57,10 +57,13 @@ const ALL_PROGRAMS = [
     one: `Rosters, time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click. Free for 90 days, no card.`,
     pitch: 'Pay day without the paperwork.',
     note: 'Check the PAYE and FNPF rates in Payroll rules against the current rules before you pay staff.' },
-  { id: 'desk-assistant', name: 'Riyeser Desk Assistant', short: 'Desk Assistant', icon: '🗂', file: 'RiyeserDeskAssistant-Setup.exe',
-    one: 'Sorts every file by type and year, finds anything in seconds, finds duplicates, and keeps your to-dos.',
-    pitch: 'Never lose a file again.',
-    shot: 'desk-find.webp' },
+  // Riyeser Documents (formerly Riyeser Desk Assistant; the page id stays desk-assistant). Releases carry its installer
+  // as RiyeserDocuments-Setup.exe and, for old links and older Centrals, RiyeserDeskAssistant-Setup.exe: the old name
+  // is used here because every release has it (the new name only from the first Riyeser Documents release).
+  { id: 'desk-assistant', name: 'Riyeser Documents', short: 'Documents', icon: '🗂', file: 'RiyeserDeskAssistant-Setup.exe',
+    one: 'Scans from the office printer, phones and uploads land in one Inbox, each with a suggested folder: file them in one click. Search the text inside every scan, with folder access for each person.',
+    pitch: 'Every paper in its place.',
+    shot: 'documents-inbox.webp' },
   // Riyeser Link (formerly Riyeser Team). Its Windows installer keeps the old file name, so installed copies update in place.
   // A paid program (module 'calls'): chat, calls, desk phones and Riyeser Link Office in one (it took in Link Plus).
   { id: 'link', name: 'Riyeser Link', short: 'Riyeser Link', icon: '💬', file: 'RiyeserTeam-Setup.exe', shot: 'team-chat.webp',

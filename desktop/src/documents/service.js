@@ -220,7 +220,7 @@ function createService(deps) {
       return r;
     },
     'docs:scanSetup': () => scanSetup(),
-    'docs:openScanFolder': (dept) => { const L = lib(); return deps.openScanFolder(path.join(L.root, SPECIAL.scans, dept || EMAIL_IN)); },
+    'docs:openScanFolder': (dept) => { const L = lib(); const d = dept || EMAIL_IN; if (d !== EMAIL_IN && !L.departments().includes(d)) throw new Error('No such scan folder.'); return deps.openScanFolder(path.join(L.root, SPECIAL.scans, d)); },
     'docs:copy': (text) => deps.copy(String(text || '')),
     'docs:history': (opts = {}) => {
       const { L, sees } = view(); const byId = new Map(L.docs().map((d) => [d.id, d]));

@@ -258,7 +258,7 @@ async function runSelfTest(file) {
     const s = lib.doc(doc.id).suggestion;
     const filed = lib.fileDoc(doc.id, s.folder);
     out.suggestion = s.folder; out.filed = fs.existsSync(lib.docPath(filed));
-    out.scannerScript = fs.existsSync(scanner.scriptFile(root));
+    out.scannerScriptPath = scanner.scriptFile(root); out.scannerScript = fs.existsSync(out.scannerScriptPath);
     out.departments = lib.departments();
     out.ok = out.filed && /^Accounts\/Bank statements\/\d{4}$/.test(s.folder) && out.scannerScript;
   } catch (e) { out.error = e.message; }
@@ -297,7 +297,7 @@ app.whenReady().then(async () => {
   handle('backup:restore', () => backups.restoreFromBackup());
   handle('backup:folder', () => backups.openFolder().then(() => true));
   handle('app:uninstall', () => runUninstall(APP_INFO));
-  handle('help:open', () => shell.openExternal('https://riyeser.com/help/documents.html').then(() => true));
+  handle('help:open', () => shell.openExternal('https://riyeser.com/help/').then(() => true));
   registerPdfIpc({ handle, store, openEditor, getTheme: () => settings().theme || 'system', setTheme: (t) => { saveSettings({ ...settings(), theme: t }); applyTheme(t); } });
 
   const startPdf = pdfArg(process.argv);

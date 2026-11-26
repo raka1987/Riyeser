@@ -25,6 +25,13 @@ const BIN_DAYS = 30;
 const MAX_TEXT = 20000;
 const SKIP_FILE = /^(desktop\.ini|thumbs\.db|\.ds_store|~\$.*|.*\.(tmp|part|crdownload|lnk))$/i;
 
+/** A folder inside the library that people may file into: no "..", no hidden or special (_) top folder. */
+function safeFolder(rel) {
+  const parts = String(rel || '').replace(/\\/g, '/').split('/').map((s) => s.trim()).filter(Boolean);
+  if (!parts.length) throw new Error('Pick a folder.');
+  if (parts.some((p) => p === '.' || p === '..' || p.startsWith('.') || /[<>:"|?*\u0000-\u001f]/.test(p)) || /^[_$]/.test(parts[0])) throw new Error('That isn\'t a folder in the library.');
+  return parts.join('/');
+}
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 const newId = () => crypto.randomBytes(6).toString('hex');
 const relOf = (root, abs) => path.relative(root, abs).split(path.sep).join('/');
@@ -187,9 +194,9 @@ class Library {
     return this.folders().map((rel) => ({ rel, level: access.levelFor(a, p, rel), locked: access.isLocked(a, rel) })).filter((f) => f.level !== 'none');
   }
   createFolder(rel, who = this.me) {
-    const clean = String(rel).split('/').map((s) => s.replace(/[<>:"\\|?*\u0000-\u001f]/g, '-').trim()).filter(Boolean);
-    if (!clean.length || /^[_.]/.test(clean[0])) throw new Error('Give the folder a name (it can\'t start with _ or .).');
-    const r = clean.join('/');
+    const clean = String(rel).split('/').map((s) => s.replace(/[<>:"\\|?*\u0000-\u001f]/g, '-').replace(/[. ]+$/, '').trim()).filter(Boolean);
+    if (!clean.length || /^[_.$]/.test(clean[0]) || clean.some((s) => s.startsWith('.'))) throw new Error('Give the folder a name (it can\'t start with _ or .).');
+    const r = safeFolder(clean.join('/'));
     this.requireOnline();
     this.check('add', clean.length > 1 ? clean.slice(0, -1).join('/') : r, who);
     fs.mkdirSync(this.abs(r), { recursive: true });
@@ -270,8 +277,7 @@ class Library {
    * picked the folder themselves (learned more strongly) }.
    */
   fileDoc(id, folderRel, opts = {}, who = this.me) {
-    const folder = access.normRel(folderRel);
-    if (!folder || /^[_.]/.test(folder)) throw new Error('Pick a folder to file it in.');
+    const folder = safeFolder(folderRel);
     this.check('file', folder, who);
     const doc = this.doc(id);
     if (doc.status !== 'inbox') throw new Error(`${doc.name} has already been filed.`);
@@ -292,7 +298,7 @@ class Library {
     return out;
   }
   move(id, folderRel, who = this.me) {
-    const folder = access.normRel(folderRel);
+    const folder = safeFolder(folderRel);
     const doc = this.doc(id);
     if (doc.status === 'inbox') return this.fileDoc(id, folder, { explicit: true }, who);
     if (doc.status !== 'filed') throw new Error('Restore it from the Recycle bin first.');
@@ -343,7 +349,7 @@ class Library {
     const wasStatus = doc.status; const wasRel = doc.rel;
     return this.relocate(doc, SPECIAL.bin, `${doc.id}~${doc.name}`, who, (d) => {
       d.status = 'deleted'; d.deletedAt = this.now().toISOString(); d.deletedBy = who.id; d.deletedFrom = from; d.wasStatus = wasStatus; d.wasRel = wasRel;
-      d.name = d.name.replace(/^[0-9a-f]{12}~/, '');
+      if (d.name.startsWith(`${d.id}~`)) d.name = d.name.slice(d.id.length + 1);
     }, 'deleted', `Moved to the Recycle bin from ${wasStatus === 'inbox' ? 'the Inbox' : shown(from)}`);
   }
   restore(id, who = this.me) {
@@ -426,7 +432,7 @@ class Library {
   saveRule(rule, who = this.me) {
     this.check('add', rule.folder, who);
     const clean = { id: rule.id || `r${newId()}`, name: String(rule.name || '').trim() || `Anything mentioning ${rule.words[0]}`, words: (rule.words || []).map((w) => String(w).trim()).filter(Boolean),
-      folder: access.normRel(rule.folder), year: rule.year !== false, enabled: rule.enabled !== false };
+      folder: rule.folder ? safeFolder(rule.folder) : '', year: rule.year !== false, enabled: rule.enabled !== false };
     if (!clean.words.length) throw new Error('Type the words to look for (for example the supplier\'s name).');
     if (!clean.folder) throw new Error('Pick the folder.');
     this.mutate((d) => { d.rules = [...(d.rules || []).filter((r) => r.id !== clean.id), clean]; });
@@ -447,7 +453,12 @@ class Library {
   /** Newest first. docId: one document's history. */
   history({ docId = null, limit = 300 } = {}) {
     let text = '';
-    try { text = fs.readFileSync(this.meta('history.jsonl'), 'utf8'); } catch { return []; }
+    try {
+      // Only the last few MB: years of history stay quick to show
+      const f = this.meta('history.jsonl'); const size = fs.statSync(f).size; const keep = 4 * 1024 * 1024;
+      if (size <= keep) text = fs.readFileSync(f, 'utf8');
+      else { const fd = fs.openSync(f, 'r'); try { const b = Buffer.alloc(keep); fs.readSync(fd, b, 0, keep, size - keep); text = b.toString('utf8'); text = text.slice(text.indexOf('\n') + 1); } finally { fs.closeSync(fd); } }
+    } catch { return []; }
     const out = [];
     const lines = text.split('\n');
     for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
@@ -464,4 +475,4 @@ function sourceLabel(source) {
   return { upload: 'Upload', printer: 'Office printer', scanner: 'Scanner', email: 'Email', phone: 'Phone', folder: 'Put in the folder', program: 'A Riyeser program' }[source] || 'Upload';
 }
 
-module.exports = { Library, OfflineError, DEFAULT_FOLDERS, SPECIAL, EMAIL_IN, BIN_DAYS, typeOf, shown, sourceLabel, relOf };
+module.exports = { Library, OfflineError, safeFolder, DEFAULT_FOLDERS, SPECIAL, EMAIL_IN, BIN_DAYS, typeOf, shown, sourceLabel, relOf };
