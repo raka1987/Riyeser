@@ -1,6 +1,10 @@
 {% extends "base.html" %}{% block title %}Audit Trail{% endblock %}
+{% import "_list.html" as ls %}
 {% block content %}
-<div class="head"><div><h1>Audit Trail</h1><p class="sub">Last 500 recorded actions.</p></div></div>
-<div class="tbl"><table><tr><th>When (UTC)</th><th>User</th><th>Action</th><th>Details</th></tr>
-{% for r in rows %}<tr><td>{{ r.at }}</td><td>{{ r.username or 'system' }}</td><td><span class="badge">{{ r.action }}</span></td><td>{{ r.details }}</td></tr>{% endfor %}</table></div>
+<div class="head"><div><h1>Audit Trail</h1><p class="sub">Every recorded action, newest first.</p></div></div>
+{{ ls.bar(lst) }}
+<div class="tbl"><table><tr>{{ ls.th(lst, 'at') }}{{ ls.th(lst, 'username') }}{{ ls.th(lst, 'action') }}{{ ls.th(lst, 'details') }}</tr>
+{% for r in rows %}<tr><td>{{ r.at }}</td><td>{{ r.username or 'system' }}</td><td><span class="badge">{{ r.action }}</span></td><td>{{ r.details }}</td></tr>
+{% else %}<tr><td colspan="4" class="muted">Nothing matches these filters.</td></tr>{% endfor %}</table></div>
+{{ ls.pager(lst) }}
 {% endblock %}

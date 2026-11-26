@@ -449,8 +449,12 @@ def rpt_jobs(db, p):
 @bp.route("/")
 def index():
     from ..perms import can, report_area
-    cat = [(grp, [(k, t) for k, t in items if can(report_area(k))]) for grp, items in _catalog()]
-    return render_template("reports/index.html", catalog=[(grp, items) for grp, items in cat if items])
+    q = (request.args.get("q") or "").strip()
+    words = q.casefold().split()
+    cat = [(grp, [(k, t) for k, t in items if can(report_area(k))
+                  and all(w in f"{grp} {t} {k}".casefold() for w in words)]) for grp, items in _catalog()]
+    shown = [(grp, items) for grp, items in cat if items]
+    return render_template("reports/index.html", catalog=shown, q=q, count=sum(len(i) for _, i in shown))
 
 
 @bp.route("/<name>")

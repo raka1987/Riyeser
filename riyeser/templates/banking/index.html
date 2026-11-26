@@ -7,7 +7,7 @@
 <div class="card kpi"><div class="lbl">{{ a.code }} {{ a.name }}</div><div class="val {{ 'neg' if b < 0 }}">{{ b|money }}</div>
 <div class="note">{{ unrec.get(a.id, 0) }} unreconciled · {{ feed.get(a.id, 0) }} statement lines to allocate</div>
 <p><a href="{{ url_for('core.account_ledger', aid=a.id) }}">Register</a> · <a href="{{ url_for('banking.reconcile', account=a.id) }}">Reconcile</a> · <a href="{{ url_for('banking.feed', account=a.id) }}">Statement</a></p></div>{% endfor %}</div>
-<h2>Recent banking transactions</h2>
+<h2>Recent banking transactions <a class="btn sm" style="margin-left:8px;vertical-align:middle" href="{{ url_for('core.journal_list', source='banking', period='', year='') }}">See all, sort and filter</a></h2>
 <div class="tbl"><table><tr><th>ID</th><th>Date</th><th>Type</th><th>Memo</th><th class="n">Amount</th></tr>
 {% for e in recent %}<tr class="click" data-href="{{ url_for('core.entry', eid=e.id) }}"><td>#{{ e.id }}</td><td>{{ e.date }}</td><td><span class="badge">{{ e.source_type }}</span>{% if e.voided %} <span class="badge void">reversed</span>{% endif %}</td><td>{{ e.memo }}</td><td class="n">{{ e.amt|money }}</td></tr>{% endfor %}</table></div>
 {% endblock %}

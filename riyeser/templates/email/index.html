@@ -1,4 +1,5 @@
 {% extends "base.html" %}{% block title %}Email{% endblock %}
+{% import "_list.html" as ls %}
 {% block content %}
 <div class="head"><div><h1>Email</h1><p class="sub">Invoices, quotes, statements and booking reminders are sent from your own email account.</p></div></div>
 <form method="post" class="card"><h3>Your email server (SMTP)</h3><div class="fields">
@@ -12,7 +13,9 @@
 <button class="btn pri">Save</button></form>
 {% if ready %}<form method="post" action="{{ url_for('email.test') }}" class="card"><label for="test-to">Send a test email to</label><input id="test-to" name="to" value="{{ company.email or '' }}"> <button class="btn">Send test</button></form>{% endif %}
 <h2>Outbox</h2><form method="post" action="{{ url_for('email.send_now') }}"><button class="btn sm">Send what's waiting</button></form>
-<div class="tbl"><table><tr><th>When</th><th>To</th><th>Subject</th><th>Status</th><th>Why not sent</th></tr>
+{{ ls.bar(lst) }}
+<div class="tbl"><table><tr>{{ ls.th(lst, 'at') }}{{ ls.th(lst, 'to_addr') }}{{ ls.th(lst, 'subject') }}{{ ls.th(lst, 'status') }}{{ ls.th(lst, 'error') }}</tr>
 {% for r in rows %}<tr><td>{{ r.sent_at or r.created_at }}</td><td>{{ r.to_addr }}</td><td>{{ r.subject }}</td><td><span class="badge {{ 'paid' if r.status == 'sent' else 'void' if r.status == 'failed' else '' }}">{{ r.status }}</span></td><td class="muted">{{ r.error or '' }}</td></tr>
-{% else %}<tr><td colspan="5" class="muted">Nothing sent yet.</td></tr>{% endfor %}</table></div>
+{% else %}<tr><td colspan="5" class="muted">{{ 'Nothing matches these filters.' if lst.filtered else 'Nothing sent yet.' }}</td></tr>{% endfor %}</table></div>
+{{ ls.pager(lst) }}
 {% endblock %}

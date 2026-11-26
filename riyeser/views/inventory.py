@@ -11,14 +11,33 @@ from . import lookups, opt_int, opt_float, guarded
 bp = Blueprint("inventory", __name__, url_prefix="/inventory")
 
 
+def items_spec(categories):
+    from ..listing import ListSpec, Col, Choice
+    return ListSpec("items", [
+        Col("sku", "SKU", "code"), Col("name", "Name"), Col("category", "Category"), Col("type", "Type"),
+        Col("qty_on_hand", "On hand", "num", sql="CASE WHEN is_inventoried THEN qty_on_hand END"),
+        Col("avg_cost", "Avg cost", "num", sql="CASE WHEN is_inventoried THEN avg_cost END"),
+        Col("sell_price", "Sell price", "num"), Col("value", "Value", "num")],
+        sort="sku", search=("sku", "name", "category", "barcodes", "description"), search_hint="SKU, name, category or barcode",
+        lead="active DESC", tiebreak="sku", noun="items", choices=[
+            Choice("cat", "Category", [(c, c) for c in categories] + [("-", "(No category)")],
+                   where=lambda v, t: (" AND COALESCE(category,'')=''", []) if v == "-" else (" AND category=?", [v])),
+            Choice("type", "Type", [("Stock", "Stock"), ("Non-stock", "Non-stock")]),
+            Choice("st", "Status", [("active", "Active"), ("inactive", "Inactive"), ("reorder", "At or below reorder level")],
+                   where={"active": (" AND active=1", []), "inactive": (" AND active=0", []),
+                          "reorder": (" AND is_inventoried=1 AND qty_on_hand<=reorder_level", [])})])
+
+
 @bp.route("/")
 def index():
     db = get_db()
-    q = request.args.get("q", "")
-    rows = db.execute("SELECT * FROM items WHERE sku LIKE ? OR name LIKE ? ORDER BY active DESC, sku",
-                      (f"%{q}%", f"%{q}%")).fetchall()
-    value = sum(r["qty_on_hand"] * r["avg_cost"] for r in rows if r["is_inventoried"])
-    return render_template("inventory/index.html", rows=rows, q=q, value=value)
+    from ..listing import from_request
+    cats = [r[0] for r in db.execute("SELECT DISTINCT category FROM items WHERE COALESCE(category,'')<>''"
+                                     " ORDER BY category COLLATE NOCASE")]
+    lst = from_request(items_spec(cats))
+    rows = lst.fetch(db, "SELECT *, CASE WHEN is_inventoried THEN 'Stock' ELSE 'Non-stock' END type,"
+                         " CASE WHEN is_inventoried THEN qty_on_hand*avg_cost END value FROM items", sums=("value",))
+    return render_template("inventory/index.html", rows=rows, q=lst.q, value=lst.sums["value"], lst=lst)
 
 
 @bp.route("/new", methods=["GET", "POST"])

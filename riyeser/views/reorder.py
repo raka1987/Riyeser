@@ -80,7 +80,22 @@ def low():
     db = get_db()
     rows = low_stock(db)
     suppliers = db.execute("SELECT id, name FROM contacts WHERE kind='supplier' AND active=1 ORDER BY name").fetchall()
-    return render_template("inventory/low.html", rows=rows, suppliers=suppliers, can_order=_can_order())
+    names = {s["id"]: s["name"] for s in suppliers}
+    for r in rows:
+        r["sup_name"] = names.get(r["order_supplier"]) or r["supplier_name"] or ""
+    from ..listing import ListSpec, Col, Choice, from_request
+    cats = sorted({r["category"] for r in rows if r.get("category")}, key=str.casefold)
+    lst = from_request(ListSpec("low_stock", [
+        Col("sku", "Item", "code"), Col("name", "Name"), Col("qty_on_hand", "On hand", "num"),
+        Col("reorder_level", "Reorder level", "num"), Col("on_order", "On order", "num"),
+        Col("suggested", "Order qty", "num"), Col("sup_name", "Supplier")],
+        sort="sku", search=("sku", "name", "category", "sup_name"), search_hint="Item, category or supplier",
+        per_page=None, noun="items", choices=[
+            Choice("cat", "Category", [(c, c) for c in cats], col="category"),
+            Choice("sup", "Supplier", [(str(s["id"]), s["name"]) for s in suppliers] + [("-", "(No supplier)")],
+                   test=lambda r, v, t: (not r["order_supplier"]) if v == "-" else str(r["order_supplier"]) == v)]))
+    rows = lst.apply(rows)
+    return render_template("inventory/low.html", rows=rows, suppliers=suppliers, can_order=_can_order(), lst=lst)
 
 
 @bp.route("/low-stock/order", methods=["GET", "POST"])

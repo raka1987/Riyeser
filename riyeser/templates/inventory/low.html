@@ -1,4 +1,5 @@
 {% extends "base.html" %}{% block title %}Low stock{% endblock %}
+{% import "_list.html" as ls %}
 {% block content %}
 <style>
 .low-tbl input.q{width:80px;text-align:right}.low-tbl select{min-width:170px}
@@ -18,12 +19,14 @@
 before ordering.</p></div>
 <div class="actions"><a class="btn" href="{{ url_for('documents.index', side='purchase', status='order') }}">Purchase orders</a>
 <a class="btn" href="{{ url_for('inventory.index') }}">All stock items</a></div></div>
-{% if not rows %}<div class="card"><p style="margin:0">Nothing is low on stock right now. Set a <b>reorder level</b> on each item
+{% if lst.total %}{{ ls.bar(lst) }}{% endif %}
+{% if not rows and lst.total %}<div class="card"><p style="margin:0">Nothing matches these filters. <a href="{{ lst.clear_url() }}">Clear filters</a></p></div>
+{% elif not rows %}<div class="card"><p style="margin:0">Nothing is low on stock right now. Set a <b>reorder level</b> on each item
 (Edit the item) to have it show here when it runs low.</p></div>
 {% else %}
 <form method="post" action="{{ url_for('inventory.order') }}">
 <div class="tbl low-tbl"><table>
-<tr class="hd"><th>Order</th><th>Item</th><th class="n">On hand</th><th class="n">Reorder level</th><th class="n">On order</th><th class="n">Order qty</th><th>Supplier</th></tr>
+<tr class="hd"><th>Order</th>{{ ls.th(lst, 'sku') }}{{ ls.th(lst, 'qty_on_hand', cls='n') }}{{ ls.th(lst, 'reorder_level', cls='n') }}{{ ls.th(lst, 'on_order', cls='n') }}{{ ls.th(lst, 'suggested', cls='n') }}{{ ls.th(lst, 'sup_name') }}</tr>
 {% for i in rows %}<tr>
 <td>{% if can_order %}<label class="check"><input type="checkbox" name="pick" value="{{ i.id }}" {{ 'checked' if i.suggested > 0 }} aria-label="Order {{ i.name }}"> <span class="muted" style="font-size:12.5px">Order</span></label>{% endif %}</td>
 <td><a href="{{ url_for('inventory.view', iid=i.id) }}"><b>{{ i.sku }}</b> {{ i.name }}</a>{% if i.on_order and not i.suggested %}<span class="why">Enough is already on order.</span>{% endif %}</td>

@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block title %}{{ L.title }}{% endblock %}
 {% from "_macros.html" import status as st %}
+{% import "_list.html" as ls %}
 {% block content %}
 <style>.qfilter{display:flex;gap:6px;flex-wrap:wrap}</style>
 <div class="head"><div><h1>{{ L.title }} Register</h1></div>
@@ -13,11 +14,11 @@
 <a class="{{ 'on' if status==k }}" href="{{ url_for('documents.index', side=side, status=k) }}">{{ v }}</a>{% endfor %}</div>
 {% if side == 'sale' and status == 'quote' %}<div class="qfilter" role="group" aria-label="Show quotes">{% for k, v in [('', 'All quotes')] + quote_filters %}<a class="btn sm{{ ' pri' if qs == k }}" href="{{ url_for('documents.index', side=side, status='quote', qs=k or None, q=q or None) }}">{{ v }}</a>{% endfor %}</div>
 <p class="muted" style="font-size:13px;margin:6px 0 12px">Waiting: sent, no answer yet. Expired: no answer and past its "valid until" date. Open a quote to mark it accepted or declined.</p>{% endif %}
-<form class="filters"><input type="hidden" name="status" value="{{ status }}">{% if qs %}<input type="hidden" name="qs" value="{{ qs }}">{% endif %}<div><label>Search</label><input name="q" value="{{ q }}" placeholder="Number or {{ L.contact|lower }}"></div><div><button class="btn">Search</button></div></form>
-<div class="tbl"><table><tr><th>Number</th><th>Date</th><th>{{ L.contact }}</th><th>Reference</th><th>{{ 'Valid until' if side == 'sale' and status == 'quote' else 'Due' }}</th><th>Status</th><th class="n">Total</th><th class="n">Balance due</th></tr>
+{{ ls.bar(lst) }}
+<div class="tbl"><table><tr>{{ ls.th(lst, 'number') }}{{ ls.th(lst, 'date') }}{{ ls.th(lst, 'cname') }}{{ ls.th(lst, 'reference') }}{{ ls.th(lst, 'due_on') }}{{ ls.th(lst, 'status') }}{{ ls.th(lst, 'total', cls='n') }}{{ ls.th(lst, 'balance', cls='n') }}</tr>
 {% for d in rows %}<tr class="click" data-href="{{ url_for('documents.view', doc_id=d.id) }}"><td><b>{{ d.number }}</b></td><td>{{ d.date }}</td><td>{{ d.cname }}</td><td>{{ d.reference or '' }}</td>
-<td>{{ (d.valid_until if side == 'sale' and status == 'quote' else d.due_date) or '' }}</td><td>{{ st(d, today) }}</td><td class="n">{{ d.total|money }}</td><td class="n">{{ (d.total-d.amount_paid)|money0 if d.status=='open' }}</td></tr>
-{% else %}<tr><td colspan="8" class="muted">Nothing here.</td></tr>{% endfor %}
-{% if capped %}<tr><td colspan="8" class="muted">Showing the latest 500. Search for a number or {{ L.contact|lower }} to see older ones.</td></tr>{% endif %}
-{% if rows %}<tr class="grand"><td colspan="6">{{ rows|length }} documents</td><td class="n">{{ rows|sum(attribute='total')|money }}</td><td></td></tr>{% endif %}</table></div>
+<td>{{ d.due_on or '' }}</td><td>{{ st(d, today) }}</td><td class="n">{{ d.total|money }}</td><td class="n">{{ d.balance|money0 if d.status=='open' }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">{{ 'Nothing matches these filters.' if lst.filtered else 'Nothing here.' }}</td></tr>{% endfor %}
+{% if rows %}<tr class="grand"><td colspan="6">{{ lst.shown }} document{{ '' if lst.shown == 1 else 's' }}{% if lst.pages > 1 %} (all pages){% endif %}</td><td class="n">{{ lst.sums.total|money }}</td><td class="n">{{ lst.sums.balance|money0 }}</td></tr>{% endif %}</table></div>
+{{ ls.pager(lst) }}
 {% endblock %}

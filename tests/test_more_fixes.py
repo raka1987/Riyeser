@@ -838,7 +838,8 @@ def test_m22_long_lists_say_they_stop_at_500(client, app, monkeypatch):
             db.execute("INSERT INTO documents (side, status, number, contact_id, date) VALUES ('sale','open',?,?,'2026-11-01')",
                        (f"X{i}", cust))
         db.commit()
-    assert "Showing the latest 500" in page(client.get("/sale/list"))
+    lst = page(client.get("/sale/list"))  # long lists now come a page at a time (riyeser/listing.py)
+    assert "1–100 of 501" in lst and "Page 1 of 6" in lst and "Next ›" in lst
 
 
 def test_m23_m24_duplicate_codes_and_journal_and_bank_account_checks(client, app):

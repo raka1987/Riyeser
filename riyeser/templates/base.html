@@ -5,6 +5,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{{ product.title }}{% endblock %} · {{ product.app }}</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='lists.css') }}">
 </head>
 <body class="{{ product.cls }}">
 {% set ep = request.endpoint or '' %}
@@ -114,5 +115,6 @@
 <div class="scrim" onclick="document.body.classList.remove('side-open')"></div>
 {% block scripts %}{% endblock %}
 <script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='lists.js') }}"></script>
 </body>
 </html>

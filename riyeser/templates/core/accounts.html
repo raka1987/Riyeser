@@ -1,16 +1,18 @@
 {% extends "base.html" %}{% block title %}Chart of Accounts{% endblock %}
 {% from "_macros.html" import tax_select %}
+{% import "_list.html" as ls %}
 {% block content %}
 <div class="head"><div><h1>Chart of Accounts</h1><p class="sub">Balances include all posted transactions to date.</p></div></div>
 <div class="tabs">{% for k, v in TYPE_LABELS.items() %}<a href="#{{ k }}">{{ v }}</a>{% endfor %}</div>
-<div class="tbl"><table><tr><th>Code</th><th>Name</th><th>Type</th><th>Tax</th><th class="n">Balance</th><th></th></tr>
-{% for t, lbl in TYPE_LABELS.items() %}<tr class="header" id="{{ t }}"><td colspan="6">{{ lbl }}</td></tr>
-{% for a in rows if a.type == t %}
-{% set b = bal.get(a.id, 0) %}{% set b = -b if t in ('liability','equity','income','other_income') else b %}
+{{ ls.bar(lst) }}
+<div class="tbl"><table><tr>{{ ls.th(lst, 'code') }}{{ ls.th(lst, 'name') }}<th>Type</th>{{ ls.th(lst, 'tcode') }}{{ ls.th(lst, 'balance', cls='n') }}<th></th></tr>
+{% for t, lbl in TYPE_LABELS.items() %}{% set here = rows|selectattr('type', 'equalto', t)|list %}{% if here or not lst.filtered %}<tr class="header" id="{{ t }}"><td colspan="6">{{ lbl }}</td></tr>{% endif %}
+{% for a in here %}
+{% set b = a.balance %}
 <tr class="click {{ 'muted' if not a.active }}" data-href="{{ url_for('core.account_ledger', aid=a.id) }}"><td>{{ a.code }}</td><td>{{ a.name }}{% if a.is_bank %} <span class="badge">bank</span>{% endif %}{% if not a.active %} <span class="badge">inactive</span>{% endif %}</td>
 <td>{{ lbl }}</td><td>{{ a.tcode or '' }}</td><td class="n">{{ b|money }}</td>
 <td><button class="btn sm" onclick='editAcct({{ {"id":a.id,"code":a.code,"name":a.name,"type":a.type,"is_bank":a.is_bank,"tax":a.tax_code_id,"desc":a.description or "","active":a.active}|tojson }})'>Edit</button></td></tr>
-{% endfor %}{% endfor %}</table></div>
+{% endfor %}{% endfor %}{% if not rows %}<tr><td colspan="6" class="muted">Nothing matches these filters.</td></tr>{% endif %}</table></div>
 <div class="card" style="margin-top:18px" id="acct-form"><h3 id="af-title">New account</h3>
 <form method="post" action="{{ url_for('core.save_account') }}" class="fields">
 <input type="hidden" name="id" id="af-id">

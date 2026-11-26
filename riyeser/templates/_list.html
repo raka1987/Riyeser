@@ -1,0 +1,46 @@
+{# Sorting and filtering for list screens (riyeser/listing.py). One look on every list. #}
+
+{# A column header you can click to sort by. #}
+{% macro th(lst, key, label=None, cls='') -%}
+{% set c = lst.spec.col(key) %}{% set on = lst.sort == key %}
+<th class="sortable{{ ' ' ~ cls if cls }}{{ ' sorted' if on }}" aria-sort="{{ lst.aria_sort(key) }}"><a href="{{ lst.sort_url(key) }}" title="Sort by {{ (label or c.label)|lower }}">{{ label or c.label }}<span class="sort-ar" aria-hidden="true">{% if on %}{{ '▼' if lst.dir == 'desc' else '▲' }}{% else %}↕{% endif %}</span></a></th>
+{%- endmacro %}
+
+{# The filter bar: search, Year, Period (with custom dates), the list's own choices, Clear filters and the count.
+   sort_select: a Sort drop-down too, for lists shown as cards rather than a table ('phone': only on a phone,
+   where the list turns into cards and the headers are gone). #}
+{% macro bar(lst, sort_select=False, noun=None) -%}
+{% set s = lst.spec %}{% set P = s.prefix %}
+<form class="lbar" method="get" role="search" aria-label="Filter this list" data-lbar>
+  {% for k, v in lst.hidden().items() %}{% if not (sort_select and k in (P ~ 'sort', P ~ 'dir')) %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+  {% if s.search %}<div class="lf lf-q"><label for="{{ P }}lq">Search</label><input id="{{ P }}lq" type="search" name="{{ P }}q" value="{{ lst.q }}" placeholder="{{ s.search_hint }}"></div>{% endif %}
+  {% if s.date_col %}
+  <div class="lf"><label for="{{ P }}ly">Year</label><select id="{{ P }}ly" name="{{ P }}year" data-auto data-year>
+    <option value="">All years</option>
+    {% for grp, opts in lst.years() %}<optgroup label="{{ grp }}">{% for v, t in opts %}<option value="{{ v }}" {{ 'selected' if lst.year == v }}>{{ t }}</option>{% endfor %}</optgroup>{% endfor %}
+  </select></div>
+  <div class="lf"><label for="{{ P }}lp">Period</label><select id="{{ P }}lp" name="{{ P }}period" data-auto data-period>
+    <option value="">Any time</option>
+    {% for v, t in lst.periods %}<option value="{{ v }}" {{ 'selected' if lst.period == v }}>{{ t }}</option>{% endfor %}
+  </select></div>
+  <div class="lf lf-d" data-custom {{ 'hidden' if lst.period != 'custom' }}><label for="{{ P }}lfrom">From</label><input id="{{ P }}lfrom" type="date" name="{{ s.p('from') }}" value="{{ lst.dfrom or '' }}"></div>
+  <div class="lf lf-d" data-custom {{ 'hidden' if lst.period != 'custom' }}><label for="{{ P }}lto">To</label><input id="{{ P }}lto" type="date" name="{{ s.p('to') }}" value="{{ lst.dto or '' }}"></div>
+  {% endif %}
+  {% for ch in s.choices %}<div class="lf"><label for="{{ P }}lc-{{ ch.param }}">{{ ch.label }}</label><select id="{{ P }}lc-{{ ch.param }}" name="{{ P }}{{ ch.param }}" data-auto>
+    <option value="">{{ ch.all_label }}</option>{% for v, t in ch.options %}<option value="{{ v }}" {{ 'selected' if lst.choice[ch.param] == v|string }}>{{ t }}</option>{% endfor %}</select></div>{% endfor %}
+  {% if sort_select %}{% set ph = ' lf-phone' if sort_select == 'phone' else '' %}<div class="lf{{ ph }}"><label for="{{ P }}ls">Sort by</label><select id="{{ P }}ls" name="{{ P }}sort" data-auto>{% for k, t in lst.sort_options %}<option value="{{ k }}" {{ 'selected' if lst.sort == k }}>{{ t }}</option>{% endfor %}</select></div>
+  <div class="lf{{ ph }}"><label for="{{ P }}ld">Order</label><select id="{{ P }}ld" name="{{ P }}dir" data-auto><option value="asc" {{ 'selected' if lst.dir == 'asc' }}>A–Z, oldest, smallest first</option><option value="desc" {{ 'selected' if lst.dir == 'desc' }}>Z–A, newest, biggest first</option></select></div>{% endif %}
+  <div class="lf lf-go"><button class="btn">Apply</button>{% if lst.filtered %} <a class="btn lclear" href="{{ lst.clear_url() }}">Clear filters</a>{% endif %}</div>
+  <div class="lcount" role="status" aria-live="polite"><b>{{ lst.shown }}</b> of {{ lst.total }} {{ noun or s.noun }}</div>
+</form>
+{%- endmacro %}
+
+{# Pages, under the table. #}
+{% macro pager(lst) -%}
+{% if lst.pages > 1 %}<nav class="lpager" aria-label="Pages">
+<span class="muted">{{ lst.page_from }}–{{ lst.page_to }} of {{ lst.shown }}</span>
+{% if lst.page > 1 %}<a class="btn sm" href="{{ lst.url(page=lst.page - 1) }}" rel="prev">‹ Previous</a>{% endif %}
+<span>Page {{ lst.page }} of {{ lst.pages }}</span>
+{% if lst.page < lst.pages %}<a class="btn sm" href="{{ lst.url(page=lst.page + 1) }}" rel="next">Next ›</a>{% endif %}
+</nav>{% endif %}
+{%- endmacro %}

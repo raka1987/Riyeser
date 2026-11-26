@@ -38,7 +38,7 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
 <div class="today">
   <div class="h1"><div><h1>{{ 'Today' if day == today() else 'Sales' }}</h1><p>{{ day_label }} · {{ company.name }}</p></div>
     <form method="get"><input type="date" name="date" value="{{ day }}" aria-label="Day"><button class="btn sm">Show</button>
-      <button type="button" class="btn sm" onclick="print()">Print summary</button><a class="btn sm" href="{{ url_for('help.index') }}#pos">Help</a></form></div>
+      <button type="button" class="btn sm" onclick="print()">Print summary</button><a class="btn sm" href="{{ url_for('pos.sales_history') }}">All sales</a><a class="btn sm" href="{{ url_for('help.index') }}#pos">Help</a></form></div>
   <div class="k4">
     <div class="card kpi"><span class="bx"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span><div><div class="lbl">Sales inc GST</div><div class="v n">{{ total|money }}</div><div class="nt">After refunds; voided sales left out</div></div></div>
     <div class="card kpi"><span class="bx" style="background:#eaf1ff;color:#2563eb"><svg class="ic" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></svg></span><div><div class="lbl">Sales</div><div class="v n">{{ count }}</div><div class="nt">{% if count %}Average {{ (total // count)|money }}{% else %}None yet{% endif %}</div></div></div>

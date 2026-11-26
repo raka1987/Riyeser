@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Riyeser POS{% endblock %} · {{ 'Riyeser POS' if product.key == 'pos' else company.name }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='lists.css') }}">
 <style>
 /* Riyeser POS: one look for every till screen (green design) */
 :root{--bg:#f3f6fa;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--line2:#cbd5e1;--navy:#1f4e86;--navy-d:#0f2742;
@@ -173,5 +174,6 @@ window.requestApproval=(function(){
 </script>
 {% endif %}
 {% block scripts %}{% endblock %}
+<script src="{{ url_for('static', filename='lists.js') }}"></script>
 </body>
 </html>

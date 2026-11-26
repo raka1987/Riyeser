@@ -24,15 +24,49 @@ def _side(side):
     return LABELS[side]
 
 
+DOC_STATUS = {
+    "open": [("overdue", "Overdue"), ("not_due", "Not yet due")],
+    "all": [("open", "Open"), ("overdue", "Overdue"), ("paid", "Paid"), ("void", "Void"), ("quote", "Quote"),
+            ("order", "Order")],
+}
+_DOC_STATUS_SQL = {
+    "overdue": (" AND status='open' AND due_date < ?", True), "not_due": (" AND (due_date IS NULL OR due_date >= ?)", True),
+    "open": (" AND status='open'", False), "paid": (" AND status='paid'", False), "void": (" AND status='void'", False),
+    "quote": (" AND status='quote'", False), "order": (" AND status='order'", False),
+}
+
+
+def _doc_status_sql(v, today):
+    sql, dated = _DOC_STATUS_SQL[v]
+    return sql, ([today] if dated else [])
+
+
+def register_spec(side, status):
+    """The Sales / Purchases register as a sortable, filterable list (riyeser/listing.py)."""
+    from ..listing import ListSpec, Col, Choice
+    L = LABELS[side]
+    due = "Valid until" if side == "sale" and status == "quote" else "Due"
+    choices = [Choice("st", "Status", DOC_STATUS[status], where=_doc_status_sql)] if status in DOC_STATUS else []
+    return ListSpec(f"docs:{side}:{status}", [
+        Col("number", "Number", "code"), Col("date", "Date", "date"), Col("cname", L["contact"]),
+        Col("reference", "Reference"), Col("due_on", due, "date"), Col("status", "Status"),
+        Col("total", "Total", "num"), Col("balance", "Balance due", "num")],
+        sort="date", dir="desc", date_col="date", search=("number", "cname", "reference"),
+        search_hint=f"Number, {L['contact'].lower()} or reference", choices=choices, noun="documents")
+
+
 @bp.route("/<side>/list")
 def index(side):
     L = _side(side)
     db = get_db()
     status = request.args.get("status", "open")
-    q = request.args.get("q", "")
-    sql = ("SELECT d.*, c.name cname, (SELECT SUM(qty_received) FROM document_lines x WHERE x.document_id=d.id) recv"
-           " FROM documents d JOIN contacts c ON c.id=d.contact_id WHERE d.side=? AND (c.name LIKE ? OR d.number LIKE ?)")
-    p = [side, f"%{q}%", f"%{q}%"]
+    if status not in ("open", "quote", "order", "paid", "void", "all"):
+        status = "open"
+    sql = ("SELECT d.*, c.name cname, (SELECT SUM(qty_received) FROM document_lines x WHERE x.document_id=d.id) recv,"
+           " CASE WHEN d.status='open' THEN d.total-d.amount_paid ELSE 0 END balance,"
+           " CASE WHEN d.status='quote' AND d.side='sale' THEN d.valid_until ELSE d.due_date END due_on"
+           " FROM documents d JOIN contacts c ON c.id=d.contact_id WHERE d.side=?")
+    p = [side]
     if status != "all":
         sql += " AND d.status=?"; p.append(status)
     if status == "order":
@@ -42,10 +76,11 @@ def index(side):
         from .quotes import filter_sql
         more, args = filter_sql(qs, date.today().isoformat())
         sql += more; p += args
-    sql += " ORDER BY d.date DESC, d.id DESC LIMIT 500"
-    rows = db.execute(sql, p).fetchall()
+    from ..listing import from_request
+    lst = from_request(register_spec(side, status), keep=dict(status=status, qs=qs))
+    rows = lst.fetch(db, sql, p, sums=("total", "balance"))
     from .quotes import FILTERS
-    return render_template("documents/index.html", rows=rows, side=side, L=L, status=status, q=q, capped=len(rows) >= 500,
+    return render_template("documents/index.html", rows=rows, side=side, L=L, status=status, q=lst.q, lst=lst,
                            today=date.today().isoformat(), qs=qs, quote_filters=FILTERS)
 
 
@@ -393,12 +428,23 @@ def credit_refund(cid):
 @bp.route("/<side>/payments")
 def payments(side):
     L = _side(side)
-    rows = get_db().execute(
-        "SELECT p.*, c.name cname, a.name bank FROM payments p JOIN contacts c ON c.id=p.contact_id"
-        " JOIN accounts a ON a.id=p.bank_account_id WHERE p.direction=? ORDER BY p.date DESC, p.id DESC LIMIT 500",
-        ("in" if side == "sale" else "out",)).fetchall()
+    db = get_db()
+    from ..listing import ListSpec, Col, Choice, from_request
+    banks = [(str(r["id"]), r["name"]) for r in db.execute("SELECT id, name FROM accounts WHERE is_bank=1 ORDER BY code")]
+    spec = ListSpec(f"payments:{side}", [
+        Col("date", "Date", "date"), Col("cname", L["contact"]), Col("bank", "Bank"), Col("reference", "Reference"),
+        Col("memo", "Memo"), Col("amount", "Amount", "num")],
+        sort="date", dir="desc", date_col="date", search=("cname", "reference", "memo"),
+        search_hint=f"{L['contact']}, reference or memo", noun="payments", choices=[
+            Choice("bank_id", "Bank account", banks, col="bank_account_id"),
+            Choice("st", "Status", [("ok", "Not voided"), ("void", "Voided")],
+                   where={"ok": (" AND voided=0", []), "void": (" AND voided=1", [])})])
+    lst = from_request(spec)
+    rows = lst.fetch(db, "SELECT p.*, c.name cname, a.name bank FROM payments p JOIN contacts c ON c.id=p.contact_id"
+                         " JOIN accounts a ON a.id=p.bank_account_id WHERE p.direction=?",
+                     ("in" if side == "sale" else "out",), sums=("CASE WHEN voided=0 THEN amount ELSE 0 END",))
     return render_template("documents/payments.html", rows=rows, side=side, L=L, hl=opt_int(request.args.get("hl")),
-                           capped=len(rows) >= 500)
+                           lst=lst, paid=lst.sums["CASE WHEN voided=0 THEN amount ELSE 0 END"])
 
 
 @bp.route("/payment/<int:pid>/void", methods=["POST"])

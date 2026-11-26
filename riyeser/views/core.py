@@ -73,9 +73,23 @@ def overview():
 def accounts():
     db = get_db()
     bal = balances(db)
-    rows = db.execute("SELECT a.*, t.code tcode FROM accounts a LEFT JOIN tax_codes t ON t.id=a.tax_code_id"
-                      " ORDER BY a.code").fetchall()
-    return render_template("core/accounts.html", rows=rows, bal=bal, **lookups(db))
+    credit = ("liability", "equity", "income", "other_income")
+    rows = [dict(r, balance=(-1 if r["type"] in credit else 1) * bal.get(r["id"], 0)) for r in db.execute(
+        "SELECT a.*, t.code tcode FROM accounts a LEFT JOIN tax_codes t ON t.id=a.tax_code_id ORDER BY a.code")]
+    from ..listing import ListSpec, Col, Choice, from_request
+    from flask import current_app
+    types = current_app.jinja_env.globals["TYPE_LABELS"]
+    lst = from_request(ListSpec("accounts", [
+        Col("code", "Code"), Col("name", "Name"), Col("tcode", "Tax"), Col("balance", "Balance", "num")],
+        sort="code", per_page=None, search=("code", "name", "description"), search_hint="Code or name",
+        noun="accounts", choices=[
+            Choice("type", "Type", list(types.items())),
+            Choice("st", "Status", [("active", "Active"), ("inactive", "Inactive"), ("bank", "Bank accounts"),
+                                    ("moved", "With a balance")],
+                   test=lambda r, v, t: {"active": bool(r["active"]), "inactive": not r["active"],
+                                         "bank": bool(r["is_bank"]), "moved": bool(r["balance"])}[v])]))
+    rows = lst.apply(rows)
+    return render_template("core/accounts.html", rows=rows, bal=bal, lst=lst, **lookups(db))
 
 
 @bp.route("/accounts/save", methods=["POST"])
@@ -140,24 +154,35 @@ def account_ledger(aid):
 
 
 # ------------------------------------------------------------------ general journal
+SOURCES = ['journal', 'invoice', 'bill', 'receipt', 'payment', 'spend', 'receive', 'transfer', 'payrun',
+           'payroll_import', 'stock_adj', 'reversal']
+BANKING_SOURCES = ('spend', 'receive', 'transfer')
+
+
+def _source_sql(v, today):
+    if v == "banking":
+        return f" AND source_type IN {BANKING_SOURCES!r}", []
+    return " AND source_type=?", [v]
+
+
 @bp.route("/journal")
 def journal_list():
     db = get_db()
-    q = request.args.get("q", "").strip()
-    src = request.args.get("source", "")
-    sql = "SELECT e.*, (SELECT SUM(debit) FROM journal_lines WHERE entry_id=e.id) amt FROM journal_entries e WHERE 1=1" + _hide_payroll_sql()
-    p = []
-    if q:
-        sql += " AND (e.memo LIKE ? OR e.reference LIKE ? OR e.id = ?)"
-        p += [f"%{q}%", f"%{q}%", opt_int(q) or -1]
-    if src:
-        sql += " AND e.source_type=?"; p.append(src)
-    if request.args.get("start"):
-        sql += " AND e.date>=?"; p.append(request.args["start"])
-    if request.args.get("end"):
-        sql += " AND e.date<=?"; p.append(request.args["end"])
-    sql += " ORDER BY e.date DESC, e.id DESC LIMIT 300"
-    return render_template("core/journal_list.html", rows=db.execute(sql, p).fetchall(), q=q, src=src)
+    from ..listing import ListSpec, Col, Choice, from_request
+    srcs = [s for s in SOURCES if can("payroll") or s not in ("payrun", "payroll_import")]
+    lst = from_request(ListSpec("journal", [
+        Col("id", "ID", "num"), Col("date", "Date", "date"), Col("source_type", "Source"), Col("reference", "Reference"),
+        Col("memo", "Memo"), Col("amt", "Amount", "num")],
+        sort="date", dir="desc", date_col="date", search=("memo", "reference", "CAST(id AS TEXT)"),
+        search_hint="Memo, reference or ID", from_param="start", to_param="end", noun="entries", choices=[
+            Choice("source", "Source", [("banking", "Banking (money in, out, transfers)")] + [(s, s) for s in srcs],
+                   where=_source_sql),
+            Choice("rev", "Status", [("posted", "Not reversed"), ("reversed", "Reversed")],
+                   where={"posted": (" AND COALESCE(voided,0)=0", []), "reversed": (" AND voided=1", [])})]))
+    sql = ("SELECT e.*, (SELECT SUM(debit) FROM journal_lines WHERE entry_id=e.id) amt FROM journal_entries e WHERE 1=1"
+           + _hide_payroll_sql())
+    rows = lst.fetch(db, sql)
+    return render_template("core/journal_list.html", rows=rows, q=lst.q, src=lst.choice["source"], lst=lst)
 
 
 @bp.route("/journal/new", methods=["GET", "POST"])
@@ -381,7 +406,17 @@ def _save_budgets(months, year):
 
 @bp.route("/setup/audit")
 def audit_log():
+    db = get_db()
     hide = "" if can("payroll") else (" WHERE a.action NOT IN ('payrun','void_payrun','save_employee','payroll_import')")
-    rows = get_db().execute("SELECT a.*, u.username FROM audit_log a LEFT JOIN users u ON u.id=a.user_id" + hide +
-                            " ORDER BY a.id DESC LIMIT 500").fetchall()
-    return render_template("core/audit.html", rows=rows)
+    base = "SELECT a.*, COALESCE(u.username, 'system') username FROM audit_log a LEFT JOIN users u ON u.id=a.user_id" + hide
+    from ..listing import ListSpec, Col, Choice, from_request
+    users = [r[0] for r in db.execute(f"SELECT DISTINCT username FROM ({base}) ORDER BY username COLLATE NOCASE")]
+    actions = [r[0] for r in db.execute(f"SELECT DISTINCT action FROM ({base}) ORDER BY action")]
+    lst = from_request(ListSpec("audit", [
+        Col("at", "When (UTC)", "date", sql="at"), Col("username", "User"), Col("action", "Action"),
+        Col("details", "Details")],
+        sort="at", dir="desc", date_col="at", search=("details", "action", "username"), search_hint="Words in the details",
+        noun="actions", choices=[Choice("user", "User", [(u, u) for u in users], col="username"),
+                                 Choice("action", "Action", [(x, x) for x in actions])]))
+    rows = lst.fetch(db, base)
+    return render_template("core/audit.html", rows=rows, lst=lst)

@@ -1,0 +1,30 @@
+/* List screens: sortable headers, the filter bar and the pager (templates/_list.html). Works in both the
+   office look (app.css) and the till look (pos/_pos.html), so it only uses colours both define. */
+.lbar{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;margin:0 0 14px}
+.lbar .lf{display:flex;flex-direction:column;min-width:0;flex:0 1 150px}
+.lbar .lf-q{flex:1 1 200px;max-width:300px}
+.lbar .lf-d{flex:0 1 150px}
+.lbar .lf[hidden]{display:none}
+.lbar .lf-phone{display:none}
+.lbar label{display:block;font-size:12.5px;color:#475467;font-weight:500;margin:0 0 4px}
+.lbar input,.lbar select{width:100%;min-width:0;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;background:#fff;color:inherit}
+.lbar .lf-go{flex:0 0 auto;flex-direction:row;gap:8px;align-items:center}
+.lbar .lcount{margin-left:auto;align-self:center;color:var(--muted);font-size:13px;white-space:nowrap;padding-bottom:2px}
+.lbar .lcount b{color:var(--ink)}
+th.sortable{padding:0}
+th.sortable a{display:flex;align-items:center;gap:4px;padding:8px 10px;color:inherit;text-decoration:none;white-space:nowrap}
+th.sortable.n a,th.sortable.r a{justify-content:flex-end}
+th.sortable a:hover{color:var(--ink);text-decoration:none;background:rgba(15,23,42,.04)}
+th.sortable a:focus-visible{outline:2px solid #1f4e86;outline-offset:-2px}
+th.sortable.sorted{color:var(--ink)}
+.sort-ar{font-size:10px;opacity:.45}th.sorted .sort-ar{opacity:1;color:#1f4e86}
+.lpager{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:flex-end;margin:10px 0 0;font-size:13px}
+@media (max-width:700px){
+  .lbar{gap:8px}
+  .lbar .lf,.lbar .lf-d{flex:1 1 calc(50% - 8px)}
+  .lbar .lf-q{flex:1 1 100%;max-width:none}
+  .lbar .lf-go{flex:1 1 auto}
+  .lbar .lcount{margin-left:0}
+  .lbar .lf-phone{display:flex}
+}
+@media print{.lbar,.lpager{display:none!important}.sort-ar{display:none}}

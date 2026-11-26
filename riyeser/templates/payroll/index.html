@@ -1,16 +1,21 @@
 {% extends "base.html" %}{% block title %}Payroll{% endblock %}
+{% import "_list.html" as ls %}
 {% block content %}
 <div class="flash warn" role="alert">{{ payroll_warning }}</div>
 <div class="head"><div><h1>Payroll</h1><p class="sub">PAYG is an approximation of ATO withholding — verify before lodging.</p></div>
 <div class="actions"><a class="btn pri" href="{{ url_for('payroll.run') }}">Run payroll</a><a class="btn" href="{{ url_for('payroll.employee') }}">+ Employee</a>
 <a class="btn" href="{{ url_for('reports.show', name='payroll_summary') }}">Payroll summary</a></div></div>
-<h2>Employees</h2>
-<div class="tbl"><table><tr><th>Name</th><th>Basis</th><th>Frequency</th><th class="n">Rate</th><th class="n">Super %</th><th class="n">Leave hrs</th></tr>
+<h2 id="employees">Employees</h2>
+{{ ls.bar(el) }}
+<div class="tbl"><table><tr>{{ ls.th(el, 'name') }}{{ ls.th(el, 'pay_basis') }}{{ ls.th(el, 'pay_frequency') }}{{ ls.th(el, 'rate', cls='n') }}{{ ls.th(el, 'super_rate', cls='n') }}{{ ls.th(el, 'leave_hours', cls='n') }}</tr>
 {% for e in emps %}<tr class="click {{ 'muted' if not e.active }}" data-href="{{ url_for('payroll.employee', eid=e.id) }}"><td><b>{{ e.first_name }} {{ e.last_name }}</b></td><td>{{ e.pay_basis }}</td><td>{{ e.pay_frequency }}</td>
 <td class="n">{{ (e.annual_salary|money ~ ' p.a.') if e.pay_basis=='salary' else (e.hourly_rate|money ~ '/hr') }}</td><td class="n">{{ e.super_rate }}</td><td class="n">{{ '%.1f'|format(e.leave_hours) }}</td></tr>
-{% else %}<tr><td colspan="6" class="muted">No employees.</td></tr>{% endfor %}</table></div>
-<h2>Pay runs</h2>
-<div class="tbl"><table><tr><th>Pay date</th><th>Period</th><th>Frequency</th><th class="n">Employees</th><th class="n">Gross</th><th class="n">Net</th><th></th></tr>
+{% else %}<tr><td colspan="6" class="muted">{{ 'Nothing matches these filters.' if el.filtered else 'No employees.' }}</td></tr>{% endfor %}</table></div>
+<h2 id="payruns">Pay runs</h2>
+{{ ls.bar(rl) }}
+<div class="tbl"><table><tr>{{ ls.th(rl, 'pay_date') }}{{ ls.th(rl, 'period_start') }}{{ ls.th(rl, 'frequency') }}{{ ls.th(rl, 'n', cls='n') }}{{ ls.th(rl, 'gross', cls='n') }}{{ ls.th(rl, 'net', cls='n') }}<th></th></tr>
 {% for r in runs %}<tr class="click" data-href="{{ url_for('payroll.payrun', rid=r.id) }}"><td>{{ r.pay_date }}</td><td>{{ r.period_start }} – {{ r.period_end }}</td><td>{{ r.frequency }}</td>
-<td class="n">{{ r.n }}</td><td class="n">{{ r.gross|money }}</td><td class="n">{{ r.net|money }}</td><td>{% if r.voided %}<span class="badge void">reversed</span>{% endif %}</td></tr>{% else %}<tr><td colspan="7" class="muted">No pay runs.</td></tr>{% endfor %}</table></div>
+<td class="n">{{ r.n }}</td><td class="n">{{ r.gross|money }}</td><td class="n">{{ r.net|money }}</td><td>{% if r.voided %}<span class="badge void">reversed</span>{% endif %}</td></tr>{% else %}<tr><td colspan="7" class="muted">{{ 'Nothing matches these filters.' if rl.filtered else 'No pay runs.' }}</td></tr>{% endfor %}
+{% if runs %}<tr class="grand"><td colspan="4">{{ rl.shown }} pay run{{ '' if rl.shown == 1 else 's' }} (reversed ones not added in)</td><td class="n">{{ run_gross|money }}</td><td class="n">{{ run_net|money }}</td><td></td></tr>{% endif %}</table></div>
+{{ ls.pager(rl) }}
 {% endblock %}

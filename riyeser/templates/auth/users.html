@@ -1,4 +1,5 @@
 {% extends "base.html" %}{% block title %}Users{% endblock %}
+{% import "_list.html" as ls %}
 {% block content %}
 <div class="head"><div><h1>Users &amp; roles</h1><p class="sub">Choose what each person can see and change. Administrators can do everything, including managing users.</p></div></div>
 
@@ -6,6 +7,8 @@
   <span><i class="lv0"></i>Hidden — not shown at all</span><span><i class="lv1"></i>View — look and print only</span>
   <span><i class="lv2"></i>Add &amp; edit — but not delete or void</span><span><i class="lv3"></i>Full — including delete and void</span></div>
 
+{{ ls.bar(lst, sort_select=True) }}
+{% if not users %}<div class="card"><p class="muted" style="margin:0">Nobody matches these filters. <a href="{{ lst.clear_url() }}">Clear filters</a></p></div>{% endif %}
 {% for u in users %}{% set L = levels(u) %}
 <form class="card user-card" method="post" action="{{ url_for('auth.save_user') }}">
   <input type="hidden" name="id" value="{{ u.id }}">

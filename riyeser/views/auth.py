@@ -478,7 +478,14 @@ def logout():
 @admin_only
 def users():
     from .. import companies as co
-    rows = get_db().execute("SELECT * FROM users ORDER BY username").fetchall()
+    from ..listing import ListSpec, Col, Choice, from_request
+    lst = from_request(ListSpec("users", [
+        Col("username", "User name"), Col("full_name", "Full name"), Col("role", "Type"), Col("email", "Email")],
+        sort="username", per_page=None, search=("username", "full_name", "email"), search_hint="Name or email",
+        noun="users", choices=[
+            Choice("role", "Type", [("admin", "Administrator"), ("accountant", "Staff"), ("viewer", "Read-only")]),
+            Choice("st", "Status", [("1", "Active"), ("0", "Inactive")], col="active")]))
+    rows = lst.apply([dict(r) for r in get_db().execute("SELECT * FROM users ORDER BY username")])
     here = co.current_id()
     others = []  # other companies where you're an administrator: you can give people access there too
     for c in co.all_companies():
@@ -487,7 +494,7 @@ def users():
         me = co.user_row(c["path"], g.user["username"])
         if me and me["role"] == "admin":
             others.append({**c, "has": {r["username"] for r in _users_in(c["path"])}})
-    return render_template("auth/users.html", users=rows, others=others, areas=perms.AREAS, level_names=perms.LEVELS,
+    return render_template("auth/users.html", users=rows, others=others, lst=lst, areas=perms.AREAS, level_names=perms.LEVELS,
                            presets=perms.PRESETS, presets_json=json.dumps({k: v for k, (_, v) in perms.PRESETS.items()}),
                            levels=perms.levels_for)
 

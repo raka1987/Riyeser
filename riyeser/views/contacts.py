@@ -7,18 +7,32 @@ from . import lookups, opt_int, guarded
 bp = Blueprint("contacts", __name__, url_prefix="/cards")
 
 
+def contacts_spec(kind):
+    from ..listing import ListSpec, Col, Choice
+    return ListSpec(f"contacts:{kind}", [
+        Col("name", "Name"), Col("contact_person", "Contact"), Col("email", "Email"), Col("phone", "Phone"),
+        Col("terms_days", "Terms", "num"), Col("balance", "Balance owing", "num")],
+        sort="name", search=("name", "contact_person", "email", "phone", "abn", "address"),
+        search_hint="Name, email, phone or address", noun=f"{kind}s", lead="active DESC", tiebreak="name, id", choices=[
+            Choice("st", "Status", [("active", "Active"), ("inactive", "Inactive")],
+                   where={"active": (" AND active=1", []), "inactive": (" AND active=0", [])}),
+            Choice("owing", "Balance", [("owing", "Owes money" if kind == "customer" else "We owe them"),
+                                        ("none", "Nothing owing")],
+                   where={"owing": (" AND balance<>0", []), "none": (" AND balance=0", [])})])
+
+
 @bp.route("/<kind>")
 def index(kind):
     if kind not in ("customer", "supplier"):
         abort(404)
     db = get_db()
-    q = request.args.get("q", "")
     side = "sale" if kind == "customer" else "purchase"
-    rows = db.execute(
+    from ..listing import from_request
+    lst = from_request(contacts_spec(kind))
+    rows = lst.fetch(db,
         "SELECT c.*, COALESCE((SELECT SUM(total-amount_paid) FROM documents d WHERE d.contact_id=c.id"
-        " AND d.side=? AND d.status='open'),0) balance FROM contacts c WHERE c.kind=? AND c.name LIKE ?"
-        " ORDER BY c.active DESC, c.name", (side, kind, f"%{q}%")).fetchall()
-    return render_template("contacts/index.html", rows=rows, kind=kind, q=q)
+        " AND d.side=? AND d.status='open'),0) balance FROM contacts c WHERE c.kind=?", (side, kind), sums=("balance",))
+    return render_template("contacts/index.html", rows=rows, kind=kind, q=lst.q, lst=lst)
 
 
 @bp.route("/<kind>/new", methods=["GET", "POST"])

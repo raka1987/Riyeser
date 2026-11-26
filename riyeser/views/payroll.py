@@ -14,13 +14,37 @@ bp = Blueprint("payroll", __name__, url_prefix="/payroll")
 @bp.route("/")
 def index():
     db = get_db()
-    emps = db.execute("SELECT * FROM employees ORDER BY active DESC, last_name").fetchall()
-    runs = db.execute("SELECT r.*, (SELECT SUM(gross) FROM payslips WHERE payrun_id=r.id) gross,"
-                      " (SELECT SUM(net) FROM payslips WHERE payrun_id=r.id) net,"
-                      " (SELECT COUNT(*) FROM payslips WHERE payrun_id=r.id) n,"
-                      " e.voided FROM payruns r LEFT JOIN journal_entries e ON e.id=r.entry_id"
-                      " ORDER BY r.pay_date DESC").fetchall()
-    return render_template("payroll/index.html", emps=emps, runs=runs)
+    from ..listing import ListSpec, Col, Choice, from_request
+    el = from_request(ListSpec("payroll:employees", [
+        Col("name", "Name", sql="last_name || ' ' || first_name"), Col("pay_basis", "Basis"),
+        Col("pay_frequency", "Frequency"), Col("rate", "Rate", "num"), Col("super_rate", "Super %", "num"),
+        Col("leave_hours", "Leave hrs", "num")],
+        sort="name", prefix="e_", per_page=None, lead="active DESC", tiebreak="id",
+        search=("first_name", "last_name", "email"), search_hint="Name or email", noun="employees", choices=[
+            Choice("st", "Status", [("active", "Active"), ("inactive", "Inactive")],
+                   where={"active": (" AND active=1", []), "inactive": (" AND active=0", [])}),
+            Choice("basis", "Basis", [("hourly", "Hourly"), ("salary", "Salary")], col="pay_basis"),
+            Choice("freq", "Frequency", [("weekly", "Weekly"), ("fortnightly", "Fortnightly"), ("monthly", "Monthly")],
+                   col="pay_frequency")]))
+    emps = el.fetch(db, "SELECT *, CASE pay_basis WHEN 'salary' THEN annual_salary ELSE hourly_rate END rate"
+                        " FROM employees")
+    rl = from_request(ListSpec("payroll:runs", [
+        Col("pay_date", "Pay date", "date"), Col("period_start", "Period", "date"), Col("frequency", "Frequency"),
+        Col("n", "Employees", "num"), Col("gross", "Gross", "num"), Col("net", "Net", "num")],
+        sort="pay_date", dir="desc", prefix="r_", date_col="pay_date", date_label="Pay date", noun="pay runs",
+        choices=[Choice("freq", "Frequency", [("weekly", "Weekly"), ("fortnightly", "Fortnightly"),
+                                              ("monthly", "Monthly")], col="frequency"),
+                 Choice("st", "Status", [("posted", "Not reversed"), ("reversed", "Reversed")],
+                        where={"posted": (" AND COALESCE(voided,0)=0", []), "reversed": (" AND voided=1", [])})]))
+    runs = rl.fetch(db, "SELECT r.*, (SELECT SUM(gross) FROM payslips WHERE payrun_id=r.id) gross,"
+                        " (SELECT SUM(net) FROM payslips WHERE payrun_id=r.id) net,"
+                        " (SELECT COUNT(*) FROM payslips WHERE payrun_id=r.id) n,"
+                        " e.voided FROM payruns r LEFT JOIN journal_entries e ON e.id=r.entry_id",
+                    sums=("CASE WHEN COALESCE(voided,0)=0 THEN gross ELSE 0 END",
+                          "CASE WHEN COALESCE(voided,0)=0 THEN net ELSE 0 END"))
+    return render_template("payroll/index.html", emps=emps, runs=runs, el=el, rl=rl,
+                           run_gross=rl.sums["CASE WHEN COALESCE(voided,0)=0 THEN gross ELSE 0 END"],
+                           run_net=rl.sums["CASE WHEN COALESCE(voided,0)=0 THEN net ELSE 0 END"])
 
 
 @bp.route("/employee/new", methods=["GET", "POST"])

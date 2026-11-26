@@ -380,6 +380,8 @@ def migrate(db):
     _payrun_roster(db)
     from .terminals.store import ensure_schema as _card_terminal_schema
     _card_terminal_schema(db)  # POS card payments: terminal attempts, their history, split tenders
+    from .listing import _ensure_prefs
+    _ensure_prefs(db)  # each person's sort and filters on each list
     db.commit()
 
 

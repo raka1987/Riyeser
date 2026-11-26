@@ -1,4 +1,5 @@
 {% extends "base.html" %}{% block title %}Manager approvals{% endblock %}
+{% import "_list.html" as ls %}
 {% block content %}
 <style>
 .opt3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
@@ -52,10 +53,12 @@
 </div>
 
 <div class="card"><h2 style="margin-top:0">Override log</h2><p class="sub">Every approval is recorded here and in the audit trail. It can’t be edited.</p>
-  <div class="tbl"><table><tr><th>When</th><th>What</th><th class="n">Amount</th><th>Asked by</th><th>Approved by</th><th>How</th><th>Reason</th></tr>
+  {{ ls.bar(lst) }}
+  <div class="tbl"><table><tr>{{ ls.th(lst, 'created_at') }}{{ ls.th(lst, 'action') }}{{ ls.th(lst, 'amount', cls='n') }}{{ ls.th(lst, 'asker') }}{{ ls.th(lst, 'approver') }}{{ ls.th(lst, 'method') }}{{ ls.th(lst, 'reason') }}</tr>
   {% for a in log %}<tr><td>{{ a.created_at[:16] }}</td><td>{{ {'void': 'Void sale', 'refund': 'Refund', 'discount': 'Discount', 'close': 'Close till'}[a.action] }}{% if a.action == 'discount' %} {{ a.amount }}%{% endif %}</td>
-    <td class="n">{% if a.action != 'discount' %}{{ a.amount|money }}{% endif %}</td><td>{{ a.rname or a.runame }}</td><td>{{ a.mname or a.muname }}</td>
+    <td class="n">{% if a.action != 'discount' %}{{ a.amount|money }}{% endif %}</td><td>{{ a.asker or '' }}</td><td>{{ a.approver or '' }}</td>
     <td><span class="badge">{{ 'Own approval' if a.method == 'self' else a.method }}</span>{% if not a.used_at %} <span class="badge open">not used</span>{% endif %}</td><td>{{ a.reason or '' }}</td></tr>
-  {% else %}<tr><td colspan="7" class="muted">No approvals yet.</td></tr>{% endfor %}</table></div>
+  {% else %}<tr><td colspan="7" class="muted">{{ 'Nothing matches these filters.' if lst.filtered else 'No approvals yet.' }}</td></tr>{% endfor %}</table></div>
+  {{ ls.pager(lst) }}
 </div>
 {% endblock %}

@@ -1,5 +1,8 @@
 {% extends "base.html" %}{% block title %}Reports{% endblock %}
 {% block content %}
 <div class="head"><div><h1>Reports</h1><p class="sub">All reports can be filtered, printed and exported to CSV.</p></div></div>
+<form class="lbar" method="get" role="search" aria-label="Find a report"><div class="lf lf-q"><label for="rq">Find a report</label><input id="rq" type="search" name="q" value="{{ q }}" placeholder="GST, aged, profit, stock…"></div>
+<div class="lf lf-go"><button class="btn">Find</button>{% if q %} <a class="btn lclear" href="{{ url_for('reports.index') }}">Clear</a>{% endif %}</div>{% if q %}<div class="lcount" role="status"><b>{{ count }}</b> report{{ '' if count == 1 else 's' }}</div>{% endif %}</form>
+{% if not catalog %}<div class="card"><p class="muted" style="margin:0">No report matches “{{ q }}”.</p></div>{% endif %}
 <div class="cat">{% for group, items in catalog %}<div class="card"><h3>{{ group }}</h3>{% for k, t in items %}<a href="{{ url_for('reports.show', name=k) }}">{{ t }}</a>{% endfor %}</div>{% endfor %}</div>
 {% endblock %}

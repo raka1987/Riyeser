@@ -13,10 +13,17 @@ def index():
     db = get_db()
     if request.method == "POST":
         return _save()
-    rows = db.execute("SELECT id, to_addr, subject, kind, status, attempts, error, created_at, sent_at FROM email_queue"
-                      " ORDER BY id DESC LIMIT 100").fetchall()
+    from ..listing import ListSpec, Col, Choice, from_request
+    lst = from_request(ListSpec("email:outbox", [
+        Col("at", "When", "date"), Col("to_addr", "To"), Col("subject", "Subject"), Col("status", "Status"),
+        Col("error", "Why not sent")],
+        sort="at", dir="desc", date_col="at", search=("to_addr", "subject"), search_hint="Address or subject",
+        noun="emails", choices=[Choice("st", "Status", [("queued", "Waiting"), ("sent", "Sent"), ("failed", "Failed")],
+                                       col="status")]))
+    rows = lst.fetch(db, "SELECT id, to_addr, subject, kind, status, attempts, error, created_at, sent_at,"
+                         " COALESCE(sent_at, created_at) at FROM email_queue")
     c = db.execute("SELECT * FROM company WHERE id=1").fetchone()
-    return render_template("email/index.html", c=c, rows=rows, ready=bool(mailer.settings(db)))
+    return render_template("email/index.html", c=c, rows=rows, lst=lst, ready=bool(mailer.settings(db)))
 
 
 @admin_only

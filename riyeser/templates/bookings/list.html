@@ -1,11 +1,12 @@
 {% extends "base.html" %}{% block title %}{{ m.many|capitalize }}{% endblock %}
+{% import "_list.html" as ls %}
 {% block content %}
 <div class="head"><div><h1>{{ m.many|capitalize }}</h1><p class="sub">{{ m.name }}</p></div>
 <div class="actions">{% include "bookings/_nav.html" %}{% if can('bookings', 2) %}<a class="btn pri" href="{{ url_for('bookings.edit') }}">+ New {{ m.one }}</a>{% endif %}</div></div>
-<form class="filters"><div><label>Show</label><select name="show" onchange="this.form.submit()">
-<option value="upcoming" {{ 'selected' if show == 'upcoming' }}>Coming up</option><option value="to_invoice" {{ 'selected' if show == 'to_invoice' }}>Done, not invoiced yet</option><option value="all" {{ 'selected' if show == 'all' }}>Everything</option></select></div>
-<div><label>Search</label><input name="q" value="{{ q }}" placeholder="Customer, phone, address"></div><div><button class="btn">Search</button></div></form>
-<div class="tbl"><table><tr><th>When</th><th>Customer</th><th>{{ m.what }}</th><th>{{ m.who_one|capitalize }}</th>{% if m.address %}<th>Address</th>{% endif %}{% if m.party %}<th class="n">People</th>{% endif %}<th>Status</th><th>Invoice</th></tr>
-{% for b in rows %}<tr class="click" data-href="{{ url_for('bookings.edit', bid=b.id) }}"><td>{{ b.starts_at[:10] }} {{ b.starts_at[11:16] }}</td><td><b>{{ b.customer or b.title or '' }}</b></td><td>{{ b.service or '' }}</td><td>{{ b.resource or '' }}</td>{% if m.address %}<td>{{ b.address or '' }}</td>{% endif %}{% if m.party %}<td class="n">{{ b.party or '' }}</td>{% endif %}<td><span class="bk-st st-{{ b.status }}">{{ statuses[b.status] }}</span></td><td>{{ b.inv_no or '' }}</td></tr>
-{% else %}<tr><td colspan="8" class="muted">No {{ m.many }} here.</td></tr>{% endfor %}</table></div>
+<div class="tabs">{% for k, v in [('upcoming', 'Coming up'), ('to_invoice', 'Done, not invoiced yet'), ('all', 'Everything')] %}<a class="{{ 'on' if show == k }}" href="{{ url_for('bookings.upcoming', show=k) }}">{{ v }}</a>{% endfor %}</div>
+{{ ls.bar(lst) }}
+<div class="tbl"><table><tr>{{ ls.th(lst, 'starts_at') }}{{ ls.th(lst, 'customer') }}{{ ls.th(lst, 'service') }}{{ ls.th(lst, 'resource') }}{% if m.address %}{{ ls.th(lst, 'address') }}{% endif %}{% if m.party %}{{ ls.th(lst, 'party', cls='n') }}{% endif %}{{ ls.th(lst, 'status') }}{{ ls.th(lst, 'inv_no') }}</tr>
+{% for b in rows %}<tr class="click" data-href="{{ url_for('bookings.edit', bid=b.id) }}"><td>{{ b.starts_at[:10] }} {{ b.starts_at[11:16] }}</td><td><b>{{ b.customer or '' }}</b></td><td>{{ b.service or '' }}</td><td>{{ b.resource or '' }}</td>{% if m.address %}<td>{{ b.address or '' }}</td>{% endif %}{% if m.party %}<td class="n">{{ b.party or '' }}</td>{% endif %}<td><span class="bk-st st-{{ b.status }}">{{ statuses[b.status] }}</span></td><td>{{ b.inv_no or '' }}</td></tr>
+{% else %}<tr><td colspan="8" class="muted">{{ 'Nothing matches these filters.' if lst.filtered else 'No ' ~ m.many ~ ' here.' }}</td></tr>{% endfor %}</table></div>
+{{ ls.pager(lst) }}
 {% endblock %}

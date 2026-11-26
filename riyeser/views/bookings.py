@@ -202,9 +202,11 @@ def week():
 @bp.route("/list")
 def upcoming():
     db = get_db()
-    q = request.args.get("q", "").strip()
     show = request.args.get("show", "upcoming")
-    sql = ("SELECT b.*, c.name customer, r.name resource, s.name service, doc.number inv_no FROM bookings b"
+    if show not in ("upcoming", "to_invoice", "all"):
+        show = "upcoming"
+    sql = ("SELECT b.*, COALESCE(c.name, b.title) customer, r.name resource, s.name service, doc.number inv_no"
+           " FROM bookings b"
            " LEFT JOIN contacts c ON c.id=b.contact_id LEFT JOIN booking_resources r ON r.id=b.resource_id"
            " LEFT JOIN booking_services s ON s.id=b.service_id LEFT JOIN documents doc ON doc.id=b.document_id WHERE 1=1")
     args = []
@@ -213,11 +215,20 @@ def upcoming():
         args.append(date.today().isoformat())
     elif show == "to_invoice":
         sql += " AND b.status='done' AND b.document_id IS NULL"
-    if q:
-        sql += " AND (c.name LIKE ? OR b.title LIKE ? OR b.address LIKE ? OR b.phone LIKE ?)"
-        args += [f"%{q}%"] * 4
-    sql += " ORDER BY b.starts_at" + (" DESC" if show == "all" else "") + " LIMIT 500"
-    return render_template("bookings/list.html", rows=db.execute(sql, args).fetchall(), q=q, show=show, m=M(),
+    m = M()
+    from ..listing import ListSpec, Col, Choice, from_request
+    lst = from_request(ListSpec(f"bookings:{show}", [
+        Col("starts_at", "When", "date"), Col("customer", "Customer"), Col("service", m["what"]),
+        Col("resource", m["who_one"].capitalize()), Col("address", "Address"), Col("party", "People", "num"),
+        Col("status", "Status"), Col("inv_no", "Invoice", "code")],
+        sort="starts_at", dir="desc" if show == "all" else "asc", date_col="starts_at", date_label="When",
+        search=("customer", "title", "address", "phone"), search_hint="Customer, phone, address", noun=m["many"],
+        choices=[Choice("st", "Status", STATUSES, col="status"),
+                 Choice("res", m["who_one"].capitalize(), [(str(r["id"]), r["name"]) for r in resources(db, True)],
+                        col="resource_id"),
+                 Choice("svc", m["what"], [(str(x["id"]), x["name"]) for x in services(db, True)], col="service_id")]),
+        keep=dict(show=show))
+    return render_template("bookings/list.html", rows=lst.fetch(db, sql, args), q=lst.q, show=show, m=m, lst=lst,
                            statuses=dict(STATUSES))
 
 
@@ -662,8 +673,18 @@ def _invoice_job(db, jid):
 @bp.route("/jobs")
 def jobs():
     db = get_db()
-    q = request.args.get("q", "").strip()
-    sql = ("SELECT j.*, c.name customer, s.name service, doc.number inv_no,"
+    m = M()
+    from ..listing import ListSpec, Col, Choice, from_request
+    lst = from_request(ListSpec("bookings:jobs", [
+        Col("id", "Job", "num"), Col("customer", "Customer"), Col("service", m["what"]), Col("address", "Address"),
+        Col("next_visit", "Next visit", "date"), Col("visits", "Visits", "num"), Col("status", "Status"),
+        Col("inv_no", "Invoice", "code"), Col("created_at", "Logged", "date")],
+        sort="id", dir="desc", date_col="created_at", per_page=None, cap=500, search=("customer",), own_search=True,
+        search_hint="Job number, customer, address, or words like Room 204", noun="jobs",
+        choices=[Choice("st", "Status", JOB_STATUSES, col="status"),
+                 Choice("svc", m["what"], [(str(x["id"]), x["name"]) for x in services(db, True)], col="service_id")]))
+    q, st = lst.q, lst.choice["st"]
+    sql = ("SELECT j.*, COALESCE(c.name, j.title) customer, s.name service, doc.number inv_no,"
            " (SELECT MIN(starts_at) FROM bookings b WHERE b.job_id=j.id AND b.status IN ('booked','confirmed','started'))"
            " next_visit, (SELECT COUNT(*) FROM bookings b WHERE b.job_id=j.id) visits"
            " FROM booking_jobs j LEFT JOIN contacts c ON c.id=j.contact_id"
@@ -675,9 +696,9 @@ def jobs():
                 " OR EXISTS (SELECT 1 FROM bookings b WHERE b.job_id=j.id AND (b.notes LIKE ? OR b.outcome_note LIKE ?))"
                 " OR j.id=?)")
         args = [f"%{q}%"] * 7 + [int(num) if num.isdigit() else -1]
-    else:
+    elif not st:
         sql += " WHERE j.status NOT IN ('cancelled') AND NOT (j.status='completed' AND j.document_id IS NOT NULL)"
-    rows = db.execute(sql + " ORDER BY j.id DESC LIMIT 500", args).fetchall()
+    rows = lst.fetch(db, sql, args, total_sql="SELECT COUNT(*) FROM booking_jobs")
     groups = [
         ("Needs a visit", "Logged but not booked yet, or the last visit said it needs another one.",
          [r for r in rows if r["status"] in ("requested", "needs_visit")]),
@@ -685,10 +706,13 @@ def jobs():
         ("Ready to invoice", "Work finished, not invoiced yet.",
          [r for r in rows if r["status"] == "completed" and not r["document_id"]]),
     ]
-    if q:
+    if q or st:
         groups.append(("Invoiced or cancelled", "", [r for r in rows if r["status"] == "cancelled" or
                                                        (r["status"] == "completed" and r["document_id"])]))
-    return render_template("bookings/jobs.html", groups=groups, q=q, m=M(), statuses=dict(JOB_STATUSES), job_no=job_no)
+    if st:
+        groups = [g_ for g_ in groups if g_[2]] or groups[:1]  # one status chosen: just the group it is in
+    return render_template("bookings/jobs.html", groups=groups, q=q, m=m, statuses=dict(JOB_STATUSES), job_no=job_no,
+                           lst=lst)
 
 
 @bp.route("/job/new", methods=["GET", "POST"])

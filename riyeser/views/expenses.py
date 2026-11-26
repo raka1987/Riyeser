@@ -80,13 +80,19 @@ def index():
     if show != "all":
         where.append("x.status=?")
         args.append(show)
-    rows = db.execute("SELECT x.*, a.name aname, (SELECT 1 FROM expense_receipts r WHERE r.claim_id=x.id) has_receipt"
-                      " FROM expense_claims x LEFT JOIN accounts a ON a.id=x.account_id"
-                      f" WHERE {' AND '.join(where)} ORDER BY x.date DESC, x.id DESC LIMIT 500", args).fetchall()
+    from ..listing import ListSpec, Col, from_request
+    lst = from_request(ListSpec(f"expenses:{show}", [
+        Col("date", "Date", "date"), Col("claimant", "Who"), Col("supplier", "Supplier"), Col("aname", "What for"),
+        Col("status", "Status"), Col("gst", "GST", "num"), Col("amount", "Amount", "num")],
+        sort="date", dir="desc", date_col="date", search=("supplier", "aname", "note", "claimant"),
+        search_hint="Supplier, what for or note", noun="claims"), keep=dict(show=show, who=who))
+    rows = lst.fetch(db, "SELECT x.*, a.name aname, (SELECT 1 FROM expense_receipts r WHERE r.claim_id=x.id) has_receipt"
+                         " FROM expense_claims x LEFT JOIN accounts a ON a.id=x.account_id"
+                         f" WHERE {' AND '.join(where)}", args, sums=("amount",))
     people = [r[0] for r in db.execute("SELECT DISTINCT claimant FROM expense_claims ORDER BY claimant")] \
         if is_manager() else []
-    return render_template("expenses/index.html", rows=rows, show=show, counts=counts, statuses=STATUSES,
-                           manager=is_manager(), people=people, who=who, total=sum(r["amount"] for r in rows))
+    return render_template("expenses/index.html", rows=rows, show=show, counts=counts, statuses=STATUSES, lst=lst,
+                           manager=is_manager(), people=people, who=who, total=lst.sums["amount"])
 
 
 @bp.route("/new", methods=["GET", "POST"])

@@ -251,11 +251,19 @@ def approvals():
             db.rollback()
             flash(str(e), "error")
         return redirect(url_for("pos.approvals"))
-    log = db.execute("SELECT a.*, r.full_name rname, r.username runame, m.full_name mname, m.username muname"
-                     " FROM pos_approvals a LEFT JOIN users r ON r.id=a.requested_by LEFT JOIN users m ON"
-                     " m.id=a.approved_by ORDER BY a.id DESC LIMIT 60").fetchall()
+    from ..listing import ListSpec, Col, Choice, from_request
+    lst = from_request(ListSpec("pos:approvals", [
+        Col("created_at", "When", "date"), Col("action", "What"), Col("amount", "Amount", "num"),
+        Col("asker", "Asked by"), Col("approver", "Approved by"), Col("method", "How"), Col("reason", "Reason")],
+        sort="created_at", dir="desc", date_col="created_at", per_page=60, search=("reason", "asker", "approver"),
+        search_hint="Reason or person", noun="approvals", choices=[
+            Choice("action", "What", [("void", "Void sale"), ("refund", "Refund"), ("discount", "Discount"),
+                                      ("close", "Close till")])]))
+    log = lst.fetch(db, "SELECT a.*, COALESCE(r.full_name, r.username) asker, COALESCE(m.full_name, m.username) approver"
+                        " FROM pos_approvals a LEFT JOIN users r ON r.id=a.requested_by LEFT JOIN users m ON"
+                        " m.id=a.approved_by")
     return render_template("pos/approvals.html", rules=approval_rules(db), methods=METHOD_NAMES,
-                           people=approvers(db), log=log, can_change=can_change)
+                           people=approvers(db), log=log, can_change=can_change, lst=lst)
 
 
 def _save_approvals(db, f):
@@ -1000,6 +1008,34 @@ def sales():
                            mode=mode, card_payments=card_ctx(db),
                            features=sorted(features),
                            tills=_tills(db), **day_summary(db, day), **day_extras(db, day), **approval_ctx(db))
+
+
+@bp.route("/sales/all")
+def sales_history():
+    """Every POS sale, across days: sort by date, receipt, customer, total; filter by year, period, how paid."""
+    db = get_db()
+    from ..listing import ListSpec, Col, Choice, from_request
+    tills = _tills(db)
+    choices = [Choice("method", "Paid by", list(METHOD_LABELS.items())),
+               Choice("st", "Status", [("sold", "Sold"), ("refunded", "Part or all refunded"), ("voided", "Voided")],
+                      where={"sold": (" AND voided=0 AND refunded=0", []), "refunded": (" AND refunded>0", []),
+                             "voided": (" AND voided=1", [])})]
+    if len(tills) > 1:
+        choices.append(Choice("till", "Till", [(str(t["id"]), t["name"]) for t in tills], col="till_id"))
+    lst = from_request(ListSpec("pos:sales", [
+        Col("created_at", "When", "date"), Col("number", "Receipt", "code"), Col("cname", "Customer"),
+        Col("till_name", "Till"), Col("method", "Paid by"), Col("total", "Total", "num"),
+        Col("refunded", "Refunded", "num")],
+        sort="created_at", dir="desc", date_col="date", search=("number", "cname"), search_hint="Receipt or customer",
+        choices=choices, noun="sales"))
+    rows = lst.fetch(db, "SELECT p.id, p.document_id, p.method, p.voided, p.created_at, p.till_id, d.number, d.date,"
+                         " d.total, d.tax_total, c.name cname, t.name till_name,"
+                         " COALESCE((SELECT SUM(amount) FROM pos_refunds f WHERE f.sale_id=p.id), 0) refunded"
+                         " FROM pos_sales p JOIN documents d ON d.id=p.document_id JOIN contacts c ON c.id=d.contact_id"
+                         " LEFT JOIN pos_tills t ON t.id=p.till_id",
+                     sums=("CASE WHEN voided=0 THEN total - refunded ELSE 0 END",))
+    return render_template("pos/sales_all.html", rows=rows, lst=lst, labels=METHOD_LABELS, tills=tills,
+                           net=lst.sums["CASE WHEN voided=0 THEN total - refunded ELSE 0 END"])
 
 
 @bp.route("/sale/<int:sid>/void", methods=["POST"])
