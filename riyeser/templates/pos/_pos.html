@@ -97,7 +97,7 @@ details.um{position:relative}details.um>summary{list-style:none;cursor:pointer}d
     <details class="um"><summary><span class="av" title="{{ user.full_name or user.username }}">{% set nm = (user.full_name or user.username or '?').split() %}{{ (nm[0][:1] ~ (nm[-1][:1] if nm|length > 1 else ''))|upper }}</span></summary><div class="dd">
       <div class="who"><b>{{ user.full_name or user.username }}</b><small>{{ user.role|title }}</small></div>
       <a href="{{ back }}">{{ 'Products & setup' if pos_app else 'Back office' }}</a>
-      {% if can('setup') %}<a href="{{ url_for('pos.setup') }}">POS setup</a><a href="{{ url_for('pos.approvals') }}">Manager approvals</a>{% endif %}
+      {% if can('setup') %}<a href="{{ url_for('pos.setup') }}">POS setup</a><a href="{{ url_for('pos.card_setup') }}">Card payments</a><a href="{{ url_for('pos.approvals') }}">Manager approvals</a>{% endif %}
       <a href="{{ url_for('help.index') }}#pos">Help</a>
       <a href="{{ url_for('auth.logout') }}">Sign out</a></div></details>
   </header>

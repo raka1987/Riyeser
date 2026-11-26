@@ -1,0 +1,145 @@
+{# Card terminal screen: "Waiting for customer… tap, insert or swipe", the result, and (for the practice terminal) the
+   pretend machine. Used by Sell, Sales (refunds) and Card payments setup (test payment). Needs card_payments. #}
+<style>
+.tmo{--tg:#0f7b63;--tgl:#d9f3ea;--tr:#b42318;--trl:#fdecea;--ta:#b54708;--tal:#fff4e5;--tl:#e2e8f0;--tm:#64748b;
+  position:fixed;inset:0;background:rgba(15,23,42,.55);display:none;align-items:center;justify-content:center;z-index:80;padding:16px;overflow:auto}
+.tmo.show{display:flex}
+.tmb{background:#fff;border-radius:22px;width:min(900px,100%);max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 30px 80px rgba(0,0,0,.35);display:grid;grid-template-columns:minmax(0,1fr)}
+.tmb.sim{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr)}
+.tmm{padding:26px 26px 22px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;min-width:0}
+.tmm .tk{font-size:13px;text-transform:uppercase;letter-spacing:.7px;color:var(--tm);font-weight:700}
+.tmm h2{margin:2px 0 0;font-size:28px;letter-spacing:-.4px}
+.tmm .ta{font-size:52px;font-weight:800;letter-spacing:-1.5px;line-height:1.05;font-variant-numeric:tabular-nums}
+.tmm .ts{color:var(--tm);font-size:16px;max-width:440px}
+.tmi{width:116px;height:116px;border-radius:50%;display:grid;place-items:center;background:var(--tgl);color:var(--tg);margin:6px 0}
+.tmi svg{width:56px;height:56px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tmi.pl{animation:tmpl 1.6s infinite}@keyframes tmpl{0%{box-shadow:0 0 0 0 rgba(15,123,99,.45)}100%{box-shadow:0 0 0 28px rgba(15,123,99,0)}}
+.tmi.bad{background:var(--trl);color:var(--tr)}.tmi.warn{background:var(--tal);color:var(--ta)}
+.tmd{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 14px;font-size:15.5px}
+.tmd b{font-variant-numeric:tabular-nums}
+.tmx{width:100%;max-width:440px;display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.tmx .row{display:flex;gap:10px}.tmx .row>*{flex:1;min-width:0}
+.tmbtn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1.5px solid #cbd5e1;background:#fff;border-radius:14px;padding:10px 16px;font:inherit;font-weight:700;font-size:17px;min-height:58px;cursor:pointer;color:#0f172a}
+.tmbtn.go{background:var(--tg);border-color:var(--tg);color:#fff}.tmbtn.no{color:var(--tr);border-color:#f3c3bd}
+.tmbtn.red{background:var(--tr);border-color:var(--tr);color:#fff}
+.tmbtn:disabled{opacity:.45;cursor:not-allowed}
+.tmf{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;text-align:left}
+.tmf label{font-size:12px;color:var(--tm);font-weight:700;display:flex;flex-direction:column;gap:4px;min-width:0}
+.tmf input,.tmf select,.tms input,.tms select{border:1.5px solid #cbd5e1;border-radius:10px;padding:10px;font:inherit;font-size:16px;min-height:46px;width:100%;background:#fff;min-width:0}
+.tmh{font-size:13.5px;color:var(--tm)}.tmh a,.tml{color:#1f4e86;font-weight:600;cursor:pointer;background:none;border:0;font:inherit;font-size:14px;text-decoration:underline}
+.tmr{width:100%;max-width:440px;background:#f8fafc;border:1px dashed #94a3b8;border-radius:12px;padding:10px 12px;font:12.5px/1.45 "Courier New",monospace;text-align:left;white-space:pre-wrap;color:#334155}
+.tmchk{width:100%;max-width:440px;border:1.5px solid #f6c37a;background:var(--tal);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px}
+/* the practice terminal: a pretend card machine */
+.tms[hidden]{display:none}
+.tms{background:linear-gradient(160deg,#1e293b,#0f172a);padding:22px 20px;display:flex;flex-direction:column;gap:10px;color:#e2e8f0;min-width:0}
+.tms .dev{background:#0b1220;border:2px solid #334155;border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:8px}
+.tms .scr{background:#d1fae5;color:#064e3b;border-radius:10px;padding:12px;text-align:center;font-weight:800;min-height:84px;display:flex;flex-direction:column;justify-content:center;gap:2px}
+.tms .scr small{font-weight:600;font-size:12px}.tms .scr b{font-size:26px;font-variant-numeric:tabular-nums}
+.tms h3{margin:0;font-size:15px;color:#fff;display:flex;justify-content:space-between;gap:8px;align-items:center}.tms h3 span{font-size:11px;background:#facc15;color:#422006;border-radius:6px;padding:2px 7px}
+.tms .g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tms label{font-size:11.5px;color:#94a3b8;font-weight:700;display:flex;flex-direction:column;gap:3px;min-width:0}
+.tms input,.tms select{min-height:42px;padding:8px;font-size:15px;color:#0f172a}
+.tms .k{border:0;border-radius:12px;min-height:50px;font:inherit;font-weight:800;font-size:15px;cursor:pointer;color:#fff}
+.tms .k.ap{background:#16a34a}.tms .k.dc{background:#dc2626}.tms .k.cn{background:#f59e0b;color:#2a1800}.tms .k.to{background:#475569}
+.tms .k:disabled{opacity:.35;cursor:not-allowed}
+.tms .nt{font-size:12px;color:#94a3b8;margin:0}
+@media (max-width:760px){.tmb.sim{grid-template-columns:minmax(0,1fr)}.tmm{padding:20px 16px}.tmm .ta{font-size:42px}.tmi{width:92px;height:92px}.tmf{grid-template-columns:1fr 1fr}.tmf label:first-child{grid-column:1/-1}}
+</style>
+<div class="tmo" id="tmO" role="dialog" aria-modal="true" aria-labelledby="tmTitle"><div class="tmb" id="tmB">
+  <div class="tmm" id="tmM"></div>
+  <div class="tms" id="tmS" hidden>
+    <h3>Practice terminal <span>NO MONEY MOVES</span></h3>
+    <div class="dev"><div class="scr" id="tmScr"><small>Riyeser practice</small><b>Ready</b></div>
+      <div class="g2"><label>Card<select id="tmSch">{% for s in schemes or ['Visa','Mastercard','EFTPOS','Amex','UnionPay'] %}<option>{{ s }}</option>{% endfor %}</select></label>
+        <label>How<select id="tmEnt"><option value="tap">Tap</option><option value="insert">Insert</option><option value="swipe">Swipe</option><option value="wallet">Phone</option></select></label></div>
+      <button type="button" class="k ap" data-sim="approve">Approve</button>
+      <div class="g2"><label>Tip<input id="tmTip" inputmode="decimal" value="2.00"></label><label>Cash out<input id="tmCo" inputmode="decimal" value="20.00"></label></div>
+      <div class="g2"><button type="button" class="k ap" data-sim="tip">Approve + tip</button><button type="button" class="k ap" data-sim="cashout" id="tmCoBtn">Approve + cash out</button></div>
+      <div class="g2"><button type="button" class="k dc" data-sim="decline">Decline</button><button type="button" class="k cn" data-sim="cancel">Customer cancels</button></div>
+      <button type="button" class="k to" data-sim="timeout">Time out (no card)</button>
+    </div>
+    <p class="nt">You are the customer. In real life this is the card machine on the counter.</p>
+  </div>
+</div></div>
+<script>
+window.RiyeserTerminal=(function(){
+  const CARD={{ card_payments|tojson }}, BASE='{{ url_for('pos.register') }}';
+  const $=s=>document.querySelector(s), O=$('#tmO'), M=$('#tmM'), S=$('#tmS');
+  const money=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const IC={card:'<svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 6h6M12 17h.01"/></svg>',
+    ok:'<svg viewBox="0 0 24 24" style="stroke-width:2.6"><path d="M20 6 9 17l-5-5"/></svg>',
+    no:'<svg viewBox="0 0 24 24" style="stroke-width:2.4"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+    wait:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'};
+  const TITLES={declined:'Declined',cancelled:'Cancelled',timeout:'Timed out',error:'Card machine problem'};
+  const post=async(url,body)=>{const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+    return r.json().catch(()=>({ok:false,error:'No answer from Riyeser. Check the connection.'}));};
+  let cur=null; // {txn, opts, resolve, reject, timer, since}
+  const tillOf=id=>(CARD.tills||{})[id]||{provider:'none',name:'None'};
+  function details(x){const b=[];if(x.card_scheme||x.card_last4)b.push(`<span>${esc(x.card_scheme||'Card')} <b>••${esc(x.card_last4||'????')}</b></span>`);
+    if(x.auth_code)b.push(`<span>Auth <b>${esc(x.auth_code)}</b></span>`);if(x.terminal_ref)b.push(`<span>Ref <b>${esc(x.terminal_ref)}</b></span>`);
+    if(x.tip)b.push(`<span>Tip <b>${money(x.tip)}</b></span>`);if(x.cashout)b.push(`<span>Cash out <b>${money(x.cashout)}</b></span>`);
+    if(x.surcharge)b.push(`<span>Surcharge <b>${money(x.surcharge)}</b></span>`);return b.length?`<div class="tmd">${b.join('')}</div>`:'';}
+  function render(){if(!cur)return;const x=cur.txn,o=cur.opts,refund=x.kind==='refund',sim=x.provider==='practice';
+    $('#tmB').classList.toggle('sim',sim&&x.status==='pending');S.hidden=!(sim&&x.status==='pending');
+    const what=refund?'Refund to card':x.kind==='test'?'Test payment':'Card payment', head=`<div class="tk">${esc(what)} · ${esc(x.provider_name)}${x.till_name?' · '+esc(x.till_name):''}</div>`;
+    if(x.status==='pending'){
+      if(x.cashier_confirms){M.innerHTML=head+`<div class="tmi">${IC.card}</div><h2 id="tmTitle">Key ${money(x.amount)} into your card machine</h2>
+        <div class="ta">${money(x.amount)}</div><div class="ts">${refund?'Do a <b>refund</b> on the machine, then tap what it shows.':'Hand the machine to the customer to tap, insert or swipe. Then tap what the machine shows.'}</div>
+        <div class="tmx"><div class="tmf"><label>Card (optional)<select id="tmMs"><option value="">-</option>${(CARD.schemes||['Visa','Mastercard','EFTPOS','Amex','UnionPay']).map(s=>`<option>${s}</option>`).join('')}</select></label>
+          <label>Last 4 digits<input id="tmL4" inputmode="numeric" maxlength="4" placeholder="1234" autocomplete="off"></label><label>Auth code<input id="tmAu" maxlength="12" placeholder="Optional" autocomplete="off"></label></div>
+          <div class="row"><button class="tmbtn red" data-man="declined">Declined</button><button class="tmbtn go" data-man="approved">Approved</button></div>
+          <button class="tmbtn" data-tm="cancel">Cancel</button></div>`;return;}
+      const slow=Date.now()-cur.since>60000;
+      M.innerHTML=head+`<div class="tmi pl">${IC.card}</div><h2 id="tmTitle">Waiting for customer…</h2><div class="ta">${money(x.amount)}</div>
+        <div class="ts">${refund?'Ask the customer to tap or insert the card for the refund.':'Tap, insert or swipe the card on the machine.'}</div>
+        <div class="tmx"><button class="tmbtn no" data-tm="cancel">Cancel</button>
+        ${slow||cur.check?`<div class="tmchk"><b>No answer from the machine?</b><span class="tmh">Look at the card machine's screen or its last receipt.</span>
+          <div class="row"><button class="tmbtn" data-res="not_charged">It shows not charged</button><button class="tmbtn go" data-res="approved">It shows approved</button></div></div>`
+          :`<span class="tmh"><button class="tml" data-tm="check">No answer? Check the machine</button></span>`}</div>`;
+      $('#tmScr').innerHTML=`<small>${refund?'REFUND':'PURCHASE'}</small><b>${money(x.amount)}</b><small>Present card</small>`;
+      $('#tmCoBtn').disabled=refund;return;}
+    if(x.status==='approved'){const more=x.approved_amount&&x.approved_amount!==x.amount?`<div class="ts">Charged to the card: <b>${money(x.approved_amount)}</b></div>`:'';
+      M.innerHTML=head+`<div class="tmi">${IC.ok}</div><h2 id="tmTitle" style="color:#0f7b63">${refund?'Refund approved':'Approved'}</h2><div class="ta">${money(x.amount)}</div>${more}${details(x)}
+        ${x.cashout?`<div class="ts" style="color:#b54708;font-weight:700">Give the customer ${money(x.cashout)} cash out from the drawer.</div>`:''}
+        ${x.receipt_lines&&x.receipt_lines.length?`<div class="tmr">${x.receipt_lines.map(esc).join('\n')}</div>`:''}
+        <div class="tmx"><button class="tmbtn go" data-tm="done" id="tmDone">${o.doneLabel||(x.kind==='payment'?'Continue':'Done')}</button></div>`;
+      setTimeout(()=>{const b=$('#tmDone');b&&b.focus();},30);return;}
+    const warn=x.status==='cancelled'||x.status==='timeout';
+    M.innerHTML=head+`<div class="tmi ${warn?'warn':'bad'}">${warn?IC.wait:IC.no}</div><h2 id="tmTitle" style="color:${warn?'#b54708':'#b42318'}">${TITLES[x.status]||x.status}</h2>
+      <div class="ta" style="font-size:36px">${money(x.amount)}</div><div class="ts">${esc(x.message||'')}${x.kind==='payment'?'<br><b>Nothing was charged. The sale is still open.</b>':''}</div>${details(x)}
+      <div class="tmx"><div class="row"><button class="tmbtn" data-tm="other">${x.kind==='payment'?'Another way to pay':'Close'}</button><button class="tmbtn go" data-tm="retry">Try again</button></div></div>`;}
+  function poll(){clearTimeout(cur&&cur.timer);if(!cur||cur.txn.status!=='pending'||cur.txn.cashier_confirms)return;
+    cur.timer=setTimeout(async()=>{if(!cur)return;try{const r=await fetch(BASE+'terminal/'+cur.txn.id);const d=await r.json();if(d.ok&&cur&&cur.txn.id===d.txn.id)set(d.txn);}catch(e){}poll();},1000);}
+  function set(t){if(!cur)return;t.till_name=t.till_name||(cur.txn&&cur.txn.till_name);cur.txn=t;render();poll();}
+  function close(ok){if(!cur)return;clearTimeout(cur.timer);O.classList.remove('show');const c=cur;cur=null;ok?c.resolve(c.txn):c.reject(Object.assign(new Error(c.txn.status),{txn:c.txn}));}
+  async function begin(opts){const d=await post(BASE+'terminal/start',{kind:opts.kind||'payment',amount:opts.amount,till_id:opts.till_id,checkout_ref:opts.checkout_ref,
+      payload:opts.payload,sale_id:opts.sale_id,approval_id:opts.approval_id,orphan_of:opts.orphan_of});
+    if(!d.ok&&d.busy){if(typeof toast==='function')toast(d.error);return d.busy;}
+    if(!d.ok)throw new Error(d.error||'Could not start the card payment.');return d.txn;}
+  O.addEventListener('click',async e=>{const b=e.target.closest('button');if(!b||!cur)return;const x=cur.txn;
+    if(b.dataset.sim){const tip=b.dataset.sim==='tip'?$('#tmTip').value:'0',co=b.dataset.sim==='cashout'?$('#tmCo').value:'0';
+      const act=['tip','cashout'].includes(b.dataset.sim)?'approve':b.dataset.sim;
+      const d=await post(BASE+'terminal/'+x.id+'/practice',{action:act,tip,cashout:co,scheme:$('#tmSch').value,entry:$('#tmEnt').value});
+      if(d.ok)set(d.txn);else if(typeof toast==='function')toast(d.error);return;}
+    if(b.dataset.man){const d=await post(BASE+'terminal/'+x.id+'/manual',{result:b.dataset.man,last4:($('#tmL4')||{}).value,auth:($('#tmAu')||{}).value,scheme:($('#tmMs')||{}).value});
+      if(d.ok)set(d.txn);return;}
+    if(b.dataset.res){if(b.dataset.res==='approved'&&!confirm('Only if the card machine shows this payment as APPROVED. Continue?'))return;
+      const d=await post(BASE+'terminal/'+x.id+'/resolve',{action:b.dataset.res});if(d.ok)set(d.txn);return;}
+    const a=b.dataset.tm;
+    if(a==='cancel'){b.disabled=true;const d=await post(BASE+'terminal/'+x.id+'/cancel');if(d.ok)set(d.txn);return;}
+    if(a==='check'){cur.check=true;render();return;}
+    if(a==='done')return close(true);
+    if(a==='other')return close(false);
+    if(a==='retry'){try{const t=await begin(cur.opts);cur.since=Date.now();cur.check=false;set(t);}catch(err){if(typeof toast==='function')toast(err.message);}return;}});
+  document.addEventListener('keydown',e=>{if(!cur||e.key!=='Enter')return;const b=$('#tmDone');if(b){e.preventDefault();close(true);}},true);
+  function watch(txn,opts){return new Promise((resolve,reject)=>{cur={txn,opts:opts||{},resolve,reject,since:Date.now(),check:false};
+    O.classList.add('show');render();poll();});}
+  return {
+    config:CARD, tillOf, money,
+    linked(till){const p=tillOf(till).provider;return p&&p!=='none';},
+    async run(opts){const t=await begin(opts);t.till_name=t.till_name||(opts.till_name||'');return watch(t,opts);},
+    watch,
+  };
+})();
+</script>

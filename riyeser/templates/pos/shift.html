@@ -25,8 +25,15 @@ table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}td
 <tr class="t"><td>Difference</td><td class="n">{{ '+' if sh.variance > 0 }}{{ sh.variance|money }}</td></tr>
 {% if sh.deposit %}<tr><td>To bank{% if bank %} ({{ bank.name }}){% endif %}</td><td class="n">{{ sh.deposit|money }}</td></tr>{% endif %}
 <tr><td>Card (till)</td><td class="n">{{ fig.card_net|money }}</td></tr>
+{% if fig.card_extras %}<tr><td>Card tips/cash out/fees</td><td class="n">{{ fig.card_extras|money }}</td></tr>{% endif %}
 {% if sh.card_settlement is not none %}<tr><td>Card machine</td><td class="n">{{ sh.card_settlement|money }}</td></tr>{% endif %}
 {% endif %}</table>
+{% if fig.terminal and fig.terminal.schemes %}<hr><div><b>CARD TERMINAL BY CARD TYPE</b></div><table>
+{% for c in fig.terminal.schemes %}<tr><td>{{ c.scheme }} ({{ c.count }})</td><td class="n">{{ c.net|money }}</td></tr>{% endfor %}
+{% if fig.terminal.tips %}<tr><td>&nbsp; incl. tips</td><td class="n">{{ fig.terminal.tips|money }}</td></tr>{% endif %}
+{% if fig.terminal.cashout %}<tr><td>&nbsp; incl. cash out</td><td class="n">{{ fig.terminal.cashout|money }}</td></tr>{% endif %}
+{% if fig.terminal.surcharge %}<tr><td>&nbsp; incl. surcharges</td><td class="n">{{ fig.terminal.surcharge|money }}</td></tr>{% endif %}
+<tr class="t"><td>Terminal total</td><td class="n">{{ fig.terminal.net|money }}</td></tr></table>{% endif %}
 {% if sh.status == 'closed' and counts %}<hr><table>{% for d, n in counts if n %}<tr><td>{{ '$%d'|format(d // 100) if d >= 100 else '%dc'|format(d) }} x {{ n }}</td><td class="n">{{ (d * n)|money }}</td></tr>{% endfor %}</table>{% endif %}
 {% if sh.reason %}<hr><div>Reason: {{ sh.reason }}{% if appr and appr.method != 'self' %}<br>Approved by {{ users.get(appr.approved_by, '') }} ({{ appr.method }}){% endif %}</div>{% endif %}
 <hr><div class="c">Sent to Riyeser Accounting automatically</div>

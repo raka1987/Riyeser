@@ -98,7 +98,19 @@ body{overflow:hidden;user-select:none}
 .stepper button{width:56px;height:56px;border-radius:14px;border:1.5px solid var(--line2);background:#fff;font-size:26px;font-weight:700}
 .stepper b{font-size:26px;min-width:60px;text-align:center}
 .pcts{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.pcts button{border:1.5px solid var(--line2);background:#fff;border-radius:10px;padding:8px 14px;font-weight:700}
-#cashArea{display:flex;flex-direction:column;gap:12px}#cashArea[hidden],#cardArea[hidden]{display:none}
+#cashArea,#cardArea{display:flex;flex-direction:column;gap:12px}#cashArea[hidden],#cardArea[hidden],#ckeys[hidden]{display:none}
+.paid{display:flex;flex-direction:column;gap:6px}.paid:empty{display:none}
+.paid div{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--ok-bg);color:var(--ok);border-radius:12px;padding:10px 14px;font-weight:700}
+.paid div small{display:block;font-weight:600;color:#3f6b52;font-size:12.5px}
+.leftpay{display:flex;justify-content:space-between;align-items:center;border-radius:14px;padding:12px 16px;font-size:20px;font-weight:800;background:var(--warn-bg);color:var(--warn)}
+.leftpay[hidden]{display:none}
+.cardline{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.cardline .tl{color:var(--muted);font-size:14px}
+.rec{display:flex;flex-direction:column;gap:10px}.rec .it{border:1.5px solid #f6c37a;background:var(--warn-bg);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.rec .it b{font-size:16px}.rec .it small{color:var(--muted);display:block}.rec .acts{display:flex;gap:8px;flex-wrap:wrap}.rec .acts .btn{flex:1;min-width:140px}
+.give.co{background:var(--warn-bg);color:var(--warn)}
+.cardinfo{color:var(--muted);font-size:14.5px;text-align:center}
+#pPay [hidden],#pDone [hidden]{display:none!important}
 #pOpen .donec{margin:16px auto;gap:10px}#pOpen .keys button{min-height:48px}#pOpen .quick button{min-height:48px}
 .lowwarn{display:block;margin:0 0 10px;padding:9px 14px;border-radius:12px;background:var(--warn-bg);color:var(--warn);font-weight:600;font-size:14px;text-decoration:none}
 #lowNote{color:var(--warn);font-weight:600;font-size:13.5px}
@@ -159,6 +171,8 @@ body{overflow:hidden;user-select:none}
     <div><div class="lbl">Amount due</div><div class="due n" id="due">$0.00</div></div>
     <div id="sumlines"></div>
     <div class="gst"><span>Includes GST</span><span class="n" id="dueGst"></span></div>
+    <div class="paid" id="paidList"></div>
+    <div class="leftpay" id="leftBox" hidden><span>Left to pay</span><span class="n" id="leftAmt"></span></div>
   </div>
   <div class="card tend">
     <div class="methods" id="methods">
@@ -171,8 +185,13 @@ body{overflow:hidden;user-select:none}
       <div class="keys" id="keys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">⌫</button></div>
       <div class="chg short" id="chg"></div>
     </div>
-    <div id="cardArea" hidden><div class="wait"><div class="pulse"><svg class="ic" viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 6h6M12 17h.01"/></svg></div>
-      <div style="font-size:32px;font-weight:800" class="n" id="cardAmt"></div><div style="color:var(--muted)">Key this amount into the card machine. When it’s approved, finish the sale.</div></div></div>
+    <div id="cardArea" hidden>
+      <div class="disp"><small id="cardLbl">Charge to card</small><span class="n" id="cardAmt"></span></div>
+      <div class="cardline"><span class="tl" id="cardHow"></span><button class="btn sm" id="cardPart" type="button">Pay part by card (split)</button></div>
+      <div class="keys" id="ckeys" hidden><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">⌫</button></div>
+      <button class="btn go big" id="cardGo">Send to card machine</button>
+      <div class="cardinfo" id="cardInfo"></div>
+    </div>
     <p class="err" id="payErr"></p>
     <button class="btn go big" id="complete" disabled>Complete sale</button>
   </div>
@@ -183,6 +202,8 @@ body{overflow:hidden;user-select:none}
   <div class="tick"><svg class="ic" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
   <h2>Sale complete</h2>
   <div class="give" id="give"></div>
+  <div class="give co" id="giveCo" hidden></div>
+  <div class="cardinfo" id="doneCard"></div>
   <button class="btn go big" id="newSale">New sale</button>
   <div class="lbl" style="margin-top:4px">Receipt</div>
   <div class="g2b">
@@ -199,6 +220,9 @@ body{overflow:hidden;user-select:none}
   {% if 'notes' in f %}<label class="fld"><span>{{ 'Options & kitchen note (e.g. oat milk, no onions)' if mode == 'restaurant' else 'Note (e.g. size, colour)' }}</span><input id="lnNote" maxlength="120"></label>{% endif %}
   {% if 'discount' in f %}<label class="fld"><span>Discount %</span><input id="lnDisc" inputmode="decimal"></label><div class="pcts" id="pcts"><button data-p="0">None</button><button data-p="5">5%</button><button data-p="10">10%</button><button data-p="20">20%</button></div>{% endif %}
   <div style="display:flex;gap:10px;margin-top:18px"><button class="btn danger" id="lnRemove" style="flex:1">Remove item</button><button class="btn go" id="lnSave" style="flex:1.4">Done</button></div></div></div>
+<div class="modal" id="mRecover"><div class="box"><h2>Card payment not finished<button class="x" data-close>×</button></h2>
+  <p style="margin:-6px 0 12px;color:var(--muted)">Riyeser was closed (or lost the connection) while a card payment was going through. Check the card machine, then choose what happened. Nothing is charged twice.</p>
+  <div class="rec" id="recList"></div></div></div>
 <div class="modal" id="mTables"><div class="box"><h2>Choose a table<button class="x" data-close>×</button></h2><div class="tables" id="tables"></div></div></div>
 <div class="modal" id="mOrders"><div class="box"><h2>{{ 'Open orders' if mode == 'restaurant' else 'Held sales' }}<button class="x" data-close>×</button></h2><div class="olist" id="olist"></div></div></div>
 {% if 'customer' in f %}<div class="modal" id="mCust"><div class="box"><h2>Choose a customer<button class="x" data-close>×</button></h2>
@@ -206,6 +230,7 @@ body{overflow:hidden;user-select:none}
 {% endblock %}
 
 {% block scripts %}
+{% include "pos/_terminal.html" %}
 <script>
 (function(){
 const MODE='{{ mode }}', F=new Set({{ features|tojson }}), ITEMS={{ items_json|safe }}, CATS={{ cats|tojson }};
@@ -217,6 +242,10 @@ const fmt=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFra
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const initials=n=>n.split(/\s+/).filter(w=>/^[A-Za-z0-9]/.test(w)).slice(0,2).map(w=>w[0]).join('').toUpperCase();
 const otypes=$$('#otype button').map(b=>b.dataset.t);
+const RT=window.RiyeserTerminal;
+let checkout=null,paid=[],cardAmt=0,cardEdit=false,resumed=null;
+const newRef=()=>{const a=new Uint8Array(12);(window.crypto||window.msCrypto).getRandomValues(a);return 'co-'+[...a].map(b=>b.toString(16).padStart(2,'0')).join('');};
+const paidSum=()=>paid.reduce((s,p)=>s+p.amount,0), leftToPay=()=>Math.max(0,total()-paidSum());
 let cart=[],cat=ITEMS.some(i=>i.fav)?'★':'All',orderId=null,otype=MODE==='restaurant'?(otypes[0]||'takeaway'):'retail',table=null,cust=null,method=null,tend=0,editIdx=null,openOrders=[],last=null;
 const lt=l=>Math.round(l.qty*l.price*(1-(l.disc||0)/100)), total=()=>cart.reduce((s,l)=>s+lt(l),0);
 const gstOf=()=>Math.round(cart.reduce((s,l)=>s+lt(l)*l.rate/(100+l.rate),0));
@@ -245,7 +274,7 @@ function draw(){
   if($('#tableBtn')){$('#tableBtn').style.display=otype==='dine_in'?'':'none';$('#tableLbl').textContent=table?'Table '+table:'Choose a table';}
   if($('#custLbl'))$('#custLbl').textContent=cust?CUSTOMERS[CUST_IDS.indexOf(+cust)]||WALK_IN:WALK_IN;}
 function setType(t){otype=t;$$('#otype button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));draw();}
-function reset(){cart=[];orderId=null;table=null;cust=null;method=null;tend=0;if(MODE==='restaurant')setType(otypes[0]||'takeaway');else draw();}
+function reset(){cart=[];orderId=null;table=null;cust=null;method=null;tend=0;checkout=null;paid=[];resumed=null;if(MODE==='restaurant')setType(otypes[0]||'takeaway');else draw();}
 // held orders / tables
 async function loadOrders(){try{openOrders=await (await fetch(U.orders)).json();}catch(e){openOrders=[];}
   $$('[data-ocount]').forEach(n=>{n.hidden=!openOrders.length;n.textContent=openOrders.length;});}
@@ -267,19 +296,46 @@ async function saveOrder(kitchen){
   const d=await r.json().catch(()=>({ok:false,error:'Could not save the order.'}));
   if(!d.ok){toast(d.error);return null;}return d;}
 // payment
-function openPay(){method=null;tend=0;$$('#methods button').forEach(b=>b.classList.remove('on'));$('#cashArea').hidden=true;$('#cardArea').hidden=true;$('#payErr').textContent='';
-  const t=total();$('#due').textContent=fmt(t);$('#dueGst').textContent=fmt(gstOf());$('#cardAmt').textContent=fmt(t);
+function openPay(){method=null;tend=0;cardEdit=false;$$('#methods button').forEach(b=>b.classList.remove('on'));$('#cashArea').hidden=true;$('#cardArea').hidden=true;$('#payErr').textContent='';
+  if(!checkout)checkout=newRef();
+  const t=total();$('#due').textContent=fmt(t);$('#dueGst').textContent=fmt(gstOf());cardAmt=leftToPay();
   const lb=label();$('#payTag').textContent=lb;$('#payTag').style.display=lb?'':'none';
   $('#sumlines').innerHTML=cart.map(l=>`<div class="sl"><span class="q">${+l.qty.toFixed(3)}</span><div><b>${esc(l.name)}</b>${l.note?`<small>${esc(l.note)}</small>`:''}${l.disc?`<small>${l.disc}% off</small>`:''}</div><span class="n">${fmt(lt(l))}</span></div>`).join('');
-  const q=[t,Math.ceil(t/500)*500,Math.ceil(t/1000)*1000,Math.ceil(t/2000)*2000,Math.ceil(t/5000)*5000,Math.ceil(t/10000)*10000].filter((v,i,a)=>v>0&&a.indexOf(v)===i).slice(0,4);
+  const r0=leftToPay(),q=[r0,Math.ceil(r0/500)*500,Math.ceil(r0/1000)*1000,Math.ceil(r0/2000)*2000,Math.ceil(r0/5000)*5000,Math.ceil(r0/10000)*10000].filter((v,i,a)=>v>0&&a.indexOf(v)===i).slice(0,4);
   $('#quick').innerHTML=q.map((v,i)=>`<button data-cash="${v}">${i===0?'Exact':fmt(v).replace('.00','')}</button>`).join('');
   updPay();show('#pPay',true);}
-function updPay(){const t=total();$('#tend').textContent=fmt(tend);$$('#quick button').forEach(b=>b.classList.toggle('on',+b.dataset.cash===tend));
+function till(){return $('#till').value||null;}
+function updPay(){const t=leftToPay();$('#tend').textContent=fmt(tend);$$('#quick button').forEach(b=>b.classList.toggle('on',+b.dataset.cash===tend));
   const c=tend-t,e=$('#chg');e.className='chg'+(c<0?' short':'');e.innerHTML=c<0?`<span>Still to pay</span><span class="n">${fmt(-c)}</span>`:`<span>Change to give</span><span class="n">${fmt(c)}</span>`;
-  $('#complete').disabled=!method||(method==='cash'&&tend<t);$('#complete').textContent=method==='card'?'Card approved: complete sale':'Complete sale';}
+  $('#paidList').innerHTML=paid.map(p=>`<div><span>Card ${p.scheme?esc(p.scheme)+' ':''}${p.last4?'••'+esc(p.last4):''}<small>${p.txn_id?'Approved'+(p.auth?' · auth '+esc(p.auth):''):'Card (not linked)'}</small></span><span class="n">${fmt(p.amount)}</span></div>`).join('');
+  $('#leftBox').hidden=!paid.length;$('#leftAmt').textContent=fmt(t);
+  const linkedT=RT.linked(till()),info=RT.tillOf(till());
+  if(cardAmt>t||(cardAmt<=0&&!cardEdit))cardAmt=t;$('#cardAmt').textContent=fmt(cardAmt);$('#ckeys').hidden=!cardEdit;
+  $('#cardLbl').textContent=cardAmt<t?'Charge to card (part)':'Charge to card';
+  $('#cardHow').textContent=linkedT?info.name:'Card machine not linked';
+  $('#cardPart').textContent=cardEdit?'Done':'Pay part by card (split)';
+  $('#cardGo').textContent=linkedT?(info.cashier_confirms?'Key '+fmt(cardAmt)+' into the machine':'Send '+fmt(cardAmt)+' to card machine'):'Card approved: '+fmt(cardAmt);
+  $('#cardGo').disabled=cardAmt<=0;
+  $('#cardInfo').textContent=linkedT?(info.cashier_confirms?'Then tap Approved or Declined.':'The customer taps, inserts or swipes on the machine.'):'Key this amount into the card machine. When it’s approved, tap the button.';
+  $('.back').style.visibility=paid.some(p=>p.txn_id)?'hidden':'';
+  const done=t===0&&paid.length;
+  $('#complete').hidden=method==='card'&&!done;
+  $('#complete').disabled=!(done||(method==='cash'&&tend>=t));$('#complete').textContent=done?'Finish sale':'Complete sale';}
+async function payCard(){$('#payErr').textContent='';const amt=cardAmt,t=till();
+  if(!RT.linked(t)){paid.push({amount:amt,txn_id:null});cardEdit=false;cardAmt=leftToPay();if(!leftToPay())return complete();updPay();return;}
+  const payload={lines:cart.map(l=>({item_id:l.id,qty:l.qty,discount_pct:l.disc,note:l.note,name:l.name})),customer_id:cust,order_id:orderId,
+    order_type:otype,table_no:table,total:total(),paid:paid.map(p=>p.txn_id).filter(Boolean)};
+  try{const x=await RT.run({kind:'payment',amount:amt,till_id:t,checkout_ref:checkout,payload,till_name:$('#till').selectedOptions[0].text});
+    if(x.checkout_ref!==checkout){toast('That was another payment. Finish it from the list.');return;}
+    if(!paid.some(p=>p.txn_id===x.id))paid.push({amount:x.amount,txn_id:x.id,scheme:x.card_scheme,last4:x.card_last4,auth:x.auth_code,cashout:x.cashout});
+    cardEdit=false;cardAmt=leftToPay();if(!leftToPay())return complete();
+    toast('Card approved. '+fmt(leftToPay())+' left to pay.');updPay();}
+  catch(err){if(err.txn)$('#payErr').textContent=(err.txn.status==='declined'?'Card declined. ':'Card payment not taken. ')+'Try again or choose another way to pay.';
+    else $('#payErr').textContent=err.message;updPay();}}
 async function complete(){$('#complete').disabled=true;
-  const till=$('#till').value||null;
-  const body={order_id:orderId,order_type:otype,table_no:table,customer_id:cust,method,tendered:(tend/100).toFixed(2),till_id:till,
+  const tl=till(),left=leftToPay();
+  const tenders=paid.map(p=>({method:'card',amount:p.amount,txn_id:p.txn_id}));if(left>0||(method==='cash'&&tend>0&&!paid.length))tenders.push({method:'cash',tendered:tend});
+  const body={order_id:orderId,order_type:otype,table_no:table,customer_id:cust,method:paid.length?'card':method,tenders,checkout_ref:checkout,till_id:tl,
     lines:cart.map(l=>({item_id:l.id,qty:l.qty,discount_pct:l.disc,note:l.note}))};
   const top=Math.max(0,...cart.map(l=>l.disc||0));
   if(RULES.discount&&top>RULES.discount_limit&&!SELF_OK){
@@ -296,7 +352,12 @@ async function complete(){$('#complete').disabled=true;
     d=await r.json().catch(()=>({ok:false,error:'Something went wrong. The sale was not saved.'}));}
   if(!d.ok){$('#payErr').textContent=d.error;updPay();return;}
   last=d;cart.forEach(l=>{const it=ITEMS.find(i=>i.id===l.id);if(it&&it.stock!==null)it.stock-=l.qty;});
-  $('#give').innerHTML=method==='cash'?`<span>Give change</span><span class="n">${fmt(d.change)}</span>`:`<span>Paid by card</span><span class="n">${fmt(d.total)}</span>`;
+  const cardTot=(d.cards||[]).reduce((s,c)=>s+c.amount,0)||(d.method==='card'?d.total:0);
+  $('#give').innerHTML=d.method==='card'?`<span>Paid by card</span><span class="n">${fmt(d.total)}</span>`:`<span>Give change</span><span class="n">${fmt(d.change)}</span>`;
+  $('#giveCo').hidden=!d.cashout;$('#giveCo').innerHTML=d.cashout?`<span>Give cash out</span><span class="n">${fmt(d.cashout)}</span>`:'';
+  $('#doneCard').innerHTML=(d.cards||[]).map(c=>`${esc(c.scheme||'Card')} ${c.last4?'••'+esc(c.last4):''}${c.auth?' · auth '+esc(c.auth):''} · ${fmt(c.amount)}`).join('<br>')
+    +(d.method==='split'?`<br>Card ${fmt(cardTot)} + cash ${fmt(d.total-cardTot)}`:'')+(cardTot&&!d.drawer?'<br>No cash: the drawer stays shut.':'');
+  if(d.drawer)document.dispatchEvent(new CustomEvent('riyeser:open-drawer',{detail:{cashout:d.cashout||0,change:d.change||0}}));
   $('#doneNote').textContent='Saved to Accounting · stock updated';
   const ln=$('#lowNote');if(ln){ln.hidden=!(d.low_stock&&d.low_stock.length);ln.textContent=ln.hidden?'':'Low on stock: '+d.low_stock.join(', ');}
   show('#pPay',false);show('#pDone',true);reset();loadOrders();drawGrid();}
@@ -306,6 +367,7 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button,[da
   if(b.dataset.close!==undefined){b.closest('.modal').classList.remove('show');return;}
   if(b.dataset.back!==undefined){show('#pPay',false);return;}
   if(b.dataset.cat){cat=b.dataset.cat;$('#q').value='';drawCats();drawGrid();return;}
+  if(b.dataset.rec){recAct(b.dataset.rec,+b.dataset.rid);return;}
   if(b.dataset.id){add(b.dataset.id);return;}
   if(b.dataset.edit!==undefined){editIdx=+b.dataset.edit;const l=cart[editIdx];$('#lnTitle').textContent=l.name;$('#lnQty').textContent=+l.qty.toFixed(3);
     if($('#lnNote'))$('#lnNote').value=l.note||'';if($('#lnDisc'))$('#lnDisc').value=l.disc||'';show('#mLine',true);return;}
@@ -316,7 +378,10 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button,[da
     table=t;show('#mTables',false);draw();return;}
   if(b.dataset.open){openOrder(b.dataset.open);return;}
   if(b.dataset.cust!==undefined){cust=b.dataset.cust?+b.dataset.cust:null;show('#mCust',false);draw();return;}
-  if(b.dataset.m){method=b.dataset.m;$$('#methods button').forEach(x=>x.classList.toggle('on',x===b));$('#cashArea').hidden=method!=='cash';$('#cardArea').hidden=method!=='card';updPay();return;}
+  if(b.dataset.m){method=b.dataset.m;$$('#methods button').forEach(x=>x.classList.toggle('on',x===b));$('#cashArea').hidden=method!=='cash';$('#cardArea').hidden=method!=='card';cardAmt=leftToPay();cardEdit=false;updPay();return;}
+  if(b.id==='cardPart'){cardEdit=!cardEdit;if(cardEdit)cardAmt=0;else if(!cardAmt)cardAmt=leftToPay();updPay();return;}
+  if(b.closest('#ckeys')){let c=String(cardAmt);if(b.dataset.k==='del')c=c.slice(0,-1)||'0';else c=(c==='0'?'':c)+b.textContent;cardAmt=Math.min(+c,leftToPay());$('#cardAmt').textContent=fmt(cardAmt);$('#cardGo').disabled=cardAmt<=0;
+    $('#cardGo').textContent=RT.linked(till())?'Send '+fmt(cardAmt)+' to card machine':'Card approved: '+fmt(cardAmt);return;}
   if(b.dataset.cash){tend=+b.dataset.cash;updPay();return;}
   if(b.closest('#keys')){let c=String(tend);if(b.dataset.k==='del')c=c.slice(0,-1)||'0';else c=(c==='0'?'':c)+b.textContent;tend=Math.min(+c,99999999);updPay();return;}});
 $('#lnMinus').onclick=()=>{const l=cart[editIdx];l.qty=Math.max(1,l.qty-1);$('#lnQty').textContent=+l.qty.toFixed(3);};
@@ -332,7 +397,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){$$('.modal').forEac
   const t=e.target;if(t.matches('input,select,textarea')||$$('.modal.show,.panel.show').length||e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key.length===1){$('#q').focus();}});
 $('#pay').onclick=()=>{if(otype==='dine_in'&&!table){loadOrders().then(showTables);toast('Choose a table first');return;}openPay();};
-$('#complete').onclick=complete;$('#newSale').onclick=newSale;
+$('#complete').onclick=complete;$('#cardGo').onclick=payCard;$('#newSale').onclick=newSale;
 $('#noRc').onclick=()=>{toast('No receipt. The sale is saved.');newSale();};
 $('#printRc').onclick=()=>{if(!last)return;const w=window.open(last.receipt_url,'receipt','width=380,height=640');if(!w)location.href=last.receipt_url+'?back=1';newSale();};
 $('#clear').onclick=async()=>{if(!cart.length&&!orderId)return;
@@ -362,6 +427,30 @@ $('#openGo').onclick=async()=>{const t=$('#till').value;
   SHIFTS[t]=true;show('#pOpen',false);toast($('#till').selectedOptions[0].text+' is open');$('#q').focus();};
 document.addEventListener('tillchange',()=>{if(!needOpen())show('#pOpen',false);});
 needOpen();
+// card payments left unfinished (the PC crashed, the page was closed, the connection dropped)
+let unres=(RT.config.unresolved||[]);
+function drawRec(){if(!unres.length){show('#mRecover',false);return;}
+  $('#recList').innerHTML=unres.map(x=>{const when=esc((x.created_at||'').slice(11,16)),where=esc(x.till_name||'');
+    if(x.status==='pending')return `<div class="it"><div><b>${x.kind==='refund'?'Card refund':x.kind==='test'?'Test payment':'Card payment'} of ${fmt(x.amount)}: no answer yet</b><small>${when} · ${where} · ${esc(x.provider_name)}</small></div>
+      <div class="acts"><button class="btn go" data-rec="watch" data-rid="${x.id}">Check the card machine</button></div></div>`;
+    if(x.kind==='refund')return `<div class="it"><div><b>Card refund of ${fmt(x.amount)} approved, not recorded</b><small>${when} · ${where} · ${esc(x.card_scheme||'Card')} ${x.card_last4?'••'+esc(x.card_last4):''}</small></div>
+      <div class="acts"><a class="btn go" href="{{ url_for('pos.sales') }}?refund_txn=${x.id}">Record it on the Sales screen</a></div></div>`;
+    return `<div class="it"><div><b>Card ${fmt(x.amount)} approved, but the sale wasn't finished</b><small>${when} · ${where} · ${esc(x.card_scheme||'Card')} ${x.card_last4?'••'+esc(x.card_last4):''}${x.auth_code?' · auth '+esc(x.auth_code):''}</small></div>
+      <div class="acts"><button class="btn go" data-rec="resume" data-rid="${x.id}">Finish the sale</button><button class="btn danger" data-rec="refund" data-rid="${x.id}">Refund it to the card</button></div></div>`;}).join('');
+  show('#mRecover',true);}
+async function recAct(a,id){const x=unres.find(u=>u.id===id);if(!x)return;
+  if(a==='watch'){show('#mRecover',false);try{const t=await RT.watch(x,{doneLabel:x.kind==='payment'?'Continue':'Done'});x.status=t.status;Object.assign(x,t);}catch(e){if(e.txn)Object.assign(x,e.txn);}
+    unres=await (await fetch(U.base+'terminal/unresolved')).json();drawRec();return;}
+  if(a==='resume'){const p=x.payload||{};cart=(p.lines||[]).map(l=>{const it=ITEMS.find(i=>i.id===l.item_id)||{};return{id:l.item_id,name:it.name||l.name||'?',price:it.price||0,rate:it.rate||0,qty:l.qty,disc:l.discount_pct||0,note:l.note||''};}).filter(l=>l.price);
+    orderId=p.order_id||null;cust=p.customer_id||null;table=p.table_no||null;if(p.order_type)otype=p.order_type;checkout=x.checkout_ref;
+    paid=unres.filter(u=>u.kind==='payment'&&u.status==='approved'&&u.checkout_ref===x.checkout_ref).map(u=>({amount:u.amount,txn_id:u.id,scheme:u.card_scheme,last4:u.card_last4,auth:u.auth_code}));
+    unres=unres.filter(u=>u.checkout_ref!==x.checkout_ref||u.kind!=='payment');show('#mRecover',false);draw();openPay();return;}
+  if(a==='refund'){let ap={approval_id:null};
+    if(!SELF_OK){try{ap=await requestApproval({action:'refund',ref:'card '+x.id,amount:x.approved_amount,what:'Refund unfinished card payment',detail:'The sale was never finished',amountLabel:fmt(x.approved_amount),verb:'Approve refund'});}catch(e){return;}}
+    show('#mRecover',false);
+    try{await RT.run({kind:'refund',amount:x.approved_amount,till_id:x.till_id,orphan_of:x.id,approval_id:ap.approval_id,doneLabel:'Done'});toast('Refunded to the card.');}catch(e){if(!e.txn)toast(e.message);}
+    unres=await (await fetch(U.base+'terminal/unresolved')).json();drawRec();}}
+drawRec();
 drawCats();drawGrid();draw();loadOrders().then(()=>{const h=location.hash.slice(1);if(h==='tables'&&$('#tables'))showTables();else if(h==='held')showOrders();if(h)history.replaceState(null,'',location.pathname);});
 })();
 </script>

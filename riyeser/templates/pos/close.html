@@ -23,7 +23,9 @@ table.t{width:100%;border-collapse:collapse}table.t th,table.t td{padding:11px 1
 table.t th{font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);background:#f8fafc;font-weight:700}
 table.t td.r,table.t th.r{text-align:right}
 .closed{text-align:center;padding:40px 20px;display:flex;flex-direction:column;align-items:center;gap:12px}
-@media (max-width:1000px){.g2{grid-template-columns:1fr}.denoms{grid-template-columns:1fr}}
+.tscroll{overflow-x:auto;border:1px solid var(--line);border-radius:12px}table.sch th,table.sch td{padding:9px 10px;font-size:14px}
+@media (max-width:1000px){.g2{grid-template-columns:minmax(0,1fr)}.denoms{grid-template-columns:1fr}}
+@media (max-width:1180px){.denoms{grid-template-columns:1fr}}
 {% endblock %}
 {% block body %}
 {% set tname = (tills|selectattr('id', 'equalto', till)|first).name if till else 'Till' %}
@@ -47,6 +49,7 @@ table.t td.r,table.t th.r{text-align:right}
           <div><span>Opening float</span><span class="n">{{ fig.float|money }}</span></div>
           <div><span>Cash sales ({{ fig.count }} sale{{ '' if fig.count == 1 else 's' }} in total)</span><span class="n">{{ fig.cash|money }}</span></div>
           {% if fig.refund_cash %}<div><span>Cash refunds</span><span class="n">−{{ fig.refund_cash|money }}</span></div>{% endif %}
+          {% if fig.terminal and fig.terminal.cashout %}<div><span>Cash out given on card payments</span><span class="n">−{{ fig.terminal.cashout|money }}</span></div>{% endif %}
           {% if fig.voids %}<div><span>Voided sales (already taken off)</span><span class="n">{{ fig.voids }}</span></div>{% endif %}
           <div class="big"><span>Should be in the drawer</span><span class="n">{{ fig.expected|money }}</span></div>
         </div>
@@ -59,9 +62,20 @@ table.t td.r,table.t th.r{text-align:right}
       <div class="card pd">
         <h2>3 · Card &amp; banking</h2>
         <div class="rec"><div><span>Card sales{% if fig.refund_card %} (after refunds){% endif %}</span><span class="n">{{ fig.card_net|money }}</span></div>
+          {% set tm = fig.terminal %}
+          {% if tm and tm.tips %}<div><span>Tips added on the card machine</span><span class="n">{{ tm.tips|money }}</span></div>{% endif %}
+          {% if tm and tm.cashout %}<div><span>Cash out on the card machine</span><span class="n">{{ tm.cashout|money }}</span></div>{% endif %}
+          {% if tm and tm.surcharge %}<div><span>Card surcharges</span><span class="n">{{ tm.surcharge|money }}</span></div>{% endif %}
           <div><span>Total sales inc GST</span><span class="n">{{ fig.total|money }}</span></div><div><span>GST collected</span><span class="n">{{ fig.gst|money }}</span></div></div>
+        {% if tm and (tm.schemes or tm.count) %}
+        <div class="lbl" style="margin:16px 0 6px">Card terminal totals by card type</div>
+        <div class="tscroll"><table class="t sch"><tr><th>Card</th><th class="r">Payments</th><th class="r">Charged</th><th class="r">Refunded</th><th class="r">Net</th></tr>
+          {% for c in tm.schemes %}<tr><td>{{ c.scheme }}</td><td class="r n">{{ c.count }}</td><td class="r n">{{ c.amount|money }}</td><td class="r n">{% if c.refunded %}−{{ c.refunded|money }}{% else %}–{% endif %}</td><td class="r n"><b>{{ c.net|money }}</b></td></tr>{% endfor %}
+          <tr><td><b>All cards</b></td><td class="r n"><b>{{ tm.count }}</b></td><td class="r n"><b>{{ tm.charged|money }}</b></td><td class="r n"><b>{% if tm.refunded %}−{{ tm.refunded|money }}{% else %}–{% endif %}</b></td><td class="r n"><b>{{ tm.net|money }}</b></td></tr></table></div>
+        <p style="font-size:13px;color:var(--muted);margin:6px 0 0">From approved card terminal transactions (tips, cash out and surcharges included). Compare each line with the card machine's settlement or end-of-day report.{% if fig.card_net + fig.card_extras != tm.net %} Card sales not taken through the terminal: {{ (fig.card_net + fig.card_extras - tm.net)|money }}.{% endif %}</p>
+        {% endif %}
         <div style="margin:12px 0"><label class="lbl" for="settle">Card machine settlement total (optional)</label>
-          <input class="f" id="settle" name="card_settlement" inputmode="decimal" placeholder="e.g. {{ '%.2f'|format(fig.card_net / 100) }}" style="margin-top:6px"><div id="settleNote" style="font-size:13.5px;margin-top:6px"></div></div>
+          <input class="f" id="settle" name="card_settlement" inputmode="decimal" placeholder="e.g. {{ '%.2f'|format((fig.card_machine if fig.card_machine is defined else fig.card_net) / 100) }}" style="margin-top:6px"><div id="settleNote" style="font-size:13.5px;margin-top:6px"></div></div>
         <label class="chk"><input type="checkbox" name="bank_it" value="1" checked id="bankIt"> Record the takings going to the bank</label>
         <div id="bankRow"><div class="rec"><div><span>Keep in the drawer (float)</span><span class="n">{{ fig.float|money }}</span></div><div><span>Takings to bank</span><span class="n" id="toBank">$0.00</span></div></div>
           <select class="f" name="bank_id" style="margin-top:10px" aria-label="Bank account">{% for b in banks %}<option value="{{ b.id }}" {{ 'selected' if b.id == default_bank }}>{{ b.code }} {{ b.name }}</option>{% endfor %}</select></div>
@@ -91,7 +105,7 @@ if(TILL&&sel&&sel.value!=String(TILL)){sel.value=String(TILL);try{localStorage.s
 document.addEventListener('tillchange',()=>{location.href=location.pathname+'?till='+sel.value;});
 const form=document.getElementById('closeForm');if(!form)return;
 {% if shift %}
-const EXPECTED={{ fig.expected|tojson }}, FLOAT={{ fig.float|tojson }}, CARD={{ fig.card_net|tojson }}, LIMIT={{ rules.close_limit|tojson }}, NEEDS={{ (rules.close and not self_ok)|tojson }}, SHIFT={{ shift.id|tojson }};
+const EXPECTED={{ fig.expected|tojson }}, FLOAT={{ fig.float|tojson }}, CARD={{ (fig.card_machine if fig.card_machine is defined else fig.card_net)|tojson }}, LIMIT={{ rules.close_limit|tojson }}, NEEDS={{ (rules.close and not self_ok)|tojson }}, SHIFT={{ shift.id|tojson }};
 const $=s=>document.querySelector(s), fmt=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2});
 let counted=0,diff=0;
 function upd(){counted=0;document.querySelectorAll('.dn').forEach(r=>{const i=r.querySelector('input'),n=Math.max(0,parseInt(i.value)||0),v=n*+i.dataset.v;counted+=v;r.querySelector('.sv').textContent=fmt(v);});

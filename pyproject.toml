@@ -21,7 +21,7 @@ riyeser-accounting = "riyeser.desktop:main"
 riyeser = "riyeser.cli:main"
 
 [tool.setuptools]
-packages = ["riyeser", "riyeser.views"]
+packages = ["riyeser", "riyeser.views", "riyeser.terminals"]
 include-package-data = true
 
 [tool.setuptools.package-data]

@@ -39,6 +39,9 @@
     <td>{% if tills|length > 1 %}<label class="check"><input type="checkbox" name="till_remove_{{ t.id }}" value="1"> Remove</label>{% endif %}</td></tr>{% endfor %}
   <tr><td><input name="new_till" maxlength="40" placeholder="+ Add another till, e.g. Till 2"></td><td><input name="new_till_loc" maxlength="60" placeholder="Location"></td><td></td></tr></table></div>
 </div>
+<div class="card"><h2 style="margin-top:0">4 · Card payments</h2>
+  <p class="sub" style="margin-top:-4px">Link each till to a card machine (EFTPOS): Manual, the Practice terminal, or a linked terminal (coming soon). Test it with a $1.00 payment.</p>
+  <a class="btn" href="{{ url_for('pos.card_setup') }}">Set up card payments</a></div>
 {% if can_change %}<p class="actions" style="justify-content:flex-end"><a class="btn" href="{{ url_for('core.dashboard') }}">Cancel</a><button class="btn pri">Save POS setup</button></p>{% endif %}
 </fieldset>
 </form>

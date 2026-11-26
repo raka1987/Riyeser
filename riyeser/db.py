@@ -378,6 +378,8 @@ def migrate(db):
     _unique_document_numbers(db)
     _crm_and_expense_tables(db)
     _payrun_roster(db)
+    from .terminals.store import ensure_schema as _card_terminal_schema
+    _card_terminal_schema(db)  # POS card payments: terminal attempts, their history, split tenders
     db.commit()
 
 

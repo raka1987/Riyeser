@@ -60,9 +60,9 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
     <div class="card" style="overflow:hidden"><div class="pd" style="padding-bottom:8px"><h3>Sales</h3></div>
       <table class="t"><tr><th>Time</th><th>Receipt</th><th>Customer</th><th>Paid</th><th class="r">Total</th><th class="r noprint"></th></tr>
       {% for r in rows %}<tr class="{{ 'void' if r.voided }}"><td class="n">{{ r.created_at[11:16] }}</td><td><a href="{{ url_for('documents.view', doc_id=r.document_id) }}">{{ r.number }}</a>{% if r.till_name and tills|length > 1 %}<br><small style="color:var(--muted)">{{ r.till_name }}</small>{% endif %}</td>
-        <td>{{ r.cname }}</td><td>{{ methods[r.method] }}</td><td class="r n">{% if r.voided %}<s>{{ r.total|money }}</s>{% else %}{{ r.total|money }}{% endif %}</td>
+        <td>{{ r.cname }}</td><td>{{ labels[r.method] }}</td><td class="r n">{% if r.voided %}<s>{{ r.total|money }}</s>{% else %}{{ r.total|money }}{% endif %}</td>
         <td class="r noprint" style="white-space:nowrap">{% if r.voided %}<span class="badge err">Voided</span>{% else %}{% if refunded.get(r.id) %}<span class="badge warn">Refunded {{ refunded[r.id]|money }}</span> {% endif %}<a class="btn sm" href="{{ url_for('pos.receipt', sid=r.id) }}" target="_blank">Receipt</a>
-        {% if lv('sales') >= 2 %}<button class="btn sm" data-refund="{{ r.id }}">Refund</button>{% if not refunded.get(r.id) %} <button class="btn sm danger" data-void="{{ r.id }}" data-num="{{ r.number }}" data-total="{{ r.total }}" data-method="{{ methods[r.method] }}" data-time="{{ r.created_at[11:16] }}">Void</button>{% endif %}{% endif %}{% endif %}</td></tr>
+        {% if lv('sales') >= 2 %}<button class="btn sm" data-refund="{{ r.id }}">Refund</button>{% if not refunded.get(r.id) %} <button class="btn sm danger" data-void="{{ r.id }}" data-num="{{ r.number }}" data-total="{{ r.total }}" data-method="{{ labels[r.method] }}" data-time="{{ r.created_at[11:16] }}">Void</button>{% endif %}{% endif %}{% endif %}</td></tr>
       {% else %}<tr><td colspan="6" class="none">No POS sales on this day.</td></tr>{% endfor %}</table>
       {% if refunds %}<div class="pd" style="padding-bottom:6px"><h3>Refunds</h3></div><table class="t"><tr><th>Time</th><th>From sale</th><th>Paid back</th><th>Reason</th><th class="r">Amount</th></tr>
       {% for f in refunds %}<tr><td class="n">{{ f.created_at[11:16] }}</td><td>{{ f.number }}</td><td>{{ methods[f.method] }}</td><td>{{ f.reason or '' }}</td><td class="r n">-{{ f.amount|money }}</td></tr>{% endfor %}</table>{% endif %}</div>
@@ -76,6 +76,7 @@ table.t td.r,table.t th.r{text-align:right}table.t tr.void td{color:#94a3b8}tabl
 </div>
 {% endblock %}
 {% block scripts %}
+{% include "pos/_terminal.html" %}
 <div class="modal" id="mRefund"><div class="box"><h2><span id="rfTitle">Refund</span><button class="x" data-rclose>&times;</button></h2>
   <p style="margin:-6px 0 10px;color:var(--muted)">Choose what the customer is bringing back. Stock goes back and GST comes off.</p>
   <div id="rfLines"></div>
@@ -104,14 +105,28 @@ document.addEventListener('click',async e=>{const b=e.target.closest('button');i
   if(b.dataset.m){rf.method=b.dataset.m;drawRf();return;}
   if(b.dataset.inc!==undefined||b.dataset.dec!==undefined){const l=rf.lines[+(b.dataset.inc??b.dataset.dec)];
     l.q=Math.min(l.left,Math.max(0,l.q+(b.dataset.inc!==undefined?1:-1)));drawRf();return;}
-  if(b.id==='rfGo'&&!b.disabled){const amt=total();
+  if(b.id==='rfGo'&&!b.disabled){const amt=total(),till=($('#till')||{}).value,RT=window.RiyeserTerminal;
+    const lines={};rf.lines.forEach(l=>{if(l.q>0)lines[l.id]=l.q;});
+    const send=async body=>{const r=await fetch(BASE+'sale/'+rf.sid+'/refund',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      return r.json().catch(()=>({ok:false,error:'Something went wrong.'}));};
     try{const a=await requestApproval({action:'refund',ref:rf.sid,amount:amt,what:'Refund from '+rf.num,detail:'Paid back by '+(rf.method==='cash'?'cash':'card'),amountLabel:fmt(amt),verb:'Approve refund'});
-      const lines={};rf.lines.forEach(l=>{if(l.q>0)lines[l.id]=l.q;});
-      const r=await fetch(BASE+'sale/'+rf.sid+'/refund',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({lines,method:rf.method,approval_id:a.approval_id,reason:a.reason,till_id:($('#till')||{}).value})});
-      const d=await r.json().catch(()=>({ok:false,error:'Something went wrong.'}));
-      if(!d.ok){$('#rfErr').textContent=d.error;return;}
-      toast('Refunded '+fmt(d.amount)+'. Pay this back to the customer.');setTimeout(()=>location.reload(),900);}catch(err){}}});
+      const body={lines,method:rf.method,approval_id:a.approval_id,reason:a.reason,till_id:till};
+      if(rf.method==='card'&&RT.linked(till)){  // the money goes back through the card machine first
+        const pv=await send({...body,preview:true});if(!pv.ok){$('#rfErr').textContent=pv.error;return;}
+        $('#mRefund').classList.remove('show');
+        let x;try{x=await RT.run({kind:'refund',amount:pv.amount,till_id:till,sale_id:rf.sid,approval_id:a.approval_id,payload:{lines,reason:a.reason,method:'card'},doneLabel:'Record the refund'});}
+        catch(err){toast(err.txn?'The card refund did not go through. Nothing was refunded.':err.message);$('#mRefund').classList.add('show');return;}
+        body.terminal_txn_id=x.id;}
+      const d=await send(body);
+      if(!d.ok){$('#rfErr').textContent=d.error;$('#mRefund').classList.add('show');return;}
+      toast('Refunded '+fmt(d.amount)+(rf.method==='card'?' to the card.':'. Pay this back to the customer.'));setTimeout(()=>location.reload(),900);}catch(err){}}});
+// a card refund the machine approved but Riyeser never recorded (opened from the Sell screen's list)
+(async function(){const id=new URLSearchParams(location.search).get('refund_txn');if(!id)return;
+  const x=((await (await fetch(BASE+'terminal/'+id)).json()).txn)||null;if(!x||x.status!=='approved'||x.refund_id||!x.sale_id||!x.payload)return;
+  try{const a=await requestApproval({action:'refund',ref:String(x.sale_id),amount:x.amount,what:'Record card refund',detail:'Already refunded on the card machine',amountLabel:fmt(x.amount),verb:'Record refund'});
+    const r=await fetch(BASE+'sale/'+x.sale_id+'/refund',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({lines:x.payload.lines,method:'card',approval_id:a.approval_id,reason:a.reason||x.payload.reason,till_id:x.till_id,terminal_txn_id:x.id})});
+    const d=await r.json().catch(()=>({ok:false,error:'Something went wrong.'}));toast(d.ok?'Card refund recorded.':d.error);if(d.ok)setTimeout(()=>location.href=location.pathname,900);}catch(e){}})();
 function total(){return rf.lines.reduce((a,l)=>a+l.q*l.each,0);}
 function drawRf(){$('#rfTitle').textContent='Refund from '+rf.num;
   $('#rfLines').innerHTML=rf.lines.map((l,i)=>`<div class="rl"><div><b>${esc(l.description)}</b><small>${fmt(l.each)} each \u00b7 ${+l.left.toFixed(3)} can be refunded</small></div>

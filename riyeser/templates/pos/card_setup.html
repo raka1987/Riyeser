@@ -1,0 +1,67 @@
+{% extends "base.html" %}{% block title %}Card payments{% endblock %}
+{% block content %}
+<style>
+.cp-tills{display:flex;flex-direction:column;gap:16px}
+.cp-h{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.cp-h h2{margin:0}.cp-h small{display:block;color:var(--muted)}
+.cp-opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.cp-o{display:flex;gap:12px;align-items:flex-start;border:2px solid var(--line);border-radius:14px;padding:14px;cursor:pointer;background:#fff;min-width:0}
+.cp-o input{width:auto;margin-top:4px;flex-shrink:0}
+.cp-o b{display:block;font-size:15px}.cp-o small{color:var(--muted);display:block}
+.cp-o:has(input:checked){border-color:#0f7b63;background:#f3fbf8}
+.cp-o.soon{opacity:.6;cursor:not-allowed;background:#f8fafc}
+.cp-tag{display:inline-block;font-size:11.5px;font-weight:700;border-radius:999px;padding:2px 8px;margin-left:6px;background:#eef1f4;color:#475467;vertical-align:1px}
+.cp-tag.soon{background:#fff4e5;color:#b54708}.cp-tag.on{background:#e7f6ec;color:#137a3d}
+.cp-test{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.cp-tbl{overflow-x:auto}
+.cp-tbl table{width:100%;border-collapse:collapse;min-width:640px}.cp-tbl th,.cp-tbl td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;font-size:14px;vertical-align:top}
+.cp-tbl td.r,.cp-tbl th.r{text-align:right}
+.cp-tbl details summary{cursor:pointer;color:var(--brand);font-weight:600}
+.cp-tbl ol{margin:6px 0 0;padding-left:18px;color:var(--muted);font-size:13px}
+.st{font-weight:700}.st.approved{color:#137a3d}.st.declined,.st.error{color:#b42318}.st.cancelled,.st.timeout{color:#b54708}.st.pending{color:#1f4e86}
+@media (max-width:900px){.cp-opts{grid-template-columns:1fr}}
+</style>
+<div class="head"><div><h1>Card payments</h1><p class="sub">How each till takes cards (EFTPOS). The amount goes to the card machine, the customer pays, and the machine tells the till approved or declined.</p></div>
+  <div class="actions"><a class="btn" href="{{ url_for('pos.setup') }}">POS setup</a><a class="btn" href="{{ url_for('pos.register') }}">Open the till</a></div></div>
+<div class="tip" style="display:flex;gap:10px;align-items:flex-start;background:var(--brand-l);color:#1e3a5f;border-radius:12px;padding:12px 14px;margin-bottom:18px"><span>ⓘ</span>
+  <div>Changing this never changes past sales. <b>Practice terminal</b> is a pretend machine for training: no money moves.{% if demo %} This is a demo company, so tills use the practice terminal unless you choose otherwise.{% endif %}
+  Linked terminals from card providers (Stripe Terminal, Windcave, and more) are coming: they'll appear here once Riyeser is certified with each provider.{% if not can_change %} <b>Only an owner or administrator can change this.</b>{% endif %}</div></div>
+<form method="post">
+<fieldset {{ 'disabled' if not can_change }} style="border:0;padding:0;margin:0">
+<div class="cp-tills">
+{% for t in tills %}{% set cur = current[t.id] %}
+<div class="card" id="till-{{ t.id }}">
+  <div class="cp-h"><div><h2>{{ t.name }}</h2><small>{{ t.location or '' }}</small></div>
+    <span class="cp-tag on">Now: {{ (providers|selectattr('key', 'equalto', cur)|first).name }}{% if not saved[t.id] and demo %} (demo){% endif %}</span></div>
+  <div class="cp-opts">{% for p in providers %}
+    <label class="cp-o {{ 'soon' if not p.available }}"><input type="radio" name="provider_{{ t.id }}" value="{{ p.key }}" {{ 'checked' if p.key == cur }} {{ 'disabled' if not p.available }}>
+      <span><b>{{ p.name }}{% if p.coming_soon %}<span class="cp-tag soon">Coming soon</span>{% endif %}</b><small>{{ p.blurb }}</small>{% if p.countries and p.coming_soon %}<small>Where: {{ p.countries }}</small>{% endif %}</span></label>{% endfor %}</div>
+  {% if can_change %}<div class="cp-test"><button type="button" class="btn" data-test="{{ t.id }}" data-name="{{ t.name }}" {{ 'disabled' if cur == 'none' }}>Test a $1.00 payment</button>
+    <small class="muted">{% if cur == 'none' %}Choose a card machine and save first.{% else %}Uses {{ (providers|selectattr('key', 'equalto', cur)|first).name }}. Not added to sales or the books.{% endif %}</small></div>{% endif %}
+</div>{% endfor %}
+</div>
+<p class="muted" style="margin:12px 0">Each till can use a different machine. Add or rename tills in <a href="{{ url_for('pos.setup') }}">POS setup</a>.</p>
+{% if can_change %}<p class="actions" style="justify-content:flex-end"><a class="btn" href="{{ url_for('pos.setup') }}">Cancel</a><button class="btn pri">Save card payments</button></p>{% endif %}
+</fieldset>
+</form>
+<div class="card"><h2 style="margin-top:0">Recent card transactions</h2>
+  <p class="sub" style="margin-top:-4px">Every attempt is kept with its full history, including declined and cancelled ones.</p>
+  {% if recent %}<div class="cp-tbl"><table><tr><th>When</th><th>Till</th><th>What</th><th>Result</th><th>Card</th><th class="r">Amount</th><th>History</th></tr>
+  {% for r in recent %}<tr><td class="n">{{ r.created_at[5:16] }}</td><td>{{ r.till_name or '' }}</td><td>{{ r.kind|title }}{% if r.sale_id and r.kind == 'payment' %} · sale #{{ r.sale_id }}{% endif %}<br><small class="muted">{{ r.reference }} · {{ r.provider }}</small></td>
+    <td><span class="st {{ r.status }}">{{ words.get(r.status, r.status) }}</span>{% if r.resolution %}<br><small class="muted">{{ r.resolution|replace('_', ' ') }}</small>{% endif %}</td>
+    <td>{% if r.card_scheme or r.card_last4 %}{{ r.card_scheme or 'Card' }} ••{{ r.card_last4 or '????' }}{% if r.auth_code %}<br><small class="muted">auth {{ r.auth_code }}</small>{% endif %}{% endif %}</td>
+    <td class="r n">{{ r.amount|money }}{% if r.approved_amount and r.approved_amount != r.amount %}<br><small class="muted">charged {{ r.approved_amount|money }}</small>{% endif %}</td>
+    <td><details><summary>{{ history[r.id]|length }} step{{ '' if history[r.id]|length == 1 else 's' }}</summary><ol>{% for e in history[r.id] %}<li>{{ e.at[11:19] }} {{ e.note }}</li>{% endfor %}</ol></details></td></tr>{% endfor %}</table></div>
+  {% else %}<p class="muted">No card terminal transactions yet.</p>{% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+{% include "pos/_terminal.html" %}
+<script>
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-test]');if(!b)return;
+  try{const x=await window.RiyeserTerminal.run({kind:'test',amount:100,till_id:b.dataset.test,till_name:b.dataset.name,doneLabel:'Done'});
+    alert('Test payment approved'+(x.card_last4?' on card ••'+x.card_last4:'')+'. The card machine works with this till.'+(x.provider==='manual'?' If you really charged $1.00, void it on your machine.':''));}
+  catch(err){if(!err.txn)alert(err.message);}
+  location.reload();});
+</script>
+{% endblock %}

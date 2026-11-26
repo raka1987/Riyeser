@@ -4,6 +4,7 @@ Each sale becomes an ordinary tax invoice (prices include GST) that is paid at o
 so stock, the cash drawer / bank, GST and every report stay in step automatically.
 """
 import json
+import sqlite3
 from datetime import date, datetime, timedelta
 
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -15,10 +16,13 @@ from ..ledger import save_document, record_payment, void_payment, void_document,
     PostingError
 from . import guarded, opt_int
 from .. import perms
+from ..terminals import store as T
+from ..terminals import ENTRY_MODES
 
 bp = Blueprint("pos", __name__, url_prefix="/pos")
 
 METHODS = {"cash": "Cash", "card": "Card / EFTPOS"}
+METHOD_LABELS = {**METHODS, "split": "Split payment"}
 WALK_IN = "Walk-in Customer"
 
 
@@ -91,6 +95,19 @@ def pos_free_plan():
 
 def _tills(db):
     return db.execute("SELECT * FROM pos_tills WHERE active=1 ORDER BY id").fetchall()
+
+
+def card_ctx(db):
+    """What the till screens need for card payments: each till's terminal, and attempts left unfinished."""
+    from ..terminals import PROVIDERS, NONE_INFO
+    tills = {}
+    for t in _tills(db):
+        key = T.provider_for(db, t["id"])
+        info = PROVIDERS[key].describe() if key in PROVIDERS else NONE_INFO
+        tills[t["id"]] = dict(provider=key, name=info["name"], cashier_confirms=info["cashier_confirms"])
+    cur = db.execute("SELECT currency FROM company WHERE id=1").fetchone()[0] or "AUD"
+    return dict(tills=tills, currency=cur, unresolved=[T.as_json(r) | {"till_name": r["till_name"]}
+                                                        for r in T.unresolved(db)])
 
 
 # ------------------------------------------------------------ manager approvals (PIN or manager card)
@@ -303,6 +320,23 @@ def open_shift(db, till_id):
                       (till_id,)).fetchone()
 
 
+def _tender_sums(db, where, args):
+    """Cash and card taken by live (not voided) sales, from each sale's tenders (split payments count in both)."""
+    rows = db.execute("SELECT t.method, COALESCE(SUM(t.amount),0) a FROM pos_tenders t JOIN pos_sales p ON"
+                      f" p.id=t.sale_id WHERE p.voided=0 AND {where} GROUP BY t.method", args).fetchall()
+    sums = {r["method"]: r["a"] for r in rows}
+    return sums.get("cash", 0), sums.get("card", 0)
+
+
+def terminal_totals(db, where, args, refund_where, refund_args):
+    """Approved card terminal transactions on live sales (and approved terminal refunds), by card scheme."""
+    pays = db.execute("SELECT x.* FROM pos_terminal_txns x JOIN pos_sales p ON p.id=x.sale_id WHERE x.kind='payment'"
+                      f" AND x.status='approved' AND p.voided=0 AND {where}", args).fetchall()
+    refs = db.execute("SELECT x.* FROM pos_terminal_txns x JOIN pos_refunds r ON r.id=x.refund_id WHERE"
+                      f" x.kind='refund' AND x.status='approved' AND {refund_where}", refund_args).fetchall()
+    return T.card_totals(pays, refs)
+
+
 def shift_figures(db, sh):
     """Everything the X / Z report needs for one shift."""
     sales = db.execute("SELECT p.*, d.total, d.tax_total FROM pos_sales p JOIN documents d ON d.id=p.document_id"
@@ -310,18 +344,20 @@ def shift_figures(db, sh):
     live = [r for r in sales if not r["voided"]]
     voids = [r for r in sales if r["voided"]]
     refunds = db.execute("SELECT * FROM pos_refunds WHERE shift_id=?", (sh["id"],)).fetchall()
-    cash = sum(r["total"] for r in live if r["method"] == "cash")
-    card = sum(r["total"] for r in live if r["method"] == "card")
+    cash, card = _tender_sums(db, "p.shift_id=?", (sh["id"],))
     ref_cash = sum(r["amount"] for r in refunds if r["method"] == "cash")
     ref_card = sum(r["amount"] for r in refunds if r["method"] == "card")
     disc = db.execute("SELECT COALESCE(SUM(ROUND(l.qty*l.unit_price*l.discount_pct/100.0)),0) FROM pos_sales p"
                       " JOIN document_lines l ON l.document_id=p.document_id WHERE p.shift_id=? AND p.voided=0",
                       (sh["id"],)).fetchone()[0]
+    term = terminal_totals(db, "p.shift_id=?", (sh["id"],), "r.shift_id=?", (sh["id"],))
+    extras = term["tips"] + term["cashout"] + term["surcharge"]
     return dict(count=len(live), total=cash + card, cash=cash, card=card, gst=sum(r["tax_total"] for r in live)
                 - sum(r["tax"] for r in refunds), voids=len(voids), void_total=sum(r["total"] for r in voids),
                 refunds=len(refunds), refund_cash=ref_cash, refund_card=ref_card, discounts=int(disc),
-                float=sh["float_amount"], expected=sh["float_amount"] + cash - ref_cash,
-                card_net=card - ref_card)
+                float=sh["float_amount"], expected=sh["float_amount"] + cash - ref_cash - term["cashout"],
+                card_net=card - ref_card, terminal=term, card_extras=extras,
+                card_machine=card - ref_card + extras)
 
 
 @bp.route("/shift/open", methods=["POST"])
@@ -502,7 +538,8 @@ def register():
                          " AND qty_on_hand<=reorder_level").fetchone()[0]
     return render_template("pos/front.html", items_json=json.dumps(items), cats=cats, customers=customers, low_count=low,
                            walk_in=WALK_IN, methods=METHODS, mode=mode, features=sorted(features),
-                           tills=tills, shifts=shifts, floats=floats, **approval_ctx(db))
+                           tills=tills, shifts=shifts, floats=floats, card_payments=card_ctx(db),
+                           **approval_ctx(db))
 
 
 @bp.route("/photo/<int:iid>")
@@ -647,6 +684,110 @@ def docket(oid):
     return render_template("pos/docket.html", o=_order_json(db, o), user=g.user)
 
 
+def _tenders_from(data, total, provider):
+    """How the customer paid: [{method, amount, tendered, change, txn_id}], checked against the total.
+    The old single-method form ({method, tendered}) is still understood."""
+    raw = data.get("tenders")
+    if raw is None:
+        method = data.get("method")
+        if method not in METHODS:
+            raise PostingError("Choose how the customer paid.")
+        raw = [dict(method="cash", tendered=round_cents(float(data.get("tendered") or 0) * 100))] \
+            if method == "cash" else [dict(method="card", amount=total, txn_id=data.get("terminal_txn_id"))]
+    if not isinstance(raw, list):
+        raise PostingError("Choose how the customer paid.")
+    cards, cash = [], None
+    for t in raw:
+        m = (t or {}).get("method")
+        if m == "card":
+            amt = int(t.get("amount") or 0)
+            if amt <= 0:
+                raise PostingError("A card payment must be more than $0.00.")
+            txn = opt_int(t.get("txn_id"))
+            if provider != "none" and not txn:
+                raise PostingError("Card payments on this till go through the card machine. Tap Card to start one.")
+            cards.append(dict(method="card", amount=amt, txn_id=txn, tendered=amt, change=0))
+        elif m == "cash":
+            if cash:
+                raise PostingError("Enter the cash as one amount.")
+            cash = dict(method="cash", tendered=int(t.get("tendered") or 0), txn_id=None)
+        else:
+            raise PostingError("Choose how the customer paid.")
+    card_total = sum(c["amount"] for c in cards)
+    if card_total > total:
+        raise PostingError("The card payments are more than the sale total.")
+    left = total - card_total
+    if cash:
+        if cash["tendered"] < left:
+            raise PostingError("Cash tendered is less than the total." if not cards else
+                               f"Cash tendered is less than the {left / 100:,.2f} still to pay.")
+        cash.update(amount=left, change=cash["tendered"] - left)
+        if left == 0 and cash["tendered"] == 0:
+            cash = None
+    elif left:
+        raise PostingError(f"{left / 100:,.2f} is still to pay.")
+    out = cards + ([cash] if cash else [])
+    if total and not out:
+        raise PostingError("Choose how the customer paid.")
+    return out
+
+
+def _extras_account(db, key, code, name, kind, tax):
+    """Accounts only some businesses need (card tips, card surcharges): made the first time they're used."""
+    row = db.execute("SELECT account_id FROM linked_accounts WHERE key=?", (key,)).fetchone()
+    if row:
+        return row[0]
+    acct = db.execute("SELECT id FROM accounts WHERE code=?", (code,)).fetchone()
+    if acct:
+        aid = acct["id"]
+    else:
+        tc = db.execute("SELECT id FROM tax_codes WHERE code=?", (tax,)).fetchone()
+        aid = db.execute("INSERT INTO accounts (code, name, type, is_bank, tax_code_id) VALUES (?,?,?,0,?)",
+                         (code, name, kind, tc["id"] if tc else None)).lastrowid
+    db.execute("INSERT INTO linked_accounts (key, account_id) VALUES (?,?)", (key, aid))
+    return aid
+
+
+def _post_card_extras(db, txn, today, number, contact_id):
+    """Tip, cash out and surcharge added on the card machine: more comes into the card account than the sale."""
+    tip, cashout, sur = txn["tip"] or 0, txn["cashout"] or 0, txn["surcharge"] or 0
+    if not (tip or cashout or sur):
+        return None
+    lines = [dict(account_id=linked(db, "pos_card"), debit=tip + cashout + sur, memo=f"Card extras {number}")]
+    if cashout:
+        lines.append(dict(account_id=linked(db, "pos_cash"), credit=cashout, memo="Cash out from the drawer"))
+    if tip:
+        lines.append(dict(account_id=_extras_account(db, "pos_tips", "2-1600", "Tips Payable", "liability", "N-T"),
+                          credit=tip, memo="Card tip (owed to staff)"))
+    if sur:
+        income = _extras_account(db, "pos_surcharge", "4-4000", "Card Surcharges", "income", "GST")
+        tc = db.execute("SELECT * FROM tax_codes WHERE id=(SELECT tax_code_id FROM accounts WHERE id=?)",
+                        (income,)).fetchone()
+        gst_on = db.execute("SELECT gst_registered FROM company WHERE id=1").fetchone()[0]
+        rate = (tc["rate"] or 0) if tc and gst_on else 0
+        gst = round(sur * rate / (100 + rate)) if rate else 0
+        lines.append(dict(account_id=income, credit=sur - gst, tax_code_id=tc["id"] if tc else None,
+                          memo="Card surcharge"))
+        if gst:
+            lines.append(dict(account_id=tc["collected_account_id"] or linked(db, "gst_collected"), credit=gst,
+                              memo="GST on card surcharge"))
+    return post_entry(db, today, f"POS card extras {number}", "pos_card_extra", lines, source_id=txn["id"],
+                      reference=number, contact_id=contact_id)
+
+
+def _sale_reply(db, sid, low=None, repeat=False):
+    s = _sale(db, sid)
+    tenders = db.execute("SELECT * FROM pos_tenders WHERE sale_id=? ORDER BY id", (sid,)).fetchall()
+    txns = [T.get(db, t["terminal_txn_id"]) for t in tenders if t["terminal_txn_id"]]
+    cashout = sum(x["cashout"] or 0 for x in txns)
+    cash_in = any(t["method"] == "cash" for t in tenders)
+    return jsonify(ok=True, sale_id=sid, total=s["total"], change=s["change_given"], low_stock=low or [],
+                   repeat=repeat, cashout=cashout, drawer=bool(cash_in or cashout), method=s["method"],
+                   cards=[dict(scheme=x["card_scheme"], last4=x["card_last4"], auth=x["auth_code"],
+                               amount=x["amount"], total=x["approved_amount"], tip=x["tip"]) for x in txns],
+                   receipt_url=url_for("pos.receipt", sid=sid))
+
+
 @bp.route("/sale", methods=["POST"])
 def sale():
     db = get_db()
@@ -654,9 +795,13 @@ def sale():
     if plan(db)["locked"]:
         from ..plan import capped_message
         return jsonify(ok=False, error=capped_message("pos")), 402
+    checkout = str(data.get("checkout_ref") or "").strip()[:64] or None
+    if checkout:  # the same sale sent again (double tap, lost reply): never finalise twice
+        done = db.execute("SELECT id FROM pos_sales WHERE checkout_ref=?", (checkout,)).fetchone()
+        if done:
+            return _sale_reply(db, done["id"], repeat=True)
     try:
-        method = data.get("method")
-        if method not in METHODS:
+        if data.get("tenders") is None and data.get("method") not in METHODS:
             raise PostingError("Choose how the customer paid.")
         lines = []
         for l in data.get("lines") or []:
@@ -690,6 +835,9 @@ def sale():
                 discount_approval = self_approval(db, "discount", "sale", round(top), "Discount at the till")
             else:
                 discount_approval = use_approval(db, data.get("approval_id"), "discount", min_amount=round(top))["id"]
+        till = opt_int(data.get("till_id"))
+        if till and not db.execute("SELECT 1 FROM pos_tills WHERE id=? AND active=1", (till,)).fetchone():
+            till = None
         cid = opt_int(data.get("customer_id")) or walk_in_customer(db)
         today = date.today().isoformat()
         ref = "POS"
@@ -701,14 +849,20 @@ def sale():
                                                 reference=ref, notes=(data.get("note") or "")[:200]),
                                lines, "open")
         total = db.execute("SELECT total FROM documents WHERE id=?", (doc_id,)).fetchone()["total"]
-        tendered = round_cents(float(data.get("tendered") or 0) * 100) if method == "cash" else total
-        if method == "cash" and tendered < total:
-            raise PostingError("Cash tendered is less than the total.")
-        if method == "cash" and tendered - total > BIG_CHANGE and not data.get("confirm_big"):
+        tenders = [] if total == 0 else _tenders_from(data, total, T.provider_for(db, till))
+        cash_t = next((t for t in tenders if t["method"] == "cash"), None)
+        if cash_t and cash_t["change"] > BIG_CHANGE and not data.get("confirm_big"):
             db.rollback()
-            return jsonify(ok=False, error=f"Change of ${(tendered - total) / 100:,.2f}? Check the cash tendered.",
+            return jsonify(ok=False, error=f"Change of ${cash_t['change'] / 100:,.2f}? Check the cash tendered.",
                            confirm_key="confirm_big"), 409
-        acct = linked(db, "pos_cash" if method == "cash" else "pos_card")
+        for t in tenders:  # each card payment must be approved, for this amount, and not used before
+            if t["txn_id"]:
+                x = T.get(db, t["txn_id"])
+                if not x or x["status"] != "approved" or x["kind"] != "payment" or x["sale_id"] \
+                        or x["resolution"] == "refunded":
+                    raise PostingError("That card payment wasn't approved, or it's already on another sale.")
+                if x["amount"] != t["amount"]:
+                    raise PostingError("The card amount doesn't match what the card machine approved.")
         if total == 0:  # M28: a free item (staff meal, giveaway) with a reason; nothing to pay
             why = str(data.get("reason") or "").strip()[:120]
             if not why:
@@ -717,18 +871,35 @@ def sale():
                                reason_key="reason"), 409
             db.execute("UPDATE documents SET status='paid', notes=TRIM(COALESCE(notes,'') || ' Free: ' || ?) WHERE id=?",
                        (why, doc_id))
-            pid = None
-        else:
-            pid = record_payment(db, "in", cid, acct, today, [(doc_id, total)], reference="POS",
-                                 memo=f"POS {METHODS[method]}")
-        till = opt_int(data.get("till_id"))
-        if till and not db.execute("SELECT 1 FROM pos_tills WHERE id=? AND active=1", (till,)).fetchone():
-            till = None
+        for t in tenders:
+            if t["amount"]:
+                t["payment_id"] = record_payment(db, "in", cid, linked(db, "pos_" + t["method"]), today,
+                                                 [(doc_id, t["amount"])], reference="POS",
+                                                 memo=f"POS {METHODS[t['method']]}")
+        methods_used = {t["method"] for t in tenders}
+        method = (methods_used.pop() if len(methods_used) == 1 else "split") if tenders else \
+            (data.get("method") if data.get("method") in METHODS else "cash")
+        tendered = sum(t["tendered"] for t in tenders) if tenders else 0
+        change = cash_t["change"] if cash_t else 0
         shift = open_shift(db, till) if till else None
+        first_pid = next((t.get("payment_id") for t in tenders if t.get("payment_id")), None)
         sid = db.execute("INSERT INTO pos_sales (document_id, payment_id, method, tendered, change_given, user_id,"
-                         " till_id, shift_id) VALUES (?,?,?,?,?,?,?,?)",
-                         (doc_id, pid, method, tendered, tendered - total, g.user["id"], till,
-                          shift["id"] if shift else None)).lastrowid
+                         " till_id, shift_id, checkout_ref) VALUES (?,?,?,?,?,?,?,?,?)",
+                         (doc_id, first_pid, method, tendered, change, g.user["id"], till,
+                          shift["id"] if shift else None, checkout)).lastrowid
+        number = db.execute("SELECT number FROM documents WHERE id=?", (doc_id,)).fetchone()[0]
+        for t in tenders:
+            db.execute("INSERT INTO pos_tenders (sale_id, method, amount, tendered, change_given, payment_id,"
+                       " terminal_txn_id) VALUES (?,?,?,?,?,?,?)",
+                       (sid, t["method"], t["amount"], t["tendered"], t["change"], t.get("payment_id"), t["txn_id"]))
+            if t["txn_id"]:
+                try:
+                    x = T.claim_for_sale(db, t["txn_id"], sid, checkout)
+                except T.TerminalError as e:
+                    raise PostingError(str(e))
+                eid = _post_card_extras(db, x, today, number, cid)
+                if eid:
+                    db.execute("UPDATE pos_terminal_txns SET extras_entry_id=? WHERE id=?", (eid, x["id"]))
         if discount_approval:
             db.execute("UPDATE pos_approvals SET ref=? WHERE id=?", (f"sale {sid}", discount_approval))
         oid = opt_int(data.get("order_id"))
@@ -737,13 +908,18 @@ def sale():
                        " WHERE id=? AND status='open'", (sid, oid))
         audit(db, "pos_sale", f"#{sid} {method}")
         db.commit()
+    except sqlite3.IntegrityError:  # another request finished this same sale a moment ago
+        db.rollback()
+        done = db.execute("SELECT id FROM pos_sales WHERE checkout_ref=?", (checkout,)).fetchone() if checkout else None
+        if done:
+            return _sale_reply(db, done["id"], repeat=True)
+        return jsonify(ok=False, error="Could not complete the sale."), 400
     except (PostingError, ValueError, KeyError, TypeError) as e:
         db.rollback()
         return jsonify(ok=False, error=str(e) or "Could not complete the sale."), 400
     from .reorder import low_after_sale
     low = low_after_sale(db, [l["item_id"] for l in lines]) if _sees_low_stock() else []  # a warning, never a block
-    return jsonify(ok=True, sale_id=sid, total=total, change=tendered - total, low_stock=low,
-                   receipt_url=url_for("pos.receipt", sid=sid))
+    return _sale_reply(db, sid, low)
 
 
 def _sees_low_stock():
@@ -766,7 +942,13 @@ def receipt(sid):
     db = get_db()
     s = _sale(db, sid)
     lines = db.execute("SELECT * FROM document_lines WHERE document_id=? ORDER BY id", (s["document_id"],)).fetchall()
-    return render_template("pos/receipt.html", s=s, lines=lines, methods=METHODS)
+    tenders = db.execute("SELECT t.*, x.card_scheme, x.card_last4, x.entry_mode, x.auth_code, x.terminal_ref,"
+                         " x.reference txn_ref, x.approved_amount, x.tip, x.cashout, x.surcharge, x.receipt_lines,"
+                         " x.provider FROM pos_tenders t LEFT JOIN pos_terminal_txns x ON x.id=t.terminal_txn_id"
+                         " WHERE t.sale_id=? ORDER BY t.id", (sid,)).fetchall()
+    tenders = [dict(t, receipt=json.loads(t["receipt_lines"]) if t["receipt_lines"] else []) for t in tenders]
+    return render_template("pos/receipt.html", s=s, lines=lines, methods=METHOD_LABELS, tenders=tenders,
+                           entry_modes=ENTRY_MODES)
 
 
 def day_summary(db, day):
@@ -780,11 +962,12 @@ def day_summary(db, day):
     refunded = {}
     for r in db.execute("SELECT sale_id, SUM(amount) a FROM pos_refunds GROUP BY sale_id"):
         refunded[r["sale_id"]] = r["a"]
-    by_method = {m: sum(r["total"] for r in live if r["method"] == m)
-                 - sum(r["amount"] for r in refunds if r["method"] == m) for m in METHODS}
+    cash, card = _tender_sums(db, "p.document_id IN (SELECT id FROM documents WHERE date=?)", (day,))
+    by_method = {m: {"cash": cash, "card": card}[m] - sum(r["amount"] for r in refunds if r["method"] == m)
+                 for m in METHODS}
     return dict(rows=rows, count=len(live), total=sum(r["total"] for r in live) - sum(r["amount"] for r in refunds),
                 gst=sum(r["tax_total"] for r in live) - sum(r["tax"] for r in refunds), by_method=by_method,
-                cash_out=sum(r["change_given"] for r in live if r["method"] == "cash"), refunds=refunds,
+                cash_out=sum(r["change_given"] for r in live), refunds=refunds,
                 refunded=refunded)
 
 
@@ -813,7 +996,8 @@ def sales():
         day_label = f"{d:%A} {d.day} {d:%B %Y}"
     except ValueError:
         abort(404)
-    return render_template("pos/sales.html", day=day, day_label=day_label, methods=METHODS, mode=mode,
+    return render_template("pos/sales.html", day=day, day_label=day_label, methods=METHODS, labels=METHOD_LABELS,
+                           mode=mode, card_payments=card_ctx(db),
                            features=sorted(features),
                            tills=_tills(db), **day_summary(db, day), **day_extras(db, day), **approval_ctx(db))
 
@@ -833,8 +1017,13 @@ def void(sid):
         self_approval(db, "void", sid, s["total"], reason or "Voided by manager")
     else:
         reason = use_approval(db, request.form.get("approval_id"), "void", sid)["reason"]
-    if s["payment_id"]:  # a free sale (M28) has no payment
-        void_payment(db, s["payment_id"])
+    if db.execute("SELECT 1 FROM pos_terminal_txns WHERE sale_id=? AND kind='payment' AND status='approved'",
+                  (sid,)).fetchone():
+        raise PostingError("This sale was paid on the card machine. Use Refund, so the money goes back to the card.")
+    pids = [r["payment_id"] for r in db.execute("SELECT payment_id FROM pos_tenders WHERE sale_id=? AND"
+                                                " payment_id IS NOT NULL", (sid,))]
+    for pid in pids or ([s["payment_id"]] if s["payment_id"] else []):  # a free sale (M28) has no payment
+        void_payment(db, pid)
     void_document(db, s["document_id"])
     db.execute("UPDATE pos_sales SET voided=1 WHERE id=?", (sid,))
     audit(db, "pos_void", f"#{sid}: {reason}")
@@ -860,7 +1049,12 @@ def _refundable(db, s):
 def sale_lines(sid):
     db = get_db()
     s = _sale(db, sid)
-    return jsonify(number=s["number"], method=s["method"], voided=bool(s["voided"]), lines=_refundable(db, s))
+    card = db.execute("SELECT * FROM pos_terminal_txns WHERE sale_id=? AND kind='payment' AND status='approved'"
+                      " ORDER BY id LIMIT 1", (sid,)).fetchone()
+    return jsonify(number=s["number"], method=s["method"] if s["method"] in METHODS else "card",
+                   voided=bool(s["voided"]), lines=_refundable(db, s),
+                   card=dict(txn_id=card["id"], scheme=card["card_scheme"], last4=card["card_last4"],
+                             provider=card["provider"]) if card else None)
 
 
 @bp.route("/sale/<int:sid>/refund", methods=["POST"])
@@ -872,7 +1066,7 @@ def refund(sid):
         s = _sale(db, sid)
         if s["voided"]:
             raise PostingError("This sale was voided, so there is nothing to refund.")
-        method = d.get("method") if d.get("method") in METHODS else s["method"]
+        method = d.get("method") if d.get("method") in METHODS else s["method"] if s["method"] in METHODS else "card"
         want = {int(k): float(v) for k, v in (d.get("lines") or {}).items() if float(v or 0) > 0}
         if not want:
             raise PostingError("Choose what to refund.")
@@ -894,6 +1088,16 @@ def refund(sid):
             total, tax = total + net + t, tax + t
             if l["item_id"]:
                 stock.append((l, q))
+        if d.get("preview"):  # what the card machine must refund, before anything is approved or posted
+            return jsonify(ok=True, amount=total, method=method)
+        till = opt_int(d.get("till_id"))
+        txn_id = opt_int(d.get("terminal_txn_id"))
+        if method == "card" and not txn_id and T.provider_for(db, till) != "none":
+            raise PostingError("Card refunds on this till go back through the card machine.")
+        if txn_id:
+            x = T.get(db, txn_id)
+            if not x or x["kind"] != "refund" or x["status"] != "approved" or x["refund_id"] or x["amount"] != total:
+                raise PostingError("The card machine hasn't approved this refund (or it is already recorded).")
         reason = str(d.get("reason") or "").strip()[:120]
         if self_approves():
             appr = self_approval(db, "refund", sid, total, reason or "Refund by manager")
@@ -920,15 +1124,22 @@ def refund(sid):
                                      (item["expense_account_id"] or linked(db, "cogs"), 0, amt)):
                     db.execute("INSERT INTO journal_lines (entry_id, account_id, debit, credit, memo) VALUES"
                                " (?,?,?,?,?)", (eid, acct, dr, cr, f"Refund stock {item['sku']}"))
-        till = opt_int(d.get("till_id"))
         shift = open_shift(db, till) if till else None
         rid = db.execute("INSERT INTO pos_refunds (sale_id, entry_id, method, amount, tax, lines, reason, user_id,"
                          " approval_id, shift_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
                          (sid, eid, method, total, tax, json.dumps({str(k): v for k, v in want.items()}), reason,
                           g.user["id"], appr, shift["id"] if shift else None)).lastrowid
+        if txn_id:
+            try:
+                T.claim_for_refund(db, txn_id, rid, sid, total)
+            except T.TerminalError as e:
+                raise PostingError(str(e))
         audit(db, "pos_refund", f"{s['number']} {total / 100:.2f} {method}: {reason}")
         db.commit()
     except (PostingError, ValueError, TypeError) as e:
         db.rollback()
         return jsonify(ok=False, error=str(e)), 400
     return jsonify(ok=True, refund_id=rid, amount=total)
+
+
+from . import pos_card  # noqa: E402,F401  card terminal routes (riyeser/views/pos_card.py)
