@@ -8,7 +8,8 @@
 //              or failed with a plain reason (link_office_pending / link_office_done).
 //   Passwords  never leave this PC in a form anyone else can read. "Show" on the website sends a one-off public key;
 //              the password is encrypted to it here (RSA-OAEP, SHA-256), so only that browser tab can read it.
-// PRIVACY: no calls, numbers dialled, recordings or audio are ever sent: only how many calls are in progress.
+// PRIVACY: no calls, numbers dialled, recordings or audio are ever sent: only how many calls are in progress, and for each
+//          extension whether it's on a call (yes or no), so Riyeser Link can show "On a call".
 // With no internet (or not signed in) the phones carry on as normal; the heartbeat and changes just wait.
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
@@ -45,9 +46,12 @@ function buildPayload(status, { officeId, pcName = '', version = '', adapters = 
       last_registered: null, ip: f.ip || null })),
   ];
   const regsOf = (ext) => regs.filter((r) => r.ext === ext);
+  // "On a call" in Riyeser Link: yes or no for each extension (who it's with and the number never leave this PC)
+  const talking = new Set();
+  for (const c of status.inProgress || []) for (const e of [c.from, c.answeredBy || (c.state === 'talking' ? c.to : null)]) if (e) talking.add(String(e));
   const extensions = [
     ...(status.people || []).map((p) => ({ extension: p.ext, name: p.name, type: 'person', registered: regsOf(p.ext).length,
-      desk_phones: (status.phones || []).filter((x) => x.ext === p.ext).length, app_users: regsOf(p.ext).filter((r) => r.device === 'app').length, dnd: !!p.dnd })),
+      desk_phones: (status.phones || []).filter((x) => x.ext === p.ext).length, app_users: regsOf(p.ext).filter((r) => r.device === 'app').length, dnd: !!p.dnd, in_call: talking.has(String(p.ext)) })),
     ...(status.groups || []).map((g) => ({ extension: g.ext, name: g.name, type: 'group', members: (g.members || []).length })),
   ];
   const lic = status.licence || {};

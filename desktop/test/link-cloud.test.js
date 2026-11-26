@@ -71,6 +71,8 @@ test('the heartbeat: address, licence, counts, phones and extensions, and never 
       const e101 = p.extensions.find((x) => x.extension === '101');
       assert.deepStrictEqual([e101.name, e101.type, e101.registered, e101.desk_phones, e101.app_users], ['Alex Sample', 'person', 1, 1, 0]);
       assert.strictEqual(p.extensions.find((x) => x.extension === '102').app_users, 1);
+      assert.deepStrictEqual(p.extensions.filter((x) => x.type === 'person').map((x) => [x.extension, x.in_call]), [['101', true], ['102', true]], 'On a call: yes or no per extension');
+      assert.strictEqual(buildPayload({ ...st, inProgress: [{ from: '101', to: '102', state: 'ringing' }] }, { officeId: 'lo-test-0001' }).extensions.find((x) => x.extension === '102').in_call, false, 'ringing isn\'t on a call yet');
       assert.deepStrictEqual(p.extensions.find((x) => x.extension === '200'), { extension: '200', name: 'Front desk', type: 'group', members: 2 });
       // nothing about calls (who, whom, numbers dialled), recordings, the log or passwords
       const text = JSON.stringify(p);
