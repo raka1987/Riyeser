@@ -22,6 +22,11 @@ async function renderRoster(state = {}) {
   if (L('timesheets') < 1 || RO.mode === 'staff') return renderRosterStaff();
   const W = await api(`/api/staff/roster?week=${RO.week || today()}`);
   RO.week = W.week_start;
+  // OWNER-LISTS: the order of the people (first or last name, employee no., position, hours this week), kept per person
+  // (sort only: everyone stays on the grid, so a shift can still be given to anyone)
+  const plv = listOf('roster', { fields: { ...NAME_FIELDS(), employee_no: { label: 'Employee no.', type: 'text', then: 'name' }, position: { label: 'Position', type: 'text', then: 'name' }, hours: { label: 'Hours this week', type: 'num', first: 'desc', then: 'name' } },
+  }, { sort: 'name', dir: 'asc' }, () => renderRoster());
+  const everyone = W.people.length; W.people = plv.apply(W.people);
   if (!W.days.includes(RO.day)) RO.day = W.days.includes(W.today) ? W.today : W.days[0];
   const ed = W.can_edit, flash = RO.flash; RO.flash = '';
   const live = list => list.filter(s => !s.deleted);
@@ -72,6 +77,7 @@ async function renderRoster(state = {}) {
       ${W.sees_pay ? `<div class="tile"><div class="k">Estimated wages</div><div class="v">${money(W.totals.wages, cur())}</div><div class="s">hourly staff, before tax${W.totals.salaried ? ` · ${W.totals.salaried} on salary` : ''}</div></div>` : ''}
       <div class="tile"><div class="k">Open shifts</div><div class="v">${W.totals.open}</div><div class="s">${W.totals.open ? `${W.totals.open_hours.toFixed(2)} h, nobody yet` : 'all shifts have someone'}</div></div>
       <div class="tile"><div class="k">Warnings</div><div class="v${W.totals.warnings ? ' ro-wv' : ''}">${W.totals.warnings}</div><div class="s">${W.totals.warnings ? 'see the list below' : 'nothing to check'}</div></div></div>
+    ${everyone > 1 ? plv.bar({ shown: W.people.length, total: everyone }) : ''}
     <div class="panel ro-gridpanel">
       <div class="scroll ro-gridwrap"><table class="ro-grid"><thead><tr><th class="ro-p">Staff</th>${W.days.map(d => `<th class="${d === W.today ? 'today' : ''}">${QE.dayShort(d).split(' ')[0]} <span>${+d.slice(8)}</span></th>`).join('')}</tr></thead><tbody>
         ${openRow ? `<tr class="ro-openrow"><th class="ro-p"><div class="ro-who"><b>Open shifts</b><span class="small muted">nobody yet</span></div></th>${W.days.map(d => cell(null, d, W.open, null)).join('')}</tr>` : ''}
@@ -101,6 +107,7 @@ async function renderRoster(state = {}) {
 
   const all = () => [...W.people.flatMap(p => p.shifts), ...W.open];
   const go2 = st => renderRoster(st);
+  plv.bind(view());
   $('#ro-prev').onclick = () => go2({ week: addDays(W.week_start, -7), day: addDays(RO.day, -7) });
   $('#ro-next').onclick = () => go2({ week: addDays(W.week_start, 7), day: addDays(RO.day, 7) });
   if ($('#ro-today')) $('#ro-today').onclick = () => go2({ week: today(), day: today() });

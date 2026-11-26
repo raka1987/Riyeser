@@ -118,9 +118,22 @@ function editModal(title, defs, values, onSave, { onDelete, extra = '', wide = f
   if (onDelete) $('.del', f).onclick = async () => { if (!confirm('Delete this permanently?')) return; try { await onDelete(); m.close(); } catch (err) { $('.err', f).innerHTML = `<div class="error">${esc(err.message)}</div>`; } };
   return m;
 }
-const table = (cols, rows, { onRow, empty = 'Nothing here yet.' } = {}) => rows.length ? `<div class="scroll"><table class="t"><thead><tr>${cols.map(c => `<th class="${c.r ? 'r' : ''}">${c.h}</th>`).join('')}</tr></thead>
+// a column with s: 'field' sorts that list (lv: its LV.list) when the heading is clicked
+const table = (cols, rows, { onRow, empty = 'Nothing here yet.', lv = null } = {}) => rows.length ? `<div class="scroll"><table class="t"><thead><tr>${cols.map(c => lv && c.s ? lv.th(c.h, c.s, { r: c.r }) : `<th class="${c.r ? 'r' : ''}">${c.h}</th>`).join('')}</tr></thead>
   <tbody>${rows.map((r, i) => `<tr class="${onRow ? 'click' : ''}" data-i="${i}">${cols.map(c => `<td class="${c.r ? 'r' : ''}" data-l="${esc(String(c.h || '').replace(/<[^>]*>/g, ''))}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
   : `<div class="empty">${empty}</div>`;
+// ------------------------------------------------------------------ OWNER-LISTS: sorting and filtering (listview.js)
+// The Year / Period choices (financial year from Settings) and the sort fields this person may use: from the server.
+let LISTMETA = null, LISTMETA_AT = 0;
+async function listMeta(fresh = false) {
+  if (fresh || !LISTMETA || Date.now() - LISTMETA_AT > 5 * 60000 || (LISTMETA.today && LISTMETA.today !== today())) { const m = await LV.meta(api); if (m) { LISTMETA = m; LISTMETA_AT = Date.now(); } }
+  return LISTMETA;
+}
+// one list's sort and filters, remembered for the person signed in
+const listOf = (id, spec, defaults, onChange) => LV.list({ id, uid: ME && ME.id, spec, defaults, meta: LISTMETA, onChange });
+const NAME_FIELDS = (get = r => r.name) => ({ name: { label: 'First name', type: 'text', get, then: 'last_name' }, last_name: { label: 'Last name', type: 'text', get: r => LV.nameKey(get(r), 'last'), then: 'name' } });
+const lvEmpty = (lv, all, what) => all.length && LV.isFiltered(lv.state, lv.spec) ? `No ${what} match these filters. <button type="button" class="btn sm ghost" data-lv-clear2>Clear filters</button>` : null;
+const bindClear2 = (root, lv) => $$('[data-lv-clear2]', root).forEach(b => b.onclick = () => lv.clear());
 function bindRows(container, rows, fn) { $$('tr.click', container).forEach(tr => tr.onclick = e => { if (e.target.closest('button,input,select,a')) return; fn(rows[tr.dataset.i]); }); }
 const initials = n => n.split(/\s+/).map(x => x[0]).slice(0, 2).join('').toUpperCase();
 const colorFor = id => `hsl(${(id * 67) % 360} 45% 38%)`;
@@ -201,12 +214,15 @@ function multiShiftModal(emps, day, after) {
   };
 }
 // Timesheets by person: a card each — days worked, paid hours, each shift on one line (tap to edit), warnings, quick add
-function tsPersonCards(rows, emps, f) {
+function tsPersonCards(rows, emps, f, { order = null, addEmpty = true, empty = '' } = {}) {
   const by = {}; rows.forEach(r => (by[r.user_id] = by[r.user_id] || { name: r.name, no: r.employee_no, list: [] }).list.push(r));
   // people with timesheet access see everyone on the clock (so a shift can be added for someone with none yet)
-  if (canTS() && !f.user_id) emps.forEach(e => { if (!by[e.id]) by[e.id] = { name: e.name, no: e.employee_no, list: [] }; });
-  const ids = Object.keys(by).sort((a, b) => by[a].name.localeCompare(by[b].name));
-  if (!ids.length) return '<div class="empty">No shifts in this period. Use "Clock in" in the sidebar to start a shift.</div>';
+  if (canTS() && !f.user_id && addEmpty) emps.forEach(e => { if (!by[e.id]) by[e.id] = { name: e.name, no: e.employee_no, list: [] }; });
+  // OWNER-LISTS: the cards follow the list's sort (first / last name, employee no., paid hours)
+  const paidOf = id => by[id].list.reduce((a, r) => a + (r.clock_out ? (r.paid_hours ?? r.hours) : 0), 0);
+  const ids = order ? order(Object.keys(by).map(id => ({ id, name: by[id].name, employee_no: by[id].no || '', hours: paidOf(id), paid_hours: paidOf(id) }))).map(x => x.id)
+    : Object.keys(by).sort((a, b) => by[a].name.localeCompare(by[b].name));
+  if (!ids.length) return `<div class="empty">${empty || 'No shifts in this period. Use "Clock in" in the sidebar to start a shift.'}</div>`;
   const day = f.to && f.to <= today() ? f.to : today();
   return `<div class="ts-cards">${ids.map(id => {
     const P = by[id], list = P.list.slice().sort((a, b) => a.clock_in.localeCompare(b.clock_in));
@@ -229,14 +245,24 @@ function tsPersonCards(rows, emps, f) {
 // add or edit leave taken. Removing a record: Super admin. Staff have no access.
 async function leaveModal(emps, year, editing = false) {
   const L = await api(`/api/staff/leave${year ? '?year=' + year : ''}`), y = L.year, st = L.settings;
+  // OWNER-LISTS: balances sort by name or days (not while editing them); leave taken sorts, searches and filters by type and pay status
+  const blv = listOf('balances', { fields: { ...NAME_FIELDS(), annual_taken: { label: 'Annual taken', type: 'num', first: 'desc' }, annual_left: { label: 'Annual left', type: 'num' }, sick_taken: { label: 'Sick taken', type: 'num', first: 'desc' }, sick_left: { label: 'Sick left', type: 'num' } } },
+    { sort: 'name', dir: 'asc' }, () => again(y, false));
+  const people = editing ? L.people : blv.apply(L.people), bth = (label, key) => (editing ? `<th class="r">${label}</th>` : blv.th(label, key, { r: true }));
+  const leaveStatus = r => (!r.paid ? 'unpaid' : r.paid_in_run ? 'run' : 'waiting');
+  const llv = listOf('leave', { fields: { date_from: { label: 'Date', type: 'date', first: 'desc' }, ...NAME_FIELDS(), kind: { label: 'Type', type: 'text', get: r => L.kinds[r.kind] || r.kind, then: 'date_from' }, days: { label: 'Days', type: 'num', first: 'desc' } },
+    search: r => [r.name, r.notes, L.kinds[r.kind]], placeholder: 'Name, note…',
+    selects: [{ key: 'kind', label: 'Type', options: Object.entries(L.kinds), test: (r, v) => r.kind === v },
+      { key: 'status', label: 'Status', options: [['run', 'Paid in a pay run'], ['waiting', 'Paid leave, not in a pay run yet'], ['unpaid', 'Unpaid leave']], test: (r, v) => leaveStatus(r) === v }] },
+  { sort: 'date_from', dir: 'desc' }, () => drawLeave());
   const num = (n, v, w = 70) => `<input type="number" step="0.5" name="${n}" value="${v}" style="width:${w}px;text-align:right;padding:6px">`;
   const m = openModal(`<h2 style="font-size:1.4rem">🌴 Accruals — ${y}</h2>
     <form id="ac">
     <p class="small muted">${editing
       ? `Each year: ${num('leave_annual_days', st.leave_annual_days)} days annual leave · ${num('leave_sick_days', st.leave_sick_days)} days sick leave · ${num('leave_day_hours', st.leave_day_hours)} hours paid per leave day (hourly staff). Change anyone's <b>days left</b> below (e.g. days carried over), then Save.`
       : `Each year: <b>${esc(st.leave_annual_days)}</b> days annual leave, <b>${esc(st.leave_sick_days)}</b> days sick leave. Paid leave is added to the pay (hourly staff: days × ${esc(st.leave_day_hours)} h × rate) and shows on payslips with the year to date.`}</p>
-    <div class="scroll"><table class="t"><thead><tr><th>Staff</th><th class="r">Annual taken</th><th class="r">Annual left</th><th class="r">Sick taken</th><th class="r">Sick left</th><th class="r">Other / unpaid</th></tr></thead><tbody>
-      ${L.people.map(p => `<tr data-pid="${p.id}"><td><b>${esc(p.name)}</b>${!editing && (p.annual_adj || p.sick_adj) ? `<div class="small muted">adjusted${p.annual_adj ? ` annual ${p.annual_adj > 0 ? '+' : ''}${p.annual_adj}` : ''}${p.sick_adj ? ` sick ${p.sick_adj > 0 ? '+' : ''}${p.sick_adj}` : ''}</div>` : ''}</td>
+    <div class="scroll"><table class="t"><thead><tr>${editing ? '<th>Staff</th>' : blv.th('Staff', 'name')}${bth('Annual taken', 'annual_taken')}${bth('Annual left', 'annual_left')}${bth('Sick taken', 'sick_taken')}${bth('Sick left', 'sick_left')}<th class="r">Other / unpaid</th></tr></thead><tbody>
+      ${people.map(p => `<tr data-pid="${p.id}"><td><b>${esc(p.name)}</b>${!editing && (p.annual_adj || p.sick_adj) ? `<div class="small muted">adjusted${p.annual_adj ? ` annual ${p.annual_adj > 0 ? '+' : ''}${p.annual_adj}` : ''}${p.sick_adj ? ` sick ${p.sick_adj > 0 ? '+' : ''}${p.sick_adj}` : ''}</div>` : ''}</td>
         <td class="r">${p.annual_taken}</td><td class="r">${editing ? num('annual_left', p.annual_left) : `<b>${p.annual_left}</b>`}</td>
         <td class="r">${p.sick_taken}</td><td class="r">${editing ? num('sick_left', p.sick_left) : `<b>${p.sick_left}</b>`}</td><td class="r">${p.other_taken} / ${p.unpaid_taken}</td></tr>`).join('') || '<tr><td colspan="6" class="muted">No staff on the time clock.</td></tr>'}</tbody></table></div>
     <div class="rp-btns" style="margin-top:10px">${editing ? '<button type="button" class="btn ghost" id="ac-cancel">Cancel</button><button class="btn coral">💾 Save</button>' : '<button type="button" class="btn coral" id="ac-edit" style="grid-column:1/-1">✏️ Edit</button>'}</div>
@@ -251,10 +277,11 @@ async function leaveModal(emps, year, editing = false) {
       <button class="btn coral">Save leave</button>
     </form>
     <h3 style="font-size:1.05rem;margin-top:16px">Leave taken in ${y}</h3>
-    ${L.rows.length ? `<div class="scroll"><table class="t"><tbody>${L.rows.map(r => `<tr><td>${fmtDate(r.date_from, { day: 'numeric', month: 'short' })}${r.date_to !== r.date_from ? '–' + fmtDate(r.date_to, { day: 'numeric', month: 'short' }) : ''}</td><td><b>${esc(r.name)}</b><div class="small muted">${esc(L.kinds[r.kind] || r.kind)}${r.notes ? ' · ' + esc(r.notes) : ''}</div></td><td class="r">${r.days} d</td><td style="white-space:nowrap"><button class="btn sm ghost" data-lvedit="${r.id}">Edit</button>${isAdmin() ? ` <button class="btn sm ghost" data-lvdel="${r.id}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="small muted">None yet.</p>'}
+    <div id="lv-list"></div>
     <div class="actions" style="justify-content:space-between"><button class="btn sm ghost" id="lv-prev">← ${+y - 1}</button><button class="btn sm ghost" id="lv-next">${+y + 1} →</button></div>`}`, { wide: true });
   const again = (yy = y, ed = false) => { m.close(); leaveModal(emps, yy, ed); };
   const A = $('#ac', m.el);
+  if (!editing) blv.bind(A);
   if ($('#ac-edit', m.el)) $('#ac-edit', m.el).onclick = () => again(y, true);
   if ($('#ac-cancel', m.el)) $('#ac-cancel', m.el).onclick = () => again(y, false);
   A.onsubmit = async e => {
@@ -270,18 +297,29 @@ async function leaveModal(emps, year, editing = false) {
   // S56: more than the balance asks first (the server refuses it otherwise)
   const overOk = (fn, body) => fn(body).catch(err => { if (err.data && err.data.over_balance && confirm(err.message)) return fn({ ...body, allow_over: true }); throw err; });
   F.onsubmit = async e => { e.preventDefault(); try { await overOk(b => api('/api/staff/leave', { body: b }), Object.fromEntries(new FormData(F))); toast('Leave saved'); again(); } catch (err) { toast(err.message, 6000); } };
-  $$('[data-lvedit]', m.el).forEach(b => b.onclick = () => {
+  const drawLeave = () => {
+    const host = $('#lv-list', m.el); if (!host) return;
+    const shown = llv.apply(L.rows);
+    host.innerHTML = L.rows.length ? `${L.rows.length > 1 ? llv.bar({ shown: shown.length, total: L.rows.length }) : ''}${shown.length ? `<div class="scroll"><table class="t"><thead><tr>${llv.th('Dates', 'date_from')}${llv.th('Staff', 'name')}${llv.th('Days', 'days', { r: true })}<th></th></tr></thead><tbody>${shown.map(r => `<tr><td data-l="Dates">${fmtDate(r.date_from, { day: 'numeric', month: 'short' })}${r.date_to !== r.date_from ? '–' + fmtDate(r.date_to, { day: 'numeric', month: 'short' }) : ''}</td><td data-l="Staff"><b>${esc(r.name)}</b><div class="small muted">${esc(L.kinds[r.kind] || r.kind)}${r.notes ? ' · ' + esc(r.notes) : ''}${leaveStatus(r) === 'waiting' ? ' · not in a pay run yet' : ''}</div></td><td class="r" data-l="Days">${r.days} d</td><td data-l="" style="white-space:nowrap"><button class="btn sm ghost" data-lvedit="${r.id}">Edit</button>${isAdmin() ? ` <button class="btn sm ghost" data-lvdel="${r.id}">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : `<div class="empty">${lvEmpty(llv, L.rows, 'leave records')}</div>`}` : '<p class="small muted">None yet.</p>';
+    llv.bind(host); bindClear2(host, llv);
+    bindLeave(host);
+  };
+  const bindLeave = host => {
+  $$('[data-lvedit]', host).forEach(b => b.onclick = () => {
     const r = L.rows.find(x => x.id == b.dataset.lvedit);
     editModal(`Edit leave — ${r.name}`, [{ n: 'kind', l: 'Type', t: 'select', o: Object.entries(L.kinds) }, { n: 'days', l: 'Days', t: 'number', step: '0.5' }, { n: 'date_from', l: 'From', t: 'date' }, { n: 'date_to', l: 'To', t: 'date' }, { n: 'notes', l: 'Note', full: 1 }],
       r, v => overOk(b => api(`/api/staff/leave/${r.id}`, { method: 'PUT', body: b }), v).then(() => again()));
   });
-  $$('[data-lvdel]', m.el).forEach(b => b.onclick = async () => { if (!confirm('Remove this leave?')) return; await api(`/api/staff/leave/${b.dataset.lvdel}`, { method: 'DELETE' }); again(); });
+  $$('[data-lvdel]', host).forEach(b => b.onclick = async () => { if (!confirm('Remove this leave?')) return; await api(`/api/staff/leave/${b.dataset.lvdel}`, { method: 'DELETE' }); again(); });
+  };
+  drawLeave();
   $('#lv-prev', m.el).onclick = () => again(+y - 1); $('#lv-next', m.el).onclick = () => again(+y + 1);
 }
 // Reports: timesheet or payslip, for everyone / each person on their own page / one person, for any dates
 async function quickRange(v) {
   const t = today(), mon = addDays(t, -((new Date(t + 'T00:00:00Z').getUTCDay() + 6) % 7)), first = t.slice(0, 8) + '01', lmEnd = addDays(first, -1);
   if (v === 'pp' || v === 'lp') { const pp = await api('/api/staff/payroll/period'); return v === 'pp' ? pp.current : pp.previous; }
+  if (v === 'fy' || v === 'lfy') { const m = await listMeta(), p = m && m.periods[v === 'fy' ? 'this_fy' : 'last_fy']; if (p) return [p.from, p.to]; }
   return { tw: [mon, addDays(mon, 6)], lw: [addDays(mon, -7), addDays(mon, -1)], tm: [first, t], lm: [lmEnd.slice(0, 8) + '01', lmEnd] }[v];
 }
 function reportsModal(emps, cur) {
@@ -290,7 +328,7 @@ function reportsModal(emps, cur) {
     <form id="rp" class="rp">
       <label class="small"><b>Report</b><select name="kind"><option value="ts">Timesheet</option>${adm ? '<option value="ps">Payslip</option>' : ''}</select></label>
       <label class="small"><b>Who</b><select name="who">${adm ? `<option value="all">All staff on one sheet</option><option value="each">Each person on their own page</option>` : ''}${people.map(e => `<option value="${e.id}" ${String(cur.user_id) === String(e.id) ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>
-      <label class="small"><b>Dates</b><select name="q"><option value="">Dates on screen</option><option value="pp">This pay period</option><option value="lp">Last pay period</option><option value="tw">This week (Mon–Sun)</option><option value="lw">Last week</option><option value="tm">This month</option><option value="lm">Last month</option></select></label>
+      <label class="small"><b>Dates</b><select name="q"><option value="">Dates on screen</option><option value="pp">This pay period</option><option value="lp">Last pay period</option><option value="tw">This week (Mon–Sun)</option><option value="lw">Last week</option><option value="tm">This month</option><option value="lm">Last month</option><option value="fy">This financial year</option><option value="lfy">Last financial year</option></select></label>
       <div class="rp-dates"><label class="ts-date"><span>From</span><input type="date" name="from" value="${cur.from}"></label><label class="ts-date"><span>To</span><input type="date" name="to" value="${cur.to}"></label></div>
       <p class="small muted" id="rp-note" style="margin:0"></p>
       <div class="rp-btns"><button type="button" class="btn coral" id="rp-print">🖨 Print</button>${window.riyser ? '<button type="button" class="btn" id="rp-pdf">Save PDF</button>' : ''}<button type="button" class="btn ghost" id="rp-email">📧 Email</button></div>
@@ -349,23 +387,41 @@ async function tsDefaultRange() {
   } catch { return [addDays(today(), -13), today()]; }
 }
 async function renderTimesheets(f) {
-  if (!f || !f.from) { const [a, b] = await tsDefaultRange(); f = { ...(f || {}), from: a, to: b }; }
+  await listMeta();
+  // OWNER-LISTS: a Year or Period chosen before (e.g. "Last financial year") opens again; otherwise the pay run's pay period
+  if (!f || !f.from) {
+    const saved = LV.load('timesheets', ME.id).pick, r = !window.__tsRange && saved && LV.rangeOf(saved, LISTMETA);
+    const [a, b] = r ? [r.from, r.to] : await tsDefaultRange(); f = { ...(f || {}), from: a, to: b };
+  }
   let PP = null; try { PP = await api(`/api/staff/payroll/period?date=${f.from}`); } catch { }
   const isPeriod = PP && PP.current[0] === f.from && PP.current[1] === f.to, isOpen = isPeriod && PP.open && PP.open[0] === f.from && PP.open[1] === f.to;
   const qs = new URLSearchParams(f).toString();
   const qsNoSort = new URLSearchParams(Object.fromEntries(Object.entries(f).filter(([k]) => k !== 'sort'))).toString();
-  const rows = await api(`/api/staff/timesheets?${qsNoSort}`);
-  const byNo = (a, b) => String(a.employee_no || '').localeCompare(String(b.employee_no || ''), undefined, { numeric: true }) || a.name.localeCompare(b.name);
-  rows.sort({ date_asc: (a, b) => a.clock_in.localeCompare(b.clock_in), name: (a, b) => a.name.localeCompare(b.name) || a.clock_in.localeCompare(b.clock_in),
-    empno: (a, b) => byNo(a, b) || a.clock_in.localeCompare(b.clock_in) }[f.sort] || ((a, b) => b.clock_in.localeCompare(a.clock_in)));
+  const all = await api(`/api/staff/timesheets?${qsNoSort}`);
+  // OWNER-LISTS: sort (headings or "Sort by"), Search, Status; Year / Period change the dates (and fetch them)
+  const tsStatus = r => (!r.clock_out ? 'on shift' : r.paid_run_id ? 'paid' : r.approved_by ? 'approved' : 'not approved');
+  const lv = listOf('timesheets', {
+    fields: { date: { label: 'Date', type: 'date', get: r => r.clock_in, first: 'desc' }, ...NAME_FIELDS(), employee_no: { label: 'Employee no.', type: 'text', then: 'date' },
+      hours: { label: 'Hours', type: 'num', first: 'desc' }, paid_hours: { label: 'Paid hours', type: 'num', get: r => r.paid_hours ?? r.hours, first: 'desc' }, status: { label: 'Status', type: 'text', get: tsStatus, then: 'date' } },
+    search: r => [r.name, r.employee_no, r.notes], placeholder: 'Name, emp. no., note…',
+    date: r => r.clock_in, dateLabel: 'Shift date', datesRequired: true, serverDates: true,
+    selects: [{ key: 'status', label: 'Status', options: [['approved', 'Approved'], ['unapproved', 'Not approved'], ['on', 'Still clocked in'], ['paid', 'In a pay run']],
+      test: (r, v) => (v === 'approved' ? !!r.approved_by : v === 'unapproved' ? !!r.clock_out && !r.approved_by : v === 'on' ? !r.clock_out : !!r.paid_run_id) }],
+  }, { sort: 'date', dir: 'desc' }, (c, { dates, cleared }) => {
+    if (dates) {
+      if (cleared) { c.state.pick = null; c.save(); return renderTimesheets({ view: f.view }); }   // back to the pay run's pay period
+      const r = c.range(); if (!r) return drawList();                                               // custom: the From / To boxes
+      c.state.pick = { year: c.state.year, period: c.state.period }; c.save(); return renderTimesheets({ ...f, from: r.from, to: r.to });
+    }
+    drawList();
+  });
+  Object.assign(lv.state, LV.pickFor(f.from, f.to, LISTMETA));
+  let rows = lv.apply(all);
   if (window.__tsUnlock && !tsUnlocked()) window.__tsUnlock = null; // 15 minutes are up
   const emps = canTS() ? (await api('/api/staff/directory')).filter(e => e.on_timeclock) : [];
-  const byEmp = {}; rows.forEach(r => byEmp[r.name] = (byEmp[r.name] || 0) + (r.paid_hours ?? r.hours)); // paid hours (unpaid breaks taken off)
   view().innerHTML = `<div class="ts-filters">
       ${canTS() ? `<select id="t-emp"><option value="">All staff</option>${emps.map(e => `<option value="${e.id}" ${f.user_id == e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select>` : ''}
       <label class="ts-date"><span>From</span><input type="date" id="t-from" value="${f.from}"></label><label class="ts-date"><span>To</span><input type="date" id="t-to" value="${f.to}"></label>
-      <select id="t-quick" title="Quick dates"><option value="">Quick dates…</option><option value="pp">This pay period</option><option value="lp">Last pay period</option><option value="tw">This week</option><option value="lw">Last week</option><option value="tf">This fortnight</option><option value="tm">This month</option><option value="lm">Last month</option></select>
-      <select id="t-sort" title="Order">${[['date_desc', 'Newest'], ['date_asc', 'Oldest'], ['name', 'Name A–Z'], ['empno', 'Emp. no.']].map(([k, l]) => `<option value="${k}" ${(f.sort || 'date_desc') === k ? 'selected' : ''}>Sort: ${l}</option>`).join('')}</select>
       </div>
     ${PP ? (isPeriod ? `<div class="ts-period"><button type="button" class="btn sm ghost" id="t-pprev" title="Previous pay period" aria-label="Previous pay period">‹</button>
         <div class="ts-period-mid"><span class="ts-period-k">Pay period</span><b>${esc(QE.period(f.from, f.to))}</b>${isOpen ? '<span class="chip">the pay run you\'re working on</span>' : ''}</div>
@@ -381,7 +437,9 @@ async function renderTimesheets(f) {
       ${canTS() ? '<button class="btn sm coral" id="t-multi">🗓 Multi-shift</button>' : ''}${L('leave') >= 1 ? '<button class="btn sm ghost" id="t-leave">🌴 Accruals</button>' : ''}<button class="btn sm ghost" id="t-add">+ ${canTS() ? 'One shift' : 'Enter my shift'}</button></div>
     <p class="small muted no-print" style="margin:-6px 0 10px">${L('timesheets') >= 3 ? 'Full access: view, enter, change and delete shifts' : L('timesheets') >= 2 ? 'Add & edit: view, enter and change shifts (deleting needs Full access)' : L('timesheets') >= 1 ? 'View: see shifts; enter your own' : 'Your own shifts: view and enter them. To change one, ask your supervisor'}${ME.team_only && L('timesheets') ? ' · your team only' : ''}.</p>
     ${(() => { let br = []; try { br = JSON.parse(S.payroll_breaks || '[]'); } catch { } return `<p class="small muted" style="margin:0 0 8px">${br.length ? `Payroll rule: ${br.map(b => `shifts over ${b.after_hours}h have a ${b.minutes}-minute unpaid break`).join('; ')}. Paid hours = hours − unpaid break.` : 'No unpaid break rule set (Payroll → Payroll rules).'}</p>`; })()}
-    <div class="tiles">${Object.entries(byEmp).map(([n, h]) => `<div class="tile"><div class="k">${esc(n)}</div><div class="v">${h.toFixed(2)}</div><div class="s">paid hours</div></div>`).join('') || ''}</div>
+    <div id="ts-list"></div>`;
+  const listHTML = () => `${lv.bar({ shown: rows.length, total: all.length })}
+    <div class="tiles">${Object.entries(rows.reduce((o, r) => { o[r.name] = (o[r.name] || 0) + (r.paid_hours ?? r.hours); return o; }, {})).map(([n, h]) => `<div class="tile"><div class="k">${esc(n)}</div><div class="v">${h.toFixed(2)}</div><div class="s">paid hours</div></div>`).join('') || ''}</div>
     ${(() => { // week by week (from the pay day): each person's paid hours per day, days worked, week total, running total
       const sd = /^\d{4}-\d{2}-\d{2}$/.test(S.pay_cycle_start || '') && ['26', '52'].includes(String(S.pay_periods_per_year || '26')) ? new Date(S.pay_cycle_start + 'T00:00:00Z').getUTCDay() : 1;
       const wk = d => addDays(d, -((new Date(d + 'T00:00:00Z').getUTCDay() - sd + 7) % 7)), W = {};
@@ -396,9 +454,11 @@ async function renderTimesheets(f) {
           <tr class="cu-sum"><td colspan="8">Week total <span class="muted">· running total</span></td><td></td><td class="r"><b>${wt.toFixed(2)}</b> <span class="muted">·</span> <b>${run.toFixed(2)}</b></td></tr></tbody></table></div>`;
       }).join('') + '</div>'; })()}
     <div class="chips no-print" style="margin:4px 0 10px"><button class="chip ${(f.view || 'person') === 'person' ? '' : 'gray'}" data-tv="person">By person</button><button class="chip ${f.view === 'list' ? '' : 'gray'}" data-tv="list">All shifts</button></div>
-    ${(f.view || 'person') === 'list' ? `<div class="panel" style="padding:0">${table([{ h: 'Staff', f: r => `${esc(r.name)}${r.employee_no ? ` <span class="small muted">${esc(r.employee_no)}</span>` : ''}` }, { h: 'Date', f: r => fmtDate(r.clock_in.slice(0, 10)) }, { h: 'In', f: r => fmtTime(r.clock_in.slice(11)) },
-      { h: 'Out', f: r => r.clock_out ? fmtTime(r.clock_out.slice(11)) : '<span class="status open">on shift</span>' }, { h: 'Hours', f: r => r.hours.toFixed(2), r: 1 }, { h: 'Unpaid break', f: r => r.break_hours ? `−${(r.break_hours * 60).toFixed(0)} min` : '·', r: 1 }, { h: 'Paid hours', f: r => `<b>${(r.paid_hours ?? r.hours).toFixed(2)}</b>`, r: 1 }, { h: 'Roster', f: r => QE.rosterText(r) || '<span class="muted">·</span>' }, { h: 'Notes', k: 'notes' }],
-      rows, { onRow: canTS(), empty: 'No shifts in this period. Use "Clock in" in the sidebar to start a shift.' })}</div>` : tsPersonCards(rows, emps, f)}`;
+    ${(f.view || 'person') === 'list' ? `<div class="panel" style="padding:0">${table([{ h: 'Staff', s: 'name', f: r => `${esc(r.name)}${r.employee_no ? ` <span class="small muted">${esc(r.employee_no)}</span>` : ''}` }, { h: 'Date', s: 'date', f: r => fmtDate(r.clock_in.slice(0, 10)) }, { h: 'In', f: r => fmtTime(r.clock_in.slice(11)) },
+      { h: 'Out', f: r => r.clock_out ? fmtTime(r.clock_out.slice(11)) : '<span class="status open">on shift</span>' }, { h: 'Hours', s: 'hours', f: r => r.hours.toFixed(2), r: 1 }, { h: 'Unpaid break', f: r => r.break_hours ? `−${(r.break_hours * 60).toFixed(0)} min` : '·', r: 1 }, { h: 'Paid hours', s: 'paid_hours', f: r => `<b>${(r.paid_hours ?? r.hours).toFixed(2)}</b>`, r: 1 },
+      { h: 'Status', s: 'status', f: r => `<span class="status ${{ 'on shift': 'open', paid: 'confirmed', approved: 'confirmed', 'not approved': '' }[tsStatus(r)]}">${esc(tsStatus(r))}</span>` }, { h: 'Roster', f: r => QE.rosterText(r) || '<span class="muted">·</span>' }, { h: 'Notes', k: 'notes' }],
+      rows, { onRow: canTS(), lv, empty: lvEmpty(lv, all, 'shifts') || 'No shifts in this period. Use "Clock in" in the sidebar to start a shift.' })}</div>`
+      : tsPersonCards(rows, LV.isFiltered(lv.state, lv.spec) ? emps.filter(e => LV.matches([e.name, e.employee_no], lv.state.q)) : emps, f, { order: cardOrder, addEmpty: !lv.state.sel.status, empty: lvEmpty(lv, all, 'shifts') })}`;
   if ($('#t-lock')) $('#t-lock').onclick = () => { window.__tsUnlock = null; toast('Timesheets locked'); renderTimesheets(f); };
   if ($('#t-pin')) $('#t-pin').onclick = () => {
     const m = openModal(`<h2 style="font-size:1.3rem">🔐 Enter timesheets for all staff</h2>
@@ -412,13 +472,6 @@ async function renderTimesheets(f) {
         setTimeout(() => { if (VIEW === 'timesheets' && window.__tsUnlock && window.__tsUnlock.token === r.token) { window.__tsUnlock = null; toast('Timesheets locked again'); renderTimesheets(f); } }, r.until - Date.now() + 500); }
       catch (err) { $('.err', e.target).innerHTML = `<div class="error">${esc(err.message)}</div>`; e.target.pin.value = ''; }
     };
-  };
-  $('#t-quick').onchange = async e => {
-    const t = today(), mon = addDays(t, -((new Date(t + 'T00:00:00Z').getUTCDay() + 6) % 7)), v = e.target.value; if (!v) return;
-    if (v === 'pp' || v === 'lp') { const pp = await api('/api/staff/payroll/period'); const [a, b] = v === 'pp' ? pp.current : pp.previous; return renderTimesheets({ ...f, from: a, to: b }); }
-    const first = t.slice(0, 8) + '01', lmEnd = addDays(first, -1);
-    const [a, b] = v === 'tw' ? [mon, addDays(mon, 6)] : v === 'lw' ? [addDays(mon, -7), addDays(mon, -1)] : v === 'tf' ? [addDays(mon, -7), addDays(mon, 6)] : v === 'tm' ? [first, t] : [lmEnd.slice(0, 8) + '01', lmEnd];
-    renderTimesheets({ ...f, from: a, to: b });
   };
   const tsQuery = () => ({ from: $('#t-from').value, to: $('#t-to').value, ...($('#t-emp') && $('#t-emp').value ? { user_id: $('#t-emp').value } : {}) });
   if ($('#t-leave')) $('#t-leave').onclick = () => leaveModal(emps);
@@ -438,19 +491,9 @@ async function renderTimesheets(f) {
     } catch (e) { toast(e.message, 8000); }
     b.disabled = false; b.textContent = '📧 Email timesheet';
   };
-  const refilter = () => renderTimesheets({ from: $('#t-from').value, to: $('#t-to').value, ...($('#t-emp') && $('#t-emp').value && { user_id: $('#t-emp').value }) });
+  const refilter = () => { lv.state.pick = null; lv.save(); renderTimesheets({ from: $('#t-from').value, to: $('#t-to').value, view: f.view, ...($('#t-emp') && $('#t-emp').value && { user_id: $('#t-emp').value }) }); };
   ['#t-from', '#t-to', '#t-emp'].forEach(s => $(s) && ($(s).onchange = refilter));
   const defs = [{ n: 'clock_in', l: 'Start', t: 'datetime-local', req: 1 }, { n: 'clock_out', l: 'Finish', t: 'datetime-local' }, { n: 'notes', l: 'Notes', full: 1 }];
-  $('#t-sort').onchange = e => renderTimesheets({ ...f, sort: e.target.value });
-  $$('[data-tv]').forEach(b => b.onclick = () => renderTimesheets({ ...f, view: b.dataset.tv }));
-  // quick add on a person's card
-  $$('[data-qu]').forEach(fm => fm.onsubmit = async e => {
-    e.preventDefault(); const d = fm.d.value, a = fm.a.value, b = fm.b.value;
-    if (!d || !a || !b) return toast('Enter the date, start and finish');
-    const btn = $('button', fm); btn.disabled = true;
-    try { await api('/api/staff/timesheets', { body: { user_id: fm.dataset.qu, clock_in: `${d}T${a}`, clock_out: `${b < a ? addDays(d, 1) : d}T${b}` } }); toast('Shift added'); renderTimesheets(f); }
-    catch (err) { toast(err.message, 6000); btn.disabled = false; }
-  });
   if ($('#t-multi')) $('#t-multi').onclick = () => multiShiftModal(emps, $('#t-to').value > today() ? today() : $('#t-to').value, () => renderTimesheets(f));
   // One shift: Date across, then Start | Finish, then notes (same boxes as the quick add on each card).
   // A finish earlier than the start is the next morning (night shift). Finish blank = still clocked in.
@@ -487,14 +530,34 @@ async function renderTimesheets(f) {
     if ($('#sh-del', m.el)) $('#sh-del', m.el).onclick = async () => { if (!confirm('Delete this shift?')) return; await api(`/api/staff/timesheets/${r.id}`, { method: 'DELETE' }); m.close(); renderTimesheets(f); };
   };
   if ($('#t-add')) $('#t-add').onclick = () => canTS() ? shiftModal({ title: 'Add a shift', staffPick: true }) : shiftModal({ title: 'Enter my shift', mine: true });
+  // the list part: drawn now, and again on each sort / filter change (same rows, no fetching)
+  const cardOrder = ppl => { const k = ['name', 'last_name', 'employee_no', 'hours', 'paid_hours'].includes(lv.state.sort) ? lv.state.sort : 'name'; return LV.sortRows(ppl, lv.spec.fields, k, k === lv.state.sort ? lv.state.dir : 'asc'); };
+  const drawList = () => {
+    const host = $('#ts-list'); if (!host) return;
+    rows = lv.apply(all);
+    host.innerHTML = listHTML(); lv.bind(host); bindClear2(host, lv);
+    bindList(host);
+  };
+  const bindList = host => {
+  $$('[data-tv]', host).forEach(b => b.onclick = () => renderTimesheets({ ...f, view: b.dataset.tv }));
+  // quick add on a person's card
+  $$('[data-qu]', host).forEach(fm => fm.onsubmit = async e => {
+    e.preventDefault(); const d = fm.d.value, a = fm.a.value, b = fm.b.value;
+    if (!d || !a || !b) return toast('Enter the date, start and finish');
+    const btn = $('button', fm); btn.disabled = true;
+    try { await api('/api/staff/timesheets', { body: { user_id: fm.dataset.qu, clock_in: `${d}T${a}`, clock_out: `${b < a ? addDays(d, 1) : d}T${b}` } }); toast('Shift added'); renderTimesheets(f); }
+    catch (err) { toast(err.message, 6000); btn.disabled = false; }
+  });
   // change a shift: Admin and up; delete: Super admin only
-  const editShift = r => shiftModal({ title: `Shift — ${r.name}`, r });
-  if (canTS() && f.view === 'list') bindRows(view(), rows, editShift);
+  if (canTS() && f.view === 'list') bindRows(host, rows, editShift);
   // OWNER-QUICKEDIT: click a line to change it in place; the bin deletes; Edit week opens the person's days side by side
-  const redraw = () => renderTimesheets(f);
-  $$('.ts-lines', view()).forEach(box => QE.bind(box, rows, { onChanged: redraw, more: editShift }));
-  $$('[data-wk]').forEach(b => b.onclick = () => { const e = emps.find(x => x.id == b.dataset.wk) || {}, r0 = rows.find(r => r.user_id == b.dataset.wk) || {};
+  $$('.ts-lines', host).forEach(box => QE.bind(box, rows, { onChanged: redraw, more: editShift }));
+  $$('[data-wk]', host).forEach(b => b.onclick = () => { const e = emps.find(x => x.id == b.dataset.wk) || {}, r0 = rows.find(r => r.user_id == b.dataset.wk) || {};
     QE.personPanel({ user_id: +b.dataset.wk, name: e.name || r0.name || '', sub: e.position || '', start: f.from, end: f.to, onChanged: async () => { await redraw(); return null; }, more: editShift }); });
+  };
+  const editShift = r => shiftModal({ title: `Shift — ${r.name}`, r });
+  const redraw = () => renderTimesheets(f);
+  drawList();
   if ($('#t-pprev')) $('#t-pprev').onclick = () => renderTimesheets({ ...f, from: PP.previous[0], to: PP.previous[1] });
   if ($('#t-pnext')) $('#t-pnext').onclick = () => renderTimesheets({ ...f, from: PP.next[0], to: PP.next[1] });
   if ($('#t-pp')) $('#t-pp').onclick = () => renderTimesheets({ ...f, from: PP.open[0], to: PP.open[1] });
@@ -507,17 +570,28 @@ async function renderTimeclock() {
   const toMin = s => { const [h, m] = s.slice(11, 16).split(':').map(Number); return h * 60 + m; };
   const dur = since => { const m = Math.max(0, toMin(d.now) - toMin(since) + (since.slice(0, 10) < d.now.slice(0, 10) ? 1440 : 0)); return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`; };
   const on = d.staff.filter(s => s.on_shift).length;
+  // OWNER-LISTS: find your name quicker: search, first or last name order, on shift first
+  const lv = listOf('timeclock', { fields: { ...NAME_FIELDS(), position: { label: 'Position', type: 'text', then: 'name' }, on_shift: { label: 'On shift first', type: 'num', get: s => (s.on_shift ? 0 : 1), then: 'name' } },
+    search: s => [s.name, s.position], placeholder: 'Your name…',
+    selects: [{ key: 'on', label: 'Show', all: 'Everyone', options: [['on', 'On shift'], ['off', 'Off']], test: (s, v) => (v === 'on' ? !!s.on_shift : !s.on_shift) }] }, { sort: 'name', dir: 'asc' }, () => drawTiles());
   view().innerHTML = `
     <div class="clock-head"><div><div class="clock-now">${fmtTime(d.now.slice(11, 16))}</div><div class="muted">${fmtDate(d.now.slice(0, 10), { weekday: 'long', day: 'numeric', month: 'long' })} · ${on} on shift</div></div>
       <p class="small muted" style="max-width:420px;margin:0">Tap your name and enter your 4-digit PIN to <b>clock in</b> or <b>clock out</b>. Hours go straight into Timesheets and Payroll.</p></div>
-    <div class="clock-grid">${d.staff.map(s => `<button class="clock-tile ${s.on_shift ? 'on' : ''}" data-u="${s.id}">
+    <div id="tc-list"></div>`;
+  const drawTiles = () => {
+    const host = $('#tc-list'); if (!host) return;
+    const shown = lv.apply(d.staff);
+    host.innerHTML = `${d.staff.length > 1 ? lv.bar({ shown: shown.length, total: d.staff.length }) : ''}<div class="clock-grid">${shown.map(s => `<button class="clock-tile ${s.on_shift ? 'on' : ''}" data-u="${s.id}">
       <span class="av" style="background:${colorFor(s.id)}">${esc(initials(s.name))}</span>
       <b>${esc(s.name)}</b><span class="small muted">${esc(s.position || '')}</span>
       <span class="clock-status">${s.on_shift ? `● On shift since ${fmtTime(s.since.slice(11, 16))} · ${dur(s.since)}` : `Off${s.today_hours ? ` · ${s.today_hours}h today` : ''}`}</span>
-    </button>`).join('')}</div>`;
-  $$('.clock-tile').forEach(b => b.onclick = () => pinPad(d.staff.find(s => s.id == b.dataset.u)));
+    </button>`).join('')}</div>${shown.length ? '' : `<div class="empty">${lvEmpty(lv, d.staff, 'names') || 'Nobody on the time clock yet.'}</div>`}`;
+    lv.bind(host); bindClear2(host, lv);
+    $$('.clock-tile', host).forEach(b => b.onclick = () => pinPad(d.staff.find(s => s.id == b.dataset.u)));
+  };
+  drawTiles();
   clearInterval(CLOCK_TIMER);
-  CLOCK_TIMER = setInterval(() => { if (VIEW === 'timeclock' && !document.querySelector('.pinpad')) renderTimeclock(); else if (VIEW !== 'timeclock') clearInterval(CLOCK_TIMER); }, 60000);
+  CLOCK_TIMER = setInterval(() => { if (VIEW === 'timeclock' && !document.querySelector('.pinpad') && !(document.activeElement && document.activeElement.matches('.lv-bar input, .lv-bar select'))) renderTimeclock(); else if (VIEW !== 'timeclock') clearInterval(CLOCK_TIMER); }, 60000);
 }
 function pinPad(s) {
   let pin = '';
@@ -584,10 +658,20 @@ async function renderLogins(f = LG) {
       { h: 'Last login', f: u => `${when(u.last_login)}${u.last_device ? `<div class="small muted">${esc(u.last_device)}</div>` : ''}` },
       { h: 'Last active', f: u => u.active_now ? '<span class="status confirmed">signed in now</span>' : ago(u.last_active) },
       { h: 'Logins', f: u => u.logins || '·', r: 1 }, { h: 'Failed', f: u => u.failed ? `<b style="color:var(--red)">${u.failed}</b>` : '·', r: 1 }], d.users.filter(u => !f.user_id || u.id == f.user_id))}</div>
-    <div class="panel" style="padding:0"><h3 style="padding:14px 16px 0">Every login (${d.events.length})</h3>${table([
-      { h: 'When', f: e => when(e.at) }, { h: 'Who', f: e => e.name ? `<b>${esc(e.name)}</b>` : `<span class="muted">${esc(e.username || '?')} (no such user)</span>` },
-      { h: 'Event', f: e => `<span class="status ${EV[e.event] ? EV[e.event][1] : ''}">${EV[e.event] ? EV[e.event][0] : esc(e.event)}</span>` },
-      { h: 'Device', k: 'device' }, { h: 'IP address', k: 'ip' }], d.events, { empty: 'No logins in this period. (Login history starts from when this report was added.)' })}</div>`;
+    <div class="panel" style="padding:0"><h3 style="padding:14px 16px 0">Every login (${d.events.length})</h3><div id="lg-list" style="padding:8px 16px 0"></div></div>`;
+  // OWNER-LISTS: the logins sort by when / who / event / device / IP and can be searched (the dates are the boxes above)
+  const lv = listOf('logins', { fields: { at: { label: 'When', type: 'date', first: 'desc' }, name: { label: 'Who', type: 'text', get: e => e.name || e.username, then: 'at' }, event: { label: 'Event', type: 'text', then: 'at' }, device: { label: 'Device', type: 'text', then: 'at' }, ip: { label: 'IP address', type: 'text', then: 'at' } },
+    search: e => [e.name, e.username, e.device, e.ip], placeholder: 'Name, device, IP…' }, { sort: 'at', dir: 'desc' }, () => drawEv());
+  const drawEv = () => {
+    const host = $('#lg-list'); if (!host) return;
+    const shown = lv.apply(d.events);
+    host.innerHTML = `${d.events.length ? lv.bar({ shown: shown.length, total: d.events.length }) : ''}${table([
+      { h: 'When', s: 'at', f: e => when(e.at) }, { h: 'Who', s: 'name', f: e => e.name ? `<b>${esc(e.name)}</b>` : `<span class="muted">${esc(e.username || '?')} (no such user)</span>` },
+      { h: 'Event', s: 'event', f: e => `<span class="status ${EV[e.event] ? EV[e.event][1] : ''}">${EV[e.event] ? EV[e.event][0] : esc(e.event)}</span>` },
+      { h: 'Device', s: 'device', k: 'device' }, { h: 'IP address', s: 'ip', k: 'ip' }], shown, { lv, empty: lvEmpty(lv, d.events, 'logins') || 'No logins in this period. (Login history starts from when this report was added.)' })}`;
+    lv.bind(host); bindClear2(host, lv);
+  };
+  drawEv();
   const go2 = () => renderLogins({ user_id: $('#lg-user').value, event: $('#lg-ev').value, from: $('#lg-from').value, to: $('#lg-to').value });
   ['#lg-user', '#lg-ev', '#lg-from', '#lg-to'].forEach(id => $(id).onchange = go2);
 }
@@ -603,16 +687,35 @@ async function renderEmployees() {
     { n: 'on_timeclock', l: 'Shows on the time clock and timesheets. Untick for office logins that don\'t clock in.', t: 'checkbox', full: 1 }]
     .filter(d => L('pay_rates') >= 1 || !PAYF.includes(d.n)).filter(d => d.n !== 'active' || isNew || L('employees') >= 3)
     .map(d => (PAYF.includes(d.n) && L('pay_rates') < 2) || !canEdit ? { ...d, dis: true } : d);
+  await listMeta();
+  const seePay = L('pay_rates') >= 1, positions = [...new Set(rows.map(e => e.position).filter(Boolean))].sort(LV.compare), accesses = [...new Set(rows.map(accessName))].sort(LV.compare);
+  const lv = listOf('employees', {
+    fields: { ...NAME_FIELDS(), employee_no: { label: 'Employee no.', type: 'text', then: 'name' }, position: { label: 'Position', type: 'text', then: 'name' }, start_date: { label: 'Start date', type: 'date', first: 'desc', then: 'name' },
+      pay_rate: { label: 'Pay rate', type: 'num', first: 'desc', hidden: !seePay, guard: 1, then: 'name' }, status: { label: 'Status (active first)', type: 'num', get: e => (e.active ? 0 : 1), then: 'name' } },
+    search: e => [e.name, e.username, e.position, e.employee_no, e.phone, e.email], placeholder: 'Name, emp. no., position…',
+    date: e => e.start_date, dateLabel: 'Start date',
+    selects: [{ key: 'status', label: 'Status', options: [['active', 'Active'], ['left', 'Left / inactive']], test: (e, v) => (v === 'active' ? !!e.active : !e.active) },
+      ...(positions.length > 1 ? [{ key: 'position', label: 'Position', options: positions.map(p => [p, p]), test: (e, v) => e.position === v }] : []),
+      ...(accesses.length > 1 ? [{ key: 'access', label: 'Access', options: accesses.map(a => [a, a]), test: (e, v) => accessName(e) === v }] : [])],
+  }, { sort: 'status', dir: 'asc' }, () => draw());
   view().innerHTML = `<div class="bar-tools"><p class="small muted grow" style="margin:0">${isAdmin() ? 'Press <b>Access</b> to choose what each person can see and change.' : ME.team_only ? 'Your team (people with you as their supervisor).' : 'Only an administrator can change what people can see and do.'}</p>${isAdmin() ? '<a class="btn sm ghost" href="#/audit">🧾 Audit trail</a><a class="btn sm ghost" href="#/logins">🔐 Login history</a>' : ''}${canEdit ? '<button class="btn sm coral" id="e-new">+ Staff member</button>' : ''}</div>
-    <div class="panel" style="padding:0">${table([{ h: 'Name', f: e => `<b>${esc(e.name)}</b><div class="small muted">@${esc(e.username)}</div>` }, { h: 'Position', k: 'position' },
-      { h: 'Access', f: e => `${accessChip(e)}${e.team_only && e.role !== 'admin' ? ' <span class="small muted">own team</span>' : ''}${e.supervisor_id ? `<div class="small muted">Supervisor: ${esc((rows.find(x => x.id === e.supervisor_id) || {}).name || '—')}</div>` : ''}${isAdmin() ? ` <button class="btn sm ghost" data-acc="${e.id}">Access</button>` : ''}` },
-      ...(L('pay_rates') >= 1 ? [{ h: 'Pay', f: e => e.pay_rate ? `${money(e.pay_rate, cur())}${e.pay_type === 'hourly' ? '/hr' : '/yr'}` : '—', r: 1 }] : []), { h: 'Phone', k: 'phone' },
-      { h: 'Status', f: e => (e.active ? '<span class="status open">active</span>' : `<span class="status cancelled">${e.end_date ? `finished ${esc(fmtDate(e.end_date))}` : 'inactive'}</span>`)
-        + (e.active && e.pay_rate && L('employees') >= 3 && L('payroll') >= 2 ? ` <button class="btn sm ghost" data-fin="${e.id}" title="Final pay with unused annual leave paid out">Finish employment…</button>` : '') }], rows, { onRow: 1 })}</div>`;
+    <div id="e-list"></div>`;
   if ($('#e-new')) $('#e-new').onclick = () => editModal('New staff member', defs(true), { pay_type: 'hourly', active: 1, on_timeclock: 1 }, v => api('/api/staff/employees', { body: v }).then(e => { renderEmployees(); if (isAdmin()) accessModal(e, rows); }), { wide: true });
-  $$('[data-acc]').forEach(b => b.onclick = () => accessModal(rows.find(e => e.id == b.dataset.acc), rows));
-  $$('[data-fin]').forEach(b => b.onclick = ev => { ev.stopPropagation(); finishModal(rows.find(e => e.id == b.dataset.fin)); });
-  bindRows(view(), rows, e => editModal(e.name, defs(false), { ...e, password: '' }, v => { if (!v.password) delete v.password; if (!v.clock_pin) delete v.clock_pin; return api(`/api/staff/employees/${e.id}`, { method: 'PUT', body: v }).then(renderEmployees); }, { wide: true, readOnly: !canEdit }));
+  const draw = () => {
+    const host = $('#e-list'); if (!host) return;
+    const shown = lv.apply(rows);
+    host.innerHTML = `${lv.bar({ shown: shown.length, total: rows.length })}
+    <div class="panel" style="padding:0">${table([{ h: 'Name', s: 'name', f: e => `<b>${esc(e.name)}</b><div class="small muted">@${esc(e.username)}</div>` }, { h: 'Emp. no.', s: 'employee_no', f: e => esc(e.employee_no || '') || '<span class="muted">·</span>' }, { h: 'Position', s: 'position', k: 'position' },
+      { h: 'Access', f: e => `${accessChip(e)}${e.team_only && e.role !== 'admin' ? ' <span class="small muted">own team</span>' : ''}${e.supervisor_id ? `<div class="small muted">Supervisor: ${esc((rows.find(x => x.id === e.supervisor_id) || {}).name || '—')}</div>` : ''}${isAdmin() ? ` <button class="btn sm ghost" data-acc="${e.id}">Access</button>` : ''}` },
+      ...(seePay ? [{ h: 'Pay', s: 'pay_rate', f: e => e.pay_rate ? `${money(e.pay_rate, cur())}${e.pay_type === 'hourly' ? '/hr' : '/yr'}` : '—', r: 1 }] : []), { h: 'Started', s: 'start_date', f: e => e.start_date ? esc(fmtDate(e.start_date, { day: 'numeric', month: 'short', year: 'numeric' })) : '<span class="muted">·</span>' }, { h: 'Phone', k: 'phone' },
+      { h: 'Status', s: 'status', f: e => (e.active ? '<span class="status open">active</span>' : `<span class="status cancelled">${e.end_date ? `finished ${esc(fmtDate(e.end_date))}` : 'inactive'}</span>`)
+        + (e.active && e.pay_rate && L('employees') >= 3 && L('payroll') >= 2 ? ` <button class="btn sm ghost" data-fin="${e.id}" title="Final pay with unused annual leave paid out">Finish employment…</button>` : '') }], shown, { onRow: 1, lv, empty: lvEmpty(lv, rows, 'staff') || 'No staff yet.' })}</div>`;
+    lv.bind(host); bindClear2(host, lv);
+    $$('[data-acc]', host).forEach(b => b.onclick = () => accessModal(rows.find(e => e.id == b.dataset.acc), rows));
+    $$('[data-fin]', host).forEach(b => b.onclick = ev => { ev.stopPropagation(); finishModal(rows.find(e => e.id == b.dataset.fin)); });
+    bindRows(host, shown, e => editModal(e.name, defs(false), { ...e, password: '' }, v => { if (!v.password) delete v.password; if (!v.clock_pin) delete v.clock_pin; return api(`/api/staff/employees/${e.id}`, { method: 'PUT', body: v }).then(renderEmployees); }, { wide: true, readOnly: !canEdit }));
+  };
+  draw();
 }
 // S57: Finish employment: their last day, the final pay (from the day after their last pay run) with unused annual leave paid out
 function finishModal(e) {
@@ -671,10 +774,24 @@ function accessModal(e, everyone) {
 }
 // Administrator: who changed access, pay or bank details, and what was deleted
 async function renderAudit() {
-  const rows = await api('/api/staff/audit');
-  view().innerHTML = `<p class="small muted">Access changes (before → after), pay and bank detail changes (which details, not the values) and deletions. Newest first.</p>
-    <div class="panel" style="padding:0">${table([{ h: 'When', f: r => `${fmtDate(r.at.slice(0, 10), { day: 'numeric', month: 'short', year: 'numeric' })} <span class="small muted">${new Date(r.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>` },
-      { h: 'Who', f: r => `<b>${esc(r.user_name || '—')}</b>` }, { h: 'What', f: r => esc(r.action) }, { h: 'Details', f: r => `<span class="small">${esc(r.details)}</span>` }], rows, { empty: 'Nothing yet. Changes to access, pay rates and bank details, and deletions, will show here.' })}</div>`;
+  await listMeta();
+  // OWNER-LISTS: the Year / Period are looked up on the server (it keeps the newest 500 for those dates); the rest here
+  const r0 = LV.rangeOf(LV.load('audit', ME.id), LISTMETA);
+  const rows = await api(`/api/staff/audit${r0 ? `?from=${r0.from}&to=${r0.to}` : ''}`);
+  const uniq = k => [...new Set(rows.map(r => r[k]).filter(Boolean))].sort(LV.compare).map(v => [v, v]);
+  const lv = listOf('audit', { fields: { at: { label: 'When', type: 'date', first: 'desc' }, user_name: { label: 'Who', type: 'text', then: 'at' }, action: { label: 'What', type: 'text', then: 'at' } },
+    search: r => [r.user_name, r.action, r.details], placeholder: 'Who, what, details…', date: r => r.at, dateLabel: 'Date', serverDates: true,
+    selects: [{ key: 'action', label: 'What', options: uniq('action'), test: (r, v) => r.action === v }, { key: 'who', label: 'Who', options: uniq('user_name'), test: (r, v) => r.user_name === v }] },
+  { sort: 'at', dir: 'desc' }, (c, { dates }) => (dates ? renderAudit() : draw()));
+  view().innerHTML = `<p class="small muted">Access changes (before → after), pay and bank detail changes (which details, not the values) and deletions.</p><div id="au-list"></div>`;
+  const draw = () => {
+    const host = $('#au-list'); if (!host) return;
+    const shown = lv.apply(rows);
+    host.innerHTML = `${lv.bar({ shown: shown.length, total: rows.length })}<div class="panel" style="padding:0">${table([{ h: 'When', s: 'at', f: r => `${fmtDate(r.at.slice(0, 10), { day: 'numeric', month: 'short', year: 'numeric' })} <span class="small muted">${new Date(r.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>` },
+      { h: 'Who', s: 'user_name', f: r => `<b>${esc(r.user_name || '—')}</b>` }, { h: 'What', s: 'action', f: r => esc(r.action) }, { h: 'Details', f: r => `<span class="small">${esc(r.details)}</span>` }], shown, { lv, empty: lvEmpty(lv, rows, 'changes') || (r0 ? 'No changes in these dates.' : 'Nothing yet. Changes to access, pay rates and bank details, and deletions, will show here.') })}</div>`;
+    lv.bind(host); bindClear2(host, lv);
+  };
+  draw();
 }
 
 // ------------------------------------------------------------------ payroll
@@ -685,6 +802,8 @@ async function renderAudit() {
 // state: { period: [from, to], flash: 'message', finalised: { id, start, end, pay_date, people, net } }
 async function renderPayroll(state = {}) {
   const runs = await api('/api/staff/payroll/runs');
+  let voided = []; try { voided = await api('/api/staff/payroll/runs/voided'); } catch { }
+  await listMeta();
   let N = null; if (L('payroll') >= 2) { try { N = await api('/api/staff/payroll/next-period'); } catch { } }
   let start, end;
   if (state.period) [start, end] = state.period;
@@ -709,11 +828,31 @@ async function renderPayroll(state = {}) {
       <div id="pr-next"></div><div id="pr-preview"></div></div>
     <div class="panel" id="pr-export"></div>
     <div class="panel"><h3>Past pay runs <a class="btn sm ghost" href="/api/staff/export/payslips.csv">Export all payslips CSV</a></h3>
-      ${table([{ h: 'Pay date', f: r => fmtDate(r.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) + (r.extra_reason ? ` <span class="chip" title="${esc(r.extra_reason)}">Extra: ${esc(r.extra_reason)}</span>` : '') + (r.note ? ` <span class="chip gray" title="${esc(r.note)}">${esc(r.note.split(' (')[0])}</span>` : '') }, { h: 'Period', f: r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}` },
-        { h: 'Staff', k: 'employees', r: 1 }, { h: 'Gross', f: r => money(r.total_gross, cur()), r: 1 }, { h: 'Net', f: r => money(r.total_net, cur()), r: 1 }, { h: 'Employer FNPF', f: r => money(r.total_fnpf_employer, cur()), r: 1 }, { h: 'By', k: 'created_by_name' }],
-        runs, { onRow: 1, empty: 'No pay runs yet.' })}</div>
+      <div id="pr-past"></div></div>
     <div class="panel" id="pr-rules"></div>`;
-  bindRows(view(), runs, r => runModal(r.id));
+  // OWNER-LISTS: Past pay runs sort by any column; Year (financial / calendar, by pay date), Period, Status (finalised / voided), Kind
+  const kindOf = r => (r.extra_reason ? 'extra' : /^Final pay/i.test(r.note || '') ? 'final' : 'normal');
+  const pastAll = [...runs.map(r => ({ ...r, status: 'finalised' })), ...voided];
+  const plv = listOf('payruns', {
+    fields: { pay_date: { label: 'Pay date', type: 'date', first: 'desc' }, period_start: { label: 'Period', type: 'date', first: 'desc' }, employees: { label: 'Staff', type: 'num', first: 'desc', then: 'pay_date' },
+      total_gross: { label: 'Gross', type: 'num', first: 'desc' }, total_net: { label: 'Net', type: 'num', first: 'desc' }, total_fnpf_employer: { label: 'Employer FNPF', type: 'num', first: 'desc' }, status: { label: 'Status', type: 'text', then: 'pay_date' } },
+    search: r => [r.created_by_name, r.note, r.extra_reason, r.voided_by_name], placeholder: 'Bonus, final pay, who…',
+    date: r => r.pay_date, dateLabel: 'Pay date',
+    selects: [{ key: 'status', label: 'Status', options: [['finalised', 'Finalised'], ['voided', 'Voided']], test: (r, v) => r.status === v },
+      { key: 'kind', label: 'Kind', options: [['normal', 'Normal pay run'], ['extra', 'Extra (bonus)'], ['final', 'Final pay']], test: (r, v) => kindOf(r) === v }],
+  }, { sort: 'pay_date', dir: 'desc' }, () => drawPast());
+  const drawPast = () => {
+    const host = $('#pr-past'); if (!host) return;
+    const shown = plv.apply(pastAll);
+    host.innerHTML = `${pastAll.length ? plv.bar({ shown: shown.length, total: pastAll.length }) : ''}${table([{ h: 'Pay date', s: 'pay_date', f: r => fmtDate(r.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) + (r.extra_reason ? ` <span class="chip" title="${esc(r.extra_reason)}">Extra: ${esc(r.extra_reason)}</span>` : '') + (r.note ? ` <span class="chip gray" title="${esc(r.note)}">${esc(r.note.split(' (')[0])}</span>` : '') },
+      { h: 'Period', s: 'period_start', f: r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}` },
+      { h: 'Staff', s: 'employees', k: 'employees', r: 1 }, { h: 'Gross', s: 'total_gross', f: r => money(r.total_gross, cur()), r: 1 }, { h: 'Net', s: 'total_net', f: r => money(r.total_net, cur()), r: 1 }, { h: 'Employer FNPF', s: 'total_fnpf_employer', f: r => money(r.total_fnpf_employer, cur()), r: 1 },
+      { h: 'Status', s: 'status', f: r => r.status === 'voided' ? `<span class="status cancelled">voided</span><div class="small muted">${esc(fmtDate((r.voided_at || '').slice(0, 10), { day: 'numeric', month: 'short', year: 'numeric' }))}${r.voided_by_name ? ' · ' + esc(r.voided_by_name) : ''}</div>` : '<span class="status confirmed">finalised</span>' },
+      { h: 'By', k: 'created_by_name' }], shown, { onRow: 1, lv: plv, empty: lvEmpty(plv, pastAll, 'pay runs') || 'No pay runs yet.' })}`;
+    plv.bind(host); bindClear2(host, plv);
+    bindRows(host, shown, r => r.status === 'voided' ? toast(`This pay run was voided${r.voided_by_name ? ' by ' + r.voided_by_name : ''}: its payslips were deleted, so it can't be opened.`, 6000) : runModal(r.id));
+  };
+  drawPast();
   if (!LIC.licensed) {   // new pay runs are locked (the server refuses them too); past pay runs stay open to see and print
     $$('#pr-form input, #pr-form button').forEach(x => { x.disabled = true; });
     $('#pr-preview').innerHTML = `<p class="small" style="margin:8px 0 0"><b>🔒 ${esc(LIC.message)}</b></p>`;
@@ -1010,23 +1149,46 @@ function rosterVsText(x, src = false, short = false) {   // short: in the Hours 
 }
 async function runModal(id) {
   const { run, payslips, roster: RV = null } = await api(`/api/staff/payroll/runs/${id}`);
+  await listMeta();
   const rvOf = p => RV && RV.rows.find(x => x.user_id === p.user_id);
   const m = openModal(`<h2 style="font-size:1.5rem">Pay run — ${fmtDate(run.pay_date, { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
     <p class="muted">${run.extra_reason ? `<span class="chip">Extra pay run: ${esc(run.extra_reason)}</span> ` : ''}${run.note ? `<span class="chip gray">${esc(run.note)}</span> ` : ''}${run.period_start} to ${run.period_end} · Gross ${money(run.total_gross, cur())} · Net ${money(run.total_net, cur())} · Employer FNPF ${money(run.total_fnpf_employer, cur())}</p>
     ${RV ? `<p class="small pr-rv-total"><b>Rostered / Paid / Difference</b> (hourly staff, published roster): ${rosterVsText(RV.total)}${RV.total.from_roster ? ` · ${RV.total.from_roster} ${RV.total.from_roster === 1 ? "person's" : "people's"} hours from the roster` : ''}</p>` : ''}
-    ${table([{ h: 'Employee', k: 'employee_name' }, { h: 'Hours', k: 'hours', r: 1 }, ...(RV ? [{ h: 'Rostered / Paid / Difference', f: p => rvOf(p) ? rosterVsText(rvOf(p), true) : '<span class="muted">·</span>', r: 1 }] : []), { h: 'Gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'FNPF', f: p => money(p.fnpf_employee, cur()), r: 1 }, { h: 'PAYE', f: p => money(p.paye, cur()), r: 1 }, { h: 'Net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }, { h: '', f: p => `<button class="btn sm ghost" data-ps="${p.id}">Payslip</button>` }], payslips)}
+    <div id="rm-list"></div>
     <div class="actions"><button class="btn sm" id="print-all">Print all payslips</button>${window.riyser ? '<button class="btn sm ghost" id="pdf-all">Save all as PDF</button>' : ''}<button class="btn sm ghost" id="mail-run">Email payslips</button>${L('payroll') >= 3 ? '<button class="btn sm danger" id="del-run">Void (delete) run</button>' : ''}</div>`, { wide: true });
   $('#mail-run', m.el).onclick = async () => { if (!confirm('Email each person in this pay run their payslip (with a PDF)?')) return; try { toast(emailResult(await emailPayslips({ run_id: id })), 12000); } catch (e) { toast(e.message, 8000); } };
-  $$('[data-ps]', m.el).forEach(b => b.onclick = () => printHTML(payslipHTML(payslips.find(p => p.id == b.dataset.ps), run)));
+  // OWNER-LISTS: the payslips in the run sort by name (first or last), hours, gross, PAYE or net, and can be searched
+  const lv = listOf('runslips', { fields: { ...NAME_FIELDS(p => p.employee_name), hours: { label: 'Hours', type: 'num', first: 'desc' }, gross: { label: 'Gross', type: 'num', first: 'desc' }, paye: { label: 'PAYE', type: 'num', first: 'desc' }, net: { label: 'Net', type: 'num', first: 'desc' } },
+    search: p => [p.employee_name, p.position], placeholder: 'Name…' }, { sort: 'name', dir: 'asc' }, () => drawSlips());
+  const drawSlips = () => {
+    const host = $('#rm-list', m.el); if (!host) return;
+    const shown = lv.apply(payslips);
+    host.innerHTML = `${payslips.length > 1 ? lv.bar({ shown: shown.length, total: payslips.length }) : ''}${table([{ h: 'Employee', s: 'name', k: 'employee_name' }, { h: 'Hours', s: 'hours', k: 'hours', r: 1 }, ...(RV ? [{ h: 'Rostered / Paid / Difference', f: p => rvOf(p) ? rosterVsText(rvOf(p), true) : '<span class="muted">·</span>', r: 1 }] : []), { h: 'Gross', s: 'gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'FNPF', f: p => money(p.fnpf_employee, cur()), r: 1 }, { h: 'PAYE', s: 'paye', f: p => money(p.paye, cur()), r: 1 }, { h: 'Net', s: 'net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }, { h: '', f: p => `<button class="btn sm ghost" data-ps="${p.id}">Payslip</button>` }], shown, { lv, empty: lvEmpty(lv, payslips, 'payslips') || 'No payslips.' })}`;
+    lv.bind(host); bindClear2(host, lv);
+    $$('[data-ps]', host).forEach(b => b.onclick = () => printHTML(payslipHTML(payslips.find(p => p.id == b.dataset.ps), run)));
+  };
+  drawSlips();
   $('#print-all', m.el).onclick = () => printHTML(payslips.map(p => payslipHTML(p, run)).join(''));
   if ($('#pdf-all', m.el)) $('#pdf-all', m.el).onclick = () => savePdf(`Payslips paid ${run.pay_date} (${run.period_start} to ${run.period_end})`, payslips.map(p => payslipHTML(p, run)).join(''));
   if ($('#del-run', m.el)) $('#del-run', m.el).onclick = async () => { if (confirm('Void this pay run? It and its payslips are deleted, so these dates can be paid again.')) { await api(`/api/staff/payroll/runs/${id}`, { method: 'DELETE' }); m.close(); renderPayroll(); } };
 }
 async function renderMyPayslips() {
   const rows = await api('/api/staff/payslips/mine');
-  view().innerHTML = `<div class="panel" style="padding:0">${table([{ h: 'Pay date', f: p => fmtDate(p.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) }, { h: 'Period', f: p => `${fmtDate(p.period_start)} – ${fmtDate(p.period_end)}` },
-    { h: 'Hours', k: 'hours', r: 1 }, { h: 'Gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'Net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }], rows, { onRow: 1, empty: 'No payslips yet.' })}</div>`;
-  bindRows(view(), rows, p => { const m = openModal(payslipHTML(p, p) + `<div class="actions"><button class="btn sm">Print</button></div>`); $('.actions .btn', m.el).onclick = () => printHTML(payslipHTML(p, p)); });
+  await listMeta();
+  // OWNER-LISTS: sort by pay date, period, hours, gross or net; Year (financial / calendar) and Period by pay date
+  const lv = listOf('payslips', { fields: { pay_date: { label: 'Pay date', type: 'date', first: 'desc' }, period_start: { label: 'Period', type: 'date', first: 'desc' }, hours: { label: 'Hours', type: 'num', first: 'desc' }, gross: { label: 'Gross', type: 'num', first: 'desc' }, net: { label: 'Net', type: 'num', first: 'desc' } },
+    date: p => p.pay_date, dateLabel: 'Pay date' }, { sort: 'pay_date', dir: 'desc' }, () => draw());
+  view().innerHTML = '<div id="ps-list"></div>';
+  const draw = () => {
+    const host = $('#ps-list'); if (!host) return;
+    const shown = lv.apply(rows), tot = k => shown.reduce((a, p) => a + (+p[k] || 0), 0);
+    host.innerHTML = `${rows.length ? lv.bar({ shown: shown.length, total: rows.length }) : ''}${shown.length && LV.isFiltered(lv.state, lv.spec) ? `<div class="tiles"><div class="tile"><div class="k">Gross</div><div class="v">${money(tot('gross'), cur())}</div><div class="s">${shown.length} payslip${shown.length === 1 ? '' : 's'}</div></div><div class="tile"><div class="k">Net</div><div class="v">${money(tot('net'), cur())}</div><div class="s">${tot('hours').toFixed(2)} hours</div></div></div>` : ''}
+    <div class="panel" style="padding:0">${table([{ h: 'Pay date', s: 'pay_date', f: p => fmtDate(p.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) }, { h: 'Period', s: 'period_start', f: p => `${fmtDate(p.period_start)} – ${fmtDate(p.period_end)}` },
+      { h: 'Hours', s: 'hours', k: 'hours', r: 1 }, { h: 'Gross', s: 'gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'Net', s: 'net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }], shown, { onRow: 1, lv, empty: lvEmpty(lv, rows, 'payslips') || 'No payslips yet.' })}</div>`;
+    lv.bind(host); bindClear2(host, lv);
+    bindRows(host, shown, p => { const m = openModal(payslipHTML(p, p) + `<div class="actions"><button class="btn sm">Print</button></div>`); $('.actions .btn', m.el).onclick = () => printHTML(payslipHTML(p, p)); });
+  };
+  draw();
 }
 
 // ------------------------------------------------------------------ settings & privileges
@@ -1249,6 +1411,10 @@ async function renderSettings() {
     ${sect('s-co', 'Company details', 'Shown on payslips, timesheets and emails.', fieldsHTML(dis([{ n: 'company_name', l: 'Company name' }, { n: 'phone', l: 'Phone' }, { n: 'address', l: 'Address', full: 1 }, { n: 'email', l: 'Email (replies to payslip emails go here)', full: 1 }]), S))}
     ${sect('s-week', 'Normal working week', 'Everyone works a normal week of these hours. Hours over it are shown as extra on the Dashboard; the multi-shift grid starts with the normal day\'s times.',
       fieldsHTML(dis([{ n: 'normal_week_hours', l: 'Normal week (hours)', t: 'number', step: '0.5', min: 1 }, { n: 'normal_start', l: 'Normal day starts', t: 'time' }, { n: 'normal_finish', l: 'Normal day finishes', t: 'time' }]), S))}
+    ${(() => { const [fm, fd] = (S.financial_year_start || '01-01').split('-').map(Number), MO = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      return sect('s-fy', 'Financial year', "The day the company's financial year starts. The lists' <b>Year</b> filter offers financial years (e.g. FY 2025–26) and calendar years. Fiji's tax year (PAYE, FNPF) is the calendar year: leave this at 1 January unless your accounts use another year.",
+        `<div class="grid2"><div class="field"><label>Starts on (day)</label><select name="fy_day" ${ro ? 'disabled' : ''}>${Array.from({ length: 31 }, (_, i) => `<option ${i + 1 === fd ? 'selected' : ''}>${i + 1}</option>`).join('')}</select></div>
+          <div class="field"><label>Month</label><select name="fy_month" ${ro ? 'disabled' : ''}>${MO.map((m, i) => `<option value="${i + 1}" ${i + 1 === fm ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>`); })()}
     ${sect('s-pay', 'PAYE tax', 'Annual brackets (from, to, rate %). <b>Check against the current FRCS tables.</b> FNPF %, unpaid breaks and pay periods are under <a href="#/payroll">Payroll → Payroll rules</a>.',
       fieldsHTML(dis([{ n: 'paye_brackets', l: 'PAYE annual brackets', t: 'textarea', full: 1, rows: 6 }]), { paye_brackets: JSON.stringify(JSON.parse(S.paye_brackets || '[]'), null, 1) }))}
     <div class="panel"><h3>Access by area</h3><p class="small muted" style="margin-top:-4px">Each person has a level for each area: <b>Hidden</b>, <b>View</b>, <b>Add & edit</b> (no deleting) or <b>Full</b>. Administrators always have Full. ${isAdmin() ? 'Set it under <a href="#/employees">Staff</a> → Access.' : 'Only an administrator can change it.'} The server checks every request.</p>
@@ -1267,6 +1433,7 @@ async function renderSettings() {
   const save = async body => { try { S = await api('/api/staff/settings', { method: 'PUT', body }); toast('Settings saved'); await refreshMe(); } catch (e) { toast(e.message); } };
   $('#s-perms').onsubmit = e => { e.preventDefault(); save({ booking_permissions: JSON.stringify(Object.fromEntries(Object.keys(LABELS).map(a => [a, (formData(e.target)[a]) || 'admin']))) }); };
   ['#s-co', '#s-week', '#s-pay'].forEach(id => $(id).onsubmit = e => { e.preventDefault(); save(formData(e.target)); });
+  $('#s-fy').onsubmit = e => { e.preventDefault(); const v = formData(e.target); save({ financial_year_start: `${String(v.fy_month).padStart(2, '0')}-${String(v.fy_day).padStart(2, '0')}` }); };
   drawEmailSettings();
 }
 

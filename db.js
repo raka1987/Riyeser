@@ -139,6 +139,7 @@ const DEFAULT_SETTINGS = {
   normal_finish: '17:00',
   pay_periods_per_year: '52',     // weekly, like the wage reports
   pay_cycle_start: '',            // a date a pay period started on (sets the day pay periods start); blank = Mondays
+  financial_year_start: '01-01',  // MM-DD the company's financial year starts (the lists' Year filter); Fiji's tax year is the calendar year
   new_payrun_hours: 'ask',        // "Start next pay run": ask | copy (always copy last week's hours) | empty (always start with no hours)
   payroll_open_period: '',        // the pay period "Start next pay run" last started: {"start","end","mode",…} (payweek.js)
   // emails (Settings → Email): off until the company's mailbox is set up and tested

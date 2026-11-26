@@ -144,6 +144,9 @@ const requireRole = role => (req, res, next) => requireStaff(req, res, () => {
 const P = require('./perms')({ db, requireStaff, HttpError });
 const { requireArea, must, inScope, scopeSql, audit } = P;
 const canArea = (req, area, need = 1) => P.levelOf(req.user, area) >= need;
+// OWNER-LISTS (lists.js): Year / Period filters (financial year from Settings) and the sort fields each person may use
+const LISTS = require('./lists');
+const listRange = req => { const st = getSettings(); return LISTS.rangeFromQuery(req.query || {}, todayIn(st.timezone), st.financial_year_start, d => payPeriodOf(d, st)); };
 // can add and edit timesheets for other people (their team only, for a supervisor)
 function canTimesheets(user) { return !!user && P.levelOf(user, 'timesheets') >= 2; }
 // Timesheet PIN: on the shared office PC, someone with timesheet access types their time-clock PIN to enter /
@@ -241,7 +244,10 @@ app.get('/api/staff/directory', requireStaff, (req, res) => {
 });
 app.get('/api/staff/employees', requireArea('employees'), (req, res) => {
   const [w, p] = scopeSql(req.user, 'id');
-  res.json(db.prepare(`SELECT ${EMP_FIELDS} FROM users WHERE ${w} ORDER BY active DESC, name`).all(...p).map(e => shapeEmp(req, e)));
+  const rows = db.prepare(`SELECT ${EMP_FIELDS} FROM users WHERE ${w} ORDER BY active DESC, name`).all(...p);
+  // ?sort=name|last_name|employee_no|start_date|pay_rate|status&dir=asc|desc (pay rate only with pay-rate access, else by name)
+  const sorted = req.query.sort ? LISTS.sortFor('employees', rows, String(req.query.sort), req.query.dir, a => P.levelOf(req.user, a)) : rows;
+  res.json(sorted.map(e => shapeEmp(req, e)));
 });
 function saveEmployee(req, id) {
   const b = req.body, o = {};
@@ -332,7 +338,15 @@ app.get('/api/staff/export/logins.csv', requireRole('admin'), wrap((req, res) =>
 app.post('/api/staff/employees', requireArea('employees', 2), wrap((req, res) => res.json(saveEmployee(req, null))));
 app.put('/api/staff/employees/:id', requireArea('employees', 2), wrap((req, res) => res.json(saveEmployee(req, +req.params.id))));
 // audit trail (administrators): access changes, pay / bank detail changes, deletions
-app.get('/api/staff/audit', requireRole('admin'), (req, res) => res.json(db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 500').all()));
+// ?year=fy:2025 | ?period=last_fy | ?from=&to= : only those dates (the newest 500 in them)
+app.get('/api/staff/audit', requireRole('admin'), wrap((req, res) => {
+  const r = listRange(req), tz = getSettings().timezone;
+  const day = new Intl.DateTimeFormat('en-CA', { timeZone: tz }), local = a => { try { return day.format(new Date(a)); } catch { return String(a).slice(0, 10); } };   // the day in the company's time zone (at is UTC)
+  if (!r) return res.json(db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 500').all());
+  // a day's margin either side in SQL, then exactly by the local date
+  res.json(db.prepare('SELECT * FROM audit_log WHERE substr(at, 1, 10) BETWEEN ? AND ? ORDER BY id DESC LIMIT 2000').all(addDays(r.from, -1), addDays(r.to, 1))
+    .filter(a => { const d = local(a.at); return d >= r.from && d <= r.to; }).slice(0, 500));
+}));
 
 // ---------------------------------------------------------------- staff: timesheets / clock
 const hoursOf = t => t.clock_out ? Math.max(0, (Date.parse(t.clock_out + 'Z') - Date.parse(t.clock_in + 'Z')) / 36e5) : 0;
@@ -483,8 +497,10 @@ app.get('/api/staff/timesheets', requireStaff, wrap((req, res) => {
   const w = [], p = [];
   if (!mgr) { w.push('t.user_id = ?'); p.push(req.user.id); } else if (req.query.user_id) { if (!inScope(by, 'timesheets', +req.query.user_id) && !inScope(req.user, 'timesheets', +req.query.user_id)) throw new HttpError(403, "That person isn't in your team."); w.push('t.user_id = ?'); p.push(+req.query.user_id); }
   else { w.push('COALESCE(u.on_timeclock, 1) = 1'); const [sw, sp] = scopeSql(by, 't.user_id'); w.push(sw); p.push(...sp); } // all staff = those on the time clock
-  if (isDate(req.query.from)) { w.push('substr(t.clock_in,1,10) >= ?'); p.push(req.query.from); }
-  if (isDate(req.query.to)) { w.push('substr(t.clock_in,1,10) <= ?'); p.push(req.query.to); }
+  const yr = !isDate(req.query.from) && !isDate(req.query.to) ? listRange(req) : null;   // ?year= / ?period= (lists.js)
+  const from = yr ? yr.from : req.query.from, to = yr ? yr.to : req.query.to;
+  if (isDate(from)) { w.push('substr(t.clock_in,1,10) >= ?'); p.push(from); }
+  if (isDate(to)) { w.push('substr(t.clock_in,1,10) <= ?'); p.push(to); }
   const rows = db.prepare(`SELECT t.*, u.name, COALESCE(u.employee_no, '') AS employee_no, (SELECT name FROM users a WHERE a.id = t.approved_by) AS approved_by_name, ${PAID_RUN_SQL} FROM timesheets t JOIN users u ON u.id=t.user_id ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY t.clock_in DESC LIMIT 1000`).all(...p);
   const rules = breakRules();
   const out = rows.map(r => { const b = breakOf(r, rules); return { ...r, hours: round2(hoursOf(r)), break_hours: round2(b), paid_hours: round2(hoursOf(r) - b) }; });
@@ -939,8 +955,19 @@ app.post('/api/staff/employees/:id/finish', requireArea('payroll', 2), requireAr
   const file = writePayrunFile(runId);
   res.json({ id: runId, unused_annual_days: f.unused, ...(file && { accounting_file: path.basename(file) }) });
 }));
-app.get('/api/staff/payroll/runs', requireArea('payroll'), (req, res) =>
-  res.json(db.prepare(`SELECT r.*, u.name AS created_by_name, (SELECT COUNT(*) FROM payslips p WHERE p.run_id=r.id) AS employees FROM payroll_runs r LEFT JOIN users u ON u.id=r.created_by ORDER BY r.pay_date DESC, r.id DESC`).all()));
+// ?year= / ?period= / ?from=&to= : pay runs paid in those dates (lists.js)
+app.get('/api/staff/payroll/runs', requireArea('payroll'), wrap((req, res) => {
+  const r = listRange(req);
+  res.json(db.prepare(`SELECT r.*, u.name AS created_by_name, (SELECT COUNT(*) FROM payslips p WHERE p.run_id=r.id) AS employees FROM payroll_runs r LEFT JOIN users u ON u.id=r.created_by ${r ? 'WHERE r.pay_date BETWEEN ? AND ?' : ''} ORDER BY r.pay_date DESC, r.id DESC`).all(...(r ? [r.from, r.to] : [])));
+}));
+// OWNER-LISTS: voided pay runs (kept as a record when a run is voided, for the Status filter on Past pay runs)
+db.exec(`CREATE TABLE IF NOT EXISTS payroll_runs_voided (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, period_start TEXT, period_end TEXT, pay_date TEXT,
+  total_gross REAL, total_net REAL, total_fnpf_employer REAL, employees INTEGER, extra_reason TEXT DEFAULT '', note TEXT DEFAULT '', created_by INTEGER, voided_by INTEGER, voided_by_name TEXT, voided_at TEXT)`);
+app.get('/api/staff/payroll/runs/voided', requireArea('payroll'), wrap((req, res) => {
+  const r = listRange(req);
+  res.json(db.prepare(`SELECT v.*, u.name AS created_by_name FROM payroll_runs_voided v LEFT JOIN users u ON u.id = v.created_by ${r ? 'WHERE v.pay_date BETWEEN ? AND ?' : ''} ORDER BY v.pay_date DESC, v.id DESC`).all(...(r ? [r.from, r.to] : []))
+    .map(v => ({ ...v, status: 'voided' })));
+}));
 app.get('/api/staff/payroll/runs/:id', requireArea('payroll'), wrap((req, res) => {
   const run = db.prepare('SELECT * FROM payroll_runs WHERE id=?').get(+req.params.id);
   if (!run) throw new HttpError(404, 'Not found');
@@ -948,7 +975,10 @@ app.get('/api/staff/payroll/runs/:id', requireArea('payroll'), wrap((req, res) =
     .map(p => ({ ...p, ytd: ytdOf(p.user_id, run.period_end, null, run.id) }));
   res.json({ run, payslips, roster: rosterVsPaid(run.period_start, run.period_end, slipPeople(payslips), !!run.extra_reason) });
 }));
-app.delete('/api/staff/payroll/runs/:id', requireArea('payroll', 3), (req, res) => { const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(+req.params.id); db.prepare('DELETE FROM payroll_runs WHERE id=?').run(+req.params.id); removePayrunFile(r); if (r) audit(req, 'Deleted a pay run', `Paid ${r.pay_date} (${r.period_start} to ${r.period_end})`); res.json({ ok: true }); });
+app.delete('/api/staff/payroll/runs/:id', requireArea('payroll', 3), (req, res) => { const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(+req.params.id);
+  if (r) db.prepare('INSERT INTO payroll_runs_voided(run_id, period_start, period_end, pay_date, total_gross, total_net, total_fnpf_employer, employees, extra_reason, note, created_by, voided_by, voided_by_name, voided_at) VALUES(?,?,?,?,?,?,?,(SELECT COUNT(*) FROM payslips WHERE run_id = ?),?,?,?,?,?,?)')
+    .run(r.id, r.period_start, r.period_end, r.pay_date, r.total_gross, r.total_net, r.total_fnpf_employer, r.id, r.extra_reason || '', r.note || '', r.created_by, req.user.id, req.user.name, new Date().toISOString());
+  db.prepare('DELETE FROM payroll_runs WHERE id=?').run(+req.params.id); removePayrunFile(r); if (r) audit(req, 'Deleted a pay run', `Paid ${r.pay_date} (${r.period_start} to ${r.period_end})`); res.json({ ok: true }); });
 // Year to date (calendar / tax year of the period end): finalised payslips in that year up to this one (+ this draft),
 // and leave taken this year against the yearly entitlement
 function ytdOf(userId, periodEnd, draft = null, runId = null) {
@@ -1016,8 +1046,10 @@ app.post('/api/staff/payslips/email', requireArea('payroll', 2), wrap(async (req
   res.json({ sent, missing, waiting, failed });
 }));
 // everyone sees their own finalised payslips (employee self-service)
-app.get('/api/staff/payslips/mine', requireStaff, (req, res) =>
-  res.json(db.prepare(`SELECT p.*, r.period_start, r.period_end, r.pay_date FROM payslips p JOIN payroll_runs r ON r.id=p.run_id WHERE p.user_id=? ORDER BY r.pay_date DESC`).all(req.user.id)));
+app.get('/api/staff/payslips/mine', requireStaff, wrap((req, res) => {
+  const r = listRange(req);   // ?year= / ?period= / ?from=&to= (pay date)
+  res.json(db.prepare(`SELECT p.*, r.period_start, r.period_end, r.pay_date FROM payslips p JOIN payroll_runs r ON r.id=p.run_id WHERE p.user_id=? ${r ? 'AND r.pay_date BETWEEN ? AND ?' : ''} ORDER BY r.pay_date DESC`).all(req.user.id, ...(r ? [r.from, r.to] : [])));
+}));
 
 // ---------------------------------------------------------------- staff: settings & exports
 app.get('/api/staff/settings', requireStaff, (req, res) => res.json(getSettings()));
@@ -1028,6 +1060,7 @@ app.put('/api/staff/settings', requireArea('setup', 2), wrap((req, res) => {
     if (k === 'paye_brackets') { try { const b = JSON.parse(v); if (!Array.isArray(b)) throw 0; } catch { bad('PAYE brackets must be a JSON list.'); } }
     if (['normal_start', 'normal_finish'].includes(k) && !isTime(v)) bad('Times must be like 09:00.');
     if (k === 'normal_week_hours' && !(+v > 0 && +v <= 100)) bad('Normal week hours must be between 1 and 100.');
+    if (k === 'financial_year_start' && !LISTS.validFyStart(v)) bad('Choose the day and month the financial year starts (e.g. 1 August).');
     if (k === 'new_payrun_hours' && !NEW_PAYRUN_HOURS.includes(v)) bad('Choose: ask me each time, always copy last week, always fill from the roster, or always start empty.');
     if (k === 'payroll_open_period') continue;   // set by "Start next pay run" only
     if (k === 'booking_permissions') {
@@ -1054,6 +1087,7 @@ require('./payweek')(app, { db, requireArea, wrap, bad, HttpError, isDate, isSta
 // OWNER-ROSTER (roster.js): the week's roster, publishing it, and comparing clock times with it
 require('./roster')(app, { db, requireStaff, requireArea, requirePerm, wrap, bad, HttpError, isDate, isTime, str, round2, addDays, getSettings, todayIn, localNowISO,
   inScope, scopeSql, levelOf: (u, a) => P.levelOf(u, a), audit, broadcast, alreadyPaid, assertNoOverlap });
+LISTS.register(app, { db, requireStaff, wrap, getSettings, todayIn, payPeriodOf: d => payPeriodOf(d), levelOf: (u, a) => P.levelOf(u, a) });
 require('./forgot')(app, { db, hashPassword, audit, rateLimit, wrap, bad, HttpError, str, getSettings, failsOf: k => failsOf(k),
   clearLockouts: (uid, req) => { for (const k of ['u', 'm', 'r']) clockFails.delete(k + uid); hits.delete(req.ip + '/api/auth/login'); } });
 require('./desktop')(app, { db, requireRole, requireArea, wrap, bad, str, getSettings, setSetting, hashPassword });

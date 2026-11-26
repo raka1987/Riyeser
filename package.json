@@ -1,6 +1,6 @@
 {
   "name": "riyeser-payroll",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "description": "Riyeser Payroll: time clock, timesheets, payroll, payslips, leave, reports",
   "main": "server.js",
   "scripts": {

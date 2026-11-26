@@ -956,3 +956,29 @@ table.ro-grid { width: 100%; border-collapse: separate; border-spacing: 0; table
 .bar-tools > [hidden] { display: none !important; }   /* a hidden box in a phone toolbar takes no room (Payroll's "What for") */
 /* Timesheets' week grid on a phone: scrolls inside its box instead of widening the page */
 .panel[style*="padding:0"] > .scroll:has(> table.days-t) { overflow-x: auto; }
+
+/* OWNER-LISTS (2.3.2): the sort and filter bar on every list (listview.js), and column headings that sort */
+.lv-bar { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px 10px; align-items: end; margin: 0 0 12px; min-width: 0; }
+.lv-bar > label, .lv-sortbox label { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin: 0; }
+.lv-bar .lv-k { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lv-bar .lv-k small { font-weight: 600; text-transform: none; letter-spacing: 0; }
+.lv-bar input, .lv-bar select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0; }
+.lv-bar .lv-q { grid-column: span 2; }
+.lv-sortbox { display: flex; gap: 6px; align-items: flex-end; min-width: 0; }
+.lv-sortbox label { flex: 1; }
+.lv-sortbox .lv-dir { flex: none; min-width: 40px; justify-content: center; }
+.lv-foot { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 8px 12px; flex-wrap: wrap; font-size: .85rem; color: var(--muted); }
+.lv-foot .lv-clear[disabled] { opacity: .45; cursor: default; }
+.panel > .lv-bar { margin-top: 4px; }
+table.t th.lv-th { padding: 0; }
+table.t th.lv-th .lv-sort { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 4px; width: 100%; padding: 8px 10px; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; white-space: nowrap; }
+table.t th.lv-th.r .lv-sort { justify-content: flex-end; }
+table.t th.lv-th .lv-sort:hover { color: var(--ink); }
+table.t th.lv-th .lv-sort:focus-visible { outline: 2px solid var(--green-600); outline-offset: -2px; border-radius: 6px; }
+table.t th.lv-th.on { color: var(--green-700); }
+.lv-arrow { font-size: .8em; opacity: .4; }
+table.t th.lv-th.on .lv-arrow { opacity: 1; }
+@media (max-width: 600px) {
+  .lv-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .lv-bar .lv-q, .lv-bar .lv-sortbox, .lv-foot { grid-column: 1 / -1; }
+}
