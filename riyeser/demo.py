@@ -247,6 +247,8 @@ def seed_bookings(db, customers=None):
     db.execute("INSERT INTO booking_jobs (contact_id, service_id, title, address, created_by) VALUES (?,?,?,?,?)",
                (customers[1 % len(customers)] if customers else None, svc["Call-out"], "Quote for a new filter",
                 "22 Demo Road, Sampletown", admin))
+    from .demo_site import seed_job_sheets
+    seed_job_sheets(db, staff, svc, customers, admin)
 
 
 def _total(db, doc_id):

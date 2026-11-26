@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block title %}On site{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='bookings_site.css') }}">
+<div class="head"><div><h1>On site</h1><p class="sub">{{ 'Today' if d == today else d.strftime('%A') }}, {{ d.strftime('%d %B %Y') }}. Tap a visit to start work, tick the checklist, add photos and get the customer's signature.</p></div>
+<div class="actions">{% include "bookings/_nav.html" %}</div></div>
+<form class="filters site-filter"><div class="site-row"><a class="btn" href="{{ url_for('bookings.site_today', d=prev.isoformat(), r=who) }}" aria-label="Day before">‹</a><input type="date" name="d" value="{{ d.isoformat() }}" onchange="this.form.submit()" aria-label="Day"><a class="btn" href="{{ url_for('bookings.site_today', d=next.isoformat(), r=who) }}" aria-label="Next day">›</a>{% if d != today %}<a class="btn" href="{{ url_for('bookings.site_today', r=who) }}">Today</a>{% endif %}</div>
+{% if res %}<div><select name="r" onchange="this.form.submit()" aria-label="Whose visits"><option value="">Everyone</option>{% for r in res %}<option value="{{ r.id }}" {{ 'selected' if who == r.id }}>{{ r.name }}</option>{% endfor %}</select></div>{% endif %}</form>
+<div class="site-cards">{% for b in rows %}<a class="card site-card st-{{ b.status }}" href="{{ url_for('bookings.site', bid=b.id) }}" style="--c:{{ b.colour or '#64748b' }}">
+<span class="site-time">{{ b.starts_at[11:16] }}</span>
+<b>{{ b.customer or b.title or 'Visit' }}</b>
+<span>{{ b.service or '' }}{% if b.title and b.customer %}{{ ' · ' if b.service }}{{ b.title }}{% endif %}</span>
+{% if b.address %}<span class="muted">{{ b.address }}</span>{% endif %}
+<span class="site-tags"><span class="bk-st st-{{ b.status }}">{{ statuses[b.status] }}</span>{% if b.resource %}<span class="muted">{{ b.resource }}</span>{% endif %}{% if b.signed %}<span class="bk-st st-done">Signed</span>{% endif %}</span></a>
+{% else %}<div class="card"><p class="muted">No visits {{ 'today' if d == today else 'on this day' }}{{ ' for this person' if who }}.</p></div>{% endfor %}</div>
+{% endblock %}

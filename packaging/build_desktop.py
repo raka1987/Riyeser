@@ -59,6 +59,8 @@ args = [
     "--hidden-import", "uharfbuzz",
     "--hidden-import", "riyeser.demo",
     "--hidden-import", "riyeser.demo_mode",
+    "--hidden-import", "riyeser.demo_site",
+    "--hidden-import", "riyeser.jobsite",
     "--hidden-import", "riyeser._built_edition",
     "--hidden-import", "riyeser.licence",
     "--hidden-import", "riyeser.signed_licence",

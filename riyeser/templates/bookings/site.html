@@ -1,0 +1,168 @@
+{% extends "base.html" %}{% block title %}On site · {{ job_no(j.id) }}{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='bookings_site.css') }}">
+{% set edit = can('bookings', 2) and not locked %}
+{% set started = b.arrived_at and not b.left_at %}
+<div class="site">
+<div class="head"><div><h1>{{ b.customer or b.title or job_no(j.id) }}</h1>
+<p class="sub"><a href="{{ url_for('bookings.job', jid=j.id) }}">Job {{ job_no(j.id) }}</a>{% if b.service %} · {{ b.service }}{% endif %}{% if b.title and b.customer %} · {{ b.title }}{% endif %} · <span class="bk-st st-{{ b.status }}">{{ statuses[b.status] }}</span>{% if locked %} · <span class="bk-st st-done">{{ 'Signed' if sign else 'Invoiced' }} · locked</span>{% endif %}</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('bookings.site_today', d=b.starts_at[:10]) }}">All visits that day</a><a class="btn" href="{{ url_for('bookings.edit', bid=b.id) }}">Booking details</a></div></div>
+
+<div class="card site-where">
+  <div><small>When</small><b>{{ b.starts_at[:10] }} at {{ b.starts_at[11:16] }}</b>{% if b.resource %}<span>{{ b.resource }}</span>{% endif %}</div>
+  {% if b.address or b.caddress %}{% set addr = b.address or (b.caddress|replace('\n', ', ')) %}<div><small>Address</small><b>{{ addr }}</b><a href="https://www.google.com/maps/search/?api=1&query={{ addr|urlencode }}" target="_blank" rel="noopener">Directions</a></div>{% endif %}
+  {% if b.phone or b.cphone %}<div><small>Phone</small><b><a href="tel:{{ (b.phone or b.cphone)|replace(' ', '') }}">{{ b.phone or b.cphone }}</a></b></div>{% endif %}
+  {% if b.notes %}<div class="wide"><small>Office notes</small><span>{{ b.notes }}</span></div>{% endif %}
+</div>
+
+{# ------------------------------------------------ Start / Finish #}
+<div class="card" id="times"><h3>Time on site</h3>
+{% if b.arrived_at %}<p class="site-clock">Started <b>{{ b.arrived_at[11:16] }}</b>{% if b.left_at %} · finished <b>{{ b.left_at[11:16] }}</b>{% endif %}
+ · <b id="site-elapsed" {% if started %}data-since="{{ b.arrived_at|replace(' ', 'T') }}"{% endif %}>{{ nice(minutes) if b.left_at or not started else '' }}</b>{% if started %} so far{% else %} on site{% endif %}</p>{% endif %}
+{% if edit and b.status in ('booked', 'confirmed', 'started') %}
+  {% if not started %}<form method="post" action="{{ url_for('bookings.site_start', bid=b.id) }}"><button class="site-big go">▶ Start work</button></form>
+  <p class="muted small">Press Start when you arrive. Press Finish when you leave: the time in between is logged as labour on the job.</p>{% endif %}
+  <form method="post" action="{{ url_for('bookings.site_finish', bid=b.id) }}" class="site-finish" id="finish-form">
+    {% if started %}<p class="muted small">When the work's done, say how it went and press Finish.</p>{% else %}<details><summary>Finish without pressing Start</summary>{% endif %}
+    <div class="site-choices" role="radiogroup" aria-label="How did it go?">{% for k, label in outcomes %}<label class="site-choice"><input type="radio" name="outcome" value="{{ k }}" {{ 'checked' if loop.first }}><span>{{ label }}</span></label>{% endfor %}</div>
+    <label for="outcome_note">What's still needed <small>(for a return visit, or if you couldn't get in)</small></label>
+    <textarea name="outcome_note" id="outcome_note" rows="2" placeholder="For example: bring a new access point for room 204"></textarea>
+    <button class="site-big stop">■ Finish work</button>{% if not started %}</details>{% endif %}
+  </form>
+{% elif not b.arrived_at %}<p class="muted">No start or finish time recorded for this visit.</p>{% endif %}
+{% if edit %}<details class="site-fix"><summary>Forgot to press Start or Finish? Type the times</summary>
+<form method="post" action="{{ url_for('bookings.site_times', bid=b.id) }}" class="site-row"><div><label>Started</label><input type="time" name="arrived" required value="{{ b.arrived_at[11:16] if b.arrived_at else '' }}"></div><div><label>Finished</label><input type="time" name="left" required value="{{ b.left_at[11:16] if b.left_at else '' }}"></div><div><button class="btn">Save times</button></div></form>
+<p class="muted small">These replace the start and finish times for this visit, and the time on site logged from them.</p></details>{% endif %}
+</div>
+
+{# ------------------------------------------------ Checklist #}
+<div class="card" id="checks"><h3>Checklist</h3>
+{% if checks %}<form method="post" action="{{ url_for('bookings.site_checks', bid=b.id) }}" class="site-checks" id="check-form">
+{% for ch in checks %}<label class="site-check"><input type="checkbox" name="done" value="{{ ch.id }}" {{ 'checked' if ch.done }} {{ 'disabled' if not edit }}><span>{{ ch.item }}</span>{% if ch.done and ch.done_at %}<small>{{ ch.done_at[11:16] }}</small>{% endif %}</label>{% endfor %}
+{% if edit %}<div class="site-row"><input name="new_item" placeholder="Add something to the list for this visit" aria-label="Add a checklist item"><button class="btn">Save</button></div><p class="muted small" id="check-saved" aria-live="polite">Each tick saves straight away.</p>{% endif %}
+</form>
+{% else %}<p class="muted small">No checklist for {{ ('the ' ~ b.service) if b.service else 'this job' }}. {% if can('setup', 2) %}Add one in <a href="{{ url_for('bookings.setup') }}#site-setup">Bookings setup</a>, under On-site checklists.{% else %}Someone with Setup access can add one in Bookings setup.{% endif %}</p>
+{% if edit %}<form method="post" action="{{ url_for('bookings.site_checks', bid=b.id) }}" class="site-row"><input name="new_item" placeholder="Add a checklist item for this visit" aria-label="Add a checklist item"><button class="btn">Add</button></form>{% endif %}{% endif %}
+</div>
+
+{# ------------------------------------------------ Notes #}
+<div class="card" id="notes"><h3>What was done</h3>
+{% if edit %}<form method="post" action="{{ url_for('bookings.site_notes', bid=b.id) }}"><textarea name="site_notes" rows="4" placeholder="What you found and what you did. This goes on the job sheet the customer signs.">{{ b.site_notes or '' }}</textarea><p><button class="btn pri">Save notes</button></p></form>
+{% else %}<p>{{ b.site_notes or '—' }}</p>{% endif %}
+{% if b.outcome_note %}<p class="muted small">Still needed: {{ b.outcome_note }}</p>{% endif %}
+</div>
+
+{# ------------------------------------------------ Parts #}
+<div class="card" id="parts"><h3>Parts and materials used</h3>
+{% if parts %}<ul class="site-list">{% for p in parts %}<li><span><b>{{ '%g' % p.qty }} ×</b> {{ p.description }}</span><span class="muted">{{ p.unit_price|money if p.unit_price else 'office adds the price' }}</span>{% if edit %}<form method="post" action="{{ url_for('bookings.remove_entry', jid=j.id) }}"><input type="hidden" name="kind" value="part"><input type="hidden" name="id" value="{{ p.id }}"><input type="hidden" name="back" value="{{ url_for('bookings.site', bid=b.id) }}#parts"><button class="btn sm" aria-label="Remove {{ p.description }}">Remove</button></form>{% endif %}</li>{% endfor %}</ul>
+{% else %}<p class="muted small">Nothing added yet.</p>{% endif %}
+{% if edit %}<form method="post" action="{{ url_for('bookings.add_part', bid=b.id) }}" class="site-part"><input type="hidden" name="back" value="{{ url_for('bookings.site', bid=b.id) }}#parts">
+{% if items %}<div class="wide"><label>From stock</label><select name="item_id"><option value="">Choose a stock item…</option>{% for i in items %}<option value="{{ i.id }}">{{ i.name }}{% if i.sell_price %} · {{ i.sell_price|money }}{% endif %}</option>{% endfor %}</select></div>{% endif %}
+<div class="wide"><label>{{ '…or type a part that isn\'t in stock' if items else 'Part or material' }}</label><input name="description" placeholder="e.g. 20 mm elbow"></div>
+<div><label>How many</label><input name="qty" value="1" inputmode="decimal"></div>
+<div><label>Price each <small>(inc GST, optional)</small></label><input name="unit_price" inputmode="decimal" placeholder="{{ 'stock price' if items else '0.00' }}"></div>
+<div class="wide"><button class="btn pri">Add part</button></div></form>
+<p class="muted small">Stock items use their price. Leave the price empty on a one-off part and the office adds it before invoicing.</p>{% endif %}
+</div>
+
+{# ------------------------------------------------ Photos #}
+<div class="card" id="photos"><h3>Photos</h3>
+{% if photos %}<div class="site-photos">{% for p in photos %}<figure><a href="{{ url_for('bookings.site_photo_file', pid=p.id) }}" target="_blank" rel="noopener"><img src="{{ url_for('bookings.site_photo_file', pid=p.id, thumb=1) }}" alt="{{ (kinds|selectattr(0, 'equalto', p.kind)|first)[1] }} photo{{ ': ' ~ p.caption if p.caption }}" loading="lazy"></a>
+<figcaption><b>{{ (kinds|selectattr(0, 'equalto', p.kind)|first)[1] }}</b>{% if p.caption %} · {{ p.caption }}{% endif %}</figcaption>
+{% if edit %}<details><summary>Edit</summary><form method="post" action="{{ url_for('bookings.site_photo_edit', pid=p.id) }}"><select name="kind" aria-label="Before or after">{% for k, label in kinds %}<option value="{{ k }}" {{ 'selected' if p.kind == k }}>{{ label }}</option>{% endfor %}</select><input name="caption" value="{{ p.caption or '' }}" placeholder="Caption" aria-label="Caption"><div class="site-row"><button class="btn sm">Save</button><button class="btn sm danger" name="delete" value="1" onclick="return confirm('Remove this photo?')">Remove</button></div></form></details>{% endif %}</figure>{% endfor %}</div>
+{% else %}<p class="muted small">No photos yet.</p>{% endif %}
+{% if edit %}<form method="post" action="{{ url_for('bookings.site_photo', bid=b.id) }}" enctype="multipart/form-data" class="site-photo-form" id="photo-form">
+<div class="site-choices" role="radiogroup" aria-label="Before or after">{% for k, label in kinds %}<label class="site-choice"><input type="radio" name="kind" value="{{ k }}" {{ 'checked' if (k == 'after' if b.status == 'done' or (b.arrived_at and photos|length) else loop.first) }}><span>{{ label }}</span></label>{% endfor %}</div>
+<input name="caption" placeholder="Caption (optional), e.g. Leak under the sink" aria-label="Caption">
+<div class="site-row"><label class="site-big cam">📷 Take a photo<input type="file" name="photo" accept="image/*" capture="environment" class="site-file"></label>
+<label class="site-big pick">🖼 Choose photos<input type="file" name="photo" accept="image/*" multiple class="site-file"></label></div>
+<noscript><button class="btn pri">Upload</button></noscript>
+<p class="muted small" id="photo-status" aria-live="polite">Big photos are made smaller before they're saved with the job.</p></form>{% endif %}
+</div>
+
+{# ------------------------------------------------ Sign-off #}
+<div class="card" id="sign"><h3>Customer sign-off</h3>
+{% if sign %}<div class="site-signed"><img src="{{ url_for('bookings.site_signature', sid=sign.id) }}" alt="Signature of {{ sign.name }}">
+<p>Signed by <b>{{ sign.name }}</b> on {{ sign.signed_at[:10] }} at {{ sign.signed_at[11:16] }}.</p>
+<p class="muted small">The job sheet is locked: times, checklist, notes, parts and photos can't change.</p></div>
+{% if can('bookings', 2) and not inv %}<details class="site-fix"><summary>Unlock the job sheet (needs a manager)</summary>
+<form method="post" action="{{ url_for('bookings.site_unlock', bid=b.id) }}" class="site-unlock">
+<div class="wide"><label>Why is it being unlocked?</label><input name="reason" required placeholder="e.g. Customer asked for another part to be fitted"></div>
+{% if not is_manager %}<div><label>Manager's user name</label><input name="manager" autocomplete="off" required></div><div><label>Manager's password</label><input type="password" name="password" autocomplete="off" required></div>{% endif %}
+<div class="wide"><button class="btn danger">Unlock</button></div></form>
+<p class="muted small">Unlocking is recorded with who did it, when and why. The customer then signs again.</p></details>{% endif %}
+{% elif inv %}<p class="muted">Not signed. This job is invoiced, so its job sheet is closed.</p>
+{% elif can('bookings', 2) %}<form method="post" action="{{ url_for('bookings.site_sign', bid=b.id) }}" id="sign-form">
+<p class="muted small">Check the job sheet with the customer, then ask them to sign with a finger (or the mouse) in the box.</p>
+<div class="site-pad"><canvas id="sigpad" aria-label="Signature box: sign here"></canvas><span class="site-pad-line">Sign here</span></div>
+<div class="site-row"><button type="button" class="btn" id="sig-clear">Clear</button><span class="muted small" id="sig-msg" aria-live="polite"></span></div>
+<input type="hidden" name="signature" id="sig-data">
+<div class="site-row"><div class="grow"><label for="sig-name">Customer's name</label><input name="name" id="sig-name" required value="{{ b.customer or '' }}" autocomplete="off"></div><div><label>Date and time</label><input value="{{ now.strftime('%d %b %Y %H:%M') }}" readonly tabindex="-1" aria-label="Date and time"></div></div>
+<button class="site-big go">✔ Sign and lock the job sheet</button></form>{% endif %}
+{% for h in history %}<p class="muted small">Earlier signature by {{ h.name }} ({{ h.signed_at[:16] }}) was unlocked by {{ h.unlocker or 'a manager' }} on {{ h.unlocked_at[:16] }}: {{ h.unlock_reason }}</p>{% endfor %}
+</div>
+
+{# ------------------------------------------------ Job sheet + invoice #}
+<div class="bk-two">
+<div class="card" id="sheet"><h3>Job sheet</h3>
+<p class="muted small">Customer, address, times, work done, checklist, parts, photos and signature for every visit on job {{ job_no(j.id) }}.</p>
+<p class="site-row"><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id) }}" target="_blank" rel="noopener">View job sheet (PDF)</a><a class="btn" href="{{ url_for('bookings.job_sheet', jid=j.id, download=1) }}">Download</a></p>
+{% if can('bookings', 2) %}{% if email_ready %}<form method="post" action="{{ url_for('bookings.job_sheet_email', jid=j.id) }}" class="site-row"><input type="hidden" name="back" value="{{ url_for('bookings.site', bid=b.id) }}#sheet"><input type="email" name="to" value="{{ b.cemail or '' }}" placeholder="Customer's email" aria-label="Customer's email" required><button class="btn pri">Email job sheet</button></form>
+{% else %}<p class="muted small">To email it from here, set up email in Setup, Email. Until then, download it and attach it to an email.</p>{% endif %}{% endif %}
+</div>
+<div class="card" id="invoice"><h3>Invoice</h3>
+{% if inv %}<p><a class="btn pri" href="{{ url_for('documents.view', doc_id=inv.id) }}">Open invoice {{ inv.number }}</a></p>
+{% elif j.contact_id and can('sales', 2) %}
+<p class="muted small">{% if j.billing == 'time' %}Time on site at {{ 'the labour rate' if sm.labour|length <= 1 else 'each rate' }}{% if sm.labour|length == 1 and sm.rate %} ({{ sm.rate|money }} an hour){% endif %}, plus parts.{% else %}Fixed price: the agreed price only. Change "How it's charged" on the job to charge time and parts.{% endif %} All visits on the job go on one invoice.</p>
+<div class="tbl"><table class="bk-cmp">{% for l in lines %}<tr><td>{{ l.description }}</td><td class="n">{{ '%g' % l.qty }}</td><td class="n">{{ l.amount|money }}</td></tr>{% else %}<tr><td class="muted">Nothing to charge yet.</td></tr>{% endfor %}
+<tr class="tot"><td>Total (including GST)</td><td></td><td class="n">{{ sm.total|money }}</td></tr></table></div>
+<form method="post" action="{{ url_for('bookings.invoice_job', jid=j.id) }}"><p><button class="btn pri">Invoice this job</button></p></form>
+{% elif not j.contact_id %}<p class="muted small">Choose the customer on the <a href="{{ url_for('bookings.job', jid=j.id) }}">job</a> to invoice it.</p>
+{% else %}<p class="muted small">The office invoices this job.</p>{% endif %}
+</div></div>
+</div>
+{% endblock %}
+{% block scripts %}<script>
+(function(){
+/* time on site so far */
+var el=document.getElementById('site-elapsed');
+if(el&&el.dataset.since){var since=new Date(el.dataset.since);var tick=function(){var m=Math.max(0,Math.round((Date.now()-since)/60000)),h=Math.floor(m/60);el.textContent=(h?h+' h ':'')+(m%60||!h?(m%60)+' min':'')};tick();setInterval(tick,15000)}
+
+/* checklist: each tick saves straight away */
+var cf=document.getElementById('check-form'),cs=document.getElementById('check-saved');
+cf&&cf.addEventListener('change',function(e){if(e.target.name!=='done')return;var fd=new FormData(cf);fd.delete('new_item');
+  cs.textContent='Saving…';fetch(cf.action,{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}}).then(function(r){return r.json()}).then(function(j){
+  if(j.ok){cs.textContent='Saved.'}else{cs.textContent=j.error;e.target.checked=!e.target.checked}}).catch(function(){cs.textContent='Not saved: check the connection, then press Save.'})});
+
+/* photos: shrink in the browser, then send */
+var pf=document.getElementById('photo-form'),ps=document.getElementById('photo-status');
+function shrink(file){return new Promise(function(done){
+  if(!/^image\//.test(file.type)||!window.createImageBitmap){done(file);return}
+  createImageBitmap(file,{imageOrientation:'from-image'}).then(function(bm){var s=Math.min(1,1600/Math.max(bm.width,bm.height));
+    if(s===1&&file.size<2500000){done(file);return}
+    var c=document.createElement('canvas');c.width=Math.round(bm.width*s);c.height=Math.round(bm.height*s);c.getContext('2d').drawImage(bm,0,0,c.width,c.height);
+    c.toBlob(function(b){done(b||file)},'image/jpeg',.85)}).catch(function(){done(file)})})}
+pf&&pf.querySelectorAll('.site-file').forEach(function(inp){inp.addEventListener('change',function(){
+  if(!inp.files.length)return;var files=[].slice.call(inp.files),fd=new FormData();
+  fd.append('kind',(pf.querySelector('input[name=kind]:checked')||{}).value||'before');fd.append('caption',pf.caption.value);
+  ps.textContent='Saving '+files.length+' photo'+(files.length>1?'s':'')+'…';
+  Promise.all(files.map(shrink)).then(function(bs){bs.forEach(function(b,i){fd.append('photo',b,(files[i].name||'photo').replace(/\.[^.]*$/,'')+'.jpg')});
+    return fetch(pf.action,{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})}).then(function(r){return r.json()}).then(function(j){
+    if(j.ok){location.hash='photos';location.reload()}else{ps.textContent=j.error;inp.value=''}}).catch(function(){ps.textContent='The photo could not be saved: check the connection and try again.';inp.value=''})})});
+
+/* signature pad: finger, pen or mouse */
+var cv=document.getElementById('sigpad');if(!cv)return;
+var ctx=cv.getContext('2d'),inked=false,drawing=false,last=null,msg=document.getElementById('sig-msg');
+function size(){if(inked)return;var r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;cv.width=Math.round(r.width*d);cv.height=Math.round(r.height*d);
+  ctx.setTransform(d,0,0,d,0,0);ctx.lineWidth=2.6;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#0f172a';ctx.fillStyle='#0f172a'}
+size();window.addEventListener('resize',size);
+function pos(e){var r=cv.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top}}
+cv.addEventListener('pointerdown',function(e){e.preventDefault();drawing=true;cv.setPointerCapture&&cv.setPointerCapture(e.pointerId);last=pos(e);
+  ctx.beginPath();ctx.arc(last.x,last.y,1.3,0,7);ctx.fill();inked=true;msg.textContent=''});
+cv.addEventListener('pointermove',function(e){if(!drawing)return;e.preventDefault();var p=pos(e);ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();last=p});
+['pointerup','pointercancel','pointerleave'].forEach(function(n){cv.addEventListener(n,function(){drawing=false})});
+document.getElementById('sig-clear').addEventListener('click',function(){ctx.clearRect(0,0,cv.width,cv.height);inked=false;size()});
+document.getElementById('sign-form').addEventListener('submit',function(e){if(!inked){e.preventDefault();msg.textContent='Ask the customer to sign in the box first.';return}
+  document.getElementById('sig-data').value=cv.toDataURL('image/png')});
+})();
+</script>{% endblock %}
