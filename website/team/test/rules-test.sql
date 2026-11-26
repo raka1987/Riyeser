@@ -3115,6 +3115,543 @@ do $$ declare a uuid := current_setting('lk.a')::uuid; begin
   perform public.set_access(a, 'a7a7a7a3-0000-4000-8000-000000000003', 'staff', false, '{}');
   assert (select role from public.members where workspace_id = a and user_id = 'a7a7a7a3-0000-4000-8000-000000000003') = 'member', 'the owner takes admin away';
 end $$;
+-- ===== Riyeser online connections (the public API): keys, post box, published data, webhooks, log, limits =====
+reset role;
+-- (on Supabase the service role can read every table; the stand-in gives it the same for these checks)
+grant select on public.api_keys, public.api_inbox, public.api_webhook_deliveries, public.api_webhooks to service_role;
+grant update on public.api_webhook_deliveries to service_role;
+insert into auth.users (id, email) values ('a9a9a9a1-0000-4000-8000-000000000001', 'owner@api.test'), ('a9a9a9a2-0000-4000-8000-000000000002', 'staff@api.test'),
+  ('a9a9a9a3-0000-4000-8000-000000000003', 'other@api.test'), ('a9a9a9a4-0000-4000-8000-000000000004', 'admin@api.test');
+set role authenticated;
+select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+select set_config('api.ws', public.create_team('Online Salon', 'Ola')::text, false);
+select set_config('api.code', (select invite_code from public.workspaces where id = current_setting('api.ws')::uuid), false);
+select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+select public.join_team(current_setting('api.code'), 'Sid');
+select public.link_device(current_setting('api.ws')::uuid, 'a9a9a9d1-0000-4000-8000-000000000001', 'FRONT-DESK', 'windows', '1.0');
+select pg_temp.as_user('a9a9a9a4-0000-4000-8000-000000000004');
+select public.join_team(current_setting('api.code'), 'Ade');
+select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+select public.link_device(current_setting('api.ws')::uuid, 'a9a9a9d2-0000-4000-8000-000000000002', 'BACK-OFFICE', 'windows', '1.0');
+select public.set_access(current_setting('api.ws')::uuid, 'a9a9a9a4-0000-4000-8000-000000000004', 'manager', true, '{}');
+select pg_temp.as_user('a9a9a9a3-0000-4000-8000-000000000003');
+select set_config('api.ws_x', public.create_team('Other Shop', 'Oz')::text, false);
+
+-- Keys: only owners and admins with two-step sign-in; the key is returned once and only its SHA-256 is kept
+select pg_temp.as_user_password_only('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ begin
+  begin perform public.api_key_create(current_setting('api.ws')::uuid, 'Shop', 'secret', 'live', array['orders:write'], '{}', '{}'); raise exception 'aal1 made a key';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin, signed in with two-step%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+do $$ begin
+  begin perform public.api_key_create(current_setting('api.ws')::uuid, 'Shop', 'secret', 'live', array['orders:write'], '{}', '{}'); raise exception 'staff made a key';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+  begin perform public.api_keys_list(current_setting('api.ws')::uuid); raise exception 'staff listed keys';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+  begin perform public.api_requests_list(current_setting('api.ws')::uuid, null, 10, null); raise exception 'staff read the request log';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+select set_config('api.k1', (public.api_key_create(current_setting('api.ws')::uuid, ' Website shop ', 'secret', 'live',
+  array['orders:write', 'bookings:write', 'enquiries:write', 'customers:write', 'quotes:write', 'payments:write', 'stock:read', 'prices:read',
+        'catalog:read', 'availability:read'], '{}', '{}'))::text, false);
+do $$ declare j jsonb := current_setting('api.k1')::jsonb; raw text := j ->> 'key'; begin
+  assert raw ~ '^rk_live_[0-9a-f]{48}$', 'live secret key format: ' || raw;
+  assert j ->> 'prefix' = left(raw, 16) || '…', 'prefix shown: ' || (j ->> 'prefix');
+  assert j ->> 'name' = 'Website shop', 'name trimmed';
+end $$;
+-- the key itself is nowhere in the database: only its hash (and the hash isn't in the change history either)
+reset role;
+do $$ declare j jsonb := current_setting('api.k1')::jsonb; raw text := j ->> 'key'; begin
+  assert (select key_hash from public.api_keys where id = (j ->> 'id')::uuid) = encode(sha256(convert_to(raw, 'UTF8')), 'hex'), 'SHA-256 kept';
+  assert not exists (select 1 from public.api_keys k where to_jsonb(k)::text like '%' || substr(raw, 9) || '%'), 'raw key not stored';
+  assert not exists (select 1 from public.audit_log a where a.details::text like '%' || substr(raw, 9, 20) || '%'
+                       or a.details::text like '%' || encode(sha256(convert_to(raw, 'UTF8')), 'hex') || '%'), 'no key or hash in the history';
+  assert exists (select 1 from public.audit_log where workspace_id = current_setting('api.ws')::uuid and action = 'api_key.create'
+                   and details ->> 'name' = 'Website shop'), 'key creation in the change history';
+end $$;
+set role authenticated; select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ declare l json := public.api_keys_list(current_setting('api.ws')::uuid); begin
+  assert json_array_length(l) = 1, 'one key listed';
+  assert not (l -> 0)::jsonb ? 'key' and not (l -> 0)::jsonb ? 'key_hash', 'the list never has the key or its hash';
+end $$;
+-- the admin (two-step) can manage keys too; another business can't see them
+select pg_temp.as_user('a9a9a9a4-0000-4000-8000-000000000004');
+do $$ begin assert json_array_length(public.api_keys_list(current_setting('api.ws')::uuid)) = 1, 'admin lists keys'; end $$;
+select pg_temp.as_user('a9a9a9a3-0000-4000-8000-000000000003');
+do $$ begin
+  begin perform public.api_keys_list(current_setting('api.ws')::uuid); raise exception 'other business listed keys';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+  begin perform public.api_key_revoke(current_setting('api.ws')::uuid, (current_setting('api.k1')::jsonb ->> 'id')::uuid); raise exception 'other business revoked';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+-- no table is readable directly, signed in or not
+do $$ declare t text; begin
+  foreach t in array array['api_keys', 'api_inbox', 'api_requests', 'api_webhooks', 'api_webhook_deliveries', 'api_catalog', 'api_stock',
+                           'api_open_times', 'api_staff', 'api_booking_settings', 'api_rate', 'api_published'] loop
+    begin execute format('select count(*) from public.%I', t); raise exception 'authenticated read %', t;
+    exception when insufficient_privilege then null; end;
+  end loop;
+end $$;
+set role anon;
+do $$ declare t text; begin
+  foreach t in array array['api_keys', 'api_inbox', 'api_requests', 'api_webhooks', 'api_catalog', 'api_stock', 'api_open_times'] loop
+    begin execute format('select count(*) from public.%I', t); raise exception 'anon read %', t;
+    exception when insufficient_privilege then null; end;
+  end loop;
+  begin perform public.api_auth(repeat('a', 64), null); raise exception 'anon ran api_auth'; exception when insufficient_privilege then null; end;
+  begin perform public.api_keys_list(current_setting('api.ws')::uuid); raise exception 'anon listed keys'; exception when insufficient_privilege then null; end;
+end $$;
+set role authenticated;
+do $$ begin
+  begin perform public.api_auth(repeat('a', 64), null); raise exception 'a signed-in person ran api_auth'; exception when insufficient_privilege then null; end;
+  begin perform public.api_submit(gen_random_uuid(), 'order', '{}', null, null, null); raise exception 'signed in ran api_submit'; exception when insufficient_privilege then null; end;
+  begin perform public.api_webhooks_due(10, null); raise exception 'signed in took deliveries'; exception when insufficient_privilege then null; end;
+  begin perform public.api_sweep(); raise exception 'signed in swept'; exception when insufficient_privilege then null; end;
+end $$;
+
+-- Widget keys: only availability:read, bookings:write, enquiries:write, and only with a website address
+select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; j json; begin
+  begin perform public.api_key_create(ws, 'Widget', 'widget', 'live', array['bookings:write', 'orders:write'], array['https://salon.example.com'], '{}'); raise exception 'widget with orders';
+  exception when others then assert sqlerrm like 'A widget key is seen by everyone%', sqlerrm; end;
+  begin perform public.api_key_create(ws, 'Widget', 'widget', 'live', array['bookings:write'], '{}', '{}'); raise exception 'widget without a website';
+  exception when others then assert sqlerrm like 'Add the website address%', sqlerrm; end;
+  begin perform public.api_key_create(ws, 'Widget', 'widget', 'live', array['bookings:write'], array['https://salon.example.com/book'], '{}'); raise exception 'origin with a path';
+  exception when others then assert sqlerrm like 'Website addresses look like%', sqlerrm; end;
+  begin perform public.api_key_create(ws, 'Widget', 'widget', 'live', array['bookings:write'], array['http://localhost:3000'], '{}'); raise exception 'localhost on a live key';
+  exception when others then assert sqlerrm like 'Website addresses look like%', sqlerrm; end;
+  begin perform public.api_key_create(ws, 'X', 'secret', 'live', array['everything:write'], '{}', '{}'); raise exception 'unknown scope';
+  exception when others then assert sqlerrm like 'Unknown permission%', sqlerrm; end;
+  begin perform public.api_key_create(ws, 'X', 'secret', 'live', array['orders:write'], '{}', array['not-an-ip']); raise exception 'bad ip';
+  exception when others then assert sqlerrm like 'Internet addresses look like%', sqlerrm; end;
+  j := public.api_key_create(ws, 'Booking widget', 'widget', 'live', array['availability:read', 'bookings:write', 'enquiries:write'],
+         array['https://Salon.Example.com/', 'https://*.example.com'], '{}');
+  assert j ->> 'key' ~ '^rk_pub_live_[0-9a-f]{48}$', 'widget key format';
+  assert (j -> 'allowed_origins')::jsonb = '["https://salon.example.com", "https://*.example.com"]', 'origins tidied';
+  perform set_config('api.kw', j::text, false);
+  j := public.api_key_create(ws, 'Test shop', 'secret', 'test', array['orders:write', 'enquiries:write'], array['http://localhost:3000'], '{}');
+  assert j ->> 'key' ~ '^rk_test_[0-9a-f]{48}$', 'test key format';
+  perform set_config('api.kt', j::text, false);
+  j := public.api_key_create(ws, 'Office server', 'secret', 'live', array['enquiries:write'], '{}', array['203.0.113.0/24', '2001:db8::/32']);
+  perform set_config('api.ki', j::text, false);
+  -- rename and change access: in the change history
+  perform public.api_key_rename(ws, (j ->> 'id')::uuid, 'Office server (Sydney)');
+  assert exists (select 1 from json_array_elements(public.api_keys_list(ws)) k where k ->> 'name' = 'Office server (Sydney)'), 'renamed';
+end $$;
+
+-- api_auth (the Edge Function, as the service role): from the hash; wrong keys refused; the internet address list
+reset role; set role service_role;
+do $$ declare k1 jsonb := current_setting('api.k1')::jsonb; ki jsonb := current_setting('api.ki')::jsonb; a json; begin
+  a := public.api_auth(encode(sha256(convert_to(k1 ->> 'key', 'UTF8')), 'hex'), '198.51.100.20');
+  assert a ->> 'key_id' = k1 ->> 'id' and a ->> 'workspace_id' = current_setting('api.ws') and a ->> 'mode' = 'live', 'api_auth finds the key: ' || a::text;
+  assert (a -> 'rate' ->> 'limit')::int = 120, 'default per-minute limit';
+  assert public.api_auth(encode(sha256(convert_to((k1 ->> 'key') || 'x', 'UTF8')), 'hex'), null) #>> '{error,code}' = 'invalid_key', 'wrong key';
+  assert public.api_auth('not-a-hash; drop table api_keys', null) #>> '{error,code}' = 'invalid_key', 'junk refused';
+  a := public.api_auth(encode(sha256(convert_to(ki ->> 'key', 'UTF8')), 'hex'), '198.51.100.20');
+  assert a #>> '{error,code}' = 'ip_not_allowed', 'address not on the list: ' || a::text;
+  assert public.api_auth(encode(sha256(convert_to(ki ->> 'key', 'UTF8')), 'hex'), null) #>> '{error,code}' = 'ip_not_allowed', 'no address, refused';
+  assert public.api_auth(encode(sha256(convert_to(ki ->> 'key', 'UTF8')), 'hex'), '203.0.113.99') ->> 'key_id' = ki ->> 'id', 'IPv4 on the list';
+  assert public.api_auth(encode(sha256(convert_to(ki ->> 'key', 'UTF8')), 'hex'), '2001:db8:5::1') ->> 'key_id' = ki ->> 'id', 'IPv6 on the list';
+end $$;
+reset role;
+do $$ begin assert exists (select 1 from public.api_keys where id = (current_setting('api.k1')::jsonb ->> 'id')::uuid and last_used_at is not null), 'last used'; end $$;
+
+-- Rate limits: per key per minute, per visitor address for widget keys, per business per day
+reset role;
+insert into public.hq_settings (key, value) values ('api.key_per_minute', '2'), ('api.widget_ip_per_minute', '2') on conflict (key) do update set value = excluded.value;
+delete from public.api_rate;
+set role service_role;
+do $$ declare h text := encode(sha256(convert_to(current_setting('api.k1')::jsonb ->> 'key', 'UTF8')), 'hex');
+  hw text := encode(sha256(convert_to(current_setting('api.kw')::jsonb ->> 'key', 'UTF8')), 'hex'); limited int := 0; a json; i int; begin
+  -- 6 calls with a limit of 2 a minute: even across a minute boundary, some are refused
+  for i in 1..6 loop a := public.api_auth(h, '198.51.100.20'); if a #>> '{error,code}' = 'rate_limited' then limited := limited + 1; end if; end loop;
+  assert limited >= 1, 'per-minute limit';
+  limited := 0;
+  for i in 1..6 loop a := public.api_auth(hw, '192.0.2.10'); if a #>> '{error,code}' = 'rate_limited' then limited := limited + 1; end if; end loop;
+  assert limited >= 1, 'widget per-visitor limit';
+  assert public.api_auth(hw, '192.0.3.10') ->> 'key_id' is not null, 'another visitor isn''t limited by the first';
+end $$;
+reset role;
+delete from public.hq_settings where key in ('api.key_per_minute', 'api.widget_ip_per_minute');
+insert into public.hq_settings (key, value) values ('api.workspace_per_day', '3') on conflict (key) do update set value = excluded.value;
+delete from public.api_rate;
+set role service_role;
+do $$ declare h text := encode(sha256(convert_to(current_setting('api.k1')::jsonb ->> 'key', 'UTF8')), 'hex'); a json; i int; begin
+  for i in 1..4 loop a := public.api_auth(h, null); end loop;
+  assert a #>> '{error,code}' = 'daily_limit', 'per-day limit: ' || a::text;
+end $$;
+reset role;
+delete from public.hq_settings where key = 'api.workspace_per_day';
+delete from public.api_rate;
+
+-- The post box: a booking, with Idempotency-Key replay and conflict; a missing permission; test keys marked test
+set role service_role;
+do $$ declare k1 uuid := (current_setting('api.k1')::jsonb ->> 'id')::uuid; kt uuid := (current_setting('api.kt')::jsonb ->> 'id')::uuid;
+  ki uuid := (current_setting('api.ki')::jsonb ->> 'id')::uuid; a json; b json; h1 text := repeat('1', 64); h2 text := repeat('2', 64); begin
+  a := public.api_submit(k1, 'order', '{"customer":{"name":"Pat","email":"pat@example.com"},"items":[{"sku":"MUG","quantity":2}]}', 'ord-1001', h1, 'api');
+  assert a ->> 'id' is not null and a ->> 'status' = 'waiting' and not (a ->> 'replay')::boolean and not (a ->> 'test')::boolean, 'order in: ' || a::text;
+  b := public.api_submit(k1, 'order', '{"customer":{"name":"Pat","email":"pat@example.com"},"items":[{"sku":"MUG","quantity":2}]}', 'ord-1001', h1, 'api');
+  assert b ->> 'id' = a ->> 'id' and (b ->> 'replay')::boolean, 'same Idempotency-Key, same body: the first answer';
+  b := public.api_submit(k1, 'order', '{"customer":{"name":"Pat"},"items":[{"sku":"MUG","quantity":3}]}', 'ord-1001', h2, 'api');
+  assert b #>> '{error,code}' = 'idempotency_conflict', 'same key, different body: refused';
+  assert (select count(*) from public.api_inbox where idempotency_key = 'ord-1001') = 1, 'only one';
+  b := public.api_submit(k1, 'order', '{"customer":{"name":"Pat"},"items":[{"sku":"MUG","quantity":1}]}', 'bad key with spaces', h2, 'api');
+  assert b #>> '{error,code}' = 'invalid_idempotency_key', 'idempotency key checked';
+  b := public.api_submit(ki, 'order', '{"customer":{"name":"Pat"},"items":[{"sku":"MUG","quantity":1}]}', null, h2, 'api');
+  assert b #>> '{error,code}' = 'missing_scope', 'a key without orders:write: ' || b::text;
+  b := public.api_submit(k1, 'order', '{"customer":{"name":"Pat"},"items":[]}', null, h2, 'api');
+  assert b #>> '{error,code}' = 'invalid_payload', 'empty order refused';
+  b := public.api_submit(k1, 'booking', '{"customer":{"name":"Pat"},"service":"CUT","start":"next tuesday"}', null, h2, 'api');
+  assert b #>> '{error,code}' = 'invalid_payload', 'bad start refused';
+  b := public.api_submit(k1, 'invoice_payment', '{"invoice_ref":"INV-7","amount":-5}', null, h2, 'api');
+  assert b #>> '{error,code}' = 'invalid_payload', 'negative payment refused';
+  b := public.api_submit(kt, 'enquiry', '{"customer":{"name":"Tess","email":"t@example.com"},"message":"Do you do gift cards?"}', 'enq-1', h1, 'api');
+  assert (b ->> 'test')::boolean, 'test key: marked test';
+  b := public.api_submit(k1, 'enquiry', '{"customer":{"name":"Lee","phone":"021 555 0101"},"message":"Quote for a deck?"}', 'enq-1', h1, 'api');
+  assert not (b ->> 'replay')::boolean, 'Idempotency-Keys are per key';
+  b := public.api_submit(k1, 'quote_accept', '{"quote_ref":"Q-1042","accepted_by":{"name":"Lee"}}', null, h1, 'api');
+  assert b ->> 'status' = 'waiting', 'quote acceptance in';
+  b := public.api_submit(k1, 'invoice_payment', '{"invoice_ref":"INV-77","amount":120.5,"method":"card"}', null, h1, 'api');
+  assert b ->> 'status' = 'waiting', 'invoice payment in';
+  b := public.api_submit(k1, 'customer', '{"name":"Max","email":"max@example.com"}', null, h1, 'api');
+  assert b ->> 'status' = 'waiting', 'customer in';
+  perform set_config('api.ord', a ->> 'id', false);
+end $$;
+
+-- Plan gating: what the business's licence allows
+reset role;
+insert into public.company_modules (workspace_id, module, status, trial_ends)
+  select current_setting('api.ws')::uuid, 'bookings', 'trial', current_date - 1;
+set role service_role;
+do $$ declare k1 uuid := (current_setting('api.k1')::jsonb ->> 'id')::uuid; b json; begin
+  b := public.api_submit(k1, 'booking', '{"customer":{"name":"Pat"},"service":"CUT","start":"2030-01-01T09:00:00Z"}', null, repeat('3', 64), 'api');
+  assert b #>> '{error,code}' = 'bookings_licence_required', 'Bookings trial over: ' || b::text;
+  assert public.api_read(k1, 'availability', '{}') #>> '{error,code}' = 'bookings_licence_required', 'open times need Bookings too';
+  assert public.api_submit(k1, 'enquiry', '{"customer":{"name":"Pat"},"message":"Hi"}', null, repeat('3', 64), 'api') ->> 'status' = 'waiting', 'enquiries still fine';
+end $$;
+reset role;
+insert into public.company_modules (workspace_id, module, status, paid_until)
+  select current_setting('api.ws')::uuid, m, 'cancelled', current_date - 1 from unnest(array['pos', 'basic', 'plus']) m;
+set role service_role;
+do $$ declare k1 uuid := (current_setting('api.k1')::jsonb ->> 'id')::uuid; begin
+  assert public.api_submit(k1, 'order', '{"customer":{"name":"Pat"},"items":[{"sku":"A","quantity":1}]}', null, repeat('3', 64), 'api') #>> '{error,code}'
+    = 'pos_or_accounting_licence_required', 'orders need POS or Accounting';
+  assert public.api_read(k1, 'stock', '{}') #>> '{error,code}' = 'pos_or_accounting_licence_required', 'stock needs POS or Accounting';
+  assert public.api_read(k1, 'prices', '{}') ->> 'items' is not null, 'prices still fine';
+end $$;
+reset role;
+insert into public.company_modules (workspace_id, module, status, paid_until)
+  select current_setting('api.ws')::uuid, m, 'cancelled', current_date - 1 from unnest(array['calls', 'payroll', 'as_built']) m;
+set role service_role;
+do $$ begin
+  assert public.api_submit((current_setting('api.k1')::jsonb ->> 'id')::uuid, 'enquiry', '{"customer":{"name":"Pat"},"message":"Hi"}', null, repeat('3', 64), 'api')
+    #>> '{error,code}' = 'plan_required', 'no program at all: plan_required';
+end $$;
+reset role;
+-- back on: POS paid, Bookings paid
+delete from public.company_modules where workspace_id = current_setting('api.ws')::uuid;
+insert into public.company_modules (workspace_id, module, status, paid_until)
+  select current_setting('api.ws')::uuid, m, 'active', current_date + 30 from unnest(array['pos', 'bookings']) m;
+update public.workspaces set status = 'suspended' where id = current_setting('api.ws')::uuid;
+set role service_role;
+do $$ begin
+  assert public.api_auth(encode(sha256(convert_to(current_setting('api.k1')::jsonb ->> 'key', 'UTF8')), 'hex'), null) #>> '{error,code}' = 'business_closed', 'a paused business: closed';
+end $$;
+reset role;
+update public.workspaces set status = 'active' where id = current_setting('api.ws')::uuid;
+
+-- The PCs: claim (oldest first, taken for 10 minutes), done, fail with retry / rejected; only linked PCs
+set role authenticated;
+select pg_temp.as_user('a9a9a9a3-0000-4000-8000-000000000003');
+do $$ begin
+  begin perform public.api_inbox_claim(current_setting('api.ws')::uuid, 'a9a9a9d1-0000-4000-8000-000000000001', null, 10); raise exception 'another business claimed';
+  exception when others then assert sqlerrm like 'Link this PC to the business first%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('a9a9a9a4-0000-4000-8000-000000000004');
+do $$ begin
+  begin perform public.api_inbox_claim(current_setting('api.ws')::uuid, 'a9a9a9d1-0000-4000-8000-000000000001', null, 10); raise exception 'someone else''s PC id';
+  exception when others then assert sqlerrm like 'Link this PC to the business first%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d1 uuid := 'a9a9a9d1-0000-4000-8000-000000000001'; c json; e jsonb; begin
+  c := public.api_inbox_claim(ws, d1, array['order'], 10);
+  assert json_array_length(c) = 1 and c -> 0 ->> 'id' = current_setting('api.ord'), 'only orders: ' || c::text;
+  e := (c -> 0)::jsonb;
+  assert e ->> 'kind' = 'order' and e -> 'payload' -> 'customer' ->> 'name' = 'Pat' and e ->> 'key_name' = 'Website shop' and (e ->> 'attempts')::int = 1, 'what the PC gets';
+  assert json_array_length(public.api_inbox_claim(ws, d1, array['order'], 10)) = 0, 'taken: not given again';
+  c := public.api_inbox_claim(ws, d1, null, 2);
+  assert json_array_length(c) = 2, 'max_items';
+  assert (select count(*) from json_array_elements(c) x where (x ->> 'test')::boolean) = 1, 'the test enquiry is first and marked test';
+  perform public.api_inbox_done(ws, d1, current_setting('api.ord')::uuid, '{"reference":"POS-0042","state":"accepted","message":"Thanks! Ready in 20 minutes.<script>"}');
+  begin perform public.api_inbox_done(ws, d1, current_setting('api.ord')::uuid, '{}'); raise exception 'done twice';
+  exception when others then assert sqlerrm like 'This PC hasn''t taken that one%', sqlerrm; end;
+  perform set_config('api.c2', c::text, false);
+end $$;
+select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d2 uuid := 'a9a9a9d2-0000-4000-8000-000000000002'; c json := current_setting('api.c2')::json; begin
+  begin perform public.api_inbox_done(ws, d2, (c -> 0 ->> 'id')::uuid, '{}'); raise exception 'another PC finished it';
+  exception when others then assert sqlerrm like 'This PC hasn''t taken that one%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d1 uuid := 'a9a9a9d1-0000-4000-8000-000000000001'; c json := current_setting('api.c2')::json; r json; begin
+  r := public.api_inbox_fail(ws, d1, (c -> 0 ->> 'id')::uuid, 'Accounting was busy', true, null);
+  assert r ->> 'status' = 'waiting', 'retry: back in the post box';
+  r := public.api_inbox_fail(ws, d1, (c -> 1 ->> 'id')::uuid, 'Not something we do', false, '{"state":"declined","message":"Sorry, we don''t do gift cards."}');
+  assert r ->> 'status' = 'rejected', 'rejected';
+end $$;
+-- the retried one isn't given again straight away (it waits a minute); a PC that went quiet for 10 minutes lets go
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d1 uuid := 'a9a9a9d1-0000-4000-8000-000000000001'; c json := current_setting('api.c2')::json; got json; begin
+  got := public.api_inbox_claim(ws, d1, null, 100);
+  assert not exists (select 1 from json_array_elements(got) x where x ->> 'id' = c -> 0 ->> 'id'), 'retry waits';
+  perform set_config('api.c3', got::text, false);
+end $$;
+reset role;
+update public.api_inbox set available_at = now() - interval '1 second' where id = (current_setting('api.c2')::json -> 0 ->> 'id')::uuid;
+update public.api_inbox set taken_at = now() - interval '11 minutes' where id = (current_setting('api.c3')::json -> 0 ->> 'id')::uuid;
+set role authenticated; select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d2 uuid := 'a9a9a9d2-0000-4000-8000-000000000002'; got json; i int; r json; id1 uuid := (current_setting('api.c2')::json -> 0 ->> 'id')::uuid; begin
+  got := public.api_inbox_claim(ws, d2, null, 100);
+  assert exists (select 1 from json_array_elements(got) x where x ->> 'id' = id1::text), 'retry due: taken again';
+  assert exists (select 1 from json_array_elements(got) x where x ->> 'id' = current_setting('api.c3')::json -> 0 ->> 'id'), 'stale (11 minutes): another PC takes it';
+end $$;
+-- five tries, then failed (run as the database, signed in as the owner, so the wait can be skipped each time)
+reset role;
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d2 uuid := 'a9a9a9d2-0000-4000-8000-000000000002'; i int; r json; id1 uuid := (current_setting('api.c2')::json -> 0 ->> 'id')::uuid; begin
+  perform set_config('request.jwt.claim.sub', 'a9a9a9a1-0000-4000-8000-000000000001', false);
+  perform set_config('request.jwt.claims', '{"sub":"a9a9a9a1-0000-4000-8000-000000000001","aal":"aal2"}', false);
+  for i in 1..10 loop
+    r := public.api_inbox_fail(ws, d2, id1, 'Still busy', true, null);
+    exit when r ->> 'status' = 'failed';
+    update public.api_inbox set available_at = now() where id = id1;
+    perform public.api_inbox_claim(ws, d2, null, 100);
+  end loop;
+  assert r ->> 'status' = 'failed' and (r ->> 'attempts')::int = 5, 'failed after 5 tries: ' || r::text;
+  assert (public.api_inbox_counts(ws, d2) ->> 'failed')::int = 1, 'counts';
+  -- the owner can send it round again
+  assert public.api_inbox_retry(ws, id1) ->> 'status' = 'waiting', 'retry by the owner';
+  assert exists (select 1 from json_array_elements(public.api_inbox_recent(ws, null, 50)) x where x ->> 'customer_name' = 'Pat'), 'recent list';
+end $$;
+-- FOR UPDATE SKIP LOCKED: while another PC is in the middle of taking a row, it's skipped, not waited for
+reset role;
+create extension if not exists dblink;
+do $$ declare c json; locked uuid; begin
+  update public.api_inbox set status = 'waiting', available_at = now(), taken_by = null where workspace_id = current_setting('api.ws')::uuid and status = 'taken';
+  select id into locked from public.api_inbox where workspace_id = current_setting('api.ws')::uuid and status = 'waiting' order by created_at limit 1;
+  perform dblink_connect('other_pc', 'dbname=' || current_database());
+  perform dblink_exec('other_pc', 'begin');
+  perform * from dblink('other_pc', format('select 1 from public.api_inbox where id = %L for update', locked)) as t(x int);
+  perform set_config('request.jwt.claim.sub', 'a9a9a9a2-0000-4000-8000-000000000002', false);
+  perform set_config('request.jwt.claims', '{"sub":"a9a9a9a2-0000-4000-8000-000000000002","aal":"aal2"}', false);
+  c := public.api_inbox_claim(current_setting('api.ws')::uuid, 'a9a9a9d1-0000-4000-8000-000000000001', null, 100);
+  assert json_array_length(c) >= 1, 'others taken';
+  assert not exists (select 1 from json_array_elements(c) x where x ->> 'id' = locked::text), 'the locked row was skipped';
+  perform dblink_exec('other_pc', 'rollback');
+  perform dblink_disconnect('other_pc');
+end $$;
+-- a PC that was replaced (Fresh start) can't take anything
+reset role;
+update public.devices set retired_at = now() where id = 'a9a9a9d1-0000-4000-8000-000000000001';
+set role authenticated; select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+do $$ begin
+  begin perform public.api_inbox_claim(current_setting('api.ws')::uuid, 'a9a9a9d1-0000-4000-8000-000000000001', null, 10); raise exception 'a replaced PC claimed';
+  exception when others then assert sqlerrm like 'Link this PC%', sqlerrm; end;
+  perform public.link_device(current_setting('api.ws')::uuid, 'a9a9a9d1-0000-4000-8000-000000000001', 'FRONT-DESK', 'windows', '1.0');
+end $$;
+
+-- What the website sees of an event: status and the cleaned result, never the payload
+reset role; set role service_role;
+do $$ declare k1 uuid := (current_setting('api.k1')::jsonb ->> 'id')::uuid; kw uuid := (current_setting('api.kw')::jsonb ->> 'id')::uuid; e json; begin
+  e := public.api_read(k1, 'event', json_build_object('id', current_setting('api.ord'))::jsonb);
+  assert e ->> 'status' = 'done' and e -> 'result' ->> 'reference' = 'POS-0042' and e -> 'result' ->> 'state' = 'accepted', 'event status: ' || e::text;
+  assert e -> 'result' ->> 'message' = 'Thanks! Ready in 20 minutes.script', 'message tidied';
+  assert not (e::jsonb ? 'payload'), 'no payload';
+  assert public.api_read(kw, 'event', json_build_object('id', current_setting('api.ord'))::jsonb) #>> '{error,code}' = 'not_found', 'a widget key only sees its own';
+  assert public.api_read(k1, 'event', '{"id":"not-a-uuid"}') #>> '{error,code}' = 'not_found', 'junk id';
+end $$;
+
+-- Published data: catalogue, stock (stock.changed to webhooks), open times -> free start times
+reset role; set role authenticated; select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+select set_config('api.hook', public.api_webhook_create(current_setting('api.ws')::uuid, 'https://hooks.example.com/riyeser', array['stock.changed', 'order.ready', 'booking.received'], 'live', 'Shop')::text, false);
+do $$ declare ws uuid := current_setting('api.ws')::uuid; h jsonb := current_setting('api.hook')::jsonb; begin
+  assert h ->> 'secret' ~ '^whsec_[0-9a-f]{48}$', 'secret shown once';
+  assert not (public.api_webhooks_list(ws) -> 0)::jsonb ? 'secret', 'the list never shows the secret';
+  begin perform public.api_webhook_create(ws, 'http://hooks.example.com/x', array['stock.changed'], 'live', null); raise exception 'http allowed';
+  exception when others then assert sqlerrm like 'The address must start with https://%', sqlerrm; end;
+  begin perform public.api_webhook_create(ws, 'https://localhost/x', array['stock.changed'], 'live', null); raise exception 'localhost allowed';
+  exception when others then assert sqlerrm like 'Use the public web address%', sqlerrm; end;
+  begin perform public.api_webhook_create(ws, 'https://169.254.169.254/latest', array['stock.changed'], 'live', null); raise exception 'IP allowed';
+  exception when others then assert sqlerrm like 'Use the public web address%', sqlerrm; end;
+  begin perform public.api_webhook_create(ws, 'https://a.example.com/x', array['stock.stolen'], 'live', null); raise exception 'unknown event';
+  exception when others then assert sqlerrm like 'Unknown event%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d1 uuid := 'a9a9a9d1-0000-4000-8000-000000000001'; r json; begin
+  begin perform public.api_webhooks_list(ws); raise exception 'staff saw webhooks'; exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+  r := public.api_publish_catalog(ws, d1, '[{"sku":"MUG","name":"Blue mug","price":12.5,"currency":"nzd","tax_rate":15},
+      {"sku":"CUT","type":"service","name":"Haircut","price":45,"currency":"NZD","duration_minutes":60},
+      {"sku":"OLD","name":"Old thing","price":1,"active":false},
+      {"sku":"bad sku!","name":"Nope","price":1}, {"sku":"NEG","name":"Negative","price":-1}]', true);
+  assert (r ->> 'saved')::int = 3 and json_array_length(r -> 'skipped') = 2, 'catalogue: bad ones skipped: ' || r::text;
+  r := public.api_publish_stock(ws, d1, '[{"sku":"MUG","quantity":4},{"sku":"CUP","quantity":0}]', true);
+  assert (r ->> 'changed')::int = 2, 'stock changes';
+  r := public.api_publish_stock(ws, d1, '[{"sku":"MUG","quantity":3}]', false);
+  assert (r ->> 'changed')::int = 1 and (r ->> 'removed')::int = 0, 'partial stock update';
+  r := public.api_publish_availability(ws, d1, '{"timezone":"Pacific/Auckland","slot_minutes":30,"min_notice_minutes":0,"days_ahead":30}',
+    '[{"ref":"amy","name":"Amy","services":["CUT"]},{"ref":"bo","name":"Bo","services":["COLOUR"]}]',
+    json_build_array(json_build_object('staff_ref', 'amy', 'start', (current_date + 2)::timestamp at time zone 'Pacific/Auckland' + interval '9 hours',
+                                                         'end', (current_date + 2)::timestamp at time zone 'Pacific/Auckland' + interval '12 hours'),
+                     json_build_object('staff_ref', 'bo', 'start', (current_date + 2)::timestamp at time zone 'Pacific/Auckland' + interval '9 hours',
+                                                         'end', (current_date + 2)::timestamp at time zone 'Pacific/Auckland' + interval '12 hours'))::jsonb,
+    now(), now() + interval '30 days');
+  assert (r ->> 'open_times_saved')::int = 2 and (r ->> 'staff_saved')::int = 2, 'availability saved: ' || r::text;
+  begin perform public.api_publish_availability(ws, d1, '{"timezone":"Mars/Olympus"}', null, null, null, null); raise exception 'bad tz';
+  exception when others then assert sqlerrm like 'Unknown time zone%', sqlerrm; end;
+end $$;
+reset role; set role service_role;
+do $$ declare k1 uuid := (current_setting('api.k1')::jsonb ->> 'id')::uuid; kw uuid := (current_setting('api.kw')::jsonb ->> 'id')::uuid; r json; s json; d date := current_date + 2; b json; begin
+  r := public.api_read(k1, 'prices', '{}');
+  assert json_array_length(r -> 'items') = 2 and r -> 'items' -> 1 ->> 'currency' = 'NZD', 'prices: active only, currency upper-cased: ' || r::text;
+  r := public.api_read(k1, 'catalog', '{"limit":2}');
+  assert json_array_length(r -> 'items') = 2 and r ->> 'next' = 'MUG', 'catalogue pages: ' || r::text;
+  r := public.api_read(k1, 'catalog', '{"limit":2,"after":"MUG"}');
+  assert json_array_length(r -> 'items') = 1 and r ->> 'next' is null, 'last page';
+  r := public.api_read(k1, 'stock', '{"skus":["MUG","CUP"]}');
+  assert r -> 'items' -> 1 ->> 'quantity' = '3.000' and not (r -> 'items' -> 0 ->> 'in_stock')::boolean, 'stock: ' || r::text;
+  assert public.api_read(kw, 'stock', '{}') #>> '{error,code}' = 'missing_scope', 'a widget key can''t read stock';
+  r := public.api_read(kw, 'availability', '{}');
+  assert r ->> 'timezone' = 'Pacific/Auckland' and json_array_length(r -> 'services') = 1 and json_array_length(r -> 'staff') = 2, 'availability: ' || r::text;
+  s := public.api_read(kw, 'slots', json_build_object('service', 'CUT', 'from', d, 'days', 1)::jsonb);
+  assert json_array_length(s -> 'slots') = 5, '09:00 to 11:00 every 30 minutes (only Amy does cuts): ' || s::text;
+  assert s -> 'slots' -> 0 ->> 'local_start' = d::text || 'T09:00' and s -> 'slots' -> 0 -> 'staff' ->> 0 = 'amy', 'local time and staff';
+  assert public.api_read(kw, 'slots', '{"service":"NOPE"}') #>> '{error,code}' = 'not_found', 'unknown service';
+  assert public.api_read(kw, 'slots', '{"service":"CUT","from":"soon"}') #>> '{error,code}' = 'invalid_request', 'bad date';
+  -- a widget can only book a time that's free; the booking then holds it until the PC takes it
+  b := public.api_submit(kw, 'booking', json_build_object('customer', json_build_object('name', 'Kai', 'phone', '021 1'), 'service', 'CUT', 'staff', 'amy',
+         'start', (s -> 'slots' -> 1 ->> 'start'))::jsonb, 'w-1', repeat('4', 64), 'api');
+  assert b ->> 'status' = 'waiting', 'widget booking at a free time: ' || b::text;
+  assert (select source from public.api_inbox where id = (b ->> 'id')::uuid) = 'widget', 'marked widget';
+  assert (select payload ->> 'end' from public.api_inbox where id = (b ->> 'id')::uuid) is not null, 'end filled in from the service';
+  s := public.api_read(kw, 'slots', json_build_object('service', 'CUT', 'from', d, 'days', 1)::jsonb);
+  assert json_array_length(s -> 'slots') = 2, 'the booked hour is held: ' || s::text;
+  b := public.api_submit(kw, 'booking', json_build_object('customer', json_build_object('name', 'Kim'), 'service', 'CUT', 'staff', 'amy',
+         'start', ((d::timestamp at time zone 'Pacific/Auckland') + interval '9 hours 30 minutes'))::jsonb, 'w-2', repeat('4', 64), 'api');
+  assert b #>> '{error,code}' = 'slot_not_available', 'the same time again: ' || b::text;
+  b := public.api_submit(kw, 'booking', json_build_object('customer', json_build_object('name', 'Kim'), 'service', 'CUT',
+         'start', ((d::timestamp at time zone 'Pacific/Auckland') + interval '9 hours 45 minutes'))::jsonb, 'w-3', repeat('4', 64), 'api');
+  assert b #>> '{error,code}' = 'slot_not_available', 'not a start time';
+  assert public.api_submit(kw, 'order', '{"customer":{"name":"Kim"},"items":[{"sku":"MUG","quantity":1}]}', null, repeat('4', 64), 'api') #>> '{error,code}' = 'missing_scope', 'widget can''t order';
+  -- webhooks queued: booking.received and two stock.changed (not order.ready: the PC hasn't said so)
+  assert (select count(*) from public.api_webhook_deliveries where workspace_id = current_setting('api.ws')::uuid and event = 'stock.changed') = 2, 'stock.changed queued';
+  assert (select count(*) from public.api_webhook_deliveries where workspace_id = current_setting('api.ws')::uuid and event = 'booking.received') = 1, 'booking.received queued';
+  assert (select payload -> 'data' -> 'items' -> 0 ->> 'sku' from public.api_webhook_deliveries where event = 'stock.changed' order by created_at desc limit 1) = 'MUG', 'what changed';
+end $$;
+-- the PC says the order is ready: order.ready to the webhook; the website sees state "ready"
+reset role; set role authenticated; select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d1 uuid := 'a9a9a9d1-0000-4000-8000-000000000001'; r json; begin
+  r := public.api_notify(ws, d1, 'order.ready', current_setting('api.ord')::uuid, '{"reference":"POS-0042","message":"Ready at the counter"}');
+  assert (r ->> 'queued')::int = 1, 'order.ready queued';
+  begin perform public.api_notify(ws, d1, 'booking.confirmed', current_setting('api.ord')::uuid, '{}'); raise exception 'wrong kind';
+  exception when others then assert sqlerrm like 'That event is a order%', sqlerrm; end;
+  begin perform public.api_notify(ws, d1, 'stock.changed', null, '{}'); raise exception 'PCs announce stock by publishing';
+  exception when others then assert sqlerrm like 'Unknown event%', sqlerrm; end;
+end $$;
+reset role; set role service_role;
+do $$ declare e json := public.api_read((current_setting('api.k1')::jsonb ->> 'id')::uuid, 'event', json_build_object('id', current_setting('api.ord'))::jsonb); begin
+  assert e -> 'result' ->> 'state' = 'ready' and e -> 'result' ->> 'message' = 'Ready at the counter', 'state ready: ' || e::text;
+end $$;
+
+-- The dispatcher: due deliveries (locked while sending), retries with backoff, delivered
+do $$ declare a json; b json; d uuid; i int; begin
+  a := public.api_webhooks_due(100, null);
+  assert json_array_length(a) = 4, 'four due: ' || json_array_length(a);
+  assert a -> 0 ->> 'secret' = current_setting('api.hook')::jsonb ->> 'secret' and a -> 0 ->> 'url' = 'https://hooks.example.com/riyeser', 'url and secret for signing';
+  assert a -> 0 -> 'payload' ->> 'type' is not null and a -> 0 -> 'payload' ->> 'id' is not null, 'body';
+  b := public.api_webhooks_due(100, null);
+  assert json_array_length(b) = 0, 'being sent: not given again';
+  d := (a -> 0 ->> 'id')::uuid;
+  perform public.api_webhook_result(d, false, 500, 'Internal Server Error');
+  assert (select status || ':' || attempts from public.api_webhook_deliveries where id = d) = 'pending:1', 'retry later';
+  assert (select next_at > now() + interval '50 seconds' from public.api_webhook_deliveries where id = d), 'backoff';
+  for i in 1..3 loop perform public.api_webhook_result((a -> i ->> 'id')::uuid, true, 200, null); end loop;
+  assert (select count(*) from public.api_webhook_deliveries where status = 'delivered') = 3, 'delivered';
+  for i in 2..8 loop
+    update public.api_webhook_deliveries set next_at = now() where id = d;
+    perform public.api_webhooks_due(100, null);
+    perform public.api_webhook_result(d, false, null, 'timeout');
+  end loop;
+  assert (select status || ':' || attempts from public.api_webhook_deliveries where id = d) = 'failed:8', 'failed after 8 tries';
+  assert (select failing_since is not null from public.api_webhooks where id = (current_setting('api.hook')::jsonb ->> 'id')::uuid), 'failing shown';
+end $$;
+reset role;
+update public.api_webhooks set failing_since = now() - interval '4 days' where id = (current_setting('api.hook')::jsonb ->> 'id')::uuid;
+set role authenticated; select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ declare id uuid; begin perform public.api_webhook_ping(current_setting('api.ws')::uuid, (current_setting('api.hook')::jsonb ->> 'id')::uuid); end $$;
+reset role; set role service_role;
+do $$ declare a json := public.api_webhooks_due(100, null); begin
+  assert json_array_length(a) = 1 and a -> 0 ->> 'event' = 'ping', 'ping';
+  perform public.api_webhook_result((a -> 0 ->> 'id')::uuid, false, 503, 'down');
+  assert not (select active from public.api_webhooks where id = (current_setting('api.hook')::jsonb ->> 'id')::uuid), 'failing 3 days: turned off';
+end $$;
+reset role; set role authenticated; select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; h uuid := (current_setting('api.hook')::jsonb ->> 'id')::uuid; j json; begin
+  j := public.api_webhook_update(ws, h, null, null, true);
+  assert (j ->> 'active')::boolean and j ->> 'failing_since' is null, 'turned back on';
+  j := public.api_webhook_rotate(ws, h);
+  assert j ->> 'secret' <> current_setting('api.hook')::jsonb ->> 'secret', 'new secret';
+  assert json_array_length(public.api_webhook_deliveries_list(ws, h, 50)) >= 5, 'delivery log';
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'api_webhook.rotate'), 'rotate in history';
+end $$;
+
+-- The request log: written by the function, addresses truncated; owners and admins read their own; 30 days kept
+reset role; set role service_role;
+do $$ declare k1 uuid := (current_setting('api.k1')::jsonb ->> 'id')::uuid; begin
+  perform public.api_log_request(k1, 'post', '/v1/orders?email=pat@example.com', 202, 41, '203.0.113.77', null);
+  perform public.api_log_request(k1, 'GET', '/v1/stock', 429, 3, '2001:db8:1:2::5', 'rate_limited');
+  perform public.api_log_request(gen_random_uuid(), 'GET', '/v1/stock', 401, 3, '203.0.113.1', 'invalid_key');   -- no such key: not logged
+end $$;
+reset role; set role authenticated; select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ declare l json := public.api_requests_list(current_setting('api.ws')::uuid, null, 10, null); begin
+  assert json_array_length(l) = 2, 'two lines';
+  assert l -> 1 ->> 'ip' = '203.0.113.0' and l -> 1 ->> 'path' = '/v1/orders' and l -> 1 ->> 'method' = 'POST', 'IPv4 truncated, no query: ' || l::text;
+  assert l -> 0 ->> 'ip' = '2001:db8:1::' and l -> 0 ->> 'code' = 'rate_limited', 'IPv6 truncated';
+  assert (public.api_overview(current_setting('api.ws')::uuid) -> 'allowed' ->> 'bookings')::boolean, 'overview';
+end $$;
+select pg_temp.as_user('a9a9a9a3-0000-4000-8000-000000000003');
+do $$ begin
+  begin perform public.api_requests_list(current_setting('api.ws')::uuid, null, 10, null); raise exception 'other business read the log';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+
+-- Revoked keys stop at once
+select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+select public.api_key_revoke(current_setting('api.ws')::uuid, (current_setting('api.kt')::jsonb ->> 'id')::uuid);
+reset role; set role service_role;
+do $$ begin
+  assert public.api_auth(encode(sha256(convert_to(current_setting('api.kt')::jsonb ->> 'key', 'UTF8')), 'hex'), null) #>> '{error,code}' = 'key_revoked', 'revoked';
+  assert public.api_submit((current_setting('api.kt')::jsonb ->> 'id')::uuid, 'enquiry', '{"customer":{"name":"A"},"message":"x"}', null, null, 'api') #>> '{error,code}' = 'invalid_key', 'revoked can''t submit';
+end $$;
+reset role;
+do $$ begin assert exists (select 1 from public.audit_log where action = 'api_key.revoke'), 'revoke in history'; end $$;
+
+-- Tidying up: finished post box items after 90 days, never-collected ones marked failed, log and deliveries after 30
+update public.api_inbox set updated_at = now() - interval '91 days' where id = current_setting('api.ord')::uuid;
+insert into public.api_inbox (workspace_id, kind, payload, created_at) values (current_setting('api.ws')::uuid, 'enquiry', '{"message":"old"}', now() - interval '95 days');
+update public.api_requests set at = now() - interval '31 days' where path = '/v1/orders';
+update public.api_webhook_deliveries set created_at = now() - interval '31 days' where status = 'delivered';
+insert into public.api_rate values ('k:old', 5, now() - interval '1 minute');
+set role service_role;
+do $$ declare r json := public.api_sweep(); begin
+  assert (r ->> 'inbox_removed')::int = 1 and (r ->> 'inbox_expired')::int = 1 and (r ->> 'requests_removed')::int = 1
+     and (r ->> 'deliveries_removed')::int = 3 and (r ->> 'rate_removed')::int >= 1, 'sweep: ' || r::text;
+end $$;
+reset role;
+do $$ begin
+  assert not exists (select 1 from public.api_inbox where id = current_setting('api.ord')::uuid), 'old done one removed';
+  assert (select status from public.api_inbox where payload ->> 'message' = 'old') = 'failed', 'never collected: failed';
+  assert (select count(*) from public.api_requests) = 1, 'recent log kept';
+end $$;
 reset role;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';

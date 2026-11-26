@@ -6151,3 +6151,1151 @@ create policy cs_send on public.call_signals for insert to authenticated
               and exists (select 1 from public.members m where m.workspace_id = call_signals.workspace_id and m.user_id = to_user)
               and public.calls_allowed(workspace_id)
               and (kind <> 'ring' or public.link_rings(workspace_id, to_user)));
+
+-- ================================================================ Riyeser online connections (the public API, phase 1)
+-- Any business's website or online shop can send bookings, orders, enquiries, customers, quote acceptances and
+-- invoice payments into Riyeser, and read back its prices, stock and free booking times. The "api" Edge Function
+-- (supabase/functions/api on main, contract in docs/api/openapi.yaml) is the only door from the internet:
+--   * API keys (rk_live_… / rk_test_…, and publishable widget keys rk_pub_live_… / rk_pub_test_…). Only a SHA-256 hash
+--     is kept: the key itself is shown once, when it's made, and never again. Owners and admins (two-step sign-in)
+--     make, rename, limit and revoke them; staff never see them, nor the request log.
+--   * The post box (api_inbox): what websites send waits here until one of the business's linked PCs collects it
+--     (api_inbox_claim, FOR UPDATE SKIP LOCKED) and files it in Bookings, POS, Invoices or Accounting (api_inbox_done).
+--   * Published data: the PCs push the catalogue and prices, stock and open booking times (api_publish_*); the API
+--     only ever reads these copies, never the books themselves.
+--   * Webhooks: the business's own systems can be told when something happens (signed with HMAC-SHA256).
+--   * The request log (30 days), rate limits, and the post box tidied up after 90 days (api_sweep).
+-- Nothing here is readable by anyone signed out, and no table is readable directly: everything goes through the
+-- functions below, each checking who's asking. Safe to run again.
+
+-- ---------------------------------------------------------------- small helpers
+create or replace function public.api_err(code text, message text) returns json language sql immutable as $$
+  select json_build_object('error', json_build_object('code', code, 'message', message))
+$$;
+create or replace function public.api_scopes() returns text[] language sql immutable as $$
+  select array['bookings:write', 'orders:write', 'customers:write', 'enquiries:write', 'quotes:write', 'payments:write',
+               'stock:read', 'prices:read', 'availability:read', 'catalog:read']
+$$;
+-- A publishable widget key (in a booking widget on a public web page) can only do these.
+create or replace function public.api_widget_scopes() returns text[] language sql immutable as $$
+  select array['availability:read', 'bookings:write', 'enquiries:write']
+$$;
+create or replace function public.api_kind_scope(kind text) returns text language sql immutable as $$
+  select case kind when 'booking' then 'bookings:write' when 'order' then 'orders:write' when 'customer' then 'customers:write'
+    when 'enquiry' then 'enquiries:write' when 'quote_accept' then 'quotes:write' when 'invoice_payment' then 'payments:write' end
+$$;
+-- The webhook events, and which ones the business's PCs may announce.
+create or replace function public.api_events() returns text[] language sql immutable as $$
+  select array['booking.received', 'booking.confirmed', 'booking.cancelled', 'order.received', 'order.ready', 'order.completed',
+               'enquiry.received', 'quote.accepted', 'payment.received', 'stock.changed']
+$$;
+create or replace function public.api_pc_events() returns text[] language sql immutable as $$
+  select array['booking.confirmed', 'booking.cancelled', 'order.ready', 'order.completed']
+$$;
+-- 203.0.113.77 -> 203.0.113.0, 2001:db8:1:2::5 -> 2001:db8:1:: (what the request log keeps: never a whole address)
+create or replace function public.api_ip_trunc(ip text) returns text language plpgsql immutable as $$
+declare a inet;
+begin
+  if ip is null or ip = '' then return null; end if;
+  a := ip::inet;
+  return host(network(set_masklen(a, case when family(a) = 4 then 24 else 48 end)));
+exception when others then return null;
+end $$;
+-- Owners and admins, signed in with two-step sign-in.
+create or replace function public.api_need_admin(ws uuid) returns void
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_admin(ws) then
+    raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can manage online connections.';
+  end if;
+end $$;
+-- One of the business's linked PCs (Riyeser Central's link_device), as the person signed in on it.
+create or replace function public.api_pc_ok(ws uuid, device uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select public.is_member(ws) and exists (select 1 from devices d where d.id = device and d.workspace_id = ws
+    and d.user_id = auth.uid() and d.retired_at is null)
+$$;
+create or replace function public.api_need_pc(ws uuid, device uuid) returns void
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.api_pc_ok(ws, device) then raise exception 'Link this PC to the business first (Riyeser Central).'; end if;
+end $$;
+
+-- ---------------------------------------------------------------- plan gating (what the business's licence allows)
+-- Any Riyeser program on trial or paid opens the API (every business starts with 90 days of each). On top of that:
+-- bookings and open times need Riyeser Bookings; orders and stock need Riyeser POS or Accounting (Basics or Plus).
+-- Enquiries, customers, quote acceptances, invoice payments, the catalogue and prices: any program on trial or paid.
+create or replace function public.api_mod_on(ws uuid, mod text) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce((public.module_state(ws, mod) ->> 'active')::boolean, false)
+$$;
+create or replace function public.api_gate(ws uuid, scope text) returns text
+  language sql stable security definer set search_path = public as $$
+  select case
+    when (select status from workspaces where id = ws) is distinct from 'active' then 'business_closed'
+    when not exists (select 1 from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
+                     where public.api_mod_on(ws, m)) then 'plan_required'
+    when scope in ('bookings:write', 'availability:read') and not public.api_mod_on(ws, 'bookings') then 'bookings_licence_required'
+    when scope in ('orders:write', 'stock:read') and not (public.api_mod_on(ws, 'pos') or public.api_mod_on(ws, 'basic')
+         or public.api_mod_on(ws, 'plus')) then 'pos_or_accounting_licence_required'
+  end
+$$;
+create or replace function public.api_gate_message(code text) returns text language sql immutable as $$
+  select case code
+    when 'business_closed' then 'This business''s Riyeser account is closed or paused.'
+    when 'plan_required' then 'Online connections need a Riyeser program on its free trial or paid. Add one on riyeser.com.'
+    when 'bookings_licence_required' then 'Online bookings and open times need Riyeser Bookings (on its free trial or paid).'
+    when 'pos_or_accounting_licence_required' then 'Online orders and stock need Riyeser POS or Riyeser Accounting (on its free trial or paid).'
+    else 'Not allowed.' end
+$$;
+
+-- ---------------------------------------------------------------- API keys
+create table if not exists public.api_keys (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  name text not null check (length(trim(name)) between 1 and 60),
+  kind text not null default 'secret' check (kind in ('secret', 'widget')),
+  mode text not null default 'live' check (mode in ('live', 'test')),
+  scopes text[] not null default '{}',
+  prefix text not null check (length(prefix) <= 40),             -- e.g. rk_live_ab12cd34 (shown as rk_live_ab12cd34…)
+  key_hash text not null unique check (key_hash ~ '^[0-9a-f]{64}$'),   -- SHA-256 of the whole key, hex: never the key
+  allowed_origins text[] not null default '{}',                  -- websites a browser may call from (widget keys: required)
+  allowed_ips cidr[] not null default '{}',                      -- empty: any address
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  last_used_at timestamptz,
+  revoked_at timestamptz,
+  revoked_by uuid references auth.users(id) on delete set null
+);
+create index if not exists api_keys_ws on public.api_keys (workspace_id, created_at desc);
+alter table public.api_keys enable row level security;
+revoke all on public.api_keys from public, anon, authenticated;
+-- The request log (30 days): one line per request, never the key, the body or a whole internet address.
+create table if not exists public.api_requests (
+  id bigint generated always as identity primary key,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  key_id uuid references public.api_keys(id) on delete cascade,
+  method text not null check (length(method) <= 10),
+  path text not null check (length(path) <= 120),        -- the route (e.g. /v1/quotes/{ref}/accept), never query strings or refs
+  status int not null,
+  ms int,
+  ip text check (length(ip) <= 64),                      -- truncated (203.0.113.0, 2001:db8:1::)
+  code text check (length(code) <= 60),                  -- the error code, if any
+  at timestamptz not null default now()
+);
+create index if not exists api_requests_ws on public.api_requests (workspace_id, at desc);
+create index if not exists api_requests_key on public.api_requests (key_id, at desc);
+create index if not exists api_requests_at on public.api_requests (at);
+alter table public.api_requests enable row level security;
+revoke all on public.api_requests from public, anon, authenticated;
+
+-- A new secret: 192 random bits as 48 hex characters (from the database's strong random source).
+create or replace function public.api_random_hex(n int) returns text language sql volatile as $$
+  select left(encode(sha256(convert_to(gen_random_uuid()::text || gen_random_uuid()::text || clock_timestamp()::text, 'UTF8')), 'hex'), n)
+$$;
+-- https://shop.example.com, https://*.example.com (any subdomain), and for test keys http://localhost:3000 too.
+create or replace function public.api_clean_origins(origins text[], key_mode text) returns text[]
+  language plpgsql immutable as $$
+declare o text; outv text[] := '{}';
+begin
+  foreach o in array coalesce(origins, '{}') loop
+    o := lower(regexp_replace(trim(o), '/+$', ''));
+    continue when o = '';
+    if not (o ~ '^https://(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:[0-9]{1,5})?$'
+            or (key_mode = 'test' and o ~ '^http://(localhost|127\.0\.0\.1)(:[0-9]{1,5})?$')) then
+      raise exception 'Website addresses look like https://shop.example.com (no page after it). "%" isn''t one.', left(o, 80);
+    end if;
+    if not o = any (outv) then outv := outv || o; end if;
+  end loop;
+  if cardinality(outv) > 10 then raise exception 'Up to 10 website addresses per key.'; end if;
+  return outv;
+end $$;
+create or replace function public.api_clean_ips(ips text[]) returns cidr[]
+  language plpgsql immutable as $$
+declare i text; c cidr; outv cidr[] := '{}';
+begin
+  foreach i in array coalesce(ips, '{}') loop
+    i := trim(i);
+    continue when i = '';
+    begin c := i::cidr; exception when others then
+      raise exception 'Internet addresses look like 203.0.113.7 or 203.0.113.0/24. "%" isn''t one.', left(i, 60);
+    end;
+    if not c = any (outv) then outv := outv || c; end if;
+  end loop;
+  if cardinality(outv) > 20 then raise exception 'Up to 20 internet addresses per key.'; end if;
+  return outv;
+end $$;
+
+create or replace function public.api_key_json(k public.api_keys) returns json language sql stable security definer set search_path = public as $$
+  select json_build_object('id', k.id, 'name', k.name, 'kind', k.kind, 'mode', k.mode, 'scopes', k.scopes,
+    'prefix', k.prefix || '…', 'allowed_origins', k.allowed_origins, 'allowed_ips', k.allowed_ips::text[],
+    'created_at', k.created_at, 'created_by_name', (select display_name from members m where m.workspace_id = k.workspace_id and m.user_id = k.created_by),
+    'last_used_at', k.last_used_at, 'revoked_at', k.revoked_at, 'status', case when k.revoked_at is null then 'active' else 'revoked' end,
+    'requests_24h', (select count(*) from api_requests r where r.key_id = k.id and r.at > now() - interval '24 hours'))
+$$;
+
+-- Make a key. Returns it ONCE (field "key"): it can't be shown again, only revoked and replaced.
+create or replace function public.api_key_create(ws uuid, key_name text, key_kind text, key_mode text, key_scopes text[],
+  origins text[], ips text[]) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys; raw text; sc text[]; kd text := coalesce(nullif(trim(key_kind), ''), 'secret'); md text := coalesce(nullif(trim(key_mode), ''), 'live');
+  og text[]; ip cidr[];
+begin
+  perform api_need_admin(ws);
+  if coalesce(trim(key_name), '') = '' or length(trim(key_name)) > 60 then raise exception 'Give the key a name (up to 60 letters), like "Website shop".'; end if;
+  if kd not in ('secret', 'widget') then raise exception 'A key is a secret key or a widget key.'; end if;
+  if md not in ('live', 'test') then raise exception 'A key is live or test.'; end if;
+  select coalesce(array_agg(distinct s order by s), '{}') into sc from unnest(coalesce(key_scopes, '{}')) s;
+  if cardinality(sc) = 0 then raise exception 'Choose what the key may do.'; end if;
+  if not sc <@ api_scopes() then raise exception 'Unknown permission: %.', (select string_agg(s, ', ') from unnest(sc) s where not s = any (api_scopes())); end if;
+  og := api_clean_origins(origins, md);
+  ip := api_clean_ips(ips);
+  if kd = 'widget' then
+    if not sc <@ api_widget_scopes() then
+      raise exception 'A widget key is seen by everyone visiting the website, so it can only read open times and send bookings and enquiries.';
+    end if;
+    if cardinality(og) = 0 then raise exception 'Add the website address the widget is on (like https://www.example.com).'; end if;
+  end if;
+  if (select count(*) from api_keys where workspace_id = ws and revoked_at is null) >= 25 then
+    raise exception 'A business can have up to 25 keys. Revoke one you don''t use first.';
+  end if;
+  raw := 'rk_' || case when kd = 'widget' then 'pub_' else '' end || md || '_' || api_random_hex(48);
+  insert into api_keys (workspace_id, name, kind, mode, scopes, prefix, key_hash, allowed_origins, allowed_ips, created_by)
+    values (ws, trim(key_name), kd, md, sc, left(raw, length(raw) - 40), encode(sha256(convert_to(raw, 'UTF8')), 'hex'), og, ip, auth.uid())
+    returning * into k;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_key.create',
+    jsonb_build_object('id', k.id, 'name', k.name, 'kind', k.kind, 'mode', k.mode, 'scopes', k.scopes, 'prefix', k.prefix,
+      'allowed_origins', k.allowed_origins, 'allowed_ips', k.allowed_ips::text[]));
+  return (api_key_json(k)::jsonb || jsonb_build_object('key', raw))::json;
+end $$;
+
+create or replace function public.api_keys_list(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_admin(ws);
+  return (select coalesce(json_agg(api_key_json(k) order by k.revoked_at is not null, k.created_at desc), '[]') from api_keys k where k.workspace_id = ws);
+end $$;
+
+create or replace function public.api_key_revoke(ws uuid, key_id uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys;
+begin
+  perform api_need_admin(ws);
+  update api_keys set revoked_at = now(), revoked_by = auth.uid() where id = key_id and workspace_id = ws and revoked_at is null returning * into k;
+  if k.id is null then raise exception 'That key isn''t there, or it''s already revoked.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_key.revoke', jsonb_build_object('id', k.id, 'name', k.name, 'prefix', k.prefix));
+  return api_key_json(k);
+end $$;
+
+create or replace function public.api_key_rename(ws uuid, key_id uuid, key_name text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys; was text;
+begin
+  perform api_need_admin(ws);
+  if coalesce(trim(key_name), '') = '' or length(trim(key_name)) > 60 then raise exception 'Give the key a name (up to 60 letters).'; end if;
+  select name into was from api_keys where id = key_id and workspace_id = ws;
+  update api_keys set name = trim(key_name) where id = key_id and workspace_id = ws returning * into k;
+  if k.id is null then raise exception 'That key isn''t there.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_key.rename', jsonb_build_object('id', k.id, 'name', jsonb_build_object('was', was, 'now', k.name)));
+  return api_key_json(k);
+end $$;
+
+-- Which websites (browsers) and internet addresses may use a key. Widget keys always keep at least one website.
+create or replace function public.api_key_set_access(ws uuid, key_id uuid, origins text[], ips text[]) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys; og text[]; ip cidr[];
+begin
+  perform api_need_admin(ws);
+  select * into k from api_keys where id = key_id and workspace_id = ws and revoked_at is null;
+  if k.id is null then raise exception 'That key isn''t there, or it''s revoked.'; end if;
+  og := api_clean_origins(origins, k.mode); ip := api_clean_ips(ips);
+  if k.kind = 'widget' and cardinality(og) = 0 then raise exception 'A widget key needs the website address it''s on.'; end if;
+  update api_keys set allowed_origins = og, allowed_ips = ip where id = k.id returning * into k;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_key.access',
+    jsonb_build_object('id', k.id, 'name', k.name, 'allowed_origins', og, 'allowed_ips', ip::text[]));
+  return api_key_json(k);
+end $$;
+
+-- ---------------------------------------------------------------- the request log (30 days) and rate limits
+
+create table if not exists public.api_rate (bucket text primary key, n int not null default 0, expires_at timestamptz not null);
+create index if not exists api_rate_expires on public.api_rate (expires_at);
+alter table public.api_rate enable row level security;
+revoke all on public.api_rate from public, anon, authenticated;
+
+-- One more request on a counter; returns the count so far in this window.
+create or replace function public.api_rate_hit(b text, ttl interval) returns int
+  language sql security definer set search_path = public as $$
+  insert into api_rate (bucket, n, expires_at) values (b, 1, now() + ttl)
+  on conflict (bucket) do update set n = api_rate.n + 1 returning n
+$$;
+
+-- The Edge Function's first call on every request (service role only): the key from its SHA-256 hash, checks the
+-- internet address against its list, and counts the request (per key per minute, per workspace per day, and for
+-- widget keys per visitor address per minute). Limits: HQ settings api.key_per_minute (120), api.widget_per_minute
+-- (60), api.widget_ip_per_minute (20), api.workspace_per_day (20000).
+create or replace function public.api_auth(key_hash text, ip text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys; wst text; minute bigint := floor(extract(epoch from now()) / 60); lim int; n int; nd int; dl int; ni int; il int;
+  addr inet;
+begin
+  if coalesce(key_hash, '') !~ '^[0-9a-f]{64}$' then return api_err('invalid_key', 'That API key isn''t right.'); end if;
+  select * into k from api_keys a where a.key_hash = api_auth.key_hash;
+  if k.id is null then return api_err('invalid_key', 'That API key isn''t right.'); end if;
+  if k.revoked_at is not null then return api_err('key_revoked', 'That API key was revoked. Ask the business for a new one.'); end if;
+  select status into wst from workspaces where id = k.workspace_id;
+  if wst is distinct from 'active' then return api_err('business_closed', api_gate_message('business_closed')); end if;
+  begin addr := nullif(ip, '')::inet; exception when others then addr := null; end;
+  if cardinality(k.allowed_ips) > 0 and (addr is null or not exists (select 1 from unnest(k.allowed_ips) c where addr <<= c)) then
+    return api_err('ip_not_allowed', 'This key can''t be used from this internet address.');
+  end if;
+  lim := hq_setting_num(case when k.kind = 'widget' then 'api.widget_per_minute' else 'api.key_per_minute' end, case when k.kind = 'widget' then 60 else 120 end)::int;
+  dl := hq_setting_num('api.workspace_per_day', 20000)::int;
+  n := api_rate_hit('k:' || k.id || ':' || minute, interval '2 minutes');
+  nd := api_rate_hit('w:' || k.workspace_id || ':' || current_date, interval '2 days');
+  if k.kind = 'widget' and addr is not null then
+    il := hq_setting_num('api.widget_ip_per_minute', 20)::int;
+    ni := api_rate_hit('i:' || k.id || ':' || api_ip_trunc(host(addr)) || ':' || minute, interval '2 minutes');
+    if ni > il then
+      return (api_err('rate_limited', 'Too many requests from here. Wait a minute and try again.')::jsonb
+        || jsonb_build_object('retry_after', 60 - extract(epoch from now())::int % 60, 'key_id', k.id, 'workspace_id', k.workspace_id))::json;
+    end if;
+  end if;
+  if n > lim then
+    return (api_err('rate_limited', 'Too many requests with this key. Wait a minute and try again.')::jsonb
+      || jsonb_build_object('retry_after', 60 - extract(epoch from now())::int % 60, 'key_id', k.id, 'workspace_id', k.workspace_id))::json;
+  end if;
+  if nd > dl then
+    return (api_err('daily_limit', 'This business has reached its daily API limit. It resets at midnight UTC.')::jsonb
+      || jsonb_build_object('retry_after', extract(epoch from (date_trunc('day', now()) + interval '1 day' - now()))::int, 'key_id', k.id, 'workspace_id', k.workspace_id))::json;
+  end if;
+  if k.last_used_at is null or k.last_used_at < now() - interval '1 minute' then update api_keys set last_used_at = now() where id = k.id; end if;
+  return json_build_object('key_id', k.id, 'workspace_id', k.workspace_id, 'kind', k.kind, 'mode', k.mode, 'scopes', k.scopes,
+    'allowed_origins', k.allowed_origins, 'name', k.name,
+    'rate', json_build_object('limit', lim, 'remaining', greatest(lim - n, 0), 'reset', 60 - extract(epoch from now())::int % 60));
+end $$;
+
+-- The Edge Function's last call (service role): one line in the request log. The address is truncated here too.
+create or replace function public.api_log_request(key_id uuid, method text, path text, status int, ms int, ip text, code text) returns void
+  language sql security definer set search_path = public as $$
+  insert into api_requests (workspace_id, key_id, method, path, status, ms, ip, code)
+  select k.workspace_id, k.id, left(upper(api_log_request.method), 10), left(regexp_replace(coalesce(api_log_request.path, ''), '[?#].*$', ''), 120),
+    api_log_request.status, greatest(api_log_request.ms, 0), api_ip_trunc(api_log_request.ip), left(api_log_request.code, 60)
+  from api_keys k where k.id = api_log_request.key_id
+$$;
+
+-- Owners and admins: their own business's request log (newest first). Optional key; before = an id for the next page.
+create or replace function public.api_requests_list(ws uuid, key_id uuid, max_rows int, before_id bigint) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_admin(ws);
+  return (select coalesce(json_agg(json_build_object('id', r.id, 'key_id', r.key_id, 'key_name', k.name, 'method', r.method, 'path', r.path,
+      'status', r.status, 'ms', r.ms, 'ip', r.ip, 'code', r.code, 'at', r.at) order by r.id desc), '[]')
+    from (select * from api_requests r where r.workspace_id = ws and (api_requests_list.key_id is null or r.key_id = api_requests_list.key_id)
+            and (before_id is null or r.id < before_id) order by r.id desc limit least(greatest(coalesce(max_rows, 50), 1), 200)) r
+    left join api_keys k on k.id = r.key_id);
+end $$;
+
+-- ---------------------------------------------------------------- the post box (what websites send, until a PC takes it)
+create table if not exists public.api_inbox (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  kind text not null check (kind in ('booking', 'order', 'enquiry', 'customer', 'quote_accept', 'invoice_payment')),
+  mode text not null default 'live' check (mode in ('live', 'test')),     -- test: sent with a test key (desktop shows it as a test)
+  payload jsonb not null check (jsonb_typeof(payload) = 'object' and octet_length(payload::text) <= 65536),
+  key_id uuid references public.api_keys(id) on delete set null,
+  source text not null default 'api' check (source ~ '^[a-z0-9_.:-]{1,40}$'),   -- api, widget (or a connector's name later)
+  idempotency_key text check (length(idempotency_key) between 1 and 100),
+  body_hash text check (body_hash ~ '^[0-9a-f]{64}$'),
+  status text not null default 'waiting' check (status in ('waiting', 'taken', 'done', 'failed', 'rejected')),
+  attempts int not null default 0,
+  available_at timestamptz not null default now(),   -- when it can next be taken (after a failed try: later)
+  taken_by uuid references public.devices(id) on delete set null,
+  taken_at timestamptz,
+  error text check (length(error) <= 500),            -- the PC's reason (for owners and admins; never shown to the website)
+  result jsonb,                                       -- {reference, state, message}: what the website may see
+  created_at timestamptz not null default clock_timestamp(),   -- (in order, even several in one go)
+  updated_at timestamptz not null default now(),
+  done_at timestamptz
+);
+create unique index if not exists api_inbox_idem on public.api_inbox (workspace_id, key_id, idempotency_key) where idempotency_key is not null;
+create index if not exists api_inbox_queue on public.api_inbox (workspace_id, available_at) where status in ('waiting', 'taken');
+create index if not exists api_inbox_finished on public.api_inbox (updated_at) where status in ('done', 'failed', 'rejected');
+create index if not exists api_inbox_ws on public.api_inbox (workspace_id, created_at desc);
+alter table public.api_inbox enable row level security;
+revoke all on public.api_inbox from public, anon, authenticated;
+
+-- ---------------------------------------------------------------- published data (pushed by the PCs, read by the API)
+create table if not exists public.api_catalog (
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  sku text not null check (sku ~ '^[A-Za-z0-9._/-]{1,64}$'),
+  type text not null default 'product' check (type in ('product', 'service')),
+  name text not null check (length(trim(name)) between 1 and 200),
+  description text check (length(description) <= 2000),
+  category text check (length(category) <= 80),
+  price numeric(14, 4) check (price >= 0),
+  currency text check (currency ~ '^[A-Z]{3}$'),
+  tax_rate numeric(7, 3) check (tax_rate between 0 and 100),
+  tax_included boolean not null default true,
+  unit text check (length(unit) <= 20),
+  duration_minutes int check (duration_minutes between 1 and 1440),   -- services: how long a booking takes
+  active boolean not null default true,
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, sku)
+);
+create table if not exists public.api_stock (
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  sku text not null check (sku ~ '^[A-Za-z0-9._/-]{1,64}$'),
+  quantity numeric(14, 3) not null,
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, sku)
+);
+create table if not exists public.api_booking_settings (
+  workspace_id uuid primary key references public.workspaces(id) on delete cascade,
+  timezone text not null default 'UTC' check (length(timezone) <= 60),
+  slot_minutes int not null default 15 check (slot_minutes between 5 and 240),         -- start times every … minutes
+  min_notice_minutes int not null default 60 check (min_notice_minutes between 0 and 43200),
+  days_ahead int not null default 30 check (days_ahead between 1 and 365),
+  updated_at timestamptz not null default now()
+);
+create table if not exists public.api_staff (
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  ref text not null check (ref ~ '^[A-Za-z0-9._/-]{1,64}$'),
+  name text not null check (length(trim(name)) between 1 and 60),     -- as customers see it (e.g. a first name)
+  services text[] not null default '{}',                              -- service SKUs they do (empty: all)
+  active boolean not null default true,
+  updated_at timestamptz not null default now(),
+  primary key (workspace_id, ref)
+);
+-- Free time that can be booked: a window per staff member (or for the business: staff_ref null, e.g. tables).
+create table if not exists public.api_open_times (
+  id bigint generated always as identity primary key,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  staff_ref text check (staff_ref ~ '^[A-Za-z0-9._/-]{1,64}$'),
+  starts_at timestamptz not null,
+  ends_at timestamptz not null,
+  capacity int not null default 1 check (capacity between 1 and 1000),   -- e.g. seats or people at once
+  check (ends_at > starts_at and ends_at - starts_at <= interval '24 hours')
+);
+create index if not exists api_open_times_ws on public.api_open_times (workspace_id, starts_at);
+create table if not exists public.api_published (       -- when each kind was last pushed
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  what text not null check (what in ('catalog', 'stock', 'availability')),
+  updated_at timestamptz not null default now(),
+  device_id uuid,
+  primary key (workspace_id, what)
+);
+alter table public.api_catalog enable row level security;
+alter table public.api_stock enable row level security;
+alter table public.api_booking_settings enable row level security;
+alter table public.api_staff enable row level security;
+alter table public.api_open_times enable row level security;
+alter table public.api_published enable row level security;
+revoke all on public.api_catalog, public.api_stock, public.api_booking_settings, public.api_staff, public.api_open_times,
+  public.api_published from public, anon, authenticated;
+
+-- ---------------------------------------------------------------- webhooks (telling the business's own systems)
+create table if not exists public.api_webhooks (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  url text not null check (length(url) <= 500 and url ~ '^https://'),
+  events text[] not null,
+  mode text not null default 'live' check (mode in ('live', 'test')),   -- test endpoints get what test keys send
+  secret text not null check (secret ~ '^whsec_[0-9a-f]{48}$'),           -- for the HMAC signature; shown once
+  description text check (length(description) <= 120),
+  active boolean not null default true,
+  disabled_reason text check (length(disabled_reason) <= 200),
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  last_success_at timestamptz,
+  last_failure_at timestamptz,
+  failing_since timestamptz
+);
+create index if not exists api_webhooks_ws on public.api_webhooks (workspace_id);
+create table if not exists public.api_webhook_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  webhook_id uuid not null references public.api_webhooks(id) on delete cascade,
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  event text not null,
+  payload jsonb not null,                       -- the body that's sent: {id, type, created_at, test, data}
+  status text not null default 'pending' check (status in ('pending', 'delivering', 'delivered', 'failed')),
+  attempts int not null default 0,
+  next_at timestamptz not null default now(),
+  locked_until timestamptz,
+  last_status int,
+  last_error text check (length(last_error) <= 300),
+  created_at timestamptz not null default now(),
+  delivered_at timestamptz
+);
+create index if not exists api_deliveries_due on public.api_webhook_deliveries (next_at) where status in ('pending', 'delivering');
+create index if not exists api_deliveries_hook on public.api_webhook_deliveries (webhook_id, created_at desc);
+create index if not exists api_deliveries_old on public.api_webhook_deliveries (created_at);
+alter table public.api_webhooks enable row level security;
+alter table public.api_webhook_deliveries enable row level security;
+revoke all on public.api_webhooks, public.api_webhook_deliveries from public, anon, authenticated;
+
+-- Only real public https addresses (no localhost, no internal names, no bare IP addresses).
+create or replace function public.api_clean_url(u text) returns text language plpgsql immutable as $$
+declare host text;
+begin
+  u := trim(coalesce(u, ''));
+  if length(u) > 500 or u !~ '^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^[:space:]]*)?$' then
+    raise exception 'The address must start with https:// (like https://example.com/riyeser-webhook).';
+  end if;
+  host := lower(substring(u from '^https://([A-Za-z0-9.-]+)'));
+  if host ~ '^[0-9.]+$' or host !~ '\.' or host ~ '(^|\.)(localhost|local|internal|lan|home|corp|intranet)$' or host ~ '\.$' then
+    raise exception 'Use the public web address of your system (not localhost, an internal name or a bare IP address).';
+  end if;
+  return u;
+end $$;
+
+-- Queue an event for the business's matching webhooks (same mode). Returns how many were queued.
+create or replace function public.api_queue_event(ws uuid, ev_mode text, ev text, data jsonb) returns int
+  language plpgsql security definer set search_path = public as $$
+declare eid uuid := gen_random_uuid(); n int;
+begin
+  insert into api_webhook_deliveries (webhook_id, workspace_id, event, payload)
+    select h.id, ws, ev, jsonb_build_object('id', eid, 'type', ev, 'created_at', now(), 'test', ev_mode = 'test', 'data', coalesce(data, '{}'::jsonb))
+    from api_webhooks h where h.workspace_id = ws and h.active and h.mode = ev_mode and ev = any (h.events);
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+create or replace function public.api_webhook_json(h public.api_webhooks) returns json language sql stable security definer set search_path = public as $$
+  select json_build_object('id', h.id, 'url', h.url, 'events', h.events, 'mode', h.mode, 'description', h.description, 'active', h.active,
+    'disabled_reason', h.disabled_reason, 'secret_hint', 'whsec_…' || right(h.secret, 4), 'created_at', h.created_at,
+    'last_success_at', h.last_success_at, 'last_failure_at', h.last_failure_at, 'failing_since', h.failing_since,
+    'pending', (select count(*) from api_webhook_deliveries d where d.webhook_id = h.id and d.status in ('pending', 'delivering')))
+$$;
+create or replace function public.api_clean_events(evs text[]) returns text[] language plpgsql immutable as $$
+declare outv text[];
+begin
+  select coalesce(array_agg(distinct e order by e), '{}') into outv from unnest(coalesce(evs, '{}')) e;
+  if cardinality(outv) = 0 then raise exception 'Choose at least one event.'; end if;
+  if not outv <@ api_events() then raise exception 'Unknown event: %.', (select string_agg(e, ', ') from unnest(outv) e where not e = any (api_events())); end if;
+  return outv;
+end $$;
+
+-- Make a webhook. Returns its signing secret ONCE (field "secret").
+create or replace function public.api_webhook_create(ws uuid, url text, events text[], hook_mode text, description text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare h api_webhooks; md text := coalesce(nullif(trim(hook_mode), ''), 'live');
+begin
+  perform api_need_admin(ws);
+  if md not in ('live', 'test') then raise exception 'A webhook is live or test.'; end if;
+  if (select count(*) from api_webhooks where workspace_id = ws) >= 10 then raise exception 'A business can have up to 10 webhooks.'; end if;
+  insert into api_webhooks (workspace_id, url, events, mode, secret, description, created_by)
+    values (ws, api_clean_url(url), api_clean_events(events), md, 'whsec_' || api_random_hex(48), nullif(left(trim(coalesce(description, '')), 120), ''), auth.uid())
+    returning * into h;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_webhook.create', jsonb_build_object('id', h.id, 'url', h.url, 'events', h.events, 'mode', h.mode));
+  return (api_webhook_json(h)::jsonb || jsonb_build_object('secret', h.secret))::json;
+end $$;
+create or replace function public.api_webhooks_list(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_admin(ws);
+  return (select coalesce(json_agg(api_webhook_json(h) order by h.created_at), '[]') from api_webhooks h where h.workspace_id = ws);
+end $$;
+-- Change the address, events or on/off (null leaves it as it is). Turning it back on clears "failing".
+create or replace function public.api_webhook_update(ws uuid, hook_id uuid, url text, events text[], active boolean) returns json
+  language plpgsql security definer set search_path = public as $$
+declare h api_webhooks;
+begin
+  perform api_need_admin(ws);
+  update api_webhooks w set url = case when nullif(trim(coalesce(api_webhook_update.url, '')), '') is null then w.url else api_clean_url(api_webhook_update.url) end,
+      events = case when api_webhook_update.events is null then w.events else api_clean_events(api_webhook_update.events) end,
+      active = coalesce(api_webhook_update.active, w.active),
+      disabled_reason = case when api_webhook_update.active then null else w.disabled_reason end,
+      failing_since = case when api_webhook_update.active then null else w.failing_since end
+    where w.id = hook_id and w.workspace_id = ws returning * into h;
+  if h.id is null then raise exception 'That webhook isn''t there.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_webhook.update', jsonb_build_object('id', h.id, 'url', h.url, 'events', h.events, 'active', h.active));
+  return api_webhook_json(h);
+end $$;
+create or replace function public.api_webhook_rotate(ws uuid, hook_id uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare h api_webhooks;
+begin
+  perform api_need_admin(ws);
+  update api_webhooks set secret = 'whsec_' || api_random_hex(48) where id = hook_id and workspace_id = ws returning * into h;
+  if h.id is null then raise exception 'That webhook isn''t there.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_webhook.rotate', jsonb_build_object('id', h.id, 'url', h.url));
+  return (api_webhook_json(h)::jsonb || jsonb_build_object('secret', h.secret))::json;
+end $$;
+create or replace function public.api_webhook_delete(ws uuid, hook_id uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare h api_webhooks;
+begin
+  perform api_need_admin(ws);
+  delete from api_webhooks where id = hook_id and workspace_id = ws returning * into h;
+  if h.id is null then raise exception 'That webhook isn''t there.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_webhook.delete', jsonb_build_object('id', h.id, 'url', h.url));
+end $$;
+-- Send a test "ping" to one webhook.
+create or replace function public.api_webhook_ping(ws uuid, hook_id uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare h api_webhooks; eid uuid := gen_random_uuid();
+begin
+  perform api_need_admin(ws);
+  select * into h from api_webhooks where id = hook_id and workspace_id = ws;
+  if h.id is null then raise exception 'That webhook isn''t there.'; end if;
+  insert into api_webhook_deliveries (webhook_id, workspace_id, event, payload)
+    values (h.id, ws, 'ping', jsonb_build_object('id', eid, 'type', 'ping', 'created_at', now(), 'test', h.mode = 'test', 'data', jsonb_build_object('message', 'Hello from Riyeser')));
+  return json_build_object('queued', true, 'event_id', eid);
+end $$;
+create or replace function public.api_webhook_deliveries_list(ws uuid, hook_id uuid, max_rows int) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_admin(ws);
+  return (select coalesce(json_agg(json_build_object('id', d.id, 'event', d.event, 'event_id', d.payload ->> 'id', 'status', d.status, 'attempts', d.attempts,
+      'next_at', case when d.status in ('pending', 'delivering') then d.next_at end, 'last_status', d.last_status, 'last_error', d.last_error,
+      'created_at', d.created_at, 'delivered_at', d.delivered_at) order by d.created_at desc), '[]')
+    from (select * from api_webhook_deliveries d where d.workspace_id = ws and d.webhook_id = hook_id
+          order by d.created_at desc limit least(greatest(coalesce(max_rows, 50), 1), 200)) d);
+end $$;
+
+-- The dispatcher (service role): take up to n deliveries that are due (FOR UPDATE SKIP LOCKED, so two runs never
+-- send the same one), each locked for 2 minutes. Optionally for one business only.
+create or replace function public.api_webhooks_due(max_n int, only_ws uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare r json;
+begin
+  with due as (
+    select d.id from api_webhook_deliveries d join api_webhooks h on h.id = d.webhook_id and h.active
+    where ((d.status = 'pending' and d.next_at <= now()) or (d.status = 'delivering' and d.locked_until < now()))
+      and (only_ws is null or d.workspace_id = only_ws)
+    order by d.next_at limit least(greatest(coalesce(max_n, 20), 1), 100)
+    for update of d skip locked),
+  t as (update api_webhook_deliveries d set status = 'delivering', locked_until = now() + interval '2 minutes', attempts = d.attempts + 1
+        from due where d.id = due.id returning d.*)
+  select coalesce(json_agg(json_build_object('id', t.id, 'url', h.url, 'secret', h.secret, 'event', t.event, 'attempt', t.attempts, 'payload', t.payload)), '[]')
+    into r from t join api_webhooks h on h.id = t.webhook_id;
+  return r;
+end $$;
+-- How it went. Retries after 1, 5, 30 minutes, 2, 6, 12 and 24 hours (8 tries), then it's failed. A webhook failing
+-- for 3 days is turned off (owners and admins see why and can turn it back on).
+create or replace function public.api_webhook_result(delivery_id uuid, ok boolean, http_status int, err text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare d api_webhook_deliveries; backoff int[] := array[1, 5, 30, 120, 360, 720, 1440];
+begin
+  select * into d from api_webhook_deliveries where id = delivery_id and status = 'delivering' for update;
+  if d.id is null then return; end if;
+  if ok then
+    update api_webhook_deliveries set status = 'delivered', delivered_at = now(), last_status = http_status, last_error = null, locked_until = null where id = d.id;
+    update api_webhooks set last_success_at = now(), failing_since = null where id = d.webhook_id;
+  else
+    update api_webhook_deliveries set status = case when d.attempts >= 8 then 'failed' else 'pending' end,
+        next_at = now() + make_interval(mins => backoff[least(d.attempts, 7)]), last_status = http_status,
+        last_error = left(regexp_replace(coalesce(err, ''), '[[:cntrl:]]', ' ', 'g'), 300), locked_until = null
+      where id = d.id;
+    update api_webhooks set last_failure_at = now(), failing_since = coalesce(failing_since, now()) where id = d.webhook_id;
+    update api_webhooks set active = false, disabled_reason = 'Turned off: it kept failing for 3 days.'
+      where id = d.webhook_id and active and failing_since < now() - interval '3 days';
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------- free booking times
+-- The start times customers can choose for one service: inside the open times of staff who do it (or the business's
+-- own open times), every slot_minutes from the window's start, the whole service fitting, at least min_notice_minutes
+-- from now and within days_ahead. Times already asked for by a booking still in the post box are left out.
+create or replace function public.api_slots(ws uuid, service text, from_day date, days int, staff text, party int) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare st api_booking_settings; dur int; t0 timestamptz; t1 timestamptz; r json;
+begin
+  select * into st from api_booking_settings where workspace_id = ws;
+  if st.workspace_id is null then st.timezone := 'UTC'; st.slot_minutes := 15; st.min_notice_minutes := 60; st.days_ahead := 30; end if;
+  select duration_minutes into dur from api_catalog c where c.workspace_id = ws and c.sku = service and c.type = 'service' and c.active;
+  if dur is null then return null; end if;
+  t0 := greatest(coalesce(from_day, (now() at time zone st.timezone)::date)::timestamp at time zone st.timezone, now() + make_interval(mins => st.min_notice_minutes));
+  t1 := least(coalesce(from_day, (now() at time zone st.timezone)::date)::timestamp at time zone st.timezone + make_interval(days => least(greatest(coalesce(days, 7), 1), 31)),
+              now() + make_interval(days => st.days_ahead));
+  with w as (
+    select o.* from api_open_times o
+    where o.workspace_id = ws and o.starts_at < t1 and o.ends_at > t0 and o.capacity >= greatest(coalesce(party, 1), 1)
+      and (staff is null or o.staff_ref = staff)
+      and (o.staff_ref is null or exists (select 1 from api_staff s where s.workspace_id = ws and s.ref = o.staff_ref and s.active
+                                           and (cardinality(s.services) = 0 or service = any (s.services))))),
+  s as (
+    select w.staff_ref, w.capacity, g as start_at from w,
+      generate_series(w.starts_at + make_interval(mins => st.slot_minutes) * ceil(greatest(0, extract(epoch from (t0 - w.starts_at))) / (st.slot_minutes * 60)),
+                      w.ends_at - make_interval(mins => dur), make_interval(mins => st.slot_minutes)) g
+    where g < t1),
+  free as (
+    select s.* from s where not exists (
+      select 1 from api_inbox b where b.workspace_id = ws and b.kind = 'booking' and b.mode = 'live' and b.status in ('waiting', 'taken')
+        and s.staff_ref is not null and b.payload ->> 'staff' = s.staff_ref
+        and (b.payload ->> 'start')::timestamptz < s.start_at + make_interval(mins => dur)
+        and coalesce((b.payload ->> 'end')::timestamptz, (b.payload ->> 'start')::timestamptz + make_interval(mins => dur)) > s.start_at))
+  select coalesce(json_agg(json_build_object('start', start_at, 'end', start_at + make_interval(mins => dur),
+      'local_start', to_char(start_at at time zone st.timezone, 'YYYY-MM-DD"T"HH24:MI'), 'staff', refs, 'capacity', cap) order by start_at), '[]')
+    into r
+    from (select start_at, array_remove(array_agg(distinct staff_ref), null) as refs, max(capacity) as cap from free group by start_at) x;
+  return json_build_object('timezone', st.timezone, 'service', service, 'duration_minutes', dur, 'from', t0, 'to', t1, 'slots', r);
+end $$;
+
+-- ---------------------------------------------------------------- what the Edge Function asks (service role only)
+-- Something a website sent. The function has already checked the key, its permission, the shape of the payload and
+-- the rate; this checks the key, permission and licence again, the essentials of the payload, and the idempotency key:
+-- the same key + Idempotency-Key with the same body returns the first answer ("replay"), with a different body an error.
+create or replace function public.api_submit(key_id uuid, kind text, payload jsonb, idempotency_key text, body_hash text, source text) returns json
+  language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare k api_keys; r api_inbox; g text; p jsonb := payload; dur int; ev text; idem text := nullif(trim(coalesce(idempotency_key, '')), '');
+begin
+  select * into k from api_keys a where a.id = api_submit.key_id and a.revoked_at is null;
+  if k.id is null then return api_err('invalid_key', 'That API key isn''t right.'); end if;
+  if api_kind_scope(kind) is null then return api_err('not_found', 'Unknown kind.'); end if;
+  if not api_kind_scope(kind) = any (k.scopes) then
+    return api_err('missing_scope', 'This key isn''t allowed to do that (it needs ' || api_kind_scope(kind) || ').');
+  end if;
+  g := api_gate(k.workspace_id, api_kind_scope(kind));
+  if g is not null then return api_err(g, api_gate_message(g)); end if;
+  if jsonb_typeof(p) is distinct from 'object' then return api_err('invalid_payload', 'Send a JSON object.'); end if;
+  if octet_length(p::text) > 65536 then return api_err('payload_too_large', 'That''s too big (64 KB at most).'); end if;
+  if idem is not null and (length(idem) > 100 or idem !~ '^[A-Za-z0-9._:-]+$') then
+    return api_err('invalid_idempotency_key', 'Idempotency-Key: up to 100 letters, digits and . _ : -');
+  end if;
+  -- the essentials (the Edge Function checks the whole shape)
+  if kind in ('booking', 'order', 'enquiry') and coalesce(trim(p #>> '{customer,name}'), '') = '' then return api_err('invalid_payload', 'customer.name is needed.'); end if;
+  if kind = 'customer' and coalesce(trim(p ->> 'name'), '') = '' then return api_err('invalid_payload', 'name is needed.'); end if;
+  if kind = 'booking' then
+    if coalesce(p ->> 'service', '') = '' then return api_err('invalid_payload', 'service is needed.'); end if;
+    begin perform (p ->> 'start')::timestamptz; exception when others then return api_err('invalid_payload', 'start must be a date and time.'); end;
+    if p ->> 'start' is null then return api_err('invalid_payload', 'start is needed.'); end if;
+    if p ? 'end' then begin perform (p ->> 'end')::timestamptz; exception when others then return api_err('invalid_payload', 'end must be a date and time.'); end; end if;
+  end if;
+  if kind = 'order' and (jsonb_typeof(p -> 'items') is distinct from 'array' or jsonb_array_length(p -> 'items') = 0) then return api_err('invalid_payload', 'items is needed.'); end if;
+  if kind = 'enquiry' and coalesce(trim(p ->> 'message'), '') = '' then return api_err('invalid_payload', 'message is needed.'); end if;
+  if kind = 'quote_accept' and (coalesce(p ->> 'quote_ref', '') = '' or coalesce(trim(p #>> '{accepted_by,name}'), '') = '') then
+    return api_err('invalid_payload', 'The quote''s reference and accepted_by.name are needed.'); end if;
+  if kind = 'invoice_payment' and (coalesce(p ->> 'invoice_ref', '') = '' or jsonb_typeof(p -> 'amount') is distinct from 'number' or (p ->> 'amount')::numeric <= 0) then
+    return api_err('invalid_payload', 'The invoice''s reference and an amount above 0 are needed.'); end if;
+  -- a replay?
+  if idem is not null then
+    select * into r from api_inbox i where i.workspace_id = k.workspace_id and i.key_id = k.id and i.idempotency_key = idem;
+    if r.id is not null then
+      if r.body_hash is distinct from api_submit.body_hash then
+        return api_err('idempotency_conflict', 'This Idempotency-Key was already used with a different request.');
+      end if;
+      return json_build_object('id', r.id, 'kind', r.kind, 'status', r.status, 'test', r.mode = 'test', 'created_at', r.created_at, 'replay', true);
+    end if;
+  end if;
+  if kind = 'booking' then
+    select duration_minutes into dur from api_catalog c where c.workspace_id = k.workspace_id and c.sku = p ->> 'service' and c.type = 'service';
+    if not p ? 'end' and dur is not null then
+      p := p || jsonb_build_object('end', (p ->> 'start')::timestamptz + make_interval(mins => dur));
+    end if;
+    -- a widget (anyone on the web) can only ask for a time that's open
+    if k.kind = 'widget' and not exists (
+        select 1 from json_array_elements(api_slots(k.workspace_id, p ->> 'service', ((p ->> 'start')::timestamptz at time zone
+          coalesce((select timezone from api_booking_settings where workspace_id = k.workspace_id), 'UTC'))::date, 1, p ->> 'staff',
+          coalesce((p ->> 'party_size')::int, 1)) -> 'slots') s
+        where (s ->> 'start')::timestamptz = (p ->> 'start')::timestamptz) then
+      return api_err('slot_not_available', 'That time isn''t free any more. Choose another time.');
+    end if;
+  end if;
+  insert into api_inbox (workspace_id, kind, mode, payload, key_id, source, idempotency_key, body_hash)
+    values (k.workspace_id, api_submit.kind, k.mode, p, k.id, case when k.kind = 'widget' then 'widget' else coalesce(nullif(api_submit.source, ''), 'api') end, idem, api_submit.body_hash)
+    on conflict (workspace_id, key_id, idempotency_key) where idempotency_key is not null do nothing
+    returning * into r;
+  if r.id is null then   -- the same Idempotency-Key at the same moment: the other one won
+    select * into r from api_inbox i where i.workspace_id = k.workspace_id and i.key_id = k.id and i.idempotency_key = idem;
+    if r.body_hash is distinct from api_submit.body_hash then return api_err('idempotency_conflict', 'This Idempotency-Key was already used with a different request.'); end if;
+    return json_build_object('id', r.id, 'kind', r.kind, 'status', r.status, 'test', r.mode = 'test', 'created_at', r.created_at, 'replay', true);
+  end if;
+  ev := case kind when 'booking' then 'booking.received' when 'order' then 'order.received' when 'enquiry' then 'enquiry.received'
+    when 'quote_accept' then 'quote.accepted' when 'invoice_payment' then 'payment.received' end;
+  if ev is not null then
+    perform api_queue_event(k.workspace_id, k.mode, ev, jsonb_build_object('event_id', r.id, 'kind', r.kind, 'source', r.source, 'payload', r.payload));
+  end if;
+  return json_build_object('id', r.id, 'kind', r.kind, 'status', r.status, 'test', r.mode = 'test', 'created_at', r.created_at, 'replay', false);
+end $$;
+
+-- What a website reads: catalog, prices, stock, availability, slots or one event. params is a JSON object.
+create or replace function public.api_read(key_id uuid, what text, params jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys; sc text; g text; ws uuid; lim int; aft text; skus text[]; r json; nxt text; e api_inbox; typ text; since timestamptz;
+  q jsonb := coalesce(params, '{}'::jsonb);
+begin
+  select * into k from api_keys a where a.id = api_read.key_id and a.revoked_at is null;
+  if k.id is null then return api_err('invalid_key', 'That API key isn''t right.'); end if;
+  ws := k.workspace_id;
+  sc := case what when 'catalog' then 'catalog:read' when 'prices' then 'prices:read' when 'stock' then 'stock:read'
+    when 'availability' then 'availability:read' when 'slots' then 'availability:read' when 'event' then null else 'unknown' end;
+  if sc = 'unknown' then return api_err('not_found', 'There''s nothing here.'); end if;
+  if sc is not null and not sc = any (k.scopes) then return api_err('missing_scope', 'This key isn''t allowed to do that (it needs ' || sc || ').'); end if;
+  g := api_gate(ws, coalesce(sc, 'events:read'));
+  if g is not null then return api_err(g, api_gate_message(g)); end if;
+  lim := least(greatest(coalesce((q ->> 'limit')::int, 100), 1), 500);
+  aft := nullif(q ->> 'after', '');
+  if jsonb_typeof(q -> 'skus') = 'array' then
+    select array_agg(x) into skus from (select jsonb_array_elements_text(q -> 'skus') x limit 200) y;
+  end if;
+  if what = 'event' then
+    begin select * into e from api_inbox i where i.id = (q ->> 'id')::uuid and i.workspace_id = ws; exception when others then e := null; end;
+    -- a widget key only sees what it sent itself
+    if e.id is null or (k.kind = 'widget' and e.key_id is distinct from k.id) then return api_err('not_found', 'There''s no event with that id.'); end if;
+    return json_build_object('id', e.id, 'kind', e.kind, 'status', e.status, 'test', e.mode = 'test', 'created_at', e.created_at,
+      'updated_at', e.updated_at, 'result', coalesce(e.result, '{}'::jsonb));
+  elsif what in ('catalog', 'prices') then
+    typ := nullif(q ->> 'type', '');
+    begin since := (q ->> 'updated_since')::timestamptz; exception when others then return api_err('invalid_request', 'updated_since must be a date and time.'); end;
+    select json_agg(case when what = 'catalog' then json_build_object('sku', c.sku, 'type', c.type, 'name', c.name, 'description', c.description,
+        'category', c.category, 'price', c.price, 'currency', c.currency, 'tax_rate', c.tax_rate, 'tax_included', c.tax_included, 'unit', c.unit,
+        'duration_minutes', c.duration_minutes, 'active', c.active, 'updated_at', c.updated_at)
+      else json_build_object('sku', c.sku, 'name', c.name, 'price', c.price, 'currency', c.currency, 'tax_rate', c.tax_rate, 'tax_included', c.tax_included) end
+      order by c.sku), max(c.sku) into r, nxt
+    from (select * from api_catalog c where c.workspace_id = ws and (aft is null or c.sku > aft) and (skus is null or c.sku = any (skus))
+            and (typ is null or c.type = typ) and (since is null or c.updated_at > since) and (what = 'catalog' or c.active)
+          order by c.sku limit lim + 1) c;
+  elsif what = 'stock' then
+    select json_agg(json_build_object('sku', s.sku, 'quantity', s.quantity, 'in_stock', s.quantity > 0, 'updated_at', s.updated_at) order by s.sku), max(s.sku) into r, nxt
+    from (select * from api_stock s where s.workspace_id = ws and (aft is null or s.sku > aft) and (skus is null or s.sku = any (skus)) order by s.sku limit lim + 1) s;
+  elsif what = 'availability' then
+    return (select json_build_object('timezone', coalesce(b.timezone, 'UTC'), 'slot_minutes', coalesce(b.slot_minutes, 15),
+        'min_notice_minutes', coalesce(b.min_notice_minutes, 60), 'days_ahead', coalesce(b.days_ahead, 30),
+        'updated_at', (select updated_at from api_published p where p.workspace_id = ws and p.what = 'availability'),
+        'services', (select coalesce(json_agg(json_build_object('sku', c.sku, 'name', c.name, 'description', c.description, 'category', c.category,
+            'duration_minutes', c.duration_minutes, 'price', c.price, 'currency', c.currency) order by c.name), '[]')
+          from api_catalog c where c.workspace_id = ws and c.type = 'service' and c.active and c.duration_minutes is not null),
+        'staff', (select coalesce(json_agg(json_build_object('ref', s.ref, 'name', s.name, 'services', s.services) order by s.name), '[]')
+          from api_staff s where s.workspace_id = ws and s.active))
+      from (select 1) one left join api_booking_settings b on b.workspace_id = ws);
+  elsif what = 'slots' then
+    if coalesce(q ->> 'service', '') = '' then return api_err('invalid_request', 'Say which service (service=SKU).'); end if;
+    begin
+      r := api_slots(ws, q ->> 'service', (q ->> 'from')::date, (q ->> 'days')::int, nullif(q ->> 'staff', ''), (q ->> 'party_size')::int);
+    exception when others then return api_err('invalid_request', 'from is a date (YYYY-MM-DD), days and party_size are numbers.'); end;
+    if r is null then return api_err('not_found', 'There''s no bookable service with that SKU.'); end if;
+    return r;
+  end if;
+  -- one page: if there's one more than the limit, there's a next page starting after the last one shown
+  if r is not null and json_array_length(r) > lim then
+    r := (select json_agg(x order by i) from (select x, i from json_array_elements(r) with ordinality t(x, i) where i <= lim) y);
+    nxt := r -> (lim - 1) ->> 'sku';
+  else nxt := null; end if;
+  return json_build_object('items', coalesce(r, '[]'), 'next', nxt,
+    'updated_at', (select updated_at from api_published p where p.workspace_id = ws and p.what = case when api_read.what = 'stock' then 'stock' else 'catalog' end));
+end $$;
+
+-- ---------------------------------------------------------------- for the business's linked PCs (Riyeser desktop)
+-- Take up to max_items from the post box (oldest first; optionally only some kinds). Each is "taken" by this PC for
+-- 10 minutes: a PC that doesn't finish in time (it closed, lost the internet) lets another PC take it again.
+-- FOR UPDATE SKIP LOCKED: two PCs asking at once never get the same one.
+create or replace function public.api_inbox_claim(ws uuid, device uuid, kinds text[], max_items int) returns json
+  language plpgsql security definer set search_path = public as $$
+declare r json;
+begin
+  perform api_need_pc(ws, device);
+  with c as (
+    select i.id from api_inbox i
+    where i.workspace_id = ws and ((i.status = 'waiting' and i.available_at <= now()) or (i.status = 'taken' and i.taken_at < now() - interval '10 minutes'))
+      and (kinds is null or cardinality(kinds) = 0 or i.kind = any (kinds))
+    order by i.created_at, i.id limit least(greatest(coalesce(max_items, 20), 1), 100)
+    for update skip locked),
+  t as (update api_inbox i set status = 'taken', taken_by = device, taken_at = now(), attempts = i.attempts + 1, updated_at = now()
+        from c where i.id = c.id returning i.*)
+  select coalesce(json_agg(json_build_object('id', t.id, 'kind', t.kind, 'test', t.mode = 'test', 'source', t.source,
+      'key_name', (select name from api_keys k where k.id = t.key_id), 'attempts', t.attempts, 'created_at', t.created_at, 'payload', t.payload)
+      order by t.created_at), '[]') into r from t;
+  return r;
+end $$;
+
+-- Clean what the website may see: {reference, state, message}.
+create or replace function public.api_clean_result(res jsonb) returns jsonb language sql immutable as $$
+  select jsonb_strip_nulls(jsonb_build_object(
+    'reference', left(regexp_replace(res ->> 'reference', '[[:cntrl:]<>]', '', 'g'), 60),
+    'state', case when res ->> 'state' ~ '^[a-z_]{1,30}$' then res ->> 'state' end,
+    'message', left(regexp_replace(res ->> 'message', '[[:cntrl:]<>]', '', 'g'), 300)))
+$$;
+-- Filed (in Bookings, POS, Invoices, Accounting): result = {reference: "BK-1042", state: "pending"|"confirmed"|…, message}.
+create or replace function public.api_inbox_done(ws uuid, device uuid, event_id uuid, result jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+declare e api_inbox;
+begin
+  perform api_need_pc(ws, device);
+  update api_inbox set status = 'done', done_at = now(), updated_at = now(), error = null,
+      result = api_clean_result(coalesce(api_inbox_done.result, '{}'::jsonb))
+    where id = event_id and workspace_id = ws and status = 'taken' and taken_by = device returning * into e;
+  if e.id is null then raise exception 'This PC hasn''t taken that one (or it was finished already).'; end if;
+  return json_build_object('id', e.id, 'status', e.status);
+end $$;
+-- Couldn't file it. retry = true: it goes back in the post box (after 1, 2, 4, 8 minutes; after 5 tries it's
+-- "failed"). retry = false: "rejected" (e.g. the time was taken, the quote has expired) with result for the website.
+create or replace function public.api_inbox_fail(ws uuid, device uuid, event_id uuid, reason text, retry boolean, result jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+declare e api_inbox;
+begin
+  perform api_need_pc(ws, device);
+  update api_inbox i set
+      status = case when not coalesce(retry, true) then 'rejected' when i.attempts >= 5 then 'failed' else 'waiting' end,
+      available_at = now() + make_interval(mins => power(2, greatest(i.attempts - 1, 0))::int),
+      error = left(regexp_replace(coalesce(reason, ''), '[[:cntrl:]]', ' ', 'g'), 500), updated_at = now(),
+      done_at = case when not coalesce(retry, true) or i.attempts >= 5 then now() end,
+      taken_by = case when coalesce(retry, true) and i.attempts < 5 then null else i.taken_by end,
+      result = case when api_inbox_fail.result is not null then api_clean_result(api_inbox_fail.result) else i.result end
+    where i.id = event_id and i.workspace_id = ws and i.status = 'taken' and i.taken_by = device returning * into e;
+  if e.id is null then raise exception 'This PC hasn''t taken that one (or it was finished already).'; end if;
+  return json_build_object('id', e.id, 'status', e.status, 'attempts', e.attempts);
+end $$;
+create or replace function public.api_inbox_counts(ws uuid, device uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_pc(ws, device);
+  return (select json_build_object('waiting', count(*) filter (where status = 'waiting'), 'taken', count(*) filter (where status = 'taken'),
+      'failed', count(*) filter (where status = 'failed'), 'test_waiting', count(*) filter (where status = 'waiting' and mode = 'test'))
+    from api_inbox where workspace_id = ws);
+end $$;
+-- Later news about something that came in (or not from the post box at all, without event_id): booking.confirmed,
+-- booking.cancelled, order.ready, order.completed. data: {reference, state, message, ...}; with event_id, the event's
+-- result is updated too, so the website sees it (GET /v1/events/{id}).
+create or replace function public.api_notify(ws uuid, device uuid, event text, event_id uuid, data jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+declare e api_inbox; md text := 'live'; d jsonb := coalesce(data, '{}'::jsonb); n int;
+begin
+  perform api_need_pc(ws, device);
+  if not event = any (api_pc_events()) then raise exception 'Unknown event: %.', left(event, 40); end if;
+  if jsonb_typeof(d) <> 'object' or octet_length(d::text) > 16384 then raise exception 'data must be a JSON object (16 KB at most).'; end if;
+  if event_id is not null then
+    select * into e from api_inbox where id = event_id and workspace_id = ws;
+    if e.id is null then raise exception 'There''s no event with that id.'; end if;
+    if split_part(event, '.', 1) <> e.kind then raise exception 'That event is a %, not a %.', e.kind, split_part(event, '.', 1); end if;
+    md := e.mode;
+    update api_inbox set result = coalesce(result, '{}'::jsonb) || api_clean_result(d || jsonb_build_object('state', coalesce(d ->> 'state', split_part(event, '.', 2)))),
+        updated_at = now() where id = e.id;
+    d := d || jsonb_build_object('event_id', e.id, 'external_reference', e.payload ->> 'reference');
+  end if;
+  n := api_queue_event(ws, md, event, d);
+  return json_build_object('queued', n);
+end $$;
+
+-- Publishing. Each item is checked; ones that don't fit are skipped and listed (sku and why), the rest are saved.
+-- full_sync = true: what isn't in the list is removed (send everything); false: only these are added or changed.
+create or replace function public.api_publish_catalog(ws uuid, device uuid, items jsonb, full_sync boolean) returns json
+  language plpgsql security definer set search_path = public as $$
+declare it jsonb; n int := 0; removed int := 0; skipped jsonb := '[]'; seen text[] := '{}';
+begin
+  perform api_need_pc(ws, device);
+  if jsonb_typeof(items) <> 'array' or jsonb_array_length(items) > 5000 then raise exception 'Send a list of up to 5000 items.'; end if;
+  for it in select * from jsonb_array_elements(items) loop
+    begin
+      insert into api_catalog (workspace_id, sku, type, name, description, category, price, currency, tax_rate, tax_included, unit, duration_minutes, active, updated_at)
+        values (ws, it ->> 'sku', coalesce(it ->> 'type', 'product'), trim(it ->> 'name'), nullif(it ->> 'description', ''), nullif(it ->> 'category', ''),
+          (it ->> 'price')::numeric, upper(nullif(it ->> 'currency', '')), (it ->> 'tax_rate')::numeric, coalesce((it ->> 'tax_included')::boolean, true),
+          nullif(it ->> 'unit', ''), (it ->> 'duration_minutes')::int, coalesce((it ->> 'active')::boolean, true), now())
+      on conflict (workspace_id, sku) do update set type = excluded.type, name = excluded.name, description = excluded.description,
+        category = excluded.category, price = excluded.price, currency = excluded.currency, tax_rate = excluded.tax_rate,
+        tax_included = excluded.tax_included, unit = excluded.unit, duration_minutes = excluded.duration_minutes, active = excluded.active, updated_at = now();
+      n := n + 1; seen := seen || (it ->> 'sku');
+    exception when others then
+      skipped := skipped || jsonb_build_object('sku', left(it ->> 'sku', 64), 'reason', left(sqlerrm, 200));
+    end;
+  end loop;
+  if full_sync then
+    delete from api_catalog where workspace_id = ws and not sku = any (seen);
+    get diagnostics removed = row_count;
+  end if;
+  insert into api_published (workspace_id, what, updated_at, device_id) values (ws, 'catalog', now(), device)
+    on conflict (workspace_id, what) do update set updated_at = now(), device_id = device;
+  return json_build_object('saved', n, 'removed', removed, 'skipped', skipped);
+end $$;
+
+-- Stock: [{sku, quantity}]. What changed is announced as one stock.changed webhook (up to 500 items).
+create or replace function public.api_publish_stock(ws uuid, device uuid, levels jsonb, full_sync boolean) returns json
+  language plpgsql security definer set search_path = public as $$
+declare it jsonb; n int := 0; removed int := 0; skipped jsonb := '[]'; seen text[] := '{}'; changed jsonb := '[]'; was numeric; q numeric;
+begin
+  perform api_need_pc(ws, device);
+  if jsonb_typeof(levels) <> 'array' or jsonb_array_length(levels) > 10000 then raise exception 'Send a list of up to 10000 stock levels.'; end if;
+  for it in select * from jsonb_array_elements(levels) loop
+    begin
+      q := (it ->> 'quantity')::numeric;
+      if q is null then raise exception 'quantity is needed'; end if;
+      select quantity into was from api_stock where workspace_id = ws and sku = it ->> 'sku';
+      insert into api_stock (workspace_id, sku, quantity, updated_at) values (ws, it ->> 'sku', q, now())
+        on conflict (workspace_id, sku) do update set quantity = excluded.quantity, updated_at = now();
+      if was is distinct from q and jsonb_array_length(changed) < 500 then
+        changed := changed || jsonb_build_object('sku', it ->> 'sku', 'quantity', q, 'previous', was);
+      end if;
+      n := n + 1; seen := seen || (it ->> 'sku');
+    exception when others then
+      skipped := skipped || jsonb_build_object('sku', left(it ->> 'sku', 64), 'reason', left(sqlerrm, 200));
+    end;
+  end loop;
+  if full_sync then
+    delete from api_stock where workspace_id = ws and not sku = any (seen);
+    get diagnostics removed = row_count;
+  end if;
+  insert into api_published (workspace_id, what, updated_at, device_id) values (ws, 'stock', now(), device)
+    on conflict (workspace_id, what) do update set updated_at = now(), device_id = device;
+  if jsonb_array_length(changed) > 0 then perform api_queue_event(ws, 'live', 'stock.changed', jsonb_build_object('items', changed)); end if;
+  return json_build_object('saved', n, 'removed', removed, 'skipped', skipped, 'changed', jsonb_array_length(changed));
+end $$;
+
+-- Booking times. settings {timezone, slot_minutes, min_notice_minutes, days_ahead} (null: unchanged);
+-- staff [{ref, name, services, active}] (null: unchanged; a list replaces them all);
+-- open_times [{staff_ref, start, end, capacity}] replace every open time starting in [from_at, to_at).
+create or replace function public.api_publish_availability(ws uuid, device uuid, settings jsonb, staff jsonb, open_times jsonb,
+  from_at timestamptz, to_at timestamptz) returns json
+  language plpgsql security definer set search_path = public as $$
+declare it jsonb; n int := 0; ns int := 0; removed int := 0; skipped jsonb := '[]'; tz text;
+begin
+  perform api_need_pc(ws, device);
+  if settings is not null then
+    if jsonb_typeof(settings) <> 'object' then raise exception 'settings must be an object.'; end if;
+    tz := coalesce(nullif(settings ->> 'timezone', ''), (select timezone from api_booking_settings where workspace_id = ws), 'UTC');
+    if not exists (select 1 from pg_timezone_names where name = tz) then raise exception 'Unknown time zone: %.', left(tz, 60); end if;
+    insert into api_booking_settings (workspace_id, timezone, slot_minutes, min_notice_minutes, days_ahead, updated_at)
+      values (ws, tz, coalesce((settings ->> 'slot_minutes')::int, 15), coalesce((settings ->> 'min_notice_minutes')::int, 60),
+              coalesce((settings ->> 'days_ahead')::int, 30), now())
+      on conflict (workspace_id) do update set timezone = excluded.timezone,
+        slot_minutes = coalesce((settings ->> 'slot_minutes')::int, api_booking_settings.slot_minutes),
+        min_notice_minutes = coalesce((settings ->> 'min_notice_minutes')::int, api_booking_settings.min_notice_minutes),
+        days_ahead = coalesce((settings ->> 'days_ahead')::int, api_booking_settings.days_ahead), updated_at = now();
+  end if;
+  if staff is not null then
+    if jsonb_typeof(staff) <> 'array' or jsonb_array_length(staff) > 500 then raise exception 'staff must be a list (up to 500).'; end if;
+    delete from api_staff where workspace_id = ws;
+    for it in select * from jsonb_array_elements(staff) loop
+      begin
+        insert into api_staff (workspace_id, ref, name, services, active, updated_at)
+          values (ws, it ->> 'ref', trim(it ->> 'name'),
+            coalesce((select array_agg(x) from jsonb_array_elements_text(case when jsonb_typeof(it -> 'services') = 'array' then it -> 'services' else '[]' end) x), '{}'),
+            coalesce((it ->> 'active')::boolean, true), now());
+        ns := ns + 1;
+      exception when others then skipped := skipped || jsonb_build_object('staff', left(it ->> 'ref', 64), 'reason', left(sqlerrm, 200));
+      end;
+    end loop;
+  end if;
+  if open_times is not null then
+    if from_at is null or to_at is null or to_at <= from_at or to_at - from_at > interval '400 days' then
+      raise exception 'Say which time open_times covers (from_at before to_at, up to 400 days).';
+    end if;
+    if jsonb_typeof(open_times) <> 'array' or jsonb_array_length(open_times) > 20000 then raise exception 'open_times must be a list (up to 20000).'; end if;
+    delete from api_open_times where workspace_id = ws and starts_at >= from_at and starts_at < to_at;
+    get diagnostics removed = row_count;
+    for it in select * from jsonb_array_elements(open_times) loop
+      begin
+        if (it ->> 'start')::timestamptz < from_at or (it ->> 'start')::timestamptz >= to_at then raise exception 'outside from_at..to_at'; end if;
+        insert into api_open_times (workspace_id, staff_ref, starts_at, ends_at, capacity)
+          values (ws, nullif(it ->> 'staff_ref', ''), (it ->> 'start')::timestamptz, (it ->> 'end')::timestamptz, coalesce((it ->> 'capacity')::int, 1));
+        n := n + 1;
+      exception when others then skipped := skipped || jsonb_build_object('open_time', it ->> 'start', 'reason', left(sqlerrm, 200));
+      end;
+    end loop;
+  end if;
+  -- old open times aren't needed
+  delete from api_open_times where workspace_id = ws and ends_at < now() - interval '1 day';
+  insert into api_published (workspace_id, what, updated_at, device_id) values (ws, 'availability', now(), device)
+    on conflict (workspace_id, what) do update set updated_at = now(), device_id = device;
+  return json_build_object('open_times_saved', n, 'open_times_removed', removed, 'staff_saved', ns, 'skipped', skipped);
+end $$;
+
+-- ---------------------------------------------------------------- for owners and admins (Management -> Connections)
+create or replace function public.api_overview(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_admin(ws);
+  return json_build_object(
+    'keys', (select json_build_object('active', count(*) filter (where revoked_at is null), 'revoked', count(*) filter (where revoked_at is not null)) from api_keys where workspace_id = ws),
+    'inbox', (select json_build_object('waiting', count(*) filter (where status = 'waiting'), 'taken', count(*) filter (where status = 'taken'),
+        'failed', count(*) filter (where status = 'failed'), 'rejected_7d', count(*) filter (where status = 'rejected' and updated_at > now() - interval '7 days'),
+        'done_7d', count(*) filter (where status = 'done' and done_at > now() - interval '7 days')) from api_inbox where workspace_id = ws),
+    'published', json_build_object(
+        'catalog_items', (select count(*) from api_catalog where workspace_id = ws),
+        'stock_items', (select count(*) from api_stock where workspace_id = ws),
+        'open_times', (select count(*) from api_open_times where workspace_id = ws and ends_at > now()),
+        'staff', (select count(*) from api_staff where workspace_id = ws and active),
+        'catalog_at', (select updated_at from api_published where workspace_id = ws and what = 'catalog'),
+        'stock_at', (select updated_at from api_published where workspace_id = ws and what = 'stock'),
+        'availability_at', (select updated_at from api_published where workspace_id = ws and what = 'availability')),
+    'webhooks', (select json_build_object('active', count(*) filter (where active), 'failing', count(*) filter (where failing_since is not null)) from api_webhooks where workspace_id = ws),
+    'requests_24h', (select count(*) from api_requests where workspace_id = ws and at > now() - interval '24 hours'),
+    'errors_24h', (select count(*) from api_requests where workspace_id = ws and at > now() - interval '24 hours' and status >= 400),
+    'allowed', json_build_object('any', api_gate(ws, 'prices:read') is null, 'bookings', api_gate(ws, 'bookings:write') is null,
+        'orders', api_gate(ws, 'orders:write') is null));
+end $$;
+-- The post box, newest first (status: null for all). Only the customer's name from what was sent.
+create or replace function public.api_inbox_recent(ws uuid, status text, max_rows int) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_admin(ws);
+  return (select coalesce(json_agg(json_build_object('id', i.id, 'kind', i.kind, 'test', i.mode = 'test', 'status', i.status, 'source', i.source,
+      'key_name', (select name from api_keys k where k.id = i.key_id), 'attempts', i.attempts, 'error', i.error, 'result', i.result,
+      'customer_name', coalesce(i.payload #>> '{customer,name}', i.payload ->> 'name', i.payload #>> '{accepted_by,name}', i.payload #>> '{payer,name}'),
+      'taken_by_pc', (select device_name from devices d where d.id = i.taken_by), 'created_at', i.created_at, 'updated_at', i.updated_at) order by i.created_at desc), '[]')
+    from (select * from api_inbox i where i.workspace_id = ws and (api_inbox_recent.status is null or i.status = api_inbox_recent.status)
+          order by i.created_at desc limit least(greatest(coalesce(max_rows, 50), 1), 200)) i);
+end $$;
+-- Try a failed or rejected one again (it goes back in the post box).
+create or replace function public.api_inbox_retry(ws uuid, event_id uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare e api_inbox;
+begin
+  perform api_need_admin(ws);
+  update api_inbox set status = 'waiting', attempts = 0, available_at = now(), taken_by = null, taken_at = null, done_at = null, updated_at = now()
+    where id = event_id and workspace_id = ws and status in ('failed', 'rejected') returning * into e;
+  if e.id is null then raise exception 'Only a failed or rejected one can be tried again.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_inbox.retry', jsonb_build_object('id', e.id, 'kind', e.kind));
+  return json_build_object('id', e.id, 'status', e.status);
+end $$;
+
+-- ---------------------------------------------------------------- tidying up (the dispatcher runs it; safe any time)
+-- Finished post box items: 90 days. Never collected by a PC in 90 days: marked failed (then kept 90 more days).
+-- Request log and webhook deliveries: 30 days. Rate counters: when their window has passed.
+create or replace function public.api_sweep() returns json
+  language plpgsql security definer set search_path = public as $$
+declare a int; b int; c int; d int; e int;
+begin
+  update api_inbox set status = 'failed', error = 'Not collected by a linked PC within 90 days.', updated_at = now(), done_at = now()
+    where status in ('waiting', 'taken') and created_at < now() - interval '90 days';
+  get diagnostics e = row_count;
+  delete from api_inbox where status in ('done', 'failed', 'rejected') and updated_at < now() - interval '90 days';
+  get diagnostics a = row_count;
+  delete from api_requests where at < now() - interval '30 days';
+  get diagnostics b = row_count;
+  delete from api_webhook_deliveries where created_at < now() - interval '30 days' and status in ('delivered', 'failed');
+  get diagnostics c = row_count;
+  delete from api_rate where expires_at < now();
+  get diagnostics d = row_count;
+  return json_build_object('inbox_expired', e, 'inbox_removed', a, 'requests_removed', b, 'deliveries_removed', c, 'rate_removed', d);
+end $$;
+
+-- ---------------------------------------------------------------- who may call what
+revoke all on function public.api_err(text, text), public.api_scopes(), public.api_widget_scopes(), public.api_kind_scope(text), public.api_events(),
+  public.api_pc_events(), public.api_ip_trunc(text), public.api_need_admin(uuid), public.api_pc_ok(uuid, uuid), public.api_need_pc(uuid, uuid),
+  public.api_mod_on(uuid, text), public.api_gate(uuid, text), public.api_gate_message(text), public.api_random_hex(int),
+  public.api_clean_origins(text[], text), public.api_clean_ips(text[]), public.api_key_json(public.api_keys),
+  public.api_key_create(uuid, text, text, text, text[], text[], text[]), public.api_keys_list(uuid), public.api_key_revoke(uuid, uuid),
+  public.api_key_rename(uuid, uuid, text), public.api_key_set_access(uuid, uuid, text[], text[]), public.api_rate_hit(text, interval),
+  public.api_auth(text, text), public.api_log_request(uuid, text, text, int, int, text, text), public.api_requests_list(uuid, uuid, int, bigint),
+  public.api_clean_url(text), public.api_queue_event(uuid, text, text, jsonb), public.api_webhook_json(public.api_webhooks), public.api_clean_events(text[]),
+  public.api_webhook_create(uuid, text, text[], text, text), public.api_webhooks_list(uuid), public.api_webhook_update(uuid, uuid, text, text[], boolean),
+  public.api_webhook_rotate(uuid, uuid), public.api_webhook_delete(uuid, uuid), public.api_webhook_ping(uuid, uuid),
+  public.api_webhook_deliveries_list(uuid, uuid, int), public.api_webhooks_due(int, uuid), public.api_webhook_result(uuid, boolean, int, text),
+  public.api_slots(uuid, text, date, int, text, int), public.api_submit(uuid, text, jsonb, text, text, text), public.api_read(uuid, text, jsonb),
+  public.api_inbox_claim(uuid, uuid, text[], int), public.api_clean_result(jsonb), public.api_inbox_done(uuid, uuid, uuid, jsonb),
+  public.api_inbox_fail(uuid, uuid, uuid, text, boolean, jsonb), public.api_inbox_counts(uuid, uuid), public.api_notify(uuid, uuid, text, uuid, jsonb),
+  public.api_publish_catalog(uuid, uuid, jsonb, boolean), public.api_publish_stock(uuid, uuid, jsonb, boolean),
+  public.api_publish_availability(uuid, uuid, jsonb, jsonb, jsonb, timestamptz, timestamptz), public.api_overview(uuid),
+  public.api_inbox_recent(uuid, text, int), public.api_inbox_retry(uuid, uuid), public.api_sweep()
+  from public, anon, authenticated;
+-- owners and admins (each checks two-step sign-in), and the business's linked PCs (each checks the PC)
+grant execute on function public.api_key_create(uuid, text, text, text, text[], text[], text[]), public.api_keys_list(uuid),
+  public.api_key_revoke(uuid, uuid), public.api_key_rename(uuid, uuid, text), public.api_key_set_access(uuid, uuid, text[], text[]),
+  public.api_requests_list(uuid, uuid, int, bigint), public.api_webhook_create(uuid, text, text[], text, text), public.api_webhooks_list(uuid),
+  public.api_webhook_update(uuid, uuid, text, text[], boolean), public.api_webhook_rotate(uuid, uuid), public.api_webhook_delete(uuid, uuid),
+  public.api_webhook_ping(uuid, uuid), public.api_webhook_deliveries_list(uuid, uuid, int), public.api_overview(uuid),
+  public.api_inbox_recent(uuid, text, int), public.api_inbox_retry(uuid, uuid), public.api_scopes(), public.api_widget_scopes(), public.api_events(),
+  public.api_pc_ok(uuid, uuid), public.api_inbox_claim(uuid, uuid, text[], int), public.api_inbox_done(uuid, uuid, uuid, jsonb),
+  public.api_inbox_fail(uuid, uuid, uuid, text, boolean, jsonb), public.api_inbox_counts(uuid, uuid), public.api_notify(uuid, uuid, text, uuid, jsonb),
+  public.api_publish_catalog(uuid, uuid, jsonb, boolean), public.api_publish_stock(uuid, uuid, jsonb, boolean),
+  public.api_publish_availability(uuid, uuid, jsonb, jsonb, jsonb, timestamptz, timestamptz) to authenticated;
+-- only the "api" Edge Function (Supabase's service role)
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.api_auth(text, text), public.api_submit(uuid, text, jsonb, text, text, text), public.api_read(uuid, text, jsonb),
+      public.api_log_request(uuid, text, text, int, int, text, text), public.api_webhooks_due(int, uuid), public.api_webhook_result(uuid, boolean, int, text),
+      public.api_sweep() to service_role;
+  end if;
+end $$;

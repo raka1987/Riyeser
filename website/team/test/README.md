@@ -138,3 +138,11 @@
   email box `autocomplete="username"`. With `AXE=path/to/axe.min.js` it also runs axe-core on those pages (all clean now).
 - `csp-test.js`: the website's Content-Security-Policy (a `<meta>` on every page from build.mjs; scripts only by SHA-256): nothing
   refused on eight pages, fonts and images load, the phone menu, calculator, Help search and Sign in work, an injected script is refused.
+- Online connections (the public API, `api_*`): `rules-test.sql` covers API keys (only owners and admins with two-step sign-in make,
+  list, rename, limit and revoke them; staff and other businesses can't; the key is returned once and only its SHA-256 is kept, never in
+  the change history; widget keys limited to availability/bookings/enquiries and a website address), `api_auth` (hash lookup, revoked,
+  internet address lists, rate limits per key per minute, per visitor for widget keys, per business per day), the post box (Idempotency-Key
+  replay and conflict, permissions, payload essentials, test keys marked test, plan gating), the PCs' claim/done/fail (only linked PCs, 10-minute
+  lease, retries then failed, rejected, FOR UPDATE SKIP LOCKED with a second connection through `dblink`), published catalogue/stock/open times
+  and free start times (a widget booking holds its time), webhooks (https only, the secret shown once, retries with backoff, turned off after
+  3 days failing), the request log (addresses truncated, 30 days) and `api_sweep` (90/30 days). Needs the `dblink` extension (in PostgreSQL's contrib).
