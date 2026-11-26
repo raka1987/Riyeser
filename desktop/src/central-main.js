@@ -19,6 +19,7 @@ const demoUi = require('./renderer/demo-ui');
 const checklist = require('./central/checklist');
 const freshstart = require('./central/freshstart');
 const diagnostics = require('./central/diagnostics');
+const programReports = require('./central/program-reports');
 const crypto = require('crypto');
 
 app.setName('Riyeser Central');
@@ -63,7 +64,8 @@ const PROGRAMS = [
     dirs: ['Riyeser POS'], exes: ['Riyeser POS.exe'], links: ['Riyeser POS'], pages: ['pos'] },
   { id: 'payroll', name: 'Payroll', full: 'Riyeser Payroll', icon: '🕒', desc: 'Time clock, timesheets, pay runs, payslips and leave.',
     dirs: ['riyeser-payroll', 'Riyeser Payroll', 'riyeser', 'Riyeser', 'riyser', 'Riyser'], exes: ['Riyeser Payroll.exe', 'Riyeser.exe', 'Riyser.exe'],
-    links: ['Riyeser Payroll', 'Riyeser', 'Riyser'] }, // Riyeser Payroll 2.0+; older builds were a hub called Riyser
+    links: ['Riyeser Payroll', 'Riyeser', 'Riyser'], // Riyeser Payroll 2.0+; older builds were a hub called Riyser
+    portable: /^RiyeserPayroll-Portable(?:-\d+(?:\.\d+){1,3})?\.exe$/i }, // the portable copy (no installer), on the desktop or in Downloads
   { id: 'desk', name: 'Desk Assistant', full: 'Riyeser Desk Assistant', icon: '🗂', desc: 'Sort files by type, find anything, meetings and to-dos.',
     dirs: ['desk-assistant'], exes: ['Riyeser Desk Assistant.exe', 'Desk Assistant.exe'], links: ['Riyeser Desk Assistant', 'Desk Assistant'] },
   { id: 'pdf', name: 'PDF', full: 'Riyeser PDF', icon: '📕', desc: 'Open, fill in, sign, combine and edit PDFs.',
@@ -109,6 +111,10 @@ function locate(p) {
       try { const t = shell.readShortcutLink(lnk).target; if (t && exists(t)) return t; } catch { /* broken shortcut */ }
     }
   }
+  if (p.portable) {
+    const f = updates.findPortable([app.getPath('desktop'), app.getPath('downloads')], p.portable, (d) => fs.readdirSync(d));
+    if (f && exists(f)) return f;
+  }
   return null;
 }
 const programList = () => PROGRAMS.map((p) => {
@@ -132,13 +138,46 @@ function searchIndex() {
 
 // ---------- updates ----------
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
+// A program file's own version (Windows' file details), for a copy that isn't in the installed-apps list. Kept per file.
+const fileVersions = new Map();
+function fileVersion(exe) {
+  const inName = updates.versionInFileName(exe);
+  if (inName || process.platform !== 'win32') return Promise.resolve(inName);
+  let stamp = 0; try { stamp = fs.statSync(exe).mtimeMs; } catch { return Promise.resolve(null); }
+  const k = `${exe}|${stamp}`;
+  if (fileVersions.has(k)) return Promise.resolve(fileVersions.get(k));
+  return new Promise((resolve) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '(Get-Item -LiteralPath $args[0]).VersionInfo.ProductVersion', exe],
+    { windowsHide: true, timeout: 15000 }, (err, out) => {
+      const v = (String(out || '').match(/\d+(?:\.\d+){1,3}/) || [])[0] || null;
+      if (!err) fileVersions.set(k, v);
+      resolve(v);
+    }));
+}
 function installedVersions() {
   if (process.platform !== 'win32') return Promise.resolve(app.isPackaged ? { central: app.getVersion() } : {});
   const q = (key) => new Promise((resolve) => execFile('reg', ['query', key, '/s', '/reg:64'], { windowsHide: true, maxBuffer: 16 * 1024 * 1024 }, (err, out) => resolve(out || '')));
   // Most programs install for this Windows user (HKCU); Riyeser Link Office installs for the whole PC (HKLM).
   return Promise.all([q('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall'), q('HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall')])
-    .then(([user, machine]) => { const v = { ...updates.installedFromRegistry(machine), ...updates.installedFromRegistry(user) }; if (app.isPackaged) v.central = app.getVersion(); return v; });
+    .then(async ([user, machine]) => {
+      const v = { ...updates.installedFromRegistry(machine), ...updates.installedFromRegistry(user) };
+      // Not in Windows' list (a portable copy, a copy picked with Locate…, an entry the installer didn't write): the
+      // same search the home screen's tiles use, so a program Central shows as installed is also reported as installed.
+      const found = {};
+      if (store) {
+        for (const p of PROGRAMS) {
+          if (p.id in v) continue;
+          const exe = locate(p);
+          if (exe && /\.exe$/i.test(exe)) found[p.id] = { exe, version: await fileVersion(exe).catch(() => null) };
+        }
+      }
+      const out = updates.withFoundPrograms(v, found);
+      if (app.isPackaged) out.central = app.getVersion();
+      return out;
+    });
 }
+// The programs on this PC go to Riyeser soon after they change (not only at the daily check-in): see program-reports.js.
+let reportProgramsNow = async () => null;   // set up in registerIpc once the online helper exists
+const programsReporter = programReports.createReporter({ report: () => reportProgramsNow() });
 async function checkUpdates(force) {
   const cached = store.get('updateCheck', null);
   if (!force && cached && Date.now() - cached.at < 6 * 3600 * 1000) return { ...cached.result, installed: await installedVersions(), cached: true };
@@ -206,6 +245,7 @@ async function installProgram(id) {
   await runInstaller(file, product.args, product.display);
   try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp folder */ }
   send('install-progress', { id, stage: 'done', pct: 1 });
+  programsReporter.soon();   // tell Riyeser it's installed now
   return { id, version: item.version };
 }
 
@@ -233,6 +273,7 @@ async function installUpdates(ids) {
     send('update-progress', { id: u.id, name: u.name, stage: 'installing', pct: 1 });
     await runInstaller(file, u.args, u.name);
     done.push(u.id);
+    programsReporter.soon();   // the new version, soon after it's installed
   }
   store.set('updateCheck', null);
   return { done, restarting: false };
@@ -248,7 +289,8 @@ let refreshOnlineLicence = async () => null;   // set up in registerIpc once the
 function registerIpc() {
   handle('app:version', () => app.getVersion());
   handle('app:platform', () => process.platform);
-  handle('central:programs', () => programList());
+  // The home screen's list. When what's installed changed since last time, the new list goes to Riyeser soon after.
+  handle('central:programs', () => { const list = programList(); programsReporter.seen(list); return list; });
   handle('central:open', async (id, page) => {
     const p = PROGRAMS.find((x) => x.id === id);
     if (!p) throw new Error('Unknown program');
@@ -341,9 +383,14 @@ function registerIpc() {
   handle('central:buy', () => shell.openExternal(licence.BUY_URL));
   handle('central:home', () => shell.openExternal(licence.HOME_URL));   // Riyeser home page: add a paid program there
   // ---------- the company this PC belongs to (%APPDATA%\Riyeser\company.json; set up or join online) ----------
-  // programsFn: the Riyeser programs installed on this PC, sent to Riyeser when the PC links and at the daily check-in
+  // programsFn: the Riyeser programs installed on this PC, sent to Riyeser when the PC links, at the daily check-in
   const on = new online.Online({ store, fetchFn: (u, o) => net.fetch(u, o), appData, appVersion: app.getVersion(), deviceName: os.hostname(),
     programsFn: () => installedVersions(), shareDevice: true });
+  // ...and soon after the list changes (only when it's different from what this PC last sent)
+  reportProgramsNow = () => {
+    const c = online.readCompany(appData);
+    return c && c.mode === 'online' && c.workspace_id ? on.reportPrograms(c.workspace_id, { onlyIfChanged: true }) : null;
+  };
   // device.json: this PC's id for the other Riyeser programs (a signed licence names the PC it's for)
   try { if (online.readCompany(appData)) on.deviceId(); } catch { /* tried again at the licence check */ }
   const companyState = async () => {

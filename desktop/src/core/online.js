@@ -238,17 +238,25 @@ class Online {
   }
   /**
    * Tell Riyeser which Riyeser programs (and versions) are installed on this PC, so Riyeser Support can see them.
-   * Sent when the PC links and at the daily check-in. Never throws: false when it couldn't be sent (offline, or the
-   * online service doesn't have report_programs yet), null when there's nothing to send.
+   * Sent when the PC links, at the daily check-in, and soon after the list changes (Riyeser Central's
+   * central/program-reports.js; onlyIfChanged: not sent when it's the same list this PC last sent for this business).
+   * Never throws: false when it couldn't be sent (offline, or the online service doesn't have report_programs yet),
+   * null when there's nothing to send.
    */
-  async reportPrograms(ws) {
+  async reportPrograms(ws, { onlyIfChanged = false } = {}) {
     if (!ws || typeof this.programsFn !== 'function' || !this.session) return null;
     let installed;
     try { installed = await this.programsFn(); } catch { return null; }
     const programs = Object.entries(installed || {}).filter(([id]) => /^[a-z0-9-]{1,40}$/.test(id))
       .map(([id, version]) => ({ id, version: version == null ? null : String(version).slice(0, 40) }))
       .sort((a, b) => a.id.localeCompare(b.id));
-    try { await this.rpc('report_programs', { ws, device: this.deviceId(), programs }); return true; } catch { return false; }
+    const device = this.deviceId();
+    const sig = JSON.stringify({ ws, device, programs });
+    const last = this.store.get('programs-reported', null);
+    if (onlyIfChanged && last && last.sig === sig) return null;
+    try { await this.rpc('report_programs', { ws, device, programs }); } catch { return false; }
+    this.store.set('programs-reported', { sig, at: Date.now() });
+    return true;
   }
   // ---------- Report an issue (Get help): a diagnostic report and a help request, for this PC's business ----------
   /** Signed in here, with this PC linked to an online business? Report an issue needs both. */

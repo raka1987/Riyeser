@@ -74,6 +74,41 @@ function installedFromRegistry(text) {
   return out;
 }
 
+/** The version in a program file's name: "RiyeserPayroll-Portable-2.2.3.exe" -> "2.2.3" (null when there's none). */
+function versionInFileName(file) {
+  const base = String(file || '').split(/[\\/]/).pop();
+  return (base.match(/[-_ ]v?(\d+(?:\.\d+){1,3})(?:\.exe)?$/i) || [])[1] || null;
+}
+
+/**
+ * Add the programs Central found on this PC the way its home screen does (the usual install folders, a desktop or
+ * Start menu shortcut, a place picked with Locate…, a portable copy) that Windows' installed-apps list doesn't have.
+ * installed: from installedFromRegistry; found: { id: { exe, version } }. The registry's version wins when it has one.
+ */
+function withFoundPrograms(installed, found) {
+  const out = { ...(installed || {}) };
+  for (const [id, f] of Object.entries(found || {})) {
+    if (id in out || !f || !f.exe) continue;
+    out[id] = (f.version && String(f.version)) || versionInFileName(f.exe) || null;
+  }
+  return out;
+}
+
+/** The newest portable copy in some folders (e.g. RiyeserPayroll-Portable-2.2.3.exe on the desktop or in Downloads). */
+function findPortable(dirs, pattern, readdir) {
+  let best = null; let bestV = null;
+  for (const dir of dirs || []) {
+    let names = [];
+    try { names = readdir(dir) || []; } catch { continue; }
+    for (const n of names) {
+      if (!pattern.test(n)) continue;
+      const v = versionInFileName(n);
+      if (!best || (v && (!bestV || newer(v, bestV)))) { best = `${dir}${/[\\/]$/.test(dir) ? '' : (dir.includes('\\') ? '\\' : '/')}${n}`; bestV = v; }
+    }
+  }
+  return best;
+}
+
 /** Which installed programs have a newer version. ownVersion: this Central's version. */
 function availableUpdates(installed, latest) {
   return PRODUCTS.filter((p) => installed[p.id] && latest.products[p.id] && newer(latest.products[p.id].version, installed[p.id]))
@@ -81,4 +116,5 @@ function availableUpdates(installed, latest) {
       file: latest.products[p.id].name || p.asset, digest: latest.products[p.id].digest || null }));
 }
 
-module.exports = { RELEASE_API, PRODUCTS, newer, latestFromRelease, installedFromRegistry, availableUpdates, ALLOWED_DOWNLOAD };
+module.exports = { RELEASE_API, PRODUCTS, newer, latestFromRelease, installedFromRegistry, availableUpdates, ALLOWED_DOWNLOAD,
+  versionInFileName, withFoundPrograms, findPortable };
