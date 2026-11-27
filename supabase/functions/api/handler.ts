@@ -6,6 +6,9 @@
 //   POST /v1/bookings | /v1/orders | /v1/enquiries | /v1/customers
 //   POST /v1/quotes/{ref}/accept | /v1/invoices/{ref}/payments
 //   GET  /v1/catalog | /v1/prices | /v1/stock | /v1/availability | /v1/availability/slots | /v1/events/{id}
+//   GET  /v1/pages/{address} | …/slots | …/events/{id}, POST …/bookings
+//                                                   the hosted booking page (riyeser.com/book/{address}): no key in the
+//                                                   browser; the address finds the page's own key (api_page_auth)
 //   POST /internal/dispatch   the webhook dispatcher + tidy-up (the service role key, from api-webhooks.yml)
 //   POST /internal/kick       a linked PC asks for its business's webhooks to go now ({ws, device}, its own sign-in)
 //
@@ -44,10 +47,14 @@ export const STATUS: Record<string, number> = {
   invalid_json: 400, invalid_request: 400, invalid_idempotency_key: 400,
   invalid_payload: 422, idempotency_conflict: 409, slot_not_available: 409,
   payload_too_large: 413, unsupported_media_type: 415, not_found: 404, method_not_allowed: 405,
-  unavailable: 503, internal: 500,
+  unavailable: 503, internal: 500, page_not_found: 404,
 };
+/** A booking page's address (riyeser.com/book/{address}): what api_page_auth accepts. */
+export const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$/;
+/** Where the booking page lives, for the booking's metadata.source_page (BOOKING_PAGE_URL overrides it). */
+const PAGE_URL = "https://riyeser.com/book/";
 
-type Route = { method: "GET" | "POST"; re: RegExp; path: string; kind?: Kind; read?: string; scope: string | null };
+type Route = { method: "GET" | "POST"; re: RegExp; path: string; kind?: Kind; read?: string; scope: string | null; page?: "profile" | "slots" | "booking" | "event" };
 const ROUTES: Route[] = [
   { method: "GET", re: /^\/v1\/ping$/, path: "/v1/ping", scope: null },
   { method: "POST", re: /^\/v1\/bookings$/, path: "/v1/bookings", kind: "booking", scope: "bookings:write" },
@@ -62,6 +69,11 @@ const ROUTES: Route[] = [
   { method: "GET", re: /^\/v1\/availability$/, path: "/v1/availability", read: "availability", scope: "availability:read" },
   { method: "GET", re: /^\/v1\/availability\/slots$/, path: "/v1/availability/slots", read: "slots", scope: "availability:read" },
   { method: "GET", re: /^\/v1\/events\/([^/]+)$/, path: "/v1/events/{id}", read: "event", scope: null },
+  // the hosted booking page: the same as the widget's routes, with the page's address instead of a key
+  { method: "GET", re: /^\/v1\/pages\/([^/]+)$/, path: "/v1/pages/{address}", page: "profile", scope: "availability:read" },
+  { method: "GET", re: /^\/v1\/pages\/([^/]+)\/slots$/, path: "/v1/pages/{address}/slots", page: "slots", read: "slots", scope: "availability:read" },
+  { method: "POST", re: /^\/v1\/pages\/([^/]+)\/bookings$/, path: "/v1/pages/{address}/bookings", page: "booking", kind: "booking", scope: "bookings:write" },
+  { method: "GET", re: /^\/v1\/pages\/([^/]+)\/events\/([^/]+)$/, path: "/v1/pages/{address}/events/{id}", page: "event", read: "event", scope: null },
 ];
 
 const BASE_HEADERS = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
@@ -207,6 +219,7 @@ export async function handle(req: Request, opts: Opts = {}): Promise<Response> {
   const route = matches.find((r) => r.method === req.method);
   if (!route) return out.err("method_not_allowed", `Use ${matches.map((r) => r.method).join(" or ")} here.`, { Allow: matches.map((r) => r.method).join(", ") });
   const idPart = route.re.exec(path)?.[1];
+  if (route.page) return pageRequest(req, url, route, out, env, opts, origin, started, now, run);
 
   const authz = req.headers.get("authorization") ?? "";
   if (route.path === "/v1/ping" && !authz) return out.json(200, { ok: true, version: VERSION });
@@ -229,14 +242,46 @@ export async function handle(req: Request, opts: Opts = {}): Promise<Response> {
     return out.err(ab.error.code, ab.error.message, extra);
   }
   const auth = a.body as Auth;
-  const res = await withKey(req, url, route, idPart, auth, origin, out, rpc, run, opts);
+  const res = await withKey(req, url, route, idPart, auth, origin, out, rpc, run, opts, env);
+  const code = res.status >= 400 ? ((await res.clone().json().catch(() => null))?.error?.code ?? null) : null;
+  await log(res.status, code, auth.key_id);
+  return res;
+}
+
+// The booking page: the page's address (not a key) says which business. api_page_auth finds the page's own widget key
+// (only availability:read and bookings:write, only from the booking page's websites), counts the visitor and the page
+// (rate limits), and every refusal says which websites may read it, so the page can show "not taking online bookings".
+async function pageRequest(req: Request, url: URL, route: Route, out: Out, env: Env, opts: Opts, origin: string | null, started: number,
+  now: () => number, run: (p: Promise<unknown>) => Promise<void>): Promise<Response> {
+  const m = route.re.exec(routePath(url.pathname)) ?? [];
+  const slug = (m[1] ?? "").toLowerCase();
+  const idPart = route.page === "event" ? m[2] : undefined;
+  if (req.headers.get("authorization")) return out.err("invalid_request", "The booking page needs no key: leave out the Authorization header.");
+  if (!SLUG_RE.test(slug)) return out.err("page_not_found", "This business isn't taking online bookings here.");
+  if (!env("SUPABASE_URL") && !opts.rpc) return out.err("unavailable", "The Riyeser API isn't set up yet.");
+  const rpc = opts.rpc ?? serviceRpc(env);
+  const ip = clientIp(req);
+  let a: { ok: boolean; status: number; body: unknown };
+  try { a = await rpc("api_page_auth", { slug, ip }); } catch { a = { ok: false, status: 0, body: null }; }
+  if (!a.ok || !a.body || typeof a.body !== "object") return out.err("unavailable", "The Riyeser API is busy. Try again in a minute.", { "Retry-After": "30" });
+  const ab = a.body as { error?: { code: string; message: string }; retry_after?: number; key_id?: string; origins?: string[] };
+  const log = (status: number, code: string | null, keyId: string) =>
+    run(rpc("api_log_request", { key_id: keyId, method: req.method, path: route.path, status, ms: Math.max(0, Math.round(now() - started)), ip, code }));
+  if (ab.error) {
+    const extra: Record<string, string> = ab.retry_after ? { "Retry-After": String(ab.retry_after) } : {};
+    if (origin && originAllowed(origin, ab.origins ?? [])) Object.assign(extra, { "Access-Control-Allow-Origin": origin, "Vary": "Origin", "Access-Control-Expose-Headers": "X-Request-Id, Retry-After" });
+    if (ab.key_id) await log(STATUS[ab.error.code] ?? 400, ab.error.code, ab.key_id);
+    return out.err(ab.error.code, ab.error.message, extra);
+  }
+  const auth = { ...(a.body as Auth), kind: "widget" as const };   // always treated as a widget key: browsers only, its websites only
+  const res = await withKey(req, url, route, idPart, auth, origin, out, rpc, run, opts, env, slug);
   const code = res.status >= 400 ? ((await res.clone().json().catch(() => null))?.error?.code ?? null) : null;
   await log(res.status, code, auth.key_id);
   return res;
 }
 
 async function withKey(req: Request, url: URL, route: Route, idPart: string | undefined, auth: Auth, origin: string | null, out: Out, rpc: Rpc,
-  run: (p: Promise<unknown>) => Promise<void>, opts: Opts): Promise<Response> {
+  run: (p: Promise<unknown>) => Promise<void>, opts: Opts, env: Env, slug?: string): Promise<Response> {
   if (auth.rate) {
     Object.assign(out.headers, { "RateLimit-Limit": String(auth.rate.limit), "RateLimit-Remaining": String(auth.rate.remaining), "RateLimit-Reset": String(auth.rate.reset) });
   }
@@ -254,6 +299,13 @@ async function withKey(req: Request, url: URL, route: Route, idPart: string | un
   }
   if (route.scope && !auth.scopes.includes(route.scope)) {
     return out.err("missing_scope", `This key isn't allowed to do that (it needs ${route.scope}).`);
+  }
+  if (route.page === "profile") {
+    const r = await rpc("api_page_profile", { key_id: auth.key_id });
+    if (!r.ok || !r.body) return out.err("unavailable", "The Riyeser API is busy. Try again in a minute.", { "Retry-After": "30" });
+    const b = r.body as { error?: { code: string; message: string } };
+    if (b.error) return out.err(b.error.code, b.error.message);
+    return out.json(200, r.body);
   }
   if (route.path === "/v1/ping") {
     return out.json(200, { ok: true, version: VERSION, workspace_id: auth.workspace_id, key: { name: auth.name, kind: auth.kind, mode: auth.mode, scopes: auth.scopes } });
@@ -284,8 +336,14 @@ async function withKey(req: Request, url: URL, route: Route, idPart: string | un
     const more = v.problems.length > 1 ? ` (and ${v.problems.length - 1} more)` : "";
     return out.err("invalid_payload", v.problems[0].message + more, {}, v.problems);
   }
+  if (route.page === "booking") {   // say where it came from (the PC shows it with the booking)
+    const meta = { ...((v.payload as { metadata?: Record<string, unknown> }).metadata ?? {}) };
+    meta.channel = "booking_page";
+    meta.source_page = (env("BOOKING_PAGE_URL") || PAGE_URL) + slug;
+    (v.payload as { metadata?: Record<string, unknown> }).metadata = meta;
+  }
   const bodyHash = await sha256Hex(`${route.kind}\n${canonical(v.payload)}`);
-  const r = await rpc("api_submit", { key_id: auth.key_id, kind: route.kind, payload: v.payload, idempotency_key: idem, body_hash: bodyHash, source: "api" });
+  const r = await rpc("api_submit", { key_id: auth.key_id, kind: route.kind, payload: v.payload, idempotency_key: idem, body_hash: bodyHash, source: route.page ? "page" : "api" });
   if (!r.ok || !r.body) return out.err("unavailable", "The Riyeser API is busy. Try again in a minute (with the same Idempotency-Key).", { "Retry-After": "30" });
   const b = r.body as { error?: { code: string; message: string }; id: string; kind: string; status: string; test: boolean; created_at: string; replay: boolean };
   if (b.error) return out.err(b.error.code, b.error.message);

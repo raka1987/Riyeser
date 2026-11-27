@@ -323,3 +323,96 @@ Deno.test("/internal/dispatch needs the service key; /internal/kick needs a link
   r = await handle(kick(), { rpc: db.rpc, rpcAs, env });
   assertEquals(r.status, 200); assertEquals(db.named("api_webhooks_due").at(-1)!.args.only_ws, WS);
 });
+
+// ---- the hosted booking page (riyeser.com/book/{address}): no key in the browser, the address finds the page's key
+const PAGE_ORIGINS = ["https://riyeser.com", "https://www.riyeser.com"];
+async function pageDb() {
+  const db = await fakeDb();
+  const seen: { name: string; args: Record<string, unknown> }[] = [];
+  const perIp = new Map<string, number>();
+  const rpc: Rpc = (name, args) => {
+    seen.push({ name, args });
+    const ok = (body: unknown) => Promise.resolve({ ok: true, status: 200, body });
+    if (name === "api_page_auth") {
+      const n = (perIp.get(String(args.ip)) ?? 0) + 1; perIp.set(String(args.ip), n);
+      if (n > 5) return ok({ error: { code: "rate_limited", message: "Too many requests from here." }, retry_after: 30, origins: PAGE_ORIGINS });
+      if (args.slug === "closed-salon") return ok({ error: { code: "business_closed", message: "This business's Riyeser account is closed or paused." }, origins: PAGE_ORIGINS });
+      if (args.slug !== "harbour-hair") return ok({ error: { code: "page_not_found", message: "This business isn't taking online bookings here." }, origins: PAGE_ORIGINS });
+      return ok({ key_id: "k-page", workspace_id: WS, kind: "widget", mode: "live", scopes: ["availability:read", "bookings:write"], allowed_origins: PAGE_ORIGINS,
+        name: "Booking page", slug: "harbour-hair", rate: { limit: 300, remaining: 299, reset: 30 } });
+    }
+    if (name === "api_page_profile") return ok({ slug: "harbour-hair", name: "Harbour Hair", colour: "#0e7c86", timezone: "Pacific/Fiji", accepting: true,
+      services: [{ sku: "CUT", name: "Cut & style", duration_minutes: 45, price: 45, currency: "FJD" }], staff: [], hours: [] });
+    return db.rpc(name, args);
+  };
+  return { rpc, seen, named: (x: string) => seen.filter((c) => c.name === x) };
+}
+const fromSite = (o: Record<string, string> = {}) => ({ Origin: "https://riyeser.com", "X-Forwarded-For": "198.51.100.7", ...o });
+
+Deno.test("booking page: the profile from the address, only for riyeser.com, nothing private", async () => {
+  const db = await pageDb();
+  const r = await handle(req("GET", "/v1/pages/harbour-hair", { headers: fromSite() }), opts(db.rpc));
+  assertEquals(r.status, 200);
+  assertEquals(r.headers.get("Access-Control-Allow-Origin"), "https://riyeser.com");
+  const b = await r.json();
+  assertEquals(b.name, "Harbour Hair"); assertEquals(b.services[0].sku, "CUT");
+  assertEquals(db.named("api_page_auth")[0].args, { slug: "harbour-hair", ip: "198.51.100.7" });
+  assertEquals(db.named("api_page_profile")[0].args.key_id, "k-page");
+  assertEquals(db.named("api_log_request")[0].args.path, "/v1/pages/{address}", "logged as the route, never the address");
+  // another website can't read it; nor can a script with no Origin (it's for the booking page only)
+  const other = await handle(req("GET", "/v1/pages/harbour-hair", { headers: fromSite({ Origin: "https://evil.example.com" }) }), opts(db.rpc));
+  assertEquals(other.status, 403); assertEquals((await other.json()).error.code, "origin_not_allowed");
+  assertEquals(other.headers.get("Access-Control-Allow-Origin"), null);
+  const curl = await handle(req("GET", "/v1/pages/harbour-hair", { headers: { "X-Forwarded-For": "198.51.100.8" } }), opts(db.rpc));
+  assertEquals(curl.status, 403);
+  // a key is never needed, and one sent is refused (the page must never carry one)
+  const keyed = await handle(req("GET", "/v1/pages/harbour-hair", { key: WIDGET, headers: fromSite() }), opts(db.rpc));
+  assertEquals(keyed.status, 400);
+});
+
+Deno.test("booking page: unknown or switched-off address, a paused business, a bad address; the page can read the answer", async () => {
+  const db = await pageDb();
+  let r = await handle(req("GET", "/v1/pages/no-such-salon", { headers: fromSite() }), opts(db.rpc));
+  assertEquals(r.status, 404); assertEquals((await r.json()).error.code, "page_not_found");
+  assertEquals(r.headers.get("Access-Control-Allow-Origin"), "https://riyeser.com", "so the page can say 'not taking online bookings'");
+  r = await handle(req("GET", "/v1/pages/closed-salon", { headers: fromSite() }), opts(db.rpc));
+  assertEquals(r.status, 403); assertEquals((await r.json()).error.code, "business_closed");
+  const before = db.seen.length;
+  r = await handle(req("GET", "/v1/pages/Bad%20Address!", { headers: fromSite() }), opts(db.rpc));
+  assertEquals(r.status, 404); assertEquals(db.seen.length, before, "a malformed address never reaches the database");
+  r = await handle(req("GET", "/v1/pages/x", { headers: fromSite() }), opts(db.rpc));
+  assertEquals(r.status, 404);
+  // a refusal for another website carries no CORS header
+  r = await handle(req("GET", "/v1/pages/no-such-salon", { headers: fromSite({ Origin: "https://evil.example.com" }) }), opts(db.rpc));
+  assertEquals(r.headers.get("Access-Control-Allow-Origin"), null);
+});
+
+Deno.test("booking page: free times, a booking (marked as from the page), following it; limited per visitor", async () => {
+  const db = await pageDb();
+  let r = await handle(req("GET", "/v1/pages/harbour-hair/slots?service=CUT&from=2026-12-01&days=7", { headers: fromSite() }), opts(db.rpc));
+  assertEquals(r.status, 200);
+  assertEquals(db.named("api_read")[0].args, { key_id: "k-page", what: "slots", params: { service: "CUT", from: "2026-12-01", days: 7 } });
+  r = await handle(req("GET", "/v1/pages/harbour-hair/slots?service=bad%20sku", { headers: fromSite() }), opts(db.rpc));
+  assertEquals(r.status, 400);
+  r = await handle(req("POST", "/v1/pages/harbour-hair/bookings", { body: { ...booking, metadata: { channel: "fake" } }, headers: fromSite({ "Idempotency-Key": "pg-1" }) }), opts(db.rpc));
+  assertEquals(r.status, 202);
+  const id = (await r.json()).id;
+  const sub = db.named("api_submit")[0].args;
+  assertEquals(sub.key_id, "k-page"); assertEquals(sub.source, "page");
+  assertEquals((sub.payload as { metadata: Record<string, unknown> }).metadata, { channel: "booking_page", source_page: "https://riyeser.com/book/harbour-hair" });
+  // replaying the same booking gives the same answer (the page retries after a dropped connection)
+  r = await handle(req("POST", "/v1/pages/harbour-hair/bookings", { body: { ...booking, metadata: { channel: "fake" } }, headers: fromSite({ "Idempotency-Key": "pg-1", "X-Forwarded-For": "198.51.100.9" }) }), opts(db.rpc));
+  assertEquals(r.status, 200); assertEquals((await r.json()).id, id);
+  r = await handle(req("GET", `/v1/pages/harbour-hair/events/${id}`, { headers: fromSite({ "X-Forwarded-For": "198.51.100.9" }) }), opts(db.rpc));
+  assertEquals(r.status, 200); assertEquals(db.named("api_read").at(-1)!.args.what, "event");
+  r = await handle(req("GET", "/v1/pages/harbour-hair/events/not-a-uuid", { headers: fromSite({ "X-Forwarded-For": "198.51.100.9" }) }), opts(db.rpc));
+  assertEquals(r.status, 404);
+  // only bookings: no orders or enquiries through the page; wrong method
+  r = await handle(req("GET", "/v1/pages/harbour-hair/bookings", { headers: fromSite({ "X-Forwarded-For": "198.51.100.10" }) }), opts(db.rpc));
+  assertEquals(r.status, 405);
+  r = await handle(req("POST", "/v1/pages/harbour-hair/orders", { body: order, headers: fromSite({ "X-Forwarded-For": "198.51.100.10" }) }), opts(db.rpc));
+  assertEquals(r.status, 404);
+  // the sixth request from one address in the pretend minute: 429 with Retry-After, readable by the page
+  for (let i = 0; i < 6; i++) r = await handle(req("GET", "/v1/pages/harbour-hair", { headers: fromSite({ "X-Forwarded-For": "203.0.113.5" }) }), opts(db.rpc));
+  assertEquals(r.status, 429); assertEquals(r.headers.get("Retry-After"), "30"); assertEquals(r.headers.get("Access-Control-Allow-Origin"), "https://riyeser.com");
+});

@@ -311,6 +311,65 @@ paths:
           description: OK
           content: { application/json: { schema: { $ref: "#/components/schemas/Slots" } } }
         "default": { $ref: "#/components/responses/Error" }
+  /v1/pages/{address}:
+    get:
+      tags: [Booking page]
+      summary: The public profile of a hosted booking page (riyeser.com/book/{address})
+      description: |
+        For the hosted booking page only: no key, and only from the booking page's own websites (riyeser.com;
+        `origin_not_allowed` otherwise, also with no Origin). The address finds the business's booking page and its
+        page key, which nobody sees. Limited per visitor address (40 a minute) and per page (300 a minute).
+        Unknown, switched off or personal: 404 `page_not_found` (readable by the page, so it can say "not taking
+        online bookings"). Only what a customer needs: the business's name, logo, colour, welcome text, address and
+        phone (if shown), time zone, services (prices if shown), staff first names (if shown), opening hours for the
+        next 7 days (from the published open times), and `accepting` (false without Riyeser Bookings, with `reason`).
+      security: [{}]
+      parameters: [{ $ref: "#/components/parameters/PageAddress" }]
+      responses:
+        "200": { description: OK }
+        "default": { $ref: "#/components/responses/Error" }
+  /v1/pages/{address}/slots:
+    get:
+      tags: [Booking page]
+      summary: Free start times on a booking page (as GET /v1/availability/slots)
+      security: [{}]
+      parameters:
+        - { $ref: "#/components/parameters/PageAddress" }
+        - { name: service, in: query, required: true, schema: { $ref: "#/components/schemas/Sku" } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 31, default: 7 } }
+        - { name: staff, in: query, schema: { $ref: "#/components/schemas/Sku" } }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/Slots" } } }
+        "default": { $ref: "#/components/responses/Error" }
+  /v1/pages/{address}/bookings:
+    post:
+      tags: [Booking page]
+      summary: A booking request from a booking page (as POST /v1/bookings with a widget key)
+      description: |
+        `start` must be one of the free times. Arrives in the post box as a widget booking (`source: widget`,
+        key name "Booking page") with `metadata.channel = "booking_page"` and `metadata.source_page`.
+      security: [{}]
+      parameters: [{ $ref: "#/components/parameters/PageAddress" }, { $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Booking" } } }
+      responses:
+        "202": { $ref: "#/components/responses/W202" }
+        "default": { $ref: "#/components/responses/Error" }
+  /v1/pages/{address}/events/{id}:
+    get:
+      tags: [Booking page]
+      summary: Where a booking made on the page is up to (only that page's own bookings)
+      security: [{}]
+      parameters: [{ $ref: "#/components/parameters/PageAddress" }, { name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/EventStatus" } } }
+        "default": { $ref: "#/components/responses/Error" }
 webhooks:
   booking.received: { $ref: "#/components/pathItems/WebhookReceived" }
   booking.confirmed: { $ref: "#/components/pathItems/WebhookLifecycle" }
@@ -329,6 +388,7 @@ components:
       scheme: bearer
       bearerFormat: "rk_live_… | rk_test_… | rk_pub_live_… | rk_pub_test_… (48 hex characters after the prefix)"
   parameters:
+    PageAddress: { name: address, in: path, required: true, description: "The booking page's address: 3–40 lowercase letters, digits and dashes", schema: { type: string, pattern: "^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$" } }
     IdempotencyKey:
       name: Idempotency-Key
       in: header
