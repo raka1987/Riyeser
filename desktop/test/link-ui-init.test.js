@@ -154,7 +154,7 @@ test('Branches and relay: backup relay, not set up, and a problem with its fix (
   const down = boot(async (c) => (c === 'link:status' ? withRelay({ state: 'connecting', connected: false, error: 'connection lost', relays: RELAY_OK.relays }) : true));
   await tick();
   assert.match(down.byId.tiles.innerHTML, /tile warn" id="relaytile"[\s\S]*Problem: not connected[\s\S]*port 443[\s\S]*data-a="relayretry"/);
-  assert.match(down.byId.attn.innerHTML, /Other sites can(?:'|&#39;)t be reached[\s\S]*data-a="relayretry">Reconnect now/);
+  assert.match(down.byId.attn.innerHTML, /Can(?:'|&#39;)t reach the Riyeser relay \(connection lost\)[\s\S]*data-a="relayretry">Reconnect now/);
 
   const refused = boot(async (c) => (c === 'link:status' ? withRelay({ state: 'refused', connected: false, error: 'an admin disconnected this office' }) : true));
   await tick();

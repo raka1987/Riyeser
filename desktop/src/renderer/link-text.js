@@ -119,6 +119,7 @@
       const where = (x) => `${x.region || x.relay || x.host || ''}${x.rtt != null ? ` · ${x.rtt} ms` : ''}`;
       const others = (x) => (x.sites && x.sites.length ? `${x.sites.length} other site${x.sites.length === 1 ? '' : 's'}: ${x.sites.slice(0, 3).map((s) => s.name).join(', ')}${x.sites.length > 3 ? '…' : ''}` : 'No other sites connected yet');
       if (!r || r.state === 'local') return { cls: 'off', big: 'Not set up', text: T.RELAY_LOCAL, act: 'relay', label: 'Connect your branches', problem: null };
+      if (r.state === 'off' && r.idle) return { cls: 'off', big: 'Not set up', text: 'Joins your other sites once the phone system is running here and the Riyeser relay is switched on for your business.', act: 'relay', label: 'Connect your branches', problem: null };
       if (r.state === 'off' || r.state === 'no-config') return { cls: 'off', big: 'Not set up', text: r.state === 'no-config' && /no riyeser relay/i.test(r.error || '') ? 'Riyeser hasn\'t set up a relay for your business yet. Phones work on this office network.' : r.state === 'no-config' ? T.RELAY_LOCAL : T.RELAY_OFF, act: 'relay', label: 'Connect your branches', problem: null };
       if (r.connected) {
         const udp = r.udp === 'blocked';
@@ -132,7 +133,7 @@
       }
       if (r.state === 'starting' || (r.state === 'connecting' && !r.error)) return { cls: 'info', big: 'Connecting…', text: 'Joining your other sites through the Riyeser relay.', act: 'relayretry', label: 'Reconnect now', problem: null };
       const fix = `Can't reach the Riyeser relay${r.error ? ` (${r.error})` : ''}. Check this PC is online; if the internet works, allow outgoing connections to the relay on port 443 in the firewall. It keeps trying; calls in this office work as normal.`;
-      return { cls: 'warn', big: 'Problem: not connected', text: fix, act: 'relayretry', label: 'Reconnect now', problem: { cls: 'warn', text: `Other sites can't be reached: ${fix}`, act: 'relayretry', label: 'Reconnect now' } };
+      return { cls: 'warn', big: 'Problem: not connected', text: fix, act: 'relayretry', label: 'Reconnect now', problem: { cls: 'warn', text: fix, act: 'relayretry', label: 'Reconnect now' } };
     },
     /** Where an extension's phones are (1.3.0, with the relay set up): 'here' (this site), 'remote' (another site or at home) or ''. */
     extSite: (r, ext, hereNow) => {

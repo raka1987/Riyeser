@@ -269,6 +269,21 @@ Calling a branch's number used to ring everyone in the branch. Now each number r
 
 `test/link-ringgroups.test.js` checks the planning, the sync (and an older online database), and real calls through the SIP server: only chosen phones ring, in order, rotate, Do not disturb skipped, and each fallback.
 
+## The Riyeser relay in the control panel (1.3.0)
+
+- **Overview → Branches and relay** shows the relay's real state from `status().relay` (`link-text.js` `relayTile`):
+  *Connected · Sydney · 42 ms*, *Using backup relay · Melbourne · 61 ms*, *Not set up* (not linked, switched off for the
+  business, or no relay yet), *Connecting…*, or a problem with its fix (*Problem: not connected* with Reconnect now,
+  *Refused by the relay* with where an admin allows it again, UDP blocked). A problem is also in **Needs attention**.
+- The top status line always carries the relay's state (`relayLine`), coloured ok / warn / muted.
+- **Settings → Connect your branches**: the site's name, other sites, diagnostics, Reconnect now, and on Windows
+  **This PC as the relay** (with the optional Namecheap Dynamic DNS password).
+- **People** and the person and phone panels say which site a phone or extension is at once the relay is set up:
+  this site's name for phones connected here, *Another site or at home* for extensions the relay reaches
+  (`status().relay.remoteExts`).
+- Riyeser Link: Management → Desk phones has a **Sites & relay** tab (the switch, relays, each site's status,
+  phones at home with a QR code), a real **Branches and relay** tile and relay problems in Needs attention.
+
 ## Security
 
 - **Office network only.** Phones can only connect, and settings can only be fetched, from private addresses. An advanced setting allows others (not recommended).

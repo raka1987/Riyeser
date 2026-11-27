@@ -512,7 +512,7 @@ class PhoneService extends EventEmitter {
       counts: { connected: new Set(snap.registrations.map((r) => r.ext)).size, onCalls: snap.calls.filter((c) => c.state === 'talking').length, phones: snap.registrations.length },
       registrations: snap.registrations.map((r) => ({ ext: r.ext, ip: r.ip, device: r.device, since: r.since })), addressStable: this.addressStable(),
       blocked: snap.blocked, ipChanged: this.ipChanged || null, adapter: this.adapter(), names: this.names(), offline: !!this.offline,
-      relay: this.relay ? this.relay.status() : { state: this.opts.relayConfig ? 'off' : 'local', connected: false, detail: this.opts.relayConfig ? 'Not started (the phone system isn\'t running).' : 'This PC isn\'t linked to Riyeser Link.' },
+      relay: this.relay ? this.relay.status() : { state: this.opts.relayConfig ? 'off' : 'local', idle: !!this.opts.relayConfig, connected: false, detail: this.opts.relayConfig ? 'Not started (the phone system isn\'t running).' : 'This PC isn\'t linked to Riyeser Link.' },
       siteName: this.siteName(),
       addressChanges: (this.settings().hostChanges || []).slice(-5).reverse(), fixedAddress: this.settings().fixedAddress || null, allowPublic: !!this.settings().allowPublic, logs: this.logs.slice(-60).reverse(),
     };
