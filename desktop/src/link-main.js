@@ -138,6 +138,27 @@ function registerIpc() {
   handle('link:label', (mac, fields) => service.label(mac, fields || {}));
   handle('link:replace', (oldMac, newMac, vendor) => service.replacePhone(oldMac, newMac, vendor));
   handle('link:ignore', (mac) => service.ignore(mac));
+  // 1.2.1: many phones at once, and each phone's own panel
+  handle('link:bulkPreview', (rows, opts) => require('./renderer/link-bulk').preview(rows || [], { ...service.bulkContext(), ...(opts || {}) }));
+  handle('link:bulkAdd', (rows, opts) => service.bulkAdd(rows, opts || {}));
+  handle('link:bulk', (action, macs, opts) => service.bulk(action, macs, opts || {}));
+  handle('link:restartPhone', (mac, reboot) => service.restartPhone(mac, { reboot: reboot !== false }));
+  handle('link:findPhone', (mac) => service.findPhone(mac));
+  handle('link:phoneSettings', (mac, settings) => service.phoneSettings(mac, settings || {}));
+  handle('link:movePhone', (mac, to) => service.movePhone(mac, to || {}));
+  handle('link:addShared', (name, ext) => service.newShared(name, ext));
+  handle('link:openFile', async (kinds) => {   // "Import a CSV": the file's text (up to 1 MB), read here
+    const r = await dialog.showOpenDialog(win, { title: 'Import desk phones', properties: ['openFile'], filters: [{ name: 'CSV or text', extensions: kinds || ['csv', 'txt'] }] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    if (fs.statSync(r.filePaths[0]).size > 1024 * 1024) throw new Error('That file is too big. Up to 1 MB (about 10,000 phones).');
+    return { name: path.basename(r.filePaths[0]), text: fs.readFileSync(r.filePaths[0], 'utf8') };
+  });
+  handle('link:saveTemplate', async () => {
+    const r = await dialog.showSaveDialog(win, { title: 'Save the desk phones template', defaultPath: path.join(app.getPath('documents'), 'Riyeser desk phones template.csv'), filters: [{ name: 'CSV', extensions: ['csv'] }] });
+    if (r.canceled || !r.filePath) return null;
+    fs.writeFileSync(r.filePath, require('./renderer/link-bulk').csvTemplate()); return r.filePath;
+  });
+  handle('link:openPhonePage', (ip) => { if (!require('./link/netinfo').isPrivate(ip) || !/^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))) throw new Error('That phone isn\'t on the office network.'); return shell.openExternal(`http://${ip}/`).then(() => true); });
   handle('link:addPerson', (name, ext) => service.addPerson({ name, ext }));
   handle('link:removePerson', (id) => service.removePerson(id));
   handle('link:manual', (ext) => service.manual(ext));

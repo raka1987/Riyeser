@@ -1891,6 +1891,99 @@ do $$ begin
 end $$;
 reset role;
 
+-- Link Office 1.2.1: many phones at once (bulk_phones), each phone's own page (phone_action, phone_settings), the office's
+-- summary back, and the extra phone details in the heartbeat. Owners and admins with two-step sign-in only.
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
+do $$ declare ws uuid := current_setting('test.ws_l')::uuid; o json; ph json; begin
+  perform public.link_office_report(ws, 'office-0001-abcd', '{"pc_name":"OFFICE-PC","version":"1.2.1","addresses":["192.168.1.20"],"sip_port":5060,"phones":[
+    {"mac":"001565aabbcc","vendor":"Yealink","extension":"101","assigned":true,"registered":true,"ip":"192.168.1.31","firmware":"124.86.0.40","registered_since":"2026-11-27T08:00:00Z","last_seen":"2026-11-27T09:00:00Z","shared":false,
+     "settings":{"label":"Front","timezone":"+12","timeFormat":"24","language":"English","ringtone":3,"ringVolume":9,"dnd":"person","lineKeys":[{"type":"speed","value":"102","label":"Bo"},{"value":"1; drop","label":"x"}],"password":"NotStored","evil":"<x>"}},
+    {"mac":"000b82112233","vendor":"Grandstream","assigned":false,"ignored":true,"firmware":"bad firmware <x>"},
+    {"mac":"000413445566","vendor":"Snom","assigned":true,"extension":"110","ignored":true,"shared":true}],"extensions":[{"extension":"101","name":"Pat","registered":1,"shared":false}],"counts":{"people":3,"ignored_phones":1}}');
+  o := (public.link_status(ws) -> 'offices') -> 0;
+  select p into ph from json_array_elements(o -> 'phones') p where p ->> 'mac' = '001565aabbcc';
+  assert ph ->> 'firmware' = '124.86.0.40' and ph ->> 'registered_since' is not null and ph ->> 'last_seen' is not null, format('firmware and times: %s', ph);
+  assert (ph -> 'settings') ->> 'label' = 'Front' and (ph -> 'settings') ->> 'timezone' = '+12' and ((ph -> 'settings') ->> 'ringtone')::int = 3, format('settings kept: %s', ph -> 'settings');
+  assert json_array_length((ph -> 'settings') -> 'lineKeys') = 1, 'only real speed-dial keys';
+  assert (ph -> 'settings')::text not like '%NotStored%' and (ph -> 'settings')::text not like '%evil%', 'nothing else kept from settings';
+  select p into ph from json_array_elements(o -> 'phones') p where p ->> 'mac' = '000b82112233';
+  assert (ph ->> 'ignored')::boolean and ph ->> 'firmware' is null, format('ignored new phone, bad firmware dropped: %s', ph);
+  select p into ph from json_array_elements(o -> 'phones') p where p ->> 'mac' = '000413445566';
+  assert not (ph ->> 'ignored')::boolean and (ph ->> 'shared')::boolean, 'a phone given to someone is never "ignored"; shared kept';
+end $$;
+reset role;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ declare ws uuid := current_setting('test.ws_l')::uuid; c uuid; big jsonb; begin
+  -- Add several phones: rows checked and cut to size; up to 500; bigger than other changes are allowed to be
+  c := public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"add","auto":true,"start":"201","rows":[{"macText":"00:15:65:12:34:56","model":"Yealink T31P","ext":"","person":"Pat","name":"Front","location":"Head office","extra":"x"},{"macText":"not-a-mac","ext":"9999"}]}');
+  assert (select data from public.link_office_commands where id = c) = '{"action":"add","auto":true,"shared":false,"start":"201","rows":[{"line":1,"macText":"00:15:65:12:34:56","model":"Yealink T31P","person":"Pat","name":"Front","location":"Head office"},{"line":2,"macText":"not-a-mac"}]}'::jsonb,
+    format('rows tidied: %s', (select data from public.link_office_commands where id = c));
+  perform set_config('test.bulk_add', c::text, false);
+  select jsonb_build_object('action', 'add', 'rows', jsonb_agg(jsonb_build_object('macText', lpad(to_hex(i), 12, '0'), 'model', 'Yealink T31P', 'name', 'Desk ' || i, 'location', 'Head office'))) into big from generate_series(1, 500) i;
+  perform public.link_command(ws, 'office-0001-abcd', 'bulk_phones', big);
+  select jsonb_build_object('action', 'add', 'rows', jsonb_agg(jsonb_build_object('macText', lpad(to_hex(i), 12, '0')))) into big from generate_series(1, 501) i;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'bulk_phones', big); raise exception '501 rows';
+  exception when others then assert sqlerrm like 'Add up to 500 phones%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"add","rows":[]}'); raise exception 'no rows';
+  exception when others then assert sqlerrm like 'Paste or import at least one%', sqlerrm; end;
+  -- one action for many phones: MACs tidied; give each to a person, or number them in order
+  c := public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"give","macs":["00-0B-82-11-22-33","000413445566"],"to":{"00:0B:82:11:22:33":"102"},"auto":false}');
+  assert (select data from public.link_office_commands where id = c) = '{"action":"give","macs":["000413445566","000b82112233"],"to":{"000b82112233":"102"},"auto":false}'::jsonb, format('give tidied: %s', (select data from public.link_office_commands where id = c));
+  c := public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"location","macs":["001565aabbcc"],"location":"Head office"}');
+  assert (select data ->> 'location' from public.link_office_commands where id = c) = 'Head office', 'move location';
+  begin perform public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"location","macs":["001565aabbcc"],"location":"Nowhere"}'); raise exception 'unknown branch';
+  exception when others then assert sqlerrm like 'Choose the location from your branches%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"remove","macs":["001565aabbcc","nope"]}'); raise exception 'a bad MAC in the list';
+  exception when others then assert sqlerrm like 'That isn''t a MAC address%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"remove","macs":[]}'); raise exception 'nothing ticked';
+  exception when others then assert sqlerrm like 'Tick at least one phone%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"factory_reset","macs":["001565aabbcc"]}'); raise exception 'unknown action';
+  exception when others then assert sqlerrm like 'Riyeser Link Office doesn''t know%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'bulk_phones', '{"action":"give","macs":["001565aabbcc"],"to":{"001565aabbcc":"1 or 1"}}'); raise exception 'bad extension';
+  exception when others then assert sqlerrm like 'Choose who each phone is for%', sqlerrm; end;
+  -- each phone's page: restart, find, move to a shared phone; settings kept to what's allowed
+  c := public.link_command(ws, 'office-0001-abcd', 'phone_action', '{"mac":"00:15:65:AA:BB:CC","action":"restart"}');
+  assert (select data from public.link_office_commands where id = c) = '{"mac":"001565aabbcc","action":"restart"}'::jsonb, 'restart';
+  c := public.link_command(ws, 'office-0001-abcd', 'phone_action', '{"mac":"001565aabbcc","action":"move","shared_name":"Reception"}');
+  assert (select data ->> 'shared_name' from public.link_office_commands where id = c) = 'Reception', 'move to a new shared phone';
+  begin perform public.link_command(ws, 'office-0001-abcd', 'phone_action', '{"mac":"001565aabbcc","action":"move"}'); raise exception 'move to nobody';
+  exception when others then assert sqlerrm like 'Choose who the phone is for%', sqlerrm; end;
+  begin perform public.link_command(ws, 'office-0001-abcd', 'phone_action', '{"mac":"001565aabbcc","action":"wipe"}'); raise exception 'unknown phone action';
+  exception when others then assert sqlerrm like 'Riyeser Link Office doesn''t know%', sqlerrm; end;
+  c := public.link_command(ws, 'office-0001-abcd', 'phone_settings', '{"mac":"001565aabbcc","settings":{"label":"Front","timezone":"+99","language":"Klingon","ringVolume":"9","lineKeys":[{"value":"102","label":"Bo"}],"admin_password":"x"}}');
+  assert (select data -> 'settings' from public.link_office_commands where id = c) = '{"label":"Front","ringVolume":9,"lineKeys":[{"type":"speed","value":"102","label":"Bo"}]}'::jsonb,
+    format('settings checked: %s', (select data -> 'settings' from public.link_office_commands where id = c));
+  perform set_config('test.cmd_set', c::text, false);
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'link.bulk_phones' and details ->> 'action' = 'give' and (details ->> 'phones')::int = 2), 'bulk changes in the history, with how many phones';
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'link.phone_action' and details ->> 'action' = 'restart'), 'phone actions in the history';
+end $$;
+-- without two-step, or someone outside the business: nothing
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ begin
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'bulk_phones', '{"action":"remove","macs":["001565aabbcc"]}'); raise exception 'bulk without two-step';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000004'); set role authenticated;
+do $$ begin
+  begin perform public.link_command(current_setting('test.ws_l')::uuid, 'office-0001-abcd', 'phone_action', '{"mac":"001565aabbcc","action":"find"}'); raise exception 'stranger rang a phone';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+-- the office says what it did: a short summary, kept with the change and in the history; an older office's answer still works
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
+do $$ begin
+  perform public.link_office_done(current_setting('test.bulk_add')::uuid, true, null, null, '{"summary":"Added 1 phone, 1 didn''t work: not-a-mac isn''t a MAC address.","added":1,"skipped":[],"failed":[{"mac":"not-a-mac","why":"not a MAC address"}],"password":"x"}');
+  perform public.link_office_done(current_setting('test.cmd_set')::uuid, true, null, null);
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ declare st json; begin
+  st := public.link_command_state(current_setting('test.bulk_add')::uuid);
+  assert st ->> 'status' = 'done' and (st -> 'result') ->> 'summary' like 'Added 1 phone%' and ((st -> 'result') ->> 'added')::int = 1, format('summary: %s', st);
+  assert (st -> 'result')::text not like '%password%', 'only the summary fields are kept';
+  assert exists (select 1 from public.audit_log where action = 'link.bulk_done' and details ->> 'summary' like 'Added 1 phone%'), 'the summary is in the history';
+  assert public.link_command_state(current_setting('test.cmd_set')::uuid) ->> 'status' = 'done', 'settings done (4-argument answer)';
+end $$;
+reset role;
+
 -- ===== Support workspace: Report an issue, diagnostics privacy, Still having an issue / Confirm fixed, rating, promised updates
 -- Sam (staff at A) reports an issue from Riyeser Central: one diagnostic report and one ticket, scrubbed
 select pg_temp.as_user('22222222-2222-2222-2222-222222222222'); set role authenticated;

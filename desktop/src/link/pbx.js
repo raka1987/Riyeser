@@ -56,6 +56,7 @@ class Pbx extends EventEmitter {
     this.bindings = new Map();   // ext -> Map(contact -> binding)
     this.ctx = new Map();        // server transactions: "branch|METHOD" -> context
     this.branches = new Map();   // our branch id -> client transaction
+    this.probes = new Map();     // "Find this phone" rings (1.2.1): our branch id -> { msg, dest, provisional, final }
     this.calls = new Map();      // Call-ID -> call
     this.failures = new Map(); this.blocked = new Map();
     this.conns = new Map();      // TCP connections: "ip:port" -> socket
@@ -552,6 +553,7 @@ class Pbx extends EventEmitter {
     const via = sip.parseVia(sip.getHeader(res, 'via'));
     const cseq = sip.parseCSeq(sip.getHeader(res, 'cseq'));
     const b = this.branches.get(via.params.branch);
+    if (!b && this.probes.has(via.params.branch)) return this.probeResponse(this.probes.get(via.params.branch), res, cseq);
     if (!b) {
       // A resent 200 OK after the call was set up: pass it on toward the caller.
       if (res.status >= 200 && res.status < 300 && cseq.method === 'INVITE' && this.isOurHost(via.host) && (via.port || 5060) === this.port && sip.getAll(res, 'via').length > 1) {
@@ -747,6 +749,52 @@ class Pbx extends EventEmitter {
       ['to', `<sip:${address}:${port}>`], ['call-id', sip.newCallId(this.host)], ['cseq', '1 NOTIFY'], ['event', String(event || 'check-sync;reboot=false').replace(/[\r\n]/g, '')],
       ['subscription-state', 'terminated'], ['user-agent', AGENT]);
     this.sendMsg(n, { proto: 'UDP', address, port });
+  }
+
+  /**
+   * "Find this phone" (1.2.1): ring one desk phone for a few seconds, shown as a call from "Riyeser Link Office", then
+   * stop. Nobody can talk on it (no audio is offered). Only for a phone connected now. -> true when the ring was sent.
+   */
+  ring(ext, { ip = null, seconds = 5, from = 'Find this phone' } = {}) {
+    const map = this.bindings.get(String(ext)); if (!map || !this.running) return false;
+    const now = Date.now();
+    const b = [...map.values()].find((x) => x.expiresAt > now && x.device !== 'app' && (!ip || x.ip === ip)); if (!b) return false;
+    const dest = { proto: b.source.proto, address: b.source.address, port: b.source.port };
+    const branch = sip.newBranch();
+    const sdp = `v=0\r\no=riyeser 1 1 IN IP4 ${this.host}\r\ns=-\r\nc=IN IP4 ${this.host}\r\nt=0 0\r\nm=audio 9 RTP/AVP 0 8\r\na=inactive\r\n`;
+    const msg = { method: 'INVITE', uri: b.contact, headers: [], body: Buffer.from(sdp) };
+    msg.headers.push(['via', this.ourVia(dest.proto, branch)], ['max-forwards', '70'], ['from', `"${String(from).replace(/["\r\n]/g, '')}" <sip:riyeser@${this.host}:${this.port}>;tag=${sip.newTag()}`],
+      ['to', `<sip:${ext}@${this.host}>`], ['call-id', sip.newCallId(this.host)], ['cseq', '1 INVITE'], ['contact', `<sip:riyeser@${this.host}:${this.port}>`],
+      ['content-type', 'application/sdp'], ['user-agent', AGENT]);
+    const pr = { msg, dest, branch, provisional: false, final: false, timers: [] };
+    this.probes.set(branch, pr);
+    const later = (fn, ms) => { const t = setTimeout(fn, ms); if (t.unref) t.unref(); pr.timers.push(t); };
+    const buf = sip.serialize(msg); this._send(buf, dest);
+    if (dest.proto === 'UDP') for (const ms of [500, 1500]) later(() => { if (!pr.provisional && !pr.final) this._send(buf, dest); }, ms);
+    later(() => this.probeStop(pr), Math.max(1, Math.min(15, seconds)) * 1000);
+    later(() => { pr.timers.forEach(clearTimeout); this.probes.delete(branch); }, 32000);
+    return true;
+  }
+  probeStop(pr) {
+    if (pr.final || pr.cancelled) return; pr.cancelled = true;
+    const c = { method: 'CANCEL', uri: pr.msg.uri, headers: [['via', sip.getHeader(pr.msg, 'via')], ['max-forwards', '70'], ['from', sip.getHeader(pr.msg, 'from')], ['to', sip.getHeader(pr.msg, 'to')],
+      ['call-id', sip.getHeader(pr.msg, 'call-id')], ['cseq', '1 CANCEL']], body: Buffer.alloc(0) };
+    this.sendMsg(c, pr.dest);
+  }
+  probeResponse(pr, res, cseq) {
+    if (cseq.method !== 'INVITE') return;
+    if (res.status < 200) { pr.provisional = true; return; }
+    if (pr.final) return; pr.final = true;
+    const to = sip.getHeader(res, 'to');
+    const ack = (branch) => ({ method: 'ACK', uri: pr.msg.uri, headers: [['via', this.ourVia(pr.dest.proto, branch)], ['max-forwards', '70'], ['from', sip.getHeader(pr.msg, 'from')], ['to', to],
+      ['call-id', sip.getHeader(pr.msg, 'call-id')], ['cseq', '1 ACK']], body: Buffer.alloc(0) });
+    if (res.status >= 300) { this.sendMsg(ack(pr.branch), pr.dest); return; }
+    // someone picked it up: say goodbye straight away
+    let target = pr.msg.uri; try { target = sip.parseNameAddr(sip.getHeader(res, 'contact')).uri || target; } catch { /* the same address */ }
+    const a = ack(sip.newBranch()); a.uri = target; this.sendMsg(a, pr.dest);
+    const bye = { method: 'BYE', uri: target, headers: [['via', this.ourVia(pr.dest.proto, sip.newBranch())], ['max-forwards', '70'], ['from', sip.getHeader(pr.msg, 'from')], ['to', to],
+      ['call-id', sip.getHeader(pr.msg, 'call-id')], ['cseq', '2 BYE'], ['user-agent', AGENT]], body: Buffer.alloc(0) };
+    this.sendMsg(bye, pr.dest);
   }
 
   // ---------- housekeeping ----------

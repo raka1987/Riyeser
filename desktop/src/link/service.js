@@ -13,8 +13,12 @@ const { pickAdapter, localAddresses } = require('./netinfo');
 const { MdnsResponder, NAME: MDNS_NAME } = require('./mdns');
 const { NetWatcher } = require('./netwatch');
 const { findRouterName } = require('./pcname');
+const Bulk = require('../renderer/link-bulk');
 
 const MAX_LOG = 300;
+const MAX_HISTORY = 500;
+/** "Yealink SIP-T31P 124.86.0.40 00:15:65:aa:bb:cc" -> "124.86.0.40" (the phone's firmware, when it says). */
+function firmwareOf(ua) { const m = /(?:^|[\s/])v?(\d+(?:\.\d+){2,4})(?=\s|$|;)/.exec(String(ua || '')); return m ? m[1] : ''; }
 
 class PhoneService extends EventEmitter {
   /**
@@ -283,9 +287,9 @@ class PhoneService extends EventEmitter {
 
   // ---------- what the owner can do ----------
   devices() { return this.prov || new Provisioner({ store: this.store, directory: this.directory, host: this.host }); }
-  assign(mac, ext, vendor) { return this.devices().assign(mac, ext, { vendor }); }
-  unassign(mac) { return this.devices().unassign(mac); }
-  label(mac, fields) { const r = this.devices().label(mac, fields); this.emit('change'); return r; }
+  assign(mac, ext, vendor) { const p = this.devices().assign(mac, ext, { vendor }); this.note(`Gave phone ${prettyMac(p.mac)} to extension ${ext} (${this.directory.nameOf(ext)})`); return p; }
+  unassign(mac) { const r = this.devices().unassign(mac); this.note(`Took back phone ${prettyMac(normaliseMac(mac))}`); return r; }
+  label(mac, fields) { const r = this.devices().label(mac, fields); this.note(`Named phone ${prettyMac(r.mac)} "${r.label || 'no name'}"${r.location ? ` at ${r.location}` : ''}`); this.emit('change'); return r; }
   /** Replace a desk phone: the new one gets the old one's extension, name, location and note; the old one stops getting settings. */
   replacePhone(oldMac, newMac, vendor) {
     const was = this.provisionerData().phones.find((x) => x.mac === normaliseMac(oldMac));
@@ -298,7 +302,138 @@ class PhoneService extends EventEmitter {
     this.emit('change');
     return { ...p, label: was.label, location: was.location };
   }
-  ignore(mac) { return this.devices().ignore(mac); }
+  ignore(mac) { const r = this.devices().ignore(mac); this.note(`Ignored the new phone ${prettyMac(normaliseMac(mac))}`); return r; }
+
+  // ---------- 1.2.1: the change history, many phones at once, and each phone's own page ----------
+  /** The change history (newest first): who changed what, here or from the website. Never passwords. */
+  history(limit = 100) { return (this.store.get('phone-history', []) || []).slice(-limit).reverse(); }
+  note(what, by = this.actor || 'This PC') {
+    this.store.update('phone-history', [], (h) => [...(h || []), { at: new Date().toISOString(), by: String(by).slice(0, 60), what: String(what).slice(0, 300) }].slice(-MAX_HISTORY));
+    this.log('info', `${by === 'This PC' ? '' : `${by}: `}${what}.`);
+  }
+  /** A new extension for a phone without a person (a place, like Reception): named after it, marked shared. */
+  newShared(name, ext) { const p = this.directory.addPerson({ name: String(name || '').trim() || `Phone ${ext || ''}`.trim(), ext: ext || null, shared: true }); this.emit('change'); return p; }
+  /** What bulk adds and previews check against. */
+  bulkContext() {
+    const d = this.provisionerData(); const dir = this.directory.data();
+    return { phones: d.phones.map((x) => ({ mac: x.mac, ext: x.ext })), found: d.found.map((f) => ({ mac: f.mac, ignored: !!f.ignored })),
+      people: this.directory.people().map((x) => ({ ext: x.ext, name: x.name, email: x.email || '' })), used: [...this.directory.usedExts(), ...dir.groups.map((g) => g.ext)] };
+  }
+  /** "Add several phones": check the rows again here (the list may have changed), then add each. -> { added, skipped, failed, summary, rows } */
+  bulkAdd(rows, { start = '101', auto = false, shared = false, by = this.actor || 'This PC' } = {}) {
+    if (!Array.isArray(rows) || !rows.length) throw new Error('Paste or import at least one MAC address.');
+    if (rows.length > 500) throw new Error('Add up to 500 phones at a time.');
+    const p = Bulk.preview(rows.map((r, i) => ({ line: r.line || i + 1, macText: String(r.macText || r.mac || ''), model: String(r.model || ''), ext: String(r.ext || ''), person: String(r.person || ''),
+      name: String(r.name || ''), location: String(r.location || '') })), { ...this.bulkContext(), start, auto, shared });
+    const added = []; const skipped = []; const failed = []; const made = new Map();
+    for (const r of p.rows) {
+      if (r.state === 'skip') { skipped.push({ mac: r.mac || r.macText, why: r.dup ? 'duplicates' : 'already added' }); continue; }
+      if (r.state === 'error') { failed.push({ mac: r.macText, why: r.notes[0] || 'not valid' }); continue; }
+      try {
+        const vendor = r.supported ? r.vendor : undefined;
+        let ext = r.ext;
+        if (ext && r.newExt) { if (!made.has(ext)) made.set(ext, this.directory.addPerson({ name: r.extName, ext, shared: !r.person })); }
+        if (ext) this.devices().assign(r.mac, ext, { vendor });
+        else this.devices().addFound(r.mac, { vendor: vendor || '', model: r.model || '', label: r.name, location: r.location });
+        if (ext && (r.name || r.location)) this.devices().label(r.mac, { name: r.name, location: r.location, note: '' });
+        if (r.model && ext) { const d = this.provisionerData(); const x = d.phones.find((q) => q.mac === r.mac); if (x && !x.model) { x.model = String(r.model).replace(new RegExp(`^${r.vendorName}\\s*`, 'i'), '').slice(0, 40); this.store.set('phone-devices', d); } }
+        added.push({ mac: r.mac, ext });
+      } catch (e) { failed.push({ mac: r.mac, why: e.message }); }
+    }
+    const summary = Bulk.summary({ added: added.length, skipped, failed });
+    this.note(`Added several phones: ${summary.replace(/\.$/, '')}${made.size ? ` (new extensions ${[...made.keys()].join(', ')})` : ''}`, by);
+    this.emit('change');
+    return { added, skipped, failed, summary, rows: p.rows.map((r) => ({ mac: r.mac, state: r.state, notes: r.notes, ext: r.ext })) };
+  }
+  /**
+   * Do one thing to many phones. action:
+   *   give      opts.to: { mac: ext } (each to a person), or opts.auto: true with opts.start (new extensions, in order, named after each phone)
+   *   shared    a new extension for each, named opts.names[mac] or after the phone's name or location ("Reception", "Meeting room")
+   *   ignore / unignore / restart / resync / unassign / remove
+   *   location  opts.location (a branch name; '' clears it)
+   * -> { done, skipped: [{ mac, why }], failed: [{ mac, why }], summary }
+   */
+  bulk(action, macs, opts = {}, by = this.actor || 'This PC') {
+    const list = [...new Set((Array.isArray(macs) ? macs : []).map((m) => normaliseMac(m)).filter(Boolean))];
+    if (!list.length) throw new Error('Tick at least one phone.');
+    if (list.length > 500) throw new Error('Change up to 500 phones at a time.');
+    const done = []; const skipped = []; const failed = [];
+    const d0 = this.provisionerData();
+    const given = (m) => d0.phones.find((x) => x.mac === m); const fresh = (m) => d0.found.find((x) => x.mac === m);
+    const nameFor = (m) => { const x = given(m) || fresh(m) || {}; return (opts.names && opts.names[m]) || x.label || x.location || ''; };
+    let next = Number(opts.start) || 101;
+    for (const m of list) {
+      try {
+        if (action === 'give') {
+          if (given(m)) { skipped.push({ mac: m, why: 'already given to someone' }); continue; }
+          let ext = opts.to && opts.to[m];
+          if (!ext && opts.auto) { [ext] = Bulk.nextFree(next, this.directory.usedExts()); if (!ext) throw new Error('No free extensions left'); next = Number(ext) + 1; this.directory.addPerson({ name: nameFor(m) || `Phone ${ext}`, ext, shared: true }); }
+          if (!ext) { skipped.push({ mac: m, why: 'no person chosen' }); continue; }
+          this.devices().assign(m, ext); done.push(m);
+        } else if (action === 'shared') {
+          if (given(m)) { skipped.push({ mac: m, why: 'already given to someone' }); continue; }
+          const [ext] = Bulk.nextFree(next, this.directory.usedExts()); if (!ext) throw new Error('No free extensions left'); next = Number(ext) + 1;
+          this.directory.addPerson({ name: nameFor(m) || `Shared phone ${ext}`, ext, shared: true });
+          this.devices().assign(m, ext); done.push(m);
+        } else if (action === 'ignore') { if (given(m)) { skipped.push({ mac: m, why: 'given to someone (take it back first)' }); continue; } if (this.devices().ignore(m)) done.push(m); else skipped.push({ mac: m, why: 'not on the list' }); }
+        else if (action === 'unignore') { if (this.devices().unignore(m)) done.push(m); else skipped.push({ mac: m, why: 'not on the list' }); }
+        else if (action === 'restart' || action === 'resync') { if (this.restartPhone(m, { reboot: action === 'restart', quiet: true })) done.push(m); else skipped.push({ mac: m, why: 'not on the network now' }); }
+        else if (action === 'unassign') { if (!given(m)) { skipped.push({ mac: m, why: 'not given to anyone' }); continue; } this.devices().unassign(m); done.push(m); }
+        else if (action === 'remove') { if (this.devices().remove(m)) done.push(m); else skipped.push({ mac: m, why: 'not on the list' }); }
+        else if (action === 'location') {
+          const x = given(m) || fresh(m); if (!x) { skipped.push({ mac: m, why: 'not on the list' }); continue; }
+          this.devices().label(m, { name: x.label || '', location: String(opts.location || ''), note: x.note || '' }); done.push(m);
+        } else throw new Error('Riyeser Link Office doesn\'t know how to do that.');
+      } catch (e) { failed.push({ mac: m, why: e.message }); }
+    }
+    const VERB = { give: 'Gave out', shared: 'Added as shared', ignore: 'Ignored', unignore: 'Brought back', restart: 'Restarted', resync: 'Re-sent settings to', unassign: 'Took back', remove: 'Removed', location: 'Moved' };
+    const summary = Bulk.summary({ verb: VERB[action] || 'Changed', done: done.length, skipped, failed }).replace(/\.$/, action === 'location' ? ` to ${opts.location || 'no location'}.` : '.');
+    if (done.length || failed.length) this.note(`${summary.replace(/\.$/, '')} (${done.map((x) => prettyMac(x)).slice(0, 12).join(', ')}${done.length > 12 ? '…' : ''})`, by);
+    this.emit('change');
+    return { done, skipped, failed, summary };
+  }
+  /** Where a phone is now (its registration, else the address it last fetched its settings from). */
+  phoneAt(mac) {
+    const m = normaliseMac(mac); const d = this.provisionerData(); const x = d.phones.find((p) => p.mac === m) || d.found.find((p) => p.mac === m);
+    if (!x) return null;
+    const reg = this.pbx ? this.pbx.snapshot().registrations.find((r) => x.ip && r.ip === x.ip && r.device !== 'app') : null;
+    return { phone: x, ip: x.ip || (reg && reg.ip) || null, port: (reg && reg.port) || 5060, reg };
+  }
+  /** Restart a phone (reboot) or just ask it to fetch its settings again (re-send settings). -> true when asked */
+  restartPhone(mac, { reboot = true, quiet = false, by = this.actor || 'This PC' } = {}) {
+    const at = this.phoneAt(mac); if (!at) throw new Error('That phone isn\'t on the list.');
+    if (!this.pbx || !at.ip) { if (quiet) return false; throw new Error('That phone isn\'t on the network right now, so it can\'t be asked. It picks up its settings when it next starts.'); }
+    this.pbx.checkSync(at.ip, at.port, resyncEvent(at.phone.vendor, { reboot }));
+    if (!quiet) this.note(`${reboot ? 'Restarted' : 'Re-sent settings to'} ${at.phone.label || prettyMac(at.phone.mac)}`, by);
+    return true;
+  }
+  /** Find this phone: ring it for 5 seconds as "Find this phone" (connected phones only). */
+  findPhone(mac, by = this.actor || 'This PC') {
+    const at = this.phoneAt(mac); if (!at || !at.phone.ext) throw new Error('Give the phone to someone first.');
+    if (!this.pbx || !this.pbx.ring(at.phone.ext, { ip: at.ip, seconds: 5 })) throw new Error('That phone isn\'t connected right now, so it can\'t ring.');
+    this.note(`Rang ${at.phone.label || prettyMac(at.phone.mac)} to find it`, by);
+    return true;
+  }
+  /** A phone's own settings (only what its maker supports). They apply when it next fetches its settings: restart it. */
+  phoneSettings(mac, settings, by = this.actor || 'This PC') {
+    const at = this.phoneAt(mac); if (!at || !at.phone.ext) throw new Error('Give the phone to someone first.');
+    const { settings: clean, dropped } = Bulk.cleanSettings(at.phone.vendor, settings);
+    const p = this.devices().setPhoneSettings(mac, clean);
+    this.note(`Changed the settings of ${p.label || prettyMac(p.mac)} (${Object.keys(clean).join(', ') || 'back to normal'})`, by);
+    this.emit('change');
+    return { settings: clean, dropped };
+  }
+  /** Change a phone's extension or person: give it to someone else, or to a new shared extension (name). */
+  movePhone(mac, { ext, sharedName } = {}, by = this.actor || 'This PC') {
+    const m = normaliseMac(mac); const at = this.phoneAt(m); if (!at) throw new Error('That phone isn\'t on the list.');
+    let to = ext ? String(ext) : null;
+    if (!to && sharedName) to = this.directory.addPerson({ name: sharedName, shared: true }).ext;
+    if (!to) throw new Error('Choose who the phone is for, or a name for a shared phone.');
+    const p = this.devices().assign(m, to);
+    this.note(`${p.label || prettyMac(m)} is now extension ${to} (${this.directory.nameOf(to)})`, by);
+    this.emit('change');
+    return p;
+  }
   addPerson(p) { const r = this.directory.addPerson(p); this.emit('change'); return r; }
   removePerson(id) { const r = this.directory.removePerson(id); this.emit('change'); return r; }
   setDnd(ext, on) { this.directory.setDnd(ext, on); this.emit('change'); return true; }
@@ -324,11 +459,14 @@ class PhoneService extends EventEmitter {
       const kinds = [...new Set(regs.map((r) => r.device))];
       const assigned = phones.filter((x) => x.ext === p.ext);
       const state = waiting ? 'waiting for Riyeser Link' : busy.get(p.ext) || (regs.length ? 'ready' : 'not connected');
-      return { id: p.id, name: p.name, ext: p.ext, source: p.source, dnd: this.directory.dnd(p.ext), device: kinds.length ? kinds.join(' + ') : assigned.length ? 'desk phone' : '',
+      return { id: p.id, name: p.name, ext: p.ext, source: p.source, shared: !!p.shared, dnd: this.directory.dnd(p.ext), device: kinds.length ? kinds.join(' + ') : assigned.length ? 'desk phone' : '',
         connected: regs.length > 0, state, ips: regs.map((r) => r.ip) };
     });
     const regIps = new Set(snap.registrations.map((r) => r.ip));
-    const found = this.provisionerData().found.filter((f) => !f.ignored).map((f) => ({ ...f, macText: prettyMac(f.mac), vendorName: VENDORS[f.vendor] || 'Desk phone' }));
+    const fnd = (f) => ({ ...f, macText: prettyMac(f.mac), vendorName: VENDORS[f.vendor] || Bulk.vendorName(Bulk.ouiVendor(f.mac)) || 'Desk phone' });
+    const found = this.provisionerData().found.filter((f) => !f.ignored).map(fnd);
+    const ignored = this.provisionerData().found.filter((f) => f.ignored).map(fnd);
+    const regOf = (ip) => snap.registrations.find((r) => ip && r.ip === ip && r.device !== 'app') || null;
     const d = this.directory.data();
     return {
       state: this.state, error: this.error, host: this.host, sipPort: snap.port || this.opts.sipPort || 5060, httpPort: this.prov ? this.prov.httpPort : (this.opts.httpPort || 5080),
@@ -336,8 +474,10 @@ class PhoneService extends EventEmitter {
       people, groups: this.directory.groups().map((g) => ({ ...g, names: g.members.map((m) => this.directory.nameOf(m)) })),
       phones: phones.map((x) => ({ ...x, macText: prettyMac(x.mac), vendorName: VENDORS[x.vendor] || 'Desk phone', name: this.directory.nameOf(x.ext), registered: !!(x.ip && regIps.has(x.ip)),
         lastRegistered: (x.ip && regIps.has(x.ip)) ? new Date().toISOString() : (((this.store.get('phone-cloud', {}) || {}).lastReg || {})[x.mac] || null),
-        state: waiting ? 'waiting for Riyeser Link' : (x.ip && regIps.has(x.ip)) ? 'connected' : x.lastFetch ? 'set up, not connected now' : 'waiting for the phone to ask for its settings' })),
-      found, inProgress: snap.calls, recent: this.calls.list({ limit: 100 }),
+        state: waiting ? 'waiting for Riyeser Link' : (x.ip && regIps.has(x.ip)) ? 'connected' : x.lastFetch ? 'set up, not connected now' : 'waiting for the phone to ask for its settings',
+        registeredSince: (regOf(x.ip) || {}).since || null, firmware: firmwareOf((regOf(x.ip) || {}).userAgent), agent: String((regOf(x.ip) || {}).userAgent || '').slice(0, 120),
+        shared: !!((this.directory.person(x.ext) || {}).shared), settings: x.settings || {}, caps: Bulk.caps(x.vendor) })),
+      found, ignored, history: this.history(60), inProgress: snap.calls, recent: this.calls.list({ limit: 100 }),
       counts: { connected: new Set(snap.registrations.map((r) => r.ext)).size, onCalls: snap.calls.filter((c) => c.state === 'talking').length, phones: snap.registrations.length },
       registrations: snap.registrations.map((r) => ({ ext: r.ext, ip: r.ip, device: r.device, since: r.since })), addressStable: this.addressStable(),
       blocked: snap.blocked, ipChanged: this.ipChanged || null, adapter: this.adapter(), names: this.names(), offline: !!this.offline,

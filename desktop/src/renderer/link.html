@@ -8,79 +8,117 @@
   <link rel="stylesheet" href="link.css">
 </head>
 <body>
+  <!-- 1.2.1: one control panel. A slim menu on the left (Overview, Phones, People, Calls, Settings), the work on the right. -->
   <header class="top">
     <img src="logos/link.png" alt="" class="logo">
     <div class="grow"><h1>Riyeser Link Office</h1><div class="sub">Your office phone system<span id="biz"></span></div></div>
-    <span id="ver" class="muted"></span>
+    <button class="sos-chip" id="soschip" data-a="sosshow" hidden title="These phones can't call emergency services">⚠ Internal calls only</button>
+    <span id="ver" class="muted hide-sm"></span>
   </header>
-  <main class="inner">
-    <section id="state" class="state" role="status"></section>
-    <p class="note sos"><b>Internal calls only.</b> These phones can't call emergency services — keep a mobile or normal phone line for that.</p>
-    <div id="notices"></div>
-    <nav class="tabs" role="tablist">
-      <button role="tab" data-tab="phones" class="on">☎ Phones</button><button role="tab" data-tab="people">People</button><button role="tab" data-tab="calls">Recent calls</button><button role="tab" data-tab="settings">Settings</button>
+  <p class="note sos" id="sos"><span class="grow"><b>Internal calls only.</b> These phones can't call emergency services — keep a mobile or normal phone line for that.</span><button class="x" data-a="soshide" aria-label="Hide this until Riyeser Link Office is opened again">✕</button></p>
+  <div class="shell">
+    <nav class="tabs side" role="tablist" aria-label="Riyeser Link Office">
+      <button role="tab" data-tab="overview" class="on"><span class="ic" aria-hidden="true">▦</span>Overview<span class="badge" id="navattn" hidden></span></button>
+      <button role="tab" data-tab="phones"><span class="ic" aria-hidden="true">☎</span>Phones<span class="badge" id="navnew" hidden></span></button>
+      <button role="tab" data-tab="people"><span class="ic" aria-hidden="true">👥</span>People</button>
+      <button role="tab" data-tab="calls"><span class="ic" aria-hidden="true">↗</span>Calls</button>
+      <button role="tab" data-tab="settings"><span class="ic" aria-hidden="true">⚙</span>Settings</button>
     </nav>
-    <div data-pane="phones">
-      <section class="panel setup" id="setup"></section>
-      <section class="hero" id="hero"></section>
-      <section class="panel" id="manualbox" hidden>
-        <div class="ph"><h2>Set up a phone by hand</h2><span class="muted">For any SIP desk phone or app (Linphone, Zoiper…)</span></div>
-        <div class="row"><select id="manualwho"></select></div>
-        <div id="manualout"></div>
-      </section>
-      <section id="found"></section>
-      <section class="panel">
-        <div class="ph"><h2>Desk phones</h2><span class="muted" id="phcount"></span></div>
-        <div id="phones"></div>
-        <details class="help" id="addphone">
-          <summary>Add a desk phone</summary>
+    <main class="inner">
+      <section id="state" class="state" role="status"></section>
+      <div id="notices"></div>
+
+      <div data-pane="overview">
+        <section class="panel setup" id="setup"></section>
+        <section class="panel attn" id="attn"></section>
+        <div class="tiles" id="tiles"></div>
+        <section class="hero" id="hero"></section>
+      </div>
+
+      <div data-pane="phones" hidden>
+        <div class="paneh"><h2>Phones</h2><span class="muted" id="phcount"></span>
+          <span class="grow"></span>
+          <button class="btn s" data-a="hand">Set up by hand</button><button class="btn s" data-a="addphone">+ Add a phone</button><button class="btn" data-a="addmany">+ Add several phones</button></div>
+        <div class="srvline" id="srvline"></div>
+        <div class="split" id="phsplit">
+          <div class="listbox">
+            <div class="filters" id="phfilters"></div>
+            <div class="bulkbar" id="phbulk" hidden></div>
+            <div class="tbox" id="phones"></div>
+          </div>
+          <aside class="side" id="phpanel" hidden aria-label="Phone details"></aside>
+        </div>
+        <section class="panel" id="manualbox" hidden>
+          <div class="ph"><h2>Set up a phone by hand</h2><span class="muted">For any SIP desk phone or app (Linphone, Zoiper…)</span><span class="grow"></span><button class="btn s sm" data-a="hand">Close</button></div>
+          <div class="row"><select id="manualwho"></select></div>
+          <div id="manualout"></div>
+        </section>
+        <details class="help panel" id="addphone">
+          <summary>How to add a desk phone</summary>
           <ol>
             <li>Plug the phone into a network socket on the same office network as this PC.</li>
             <li>Many desk phones don't come with a power adapter and expect power over the network cable (PoE). Buy the phone's power adapter, or a small PoE switch.</li>
-            <li>Turn the phone on. Yealink, Grandstream, Snom and Polycom phones ask the network who sets them up, and appear here as <b>New phone found</b>. Choose who it's for, then restart the phone if it hasn't set itself up within a minute.</li>
+            <li>Turn the phone on. Yealink, Grandstream, Snom and Polycom phones ask the network who sets them up, and appear here as <b>New</b>. Tick them and choose <b>Give to…</b>, then restart the phone if it hasn't set itself up within a minute.</li>
             <li>Wi-Fi desk phones work too, once joined to the office Wi-Fi.</li>
             <li>A phone in another building or at home won't reach it; that's coming with the cloud version.</li>
           </ol>
-          <p class="muted">Phone didn't appear? Add it by its MAC address (12 letters and numbers on a sticker under the phone), or use <b>Set up a phone by hand</b> above to type the details into any SIP phone.</p>
+          <p class="muted">Phone didn't appear? Add it by its MAC address (12 letters and numbers on a sticker under the phone), or many at once with <b>Add several phones</b> (paste a list or import a CSV).</p>
           <form id="macform" class="row">
             <input id="mac" placeholder="MAC address, e.g. 00:15:65:12:34:56" autocomplete="off" spellcheck="false">
             <select id="macwho"></select>
             <button class="btn">Add phone</button>
           </form>
         </details>
-      </section>
-    </div>
-    <div data-pane="people" hidden>
-      <section class="panel">
-        <div class="ph"><h2>People</h2><span id="pcount" class="muted"></span></div>
-        <div id="people"></div>
-        <div id="addperson"></div>
-      </section>
-      <section class="panel" id="groupsp"><div class="ph"><h2>Ring groups</h2><span class="muted">Dial the group's number to ring everyone in it at once</span></div><div id="groups"></div></section>
-    </div>
-    <div data-pane="calls" hidden>
-      <section class="panel">
-        <div class="ph"><h2>Recent calls</h2><span class="muted">Kept on this PC for 90 days</span></div>
-        <div id="calls"></div>
-      </section>
-    </div>
-    <div data-pane="settings" hidden>
-      <section class="panel">
-        <div class="ph"><h2>Riyeser account</h2></div>
-        <div id="account"></div>
-      </section>
-      <section class="panel" id="addrpanel">
-        <div class="ph"><h2>This PC's address</h2><span class="muted">So the phones always find it</span></div>
-        <div id="address"></div>
-      </section>
-      <details class="panel adv">
-        <summary><h2>Advanced</h2></summary>
-        <div id="advanced"></div>
-      </details>
-    </div>
-  </main>
+        <section id="found" hidden></section>
+      </div>
+
+      <div data-pane="people" hidden>
+        <div class="paneh"><h2>People</h2><span id="pcount" class="muted"></span><span class="grow"></span></div>
+        <div class="split" id="psplit">
+          <div class="listbox">
+            <div class="filters" id="pfilters"></div>
+            <div class="tbox" id="people"></div>
+            <div id="addperson"></div>
+          </div>
+          <aside class="side" id="ppanel" hidden aria-label="Person details"></aside>
+        </div>
+        <section class="panel" id="groupsp"><div class="ph"><h2>Ring groups</h2><span class="muted">Dial the group's number to ring everyone in it at once</span></div><div id="groups"></div></section>
+      </div>
+
+      <div data-pane="calls" hidden>
+        <div class="paneh"><h2>Recent calls</h2><span class="muted">Kept on this PC for 90 days</span></div>
+        <div class="split" id="csplit">
+          <div class="listbox">
+            <div class="filters" id="cfilters"></div>
+            <div class="tbox" id="calls"></div>
+          </div>
+          <aside class="side" id="cpanel" hidden aria-label="Call details"></aside>
+        </div>
+      </div>
+
+      <div data-pane="settings" hidden>
+        <section class="panel">
+          <div class="ph"><h2>Riyeser account</h2></div>
+          <div id="account"></div>
+        </section>
+        <section class="panel" id="addrpanel">
+          <div class="ph"><h2>This PC's address</h2><span class="muted">So the phones always find it</span></div>
+          <div id="address"></div>
+        </section>
+        <section class="panel">
+          <div class="ph"><h2>Change history</h2><span class="muted">Who changed the phones, here or on the website</span></div>
+          <div id="history"></div>
+        </section>
+        <details class="panel adv">
+          <summary><h2>Advanced</h2></summary>
+          <div id="advanced"></div>
+        </details>
+      </div>
+    </main>
+  </div>
   <div id="toast" class="toast" hidden></div>
   <script src="link-text.js"></script>
+  <script src="link-bulk.js"></script>
   <script src="link.js"></script>
 </body>
 </html>

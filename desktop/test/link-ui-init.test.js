@@ -16,15 +16,17 @@ function fakePage() {
   const listeners = {};
   const make = (props = {}) => {
     const el = { innerHTML: '', textContent: '', className: '', hidden: false, open: false, value: '', dataset: {}, style: {}, attrs: {},
-      classList: { set: new Set(), toggle(c, on) { if (on) this.set.add(c); else this.set.delete(c); }, contains(c) { return this.set.has(c); }, add(c) { this.set.add(c); } },
-      setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {}, focus() {}, scrollIntoView() {}, closest() { return null; }, querySelector: () => make(), ...props };
+      classList: { set: new Set(), toggle(c, on) { if (on) this.set.add(c); else this.set.delete(c); }, contains(c) { return this.set.has(c); }, add(c) { this.set.add(c); }, remove(c) { this.set.delete(c); } },
+      setAttribute(k, v) { this.attrs[k] = v; }, addEventListener() {}, focus() {}, scrollIntoView() {}, closest() { return null; }, contains() { return false; }, before() {}, nextElementSibling: null,
+      querySelector: () => make(), querySelectorAll: () => [], ...props };
     return el;
   };
   const byId = {};
   for (const m of HTML.matchAll(/id="([^"]+)"/g)) byId[m[1]] = make({ id: m[1] });
   byId.manualbox.hidden = true;
-  const tabs = ['phones', 'people', 'calls', 'settings'].map((t) => { const b = make({ tag: 'button', dataset: { tab: t } }); b.closest = (s) => (s === 'button' ? b : null); return b; });
-  const panes = ['phones', 'people', 'calls', 'settings'].map((p) => make({ dataset: { pane: p }, hidden: p !== 'phones' }));
+  const TABS = ['overview', 'phones', 'people', 'calls', 'settings'];
+  const tabs = TABS.map((t) => { const b = make({ tag: 'button', dataset: { tab: t } }); b.closest = (s) => (s === 'button' ? b : null); return b; });
+  const panes = TABS.map((p) => make({ dataset: { pane: p }, hidden: p !== 'overview' }));
   const adv = make({ open: false });
   const document = {
     activeElement: null,
@@ -42,11 +44,12 @@ function fakePage() {
 function boot(call) {
   const page = fakePage(); const errors = [];
   const ctx = vm.createContext({ document: page.document, console: { error: (...a) => errors.push(a.join(' ')), log() {} }, setTimeout: (f, ms) => { const t = setTimeout(f, ms); t.unref(); return t; }, clearTimeout, Promise, Date, Error, String, Object, Map, Set,
-    localStorage: { getItem: () => null, setItem() {} } });
+    localStorage: { getItem: () => null, setItem() {} }, sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} } });
   const g = vm.runInContext('this', ctx);
   g.window = g;
   Object.defineProperty(g, 'api', { value: Object.freeze({ call, on() {} }), configurable: false, enumerable: true, writable: false });
   vm.runInContext(fs.readFileSync(path.join(R, 'link-text.js'), 'utf8'), ctx, { filename: 'link-text.js' });
+  vm.runInContext(fs.readFileSync(path.join(R, 'link-bulk.js'), 'utf8'), ctx, { filename: 'link-bulk.js' });
   vm.runInContext(fs.readFileSync(path.join(R, 'link.js'), 'utf8'), ctx, { filename: 'link.js' });
   return { ...page, errors, ctx };
 }
@@ -67,9 +70,10 @@ test('the screen starts with a backend that answers: status filled in, tabs swit
   await tick();
   assert.match(p.byId.state.innerHTML, /running on this PC \(192\.168\.1\.20\)/);
   assert.match(p.byId.hero.innerHTML, /192\.168\.1\.20/);
-  await p.click(p.tabs[1]);
+  assert.match(p.byId.tiles.innerHTML, /Phones/);
+  await p.click(p.tabs[2]);
   assert.equal(p.panes.find((x) => x.dataset.pane === 'people').hidden, false);
-  assert.equal(p.panes.find((x) => x.dataset.pane === 'phones').hidden, true);
+  assert.equal(p.panes.find((x) => x.dataset.pane === 'overview').hidden, true);
   assert.deepEqual(p.errors, []);
 });
 
@@ -78,7 +82,7 @@ test('a backend that never answers: "Starting…" at the top, never an empty bar
   await tick();
   assert.match(p.byId.state.innerHTML, /Starting Riyeser Link Office/);
   assert.equal(p.byId.setup.innerHTML, '');   // empty boxes are hidden by link.css (:empty)
-  await p.click(p.tabs[3]);
+  await p.click(p.tabs[4]);
   assert.equal(p.panes.find((x) => x.dataset.pane === 'settings').hidden, false);
 });
 
@@ -88,10 +92,10 @@ test('a backend that fails: the problem is said at the top with Try again, it ke
   await tick();
   assert.match(p.byId.state.innerHTML, /couldn't be read/);
   assert.match(p.byId.state.innerHTML, /data-a="reload"/);
-  await p.click(p.tabs[2]);
+  await p.click(p.tabs[3]);
   assert.equal(p.panes.find((x) => x.dataset.pane === 'calls').hidden, false);
   fail = false;
-  const reload = { dataset: { a: 'reload' }, disabled: false }; reload.closest = () => reload;
+  const reload = { dataset: { a: 'reload' }, disabled: false }; reload.closest = (s) => (s === 'button' ? reload : null);
   await p.click(reload); await tick();
   assert.ok(asked >= 2);
   assert.match(p.byId.state.innerHTML, /running on this PC/);

@@ -40,17 +40,21 @@ function buildPayload(status, { officeId, pcName = '', version = '', adapters = 
       const on = p.state === 'connected';
       return { mac: p.mac, vendor: VENDORS[p.vendor] || '', model: p.model || '', extension: p.ext, assigned: true, registered: on,
         last_registered: on ? iso(now) : (lastReg[p.mac] || null), ip: p.ip || null,
-        name: p.label || '', location: p.location || '', note: p.note || '', provisioned_at: p.lastFetch || null };
+        name: p.label || '', location: p.location || '', note: p.note || '', provisioned_at: p.lastFetch || null,
+        // 1.2.1: for the website's phone panel (no calls or passwords): firmware, when it connected, its own settings, shared
+        firmware: p.firmware || '', registered_since: p.registeredSince || null, last_seen: p.lastSeen || null, shared: !!p.shared, settings: p.settings || {} };
     }),
     ...(status.found || []).map((f) => ({ mac: f.mac, vendor: VENDORS[f.vendor] || '', model: f.model || '', extension: null, assigned: false, registered: false,
-      last_registered: null, ip: f.ip || null })),
+      last_registered: null, ip: f.ip || null, name: f.label || '', location: f.location || '', last_seen: f.lastSeen || null })),
+    ...(status.ignored || []).map((f) => ({ mac: f.mac, vendor: VENDORS[f.vendor] || '', model: f.model || '', extension: null, assigned: false, registered: false,
+      last_registered: null, ip: f.ip || null, ignored: true, last_seen: f.lastSeen || null })),
   ];
   const regsOf = (ext) => regs.filter((r) => r.ext === ext);
   // "On a call" in Riyeser Link: yes or no for each extension (who it's with and the number never leave this PC)
   const talking = new Set();
   for (const c of status.inProgress || []) for (const e of [c.from, c.answeredBy || (c.state === 'talking' ? c.to : null)]) if (e) talking.add(String(e));
   const extensions = [
-    ...(status.people || []).map((p) => ({ extension: p.ext, name: p.name, type: 'person', registered: regsOf(p.ext).length,
+    ...(status.people || []).map((p) => ({ extension: p.ext, name: p.name, type: 'person', shared: !!p.shared, registered: regsOf(p.ext).length,
       desk_phones: (status.phones || []).filter((x) => x.ext === p.ext).length, app_users: regsOf(p.ext).filter((r) => r.device === 'app').length, dnd: !!p.dnd, in_call: talking.has(String(p.ext)) })),
     ...(status.groups || []).map((g) => ({ extension: g.ext, name: g.name, type: 'group', members: (g.members || []).length })),
   ];
@@ -65,7 +69,7 @@ function buildPayload(status, { officeId, pcName = '', version = '', adapters = 
     address_changes: (status.addressChanges || []).slice(0, 5).map((c) => ({ from: c.from, to: c.to, at: c.at })),
     licence: { active: !!lic.active, state: lic.state || '', text: lic.text || lic.message || '' },
     counts: { people: (status.people || []).length, groups: (status.groups || []).length, phones_assigned: (status.phones || []).length,
-      phones_connected: phones.filter((p) => p.registered).length, new_phones: (status.found || []).length,
+      phones_connected: phones.filter((p) => p.registered).length, new_phones: (status.found || []).length, ignored_phones: (status.ignored || []).length,
       app_users: regs.filter((r) => r.device === 'app').length, calls_in_progress: (status.inProgress || []).length,
       calls_made: (status.recent || []).filter((c) => c.result === 'answered').length },   // a count only: "Make a test call" ticks itself
     phones, extensions,
@@ -82,8 +86,13 @@ function sealFor(jwk, text) {
   return crypto.publicEncrypt({ key, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' }, Buffer.from(String(text), 'utf8')).toString('base64');
 }
 
-/** Do one change from the website. -> { ok, error?, sealed? } (never the password itself) */
+const BY = 'Riyeser Link (website)';
+/** Do one change from the website. -> { ok, error?, sealed?, result? } (never the password itself) */
 function applyCommand(service, cmd) {
+  service.actor = BY;
+  try { return applyOne(service, cmd); } finally { service.actor = null; }
+}
+function applyOne(service, cmd) {
   const d = (cmd && cmd.data) || {};
   const ext = d.extension == null ? '' : String(d.extension);
   const person = () => { if (!service.directory.person(ext)) throw new Error(`No one has extension ${ext} on Riyeser Link Office.`); };
@@ -115,6 +124,24 @@ function applyCommand(service, cmd) {
         service.log('info', `Riyeser Link asked for extension ${ext}'s password (Set up a phone by hand). It was sent encrypted, for that person only.`);
         return { ok: true, sealed };
       }
+      // 1.2.1: many phones at once, and each phone's own page
+      case 'bulk_phones': {
+        const act = String(d.action || '');
+        if (act === 'add') { const r = service.bulkAdd(Array.isArray(d.rows) ? d.rows : [], { start: d.start, auto: !!d.auto, shared: !!d.shared }); return { ok: true, result: { summary: r.summary, added: r.added.length, skipped: r.skipped, failed: r.failed } }; }
+        const to = {}; for (const [m, e] of Object.entries(d.to && typeof d.to === 'object' ? d.to : {})) { const k = normaliseMac(m); if (k && /^\d{3}$/.test(String(e))) { if (!service.directory.person(String(e))) throw new Error(`No one has extension ${e} on Riyeser Link Office.`); to[k] = String(e); } }
+        const r = service.bulk(act, Array.isArray(d.macs) ? d.macs : [], { to, auto: !!d.auto, start: d.start, location: d.location, names: d.names });
+        return { ok: true, result: { summary: r.summary, done: r.done.length, skipped: r.skipped, failed: r.failed } };
+      }
+      case 'phone_action': {
+        const m = mac(); const act = String(d.action || '');
+        if (act === 'restart' || act === 'resync') service.restartPhone(m, { reboot: act === 'restart' });
+        else if (act === 'find') service.findPhone(m);
+        else if (['ignore', 'unignore', 'remove'].includes(act)) { const r = service.bulk(act, [m]); if (!r.done.length) throw new Error((r.skipped[0] || r.failed[0] || {}).why || 'Nothing was changed.'); }
+        else if (act === 'move') { if (d.extension) person(); service.movePhone(m, { ext: d.extension ? ext : null, sharedName: d.shared_name }); }
+        else throw new Error('This Riyeser Link Office doesn\'t know how to do that yet. Update it in Riyeser Central.');
+        return { ok: true };
+      }
+      case 'phone_settings': { const r = service.phoneSettings(mac(), d.settings || {}); return { ok: true, result: { applied: Object.keys(r.settings), dropped: r.dropped } }; }
       default: throw new Error('This Riyeser Link Office doesn\'t know how to do that yet. Update it in Riyeser Central.');
     }
     service.log('info', `From Riyeser Link: ${what}.`);
@@ -191,7 +218,11 @@ class LinkCloud extends EventEmitter {
       const list = await this.withClient((o) => o.rpc('link_office_pending', { ws: co.workspace_id, office_id: office }));
       for (const cmd of Array.isArray(list) ? list : []) {
         const r = applyCommand(this.service, cmd);
-        await this.withClient((o) => o.rpc('link_office_done', { command: cmd.id, ok: r.ok, error: r.ok ? null : r.error, sealed: r.sealed || null }));
+        const args = { command: cmd.id, ok: r.ok, error: r.ok ? null : r.error, sealed: r.sealed || null };
+        if (r.result) {
+          try { await this.withClient((o) => o.rpc('link_office_done', { ...args, result: r.result })); }
+          catch (e) { if (!missingFn(e)) throw e; await this.withClient((o) => o.rpc('link_office_done', args)); }   // a database from before 1.2.1
+        } else await this.withClient((o) => o.rpc('link_office_done', args));
         n++;
       }
       if (this.state.status !== 'online') this.setState({ status: 'online', at: this.state.at || iso(this.now()), error: null });

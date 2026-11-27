@@ -35,9 +35,27 @@ const line = (s) => String(s == null ? '' : s).replace(/[\r\n]/g, ' ');
 // ---------- the settings files ----------
 // a.backup: a second address for the same PC (its name when phones use its address, or the other way round), so a
 // phone that loses touch with the first tries the second. After this PC's address changes, the name still works.
-/** a: { mac, ext, name, password, server, backup, sipPort, provisionUrl } */
+// 1.2.1: each phone's own settings (s: link-bulk.js cleanSettings, only what this maker supports): the name on its screen,
+// time zone and 12/24-hour clock, language, ringtone and ring volume, speed-dial keys, and Do not disturb following its person.
+const tzMinutes = (tz) => { const m = /^([+-])(\d{1,2})(?::(\d\d))?$/.exec(String(tz || '')); return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0)) : null; };
+const LANG = {
+  yealink: { English: 'English', French: 'French', Spanish: 'Spanish', German: 'German', Portuguese: 'Portuguese', Chinese: 'Chinese_S' },
+  grandstream: { English: 'en', French: 'fr', Spanish: 'es', German: 'de', Portuguese: 'pt', Chinese: 'zh' },
+  snom: { English: 'English', French: 'Francais', Spanish: 'Espanol', German: 'Deutsch', Portuguese: 'Portugues', Chinese: 'Chinese' },
+  polycom: { English: 'English_United_States', French: 'French_France', Spanish: 'Spanish_Spain', German: 'German_Germany', Portuguese: 'Portuguese_Portugal', Chinese: 'Chinese_China' },
+};
+/** a: { mac, ext, name, password, server, backup, sipPort, provisionUrl, settings, dnd } */
 function yealinkConfig(a) {
-  return ['#!version:1.0.0.1', '## Riyeser Link Office', 'account.1.enable = 1', `account.1.label = ${line(a.name)}`, `account.1.display_name = ${line(a.name)}`,
+  const s = a.settings || {};
+  const extra = [];
+  if (s.timezone) { extra.push(`local_time.time_zone = ${s.timezone}`); }
+  if (s.timeFormat) extra.push(`local_time.time_format = ${s.timeFormat === '24' ? 1 : 0}`);
+  if (s.language) extra.push(`lang.gui = ${LANG.yealink[s.language] || 'English'}`, `lang.wui = ${LANG.yealink[s.language] || 'English'}`);
+  if (s.ringtone) extra.push(`account.1.ringtone.ring_type = Ring${s.ringtone}.wav`);
+  if (s.ringVolume) extra.push(`voice.ring_vol = ${s.ringVolume}`);
+  (s.lineKeys || []).forEach((k, i) => extra.push(`linekey.${i + 2}.type = 13`, `linekey.${i + 2}.line = 1`, `linekey.${i + 2}.value = ${line(k.value)}`, `linekey.${i + 2}.label = ${line(k.label || k.value)}`));
+  if (s.dnd === 'person') extra.push(`features.dnd.enable = ${a.dnd ? 1 : 0}`);
+  return ['#!version:1.0.0.1', '## Riyeser Link Office', 'account.1.enable = 1', `account.1.label = ${line(s.label || a.name)}`, `account.1.display_name = ${line(s.displayName || a.name)}`,
     `account.1.auth_name = ${a.ext}`, `account.1.user_name = ${a.ext}`, `account.1.password = ${line(a.password)}`,
     `account.1.sip_server.1.address = ${a.server}`, `account.1.sip_server.1.port = ${a.sipPort}`, 'account.1.sip_server.1.transport_type = 0',
     'account.1.sip_server.1.expires = 600',
@@ -45,28 +63,42 @@ function yealinkConfig(a) {
     `static.auto_provision.server.url = ${a.provisionUrl}`,
     // on every start-up, ask the network who sets it up (plug-and-play), so a phone restarted after this PC's address
     // changed finds the new one; and allow "check-sync" restarts from Riyeser Link Office
-    'static.auto_provision.pnp_enable = 1', 'static.auto_provision.power_on = 1', 'sip.notify_reboot_enable = 1', ''].join('\n');
+    'static.auto_provision.pnp_enable = 1', 'static.auto_provision.power_on = 1', 'sip.notify_reboot_enable = 1', ...extra, ''].join('\n');
 }
 function grandstreamConfig(a) {
   // P2312 secondary SIP server; P145 lets DHCP option 66 (a provisioning address from the router) take over
-  const p = { P271: 1, P270: a.name, P47: `${a.server}:${a.sipPort}`, ...(a.backup ? { P2312: `${a.backup}:${a.sipPort}` } : {}), P35: a.ext, P36: a.ext, P34: a.password, P3: a.name, P32: 10, P237: a.provisionUrl, P212: 1, P145: 1 };
+  const s = a.settings || {};
+  // P122: 24-hour clock (1) or 12-hour (0); P1362: the screen's language
+  const p = { P271: 1, P270: s.label || a.name, P47: `${a.server}:${a.sipPort}`, ...(a.backup ? { P2312: `${a.backup}:${a.sipPort}` } : {}), P35: a.ext, P36: a.ext, P34: a.password, P3: s.displayName || a.name, P32: 10, P237: a.provisionUrl, P212: 1, P145: 1,
+    ...(s.timeFormat ? { P122: s.timeFormat === '24' ? 1 : 0 } : {}), ...(s.language ? { P1362: LANG.grandstream[s.language] || 'en' } : {}) };
   return `<?xml version="1.0" encoding="UTF-8" ?>\n<!-- Riyeser Link Office -->\n<gs_provision version="1">\n<mac>${a.mac}</mac>\n<config version="1">\n${
     Object.entries(p).map(([k, v]) => `<${k}>${xml(v)}</${k}>`).join('\n')}\n</config>\n</gs_provision>\n`;
 }
 function snomConfig(a) {
-  const s = [['user_active', 'on'], ['user_realname', a.name], ['user_name', a.ext], ['user_pname', a.ext], ['user_pass', a.password], ['user_host', `${a.server}:${a.sipPort}`], ['user_expiry', '600']];
+  const o = a.settings || {};
+  const s = [['user_active', 'on'], ['user_realname', o.displayName || a.name], ['user_name', a.ext], ['user_pname', a.ext], ['user_pass', a.password], ['user_host', `${a.server}:${a.sipPort}`], ['user_expiry', '600'],
+    ...(o.ringtone ? [['user_ringer', `Ringer${o.ringtone}`]] : [])];
+  const g = [...(o.timezone ? [['utc_offset', tzMinutes(o.timezone) * 60]] : []), ...(o.timeFormat ? [['time_24_format', o.timeFormat === '24' ? 'on' : 'off']] : []),
+    ...(o.language ? [['language', LANG.snom[o.language] || 'English']] : []), ...(o.ringVolume ? [['vol_ringer', o.ringVolume]] : []), ...(o.dnd === 'person' ? [['dnd_mode', a.dnd ? 'on' : 'off']] : [])];
+  const keys = (o.lineKeys || []).map((k, i) => `<fkey idx="${i}" context="active" label="${xml(k.label || k.value)}" perm="">speed ${xml(k.value)}</fkey>`);
   return `<?xml version="1.0" encoding="utf-8"?>\n<!-- Riyeser Link Office -->\n<settings>\n<phone-settings e="2">\n${
-    s.map(([k, v]) => `<${k} idx="1" perm="">${xml(v)}</${k}>`).join('\n')}\n<setting_server perm="">${xml(a.provisionUrl)}</setting_server>\n</phone-settings>\n</settings>\n`;
+    s.map(([k, v]) => `<${k} idx="1" perm="">${xml(v)}</${k}>`).join('\n')}\n${g.map(([k, v]) => `<${k} perm="">${xml(v)}</${k}>\n`).join('')}<setting_server perm="">${xml(a.provisionUrl)}</setting_server>\n</phone-settings>\n${
+    keys.length ? `<functionKeys e="2">\n${keys.join('\n')}\n</functionKeys>\n` : ''}</settings>\n`;
 }
 function polycomMaster(a) {
   return `<?xml version="1.0" standalone="yes"?>\n<!-- Riyeser Link Office -->\n<APPLICATION APP_FILE_PATH="" CONFIG_FILES="${a.mac}-riyeser.cfg" MISC_FILES="" LOG_FILE_DIRECTORY="" OVERRIDES_DIRECTORY="" CONTACTS_DIRECTORY="" LICENSE_DIRECTORY=""/>\n`;
 }
 function polycomConfig(a) {
-  const r = { 'reg.1.displayName': a.name, 'reg.1.label': a.name, 'reg.1.address': a.ext, 'reg.1.auth.userId': a.ext, 'reg.1.auth.password': a.password,
+  const o = a.settings || {};
+  const r = { 'reg.1.displayName': o.displayName || a.name, 'reg.1.label': o.label || a.name, 'reg.1.address': a.ext, 'reg.1.auth.userId': a.ext, 'reg.1.auth.password': a.password,
     'reg.1.server.1.address': a.server, 'reg.1.server.1.port': a.sipPort, 'reg.1.server.1.transport': 'UDPOnly', 'reg.1.server.1.expires': 600,
     ...(a.backup ? { 'reg.1.server.2.address': a.backup, 'reg.1.server.2.port': a.sipPort, 'reg.1.server.2.transport': 'UDPOnly', 'reg.1.server.2.expires': 600 } : {}) };
+  const more = { ...(o.timezone ? { 'tcpIpApp.sntp.gmtOffset': tzMinutes(o.timezone) * 60 } : {}), ...(o.timeFormat ? { 'lcl.datetime.time.24HourClock': o.timeFormat === '24' ? 1 : 0 } : {}),
+    ...(o.language ? { 'lcl.ml.lang': LANG.polycom[o.language] || 'English_United_States' } : {}), ...(o.ringtone ? { 'np.normal.ringing.calls.tonePattern': `ringer${o.ringtone + 1}` } : {}) };
+  (o.lineKeys || []).forEach((k, i) => { more[`attendant.resourceList.${i + 1}.address`] = k.value; more[`attendant.resourceList.${i + 1}.label`] = k.label || k.value; more[`attendant.resourceList.${i + 1}.type`] = 'automata'; });
   // check-sync from Riyeser Link Office restarts the phone, so it picks up a new address
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<!-- Riyeser Link Office -->\n<polycomConfig>\n<reg ${Object.entries(r).map(([k, v]) => `${k}="${xml(v)}"`).join(' ')}/>\n<voIpProt voIpProt.SIP.specialEvent.checkSync.alwaysReboot="1"/>\n</polycomConfig>\n`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<!-- Riyeser Link Office -->\n<polycomConfig>\n<reg ${Object.entries(r).map(([k, v]) => `${k}="${xml(v)}"`).join(' ')}/>\n<voIpProt voIpProt.SIP.specialEvent.checkSync.alwaysReboot="1"/>\n${
+    Object.keys(more).length ? `<settings ${Object.entries(more).map(([k, v]) => `${k}="${xml(v)}"`).join(' ')}/>\n` : ''}</polycomConfig>\n`;
 }
 
 /**
@@ -168,7 +200,7 @@ class Provisioner extends EventEmitter {
     const was = d.phones.find((x) => x.mac === m);
     const p = { mac: m, ext: String(ext), vendor: vendor || (was && was.vendor) || (f && f.vendor) || vendorKey('', m), model: (was && was.model) || (f && f.model) || '',
       ip: (was && was.ip) || (f && f.ip) || '', addedAt: (was && was.addedAt) || new Date().toISOString(), lastSeen: (was && was.lastSeen) || (f && f.lastSeen) || null, lastFetch: (was && was.lastFetch) || null,
-      label: (was && was.label) || '', location: (was && was.location) || '', note: (was && was.note) || '' };
+      label: (was && was.label) || (f && f.label) || '', location: (was && was.location) || (f && f.location) || '', note: (was && was.note) || '', settings: (was && was.settings) || {} };
     d.phones = [...d.phones.filter((x) => x.mac !== m), p];
     d.found = d.found.filter((x) => x.mac !== m);
     this.save(d);
@@ -178,8 +210,8 @@ class Provisioner extends EventEmitter {
   }
   /** A desk phone's name ("Reception"), location (a branch) and a note (e.g. its S/N). Only for a phone given to someone. */
   label(mac, { name = '', location = '', note = '' } = {}) {
-    const m = normaliseMac(mac); const d = this.data(); const p = d.phones.find((x) => x.mac === m);
-    if (!p) throw new Error('That phone isn\'t given to anyone yet.');
+    const m = normaliseMac(mac); const d = this.data(); const p = d.phones.find((x) => x.mac === m) || d.found.find((x) => x.mac === m);
+    if (!p) throw new Error('That phone isn\'t on the list.');
     const clean = (v, n) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n);
     Object.assign(p, { label: clean(name, 40), location: clean(location, 60), note: clean(note, 60) });
     this.save(d);
@@ -188,7 +220,25 @@ class Provisioner extends EventEmitter {
   }
   /** Stop giving settings to this phone. (It keeps what it already has until reset; change the password to lock it out.) */
   unassign(mac) { const m = normaliseMac(mac); const d = this.data(); d.phones = d.phones.filter((x) => x.mac !== m); this.save(d); return true; }
-  ignore(mac) { const m = normaliseMac(mac); const d = this.data(); const f = d.found.find((x) => x.mac === m); if (f) f.ignored = true; this.save(d); return true; }
+  ignore(mac) { const m = normaliseMac(mac); const d = this.data(); const f = d.found.find((x) => x.mac === m); if (f) f.ignored = true; this.save(d); return !!f; }
+  /** An ignored phone back on the New phones list. */
+  unignore(mac) { const m = normaliseMac(mac); const d = this.data(); const f = d.found.find((x) => x.mac === m); if (f) delete f.ignored; this.save(d); return !!f; }
+  /** Forget a phone altogether: given to someone, new or ignored. (If it asks again, it shows up as a new phone.) */
+  remove(mac) {
+    const m = normaliseMac(mac); const d = this.data(); const had = d.phones.some((x) => x.mac === m) || d.found.some((x) => x.mac === m);
+    d.phones = d.phones.filter((x) => x.mac !== m); d.found = d.found.filter((x) => x.mac !== m); this.save(d); return had;
+  }
+  /** A phone added by its MAC address but not given to anyone yet: it waits on the New phones list. */
+  addFound(mac, { vendor = '', model = '', label = '', location = '' } = {}) {
+    const m = normaliseMac(mac); if (!m) throw new Error('That isn\'t a MAC address.');
+    const d = this.data(); if (d.phones.some((x) => x.mac === m)) throw new Error('That phone is already given to someone.');
+    const now = new Date().toISOString(); const f = d.found.find((x) => x.mac === m);
+    if (f) Object.assign(f, { vendor: f.vendor || vendor, model: f.model || model, label: label || f.label || '', location: location || f.location || '' }), delete f.ignored;
+    else d.found.push({ mac: m, vendor: vendor || vendorKey('', m), model, ip: '', firstSeen: now, lastSeen: null, added: true, label, location });
+    this.save(d); return true;
+  }
+  /** Each phone's own settings (only what its maker supports; link-bulk.js cleanSettings). They apply when it next fetches its settings. */
+  setPhoneSettings(mac, settings) { const m = normaliseMac(mac); const d = this.data(); const p = d.phones.find((x) => x.mac === m); if (!p) throw new Error('Give the phone to someone first.'); p.settings = settings || {}; this.save(d); return p; }
 
   // ---------- the web server ----------
   settingsFor(r) {
@@ -199,7 +249,7 @@ class Provisioner extends EventEmitter {
     const { server, backup } = this.servers();
     const base = this.base(server);
     const provisionUrl = vendor === 'snom' ? `${base}/snom/{mac}.xml` : vendor === 'grandstream' ? `${base}/grandstream` : `${base}/${vendor}/`;
-    const a = { mac: r.mac, ext: user.ext, name: user.name, password: user.password, server, backup, sipPort: this.sipPort, provisionUrl };
+    const a = { mac: r.mac, ext: user.ext, name: user.name, password: user.password, server, backup, sipPort: this.sipPort, provisionUrl, settings: phone.settings || {}, dnd: this.directory.dnd(user.ext) };
     if (vendor === 'yealink') return { type: 'text/plain; charset=utf-8', body: yealinkConfig(a), phone };
     if (vendor === 'grandstream') return { type: 'application/xml; charset=utf-8', body: grandstreamConfig(a), phone };
     if (vendor === 'snom') return { type: 'application/xml; charset=utf-8', body: snomConfig(a), phone };

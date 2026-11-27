@@ -117,14 +117,15 @@ class Directory {
     for (let n = 101; n <= MAX_EXT; n++) { const e = String(n); if (n % 100 && !used.has(e) && !EMERGENCY.has(e)) return e; }
     return null;
   }
-  addPerson({ name, ext } = {}) {
+  /** shared: a phone for a place, not a person (Reception, Meeting room): its own extension, named after the place. */
+  addPerson({ name, ext, shared = false } = {}) {
     const n = clean(name);
     if (!n) throw new Error('Type the person\'s name.');
     const e = ext ? String(ext).trim() : this.nextFreeExt();
     if (!e || !validExt(e)) throw new Error(`Extensions are 3 digits, ${MIN_EXT} to ${MAX_EXT}.`);
     if (EMERGENCY.has(e)) throw new Error(`${e} is an emergency number. Choose another extension.`);
     if (this.usedExts().has(e)) throw new Error(`Extension ${e} is already used.`);
-    const p = { id: `local:${crypto.randomUUID()}`, name: n, ext: e, source: 'local', addedAt: new Date().toISOString() };
+    const p = { id: `local:${crypto.randomUUID()}`, name: n, ext: e, source: 'local', addedAt: new Date().toISOString(), ...(shared ? { shared: true } : {}) };
     const d = this.data(); d.people.push(p); d.people.sort((a, b) => a.ext.localeCompare(b.ext)); this.save(d);
     this.password(e);
     return p;

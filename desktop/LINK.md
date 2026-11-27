@@ -230,6 +230,20 @@ These are stored in `link_offices` (new columns, `team-chat.sql`). The Phones pa
 
 **The firewall rule** now also opens UDP 5353 (riyeser-office.local) for office addresses. A rule from before 1.2.0 shows **Update the firewall rule** on the status screen.
 
+## One control panel, many phones at once (1.2.1)
+
+The window is now one control panel with a menu on the left:
+
+- **Overview**: *Needs attention* (new phones waiting, phones offline, the firewall, the address, Riyeser Online) with a one-click fix for each, and a tile for each part: phones online / offline / new (click a number for that list), calls today and missed, people on Do not disturb, this PC's address, branches and relay (*Not set up* until Riyeser Link Cloud's relay exists), the Windows check, backups and Riyeser Online.
+- **Phones**: every phone in one list (given to someone, new, ignored) with search, sorting and filters (status, maker, location, assigned or not), a tick box on every row and *select all* (of what's shown). Ticked phones get a bar: **Give to…** (a person for each, or new extensions numbered in order), **Add as shared phones** (each its own extension, named after the phone: Reception, Meeting room), **Move location**, **Restart**, **Re-send settings**, **Take back**, **Ignore** / **Bring back**, **Remove**. Each ends with a summary ("Gave out 3 phones, 1 skipped: already given to someone").
+- Click a phone to manage it in the panel on the right (the list stays in view): its status, model, firmware, MAC, IP, when it connected and was last seen, its recent calls; Restart, Re-send settings, **Find this phone** (it rings for 5 seconds as "Find this phone"; nobody can talk on it), its web page, Set up by hand, New SIP password, Replace phone, Take back, Ignore, Remove; who it's for (a person, or a new shared phone); its name, location and notes; and **Phone settings**: only what its maker's settings file supports (Yealink: line key name, name on calls, time zone, 12/24-hour clock, language, ringtone, ring volume, up to 10 speed-dial keys, Do not disturb following its person; Grandstream: names, clock, language; Snom: name, time zone, clock, language, ringtone, volume, 12 keys, Do not disturb; Polycom: names, time zone, clock, language, ringtone, 6 keys). Settings reach the phone when it next fetches them: *Save and restart* does it at once. Busy lamps on keys need a later version (the phone system doesn't send busy states yet).
+- **Add several phones**: paste MAC addresses (one per line, any format) or import a CSV (*MAC address, Model or maker, Extension, Person (name or email), Phone name, Location*; only the MAC is needed; *Download the CSV template*). Every row is checked before anything is added: a valid MAC or not, twice in the list, already added, the maker (from the label, or the MAC's first 6 digits), the extension it gets and who it's for. Fix rows in place, then **Add N phones**. Phones with no person either wait under New, or each get a new extension from a chosen number up (skipping used numbers, x00 group numbers and emergency numbers).
+- **People** and **Calls** work the same way: a list, and a panel on the right. Do not disturb, ring groups and passwords stay with the person.
+- **Settings → Change history**: who changed the phones and what, here or from the website.
+- The *Internal calls only* warning is a slim line under the title; hide it for this session with ✕ (a small chip stays in the title bar).
+
+The website's Phones page does the same (bulk_phones, phone_action, phone_settings changes); `test/link-bulk.test.js` covers it.
+
 ## The status screen always starts (1.2.1)
 
 1.2.0's window stopped before it drew anything: the tabs didn't switch, the status bar at the top showed only its coloured edge, and the two cards under the tabs stayed as empty grey bars. The window's script declared its own `api` while the preload already puts a fixed `api` on the window, which Electron rejects as a script error. 1.2.1 fixes that, and the screen no longer depends on any one answer:

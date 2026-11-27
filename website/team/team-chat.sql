@@ -3247,7 +3247,23 @@ alter table public.link_offices add column if not exists phone_server text check
 alter table public.link_offices add column if not exists address_changes jsonb not null default '[]';
 alter table public.link_office_commands drop constraint if exists link_office_commands_kind_check;
 alter table public.link_office_commands add constraint link_office_commands_kind_check
-  check (kind in ('assign_phone', 'unassign_phone', 'add_phone', 'new_password', 'set_dnd', 'reveal_password', 'name_phone'));
+  check (kind in ('assign_phone', 'unassign_phone', 'add_phone', 'new_password', 'set_dnd', 'reveal_password', 'name_phone',
+                  'bulk_phones', 'phone_action', 'phone_settings'));
+-- Many phones at once and each phone's own page (Link Office 1.2.1): a list of up to 500 phones fits in one change, so
+-- "Add several phones" may be bigger than the other changes; what the office did comes back as a short summary (result:
+-- { summary, added|done, skipped: [{mac, why}], failed: [{mac, why}] }). Phones also report whether they're ignored, their
+-- firmware, when they connected and were last seen, whether they're a shared phone (Reception), and their own settings.
+alter table public.link_office_commands drop constraint if exists link_office_commands_data_check;
+alter table public.link_office_commands drop constraint if exists link_office_commands_data_size;
+alter table public.link_office_commands add constraint link_office_commands_data_size
+  check (length(data::text) < case when kind = 'bulk_phones' then 120000 else 4000 end);
+alter table public.link_office_commands add column if not exists result jsonb check (result is null or length(result::text) < 20000);
+alter table public.link_office_phones add column if not exists ignored boolean not null default false;
+alter table public.link_office_phones add column if not exists firmware text check (length(firmware) <= 40);
+alter table public.link_office_phones add column if not exists registered_since timestamptz;
+alter table public.link_office_phones add column if not exists last_seen timestamptz;
+alter table public.link_office_phones add column if not exists shared boolean not null default false;
+alter table public.link_office_phones add column if not exists settings jsonb not null default '{}' check (length(settings::text) < 3000);
 
 alter table public.link_offices enable row level security;
 alter table public.link_office_phones enable row level security;
@@ -3320,8 +3336,26 @@ create or replace function public.link_office_json(o link_offices) returns json
     'extensions', o.extensions, 'first_seen', o.first_seen, 'last_seen', o.last_seen,
     'phones', (select coalesce(json_agg(json_build_object('mac', p.mac, 'vendor', p.vendor, 'model', p.model, 'extension', p.extension,
         'assigned', p.assigned, 'registered', p.registered, 'last_registered', p.last_registered, 'ip', p.ip,
-        'name', p.name, 'location', p.location, 'note', p.note, 'provisioned_at', p.provisioned_at) order by p.assigned desc, p.extension, p.mac), '[]')
+        'name', p.name, 'location', p.location, 'note', p.note, 'provisioned_at', p.provisioned_at,
+        'ignored', p.ignored, 'firmware', p.firmware, 'registered_since', p.registered_since, 'last_seen', p.last_seen, 'shared', p.shared, 'settings', p.settings)
+        order by p.assigned desc, p.ignored, p.extension, p.mac), '[]')
       from link_office_phones p where p.workspace_id = o.workspace_id and p.office_id = o.office_id))
+$$;
+
+-- A desk phone's own settings (Link Office 1.2.1), checked: only these keys, each a short plain value; up to 12
+-- speed-dial keys ({type: 'speed', value: digits, label}). Anything else is left out. {} when there's nothing.
+create or replace function public.link_phone_settings(j jsonb) returns jsonb language sql immutable as $$
+  select case when jsonb_typeof(j) <> 'object' then '{}'::jsonb else jsonb_strip_nulls(jsonb_build_object(
+    'label', public.link_text(j -> 'label', 20), 'displayName', public.link_text(j -> 'displayName', 40),
+    'timezone', case when j ->> 'timezone' ~ '^[+-]([0-9]|1[0-4])(:(00|30|45))?$' then j ->> 'timezone' end,
+    'timeFormat', case when j ->> 'timeFormat' in ('12', '24') then j ->> 'timeFormat' end,
+    'language', case when j ->> 'language' in ('English', 'French', 'Spanish', 'German', 'Portuguese', 'Chinese') then j ->> 'language' end,
+    'ringtone', case when j ->> 'ringtone' ~ '^([1-9]|10)$' then (j ->> 'ringtone')::int end,
+    'ringVolume', case when j ->> 'ringVolume' ~ '^([1-9]|1[0-5])$' then (j ->> 'ringVolume')::int end,
+    'dnd', case when j ->> 'dnd' in ('person', 'off') then j ->> 'dnd' end,
+    'lineKeys', (select nullif(jsonb_agg(jsonb_build_object('type', 'speed', 'value', k ->> 'value', 'label', coalesce(public.link_text(k -> 'label', 20), '')) order by i), '[]'::jsonb)
+      from jsonb_array_elements(case when jsonb_typeof(j -> 'lineKeys') = 'array' then j -> 'lineKeys' else '[]' end) with ordinality x(k, i)
+      where jsonb_typeof(k) = 'object' and k ->> 'value' ~ '^[0-9*#]{1,8}$' and i <= 12))) end
 $$;
 
 -- ---------------------------------------------------------------- Riyeser Link Office calls these
@@ -3374,12 +3408,17 @@ begin
     mdns_name = excluded.mdns_name, router_name = excluded.router_name, phone_server = excluded.phone_server, address_changes = excluded.address_changes;
   -- the phones list is a copy of what the office has now (the office keeps the real list)
   delete from link_office_phones where workspace_id = ws and office_id = the_office;
-  insert into link_office_phones (workspace_id, office_id, mac, vendor, model, extension, assigned, registered, last_registered, ip, name, location, note, provisioned_at)
+  insert into link_office_phones (workspace_id, office_id, mac, vendor, model, extension, assigned, registered, last_registered, ip, name, location, note, provisioned_at,
+    ignored, firmware, registered_since, last_seen, shared, settings)
   select distinct on (link_mac(ph ->> 'mac')) ws, the_office, link_mac(ph ->> 'mac'), link_text(ph -> 'vendor', 40), link_text(ph -> 'model', 60),
     case when ph ->> 'extension' ~ '^[0-9]{2,4}$' then ph ->> 'extension' end,
     coalesce(link_bool(ph -> 'assigned'), false), coalesce(link_bool(ph -> 'registered'), false), link_time(ph -> 'last_registered'),
     case when link_text(ph -> 'ip', 45) ~ '^[0-9a-fA-F.:]{3,45}$' then link_text(ph -> 'ip', 45) end,
-    link_text(ph -> 'name', 40), link_text(ph -> 'location', 60), link_text(ph -> 'note', 60), link_time(ph -> 'provisioned_at')
+    link_text(ph -> 'name', 40), link_text(ph -> 'location', 60), link_text(ph -> 'note', 60), link_time(ph -> 'provisioned_at'),
+    coalesce(link_bool(ph -> 'ignored'), false) and not coalesce(link_bool(ph -> 'assigned'), false),
+    case when link_text(ph -> 'firmware', 40) ~ '^[0-9A-Za-z._-]+$' then link_text(ph -> 'firmware', 40) end,
+    link_time(ph -> 'registered_since'), link_time(ph -> 'last_seen'), coalesce(link_bool(ph -> 'shared'), false),
+    public.link_phone_settings(ph -> 'settings')
   from (select ph from jsonb_array_elements(case when jsonb_typeof(p -> 'phones') = 'array' then p -> 'phones' else '[]' end) ph
         where jsonb_typeof(ph) = 'object' limit 500) x
   where link_mac(ph ->> 'mac') is not null
@@ -3423,7 +3462,66 @@ begin
   where id = c.id;
 end $$;
 
+-- The same, with what the office did for "many phones at once" (1.2.1): a short summary the website shows.
+create or replace function public.link_office_done(command uuid, ok boolean, error text, sealed text, result jsonb) returns void
+  language plpgsql security definer set search_path = public as $$
+#variable_conflict use_variable
+declare c link_office_commands; r jsonb;
+begin
+  perform public.link_office_done(command, ok, error, sealed);
+  select * into c from link_office_commands where id = command;
+  if c.id is null or c.kind not in ('bulk_phones', 'phone_settings') or jsonb_typeof(result) <> 'object' then return; end if;
+  r := jsonb_strip_nulls(jsonb_build_object('summary', public.link_text(result -> 'summary', 300),
+    'added', public.link_int(result -> 'added'), 'done', public.link_int(result -> 'done'),
+    'skipped', (select jsonb_agg(jsonb_build_object('mac', public.link_text(x -> 'mac', 40), 'why', public.link_text(x -> 'why', 120))) from (select x from jsonb_array_elements(case when jsonb_typeof(result -> 'skipped') = 'array' then result -> 'skipped' else '[]' end) x limit 100) y),
+    'failed', (select jsonb_agg(jsonb_build_object('mac', public.link_text(x -> 'mac', 40), 'why', public.link_text(x -> 'why', 120))) from (select x from jsonb_array_elements(case when jsonb_typeof(result -> 'failed') = 'array' then result -> 'failed' else '[]' end) x limit 100) y),
+    'applied', case when jsonb_typeof(result -> 'applied') = 'array' then (select jsonb_agg(public.link_text(a, 20)) from jsonb_array_elements(result -> 'applied') a) end));
+  update link_office_commands set result = r where id = c.id;
+  if public.link_text(r -> 'summary', 300) is not null then
+    insert into audit_log (workspace_id, action, details) values (c.workspace_id, 'link.bulk_done', jsonb_build_object('summary', r ->> 'summary', 'office_id', c.office_id));
+  end if;
+end $$;
+
 -- ---------------------------------------------------------------- the website and HQ call these
+-- "Many phones at once" checked (internal): the action, the MAC addresses (or the rows to add), and its options.
+create or replace function public.link_bulk_clean(ws uuid, d jsonb) returns jsonb
+  language plpgsql stable security definer set search_path = public as $$
+declare act text := coalesce(d ->> 'action', ''); macs jsonb; rows jsonb; tomap jsonb := '{}'; k text; v jsonb; loc text;
+begin
+  if act not in ('add', 'give', 'shared', 'ignore', 'unignore', 'restart', 'resync', 'unassign', 'remove', 'location') then
+    raise exception 'Riyeser Link Office doesn''t know how to do that.';
+  end if;
+  if act = 'add' then
+    if jsonb_typeof(d -> 'rows') <> 'array' or jsonb_array_length(d -> 'rows') = 0 then raise exception 'Paste or import at least one MAC address.'; end if;
+    if jsonb_array_length(d -> 'rows') > 500 then raise exception 'Add up to 500 phones at a time.'; end if;
+    select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('line', i, 'macText', public.link_text(r -> 'macText', 40), 'model', public.link_text(r -> 'model', 60),
+        'ext', case when r ->> 'ext' ~ '^[0-9]{3}$' then r ->> 'ext' end, 'person', public.link_text(r -> 'person', 80),
+        'name', public.link_text(r -> 'name', 40), 'location', public.link_text(r -> 'location', 60))) order by i)
+      into rows from jsonb_array_elements(d -> 'rows') with ordinality x(r, i) where jsonb_typeof(r) = 'object';
+    return jsonb_strip_nulls(jsonb_build_object('action', act, 'rows', coalesce(rows, '[]'::jsonb), 'auto', coalesce(public.link_bool(d -> 'auto'), false),
+      'shared', coalesce(public.link_bool(d -> 'shared'), false), 'start', case when d ->> 'start' ~ '^[0-9]{3}$' then d ->> 'start' end));
+  end if;
+  if jsonb_typeof(d -> 'macs') <> 'array' or jsonb_array_length(d -> 'macs') = 0 then raise exception 'Tick at least one phone.'; end if;
+  if jsonb_array_length(d -> 'macs') > 500 then raise exception 'Change up to 500 phones at a time.'; end if;
+  select jsonb_agg(distinct public.link_mac(m)) into macs from jsonb_array_elements_text(d -> 'macs') m where public.link_mac(m) is not null;
+  if macs is null or jsonb_array_length(macs) <> jsonb_array_length(d -> 'macs') then
+    raise exception 'That isn''t a MAC address. It''s 12 letters and numbers, on a sticker under the phone (like 00:15:65:12:34:56).';
+  end if;
+  if act = 'give' and jsonb_typeof(d -> 'to') = 'object' then
+    for k, v in select * from jsonb_each(d -> 'to') loop
+      if public.link_mac(k) is null or v #>> '{}' !~ '^[0-9]{3}$' then raise exception 'Choose who each phone is for.'; end if;
+      tomap := tomap || jsonb_build_object(public.link_mac(k), v #>> '{}');
+    end loop;
+  end if;
+  if act = 'location' then
+    loc := nullif(trim(coalesce(d ->> 'location', '')), '');
+    if loc is not null and not exists (select 1 from branches b where b.workspace_id = ws and b.name = loc) then raise exception 'Choose the location from your branches.'; end if;
+  end if;
+  return jsonb_strip_nulls(jsonb_build_object('action', act, 'macs', macs, 'to', case when tomap <> '{}' then tomap end,
+    'auto', case when act = 'give' then coalesce(public.link_bool(d -> 'auto'), false) end, 'start', case when d ->> 'start' ~ '^[0-9]{3}$' then d ->> 'start' end,
+    'location', case when act = 'location' then coalesce(loc, '') end));
+end $$;
+
 -- A change for the office to make. Owners and admins with two-step sign-in; or Riyeser support (link.support) while
 -- the customer has pressed "Let Riyeser help". Every change goes in the business's history (and HQ's, for Riyeser).
 create or replace function public.link_command(ws uuid, office_id text, kind text, data jsonb) returns uuid
@@ -3466,6 +3564,22 @@ begin
     end if;
     clean := jsonb_build_object('mac', mac, 'name', coalesce(nullif(trim(coalesce(d ->> 'name', '')), ''), ''),
       'branch', coalesce(nullif(trim(coalesce(d ->> 'branch', '')), ''), ''), 'note', coalesce(nullif(trim(coalesce(d ->> 'note', '')), ''), ''));
+  elsif kind = 'bulk_phones' then
+    -- many phones at once (Link Office 1.2.1): one action for up to 500 phones, or "Add several phones" with up to 500 rows
+    clean := public.link_bulk_clean(ws, d);
+  elsif kind = 'phone_action' then
+    if coalesce(d ->> 'action', '') not in ('restart', 'resync', 'find', 'ignore', 'unignore', 'remove', 'move') then raise exception 'Riyeser Link Office doesn''t know how to do that.'; end if;
+    if mac is null then raise exception 'That isn''t a MAC address. It''s 12 letters and numbers, on a sticker under the phone (like 00:15:65:12:34:56).'; end if;
+    clean := jsonb_build_object('mac', mac, 'action', d ->> 'action');
+    if d ->> 'action' = 'move' then
+      if ext is not null then clean := clean || jsonb_build_object('extension', ext);
+      elsif public.link_text(d -> 'shared_name', 40) is not null then clean := clean || jsonb_build_object('shared_name', public.link_text(d -> 'shared_name', 40));
+      else raise exception 'Choose who the phone is for, or a name for a shared phone.'; end if;
+    end if;
+  elsif kind = 'phone_settings' then
+    if mac is null then raise exception 'That isn''t a MAC address. It''s 12 letters and numbers, on a sticker under the phone (like 00:15:65:12:34:56).'; end if;
+    if jsonb_typeof(d -> 'settings') <> 'object' then raise exception 'Choose the phone''s settings.'; end if;
+    clean := jsonb_build_object('mac', mac, 'settings', public.link_phone_settings(d -> 'settings'));
   elsif kind = 'new_password' then clean := jsonb_build_object('extension', ext);
   elsif kind = 'set_dnd' then
     if link_bool(d -> 'on') is null then raise exception 'Say whether Do not disturb is on or off.'; end if;
@@ -3484,6 +3598,7 @@ begin
   insert into link_office_commands (workspace_id, office_id, kind, data, by_riyeser) values (ws, the_office, kind, clean, by_hq) returning id into cid;
   insert into audit_log (workspace_id, action, details, actor)
   values (ws, 'link.' || kind, jsonb_strip_nulls(jsonb_build_object('extension', ext, 'mac', mac, 'on', clean -> 'on', 'name', nullif(clean ->> 'name', ''), 'office_id', the_office,
+            'action', clean ->> 'action', 'phones', case when kind = 'bulk_phones' then coalesce(jsonb_array_length(clean -> 'macs'), jsonb_array_length(clean -> 'rows')) end,
             'by', case when by_hq then 'Riyeser support' end)), case when by_hq then null else auth.uid() end);
   if by_hq then perform hq_log('link.' || kind, jsonb_strip_nulls(jsonb_build_object('workspace_id', ws, 'office_id', the_office, 'extension', ext, 'mac', mac))); end if;
   return cid;
@@ -3499,7 +3614,7 @@ begin
   if c.id is null or not (public.is_admin(c.workspace_id) or (c.by_riyeser and c.created_by = auth.uid() and hq_can('link.support'))) then
     raise exception 'That change isn''t one of yours.';
   end if;
-  return json_build_object('id', c.id, 'kind', c.kind, 'status', c.status, 'error', c.error, 'created_at', c.created_at, 'done_at', c.done_at,
+  return json_build_object('id', c.id, 'kind', c.kind, 'status', c.status, 'error', c.error, 'created_at', c.created_at, 'done_at', c.done_at, 'result', c.result,
     'ready', exists (select 1 from link_office_reveals r where r.command_id = c.id and r.requested_by = auth.uid() and r.sealed is not null
                      and r.read_at is null and r.expires_at > now()));
 end $$;
@@ -3569,9 +3684,11 @@ end $$;
 revoke all on function public.link_int(jsonb), public.link_bool(jsonb), public.link_text(jsonb, int), public.link_time(jsonb), public.link_mac(text),
   public.link_office_caller_ok(uuid), public.link_support_active(uuid), public.link_sweep(), public.link_office_json(link_offices),
   public.link_office_report(uuid, text, jsonb), public.link_office_pending(uuid, text), public.link_office_done(uuid, boolean, text, text),
+  public.link_office_done(uuid, boolean, text, text, jsonb), public.link_phone_settings(jsonb), public.link_bulk_clean(uuid, jsonb),
   public.link_command(uuid, text, text, jsonb), public.link_command_state(uuid), public.link_reveal_take(uuid), public.link_status(uuid),
   public.link_support_allow(uuid), public.link_support_end(uuid), public.hq_company_link(uuid) from public, anon, authenticated;
 grant execute on function public.link_office_report(uuid, text, jsonb), public.link_office_pending(uuid, text), public.link_office_done(uuid, boolean, text, text),
+  public.link_office_done(uuid, boolean, text, text, jsonb),
   public.link_command(uuid, text, text, jsonb), public.link_command_state(uuid), public.link_reveal_take(uuid), public.link_status(uuid),
   public.link_support_allow(uuid), public.link_support_end(uuid), public.hq_company_link(uuid) to authenticated;
 -- ===== Riyeser Link: My phone =====
@@ -3678,7 +3795,7 @@ begin
           and coalesce(c.data ->> 'extension' = link_my_ext(c.workspace_id), false))) then   -- null-safe: no extension, no access
     raise exception 'That change isn''t one of yours.';
   end if;
-  return json_build_object('id', c.id, 'kind', c.kind, 'status', c.status, 'error', c.error, 'created_at', c.created_at, 'done_at', c.done_at,
+  return json_build_object('id', c.id, 'kind', c.kind, 'status', c.status, 'error', c.error, 'created_at', c.created_at, 'done_at', c.done_at, 'result', c.result,
     'ready', exists (select 1 from link_office_reveals r where r.command_id = c.id and r.requested_by = auth.uid() and r.sealed is not null
                      and r.read_at is null and r.expires_at > now()));
 end $$;
