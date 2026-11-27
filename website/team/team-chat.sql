@@ -3249,7 +3249,7 @@ alter table public.link_office_commands drop constraint if exists link_office_co
 alter table public.link_office_commands add constraint link_office_commands_kind_check
   check (kind in ('assign_phone', 'unassign_phone', 'add_phone', 'new_password', 'set_dnd', 'reveal_password', 'name_phone',
                   'bulk_phones', 'phone_action', 'phone_settings'));
--- Many phones at once and each phone's own page (Link Office 1.2.1): a list of up to 500 phones fits in one change, so
+-- Many phones at once and each phone's own page (Link Office 1.2.3): a list of up to 500 phones fits in one change, so
 -- "Add several phones" may be bigger than the other changes; what the office did comes back as a short summary (result:
 -- { summary, added|done, skipped: [{mac, why}], failed: [{mac, why}] }). Phones also report whether they're ignored, their
 -- firmware, when they connected and were last seen, whether they're a shared phone (Reception), and their own settings.
@@ -3342,7 +3342,7 @@ create or replace function public.link_office_json(o link_offices) returns json
       from link_office_phones p where p.workspace_id = o.workspace_id and p.office_id = o.office_id))
 $$;
 
--- A desk phone's own settings (Link Office 1.2.1), checked: only these keys, each a short plain value; up to 12
+-- A desk phone's own settings (Link Office 1.2.3), checked: only these keys, each a short plain value; up to 12
 -- speed-dial keys ({type: 'speed', value: digits, label}). Anything else is left out. {} when there's nothing.
 create or replace function public.link_phone_settings(j jsonb) returns jsonb language sql immutable as $$
   select case when jsonb_typeof(j) <> 'object' then '{}'::jsonb else jsonb_strip_nulls(jsonb_build_object(
@@ -3462,7 +3462,7 @@ begin
   where id = c.id;
 end $$;
 
--- The same, with what the office did for "many phones at once" (1.2.1): a short summary the website shows.
+-- The same, with what the office did for "many phones at once" (1.2.3): a short summary the website shows.
 create or replace function public.link_office_done(command uuid, ok boolean, error text, sealed text, result jsonb) returns void
   language plpgsql security definer set search_path = public as $$
 #variable_conflict use_variable
@@ -3565,7 +3565,7 @@ begin
     clean := jsonb_build_object('mac', mac, 'name', coalesce(nullif(trim(coalesce(d ->> 'name', '')), ''), ''),
       'branch', coalesce(nullif(trim(coalesce(d ->> 'branch', '')), ''), ''), 'note', coalesce(nullif(trim(coalesce(d ->> 'note', '')), ''), ''));
   elsif kind = 'bulk_phones' then
-    -- many phones at once (Link Office 1.2.1): one action for up to 500 phones, or "Add several phones" with up to 500 rows
+    -- many phones at once (Link Office 1.2.3): one action for up to 500 phones, or "Add several phones" with up to 500 rows
     clean := public.link_bulk_clean(ws, d);
   elsif kind = 'phone_action' then
     if coalesce(d ->> 'action', '') not in ('restart', 'resync', 'find', 'ignore', 'unignore', 'remove', 'move') then raise exception 'Riyeser Link Office doesn''t know how to do that.'; end if;

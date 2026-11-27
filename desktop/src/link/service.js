@@ -304,7 +304,7 @@ class PhoneService extends EventEmitter {
   }
   ignore(mac) { const r = this.devices().ignore(mac); this.note(`Ignored the new phone ${prettyMac(normaliseMac(mac))}`); return r; }
 
-  // ---------- 1.2.1: the change history, many phones at once, and each phone's own page ----------
+  // ---------- 1.2.3: the change history, many phones at once, and each phone's own page ----------
   /** The change history (newest first): who changed what, here or from the website. Never passwords. */
   history(limit = 100) { return (this.store.get('phone-history', []) || []).slice(-limit).reverse(); }
   note(what, by = this.actor || 'This PC') {

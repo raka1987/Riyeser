@@ -1,4 +1,4 @@
-// Riyeser Link Office 1.2.1: many desk phones at once, and each phone's own page.
+// Riyeser Link Office 1.2.3: many desk phones at once, and each phone's own page.
 //   link-bulk.js   MAC addresses in any format, makers from the MAC's OUI prefix, pasted lists and CSV files, the preview
 //                  (valid, duplicate, already added, maker, extension, person), extension auto-numbering, the summary
 //   service.js     Add several phones; Give to… (to people, or numbered in order); Add as shared; Ignore / Bring back;

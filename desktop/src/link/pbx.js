@@ -56,7 +56,7 @@ class Pbx extends EventEmitter {
     this.bindings = new Map();   // ext -> Map(contact -> binding)
     this.ctx = new Map();        // server transactions: "branch|METHOD" -> context
     this.branches = new Map();   // our branch id -> client transaction
-    this.probes = new Map();     // "Find this phone" rings (1.2.1): our branch id -> { msg, dest, provisional, final }
+    this.probes = new Map();     // "Find this phone" rings (1.2.3): our branch id -> { msg, dest, provisional, final }
     this.calls = new Map();      // Call-ID -> call
     this.failures = new Map(); this.blocked = new Map();
     this.conns = new Map();      // TCP connections: "ip:port" -> socket
@@ -752,7 +752,7 @@ class Pbx extends EventEmitter {
   }
 
   /**
-   * "Find this phone" (1.2.1): ring one desk phone for a few seconds, shown as a call from "Riyeser Link Office", then
+   * "Find this phone" (1.2.3): ring one desk phone for a few seconds, shown as a call from "Riyeser Link Office", then
    * stop. Nobody can talk on it (no audio is offered). Only for a phone connected now. -> true when the ring was sent.
    */
   ring(ext, { ip = null, seconds = 5, from = 'Find this phone' } = {}) {

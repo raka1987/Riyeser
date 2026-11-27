@@ -1030,7 +1030,7 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 .lo-attn li > span { flex: 1; min-width: 0; } .lo-attn li .btn { white-space: nowrap; }
 .lo-attn li i { width: 10px; height: 10px; border-radius: 50%; flex: none; background: #b45309; } .lo-attn li.bad i { background: #b91c1c; } .lo-attn li.info i { background: #0e7490; }
 .lo-attn.good { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; color: #166534; }
-.lo-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.lo-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .lo-tile { background: #fff; border: 1px solid var(--line); border-top: 4px solid #e2e8f0; border-radius: 14px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .lo-tile.ok { border-top-color: #16a34a; } .lo-tile.warn { border-top-color: #d97706; } .lo-tile.bad { border-top-color: #dc2626; } .lo-tile.info { border-top-color: #0e7490; }
 .lo-tile h4 { margin: 0; font-size: 12.5px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
@@ -1045,7 +1045,8 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 .lo-listbox { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px; min-width: 0; }
 .lo-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; } .lo-filters:empty { display: none; }
 .lo-filters input, .lo-filters select { padding: 8px 10px; border: 1px solid #cfd6e4; border-radius: 10px; background: #fff; min-width: 0; font-size: 14px; }
-.lo-filters input { flex: 2 1 170px; } .lo-filters select { flex: 1 1 120px; max-width: 175px; }
+.lo-filters input { flex: 1 1 140px; min-width: 120px; } .lo-filters select { flex: 0 1 150px; min-width: 104px; }
+@media (min-width: 761px) { .lo-filters { flex-wrap: nowrap; } }
 .lo-bulk { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: #ecfeff; border: 1px solid #0e7490; border-radius: 10px; padding: 7px 10px; margin-bottom: 10px; }
 .lo-bulk b { margin-right: 4px; white-space: nowrap; font-size: 14px; } .lo-bulk .btn { white-space: nowrap; } .lo-grow { flex: 1; }
 .btn.lo-danger { color: #b91c1c; }
@@ -1057,8 +1058,8 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 table.lo th.sort { cursor: pointer; user-select: none; } table.lo th .arr { font-size: 10px; margin-left: 3px; }
 table.lo .ck { width: 34px; padding-right: 0; } table.lo .ck input { width: 16px; height: 16px; margin: 0; accent-color: #0e7490; cursor: pointer; }
 .lo-two b { display: block; } .lo-two small { display: block; font-size: 12.5px; }
-.lo-tbox .optalt { display: none; } .lo-split.open .lo-tbox .opt { display: none; } .lo-split.open .lo-tbox .optalt { display: inline; }
-@media (max-width: 1240px) { .lo-tbox .opt { display: none; } .lo-tbox .optalt { display: inline; } }
+.lo-split.open .lo-tbox .opt { display: none; }
+@media (max-width: 1240px) { .lo-tbox .opt { display: none; } }
 .lo-empty { padding: 18px; text-align: center; white-space: normal !important; }
 .lo-side { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; min-width: 0; }
 .lo-sh { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; } .lo-sh h3 { margin: 0; font-size: 18px; color: var(--ink); overflow-wrap: anywhere; }
@@ -1091,7 +1092,9 @@ table.lo-am td.lo-chk { white-space: normal; min-width: 190px; max-width: 290px;
 }
 @media (max-width: 760px) {
   .lo-tbox { max-height: none; border: 0; overflow: visible; } .lo-listbox { padding: 0; border: 0; background: none; }
-  .lo-tbox table.lo td { white-space: normal; } .lo-tbox .opt { display: flex !important; } .lo-tbox .optalt { display: none !important; }
+  .lo-tbox table.lo td { white-space: normal; } .lo-tbox .opt { display: flex !important; }
   table.lo-dp td.ck { display: flex; } .lo-gr { grid-template-columns: 1fr; } .lo-two2 { grid-template-columns: 1fr; }
   table.lo-am, table.lo-am tbody, table.lo-am tr, table.lo-am td { display: block; width: 100%; } table.lo-am td { border: 0; }
 }
+@media (max-width: 640px) { .lo-found > .muted { flex-basis: 100%; order: 3; } }
+.lo-split.open .lo-tbox .lo-morec { display: none; }   /* the panel is open: the ⋯ button isn't needed */

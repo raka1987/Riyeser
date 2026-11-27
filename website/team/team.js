@@ -430,7 +430,7 @@
     const tix = [{ id: 't0', ref: 'T-10230', topic: 'other', subject: 'Welcome to Riyeser', status: 'waiting_customer', who_acts: 'customer', mine: true, from_riyeser: true, business: 'Sample Plumbing',
       created_at: ago(300), updated_at: ago(300), read: '', messages: [{ id: 1, staff: true, mine: false, from: 'Riyeser Support', body: 'Hi! We\'re here if you need a hand setting up Riyeser Central or bringing your customers across. Just reply here.', at: ago(300) }] }];
     const refs = [];
-    const lo = { office_id: 'lo-demo', pc_name: 'OFFICE-PC', version: '1.2.1', state: 'running', addresses: ['192.168.1.20'], sip_port: 5060, address_stable: true, pc_mac: '3C:52:82:1A:2B:3C',
+    const lo = { office_id: 'lo-demo', pc_name: 'OFFICE-PC', version: '1.2.3', state: 'running', addresses: ['192.168.1.20'], sip_port: 5060, address_stable: true, pc_mac: '3C:52:82:1A:2B:3C',
       licence: { active: true, state: 'trial', text: 'Free trial · 74 days left' }, first_seen: ago(20000), last_seen: ago(1),
       counts: { people: 4, groups: 2, phones_assigned: 3, phones_connected: 2, new_phones: 1, calls_in_progress: 0, calls_made: 12 },
       phones: [{ mac: '0015654a1b2c', vendor: 'Yealink', model: 'T31P', extension: '101', assigned: true, registered: true, last_registered: ago(0), ip: '192.168.1.31', name: 'Front desk', location: 'Head office', provisioned_at: ago(2000) },
@@ -443,7 +443,7 @@
         { extension: '102', name: 'Sam Taylor', type: 'person', registered: 2, desk_phones: 1, app_users: 1, dnd: false }, { extension: '200', name: 'Lautoka branch', type: 'group', members: 2 },
         { extension: '201', name: 'Jordan Lee', type: 'person', registered: 0, desk_phones: 1, app_users: 0, dnd: false }, { extension: '202', name: 'Alex Nguyen', type: 'person', registered: 0, desk_phones: 0, app_users: 0, dnd: true }] };
     const loCmds = {}; const loPw = {}; let loN = 0; let loSupport = null;
-    // Link Office 1.2.1 in the demo: many phones at once, and each phone's page (the office's summary comes back)
+    // Link Office 1.2.3 in the demo: many phones at once, and each phone's page (the office's summary comes back)
     const demoPhones = (kind, data, mac) => {
       const B = window.LinkBulk; const VN = { yealink: 'Yealink', grandstream: 'Grandstream', snom: 'Snom', polycom: 'Polycom' };
       const ph = (m) => lo.phones.find((x) => x.mac === m); const person = (e) => lo.extensions.find((x) => x.extension === String(e) && x.type === 'person');
@@ -1319,6 +1319,7 @@
     } else { S.wsReady = null; await loadWorkspace(); await openChannel(first && first.id, false); }
     if (params.has('phones') && !S.phonesShown && isAdmin()) { S.phonesShown = true; mg(() => phonesPage(S.home ? 'home' : 'manage'))(); }
     else if (params.has('connections') && !S.connShown && isAdmin()) { S.connShown = true; mg(() => connectionsPage(S.home ? 'home' : 'manage'))(); }
+    else if (params.has('rings') && !S.ringsShown && isAdmin() && Array.isArray(S.groups)) { S.ringsShown = true; S.home = false; mg(() => openRingGroups('manage'))(); }   // from Riyeser Link Office
     else if ((params.has('myphone') || params.has('phones')) && !S.myShown) { S.myShown = true; S.phonesShown = true; myPhonePage(S.home ? 'home' : 'chat'); }
   }
 
@@ -3773,7 +3774,7 @@
       const movedNew = moved && moved.at && now - Date.parse(moved.at) < 7 * 86400000 && moved.to === addr ? moved : null;
       const shortTo = (a, b) => { const x = String(a).split('.'); const y = String(b).split('.'); return x.length === 4 && y.length === 4 && x.slice(0, 3).join('.') === y.slice(0, 3).join('.') ? `.${y[3]}` : b; };
       const support = st.support && new Date(st.support.until) > Date.now() ? st.support : null;
-      // Link Office 1.2.1: one control panel. Overview (what needs attention, tiles), Phones (every phone, filters, tick
+      // Link Office 1.2.3: one control panel. Overview (what needs attention, tiles), Phones (every phone, filters, tick
       // boxes, a bar for many at once, and a panel on the right for one), Extensions, Help and support.
       const ui = loUi(); const rowsAll = loRows(o, now);
       const attn = loAttention(o, now, desk, found, movedNew);
@@ -3785,7 +3786,7 @@
       body = `${setupHtml(setupSteps(offices, now))}
       ${offices.length > 1 ? `<label class="lo-pick">Riyeser Link Office on <select id="lopick">${offices.map((x) => `<option value="${esc(x.office_id)}"${x === o ? ' selected' : ''}>${esc(x.pc_name || 'a PC')} · seen ${ago(x.last_seen)}</option>`).join('')}</select></label>` : ''}
       <div class="lo-shell">
-        <nav class="lo-nav" role="tablist" aria-label="Desk phones">${tab('overview', 'Overview', attn.length ? `<span class="lo-badge${attn.some((a) => a.cls !== 'info') ? ' warn' : ''}">${attn.length}</span>` : '')}${tab('phones', 'Phones', found.length ? `<span class="lo-badge">${found.length}</span>` : '')}${tab('ext', 'Extensions')}${tab('help', 'Help and support')}</nav>
+        <nav class="lo-nav" role="tablist" aria-label="Desk phones">${tab('overview', 'Overview', attn.length ? `<span class="lo-badge${attn.some((a) => a.cls !== 'info') ? ' warn' : ''}">${attn.length}</span>` : '')}${tab('phones', 'Phones', found.length ? `<span class="lo-badge">${found.length}</span>` : '')}${tab('ext', 'Extensions')}${Array.isArray(S.groups) ? `<button data-lorings="1">Ring groups${groupsToCheck().length ? `<span class="lo-badge warn">${groupsToCheck().length}</span>` : ''}</button>` : ''}${tab('help', 'Help and support')}</nav>
         <div class="lo-panes">
         <div data-lopane="overview"${ui.tab === 'overview' ? '' : ' hidden'}>
       <section class="lo-card lo-top">
@@ -3811,8 +3812,9 @@
         ${tile(stCls === 'ok' ? 'ok' : stCls === 'bad' ? 'bad' : 'warn', '🖥 Office PC', `<code>${esc(addr || '—')}</code>`, `${esc(o.pc_name || 'Office PC')} · ${esc(stText)} · seen ${esc(ago(o.last_seen))} · version ${esc(o.version || '—')}`)}
         ${tile(dnd.length ? 'info' : 'ok', '👥 People', `<div class="lo-nums">${num(exts.filter((x) => x.type === 'person').length, 'extensions', 'ext')}${num(dnd.length, 'do not disturb', 'ext')}${num(exts.filter((x) => x.type === 'group').length, 'ring groups', 'ext')}</div>`, '')}
         ${tile('ok', '↗ Calls', `<div class="lo-nums">${num((o.counts && o.counts.calls_in_progress) || 0, 'now', 'calls')}${num((o.counts && o.counts.calls_made) || 0, 'answered (kept on the PC)', 'calls')}</div>`, 'Who called whom stays on the office PC, never online.')}
+        ${Array.isArray(S.groups) ? tile(groupsToCheck().length ? 'warn' : S.groups.length ? 'ok' : '', '☏ Ring groups', `<div class="lo-nums"><button class="lo-num" data-lorings="1"><b>${S.groups.length}</b><span>numbers</span></button><button class="lo-num" data-lorings="1"><b>${groupsToCheck().length}</b><span>to check</span></button></div>`,
+          'Who answers each branch and group number (like Sales or Reception).', '<button class="btn sm" data-lorings="1">Manage ring groups</button>') : ''}
         ${tile('off', '🏢 Branches and relay', 'Not set up', 'Phones at other branches or at home will connect through Riyeser Link Cloud\'s relay (coming soon). Until then, phones work on the office network.')}
-        ${tile(support ? 'info' : 'off', '🤝 Riyeser support', support ? `Helping until ${esc(timeShort(support.until))}` : 'Off', 'Let Riyeser see and change your phone set-up for an hour.', `<button class="btn sm" data-lotab="help">Help and support</button>`)}
       </div>
         </div>
         <div data-lopane="phones"${ui.tab === 'phones' ? '' : ' hidden'}>
@@ -3821,7 +3823,7 @@
       <div class="lo-split" id="losplit"><div class="lo-listbox"><div class="lo-filters" id="lofilters"></div><div class="lo-bulk" id="lobulk" hidden></div><div class="lo-tbox" id="lolist"></div></div><aside class="lo-side" id="lopanel" hidden aria-label="Phone details"></aside></div>
         </div>
         <div data-lopane="ext"${ui.tab === 'ext' ? '' : ' hidden'}>
-      <h3 class="hsec">Extensions <small>Each person's number. Their desk phones and Riyeser Link apps ring together.</small></h3>
+      <div class="lo-dphead"><h3 class="hsec">Extensions <small>Each person's number. Their desk phones and Riyeser Link apps ring together.</small></h3>${Array.isArray(S.groups) ? '<button class="btn" data-lorings="1">Ring groups: who answers each number</button>' : ''}</div>
       <div class="lo-tw"><table class="lo lo-ext"><thead><tr><th>Ext.</th><th>Person or group</th><th>Desk phones</th><th>App users</th><th>Do not disturb</th><th></th></tr></thead><tbody>
         ${exts.map((x) => x.type === 'group'
           ? `<tr class="grp"><td data-l="Ext."><b>${esc(x.extension)}</b></td><td data-l="Group">${esc(x.name)} <small class="muted">ring group · ${x.members || 0} ${x.members === 1 ? 'person' : 'people'}</small></td><td data-l="Desk phones" class="muted">—</td><td data-l="App users" class="muted">—</td><td data-l="Do not disturb" class="muted">—</td><td></td></tr>`
@@ -3867,7 +3869,7 @@
     $app.querySelectorAll('[data-give]').forEach((b) => b.onclick = () => giveTo(b.dataset.give));
     if (o && plus && admin) wireLoPanel();
   }
-  // ------------------------------------------------------------------ Link Office 1.2.1: the control panel's Phones list
+  // ------------------------------------------------------------------ Link Office 1.2.3: the control panel's Phones list
   // Every phone in one list (given to someone, new, ignored): search, sort, filters, tick boxes and a bar for many at
   // once; one phone in the panel on the right. The same as Riyeser Link Office's own screen (desktop/src/renderer/link.js).
   const LB = () => window.LinkBulk;
@@ -3892,7 +3894,9 @@
     if (off.length) a.push({ cls: 'warn', html: `${off.length} phone${off.length === 1 ? '' : 's'} offline: ${esc(off.slice(0, 3).map((p) => p.name || extName(p.extension) || prettyMac(p.mac)).join(', '))}${off.length > 3 ? '…' : ''}.`, act: 'f-Offline', label: 'Show them' });
     if (o.address_stable === false) a.push({ cls: 'warn', html: 'The office PC\'s address keeps changing, so phones may lose touch.', act: 'stable', label: 'How to fix it' });
     else if (movedNew) a.push({ cls: 'info', html: `The office PC's address changed to ${esc((o.addresses || [])[0] || '')}. Phones typed in by hand need it typed in.` });
-    if (versionBelow(o.version, '1.2.1')) a.push({ cls: 'info', html: `Update Riyeser Link Office on ${esc(o.pc_name || 'the office PC')} (version ${esc(o.version || '?')}) to manage many phones at once and each phone's settings from here. Riyeser Central updates it.` });
+    const rg = typeof groupsToCheck === 'function' ? groupsToCheck() : [];
+    if (rg.length) a.push({ cls: 'warn', html: `${rg.length} ring group${rg.length === 1 ? '' : 's'} to check: who answers ${esc(rg.slice(0, 3).map((g) => g.name).join(', '))}.`, act: 'rings', label: 'Check ring groups' });
+    if (versionBelow(o.version, '1.2.3')) a.push({ cls: 'info', html: `Update Riyeser Link Office on ${esc(o.pc_name || 'the office PC')} (version ${esc(o.version || '?')}) to manage many phones at once and each phone's settings from here. Riyeser Central updates it.` });
     return a;
   }
   function loFiltered() {
@@ -3911,10 +3915,10 @@
     const vendors = [...new Set(all.map((r) => r.vendor).filter(Boolean))].sort(); const locs = [...new Set(all.map((r) => r.location).filter(Boolean))].sort();
     const n = (st) => all.filter((r) => r.status === st).length;
     box.innerHTML = all.length ? `<input type="search" id="loq" placeholder="Search name, extension, person, MAC, IP…" value="${esc(ui.q)}" aria-label="Search phones">
-      <select id="lost" aria-label="Status"><option value="all">All statuses (${all.length})</option>${LO_ORDER.filter((x) => n(x) || ui.status === x).map((x) => `<option value="${esc(x)}"${ui.status === x ? ' selected' : ''}>${esc(x)} (${n(x)})</option>`).join('')}</select>
+      <select id="lost" aria-label="Status"><option value="all">All statuses</option>${LO_ORDER.filter((x) => n(x) || ui.status === x).map((x) => `<option value="${esc(x)}"${ui.status === x ? ' selected' : ''}>${esc(x)} (${n(x)})</option>`).join('')}</select>
       <select id="lovd" aria-label="Maker"><option value="">All makers</option>${vendors.map((v) => `<option${ui.vendor === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>
       <select id="loloc" aria-label="Location"><option value="">All locations</option>${locs.map((v) => `<option${ui.location === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}<option value="-"${ui.location === '-' ? ' selected' : ''}>No location</option></select>
-      <select id="loas" aria-label="Given to someone"><option value="">Assigned or not</option><option value="yes"${ui.assigned === 'yes' ? ' selected' : ''}>Assigned</option><option value="no"${ui.assigned === 'no' ? ' selected' : ''}>Not assigned</option></select>` : '';
+      <select id="loas" aria-label="Given to someone"><option value="">All phones</option><option value="yes"${ui.assigned === 'yes' ? ' selected' : ''}>Assigned</option><option value="no"${ui.assigned === 'no' ? ' selected' : ''}>Not assigned</option></select>` : '';
   }
   function drawLoList() {
     const box = document.getElementById('lolist'); if (!box) return;
@@ -3923,11 +3927,11 @@
     const th = (k, t, cls = '') => `<th class="sort ${cls}" data-sort="${k}" aria-sort="${ui.sort === k ? (ui.dir > 0 ? 'ascending' : 'descending') : 'none'}">${t}${ui.sort === k ? `<span class="arr">${ui.dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`;
     const allOn = rows.length > 0 && rows.every((r) => ui.sel.has(r.mac));
     box.innerHTML = !all.length ? '<p class="muted lo-empty">No desk phones yet. Plug one in at the office and it shows up here as <b>New</b>, or add them by MAC address.</p>'
-      : `<table class="lo lo-dp"><thead><tr><th class="ck"><input type="checkbox" id="loall" aria-label="Select all ${rows.length} shown"${allOn ? ' checked' : ''}></th>${th('name', 'Name · location')}${th('ext', 'Ext.')}${th('person', 'Person')}${th('model', 'Model')}${th('mac', 'MAC', 'opt')}${th('ip', 'IP', 'opt')}${th('status', 'Status')}${th('seen', 'Last seen')}<th><span class="sr">More</span></th></tr></thead><tbody>
+      : `<table class="lo lo-dp"><thead><tr><th class="ck"><input type="checkbox" id="loall" aria-label="Select all ${rows.length} shown"${allOn ? ' checked' : ''}></th>${th('name', 'Name · location')}${th('ext', 'Ext.')}${th('person', 'Person')}${th('model', 'Model')}${th('mac', 'MAC', 'opt')}${th('ip', 'IP', 'opt')}${th('status', 'Status')}${th('seen', 'Last seen')}<th class="lo-morec"><span class="sr">More</span></th></tr></thead><tbody>
         ${rows.map((r) => `<tr data-mac="${esc(r.mac)}" class="${ui.sel.has(r.mac) ? 'sel' : ''}${ui.cur === r.mac ? ' cur' : ''}"><td class="ck" data-l=""><input type="checkbox" data-pick="${esc(r.mac)}"${ui.sel.has(r.mac) ? ' checked' : ''} aria-label="Select ${esc(r.title)}"></td>
           <td data-l="Name"><span class="lo-nm"><span class="lo-ico" aria-hidden="true">☎</span><span><b>${esc(r.title)}</b><small>${esc(r.location || '—')}</small></span></span></td>
           <td data-l="Extension">${r.ext ? `<b>${esc(r.ext)}</b>` : '<span class="muted">—</span>'}</td><td data-l="Person">${r.person ? `${esc(r.person)}${r.p.shared ? ' <small class="muted">shared</small>' : ''}` : '<span class="muted">—</span>'}</td>
-          <td data-l="Model"><span class="lo-two"><b>${esc(r.vendor || 'Not known')}</b><small>${esc(r.model || '—')}<span class="optalt mono"> · ${esc(prettyMac(r.mac))}</span></small></span></td>
+          <td data-l="Model"><span class="lo-two"><b>${esc(r.vendor || 'Not known')}</b><small>${esc(r.model || '—')}</small></span></td>
           <td data-l="MAC" class="mono opt">${esc(prettyMac(r.mac))}</td><td data-l="IP" class="mono opt">${esc(r.ip || '—')}</td>
           <td data-l="Status">${statusPillT(r.status, r.cls)}</td><td data-l="Last seen">${r.seen ? esc(r.p.registered ? 'Now' : ago(r.seen)) : 'Never'}</td>
           <td class="lo-morec"><button class="btn sm lo-dots" data-more="${esc(r.mac)}" aria-label="Manage ${esc(r.title)}" title="Manage this phone">⋯</button></td></tr>`).join('')
@@ -3956,7 +3960,7 @@
     const p = r.p; const c = LB() ? LB().caps(vkey(p.vendor)) : {}; const s = p.settings || {}; const keys = s.lineKeys || [];
     const opts = (list, cur) => list.map(([v, l]) => `<option value="${esc(v)}"${String(cur) === String(v) ? ' selected' : ''}>${esc(l)}</option>`).join('');
     const ppl = people();
-    const old = versionBelow((S.lo.office || {}).version, '1.2.1');
+    const old = versionBelow((S.lo.office || {}).version, '1.2.3');
     const settings = r.kind !== 'phone' ? '' : !Object.keys(c).length ? `<h4>Phone settings</h4><p class="lo-hint">${esc(p.vendor || 'This maker')} phones aren't set up by Riyeser Link Office, so their settings are changed on the phone itself.</p>`
       : `<h4>Phone settings <small>${esc(p.vendor)}</small></h4><form id="lopsf"><div class="lo-two2">
         ${c.label ? `<label class="f"><span>Name on the line key</span><input name="label" maxlength="20" value="${esc(s.label || '')}" placeholder="${esc(r.person)}"></label>` : ''}
@@ -3975,7 +3979,7 @@
       <dl class="lo-kv lo-pkv">${r.kind === 'phone' ? `<dt>Extension</dt><dd><b>${esc(r.ext)}</b> ${esc(r.person)}${p.shared ? ' <small>shared phone</small>' : ''}</dd>` : ''}<dt>Location</dt><dd>${esc(r.location || '—')}</dd>${p.note ? `<dt>Notes</dt><dd>${esc(p.note)}</dd>` : ''}
         <dt>IP address</dt><dd class="mono">${esc(p.ip || '—')}</dd>${p.firmware ? `<dt>Firmware</dt><dd class="mono">${esc(p.firmware)}</dd>` : ''}${p.registered_since ? `<dt>Connected since</dt><dd>${esc(ago(p.registered_since))}</dd>` : ''}
         <dt>Last seen</dt><dd>${r.seen ? esc(p.registered ? 'Now' : ago(r.seen)) : 'Never'}</dd>${r.kind === 'phone' ? `<dt>Settings fetched</dt><dd>${p.provisioned_at ? esc(ago(p.provisioned_at)) : 'Not yet'}</dd>` : ''}</dl>
-      ${old ? `<p class="lo-hint lo-old">Restart, Find this phone, Ignore, Remove and phone settings need Riyeser Link Office 1.2.1 on ${esc((S.lo.office || {}).pc_name || 'the office PC')}.</p>` : ''}
+      ${old ? `<p class="lo-hint lo-old">Restart, Find this phone, Ignore, Remove and phone settings need Riyeser Link Office 1.2.3 on ${esc((S.lo.office || {}).pc_name || 'the office PC')}.</p>` : ''}
       <h4>Actions</h4><div class="lo-pacts">
         ${p.ip ? '<button class="btn sm" data-pa="restart">Restart</button>' : ''}${r.kind === 'phone' && p.ip ? '<button class="btn sm" data-pa="resync">Re-send settings</button>' : ''}${r.kind === 'phone' && p.registered ? '<button class="btn sm" data-pa="find">Find this phone</button>' : ''}
         ${r.kind === 'phone' ? `<button class="btn sm" data-m="view">View setup</button>${r.status !== 'Online' ? '<button class="btn sm" data-m="trouble">Troubleshoot</button>' : ''}<button class="btn sm" data-m="replace">Replace phone</button><button class="btn sm" data-m="adv">Advanced setup (manual SIP)</button><button class="btn sm" data-m="remove">Remove from this person</button>` : ''}
@@ -4008,6 +4012,7 @@
     page.addEventListener('click', async (e) => {
       const t = e.target;
       const tb = t.closest('[data-lotab]'); if (tb) { tabTo(tb.dataset.lotab); return; }
+      if (t.closest('[data-lorings]')) { clearInterval(S.loTimer); S.view = null; S.home = false; openRingGroups('manage'); return; }   // the same Ring groups page as Management
       const lf = t.closest('[data-lof]'); if (lf) { const f = lf.dataset.lof; if (f === 'ext' || f === 'calls') tabTo('ext'); else filterTo(f); return; }
       const la = t.closest('[data-loact]');
       if (la) { const a = la.dataset.loact;
@@ -4015,11 +4020,12 @@
         if (a === 'addmany') addManyWeb();
         if (a.startsWith('f-')) filterTo(a.slice(2));
         if (a === 'stable') location.href = '/help/link.html#stable-address';
+        if (a === 'rings') { clearInterval(S.loTimer); S.view = null; S.home = false; openRingGroups('manage'); }
         return; }
       const th = t.closest('th[data-sort]'); if (th) { const k = th.dataset.sort; if (ui.sort === k) ui.dir *= -1; else { ui.sort = k; ui.dir = 1; } drawLoList(); return; }
       const bk = t.closest('[data-bulk]'); if (bk) { loBulk(bk.dataset.bulk); return; }
       const more = t.closest('[data-more]'); const row = t.closest('tr[data-mac]');
-      if (more || (row && !t.closest('input,button,a,label,select'))) { const m = (more || row).dataset.more || row.dataset.mac; ui.cur = ui.cur === m && !more ? null : m; drawLoList(); drawLoPanel();
+      if (more || (row && !t.closest('input,button,a,label,select'))) { const m = (more || row).dataset.more || row.dataset.mac; ui.cur = m; drawLoList(); drawLoPanel();
         if (window.innerWidth < 1100) document.getElementById('lopanel').scrollTop = 0; return; }
       if (t.closest('#lopclose')) { ui.cur = null; drawLoList(); drawLoPanel(); return; }
       if (t.closest('#loaddmany')) { addManyWeb(); return; }

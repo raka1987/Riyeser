@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="link.css">
 </head>
 <body>
-  <!-- 1.2.1: one control panel. A slim menu on the left (Overview, Phones, People, Calls, Settings), the work on the right. -->
+  <!-- 1.2.3: one control panel. A slim menu on the left (Overview, Phones, People, Calls, Settings), the work on the right. -->
   <header class="top">
     <img src="logos/link.png" alt="" class="logo">
     <div class="grow"><h1>Riyeser Link Office</h1><div class="sub">Your office phone system<span id="biz"></span></div></div>
@@ -17,7 +17,7 @@
   </header>
   <p class="note sos" id="sos"><span class="grow"><b>Internal calls only.</b> These phones can't call emergency services — keep a mobile or normal phone line for that.</span><button class="x" data-a="soshide" aria-label="Hide this until Riyeser Link Office is opened again">✕</button></p>
   <div class="shell">
-    <nav class="tabs side" role="tablist" aria-label="Riyeser Link Office">
+    <nav class="tabs rail" role="tablist" aria-label="Riyeser Link Office">
       <button role="tab" data-tab="overview" class="on"><span class="ic" aria-hidden="true">▦</span>Overview<span class="badge" id="navattn" hidden></span></button>
       <button role="tab" data-tab="phones"><span class="ic" aria-hidden="true">☎</span>Phones<span class="badge" id="navnew" hidden></span></button>
       <button role="tab" data-tab="people"><span class="ic" aria-hidden="true">👥</span>People</button>
@@ -82,11 +82,11 @@
           </div>
           <aside class="side" id="ppanel" hidden aria-label="Person details"></aside>
         </div>
-        <section class="panel" id="groupsp"><div class="ph"><h2>Ring groups</h2><span class="muted">Dial the group's number to ring everyone in it at once</span></div><div id="groups"></div></section>
+        <section class="panel" id="groupsp"><div class="ph"><h2>Ring groups</h2><span class="muted">Dial a group's number to ring the people chosen for it</span><span class="grow"></span><button class="btn s sm" data-a="rings">Manage ring groups</button></div><div id="groups"></div></section>
       </div>
 
       <div data-pane="calls" hidden>
-        <div class="paneh"><h2>Recent calls</h2><span class="muted">Kept on this PC for 90 days</span></div>
+        <div class="paneh"><h2>Recent calls</h2><span class="muted">Kept on this PC for 90 days</span><span class="grow"></span><button class="btn s sm" data-a="rings">Ring groups: who answers each number</button></div>
         <div class="split" id="csplit">
           <div class="listbox">
             <div class="filters" id="cfilters"></div>

@@ -1,4 +1,4 @@
-// Riyeser Link Office 1.2.1: adding and managing many desk phones at once. Plain functions with no window, Electron or
+// Riyeser Link Office 1.2.3: adding and managing many desk phones at once. Plain functions with no window, Electron or
 // network, so the same file runs in Riyeser Link Office's main process, in its window, and on the website's Phones page
 // (website/team/link-bulk.js must stay a byte-for-byte copy; a test checks).
 //   MAC addresses   any format (001565aabbcc, 00:15:65:AA:BB:CC, 00-15-65-…, 0015.65aa.bbcc) -> 12 lower-case hex digits

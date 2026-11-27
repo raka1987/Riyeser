@@ -1,4 +1,4 @@
-// Riyeser Link Office's screen (1.2.1: one control panel). A menu on the left: Overview (what needs attention, and a tile
+// Riyeser Link Office's screen (1.2.3: one control panel). A menu on the left: Overview (what needs attention, and a tile
 // for each part of the office phone system), Phones (every phone in one list: tick several to act on them, click one to
 // manage it in the panel on the right), People, Calls and Settings.
 // 1.2.1: never `const api = window.api` at the top level: the preload puts `api` on the window as a fixed (non-configurable)
@@ -114,10 +114,10 @@ function renderPhoneFilters() {
   const vendors = [...new Set(all.map((r) => r.vendorName).filter(Boolean))].sort(); const locs = [...new Set(all.map((r) => r.location).filter(Boolean))].sort();
   const count = (s) => all.filter((r) => r.status === s).length;
   box.innerHTML = `<input type="search" id="phq" placeholder="Search name, extension, person, MAC, IP…" value="${esc(f.q)}" aria-label="Search phones">
-    <select id="phst" aria-label="Status"><option value="all">All statuses (${all.length})</option>${STATUSES.filter((s) => count(s) || f.status === s).map((s) => `<option value="${esc(s)}"${f.status === s ? ' selected' : ''}>${esc(s)} (${count(s)})</option>`).join('')}</select>
+    <select id="phst" aria-label="Status"><option value="all">All statuses</option>${STATUSES.filter((s) => count(s) || f.status === s).map((s) => `<option value="${esc(s)}"${f.status === s ? ' selected' : ''}>${esc(s)} (${count(s)})</option>`).join('')}</select>
     <select id="phvd" aria-label="Maker"><option value="">All makers</option>${vendors.map((v) => `<option${f.vendor === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select>
     <select id="phloc" aria-label="Location"><option value="">All locations</option>${locs.map((v) => `<option${f.location === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}<option value="-"${f.location === '-' ? ' selected' : ''}>No location</option></select>
-    <select id="phas" aria-label="Given to someone"><option value="">Assigned or not</option><option value="yes"${f.assigned === 'yes' ? ' selected' : ''}>Assigned</option><option value="no"${f.assigned === 'no' ? ' selected' : ''}>Not assigned</option></select>`;
+    <select id="phas" aria-label="Given to someone"><option value="">All phones</option><option value="yes"${f.assigned === 'yes' ? ' selected' : ''}>Assigned</option><option value="no"${f.assigned === 'no' ? ' selected' : ''}>Not assigned</option></select>`;
 }
 function renderPhones() {
   const rows = filtered(); const f = ui.ph;
@@ -132,7 +132,7 @@ function renderPhones() {
         <td class="two"><b>${esc(rowTitle(r))}</b><small>${esc(r.location || '—')}</small></td>
         <td>${r.ext ? `<b>${esc(r.ext)}</b>` : '<span class="muted">—</span>'}</td>
         <td>${r.person ? `${esc(r.person)}${r.shared ? ' <span class="pill">shared</span>' : ''}` : '<span class="muted">—</span>'}</td>
-        <td class="two"><b>${esc(r.vendorName || 'Not known')}</b><small>${esc(r.model || '—')}<span class="optalt mono"> · ${esc(r.macText)}</span></small></td>
+        <td class="two"><b>${esc(r.vendorName || 'Not known')}</b><small>${esc(r.model || '—')}</small></td>
         <td class="mono opt">${esc(r.macText)}</td><td class="mono opt">${esc(r.ip || '—')}</td>
         <td><span class="pill ${esc(r.cls)}">${esc(r.status)}</span></td><td>${r.seen ? esc(when(r.seen)) : '<span class="muted">Never</span>'}</td></tr>`).join('')
         || '<tr><td colspan="9" class="empty">No phones match. <button class="linkbtn" data-a="phclear">Clear the filters</button></td></tr>'}</tbody></table>`;
@@ -222,6 +222,8 @@ function attention() {
   if (S.offline) add('bad', T.IP_OFFLINE, null);
   if (S.sleepNote) add('warn', S.sleepNote, null);
   for (const b of S.blocked || []) add('warn', `Blocked ${b.ip} until ${when(b.until)} after too many wrong passwords. If that's one of your phones, check its password.`, null);
+  const eg = emptyGroups();
+  if (eg.length) add('warn', `Nobody is chosen to answer ${eg.slice(0, 3).map((g) => `${g.name} (${g.ext})`).join(', ')}${eg.length > 3 ? '…' : ''}, so calls to ${eg.length === 1 ? 'it' : 'them'} are missed.`, 'rings', 'Choose who answers');
   if ((S.skipped || []).length) add('info', `Not on the phones yet: ${S.skipped.map((x) => `${x.name} (${x.why})`).join('; ')}.`, 'sync', 'Bring in people again');
   if (S.cloud && S.cloud.status === 'offline') add('warn', T.cloud(S.cloud), 'report', 'Try now');
   if (!S.signedIn && S.source !== 'team') add('info', 'Sign in to bring in your team and see the phones on the website.', 'step-signin', 'Sign in');
@@ -250,11 +252,13 @@ function renderOverview() {
     `<section class="tile ${S.ipChanged || S.addressStable === false ? 'warn' : 'ok'}"><h3>🖥 This PC's address</h3><div class="big"><code>${esc(S.host || '…')}</code></div>
       <p>${esc(S.names && S.names.mdns ? `Also ${S.names.mdns}${S.names.router ? ` and ${S.names.router}` : ''}.` : '')}${S.addressStable === false ? ' It keeps changing.' : ''}</p>
       <div class="acts"><button class="btn s sm" data-copy="${esc(S.host || '')}">Copy</button><button class="btn s sm" data-a="reserve">Reserve address</button></div></section>`,
+    `<section class="tile ${emptyGroups().length ? 'warn' : S.groups.length ? 'ok' : 'off'}"><h3>☏ Ring groups</h3><div class="nums">${n(S.groups.length, 'numbers', 'people')}${n(emptyGroups().length, 'to check', 'people')}</div>
+      <p>${S.groups.length ? esc(S.groups.slice(0, 3).map((g) => `${g.ext} ${g.name}: ${groupHow(g)}`).join(' · ')) : 'Each branch or group number (like Sales or Reception) rings the people chosen for it.'}</p>
+      <div class="acts"><button class="btn s sm" data-a="rings">Manage ring groups</button></div></section>`,
     '<section class="tile off"><h3>🏢 Branches and relay</h3><div class="big">Not set up</div><p>Phones at other branches or at home will connect through Riyeser Link Cloud\'s relay (coming soon). Until then, phones work on this office network.</p></section>',
-    `<section class="tile ${fw}"><h3>🛡 Windows check</h3><div class="big">${fw === 'ok' ? 'All good' : fw === 'bad' ? 'Firewall blocks phones' : 'Needs a look'}</div>
-      <p>Firewall: ${S.firewall === true ? 'phones allowed' : S.firewall === false ? 'not allowed yet' : S.firewall === 'outdated' ? 'older rule' : 'not checked here'} · Starts with Windows: ${S.startWithWindows ? 'yes' : 'no'}${S.sleepNote ? ' · may go to sleep' : ''}</p>
-      <div class="acts">${S.firewall === false || S.firewall === 'outdated' ? '<button class="btn sm" data-a="firewall">Fix firewall</button>' : ''}<button class="btn s sm" data-a="recheck">Check again</button></div></section>`,
-    '<section class="tile ok"><h3>💾 Backups</h3><div class="big">Every day</div><p>Into Documents\\Riyeser\\Link Office\\Backups (the last 30 are kept).</p><div class="acts"><button class="btn s sm" data-a="backupnow">Back up now</button></div></section>',
+    `<section class="tile ${fw}"><h3>🛡 Windows check and backups</h3><div class="big">${fw === 'ok' ? 'All good' : fw === 'bad' ? 'Firewall blocks phones' : 'Needs a look'}</div>
+      <p>Firewall: ${S.firewall === true ? 'phones allowed' : S.firewall === false ? 'not allowed yet' : S.firewall === 'outdated' ? 'older rule' : 'not checked here'} · Starts with Windows: ${S.startWithWindows ? 'yes' : 'no'}${S.sleepNote ? ' · may go to sleep' : ''} · Backed up every day (the last 30 kept).</p>
+      <div class="acts">${S.firewall === false || S.firewall === 'outdated' ? '<button class="btn sm" data-a="firewall">Fix firewall</button>' : ''}<button class="btn s sm" data-a="recheck">Check again</button><button class="btn s sm" data-a="backupnow">Back up now</button></div></section>`,
     `<section class="tile ${cl === 'online' ? 'ok' : cl === 'offline' ? 'warn' : 'off'}"><h3>☁ Riyeser Online</h3><div class="big">${cl === 'online' ? 'Connected' : cl === 'offline' ? 'Can\'t reach it' : cl === 'local' ? 'Not linked' : 'Connecting…'}</div>
       <p>${esc(S.teamSyncedAt ? `People brought in ${when(S.teamSyncedAt)}. ` : '')}${esc(T.cloud(S.cloud))}</p>
       <div class="acts">${cl === 'online' ? '<button class="btn s sm" data-a="web">Phones page on the website</button>' : ''}<button class="btn s sm" data-a="sync">Bring in people now</button></div></section>`,
@@ -333,9 +337,14 @@ function renderPersonPanel() {
       : `<button class="btn s sm" data-manual="${esc(p.ext)}">${esc(T.howSetsUp(p.name))}</button>`}
     ${p.source === 'local' ? `<h4>Remove</h4><button class="btn danger sm" data-remove="${esc(p.id)}">Take ${esc(p.name)} off the phones</button>` : '<p class="hint">Name, extension and branches are changed in Riyeser Link.</p>'}`;
 }
+// Ring groups (1.2.2): chosen in Riyeser Link (Management › Ring groups); shown here with how they ring.
+const HOW = { all: 'all at once', order: 'one after another', rotate: 'taking turns' };
+const groupHow = (g) => `${HOW[g.strategy] || HOW.all}${g.fallback ? ` · then ${g.fallback.ext}` : ''}`;
+const emptyGroups = () => S.groups.filter((g) => !(g.members || []).length);
 function renderGroups() {
   $('#groupsp').hidden = !S.groups.length;
-  $('#groups').innerHTML = `<div class="tw"><table>${S.groups.map((g) => `<tr><td><b>${esc(g.ext)}</b></td><td>${esc(g.name)}</td><td class="muted">${g.names.length ? esc(g.names.join(', ')) : 'No one in it yet'}</td></tr>`).join('')}</table></div>`;
+  $('#groups').innerHTML = `<div class="tw"><table><tr><th>Number</th><th>Group</th><th>Who answers</th><th>How it rings</th></tr>${S.groups.map((g) => `<tr><td><b>${esc(g.ext)}</b></td><td>${esc(g.name)}</td>
+    <td>${g.names.length ? esc(g.names.join(', ')) : '<span class="pill wait">Nobody chosen</span>'}</td><td class="muted">${esc(groupHow(g))}</td></tr>`).join('')}</table></div>`;
 }
 // ---------- Calls: the list (filter missed or answered), and one call in the panel
 function callRows() { return [...S.inProgress.map((c) => ({ ...c, live: true, result: c.state === 'talking' ? 'on a call now' : 'ringing' })), ...S.recent.slice(0, 100)]; }
@@ -636,6 +645,7 @@ document.addEventListener('click', async (e) => {
     if (a === 'closecall') { ui.cc.cur = null; renderCalls(); return; }
     if (a === 'team') await safe(() => bridge.call('link:openTeam'));
     if (a === 'web') await safe(() => bridge.call('link:openPhonesPage'));
+    if (a === 'rings') await safe(() => bridge.call('link:openRingGroups'));
     if (a === 'report') { const r = await safe(() => bridge.call('link:report')); if (r) toast(r.ok ? 'Sent to Riyeser Link.' : r.error); }
     if (a === 'setupopen') { setupOpen = !setupOpen; renderSetup(); }
     if (a === 'step-signin') { showTab('settings'); const em = $('#em'); if (em) em.focus(); }

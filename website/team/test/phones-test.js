@@ -9,7 +9,7 @@
 //     new one on the same extension, keep the name and location). 8. Troubleshoot, and Report a phone issue (prefilled).
 //  9. Advanced setup (manual SIP) is for admins only. 10. Let Riyeser help. 11. All steps done: folded away.
 // 12. Riyeser Link paused: how to add it. 13. An older database: the steps, no errors. 14. Phone width: no sideways scrolling.
-// Link Office 1.2.1 (one control panel): 15. Overview (Needs attention, tiles; a number opens the filtered list). 16. Every phone
+// Link Office 1.2.3 (one control panel): 15. Overview (Needs attention, tiles; a number opens the filtered list). 16. Every phone
 // in one list: search, sort, filters, tick boxes, select all shown, the bar for many at once (Give to… per person or numbered in
 // order, Restart, Remove) with the office's summary. 17. Add several phones (paste or CSV, the preview, fix in place, add).
 // 18. Each phone's panel: Restart, Find this phone, Ignore, its settings (only what its maker supports), Save and restart.
@@ -80,7 +80,7 @@ async function fakeServer(page, opts = {}) {
         if (c.kind === 'add_phone') phones.push({ mac: c.data.mac, vendor: c.data.vendor === 'snom' ? 'Snom' : '', model: '', extension: c.data.extension, assigned: true, registered: false, last_registered: null, ip: null, provisioned_at: null });
         if (c.kind === 'unassign_phone') st.offices[0].phones = phones.filter((p) => p.mac !== c.data.mac);
         if (c.kind === 'name_phone') Object.assign(phones.find((p) => p.mac === c.data.mac), { name: c.data.name, location: c.data.branch, note: c.data.note });
-        if (c.kind === 'bulk_phones') {   // Link Office 1.2.1: many phones at once, with its summary back
+        if (c.kind === 'bulk_phones') {   // Link Office 1.2.3: many phones at once, with its summary back
           const d = c.data; const n = (k) => `${k} phone${k === 1 ? '' : 's'}`;
           if (d.action === 'give') { let e = Number(d.start) || 201; for (const m of d.macs) Object.assign(phones.find((p) => p.mac === m), { assigned: true, extension: (d.to || {})[m] || String(e++) }); c.result = { summary: `Gave out ${n(d.macs.length)}.`, done: d.macs.length }; }
           if (d.action === 'add') { for (const r of d.rows) phones.push({ mac: r.macText.replace(/[^0-9a-f]/gi, '').toLowerCase(), vendor: '', model: '', extension: r.ext || null, assigned: !!r.ext, registered: false, last_registered: null, ip: null, name: r.name || '', location: r.location || '' });
@@ -138,7 +138,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.ok(attn.some((x) => /keeps changing/.test(x)), 'the address isn\'t stable');
     assert.ok(attn.some((x) => /Update Riyeser Link Office on OFFICE-PC \(version 1\.1\.1\)/.test(x)), 'an older Link Office: update it');
     const tiles = await pg.evaluate(() => [...document.querySelectorAll('.lo-tile h4')].map((x) => x.textContent));
-    assert.deepStrictEqual(tiles, ['☎ Phones', '🖥 Office PC', '👥 People', '↗ Calls', '🏢 Branches and relay', '🤝 Riyeser support']);
+    assert.deepStrictEqual(tiles, ['☎ Phones', '🖥 Office PC', '👥 People', '↗ Calls', '☏ Ring groups', '🏢 Branches and relay']);
     await pg.screenshot({ path: out + '/phones-overview.png', fullPage: true });
     await pg.click('.lo-tile [data-lof="Offline"]'); await pg.waitForSelector('[data-lopane="phones"]:not([hidden])');
     assert.deepStrictEqual((await rows(pg)).map((x) => x.st), ['Offline'], 'a tile number opens the filtered list');
@@ -243,7 +243,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     console.log('added: Front counter, Online');
 
     // 7. Replace phone: the Offline one (Accounts, 102)
-    await pg.click('[data-more="000b82112233"]'); await pg.waitForSelector('#lopanel [data-m=replace]');
+    await pg.click('tr[data-mac="000b82112233"] td[data-l="Name"]'); await pg.waitForSelector('#lopanel [data-m=replace]');
     const menu = await pg.evaluate(() => [...document.querySelectorAll('#lopanel .lo-pacts .btn')].map((x) => x.textContent));
     console.log('phone panel:', menu);
     assert.deepStrictEqual(menu, ['Restart', 'Re-send settings', 'View setup', 'Troubleshoot', 'Replace phone', 'Advanced setup (manual SIP)', 'Remove from this person', 'Remove']);
@@ -264,7 +264,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     await pg.waitForFunction(() => { const r = [...document.querySelectorAll('table.lo-dp tbody tr')]; return !r.some((x) => x.dataset.mac === '000b82112233') && r.some((x) => x.dataset.mac === '000b82445566' && /Accounts/.test(x.innerText) && /102\s+Bo Example/.test(x.innerText)); }, null, { timeout: 8000 });
 
     // 8. Troubleshoot, and Report a phone issue
-    await pg.click('[data-more="0004f2aabbcc"]'); await pg.click('#lopanel [data-m=trouble]'); await pg.waitForSelector('.lo-check');
+    await pg.click('tr[data-mac="0004f2aabbcc"] td[data-l="Name"]'); await pg.click('#lopanel [data-m=trouble]'); await pg.waitForSelector('.lo-check');
     const checks = await pg.evaluate(() => [...document.querySelectorAll('.lo-check li')].map((x) => x.querySelector('b').textContent));
     console.log('troubleshoot:', checks);
     assert.deepStrictEqual(checks, ['Power.', 'Network cable in the LAN port.', 'Same office network.', 'The office PC is on and online.', 'Restart the phone.']);
@@ -345,7 +345,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     await pg.click('.modal #cl');
 
     // 18. each phone's panel: its settings (only what its maker supports), Save and restart, Find this phone, Ignore
-    await pg.click('[data-more="001565aabbcc"]'); await pg.waitForSelector('#lopsf');
+    await pg.click('tr[data-mac="001565aabbcc"] td[data-l="Name"]'); await pg.waitForSelector('#lopsf');
     const fields = await pg.evaluate(() => [...document.querySelectorAll('#lopsf label.f > span')].map((x) => x.textContent));
     assert.deepStrictEqual(fields, ['Name on the line key', 'Name shown on calls', 'Time zone', 'Clock', 'Language', 'Ringtone', 'Ring volume', 'Do not disturb'], 'Yealink: everything');
     await pg.selectOption('#lopsf [name=timeFormat]', '24'); await pg.selectOption('#lopsf [name=ringVolume]', '9'); await pg.fill('#lopsf [name=kv0]', '102'); await pg.fill('#lopsf [name=kl0]', 'Bo');
@@ -356,7 +356,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.deepStrictEqual(sk.map((c) => [c.kind, c.data]), [['phone_settings', { mac: '001565aabbcc', settings: { timeFormat: '24', ringVolume: '9', lineKeys: [{ value: '102', label: 'Bo' }] } }], ['phone_action', { mac: '001565aabbcc', action: 'restart' }]]);
     await pg.click('#lopanel [data-pa="find"]');
     await pg.waitForFunction(() => /Done|connected right now/.test((document.getElementById('lopstat') || {}).textContent || ''), null, { timeout: 8000 });
-    await pg.click('[data-more="0004f2aabbcc"]'); await pg.waitForSelector('#lopanel');
+    await pg.click('tr[data-mac="0004f2aabbcc"] td[data-l="Name"]'); await pg.waitForSelector('#lopanel');
     assert.ok(!(await pg.$('#lopanel [data-pa="find"]')), 'Find this phone only for a phone that is connected');
     assert.deepStrictEqual(await pg.evaluate(() => [...document.querySelectorAll('#lopsf label.f > span')].map((x) => x.textContent)),
       ['Name on the line key', 'Name shown on calls', 'Time zone', 'Clock', 'Language', 'Ringtone'], 'Polycom: only what its settings file carries');
@@ -364,7 +364,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     console.log('phone panel settings: ok');
 
     // 9. Advanced setup (manual SIP): admins get it; a member can't open the Desk phones page at all (they get My phone)
-    await pg.click('[data-more="001565aabbcc"]'); await pg.click('#lopanel [data-m=adv]'); await pg.waitForSelector('#show');
+    await pg.click('tr[data-mac="001565aabbcc"] td[data-l="Name"]'); await pg.click('#lopanel [data-m=adv]'); await pg.waitForSelector('#show');
     assert.match(await text(pg, '.mcard h3'), /Advanced setup \(manual SIP\)/); await pg.click('.mcard #cl');
     const pm = await b.newPage({ viewport: { width: 1100, height: 800 } }); pm.on('pageerror', (e) => errs.push('member: ' + e.message));
     await fakeServer(pm, { member: true, offices: [office()] }); await signIn(pm, BASE + '/link/?phones'); await pm.waitForSelector('#myPhonePage');

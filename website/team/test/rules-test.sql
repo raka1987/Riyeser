@@ -1891,11 +1891,11 @@ do $$ begin
 end $$;
 reset role;
 
--- Link Office 1.2.1: many phones at once (bulk_phones), each phone's own page (phone_action, phone_settings), the office's
+-- Link Office 1.2.3: many phones at once (bulk_phones), each phone's own page (phone_action, phone_settings), the office's
 -- summary back, and the extra phone details in the heartbeat. Owners and admins with two-step sign-in only.
 select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
 do $$ declare ws uuid := current_setting('test.ws_l')::uuid; o json; ph json; begin
-  perform public.link_office_report(ws, 'office-0001-abcd', '{"pc_name":"OFFICE-PC","version":"1.2.1","addresses":["192.168.1.20"],"sip_port":5060,"phones":[
+  perform public.link_office_report(ws, 'office-0001-abcd', '{"pc_name":"OFFICE-PC","version":"1.2.3","addresses":["192.168.1.20"],"sip_port":5060,"phones":[
     {"mac":"001565aabbcc","vendor":"Yealink","extension":"101","assigned":true,"registered":true,"ip":"192.168.1.31","firmware":"124.86.0.40","registered_since":"2026-11-27T08:00:00Z","last_seen":"2026-11-27T09:00:00Z","shared":false,
      "settings":{"label":"Front","timezone":"+12","timeFormat":"24","language":"English","ringtone":3,"ringVolume":9,"dnd":"person","lineKeys":[{"type":"speed","value":"102","label":"Bo"},{"value":"1; drop","label":"x"}],"password":"NotStored","evil":"<x>"}},
     {"mac":"000b82112233","vendor":"Grandstream","assigned":false,"ignored":true,"firmware":"bad firmware <x>"},

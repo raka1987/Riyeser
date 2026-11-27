@@ -35,7 +35,7 @@ const line = (s) => String(s == null ? '' : s).replace(/[\r\n]/g, ' ');
 // ---------- the settings files ----------
 // a.backup: a second address for the same PC (its name when phones use its address, or the other way round), so a
 // phone that loses touch with the first tries the second. After this PC's address changes, the name still works.
-// 1.2.1: each phone's own settings (s: link-bulk.js cleanSettings, only what this maker supports): the name on its screen,
+// 1.2.3: each phone's own settings (s: link-bulk.js cleanSettings, only what this maker supports): the name on its screen,
 // time zone and 12/24-hour clock, language, ringtone and ring volume, speed-dial keys, and Do not disturb following its person.
 const tzMinutes = (tz) => { const m = /^([+-])(\d{1,2})(?::(\d\d))?$/.exec(String(tz || '')); return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] || 0)) : null; };
 const LANG = {

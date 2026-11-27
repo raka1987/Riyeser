@@ -138,7 +138,7 @@ function registerIpc() {
   handle('link:label', (mac, fields) => service.label(mac, fields || {}));
   handle('link:replace', (oldMac, newMac, vendor) => service.replacePhone(oldMac, newMac, vendor));
   handle('link:ignore', (mac) => service.ignore(mac));
-  // 1.2.1: many phones at once, and each phone's own panel
+  // 1.2.3: many phones at once, and each phone's own panel
   handle('link:bulkPreview', (rows, opts) => require('./renderer/link-bulk').preview(rows || [], { ...service.bulkContext(), ...(opts || {}) }));
   handle('link:bulkAdd', (rows, opts) => service.bulkAdd(rows, opts || {}));
   handle('link:bulk', (action, macs, opts) => service.bulk(action, macs, opts || {}));
@@ -178,6 +178,7 @@ function registerIpc() {
   handle('link:signOut', () => { service.online.signOut(); return true; });
   handle('link:openTeam', () => shell.openExternal(TEAM_URL).then(() => true));
   handle('link:openPhonesPage', () => shell.openExternal(`${TEAM_URL}?phones`).then(() => true));
+  handle('link:openRingGroups', () => shell.openExternal(`${TEAM_URL}?rings`).then(() => true));   // Management › Ring groups on riyeser.com/link
   handle('link:report', () => (cloud ? cloud.report('button').then((r) => (cloud.poll().catch(() => 0), r)) : null));
   handle('link:recheck', async () => { await checkPc(); await service.sync().catch(() => null); return service.checkLicence(); });
   handle('link:firewall', async () => { firewall = await require('./link/windows').addFirewallRule(process.execPath, service.status().httpPort); return firewall; });

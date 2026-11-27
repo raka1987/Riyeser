@@ -41,7 +41,7 @@ function buildPayload(status, { officeId, pcName = '', version = '', adapters = 
       return { mac: p.mac, vendor: VENDORS[p.vendor] || '', model: p.model || '', extension: p.ext, assigned: true, registered: on,
         last_registered: on ? iso(now) : (lastReg[p.mac] || null), ip: p.ip || null,
         name: p.label || '', location: p.location || '', note: p.note || '', provisioned_at: p.lastFetch || null,
-        // 1.2.1: for the website's phone panel (no calls or passwords): firmware, when it connected, its own settings, shared
+        // 1.2.3: for the website's phone panel (no calls or passwords): firmware, when it connected, its own settings, shared
         firmware: p.firmware || '', registered_since: p.registeredSince || null, last_seen: p.lastSeen || null, shared: !!p.shared, settings: p.settings || {} };
     }),
     ...(status.found || []).map((f) => ({ mac: f.mac, vendor: VENDORS[f.vendor] || '', model: f.model || '', extension: null, assigned: false, registered: false,
@@ -124,7 +124,7 @@ function applyOne(service, cmd) {
         service.log('info', `Riyeser Link asked for extension ${ext}'s password (Set up a phone by hand). It was sent encrypted, for that person only.`);
         return { ok: true, sealed };
       }
-      // 1.2.1: many phones at once, and each phone's own page
+      // 1.2.3: many phones at once, and each phone's own page
       case 'bulk_phones': {
         const act = String(d.action || '');
         if (act === 'add') { const r = service.bulkAdd(Array.isArray(d.rows) ? d.rows : [], { start: d.start, auto: !!d.auto, shared: !!d.shared }); return { ok: true, result: { summary: r.summary, added: r.added.length, skipped: r.skipped, failed: r.failed } }; }
@@ -221,7 +221,7 @@ class LinkCloud extends EventEmitter {
         const args = { command: cmd.id, ok: r.ok, error: r.ok ? null : r.error, sealed: r.sealed || null };
         if (r.result) {
           try { await this.withClient((o) => o.rpc('link_office_done', { ...args, result: r.result })); }
-          catch (e) { if (!missingFn(e)) throw e; await this.withClient((o) => o.rpc('link_office_done', args)); }   // a database from before 1.2.1
+          catch (e) { if (!missingFn(e)) throw e; await this.withClient((o) => o.rpc('link_office_done', args)); }   // a database from before 1.2.3
         } else await this.withClient((o) => o.rpc('link_office_done', args));
         n++;
       }
