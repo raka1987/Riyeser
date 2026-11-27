@@ -1,0 +1,25 @@
+# The Riyeser relay with Docker (setup.sh --docker). Host networking, because the relay uses large UDP port ranges
+# for call sound and TURN. Settings come from /etc/riyeser-relay/relay.env (made by setup.sh).
+#   docker compose --env-file /etc/riyeser-relay/relay.env up -d --build
+# Let's Encrypt (optional): add the Caddy service with  --profile letsencrypt  (it reverse-proxies 443 to the relay).
+services:
+  relay:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    image: riyeser-relay:local
+    network_mode: host
+    restart: always
+    env_file: /etc/riyeser-relay/relay.env
+    cap_add: [NET_BIND_SERVICE]
+    volumes:
+      - /etc/riyeser-relay:/etc/riyeser-relay:ro
+      - /var/lib/riyeser-relay:/var/lib/riyeser-relay
+  caddy:
+    profiles: [letsencrypt]
+    image: caddy:2.8.4-alpine
+    network_mode: host
+    restart: always
+    volumes:
+      - /etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+volumes:
+  caddy-data:

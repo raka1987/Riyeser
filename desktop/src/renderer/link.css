@@ -241,3 +241,12 @@ dialog.askform select[multiple] { min-height: 120px; }
 #pmove { flex-wrap: nowrap; } #pmove select { flex: 1 1 auto; min-width: 0; } #pmove input { flex: 1 1 140px; min-width: 0; }
 .side h4 small { text-transform: none; letter-spacing: 0; font-weight: 500; }
 @media (max-width: 640px) { #found .newbar .grow { flex-basis: 100%; order: 3; } }
+/* ---------- 1.3.0: the Riyeser relay (top status line, Overview tile, Settings → Connect your branches) ---------- */
+.relayline { display: block; margin-top: 2px; font-size: 13px; }
+.relayline.ok { color: var(--ok); }
+.relayline.warn { color: var(--warn); }
+.relayline.muted { color: var(--muted); }
+.sitetag { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 1px 7px; border-radius: 99px; background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); white-space: nowrap; }
+.sitetag.here { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+#relay .sites { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 4px; }
+#relay .sites li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 10px; border-radius: 10px; background: var(--panel-2); font-size: 13.5px; }

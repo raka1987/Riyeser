@@ -115,3 +115,62 @@ test('link.css hides empty boxes instead of leaving grey bars', () => {
   const css = fs.readFileSync(path.join(R, 'link.css'), 'utf8');
   for (const id of ['state', 'setup', 'hero']) assert.match(css, new RegExp(`#${id}:empty`));
 });
+
+// ---------- 1.3.0: the Riyeser relay in the control panel ----------
+const RELAY_OK = { state: 'connected', connected: true, relay: 'syd1', region: 'Sydney', host: 'relay.riyeser.com', rtt: 42, backup: false, primary: { id: 'syd1', region: 'Sydney' },
+  sites: [{ name: 'Nadi', exts: 2, via: 'here' }], remote: 3, remoteExts: ['201', '202', '301'], phones: 1, udp: 'ok', since: new Date().toISOString(), error: null, reconnects: 0, draining: [], relays: [{ id: 'syd1', region: 'Sydney' }, { id: 'mel1', region: 'Melbourne' }] };
+const withRelay = (relay, more = {}) => ({ ...STATUS, version: '1.3.0', relay, siteName: 'Suva', registrations: [{ ext: '101', ip: '192.168.1.50', device: 'desk phone' }],
+  people: [...STATUS.people, { id: 'b', name: 'Ned Nadi', ext: '201', device: 'desk phone', state: 'not connected', dnd: false }], ...more });
+
+test('Overview → Branches and relay shows the relay\'s real state; the top line says it too', async () => {
+  const p = boot(async (c) => (c === 'link:status' ? withRelay(RELAY_OK) : true));
+  await tick();
+  assert.match(p.byId.tiles.innerHTML, /Branches and relay<\/h3><div class="big">Connected · Sydney · 42 ms/);
+  assert.match(p.byId.tiles.innerHTML, /1 other site: Nadi · 1 phone at home/);
+  assert.doesNotMatch(p.byId.tiles.innerHTML, /coming soon/);
+  assert.match(p.byId.state.innerHTML, /class="relayline ok" id="relayline">Connected to Riyeser relay · Sydney · 42 ms · 1 other site/);
+  assert.match(p.byId.relay.innerHTML, /Connect your branches|Other sites/);
+  assert.match(p.byId.relay.innerHTML, /This PC as the relay/);   // win32
+  // People: which site each extension's phone is at
+  assert.match(p.byId.people.innerHTML, /data-prow="101"[\s\S]*?class="sitetag here"[^>]*>Suva</);
+  assert.match(p.byId.people.innerHTML, /data-prow="201"[\s\S]*?Another site or at home/);
+  assert.doesNotMatch(p.byId.attn.innerHTML, /relay/i);
+  assert.deepEqual(p.errors, []);
+});
+
+test('Branches and relay: backup relay, not set up, and a problem with its fix (in Needs attention)', async () => {
+  const backup = boot(async (c) => (c === 'link:status' ? withRelay({ ...RELAY_OK, relay: 'mel1', region: 'Melbourne', rtt: 61, backup: true }) : true));
+  await tick();
+  assert.match(backup.byId.tiles.innerHTML, /tile info" id="relaytile"[\s\S]*Using backup relay · Melbourne · 61 ms[\s\S]*main relay \(Sydney\) isn(?:'|&#39;)t answering/);
+  assert.match(backup.byId.state.innerHTML, /Using backup relay · Melbourne · 61 ms/);
+
+  const none = boot(async (c) => (c === 'link:status' ? withRelay({ state: 'off', connected: false }) : true));
+  await tick();
+  assert.match(none.byId.tiles.innerHTML, /tile off" id="relaytile"[\s\S]*<div class="big">Not set up/);
+  assert.match(none.byId.state.innerHTML, /relayline muted[^>]*>Branches and relay: not set up/);
+  assert.doesNotMatch(none.byId.people.innerHTML, /sitetag/);   // one site: no site tags
+  assert.doesNotMatch(none.byId.attn.innerHTML, /relay/i);
+
+  const down = boot(async (c) => (c === 'link:status' ? withRelay({ state: 'connecting', connected: false, error: 'connection lost', relays: RELAY_OK.relays }) : true));
+  await tick();
+  assert.match(down.byId.tiles.innerHTML, /tile warn" id="relaytile"[\s\S]*Problem: not connected[\s\S]*port 443[\s\S]*data-a="relayretry"/);
+  assert.match(down.byId.attn.innerHTML, /Other sites can(?:'|&#39;)t be reached[\s\S]*data-a="relayretry">Reconnect now/);
+
+  const refused = boot(async (c) => (c === 'link:status' ? withRelay({ state: 'refused', connected: false, error: 'an admin disconnected this office' }) : true));
+  await tick();
+  assert.match(refused.byId.tiles.innerHTML, /tile bad" id="relaytile"[\s\S]*Refused by the relay[\s\S]*allows it again/);
+  assert.match(refused.byId.attn.innerHTML, /<li class="bad">[\s\S]*refused this office/);
+
+  const udp = boot(async (c) => (c === 'link:status' ? withRelay({ ...RELAY_OK, udp: 'blocked' }) : true));
+  await tick();
+  assert.match(udp.byId.attn.innerHTML, /block UDP to the relay/);
+  for (const x of [backup, none, down, refused, udp]) assert.deepEqual(x.errors, []);
+});
+
+test('a status from before 1.3.0 (no relay): every section still draws, the tile says Not set up', async () => {
+  const p = boot(async (c) => (c === 'link:status' ? STATUS : true));
+  await tick();
+  assert.match(p.byId.tiles.innerHTML, /Branches and relay<\/h3><div class="big">Not set up/);
+  assert.match(p.byId.relay.innerHTML, /Link this PC to your business/);
+  assert.deepEqual(p.errors, []);
+});

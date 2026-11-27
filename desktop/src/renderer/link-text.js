@@ -94,6 +94,61 @@
     },
     howSetsUp: (name) => `How ${name || 'this person'} sets up their phone`,
     REPLACE_PREVIEW: (mac) => `The old phone (MAC ${mac}) stops getting its settings now. It keeps working until it's restarted or reset. To lock it out straight away, also make a new password.`,
+    // ---------- the Riyeser relay (1.3.0): other sites and phones at home
+    RELAY_TITLE: 'Connect your branches',
+    RELAY_SUB: 'Other sites and phones at home, through the Riyeser relay',
+    RELAY_WHY: 'With the Riyeser relay switched on for your business, desk phones here can dial any extension at your other sites (each with its own Riyeser Link Office) and phones at home, and they can dial you. Nothing to change on your router. Calls inside this office never use it, and keep working with no internet.',
+    RELAY_OFF: 'The Riyeser relay is switched off for your business. An owner or admin switches it on in Riyeser Link: Phones → Sites and the relay.',
+    RELAY_LOCAL: 'Link this PC to your business (in Riyeser Central) and sign in, to connect your branches.',
+    /** Is the relay part of this office's set-up yet? (off, not linked, or no relay for the business: "Not set up") */
+    relaySetUp: (r) => !!r && !['local', 'off', 'no-config'].includes(r.state),
+    /** The top status line's relay part (1.3.0). Empty only before the first status. */
+    relayLine: (r) => {
+      if (!r) return '';
+      if (r.connected) return `${r.backup ? 'Using backup relay' : 'Connected to Riyeser relay'} · ${r.region || r.host}${r.rtt != null ? ` · ${r.rtt} ms` : ''}${r.sites && r.sites.length ? ` · ${r.sites.length} other site${r.sites.length === 1 ? '' : 's'}` : ''}`;
+      if (!T.relaySetUp(r)) return 'Branches and relay: not set up';
+      if (r.state === 'refused') return `Other sites: the relay refused this office (${r.error || 'ask an admin'}). Calls in this office work as normal.`;
+      if (r.state === 'starting' || (r.state === 'connecting' && !r.error)) return 'Connecting to the Riyeser relay…';
+      return 'Other sites: not connected right now (no connection to the Riyeser relay). Calls in this office work as normal; it keeps trying.';
+    },
+    /**
+     * Overview → Branches and relay (1.3.0): { cls, big, text, act, label, problem } where problem (for Needs attention)
+     * is { cls, text, act, label } or null. Connected · relay · ms / Using backup relay / Not set up / a problem and its fix.
+     */
+    relayTile: (r) => {
+      const where = (x) => `${x.region || x.relay || x.host || ''}${x.rtt != null ? ` · ${x.rtt} ms` : ''}`;
+      const others = (x) => (x.sites && x.sites.length ? `${x.sites.length} other site${x.sites.length === 1 ? '' : 's'}: ${x.sites.slice(0, 3).map((s) => s.name).join(', ')}${x.sites.length > 3 ? '…' : ''}` : 'No other sites connected yet');
+      if (!r || r.state === 'local') return { cls: 'off', big: 'Not set up', text: T.RELAY_LOCAL, act: 'relay', label: 'Connect your branches', problem: null };
+      if (r.state === 'off' || r.state === 'no-config') return { cls: 'off', big: 'Not set up', text: r.state === 'no-config' && /no riyeser relay/i.test(r.error || '') ? 'Riyeser hasn\'t set up a relay for your business yet. Phones work on this office network.' : r.state === 'no-config' ? T.RELAY_LOCAL : T.RELAY_OFF, act: 'relay', label: 'Connect your branches', problem: null };
+      if (r.connected) {
+        const udp = r.udp === 'blocked';
+        const text = `${others(r)}${r.phones ? ` · ${r.phones} phone${r.phones === 1 ? '' : 's'} at home` : ''}.${r.backup && r.primary ? ` The main relay (${r.primary.region || r.primary.id}) isn't answering; it moves back by itself.` : ''}`;
+        return { cls: udp ? 'warn' : r.backup ? 'info' : 'ok', big: `${r.backup ? 'Using backup relay' : 'Connected'} · ${where(r)}`, text, act: 'relay', label: 'Connect your branches',
+          problem: udp ? { cls: 'warn', text: T.RELAY_UDP_BLOCKED, act: 'relay', label: 'Connect your branches' } : null };
+      }
+      if (r.state === 'refused') {
+        const fix = `The relay refused this office (${r.error || 'no reason given'}). An owner or admin allows it again in Riyeser Link: Phones → Sites and the relay. Calls in this office work as normal.`;
+        return { cls: 'bad', big: 'Refused by the relay', text: fix, act: 'web', label: 'Open Sites and the relay', problem: { cls: 'bad', text: fix, act: 'web', label: 'Sites and the relay' } };
+      }
+      if (r.state === 'starting' || (r.state === 'connecting' && !r.error)) return { cls: 'info', big: 'Connecting…', text: 'Joining your other sites through the Riyeser relay.', act: 'relayretry', label: 'Reconnect now', problem: null };
+      const fix = `Can't reach the Riyeser relay${r.error ? ` (${r.error})` : ''}. Check this PC is online; if the internet works, allow outgoing connections to the relay on port 443 in the firewall. It keeps trying; calls in this office work as normal.`;
+      return { cls: 'warn', big: 'Problem: not connected', text: fix, act: 'relayretry', label: 'Reconnect now', problem: { cls: 'warn', text: `Other sites can't be reached: ${fix}`, act: 'relayretry', label: 'Reconnect now' } };
+    },
+    /** Where an extension's phones are (1.3.0, with the relay set up): 'here' (this site), 'remote' (another site or at home) or ''. */
+    extSite: (r, ext, hereNow) => {
+      if (!T.relaySetUp(r)) return '';
+      if (hereNow) return 'here';
+      return (r.remoteExts || []).map(String).includes(String(ext)) ? 'remote' : '';
+    },
+    RELAY_UDP_BLOCKED: 'Calls to other sites connect, but there may be no sound: this network\'s firewall seems to block UDP to the relay. Allow outgoing UDP to the relay (ports 40000–49999) on the router or firewall.',
+    RELAY_SITE_NAME: 'This site\'s name (what the other sites see)',
+    RELAY_HOST_TITLE: 'This PC as the relay (head office)',
+    RELAY_HOST_WHY: 'The head office\'s always-on PC can be the Riyeser relay for all your sites (a rented server can be the backup). It runs in the background from Windows start-up, opens its ports in Windows Firewall and asks the router to forward them. Windows asks for permission once. Then add the relay\'s DNS name and register it once in Riyeser online (the relay\'s README says how).',
+    RELAY_HOST_DOWN: 'The relay is installed on this PC but isn\'t answering. Running this again repairs it.',
+    RELAY_HOST_MORE: 'It runs as the Windows task "Riyeser Relay" (starts with Windows, restarts itself). Its settings and log are in C:\\ProgramData\\Riyeser Relay.',
+    RELAY_HOST_DONE: 'The relay is running on this PC. Next: its DNS name, the router (if it didn\'t forward the ports itself) and registering it once — see C:\\ProgramData\\Riyeser Relay.',
+    relayHostOn: (h) => `This PC runs the Riyeser relay ${h.relay} (${h.region}) · version ${h.version} · ${h.sites} site${h.sites === 1 ? '' : 's'} and ${h.phones} phone${h.phones === 1 ? '' : 's'} connected now${h.sync && h.sync.ok === false ? ' · not reaching Riyeser online' : ''}.`,
+    udp: (u) => ({ ok: 'gets through', blocked: 'blocked by a firewall', checking: 'checking…', unknown: 'not checked' }[u] || '—'),
     duration: (s) => (!s ? '' : s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim()),
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = T; else root.LinkText = T;

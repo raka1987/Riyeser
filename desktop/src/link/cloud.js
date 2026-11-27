@@ -200,12 +200,53 @@ class LinkCloud extends EventEmitter {
         const r = await this.withClient((o) => o.rpc('link_office_report', { ws: co.workspace_id, office_id: payload.office_id, payload }));
         this.lastSig = signature(payload); this.lastReportAt = this.now();
         this.setState({ status: 'online', at: iso(this.now()), error: null, reason });
+        this.relayReport().catch(() => null);
         if (r && Number(r.pending) > 0) setImmediate(() => this.poll().catch(() => null));
         return { ok: true, pending: Number((r && r.pending) || 0) };
       } catch (e) { this.failed(e); return { ok: false, error: this.state.error }; }
       finally { this.reporting = null; }
     })();
     return this.reporting;
+  }
+
+  // ---------- the Riyeser relay (1.3.0) ----------
+  /**
+   * Is the relay on for this business, which relays (in order) and a pass for each (6 hours). The last answer is
+   * kept on this PC (passes sealed), so with Riyeser online unreachable but the internet up the relay still works
+   * until the passes run out. -> { enabled, relays, tokens, exp }
+   */
+  async relayConfig() {
+    const co = this.company();
+    if (!co) throw new Error('This PC isn\'t linked to a Riyeser Online company (link it in Riyeser Central).');
+    const ws = co.workspace_id; const office = this.service.officeId();
+    try {
+      const cfg = await this.withClient((o) => o.rpc('link_relay_config', { ws }));
+      if (!cfg || !cfg.enabled) { this.service.store.set('phone-relay', { enabled: false, at: iso(this.now()) }); return { enabled: false, relays: (cfg && cfg.relays) || [] }; }
+      const t = await this.withClient((o) => o.rpc('link_relay_token', { ws, office_id: office }));
+      const out = { enabled: true, relays: t.relays || cfg.relays || [], tokens: t.tokens || {}, exp: Number(t.exp) || 0 };
+      const seal = this.service.directory && this.service.directory.seal;
+      this.service.store.set('phone-relay', { ...out, tokens: seal ? Object.fromEntries(Object.entries(out.tokens).map(([k, v]) => [k, seal(v)])) : out.tokens, at: iso(this.now()) });
+      return out;
+    } catch (e) {
+      if (/switched off|disconnected from the relay/i.test(String(e.message))) throw e;   // a real answer, not a network problem
+      const c = this.service.store.get('phone-relay', null);
+      const unseal = this.service.directory && this.service.directory.unseal;
+      if (c && c.enabled && Number(c.exp) * 1000 > this.now() + 60000) return { ...c, tokens: unseal ? Object.fromEntries(Object.entries(c.tokens || {}).map(([k, v]) => [k, unseal(v)])) : c.tokens, cached: true };
+      throw e;
+    }
+  }
+  /** Tell the website how the relay connection is (state, which relay, round trip) — never calls or numbers. */
+  async relayReport() {
+    const co = this.ready(); const st = this.service.status().relay;
+    if (!co || !st || st.state === 'local') return false;
+    const sig = JSON.stringify([st.state, st.relay, st.backup, st.udp, st.error, st.sites && st.sites.length, Math.round((st.rtt || 0) / 25)]);
+    if (sig === this.lastRelaySig && this.now() - (this.lastRelayAt || 0) < HEARTBEAT - 1000) return false;
+    try {
+      await this.withClient((o) => o.rpc('link_relay_report', { ws: co.workspace_id, office_id: this.service.officeId(),
+        state: { state: st.state, relay: st.relay, region: st.region, rtt_ms: st.rtt, backup: st.backup, udp: st.udp, error: st.error, sites: (st.sites || []).length, since: st.since } }));
+      this.lastRelaySig = sig; this.lastRelayAt = this.now();
+      return true;
+    } catch { return false; }
   }
 
   /** Fetch and do the changes waiting from the website. -> how many were done */
@@ -238,6 +279,7 @@ class LinkCloud extends EventEmitter {
       this.soon = null;
       try {
         if (!this.ready() || this.state.status === 'offline') return;
+        this.relayReport().catch(() => null);
         if (signature(buildPayload(this.service.status(), { officeId: this.service.officeId(), pcName: this.pcName, version: this.version, adapters: this.service.adapters() })) === this.lastSig) return;
         if (this.now() - this.lastReportAt < MIN_GAP) { this.changed(); return; }
         this.report('change');

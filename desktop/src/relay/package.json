@@ -1,0 +1,13 @@
+{
+  "name": "riyeser-relay",
+  "version": "1.0.0",
+  "description": "The Riyeser relay: joins a business's Riyeser Link Office sites and remote phones (SIP federation, media relay, STUN/TURN). No dependencies.",
+  "private": true,
+  "main": "server.js",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test --test-timeout=120000 --test-force-exit test/*.test.js"
+  },
+  "license": "UNLICENSED"
+}

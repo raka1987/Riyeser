@@ -1,0 +1,28 @@
+# The Riyeser relay as a systemd service (setup.sh installs it). Runs as its own user, no extra privileges:
+# the ports it needs below 1024 (443) come from AmbientCapabilities.
+[Unit]
+Description=Riyeser relay (SIP federation, media relay, STUN/TURN)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=riyeser-relay
+Group=riyeser-relay
+EnvironmentFile=/etc/riyeser-relay/relay.env
+WorkingDirectory=/opt/riyeser-relay/app
+ExecStart=/usr/bin/node /opt/riyeser-relay/app/server.js
+Restart=always
+RestartSec=2
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/riyeser-relay
+ReadOnlyPaths=/etc/riyeser-relay
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -371,7 +371,7 @@ test('wording: status line, licence message, address notice, emergency note', ()
   const html = fs.readFileSync(path.join(__dirname, '..', 'src', 'renderer', 'link.html'), 'utf8');
   assert.ok(html.includes('Riyeser Link Office') && html.includes('Your office phone system'));
   assert.ok(html.includes('<b>Internal calls only.</b> These phones can\'t call emergency services — keep a mobile or normal phone line for that.'));
-  for (const s of ['power over the network cable (PoE)', 'same office network as this PC', 'coming with the cloud version', 'Wi-Fi desk phones work too']) assert.ok(html.includes(s), s);
+  for (const s of ['power over the network cable (PoE)', 'same office network as this PC', 'reaches it through the Riyeser relay', 'Wi-Fi desk phones work too']) assert.ok(html.includes(s), s);
 });
 
 test('Windows: sleep settings are read (never changed) and the firewall rule is for this program only, office addresses only', () => {

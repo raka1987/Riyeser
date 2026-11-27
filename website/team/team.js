@@ -321,6 +321,14 @@
       async linkMyReveal(ws, key) { return ok(await sb.rpc('link_my_reveal', { ws, pub_key: key })); },
       async linkMyDnd(ws, on) { return ok(await sb.rpc('link_my_dnd', { ws, dnd_on: !!on })); },
       async linkSupport(ws, allow) { return ok(await sb.rpc(allow ? 'link_support_allow' : 'link_support_end', { ws })); },
+      // The Riyeser relay (sites on different internet connections, phones at home, TURN for calls). null = the
+      // database hasn't had this release's team-chat.sql yet.
+      async linkRelayStatus(ws) { try { return ok(await sb.rpc('link_relay_status', { ws })); } catch (e) { if (/PGRST202|Could not find the function|schema cache/i.test(e.message || '')) return null; throw e; } },
+      async linkRelaySet(ws, on) { return ok(await sb.rpc('link_relay_set', { ws, enabled: !!on })); },
+      async linkRelayRevoke(ws, office, allow) { return ok(await sb.rpc('link_relay_revoke', { ws, office_id: office, allow: !!allow })); },
+      async linkRelayDeviceAdd(ws, ext, label) { return ok(await sb.rpc('link_relay_device_add', { ws, extension: String(ext), label: label || '' })); },
+      async linkRelayDeviceRemove(ws, id) { return ok(await sb.rpc('link_relay_device_remove', { ws, device: id })); },
+      async linkRelayTurn(ws) { try { return ok(await sb.rpc('link_relay_turn', { ws })); } catch (e) { if (/PGRST202|Could not find the function|schema cache/i.test(e.message || '')) return null; throw e; } },
       // Management › Connections: the api_* functions (owners and admins with two-step sign-in). On a database without
       // them the error is PGRST202 and the page says Connections aren't set up yet.
       async conn(fn, args) { return ok(await sb.rpc(fn, args)); },
@@ -490,6 +498,8 @@
       const VERB = { give: 'Gave out', shared: 'Added as shared', ignore: 'Ignored', unignore: 'Brought back', restart: 'Restarted', resync: 'Re-sent settings to', unassign: 'Took back', remove: 'Removed', location: 'Moved' };
       return out(VERB[act] || 'Changed', act === 'location' ? ` to ${data.location || 'no location'}` : '');
     };
+    const demoRelay = { enabled: false, admin: true, relays: [{ id: 'syd1', host: 'relay.riyeser.com', region: 'Sydney', online: true, priority: 1 }, { id: 'mel1', host: 'relay2.riyeser.com', region: 'Melbourne', online: true, priority: 2 }],
+      offices: [{ office_id: 'lo-demo-suva', pc_name: 'SUVA-OFFICE', relay: { state: 'off' }, revoked: false }, { office_id: 'lo-demo-nadi', pc_name: 'NADI-BRANCH', relay: { state: 'off' }, revoked: false }], devices: [] };
     // Demo file storage and Riyeser Link. sessionStorage 'riyeser.demo.storage': 'nearly' = 85% of the 20 GB, 'full' = 1 MB
     // left, 'off' = Riyeser Link paused (its 90 days over, not paid: chat read-only).
     const demoStore = (() => { let k = ''; try { k = sessionStorage.getItem('riyeser.demo.storage') || ''; } catch { /* private window */ }
@@ -790,6 +800,16 @@
       async linkMyReveal(w, key) { return this.linkCommand(w, lo.office_id, 'reveal_password', { extension: String((ppl.find((q) => q[0] === AS) || [])[3]), key }); },
       async linkMyDnd(w, on) { return this.linkCommand(w, lo.office_id, 'set_dnd', { extension: String((ppl.find((q) => q[0] === AS) || [])[3]), on: !!on }); },
       async linkSupport(_w, allow) { loSupport = allow ? Date.now() + 3600e3 : null; return allow ? { until: new Date(loSupport).toISOString() } : null; },
+      // the Riyeser relay in the demo: switched off until you switch it on; no TURN (demo calls are in one browser)
+      async linkRelayStatus() { return JSON.parse(JSON.stringify(demoRelay)); },
+      async linkRelaySet(_w, on) { demoRelay.enabled = !!on; demoRelay.offices.forEach((o) => { o.relay = on ? { state: 'connected', relay: 'syd1', region: 'Sydney', rtt_ms: 42, udp: 'ok', backup: false } : { state: 'off' }; }); return demoRelay; },
+      async linkRelayRevoke(_w, office, allow) { const o = demoRelay.offices.find((x) => x.office_id === office); if (o) o.revoked = !allow; },
+      async linkRelayDeviceAdd(_w, ext, label) { if (!demoRelay.enabled) throw new Error('Switch the Riyeser relay on first (Phones → Sites and the relay).');
+        const d = { id: 'rd' + (demoRelay.devices.length + 1), extension: String(ext), label: label || 'Phone at home', username: 'rdemo' + String(10000 + demoRelay.devices.length).slice(-5), created_at: new Date().toISOString(), online: false };
+        demoRelay.devices.push(d);
+        return { ...d, password: 'DemoOnlyPassw0rd1234', server: 'relay.riyeser.com', domain: 'relay.riyeser.com', port: 5061, transport: 'TLS', realm: 'riyeser-relay', prov_url: 'https://relay.riyeser.com/prov/demo-only-link', prov_expires: new Date(Date.now() + 900e3).toISOString() }; },
+      async linkRelayDeviceRemove(_w, id) { demoRelay.devices = demoRelay.devices.filter((d) => d.id !== id); },
+      async linkRelayTurn() { return { ice_servers: [], ttl: 0 }; },
       async requestRefund(_w, r) { const f = { id: 'f' + (refs.length + 1), ref: 'R-' + (1042 + refs.length), ...r, status: 'submitted', created_at: new Date().toISOString() }; refs.unshift(f); return { id: f.id, ref: f.ref }; },
       // the demo doesn't take payments (Billing hides)
       async myBilling() { return null; }, async paypalStatus() { return { ready: false }; },
@@ -3673,7 +3693,7 @@
     GUIDE: ['Install <b>Riyeser Link Office</b> on a PC at the office that stays on (<b>Riyeser Central → Get more apps</b>, or <a href="/downloads.html">riyeser.com → Downloads</a>).', 'Sign in with your Riyeser account.', 'Plug in desk phones.'],
     SENDING: 'Sending to Riyeser Link Office…', DONE: 'Done', SLOW: 'Riyeser Link Office hasn\'t picked this up yet. It checks every 30 seconds while the office PC is on and connected to the internet.',
     HELP: [['🔌 Power', 'Many desk phones don\'t come with a power adapter and expect power over the network cable (PoE). Buy the phone\'s power adapter, or a small PoE switch.'],
-      ['🏢 Same office network', 'Desk phones must be plugged into the same office network as the Riyeser Link Office PC. A phone at home or in another building can\'t reach it yet.'],
+      ['🏢 Same office network', 'Desk phones plug into the same office network as the Riyeser Link Office PC. A phone at home or at another site can join too once the Riyeser relay is switched on (Sites and the Riyeser relay, below).'],
       ['🚫 No emergency calls', 'These phones can only call each other. Keep a mobile or normal phone line for emergency calls (000, 111, 112, 911).'],
       ['📶 Wi-Fi phones', 'Wi-Fi desk phones work too, once they\'re joined to the office Wi-Fi.']],
   };
@@ -3734,6 +3754,7 @@
   async function refreshPhones() {
     if (!document.getElementById('phonesPage')) return;
     try { S.lo.status = await api.linkStatus(S.team.id); } catch { /* keep what we have */ }
+    if (api.linkRelayStatus && isAdmin()) S.lo.relay = await api.linkRelayStatus(S.team.id).catch(() => S.lo.relay);
     drawPhones();
   }
   async function phonesPage(back) {
@@ -3742,6 +3763,7 @@
     if (S.loui) Object.assign(S.loui, { tab: 'overview', cur: null });   // a fresh visit starts on Overview
     if (!S.homeLic || S.homeLicFor !== S.team.id) { S.homeLicFor = S.team.id; S.homeLic = isAdmin() ? await api.licence(S.team.id).catch(() => null) : null; }
     try { S.lo.status = await api.linkStatus(S.team.id); } catch (err) { S.lo.error = plainError(err); }
+    if (api.linkRelayStatus && isAdmin()) S.lo.relay = await api.linkRelayStatus(S.team.id).catch(() => null);
     drawPhones();
     clearInterval(S.loTimer); S.loTimer = setInterval(() => { if (!document.getElementById('phonesPage')) clearInterval(S.loTimer); else if (!document.hidden && !document.querySelector('.modal') && !(document.activeElement && document.activeElement.closest && document.activeElement.closest('#phonesPage') && /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName))) refreshPhones(); }, 20000);
   }
@@ -3764,7 +3786,7 @@
     else if (!plus) body = `<div class="lo-card lo-up"><h2>Riyeser Link is paused</h2><p>${isOwner() ? PH.UPSELL : PH.UPSELL_TEAM}</p><p class="muted small">Nothing is deleted: people, phones and extensions are kept.</p></div>`;
     else if (!o) body = `${setupHtml(setupSteps([], now))}<div class="lo-card"><h2>Set up desk phones</h2><p>Riyeser Link Office is the office phone system: it runs on one PC at the office, and the office's desk phones connect to it and call each other. Nothing has been set up yet.</p>
         <p>Once it's running, this page shows the address to type into phones, every desk phone and extension, and lets you give phones to people from here.</p>
-        <p><a class="btn" href="/help/link.html#desk-phones">📖 Read the guide: Setting up desk phones</a></p>${st === null ? '<p class="muted small">Riyeser is finishing an update to this page. If Riyeser Link Office is already running, its details show here soon.</p>' : ''}</div>`;
+        <p><a class="btn" href="/help/link.html#desk-phones">📖 Read the guide: Setting up desk phones</a></p>${st === null ? '<p class="muted small">Riyeser is finishing an update to this page. If Riyeser Link Office is already running, its details show here soon.</p>' : ''}</div>${relayHtml(now)}`;
     else {
       const [stText, stCls, stWhy] = officeState(o, now);
       const addr = (o.addresses || [])[0] || '';
@@ -3781,12 +3803,16 @@
       const tab = (k, t, badge = '') => `<button role="tab" data-lotab="${k}" aria-selected="${ui.tab === k}" class="${ui.tab === k ? 'on' : ''}">${t}${badge}</button>`;
       const nOn = desk.filter((p) => p.registered).length; const nOff = rowsAll.filter((r) => r.status === 'Offline').length;
       const exts = o.extensions || []; const dnd = exts.filter((x) => x.type === 'person' && x.dnd);
+      // 1.3.0: with the Riyeser relay on (or several sites), say which site a desk phone is at; phones at home are listed too
+      const multiSite = offices.length > 1 || !!(S.lo.relay && S.lo.relay.enabled);
+      const siteTag = multiSite ? ` <small class="lo-site">at ${esc(o.pc_name || 'this site')}</small>` : '';
+      const relayDevs = (ext) => (S.lo.relay && S.lo.relay.enabled ? S.lo.relay.devices || [] : []).filter((d) => String(d.extension) === String(ext));
       const tile = (cls, h, big, p, acts = '') => `<section class="lo-tile ${cls}"><h4>${h}</h4><div class="lo-tbig">${big}</div>${p ? `<p>${p}</p>` : ''}${acts ? `<div class="lo-tacts">${acts}</div>` : ''}</section>`;
       const num = (n, label, f) => `<button class="lo-num" data-lof="${f}"><b>${n}</b><span>${esc(label)}</span></button>`;
       body = `${setupHtml(setupSteps(offices, now))}
       ${offices.length > 1 ? `<label class="lo-pick">Riyeser Link Office on <select id="lopick">${offices.map((x) => `<option value="${esc(x.office_id)}"${x === o ? ' selected' : ''}>${esc(x.pc_name || 'a PC')} · seen ${ago(x.last_seen)}</option>`).join('')}</select></label>` : ''}
       <div class="lo-shell">
-        <nav class="lo-nav" role="tablist" aria-label="Desk phones">${tab('overview', 'Overview', attn.length ? `<span class="lo-badge${attn.some((a) => a.cls !== 'info') ? ' warn' : ''}">${attn.length}</span>` : '')}${tab('phones', 'Phones', found.length ? `<span class="lo-badge">${found.length}</span>` : '')}${tab('ext', 'Extensions')}${Array.isArray(S.groups) ? `<button data-lorings="1">Ring groups${groupsToCheck().length ? `<span class="lo-badge warn">${groupsToCheck().length}</span>` : ''}</button>` : ''}${tab('help', 'Help and support')}</nav>
+        <nav class="lo-nav" role="tablist" aria-label="Desk phones">${tab('overview', 'Overview', attn.length ? `<span class="lo-badge${attn.some((a) => a.cls !== 'info') ? ' warn' : ''}">${attn.length}</span>` : '')}${tab('phones', 'Phones', found.length ? `<span class="lo-badge">${found.length}</span>` : '')}${tab('ext', 'Extensions')}${S.lo.relay ? tab('relay', 'Sites &amp; relay', (() => { const n = relaySummary(S.lo.relay, o).problems.length; return n ? `<span class="lo-badge warn">${n}</span>` : ''; })()) : ''}${Array.isArray(S.groups) ? `<button data-lorings="1">Ring groups${groupsToCheck().length ? `<span class="lo-badge warn">${groupsToCheck().length}</span>` : ''}</button>` : ''}${tab('help', 'Help and support')}</nav>
         <div class="lo-panes">
         <div data-lopane="overview"${ui.tab === 'overview' ? '' : ' hidden'}>
       <section class="lo-card lo-top">
@@ -3814,7 +3840,7 @@
         ${tile('ok', '↗ Calls', `<div class="lo-nums">${num((o.counts && o.counts.calls_in_progress) || 0, 'now', 'calls')}${num((o.counts && o.counts.calls_made) || 0, 'answered (kept on the PC)', 'calls')}</div>`, 'Who called whom stays on the office PC, never online.')}
         ${Array.isArray(S.groups) ? tile(groupsToCheck().length ? 'warn' : S.groups.length ? 'ok' : '', '☏ Ring groups', `<div class="lo-nums"><button class="lo-num" data-lorings="1"><b>${S.groups.length}</b><span>numbers</span></button><button class="lo-num" data-lorings="1"><b>${groupsToCheck().length}</b><span>to check</span></button></div>`,
           'Who answers each branch and group number (like Sales or Reception).', '<button class="btn sm" data-lorings="1">Manage ring groups</button>') : ''}
-        ${tile('off', '🏢 Branches and relay', 'Not set up', 'Phones at other branches or at home will connect through Riyeser Link Cloud\'s relay (coming soon). Until then, phones work on the office network.')}
+        ${(() => { const rs = relaySummary(S.lo.relay, o); return tile(rs.cls, '🏢 Branches and relay', esc(rs.big), esc(rs.p), rs.tab ? '<button class="btn sm" data-lotab="relay">Sites and the relay</button>' : ''); })()}
       </div>
         </div>
         <div data-lopane="phones"${ui.tab === 'phones' ? '' : ' hidden'}>
@@ -3828,10 +3854,13 @@
         ${exts.map((x) => x.type === 'group'
           ? `<tr class="grp"><td data-l="Ext."><b>${esc(x.extension)}</b></td><td data-l="Group">${esc(x.name)} <small class="muted">ring group · ${x.members || 0} ${x.members === 1 ? 'person' : 'people'}</small></td><td data-l="Desk phones" class="muted">—</td><td data-l="App users" class="muted">—</td><td data-l="Do not disturb" class="muted">—</td><td></td></tr>`
           : `<tr><td data-l="Ext."><b>${esc(x.extension)}</b></td><td data-l="Person">${esc(x.name)}${x.shared ? ' <small class="muted">shared phone</small>' : ''}</td>
-            <td data-l="Desk phones">${desk.filter((p) => p.extension === x.extension).map((p) => `<div>${dot(p.registered)} ${phoneLine(p)}</div>`).join('') || '<span class="muted">None</span>'}</td>
+            <td data-l="Desk phones">${desk.filter((p) => p.extension === x.extension).map((p) => `<div>${dot(p.registered)} ${phoneLine(p)}${siteTag}</div>`).join('')}${relayDevs(x.extension).map((d) => `<div>${dot(d.online)} <span class="lo-ph">${esc(d.label || 'Phone at home')} <small class="lo-site">through the relay</small></span></div>`).join('') || (desk.some((p) => p.extension === x.extension) ? '' : '<span class="muted">None</span>')}</td>
             <td data-l="App users">${x.app_users ? `${dot(true)} ${x.app_users}` : '<span class="muted">0</span>'}</td>
             <td data-l="Do not disturb"><label class="sw"><input type="checkbox" data-dnd="${esc(x.extension)}"${x.dnd ? ' checked' : ''} aria-label="Do not disturb for ${esc(x.name)}"><span></span></label></td>
             <td><button class="btn sm" data-hand="${esc(x.extension)}">Set up a phone by hand</button></td></tr>`).join('')}</tbody></table></div>
+        </div>
+        <div data-lopane="relay"${ui.tab === 'relay' ? '' : ' hidden'}>
+      ${relayHtml(now)}
         </div>
         <div data-lopane="help"${ui.tab === 'help' ? '' : ' hidden'}>
       <section class="lo-card lo-help-us"><h4>🤝 Let Riyeser help</h4>${support
@@ -3868,6 +3897,105 @@
     $app.querySelectorAll('[data-dnd]').forEach((c) => c.onchange = async () => { const r = await sendCmd('set_dnd', { extension: c.dataset.dnd, on: c.checked }, phMsg); if (!r) c.checked = !c.checked; });
     $app.querySelectorAll('[data-give]').forEach((b) => b.onclick = () => giveTo(b.dataset.give));
     if (o && plus && admin) wireLoPanel();
+    wireRelay();
+  }
+  // ---------- Sites and the Riyeser relay: other sites on other internet connections, and phones at home ----------
+  // (link_relay_status / link_relay_set / link_relay_revoke / link_relay_device_add in team-chat.sql; design in desktop/RELAY.md)
+  function relayState(o) {
+    const r = o.relay || {};
+    if (o.revoked) return ['Disconnected from the relay', 'bad', 'An owner or admin disconnected this office. Allow it again to reconnect.'];
+    if (r.state === 'connected') return [`${r.backup ? 'Using backup relay' : 'Connected'} · ${r.region || r.relay || ''}${r.rtt_ms != null ? ` · ${r.rtt_ms} ms` : ''}`, 'ok', r.udp === 'blocked' ? 'Calls connect, but there may be no sound: this office\'s firewall blocks UDP to the relay.' : ''];
+    if (r.state === 'refused') return ['Refused by the relay', 'bad', r.error || ''];
+    if (r.state === 'connecting') return ['Not connected', 'warn', r.error ? `Trying again by itself (${r.error}).` : 'Trying again by itself. Calls inside that office work as normal.'];
+    if (!o.version || !/^1\.(?:[3-9]|\d\d)|^[2-9]\./.test(o.version)) return ['Update needed', 'warn', 'Update Riyeser Link Office to 1.3.0 or later (Riyeser Central does it) to connect this site.'];
+    return ['Not connected yet', 'warn', ''];
+  }
+  /** The Overview tile and Needs attention (1.3.0): { cls, big, p, tab, problems: [{ cls, html }] }. o: the office shown. */
+  function relaySummary(R, o) {
+    if (!R) return { cls: 'off', big: 'Not set up', p: 'Phones at your other sites and at home join through the Riyeser relay, once this page has been updated for it. Until then, phones work on the office network.', tab: false, problems: [] };
+    const relays = R.relays || []; const online = relays.filter((x) => x.online);
+    if (!relays.length) return { cls: 'off', big: 'Not set up', p: 'The Riyeser relay isn\'t running yet. Riyeser is setting it up; phones work on the office network until then.', tab: true, problems: [] };
+    if (!R.enabled) return { cls: 'off', big: 'Not set up', p: 'Switch on the Riyeser relay to join your other sites and phones at home into one phone system. Nothing to change on your routers.', tab: true, problems: [] };
+    const offs = R.offices || []; const problems = [];
+    if (!online.length) problems.push({ cls: 'bad', html: '<b>The Riyeser relays aren\'t answering.</b> Calls between sites and to phones at home don\'t connect; calls inside each office work as normal.' });
+    else if (relays[0] && !relays[0].online) problems.push({ cls: 'warn', html: `<b>The main relay (${esc(relays[0].region || relays[0].host)}) isn't answering.</b> Sites use the backup (${esc(online[0].region || online[0].host)}) by themselves.` });
+    const st = offs.map((x) => [x, relayState(x)]);
+    for (const [x, [t, c, why]] of st) if ((c !== 'ok' || why) && online.length) problems.push({ cls: c === 'bad' ? 'bad' : 'warn', html: `<b>${esc(x.pc_name || 'A site')}: ${esc(t)}.</b> ${esc(why || '')}` });
+    const okN = st.filter(([, [, c]]) => c === 'ok').length; const me = offs.find((x) => o && x.office_id === o.office_id);
+    const mine = me && me.relay && me.relay.state === 'connected' ? `${me.relay.backup ? 'Using backup relay' : 'Connected'} · ${me.relay.region || me.relay.relay || ''}${me.relay.rtt_ms != null ? ` · ${me.relay.rtt_ms} ms` : ''}` : '';
+    const devs = (R.devices || []).length;
+    return { cls: problems.some((x) => x.cls === 'bad') ? 'bad' : problems.length ? 'warn' : 'ok', big: `${okN} of ${offs.length} site${offs.length === 1 ? '' : 's'} connected`,
+      p: `${mine ? `${o.pc_name || 'This site'}: ${mine}. ` : ''}Relays: ${relays.map((x, i) => `${x.region || x.host}${i ? ' (backup)' : ' (main)'}`).join(', ')}${devs ? ` · ${devs} phone${devs === 1 ? '' : 's'} at home` : ''}.`, tab: true, problems };
+  }
+  function relayHtml(now) {
+    const R = S.lo.relay; if (!R) return '';
+    const relays = R.relays || []; const online = relays.filter((x) => x.online);
+    const avail = relays.length > 0;
+    const row = (o) => { const [t, c, why] = relayState(o); return `<tr><td data-l="Site"><b>${esc(o.pc_name || 'Riyeser Link Office')}</b>${o.version ? `<small class="muted"> · ${esc(o.version)}</small>` : ''}</td>
+      <td data-l="Relay"><span class="pl ${c}">${esc(t)}</span>${why ? `<small>${esc(why)}</small>` : ''}</td><td data-l="Last seen">${o.last_seen ? ago(o.last_seen) : '—'}</td>
+      <td>${R.admin ? `<button class="btn sm" data-relayoff="${esc(o.office_id)}" data-allow="${o.revoked ? '1' : ''}">${o.revoked ? 'Allow again' : 'Disconnect'}</button>` : ''}</td></tr>`; };
+    const dev = (d) => `<tr><td data-l="Phone"><b>${esc(d.label)}</b><small class="mono"> ${esc(d.username)}</small></td><td data-l="Extension"><b>${esc(d.extension)}</b> ${esc(extName(d.extension) || ((S.people || []).find((p) => String(p.extension) === String(d.extension)) || {}).display_name || '')}</td>
+      <td data-l="Status"><span class="pl ${d.online ? 'ok' : ''}">${d.online ? 'Online' : d.last_seen ? `Last seen ${esc(ago(d.last_seen))}` : 'Not connected yet'}</span></td><td><button class="btn sm" data-relaydev="${esc(d.id)}">Remove</button></td></tr>`;
+    return `<section class="lo-card lo-relay" id="lorelay"><h3>🌐 Sites and the Riyeser relay</h3>
+      <p class="muted">Join your branches into one phone system: a desk phone at one site can dial any extension at another, and phones at home ring like desk phones. Each site keeps its own Riyeser Link Office; nothing changes on your routers. Calls inside each office stay inside it and keep working with no internet.</p>
+      ${avail ? '' : '<p class="lo-warn" id="lorelaynone">The Riyeser relay isn\'t running yet. Riyeser is setting it up; this switches on once it is.</p>'}
+      <label class="lo-relaysw"><span class="sw"><input type="checkbox" id="lorelayon"${R.enabled ? ' checked' : ''}${!avail || !R.admin ? ' disabled' : ''}><span></span></span> <b>Connect our sites through the Riyeser relay</b></label>
+      ${avail ? `<p class="muted small" id="lorelays">Relays: ${relays.map((x, i) => `${esc(x.region || x.host)}${i === 0 ? ' (main)' : ' (backup)'} · ${x.online ? '<span class="pl ok">online</span>' : '<span class="pl bad">offline</span>'}`).join(' → ')}. If the main one stops, sites move to the backup by themselves within seconds.</p>` : ''}
+      ${R.enabled ? `<div class="lo-tw"><table class="lo lo-sites"><thead><tr><th>Site</th><th>Relay</th><th>Last seen</th><th></th></tr></thead><tbody>${(R.offices || []).map(row).join('') || '<tr><td colspan="4" class="muted">No Riyeser Link Office has been in touch yet.</td></tr>'}</tbody></table></div>
+        <div class="lo-dphead"><h4>Phones at home or at another site</h4><button class="btn p" id="lorelayadd">+ Set up a phone at home or another site</button></div>
+        ${(R.devices || []).length ? `<div class="lo-tw"><table class="lo lo-rdev"><thead><tr><th>Phone</th><th>Extension</th><th>Status</th><th></th></tr></thead><tbody>${R.devices.map(dev).join('')}</tbody></table></div>` : '<p class="muted small">None yet. Any SIP phone or app that can use TLS works (Linphone, Zoiper, most desk phones); it connects straight to the relay.</p>'}` : ''}
+      ${online.length || !avail ? '' : '<p class="lo-warn">The relays aren\'t answering right now. Calls inside each office still work.</p>'}</section>`;
+  }
+  function wireRelay() {
+    const t = S.team; const sw = $app.querySelector('#lorelayon');
+    if (sw) sw.onchange = async () => {
+      if (needs2step()) { sw.checked = !sw.checked; return security(); }
+      if (!sw.checked && !(await ask('Switch the Riyeser relay off? Sites can\'t call each other, and phones at home stop working, until it\'s switched on again. Calls inside each office carry on.'))) { sw.checked = true; return; }
+      try { await api.linkRelaySet(t.id, sw.checked); phMsg(sw.checked ? 'The relay is on. Each Riyeser Link Office connects within 5 minutes (or press Reconnect now in its Settings).' : 'The relay is off.', 'ok'); }
+      catch (err) { phMsg(esc(plainError(err)), 'bad'); }
+      refreshPhones();
+    };
+    $app.querySelectorAll('[data-relayoff]').forEach((b) => b.onclick = async () => {
+      const allow = !!b.dataset.allow;
+      if (!allow && !(await ask('Disconnect this office from the relay? Its phones can still call each other, but not the other sites. Its relay passes stop working within 30 seconds.'))) return;
+      try { await api.linkRelayRevoke(t.id, b.dataset.relayoff, allow); phMsg(allow ? 'Allowed again. It reconnects within 5 minutes.' : 'Disconnected from the relay.', 'ok'); } catch (err) { phMsg(esc(plainError(err)), 'bad'); }
+      refreshPhones();
+    });
+    $app.querySelectorAll('[data-relaydev]').forEach((b) => b.onclick = async () => {
+      if (!(await ask('Remove this phone from the relay? It stops working straight away.'))) return;
+      try { await api.linkRelayDeviceRemove(t.id, b.dataset.relaydev); phMsg('Removed.', 'ok'); } catch (err) { phMsg(esc(plainError(err)), 'bad'); }
+      refreshPhones();
+    });
+    const add = $app.querySelector('#lorelayadd'); if (add) add.onclick = () => relayPhone();
+  }
+  /** Lazily load the QR code maker (vendor/qrcode-1.4.4.js, MIT), only when one is needed. */
+  function qrSvg(text) {
+    const make = () => { const q = window.qrcode(0, 'M'); q.addData(text); q.make(); return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); };
+    if (window.qrcode) return Promise.resolve(make());
+    return new Promise((res, rej) => { const sc = document.createElement('script'); sc.src = 'vendor/qrcode-1.4.4.js'; sc.onload = () => res(make()); sc.onerror = () => rej(new Error('The QR code couldn\'t be made. Type the details in instead.')); document.head.appendChild(sc); });
+  }
+  /** Set up a phone at home (or at a site with no Riyeser Link Office): extension and name, then the details, shown once. */
+  function relayPhone(ext) {
+    const people = (S.people || []).filter((p) => p.extension);
+    modal(`<h3>Set up a phone at home or another site</h3><p class="muted">It connects straight to the Riyeser relay over the internet (TLS), and rings and dials like the person's desk phone.</p>
+      <div class="lo-rpform"><label>Whose phone<select id="rpext">${people.map((p) => `<option value="${esc(p.extension)}"${String(p.extension) === String(ext || '') ? ' selected' : ''}>${esc(p.extension)} ${esc(p.display_name || '')}</option>`).join('')}</select></label>
+      <label>Name it<input id="rplabel" maxlength="40" placeholder="e.g. Home, Mobile, Lautoka desk"></label></div>
+      <div id="rpout"></div><div class="mfoot"><button class="btn" id="cl">Close</button><button class="btn p" id="rpgo">Make the details</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = () => { close(); refreshPhones(); };
+      d.querySelector('#rpgo').onclick = async () => {
+        const go = d.querySelector('#rpgo'); go.disabled = true;
+        try {
+          const r = await api.linkRelayDeviceAdd(S.team.id, d.querySelector('#rpext').value, d.querySelector('#rplabel').value.trim());
+          const kv = [['Server (domain)', r.server], ['Port', r.port], ['Transport', 'TLS'], ['Username', r.username], ['Password', r.password], ['Authentication name', r.username]];
+          d.querySelector('#rpout').innerHTML = `<div class="lo-relaydet"><dl class="lo-kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd><code>${esc(v)}</code></dd>`).join('')}</dl>
+            <p class="lo-warn small"><b>Copy the password now:</b> it's shown only this once. If it's lost, remove the phone and make new details.</p>
+            <div class="lo-qr" id="rpqr"></div><p class="muted small">Linphone (free, iPhone, Android, Windows, Mac): <b>Assistant → Fetch remote configuration → Scan QR code</b>. The code works once, for 15 minutes. Other apps and desk phones: type the details above (choose TLS; for a desk phone, the server's port is ${esc(r.port)}).</p>
+            ${r.self_signed ? '<p class="muted small">This relay uses its own certificate. In the phone, turn off "verify the server\'s certificate" (or ask Riyeser to add one your phone trusts).</p>' : ''}</div>`;
+          go.remove(); d.querySelector('.lo-rpform').hidden = true;
+          if (r.prov_url) qrSvg(r.prov_url).then((svg) => { const q = d.querySelector('#rpqr'); if (q) q.innerHTML = svg; }).catch((e) => { const q = d.querySelector('#rpqr'); if (q) q.textContent = e.message; });
+        } catch (err) { d.querySelector('#rpout').innerHTML = `<p class="err">${esc(plainError(err))}</p>`; go.disabled = false; }
+      };
+    });
   }
   // ------------------------------------------------------------------ Link Office 1.2.3: the control panel's Phones list
   // Every phone in one list (given to someone, new, ignored): search, sort, filters, tick boxes and a bar for many at
@@ -3896,6 +4024,7 @@
     else if (movedNew) a.push({ cls: 'info', html: `The office PC's address changed to ${esc((o.addresses || [])[0] || '')}. Phones typed in by hand need it typed in.` });
     const rg = typeof groupsToCheck === 'function' ? groupsToCheck() : [];
     if (rg.length) a.push({ cls: 'warn', html: `${rg.length} ring group${rg.length === 1 ? '' : 's'} to check: who answers ${esc(rg.slice(0, 3).map((g) => g.name).join(', '))}.`, act: 'rings', label: 'Check ring groups' });
+    for (const p of relaySummary(S.lo.relay, o).problems) a.push({ ...p, act: 'relay', label: 'Sites and the relay' });
     if (versionBelow(o.version, '1.2.3')) a.push({ cls: 'info', html: `Update Riyeser Link Office on ${esc(o.pc_name || 'the office PC')} (version ${esc(o.version || '?')}) to manage many phones at once and each phone's settings from here. Riyeser Central updates it.` });
     return a;
   }
@@ -3976,7 +4105,7 @@
         <div class="lo-row"><button class="btn p sm" name="go" value="restart">Save and restart</button><button class="btn sm" name="go" value="save">Save</button></div></form>`;
     box.innerHTML = `<div class="lo-sh"><div><h3>${esc(r.title)}</h3><small>${esc(p.vendor || 'Maker not known')} ${esc(p.model || '')} · <span class="mono">${esc(prettyMac(p.mac))}</span></small></div><button class="lo-x" id="lopclose" aria-label="Close">✕</button></div>
       ${statusPillT(r.status, r.cls)}
-      <dl class="lo-kv lo-pkv">${r.kind === 'phone' ? `<dt>Extension</dt><dd><b>${esc(r.ext)}</b> ${esc(r.person)}${p.shared ? ' <small>shared phone</small>' : ''}</dd>` : ''}<dt>Location</dt><dd>${esc(r.location || '—')}</dd>${p.note ? `<dt>Notes</dt><dd>${esc(p.note)}</dd>` : ''}
+      <dl class="lo-kv lo-pkv">${(S.lo.status && (S.lo.status.offices || []).length > 1) || (S.lo.relay && S.lo.relay.enabled) ? `<dt>Site</dt><dd>${esc((S.lo.office && S.lo.office.pc_name) || 'This site')}</dd>` : ''}${r.kind === 'phone' ? `<dt>Extension</dt><dd><b>${esc(r.ext)}</b> ${esc(r.person)}${p.shared ? ' <small>shared phone</small>' : ''}</dd>` : ''}<dt>Location</dt><dd>${esc(r.location || '—')}</dd>${p.note ? `<dt>Notes</dt><dd>${esc(p.note)}</dd>` : ''}
         <dt>IP address</dt><dd class="mono">${esc(p.ip || '—')}</dd>${p.firmware ? `<dt>Firmware</dt><dd class="mono">${esc(p.firmware)}</dd>` : ''}${p.registered_since ? `<dt>Connected since</dt><dd>${esc(ago(p.registered_since))}</dd>` : ''}
         <dt>Last seen</dt><dd>${r.seen ? esc(p.registered ? 'Now' : ago(r.seen)) : 'Never'}</dd>${r.kind === 'phone' ? `<dt>Settings fetched</dt><dd>${p.provisioned_at ? esc(ago(p.provisioned_at)) : 'Not yet'}</dd>` : ''}</dl>
       ${old ? `<p class="lo-hint lo-old">Restart, Find this phone, Ignore, Remove and phone settings need Riyeser Link Office 1.2.3 on ${esc((S.lo.office || {}).pc_name || 'the office PC')}.</p>` : ''}
@@ -4020,6 +4149,7 @@
         if (a === 'addmany') addManyWeb();
         if (a.startsWith('f-')) filterTo(a.slice(2));
         if (a === 'stable') location.href = '/help/link.html#stable-address';
+        if (a === 'relay') tabTo('relay');
         if (a === 'rings') { clearInterval(S.loTimer); S.view = null; S.home = false; openRingGroups('manage'); }
         return; }
       const th = t.closest('th[data-sort]'); if (th) { const k = th.dataset.sort; if (ui.sort === k) ui.dir *= -1; else { ui.sort = k; ui.dir = 1; } drawLoList(); return; }
@@ -4262,7 +4392,7 @@
     return `<div class="lo-trouble"><h4>🛠 Troubleshoot</h4><ol class="lo-check">
       <li><b>Power.</b> Is the phone's screen on? Many desk phones need power over the network cable (PoE) or their own power adapter.</li>
       <li><b>Network cable in the LAN port.</b> Plug the cable from the wall (or the network switch) into the phone's <b>LAN</b> port, not its <b>PC</b> port.</li>
-      <li><b>Same office network.</b> The phone must be on the same office network as the Riyeser Link Office PC${o && o.pc_name ? ` (${esc(o.pc_name)})` : ''}. A phone at home or in another building can't reach it yet.</li>
+      <li><b>Same office network.</b> The phone must be on the same office network as the Riyeser Link Office PC${o && o.pc_name ? ` (${esc(o.pc_name)})` : ''}. A phone at home or at another site can connect too, once your owner or admin has switched on the Riyeser relay (Phones → Sites and the Riyeser relay).</li>
       <li><b>The office PC is on and online.</b> ${o ? `Riyeser Link Office last reported <b>${ago(o.last_seen)}</b>${fresh ? '.' : '. Check the PC is on, awake and connected to the internet.'}` : 'Riyeser Link Office hasn\'t reported in yet.'}</li>
       <li><b>Restart the phone.</b> Unplug its power (or the network cable, for PoE) for 10 seconds, then plug it back in.</li></ol>
       ${p ? `<p class="small muted">Last check-in: <b>${esc(checkIn(p))}</b> · Last settings fetch: <b>${p.provisioned_at ? esc(ago(p.provisioned_at)) : 'never'}</b></p>` : ''}
@@ -4926,7 +5056,20 @@
   function settingsMenu() { setNav('settings'); }
 
   const Calls = (() => {
-    const ICE = CFG.iceServers || [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+    // ICE: only Riyeser's own relay (its STUN/TURN, with 12-hour passwords from link_relay_turn), never Google's or anyone
+    // else's. With no relay set up, calls use only the computers' own addresses (fine on one network).
+    let ICE = CFG.iceServers || []; let iceAt = 0; let iceTtl = 0; let iceFor = null;
+    async function refreshIce() {
+      if (!S.team || !api.linkRelayTurn) return ICE;
+      if (iceFor === S.team.id && Date.now() - iceAt < (iceTtl * 1000) / 2) return ICE;
+      try {
+        const t = await Promise.race([api.linkRelayTurn(S.team.id), new Promise((r) => setTimeout(() => r(undefined), 2500))]);
+        if (t === undefined) return ICE;
+        ICE = t && Array.isArray(t.ice_servers) && t.ice_servers.length ? t.ice_servers : (CFG.iceServers || []);
+        iceAt = Date.now(); iceTtl = (t && t.ttl) || 600; iceFor = S.team.id;
+      } catch { /* keep what we have: the call still works on one network */ }
+      return ICE;
+    }
     let call = null; let listening = null;
     const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'c' + Date.now() + Math.random().toString(16).slice(2));
     const send = (to, kind, payload) => api.signal(S.team.id, call.id, to, kind, payload).catch((e) => console.warn('call signal', e));
@@ -5182,6 +5325,7 @@
           for (const to of call.targets) send(to, 'taken'); call.targets.clear();
           if (pl.demo) { call.sim = true; call.status = 'live'; call.startedAt = Date.now(); stopTone(); draw(); return; }
           call.status = 'connecting'; draw();
+          await refreshIce(); if (!call || call.status !== 'connecting') return;
           call.pc = newPc();
           call.local.getTracks().forEach((tr) => call.pc.addTrack(tr, call.local));
           call.pc.addTransceiver('video', { direction: 'sendrecv' });
@@ -5205,6 +5349,7 @@
       if (!call || call.status !== 'incoming') return;
       stopTone(); call.status = 'connecting'; draw();
       try { call.local = await mic(); } catch (e) { send(call.peer, 'decline', { mic: true }); finish(e.message); return; }
+      await refreshIce(); if (!call || call.status !== 'connecting') return;
       call.pc = newPc();
       call.local.getTracks().forEach((tr) => call.pc.addTrack(tr, call.local));
       send(call.peer, 'accept');

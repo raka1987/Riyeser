@@ -79,7 +79,7 @@ The formats follow each maker's published provisioning documentation, and the te
 3. Turn it on. The phone asks the network "who sets me up?" (SIP plug-and-play on 224.0.1.75). Riyeser Link Office answers with the address of its small settings server, on this PC at port 5080.
 4. The phone shows on the status screen as **New phone found**. Choose who it's for. The phone fetches its settings (server address, extension, password, and the person's name as its label) and connects. If it hasn't done that within a minute, restart the phone.
 5. Wi-Fi desk phones work too, once joined to the office Wi-Fi.
-6. A phone in another building or at home won't reach it. That's coming with the cloud version.
+6. A phone in another building or at home connects through the **Riyeser relay** once the business switches it on (1.3.0; see `RELAY.md` and *Connect your branches* in the help).
 
 Didn't appear? Use **Add a desk phone → Add phone** with the MAC address on the sticker under the phone. Or use **Set up a phone by hand** next to the person. It shows the server address (this PC's address), the username (the extension) and the password, to type into any SIP phone or app.
 
@@ -318,15 +318,10 @@ The Riyeser Link desktop app (`src/team-main.js`) will register to Riyeser Link 
 
 `src/link/simua.js` is a minimal SIP user agent (register, call, answer, hang up, hold) and is a starting point for the signalling side.
 
-### Step 3: the Riyeser relay (remote Link app users and branches)
+### Step 3: the Riyeser relay (1.3.0, built)
 
-The Office Link is designed to keep an **outgoing** connection to a Riyeser relay. Remote Riyeser Link app users, and other branches' Links, will reach office extensions through it with no router changes. The relay isn't built yet. The seam is `src/link/trunks.js`. A trunk:
-
-- opens its own outgoing connection (`start`) and hands the SIP it receives to the PBX as coming from a trusted trunk (`proto: 'TRUNK'`);
-- says which numbers it can reach (`route(number)`): the PBX asks only for numbers that aren't on this PC, and never for emergency numbers;
-- sends SIP out over its connection (`send`).
-
-Office extensions always stay local. A test checks that an unknown number is handed to a registered trunk.
+Branches on other internet connections and phones at home, through the Riyeser relay: see **`RELAY.md`**. The seam is
+`src/link/trunks.js`; the relay link is `src/link/relay.js`; the relay itself is `relay/` on `main` (copy in `src/relay/`).
 
 ### Later: Riyeser Link Cloud
 
@@ -348,7 +343,8 @@ The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring
   - `calllog.js` — 90 days of recent calls.
   - `service.js` — puts it all together.
   - `portable.js` — export and import.
-  - `trunks.js` — the relay seam.
+  - `trunks.js` — the trunk seam; `relay.js` — the Riyeser relay link (1.3.0); `ws.js` — WebSocket.
+- `src/relay/` — the Riyeser relay itself (the same code as `relay/` on main), for running it on the head office PC.
   - `windows.js` — the firewall rule, sleep settings, the adapters' routers and DNS (read only), and the optional fixed address.
   - `netinfo.js` — this PC's addresses and which adapter is the office one.
   - `netwatch.js` — notices address changes (polling and Windows' own events).

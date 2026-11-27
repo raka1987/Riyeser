@@ -97,6 +97,8 @@ function makeService() {
   const { LinkCloud } = require('./link/cloud');
   cloud = new LinkCloud({ service, clients: () => [own, central], appData, version: app.getVersion(), pcName: os.hostname() });
   cloud.on('change', () => service.emit('change'));
+  // the Riyeser relay (1.3.0): other sites and phones at home, when the business has it switched on
+  service.opts.relayConfig = () => cloud.relayConfig();
   let pending = null;
   service.on('change', () => {   // tell the window, at most every 300 ms
     if (pending) return;
@@ -159,6 +161,17 @@ function registerIpc() {
     fs.writeFileSync(r.filePath, require('./renderer/link-bulk').csvTemplate()); return r.filePath;
   });
   handle('link:openPhonePage', (ip) => { if (!require('./link/netinfo').isPrivate(ip) || !/^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))) throw new Error('That phone isn\'t on the office network.'); return shell.openExternal(`http://${ip}/`).then(() => true); });
+  handle('link:site-name', (name) => service.setSiteName(name));
+  // the head office PC can run the Riyeser relay itself (Settings → Connect your branches → This PC as the relay)
+  handle('link:relay-host-state', () => require('./link/windows').relayHostState());
+  handle('link:relay-host', async (o) => {
+    const w = require('./link/windows');
+    const relayDir = path.join(__dirname, 'relay').replace('app.asar', 'app.asar.unpacked');
+    const r = await w.runElevatedScript((result) => w.relayHostScript({ script: path.join(relayDir, 'deploy', 'windows', 'install-relay.ps1'), relayDir, ...(o || {}) }, result));
+    logLine('info', `Run the Riyeser relay on this PC: ${r.ok ? 'installed' : r.why || 'didn\'t finish'}.`);
+    return { ok: !!r.ok, out: String(r.out || r.why || '').replace(/select relay_register\([^)]*\);?/g, '[see REGISTER.sql]').slice(-2000) };
+  });
+  handle('link:relay-retry', () => { if (service.relay) { service.relay.configAt = 0; service.relay.nudge(); } return service.status().relay; });
   handle('link:addPerson', (name, ext) => service.addPerson({ name, ext }));
   handle('link:removePerson', (id) => service.removePerson(id));
   handle('link:manual', (ext) => service.manual(ext));

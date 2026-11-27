@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="link.css">
 </head>
 <body>
-  <!-- 1.2.3: one control panel. A slim menu on the left (Overview, Phones, People, Calls, Settings), the work on the right. -->
+  <!-- 1.2.3: one control panel (1.3.0 adds the Riyeser relay: Overview tile, status line, Settings → Connect your branches). A slim menu on the left (Overview, Phones, People, Calls, Settings), the work on the right. -->
   <header class="top">
     <img src="logos/link.png" alt="" class="logo">
     <div class="grow"><h1>Riyeser Link Office</h1><div class="sub">Your office phone system<span id="biz"></span></div></div>
@@ -60,7 +60,7 @@
             <li>Many desk phones don't come with a power adapter and expect power over the network cable (PoE). Buy the phone's power adapter, or a small PoE switch.</li>
             <li>Turn the phone on. Yealink, Grandstream, Snom and Polycom phones ask the network who sets them up, and appear here as <b>New</b>. Tick them and choose <b>Give to…</b>, then restart the phone if it hasn't set itself up within a minute.</li>
             <li>Wi-Fi desk phones work too, once joined to the office Wi-Fi.</li>
-            <li>A phone in another building or at home won't reach it; that's coming with the cloud version.</li>
+            <li>A phone at another site or at home reaches it through the Riyeser relay: see <b>Settings → Connect your branches</b>.</li>
           </ol>
           <p class="muted">Phone didn't appear? Add it by its MAC address (12 letters and numbers on a sticker under the phone), or many at once with <b>Add several phones</b> (paste a list or import a CSV).</p>
           <form id="macform" class="row">
@@ -100,6 +100,10 @@
         <section class="panel">
           <div class="ph"><h2>Riyeser account</h2></div>
           <div id="account"></div>
+        </section>
+        <section class="panel" id="relaypanel">
+          <div class="ph"><h2>Connect your branches</h2><span class="muted">Other sites and phones at home, through the Riyeser relay</span></div>
+          <div id="relay"></div>
         </section>
         <section class="panel" id="addrpanel">
           <div class="ph"><h2>This PC's address</h2><span class="muted">So the phones always find it</span></div>

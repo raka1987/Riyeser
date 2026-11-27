@@ -56,7 +56,8 @@ function renderState() {
   $('#ver').textContent = `Version ${S.version}`;
   if (S.state === 'running') {
     el.className = 'state';
-    el.innerHTML = `<div class="grow"><b class="big">${esc(T.running(S.host))}</b><span class="muted">${esc(T.counts(S.counts))}${S.licence.text ? ` · ${esc(S.licence.text)}` : ''}</span></div>`;
+    const rl = T.relayLine(S.relay); const rc = !S.relay ? '' : S.relay.connected ? (S.relay.udp === 'blocked' ? 'warn' : 'ok') : !T.relaySetUp(S.relay) ? 'muted' : 'warn';
+    el.innerHTML = `<div class="grow"><b class="big">${esc(T.running(S.host))}</b><span class="muted">${esc(T.counts(S.counts))}${S.licence.text ? ` · ${esc(S.licence.text)}` : ''}</span>${rl ? `<span class="relayline ${rc}" id="relayline">${esc(rl)}</span>` : ''}</div>`;
   } else if (S.state === 'waiting-licence') {
     el.className = 'state wait';
     el.innerHTML = `<div class="grow"><b class="big">${esc(T.WAITING_TITLE)}</b><span>${T.boldPlus(esc(S.licence.message || T.NEEDS_PLUS))}</span></div>
@@ -137,7 +138,7 @@ function renderPhones() {
         <td><span class="pill ${esc(r.cls)}">${esc(r.status)}</span></td><td>${r.seen ? esc(when(r.seen)) : '<span class="muted">Never</span>'}</td></tr>`).join('')
         || '<tr><td colspan="9" class="empty">No phones match. <button class="linkbtn" data-a="phclear">Clear the filters</button></td></tr>'}</tbody></table>`;
   const on = S.phones.filter((x) => x.state === 'connected').length;
-  $('#phcount').textContent = total ? `${plural(total, 'phone')} · ${on} online${S.found.length ? ` · ${S.found.length} new` : ''}${rows.length !== total ? ` · ${rows.length} shown` : ''}` : '';
+  $('#phcount').textContent = total ? `${T.relaySetUp(S.relay) && S.siteName ? `At ${S.siteName} · ` : ''}${plural(total, 'phone')} · ${on} online${S.found.length ? ` · ${S.found.length} new` : ''}${rows.length !== total ? ` · ${rows.length} shown` : ''}` : '';
   const nn = $('#navnew'); nn.hidden = !S.found.length; nn.textContent = S.found.length;
   renderBulkBar();
 }
@@ -182,7 +183,7 @@ function renderPhonePanel() {
   box.innerHTML = `<div class="sh"><div><h3>${esc(rowTitle(r))}</h3><small>${esc(r.vendorName || 'Maker not known')} ${esc(r.model)} · <span class="mono">${esc(r.macText)}</span></small></div>
       <button class="x" data-a="closepanel" aria-label="Close">✕</button></div>
     <span class="pill ${esc(r.cls)}">${esc(r.status)}</span>
-    <dl class="kv">${r.kind === 'phone' ? `<dt>Extension</dt><dd><b>${esc(r.ext)}</b> ${esc(r.person)}${r.shared ? ' <span class="pill">shared</span>' : ''}</dd>` : ''}
+    <dl class="kv">${T.relaySetUp(S.relay) ? `<dt>Site</dt><dd><span class="sitetag here">${esc(S.siteName || 'This site')}</span></dd>` : ''}${r.kind === 'phone' ? `<dt>Extension</dt><dd><b>${esc(r.ext)}</b> ${esc(r.person)}${r.shared ? ' <span class="pill">shared</span>' : ''}</dd>` : ''}
       <dt>Location</dt><dd>${esc(r.location || '—')}</dd>${x.note ? `<dt>Note</dt><dd>${esc(x.note)}</dd>` : ''}
       <dt>IP address</dt><dd class="mono">${esc(r.ip || '—')}</dd>${x.firmware ? `<dt>Firmware</dt><dd class="mono">${esc(x.firmware)}</dd>` : ''}
       ${x.registeredSince ? `<dt>Connected since</dt><dd>${esc(when(x.registeredSince))}</dd>` : ''}<dt>Last seen</dt><dd>${r.seen ? esc(when(r.seen)) : 'Never'}</dd>
@@ -226,6 +227,7 @@ function attention() {
   if (eg.length) add('warn', `Nobody is chosen to answer ${eg.slice(0, 3).map((g) => `${g.name} (${g.ext})`).join(', ')}${eg.length > 3 ? '…' : ''}, so calls to ${eg.length === 1 ? 'it' : 'them'} are missed.`, 'rings', 'Choose who answers');
   if ((S.skipped || []).length) add('info', `Not on the phones yet: ${S.skipped.map((x) => `${x.name} (${x.why})`).join('; ')}.`, 'sync', 'Bring in people again');
   if (S.cloud && S.cloud.status === 'offline') add('warn', T.cloud(S.cloud), 'report', 'Try now');
+  const rp = S.relay && T.relayTile(S.relay).problem; if (rp) add(rp.cls, rp.text, rp.act, rp.label);   // the Riyeser relay (1.3.0)
   if (!S.signedIn && S.source !== 'team') add('info', 'Sign in to bring in your team and see the phones on the website.', 'step-signin', 'Sign in');
   return a;
 }
@@ -255,7 +257,7 @@ function renderOverview() {
     `<section class="tile ${emptyGroups().length ? 'warn' : S.groups.length ? 'ok' : 'off'}"><h3>☏ Ring groups</h3><div class="nums">${n(S.groups.length, 'numbers', 'people')}${n(emptyGroups().length, 'to check', 'people')}</div>
       <p>${S.groups.length ? esc(S.groups.slice(0, 3).map((g) => `${g.ext} ${g.name}: ${groupHow(g)}`).join(' · ')) : 'Each branch or group number (like Sales or Reception) rings the people chosen for it.'}</p>
       <div class="acts"><button class="btn s sm" data-a="rings">Manage ring groups</button></div></section>`,
-    '<section class="tile off"><h3>🏢 Branches and relay</h3><div class="big">Not set up</div><p>Phones at other branches or at home will connect through Riyeser Link Cloud\'s relay (coming soon). Until then, phones work on this office network.</p></section>',
+    relayTileHtml(),
     `<section class="tile ${fw}"><h3>🛡 Windows check and backups</h3><div class="big">${fw === 'ok' ? 'All good' : fw === 'bad' ? 'Firewall blocks phones' : 'Needs a look'}</div>
       <p>Firewall: ${S.firewall === true ? 'phones allowed' : S.firewall === false ? 'not allowed yet' : S.firewall === 'outdated' ? 'older rule' : 'not checked here'} · Starts with Windows: ${S.startWithWindows ? 'yes' : 'no'}${S.sleepNote ? ' · may go to sleep' : ''} · Backed up every day (the last 30 kept).</p>
       <div class="acts">${S.firewall === false || S.firewall === 'outdated' ? '<button class="btn sm" data-a="firewall">Fix firewall</button>' : ''}<button class="btn s sm" data-a="recheck">Check again</button><button class="btn s sm" data-a="backupnow">Back up now</button></div></section>`,
@@ -263,6 +265,17 @@ function renderOverview() {
       <p>${esc(S.teamSyncedAt ? `People brought in ${when(S.teamSyncedAt)}. ` : '')}${esc(T.cloud(S.cloud))}</p>
       <div class="acts">${cl === 'online' ? '<button class="btn s sm" data-a="web">Phones page on the website</button>' : ''}<button class="btn s sm" data-a="sync">Bring in people now</button></div></section>`,
   ].join('');
+}
+// Overview → Branches and relay (1.3.0): the Riyeser relay's real state (link-text.js relayTile)
+function relayTileHtml() {
+  const t = T.relayTile(S.relay);
+  return `<section class="tile ${t.cls}" id="relaytile"><h3>🏢 Branches and relay</h3><div class="big">${esc(t.big)}</div><p>${esc(t.text)}</p>
+    <div class="acts">${t.act && t.act !== 'relay' ? `<button class="btn sm" data-a="${esc(t.act)}">${esc(t.label)}</button>` : ''}<button class="btn s sm" data-a="relay">${S.relay && T.relaySetUp(S.relay) ? 'Details' : 'Connect your branches'}</button></div></section>`;
+}
+/** Where an extension's phones are, with the relay set up (1.3.0): this site, or another site / at home. */
+function siteTag(ext) {
+  const w = T.extSite(S.relay, ext, (S.registrations || []).some((x) => x.ext === ext));
+  return w === 'here' ? `<span class="sitetag here" title="Connected at this site">${esc(S.siteName || 'This site')}</span>` : w === 'remote' ? '<span class="sitetag" title="Reached through the Riyeser relay">Another site or at home</span>' : '';
 }
 const personOptions = (sel) => `<option value="">Who is it for?</option>${S.people.map((p) => `<option value="${esc(p.ext)}"${sel === p.ext ? ' selected' : ''}>${esc(p.name)} (${esc(p.ext)})</option>`).join('')}`;
 // the address to type into phones, big, with the two things people come here to do
@@ -313,7 +326,7 @@ function renderPeople() {
   const list = S.people.filter((p) => !q || `${p.name} ${p.ext}`.toLowerCase().includes(q));
   $('#people').innerHTML = !S.people.length ? '<div class="empty"><p>No one yet. Sign in to Riyeser under Settings to bring in your team, or add people below.</p></div>'
     : `<table><thead><tr><th>Name</th><th>Ext.</th><th>Device</th><th>State</th><th>Do not disturb</th><th>Desk phones</th></tr></thead><tbody>
-      ${list.map((p) => `<tr data-prow="${esc(p.ext)}" class="${ui.pp.cur === p.ext ? 'cur' : ''}"><td><b>${esc(p.name)}</b>${p.shared ? ' <span class="pill">shared</span>' : ''}</td><td><b>${esc(p.ext)}</b></td><td>${esc(T.device(p.device))}</td><td>${pill(T.personState(p))}</td>
+      ${list.map((p) => `<tr data-prow="${esc(p.ext)}" class="${ui.pp.cur === p.ext ? 'cur' : ''}"><td><b>${esc(p.name)}</b>${p.shared ? ' <span class="pill">shared</span>' : ''}</td><td><b>${esc(p.ext)}</b></td><td>${esc(T.device(p.device))} ${siteTag(p.ext)}</td><td>${pill(T.personState(p))}</td>
         <td><input type="checkbox" data-dnd="${esc(p.ext)}"${p.dnd ? ' checked' : ''} aria-label="Do not disturb for ${esc(p.name)}"></td><td>${S.phones.filter((x) => x.ext === p.ext).length || '<span class="muted">0</span>'}</td></tr>`).join('')
         || '<tr><td colspan="6" class="empty">No one matches.</td></tr>'}</tbody></table>`;
   if (!busy) $('#addperson').innerHTML = `<form id="personform" class="row"><input id="pname" placeholder="${S.source === 'team' ? 'Someone not in Riyeser Link? Their name' : 'Add a person: their name'}" autocomplete="off">
@@ -328,7 +341,7 @@ function renderPersonPanel() {
   const m = shown[p.ext]; const phones = S.phones.filter((x) => x.ext === p.ext); const groups = S.groups.filter((g) => (g.members || []).includes(p.ext));
   box.innerHTML = `<div class="sh"><div><h3>${esc(p.name)}</h3><small>Extension ${esc(p.ext)}${p.shared ? ' · shared phone' : ''} · ${p.source === 'team' ? 'from Riyeser Link' : 'added on this PC'}</small></div><button class="x" data-a="closeperson" aria-label="Close">✕</button></div>
     ${pill(T.personState(p))}
-    <dl class="kv"><dt>Device</dt><dd>${esc(T.device(p.device))}</dd><dt>Do not disturb</dt><dd><label><input type="checkbox" data-dnd="${esc(p.ext)}"${p.dnd ? ' checked' : ''}> ${p.dnd ? 'On' : 'Off'}</label></dd>
+    <dl class="kv"><dt>Device</dt><dd>${esc(T.device(p.device))}</dd>${siteTag(p.ext) ? `<dt>Where</dt><dd>${siteTag(p.ext)}</dd>` : ''}<dt>Do not disturb</dt><dd><label><input type="checkbox" data-dnd="${esc(p.ext)}"${p.dnd ? ' checked' : ''}> ${p.dnd ? 'On' : 'Off'}</label></dd>
       <dt>Ring groups</dt><dd>${groups.length ? groups.map((g) => `${esc(g.ext)} ${esc(g.name)}`).join(', ') : 'None'}</dd></dl>
     <h4>Desk phones</h4>${phones.length ? `<ul class="calls">${phones.map((x) => `<li><button class="linkbtn" data-openphone="${esc(x.mac)}">${esc(x.label || `${x.vendorName} ${x.model || ''}`)}</button><span class="muted">${esc(T.phoneStatus(x)[0])}</span></li>`).join('')}</ul>` : '<p class="hint">None yet.</p>'}
     <h4>Set up a phone or app by hand</h4>
@@ -380,6 +393,39 @@ function renderHistory() {
   const h = S.history || [];
   $('#history').innerHTML = h.length ? `<div class="tbox" style="max-height:320px"><table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>${h.map((x) => `<tr style="cursor:default"><td>${esc(when(x.at))}</td><td>${esc(x.by)}</td><td style="white-space:normal;min-width:260px">${esc(x.what)}</td></tr>`).join('')}</tbody></table></div>`
     : '<p class="muted">No changes yet.</p>';
+}
+// ---------- Settings → Connect your branches: the Riyeser relay's status and diagnostics
+function renderRelay() {
+  const r = S.relay || { state: 'local' };
+  const row = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
+  const intro = r.connected ? T.relayLine(r) : T.relayTile(r).text;   // not set up, or the problem and its fix
+  const sites = (r.sites || []).map((x) => `<li><span class="sitetag">${esc(x.name)}</span> <span class="muted">· ${esc(x.exts)} extension${x.exts === 1 ? '' : 's'} connected${x.via && x.via !== 'here' ? ` · through ${esc(x.via)}` : ''}</span></li>`).join('');
+  $('#relay').innerHTML = `<p class="muted">${esc(T.RELAY_WHY)}</p><p><b>${esc(intro)}</b></p>
+    ${r.connected && r.udp === 'blocked' ? `<div class="note warn">${esc(T.RELAY_UDP_BLOCKED)}</div>` : ''}
+    ${sites ? `<p><b>Other sites</b></p><ul class="sites">${sites}</ul>` : ''}
+    <form id="sitename" class="row"><label style="flex:1 1 260px"><span class="muted small">${esc(T.RELAY_SITE_NAME)}</span><input id="sitenamein" value="${esc(S.siteName || '')}" maxlength="40" autocomplete="off"></label><button class="btn s">Save</button></form>
+    <details class="help"><summary>Diagnostics</summary><dl class="kv">
+      ${row('State', esc(r.state || '—'))}${row('Relay', r.relay ? `${esc(r.relay)} (${esc(r.region || '')})${r.backup ? ' <span class="pill wait">backup</span>' : ''}` : '—')}
+      ${row('Round trip', r.rtt != null ? `${esc(r.rtt)} ms` : '—')}${row('Sound (UDP)', esc(T.udp(r.udp)))}
+      ${row('Connected since', r.since ? esc(when(r.since)) : '—')}${row('Reconnects', esc(r.reconnects || 0))}
+      ${row('Relays (in order)', (r.relays || []).map((x) => `${esc(x.id)} ${esc(x.region)}`).join(' → ') || '—')}
+      ${row('Reachable through it', `${esc(r.remote || 0)} extension(s), ${esc(r.phones || 0)} phone(s) at home`)}
+      ${row('Last problem', esc(r.error || 'none'))}</dl></details>
+    <div class="row"><button class="btn s" data-a="relayretry">Reconnect now</button><button class="btn s" data-a="web">Sites and the relay on the website</button></div>
+    ${S.platform === 'win32' ? relayHostHtml() : ''}`;
+  if (S.platform === 'win32' && relayHost === undefined) { relayHost = null; bridge.call('link:relay-host-state').then((h) => { relayHost = h || { installed: false }; part('connect your branches', renderRelay, '#relay'); }).catch(() => { relayHost = { installed: false }; }); }
+}
+// ---------- the head office PC can run the Riyeser relay itself (install-relay.ps1, with Windows' permission prompt)
+let relayHost;
+function relayHostHtml() {
+  const h = relayHost;
+  if (h && h.health && h.health.ok) return `<details class="help" open><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p><b>${esc(T.relayHostOn(h.health))}</b></p><p class="muted small">${esc(T.RELAY_HOST_MORE)}</p></details>`;
+  return `<details class="help"><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p class="muted">${esc(T.RELAY_HOST_WHY)}</p>
+    ${h && h.installed ? `<div class="note warn">${esc(T.RELAY_HOST_DOWN)}</div>` : ''}
+    <form id="relayhost" class="row"><label style="flex:1 1 220px"><span class="muted small">Relay's name (DNS)</span><input id="rhdomain" value="relay.riyeser.com" autocomplete="off" spellcheck="false"></label>
+      <label style="flex:1 1 160px"><span class="muted small">Where</span><input id="rhregion" value="Head office" maxlength="60" autocomplete="off"></label>
+      <label style="flex:0 1 110px"><span class="muted small">Id</span><input id="rhid" value="suva1" maxlength="40" autocomplete="off" spellcheck="false"></label>
+      <button class="btn s">Run the relay on this PC…</button></form></details>`;
 }
 // ---------- Settings → This PC's address: the adapter, names, what phones are given, reserve it, fixed address
 function renderAddress() {
@@ -561,6 +607,7 @@ function render() {
   part('phone filters', renderPhoneFilters, '#phfilters'); part('phones', renderPhones, '#phones'); part('phone', renderPhonePanel, '#phpanel'); part('new phones', renderFound, '#found');
   part('people', renderPeople, '#people'); part('ring groups', renderGroups, '#groups');
   part('calls', renderCalls, '#calls'); part('account', renderAccount, '#account'); part('history', renderHistory, '#history');
+  if (!document.activeElement || !document.activeElement.closest || !document.activeElement.closest('#relay')) part('connect your branches', renderRelay, '#relay');
   if (!document.activeElement || !document.activeElement.closest || !document.activeElement.closest('#address')) part('this PC\'s address', renderAddress, '#address');
   if (!document.querySelector('.adv').open) part('advanced', renderAdvanced, '#advanced');
 }
@@ -646,6 +693,8 @@ document.addEventListener('click', async (e) => {
     if (a === 'team') await safe(() => bridge.call('link:openTeam'));
     if (a === 'web') await safe(() => bridge.call('link:openPhonesPage'));
     if (a === 'rings') await safe(() => bridge.call('link:openRingGroups'));
+    if (a === 'relay') { showTab('settings'); const rp = $('#relaypanel'); if (rp && rp.scrollIntoView) rp.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    if (a === 'relayretry') { await safe(() => bridge.call('link:relay-retry')); toast('Reconnecting to the Riyeser relay…'); }
     if (a === 'report') { const r = await safe(() => bridge.call('link:report')); if (r) toast(r.ok ? 'Sent to Riyeser Link.' : r.error); }
     if (a === 'setupopen') { setupOpen = !setupOpen; renderSetup(); }
     if (a === 'step-signin') { showTab('settings'); const em = $('#em'); if (em) em.focus(); }
@@ -720,6 +769,16 @@ document.addEventListener('submit', async (e) => {
     const ext = $('#macwho').value; if (!ext) { toast('Choose who the phone is for.'); return; }
     const r = await safe(() => bridge.call('link:assign', $('#mac').value, ext));
     if (r) { $('#mac').value = ''; toast('Added. Turn the phone on (or restart it) and it sets itself up.'); load(); }
+  }
+  if (f.id === 'relayhost') {
+    toast('Windows will ask for permission…');
+    const r = await safe(() => bridge.call('link:relay-host', { domain: $('#rhdomain').value.trim(), region: $('#rhregion').value.trim(), id: $('#rhid').value.trim() }));
+    relayHost = undefined;
+    if (r) { toast(r.ok ? T.RELAY_HOST_DONE : `The relay wasn't set up: ${r.out || 'cancelled'}`); load(); }
+  }
+  if (f.id === 'sitename') {
+    const n = await safe(() => bridge.call('link:site-name', $('#sitenamein').value));
+    if (n) { toast(`The other sites see this office as ${n}.`); $('#sitenamein').blur(); load(); }
   }
   if (f.id === 'fixedform') {
     const r = await safe(() => bridge.call('link:fixedAddress', $('#fixedip').value.trim()));

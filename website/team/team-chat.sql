@@ -8124,3 +8124,323 @@ create policy cs_send on public.call_signals for insert to authenticated
               and public.calls_allowed(workspace_id)
               and (kind <> 'ring' or (public.link_rings(workspace_id, to_user)
                                       and public.link_group_rings(workspace_id, payload ->> 'group', to_user))));
+-- ===== The Riyeser relay (Link Office 1.3.0): sites on different internet connections, phones at home, TURN =====
+-- The relay (relay/ on the main branch; design in desktop/RELAY.md) joins a business's Link Offices, wherever they are,
+-- and phones that aren't in any office. It runs on a machine Riyeser controls (the head office's own PC or mini PC,
+-- and a rented server as a backup). This section holds:
+--   relay_cluster      the one relay secret, shared by the relays and this database (never readable by apps)
+--   relay_servers      the relays: where they are, which one is first, their current public IP and certificate
+--   link_relay_settings  per business: the relay switched on or off, and its own order of relays (optional)
+--   link_relay_devices remote phones (at home, at a site with no Link Office): username and HA1 only, never a password
+-- and the functions that give out short-lived passes: Link Office passes (signed for each relay, 6 hours), TURN
+-- passwords for browser and app calls (12 hours) and one-time phone set-up links (15 minutes).
+-- PRIVACY: the relay reports counts and which offices are connected, never calls, numbers dialled or audio.
+-- Safe to re-run.
+create table if not exists public.relay_cluster (
+  id int primary key default 1 check (id = 1),
+  secret text not null check (length(secret) >= 32),
+  created_at timestamptz not null default now()
+);
+create table if not exists public.relay_servers (
+  id text primary key check (id ~ '^[a-z0-9-]{2,40}$'),
+  host text not null check (host ~ '^[A-Za-z0-9.-]{3,253}$'),
+  port int not null default 443 check (port between 1 and 65535),           -- where Link Office connects (wss)
+  region text not null default '' check (length(region) <= 60),
+  priority int not null default 1 check (priority between 1 and 99),        -- 1 is the main relay, then the backups
+  workspace_id uuid references public.workspaces(id) on delete cascade,     -- null: for every business; else only this one's
+  public_ip text check (public_ip ~ '^\d{1,3}(\.\d{1,3}){3}$'),
+  ip_how text check (length(ip_how) <= 40),
+  cert_sha256 text check (cert_sha256 ~ '^([0-9A-F]{2}:){31}[0-9A-F]{2}$'),
+  self_signed boolean not null default false,                               -- then apps check exactly cert_sha256
+  ports jsonb not null default '{}', version text check (length(version) <= 40), counts jsonb,
+  last_seen timestamptz, created_at timestamptz not null default now()
+);
+create table if not exists public.link_relay_settings (
+  workspace_id uuid primary key references public.workspaces(id) on delete cascade,
+  enabled boolean not null default false,
+  relays text[] not null default '{}',                                       -- the business's own order (empty: Riyeser's)
+  updated_by uuid references auth.users(id) on delete set null,
+  updated_at timestamptz not null default now()
+);
+create table if not exists public.link_relay_devices (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  extension text not null check (extension ~ '^[1-8][0-9]{2}$'),
+  label text not null default '' check (length(label) <= 40),
+  username text not null unique check (username ~ '^r[a-z0-9]{10}$'),
+  ha1 text not null check (ha1 ~ '^[0-9a-f]{32}$'),                          -- MD5(username:riyeser-relay:password), what SIP needs
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  last_seen timestamptz,
+  removed_at timestamptz
+);
+create index if not exists link_relay_devices_ws on public.link_relay_devices (workspace_id) where removed_at is null;
+alter table public.link_offices add column if not exists relay_gen int not null default 1;          -- bumped on revoke / allow
+alter table public.link_offices add column if not exists relay_revoked_at timestamptz;
+alter table public.link_offices add column if not exists relay jsonb;            -- from Link Office: { state, relay, region, rtt_ms, backup, udp, error, at }
+alter table public.link_offices add column if not exists relay_seen jsonb;       -- from the relay itself: { relay, since, at }
+
+alter table public.relay_cluster enable row level security;
+alter table public.relay_servers enable row level security;
+alter table public.link_relay_settings enable row level security;
+alter table public.link_relay_devices enable row level security;
+-- no policies and no grants: only the functions below (security definer) read or change these
+revoke all on public.relay_cluster, public.relay_servers, public.link_relay_settings, public.link_relay_devices from anon, authenticated;
+
+-- ---------------------------------------------------------------- helpers (not callable from outside)
+create or replace function public.relay_b64u(b bytea) returns text language sql immutable as $$
+  select rtrim(translate(replace(encode(b, 'base64'), E'\n', ''), '+/', '-_'), '=')
+$$;
+-- A pass: base64url(JSON) "." base64url(HMAC-SHA256(key, that)). The relay checks it the same way (relay/lib/tokens.js).
+create or replace function public.relay_sign(k bytea, payload jsonb) returns text
+  language sql immutable set search_path = public, extensions as $$
+  select b || '.' || relay_b64u(hmac(convert_to(b, 'utf8'), k, 'sha256'))
+  from (select relay_b64u(convert_to(payload::text, 'utf8')) as b) x
+$$;
+-- The keys made from the relay secret (the same derivation as relay/lib/tokens.js keys()).
+create or replace function public.relay_key(purpose text) returns bytea
+  language sql stable security definer set search_path = public, extensions as $$
+  select hmac(convert_to(purpose, 'utf8'), convert_to(secret, 'utf8'), 'sha256') from relay_cluster where id = 1
+$$;
+create or replace function public.relay_turn_secret() returns text
+  language sql stable security definer set search_path = public, extensions as $$ select encode(relay_key('turn'), 'hex') $$;
+-- The relays a business uses, in order: its own order if it set one, else main relay first. Only relays for every
+-- business, or its own. online: checked in during the last 2 minutes.
+create or replace function public.relay_list(ws uuid) returns jsonb
+  language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'host', r.host, 'port', r.port, 'region', r.region, 'priority', r.priority,
+      'url', 'wss://' || r.host || case when r.port = 443 then '' else ':' || r.port end || '/link/v1', 'ip', r.public_ip,
+      'pin', case when r.self_signed then r.cert_sha256 end, 'cert_sha256', r.cert_sha256,
+      'online', coalesce(r.last_seen > now() - interval '2 minutes', false), 'last_seen', r.last_seen,
+      'sip_tls_port', coalesce((r.ports ->> 'sip_tls')::int, 5061), 'turn_port', (r.ports ->> 'turn')::int, 'turns_port', (r.ports ->> 'turns')::int,
+      'own', r.workspace_id is not null)
+    order by coalesce(array_position(s.relays, r.id), 1000), r.priority, r.id), '[]'::jsonb)
+  from relay_servers r left join link_relay_settings s on s.workspace_id = ws
+  where (r.workspace_id is null or r.workspace_id = ws) and (s.relays is null or cardinality(s.relays) = 0 or r.id = any (s.relays))
+$$;
+create or replace function public.relay_enabled(ws uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select enabled from link_relay_settings where workspace_id = ws), false)
+    and exists (select 1 from workspaces w where w.id = ws and w.status = 'active')
+$$;
+revoke all on function public.relay_b64u(bytea), public.relay_sign(bytea, jsonb), public.relay_key(text), public.relay_turn_secret(),
+  public.relay_list(uuid), public.relay_enabled(uuid) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------- set up by Riyeser, in the Supabase SQL editor only
+-- After setup.sh on the relay machine:  select relay_register('syd1', 'relay.riyeser.com', 'Sydney', '<the secret it printed>');
+-- A backup relay (setup.sh --backup copies the secret from the main relay):  select relay_register('mel1', 'relay2.riyeser.com', 'Melbourne', '<same secret>', 2);
+-- A relay only for one business (its own machine):  ..., 1, '<workspace id>'.  Port: where Link Office connects (443 by default).
+create or replace function public.relay_register(p_id text, p_host text, p_region text, p_secret text, p_priority int default 1,
+    p_workspace uuid default null, p_port int default 443) returns text
+  language plpgsql security definer set search_path = public as $$
+declare have text;
+begin
+  select secret into have from relay_cluster where id = 1;
+  if have is null then insert into relay_cluster (id, secret) values (1, p_secret);
+  elsif have <> p_secret then
+    raise exception 'This relay''s secret is different from the other relays''. Install it with setup.sh --backup (it copies the secret from the main relay), or remove the old relays first (relay_remove).';
+  end if;
+  insert into relay_servers (id, host, region, priority, workspace_id, port) values (p_id, lower(p_host), coalesce(p_region, ''), coalesce(p_priority, 1), p_workspace, coalesce(p_port, 443))
+  on conflict (id) do update set host = excluded.host, region = excluded.region, priority = excluded.priority, workspace_id = excluded.workspace_id, port = excluded.port;
+  return format('Relay %s (%s, %s) registered. It shows as online within a minute of starting.', p_id, p_host, coalesce(p_region, ''));
+end $$;
+create or replace function public.relay_remove(p_id text) returns void
+  language sql security definer set search_path = public as $$ delete from relay_servers where id = p_id $$;
+revoke all on function public.relay_register(text, text, text, text, int, uuid, int), public.relay_remove(text) from public, anon, authenticated;
+
+-- ---------------------------------------------------------------- the relay calls this every 30 seconds
+-- sig = hex(HMAC-SHA256(secret, '<relay>|<ts>')), within 5 minutes. info: { version, public_ip, ip_how, ports, counts,
+-- cert: { sha256, self_signed }, offices: [{ ws, office, since }], phones: [username] }. Returns the plan.
+create or replace function public.relay_sync(relay text, ts bigint, sig text, info jsonb) returns jsonb
+  language plpgsql security definer set search_path = public, extensions as $$
+declare r relay_servers; sec text; seen text; ip text; plan jsonb;
+begin
+  select * into r from relay_servers where id = relay_sync.relay;
+  select secret into sec from relay_cluster where id = 1;
+  if r.id is null or sec is null or abs(extract(epoch from now()) - ts) > 300
+     or coalesce(sig, '') <> encode(hmac(convert_to(relay_sync.relay || '|' || ts, 'utf8'), convert_to(sec, 'utf8'), 'sha256'), 'hex') then
+    raise exception 'Not a relay of Riyeser''s (check RELAY_ID and the secret, and that the clock is right).';
+  end if;
+  -- the address this call came from, as our own "what is my IP" (no outside service needed)
+  begin seen := trim(split_part(coalesce(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ''), ',', 1)); exception when others then seen := null; end;
+  if seen !~ '^\d{1,3}(\.\d{1,3}){3}$' then seen := null; end if;
+  ip := case when coalesce(info ->> 'public_ip', '') ~ '^\d{1,3}(\.\d{1,3}){3}$' then info ->> 'public_ip' else seen end;
+  update relay_servers set last_seen = now(), public_ip = coalesce(ip, public_ip), ip_how = left(coalesce(info ->> 'ip_how', ip_how), 40),
+      version = left(info ->> 'version', 40), ports = coalesce(case when jsonb_typeof(info -> 'ports') = 'object' and length((info -> 'ports')::text) < 1000 then info -> 'ports' end, ports),
+      counts = case when jsonb_typeof(info -> 'counts') = 'object' and length((info -> 'counts')::text) < 2000 then info -> 'counts' end,
+      cert_sha256 = case when coalesce(info #>> '{cert,sha256}', '') ~ '^([0-9A-F]{2}:){31}[0-9A-F]{2}$' then info #>> '{cert,sha256}' else cert_sha256 end,
+      self_signed = coalesce((info #>> '{cert,self_signed}')::boolean, self_signed)
+    where id = relay_sync.relay;
+  -- which offices are connected to this relay now (for the Phones page): only businesses this relay may serve
+  update link_offices o set relay_seen = jsonb_build_object('relay', relay_sync.relay, 'since', x ->> 'since', 'at', now())
+    from jsonb_array_elements(case when jsonb_typeof(info -> 'offices') = 'array' then info -> 'offices' else '[]' end) x
+    where o.workspace_id::text = x ->> 'ws' and o.office_id = x ->> 'office' and (r.workspace_id is null or r.workspace_id = o.workspace_id);
+  update link_relay_devices d set last_seen = now()
+    from jsonb_array_elements_text(case when jsonb_typeof(info -> 'phones') = 'array' then info -> 'phones' else '[]' end) u
+    where d.username = u and d.removed_at is null;
+  select coalesce(jsonb_agg(jsonb_build_object('ws', w.id, 'enabled', true,
+      'offices', (select coalesce(jsonb_agg(jsonb_build_object('office_id', o.office_id, 'gen', o.relay_gen, 'revoked', o.relay_revoked_at is not null, 'name', coalesce(o.pc_name, ''))), '[]')
+                  from link_offices o where o.workspace_id = w.id),
+      'devices', (select coalesce(jsonb_agg(jsonb_build_object('user', d.username, 'ext', d.extension, 'ha1', d.ha1, 'label', d.label)), '[]')
+                  from link_relay_devices d where d.workspace_id = w.id and d.removed_at is null),
+      -- ring groups with their chosen members only (people's extensions and shared desk phones), as ring_group_plan
+      'groups', (select coalesce(jsonb_agg(jsonb_build_object('ext', g.extension::text, 'members',
+                    (select coalesce(jsonb_agg(coalesce(m.extension::text, rm.phone_ext) order by rm.position, rm.id), '[]') from ring_group_members rm
+                     left join members m on m.user_id = rm.user_id and m.workspace_id = w.id
+                     where rm.group_id = g.id and coalesce(m.extension::text, rm.phone_ext) is not null))), '[]')
+                 from ring_groups g where g.workspace_id = w.id and g.extension is not null))), '[]')
+    into plan
+    from workspaces w join link_relay_settings s on s.workspace_id = w.id and s.enabled
+    where w.status = 'active' and (r.workspace_id is null or r.workspace_id = w.id)
+      and (cardinality(s.relays) = 0 or relay_sync.relay = any (s.relays));
+  return jsonb_build_object('ok', true, 'now', now(), 'your_ip', seen, 'businesses', plan,
+    'relays', (select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'host', x.host, 'region', x.region, 'priority', x.priority, 'ip', x.public_ip,
+        'url', 'wss://' || x.host || case when x.port = 443 then '' else ':' || x.port end || '/relay/v1', 'pin', case when x.self_signed then x.cert_sha256 end)), '[]')
+      from relay_servers x where x.id <> relay_sync.relay));
+end $$;
+revoke all on function public.relay_sync(text, bigint, text, jsonb) from public;
+grant execute on function public.relay_sync(text, bigint, text, jsonb) to anon, authenticated;
+
+-- ---------------------------------------------------------------- Link Office and Riyeser Link call these
+-- Everyone in the business: is the relay on, and which relays (in order) with their addresses and certificates.
+create or replace function public.link_relay_config(ws uuid) returns jsonb
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_member(ws) then raise exception 'You''re not in this business.'; end if;
+  return jsonb_build_object('enabled', relay_enabled(ws), 'relays', relay_list(ws),
+    'available', exists (select 1 from jsonb_array_elements(relay_list(ws)) x where (x ->> 'online')::boolean));
+end $$;
+-- Owners and admins (two-step sign-in): switch the relay on or off for the business, and optionally its own order.
+create or replace function public.link_relay_set(ws uuid, enabled boolean, relays text[] default null) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare want text[] := link_relay_set.relays; turn_on boolean := link_relay_set.enabled;
+begin
+  if not public.is_admin(ws) then raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can switch the relay on or off.'; end if;
+  if want is not null and exists (select 1 from unnest(want) x where not exists (select 1 from relay_servers r where r.id = x and (r.workspace_id is null or r.workspace_id = ws))) then
+    raise exception 'Choose relays from the list.';
+  end if;
+  insert into link_relay_settings as s (workspace_id, enabled, relays, updated_by, updated_at) values (ws, turn_on, coalesce(want, '{}'), auth.uid(), now())
+  on conflict (workspace_id) do update set enabled = turn_on, relays = coalesce(want, s.relays), updated_by = auth.uid(), updated_at = now();
+  insert into audit_log (workspace_id, action, details) values (ws, case when turn_on then 'link.relay_on' else 'link.relay_off' end,
+    jsonb_strip_nulls(jsonb_build_object('relays', want)));
+  return link_relay_config(ws);
+end $$;
+-- Link Office (signed in as someone who may report for it): a pass for each relay, valid 6 hours.
+create or replace function public.link_relay_token(ws uuid, office_id text) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare o link_offices; exp bigint := floor(extract(epoch from now()))::bigint + 6 * 3600; k bytea;
+begin
+  if not public.link_office_caller_ok(ws) then raise exception 'Sign in as the business''s owner or an admin, or link this PC to the business, to connect to the relay.'; end if;
+  select * into o from link_offices x where x.workspace_id = ws and x.office_id = link_relay_token.office_id;
+  if o.office_id is null then raise exception 'This Riyeser Link Office hasn''t been in touch with Riyeser Link yet. It will be within a few minutes.'; end if;
+  if not relay_enabled(ws) then raise exception 'The Riyeser relay is switched off for this business. Switch it on in Riyeser Link: Phones → Sites and the relay.'; end if;
+  if o.relay_revoked_at is not null then raise exception 'This office has been disconnected from the relay. An owner or admin can allow it again in Riyeser Link: Phones → Sites and the relay.'; end if;
+  k := relay_key('office-token');
+  if k is null then raise exception 'The Riyeser relay isn''t set up yet.'; end if;
+  return jsonb_build_object('office', o.office_id, 'gen', o.relay_gen, 'exp', exp, 'relays', relay_list(ws),
+    'tokens', (select coalesce(jsonb_object_agg(x ->> 'id', relay_sign(k, jsonb_build_object('v', 1, 'r', x ->> 'id', 'ws', ws, 'o', o.office_id, 'g', o.relay_gen, 'exp', exp))), '{}')
+               from jsonb_array_elements(relay_list(ws)) x));
+end $$;
+-- Link Office tells Riyeser Link how its relay connection is (for the Phones page): every heartbeat and on change.
+create or replace function public.link_relay_report(ws uuid, office_id text, state jsonb) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not public.link_office_caller_ok(ws) then raise exception 'Not allowed.'; end if;
+  update link_offices o set relay = jsonb_strip_nulls(jsonb_build_object(
+      'state', link_text(link_relay_report.state -> 'state', 20), 'relay', link_text(link_relay_report.state -> 'relay', 40), 'region', link_text(link_relay_report.state -> 'region', 60),
+      'rtt_ms', link_int(link_relay_report.state -> 'rtt_ms'), 'backup', link_bool(link_relay_report.state -> 'backup'), 'udp', link_text(link_relay_report.state -> 'udp', 20),
+      'error', link_text(link_relay_report.state -> 'error', 200), 'sites', link_int(link_relay_report.state -> 'sites'), 'since', link_time(link_relay_report.state -> 'since'), 'at', now()))
+    where o.workspace_id = ws and o.office_id = link_relay_report.office_id;
+end $$;
+-- Owners and admins: disconnect an office from the relay (its passes stop working within 30 seconds), or allow it again.
+create or replace function public.link_relay_revoke(ws uuid, office_id text, allow boolean default false) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin(ws) then raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can do that.'; end if;
+  update link_offices o set relay_gen = o.relay_gen + 1, relay_revoked_at = case when allow then null else now() end
+    where o.workspace_id = ws and o.office_id = link_relay_revoke.office_id;
+  if not found then raise exception 'That Riyeser Link Office isn''t one of this business''s.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, case when allow then 'link.relay_office_allowed' else 'link.relay_office_revoked' end, jsonb_build_object('office_id', office_id));
+end $$;
+-- Everyone in the business: TURN details for browser and app calls (12 hours), from the business's relays only.
+create or replace function public.link_relay_turn(ws uuid) returns jsonb
+  language plpgsql security definer set search_path = public, extensions as $$
+declare sec text := relay_turn_secret(); exp bigint := floor(extract(epoch from now()))::bigint + 12 * 3600; u text; pw text; servers jsonb;
+begin
+  if not public.is_member(ws) then raise exception 'You''re not in this business.'; end if;
+  if sec is null then return jsonb_build_object('ice_servers', '[]'::jsonb, 'ttl', 0); end if;
+  u := exp || ':' || replace(auth.uid()::text, '-', '');
+  pw := encode(hmac(convert_to(u, 'utf8'), convert_to(sec, 'utf8'), 'sha1'), 'base64');
+  select coalesce(jsonb_agg(s), '[]') into servers from (
+    select jsonb_build_object('urls', to_jsonb(array_remove(array[
+        'stun:' || (x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478'),
+        'turn:' || (x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=udp',
+        'turn:' || (x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=tcp',
+        case when x ->> 'ip' is not null then 'turn:' || (x ->> 'ip') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=udp' end,
+        case when x ->> 'turns_port' is not null and x ->> 'pin' is null then 'turns:' || (x ->> 'host') || ':' || (x ->> 'turns_port') || '?transport=tcp' end], null)),
+      'username', u, 'credential', pw) s
+    from jsonb_array_elements(relay_list(ws)) x where (x ->> 'turn_port') is not null) q;
+  return jsonb_build_object('ice_servers', servers, 'ttl', 12 * 3600, 'expires_at', to_timestamp(exp));
+end $$;
+
+-- ---------------------------------------------------------------- phones at home (or at a site with no Link Office)
+-- Owners and admins for anyone; everyone for their own extension. The password is made here, shown once, and only
+-- its HA1 is kept. Returns the details to type in, and a one-time set-up link (15 minutes) for Linphone's QR code.
+create or replace function public.link_relay_device_add(ws uuid, extension text, label text default '') returns jsonb
+  language plpgsql security definer set search_path = public, extensions as $$
+declare u text; pw text; did uuid; first jsonb := relay_list(ws) -> 0; code text;
+begin
+  if not (public.is_admin(ws) or (public.is_member(ws) and exists (select 1 from members m where m.workspace_id = ws and m.user_id = auth.uid() and m.extension::text = link_relay_device_add.extension))) then
+    raise exception 'Only an owner or admin (with two-step sign-in) can set up a phone for someone else. You can set up your own.';
+  end if;
+  if coalesce(extension, '') !~ '^[1-8][0-9]{2}$' or not exists (select 1 from members m where m.workspace_id = ws and m.extension::text = link_relay_device_add.extension) then
+    raise exception 'Choose the extension of someone in the business.';
+  end if;
+  if coalesce(label, '') ~ '[[:cntrl:]<>]' or length(coalesce(label, '')) > 40 then raise exception 'Give the phone a short name (up to 40 letters), like Kitchen or Mobile.'; end if;
+  if not relay_enabled(ws) then raise exception 'Switch the Riyeser relay on first (Phones → Sites and the relay).'; end if;
+  if first is null then raise exception 'The Riyeser relay isn''t set up yet.'; end if;
+  if (select count(*) from link_relay_devices d where d.workspace_id = ws and d.removed_at is null) >= 20 then raise exception 'A business can have up to 20 phones on the relay. Remove one first.'; end if;
+  u := 'r' || substr(translate(encode(gen_random_bytes(12), 'hex'), 'abcdef', 'abcdef'), 1, 10);
+  pw := substr(translate(encode(gen_random_bytes(24), 'base64'), '+/=lIO0', 'xyzkLQ8'), 1, 20);
+  insert into link_relay_devices (workspace_id, extension, label, username, ha1, created_by)
+    values (ws, extension, coalesce(nullif(trim(label), ''), 'Phone at home'), u, md5(u || ':riyeser-relay:' || pw), auth.uid()) returning id into did;
+  code := relay_sign(relay_key('device-prov'), jsonb_build_object('v', 1, 'u', u, 'n', encode(gen_random_bytes(8), 'hex'), 'exp', floor(extract(epoch from now() + interval '15 minutes'))::bigint));
+  insert into audit_log (workspace_id, action, details) values (ws, 'link.relay_phone_added', jsonb_build_object('extension', extension, 'label', coalesce(nullif(trim(label), ''), 'Phone at home')));
+  return jsonb_build_object('id', did, 'extension', extension, 'username', u, 'password', pw, 'domain', first ->> 'host', 'server', first ->> 'host',
+    'port', coalesce((first ->> 'sip_tls_port')::int, 5061), 'transport', 'TLS', 'realm', 'riyeser-relay', 'backup', relay_list(ws) -> 1 ->> 'host',
+    'self_signed', first ->> 'pin' is not null, 'prov_url', 'https://' || (first ->> 'host') || case when (first ->> 'port') = '443' then '' else ':' || (first ->> 'port') end || '/prov/' || code,
+    'prov_expires', now() + interval '15 minutes');
+end $$;
+create or replace function public.link_relay_device_remove(ws uuid, device uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare d link_relay_devices;
+begin
+  select * into d from link_relay_devices x where x.id = device and x.workspace_id = ws and x.removed_at is null;
+  if d.id is null then raise exception 'That phone isn''t on the relay.'; end if;
+  if not (public.is_admin(ws) or exists (select 1 from members m where m.workspace_id = ws and m.user_id = auth.uid() and m.extension::text = d.extension)) then
+    raise exception 'Only an owner or admin can remove someone else''s phone.';
+  end if;
+  update link_relay_devices set removed_at = now() where id = d.id;
+  insert into audit_log (workspace_id, action, details) values (ws, 'link.relay_phone_removed', jsonb_build_object('extension', d.extension, 'label', d.label));
+end $$;
+-- The Phones page: the relays, each office (site) and how it's connected, and the phones on the relay (admins see all,
+-- members their own). Never a password or HA1.
+create or replace function public.link_relay_status(ws uuid) returns jsonb
+  language plpgsql stable security definer set search_path = public as $$
+declare mine text;
+begin
+  if not public.is_member(ws) then raise exception 'You''re not in this business.'; end if;
+  select m.extension::text into mine from members m where m.workspace_id = ws and m.user_id = auth.uid();
+  return jsonb_build_object('enabled', relay_enabled(ws), 'relays', relay_list(ws), 'admin', public.is_admin(ws),
+    'offices', (select coalesce(jsonb_agg(jsonb_build_object('office_id', o.office_id, 'pc_name', o.pc_name, 'version', o.version, 'last_seen', o.last_seen,
+        'relay', o.relay, 'relay_seen', o.relay_seen, 'revoked', o.relay_revoked_at is not null) order by o.pc_name), '[]') from link_offices o where o.workspace_id = ws),
+    'devices', (select coalesce(jsonb_agg(jsonb_build_object('id', d.id, 'extension', d.extension, 'label', d.label, 'username', d.username, 'created_at', d.created_at,
+        'last_seen', d.last_seen, 'online', coalesce(d.last_seen > now() - interval '2 minutes', false)) order by d.extension, d.created_at), '[]')
+      from link_relay_devices d where d.workspace_id = ws and d.removed_at is null and (public.is_admin(ws) or d.extension = mine)));
+end $$;
+revoke all on function public.link_relay_config(uuid), public.link_relay_set(uuid, boolean, text[]), public.link_relay_token(uuid, text),
+  public.link_relay_report(uuid, text, jsonb), public.link_relay_revoke(uuid, text, boolean), public.link_relay_turn(uuid),
+  public.link_relay_device_add(uuid, text, text), public.link_relay_device_remove(uuid, uuid), public.link_relay_status(uuid) from public, anon;
+grant execute on function public.link_relay_config(uuid), public.link_relay_set(uuid, boolean, text[]), public.link_relay_token(uuid, text),
+  public.link_relay_report(uuid, text, jsonb), public.link_relay_revoke(uuid, text, boolean), public.link_relay_turn(uuid),
+  public.link_relay_device_add(uuid, text, text), public.link_relay_device_remove(uuid, uuid), public.link_relay_status(uuid) to authenticated;

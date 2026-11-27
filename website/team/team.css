@@ -1098,3 +1098,10 @@ table.lo-am td.lo-chk { white-space: normal; min-width: 190px; max-width: 290px;
 }
 @media (max-width: 640px) { .lo-found > .muted { flex-basis: 100%; order: 3; } }
 .lo-split.open .lo-tbox .lo-morec { display: none; }   /* the panel is open: the ⋯ button isn't needed */
+/* Sites and the Riyeser relay (Phones page) */
+.lo-relay h3 { margin-top: 0; }
+.lo-relaysw { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.lo-relay .lo-sites small, .lo-relay .lo-rdev small { display: block; }
+.lo-qr { max-width: 220px; margin: 10px 0; } .lo-qr svg { width: 100%; height: auto; background: #fff; border-radius: 8px; }
+.lo-relaydet dl.lo-kv code { word-break: break-all; }
+.lo-rpform label { display: grid; gap: 4px; margin: 10px 0; font-weight: 600; } .lo-rpform select, .lo-rpform input { font-weight: 400; }
