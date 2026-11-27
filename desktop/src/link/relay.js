@@ -5,7 +5,7 @@
 //   blinked, this office's public IP changed, the relay restarted) it reconnects with backoff and announces this
 //   office's connected extensions again.
 // - Failover: the business has an ordered list of relays (main first, then backups), each with its own pass. If the
-//   one in use stops answering (a ping every 5 s; gone after 12 s) or closes, the next one is used straight away.
+//   one in use stops answering (a ping every 3 s; gone after 8 s) or closes, the next one is used straight away.
 //   While on a backup, the main relay is tried every 30 s; once it answers, new calls go through it and the backup
 //   connection is kept ("draining") until the calls in progress have ended.
 // - Calls inside this office never touch the relay, and keep working with no internet.
@@ -16,7 +16,7 @@ const { EventEmitter } = require('events');
 const ws = require('./ws');
 const sip = require('./sip');
 
-const PING_EVERY = 5000; const DEAD_AFTER = 12000;
+const PING_EVERY = 3000; const DEAD_AFTER = 8000;
 const FAILBACK_EVERY = 30000; const DRAIN_MAX = 2 * 3600 * 1000;
 const CONFIG_EVERY = 5 * 60 * 1000;
 const backoff = (n) => Math.min(60000, 1000 * 2 ** Math.min(n, 6)) * (0.75 + Math.random() * 0.5);
@@ -125,7 +125,9 @@ class RelayLink extends EventEmitter {
         let cfg;
         try { cfg = await this.refreshConfig(this.failures > 0); } catch (e) { this.set('no-config', String(e.message || e).slice(0, 200)); await this.sleep(backoff(this.failures++)); continue; }
         if (!cfg || !cfg.enabled) { this.set('off'); await this.sleep(CONFIG_EVERY); this.configAt = 0; continue; }
-        const relays = cfg.relays || [];
+        // the relay that just went away is tried last for a minute (fail-back brings us home once it answers)
+        const avoid = this.avoid && Date.now() - this.avoid.at < 60000 ? this.avoid.id : null;
+        const relays = [...(cfg.relays || [])].sort((a, b) => (a.id === avoid) - (b.id === avoid));
         if (!relays.length) { this.set('no-config', 'No Riyeser relay is set up yet.'); await this.sleep(CONFIG_EVERY); continue; }
         if (this.state !== 'connecting') this.set('connecting', this.error);
         let ok = false; let refused = null;
@@ -175,10 +177,11 @@ class RelayLink extends EventEmitter {
     return c;
   }
   async connectTry(r, token) {
-    const opts = { headers: { Authorization: `Bearer ${token}`, 'X-Riyeser-Site': String(this.siteName() || '').replace(/[^\x20-\x7e]/g, '').slice(0, 60) }, pin: r.pin || undefined, ca: r.ca, timeout: 6000 };
+    const opts = { headers: { Authorization: `Bearer ${token}`, 'X-Riyeser-Site': String(this.siteName() || '').replace(/[^\x20-\x7e]/g, '').slice(0, 60) }, pin: r.pin || undefined, ca: r.ca, timeout: 4000 };
     try { return await this.connectFn(r.url, opts); } catch (e) {
       // the name doesn't resolve (or points at an old address): try the address the relay last reported
-      if (r.ip && (e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN' || e.code === 'ECONNREFUSED' || e.code === 'ETIMEDOUT' || e.code === 'EHOSTUNREACH')) return this.connectFn(r.url, { ...opts, lookupAddress: r.ip });
+      let host = ''; try { host = new URL(r.url).hostname; } catch { /* keep '' */ }
+      if (r.ip && r.ip !== host && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ETIMEDOUT', 'EHOSTUNREACH'].includes(e.code)) return this.connectFn(r.url, { ...opts, lookupAddress: r.ip });
       throw e;
     }
   }
@@ -203,7 +206,7 @@ class RelayLink extends EventEmitter {
   }
   ping(c) {
     if (!c.ws || !c.ws.open) return;
-    if (Date.now() - c.lastPong > this.timing.deadAfter) { this.log('warn', `The relay ${c.relay.region || c.id} stopped answering.`); c.ws.terminate(); return; }
+    if (Date.now() - c.lastPong > this.timing.deadAfter) { this.log('warn', `The relay ${c.relay.region || c.id} stopped answering.`); this.avoid = { id: c.id, at: Date.now() }; c.ws.terminate(); return; }
     c.ws.sendJson({ t: 'ping', id: crypto.randomBytes(4).toString('hex'), at: Date.now() });
   }
   drop(c, why) { clearInterval(c.pinger); clearTimeout(c.drainTimer); if (this.conns.get(c.id) === c) this.conns.delete(c.id); try { c.ws.close(1000, why); } catch { /* gone */ } }
