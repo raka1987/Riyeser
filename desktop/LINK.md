@@ -16,7 +16,7 @@ Riyeser Link Office comes with **Riyeser Link** (the `calls` module of the Riyes
 
 One office PC runs Riyeser Link Office. It:
 
-- keeps everyone's extension (100–899) and the ring groups (branches);
+- keeps everyone's extension (100–899) and the ring groups (each branch's number and any group with its own number, ringing only the people and phones chosen for it);
 - lets the office's desk phones connect to it (SIP registration);
 - connects calls between them.
 
@@ -37,7 +37,7 @@ Riyeser Link Office handles the *signalling*: who's calling, ringing, answering 
 | Dial | What happens |
 |---|---|
 | `101`–`899` | That person's phones ring (desk phone and, later, the Riyeser Link app, all at once). |
-| A branch number, e.g. `100`, `200` | Every phone in that ring group rings at once. The first to answer gets the call; the others stop ringing. |
+| A ring group's number, e.g. a branch's `100` or Sales `300` | Only the people and shared desk phones chosen for that group ring: all at once, in order, or rotating (see *Ring groups with chosen members*). The first to answer gets the call; the others stop ringing. |
 | `*78` / `*79` | Do not disturb on / off for your extension. Callers hear busy. |
 | Anything else | "Not found", with a short reason on the phone's screen. |
 
@@ -241,6 +241,19 @@ These are stored in `link_offices` (new columns, `team-chat.sql`). The Phones pa
 
 `test/link-ui-init.test.js` runs the real window scripts with a backend that works, fails and never answers.
 
+## Ring groups with chosen members (1.2.2)
+
+Calling a branch's number used to ring everyone in the branch. Now each number rings only who the owner or an admin chose for it in Riyeser Link (Management › Phones & calls › Ring groups), and the same groups come down to this PC with the people:
+
+- **Members**: people (their desk phones and Riyeser Link apps ring together, as for their own extension) and shared desk phones (an extension added on this PC that isn't a person in Riyeser Link, such as Reception 150). Someone in the branch but not chosen doesn't ring.
+- **How it rings**: *Ring all at once*; *Ring in order* (each for the chosen seconds, the next when they don't answer or say no); *Rotate* (in order, starting with the next person each call; this PC keeps its own turn).
+- **Skipped**: Do not disturb (`*78`), and anyone on a call (talking or dialling out) on this PC.
+- **If nobody answers** within the group's time: another group's number, one person's extension, or a missed call (at most 3 groups in a row, never the same one twice). Voicemail is coming.
+- **Nobody chosen**: the caller hears *Temporarily Unavailable (nobody chosen for this group)* and it's a missed call, unless the group falls back to another.
+- Groups made by hand here (`addGroup`) take the same settings; the settings file (export/import) keeps them.
+
+`test/link-ringgroups.test.js` checks the planning, the sync (and an older online database), and real calls through the SIP server: only chosen phones ring, in order, rotate, Do not disturb skipped, and each fallback.
+
 ## Security
 
 - **Office network only.** Phones can only connect, and settings can only be fetched, from private addresses. An advanced setting allows others (not recommended).
@@ -259,7 +272,7 @@ These are stored in `link_offices` (new columns, `team-chat.sql`). The Phones pa
 
 ## People and the licence
 
-- **Signed in to Riyeser.** When the PC is signed in (Riyeser Central's sign-in, or Riyeser Link Office's own), Riyeser Link Office brings in the Riyeser Link members with their extensions, the branches (as ring groups) and the business name. It does this every 30 minutes and saves everything on this PC, so the phones keep working with no internet, indefinitely. It never renews Central's sign-in itself, so the two programs can't trip each other up.
+- **Signed in to Riyeser.** When the PC is signed in (Riyeser Central's sign-in, or Riyeser Link Office's own), Riyeser Link Office brings in the Riyeser Link members with their extensions, the ring groups (`ring_groups_list`: each number with only the people and shared desk phones chosen for it, how it rings and what happens if nobody answers; an online database without ring groups yet still sends the branches with everyone in them) and the business name. It does this every 30 minutes and saves everything on this PC, so the phones keep working with no internet, indefinitely. It never renews Central's sign-in itself, so the two programs can't trip each other up.
 - **Not signed in.** People can be added by hand. Hand-added people never get an emergency number (111, 112).
 - **Licence.** Riyeser Link Office works while Riyeser Link is on: in its free trial (the same 90 days as every paid program) or paid. That's read from `%APPDATA%\Riyeser\licence.json`, and it keeps working for 30 days without the internet.
 - **When it isn't on.** Riyeser Link Office still installs and opens, but doesn't start the phone system. The screen says: "Riyeser Link Office comes with **Riyeser Link**. Start your free trial or add Riyeser Link from your Riyeser home page (Add to my plan)." It has a button to open Riyeser Link, and phones show as "waiting for Riyeser Link".
@@ -313,6 +326,7 @@ The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring
   - `dialplan.js`
   - `provision.js` — plug-and-play answers and the settings server.
   - `directory.js` — people, ring groups, passwords and DND.
+  - `ringgroups.js` — who a group's number rings, step by step (all at once, in order, rotating; skipped phones; the fallback).
   - `sync.js` — Riyeser Link.
   - `cloud.js` — the website's Phones page: heartbeat, changes, Show password.
   - `licence.js` — Riyeser Link.

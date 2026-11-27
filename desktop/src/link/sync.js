@@ -31,10 +31,17 @@ function centralOnline({ appData, phoneStore, fetchFn }) {
   return on;
 }
 
-/** Members (with extensions) and branches (with their people) of the company's team. */
+const missingFn = (e) => /PGRST202|Could not find the function|schema cache|404/i.test(String(e && e.message));
+/**
+ * Members (with extensions) and the ring groups: each branch's number and any group's own number, with only the people
+ * and shared desk phones chosen for it. An online database without ring groups yet: branches with everyone in them.
+ */
 async function teamData(online, ws) {
   const w = encodeURIComponent(ws);
   const members = await online.call(`/rest/v1/members?select=user_id,display_name,extension&workspace_id=eq.${w}`);
+  let ringGroups = null;
+  try { ringGroups = await online.call('/rest/v1/rpc/ring_groups_list', { method: 'POST', body: { ws } }); } catch (e) { if (!missingFn(e)) throw e; }
+  if (Array.isArray(ringGroups)) return { members: Array.isArray(members) ? members : [], ringGroups };
   const branches = await online.call(`/rest/v1/branches?select=id,name,extension,branch_members(user_id)&workspace_id=eq.${w}`);
   return { members: Array.isArray(members) ? members : [], branches: Array.isArray(branches) ? branches : [] };
 }

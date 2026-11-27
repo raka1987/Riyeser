@@ -3858,6 +3858,216 @@ do $$ begin
                      where x ->> 'id' = current_setting('test.est_ws')), 'not started: not listed on trial';
   assert exists (select 1 from json_array_elements(public.hq_licences() -> 'modules') x where x ->> 'module' = 'estimate'), 'Estimate has a row';
 end $$;
+-- ===== Ring groups with chosen members: only the chosen ring; skipped statuses; order and rotate; what happens if
+-- nobody answers; numbers don't clash; the upgrade keeps the branch's people and asks once; other businesses can't see.
+reset role;
+insert into auth.users (id, email) values ('a3a3a3a3-1111-4000-8000-000000000001', 'ana@rg.test'), ('a3a3a3a3-1111-4000-8000-000000000002', 'sam@rg.test'),
+  ('a3a3a3a3-1111-4000-8000-000000000003', 'tom@rg.test'), ('a3a3a3a3-1111-4000-8000-000000000004', 'una@rg.test'),
+  ('a3a3a3a3-1111-4000-8000-000000000005', 'vic@rg.test'), ('a3a3a3a3-1111-4000-8000-000000000009', 'owner@rg2.test');
+set role authenticated;
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000001');
+select public.create_team('Ring Test Co', 'Ana') as rg_ws \gset
+select set_config('test.rg_ws', :'rg_ws', false);
+select invite_code as rg_code from public.workspaces where id = :'rg_ws' \gset
+select code as rg_hcode from public.branches where workspace_id = :'rg_ws' and name = 'Head office' \gset
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000002'); select public.join_team(:'rg_hcode', 'Sam');
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000003'); select public.join_team(:'rg_hcode', 'Tom');
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000004'); select public.join_team(:'rg_hcode', 'Una');
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000005'); select public.join_team(:'rg_code', 'Vic');
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; h uuid; g json; begin
+  select id into h from public.ring_groups where workspace_id = ws and branch_id is not null;
+  assert h is not null, 'Head office has its own ring group';
+  assert (select count(*) from public.branch_members bm join public.branches b on b.id = bm.branch_id where b.workspace_id = ws) = 4, 'four people in Head office';
+  assert (select count(*) from public.ring_group_members where group_id = h) = 0, 'a new branch''s number has nobody chosen (not everyone in the branch)';
+  assert not (select needs_review from public.ring_groups where id = h), 'a new branch isn''t "check these" (nothing was there before)';
+  g := public.ring_group_plan(ws, h);
+  assert json_array_length(g -> 'ring') = 0, 'nobody chosen: nobody rings';
+  assert g ->> 'fallback' = 'missed', 'and it ends as a missed call';
+  perform set_config('test.rg_h', h::text, false);
+end $$;
+
+-- the upgrade: a branch from before ring groups gets a group with the people who were in it, marked "check these"
+reset role;
+select public.ring_groups_upgrade() as rg_none \gset
+do $$ begin assert current_setting('test.rg_h') is not null; end $$;
+delete from public.ring_groups where id = current_setting('test.rg_h')::uuid;
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; h uuid; begin
+  assert public.ring_groups_upgrade() = 4, 'the upgrade puts the 4 people in the branch into its group';
+  assert public.ring_groups_upgrade() = 0, 'running it again changes nothing';
+  select id into h from public.ring_groups where workspace_id = ws and branch_id is not null;
+  assert (select needs_review from public.ring_groups where id = h), 'upgraded groups ask "Choose who answers each branch number"';
+  assert (select extension from public.ring_groups where id = h) = 100, 'the branch''s number';
+  perform set_config('test.rg_h', h::text, false);
+end $$;
+set role authenticated;
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; h uuid := current_setting('test.rg_h')::uuid; g json; begin
+  g := public.ring_group_plan(ws, h);
+  assert json_array_length(g -> 'ring') = 3, 'after the upgrade everyone else in the branch still rings (not the caller)';
+  assert public.ring_groups_confirm(ws) = 1, 'These are right: confirmed';
+  assert not (select needs_review from public.ring_groups where id = h), 'the notice goes away';
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'ring_group.confirm'), 'in the change history';
+end $$;
+
+-- choose who answers: only Sam and Una (Tom is in the branch but not chosen), in order
+select set_config('test.u_sam', 'a3a3a3a3-1111-4000-8000-000000000002', false), set_config('test.u_tom', 'a3a3a3a3-1111-4000-8000-000000000003', false),
+  set_config('test.u_una', 'a3a3a3a3-1111-4000-8000-000000000004', false), set_config('test.u_vic', 'a3a3a3a3-1111-4000-8000-000000000005', false);
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; h uuid := current_setting('test.rg_h')::uuid; g json;
+  sam uuid := current_setting('test.u_sam'); tom uuid := current_setting('test.u_tom'); una uuid := current_setting('test.u_una'); begin
+  perform public.ring_group_save(ws, h, jsonb_build_object('strategy', 'order', 'ring_seconds', 10, 'timeout_seconds', 40),
+    jsonb_build_array(jsonb_build_object('user_id', una), jsonb_build_object('user_id', sam), jsonb_build_object('phone_ext', '150', 'phone_name', 'Reception')));
+  g := public.ring_group_plan(ws, h);
+  assert (g -> 'ring') ->> 0 = una::text and (g -> 'ring') ->> 1 = sam::text and json_array_length(g -> 'ring') = 2, 'only the chosen, in the chosen order';
+  assert g ->> 'strategy' = 'order' and (g ->> 'ring_seconds')::int = 10 and (g ->> 'timeout_seconds')::int = 40, 'ring in order, 10 s each, 40 s in all';
+  assert (g -> 'phones') -> 0 ->> 'extension' = '150', 'the shared desk phone (Reception) is in it for Riyeser Link Office';
+  assert not exists (select 1 from json_array_elements_text(g -> 'ring') x where x = tom::text), 'Tom (in the branch, not chosen) doesn''t ring';
+  assert (select name from public.branches where id = (select branch_id from public.ring_groups where id = h)) = 'Head office', 'the branch keeps its people';
+  assert (select count(*) from public.branch_members bm where bm.branch_id = (select branch_id from public.ring_groups where id = h)) = 4, '…all four of them';
+  assert json_array_length((select (x -> 'members') from json_array_elements(public.ring_groups_list(ws)) x where x ->> 'id' = h::text)) = 3, 'the list shows 3 members';
+  -- a desk phone can't be a person's number or a group's number
+  begin perform public.ring_group_save(ws, h, '{}', jsonb_build_array(jsonb_build_object('phone_ext', (select extension::text from public.members where workspace_id = ws and user_id = tom))));
+    raise exception 'a person''s number as a desk phone'; exception when raise_exception then if sqlerrm not like '%belongs to a person%' then raise; end if; end;
+  begin perform public.ring_group_save(ws, h, '{}', jsonb_build_array(jsonb_build_object('user_id', 'a3a3a3a3-1111-4000-8000-000000000009')));
+    raise exception 'someone from outside'; exception when raise_exception then if sqlerrm not like '%from your business%' then raise; end if; end;
+  begin perform public.ring_group_save(ws, h, '{"fallback":"voicemail"}', '[]'); raise exception 'voicemail allowed';
+    exception when raise_exception then if sqlerrm not like '%Voicemail is coming%' then raise; end if; end;
+end $$;
+
+-- the call itself: a group ring reaches only the chosen; a direct call to Tom still works
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; h uuid := current_setting('test.rg_h')::uuid; c uuid := gen_random_uuid(); begin
+  insert into public.call_signals (workspace_id, call_id, to_user, kind, payload) values (ws, c, current_setting('test.u_sam')::uuid, 'ring', jsonb_build_object('group', h));
+  begin
+    insert into public.call_signals (workspace_id, call_id, to_user, kind, payload) values (ws, c, current_setting('test.u_tom')::uuid, 'ring', jsonb_build_object('group', h));
+    raise exception 'Tom rang for a group he isn''t chosen for';
+  exception when insufficient_privilege then null; end;
+  begin
+    insert into public.call_signals (workspace_id, call_id, to_user, kind, payload) values (ws, c, current_setting('test.u_tom')::uuid, 'ring', jsonb_build_object('group', 'not-a-group'));
+    raise exception 'a made-up group rang';
+  exception when insufficient_privilege then null; end;
+  insert into public.call_signals (workspace_id, call_id, to_user, kind, payload) values (ws, gen_random_uuid(), current_setting('test.u_tom')::uuid, 'ring', '{"from_name":"Ana"}');
+  insert into public.call_signals (workspace_id, call_id, to_user, kind) values (ws, c, current_setting('test.u_tom')::uuid, 'taken');   -- other signals aren't limited
+end $$;
+
+-- Do not disturb, Busy, At lunch, Unavailable and On a call are skipped
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000004');
+select public.link_status_set(:'rg_ws', 'dnd', 'dnd', null, false, null);
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000002');
+select public.link_status_set(:'rg_ws', 'available', null, null, true, null);
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; h uuid := current_setting('test.rg_h')::uuid; g json; begin
+  g := public.ring_group_plan(ws, h);
+  assert json_array_length(g -> 'ring') = 0, 'Una on Do not disturb and Sam on a call: nobody rings';
+  assert exists (select 1 from json_array_elements(g -> 'skipped') x where x ->> 'user_id' = current_setting('test.u_una') and x ->> 'why' = 'dnd'), 'Una skipped: Do not disturb';
+  assert exists (select 1 from json_array_elements(g -> 'skipped') x where x ->> 'user_id' = current_setting('test.u_sam') and x ->> 'why' = 'on_call'), 'Sam skipped: on a call';
+  begin
+    insert into public.call_signals (workspace_id, call_id, to_user, kind, payload) values (ws, gen_random_uuid(), current_setting('test.u_una')::uuid, 'ring', jsonb_build_object('group', h));
+    raise exception 'Do not disturb rang for a group';
+  exception when insufficient_privilege then null; end;
+end $$;
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000004'); select public.link_status_set(:'rg_ws', 'lunch', 'lunch', null, false, null);
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000002'); select public.link_status_set(:'rg_ws', 'unavailable', 'unavailable', null, false, null);
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000001');
+do $$ declare g json := public.ring_group_plan(current_setting('test.rg_ws')::uuid, current_setting('test.rg_h')::uuid); begin
+  assert (select string_agg(x ->> 'why', ',' order by x ->> 'why') from json_array_elements(g -> 'skipped') x) = 'lunch,unavailable', 'At lunch and Unavailable skipped';
+end $$;
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000004'); select public.link_status_set(:'rg_ws', 'busy', 'busy', null, false, now() - interval '30 seconds');
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000002'); select public.link_status_set(:'rg_ws', 'available', null, null, false, null);
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000001');
+do $$ declare g json := public.ring_group_plan(current_setting('test.rg_ws')::uuid, current_setting('test.rg_h')::uuid); begin
+  assert json_array_length(g -> 'ring') = 2, 'Busy whose "until" has passed and Available both ring again';
+end $$;
+
+-- Rotate: the next person goes first each time
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; h uuid := current_setting('test.rg_h')::uuid; firsts text := '';
+  sam uuid := current_setting('test.u_sam'); tom uuid := current_setting('test.u_tom'); una uuid := current_setting('test.u_una'); begin
+  perform public.ring_group_save(ws, h, '{"strategy":"rotate"}', jsonb_build_array(jsonb_build_object('user_id', sam), jsonb_build_object('user_id', tom), jsonb_build_object('user_id', una)));
+  for i in 1..4 loop firsts := firsts || ((public.ring_group_plan(ws, h) -> 'ring') ->> 0) || ' '; end loop;
+  assert firsts = format('%s %s %s %s ', sam, tom, una, sam), 'rotate: Sam, Tom, Una, then Sam again (' || firsts || ')';
+  assert json_array_length(public.ring_group_plan(ws, h) -> 'ring') = 3, 'rotate still rings everyone chosen, just starting further on';
+end $$;
+
+-- extra groups with their own number; numbers never clash
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; h uuid := current_setting('test.rg_h')::uuid; s uuid; r uuid; g json; tomx int; b uuid; begin
+  select extension into tomx from public.members where workspace_id = ws and user_id = current_setting('test.u_tom')::uuid;
+  begin perform public.ring_group_save(ws, null, jsonb_build_object('name', 'Sales', 'extension', tomx::text), '[]'); raise exception 'took Tom''s number';
+    exception when raise_exception then if sqlerrm not like '%already used%' then raise; end if; end;
+  begin perform public.ring_group_save(ws, null, '{"name":"Sales","extension":"100"}', '[]'); raise exception 'took the branch''s number';
+    exception when raise_exception then if sqlerrm not like '%already used%' then raise; end if; end;
+  begin perform public.ring_group_save(ws, null, '{"name":"Sales","extension":"2000"}', '[]'); raise exception 'four digits';
+    exception when raise_exception then if sqlerrm not like '%3 digits%' then raise; end if; end;
+  begin perform public.ring_group_save(ws, null, '{"name":"","extension":"300"}', '[]'); raise exception 'no name';
+    exception when raise_exception then if sqlerrm not like '%name%' then raise; end if; end;
+  s := public.ring_group_save(ws, null, '{"name":"Sales","extension":"300"}', jsonb_build_array(jsonb_build_object('user_id', current_setting('test.u_vic'))));
+  begin perform public.ring_group_save(ws, null, '{"name":"Reception","extension":"300"}', '[]'); raise exception 'two groups on 300';
+    exception when raise_exception then if sqlerrm not like '%already used%' then raise; end if; end;
+  r := public.ring_group_save(ws, null, '{"name":"Reception","extension":"301"}', '[]');
+  begin perform public.set_extension(ws, current_setting('test.u_tom')::uuid, 300); raise exception 'a person on a group''s number';
+    exception when raise_exception then if sqlerrm not like '%already used%' then raise; end if; end;
+  assert public.ring_group_save(ws, s, '{"name":"Sales team","extension":"300"}', '[]') = s, 'a group keeps its own number when saved again';
+  b := public.create_branch(ws, 'Shop 2');
+  assert (select extension from public.branches where id = b) = 200, 'a new branch gets 200';
+  b := public.create_branch(ws, 'Shop 3');
+  assert (select extension from public.branches where id = b) = 400, 'the next branch skips 300 (Sales)';
+  assert (select count(*) from public.ring_group_members rm join public.ring_groups g2 on g2.id = rm.group_id where g2.branch_id = b) = 0, 'new branch: nobody chosen';
+  -- if nobody answers: another group, or one person; never itself
+  perform public.ring_group_save(ws, h, jsonb_build_object('strategy', 'all', 'fallback', 'group', 'fallback_group', s), '[]');
+  g := public.ring_group_plan(ws, h);
+  assert g ->> 'fallback' = 'group' and g ->> 'fallback_group' = s::text, 'nobody chosen at Head office: on to Sales';
+  begin perform public.ring_group_save(ws, h, jsonb_build_object('fallback', 'group', 'fallback_group', h), '[]'); raise exception 'falls back to itself';
+    exception when raise_exception then if sqlerrm not like '%another group%' then raise; end if; end;
+  perform public.ring_group_save(ws, r, jsonb_build_object('name', 'Reception', 'extension', '301', 'fallback', 'person', 'fallback_user', current_setting('test.u_tom')), '[]');
+  assert public.link_group_rings(ws, r::text, current_setting('test.u_tom')::uuid), 'the person it falls back to can be rung for the group';
+  assert not public.link_group_rings(ws, r::text, current_setting('test.u_una')::uuid), 'nobody else can';
+  -- a branch's own group can't be removed; an extra one can, and whatever fell back to it ends as missed
+  begin perform public.ring_group_delete(ws, h); raise exception 'removed a branch number'; exception when raise_exception then if sqlerrm not like '%branch%' then raise; end if; end;
+  perform public.ring_group_delete(ws, s);
+  assert (select fallback from public.ring_groups where id = h) = 'missed', 'falling back to a removed group: missed';
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'ring_group.delete'), 'removing is in the history';
+  perform set_config('test.rg_r', r::text, false);
+end $$;
+
+-- only owners and admins with two-step sign-in change groups; nobody writes the tables directly
+select pg_temp.as_user_password_only('a3a3a3a3-1111-4000-8000-000000000001');
+do $$ begin perform public.ring_group_save(current_setting('test.rg_ws')::uuid, null, '{"name":"X","extension":"500"}', '[]'); raise exception 'aal1 admin saved';
+  exception when raise_exception then if sqlerrm not like '%two-step%' then raise; end if; end $$;
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000003');
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; begin
+  begin perform public.ring_group_save(ws, current_setting('test.rg_h')::uuid, '{}', '[]'); raise exception 'staff saved';
+    exception when raise_exception then if sqlerrm not like '%owner or an admin%' then raise; end if; end;
+  begin perform public.ring_groups_confirm(ws); raise exception 'staff confirmed'; exception when raise_exception then if sqlerrm not like '%owner or an admin%' then raise; end if; end;
+  begin insert into public.ring_group_members (group_id, user_id) values (current_setting('test.rg_h')::uuid, auth.uid()); raise exception 'staff added themselves';
+    exception when insufficient_privilege then null; end;
+  begin update public.ring_groups set strategy = 'all' where workspace_id = ws; raise exception 'staff changed a group';
+    exception when insufficient_privilege then null; end;
+  assert json_array_length(public.ring_groups_list(ws)) = 4, 'staff can see the groups (to call them)';
+  assert (public.ring_group_plan(ws, current_setting('test.rg_h')::uuid) ->> 'name') = 'Head office', 'and call them';
+end $$;
+
+-- another business sees and changes nothing
+select pg_temp.as_user('a3a3a3a3-1111-4000-8000-000000000009');
+select public.create_team('Other Rings Ltd', 'Olga') as rg_ws2 \gset
+select set_config('test.rg_ws2', :'rg_ws2', false);
+do $$ declare ws uuid := current_setting('test.rg_ws')::uuid; begin
+  assert json_array_length(public.ring_groups_list(ws)) = 0, 'another business lists none of them';
+  assert (select count(*) from public.ring_groups) = 1, 'and reads only its own (Head office)';
+  assert (select count(*) from public.ring_group_members) = 0, 'and none of the members';
+  begin perform public.ring_group_plan(ws, current_setting('test.rg_h')::uuid); raise exception 'planned another business''s call';
+    exception when raise_exception then if sqlerrm not like '%not in that company%' then raise; end if; end;
+  begin perform public.ring_group_save(ws, current_setting('test.rg_h')::uuid, '{}', '[]'); raise exception 'changed another business';
+    exception when raise_exception then if sqlerrm not like '%owner or an admin%' then raise; end if; end;
+  begin perform public.ring_group_plan(current_setting('test.rg_ws2')::uuid, current_setting('test.rg_h')::uuid); raise exception 'used A''s group from B';
+    exception when raise_exception then if sqlerrm not like '%isn''t there%' then raise; end if; end;
+end $$;
+
+-- someone who leaves the business leaves its groups
+reset role;
+delete from public.members where workspace_id = current_setting('test.rg_ws')::uuid and user_id = current_setting('test.u_tom')::uuid;
+do $$ begin
+  assert not exists (select 1 from public.ring_group_members where user_id = current_setting('test.u_tom')::uuid), 'Tom is out of every group';
+  assert (select fallback from public.ring_groups where id = current_setting('test.rg_r')::uuid) = 'missed', 'a group that fell back to Tom ends as missed';
+end $$;
+set role authenticated;
 reset role;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';

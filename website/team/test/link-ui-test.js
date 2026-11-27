@@ -164,7 +164,7 @@ async function contrast(pg, sel) {
     await pg.click('#tbcalls'); await pg.waitForSelector('#vdn');
     for (const k of ['2', '0', '2']) await pg.click(`[data-vdk="${k}"]`);
     assert.match(await text(pg, '#vdw'), /^Alex Nguyen · Away/);
-    await pg.fill('#vdn', '200'); await pg.dispatchEvent('#vdn', 'input'); assert.strictEqual(await text(pg, '#vdw'), 'Lautoka branch (everyone)');
+    await pg.fill('#vdn', '200'); await pg.dispatchEvent('#vdn', 'input'); assert.strictEqual(await text(pg, '#vdw'), 'Lautoka branch · Jordan, Alex · ring all at once');
     await pg.fill('#vdn', '999'); await pg.dispatchEvent('#vdn', 'input'); assert.strictEqual(await text(pg, '#vdw'), 'No one on that number');
     assert.ok(await pg.$('#vdcall.lk-green') && await pg.$('#vdvid'), 'green call and video buttons');
     await pg.click('#vclose');
@@ -232,7 +232,7 @@ async function contrast(pg, sel) {
     await pg.screenshot({ path: out + '/link-manage-locked.png' });
     await pg.fill('#mgcode', '000000'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgerr:not([hidden])'); assert.match(await text(pg, '#mgerr'), /isn't right/);
     await pg.fill('#mgcode', '123456'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgopen');
-    assert.deepStrictEqual(await pg.$$eval('.lk-tile', (x) => x.map((y) => y.id)), ['coppl', 'coreq', 'coinfo', 'mgbr', 'cophones', 'coconn', 'cosec', 'cohist', 'coplan']);
+    assert.deepStrictEqual(await pg.$$eval('.lk-tile', (x) => x.map((y) => y.id)), ['coppl', 'coreq', 'coinfo', 'mgbr', 'mgrg', 'cophones', 'coconn', 'cosec', 'cohist', 'coplan']);
     assert.match(await text(pg, '#coreq'), /1 waiting/);
     await pg.screenshot({ path: out + '/link-manage-open.png' });
     await pg.click('#coppl'); await pg.waitForSelector('details.brm');

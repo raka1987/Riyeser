@@ -267,6 +267,12 @@
         if (remove.length) ok(await sb.from('branch_members').delete().eq('branch_id', branch).in('user_id', remove));
       },
       async setExtension(ws, person, ext) { ok(await sb.rpc('set_extension', { ws, person, ext })); },
+      // Ring groups (who answers each branch number and each group's own number). null on a database without them yet.
+      async ringGroups(ws) { return soft(sb.rpc('ring_groups_list', { ws })); },
+      async ringGroupSave(ws, grp, info, people) { return ok(await sb.rpc('ring_group_save', { ws, grp: grp || null, info, people })); },
+      async ringGroupDelete(ws, grp) { ok(await sb.rpc('ring_group_delete', { ws, grp })); },
+      async ringGroupsConfirm(ws) { return ok(await sb.rpc('ring_groups_confirm', { ws })); },
+      async ringPlan(ws, grp) { return soft(sb.rpc('ring_group_plan', { ws, grp })); },
       async signal(ws, call, to, kind, payload) {
         ok(await sb.from('call_signals').insert({ workspace_id: ws, call_id: call, to_user: to, kind, payload: payload || null }));
       },
@@ -348,6 +354,16 @@
       { id: 'd2', user_id: 'u-jordan', device_name: 'Lautoka front desk', platform: 'Windows', app_version: '1.7.0', last_seen: new Date(Date.now() - 3 * 3600000).toISOString() }];
     const brs = [{ id: 'b-head', name: 'Head office', code: 'HEA-3071', extension: 100, people: ['u-me', 'u-sam', 'u-ana'] },
       { id: 'b-lau', name: 'Lautoka branch', code: 'LAU-4821', extension: 200, people: ['u-jordan', 'u-alex'] }];
+    // Ring groups: each branch's number with the people who were in the branch (an upgraded business: "check these"),
+    // and a branch added in the demo starts with nobody chosen.
+    const rgs = brs.map((b) => ({ id: 'g-' + b.id.slice(2), branch_id: b.id, name: b.name, extension: b.extension, strategy: 'all', ring_seconds: 15, timeout_seconds: 30,
+      fallback: 'missed', fallback_group: null, fallback_user: null, needs_review: true, next: 0, members: b.people.map((user_id) => ({ user_id })) }));
+    const syncRgs = () => { for (const b of brs) { const g = rgs.find((x) => x.branch_id === b.id);
+      if (g) Object.assign(g, { name: b.name, extension: b.extension });
+      else rgs.push({ id: 'g-' + b.id.slice(2), branch_id: b.id, name: b.name, extension: b.extension, strategy: 'all', ring_seconds: 15, timeout_seconds: 30, fallback: 'missed', fallback_group: null, fallback_user: null, needs_review: false, next: 0, members: [] }); } };
+    const rgJson = (g) => ({ id: g.id, branch_id: g.branch_id, name: g.name, extension: g.extension, strategy: g.strategy, ring_seconds: g.ring_seconds, timeout_seconds: g.timeout_seconds,
+      fallback: g.fallback, fallback_group: g.fallback_group, fallback_user: g.fallback_user, needs_review: g.needs_review,
+      members: g.members.map((x) => { const q = x.user_id && ppl.find((y) => y[0] === x.user_id); return x.user_id ? (q ? { user_id: x.user_id, name: q[1], extension: q[3] == null ? null : String(q[3]) } : null) : { phone_ext: x.phone_ext, name: x.phone_name || 'Desk phone ' + x.phone_ext, extension: x.phone_ext }; }).filter(Boolean) });
     // Calls in the demo travel between browser tabs (open the demo again with ?demo&as=u-sam to be Sam).
     const bus = 'BroadcastChannel' in window ? new BroadcastChannel('riyeser-team-demo-calls') : null;
     const online = new Set([AS]); let onSig = null; let onPres = null;
@@ -422,6 +438,7 @@
         { mac: '000b82c1d2e3', vendor: 'Grandstream', model: 'GRP2601P', extension: '201', assigned: true, registered: false, last_registered: ago(300), ip: '192.168.1.41', name: 'Workshop', location: 'Lautoka branch', provisioned_at: ago(2000) },
         { mac: '0015657d8e9f', vendor: 'Yealink', model: 'T31P', extension: null, assigned: false, registered: false, last_registered: null, ip: '192.168.1.44' }],
       extensions: [{ extension: '100', name: 'Head office', type: 'group', members: 2 }, { extension: '101', name: 'You', type: 'person', registered: 1, desk_phones: 1, app_users: 0, dnd: false },
+        { extension: '150', name: 'Reception', type: 'person', registered: 1, desk_phones: 1, app_users: 0, dnd: false },
         { extension: '102', name: 'Sam Taylor', type: 'person', registered: 2, desk_phones: 1, app_users: 1, dnd: false }, { extension: '200', name: 'Lautoka branch', type: 'group', members: 2 },
         { extension: '201', name: 'Jordan Lee', type: 'person', registered: 0, desk_phones: 1, app_users: 0, dnd: false }, { extension: '202', name: 'Alex Nguyen', type: 'person', registered: 0, desk_phones: 0, app_users: 0, dnd: true }] };
     const loCmds = {}; const loPw = {}; let loN = 0; let loSupport = null;
@@ -548,8 +565,38 @@
       async newBranchCode(b) { const x = brs.find((y) => y.id === b); x.code = x.code.slice(0, 4) + Math.floor(1000 + Math.random() * 9000); return x.code; },
       async setBranchPeople(b, add, remove) { const x = brs.find((y) => y.id === b); x.people = [...new Set([...x.people, ...add])].filter((u) => !remove.includes(u)); },
       async setExtension(_w, person, ext) {
-        if (ppl.some((q) => q[3] === ext && q[0] !== person) || brs.some((b) => b.extension === ext)) throw new Error(`Extension ${ext} is already used`);
+        if (ppl.some((q) => q[3] === ext && q[0] !== person) || brs.some((b) => b.extension === ext) || rgs.some((g) => g.extension === ext)) throw new Error(`Extension ${ext} is already used`);
         ppl.find((q) => q[0] === person)[3] = ext; },
+      // ---- ring groups in the demo: like an upgraded business (each branch's people, "check these" once)
+      async ringGroups() { syncRgs(); return JSON.parse(JSON.stringify(rgs.map(rgJson))); },
+      async ringGroupSave(_w, grp, info, people) {
+        if (!mfa.on || !['u-me', 'u-sam'].includes(AS)) throw new Error('Only the owner or an admin (with two-step sign-in) can change ring groups.');
+        syncRgs(); let g = rgs.find((x) => x.id === grp);
+        if (grp && !g) throw new Error('That ring group isn\'t there any more.');
+        const fb = info.fallback || 'missed';
+        if (fb === 'voicemail') throw new Error('Voicemail is coming with Riyeser Link Office voicemail. Choose another way for now.');
+        if (fb === 'group' && (!info.fallback_group || info.fallback_group === grp)) throw new Error('Choose another group to try.');
+        if (fb === 'person' && !info.fallback_user) throw new Error('Choose the person to ring.');
+        if (!g || !g.branch_id) {
+          const nm = String(info.name || '').trim(); const ext = String(info.extension || '');
+          if (!nm || nm.length > 60) throw new Error('Give the group a name (up to 60 letters), e.g. Sales.');
+          if (!/^[0-9]{3}$/.test(ext) || +ext < 100 || +ext > 899) throw new Error('Group numbers are 3 digits, 100 to 899, so desk phones can dial them too.');
+          if (ppl.some((q) => q[3] === +ext) || brs.some((b) => b.extension === +ext) || rgs.some((x) => x.extension === +ext && x !== g)) throw new Error(`${ext} is already used by a person, a branch or another group. Choose another number.`);
+          if (!g) { g = { id: 'g-' + Date.now(), branch_id: null, next: 0 }; rgs.push(g); }
+          Object.assign(g, { name: nm, extension: +ext });
+        }
+        Object.assign(g, { strategy: info.strategy || 'all', ring_seconds: +info.ring_seconds || 15, timeout_seconds: +info.timeout_seconds || 30, fallback: fb,
+          fallback_group: fb === 'group' ? info.fallback_group : null, fallback_user: fb === 'person' ? info.fallback_user : null, needs_review: false,
+          members: (people || []).map((x) => (x.user_id ? { user_id: x.user_id } : { phone_ext: String(x.phone_ext), phone_name: x.phone_name || '' })) });
+        dlog(grp ? 'ring_group.update' : 'ring_group.insert', { name: g.name, extension: g.extension, strategy: g.strategy, members: g.members.length });
+        return g.id; },
+      async ringGroupDelete(_w, grp) { const g = rgs.find((x) => x.id === grp); if (!g) return; if (g.branch_id) throw new Error('This is a branch\'s number. It goes when the branch goes; choose who answers it instead.');
+        rgs.forEach((x) => { if (x.fallback_group === grp) { x.fallback = 'missed'; x.fallback_group = null; } }); rgs.splice(rgs.indexOf(g), 1); },
+      async ringGroupsConfirm() { let k = 0; rgs.forEach((g) => { if (g.needs_review) { g.needs_review = false; k++; } }); return k; },
+      async ringPlan(_w, grp) { syncRgs(); const g = rgs.find((x) => x.id === grp); if (!g) throw new Error('That ring group isn\'t there any more.');
+        let ids = g.members.filter((x) => x.user_id && x.user_id !== AS && ppl.some((q) => q[0] === x.user_id)).map((x) => x.user_id);
+        if (g.strategy === 'rotate' && ids.length) { const k = g.next % ids.length; ids = [...ids.slice(k), ...ids.slice(0, k)]; g.next = (k + 1) % ids.length; }
+        return { ...rgJson(g), ring: ids, skipped: [], phones: g.members.filter((x) => x.phone_ext).map((x) => ({ extension: x.phone_ext, name: x.phone_name })) }; },
       // ---- the Link workspace in the demo
       async savePrefs(p) { me.user_metadata = { ...(me.user_metadata || {}), riyeser_prefs: { ...((me.user_metadata || {}).riyeser_prefs || {}), ...p } }; return me; },
       async presence() { return Object.values(pres).filter((x) => ppl.some((q) => q[0] === x.user_id)).map((x) => ({ ...x, manual: x.user_id === AS ? x.manual : null })); },
@@ -574,6 +621,9 @@
       async signal(_w, call, to, kind, payload) {
         const q = pres[to];   // like the database: no ringing someone on Busy / Do not disturb, At lunch or Unavailable
         if (kind === 'ring' && q && ['dnd', 'busy', 'lunch', 'unavailable'].includes(q.manual || q.status) && !(q.until_at && Date.parse(q.until_at) <= Date.now()))
+          throw new Error('new row violates row-level security policy for table "call_signals"');
+        const rg = kind === 'ring' && payload && payload.group ? rgs.find((g) => g.id === payload.group) : null;   // a group call: only who's chosen for it
+        if (kind === 'ring' && payload && payload.group && !(rg && (rg.members.some((x) => x.user_id === to) || (rg.fallback === 'person' && rg.fallback_user === to))))
           throw new Error('new row violates row-level security policy for table "call_signals"');
         const m = { call_id: call, from_user: AS, to_user: to, to, kind, payload: payload || null, created_at: new Date().toISOString() };
         if (bus && online.has(to)) bus.postMessage(m);
@@ -1062,6 +1112,8 @@
     'devices.delete': 'unlinked a PC', 'join_request.approved': 'approved a join request', 'join_request.declined': 'declined a join request',
     'channel.rename': 'renamed a channel', 'channel.archive': 'archived a channel', 'channel.unarchive': 'brought back a channel',
     'channel.topic': 'changed a channel\'s topic', 'channel.members': 'changed who\'s in a private channel',
+    'ring_group.insert': 'made a ring group', 'ring_group.update': 'changed who answers a ring group', 'ring_group.delete': 'deleted a ring group',
+    'ring_group.confirm': 'kept who answers the branch numbers',
     'link.assign_phone': 'gave a desk phone to someone', 'link.add_phone': 'added a desk phone', 'link.unassign_phone': 'took a desk phone off someone',
     'link.new_password': 'made a new phone password', 'link.set_dnd': 'changed Do not disturb', 'link.reveal_password': 'looked at a phone password (Set up a phone by hand)',
     'link.reveal_own': 'looked at their own phone password (My phone)', 'link.set_dnd_own': 'changed their own Do not disturb', 'link.name_phone': 'named or moved a desk phone',
@@ -1107,7 +1159,7 @@
     return Array.from({ length: Math.max(0, Number(n) || 0) }, () => ({ waiting: true }));
   }
   async function refreshCompany() {
-    [S.people, S.branches, S.teams] = await Promise.all([api.people(S.team.id), api.branches(S.team.id), api.teams(S.user.id)]);
+    [S.people, S.branches, S.teams, S.groups] = await Promise.all([api.people(S.team.id), api.branches(S.team.id), api.teams(S.user.id), api.ringGroups(S.team.id).catch(() => null)]);
     S.team = S.teams.find((t) => t.id === S.team.id) || S.team;
     S.requests = await loadRequests();
     renderSide(); if (S.home) renderHome();
@@ -1200,8 +1252,8 @@
     try { localStorage.setItem('riyeser.team.last', S.team.id); localStorage.setItem('riyeser.member.' + S.user.id, JSON.stringify({ id: S.team.id, name: S.team.name })); } catch { /* private mode */ }
     let all;
     // S4: everything that doesn't depend on something else goes together
-    [S.people, all, S.unread, , S.features, S.branches, S.requests] = await Promise.all([api.people(S.team.id), api.channels(S.team.id), api.unread(S.team.id), loadPrefs(),
-      api.features(S.team.id).catch(() => ({ calls: false })), api.branches(S.team.id).catch(() => []), loadRequests(),
+    [S.people, all, S.unread, , S.features, S.branches, S.requests, S.groups] = await Promise.all([api.people(S.team.id), api.channels(S.team.id), api.unread(S.team.id), loadPrefs(),
+      api.features(S.team.id).catch(() => ({ calls: false })), api.branches(S.team.id).catch(() => []), loadRequests(), api.ringGroups(S.team.id).catch(() => null),
       api.formerMembers(S.team.id).catch(() => null).then((r) => { S.former = Object.fromEntries((r || []).map((x) => [x.user_id, x.display_name])); })]);
     splitChans(all);
     Calls.listen();
@@ -1897,7 +1949,7 @@
     help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/>',
     more: '<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>', clip: '<path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"/>',
     smile: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01"/>', send: '<path d="M4 12 20 4l-6 16-3-7z"/><path d="m11 13 9-9"/>',
-    pin: '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>', plus: '<path d="M12 5v14M5 12h14"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="m15 5-7 7 7 7"/>',
+    pin: '<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>', check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>', plus: '<path d="M12 5v14M5 12h14"/>', down: '<path d="m6 9 6 6 6-6"/>', back: '<path d="m15 5-7 7 7 7"/>',
     menu: '<path d="M4 6h16M4 12h16M4 18h16"/>', mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     micoff: '<path d="m3 3 18 18M9 9v2a3 3 0 0 0 5 2.2M15 10V6a3 3 0 0 0-5.8-1"/><path d="M5 11a7 7 0 0 0 11 5.7M19 11a7 7 0 0 1-.5 2.5M12 18v3"/>',
     pause: '<path d="M8 5v14M16 5v14"/>', speaker: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
@@ -1944,6 +1996,32 @@
   }
   const personOf = (uid) => S.people.find((p) => p.user_id === uid) || null;
   const extOf = (uid) => (personOf(uid) || {}).extension || null;
+
+  // ---- ring groups: who answers each branch's number and each group's own number (Sales 300)
+  // S.groups comes from ring_groups_list. A database without ring groups yet gives null: then a branch's number rings
+  // everyone in the branch, as it always did.
+  function groups() {
+    if (Array.isArray(S.groups)) return S.groups;
+    return (S.branches || []).filter((b) => b.extension).map((b) => ({ id: 'b:' + b.id, branch_id: b.id, name: b.name, extension: b.extension, strategy: 'all', ring_seconds: 15,
+      timeout_seconds: 30, fallback: 'missed', legacy: true, members: b.people.map((u) => ({ user_id: u, name: nameOf(u), extension: extOf(u) })) }));
+  }
+  const groupById = (id) => groups().find((g) => g.id === id) || null;
+  const groupOfBranch = (b) => groups().find((g) => g.branch_id === b) || null;
+  const STRAT = { all: 'ring all at once', order: 'ring in order', rotate: 'rotate' };
+  const firstName = (m) => (m.user_id === S.user.id ? 'You' : String(m.name || '').split(/\s+/)[0] || m.extension);
+  // "Ana, Sam · ring in order", or that nobody is chosen yet
+  function groupWho(g, max = 3) {
+    const ms = g.members || [];
+    if (!ms.length) return g.fallback === 'group' || g.fallback === 'person' ? `Nobody chosen yet · calls go to ${fallbackText(g)}` : 'Nobody chosen yet — calls go to missed';
+    const names = ms.slice(0, max).map(firstName).join(', ') + (ms.length > max ? ` +${ms.length - max}` : '');
+    return `${names} · ${STRAT[g.strategy] || STRAT.all}`;
+  }
+  function fallbackText(g) {
+    if (g.fallback === 'group') { const o = groupById(g.fallback_group); return o ? `${o.name}${o.extension ? ` (${o.extension})` : ''}` : 'another group'; }
+    if (g.fallback === 'person') return nameOf(g.fallback_user);
+    return 'missed calls';
+  }
+  const groupsToCheck = () => (Array.isArray(S.groups) ? S.groups.filter((g) => g.needs_review) : []);
   const plus = () => !!(S.features && S.features.calls);
   // Riyeser Link off: its trial is over and it isn't paid (team_features.link false). A database before pricing v2 has
   // no 'link' at all, and chat stays as it was.
@@ -2079,13 +2157,13 @@
     const IDLE = 15 * 60000; let last = 0; let fake = null; let timer = null;
     const now = () => fake || Date.now();
     const open = () => !!last && isAdmin() && now() - last < IDLE;
-    const inside = () => S.nav === 'manage' || S.view === 'phones' || S.view === 'connections' || !!document.querySelector('.modal[data-mgmt]');
+    const inside = () => S.nav === 'manage' || S.nav === 'rings' || S.view === 'phones' || S.view === 'connections' || !!document.querySelector('.modal[data-mgmt]');
     function touch() { if (open() && inside()) last = now(); }
     function lock() {
       const was = !!last; last = 0;
       document.querySelectorAll('.modal[data-mgmt]').forEach((m) => m.remove());
       if (S.view === 'phones' || S.view === 'connections') { clearInterval(S.loTimer); S.view = null; S.cn = null; S.nav = 'manage'; if (S.home) { S.home = false; } render(); }
-      else if (S.nav === 'manage' && document.getElementById('lkshell')) renderMain();
+      else if ((S.nav === 'manage' || S.nav === 'rings') && document.getElementById('lkshell')) renderMain();
       if (was) renderTop();
     }
     function check() { if (last && now() - last >= IDLE) lock(); }
@@ -2171,8 +2249,8 @@
   }
   const missedNew = () => (S.callLog || []).filter((c) => c.result === 'missed' && Date.parse(c.at) > (S.callSeen || 0)).length;
   function seeCalls() { S.callSeen = Date.now(); try { localStorage.setItem(callKey() + '.seen', String(S.callSeen)); } catch { /* private mode */ } }
-  const callWho = (c) => (c.peer ? nameOf(c.peer) : c.label || 'A branch');
-  const callExt = (c) => (c.peer ? extOf(c.peer) : (S.branches.find((b) => b.id === c.branch) || {}).extension);
+  const callWho = (c) => (c.peer ? nameOf(c.peer) : c.label || 'A ring group');
+  const callExt = (c) => (c.peer ? extOf(c.peer) : ((c.group && groupById(c.group)) || (c.branch && groupOfBranch(c.branch)) || {}).extension);
   const callLine = (c) => ({ missed: 'Missed', declined: 'Declined', offline: 'Not online', answered: c.dir === 'in' ? 'Incoming' : 'Outgoing', 'no answer': 'No answer', cancelled: 'Cancelled', elsewhere: 'Answered elsewhere' }[c.result] || c.result);
 
   // ---- what you folded away: the list's sections (Pinned, Channels, Direct messages, Archived), the details panel, and the
@@ -2387,7 +2465,7 @@
   // Refresh everything round the conversation (the list, the top bar, the tab bar, details).
   function renderSide() { if (!document.getElementById('lkshell')) return; renderTop(); renderTabs(); renderList(); renderRight(); chatTitle(); }
 
-  const TITLES = { chat: 'Chats', calls: 'Calls', people: 'People', devices: 'My phone and devices', settings: 'Settings', manage: 'Management', channels: 'Channels' };
+  const TITLES = { chat: 'Chats', calls: 'Calls', people: 'People', devices: 'My phone and devices', settings: 'Settings', manage: 'Management', channels: 'Channels', rings: 'Ring groups' };
   // ---- the top bar: logo, business, search, Calls and People, your status, you
   function renderTop() {
     const el = document.getElementById('lktop'); if (!el) return;
@@ -2549,7 +2627,7 @@
 
   // Chat, Calls, People, My phone and devices, Settings, Management, Channels
   function setNav(k) {
-    if (k === 'manage' && !isAdmin()) k = 'settings';
+    if ((k === 'manage' || k === 'rings') && !isAdmin()) k = 'settings';
     S.nav = k; closePops(); if (k !== 'chat') S.details = false;
     if (k === 'calls') seeCalls();
     if (k === 'chat') { S.pane = narrow() ? 'list' : 'main'; } else S.pane = 'list';
@@ -2630,7 +2708,7 @@
       <span class="lk-rb"><span class="lk-r1"><span class="nm">${esc(callWho(c))}</span><time>${esc(whenShort(c.at))}</time></span>
       <span class="lk-r2"><span class="pv"><span class="cdir">${ic(c.result === 'missed' ? 'missed' : c.dir === 'in' ? 'in' : 'outc')}</span>${esc(callLine(c))}${c.dur ? ` · ${durText(c.dur)}` : ''}${callExt(c) ? ` · Ext. ${callExt(c)}` : ''}</span></span></span></button></div>`).join('');
   }
-  function redial(i) { const c = (S.callLog || [])[Number(i)]; if (!c) return; if (c.peer) Calls.start({ user: c.peer }); else if (c.branch) Calls.start({ branch: c.branch }); }
+  function redial(i) { const c = (S.callLog || [])[Number(i)]; if (!c) return; if (c.peer) Calls.start({ user: c.peer }); else if (c.group) Calls.start({ group: c.group }); else if (c.branch) Calls.start({ branch: c.branch }); }
   async function openDm(uid) {
     if (uid === S.user.id) return;
     const id = await api.openDm(S.team.id, uid);
@@ -2675,10 +2753,10 @@
     if (k === 'calls') {
       const f = S.features || {};
       const trial = f.calls && !f.calls_paid && f.trial_days_left != null ? `<span class="trialtag">Free trial · ${f.trial_days_left} days left</span>` : '';
-      return `<p class="lk-sub">${plus() ? `Call a person or a whole branch. Calls go straight between devices, with no call charges.${me.extension ? ` Your extension is <b>${me.extension}</b>.` : ''}` : 'Riyeser Link is paused, so calls are paused too.'} ${trial}</p>
+      return `<p class="lk-sub">${plus() ? `Call a person or a ring group (a branch's number, or a group like Sales). Calls go straight between devices, with no call charges.${me.extension ? ` Your extension is <b>${me.extension}</b>.` : ''}` : 'Riyeser Link is paused, so calls are paused too.'} ${trial}</p>
         <div class="lk-cols">
           <div class="lk-colmain">${card(`${ic('clock')} Recent calls`, `<div class="lk-mini lk-calls">${callRows(S.callLog || [], 50)}</div>`)}
-            ${S.branches.length ? card(`${ic('branch')} Ring a branch`, `<div class="lk-mini">${S.branches.map((b) => `<button class="mi" data-callbranch="${b.id}"><span class="lk-chic sm">${ic('phone')}</span><span>${esc(b.name)}<small>${b.people.length} ${b.people.length === 1 ? 'person rings' : 'people ring'} together${b.extension ? ` · Ext. ${b.extension}` : ''}</small></span></button>`).join('')}</div>`) : ''}
+            ${groups().length ? card(`${ic('branch')} Ring a group`, `<div class="lk-mini lk-rgl">${groups().map((g) => `<button class="mi" data-callgroup="${esc(g.id)}"><span class="lk-chic sm">${ic('phone')}</span><span>${esc(g.name)}${g.extension ? ` <span class="lk-rgx">${g.extension}</span>` : ''}<small${g.members.length ? '' : ' class="lk-none"'}>${esc(groupWho(g))}</small></span></button>`).join('')}</div>${isAdmin() ? '<button class="btn sm lk-rgedit" id="vrgedit">Choose who answers</button>' : ''}`, '', 'rgcard') : ''}
             ${card(`${ic('vm')} Voicemail`, '<p class="muted">Coming with Riyeser Link Office voicemail. Messages people leave on your extension will show here.</p>', 'lk-quiet', 'vmcard')}</div>
           <div class="lk-colside">${plus() ? card(`${ic('grid')} Keypad`, dialHtml('vd'), 'lk-qd') : card('', '<p class="muted">Riyeser Link is paused, so calls are paused too.</p><button class="btn" id="qcup">How to turn it back on</button>')}</div></div>`;
     }
@@ -2687,7 +2765,7 @@
         <input class="lk-find" id="cfind" placeholder="Search name or extension" aria-label="Search people" value="${esc(S.cq || '')}">
         <div class="lk-dir" id="cdir">${S.people.map((p) => `<div class="lk-drow" data-name="${esc(p.display_name.toLowerCase())} ${p.extension || ''}">${personRow(p, false)}<span class="lk-job">${esc(p.role === 'owner' ? 'Owner' : jobName(p.job_role))}</span>
           <span class="lk-dact">${p.user_id !== S.user.id ? `<button class="btn sm" data-dmp="${p.user_id}">${ic('chat')} Message</button>${plus() ? `<button class="btn sm" data-callp="${p.user_id}">${ic('phone')} Call</button>` : ''}` : ''}</span></div>`).join('')}</div>
-        ${S.branches.length ? `<h2 class="lk-h2">Branches</h2><div class="lk-dir">${S.branches.map((b) => `<div class="lk-drow"><div class="lk-person"><span class="lk-chic">${ic('branch')}</span><span class="lk-pn"><b>${esc(b.name)}</b><small class="lk-pst">${b.people.length} ${b.people.length === 1 ? 'person' : 'people'} · rings everyone</small></span>${b.extension ? `<span class="lk-ext">Ext. ${b.extension}</span>` : ''}</div><span class="lk-job"></span><span class="lk-dact">${plus() ? `<button class="btn sm" data-callbranch="${b.id}">${ic('phone')} Call</button>` : ''}</span></div>`).join('')}</div>` : ''}`;
+        ${groups().length ? `<h2 class="lk-h2">Ring groups</h2><div class="lk-dir">${groups().map((g) => `<div class="lk-drow"><div class="lk-person"><span class="lk-chic">${ic('branch')}</span><span class="lk-pn"><b>${esc(g.name)}</b><small class="lk-pst">${esc(groupWho(g))}</small></span>${g.extension ? `<span class="lk-ext">Ext. ${g.extension}</span>` : ''}</div><span class="lk-job"></span><span class="lk-dact">${plus() ? `<button class="btn sm" data-callgroup="${esc(g.id)}">${ic('phone')} Call</button>` : ''}</span></div>`).join('')}</div>` : ''}`;
     }
     if (k === 'channels') {
       const chs = S.chans.filter((c) => c.kind !== 'dm');
@@ -2704,6 +2782,7 @@
     }
     if (k === 'settings') return settingsHtml(me);
     if (k === 'manage') return manageHtml();
+    if (k === 'rings') return ringsHtml();
     return '';
   }
   // Settings: about you (everyone). The business's own settings are in Management (owners and admins).
@@ -2725,6 +2804,7 @@
         ${setRow('shield', 'Two-step sign-in', twoOn ? 'On: signing in needs a code from your authenticator app.' : 'Off. Turn it on so a stolen password isn\'t enough.', `<button class="btn sm" id="set-2fa">${twoOn ? 'Manage' : 'Turn on'}</button>`)}
         ${setRow('lock', 'Password', '', '<button class="btn sm" id="set-pw">Change</button>')}`)}
       ${card('My phone and devices', setRow('desk', me.extension ? `Extension ${me.extension}` : 'No extension yet', 'Your desk phone, Do not disturb, and the PCs you\'re signed in on.', '<button class="btn sm" id="comyphone">My phone</button><button class="btn sm" id="set-dev">Devices</button>'))}
+      ${isAdmin() && Array.isArray(S.groups) ? card('Phones &amp; calls', setRow('phone', 'Ring groups', `Who answers each branch number and group number (like Sales or Reception).${groupsToCheck().length ? ` <b>${groupsToCheck().length} to check.</b>` : ''}`, '<button class="btn sm" id="set-rg">Open</button>'), '', 'setcalls') : ''}
       ${card('Company', `${setRow('building', esc(S.team.name), `Company ID <b class="mono">${esc(S.team.company_code || '')}</b>`, `<button class="btn sm" id="inv">${ic('plus')} Invite people</button>${isAdmin() ? '' : '<button class="btn sm" id="set-co">Details</button>'}`)}
         ${isAdmin() ? setRow(Mgmt.open() ? 'shield' : 'lock', 'Management', `People, join requests, branches, desk phones, security, history${isOwner() ? ', billing' : ''}.${S.requests.length ? ` <b>${S.requests.length} waiting to join.</b>` : ''}`, '<button class="btn sm" id="set-mgmt">Open</button>') : ''}`)}
       ${card('Help', setRow('help', 'Riyeser Link Help Centre', 'Chat, calls and desk phones, step by step.', `<a class="btn sm" href="/help/link.html" target="_blank" rel="noopener">Open</a><button class="btn sm" id="set-help">Ask us</button>`))}
@@ -2743,12 +2823,15 @@
       <button class="btn p" id="mgunlock">Unlock</button></form>`;
     const tile = (id, icon, title, sub, extra = '') => `<button class="lk-tile" id="${id}">${ic(icon)}<span><b>${title}</b><small>${sub}</small></span>${extra}</button>`;
     const n = S.requests.length;
+    const chk = groupsToCheck();
     return `<div class="lk-mgbar" id="mgopen">${ic('shield')}<span>Unlocked. It locks again after 15 minutes without use.</span><button class="btn sm" id="mglock">${ic('lock')} Lock now</button></div>
+      ${chk.length ? `<div class="rg-notice" id="mgrgnote" role="status">${ic('info')}<span><b>Choose who answers each branch number</b>Calling a branch now rings only the people you choose, not everyone in it. Until you check, ${chk.length === 1 ? `${esc(chk[0].name)} rings` : 'each branch rings'} the people who were in it.</span><span class="rg-nbtns"><button class="btn sm p" id="rgnotego">Choose now</button></span></div>` : ''}
       <div class="lk-tiles">
       ${tile('coppl', 'users', 'People &amp; access', 'Job roles, admins and branches')}
       ${tile('coreq', 'user', 'Join requests', n ? `${n} waiting for you` : 'No one waiting', n ? `<span class="badge">${n}</span>` : '')}
       ${tile('coinfo', 'building', 'Company', 'Business details, Company ID, linked PCs')}
       ${tile('mgbr', 'branch', 'Branches &amp; extensions', 'Branch join codes and who\'s in each')}
+      ${Array.isArray(S.groups) ? tile('mgrg', 'phone', 'Phones &amp; calls: Ring groups', groupsToCheck().length ? `${groupsToCheck().length} branch number${groupsToCheck().length === 1 ? '' : 's'} to check` : 'Who answers each branch and group number', groupsToCheck().length ? `<span class="badge">${groupsToCheck().length}</span>` : '') : ''}
       ${tile('cophones', 'desk', 'Desk phones', 'Riyeser Link Office and every desk phone')}
       ${tile('coconn', 'grid', 'Connections', 'Your website: API keys, booking widget, webhooks')}
       ${tile('cosec', 'shield', 'Security', 'Two-step sign-in and your password')}
@@ -2761,10 +2844,10 @@
     el.querySelectorAll('[data-rejoin]').forEach((b) => b.onclick = () => rejoinChan(b.dataset.rejoin));
     el.querySelectorAll('[data-callp]').forEach((b) => b.onclick = () => Calls.start({ user: b.dataset.callp }));
     el.querySelectorAll('[data-dmp]').forEach((b) => b.onclick = () => openDm(b.dataset.dmp));
-    el.querySelectorAll('[data-callbranch]').forEach((b) => b.onclick = () => Calls.start({ branch: b.dataset.callbranch }));
+    el.querySelectorAll('[data-callgroup]').forEach((b) => b.onclick = () => Calls.start({ group: b.dataset.callgroup }));
     el.querySelectorAll('[data-redial]').forEach((b) => b.onclick = () => redial(b.dataset.redial));
     const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = fn; };
-    on('#vnewch', addChannel); on('#qcup', upsell);
+    on('#vnewch', addChannel); on('#qcup', upsell); on('#vrgedit', () => openRingGroups('calls'));
     wireDial(el, 'vd');
     const cf = el.querySelector('#cfind');   // kept while statuses change underneath
     if (cf) { cf.oninput = () => { S.cq = cf.value; const q = cf.value.trim().toLowerCase(); el.querySelectorAll('#cdir .lk-drow').forEach((r) => { r.hidden = !!q && !r.dataset.name.includes(q); }); }; if (S.cq) cf.oninput(); }
@@ -2788,7 +2871,9 @@
     }
     const t = (id, fn) => on(id, () => (Mgmt.open() ? fn() : renderMain()));
     t('#coppl', peopleAccess); t('#coreq', joinRequests); t('#coinfo', () => companyInfo(false)); t('#mgbr', manageBranches); t('#cophones', () => phonesPage('manage')); t('#coconn', () => connectionsPage('manage'));
-    t('#cosec', security); t('#cohist', showHistory); t('#coplan', planBilling);
+    t('#cosec', security); t('#cohist', showHistory); t('#coplan', planBilling); t('#mgrg', () => openRingGroups('manage')); on('#rgnotego', () => openRingGroups('manage'));
+    on('#set-rg', () => openRingGroups('settings'));
+    wireRings(el);
   }
   async function fillDevices(el) {
     const [my, devs] = await Promise.all([api.linkMyPhone(S.team.id).catch(() => null), api.devices(S.team.id).catch(() => [])]);
@@ -2837,7 +2922,7 @@
       body = `<div class="mh">Call someone in ${esc(c.kind === 'private' ? c.name : '#' + c.name)}</div><div class="lk-mini callpick">${ppl.map((u) => `<button class="mi" data-cw="${u}">${who(u)}</button>`).join('') || '<p class="mnote">No one else is in this chat.</p>'}</div>
         <p class="mnote">Group calls are coming. For now, call one person.</p>`;
     }
-    popMenu(anchor, `${body}<div class="msep"></div><button class="mi" id="callkeys">${ic('grid')}<span>Keypad<small>Dial an extension or a branch</small></span></button>`, (d, close) => {
+    popMenu(anchor, `${body}<div class="msep"></div><button class="mi" id="callkeys">${ic('grid')}<span>Keypad<small>Dial an extension or a ring group</small></span></button>`, (d, close) => {
       const on = (id, fn) => { const b = d.querySelector(id); if (b) b.onclick = () => { close(); fn(); }; };
       const o = otherIn(c);
       on('#calldm', () => Calls.start({ user: o, video: false })); on('#vidbtn', () => Calls.start({ user: o, video: true })); on('#callkeys', dialPad);   // M9
@@ -3051,7 +3136,7 @@
   function findDial(v) {
     const x = Number(String(v).trim()); if (!x) return null;
     const p = S.people.find((q) => q.extension === x && q.user_id !== S.user.id); if (p) return { user: p.user_id, label: p.display_name };
-    const b = S.branches.find((q) => q.extension === x); return b ? { branch: b.id, label: b.name + ' (everyone)' } : null;
+    const g = groups().find((q) => Number(q.extension) === x); return g ? { group: g.id, label: `${g.name} · ${groupWho(g, 2)}` } : null;
   }
   function wireDial(root, p) {
     const n = root.querySelector(`#${p}n`); if (!n) return; const w = root.querySelector(`#${p}w`);
@@ -3268,7 +3353,8 @@
 
   // ================================================================== calls (part of Riyeser Link)
   // Calls go directly between the two devices (WebRTC). The online service only carries the ringing and set-up.
-  // Calling a branch rings everyone in it; the first to answer takes the call. 30 seconds with no answer is a missed call.
+  // Calling a ring group (a branch's number or a group's own) rings only the people chosen for it (Management › Ring
+  // groups): all at once, in order, or rotating; the first to answer takes the call. 30 seconds with no answer is a missed call.
   // With Riyeser Link off (its 90 days over, not paid), calls are paused like chat.
   function upsell() {
     modal(`<h3>📞 Riyeser Link is paused</h3><p>Calls, desk phones and sending messages are paused because Riyeser Link's 90 free days have ended. Nothing is deleted: everyone can still read every chat.</p>
@@ -3277,14 +3363,14 @@
   }
 
   function dialPad() {
-    modal(`<h3>Dial an extension</h3><p>A person's number rings them; a branch's number (like 200) rings everyone there.</p>
+    modal(`<h3>Dial an extension</h3><p>A person's number rings them; a ring group's number (like 200) rings the people chosen for it.</p>
       <form id="dpf"><input id="dpn" class="dpn" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" aria-label="Extension">
       <div class="keys">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, '⌫'].map((k) => k === '' ? '<span></span>' : `<button type="button" data-k="${k}">${k}</button>`).join('')}</div>
       <div class="dpwho" id="dpw"></div>
       <div class="mfoot"><button type="button" class="btn" id="cl">Close</button><button class="btn p">📞 Call</button></div></form>`, (d, close) => {
       const n = d.querySelector('#dpn'); const who = d.querySelector('#dpw');
       const find = (v) => { const x = Number(v); const p = S.people.find((q) => q.extension === x && q.user_id !== S.user.id); if (p) return { user: p.user_id, label: p.display_name };
-        const b = S.branches.find((q) => q.extension === x); return b ? { branch: b.id, label: b.name + ' (everyone)' } : null; };
+        const g = groups().find((q) => Number(q.extension) === x); return g ? { group: g.id, label: `${g.name} · ${groupWho(g, 2)}` } : null; };
       const show = () => { const t = find(n.value); who.textContent = n.value ? (t ? t.label : noOne(n.value)) : ''; };
       n.oninput = show; n.focus();
       d.querySelectorAll('[data-k]').forEach((k) => k.onclick = () => { n.value = k.dataset.k === '⌫' ? n.value.slice(0, -1) : (n.value + k.dataset.k).slice(0, 4); show(); });
@@ -3293,9 +3379,209 @@
     });
   }
 
+  // ================================================================== Ring groups (Management › Phones & calls)
+  // Owners and admins (two-step sign-in, Management unlocked) choose who answers each number: a branch's own number and
+  // any group with its own number (Sales 300, Reception 301). Only those chosen ring, never everyone in a branch by
+  // itself: all at once, in order (drag to change it), or rotating; and what happens if nobody answers. Riyeser Link
+  // Office follows the same groups for the desk phones. The database checks every change (ring_group_save).
+  const RG_STRATS = [['all', 'Ring all at once', 'Everyone chosen rings together. The first to answer takes the call.'],
+    ['order', 'Ring in order', 'One at a time, top to bottom. Drag the list to change the order.'],
+    ['rotate', 'Rotate', 'One at a time, starting with the next person on each call, so calls are shared out.']];
+  function openRingGroups(from) {
+    if (!isAdmin()) return;
+    S.rg = { sel: null, draft: null, q: '', phones: S.rg ? S.rg.phones : null, msg: '', back: from || S.nav || 'manage' };
+    const first = groupsToCheck()[0]; if (first && from !== 'list') rgSelect(first.id);
+    setNav('rings');
+  }
+  const rgKey = (m) => (m.user_id ? 'u:' + m.user_id : 'p:' + m.phone_ext);
+  function rgSelect(id) {
+    const g = id === 'new' ? null : (S.groups || []).find((x) => x.id === id); if (id !== 'new' && !g) return;
+    const used = new Set([...S.people.map((p) => p.extension), ...(S.groups || []).map((x) => x.extension), ...(S.branches || []).map((b) => b.extension)].filter(Boolean).map(Number));
+    const free = [300, 400, 500, 600, 700, 800, ...Array.from({ length: 800 }, (_, i) => 100 + i)].find((n) => !used.has(n));
+    S.rg.sel = id; S.rg.err = ''; S.rg.msg = '';
+    S.rg.draft = g ? { ...g, members: g.members.map((m) => ({ ...m })) }
+      : { id: null, branch_id: null, name: '', extension: free || '', strategy: 'all', ring_seconds: 15, timeout_seconds: 30, fallback: 'missed', fallback_group: null, fallback_user: null, members: [] };
+  }
+  function rgPhones() {   // shared desk phones: extensions on Riyeser Link Office that aren't a person in Riyeser Link (Reception 150)
+    const mine = new Set(S.people.map((p) => String(p.extension)));
+    const fromGroups = (S.groups || []).flatMap((g) => g.members.filter((m) => m.phone_ext).map((m) => ({ ext: String(m.phone_ext), name: m.name })));
+    const all = [...(S.rg.phones || []), ...fromGroups].filter((p) => !mine.has(p.ext));
+    return all.filter((p, i) => all.findIndex((q) => q.ext === p.ext) === i).sort((a, b) => a.ext.localeCompare(b.ext));
+  }
+  function rgClash(n, selfId) {
+    const x = Number(n);
+    const p = S.people.find((q) => Number(q.extension) === x); if (p) return p.user_id === S.user.id ? `${x} is your extension.` : `${x} is ${p.display_name}'s extension.`;
+    const g = (S.groups || []).find((q) => Number(q.extension) === x && q.id !== selfId); if (g) return `${x} is already ${g.name}'s number.`;
+    const b = (S.branches || []).find((q) => Number(q.extension) === x && !(S.groups || []).some((q2) => q2.id === selfId && q2.branch_id === q.id)); if (b) return `${x} is ${b.name}'s number.`;
+    const ph = rgPhones().find((q) => Number(q.ext) === x); if (ph) return `${x} is the ${ph.name} desk phone.`;
+    return '';
+  }
+  function rgExtMsg(d) {
+    if (d.branch_id) return '';
+    const v = String(d.extension || '');
+    if (!v) return 'Choose a 3-digit number, 100 to 899.';
+    if (!/^[0-9]{3}$/.test(v) || +v < 100 || +v > 899) return 'Group numbers are 3 digits, 100 to 899, so desk phones can dial them too.';
+    return rgClash(v, d.id);
+  }
+  function ringsHtml() {
+    if (!isAdmin()) return '';
+    if ((needs2step() && !S.mfaOn) || !Mgmt.open()) return manageHtml();
+    if (!S.rg) S.rg = { sel: null, draft: null, q: '', phones: null, msg: '', back: 'manage' };
+    if (!Array.isArray(S.groups)) return card('', `<div id="rgoff"><p><b>Ring groups are on their way.</b> Riyeser is finishing an update so you can choose who answers each branch number. Until then, a branch's number rings everyone in the branch.</p><p class="muted small">If you look after the Riyeser database yourself: run the latest <code>team-chat.sql</code> in the Supabase SQL Editor.</p></div>`);
+    const gs = S.groups; const sel = S.rg.sel; const check = groupsToCheck();
+    const row = (g) => `<button class="rg-row${sel === g.id ? ' on' : ''}" data-rg="${esc(g.id)}" aria-current="${sel === g.id}"><span class="lk-chic sm">${ic(g.branch_id ? 'branch' : 'users')}</span>
+      <span class="rg-rt"><b>${esc(g.name)}</b><small${g.members.length ? '' : ' class="lk-none"'}>${esc(groupWho(g))}</small></span>
+      ${g.needs_review ? '<span class="lk-pill rg-chk">Check</span>' : ''}<span class="lk-ext">${g.extension ? `Ext. ${g.extension}` : ''}</span></button>`;
+    return `<p class="lk-sub">Who answers each number. A branch's number rings only the people and desk phones you choose here, not everyone in the branch.</p>
+      ${check.length ? `<div class="rg-notice" id="rgnotice" role="status">${ic('info')}<span><b>Choose who answers each branch number</b>Riyeser Link now rings only the people you choose. For now, ${check.length === 1 ? `${esc(check[0].name)}'s number rings` : 'each branch\'s number rings'} the people who were in ${check.length === 1 ? 'that branch' : 'the branch'}. Check ${check.length === 1 ? 'it' : 'each one'}, or keep ${check.length === 1 ? 'it' : 'them'} as ${check.length === 1 ? 'it is' : 'they are'}.</span>
+        <span class="rg-nbtns"><button class="btn sm" id="rgkeep">Keep as they are</button></span></div>` : ''}
+      ${S.rg.msg ? `<div class="rg-ok" id="rgok" role="status">${S.rg.msg}</div>` : ''}
+      <div class="rg-wrap${sel ? ' rg-editing' : ''}">
+        <section class="lk-card rg-list" aria-label="Ring groups"><div class="rg-lh"><h3>${ic('branch')} Numbers</h3><button class="btn sm" id="rgnew">${ic('plus')} New group</button></div>
+          <div class="rg-rows">${gs.map(row).join('') || '<p class="muted">No numbers yet. Add a branch, or a group with its own number.</p>'}</div>
+          <p class="muted small rg-lnote">A branch's number comes with the branch (Branches &amp; extensions). New groups get their own number, like Sales 300.</p></section>
+        <section class="lk-card rg-ed" id="rged" aria-label="Edit ring group">${sel && S.rg.draft ? rgEditorHtml(S.rg.draft) : `<div class="rg-empty">${ic('branch')}<b>Choose a number to change who answers it</b><span>Or make a new group with its own number, like Sales or Reception.</span></div>`}</section>
+      </div>`;
+  }
+  function rgChosenHtml(d) {
+    if (!d.members.length) return `<li class="rg-none">Nobody chosen yet — calls to ${d.extension ? esc(String(d.extension)) : 'this number'} go to ${esc(d.fallback === 'group' || d.fallback === 'person' ? fallbackText(d) : 'missed calls')}. Tick people or desk phones below.</li>`;
+    return d.members.map((m, i) => { const k = rgKey(m); const nm = m.user_id ? nameOf(m.user_id) : m.name || `Desk phone ${m.phone_ext}`;
+      const ext = m.user_id ? extOf(m.user_id) : m.phone_ext; const quiet = m.user_id && Presence.quiet(m.user_id);
+      return `<li class="rg-m" draggable="true" data-k="${esc(k)}"><span class="rg-grip" aria-hidden="true" title="Drag to change the order">⋮⋮</span><span class="rg-n" aria-hidden="true">${i + 1}</span>
+        ${m.user_id ? av(m.user_id, nm) : `<span class="lk-chic sm">${ic('desk')}</span>`}
+        <span class="rg-mt"><b>${esc(nm)}</b><small>${[ext ? `Ext. ${esc(String(ext))}` : '', m.user_id ? '' : 'shared desk phone', quiet ? `skipped while ${esc(Presence.text(m.user_id))}` : ''].filter(Boolean).join(' · ')}</small></span>
+        <span class="rg-mb"><button type="button" class="lk-ib" data-up="${esc(k)}" aria-label="Move ${esc(nm)} up"${i ? '' : ' disabled'}>↑</button><button type="button" class="lk-ib" data-down="${esc(k)}" aria-label="Move ${esc(nm)} down"${i < d.members.length - 1 ? '' : ' disabled'}>↓</button>
+        <button type="button" class="lk-ib" data-rm="${esc(k)}" aria-label="Take ${esc(nm)} out">${ic('x')}</button></span></li>`; }).join('');
+  }
+  function rgPicksHtml(d) {
+    const q = S.rg.q.trim().toLowerCase(); const chosen = new Set(d.members.map(rgKey));
+    const hit = (t) => !q || t.toLowerCase().includes(q);
+    const ppl = S.people.filter((p) => hit(`${p.display_name} ${p.extension || ''}`));
+    const phs = rgPhones().filter((p) => hit(`${p.name} ${p.ext} desk phone`));
+    const pick = (k, label, sub, pic) => `<label class="pk rg-pk"><input type="checkbox" data-pick="${esc(k)}"${chosen.has(k) ? ' checked' : ''}>${pic}<span>${label}<small>${sub}</small></span></label>`;
+    return `${ppl.length ? `<span class="rg-ph">People</span>${ppl.map((p) => pick('u:' + p.user_id, esc(p.display_name) + (p.user_id === S.user.id ? ' <small class="rg-you">(You)</small>' : ''), `${p.extension ? `Ext. ${p.extension} · ` : ''}${esc(Presence.text(p.user_id))}`, av(p.user_id, p.display_name))).join('')}` : ''}
+      ${phs.length ? `<span class="rg-ph">Shared desk phones</span>${phs.map((p) => pick('p:' + p.ext, esc(p.name), `Ext. ${esc(p.ext)} · on Riyeser Link Office`, `<span class="lk-chic sm">${ic('desk')}</span>`)).join('')}` : ''}
+      ${!ppl.length && !phs.length ? `<p class="muted small rg-nores">Nobody matches "${esc(S.rg.q)}".</p>` : ''}
+      ${S.rg.phones === null ? '' : !rgPhones().length ? '<p class="muted small rg-nores">Shared desk phones (like Reception) show here once they\'re added on Riyeser Link Office.</p>' : ''}`;
+  }
+  function rgHint(d) {   // in the branch but not chosen (a reminder only: choosing is up to you)
+    if (!d.branch_id) return '';
+    const b = (S.branches || []).find((x) => x.id === d.branch_id); if (!b) return '';
+    const left = b.people.filter((u) => !d.members.some((m) => m.user_id === u));
+    return left.length ? `In ${esc(b.name)} but not chosen: ${left.map((u) => esc(nameOf(u))).join(', ')}. They won't ring for ${esc(String(d.extension || 'this number'))}.` : '';
+  }
+  function rgEditorHtml(d) {
+    const isNew = !d.id; const branch = !!d.branch_id; const others = (S.groups || []).filter((g) => g.id !== d.id);
+    const opt = (v, l, cur, dis) => `<option value="${esc(v)}"${String(cur) === String(v) ? ' selected' : ''}${dis ? ' disabled' : ''}>${l}</option>`;
+    return `<form id="rgf" novalidate><div class="rg-eh"><button type="button" class="lk-ib rg-back" id="rgback" aria-label="All ring groups" title="All ring groups">${ic('back')}</button>
+        <h3>${isNew ? 'New ring group' : esc(d.name)}</h3>${branch ? '<span class="lk-pill">Branch number</span>' : ''}${!isNew && d.extension ? `<span class="lk-ext">Ext. ${d.extension}</span>` : ''}</div>
+      ${branch ? `<p class="muted small rg-bnote">${esc(d.name)}'s own number. Its name and number come with the branch (Branches &amp; extensions); who answers is chosen here.</p>`
+        : `<div class="rg-two"><label class="f"><span>Name</span><input id="rgname" maxlength="60" value="${esc(d.name)}" placeholder="e.g. Sales" autocomplete="off"></label>
+          <label class="f"><span>Number</span><input id="rgext" inputmode="numeric" maxlength="3" value="${esc(String(d.extension || ''))}" placeholder="300" autocomplete="off" aria-describedby="rgxmsg"><small id="rgxmsg" class="rg-xmsg" aria-live="polite">${esc(rgExtMsg(d))}</small></label></div>`}
+      <h4 class="rg-h">Who answers <small id="rgcount">${d.members.length ? `${d.members.length} chosen` : 'nobody yet'}</small></h4>
+      <ol class="rg-chosen${d.strategy === 'all' ? '' : ' rg-ordered'}" id="rgchosen">${rgChosenHtml(d)}</ol>
+      <p class="muted small rg-hint" id="rghint"${rgHint(d) ? '' : ' hidden'}>${rgHint(d)}</p>
+      <div class="rg-add"><input class="lk-find" id="rgq" placeholder="Search people and desk phones" aria-label="Search people and desk phones" value="${esc(S.rg.q)}" autocomplete="off">
+        <div class="rg-picks" id="rgpicks">${rgPicksHtml(d)}</div></div>
+      <h4 class="rg-h">How it rings</h4>
+      <div class="rg-strat" role="radiogroup" aria-label="How it rings">${RG_STRATS.map(([k, l, x]) => `<label class="rg-sc"><input type="radio" name="rgst" value="${k}"${d.strategy === k ? ' checked' : ''}><b>${l}</b><small>${x}</small></label>`).join('')}</div>
+      <label class="rg-inl" id="rgeach"${d.strategy === 'all' ? ' hidden' : ''}>Ring each person for <input type="number" id="rgsec" min="5" max="120" value="${d.ring_seconds}" aria-label="Seconds for each person"> seconds</label>
+      <h4 class="rg-h">If nobody answers</h4>
+      <div class="rg-fb"><label class="rg-inl">After <input type="number" id="rgto" min="5" max="300" value="${d.timeout_seconds}" aria-label="Seconds before the next step"> seconds</label>
+        <select id="rgfb" aria-label="If nobody answers">${opt('missed', 'End as a missed call', d.fallback)}${opt('group', 'Try another group', d.fallback, !others.length)}${opt('person', 'Ring a person', d.fallback)}${opt('voicemail', 'Voicemail (coming soon)', d.fallback, true)}</select>
+        <select id="rgfbg" aria-label="Group to try"${d.fallback === 'group' ? '' : ' hidden'}>${opt('', 'Choose a group…', d.fallback_group || '')}${others.map((g) => opt(g.id, `${esc(g.name)}${g.extension ? ` (${g.extension})` : ''}`, d.fallback_group || '')).join('')}</select>
+        <select id="rgfbu" aria-label="Person to ring"${d.fallback === 'person' ? '' : ' hidden'}>${opt('', 'Choose a person…', d.fallback_user || '')}${S.people.map((p) => opt(p.user_id, `${esc(p.display_name)}${p.extension ? ` (${p.extension})` : ''}`, d.fallback_user || '')).join('')}</select></div>
+      <p class="muted small rg-note">${ic('info')}<span>Skipped automatically: Do not disturb, Busy, At lunch, Unavailable and anyone already on a call. Desk phones follow these groups through Riyeser Link Office; a person's desk phone and Riyeser Link ring together.</span></p>
+      <p class="ferr" id="rgerr" role="alert"${S.rg.err ? '' : ' hidden'}>${esc(S.rg.err || '')}</p>
+      <div class="rg-foot">${!isNew && !branch ? '<button type="button" class="btn rg-del" id="rgdel">Delete group</button>' : ''}<span class="rg-sp"></span><button type="button" class="btn" id="rgcancel">Cancel</button><button class="btn p" id="rgsave">${isNew ? 'Make group' : 'Save'}</button></div></form>`;
+  }
+  function wireRings(el) {
+    const root = el.querySelector('[data-view="rings"]'); if (!root || !S.rg) return;
+    if (S.rg.phones === null) { S.rg.phones = undefined;
+      api.linkStatus(S.team.id).then((st) => { const o = st && st.offices && st.offices[0];
+        S.rg.phones = o ? (o.extensions || []).filter((x) => x.type === 'person').map((x) => ({ ext: String(x.extension), name: x.name })) : [];
+        const pk = document.getElementById('rgpicks'); if (pk && S.rg.draft) pk.innerHTML = rgPicksHtml(S.rg.draft), wirePicks(); }).catch(() => { S.rg.phones = []; }); }
+    const redraw = () => { renderMain(); };
+    root.querySelectorAll('[data-rg]').forEach((b) => b.onclick = () => { rgSelect(b.dataset.rg); redraw(); const e = document.getElementById('rged'); if (e && narrow()) e.scrollIntoView({ block: 'start' }); });
+    const on = (id, fn) => { const b = root.querySelector(id); if (b) b.onclick = fn; };
+    on('#rgnew', () => { rgSelect('new'); redraw(); const n = document.getElementById('rgname'); if (n) n.focus(); });
+    on('#rgkeep', async () => { try { await api.ringGroupsConfirm(S.team.id); S.groups = await api.ringGroups(S.team.id); S.rg.msg = 'Done. Each branch\'s number keeps ringing the people chosen for it now.'; } catch (e) { tell(plainError(e)); } redraw(); });
+    const d = S.rg.draft; if (!d) return;
+    const form = root.querySelector('#rgf'); if (!form) return;
+    const close = () => { S.rg.sel = null; S.rg.draft = null; S.rg.err = ''; redraw(); };
+    on('#rgback', close); on('#rgcancel', close);
+    const drawChosen = () => {
+      const ol = root.querySelector('#rgchosen'); ol.innerHTML = rgChosenHtml(d); ol.classList.toggle('rg-ordered', d.strategy !== 'all');
+      root.querySelector('#rgcount').textContent = d.members.length ? `${d.members.length} chosen` : 'nobody yet';
+      const h = root.querySelector('#rghint'); const t = rgHint(d); h.innerHTML = t; h.hidden = !t; wireChosen();
+    };
+    const find = (k) => d.members.findIndex((m) => rgKey(m) === k);
+    const move = (k, by) => { const i = find(k); const j = i + by; if (i < 0 || j < 0 || j >= d.members.length) return; const [m] = d.members.splice(i, 1); d.members.splice(j, 0, m); drawChosen();
+      const b = root.querySelector(`[data-${by < 0 ? 'up' : 'down'}="${CSS.escape(k)}"]`); if (b && !b.disabled) b.focus(); };
+    function wireChosen() {
+      root.querySelectorAll('[data-up]').forEach((b) => b.onclick = () => move(b.dataset.up, -1));
+      root.querySelectorAll('[data-down]').forEach((b) => b.onclick = () => move(b.dataset.down, 1));
+      root.querySelectorAll('[data-rm]').forEach((b) => b.onclick = () => { const i = find(b.dataset.rm); if (i >= 0) d.members.splice(i, 1); drawChosen(); wirePicksSync(); });
+      let dragK = null;   // drag to change the order
+      root.querySelectorAll('.rg-m').forEach((li) => {
+        li.ondragstart = (e) => { dragK = li.dataset.k; li.classList.add('drag'); try { e.dataTransfer.setData('text/plain', dragK); e.dataTransfer.effectAllowed = 'move'; } catch { /* old browser */ } };
+        li.ondragend = () => { li.classList.remove('drag'); root.querySelectorAll('.rg-m.over').forEach((x) => x.classList.remove('over')); };
+        li.ondragover = (e) => { e.preventDefault(); li.classList.add('over'); };
+        li.ondragleave = () => li.classList.remove('over');
+        li.ondrop = (e) => { e.preventDefault(); const k = dragK || (e.dataTransfer && e.dataTransfer.getData('text/plain')); const i = find(k); const j = find(li.dataset.k);
+          if (i < 0 || j < 0 || i === j) return; const [m] = d.members.splice(i, 1); d.members.splice(j, 0, m); drawChosen(); };
+      });
+    }
+    function wirePicksSync() { root.querySelectorAll('[data-pick]').forEach((c) => { c.checked = find(c.dataset.pick) >= 0; }); }
+    function wirePicks() {
+      root.querySelectorAll('[data-pick]').forEach((c) => c.onchange = () => {
+        const k = c.dataset.pick; const i = find(k);
+        if (c.checked && i < 0) { if (k.startsWith('u:')) d.members.push({ user_id: k.slice(2), name: nameOf(k.slice(2)), extension: extOf(k.slice(2)) });
+          else { const ph = rgPhones().find((p) => p.ext === k.slice(2)); d.members.push({ phone_ext: k.slice(2), name: ph ? ph.name : `Desk phone ${k.slice(2)}`, extension: k.slice(2) }); } }
+        if (!c.checked && i >= 0) d.members.splice(i, 1);
+        drawChosen();
+      });
+    }
+    wireChosen(); wirePicks();
+    const q = root.querySelector('#rgq'); q.oninput = () => { S.rg.q = q.value; root.querySelector('#rgpicks').innerHTML = rgPicksHtml(d); wirePicks(); };
+    root.querySelectorAll('input[name=rgst]').forEach((r) => r.onchange = () => { d.strategy = r.value; root.querySelector('#rgeach').hidden = d.strategy === 'all'; root.querySelector('#rgchosen').classList.toggle('rg-ordered', d.strategy !== 'all'); });
+    const num = (id, k) => { const i = root.querySelector(id); if (i) i.oninput = () => { d[k] = i.value === '' ? '' : Number(i.value); }; };
+    num('#rgsec', 'ring_seconds'); num('#rgto', 'timeout_seconds');
+    const nm = root.querySelector('#rgname'); if (nm) nm.oninput = () => { d.name = nm.value; };
+    const ex = root.querySelector('#rgext'); if (ex) ex.oninput = () => { ex.value = ex.value.replace(/[^0-9]/g, '').slice(0, 3); d.extension = ex.value; const m = rgExtMsg(d); root.querySelector('#rgxmsg').textContent = m; ex.setAttribute('aria-invalid', m ? 'true' : 'false'); };
+    const fb = root.querySelector('#rgfb'); const fg = root.querySelector('#rgfbg'); const fu = root.querySelector('#rgfbu');
+    fb.onchange = () => { d.fallback = fb.value; fg.hidden = d.fallback !== 'group'; fu.hidden = d.fallback !== 'person'; };
+    fg.onchange = () => { d.fallback_group = fg.value || null; }; fu.onchange = () => { d.fallback_user = fu.value || null; };
+    on('#rgdel', async () => {
+      if (!(await ask(`Delete ${d.name} (${d.extension})? Calls to ${d.extension} won't ring anyone after this.`, { yes: 'Delete group', danger: true }))) return;
+      try { await api.ringGroupDelete(S.team.id, d.id); S.groups = await api.ringGroups(S.team.id); S.rg.sel = null; S.rg.draft = null; S.rg.msg = `${esc(d.name)} is deleted.`; } catch (e) { S.rg.err = plainError(e); }
+      redraw();
+    });
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const err = (m) => { S.rg.err = m; const p = root.querySelector('#rgerr'); p.textContent = m; p.hidden = false; p.scrollIntoView({ block: 'nearest' }); };
+      if (!d.branch_id) { if (!String(d.name || '').trim()) return err('Give the group a name, e.g. Sales.'); const m = rgExtMsg(d); if (m) return err(m); }
+      if (!(d.ring_seconds >= 5 && d.ring_seconds <= 120)) return err('Ring each person for 5 to 120 seconds.');
+      if (!(d.timeout_seconds >= 5 && d.timeout_seconds <= 300)) return err('Choose 5 to 300 seconds for "If nobody answers".');
+      if (d.fallback === 'group' && !d.fallback_group) return err('Choose the group to try.');
+      if (d.fallback === 'person' && !d.fallback_user) return err('Choose the person to ring.');
+      const btn = root.querySelector('#rgsave'); btn.disabled = true;
+      try {
+        const id = await api.ringGroupSave(S.team.id, d.id, { name: String(d.name || '').trim(), extension: String(d.extension || ''), strategy: d.strategy, ring_seconds: d.ring_seconds,
+          timeout_seconds: d.timeout_seconds, fallback: d.fallback, fallback_group: d.fallback_group, fallback_user: d.fallback_user },
+          d.members.map((m) => (m.user_id ? { user_id: m.user_id } : { phone_ext: String(m.phone_ext), phone_name: m.name || '' })));
+        S.groups = await api.ringGroups(S.team.id);
+        const g = S.groups.find((x) => x.id === id) || S.groups.find((x) => String(x.extension) === String(d.extension));
+        S.rg.sel = null; S.rg.draft = null; S.rg.err = '';
+        S.rg.msg = g ? `${ic('check')}<span>Saved. ${esc(g.name)}${g.extension ? ` (${g.extension})` : ''} ${g.members.length ? `rings ${esc(g.members.map(firstName).join(', '))} · ${esc(STRAT[g.strategy])}` : 'has nobody chosen yet, so calls go to missed'}.</span>` : 'Saved.';
+        redraw();
+      } catch (x) { btn.disabled = false; err(plainError(x)); }
+    };
+  }
+
   // Owners and admins: branches, who's in each, their join codes, and everyone's extension.
   function manageBranches() {
-    const body = () => `<h3>Branches and extensions</h3><p>Each branch has its own join code: staff who join with it go straight into that branch with the next extension.</p>
+    const body = () => `<h3>Branches and extensions</h3><p>Each branch has its own join code: staff who join with it go straight into that branch with the next extension.${Array.isArray(S.groups) ? ' Who answers each branch\'s number is chosen in <button type="button" class="linkbtn" id="brrg">Ring groups</button>: being in a branch doesn\'t make someone ring.' : ''}</p>
       ${S.branches.map((b) => `<details class="brm"><summary><b>${esc(b.name)}</b>${b.extension ? ` · ${b.extension}` : ''} <span class="code sm">${esc(b.code || '')}</span></summary>
         <div class="pick">${S.people.map((p) => `<label class="pk"><input type="checkbox" data-br="${b.id}" value="${p.user_id}"${b.people.includes(p.user_id) ? ' checked' : ''}>${av(p.user_id, p.display_name)}<span>${esc(p.display_name)}</span></label>`).join('')}</div>
         <div class="row2"><button class="btn sm" data-save="${b.id}">Save who's in it</button><button class="btn sm" data-code="${b.id}">New join code</button></div></details>`).join('')}
@@ -3304,10 +3590,11 @@
       <div class="exts">${S.people.map((p) => `<label>${av(p.user_id, p.display_name)}<span>${esc(p.display_name)}</span><input type="number" min="10" max="9999" value="${p.extension || ''}" data-ext="${p.user_id}" aria-label="Extension for ${esc(p.display_name)}"></label>`).join('')}</div>
       <div class="mfoot"><button class="btn" id="cl">Close</button><button class="btn p" id="sx">Save extensions</button></div>`;
     modal(body(), function wire(d, close) {
-      const refresh = async () => { [S.people, S.branches] = await Promise.all([api.people(S.team.id), api.branches(S.team.id)]); renderSide();
+      const refresh = async () => { [S.people, S.branches, S.groups] = await Promise.all([api.people(S.team.id), api.branches(S.team.id), api.ringGroups(S.team.id).catch(() => null)]); renderSide();
         d.querySelector('.mcard').innerHTML = body(); wire(d, close); };
       const run = async (fn) => { try { await fn(); } catch (err) { tell(plainError(err)); } await refresh(); };
       d.querySelector('#cl').onclick = close;
+      const rg = d.querySelector('#brrg'); if (rg) rg.onclick = () => { close(); openRingGroups('manage'); };
       d.querySelectorAll('[data-save]').forEach((b) => b.onclick = () => run(async () => {
         const br = S.branches.find((x) => x.id === b.dataset.save);
         const now = [...d.querySelectorAll(`input[data-br="${br.id}"]:checked`)].map((x) => x.value);
@@ -4295,7 +4582,10 @@
     // covers the chat), a card for an incoming call, and a bigger window with video.
     function box() { let b = document.getElementById('callbox'); if (!b) { b = document.createElement('div'); b.id = 'callbox'; document.body.appendChild(b); } return b; }
     const fmtTime = (ms) => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
-    const extLine = () => { const e = call.peer ? extOf(call.peer) : call.branch ? (S.branches.find((b) => b.id === call.branch) || {}).extension : null; return e ? `Ext. ${e}` : ''; };
+    const extLine = () => { const e = call.peer ? extOf(call.peer) : call.group ? (groupById(call.group) || {}).extension : null; return e ? `Ext. ${e}` : ''; };
+    // a group call: who's ringing now ("Ringing Ana", "Ringing Ana, Sam", "Trying Sales: ringing Tom")
+    const ringingLine = () => { const r = (call.ringing || []).map((u) => String(nameOf(u)).split(/\s+/)[0]); const who = r.length > 3 ? `${r.slice(0, 3).join(', ')} +${r.length - 3}` : r.join(', ');
+      return `${call.trying ? `Trying ${esc(call.trying)}: ` : ''}${who ? `ringing ${esc(who)}` : 'Calling'}…`; };
     function draw() {
       const b = box();
       const pill = !!call && call.status !== 'incoming' && !(call.cam || call.remoteVideo);
@@ -4303,7 +4593,7 @@
       if (!call) { b.innerHTML = ''; b.className = ''; return; }
       const who = call.peer ? nameOf(call.peer) : call.label; const ext = extLine();
       const sub = call.status === 'incoming' ? `${ext ? ext + ' · ' : ''}Incoming call${call.via ? ` to ${esc(call.via)}` : ''}`
-        : call.status === 'calling' ? `${ext ? ext + ' · ' : ''}Calling${call.branch ? ' everyone' : ''}…` : call.status === 'connecting' ? 'Connecting…'
+        : call.status === 'calling' ? `${ext ? ext + ' · ' : ''}${call.gp ? ringingLine() : 'Calling…'}` : call.status === 'connecting' ? 'Connecting…'
         : call.status === 'live' ? `${ext ? ext + ' · ' : ''}<span id="ctime">${fmtTime(Date.now() - call.startedAt)}</span>${call.held ? ' · <b class="chold">On hold</b>' : ''}${call.remoteHeld ? ' · <b class="chold">They put you on hold</b>' : ''}${call.sim ? ' · demo call, no sound' : ''}`
         : esc(call.note || 'Call ended');
       const live = call.status === 'live';
@@ -4333,8 +4623,8 @@
       if (typeof Presence !== 'undefined' && S.team) Presence.changed();
     }
     // Someone on Busy / Do not disturb, At lunch or Unavailable: their phone doesn't ring, and you're told so.
-    function notNow(label, why) {
-      const c = { id: uuid(), status: 'ended', note: `${label} is ${why}, so the call didn't ring. Send a message instead.` }; call = c; draw();
+    function notNow(label, why, text) {
+      const c = { id: uuid(), status: 'ended', note: text || `${label} is ${why}, so the call didn't ring. Send a message instead.` }; call = c; draw();
       setTimeout(() => { if (call === c) { call = null; draw(); } }, 4500);
     }
     setInterval(() => { const t = document.getElementById('ctime'); if (t && call && call.startedAt) t.textContent = fmtTime(Date.now() - call.startedAt); }, 1000);
@@ -4373,36 +4663,111 @@
       catch (e) { throw new Error('Riyeser Link needs your microphone for calls. Allow it when asked (or in the browser\'s site settings), then try again.'); }
     }
 
-    // ---- start a call to a person ({user}) or a branch ({branch})
+    // ---- start a call to a person ({user}) or a ring group ({group}; {branch} = that branch's number)
     async function start(t) {
       if (!S.features.calls) return upsell();
       if (call && call.status !== 'ended') return;
-      let targets; let label;
-      if (t.branch) { const b = S.branches.find((x) => x.id === t.branch); if (!b) return;
-        targets = b.people.filter((u) => u !== S.user.id); label = b.name;
-        if (!targets.length) return tell(`Nobody else is in ${b.name} yet. The owner or an admin adds people in Management, Branches and extensions.`);
-        targets = targets.filter((u) => !Presence.quiet(u));
-        if (!targets.length) return notNow(`Everyone in ${b.name}`, 'busy or away from their desk'); }
-      else { if (Presence.quiet(t.user)) { const p = S.presence[t.user] || {};
-          return notNow(nameOf(t.user), { lunch: 'at lunch', unavailable: 'unavailable' }[normManual(p.manual || p.status)] || 'busy (Do not disturb)'); }
-        targets = [t.user]; label = nameOf(t.user); }
-      call = { id: uuid(), dir: 'out', status: 'calling', targets: new Set(targets), label, branch: t.branch || null, peer: t.user || null, pendingIce: [], wantVideo: !!(t.video && t.user), at: new Date().toISOString() };
+      if (t.branch && !t.group) { const g = groupOfBranch(t.branch); if (!g) return; t = { group: g.id }; }
+      if (t.group) return startGroup(t.group);
+      if (Presence.quiet(t.user)) { const p = S.presence[t.user] || {};
+        return notNow(nameOf(t.user), { lunch: 'at lunch', unavailable: 'unavailable' }[normManual(p.manual || p.status)] || 'busy (Do not disturb)'); }
+      const targets = [t.user]; const label = nameOf(t.user);
+      call = { id: uuid(), dir: 'out', status: 'calling', targets: new Set(targets), label, branch: null, peer: t.user, pendingIce: [], wantVideo: !!t.video, at: new Date().toISOString() };
       draw();
       try { call.local = await mic(); } catch (e) { call = null; draw(); return tell(e.message); }
       if (!call) return;
       tone('out');
-      const me = call;
-      for (const to of targets) {
-        api.signal(S.team.id, call.id, to, 'ring', { from_name: myName(), via: t.branch ? label : null }).catch((e) => {
-          // the database refused: they've just chosen Busy / Do not disturb, At lunch or Unavailable
-          if (call !== me || call.status !== 'calling') return;
-          if (!/row-level|policy|403/i.test(String(e && e.message))) { console.warn('call signal', e); return; }
-          call.targets.delete(to); if (!call.targets.size) { clearTimeout(call.timeout); finish(`${label} can't take calls right now (busy or away)`, true); }
-        });
-      }
+      ringTo(call, targets, null);
       // M9: nobody it rings is online: 8 seconds (another tab may still wake up), then "… isn't online"; else 30 seconds
       const allOff = !Presence.off && targets.every((u) => Presence.info(u).status === 'offline');
       call.timeout = setTimeout(() => { if (call && call.status === 'calling') { for (const to of call.targets) send(to, 'cancel'); finish(allOff ? `${label} isn't online` : 'No answer', true); } }, allOff ? 8000 : 30000);
+    }
+    // Ring these people now (a group call says which group, so the database only lets its chosen people ring).
+    function ringTo(c, users, gid) {
+      for (const to of users) {
+        c.targets.add(to);
+        api.signal(S.team.id, c.id, to, 'ring', { from_name: myName(), via: gid ? c.label : null, ...(gid && !String(gid).startsWith('b:') ? { group: gid } : {}) }).catch((e) => {
+          // the database refused: they've just chosen Busy / Do not disturb, At lunch or Unavailable (or aren't chosen for the group any more)
+          if (call !== c || c.status !== 'calling') return;
+          if (!/row-level|policy|403/i.test(String(e && e.message))) { console.warn('call signal', e); return; }
+          c.targets.delete(to); if (!c.targets.size) { if (c.gp) stepDone(c); else { clearTimeout(c.timeout); finish(`${c.label} can't take calls right now (busy or away)`, true); } }
+        });
+      }
+    }
+
+    // ---- a ring group: only the people chosen for it (ring_group_plan), all at once, one after another, or starting
+    // with the next person each time. Busy / Do not disturb, At lunch, Unavailable and On a call are skipped. If nobody
+    // answers in the group's time: another group, one person, or a missed call (3 groups at most, never one twice).
+    async function groupPlan(g) {
+      let p = null;
+      if (!g.legacy) p = await api.ringPlan(S.team.id, g.id);
+      if (!p) {   // a database without ring_group_plan: the group as listed (and everyone in a branch on an older database)
+        let ids = (g.members || []).filter((m) => m.user_id && m.user_id !== S.user.id).map((m) => m.user_id);
+        if (g.strategy === 'rotate' && ids.length) { S.rot = S.rot || {}; const k = (S.rot[g.id] || 0) % ids.length; ids = [...ids.slice(k), ...ids.slice(0, k)]; S.rot[g.id] = k + 1; }
+        p = { ...g, ring: ids, skipped: [] };
+      }
+      return p;
+    }
+    function usePlan(c, p) {
+      const G = c.gp; const quiet = (p.ring || []).filter((u) => u === S.user.id || Presence.quiet(u));
+      Object.assign(G, { groupId: p.id, strategy: p.strategy || 'all', queue: (p.ring || []).filter((u) => !quiet.includes(u)),
+        stepMs: ((p.strategy === 'order' || p.strategy === 'rotate') ? Math.min(p.ring_seconds || 15, p.timeout_seconds || 30) : (p.timeout_seconds || 30)) * 1000,
+        timeoutMs: (p.timeout_seconds || 30) * 1000, deadline: Date.now() + (p.timeout_seconds || 30) * 1000,
+        fallback: p.fallback === 'group' && p.fallback_group ? { type: 'group', id: p.fallback_group } : p.fallback === 'person' && p.fallback_user ? { type: 'person', user: p.fallback_user } : null });
+      G.tried.add(p.id); G.chosen += (p.ring || []).length + (p.skipped || []).length; G.skipped += (p.skipped || []).length + quiet.length;
+    }
+    async function startGroup(gid) {
+      const g = groupById(gid); if (!g) return;
+      call = { id: uuid(), dir: 'out', status: 'calling', targets: new Set(), label: g.name, group: g.id, branch: g.branch_id || null, peer: null, pendingIce: [], at: new Date().toISOString(),
+        gp: { tried: new Set(), hops: 0, chosen: 0, skipped: 0, rang: 0, queue: [] } };
+      const c = call; draw();
+      let p; try { p = await groupPlan(g); } catch (e) { call = null; draw(); return tell(plainError(e)); }
+      if (call !== c) return;
+      usePlan(c, p);
+      if (!c.gp.queue.length && !c.gp.fallback) {   // nobody to ring: say why, and it's a missed call
+        call = null; draw();
+        if (!c.gp.chosen) { logCall({ id: c.id, dir: 'out', group: g.id, branch: g.branch_id || null, label: g.name, at: c.at, dur: 0, result: 'no answer' });
+          return notNow('', '', `Nobody is chosen to answer ${g.name}${g.extension ? ` (${g.extension})` : ''} yet, so it didn't ring. ${isAdmin() ? 'Choose who answers in Management › Ring groups.' : 'The owner or an admin chooses who answers it.'}`); }
+        return notNow(`Everyone chosen for ${g.name}`, 'busy or away from their desk');
+      }
+      try { c.local = await mic(); } catch (e) { call = null; draw(); return tell(e.message); }
+      if (call !== c) return;
+      tone('out');
+      ringNext(c);
+    }
+    // The current step is over (its time is up, or everyone in it said no): stop it ringing, then the next.
+    function stepDone(c) {
+      if (call !== c || c.status !== 'calling') return;
+      clearTimeout(c.timeout);
+      for (const to of c.targets) send(to, 'cancel');
+      c.targets.clear();
+      ringNext(c);
+    }
+    async function ringNext(c) {
+      const G = c.gp;
+      while (call === c && c.status === 'calling') {
+        if (G.queue.length && Date.now() < G.deadline - 300) {
+          const step = G.strategy === 'all' ? G.queue.splice(0) : [G.queue.shift()];
+          G.rang += step.length; c.ringing = step; draw();
+          ringTo(c, step, G.groupId);
+          const off = !Presence.off && step.every((u) => Presence.info(u).status === 'offline');
+          c.timeout = setTimeout(() => stepDone(c), Math.max(500, Math.min(off ? 8000 : G.stepMs, G.deadline - Date.now())));
+          return;
+        }
+        const fb = G.fallback; G.fallback = null; G.queue = [];
+        if (!fb || G.hops >= 3) break;
+        G.hops++;
+        if (fb.type === 'group') {
+          const o = groupById(fb.id); if (!o || G.tried.has(o.id)) break;
+          let p; try { p = await groupPlan(o); } catch { break; }
+          if (call !== c) return;
+          usePlan(c, p); c.trying = o.name;
+        } else if (fb.type === 'person') {
+          if (fb.user === S.user.id || Presence.quiet(fb.user)) continue;
+          Object.assign(G, { strategy: 'all', queue: [fb.user], stepMs: G.timeoutMs, deadline: Date.now() + G.timeoutMs }); c.trying = nameOf(fb.user);
+        }
+      }
+      if (call === c && c.status === 'calling') finish(G.rang ? 'No answer' : `Everyone chosen for ${c.label} is busy or away`, true);
     }
 
     function newPc() {
@@ -4459,7 +4824,8 @@
         }
         if (k === 'accept' && from !== call.peer) { api.signal(S.team.id, call.id, from, 'taken').catch(() => {}); return; }
         if ((k === 'decline' || k === 'busy') && call.status === 'calling') {
-          call.targets.delete(from); if (!call.targets.size) { clearTimeout(call.timeout); finish(k === 'busy' ? `${call.label} is on another call` : pl.dnd || pl.mic ? `${call.label} is busy and can't take calls right now` : `${call.label} declined the call`, true); }
+          call.targets.delete(from); if (!call.targets.size && call.gp) { stepDone(call); return; }
+          if (!call.targets.size) { clearTimeout(call.timeout); finish(k === 'busy' ? `${call.label} is on another call` : pl.dnd || pl.mic ? `${call.label} is busy and can't take calls right now` : `${call.label} declined the call`, true); }
           return;
         }
         if (k === 'answer' && call.pc) { await call.pc.setRemoteDescription(pl); await flushIce(); return; }
@@ -4501,7 +4867,7 @@
       const c = call; call = null; stopTone(); clearTimeout(c.timeout);
       const result = c.startedAt ? 'answered' : c.dir === 'in' ? (note === 'Declined' ? 'declined' : note === 'Answered by someone else' ? 'elsewhere' : 'missed')
         : note === 'Cancelled' ? 'cancelled' : / declined the call$/.test(note) ? 'declined' : / isn't online$/.test(note) ? 'offline' : 'no answer';
-      try { logCall({ id: c.id, dir: c.dir, peer: c.peer || null, branch: c.branch || null, label: c.peer ? null : c.label, via: c.via || null, at: c.at || new Date().toISOString(),
+      try { logCall({ id: c.id, dir: c.dir, peer: c.peer || null, branch: c.branch || null, group: c.group || null, label: c.peer ? null : c.label, via: c.via || null, at: c.at || new Date().toISOString(),
         dur: c.startedAt ? Math.round((Date.now() - c.startedAt) / 1000) : 0, result }); } catch { /* history is a nice-to-have */ }
       try { c.pc && c.pc.close(); } catch { /* closed */ }
       (c.local ? c.local.getTracks() : []).forEach((t) => t.stop()); c.camTrack && c.camTrack.stop();
@@ -4510,11 +4876,11 @@
       document.title = NAME; chatTitle();
       if (c.dir === 'out' && (c.peer || c.targets) && !DEMO) api.tidyCall(c.id).catch(() => {});
       if (c.dir === 'out' && c.peer) {
-        const text = c.startedAt ? `📞 Call · ${fmtTime(Date.now() - c.startedAt)}` : `📞 Missed call${c.branch ? ` to ${c.label}` : ''}`;
+        const text = c.startedAt ? `📞 Call · ${fmtTime(Date.now() - c.startedAt)}` : `📞 Missed call${c.group ? ` to ${c.label}` : ''}`;
         try { const dm = await api.openDm(S.team.id, c.peer); const m = await api.send(S.team.id, dm, text);
           if (S.ch && S.ch.id === dm && m && !S.msgs.find((x) => x.id === m.id)) { S.msgs.push(m); renderMsgs(true); }
           if (!S.chans.find((x) => x.id === dm)) { await loadChans(); renderSide(); } } catch { /* chat note is a nice-to-have */ }
-      } else if (c.dir === 'out' && missed && c.branch) {
+      } else if (c.dir === 'out' && missed && c.group) {
         const g = S.chans.find((x) => x.name === 'general'); if (g) api.send(S.team.id, g.id, `📞 Missed call to ${c.label}`).catch(() => {});
       }
     }

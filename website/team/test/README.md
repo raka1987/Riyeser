@@ -8,8 +8,18 @@
   `website/public` on port 8090, then run them with node. The tests use the main address, /link/;
   `oldaddress-test.js` checks the old address, /team/, still works (`?signup`, `?join=`, a sign-in link's `#...`).
 - `private-test.js`: private chats with chosen people. `calls-test.js`: real calls between browser tabs in the
-  demo (fake microphone and camera): person to person, a branch (first to answer), declining, the dial pad,
-  branches and extensions, and Riyeser Link paused.
+  demo (fake microphone and camera): person to person, a ring group (first to answer), declining, the dial pad,
+  branches and extensions, and Riyeser Link paused. Ring groups with chosen members: Management's one-time "Choose who
+  answers each branch number" (Choose now, Keep as they are), only the chosen ring (someone in the branch but not chosen
+  doesn't), a new group with its own number (a person's or a branch's number refused), Ring in order (the next after its
+  seconds), Rotate (someone else first on the next call), Do not disturb skipped, nobody chosen → on to another group,
+  a new branch with nobody chosen (not rung, the caller is told), staff can't open it; and the Ring groups page, the
+  Management notice and the Calls card at 1280 at 125%, 1366, 1920 and 390, light and dark. Exits 1 on failure.
+  `rules-test.sql` covers the database side: the upgrade (each branch's people, "check these", safe to repeat), a new
+  branch with nobody chosen, `ring_group_save` (order, desk phones, numbers that clash, who may), `ring_group_plan`
+  (only the chosen, in order, rotate, Do not disturb / Busy / At lunch / Unavailable / On a call skipped, the fallback),
+  a group ring only reaching the chosen (`call_signals`), `ring_group_delete`, `ring_groups_confirm`, leaving the
+  business, and another business seeing and changing nothing. Riyeser Link Office: `desktop/test/link-ringgroups.test.js`.
 - `company-test.js`: Company ID, join requests (approve with job role and branch), people & access, company details,
   linked PCs, and ask-to-join → waiting → approved against a pretend server.
 - `mfa-test.js`: two-step sign-in (set up with a QR code, the reminder for owners/admins, admin screens waiting for

@@ -107,6 +107,7 @@ test('sync from Riyeser Link, then keep working from the saved copy with no inte
   fs.writeFileSync(path.join(appData, 'Riyeser', 'company.json'), JSON.stringify({ name: 'Sample Trading Co', mode: 'online', workspace_id: 'ws-1' }));
   const calls = [];
   const online = { session: { access_token: 'x' }, async call(p) { calls.push(p); return p.includes('/members') ? [{ user_id: 'u1', display_name: 'Alex Sample', extension: 101 }, { user_id: 'u2', display_name: 'Bo Example', extension: 102 }]
+    : p.includes('ring_groups_list') ? [{ id: 'g1', name: 'Head office', extension: 100, members: [{ user_id: 'u1' }, { user_id: 'u2' }] }]
     : [{ id: 'b1', name: 'Head office', extension: 100, branch_members: [{ user_id: 'u1' }, { user_id: 'u2' }] }]; }, refreshLicence: async () => null };
   try {
     const directory = new Directory(new Store(dir));

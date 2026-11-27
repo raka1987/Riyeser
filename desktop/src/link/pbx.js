@@ -1,6 +1,6 @@
 // Riyeser Link Office's SIP server: a registrar and a record-routing proxy for desk phones on the office network.
 //   REGISTER   digest authentication (MD5, qop=auth); each extension has its own strong password
-//   INVITE     routed by the dial plan to a person's phones, or to every phone in a ring group at once
+//   INVITE     routed by the dial plan to a person's phones, or to a ring group's chosen phones (all at once, in order or rotating: ringgroups.js)
 //              (the first to answer wins and the others are cancelled); 486 busy / 480 not connected / 404
 //   in-dialog  ACK, BYE, re-INVITE (hold), REFER (transfer), INFO, UPDATE, NOTIFY pass through via Record-Route
 //   CANCEL     cancels every phone still ringing
@@ -14,6 +14,7 @@ const crypto = require('crypto');
 const { EventEmitter } = require('events');
 const sip = require('./sip');
 const dialplan = require('./dialplan');
+const ringgroups = require('./ringgroups');
 const { isPrivate, sameSubnet, v4 } = require('./netinfo');
 
 const T1 = 500; const T2 = 4000; const TIMEOUT = 64 * T1;
@@ -430,22 +431,59 @@ class Pbx extends EventEmitter {
       if (this.directory.dnd(r.ext)) return this.missed(req, ctx, caller, r, 486, 'Busy Here (Do Not Disturb)', 'busy');
       targets = this.contactsOf(r.ext).map((b) => ({ binding: b, ext: r.ext }));
       if (!targets.length) return this.missed(req, ctx, caller, r, 480, 'Temporarily Unavailable (phone not connected)', 'unavailable');
-    } else {
-      const g = this.directory.group(r.ext);
-      const members = (g.members || []).filter((m) => m !== caller);
-      const free = members.filter((m) => !this.directory.dnd(m));
-      targets = free.flatMap((m) => this.contactsOf(m).map((b) => ({ binding: b, ext: m })));
-      if (!targets.length) {
-        return free.length || !members.length ? this.missed(req, ctx, caller, r, 480, 'Temporarily Unavailable (no phones connected)', 'unavailable')
-          : this.missed(req, ctx, caller, r, 486, 'Busy Here (Do Not Disturb)', 'busy');
-      }
-    }
+    } else return this.ringGroup(req, ctx, caller, r);
     ctx.call = this.newCall(req, caller, r);
     this.fork(ctx, targets.map((t) => ({ dest: t.binding.source, uri: t.binding.contact, ext: t.ext })), { recordRoute: true });
     ctx.timerC = setTimeout(() => { ctx.noAnswer = true; this.cancelBranches(ctx); }, this.ringTimeout);
     ctx.timerC.unref && ctx.timerC.unref();
     this.emit('change');
   }
+  // ---------- ring groups (ringgroups.js): only the chosen phones, all at once, in order or rotating ----------
+  ringGroup(req, ctx, caller, r) {
+    ctx.group = { caller, tried: new Set(), plan: null, i: 0, deadline: 0, skipped: [], members: 0 };
+    this.groupLoad(ctx, this.directory.group(r.ext), r.ext);
+    ctx.call = this.newCall(req, caller, r);
+    if (this.groupNext(ctx)) return this.emit('change');
+    const G = ctx.group;   // nobody could be rung at all
+    const [status, reason, result] = !G.members ? [480, 'Temporarily Unavailable (nobody chosen for this group)', 'unavailable']
+      : G.skipped.length && G.skipped.every((x) => x.why === 'dnd') ? [486, 'Busy Here (Do Not Disturb)', 'busy']
+        : G.skipped.length && G.skipped.every((x) => x.why !== 'not_connected') ? [486, 'Busy Here (everyone is on a call)', 'busy']
+          : [480, 'Temporarily Unavailable (no phones connected)', 'unavailable'];
+    this.reply(req, status, reason);
+    this.endCall(ctx.call, result);
+  }
+  groupLoad(ctx, g, key) {
+    const G = ctx.group;
+    if (!g || G.tried.has(key) || G.tried.size > 3) return false;
+    G.tried.add(key);
+    this.rotation = this.rotation || new Map();
+    const turn = this.rotation.get(key) || 0;
+    const p = ringgroups.plan(g, { caller: G.caller, dnd: (m) => this.directory.dnd(m), busy: (m) => this.onACall(m), contactsOf: (m) => this.contactsOf(m), turn, defaultMs: this.ringTimeout });
+    if (p.strategy === 'rotate' && p.members) this.rotation.set(key, turn + 1);
+    Object.assign(G, { plan: p, i: 0, deadline: Date.now() + p.totalMs, members: G.members + p.members, skipped: [...G.skipped, ...p.skipped] });
+    return true;
+  }
+  /** Ring the group's next step, or move on to its fallback. false: there's nobody left to ring. */
+  groupNext(ctx) {
+    const G = ctx.group;
+    if (ctx.cancelled || ctx.answered || ctx.finalSent) return false;
+    while (G.plan) {
+      if (G.i < G.plan.steps.length && Date.now() < G.deadline) {
+        const step = G.plan.steps[G.i++];
+        this.fork(ctx, step.map((t) => ({ dest: t.binding.source, uri: t.binding.contact, ext: t.ext })), { recordRoute: true });
+        clearTimeout(ctx.timerC);
+        ctx.timerC = setTimeout(() => { ctx.noAnswer = true; this.cancelBranches(ctx); }, Math.max(1, Math.min(G.plan.stepMs, G.deadline - Date.now())));
+        ctx.timerC.unref && ctx.timerC.unref();
+        return true;
+      }
+      const fb = G.plan.fallback; G.plan = null;
+      if (fb && fb.type === 'group') this.groupLoad(ctx, this.directory.group(fb.ext), fb.ext);
+      else if (fb && fb.type === 'person' && this.directory.person(fb.ext)) this.groupLoad(ctx, { members: [fb.ext], strategy: 'all' }, `person:${fb.ext}`);
+    }
+    return false;
+  }
+  /** On a call right now (talking, or dialling out), on any of their phones. */
+  onACall(ext) { return this.callsInProgress().some((c) => c.from === String(ext) || c.answeredBy === String(ext)); }
   /** A call that couldn't ring anyone: answered here, and noted in recent calls. */
   missed(req, ctx, caller, r, status, reason, result) {
     const call = this.newCall(req, caller, r);
@@ -563,7 +601,7 @@ class Pbx extends EventEmitter {
     }
     if (!first || ctx.finalSent) return;
     if (res && (!ctx.best || rank(status) < rank(ctx.best.status))) ctx.best = res;
-    if (ctx.branches.every((x) => x.final)) this.finalUp(ctx);
+    if (ctx.branches.every((x) => x.final) && !(ctx.group && this.groupNext(ctx))) this.finalUp(ctx);
   }
   finalUp(ctx) {
     if (ctx.finalSent) return;
