@@ -342,6 +342,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
+      - name: A test network adapter (Microsoft loopback, so the runner's own adapter is never touched)
+        run: |
+          choco install devcon.portable -y --no-progress | Out-Null
+          $devcon = (Get-ChildItem "$env:ChocolateyInstall\lib\devcon.portable" -Recurse -Filter "devcon*64*.exe" | Select-Object -First 1).FullName
+          if (-not $devcon) { $devcon = (Get-ChildItem "$env:ChocolateyInstall\lib\devcon.portable" -Recurse -Filter "devcon*.exe" | Select-Object -First 1).FullName }
+          & $devcon install "$env:windir\inf\netloop.inf" "*MSLOOP"
+          Start-Sleep -Seconds 5
+          Get-NetAdapter | Format-Table Name, InterfaceDescription, Status -AutoSize
+          $a = Get-NetAdapter | Where-Object InterfaceDescription -like "*Loopback*" | Select-Object -First 1
+          if (-not $a) { throw "No loopback adapter" }
+          Set-NetIPInterface -InterfaceAlias $a.Name -Dhcp Disabled
+          Enable-NetAdapter -Name $a.Name -Confirm:$false
       - name: Link Office follows a new address
         run: |
           # bounded here too: whatever happens, the log is shown and the leftover helpers stopped

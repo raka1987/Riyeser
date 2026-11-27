@@ -1,7 +1,9 @@
 // The Windows check for Riyeser Link Office 1.2.0's "the PC's address changed" handling, on a real network adapter.
 // Run on a throwaway Windows machine as an administrator (the GitHub runner): `node scripts/link-ip-check.js <out.json>`.
-//  1. Adds a test address (192.168.77.20/24, SkipAsSource, so the machine's own traffic is untouched) to the adapter
-//     with the router, and starts the Link Office engine on it (spare SIP and settings ports; riyeser-office.local on
+//  1. Adds a test address (192.168.77.20/24) to a Microsoft loopback adapter installed for this check (the workflow
+//     installs it: the runner's own adapter is never touched, because adding an address there turns its DHCP off and
+//     cuts the machine off). The loopback adapter counts as virtual, so it's chosen the way an owner would (Settings →
+//     Advanced → adapter), and the Link Office engine starts on it (spare SIP and settings ports; riyeser-office.local on
 //     5353), with Windows' network-change events and a pretend Riyeser Link online that records the heartbeats.
 //     A simulated Yealink desk phone registers.
 //  2. Adds 192.168.77.35 and removes .20, like a router giving the PC a new address. Checks the engine moved to .35
@@ -49,9 +51,9 @@ setTimeout(() => { report.error = report.error || `stopped after 6 minutes at: $
     step('reading the adapters');
     const rows = await win.readNetConfig();
     report.adapters = rows.map((r) => ({ alias: r.alias, description: r.description, address: r.address, prefix: r.prefix, gateway: r.gateway, dhcp: r.dhcp }));
-    const main = rows.find((r) => r.gateway) || rows[0];
-    if (!main) throw new Error('No network adapter found');
-    alias = main.alias; step(`adapter with the router: ${alias} (${main.description}) ${main.address}/${main.prefix} via ${main.gateway}`);
+    alias = ps("(Get-NetAdapter | Where-Object InterfaceDescription -like '*Loopback*' | Select-Object -First 1).Name").trim();
+    if (!alias) throw new Error('No loopback test adapter: the workflow installs one first');
+    step(`test adapter: ${alias}; the runner's own: ${rows.filter((r) => r.gateway).map((r) => `${r.alias} ${r.address}`).join(', ')}`);
     const addIp = (ip) => ps(`New-NetIPAddress -InterfaceAlias '${alias}' -IPAddress ${ip} -PrefixLength 24 -SkipAsSource $true -PolicyStore ActiveStore | Out-Null`);
     const delIp = (ip) => { try { ps(`Remove-NetIPAddress -InterfaceAlias '${alias}' -IPAddress ${ip} -Confirm:$false -ErrorAction SilentlyContinue`); } catch { /* not there */ } };
     for (const ip of [A, B, C]) delIp(ip);
@@ -63,6 +65,7 @@ setTimeout(() => { report.error = report.error || `stopped after 6 minutes at: $
     svc = new PhoneService({ store, appData: dir, sipPort: 0, httpPort: 0, tcp: false, multicast: false, licence: () => ({ active: true, state: 'paid' }), ifaces: only,
       mdns: { port: 5353 }, hostname: os.hostname(), netConfig: () => win.readNetConfig(), log: (l, t) => console.log(`  [${l}] ${t}`) });
     svc.addPerson({ name: 'Test Person', ext: '101' });
+    svc.setSettings({ adapter: alias });   // the owner's choice (a loopback adapter is never picked automatically)
     await svc.start();
     step(`Link Office started on ${svc.host} (SIP ${svc.pbx.port}, settings ${svc.prov.httpPort}, riyeser-office.local ${svc.mdns ? `on ${svc.mdns.port}` : 'unavailable'})`);
     if (svc.host !== A) throw new Error(`expected ${A}, got ${svc.host}`);
