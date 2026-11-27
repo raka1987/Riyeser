@@ -1,7 +1,10 @@
 name: HQ download counts
 
-# Once a day: total downloads of each installer (all releases) from GitHub, saved into Riyeser HQ so the
-# Downloads page can show downloads per day. Needs the HQ_INGEST_TOKEN secret (see ops/RUNBOOK.md, Riyeser HQ).
+# Once a day: GitHub's raw total downloads of each installer (all releases), saved into Riyeser HQ for the Downloads
+# page's "Raw GitHub counts" section. (These include our CI runs, update checks and robots; HQ's real numbers come from
+# the "download" function and Riyeser Central instead.) Also deletes download notes over 3 years old.
+# Connects with the TEAM_DB_URL secret, like the HQ jobs and backups, so it needs nothing else. Without it, it falls
+# back to the older HQ_INGEST_TOKEN way (see ops/RUNBOOK.md, Riyeser HQ).
 on:
   schedule:
     - cron: "55 13 * * *"      # 13:55 UTC, before midnight in Fiji and Sydney
@@ -10,32 +13,66 @@ on:
 permissions:
   contents: read
 
+concurrency: { group: hq-downloads, cancel-in-progress: false }
+
 jobs:
   record:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
+      DB_URL: ${{ secrets.TEAM_DB_URL }}
       HQ_INGEST_TOKEN: ${{ secrets.HQ_INGEST_TOKEN }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v5
-        with: { ref: module/desk-assistant, sparse-checkout: website/team/config.js, sparse-checkout-cone-mode: false }
       - name: Set up yet?
         id: ready
         run: |
-          url=$(grep -oP 'supabaseUrl:\s*"\K[^"]*' website/team/config.js || true)
-          key=$(grep -oP 'supabaseKey:\s*"\K[^"]*' website/team/config.js || true)
-          if [ -z "$url" ] || [ -z "$key" ] || [ -z "$HQ_INGEST_TOKEN" ]; then
-            echo "::notice::HQ download counts aren't set up yet. See ops/RUNBOOK.md (Riyeser HQ)."; echo "ok=no" >> "$GITHUB_OUTPUT"
-          else echo "ok=yes" >> "$GITHUB_OUTPUT"; echo "SB_URL=$url" >> "$GITHUB_ENV"; echo "SB_KEY=$key" >> "$GITHUB_ENV"; fi
-      - if: steps.ready.outputs.ok == 'yes'
-        name: Count and record
+          if [ -n "$DB_URL" ]; then echo "how=db" >> "$GITHUB_OUTPUT"
+          elif [ -n "$HQ_INGEST_TOKEN" ]; then echo "how=token" >> "$GITHUB_OUTPUT"
+          else echo "::notice::HQ download counts aren't set up yet: add the TEAM_DB_URL secret (ops/RUNBOOK.md, Setting up backups)."; echo "how=none" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.ready.outputs.how != 'none'
+        name: Count GitHub's downloads
         run: |
           gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
             --jq '.[].assets[] | select(.name | endswith(".exe")) | [.name, .download_count] | @tsv' > counts.tsv
-          totals=$(jq -Rn 'reduce (inputs | split("\t")) as $r ({}; .[$r[0]] += ($r[1] | tonumber))' < counts.tsv)
-          echo "$totals" | jq -r 'to_entries | sort_by(-.value) | .[] | "\(.value)\t\(.key)"'
-          body=$(jq -n --arg token "$HQ_INGEST_TOKEN" --argjson totals "$totals" '{token: $token, totals: $totals}')
-          code=$(curl -s -o resp.txt -w '%{http_code}' -X POST "$SB_URL/rest/v1/rpc/hq_record_downloads" \
-            -H "apikey: $SB_KEY" -H "Authorization: Bearer $SB_KEY" -H "Content-Type: application/json" --data "$body")
+          jq -Rn 'reduce (inputs | split("\t")) as $r ({}; .[$r[0]] += ($r[1] | tonumber))' < counts.tsv > totals.json
+          jq -r 'to_entries | sort_by(-.value) | .[] | "\(.value)\t\(.key)"' totals.json
+      - if: steps.ready.outputs.how == 'db'
+        uses: actions/checkout@v5
+        with: { path: tools, sparse-checkout: .github/scripts/pooler-url.py, sparse-checkout-cone-mode: false }
+      - if: steps.ready.outputs.how == 'db'
+        name: PostgreSQL client
+        run: command -v psql >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client >/dev/null; }
+      - if: steps.ready.outputs.how == 'db'
+        name: Save into HQ (database connection)
+        run: |
+          CANDIDATES="$(python3 tools/.github/scripts/pooler-url.py)"
+          URL=""
+          while IFS= read -r c; do
+            [ -z "$c" ] && continue; echo "::add-mask::$c"
+            if [ -z "$URL" ] && PGCONNECT_TIMEOUT=8 psql "$c" -X -q -t -c "select 1" >/dev/null 2>&1; then URL="$c"; fi
+          done <<< "$CANDIDATES"
+          [ -n "$URL" ] || { echo "::error::Couldn't connect with TEAM_DB_URL. Check the password, or put the Session pooler line from Supabase → Connect into it."; exit 1; }
+          have=$(psql "$URL" -X -q -At -c "select to_regprocedure('public.hq_save_download_totals(jsonb)') is not null")
+          # (psql only fills in :'totals' in what it reads, not in -c)
+          if [ "$have" = "t" ]; then sql="select public.hq_save_download_totals(:'totals'::jsonb)"
+          else
+            echo "::warning::The database doesn't have hq_save_download_totals yet: run \"Update the Riyeser Link database\" (team-chat.sql). Saving the older way for now."
+            sql="with t as (insert into public.downloads_daily (day, asset, total) select current_date, left(key, 120), value::bigint from jsonb_each_text(:'totals'::jsonb) on conflict (day, asset) do update set total = excluded.total returning 1) select count(*) from t"
+          fi
+          n=$(echo "$sql" | psql "$URL" -X -q -At -v ON_ERROR_STOP=1 -v totals="$(cat totals.json)")
+          echo "Recorded $n installers."
+      - if: steps.ready.outputs.how == 'token'
+        uses: actions/checkout@v5
+        with: { ref: module/desk-assistant, sparse-checkout: website/team/config.js, sparse-checkout-cone-mode: false }
+      - if: steps.ready.outputs.how == 'token'
+        name: Save into HQ (ingest token)
+        run: |
+          url=$(grep -oP 'supabaseUrl:\s*"\K[^"]*' website/team/config.js || true)
+          key=$(grep -oP 'supabaseKey:\s*"\K[^"]*' website/team/config.js || true)
+          [ -n "$url" ] && [ -n "$key" ] || { echo "::notice::Riyeser HQ's database isn't set up in config.js yet."; exit 0; }
+          body=$(jq -n --arg token "$HQ_INGEST_TOKEN" --slurpfile t totals.json '{token: $token, totals: $t[0]}')
+          code=$(curl -s -o resp.txt -w '%{http_code}' -X POST "$url/rest/v1/rpc/hq_record_downloads" \
+            -H "apikey: $key" -H "Authorization: Bearer $key" -H "Content-Type: application/json" --data "$body")
           if [ "$code" != "200" ]; then echo "::error::HQ didn't accept the counts (HTTP $code): $(cat resp.txt)"; exit 1; fi
           echo "Recorded $(cat resp.txt) installers."

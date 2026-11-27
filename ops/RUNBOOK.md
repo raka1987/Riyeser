@@ -80,15 +80,21 @@ person ("Permissions" beside them). The website hides what someone can't do, but
 Every HQ action is written to the HQ history, including opening a company or a ticket. Nobody can change or delete it,
 not even the database owner. History has filters (who, what, business, dates) and **Download CSV**.
 
-**Daily download counts:**
-1. Make a long random token (5–6 random words).
-2. In the SQL Editor, run `select public.hq_set_ingest_token('the token');`
-3. Add the same token as the GitHub secret `HQ_INGEST_TOKEN`.
-4. Run **Actions → HQ download counts** once to check it works.
+**Real download and install counts (HQ → Downloads):**
+1. Run **Actions → Update the Riyeser Link database** (adds `download_events`, `install_events` and their functions).
+2. Run **Actions → Deploy download counter** (the `download` Edge Function; optional secret `DOWNLOAD_SALT`, 32+ random
+   characters, for the daily visitor hash).
+3. Run **Actions → Publish website**: the Download buttons then go through riyeser.com/download/<program>.html, which
+   counts the download and starts it. Until step 2 is done the page goes straight to GitHub, so nothing breaks.
+4. Release Riyeser Central: it sends one anonymous "new install" note per PC, and a note per update (Settings →
+   "Send anonymous usage counts" turns it off).
+Real downloads leave out robots, tests (CI, `X-Riyeser-Test`) and HQ staff, and count one person once a day per program.
+On a PC used for testing, open HQ → Downloads and tick **Don't count downloads from this browser**.
 
-The Downloads page shows live totals straight away. Per-day numbers start the day after the job's first run.
-
-Download totals include a few copies fetched by Riyeser's own release checks, so treat small numbers as roughly right.
+**Daily GitHub totals (raw):** **Actions → HQ download counts** runs every day with the `TEAM_DB_URL` secret (nothing
+else to set up) and saves GitHub's totals for the "Raw GitHub counts" section. Without `TEAM_DB_URL` it falls back to
+the older token: `select public.hq_set_ingest_token('the token');` and the GitHub secret `HQ_INGEST_TOKEN`.
+GitHub's totals include our CI runs, Central's update downloads and robots, so they're far higher than real downloads.
 
 **Marking a company paid for Riyeser Link:** HQ → Customers → open the business → Programs → Riyeser Link → **Mark paid until…**.
 Customers who pay online (PayPal or bank transfer) don't need this: see "Taking payments" below.
