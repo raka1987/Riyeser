@@ -25,8 +25,12 @@ if not token:
     sys.stderr.write("::warning::TEAM_DB_URL is Supabase's direct address, which GitHub can't reach, and there's no SUPABASE_ACCESS_TOKEN to look up the pooler. Use the Session pooler line from Supabase → Connect.\n")
     print(url); sys.exit(0)
 req = urllib.request.Request(f"https://api.supabase.com/v1/projects/{ref}/config/database/pooler",
-                             headers={"Authorization": f"Bearer {token}"})
-cfg = json.load(urllib.request.urlopen(req, timeout=30))
+                             headers={"Authorization": f"Bearer {token}", "User-Agent": "riyeser-ci/1.0", "Accept": "application/json"})
+try:
+    cfg = json.load(urllib.request.urlopen(req, timeout=30))
+except Exception as e:
+    sys.stderr.write(f"::error::Couldn't look up the Session pooler address ({e}). Put the Session pooler line from Supabase → Connect into TEAM_DB_URL instead.\n")
+    sys.exit(1)
 cfg = cfg if isinstance(cfg, list) else [cfg]
 c = next((x for x in cfg if x.get("database_type", "PRIMARY") == "PRIMARY"), cfg[0])
 host = c.get("db_host")
