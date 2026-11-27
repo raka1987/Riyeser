@@ -337,3 +337,49 @@ table.ot td:nth-child(2) { min-width: 260px; } table.ot td:nth-child(3) { min-wi
 /* An install that didn't work: what happened, how to fix it, Try again / Get help (stays until it's tried again) */
 .insterr { flex: 1; min-width: 180px; font-size: 13px; line-height: 1.4; color: var(--text); border-left: 3px solid var(--bad); padding: 2px 0 2px 10px; }
 .insterr b { display: block; font-weight: 600; } .insterr .lbl { margin-top: 4px; } .insterr .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+
+/* ---------- first run, "One installer": steps, the plan's programs with a bar each, What is this PC for?, Your business, Done ---------- */
+.frsteps { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; list-style: none; margin: -6px 0 14px; padding: 0; font-size: 12.5px; color: var(--muted); }
+.frsteps li { padding: 4px 11px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
+.frsteps li.on { background: var(--accent-soft); color: var(--text); border-color: transparent; font-weight: 600; }
+.frsteps li.did { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.frcen { text-align: center; } .frcen .wsub { max-width: 52ch; margin-left: auto; margin-right: auto; }
+.frlist { display: grid; gap: 8px; max-height: max(200px, calc(100vh - 390px)); overflow-y: auto; padding: 2px; margin: 0 0 12px; overscroll-behavior: contain; }
+.frrow { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; background: var(--panel); }
+.frrow.bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); background: color-mix(in srgb, var(--bad-soft) 55%, var(--panel)); }
+.frmid { min-width: 0; display: flex; flex-direction: column; gap: 2px; } .frmid b { font-size: 14px; }
+.frtxt { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; } .frrow.bad .frtxt { color: var(--bad); font-weight: 600; }
+.frfix { font-size: 12.5px; color: var(--text); }
+.frbar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 5px; } .frbar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width .35s; }
+.frrow[data-stage="installed"] .frbar i, .frrow[data-stage="skipped"] .frbar i { background: var(--ok); }
+.frrowbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.frpill { font-size: 11.5px; font-weight: 700; border-radius: 99px; padding: 2px 9px; white-space: nowrap; }
+.frpill.ok { background: var(--ok-soft); color: var(--ok); } .frpill.wa { background: var(--warn-soft); color: var(--warn); }
+.frpill.mu { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); } .frpill.bad { background: var(--bad-soft); color: var(--bad); }
+.frnote { display: block; background: var(--panel-2); border-radius: 10px; padding: 10px 12px; color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+.frnote.warn { background: var(--warn-soft); color: var(--warn); } .frnote .wlink { margin-left: 8px; }
+.frbtns { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; } .frbtns .grow { flex: 1; } .frbtns .btn { padding: 10px 18px; font-size: 14px; }
+.frbtns .btn[disabled] { opacity: .55; cursor: default; }
+.frpick { cursor: pointer; } .frpick:hover { border-color: var(--accent); }
+.frpick input { width: 20px; height: 20px; accent-color: var(--accent); margin: 0; }
+.frpick:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent-soft) 60%, var(--panel)); }
+.frpick:has(input:disabled) { cursor: default; opacity: .8; }
+.frpick .frtxt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.frroles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 8px; }
+.fropt { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; text-align: left; border: 2px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel); color: var(--text); font: inherit; }
+.fropt:hover { border-color: var(--accent); } .fropt[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.fropt b { font-size: 15px; } .fropt small { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.frwill { margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--accent); }
+.frbiz { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 18px; align-items: start; }
+.frlogo { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; border: 1px dashed var(--line); border-radius: 12px; padding: 14px; }
+.frlogo > div { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; } .frlogo small { color: var(--muted); font-size: 12.5px; line-height: 1.4; }
+.frlogobox { width: 72px; height: 72px; border-radius: 14px; background: var(--panel-2); border: 1px solid var(--line); display: grid; place-items: center; font-size: 28px; overflow: hidden; }
+.frlogobox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.frday { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin: 6px 0 12px; display: grid; gap: 8px; }
+.frday ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.frday li { display: flex; gap: 10px; align-items: flex-start; } .frday li span:last-child { display: flex; flex-direction: column; } .frday li small { color: var(--muted); font-size: 12.5px; }
+.frtick { width: 16px; height: 16px; border: 1.6px solid var(--muted); border-radius: 50%; flex: none; margin-top: 2px; }
+@media (max-width: 760px) { .frroles, .frbiz { grid-template-columns: 1fr; } .frbtns .grow { display: none; } }
+@media (prefers-reduced-motion: reduce) { .frbar i { transition: none; } }
+/* the first run's card is a little tighter, so the list and its buttons fit a 1280 screen at 125% */
+.wcard:has(.frsteps) { padding: 24px 32px; } .wcard:has(.frsteps) .wlogo { margin-bottom: 10px; } .wcard:has(.frsteps) h1 { font-size: 24px; } .wcard:has(.frsteps) .wsub { margin-bottom: 14px; }

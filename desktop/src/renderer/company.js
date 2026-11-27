@@ -20,12 +20,15 @@ const formData = (f) => Object.fromEntries([...new FormData(f).entries()].map(([
 // A password box with an eye button to see what was typed, and a Caps Lock warning under it.
 const pwField = (n, label, auto) => `<label class="wf"><span>${label}</span><span class="pwwrap"><input name="${n}" type="password" minlength="8" required autocomplete="${auto}" spellcheck="false"><button type="button" class="pweye" data-pweye aria-label="Show password" title="Show password">👁</button></span></label>`;
 
+const FRun = () => window.RiyeserFirstRun;   // first-run.js: install your plan, your business, done
 async function coLoad() { CO.state = await bridge.call('company:get'); try { renderAcct(); } catch { /* sidebar not drawn yet */ } return CO.state; }
 
 // ---------------------------------------------------------------- the wizard
 function wiz(html) {
   const w = $('#wizard'); w.hidden = false;
-  w.innerHTML = `<div class="wcard"><div class="wlogo"><img src="logo-r.png" alt="">Riyeser</div>${CO.err ? `<div class="werr">${esc(CO.err)}</div>` : ''}${CO.note ? `<div class="wok">${esc(CO.note)}</div>` : ''}${html}</div>`;
+  // the first run's steps across the top (step 1, Sign in, until first-run.js takes over with its own)
+  const steps = CO.first && !/class="frsteps"/.test(html) && window.RiyeserFirstRun ? window.RiyeserFirstRun.steps(1) : '';
+  w.innerHTML = `<div class="wcard"><div class="wlogo"><img src="logo-r.png" alt="">Riyeser</div>${steps}${CO.err ? `<div class="werr">${esc(CO.err)}</div>` : ''}${CO.note ? `<div class="wok">${esc(CO.note)}</div>` : ''}${html}</div>`;
   CO.err = ''; CO.note = '';
   const first = w.querySelector('input:not([type=hidden]), button.wbig'); if (first) first.focus();
 }
@@ -117,7 +120,7 @@ async function findBusiness() {
   wiz('<h1>Looking up your account…</h1><p class="wsub">Finding the business your Riyeser account belongs to.</p>');
   try {
     const r = await bridge.call('company:afterSignIn'); await coLoad();
-    if (r.status === 'linked') return showWelcome(r);
+    if (r.status === 'linked') return CO.first && FRun() ? FRun().afterLinked(r) : showWelcome(r);
     if (r.status === 'choose') { CO.list = r.businesses; return showPick(); }
     CO.details = r.details || {}; CO.last = null; return showNewForm();
   } catch (e) { CO.err = e.message; return showChoice(); }
@@ -155,7 +158,7 @@ function showNewForm() {
     </div>
       <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">Finish setting up</button></div></form>`);
   $('#wf-new').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); CO.last = f; run(async () => {
-    const c = await bridge.call('company:details', f); await coLoad(); showCreated(c); }); };
+    const c = await bridge.call('company:details', f); await coLoad(); if (CO.first && FRun()) return FRun().afterLinked({ created: c }); showCreated(c); }); };
 }
 
 function showCreated(c) {
@@ -176,7 +179,7 @@ function showJoinForm() {
       <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">Send request</button></div></form>`);
   $('#wf-join').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); run(async () => {
     const r = await bridge.call('company:join', f.code, f.your_name, f.note);
-    await coLoad(); if (r.status === 'approved') return showJoined(r.company); showWaiting(r.company_name); }); };
+    await coLoad(); if (r.status === 'approved') return CO.first && FRun() ? FRun().afterLinked(r) : showJoined(r.company); showWaiting(r.company_name); }); };
 }
 
 function showWaiting(name) {
@@ -190,7 +193,7 @@ function showWaiting(name) {
 async function checkJoin(quiet) {
   try {
     const r = await bridge.call('company:checkJoin');
-    if (r.status === 'approved') { clearInterval(CO.poll); await coLoad(); return showJoined(r.company); }
+    if (r.status === 'approved') { clearInterval(CO.poll); await coLoad(); return CO.first && FRun() ? FRun().afterLinked(r) : showJoined(r.company); }
     if (r.status === 'declined') { clearInterval(CO.poll); await coLoad(); return showDeclined(r.company_name); }
     if (!quiet && CO.screen === 'waiting') toast('Not approved yet. We\'ll keep checking.');
   } catch (e) { if (!quiet) toast(e.message); }
@@ -213,7 +216,9 @@ function showLocal() {
     <form id="wf-local">${profileFields((CO.state && CO.state.company) || CO.last || {})}${field('your_name', 'Your name', (CO.state && CO.state.company && CO.state.company.your_name) || '', 'maxlength="60" autocomplete="name"')}
       <div class="wrow"><button type="button" class="btn s" data-w="back">Back</button><button class="btn">Save</button></div></form>`);
   $('#wf-local').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); CO.last = f; run(async () => {
-    await bridge.call('company:local', f, f.your_name); await coLoad(); closeWizard(); toast(`${f.name} is set up on this PC.`); afterChange(); }); };
+    await bridge.call('company:local', f, f.your_name); await coLoad();
+    if (CO.first && FRun()) { afterChange(); return FRun().individual(); }   // on this PC only: pick the programs, done
+    closeWizard(); toast(`${f.name} is set up on this PC.`); afterChange(); }); };
 }
 
 // "Sign out" on the Company page: asked first, then the business is put away on this PC (renamed, never deleted).
@@ -269,7 +274,7 @@ document.addEventListener('click', (e) => {
   const a = b.dataset.w;
   if (a === 'signin' || a === 'join') { CO.create = false; CO.fromCompany = false; return showAccount(a); }
   if (a === 'signup') { CO.create = true; CO.fromCompany = false; return showAccount('signin'); }
-  if (a === 'pick') return run(async () => { const r = await bridge.call('company:link', b.dataset.ws); await coLoad(); showWelcome(r); });
+  if (a === 'pick') return run(async () => { const r = await bridge.call('company:link', b.dataset.ws); await coLoad(); if (CO.first && FRun()) return FRun().afterLinked(r); showWelcome(r); });
   if (a === 'local') return showLocal();
   if (a === 'blank') return showChoice();
   if (a === 'start') return showStart();
@@ -282,7 +287,8 @@ document.addEventListener('click', (e) => {
   if (a === 'copy') { const t = ($('#wid') || $('#coid') || {}).textContent; safe(() => bridge.call('company:copy', t)).then(() => toast('Company ID copied')); return; }
   if (a === 'check') return checkJoin(false);
   if (a === 'cancel-join') return run(async () => { await bridge.call('company:cancelJoin'); await coLoad(); showJoinForm(); });
-  if (a === 'later') { safe(() => bridge.call('company:skip')); closeWizard(); return; }
+  // Set up later: on the first run, someone on their own just picks the programs they want (no business asked)
+  if (a === 'later') { safe(() => bridge.call('company:skip')); if (CO.first && FRun() && CO.screen !== 'waiting') return FRun().individual(); closeWizard(); return; }
   if (a === 'restore') { if (window.RiyeserBackup) window.RiyeserBackup.restoreEverything(); return; }   // OWNER-BACKUP
   if (a === 'done') { closeWizard(); afterChange(); return; }
   if (a === 'restart') { CO.fromCompany = false; coLoad().then(showChoice); return; }
