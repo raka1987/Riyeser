@@ -538,3 +538,13 @@ def test_quote_in_other_apps_links_to_estimate_only_when_on(tmp_path, monkeypatc
     assert "Measured in Riyeser Estimate" in page and "Convert to invoice" in page      # its trial started on this PC
     _marker(tmp_path, 120)
     assert "Measured in Riyeser Estimate" not in c.get(f"/document/{did}").get_data(as_text=True)
+
+
+def test_map_key_switches_to_the_location_platform_tiles(tmp_path, monkeypatch):
+    app, c = est(tmp_path, monkeypatch)
+    tid = _new_estimate(c)
+    monkeypatch.setenv("RIYESER_ESRI_KEY", "AAPK-test")
+    page = c.get(f"/estimate/{tid}/measure?m=map").get_data(as_text=True)
+    assert "ibasemaps-api.arcgis.com" in page and "AAPK-test" in page
+    monkeypatch.delenv("RIYESER_ESRI_KEY")
+    assert "server.arcgisonline.com" in c.get(f"/estimate/{tid}/measure?m=map").get_data(as_text=True)

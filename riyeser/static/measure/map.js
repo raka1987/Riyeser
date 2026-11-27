@@ -69,7 +69,8 @@
   async function find(q) {
     if (!q.trim()) return;
     try {
-      const u = M.geocode + (M.geocode.includes('?') ? '&' : '?') + 'f=json&maxLocations=1&outFields=Match_addr&SingleLine=' + encodeURIComponent(q);
+      // forStorage=false: the result only moves the map; nothing from the geocoder is kept
+      const u = M.geocode + (M.geocode.includes('?') ? '&' : '?') + 'f=json&maxLocations=1&forStorage=false&outFields=Match_addr&SingleLine=' + encodeURIComponent(q) + (M.key ? '&token=' + encodeURIComponent(M.key) : '');
       const r = await fetch(u); const j = await r.json(); const c = (j.candidates || [])[0];
       if (!c) { RE.toast('That address wasn\'t found. Try the street and town.', true); return; }
       map.setView([c.location.y, c.location.x], 19);

@@ -35,10 +35,26 @@ TRADE_ICONS = {"roofing": "🏠", "fencing": "🚧", "decking": "🪵", "paintin
 MAX_PLAN_BYTES = 40 * 1024 * 1024
 PLAN_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif"}
 # Map imagery providers. Only Esri World Imagery is switched on; others need their own terms checked and a key.
+def map_key():
+    """Riyeser's ArcGIS Location Platform API key (built in by packaging/build_desktop.py from RIYESER_ESRI_KEY, or the
+    environment). Without one, the public World Imagery tiles are used and address search may be refused."""
+    import os
+    k = os.environ.get("RIYESER_ESRI_KEY", "").strip()
+    if k:
+        return k
+    try:
+        from .._map_key import ESRI_KEY
+        return ESRI_KEY
+    except ImportError:
+        return ""
+
+
 MAP_PROVIDERS = {
     "esri": {"name": "Esri World Imagery", "tiles": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
              "attribution": "Powered by Esri | Source: Esri, Vantor (Maxar), Earthstar Geographics, and the GIS User Community",
-             "max_zoom": 21, "geocode": "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates"},
+             "max_zoom": 21, "geocode": "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates",
+             # with an ArcGIS Location Platform key: the basemap layer service (counted against Riyeser's free tile tier)
+             "tiles_key": "https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"},
 }
 
 
@@ -275,8 +291,9 @@ def measure(tid):
         pages[f"{r['plan_id']}:{r['page']}"] = {"scale": r["scale"], "note": r["scale_note"]}
     prov = MAP_PROVIDERS.get((g.company or {}).get("map_provider") or "esri", MAP_PROVIDERS["esri"])
     import os
-    tiles = os.environ.get("RIYESER_MAP_TILES") or prov["tiles"]           # tests point this at a local tile server
-    geocode = os.environ.get("RIYESER_MAP_GEOCODE", prov["geocode"])
+    key = "" if os.environ.get("RIYESER_MAP_TILES") else map_key()
+    tiles = os.environ.get("RIYESER_MAP_TILES") or (prov["tiles_key"] + "?token=" + key if key and prov.get("tiles_key") else prov["tiles"])
+    geocode = os.environ.get("RIYESER_MAP_GEOCODE", prov["geocode"])   # tests point these at a local stand-in
     try:
         view = json.loads(t["map_view"]) if t["map_view"] else None
     except ValueError:
@@ -284,7 +301,7 @@ def measure(tid):
     cfg = {"tid": tid, "units": sys_, "method": method, "readOnly": bool(g.get("estimate_read_only")),
            "colors": COLORS, "kinds": KINDS, "as": G.AS_LABELS, "edgeTypes": G.EDGE_LABELS,
            "map": {"tiles": tiles, "attribution": prov["attribution"], "maxZoom": prov["max_zoom"], "geocode": geocode,
-                   "provider": prov["name"], "view": view},
+                   "provider": prov["name"], "view": view, "key": key},
            "plans": [dict(p) for p in plans], "pages": pages,
            "urls": {"items": url_for("estimate.items_api", tid=tid), "plans": url_for("estimate.plan_upload", tid=tid),
                     "view": url_for("estimate.save_view", tid=tid), "base": url_for("estimate.index"),

@@ -48,6 +48,16 @@ else:
     key_file.unlink(missing_ok=True)
     print("No licence public key: this build accepts unsigned licences (licence signing not switched on yet).")
 
+# Riyeser Estimate's map: Riyeser's ArcGIS Location Platform API key (imagery tiles and address search), from the
+# RIYESER_ESRI_KEY secret. It's used in the browser, so it's not secret from the user: restrict it in the ArcGIS
+# dashboard to the basemap and geocoding (not stored) privileges, with pay-as-you-go off as a cost ceiling.
+map_key_file = PKG / "_map_key.py"
+ESRI_KEY = os.environ.get("RIYESER_ESRI_KEY", "").strip()
+if ESRI_KEY:
+    map_key_file.write_text(f'ESRI_KEY = "{ESRI_KEY}"\n', encoding="utf-8")
+else:
+    map_key_file.unlink(missing_ok=True)
+
 args = [
     str(ROOT / "packaging" / "riyeser_desktop.py"),
     "--noconfirm", "--clean",
@@ -67,6 +77,7 @@ args = [
     "--hidden-import", "riyeser.signed_licence",
     "--hidden-import", "riyeser.ed25519",
     *(["--hidden-import", "riyeser._licence_key"] if LICENCE_KEY else []),
+    *(["--hidden-import", "riyeser._map_key"] if ESRI_KEY else []),
     "--hidden-import", "riyeser.companies",
     "--hidden-import", "riyeser.archive",
     "--hidden-import", "riyeser.perms",
@@ -90,4 +101,5 @@ try:
 finally:
     built.unlink(missing_ok=True)  # running from source stays "pick per company"
     key_file.unlink(missing_ok=True)  # and accepts unsigned licences
+    map_key_file.unlink(missing_ok=True)
 print("Built", APP_NAME, "into", ROOT / "dist")
