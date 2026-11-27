@@ -235,11 +235,15 @@ const EMP_FIELDS = "id, name, username, role, position, phone, email, pay_type, 
 // pay rates and bank details: only for people with access to them
 const SENSITIVE = ['pay_type', 'pay_rate', 'tin', 'fnpf_no', 'bank_name', 'bank_account_name', 'bank_account', 'deductions'];
 const shapeEmp = (req, e) => { if (!e) return e; const o = { ...e, access: P.permsOf(e) }; delete o.perms; if (!canArea(req, 'pay_rates')) for (const k of SENSITIVE) delete o[k]; return o; };
-// names for pickers: the people in this person's scope (contact details only with Employees access)
+// names for pickers: the people in this person's scope (contact details only with Employees access).
+// 2.4.0: current staff only (not people who have left, or whose last day has passed); ?former=1 adds former staff,
+// marked former: 1, for looking back (e.g. the Timesheets person filter on past dates).
 app.get('/api/staff/directory', requireStaff, (req, res) => {
   const wide = canArea(req, 'employees') || canArea(req, 'timesheets');
   const [w, p] = wide ? scopeSql(req.user, 'id') : ['id = ?', [req.user.id]];
-  res.json(db.prepare(`SELECT id, name, position, phone, email, role, COALESCE(on_timeclock, 1) AS on_timeclock, COALESCE(employee_no, '') AS employee_no FROM users WHERE active=1 AND ${w} ORDER BY name`).all(...p)
+  const today = todayIn(getSettings().timezone), current = "(active = 1 AND (COALESCE(end_date, '') = '' OR end_date >= ?))";
+  res.json(db.prepare(`SELECT id, name, position, phone, email, role, COALESCE(on_timeclock, 1) AS on_timeclock, COALESCE(employee_no, '') AS employee_no, COALESCE(end_date, '') AS end_date,
+      CASE WHEN ${current} THEN 0 ELSE 1 END AS former FROM users WHERE ${req.query.former === '1' ? '1 = 1' : current} AND ${w} ORDER BY former, name`).all(today, ...(req.query.former === '1' ? [] : [today]), ...p)
     .map(u => canArea(req, 'employees') ? u : { ...u, phone: '', email: '' }));
 });
 app.get('/api/staff/employees', requireArea('employees'), (req, res) => {
@@ -1085,7 +1089,7 @@ const mail = () => app.locals.mail || {};
 require('./payweek')(app, { db, requireArea, wrap, bad, HttpError, isDate, isStamp, addDays, round2, getSettings, setSetting, todayIn, payPeriodOf, alreadyPaid, assertNoOverlap, inScope, audit, broadcast, levelOf: (u, a) => P.levelOf(u, a) });
 // "Forgot password?" (forgot.js). After a reset: the person's wrong-PIN counters and this device's login limit start again.
 // OWNER-ROSTER (roster.js): the week's roster, publishing it, and comparing clock times with it
-require('./roster')(app, { db, requireStaff, requireArea, requirePerm, wrap, bad, HttpError, isDate, isTime, str, round2, addDays, getSettings, todayIn, localNowISO,
+require('./roster')(app, { db, requireStaff, requireArea, requirePerm, wrap, bad, HttpError, isDate, isTime, str, round2, addDays, getSettings, setSetting, todayIn, localNowISO,
   inScope, scopeSql, levelOf: (u, a) => P.levelOf(u, a), audit, broadcast, alreadyPaid, assertNoOverlap });
 LISTS.register(app, { db, requireStaff, wrap, getSettings, todayIn, payPeriodOf: d => payPeriodOf(d), levelOf: (u, a) => P.levelOf(u, a) });
 require('./forgot')(app, { db, hashPassword, audit, rateLimit, wrap, bad, HttpError, str, getSettings, failsOf: k => failsOf(k),

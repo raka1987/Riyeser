@@ -1152,3 +1152,170 @@ body.staff .scroll > table.t > * > tr > td.act:last-child:has(> .rm > .rm-btn[ar
 /* Bank statements: the Year box is wide enough for its label */
 @media (min-width: 601px) { .bk-grid { grid-template-columns: auto minmax(220px, max-content); } .bk-grid .file-btn { min-height: 40px; } }
 @media (max-width: 600px) { .bk-grid .ts-box span { overflow: hidden; text-overflow: ellipsis; } }
+
+/* ====================================================================================================================
+   Payroll 2.4.0: bulk rostering (rosterbulk.js). The roster's toolbar on one row (Undo and More at the end), the grid in
+   its own scrolling box (day headings, names and day totals stay in view), shift-template colours, selected days, the
+   bar for the selected days (stays at the bottom of the window), and the windows for templates, usual weeks and import.
+   ==================================================================================================================== */
+body.staff .ro-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-4); }
+body.staff .ro-tools > .btn, body.staff .ro-tools-end > .btn { min-height: var(--ctl-h); }
+.ro-tools-end { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
+body.staff .ro-tools .btn.ghost.on { background: var(--green-100); box-shadow: inset 0 0 0 1.5px var(--green-600); }
+body.staff .ro-more .rm-btn.btn { display: inline-flex; width: auto; height: auto; min-height: var(--ctl-h); padding: 4px 14px; border: 0; border-radius: 999px; font-size: var(--fs-md); color: var(--green-800); background: #fff; box-shadow: inset 0 0 0 1px var(--line-ctl); }
+body.staff .ro-more .rm-btn.btn:hover, body.staff .ro-more .rm-btn.btn[aria-expanded=true] { background: var(--green-100); box-shadow: inset 0 0 0 1px var(--green-600); }
+.ro-more .rm-btn span { font-size: .7rem; }
+.ro-flash .ro-undo-inl { margin-left: var(--sp-2); min-height: 28px; padding: 2px 12px; vertical-align: middle; }
+.ro-sum-k, .ro-sum-w { font-weight: 600; }
+
+/* the grid: its own box, one-line shift times */
+body.staff .ro-gridwrap { overflow: auto; max-height: max(380px, calc(100vh - 170px)); overscroll-behavior-x: contain; }
+table.ro-grid { min-width: 800px; }
+.ro-grid th.ro-p { width: 150px; }
+.ro-grid th, .ro-grid td { padding: 5px; }
+.ro-grid thead th { position: sticky; top: 0; z-index: 3; }
+.ro-grid thead th.ro-p { z-index: 5; }
+.ro-grid tbody th.ro-p, .ro-grid tfoot th.ro-p { z-index: 2; }
+.ro-grid tfoot th, .ro-grid tfoot td { position: sticky; bottom: 0; z-index: 3; box-shadow: 0 -1px 0 #e8ecf1; }
+.ro-grid tfoot th.ro-p { z-index: 5; }
+.scroll.scrolled-x .ro-grid th.ro-p { box-shadow: 8px 0 8px -8px rgba(11, 46, 35, .22); }
+.ro-grid tfoot td { white-space: nowrap; }
+.ro-shift { padding: 3px 5px; border-left-width: 3px; gap: 1px 6px; }
+.ro-shift b { white-space: nowrap; font-size: .76rem; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.ro-shift .ro-role { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.ro-shift.tpl { border-left-color: var(--tc); background: color-mix(in srgb, var(--tc) 9%, #fff); border-color: color-mix(in srgb, var(--tc) 28%, #fff); border-left-color: var(--tc); }
+.ro-shift.tpl.open { background: #fff4dc; }
+.ro-shift.warn, .ro-shift.tpl.warn { border-left-color: #c0392b; }
+.ro-left { font-size: .6rem; padding: 1px 6px; margin-left: 4px; vertical-align: 1px; }
+.ro-grid tr.former th.ro-p b { color: var(--muted); }
+.ro-usual { color: var(--green-600); font-size: .8rem; }
+
+/* selecting days */
+.ro-grid[role=grid] .ro-cell { cursor: cell; user-select: none; -webkit-user-select: none; }
+.ro-grid[role=grid] thead th[data-col], .ro-grid[role=grid] tbody th.ro-p { cursor: pointer; }
+.ro-grid[role=grid] thead th[data-col]:hover, .ro-grid[role=grid] tbody th.ro-p:hover { background: var(--hover); }
+.ro-cell.sel, .ro-grid tr.ro-openrow td.ro-cell.sel { background: #e4f0e9; box-shadow: inset 0 0 0 2px var(--green-600); }
+.ro-cell:focus { outline: none; }
+.ro-cell:focus-visible { box-shadow: inset 0 0 0 2px var(--green-800), inset 0 0 0 4px #fff; }
+.ro-cell.sel:focus-visible { box-shadow: inset 0 0 0 2px var(--green-800), inset 0 0 0 4px #bcd9c8; }
+.selmode .ro-cell { cursor: pointer; padding-top: 24px; }
+.ro-ck { position: absolute; top: 4px; right: 4px; margin: 0; width: 16px; height: 16px; pointer-events: none; }
+.ro-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.ro-all input { margin: 0; }
+
+/* shift-template buttons (the shift window, the bar for selected days) */
+.ro-tbtns { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-2); }
+.ro-tbtn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 10px; border: 1px solid var(--line-ctl); border-radius: 999px; background: #fff; font: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--ink); cursor: pointer; white-space: nowrap; flex: none; }
+.ro-tbtn i { width: 10px; height: 10px; border-radius: 50%; background: var(--tc, var(--green-600)); flex: none; }
+.ro-tbtn small { font-weight: 500; font-size: var(--fs-xs); color: var(--muted); }
+.ro-tbtn:hover { border-color: var(--tc, var(--green-600)); background: color-mix(in srgb, var(--tc, #1d6b52) 8%, #fff); }
+.ro-tbtn.on { border-color: var(--tc, var(--green-600)); box-shadow: inset 0 0 0 1px var(--tc, var(--green-600)); background: color-mix(in srgb, var(--tc, #1d6b52) 12%, #fff); }
+.ro-tbtn:focus-visible { outline: 2px solid var(--green-600); outline-offset: 2px; }
+.ro-tbtn:disabled { opacity: .5; cursor: default; }
+.ro-tpick { display: flex; flex-direction: column; gap: var(--sp-1); }
+
+/* the bar for the selected days: stays at the bottom of the window while the roster is in view */
+.ro-bulk { position: sticky; bottom: var(--sp-3); z-index: 25; display: flex; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-4); min-height: 52px; padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4); background: #fff; border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 4px 14px rgba(11, 46, 35, .16); }
+.ro-bulk[hidden], .ro-bb-acts[hidden] { display: none; }
+.ro-bb-n { flex: none; white-space: nowrap; font-size: var(--fs-md); }
+.ro-bb-acts { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--sp-2); }
+.ro-bb-t { flex: 0 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; padding: 2px; }
+.ro-bb-sep { flex: none; width: 1px; align-self: stretch; margin: 6px 0; background: var(--line); }
+body.staff .ro-bb-acts > .btn { flex: none; min-height: 32px; padding: 2px 12px; font-size: var(--fs-sm); }
+body.staff .ro-bb-acts > .ro-bb-clear { color: var(--red); }
+.ro-bb-x { flex: none; margin-left: auto; width: 32px; height: 32px; border: 0; border-radius: var(--r-md); background: transparent; color: var(--muted); font-size: 1rem; cursor: pointer; }
+.ro-bb-x:hover { background: #f1ede4; color: var(--ink); }
+.ro-bb-x:focus-visible { outline: 2px solid var(--green-600); outline-offset: 1px; }
+
+/* windows: fill, templates, usual weeks, import */
+.ro-radios { border: 0; padding: 0; margin: 0 0 var(--sp-3); display: grid; gap: var(--sp-1); }
+.ro-radios legend { padding: 0; margin-bottom: var(--sp-1); }
+.ro-fillprev { background: var(--hover); border-radius: var(--r-md); padding: var(--sp-3); margin: var(--sp-3) 0; min-height: 48px; }
+.ro-tlist { display: flex; flex-direction: column; border: 1px solid var(--line-soft); border-radius: var(--r-md); margin: 0 0 var(--sp-4); }
+.ro-trow { display: grid; grid-template-columns: 14px minmax(70px, max-content) minmax(0, 1fr) auto; gap: var(--sp-3); align-items: center; padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--line-soft); }
+.ro-trow:first-child { border-top: 0; }
+.ro-trow.on { background: var(--hover); }
+.ro-sw { display: block; width: 14px; height: 14px; border-radius: 4px; background: var(--tc); }
+.ro-tt { color: var(--muted); font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ro-tact { display: flex; gap: var(--sp-1); }
+body.staff .ro-tact .btn.sm { min-height: 30px; padding: 2px 12px; font-size: var(--fs-sm); }
+.ro-tform { border-top: 1px solid var(--line); padding-top: var(--sp-3); }
+.ro-colours { margin: 0; }
+.ro-colours legend { font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 0; float: left; width: 100%; }
+.ro-colours > div { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 0 2px; clear: both; }
+.ro-col { position: relative; display: inline-flex; }
+.ro-col input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.ro-col i { display: block; width: 22px; height: 22px; border-radius: 50%; background: var(--tc); cursor: pointer; box-shadow: inset 0 0 0 2px #fff, 0 0 0 1px var(--line); }
+.ro-col input:checked + i { box-shadow: inset 0 0 0 3px #fff, 0 0 0 2px var(--tc); }
+.ro-col input:focus-visible + i { outline: 2px solid var(--green-600); outline-offset: 2px; }
+body.staff .ro-uwrap { max-height: min(60vh, 520px); margin-bottom: var(--sp-3); }
+body.staff table.ro-utable td { padding: 4px 6px; }
+body.staff table.ro-utable td:first-child { min-width: 140px; white-space: normal; }
+.ro-utable select { height: 32px; width: 100%; min-width: 96px; max-width: 160px; padding: 0 4px; font-size: var(--fs-sm); border: 1px solid var(--line-ctl); border-radius: var(--r-md); background: #fff; color: var(--muted); }
+.ro-utable select.on { color: var(--ink); border-left: 4px solid var(--tc, var(--green-600)); background: #f7fbf8; }
+.ro-steps { margin: 0 0 var(--sp-3); padding-left: 20px; } .ro-steps li { margin: 2px 0; }
+.ro-imp { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-2); }
+body.staff .ro-imp .file-btn { min-height: var(--ctl-h); }
+.ro-impsum { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 0 var(--sp-3); }
+.ro-onlyp { margin-left: auto; }
+body.staff .ro-impwrap { max-height: min(52vh, 480px); margin-bottom: var(--sp-3); }
+.ro-imptable tr.st-err td { background: #fff7f6; }
+.ro-imptable tr.st-skip td { color: var(--muted); }
+.ro-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 700; white-space: nowrap; vertical-align: middle; }
+.ro-pill.ok { background: var(--green-100); color: var(--green-800); }
+.ro-pill.warn { background: #fff4dc; color: #7a5a00; }
+.ro-pill.skip { background: #eef1f5; color: #4b5563; }
+.ro-pill.err { background: #fbe6e3; color: var(--red); }
+
+@media (min-width: 901px) and (max-width: 1099px) {
+  .ro-grid th.ro-p { width: 136px; }
+  table.ro-grid { min-width: 760px; }
+}
+@media (max-width: 900px) {
+  .ro-pcard { position: relative; }
+  .ro-pcard .ro-pck { position: absolute; top: 12px; right: 12px; width: 22px; height: 22px; margin: 0; }
+  .selmode .ro-pcard { cursor: pointer; } .selmode .ro-pc-h { padding-right: 32px; }
+  .ro-pcard.sel { background: #eef6f1; box-shadow: var(--shadow), inset 0 0 0 2px var(--green-600); }
+  .ro-pall { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+  .ro-bulk { flex-wrap: wrap; padding: var(--sp-2) var(--sp-3); gap: var(--sp-2); bottom: var(--sp-2); }
+  .ro-bb-n { flex: 1 1 auto; }
+  .ro-bb-acts { order: 3; flex: 1 1 100%; flex-wrap: wrap; }
+  .ro-bb-t { flex: 1 1 100%; }
+  .ro-bb-sep { display: none; }
+}
+@media (max-width: 600px) {
+  body.staff .ro-tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
+  body.staff .ro-tools > .btn { width: 100%; justify-content: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.staff .ro-tools > .btn.coral { grid-column: 1 / -1; }
+  .ro-tools-end { grid-column: 1 / -1; margin-left: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ro-tools-end > *, body.staff .ro-more .rm-btn.btn { width: 100%; justify-content: center; }
+  .ro-tools-end > .rm:only-child { grid-column: 1 / -1; }
+  .ro-trow { grid-template-columns: 14px minmax(0, 1fr) auto; } .ro-tt { grid-column: 2 / -1; grid-row: 2; white-space: normal; }
+  .ro-onlyp { margin-left: 0; }
+}
+body.staff .ro-gridpanel { padding: 0; }
+.ro-grid tfoot td .ro-dp { display: block; font-size: var(--fs-xs); line-height: 1.2; }
+body.staff .ro-tiles .tile .v { white-space: nowrap; font-size: clamp(1.2rem, 2vw, 1.8rem); }
+
+/* 2.4.0 review fixes: the wider windows (usual weeks, import), the usual-week key, the bar's "More shifts…", no text
+   highlighted while selecting days */
+body.staff .modal.ro-xwide { max-width: min(1180px, calc(100vw - 32px)); }
+.ro-ukey { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-4); margin: 0 0 var(--sp-3); color: var(--muted); }
+.ro-ukey span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ro-ukey b { color: var(--ink); font-weight: 600; }
+.ro-ukey .ro-sw { width: 10px; height: 10px; border-radius: 50%; }
+.ro-utable select { min-width: 104px; }
+body.staff table.ro-imptable td.wrap { min-width: 260px; white-space: normal; }
+body.staff table.ro-imptable td:nth-child(2) { white-space: nowrap; }
+.ro-bb-more { flex: none; height: 32px; max-width: 160px; padding: 0 8px; font-size: var(--fs-sm); border: 1px solid var(--line-ctl); border-radius: 999px; background: #fff; }
+.ro-bb-more[hidden] { display: none; }
+.ro-gridpanel:has(.ro-grid[role=grid]) { user-select: none; -webkit-user-select: none; }
+.ro-tbtn[hidden] { display: none; }
+.ro-bb-t.compact .ro-tbtn small { display: none; }
+@media (max-width: 900px) { .ro-bb-t .ro-tbtn small { display: none; } }
+@media (max-width: 600px) {
+  /* the toolbar: two even columns, Undo and More in the same grid (no button alone on a row) */
+  .ro-tools-end { display: contents; }
+  body.staff .ro-tools:has([data-ro-undo]) .ro-more { grid-column: 1 / -1; }
+  .ro-more .rm-btn { width: 100%; }
+}

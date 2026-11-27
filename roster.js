@@ -33,6 +33,8 @@ module.exports = function roster(app, h) {
   CREATE INDEX IF NOT EXISTS idx_roster_pub ON roster_shifts(pub_user_id, pub_date);
   CREATE TABLE IF NOT EXISTS roster_weeks (week_start TEXT PRIMARY KEY, published_at TEXT, published_by INTEGER, published_by_name TEXT, first_published_at TEXT, times INTEGER NOT NULL DEFAULT 0);
   `);
+  // 2.4.0: the shift template (standard shift) a shift was made from, for its colour (NULL: typed times)
+  try { db.exec('ALTER TABLE roster_shifts ADD COLUMN template_id INTEGER'); } catch { /* already there */ }
 
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const dow = d => new Date(d + 'T00:00:00Z').getUTCDay();
@@ -64,11 +66,14 @@ module.exports = function roster(app, h) {
   const mustEdit = req => { if (!canEdit(req)) throw new HttpError(403, "Planning the roster needs Add & edit access to Timesheets. Ask an administrator."); };
   const seesPay = req => levelOf(req.user, 'pay_rates') >= 1;
 
-  // ---- people on the roster: active and on the time clock (in this person's scope), plus anyone with a shift that week
+  // ---- people on the roster: current staff on the time clock (in this person's scope), plus anyone with a shift that week.
+  // 2.4.0: former staff (left, or their last day was before the week) are not on the grid for later weeks; a past week
+  // they have shifts in still shows them (history), marked as former staff.
   function peopleFor(req, a, b) {
     const [w, p] = scopeSql(req.user, 'id');
-    return db.prepare(`SELECT id, name, position, pay_type, pay_rate, COALESCE(end_date, '') AS end_date, COALESCE(employee_no, '') AS employee_no FROM users
-      WHERE active = 1 AND ${w} AND (COALESCE(on_timeclock, 1) = 1 OR id IN (SELECT user_id FROM roster_shifts WHERE date BETWEEN ? AND ? AND user_id IS NOT NULL)) ORDER BY name`).all(...p, a, b);
+    return db.prepare(`SELECT id, name, position, pay_type, pay_rate, active, COALESCE(end_date, '') AS end_date, COALESCE(start_date, '') AS start_date, COALESCE(employee_no, '') AS employee_no FROM users
+      WHERE ${w} AND ((active = 1 AND COALESCE(on_timeclock, 1) = 1 AND (COALESCE(end_date, '') = '' OR end_date >= ?))
+        OR id IN (SELECT user_id FROM roster_shifts WHERE date BETWEEN ? AND ? AND user_id IS NOT NULL AND deleted = 0)) ORDER BY name`).all(...p, a, a, b);
   }
   const leaveStmt = () => db.prepare('SELECT kind, date_from, date_to FROM staff_leave WHERE user_id = ? AND date_from <= ? AND date_to >= ?');
   const LEAVE = { annual: 'annual leave', sick: 'sick leave', other: 'paid leave', unpaid: 'unpaid leave' };
@@ -89,7 +94,7 @@ module.exports = function roster(app, h) {
     }
   }
   const shape = (r, weekPublished) => {
-    const s = { id: r.id, user_id: r.user_id, date: r.date, start: r.start, finish: r.finish, break_min: r.break_min, role: r.role || '', note: r.note || '', deleted: !!r.deleted };
+    const s = { id: r.id, user_id: r.user_id, date: r.date, start: r.start, finish: r.finish, break_min: r.break_min, role: r.role || '', note: r.note || '', deleted: !!r.deleted, template_id: r.template_id || null };
     s.hours = hoursOf(s); s.rule_break_min = ruleBreak(spanMin(s.start, s.finish));
     const same = r.published && r.pub_user_id === r.user_id && r.pub_date === r.date && r.pub_start === r.start && r.pub_finish === r.finish && r.pub_break_min === r.break_min && (r.pub_role || '') === (r.role || '') && (r.pub_note || '') === (r.note || '');
     // what the planner sees: not published yet (the week has been), changed since it was published, or removed
@@ -110,7 +115,7 @@ module.exports = function roster(app, h) {
       const before = db.prepare('SELECT * FROM roster_shifts WHERE user_id = ? AND date = ? AND deleted = 0').all(p.id, addDays(a, -1)).map(r => shape(r, false));
       warn([...before, ...shifts], { leave, end_date: p.end_date });
       const live = shifts.filter(x => !x.deleted), hours = round2(live.reduce((t, x) => t + x.hours, 0));
-      const person = { id: p.id, name: p.name, position: p.position || '', employee_no: p.employee_no, end_date: p.end_date, shifts, hours, days: new Set(live.map(x => x.date)).size, warnings: [],
+      const person = { id: p.id, name: p.name, position: p.position || '', employee_no: p.employee_no, end_date: p.end_date, former: !p.active || (!!p.end_date && p.end_date < a), shifts, hours, days: new Set(live.map(x => x.date)).size, warnings: [],
         leave: Object.fromEntries(days.map(d => [d, (leave.find(l => l.date_from <= d && l.date_to >= d) || {}).kind]).filter(([, k]) => k)) };
       if (hours > normal) person.warnings.push(`${hours} hours this week: over the normal ${normal}-hour week (extra hours)`);
       if (pay) { person.pay_type = p.pay_type; person.pay_rate = p.pay_rate; person.wages = p.pay_type === 'hourly' ? round2(hours * (+p.pay_rate || 0)) : null; }
@@ -123,7 +128,9 @@ module.exports = function roster(app, h) {
     const pending = { new: all.filter(x => x.state === 'new').length, changed: all.filter(x => x.state === 'changed').length, removed: all.filter(x => x.state === 'removed').length };
     const live = out.flatMap(p => p.shifts.filter(x => !x.deleted));
     const roles = db.prepare("SELECT role, COUNT(*) AS n FROM roster_shifts WHERE COALESCE(role, '') != '' GROUP BY role ORDER BY n DESC, role LIMIT 30").all().map(r => r.role);
+    const bulk = BULK ? BULK.weekExtras(req, out) : {};
     return {
+      ...bulk,
       week_start: a, week_end: b, label: weekLabel(a, b), days, today: todayIn(s.timezone), can_edit: canEdit(req), sees_pay: pay,
       normal_start: s.normal_start || '09:00', normal_finish: s.normal_finish || '17:00', normal_week_hours: normal, long_shift_hours: LONG_HOURS,
       published: wk ? { at: wk.published_at, by: wk.published_by_name, first_at: wk.first_published_at, times: wk.times } : null, pending, hidden,
@@ -139,7 +146,8 @@ module.exports = function roster(app, h) {
   // ---- adding and changing shifts
   function clean(req, b, old = {}) {
     const v = { ...old, ...b };
-    const out = { date: v.date, start: v.start, finish: v.finish, break_min: Math.round(+v.break_min || 0), role: str(v.role, 40), note: str(v.note, 200) };
+    const out = { date: v.date, start: v.start, finish: v.finish, break_min: Math.round(+v.break_min || 0), role: str(v.role, 40), note: str(v.note, 200),
+      template_id: +v.template_id > 0 && db.prepare('SELECT 1 FROM roster_templates WHERE id = ?').get(+v.template_id) ? +v.template_id : null };
     if (!isDate(out.date)) bad('Choose the day.');
     if (!isTime(out.start) || !isTime(out.finish)) bad('Enter the start and finish times.');
     if (out.start === out.finish) bad('The finish is the same as the start.');
@@ -166,8 +174,8 @@ module.exports = function roster(app, h) {
     return (near.find(x => x.id === r.id) || { warnings: [] }).warnings;
   }
   const changed = () => broadcast({ type: 'roster' }, true);
-  const ins = (req, v) => db.prepare('INSERT INTO roster_shifts(user_id, date, start, finish, break_min, role, note, created_by, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)')
-    .run(v.user_id, v.date, v.start, v.finish, v.break_min, v.role, v.note, req.user.id, new Date().toISOString(), new Date().toISOString()).lastInsertRowid;
+  const ins = (req, v) => db.prepare('INSERT INTO roster_shifts(user_id, date, start, finish, break_min, role, note, template_id, created_by, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run(v.user_id, v.date, v.start, v.finish, v.break_min, v.role || '', v.note || '', v.template_id || null, req.user.id, new Date().toISOString(), new Date().toISOString()).lastInsertRowid;
   const own = (req, id) => {
     const r = db.prepare('SELECT * FROM roster_shifts WHERE id = ?').get(+id);
     if (!r) throw new HttpError(404, 'That shift is no longer on the roster.');
@@ -183,9 +191,9 @@ module.exports = function roster(app, h) {
     mustEdit(req);
     const r = own(req, req.params.id), b = req.body || {};
     if (b.restore === true) { db.prepare('UPDATE roster_shifts SET deleted = 0, updated_at = ? WHERE id = ?').run(new Date().toISOString(), r.id); changed(); return res.json({ ok: true, id: r.id, warnings: warningsFor(r.id) }); }
-    const v = clean(req, b, { user_id: r.user_id, date: r.date, start: r.start, finish: r.finish, break_min: r.break_min, role: r.role, note: r.note });
-    db.prepare('UPDATE roster_shifts SET user_id = ?, date = ?, start = ?, finish = ?, break_min = ?, role = ?, note = ?, deleted = 0, updated_at = ? WHERE id = ?')
-      .run(v.user_id, v.date, v.start, v.finish, v.break_min, v.role, v.note, new Date().toISOString(), r.id);
+    const v = clean(req, b, { user_id: r.user_id, date: r.date, start: r.start, finish: r.finish, break_min: r.break_min, role: r.role, note: r.note, template_id: r.template_id });
+    db.prepare('UPDATE roster_shifts SET user_id = ?, date = ?, start = ?, finish = ?, break_min = ?, role = ?, note = ?, template_id = ?, deleted = 0, updated_at = ? WHERE id = ?')
+      .run(v.user_id, v.date, v.start, v.finish, v.break_min, v.role, v.note, v.template_id, new Date().toISOString(), r.id);
     changed(); res.json({ ok: true, id: r.id, warnings: warningsFor(r.id) });
   }));
   app.delete('/api/staff/roster/shifts/:id', requireStaff, wrap((req, res) => {
@@ -207,37 +215,9 @@ module.exports = function roster(app, h) {
     changed(); res.json({ ok: true, added, skipped });
   }));
 
-  // copy last week: each shift of the week before, a week on; people who have left, are on leave that day, or already have
-  // the same shift are skipped. replace: take this week's shifts off first.
-  app.post('/api/staff/roster/copy-week', requireStaff, wrap((req, res) => {
-    mustEdit(req);
-    const [a, b] = weekOf(req.body.week), fa = addDays(a, -7), fb = addDays(a, -1);
-    const src = db.prepare('SELECT * FROM roster_shifts WHERE date BETWEEN ? AND ? AND deleted = 0 ORDER BY date, start').all(fa, fb).filter(r => !r.user_id || inScope(req.user, 'timesheets', r.user_id, 2));
-    if (!src.length) bad(`There are no shifts in the week before (${weekLabel(fa, fb)}) to copy.`);
-    const lv = leaveStmt(), user = db.prepare("SELECT id, name, active, COALESCE(end_date, '') AS end_date FROM users WHERE id = ?");
-    const same = db.prepare('SELECT 1 FROM roster_shifts WHERE user_id IS ? AND date = ? AND start = ? AND finish = ? AND deleted = 0 LIMIT 1');
-    let added = 0, removed = 0; const skipped = [];
-    db.exec('BEGIN');
-    try {
-      if (req.body.replace === true) {
-        for (const r of db.prepare('SELECT * FROM roster_shifts WHERE date BETWEEN ? AND ? AND deleted = 0').all(a, b)) {
-          if (r.user_id && !inScope(req.user, 'timesheets', r.user_id, 2)) continue;
-          if (r.published) db.prepare('UPDATE roster_shifts SET deleted = 1, updated_at = ? WHERE id = ?').run(new Date().toISOString(), r.id); else db.prepare('DELETE FROM roster_shifts WHERE id = ?').run(r.id);
-          removed++;
-        }
-      }
-      for (const r of src) {
-        const d = addDays(r.date, 7), u = r.user_id ? user.get(r.user_id) : null;
-        const why = r.user_id && (!u || !u.active) ? 'no longer working' : u && u.end_date && u.end_date < d ? `finished on ${dayLong(u.end_date)}` : u && lv.all(u.id, d, d).length ? 'on leave that day'
-          : same.get(r.user_id, d, r.start, r.finish) ? 'already on the roster' : '';
-        if (why) { skipped.push({ name: u ? u.name : 'Open shift', date: d, why }); continue; }
-        ins(req, { ...r, date: d }); added++;
-      }
-      db.exec('COMMIT');
-    } catch (e) { db.exec('ROLLBACK'); throw e; }
-    if (added || removed) { audit(req, 'Copied the roster', `${added} shift${added === 1 ? '' : 's'} from ${weekLabel(fa, fb)} into ${weekLabel(a, b)}${removed ? ` (${removed} taken off first)` : ''}`); changed(); }
-    res.json({ ok: true, added, removed, skipped });
-  }));
+  // ---- bulk rostering (2.4.0, rosterbulk.js): shift templates, usual weeks, fill the week, select many cells and apply once,
+  // import from a CSV file, copy last week / copy to the next weeks, and undo the last bulk change
+  const BULK = require('./rosterbulk')(app, h, { ins, clean, own, warningsFor, weekOf, weekStart, weekLabel, dayLong, dow, t12, spanMin, hoursOf, LONG_HOURS, canEdit, mustEdit, leaveStmt, LEAVE, peopleFor, changed });
 
   // ---- publish: what staff see
   app.post('/api/staff/roster/publish', requireStaff, wrap((req, res) => {

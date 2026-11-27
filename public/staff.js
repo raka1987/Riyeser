@@ -191,8 +191,10 @@ async function listMeta(fresh = false) {
 }
 // one list's sort and filters, remembered for the person signed in
 const listOf = (id, spec, defaults, onChange) => LV.list({ id, uid: ME && ME.id, spec, defaults, meta: LISTMETA, onChange });
+// 2.4.0: current staff: active, and their last day (if any) hasn't passed. Everyone else is former staff.
+const isCurrentStaff = e => !!e.active && !(e.end_date && e.end_date < today());
 const NAME_FIELDS = (get = r => r.name) => ({ name: { label: 'First name', type: 'text', get, then: 'last_name' }, last_name: { label: 'Last name', type: 'text', get: r => LV.nameKey(get(r), 'last'), then: 'name' } });
-const lvEmpty = (lv, all, what) => all.length && LV.isFiltered(lv.state, lv.spec) ? `No ${what} match these filters. <button type="button" class="btn sm ghost" data-lv-clear2>Clear filters</button>` : null;
+const lvEmpty = (lv, all, what) => all.length && LV.isFiltered(lv.state, lv.spec, lv.defaults) ? `No ${what} match these filters. <button type="button" class="btn sm ghost" data-lv-clear2>Clear filters</button>` : null;
 const bindClear2 = (root, lv) => $$('[data-lv-clear2]', root).forEach(b => b.onclick = () => lv.clear());
 function bindRows(container, rows, fn) { $$('tr.click', container).forEach(tr => tr.onclick = e => { if (e.target.closest('button,input,select,a')) return; fn(rows[tr.dataset.i]); }); }
 const initials = n => n.split(/\s+/).map(x => x[0]).slice(0, 2).join('').toUpperCase();
@@ -478,9 +480,12 @@ async function renderTimesheets(f) {
   Object.assign(lv.state, LV.pickFor(f.from, f.to, LISTMETA));
   let rows = lv.apply(all);
   if (window.__tsUnlock && !tsUnlocked()) window.__tsUnlock = null; // 15 minutes are up
-  const emps = canTS() ? (await api('/api/staff/directory')).filter(e => e.on_timeclock) : [];
+  // 2.4.0: current staff to choose from; former staff only when they have shifts in these dates (looking back)
+  const dir = canTS() ? await api('/api/staff/directory?former=1') : [];
+  const emps = dir.filter(e => !e.former && e.on_timeclock), formerEmps = dir.filter(e => e.former && (all.some(r => r.user_id === e.id) || String(f.user_id) === String(e.id)));
+  const empOpt = e => `<option value="${e.id}" ${f.user_id == e.id ? 'selected' : ''}>${esc(e.name)}</option>`;
   view().innerHTML = `<div class="ts-filters">
-      ${canTS() ? `<select id="t-emp"><option value="">All staff</option>${emps.map(e => `<option value="${e.id}" ${f.user_id == e.id ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select>` : ''}
+      ${canTS() ? `<select id="t-emp"><option value="">All staff</option>${emps.map(empOpt).join('')}${formerEmps.length ? `<optgroup label="Former staff">${formerEmps.map(empOpt).join('')}</optgroup>` : ''}</select>` : ''}
       <label class="ts-date"><span>From</span><input type="date" id="t-from" value="${f.from}"></label><label class="ts-date"><span>To</span><input type="date" id="t-to" value="${f.to}"></label>
       </div>
     ${PP ? (isPeriod ? `<div class="ts-period"><button type="button" class="btn sm ghost" id="t-pprev" title="Previous pay period" aria-label="Previous pay period">‹</button>
@@ -518,7 +523,7 @@ async function renderTimesheets(f) {
       { h: 'Out', f: r => r.clock_out ? fmtTime(r.clock_out.slice(11)) : '<span class="status open">on shift</span>' }, { h: 'Hours', s: 'hours', f: r => r.hours.toFixed(2), r: 1 }, { h: 'Unpaid break', f: r => r.break_hours ? `−${(r.break_hours * 60).toFixed(0)} min` : NONE, r: 1 }, { h: 'Paid hours', s: 'paid_hours', f: r => `<b>${(r.paid_hours ?? r.hours).toFixed(2)}</b>`, r: 1 },
       { h: 'Status', s: 'status', f: r => `<span class="status ${{ 'on shift': 'open', paid: 'confirmed', approved: 'confirmed', 'not approved': '' }[tsStatus(r)]}">${esc(tsStatus(r))}</span>` }, { h: 'Roster', f: r => QE.rosterText(r) || NONE }, { h: 'Notes', k: 'notes' }],
       rows, { onRow: canTS(), lv, empty: lvEmpty(lv, all, 'shifts') || 'No shifts in this period. Use "Clock in" in the sidebar to start a shift.' })}</div>`
-      : tsPersonCards(rows, LV.isFiltered(lv.state, lv.spec) ? emps.filter(e => LV.matches([e.name, e.employee_no], lv.state.q)) : emps, f, { order: cardOrder, addEmpty: !lv.state.sel.status, empty: lvEmpty(lv, all, 'shifts') })}`;
+      : tsPersonCards(rows, LV.isFiltered(lv.state, lv.spec, lv.defaults) ? emps.filter(e => LV.matches([e.name, e.employee_no], lv.state.q)) : emps, f, { order: cardOrder, addEmpty: !lv.state.sel.status, empty: lvEmpty(lv, all, 'shifts') })}`;
   if ($('#t-lock')) $('#t-lock').onclick = () => { window.__tsUnlock = null; toast('Timesheets locked'); renderTimesheets(f); };
   if ($('#t-pin')) $('#t-pin').onclick = () => {
     const m = openModal(`<h2 style="font-size:1.3rem">🔐 Enter timesheets for all staff</h2>
@@ -535,7 +540,8 @@ async function renderTimesheets(f) {
   };
   const tsQuery = () => ({ from: $('#t-from').value, to: $('#t-to').value, ...($('#t-emp') && $('#t-emp').value ? { user_id: $('#t-emp').value } : {}) });
   if ($('#t-leave')) $('#t-leave').onclick = () => leaveModal(emps);
-  $('#t-print').onclick = () => reportsModal(emps, { from: $('#t-from').value, to: $('#t-to').value, user_id: $('#t-emp') ? $('#t-emp').value : '' });
+  $('#t-print').onclick = () => reportsModal([...emps, ...formerEmps], {   // reports look back: former staff with shifts in these dates too
+     from: $('#t-from').value, to: $('#t-to').value, user_id: $('#t-emp') ? $('#t-emp').value : '' });
   if ($('#t-admin')) $('#t-admin').onclick = async () => {
     if (!confirm('Email every staff member\'s hours and pay for these dates to the admin?')) return;
     const b = $('#t-admin'); b.disabled = true;
@@ -749,31 +755,38 @@ async function renderEmployees() {
     .map(d => (PAYF.includes(d.n) && L('pay_rates') < 2) || !canEdit ? { ...d, dis: true } : d);
   await listMeta();
   const seePay = L('pay_rates') >= 1, positions = [...new Set(rows.map(e => e.position).filter(Boolean))].sort(LV.compare), accesses = [...new Set(rows.map(accessName))].sort(LV.compare);
-  const lv = listOf('employees', {
+  // 2.4.0 (owner): people who have left are hidden by default ("Current staff"); "Show former staff" brings them back.
+  // A choice remembered from before 2.4.0 ("All", "Active", "Left / inactive") moves to the new choices once.
+  const lv = LV.list({ id: 'employees', uid: ME && ME.id, meta: LISTMETA, onChange: () => draw(), spec: {
     fields: { ...NAME_FIELDS(), employee_no: { label: 'Employee no.', type: 'text', then: 'name' }, position: { label: 'Position', type: 'text', then: 'name' }, start_date: { label: 'Start date', type: 'date', first: 'desc', then: 'name' },
-      pay_rate: { label: 'Pay rate', type: 'num', first: 'desc', hidden: !seePay, guard: 1, then: 'name' }, status: { label: 'Status (active first)', type: 'num', get: e => (e.active ? 0 : 1), then: 'name' } },
+      pay_rate: { label: 'Pay rate', type: 'num', first: 'desc', hidden: !seePay, guard: 1, then: 'name' }, status: { label: 'Status (current first)', type: 'num', get: e => (isCurrentStaff(e) ? 0 : 1), then: 'name' } },
     search: e => [e.name, e.username, e.position, e.employee_no, e.phone, e.email], placeholder: 'Name, emp. no., position…',
     date: e => e.start_date, dateLabel: 'Start date',
-    selects: [{ key: 'status', label: 'Status', options: [['active', 'Active'], ['left', 'Left / inactive']], test: (e, v) => (v === 'active' ? !!e.active : !e.active) },
+    selects: [{ key: 'status', label: 'Status', all: 'All staff', options: [['current', 'Current staff'], ['former', 'Former staff']], test: (e, v) => (v === 'current' ? isCurrentStaff(e) : !isCurrentStaff(e)) },
       ...(positions.length > 1 ? [{ key: 'position', label: 'Position', options: positions.map(p => [p, p]), test: (e, v) => e.position === v }] : []),
-      ...(accesses.length > 1 ? [{ key: 'access', label: 'Access', options: accesses.map(a => [a, a]), test: (e, v) => accessName(e) === v }] : [])],
-  }, { sort: 'status', dir: 'asc' }, () => draw());
+      ...(accesses.length > 1 ? [{ key: 'access', label: 'Access', options: accesses.map(a => [a, a]), test: (e, v) => accessName(e) === v }] : [])] },
+    defaults: { sort: 'status', dir: 'asc', sel: { status: 'current' }, v: 2 },
+    migrate: old => ({ ...old, sel: { ...old.sel, status: { left: 'former' }[old.sel.status] || 'current' } }) });
   view().innerHTML = `<div class="bar-tools"><p class="small muted grow" style="margin:0">${isAdmin() ? 'Press <b>⋯</b> on a row, then <b>Access…</b>, to choose what each person can see and change.' : ME.team_only ? 'Your team (people with you as their supervisor).' : 'Only an administrator can change what people can see and do.'}</p>${isAdmin() ? '<a class="btn sm ghost" href="#/audit">🧾 Audit trail</a><a class="btn sm ghost" href="#/logins">🔐 Login history</a>' : ''}${canEdit ? '<button class="btn sm coral" id="e-new">+ Staff member</button>' : ''}</div>
     <div id="e-list"></div>`;
   if ($('#e-new')) $('#e-new').onclick = () => editModal('New staff member', defs(true), { pay_type: 'hourly', active: 1, on_timeclock: 1 }, v => api('/api/staff/employees', { body: v }).then(e => { renderEmployees(); if (isAdmin()) accessModal(e, rows); }), { wide: true });
   const draw = () => {
     const host = $('#e-list'); if (!host) return;
-    const shown = lv.apply(rows);
-    host.innerHTML = `${lv.bar({ shown: shown.length, total: rows.length })}
+    const shown = lv.apply(rows), st = lv.state.sel.status || '', former = rows.filter(e => !isCurrentStaff(e)).length;
+    // "+3 former staff hidden · Show former staff" (or "Hide former staff" when they're shown)
+    const formerBtn = !former ? '' : st === 'current' ? `<span class="lv-more small muted">+${former} former staff hidden</span><button type="button" class="btn sm ghost" data-former="">Show former staff</button>`
+      : `<button type="button" class="btn sm ghost" data-former="current">Hide former staff</button>`;
+    host.innerHTML = `${lv.bar({ shown: shown.length, total: rows.length, extra: formerBtn })}
     <div class="panel" style="padding:0">${table([{ h: 'Name', s: 'name', long: 1, f: e => `<b>${esc(e.name)}</b> <span class="small muted hide-md-inline">@${esc(e.username)}</span>` }, { h: 'Emp. no.', s: 'employee_no', hide: 'md', k: 'employee_no' }, { h: 'Position', s: 'position', k: 'position', long: 1, hide: 'md' },
       { h: 'Access', long: 1, f: e => `${accessChip(e)}${e.team_only && e.role !== 'admin' ? ' <span class="small muted">own team</span>' : ''}${e.supervisor_id ? ` <span class="small muted">· Supervisor: ${esc((rows.find(x => x.id === e.supervisor_id) || {}).name || '—')}</span>` : ''}` },
       ...(seePay ? [{ h: 'Pay', s: 'pay_rate', f: e => e.pay_rate ? `${money(e.pay_rate, cur())}${e.pay_type === 'hourly' ? '/hr' : '/yr'}` : '', r: 1 }] : []), { h: 'Started', s: 'start_date', hide: 'lg', f: e => e.start_date ? esc(fmtDate(e.start_date, { day: 'numeric', month: 'short', year: 'numeric' })) : '' }, { h: 'Phone', k: 'phone', hide: 'lg' },
-      { h: 'Status', s: 'status', f: e => (e.active ? '<span class="status open">active</span>' : `<span class="status cancelled">${e.end_date ? `finished ${esc(fmtDate(e.end_date))}` : 'inactive'}</span>`) },
+      { h: 'Status', s: 'status', f: e => (isCurrentStaff(e) ? '<span class="status open">active</span>' : `<span class="status cancelled">${e.end_date ? `finished ${esc(fmtDate(e.end_date))}` : 'inactive'}</span>`) },
       { h: '', act: 1, f: e => rowMenu(`Actions for ${e.name}`, [
         { label: canEdit ? 'Edit details…' : 'View details…', attrs: `data-edit="${e.id}"` },
         isAdmin() && { label: 'Access…', attrs: `data-acc="${e.id}"` },
         e.active && e.pay_rate && L('employees') >= 3 && L('payroll') >= 2 && { label: 'Finish employment…', attrs: `data-fin="${e.id}" title="Final pay with unused annual leave paid out"`, danger: 1 }]) }], shown, { onRow: 1, lv, empty: lvEmpty(lv, rows, 'staff') || 'No staff yet.' })}</div>`;
     lv.bind(host); bindClear2(host, lv);
+    $$('[data-former]', host).forEach(b => b.onclick = () => lv.set({ sel: { ...lv.state.sel, status: b.dataset.former } }));
     $$('[data-acc]', host).forEach(b => b.onclick = () => accessModal(rows.find(e => e.id == b.dataset.acc), rows));
     $$('[data-fin]', host).forEach(b => b.onclick = ev => { ev.stopPropagation(); finishModal(rows.find(e => e.id == b.dataset.fin)); });
     const edit = e => editModal(e.name, defs(false), { ...e, password: '' }, v => { if (!v.password) delete v.password; if (!v.clock_pin) delete v.clock_pin; return api(`/api/staff/employees/${e.id}`, { method: 'PUT', body: v }).then(renderEmployees); }, { wide: true, readOnly: !canEdit });
@@ -1247,7 +1260,7 @@ async function renderMyPayslips() {
   const draw = () => {
     const host = $('#ps-list'); if (!host) return;
     const shown = lv.apply(rows), tot = k => shown.reduce((a, p) => a + (+p[k] || 0), 0);
-    host.innerHTML = `${rows.length ? lv.bar({ shown: shown.length, total: rows.length }) : ''}${shown.length && LV.isFiltered(lv.state, lv.spec) ? `<div class="tiles"><div class="tile"><div class="k">Gross</div><div class="v">${money(tot('gross'), cur())}</div><div class="s">${shown.length} payslip${shown.length === 1 ? '' : 's'}</div></div><div class="tile"><div class="k">Net</div><div class="v">${money(tot('net'), cur())}</div><div class="s">${tot('hours').toFixed(2)} hours</div></div></div>` : ''}
+    host.innerHTML = `${rows.length ? lv.bar({ shown: shown.length, total: rows.length }) : ''}${shown.length && LV.isFiltered(lv.state, lv.spec, lv.defaults) ? `<div class="tiles"><div class="tile"><div class="k">Gross</div><div class="v">${money(tot('gross'), cur())}</div><div class="s">${shown.length} payslip${shown.length === 1 ? '' : 's'}</div></div><div class="tile"><div class="k">Net</div><div class="v">${money(tot('net'), cur())}</div><div class="s">${tot('hours').toFixed(2)} hours</div></div></div>` : ''}
     <div class="panel" style="padding:0">${table([{ h: 'Pay date', s: 'pay_date', f: p => fmtDate(p.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) }, { h: 'Period', s: 'period_start', f: p => `${fmtDate(p.period_start)} – ${fmtDate(p.period_end)}` },
       { h: 'Hours', s: 'hours', k: 'hours', r: 1 }, { h: 'Gross', s: 'gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'Net', s: 'net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }], shown, { onRow: 1, lv, empty: lvEmpty(lv, rows, 'payslips') || 'No payslips yet.' })}</div>`;
     lv.bind(host); bindClear2(host, lv);
