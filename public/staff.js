@@ -47,12 +47,12 @@ function renderMenu() {
 // Phone toolbars are a two-column grid: if the last row has a single item, stretch it across so nothing sits alone
 function evenToolbars(root = document) {
   if (window.innerWidth > 600) return;
-  root.querySelectorAll('.bar-tools').forEach(bar => {
+  root.querySelectorAll('.bar-tools, .lv-bar').forEach(bar => {
     let col = 0, last = null;
     for (const el of bar.children) {
       el.classList.remove('bt-span');
       const cs = getComputedStyle(el); if (cs.display === 'none') continue;
-      if (cs.gridColumnEnd === '-1') { col = 0; last = null; continue; }
+      if (cs.gridColumnEnd === '-1') { if (col === 1 && last) last.classList.add('bt-span'); col = 0; last = null; continue; }
       col ^= 1; last = el;
     }
     if (col === 1 && last) last.classList.add('bt-span');
@@ -118,10 +118,70 @@ function editModal(title, defs, values, onSave, { onDelete, extra = '', wide = f
   if (onDelete) $('.del', f).onclick = async () => { if (!confirm('Delete this permanently?')) return; try { await onDelete(); m.close(); } catch (err) { $('.err', f).innerHTML = `<div class="error">${esc(err.message)}</div>`; } };
   return m;
 }
-// a column with s: 'field' sorts that list (lv: its LV.list) when the heading is clicked
-const table = (cols, rows, { onRow, empty = 'Nothing here yet.', lv = null } = {}) => rows.length ? `<div class="scroll"><table class="t"><thead><tr>${cols.map(c => lv && c.s ? lv.th(c.h, c.s, { r: c.r }) : `<th class="${c.r ? 'r' : ''}">${c.h}</th>`).join('')}</tr></thead>
-  <tbody>${rows.map((r, i) => `<tr class="${onRow ? 'click' : ''}" data-i="${i}">${cols.map(c => `<td class="${c.r ? 'r' : ''}" data-l="${esc(String(c.h || '').replace(/<[^>]*>/g, ''))}">${c.f ? c.f(r) : esc(r[c.k])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+// a column with s: 'field' sorts that list (lv: its LV.list) when the heading is clicked.
+// Payroll 2.3.3: cells stay on one line; c.long cuts long text with … (the whole text in a tooltip), c.wrap lets a cell wrap,
+// c.hide: 'md' | 'lg' tucks a less important column away on narrower windows, c.act is the row's ⋯ menu column.
+// An empty value shows a quiet "—".
+const NONE = '<span class="none" aria-label="none">—</span>';
+const plain = html => String(html ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+const colCls = c => [c.r ? 'r' : '', c.wrap ? 'wrap' : '', c.hide ? `hide-${c.hide}` : '', c.act ? 'act' : '', c.cls || ''].filter(Boolean).join(' ');
+const cellHTML = (c, r) => {
+  let v = c.f ? c.f(r) : esc(r[c.k]);
+  if (v == null || String(v).trim() === '') return c.act ? '' : NONE;
+  if (c.long) { const t = plain(v); v = `<span class="ell" title="${esc(t)}">${v}</span>`; }
+  return v;
+};
+const table = (cols, rows, { onRow, empty = 'Nothing here yet.', lv = null } = {}) => rows.length ? `<div class="scroll"><table class="t"><thead><tr>${cols.map(c => lv && c.s ? lv.th(c.h, c.s, { r: c.r, cls: colCls(c) }) : `<th class="${colCls(c)}">${c.act && !c.h ? '<span class="sr-only">Actions</span>' : c.h}</th>`).join('')}</tr></thead>
+  <tbody>${rows.map((r, i) => `<tr class="${onRow ? 'click' : ''}" data-i="${i}">${cols.map(c => `<td class="${colCls(c)}" data-l="${esc(String(c.h || '').replace(/<[^>]*>/g, ''))}">${cellHTML(c, r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`
   : `<div class="empty">${empty}</div>`;
+// A row's ⋯ menu (Payroll 2.3.3): secondary actions tucked away so rows stay one line. items: [{ label, attrs, danger }].
+// The buttons keep their data-* attributes, so each screen's own handlers work unchanged. Keyboard: Enter / Space / ↓ opens,
+// ↑ ↓ Home End move, Esc closes and returns focus to ⋯.
+const rowMenu = (label, items) => {
+  items = items.filter(Boolean); if (!items.length) return '';
+  return `<div class="rm"><button type="button" class="rm-btn" aria-haspopup="menu" aria-expanded="false" aria-label="${esc(label)}" title="${esc(label)}"><span aria-hidden="true">⋯</span></button>`
+    + `<div class="rm-list" role="menu" aria-label="${esc(label)}" hidden>${items.map(it => `<button type="button" role="menuitem" tabindex="-1" class="rm-item${it.danger ? ' danger' : ''}" ${it.attrs || ''}>${it.label}</button>`).join('')}</div></div>`;
+};
+(function rowMenus() {
+  let open = null;
+  const close = (focusBtn = false) => { if (!open) return; const { btn, list } = open; list.hidden = true; btn.setAttribute('aria-expanded', 'false'); list.style.cssText = ''; open = null; if (focusBtn) btn.focus(); };
+  const place = (btn, list) => {
+    const r = btn.getBoundingClientRect(); list.hidden = false; list.style.position = 'fixed'; list.style.visibility = 'hidden';
+    const w = list.offsetWidth, hh = list.offsetHeight, vw = document.documentElement.clientWidth, vh = window.innerHeight;
+    list.style.left = `${Math.max(8, Math.min(r.right - w, vw - w - 8))}px`;
+    list.style.top = `${r.bottom + 4 + hh > vh - 8 ? Math.max(8, r.top - hh - 4) : r.bottom + 4}px`;
+    list.style.visibility = '';
+  };
+  const items = list => [...list.querySelectorAll('[role=menuitem]:not([disabled])')];
+  const openMenu = (btn, first = true) => {
+    close(); const list = btn.parentElement.querySelector('.rm-list'); if (!list) return;
+    place(btn, list); btn.setAttribute('aria-expanded', 'true'); open = { btn, list };
+    const it = items(list); if (it.length) (first ? it[0] : it[it.length - 1]).focus();
+  };
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('.rm-btn');
+    if (btn) { e.stopPropagation(); if (open && open.btn === btn) close(); else openMenu(btn); return; }
+    if (open && e.target.closest('.rm-item')) { setTimeout(() => close(), 0); return; }   // the screen's own handler runs first
+    if (open && !e.target.closest('.rm-list')) close();
+  }, true);
+  document.addEventListener('keydown', e => {
+    const btn = e.target.closest && e.target.closest('.rm-btn');
+    if (btn && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) { e.preventDefault(); openMenu(btn, e.key === 'ArrowDown'); return; }
+    if (!open || !open.list.contains(e.target)) return;
+    const it = items(open.list), i = it.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); close(true); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); it[(i + 1) % it.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); it[(i - 1 + it.length) % it.length].focus(); }
+    else if (e.key === 'Home') { e.preventDefault(); it[0].focus(); }
+    else if (e.key === 'End') { e.preventDefault(); it[it.length - 1].focus(); }
+    else if (e.key === 'Tab') close();
+  });
+  window.addEventListener('resize', () => close());
+  document.addEventListener('scroll', e => { if (open && !open.list.contains(e.target)) close(); }, true);
+  // a table that is scrolled sideways shows a soft edge beside its pinned first column
+  document.addEventListener('scroll', e => { const t = e.target; if (t && t.classList && t.classList.contains('scroll')) t.classList.toggle('scrolled-x', t.scrollLeft > 2); }, true);
+})();
 // ------------------------------------------------------------------ OWNER-LISTS: sorting and filtering (listview.js)
 // The Year / Period choices (financial year from Settings) and the sort fields this person may use: from the server.
 let LISTMETA = null, LISTMETA_AT = 0;
@@ -450,13 +510,13 @@ async function renderTimesheets(f) {
         const days = Array.from({ length: 7 }, (_, i) => addDays(w, i)), people = Object.keys(W[w]).sort();
         const wt = people.reduce((a, n) => a + Object.values(W[w][n]).reduce((x, y) => x + y, 0), 0); run += wt;
         return `<div class="scroll"><table class="t days-t"><thead><tr><th>Week of ${fmtDate(w)}</th>${days.map(d => `<th class="r">${fmtDate(d, { weekday: 'short' })}<div class="small muted">${+d.slice(8)}</div></th>`).join('')}<th class="r">Days</th><th class="r">Hours</th></tr></thead><tbody>
-          ${people.map(n => { const p = W[w][n], tot = Object.values(p).reduce((x, y) => x + y, 0); return `<tr><td><b>${esc(n)}</b></td>${days.map(d => `<td class="r">${p[d] ? p[d].toFixed(2) : '<span class="muted">·</span>'}</td>`).join('')}<td class="r">${Object.keys(p).length}</td><td class="r"><b>${tot.toFixed(2)}</b></td></tr>`; }).join('')}
+          ${people.map(n => { const p = W[w][n], tot = Object.values(p).reduce((x, y) => x + y, 0); return `<tr><td><b>${esc(n)}</b></td>${days.map(d => `<td class="r">${p[d] ? p[d].toFixed(2) : NONE}</td>`).join('')}<td class="r">${Object.keys(p).length}</td><td class="r"><b>${tot.toFixed(2)}</b></td></tr>`; }).join('')}
           <tr class="cu-sum"><td colspan="8">Week total <span class="muted">· running total</span></td><td></td><td class="r"><b>${wt.toFixed(2)}</b> <span class="muted">·</span> <b>${run.toFixed(2)}</b></td></tr></tbody></table></div>`;
       }).join('') + '</div>'; })()}
     <div class="chips no-print" style="margin:4px 0 10px"><button class="chip ${(f.view || 'person') === 'person' ? '' : 'gray'}" data-tv="person">By person</button><button class="chip ${f.view === 'list' ? '' : 'gray'}" data-tv="list">All shifts</button></div>
     ${(f.view || 'person') === 'list' ? `<div class="panel" style="padding:0">${table([{ h: 'Staff', s: 'name', f: r => `${esc(r.name)}${r.employee_no ? ` <span class="small muted">${esc(r.employee_no)}</span>` : ''}` }, { h: 'Date', s: 'date', f: r => fmtDate(r.clock_in.slice(0, 10)) }, { h: 'In', f: r => fmtTime(r.clock_in.slice(11)) },
-      { h: 'Out', f: r => r.clock_out ? fmtTime(r.clock_out.slice(11)) : '<span class="status open">on shift</span>' }, { h: 'Hours', s: 'hours', f: r => r.hours.toFixed(2), r: 1 }, { h: 'Unpaid break', f: r => r.break_hours ? `−${(r.break_hours * 60).toFixed(0)} min` : '·', r: 1 }, { h: 'Paid hours', s: 'paid_hours', f: r => `<b>${(r.paid_hours ?? r.hours).toFixed(2)}</b>`, r: 1 },
-      { h: 'Status', s: 'status', f: r => `<span class="status ${{ 'on shift': 'open', paid: 'confirmed', approved: 'confirmed', 'not approved': '' }[tsStatus(r)]}">${esc(tsStatus(r))}</span>` }, { h: 'Roster', f: r => QE.rosterText(r) || '<span class="muted">·</span>' }, { h: 'Notes', k: 'notes' }],
+      { h: 'Out', f: r => r.clock_out ? fmtTime(r.clock_out.slice(11)) : '<span class="status open">on shift</span>' }, { h: 'Hours', s: 'hours', f: r => r.hours.toFixed(2), r: 1 }, { h: 'Unpaid break', f: r => r.break_hours ? `−${(r.break_hours * 60).toFixed(0)} min` : NONE, r: 1 }, { h: 'Paid hours', s: 'paid_hours', f: r => `<b>${(r.paid_hours ?? r.hours).toFixed(2)}</b>`, r: 1 },
+      { h: 'Status', s: 'status', f: r => `<span class="status ${{ 'on shift': 'open', paid: 'confirmed', approved: 'confirmed', 'not approved': '' }[tsStatus(r)]}">${esc(tsStatus(r))}</span>` }, { h: 'Roster', f: r => QE.rosterText(r) || NONE }, { h: 'Notes', k: 'notes' }],
       rows, { onRow: canTS(), lv, empty: lvEmpty(lv, all, 'shifts') || 'No shifts in this period. Use "Clock in" in the sidebar to start a shift.' })}</div>`
       : tsPersonCards(rows, LV.isFiltered(lv.state, lv.spec) ? emps.filter(e => LV.matches([e.name, e.employee_no], lv.state.q)) : emps, f, { order: cardOrder, addEmpty: !lv.state.sel.status, empty: lvEmpty(lv, all, 'shifts') })}`;
   if ($('#t-lock')) $('#t-lock').onclick = () => { window.__tsUnlock = null; toast('Timesheets locked'); renderTimesheets(f); };
@@ -638,8 +698,8 @@ async function renderLogins(f = LG) {
   const qs = new URLSearchParams(Object.entries(f).filter(([, v]) => v)).toString();
   const d = await api(`/api/staff/admin/logins${qs ? '?' + qs : ''}`);
   const EV = { login: ['Logged in', 'confirmed'], failed: ['Failed login', 'cancelled'], logout: ['Logged out', ''] };
-  const when = s => s ? `${fmtDate(s.slice(0, 10))} ${fmtTime(s.slice(11, 16))}` : '—';
-  const ago = iso => { if (!iso) return '—'; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 2 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
+  const when = s => s ? `${fmtDate(s.slice(0, 10))} ${fmtTime(s.slice(11, 16))}` : NONE;
+  const ago = iso => { if (!iso) return NONE; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 2 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; };
   const failedTotal = d.users.reduce((a, u) => a + u.failed, 0) + d.unknown_failed;
   view().innerHTML = `
     <div class="bar-tools no-print">
@@ -657,7 +717,7 @@ async function renderLogins(f = LG) {
       { h: 'Access', f: u => `<span class="chip ${u.role === 'staff' ? 'gray' : u.role === 'admin' ? 'coral' : ''}">${u.role === 'admin' ? 'Administrator' : 'Staff'}</span>` },
       { h: 'Last login', f: u => `${when(u.last_login)}${u.last_device ? `<div class="small muted">${esc(u.last_device)}</div>` : ''}` },
       { h: 'Last active', f: u => u.active_now ? '<span class="status confirmed">signed in now</span>' : ago(u.last_active) },
-      { h: 'Logins', f: u => u.logins || '·', r: 1 }, { h: 'Failed', f: u => u.failed ? `<b style="color:var(--red)">${u.failed}</b>` : '·', r: 1 }], d.users.filter(u => !f.user_id || u.id == f.user_id))}</div>
+      { h: 'Logins', f: u => u.logins || NONE, r: 1 }, { h: 'Failed', f: u => u.failed ? `<b style="color:var(--red)">${u.failed}</b>` : NONE, r: 1 }], d.users.filter(u => !f.user_id || u.id == f.user_id))}</div>
     <div class="panel" style="padding:0"><h3 style="padding:14px 16px 0">Every login (${d.events.length})</h3><div id="lg-list" style="padding:8px 16px 0"></div></div>`;
   // OWNER-LISTS: the logins sort by when / who / event / device / IP and can be searched (the dates are the boxes above)
   const lv = listOf('logins', { fields: { at: { label: 'When', type: 'date', first: 'desc' }, name: { label: 'Who', type: 'text', get: e => e.name || e.username, then: 'at' }, event: { label: 'Event', type: 'text', then: 'at' }, device: { label: 'Device', type: 'text', then: 'at' }, ip: { label: 'IP address', type: 'text', then: 'at' } },
@@ -698,22 +758,27 @@ async function renderEmployees() {
       ...(positions.length > 1 ? [{ key: 'position', label: 'Position', options: positions.map(p => [p, p]), test: (e, v) => e.position === v }] : []),
       ...(accesses.length > 1 ? [{ key: 'access', label: 'Access', options: accesses.map(a => [a, a]), test: (e, v) => accessName(e) === v }] : [])],
   }, { sort: 'status', dir: 'asc' }, () => draw());
-  view().innerHTML = `<div class="bar-tools"><p class="small muted grow" style="margin:0">${isAdmin() ? 'Press <b>Access</b> to choose what each person can see and change.' : ME.team_only ? 'Your team (people with you as their supervisor).' : 'Only an administrator can change what people can see and do.'}</p>${isAdmin() ? '<a class="btn sm ghost" href="#/audit">🧾 Audit trail</a><a class="btn sm ghost" href="#/logins">🔐 Login history</a>' : ''}${canEdit ? '<button class="btn sm coral" id="e-new">+ Staff member</button>' : ''}</div>
+  view().innerHTML = `<div class="bar-tools"><p class="small muted grow" style="margin:0">${isAdmin() ? 'Press <b>⋯</b> on a row, then <b>Access…</b>, to choose what each person can see and change.' : ME.team_only ? 'Your team (people with you as their supervisor).' : 'Only an administrator can change what people can see and do.'}</p>${isAdmin() ? '<a class="btn sm ghost" href="#/audit">🧾 Audit trail</a><a class="btn sm ghost" href="#/logins">🔐 Login history</a>' : ''}${canEdit ? '<button class="btn sm coral" id="e-new">+ Staff member</button>' : ''}</div>
     <div id="e-list"></div>`;
   if ($('#e-new')) $('#e-new').onclick = () => editModal('New staff member', defs(true), { pay_type: 'hourly', active: 1, on_timeclock: 1 }, v => api('/api/staff/employees', { body: v }).then(e => { renderEmployees(); if (isAdmin()) accessModal(e, rows); }), { wide: true });
   const draw = () => {
     const host = $('#e-list'); if (!host) return;
     const shown = lv.apply(rows);
     host.innerHTML = `${lv.bar({ shown: shown.length, total: rows.length })}
-    <div class="panel" style="padding:0">${table([{ h: 'Name', s: 'name', f: e => `<b>${esc(e.name)}</b><div class="small muted">@${esc(e.username)}</div>` }, { h: 'Emp. no.', s: 'employee_no', f: e => esc(e.employee_no || '') || '<span class="muted">·</span>' }, { h: 'Position', s: 'position', k: 'position' },
-      { h: 'Access', f: e => `${accessChip(e)}${e.team_only && e.role !== 'admin' ? ' <span class="small muted">own team</span>' : ''}${e.supervisor_id ? `<div class="small muted">Supervisor: ${esc((rows.find(x => x.id === e.supervisor_id) || {}).name || '—')}</div>` : ''}${isAdmin() ? ` <button class="btn sm ghost" data-acc="${e.id}">Access</button>` : ''}` },
-      ...(seePay ? [{ h: 'Pay', s: 'pay_rate', f: e => e.pay_rate ? `${money(e.pay_rate, cur())}${e.pay_type === 'hourly' ? '/hr' : '/yr'}` : '—', r: 1 }] : []), { h: 'Started', s: 'start_date', f: e => e.start_date ? esc(fmtDate(e.start_date, { day: 'numeric', month: 'short', year: 'numeric' })) : '<span class="muted">·</span>' }, { h: 'Phone', k: 'phone' },
-      { h: 'Status', s: 'status', f: e => (e.active ? '<span class="status open">active</span>' : `<span class="status cancelled">${e.end_date ? `finished ${esc(fmtDate(e.end_date))}` : 'inactive'}</span>`)
-        + (e.active && e.pay_rate && L('employees') >= 3 && L('payroll') >= 2 ? ` <button class="btn sm ghost" data-fin="${e.id}" title="Final pay with unused annual leave paid out">Finish employment…</button>` : '') }], shown, { onRow: 1, lv, empty: lvEmpty(lv, rows, 'staff') || 'No staff yet.' })}</div>`;
+    <div class="panel" style="padding:0">${table([{ h: 'Name', s: 'name', long: 1, f: e => `<b>${esc(e.name)}</b> <span class="small muted hide-md-inline">@${esc(e.username)}</span>` }, { h: 'Emp. no.', s: 'employee_no', hide: 'md', k: 'employee_no' }, { h: 'Position', s: 'position', k: 'position', long: 1, hide: 'md' },
+      { h: 'Access', long: 1, f: e => `${accessChip(e)}${e.team_only && e.role !== 'admin' ? ' <span class="small muted">own team</span>' : ''}${e.supervisor_id ? ` <span class="small muted">· Supervisor: ${esc((rows.find(x => x.id === e.supervisor_id) || {}).name || '—')}</span>` : ''}` },
+      ...(seePay ? [{ h: 'Pay', s: 'pay_rate', f: e => e.pay_rate ? `${money(e.pay_rate, cur())}${e.pay_type === 'hourly' ? '/hr' : '/yr'}` : '', r: 1 }] : []), { h: 'Started', s: 'start_date', hide: 'lg', f: e => e.start_date ? esc(fmtDate(e.start_date, { day: 'numeric', month: 'short', year: 'numeric' })) : '' }, { h: 'Phone', k: 'phone', hide: 'lg' },
+      { h: 'Status', s: 'status', f: e => (e.active ? '<span class="status open">active</span>' : `<span class="status cancelled">${e.end_date ? `finished ${esc(fmtDate(e.end_date))}` : 'inactive'}</span>`) },
+      { h: '', act: 1, f: e => rowMenu(`Actions for ${e.name}`, [
+        { label: canEdit ? 'Edit details…' : 'View details…', attrs: `data-edit="${e.id}"` },
+        isAdmin() && { label: 'Access…', attrs: `data-acc="${e.id}"` },
+        e.active && e.pay_rate && L('employees') >= 3 && L('payroll') >= 2 && { label: 'Finish employment…', attrs: `data-fin="${e.id}" title="Final pay with unused annual leave paid out"`, danger: 1 }]) }], shown, { onRow: 1, lv, empty: lvEmpty(lv, rows, 'staff') || 'No staff yet.' })}</div>`;
     lv.bind(host); bindClear2(host, lv);
     $$('[data-acc]', host).forEach(b => b.onclick = () => accessModal(rows.find(e => e.id == b.dataset.acc), rows));
     $$('[data-fin]', host).forEach(b => b.onclick = ev => { ev.stopPropagation(); finishModal(rows.find(e => e.id == b.dataset.fin)); });
-    bindRows(host, shown, e => editModal(e.name, defs(false), { ...e, password: '' }, v => { if (!v.password) delete v.password; if (!v.clock_pin) delete v.clock_pin; return api(`/api/staff/employees/${e.id}`, { method: 'PUT', body: v }).then(renderEmployees); }, { wide: true, readOnly: !canEdit }));
+    const edit = e => editModal(e.name, defs(false), { ...e, password: '' }, v => { if (!v.password) delete v.password; if (!v.clock_pin) delete v.clock_pin; return api(`/api/staff/employees/${e.id}`, { method: 'PUT', body: v }).then(renderEmployees); }, { wide: true, readOnly: !canEdit });
+    bindRows(host, shown, edit);
+    $$('[data-edit]', host).forEach(b => b.onclick = ev => { ev.stopPropagation(); edit(rows.find(e => e.id == b.dataset.edit)); });
   };
   draw();
 }
@@ -788,7 +853,7 @@ async function renderAudit() {
     const host = $('#au-list'); if (!host) return;
     const shown = lv.apply(rows);
     host.innerHTML = `${lv.bar({ shown: shown.length, total: rows.length })}<div class="panel" style="padding:0">${table([{ h: 'When', s: 'at', f: r => `${fmtDate(r.at.slice(0, 10), { day: 'numeric', month: 'short', year: 'numeric' })} <span class="small muted">${new Date(r.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>` },
-      { h: 'Who', s: 'user_name', f: r => `<b>${esc(r.user_name || '—')}</b>` }, { h: 'What', s: 'action', f: r => esc(r.action) }, { h: 'Details', f: r => `<span class="small">${esc(r.details)}</span>` }], shown, { lv, empty: lvEmpty(lv, rows, 'changes') || (r0 ? 'No changes in these dates.' : 'Nothing yet. Changes to access, pay rates and bank details, and deletions, will show here.') })}</div>`;
+      { h: 'Who', s: 'user_name', f: r => `<b>${esc(r.user_name || '—')}</b>` }, { h: 'What', s: 'action', f: r => esc(r.action) }, { h: 'Details', long: 1, cls: 'grow', f: r => `<span class="small">${esc(r.details)}</span>` }], shown, { lv, empty: lvEmpty(lv, rows, 'changes') || (r0 ? 'No changes in these dates.' : 'Nothing yet. Changes to access, pay rates and bank details, and deletions, will show here.') })}</div>`;
     lv.bind(host); bindClear2(host, lv);
   };
   draw();
@@ -846,9 +911,9 @@ async function renderPayroll(state = {}) {
     const shown = plv.apply(pastAll);
     host.innerHTML = `${pastAll.length ? plv.bar({ shown: shown.length, total: pastAll.length }) : ''}${table([{ h: 'Pay date', s: 'pay_date', f: r => fmtDate(r.pay_date, { day: 'numeric', month: 'short', year: 'numeric' }) + (r.extra_reason ? ` <span class="chip" title="${esc(r.extra_reason)}">Extra: ${esc(r.extra_reason)}</span>` : '') + (r.note ? ` <span class="chip gray" title="${esc(r.note)}">${esc(r.note.split(' (')[0])}</span>` : '') },
       { h: 'Period', s: 'period_start', f: r => `${fmtDate(r.period_start)} – ${fmtDate(r.period_end)}` },
-      { h: 'Staff', s: 'employees', k: 'employees', r: 1 }, { h: 'Gross', s: 'total_gross', f: r => money(r.total_gross, cur()), r: 1 }, { h: 'Net', s: 'total_net', f: r => money(r.total_net, cur()), r: 1 }, { h: 'Employer FNPF', s: 'total_fnpf_employer', f: r => money(r.total_fnpf_employer, cur()), r: 1 },
+      { h: 'Staff', s: 'employees', k: 'employees', r: 1 }, { h: 'Gross', s: 'total_gross', f: r => money(r.total_gross, cur()), r: 1 }, { h: 'Net', s: 'total_net', f: r => money(r.total_net, cur()), r: 1 }, { h: 'Employer FNPF', s: 'total_fnpf_employer', hide: 'md', f: r => money(r.total_fnpf_employer, cur()), r: 1 },
       { h: 'Status', s: 'status', f: r => r.status === 'voided' ? `<span class="status cancelled">voided</span><div class="small muted">${esc(fmtDate((r.voided_at || '').slice(0, 10), { day: 'numeric', month: 'short', year: 'numeric' }))}${r.voided_by_name ? ' · ' + esc(r.voided_by_name) : ''}</div>` : '<span class="status confirmed">finalised</span>' },
-      { h: 'By', k: 'created_by_name' }], shown, { onRow: 1, lv: plv, empty: lvEmpty(plv, pastAll, 'pay runs') || 'No pay runs yet.' })}`;
+      { h: 'By', k: 'created_by_name', hide: 'lg', long: 1 }], shown, { onRow: 1, lv: plv, empty: lvEmpty(plv, pastAll, 'pay runs') || 'No pay runs yet.' })}`;
     plv.bind(host); bindClear2(host, plv);
     bindRows(host, shown, r => r.status === 'voided' ? toast(`This pay run was voided${r.voided_by_name ? ' by ' + r.voided_by_name : ''}: its payslips were deleted, so it can't be opened.`, 6000) : runModal(r.id));
   };
@@ -1163,7 +1228,7 @@ async function runModal(id) {
   const drawSlips = () => {
     const host = $('#rm-list', m.el); if (!host) return;
     const shown = lv.apply(payslips);
-    host.innerHTML = `${payslips.length > 1 ? lv.bar({ shown: shown.length, total: payslips.length }) : ''}${table([{ h: 'Employee', s: 'name', k: 'employee_name' }, { h: 'Hours', s: 'hours', k: 'hours', r: 1 }, ...(RV ? [{ h: 'Rostered / Paid / Difference', f: p => rvOf(p) ? rosterVsText(rvOf(p), true) : '<span class="muted">·</span>', r: 1 }] : []), { h: 'Gross', s: 'gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'FNPF', f: p => money(p.fnpf_employee, cur()), r: 1 }, { h: 'PAYE', s: 'paye', f: p => money(p.paye, cur()), r: 1 }, { h: 'Net', s: 'net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }, { h: '', f: p => `<button class="btn sm ghost" data-ps="${p.id}">Payslip</button>` }], shown, { lv, empty: lvEmpty(lv, payslips, 'payslips') || 'No payslips.' })}`;
+    host.innerHTML = `${payslips.length > 1 ? lv.bar({ shown: shown.length, total: payslips.length }) : ''}${table([{ h: 'Employee', s: 'name', k: 'employee_name' }, { h: 'Hours', s: 'hours', k: 'hours', r: 1 }, ...(RV ? [{ h: 'Rostered / Paid / Difference', f: p => rvOf(p) ? rosterVsText(rvOf(p), true) : NONE, r: 1 }] : []), { h: 'Gross', s: 'gross', f: p => money(p.gross, cur()), r: 1 }, { h: 'FNPF', f: p => money(p.fnpf_employee, cur()), r: 1 }, { h: 'PAYE', s: 'paye', f: p => money(p.paye, cur()), r: 1 }, { h: 'Net', s: 'net', f: p => `<b>${money(p.net, cur())}</b>`, r: 1 }, { h: '', f: p => `<button class="btn sm ghost" data-ps="${p.id}">Payslip</button>` }], shown, { lv, empty: lvEmpty(lv, payslips, 'payslips') || 'No payslips.' })}`;
     lv.bind(host); bindClear2(host, lv);
     $$('[data-ps]', host).forEach(b => b.onclick = () => printHTML(payslipHTML(payslips.find(p => p.id == b.dataset.ps), run)));
   };
@@ -1316,7 +1381,7 @@ async function renderHistory(f = PH) {
   $('#ph-user').onchange = () => renderHistory({ ...PH, user_id: $('#ph-user').value });
   $$('[data-wk]').forEach(b => b.onclick = () => { const [uid, month] = b.dataset.wk.split('|'); const list = byPerson[uid].months[month];
     openModal(`<h2 style="font-size:1.4rem">${esc(byPerson[uid].name)} — ${monthName(month)}</h2>${table([{ h: 'Week', f: w => `Week ${w.week}${w.comment ? `<div class="small muted">${esc(w.comment)}</div>` : ''}` }, { h: 'Hours', k: 'hours', r: 1 }, { h: 'Rate', f: w => money(w.rate, cur()), r: 1 },
-      { h: 'Bonus', f: w => w.bonus ? m2(w.bonus) : '—', r: 1 }, { h: 'Gross', f: w => m2(w.gross), r: 1 }, { h: 'FNPF', f: w => m2(w.fnpf_employee), r: 1 }, { h: 'PAYE', f: w => m2(w.paye), r: 1 }, { h: 'Deductions', f: w => w.other_deductions ? m2(w.other_deductions) : '—', r: 1 }, { h: 'Net', f: w => `<b>${m2(w.net)}</b>`, r: 1 }], list)}
+      { h: 'Bonus', f: w => w.bonus ? m2(w.bonus) : NONE, r: 1 }, { h: 'Gross', f: w => m2(w.gross), r: 1 }, { h: 'FNPF', f: w => m2(w.fnpf_employee), r: 1 }, { h: 'PAYE', f: w => m2(w.paye), r: 1 }, { h: 'Deductions', f: w => w.other_deductions ? m2(w.other_deductions) : '—', r: 1 }, { h: 'Net', f: w => `<b>${m2(w.net)}</b>`, r: 1 }], list)}
       <p class="small muted">From ${esc(list[0].source || 'the wage report')}.</p>`, { wide: true }); });
   $$('[data-rm]').forEach(b => b.onclick = async () => { const [uid, month] = b.dataset.rm.split('|');
     if (!confirm(`Remove ${byPerson[uid].name}'s pay history for ${monthName(month)}? (You can import the file again.)`)) return;
@@ -1381,7 +1446,7 @@ async function renderImport() {
           ${p.already.length ? `<div class="small" style="color:var(--gold)">Already imported for ${p.already.map(monthShort).join(', ')}: importing again replaces those weeks.</div>` : ''}
           ${p.issues.length ? `<details class="im-iss"><summary class="small"><b style="color:var(--red)">${p.issues.length} thing${p.issues.length === 1 ? '' : 's'} to check</b></summary><ul class="im-issues">${p.issues.map(t => `<li class="warn">${esc(t)}</li>`).join('')}</ul></details>` : ''}
           <details class="im-iss"><summary class="small">Months</summary>${table([{ h: 'Month', f: m => monthShort(m.month) }, { h: 'Weeks', k: 'weeks', r: 1 }, { h: 'Hours', f: m => m.hours.toFixed(2), r: 1 }, { h: 'Gross', f: m => m2(m.gross), r: 1 }, { h: 'Net', f: m => m2(m.net), r: 1 },
-            { h: 'Sheet YTD', f: m => m.sheet_ytd == null ? '—' : Math.abs(m.sheet_ytd - m.gross) > 0.01 ? `<span style="color:var(--red)">${m2(m.sheet_ytd)}</span>` : m2(m.sheet_ytd), r: 1 }], p.months)}</details>
+            { h: 'Sheet YTD', f: m => m.sheet_ytd == null ? NONE : Math.abs(m.sheet_ytd - m.gross) > 0.01 ? `<span style="color:var(--red)">${m2(m.sheet_ytd)}</span>` : m2(m.sheet_ytd), r: 1 }], p.months)}</details>
         </div>`).join('')}</div>
         <div class="actions"><button class="btn coral" id="im-go">Import</button><span class="small muted" style="align-self:center">New staff get a login username and a time-clock PIN. Set their password under Staff before they log in.</span></div></div>`;
     $$('.im-person').forEach(el => { const sel = $('[data-act]', el), sync = () => $$('[data-for]', el).forEach(x => x.classList.toggle('hidden', x.dataset.for !== sel.value)); sel.onchange = sync; sync(); });
@@ -1417,7 +1482,7 @@ async function renderSettings() {
           <div class="field"><label>Month</label><select name="fy_month" ${ro ? 'disabled' : ''}>${MO.map((m, i) => `<option value="${i + 1}" ${i + 1 === fm ? 'selected' : ''}>${m}</option>`).join('')}</select></div></div>`); })()}
     ${sect('s-pay', 'PAYE tax', 'Annual brackets (from, to, rate %). <b>Check against the current FRCS tables.</b> FNPF %, unpaid breaks and pay periods are under <a href="#/payroll">Payroll → Payroll rules</a>.',
       fieldsHTML(dis([{ n: 'paye_brackets', l: 'PAYE annual brackets', t: 'textarea', full: 1, rows: 6 }]), { paye_brackets: JSON.stringify(JSON.parse(S.paye_brackets || '[]'), null, 1) }))}
-    <div class="panel"><h3>Access by area</h3><p class="small muted" style="margin-top:-4px">Each person has a level for each area: <b>Hidden</b>, <b>View</b>, <b>Add & edit</b> (no deleting) or <b>Full</b>. Administrators always have Full. ${isAdmin() ? 'Set it under <a href="#/employees">Staff</a> → Access.' : 'Only an administrator can change it.'} The server checks every request.</p>
+    <div class="panel"><h3>Access by area</h3><p class="small muted" style="margin-top:-4px">Each person has a level for each area: <b>Hidden</b>, <b>View</b>, <b>Add & edit</b> (no deleting) or <b>Full</b>. Administrators always have Full. ${isAdmin() ? 'Set it under <a href="#/employees">Staff</a> → ⋯ → Access….' : 'Only an administrator can change it.'} The server checks every request.</p>
       <div class="scroll"><table class="t"><thead><tr><th>Preset</th>${Object.values(AREAS).map(a => `<th>${esc(a)}</th>`).join('')}</tr></thead><tbody>
       ${Object.values(PRESETS).map(p => `<tr><td data-l="Preset"><b>${esc(p.label)}</b>${p.team ? '<div class="small muted">own team only</div>' : ''}</td>${Object.keys(AREAS).map(a => `<td data-l="${esc(AREAS[a])}">${esc(LEVELS[p.perms[a] || 0])}</td>`).join('')}</tr>`).join('')}
       </tbody></table></div><p class="small muted">Your access: <b>${esc(accessName({ ...ME, access: ME.perms }))}</b>${ME.team_only ? ' (your team only)' : ''}.</p></div>

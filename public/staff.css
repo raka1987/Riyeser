@@ -530,7 +530,7 @@ table.t.fit th:last-child, table.t.fit td:last-child { padding-right: 16px; }
 .rec-out { display: inline-block; font-size: .7rem; font-weight: 700; color: #8a5a00; background: #fff3d6; border-radius: 999px; padding: 1px 7px; margin-left: 4px; }
 
 /* iPhone / iPad: boxes with text under 16px make Safari zoom in when tapped (and stay zoomed after Save). 16px stops that. */
-@media (max-width: 1024px) { input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px !important; } }
+@media (max-width: 1024px) and (pointer: coarse) { input:not([type=checkbox]):not([type=radio]), select, textarea { font-size: 16px !important; } }
 /* quick add: more room for the times, Add a fixed width */
 .ts-quick { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 76px !important; }
 .ts-box input::-webkit-calendar-picker-indicator { margin: 0; padding: 0; width: 14px; }
@@ -957,28 +957,198 @@ table.ro-grid { width: 100%; border-collapse: separate; border-spacing: 0; table
 /* Timesheets' week grid on a phone: scrolls inside its box instead of widening the page */
 .panel[style*="padding:0"] > .scroll:has(> table.days-t) { overflow-x: auto; }
 
-/* OWNER-LISTS (2.3.2): the sort and filter bar on every list (listview.js), and column headings that sort */
-.lv-bar { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px 10px; align-items: end; margin: 0 0 12px; min-width: 0; }
-.lv-bar > label, .lv-sortbox label { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin: 0; }
-.lv-bar .lv-k { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lv-bar .lv-k small { font-weight: 600; text-transform: none; letter-spacing: 0; }
-.lv-bar input, .lv-bar select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; margin: 0; }
-.lv-bar .lv-q { grid-column: span 2; }
-.lv-sortbox { display: flex; gap: 6px; align-items: flex-end; min-width: 0; }
-.lv-sortbox label { flex: 1; }
-.lv-sortbox .lv-dir { flex: none; min-width: 40px; justify-content: center; }
-.lv-foot { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 8px 12px; flex-wrap: wrap; font-size: .85rem; color: var(--muted); }
-.lv-foot .lv-clear[disabled] { opacity: .45; cursor: default; }
-.panel > .lv-bar { margin-top: 4px; }
-table.t th.lv-th { padding: 0; }
-table.t th.lv-th .lv-sort { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 4px; width: 100%; padding: 8px 10px; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; white-space: nowrap; }
+
+/* ====================================================================================================================
+   Payroll 2.3.3: one spacing system for every Payroll screen. Spacing on a 4 / 8 / 12 / 16 / 24 / 32 scale, one control
+   height for toolbars (36px), one row height for tables, the same label style everywhere. Lists: a compact filter bar
+   that wraps neatly, one-line table rows, a ⋯ menu for a row's extra actions, and tables that scroll inside their own
+   box (thin scroll bar, heading stays put, the first column stays put when scrolling sideways), so the page itself
+   never scrolls sideways.
+   ==================================================================================================================== */
+body.staff {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+  --r-sm: 6px; --r-md: 8px; --r-lg: 12px;
+  --fs-2xs: .6875rem; --fs-xs: .75rem; --fs-sm: .8125rem; --fs-md: .875rem; --fs-base: .9375rem;
+  --ctl-h: 36px; --btn-h: 40px; --row-h: 44px;
+  --line-soft: #ece8df; --line-ctl: #d4ccbb; --hover: #f8f6f1; --none: #b5ad9e;
+  --focus-ring: 0 0 0 3px rgba(29, 107, 82, .2);
+}
+/* thin, quiet scroll bars (the window's, a table's, a pop-up's) */
+body.staff, body.staff * { scrollbar-width: thin; scrollbar-color: rgba(23, 35, 30, .28) transparent; }
+body.staff .side, body.staff .side * { scrollbar-color: rgba(255, 255, 255, .22) transparent; }
+html:has(body.staff) { scrollbar-gutter: stable; }
+
+/* ---------- page frame: top bar, page padding, panels, number tiles ---------- */
+body.staff .topbar { padding: var(--sp-3) var(--sp-5); min-height: 60px; gap: var(--sp-3); }
+body.staff .topbar h1 { font-size: 1.35rem; line-height: 1.2; }
+body.staff .view { padding: var(--sp-5) var(--sp-5) 48px; min-width: 0; }
+body.staff .panel { padding: var(--sp-4) var(--sp-5); margin-bottom: var(--sp-4); border-radius: var(--r-lg); }
+body.staff .panel h3 { margin: 0 0 var(--sp-3); line-height: 1.3; }
+body.staff .panel[style*="padding:0"] { overflow: hidden; }
+body.staff .panel[style*="padding:0"] > h3 { margin-bottom: var(--sp-2); }
+body.staff .tiles { gap: var(--sp-3); margin-bottom: var(--sp-4); }
+body.staff .tile { border-radius: var(--r-lg); }
+body.staff .tile .k { font-size: var(--fs-xs); letter-spacing: .04em; }
+body.staff .note { border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-4); }
+body.staff .empty { padding: var(--sp-6) var(--sp-5); border-radius: var(--r-lg); }
+@media (max-width: 900px) { body.staff .view { padding: var(--sp-4); } body.staff .topbar { padding: var(--sp-3) var(--sp-4); } }
+
+/* ---------- buttons: primary, secondary (ghost), light; two sizes ---------- */
+body.staff .btn { min-height: var(--btn-h); padding: 6px 18px; font-size: var(--fs-base); line-height: 1.25; }
+body.staff .btn.sm { min-height: var(--ctl-h); padding: 4px 14px; font-size: var(--fs-md); white-space: nowrap; }
+body.staff .btn.ghost { background: #fff; color: var(--green-800); box-shadow: inset 0 0 0 1px var(--line-ctl); }
+body.staff .btn.ghost:hover { background: var(--green-100); box-shadow: inset 0 0 0 1px var(--green-600); }
+body.staff .btn.ghost:disabled:hover { background: #fff; box-shadow: inset 0 0 0 1px var(--line-ctl); }
+body.staff .side .btn.ghost { background: transparent; }
+body.staff .side .btn.ghost:hover { background: rgba(255, 255, 255, .08); }
+body.staff .btn:focus-visible { outline: 2px solid var(--green-600); outline-offset: 2px; }
+
+/* ---------- page header row: description on the left, actions on the right, wrapping gracefully ---------- */
+@media (min-width: 601px) {
+  body.staff .bar-tools { gap: var(--sp-2); margin-bottom: var(--sp-4); align-items: center; }
+  body.staff .bar-tools > p { flex: 1 1 260px; min-width: 0; margin: 0; }
+  body.staff .bar-tools > .grow:not(p) { flex: 1 1 0; min-width: 0; margin: 0; }
+  body.staff .bar-tools > input, body.staff .bar-tools > select { height: var(--ctl-h); padding: 0 12px; font-size: var(--fs-md); border-width: 1px; border-radius: var(--r-md); }
+  body.staff .bar-tools > input[type=date] { width: 160px; }
+  body.staff .bar-tools > .btn { min-height: var(--ctl-h); }
+  /* Timesheets: the buttons size to their words and wrap as a group (no lone button on a row of its own) */
+  body.staff .ts-filters { gap: var(--sp-3); margin-bottom: var(--sp-3); }
+  body.staff .ts-filters > select, body.staff .ts-filters > .ts-date { height: var(--btn-h); min-height: var(--btn-h); border-width: 1px; border-radius: var(--r-md); }
+  body.staff .ts-filters > select { padding: 0 12px; }
+  body.staff .ts-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+  body.staff .ts-actions > .btn { width: auto; min-height: var(--ctl-h); }
+}
+
+/* ---------- the sort and filter bar on every list (listview.js) ---------- */
+.lv-bar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); margin: 0 0 var(--sp-4); min-width: 0; }
+.panel > .lv-bar { margin-top: var(--sp-1); }
+.lv-f { display: flex; flex-direction: column; gap: var(--sp-1); margin: 0; min-width: 0; flex: 0 0 auto; }
+.lv-bar .lv-k { display: block; font-size: var(--fs-xs); font-weight: 600; line-height: 16px; color: var(--muted); white-space: nowrap; text-transform: none; letter-spacing: 0; margin: 0; }
+.lv-bar .lv-k small { font-size: inherit; font-weight: 500; opacity: .85; }
+.lv-bar input, .lv-bar select { height: var(--ctl-h); margin: 0; padding: 0 12px; font-size: var(--fs-md); line-height: normal; border-width: 1px; border-color: var(--line-ctl); border-radius: var(--r-md); box-sizing: border-box; }
+.lv-q { flex: 2 1 240px; max-width: 480px; }
+
+.lv-q input { width: 100%; min-width: 0; }
+.lv-bar select { width: auto; min-width: 132px; max-width: 260px; padding-right: 30px; text-overflow: ellipsis; }
+.lv-date input { width: 156px; }
+.lv-join { display: flex; }
+.lv-join select { border-radius: var(--r-md) 0 0 var(--r-md); min-width: 150px; }
+.lv-join select:focus { position: relative; z-index: 1; }
+.lv-dir { flex: none; width: 36px; height: var(--ctl-h); margin: 0 0 0 -1px; padding: 0; display: grid; place-items: center; border: 1px solid var(--line-ctl); border-radius: 0 var(--r-md) var(--r-md) 0; background: #fff; color: var(--green-800); font-size: .7rem; cursor: pointer; }
+.lv-dir:hover { background: var(--green-100); }
+.lv-dir:focus-visible { outline: 2px solid var(--green-600); outline-offset: -2px; position: relative; z-index: 2; }
+.lv-end { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--sp-3); min-width: 0; }
+.lv-foot { margin-left: auto; display: flex; align-items: center; gap: var(--sp-3); min-height: var(--ctl-h); font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; }
+.lv-foot .lv-clear[disabled] { opacity: .5; cursor: default; }
+.lv-foot .lv-clear { padding: 4px 12px; }
+/* Timesheets cards: Add a shift — the time boxes keep room for "09:00 AM" */
+body.staff .ts-add { grid-template-columns: minmax(70px, .9fr) minmax(74px, 1fr) auto minmax(74px, 1fr) auto; }
+body.staff .ts-add .btn { padding: 0 8px; }
+@media (min-width: 601px) {
+  body.staff .ts-add input, body.staff .ts-add select { font-size: var(--fs-sm); }
+  body.staff .ts-filters > select, body.staff .ts-date input { font-size: var(--fs-base); }
+  /* each card: the name on one line, the totals under it — the same on every card, so cards line up */
+  body.staff .ts-card { padding: var(--sp-4); }
+  body.staff .ts-card .ts-head { flex-direction: column; align-items: flex-start; gap: 2px; }
+}
+.lv-foot b { color: var(--ink); }
+
+/* ---------- tables ---------- */
+body.staff table.t { font-size: var(--fs-md); }
+body.staff table.t th { font-size: var(--fs-2xs); letter-spacing: .05em; padding: 10px 12px; height: 40px; vertical-align: middle; border-bottom: 1px solid var(--line); }
+body.staff table.t td { padding: 8px 12px; height: var(--row-h); line-height: 1.4; vertical-align: middle; white-space: nowrap; border-bottom-color: var(--line-soft); }
+body.staff table.t tbody tr:last-child > td { border-bottom: 0; }
+body.staff table.t td.wrap, body.staff table.t th.wrap { white-space: normal; }
+body.staff table.t td.r, body.staff table.t th.r { text-align: right; font-variant-numeric: tabular-nums; }
+body.staff table.t tr.click:hover td { background-color: var(--hover); }
+body.staff table.t th.lv-th { padding: 0; }
+table.t th.lv-th .lv-sort { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: var(--sp-1); width: 100%; height: 40px; padding: 0 12px; cursor: pointer; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; white-space: nowrap; }
 table.t th.lv-th.r .lv-sort { justify-content: flex-end; }
 table.t th.lv-th .lv-sort:hover { color: var(--ink); }
-table.t th.lv-th .lv-sort:focus-visible { outline: 2px solid var(--green-600); outline-offset: -2px; border-radius: 6px; }
+table.t th.lv-th .lv-sort:focus-visible { outline: 2px solid var(--green-600); outline-offset: -2px; border-radius: var(--r-sm); }
 table.t th.lv-th.on { color: var(--green-700); }
 .lv-arrow { font-size: .8em; opacity: .4; }
 table.t th.lv-th.on .lv-arrow { opacity: 1; }
-@media (max-width: 600px) {
-  .lv-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .lv-bar .lv-q, .lv-bar .lv-sortbox, .lv-foot { grid-column: 1 / -1; }
+/* long text: cut with … (the whole text shows when the pointer rests on it) */
+table.t .ell { display: inline-block; max-width: 26ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+table.t td.grow .ell { max-width: 64ch; }
+/* an empty value */
+.none { color: var(--none); }
+/* pills, chips and buttons inside a table never break over two lines */
+body.staff table.t .status, body.staff table.t .chip, body.staff table.t .pill, body.staff table.t .btn { white-space: nowrap; vertical-align: middle; }
+body.staff table.t .status, body.staff table.t .chip { display: inline-flex; align-items: center; line-height: 18px; }
+body.staff table.t .btn.sm { min-height: 30px; padding: 2px 12px; font-size: var(--fs-sm); }
+body.staff table.t td .small { font-size: var(--fs-sm); }
+/* the row's ⋯ menu column */
+table.t td.act, table.t th.act { width: 1%; padding: 0 var(--sp-2); text-align: right; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* the table's own box: scrolls sideways (and down, for a long list) with the heading and the first column kept in view */
+@media (min-width: 601px) {
+  body.staff .scroll { overflow: auto; max-height: max(320px, calc(100vh - 150px)); overscroll-behavior-x: contain; }
+  body.staff .scroll > table.t > thead th { position: sticky; top: 0; z-index: 2; background-color: #fff; }
+  body.staff .scroll > table.t > * > tr > :first-child { position: sticky; left: 0; z-index: 1; background-color: #fff; }
+  body.staff .scroll > table.t > thead > tr > th:first-child { z-index: 3; }
+  body.staff .scroll > table.t tr.click:hover > td:first-child { background-color: var(--hover); }
+  body.staff .scroll.scrolled-x > table.t > * > tr > :first-child { box-shadow: 8px 0 8px -8px rgba(11, 46, 35, .22); }
+  /* the ⋯ column stays in view at the right */
+  body.staff .scroll > table.t > * > tr > .act:last-child { position: sticky; right: 0; z-index: 1; background-color: #fff; }
+  body.staff .scroll > table.t tr.click:hover > td.act:last-child { background-color: var(--hover); }
 }
+@media (min-width: 601px) and (max-width: 1439px) { table.t .hide-lg { display: none; } }
+@media (min-width: 601px) and (max-width: 1099px) { table.t .hide-md, table.t .hide-md-inline { display: none; } }
+/* a narrower menu on small laptop screens (1280 at 125% is 1024 wide) leaves the page more room */
+@media (min-width: 901px) and (max-width: 1099px) {
+  body.staff .app { grid-template-columns: 208px minmax(0, 1fr); background: linear-gradient(to right, var(--green-900) 208px, transparent 208px); }
+  body.staff .side { padding: 16px 10px; }
+  body.staff .side .brand { font-size: 1rem; }
+  body.staff .view { padding: var(--sp-4) var(--sp-4) 48px; }
+  body.staff .topbar { padding: var(--sp-3) var(--sp-4); }
+  body.staff table.t td, body.staff table.t th { padding-left: 10px; padding-right: 10px; }
+  body.staff table.t th.lv-th .lv-sort { padding: 0 10px; }
+  body.staff .ts-actions > .btn { padding: 4px 10px; font-size: var(--fs-sm); }
+}
+@media print { body.staff .scroll { max-height: none; overflow: visible; } }
+
+/* ---------- the ⋯ row menu ---------- */
+.rm { display: inline-flex; }
+.rm-btn { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: var(--r-md); background: transparent; color: var(--muted); font-size: 1.15rem; line-height: 1; cursor: pointer; }
+.rm-btn:hover, .rm-btn[aria-expanded=true] { background: #f1ede4; border-color: var(--line); color: var(--ink); }
+.rm-btn:focus-visible { outline: 2px solid var(--green-600); outline-offset: 1px; }
+.rm-list { z-index: 120; min-width: 200px; padding: var(--sp-1); display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 12px 32px rgba(11, 46, 35, .16); text-align: left; }
+.rm-list[hidden] { display: none; }
+/* the open menu's cell sits above the cells below it (they are pinned at the right too) */
+body.staff table.t td.act:has(> .rm > .rm-btn[aria-expanded="true"]) { z-index: 6; position: relative; }
+body.staff .scroll > table.t > * > tr > td.act:last-child:has(> .rm > .rm-btn[aria-expanded="true"]) { z-index: 6; position: sticky; }
+.rm-item { all: unset; box-sizing: border-box; display: block; padding: 8px 12px; border-radius: var(--r-sm); font-size: var(--fs-md); line-height: 1.35; color: var(--ink); white-space: nowrap; cursor: pointer; }
+.rm-item:hover, .rm-item:focus { background: var(--green-100); }
+.rm-item:focus-visible { box-shadow: inset 0 0 0 2px var(--green-600); }
+.rm-item.danger { color: var(--red); }
+.rm-item.danger:hover, .rm-item.danger:focus { background: #fbe6e3; }
+
+/* ---------- phones: the bar is an even two-column grid; list rows are cards with ⋯ at the top right ---------- */
+@media (max-width: 600px) {
+  body.staff { --ctl-h: 40px; }
+  .lv-bar { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-2); }
+  .lv-bar .lv-q, .lv-bar .lv-end, .lv-bar > .bt-span { grid-column: 1 / -1; }
+  .lv-end { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); }
+  .lv-q { max-width: none; }
+  .lv-bar select, .lv-date input { width: 100%; min-width: 0; max-width: 100%; }
+  .lv-join select { flex: 1; min-width: 0; }
+  .lv-dir { width: 44px; }
+  .lv-foot { margin-left: 0; justify-content: space-between; }
+  body.staff table.t td { height: auto; }
+  .panel[style*="padding:0"] table.t td, .modal-bg table.t td { white-space: normal; }
+  body.staff .bk-grid .file-btn { white-space: normal; min-width: 0; text-align: center; padding: 6px 10px; }
+  /* Timesheets cards: the day across the top, then start – finish + Add */
+  body.staff .ts-add { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto; }
+  body.staff .ts-add > :first-child { grid-column: 1 / -1; }
+  table.t .ell { max-width: 62vw; }
+  .panel[style*="padding:0"] table.t tr:has(> td.act) { position: relative; padding-right: 52px !important; }
+  .panel[style*="padding:0"] table.t td:has(> .none:only-child) { display: none !important; }
+  .panel[style*="padding:0"] table.t td.act { position: absolute !important; top: 8px; right: 8px; width: auto !important; padding: 0 !important; }
+}
+
+/* Bank statements: the Year box is wide enough for its label */
+@media (min-width: 601px) { .bk-grid { grid-template-columns: auto minmax(220px, max-content); } .bk-grid .file-btn { min-height: 40px; } }
+@media (max-width: 600px) { .bk-grid .ts-box span { overflow: hidden; text-overflow: ellipsis; } }
