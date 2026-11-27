@@ -40,7 +40,7 @@ const APPS = {
   // Firewall rule that lets the office's desk phones reach it (build/link/installer.nsh; removed on uninstall).
   linkoffice: { name: 'Riyeser Link Office', appId: 'com.riyeser.linkoffice', ico: 'build/link/icon.ico', out: 'dist-linkoffice', artifact: 'RiyeserLinkOffice',
     perMachine: true, include: 'build/link/installer.nsh',
-    extraMetadata: { main: 'src/link-main.js', name: 'riyeser-linkoffice', version: '1.2.2', productName: 'Riyeser Link Office' } },
+    extraMetadata: { main: 'src/link-main.js', name: 'riyeser-linkoffice', version: '1.3.0', productName: 'Riyeser Link Office' } },
 };
 const a = APPS[which];
 

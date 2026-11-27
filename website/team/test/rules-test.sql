@@ -4068,6 +4068,198 @@ do $$ begin
   assert (select fallback from public.ring_groups where id = current_setting('test.rg_r')::uuid) = 'missed', 'a group that fell back to Tom ends as missed';
 end $$;
 set role authenticated;
+
+-- ===== The Riyeser relay: registering relays, passes for Link Office, revoking, TURN, phones at home, the relay's own sync
+reset role;
+insert into auth.users values ('d0d0d0d0-0000-4000-8000-000000000001', 'boss@relay.test'), ('d0d0d0d0-0000-4000-8000-000000000002', 'staff@relay.test'),
+  ('d0d0d0d0-0000-4000-8000-000000000003', 'nadipc@relay.test'), ('d0d0d0d0-0000-4000-8000-000000000004', 'other@relay.test');
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000001'); set role authenticated;
+select (public.create_company('Relay Plumbing', 'Ana', '{"country":"Fiji"}'::jsonb) ->> 'workspace_id') as ws_r \gset
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000004');
+select (public.create_company('Other Cafe', 'Oli', '{"country":"Fiji"}'::jsonb) ->> 'workspace_id') as ws_o \gset
+select set_config('test.ws_r', :'ws_r', false), set_config('test.ws_o', :'ws_o', false);
+reset role;
+insert into public.members (workspace_id, user_id, display_name, role, extension) values (:'ws_r', 'd0d0d0d0-0000-4000-8000-000000000002', 'Sam Staff', 'member', 102),
+  (:'ws_r', 'd0d0d0d0-0000-4000-8000-000000000003', 'Nadi PC', 'member', 201);
+insert into public.devices (id, workspace_id, user_id, device_name) values (gen_random_uuid(), :'ws_r', 'd0d0d0d0-0000-4000-8000-000000000003', 'NADI-PC');
+-- apps can't register relays or read the secret; only the SQL editor (here: the database owner) can
+set role authenticated;
+do $$ begin
+  begin perform public.relay_register('evil', 'evil.example', 'X', 'x'); raise exception 'app registered a relay';
+  exception when insufficient_privilege then null; end;
+  begin perform count(*) from public.relay_cluster; raise exception 'app read the relay secret';
+  exception when insufficient_privilege then null; end;
+  begin perform count(*) from public.relay_servers; raise exception 'app read the relays';
+  exception when insufficient_privilege then null; end;
+  begin perform public.relay_key('office-token'); raise exception 'app made a relay key';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+select public.relay_register('syd1', 'relay.riyeser.test', 'Suva head office', 'test-relay-secret-0123456789abcdef0123456789');
+select public.relay_register('mel1', 'backup.riyeser.test', 'Sydney', 'test-relay-secret-0123456789abcdef0123456789', 2);
+do $$ begin
+  begin perform public.relay_register('bad1', 'bad.riyeser.test', 'X', 'a-completely-different-secret-0123456789abc'); raise exception 'a second secret was accepted';
+  exception when others then assert sqlerrm like 'This relay''s secret is different%', sqlerrm; end;
+  -- the same pass the relay's own test checks (relay/test/relay.test.js): the two sides make it the same way
+  assert public.relay_sign(public.relay_key('office-token'), jsonb_build_object('v', 1, 'r', 'syd1', 'ws', 'aaaaaaaa-0000-4000-8000-000000000001', 'o', 'lo-suva-0001', 'g', 1, 'exp', 4102444800))
+    = 'eyJnIjogMSwgIm8iOiAibG8tc3V2YS0wMDAxIiwgInIiOiAic3lkMSIsICJ2IjogMSwgIndzIjogImFhYWFhYWFhLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMSIsICJleHAiOiA0MTAyNDQ0ODAwfQ.nhcgHsepBLiMXHM75t5YocDIXmtRETfbZyQ9Y3In-eo', format('the pass made here: %s', public.relay_sign(public.relay_key('office-token'), jsonb_build_object('v', 1, 'r', 'syd1', 'ws', 'aaaaaaaa-0000-4000-8000-000000000001', 'o', 'lo-suva-0001', 'g', 1, 'exp', 4102444800)));
+  assert public.relay_turn_secret() = encode(hmac('turn', 'test-relay-secret-0123456789abcdef0123456789', 'sha256'), 'hex'), 'coturn/relay TURN secret';
+end $$;
+-- the Nadi PC reports (as before); the relay is still off, so no pass
+select pg_temp.as_user_password_only('d0d0d0d0-0000-4000-8000-000000000003'); set role authenticated;
+do $$ declare ws uuid := current_setting('test.ws_r')::uuid; begin
+  perform public.link_office_report(ws, 'lo-nadi-0002', '{"pc_name":"NADI-PC","version":"1.3.0","addresses":["192.168.1.20"],"sip_port":5060}');
+  perform public.link_office_report(ws, 'lo-suva-0001', '{"pc_name":"SUVA-PC","version":"1.3.0","addresses":["192.168.1.20"],"sip_port":5060}');
+  assert not (public.link_relay_config(ws) ->> 'enabled')::boolean, 'off until switched on';
+  assert jsonb_array_length(public.link_relay_config(ws) -> 'relays') = 2, 'both relays listed';
+  assert (public.link_relay_config(ws) -> 'relays' -> 0 ->> 'id') = 'syd1', 'main relay first';
+  begin perform public.link_relay_token(ws, 'lo-nadi-0002'); raise exception 'pass while off';
+  exception when others then assert sqlerrm like 'The Riyeser relay is switched off%', sqlerrm; end;
+  begin perform public.link_relay_set(ws, true); raise exception 'a member switched the relay on';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('test.ws_r')::uuid; begin
+  assert (public.link_relay_set(ws, true) ->> 'enabled')::boolean, 'owner switched it on';
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'link.relay_on'), 'in the history';
+end $$;
+-- passes for each relay (6 hours), for the linked PC; never for someone outside the business
+select pg_temp.as_user_password_only('d0d0d0d0-0000-4000-8000-000000000003');
+do $$ declare ws uuid := current_setting('test.ws_r')::uuid; t jsonb; body text; p jsonb; begin
+  t := public.link_relay_token(ws, 'lo-nadi-0002');
+  assert t -> 'tokens' ? 'syd1' and t -> 'tokens' ? 'mel1', format('a pass per relay: %s', t);
+  body := split_part(t -> 'tokens' ->> 'syd1', '.', 1);
+  p := convert_from(decode(translate(body, '-_', '+/') || repeat('=', (4 - length(body) % 4) % 4), 'base64'), 'utf8')::jsonb;
+  assert p ->> 'r' = 'syd1' and p ->> 'o' = 'lo-nadi-0002' and p ->> 'ws' = ws::text and (p ->> 'g')::int = 1, format('pass: %s', p);
+  assert (p ->> 'exp')::bigint between extract(epoch from now()) + 6 * 3600 - 5 and extract(epoch from now()) + 6 * 3600 + 5, '6 hours';
+  begin perform public.link_relay_token(ws, 'lo-nobody-999'); raise exception 'pass for an unknown office';
+  exception when others then assert sqlerrm like 'This Riyeser Link Office hasn''t been in touch%', sqlerrm; end;
+  perform public.link_relay_report(ws, 'lo-nadi-0002', '{"state":"connected","relay":"syd1","region":"Suva head office","rtt_ms":42,"backup":false,"udp":"ok","extra":"dropped"}');
+end $$;
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000002');
+do $$ declare ws uuid := current_setting('test.ws_r')::uuid; begin
+  begin perform public.link_relay_token(ws, 'lo-nadi-0002'); raise exception 'plain member got a pass';
+  exception when others then assert sqlerrm like 'Sign in as the business''s owner%', sqlerrm; end;
+  -- members see the sites and how they're connected
+  assert (public.link_relay_status(ws) -> 'offices' -> 0 -> 'relay' ->> 'rtt_ms') = '42', format('status: %s', public.link_relay_status(ws));
+  assert (public.link_relay_status(ws) -> 'offices' -> 0 -> 'relay') ->> 'extra' is null, 'only the listed fields';
+end $$;
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000004');
+do $$ declare ws uuid := current_setting('test.ws_r')::uuid; begin
+  begin perform public.link_relay_token(ws, 'lo-nadi-0002'); raise exception 'another business got a pass';
+  exception when others then assert sqlerrm like 'Sign in as the business''s owner%', sqlerrm; end;
+  begin perform public.link_relay_config(ws); raise exception 'another business read the config';
+  exception when others then assert sqlerrm like 'You''re not in this business%', sqlerrm; end;
+  begin perform public.link_relay_turn(ws); raise exception 'another business got TURN';
+  exception when others then assert sqlerrm like 'You''re not in this business%', sqlerrm; end;
+  begin perform public.link_relay_revoke(ws, 'lo-nadi-0002'); raise exception 'another business revoked';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+-- the relay's own sync: a wrong signature is refused; the right one gets only businesses with the relay on
+set role anon;
+do $$ declare ts bigint := floor(extract(epoch from now())); r jsonb; b jsonb; begin
+  begin perform public.relay_sync('syd1', ts, 'deadbeef', '{}'); raise exception 'unsigned sync';
+  exception when others then assert sqlerrm like 'Not a relay of Riyeser''s%', sqlerrm; end;
+  begin perform public.relay_sync('syd1', ts - 900, encode(hmac(('syd1|' || (ts - 900))::text, 'test-relay-secret-0123456789abcdef0123456789', 'sha256'), 'hex'), '{}'); raise exception 'old sync';
+  exception when others then assert sqlerrm like 'Not a relay of Riyeser''s%', sqlerrm; end;
+  r := public.relay_sync('syd1', ts, encode(hmac(('syd1|' || ts)::text, 'test-relay-secret-0123456789abcdef0123456789', 'sha256'), 'hex'),
+    jsonb_build_object('version', '1.0.0', 'public_ip', '203.0.113.7', 'cert', jsonb_build_object('sha256', repeat('AB:', 31) || 'AB', 'self_signed', true),
+      'ports', jsonb_build_object('turn', 3478, 'sip_tls', 5061), 'offices', jsonb_build_array(jsonb_build_object('ws', current_setting('test.ws_r'), 'office', 'lo-nadi-0002', 'since', '2026-11-27T01:00:00Z'))));
+  assert jsonb_array_length(r -> 'businesses') = 1, format('only Relay Plumbing: %s', r);
+  b := r -> 'businesses' -> 0;
+  assert b ->> 'ws' = current_setting('test.ws_r') and jsonb_array_length(b -> 'offices') = 2, format('its offices: %s', b);
+  assert (r -> 'relays' -> 0 ->> 'id') = 'mel1' and (r -> 'relays' -> 0 ->> 'url') = 'wss://backup.riyeser.test/relay/v1', 'the other relays of the cluster';
+  assert exists (select 1 from jsonb_array_elements(b -> 'groups') g where g ->> 'ext' = '100'), format('ring groups: %s', b -> 'groups');
+end $$;
+reset role;
+do $$ begin
+  assert (select public_ip from public.relay_servers where id = 'syd1') = '203.0.113.7', 'the relay''s address is kept';
+  assert (select self_signed and cert_sha256 like 'AB:%' from public.relay_servers where id = 'syd1'), 'and its certificate';
+  assert (select relay_seen ->> 'relay' from public.link_offices where office_id = 'lo-nadi-0002') = 'syd1', 'which relay the office is on';
+end $$;
+-- revoking: the generation moves on (old passes stop matching); no pass while revoked; allowed again with a new generation
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ declare ws uuid := current_setting('test.ws_r')::uuid; begin
+  perform public.link_relay_revoke(ws, 'lo-nadi-0002');
+  assert (public.link_relay_status(ws) -> 'offices' -> 0 ->> 'revoked')::boolean, 'shows as disconnected';
+  assert (public.link_relay_config(ws) -> 'relays' -> 0 ->> 'pin') = repeat('AB:', 31) || 'AB', 'a self-signed relay''s certificate is pinned';
+end $$;
+select pg_temp.as_user_password_only('d0d0d0d0-0000-4000-8000-000000000003');
+do $$ declare ws uuid := current_setting('test.ws_r')::uuid; begin
+  begin perform public.link_relay_token(ws, 'lo-nadi-0002'); raise exception 'pass while revoked';
+  exception when others then assert sqlerrm like 'This office has been disconnected%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000001');
+select public.link_relay_revoke(:'ws_r', 'lo-nadi-0002', true);
+reset role;
+do $$ begin
+  assert (select relay_gen from public.link_offices where office_id = 'lo-nadi-0002') = 3, 'revoked and allowed: generation 3';
+  assert exists (select 1 from public.audit_log where action = 'link.relay_office_revoked') and exists (select 1 from public.audit_log where action = 'link.relay_office_allowed'), 'both in the history';
+end $$;
+-- TURN for browser and app calls: 12 hours, the TURN REST API kind (what the relay's TURN server checks)
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000002'); set role authenticated;
+do $$ declare t jsonb; s jsonb; begin
+  t := public.link_relay_turn(current_setting('test.ws_r')::uuid);
+  s := t -> 'ice_servers' -> 0;
+  assert jsonb_array_length(t -> 'ice_servers') = 1, format('only relays that report a TURN port: %s', t);
+  assert split_part(s ->> 'username', ':', 2) = replace('d0d0d0d0-0000-4000-8000-000000000002', '-', ''), 'username has who it is for';
+  assert (split_part(s ->> 'username', ':', 1))::bigint between extract(epoch from now()) + 43190 and extract(epoch from now()) + 43210, '12 hours';
+  assert s ->> 'credential' = encode(hmac(s ->> 'username', encode(hmac('turn', 'test-relay-secret-0123456789abcdef0123456789', 'sha256'), 'hex'), 'sha1'), 'base64'), 'password = HMAC-SHA1(turn secret, username)';
+  assert (s -> 'urls')::text like '%turn:relay.riyeser.test:3478?transport=udp%' and (s -> 'urls')::text like '%turn:203.0.113.7:3478%', format('urls: %s', s -> 'urls');
+  assert (s -> 'urls')::text not like '%turns:%', 'no TURN over TLS with a self-signed certificate (browsers wouldn''t trust it)';
+  assert (s -> 'urls')::text not like '%google%', 'nothing outside';
+end $$;
+-- phones at home: a member for their own extension, an admin for anyone; the password is shown once and never kept
+do $$ declare ws uuid := current_setting('test.ws_r')::uuid; d jsonb; begin
+  d := public.link_relay_device_add(ws, '102', 'Sam''s mobile');
+  assert d ->> 'username' ~ '^r[a-z0-9]{10}$' and length(d ->> 'password') = 20 and d ->> 'server' = 'relay.riyeser.test' and (d ->> 'port')::int = 5061, format('details: %s', d - 'password');
+  assert d ->> 'prov_url' like 'https://relay.riyeser.test/prov/%', 'a one-time set-up link';
+  perform set_config('test.dev_pw', d ->> 'password', false); perform set_config('test.dev_user', d ->> 'username', false); perform set_config('test.dev_id', d ->> 'id', false);
+  begin perform public.link_relay_device_add(ws, '201', 'Not mine'); raise exception 'member set up someone else''s phone';
+  exception when others then assert sqlerrm like 'Only an owner or admin%', sqlerrm; end;
+  assert jsonb_array_length(public.link_relay_status(ws) -> 'devices') = 1, 'sees their own phone';
+  assert public.link_relay_status(ws)::text not like '%' || current_setting('test.dev_pw') || '%', 'never the password again';
+end $$;
+reset role;
+do $$ begin
+  assert (select ha1 from public.link_relay_devices where username = current_setting('test.dev_user')) = md5(current_setting('test.dev_user') || ':riyeser-relay:' || current_setting('test.dev_pw')), 'only the HA1 is kept';
+  assert not exists (select 1 from public.link_relay_devices d where to_jsonb(d)::text like '%' || current_setting('test.dev_pw') || '%'), 'no password stored';
+  assert not exists (select 1 from public.audit_log a where a.details::text like '%' || current_setting('test.dev_pw') || '%'), 'no password in the history';
+  assert exists (select 1 from public.audit_log where action = 'link.relay_phone_added' and details ->> 'extension' = '102'), 'in the history';
+end $$;
+-- the relay gets the phone (HA1, for SIP digest); another business's owner can't add or remove it
+set role anon;
+do $$ declare ts bigint := floor(extract(epoch from now())); r jsonb; begin
+  r := public.relay_sync('mel1', ts, encode(hmac(('mel1|' || ts)::text, 'test-relay-secret-0123456789abcdef0123456789', 'sha256'), 'hex'), jsonb_build_object('phones', jsonb_build_array(current_setting('test.dev_user'))));
+  assert (r -> 'businesses' -> 0 -> 'devices' -> 0 ->> 'user') = current_setting('test.dev_user') and (r -> 'businesses' -> 0 -> 'devices' -> 0 ->> 'ext') = '102', format('device: %s', r -> 'businesses' -> 0 -> 'devices');
+end $$;
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000004'); set role authenticated;
+do $$ begin
+  begin perform public.link_relay_device_add(current_setting('test.ws_r')::uuid, '102', 'x'); raise exception 'another business added a phone';
+  exception when others then assert sqlerrm like 'Only an owner or admin%', sqlerrm; end;
+  begin perform public.link_relay_device_remove(current_setting('test.ws_r')::uuid, current_setting('test.dev_id')::uuid); raise exception 'another business removed a phone';
+  exception when others then assert sqlerrm like 'Only an owner or admin%', sqlerrm; end;
+end $$;
+-- a relay just for one business (its own machine) never sees anyone else's
+reset role;
+select public.relay_register('own1', 'pbx.othercafe.test', 'Other Cafe office', 'test-relay-secret-0123456789abcdef0123456789', 1, :'ws_o');
+set role anon;
+do $$ declare ts bigint := floor(extract(epoch from now())); r jsonb; begin
+  r := public.relay_sync('own1', ts, encode(hmac(('own1|' || ts)::text, 'test-relay-secret-0123456789abcdef0123456789', 'sha256'), 'hex'), '{}');
+  assert jsonb_array_length(r -> 'businesses') = 0, format('Other Cafe has the relay off, and Relay Plumbing isn''t its business: %s', r -> 'businesses');
+end $$;
+select pg_temp.as_user('d0d0d0d0-0000-4000-8000-000000000001'); set role authenticated;
+do $$ begin
+  assert not exists (select 1 from jsonb_array_elements(public.link_relay_config(current_setting('test.ws_r')::uuid) -> 'relays') x where x ->> 'id' = 'own1'), 'another business''s own relay isn''t offered';
+  perform public.link_relay_device_remove(current_setting('test.ws_r')::uuid, current_setting('test.dev_id')::uuid);
+  assert jsonb_array_length(public.link_relay_status(current_setting('test.ws_r')::uuid) -> 'devices') = 0, 'removed';
+  -- switching the relay off: no more passes, and the relay's plan no longer has the business
+  perform public.link_relay_set(current_setting('test.ws_r')::uuid, false);
+end $$;
+set role anon;
+do $$ declare ts bigint := floor(extract(epoch from now())); begin
+  assert jsonb_array_length(public.relay_sync('syd1', ts, encode(hmac(('syd1|' || ts)::text, 'test-relay-secret-0123456789abcdef0123456789', 'sha256'), 'hex'), '{}') -> 'businesses') = 0, 'switched off: not in the plan';
+end $$;
 reset role;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';

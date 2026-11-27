@@ -97,6 +97,8 @@ function makeService() {
   const { LinkCloud } = require('./link/cloud');
   cloud = new LinkCloud({ service, clients: () => [own, central], appData, version: app.getVersion(), pcName: os.hostname() });
   cloud.on('change', () => service.emit('change'));
+  // the Riyeser relay (1.3.0): other sites and phones at home, when the business has it switched on
+  service.opts.relayConfig = () => cloud.relayConfig();
   let pending = null;
   service.on('change', () => {   // tell the window, at most every 300 ms
     if (pending) return;
@@ -138,6 +140,8 @@ function registerIpc() {
   handle('link:label', (mac, fields) => service.label(mac, fields || {}));
   handle('link:replace', (oldMac, newMac, vendor) => service.replacePhone(oldMac, newMac, vendor));
   handle('link:ignore', (mac) => service.ignore(mac));
+  handle('link:site-name', (name) => service.setSiteName(name));
+  handle('link:relay-retry', () => { if (service.relay) { service.relay.configAt = 0; service.relay.nudge(); } return service.status().relay; });
   handle('link:addPerson', (name, ext) => service.addPerson({ name, ext }));
   handle('link:removePerson', (id) => service.removePerson(id));
   handle('link:manual', (ext) => service.manual(ext));

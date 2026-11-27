@@ -13,6 +13,8 @@ const { pickAdapter, localAddresses } = require('./netinfo');
 const { MdnsResponder, NAME: MDNS_NAME } = require('./mdns');
 const { NetWatcher } = require('./netwatch');
 const { findRouterName } = require('./pcname');
+const { Trunks } = require('./trunks');
+const { RelayLink } = require('./relay');
 
 const MAX_LOG = 300;
 
@@ -22,7 +24,8 @@ class PhoneService extends EventEmitter {
    *         clients: () => [Online-like], seal, unseal, licence: (appData) => state (tests), log,
    *         mdns: false | { port, multicast } (riyeser-office.local; off unless given), hostname (this PC's name),
    *         netConfig: () => Promise<[windows.js readNetConfig() rows]> (routers, DNS suffixes, adapter descriptions),
-   *         findName: (opts) => Promise<name | null> (the router's DNS name for this PC; pcname.js) }
+   *         findName: (opts) => Promise<name | null> (the router's DNS name for this PC; pcname.js),
+   *         relayConfig: async () => ({ enabled, relays, tokens, exp }) (the Riyeser relay, 1.3.0; from cloud.js), relayTiming }
    */
   constructor(opts = {}) {
     super();
@@ -36,6 +39,7 @@ class PhoneService extends EventEmitter {
     this.lic = { active: false, state: 'none' };
     this.net = { rows: [], gateways: [], describe: {}, suffixes: [] };   // from Windows (netConfig), refreshed on every change
     this.routerName = null; this.mdns = null; this.watcher = null;
+    this.trunks = new Trunks(); this.relay = null;
   }
   log(level, text) {
     this.logs.push({ at: new Date().toISOString(), level, text: String(text).slice(0, 300) });
@@ -187,6 +191,7 @@ class PhoneService extends EventEmitter {
         this.prov.setHost(now);
         if (this.mdns) this.mdns.setAddress(now);
         this.resyncPhones({ reboot: true });
+        if (this.relay) this.relay.nudge();   // this office's public IP may well have changed too
       } else if (this.pbx) { await this.stopPbx(); await this.checkLicence(); }   // listening on one address only: start again on the new one
       await this.refreshNames().catch(() => null);
       this.emit('address-changed', { from, to: now, source, ...(this.ipChanged || {}) });
@@ -228,7 +233,7 @@ class PhoneService extends EventEmitter {
   async startPbx() {
     const o = this.opts; const s = this.settings();
     const pbx = new Pbx({ directory: this.directory, host: this.host, port: o.sipPort == null ? 5060 : o.sipPort, bind: o.bind, tcp: o.tcp, multicast: o.multicast,
-      allowPublic: !!s.allowPublic, ringTimeout: o.ringTimeout, ifaces: this.ifaces(), log: (l, t) => this.log(l, t), onPnp: (info) => this.prov && this.prov.onPnp(info) });
+      allowPublic: !!s.allowPublic, ringTimeout: o.ringTimeout, ifaces: this.ifaces(), log: (l, t) => this.log(l, t), onPnp: (info) => this.prov && this.prov.onPnp(info), trunks: this.trunks });
     const prov = new Provisioner({ store: this.store, directory: this.directory, host: this.host, sipPort: 0, httpPort: o.httpPort == null ? 5080 : o.httpPort,
       bind: o.bind, allowPublic: !!s.allowPublic, log: (l, t) => this.log(l, t), name: this.routerName, useName: this.useName() });
     try {
@@ -244,16 +249,41 @@ class PhoneService extends EventEmitter {
       return;
     }
     pbx.setNames([this.mdnsName(), this.routerName]);
-    pbx.on('change', () => { this.emit('change'); if (this.pendingMove && !pbx.callsInProgress().length) setImmediate(() => this.checkNetwork('calls ended').catch(() => null)); });
+    pbx.on('change', () => { this.relayExts(); this.emit('change'); if (this.pendingMove && !pbx.callsInProgress().length) setImmediate(() => this.checkNetwork('calls ended').catch(() => null)); });
     pbx.on('call-ended', (rec) => { this.calls.add(rec); });
     pbx.on('idle', () => { if (!this.lic.active) this.stopPbx('licence'); });
     prov.on('change', () => this.emit('change'));
     prov.on('assigned', (p) => { if (p.ip) pbx.checkSync(p.ip); });
     this.pbx = pbx; this.prov = prov; this.state = 'running'; this.error = null;
     await this.startMdns();
+    await this.startRelay();
     if (this.updatePhones) this.resyncPhones({ reboot: true });
     this.emit('change');
   }
+  /**
+   * The Riyeser relay (1.3.0): joins this office to the business's other sites and phones at home. Started whenever
+   * the phone system runs; it finds out from Riyeser Link whether the business has it switched on (and stays quiet
+   * if not). Calls inside this office never depend on it.
+   */
+  async startRelay() {
+    if (this.relay || !this.opts.relayConfig || !this.pbx) return;
+    const pbx = this.pbx;
+    const r = new RelayLink({ getConfig: () => this.opts.relayConfig(), siteName: () => this.siteName(), log: (l, t) => this.log(l, t),
+      callsInProgress: () => (this.pbx ? this.pbx.callsInProgress().length : 0), timing: this.opts.relayTiming, probe: this.opts.relayProbe });
+    r.on('change', () => this.emit('change'));
+    this.trunks.add(r); this.relay = r;
+    await r.start({ pbx });
+    this.relayExts();
+  }
+  /** The extensions with a phone connected here now, for the relay. */
+  relayExts() {
+    if (!this.relay || !this.pbx) return;
+    const now = Date.now();
+    this.relay.setExts([...this.pbx.bindings.entries()].filter(([, m]) => [...m.values()].some((b) => b.expiresAt > now)).map(([ext]) => ext));
+  }
+  /** What the other sites see this office as ("Suva"); the PC's name until the owner names it. */
+  siteName() { return this.settings().siteName || this.opts.hostname || require('os').hostname(); }
+  setSiteName(name) { this.setSettings({ siteName: String(name || '').replace(/[\x00-\x1f<>]/g, '').trim().slice(0, 40) }); if (this.relay) { this.relay.exts = []; this.relayExts(); } this.emit('change'); return this.siteName(); }
   /** riyeser-office.local: answered while the phone system runs (when switched on, which the app does). */
   async startMdns() {
     const m = this.opts.mdns; if (!m || this.mdns) return;
@@ -262,8 +292,9 @@ class PhoneService extends EventEmitter {
     try { await r.start(); this.mdns = r; } catch (e) { this.log('warn', `Phones and apps can't find this PC as ${r.name} (${e.code || e.message}). Its address still works.`); }
   }
   async stopPbx(why) {
-    const pbx = this.pbx; const prov = this.prov; const mdns = this.mdns;
-    this.pbx = null; this.prov = null; this.mdns = null;
+    const pbx = this.pbx; const prov = this.prov; const mdns = this.mdns; const relay = this.relay;
+    this.pbx = null; this.prov = null; this.mdns = null; this.relay = null;
+    if (relay) await this.trunks.remove(relay.id).catch(() => {});
     if (mdns) await mdns.stop().catch(() => {});
     if (pbx) await pbx.stop().catch(() => {});
     if (prov) await prov.stop().catch(() => {});
@@ -341,6 +372,8 @@ class PhoneService extends EventEmitter {
       counts: { connected: new Set(snap.registrations.map((r) => r.ext)).size, onCalls: snap.calls.filter((c) => c.state === 'talking').length, phones: snap.registrations.length },
       registrations: snap.registrations.map((r) => ({ ext: r.ext, ip: r.ip, device: r.device, since: r.since })), addressStable: this.addressStable(),
       blocked: snap.blocked, ipChanged: this.ipChanged || null, adapter: this.adapter(), names: this.names(), offline: !!this.offline,
+      relay: this.relay ? this.relay.status() : { state: this.opts.relayConfig ? 'off' : 'local', connected: false, detail: this.opts.relayConfig ? 'Not started (the phone system isn\'t running).' : 'This PC isn\'t linked to Riyeser Link.' },
+      siteName: this.siteName(),
       addressChanges: (this.settings().hostChanges || []).slice(-5).reverse(), fixedAddress: this.settings().fixedAddress || null, allowPublic: !!this.settings().allowPublic, logs: this.logs.slice(-60).reverse(),
     };
   }

@@ -7,6 +7,8 @@
 //   OPTIONS    answered here (phones use it as a keep-alive)
 //   SUBSCRIBE  Event: ua-profile (desk-phone plug-and-play) is answered with the provisioning address
 // Media (RTP) never comes here: the SDP passes through unchanged and phones send sound to each other directly.
+// The Riyeser relay (1.3.0, relay.js) is a trunk: extensions with no phone connected here (or with a phone at another
+// site or at home too) are rung through it, and calls from it ring only the phones here (never back out).
 // Only office (private) addresses are served, and an address that keeps getting the password wrong is blocked.
 const dgram = require('dgram');
 const net = require('net');
@@ -50,7 +52,7 @@ class Pbx extends EventEmitter {
     this.ringTimeout = opts.ringTimeout || 120 * 1000;
     this.logFn = opts.log || (() => {});
     this.onPnp = opts.onPnp || null;
-    this.trunks = opts.trunks || null;   // trunks.js: the relay / other Links (none yet)
+    this.trunks = opts.trunks || null;   // trunks.js: the Riyeser relay (other sites, phones at home)
     this.ifaces = opts.ifaces;
     this.secret = crypto.randomBytes(32);
     this.bindings = new Map();   // ext -> Map(contact -> binding)
@@ -401,9 +403,21 @@ class Pbx extends EventEmitter {
   contactsOf(ext) { return [...(this.bindings.get(String(ext)) || new Map()).values()].filter((b) => b.expiresAt > Date.now()); }
 
   // ---------- INVITE (a new call) ----------
+  /** Where the relay can take a call to this number (and, for a group, its members), unless the call came from it. */
+  trunkRoute(number, fromTrunk, members) {
+    if (fromTrunk || !this.trunks || dialplan.EMERGENCY.has(String(number))) return null;
+    try { return this.trunks.route(String(number), { members }); } catch { return null; }
+  }
+  /** "Not connected" in plain words: when the number lives at another site and the relay is down, say so. */
+  unreachable(number) {
+    const t = this.trunks && this.trunks.all().find((x) => x.wasRemote && x.wasRemote(number));
+    return t ? 'Temporarily Unavailable (the other sites can\'t be reached: no connection to the Riyeser relay)' : 'Temporarily Unavailable (phone not connected)';
+  }
   onInvite(req, src) {
     if (!this.accepting) return this.reply(req, 403, 'Forbidden (needs Riyeser Link)');
-    const caller = this.authenticate(req, src, true);
+    // a call from the relay was checked there: no SIP password, and the caller is the extension it vouches for
+    const fromTrunk = src.proto === 'TRUNK';
+    const caller = fromTrunk ? (require('./relay').trunkCaller(req) || 'relay') : this.authenticate(req, src, true);
     if (!caller) return;
     const key = this.txKey(req);
     const ctx = { key, req, dest: this.responseDest(req), method: 'INVITE', branches: [], best: null, initial: true };
@@ -413,34 +427,40 @@ class Pbx extends EventEmitter {
     const dialled = sip.userOf(sip.parseUri(req.uri));
     const r = dialplan.resolve(dialled, this.directory);
     if (r.type === 'dnd') {
+      if (fromTrunk) return this.reply(req, 403, 'Forbidden');
       this.directory.setDnd(caller, r.on); this.emit('change');
       this.log('info', `Extension ${caller} turned Do not disturb ${r.on ? 'on' : 'off'}.`);
       return this.reply(req, 603, r.on ? 'Do Not Disturb On' : 'Do Not Disturb Off');
     }
     if (r.type === 'none') {
       // Not on this PC: a trunk (the Riyeser relay, another branch) may reach it. None are set up yet.
-      const via = !r.emergency && this.trunks && this.trunks.route(dialplan.normalise(dialled));
+      const via = !r.emergency && this.trunkRoute(dialplan.normalise(dialled), fromTrunk);
       if (!via) return this.reply(req, 404, `Not Found (${r.reason})`);
       ctx.call = this.newCall(req, caller, { type: 'ext', ext: dialplan.normalise(dialled) });
       this.fork(ctx, [{ dest: via.dest, uri: via.uri, ext: null }], { recordRoute: true });
+      ctx.timerC = setTimeout(() => { ctx.noAnswer = true; this.cancelBranches(ctx); }, this.ringTimeout); ctx.timerC.unref && ctx.timerC.unref();
       return;
     }
     let targets = [];
+    let via = null;   // the relay, for this person's phones at other sites / at home, or the group's members there
     if (r.type === 'ext') {
       if (r.ext === caller) return this.reply(req, 486, 'Busy Here (that is your own number)');
       if (this.directory.dnd(r.ext)) return this.missed(req, ctx, caller, r, 486, 'Busy Here (Do Not Disturb)', 'busy');
       targets = this.contactsOf(r.ext).map((b) => ({ binding: b, ext: r.ext }));
-      if (!targets.length) return this.missed(req, ctx, caller, r, 480, 'Temporarily Unavailable (phone not connected)', 'unavailable');
-    } else return this.ringGroup(req, ctx, caller, r);
+      via = this.trunkRoute(r.ext, fromTrunk);
+      if (!targets.length && !via) return this.missed(req, ctx, caller, r, 480, this.unreachable(r.ext), 'unavailable');
+    } else return this.ringGroup(req, ctx, caller, r, fromTrunk);
     ctx.call = this.newCall(req, caller, r);
-    this.fork(ctx, targets.map((t) => ({ dest: t.binding.source, uri: t.binding.contact, ext: t.ext })), { recordRoute: true });
+    const legs = targets.map((t) => ({ dest: t.binding.source, uri: t.binding.contact, ext: t.ext }));
+    if (via) legs.push({ dest: via.dest, uri: via.uri, ext: r.type === 'ext' ? r.ext : null });
+    this.fork(ctx, legs, { recordRoute: true });
     ctx.timerC = setTimeout(() => { ctx.noAnswer = true; this.cancelBranches(ctx); }, this.ringTimeout);
     ctx.timerC.unref && ctx.timerC.unref();
     this.emit('change');
   }
   // ---------- ring groups (ringgroups.js): only the chosen phones, all at once, in order or rotating ----------
-  ringGroup(req, ctx, caller, r) {
-    ctx.group = { caller, tried: new Set(), plan: null, i: 0, deadline: 0, skipped: [], members: 0 };
+  ringGroup(req, ctx, caller, r, fromTrunk = false) {
+    ctx.group = { caller, tried: new Set(), plan: null, i: 0, deadline: 0, skipped: [], members: 0, fromTrunk };
     this.groupLoad(ctx, this.directory.group(r.ext), r.ext);
     ctx.call = this.newCall(req, caller, r);
     if (this.groupNext(ctx)) return this.emit('change');
@@ -458,7 +478,7 @@ class Pbx extends EventEmitter {
     G.tried.add(key);
     this.rotation = this.rotation || new Map();
     const turn = this.rotation.get(key) || 0;
-    const p = ringgroups.plan(g, { caller: G.caller, dnd: (m) => this.directory.dnd(m), busy: (m) => this.onACall(m), contactsOf: (m) => this.contactsOf(m), turn, defaultMs: this.ringTimeout });
+    const p = ringgroups.plan(g, { caller: G.caller, dnd: (m) => this.directory.dnd(m), busy: (m) => this.onACall(m), contactsOf: (m) => this.groupContacts(m, G.fromTrunk), turn, defaultMs: this.ringTimeout });
     if (p.strategy === 'rotate' && p.members) this.rotation.set(key, turn + 1);
     Object.assign(G, { plan: p, i: 0, deadline: Date.now() + p.totalMs, members: G.members + p.members, skipped: [...G.skipped, ...p.skipped] });
     return true;
@@ -481,6 +501,16 @@ class Pbx extends EventEmitter {
       else if (fb && fb.type === 'person' && this.directory.person(fb.ext)) this.groupLoad(ctx, { members: [fb.ext], strategy: 'all' }, `person:${fb.ext}`);
     }
     return false;
+  }
+  /**
+   * A group member's phones: the ones connected here, and (1.3.0) one leg through the Riyeser relay when they have a
+   * phone at another site or at home, so only the chosen members ring, wherever they are. Not for calls that came
+   * from the relay (those ring only phones here).
+   */
+  groupContacts(ext, fromTrunk) {
+    const here = this.contactsOf(ext);
+    const via = this.trunkRoute(ext, fromTrunk);
+    return via ? [...here, { source: via.dest, contact: via.uri, relay: true }] : here;
   }
   /** On a call right now (talking, or dialling out), on any of their phones. */
   onACall(ext) { return this.callsInProgress().some((c) => c.from === String(ext) || c.answeredBy === String(ext)); }
@@ -557,6 +587,7 @@ class Pbx extends EventEmitter {
       if (res.status >= 200 && res.status < 300 && cseq.method === 'INVITE' && this.isOurHost(via.host) && (via.port || 5060) === this.port && sip.getAll(res, 'via').length > 1) {
         sip.removeFirst(res, 'via');
         const next = sip.parseVia(sip.getHeader(res, 'via'));
+        if (next.params.rly && this.trunks) { const t = this.trunks.all().find((x) => x.owns); const d = t && t.owns({ host: next.host, params: { rly: next.params.rly } }); if (d) this.sendMsg(res, d); return; }
         this.sendMsg(res, { proto: next.transport === 'TCP' ? 'TCP' : 'UDP', address: next.params.received || next.host, port: next.params.rport ? Number(next.params.rport) : (next.port || 5060) });
       }
       return;
@@ -685,11 +716,14 @@ class Pbx extends EventEmitter {
     const call = this.calls.get(callId);
     if (!call) { if (req.method !== 'ACK') this.reply(req, 481, null); return; }
     let routes = sip.getAll(req, 'route');
-    if (routes.length) { try { if (this.isUs(sip.parseNameAddr(routes[0]).parsed)) { sip.removeFirst(req, 'route'); routes = routes.slice(1); } } catch { /* bad route */ } }
+    // take ourselves off the route (we may be on it twice: once for each side, e.g. the office network and the relay)
+    while (routes.length) { let u = null; try { u = sip.parseNameAddr(routes[0]).parsed; } catch { /* bad route */ } if (!u || !this.isUs(u)) break; sip.removeFirst(req, 'route'); routes = routes.slice(1); }
     let target;
     try { target = routes.length ? sip.parseNameAddr(routes[0]).parsed : sip.parseUri(req.uri); } catch { target = null; }
-    const dest = this.uriDest(target);
-    if (!dest || !this.allowed(dest.address) || this.isUs(target)) { if (req.method !== 'ACK') this.reply(req, 404, 'Not Found (no route)'); return; }
+    // the next hop is the relay (the call is with another site or a phone at home): over the relay's connection
+    const viaTrunk = target && this.trunks && src.proto !== 'TRUNK' ? this.trunkOwning(target) : null;
+    const dest = viaTrunk || this.uriDest(target);
+    if (!dest || (dest.proto !== 'TRUNK' && !this.allowed(dest.address)) || this.isUs(target)) { if (req.method !== 'ACK') this.reply(req, 404, 'Not Found (no route)'); return; }
     call.lastActivity = Date.now();
     const fwd = sip.clone(req); delete fwd._src;
     const mf = Number(sip.getHeader(fwd, 'max-forwards'));
@@ -706,6 +740,8 @@ class Pbx extends EventEmitter {
     if (req.method === 'INVITE') { const t = sip.response(req, 100, null, {}); this.sendMsg(t, ctx.dest); ctx.last = t; }
     this.fork(ctx, [{ dest, uri: req.uri, ext: null }]);
   }
+
+  trunkOwning(uri) { for (const t of this.trunks.all()) { const d = t.owns && t.owns(uri); if (d) return d; } return null; }
 
   // ---------- desk-phone plug-and-play (SUBSCRIBE Event: ua-profile) ----------
   onSubscribe(req, src) {

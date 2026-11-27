@@ -1,8 +1,6 @@
-// Trunks and links: the seam where Riyeser Link Office will reach beyond this office network. Nothing uses it yet.
-//
-// The next step is a Riyeser relay. The Office Link keeps one OUTGOING connection to it (so no router changes are
-// needed), and remote Riyeser Link users and other branches' Links reach office extensions through it. Riyeser
-// Link Cloud will be the same idea with the phone system itself hosted by Riyeser.
+// Trunks and links: the seam where Riyeser Link Office reaches beyond this office network. Since 1.3.0 the Riyeser
+// relay (relay.js) is one: the Office Link keeps one OUTGOING connection to it (so no router changes are needed), and
+// the business's other sites and phones at home reach office extensions through it.
 //
 // A trunk is an object with:
 //   id, name
@@ -10,9 +8,13 @@
 //                              src = { proto: 'TRUNK', trunk: id, address, port } and trusted as coming from the trunk
 //   stop()
 //   status()                   -> { connected: bool, detail: 'plain words' }
-//   route(number)              -> { dest, uri } when this trunk can reach a number that isn't on this PC, else null
+//   route(number, { members }) -> { dest, uri } when this trunk can reach a number (or, for a group, one of its
+//                              members) that has a phone somewhere else, else null
 //   send(buf, dest)            send SIP out over the trunk (dest.proto === 'TRUNK')
-// The PBX asks route() only for numbers its own dial plan doesn't know, so office extensions always stay local.
+//   owns(uri)                  (optional) -> dest when a Route / Request-URI points at this trunk (calls in progress)
+//   wasRemote(number)          (optional) the number was reachable through it before it went away
+// Phones here always ring here; the trunk is asked as well (a person may have a phone at another site or at home).
+// Calls that came in over a trunk are never sent back out (no loops).
 class Trunks {
   constructor() { this.list = new Map(); }
   add(trunk) {
@@ -25,8 +27,8 @@ class Trunks {
   async startAll(ctx) { for (const t of this.all()) { try { await t.start(ctx); } catch (e) { ctx.log && ctx.log('warn', `${t.name || t.id}: ${e.message}`); } } }
   async stopAll() { for (const t of this.all()) { try { await t.stop(); } catch { /* closing anyway */ } } }
   /** The first trunk that can reach this number: { trunk, dest, uri } or null. */
-  route(number) {
-    for (const t of this.all()) { const r = t.route(number); if (r) return { trunk: t, ...r }; }
+  route(number, opts = {}) {
+    for (const t of this.all()) { const r = t.route(number, opts); if (r) return { trunk: t, ...r }; }
     return null;
   }
   status() { return this.all().map((t) => ({ id: t.id, name: t.name || t.id, ...t.status() })); }

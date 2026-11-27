@@ -50,7 +50,8 @@ function renderState() {
   $('#ver').textContent = `Version ${S.version}`;
   if (S.state === 'running') {
     el.className = 'state';
-    el.innerHTML = `<div class="grow"><b class="big">${esc(T.running(S.host))}</b><span class="muted">${esc(T.counts(S.counts))}${S.licence.text ? ` · ${esc(S.licence.text)}` : ''}</span></div>`;
+    const rl = T.relayLine(S.relay);
+    el.innerHTML = `<div class="grow"><b class="big">${esc(T.running(S.host))}</b><span class="muted">${esc(T.counts(S.counts))}${S.licence.text ? ` · ${esc(S.licence.text)}` : ''}</span>${rl ? `<span class="relayline ${S.relay.connected ? 'ok' : 'warn'}" id="relayline">${esc(rl)}</span>` : ''}</div>`;
   } else if (S.state === 'waiting-licence') {
     el.className = 'state wait';
     el.innerHTML = `<div class="grow"><b class="big">${esc(T.WAITING_TITLE)}</b><span>${T.boldPlus(esc(S.licence.message || T.NEEDS_PLUS))}</span></div>
@@ -164,6 +165,25 @@ function renderAccount() {
     ${S.signedIn ? '' : `<form id="signin" class="row"><input id="em" type="email" placeholder="Riyeser account email" autocomplete="username"><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button class="btn">Sign in</button></form>
       <p class="muted">Already signed in on Riyeser Central? Riyeser Link Office uses that too when it can.</p>`}`;
 }
+// ---------- Settings → Connect your branches: the Riyeser relay's status and diagnostics
+function renderRelay() {
+  const r = S.relay || {};
+  const row = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
+  const intro = r.state === 'local' ? T.RELAY_LOCAL : r.state === 'off' ? T.RELAY_OFF : T.relayLine(r);
+  const sites = (r.sites || []).map((x) => `<li>${esc(x.name)} <span class="muted">· ${esc(x.exts)} extension${x.exts === 1 ? '' : 's'} connected${x.via && x.via !== 'here' ? ` · through ${esc(x.via)}` : ''}</span></li>`).join('');
+  $('#relay').innerHTML = `<p class="muted">${esc(T.RELAY_WHY)}</p><p><b>${esc(intro)}</b></p>
+    ${r.connected && r.udp === 'blocked' ? `<div class="note warn">${esc(T.RELAY_UDP_BLOCKED)}</div>` : ''}
+    ${sites ? `<p><b>Other sites</b></p><ul class="hist">${sites}</ul>` : ''}
+    <form id="sitename" class="row"><label style="flex:1 1 260px"><span class="muted small">${esc(T.RELAY_SITE_NAME)}</span><input id="sitenamein" value="${esc(S.siteName || '')}" maxlength="40" autocomplete="off"></label><button class="btn s">Save</button></form>
+    <details class="help"><summary>Diagnostics</summary><dl class="kv">
+      ${row('State', esc(r.state || '—'))}${row('Relay', r.relay ? `${esc(r.relay)} (${esc(r.region || '')})${r.backup ? ' <span class="pill wait">backup</span>' : ''}` : '—')}
+      ${row('Round trip', r.rtt != null ? `${esc(r.rtt)} ms` : '—')}${row('Sound (UDP)', esc(T.udp(r.udp)))}
+      ${row('Connected since', r.since ? esc(when(r.since)) : '—')}${row('Reconnects', esc(r.reconnects || 0))}
+      ${row('Relays (in order)', (r.relays || []).map((x) => `${esc(x.id)} ${esc(x.region)}`).join(' → ') || '—')}
+      ${row('Reachable through it', `${esc(r.remote || 0)} extension(s), ${esc(r.phones || 0)} phone(s) at home`)}
+      ${row('Last problem', esc(r.error || 'none'))}</dl></details>
+    <div class="row"><button class="btn s" data-a="relayretry">Reconnect now</button><button class="btn s" data-a="web">Sites and the relay on the website</button></div>`;
+}
 // ---------- Settings → This PC's address: the adapter, names, what phones are given, reserve it, fixed address
 function renderAddress() {
   const a = S.adapters.current; const n = S.names || {}; const f = S.fixedAddress;
@@ -235,6 +255,7 @@ function render() {
   if (!$('#manualbox').hidden) part('by hand', renderHand, '#manualout');
   part('new phones', renderFound, '#found'); if (!busy) part('people', renderPeople, '#people'); part('ring groups', renderGroups, '#groups'); part('phones', renderPhones, '#phones');
   part('calls', renderCalls, '#calls'); part('account', renderAccount, '#account');
+  if (!document.activeElement || !document.activeElement.closest('#relay')) part('connect your branches', renderRelay, '#relay');
   if (!document.activeElement || !document.activeElement.closest('#address')) part('this PC\'s address', renderAddress, '#address');
   if (!document.querySelector('.adv').open) part('advanced', renderAdvanced, '#advanced');
 }
@@ -298,6 +319,7 @@ document.addEventListener('click', async (e) => {
     if (a === 'reload') { renderLoading(); return; }
     if (a === 'team') await safe(() => bridge.call('link:openTeam'));
     if (a === 'web') await safe(() => bridge.call('link:openPhonesPage'));
+    if (a === 'relayretry') { await safe(() => bridge.call('link:relay-retry')); toast('Reconnecting to the Riyeser relay…'); }
     if (a === 'report') { const r = await safe(() => bridge.call('link:report')); if (r) toast(r.ok ? 'Sent to Riyeser Link.' : r.error); }
     if (a === 'setupopen') { setupOpen = !setupOpen; renderSetup(); }
     if (a === 'step-signin') { showTab('settings'); const em = $('#em'); if (em) em.focus(); }
@@ -340,6 +362,10 @@ document.addEventListener('submit', async (e) => {
     const ext = $('#macwho').value; if (!ext) { toast('Choose who the phone is for.'); return; }
     const r = await safe(() => bridge.call('link:assign', $('#mac').value, ext));
     if (r) { $('#mac').value = ''; toast('Added. Turn the phone on (or restart it) and it sets itself up.'); load(); }
+  }
+  if (e.target.id === 'sitename') {
+    const n = await safe(() => bridge.call('link:site-name', $('#sitenamein').value));
+    if (n) { toast(`The other sites see this office as ${n}.`); $('#sitenamein').blur(); load(); }
   }
   if (e.target.id === 'fixedform') {
     const r = await safe(() => bridge.call('link:fixedAddress', $('#fixedip').value.trim()));

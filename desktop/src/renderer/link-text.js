@@ -94,6 +94,21 @@
     },
     howSetsUp: (name) => `How ${name || 'this person'} sets up their phone`,
     REPLACE_PREVIEW: (mac) => `The old phone (MAC ${mac}) stops getting its settings now. It keeps working until it's restarted or reset. To lock it out straight away, also make a new password.`,
+    // ---------- the Riyeser relay (1.3.0): other sites and phones at home
+    RELAY_TITLE: 'Connect your branches',
+    RELAY_SUB: 'Other sites and phones at home, through the Riyeser relay',
+    RELAY_WHY: 'With the Riyeser relay switched on for your business, desk phones here can dial any extension at your other sites (each with its own Riyeser Link Office) and phones at home, and they can dial you. Nothing to change on your router. Calls inside this office never use it, and keep working with no internet.',
+    RELAY_OFF: 'The Riyeser relay is switched off for your business. An owner or admin switches it on in Riyeser Link: Phones → Sites and the relay.',
+    RELAY_LOCAL: 'Link this PC to your business (in Riyeser Central) and sign in, to connect your branches.',
+    relayLine: (r) => {
+      if (!r || r.state === 'local' || r.state === 'off') return '';
+      if (r.connected) return `${r.backup ? 'Using backup relay' : 'Connected to Riyeser relay'} · ${r.region || r.host}${r.rtt != null ? ` · ${r.rtt} ms` : ''}${r.sites && r.sites.length ? ` · ${r.sites.length} other site${r.sites.length === 1 ? '' : 's'}` : ''}`;
+      if (r.state === 'refused') return `Other sites: the relay refused this office (${r.error || 'ask an admin'}). Calls in this office work as normal.`;
+      return 'Other sites: not connected right now (no connection to the Riyeser relay). Calls in this office work as normal; it keeps trying.';
+    },
+    RELAY_UDP_BLOCKED: 'Calls to other sites connect, but there may be no sound: this network\'s firewall seems to block UDP to the relay. Allow outgoing UDP to the relay (ports 40000–49999) on the router or firewall.',
+    RELAY_SITE_NAME: 'This site\'s name (what the other sites see)',
+    udp: (u) => ({ ok: 'gets through', blocked: 'blocked by a firewall', checking: 'checking…', unknown: 'not checked' }[u] || '—'),
     duration: (s) => (!s ? '' : s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim()),
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = T; else root.LinkText = T;

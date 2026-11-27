@@ -100,3 +100,7 @@ dialog.reserve { width: min(560px, calc(100% - 32px)); } dialog.reserve ol { pad
 fieldset.mode input[type=radio] { width: auto; flex: none; margin-top: 3px; }
 /* 1.2.1: no empty card shells. Each box shows only once it has something in it (before the first status, the top bar says "Starting…"). */
 #state:empty, #setup:empty, #hero:empty, #notices:empty, #found:empty { display: none; }
+/* the Riyeser relay line under the status (1.3.0) */
+.relayline { display: block; margin-top: 2px; font-size: 13px; }
+.relayline.ok { color: var(--ok); }
+.relayline.warn { color: var(--muted); }
