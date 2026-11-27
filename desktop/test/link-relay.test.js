@@ -161,3 +161,27 @@ test('business isolation and revoking, end to end', async () => {
     await H.until(() => suva.link.route('201') === null, 4000, 'Suva no longer reaches Nadi');
   } finally { await suva.close(); await nadi.close(); await other.close(); await r.close(); }
 });
+
+test('This PC as the relay: the Namecheap Dynamic DNS password goes to the installer as a file, never in the script, and the panel says the DNS state', () => {
+  const w = require('../src/link/windows');
+  const T = require('../src/renderer/link-text');
+  const base = { script: 'C:\\R\\install-relay.ps1', relayDir: 'C:\\R', domain: 'relay.riyeser.com', region: 'Head office', id: 'suva1' };
+  const plain = w.relayHostScript(base, 'C:\\t\\result.json');
+  assert.doesNotMatch(plain, /Ddns/, 'no password: the installer keeps whatever DNS settings are there');
+  const pw = '0123abcd4567ef890123abcd4567ef89';
+  const s = w.relayHostScript({ ...base, ddnsPasswordFile: 'C:\\t\\ddns.txt' }, 'C:\\t\\result.json');
+  assert.match(s, / -DdnsProvider namecheap -DdnsPasswordFile 'C:\\t\\ddns\.txt' \*>&1/);
+  assert.ok(!s.includes(pw));
+  assert.equal(w.checkDdnsPassword(`  ${pw}\n`), pw);
+  for (const bad of ['', 'short', 'has space in it', 'quote"inside1', 'dollar$sign12']) assert.throws(() => w.checkDdnsPassword(bad), /Advanced DNS → Dynamic DNS/);
+  assert.match(T.relayDns(null), /doesn't update its name itself/);
+  assert.match(T.relayDns({ provider: 'namecheap', name: 'relay.riyeser.com', ok: true }), /relay\.riyeser\.com points at this office \(Namecheap Dynamic DNS/);
+  assert.match(T.relayDns({ provider: 'namecheap', name: 'relay.riyeser.com', ok: false, error: 'Namecheap refused the Dynamic DNS password.' }), /^DNS: couldn't update relay\.riyeser\.com\. Namecheap refused/);
+  assert.match(T.RELAY_DDNS_WHY, /never in chat or email/);
+});
+
+test('src/relay is the same code as relay/ (the Namecheap dynamic DNS too)', () => {
+  const { Ddns } = require('../src/relay/lib/ddns');
+  const d = new Ddns({ provider: 'namecheap', name: 'relay2.riyeser.com', password: 'x'.repeat(32) });
+  assert.deepEqual([d.enabled, d.host, d.domain], [true, 'relay2', 'riyeser.com']);
+});

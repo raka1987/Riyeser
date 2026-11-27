@@ -178,8 +178,16 @@ On a VPS the address is fixed. On the owner's own hardware it can change, so:
   allow it, the log and the README say which ports to forward by hand;
 - it reports it in `relay_sync`, and Link Office / Riyeser Link get it from `link_relay_config(ws)` and try it if
   the name doesn't resolve;
-- the built-in **dynamic DNS updater** (`relay/lib/ddns.js`) updates the `relay.riyeser.com` A record through the DNS
-  provider's own API (Cloudflare or DigitalOcean DNS) whenever it changes. No separate DDNS service.
+- the built-in **dynamic DNS updater** (`relay/lib/ddns.js`) keeps the relay's A record pointing at it, at start,
+  whenever the address changes, and every 30 minutes as a safety net. `riyeser.com` is at **Namecheap**, so that's
+  `DDNS_PROVIDER=namecheap` with `DDNS_HOST` (`relay`, or `relay2` for the backup), `DDNS_DOMAIN` (`riyeser.com`) and
+  `DDNS_PASSWORD` (the domain's Dynamic DNS password from Namecheap's Advanced DNS page, not the account password), via
+  Namecheap's Dynamic DNS update (`dynamicdns.park-your-domain.com/update`, an "A + Dynamic DNS Record" per host).
+  Cloudflare and DigitalOcean DNS (API token) work too. Namecheap's errors become plain messages in the log and in
+  `/health` → `dns` (wrong password, no such record, domain not found; passing problems are retried every minute).
+  The password is asked for hidden by `install-relay.ps1` / `setup.sh`, or pasted into Link Office's *This PC as the
+  relay* (handed to the installer as a file in that run's temp folder, deleted at once), and kept only in `relay.env`
+  (Administrators/SYSTEM; root and the relay's group). Never logged, never in `/health`. No separate DDNS service.
 
 ### 8. Rate limits, logging, health
 
@@ -234,7 +242,9 @@ On a VPS the address is fixed. On the owner's own hardware it can change, so:
 - `relay/test/*.test.js` (`cd relay && npm test`): passes (and one made by the SQL), the proxy (cross-site with sound,
   isolation, revoked, rate limits), a phone at home over TLS, two relays of a cluster, set-up links, health/metrics,
   the TURN server against coturn's own `turnutils_uclient` (UDP, TCP, expired and forged passwords refused), no TURN
-  into private networks, dynamic DNS, NAT-PMP/UPnP port mapping (pretend routers).
+  into private networks, dynamic DNS (`ddns.test.js`: a fake Namecheap endpoint — success, UTF-16 replies, wrong
+  password, no such host, unknown domain, busy then retried, the relay setting relay2 at start and every N minutes,
+  the password never in the log or `/health`), NAT-PMP/UPnP port mapping (pretend routers).
 - `desktop/test/link-relay.test.js`: Link Office's RelayTrunk and PBX against the real relay on this PC, with RTP both
   ways; reconnect after a public IP change; relay down → local calls still work and remote calls fail cleanly.
 - `desktop/test/link-relay-nat.test.js`: **two sites behind separate strict NATs** (Linux network namespaces, iptables

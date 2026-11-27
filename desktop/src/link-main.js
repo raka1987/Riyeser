@@ -164,11 +164,20 @@ function registerIpc() {
   handle('link:site-name', (name) => service.setSiteName(name));
   // the head office PC can run the Riyeser relay itself (Settings → Connect your branches → This PC as the relay)
   handle('link:relay-host-state', () => require('./link/windows').relayHostState());
+  // o: { domain, region, id, ddnsPassword (optional: Namecheap Dynamic DNS, written only to the relay's relay.env) }
   handle('link:relay-host', async (o) => {
     const w = require('./link/windows');
+    const fs = require('fs');
     const relayDir = path.join(__dirname, 'relay').replace('app.asar', 'app.asar.unpacked');
-    const r = await w.runElevatedScript((result) => w.relayHostScript({ script: path.join(relayDir, 'deploy', 'windows', 'install-relay.ps1'), relayDir, ...(o || {}) }, result));
-    logLine('info', `Run the Riyeser relay on this PC: ${r.ok ? 'installed' : r.why || 'didn\'t finish'}.`);
+    const { domain, region, id } = o || {};
+    const pw = o && o.ddnsPassword ? w.checkDdnsPassword(o.ddnsPassword) : '';
+    const r = await w.runElevatedScript((result) => {
+      let ddnsPasswordFile = '';
+      // in this run's own temp folder (only this Windows user), deleted by the installer and again when the run ends
+      if (pw) { ddnsPasswordFile = path.join(path.dirname(result), 'ddns.txt'); fs.writeFileSync(ddnsPasswordFile, pw, { mode: 0o600 }); }
+      return w.relayHostScript({ script: path.join(relayDir, 'deploy', 'windows', 'install-relay.ps1'), relayDir, domain, region, id, ddnsPasswordFile }, result);
+    });
+    logLine('info', `Run the Riyeser relay on this PC: ${r.ok ? 'installed' : r.why || 'didn\'t finish'}${pw ? ' (with Namecheap Dynamic DNS)' : ''}.`);
     return { ok: !!r.ok, out: String(r.out || r.why || '').replace(/select relay_register\([^)]*\);?/g, '[see REGISTER.sql]').slice(-2000) };
   });
   handle('link:relay-retry', () => { if (service.relay) { service.relay.configAt = 0; service.relay.nudge(); } return service.status().relay; });

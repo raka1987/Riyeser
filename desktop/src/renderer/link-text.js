@@ -143,10 +143,18 @@
     RELAY_UDP_BLOCKED: 'Calls to other sites connect, but there may be no sound: this network\'s firewall seems to block UDP to the relay. Allow outgoing UDP to the relay (ports 40000–49999) on the router or firewall.',
     RELAY_SITE_NAME: 'This site\'s name (what the other sites see)',
     RELAY_HOST_TITLE: 'This PC as the relay (head office)',
-    RELAY_HOST_WHY: 'The head office\'s always-on PC can be the Riyeser relay for all your sites (a rented server can be the backup). It runs in the background from Windows start-up, opens its ports in Windows Firewall and asks the router to forward them. Windows asks for permission once. Then add the relay\'s DNS name and register it once in Riyeser online (the relay\'s README says how).',
+    RELAY_HOST_WHY: 'The head office\'s always-on PC can be the Riyeser relay for all your sites (a rented server can be the backup). It runs in the background from Windows start-up, opens its ports in Windows Firewall and asks the router to forward them. Windows asks for permission once. Then register it once in Riyeser online (the relay\'s README says how).',
+    RELAY_DDNS_LABEL: 'Namecheap Dynamic DNS password (optional)',
+    RELAY_DDNS_WHY: 'So the relay\'s name keeps pointing at this office when its internet address changes. At Namecheap: Domain List → Manage riyeser.com → Advanced DNS → turn on Dynamic DNS and copy its password (not your Namecheap account password), and add an "A + Dynamic DNS Record" with host relay. Paste the password only here — never in chat or email. It is kept only in the relay\'s settings on this PC.',
+    RELAY_DDNS_SAVE: 'Save the Dynamic DNS password…',
+    RELAY_DDNS_SAVED: 'Saved. The relay sets its name at Namecheap now, whenever the office\'s address changes, and every 30 minutes.',
+    relayDns: (d) => (!d ? 'DNS: the relay doesn\'t update its name itself (add the Namecheap Dynamic DNS password below to turn it on).'
+      : d.ok === false ? `DNS: couldn't update ${d.name}. ${d.error || ''}`.trim()
+        : d.ok ? `DNS: ${d.name} points at this office (${d.provider === 'namecheap' ? 'Namecheap Dynamic DNS' : d.provider}, kept up to date by the relay).`
+          : `DNS: setting ${d.name} (${d.provider === 'namecheap' ? 'Namecheap' : d.provider})…`),
     RELAY_HOST_DOWN: 'The relay is installed on this PC but isn\'t answering. Running this again repairs it.',
     RELAY_HOST_MORE: 'It runs as the Windows task "Riyeser Relay" (starts with Windows, restarts itself). Its settings and log are in C:\\ProgramData\\Riyeser Relay.',
-    RELAY_HOST_DONE: 'The relay is running on this PC. Next: its DNS name, the router (if it didn\'t forward the ports itself) and registering it once — see C:\\ProgramData\\Riyeser Relay.',
+    RELAY_HOST_DONE: 'The relay is running on this PC. Next: its DNS name (unless Namecheap Dynamic DNS is set), the router (if it didn\'t forward the ports itself) and registering it once — see C:\\ProgramData\\Riyeser Relay.',
     relayHostOn: (h) => `This PC runs the Riyeser relay ${h.relay} (${h.region}) · version ${h.version} · ${h.sites} site${h.sites === 1 ? '' : 's'} and ${h.phones} phone${h.phones === 1 ? '' : 's'} connected now${h.sync && h.sync.ok === false ? ' · not reaching Riyeser online' : ''}.`,
     udp: (u) => ({ ok: 'gets through', blocked: 'blocked by a firewall', checking: 'checking…', unknown: 'not checked' }[u] || '—'),
     duration: (s) => (!s ? '' : s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim()),
