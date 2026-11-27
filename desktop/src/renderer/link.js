@@ -1,5 +1,8 @@
 // Riyeser Link Office's status screen: is it running, which phones are connected, people, new phones, recent calls.
-const api = window.api; const T = window.LinkText;
+// 1.2.1: never `const api = window.api` at the top level: the preload puts `api` on the window as a fixed (non-configurable)
+// property, so a top-level `const api` is a SyntaxError in Electron and the whole screen stops (no tabs, empty cards).
+const bridge = window.api || { call: async () => { throw new Error('Riyeser Link Office\'s window couldn\'t reach the phone system. Close it from the tray icon and open it again.'); }, on() {} };
+const T = window.LinkText;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -219,10 +222,42 @@ function showTab(name) {
   for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
   try { localStorage.setItem('link.tab', name); } catch { /* fine */ }
 }
-function render() { if (!S) return; renderState(); renderNotices(); renderSetup(); renderHero(); if (!$('#manualbox').hidden) renderHand(); renderFound(); if (!busy) renderPeople(); renderGroups(); renderPhones(); renderCalls(); renderAccount(); if (!document.activeElement || !document.activeElement.closest('#address')) renderAddress(); if (!document.querySelector('.adv').open) renderAdvanced(); }
-async function load() { const s = await safe(() => api.call('link:status')); if (s) { S = s; render(); } }
+// Each part is drawn on its own: a problem in one shows there and never leaves the rest of the screen empty.
+function part(name, fn, box) {
+  try { fn(); } catch (e) {
+    const el = box && $(box); if (el) { el.hidden = false; el.innerHTML = `<p class="note warn">This part couldn't be shown (${esc(e.message)}). The phones keep working.</p>`; }
+    if (window.console) console.error(`Riyeser Link Office: ${name}:`, e);
+  }
+}
+function render() {
+  if (!S) return;
+  part('status', renderState, '#state'); part('notices', renderNotices, '#notices'); part('setup', renderSetup, '#setup'); part('address', renderHero, '#hero');
+  if (!$('#manualbox').hidden) part('by hand', renderHand, '#manualout');
+  part('new phones', renderFound, '#found'); if (!busy) part('people', renderPeople, '#people'); part('ring groups', renderGroups, '#groups'); part('phones', renderPhones, '#phones');
+  part('calls', renderCalls, '#calls'); part('account', renderAccount, '#account');
+  if (!document.activeElement || !document.activeElement.closest('#address')) part('this PC\'s address', renderAddress, '#address');
+  if (!document.querySelector('.adv').open) part('advanced', renderAdvanced, '#advanced');
+}
+// Before the first answer: a plain "Starting…" (never an empty card). If the phone system doesn't answer, say so here
+// and keep asking every few seconds; the tabs work all along.
+let loadFails = 0; let retry = null;
+function renderLoading(err) {
+  const el = $('#state'); el.hidden = false;
+  if (!err) { el.className = 'state wait'; el.innerHTML = `<div class="grow"><b class="big">Starting Riyeser Link Office…</b><span class="muted">Getting the phone system's status.</span></div>`; return; }
+  el.className = 'state bad';
+  el.innerHTML = `<div class="grow"><b class="big">Riyeser Link Office's status couldn't be read</b><span class="muted">${esc(err)} Trying again by itself.</span></div><button class="btn s" data-a="reload">Try again</button>`;
+}
+async function load() {
+  let s = null; let err = null;
+  try { s = await Promise.race([bridge.call('link:status'), new Promise((_, no) => setTimeout(() => no(new Error('The phone system didn\'t answer in time.')), 15000))]); } catch (e) { err = e.message || String(e); }
+  clearTimeout(retry);
+  if (s) { loadFails = 0; S = s; render(); return; }
+  loadFails++;
+  if (!S) renderLoading(err); else if (loadFails > 1) toast(err);
+  retry = setTimeout(load, Math.min(3000 * loadFails, 15000));
+}
 let pending = null;
-api.on('link:changed', () => { clearTimeout(pending); pending = setTimeout(load, 150); });
+bridge.on('link:changed', () => { clearTimeout(pending); pending = setTimeout(load, 150); });
 document.querySelector('.adv').addEventListener('toggle', () => renderAdvanced());
 // don't redraw the people list under someone who's typing in it
 document.addEventListener('focusin', (e) => { busy = !!e.target.closest('#addperson'); });
@@ -231,90 +266,92 @@ document.addEventListener('focusout', () => { busy = false; });
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('button'); if (!b) return;
   const d = b.dataset;
-  if (d.copy != null) { await safe(() => api.call('link:copy', d.copy)); toast('Copied.'); return; }
-  if (d.router) { await safe(() => api.call('link:openRouter', d.router)); return; }
-  if (d.manual) { if (shown[d.manual]) delete shown[d.manual]; else shown[d.manual] = await safe(() => api.call('link:manual', d.manual)); renderPeople(); return; }
-  if (d.manual2) { showTab('people'); if (!shown[d.manual2]) shown[d.manual2] = await safe(() => api.call('link:manual', d.manual2)); renderPeople();
+  if (d.copy != null) { await safe(() => bridge.call('link:copy', d.copy)); toast('Copied.'); return; }
+  if (d.router) { await safe(() => bridge.call('link:openRouter', d.router)); return; }
+  if (d.manual) { if (shown[d.manual]) delete shown[d.manual]; else shown[d.manual] = await safe(() => bridge.call('link:manual', d.manual)); renderPeople(); return; }
+  if (d.manual2) { showTab('people'); if (!shown[d.manual2]) shown[d.manual2] = await safe(() => bridge.call('link:manual', d.manual2)); renderPeople();
     const r = document.querySelector(`[data-manual="${d.manual2}"]`); if (r) r.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
   if (d.rename) { const x = S.phones.find((p) => p.mac === d.rename); if (!x) return;
     const f = await askForm('Rename or move this phone', `${x.vendorName} ${x.model || ''} · ${x.macText}`, [{ name: 'name', label: 'Phone name', value: x.label || '', max: 40, placeholder: 'e.g. Reception' },
       { name: 'location', label: 'Location', value: x.location || '', max: 60, placeholder: 'e.g. Head office' }]);
-    if (f && await safe(() => api.call('link:label', x.mac, { name: f.name, location: f.location, note: x.note || '' }))) toast('Saved.'); load(); return; }
+    if (f && await safe(() => bridge.call('link:label', x.mac, { name: f.name, location: f.location, note: x.note || '' }))) toast('Saved.'); load(); return; }
   if (d.replace) { const x = S.phones.find((p) => p.mac === d.replace); if (!x) return;
     const fields = [{ name: 'mac', label: 'The new phone', type: 'select', value: '', options: [['', 'Type its MAC address below'], ...S.found.map((f) => [f.mac, `New phone found: ${f.vendorName} ${f.model || ''} · ${f.macText}`])] },
       { name: 'typed', label: 'MAC address (on the label under the phone)', value: '', max: 20, placeholder: 'e.g. 00:15:65:12:34:56' }];
     fields.preview = `${T.REPLACE_PREVIEW(x.macText)} The new phone keeps extension ${x.ext}${x.label ? `, the name ${x.label}` : ''}${x.location ? ` and the location ${x.location}` : ''}.`;
     const f = await askForm(`Replace ${x.label || 'this phone'}`, `Now: ${x.vendorName} ${x.model || ''} · ${x.macText} · extension ${x.ext}`, fields, 'Replace phone');
     if (!f) return; const mac = f.mac || f.typed; if (!mac) { toast('Choose the new phone, or type its MAC address.'); return; }
-    if (await safe(() => api.call('link:replace', x.mac, mac))) toast('Replaced. Plug in the new phone: it sets itself up in a minute.'); load(); return; }
+    if (await safe(() => bridge.call('link:replace', x.mac, mac))) toast('Replaced. Plug in the new phone: it sets itself up in a minute.'); load(); return; }
   if (d.reveal) { shown[d.reveal].reveal = !shown[d.reveal].reveal; renderPeople(); return; }
   if (d.handreveal) { hand.reveal = !hand.reveal; renderHand(); return; }
-  if (d.reset) { const m = await safe(() => api.call('link:resetPassword', d.reset)); if (m) { if (shown[d.reset]) shown[d.reset] = { ...m, reveal: true };
+  if (d.reset) { const m = await safe(() => bridge.call('link:resetPassword', d.reset)); if (m) { if (shown[d.reset]) shown[d.reset] = { ...m, reveal: true };
     if (hand && hand.ext === d.reset) hand = { ext: d.reset, details: m, reveal: true }; renderPeople(); renderHand(); toast('New password made.'); } return; }
   if (d.tab) { showTab(d.tab); return; }
-  if (d.remove) { if (await askYes('Take this person off the phones? Their call history stays.', 'Take them off')) { await safe(() => api.call('link:removePerson', d.remove)); load(); } return; }
+  if (d.remove) { if (await askYes('Take this person off the phones? Their call history stays.', 'Take them off')) { await safe(() => bridge.call('link:removePerson', d.remove)); load(); } return; }
   if (d.give) { const ext = document.querySelector(`select[data-found="${d.give}"]`).value; if (!ext) { toast('Choose who the phone is for.'); return; }
-    if (await safe(() => api.call('link:assign', d.give, ext))) toast('Done. The phone sets itself up in a minute. If it doesn\'t, restart it.'); load(); return; }
-  if (d.ignore) { await safe(() => api.call('link:ignore', d.ignore)); load(); return; }
-  if (d.unassign) { if (await askYes('Stop giving this phone its settings? It keeps what it has until it\'s reset. To lock it out, make a new password for its person.')) { await safe(() => api.call('link:unassign', d.unassign)); load(); } return; }
+    if (await safe(() => bridge.call('link:assign', d.give, ext))) toast('Done. The phone sets itself up in a minute. If it doesn\'t, restart it.'); load(); return; }
+  if (d.ignore) { await safe(() => bridge.call('link:ignore', d.ignore)); load(); return; }
+  if (d.unassign) { if (await askYes('Stop giving this phone its settings? It keeps what it has until it\'s reset. To lock it out, make a new password for its person.')) { await safe(() => bridge.call('link:unassign', d.unassign)); load(); } return; }
   const a = d.a; if (!a) return;
   b.disabled = true;
   try {
-    if (a === 'team') await safe(() => api.call('link:openTeam'));
-    if (a === 'web') await safe(() => api.call('link:openPhonesPage'));
-    if (a === 'report') { const r = await safe(() => api.call('link:report')); if (r) toast(r.ok ? 'Sent to Riyeser Link.' : r.error); }
+    if (a === 'reload') { renderLoading(); return; }
+    if (a === 'team') await safe(() => bridge.call('link:openTeam'));
+    if (a === 'web') await safe(() => bridge.call('link:openPhonesPage'));
+    if (a === 'report') { const r = await safe(() => bridge.call('link:report')); if (r) toast(r.ok ? 'Sent to Riyeser Link.' : r.error); }
     if (a === 'setupopen') { setupOpen = !setupOpen; renderSetup(); }
     if (a === 'step-signin') { showTab('settings'); const em = $('#em'); if (em) em.focus(); }
     if (a === 'step-addphone') { const dd = $('#addphone'); dd.open = true; dd.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     if (a === 'step-found') { const fd = $('#found'); if (fd) fd.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
     if (a === 'hand') { const box = $('#manualbox'); box.hidden = !box.hidden; if (!box.hidden) { renderHand(); box.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#manualwho').focus(); } }
     if (a === 'addphone') { const dd = $('#addphone'); dd.open = true; dd.scrollIntoView({ behavior: 'smooth', block: 'start' }); $('#mac').focus(); }
-    if (a === 'recheck') { await safe(() => api.call('link:recheck')); toast(S && S.state === 'running' ? 'Riyeser Link Office is on.' : 'Checked.'); }
-    if (a === 'sync') { const r = await safe(() => api.call('link:sync')); if (r) toast(r.status === 'synced' ? `Brought in ${r.people} people.` : (r.error || r.why)); }
-    if (a === 'signout') await safe(() => api.call('link:signOut'));
-    if (a === 'firewall') { const ok = await safe(() => api.call('link:firewall')); toast(ok ? 'Phones are allowed through the firewall.' : 'The firewall rule wasn\'t added. Try again and choose Yes when Windows asks.'); }
-    if (a === 'dismissip') await safe(() => api.call('link:dismissIp'));
+    if (a === 'recheck') { await safe(() => bridge.call('link:recheck')); toast(S && S.state === 'running' ? 'Riyeser Link Office is on.' : 'Checked.'); }
+    if (a === 'sync') { const r = await safe(() => bridge.call('link:sync')); if (r) toast(r.status === 'synced' ? `Brought in ${r.people} people.` : (r.error || r.why)); }
+    if (a === 'signout') await safe(() => bridge.call('link:signOut'));
+    if (a === 'firewall') { const ok = await safe(() => bridge.call('link:firewall')); toast(ok ? 'Phones are allowed through the firewall.' : 'The firewall rule wasn\'t added. Try again and choose Yes when Windows asks.'); }
+    if (a === 'dismissip') await safe(() => bridge.call('link:dismissIp'));
     if (a === 'reserve') reserveHelper();
-    if (a === 'recheckaddr') { const n = await safe(() => api.call('link:recheckAddress')); if (n) toast(`Checked: this PC is ${S.host}${n.router ? ` (${n.router})` : ''}.`); }
-    if (a === 'undofixed') { const r = await safe(() => api.call('link:undoFixed')); if (r) toast(r.ok ? 'Back on automatic.' : 'Nothing was changed.'); }
-    if (a === 'export') { const f = await safe(() => api.call('link:export')); if (f) toast('Settings saved. Keep the file safe: it holds the phones\' passwords.'); }
-    if (a === 'import') { const r = await safe(() => api.call('link:import')); if (r) toast(`Imported ${r.people} people, ${r.groups} groups and ${r.phones} phones.`); }
-    if (a === 'logs') await safe(() => api.call('link:openLogs'));
-    if (a === 'backupnow') { const f = await safe(() => api.call('backup:now')); if (f) toast(`Backed up: ${f.split(/[\\/]/).pop()}`); }
-    if (a === 'backuprestore') await safe(() => api.call('backup:restore'));
-    if (a === 'backupfolder') await safe(() => api.call('backup:folder'));
+    if (a === 'recheckaddr') { const n = await safe(() => bridge.call('link:recheckAddress')); if (n) toast(`Checked: this PC is ${S.host}${n.router ? ` (${n.router})` : ''}.`); }
+    if (a === 'undofixed') { const r = await safe(() => bridge.call('link:undoFixed')); if (r) toast(r.ok ? 'Back on automatic.' : 'Nothing was changed.'); }
+    if (a === 'export') { const f = await safe(() => bridge.call('link:export')); if (f) toast('Settings saved. Keep the file safe: it holds the phones\' passwords.'); }
+    if (a === 'import') { const r = await safe(() => bridge.call('link:import')); if (r) toast(`Imported ${r.people} people, ${r.groups} groups and ${r.phones} phones.`); }
+    if (a === 'logs') await safe(() => bridge.call('link:openLogs'));
+    if (a === 'backupnow') { const f = await safe(() => bridge.call('backup:now')); if (f) toast(`Backed up: ${f.split(/[\\/]/).pop()}`); }
+    if (a === 'backuprestore') await safe(() => bridge.call('backup:restore'));
+    if (a === 'backupfolder') await safe(() => bridge.call('backup:folder'));
   } finally { b.disabled = false; load(); }
 });
 document.addEventListener('change', async (e) => {
   const t = e.target;
-  if (t.dataset.dnd) { await safe(() => api.call('link:dnd', t.dataset.dnd, t.checked)); load(); }
-  if (t.id === 'manualwho') { hand = t.value ? { ext: t.value, details: await safe(() => api.call('link:manual', t.value)), reveal: false } : null; renderHand(); }
-  if (t.id === 'adapter') { await safe(() => api.call('link:adapter', t.value)); load(); }
-  if (t.name === 'pmode') { const n = await safe(() => api.call('link:phoneAddress', t.value)); if (n) toast(n.useName ? `Desk phones now get ${n.server}. They pick it up as they restart.` : `Desk phones now get ${n.server}.`); load(); }
-  if (t.id === 'sww') await safe(() => api.call('link:startWithWindows', t.checked));
-  if (t.id === 'pub') await safe(() => api.call('link:allowPublic', t.checked));
+  if (t.dataset.dnd) { await safe(() => bridge.call('link:dnd', t.dataset.dnd, t.checked)); load(); }
+  if (t.id === 'manualwho') { hand = t.value ? { ext: t.value, details: await safe(() => bridge.call('link:manual', t.value)), reveal: false } : null; renderHand(); }
+  if (t.id === 'adapter') { await safe(() => bridge.call('link:adapter', t.value)); load(); }
+  if (t.name === 'pmode') { const n = await safe(() => bridge.call('link:phoneAddress', t.value)); if (n) toast(n.useName ? `Desk phones now get ${n.server}. They pick it up as they restart.` : `Desk phones now get ${n.server}.`); load(); }
+  if (t.id === 'sww') await safe(() => bridge.call('link:startWithWindows', t.checked));
+  if (t.id === 'pub') await safe(() => bridge.call('link:allowPublic', t.checked));
 });
 document.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (e.target.id === 'personform') {
-    const r = await safe(() => api.call('link:addPerson', $('#pname').value, $('#pext').value.trim() || null));
+    const r = await safe(() => bridge.call('link:addPerson', $('#pname').value, $('#pext').value.trim() || null));
     if (r) { toast(`${r.name} is extension ${r.ext}.`); busy = false; load(); }
   }
   if (e.target.id === 'macform') {
     const ext = $('#macwho').value; if (!ext) { toast('Choose who the phone is for.'); return; }
-    const r = await safe(() => api.call('link:assign', $('#mac').value, ext));
+    const r = await safe(() => bridge.call('link:assign', $('#mac').value, ext));
     if (r) { $('#mac').value = ''; toast('Added. Turn the phone on (or restart it) and it sets itself up.'); load(); }
   }
   if (e.target.id === 'fixedform') {
-    const r = await safe(() => api.call('link:fixedAddress', $('#fixedip').value.trim()));
+    const r = await safe(() => bridge.call('link:fixedAddress', $('#fixedip').value.trim()));
     if (r) toast(r.ok ? `This PC now keeps ${r.address}.` : r.why === 'in-use' ? 'Another device already uses that address. Nothing was changed.' : r.why === 'no-router' ? 'The router couldn\'t be reached with that address, so it went back to automatic.' : 'Nothing was changed.');
     load();
   }
   if (e.target.id === 'signin') {
-    const r = await safe(() => api.call('link:signIn', $('#em').value, $('#pw').value));
+    const r = await safe(() => bridge.call('link:signIn', $('#em').value, $('#pw').value));
     if (r) toast(r.status === 'synced' ? `Signed in. Brought in ${r.people} people.` : 'Signed in.');
     load();
   }
 });
 try { const t = localStorage.getItem('link.tab'); if (t && document.querySelector(`[data-pane="${t}"]`)) showTab(t); } catch { /* the Phones tab */ }
+renderLoading();
 load();

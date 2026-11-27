@@ -230,6 +230,17 @@ These are stored in `link_offices` (new columns, `team-chat.sql`). The Phones pa
 
 **The firewall rule** now also opens UDP 5353 (riyeser-office.local) for office addresses. A rule from before 1.2.0 shows **Update the firewall rule** on the status screen.
 
+## The status screen always starts (1.2.1)
+
+1.2.0's window stopped before it drew anything: the tabs didn't switch, the status bar at the top showed only its coloured edge, and the two cards under the tabs stayed as empty grey bars. The window's script declared its own `api` while the preload already puts a fixed `api` on the window, which Electron rejects as a script error. 1.2.1 fixes that, and the screen no longer depends on any one answer:
+
+- the tabs work straight away; the top bar says **Starting Riyeser Link Office…** until the phone system answers;
+- if it doesn't answer (or answers with an error), the top bar says so with **Try again**, and it keeps asking by itself;
+- each part of the screen is drawn on its own, so a problem in one shows a short note there and the rest still fills in;
+- empty boxes are hidden rather than shown as grey bars.
+
+`test/link-ui-init.test.js` runs the real window scripts with a backend that works, fails and never answers.
+
 ## Security
 
 - **Office network only.** Phones can only connect, and settings can only be fetched, from private addresses. An advanced setting allows others (not recommended).
