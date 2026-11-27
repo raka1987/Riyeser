@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}Estimates{% endblock %}
+{% block content %}
+<div class="est-head"><div><h1>Estimates</h1><p class="sub">Measure a job, pick a trade template, check the price and send the quote.</p></div>
+{% if can('sales', 2) and not read_only %}<a class="btn pri big" href="{{ url_for('estimate.new') }}">+ New estimate</a>{% endif %}</div>
+{% if total == 0 and not q %}
+<div class="card"><h2 style="margin-top:0">Your first estimate in three steps</h2>
+<div class="empty-steps">
+  <div><span class="em">📏</span><b>1. Measure</b>Type in sizes from your tape or laser, draw on a plan or photo, or draw on the map.</div>
+  <div><span class="em">🧰</span><b>2. Pick a trade</b>Roofing, fencing, painting, tiling and more turn the sizes into priced lines, with waste and pack sizes.</div>
+  <div><span class="em">📨</span><b>3. Send the quote</b>Check the price and your profit, then email or print the quote. Accepted? Make the invoice or job later.</div>
+</div>
+{% if can('sales', 2) and not read_only %}<a class="btn pri big" href="{{ url_for('estimate.new') }}">Start an estimate</a>{% endif %}
+<p class="muted small" style="margin-top:12px">Set your units, currency and tax name first in <a href="{{ url_for('estimate.settings') }}">Settings</a>, and your prices in <a href="{{ url_for('estimate.templates') }}">Templates</a>.</p></div>
+{% else %}
+<form class="filters" method="get" role="search">
+  <div style="flex:1;min-width:200px"><label for="q">Search</label><input id="q" name="q" value="{{ q }}" placeholder="Job, customer, address or quote number"></div>
+  <div><label for="sort">Sort</label><select id="sort" name="sort" onchange="this.form.submit()">{% for k, v in sorts.items() %}<option value="{{ k }}" {{ 'selected' if k == sort }}>{{ v[0] }}</option>{% endfor %}</select></div>
+  <input type="hidden" name="st" value="{{ st }}"><button class="btn">Search</button>
+</form>
+<div class="chips">{% for k, label in filters %}<a class="chip{{ ' on' if st == k }}" href="{{ url_for('estimate.index', st=k, q=q, sort=sort) }}">{{ label }} <small>{{ total if not k else counts.get(k, 0) }}</small></a>{% endfor %}</div>
+<div class="est-list">
+{% for r in rows %}
+  <div class="est-row" data-id="{{ r.id }}">
+    <div><a class="t" href="{{ url_for('estimate.measure' if r.method else 'estimate.how', tid=r.id) }}">{{ r.title }}</a> <span class="st {{ r.status }}">{{ r.status_label }}</span>
+      <div class="m">{{ r.cname or 'No customer yet' }}{% if r.address %} · {{ r.address }}{% endif %} · changed {{ r.updated_at|mdate }}{% if r.qnum %} · quote {{ r.qnum }} {{ r.qtotal|cur }}{% endif %}</div></div>
+    <div class="r">
+      {% if r.document_id %}<a class="btn sm" href="{{ url_for('estimate.send', tid=r.id) }}">Quote</a>{% else %}<a class="btn sm" href="{{ url_for('estimate.measure' if r.method else 'estimate.how', tid=r.id) }}">Carry on</a>{% endif %}
+      {% if can('sales', 2) and not read_only %}<form class="inline" method="post" action="{{ url_for('estimate.duplicate', tid=r.id) }}"><button class="btn sm" title="Copy the sizes, plans and template into a new estimate">Duplicate</button></form>{% endif %}
+    </div>
+  </div>
+{% else %}<p class="muted">No estimates match.</p>{% endfor %}
+</div>
+{% endif %}
+{% endblock %}

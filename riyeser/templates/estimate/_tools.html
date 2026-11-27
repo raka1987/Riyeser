@@ -1,0 +1,25 @@
+{# Drawing tools shared by the plan and the map: only what's needed, big buttons, undo and redo. #}
+{% if not read_only %}
+<div class="toolbar" id="tools" role="toolbar" aria-label="Drawing tools">
+  <button class="tool on" data-tool="pan" type="button" title="Move around">✋ Move</button>
+  <button class="tool" data-tool="shape" type="button" title="Draw an area: tap each corner">▭ Area</button>
+  <button class="tool" data-tool="line" type="button" title="Draw a length: tap along it">📏 Length</button>
+  <button class="tool" data-tool="markers" type="button" title="Tap each thing to count it">#️⃣ Count</button>
+  <button class="tool" data-tool="roof" type="button" title="Draw a roof face, then give its pitch">🏚️ Roof face</button>
+  <button class="tool" data-tool="fence" type="button" title="Draw a fence line: posts are worked out">🚧 Fence</button>
+  <button class="tool" data-tool="hole" type="button" title="Cut a hole out of the last area (a pool, a stairwell)">✂️ Cut-out</button>
+  <span style="flex:1"></span>
+  <button class="tool" id="undo" type="button" title="Undo (Ctrl+Z)">↶ Undo</button>
+  <button class="tool" id="redo" type="button" title="Redo (Ctrl+Y)">↷ Redo</button>
+  <button class="tool" id="finish" type="button" title="Finish the shape (double-tap)">✔ Finish</button>
+</div>
+<div class="toolbar" id="drawopts">
+  <input id="d_label" placeholder="Name (e.g. North face)" style="width:180px" aria-label="Name">
+  <input id="d_group" placeholder="Group" style="width:110px" list="groups" aria-label="Group">
+  <span id="swatches" role="radiogroup" aria-label="Colour"></span>
+  <span data-for="roof" hidden><label class="small" style="display:inline;margin:0 4px">Pitch</label><input id="d_pitch" inputmode="decimal" placeholder="deg" style="width:70px" aria-label="Pitch in degrees"> or <input id="d_rise" inputmode="decimal" placeholder="rise" style="width:60px" aria-label="Rise">/<input id="d_run" inputmode="decimal" placeholder="12" style="width:50px" aria-label="Run"></span>
+  <span data-for="fence" hidden><label class="small" style="display:inline;margin:0 4px">Post spacing</label><input id="d_spacing" inputmode="decimal" style="width:70px" aria-label="Post spacing"> <label class="small" style="display:inline;margin:0 4px">Gates</label><input id="d_gates" inputmode="numeric" style="width:50px" aria-label="Gates"> x <input id="d_gatew" inputmode="decimal" placeholder="width" style="width:70px" aria-label="Gate width"></span>
+  <span data-for="shape line markers" hidden><label class="small" style="display:inline;margin:0 4px">Count as</label><select id="d_as" style="width:auto" aria-label="Also count it as"></select></span>
+</div>
+<div class="panel" id="edges" hidden><b>Roof edges</b> <span class="small muted">Say what each edge is: ridges, hips, valleys, eaves (gutters) and rakes (barges) are priced by length.</span><div id="edgelist"></div><button class="btn pri" type="button" id="edgesave">Save edges</button></div>
+{% endif %}

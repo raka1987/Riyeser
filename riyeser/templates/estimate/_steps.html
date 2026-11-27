@@ -1,0 +1,10 @@
+{# The progress bar: one step per screen; every step you've reached can be opened again. #}
+<ol class="est-steps" aria-label="Steps">
+{% for n, key, name in steps %}
+  <li class="{{ 'now' if n == step else ('done' if n < step else '') }}">
+  {% if t and (n <= 4 or t.templates) or (not t and n == 1) %}<a href="{{ url_for('estimate.' ~ key, tid=t.id) if t else url_for('estimate.new') }}"{% if n == step %} aria-current="step"{% endif %}><b>{{ n }}</b><span class="lbl">{{ name }}</span></a>
+  {% else %}<span><b>{{ n }}</b><span class="lbl">{{ name }}</span></span>{% endif %}
+  </li>
+{% endfor %}
+</ol>
+{% if read_only %}<div class="note-est">This estimate is read-only: the free trial has ended. You can still look at it, print it and send its quote.</div>{% endif %}

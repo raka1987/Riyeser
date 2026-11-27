@@ -382,6 +382,8 @@ def migrate(db):
     _card_terminal_schema(db)  # POS card payments: terminal attempts, their history, split tenders
     from .listing import _ensure_prefs
     _ensure_prefs(db)  # each person's sort and filters on each list
+    from .measure.store import ensure as _estimate_tables
+    _estimate_tables(db)  # Riyeser Estimate: measurements, plans and trade templates
     db.commit()
 
 
@@ -505,6 +507,10 @@ INVOICES_APP = {"name": "Invoices", "title": "Invoices", "app": "Riyeser Invoice
 # The fifth: bookings and scheduling for trades jobs, appointments and restaurant tables.
 BOOKINGS_APP = {"name": "Bookings", "title": "Bookings", "app": "Riyeser Bookings", "price": f"{PRICES['bookings']} a month"}
 
+# The sixth: measure a job (by hand, on a plan or photo, on the map) and turn it into a quote. Free for 90 days from
+# its first use; the price after that is still to be announced (so there's no PRICE_USD entry for it yet).
+ESTIMATE_APP = {"name": "Estimate", "title": "Estimate", "app": "Riyeser Estimate", "price": "Free for 90 days, price to be announced"}
+
 
 
 def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition=None):
@@ -528,8 +534,8 @@ def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition=N
     db.commit()
     migrate(db)
     if edition not in EDITIONS:
-        from .edition import app_edition, is_invoices_app, is_bookings_app
-        edition = app_edition() or ("basic" if is_invoices_app() or is_bookings_app() else "enterprise")
+        from .edition import app_edition, is_invoices_app, is_bookings_app, is_estimate_app
+        edition = app_edition() or ("basic" if is_invoices_app() or is_bookings_app() or is_estimate_app() else "enterprise")
     db.execute("UPDATE company SET edition=? WHERE id=1", (edition,))
     db.commit()
 

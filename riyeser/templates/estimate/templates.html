@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block title %}Templates{% endblock %}
+{% block content %}
+<div class="est-head"><div><h1>Trade templates</h1><p class="sub">Each template turns sizes into quote lines: a rate per unit, waste %, pack sizes and a minimum charge. Riyeser's templates are starting points: check the waste, coverage and pack sizes for your materials, and type in your own prices.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('estimate.price_list') }}">Import a supplier price list</a>{% if not read_only %}<a class="btn pri" href="{{ url_for('estimate.template_edit') }}">+ New template</a>{% endif %}</div></div>
+<div class="tpl-cards">
+{% for r in rows %}<a class="choice" href="{{ url_for('estimate.template_edit', tpl=r.id) }}"><span class="em" aria-hidden="true">{{ r.icon }}</span><b>{{ r.name }}</b><small>{{ r.notes or '' }}</small><small>{{ r.n }} lines · {{ 'imperial' if r.units == 'imperial' else 'metric' }}{% if r.shipped %} · Riyeser's starting template{% endif %}{% if r.unpriced %} · <span style="color:var(--warn)">{{ r.unpriced }} without a price</span>{% endif %}</small></a>{% endfor %}
+</div>
+{% endblock %}

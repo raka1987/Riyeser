@@ -77,7 +77,7 @@ def collapse_pay(rows, show=None):
 
 # Actions that remove or cancel something: they need Full.
 DESTRUCTIVE = {"documents.void", "documents.delete", "documents.payment_void", "banking.feed_delete", "core.reverse",
-               "payroll.void_run", "pos.cancel_order"}
+               "payroll.void_run", "pos.cancel_order", "estimate.delete", "estimate.template_delete"}
 # pos.void and pos.refund check for themselves: staff may do them with a manager's PIN or card.
 REPORT_AREA = {
     "aged_receivables": "sales", "sales_customer": "sales", "sales_item": "sales",
@@ -187,6 +187,8 @@ def area_of(endpoint, view_args, args, db):
         return "payroll"
     if bp == "expenses":
         return "expenses"
+    if bp == "estimate":   # Riyeser Estimate: estimates and the quotes they make are sales; its settings are setup
+        return "setup" if endpoint == "estimate.settings" and request.method == "POST" else "sales"
     if bp == "email":
         return "setup"
     if bp == "backups":

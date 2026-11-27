@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block title %}Quotes{% endblock %}
+{% block content %}
+<div class="est-head"><div><h1>Quotes</h1><p class="sub">The quotes your estimates made. They're ordinary Riyeser quotes, so they also show in Riyeser Invoices, Bookings and Accounting, where they become invoices and jobs.</p></div></div>
+<div class="tbl"><table><thead><tr><th>Quote</th><th>Date</th><th>Customer</th><th>Job</th><th>Status</th><th class="n">Total</th></tr></thead><tbody>
+{% for r in rows %}<tr class="click" onclick="location.href='{{ url_for('documents.view', doc_id=r.id) }}'"><td><a href="{{ url_for('documents.view', doc_id=r.id) }}">{{ r.number }}</a></td><td>{{ r.date|mdate }}</td><td>{{ r.cname }}</td><td><a href="{{ url_for('estimate.send', tid=r.tid) }}">{{ r.title }}</a></td><td><span class="st {{ 'sent' if r.qstate == 'waiting' else r.qstate }}">{{ {'waiting': 'Waiting', 'accepted': 'Accepted', 'declined': 'Declined', 'expired': 'Expired'}.get(r.qstate, r.qstate|title) }}</span></td><td class="n">{{ r.total|cur }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No quotes yet. Make one on step 5 of an estimate.</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}

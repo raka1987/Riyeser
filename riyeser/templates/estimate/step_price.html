@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}Price · {{ t.title }}{% endblock %}
+{% block content %}
+{% include "estimate/_steps.html" %}
+<div class="est-head"><div><h1>Review the price</h1><p class="sub">{{ t.title }}{% if t.cname %} · {{ t.cname }}{% endif %}. Change a rate or the waste here for this job; tick the box to keep the change in the template too.</p></div></div>
+{% if not p.lines %}<div class="card"><p>No lines yet. {% if not p.templates %}<a href="{{ url_for('estimate.template', tid=t.id) }}">Choose a template</a>.{% else %}The template doesn't use what you've measured (for example, a painting template needs a room or a wall area). <a href="{{ url_for('estimate.measure', tid=t.id) }}">Measure</a> or <a href="{{ url_for('estimate.template', tid=t.id) }}">choose another template</a>.{% endif %}</p></div>
+{% else %}
+{% if p.missing_rates %}<div class="flash warn">{{ p.missing_rates|length }} line{{ '' if p.missing_rates|length == 1 else 's' }} {{ 'has' if p.missing_rates|length == 1 else 'have' }} no price yet. Type a rate below (or set your prices in <a href="{{ url_for('estimate.templates') }}">Templates</a>).</div>{% endif %}
+{% if qst == 'accepted' %}<div class="flash warn">Quote {{ doc.number }} has been accepted, so it won't change. Duplicate the estimate to quote again.</div>{% endif %}
+<form method="post">
+<div class="card">
+{% for sec, lines in p.sections %}
+<div class="price-sec"><h3>{{ sec }}</h3>
+<div class="tbl"><table class="lines stack"><thead><tr><th>Line</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Waste %</th><th class="n">Amount</th></tr></thead><tbody>
+{% for l in lines %}{% set o = (adj.lines or {}).get(l.tl_id|string) or {} %}
+<tr><td>{{ l.description }}<div class="small muted">{{ l.template }}</div></td><td class="n" data-l="Qty">{{ '%g'|format(l.qty) }} {{ l.unit_label }}</td>
+<td class="n" data-l="Rate">{% if l.tl_id and not read_only %}<input name="rate_{{ l.tl_id }}" value="{{ (o.rate|cents) if o.rate is not none and o.rate is defined else '' }}" placeholder="{{ (l.unit_price|cents) if l.unit_price else 'rate' }}" inputmode="decimal" style="width:96px;text-align:right" aria-label="Rate for {{ l.description }}">{% else %}{{ l.unit_price|cur }}{% endif %}</td>
+<td class="n"{% if l.basis != 'fixed' %} data-l="Waste %"{% endif %}>{% if l.tl_id and l.basis != 'fixed' and not read_only %}<input name="waste_{{ l.tl_id }}" value="{{ o.waste_pct if o.waste_pct is not none and o.waste_pct is defined else '' }}" placeholder="—" inputmode="decimal" style="width:64px;text-align:right" aria-label="Waste for {{ l.description }}">{% endif %}</td>
+<td class="n" data-l="Amount">{{ (l.qty * l.unit_price)|round|int|cur }}</td></tr>
+{% endfor %}</tbody></table></div></div>
+{% endfor %}
+<table class="totals"><tr><td>Total (before {{ company.tax_name or 'tax' }})</td><td class="n">{{ p.total|cur }}</td></tr></table>
+{% if not read_only %}<div class="fields" style="margin-top:14px"><div><label for="markup">Markup on every line (%)</label><input id="markup" name="markup_pct" value="{{ adj.markup_pct or '' }}" inputmode="decimal" placeholder="0"></div>
+<div style="align-self:end"><label class="check"><input type="checkbox" name="save_to_template" value="1"> Keep rate and waste changes in the template</label></div>
+<div style="align-self:end"><button class="btn" name="go" value="save">Update the price</button></div></div>{% endif %}
+</div>
+<div class="card"><h2 style="margin-top:0">Your profit <span class="only-you">Only you see this</span></h2>
+<div class="profit"><div>Price<b>{{ p.profit.sell|cur }}</b></div><div>Your costs<b>{{ p.profit.cost|cur }}</b></div><div>Profit<b>{{ p.profit.profit|cur }}</b></div><div>Margin<b>{{ p.profit.margin_pct }}%</b></div></div>
+{% if p.profit.unknown %}<p class="small muted">No cost entered for {{ p.profit.unknown|length }} line{{ '' if p.profit.unknown|length == 1 else 's' }} (counted as all profit). Add your costs in the template, or link a stock item.</p>{% endif %}</div>
+<div class="est-foot"><a class="btn" href="{{ url_for('estimate.template', tid=t.id) }}">← Template</a>
+{% if not read_only and qst != 'accepted' %}<button class="btn pri big" name="go" value="quote">{{ 'Update quote ' ~ doc.number if doc else 'Make the quote' }} →</button>{% elif doc %}<a class="btn pri big" href="{{ url_for('estimate.send', tid=t.id) }}">Next: send →</a>{% endif %}</div>
+</form>
+{% if not read_only %}<form method="post" action="{{ url_for('estimate.template_from_estimate', tid=t.id) }}" style="margin-top:10px"><button class="btn sm" title="A new template with this job's rates, waste and markup">Save these prices as a template for next time</button></form>{% endif %}
+{% endif %}
+{% endblock %}

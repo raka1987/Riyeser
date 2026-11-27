@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Send · {{ t.title }}{% endblock %}
+{% block content %}
+{% include "estimate/_steps.html" %}
+<div class="est-head"><div><h1>Send the quote</h1><p class="sub">Quote <a href="{{ url_for('documents.view', doc_id=doc.id) }}">{{ doc.number }}</a> for {{ t.cname }} · {{ doc.total|cur }} including {{ company.tax_name or 'tax' }} · <span class="st {{ status }}">{{ {'draft': 'Draft', 'sent': 'Sent', 'accepted': 'Accepted', 'declined': 'Declined', 'expired': 'Expired'}[status] }}</span>{% if doc.valid_until %} · valid until {{ doc.valid_until|mdate }}{% endif %}</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('estimate.quote_pdf', tid=t.id, download=1) }}">⬇ Download PDF</a><a class="btn" href="{{ url_for('estimate.quote_pdf', tid=t.id) }}" target="_blank" rel="noopener">🖨 Print</a></div></div>
+<div class="mwrap">
+<div><iframe class="pdfprev" src="{{ url_for('estimate.quote_pdf', tid=t.id) }}" title="Quote {{ doc.number }}"></iframe></div>
+<div>
+<form class="card" method="post" action="{{ url_for('documents.email', doc_id=doc.id) }}"><h2 style="margin-top:0">Email it</h2>
+<label for="to">To</label><input id="to" name="to" type="email" value="{{ cemail or '' }}" placeholder="customer@example.com" class="big">
+<label for="msg" style="margin-top:8px">Message (optional)</label><textarea id="msg" name="message" rows="3" placeholder="We'll write a short note with the quote attached if you leave this empty."></textarea>
+<button class="btn pri big" style="margin-top:10px;width:100%;justify-content:center">Send by email</button></form>
+<div class="card"><form method="post" action="{{ url_for('estimate.mark_sent', tid=t.id) }}"><button class="btn wrap" style="width:100%;justify-content:center">I gave it to them another way: mark as sent</button></form>
+<form method="post" action="{{ url_for('estimate.summary_toggle', tid=t.id) }}" style="margin-top:10px"><label class="check"><input type="checkbox" name="on" value="1" {{ 'checked' if t.summary_on_pdf }} onchange="this.form.submit()"{{ ' disabled' if read_only }}> Add a measurements page (with your drawing) to the PDF</label></form></div>
+<div class="card"><h2 style="margin-top:0">When they say yes</h2>
+<p class="small">Open the quote and press <b>Mark accepted</b>. Then make the invoice in Riyeser Invoices or Accounting{% if bookings %}, or a job in Riyeser Bookings{% endif %}: they open the same company file, so the quote is already there.</p>
+<a class="btn" href="{{ url_for('documents.view', doc_id=doc.id) }}">Open quote {{ doc.number }}</a></div>
+</div></div>
+<div class="est-foot"><a class="btn" href="{{ url_for('estimate.price', tid=t.id) }}">← Price</a><a class="btn" href="{{ url_for('estimate.index') }}">Done: back to estimates</a></div>
+{% endblock %}

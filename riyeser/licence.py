@@ -35,7 +35,12 @@ STALE_MESSAGE = ("Riyeser couldn't check your licence for 30 days: connect to th
                  "Nothing has been deleted.")
 # Which online licence module each app is: Accounting Basics, Plus (which includes its payroll pages), POS, Bookings.
 # Riyeser Invoices is free, so it has no module.
-MODULES = {"basic": "basic", "enterprise": "plus", "plus": "plus", "pos": "pos", "bookings": "bookings"}
+MODULES = {"basic": "basic", "enterprise": "plus", "plus": "plus", "pos": "pos", "bookings": "bookings",
+           "estimate": "estimate"}
+# Programs whose 90-day trial starts the first time they're used on this PC (not when Riyeser Central first ran),
+# so a business that has had Accounting for a year still gets its full Riyeser Estimate trial. Riyeser online
+# starts the same trial when Central first reports the program on one of the business's PCs (team-chat.sql).
+FIRST_USE_MODULES = {"estimate"}
 _AUTO = object()
 
 
@@ -113,12 +118,23 @@ def status(now=None, path=None, product=_AUTO):
     d = _read(path)
     module = module_for_app() if product is _AUTO else MODULES.get(product, product)
     online = d.get("online")
+    first_use = module in FIRST_USE_MODULES
     if isinstance(online, dict) and module:
         ev = S.check(riyeser_dir, own_dir(), now, lic_file=path)
         if ev["state"] in ("trusted", "unsigned"):
+            m = ((ev["plan"] or {}).get("modules") or {}).get(module)
+            if first_use and (not isinstance(m, dict) or (m.get("status") == "trial" and not m.get("trial_ends"))):
+                # not on the plan yet (or its trial hasn't started online): this PC's first-use trial decides
+                return dict(first_use_status(module, now, riyeser_dir), source="local")
             return _online_status(ev["plan"], module, now, ev)
         if ev["state"] == "invalid":
             # no licence: a PC that has had a real plan from Riyeser gets no new local trial
+            if first_use:
+                t = first_use_status(module, now, riyeser_dir)
+                if t["mode"] == "trial" and not S.local_trial(riyeser_dir, own_dir(), now, write=False, lic_file=path)["linked"]:
+                    return dict(t, message=ev["message"], source="local")
+                return {"mode": "expired", "untrusted": ev["problem"], "message": ev["message"], "buy_url": BUY_URL,
+                        "extra_companies": 0, "module": module, "source": "online"}
             t = S.local_trial(riyeser_dir, own_dir(), now, lic_file=path)
             if not t["linked"] and t["active"]:
                 return {"mode": "trial", "days_left": t["days_left"], "buy_url": BUY_URL, "message": ev["message"], "source": "local"}
@@ -133,6 +149,8 @@ def status(now=None, path=None, product=_AUTO):
         if lic.get("status") == "active" and (not expires or expires > now) and fresh:
             return {"mode": "licensed", "plan": lic.get("plan"), "extra_companies": int(lic.get("extraCompanies") or 0)}
         return {"mode": "expired", "buy_url": BUY_URL}
+    if first_use:
+        return first_use_status(module, now, riyeser_dir)
     # The trial: the earlier of licence.json's trialStart and this app's own marker. Before licences are signed, a PC
     # where Riyeser Central never started one shows nothing, as before; after, the trial starts now.
     t = S.local_trial(riyeser_dir, own_dir(), now, start_now=bool(S.built_in_key()), lic_file=path)
@@ -158,3 +176,68 @@ def company_allowance(now=None, path=None, product=_AUTO):
     if st["mode"] == "licensed":
         return 1 + st.get("extra_companies", 0)
     return 1
+
+
+# ---------------------------------------------------------------- first-use trials (Riyeser Estimate)
+def _trial_marker(folder, module):
+    return os.path.join(folder, f".riyeser-trial-{module}.json")
+
+
+def _first_use_dirs(riyeser_dir=None):
+    out = []
+    for x in (own_dir(), riyeser_dir or os.path.dirname(licence_file())):
+        if x and x not in out:
+            out.append(x)
+    return out
+
+
+def first_use_status(module, now=None, riyeser_dir=None):
+    """{'mode': 'trial'|'expired', 'days_left', 'started'}: 90 days from this program's first use on this PC.
+    Kept in two places (this program's own folder and the Riyeser folder): the earliest start and the latest time seen
+    count, so deleting one file or putting the clock back gives no days back. Not started yet: 90 days left."""
+    import math
+    now = now or datetime.now(timezone.utc)
+    t = now.timestamp()
+    starts, seen = [], [t]
+    for x in _first_use_dirs(riyeser_dir):
+        d = _read(_trial_marker(x, module))
+        s, l = _when(d.get("firstUse")), d.get("latest")
+        if s:
+            starts.append(s.timestamp())
+        if isinstance(l, (int, float)):
+            seen.append(float(l))
+    if not starts:
+        return {"mode": "trial", "days_left": TRIAL_DAYS, "buy_url": BUY_URL, "started": False}
+    ends = min(starts) + TRIAL_DAYS * 86400
+    latest = max(seen)
+    if latest < ends:
+        return {"mode": "trial", "days_left": max(0, math.ceil((ends - latest) / 86400)), "buy_url": BUY_URL, "started": True}
+    return {"mode": "expired", "buy_url": BUY_URL, "started": True}
+
+
+def start_first_use(module, now=None, riyeser_dir=None):
+    """The program is being used: start its trial on this PC if it hasn't started (and note the latest time seen)."""
+    now = now or datetime.now(timezone.utc)
+    t = now.timestamp()
+    found = []
+    dirs = _first_use_dirs(riyeser_dir)
+    for x in dirs:
+        d = _read(_trial_marker(x, module))
+        found.append(d)
+    starts = [s.timestamp() for s in (_when(d.get("firstUse")) for d in found) if s]
+    start = min(starts + [t])
+    latest = max([t] + [float(d["latest"]) for d in found if isinstance(d.get("latest"), (int, float))])
+    data = {"module": module, "firstUse": datetime.fromtimestamp(start, timezone.utc).isoformat(), "latest": latest}
+    for x, old in zip(dirs, found):
+        if old.get("firstUse") == data["firstUse"] and latest - float(old.get("latest") or 0) < 3600:
+            continue   # nothing new (the latest time is written at most once an hour)
+        try:
+            os.makedirs(x, exist_ok=True)
+            f = _trial_marker(x, module)
+            tmp = f + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+            os.replace(tmp, f)
+        except OSError:
+            pass
+    return first_use_status(module, now, riyeser_dir)

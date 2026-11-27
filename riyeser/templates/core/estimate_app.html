@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Riyeser Estimate{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Riyeser Estimate</h1><p class="sub">Measure jobs on a plan, a photo or the map, and turn them into quotes.</p></div></div>
+<div class="card"><p>Estimate is its own app. It opens <b>the same company file</b> as this one, so your customers are already there, and the quotes it makes show here straight away, ready to turn into an invoice{% if product.key != 'invoices' %} or a job{% endif %}.</p>
+<ul><li>Type in sizes: rooms (walls less doors and windows), areas, lengths, counts and hours. Works with a laser measurer that types into the box.</li>
+<li>On a plan or photo: set the scale, then draw lengths, areas and counts.</li>
+<li>On the map: draw roofs (with pitch), fences, driveways and lawns on satellite imagery.</li>
+<li>Trade templates for roofing, fencing, painting, tiling, concreting and more turn the sizes into priced quote lines.</li></ul>
+<p>Free for 90 days from when you first use it. The price after that is still to be announced.</p>
+<a class="btn pri" href="{{ download }}" target="_blank" rel="noopener">⬇ Download Riyeser Estimate</a></div>
+{% endblock %}

@@ -14,10 +14,10 @@
 {% set got = rcv and rcv.received > 0 %}
 {% if not got and not doc.received_at %}<a class="btn" href="{{ url_for('documents.edit', side=doc.side, doc_id=doc.id) }}">Edit</a>{% endif %}
 {% if is_po %}{% if not doc.received_at %}<a class="btn pri" href="{{ url_for('documents.receive_goods', doc_id=doc.id) }}">Receive goods</a>{% endif %}
-{% elif doc.converted_to %}<a class="btn" href="{{ url_for('documents.view', doc_id=doc.converted_to) }}">Converted: open the {{ L.doc|lower }} / order</a>{% elif qstate != 'declined' %}
+{% elif doc.converted_to %}<a class="btn" href="{{ url_for('documents.view', doc_id=doc.converted_to) }}">Converted: open the {{ L.doc|lower }} / order</a>{% elif product.key == 'estimate' %}{% if estimate %}<a class="btn pri" href="{{ url_for('estimate.send', tid=estimate.id) }}">Back to the estimate</a>{% endif %}{% elif qstate != 'declined' %}
 {% if doc.status=='quote' %}<form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="order"><button class="btn">Convert to order</button></form>{% endif %}
 <form method="post" class="inline" action="{{ url_for('documents.convert', doc_id=doc.id) }}"><input type="hidden" name="to" value="open"><button class="btn{{ ' pri' if qstate in (None, 'accepted') }}">{{ 'Make the invoice' if qstate == 'accepted' else 'Convert to ' ~ L.doc|lower }}</button></form>{% endif %}
-{% if qstate == 'accepted' and bookings_on and not job %}<form method="post" class="inline" action="{{ url_for('documents.quote_job', doc_id=doc.id) }}"><button class="btn">Make a booking job</button></form>{% endif %}
+{% if qstate == 'accepted' and bookings_on and not job and product.key != 'estimate' %}<form method="post" class="inline" action="{{ url_for('documents.quote_job', doc_id=doc.id) }}"><button class="btn">Make a booking job</button></form>{% endif %}
 {% if job %}<a class="btn" href="{{ url_for('bookings.job', jid=job.id) }}">Open job J-{{ '%04d'|format(job.id) }}</a>{% endif %}
 {% if lv('sales' if doc.side == 'sale' else 'purchases') >= 3 and not got %}<form method="post" class="inline" action="{{ url_for('documents.delete', doc_id=doc.id) }}" data-confirm="Delete this {{ doc.status }}?"><button class="btn danger">Delete</button></form>{% endif %}
 {% endif %}
@@ -26,6 +26,7 @@
 {% if doc.entry_id %}<a class="btn" href="{{ url_for('core.entry', eid=doc.entry_id) }}">Journal #{{ doc.entry_id }}</a>{% endif %}
 </div></div>
 {% if qstate %}{% include "documents/_quote_status.html" %}{% endif %}
+{% if estimate and product.key == 'estimate' and not doc.converted_to %}<p class="muted small">Make the invoice in Riyeser Invoices or Accounting, or a job in Riyeser Bookings: they open the same company file, so this quote is already there.</p>{% elif estimate and estimate_link %}<p class="muted small">📐 Measured in Riyeser Estimate ({{ estimate.title }}). <a href="{{ url_for('core.estimate_app') }}">Open it in Riyeser Estimate</a> to measure again.</p>{% endif %}
 {% if rcv %}<div class="card"><h3>Receiving</h3><p style="margin:0">{% if doc.received_at %}Finished on {{ doc.received_at[:10] }}: {{ '%g'|format(rcv.received) }} of {{ '%g'|format(rcv.ordered) }} received.{% elif rcv.received %}{{ '%g'|format(rcv.received) }} of {{ '%g'|format(rcv.ordered) }} received so far. Press <b>Receive goods</b> when the rest arrives.{% else %}Nothing received yet. When the delivery comes, press <b>Receive goods</b>: it brings the stock in and makes the bill.{% endif %}</p>
 {% if rcv.bills %}<p class="muted" style="margin:8px 0 0">Bills: {% for b in rcv.bills %}<a href="{{ url_for('documents.view', doc_id=b.id) }}">{{ b.number }}</a>{{ ' (void)' if b.status == 'void' }}{{ ', ' if not loop.last }}{% endfor %}</p>{% endif %}</div>{% endif %}
 {% if source_doc %}<p class="muted">Goods received on purchase order <a href="{{ url_for('documents.view', doc_id=source_doc.id) }}">{{ source_doc.number }}</a>.</p>{% endif %}

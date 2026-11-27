@@ -11,6 +11,8 @@ __version__ = "2.10.1"
 
 
 def create_app(test_config=None):
+    import mimetypes
+    mimetypes.add_type("text/javascript", ".mjs")   # pdf.js (Riyeser Estimate's plans) is an ES module; Windows may not know .mjs
     app = Flask(__name__, instance_relative_config=True)
     app.config.from_mapping(
         SECRET_KEY=os.environ.get("RIYESER_SECRET", "dev-change-me"),
@@ -162,8 +164,11 @@ def create_app(test_config=None):
         from . import companies as co
         acc = session.get("access") or {}
         mine = [c for c in co.all_companies() if c["id"] in acc] if g.get("user") else []
-        from .edition import app_edition, is_pos_app, is_accounting_app, is_invoices_app, is_bookings_app
-        if is_bookings_app():
+        from .edition import app_edition, is_pos_app, is_accounting_app, is_invoices_app, is_bookings_app, is_estimate_app
+        if is_estimate_app():
+            product = {"key": "estimate", "app": dbmod.ESTIMATE_APP["app"], "title": dbmod.ESTIMATE_APP["title"],
+                       "letter": "Es", "cls": "ed-est", "separate": True}
+        elif is_bookings_app():
             product = {"key": "bookings", "app": dbmod.BOOKINGS_APP["app"], "title": dbmod.BOOKINGS_APP["title"],
                        "letter": "Bk", "cls": "ed-book", "separate": True}
         elif is_pos_app():
@@ -178,8 +183,9 @@ def create_app(test_config=None):
                        "title": dbmod.EDITIONS[ed]["title"] if ed else "Riyeser Accounting",
                        "letter": {"basic": "B", "enterprise": "P"}.get(ed, "R"),
                        "cls": {"basic": "ed-basic", "enterprise": "ed-plus"}.get(ed, ""), "separate": bool(app_edition())}
-        product["pos_separate"] = is_accounting_app() or is_invoices_app() or is_bookings_app()
-        product["bookings_separate"] = is_accounting_app() or is_invoices_app() or is_pos_app()  # Accounting builds: the till is in Riyeser POS
+        product["pos_separate"] = is_accounting_app() or is_invoices_app() or is_bookings_app() or is_estimate_app()
+        product["bookings_separate"] = is_accounting_app() or is_invoices_app() or is_pos_app() or is_estimate_app()  # Accounting builds: the till is in Riyeser POS
+        product["estimate_separate"] = app_edition() is not None or is_invoices_app() or is_bookings_app() or is_pos_app()
         return dict(product=product, user=g.get("user"), company=g.get("company"), licence=licence_status() if g.get("user") else None,
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
@@ -194,7 +200,9 @@ def create_app(test_config=None):
         return redirect(request.referrer or url_for("core.dashboard"))
 
     from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help, companies
-    from .views import bookings, backups, email, expenses
+    from .views import bookings, backups, email, expenses, estimate
+    app.register_blueprint(estimate.bp)
+    estimate.register_filters(app)
     app.register_blueprint(expenses.bp)
     app.register_blueprint(auth.bp)
     app.register_blueprint(backups.bp)
@@ -267,7 +275,12 @@ POS_APP_AREAS = ("pos.", "inventory.", "contacts.", "companies.", "help.", "auth
 def _separate_app_redirect(endpoint):
     """Keep each app to its own screens. Riyeser POS shows only the till (and products, customers, users, help);
     Accounting Basics and Plus send the till's screens to Riyeser POS. Both open the same company file."""
-    from .edition import is_pos_app, is_accounting_app, is_invoices_app, is_bookings_app
+    from .edition import is_pos_app, is_accounting_app, is_invoices_app, is_bookings_app, is_estimate_app
+    if is_estimate_app():
+        return _estimate_app_redirect(endpoint)
+    if endpoint.startswith("estimate.") and \
+            (is_bookings_app() or is_invoices_app() or is_pos_app() or is_accounting_app()):
+        return redirect(url_for("core.estimate_app"))
     if is_bookings_app():
         return _bookings_app_redirect(endpoint)
     if is_invoices_app():
@@ -279,7 +292,7 @@ def _separate_app_redirect(endpoint):
             return redirect(url_for("pos.register"))
         if endpoint.startswith("bookings."):
             return redirect(url_for("core.bookings_app"))
-        if endpoint.startswith(POS_APP_AREAS) or endpoint in ("static", "core.bookings_app", "core.today"):
+        if endpoint.startswith(POS_APP_AREAS) or endpoint in ("static", "core.bookings_app", "core.today", "core.estimate_app"):
             return None
         flash("That's part of Riyeser Accounting. Open it in Riyeser Accounting: it uses the same company file.",
               "error")
@@ -295,7 +308,7 @@ def _separate_app_redirect(endpoint):
 # Riyeser Accounting's, and opens there with the same company file.
 INVOICES_APP_ENDPOINTS = ("companies.", "help.", "auth.", "backups.", "email.")
 INVOICES_APP_EXACT = {"static", "core.company", "core.invoices_upgrade", "core.bookings_app", "documents.save_pdf",
-                      "core.dashboard", "core.today"}   # Today is the home screen
+                      "core.dashboard", "core.today", "core.estimate_app"}   # Today is the home screen
 
 
 def _invoices_app_redirect(endpoint):
@@ -320,7 +333,7 @@ def _bookings_app_redirect(endpoint):
     from . import perms
     home = url_for("bookings.calendar")
     if endpoint.startswith(("bookings.", "companies.", "help.", "auth.", "backups.", "email.")) or \
-            endpoint in ("static", "core.company", "core.dashboard", "core.today"):   # Today is the home screen
+            endpoint in ("static", "core.company", "core.dashboard", "core.today", "core.estimate_app"):   # Today is the home screen
         return None
     if endpoint.startswith(("documents.", "contacts.")):
         try:
@@ -332,6 +345,41 @@ def _bookings_app_redirect(endpoint):
     flash("That's part of Riyeser Accounting. It opens the same company file, so your bookings' invoices are already "
           "there.", "error")
     return redirect(home)
+
+# Riyeser Estimate: estimates (measure -> template -> price -> send), its templates and settings, customers, and the
+# quotes it makes (to check, send, print and mark accepted). Invoicing them happens in Invoices, Bookings or Accounting,
+# which open the same company file.
+ESTIMATE_QUOTE_ENDPOINTS = {"documents.view", "documents.email", "documents.save_pdf", "documents.quote_accept",
+                            "documents.quote_decline", "documents.quote_undo", "documents.delete"}
+
+
+def _estimate_app_redirect(endpoint):
+    from . import perms
+    if endpoint.startswith(("estimate.", "companies.", "help.", "auth.", "backups.", "email.")) or \
+            endpoint in ("static", "core.bookings_app", "core.invoices_upgrade"):
+        return None
+    if endpoint in ("core.dashboard", "core.today"):
+        return redirect(url_for("estimate.index"))   # the Estimates list is the home screen
+    if endpoint == "core.company":
+        return redirect(url_for("estimate.settings"))
+    if endpoint in ESTIMATE_QUOTE_ENDPOINTS:
+        return None
+    if endpoint.startswith("contacts."):
+        try:
+            area = perms.area_of(endpoint, request.view_args, request.args, get_db())
+        except Exception:
+            area = None
+        if area == "sales":
+            return None
+    if endpoint == "documents.edit" and (request.args.get("status") == "quote" or request.view_args.get("doc_id")):
+        doc_id = (request.view_args or {}).get("doc_id")
+        if not doc_id or (get_db().execute("SELECT status FROM documents WHERE id=?", (doc_id,)).fetchone() or {"status": ""})["status"] == "quote":
+            if request.method == "GET" or request.form.get("status") == "quote":
+                return None
+    flash("Invoices and jobs are made in Riyeser Invoices, Riyeser Bookings or Riyeser Accounting. They open the same "
+          "company file, so the quotes you make here are already there.", "error")
+    return redirect(url_for("estimate.index"))
+
 
 ENTERPRISE_ONLY = {"core.journal_new", "core.journal_list", "core.budgets", "core.jobs", "core.reverse",
                    "banking.reconcile", "banking.feed", "banking.allocate", "banking.feed_delete",

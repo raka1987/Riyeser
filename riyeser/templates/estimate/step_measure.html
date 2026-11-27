@@ -1,0 +1,102 @@
+{% extends "base.html" %}{% block title %}Measure · {{ t.title }}{% endblock %}
+{% block head %}{% if method == 'map' %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}">{% endif %}{% endblock %}
+{% block content %}
+<div class="mpage">
+{% include "estimate/_steps.html" %}
+{% set U = 'ft' if sys_ == 'imperial' else 'm' %}
+<div class="est-head"><div><h1>Measure</h1><p class="sub">{{ t.title }}{% if t.cname %} · {{ t.cname }}{% endif %}{% if t.address %} · {{ t.address }}{% endif %}</p></div>
+<form method="post" action="{{ url_for('estimate.set_units', tid=t.id) }}" class="actions"><label for="units" class="small" style="margin:0">Units</label><select id="units" name="units" onchange="this.form.submit()" style="width:auto"{{ ' disabled' if read_only }}><option value="metric" {{ 'selected' if sys_ == 'metric' }}>Metric (m, m², m³)</option><option value="imperial" {{ 'selected' if sys_ == 'imperial' }}>Imperial (ft, sq ft, cu yd)</option></select></form></div>
+<nav class="mtabs" aria-label="How to measure">
+  <a class="{{ 'on' if method == 'manual' }}" href="{{ url_for('estimate.measure', tid=t.id, m='manual') }}">📏 Type in sizes</a>
+  <a class="{{ 'on' if method == 'plan' }}" href="{{ url_for('estimate.measure', tid=t.id, m='plan') }}">📐 Plan or photo</a>
+  <a class="{{ 'on' if method == 'map' }}" href="{{ url_for('estimate.measure', tid=t.id, m='map') }}">🛰️ Map</a>
+</nav>
+<div class="tip" data-tip="measure-{{ method }}" hidden>{% if method == 'manual' %}Pick what you're measuring, then type the sizes. Plain numbers are in {{ 'feet' if sys_ == 'imperial' else 'metres' }}; you can also type units like <b>2400mm</b> or <b>12' 6"</b>. A laser measurer in keyboard mode can type straight into the boxes.{% elif method == 'plan' %}Open a PDF plan or a photo. Then <b>Set scale</b>: draw along a size you know (a door is about 820 mm / 2' 8") and type its real length, or pick the drawing scale (1:100). Then draw.{% else %}Search for the address, then pick a tool and tap the corners. Double-tap (or press <b>Finish</b>) to close a shape. Roof faces ask for the pitch: a satellite picture can't show it.{% endif %}<button type="button" aria-label="Got it" title="Got it">×</button></div>
+<div class="mwrap">
+<div>
+{% if method == 'manual' %}
+<form method="post" action="{{ url_for('estimate.item_manual', tid=t.id) }}" class="panel big-input" id="manual" autocomplete="off">
+  <input type="hidden" name="id" value="">
+  <div class="kindpick" role="radiogroup" aria-label="What are you measuring?">
+  {% for k, em, name in [('room','🏠','Room'),('rect','▭','Area (L x W)'),('circle','◯','Circle'),('triangle','△','Triangle'),('area','✏️','Area typed in'),('length','📏','Length'),('count','#️⃣','Count'),('volume','🧊','Volume'),('hours','⏱️','Hours'),('roof','🏚️','Roof face'),('fence','🚧','Fence')] %}
+    <label><input type="radio" name="kind" value="{{ k }}" {{ 'checked' if loop.first }}><span class="em" aria-hidden="true">{{ em }}</span>{{ name }}</label>
+  {% endfor %}
+  </div>
+  <div class="fields">
+    <div class="wide"><label for="m_label">Name</label><input id="m_label" name="label" placeholder="e.g. Bedroom 2, front lawn, north fence"></div>
+    <div data-k="room rect volume length fence"><label for="m_length">Length ({{ U }})</label><input id="m_length" name="length" inputmode="decimal" data-len></div>
+    <div data-k="room rect volume"><label for="m_width">Width ({{ U }})</label><input id="m_width" name="width" inputmode="decimal" data-len></div>
+    <div data-k="room length fence"><label for="m_height">Height ({{ U }})</label><input id="m_height" name="height" inputmode="decimal" data-len></div>
+    <div data-k="circle"><label for="m_diameter">Diameter ({{ U }})</label><input id="m_diameter" name="diameter" inputmode="decimal" data-len></div>
+    <div data-k="triangle"><label for="m_base">Base ({{ U }})</label><input id="m_base" name="base" inputmode="decimal" data-len></div>
+    <div data-k="triangle"><label for="m_theight">Height ({{ U }})</label><input id="m_theight" name="height" inputmode="decimal" data-len disabled></div>
+    <div data-k="area"><label for="m_area">Area ({{ 'sq ft' if sys_ == 'imperial' else 'm²' }})</label><input id="m_area" name="area" inputmode="decimal"></div>
+    <div data-k="area"><label for="m_perimeter">Perimeter ({{ U }}) <small class="muted">optional</small></label><input id="m_perimeter" name="perimeter" inputmode="decimal"></div>
+    <div data-k="rect circle triangle area volume"><label for="m_depth">Depth ({{ U }}) <small class="muted">for volume</small></label><input id="m_depth" name="depth" inputmode="decimal" data-len></div>
+    <div data-k="count"><label for="m_count">How many</label><input id="m_count" name="count" inputmode="numeric"></div>
+    <div data-k="hours"><label for="m_hours">Hours</label><input id="m_hours" name="hours" inputmode="decimal"></div>
+    <div data-k="length fence"><label for="m_spacing">Post spacing ({{ U }}) <small class="muted">optional</small></label><input id="m_spacing" name="spacing" inputmode="decimal" data-len placeholder="{{ '8' if sys_ == 'imperial' else '2.4' }}"></div>
+    <div data-k="fence"><label for="m_gates">Gates</label><input id="m_gates" name="gates" inputmode="numeric"></div>
+    <div data-k="fence"><label for="m_gate_width">Gate width ({{ U }})</label><input id="m_gate_width" name="gate_width" inputmode="decimal" data-len></div>
+    <div data-k="fence"><label for="m_corners">Extra corner posts</label><input id="m_corners" name="corners" inputmode="numeric"></div>
+    <div data-k="roof"><label for="m_plan_area">Roof plan area ({{ 'sq ft' if sys_ == 'imperial' else 'm²' }}) <small class="muted">from above, flat</small></label><input id="m_plan_area" name="plan_area" inputmode="decimal"></div>
+    <div data-k="roof"><label for="m_pitch">Pitch (degrees)</label><input id="m_pitch" name="pitch_deg" inputmode="decimal" placeholder="e.g. 22.5"></div>
+    <div data-k="roof"><label for="m_rise">…or rise per {{ '12 (x/12)' if sys_ == 'imperial' else 'run' }}</label><div style="display:flex;gap:6px"><input id="m_rise" name="rise" inputmode="decimal" placeholder="rise" aria-label="Rise"><input name="run" inputmode="decimal" placeholder="12" aria-label="Run"></div></div>
+    {% for e, lab in edge_labels.items() %}<div data-k="roof"><label for="m_{{ e }}">{{ lab }} ({{ U }}, plan)</label><input id="m_{{ e }}" name="{{ e }}" inputmode="decimal"></div>{% endfor %}
+    <div data-k="rect circle triangle area length count"><label for="m_as">Also count it as</label><select id="m_as" name="as">{% for k, v in as_labels.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+    <div><label for="m_group">Group <small class="muted">optional</small></label><input id="m_group" name="group" placeholder="e.g. power, downstairs" list="groups"></div>
+  </div>
+  <div data-k="room" class="openings" style="margin-top:12px"><label>Doors and windows (taken off the wall area)</label>
+    {% for i in range(3) %}<div class="opening-row"><select name="op_kind" aria-label="Opening {{ i + 1 }}"><option value="door">Door</option><option value="window" {{ 'selected' if i > 0 }}>Window</option><option value="other">Other</option></select><input name="op_w" inputmode="decimal" placeholder="width" aria-label="Width" data-len><input name="op_h" inputmode="decimal" placeholder="height" aria-label="Height" data-len><input name="op_n" inputmode="numeric" placeholder="1" aria-label="How many"></div>{% endfor %}
+    <button type="button" class="btn sm" id="addop">+ Another door or window</button></div>
+  <div class="est-foot"><span class="muted small" id="preview" aria-live="polite"></span>{% if not read_only %}<span><button type="button" class="btn" id="m_clear">Clear</button> <button class="btn pri big" id="m_save">Save measurement</button></span>{% endif %}</div>
+</form>
+{% elif method == 'plan' %}
+<div class="panel" id="planpanel">
+  <div class="toolbar">
+    {% if not read_only %}<label class="btn" style="margin:0">📂 Open a plan or photo<input type="file" id="planfile" accept="application/pdf,image/png,image/jpeg,image/webp" hidden></label>{% endif %}
+    <select id="plansel" aria-label="Plan" style="width:auto;max-width:220px">{% for p in plans %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}</select>
+    <button class="tool" id="pgprev" type="button" aria-label="Previous page">◀</button><span id="pginfo" class="small"></span><button class="tool" id="pgnext" type="button" aria-label="Next page">▶</button>
+    <button class="tool" id="zout" type="button" aria-label="Zoom out">−</button><button class="tool" id="zin" type="button" aria-label="Zoom in">+</button><button class="tool" id="zfit" type="button">Fit</button>
+  </div>
+  <div class="toolbar" id="scalebar"><b class="small">Scale:</b> <span id="scaleinfo" class="small">not set</span>
+    {% if not read_only %}<button class="tool" data-tool="scale" type="button">📏 Set scale</button>
+    <select id="stdscale" aria-label="Drawing scale" style="width:auto"><option value="">or pick a drawing scale…</option>{% for r in [1, 10, 20, 50, 100, 200, 250, 500, 1000] %}<option value="{{ r }}">1:{{ r }}</option>{% endfor %}</select>{% endif %}</div>
+  {% include "estimate/_tools.html" %}
+  <div class="stage" id="stage"><div class="hint" id="hint">Open a plan or photo to start.</div></div>
+</div>
+{% else %}
+<div class="panel" id="mappanel">
+  <div class="map-warn" role="note"><b>Estimate from satellite imagery: verify on site.</b> The imagery may be several years old, trees and eaves hide edges, and roof pitch can't be seen from above.</div>
+  <form class="toolbar" id="search" role="search"><input id="addr" placeholder="Search an address" value="{{ t.address or '' }}" style="flex:1;min-width:180px" class="big"><button class="tool">Find</button></form>
+  {% include "estimate/_tools.html" %}
+  <div id="map" role="application" aria-label="Map"></div>
+  <p class="small muted" id="mapinfo">Map: {{ cfg.map.provider }}. Only your own lines are saved, never the imagery.</p>
+</div>
+{% endif %}
+<h2 id="list">Measurements</h2>
+<div class="mlist" id="mlist">
+{% for i in items %}<div class="mitem" data-id="{{ i.id }}"><span class="sw" style="background:{{ i.color }}"></span><div><b>{{ i.label }}</b> <span class="src">{{ i.source }}</span>{% if i.group %} · <span class="small">{{ i.group }}</span>{% endif %}<div class="q">{% for k, v in i.shown %}{{ k }}: {{ v }}{{ '; ' if not loop.last }}{% endfor %}</div></div><div>{% if not read_only %}<form method="post" class="inline" action="{{ url_for('estimate.item_delete', tid=t.id, iid=i.id) }}"><button class="btn sm danger" aria-label="Remove {{ i.label }}">Remove</button></form>{% endif %}</div></div>
+{% else %}<p class="muted" id="noitems">Nothing measured yet.</p>{% endfor %}
+</div>
+<datalist id="groups">{% for g in ['power', 'light', 'data', 'fixture', 'pipe', 'trench', 'downpipe', 'tiles', 'walls', 'floor'] %}<option value="{{ g }}">{% endfor %}</datalist>
+</div>
+<aside class="mside" id="mside">
+  <div class="totals-panel"><h3>Totals <button type="button" class="sheet-toggle" id="sheet">Show</button></h3>
+    <div id="live" class="small" aria-live="polite"></div>
+    <dl id="totals">{% for x in totals %}<dt>{{ x.label }}</dt><dd>{{ x.text }}</dd>{% else %}<dt>Nothing measured yet</dt><dd></dd>{% endfor %}</dl>
+    <div class="more" style="margin-top:12px"><a class="btn pri big" style="width:100%;justify-content:center" href="{{ url_for('estimate.template', tid=t.id) }}">Next: choose a template →</a>
+    <p class="small muted" style="margin:8px 0 0">Saved as you go.{% if method != 'manual' %} <span id="undo-hint"></span>{% endif %}</p></div>
+  </div>
+</aside>
+</div>
+</div>
+<script id="cfg" type="application/json">{{ cfg|tojson }}</script>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='measure/units.js') }}"></script>
+<script src="{{ url_for('static', filename='measure/geometry.js') }}"></script>
+<script src="{{ url_for('static', filename='measure/measure.js') }}"></script>
+{% if method == 'plan' %}<script type="module" src="{{ url_for('static', filename='measure/plan.js') }}"></script>
+{% elif method == 'map' %}<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script><script src="{{ url_for('static', filename='measure/map.js') }}"></script>{% endif %}
+{% endblock %}

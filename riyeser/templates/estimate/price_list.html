@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block title %}Supplier price list{% endblock %}
+{% block content %}
+<div class="est-head"><div><h1>Import a supplier price list</h1><p class="sub">A CSV file with a heading row: a <b>name</b> (or <b>code</b>) column and a <b>price</b> column (what you pay). Material lines in your templates whose description, or linked stock item's code or name, matches get that price as their cost, and the price plus your markup as their rate.</p></div></div>
+<form class="card" method="post" enctype="multipart/form-data"><div class="fields">
+<div><label for="file">Price list (CSV)</label><input id="file" type="file" name="file" accept=".csv,text/csv" required></div>
+<div><label for="markup">Your markup on materials (%)</label><input id="markup" name="markup" value="{{ markup or '20' }}" inputmode="decimal"></div></div>
+<div class="est-foot"><button class="btn" name="check" value="1">Check what will change</button>{% if not read_only %}<button class="btn pri" name="apply" value="1">Update my templates</button>{% endif %}</div></form>
+{% if result %}<div class="card"><h2 style="margin-top:0">{{ result.matched|length }} line{{ '' if result.matched|length == 1 else 's' }} matched{% if result.changed %} and updated{% endif %} ({{ result.rows }} rows read)</h2>
+<div class="tbl"><table><thead><tr><th>Template</th><th>Line</th><th class="n">Cost</th><th class="n">Rate was</th><th class="n">Rate now</th></tr></thead><tbody>
+{% for m in result.matched %}<tr><td>{{ m.template }}</td><td>{{ m.line }}</td><td class="n">{{ m.cost|cur }}</td><td class="n">{{ m.old|cur if m.old else '—' }}</td><td class="n">{{ m.new|cur }}</td></tr>{% else %}<tr><td colspan="5" class="muted">Nothing matched. Name the rows like your template lines (e.g. "Floor tiles"), or link stock items.</td></tr>{% endfor %}
+</tbody></table></div>{% if result.unmatched %}<p class="small muted">Not matched: {{ result.unmatched|join(', ') }}</p>{% endif %}</div>{% endif %}
+{% endblock %}

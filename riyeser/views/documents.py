@@ -228,6 +228,13 @@ def view(doc_id):
             if doc["booking_job_id"] else None
     if doc["side"] == "purchase" and doc["status"] == "order":
         extra["rcv"] = receiving.receiving_status(db, doc)
+    if doc["side"] == "sale" and doc["status"] == "quote":
+        from .estimate import estimate_for_document
+        extra["estimate"] = estimate_for_document(db, doc_id)
+        if extra["estimate"]:
+            from ..measure.licence import status as est_status
+            st = est_status()   # only while Estimate is on this business's plan, or its trial has started here
+            extra["estimate_link"] = st.get("mode") == "licensed" or (st.get("mode") == "trial" and st.get("started", True))
     if doc["source_document_id"]:
         extra["source_doc"] = db.execute("SELECT id, number FROM documents WHERE id=?",
                                          (doc["source_document_id"],)).fetchone()
