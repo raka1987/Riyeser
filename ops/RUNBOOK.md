@@ -499,3 +499,41 @@ Practise steps 1–4 with a copy at least once before you need them.
 ## Not covered yet
 - **As Built photos and files** in Supabase Storage. The database copy includes their records but not the files themselves. Add a storage copy (Supabase Storage → R2) before customers depend on As Built online.
 - **The books on each PC:** Accounting, Payroll and the rest. Each program keeps its own backups on the PC. These move online with the shared company database.
+
+## Running the Riyeser relay
+
+The relay (`relay/`, details in `relay/README.md`) joins customers' Riyeser Link Office sites and phones at home, and
+is the STUN/TURN for Riyeser Link calls. Main relay: the head office PC (Windows task **Riyeser Relay**). Backup: a
+rented Sydney server (systemd service `riyeser-relay`). Sites fail over to the backup by themselves within seconds and
+come back when the main one answers again; calls inside each office never depend on either.
+
+**Is it up?** `curl -k https://relay.riyeser.com/health` (and `relay2…`). In Supabase: `select id, region, last_seen, public_ip, counts from relay_servers;`
+— `last_seen` older than 2 minutes means that relay isn't checking in.
+
+**It's down.**
+1. Linux: `sudo systemctl status riyeser-relay`, `journalctl -u riyeser-relay -n 100`, `sudo systemctl restart riyeser-relay`.
+   Windows: Task Scheduler → *Riyeser Relay* → Run; log in `C:\ProgramData\Riyeser Relay\logs\relay.log`.
+2. Head office internet down: sites are already on the backup (Phones page shows "Using backup relay"). Nothing to do.
+3. Head office public address changed and the DNS record is stale: the relay updates it itself if `DDNS_*` is set;
+   otherwise update the A record by hand. Link Office also tries the address the relay last reported.
+4. A bad update: `update.sh` already rolled back if the new version didn't start; the failed copy is in
+   `/opt/riyeser-relay/app.bad`. To go back by hand: `sudo mv /opt/riyeser-relay/app /opt/riyeser-relay/app.bad && sudo mv /opt/riyeser-relay/app.old /opt/riyeser-relay/app && sudo systemctl restart riyeser-relay`.
+
+**A customer's site won't connect.** Phones page → *Sites and the Riyeser relay* shows each site's state and reason.
+"Update needed": Link Office older than 1.3.0. "Refused": the office was disconnected (Allow again) or the relay is
+switched off for the business. "Not connected": the site has no internet, or blocks outgoing 443. On the PC:
+*Settings → Connect your branches → Diagnostics*. "No sound between sites" with "Sound (UDP): blocked": the site's
+firewall blocks outgoing UDP to the relay's ports 40000–49999.
+
+**Revoke a site or phone at once** (stolen PC, lost phone): Phones page → *Disconnect* / *Remove*. The relay drops
+it within 30 seconds (next `relay_sync`); old passes stop working.
+
+**Rotate the relay secret** (if it may have leaked): make a new one (`openssl rand -hex 32`), put it in every relay
+(`/etc/riyeser-relay/secret`, `C:\ProgramData\Riyeser Relay\secret`), restart them, then in Supabase:
+`update relay_cluster set secret = '<new>';`. Link Offices get new passes on their next reconnect (they reconnect by
+themselves when refused); browsers get new TURN passwords on their next call.
+
+**Add or remove a relay**: `relay_register(...)` / `select relay_remove('mel1');` in the SQL editor.
+**A relay just for one customer** (their own machine, managed by Riyeser): `relay_register('cust1', 'pbx.customer.com', 'Customer office', '<secret>', 1, '<workspace id>')`.
+
+**Privacy**: relays log connections, extensions and call outcomes only. Never call sound, SDP, passwords or passes.

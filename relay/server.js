@@ -24,6 +24,7 @@ const { Ddns } = require('./lib/ddns');
 const { findPublicIp } = require('./lib/publicip');
 const { TurnServer } = require('./lib/turn');
 const certgen = require('./lib/certgen');
+const { PortMapper, relayPorts } = require('./lib/portmap');
 const https = require('https');
 
 const VERSION = require('./package.json').version;
@@ -47,7 +48,17 @@ class Limiter {
   count() { return [...this.blocked.values()].filter((u) => u > Date.now()).length; }
 }
 
+/** KEY="value" lines (relay.env, as setup.sh / install-relay.ps1 write it) into an env object. */
+function loadEnvFile(file, env = process.env) {
+  if (!file || !fs.existsSync(file)) return env;
+  for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|(.*?))\s*$/.exec(line);
+    if (m && env[m[1]] === undefined) env[m[1]] = m[2] != null ? m[2] : m[3] != null ? m[3] : m[4];
+  }
+  return env;
+}
 function config(env = process.env) {
+  if (env.RELAY_ENV_FILE) loadEnvFile(env.RELAY_ENV_FILE, env);
   const secret = env.RELAY_SECRET || (env.RELAY_SECRET_FILE && fs.existsSync(env.RELAY_SECRET_FILE) ? fs.readFileSync(env.RELAY_SECRET_FILE, 'utf8').trim() : '');
   const num = (v, d) => (v == null || v === '' ? d : Number(v));
   return {
@@ -59,7 +70,7 @@ function config(env = process.env) {
     // no certificate given: make a self-signed one in CERT_DIR; Link Office pins its fingerprint (from Riyeser online)
     selfSigned: env.SELF_SIGNED !== '0', certDir: env.CERT_DIR || path.join(__dirname, 'data'),
     turn: { enabled: env.TURN !== 'off', port: num(env.TURN_PORT, 3478), tlsPort: num(env.TURNS_PORT, 5349), min: num(env.TURN_MIN, 50000), max: num(env.TURN_MAX, 50999), bind: env.TURN_BIND || '0.0.0.0' },
-    portMap: env.PORT_MAP === '1',
+    portMap: env.PORT_MAP === '1', portMapIp: env.PORT_MAP_IP || '',
     mediaMin: num(env.MEDIA_MIN, 40002), mediaMax: num(env.MEDIA_MAX, 49999), probePort: num(env.PROBE_PORT, 40000), mediaBind: env.MEDIA_BIND || '0.0.0.0',
     publicIp: env.RELAY_PUBLIC_IP || '', supabaseUrl: env.SUPABASE_URL || '', supabaseKey: env.SUPABASE_KEY || '', metricsToken: env.METRICS_TOKEN || '',
     ddns: { provider: env.DDNS_PROVIDER || '', token: env.DDNS_TOKEN || '', zone: env.DDNS_ZONE || '', name: env.DDNS_NAME || env.RELAY_HOST || '' },
@@ -98,7 +109,8 @@ function createRelayServer(cfg) {
     return { version: VERSION, region: cfg.region, host: cfg.host, public_ip: self.ip.ip, ip_how: self.ip.how,
       ports: { sip_tls: self.ports.sipTls || null, media: [cfg.mediaMin, cfg.mediaMax], probe: media.probePort, turn: self.ports.turn || null, turns: self.ports.turns || null, https: self.ports.https || null },
       counts: relay.snapshot(), turn: turn ? turn.snapshot() : null, offices: offices.slice(0, 2000), ddns: ddns.enabled ? ddns.state : null,
-      cert: self.cert ? { sha256: self.cert.fingerprint, self_signed: !!self.cert.selfSigned } : null, https_port: self.ports.https || null };
+      cert: self.cert ? { sha256: self.cert.fingerprint, self_signed: !!self.cert.selfSigned } : null, https_port: self.ports.https || null,
+      port_map: self.portMapper ? self.portMapper.state : null };
   }
   async function applySync(j) {
     if (!j) return;
@@ -178,7 +190,7 @@ function createRelayServer(cfg) {
     const url = new URL(req.url, 'http://relay');
     if (req.method === 'GET' && url.pathname === '/health') {
       const s = relay.snapshot();
-      return json(res, 200, { ok: true, relay: cfg.id, region: cfg.region, version: VERSION, uptime: Math.round((Date.now() - started) / 1000), sites: s.sites, phones: s.phones, peers: s.peers, calls: s.calls,
+      return json(res, 200, { ok: true, relay: cfg.id, region: cfg.region, version: VERSION, cert_sha256: self.cert ? self.cert.fingerprint : null, uptime: Math.round((Date.now() - started) / 1000), sites: s.sites, phones: s.phones, peers: s.peers, calls: s.calls,
         sync: cloud.state ? { ok: cloud.state.ok, at: cloud.state.at } : null });
     }
     if (req.method === 'GET' && url.pathname === '/metrics') {
@@ -342,6 +354,12 @@ function createRelayServer(cfg) {
     self.ipTimer = setInterval(() => refreshIp().catch(() => {}), 5 * 60 * 1000); self.ipTimer.unref();
     self.ddnsTimer = setInterval(() => { if (self.ip.ip) { ddns.last = null; ddns.update(self.ip.ip).catch(() => {}); } }, 60 * 60 * 1000); self.ddnsTimer.unref();
     self.sweepTimer = setInterval(() => { limiter.sweep(); const now = Date.now(); for (const [n, exp] of self.usedCodes) if (exp < now) self.usedCodes.delete(n); }, 60000); self.sweepTimer.unref();
+    // own hardware: ask the office router to forward our ports (NAT-PMP or UPnP), where it allows it
+    if (cfg.portMap) {
+      const lan = Object.values(require('os').networkInterfaces()).flat().find((a) => a && a.family === 'IPv4' && !a.internal);
+      self.portMapper = new PortMapper({ ports: relayPorts(cfg, self.ports), localIp: cfg.portMapIp || (lan && lan.address), log, gw: cfg.portMapGateway, ssdpTarget: cfg.ssdpTarget, ssdpPort: cfg.ssdpPort, pmpPort: cfg.pmpPort });
+      await self.portMapper.start().catch((e) => log('warn', `Router port forwarding: ${e.message}`));
+    }
     if (cfg.plan) await applySync(cfg.plan);
     if (cloud.start) await cloud.start(applySync);
     else if (cloud.enabled === false) log('warn', 'Not connected to Riyeser online (SUPABASE_URL / SUPABASE_KEY missing): no business can use this relay until it is.');
@@ -354,6 +372,7 @@ function createRelayServer(cfg) {
   self.stop = async () => {
     for (const t of [self.ipTimer, self.ddnsTimer, self.sweepTimer, self.certTimer]) clearInterval(t);
     if (cloud.stop) cloud.stop();
+    if (self.portMapper) await self.portMapper.stop().catch(() => {});
     for (const d of self.peerDialers.values()) d.stop();
     relay.stop();
     await new Promise((r) => httpServer.close(() => r()));
@@ -385,7 +404,7 @@ function readSipStream(sock, onPacket) {
   });
 }
 
-module.exports = { createRelayServer, config, Limiter, readSipStream, VERSION };
+module.exports = { createRelayServer, config, loadEnvFile, Limiter, readSipStream, VERSION };
 
 if (require.main === module) {
   const cfg = config();

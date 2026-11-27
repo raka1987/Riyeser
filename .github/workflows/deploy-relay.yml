@@ -1,0 +1,66 @@
+name: Deploy the Riyeser relay
+
+# Tests the relay (relay/), then copies it to the relay machine(s) over SSH and runs deploy/update.sh there (which
+# restarts it, checks /health and puts the old version back if the new one doesn't start).
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   RELAY_HOST          the main relay's address (e.g. relay.riyeser.com)
+#   RELAY_SSH_KEY       a private SSH key whose public half is in root's ~/.ssh/authorized_keys on the relay(s)
+#   RELAY_BACKUP_HOST   (optional) the backup relay's address; deployed after the main one is healthy
+#   RELAY_SSH_USER      (optional) default root
+# Without RELAY_HOST and RELAY_SSH_KEY it runs the tests, says so, and stops without failing.
+on:
+  push:
+    branches: [main]
+    paths: ["relay/**", ".github/workflows/deploy-relay.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: { group: deploy-relay, cancel-in-progress: false }
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - name: coturn's TURN test client (checks the relay's own TURN server against another implementation)
+        run: sudo apt-get install -y -qq coturn >/dev/null && sudo systemctl stop coturn || true
+      - run: npm test
+        working-directory: relay
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      RELAY_HOST: ${{ secrets.RELAY_HOST }}
+      RELAY_SSH_KEY: ${{ secrets.RELAY_SSH_KEY }}
+      RELAY_BACKUP_HOST: ${{ secrets.RELAY_BACKUP_HOST }}
+      RELAY_SSH_USER: ${{ secrets.RELAY_SSH_USER }}
+    steps:
+      - name: Is a relay set up?
+        id: ready
+        run: |
+          if [ -z "$RELAY_HOST" ] || [ -z "$RELAY_SSH_KEY" ]; then
+            echo "::notice::The Riyeser relay isn't deployed: add the RELAY_HOST and RELAY_SSH_KEY secrets once the relay machine is set up (relay/README.md)."
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          else echo "go=yes" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/checkout@v4
+        if: steps.ready.outputs.go == 'yes'
+      - name: Copy and update
+        if: steps.ready.outputs.go == 'yes'
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$RELAY_SSH_KEY" > ~/.ssh/relay && chmod 600 ~/.ssh/relay
+          U=${RELAY_SSH_USER:-root}
+          for H in "$RELAY_HOST" $RELAY_BACKUP_HOST; do
+            echo "Deploying to $H"
+            ssh-keyscan -T 10 "$H" >> ~/.ssh/known_hosts 2>/dev/null
+            SSH="ssh -i $HOME/.ssh/relay -o BatchMode=yes -o ConnectTimeout=15 $U@$H"
+            tar -C relay --exclude=test --exclude=data -czf - . | $SSH 'rm -rf /opt/riyeser-relay/src.new && mkdir -p /opt/riyeser-relay/src.new && tar -xzf - -C /opt/riyeser-relay/src.new'
+            $SSH 'S=/opt/riyeser-relay/src.new; [ "$(id -u)" = 0 ] && "$S/deploy/update.sh" || sudo "$S/deploy/update.sh"'
+          done
+          rm -f ~/.ssh/relay
