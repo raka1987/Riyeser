@@ -59,7 +59,8 @@ async function contrast(pg, sel) {
     for (const id of ['#bell', '#helpbtn', '#adming', '#coppl', '#cophones', '#qd', '#rtog', '#ppl']) assert.ok(!(await pg.$(id)), id + ' is gone (no clutter)');
     assert.deepStrictEqual(await pg.$$eval('#side [data-filter]', (x) => x.map((y) => y.textContent)), ['All', 'Channels', 'People', 'Unread']);
     assert.strictEqual(await text(pg, '#newchat'), 'New');
-    assert.deepStrictEqual(await pg.$$eval('#side .sec', (x) => x.length), 0, 'one list: channels and people together');
+    assert.deepStrictEqual(await pg.$$eval('#side .sec', (x) => x.map((y) => y.dataset.sec)), ['pinned', 'channels', 'people'], 'one list in folding sections: Pinned, Channels, Direct messages');
+    assert.ok(await pg.isVisible('#railbtn'), 'the list can shrink to icons');
     const [order, pinnedIds] = await pg.evaluate(() => { const S = window.RiyeserTeam.state;
       return [[...document.querySelectorAll('#lscroll .item')].map((el) => el.dataset.ch || (S.chans.find((c) => c.kind === 'dm' && c.people.includes(el.dataset.dm)) || {}).id), S.pinned]; });
     assert.ok(pinnedIds.length >= 1); assert.deepStrictEqual(order.slice(0, pinnedIds.length), pinnedIds, 'pinned at the top');
@@ -402,7 +403,8 @@ async function contrast(pg, sel) {
     await fp.click('.fcard [data-file]'); await fp.waitForTimeout(300); assert.ok(fs.storage.some(([m]) => m === 'sign'), 'a short-lived download link');
     // your look goes with your account
     await fp.evaluate(() => window.RiyeserTeam.theme.set({ theme: 'light', accent: 'green' })); await fp.waitForTimeout(300);
-    assert.deepStrictEqual(fs.userPut.pop().data.riyeser_prefs, { theme: 'light', accent: 'green' });
+    const look2 = fs.userPut.map((x) => x.data.riyeser_prefs).filter((x) => x && x.accent === 'green').pop();   // (what you fold away is saved alongside, as ui)
+    assert.ok(look2 && look2.theme === 'light', 'the look is saved with the account: ' + JSON.stringify(look2));
     await fp.screenshot({ path: out + '/link-server.png' });
     console.log('pretend server: presence, reactions, pins, files, look: ok');
 

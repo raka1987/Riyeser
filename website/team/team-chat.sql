@@ -7451,3 +7451,210 @@ revoke all on function public.api_status(uuid, uuid), public.api_send_test(uuid,
   from public, anon, authenticated;
 grant execute on function public.api_status(uuid, uuid), public.api_send_test(uuid, uuid, text), public.api_event_status(uuid, uuid, uuid)
   to authenticated;
+
+-- ===== Riyeser Link: the channel menu, part 2 (mute for a while, a line in the chat for each change, members in the history) =====
+-- Safe to re-run. Members see a line in the chat when a channel changes ("Ana renamed #jobs to #site-jobs"); the change
+-- history (owners and admins) has each one too. Mute can be for 1 hour, 8 hours, until tomorrow, a week, or until turned back on.
+alter table public.channel_prefs add column if not exists muted_until timestamptz;   -- null: muted until turned back on
+
+-- A line Riyeser Link adds to a chat (not a message anyone typed): kind + details; body is the same words for older apps.
+alter table public.messages add column if not exists system jsonb;
+do $$ begin
+  alter table public.messages add constraint messages_system_shape check (system is null or (jsonb_typeof(system) = 'object'
+    and system ->> 'kind' in ('rename', 'topic', 'archive', 'unarchive', 'add', 'remove', 'left', 'removed')));
+exception when duplicate_object then null; end $$;
+
+-- Only the database adds these lines, and nobody can change them afterwards (owner-approved removal blanks them).
+create or replace function public.messages_system_guard() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'INSERT' then
+    if new.system is not null and coalesce(current_setting('riyeser.system_line', true), '') <> 'on' then
+      raise exception 'Only Riyeser Link adds these lines to a chat.'; end if;
+    return new;
+  end if;
+  if current_setting('riyeser.removing', true) = 'on' then
+    if old.system is not null then new.system := '{"kind": "removed"}'::jsonb; end if;
+    return new;
+  end if;
+  if old.system is not null or new.system is distinct from old.system then
+    raise exception 'This line can''t be changed.'; end if;
+  return new;
+end $$;
+drop trigger if exists messages_system_guard on public.messages;
+create trigger messages_system_guard before insert or update on public.messages for each row execute function public.messages_system_guard();
+
+-- An archived channel stays read-only, but its own "archived" line still goes in.
+create or replace function public.channel_open_guard() returns trigger language plpgsql as $$
+begin
+  if current_setting('riyeser.removing', true) = 'on' then return new; end if;
+  if tg_table_name = 'messages' and tg_op = 'INSERT' and to_jsonb(new) ->> 'system' is not null
+     and coalesce(current_setting('riyeser.system_line', true), '') = 'on' then return new; end if;
+  if exists (select 1 from public.channels c where c.id = new.channel_id and c.archived) then
+    raise exception 'This channel is archived, so it''s read-only. Whoever made it, or an owner or admin, can bring it back.';
+  end if;
+  return new;
+end $$;
+
+-- Add a line to a chat, as the person who made the change (no line when there's no one signed in, e.g. a fix by Riyeser).
+create or replace function public.channel_note(ch uuid, ws uuid, kind text, details jsonb, words text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or current_setting('riyeser.removing', true) = 'on' then return; end if;
+  perform set_config('riyeser.system_line', 'on', true);
+  insert into messages (channel_id, workspace_id, user_id, body, system)
+    values (ch, ws, auth.uid(), left(words, 4000), coalesce(details, '{}'::jsonb) || jsonb_build_object('kind', kind));
+  perform set_config('riyeser.system_line', 'off', true);
+end $$;
+revoke all on function public.channel_note(uuid, uuid, text, jsonb, text) from public, anon, authenticated;
+
+-- Every rename, topic change and archiving (through the menu or not) goes in the history and in the chat.
+create or replace function public.channel_changed() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if current_setting('riyeser.removing', true) = 'on' or new.kind = 'dm' then return null; end if;
+  if new.name is distinct from old.name then
+    insert into audit_log (workspace_id, action, details) values (new.workspace_id, 'channel.rename', jsonb_build_object('name', '#' || new.name, 'was', '#' || old.name));
+    perform channel_note(new.id, new.workspace_id, 'rename', jsonb_build_object('was', old.name, 'now', new.name), 'renamed #' || old.name || ' to #' || new.name);
+  end if;
+  if new.topic is distinct from old.topic then
+    insert into audit_log (workspace_id, action, details) values (new.workspace_id, 'channel.topic', jsonb_build_object('name', '#' || new.name, 'topic', new.topic));
+    perform channel_note(new.id, new.workspace_id, 'topic', jsonb_build_object('topic', new.topic),
+      case when new.topic is null then 'cleared the topic' else 'changed the topic to: ' || new.topic end);
+  end if;
+  if new.archived is distinct from old.archived then
+    insert into audit_log (workspace_id, action, details)
+      values (new.workspace_id, case when new.archived then 'channel.archive' else 'channel.unarchive' end, jsonb_build_object('name', '#' || new.name));
+    perform channel_note(new.id, new.workspace_id, case when new.archived then 'archive' else 'unarchive' end, '{}'::jsonb,
+      case when new.archived then 'archived this channel' else 'brought this channel back' end);
+  end if;
+  return null;
+end $$;
+revoke all on function public.channel_changed() from public, anon, authenticated;
+drop trigger if exists channel_changed on public.channels;
+create trigger channel_changed after update on public.channels for each row execute function public.channel_changed();
+
+-- channel_rename and channel_archive: the same checks as before; the history and the chat line now come from channel_changed.
+create or replace function public.channel_rename(ch uuid, new_name text, new_topic text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare c record; n text; t text;
+begin
+  select * into c from channels where id = ch;
+  if c.id is null or not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  if c.kind = 'dm' then raise exception 'Direct messages don''t have a name to change.'; end if;
+  if not channel_can_manage(ch) then
+    raise exception 'Only whoever made this channel, or the owner or an admin, can change its name or topic.'; end if;
+  if c.archived then raise exception 'This channel is archived. Bring it back first, then change it.'; end if;
+  n := c.name; t := c.topic;
+  if new_name is not null then
+    n := regexp_replace(regexp_replace(lower(trim(new_name)), '^#+', ''), '\s+', '-', 'g');
+    if n !~ '^[a-z0-9_-]{1,40}$' then
+      raise exception 'Use up to 40 lowercase letters, numbers, - or _ for the name (no spaces), e.g. hill-rd-site.'; end if;
+  end if;
+  if new_topic is not null then
+    t := nullif(trim(new_topic), '');
+    if length(t) > 200 then raise exception 'Keep the topic under 200 characters.'; end if;
+  end if;
+  if n is not distinct from c.name and t is not distinct from c.topic then return; end if;
+  update channels set name = n, topic = t where id = ch;
+end $$;
+
+create or replace function public.channel_archive(ch uuid, archive boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from channels where id = ch;
+  if c.id is null or not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  if c.kind = 'dm' then raise exception 'Direct messages can''t be archived.'; end if;
+  if not channel_can_manage(ch) then
+    raise exception 'Only whoever made this channel, or the owner or an admin, can archive it or bring it back.'; end if;
+  if c.archived = coalesce(archive, false) then return; end if;
+  update channels set archived = coalesce(archive, false) where id = ch;
+end $$;
+
+-- Mute: until turned back on (channel_mute), or until a time (channel_mute_until: within a year).
+create or replace function public.channel_mute(ch uuid, mute_on boolean) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  insert into channel_prefs (user_id, channel_id, muted, muted_until) values (auth.uid(), ch, coalesce(mute_on, false), null)
+    on conflict (user_id, channel_id) do update set muted = excluded.muted, muted_until = null;
+end $$;
+create or replace function public.channel_mute_until(ch uuid, until_at timestamptz) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  if until_at is not null and (until_at <= now() or until_at > now() + interval '366 days') then
+    raise exception 'Choose a time in the next year to mute it until.'; end if;
+  insert into channel_prefs (user_id, channel_id, muted, muted_until) values (auth.uid(), ch, true, until_at)
+    on conflict (user_id, channel_id) do update set muted = true, muted_until = excluded.muted_until;
+end $$;
+
+-- Add or remove people in a private channel (its creator, or an owner/admin): in the history and in the chat.
+create or replace function public.set_channel_people(ch uuid, add_people uuid[], remove_people uuid[])
+  returns void language plpgsql security definer set search_path = public as $$
+declare c record; added uuid[]; removed uuid[]; nm text;
+begin
+  select * into c from channels where id = ch;
+  if c.id is null or c.kind <> 'private' then raise exception 'That isn''t a private channel'; end if;
+  if not (is_admin(c.workspace_id) or (c.created_by = auth.uid() and can_see_channel(ch))) then
+    raise exception 'Only whoever made this channel, or a team owner or admin, can change who''s in it';
+  end if;
+  if c.archived then raise exception 'This channel is archived. Bring it back first, then change it.'; end if;
+  with i as (insert into channel_members (channel_id, user_id)
+    select ch, m.user_id from members m where m.workspace_id = c.workspace_id and m.user_id = any(coalesce(add_people, '{}'))
+    on conflict do nothing returning user_id) select coalesce(array_agg(user_id), '{}') into added from i;
+  with d as (delete from channel_members where channel_id = ch and user_id = any(coalesce(remove_people, '{}')) returning user_id)
+    select coalesce(array_agg(user_id), '{}') into removed from d;
+  if not exists (select 1 from channel_members where channel_id = ch) then
+    raise exception 'A private channel needs at least one person in it';
+  end if;
+  if cardinality(added) + cardinality(removed) = 0 then return; end if;
+  insert into audit_log (workspace_id, action, details) values (c.workspace_id, 'channel.members', jsonb_build_object('name', c.name,
+    'added', (select coalesce(jsonb_agg(display_name order by display_name), '[]') from members where workspace_id = c.workspace_id and user_id = any(added)),
+    'removed', (select coalesce(jsonb_agg(display_name order by display_name), '[]') from members where workspace_id = c.workspace_id and user_id = any(removed))));
+  if cardinality(added) > 0 then
+    select string_agg(display_name, ', ' order by display_name) into nm from members where workspace_id = c.workspace_id and user_id = any(added);
+    perform channel_note(ch, c.workspace_id, 'add', jsonb_build_object('people', to_jsonb(added)), 'added ' || nm);
+  end if;
+  if cardinality(removed) > 0 then
+    select string_agg(display_name, ', ' order by display_name) into nm from members where workspace_id = c.workspace_id and user_id = any(removed);
+    perform channel_note(ch, c.workspace_id, 'remove', jsonb_build_object('people', to_jsonb(removed)), 'removed ' || nm);
+  end if;
+end $$;
+
+-- Leaving a private channel: the others see "… left".
+create or replace function public.channel_leave(ch uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from channels where id = ch;
+  if c.id is null or not can_see_channel(ch) then raise exception 'That channel isn''t there any more.'; end if;
+  if c.kind = 'dm' then raise exception 'You can''t leave a direct message. Mute it instead.'; end if;
+  if c.kind = 'channel' and c.name = 'general' then raise exception '#general is for everyone in the team, so you can''t leave it. Mute it instead.'; end if;
+  if c.kind = 'private' then
+    if not exists (select 1 from channel_members where channel_id = ch and user_id <> auth.uid()) then
+      raise exception 'You''re the only person in this channel. Add someone first, or archive it.'; end if;
+    if not c.archived then perform channel_note(ch, c.workspace_id, 'left', '{}'::jsonb, 'left'); end if;
+    delete from channel_members where channel_id = ch and user_id = auth.uid();
+  else
+    insert into channel_prefs (user_id, channel_id, left_at) values (auth.uid(), ch, now())
+      on conflict (user_id, channel_id) do update set left_at = now();
+  end if;
+end $$;
+
+revoke all on function public.channel_mute_until(uuid, timestamptz), public.set_channel_people(uuid, uuid[], uuid[]) from public, anon;
+grant execute on function public.channel_mute_until(uuid, timestamptz), public.set_channel_people(uuid, uuid[], uuid[]),
+  public.channel_rename(uuid, text, text), public.channel_archive(uuid, boolean), public.channel_mute(uuid, boolean),
+  public.channel_leave(uuid) to authenticated;
+
+-- The lines Riyeser Link adds ("Ana renamed #jobs") don't count as unread messages.
+create or replace function public.unread_counts(ws uuid) returns table (channel_id uuid, unread bigint)
+  language sql stable security definer set search_path = public as $$
+  select c.id, count(m.id)
+  from channels c
+  left join reads r on r.channel_id = c.id and r.user_id = auth.uid()
+  left join messages m on m.channel_id = c.id and not m.deleted and m.user_id <> auth.uid() and m.system is null
+       and m.created_at > coalesce(r.last_read_at, '-infinity'::timestamptz)
+  where c.workspace_id = ws and public.is_member(ws) and public.can_see_channel(c.id)
+  group by c.id
+$$;

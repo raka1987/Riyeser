@@ -174,10 +174,20 @@
       async leave(ch, uid) { ok(await sb.from('channel_members').delete().eq('channel_id', ch).eq('user_id', uid)); },
       // The channel menu. channelPrefs is null on a database without this release's team-chat.sql (Mute, Leave and the
       // rest then hide). The database checks who may rename, change the topic or archive, and protects #general.
-      async channelPrefs(_ws, uid) { return soft(sb.from('channel_prefs').select('channel_id, muted, left_at').eq('user_id', uid)); },
+      async channelPrefs(_ws, uid) {
+        const r = await soft(sb.from('channel_prefs').select('channel_id, muted, muted_until, left_at').eq('user_id', uid));   // muted_until: part 2
+        return r !== null ? r : soft(sb.from('channel_prefs').select('channel_id, muted, left_at').eq('user_id', uid));
+      },
       async renameChannel(ch, name, topic) { ok(await sb.rpc('channel_rename', { ch, new_name: name, new_topic: topic })); },
       async archiveChannel(ch, on) { ok(await sb.rpc('channel_archive', { ch, archive: !!on })); },
-      async muteChannel(ch, on) { ok(await sb.rpc('channel_mute', { ch, mute_on: !!on })); },
+      // until: undefined = until turned back on (or a database without channel_mute_until); else an ISO time, or null for "until I turn it back on"
+      async muteChannel(ch, on, until) {
+        if (on && until !== undefined) {
+          const r = await sb.rpc('channel_mute_until', { ch, until_at: until });
+          if (!r.error) return true; if (!missing(r.error)) throw r.error;
+        }
+        ok(await sb.rpc('channel_mute', { ch, mute_on: !!on })); return !on || until == null;
+      },
       async leaveChannel(ch) { ok(await sb.rpc('channel_leave', { ch })); },
       async rejoinChannel(ch) { ok(await sb.rpc('channel_rejoin', { ch })); },
       async openDm(ws, person) { return ok(await sb.rpc('open_dm', { ws, person })); },
@@ -391,6 +401,13 @@
     const dchan = (ch) => { const c = chans.find((x) => x.id === ch && (x.kind === 'channel' || x.people.includes(AS))); if (!c) throw new Error('That channel isn\'t there any more.'); return c; };
     const dgen = (c) => c.kind === 'channel' && c.name === 'general';
     const dmanage = (c) => c.kind !== 'dm' && (c.created_by === AS || AS === 'u-me' || AS === 'u-sam');
+    // a line in the chat for each change, like the database's channel_note ("You renamed #office to #paper-work")
+    const dhist = []; const dlog = (action, details) => dhist.push({ id: 100 + dhist.length, at: new Date().toISOString(), actor: AS, action, details });
+    const dnote = (c, kind, details, body) => { const act = { rename: 'channel.rename', topic: 'channel.topic', archive: 'channel.archive', unarchive: 'channel.unarchive', add: 'channel.members', remove: 'channel.members' }[kind];
+      if (act) dlog(act,
+        kind === 'rename' ? { name: '#' + details.now, was: '#' + details.was } : kind === 'add' || kind === 'remove' ? { name: c.name, [kind === 'add' ? 'added' : 'removed']: details.people.map(dname) }
+          : kind === 'topic' ? { name: '#' + c.name, topic: details.topic } : { name: '#' + c.name }); const m = msg(c.id, AS, body, 0); m.created_at = new Date().toISOString(); m.system = { ...details, kind }; msgs.push(m); if (listener) listener({ ...m }); };
+    const dname = (u) => (ppl.find((q) => q[0] === u) || [u, u])[1];
     const files = { 'demo/c-jobs/sample/Job_12_sheet.pdf': 'data:text/plain;charset=utf-8,' + encodeURIComponent('A sample job sheet from the Riyeser Link demo.') };
     let listener = null;
     // a message Riyeser started (from HQ's "Message customer"): it waits for the customer's reply
@@ -517,7 +534,7 @@
           as_built: { status: 'trial', active: true, trial_ends: d(10), days_left: 10 }, calls: { status: 'trial', active: true, trial_ends: d(10), days_left: 10 } },
           seats: { included: 3, extra: 2, used: 4 }, extra_companies: 0, billing: 'monthly', early_bird: true }; },
       async history() { const t = (m) => new Date(Date.now() - m * 60000).toISOString();
-        return [{ id: 5, at: t(3), actor: 'u-me', action: 'devices.delete', details: { device_name: 'Lautoka front desk' } },
+        return [...dhist.slice().reverse(), { id: 5, at: t(3), actor: 'u-me', action: 'devices.delete', details: { device_name: 'Lautoka front desk' } },
           { id: 4, at: t(9), actor: 'u-me', action: 'members.update', details: { job_role: { was: 'staff', now: 'bookkeeper' }, user_id: 'u-jordan' } },
           { id: 3, at: t(30), actor: 'u-me', action: 'join_request.approved', details: { display_name: { was: 'Mere Vula', now: 'Mere Vula' } } },
           { id: 2, at: t(1440), actor: 'u-sam', action: 'branches.insert', details: { name: 'Lautoka branch', extension: 200 } },
@@ -577,18 +594,25 @@
           if (!/^[a-z0-9_-]{1,40}$/.test(n)) throw new Error('Use up to 40 lowercase letters, numbers, - or _ for the name (no spaces), e.g. hill-rd-site.');
           if (dgen(c) && n !== 'general') throw new Error('#general keeps its name, so everyone can find it.');
           if (!dgen(c) && n === 'general') throw new Error('There\'s already a #general. Choose another name.');
-          c.name = n; }
-        if (topic != null) { if (String(topic).trim().length > 200) throw new Error('Keep the topic under 200 characters.'); c.topic = String(topic).trim() || null; } },
+          if (n !== c.name) { const was = c.name; c.name = n; dnote(c, 'rename', { was, now: n }, `renamed #${was} to #${n}`); } }
+        if (topic != null) { if (String(topic).trim().length > 200) throw new Error('Keep the topic under 200 characters.'); const t = String(topic).trim() || null;
+          if (t !== (c.topic || null)) { c.topic = t; dnote(c, 'topic', { topic: t }, t ? `changed the topic to: ${t}` : 'cleared the topic'); } } },
       async archiveChannel(ch, on) { const c = dchan(ch); if (c.kind === 'dm') throw new Error('Direct messages can\'t be archived.');
         if (!dmanage(c)) throw new Error('Only whoever made this channel, or the owner or an admin, can archive it or bring it back.');
-        if (on && dgen(c)) throw new Error('#general is where everyone in the team talks, so it can\'t be archived.'); c.archived = !!on; },
-      async muteChannel(ch, on) { dchan(ch); dprefs[ch] = { muted: !!on, left_at: (dprefs[ch] || {}).left_at || null }; },
+        if (on && dgen(c)) throw new Error('#general is where everyone in the team talks, so it can\'t be archived.');
+        if (!!c.archived !== !!on) { c.archived = !!on; dnote(c, on ? 'archive' : 'unarchive', {}, on ? 'archived this channel' : 'brought this channel back'); } },
+      async muteChannel(ch, on, until) { dchan(ch); dprefs[ch] = { muted: !!on, muted_until: on && until ? until : null, left_at: (dprefs[ch] || {}).left_at || null }; return true; },
       async leaveChannel(ch) { const c = dchan(ch); if (c.kind === 'dm') throw new Error('You can\'t leave a direct message. Mute it instead.');
         if (dgen(c)) throw new Error('#general is for everyone in the team, so you can\'t leave it. Mute it instead.');
-        if (c.kind === 'private') { if (!c.people.some((x) => x !== AS)) throw new Error('You\'re the only person in this channel. Add someone first, or archive it.'); c.people = c.people.filter((x) => x !== AS); }
+        if (c.kind === 'private') { if (!c.people.some((x) => x !== AS)) throw new Error('You\'re the only person in this channel. Add someone first, or archive it.'); dnote(c, 'left', {}, 'left'); c.people = c.people.filter((x) => x !== AS); }
         else dprefs[ch] = { muted: !!(dprefs[ch] || {}).muted, left_at: new Date().toISOString() }; },
       async rejoinChannel(ch) { dchan(ch); if (dprefs[ch]) dprefs[ch].left_at = null; },
-      async setPeople(ch, add, remove) { const c = chans.find((x) => x.id === ch); c.people = [...new Set([...c.people, ...add])].filter((x) => !remove.includes(x)); },
+      async setPeople(ch, add, remove) { const c = chans.find((x) => x.id === ch);
+        if (!dmanage(c)) throw new Error('Only whoever made this channel, or a team owner or admin, can change who\'s in it');
+        const added = add.filter((x) => !c.people.includes(x)); const gone = remove.filter((x) => c.people.includes(x));
+        c.people = [...new Set([...c.people, ...add])].filter((x) => !remove.includes(x));
+        const names = (l) => l.map(dname).sort().join(', ');
+        if (added.length) dnote(c, 'add', { people: added }, 'added ' + names(added)); if (gone.length) dnote(c, 'remove', { people: gone }, 'removed ' + names(gone)); },
       async leave(ch) { const i = chans.findIndex((x) => x.id === ch); if (i >= 0) chans.splice(i, 1); },
       async openDm(_w, person) {
         let c = chans.find((x) => x.kind === 'dm' && x.people.includes(person));
@@ -611,7 +635,7 @@
       async dmSeen(ch) { return ch === 'd-sam' ? new Date().toISOString() : null; },   // in the demo Sam has read everything
       async unread() {
         const out = {};
-        for (const c of chans) out[c.id] = msgs.filter((m) => m.channel_id === c.id && m.user_id !== 'u-me' && !m.deleted && m.created_at > (read[c.id] || '')).length;
+        for (const c of chans) out[c.id] = msgs.filter((m) => m.channel_id === c.id && m.user_id !== 'u-me' && !m.deleted && !m.system && m.created_at > (read[c.id] || '')).length;
         return out;
       },
       live(_w, fn) { listener = fn; },
@@ -686,11 +710,13 @@
   const jobName = (j) => (JOBS.find((x) => x[0] === j) || [j, j === 'owner' ? 'Owner' : 'Staff'])[1];
   const nameOf = (uid) => (S.people.find((p) => p.user_id === uid) || {}).display_name || (S.former && S.former[uid] ? `${S.former[uid]} (left)` : 'Someone who left');
   const isGeneral = (c) => !!c && c.kind === 'channel' && c.name === 'general';
-  const muted = (id) => !!((S.cprefs || {})[id] || {}).muted;
+  // muted, and not past the time it was muted until (1 hour, 8 hours, until tomorrow, a week)
+  const muted = (id) => { const p = (S.cprefs || {})[id]; return !!(p && p.muted && !(p.until && Date.parse(p.until) <= Date.now())); };
+  const mutedUntil = (id) => (muted(id) && S.cprefs[id].until) || null;
   // Who may rename, change the topic and archive: whoever made the channel, or an owner or admin (the database checks too).
   const canManage = (c) => !!c && c.kind !== 'dm' && (c.created_by === S.user.id || isAdmin());
   const chanLabel = (c) => (c.kind === 'dm' ? nameOf(c.people.find((p) => p !== S.user.id) || S.user.id) : c.name);
-  const demoBar = () => (DEMO ? `<div class="demo-bar">This is a demo with sample messages and calls${CONFIGURED ? ` · <a href="${HERE}">Sign in for real</a>` : ''} · <a href="/programs/link.html">About Riyeser Link</a></div>` : '');
+  const demoBar = () => (DEMO ? `<div class="demo-bar"><span class="dbl">This is a demo with sample messages and calls</span><span class="dbs">Demo</span>${CONFIGURED ? ` · <a href="${HERE}">Sign in for real</a>` : ''} · <a href="/programs/link.html">About Riyeser Link</a></div>` : '');
 
   // ------------------------------------------------------------------ sign in / create account
   // A password box with an eye to show what was typed, and a Caps Lock warning.
@@ -1035,6 +1061,7 @@
     'branch_members.insert': 'put someone in a branch', 'branch_members.delete': 'took someone out of a branch', 'devices.insert': 'linked a PC',
     'devices.delete': 'unlinked a PC', 'join_request.approved': 'approved a join request', 'join_request.declined': 'declined a join request',
     'channel.rename': 'renamed a channel', 'channel.archive': 'archived a channel', 'channel.unarchive': 'brought back a channel',
+    'channel.topic': 'changed a channel\'s topic', 'channel.members': 'changed who\'s in a private channel',
     'link.assign_phone': 'gave a desk phone to someone', 'link.add_phone': 'added a desk phone', 'link.unassign_phone': 'took a desk phone off someone',
     'link.new_password': 'made a new phone password', 'link.set_dnd': 'changed Do not disturb', 'link.reveal_password': 'looked at a phone password (Set up a phone by hand)',
     'link.reveal_own': 'looked at their own phone password (My phone)', 'link.set_dnd_own': 'changed their own Do not disturb', 'link.name_phone': 'named or moved a desk phone',
@@ -1047,15 +1074,22 @@
     const d = h.details || {}; const v = (k) => (d[k] && typeof d[k] === 'object' && 'now' in d[k] ? d[k].now : d[k]);
     const who = h.actor ? nameOf(h.actor) : 'Riyeser';
     let what = HIST[h.action] || h.action;
+    if (h.action.startsWith('channel.')) {   // channel menu changes: "renamed a channel · #jobs → #site-jobs"
+      const l = (k) => (Array.isArray(d[k]) ? d[k].join(', ') : '');
+      const x = h.action === 'channel.rename' ? `${d.was || ''} → ${d.name || ''}` : h.action === 'channel.members'
+        ? `🔒 ${d.name || ''}${l('added') ? `: added ${l('added')}` : ''}${l('removed') ? `${l('added') ? ';' : ':'} removed ${l('removed')}` : ''}`
+        : h.action === 'channel.topic' ? `${d.name || ''}: ${d.topic ? `“${d.topic}”` : 'no topic'}` : d.name || '';
+      return `<div class="hl"><span class="ht"><span class="hw">${esc(who)}</span> ${esc(what)}${x ? ` · <b>${esc(x)}</b>` : ''}</span> <time>${ago(h.at)}</time></div>`;
+    }
     const extra = [v('display_name'), v('device_name'), v('name'), d.user_id ? nameOf(v('user_id')) : null, d.extension ? `extension ${d.extension}` : null].filter(Boolean)[0];
     const changed = h.action.endsWith('.update') ? Object.keys(d).filter((k) => d[k] && typeof d[k] === 'object' && 'was' in d[k]).map((k) => k.replace(/_/g, ' ')).join(', ') : '';
-    return `<div class="hl"><span class="hw">${esc(who)}</span> ${esc(what)}${extra ? ` · <b>${esc(extra)}</b>` : ''}${changed ? ` <small>(${esc(changed)})</small>` : ''}<time>${ago(h.at)}</time></div>`;
+    return `<div class="hl"><span class="ht"><span class="hw">${esc(who)}</span> ${esc(what)}${extra ? ` · <b>${esc(extra)}</b>` : ''}${changed ? ` <small>(${esc(changed)})</small>` : ''}</span> <time>${ago(h.at)}</time></div>`;
   }
   async function showHistory() {
     if (needs2step()) return security();
     let rows = [];
     try { rows = await api.history(S.team.id); } catch (err) { tell(plainError(err)); return; }
-    modal(`<h3>🕘 Change history</h3><p>Who changed people, access, branches, PCs and company details. It can't be edited or deleted.</p>
+    modal(`<h3>🕘 Change history</h3><p>Who changed people, access, branches, PCs, channels and company details. It can't be edited or deleted.</p>
       <div class="hist">${rows.map(histLine).join('') || '<div class="empty"><b>Nothing yet</b></div>'}</div>
       <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => { d.querySelector('#cl').onclick = close; });
   }
@@ -1198,7 +1232,7 @@
   async function loadPrefs() {
     const r = await api.channelPrefs(S.team.id, S.user.id).catch(() => null);
     S.cprefsOff = r === null;
-    S.cprefs = Object.fromEntries((r || []).map((x) => [x.channel_id, { muted: !!x.muted, left: !!x.left_at }]));
+    S.cprefs = Object.fromEntries((r || []).map((x) => [x.channel_id, { muted: !!x.muted, until: x.muted_until || null, left: !!x.left_at }]));
   }
 
   async function openChannel(id, toChat = true, draw = true) {
@@ -1222,7 +1256,7 @@
       if (i >= 0) S.msgs[i] = m; else S.msgs.push(m);
       renderMsgs(true); renderList();
       if (!document.hidden) api.markRead(S.ch.id, S.user.id);
-    } else if (m.user_id !== S.user.id && !m.deleted && !m.edited_at) {   // M9: an edit isn't a new message
+    } else if (m.user_id !== S.user.id && !m.deleted && !m.edited_at && !m.system) {   // M9: an edit isn't a new message (nor a line Link adds)
       S.unread[m.channel_id] = (S.unread[m.channel_id] || 0) + 1;
       if (!S.allChans.find((c) => c.id === m.channel_id)) loadChans().then(renderSide); else renderSide();
     }
@@ -2141,28 +2175,43 @@
   const callExt = (c) => (c.peer ? extOf(c.peer) : (S.branches.find((b) => b.id === c.branch) || {}).extension);
   const callLine = (c) => ({ missed: 'Missed', declined: 'Declined', offline: 'Not online', answered: c.dir === 'in' ? 'Incoming' : 'Outgoing', 'no answer': 'No answer', cancelled: 'Cancelled', elsewhere: 'Answered elsewhere' }[c.result] || c.result);
 
-  // ---- what you folded away (the Archived section) and whether the details panel is open. Kept in this browser, for each person.
+  // ---- what you folded away: the list's sections (Pinned, Channels, Direct messages, Archived), the details panel, and the
+  // chat list down to icons (on a computer). Kept with your account (riyeser_prefs.ui, like your theme) so it follows you to
+  // every PC, and in this browser for each person so it shows straight away (and when the account can't be saved to).
   const UI = (() => {
-    let v = { shut: {} }; let key = '';
-    function load(uid) {
+    let v = { shut: {} }; let key = ''; let timer = null;
+    const clean = (x) => (x && typeof x === 'object' ? { ...x, shut: { ...(x.shut && typeof x.shut === 'object' ? x.shut : {}) } } : null);
+    function load(uid, acct) {
       key = 'riyeser.link.ui.' + uid; v = { shut: {} };
-      try { const x = JSON.parse(localStorage.getItem(key) || 'null'); if (x && typeof x === 'object') v = { ...x, shut: { ...(x.shut && typeof x.shut === 'object' ? x.shut : {}) } }; } catch { /* private mode */ }
+      try { const x = clean(JSON.parse(localStorage.getItem(key) || 'null')); if (x) v = x; } catch { /* private mode */ }
+      const a = clean(acct); if (a) { v = { ...v, ...a, shut: { ...v.shut, ...a.shut } }; keep(); }
     }
-    const save = () => { if (key) try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* private mode */ } };
+    const keep = () => { if (key) try { localStorage.setItem(key, JSON.stringify(v)); } catch { /* private mode */ } };
+    function save() {
+      keep(); clearTimeout(timer);
+      timer = setTimeout(() => { if (S.user && api.savePrefs) api.savePrefs({ ui: { ...v } }).then((u) => { if (u && u.user_metadata) S.user.user_metadata = u.user_metadata; }).catch(() => { /* kept in this browser */ }); }, 600);
+    }
     return { load, get: (k) => v[k], set: (k, x) => { v[k] = x; save(); },
       // Archived starts folded
       shut: (k) => (k in v.shut ? !!v.shut[k] : k === 'archived'), setShut: (k, on) => { v.shut[k] = !!on; save(); } };
   })();
   const wideRight = () => matchMedia('(min-width: 1281px)').matches;   // wide enough for the details panel beside the chat
   function toggleRight() { if (S.details || S.pane === 'right') closeDetails(); else showRight(); }
+  // the chat list down to icons (a computer only; a phone shows one screen at a time). Ctrl + [ too.
+  const railOn = () => !!UI.get('rail') && !narrow();
+  function toggleRail() {
+    UI.set('rail', !UI.get('rail')); paneClasses(); renderList();
+    const b = document.getElementById('railbtn'); if (b) b.focus();
+  }
   function toggleSec(k) {
     UI.setShut(k, !UI.shut(k)); renderList();
     const b = document.querySelector(`[data-sect="${k}"]`); if (b) b.focus();
   }
   // A list section's heading: click (or Enter / Space) to fold it away or open it again
-  function secHead(k, label, extra = '', count = 0) {
+  // count: how many in it (a grey badge, Archived); unread: unread messages folded away with it (a red badge, so they aren't missed)
+  function secHead(k, label, extra = '', count = 0, unread = 0) {
     const shut = UI.shut(k);
-    return `<div class="sec${shut ? ' shut' : ''}" data-sec="${k}"><button class="sech" data-sect="${k}" aria-expanded="${!shut}" aria-controls="sb-${k}" title="${shut ? 'Show' : 'Hide'} ${esc(label)}">${ic('down')}${esc(label)}${count ? `<span class="badge dim">${count}</span>` : ''}</button>${extra}</div>`;
+    return `<div class="sec${shut ? ' shut' : ''}" data-sec="${k}"><button class="sech" data-sect="${k}" aria-expanded="${!shut}" aria-controls="sb-${k}" title="${shut ? 'Show' : 'Hide'} ${esc(label)}"><span class="sechi">${ic('down')}</span><span class="secl">${esc(label)}</span>${count ? `<span class="badge dim">${count}</span>` : ''}${unread ? `<span class="badge" aria-label="${unread} unread">${unread}</span>` : ''}</button>${extra}</div>`;
   }
   const secBody = (k, html) => `<div class="secb" id="sb-${k}"${UI.shut(k) ? ' hidden' : ''}>${html}</div>`;
   let keysOn = false;
@@ -2172,13 +2221,15 @@
     addEventListener('keydown', (e) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || !document.getElementById('lkshell') || document.querySelector('.modal')) return;
       if ((e.code === 'BracketRight' || e.key === ']') && S.nav === 'chat' && S.ch) { e.preventDefault(); toggleRight(); }
+      if ((e.code === 'BracketLeft' || e.key === '[') && !narrow()) { e.preventDefault(); toggleRail(); }
     });
   }
 
   // ---- loading what the workspace shows
   async function loadWorkspace() {
-    UI.load(S.user.id); wireKeys();
+    UI.load(S.user.id, ((S.user.user_metadata || {}).riyeser_prefs || {}).ui); wireKeys();
     S.nav = S.nav || 'chat'; S.pane = S.pane || 'list'; S.filter = S.filter || 'all';
+    if (wideRight() && UI.get('details') && S.nav === 'chat') S.details = true;   // the details panel stays open if you left it open
     S.myManual = undefined; S.myText = '';
     const [pins, last] = await Promise.all([api.pins(S.team.id, S.user.id).catch(() => null), api.lastMessages(S.team.id).catch(() => ({})), Presence.load()]);
     if (S.myManual === undefined) S.myManual = null;
@@ -2235,6 +2286,17 @@
   }
   // M27: programs and scripts that run when opened
   const isProgram = (name) => /\.(exe|msi|msix|appx|bat|cmd|com|scr|pif|ps1|vbs|vbe|js|jse|wsf|hta|jar|lnk|reg|cpl|apk|dmg|pkg|sh)$/i.test(String(name || ''));
+  // A line Riyeser Link adds when a channel changes: "Ana renamed #jobs to #site-jobs", "You archived this channel".
+  const SYS_ICON = { rename: 'edit', topic: 'note', archive: 'archive', unarchive: 'archive', add: 'users', remove: 'users', left: 'leave' };
+  function sysText(m) {
+    const x = m.system || {}; const who = m.user_id === S.user.id ? 'You' : nameOf(m.user_id);
+    const ppl = (l) => (Array.isArray(l) ? l.map((u) => (u === S.user.id ? 'you' : nameOf(u))).join(', ') : '');
+    const what = { rename: x.was && x.now ? `renamed #${x.was} to #${x.now}` : '', topic: x.topic ? `changed the topic to “${x.topic}”` : 'cleared the topic',
+      archive: 'archived this channel. It\'s read-only now', unarchive: 'brought this channel back', add: x.people ? `added ${ppl(x.people)}` : '',
+      remove: x.people ? `removed ${ppl(x.people)}` : '', left: 'left', removed: '' }[x.kind];
+    return x.kind === 'removed' ? 'A change to this channel' : `${who} ${what || m.body}`;
+  }
+  const sysLine = (m) => `<div class="lk-sys" data-sys="${esc((m.system || {}).kind || '')}" role="note">${ic(SYS_ICON[(m.system || {}).kind] || 'info')}<span>${esc(sysText(m))}</span> <time title="${esc(new Date(m.created_at).toLocaleString())}">${esc(new Date(m.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time></div>`;
   function msgsHtml() {
     if (!S.ch) return `<div class="empty"><b>No channels yet</b>Add one with + next to Channels.</div>`;
     if (!S.msgs.length) return `<div class="empty"><b>${S.ch.kind === 'dm' ? 'Say hello 👋' : `Welcome to #${esc(S.ch.name)}`}</b>${esc(S.ch.topic || 'Nothing here yet. Write the first message below.')}</div>`;
@@ -2242,6 +2304,7 @@
     for (const m of S.msgs) {
       const d = new Date(m.created_at); const day = d.toDateString();
       if (day !== lastDay) { out += `<div class="day"><span>${esc(dayName(d))}</span></div>`; lastDay = day; prev = null; }
+      if (m.system) { out += sysLine(m); prev = null; continue; }
       const cont = prev && prev.user_id === m.user_id && d - new Date(prev.created_at) < 5 * 60000;
       const mine = m.user_id === S.user.id && !m.deleted;
       const showText = !(m.files && m.files.length && m.body === autoBody(m.files)) || m.deleted;
@@ -2289,7 +2352,7 @@
     S.inChat = S.nav === 'chat' && (S.pane === 'main' || S.pane === 'right');
     sh.classList.toggle('inchat', S.nav === 'chat' && S.pane === 'main'); sh.classList.toggle('inright', S.pane === 'right');
     sh.classList.toggle('inview', S.nav !== 'chat' && S.pane !== 'right'); sh.classList.toggle('details', !!S.details && S.nav === 'chat');
-    sh.dataset.nav = S.nav;
+    sh.dataset.nav = S.nav; sh.classList.toggle('rail', railOn());
   }
   function go(pane) { S.pane = pane; if (pane !== 'right' && !wideRight()) S.details = false; paneClasses(); if (narrow()) Hist.move(pane); }
 
@@ -2503,7 +2566,7 @@
     const label = dm ? nameOf(dm) : ch.name; const on = S.nav === 'chat' && S.ch && id && S.ch.id === id;
     const pic = dm ? `<span class="lk-av">${av(dm, label)}${Presence.dot(dm)}</span>`
       : `<span class="lk-chic${ch.kind === 'private' ? ' prv' : ''}" aria-hidden="true">${ch.kind === 'private' ? ic('lock') : ic('hash')}</span>`;
-    const prev = lm ? (lm.deleted ? 'Message deleted' : `${lm.user_id === S.user.id ? 'You: ' : dm ? '' : esc(nameOf(lm.user_id).split(' ')[0]) + ': '}${esc(lm.body.replace(/\s+/g, ' ').slice(0, 70))}`)
+    const prev = lm ? (lm.deleted ? 'Message deleted' : lm.system ? esc(sysText(lm)) : `${lm.user_id === S.user.id ? 'You: ' : dm ? '' : esc(nameOf(lm.user_id).split(' ')[0]) + ': '}${esc(lm.body.replace(/\s+/g, ' ').slice(0, 70))}`)
       : dm ? esc(Presence.text(dm)) : esc((ch && ch.topic) || 'No messages yet');
     const pinned = id && S.pinned.includes(id); const mu = id && muted(id); const arch = !!(ch && ch.archived);
     return `<div class="lk-row${arch ? ' arch' : ''}"><button class="item${on ? ' on' : ''}${un && !arch ? ' unread' : ''}${mu ? ' muted' : ''}" ${dm ? `data-dm="${dm}"` : `data-ch="${id}"`}>${pic}
@@ -2529,9 +2592,17 @@
     const rows = convos().filter((r) => f === 'all' || (f === 'channels' ? !r.uid : f === 'people' ? !!r.uid : !!(r.c && S.unread[r.c.id] && !muted(r.c.id))));
     const empty = { all: 'Invite your team to start chatting.', channels: 'No channels yet. Press + New to add one.', people: 'No one else is here yet. Invite your team.', unread: 'You\'re all caught up.' }[f];
     const keep = document.getElementById('lscroll'); const y = keep ? keep.scrollTop : 0;
-    el.innerHTML = `<div class="lk-lhead"><h2>Chats</h2><button class="lk-new" id="newchat">${ic('plus')}<span>New</span></button></div>
+    const rail = railOn();
+    // sections (each folds away, remembered): Pinned, Channels, Direct messages, then Archived. Unread is one short list.
+    const isPin = (r) => r.c && S.pinned.includes(r.c.id);
+    const unreadOf = (l) => l.reduce((a, r) => a + (r.c && !muted(r.c.id) ? S.unread[r.c.id] || 0 : 0), 0);
+    const sect = (k, label, l) => (l.length ? `${secHead(k, label, '', 0, UI.shut(k) ? unreadOf(l) : 0)}${secBody(k, l.map((r) => chatRow(r.c, r.uid)).join(''))}` : '');
+    const body = f === 'unread' ? rows.map((r) => chatRow(r.c, r.uid)).join('')
+      : sect('pinned', 'Pinned', rows.filter(isPin)) + sect('channels', 'Channels', rows.filter((r) => !isPin(r) && !r.uid)) + sect('people', 'Direct messages', rows.filter((r) => !isPin(r) && r.uid));
+    el.innerHTML = `<div class="lk-lhead"><h2>Chats</h2><span class="lk-lacts"><button class="lk-new" id="newchat" aria-label="New chat" title="New chat">${ic('plus')}<span>New</span></button>
+        <button class="lk-ib lk-railb" id="railbtn" aria-pressed="${rail}" aria-label="${rail ? 'Show the chat list' : 'Shrink the chat list to icons'}" title="${rail ? 'Show the chat list' : 'Shrink to icons'} (Ctrl + [)">${ic(rail ? 'navopen' : 'navshut')}</button></span></div>
       <div class="lk-chips" role="tablist" aria-label="Show">${FILTERS.map(([k, n]) => `<button role="tab" class="chip${f === k ? ' on' : ''}" data-filter="${k}" aria-selected="${f === k}">${n}</button>`).join('')}</div>
-      <div class="sidescroll" id="lscroll">${rows.map((r) => chatRow(r.c, r.uid)).join('') || `<p class="lk-none">${empty}</p>`}
+      <div class="sidescroll" id="lscroll">${body || `<p class="lk-none">${empty}</p>`}
         ${S.archived.length && f !== 'unread' && f !== 'people' ? `${secHead('archived', 'Archived', '', S.archived.length)}${secBody('archived', `<p class="lk-none lk-archnote">Hidden for everyone and read-only. The messages are kept.</p>${S.archived.map((c) => chatRow(c)).join('')}`)}` : ''}
         ${f === 'all' || f === 'channels' ? `<button class="linkbtn lk-browse" id="browsech">Browse channels${S.leftChans.length ? ` · join one you left` : ''}</button>` : ''}</div>
       <button class="lk-fab" id="fabnew" aria-label="New chat">${ic('plus')}</button>`;
@@ -2548,7 +2619,8 @@
       e.preventDefault(); chanMenu(b, c, e.clientX || e.clientY ? { x: e.clientX, y: e.clientY } : null);
     });
     const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = fn; };
-    on('#newchat', newChat); on('#fabnew', newChat); on('#browsech', () => setNav('channels'));
+    on('#newchat', newChat); on('#fabnew', newChat); on('#browsech', () => setNav('channels')); on('#railbtn', toggleRail);
+    if (rail) el.querySelectorAll('.lk-row > .item').forEach((b) => { const n = b.querySelector('.nm'); if (n) { b.title = n.textContent; b.setAttribute('aria-label', n.textContent + (b.querySelector('.badge:not(.dim)') ? `, ${b.querySelector('.badge').textContent} unread` : '')); } });
     chatTitle();
   }
   function callRows(list, n) {
@@ -2785,7 +2857,7 @@
       ${man && !arch && !gen ? mi('mrename', 'edit', 'Rename') : ''}
       ${man && !arch ? mi('mtopic', 'note', 'Edit topic', c.topic ? esc(c.topic.slice(0, 60)) : 'Say what it\'s for') : ''}
       ${!dm ? mi('mmembers', 'users', 'Members', c.kind === 'private' ? `${nPeople} ${nPeople === 1 ? 'person' : 'people'} · ${canManage(c) ? 'add or remove people' : 'see who\'s in it'}` : 'Everyone in the team') : ''}
-      ${newDb ? mi('mmute', 'mute', mu ? 'Unmute' : 'Mute', mu ? 'Count its unread messages again' : 'Its messages won\'t add to your unread count') : ''}
+      ${newDb ? mi('mmute', 'mute', mu ? 'Unmute' : 'Mute…', mu ? (mutedUntil(c.id) ? `Muted until ${esc(untilText(mutedUntil(c.id)))}` : 'Muted until you turn it back on') : 'For an hour, a day, a week or until you unmute') : ''}
       ${!arch ? mi('mpin', 'pin', pinned ? 'Unpin this chat' : 'Pin this chat') : ''}
       ${S.unread[c.id] ? mi('mread', 'chat', 'Mark as read') : ''}
       ${!dm && !at ? mi('minfo', 'info', 'Channel info') : ''}
@@ -2800,7 +2872,7 @@
       const mg = (fn) => () => (c.created_by !== S.user.id && needs2step() ? security() : fn());
       on('#mrename', mg(() => renameChan(c, 'name'))); on('#mtopic', mg(() => renameChan(c, 'topic')));
       on('#mmembers', () => (c.kind === 'private' ? peopleOf(c) : (S.ch && S.ch.id === c.id ? showRight() : openChannel(c.id).then(() => showRight()))));
-      on('#mmute', () => muteChan(c)); on('#mpin', () => togglePin(c.id)); on('#minfo', () => showRight());
+      on('#mmute', () => muteChan(c, anchor, at)); on('#mpin', () => togglePin(c.id)); on('#minfo', () => showRight());
       on('#mread', () => { api.markRead(c.id, S.user.id); S.unread[c.id] = 0; renderSide(); });
       on('#mleave', () => leaveChan(c)); on('#marchive', mg(() => archiveChan(c, true))); on('#munarchive', mg(() => archiveChan(c, false)));
     }, 'chmenu', at);
@@ -2844,12 +2916,44 @@
       else { await openChannel(c.id); tell(`${chTitle(c)} is back for everyone.`, 'ok'); }
     } catch (err) { tell(plainError(err)); }
   }
-  async function muteChan(c) {
-    const on = !muted(c.id); const was = S.cprefs[c.id];
-    S.cprefs[c.id] = { ...(was || {}), muted: on }; afterChanChange(); chatTitle();
-    try { await api.muteChannel(c.id, on); tell(on ? `${chTitle(c)} is muted. Its messages won't add to your unread count.` : `${chTitle(c)} is unmuted.`, 'ok'); }
-    catch (err) { if (was) S.cprefs[c.id] = was; else delete S.cprefs[c.id]; afterChanChange(); tell(plainError(err)); }
+  // Mute: muted chats are unmuted straight away; otherwise "for how long" (the database's channel_mute_until; an older one
+  // only has "until I turn it back on").
+  const MUTE_FOR = [['1h', 'For 1 hour'], ['8h', 'For 8 hours'], ['tomorrow', 'Until tomorrow'], ['week', 'For a week'], ['ever', 'Until I turn it back on']];
+  function muteEnd(k) {
+    const d = new Date();
+    if (k === '1h') return new Date(+d + 3600e3); if (k === '8h') return new Date(+d + 8 * 3600e3); if (k === 'week') return new Date(+d + 7 * 86400e3);
+    if (k === 'tomorrow') { const t = new Date(d); t.setDate(t.getDate() + 1); t.setHours(8, 0, 0, 0); return t; }
+    return null;
   }
+  function untilText(iso) {
+    const t = new Date(iso); const today = new Date(); const tm = new Date(today); tm.setDate(tm.getDate() + 1);
+    const time = t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return t.toDateString() === today.toDateString() ? time : t.toDateString() === tm.toDateString() ? `tomorrow, ${time}`
+      : `${t.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}, ${time}`;
+  }
+  function muteChan(c, anchor, at = null) {
+    if (muted(c.id)) return setMute(c, false);
+    const a = anchor && document.body.contains(anchor) ? anchor : document.getElementById('morebtn') || document.body;
+    popMenu(a, `<div class="mh">Mute ${esc(chTitle(c))}</div><p class="mnote mtop">Its messages won't count as unread.</p>
+      ${MUTE_FOR.map(([k, l]) => `<button class="mi" id="mute-${k}" role="menuitem">${ic(k === 'ever' ? 'mute' : 'clock')}<span>${l}${k !== 'ever' ? `<small>Until ${esc(untilText(muteEnd(k).toISOString()))}</small>` : ''}</span></button>`).join('')}`,
+    (d, close) => { MUTE_FOR.forEach(([k]) => { d.querySelector('#mute-' + k).onclick = () => { close(); const e = muteEnd(k); setMute(c, true, e ? e.toISOString() : null); }; }); }, 'chmenu mutemenu', at);
+  }
+  async function setMute(c, on, until) {
+    const was = S.cprefs[c.id];
+    S.cprefs[c.id] = { ...(was || {}), muted: on, until: on ? until || null : null }; afterChanChange(); chatTitle();
+    try {
+      const timed = await api.muteChannel(c.id, on, on ? until : undefined);
+      if (on && until && timed === false) S.cprefs[c.id] = { ...S.cprefs[c.id], until: null };   // an older database: until turned back on
+      const u = S.cprefs[c.id].until; afterChanChange();
+      tell(on ? `${chTitle(c)} is muted${u ? ` until ${untilText(u)}` : ''}.` : `${chTitle(c)} is unmuted.`, 'ok');
+    } catch (err) { if (was) S.cprefs[c.id] = was; else delete S.cprefs[c.id]; afterChanChange(); tell(plainError(err)); }
+  }
+  // a timed mute ends by itself: redraw when one runs out
+  setInterval(() => {
+    if (!S.cprefs || !document.getElementById('lkshell')) return;
+    const done = Object.entries(S.cprefs).filter(([, p]) => p.muted && p.until && Date.parse(p.until) <= Date.now());
+    if (done.length) { done.forEach(([id]) => { S.cprefs[id] = { ...S.cprefs[id], muted: false, until: null }; }); afterChanChange(); chatTitle(); }
+  }, 30000);
   async function leaveChan(c, closeBox) {
     const priv = c.kind === 'private';
     if (!(await ask(priv ? `Leave ${c.name}? You won't see it again unless someone adds you back.` : `Leave #${c.name}? It goes from your list. You can join again from Browse channels, at the bottom of your chats.`, { yes: 'Leave', title: 'Leave this channel?' }))) return;
@@ -2886,10 +2990,10 @@
 
   // ---- details (ⓘ): a side sheet, only when asked for. A person: status, extension, Call. A channel: members, files, settings.
   function showRight() {
-    if (!S.ch) return; S.details = true;
+    if (!S.ch) return; S.details = true; if (!narrow()) UI.set('details', true);
     if (narrow()) { renderRight(); go('right'); } else { renderRight(); paneClasses(); renderHead(); }
   }
-  function closeDetails() { S.details = false; if (S.pane === 'right') S.pane = 'main'; paneClasses(); if (narrow()) Hist.move('main'); renderHead(); }
+  function closeDetails() { S.details = false; if (!narrow()) UI.set('details', false); if (S.pane === 'right') S.pane = 'main'; paneClasses(); if (narrow()) Hist.move('main'); renderHead(); }
   function renderRight() {
     const el = document.getElementById('lkright'); if (!el) return;
     const c = S.ch; let body = '';
@@ -2906,7 +3010,7 @@
             ${plus() ? `<div class="row2"><button class="btn sm lk-greenb" data-callp="${o}">${ic('phone')} Call</button><button class="btn sm" data-vidp="${o}">${ic('video')} Video</button></div>` : ''}</div>`
           : `<div class="lk-icard"><span class="lk-chic big">${c.kind === 'private' ? ic('lock') : ic('hash')}</span><b>${esc(c.name)}</b><small>${esc(c.topic || (c.kind === 'private' ? 'Private chat' : 'Everyone in the team'))}</small></div>`}
           <div class="lk-iacts"><button class="btn sm" id="ipin">${ic('pin')} ${pinned ? 'Unpin' : 'Pin'}</button>${S.cprefsOff ? '' : `<button class="btn sm" id="imute">${ic('mute')} ${mu ? 'Unmute' : 'Mute'}</button>`}
-            ${c.kind !== 'dm' ? `<button class="btn sm" id="iset" aria-haspopup="menu">${ic('cog')} Channel settings</button>` : ''}</div>
+            ${c.kind !== 'dm' ? `<button class="btn sm" id="iset" aria-haspopup="menu" aria-label="Channel settings: rename, topic, members, archive" title="Channel settings">${ic('cog')} Settings</button>` : ''}</div>
           ${c.kind !== 'dm' ? `<h4>${c.kind === 'private' ? 'Who\'s in it' : 'Members'} · ${c.kind === 'channel' ? S.people.length : c.people.length}</h4>
             <div class="lk-psearch">${ic('search')}<input id="psearch" placeholder="Search people" aria-label="Search people" value="${esc(S.pq || '')}"></div>
             <div class="lk-people" id="plist">${ppl.map((p) => personRow(p)).join('') || '<p class="lk-none">No one matches.</p>'}</div>${c.kind === 'private' ? '<button class="btn sm" id="ippl">Change who\'s in it</button>' : ''}` : ''}
@@ -2923,7 +3027,7 @@
         pn.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDm(r.dataset.person); } }; } } });   // M21
     const ps = el.querySelector('#psearch'); if (ps) ps.oninput = () => { S.pq = ps.value; const pos = ps.selectionStart; renderRight(); const n = document.getElementById('psearch'); n.focus(); n.setSelectionRange(pos, pos); };
     const on = (id, fn) => { const b = el.querySelector(id); if (b) b.onclick = fn; };
-    on('#ipin', () => togglePin(S.ch.id)); on('#imute', () => muteChan(S.ch)); on('#ippl', () => peopleOf()); on('#iset', (e) => chanMenu(e.currentTarget, S.ch));
+    on('#ipin', () => togglePin(S.ch.id)); on('#imute', (e) => muteChan(S.ch, e.currentTarget)); on('#ippl', () => peopleOf()); on('#iset', (e) => chanMenu(e.currentTarget, S.ch));
     el.querySelectorAll('[data-ifile]').forEach((b) => b.onclick = () => { const [mid, i] = b.dataset.ifile.split(':'); const m = S.msgs.find((x) => String(x.id) === mid); if (m) download(m.files[Number(i)]); });
     if (c && isAdmin() && S.storeInfo === undefined && S.details) { S.storeInfo = null; api.storage(S.team.id).then((x) => { S.storeInfo = x || false; if (S.details) renderRight(); }).catch(() => { S.storeInfo = false; }); }
   }

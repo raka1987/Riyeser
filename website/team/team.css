@@ -120,8 +120,9 @@ a { color: var(--blue); }
 .qr { margin: 10px 0 4px; } .qr img { width: 180px; height: 180px; border: 1px solid var(--line); border-radius: 10px; padding: 6px; background: #fff; image-rendering: pixelated; }
 .steps code { font-family: ui-monospace, Consolas, monospace; background: var(--panel-2); padding: 1px 6px; border-radius: 5px; word-break: break-all; }
 .hist { max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; }
-.hl { padding: 9px 12px; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.4; } .hl:first-child { border-top: 0; }
-.hl .hw { font-weight: 700; color: var(--ink); } .hl small { color: var(--muted); } .hl time { float: right; color: var(--muted); font-size: 12px; margin-left: 8px; }
+.hl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding: 9px 12px; border-top: 1px solid var(--line); font-size: 14px; line-height: 1.4; } .hl:first-child { border-top: 0; }
+.hl .ht { min-width: 0; overflow-wrap: anywhere; }
+.hl .hw { font-weight: 700; color: var(--ink); } .hl small { color: var(--muted); } .hl time { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .plan { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 10px; }
 .plan > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line); font-size: 14px; } .plan > div:first-child { border-top: 0; }
 .pl { font-weight: 600; color: var(--muted); font-size: 13px; text-align: right; } .pl.ok { color: #15803d; } .pl.warn { color: #b45309; } .pl.bad { color: #b91c1c; }
@@ -613,7 +614,7 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 .lk-icard { display: grid; justify-items: center; text-align: center; gap: 4px; padding: 18px 10px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel-2); }
 .lk-icard b { color: var(--ink); font-size: 16.5px; } .lk-icard small { color: var(--muted); } .lk-icard .row2 { margin-top: 10px; display: flex; gap: 8px; }
 .lk-icard .lk-av .av.big { width: 60px; height: 60px; } .lk-inote { font-style: italic; }
-.lk-iacts { display: flex; flex-wrap: wrap; gap: 6px; }
+.lk-iacts { display: flex; flex-wrap: nowrap; gap: 6px; min-width: 0; } .lk-iacts .btn { white-space: nowrap; }
 .btn.lk-greenb { background: #15803d; border-color: #15803d; color: #fff; } .btn.lk-greenb:hover { background: #166534; }
 .lk-scrim { display: none; }
 /* the keypad (Calls) */
@@ -752,7 +753,8 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 .mhead h2 .mutei .ic { width: 16px; height: 16px; vertical-align: -2px; }
 .lk-pill.arch { vertical-align: 2px; font-size: 11.5px; background: #fef3c7; color: #854d0e; }
 :root[data-theme="dark"] .lk-pill.arch { background: rgba(250, 204, 21, .16); color: #fde68a; }
-.chmenu { width: 290px; }
+.chmenu { width: 340px; max-width: calc(100vw - 16px); }
+.chmenu .mi small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chmenu .mi.warn, .chmenu .mi.warn .ic { color: #b45309; }
 :root[data-theme="dark"] .chmenu .mi.warn, :root[data-theme="dark"] .chmenu .mi.warn .ic { color: #fbbf24; }
 .chmenu .mi.warn { border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; }
@@ -889,3 +891,40 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 .cn-gprog { margin-top: 10px; padding: 9px 12px; border-radius: 10px; background: #f8fafc; border: 1px solid var(--line); font-size: 14px; }
 .cn-gprog.ok { background: #dcfce7; border-color: transparent; color: #14532d; } .cn-gprog.bad { background: #fef3c7; border-color: transparent; color: #78350f; }
 @media (max-width: 640px) { .cn-gtop { grid-template-columns: 1fr; } .cn-gwhere { grid-template-columns: 1fr; } }
+
+/* ================================================================ channel menu, part 2: lines in the chat, mute for a while, folding away */
+/* "Ana renamed #jobs to #site-jobs": a quiet line in the middle of the chat */
+.lk-sys { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px auto; padding: 4px 12px; max-width: min(640px, 100%); color: var(--muted); font-size: 13px; line-height: 1.45; text-align: center; }
+.lk-sys .ic { width: 15px; height: 15px; color: var(--muted); }
+.lk-sys span { min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.lk-sys time { flex: none; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mutemenu .mnote.mtop { margin: -2px 10px 6px; }
+/* the list's header: + New and "shrink to icons" */
+.lk-lacts { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.lk-railb .ic { width: 19px; height: 19px; }
+.sec .sech .secl { white-space: nowrap; }
+.sec .sech .badge { font-size: 11px; min-width: 18px; line-height: 17px; padding: 0 5px; }
+.sec .sechi { display: inline-flex; }
+/* the chat list down to icons (a computer): each chat's picture, its unread badge, its name on hover */
+@media (min-width: 761px) {
+  .shell.rail { --listw: 76px; }
+  .shell.rail .lk-brand { width: auto; }
+  .shell.rail .lk-lhead { flex-direction: column; gap: 8px; padding: 12px 0 8px; }
+  .shell.rail .lk-lhead h2, .shell.rail .lk-new span, .shell.rail .lk-chips, .shell.rail .lk-more, .shell.rail .lk-browse, .shell.rail .lk-archnote, .shell.rail .lk-none, .shell.rail .sec .secl, .shell.rail .sec .badge.dim { display: none; }
+  .shell.rail .lk-lacts { flex-direction: column; }
+  .shell.rail .lk-new { width: 40px; height: 40px; padding: 0; justify-content: center; }
+  .shell.rail .sidescroll { padding: 2px 8px 16px; overflow-x: hidden; }
+  .shell.rail .sec { justify-content: center; padding: 8px 0 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+  .shell.rail .sec:first-child { border-top: 0; margin-top: 0; }
+  .shell.rail .sec .sech { margin: 0; padding: 3px 4px; }
+  .shell.rail .item { justify-content: center; padding: 8px 0; position: relative; }
+  .shell.rail .lk-rb { position: absolute; inset: 0; display: block; pointer-events: none; }
+  .shell.rail .lk-r1, .shell.rail .lk-r2 .pv { display: none; }
+  .shell.rail .lk-r2 .badge { position: absolute; top: 3px; right: 2px; font-size: 11px; min-width: 18px; line-height: 17px; padding: 0 5px; box-shadow: 0 0 0 2px var(--panel); }
+}
+@media (max-width: 760px) { .lk-railb { display: none; } }
+/* the demo's bar fits a phone: "Demo · Sign in for real · About Riyeser Link" */
+.demo-bar .dbs { display: none; }
+@media (max-width: 560px) { .demo-bar .dbl { display: none; } .demo-bar .dbs { display: inline; font-weight: 700; } }
+/* All · Channels · People · Unread stay on one line in a narrower list (1280 at 125%) */
+@media (max-width: 1100px) and (min-width: 761px) { .lk-chips { gap: 5px; padding: 8px 14px 10px; } .chip { padding: 4px 9px; } }

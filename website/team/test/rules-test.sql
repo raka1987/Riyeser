@@ -2418,7 +2418,8 @@ end $$;
 select pg_temp.as_user('c4c4c4c4-0000-4000-8000-000000000004');
 do $$ declare o uuid := current_setting('cm.o')::uuid; begin
   assert (select archived from public.channels where id = o), 'Tui still sees #office, as archived';
-  assert (select count(*) from public.messages where channel_id = o) = 1, 'its messages are kept and readable';
+  assert (select count(*) from public.messages where channel_id = o and system is null) = 1, 'its messages are kept and readable';
+  assert (select body from public.messages where channel_id = o and system ->> 'kind' = 'archive') = 'archived this channel', 'Tui sees the "archived" line';
   begin insert into public.messages (channel_id, workspace_id, body) values (o, current_setting('cm.a')::uuid, 'still here?'); raise exception 'posted in archived';
   exception when others then assert sqlerrm like 'This channel is archived%', sqlerrm; end;
   begin update public.messages set body = 'edited' where id = current_setting('cm.m')::uuid; raise exception 'edited in archived';
@@ -2436,7 +2437,7 @@ do $$ declare o uuid := current_setting('cm.o')::uuid; begin
   perform public.channel_archive(o, false);
   assert (select not archived and archived_at is null and archived_by is null from public.channels where id = o), 'brought back';
   insert into public.messages (channel_id, workspace_id, body) values (o, current_setting('cm.a')::uuid, 'Back in business');
-  assert (select string_agg(action || ' ' || (details ->> 'name'), ', ' order by id) from public.audit_log where workspace_id = current_setting('cm.a')::uuid and action like 'channel.%')
+  assert (select string_agg(action || ' ' || (details ->> 'name'), ', ' order by id) from public.audit_log where workspace_id = current_setting('cm.a')::uuid and action in ('channel.rename', 'channel.archive', 'channel.unarchive'))
     = 'channel.rename #site-jobs, channel.archive #office, channel.unarchive #office', 'history of renames and archiving';
 end $$;
 -- Mute and Leave are each person's own
@@ -2472,6 +2473,70 @@ select pg_temp.as_user('c4c4c4c2-0000-4000-8000-000000000002');
 do $$ begin
   begin perform public.channel_archive(current_setting('cm.x')::uuid, true); raise exception 'archived a private chat I''m not in';
   exception when others then assert sqlerrm like 'That channel isn''t there%', sqlerrm; end;
+end $$;
+-- Part 2: the line each change leaves in the chat, the change history, mute for a while, people in and out of a private channel
+select pg_temp.as_user('c4c4c4c3-0000-4000-8000-000000000003');
+do $$ declare j uuid := current_setting('cm.j')::uuid; begin
+  assert (select string_agg(system ->> 'kind' || ':' || body, ' | ' order by created_at, body) from public.messages where channel_id = j and system is not null)
+    = 'topic:changed the topic to: Bookings and call-outs | topic:cleared the topic | rename:renamed #jobs to #site-jobs', 'Mele sees the lines for #site-jobs';
+  assert (select bool_and(user_id = auth.uid()) from public.messages where channel_id = j and system is not null), 'each line is from whoever made the change';
+  perform public.channel_rename(j, 'site-jobs', null);   -- nothing changed: no new line
+  assert (select count(*) from public.messages where channel_id = j and system is not null) = 3, 'no line when nothing changes';
+  -- nobody can write a line themselves, or change one
+  begin insert into public.messages (channel_id, workspace_id, body, system) values (j, current_setting('cm.a')::uuid, 'renamed #x to #y', '{"kind": "rename"}');
+    raise exception 'wrote a system line';
+  exception when others then assert sqlerrm like 'Only Riyeser Link adds%', sqlerrm; end;
+  begin update public.messages set body = 'renamed it to #fun' where channel_id = j and system ->> 'kind' = 'rename'; raise exception 'edited a system line';
+  exception when others then assert sqlerrm like 'This line can''t be changed%', sqlerrm; end;
+  begin perform public.channel_note(j, current_setting('cm.a')::uuid, 'rename', '{}', 'x'); raise exception 'called channel_note';
+  exception when insufficient_privilege then null; end;
+  assert not exists (select 1 from public.messages where channel_id = j and system is not null and body like '%#fun%'), 'the line is unchanged';
+  -- members can't read the change history
+  assert not exists (select 1 from public.audit_log), 'Mele (a member) reads no change history';
+end $$;
+select pg_temp.as_user('c4c4c4c1-0000-4000-8000-000000000001');
+do $$ declare a uuid := current_setting('cm.a')::uuid; x uuid := current_setting('cm.x')::uuid; begin
+  -- the owner's change history has the topic changes too
+  assert (select count(*) from public.audit_log where workspace_id = a and action = 'channel.topic') = 3, 'three topic changes in the history';
+  -- people in and out of the private #execs (Tui left it earlier): added, then removed, each a line and in the history
+  perform public.set_channel_people(x, array['c4c4c4c3-0000-4000-8000-000000000003'::uuid, 'c4c4c4c4-0000-4000-8000-000000000004'::uuid], '{}');
+  perform public.set_channel_people(x, '{}', array['c4c4c4c3-0000-4000-8000-000000000003'::uuid]);
+  perform public.set_channel_people(x, '{}', array['c4c4c4c5-0000-4000-8000-000000000005'::uuid]);   -- not in it: nothing to record
+  assert (select string_agg(body, ' | ' order by created_at, body) from public.messages where channel_id = x and system is not null)
+    = 'left | added Mele, Tui | removed Mele', 'the lines in #execs';
+  assert (select string_agg((details -> 'added')::text || (details -> 'removed')::text, ' | ' order by id) from public.audit_log where workspace_id = a and action = 'channel.members')
+    = '["Mele", "Tui"][] | []["Mele"]', 'who was added and removed, in the history';
+end $$;
+-- Tui: mute for a while (within a year), and an unmute clears the time
+select pg_temp.as_user('c4c4c4c4-0000-4000-8000-000000000004');
+do $$ declare g uuid := current_setting('cm.g')::uuid; x uuid := current_setting('cm.x')::uuid; begin
+  assert exists (select 1 from public.messages where channel_id = x and system ->> 'kind' = 'add'), 'Tui, added back, sees the line';
+  assert (select unread from public.unread_counts(current_setting('cm.a')::uuid) where channel_id = current_setting('cm.j')::uuid) = 0,
+    'the lines in #site-jobs aren''t unread messages for Tui';
+  perform public.channel_mute_until(g, now() + interval '8 hours');
+  assert (select muted and muted_until > now() + interval '7 hours' from public.channel_prefs where channel_id = g), 'muted for 8 hours';
+  perform public.channel_mute_until(g, null);
+  assert (select muted and muted_until is null from public.channel_prefs where channel_id = g), 'muted until turned back on';
+  begin perform public.channel_mute_until(g, now() - interval '1 minute'); raise exception 'muted until the past';
+  exception when others then assert sqlerrm like 'Choose a time in the next year%', sqlerrm; end;
+  begin perform public.channel_mute_until(g, now() + interval '400 days'); raise exception 'muted for over a year';
+  exception when others then assert sqlerrm like 'Choose a time in the next year%', sqlerrm; end;
+  perform public.channel_mute_until(g, now() + interval '1 hour'); perform public.channel_mute(g, false);
+  assert (select not muted and muted_until is null from public.channel_prefs where channel_id = g), 'unmuted: no time left over';
+  begin update public.messages set system = '{"kind": "rename"}' where id = current_setting('cm.m')::uuid; raise exception 'made a message a system line';
+  exception when others then assert sqlerrm like 'This line can''t be changed%', sqlerrm; end;
+  -- a member who didn't make #execs can't change who's in it
+  begin perform public.set_channel_people(x, array['c4c4c4c3-0000-4000-8000-000000000003'::uuid], '{}'); raise exception 'Tui added someone';
+  exception when others then assert sqlerrm like 'Only whoever made this channel%', sqlerrm; end;
+end $$;
+-- another business: no mute, no people changes, no lines to read
+select pg_temp.as_user('c4c4c4c5-0000-4000-8000-000000000005');
+do $$ begin
+  begin perform public.channel_mute_until(current_setting('cm.j')::uuid, now() + interval '1 hour'); raise exception 'Vai muted for a while';
+  exception when others then assert sqlerrm like 'That channel isn''t there%', sqlerrm; end;
+  begin perform public.set_channel_people(current_setting('cm.x')::uuid, array['c4c4c4c5-0000-4000-8000-000000000005'::uuid], '{}'); raise exception 'Vai joined #execs';
+  exception when others then assert sqlerrm like 'That isn''t a private channel%' or sqlerrm like 'Only whoever%', sqlerrm; end;
+  assert not exists (select 1 from public.messages where system is not null and workspace_id = current_setting('cm.a')::uuid), 'Vai reads none of the lines';
 end $$;
 -- another business can't touch any of it, and signed-out visitors can't call the actions
 select pg_temp.as_user('c4c4c4c5-0000-4000-8000-000000000005');

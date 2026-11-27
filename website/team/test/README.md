@@ -57,7 +57,7 @@
   status, separate drafts with the audience line, Log a call, Next update, diagnostics, support notes, phone width).
   Riyeser Central: `desktop/test/diagnostics.test.js` (scrubbing, 200 lines / 64 KB, the preview is what's sent).
 - `link-ui-test.js`: the Riyeser Link workspace (concept A: one list, one chat) in the demo and against a pretend Supabase: the
-  slim top bar and two panels (All · Channels · People · Unread, one badge a row, pinned at the top), Calls (with Voicemail)
+  slim top bar and two panels (All · Channels · People · Unread, one badge a row, pinned at the top, in folding sections), Calls (with Voicemail)
   and People as views, details (ⓘ) only when asked for; your status (Available, Busy / Do not disturb, At lunch, Away,
   Unavailable; 30 min / 1 hour / until a time, then back to Available; Away after 10 idle minutes; On a call and Offline
   can't be chosen) next to names; reactions, pins, New chat, files; the keypad only from Call or Calls; the call pill between
@@ -75,6 +75,15 @@
   pretend Supabase (channel_rename / channel_archive / channel_mute, the database's refusal in the dialog, an older
   database). `rules-test.sql` covers the database side (who may rename and archive, two-step sign-in for admins,
   #general, read-only archived channels, mute and leave are each person's own, another business can't touch any of it).
+  Part 2: Mute for 1 hour / 8 hours / until tomorrow / a week / until turned back on (`channel_mute_until`; a timed mute ends by
+  itself); a line in the chat for each change ("You renamed #office to #paper-work", topic, archived / brought back, added /
+  removed / left a private channel), not counted as unread; the change history (renames, topics, archiving, who's in a private
+  channel); the list's sections (Pinned, Channels, Direct messages, Archived) fold away, the list shrinks to icons (Ctrl + [) and
+  the details stay open, all remembered with the account (`riyeser_prefs.ui`) and in the browser, including after a reload and
+  from the account alone; the layout at 1280 at 125%, 1366, 1920 and 390, light and dark (nothing cut off or wrapping, no
+  sideways scroll); a database with the channel menu but not part 2. `rules-test.sql`: the lines (only the database adds them,
+  nobody edits them, from whoever made the change, none when nothing changed, not unread, not seen by another business),
+  `channel.topic` / `channel.members` in the history, `channel_mute_until` (within a year), `set_channel_people` permissions.
 - Every browser test takes `LINK_BASE=http://127.0.0.1:8091` to use another port. Confirmations are in-page now (`#askyes`).
 - `pricing-test.js`: the website's prices (pricing v2: US dollars, per business per month, 3 users included in each program;
   Riyeser Link US$20 is a paid program; POS 1 till and unlimited cashiers, US$15 a till; bundles Shop US$59, Office US$59,
