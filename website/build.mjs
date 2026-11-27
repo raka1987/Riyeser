@@ -1378,6 +1378,40 @@ for (const d of developerPages({ API: API_BASE, EMAIL, WIDGET_JS: `${SITE}/widge
 mkdirSync(join(OUT, 'widget'), { recursive: true });
 writeFileSync(join(OUT, 'widget', 'book.js'), readFileSync(join(ROOT, 'widget', 'book.js'), 'utf8').replace("'__RIYESER_API__'", JSON.stringify(API_BASE)));
 
+// ---------- the hosted booking page: riyeser.com/book/<address> (website/book) ----------
+// riyeser.com is static (GitHub Pages behind Cloudflare), so there's no page per business: /book/index.html reads
+// the address from the URL. A clean riyeser.com/book/harbour-hair isn't a file, so the host answers it with 404.html,
+// which is the same page (it shows "That page isn't here" for any other missing address). /book/?b=harbour-hair works
+// on any host too. The page talks only to the API (connect-src) and shows only the business's logo (img-src data:).
+mkdirSync(join(OUT, 'book'), { recursive: true });
+const bookJs = readFileSync(join(ROOT, 'book', 'book.js'), 'utf8').replace("'__RIYESER_API__'", JSON.stringify(API_BASE));
+const bookCss = readFileSync(join(ROOT, 'book', 'book.css'), 'utf8');
+writeFileSync(join(OUT, 'book', 'book.js'), bookJs);
+writeFileSync(join(OUT, 'book', 'book.css'), bookCss);
+const stamp8 = (t) => createHash('sha256').update(t).digest('hex').slice(0, 8);
+const bookShell = (title) => withCsp(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>${title}</title>
+<meta name="description" content="Book online with a Riyeser business: choose a service and a free time.">
+<meta property="og:title" content="Book online">
+<meta property="og:description" content="Choose a service and a free time. No account needed.">
+<link rel="icon" href="${BASE}assets/favicon.png" type="image/png">
+<link rel="stylesheet" href="${BASE}book/book.css?v=${stamp8(bookCss)}">
+</head>
+<body data-base="${BASE}">
+<div class="wrap" id="app"><p class="foot">Loading…</p></div>
+<div id="live" class="sr" aria-live="polite"></div>
+<script src="${BASE}book/book.js?v=${stamp8(bookJs)}" defer></script>
+</body>
+</html>
+`);
+writeFileSync(join(OUT, 'book', 'index.html'), bookShell('Book online · Riyeser'));
+
 // ---------- old riyeser.com addresses keep working ----------
 const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
@@ -1399,5 +1433,7 @@ if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
 const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...guidesFor({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`), ...DEV_PAGES.map(([p]) => (p === 'index' ? 'developers/' : `developers/${p}.html`))];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
-writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyeser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
+// Missing pages: the booking page's shell, which shows a business's booking page for /book/<address> and "That page
+// isn't here" for anything else (see the booking page above).
+writeFileSync(join(OUT, '404.html'), bookShell('Riyeser'));
 console.log('Built', urls.length, 'pages into', OUT);

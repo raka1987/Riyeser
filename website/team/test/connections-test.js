@@ -14,6 +14,10 @@
 //  9. An older database (PGRST202): "Connections aren't set up yet", nothing breaks.
 // 10. Staff never see Connections (no tile, ?connections does nothing, no api_* call); an owner without two-step
 //     sign-in is sent to set it up. 11. Phone width (390): no sideways scrolling on any tab.
+// 13. Booking page: off until switched on (no nudge on the Overview), the address checked as you type (taken, tidied),
+//     one tick switches it on with the address and look (no key shown), colour / welcome text / prices hidden in a live
+//     preview, the link, share texts (WhatsApp, Facebook, Instagram, Google Business) and QR code; off again; no Bookings
+//     licence (a calm note); an older database; a personal account has no Booking page tab; phone width.
 // Run: build the site (node website/build-combined.mjs), serve website/public on 8090 (or LINK_BASE), then
 // `node website/team/test/connections-test.js <shots>`. Exits 1 on any failure.
 const { chromium } = require('playwright');
@@ -57,12 +61,28 @@ async function fakeServer(page, opts = {}) {
     if (u.pathname === '/auth/v1/factors/f1/challenge') return json({ id: 'ch1', expires_at: Math.floor(Date.now() / 1000) + 300 });
     if (u.pathname === '/auth/v1/factors/f1/verify') { if (a.code !== '246810') return json({ code: 'mfa_verification_failed', msg: 'Invalid TOTP code entered' }, 422);
       st.unlocked = true; return json({ access_token: token(), token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, refresh_token: 'r2', user }); }
-    if (u.pathname === '/rest/v1/members' && u.search.includes('workspaces')) return json([{ role, job_role: role, display_name: 'Alex Sample', workspaces: { id: 'w1', name: 'Sample Salon', invite_code: 'AB12CD34', company_code: 'RIY-7K3M-Q2', kind: 'business', country: 'Fiji' } }]);
+    if (u.pathname === '/rest/v1/members' && u.search.includes('workspaces')) return json([{ role, job_role: role, display_name: 'Alex Sample', workspaces: { id: 'w1', name: 'Sample Salon', invite_code: 'AB12CD34', company_code: 'RIY-7K3M-Q2', kind: opts.personal ? 'personal' : 'business', country: 'Fiji' } }]);
     if (u.pathname === '/rest/v1/members') return json([{ user_id: user.id, display_name: 'Alex Sample', role, job_role: role, extension: 101 }]);
     if (u.pathname === '/rest/v1/channels') return json([{ id: 'c1', kind: 'channel', name: 'general', topic: null }]);
     if (u.pathname === '/rest/v1/audit_log') return json(st.audit);
     if (fn === 'company_licence') return json({ modules: { bookings: { status: 'trial', active: true, days_left: 60 } }, seats: { included: 3, extra: 0, used: 1 } });
     if (fn === 'team_features') return json({ calls: true });
+    // ---- the booking page (booking_page_* in team-chat.sql)
+    if (fn.startsWith('booking_page_')) {
+      st.calls.push(fn); (st.bpArgs = st.bpArgs || []).push([fn, a]);
+      if (opts.oldDatabase) return json({ code: 'PGRST202', message: `Could not find the function public.${fn}(ws) in the schema cache`, details: null, hint: null }, 404);
+      const bp = st.bp || (st.bp = { page: null });
+      const view = () => ({ page: bp.page && { ...bp.page, working: bp.page.enabled }, suggested_slug: bp.page ? bp.page.slug : 'sample-salon', business: { name: 'Sample Salon', address: '12 Marine Drive, Suva', phone: '+679 330 1234' },
+        allowed: !opts.noBookings, published: { services: opts.noServices ? 0 : 4, open_times: 30, availability_at: ago(5) }, bookings_7d: bp.page && bp.page.enabled ? 2 : 0 });
+      const clean = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      if (fn === 'booking_page_get') return json(view());
+      if (fn === 'booking_page_slug_check') { const v = clean(a.slug); if (v.length < 3) return json({ ok: false, slug: null, message: 'The address needs at least 3 letters or numbers.' });
+        return json(v === 'harbour-hair' ? { ok: false, slug: v, message: `riyeser.com/book/${v} is taken. Try adding your town, like ${v}-suva.` } : { ok: true, slug: v, message: null }); }
+      if (fn === 'booking_page_save') { const x = a.settings || {}; if ('slug' in x && clean(x.slug) === 'harbour-hair') return fail('riyeser.com/book/harbour-hair is taken. Try another address.');
+        bp.page = { slug: 'sample-salon', enabled: false, intro: null, colour: '#0e7c86', logo: null, show_prices: true, show_staff: true, show_contact: true, ...(bp.page || {}) };
+        if ('slug' in x) bp.page.slug = clean(x.slug); for (const k of ['enabled', 'colour', 'show_prices', 'show_staff', 'show_contact']) if (k in x && x[k] !== null) bp.page[k] = x[k];
+        if ('intro' in x) bp.page.intro = x.intro || null; if ('logo' in x) bp.page.logo = x.logo || null; return json(view()); }
+    }
     if (!fn.startsWith('api_')) return json([]);
     // ---- the api_* functions
     st.calls.push(fn); st.args[fn] = a;
@@ -308,6 +328,67 @@ const noSideways = (pg) => pg.evaluate(() => document.documentElement.scrollWidt
     await signIn(p12b, BASE + '/link/?connections'); await p12b.waitForSelector('#mgucode'); await p12b.fill('#mgucode', '246810'); await p12b.click('#mgugo'); await p12b.waitForSelector('#cnguide');
     assert.ok(await noSideways(p12b), 'guide: no sideways scrolling on a phone');
     console.log('connect your website guide: ok');
+
+    // 13. Booking page: off until switched on; the address checked as you type; one tick turns it on (no key shown);
+    //     look (colour, welcome text, prices hidden) with a live preview; share texts, QR code; personal accounts have none.
+    const [p13, s13] = await newPage({});
+    await signIn(p13, BASE + '/link/?connections'); await p13.waitForSelector('#mgucode'); await p13.fill('#mgucode', '246810'); await p13.click('#mgugo');
+    await p13.waitForSelector('#connPage .cn-stats');
+    assert.ok(!s13.calls.includes('booking_page_get'), 'the booking page is only asked for on its own tab');
+    assert.ok(!/booking page/i.test(await text(p13, '#cnpanel')), 'no banner or nudge about the booking page on the Overview');
+    await p13.click('#cnt-page'); await p13.waitForSelector('#bpcard');
+    assert.strictEqual(await p13.$eval('#bpon', (e) => e.checked), false, 'off until switched on');
+    assert.match(await text(p13, '#bpstate'), /Off/); assert.strictEqual(await p13.$('#bpshare'), null, 'nothing to share while it is off');
+    assert.strictEqual(await p13.$eval('#bpslug', (e) => e.value), 'sample-salon', 'an address from the business name');
+    await p13.fill('#bpslug', 'Harbour Hair'); await p13.waitForSelector('#bpslugmsg.bad');
+    assert.match(await text(p13, '#bpslugmsg'), /is taken/); assert.strictEqual(await p13.getAttribute('#bpslug', 'aria-invalid'), 'true');
+    await p13.click('#bpon'); await p13.waitForTimeout(300);
+    assert.strictEqual(await p13.$eval('#bpon', (e) => e.checked), false, 'a taken address can\'t be switched on');
+    await p13.fill('#bpslug', 'Sample Salon Suva'); await p13.waitForSelector('#bpslugmsg.ok');
+    assert.match(await text(p13, '#bpslugmsg'), /riyeser\.com\/book\/sample-salon-suva is free/);
+    await p13.fill('#bpintro', 'Walk-ins welcome <b>too</b>.'); await p13.click('[data-bpshow=show_prices]');
+    await p13.$eval('#bpcol', (e) => { e.value = '#7c3aed'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+    assert.match(await text(p13, '.bp-prev'), /Walk-ins welcome <b>too<\/b>\./); assert.ok(!/\$45/.test(await text(p13, '.bp-prev')), 'the preview hides prices');
+    assert.strictEqual(await p13.$eval('.bp-prev', (e) => e.style.getPropertyValue('--bpa')), '#7c3aed', 'the preview in the new colour');
+    await p13.check('#bpon'); await p13.waitForSelector('#bpshare');
+    const on = s13.bpArgs.filter(([f]) => f === 'booking_page_save').pop()[1].settings;
+    assert.deepStrictEqual({ slug: on.slug, enabled: on.enabled, colour: on.colour, show_prices: on.show_prices }, { slug: 'Sample Salon Suva', enabled: true, colour: '#7c3aed', show_prices: false });
+    assert.match(await text(p13, '#bpstate'), /On riyeser\.com\/book\/sample-salon-suva/);
+    assert.ok(!/rk_|api key/i.test(await text(p13, '#cnpanel')), 'no key is ever shown');
+    assert.strictEqual(await p13.$eval('#bpurl', (e) => e.value), 'https://riyeser.com/book/sample-salon-suva');
+    for (const id of ['whatsapp', 'facebook', 'instagram', 'google']) assert.match(await p13.$eval(`#bptx-${id}`, (e) => e.value), /https:\/\/riyeser\.com\/book\/sample-salon-suva/, id);
+    assert.match(await p13.getAttribute('[data-share=whatsapp] a', 'href'), /^https:\/\/wa\.me\/\?text=Book%20your%20next%20visit/);
+    await p13.waitForSelector('#bpqr svg'); assert.ok(true, 'a QR code from the vendored maker');
+    await p13.waitForTimeout(3700);   // the "it's on" note fades
+    const tall = await p13.evaluate(() => document.documentElement.scrollHeight); await p13.setViewportSize({ width: 1280, height: tall });
+    await p13.screenshot({ path: out + '/business-booking-page.png' });
+    await (await p13.$('#bpshare')).screenshot({ path: out + '/business-booking-page-qr.png' }); await p13.setViewportSize({ width: 1280, height: 900 });
+    await p13.click('[data-copy="#bpurl"]'); assert.strictEqual(await p13.evaluate(() => navigator.clipboard.readText()), 'https://riyeser.com/book/sample-salon-suva');
+    // switch it off again
+    await p13.uncheck('#bpon'); await p13.waitForSelector('#bpstate [data-st=off]');
+    assert.strictEqual(s13.bpArgs.filter(([f]) => f === 'booking_page_save').pop()[1].settings.enabled, false);
+    // phone width
+    const [p13b] = await newPage({}, { width: 390, height: 844 });
+    await signIn(p13b, BASE + '/link/?connections'); await p13b.waitForSelector('#mgucode'); await p13b.fill('#mgucode', '246810'); await p13b.click('#mgugo');
+    await p13b.waitForSelector('#cnt-page'); await p13b.click('#cnt-page'); await p13b.waitForSelector('#bpcard'); await p13b.check('#bpon'); await p13b.waitForSelector('#bpshare svg');
+    assert.ok(await noSideways(p13b), 'booking page: no sideways scrolling on a phone');
+    await p13b.waitForTimeout(3700); await p13b.setViewportSize({ width: 390, height: await p13b.evaluate(() => document.documentElement.scrollHeight) });
+    await p13b.screenshot({ path: out + '/business-booking-page-phone.png' });
+    // no Riyeser Bookings / nothing published: a calm note, not a pop-up; an older database
+    const [p13c] = await newPage({ noBookings: true });
+    await signIn(p13c, BASE + '/link/?connections'); await p13c.waitForSelector('#mgucode'); await p13c.fill('#mgucode', '246810'); await p13c.click('#mgugo');
+    await p13c.waitForSelector('#cnt-page'); await p13c.click('#cnt-page'); await p13c.waitForSelector('[data-note=plan]');
+    assert.match(await text(p13c, '[data-note=plan]'), /needs Riyeser Bookings/); assert.strictEqual(await p13c.$('.modal'), null);
+    const [p13d] = await newPage({ oldDatabase: true });
+    await signIn(p13d, BASE + '/link/?connections'); await p13d.waitForSelector('#mgucode'); await p13d.fill('#mgucode', '246810'); await p13d.click('#mgugo');
+    await p13d.waitForSelector('#cnoff, #cnt-page'); assert.ok(await p13d.$('#cnoff'), 'an older database: Connections not set up yet (nothing breaks)');
+    // a personal account: no Booking page tab
+    const [p13e, s13e] = await newPage({ personal: true });
+    await signIn(p13e, BASE + '/link/?connections'); await p13e.waitForSelector('#mgucode', { timeout: 8000 }).catch(() => null);
+    if (await p13e.$('#mgucode')) { await p13e.fill('#mgucode', '246810'); await p13e.click('#mgugo'); }
+    await p13e.waitForTimeout(1500);
+    assert.strictEqual(await p13e.$('#cnt-page'), null, 'no Booking page tab for a personal account'); assert.ok(!s13e.calls.includes('booking_page_get'));
+    console.log('booking page settings: ok');
   } catch (e) { failed = true; console.error('FAIL', e); }
   if (errs.length) { failed = true; console.error('page errors:', errs); }
   await b.close();

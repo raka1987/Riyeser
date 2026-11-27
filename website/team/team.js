@@ -562,9 +562,23 @@
           case 'api_event_status': { const e = st.inbox.find((x) => x.id === a.event_id); if (!e) throw new Error('That test isn\'t in the post box.');
             if (e.test && e.status === 'waiting' && Date.now() - e.at > 4000) Object.assign(e, { status: 'done', taken_by_pc: 'Head office PC', result: { state: 'received', message: 'Thanks, we\'ll be in touch. (test)' } });
             return { id: e.id, kind: e.kind, status: e.status, test: e.test, result: e.result, taken_by_pc: e.taken_by_pc, created_at: e.created_at, updated_at: now }; }
+          // the booking page (riyeser.com/book/…): off until switched on
+          case 'booking_page_get': return bpGet();
+          case 'booking_page_slug_check': { const v = String(a.slug || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+            if (v.length < 3) return { ok: false, slug: null, message: 'The address needs at least 3 letters or numbers.' };
+            if (['admin', 'riyeser', 'book', 'demo', 'help', 'support'].includes(v)) return { ok: false, slug: null, message: `"${v}" is kept for Riyeser. Try your business's name.` };
+            if (v === 'harbour-hair') return { ok: false, slug: v, message: `riyeser.com/book/${v} is taken. Try adding your town, like ${v}-suva.` };
+            return { ok: true, slug: v, message: null }; }
+          case 'booking_page_save': { const x = a.settings || {}; const pg = st.page || (st.page = { slug: 'sample-plumbing', enabled: false, intro: null, colour: '#0e7c86', logo: null, show_prices: true, show_staff: true, show_contact: true });
+            if ('slug' in x) { const v = String(x.slug || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); if (v.length < 3) throw new Error('The address needs at least 3 letters or numbers.'); if (v === 'harbour-hair') throw new Error(`riyeser.com/book/${v} is taken. Try another address.`); pg.slug = v; }
+            ['enabled', 'colour', 'show_prices', 'show_staff', 'show_contact'].forEach((k) => { if (k in x && x[k] != null) pg[k] = x[k]; });
+            if ('intro' in x) pg.intro = String(x.intro || '').trim() || null; if ('logo' in x) pg.logo = x.logo || null;
+            pg.updated_at = now; pg.working = pg.enabled; return bpGet(); }
           default: throw new Error(`Could not find the function public.${fn}`);
         }
       };
+      function bpGet() { return { page: st.page ? { ...st.page } : null, suggested_slug: st.page ? st.page.slug : 'sample-plumbing', business: { name: 'Sample Plumbing', address: '14 Victoria Parade, Suva', phone: '330 1234' },
+        allowed: true, published: { services: 6, open_times: 64, availability_at: ago(9) }, bookings_7d: st.page && st.page.enabled ? 3 : 0 }; }
     })();
     const reply = (ch, from, body, ms) => setTimeout(() => { const m = msg(ch, from, body, 0); m.created_at = new Date().toISOString(); msgs.push(m); listener && listener(m); }, ms);
     return {
@@ -4607,7 +4621,7 @@
       ['payment.received', 'An invoice payment comes in'], ['stock.changed', 'Stock levels change']],
     KINDS: { booking: 'Booking', order: 'Order', enquiry: 'Enquiry', customer: 'Customer', quote_accept: 'Quote accepted', invoice_payment: 'Invoice payment' },
     BOX: [['', 'All'], ['waiting', 'Waiting'], ['taken', 'Being filed'], ['done', 'Done'], ['failed', 'Failed'], ['rejected', 'Rejected']],
-    TABS: [['overview', 'Overview'], ['keys', 'API keys'], ['inbox', 'Post box'], ['log', 'Request log'], ['hooks', 'Webhooks'], ['site', 'Add to your website']],
+    TABS: [['overview', 'Overview'], ['page', 'Booking page'], ['keys', 'API keys'], ['inbox', 'Post box'], ['log', 'Request log'], ['hooks', 'Webhooks'], ['site', 'Add to your website']],
     WIDGET_JS: 'https://riyeser.com/widget/book.js',
   };
   const cnMissing = (e) => /PGRST202|Could not find the function|schema cache/i.test(String((e && (e.message || e.code)) || '') + ' ' + String((e && e.code) || ''));
@@ -4617,10 +4631,13 @@
     const l = { taken: 'Being filed', active: 'Active', revoked: 'Revoked', waiting: 'Waiting', done: 'Done', failed: 'Failed', rejected: 'Rejected', pending: 'Waiting', delivered: 'Delivered' }[st] || st;
     return `<span class="lo-pill ${c}" data-st="${esc(st)}">${esc(l)}</span>`; };
   const lines = (s) => String(s || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  // A personal account (one person, no business) has no booking page.
+  const cnTabs = () => CN.TABS.filter(([id]) => id !== 'page' || (S.team && S.team.kind !== 'personal'));
   async function connectionsPage(back, tab) {
     if (!isAdmin()) return;
     if (needs2step()) return security();
     S.cnBack = back || S.cnBack || (S.home ? 'home' : 'manage'); S.view = 'connections'; S.home = false;
+    if (tab === 'page' && S.team.kind === 'personal') tab = 'overview';
     S.cn = { tab: tab || (S.cn && S.cn.tab) || 'overview', box: '', reqKey: '', reqSt: '', widgetKey: S.cn && S.cn.widgetKey, site: (S.cn && S.cn.site) || { type: 'booking', accent: '#2563eb', theme: 'auto', sku: '', name: '', price: '' } };
     drawConn(); await cnLoad(); drawConn(true);
   }
@@ -4630,6 +4647,7 @@
       [c.ov, c.keys, c.hooks] = await Promise.all([api.conn('api_overview', { ws }), api.conn('api_keys_list', { ws }), api.conn('api_webhooks_list', { ws })]);
       // where things stand for the guide's checklist (an older database has no api_status: the checklist uses the overview)
       c.status = await api.conn('api_status', { ws, device: null }).catch(() => null);
+      if (c.tab === 'page') await bpLoad();
       if (c.tab === 'inbox') c.inbox = await api.conn('api_inbox_recent', { ws, status: c.box || null, max_rows: 100 });
       if (c.tab === 'log') { c.reqs = await api.conn('api_requests_list', { ws, key_id: c.reqKey || null, max_rows: 100, before_id: null }); c.more = (c.reqs || []).length >= 100; }
     } catch (e) { if (cnMissing(e)) c.off = true; else c.err = plainError(e); }
@@ -4643,8 +4661,8 @@
     if (!loaded && !c.ov && !c.off) body = '<p class="muted">Loading…</p>';
     else if (c.off) body = `<div class="lo-card cn-off" id="cnoff"><h2>Connections aren't set up yet</h2><p>Riyeser is finishing an update for online connections (your website, booking widget and webhooks). It will be here soon: nothing needs doing on your side.</p><p class="muted small">If you look after the Riyeser database yourself: run the latest <code>team-chat.sql</code> in the Supabase SQL Editor.</p></div>`;
     else if (c.err && !c.ov) body = `<div class="err" role="alert">${esc(c.err)}</div><button class="btn" id="cnretry">Try again</button>`;
-    else body = `${c.err ? `<div class="err" role="alert">${esc(c.err)}</div>` : ''}<div class="cn-tabs" role="tablist" aria-label="Connections">${CN.TABS.map(([id, l]) => `<button role="tab" class="cn-tab${c.tab === id ? ' on' : ''}" id="cnt-${id}" data-tab="${id}" aria-selected="${c.tab === id}" aria-controls="cnpanel">${l}${id === 'inbox' && c.ov && c.ov.inbox.failed ? ` <span class="badge" title="Failed">${c.ov.inbox.failed}</span>` : ''}</button>`).join('')}</div>
-      <section class="cn-panel" id="cnpanel" role="tabpanel" aria-labelledby="cnt-${c.tab}">${({ overview: cnOverview, keys: cnKeys, inbox: cnInbox, log: cnLog, hooks: cnHooks, site: cnSite })[c.tab]()}</section>`;
+    else body = `${c.err ? `<div class="err" role="alert">${esc(c.err)}</div>` : ''}<div class="cn-tabs" role="tablist" aria-label="Connections">${cnTabs().map(([id, l]) => `<button role="tab" class="cn-tab${c.tab === id ? ' on' : ''}" id="cnt-${id}" data-tab="${id}" aria-selected="${c.tab === id}" aria-controls="cnpanel">${l}${id === 'inbox' && c.ov && c.ov.inbox.failed ? ` <span class="badge" title="Failed">${c.ov.inbox.failed}</span>` : ''}</button>`).join('')}</div>
+      <section class="cn-panel" id="cnpanel" role="tabpanel" aria-labelledby="cnt-${c.tab}">${({ overview: cnOverview, page: cnPage, keys: cnKeys, inbox: cnInbox, log: cnLog, hooks: cnHooks, site: cnSite })[c.tab]()}</section>`;
     $app.innerHTML = `<header class="htop"><button class="btn sm" id="cnback">← ${backLabel(S.cnBack)}</button><b class="hbrand-t">Management › Connections</b><span class="hme">${esc(t.name)}</span></header>
       <main class="hmain" id="connPage"><h1>Connections</h1><p class="muted lo-sub">Connect ${esc(t.name)}'s website or online shop: bookings, orders and enquiries come straight into Riyeser.</p>${body}
         <p class="muted small hfoot"><a href="/help/link.html#connections">Help: Connections</a> · <a href="/developers/">Developer docs</a> (send this to your web developer)</p></main>`;
@@ -4804,12 +4822,118 @@
     if (window.RiyeserWidget) return go();
     const sc = document.createElement('script'); sc.src = '/widget/book.js'; sc.onload = go; sc.onerror = () => { box.innerHTML = '<p class="muted">The preview couldn\'t load.</p>'; }; document.head.appendChild(sc);
   }
+  // ---- Connections › Booking page: riyeser.com/book/<address>, switched on with one tick (booking_page_* in team-chat.sql).
+  // Off until an owner or admin switches it on. No pop-ups or banners about it anywhere else: just this calm tab.
+  // Switching it on makes the page's own key on the server; it never appears here or in API keys.
+  const BP = { SITE: 'https://riyeser.com', MAX_LOGO: 140000 };
+  const bpUrl = (slug) => `${BP.SITE}/book/${slug}`;
+  async function bpLoad() {
+    const c = S.cn;
+    try { c.bp = await api.conn('booking_page_get', { ws: S.team.id }); c.bpOff = false; } catch (e) { if (cnMissing(e)) c.bpOff = true; else throw e; }
+    if (c.bp) { const p = c.bp.page || {}; c.bpd = c.bpd && c.bpd.ws === S.team.id ? c.bpd : { ws: S.team.id, slug: p.slug || c.bp.suggested_slug, intro: p.intro || '', colour: p.colour || '#0e7c86', logo: p.logo || null,
+      show_prices: p.show_prices !== false, show_staff: p.show_staff !== false, show_contact: p.show_contact !== false, dirty: false, check: null }; }
+  }
+  const bpOn = () => !!(S.cn.bp && S.cn.bp.page && S.cn.bp.page.enabled);
+  function bpShareTexts(url) {
+    const n = S.team.name;
+    return [['whatsapp', 'WhatsApp', `Book your next visit with ${n} online, any time: ${url}`],
+      ['facebook', 'Facebook', `You can now book with ${n} online! Choose a service and a time that suits you, and we'll confirm by text or email. Book here: ${url}`],
+      ['instagram', 'Instagram (put the link in your bio)', `📅 Book online with ${n}: link in bio\n${url}`],
+      ['google', 'Google Business Profile (Edit profile → Booking → add this link)', url]];
+  }
+  function bpPreviewCard(d) {
+    const n = S.team.name; const ini = String(n || '').split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toUpperCase();
+    return `<div class="bp-prev" style="--bpa:${esc(d.colour)}" aria-label="How the top of your page looks"><div class="bp-pbar"></div><div class="bp-phead"><span class="bp-plogo">${d.logo ? `<img src="${esc(d.logo)}" alt="">` : esc(ini)}</span><div><b>${esc(n)}</b>${d.show_contact && S.cn.bp.business.address ? `<small>${esc(S.cn.bp.business.address)}</small>` : ''}</div></div>
+      ${d.intro ? `<p>${esc(d.intro)}</p>` : ''}<div class="bp-psvc"><span class="on">Cut &amp; style<small>45 min${d.show_prices ? ' · $45' : ''}</small></span><span>Colour<small>90 min${d.show_prices ? ' · $95' : ''}</small></span></div><span class="bp-pbtn">Request booking</span></div>`;
+  }
+  function cnPage() {
+    const c = S.cn;
+    if (c.bpOff) return '<div class="lo-card" id="bpoff"><h2>Booking pages are on their way</h2><p>Riyeser is finishing an update for booking pages. Nothing needs doing on your side.</p></div>';
+    if (!c.bp) return '<p class="muted">Loading…</p>';
+    const b = c.bp; const p = b.page || {}; const d = c.bpd; const on = bpOn(); const url = bpUrl(p.slug || d.slug);
+    const chk = d.check; const pub = b.published || {};
+    const status = on ? `<span class="lo-pill ok" data-st="on"><i></i>On</span> <a href="${esc(url)}" target="_blank" rel="noopener" id="bpopen">${esc(url.replace('https://', ''))}</a>`
+      : '<span class="lo-pill" data-st="off">Off</span> <span class="muted small">Customers can\'t see it until you switch it on.</span>';
+    const notes = [];
+    if (!b.allowed) notes.push(`<p class="bp-note" data-note="plan">Your booking page needs <b>Riyeser Bookings</b> (on its free trial or paid). Until then it says you aren't taking online bookings. ${isOwner() ? '<button class="linkbtn" data-cnplan>See your plan</button>' : 'Ask the owner to add it.'}</p>`);
+    else if (!pub.services) notes.push('<p class="bp-note" data-note="services">No services published yet. Add services with a duration in Riyeser Bookings: Riyeser Central on your PC publishes them, with your free times, within a minute.</p>');
+    const tx = bpShareTexts(url);
+    return `<section class="lo-card bp-main" id="bpcard"><div class="bp-head"><div><h2>Your booking page</h2><p class="muted">A page on riyeser.com where customers book with you. Your services, staff and free times come straight from Riyeser Bookings, and bookings arrive there for you to confirm. Nothing to paste into a website.</p></div>
+        <label class="bp-switch"><input type="checkbox" role="switch" id="bpon"${on ? ' checked' : ''}${c.bpBusy ? ' disabled' : ''} aria-describedby="bpstate"><span class="bp-track" aria-hidden="true"></span><span>Take bookings on my page</span></label></div>
+      <p class="bp-state" id="bpstate">${status}${on && b.bookings_7d ? ` <span class="muted small">· ${b.bookings_7d} booking${b.bookings_7d === 1 ? '' : 's'} from it this week</span>` : ''}</p>${notes.join('')}</section>
+    <section class="lo-card" id="bpaddr"><h2>Address</h2><p class="muted small">Letters, numbers and dashes. Changing it later breaks links and QR codes you've already shared.</p>
+      <div class="bp-slug"><span class="bp-pre" aria-hidden="true">riyeser.com/book/</span><input id="bpslug" value="${esc(d.slug)}" maxlength="60" autocomplete="off" spellcheck="false" aria-label="Your booking page address (after riyeser.com/book/)" aria-describedby="bpslugmsg"${chk && !chk.ok ? ' aria-invalid="true"' : ''}></div>
+      <p class="bp-slugmsg ${chk ? (chk.ok ? 'ok' : 'bad') : ''}" id="bpslugmsg" role="status">${chk ? (chk.ok ? `✓ riyeser.com/book/${esc(chk.slug)} is free.` : esc(chk.message)) : ''}</p></section>
+    <section class="lo-card" id="bplook"><h2>How it looks</h2><div class="bp-look"><div class="bp-fields">
+        <div class="bp-f"><span class="bp-l">Logo <small>PNG, JPEG or WebP</small></span><div class="row"><label class="btn sm bp-file">${d.logo ? 'Change logo' : 'Add your logo'}<input type="file" id="bplogo" accept="image/png,image/jpeg,image/webp" class="sr"></label>${d.logo ? '<button class="btn sm" id="bplogorm">Remove</button>' : ''}</div></div>
+        <div class="bp-f"><label class="bp-l" for="bpcol">Colour</label><div class="row bp-col"><input type="color" id="bpcol" value="${esc(d.colour)}"><code class="mono">${esc(d.colour)}</code></div></div>
+        <label class="bp-f"><span class="bp-l">Welcome text <small>optional, up to 300 letters</small></span><textarea id="bpintro" maxlength="300" rows="3" placeholder="e.g. Cuts, colour and styling by the water. We confirm by text.">${esc(d.intro)}</textarea></label>
+        <fieldset class="bp-show"><legend>Show on the page</legend>${[['show_prices', 'Prices'], ['show_staff', 'Staff names (customers can choose who)'], ['show_contact', `Your address and phone${b.business.address || b.business.phone ? '' : ' (add them in Company details)'}`]]
+          .map(([k, l]) => `<label><input type="checkbox" data-bpshow="${k}"${d[k] ? ' checked' : ''}> ${esc(l)}</label>`).join('')}</fieldset>
+        <div class="row"><button class="btn p" id="bpsave"${d.dirty && !c.bpBusy ? '' : ' disabled'}>Save changes</button><button class="btn" id="bppreview">Preview full page</button></div></div>
+      <div class="bp-side"><span class="muted small">Preview</span>${bpPreviewCard(d)}</div></div></section>
+    ${on ? `<section class="lo-card" id="bpshare"><h2>Share it</h2><div class="bp-sharegrid"><div class="bp-links"><div class="copyrow"><input readonly id="bpurl" value="${esc(url)}" aria-label="Your booking page link"><button class="btn p" data-copy="#bpurl">Copy link</button></div>
+        ${tx.map(([id, l, t]) => `<div class="bp-tx" data-share="${id}"><b>${esc(l)}</b><textarea readonly id="bptx-${id}" rows="${id === 'google' ? 1 : 3}" aria-label="Text for ${esc(l)}">${esc(t)}</textarea><div class="row"><button class="btn sm" data-copy="#bptx-${id}">Copy</button>${id === 'whatsapp' ? `<a class="btn sm" href="https://wa.me/?text=${encodeURIComponent(t)}" target="_blank" rel="noopener">Open WhatsApp</a>` : ''}</div></div>`).join('')}</div>
+        <div class="bp-qr"><div id="bpqr" class="bp-qrbox" role="img" aria-label="QR code for ${esc(url)}"><span class="muted small">Making the QR code…</span></div><p class="muted small">For the counter, a window sticker or your cards.</p><div class="row"><button class="btn sm" id="bpqrsave">Download</button><button class="btn sm" id="bpqrprint">Print</button></div></div></div></section>` : ''}`;
+  }
+  async function bpSave(patch, okMsg) {
+    const c = S.cn; c.bpBusy = true; drawConn(true);
+    try { c.bp = await api.conn('booking_page_save', { ws: S.team.id, settings: patch }); const p = c.bp.page || {};
+      Object.assign(c.bpd, { slug: p.slug, colour: p.colour, intro: p.intro || '', logo: p.logo || null, show_prices: p.show_prices, show_staff: p.show_staff, show_contact: p.show_contact, dirty: false, check: null });
+      if (okMsg) cnMsg(okMsg, 'ok');
+    } catch (e) { cnMsg(esc(cnMissing(e) ? 'Riyeser is finishing an update for booking pages: try again later.' : plainError(e)), 'bad'); }
+    c.bpBusy = false; drawConn(true);
+  }
+  const bpLook = () => { const d = S.cn.bpd; return { slug: d.slug, intro: d.intro, colour: d.colour, logo: d.logo || '', show_prices: d.show_prices, show_staff: d.show_staff, show_contact: d.show_contact }; };
+  // a picture → a PNG (or WebP/JPEG if that's smaller) at most 256 pixels across, small enough to keep with the page
+  function bpShrink(file) {
+    return new Promise((res, rej) => {
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return rej(new Error('Choose a PNG, JPEG or WebP picture.'));
+      if (file.size > 8e6) return rej(new Error('That picture is too big (8 MB at most).'));
+      const img = new Image(); const u = URL.createObjectURL(file);
+      img.onload = () => { URL.revokeObjectURL(u); const k = Math.min(1, 256 / Math.max(img.width, img.height)); const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(img.width * k)); cv.height = Math.max(1, Math.round(img.height * k)); cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        const tries = [cv.toDataURL('image/png'), cv.toDataURL('image/webp', 0.9), cv.toDataURL('image/jpeg', 0.88)].filter((x) => /^data:image\/(png|jpeg|webp);base64,/.test(x));
+        const best = tries.sort((a, b) => a.length - b.length)[0];
+        if (!best || best.length > BP.MAX_LOGO) rej(new Error('That logo is too detailed to keep. Try a simpler or smaller picture.')); else res(best); };
+      img.onerror = () => { URL.revokeObjectURL(u); rej(new Error('That picture couldn\'t be opened.')); };
+      img.src = u;
+    });
+  }
+  function bpWire() {
+    const c = S.cn; const d = c.bpd; if (!d) return;
+    const q = (sel) => $app.querySelector(sel);
+    const dirty = () => { d.dirty = true; const b = q('#bpsave'); if (b) b.disabled = false; const pv = q('.bp-side'); if (pv) pv.innerHTML = `<span class="muted small">Preview</span>${bpPreviewCard(d)}`; };
+    const sw = q('#bpon'); if (sw) sw.onchange = () => {
+      if (sw.checked && d.check && !d.check.ok) { sw.checked = false; cnMsg(esc(d.check.message), 'bad'); return; }
+      bpSave(sw.checked ? { ...bpLook(), enabled: true } : { enabled: false }, sw.checked ? 'Your booking page is on. Share the link or QR code below.' : 'Your booking page is off. Customers see "not taking online bookings".');
+    };
+    const sl = q('#bpslug'); if (sl) sl.oninput = () => { d.slug = sl.value; d.dirty = true; const b = q('#bpsave'); if (b) b.disabled = false;
+      clearTimeout(bpWire.t); bpWire.t = setTimeout(async () => { try { d.check = await api.conn('booking_page_slug_check', { ws: S.team.id, slug: sl.value }); } catch { d.check = null; }
+        const m = q('#bpslugmsg'); if (m && d.check) { m.className = `bp-slugmsg ${d.check.ok ? 'ok' : 'bad'}`; m.textContent = d.check.ok ? `✓ riyeser.com/book/${d.check.slug} is free.` : d.check.message; sl.setAttribute('aria-invalid', String(!d.check.ok)); } }, 350); };
+    const col = q('#bpcol'); if (col) col.oninput = () => { d.colour = col.value; const cd = col.parentElement.querySelector('code'); if (cd) cd.textContent = col.value; dirty(); };
+    const it = q('#bpintro'); if (it) it.oninput = () => { d.intro = it.value; dirty(); };
+    $app.querySelectorAll('[data-bpshow]').forEach((i) => { i.onchange = () => { d[i.dataset.bpshow] = i.checked; dirty(); }; });
+    const lg = q('#bplogo'); if (lg) lg.onchange = async () => { const f = lg.files && lg.files[0]; if (!f) return;
+      try { d.logo = await bpShrink(f); d.dirty = true; drawConn(true); } catch (e) { cnMsg(esc(e.message), 'bad'); } };
+    const rm = q('#bplogorm'); if (rm) rm.onclick = () => { d.logo = null; d.dirty = true; drawConn(true); };
+    const sv = q('#bpsave'); if (sv) sv.onclick = () => { if (d.check && !d.check.ok) { cnMsg(esc(d.check.message), 'bad'); sl && sl.focus(); return; } bpSave(bpLook(), 'Saved. Your booking page shows the changes straight away.'); };
+    const pv = q('#bppreview'); if (pv) pv.onclick = () => {
+      try { localStorage.setItem('riyeser.book.preview', JSON.stringify({ at: Date.now(), look: { name: S.team.name, intro: d.intro, colour: d.colour, logo: d.logo, address: c.bp.business.address, phone: c.bp.business.phone,
+        show_prices: d.show_prices, show_staff: d.show_staff, show_contact: d.show_contact } })); } catch { /* private window: the preview shows the sample look */ }
+      window.open('/book/?preview', '_blank', 'noopener'); };
+    const box = q('#bpqr');
+    if (box) qrSvg(bpUrl(c.bp.page.slug)).then((svg) => { if (q('#bpqr') === box) { box.innerHTML = svg; c.bpQr = svg; } }, (e) => { box.textContent = e.message; });
+    const qs = q('#bpqrsave'); if (qs) qs.onclick = () => { if (!c.bpQr) return; const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([c.bpQr], { type: 'image/svg+xml' })); a.download = `booking-page-${c.bp.page.slug}.svg`; document.body.appendChild(a); a.click(); a.remove(); };
+    const qp = q('#bpqrprint'); if (qp) qp.onclick = () => { if (!c.bpQr) return; const w = window.open('', '_blank'); if (!w) return;
+      w.document.write(`<!doctype html><title>Book online: ${esc(S.team.name)}</title><style>body{font-family:system-ui,sans-serif;text-align:center;padding:40px}svg{width:320px;height:320px}h1{font-size:28px;margin:0 0 6px}p{font-size:18px;color:#333}</style><h1>Book online</h1><p>${esc(S.team.name)}</p>${c.bpQr}<p>${esc(bpUrl(c.bp.page.slug).replace('https://', ''))}</p><script>print()</` + 'script>'); w.document.close(); };
+  }
   async function cnTab(tab) { S.cn.tab = tab; if (tab === 'inbox') S.cn.inbox = null; if (tab === 'log') S.cn.reqs = null; drawConn(true); await cnLoad(); drawConn(true); const t = document.getElementById('cnt-' + tab); if (t) t.focus(); }
   function cnWire() {
     const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
     on('#cnback', () => { S.view = null; goBack(S.cnBack); }); on('#cnretry', () => connectionsPage());
     $app.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => cnTab(b.dataset.tab));
-    const tl = $app.querySelector('[role=tablist]'); if (tl) tl.onkeydown = (e) => { if (!['ArrowRight', 'ArrowLeft'].includes(e.key)) return; const i = CN.TABS.findIndex((x) => x[0] === S.cn.tab); const n = CN.TABS[(i + (e.key === 'ArrowRight' ? 1 : CN.TABS.length - 1)) % CN.TABS.length][0]; cnTab(n); };
+    const tl = $app.querySelector('[role=tablist]'); if (tl) tl.onkeydown = (e) => { if (!['ArrowRight', 'ArrowLeft'].includes(e.key)) return; const T = cnTabs(); const i = T.findIndex((x) => x[0] === S.cn.tab); const n = T[(i + (e.key === 'ArrowRight' ? 1 : T.length - 1)) % T.length][0]; cnTab(n); };
     $app.querySelectorAll('[data-cnplan]').forEach((b) => b.onclick = () => { S.view = null; planBilling(); });
     $app.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { const i = $app.querySelector(b.dataset.copy); try { await navigator.clipboard.writeText(i.value); b.textContent = 'Copied'; } catch { i.select(); } });
     $app.querySelectorAll('[data-cnnew]').forEach((b) => b.onclick = () => cnNewKey(b.dataset.cnnew));
@@ -4843,6 +4967,7 @@
     const th = $app.querySelector('#cnwtheme'); if (th) th.onchange = () => { site.theme = th.value; redraw(); };
     const wi = $app.querySelector('#cnwkin'); if (wi) wi.oninput = () => { const v = wi.value.trim(); S.cn.widgetKey = /^rk_pub_(live|test)_[0-9a-f]{8,}$/.test(v) ? v : ''; $app.querySelector('#cnsnip').value = cnSnippet(S.cn.widgetKey || ''); };
     if (S.cn.tab === 'site') cnPreview();
+    if (S.cn.tab === 'page') bpWire();
   }
   // + New key: a plain-English choice first (the presets), then exactly what it may do
   function cnNewKey(preset = 'widget') {

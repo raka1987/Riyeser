@@ -1,6 +1,6 @@
 // The website's Content-Security-Policy (a <meta> on every page built by build.mjs): nothing on the pages is refused,
 // and what they do still works: the phone menu, the price calculator and its Buy links, the Help Centre search,
-// "Sign in" to Riyeser Link, fonts and images; an injected inline script is refused.
+// "Sign in" to Riyeser Link, fonts and images, the hosted booking page (/book/); an injected inline script is refused.
 // Run: build the site, serve website/public on 8090 (or LINK_BASE), then `node website/team/test/csp-test.js`. Exits 1 on failure.
 const { chromium } = require('playwright');
 const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';
@@ -18,11 +18,11 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     pg.refused = async () => [...refused, ...(await pg.evaluate(() => window.__csp))];
     return pg;
   };
-  const pages = ['/index.html', '/pricing.html', '/programs.html', '/downloads.html', '/help.html', '/help/link.html', '/programs/payroll.html', '/programs/link-office.html', '/help/link-office.html', '/terms.html', '/developers/', '/developers/api.html', '/developers/widget.html'];
+  const pages = ['/index.html', '/pricing.html', '/programs.html', '/downloads.html', '/help.html', '/help/link.html', '/programs/payroll.html', '/programs/link-office.html', '/help/link-office.html', '/terms.html', '/developers/', '/developers/api.html', '/developers/widget.html', '/book/?b=demo', '/404.html'];
   for (const path of pages) {
     const pg = await open(path);
     const meta = await pg.$eval('meta[http-equiv="Content-Security-Policy"]', (m) => m.content).catch(() => '');
-    check(/default-src 'self'/.test(meta) && /script-src 'self' (https:\/\/static\.cloudflareinsights\.com )?'sha256-/.test(meta) && !/unsafe-inline'[^;]*;?\s*style/.test(meta.split('script-src')[1].split(';')[0]), `${path}: has the policy (scripts by hash only)`);
+    check(/default-src 'self'/.test(meta) && /script-src 'self' (https:\/\/static\.cloudflareinsights\.com ?)?('sha256-|;)/.test(meta) && !/unsafe-inline'[^;]*;?\s*style/.test(meta.split('script-src')[1].split(';')[0]), `${path}: has the policy (scripts by hash only)`);
     if (path === '/index.html') check(/connect-src [^;]*https:\/\/[a-z0-9]+\.supabase\.co/.test(meta), 'website traffic (track_visit) may reach Riyeser\'s Supabase project');
     const fonts = await pg.evaluate(() => document.fonts.status);
     const imgs = await pg.$$eval('img', (x) => x.filter((i) => i.getAttribute('src') && i.complete && i.naturalWidth === 0 && i.getAttribute('loading') !== 'lazy').map((i) => i.src));
@@ -40,6 +40,12 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
   { const pg = await open('/index.html', 390);
     await pg.click('#nav .menu'); check(await pg.evaluate(() => document.getElementById('nav').classList.contains('open')) && await pg.getAttribute('#nav .menu', 'aria-expanded') === 'true', 'phone menu opens (no inline onclick)');
     check(!(await pg.refused()).length, 'phone menu: nothing refused'); await pg.close(); }
+  { const pg = await open('/book/?b=demo');   // the hosted booking page: the flow works, it may reach the API, nothing refused
+    const meta = await pg.$eval('meta[http-equiv="Content-Security-Policy"]', (m) => m.content);
+    check(/connect-src [^;]*https:\/\/[a-z0-9]+\.supabase\.co/.test(meta) && /img-src 'self' data:/.test(meta), 'booking page: may reach the Riyeser API, and show a logo (data:)');
+    await pg.waitForSelector('[data-svc=CUT]'); await pg.click('[data-svc=CUT]'); await pg.waitForSelector('.times [data-slot]'); await pg.click('.times [data-slot="0"]');
+    check(!!(await pg.$('#f-name')) && !(await pg.refused()).length, 'booking page: service, time, details; nothing refused');
+    await pg.close(); }
   { const pg = await open('/help.html');
     await pg.fill('#hq', 'password'); await pg.dispatchEvent('#hq', 'input'); await pg.waitForTimeout(200);
     const first = await pg.$eval('#hres a', (a) => a.href).catch(() => null);

@@ -4454,6 +4454,219 @@ do $$ begin
   assert (select total from public.downloads_daily where asset = 'RiyeserCentral-Setup.exe' and day = current_date) = 120, 'saved';
 end $$;
 select 'real downloads ok' as downloads;
+-- ===== Your booking page (riyeser.com/book/<address>): settings, the hidden page key, the public profile, bookings =====
+reset role;
+grant select on public.booking_pages to service_role;
+insert into auth.users (id, email) values ('b0b0b0b1-0000-4000-8000-000000000001', 'owner@bp.test'), ('b0b0b0b2-0000-4000-8000-000000000002', 'staff@bp.test'),
+  ('b0b0b0b3-0000-4000-8000-000000000003', 'other@bp.test'), ('b0b0b0b4-0000-4000-8000-000000000004', 'solo@bp.test');
+set role authenticated;
+select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+select set_config('bp.ws', public.create_team('Harbour Hair Studio!', 'Hana')::text, false);
+select set_config('bp.code', (select invite_code from public.workspaces where id = current_setting('bp.ws')::uuid), false);
+select public.link_device(current_setting('bp.ws')::uuid, 'b0b0b0d1-0000-4000-8000-000000000001', 'SALON-PC', 'windows', '1.0');
+select pg_temp.as_user('b0b0b0b2-0000-4000-8000-000000000002');
+select public.join_team(current_setting('bp.code'), 'Sione');
+select pg_temp.as_user('b0b0b0b3-0000-4000-8000-000000000003');
+select set_config('bp.ws_x', public.create_team('Other Barber', 'Oli')::text, false);
+reset role;
+update public.workspaces set address = '12 Marine Drive, Suva', phone = '+679 330 1234' where id = current_setting('bp.ws')::uuid;
+-- a personal account (no business): no booking page
+insert into public.workspaces (name, kind) values ('Solo person', 'personal') returning set_config('bp.ws_p', id::text, false);
+insert into public.members (workspace_id, user_id, role, display_name) values (current_setting('bp.ws_p')::uuid, 'b0b0b0b4-0000-4000-8000-000000000004', 'owner', 'Solo');
+set role authenticated;
+
+-- off until switched on; only owners and admins with two-step sign-in
+select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+do $$ declare g json := public.booking_page_get(current_setting('bp.ws')::uuid); begin
+  assert g -> 'page' is null or json_typeof(g -> 'page') = 'null', 'no page until it is saved: ' || g::text;
+  assert g ->> 'suggested_slug' = 'harbour-hair-studio', 'an address from the name: ' || (g ->> 'suggested_slug');
+  assert (g ->> 'allowed')::boolean, 'Bookings on its trial: allowed';
+end $$;
+select pg_temp.as_user_password_only('b0b0b0b1-0000-4000-8000-000000000001');
+do $$ begin
+  begin perform public.booking_page_save(current_setting('bp.ws')::uuid, '{"enabled": true}'); raise exception 'aal1 switched the page on';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin, signed in with two-step%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('b0b0b0b2-0000-4000-8000-000000000002');
+do $$ begin
+  begin perform public.booking_page_get(current_setting('bp.ws')::uuid); raise exception 'staff read the booking page settings';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+  begin perform public.booking_page_save(current_setting('bp.ws')::uuid, '{"enabled": true}'); raise exception 'staff switched it on';
+  exception when others then assert sqlerrm like 'Only the business''s owner or an admin%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('b0b0b0b4-0000-4000-8000-000000000004');
+do $$ begin
+  begin perform public.booking_page_save(current_setting('bp.ws_p')::uuid, '{"enabled": true}'); raise exception 'a personal account got a booking page';
+  exception when others then assert sqlerrm like 'Booking pages are for businesses%' or sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+-- addresses: tidied, reserved words refused, unique
+select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('bp.ws')::uuid; c json; begin
+  c := public.booking_page_slug_check(ws, '  Harbour  Hair!! ');
+  assert (c ->> 'ok')::boolean and c ->> 'slug' = 'harbour-hair', 'tidied: ' || c::text;
+  c := public.booking_page_slug_check(ws, 'ab'); assert not (c ->> 'ok')::boolean and c ->> 'message' like 'The address needs at least 3%', c::text;
+  c := public.booking_page_slug_check(ws, 'Riyeser'); assert not (c ->> 'ok')::boolean and c ->> 'message' like '%kept for Riyeser%', c::text;
+  c := public.booking_page_slug_check(ws, repeat('a', 41)); assert not (c ->> 'ok')::boolean, 'too long';
+  begin perform public.booking_page_save(ws, '{"slug": "admin"}'); raise exception 'reserved address saved';
+  exception when others then assert sqlerrm like '%kept for Riyeser%', sqlerrm; end;
+  begin perform public.booking_page_save(ws, '{"logo": "data:image/svg+xml;base64,PHN2Zz4="}'); raise exception 'svg logo';
+  exception when others then assert sqlerrm like 'The logo must be a PNG%', sqlerrm; end;
+  begin perform public.booking_page_save(ws, '{"colour": "red"}'); raise exception 'bad colour';
+  exception when others then assert sqlerrm like 'The colour looks like%', sqlerrm; end;
+  begin perform public.booking_page_save(ws, jsonb_build_object('intro', repeat('x', 301))); raise exception 'long intro';
+  exception when others then assert sqlerrm like 'The welcome text%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('b0b0b0b3-0000-4000-8000-000000000003');
+do $$ declare g json; begin
+  g := public.booking_page_save(current_setting('bp.ws_x')::uuid, '{"slug": "harbour-hair", "enabled": false}');
+  assert g -> 'page' ->> 'slug' = 'harbour-hair' and not (g -> 'page' ->> 'enabled')::boolean, 'other business took harbour-hair (off)';
+  begin perform public.booking_page_get(current_setting('bp.ws')::uuid); raise exception 'other business read our page';
+  exception when others then assert sqlerrm like 'Only the business''s owner%', sqlerrm; end;
+end $$;
+select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('bp.ws')::uuid; c json; g json; begin
+  c := public.booking_page_slug_check(ws, 'harbour-hair'); assert not (c ->> 'ok')::boolean and c ->> 'message' like '%is taken%', 'taken: ' || c::text;
+  begin perform public.booking_page_save(ws, '{"slug": "Harbour Hair"}'); raise exception 'took a taken address';
+  exception when others then assert sqlerrm like '%is taken%', sqlerrm; end;
+  -- switch it on: one tick. The page key is made behind the scenes and never shown
+  g := public.booking_page_save(ws, '{"enabled": true, "intro": " Walk-ins welcome too. ", "colour": "#0E7C86", "logo": "data:image/png;base64,iVBORw0KGgo=", "show_staff": true}');
+  assert (g -> 'page' ->> 'enabled')::boolean and (g -> 'page' ->> 'working')::boolean, 'on and working: ' || g::text;
+  assert g -> 'page' ->> 'slug' = 'harbour-hair-studio' and g -> 'page' ->> 'intro' = 'Walk-ins welcome too.' and g -> 'page' ->> 'colour' = '#0e7c86', 'saved: ' || g::text;
+  assert g::text not like '%rk\_%' and g::text !~ '"key|key_id|key_hash', 'no key in what the owner sees: ' || g::text;
+  assert json_array_length(public.api_keys_list(ws)) = 0, 'the page key is not in the API keys list';
+  assert (public.api_overview(ws) -> 'keys' ->> 'active')::int = 0 and (public.api_overview(ws) -> 'booking_page' ->> 'enabled')::boolean, 'nor in the counts';
+  assert exists (select 1 from public.audit_log where workspace_id = ws and action = 'booking_page.on'), 'switching on is in the change history';
+end $$;
+reset role;
+do $$ declare k public.api_keys; begin
+  select * into k from public.api_keys where workspace_id = current_setting('bp.ws')::uuid and internal = 'booking_page';
+  assert k.id is not null and k.kind = 'widget' and k.scopes = array['availability:read', 'bookings:write'] and k.mode = 'live', 'a page key with only free times and bookings';
+  assert (select key_id from public.booking_pages where workspace_id = current_setting('bp.ws')::uuid) = k.id, 'the page uses it';
+  perform set_config('bp.key', k.id::text, false);
+end $$;
+set role authenticated; select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+do $$ declare ws uuid := current_setting('bp.ws')::uuid; begin
+  begin perform public.api_key_revoke(ws, current_setting('bp.key')::uuid); raise exception 'revoked the page key from the keys screen';
+  exception when others then assert sqlerrm like 'That key isn''t there%', sqlerrm; end;
+  begin perform public.api_key_rename(ws, current_setting('bp.key')::uuid, 'Mine'); raise exception 'renamed the page key';
+  exception when others then assert sqlerrm like 'That key isn''t there%', sqlerrm; end;
+  begin perform public.api_key_set_access(ws, current_setting('bp.key')::uuid, array['https://evil.example.com'], '{}'); raise exception 'changed the page key''s websites';
+  exception when others then assert sqlerrm like 'That key isn''t there%', sqlerrm; end;
+end $$;
+-- nothing is readable directly, and the Edge Function's calls are only for the service role
+do $$ begin
+  begin perform count(*) from public.booking_pages; raise exception 'authenticated read booking_pages'; exception when insufficient_privilege then null; end;
+  begin perform public.api_page_auth('harbour-hair-studio', null); raise exception 'signed in ran api_page_auth'; exception when insufficient_privilege then null; end;
+  begin perform public.api_page_profile(current_setting('bp.key')::uuid); raise exception 'signed in ran api_page_profile'; exception when insufficient_privilege then null; end;
+end $$;
+set role anon;
+do $$ begin
+  begin perform count(*) from public.booking_pages; raise exception 'anon read booking_pages'; exception when insufficient_privilege then null; end;
+  begin perform public.api_page_auth('harbour-hair-studio', null); raise exception 'anon ran api_page_auth'; exception when insufficient_privilege then null; end;
+  begin perform public.booking_page_get(current_setting('bp.ws')::uuid); raise exception 'anon read the settings'; exception when insufficient_privilege then null; end;
+end $$;
+
+-- the PC publishes services, staff and free times (Riyeser Bookings through Central)
+set role authenticated; select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+select public.api_publish_catalog(current_setting('bp.ws')::uuid, 'b0b0b0d1-0000-4000-8000-000000000001',
+  '[{"sku": "CUT", "type": "service", "name": "Cut & style", "price": 45, "currency": "FJD", "duration_minutes": 45},
+    {"sku": "KIDS", "type": "service", "name": "Kids cut", "price": 25, "currency": "FJD", "duration_minutes": 30},
+    {"sku": "SHAMPOO", "type": "product", "name": "Shampoo", "price": 18, "currency": "FJD"}]', true);
+select public.api_publish_availability(current_setting('bp.ws')::uuid, 'b0b0b0d1-0000-4000-8000-000000000001',
+  '{"timezone": "Pacific/Fiji", "slot_minutes": 15, "min_notice_minutes": 0, "days_ahead": 30}',
+  '[{"ref": "amy", "name": "Amy", "services": []}, {"ref": "old", "name": "Gone", "services": [], "active": false}]',
+  jsonb_build_array(jsonb_build_object('staff_ref', 'amy', 'start', date_trunc('day', now()) + interval '2 days' - interval '12 hours' + interval '9 hours',
+                                       'end', date_trunc('day', now()) + interval '2 days' - interval '12 hours' + interval '17 hours')),
+  now() - interval '1 day', now() + interval '30 days');
+
+-- api_page_auth (the Edge Function, service role): from the address; unknown, switched off and personal give the same answer
+reset role; set role service_role;
+do $$ declare a json; p json; begin
+  a := public.api_page_auth('harbour-hair-studio', '198.51.100.7');
+  assert a ->> 'key_id' = current_setting('bp.key') and a ->> 'workspace_id' = current_setting('bp.ws') and a ->> 'kind' = 'widget' and a ->> 'mode' = 'live', 'found: ' || a::text;
+  assert (a -> 'allowed_origins')::jsonb = '["https://riyeser.com", "https://www.riyeser.com"]', 'only riyeser.com: ' || (a -> 'allowed_origins')::text;
+  assert (public.api_page_auth('no-such-page', '198.51.100.7') -> 'error' ->> 'code') = 'page_not_found', 'unknown address';
+  assert (public.api_page_auth('no-such-page', '198.51.100.7') -> 'origins')::jsonb ? 'https://riyeser.com', 'a refusal says which websites may read it (CORS)';
+  assert (public.api_page_auth('harbour-hair', '198.51.100.7') -> 'error' ->> 'code') = 'page_not_found', 'a page that is switched off';
+  assert (public.api_page_auth('Bad Slug!', '198.51.100.7') -> 'error' ->> 'code') = 'page_not_found', 'not an address';
+  -- the public profile: only what a customer needs
+  p := public.api_page_profile(current_setting('bp.key')::uuid);
+  assert p ->> 'name' = 'Harbour Hair Studio!' and p ->> 'slug' = 'harbour-hair-studio' and p ->> 'colour' = '#0e7c86' and p ->> 'intro' = 'Walk-ins welcome too.', 'profile: ' || p::text;
+  assert p ->> 'address' = '12 Marine Drive, Suva' and p ->> 'phone' = '+679 330 1234' and p ->> 'timezone' = 'Pacific/Fiji' and (p ->> 'accepting')::boolean, 'contact and time zone';
+  assert json_array_length(p -> 'services') = 2 and (p -> 'services')::text like '%"price" : 45%' and (p -> 'services')::text not like '%SHAMPOO%', 'services only (not products), with prices: ' || (p -> 'services')::text;
+  assert json_array_length(p -> 'staff') = 1 and p -> 'staff' -> 0 ->> 'name' = 'Amy', 'active staff only';
+  assert json_array_length(p -> 'hours') = 1 and p -> 'hours' -> 0 ->> 'open' ~ '^\d\d:\d\d$', 'opening hours from the open times: ' || (p -> 'hours')::text;
+  assert p::text not like '%owner@bp.test%' and p::text not like '%Hana%' and p::text not like '%invite%' and p::text not like '%key%', 'nothing private: ' || p::text;
+end $$;
+-- a booking through the page key: only a free time, lands in the post box as a widget booking, seen by the PC
+do $$ declare s json; r json; bad json; t text; begin
+  s := public.api_read(current_setting('bp.key')::uuid, 'slots', jsonb_build_object('service', 'CUT', 'from', to_char((now() + interval '1 day') at time zone 'Pacific/Fiji', 'YYYY-MM-DD'), 'days', 7));
+  assert json_array_length(s -> 'slots') > 10, 'free times for the page: ' || left(s::text, 200);
+  t := s -> 'slots' -> 0 ->> 'start';
+  bad := public.api_submit(current_setting('bp.key')::uuid, 'booking', jsonb_build_object('service', 'CUT', 'start', (t::timestamptz + interval '7 minutes'),
+    'customer', jsonb_build_object('name', 'Mele', 'phone', '+679 777 1234')), 'bp-1', repeat('a', 64), 'page');
+  assert bad -> 'error' ->> 'code' = 'slot_not_available', 'a time that isn''t free is refused: ' || bad::text;
+  r := public.api_submit(current_setting('bp.key')::uuid, 'booking', jsonb_build_object('service', 'CUT', 'staff', 'amy', 'start', t,
+    'customer', jsonb_build_object('name', 'Mele', 'phone', '+679 777 1234'), 'metadata', jsonb_build_object('channel', 'booking_page')), 'bp-2', repeat('b', 64), 'page');
+  assert r ->> 'status' = 'waiting' and not (r ->> 'test')::boolean, 'booked: ' || r::text;
+  perform set_config('bp.ev', r ->> 'id', false);
+  assert (select source from public.api_inbox where id = (r ->> 'id')::uuid) = 'widget', 'arrives like a widget booking (to confirm)';
+  assert (public.api_read(current_setting('bp.key')::uuid, 'event', jsonb_build_object('id', r ->> 'id')) ->> 'status') = 'waiting', 'the page can follow its own booking';
+  -- the time is held: it is no longer offered
+  s := public.api_read(current_setting('bp.key')::uuid, 'slots', jsonb_build_object('service', 'CUT', 'from', to_char((now() + interval '1 day') at time zone 'Pacific/Fiji', 'YYYY-MM-DD'), 'days', 7, 'staff', 'amy'));
+  assert not exists (select 1 from json_array_elements(s -> 'slots') x where x ->> 'start' = t), 'the booked time is held';
+end $$;
+-- visitor limits: 40 a minute from one address (any page address, known or not)
+do $$ declare i int; a json; begin
+  for i in 1..45 loop a := public.api_page_auth(case when i % 2 = 0 then 'harbour-hair-studio' else 'guess-' || i end, '203.0.113.99'); end loop;
+  assert a -> 'error' ->> 'code' = 'rate_limited' and (a ->> 'retry_after')::int between 0 and 60, 'one visitor address is limited: ' || a::text;
+  assert public.api_page_auth('harbour-hair-studio', '198.51.100.8') ->> 'key_id' = current_setting('bp.key'), 'other visitors are not';
+end $$;
+reset role;
+-- the business's linked PC collects it like any widget booking
+set role authenticated; select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+do $$ declare c json; begin
+  c := public.api_inbox_claim(current_setting('bp.ws')::uuid, 'b0b0b0d1-0000-4000-8000-000000000001', array['booking'], 10);
+  assert json_array_length(c) = 1 and c -> 0 ->> 'id' = current_setting('bp.ev') and c -> 0 ->> 'key_name' = 'Booking page', 'the PC gets it: ' || c::text;
+  assert (public.api_status(current_setting('bp.ws')::uuid, 'b0b0b0d1-0000-4000-8000-000000000001') ->> 'set_up')::boolean, 'Central sees connections are set up';
+  assert (public.booking_page_get(current_setting('bp.ws')::uuid) ->> 'bookings_7d')::int = 1, 'one booking from the page this week';
+  -- hide prices, staff and contact details
+  perform public.booking_page_save(current_setting('bp.ws')::uuid, '{"show_prices": false, "show_staff": false, "show_contact": false, "logo": ""}');
+end $$;
+reset role; set role service_role;
+do $$ declare p json := public.api_page_profile(current_setting('bp.key')::uuid); begin
+  assert p -> 'services' -> 0 ->> 'price' is null and json_array_length(p -> 'staff') = 0 and p ->> 'address' is null and p ->> 'phone' is null and p ->> 'logo' is null, 'hidden: ' || p::text;
+end $$;
+reset role;
+-- licence: without Riyeser Bookings the page says it isn't taking bookings (no services shown)
+insert into public.company_modules (workspace_id, module, status, trial_ends) values (current_setting('bp.ws')::uuid, 'bookings', 'trial', current_date - 1)
+  on conflict (workspace_id, module) do update set status = 'trial', trial_ends = current_date - 1;
+set role service_role;
+do $$ declare p json := public.api_page_profile(current_setting('bp.key')::uuid); begin
+  assert not (p ->> 'accepting')::boolean and p ->> 'reason' = 'bookings_licence_required' and json_array_length(p -> 'services') = 0, 'not accepting: ' || p::text;
+end $$;
+reset role;
+update public.company_modules set trial_ends = current_date + 30 where workspace_id = current_setting('bp.ws')::uuid and module = 'bookings';
+-- switched off: the address stops answering (and the key stays unusable from anywhere else)
+set role authenticated; select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+select public.booking_page_save(current_setting('bp.ws')::uuid, '{"enabled": false}');
+reset role; set role service_role;
+do $$ begin
+  assert public.api_page_auth('harbour-hair-studio', '198.51.100.9') -> 'error' ->> 'code' = 'page_not_found', 'switched off: not found';
+  assert public.api_page_profile(current_setting('bp.key')::uuid) -> 'error' ->> 'code' = 'page_not_found', 'no profile when off';
+end $$;
+reset role;
+do $$ begin assert exists (select 1 from public.audit_log where workspace_id = current_setting('bp.ws')::uuid and action = 'booking_page.off'), 'switching off is in the history'; end $$;
+-- on again: the same key (nothing new to set up); a closed business answers business_closed
+set role authenticated; select pg_temp.as_user('b0b0b0b1-0000-4000-8000-000000000001');
+select public.booking_page_save(current_setting('bp.ws')::uuid, '{"enabled": true}');
+reset role;
+do $$ begin assert (select count(*) from public.api_keys where workspace_id = current_setting('bp.ws')::uuid and internal = 'booking_page') = 1, 'one page key, reused'; end $$;
+update public.workspaces set status = 'suspended' where id = current_setting('bp.ws')::uuid;
+set role service_role;
+do $$ begin assert public.api_page_auth('harbour-hair-studio', '198.51.100.10') -> 'error' ->> 'code' = 'business_closed', 'a paused business'; end $$;
+reset role;
+update public.workspaces set status = 'active' where id = current_setting('bp.ws')::uuid;
 reset role;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';

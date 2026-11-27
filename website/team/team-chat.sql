@@ -8621,3 +8621,315 @@ revoke all on function public.record_download(text, text, text, text, text, text
 grant execute on function public.record_download(text, text, text, text, text, text, boolean, boolean, boolean, boolean) to service_role;
 grant execute on function public.track_install(uuid, text, text, text[], text, text, text, boolean) to anon, authenticated;
 grant execute on function public.install_link(uuid, uuid), public.hq_real_downloads(int) to authenticated;
+-- ================================================================ Your booking page (riyeser.com/book/<address>)
+-- Every business with Riyeser Bookings can have its own booking page on riyeser.com, switched on with one tick in
+-- Management → Connections → Booking page. Nothing to paste into a website: the page shows the business's name, logo,
+-- colour, address, opening hours (from the open times its PCs publish), services with duration and price, staff
+-- (optional) and free times, and sends booking requests to the post box like the booking widget does.
+--   * Off until an owner or admin (two-step sign-in) switches it on. Personal accounts have none.
+--   * Switching it on makes a page key behind the scenes (api_keys.internal = 'booking_page'): a widget key with only
+--     availability:read and bookings:write. Nobody ever sees it (only a hash of random bits that were never kept),
+--     it isn't in the API keys list, and owners can't rename or revoke it there: switching the page off stops it.
+--   * The "api" Edge Function serves /v1/pages/{address} (the public profile) and /slots, /bookings, /events/{id}
+--     under it, with no key in the browser: api_page_auth finds the page key from the address, only for the booking
+--     page's own web addresses (HQ setting booking_page.origins, default riyeser.com and www.riyeser.com), with rate
+--     limits per visitor address (api.page_ip_per_minute, 40) and per page (api.page_per_minute, 300).
+--   * The public profile (api_page_profile) has only what a customer needs. Never staff surnames, the books, keys or
+--     anything about the people in the business.
+-- Safe to run again.
+alter table public.api_keys add column if not exists internal text;
+do $$ begin
+  alter table public.api_keys add constraint api_keys_internal check (internal is null or internal in ('booking_page'));
+exception when duplicate_object then null; end $$;
+
+create table if not exists public.booking_pages (
+  workspace_id uuid primary key references public.workspaces(id) on delete cascade,
+  slug text not null check (slug ~ '^[a-z0-9]([a-z0-9-]{1,38})[a-z0-9]$' and slug !~ '--'),
+  enabled boolean not null default false,
+  key_id uuid references public.api_keys(id) on delete set null,
+  intro text check (length(intro) <= 300),
+  colour text not null default '#0e7c86' check (colour ~ '^#[0-9a-f]{6}$'),
+  logo text check (length(logo) <= 150000 and logo ~ '^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$'),
+  show_prices boolean not null default true,
+  show_staff boolean not null default true,
+  show_contact boolean not null default true,     -- the business's address and phone
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id) on delete set null
+);
+create unique index if not exists booking_pages_slug on public.booking_pages (slug);
+alter table public.booking_pages enable row level security;
+revoke all on public.booking_pages from public, anon, authenticated;
+
+-- Addresses nobody can have (Riyeser's own words, and ones that would look official).
+create or replace function public.booking_page_reserved() returns text[] language sql immutable as $$
+  select array['admin', 'administrator', 'api', 'app', 'apps', 'assets', 'book', 'booking', 'bookings', 'help', 'hq', 'link', 'login',
+    'logout', 'new', 'official', 'page', 'pages', 'riyeser', 'riyeser-hq', 'root', 'security', 'settings', 'signin', 'signup',
+    'software', 'staff', 'support', 'system', 'team', 'test', 'www', 'widget', 'developers', 'demo', 'example', 'sample']
+$$;
+-- "Harbour Hair Studio!" -> harbour-hair-studio. Raises with a plain message when it can't be an address.
+create or replace function public.booking_page_clean_slug(s text) returns text language plpgsql immutable as $$
+declare v text := lower(trim(coalesce(s, '')));
+begin
+  v := regexp_replace(v, '[^a-z0-9]+', '-', 'g');
+  v := regexp_replace(v, '(^-+|-+$)', '', 'g');
+  if length(v) < 3 then raise exception 'The address needs at least 3 letters or numbers.'; end if;
+  if length(v) > 40 then raise exception 'The address can be up to 40 letters, numbers and dashes.'; end if;
+  if v = any (booking_page_reserved()) then raise exception '"%" is kept for Riyeser. Try your business''s name.', v; end if;
+  return v;
+end $$;
+-- A free address made from the business's name (harbour-hair-studio, then harbour-hair-studio-2 …).
+create or replace function public.booking_page_suggest(ws uuid) returns text
+  language plpgsql stable security definer set search_path = public as $$
+declare base text; v text; n int := 1;
+begin
+  begin base := booking_page_clean_slug(left(regexp_replace(lower(coalesce((select name from workspaces where id = ws), '')), '[^a-z0-9]+', '-', 'g'), 36));
+  exception when others then base := 'my-business'; end;
+  base := left(regexp_replace(base, '-+$', ''), 36);
+  v := base;
+  while exists (select 1 from booking_pages p where p.slug = v and p.workspace_id <> ws) loop n := n + 1; v := base || '-' || n; end loop;
+  return v;
+end $$;
+-- The web addresses the booking page is served from (the Edge Function only answers those browsers).
+create or replace function public.booking_page_origins() returns text[]
+  language sql stable security definer set search_path = public as $$
+  select coalesce((select array_agg(trim(o)) from hq_settings s, unnest(string_to_array(s.value, ',')) o
+                   where s.key = 'booking_page.origins' and trim(o) ~ '^https?://[a-z0-9.:-]+$'),
+                  array['https://riyeser.com', 'https://www.riyeser.com'])
+$$;
+
+-- For owners and admins: where the page stands (null until it's first saved), a free address to suggest, and what
+-- the page would show.
+create or replace function public.booking_page_get(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare p booking_pages; w workspaces;
+begin
+  perform api_need_admin(ws);
+  select * into w from workspaces where id = ws;
+  if w.kind = 'personal' then raise exception 'Booking pages are for businesses.'; end if;
+  select * into p from booking_pages where workspace_id = ws;
+  return json_build_object(
+    'page', case when p.workspace_id is null then null else json_build_object('slug', p.slug, 'enabled', p.enabled, 'intro', p.intro, 'colour', p.colour,
+        'logo', p.logo, 'show_prices', p.show_prices, 'show_staff', p.show_staff, 'show_contact', p.show_contact, 'updated_at', p.updated_at,
+        'working', p.enabled and exists (select 1 from api_keys k where k.id = p.key_id and k.revoked_at is null)) end,
+    'suggested_slug', coalesce(p.slug, booking_page_suggest(ws)),
+    'business', json_build_object('name', w.name, 'address', w.address, 'phone', w.phone),
+    'allowed', api_gate(ws, 'availability:read') is null,
+    'published', json_build_object('services', (select count(*) from api_catalog c where c.workspace_id = ws and c.type = 'service' and c.active and c.duration_minutes is not null),
+        'open_times', (select count(*) from api_open_times o where o.workspace_id = ws and o.ends_at > now()),
+        'availability_at', (select updated_at from api_published where workspace_id = ws and what = 'availability')),
+    'bookings_7d', (select count(*) from api_inbox i join booking_pages bp on bp.workspace_id = i.workspace_id and bp.key_id = i.key_id
+        where i.workspace_id = ws and i.kind = 'booking' and i.created_at > now() - interval '7 days'));
+end $$;
+
+-- Is this address free? {ok, slug (tidied), message}. Never raises for a bad address: says why instead.
+create or replace function public.booking_page_slug_check(ws uuid, slug text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare v text;
+begin
+  perform api_need_admin(ws);
+  begin v := booking_page_clean_slug(slug); exception when others then return json_build_object('ok', false, 'slug', null, 'message', sqlerrm); end;
+  if exists (select 1 from booking_pages p where p.slug = v and p.workspace_id <> ws) then
+    return json_build_object('ok', false, 'slug', v, 'message', 'riyeser.com/book/' || v || ' is taken. Try adding your town, like ' || left(v, 33) || '-suva.');
+  end if;
+  return json_build_object('ok', true, 'slug', v, 'message', null);
+end $$;
+
+-- Save the page. settings: {slug, enabled, intro, colour, logo ('' removes it), show_prices, show_staff, show_contact};
+-- anything left out stays as it is. Switching it on makes the page key if it has none (or it was revoked).
+create or replace function public.booking_page_save(ws uuid, settings jsonb) returns json
+  language plpgsql security definer set search_path = public as $$
+declare p booking_pages; s jsonb := coalesce(settings, '{}'::jsonb); v text; was boolean; kid uuid; lg text; col text; w workspaces;
+begin
+  perform api_need_admin(ws);
+  select * into w from workspaces where id = ws;
+  if w.kind = 'personal' then raise exception 'Booking pages are for businesses.'; end if;
+  if jsonb_typeof(s) <> 'object' then raise exception 'settings must be an object.'; end if;
+  select * into p from booking_pages where workspace_id = ws for update;
+  was := coalesce(p.enabled, false);
+  v := case when s ? 'slug' then booking_page_clean_slug(s ->> 'slug') else coalesce(p.slug, booking_page_suggest(ws)) end;
+  if exists (select 1 from booking_pages x where x.slug = v and x.workspace_id <> ws) then
+    raise exception 'riyeser.com/book/% is taken. Try another address.', v;
+  end if;
+  col := lower(coalesce(nullif(trim(s ->> 'colour'), ''), p.colour, '#0e7c86'));
+  if col ~ '^#[0-9a-f]{3}$' then col := '#' || substr(col, 2, 1) || substr(col, 2, 1) || substr(col, 3, 1) || substr(col, 3, 1) || substr(col, 4, 1) || substr(col, 4, 1); end if;
+  if col !~ '^#[0-9a-f]{6}$' then raise exception 'The colour looks like #0e7c86.'; end if;
+  lg := case when s ? 'logo' then nullif(s ->> 'logo', '') else p.logo end;
+  if lg is not null and (length(lg) > 150000 or lg !~ '^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+=*$') then
+    raise exception 'The logo must be a PNG, JPEG or WebP picture, up to about 100 KB.';
+  end if;
+  if s ? 'intro' and length(coalesce(s ->> 'intro', '')) > 300 then raise exception 'The welcome text can be up to 300 letters.'; end if;
+  insert into booking_pages as b (workspace_id, slug, enabled, intro, colour, logo, show_prices, show_staff, show_contact, updated_by)
+    values (ws, v, coalesce((s ->> 'enabled')::boolean, false), nullif(trim(regexp_replace(coalesce(s ->> 'intro', ''), '[[:cntrl:]]', ' ', 'g')), ''), col, lg,
+            coalesce((s ->> 'show_prices')::boolean, true), coalesce((s ->> 'show_staff')::boolean, true), coalesce((s ->> 'show_contact')::boolean, true), auth.uid())
+    on conflict (workspace_id) do update set slug = v,
+      enabled = coalesce((s ->> 'enabled')::boolean, b.enabled),
+      intro = case when s ? 'intro' then nullif(trim(regexp_replace(coalesce(s ->> 'intro', ''), '[[:cntrl:]]', ' ', 'g')), '') else b.intro end,
+      colour = col, logo = lg,
+      show_prices = coalesce((s ->> 'show_prices')::boolean, b.show_prices), show_staff = coalesce((s ->> 'show_staff')::boolean, b.show_staff),
+      show_contact = coalesce((s ->> 'show_contact')::boolean, b.show_contact), updated_at = now(), updated_by = auth.uid()
+    returning * into p;
+  if p.enabled and not exists (select 1 from api_keys k where k.id = p.key_id and k.revoked_at is null) then
+    -- the page key: a hash of random bits nobody keeps, so it can't be used as a Bearer key anywhere
+    insert into api_keys (workspace_id, name, kind, mode, scopes, prefix, key_hash, allowed_origins, created_by, internal)
+      values (ws, 'Booking page', 'widget', 'live', array['availability:read', 'bookings:write'], 'rk_pub_live_page',
+              encode(sha256(convert_to(api_random_hex(64) || gen_random_uuid()::text, 'UTF8')), 'hex'), booking_page_origins(), auth.uid(), 'booking_page')
+      returning id into kid;
+    update booking_pages set key_id = kid where workspace_id = ws returning * into p;
+  end if;
+  insert into audit_log (workspace_id, action, details) values (ws,
+    case when p.enabled and not was then 'booking_page.on' when was and not p.enabled then 'booking_page.off' else 'booking_page.update' end,
+    jsonb_build_object('slug', p.slug, 'enabled', p.enabled));
+  return booking_page_get(ws);
+end $$;
+
+-- The Edge Function's first call for /v1/pages/{address}… (service role only): like api_auth, but from the page's
+-- address instead of a key. Every call counts against the visitor's address first (so trying addresses is limited too).
+create or replace function public.api_page_auth(slug text, ip text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare p booking_pages; k api_keys; w workspaces; minute bigint := floor(extract(epoch from now()) / 60); addr inet; n int; lim int; nd int;
+  og jsonb := jsonb_build_object('origins', booking_page_origins());   -- with every refusal, so the page can read it (CORS)
+  gone json := (api_err('page_not_found', 'This business isn''t taking online bookings here.')::jsonb || og)::json;
+begin
+  begin addr := nullif(ip, '')::inet; exception when others then addr := null; end;
+  if addr is not null and api_rate_hit('pi:' || api_ip_trunc(host(addr)) || ':' || minute, interval '2 minutes') > hq_setting_num('api.page_ip_per_minute', 40) then
+    return (api_err('rate_limited', 'Too many requests from here. Wait a minute and try again.')::jsonb
+      || jsonb_build_object('retry_after', 60 - extract(epoch from now())::int % 60) || og)::json;
+  end if;
+  if coalesce(slug, '') !~ '^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$' then return gone; end if;
+  select * into p from booking_pages b where b.slug = api_page_auth.slug;
+  if p.workspace_id is null or not p.enabled then return gone; end if;
+  select * into k from api_keys a where a.id = p.key_id and a.revoked_at is null;
+  select * into w from workspaces where id = p.workspace_id;
+  if k.id is null or w.kind = 'personal' then return gone; end if;
+  if w.status is distinct from 'active' then return (api_err('business_closed', api_gate_message('business_closed'))::jsonb || og)::json; end if;
+  lim := hq_setting_num('api.page_per_minute', 300)::int;
+  n := api_rate_hit('k:' || k.id || ':' || minute, interval '2 minutes');
+  nd := api_rate_hit('w:' || k.workspace_id || ':' || current_date, interval '2 days');
+  if n > lim then
+    return (api_err('rate_limited', 'This booking page is very busy. Wait a minute and try again.')::jsonb
+      || jsonb_build_object('retry_after', 60 - extract(epoch from now())::int % 60, 'key_id', k.id, 'workspace_id', k.workspace_id) || og)::json;
+  end if;
+  if nd > hq_setting_num('api.workspace_per_day', 20000) then
+    return (api_err('daily_limit', 'This business has reached its daily limit for online bookings. Try again tomorrow.')::jsonb
+      || jsonb_build_object('retry_after', extract(epoch from (date_trunc('day', now()) + interval '1 day' - now()))::int, 'key_id', k.id, 'workspace_id', k.workspace_id) || og)::json;
+  end if;
+  if k.last_used_at is null or k.last_used_at < now() - interval '1 minute' then update api_keys set last_used_at = now() where id = k.id; end if;
+  return json_build_object('key_id', k.id, 'workspace_id', k.workspace_id, 'kind', 'widget', 'mode', 'live', 'scopes', k.scopes,
+    'allowed_origins', booking_page_origins(), 'name', 'Booking page', 'slug', p.slug,
+    'rate', json_build_object('limit', lim, 'remaining', greatest(lim - n, 0), 'reset', 60 - extract(epoch from now())::int % 60));
+end $$;
+
+-- What the booking page shows (service role only, after api_page_auth). Only what a customer needs.
+create or replace function public.api_page_profile(key_id uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare p booking_pages; w workspaces; st api_booking_settings; tz text; g text;
+begin
+  select b.* into p from booking_pages b join api_keys k on k.id = b.key_id and k.revoked_at is null where b.key_id = api_page_profile.key_id and b.enabled;
+  if p.workspace_id is null then return api_err('page_not_found', 'This business isn''t taking online bookings here.'); end if;
+  select * into w from workspaces where id = p.workspace_id;
+  select * into st from api_booking_settings where workspace_id = p.workspace_id;
+  tz := coalesce(st.timezone, 'UTC');
+  g := api_gate(p.workspace_id, 'availability:read');
+  return json_build_object('slug', p.slug, 'name', w.name, 'intro', p.intro, 'colour', p.colour, 'logo', p.logo,
+    'address', case when p.show_contact then w.address end, 'phone', case when p.show_contact then w.phone end,
+    'timezone', tz, 'slot_minutes', coalesce(st.slot_minutes, 15), 'days_ahead', coalesce(st.days_ahead, 30),
+    'accepting', g is null and exists (select 1 from api_catalog c where c.workspace_id = p.workspace_id and c.type = 'service' and c.active and c.duration_minutes is not null),
+    'reason', g,
+    'services', case when g is null then (select coalesce(json_agg(json_build_object('sku', c.sku, 'name', c.name, 'description', c.description, 'category', c.category,
+        'duration_minutes', c.duration_minutes, 'price', case when p.show_prices then c.price end, 'currency', case when p.show_prices then c.currency end)
+        order by c.category nulls first, c.name), '[]') from api_catalog c where c.workspace_id = p.workspace_id and c.type = 'service' and c.active and c.duration_minutes is not null)
+      else '[]'::json end,
+    'staff', case when g is null and p.show_staff then (select coalesce(json_agg(json_build_object('ref', s.ref, 'name', s.name, 'services', s.services) order by s.name), '[]')
+        from api_staff s where s.workspace_id = p.workspace_id and s.active) else '[]'::json end,
+    -- opening hours for the next 7 days, from the open times the PCs publish (earliest start, latest end each day)
+    'hours', (select coalesce(json_agg(json_build_object('day', d, 'open', to_char(o1, 'HH24:MI'), 'close', to_char(c1, 'HH24:MI')) order by d), '[]')
+      from (select (o.starts_at at time zone tz)::date d, min((o.starts_at at time zone tz)::time) o1,
+                   max(case when (o.ends_at at time zone tz)::date > (o.starts_at at time zone tz)::date then time '23:59' else (o.ends_at at time zone tz)::time end) c1
+            from api_open_times o where o.workspace_id = p.workspace_id and o.ends_at > now() and o.starts_at < now() + interval '7 days'
+              and (o.staff_ref is null or exists (select 1 from api_staff s where s.workspace_id = p.workspace_id and s.ref = o.staff_ref and s.active))
+            group by 1) h),
+    'updated_at', (select updated_at from api_published where workspace_id = p.workspace_id and what = 'availability'));
+end $$;
+
+-- The page key isn't one of the owner's keys: not in the list or the counts, and it can't be renamed, limited or
+-- revoked there (switching the page off is how it stops). The same functions as above, leaving internal keys out.
+create or replace function public.api_keys_list(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_admin(ws);
+  return (select coalesce(json_agg(api_key_json(k) order by k.revoked_at is not null, k.created_at desc), '[]') from api_keys k where k.workspace_id = ws and k.internal is null);
+end $$;
+create or replace function public.api_key_revoke(ws uuid, key_id uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys;
+begin
+  perform api_need_admin(ws);
+  update api_keys set revoked_at = now(), revoked_by = auth.uid() where id = key_id and workspace_id = ws and revoked_at is null and internal is null returning * into k;
+  if k.id is null then raise exception 'That key isn''t there, or it''s already revoked.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_key.revoke', jsonb_build_object('id', k.id, 'name', k.name, 'prefix', k.prefix));
+  return api_key_json(k);
+end $$;
+create or replace function public.api_key_rename(ws uuid, key_id uuid, key_name text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys; was text;
+begin
+  perform api_need_admin(ws);
+  if coalesce(trim(key_name), '') = '' or length(trim(key_name)) > 60 then raise exception 'Give the key a name (up to 60 letters).'; end if;
+  select name into was from api_keys where id = key_id and workspace_id = ws and internal is null;
+  update api_keys set name = trim(key_name) where id = key_id and workspace_id = ws and internal is null returning * into k;
+  if k.id is null then raise exception 'That key isn''t there.'; end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_key.rename', jsonb_build_object('id', k.id, 'name', jsonb_build_object('was', was, 'now', k.name)));
+  return api_key_json(k);
+end $$;
+create or replace function public.api_key_set_access(ws uuid, key_id uuid, origins text[], ips text[]) returns json
+  language plpgsql security definer set search_path = public as $$
+declare k api_keys; og text[]; ip cidr[];
+begin
+  perform api_need_admin(ws);
+  select * into k from api_keys where id = key_id and workspace_id = ws and revoked_at is null and internal is null;
+  if k.id is null then raise exception 'That key isn''t there, or it''s revoked.'; end if;
+  og := api_clean_origins(origins, k.mode); ip := api_clean_ips(ips);
+  if k.kind = 'widget' and cardinality(og) = 0 then raise exception 'A widget key needs the website address it''s on.'; end if;
+  update api_keys set allowed_origins = og, allowed_ips = ip where id = k.id returning * into k;
+  insert into audit_log (workspace_id, action, details) values (ws, 'api_key.access',
+    jsonb_build_object('id', k.id, 'name', k.name, 'allowed_origins', og, 'allowed_ips', ip::text[]));
+  return api_key_json(k);
+end $$;
+-- api_overview: the same, with the booking page's key left out of "API keys in use" and the page's state added.
+create or replace function public.api_overview(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform api_need_admin(ws);
+  return json_build_object(
+    'keys', (select json_build_object('active', count(*) filter (where revoked_at is null), 'revoked', count(*) filter (where revoked_at is not null)) from api_keys where workspace_id = ws and internal is null),
+    'inbox', (select json_build_object('waiting', count(*) filter (where status = 'waiting'), 'taken', count(*) filter (where status = 'taken'),
+        'failed', count(*) filter (where status = 'failed'), 'rejected_7d', count(*) filter (where status = 'rejected' and updated_at > now() - interval '7 days'),
+        'done_7d', count(*) filter (where status = 'done' and done_at > now() - interval '7 days')) from api_inbox where workspace_id = ws),
+    'published', json_build_object(
+        'catalog_items', (select count(*) from api_catalog where workspace_id = ws),
+        'stock_items', (select count(*) from api_stock where workspace_id = ws),
+        'open_times', (select count(*) from api_open_times where workspace_id = ws and ends_at > now()),
+        'staff', (select count(*) from api_staff where workspace_id = ws and active),
+        'catalog_at', (select updated_at from api_published where workspace_id = ws and what = 'catalog'),
+        'stock_at', (select updated_at from api_published where workspace_id = ws and what = 'stock'),
+        'availability_at', (select updated_at from api_published where workspace_id = ws and what = 'availability')),
+    'webhooks', (select json_build_object('active', count(*) filter (where active), 'failing', count(*) filter (where failing_since is not null)) from api_webhooks where workspace_id = ws),
+    'requests_24h', (select count(*) from api_requests where workspace_id = ws and at > now() - interval '24 hours'),
+    'errors_24h', (select count(*) from api_requests where workspace_id = ws and at > now() - interval '24 hours' and status >= 400),
+    'allowed', json_build_object('any', api_gate(ws, 'prices:read') is null, 'bookings', api_gate(ws, 'bookings:write') is null,
+        'orders', api_gate(ws, 'orders:write') is null),
+    'booking_page', (select json_build_object('enabled', p.enabled, 'slug', p.slug) from booking_pages p where p.workspace_id = ws));
+end $$;
+
+revoke all on function public.booking_page_reserved(), public.booking_page_clean_slug(text), public.booking_page_suggest(uuid),
+  public.booking_page_origins(), public.booking_page_get(uuid), public.booking_page_slug_check(uuid, text), public.booking_page_save(uuid, jsonb),
+  public.api_page_auth(text, text), public.api_page_profile(uuid) from public, anon, authenticated;
+-- owners and admins (each checks two-step sign-in)
+grant execute on function public.booking_page_get(uuid), public.booking_page_slug_check(uuid, text), public.booking_page_save(uuid, jsonb) to authenticated;
+-- only the "api" Edge Function (Supabase's service role)
+do $$ begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function public.api_page_auth(text, text), public.api_page_profile(uuid) to service_role;
+  end if;
+end $$;
