@@ -231,16 +231,31 @@ test('compact headers, folded lines and comma lists are understood', () => {
 });
 
 test('SIP over TCP works too (a REGISTER gets its challenge back on the same connection)', async () => {
-  const env = await setup({ tcp: true });
+  // With port 0, UDP picks a free port first and TCP then has to listen on that same number. On Windows that TCP port
+  // is sometimes already taken (TCP and UDP ephemeral ports are separate), and the PBX then runs UDP-only — which is
+  // right for the app but made this test connect to nothing (ECONNREFUSED). So: start again until TCP is listening,
+  // connect to the TCP server's real bound port, and turn socket errors into a test failure, not a crash.
+  let env = null;
+  for (let i = 0; i < 10 && !env; i++) {
+    const e = await setup({ tcp: true });
+    if (e.pbx.tcp && e.pbx.tcp.listening) env = e; else await e.close();
+  }
+  assert.ok(env, 'SIP over TCP could not listen on a free port in 10 tries');
+  const net = require('net');
+  let s = null;
   try {
-    const net = require('net');
-    const s = net.connect(env.pbx.port, '127.0.0.1');
-    await new Promise((r) => s.once('connect', r));
+    const port = env.pbx.tcp.address().port;
+    assert.strictEqual(port, env.pbx.port, 'TCP and UDP share the SIP port');
+    s = net.connect(port, '127.0.0.1');
+    const failed = new Promise((_r, reject) => s.on('error', (err) => reject(new Error(`SIP over TCP: ${err.message}`))));
+    failed.catch(() => {});   // only matters while we wait on it below
+    await Promise.race([new Promise((r) => s.once('connect', r)), failed]);
     const reg = ['REGISTER sip:127.0.0.1 SIP/2.0', `Via: SIP/2.0/TCP 127.0.0.1:${s.localPort};branch=z9hG4bKtcp1`, 'From: <sip:101@127.0.0.1>;tag=1',
       'To: <sip:101@127.0.0.1>', 'Call-ID: tcp1', 'CSeq: 1 REGISTER', `Contact: <sip:101@127.0.0.1:${s.localPort};transport=tcp>`, 'Content-Length: 0', '', ''].join('\r\n');
-    const got = new Promise((r) => s.once('data', (d) => r(d.toString())));
+    let buf = '';
+    const got = new Promise((r) => s.on('data', (d) => { buf += d.toString(); if (/\r\n\r\n/.test(buf)) r(buf); }));
+    const timeout = new Promise((_r, reject) => { const t = setTimeout(() => reject(new Error('no answer over TCP in 5 s')), 5000); t.unref(); });
     s.write('\r\n\r\n' + reg);
-    assert.match(await got, /^SIP\/2\.0 401 /);
-    s.destroy();
-  } finally { await env.close(); }
+    assert.match(await Promise.race([got, failed, timeout]), /^SIP\/2\.0 401 /);
+  } finally { if (s) s.destroy(); await env.close(); }
 });
