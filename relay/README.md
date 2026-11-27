@@ -52,6 +52,28 @@ No dependencies: Node 18 or later (Ubuntu 24.04's own `nodejs`, or the Node insi
 5. **Register it** (once): open Supabase → SQL editor, paste the line from `C:\ProgramData\Riyeser Relay\REGISTER.sql`
    and run it. It holds the secret: paste it only there, never into chat or email.
 
+## Change or remove a relay PC (runbook)
+
+Riyeser Link Office 1.3.1 does all of this with buttons; these are the same steps by hand.
+
+- **New relay PC, no DNS** (the default): an owner or admin makes a **set-up code** on the website (*Management →
+  Desk phones → Sites & relay → Add or move a relay PC*), and types it into Link Office on the PC (*Settings → Connect
+  your branches → This PC as the relay*). The PC gets its own key; sites use the address it reports.
+- **Move it to another PC**: the same, choosing *It takes over from* the old relay (or *Move to another PC* on its
+  card). When the new PC first checks in, the old one is removed and the sites reconnect to the new one. Then on the old
+  PC: `.\deploy\windows\install-relay.ps1 -Uninstall -KeepRegistration` (or uninstall Link Office).
+- **Remove it from the PC it runs on**: `.\deploy\windows\install-relay.ps1 -Uninstall` (as administrator): out of
+  Riyeser (signed with its key), task and process stopped and removed, the router port forwarding it made removed
+  (`portmaps.json`), firewall rules removed, logs zipped into `C:\ProgramData\Riyeser Relay Logs`, and
+  `C:\ProgramData\Riyeser Relay` deleted (`-KeepSettings` keeps it). The last line is `RESULT {json}`.
+- **The PC is lost or dead**: website, the relay's card → **Remove**. Its key stops working at once and the cluster
+  secret is changed, so keys copied from it stop working on the other relays within 30 seconds.
+- **Riyeser's own relays** (registered in the SQL editor): `select relay_remove('<id>');` still works; to let a
+  business look after one, `update relay_servers set managed_by = '<workspace id>' where id = '<id>';`.
+- **Your own web name** (optional): Cloudflare — DNS → Records → Add record: A, `relay`, the office's address, Proxy
+  status **DNS only** (grey cloud); My Profile → API Tokens → Create token → "Edit zone DNS", zone riyeser.com only;
+  then `-DdnsProvider cloudflare -DdnsZone riyeser.com` (the token is asked for, or `-DdnsTokenFile`). Namecheap — below.
+
 ## 2. The backup relay on a rented server (Linux)
 
 1. Rent a small server in **Sydney**: DigitalOcean *Basic Droplet, 1 vCPU / 1 GB, Ubuntu 24.04, SYD1* (~US$6/month), or

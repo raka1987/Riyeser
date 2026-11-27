@@ -24,7 +24,9 @@ const { Ddns } = require('./lib/ddns');
 const { findPublicIp } = require('./lib/publicip');
 const { TurnServer } = require('./lib/turn');
 const certgen = require('./lib/certgen');
-const { PortMapper, relayPorts } = require('./lib/portmap');
+const { PortMapper, relayPorts, removeSaved } = require('./lib/portmap');
+const net = require('net');
+const dgram = require('dgram');
 const https = require('https');
 
 const VERSION = require('./package.json').version;
@@ -71,6 +73,9 @@ function config(env = process.env) {
     selfSigned: env.SELF_SIGNED !== '0', certDir: env.CERT_DIR || path.join(__dirname, 'data'),
     turn: { enabled: env.TURN !== 'off', port: num(env.TURN_PORT, 3478), tlsPort: num(env.TURNS_PORT, 5349), min: num(env.TURN_MIN, 50000), max: num(env.TURN_MAX, 50999), bind: env.TURN_BIND || '0.0.0.0' },
     portMap: env.PORT_MAP === '1', portMapIp: env.PORT_MAP_IP || '',
+    // 1.1.0: RELAY_DNS=0: no web name (a PC in an office, set up with a code): sites and phones use the public address
+    // it reports, and trust it by its certificate's fingerprint. PORT_MAP_FILE: where the router mappings are noted.
+    dns: env.RELAY_DNS !== '0', portMapFile: env.PORT_MAP_FILE || path.join(env.CERT_DIR || path.join(__dirname, 'data'), 'portmaps.json'),
     mediaMin: num(env.MEDIA_MIN, 40002), mediaMax: num(env.MEDIA_MAX, 49999), probePort: num(env.PROBE_PORT, 40000), mediaBind: env.MEDIA_BIND || '0.0.0.0',
     publicIp: env.RELAY_PUBLIC_IP || '', supabaseUrl: env.SUPABASE_URL || '', supabaseKey: env.SUPABASE_KEY || '', metricsToken: env.METRICS_TOKEN || '',
     ddns: { provider: env.DDNS_PROVIDER || '', token: env.DDNS_TOKEN || '', zone: env.DDNS_ZONE || '', name: env.DDNS_NAME || env.RELAY_HOST || '',
@@ -116,10 +121,39 @@ function createRelayServer(cfg) {
   }
   async function applySync(j) {
     if (!j) return;
+    if (j.keys) adoptKeys(j.keys);
+    self.removed = false;
     relay.setPlan(j);
     self.relays = Array.isArray(j.relays) ? j.relays : [];
     if (j.your_ip && !cfg.publicIp) await refreshIp(j.your_ip);
     dialPeers();
+    // a relay that was removed (or moved to another PC) is no longer one of ours: drop its connection
+    for (const c of [...relay.conns.values()]) if (c.kind === 'peer' && !self.relays.some((x) => x.id === c.peer) && !(cfg.peers || []).some((x) => x.id === c.peer)) { log('warn', `Relay ${c.peer} is no longer in the cluster; disconnecting it.`); c.close('removed from the cluster'); }
+  }
+  /** 1.1.0: the cluster's keys from relay_sync (a relay with its own key). They change when a relay is removed. */
+  function adoptKeys(k) {
+    const hex = (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
+    if (!hex(k.office) || !hex(k.device) || !hex(k.peer) || !hex(k.turn)) return;
+    const changed = self.keyEpoch != null && self.keyEpoch !== k.epoch;
+    keys.office = Buffer.from(k.office, 'hex'); keys.device = Buffer.from(k.device, 'hex'); keys.peer = Buffer.from(k.peer, 'hex'); keys.turn = k.turn;
+    if (turn) turn.secret = k.turn;
+    if (self.keyEpoch !== k.epoch) {
+      if (changed) {
+        log('warn', 'The relay keys were changed (a relay was removed or moved): reconnecting to the other relays with the new ones.');
+        for (const d of self.peerDialers.values()) d.stop(); self.peerDialers.clear();
+        for (const c of [...relay.conns.values()]) if (c.kind === 'peer') c.close('the relay keys changed');
+      } else log('info', `Got the relay keys from Riyeser online (set ${k.epoch}).`);
+      self.keyEpoch = k.epoch;
+    }
+  }
+  /** Riyeser online says this relay was removed (on the website, or another PC took over): stop serving. */
+  function onRemoved() {
+    if (self.removed) return;
+    self.removed = true;
+    log('error', 'This relay has been removed from Riyeser (on the website, or another PC took over as the relay). It no longer serves anyone: sites move to the next relay by themselves. Uninstall it from this PC (Riyeser Link Office → Settings → Connect your branches).');
+    for (const c of [...relay.conns.values()]) if (c.kind === 'site' || c.kind === 'peer') c.close('this relay was removed from Riyeser');
+    for (const d of self.peerDialers.values()) d.stop(); self.peerDialers.clear();
+    relay.setPlan({ businesses: [] });
   }
 
   // ---------- our public IP (and DNS) ----------
@@ -169,12 +203,13 @@ function createRelayServer(cfg) {
     if (!dev) return null;
     self.usedCodes.set(n, Number(v.payload.exp) * 1000);
     const u = v.payload.u.toLowerCase(); const esc = (s) => String(s).replace(/[<>&"]/g, '');
+    const addr = cfg.dns ? cfg.host : (self.ip.ip || cfg.host);   // no web name: the phone uses the relay's address
     // Linphone's remote provisioning format, with the HA1 (the password itself is never on the relay)
     return `<?xml version="1.0" encoding="UTF-8"?>
 <config xmlns="http://www.linphone.org/xsds/lpconfig.xsd">
   <section name="proxy_0">
-    <entry name="reg_proxy">&lt;sip:${esc(cfg.host)}:${self.ports.sipTls || cfg.sipTlsPort};transport=tls&gt;</entry>
-    <entry name="reg_identity">"${esc(dev.label || `Extension ${dev.ext}`)}" &lt;sip:${esc(u)}@${esc(cfg.host)}&gt;</entry>
+    <entry name="reg_proxy">&lt;sip:${esc(addr)}:${self.ports.sipTls || cfg.sipTlsPort};transport=tls&gt;</entry>
+    <entry name="reg_identity">"${esc(dev.label || `Extension ${dev.ext}`)}" &lt;sip:${esc(u)}@${esc(addr)}&gt;</entry>
     <entry name="reg_expires">600</entry>
     <entry name="reg_sendregister">1</entry>
     <entry name="realm">riyeser-relay</entry>
@@ -183,7 +218,7 @@ function createRelayServer(cfg) {
     <entry name="username">${esc(u)}</entry>
     <entry name="ha1">${esc(dev.ha1)}</entry>
     <entry name="realm">riyeser-relay</entry>
-    <entry name="domain">${esc(cfg.host)}</entry>
+    <entry name="domain">${esc(addr)}</entry>
   </section>
 </config>
 `;
@@ -193,7 +228,9 @@ function createRelayServer(cfg) {
     if (req.method === 'GET' && url.pathname === '/health') {
       const s = relay.snapshot();
       return json(res, 200, { ok: true, relay: cfg.id, region: cfg.region, host: cfg.host, version: VERSION, cert_sha256: self.cert ? self.cert.fingerprint : null, uptime: Math.round((Date.now() - started) / 1000), sites: s.sites, phones: s.phones, peers: s.peers, calls: s.calls,
-        sync: cloud.state ? { ok: cloud.state.ok, at: cloud.state.at } : null,
+        sync: cloud.state ? { ok: cloud.state.ok, at: cloud.state.at, error: cloud.state.ok === false ? cloud.state.error : null } : null, removed: !!self.removed,
+        public_ip: self.ip.ip, ip_how: self.ip.how, dns_name: cfg.dns ? cfg.host : null, ports: self.ports, keys: self.keyEpoch != null ? self.keyEpoch : null,
+        port_map: self.portMapper ? self.portMapper.state : null, peers_list: [...relay.conns.values()].filter((c) => c.kind === 'peer').map((c) => c.peer),
         dns: ddns.enabled ? { provider: ddns.provider, name: ddns.name, ok: ddns.state.ok, at: ddns.state.at, error: ddns.state.error } : null });
     }
     if (req.method === 'GET' && url.pathname === '/metrics') {
@@ -202,6 +239,19 @@ function createRelayServer(cfg) {
       const want = `Bearer ${cfg.metricsToken}`;
       if (auth.length !== want.length || !crypto.timingSafeEqual(Buffer.from(auth), Buffer.from(want))) return json(res, 401, { error: 'Needs the metrics token.' });
       res.writeHead(200, { 'Content-Type': 'text/plain; version=0.0.4' }); return res.end(metrics());
+    }
+    // 1.1.0: the checklist in Riyeser Link Office on this PC (only from this PC, never through HTTPS from outside)
+    if (url.pathname.startsWith('/check')) {
+      const local = !req.socket.encrypted && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(String(req.socket.remoteAddress || '')) && !req.headers['x-forwarded-for'];
+      if (!local) return json(res, 404, { error: 'Not here.' });
+      if (req.method === 'GET' && url.pathname === '/check') return json(res, 200, checkInfo());
+      if (req.method === 'POST' && url.pathname === '/check/outside') return outsideCheck().then((r) => json(res, 200, r), (e) => json(res, 200, { ok: false, error: e.message }));
+      if (req.method === 'POST' && url.pathname === '/check/portmap') {
+        if (!self.portMapper) return json(res, 200, { ok: false, error: 'Automatic port forwarding is off (PORT_MAP=0).' });
+        return self.portMapper.map().then((st) => json(res, 200, { ok: !st.error, state: st }), (e) => json(res, 200, { ok: false, error: e.message }));
+      }
+      if (req.method === 'POST' && url.pathname === '/check/sync') return self.sync().then(() => json(res, 200, { ok: true, sync: cloud.state }), (e) => json(res, 200, { ok: false, error: e.message }));
+      return json(res, 404, { error: 'Not here.' });
     }
     const pm = /^\/prov\/([A-Za-z0-9_.-]{20,1500})$/.exec(url.pathname);
     if (req.method === 'GET' && pm) {
@@ -230,6 +280,7 @@ function createRelayServer(cfg) {
         log('warn', `Refused a site from ${ip}: ${v.why}.`);
         return ws.refuse(socket, 401, 'Unauthorized', JSON.stringify({ error: v.why === 'expired' ? 'This office\'s relay pass has expired.' : 'This office\'s relay pass isn\'t valid.', code: v.why === 'expired' ? 'expired' : 'token' }));
       }
+      if (self.removed) return ws.refuse(socket, 403, 'Forbidden', JSON.stringify({ error: 'The relay refused this office: this relay was removed from Riyeser.', code: 'removed' }));
       const why = relay.admitSite(v.payload);
       if (why) { relay.stats.refused++; log('warn', `Refused office ${v.payload.o} from ${ip}: ${why}.`); return ws.refuse(socket, 403, 'Forbidden', JSON.stringify({ error: `The relay refused this office: ${why}.`, code: 'refused' })); }
       const conn = ws.accept(req, socket, head);
@@ -260,7 +311,12 @@ function createRelayServer(cfg) {
     });
     conn.on('message', (data, binary) => {
       lastSeen = Date.now();
-      if (!binary) { let m; try { m = JSON.parse(data); } catch { return; } return relay.onControl(c, m); }
+      if (!binary) {
+        let m; try { m = JSON.parse(data); } catch { return; }
+        if (fields.kind === 'peer' && m.t === 'probe-me') return probeBack(c, m);
+        if (fields.kind === 'peer' && m.t === 'probe-result') { const w = self.probes.get(m.id); if (w) { self.probes.delete(m.id); w(m); } return; }
+        return relay.onControl(c, m);
+      }
       if (fields.kind === 'peer') {
         const nl = data.indexOf(10); if (nl < 0 || nl > 60) return;
         const head2 = data.slice(0, nl).toString(); if (!head2.startsWith('ws:')) return;
@@ -275,19 +331,86 @@ function createRelayServer(cfg) {
     return c;
   }
 
+  // ---------- 1.1.0: checks for Link Office's checklist ----------
+  self.probes = new Map();
+  /** What the checklist needs to know (this PC only): ports, address, port forwarding, peers, keys, the last outside test. */
+  function checkInfo() {
+    return { relay: cfg.id, region: cfg.region, host: cfg.host, dns: cfg.dns, version: VERSION, public_ip: self.ip.ip, ip_how: self.ip.how, ports: self.ports,
+      media: [cfg.mediaMin, cfg.mediaMax], port_map: self.portMapper ? self.portMapper.state : { method: null, off: true }, removed: !!self.removed,
+      sync: cloud.state || null, keys: self.keyEpoch != null ? self.keyEpoch : null, cert_sha256: self.cert ? self.cert.fingerprint : null,
+      peers: [...relay.conns.values()].filter((c) => c.kind === 'peer').map((c) => c.peer), relays: self.relays.map((x) => ({ id: x.id, region: x.region, ip: x.ip })),
+      dns_state: ddns.enabled ? { provider: ddns.provider, name: ddns.name, ok: ddns.state.ok, at: ddns.state.at, error: ddns.state.error } : null,
+      outside: self.outside || null, log: logLines.slice(-60) };
+  }
+  /** The ports that must be open from the internet: [{ proto, port, what }] */
+  function outsidePorts() {
+    const out = [];
+    if (self.ports.https) out.push({ proto: 'tcp', port: self.ports.https, what: 'sites (secure WebSocket)' });
+    if (self.ports.sipTls) out.push({ proto: 'tcp', port: self.ports.sipTls, what: 'phones at home (SIP over TLS)' });
+    if (self.ports.turn) { out.push({ proto: 'udp', port: self.ports.turn, what: 'calls from browsers and apps (TURN)' }); out.push({ proto: 'tcp', port: self.ports.turn, what: 'TURN over TCP' }); }
+    if (self.ports.turns) out.push({ proto: 'tcp', port: self.ports.turns, what: 'TURN over TLS' });
+    if (media.probePort) out.push({ proto: 'udp', port: media.probePort, what: 'call sound (and the sound check)' });
+    return out;
+  }
+  /**
+   * Are our ports open from the internet? Another relay of the cluster connects back to our public address on each
+   * port (peers only test the address Riyeser online lists for us, so nobody can use them to test anyone else's).
+   * -> { ok, via, ip, results: [{ proto, port, what, open }], at } (also kept as self.outside for /check)
+   */
+  async function outsideCheck() {
+    const peer = [...relay.conns.values()].find((c) => c.kind === 'peer');
+    if (!self.ip.ip) return (self.outside = { ok: false, error: 'This relay doesn\'t know its public address yet.', at: new Date().toISOString() });
+    if (!peer) return (self.outside = { ok: null, error: 'No other relay is connected to test from outside. The sites test it when they connect.', ip: self.ip.ip, at: new Date().toISOString() });
+    const id = crypto.randomBytes(6).toString('hex'); const ports = outsidePorts();
+    const answer = await new Promise((resolve) => {
+      const t = setTimeout(() => { self.probes.delete(id); resolve(null); }, 15000);
+      self.probes.set(id, (m) => { clearTimeout(t); resolve(m); });
+      peer.sendJson({ t: 'probe-me', id, ports });
+    });
+    if (answer && answer.error) return (self.outside = { ok: null, error: `The relay ${peer.peer} couldn't test this relay's address (${answer.error}).`, ip: self.ip.ip, at: new Date().toISOString() });
+    if (!answer || !Array.isArray(answer.results)) return (self.outside = { ok: null, error: `The relay ${peer.peer} didn't answer the test.`, ip: self.ip.ip, at: new Date().toISOString() });
+    const results = ports.map((p) => ({ ...p, open: !!(answer.results.find((r) => r.proto === p.proto && r.port === p.port) || {}).open }));
+    return (self.outside = { ok: results.every((r) => r.open), via: peer.peer, ip: answer.ip || self.ip.ip, results, at: new Date().toISOString() });
+  }
+  /** Another relay asked us to test its ports from here: only its own listed address, only the ports it names. */
+  async function probeBack(c, m) {
+    const listed = self.relays.find((x) => x.id === c.peer);
+    const ip = listed && listed.ip; const ports = (Array.isArray(m.ports) ? m.ports : []).slice(0, 12).filter((p) => p && ['tcp', 'udp'].includes(p.proto) && Number.isInteger(p.port) && p.port > 0 && p.port < 65536);
+    if (!ip || !net.isIPv4(ip)) { c.sendJson({ t: 'probe-result', id: m.id, error: 'no address listed for you', results: [] }); return; }
+    const results = [];
+    for (const p of ports) results.push({ proto: p.proto, port: p.port, open: p.proto === 'tcp' ? await tcpOpen(ip, p.port) : await udpAnswers(ip, p.port) });
+    c.sendJson({ t: 'probe-result', id: m.id, ip, results });
+  }
+  const tcpOpen = (ip, port) => new Promise((resolve) => { const s = net.connect({ host: ip, port, timeout: 3000 }); const end = (v) => { s.destroy(); resolve(v); }; s.on('connect', () => end(true)); s.on('timeout', () => end(false)); s.on('error', () => end(false)); });
+  /** UDP: the sound check (RYPROBE1) on the probe port, a STUN binding request on the TURN port. */
+  function udpAnswers(ip, port) {
+    return new Promise((resolve) => {
+      const s = dgram.createSocket('udp4'); const tid = crypto.randomBytes(12);
+      const stun = Buffer.concat([Buffer.from([0, 1, 0, 0, 0x21, 0x12, 0xa4, 0x42]), tid]);
+      let done = false; const end = (v) => { if (done) return; done = true; clearTimeout(t); try { s.close(); } catch { /* closed */ } resolve(v); };
+      const t = setTimeout(() => end(false), 2500);
+      s.on('message', () => end(true)); s.on('error', () => end(false));
+      // both kinds: the other relay's probe port may differ from ours, so send the sound check and STUN
+      s.bind(0, () => { for (let i = 0; i < 3; i++) setTimeout(() => { if (done) return; try { s.send(Buffer.from(`RYPROBE1${tid.toString('hex')}`), port, ip); s.send(stun, port, ip); } catch { /* closed */ } }, i * 400); });
+    });
+  }
+
   // ---------- the other relays of the cluster ----------
   function dialPeers() {
+    if (self.removed) return;
     const want = new Map();
-    for (const r of [...(cfg.peers || []), ...self.relays.map((x) => ({ id: x.id, url: x.url || (x.host ? `wss://${x.host}/relay/v1` : null) }))]) if (r.id && r.url && r.id !== cfg.id) want.set(r.id, r.url);
-    for (const [id, d] of self.peerDialers) if (!want.has(id) || want.get(id) !== d.url) { d.stop(); self.peerDialers.delete(id); }
-    for (const [id, url] of want) if (!self.peerDialers.has(id)) self.peerDialers.set(id, peerDialer(id, url));
+    // 1.1.0: a self-signed relay (a PC with no web name) is trusted by the fingerprint Riyeser online lists (pin)
+    const pins = new Map();
+    for (const r of [...(cfg.peers || []), ...self.relays.map((x) => ({ id: x.id, url: x.url || (x.host ? `wss://${x.host}/relay/v1` : null), pin: x.pin }))]) if (r.id && r.url && r.id !== cfg.id) { want.set(r.id, r.url); if (r.pin) pins.set(r.id, r.pin); }
+    for (const [id, d] of self.peerDialers) if (!want.has(id) || want.get(id) !== d.url || (pins.get(id) || null) !== (d.pin || null)) { d.stop(); self.peerDialers.delete(id); }
+    for (const [id, url] of want) if (!self.peerDialers.has(id)) self.peerDialers.set(id, peerDialer(id, url, pins.get(id)));
   }
-  function peerDialer(id, url) {
-    const d = { url, stopped: false, conn: null, delay: 1000 };
+  function peerDialer(id, url, pin) {
+    const d = { url, pin, stopped: false, conn: null, delay: 1000 };
     const go = async () => {
       if (d.stopped) return;
       try {
-        const conn = await ws.connect(url, { headers: { Authorization: `Peer ${tokens.peerAuth(keys.peer, cfg.id)}` }, ca: cfg.ca, rejectUnauthorized: cfg.rejectUnauthorized });
+        const conn = await ws.connect(url, { headers: { Authorization: `Peer ${tokens.peerAuth(keys.peer, cfg.id)}` }, ca: cfg.ca, rejectUnauthorized: cfg.rejectUnauthorized, pin: pin || undefined });
         if (d.stopped) { conn.close(); return; }
         d.conn = conn; d.delay = 1000;
         wireWs(conn, { kind: 'peer', peer: id, ip: String(conn.remoteAddress || '').replace(/^::ffff:/, '') });
@@ -363,17 +486,20 @@ function createRelayServer(cfg) {
     // own hardware: ask the office router to forward our ports (NAT-PMP or UPnP), where it allows it
     if (cfg.portMap) {
       const lan = Object.values(require('os').networkInterfaces()).flat().find((a) => a && a.family === 'IPv4' && !a.internal);
-      self.portMapper = new PortMapper({ ports: relayPorts(cfg, self.ports), localIp: cfg.portMapIp || (lan && lan.address), log, gw: cfg.portMapGateway, ssdpTarget: cfg.ssdpTarget, ssdpPort: cfg.ssdpPort, pmpPort: cfg.pmpPort });
+      self.portMapper = new PortMapper({ ports: relayPorts(cfg, self.ports), localIp: cfg.portMapIp || (lan && lan.address), log, gw: cfg.portMapGateway, ssdpTarget: cfg.ssdpTarget, ssdpPort: cfg.ssdpPort, pmpPort: cfg.pmpPort, saveFile: cfg.portMapFile });
       await self.portMapper.start().catch((e) => log('warn', `Router port forwarding: ${e.message}`));
     }
     if (cfg.plan) await applySync(cfg.plan);
-    if (cloud.start) await cloud.start(applySync);
+    if (cloud.start) await cloud.start(applySync, onRemoved);
     else if (cloud.enabled === false) log('warn', 'Not connected to Riyeser online (SUPABASE_URL / SUPABASE_KEY missing): no business can use this relay until it is.');
     dialPeers();
     log('info', `Riyeser relay ${cfg.id} (${cfg.region}) ${VERSION} ready: http ${self.ports.http}${self.ports.https ? `, https ${self.ports.https}` : ''}, sip-tls ${self.ports.sipTls || 'off'}, turn ${self.ports.turn || 'off'}${self.ports.turns ? `/${self.ports.turns} (tls)` : ''}, media ${cfg.mediaMin}-${cfg.mediaMax}, probe ${media.probePort}.`);
     return self;
   };
-  self.sync = async () => { const j = await cloud.sync(info()); await applySync(j); return j; };
+  self.sync = async () => {
+    try { const j = await cloud.sync(info()); await applySync(j); return j; } catch (e) { if (/RELAY_REMOVED/.test(e.message)) onRemoved(); throw e; }
+  };
+  self.outsideCheck = outsideCheck; self.checkInfo = checkInfo;
   self.info = info;
   self.stop = async () => {
     for (const t of [self.ipTimer, self.ddnsTimer, self.sweepTimer, self.certTimer]) clearInterval(t);
@@ -413,7 +539,27 @@ function readSipStream(sock, onPacket) {
 
 module.exports = { createRelayServer, config, loadEnvFile, Limiter, readSipStream, VERSION };
 
-if (require.main === module) {
+/**
+ * The uninstaller's helpers (install-relay.ps1 -Uninstall, with RELAY_ENV_FILE set):
+ *   --remove-port-mappings  remove the router port forwarding this relay noted (portmaps.json)
+ *   --leave                 remove this relay from Riyeser (relay_leave, signed with its own key)
+ * Each prints one line of JSON.
+ */
+async function cli(argv, cfg = config()) {
+  if (argv.includes('--remove-port-mappings')) return removeSaved(cfg.portMapFile);
+  if (argv.includes('--leave')) {
+    if (!cfg.supabaseUrl || !cfg.supabaseKey || !cfg.secret) return { left: false, why: 'not connected to Riyeser online' };
+    try { const r = await new CloudSync({ url: cfg.supabaseUrl, key: cfg.supabaseKey, relayId: cfg.id, secret: cfg.secret }).leave(); return { left: true, ...(r || {}) }; }
+    catch (e) { return { left: false, why: String(e.message).slice(0, 200), gone: /RELAY_REMOVED/.test(e.message) }; }
+  }
+  return null;
+}
+
+module.exports.cli = cli;
+
+if (require.main === module && process.argv.some((a) => a === '--remove-port-mappings' || a === '--leave')) {
+  cli(process.argv).then((r) => { console.log(JSON.stringify(r)); process.exit(0); }, (e) => { console.log(JSON.stringify({ error: e.message })); process.exit(1); });
+} else if (require.main === module) {
   const cfg = config();
   if (!cfg.secret) { console.error('RELAY_SECRET (or RELAY_SECRET_FILE) is missing. Run setup.sh, which makes one.'); process.exit(1); }
   const s = createRelayServer(cfg);
