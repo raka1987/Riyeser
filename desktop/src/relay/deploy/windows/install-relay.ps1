@@ -85,9 +85,12 @@ function Read-Hidden([string]$prompt) {
   $s = Read-Host $prompt -AsSecureString; $p = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s)
   try { [Runtime.InteropServices.Marshal]::PtrToStringAuto($p) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($p) }
 }
-if (-not $DdnsProvider -and (Test-Path $envFile)) {
-  foreach ($l in Get-Content $envFile) { if ($l -match '^(DDNS_[A-Z_]+)="(.*)"$' -and $dd.ContainsKey($Matches[1])) { $dd[$Matches[1]] = $Matches[2] } }
-  if ($dd.DDNS_PROVIDER) { Write-Host "Keeping the dynamic DNS settings ($($dd.DDNS_PROVIDER)) already in $envFile." }
+if (-not $DdnsProvider) {
+  # no dynamic DNS asked for: keep what relay.env already has (a fresh install has none)
+  if (Test-Path $envFile) {
+    foreach ($l in Get-Content $envFile) { if ($l -match '^(DDNS_[A-Z_]+)="(.*)"$' -and $dd.ContainsKey($Matches[1])) { $dd[$Matches[1]] = $Matches[2] } }
+    if ($dd.DDNS_PROVIDER) { Write-Host "Keeping the dynamic DNS settings ($($dd.DDNS_PROVIDER)) already in $envFile." }
+  }
 } elseif ($DdnsProvider -eq 'namecheap') {
   $labels = $Domain.Split('.')
   if (-not $DdnsDomain) { $DdnsDomain = ($labels | Select-Object -Last 2) -join '.' }
