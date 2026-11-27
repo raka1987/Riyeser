@@ -120,7 +120,8 @@ jobs:
     timeout-minutes: 45
     needs: licence-key
     # The licence public key, built into the program (empty until licence signing is switched on)
-    env: { RIYESER_LICENCE_PUBLIC_KEY: "${{ needs.licence-key.outputs.key }}" }
+    # RIYESER_ESRI_KEY: Riyeser Estimate's map (ArcGIS Location Platform API key; optional, a repository secret)
+    env: { RIYESER_LICENCE_PUBLIC_KEY: "${{ needs.licence-key.outputs.key }}", RIYESER_ESRI_KEY: "${{ secrets.RIYESER_ESRI_KEY }}" }
     steps:
       - uses: actions/checkout@v4
         with: { ref: main }
