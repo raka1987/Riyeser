@@ -5,7 +5,7 @@
     .\install-relay.ps1 -Domain relay.riyeser.com -Region "Suva head office" -Id suva1
     .\install-relay.ps1 -Backup -Domain relay2.riyeser.com -Region Sydney -Id syd1     (asks for the main relay's secret)
     .\install-relay.ps1 -Uninstall        (removes it from this PC and from Riyeser: see "Uninstalling" below)
-    .\install-relay.ps1 -LinkOffice -SecretFile <file> -Id r1a2b3c4 -NoDns   (Riyeser Link Office, with a set-up code)
+    .\install-relay.ps1 -LinkOffice -RelayKeyFile <file> -Id r1a2b3c4 -NoDns   (Riyeser Link Office, with a set-up code)
     .\install-relay.ps1 -DdnsProvider namecheap -Domain relay.riyeser.com ...   (asks for the Namecheap Dynamic DNS password)
 
   It runs the relay with Node (node.exe on this PC), or, with -LinkOffice, with the copy of Node inside Riyeser Link
@@ -26,7 +26,7 @@
     DigitalOcean token in a file (deleted after reading), as Riyeser Link Office passes it.
 
   No web name (-NoDns, 1.3.1, the default from Riyeser Link Office): sites and phones connect to the address the relay
-  reports to Riyeser online and check its certificate, so no DNS or dynamic DNS is needed. -SecretFile: the relay's own
+  reports to Riyeser online and check its certificate, so no DNS or dynamic DNS is needed. -RelayKeyFile: the relay's own
   key, from a set-up code made on the website (Riyeser Link Office claims it; the file is deleted after reading).
 
   Uninstalling (-Uninstall): removes this relay from Riyeser (unless -KeepRegistration), stops and removes the task,
@@ -42,7 +42,7 @@ param(
   [int]$HttpsPort = 443, [int]$MediaMin = 40002, [int]$MediaMax = 40201, [int]$TurnMin = 40202, [int]$TurnMax = 40301,
   [string]$CertFile = '', [string]$KeyFile = '', [switch]$NoPortMap, [switch]$Uninstall,
   [switch]$KeepSettings, [switch]$KeepRegistration, [string]$LogsDir = (Join-Path $env:ProgramData 'Riyeser Relay Logs'),
-  [string]$SecretFile = '', [switch]$NoDns, [string]$DdnsTokenFile = '', [string]$PublicIp = '',
+  [string]$RelayKeyFile = '', [switch]$NoDns, [string]$DdnsTokenFile = '', [string]$PublicIp = '',
   [ValidateSet('namecheap', 'cloudflare', 'digitalocean')][string]$DdnsProvider = '', [string]$DdnsHost = '', [string]$DdnsDomain = '',
   [string]$DdnsZone = '', [string]$DdnsPasswordFile = '',
   [string]$SupabaseUrl = 'https://goaugynxeatzqzifpoes.supabase.co', [string]$SupabaseKey = 'sb_publishable_-hYqz3gbSvsH-1rX_HLV4A_eSTp3XXL'
@@ -111,10 +111,10 @@ New-Item -ItemType Directory -Force -Path $Data, (Join-Path $Data 'tls'), (Join-
 & icacls $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 
 $secretFile = Join-Path $Data 'secret'
-if ($SecretFile) {
+if ($RelayKeyFile) {
   # the relay's own key from a set-up code (Riyeser Link Office claimed it): replaces any key this PC had
-  $k = if (Test-Path $SecretFile) { (Get-Content $SecretFile -Raw).Trim() } else { '' }
-  Remove-Item $SecretFile -Force -ErrorAction SilentlyContinue
+  $k = if (Test-Path $RelayKeyFile) { (Get-Content $RelayKeyFile -Raw).Trim() } else { '' }
+  Remove-Item $RelayKeyFile -Force -ErrorAction SilentlyContinue
   if ($k -notmatch '^[0-9a-f]{64}$') { Write-Host 'The relay key from the set-up code is missing. Make a new set-up code on the website and try again.'; exit 1 }
   [IO.File]::WriteAllText($secretFile, $k); $k = $null; $Enrolled = $true
 } else { $Enrolled = $false }
