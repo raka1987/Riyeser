@@ -26,12 +26,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
-        edition: [basics, plus, pos, invoices, bookings]
+        edition: [basics, plus, pos, invoices, bookings, estimate]
     runs-on: ${{ matrix.os }}
     env:
-      APP: ${{ fromJSON('{"basics":"Riyeser Accounting Basics","plus":"Riyeser Accounting Plus","pos":"Riyeser POS","invoices":"Riyeser Invoices","bookings":"Riyeser Bookings"}')[matrix.edition] }}
-      LINUX_APP: ${{ fromJSON('{"basics":"riyeser-accounting-basics","plus":"riyeser-accounting-plus","pos":"riyeser-pos","invoices":"riyeser-invoices","bookings":"riyeser-bookings"}')[matrix.edition] }}
-      SETUP: ${{ fromJSON('{"basics":"RiyeserAccountingBasics-Setup","plus":"RiyeserAccountingPlus-Setup","pos":"RiyeserPOS-Setup","invoices":"RiyeserInvoices-Setup","bookings":"RiyeserBookings-Setup"}')[matrix.edition] }}
+      APP: ${{ fromJSON('{"basics":"Riyeser Accounting Basics","plus":"Riyeser Accounting Plus","pos":"Riyeser POS","invoices":"Riyeser Invoices","bookings":"Riyeser Bookings","estimate":"Riyeser Estimate"}')[matrix.edition] }}
+      LINUX_APP: ${{ fromJSON('{"basics":"riyeser-accounting-basics","plus":"riyeser-accounting-plus","pos":"riyeser-pos","invoices":"riyeser-invoices","bookings":"riyeser-bookings","estimate":"riyeser-estimate"}')[matrix.edition] }}
+      SETUP: ${{ fromJSON('{"basics":"RiyeserAccountingBasics-Setup","plus":"RiyeserAccountingPlus-Setup","pos":"RiyeserPOS-Setup","invoices":"RiyeserInvoices-Setup","bookings":"RiyeserBookings-Setup","estimate":"RiyeserEstimate-Setup"}')[matrix.edition] }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -121,6 +121,7 @@ jobs:
             dist/riyeser-pos
             dist/riyeser-invoices
             dist/riyeser-bookings
+            dist/riyeser-estimate
           if-no-files-found: error
 
   switch:
@@ -178,6 +179,13 @@ jobs:
           if (-not (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Invoices*")) { throw "Installing Bookings removed Riyeser Invoices" }
           if (@(Installed).Count -ne 1) { throw "Installing Bookings changed Accounting" }
           Write-Host "OK: Riyeser Bookings installs next to the others"
+          $es = Get-ChildItem out\RiyeserEstimate-Setup-*.exe | Select-Object -First 1
+          Run $es
+          if (-not (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Estimate*")) { throw "Riyeser Estimate is not listed in Installed apps" }
+          if (-not (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Bookings*")) { throw "Installing Estimate removed Riyeser Bookings" }
+          if (@(Installed).Count -ne 1) { throw "Installing Estimate changed Accounting" }
+          if ((Get-FileHash $db).Hash -ne $size) { throw "Company file changed" }
+          Write-Host "OK: Riyeser Estimate installs next to the others"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
