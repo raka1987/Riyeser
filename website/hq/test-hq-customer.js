@@ -71,7 +71,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   check(/On free trial · ends/.test(sum) && /\d+ paid · \d+ on trial/.test(sum), 'summary: the plan in plain words, and the counts');
   check(!(await pg.$('#licCard tr[data-mod=as_built]')), 'As Built hidden (not paid, not installed)');
   check((await pg.$$('#licCard [data-manage]')).length === (await pg.$$('#licCard tr[data-mod]')).length && !(await pg.$('#licCard [data-q]')), 'one Manage button per row, no action buttons in the rows');
-  check(!(await pg.isVisible('#freeProgs table')) && (await text('#freeProgs summary')).startsWith('Free programs: Riyeser Central, Invoices, PDF, Desk Assistant ·'), 'free programs: one quiet line, folded (Riyeser Link is paid, not listed here)');
+  check(!(await pg.isVisible('#freeProgs table')) && (await text('#freeProgs summary')).startsWith('Free programs: Riyeser Central, Invoices, PDF, Documents ·'), 'free programs: one quiet line, folded (Riyeser Link is paid, not listed here)');
   check(!!(await pg.$('#licCard tr[data-mod=calls]')) && !(await text('#freeProgs summary')).includes('Riyeser Link') && !(await pg.$('#freeProgs [data-pcsfor=team]')), 'Riyeser Link is in the paid and trial programs');
   await pg.click('#freeProgs summary'); check(await pg.isVisible('#freeProgs tr.free'), 'free programs: expand for each one\'s installs');
   const before = await until('bookings');

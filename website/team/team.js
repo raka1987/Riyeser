@@ -1077,7 +1077,7 @@
       <form id="cof">${field('name', 'Business name', 80)}${field('tax_number', 'ABN / TIN / Tax ID', 40)}${field('address', 'Address', 300)}${field('phone', 'Phone', 40)}${field('email', 'Email')}${field('country', 'Country', 60)}
       ${admin ? `<label class="opt sm"><input type="checkbox" name="require_approval"${t.require_approval ? ' checked' : ''}> New people need approval before they're in (recommended)</label>` : ''}
       ${lic && isOwner() ? `<h4 style="margin:16px 0 6px">Your plan</h4>${planHtml(lic)}
-        <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Desk Assistant and Riyeser Link chat. To add programs or pay, use Billing on your Riyeser home page.</p>` : ''}
+        <p class="muted small" style="margin:6px 0 0">Free forever: Riyeser Central, Invoices, PDF, Riyeser Documents and Riyeser Link chat. To add programs or pay, use Billing on your Riyeser home page.</p>` : ''}
       ${admin && devs.length ? `<h4 style="margin:16px 0 6px">Linked PCs</h4><div class="devs">${devs.map((dv) => `<div><span><b>${esc(dv.device_name || 'A PC')}</b><small>${esc(nameOf(dv.user_id))} · ${esc(dv.platform || '')} · seen ${ago(dv.last_seen)}</small></span><button type="button" class="btn sm" data-unlink="${dv.id}">Unlink</button></div>`).join('')}</div>` : ''}
       <div class="mfoot"><button type="button" class="btn" id="cl">Close</button>${admin ? '<button class="btn p">Save</button>' : ''}</div></form>`, (d, close) => {
       d.querySelector('#cl').onclick = close;
@@ -1191,7 +1191,7 @@
     ['bookings', 'Bookings', 'Jobs, appointments and tables.', 'RiyeserBookings-Setup.exe', 'bookings'],
     ['payroll', 'Payroll', 'Staff, timesheets and pay runs.', 'RiyeserPayroll-Setup.exe', 'payroll'],
     ['pdf', 'PDF', 'Fill, sign and edit PDFs.', 'RiyeserPDF-Setup.exe', 'free'],
-    ['desk-assistant', 'Desk Assistant', 'Files your documents for you.', 'RiyeserDeskAssistant-Setup.exe', 'free'],
+    ['documents', 'Documents', 'Scan, file and find office documents.', 'RiyeserDeskAssistant-Setup.exe', 'free'],
   ];
   const shortDay = (d) => new Date(d + (String(d).length === 10 ? 'T00:00:00' : '')).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
   function licLine(lic, key) {
@@ -1620,7 +1620,7 @@
   const TSAYS = { new: 'We\'ve got it and will reply soon.', investigating: 'We\'re looking into it.', waiting_us: 'It\'s with Riyeser. We\'ll reply here.',
     waiting_customer: 'We\'re waiting for your reply. Is it fixed?', done: 'Resolved. If it happens again, press Still having an issue.' };
   const PRODUCTS = [['central', 'Riyeser Central'], ['accounting', 'Accounting'], ['invoices', 'Invoices'], ['pos', 'POS'], ['bookings', 'Bookings'], ['payroll', 'Payroll'],
-    ['link', 'Riyeser Link'], ['linkoffice', 'Riyeser Link Office'], ['pdf', 'Riyeser PDF'], ['desk', 'Desk Assistant'], ['website', 'riyeser.com'], ['other', 'Something else']];
+    ['link', 'Riyeser Link'], ['linkoffice', 'Riyeser Link Office'], ['pdf', 'Riyeser PDF'], ['desk', 'Riyeser Documents'], ['website', 'riyeser.com'], ['other', 'Something else']];
   const PRODUCT_NAMES = Object.fromEntries(PRODUCTS);
   // "3:00 pm Fri" this week, else "3:00 pm Fri 5 Dec"
   const byWhen = (t) => { const d = new Date(t); const tm = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).replace(/\s?([ap])\.?m\.?/i, ' $1m').toLowerCase();

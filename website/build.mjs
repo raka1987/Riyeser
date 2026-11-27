@@ -57,11 +57,12 @@ const ALL_PROGRAMS = [
     one: `Rosters, time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click. Free for 90 days, no card.`,
     pitch: 'Pay day without the paperwork.',
     note: 'Check the PAYE and FNPF rates in Payroll rules against the current rules before you pay staff.' },
-  // Riyeser Documents (formerly Riyeser Desk Assistant; the page id stays desk-assistant). Releases carry its installer
+  // Riyeser Documents (formerly Riyeser Desk Assistant; its old pages programs/desk-assistant.html and
+  // help/desk-assistant.html forward here, see "old riyeser.com addresses"). Releases carry its installer
   // as RiyeserDocuments-Setup.exe and, for old links and older Centrals, RiyeserDeskAssistant-Setup.exe: the old name
   // is used here because every release has it (the new name only from the first Riyeser Documents release).
-  { id: 'desk-assistant', name: 'Riyeser Documents', short: 'Documents', icon: '🗂', file: 'RiyeserDeskAssistant-Setup.exe',
-    one: 'Scans from the office printer, phones and uploads land in one Inbox, each with a suggested folder: file them in one click. Search the text inside every scan, with folder access for each person.',
+  { id: 'documents', name: 'Riyeser Documents', short: 'Documents', icon: '🗂', file: 'RiyeserDeskAssistant-Setup.exe',
+    one: 'Scan, file and find every office document. Scans from the office printer and uploads land in one Inbox, each with a suggested folder: file them in one click. Search the text inside every scan, with folder access for each person.',
     pitch: 'Every paper in its place.',
     shot: 'documents-inbox.webp' },
   // Riyeser Link (formerly Riyeser Team). Its Windows installer keeps the old file name, so installed copies update in place.
@@ -92,7 +93,7 @@ const CARD = {
   pos: ['A touch-friendly till for shops and cafes.', 'The till for shops and cafes'],
   bookings: ['Jobs, appointments, tables and on-site sign-off.', 'Jobs, appointments, on-site sign-off'],
   payroll: ['Rosters, timesheets, pay runs and payslips.', 'Rosters and pay runs'],
-  'desk-assistant': ['Sorts and finds every file in seconds.', 'Sort and find your files'],
+  documents: ['Scan, file and find every office document.', 'Scan, file and find documents'],
   link: ['Chat, calls and desk phones for your team.', 'Chat, calls and phones'],
   'link-office': ['Your office phone system: desk phones and extensions.', 'Office phone system'],
   pdf: ['Open, fill in, sign and combine PDFs.', 'Fill, sign and edit PDFs'],
@@ -101,8 +102,8 @@ const CARD = {
 for (const p of ALL_PROGRAMS) [p.card, p.tag] = CARD[p.id];
 // Free programs first, then the paid ones, each group A to Z. Every list on the site (menus, finder, grids, downloads,
 // footer, pricing) uses this order. Riyeser Link Office sits right after Riyeser Link (it comes with it).
-const FREE_TOOLS = ['central', 'desk-assistant', 'invoices', 'pdf'];
-const ORDER = ['central', 'desk-assistant', 'invoices', 'pdf', 'accounting-basics', 'accounting', 'bookings', 'link', 'link-office', 'payroll', 'pos', 'services'];
+const FREE_TOOLS = ['central', 'documents', 'invoices', 'pdf'];
+const ORDER = ['central', 'documents', 'invoices', 'pdf', 'accounting-basics', 'accounting', 'bookings', 'link', 'link-office', 'payroll', 'pos', 'services'];
 ALL_PROGRAMS.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 for (const p of ALL_PROGRAMS) p.free = FREE_TOOLS.includes(p.id);
 const FREE_HEAD = 'Free forever';
@@ -113,8 +114,7 @@ const FREE_INFO = {
   invoices: { inc: 'Unlimited quotes, invoices, customers and payments received, who owes you, and PDF copies to print or attach to your email.', lim: null,
     up: `For stock, bills, money in and out and reports, move up to Accounting Basics (${usd(PRICE.basic)}/month): it opens the same company file.` },
   pdf: { inc: 'Open, fill in, sign, edit, combine and split PDFs, and read scanned pages.', lim: null },
-  'desk-assistant': { inc: 'Sorts your files by type and year, finds anything by name or by the words inside, spots copies, and keeps your to-dos.', lim: null,
-    note: 'Optional AI sorting uses your own AI key, if you add one.' },
+  documents: { inc: 'The office document library: department folders, the Inbox with suggested folders, search inside scans, scanning from the office printer, People & access, the Recycle bin and history.', lim: null },
 };
 // ---------- prices next to each program (every number from prices.mjs) ----------
 // Each paid program's entry in PRICE (Riyeser Link is the 'calls' module).
@@ -138,13 +138,13 @@ const buyBtns = (m, cls = '') => `<div class="buybtns${cls ? ' ' + cls : ''}" da
 
 // ---------- what each program includes ----------
 // Checked against the programs themselves (November 2026): Accounting Basics / Plus, Invoices, POS and Bookings on main
-// (riyeser/), Payroll on module/payroll, Central, PDF, Desk Assistant and Link Office in desktop/, Riyeser Link in
+// (riyeser/), Payroll on module/payroll, Central, PDF, Riyeser Documents and Link Office in desktop/, Riyeser Link in
 // website/team/. Only what the program does today; "coming soon" only where the site already says so.
 const INCLUDES = {
   central: ['Every Riyeser program you have, one click away', 'Installs and updates Riyeser programs (Add a program)',
     'Money owed to you, overdue invoices and bills to pay, from Riyeser Accounting', 'Your last pay run, from Riyeser Payroll',
-    "Today's meetings and to-dos, from Desk Assistant", 'Recent activity, invoices to chase and shortcuts (open the till, new invoice, new booking, run payroll)',
-    'One search box for all your files: by name, words inside, company or an old name', 'Recent documents: pick up the files you opened last', 'A getting-started checklist',
+    'Recent activity, invoices to chase and shortcuts (open the till, new invoice, new booking, run payroll)',
+    'One search box for your documents: by name or the words inside, from Riyeser Documents', 'Recent documents: pick up the files you opened last', 'A getting-started checklist',
     'Demo mode: try every program with a made-up sample business', 'Your company and Riyeser licence in one place', 'Light and dark look'],
   invoices: ['Today, your home screen: unpaid invoices (overdue first), money in this week and the calls you said you\'d make', 'Quotes and tax invoices with your business details',
     'Quotes with a valid-until date: mark them accepted or declined, and late ones show as expired', 'Turn an accepted quote into an invoice in one click, or into a Riyeser Bookings job',
@@ -199,10 +199,15 @@ const INCLUDES = {
     'Payslips with year-to-date totals: print, save as PDFs or email', 'Staff can see their own payslips and timesheets',
     'Annual and sick leave: entitlement, taken and left', 'Bring in monthly Excel wage reports', 'Bank statement check: wage payments matched to staff (PDF, CSV or Excel)',
     'Access by area: Owner, Payroll officer, Supervisor, Employee and Read-only', 'Audit trail and login history', 'A backup every day (the last 30 kept)'],
-  'desk-assistant': ['Sort by type: files into Organised › Type › Year, with a preview first', "Undo, and \"Where are my files?\" for every move, or put everything back",
-    'Find a file by name, by the words inside, by company or by an old name, with type and year filters', 'Copies of the same file found, even a Word file and its PDF; extras archived, never deleted',
-    'Reads scanned PDFs and photos so they can be filed and found', 'Organise new files, tidy the Desktop and clean up Downloads',
-    "Today: meetings from your calendar and the to-dos from your meeting notes", 'A built-in PDF editor', 'Optional AI sorting with your own AI key', 'Only your own documents: never Windows or program files'],
+  documents: ['One shared library for the office, on this PC or a shared network folder', 'Department folders (Accounts, Admin, Jobs, Payroll & HR, Sales…), real Windows folders',
+    'An Inbox for new documents, each with a suggested folder: from your filing rules, where you filed similar ones, and what the document is',
+    'File it in one click, change the folder (it learns), or File all as suggested', 'Reads scans and photos (OCR), so search finds the words inside them',
+    'Upload, or drag files onto the window: your original stays where it was', 'Scan from a scanner on this PC (Windows\' own scan window)',
+    'Scan to folder from the office printer, with steps for HP, Canon, Brother, Ricoh, Kyocera and Epson', 'Show scans, photos or documents, filter by who it came from, and sort',
+    'Preview PDFs and pictures; open, print, move, rename or delete one document or several', 'Recycle bin: deleted documents kept for 30 days, then restore with one click',
+    'History: who added, filed, moved, renamed, printed, deleted and restored what', 'People & access for each folder: No access, View, Add, Edit or Full, for everyone, groups or one person',
+    'Private documents, and the owner always has Full access', 'Light and dark look',
+    'Coming: Riyeser cloud sync, connecting offices on different sites, and share links'],
   link: ['Channels for each topic, job or site', 'Private chats: only the people you choose can see them', 'Direct messages between two people',
     'Reactions, pinned chats and files shared in chat', 'INV-1047 or Booking 12 stands out in a message', 'Unread counts on every chat',
     'Call a person, dial an extension, or call a whole branch', 'Turn the camera on for video in any call',
@@ -231,7 +236,7 @@ const inclDetails = (key, name) => `<details class="incd"><summary>What's includ
 // ---------- screenshots: the real programs with a made-up sample business (assets/shots, each also as -900.webp) ----------
 // Taken with sample data only ("Coral Coast Trading (sample)", Riyeser Link's "Sample Plumbing" demo): no real people or customers.
 const SHOTS = {
-  central: [['central-home', 1280, 800, 'Riyeser Central home screen in demo mode: tiles for Link, Invoices, Bookings, Books, POS, Payroll, Desk Assistant and PDF, with money owed, recent activity and shortcuts', 'Home screen, with money owed and recent activity'],
+  central: [['central-home', 1280, 800, 'Riyeser Central home screen in demo mode: tiles for Link, Invoices, Bookings, Books, POS, Payroll, Documents and PDF, with money owed, recent activity and shortcuts', 'Home screen, with money owed and recent activity'],
     ['central-home-dark', 1280, 800, 'The same Riyeser Central home screen in the dark look', 'The dark look']],
   invoices: [['invoices-list', 1440, 675, 'Riyeser Invoices sales register listing open and overdue invoices for sample customers', 'Your invoices, with what is open and overdue'],
     ['invoices-invoice', 1440, 495, 'An overdue invoice in Riyeser Invoices with a part payment applied and buttons to download a PDF or receive a payment', 'An invoice with a part payment'],
@@ -266,8 +271,12 @@ const SHOTS = {
     ['payroll-roster', 1280, 1143, "Riyeser Payroll roster: the week's shifts for each person, an open shift, hours and estimated wages, and buttons to publish, print or send it as a WhatsApp or SMS text", 'The weekly roster'],
     ['payroll-roster-staff', 780, 1388, 'The published roster on a phone: the shifts for each day, with Print or PDF and WhatsApp / SMS text buttons', 'What staff see on a phone', 'tall'],
     ['payroll-roster-print', 1280, 800, 'The printed roster: a table of people and days with each shift, its area and the hours for the week', 'The roster, printed']],
-  'desk-assistant': [['desk-search', 1280, 560, 'Desk Assistant Find a file: a search for a customer name finds two invoices, filed under Organised, Invoices, 2026', 'Find a file'],
-    ['desk-today', 1280, 300, "Desk Assistant Today screen with meetings and the to-dos taken from meeting notes", "Today's to-dos"]],
+  documents: [['documents-inbox', 1440, 900, 'Riyeser Documents Inbox in demo mode: an invoice scanned at the office printer with its suggested folder, Accounts, Suppliers, Pacific Hardware, 2026, and File it and Change buttons', 'The Inbox, with a suggested folder'],
+    ['documents-search', 1440, 900, 'A search for "pacific" finds three invoices and a bank statement scanned at the office printer, with the matching words from inside the scan', 'Search finds words inside scans'],
+    ['documents-folder', 1440, 900, 'The Accounts folder in the dark look, showing only scans sorted by name, with sub-folders for bank statements, expense claims, suppliers and tax', 'A department folder, scans only'],
+    ['documents-scan-folders', 1440, 900, 'Settings, Scan folders: the network path for each department to type into the office printer, with Copy buttons', 'Scan folders for the office printer'],
+    ['documents-access', 1440, 900, 'Settings, People & access: a level for each folder for everyone, managers, the accounts team and the payroll and HR team, with Payroll & HR locked', 'People & access for each folder'],
+    ['documents-phone', 390, 844, 'Riyeser Documents in a narrow window like a phone: the Inbox with a fuel receipt, a contract and a signed job sheet', 'In a small window', 'tall']],
   link: [['link-chat', 1440, 900, 'Riyeser Link demo: one list of chats and people on the left, the jobs channel with messages, reactions and a shared job sheet, and your status at the top', 'Team chat'],
     ['link-calls', 1440, 900, 'Riyeser Link calls: dial an extension or call a branch, with recent calls', 'Calls'],
     ['link-desk-phones', 1440, 900, 'Riyeser Link desk phones page: set-up steps for Riyeser Link Office and the server address to type into phones', 'Desk phones'],
@@ -343,12 +352,12 @@ const DEMO = [
       ['link-desk-phones', 30, 41, 'Plug in desk phones: they show up by themselves.'],
       ['link-desk-phones', 30, 48, 'Give each phone to a person: staff call each other free.'],
       ['link-desk-phones', 63, 66, "See that it's running and how many phones are connected."]] },
-  { id: 'desk-assistant', label: 'Desk Assistant', prog: 'desk-assistant', finder: ['desk-assistant'],
-    head: 'Never lose a file again.', ticks: ['Free forever', 'Finds copies of the same file; extras are archived, never deleted', 'Reads scanned PDFs and photos so they can be found'],
-    steps: [['desk-search', 60, 26, 'Find any file by its name, the words inside or a company.'],
-      ['desk-search', 27, 40, 'Narrow it down by type and year.'],
-      ['desk-search', 30, 72, 'Files sorted into folders by type and year.'],
-      ['desk-search', 9, 29, 'See where every file went, or put everything back.']] },
+  { id: 'documents', label: 'Documents', prog: 'documents', finder: ['documents'],
+    head: 'Scan, file and find every office document.', ticks: ['Free forever', 'Scans from the office printer land in one Inbox', 'Search finds the words inside every scan'],
+    steps: [['documents-inbox', 23, 38, 'Scans from the office printer land in the Inbox.'],
+      ['documents-inbox', 84, 86, 'Each one gets a suggested folder: File it in one click.'],
+      ['documents-search', 28, 58, 'Search finds the words inside every scan.'],
+      ['documents-access', 29, 87, 'Choose who can see each folder, like Payroll & HR.']] },
   { id: 'pdf', label: 'PDF', prog: 'pdf', finder: ['pdf'],
     head: 'Drawings and forms, done on the PC.', ticks: ['Free forever', 'Fill in forms, and Redact removes what is underneath for good', 'Reads the text in scanned pages'],
     steps: [['pdf-markup', 44, 70, 'Mark up drawings with circles, arrows and notes.'],
@@ -392,7 +401,7 @@ const VIDEOS = {
   payroll: [52, 'Riyeser Payroll: roster, timesheets and a pay run with rostered and paid hours'],
   link: [43, 'Riyeser Link: team chat, your status and a call'],
   'link-office': [35, 'Riyeser Link Office: a new desk phone, given to a person, and a call'],
-  'desk-assistant': [50, 'Riyeser Desk Assistant: find a file, sort Downloads and Desktop, find copies'],
+  documents: [54, 'Riyeser Documents: file a scan from the office printer, search inside scans, and People & access'],
   pdf: [51, 'Riyeser PDF: mark up a drawing, tick, sign and date it, and more tools'],
   central: [42, 'Riyeser Central: demo mode and your home screen for the business'],
 };
@@ -509,7 +518,7 @@ const LI = {
   'accounting-basics': '<rect x="4.5" y="2.5" width="15" height="19" rx="2"/><rect x="7" y="5" width="10" height="4" rx=".8"/><path d="M8 12.5h.01M12 12.5h.01M16 12.5h.01M8 15.5h.01M12 15.5h.01M16 15.5h.01M8 18.5h.01M12 18.5h.01M16 18.5h.01"/>',
   accounting: '<ellipse cx="15" cy="6" rx="6" ry="2.5"/><path d="M9 6v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V6"/><path d="M21 10v4c0 1.4-2.7 2.5-6 2.5"/><ellipse cx="9" cy="14" rx="6" ry="2.5"/><path d="M3 14v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4"/>',
   payroll: '<rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/><path d="M7.5 13h.01M12 13h.01M16.5 13h.01M7.5 16.5h.01M12 16.5h.01M16.5 16.5h.01"/>',
-  'desk-assistant': '<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12.5" cy="13.5" r="2.6"/><path d="M14.5 15.5l2 2"/>',
+  documents: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12.5" cy="13.5" r="2.6"/><path d="M14.5 15.5l2 2"/>',
   pdf: '<path d="M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z"/><path d="M14 2.5V8h5.5"/><path d="M7.5 17v-4h1.3a1.2 1.2 0 0 1 0 2.4H7.5M11.5 13v4h.9a2 2 0 0 0 0-4zM16.8 13h-1.9v4M14.9 15h1.6"/>',
   services: '<path d="M3 17.5h18"/><path d="M5 17.5a7 7 0 0 1 14 0"/><path d="M10 10.8V8a2 2 0 0 1 4 0v2.8"/><path d="M4 17.5v2h16v-2"/>',
   retail: '<path d="M3.5 9.5l1.5-5h14l1.5 5"/><path d="M3.5 9.5a2.2 2.2 0 0 0 4.3 0 2.2 2.2 0 0 0 4.2 0 2.2 2.2 0 0 0 4.2 0 2.2 2.2 0 0 0 4.3 0"/><path d="M5 11.5v9h14v-9"/><path d="M10 20.5v-5h4v5"/>',
@@ -545,7 +554,7 @@ const INDUSTRIES = [
     h: 'Client books, one sign-in', p: "Run a separate company file for each client, switch between them from the top of the screen, and see everyone's cash, money owed and profit on one page.",
     shot: 'accounting.webp', shotName: 'Riyeser Accounting Plus', shotApp: 'accounting', cta: ['accounting', 'Explore Accounting Plus'],
     progs: [['accounting', ['Several companies with one sign-in, and an overview of them all', 'Bank reconciliation, statement import and BAS / GST figures', 'Lock a period after the BAS is lodged', 'Quick access sets: Owner, Bookkeeper, Payroll officer, Read-only']],
-      ['desk-assistant', ['Files every invoice and statement by company, type and year', 'Find any file by a word inside it or an old name', 'Undo any tidy-up, and nothing is ever deleted']],
+      ['documents', ['Scans from the office printer land in one Inbox, with a suggested folder', 'Find any document by a word inside the scan', 'Lock folders like Payroll & HR to the people who need them']],
       ['pdf', ['Fill in and sign forms', 'Combine, split and reorder pages', 'Black out bank details before you send']]] },
   { id: 'trades', name: 'Trades & construction', icon: 'trades', photo: 'trades.webp', short: 'Track installations, inspections and handovers.',
     title: 'Trades & Construction', lead: 'Service mapping and inspections for trades and construction projects, with clear plans and on-site markups.',
@@ -557,7 +566,7 @@ const INDUSTRIES = [
     progs: [['bookings', ['Jobs at the customer\'s address, given to your staff', 'A day view for every tradie, with no double-booking', 'On site: checklists, before and after photos, and the customer signs on screen', 'Invoice the job in one click when it\'s done']],
       ['services', ['Cables, pipes and ducts drawn on your PDF plans, end to end', 'Inspections, test results and photos on every item', 'Works with no signal on site; as-builts ready at handover']],
       ['pdf', ['Mark up drawings with clouds, arrows, boxes and stamps', 'Fill in and sign site forms', 'Read scanned drawings so they can be searched']],
-      ['desk-assistant', ['Files drawings, quotes and invoices by type and year', 'Spots duplicate copies of the same drawing', 'Find any file in seconds']]] },
+      ['documents', ['A folder for every job, with quotes, job sheets and photos', 'Scan site paperwork at the office printer and file it in one click', 'Find any document by a word inside it']]] },
 ];
 if (!ASBUILT) for (const i of INDUSTRIES) i.progs = i.progs.filter(([id]) => id !== 'services');
 // ---------- home page hero: "Take it anywhere with you" — four real-life scenes that slowly take turns ----------
@@ -607,7 +616,7 @@ const CI = {
 const ci = (k) => `<svg viewBox="0 0 24 24" aria-hidden="true">${CI[k]}</svg>`;
 const centralMock = (up) => `<div class="cmock-wrap" aria-label="Riyeser Central home screen" role="img"><div class="cmock">
   <div class="cm-side"><div class="cm-logo"><img src="${up}assets/logo-r.png" alt="">Riyeser Central</div>
-    <span class="on">${ci('home')}Home</span><span>${ci('book')}Books</span><span>${ci('people')}Payroll</span><span>${ci('invoice')}Invoices</span><span>${ci('folder')}Desk Assistant</span><span>${ci('pdf')}PDF</span>
+    <span class="on">${ci('home')}Home</span><span>${ci('book')}Books</span><span>${ci('people')}Payroll</span><span>${ci('invoice')}Invoices</span><span>${ci('folder')}Documents</span><span>${ci('pdf')}PDF</span>
     <hr><span>${ci('key')}Licence</span><span>${ci('help')}Help</span></div>
   <div class="cm-main"><div class="cm-ctl"><i></i><i></i><i></i></div>
     <b class="cm-hi">Good morning.</b><small class="cm-sub">Your business at a glance in Riyeser Central.</small>
@@ -658,17 +667,17 @@ const heroPrice = (p, up) => { const m = MOD[p.id];
     <div class="hp-sub">No time limit, no card, no user charges</div>${f.lim ? `<div class="hp-sub">Only limit: ${esc(f.lim)}</div>` : ''}${f.up ? `<div class="hp-sub">${esc(f.up)}</div>` : ''}</div>`; };
 // "Works with" on each program page: only links the programs really have (checked against INCLUDES and the industry pages).
 const RELATED = {
-  central: [['accounting-basics', 'Money owed and overdue invoices on your home screen'], ['payroll', 'Your last pay run on your home screen'], ['desk-assistant', "Today's meetings and to-dos on your home screen"]],
+  central: [['accounting-basics', 'Money owed and overdue invoices on your home screen'], ['payroll', 'Your last pay run on your home screen'], ['documents', 'Search the office\'s documents from your home screen']],
   invoices: [['accounting-basics', 'Opens the same company file when you need more'], ['bookings', 'Invoice a finished job in one click'], ['central', 'Your home screen for every program']],
   'accounting-basics': [['pos', 'Till sales land as paid invoices'], ['payroll', 'Pay runs brought into your books'], ['bookings', 'Invoice a finished job in one click']],
   accounting: [['pos', 'Till sales land as paid invoices'], ['bookings', 'Invoice a finished job in one click'], ['central', 'Money owed, on your home screen']],
   pos: [['accounting-basics', 'Every sale lands as a paid invoice'], ['bookings', 'Customers shared with the till'], ['central', 'Your home screen for every program']],
   bookings: [['invoices', 'Invoice a finished job in one click'], ['accounting-basics', 'Job invoices land in your books'], ['pos', 'Customers shared with the till']],
   payroll: [['accounting-basics', 'Pay runs brought into your books'], ['central', 'Your last pay run on your home screen']],
-  'desk-assistant': [['central', "Today's meetings and to-dos on your home screen"], ['pdf', 'Fill in, sign and edit the PDFs it finds']],
+  documents: [['central', 'Search the office\'s documents from your home screen'], ['pdf', 'Open in Riyeser PDF: fill in, sign and edit a document']],
   link: [['link-office', 'Your office phone system: desk phones that ring each other'], ['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out']],
   'link-office': [['link', 'See the desk phones, and answer office calls in the app (My phone)'], ['central', 'Installs it and keeps it up to date']],
-  pdf: [['desk-assistant', 'Sorts and finds your PDFs, even scanned ones'], ['central', 'Your home screen for every program']],
+  pdf: [['documents', 'Files and finds the office\'s PDFs, even scanned ones'], ['central', 'Your home screen for every program']],
 };
 /** A program card: icon, name, one line, then the price and "Learn more" pinned to the bottom (every card the same height). */
 const progCard = (p, up) => `<a class="card pcard2" href="${up}programs/${p.id}.html">${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p>
@@ -863,14 +872,14 @@ ${demoSection(up)}
   <div class="safe">
     <div><span class="k">Your business, your computer</span><h2>Safe by design</h2>
       <p>Your books, staff records and files stay on your own PC, not on someone else's server. Nothing is deleted without asking, and almost everything can be undone.</p></div>
-    <ul class="ticks" style="margin:0"><li>Works with no internet: on site, in the car, anywhere</li><li>Forgot your password? Reset it on the PC without losing anything</li><li>Payroll keeps a backup every day</li><li>Desk Assistant records every file it moves, with “Put everything back”</li>${ASBUILT ? '<li>Want online access too? As Built can sync to an online account when you choose</li>' : '<li>Riyeser Link chat and calls work online, on the PC and on phones</li>'}</ul>
+    <ul class="ticks" style="margin:0"><li>Works with no internet: on site, in the car, anywhere</li><li>Forgot your password? Reset it on the PC without losing anything</li><li>Payroll keeps a backup every day</li><li>Riyeser Documents keeps deleted documents for 30 days, and a history of who did what</li>${ASBUILT ? '<li>Want online access too? As Built can sync to an online account when you choose</li>' : '<li>Riyeser Link chat and calls work online, on the PC and on phones</li>'}</ul>
   </div>
 </section>
 
 <section class="c" style="padding-top:0;max-width:920px">
   <h2 class="h2 center">Frequently asked questions</h2>
   <div class="faq" style="margin-top:26px">
-  <details><summary>What does it cost?</summary><p>Riyeser Central, Desk Assistant, Riyeser Invoices and PDF are free forever. Every paid program is free for 90 days with no card. After that, each one is a set price per business — not per person — with 3 users included: Accounting Basics ${usd(PRICE.basic)} a month, Accounting Plus ${usd(PRICE.plus)} (it includes Basics), Bookings ${usd(PRICE.bookings)}, Riyeser Link ${usd(PRICE.calls)} (chat, calls and office phones), Payroll ${usd(PRICE.payroll)} (unlimited employees) and POS ${usd(PRICE.pos)} (1 till, unlimited cashiers).${ASBUILT ? ` As Built, for the building industry, is ${usd(PRICE.as_built)}.` : ''} Extra users are ${usd(PRICE.extra_user)} a month each, for each program, and your accountant signs in free. Bundles save more: ${BUNDLES.map((x) => `${x.name} ${usd(x.price)}`).join(', ')}. All prices are in US dollars, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Riyeser Central, Riyeser Documents, Riyeser Invoices and PDF are free forever. Every paid program is free for 90 days with no card. After that, each one is a set price per business — not per person — with 3 users included: Accounting Basics ${usd(PRICE.basic)} a month, Accounting Plus ${usd(PRICE.plus)} (it includes Basics), Bookings ${usd(PRICE.bookings)}, Riyeser Link ${usd(PRICE.calls)} (chat, calls and office phones), Payroll ${usd(PRICE.payroll)} (unlimited employees) and POS ${usd(PRICE.pos)} (1 till, unlimited cashiers).${ASBUILT ? ` As Built, for the building industry, is ${usd(PRICE.as_built)}.` : ''} Extra users are ${usd(PRICE.extra_user)} a month each, for each program, and your accountant signs in free. Bundles save more: ${BUNDLES.map((x) => `${x.name} ${usd(x.price)}`).join(', ')}. All prices are in US dollars, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline.${ASBUILT ? ' As Built can optionally sync to an online account so phones, clients and staff can see your projects.' : ' Riyeser Link (chat and calls) is the one part that runs online.'}</p></details>
   <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11.${ASBUILT ? ' As Built also works in any web browser, on phones and tablets.' : ' Riyeser Link also works in any web browser, on phones and tablets.'}</p></details>
   <details><summary>Where do I start?</summary><p>Download Riyeser Central. It's the home screen for every program and shows you what else you can add. The <a class="more" href="${up}help/start.html">Getting started guide</a> walks you through it.</p></details>
@@ -884,7 +893,7 @@ ${MBAR}`,
 // ---------- all programs ----------
 page({
   path: 'programs.html', title: 'All programs — Riyeser', active: 'programs',
-  description: `Every Riyeser program: Central, Invoices, Bookings, Riyeser Link, Riyeser Link Office, Accounting Basics, Accounting Plus, Payroll, Desk Assistant${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
+  description: `Every Riyeser program: Central, Invoices, Bookings, Riyeser Link, Riyeser Link Office, Accounting Basics, Accounting Plus, Payroll, Riyeser Documents${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
   body: (up) => `${bandHero({ eyebrow: 'Programs', title: 'All programs', lead: 'A complete range of Riyeser programs to run and support your business. Start with Riyeser Central and add what you need.' })}
 <section class="c blk first">${progGrid(PROGRAMS.filter((p) => p.id !== 'services'), up, (t) => `<div class="shead small"><h2>${esc(t)}</h2></div>`)}</section>
 ${ASBUILT ? `<section class="c blk">${shead('For the building industry', 'A separate program for trades and construction, priced on its own.')}<div class="grid pgrid">${progCard(prog('services'), up)}</div></section>` : ''}
@@ -1060,7 +1069,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
   const CALC = ROWS.filter(([m]) => PRICE[m] != null);
   // What the number next to each program in the calculator counts
   const UNIT = { pos: 'Tills', payroll: 'Office users', bookings: 'Staff calendars', calls: 'People' };
-  const FREE = [['central', 'Riyeser Central', 'Your home screen, and it installs and updates the rest'], ['desk-assistant', 'Desk Assistant', 'Sort and find every file'],
+  const FREE = [['central', 'Riyeser Central', 'Your home screen, and it installs and updates the rest'], ['documents', 'Riyeser Documents', 'Scan, file and find every office document'],
     ['invoices', 'Riyeser Invoices', 'Quotes, invoices and getting paid'], ['pdf', 'Riyeser PDF', 'Fill, sign, combine and edit PDFs']];
   const half = (n) => usd(n / 2);
   const NAME = Object.fromEntries(CALC.map(([m, n]) => [m, n]));
@@ -1077,7 +1086,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
     ${buyBtns(x.mods.join(','))}</div>`;
   page({
     path: 'pricing.html', title: 'Riyeser pricing — free tools, one price per program, and bundles', active: 'pricing',
-    description: `All prices in US dollars, per business per month, with 3 users included in each program. Riyeser Central, Desk Assistant, Invoices and PDF are free forever. Accounting Basics is ${usd(P.basic)}, Accounting Plus ${usd(P.plus)}, Bookings ${usd(P.bookings)}, Riyeser Link ${usd(P.calls)}, Payroll ${usd(P.payroll)} and POS ${usd(P.pos)}. Bundles from ${usd(Math.min(...BUNDLES.map((x) => x.price)))}. Every paid program is free for 90 days, no card.`,
+    description: `All prices in US dollars, per business per month, with 3 users included in each program. Riyeser Central, Riyeser Documents, Invoices and PDF are free forever. Accounting Basics is ${usd(P.basic)}, Accounting Plus ${usd(P.plus)}, Bookings ${usd(P.bookings)}, Riyeser Link ${usd(P.calls)}, Payroll ${usd(P.payroll)} and POS ${usd(P.pos)}. Bundles from ${usd(Math.min(...BUNDLES.map((x) => x.price)))}. Every paid program is free for 90 days, no card.`,
     body: (up) => `
 ${bandHero({ title: 'Pricing', lead: `Start free. Pay only for the programs you use: one price per business per month, with ${P.users_included} users included in each. Take programs together in a bundle and pay less.` })}
 <section class="c" style="padding-bottom:10px">
@@ -1156,7 +1165,7 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
   <details><summary>How do bundles work?</summary><p>A bundle is a set of programs for one lower price: Shop (Accounting Basics, POS and Riyeser Link) ${usd(BUNDLES[0].price)}, Office (Accounting Basics, Payroll and Riyeser Link) ${usd(BUNDLES[1].price)}, and Business (Accounting Plus, Bookings, Riyeser Link, Payroll and POS) ${usd(big.price)}. Each program in a bundle still includes ${P.users_included} users; extra users are ${usd(P.extra_user)} a month and extra tills ${usd(P.extra_till)}. You don't have to choose a bundle: when the programs you pick make one, you're charged the bundle price by itself. Move up to a bigger bundle any time. The early bird half price applies to bundles too.</p></details>
   <details><summary>Why US dollars?</summary><p>Riyeser is used by businesses in more than one country, so one price in one currency keeps it simple and fair for everyone. Your bank or card changes it into your own currency when you pay. Any GST or local tax is shown before you pay.</p></details>
   <details><summary>Basics or Plus?</summary><p>Start with Accounting Basics (${usd(P.basic)} a month) if you need invoices, stock and simple money in and out. Choose Accounting Plus (${usd(P.plus)} a month) for bank reconciliation, payroll in your books, BAS, journals, jobs and budgets. Plus includes everything in Basics, so you only ever pay for one: moving up is ${usd(P.plus - P.basic)} a month more, and your books carry straight over.</p></details>
-  <details><summary>Are the free programs really free?</summary><p>Yes. Riyeser Central, Desk Assistant, Riyeser Invoices and Riyeser PDF are free forever, with no card, no time limit and no user charges. The paid programs are optional: add them only if you need them.</p></details>
+  <details><summary>Are the free programs really free?</summary><p>Yes. Riyeser Central, Riyeser Documents, Riyeser Invoices and Riyeser PDF are free forever, with no card, no time limit and no user charges. The paid programs are optional: add them only if you need them.</p></details>
   <details><summary>Is Riyeser Link free?</summary><p>Riyeser Link is now a paid program (${usd(P.calls)} a month, ${P.users_included} users included, free for 90 days). It covers everything in one: chat, calls, desk phones, Riyeser Link Office (your office phone system) and ${STORAGE_GB.link} GB of space for files shared in chat. Businesses that already used Riyeser Link get 90 free days from the change. If it isn't paid after that, your chats stay and can still be read; only sending new messages waits until Riyeser Link is added from your Riyeser home page. Nothing is deleted.</p></details>
   <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, Bookings, Riyeser Link, Payroll and POS${ASBUILT ? ', and As Built for the building industry' : ''} — is free for 90 days. No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
   <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS), new messages and calls (Riyeser Link) or that program's screens (the others) wait until you buy it. They unlock straight away.</p></details>
@@ -1203,7 +1212,7 @@ function draw(e){
   var q='/link/?signup&add='+pl.mods.join(',')+(u?'&u='+u:'')+(tills>1&&pl.mods.indexOf('pos')>=0?'&tills='+tills:'')+(y.checked?'&period=yearly':''),cb=document.getElementById('calcbuy');
   cb.hidden=!pl.mods.length;document.getElementById('calcfree').href=q;document.getElementById('calcpay').href=q+'&buy=1';
   bl.textContent='';
-  if(!pl.mods.length){per.appendChild(li('Free tools only','US$0'));t.textContent='US$0 a month';note.textContent='Central, Desk Assistant, Invoices and PDF are free forever.';if(eb)eb.textContent='';return}
+  if(!pl.mods.length){per.appendChild(li('Free tools only','US$0'));t.textContent='US$0 a month';note.textContent='Central, Documents, Invoices and PDF are free forever.';if(eb)eb.textContent='';return}
   if(y.checked){t.textContent=money(m*10)+' a year';note.textContent=money(m)+' a month × 10: 2 months free.'}
   else{t.textContent=money(m)+' a month';note.textContent='After the 90-day free trial. Per business, not per person.'}
   var top=B.filter(function(x){return x.popular})[0],big=planPrice(P,B,pl.mods.concat(top.mods),users,tills),msg=pl.bundle?'✓ Bundle price: you save '+money(pl.saves)+' a month.':'';
@@ -1241,7 +1250,7 @@ box.addEventListener('keydown',function(e){if(e.key==='Enter'){var a=out.querySe
 
   page({
     path: 'help.html', title: 'Help Centre — Riyeser', active: 'help',
-    description: `Step-by-step help for every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Desk Assistant${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
+    description: `Step-by-step help for every Riyeser program: Central, Accounting Basics, Accounting Plus, Payroll, Riyeser Documents${ASBUILT ? ', PDF and As Built' : ' and PDF'}.`,
     body: (up) => {
       const G = guides(up);
       const popular = G.flatMap((g) => g.groups.flatMap((grp) => grp.items.filter((it) => it[3]).map((it) => [g, it]))).filter((_, i) => i % 2 === 0).slice(0, 8);
@@ -1257,7 +1266,7 @@ ${bandHero({ eyebrow: 'Help Centre', title: 'How can we help?', img: 'blueprint.
 </section>
 <section class="c" style="padding-top:8px;max-width:1000px">${contact(up)}</section>
 ${searchScript(up)}
-<script>/* old Help Centre links (help.html#payroll) go to the new guide pages */(function(){var m={start:'start',central:'central',accounting:'accounting-basics',payroll:'payroll',services:'services',desk:'desk-assistant',pdf:'pdf'},h=location.hash.slice(1);if(m[h])location.replace('${up}help/'+m[h]+'.html')})()</script>`;
+<script>/* old Help Centre links (help.html#payroll) go to the new guide pages */(function(){var m={start:'start',central:'central',accounting:'accounting-basics',payroll:'payroll',services:'services',desk:'documents',pdf:'pdf'},h=location.hash.slice(1);if(m[h])location.replace('${up}help/'+m[h]+'.html')})()</script>`;
     },
   });
 
@@ -1297,11 +1306,14 @@ const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dir
   writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
 redirect('faq.html', ASBUILT ? `${BASE}programs/services.html#faq` : `${BASE}help.html`, ASBUILT ? 'As Built questions and answers' : 'Riyeser Help Centre');
 redirect('support.html', `${BASE}help.html`, 'Riyeser Help Centre');
-// Riyeser Team is called Riyeser Link now: its old pages forward to the new ones (keeping any #section).
+// Renamed programs: their old pages forward to the new ones (keeping any #section).
 const redirectKeep = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${SITE}/${to.replace(/^(\.\.\/)+/, '')}"><script>location.replace(${JSON.stringify(to)}+location.search+location.hash)</script><p>Moved to <a href="${to}">${label}</a>.</p>`); };
 redirectKeep('programs/team.html', '../programs/link.html', 'Riyeser Link');
 redirectKeep('help/team.html', '../help/link.html', 'Riyeser Link help');
+// Riyeser Desk Assistant is called Riyeser Documents now (older Centrals still open programs/desk-assistant.html).
+redirectKeep('programs/desk-assistant.html', '../programs/documents.html', 'Riyeser Documents');
+redirectKeep('help/desk-assistant.html', '../help/documents.html', 'Riyeser Documents help');
 
 // ---------- extras ----------
 cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });

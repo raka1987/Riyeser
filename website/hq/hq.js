@@ -51,7 +51,7 @@
     : v.status === 'closed' ? '<span class="pill bad">Business closed</span>' : '<span class="pill bad">Ended</span>');
   // Which program each installer is (older file names included).
   const PRODUCT = [[/Central/i, 'Riyeser Central'], [/AccountingBasics/i, 'Accounting Basics'], [/Accounting(Plus)?-Setup|AccountingPlus/i, 'Accounting Plus'],
-    [/POS/i, 'POS'], [/Invoices/i, 'Invoices'], [/Bookings/i, 'Bookings'], [/Payroll/i, 'Payroll'], [/DeskAssistant/i, 'Desk Assistant'],
+    [/POS/i, 'POS'], [/Invoices/i, 'Invoices'], [/Bookings/i, 'Bookings'], [/Payroll/i, 'Payroll'], [/DeskAssistant|Documents-Setup/i, 'Riyeser Documents'],
     [/PDF/i, 'PDF'], [/Services|AsBuilt/i, 'As Built']];
   const productOf = (asset) => (PRODUCT.find(([re]) => re.test(asset)) || [null, 'Other'])[1];
   const plain = (e) => { const m = (e && (e.message || e.msg || e.error_description)) || String(e);
@@ -96,7 +96,7 @@
   const TSTAT_ORDER = ['new', 'investigating', 'waiting_us', 'waiting_customer', 'done'];
   // The products a ticket can be about (support_products() in team-chat.sql), with an icon for the inbox.
   const PRODUCTS = [['central', 'Riyeser Central', '🏠'], ['accounting', 'Accounting', '📒'], ['invoices', 'Invoices', '🧾'], ['pos', 'POS', '🛒'], ['bookings', 'Bookings', '📅'],
-    ['payroll', 'Payroll', '🕒'], ['link', 'Riyeser Link', '💬'], ['linkoffice', 'Link Office', '☎️'], ['pdf', 'Riyeser PDF', '📕'], ['desk', 'Desk Assistant', '🗂'],
+    ['payroll', 'Payroll', '🕒'], ['link', 'Riyeser Link', '💬'], ['linkoffice', 'Link Office', '☎️'], ['pdf', 'Riyeser PDF', '📕'], ['desk', 'Riyeser Documents', '🗂'],
     ['website', 'riyeser.com', '🌐'], ['other', 'Something else', '❔']];
   const prodName = (p) => (PRODUCTS.find((x) => x[0] === p) || [p, p ? 'Something else' : 'Not set'])[1];
   const prodIcon = (p) => (PRODUCTS.find((x) => x[0] === p) || [0, 0, '🎧'])[2];
@@ -104,7 +104,7 @@
   const PRODUCT_APPS = { central: ['central'], accounting: ['accounting', 'accounting-basics'], invoices: ['invoices'], pos: ['pos'], bookings: ['bookings'], payroll: ['payroll'],
     link: ['team'], linkoffice: ['linkoffice'], pdf: ['pdf'], desk: ['desk'] };
   const APP_NAMES = { central: 'Central', accounting: 'Accounting Plus', 'accounting-basics': 'Accounting Basics', invoices: 'Invoices', pos: 'POS', bookings: 'Bookings', payroll: 'Payroll',
-    team: 'Riyeser Link', linkoffice: 'Link Office', pdf: 'PDF', desk: 'Desk Assistant', services: 'As Built' };
+    team: 'Riyeser Link', linkoffice: 'Link Office', pdf: 'PDF', desk: 'Documents', services: 'As Built' };
   // "3:00 pm Fri" (this week) or "3:00 pm Fri 5 Dec"
   const dueText = (t) => { const d = new Date(t); const tm = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).replace(/\s?([ap])\.?m\.?/i, ' $1m').toLowerCase();
     const wd = d.toLocaleDateString('en-AU', { weekday: 'short' }); const soon = Math.abs(d - Date.now()) < 6 * 864e5;
@@ -1444,11 +1444,11 @@
   const CPTABS = [['overview', 'Overview'], ['programs', 'Programs'], ['pcs', 'PCs & programs'], ['people', 'People'], ['conversations', 'Conversations'],
     ['money', 'Money'], ['history', 'History'], ['link', 'Link']];
   // Free programs (Riyeser Link is a paid program since pricing v2: it's the 'calls' row in the paid list)
-  const FREE_PROGRAMS = [['central', 'Riyeser Central'], ['invoices', 'Invoices'], ['pdf', 'PDF'], ['desk', 'Desk Assistant']];
+  const FREE_PROGRAMS = [['central', 'Riyeser Central'], ['invoices', 'Invoices'], ['pdf', 'PDF'], ['desk', 'Documents']];
   // Riyeser Central's name for each program (desktop/src/central/updates.js)
   const MOD_APP = { basic: 'accounting-basics', plus: 'accounting', payroll: 'payroll', pos: 'pos', bookings: 'bookings', as_built: 'services', calls: 'team' };
   const APP_NAME = { central: 'Central', 'accounting-basics': 'Accounting Basics', accounting: 'Accounting Plus', payroll: 'Payroll', pos: 'POS', bookings: 'Bookings',
-    services: 'As Built', team: 'Riyeser Link', linkoffice: 'Link Office', invoices: 'Invoices', pdf: 'PDF', desk: 'Desk Assistant' };
+    services: 'As Built', team: 'Riyeser Link', linkoffice: 'Link Office', invoices: 'Invoices', pdf: 'PDF', desk: 'Documents' };
   const QWHY_PAID = [['payment', 'Payment received'], ['customer_asked', 'The customer asked'], ['non_payment', 'Not paid'], ['correction', 'Fixing a mistake'], ['other', 'Other']];
   const daysPill = (n) => (n == null ? '' : `<span class="pill ${n <= 7 ? 'bad' : n <= 30 ? 'warn' : 'ok'}">${n <= 0 ? 'today' : `${num(n)} day${n === 1 ? '' : 's'}`}</span>`);
   const daysSince = (t) => (t ? Math.floor((Date.now() - new Date(t)) / 864e5) : null);

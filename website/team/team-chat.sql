@@ -1228,7 +1228,7 @@ grant execute on function public.hq_record_downloads(text, jsonb) to anon, authe
 -- ================================================================ Licences online (per company, per program)
 -- Paid programs: basic (Accounting Basics), plus (Accounting Plus), bookings, calls (Riyeser Link: chat, calls, desk phones
 -- and Riyeser Link Office; the id 'calls' is kept from when it was Link Plus), payroll, pos, as_built.
--- Free programs (Central, Desk Assistant, Invoices, PDF) aren't listed: they're always free.
+-- Free programs (Central, Riyeser Documents, Invoices, PDF) aren't listed: they're always free.
 -- With no row, a program is on its free trial: 90 days from when the company joined Riyeser online.
 -- Riyeser HQ (owners, finance) sets each one: trial (with its end date), active (paid until), or cancelled.
 -- Riyeser Central reads company_licence() and the programs on the PC unlock what's active.
@@ -1411,7 +1411,7 @@ begin perform hq_set_module(ws, 'calls', 'active', null, until); end $$;
 
 -- Riyeser list prices, in US dollars a month per business (pricing v2). This is the one place they're set: change a
 -- number here, re-run this file, and every HQ estimate and bill follows (website/prices.mjs has the same list).
--- Free programs (Central, Desk Assistant, Invoices, PDF) cost 0.
+-- Free programs (Central, Riyeser Documents, Invoices, PDF) cost 0.
 create or replace function public.riyeser_price(item text) returns numeric
   language sql immutable set search_path = public as $$
   select (case item
@@ -1853,7 +1853,7 @@ $$;
 create or replace function public.product_label(p text) returns text language sql immutable as $$
   select case p when 'central' then 'Riyeser Central' when 'accounting' then 'Accounting' when 'invoices' then 'Invoices' when 'pos' then 'POS'
     when 'bookings' then 'Bookings' when 'payroll' then 'Payroll' when 'link' then 'Riyeser Link' when 'linkoffice' then 'Link Office'
-    when 'pdf' then 'Riyeser PDF' when 'desk' then 'Desk Assistant' when 'website' then 'riyeser.com' else 'Something else' end
+    when 'pdf' then 'Riyeser PDF' when 'desk' then 'Riyeser Documents' when 'website' then 'riyeser.com' else 'Something else' end
 $$;
 create sequence if not exists public.support_diag_no start 4821;
 create table if not exists public.support_diagnostics (

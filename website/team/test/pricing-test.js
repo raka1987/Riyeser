@@ -6,7 +6,7 @@
 //     yearly = 10 x; early bird half).
 //  2. No FJD, AUD or NZD prices anywhere on the website, and no "Link Plus" or "★ Plus" left.
 //  3. Free programs come first everywhere programs are listed (menu, finder, All programs, Downloads, footer), A to Z:
-//     Central, Desk Assistant, Invoices, PDF; then the paid ones A to Z, with Riyeser Link Office right after Riyeser Link.
+//     Central, Riyeser Documents, Invoices, PDF; then the paid ones A to Z, with Riyeser Link Office right after Riyeser Link.
 //  4. Riyeser Link Office never has a price of its own: "With Riyeser Link", linked to pricing.html#link.
 //  5. Find your program on a phone is a tidy list; the home hero is one still picture on a phone; the footer is tidy.
 // Run: build the site, serve website/public on 8090, then `node website/team/test/pricing-test.js [shots folder]`.
@@ -17,7 +17,7 @@ const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';
 const SHOTS = process.argv[2];
 let failed = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failed++; };
-const FREE = ['central', 'desk-assistant', 'invoices', 'pdf'];
+const FREE = ['central', 'documents', 'invoices', 'pdf'];
 const PAID = ['accounting-basics', 'accounting', 'bookings', 'link', 'link-office', 'payroll', 'pos'];
 const LO_FILE = 'RiyeserLinkOffice-Setup.exe';
 
@@ -97,7 +97,7 @@ const LO_FILE = 'RiyeserLinkOffice-Setup.exe';
   if (SHOTS) await pg.screenshot({ path: path.join(SHOTS, 'programs-menu.png') });
   await pg.goto(`${BASE}/downloads.html`);
   const dls = await pg.$$eval('.dl h3', (hs) => hs.map((h) => h.textContent));
-  check(dls[0].includes('Desk Assistant') && dls.findIndex((t) => /Free trial/.test(t)) > dls.findIndex((t) => /Riyeser PDF/.test(t)), `Downloads: free first (${dls.map((t) => t.replace(/\s+/g, ' ')).join(' | ')})`);
+  check(dls[0].includes('Riyeser Documents') && dls.findIndex((t) => /Free trial/.test(t)) > dls.findIndex((t) => /Riyeser PDF/.test(t)), `Downloads: free first (${dls.map((t) => t.replace(/\s+/g, ' ')).join(' | ')})`);
 
   // Riyeser Link Office: right after Riyeser Link everywhere, a Windows download, and no price of its own
   const after = (list) => list.indexOf('link-office') === list.indexOf('link') + 1;
