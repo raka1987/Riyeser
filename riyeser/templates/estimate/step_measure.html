@@ -5,7 +5,8 @@
 {% include "estimate/_steps.html" %}
 {% set U = 'ft' if sys_ == 'imperial' else 'm' %}
 <div class="est-head"><div><h1>Measure</h1><p class="sub">{{ t.title }}{% if t.cname %} · {{ t.cname }}{% endif %}{% if t.address %} · {{ t.address }}{% endif %}</p></div>
-<form method="post" action="{{ url_for('estimate.set_units', tid=t.id) }}" class="actions"><label for="units" class="small" style="margin:0">Units</label><select id="units" name="units" onchange="this.form.submit()" style="width:auto"{{ ' disabled' if read_only }}><option value="metric" {{ 'selected' if sys_ == 'metric' }}>Metric (m, m², m³)</option><option value="imperial" {{ 'selected' if sys_ == 'imperial' }}>Imperial (ft, sq ft, cu yd)</option></select></form></div>
+<div class="actions est-mact"><a class="btn" id="photos-link" href="{{ url_for('estimate.photos', tid=t.id) }}">📷 Photos{% if photo_count %} <span class="qbadge">{{ photo_count }}</span>{% endif %}</a>
+<form method="post" action="{{ url_for('estimate.set_units', tid=t.id) }}" class="est-units"><label for="units" class="small" style="margin:0">Units</label><select id="units" name="units" onchange="this.form.submit()" style="width:auto"{{ ' disabled' if read_only }}><option value="metric" {{ 'selected' if sys_ == 'metric' }}>Metric (m, m², m³)</option><option value="imperial" {{ 'selected' if sys_ == 'imperial' }}>Imperial (ft, sq ft, cu yd)</option></select></form></div></div>
 <nav class="mtabs" aria-label="How to measure">
   <a class="{{ 'on' if method == 'manual' }}" href="{{ url_for('estimate.measure', tid=t.id, m='manual') }}">📏 Type in sizes</a>
   <a class="{{ 'on' if method == 'plan' }}" href="{{ url_for('estimate.measure', tid=t.id, m='plan') }}">📐 Plan or photo</a>

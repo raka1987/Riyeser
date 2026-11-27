@@ -146,7 +146,7 @@ def _licence():
     g.estimate_read_only = st.get("mode") == "expired"
     if g.estimate_read_only and request.method == "POST" and request.endpoint not in ("estimate.mark_sent",):
         if request.is_json or request.path.endswith((".json", "/items", "/view")) or "/items/" in request.path \
-                or "/scans" in request.path:
+                or "/scans" in request.path or "/photos" in request.path:
             return _api_error(ML.message(), 402)
         flash(ML.message(), "error")
         return redirect(request.referrer or url_for("estimate.index"))
@@ -319,7 +319,9 @@ def measure(tid):
     return render_template("estimate/step_measure.html", t=t, step=3, method=method, sys_=sys_, cfg=cfg,
                            items=[item_view(i, sys_) for i in items], totals=totals_view(items, sys_),
                            plans=plans, as_labels=G.AS_LABELS, colors=COLORS, edge_labels=G.EDGE_LABELS,
-                           scans=scans, floorplan=Markup(plan_svg) if plan_svg else None)
+                           scans=scans, floorplan=Markup(plan_svg) if plan_svg else None,
+                           photo_count=db.execute("SELECT COUNT(*) FROM takeoff_photos WHERE takeoff_id=?",
+                                                  (tid,)).fetchone()[0])
 
 
 def _clean_data(kind, data, sys_):
@@ -568,6 +570,13 @@ def template(tid):
             flash("Choose at least one template.", "error")
             return redirect(url_for("estimate.template", tid=tid))
         db.execute("UPDATE takeoffs SET templates=?, updated_at=datetime('now','localtime') WHERE id=?", (json.dumps(ids), tid))
+        opts = Q.options(t)
+        if opts:   # the estimate has options: these templates are used for every one of them
+            for o in opts["list"]:
+                o["templates"] = ids
+            Q.save_options(db, tid, opts)
+            flash(f"These templates are used for every option ({', '.join(o['name'] for o in opts['list'])}). "
+                  "Change an option's own on this step.", "ok")
         db.commit()
         return redirect(url_for("estimate.price", tid=tid))
     chosen = store.template_ids(t)
@@ -589,7 +598,7 @@ def template(tid):
         x["recent"] = x["id"] in recent
         bases = {r["basis"] for r in db.execute("SELECT basis FROM measure_template_lines WHERE template_id=?", (x["id"],))}
         x["fits"] = bool(bases & have) or not items
-    return render_template("estimate/step_template.html", t=t, step=4, tpls=tpls, chosen=chosen)
+    return render_template("estimate/step_template.html", t=t, step=4, tpls=tpls, chosen=chosen, opts=Q.options(t))
 
 
 # ---------------------------------------------------------------- step 5: review price
@@ -599,17 +608,29 @@ def price(tid):
     t = _t(tid)
     if request.method == "POST":
         return _save_adjust(tid)
-    priced = Q.price(db, t)
     doc, st = Q.quote_state(db, t)
-    return render_template("estimate/step_price.html", t=t, step=5, p=priced, adj=Q.adjustments(t), doc=doc, qst=st)
+    opts = Q.options(t)
+    if opts:
+        priced_opts = Q.price_options(db, t)
+        cur = request.args.get("opt", type=int)
+        cur = cur if cur is not None and 0 <= cur < len(priced_opts) else opts["recommended"]
+        o, priced = priced_opts[cur]
+        return render_template("estimate/step_price.html", t=t, step=5, p=priced, adj=o["adjust"], doc=doc, qst=st,
+                               opts=priced_opts, cur=cur, opt=o, tpls=_template_choices(db, t),
+                               max_options=Q.MAX_OPTIONS)
+    priced = Q.price(db, t)
+    return render_template("estimate/step_price.html", t=t, step=5, p=priced, adj=Q.adjustments(t), doc=doc, qst=st,
+                           opts=None)
 
 
-@guarded
-def _save_adjust(tid):
-    db = get_db()
-    t = _t(tid)
-    f = request.form
-    adj = Q.adjustments(t)
+def _template_choices(db, t):
+    """The templates an option can use (this estimate's units, and the business's own), A to Z."""
+    return [dict(r) for r in db.execute("SELECT id, name, trade FROM measure_templates WHERE active=1 AND"
+                                        " (units=? OR shipped=0) ORDER BY name", (_units(t),))]
+
+
+def _read_adjust(f, adj, db):
+    """The quick changes typed on the Price step (markup, a line's rate or waste) into adj."""
     adj["markup_pct"] = U.parse_number(f.get("markup_pct"), 0) or 0
     lines = adj.get("lines") or {}
     for key in f:
@@ -625,13 +646,136 @@ def _save_adjust(tid):
                 col = "rate" if kind == "rate" else "waste_pct"
                 db.execute(f"UPDATE measure_template_lines SET {col}=? WHERE id=?", (o[kind if kind == "rate" else "waste_pct"], int(lid)))
     adj["lines"] = {k: v for k, v in lines.items() if any(x is not None for x in v.values())}
-    db.execute("UPDATE takeoffs SET adjust=?, updated_at=datetime('now','localtime') WHERE id=?", (json.dumps(adj), tid))
+    return adj
+
+
+@guarded
+def _save_adjust(tid):
+    db = get_db()
+    t = _t(tid)
+    f = request.form
+    opts = Q.options(t)
+    back = {}
+    if opts and f.get("opt") not in (None, ""):
+        i = int(f.get("opt"))
+        if not 0 <= i < len(opts["list"]):
+            raise PostingError("That option isn't on this estimate.")
+        o = opts["list"][i]
+        name = (f.get("option_name") or "").strip()
+        if "option_name" in f:
+            if not name:
+                raise PostingError("Give the option a name (for example Good, Better or Best).")
+            if any(x["name"].lower() == name.lower() for j, x in enumerate(opts["list"]) if j != i):
+                raise PostingError(f"Another option is already called {name}.")
+            o["name"] = name[:40]
+        if "templates_shown" in f:
+            ids = [int(x) for x in f.getlist("template_id") if x.isdigit()]
+            if not ids:
+                raise PostingError(f"Choose at least one template for {o['name']}.")
+            o["templates"] = ids
+        o["adjust"] = _read_adjust(f, o.get("adjust") or {}, db)
+        Q.save_options(db, tid, opts)
+        back = {"opt": i}
+    else:
+        adj = _read_adjust(f, Q.adjustments(t), db)
+        db.execute("UPDATE takeoffs SET adjust=?, updated_at=datetime('now','localtime') WHERE id=?", (json.dumps(adj), tid))
     if f.get("go") == "quote":
         did, how = Q.make_quote(db, tid)
         num = db.execute("SELECT number FROM documents WHERE id=?", (did,)).fetchone()["number"]
         flash(f"Quote {num} {how}.", "ok")
         return redirect(url_for("estimate.send", tid=tid))
     flash("Price updated.", "ok")
+    return redirect(url_for("estimate.price", tid=tid, **back))
+
+
+# ---------------------------------------------------------------- Good / Better / Best options (step 5)
+@bp.route("/<int:tid>/options/start", methods=["POST"])
+@guarded
+def options_start(tid):
+    """Add options: this price copied into Good, Better and Best (each can then have its own templates and rates)."""
+    db = get_db()
+    t = _t(tid)
+    if Q.options(t):
+        return redirect(url_for("estimate.price", tid=tid))
+    if not store.template_ids(t):
+        raise PostingError("Choose a template first (step 4), then add options.")
+    opts = Q.start_options(t)
+    Q.save_options(db, tid, opts)
+    audit(db, "estimate_options_on", t["title"])
+    flash("Options added: Good, Better and Best start as copies of this price. Change each one's templates, rates "
+          "and markup, and mark the one you recommend.", "ok")
+    return redirect(url_for("estimate.price", tid=tid, opt=opts["recommended"]))
+
+
+@bp.route("/<int:tid>/options/add", methods=["POST"])
+@guarded
+def options_add(tid):
+    db = get_db()
+    t = _t(tid)
+    opts = Q.options(t)
+    if not opts:
+        return options_start(tid)
+    if len(opts["list"]) >= Q.MAX_OPTIONS:
+        raise PostingError(f"A quote can have up to {Q.MAX_OPTIONS} options.")
+    src = request.form.get("from", type=int)
+    src = src if src is not None and 0 <= src < len(opts["list"]) else opts["recommended"]
+    names = {o["name"].lower() for o in opts["list"]}
+    name = next((n for n in Q.OPTION_NAMES if n.lower() not in names), f"Option {len(opts['list']) + 1}")
+    opts["list"].append(dict(json.loads(json.dumps(opts["list"][src])), name=name))
+    Q.save_options(db, tid, opts)
+    flash(f"{name} added as a copy of {opts['list'][src]['name']}.", "ok")
+    return redirect(url_for("estimate.price", tid=tid, opt=len(opts["list"]) - 1))
+
+
+@bp.route("/<int:tid>/options/<int:i>/recommend", methods=["POST"])
+@guarded
+def options_recommend(tid, i):
+    db = get_db()
+    t = _t(tid)
+    opts = Q.options(t)
+    if not opts or not 0 <= i < len(opts["list"]):
+        raise PostingError("That option isn't on this estimate.")
+    opts["recommended"] = i
+    Q.save_options(db, tid, opts)
+    flash(f"{opts['list'][i]['name']} is the one you recommend. It's marked on the quote, and its total is the "
+          "quote's total until the customer chooses.", "ok")
+    return redirect(url_for("estimate.price", tid=tid, opt=request.form.get("back", type=int, default=i)))
+
+
+@bp.route("/<int:tid>/options/<int:i>/remove", methods=["POST"])
+@guarded
+def options_remove(tid, i):
+    db = get_db()
+    t = _t(tid)
+    opts = Q.options(t)
+    if not opts or not 0 <= i < len(opts["list"]):
+        raise PostingError("That option isn't on this estimate.")
+    if len(opts["list"]) <= 2:
+        raise PostingError("A quote with options has at least 2. Press \"Back to one price\" to stop offering options.")
+    gone = opts["list"].pop(i)
+    if opts["recommended"] == i:
+        opts["recommended"] = 0
+    elif opts["recommended"] > i:
+        opts["recommended"] -= 1
+    Q.save_options(db, tid, opts)
+    flash(f"{gone['name']} removed.", "ok")
+    return redirect(url_for("estimate.price", tid=tid, opt=opts["recommended"]))
+
+
+@bp.route("/<int:tid>/options/off", methods=["POST"])
+@guarded
+def options_off(tid):
+    """Back to one price: the recommended option's templates and quick changes become the estimate's price."""
+    db = get_db()
+    t = _t(tid)
+    opts = Q.options(t)
+    if opts:
+        keep = opts["list"][opts["recommended"]]
+        db.execute("UPDATE takeoffs SET templates=?, adjust=? WHERE id=?",
+                   (json.dumps(keep["templates"]), json.dumps(keep["adjust"]), tid))
+        Q.save_options(db, tid, None)
+        audit(db, "estimate_options_off", t["title"])
+        flash(f"Back to one price ({keep['name']}'s). Press \"Update quote\" to take the options off the quote.", "ok")
     return redirect(url_for("estimate.price", tid=tid))
 
 
@@ -657,8 +801,11 @@ def send(tid):
     from .. import perms
     from .quotes import uses_bookings
     c = db.execute("SELECT email FROM contacts WHERE id=?", (doc["contact_id"],)).fetchone()
+    from .estimate_photos import photos_of
+    from ..quote_options import of as options_of
     return render_template("estimate/step_send.html", t=t, step=6, doc=doc, qst=st, cemail=c["email"] if c else "",
-                           status=Q.status_of(db, t), bookings=uses_bookings(db) and perms.can("bookings", perms.EDIT))
+                           status=Q.status_of(db, t), bookings=uses_bookings(db) and perms.can("bookings", perms.EDIT),
+                           photos=photos_of(db, tid), qoptions=options_of(db, doc["id"]))
 
 
 @bp.route("/<int:tid>/quote.pdf")
@@ -713,6 +860,7 @@ def delete(tid):
         db.execute("DELETE FROM takeoff_plan_pages WHERE plan_id=?", (p["id"],))
     db.execute("DELETE FROM takeoff_plans WHERE takeoff_id=?", (tid,))
     db.execute("DELETE FROM takeoff_scans WHERE takeoff_id=?", (tid,))
+    db.execute("DELETE FROM takeoff_photos WHERE takeoff_id=?", (tid,))
     db.execute("DELETE FROM takeoffs WHERE id=?", (tid,))
     audit(db, "estimate_deleted", t["title"])
     flash(f"{t['title']} deleted. Its quote (if any) is kept.", "ok")
@@ -968,3 +1116,4 @@ __all__ = ["bp", "register_filters", "money", "import_price_list", "estimate_for
 
 
 from . import estimate_scan  # noqa: E402,F401  (Import a scan: its routes are on this blueprint)
+from . import estimate_photos  # noqa: E402,F401  (Photos with markup: their routes are on this blueprint too)

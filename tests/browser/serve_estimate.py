@@ -82,5 +82,23 @@ with open(os.path.join(work, "mesh-scan.obj"), "wb") as f:
     f.write(sample.write_obj(sample.room_mesh()))
 print("SCAN", os.path.join(work, "bedroom-scan.glb"), flush=True)
 print("MESH", os.path.join(work, "mesh-scan.obj"), flush=True)
+# a site photo for the Photos test (estimate_extras.e2e.js): a wall with a window, drawn here (not a real photo)
+def _site_photo():
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (1600, 1200), (196, 186, 170))
+    d = ImageDraw.Draw(im)
+    for y in range(0, 1200, 60):
+        d.line([(0, y), (1600, y)], fill=(184, 172, 156), width=3)
+    d.rectangle([520, 260, 1080, 760], fill=(120, 160, 196), outline=(250, 250, 250), width=24)
+    d.line([(800, 260), (800, 760)], fill=(250, 250, 250), width=16)
+    d.rectangle([0, 1000, 1600, 1200], fill=(110, 92, 70))
+    b = io.BytesIO()
+    im.save(b, "JPEG", quality=88)
+    return b.getvalue()
+
+
+with open(os.path.join(work, "site-photo.jpg"), "wb") as f:
+    f.write(_site_photo())
+print("PHOTO", os.path.join(work, "site-photo.jpg"), flush=True)
 print("READY", flush=True)
 app.run("127.0.0.1", APP_PORT, threaded=True, use_reloader=False)

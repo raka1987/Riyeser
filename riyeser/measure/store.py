@@ -106,6 +106,36 @@ def ensure(db):
             db.execute(f"ALTER TABLE company ADD COLUMN {col} {ddl}")
     if "measure_line" not in {r["name"] for r in db.execute("PRAGMA table_info(document_lines)")}:
         db.execute("ALTER TABLE document_lines ADD COLUMN measure_line INTEGER")   # made by Estimate (re-measure updates these)
+    if "options" not in {r["name"] for r in db.execute("PRAGMA table_info(takeoffs)")}:
+        # JSON Good / Better / Best: {"list": [{"name", "templates", "adjust"}], "recommended": index} (NULL: one price)
+        db.execute("ALTER TABLE takeoffs ADD COLUMN options TEXT")
+    db.execute("""CREATE TABLE IF NOT EXISTS takeoff_photos (
+        id INTEGER PRIMARY KEY,
+        takeoff_id INTEGER NOT NULL REFERENCES takeoffs(id) ON DELETE CASCADE,
+        name TEXT,                    -- the file's name
+        mime TEXT NOT NULL,           -- image/jpeg or image/png
+        size INTEGER NOT NULL DEFAULT 0,
+        width INTEGER, height INTEGER,
+        data BLOB NOT NULL,           -- the photo (big ones shrunk to 2400 px on the long side); never drawn on
+        markup TEXT,                  -- JSON: the arrows, circles, boxes, lines and labels drawn on it (photos.py)
+        flat BLOB,                    -- JPEG of the photo with its markup, for the quote PDF (NULL: no markup)
+        caption TEXT,
+        on_pdf INTEGER NOT NULL DEFAULT 1,       -- put it on the quote PDF
+        sort INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("CREATE INDEX IF NOT EXISTS takeoff_photos_takeoff ON takeoff_photos(takeoff_id)")
+    # Options on a quote (Good / Better / Best; riyeser/quote_options.py): every option's lines and totals. The
+    # quote's own lines are the recommended option's, then the chosen one's once the customer accepts.
+    db.execute("""CREATE TABLE IF NOT EXISTS document_options (
+        document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        n INTEGER NOT NULL,           -- 1, 2, 3
+        name TEXT NOT NULL,
+        recommended INTEGER NOT NULL DEFAULT 0,
+        lines TEXT NOT NULL,          -- JSON: the option's document lines (as save_document takes them)
+        subtotal INTEGER NOT NULL DEFAULT 0, tax_total INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (document_id, n))""")
+    if "chosen_option" not in {r["name"] for r in db.execute("PRAGMA table_info(documents)")}:
+        db.execute("ALTER TABLE documents ADD COLUMN chosen_option INTEGER")   # the option the customer accepted
 
 
 IMPERIAL_COUNTRIES = {"US", "USA", "UNITED STATES", "LR", "LIBERIA", "MM", "MYANMAR"}

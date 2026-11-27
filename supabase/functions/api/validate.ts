@@ -159,7 +159,8 @@ const schemas: Record<Kind, V<Record<string, unknown>>> = {
   }),
   quote_accept: obj({
     accepted_by: obj({ name: str(120, { required: true }), email, phone, position: str(80) }, true), signature: str(200),
-    po_number: str(64), note: str(1000, { multiline: true }), options: arr(str(64), { max: 50 }), accepted_at: datetime(), metadata,
+    po_number: str(64), note: str(1000, { multiline: true }), options: arr(str(64), { max: 50 }), option: str(64),
+    accepted_at: datetime(), metadata,
   }),
   invoice_payment: obj({
     amount: num({ above: 0, max: 1e9, decimals: 4, required: true }), currency, paid_at: datetime(),

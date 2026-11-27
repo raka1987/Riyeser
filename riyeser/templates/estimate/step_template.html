@@ -3,6 +3,7 @@
 {% include "estimate/_steps.html" %}
 <div class="est-head"><div><h1>Choose a trade template</h1><p class="sub">It turns your sizes into priced lines, with waste and pack sizes. Pick more than one for a job with several trades.</p></div>
 <a class="btn" href="{{ url_for('estimate.templates') }}">Edit templates and prices</a></div>
+{% if opts %}<div class="note-est">This estimate has {{ opts.list|length }} options ({{ opts.list|map(attribute='name')|join(', ') }}). Each has its own templates on the <a href="{{ url_for('estimate.price', tid=t.id) }}">Price step</a>. Pressing the button here uses these templates for every option.</div>{% endif %}
 <form method="post">
 <div class="tpl-cards">
 {% for x in tpls %}
@@ -15,7 +16,7 @@
   </label>
 {% endfor %}
 </div>
-<div class="est-foot"><a class="btn" href="{{ url_for('estimate.measure', tid=t.id) }}">← Measure</a>{% if not read_only %}<button class="btn pri big">Next: review the price →</button>{% endif %}</div>
+<div class="est-foot"><a class="btn" href="{{ url_for('estimate.measure', tid=t.id) }}">← Measure</a>{% if not read_only %}<button class="btn pri big">{{ 'Use for every option →' if opts else 'Next: review the price →' }}</button>{% endif %}</div>
 </form>
 <script>document.querySelectorAll('.tpl-cards input').forEach(function(i){i.addEventListener('change',function(){i.closest('.choice').classList.toggle('on',i.checked)})});</script>
 {% endblock %}

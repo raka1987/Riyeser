@@ -122,7 +122,10 @@ def edit(side, doc_id=None):
     acct = db.execute("SELECT tax_code_id FROM accounts WHERE id=?", (default_account,)).fetchone()
     default_tax = acct["tax_code_id"] if acct and g.company.get("gst_registered", 1) else None
     kind = "credit" if (request.args.get("kind") == "credit" and not doc) else "invoice"
+    from ..quote_options import of as options_of
+    qoptions = options_of(db, doc_id) if doc_id else []
     return render_template("documents/edit.html", side=side, L=L, doc=doc, lines=lines, contacts=contacts,
+                           qoptions=qoptions,
                            items=items, item_json=json.dumps(item_json), contact_json=json.dumps(contact_json),
                            tax_json=json.dumps(tax_json), default_account=default_account, default_tax=default_tax,
                            kind=kind,
@@ -183,6 +186,9 @@ def _save(side, doc_id):
         quotes.after_convert(db, doc_id, did)
     else:
         did = save_document(db, side, header, lines, status, doc_id)
+        if side == "sale" and status == "quote" and doc_id:
+            from ..quote_options import sync_from_document
+            sync_from_document(db, did)   # a quote with options: the option on it takes the edited lines
     if side == "sale" and (status == "quote" or was_quote):
         quotes.set_valid_until(db, doc_id if was_quote else did, f.get("valid_until"), header["date"])
     doc = db.execute("SELECT number, tax_total FROM documents WHERE id=?", (did,)).fetchone()
@@ -221,7 +227,8 @@ def view(doc_id):
     tpl = "documents/print.html" if request.args.get("print") else "documents/view.html"
     from . import quotes, receiving
     from .. import perms
-    extra = dict(qstate=quotes.state(doc), sources=quotes.SOURCES)
+    from ..quote_options import of as options_of
+    extra = dict(qstate=quotes.state(doc), sources=quotes.SOURCES, qoptions=options_of(db, doc_id))
     if extra["qstate"]:
         extra["bookings_on"] = quotes.uses_bookings(db) and perms.can("bookings", perms.EDIT)
         extra["job"] = db.execute("SELECT id FROM booking_jobs WHERE id=?", (doc["booking_job_id"],)).fetchone() \

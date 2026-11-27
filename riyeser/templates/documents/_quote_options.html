@@ -1,0 +1,14 @@
+{# A quote with options (Good / Better / Best): every option side by side (stacked on a phone); the customer chooses one. #}
+{% set taxn = company.tax_name or 'GST' %}
+<section class="card qopts" aria-labelledby="qopts-h">
+<h3 id="qopts-h">{{ qoptions|length }} options · the customer chooses one</h3>
+<p class="muted small qopts-sub">{% if qoptions|selectattr('chosen')|list %}The customer chose <b>{{ (qoptions|selectattr('chosen')|first).name }}</b>: its lines are on the quote, so the invoice and the job are for that option.{% else %}From {{ qoptions|map(attribute='total')|min|money }}. The quote's total is the recommended option's until the customer chooses.{% endif %}</p>
+<div class="qopt-grid">
+{% for o in qoptions %}
+<article class="qopt{{ ' rec' if o.recommended }}{{ ' chosen' if o.chosen }}" data-option="{{ o.n }}">
+<header><b class="qopt-name">{{ o.name }}</b>{% if o.chosen %}<span class="badge paid">Chosen</span>{% elif o.recommended %}<span class="badge quote">Recommended</span>{% endif %}</header>
+<ul class="qopt-lines">{% for l in o.lines %}<li><span>{{ l.description }}{% if l.qty != 1 %} <small class="muted">× {{ '%g'|format(l.qty) }}</small>{% endif %}</span><span class="n">{{ l.amount|money }}</span></li>{% endfor %}</ul>
+<dl class="qopt-tot"><dt>Subtotal</dt><dd>{{ o.subtotal|money }}</dd><dt>{{ taxn }}</dt><dd>{{ o.tax_total|money }}</dd><dt class="big">Total</dt><dd class="big">{{ o.total|money }}</dd></dl>
+</article>
+{% endfor %}
+</div></section>

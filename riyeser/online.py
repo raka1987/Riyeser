@@ -1012,9 +1012,29 @@ def file_quote_accept(db, p, item):
     by = p.get("accepted_by") if isinstance(p.get("accepted_by"), dict) else {}
     name = _s(p.get("signature"), 200) or _s(by.get("name"), 120)
     at = _utc(p.get("accepted_at")) or datetime.now(timezone.utc)
+    # a quote with options (Good / Better / Best): the one the customer picked ("option": its name or number, or
+    # one of the ticked "options" that is an option's name); none named: the recommended one
+    from . import quote_options as QO
+    opts = QO.of(db, q["id"])
+    picked = None
+    if opts:
+        if p.get("option") not in (None, ""):
+            picked = QO.find(opts, _s(p.get("option"), 64))
+            if not picked:
+                raise Reject("invalid", "Please choose one of the quote's options: "
+                             + ", ".join(o["name"] for o in opts) + ".",
+                             f"{q['number']} has no option {_s(p.get('option'), 64)!r}.")
+        else:
+            picked = next((QO.find(opts, _s(o, 64)) for o in (p.get("options") or [])[:50]
+                           if QO.find(opts, _s(o, 64))), None)
     if st != "accepted":
-        Q.record_online_acceptance(db, q["id"], name, at=at.astimezone(_tz(s["timezone"])).strftime("%Y-%m-%d %H:%M"))
+        Q.record_online_acceptance(db, q["id"], name, at=at.astimezone(_tz(s["timezone"])).strftime("%Y-%m-%d %H:%M"),
+                                   option=picked["n"] if picked else None)
     note = []
+    if opts and st != "accepted":
+        chosen = next((o for o in QO.of(db, q["id"]) if o["chosen"]), None)
+        if chosen:
+            note.append(f"Option chosen: {chosen['name']}" + ("" if picked else " (none named, so the recommended one)"))
     if by.get("name") and _s(by.get("name"), 120) != name:
         note.append(f"Accepted by {_s(by.get('name'), 120)}" + (f" ({_s(by.get('position'), 80)})" if by.get("position") else ""))
     elif by.get("position"):

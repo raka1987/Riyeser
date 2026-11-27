@@ -1,13 +1,5 @@
 {% extends "base.html" %}{% block title %}Price · {{ t.title }}{% endblock %}
-{% block content %}
-{% include "estimate/_steps.html" %}
-<div class="est-head"><div><h1>Review the price</h1><p class="sub">{{ t.title }}{% if t.cname %} · {{ t.cname }}{% endif %}. Change a rate or the waste here for this job; tick the box to keep the change in the template too.</p></div></div>
-{% if not p.lines %}<div class="card"><p>No lines yet. {% if not p.templates %}<a href="{{ url_for('estimate.template', tid=t.id) }}">Choose a template</a>.{% else %}The template doesn't use what you've measured (for example, a painting template needs a room or a wall area). <a href="{{ url_for('estimate.measure', tid=t.id) }}">Measure</a> or <a href="{{ url_for('estimate.template', tid=t.id) }}">choose another template</a>.{% endif %}</p></div>
-{% else %}
-{% if p.missing_rates %}<div class="flash warn">{{ p.missing_rates|length }} line{{ '' if p.missing_rates|length == 1 else 's' }} {{ 'has' if p.missing_rates|length == 1 else 'have' }} no price yet. Type a rate below (or set your prices in <a href="{{ url_for('estimate.templates') }}">Templates</a>).</div>{% endif %}
-{% if qst == 'accepted' %}<div class="flash warn">Quote {{ doc.number }} has been accepted, so it won't change. Duplicate the estimate to quote again.</div>{% endif %}
-<form method="post">
-<div class="card">
+{% macro lines_table(p, adj) %}
 {% for sec, lines in p.sections %}
 <div class="price-sec"><h3>{{ sec }}</h3>
 <div class="tbl"><table class="lines stack"><thead><tr><th>Line</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Waste %</th><th class="n">Amount</th></tr></thead><tbody>
@@ -18,6 +10,56 @@
 <td class="n" data-l="Amount">{{ (l.qty * l.unit_price)|round|int|cur }}</td></tr>
 {% endfor %}</tbody></table></div></div>
 {% endfor %}
+{% endmacro %}
+{% block content %}
+{% include "estimate/_steps.html" %}
+<div class="est-head"><div><h1>Review the price</h1><p class="sub">{{ t.title }}{% if t.cname %} · {{ t.cname }}{% endif %}. {% if opts %}{{ opts|length }} options on one quote: the customer chooses one. Change each option's templates, rates and markup.{% else %}Change a rate or the waste here for this job; tick the box to keep the change in the template too.{% endif %}</p></div></div>
+{% if qst == 'accepted' %}<div class="flash warn">Quote {{ doc.number }} has been accepted, so it won't change. Duplicate the estimate to quote again.</div>{% endif %}
+{% if opts %}
+{# ------------------------------------------------ Good / Better / Best #}
+<section class="card opt-board" aria-labelledby="opt-h">
+<div class="opt-board-head"><h2 id="opt-h">Options <span class="only-you">Profit: only you see it</span></h2>
+{% if not read_only %}<div class="opt-board-act">{% if opts|length < max_options %}<form method="post" action="{{ url_for('estimate.options_add', tid=t.id) }}"><input type="hidden" name="from" value="{{ cur }}"><button class="btn sm" id="opt-add">+ Add an option</button></form>{% endif %}
+<form method="post" action="{{ url_for('estimate.options_off', tid=t.id) }}" data-confirm="Go back to one price? The recommended option's price is kept."><button class="btn sm">Back to one price</button></form></div>{% endif %}</div>
+<div class="opt-cards" style="--n:{{ opts|length }}">
+{% for o, pr in opts %}
+<div class="opt-card{{ ' on' if loop.index0 == cur }}{{ ' rec' if o.recommended }}" data-opt="{{ loop.index0 }}">
+<a class="opt-pick" href="{{ url_for('estimate.price', tid=t.id, opt=loop.index0) }}"{% if loop.index0 == cur %} aria-current="true"{% endif %}><span class="opt-name">{{ o.name }}</span>{% if o.recommended %}<span class="opt-rec">★ Recommended</span>{% endif %}</a>
+<div class="opt-total"><small>Total</small><b>{{ pr.total|cur }}</b></div>
+<div class="opt-pm"><div><small>Profit</small><b class="opt-profit">{{ pr.profit.profit|cur }}</b></div><div><small>Margin</small><b class="opt-margin">{{ pr.profit.margin_pct }}%</b></div></div>
+<div class="opt-foot"><span class="small muted">{{ pr.lines|length }} line{{ '' if pr.lines|length == 1 else 's' }}{% if pr.missing_rates %} · <span class="warn-t">{{ pr.missing_rates|length }} without a price</span>{% endif %}</span>
+{% if not o.recommended and not read_only %}<form method="post" action="{{ url_for('estimate.options_recommend', tid=t.id, i=loop.index0) }}"><input type="hidden" name="back" value="{{ cur }}"><button class="btn sm opt-recbtn">Recommend</button></form>{% endif %}</div>
+</div>
+{% endfor %}
+</div>
+<p class="small muted opt-note">Before {{ company.tax_name or 'tax' }}. The quote shows every option with its lines and total, marks the recommended one, and its headline total is the recommended option's until the customer chooses.</p>
+</section>
+<form method="post" id="opt-form"><input type="hidden" name="opt" value="{{ cur }}">
+<div class="card opt-edit">
+<div class="opt-edit-head"><div class="opt-name-f"><label for="option_name">Option name</label><input id="option_name" name="option_name" value="{{ opt.name }}" maxlength="40"{{ ' disabled' if read_only }}></div>
+{% if not read_only and opts|length > 2 %}<button class="btn sm danger" form="opt-remove" title="Remove {{ opt.name }}">Remove {{ opt.name }}</button>{% endif %}</div>
+<details class="opt-tpls"{% if not opt.templates or not p.lines %} open{% endif %}><summary><span class="opt-tpls-l">Templates for {{ opt.name }}:</span> <b>{{ tpls|selectattr('id', 'in', opt.templates)|map(attribute='name')|join(', ') or 'none yet' }}</b> {% if not read_only %}<span class="opt-tpls-c">Change</span>{% endif %}</summary>
+<fieldset><legend class="sr-only">Templates for {{ opt.name }}</legend><input type="hidden" name="templates_shown" value="1">
+<div class="chips">{% for x in tpls %}<label class="chip tpl-chip"><input type="checkbox" name="template_id" value="{{ x.id }}" {{ 'checked' if x.id in opt.templates }}{{ ' disabled' if read_only }}> {{ x.name }}</label>{% endfor %}</div></fieldset></details>
+{% if p.missing_rates %}<div class="flash warn">{{ p.missing_rates|length }} line{{ '' if p.missing_rates|length == 1 else 's' }} in {{ opt.name }} {{ 'has' if p.missing_rates|length == 1 else 'have' }} no price yet. Type a rate below.</div>{% endif %}
+{% if not p.lines %}<p class="muted">{{ opt.name }} has no lines yet: tick a template that uses what you measured, then press <b>Update the price</b>.</p>{% endif %}
+{{ lines_table(p, adj) }}
+{% if p.lines %}<table class="totals"><tr><td>{{ opt.name }} total (before {{ company.tax_name or 'tax' }})</td><td class="n">{{ p.total|cur }}</td></tr></table>{% endif %}
+{% if not read_only %}<div class="fields" style="margin-top:14px"><div><label for="markup">Markup on every line of {{ opt.name }} (%)</label><input id="markup" name="markup_pct" value="{{ adj.markup_pct or '' }}" inputmode="decimal" placeholder="0"></div>
+<div style="align-self:end"><label class="check"><input type="checkbox" name="save_to_template" value="1"> Keep rate and waste changes in the template</label></div>
+<div style="align-self:end"><button class="btn" name="go" value="save" id="opt-save">Update the price</button></div></div>{% endif %}
+</div>
+{% if p.profit.unknown %}<p class="small muted">No cost entered for {{ p.profit.unknown|length }} line{{ '' if p.profit.unknown|length == 1 else 's' }} in {{ opt.name }} (counted as all profit). Add your costs in the template, or link a stock item.</p>{% endif %}
+<div class="est-foot"><a class="btn" href="{{ url_for('estimate.template', tid=t.id) }}">← Template</a>
+{% if not read_only and qst != 'accepted' %}<button class="btn pri big" name="go" value="quote">{{ 'Update quote ' ~ doc.number if doc else 'Make the quote' }} →</button>{% elif doc %}<a class="btn pri big" href="{{ url_for('estimate.send', tid=t.id) }}">Next: send →</a>{% endif %}</div>
+</form>
+{% if not read_only and opts|length > 2 %}<form method="post" id="opt-remove" action="{{ url_for('estimate.options_remove', tid=t.id, i=cur) }}" data-confirm="Remove {{ opt.name }}?" hidden></form>{% endif %}
+{% elif not p.lines %}<div class="card"><p>No lines yet. {% if not p.templates %}<a href="{{ url_for('estimate.template', tid=t.id) }}">Choose a template</a>.{% else %}The template doesn't use what you've measured (for example, a painting template needs a room or a wall area). <a href="{{ url_for('estimate.measure', tid=t.id) }}">Measure</a> or <a href="{{ url_for('estimate.template', tid=t.id) }}">choose another template</a>.{% endif %}</p></div>
+{% else %}
+{% if p.missing_rates %}<div class="flash warn">{{ p.missing_rates|length }} line{{ '' if p.missing_rates|length == 1 else 's' }} {{ 'has' if p.missing_rates|length == 1 else 'have' }} no price yet. Type a rate below (or set your prices in <a href="{{ url_for('estimate.templates') }}">Templates</a>).</div>{% endif %}
+<form method="post">
+<div class="card">
+{{ lines_table(p, adj) }}
 <table class="totals"><tr><td>Total (before {{ company.tax_name or 'tax' }})</td><td class="n">{{ p.total|cur }}</td></tr></table>
 {% if not read_only %}<div class="fields" style="margin-top:14px"><div><label for="markup">Markup on every line (%)</label><input id="markup" name="markup_pct" value="{{ adj.markup_pct or '' }}" inputmode="decimal" placeholder="0"></div>
 <div style="align-self:end"><label class="check"><input type="checkbox" name="save_to_template" value="1"> Keep rate and waste changes in the template</label></div>
@@ -26,9 +68,11 @@
 <div class="card"><h2 style="margin-top:0">Your profit <span class="only-you">Only you see this</span></h2>
 <div class="profit"><div>Price<b>{{ p.profit.sell|cur }}</b></div><div>Your costs<b>{{ p.profit.cost|cur }}</b></div><div>Profit<b>{{ p.profit.profit|cur }}</b></div><div>Margin<b>{{ p.profit.margin_pct }}%</b></div></div>
 {% if p.profit.unknown %}<p class="small muted">No cost entered for {{ p.profit.unknown|length }} line{{ '' if p.profit.unknown|length == 1 else 's' }} (counted as all profit). Add your costs in the template, or link a stock item.</p>{% endif %}</div>
+{% if not read_only and qst != 'accepted' %}<div class="card opt-offer"><div><h2>Give the customer a choice</h2><p class="small muted">Good, Better and Best on one quote: each starts as a copy of this price, with its own templates, rates and markup. You mark the one you recommend; the customer picks one.</p></div><button class="btn" id="opt-start" form="opt-start-form">Add options</button></div>{% endif %}
 <div class="est-foot"><a class="btn" href="{{ url_for('estimate.template', tid=t.id) }}">← Template</a>
 {% if not read_only and qst != 'accepted' %}<button class="btn pri big" name="go" value="quote">{{ 'Update quote ' ~ doc.number if doc else 'Make the quote' }} →</button>{% elif doc %}<a class="btn pri big" href="{{ url_for('estimate.send', tid=t.id) }}">Next: send →</a>{% endif %}</div>
 </form>
+{% if not read_only and qst != 'accepted' %}<form method="post" id="opt-start-form" action="{{ url_for('estimate.options_start', tid=t.id) }}" hidden></form>{% endif %}
 {% if not read_only %}<form method="post" action="{{ url_for('estimate.template_from_estimate', tid=t.id) }}" style="margin-top:10px"><button class="btn sm" title="A new template with this job's rates, waste and markup">Save these prices as a template for next time</button></form>{% endif %}
 {% endif %}
 {% endblock %}

@@ -81,22 +81,37 @@ def _now():
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
-def mark_accepted(db, doc_id, name=None, source="in_person", by=None, note=None, at=None):
+def mark_accepted(db, doc_id, name=None, source="in_person", by=None, note=None, at=None, option=None):
+    """option: for a quote with options (Good / Better / Best), the one the customer chose (its number or name). Its
+    lines go on the quote, so the invoice and the Bookings job made from it are that option."""
+    from .. import quote_options as QO
     doc = _quote(db, doc_id)
     if source not in SOURCES:
         raise PostingError("Choose how the customer accepted.")
+    opts = QO.of(db, doc_id)
+    chosen = None
+    if opts:
+        chosen = QO.find(opts, option)
+        if not chosen:
+            raise PostingError(f"{doc['number']} has options: choose the one the customer accepted.")
+        QO.choose(db, doc_id, chosen["n"])
     db.execute("UPDATE documents SET quote_status='accepted', quote_status_at=?, quote_status_by=?, accepted_name=?,"
                " accepted_source=?, quote_status_note=? WHERE id=?",
                (at or _now(), by or _who(), (name or "").strip() or None, source, (note or "").strip() or None, doc_id))
-    audit(db, "quote_accepted", f"{doc['number']} ({source})")
+    audit(db, "quote_accepted", f"{doc['number']} ({source})" + (f": option {chosen['name']}" if chosen else ""))
 
 
-def record_online_acceptance(db, doc_id, name, at=None):
-    """For later: the customer accepted the quote over the internet (sent down from the cloud)."""
+def record_online_acceptance(db, doc_id, name, at=None, option=None):
+    """The customer accepted the quote over the internet (sent down from the cloud). For a quote with options, the
+    option they ticked (number or name); none given: the recommended one."""
+    from .. import quote_options as QO
     doc = _quote(db, doc_id)
     if doc["quote_status"] == "declined" or doc["converted_to"]:
         return False
-    mark_accepted(db, doc_id, name=name, source="accepted_online", by="customer", at=at)
+    opts = QO.of(db, doc_id)
+    if opts and option in (None, ""):
+        option = QO.recommended(opts)["n"]
+    mark_accepted(db, doc_id, name=name, source="accepted_online", by="customer", at=at, option=option)
     return True
 
 
@@ -107,6 +122,9 @@ def mark_declined(db, doc_id, note=None):
     db.execute("UPDATE documents SET quote_status='declined', quote_status_at=?, quote_status_by=?, accepted_name=NULL,"
                " accepted_source=NULL, quote_status_note=? WHERE id=?",
                (_now(), _who(), (note or "").strip() or None, doc_id))
+    if doc["chosen_option"]:
+        from ..quote_options import unchoose
+        unchoose(db, doc_id)
     audit(db, "quote_declined", doc["number"])
 
 
@@ -116,6 +134,9 @@ def check_convertible(db, doc_id):
     if doc and doc["side"] == "sale" and doc["status"] == "quote" and doc["quote_status"] == "declined":
         raise PostingError(f"{doc['number']} was declined. Press \"Undo\" on it first if the customer has changed "
                            "their mind.")
+    if doc and doc["side"] == "sale":
+        from ..quote_options import check_chosen
+        check_chosen(db, doc)
 
 
 def after_convert(db, quote_id, new_id):
@@ -152,8 +173,10 @@ def make_job(db, doc_id):
     plan_check(db)
     lines = db.execute("SELECT * FROM document_lines WHERE document_id=? ORDER BY id", (doc_id,)).fetchall()
     first = next((l["description"] for l in lines if l["description"]), None)
+    from ..quote_options import of as options_of
+    picked = next((o for o in options_of(db, doc_id) if o["chosen"]), None)
     notes = [f"From quote {doc['number']}" + (f", accepted by {doc['accepted_name']}" if doc["accepted_name"] else "")
-             + ":"]
+             + (f", option {picked['name']}" if picked else "") + ":"]
     notes += [f"- {l['qty']:g} x {l['description'] or ''}" for l in lines]
     notes.append(f"Quoted total {fmt_money(doc['total'])} including GST.")
     if doc["notes"]:
@@ -210,9 +233,13 @@ def _back_on_get(fn):
 def quote_accept(doc_id):
     db = get_db()
     f = request.form
-    mark_accepted(db, doc_id, f.get("accepted_name"), f.get("source") or "in_person", note=f.get("note"))
-    doc = db.execute("SELECT number FROM documents WHERE id=?", (doc_id,)).fetchone()
-    flash(f"{doc['number']} marked as accepted. Make the invoice (or the job) when you're ready.", "ok")
+    mark_accepted(db, doc_id, f.get("accepted_name"), f.get("source") or "in_person", note=f.get("note"),
+                  option=f.get("option"))
+    doc = db.execute("SELECT number, chosen_option FROM documents WHERE id=?", (doc_id,)).fetchone()
+    from ..quote_options import of as options_of
+    picked = next((o for o in options_of(db, doc_id) if o["chosen"]), None)
+    flash(f"{doc['number']} marked as accepted" + (f" ({picked['name']})" if picked else "")
+          + ". Make the invoice (or the job) when you're ready.", "ok")
     return redirect(url_for("documents.view", doc_id=doc_id))
 
 
@@ -236,6 +263,8 @@ def quote_undo(doc_id):
         raise PostingError(f"{doc['number']} has already been turned into an invoice or order.")
     db.execute("UPDATE documents SET quote_status=NULL, quote_status_at=NULL, quote_status_by=NULL, accepted_name=NULL,"
                " accepted_source=NULL, quote_status_note=NULL WHERE id=?", (doc_id,))
+    from ..quote_options import unchoose
+    unchoose(db, doc_id)   # a quote with options: the recommended one goes back on it
     audit(db, "quote_undo", doc["number"])
     flash(f"{doc['number']} is waiting for the customer again.", "ok")
     return redirect(url_for("documents.view", doc_id=doc_id))

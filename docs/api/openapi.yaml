@@ -583,6 +583,7 @@ components:
         po_number: { type: string, maxLength: 64 }
         note: { type: string, maxLength: 1000 }
         options: { type: array, maxItems: 50, items: { type: string, maxLength: 64 }, description: Optional lines they chose }
+        option: { type: string, maxLength: 64, description: "For a quote with options (Good / Better / Best): the one the customer chose, by its name or number (1, 2, 3). Left out: the recommended option." }
         accepted_at: { $ref: "#/components/schemas/DateTime" }
         metadata: { $ref: "#/components/schemas/Metadata" }
     InvoicePayment:

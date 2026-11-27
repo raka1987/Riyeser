@@ -293,3 +293,23 @@ a.bk-slot:hover{background:var(--brand-l,#eef4ff)}
 .bk-q .tbl tr>:nth-child(5){width:136px}.bk-q .tbl tr>:nth-child(6){width:68px}.bk-q .tbl tr>:nth-child(7){width:128px}.bk-q .tbl tr>:nth-child(8){width:90px}
 .bk-q .tbl td{max-width:none}.bk-q .tbl td[colspan]{width:auto}
 .bk-q h3 small{font-weight:600;font-size:12px;background:var(--brand-l);color:var(--brand);border-radius:99px;padding:1px 8px}
+/* A quote with options (Good / Better / Best): side by side, stacked when there isn't room */
+.qopts h3{margin-bottom:var(--sp-1)}
+.qopts-sub{margin:0 0 var(--sp-3)}
+.qopt-grid{display:grid;gap:var(--sp-3);grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));align-items:stretch}
+.qopt{display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-3) var(--sp-4);background:var(--card)}
+.qopt.rec{border-color:#9db0f0;box-shadow:0 0 0 1px #9db0f0 inset}
+.qopt.chosen{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok) inset}
+.qopt header{display:flex;gap:var(--sp-2);align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:var(--sp-2)}
+.qopt-name{font-size:var(--fs-md);overflow-wrap:anywhere;min-width:0}
+.qopt-lines{list-style:none;margin:0 0 var(--sp-2);padding:0;flex:1}
+.qopt-lines li{display:flex;gap:var(--sp-3);justify-content:space-between;padding:var(--sp-1) 0;border-bottom:1px solid var(--line);font-size:var(--fs-sm)}
+.qopt-lines li>span:first-child{min-width:0;overflow-wrap:anywhere}
+.qopt-lines .n,.qopt-tot dd{white-space:nowrap;font-variant-numeric:tabular-nums;text-align:right}
+.qopt-tot{display:grid;grid-template-columns:1fr auto;gap:2px var(--sp-3);margin:0;font-size:var(--fs-sm)}
+.qopt-tot dt{color:var(--muted)}.qopt-tot dd{margin:0}
+.qopt-tot .big{font-size:var(--fs-md);font-weight:700;color:var(--ink)}
+h3.qopts-on{margin-top:var(--sp-4)}
+.fields>.qopt-pick{grid-row:auto;border:0;padding:0;margin:0 0 var(--sp-4);min-width:0}
+.qopt-pick legend{font-weight:600;font-size:var(--fs-sm);margin-bottom:var(--sp-1);padding:0}
+.qopt-pick label.check{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;margin:0 0 var(--sp-1)}

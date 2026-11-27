@@ -1,0 +1,49 @@
+{% extends "base.html" %}{% block title %}Photos · {{ t.title }}{% endblock %}
+{% block content %}
+{% include "estimate/_steps.html" %}
+<div class="est-head"><div><h1>Photos</h1><p class="sub">{{ t.title }}{% if t.cname %} · {{ t.cname }}{% endif %}. Mark up what you'll do: arrows, circles, boxes, notes and sizes. Tick the ones to put on the quote.</p></div>
+{% if not cfg.readOnly %}<div class="actions ph-add"><label class="btn pri" for="ph-camera">📷 Take a photo</label><input type="file" id="ph-camera" accept="image/*" capture="environment" hidden>
+<label class="btn" for="ph-file">🖼 Add photos</label><input type="file" id="ph-file" accept="image/jpeg,image/png,image/webp,image/*" multiple hidden></div>{% endif %}</div>
+<div id="ph-status" class="ph-status" role="status" aria-live="polite" hidden></div>
+<div id="ph-empty" class="ph-empty"{% if photos %} hidden{% endif %}><span class="em" aria-hidden="true">📷</span><b>No photos yet</b><p class="small muted">Take photos on site (or add them from this computer), then press <b>Mark up</b> to draw on them. Photos up to {{ cfg.maxMB }} MB; big ones are made smaller to keep the file light. The photo itself is never changed: your markup is kept separately.</p></div>
+<div class="ph-grid" id="ph-grid">
+{% for ph in photos %}
+<article class="ph-card" data-photo="{{ ph.id }}">
+<button type="button" class="ph-thumb" data-edit="{{ ph.id }}" aria-label="Mark up {{ ph.caption or ph.name }}"><img src="{{ url_for('estimate.photo_img', tid=t.id, pid=ph.id, w=640, v=ph.v) }}" alt="{{ ph.caption or ph.name }}" loading="lazy">{% if ph.marks %}<span class="ph-marks">{{ ph.marks }} mark{{ '' if ph.marks == 1 else 's' }}</span>{% endif %}</button>
+<div class="ph-body"><label class="sr-only" for="cap-{{ ph.id }}">Caption</label><input id="cap-{{ ph.id }}" class="ph-cap" data-id="{{ ph.id }}" value="{{ ph.caption }}" placeholder="Caption, e.g. Rot under the window" maxlength="200"{{ ' disabled' if cfg.readOnly }}>
+<div class="ph-row"><label class="check"><input type="checkbox" class="ph-on" data-id="{{ ph.id }}" {{ 'checked' if ph.on_pdf }}{{ ' disabled' if cfg.readOnly }}> On the quote</label>
+<span class="ph-btns">{% if not cfg.readOnly %}<button type="button" class="btn sm" data-edit="{{ ph.id }}">✏️ Mark up</button><button type="button" class="btn sm danger" data-del="{{ ph.id }}" aria-label="Delete photo">Delete</button>{% endif %}</span></div></div>
+</article>
+{% endfor %}
+</div>
+<div class="est-foot">{% if back == 'send' and t.document_id %}<a class="btn" href="{{ url_for('estimate.send', tid=t.id) }}">← Send</a>{% else %}<a class="btn" href="{{ url_for('estimate.measure', tid=t.id) }}">← Measure</a>{% endif %}<a class="btn pri big" href="{{ url_for('estimate.template', tid=t.id) if not t.document_id else url_for('estimate.send', tid=t.id) }}">{{ 'Next: template →' if not t.document_id else 'Back to the quote →' }}</a></div>
+
+{# the markup editor: full screen, works with a mouse, a pen or a finger #}
+<div class="mk" id="mk" role="dialog" aria-modal="true" aria-labelledby="mk-title" hidden>
+<div class="mk-bar">
+  <b id="mk-title" class="mk-title">Mark up</b>
+  <div class="mk-tools" role="toolbar" aria-label="Drawing tools">
+    <button type="button" class="tool on" data-tool="arrow" title="Arrow">➜ <span>Arrow</span></button>
+    <button type="button" class="tool" data-tool="circle" title="Circle">◯ <span>Circle</span></button>
+    <button type="button" class="tool" data-tool="rect" title="Box">▭ <span>Box</span></button>
+    <button type="button" class="tool" data-tool="pen" title="Draw">✎ <span>Draw</span></button>
+    <button type="button" class="tool" data-tool="text" title="Text">T <span>Text</span></button>
+    <button type="button" class="tool" data-tool="measure" title="Size">↔ <span>Size</span></button>
+  </div>
+  <div class="mk-colours" role="radiogroup" aria-label="Colour">{% for c in cfg.colours %}<button type="button" class="mk-c{{ ' on' if loop.first }}" data-colour="{{ c }}" style="--c:{{ c }}" role="radio" aria-checked="{{ 'true' if loop.first else 'false' }}" aria-label="Colour {{ c }}"></button>{% endfor %}</div>
+  <div class="mk-act">
+    <button type="button" class="tool" id="mk-undo" title="Undo" aria-label="Undo" disabled>↶</button>
+    <button type="button" class="tool" id="mk-redo" title="Redo" aria-label="Redo" disabled>↷</button>
+    <button type="button" class="tool" id="mk-clear" title="Clear all">Clear</button>
+    <button type="button" class="btn" id="mk-cancel">Cancel</button>
+    <button type="button" class="btn pri" id="mk-save">Save</button>
+  </div>
+</div>
+<div class="mk-stage" id="mk-stage"><canvas id="mk-canvas"></canvas>
+  <div class="mk-ask" id="mk-ask" hidden><label for="mk-text" id="mk-ask-l">Label</label><input id="mk-text" maxlength="80" autocomplete="off"><button type="button" class="btn sm pri" id="mk-ok">OK</button></div>
+  <div class="mk-hint" id="mk-hint">Drag to draw an arrow.</div>
+</div>
+</div>
+<script>window.RE_PHOTOS = {{ cfg|tojson }};</script>
+<script src="{{ url_for('static', filename='measure/photos.js') }}"></script>
+{% endblock %}

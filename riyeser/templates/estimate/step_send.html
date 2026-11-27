@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Send · {{ t.title }}{% endblock %}
 {% block content %}
 {% include "estimate/_steps.html" %}
-<div class="est-head"><div><h1>Send the quote</h1><p class="sub">Quote <a href="{{ url_for('documents.view', doc_id=doc.id) }}">{{ doc.number }}</a> for {{ t.cname }} · {{ doc.total|cur }} including {{ company.tax_name or 'tax' }} · <span class="st {{ status }}">{{ {'draft': 'Draft', 'sent': 'Sent', 'accepted': 'Accepted', 'declined': 'Declined', 'expired': 'Expired'}[status] }}</span>{% if doc.valid_until %} · valid until {{ doc.valid_until|mdate }}{% endif %}</p></div>
+<div class="est-head"><div><h1>Send the quote</h1><p class="sub">Quote <a href="{{ url_for('documents.view', doc_id=doc.id) }}">{{ doc.number }}</a> for {{ t.cname }} · {% if qoptions %}{% set lead = (qoptions|selectattr('on_quote')|first) %}{{ qoptions|length }} options from {{ qoptions|map(attribute='total')|min|cur }} · {{ lead.name }} {{ '(chosen)' if lead.chosen else '(recommended)' }} {{ lead.total|cur }}{% else %}{{ doc.total|cur }}{% endif %} including {{ company.tax_name or 'tax' }} · <span class="st {{ status }}">{{ {'draft': 'Draft', 'sent': 'Sent', 'accepted': 'Accepted', 'declined': 'Declined', 'expired': 'Expired'}[status] }}</span>{% if doc.valid_until %} · valid until {{ doc.valid_until|mdate }}{% endif %}</p></div>
 <div class="actions"><a class="btn" href="{{ url_for('estimate.quote_pdf', tid=t.id, download=1) }}">⬇ Download PDF</a><a class="btn" href="{{ url_for('estimate.quote_pdf', tid=t.id) }}" target="_blank" rel="noopener">🖨 Print</a></div></div>
 <div class="mwrap">
 <div><iframe class="pdfprev" src="{{ url_for('estimate.quote_pdf', tid=t.id) }}" title="Quote {{ doc.number }}"></iframe></div>
@@ -12,8 +12,12 @@
 <button class="btn pri big" style="margin-top:10px;width:100%;justify-content:center">Send by email</button></form>
 <div class="card"><form method="post" action="{{ url_for('estimate.mark_sent', tid=t.id) }}"><button class="btn wrap" style="width:100%;justify-content:center">I gave it to them another way: mark as sent</button></form>
 <form method="post" action="{{ url_for('estimate.summary_toggle', tid=t.id) }}" style="margin-top:10px"><label class="check"><input type="checkbox" name="on" value="1" {{ 'checked' if t.summary_on_pdf }} onchange="this.form.submit()"{{ ' disabled' if read_only }}> Add a measurements page (with your drawing) to the PDF</label></form></div>
+<div class="card" id="send-photos"><h2 style="margin-top:0">Photos on the quote</h2>
+{% if photos %}<form method="post" action="{{ url_for('estimate.photos_on_pdf', tid=t.id) }}"><ul class="send-photos">{% for ph in photos %}<li><label class="check"><input type="checkbox" name="on" value="{{ ph.id }}" {{ 'checked' if ph.on_pdf }}{{ ' disabled' if read_only }}><img src="{{ url_for('estimate.photo_img', tid=t.id, pid=ph.id, w=120, v=ph.v) }}" alt="" width="56" height="42" loading="lazy"><span>{{ ph.caption or ph.name }}{% if ph.marks %} <small class="muted">· {{ ph.marks }} mark{{ '' if ph.marks == 1 else 's' }}</small>{% endif %}</span></label></li>{% endfor %}</ul>
+<div class="send-photo-act">{% if not read_only %}<button class="btn sm">Save and update the PDF</button>{% endif %}<a class="btn sm" href="{{ url_for('estimate.photos', tid=t.id, **{'from': 'send'}) }}">Captions and markup</a></div></form>
+{% else %}<p class="small muted">No photos yet. Add photos of the job (and mark them up) to show the customer what you'll do.</p><a class="btn sm" href="{{ url_for('estimate.photos', tid=t.id, **{'from': 'send'}) }}">📷 Add photos</a>{% endif %}</div>
 <div class="card"><h2 style="margin-top:0">When they say yes</h2>
-<p class="small">Open the quote and press <b>Mark accepted</b>. Then make the invoice in Riyeser Invoices or Accounting{% if bookings %}, or a job in Riyeser Bookings{% endif %}: they open the same company file, so the quote is already there.</p>
+<p class="small">Open the quote and press <b>Mark accepted</b>{% if qoptions %}, and choose the option they picked{% endif %}. Then make the invoice in Riyeser Invoices or Accounting{% if bookings %}, or a job in Riyeser Bookings{% endif %}: they open the same company file, so the quote is already there.</p>
 <a class="btn" href="{{ url_for('documents.view', doc_id=doc.id) }}">Open quote {{ doc.number }}</a></div>
 </div></div>
 <div class="est-foot"><a class="btn" href="{{ url_for('estimate.price', tid=t.id) }}">← Price</a><a class="btn" href="{{ url_for('estimate.index') }}">Done: back to estimates</a></div>

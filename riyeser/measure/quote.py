@@ -26,6 +26,63 @@ def adjustments(takeoff):
         return {}
 
 
+# ---------------------------------------------------------------- Good / Better / Best
+OPTION_NAMES = ("Good", "Better", "Best")
+MAX_OPTIONS = 3
+
+
+def options(takeoff):
+    """The estimate's options, or None for one price: {'list': [{'name', 'templates', 'adjust'}], 'recommended': i}."""
+    try:
+        o = json.loads(takeoff["options"] or "null") if "options" in takeoff.keys() else None
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(o, dict) or not isinstance(o.get("list"), list) or len(o["list"]) < 2:
+        return None
+    lst = []
+    for i, x in enumerate(o["list"][:MAX_OPTIONS]):
+        x = x if isinstance(x, dict) else {}
+        lst.append({"name": (str(x.get("name") or "").strip() or f"Option {i + 1}")[:40],
+                    "templates": [int(t) for t in (x.get("templates") or []) if str(t).isdigit()],
+                    "adjust": x.get("adjust") if isinstance(x.get("adjust"), dict) else {}})
+    rec = o.get("recommended")
+    rec = rec if isinstance(rec, int) and 0 <= rec < len(lst) else min(1, len(lst) - 1)
+    return {"list": lst, "recommended": rec}
+
+
+def save_options(db, tid, opts):
+    db.execute("UPDATE takeoffs SET options=?, updated_at=datetime('now','localtime') WHERE id=?",
+               (json.dumps(opts) if opts else None, tid))
+
+
+def start_options(takeoff, n=3):
+    """Add options: the current price copied into Good, Better and Best (Better recommended)."""
+    base = {"templates": store.template_ids(takeoff), "adjust": adjustments(takeoff)}
+    return {"list": [dict(json.loads(json.dumps(base)), name=OPTION_NAMES[i]) for i in range(n)],
+            "recommended": 1 if n > 2 else 0}
+
+
+def option_takeoff(takeoff, opt):
+    """The estimate as one option sees it: its own templates and quick changes (markup, rates, waste)."""
+    d = dict(takeoff)
+    d["templates"] = json.dumps(opt.get("templates") or [])
+    d["adjust"] = json.dumps(opt.get("adjust") or {})
+    return d
+
+
+def price_options(db, takeoff, items=None):
+    """[(option, priced)] for every option (each priced like a one-price estimate), or [] for one price."""
+    opts = options(takeoff)
+    if not opts:
+        return []
+    items = store.items_of(db, takeoff["id"]) if items is None else items
+    out = []
+    for i, o in enumerate(opts["list"]):
+        p = price(db, option_takeoff(takeoff, o), items)
+        out.append((dict(o, index=i, recommended=i == opts["recommended"]), p))
+    return out
+
+
 def price(db, takeoff, items=None):
     """{'lines', 'sections': [(name, lines)], 'total', 'profit', 'missing_rates', 'templates'}"""
     items = store.items_of(db, takeoff["id"]) if items is None else items
@@ -111,13 +168,28 @@ def make_quote(db, takeoff_id):
     items = store.items_of(db, takeoff_id)
     if not items:
         raise PostingError("Add a measurement first (step 3).")
-    if not store.template_ids(t):
+    if not store.template_ids(t) and not options(t):
         raise PostingError("Choose a trade template first (step 4).")
-    priced = price(db, t, items)
-    if not priced["lines"]:
-        raise PostingError("The template didn't make any lines from these measurements. Check the template "
-                           "uses what you measured (for example floor area for a room).")
-    lines = doc_lines(db, priced)
+    from .. import quote_options as QO
+    opts = price_options(db, t, items)
+    if opts:
+        for o, p in opts:
+            if not o["templates"]:
+                raise PostingError(f"Choose a template for option {o['name']} (step 5).")
+            if not p["lines"]:
+                raise PostingError(f"Option {o['name']} has no lines: its template doesn't use what you measured.")
+        sets = [doc_lines(db, p) for _o, p in opts]
+        rec = next(i for i, (o, _p) in enumerate(opts) if o["recommended"])
+    else:
+        priced = price(db, t, items)
+        if not priced["lines"]:
+            raise PostingError("The template didn't make any lines from these measurements. Check the template "
+                               "uses what you measured (for example floor area for a room).")
+        sets, rec = [doc_lines(db, priced)], 0
+    for ls in sets:
+        for l in ls:
+            l["measure_line"] = 1
+    lines = [dict(l) for l in sets[rec]]
     doc, st = quote_state(db, t)
     header = {"contact_id": t["contact_id"], "date": date.today().isoformat(), "reference": t["title"][:60],
               "notes": notes_for(db, t, items), "tax_inclusive": False}
@@ -127,6 +199,8 @@ def make_quote(db, takeoff_id):
         header["date"] = doc["date"]
         manual = [{k: r[k] for k in ("item_id", "description", "qty", "unit_price", "discount_pct", "account_id",
                                      "tax_code_id", "job_id")} for r in keep]
+        if doc["chosen_option"]:   # declined after a choice: the recommended option goes back on
+            db.execute("UPDATE documents SET chosen_option=NULL WHERE id=?", (doc["id"],))
         did = save_document(db, "sale", header, manual + lines, "quote", doc["id"])
         ids = [r["id"] for r in db.execute("SELECT id FROM document_lines WHERE document_id=? ORDER BY id", (did,))]
         mark = ids[len(manual):]
@@ -135,6 +209,7 @@ def make_quote(db, takeoff_id):
         raise PostingError(f"Quote {doc['number']} has been accepted, so it isn't changed. Duplicate this estimate to "
                            "quote again.")
     else:
+        manual = []
         did = save_document(db, "sale", header, lines, "quote")
         from ..views.quotes import set_valid_until
         set_valid_until(db, did, None, header["date"])
@@ -142,6 +217,12 @@ def make_quote(db, takeoff_id):
         how = "made"
     if mark:
         db.execute(f"UPDATE document_lines SET measure_line=1 WHERE id IN ({','.join('?' * len(mark))})", mark)
+    if opts:   # every option on the one quote (the lines typed into the quote by hand go with each of them)
+        QO.save(db, did, [{"name": o["name"], "recommended": o["recommended"],
+                           "lines": [dict(m) for m in manual] + [dict(l) for l in ls]}
+                          for (o, _p), ls in zip(opts, sets)], tax_inclusive=False)
+    else:
+        QO.clear(db, did)
     db.execute("UPDATE takeoffs SET document_id=?, quoted_at=datetime('now','localtime'),"
                " updated_at=datetime('now','localtime') WHERE id=?", (did, takeoff_id))
     num = db.execute("SELECT number FROM documents WHERE id=?", (did,)).fetchone()["number"]
@@ -171,9 +252,9 @@ def duplicate(db, takeoff_id, title=None):
     if not t:
         raise PostingError("That estimate doesn't exist.")
     nid = db.execute("INSERT INTO takeoffs (title, contact_id, address, units, templates, summary_on_pdf, map_view, notes,"
-                     " method, adjust, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                     " method, adjust, options, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                      (title or f"{t['title']} (copy)", t["contact_id"], t["address"], t["units"], t["templates"],
-                      t["summary_on_pdf"], t["map_view"], t["notes"], t["method"], t["adjust"],
+                      t["summary_on_pdf"], t["map_view"], t["notes"], t["method"], t["adjust"], t["options"],
                       g.user["id"] if g.get("user") else None)).lastrowid
     plan_map = {}
     for p in db.execute("SELECT * FROM takeoff_plans WHERE takeoff_id=?", (takeoff_id,)).fetchall():
@@ -202,8 +283,14 @@ def duplicate(db, takeoff_id, title=None):
         db.execute("INSERT INTO takeoff_items (takeoff_id, kind, source, label, grp, color, data, plan_id, page, verified, sort)"
                    " VALUES (?,?,?,?,?,?,?,?,?,0,?)", (nid, i["kind"], i["source"], i["label"], i["grp"], i["color"],
                                                        data, plan_map.get(i["plan_id"]), i["page"], i["sort"]))
+    for ph in db.execute("SELECT * FROM takeoff_photos WHERE takeoff_id=? ORDER BY sort, id", (takeoff_id,)).fetchall():
+        db.execute("INSERT INTO takeoff_photos (takeoff_id, name, mime, size, width, height, data, markup, flat, caption,"
+                   " on_pdf, sort) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                   (nid, ph["name"], ph["mime"], ph["size"], ph["width"], ph["height"], ph["data"], ph["markup"],
+                    ph["flat"], ph["caption"], ph["on_pdf"], ph["sort"]))
     audit(db, "estimate_duplicated", f"{t['title']} -> {nid}")
     return nid
 
 
-__all__ = ["price", "make_quote", "duplicate", "status_of", "round_up"]
+__all__ = ["price", "make_quote", "duplicate", "status_of", "round_up", "options", "price_options", "start_options",
+           "save_options", "option_takeoff"]
