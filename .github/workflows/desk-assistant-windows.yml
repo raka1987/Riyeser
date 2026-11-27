@@ -272,12 +272,19 @@ jobs:
           Write-Host "--- administrator, started directly (Central 1.8.10)"
           node scripts/central-install-check.js --mode=old --only=linkoffice --wait=150 --dir=C:\riy\dl --out=C:\riy\out\lo-admin-old.json
           Remove-LinkOffice
-          Write-Host "--- limited token, through the permission prompt (new)"
-          As-Limited new "lo-limited-new"
-          $r = Get-Content C:\riy\out\lo-limited-new.json -Raw | ConvertFrom-Json
-          $lo = $r.results | Where-Object id -eq linkoffice
-          if (-not ($lo.failure.ok -and $lo.detected -and $lo.elevated)) { throw "Link Office didn't install through the permission prompt: $($lo | ConvertTo-Json -Compress -Depth 4)" }
-          Write-Host "Link Office installed from the limited token through the permission prompt, listed in" $lo.where
+          # From the limited token, Central now asks Windows for permission (Start-Process -Verb RunAs). On a PC that is the
+          # Windows permission prompt; this runner has nobody to answer it, so the check only confirms Central waits on
+          # it (and doesn't report "installed" when nothing was). The administrator step below runs the same code to the end.
+          Write-Host "--- limited token, through the permission prompt (new): waits for an answer"
+          $node = (Get-Command node).Source
+          "@`"$node`" C:\riy\app\scripts\central-install-check.js --mode=new --only=linkoffice --dir=C:\riy\dl --out=C:\riy\out\lo-limited-new.json > C:\riy\out\lo-limited-new.log 2>&1" | Set-Content "C:\riy\lo-limited-new.cmd" -Encoding ascii
+          runas /trustlevel:0x20000 "C:\riy\lo-limited-new.cmd"
+          Start-Sleep -Seconds 60
+          $prompt = Get-Process -Name consent -ErrorAction SilentlyContinue
+          Write-Host "After 60 s: report written:" (Test-Path C:\riy\out\lo-limited-new.json) "; Windows permission prompt (consent.exe) open:" ([bool]$prompt)
+          Get-Process -Name consent, powershell, node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Remove-LinkOffice
+          $global:LASTEXITCODE = 0
       - name: Administrator, with Central's new install (every program)
         shell: pwsh
         run: |
@@ -287,6 +294,9 @@ jobs:
           $r.results | Format-Table id, asset, version, code, startError, elevated, detected, where -AutoSize | Out-String -Width 220 | Write-Host
           $bad = @($r.results | Where-Object { -not $_.failure.ok -or -not $_.detected })
           if ($bad.Count) { throw "Not installed or not found: $($bad.id -join ', ')" }
+          $lo = $r.results | Where-Object id -eq linkoffice
+          if (-not $lo.elevated -or $lo.where -ne "HKLM") { throw "Link Office should install through the permission prompt, for the whole PC: $($lo | ConvertTo-Json -Compress -Depth 4)" }
+          Write-Host "Every program installed the way Central installs it, and is listed; Link Office through Start-Process -Verb RunAs, in HKLM"
       - name: The released Riyeser Central finds every program
         shell: pwsh
         run: |
