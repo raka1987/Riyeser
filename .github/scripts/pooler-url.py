@@ -2,12 +2,17 @@
 Session pooler URL for the same project, which works over IPv4. Uses SUPABASE_ACCESS_TOKEN to ask Supabase for the
 pooler's address. Any other URL (already a pooler, or not Supabase) is printed unchanged. Prints only the URL."""
 import json, os, re, sys, urllib.parse, urllib.request
-url = os.environ.get("DB_URL", "").strip().strip('"').strip("'")
+raw = os.environ.get("DB_URL", "")
+url = re.sub(r"\s+", "", raw).strip('"').strip("'")          # line breaks or spaces from copying
+i = url.find("postgres")
+url = url[i:] if i >= 0 else url                               # e.g. "DATABASE_URL=postgresql://…"
 # Read it by hand (not urlsplit): passwords can hold characters a URL parser trips on, and people often leave the
 # [ ] from Supabase's "[YOUR-PASSWORD]" around their password.
 p = re.fullmatch(r"(postgres(?:ql)?)://([^:/@]+):(.*)@([^@/:]+)(?::(\d+))?(/[^?]*)?(\?.*)?", url)
 if not p:
-    sys.stderr.write("::error::TEAM_DB_URL doesn't look like a database address. It should start with postgresql:// (Supabase → Connect → Connection String → URI).\n")
+    shape = re.sub(r"[A-Za-z0-9]", "x", url)[:12]
+    sys.stderr.write("::error::TEAM_DB_URL doesn't look like a database address. It should start with postgresql:// (Supabase → Connect → Connection String → URI). "
+                     f"What's saved: {len(raw)} characters, starts like '{shape}', has '@': {'@' in url}, has 'pooler': {'pooler' in url}, line breaks: {raw.count(chr(10))}.\n")
     sys.exit(1)
 _, user0, pw, host0, port0, path, query = p.groups()
 if pw.startswith("[") and pw.endswith("]"):
