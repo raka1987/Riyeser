@@ -57,6 +57,7 @@ test('adapter choice: the adapter with the router comes first, and a second addr
   // a second address on the same adapter: stays on the one in use
   const second = { Ethernet: [v4('192.168.1.20'), v4('192.168.1.99')] };
   assert.strictEqual(pickAdapter(second, '', { last: { name: 'Ethernet', address: '192.168.1.99' } }).address, '192.168.1.99');
+  assert.strictEqual(pickAdapter(second, 'Ethernet', { last: { name: 'Ethernet', address: '192.168.1.99' } }).address, '192.168.1.99', 'on the adapter the owner chose too');
   // the adapter in use got a new address (DHCP): follow it on the same adapter, not a different one
   const moved = { Ethernet: [v4('10.0.0.15')], 'Wi-Fi': [v4('192.168.1.35')] };
   assert.strictEqual(pickAdapter(moved, '', { last: { name: 'Ethernet', address: '10.0.0.9' } }).address, '10.0.0.15');

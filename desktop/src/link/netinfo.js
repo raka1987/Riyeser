@@ -63,7 +63,7 @@ function pickAdapter(ifaces, preferredName, hints = {}) {
   const list = localAddresses(ifaces, hints);
   const real = list.filter((a) => !a.virtual);
   const last = hints.last || {};
-  const chosen = preferredName && list.find((a) => a.name === preferredName);
+  const chosen = preferredName && (list.find((a) => a.name === preferredName && a.address === last.address) || list.find((a) => a.name === preferredName));
   const a = chosen || (last.address && real.find((x) => x.address === last.address)) || (last.name && real.find((x) => x.name === last.name)) || real[0]
     // a Hyper-V "external" switch moves the real network card's address onto a vEthernet adapter: use it if it has the router
     || list.find((x) => (hints.gateways || []).includes(x.address));
