@@ -21,13 +21,13 @@
   const ROLES = [['owner', 'Owner'], ['finance', 'Finance'], ['support', 'Support'], ['senior', 'Senior support'], ['sales', 'Sales'], ['developer', 'Developer']];
   const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
   // The paid programs A to Z (as everywhere else). 'calls' is Riyeser Link (chat, calls, desk phones, Link Office).
-  // Riyeser Estimate ('estimate'): free for 90 days from first use, price to be announced (no PRICE entry, never billed yet).
+  // Riyeser Estimate ('estimate'): free for 90 days from first use, then US$20 a month (not part of any bundle).
   const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built'], ['estimate', 'Riyeser Estimate']];
   const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
   // List prices: US dollars a month per business (the same as riyeser_price() in team-chat.sql and website/prices.mjs).
   // Each paid program includes 3 users, then US$7 a month each for that program; Plus includes Basics (never both).
   // POS: 1 till included (unlimited cashiers), US$15 a till after. Bundles replace their programs' prices (riyeser_plan).
-  const PRICE = { basic: 25, plus: 39, bookings: 25, calls: 20, payroll: 25, pos: 29, as_built: 29, users_included: 3, extra_user: 7, tills_included: 1, extra_till: 15, extra_company: 10 };
+  const PRICE = { basic: 25, plus: 39, bookings: 25, calls: 20, payroll: 25, pos: 29, as_built: 29, estimate: 20, users_included: 3, extra_user: 7, tills_included: 1, extra_till: 15, extra_company: 10 };
   const BUNDLES = [{ id: 'shop', name: 'Shop', mods: ['basic', 'pos', 'calls'], price: 59 }, { id: 'office', name: 'Office', mods: ['basic', 'payroll', 'calls'], price: 59 },
     { id: 'business', name: 'Business', mods: ['plus', 'bookings', 'calls', 'payroll', 'pos'], price: 99 }];
   /** The same sums as riyeser_plan in team-chat.sql: each program + US$7 per user over 3 (POS: tills), the best bundle. */

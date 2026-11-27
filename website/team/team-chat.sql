@@ -1423,6 +1423,7 @@ create or replace function public.riyeser_price(item text) returns numeric
   select (case item
     when 'basic' then 25 when 'plus' then 39 when 'bookings' then 25 when 'calls' then 20   -- calls = Riyeser Link
     when 'payroll' then 25 when 'pos' then 29 when 'as_built' then 29
+    when 'estimate' then 20          -- Riyeser Estimate (after its 90 days from first use; not in any bundle)
     when 'users_included' then 3     -- users included in each paid program (POS: unlimited cashiers instead)
     when 'extra_user' then 7         -- each user over that, for each paid program
     when 'tills_included' then 1     -- POS: checkout counters included
@@ -1453,7 +1454,7 @@ declare m text[]; b record; best record; save numeric; best_save numeric := 0; x
   rest text[]; v numeric; extras numeric; ext_users int; total numeric; best_id text;
 begin
   select coalesce(array_agg(o.m order by o.ord), '{}'::text[]) into m
-    from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) with ordinality o(m, ord)
+    from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) with ordinality o(m, ord)
     where o.m = any (coalesce(mods, '{}'::text[])) and not (o.m = 'basic' and 'plus' = any (mods));
   foreach x in array m loop
     n := case when users is not null and jsonb_typeof(users -> x) = 'number' then (users ->> x)::numeric::int else coalesce(people, inc) end;
@@ -1520,7 +1521,7 @@ $$;
 create or replace function public.company_monthly(ws uuid) returns numeric
   language sql stable security definer set search_path = public as $$
   select round((public.riyeser_plan(
-      array(select m from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
+      array(select m from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) m
             where (public.module_state(ws, m) ->> 'status') = 'active'),
       public.riyeser_people(ws), public.riyeser_users(ws), coalesce(p.tills, 1), coalesce(p.extra_companies, 0), 'monthly',
       coalesce(p.early_bird, false) and p.early_bird_since > current_date - 365) ->> 'total')::numeric
@@ -2155,10 +2156,10 @@ begin
   return (select json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'status', w.status, 'kind', w.kind,
     'country', w.country, 'last_active_at', w.last_active_at,
     'people', (select count(*) from members m where m.workspace_id = w.id), 'pcs', (select count(*) from devices d where d.workspace_id = w.id and public.pc_active(d)),
-    'paid', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
+    'paid', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) m
              where (public.module_state(w.id, m) ->> 'status') = 'active'),
-    'trial', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
-             where (public.module_state(w.id, m) ->> 'status') = 'trial'),
+    'trial', (select coalesce(json_agg(m), '[]') from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) m
+             where (public.module_state(w.id, m) ->> 'status') = 'trial' and (public.module_state(w.id, m) ->> 'starts_on_first_use') is null),
     'monthly', public.company_monthly(w.id), 'credit', public.credit_json(w.id),
     'notes', (select coalesce(json_agg(json_build_object('body', n.body, 'at', n.created_at, 'by', public.staff_name(n.author)) order by n.created_at desc), '[]')
               from (select * from hq_notes where workspace_id = w.id order by created_at desc limit 5) n))
@@ -2961,7 +2962,7 @@ begin
   if tr ~ '^[0-9]+$' then tr := 'T-' || tr; end if;
   if tr is not null and not exists (select 1 from support_tickets where ref = tr) then raise exception 'There''s no ticket %.', tr; end if;
   if kind = 'account' then
-    select array_agg(m) into mods from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
+    select array_agg(m) into mods from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) m
       where (module_state(ws, m) ->> 'status') = 'active';
     if mods is null then raise exception 'This business has no paid programs. Extend a trial instead.'; end if;
   else
@@ -4217,7 +4218,7 @@ begin
           coalesce(sum(public.riyeser_bill(array[mm.m], public.riyeser_people(c.workspace_id), 0, 'monthly', false))
             filter (where c.module is not null and not (mm.m = 'basic' and exists (select 1 from company_modules c2 where c2.workspace_id = c.workspace_id
               and c2.module = 'plus' and c2.status = 'active' and (c2.paid_until is null or c2.paid_until >= current_date)))), 0) as estimate
-        from unnest(mods) mm(m) left join (company_modules c join workspaces w on w.id = c.workspace_id and w.status = 'active')
+        from unnest(mods || array['estimate']) mm(m) left join (company_modules c join workspaces w on w.id = c.workspace_id and w.status = 'active')
           on c.module = mm.m and c.status = 'active' and (c.paid_until is null or c.paid_until >= current_date)
         group by mm.m) x),
     'monthly_now', coalesce((select sum(public.company_monthly(c.workspace_id)) from (select distinct workspace_id from company_modules
@@ -5261,7 +5262,7 @@ create trigger billing_entities_keep before update or delete on public.billing_e
 create or replace function public.billing_mods(mods text[]) returns text[]
   language sql immutable set search_path = public as $$
   select coalesce(array_agg(u.m order by u.ord), '{}'::text[])
-  from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) with ordinality u(m, ord)
+  from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) with ordinality u(m, ord)
   where u.m = any (coalesce(mods, '{}'::text[])) and not (u.m = 'basic' and 'plus' = any (mods))
 $$;
 -- "…AB12CD": PayPal's ids in HQ, all but the last 6 characters hidden.
@@ -7311,8 +7312,8 @@ end $$;
 -- ---------------------------------------------------------------- Riyeser Estimate (licence module 'estimate')
 -- Measure jobs on a plan, a photo or the map, and turn them into quotes. Free for 90 days from FIRST USE: the trial
 -- starts the first time Riyeser Central reports the program on one of the business's PCs (report_programs), and the
--- program itself keeps its own first-use date on the PC until then. The price after the trial is still to be
--- announced, so riyeser_price() and the billing lists don't include it yet (it can't be bought or billed).
+-- program itself keeps its own first-use date on the PC until then. After the trial it's US$20 a month with 3 users
+-- included (riyeser_price('estimate'); extra users US$7), billed like the other paid programs; not in any bundle.
 -- Safe to run again: only adds 'estimate' to the allowed programs and starts trials that haven't started.
 alter table public.company_modules drop constraint if exists company_modules_module_check;
 alter table public.company_modules add constraint company_modules_module_check

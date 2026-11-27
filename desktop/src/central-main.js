@@ -6,6 +6,7 @@ const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
 const installerCheck = require('./central/installer-check');
 const licence = require('./core/licence');
+const prices = require('./core/prices');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -68,7 +69,7 @@ const PROGRAMS = [
   { id: 'bookings', name: 'Bookings', full: 'Riyeser Bookings', icon: '📅', desc: 'Jobs, appointments and table bookings on one calendar. Free for 90 days.',
     dirs: ['Riyeser Bookings'], exes: ['Riyeser Bookings.exe'], links: ['Riyeser Bookings'] },
   // Riyeser Estimate: measure jobs (plan, photo, map) and quote them. Same company files as Accounting; installs next to it.
-  { id: 'estimate', name: 'Estimate', full: 'Riyeser Estimate', icon: '📐', desc: 'Measure jobs on a plan, a photo or the map, and turn them into quotes. Free for 90 days.',
+  { id: 'estimate', name: 'Estimate', full: 'Riyeser Estimate', icon: '📐', desc: `Measure jobs on a plan, a photo or the map, and turn them into quotes. Free for 90 days, then ${prices.usd(prices.PRICE.estimate)} a month.`,
     dirs: ['Riyeser Estimate'], exes: ['Riyeser Estimate.exe'], links: ['Riyeser Estimate'], pages: ['estimate'] },
   // Two separate apps that share the same books. The old single "Riyeser Accounting" 1.x counts as Plus.
   { id: 'accounting-basics', name: 'Accounting Basics', full: 'Riyeser Accounting Basics', icon: '📗', desc: 'Invoicing, quotes, customers and stock. Free for 90 days.',

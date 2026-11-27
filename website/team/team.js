@@ -19,7 +19,7 @@
   // Prices are in US dollars a month per business (the full list is on riyeser.com/pricing.html, from website/prices.mjs).
   // PRICE is the same list as PRICE in website/prices.mjs and riyeser_price() in team-chat.sql (pay-test.js checks they agree).
   // Pricing v2: Riyeser Link (module 'calls') is a paid program; POS has tills (1 included) instead of users; bundles.
-  const PRICE = { basic: 25, plus: 39, bookings: 25, calls: 20, payroll: 25, pos: 29, as_built: 29, users_included: 3, extra_user: 7, tills_included: 1, extra_till: 15, extra_company: 10 };
+  const PRICE = { basic: 25, plus: 39, bookings: 25, calls: 20, payroll: 25, pos: 29, as_built: 29, estimate: 20, users_included: 3, extra_user: 7, tills_included: 1, extra_till: 15, extra_company: 10 };
   const BUNDLES = [{ id: 'shop', name: 'Shop', mods: ['basic', 'pos', 'calls'], price: 59 }, { id: 'office', name: 'Office', mods: ['basic', 'payroll', 'calls'], price: 59 },
     { id: 'business', name: 'Business', mods: ['plus', 'bookings', 'calls', 'payroll', 'pos'], price: 99, popular: true }];
   const PRICE_LINK = PRICE.calls;
@@ -1117,7 +1117,7 @@
   // "4 people · 3 included in each program, then US$7 a month each" (PRICE_EXTRA_USER): users are charged per paid program.
   const peopleText = (lic) => `${lic.seats.used} ${lic.seats.used === 1 ? 'person' : 'people'} · ${lic.seats.included} included per program`;
   function planHtml(lic) {
-    // Riyeser Estimate shows once the database sends it; its trial starts the first time it's used (no price yet).
+    // Riyeser Estimate shows once the database sends it; its trial starts the first time it's used.
     return `<div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built'], ['estimate', 'Riyeser Estimate']].filter(([k]) => k !== 'estimate' || (lic.modules || {})[k]).map(([k, n]) => { const v = (lic.modules || {})[k] || {};
         const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
         const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' && v.starts_on_first_use && !v.trial_ends ? 'Free for 90 days from first use' : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
@@ -1355,7 +1355,7 @@
   // riyeser_bill in team-chat.sql); the database works it out again when you pay (billing_start), early bird included.
   // Pay with PayPal (card or PayPal balance) goes through the paypal function to PayPal and back (?paid=RI-…);
   // bank transfer makes an invoice with the bank details. Only the owner can pay or see billing (the database checks).
-  const PAID_MODS = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built']];
+  const PAID_MODS = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built'], ['estimate', 'Riyeser Estimate']];
   // What the number next to each program counts (POS: tills, with unlimited cashiers)
   const UNIT = { calls: 'People', payroll: 'Office users', bookings: 'Staff calendars', pos: 'Tills' };
   const modLabel = (m) => (PAID_MODS.find((x) => x[0] === m) || [m, m])[1];

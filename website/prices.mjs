@@ -11,6 +11,7 @@ export const PRICE = {
   payroll: 25,    // 3 office users included (who run pay or approve timesheets); unlimited employees
   pos: 29,        // 1 till included, unlimited cashiers
   as_built: 29,
+  estimate: 20,   // Riyeser Estimate: free for 90 days from first use, then this; not part of any bundle
   users_included: 3,
   extra_user: 7,
   tills_included: 1,
@@ -18,7 +19,7 @@ export const PRICE = {
   extra_company: 10,
 };
 // The paid programs, in the order they're listed (A to Z): [module id, name].
-export const PAID = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built']];
+export const PAID = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built'], ['estimate', 'Riyeser Estimate']];
 export const LOWEST = Math.min(...PAID.map(([m]) => PRICE[m]));
 // Bundles: one price for the programs together. Each program in a bundle still includes 3 users (extra users US$7,
 // extra tills US$15). Billing picks the bundle by itself when the programs chosen contain one.
@@ -39,7 +40,7 @@ export const usd = (n) => `US$${n % 1 ? n.toFixed(2) : n}`;
  *  Returns { mods, bundle, lines: [{ name, mods, price, extraUsers, extraTills, monthly }], total }.
  *  Written without anything from outside it, so the website's calculator can carry a copy of it. */
 export function planPrice(P, B, mods, users, tills) {
-  var ORDER = ['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built'];
+  var ORDER = ['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate'];
   var m = ORDER.filter(function (x) { return mods.indexOf(x) >= 0 && !(x === 'basic' && mods.indexOf('plus') >= 0); });
   var u = function (x) { var n = users && users[x] != null ? Math.round(Number(users[x])) : P.users_included; return Math.max(1, isFinite(n) ? n : P.users_included); };
   var t = Math.max(1, Math.round(Number(tills) || 1));

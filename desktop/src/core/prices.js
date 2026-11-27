@@ -10,6 +10,7 @@ const PRICE = Object.freeze({
   payroll: 25,    // 3 office users included; unlimited employees
   pos: 29,        // 1 till included, unlimited cashiers
   as_built: 29,
+  estimate: 20,   // Riyeser Estimate: free for 90 days from first use; not part of any bundle
   users_included: 3,
   extra_user: 7,
   tills_included: 1,
@@ -17,12 +18,11 @@ const PRICE = Object.freeze({
   extra_company: 10,
 });
 // The paid programs, in the order they're listed (the same as website/prices.mjs PAID).
-const PAID = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built']];
+const PAID = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built'], ['estimate', 'Riyeser Estimate']];
 // The bundles (the same as website/prices.mjs BUNDLES): one price for the programs together.
 const BUNDLES = [['Shop', ['basic', 'pos', 'calls'], 59], ['Office', ['basic', 'payroll', 'calls'], 59], ['Business', ['plus', 'bookings', 'calls', 'payroll', 'pos'], 99]];
 const usd = (n) => `US$${n % 1 ? n.toFixed(2) : n}`;
-// A program with no price yet (Riyeser Estimate: free for 90 days, the price after that is still to be announced).
-const monthly = (id) => (PRICE[id] == null ? 'price to be announced' : `${usd(PRICE[id])}/month`);
+const monthly = (id) => `${usd(PRICE[id])}/month`;
 
 /** Everything the licence window says about prices, in one paragraph. */
 function summary() {

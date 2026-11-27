@@ -120,9 +120,9 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   const web = await newPage(1300);
   await web.goto(`${BASE}/pricing.html`);
   const rows = await web.$$eval('tr[data-row]', (rs) => rs.map((r) => [r.dataset.row, [...r.querySelectorAll('.buybtns a')].map((a) => [a.textContent, a.getAttribute('href')])]));
-  // Riyeser Estimate has no price yet (to be announced): its row has no buttons, so it can't be bought
-  check(rows.some(([m, l]) => m === 'estimate' && l.length === 0), 'Riyeser Estimate: free for 90 days, no Buy button (price to be announced)');
-  check(rows.length >= 6 && rows.filter(([m]) => m !== 'link-office' && m !== 'estimate').every(([m, l]) => l.length === 2 && l[0][0] === 'Start free for 90 days' && l[0][1] === `/link/?signup&add=${m}` && l[1][0] === 'Buy now' && l[1][1] === `/link/?signup&add=${m}&buy=1`),
+  // Riyeser Estimate (US$20 a month after its 90 days) has Start free + Buy now like every other paid program
+  check(rows.some(([m, l]) => m === 'estimate' && l.length === 2), 'Riyeser Estimate: Start free + Buy now');
+  check(rows.length >= 6 && rows.filter(([m]) => m !== 'link-office').every(([m, l]) => l.length === 2 && l[0][0] === 'Start free for 90 days' && l[0][1] === `/link/?signup&add=${m}` && l[1][0] === 'Buy now' && l[1][1] === `/link/?signup&add=${m}&buy=1`),
     `pricing rows: Start free + Buy now on every paid program (${rows.map((r) => r[0]).join(', ')})`);
   const eds = await web.$$eval('#accounting .plan .buybtns', (x) => x.map((d) => d.dataset.buy));
   check(eds.join() === 'basic,plus', `pricing checklists: Basics and Plus cards have the buttons (${eds})`);
@@ -299,7 +299,7 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   const fromJs = (f) => { const m = fs.readFileSync(path.join(root, f), 'utf8').match(/const PRICE = (\{[^}]+\})/); return Function(`return (${m[1]})`)(); };
   const sql = fs.readFileSync(path.join(root, 'team', 'team-chat.sql'), 'utf8').match(/function public\.riyeser_price\(item text\)[\s\S]*?\$\$;/)[0];
   const fromSql = Object.fromEntries([...sql.matchAll(/when '(\w+)' then (\d+)/g)].map((x) => [x[1], Number(x[2])]));
-  const keys = ['basic', 'plus', 'payroll', 'pos', 'bookings', 'calls', 'as_built', 'users_included', 'extra_user', 'tills_included', 'extra_till', 'extra_company'];
+  const keys = ['basic', 'plus', 'payroll', 'pos', 'bookings', 'calls', 'as_built', 'estimate', 'users_included', 'extra_user', 'tills_included', 'extra_till', 'extra_company'];
   const sqlB = Object.fromEntries(['shop', 'office', 'business'].map((k) => [k, fromSql['bundle_' + k]]));
   check(site.BUNDLES.every((x) => sqlB[x.id] === x.price), `riyeser_price() has the same bundle prices as prices.mjs (${JSON.stringify(sqlB)})`);
   for (const f of ['team/team.js', 'hq/hq.js']) { const src = fs.readFileSync(path.join(root, f), 'utf8');

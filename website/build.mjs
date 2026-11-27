@@ -54,10 +54,10 @@ const ALL_PROGRAMS = [
   { id: 'bookings', name: 'Riyeser Bookings', short: 'Bookings', icon: '📅', file: 'RiyeserBookings-Setup.exe',
     one: `Book and schedule trades jobs, appointments or restaurant tables, sign jobs off on site, then invoice them in one click. Free for 90 days, no card.`,
     pitch: 'Every job and appointment, on one calendar.' },
-  // Riyeser Estimate (licence module 'estimate'): free for 90 days from first use; the price after that is still to be
-  // announced, so it has no PRICE entry and shows "Price to be announced" wherever a price would be (tba).
-  { id: 'estimate', name: 'Riyeser Estimate', short: 'Estimate', icon: '📐', file: 'RiyeserEstimate-Setup.exe', tba: true,
-    one: 'Measure jobs on a plan, a photo or the map, and turn them into quotes. Free for 90 days, price to be announced.',
+  // Riyeser Estimate (licence module 'estimate'): free for 90 days from FIRST USE (firstUse), then PRICE.estimate a
+  // month with 3 users included, like the other paid programs. It isn't part of any bundle.
+  { id: 'estimate', name: 'Riyeser Estimate', short: 'Estimate', icon: '📐', file: 'RiyeserEstimate-Setup.exe', firstUse: true,
+    one: `Measure jobs on a plan, a photo or the map, and turn them into quotes. Free for 90 days, then ${usd(PRICE.estimate)} a month.`,
     pitch: 'Measure the job, send the quote.',
     note: 'Sizes measured on satellite imagery are estimates: check them on site. The imagery can be years old and roof pitch can\'t be seen from above.' },
   { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: PAYROLL_WIN ? 'RiyeserPayroll-Setup.exe' : null,
@@ -126,7 +126,7 @@ const FREE_INFO = {
 };
 // ---------- prices next to each program (every number from prices.mjs) ----------
 // Each paid program's entry in PRICE (Riyeser Link is the 'calls' module).
-const MOD = { 'accounting-basics': 'basic', accounting: 'plus', bookings: 'bookings', link: 'calls', payroll: 'payroll', pos: 'pos', services: 'as_built' };
+const MOD = { 'accounting-basics': 'basic', accounting: 'plus', bookings: 'bookings', link: 'calls', payroll: 'payroll', pos: 'pos', services: 'as_built', estimate: 'estimate' };
 const USERS_LINE = `${PRICE.users_included} users included · +${usd(PRICE.extra_user)} a month per extra user`;
 /** What's included in each paid program's price, in plain words (all numbers from PRICE). */
 const INCL = {
@@ -663,8 +663,7 @@ const withName = (p) => prog(p.comesWith).name;
 const withHref = (p, up) => `${up}pricing.html#${p.comesWith}`;
 const withShort = (p) => `With ${withName(p)}`;
 /** A paid program's price, users included and extra-user price (all from PRICE). */
-const TBA = 'Price to be announced';
-const priceTag = (p) => (p.tba ? `<b>Free for 90 days</b> · ${TBA.toLowerCase()}` : `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(inclLine(MOD[p.id]))}`);
+const priceTag = (p) => `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(inclLine(MOD[p.id]))}`;
 /** A section heading: optional eyebrow, the title and an optional one-line summary (the same on every section). */
 const shead = (title, sub = '', eyebrow = '') => `<div class="shead">${eyebrow ? `<span class="eyebrow">${esc(eyebrow)}</span>` : ''}<h2 class="h2">${esc(title)}</h2>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</div>`;
 const firstSentence = (t) => t.split(/(?<=\.)\s+/)[0];
@@ -676,10 +675,8 @@ const heroPrice = (p, up) => { const m = MOD[p.id];
   if (p.comesWith) { const w = MOD[p.comesWith]; return `<div class="hprice with"><div class="hp-main"><b>Comes with ${esc(withName(p))}</b></div>
     <div class="hp-sub">No separate price. The Windows program is free to download, and it switches on when your business has ${esc(withName(p))} (${usd(PRICE[w])} a month, free for 90 days).</div>
     <a class="hp-plus" href="${withHref(p, up)}"><b>${esc(withName(p))}</b>: chat, calls, desk phones and this office phone system, ${usd(PRICE[w])}/month ${ARR}</a>${buyBtns(w)}</div>`; }
-  if (p.tba) return `<div class="hprice"><div class="hp-main"><b>Free</b><span>for 90 days</span></div>
-    <div class="hp-sub">From the first time you use it, no card</div><div class="hp-sub">After that: ${TBA.toLowerCase()}</div></div>`;
   if (m) return `<div class="hprice"><div class="hp-main"><b>${usd(PRICE[m])}</b><span>/month per business</span></div>
-    <div class="hp-sub">${esc(inclLine(m))}</div><div class="hp-sub">Or ${usd(PRICE[m] * 10)} a year: 2 months free</div><div class="hp-sub ok">Free for 90 days, no card</div>${buyBtns(m)}</div>`;
+    <div class="hp-sub">${esc(inclLine(m))}</div><div class="hp-sub">Or ${usd(PRICE[m] * 10)} a year: 2 months free</div><div class="hp-sub ok">${p.firstUse ? `Free for 90 days from the first time you use it, then ${usd(PRICE[m])} a month. No card` : 'Free for 90 days, no card'}</div>${buyBtns(m)}</div>`;
   const f = FREE_INFO[p.id] || {};
   return `<div class="hprice free"><div class="hp-main"><b>Free</b><span>forever</span></div>
     <div class="hp-sub">No time limit, no card, no user charges</div>${f.lim ? `<div class="hp-sub">Only limit: ${esc(f.lim)}</div>` : ''}${f.up ? `<div class="hp-sub">${esc(f.up)}</div>` : ''}</div>`; };
@@ -700,8 +697,8 @@ const RELATED = {
 };
 /** A program card: icon, name, one line, then the price and "Learn more" pinned to the bottom (every card the same height). */
 const progCard = (p, up) => `<a class="card pcard2" href="${up}programs/${p.id}.html">${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p>
-<div class="cfoot"><span class="cp">${p.comesWith ? `<b class="with">${esc(withShort(p))}</b>` : p.free ? '<b class="free">Free</b>' : p.tba ? '<b>Free for 90 days</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
-<small class="cq">${p.comesWith ? 'No separate price' : p.free ? 'No time limit, no card' : p.tba ? TBA : esc(inclOf(MOD[p.id])[0])}</small></div></a>`;
+<div class="cfoot"><span class="cp">${p.comesWith ? `<b class="with">${esc(withShort(p))}</b>` : p.free ? '<b class="free">Free</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
+<small class="cq">${p.comesWith ? 'No separate price' : p.free ? 'No time limit, no card' : esc(inclOf(MOD[p.id])[0])}</small></div></a>`;
 /** The last tile in each group, so the 3-column grid has no gaps: a quiet summary with a link to the prices. */
 const groupTile = (free, up) => free
   ? `<a class="card ptile" href="${up}pricing.html"><b>Free, for good</b><p>No time limit, no card and no user charges.</p><span class="more">See every price ${ARR}</span></a>`
@@ -761,7 +758,7 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
 <header class="nav" id="nav"><div class="c">
   <a class="logo" href="${up}index.html"><img src="${up}assets/logo-r.png" alt="">Riyeser</a>
   <nav class="links">
-    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop progs">${grouped(PROGRAMS, (l) => `${l.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up, 'mi')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}<small>${esc(p.tag || '')}</small><em class="mprice${p.free ? ' free' : p.comesWith ? ' with' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : p.tba ? '90 days free · price TBA' : esc(priceShort(MOD[p.id]))}</em></span></a>`).join('')}${l[0].free ? '' : `<p class="mnote">${esc(USERS_NOTE)}</p>`}</div>`, (t) => `<div class="mcol"><div class="mgrp">${esc(t)}</div>`)}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
+    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop progs">${grouped(PROGRAMS, (l) => `${l.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up, 'mi')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}<small>${esc(p.tag || '')}</small><em class="mprice${p.free ? ' free' : p.comesWith ? ' with' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : esc(priceShort(MOD[p.id]))}</em></span></a>`).join('')}${l[0].free ? '' : `<p class="mnote">${esc(USERS_NOTE)}</p>`}</div>`, (t) => `<div class="mcol"><div class="mgrp">${esc(t)}</div>`)}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
     <div class="dd"><a href="${indLink(INDUSTRIES[0], up)}"${active === 'industries' ? ' class="on"' : ''}>Industries ${svg(LI.down)}</a><div class="menu-pop">${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}"><span class="li">${li(i.icon, '')}</span><span>${esc(i.name)}<small>${esc(i.short)}</small></span></a>`).join('')}</div></div>
     <a href="${up}pricing.html"${active === 'pricing' ? ' class="on"' : ''}>Pricing</a>
     <div class="dd"><a href="${up}help.html"${active === 'help' ? ' class="on"' : ''}>Help ${svg(LI.down)}</a><div class="menu-pop">${guidesFor({ EMAIL, SERVICES_APP, up }).map((g) => `<a href="${up}help/${g.id}.html"><img class="appicon i-${g.app}" src="${up}assets/apps/${g.app}.png" alt="" style="width:30px;height:30px;border-radius:8px">${esc(g.name)}</a>`).join('')}<a class="all" href="${up}help.html">Help Centre ${ARR}</a></div></div>
@@ -898,7 +895,7 @@ ${demoSection(up)}
 <section class="c" style="padding-top:0;max-width:920px">
   <h2 class="h2 center">Frequently asked questions</h2>
   <div class="faq" style="margin-top:26px">
-  <details><summary>What does it cost?</summary><p>Riyeser Central, Riyeser Documents, Riyeser Invoices and PDF are free forever. Every paid program is free for 90 days with no card. After that, each one is a set price per business — not per person — with 3 users included: Accounting Basics ${usd(PRICE.basic)} a month, Accounting Plus ${usd(PRICE.plus)} (it includes Basics), Bookings ${usd(PRICE.bookings)}, Riyeser Link ${usd(PRICE.calls)} (chat, calls and office phones), Payroll ${usd(PRICE.payroll)} (unlimited employees) and POS ${usd(PRICE.pos)} (1 till, unlimited cashiers).${ASBUILT ? ` As Built, for the building industry, is ${usd(PRICE.as_built)}.` : ''} Extra users are ${usd(PRICE.extra_user)} a month each, for each program, and your accountant signs in free. Bundles save more: ${BUNDLES.map((x) => `${x.name} ${usd(x.price)}`).join(', ')}. All prices are in US dollars, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
+  <details><summary>What does it cost?</summary><p>Riyeser Central, Riyeser Documents, Riyeser Invoices and PDF are free forever. Every paid program is free for 90 days with no card. After that, each one is a set price per business — not per person — with 3 users included: Accounting Basics ${usd(PRICE.basic)} a month, Accounting Plus ${usd(PRICE.plus)} (it includes Basics), Bookings ${usd(PRICE.bookings)}, Riyeser Link ${usd(PRICE.calls)} (chat, calls and office phones), Payroll ${usd(PRICE.payroll)} (unlimited employees), POS ${usd(PRICE.pos)} (1 till, unlimited cashiers) and Riyeser Estimate ${usd(PRICE.estimate)} (free for 90 days from the first time you use it).${ASBUILT ? ` As Built, for the building industry, is ${usd(PRICE.as_built)}.` : ''} Extra users are ${usd(PRICE.extra_user)} a month each, for each program, and your accountant signs in free. Bundles save more: ${BUNDLES.map((x) => `${x.name} ${usd(x.price)}`).join(', ')}. All prices are in US dollars, and 2 months are free if you pay yearly. See <a class="more" href="${up}pricing.html">Pricing</a>.</p></details>
   <details><summary>Does it need the internet?</summary><p>No. Everything works offline.${ASBUILT ? ' As Built can optionally sync to an online account so phones, clients and staff can see your projects.' : ' Riyeser Link (chat and calls) is the one part that runs online.'}</p></details>
   <details><summary>What computer do I need?</summary><p>A PC with Windows 10 or 11.${ASBUILT ? ' As Built also works in any web browser, on phones and tablets.' : ' Riyeser Link also works in any web browser, on phones and tablets.'}</p></details>
   <details><summary>Where do I start?</summary><p>Download Riyeser Central. It's the home screen for every program and shows you what else you can add. The <a class="more" href="${up}help/start.html">Getting started guide</a> walks you through it.</p></details>
@@ -1106,7 +1103,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
     ${buyBtns(x.mods.join(','))}</div>`;
   page({
     path: 'pricing.html', title: 'Riyeser pricing — free tools, one price per program, and bundles', active: 'pricing',
-    description: `All prices in US dollars, per business per month, with 3 users included in each program. Riyeser Central, Riyeser Documents, Invoices and PDF are free forever. Accounting Basics is ${usd(P.basic)}, Accounting Plus ${usd(P.plus)}, Bookings ${usd(P.bookings)}, Riyeser Link ${usd(P.calls)}, Payroll ${usd(P.payroll)} and POS ${usd(P.pos)}. Bundles from ${usd(Math.min(...BUNDLES.map((x) => x.price)))}. Every paid program is free for 90 days, no card.`,
+    description: `All prices in US dollars, per business per month, with 3 users included in each program. Riyeser Central, Riyeser Documents, Invoices and PDF are free forever. Accounting Basics is ${usd(P.basic)}, Accounting Plus ${usd(P.plus)}, Bookings ${usd(P.bookings)}, Riyeser Link ${usd(P.calls)}, Payroll ${usd(P.payroll)}, POS ${usd(P.pos)} and Riyeser Estimate ${usd(P.estimate)}. Bundles from ${usd(Math.min(...BUNDLES.map((x) => x.price)))}. Every paid program is free for 90 days, no card.`,
     body: (up) => `
 ${bandHero({ title: 'Pricing', lead: `Start free. Pay only for the programs you use: one price per business per month, with ${P.users_included} users included in each. Take programs together in a bundle and pay less.` })}
 <section class="c" style="padding-bottom:10px">
@@ -1130,11 +1127,9 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Pay only for the programs you 
     </tbody><tbody class="gh">
       <tr class="grp"><th colspan="2">${esc(PAID_HEAD)} <span class="gnote">${esc(USERS_NOTE)}</span> <span class="swipe" aria-hidden="true">Swipe for more →</span></th></tr></tbody>
     <tbody class="gcards">
-      ${ROWS.map(([m, n, id, d]) => m === 'estimate'
-        ? `<tr id="estimate" data-row="estimate"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b>Free for 90 days</b><small>From the first time you use it. Price to be announced.</small></td></tr>`
-        : m === 'link-office'
+      ${ROWS.map(([m, n, id, d]) => m === 'link-office'
         ? `<tr id="link-office" data-row="link-office"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b class="with">With Riyeser Link</b><small>No separate price: it comes with <a href="#link">Riyeser Link</a></small></td></tr>`
-        : `<tr${m === 'calls' ? ' id="link"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b>${usd(P[m])}</b> a month<small>${inclOf(m).join('<br>')}<br>Or ${usd(P[m] * 10)} a year (2 months free)</small>${buyBtns(m, 'row')}</td></tr>`).join('')}
+        : `<tr${m === 'calls' ? ' id="link"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b>${usd(P[m])}</b> a month<small>${m === 'estimate' ? `Free for 90 days from the first time you use it, then ${usd(P[m])} a month<br>` : ''}${inclOf(m).join('<br>')}<br>Or ${usd(P[m] * 10)} a year (2 months free)</small>${buyBtns(m, 'row')}</td></tr>`).join('')}
     </tbody></table></div>
   <details class="phfold addfold" open><summary>Good to know: users, tills, your accountant, companies and paying yearly</summary>
   <div class="addon"><div class="big">➕</div><div><b>Good to know</b><ul class="gk">
@@ -1189,7 +1184,7 @@ ${ASBUILT ? `<section class="c" id="as-built" style="padding-top:0">
   <details><summary>Basics or Plus?</summary><p>Start with Accounting Basics (${usd(P.basic)} a month) if you need invoices, stock and simple money in and out. Choose Accounting Plus (${usd(P.plus)} a month) for bank reconciliation, payroll in your books, BAS, journals, jobs and budgets. Plus includes everything in Basics, so you only ever pay for one: moving up is ${usd(P.plus - P.basic)} a month more, and your books carry straight over.</p></details>
   <details><summary>Are the free programs really free?</summary><p>Yes. Riyeser Central, Riyeser Documents, Riyeser Invoices and Riyeser PDF are free forever, with no card, no time limit and no user charges. The paid programs are optional: add them only if you need them.</p></details>
   <details><summary>Is Riyeser Link free?</summary><p>Riyeser Link is now a paid program (${usd(P.calls)} a month, ${P.users_included} users included, free for 90 days). It covers everything in one: chat, calls, desk phones, Riyeser Link Office (your office phone system) and ${STORAGE_GB.link} GB of space for files shared in chat. Businesses that already used Riyeser Link get 90 free days from the change. If it isn't paid after that, your chats stay and can still be read; only sending new messages waits until Riyeser Link is added from your Riyeser home page. Nothing is deleted.</p></details>
-  <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, Bookings, Riyeser Link, Payroll and POS${ASBUILT ? ', and As Built for the building industry' : ''} — is free for 90 days. No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
+  <details><summary>How does the free trial work?</summary><p>Every paid program — Accounting Basics, Accounting Plus, Bookings, Riyeser Link, Payroll, POS and Riyeser Estimate${ASBUILT ? ', and As Built for the building industry' : ''} — is free for 90 days (Riyeser Estimate from the first time you use it). No card. The programs show how many days are left, and when the trial ends nothing is deleted: you keep every record and can still look and print; only adding new work waits for a licence.</p></details>
   <details><summary>What happens when the free part runs out?</summary><p>Nothing is deleted and nothing is charged. Everything you made stays and can still be opened, and quotes, payments and reports keep working. Only new invoices (Basics), new till sales (POS), new messages and calls (Riyeser Link) or that program's screens (the others) wait until you buy it. They unlock straight away.</p></details>
   <details><summary>How much file storage do I get in Riyeser Link?</summary><p>${STORAGE_GB.link} GB of chat files per business. Owners and admins can see how much is used in Billing &amp; Subscription. This is only space for the files people send in Link chats (photos, PDFs, documents). It is not website hosting, email hosting or cloud backup. Nothing is ever deleted for you: when you're full, new uploads wait until you make room or contact Riyeser support.</p></details>
   <details><summary>Is hosting included?</summary><p>No. Riyeser programs run on your own PCs, and your company files stay with you. The file space in Riyeser Link is only for files shared in chat. Website hosting and email hosting are not part of any plan. If Riyeser offers them later, they will be separate services with their own prices.</p></details>

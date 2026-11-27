@@ -49,7 +49,7 @@ const mask = (key) => (key ? `${String(key).slice(0, 4)}…${String(key).slice(-
 // Riyeser Central fetches it (core/online.js refreshLicence) and keeps it here under "online", next to the older
 // fields, so each Riyeser program can unlock its own paid module. It stays good for OFFLINE_GRACE_DAYS offline.
 const MODULE_NAMES = { basic: 'Accounting Basics', plus: 'Accounting Plus', bookings: 'Bookings', calls: 'Riyeser Link', payroll: 'Payroll', pos: 'POS',
-  as_built: 'As Built', estimate: 'Riyeser Estimate' };   // estimate: its trial starts on first use; no price yet   // calls: Riyeser Link (chat, calls, desk phones and Riyeser Link Office)
+  as_built: 'As Built', estimate: 'Riyeser Estimate' };   // estimate: its trial starts on first use   // calls: Riyeser Link (chat, calls, desk phones and Riyeser Link Office)
 // What each paid program costs a month, for the "trial ended" messages: from the one price list (core/prices.js,
 // the same as riyeser.com's website/prices.mjs).
 const prices = require('./prices');

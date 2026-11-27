@@ -1,5 +1,5 @@
 // Riyeser Estimate in Riyeser Central: a program it installs, updates and opens; its licence module 'estimate' is free
-// for 90 days from first use, with no price yet ("price to be announced").
+// for 90 days from first use, then US$20 a month (3 users included, like the other paid programs; not in a bundle).
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs'); const os = require('os'); const path = require('path');
@@ -22,10 +22,13 @@ test('estimate: Central updates and installs it from the release', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'src', 'renderer', 'logos', 'estimate.png')), 'its logo');
 });
 
-test('estimate: no price yet, and its plan line before and after first use', () => {
-  assert.equal(prices.PRICE.estimate, undefined);
-  assert.equal(prices.monthly('estimate'), 'price to be announced');
-  assert.match(licence.lockedText('estimate'), /Riyeser Estimate.*price to be announced/);
+test('estimate: US$20 a month after the trial, and its plan line before and after first use', () => {
+  assert.equal(prices.PRICE.estimate, 20);
+  assert.equal(prices.monthly('estimate'), 'US$20/month');
+  assert.match(licence.lockedText('estimate'), /Riyeser Estimate.*\(US\$20\/month\)/);
+  assert.ok(prices.BUNDLES.every(([, mods]) => !mods.includes('estimate')), 'not in any bundle');
+  assert.match(prices.summary(), /Riyeser Estimate US\$20/);
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', 'central-main.js'), 'utf8'), /turn them into quotes\. Free for 90 days, then \$\{prices\.usd\(prices\.PRICE\.estimate\)\} a month\./);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'est-'));
   licence.saveOnline(dir, plan(NOT_STARTED), NOW);
   let row = licence.onlinePlan(dir, NOW).rows.find((r) => r.id === 'estimate');

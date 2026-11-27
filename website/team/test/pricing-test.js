@@ -18,7 +18,7 @@ const SHOTS = process.argv[2];
 let failed = 0;
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failed++; };
 const FREE = ['central', 'documents', 'invoices', 'pdf'];
-const PAID = ['accounting-basics', 'accounting', 'bookings', 'link', 'link-office', 'payroll', 'pos'];
+const PAID = ['accounting-basics', 'accounting', 'bookings', 'estimate', 'link', 'link-office', 'payroll', 'pos'];
 const LO_FILE = 'RiyeserLinkOffice-Setup.exe';
 
 (async () => {
@@ -39,14 +39,20 @@ const LO_FILE = 'RiyeserLinkOffice-Setup.exe';
   const free = await pg.$$eval('tr[data-free]', (rs) => rs.map((r) => [r.dataset.free, r.querySelector('.freeinfo') ? r.querySelector('.freeinfo').textContent.replace(/\s+/g, ' ') : '', !!r.querySelector('.nolim')]));
   check(free.map((x) => x[0]).join() === FREE.join() && free.every(([, t, n]) => t.includes('Included free:') && n), `What's free: ${free.map((x) => x[0]).join(', ')}, all with no limits`);
   check(free.some(([id, t]) => id === 'invoices' && t.includes('Accounting Basics (US$25/month)')), 'Invoices: the upgrade note with the Basics price');
-  check(await pg.$$eval('tr[data-row]', (rs) => rs.map((r) => r.dataset.row).join()) === 'basic,plus,bookings,calls,link-office,payroll,pos', 'paid rows A to Z, Link Office after Link');
+  check(await pg.$$eval('tr[data-row]', (rs) => rs.map((r) => r.dataset.row).join()) === 'basic,plus,bookings,estimate,calls,link-office,payroll,pos', 'paid rows A to Z, Link Office after Link');
+  // Riyeser Estimate: free for 90 days from first use, then US$20 a month (3 users included); not in any bundle
+  const est = await pg.$eval('tr[data-row="estimate"] td.pr', (td) => td.textContent.replace(/\s+/g, ' '));
+  check(est.includes('US$20 a month') && est.includes('Free for 90 days from the first time you use it, then US$20 a month') && est.includes('3 users included') && est.includes('US$200 a year') && !/announced/i.test(est),
+    `Riyeser Estimate row: free for 90 days, then US$20 a month (${est.slice(0, 160)})`);
+  check(!/to be announced/i.test(body), 'no "price to be announced" left');
+  check(await pg.$$eval('#bundles .bmods', (x) => x.every((u) => !/Estimate/.test(u.textContent))), 'Riyeser Estimate is in no bundle');
   check((await pg.textContent('tr[data-row=pos]')).includes('unlimited cashiers') && (await pg.textContent('tr[data-row=payroll]')).includes('unlimited employees'), 'POS: unlimited cashiers; Payroll: unlimited employees');
   check(body.includes('Your accountant is free') && body.includes('Is it per person?'), 'the free accountant; FAQ');
   const total = () => pg.textContent('#total');
   async function set(mods, users = {}, yearly = false) {
-    for (const m of ['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos']) { if (await pg.isChecked(`[data-m=${m}]`)) await pg.uncheck(`[data-m=${m}]`); }
+    for (const m of ['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'estimate']) { if (await pg.isChecked(`[data-m=${m}]`)) await pg.uncheck(`[data-m=${m}]`); }
     for (const m of mods) await pg.check(`[data-m=${m}]`);
-    for (const m of ['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos']) { const v = typeof users === 'number' ? (m === 'pos' ? 1 : users) : users[m] || (m === 'pos' ? 1 : 3);
+    for (const m of ['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'estimate']) { const v = typeof users === 'number' ? (m === 'pos' ? 1 : users) : users[m] || (m === 'pos' ? 1 : 3);
       await pg.fill(`[data-u=${m}]`, String(v)); await pg.dispatchEvent(`[data-u=${m}]`, 'input'); }
     if (yearly !== await pg.isChecked('#yearly')) await pg.click('#yearly');
   }
@@ -62,6 +68,8 @@ const LO_FILE = 'RiyeserLinkOffice-Setup.exe';
   await set(['basic', 'pos', 'calls'], 3);
   check((await total()) === 'US$59 a month' && (await pg.$$('#per li')).length === 1 && (await pg.textContent('#per')).includes('Shop bundle') && (await pg.textContent('#bline')).includes('save US$15'), `Shop bundle: one line, US$59, saves US$15 (${await total()})`);
   await set(['plus', 'bookings', 'calls', 'payroll', 'pos'], 3); check((await total()) === 'US$99 a month', `Business bundle = US$99 (${await total()})`);
+  await set(['estimate'], { estimate: 5 }); check((await total()) === 'US$34 a month', `Riyeser Estimate, 5 users = 20 + 2 × 7 = US$34 (${await total()})`);
+  await set(['basic', 'pos', 'calls', 'estimate'], 3); check((await total()) === 'US$79 a month' && (await pg.textContent('#per')).includes('Shop bundle'), `Shop bundle + Riyeser Estimate = 59 + 20 = US$79 (${await total()})`);
   await set(['pos'], { pos: 3 }); check((await total()) === 'US$59 a month', `POS with 3 tills = 29 + 2 × 15 = US$59 (${await total()})`);
   await set(['basic', 'pos', 'payroll', 'bookings', 'calls'], 3); check((await total()) === 'US$109 a month' && (await pg.textContent('#bline')).includes('Business bundle'), `Shop + Payroll + Bookings = US$109, with the Business bundle tip (${await pg.textContent('#bline')})`);
   check((await pg.getAttribute('#calcpay', 'href')).startsWith('/link/?signup&add=basic,bookings,calls,payroll,pos'), 'Buy this plan carries the programs');

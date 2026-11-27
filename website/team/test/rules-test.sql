@@ -3656,7 +3656,7 @@ do $$ begin
   assert (select count(*) from public.api_requests) = 1, 'recent log kept';
 end $$;
 reset role;
--- ===== Riyeser Estimate (module 'estimate'): its 90-day trial starts on first use, and it has no price yet
+-- ===== Riyeser Estimate (module 'estimate'): its 90-day trial starts on first use, then US$20 a month (no bundle)
 reset role;
 do $$ declare w uuid; d uuid; s json; begin
   select workspace_id, id into w, d from public.devices order by linked_at nulls last limit 1;
@@ -3677,10 +3677,17 @@ do $$ declare w uuid; d uuid; s json; begin
   assert (public.module_state(w, 'estimate') ->> 'trial_ends')::date = current_date + 10, 'a running trial is never restarted';
   update public.company_modules set trial_ends = current_date - 1 where workspace_id = w and module = 'estimate';
   assert (public.module_state(w, 'estimate') ->> 'status') = 'ended', 'after the trial: ended (read-only on the PC)';
-  assert public.riyeser_price('estimate') = 0, 'no price yet: to be announced';
+  assert public.riyeser_price('estimate') = 20, 'Riyeser Estimate: US$20 a month';
   delete from public.company_modules where workspace_id = w and module = 'estimate';
   perform set_config('test.est_ws', w::text, false);
-  assert not ('estimate' = any (public.billing_mods(array['estimate', 'basic']))), 'not billable yet';
+  assert public.billing_mods(array['estimate', 'basic']) = array['basic', 'estimate'], 'billable, in the usual order';
+  assert public.riyeser_bill(array['estimate'], 3, 0, 'monthly', false) = 20, 'Estimate alone, 3 users: US$20';
+  assert public.riyeser_bill(array['estimate'], 5, 0, 'monthly', false) = 34, 'Estimate with 5 users: 20 + 2 x 7';
+  assert public.riyeser_bill(array['estimate'], 3, 0, 'yearly', false) = 200, 'yearly: 10 months';
+  assert public.riyeser_bill(array['estimate'], 3, 0, 'monthly', true) = 10, 'early bird: half';
+  assert public.riyeser_bill(array['basic', 'pos', 'calls', 'estimate'], 3, 0, 'monthly', false) = 79, 'Shop bundle (59) + Estimate (20)';
+  assert public.riyeser_plan(array['basic', 'pos', 'calls', 'estimate'], 3, null, 1, 0, 'monthly', false) ->> 'bundle' = 'shop', 'the bundle stays Shop';
+  assert not exists (select 1 from public.riyeser_bundles() b where 'estimate' = any (b.mods)), 'not in any bundle';
   begin insert into public.company_modules (workspace_id, module) values (w, 'nope'); raise exception 'unknown program allowed';
   exception when check_violation then null; end;
 end $$;
