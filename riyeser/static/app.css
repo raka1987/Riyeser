@@ -1,4 +1,12 @@
+/* Design tokens: one spacing scale, control heights, type sizes, radii and colours for every office screen.
+   Use these (not raw numbers) in new CSS so every screen lines up the same way. */
 :root{
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px;
+  --ctl-h:36px; --ctl-h-sm:28px; --ctl-h-lg:44px; --ctl-px:12px; --ctl-r:9px;
+  --fs-xs:11.5px; --fs-sm:12.5px; --fs-base:14px; --fs-md:15px; --fs-lg:18px; --fs-h1:26px;
+  --r-sm:6px; --r-md:10px; --pill-r:999px;
+  --cell-py:9px; --cell-px:12px; --cell-max:clamp(160px,17vw,360px);
+  --ink-2:#475467; --line-2:#cbd5e1; --surface-2:#f8fafc; --hover:#f1f5f9; --row-hover:#f5f8fd;
   --brand:#1f4e86; --brand-d:#173c69; --brand-l:#e8f0fa; --accent:#14b8a6; --accent-l:#e6f7f4;
   --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --bg:#f4f6fa; --card:#fff;
   --ok:#137a3d; --ok-bg:#e7f6ec; --err:#b42318; --err-bg:#fdecea; --warn:#b54708;
@@ -16,11 +24,11 @@ a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
 .brand:hover{text-decoration:none}
 .brand .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--brand),#0f2742);color:#fff;display:grid;place-items:center;font-weight:800;position:relative}
 .brand .logo::after{content:"";position:absolute;right:6px;bottom:6px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
-.brand small{display:block;font-weight:500;font-size:11.5px;color:var(--muted)}
+.brand small{display:flex;flex-wrap:wrap;align-items:center;gap:2px 6px;font-weight:500;font-size:11.5px;color:var(--muted)}
 /* Accounting Basics (free edition): its own green badge so Basic and Enterprise are easy to tell apart */
 .brand.basic .logo{background:linear-gradient(135deg,#16a34a,#065f46)}
 .brand.basic .logo::after{background:#facc15}
-.brand .ed-pill{display:inline-block;padding:0 6px;margin-right:4px;border-radius:999px;background:var(--ok-bg);color:var(--ok);font-weight:700;font-size:10.5px;line-height:16px}
+.brand .ed-pill{display:inline-block;padding:0 6px;margin-right:4px;border-radius:999px;background:var(--ok-bg);color:var(--ok);font-weight:700;font-size:10.5px;line-height:16px;white-space:nowrap}
 .side .home,.nav-sec>summary{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;color:var(--side-ink);font-weight:600;font-size:14px;cursor:pointer;list-style:none;user-select:none}
 .nav-sec>summary::-webkit-details-marker{display:none}
 .nav-sec>summary::after{content:"";margin-left:auto;width:7px;height:7px;border-right:1.8px solid #94a3b8;border-bottom:1.8px solid #94a3b8;transform:rotate(-45deg);transition:transform .15s}
@@ -48,34 +56,64 @@ a{color:var(--brand);text-decoration:none} a:hover{text-decoration:underline}
 .av{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--accent-l);color:#0e7c70;font-weight:700}
 .menu-btn{display:none;border:1px solid var(--line);background:#fff;border-radius:10px;padding:6px 10px;font-size:17px;cursor:pointer}
 .scrim{display:none}
-.content{padding:26px 32px 64px;max-width:1440px}
-h1{font-size:26px;letter-spacing:-.4px;margin:0 0 4px} h2{font-size:16px;margin:24px 0 10px} h3{font-size:14px;margin:0 0 8px}
-.sub{color:var(--muted);margin:0 0 18px}
-.head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px}
-.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px;margin-bottom:18px;box-shadow:var(--shadow)}
-.grid{display:grid;gap:16px}
+.content{padding:var(--sp-6) var(--sp-8) 64px;max-width:1440px;min-width:0}
+h1{font-size:var(--fs-h1);line-height:1.25;letter-spacing:-.4px;margin:0 0 var(--sp-1)} h2{font-size:16px;margin:var(--sp-6) 0 10px} h3{font-size:var(--fs-base);margin:0 0 var(--sp-2)}
+.sub{color:var(--muted);margin:0 0 var(--sp-5);max-width:80ch}
+/* page header: title and description on the left, the page's buttons on the right (they wrap under on narrow screens) */
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-3) var(--sp-4);flex-wrap:wrap;margin-bottom:var(--sp-5)}
+.head>div:first-child{min-width:min(100%,280px);flex:1 1 0}
+.head .sub{margin-bottom:0}
+.head>.actions{flex:0 1 auto;justify-content:flex-end;padding-top:2px}
+.actions{display:flex;gap:var(--sp-2);flex-wrap:wrap;align-items:center}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:var(--sp-5);margin-bottom:var(--sp-4);box-shadow:var(--shadow);min-width:0}
+.grid{display:grid;gap:var(--sp-4);margin-bottom:var(--sp-4)}.grid>.card{margin-bottom:0}
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
 .kpi .lbl{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
 .kpi .val{font-size:26px;font-weight:700;letter-spacing:-.4px;margin-top:4px;font-variant-numeric:tabular-nums}
 .kpi .note{color:var(--muted);font-size:12px}
-.btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:#fff;color:var(--ink);padding:8px 15px;border-radius:10px;font:inherit;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--ctl-h);border:1px solid var(--line-2);background:#fff;color:var(--ink);padding:6px 14px;border-radius:var(--ctl-r);font:inherit;font-weight:600;line-height:20px;cursor:pointer;white-space:nowrap;vertical-align:middle;text-decoration:none}
+.btn:focus-visible{outline:3px solid #c7dbf3;outline-offset:1px}
 .btn:hover{background:#f2f4f7;text-decoration:none}
 .btn.pri{background:var(--brand);border-color:var(--brand);color:#fff}.btn.pri:hover{background:var(--brand-d)}
-.btn.danger{color:var(--err);border-color:#f3c3bd}.btn.sm{padding:3px 9px;font-size:12.5px}
+.btn.danger{color:var(--err);border-color:#f3c3bd}
+.btn.sm{min-height:var(--ctl-h-sm);padding:3px 10px;font-size:var(--fs-sm);line-height:18px;border-radius:7px}
 table{width:100%;border-collapse:collapse;background:#fff}
-th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
-th{font-size:11.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700;background:#f8fafc}
-td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-tr.click:hover td{background:#f5f8fd;cursor:pointer}
-.tbl{border:1px solid var(--line);border-radius:var(--radius);overflow:auto;background:#fff;box-shadow:var(--shadow)}
+th,td{padding:var(--cell-py) var(--cell-px);border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:var(--fs-xs);line-height:18px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700;background:var(--surface-2);white-space:nowrap}
+td.n,th.n,td.r,th.r{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.click:hover td{background:var(--row-hover);cursor:pointer}
+/* Table boxes: rows stay on one line (long text ends in "…", the whole text is in its tooltip), the header stays put,
+   and a wide table scrolls sideways inside its box with a thin scroll bar, never the page. Add class "wrap" to a cell
+   or table that should wrap its text. */
+.tbl{border:1px solid var(--line);border-radius:var(--radius);overflow:auto;background:#fff;box-shadow:var(--shadow);max-width:100%;
+  scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent;overscroll-behavior-x:contain}
+.tbl::-webkit-scrollbar{width:8px;height:8px}.tbl::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:8px}.tbl::-webkit-scrollbar-track{background:transparent}
 .tbl table{border:0}
+.tbl tr:last-child>td{border-bottom:0}
+.tbl th{position:sticky;top:0;z-index:2}
+.tbl td{white-space:nowrap}
+.tbl td{overflow:hidden;text-overflow:ellipsis}
+.tbl td:has(input,select,textarea,button,details,form,.btn,.badge,.pill,.bk-st,.st){overflow:visible}
+/* app.js adds "fit" when a table is wider than its box: then long text columns are capped and end in "…" */
+.tbl.fit td:not(:has(input,select,textarea,button,details,form,.btn,.badge,.pill,.bk-st,.st)){max-width:var(--cell-max)}
+.tbl td:has(input,select,textarea) :is(small,.small,.hint,.why){display:block;white-space:normal;min-width:160px}
+td label,td .check{margin-bottom:0}
+.tbl td>div,.tbl td>small,.tbl td>.muted{overflow:hidden;text-overflow:ellipsis}
+.tbl td[colspan],.tbl .wrap,.tbl.wrap td,.tbl td.wrap{white-space:normal;max-width:none}
+/* an empty cell in a list row shows a quiet dash (not read aloud), so a blank isn't mistaken for a missing column */
+.tbl table:not(.lines) tr:not(.grand):not(.total):not(.tot):not(.header)>td:empty::before{content:"—";content:"—"/"";color:#b6c0cc}
+.tbl td .btn,.tbl td button.btn{min-height:var(--ctl-h-sm);padding:3px 10px;font-size:var(--fs-sm);line-height:18px;border-radius:7px}
+.tbl td form:not([class]){display:inline}
+.tbl td>:is(.btn,form)+:is(.btn,form){margin-left:var(--sp-1)}
+.tbl td input:not([type=checkbox]):not([type=radio]),.tbl td select{min-height:32px;padding-top:4px;padding-bottom:4px}
+.tbl td select{width:auto;max-width:none}
+.tbl td input:not([type=checkbox]):not([type=radio]):not([type=color]):not([type=hidden]){min-width:88px}
 tr.header td{font-weight:700;background:#f7f9fa}
 tr.total td{font-weight:600;border-top:1px solid #c9d0d8}
 tr.grand td{font-weight:700;background:var(--brand-l);border-top:2px solid var(--brand)}
 td.i1{padding-left:28px}
 tfoot td{font-weight:700}
-.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11.5px;font-weight:600;background:#eef1f4;color:#475467}
+.badge{display:inline-block;padding:2px 9px;border-radius:var(--pill-r);font-size:var(--fs-xs);line-height:18px;font-weight:600;background:#eef1f4;color:#475467;white-space:nowrap;vertical-align:middle}
 .badge.open{background:#fff4e5;color:var(--warn)}.badge.paid{background:var(--ok-bg);color:var(--ok)}
 .badge.void{background:var(--err-bg);color:var(--err)}.badge.quote,.badge.order{background:#eaf0ff;color:#3346b3}
 .badge.over{background:var(--err-bg);color:var(--err)}
@@ -84,21 +122,40 @@ tfoot td{font-weight:700}
 .flash.error{background:var(--err-bg);color:var(--err);border-color:#f3c3bd}
 .flash.warn{background:#fff4e5;color:var(--warn);border-color:#f8d9a8}
 form.inline{display:inline}
-label{display:block;font-size:12.5px;color:#475467;font-weight:500;margin-bottom:4px}
-input,select,textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;background:#fff;color:var(--ink)}
+label{display:block;font-size:var(--fs-sm);color:var(--ink-2);font-weight:500;margin-bottom:var(--sp-1)}
+input,select,textarea{width:100%;min-height:var(--ctl-h);padding:6px 10px;border:1px solid var(--line-2);border-radius:var(--ctl-r);font:inherit;line-height:22px;background:#fff;color:var(--ink);max-width:100%}
+select{padding-right:6px;text-overflow:ellipsis}
+textarea{padding:8px 10px;line-height:1.5}
+input[type=checkbox],input[type=radio]{min-height:0}
+input[type=file]{min-height:0;padding:6px}
+input[type=color]{padding:2px}
 input:focus,select:focus,textarea:focus{outline:3px solid #c7dbf3;border-color:var(--brand)}
 input[type=checkbox]{width:auto}
 .check{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink)}
-.fields{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.fields{display:grid;gap:var(--sp-4);grid-template-columns:repeat(auto-fill,minmax(min(100%,260px),1fr))}
 .fields .wide{grid-column:1/-1}
-.lines td{padding:4px}.lines input,.lines select{padding:5px 7px}
+.fields .w2{grid-column:span 2}@media (max-width:620px){.fields .w2{grid-column:auto}}
+/* side-by-side fields line up on three shared rows (label · box · help text), so a label that wraps onto two lines
+   or a hint under one box never pushes a box out of line with its neighbours */
+.fields{row-gap:0;margin-bottom:calc(-1 * var(--sp-4))}
+.fields>*{grid-row:span 3;margin-bottom:var(--sp-4);min-width:0}
+.fields>div:not([hidden]):not(:has(>:nth-child(4))){display:grid;grid-template-rows:subgrid;align-content:start}
+.fields>div:not(:has(>:nth-child(4)))>label:first-child{align-self:end}
+.fields>div>.check:only-child{grid-row:2;align-self:center}
+.fields>.check{align-self:end;min-height:var(--ctl-h)}
+.fields>:is(.btn,button){justify-self:start;align-self:end}
+.fields>div>:is(.btn,button){justify-self:start}
+.lines td{padding:4px}.lines input,.lines select{min-height:32px;padding:4px 7px;font-size:13.5px}.lines select{min-width:68px;padding:4px 2px 4px 6px}
 .lines td.n{padding-right:10px}
-@media (max-width:900px){.tabs{flex-wrap:wrap}table.lines{display:block;overflow-x:auto}}  /* phones: no sideways page scroll */
+/* line editors (invoice, bill, journal, money in/out lines): on a small screen the lines keep usable widths and
+   scroll sideways inside their card, never the page */
+@media (max-width:900px){.tabs{flex-wrap:wrap}table.lines{min-width:940px}:has(>table.lines){overflow-x:auto;scrollbar-width:thin}}
 .totals{margin-left:auto;width:320px}.totals td{border:0;padding:4px 10px}.totals tr:last-child td{font-size:16px;font-weight:700;border-top:2px solid var(--ink)}
-.filters{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px}
+.filters{display:flex;gap:var(--sp-3);align-items:flex-end;flex-wrap:wrap;margin-bottom:var(--sp-4)}
 .filters>div{min-width:150px}
-.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px}
-.tabs a{padding:8px 14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px}
+.filters>div>select{width:auto;min-width:150px;max-width:100%}
+.tabs{display:flex;gap:var(--sp-1);border-bottom:1px solid var(--line);margin-bottom:var(--sp-4);overflow-x:auto;scrollbar-width:none}
+.tabs a{padding:8px 14px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
 .tabs a.on{color:var(--brand);border-color:var(--brand);font-weight:600}
 .muted{color:var(--muted)}.right{text-align:right}.neg{color:var(--err)}
 .bars{display:flex;align-items:flex-end;gap:18px;height:160px;padding-top:10px}
@@ -110,7 +167,7 @@ input[type=checkbox]{width:auto}
 .login{max-width:400px;margin:10vh auto;background:#fff;border:1px solid var(--line);border-radius:18px;padding:34px;box-shadow:0 20px 50px rgba(15,23,42,.10)}
 .cat{columns:3 260px;gap:18px}.cat .card{break-inside:avoid}
 .cat a{display:block;padding:4px 0}
-@media (max-width:900px){.side{position:fixed;left:0;top:0;z-index:40;transform:translateX(-100%);transition:transform .2s;box-shadow:0 0 40px rgba(15,23,42,.2)}body.side-open .side{transform:none}body.side-open .scrim{display:block;position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:35}.menu-btn{display:block}.tsearch{display:none}.top{padding:10px 14px}.g3,.g4,.g2{grid-template-columns:1fr}.content{padding:16px}}
+@media (max-width:900px){.side{position:fixed;left:0;top:0;z-index:40;transform:translateX(-100%);transition:transform .2s,visibility .2s;visibility:hidden}body.side-open .side{transform:none;visibility:visible;box-shadow:0 0 40px rgba(15,23,42,.2)}body.side-open .scrim{display:block;position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:35}.menu-btn{display:block}.tsearch{display:none}.top{padding:10px 14px}.g3,.g4,.g2{grid-template-columns:1fr}.content{padding:16px}}
 @media print{
   .side,.top,.scrim,.noprint,.actions,.filters{display:none!important}
   body{background:#fff}.content{padding:0}.card,.tbl{border:0}
@@ -129,7 +186,8 @@ input[type=checkbox]{width:auto}
 .perm-key{display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;font-size:13px}.perm-key i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
 .lv0{background:#cbd5e1}.lv1{background:#93c5fd}.lv2{background:#14b8a6}.lv3{background:var(--brand)}
 .user-head{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}.user-head>div:nth-child(2){min-width:140px}
-.user-fields{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:12px;flex:1;min-width:300px}
+.user-fields{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr)) auto;gap:12px;flex:1;min-width:300px;align-items:end}
+.user-fields>.check{margin:0!important;min-height:var(--ctl-h)}
 .perm-wrap{margin-top:16px}.presets{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px}
 .perm-grid{border:1px solid var(--line);border-radius:12px;overflow:hidden}.perm-grid th.c,.perm-grid td.c{text-align:center;width:110px}
 .perm-grid input[type=radio]{width:18px;height:18px;accent-color:var(--brand);cursor:pointer}.small{font-size:12px}
@@ -183,7 +241,7 @@ body.ed-book .brand .logo::after { background: #facc15; right: 3px; bottom: 8px;
 .bk-tabs{display:inline-flex;border:1px solid var(--line,#e2e8f0);border-radius:10px;overflow:hidden;margin-right:6px}
 .bk-tabs a{padding:7px 14px;font-weight:600;font-size:14px;color:inherit;text-decoration:none}.bk-tabs a.on{background:var(--brand-l,#e0ecff);color:var(--brand-d,#1e3a8a)}
 .bk-date{display:inline-block}.bk-date input{padding:6px 8px}
-.pill{display:inline-block;font-size:13px;padding:3px 10px;border-radius:999px;background:var(--brand-l,#e0ecff);color:var(--brand-d,#1e3a8a);vertical-align:middle}
+.pill{display:inline-block;font-size:13px;padding:3px 10px;border-radius:999px;white-space:nowrap;background:var(--brand-l,#e0ecff);color:var(--brand-d,#1e3a8a);vertical-align:middle}
 .bk-day{--slot:26px;display:grid;grid-template-columns:58px repeat(var(--cols),minmax(150px,1fr));border:1px solid var(--line,#e2e8f0);border-radius:12px;overflow:auto;background:#fff;max-height:calc(100vh - 210px)}
 .bk-ch{position:sticky;top:0;z-index:3;height:42px;display:flex;align-items:center;gap:8px;padding:0 10px;font-weight:700;background:#f8fafc;border-bottom:1px solid var(--line,#e2e8f0);white-space:nowrap;overflow:hidden}
 .bk-ch i{width:10px;height:10px;border-radius:50%;flex:none}.bk-ch small{font-weight:500;color:#64748b}
@@ -194,7 +252,7 @@ a.bk-slot:hover{background:var(--brand-l,#eef4ff)}
 .bk-b{position:absolute;left:4px;right:4px;z-index:2;border-radius:8px;padding:4px 8px;background:color-mix(in srgb,var(--c) 14%,#fff);border-left:4px solid var(--c);color:#0f172a;text-decoration:none;overflow:hidden;font-size:12.5px;line-height:1.3;box-shadow:0 1px 3px rgba(15,23,42,.12)}
 .bk-b b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bk-b span{display:block;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bk-b em{font-style:normal;font-size:11px;font-weight:700;color:#334155}
 .bk-b.st-done{opacity:.75}.bk-b.st-cancelled,.bk-b.st-no_show{opacity:.45;text-decoration:line-through}
-.bk-st{display:inline-block;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;background:#eef2f7;color:#334155}
+.bk-st{display:inline-block;font-size:12px;line-height:18px;font-weight:700;padding:2px 9px;border-radius:999px;white-space:nowrap;background:#eef2f7;color:#334155}
 .bk-st.st-confirmed{background:#dbeafe;color:#1e40af}.bk-st.st-started{background:#fef3c7;color:#92400e}.bk-st.st-done{background:#dcfce7;color:#166534}.bk-st.st-cancelled,.bk-st.st-no_show{background:#fee2e2;color:#991b1b}
 .bk-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
 .bk-wd{padding:10px;min-height:160px}.bk-wd.today{outline:2px solid var(--brand,#2563eb)}
@@ -216,7 +274,7 @@ a.bk-slot:hover{background:var(--brand-l,#eef4ff)}
 .bk-mode.on{border-color:var(--line,#e2e8f0);background:none}
 .bk-col-in{width:46px;height:34px;padding:2px;border:1px solid var(--line,#e2e8f0);border-radius:8px;background:#fff;cursor:pointer}
 .bk-col-in::-webkit-color-swatch-wrapper{padding:2px}.bk-col-in::-webkit-color-swatch{border:0;border-radius:5px}
-.bk-num{width:100px}.btn.sm{padding:5px 10px;font-size:13px}.bk-del{color:#b91c1c}
+.bk-num{width:100px}.bk-del{color:#b91c1c}
 /* Blank or demo, start again, archived copies */
 .picks{display:grid;gap:10px;margin-top:6px}.picks.two{grid-template-columns:repeat(2,minmax(0,1fr))}
 .pick{display:block;border:2px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;background:#fff}
@@ -229,3 +287,9 @@ a.bk-slot:hover{background:var(--brand-l,#eef4ff)}
 @media (max-width:900px){.picks.two{grid-template-columns:1fr}}
 /* Riyeser Payroll 2.3.1: rostered vs paid hours on imported pay runs */
 .hrs-over{color:var(--warn)}.hrs-under{color:var(--text,inherit)}.hrs-row td{background:#fbfbfa;padding-top:4px}.hrs-row summary{cursor:pointer;font-size:13px}.hrs-tbl{margin:8px 0 4px;box-shadow:none}.hrs-tbl table{min-width:0}
+/* Bookings > Jobs: the groups' tables share one set of column widths, so the columns line up down the page */
+.bk-q .tbl table{table-layout:fixed;min-width:860px}
+.bk-q .tbl tr>:nth-child(1){width:78px}.bk-q .tbl tr>:nth-child(2){width:21%}.bk-q .tbl tr>:nth-child(3){width:10%}
+.bk-q .tbl tr>:nth-child(5){width:136px}.bk-q .tbl tr>:nth-child(6){width:68px}.bk-q .tbl tr>:nth-child(7){width:128px}.bk-q .tbl tr>:nth-child(8){width:90px}
+.bk-q .tbl td{max-width:none}.bk-q .tbl td[colspan]{width:auto}
+.bk-q h3 small{font-weight:600;font-size:12px;background:var(--brand-l);color:var(--brand);border-radius:99px;padding:1px 8px}

@@ -18,4 +18,16 @@
       f.submit();
     });
   });
+  // When the bar needs two rows, search and the count share the first row (instead of the count sitting alone on
+  // a row of its own) and the drop-downs and Apply make the second.
+  function lay() {
+    document.querySelectorAll("form.lbar").forEach(function (f) {
+      f.classList.remove("two");
+      var end = f.querySelector(".lend"), q = f.querySelector(".lf-q");
+      if (!end || !q || !end.offsetParent) return;
+      if (end.getBoundingClientRect().bottom > q.getBoundingClientRect().bottom + 4) f.classList.add("two");   // on a row below search
+    });
+  }
+  lay();
+  var t; window.addEventListener("resize", function () { clearTimeout(t); t = setTimeout(lay, 100); });
 })();

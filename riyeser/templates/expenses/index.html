@@ -6,8 +6,10 @@
 <div class="actions">{% if can('expenses', 2) %}<a class="btn pri" href="{{ url_for('expenses.new') }}">+ New expense claim</a>{% endif %}</div></div>
 
 <div class="xc-tabs" role="tablist">{% for k, label in statuses + [('all', 'All')] %}<a class="{{ 'on' if show == k }}" href="{{ url_for('expenses.index', show=k, who=who or None) }}">{{ label }}<span class="n">{{ counts.get(k, 0) }}</span></a>{% endfor %}</div>
-{% if manager and people|length > 1 %}<form class="filters" method="get"><input type="hidden" name="show" value="{{ show }}"><div><label for="who">Whose claims</label><select id="who" name="who" onchange="this.form.submit()"><option value="">Everyone</option>{% for p in people %}<option {{ 'selected' if p == who }}>{{ p }}</option>{% endfor %}</select></div></form>{% endif %}
-{% if counts.get(show, 0) %}{{ ls.bar(lst, sort_select='phone') }}{% endif %}
+{% set pick_who = manager and people|length > 1 %}
+{% macro who_select(auto) %}<div class="lf"><label for="who">Whose claims</label><select id="who" name="who" {{ 'data-auto' if auto else 'onchange=this.form.submit()' }}><option value="">Everyone</option>{% for p in people %}<option {{ 'selected' if p == who }}>{{ p }}</option>{% endfor %}</select></div>{% endmacro %}
+{% if counts.get(show, 0) %}{% if pick_who %}{% call ls.bar(lst, sort_select='phone', skip=('who',)) %}{{ who_select(True) }}{% endcall %}{% else %}{{ ls.bar(lst, sort_select='phone') }}{% endif %}
+{% elif pick_who %}<form class="lbar" method="get"><input type="hidden" name="show" value="{{ show }}">{{ who_select(False) }}</form>{% endif %}
 
 {% macro st(x) %}<span class="badge {{ x.status }}">{{ dict(statuses)[x.status] }}</span>{% endmacro %}
 {% if rows %}

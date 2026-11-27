@@ -3,7 +3,10 @@
 .td-kpis{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:16px}
 .td-kpis .card{margin:0;padding:16px 18px}.td-kpis a.card{display:block;color:inherit}.td-kpis a.card:hover{text-decoration:none;border-color:var(--brand)}
 .td-kpis .val{font-size:24px}.td-kpis .note b{color:var(--err)}
-.td-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start}
+.td-grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:stretch}
+/* long lists scroll inside their card (about five rows show), so the cards in a row stay a similar height */
+.td-card>.td-list{max-height:300px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#cbd5e1 transparent;margin-right:-6px;padding-right:6px}
+@media (max-width:700px){.td-card>.td-list{max-height:none}}
 .td-grid>.card{margin:0;padding:16px 18px;min-width:0}
 .td-card h3{display:flex;align-items:baseline;gap:8px;font-size:15px;margin-bottom:10px}.td-card h3 a{margin-left:auto;font-size:12.5px;font-weight:600;white-space:nowrap}
 .td-card h3 .cnt{font-size:12px;font-weight:700;background:var(--brand-l);color:var(--brand);border-radius:99px;padding:1px 8px}
@@ -36,7 +39,7 @@
 .tl-filter a.on{background:var(--brand-l);border-color:var(--brand);color:var(--brand)}.tl-filter a:hover{text-decoration:none}
 .fu{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fff4e5;border:1px solid #f8d9a8;border-radius:10px;padding:8px 10px;margin-top:6px;font-size:13px}
 .fu.done{background:#f1f5f9;border-color:var(--line);color:var(--muted)}.fu form{margin:0 0 0 auto}
-.stack>*+*{margin-top:12px}
+.stack{display:grid;gap:var(--sp-4,16px);align-content:start;min-width:0}.stack>.card{margin:0}
 /* expense claims */
 .xc-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
 .xc-tabs a{padding:6px 13px;border:1px solid var(--line);border-radius:99px;font-weight:600;color:var(--muted);background:#fff}

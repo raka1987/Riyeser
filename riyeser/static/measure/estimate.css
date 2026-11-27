@@ -16,7 +16,8 @@ body.ed-est .brand .logo::after { background: #facc15; right: 3px; bottom: 8px; 
 .est-head{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px}
 .est-head h1{font-size:22px}
 .est-foot{display:flex;gap:10px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-top:18px}
-.btn.big{padding:12px 20px;font-size:15.5px;border-radius:12px}
+.btn.big{min-height:var(--ctl-h-lg,44px);padding:10px 20px;font-size:15.5px;border-radius:12px}
+.est-foot .btn,.est-head .actions .btn{min-height:var(--ctl-h-lg,44px)}
 .big-input input,.big-input select,input.big,select.big{font-size:18px;padding:12px 14px;border-radius:12px;min-height:50px}
 .choice-cards{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
 .choice{display:flex;flex-direction:column;gap:6px;text-align:left;background:#fff;border:2px solid var(--line);border-radius:16px;padding:20px;cursor:pointer;font:inherit;color:var(--ink);min-height:150px}

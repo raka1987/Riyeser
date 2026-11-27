@@ -1,30 +1,54 @@
 /* List screens: sortable headers, the filter bar and the pager (templates/_list.html). Works in both the
-   office look (app.css) and the till look (pos/_pos.html), so it only uses colours both define. */
-.lbar{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-end;margin:0 0 14px}
-.lbar .lf{display:flex;flex-direction:column;min-width:0;flex:0 1 150px}
-.lbar .lf-q{flex:1 1 200px;max-width:300px}
-.lbar .lf-d{flex:0 1 150px}
-.lbar .lf[hidden]{display:none}
+   office look (app.css) and the till look (pos/_pos.html), so it only uses tokens both define (with fallbacks):
+   --ctl-h is 36px in the office and bigger on the till, so the bar stays touch-friendly there.
+   The bar is one tidy wrapping row: search (grows) · the list's drop-downs (as wide as their text) · Sort · Apply,
+   then Clear filters and the count at the end. */
+.lbar{--lh:var(--ctl-h,36px);display:flex;flex-wrap:wrap;gap:var(--sp-3,12px);align-items:flex-end;margin:0 0 var(--sp-4,16px)}
+.lbar .lf{display:flex;flex-direction:column;min-width:0;flex:0 0 auto}
+.lbar .lf-q{flex:1 1 240px;max-width:440px}
+.lbar .lf-d{flex:0 0 160px}
+.lbar .lf[hidden],.lbar .lf-sort[hidden]{display:none}
+.lbar label{display:block;font-size:var(--fs-sm,12.5px);line-height:18px;color:#475467;font-weight:500;margin:0 0 4px;white-space:nowrap}
+.lbar input,.lbar select{width:100%;min-width:0;height:var(--lh);min-height:var(--lh);padding:0 10px;border:1px solid var(--line-2,#cbd5e1);border-radius:var(--ctl-r,9px);font:inherit;line-height:normal;background:#fff;color:inherit}
+/* a drop-down is as wide as its longest choice (never cut off), within reason */
+.lbar select{width:auto;min-width:120px;max-width:300px;padding-right:6px}
+.lbar .lf-sort{display:flex;gap:var(--sp-2,8px);align-items:flex-end;flex:0 0 auto}
 .lbar .lf-phone{display:none}
-.lbar label{display:block;font-size:12.5px;color:#475467;font-weight:500;margin:0 0 4px}
-.lbar input,.lbar select{width:100%;min-width:0;padding:8px 10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;background:#fff;color:inherit}
-.lbar .lf-go{flex:0 0 auto;flex-direction:row;gap:8px;align-items:center}
-.lbar .lcount{margin-left:auto;align-self:center;color:var(--muted);font-size:13px;white-space:nowrap;padding-bottom:2px}
+.lbar .lf-go,.lbar .lend{display:flex;flex-direction:row;gap:var(--sp-2,8px);align-items:center;flex:0 0 auto;min-height:var(--lh)}
+.lbar .btn{min-height:var(--lh)}
+.lbar .lend{margin-left:auto}
+.lbar .lcount{color:var(--muted);font-size:13px;white-space:nowrap}
 .lbar .lcount b{color:var(--ink)}
 th.sortable{padding:0}
-th.sortable a{display:flex;align-items:center;gap:4px;padding:8px 10px;color:inherit;text-decoration:none;white-space:nowrap}
+th.sortable a{display:flex;align-items:center;gap:4px;padding:var(--cell-py,9px) var(--cell-px,12px);color:inherit;text-decoration:none;white-space:nowrap}
 th.sortable.n a,th.sortable.r a{justify-content:flex-end}
 th.sortable a:hover{color:var(--ink);text-decoration:none;background:rgba(15,23,42,.04)}
 th.sortable a:focus-visible{outline:2px solid #1f4e86;outline-offset:-2px}
 th.sortable.sorted{color:var(--ink)}
 .sort-ar{font-size:10px;opacity:.45}th.sorted .sort-ar{opacity:1;color:#1f4e86}
-.lpager{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:flex-end;margin:10px 0 0;font-size:13px}
-@media (max-width:700px){
-  .lbar{gap:8px}
-  .lbar .lf,.lbar .lf-d{flex:1 1 calc(50% - 8px)}
-  .lbar .lf-q{flex:1 1 100%;max-width:none}
-  .lbar .lf-go{flex:1 1 auto}
-  .lbar .lcount{margin-left:0}
-  .lbar .lf-phone{display:flex}
+/* a register under the bar: its own scroll box, so the column headers and the first column stay in view */
+.lbar~.tbl{max-height:max(420px,calc(100vh - 150px))}
+.lbar~.tbl tr>:first-child{position:sticky;left:0;z-index:1;background:var(--card,#fff)}
+.lbar~.tbl tr>th:first-child{z-index:3;background:var(--surface-2,#f8fafc)}
+.lbar~.tbl tr.click:hover>td:first-child{background:var(--row-hover,#f5f8fd)}
+.lbar~.tbl tr.grand>td:first-child{background:var(--brand-l,#e8f0fa)}
+.lbar~.tbl tr.total>td:first-child,.lbar~.tbl tr.header>td:first-child{background:inherit}
+.lpager{display:flex;flex-wrap:wrap;gap:var(--sp-2,8px) var(--sp-3,12px);align-items:center;justify-content:flex-end;margin:var(--sp-3,12px) 0 0;font-size:13px}
+@media (min-width:701px){
+  .lbar.two .lf-q{order:-3;flex:1 1 320px;max-width:none}
+  .lbar.two .lend{order:-2}
+  .lbar.two::before{content:"";order:-1;flex:0 0 100%;height:0;margin-bottom:calc(-1 * var(--sp-3,12px))}
 }
-@media print{.lbar,.lpager{display:none!important}.sort-ar{display:none}}
+@media (max-width:700px){
+  .lbar{gap:var(--sp-2,8px)}
+  .lbar .lf,.lbar .lf-d{flex:1 1 calc(50% - 8px)}
+  .lbar select{width:100%;max-width:none}
+  .lbar .lf-q{flex:1 1 100%;max-width:none}
+  .lbar .lf-sort{flex:1 1 100%}.lbar .lf-sort .lf{flex:1 1 auto}
+  .lbar .lf-go{flex:0 0 auto}
+  .lbar .lend{flex:1 1 auto;justify-content:space-between;margin-left:0}
+  .lbar .lf-phone{display:flex}
+  .lbar~.tbl{max-height:none}
+  .lbar~.tbl tr>:first-child{position:static}
+}
+@media print{.lbar,.lpager{display:none!important}.sort-ar{display:none}.lbar~.tbl{max-height:none;overflow:visible}}

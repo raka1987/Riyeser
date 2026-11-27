@@ -125,3 +125,26 @@
     }
   });
 })();
+
+// Table boxes keep each row on one line: when a cell's text is cut short with "…", its tooltip shows all of it.
+(function () {
+  function fit() {   // cap long text columns only when the table doesn't fit its box
+    document.querySelectorAll(".tbl").forEach(function (box) {
+      box.classList.remove("fit");
+      if (box.scrollWidth > box.clientWidth + 1) box.classList.add("fit");
+    });
+  }
+  function titles() {
+    document.querySelectorAll(".tbl td, .td-list .main b, .td-list .main span").forEach(function (el) {
+      if (el.dataset.autoTitle === undefined && el.hasAttribute("title")) return;   // the page's own tooltip
+      var cut = el.scrollWidth > el.clientWidth + 1;
+      if (!cut) el.querySelectorAll(":scope > div, :scope > small").forEach(function (c) { if (c.scrollWidth > c.clientWidth + 1) cut = true; });
+      if (cut) { el.title = el.innerText.replace(/\s+/g, " ").trim(); el.dataset.autoTitle = ""; }
+      else if (el.dataset.autoTitle !== undefined) { el.removeAttribute("title"); delete el.dataset.autoTitle; }
+    });
+  }
+  var t;
+  fit();
+  window.addEventListener("load", function () { fit(); titles(); });
+  window.addEventListener("resize", function () { clearTimeout(t); t = setTimeout(function () { fit(); titles(); }, 150); });
+})();

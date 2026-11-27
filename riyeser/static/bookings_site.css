@@ -50,7 +50,9 @@
 .site-card .site-time{font-size:22px;font-weight:800;color:var(--brand)}
 .site-card.st-done{opacity:.8}
 .site-tags{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px}
-.site-filter .site-row{margin:0}.site-filter input[type=date]{width:auto}
+.site-filter .site-row{margin:0;flex-wrap:nowrap;align-items:center}.site-filter input[type=date]{width:auto;flex:1 1 170px;min-width:0}
+.site-filter .site-row>.btn{min-width:44px;min-height:44px}.site-filter input,.site-filter select{min-height:44px}
+@media (max-width:700px){.site-filter>div{flex:1 1 100%}.site-filter select{width:100%}}
 .site-setup textarea{min-height:70px}
 @media (max-width:600px){.site-part,.site-unlock{grid-template-columns:1fr}.site-big{font-size:18px}.site input,.site select,.site textarea{font-size:16px}
  .site .head .actions{width:100%}.site-cards{grid-template-columns:1fr}}

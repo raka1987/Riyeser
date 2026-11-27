@@ -10,7 +10,7 @@
 <form method="post" id="ol-settings">
 <div class="card ol-opts"><h3>Orders from your website</h3>
 {% for k, label, help in order_as %}<label class="opt"><input type="radio" name="order_as" value="{{ k }}" {{ 'checked' if s.order_as == k }}><span><b>{{ label }}</b><small>{{ help }}</small></span></label>{% endfor %}
-<div class="fields" style="margin-top:10px"><div><label for="order_prices">Prices</label><select id="order_prices" name="order_prices">
+<div class="fields" style="margin-top:10px"><div class="w2"><label for="order_prices">Prices</label><select id="order_prices" name="order_prices">
 <option value="website" {{ 'selected' if s.order_prices == 'website' }}>The price the customer saw on the website</option>
 <option value="riyeser" {{ 'selected' if s.order_prices == 'riyeser' }}>This company file's price</option></select></div>
 <div><label for="payment_account_id">Money paid online goes into</label><select id="payment_account_id" name="payment_account_id">{% for b in banks %}<option value="{{ b.id }}" {{ 'selected' if b.id == pay_default }}>{{ b.code }} {{ b.name }}</option>{% endfor %}</select></div></div>

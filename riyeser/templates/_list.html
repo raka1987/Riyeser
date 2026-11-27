@@ -9,10 +9,10 @@
 {# The filter bar: search, Year, Period (with custom dates), the list's own choices, Clear filters and the count.
    sort_select: a Sort drop-down too, for lists shown as cards rather than a table ('phone': only on a phone,
    where the list turns into cards and the headers are gone). #}
-{% macro bar(lst, sort_select=False, noun=None) -%}
+{% macro bar(lst, sort_select=False, noun=None, skip=()) -%}
 {% set s = lst.spec %}{% set P = s.prefix %}
 <form class="lbar" method="get" role="search" aria-label="Filter this list" data-lbar>
-  {% for k, v in lst.hidden().items() %}{% if not (sort_select and k in (P ~ 'sort', P ~ 'dir')) %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
+  {% for k, v in lst.hidden().items() %}{% if not (sort_select and k in (P ~ 'sort', P ~ 'dir')) and k not in skip %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}{% endfor %}
   {% if s.search %}<div class="lf lf-q"><label for="{{ P }}lq">Search</label><input id="{{ P }}lq" type="search" name="{{ P }}q" value="{{ lst.q }}" placeholder="{{ s.search_hint }}"></div>{% endif %}
   {% if s.date_col %}
   <div class="lf"><label for="{{ P }}ly">Year</label><select id="{{ P }}ly" name="{{ P }}year" data-auto data-year>
@@ -26,12 +26,14 @@
   <div class="lf lf-d" data-custom {{ 'hidden' if lst.period != 'custom' }}><label for="{{ P }}lfrom">From</label><input id="{{ P }}lfrom" type="date" name="{{ s.p('from') }}" value="{{ lst.dfrom or '' }}"></div>
   <div class="lf lf-d" data-custom {{ 'hidden' if lst.period != 'custom' }}><label for="{{ P }}lto">To</label><input id="{{ P }}lto" type="date" name="{{ s.p('to') }}" value="{{ lst.dto or '' }}"></div>
   {% endif %}
+  {% if caller %}{{ caller() }}{% endif %}
   {% for ch in s.choices %}<div class="lf"><label for="{{ P }}lc-{{ ch.param }}">{{ ch.label }}</label><select id="{{ P }}lc-{{ ch.param }}" name="{{ P }}{{ ch.param }}" data-auto>
     <option value="">{{ ch.all_label }}</option>{% for v, t in ch.options %}<option value="{{ v }}" {{ 'selected' if lst.choice[ch.param] == v|string }}>{{ t }}</option>{% endfor %}</select></div>{% endfor %}
-  {% if sort_select %}{% set ph = ' lf-phone' if sort_select == 'phone' else '' %}<div class="lf{{ ph }}"><label for="{{ P }}ls">Sort by</label><select id="{{ P }}ls" name="{{ P }}sort" data-auto>{% for k, t in lst.sort_options %}<option value="{{ k }}" {{ 'selected' if lst.sort == k }}>{{ t }}</option>{% endfor %}</select></div>
-  <div class="lf{{ ph }}"><label for="{{ P }}ld">Order</label><select id="{{ P }}ld" name="{{ P }}dir" data-auto><option value="asc" {{ 'selected' if lst.dir == 'asc' }}>A–Z, oldest, smallest first</option><option value="desc" {{ 'selected' if lst.dir == 'desc' }}>Z–A, newest, biggest first</option></select></div>{% endif %}
-  <div class="lf lf-go"><button class="btn">Apply</button>{% if lst.filtered %} <a class="btn lclear" href="{{ lst.clear_url() }}">Clear filters</a>{% endif %}</div>
-  <div class="lcount" role="status" aria-live="polite"><b>{{ lst.shown }}</b> of {{ lst.total }} {{ noun or s.noun }}</div>
+  {% if sort_select %}{% set ph = ' lf-phone' if sort_select == 'phone' else '' %}<div class="lf-sort{{ ph }}" role="group" aria-label="Sort">
+  <div class="lf"><label for="{{ P }}ls">Sort by</label><select id="{{ P }}ls" name="{{ P }}sort" data-auto>{% for k, t in lst.sort_options %}<option value="{{ k }}" {{ 'selected' if lst.sort == k }}>{{ t }}</option>{% endfor %}</select></div>
+  <div class="lf"><label for="{{ P }}ld">Order</label><select id="{{ P }}ld" name="{{ P }}dir" data-auto><option value="asc" {{ 'selected' if lst.dir == 'asc' }}>A–Z, oldest, smallest first</option><option value="desc" {{ 'selected' if lst.dir == 'desc' }}>Z–A, newest, biggest first</option></select></div></div>{% endif %}
+  <div class="lf-go"><button class="btn">Apply</button></div>
+  <div class="lend">{% if lst.filtered %}<a class="btn lclear" href="{{ lst.clear_url() }}">Clear filters</a>{% endif %}<div class="lcount" role="status" aria-live="polite"><b>{{ lst.shown }}</b> of {{ lst.total }} {{ noun or s.noun }}</div></div>
 </form>
 {%- endmacro %}
 

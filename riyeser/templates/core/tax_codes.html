@@ -8,8 +8,8 @@
 <td><input form="t{{ t.id }}" name="code" value="{{ t.code }}" style="width:70px"></td><td><input form="t{{ t.id }}" name="name" value="{{ t.name }}"></td>
 <td><input form="t{{ t.id }}" name="rate" value="{{ t.rate }}" style="width:70px" class="right"></td>
 <td><select form="t{{ t.id }}" name="kind">{% for k, v in kinds.items() %}<option value="{{ k }}" {{ 'selected' if t.kind==k }}>{{ v }}</option>{% endfor %}</select></td>
-<td>{{ account_select('collected_account_id', accounts, t.collected_account_id)|replace('<select', '<select form="t' ~ t.id ~ '"') }}</td>
-<td>{{ account_select('paid_account_id', accounts, t.paid_account_id)|replace('<select', '<select form="t' ~ t.id ~ '"') }}</td>
+<td>{{ account_select('collected_account_id', accounts, t.collected_account_id, form='t' ~ t.id, label='Collected account for ' ~ t.code) }}</td>
+<td>{{ account_select('paid_account_id', accounts, t.paid_account_id, form='t' ~ t.id, label='Paid account for ' ~ t.code) }}</td>
 <td><form id="t{{ t.id }}" method="post"><input type="hidden" name="id" value="{{ t.id }}"><button class="btn sm">Save</button></form></td></tr>{% endfor %}
 </table></div>
 <div class="card" style="margin-top:18px"><h3>New tax code</h3><form method="post" class="fields">
