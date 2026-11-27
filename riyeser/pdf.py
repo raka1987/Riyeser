@@ -203,9 +203,11 @@ def document_pdf(db, doc_id) -> bytes:
     rows = [[l["description"] or "", f"{l['qty']:g}", fmt_money(l["unit_price"]),
              f"{l['discount_pct']:g}%" if l["discount_pct"] else "", fmt_money(l["tax_amount"]),
              fmt_money(l["net_amount"] + (l["tax_amount"] if incl else 0))] for l in lines]
-    pdf.table(["Description", "Qty", "Unit price", "Disc", "GST", "Amount"], rows,
+    co = pdf.company
+    taxn = (co["tax_name"] if "tax_name" in co.keys() and co["tax_name"] else "GST")   # GST, VAT, sales tax (company setting)
+    pdf.table(["Description", "Qty", "Unit price", "Disc", taxn, "Amount"], rows,
               [74, 14, 26, 14, 22, 28], ["L", "R", "R", "R", "R", "R"])
-    tot = [("Subtotal (ex GST)", fmt_money(doc["subtotal"])), ("GST", fmt_money(doc["tax_total"]))]
+    tot = [(f"Subtotal (ex {taxn})", fmt_money(doc["subtotal"])), (taxn, fmt_money(doc["tax_total"]))]
     if doc["amount_paid"]:
         tot += [("Total", fmt_money(doc["total"])), ("Paid", fmt_money(doc["amount_paid"]))]
     tot.append(("Balance due" if doc["side"] == "sale" and doc["status"] in ("open", "paid") else "Total",
@@ -214,6 +216,9 @@ def document_pdf(db, doc_id) -> bytes:
     pdf.notes(doc["notes"])
     if doc["side"] == "sale" and doc["status"] in ("open", "paid") and (doc["kind"] or "invoice") == "invoice":
         pdf.how_to_pay(db)
+    if doc["side"] == "sale" and doc["status"] == "quote":
+        from .measure.drawing import add_page
+        add_page(pdf, db, doc_id, FONT)   # Riyeser Estimate: what was measured, and the drawing (never map imagery)
     return bytes(pdf.output())
 
 

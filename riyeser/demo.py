@@ -203,6 +203,8 @@ def seed_demo(db):
                    (acc["1-1110"], d(days), desc, to_cents(amt)))
     seed_bookings(db, cust)
     seed_crm(db, cust, items, acc, tc)
+    from .measure.demo import seed as seed_estimates
+    seed_estimates(db, cust)   # Riyeser Estimate: a roof, a fence, a painted room and a tiled bathroom
     db.commit()
 
 

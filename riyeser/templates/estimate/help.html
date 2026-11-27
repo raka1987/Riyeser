@@ -1,0 +1,38 @@
+{% extends "base.html" %}{% block title %}Help{% endblock %}
+{% block content %}
+<style>.help h2{scroll-margin-top:16px}.help li{margin:4px 0}.help .card{max-width:900px}</style>
+<div class="est-head"><div><h1>Riyeser Estimate help</h1><p class="sub">Measure jobs on a plan, a photo or the map, and turn them into quotes. Version {{ riyeser_version }}.</p></div></div>
+<div class="help">
+<div class="card"><h2 id="start" style="margin-top:0">An estimate in six steps</h2><ol>
+<li><b>Customer</b>: pick the customer (or type a new one) and the job address.</li>
+<li><b>How to measure</b>: on the map, on a plan or photo, or type in sizes. You can switch any time.</li>
+<li><b>Measure</b>: everything saves as you go. The totals panel (at the bottom on a phone) adds up the whole job. In the trade this is called a <i>takeoff</i>.</li>
+<li><b>Template</b>: pick a trade (roofing, fencing, painting, tiling and more). Templates you used lately come first.</li>
+<li><b>Price</b>: lines grouped into labour, materials and other. Change a rate, the waste or add a markup; your profit and margin show here for you only.</li>
+<li><b>Send</b>: look at the PDF, email or print it, or mark it as sent. When the customer says yes, open the quote and press <b>Mark accepted</b>; make the invoice in Riyeser Invoices or Accounting, or a job in Riyeser Bookings (they open the same company file).</li></ol>
+<p>Measured again? Press <b>Update quote</b> on step 5: the lines Estimate made are replaced; lines you typed into the quote yourself stay. An accepted quote is never changed: <b>Duplicate</b> the estimate to quote again.</p></div>
+<div class="card"><h2 id="manual">Typing in sizes</h2><ul>
+<li><b>Room</b>: length, width and height give the floor, ceiling, walls (less the doors and windows you list), perimeter and skirting (less door widths).</li>
+<li><b>Area</b>, <b>circle</b>, <b>triangle</b>: add a depth for a volume (concrete, soil, mulch). <b>Also count it as</b> makes an area count as floor or wall area, so room-based templates use it.</li>
+<li><b>Length</b>: add a height for a face area, or a spacing to count posts or joists. <b>Count</b> and <b>Hours</b> are for points, fixtures and labour.</li>
+<li><b>Roof face</b>: plan area (from above) and pitch, in degrees or rise over run (6/12). <b>Fence</b>: length, post spacing and gates.</li>
+<li>Plain numbers are in your units (metres, or feet for imperial). You can type units: <b>2400mm</b>, <b>3.6 m</b>, <b>12' 6"</b>, <b>10 1/2"</b>.</li>
+<li><b>Laser measurers</b>: one that works as a Bluetooth keyboard types straight into the box; Enter moves to the next box. (Direct Bluetooth links and phone AR come later.)</li></ul></div>
+<div class="card"><h2 id="plan">Plans and photos</h2><ul>
+<li><b>Open a plan or photo</b>: a PDF (every page) or a picture. It stays in this company file.</li>
+<li><b>Set the scale</b> before drawing: press <b>Set scale</b>, tap both ends of something you know (a dimension line, a door) and type its real length. For a PDF drawn to scale and printed at full size, you can pick the drawing scale instead (1:100). Check one known size after.</li>
+<li>Tools: <b>Area</b> (tap the corners; double-tap or <b>Finish</b> to close), <b>Cut-out</b> (cuts a hole from the last area), <b>Length</b>, <b>Count</b>, <b>Roof face</b>, <b>Fence</b>. <b>Undo</b>/<b>Redo</b> work on points and on saved measurements (Ctrl+Z, Ctrl+Y). Name and colour each one, and use a group to keep sets apart (e.g. power and light points).</li>
+<li>On the quote's measurements page, the plan is shown with your lines on it.</li></ul></div>
+<div class="card"><h2 id="map">The map</h2><ul>
+<li>Search the address, then draw with the same tools. The map needs the internet; everything else works offline.</li>
+<li><b>Roof face</b>: draw each face, type its pitch (a picture from above can't show it), then say what each edge is: ridge, hip, valley, eave (gutter), rake (barge) or wall flashing. True area = plan area ÷ cos(pitch); rakes are lengthened by the same factor, hips and valleys by √(1 + tan²(pitch) ÷ 2). A hip drawn on two faces is counted once.</li>
+<li><b>Fence</b>: posts = each straight run ÷ post spacing, rounded up, plus one, plus a post for each gate (a rule of thumb: change it with extra corner posts).</li>
+<li><b>Map sizes are estimates from satellite imagery: check them on site.</b> The imagery may be years old, trees and eaves hide edges, and buildings can lean in the picture. The quote says so too.</li>
+<li>Imagery: Esri World Imagery (attribution on the map). Only your own lines are saved, never the imagery; the quote's measurements page draws your lines on a plain background.</li></ul></div>
+<div class="card"><h2 id="templates">Templates and prices</h2><ul>
+<li>Each line: <i>quantity = measured amount in the line's unit × factor × (1 + waste %)</i>, rounded up to whole packs when there's a pack size, then × your rate. A line's minimum charge lifts a small line; the template's minimum charge tops up the whole quote.</li>
+<li>Riyeser's starting templates have no prices (every business is different). Their waste %, coverage and pack sizes are rules of thumb: check them.</li>
+<li><b>Your cost</b> on a line gives the profit and margin on step 5 (never on the quote). <b>Import a supplier price list</b> (CSV) updates costs and rates in one go. <b>Save these prices as a template</b> on step 5 copies a past job's prices for next time.</li></ul></div>
+<div class="card"><h2 id="trial">Free trial</h2><p>Riyeser Estimate is free for 90 days from the first time you use it. The price after that is still to be announced. If the trial ends before Estimate is on your Riyeser plan, it becomes read-only: every estimate, plan and quote stays to view, print and send, and nothing is deleted.</p></div>
+</div>
+{% endblock %}

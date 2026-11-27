@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Template · {{ t.title }}{% endblock %}
+{% block content %}
+{% include "estimate/_steps.html" %}
+<div class="est-head"><div><h1>Choose a trade template</h1><p class="sub">It turns your sizes into priced lines, with waste and pack sizes. Pick more than one for a job with several trades.</p></div>
+<a class="btn" href="{{ url_for('estimate.templates') }}">Edit templates and prices</a></div>
+<form method="post">
+<div class="tpl-cards">
+{% for x in tpls %}
+  <label class="choice{{ ' on' if x.id in chosen }}"{% if not x.fits %} style="opacity:.7"{% endif %}>
+    <input type="checkbox" name="template_id" value="{{ x.id }}" {{ 'checked' if x.id in chosen }}>
+    {% if x.recent %}<span class="tag">Used lately</span>{% endif %}
+    <span class="em" aria-hidden="true">{{ x.icon }}</span><b>{{ x.name }}</b>
+    <small>{{ x.notes or '' }}</small>
+    <small>{{ x.n }} lines{% if x.unpriced %} · <span style="color:var(--warn)">{{ x.unpriced }} without a price yet</span>{% endif %}{% if not x.fits %} · doesn't use what you've measured{% endif %}</small>
+  </label>
+{% endfor %}
+</div>
+<div class="est-foot"><a class="btn" href="{{ url_for('estimate.measure', tid=t.id) }}">← Measure</a>{% if not read_only %}<button class="btn pri big">Next: review the price →</button>{% endif %}</div>
+</form>
+<script>document.querySelectorAll('.tpl-cards input').forEach(function(i){i.addEventListener('change',function(){i.closest('.choice').classList.toggle('on',i.checked)})});</script>
+{% endblock %}

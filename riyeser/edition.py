@@ -1,14 +1,16 @@
 """Which product this copy of the app is.
 
-Five separate apps are built from this one code base. All of them open the same company files:
+Six separate apps are built from this one code base. All of them open the same company files:
   * Riyeser Invoices (free forever)                 -> APP_EDITION = "invoices"
   * Riyeser Bookings (90 days free, then US$25 a month)-> APP_EDITION = "bookings"
   * Riyeser Accounting Basics (US$25 a month)    -> APP_EDITION = "basic"
   * Riyeser Accounting Plus (US$39 a month)       -> APP_EDITION = "enterprise"
   * Riyeser POS (90 days free, then US$29 a month)-> APP_EDITION = "pos"
-packaging/build_desktop.py --edition basics|plus|pos|invoices|bookings writes riyeser/_built_edition.py into the build. Run from source
+  * Riyeser Estimate (90 days free from first use, price to be announced) -> APP_EDITION = "estimate":
+    measure a job (by hand, on a plan or photo, on the map) and turn it into a quote (riyeser/measure/)
+packaging/build_desktop.py --edition basics|plus|pos|invoices|bookings|estimate writes riyeser/_built_edition.py into the build. Run from source
 (or `pip install`) there is no built edition, so APP_EDITION is None: each company picks Basic or Plus under Setup
-and the till is there too. RIYESER_APP_EDITION=basics|plus|pos|invoices|bookings overrides it (handy for testing). Switching app never
+and the till is there too. RIYESER_APP_EDITION=basics|plus|pos|invoices|bookings|estimate overrides it (handy for testing). Switching app never
 changes any data: Basics just doesn't show the Plus screens, and Accounting doesn't show the till.
 """
 import os
@@ -16,7 +18,7 @@ import os
 DOWNLOADS = "https://github.com/raka1987/Riyeser/releases/latest/download"
 SETUP_FILES = {"basic": "RiyeserAccountingBasics-Setup.exe", "enterprise": "RiyeserAccountingPlus-Setup.exe",
                "pos": "RiyeserPOS-Setup.exe", "invoices": "RiyeserInvoices-Setup.exe",
-               "bookings": "RiyeserBookings-Setup.exe"}
+               "bookings": "RiyeserBookings-Setup.exe", "estimate": "RiyeserEstimate-Setup.exe"}
 POS_PAGE = "https://riyeser.com/programs/pos.html"
 
 
@@ -24,11 +26,11 @@ def _norm(v):
     v = (v or "").strip().lower()
     return {"basic": "basic", "basics": "basic", "plus": "enterprise", "enterprise": "enterprise",
             "pos": "pos", "invoices": "invoices", "invoice": "invoices",
-            "bookings": "bookings", "booking": "bookings"}.get(v)
+            "bookings": "bookings", "booking": "bookings", "estimate": "estimate", "estimates": "estimate"}.get(v)
 
 
 def app_product():
-    """'basic', 'enterprise', 'pos', 'invoices', 'bookings' or None (run from source)."""
+    """'basic', 'enterprise', 'pos', 'invoices', 'bookings', 'estimate' or None (run from source)."""
     env = _norm(os.environ.get("RIYESER_APP_EDITION"))
     if env:
         return env
@@ -57,6 +59,11 @@ def is_bookings_app():
 def is_invoices_app():
     """Riyeser Invoices: the free app for quotes, invoices, customers and getting paid."""
     return app_product() == "invoices"
+
+
+def is_estimate_app():
+    """Riyeser Estimate: measure jobs and turn them into quotes (Measure & Quote)."""
+    return app_product() == "estimate"
 
 
 def is_accounting_app():

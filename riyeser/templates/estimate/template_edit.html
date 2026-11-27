@@ -1,0 +1,33 @@
+{% extends "base.html" %}{% block title %}{{ tpl.name or 'New template' }}{% endblock %}
+{% block content %}
+<div class="est-head"><div><h1>{{ tpl.name or 'New template' }}</h1><p class="sub">Each line: what it's priced by (the basis), the unit its rate is per, a factor (e.g. litres of paint per m²), waste %, pack size (round up to whole boxes, sheets or tins) and your rate. Leave the rate empty to use a linked stock item's price.</p></div>
+{% if tid %}<div class="actions"><form method="post" action="{{ url_for('estimate.template_copy', tpl=tid) }}" class="inline"><button class="btn">Copy</button></form>{% if not read_only %}<form method="post" action="{{ url_for('estimate.template_delete', tpl=tid) }}" class="inline" onsubmit="return confirm('Remove this template?')"><button class="btn danger">Remove</button></form>{% endif %}</div>{% endif %}</div>
+{% if tpl.shipped %}<div class="note-est">This is one of Riyeser's starting templates. The waste %, coverage and pack sizes are common rules of thumb, not advice: change them to suit your materials and methods.</div>{% endif %}
+<form method="post">
+<div class="card"><div class="fields">
+  <div><label for="name">Name</label><input id="name" name="name" value="{{ tpl.name }}" required></div>
+  <div><label for="trade">Trade</label><input id="trade" name="trade" value="{{ tpl.trade or '' }}" placeholder="e.g. roofing"></div>
+  <div><label for="units">Units</label><select id="units" name="units"><option value="metric" {{ 'selected' if tpl.units == 'metric' }}>Metric</option><option value="imperial" {{ 'selected' if tpl.units == 'imperial' }}>Imperial</option></select></div>
+  <div><label for="min_charge">Minimum charge for the job</label><input id="min_charge" name="min_charge" value="{{ tpl.min_charge|cents if tpl.min_charge else '' }}" inputmode="decimal" placeholder="none"></div>
+  <div class="wide"><label for="notes">Notes</label><input id="notes" name="notes" value="{{ tpl.notes or '' }}"></div>
+</div></div>
+<div class="tbl"><table class="lines" id="tl"><thead><tr><th>Section</th><th>Description</th><th>Priced by</th><th>Unit</th><th class="n">Factor</th><th class="n">Waste %</th><th class="n">Pack</th><th>Pack name</th><th>Only group</th><th class="n">Rate</th><th class="n">Your cost</th><th class="n">Min</th><th>Stock item</th></tr></thead><tbody>
+{% for l in lines + [{}] * 3 %}<tr>
+<td><input type="hidden" name="l_lid" value="{{ l.id or '' }}"><select name="l_section" aria-label="Section">{% for s in sections %}<option {{ 'selected' if l.section == s }}>{{ s }}</option>{% endfor %}</select></td>
+<td><input name="l_description" value="{{ l.description or '' }}" style="min-width:200px" aria-label="Description"></td>
+<td><select name="l_basis" aria-label="Priced by">{% for k, v in bases %}<option value="{{ k }}" {{ 'selected' if l.basis == k }}>{{ v }}</option>{% endfor %}</select></td>
+<td><select name="l_unit" aria-label="Unit">{% for u in units %}<option value="{{ u }}" {{ 'selected' if l.unit == u }}>{{ unit_label(u) }}</option>{% endfor %}</select></td>
+<td><input name="l_factor" value="{{ '%g'|format(l.factor) if l.factor is defined and l.factor is not none else '1' }}" style="width:70px" aria-label="Factor"></td>
+<td><input name="l_waste" value="{{ '%g'|format(l.waste_pct) if l.waste_pct else '' }}" style="width:60px" aria-label="Waste %"></td>
+<td><input name="l_pack" value="{{ '%g'|format(l.pack_size) if l.pack_size else '' }}" style="width:60px" aria-label="Pack size"></td>
+<td><input name="l_label" value="{{ l.unit_label or '' }}" style="width:90px" aria-label="Pack name"></td>
+<td><input name="l_group" value="{{ l.group_filter or '' }}" style="width:80px" aria-label="Only group"></td>
+<td><input name="l_rate" value="{{ l.rate|cents if l.rate else '' }}" style="width:80px" inputmode="decimal" aria-label="Rate"></td>
+<td><input name="l_cost" value="{{ l.cost|cents if l.cost else '' }}" style="width:80px" inputmode="decimal" aria-label="Your cost"></td>
+<td><input name="l_min" value="{{ l.min_charge|cents if l.min_charge else '' }}" style="width:70px" inputmode="decimal" aria-label="Minimum charge"></td>
+<td><select name="l_item" aria-label="Stock item"><option value="">—</option>{% for i in items %}<option value="{{ i.id }}" {{ 'selected' if l.item_id == i.id }}>{{ i.sku }} {{ i.name }}</option>{% endfor %}</select></td>
+</tr>{% endfor %}</tbody></table></div>
+<p class="small muted">Leave a description empty to drop that line. Save to get three more empty lines.</p>
+{% if not read_only %}<div class="est-foot"><a class="btn" href="{{ url_for('estimate.templates') }}">← Templates</a><button class="btn pri big">Save template</button></div>{% endif %}
+</form>
+{% endblock %}

@@ -9,3 +9,4 @@ dist/
 .venv/
 _built_edition.py
 _licence_key.py
+riyeser/_map_key.py

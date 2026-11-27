@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}{{ t.title if t else 'New estimate' }}{% endblock %}
+{% block content %}
+{% include "estimate/_steps.html" %}
+<div class="est-head"><div><h1>{{ t.title if t else 'New estimate' }}</h1><p class="sub">Who's it for, and where's the job?</p></div></div>
+<form method="post" class="card big-input" autocomplete="off">
+  <div class="fields">
+    <div class="wide"><label for="contact_id">Customer</label><select id="contact_id" name="contact_id" class="big"><option value="">— New customer —</option>{% for c in contacts %}<option value="{{ c.id }}" data-address="{{ c.address or '' }}" {{ 'selected' if c.id == preset_contact }}>{{ c.name }}{% if c.phone %} · {{ c.phone }}{% endif %}</option>{% endfor %}</select></div>
+    <div class="newc"><label for="new_name">New customer's name</label><input id="new_name" name="new_name" placeholder="e.g. Sam Rivera"></div>
+    <div class="newc"><label for="new_phone">Phone</label><input id="new_phone" name="new_phone" inputmode="tel"></div>
+    <div class="newc"><label for="new_email">Email (to send the quote)</label><input id="new_email" name="new_email" type="email" inputmode="email"></div>
+    <div class="wide"><label for="title">Job</label><input id="title" name="title" value="{{ t.title if t else '' }}" placeholder="e.g. Re-roof, back fence, paint 3 bedrooms"></div>
+    <div class="wide"><label for="address">Job address</label><input id="address" name="address" value="{{ t.address if t and t.address else '' }}" placeholder="Street, town" autocomplete="street-address"></div>
+    <div class="wide"><label for="notes">Notes for the quote (optional)</label><textarea id="notes" name="notes" rows="2">{{ t.notes if t and t.notes else '' }}</textarea></div>
+  </div>
+  <div class="est-foot"><a class="btn" href="{{ url_for('estimate.index') }}">Back to estimates</a>
+  {% if not read_only %}<button class="btn pri big">Next: how to measure →</button>{% endif %}</div>
+</form>
+<script>
+(function(){var s=document.getElementById('contact_id'),a=document.getElementById('address');
+function sync(){var on=!s.value;document.querySelectorAll('.newc').forEach(function(e){e.style.display=on?'':'none'});
+ var o=s.options[s.selectedIndex];if(!on&&!a.value&&o&&o.dataset.address)a.value=o.dataset.address;}
+s.addEventListener('change',sync);sync();})();
+</script>
+{% endblock %}

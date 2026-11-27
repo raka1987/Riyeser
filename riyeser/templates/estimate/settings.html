@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="est-head"><div><h1>Settings</h1><p class="sub">How {{ company.name }} measures and prices. Each estimate can switch units on its Measure step.</p></div></div>
+<form class="card" method="post"><div class="fields">
+<div><label for="units">Units</label><select id="units" name="units"><option value="metric" {{ 'selected' if units == 'metric' }}>Metric: m, m², m³</option><option value="imperial" {{ 'selected' if units == 'imperial' }}>Imperial: ft, sq ft, cu yd, roofing squares</option></select></div>
+<div><label for="currency">Currency (3-letter code)</label><input id="currency" name="currency" value="{{ company.currency or '' }}" maxlength="3" placeholder="USD, EUR, GBP, AUD, FJD…" style="text-transform:uppercase"></div>
+<div><label for="tax_name">What your sales tax is called</label><input id="tax_name" name="tax_name" value="{{ company.tax_name or 'GST' }}" placeholder="GST, VAT, sales tax"></div>
+<div><label for="date_format">Dates</label><select id="date_format" name="date_format">{% for k, v in [('iso', '2026-11-27'), ('dmy', '27/11/2026'), ('mdy', '11/27/2026')] %}<option value="{{ k }}" {{ 'selected' if company.date_format == k }}>{{ v }}</option>{% endfor %}</select></div>
+<div><label for="map_provider">Map imagery</label><select id="map_provider" name="map_provider">{% for k, p in providers.items() %}<option value="{{ k }}" {{ 'selected' if company.map_provider == k }}>{{ p.name }}</option>{% endfor %}</select><small class="muted">More providers (Google, Nearmap) may come later.</small></div>
+</div>
+<p class="small muted">Tax rates are set on your tax codes (in Riyeser Invoices or Accounting, Setup → Tax codes). New estimates use the company's default tax code.</p>
+{% if can('setup', 2) and not read_only %}<button class="btn pri">Save settings</button>{% endif %}</form>
+{% endblock %}

@@ -6,8 +6,9 @@
     python packaging/build_desktop.py --edition pos      # Riyeser POS (90 days free, then a licence)
     python packaging/build_desktop.py --edition invoices # Riyeser Invoices (free forever)
     python packaging/build_desktop.py --edition bookings # Riyeser Bookings (90 days free, then a licence)
+    python packaging/build_desktop.py --edition estimate # Riyeser Estimate (90 days free from first use)
 
-Five separate apps from one code base: the edition is baked into the build (riyeser/_built_edition.py), with its own
+Six separate apps from one code base: the edition is baked into the build (riyeser/_built_edition.py), with its own
 name, icon and colours. Output: dist/Riyeser Accounting Basics.exe / dist/Riyeser Accounting Plus.exe (Windows),
 dist/Riyeser POS.exe, .app bundles on macOS, riyeser-accounting-basics / -plus / riyeser-pos on Linux.
 """
@@ -25,10 +26,10 @@ sep = os.pathsep
 system = platform.system()
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--edition", choices=["basics", "plus", "pos", "invoices", "bookings"], required=True)
+ap.add_argument("--edition", choices=["basics", "plus", "pos", "invoices", "bookings", "estimate"], required=True)
 EDITION = ap.parse_args().edition
 APP_NAME = {"basics": "Riyeser Accounting Basics", "plus": "Riyeser Accounting Plus", "pos": "Riyeser POS",
-            "invoices": "Riyeser Invoices", "bookings": "Riyeser Bookings"}[EDITION]
+            "invoices": "Riyeser Invoices", "bookings": "Riyeser Bookings", "estimate": "Riyeser Estimate"}[EDITION]
 ICON = ROOT / "packaging" / f"{EDITION}.ico"
 built = PKG / "_built_edition.py"
 built.write_text(f'APP_EDITION = "{EDITION}"\n', encoding="utf-8")
@@ -46,6 +47,16 @@ if LICENCE_KEY:
 else:
     key_file.unlink(missing_ok=True)
     print("No licence public key: this build accepts unsigned licences (licence signing not switched on yet).")
+
+# Riyeser Estimate's map: Riyeser's ArcGIS Location Platform API key (imagery tiles and address search), from the
+# RIYESER_ESRI_KEY secret. It's used in the browser, so it's not secret from the user: restrict it in the ArcGIS
+# dashboard to the basemap and geocoding (not stored) privileges, with pay-as-you-go off as a cost ceiling.
+map_key_file = PKG / "_map_key.py"
+ESRI_KEY = os.environ.get("RIYESER_ESRI_KEY", "").strip()
+if ESRI_KEY:
+    map_key_file.write_text(f'ESRI_KEY = "{ESRI_KEY}"\n', encoding="utf-8")
+else:
+    map_key_file.unlink(missing_ok=True)
 
 args = [
     str(ROOT / "packaging" / "riyeser_desktop.py"),
@@ -66,6 +77,7 @@ args = [
     "--hidden-import", "riyeser.signed_licence",
     "--hidden-import", "riyeser.ed25519",
     *(["--hidden-import", "riyeser._licence_key"] if LICENCE_KEY else []),
+    *(["--hidden-import", "riyeser._map_key"] if ESRI_KEY else []),
     "--hidden-import", "riyeser.companies",
     "--hidden-import", "riyeser.archive",
     "--hidden-import", "riyeser.perms",
@@ -77,7 +89,7 @@ args = [
     "--specpath", str(ROOT / "build"),
 ]
 if system == "Darwin":
-    args += ["--windowed", "--osx-bundle-identifier", {"pos": "com.riyeser.pos", "invoices": "com.riyeser.invoices", "bookings": "com.riyeser.bookings"}.get(EDITION, f"com.riyeser.accounting.{EDITION}")]
+    args += ["--windowed", "--osx-bundle-identifier", {"pos": "com.riyeser.pos", "invoices": "com.riyeser.invoices", "bookings": "com.riyeser.bookings", "estimate": "com.riyeser.estimate"}.get(EDITION, f"com.riyeser.accounting.{EDITION}")]
 elif system == "Windows":
     # Its own app window (pywebview on Microsoft Edge WebView2, which Windows 10/11 already has) - never the web browser.
     args += ["--windowed", "--onefile", "--icon", str(ICON),
@@ -89,4 +101,5 @@ try:
 finally:
     built.unlink(missing_ok=True)  # running from source stays "pick per company"
     key_file.unlink(missing_ok=True)  # and accepts unsigned licences
+    map_key_file.unlink(missing_ok=True)
 print("Built", APP_NAME, "into", ROOT / "dist")

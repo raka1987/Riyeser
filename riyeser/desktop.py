@@ -32,7 +32,7 @@ def _wait_until_up(url, timeout=30):
 
 
 # Screens Riyeser Central can open the app on (quick access): --page=pos opens the Shop counter.
-START_PAGES = {"pos": "/pos/", "invoice": "/sale/new"}
+START_PAGES = {"pos": "/pos/", "invoice": "/sale/new", "estimate": "/estimate/new"}
 
 
 def start_path(page):
@@ -41,11 +41,12 @@ def start_path(page):
 
 
 def main(argv=None):
-    from .db import EDITIONS, POS_APP, INVOICES_APP, BOOKINGS_APP
-    from .edition import app_edition, is_pos_app, is_invoices_app, is_bookings_app
+    from .db import EDITIONS, POS_APP, INVOICES_APP, BOOKINGS_APP, ESTIMATE_APP
+    from .edition import app_edition, is_pos_app, is_invoices_app, is_bookings_app, is_estimate_app
     ed = app_edition()
     app_name = (POS_APP["app"] if is_pos_app() else INVOICES_APP["app"] if is_invoices_app()
                 else BOOKINGS_APP["app"] if is_bookings_app()
+                else ESTIMATE_APP["app"] if is_estimate_app()
                 else EDITIONS[ed]["app"] if ed else "Riyeser Accounting")
     if is_pos_app() and not any(a.startswith("--page") for a in (argv if argv is not None else sys.argv[1:])):
         argv = list(argv if argv is not None else sys.argv[1:]) + ["--page=pos"]  # Riyeser POS opens on the till

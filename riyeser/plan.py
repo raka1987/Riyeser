@@ -13,11 +13,12 @@ This is the one place that decides it, so a billing backend can take over `subsc
 from .licence import TRIAL_DAYS
 
 WARN_DAYS = 14      # remind people in the last two weeks of the trial
-WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices"), "bookings": ("booking", "bookings")}
+WHAT = {"pos": ("sale", "sales"), "basic": ("invoice", "invoices"), "bookings": ("booking", "bookings"),
+        "estimate": ("estimate", "estimates")}
 
 
 # Each app's paid actions and the licence module that unlocks them (riyeser/licence.py MODULES).
-MODULE = {"pos": "pos", "basic": "basic", "bookings": "bookings"}
+MODULE = {"pos": "pos", "basic": "basic", "bookings": "bookings", "estimate": "estimate"}
 
 
 def _status(product=None):
@@ -33,6 +34,8 @@ def subscribed(product=None):
 def used(db, product):
     if product == "bookings":
         return db.execute("SELECT COUNT(*) FROM bookings").fetchone()[0]
+    if product == "estimate":
+        return db.execute("SELECT COUNT(*) FROM takeoffs").fetchone()[0]
     if product == "pos":
         # every till sale that wasn't voided (refunds aren't sales)
         return db.execute("SELECT COUNT(*) FROM pos_sales WHERE voided=0").fetchone()[0]
@@ -58,11 +61,14 @@ def plan(db, product):
 HOME_URL = "https://riyeser.com/link/"   # the Riyeser home page, where paid programs are added
 from .db import PRICES as _USD   # the one price list (riyeser/db.py PRICE_USD)
 PRICES = {k: f"{_USD[k]}/month" for k in ("basic", "plus", "pos", "bookings")}
-NAMES = {"basic": "Accounting Basics", "plus": "Accounting Plus", "pos": "Riyeser POS", "bookings": "Riyeser Bookings"}
+PRICES["estimate"] = "price to be announced"   # Riyeser Estimate: 90 days free; the price after that isn't set yet
+NAMES = {"basic": "Accounting Basics", "plus": "Accounting Plus", "pos": "Riyeser POS", "bookings": "Riyeser Bookings",
+         "estimate": "Riyeser Estimate"}
 STILL_WORKS = {
     "basic": "Quotes, customers, stock, payments and reports all still work.",
     "pos": "Your sales, receipts, close-till reports, products and stock are all still here.",
     "bookings": "Your calendar and every booking are still here to see and print.",
+    "estimate": "Your estimates, measurements, plans and quotes are all still here to view, print and send.",
     "plus": "Invoices, customers, stock and reports still work; banking, payroll, journals, jobs and budgets are kept safe.",
 }
 

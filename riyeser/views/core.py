@@ -263,6 +263,13 @@ def bookings_app():
     return render_template("core/bookings_app.html", download=download_url("bookings"))
 
 
+@bp.route("/setup/estimate-app")
+def estimate_app():
+    """In the other apps: Riyeser Estimate is its own app, on the same company file."""
+    from ..edition import download_url
+    return render_template("core/estimate_app.html", download=download_url("estimate"))
+
+
 @bp.route("/setup/accounting-basics")
 def invoices_upgrade():
     """Riyeser Invoices: what Accounting Basics adds, and where to get it."""

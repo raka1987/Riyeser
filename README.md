@@ -71,6 +71,18 @@ This code base ships as **three separate Windows apps**, so they're easy to look
 
 Build one: `python packaging/build_desktop.py --edition basics` (or `plus`, or `pos`). Run from source with no edition baked in, each company picks Basic or Plus under **Setup → Company** instead (set `RIYESER_APP_EDITION=basics|plus|pos` to try any of the apps). The names live in one place, `EDITIONS` in `riyeser/db.py`; the edition logic is in `riyeser/edition.py`.
 
+## Riyeser Estimate (Measure & Quote)
+
+A separate app from the same code base (`--edition estimate`, `RiyeserEstimate-Setup.exe`, orange "Es." logo): measure a job and turn it into a quote. It opens the same company file as Invoices, Bookings and Accounting, so its quotes are ordinary Riyeser quotes there (accept, then invoice or make a Bookings job).
+
+* **Six steps, one screen each:** customer and job address, how to measure (map, plan or photo, type in sizes), measure, trade template, review price (profit and margin for you only; quick rate, waste and markup changes), send (PDF preview, email, print). Every step saves as you go; the Estimates list (Draft, Sent, Accepted, Declined, Expired; search, sort, Duplicate) is the home screen.
+* **Measuring:** rooms (walls less doors and windows), areas, circles, triangles, lengths, counts, volumes and hours by hand (a Bluetooth laser in keyboard mode types into the boxes); PDF plans and photos with a scale from a known line or a drawing scale (pdf.js, multi-page, cut-outs, counts, undo/redo); the map (Leaflet on Esri World Imagery) with roof faces (pitch in degrees or rise/run, ridge/hip/valley/eave/rake edges, shared edges counted once) and fences (posts from spacing, gates). Map figures are labelled as estimates to check on site.
+* **Units and money:** metric or imperial (m, m², m³ / ft, sq ft, cu yd, roofing squares) per company with a per-estimate switch; the company's currency, tax name (GST, VAT, sales tax) and date format.
+* **Templates:** 15 trades shipped as editable starting points (waste %, coverage, pack sizes; no prices), your own templates, a supplier price list import (CSV), and "save these prices as a template" from a past job.
+* **Only your own lines are kept:** map imagery is never stored or put in a PDF; the quote's measurements page draws your lines on a plain background (plans show your own plan with the lines).
+* **Licence:** module `estimate`, free for 90 days from first use (`riyeser/licence.py` first-use trial; Riyeser online starts it when Central first reports the program), then read-only until it's on the plan. The price after the trial is still to be announced.
+* Code: `riyeser/measure/` (geometry, units, engine, seeds, quote, drawing, demo, licence), `riyeser/views/estimate.py`, `riyeser/templates/estimate/`, `riyeser/static/measure/`; libraries in `riyeser/static/vendor/` (see its README for licences). Tests: `tests/test_estimate.py`; in a browser, `tests/browser/estimate.e2e.js` with `tests/browser/serve_estimate.py` (stand-in map tiles, never Esri).
+
 ## Features
 
 **Accounts**
