@@ -7,9 +7,14 @@ on:
     branches: [module/desk-assistant]
     paths: ["desktop/**", ".github/workflows/desk-assistant-windows.yml"]
   workflow_dispatch:
+    inputs:
+      job:
+        description: "all, or only central-install (installs every program from the latest release the way Central does)"
+        default: all
 
 jobs:
   windows:
+    if: github.event_name != 'workflow_dispatch' || inputs.job != 'central-install'
     runs-on: windows-latest
     defaults:
       run:
@@ -194,3 +199,99 @@ jobs:
             desktop/dist-team/RiyeserLink-Setup-*.exe
             desktop/dist-linkoffice/RiyeserLinkOffice-Setup-*.exe
           if-no-files-found: error
+
+  # Riyeser Central's Install button, on a real Windows PC: every program from the latest release, installed with the
+  # same silent options Central uses, then read back from Windows' installed-apps list the way Central reads it.
+  # 1) as a standard Windows user (most office PCs: no administrator token), the way Central 1.8.10 started installers
+  # 2) the same user with Central's new install-run.js (Link Office through the Windows permission prompt)
+  # 3) as an administrator with install-run.js: every program installs and Central finds it
+  central-install:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Unit tests (install state machine and detection)
+        run: node --test test/central-install.test.js
+      - name: Windows permission settings on this runner
+        shell: pwsh
+        run: |
+          Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System | Select-Object EnableLUA, ConsentPromptBehaviorAdmin, ConsentPromptBehaviorUser, PromptOnSecureDesktop | Format-List | Out-String | Write-Host
+          whoami /groups | Select-String -Pattern "Administrators|Mandatory Label" | Write-Host
+      - name: Download the latest release's installers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force C:\riy\dl, C:\riy\out | Out-Null
+          gh release download --repo raka1987/Riyeser --dir C:\riy\dl --pattern "Riyeser*-Setup.exe" --clobber
+          Get-ChildItem C:\riy\dl | Format-Table Name, Length -AutoSize | Out-String | Write-Host
+          Copy-Item -Recurse src, scripts C:\riy\app\ -Force
+          icacls C:\riy /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
+      - name: Standard user, the way Central 1.8.10 installs (reproduces the bug)
+        shell: pwsh
+        run: |
+          $pw = "Rq7!" + [guid]::NewGuid().ToString("N").Substring(0, 12)
+          net user riyuser $pw /add /y | Out-Null
+          "riyuser`n$pw" | Set-Content C:\riy\cred.txt
+          $node = (Get-Command node).Source
+          function As-User($mode, $only, $name) {
+            $cmd = "C:\riy\$name.cmd"
+            "@`"$node`" C:\riy\app\scripts\central-install-check.js --mode=$mode --dir=C:\riy\dl --out=C:\riy\out\$name.json $only > C:\riy\out\$name.log 2>&1" | Set-Content $cmd -Encoding ascii
+            schtasks /create /tn "riy-$name" /tr $cmd /sc once /st 23:59 /ru riyuser /rp $pw /rl LIMITED /f | Out-Null
+            schtasks /run /tn "riy-$name" | Out-Null
+            for ($i = 0; $i -lt 360 -and -not (Test-Path "C:\riy\out\$name.json"); $i++) { Start-Sleep -Seconds 5 }
+            Get-Content "C:\riy\out\$name.log" -ErrorAction SilentlyContinue | Write-Host
+            if (-not (Test-Path "C:\riy\out\$name.json")) { schtasks /query /tn "riy-$name" /v /fo list | Write-Host; throw "The check didn't finish as riyuser" }
+          }
+          As-User old "" "user-old"
+      - name: Standard user, with Central's new install (Link Office asks Windows for permission)
+        shell: pwsh
+        run: |
+          $pw = (Get-Content C:\riy\cred.txt)[1]
+          $node = (Get-Command node).Source
+          $name = "user-new"
+          "@`"$node`" C:\riy\app\scripts\central-install-check.js --mode=new --dir=C:\riy\dl --out=C:\riy\out\$name.json --only=linkoffice > C:\riy\out\$name.log 2>&1" | Set-Content "C:\riy\$name.cmd" -Encoding ascii
+          schtasks /create /tn "riy-$name" /tr "C:\riy\$name.cmd" /sc once /st 23:59 /ru riyuser /rp $pw /rl LIMITED /f | Out-Null
+          schtasks /run /tn "riy-$name" | Out-Null
+          for ($i = 0; $i -lt 160 -and -not (Test-Path "C:\riy\out\$name.json"); $i++) { Start-Sleep -Seconds 5 }
+          Get-Content "C:\riy\out\$name.log" -ErrorAction SilentlyContinue | Write-Host
+          if (-not (Test-Path "C:\riy\out\$name.json")) { Write-Warning "No answer within 13 minutes (nobody can answer a permission prompt on this runner)" }
+      - name: Administrator, with Central's new install (every program)
+        shell: pwsh
+        run: |
+          node scripts/central-install-check.js --mode=new --dir=C:\riy\dl --out=C:\riy\out\admin-new.json
+          Get-Process -Name "Riyeser*", "As Built" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          $r = Get-Content C:\riy\out\admin-new.json -Raw | ConvertFrom-Json
+          $r.results | Format-Table id, asset, version, code, startError, elevated, detected, where -AutoSize | Out-String -Width 220 | Write-Host
+          $bad = @($r.results | Where-Object { -not $_.failure.ok -or -not $_.detected })
+          if ($bad.Count) { throw "Not installed or not found: $($bad.id -join ', ')" }
+      - name: The released Riyeser Central finds every program
+        shell: pwsh
+        run: |
+          Start-Process -FilePath C:\riy\dl\RiyeserCentral-Setup.exe -ArgumentList "/S" -Wait
+          Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          $central = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Central.exe" | Select-Object -First 1
+          Start-Process -FilePath $central.FullName -ArgumentList "--self-test=C:\riy\out\central.json" -Wait
+          $c = Get-Content C:\riy\out\central.json -Raw | ConvertFrom-Json
+          $c.programs | Format-Table id, status, where -AutoSize | Out-String -Width 220 | Write-Host
+          $missing = @($c.programs | Where-Object { $_.status -ne "installed" })
+          if ($missing.Count) { throw "Riyeser Central doesn't find: $($missing.id -join ', ')" }
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($f in Get-ChildItem C:\riy\out\*.json -ErrorAction SilentlyContinue) {
+            Write-Host "== $($f.Name)"
+            $r = Get-Content $f.FullName -Raw | ConvertFrom-Json
+            if ($r.results) { $r.results | ForEach-Object { "{0,-18} {1,-36} code={2} startError={3} elevated={4} detected={5} where={6} reason={7} {8}" -f $_.id, $_.asset, $_.code, $_.startError, $_.elevated, $_.detected, $_.where, $_.failure.reason, $_.detail } | Write-Host }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: central-install-reports
+          path: C:\riy\out\

@@ -95,8 +95,8 @@ const LOOK = {
   invoices: { ic: 'invoice', c: 'c-inv', nav: 'Invoices', col: '#0284c7', blurb: 'Send invoices and get paid' },
   bookings: { ic: 'calendar', c: 'c-book', nav: 'Bookings', col: '#e11d48', blurb: 'Jobs, appointments and tables' },
   estimate: { ic: 'invoice', c: 'c-est', nav: 'Estimate', col: '#ea580c', blurb: 'Measure jobs and quote them' },
-  'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Books', col: '#16a05a', blurb: 'View and manage your accounts' },
-  accounting: { ic: 'book', c: 'c-acc', nav: 'Books', col: '#1a5fd6', blurb: 'View and manage your accounts' },
+  'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Accounting Basics', col: '#16a05a', blurb: 'View and manage your accounts' },
+  accounting: { ic: 'book', c: 'c-acc', nav: 'Accounting Plus', col: '#1a5fd6', blurb: 'View and manage your accounts' },
   pos: { ic: 'store', c: 'c-pos', nav: 'POS', col: '#0f8f82', blurb: 'Open the till and ring up sales' },
   payroll: { ic: 'people', c: 'c-pay', nav: 'Payroll', col: '#5b54d6', blurb: 'Run payroll and manage staff' },
   desk: { ic: 'folder', c: 'c-desk', nav: 'Documents', col: '#0e7c86', blurb: 'Scan, file and find documents' },   // Riyeser Documents (was Desk Assistant)

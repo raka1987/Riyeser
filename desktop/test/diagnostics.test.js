@@ -35,7 +35,7 @@ test('diagnostics: at most the last 200 lines and 64 KB', () => {
 
 test('diagnostics: the Link Office log is found; programs without a log are skipped', () => {
   const dir = tmp(); const env = { APPDATA: dir };
-  assert.deepEqual(dg.logFiles('linkoffice', env).map((x) => path.relative(dir, x.file)), [path.join('Riyeser Link Office', 'logs', 'link.log')]);
+  assert.deepEqual(dg.logFiles('linkoffice', env).map((x) => path.relative(dir, x.file)), [path.join('Riyeser Link Office', 'logs', 'link.log'), path.join('Riyeser Central', 'logs', 'install.log')]);
   assert.equal(dg.readLog('linkoffice', { env }), null);              // not there yet: nothing, no error
   assert.equal(dg.readLog('payroll', { env }), null);                 // no log Central can read
   assert.deepEqual(dg.logFiles('pos', {}), []);

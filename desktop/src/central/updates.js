@@ -20,8 +20,10 @@ const PRODUCTS = [
   // Riyeser Link was called Riyeser Team (same app): Windows lists it under either name. M3: its release file is
   // RiyeserLink-Setup.exe; releases also keep RiyeserTeam-Setup.exe (the old download links and older Centrals).
   { id: 'team', display: 'Riyeser Link', also: ['Riyeser Team'], asset: 'RiyeserLink-Setup.exe', oldAsset: 'RiyeserTeam-Setup.exe', args: ['/S'] },
-  // Installs for the whole PC, so Windows asks for permission when it installs or updates (for its firewall rule).
-  { id: 'linkoffice', display: 'Riyeser Link Office', asset: 'RiyeserLinkOffice-Setup.exe', args: ['/S'] },
+  // Installs for the whole PC (perMachine), so Windows asks for permission when it installs or updates (for its firewall
+  // rule). elevate: Central starts its installer through the Windows permission prompt (install-run.js); started like
+  // the others, Windows refuses it ("spawn EACCES", error 740) without ever showing the prompt.
+  { id: 'linkoffice', display: 'Riyeser Link Office', asset: 'RiyeserLinkOffice-Setup.exe', args: ['/S'], elevate: true },
   { id: 'invoices', display: 'Riyeser Invoices', asset: 'RiyeserInvoices-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'bookings', display: 'Riyeser Bookings', asset: 'RiyeserBookings-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   // Riyeser Estimate (measure and quote) installs next to Accounting, like Invoices and Bookings.
@@ -116,7 +118,7 @@ function findPortable(dirs, pattern, readdir) {
 /** Which installed programs have a newer version. ownVersion: this Central's version. */
 function availableUpdates(installed, latest) {
   return PRODUCTS.filter((p) => installed[p.id] && latest.products[p.id] && newer(latest.products[p.id].version, installed[p.id]))
-    .map((p) => ({ id: p.id, name: p.display, from: installed[p.id], to: latest.products[p.id].version, url: latest.products[p.id].url, size: latest.products[p.id].size, self: !!p.self, args: p.args,
+    .map((p) => ({ id: p.id, name: p.display, from: installed[p.id], to: latest.products[p.id].version, url: latest.products[p.id].url, size: latest.products[p.id].size, self: !!p.self, args: p.args, elevate: !!p.elevate,
       file: latest.products[p.id].name || p.asset, digest: latest.products[p.id].digest || null }));
 }
 
