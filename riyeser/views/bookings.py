@@ -439,11 +439,14 @@ def _save_core(bid):
             (f.get("title") or "").strip() or None, (f.get("address") or "").strip() or None, party,
             (f.get("phone") or "").strip() or None, (f.get("notes") or "").strip() or None, status, jid)
     if bid:
+        was = db.execute("SELECT status FROM bookings WHERE id=?", (bid,)).fetchone()["status"]
         db.execute("UPDATE bookings SET contact_id=?, resource_id=?, service_id=?, starts_at=?, minutes=?, title=?,"
                    " address=?, party=?, phone=?, notes=?, status=?, job_id=?, updated_at=datetime('now','localtime')"
                    " WHERE id=?",
                    vals + (bid,))
         audit(db, "booking_edit", f"#{bid}")
+        from .. import online
+        online.booking_changed(db, bid, was, status)   # an online booking confirmed or cancelled: the website hears
     else:
         bid = db.execute("INSERT INTO bookings (contact_id, resource_id, service_id, starts_at, minutes, title, address,"
                          " party, phone, notes, status, job_id, mode, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -469,6 +472,8 @@ def set_status(bid):
     db.execute("UPDATE bookings SET status=?, outcome=CASE WHEN ?='done' THEN COALESCE(outcome, 'finished') ELSE outcome END,"
                " updated_at=datetime('now','localtime') WHERE id=?", (st, st, bid))
     audit(db, "booking_status", f"#{bid} {st}")
+    from .. import online
+    online.booking_changed(db, bid, b["status"], st)   # an online booking confirmed or cancelled: the website hears
     refresh_job(db, b["job_id"])
     flash(f"Marked {dict(STATUSES)[st].lower()}.", "ok")
     return redirect(request.form.get("back") or url_for("bookings.calendar", d=b["starts_at"][:10]))

@@ -52,6 +52,13 @@ def cmd_serve(args):
             webbrowser.open(url)
         except Exception:
             pass
+    try:  # Riyeser Central on this PC finds the local online-connections API here (riyeser/views/online.py)
+        import atexit
+        from .views.online import write_local_api, remove_local_api
+        write_local_api(app, args.port, "Riyeser Accounting (serve)")
+        atexit.register(remove_local_api, app)
+    except OSError:
+        pass
     try:
         from waitress import serve
         serve(app, host=args.host, port=args.port, threads=8)

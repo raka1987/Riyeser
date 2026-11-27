@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% block title %}{{ title }} from your website{% endblock %}
+{% block content %}
+{% include "online/_styles.html" %}
+<div class="head"><div><h1>{{ title }} from your website{% if r.test %} <span class="badge ol-test">Test</span>{% endif %}</h1>
+<p class="sub">Sent {{ (r.received_at or '')[:16]|replace('T', ' ') }} UTC{% if r.key_name %} with the key “{{ r.key_name }}”{% endif %}{% if r.source == 'widget' %}, from the booking form on your website{% endif %}. Brought in {{ r.filed_at[:16] }}.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('online.index', t='test' if r.test else 'all') }}">← Back to the list</a>{% if link %}<a class="btn pri" href="{{ link }}">Open {{ r.reference or 'it' }}</a>{% endif %}</div></div>
+{% if r.test %}<div class="ol-test">Sent with a <b>test key</b>: it was checked the same way a real one is, but nothing was added to your books.</div>{% endif %}
+<div class="card"><h3>What happened</h3><dl class="ol-kv">
+<dt>Status</dt><dd><span class="badge ol-{{ r.status }}">{{ statuses.get(r.status, r.status) }}</span>{% if r.state %} {{ r.state|replace('_', ' ') }}{% endif %}</dd>
+{% if r.reference %}<dt>Our reference</dt><dd>{{ r.reference }}</dd>{% endif %}
+{% if r.message %}<dt>The customer sees</dt><dd>{{ r.message }}</dd>{% endif %}
+{% if r.reason %}<dt>Note for you</dt><dd>{{ r.reason }}</dd>{% endif %}
+{% if r.attempts > 1 %}<dt>Tries</dt><dd>{{ r.attempts }}</dd>{% endif %}
+{% if source_page %}<dt>Sent from the page</dt><dd>{{ source_page }}</dd>{% endif %}
+</dl>
+{% if not r.test and r.status == 'done' and can('sales', 2) %}
+{% if r.kind == 'order' %}<form method="post" action="{{ url_for('online.news', iid=r.id) }}" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" name="what" value="ready">Ready for the customer</button><button class="btn" name="what" value="completed">Completed</button></form>{% endif %}
+{% if r.kind == 'booking' and booking %}<form method="post" action="{{ url_for('online.news', iid=r.id) }}" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">{% if booking.status == 'booked' %}<button class="btn pri" name="what" value="confirmed">Confirm the booking</button>{% endif %}{% if booking.status in ('booked', 'confirmed') %}<button class="btn danger" name="what" value="cancelled" onclick="return confirm('Cancel this booking? The customer\'s website will be told.')">Cancel it</button>{% endif %}</form>{% endif %}
+{% endif %}
+{% if req %}<h4 style="margin-top:14px">Order request</h4>
+<div class="tbl"><table id="ol-req"><tr><th>Item</th><th>Qty</th><th>Price on the website</th></tr>{% for l in req %}<tr><td>{{ l.name or '' }} <span class="muted">{{ l.sku }}</span>{% if not l.known %} <span class="badge void">Not one of your items</span>{% endif %}</td><td>{{ '%g'|format(l.quantity) }}</td><td>{{ l.unit_price if l.unit_price is not none else '' }}</td></tr>{% endfor %}</table></div>
+{% if p.preferred_time %}<p class="muted">Wanted: {{ p.preferred_time }}</p>{% endif %}
+{% if r.converted_id %}<p class="flash ok">Turned into {{ 'a till order' if r.converted_type == 'pos_order' else 'an order' }}{% if converted_link %}: <a href="{{ converted_link }}">open it</a>{% endif %}.</p>
+{% elif r.test %}<p class="muted">Sent with a test key, so it can't be turned into an order.</p>
+{% elif can('sales', 2) %}<p class="muted small">Nothing is added until you confirm it. Check the items and the price with the customer first.</p>
+<form method="post" action="{{ url_for('online.convert', iid=r.id) }}" style="display:flex;gap:8px;flex-wrap:wrap">{% for k, l in convert_as.items() %}<button class="btn{{ ' pri' if loop.first }}" name="how" value="{{ k }}">Make {{ 'an' if l[0] in 'AEIOU' else 'a' }} {{ l|lower }}</button>{% endfor %}</form>{% endif %}
+{% endif %}
+{% if news %}<h4 style="margin-top:14px">News sent back</h4><ul>{% for n in news %}<li>{{ n.event }} · {{ n.created_at[:16] }} · {% if n.sent_at %}sent {{ n.sent_at[:16] }}{% else %}waiting for Riyeser Central{% if n.error %} ({{ n.error }}){% endif %}{% endif %}</li>{% endfor %}</ul>{% endif %}
+</div>
+<div class="card"><h3>What was sent</h3>
+{% set c = p.customer or p.accepted_by or p.payer %}
+{% if c is mapping %}<dl class="ol-kv">{% for k in ('name', 'company', 'email', 'phone', 'position') if c[k] %}<dt>{{ k|capitalize }}</dt><dd>{{ c[k] }}</dd>{% endfor %}</dl>{% endif %}
+{% if r.kind == 'order' and p['items'] %}<div class="tbl" style="margin-top:10px"><table><tr><th>Item</th><th>Qty</th><th>Price</th></tr>{% for l in p['items'] %}<tr><td>{{ l.name or '' }} <span class="muted">{{ l.sku or '' }}</span></td><td>{{ l.quantity }}</td><td>{{ l.unit_price if l.unit_price is not none else '' }}</td></tr>{% endfor %}</table></div>{% endif %}
+<details style="margin-top:10px"><summary>Everything, as sent</summary><pre class="ol-pre">{{ pretty }}</pre></details>
+</div>
+{% endblock %}

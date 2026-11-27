@@ -20,7 +20,7 @@ table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}td
 {% if t.surcharge %}<tr><td>&nbsp; Card surcharge</td><td class="n">{{ t.surcharge|money }}</td></tr>{% endif %}
 {% if t.cashout %}<tr><td>&nbsp; Cash out</td><td class="n">{{ t.cashout|money }}</td></tr>{% endif %}
 {% if t.approved_amount and t.approved_amount != t.amount %}<tr><td>&nbsp; Charged to card</td><td class="n">{{ t.approved_amount|money }}</td></tr>{% endif %}
-{% endif %}{% endif %}{% else %}{% if s.total %}<tr><td>{{ methods[s.method] }}</td><td class="n">{{ s.tendered|money }}</td></tr>
+{% endif %}{% endif %}{% else %}{% if s.total %}<tr><td>{{ methods[s.method] or ('Paid online' if s.method == 'online' else s.method) }}</td><td class="n">{{ s.tendered|money }}</td></tr>
 {% if s.method == 'cash' %}<tr><td>Change</td><td class="n">{{ s.change_given|money }}</td></tr>{% endif %}{% endif %}{% endfor %}</table>
 {% for t in tenders if t.receipt %}<hr><div style="white-space:pre-wrap;font-size:12px">{{ t.receipt|join('\n') }}</div>{% endfor %}
 <hr><div class="c">{% if s.cname != 'Walk-in Customer' %}Customer: {{ s.cname }}<br>{% endif %}Served by {{ s.full_name or s.username }}<br>Thank you!</div>

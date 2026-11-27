@@ -92,6 +92,14 @@ def today_data(db):
         out["bookings"] = [b for b in day_bookings(db, d) if b["status"] not in ("cancelled",)]
     if visible_kinds():
         out["follow_ups"] = follow_ups_due(db, day)
+    if perms.can("sales") or perms.can("bookings"):
+        from .. import online
+        try:
+            out["online_new"] = online.new_for_today(db)
+        except Exception:
+            out["online_new"] = []
+        if not out["online_new"]:
+            out.pop("online_new")
     if f["expenses"] and perms.can("expenses", perms.FULL):
         out["claims"] = db.execute("SELECT COUNT(*) n, COALESCE(SUM(amount),0) s FROM expense_claims"
                                    " WHERE status='waiting'").fetchone()

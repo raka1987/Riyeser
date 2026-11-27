@@ -75,6 +75,13 @@ def main(argv=None):
     if not _wait_until_up(url):
         print(f"{app_name} failed to start.", file=sys.stderr)
         sys.exit(1)
+    try:  # Riyeser Central finds this program's local online-connections API here (riyeser/views/online.py)
+        import atexit
+        from .views.online import write_local_api, remove_local_api
+        write_local_api(app, port, app_name)
+        atexit.register(remove_local_api, app)
+    except OSError:
+        pass
     print(f"{app_name} running at {url}  (company file: {app.config['DATABASE']}"
           f"{', demo mode' if app.config.get('DEMO_MODE') else ''})", flush=True)
 

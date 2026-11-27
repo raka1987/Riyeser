@@ -1,0 +1,9 @@
+{# What Riyeser Central's sync loop last reported. #}
+<div class="card ol-sync" id="ol-sync">
+{% if not sync.at %}<span class="dot idle"></span><div><b>Not connected yet</b><div class="muted small">Riyeser Central on the PC that holds this company file brings in what your website sends. Turn it on in Central: Settings → Online connections.</div></div>
+{% else %}<span class="dot {{ 'ok' if sync.ok else 'err' }}"></span>
+<div><b>Online connections: {{ counts.today }} received today{% if sync.ok %}, last sync {{ ago }}{% else %}, a problem {{ ago }}{% endif %}</b>
+<div class="muted small">{% if sync.pc %}Synced by {{ sync.pc }}. {% endif %}{% if sync.last_publish %}Prices, stock and free times sent {{ sync.last_publish }}.{% endif %}{% if counts.failed %} <b>{{ counts.failed }} to try again.</b>{% endif %}</div></div>
+{% if not sync.ok and sync.error %}<p class="flash error fix">{{ sync.error }}{% if sync.fix %} {{ sync.fix }}{% endif %}</p>{% endif %}
+{% endif %}
+</div>
