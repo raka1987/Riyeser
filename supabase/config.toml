@@ -1,4 +1,4 @@
-# Only for deploying the Edge Functions (.github/workflows/deploy-licence-function.yml and deploy-paypal-function.yml). The database itself is
+# Only for deploying the Edge Functions (.github/workflows/deploy-licence-function.yml, deploy-paypal-function.yml and deploy-api-function.yml). The database itself is
 # set up from website/team/team-chat.sql on branch module/desk-assistant.
 project_id = "goaugynxeatzqzifpoes"
 
@@ -9,4 +9,8 @@ verify_jwt = false
 [functions.paypal]
 # PayPal's webhooks arrive without a Supabase sign-in (their signature is checked with PayPal instead);
 # paying and cancelling check the person's session themselves.
+verify_jwt = false
+
+[functions.api]
+# Websites call it with Riyeser API keys (rk_…), not Supabase sign-ins; it checks them itself (hash lookup).
 verify_jwt = false

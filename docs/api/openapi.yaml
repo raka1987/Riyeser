@@ -1,0 +1,751 @@
+openapi: 3.1.0
+info:
+  title: Riyeser online connections API
+  version: "2026-11-26"
+  summary: Send bookings, orders, enquiries, customers, quote acceptances and invoice payments into Riyeser; read prices, stock and free booking times.
+  description: |
+    Every business on Riyeser (shops, salons, clinics, trades, cafés and restaurants, service and professional firms)
+    can connect its own website or online shop. What a website sends waits in the business's **post box** until one
+    of its PCs running Riyeser collects it and files it in Bookings, POS, Invoices or Accounting. Prices, stock and
+    open booking times are **published** by those PCs, so reads are always the latest copy the business pushed
+    (see `updated_at`), never its books.
+
+    **Keys.** Owners and admins make keys in Riyeser (Management → Connections), signed in with two-step sign-in.
+    A key is shown once. Send it as `Authorization: Bearer rk_…`.
+    - Secret keys `rk_live_…` / `rk_test_…`: for servers only. Refused from a web browser (`secret_key_in_browser`)
+      unless the owner lists the website on the key.
+    - Widget keys `rk_pub_live_…` / `rk_pub_test_…`: publishable, for a booking widget in a public web page. Only
+      `availability:read`, `bookings:write`, `enquiries:write`, only from the key's websites (CORS), and a widget
+      booking must be one of the free start times.
+    - Test keys (`_test_`): everything works the same, but what they send is marked `test: true`, and Riyeser shows
+      it as a test, never as a real booking or sale. Reads return the business's real published data.
+
+    **Permissions (scopes)** per key: `bookings:write`, `orders:write`, `customers:write`, `enquiries:write`,
+    `quotes:write`, `payments:write`, `stock:read`, `prices:read`, `availability:read`, `catalog:read`.
+
+    **Licences.** The API needs at least one Riyeser program on its free trial or paid. Bookings and open times also
+    need Riyeser Bookings; orders and stock need Riyeser POS or Riyeser Accounting. Otherwise the answer is 402 with
+    `plan_required`, `bookings_licence_required` or `pos_or_accounting_licence_required`.
+
+    **Errors** are always `{"error": {"code": "…", "message": "plain English", "details": [{"field", "message"}]}}`
+    (`details` only for `invalid_payload`). Every answer has `X-Request-Id`.
+
+    **Limits.** 120 requests a minute per secret key, 60 per widget key (and 20 a minute per visitor address), 20 000
+    a day per business. Over: 429 with `Retry-After`. `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`
+    on each answer. Bodies up to 64 KB.
+
+    **Idempotency.** Send `Idempotency-Key` (up to 100 of `A-Z a-z 0-9 . _ : -`) on every POST, e.g. your order
+    number. The same key with the same body (in any key order or spacing) returns the first answer again (200 and
+    `Idempotent-Replayed: true`); with a different body it's 409 `idempotency_conflict`. Keys are kept 90 days.
+
+    **Webhooks** (made in Riyeser): POST JSON `{"id","type","created_at","test","data"}` with
+    `Riyeser-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" keyed with the whsec_… secret>`,
+    `Riyeser-Event`, `Riyeser-Delivery`. Check the signature (constant-time) and that `t` is within 5 minutes; use
+    `id` to ignore repeats. 2xx within 10 seconds = delivered; otherwise retried after 1, 5, 30 min, 2, 6, 12, 24 h.
+    Events: booking.received, booking.confirmed, booking.cancelled, order.received, order.ready, order.completed,
+    enquiry.received, quote.accepted, payment.received, stock.changed (and ping, from "Send test").
+  contact:
+    name: Riyeser support
+    url: https://riyeser.com/?contact
+servers:
+  - url: https://goaugynxeatzqzifpoes.supabase.co/functions/v1/api
+    description: Riyeser (live and test keys both use this address)
+security:
+  - apiKey: []
+tags:
+  - { name: In, description: Things websites send (into the post box) }
+  - { name: Out, description: Published data the business's PCs keep up to date }
+  - { name: Status }
+paths:
+  /v1/ping:
+    get:
+      tags: [Status]
+      summary: Check the API (and, with a key, which business and permissions it has)
+      security: [{}, { apiKey: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, version]
+                properties:
+                  ok: { const: true }
+                  version: { type: string, examples: ["2026-11-26"] }
+                  workspace_id: { type: string, format: uuid }
+                  key:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      kind: { enum: [secret, widget] }
+                      mode: { enum: [live, test] }
+                      scopes: { type: array, items: { $ref: "#/components/schemas/Scope" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/bookings:
+    post:
+      tags: [In]
+      summary: A booking request (appointment, job visit, table, class)
+      description: |
+        Needs `bookings:write` and Riyeser Bookings. Arrives in Bookings as a request the business confirms (or the
+        PC confirms it straight away, by the business's own settings). Follow it with GET /v1/events/{id} or the
+        booking.confirmed / booking.cancelled webhooks. Widget keys: `start` must be one of the free times from
+        GET /v1/availability/slots (409 `slot_not_available` otherwise). If `end` is left out it's `start` plus the
+        service's duration.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Booking" } } }
+      responses:
+        "202": { $ref: "#/components/responses/W202" }
+        "200": { $ref: "#/components/responses/W200" }
+        "400": { $ref: "#/components/responses/W400" }
+        "401": { $ref: "#/components/responses/W401" }
+        "402": { $ref: "#/components/responses/W402" }
+        "403": { $ref: "#/components/responses/W403" }
+        "409": { $ref: "#/components/responses/W409" }
+        "413": { $ref: "#/components/responses/W413" }
+        "415": { $ref: "#/components/responses/W415" }
+        "422": { $ref: "#/components/responses/W422" }
+        "429": { $ref: "#/components/responses/W429" }
+        "503": { $ref: "#/components/responses/W503" }
+  /v1/orders:
+    post:
+      tags: [In]
+      summary: An online order (shop, takeaway, café or restaurant)
+      description: Needs `orders:write` and Riyeser POS or Accounting. Arrives as an online order on the POS (or a sales invoice in Accounting).
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+      responses:
+        "202": { $ref: "#/components/responses/W202" }
+        "200": { $ref: "#/components/responses/W200" }
+        "400": { $ref: "#/components/responses/W400" }
+        "401": { $ref: "#/components/responses/W401" }
+        "402": { $ref: "#/components/responses/W402" }
+        "403": { $ref: "#/components/responses/W403" }
+        "409": { $ref: "#/components/responses/W409" }
+        "413": { $ref: "#/components/responses/W413" }
+        "415": { $ref: "#/components/responses/W415" }
+        "422": { $ref: "#/components/responses/W422" }
+        "429": { $ref: "#/components/responses/W429" }
+        "503": { $ref: "#/components/responses/W503" }
+  /v1/enquiries:
+    post:
+      tags: [In]
+      summary: An enquiry (contact form, request for a quote, callback)
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Enquiry" } } }
+      responses:
+        "202": { $ref: "#/components/responses/W202" }
+        "200": { $ref: "#/components/responses/W200" }
+        "400": { $ref: "#/components/responses/W400" }
+        "401": { $ref: "#/components/responses/W401" }
+        "402": { $ref: "#/components/responses/W402" }
+        "403": { $ref: "#/components/responses/W403" }
+        "409": { $ref: "#/components/responses/W409" }
+        "413": { $ref: "#/components/responses/W413" }
+        "415": { $ref: "#/components/responses/W415" }
+        "422": { $ref: "#/components/responses/W422" }
+        "429": { $ref: "#/components/responses/W429" }
+        "503": { $ref: "#/components/responses/W503" }
+  /v1/customers:
+    post:
+      tags: [In]
+      summary: A new or updated customer (sign-up, account, newsletter with consent)
+      description: Matched by `external_id`, then email, then phone; otherwise a new customer.
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/Customer" } } }
+      responses:
+        "202": { $ref: "#/components/responses/W202" }
+        "200": { $ref: "#/components/responses/W200" }
+        "400": { $ref: "#/components/responses/W400" }
+        "401": { $ref: "#/components/responses/W401" }
+        "402": { $ref: "#/components/responses/W402" }
+        "403": { $ref: "#/components/responses/W403" }
+        "409": { $ref: "#/components/responses/W409" }
+        "413": { $ref: "#/components/responses/W413" }
+        "415": { $ref: "#/components/responses/W415" }
+        "422": { $ref: "#/components/responses/W422" }
+        "429": { $ref: "#/components/responses/W429" }
+        "503": { $ref: "#/components/responses/W503" }
+  /v1/quotes/{ref}/accept:
+    post:
+      tags: [In]
+      summary: A customer accepted a quote online
+      description: "`ref` is the quote's number as the business sent it (e.g. Q-1042), URL-encoded. The PC checks it exists and hasn't expired; if not, the event is rejected with a message."
+      parameters:
+        - { name: ref, in: path, required: true, schema: { $ref: "#/components/schemas/Ref" } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/QuoteAccept" } } }
+      responses:
+        "202": { $ref: "#/components/responses/W202" }
+        "200": { $ref: "#/components/responses/W200" }
+        "400": { $ref: "#/components/responses/W400" }
+        "401": { $ref: "#/components/responses/W401" }
+        "402": { $ref: "#/components/responses/W402" }
+        "403": { $ref: "#/components/responses/W403" }
+        "409": { $ref: "#/components/responses/W409" }
+        "413": { $ref: "#/components/responses/W413" }
+        "415": { $ref: "#/components/responses/W415" }
+        "422": { $ref: "#/components/responses/W422" }
+        "429": { $ref: "#/components/responses/W429" }
+        "503": { $ref: "#/components/responses/W503" }
+  /v1/invoices/{ref}/payments:
+    post:
+      tags: [In]
+      summary: A payment received online for an invoice
+      description: "`ref` is the invoice number (e.g. INV-0077), URL-encoded. Recorded against the invoice; an overpayment or unknown invoice is kept for the business to sort out (never lost)."
+      parameters:
+        - { name: ref, in: path, required: true, schema: { $ref: "#/components/schemas/Ref" } }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: "#/components/schemas/InvoicePayment" } } }
+      responses:
+        "202": { $ref: "#/components/responses/W202" }
+        "200": { $ref: "#/components/responses/W200" }
+        "400": { $ref: "#/components/responses/W400" }
+        "401": { $ref: "#/components/responses/W401" }
+        "402": { $ref: "#/components/responses/W402" }
+        "403": { $ref: "#/components/responses/W403" }
+        "409": { $ref: "#/components/responses/W409" }
+        "413": { $ref: "#/components/responses/W413" }
+        "415": { $ref: "#/components/responses/W415" }
+        "422": { $ref: "#/components/responses/W422" }
+        "429": { $ref: "#/components/responses/W429" }
+        "503": { $ref: "#/components/responses/W503" }
+  /v1/events/{id}:
+    get:
+      tags: [Status]
+      summary: Where something you sent is up to
+      description: Any key of the business (a widget key only sees what it sent itself). Never returns what was sent.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/EventStatus" } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/catalog:
+    get:
+      tags: [Out]
+      summary: Products and services (catalog:read)
+      parameters:
+        - { name: type, in: query, schema: { enum: [product, service] } }
+        - { name: updated_since, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Sku" }
+        - { $ref: "#/components/parameters/Limit" }
+        - { $ref: "#/components/parameters/After" }
+      responses:
+        "200":
+          description: One page (sorted by SKU; `next` is the `after` for the next page, or null)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/CatalogItem" } } }
+        "default": { $ref: "#/components/responses/Error" }
+  /v1/prices:
+    get:
+      tags: [Out]
+      summary: Prices of active products and services (prices:read)
+      parameters: [{ $ref: "#/components/parameters/Sku" }, { $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/After" }]
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/Price" } } }
+        "default": { $ref: "#/components/responses/Error" }
+  /v1/stock:
+    get:
+      tags: [Out]
+      summary: Stock levels (stock:read; needs POS or Accounting)
+      parameters: [{ $ref: "#/components/parameters/Sku" }, { $ref: "#/components/parameters/Limit" }, { $ref: "#/components/parameters/After" }]
+      responses:
+        "200":
+          description: One page
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/Page" }
+                  - properties: { items: { type: array, items: { $ref: "#/components/schemas/StockLevel" } } }
+        "default": { $ref: "#/components/responses/Error" }
+  /v1/availability:
+    get:
+      tags: [Out]
+      summary: What can be booked (availability:read; needs Bookings) — services, staff, booking rules
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/Availability" } } }
+        "default": { $ref: "#/components/responses/Error" }
+  /v1/availability/slots:
+    get:
+      tags: [Out]
+      summary: Free start times for one service
+      description: |
+        Start times every `slot_minutes` inside the business's open times, where the whole service fits, at least
+        `min_notice_minutes` from now and within `days_ahead`. Times asked for by bookings still in the post box are
+        left out. `from` is a date in the business's time zone (default today); up to 31 days.
+      parameters:
+        - { name: service, in: query, required: true, schema: { $ref: "#/components/schemas/Sku" } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: days, in: query, schema: { type: integer, minimum: 1, maximum: 31, default: 7 } }
+        - { name: staff, in: query, schema: { $ref: "#/components/schemas/Sku" } }
+        - { name: party_size, in: query, schema: { type: integer, minimum: 1, maximum: 1000, default: 1 } }
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/Slots" } } }
+        "default": { $ref: "#/components/responses/Error" }
+webhooks:
+  booking.received: { $ref: "#/components/pathItems/WebhookReceived" }
+  booking.confirmed: { $ref: "#/components/pathItems/WebhookLifecycle" }
+  booking.cancelled: { $ref: "#/components/pathItems/WebhookLifecycle" }
+  order.received: { $ref: "#/components/pathItems/WebhookReceived" }
+  order.ready: { $ref: "#/components/pathItems/WebhookLifecycle" }
+  order.completed: { $ref: "#/components/pathItems/WebhookLifecycle" }
+  enquiry.received: { $ref: "#/components/pathItems/WebhookReceived" }
+  quote.accepted: { $ref: "#/components/pathItems/WebhookReceived" }
+  payment.received: { $ref: "#/components/pathItems/WebhookReceived" }
+  stock.changed: { $ref: "#/components/pathItems/WebhookStock" }
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: "rk_live_… | rk_test_… | rk_pub_live_… | rk_pub_test_… (48 hex characters after the prefix)"
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, pattern: "^[A-Za-z0-9._:-]{1,100}$" }
+      description: Strongly recommended. Your own id for this request (e.g. the order number). Safe to retry with it.
+    Sku:
+      name: sku
+      in: query
+      description: Only these SKUs, separated by commas (up to 200).
+      schema: { type: string, examples: ["MUG,CUP"] }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+    After:
+      name: after
+      in: query
+      description: The `next` of the page before.
+      schema: { $ref: "#/components/schemas/Sku" }
+  responses:
+    W202:
+      description: Taken into the post box (it waits there until one of the business's PCs collects it)
+      headers:
+        Location: { schema: { type: string }, description: "/v1/events/{id}" }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Accepted" } } }
+    W200:
+      description: The same Idempotency-Key and body as before; the first answer again (Idempotent-Replayed true)
+      headers:
+        Idempotent-Replayed: { schema: { const: "true" } }
+      content: { application/json: { schema: { $ref: "#/components/schemas/Accepted" } } }
+    W400: { description: "invalid_json, invalid_request, invalid_idempotency_key", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W401: { description: "missing_key, invalid_key, key_revoked", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W402: { description: "plan_required, bookings_licence_required, pos_or_accounting_licence_required", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W403: { description: "missing_scope, origin_not_allowed, secret_key_in_browser, ip_not_allowed, business_closed", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W409: { description: "idempotency_conflict, slot_not_available", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W413: { description: payload_too_large (over 64 KB), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W415: { description: unsupported_media_type (send application/json), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W422: { description: "invalid_payload, with details per field", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W429: { description: "rate_limited, daily_limit (see Retry-After)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    W503: { description: unavailable (try again with the same Idempotency-Key), content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    Error:
+      description: An error
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+    Unauthorized:
+      description: No key, or not a valid key (missing_key, invalid_key, key_revoked)
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  pathItems:
+    WebhookReceived:
+      post:
+        summary: Something a website sent was taken in. data = {event_id, kind, source, payload} (payload as cleaned by the API).
+        requestBody:
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/WebhookEnvelope" }
+                  - properties:
+                      data:
+                        type: object
+                        required: [event_id, kind, source, payload]
+                        properties:
+                          event_id: { type: string, format: uuid }
+                          kind: { $ref: "#/components/schemas/Kind" }
+                          source: { enum: [api, widget] }
+                          payload: { type: object }
+        responses: { "2XX": { description: Delivered } }
+    WebhookLifecycle:
+      post:
+        summary: The business confirmed/cancelled a booking, or an order is ready/completed. data from the business's PC.
+        requestBody:
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/WebhookEnvelope" }
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          event_id: { type: string, format: uuid, description: The post box event it's about (when it came in through the API) }
+                          external_reference: { type: [string, "null"], description: The website's own `reference` from the payload }
+                          reference: { type: string, description: "Riyeser's reference (e.g. BK-1042, POS-0042)" }
+                          state: { type: string }
+                          message: { type: string }
+                          start: { type: string, format: date-time }
+                          end: { type: string, format: date-time }
+        responses: { "2XX": { description: Delivered } }
+    WebhookStock:
+      post:
+        summary: Stock levels changed (up to 500 items per event)
+        requestBody:
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - { $ref: "#/components/schemas/WebhookEnvelope" }
+                  - properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                sku: { $ref: "#/components/schemas/Sku" }
+                                quantity: { type: number }
+                                previous: { type: [number, "null"] }
+        responses: { "2XX": { description: Delivered } }
+  schemas:
+    Scope:
+      enum: [bookings:write, orders:write, customers:write, enquiries:write, quotes:write, payments:write, stock:read, prices:read, availability:read, catalog:read]
+    Kind: { enum: [booking, order, enquiry, customer, quote_accept, invoice_payment] }
+    Sku: { type: string, pattern: "^[A-Za-z0-9._/-]{1,64}$" }
+    Ref: { type: string, pattern: "^[A-Za-z0-9._/#-]{1,64}$", description: "URL-encode / and # in the path" }
+    DateTime:
+      type: string
+      format: date-time
+      description: With its time zone (Z or ±hh:mm), e.g. 2026-12-01T09:30:00+13:00. Stored in UTC.
+    Money: { type: number, minimum: 0, maximum: 1000000000, description: Up to 4 decimal places }
+    Currency: { type: string, pattern: "^[A-Za-z]{3}$", description: ISO 4217, upper-cased (NZD, AUD, FJD, USD…) }
+    Metadata:
+      type: object
+      maxProperties: 20
+      propertyNames: { pattern: "^[A-Za-z0-9_.-]{1,40}$" }
+      additionalProperties: { type: [string, number, boolean, "null"], description: Text is cut to 200 characters }
+      description: Your own extras, kept with it and shown to the business. (Unknown fields elsewhere are dropped.)
+    Address:
+      type: object
+      properties:
+        line1: { type: string, maxLength: 200 }
+        line2: { type: string, maxLength: 200 }
+        city: { type: string, maxLength: 100 }
+        region: { type: string, maxLength: 100 }
+        postcode: { type: string, maxLength: 20 }
+        country: { type: string, maxLength: 60 }
+    Person:
+      type: object
+      required: [name]
+      description: For bookings, orders and enquiries, give email or phone (or both).
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        email: { type: string, format: email, maxLength: 200, description: Lower-cased }
+        phone: { type: string, pattern: "^[0-9+()\\-. ]{3,40}$" }
+        company: { type: string, maxLength: 120 }
+        address: { $ref: "#/components/schemas/Address" }
+        notes: { type: string, maxLength: 1000 }
+    Booking:
+      type: object
+      required: [service, start, customer]
+      properties:
+        service: { $ref: "#/components/schemas/Sku", description: A service SKU from GET /v1/availability }
+        staff: { $ref: "#/components/schemas/Sku", description: A staff ref (leave out for "anyone") }
+        start: { $ref: "#/components/schemas/DateTime", description: Not in the past, within 2 years }
+        end: { $ref: "#/components/schemas/DateTime", description: After start. Default start + the service's duration }
+        party_size: { type: integer, minimum: 1, maximum: 1000, description: Tables and group classes }
+        customer: { $ref: "#/components/schemas/Person" }
+        notes: { type: string, maxLength: 2000 }
+        location: { type: string, maxLength: 200, description: Where the job is (trades, mobile services) if not the customer's address }
+        reference: { type: string, maxLength: 64, description: Your own reference }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+      examples:
+        - service: CUT
+          staff: amy
+          start: "2026-12-01T09:30:00+13:00"
+          customer: { name: Kai Smith, email: kai@example.com, phone: "021 555 0101" }
+          notes: First visit
+    OrderItem:
+      type: object
+      required: [quantity]
+      description: sku or name (or both)
+      properties:
+        sku: { $ref: "#/components/schemas/Sku" }
+        name: { type: string, maxLength: 200 }
+        quantity: { type: number, exclusiveMinimum: 0, maximum: 100000, description: Up to 3 decimal places }
+        unit_price: { $ref: "#/components/schemas/Money", description: What the customer was charged each; left out = the business's price }
+        tax_rate: { type: number, minimum: 0, maximum: 100 }
+        notes: { type: string, maxLength: 300 }
+        options: { type: array, maxItems: 20, items: { type: string, maxLength: 100 }, examples: [["Oat milk", "Extra shot"]] }
+    Order:
+      type: object
+      required: [customer, items]
+      properties:
+        reference: { type: string, maxLength: 64, description: Your order number }
+        customer: { $ref: "#/components/schemas/Person" }
+        currency: { $ref: "#/components/schemas/Currency" }
+        items: { type: array, minItems: 1, maxItems: 200, items: { $ref: "#/components/schemas/OrderItem" } }
+        fulfilment:
+          type: object
+          required: [type]
+          properties:
+            type: { enum: [pickup, delivery, dine_in, shipping, digital] }
+            time: { $ref: "#/components/schemas/DateTime", description: When the customer wants it }
+            address: { $ref: "#/components/schemas/Address" }
+            table: { type: string, maxLength: 20 }
+            notes: { type: string, maxLength: 300 }
+        payment:
+          type: object
+          required: [status]
+          properties:
+            status: { enum: [paid, unpaid, part_paid] }
+            method: { type: string, maxLength: 40 }
+            amount: { $ref: "#/components/schemas/Money" }
+            currency: { $ref: "#/components/schemas/Currency" }
+            provider: { type: string, maxLength: 40, examples: [stripe, paypal, windcave] }
+            transaction_id: { type: string, maxLength: 100 }
+        totals:
+          type: object
+          properties:
+            subtotal: { $ref: "#/components/schemas/Money" }
+            tax: { $ref: "#/components/schemas/Money" }
+            shipping: { $ref: "#/components/schemas/Money" }
+            discount: { $ref: "#/components/schemas/Money" }
+            total: { $ref: "#/components/schemas/Money" }
+        notes: { type: string, maxLength: 2000 }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+    Enquiry:
+      type: object
+      required: [customer, message]
+      properties:
+        customer: { $ref: "#/components/schemas/Person" }
+        subject: { type: string, maxLength: 200 }
+        message: { type: string, minLength: 1, maxLength: 5000 }
+        service: { $ref: "#/components/schemas/Sku" }
+        preferred_contact: { enum: [email, phone, any] }
+        preferred_time: { type: string, maxLength: 120 }
+        source_page: { type: string, format: uri, maxLength: 500 }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+    Customer:
+      allOf:
+        - { $ref: "#/components/schemas/Person" }
+        - type: object
+          description: email or phone is needed
+          properties:
+            external_id: { type: string, maxLength: 64, description: Your id for them }
+            marketing_consent: { type: boolean, description: Only true if they agreed to marketing }
+            tags: { type: array, maxItems: 20, items: { type: string, maxLength: 40 } }
+            metadata: { $ref: "#/components/schemas/Metadata" }
+    QuoteAccept:
+      type: object
+      required: [accepted_by]
+      properties:
+        accepted_by:
+          type: object
+          required: [name]
+          properties:
+            name: { type: string, maxLength: 120 }
+            email: { type: string, format: email }
+            phone: { type: string }
+            position: { type: string, maxLength: 80 }
+        signature: { type: string, maxLength: 200, description: The name they typed to sign }
+        po_number: { type: string, maxLength: 64 }
+        note: { type: string, maxLength: 1000 }
+        options: { type: array, maxItems: 50, items: { type: string, maxLength: 64 }, description: Optional lines they chose }
+        accepted_at: { $ref: "#/components/schemas/DateTime" }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+    InvoicePayment:
+      type: object
+      required: [amount, method]
+      properties:
+        amount: { type: number, exclusiveMinimum: 0, maximum: 1000000000 }
+        currency: { $ref: "#/components/schemas/Currency" }
+        paid_at: { $ref: "#/components/schemas/DateTime" }
+        method: { enum: [card, bank_transfer, paypal, stripe, cash, direct_debit, other] }
+        provider: { type: string, maxLength: 40 }
+        transaction_id: { type: string, maxLength: 100 }
+        payer:
+          type: object
+          properties:
+            name: { type: string, maxLength: 120 }
+            email: { type: string, format: email }
+        note: { type: string, maxLength: 1000 }
+        metadata: { $ref: "#/components/schemas/Metadata" }
+    Accepted:
+      type: object
+      required: [id, kind, status, test, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/Kind" }
+        status: { enum: [waiting, taken, done, failed, rejected] }
+        test: { type: boolean }
+        created_at: { type: string, format: date-time }
+    EventStatus:
+      type: object
+      required: [id, kind, status, test, created_at, updated_at, result]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/Kind" }
+        status:
+          enum: [waiting, taken, done, failed, rejected]
+          description: |
+            waiting: in the post box. taken: a PC is filing it. done: filed. rejected: the business couldn't accept it
+            (see result.message). failed: it couldn't be filed after 5 tries, or no PC collected it in 90 days.
+        test: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        result:
+          type: object
+          properties:
+            reference: { type: string, maxLength: 60, description: "Riyeser's reference, e.g. BK-1042" }
+            state: { type: string, description: "e.g. pending, confirmed, cancelled, accepted, ready, completed, recorded, declined, expired" }
+            message: { type: string, maxLength: 300, description: For the customer }
+    Page:
+      type: object
+      required: [items, next, test]
+      properties:
+        items: { type: array }
+        next: { type: [string, "null"] }
+        updated_at: { type: [string, "null"], format: date-time, description: When the business's PC last published this }
+        test: { type: boolean }
+    CatalogItem:
+      type: object
+      properties:
+        sku: { $ref: "#/components/schemas/Sku" }
+        type: { enum: [product, service] }
+        name: { type: string }
+        description: { type: [string, "null"] }
+        category: { type: [string, "null"] }
+        price: { type: [number, "null"] }
+        currency: { type: [string, "null"] }
+        tax_rate: { type: [number, "null"], description: Percent }
+        tax_included: { type: boolean }
+        unit: { type: [string, "null"] }
+        duration_minutes: { type: [integer, "null"] }
+        active: { type: boolean }
+        updated_at: { type: string, format: date-time }
+    Price:
+      type: object
+      properties:
+        sku: { $ref: "#/components/schemas/Sku" }
+        name: { type: string }
+        price: { type: [number, "null"] }
+        currency: { type: [string, "null"] }
+        tax_rate: { type: [number, "null"] }
+        tax_included: { type: boolean }
+    StockLevel:
+      type: object
+      properties:
+        sku: { $ref: "#/components/schemas/Sku" }
+        quantity: { type: number }
+        in_stock: { type: boolean }
+        updated_at: { type: string, format: date-time }
+    Availability:
+      type: object
+      properties:
+        timezone: { type: string, examples: [Pacific/Auckland] }
+        slot_minutes: { type: integer }
+        min_notice_minutes: { type: integer }
+        days_ahead: { type: integer }
+        updated_at: { type: [string, "null"], format: date-time }
+        services:
+          type: array
+          items:
+            type: object
+            properties:
+              sku: { $ref: "#/components/schemas/Sku" }
+              name: { type: string }
+              description: { type: [string, "null"] }
+              category: { type: [string, "null"] }
+              duration_minutes: { type: integer }
+              price: { type: [number, "null"] }
+              currency: { type: [string, "null"] }
+        staff:
+          type: array
+          items:
+            type: object
+            properties:
+              ref: { $ref: "#/components/schemas/Sku" }
+              name: { type: string }
+              services: { type: array, items: { type: string }, description: Empty = all services }
+        test: { type: boolean }
+    Slots:
+      type: object
+      properties:
+        timezone: { type: string }
+        service: { type: string }
+        duration_minutes: { type: integer }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        slots:
+          type: array
+          items:
+            type: object
+            properties:
+              start: { type: string, format: date-time }
+              end: { type: string, format: date-time }
+              local_start: { type: string, examples: ["2026-12-01T09:30"], description: In the business's time zone }
+              staff: { type: array, items: { type: string }, description: Who is free then (empty for the business's own open times) }
+              capacity: { type: integer }
+        test: { type: boolean }
+    WebhookEnvelope:
+      type: object
+      required: [id, type, created_at, test, data]
+      properties:
+        id: { type: string, format: uuid, description: The event's id (the same for every webhook that gets it; use it to ignore repeats) }
+        type: { type: string }
+        created_at: { type: string, format: date-time }
+        test: { type: boolean }
+        data: { type: object }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              enum: [missing_key, invalid_key, key_revoked, ip_not_allowed, origin_not_allowed, secret_key_in_browser, missing_scope,
+                     business_closed, plan_required, bookings_licence_required, pos_or_accounting_licence_required, rate_limited,
+                     daily_limit, invalid_json, invalid_request, invalid_idempotency_key, invalid_payload, idempotency_conflict,
+                     slot_not_available, payload_too_large, unsupported_media_type, not_found, method_not_allowed, unavailable, internal]
+            message: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string, examples: ["customer.email", "items[0].quantity"] }
+                  message: { type: string }
