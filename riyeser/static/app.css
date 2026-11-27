@@ -101,7 +101,7 @@ td label,td .check{margin-bottom:0}
 .tbl td>div,.tbl td>small,.tbl td>.muted{overflow:hidden;text-overflow:ellipsis}
 .tbl td[colspan],.tbl .wrap,.tbl.wrap td,.tbl td.wrap{white-space:normal;max-width:none}
 /* an empty cell in a list row shows a quiet dash (not read aloud), so a blank isn't mistaken for a missing column */
-.tbl table:not(.lines) tr:not(.grand):not(.total):not(.tot):not(.header)>td:empty::before{content:"—";content:"—"/"";color:#b6c0cc}
+.tbl table:not(.lines):not(:has(input,select,textarea)) tr:not(.grand):not(.total):not(.tot):not(.header)>td:empty::before{content:"—";content:"—"/"";color:#b6c0cc}
 .tbl td .btn,.tbl td button.btn{min-height:var(--ctl-h-sm);padding:3px 10px;font-size:var(--fs-sm);line-height:18px;border-radius:7px}
 .tbl td form:not([class]){display:inline}
 .tbl td>:is(.btn,form)+:is(.btn,form){margin-left:var(--sp-1)}

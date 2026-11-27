@@ -130,8 +130,18 @@
 (function () {
   function fit() {   // cap long text columns only when the table doesn't fit its box
     document.querySelectorAll(".tbl").forEach(function (box) {
-      box.classList.remove("fit");
-      if (box.scrollWidth > box.clientWidth + 1) box.classList.add("fit");
+      box.classList.remove("fit"); box.style.removeProperty("--cell-max");
+      if (box.scrollWidth <= box.clientWidth + 1) return;
+      box.classList.add("fit");
+      // the widest cap that still fits (so short tables don't cut text they have room for)
+      var lo = 120, hi = 600;
+      if (box.scrollWidth > box.clientWidth + 1) { box.style.removeProperty("--cell-max"); return; }   // can't fit: CSS default
+      while (hi - lo > 8) {
+        var mid = (lo + hi) >> 1;
+        box.style.setProperty("--cell-max", mid + "px");
+        if (box.scrollWidth > box.clientWidth + 1) hi = mid; else lo = mid;
+      }
+      box.style.setProperty("--cell-max", lo + "px");
     });
   }
   function titles() {
