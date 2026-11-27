@@ -141,7 +141,7 @@ input[type=checkbox]{width:auto}
 .fields>*{grid-row:span 3;margin-bottom:var(--sp-4);min-width:0}
 .fields>div:not([hidden]):not(:has(>:nth-child(4))){display:grid;grid-template-rows:subgrid;align-content:start}
 .fields>div:not(:has(>:nth-child(4)))>label:first-child{align-self:end}
-.fields>div>.check:only-child{grid-row:2;align-self:center}
+.fields>div>.check:only-child,.fields>div>:only-child:not(label){grid-row:2;align-self:center}
 .fields>.check{align-self:end;min-height:var(--ctl-h)}
 .fields>:is(.btn,button){justify-self:start;align-self:end}
 .fields>div>:is(.btn,button){justify-self:start}
