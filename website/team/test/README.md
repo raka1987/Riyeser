@@ -146,3 +146,15 @@
   lease, retries then failed, rejected, FOR UPDATE SKIP LOCKED with a second connection through `dblink`), published catalogue/stock/open times
   and free start times (a widget booking holds its time), webhooks (https only, the secret shown once, retries with backoff, turned off after
   3 days failing), the request log (addresses truncated, 30 days) and `api_sweep` (90/30 days). Needs the `dblink` extension (in PostgreSQL's contrib).
+- `connections-test.js`: Management › Connections against a pretend Supabase answering the `api_*` functions: the fresh two-step code
+  first (no `api_*` call before it), the Overview, + New key (presets, widget keys need a website and can't send orders, the key shown
+  once with Copy, then only its prefix: never in the page, browser storage or the change history), rename, websites and addresses, revoke
+  (the in-page question), the post box (filters, Try again), the request log (per key, refused only, Show older), webhooks (https only,
+  the secret once, Send test, Deliveries, turned off → Turn back on), Add to your website (snippet, live preview), plan messages, the
+  database's refusal, an older database (PGRST202), staff (nothing at all), no two-step sign-in, and 390px.
+- `widget-test.js`: the booking widget (`website/widget/book.js`, served at `/widget/book.js`) on another website (8093) against a pretend
+  API (8094) with real CORS, plus a website not on the key (8095): book a slot through to "confirmed", an idempotent retry after a cut-off
+  answer (one booking), no free time, 409 slot gone, 402 plan, 422, 429, the enquiry form and the order button, dark, 390px, keyboard,
+  no cookies or storage. Uses ports 8093-8095.
+- `developers-test.js`: riyeser.com/developers/ (from `website/developers.mjs`): every page under the CSP, every endpoint with curl and
+  JavaScript, the webhook signature known answer, the widget preview, help and footer links, the sitemap, 390px.
