@@ -487,7 +487,7 @@ def _unique_document_numbers(db):
 # Each paid program includes 3 users; each extra user is US$7 a month for that program. Plus includes Basics.
 # calls = Riyeser Link (chat, calls, desk phones, Riyeser Link Office). POS: 1 till included (unlimited cashiers),
 # US$15 a month for each extra till. Bundles (Shop, Office, Business) are worked out by the database (riyeser_plan).
-PRICE_USD = {"basic": 25, "plus": 39, "bookings": 25, "calls": 20, "payroll": 25, "pos": 29, "as_built": 29,
+PRICE_USD = {"basic": 25, "plus": 39, "bookings": 25, "calls": 20, "payroll": 25, "pos": 29, "as_built": 29, "estimate": 20,
              "extra_user": 7, "extra_till": 15, "extra_company": 10}
 PRICES = {k: f"US${v}" for k, v in PRICE_USD.items()}   # for screens: {{ prices.basic }} -> "US$25"
 
@@ -510,8 +510,9 @@ INVOICES_APP = {"name": "Invoices", "title": "Invoices", "app": "Riyeser Invoice
 BOOKINGS_APP = {"name": "Bookings", "title": "Bookings", "app": "Riyeser Bookings", "price": f"{PRICES['bookings']} a month"}
 
 # The sixth: measure a job (by hand, on a plan or photo, on the map) and turn it into a quote. Free for 90 days from
-# its first use; the price after that is still to be announced (so there's no PRICE_USD entry for it yet).
-ESTIMATE_APP = {"name": "Estimate", "title": "Estimate", "app": "Riyeser Estimate", "price": "Free for 90 days, price to be announced"}
+# its first use, then US$20 a month (3 users included, US$7 a month each extra user; not part of any bundle).
+ESTIMATE_APP = {"name": "Estimate", "title": "Estimate", "app": "Riyeser Estimate",
+                "price": f"Free for 90 days, then {PRICES['estimate']} a month"}
 
 
 

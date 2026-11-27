@@ -80,7 +80,7 @@ A separate app from the same code base (`--edition estimate`, `RiyeserEstimate-S
 * **Units and money:** metric or imperial (m, m², m³ / ft, sq ft, cu yd, roofing squares) per company with a per-estimate switch; the company's currency, tax name (GST, VAT, sales tax) and date format.
 * **Templates:** 15 trades shipped as editable starting points (waste %, coverage, pack sizes; no prices), your own templates, a supplier price list import (CSV), and "save these prices as a template" from a past job.
 * **Only your own lines are kept:** map imagery is never stored or put in a PDF; the quote's measurements page draws your lines on a plain background (plans show your own plan with the lines).
-* **Licence:** module `estimate`, free for 90 days from first use (`riyeser/licence.py` first-use trial; Riyeser online starts it when Central first reports the program), then read-only until it's on the plan. The price after the trial is still to be announced.
+* **Licence:** module `estimate`, free for 90 days from first use (`riyeser/licence.py` first-use trial; Riyeser online starts it when Central first reports the program), then read-only until it's on the plan. After the trial it has a monthly price per business like the other paid programs (`estimate` in `PRICE_USD`, `riyeser/db.py`; 3 users included).
 * Code: `riyeser/measure/` (geometry, units, engine, seeds, quote, drawing, demo, licence), `riyeser/views/estimate.py`, `riyeser/templates/estimate/`, `riyeser/static/measure/`; libraries in `riyeser/static/vendor/` (see its README for licences). Tests: `tests/test_estimate.py`; in a browser, `tests/browser/estimate.e2e.js` with `tests/browser/serve_estimate.py` (stand-in map tiles, never Esri).
 
 ## Features

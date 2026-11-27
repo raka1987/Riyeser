@@ -6,7 +6,7 @@ Six separate apps are built from this one code base. All of them open the same c
   * Riyeser Accounting Basics (US$25 a month)    -> APP_EDITION = "basic"
   * Riyeser Accounting Plus (US$39 a month)       -> APP_EDITION = "enterprise"
   * Riyeser POS (90 days free, then US$29 a month)-> APP_EDITION = "pos"
-  * Riyeser Estimate (90 days free from first use, price to be announced) -> APP_EDITION = "estimate":
+  * Riyeser Estimate (90 days free from first use, then US$20 a month) -> APP_EDITION = "estimate":
     measure a job (by hand, on a plan or photo, on the map) and turn it into a quote (riyeser/measure/)
 packaging/build_desktop.py --edition basics|plus|pos|invoices|bookings|estimate writes riyeser/_built_edition.py into the build. Run from source
 (or `pip install`) there is no built edition, so APP_EDITION is None: each company picks Basic or Plus under Setup

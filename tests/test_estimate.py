@@ -470,7 +470,7 @@ def test_after_90_days_estimate_is_read_only(tmp_path, monkeypatch):
     _marker(tmp_path, 91)
     page = c.get("/estimate/").get_data(as_text=True)
     assert "Read-only." in page and "Nothing has been deleted" in page.replace("nothing has been deleted", "Nothing has been deleted")
-    assert "price to be announced" in page
+    assert "US$20/month" in page and "to be announced" not in page
     r = c.post(f"/estimate/{tid}/items", json={"kind": "count", "label": "More", "data": {"count": "1"}})
     assert r.status_code == 402 and "read-only" in r.get_json()["error"]
     r = c.post("/estimate/new", data={"new_name": "X", "title": "Y"}, follow_redirects=True)

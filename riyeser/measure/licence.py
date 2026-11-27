@@ -1,5 +1,5 @@
 """The "estimate" licence module: Riyeser Estimate is free for 90 days from its first use, then needs to be on the
-business's Riyeser plan (the price after the trial is still to be announced). After the trial without it, everything
+business's Riyeser plan (US$20 a month, 3 users included). After the trial without it, everything
 is read-only: estimates, measurements, plans and quotes stay to view, print and send; nothing new is measured or
 priced. Nothing is ever deleted."""
 from .. import licence as L
@@ -34,7 +34,7 @@ def message():
     title = n["title"] if n and (st.get("message") or st.get("source") == "online") else own
     return (f"{title} {NAME} is read-only now: your estimates, measurements and quotes are all still here to view, "
             f"print and send, and nothing has been deleted. To measure and price new work, add {NAME} from your "
-            f"Riyeser home page (price to be announced).")
+            f"Riyeser home page ({P.PRICES[MODULE]}).")
 
 
 def pill(now=None):
@@ -46,4 +46,4 @@ def pill(now=None):
         return {"text": "Free trial ended · read-only", "cls": "end", "title": message()}
     left = int(st.get("days_left") or L.TRIAL_DAYS)
     return {"text": f"Free trial · {left} day{'' if left == 1 else 's'} left", "cls": "soon" if left <= 14 else "",
-            "title": f"{NAME} is free for {L.TRIAL_DAYS} days from when you first use it."}
+            "title": f"{NAME} is free for {L.TRIAL_DAYS} days from when you first use it, then {P.PRICES[MODULE]}."}
