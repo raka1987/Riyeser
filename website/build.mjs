@@ -25,6 +25,10 @@ const PAYROLL_WIN = process.env.PAYROLL_WIN !== '0'; // in the release since riy
 // Where the site lives: '/' on riyeser.com, '/Riyeser/' on the temporary github.io address (set by the publish workflow).
 const BASE = process.env.SITE_BASE || '/';
 const TERMS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'terms.html'), 'utf8');
+// The privacy policy (content/privacy.html). DRAFT: placeholders and [CHECK] items for the owner; noindex and out of the
+// sitemap until PRIVACY_DRAFT is false (fill every [placeholder], settle every [CHECK], remove the draft note, have it reviewed).
+const PRIVACY = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'content', 'privacy.html'), 'utf8');
+const PRIVACY_DRAFT = true;
 // As Built (the web app). It runs at riyeser.com today; when it moves to app.riyeser.com, change this one line.
 const SERVICES_APP = process.env.SERVICES_APP || 'https://riyeser.com';
 // As Built is off the website for now (its Windows app is unaffected). Set ASBUILT_WEB=1 to bring it back.
@@ -788,7 +792,7 @@ document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventList
     <div class="flinks">
       <div><h2 class="fh">Industries</h2>${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}">${esc(i.name)}</a>`).join('')}</div>
       <div><h2 class="fh">Help</h2><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="/link/?contact">Contact support</a><a class="fmail" href="mailto:${EMAIL}">${EMAIL}</a></div>
-      <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="/link/?signup">Create an account</a><a href="${up}developers/">Developers</a><a href="${up}terms.html">Terms of use</a></div>
+      <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="/link/?signup">Create an account</a><a href="${up}developers/">Developers</a><a href="${up}terms.html">Terms of use</a><a href="${up}privacy.html">Privacy policy</a></div>
     </div>
   </div>
   <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span class="fwin"><span>For Windows 10 &amp; 11</span><span>Works offline</span><span>No account or card needed</span></span></div></div></footer>
@@ -1046,6 +1050,13 @@ page({
   path: 'terms.html', title: 'Terms of use — Riyeser', active: '',
   description: 'Terms of use for Riyeser and As Built.',
   body: () => `<div class="c legal" style="max-width:820px;padding:56px 24px 64px">${TERMS}</div>`,
+});
+
+// ---------- privacy policy (content/privacy.html) ----------
+page({
+  path: 'privacy.html', title: 'Privacy policy — Riyeser', active: '', noindex: PRIVACY_DRAFT,
+  description: 'What personal information Riyeser collects, why, where it is kept, for how long, and your rights.',
+  body: () => `<div class="c legal" style="max-width:820px;padding:56px 24px 64px">${PRIVACY}</div>`,
 });
 
 // ---------- download hand-off pages: riyeser.com/download/<program>.html ----------
@@ -1397,7 +1408,7 @@ cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 const SUBFOLDER = BASE !== '/';
 if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...guidesFor({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`), ...DEV_PAGES.map(([p]) => (p === 'index' ? 'developers/' : `developers/${p}.html`))];
+const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...(PRIVACY_DRAFT ? [] : ['privacy.html']), ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...guidesFor({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`), ...DEV_PAGES.map(([p]) => (p === 'index' ? 'developers/' : `developers/${p}.html`))];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
 writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyeser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
 console.log('Built', urls.length, 'pages into', OUT);

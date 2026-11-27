@@ -1,0 +1,193 @@
+<div class="note draftnote" role="note"><b>Draft for review: not in force yet.</b> Words in <mark class="ph">[square brackets]</mark> are details the owner must fill in. Items marked <mark class="chk">[CHECK: …]</mark> must be confirmed or changed before this is published. This draft describes what the Riyeser software does today; it is not legal advice. Have a lawyer review it before it goes live.</div>
+<h1>Privacy policy</h1>
+<p>Last updated <mark class="ph">[date of publishing]</mark>.</p>
+<p>This policy explains what personal information Riyeser collects, why, where it goes, how long we keep it and what you can do about it. We've written it in plain English and kept it to what our software really does.</p>
+
+<h2 id="short">The short version</h2>
+<ul>
+<li><b>Your books stay on your PC.</b> Accounting, invoices, payroll, POS sales, bookings, documents and backups are kept on your own computer. We can't see them. Only what you choose to send reaches us (for example, online connections or a problem report).</li>
+<li><b>Online, we keep what's needed to run your account</b>: your sign-in, your business details, your team's chat and files in Riyeser Link, your plan and billing, and your help requests.</li>
+<li><b>Calls aren't recorded.</b> Call sound and video go directly between devices, or through Riyeser's own relay when they can't connect directly. They're never recorded or kept.</li>
+<li><b>No cookies for tracking, no ads, and we don't sell personal information.</b> Our website counts visits without cookies and without keeping your internet address. Browsers that ask not to be tracked aren't counted.</li>
+<li><b>When your business uses Riyeser's online connections</b> (for example, the booking widget on its website), the business decides what happens to its customers' details. We only carry them for the business.</li>
+</ul>
+
+<h2 id="who">Who we are</h2>
+<p>Riyeser is run by <mark class="ph">[registered business name]</mark>, ABN <mark class="ph">[ABN]</mark>, trading as Riyeser and Riyeser Group (&quot;Riyeser&quot;, &quot;we&quot;, &quot;us&quot;). Our address is <mark class="ph">[registered business address, Australia]</mark>. Our team is based in Fiji and we serve businesses around the world.</p>
+<p>For anything about privacy, email <mark class="ph">[privacy contact email, e.g. privacy@riyeser.com or info@riyeser.com]</mark> or write to us at the address above.</p>
+<p>We follow the Australian Privacy Principles in the <i>Privacy Act 1988</i> (Cth). Where the European Union or United Kingdom data protection laws (the GDPR and UK GDPR) apply to you, we follow them too. <mark class="chk">[CHECK: whether the business is covered by the Privacy Act (the small business exemption may apply under A$3 million turnover), whether an EU/UK representative is needed, and whether Fiji law adds anything. We suggest following the APPs regardless.]</mark></p>
+
+<h2 id="covers">What this policy covers</h2>
+<ul>
+<li>the website at riyeser.com, including the Help Centre, Downloads and Developers pages;</li>
+<li><b>Riyeser Link</b> (chat, files and calls) at riyeser.com/link and in the Riyeser Link app;</li>
+<li><b>Riyeser online</b>: your Riyeser account, your business on Riyeser, licences, billing, support, and the online connections API, webhooks and booking widget;</li>
+<li>the parts of our Windows programs (Riyeser Central, Accounting, Invoices, POS, Bookings, Estimate, Payroll, Documents, PDF, Riyeser Link Office) that talk to us or to other services;</li>
+<li><b>As Built</b> (Riyeser Services), our web app for building services records. <mark class="chk">[CHECK: As Built runs on its own separate online database. Confirm it is live, what it stores (projects, drawings, photos, people), and that this policy should cover it.]</mark></li>
+</ul>
+
+<h2 id="pc">What stays on your PC</h2>
+<p>Riyeser's Windows programs work offline and keep your records in files on your own computer. That includes your ledgers, invoices, quotes and estimates, customers and suppliers, payroll and employee details, POS sales, bookings, stock, documents sorted by Riyeser Documents, Riyeser Link Office's list of recent calls (kept 90 days), and the automatic backups each program makes (in your Documents folder; the last 30 are kept). <b>None of this is sent to us.</b> You look after it, including your own backups and who can use your PC.</p>
+<p>Some things leave your PC only when you choose to use them:</p>
+<ul>
+<li><b>Online connections</b>: if your business switches them on, Riyeser Central on one of your PCs collects what your website sends and publishes what you choose for your website (see <a class="more" href="#connections">Online connections</a>).</li>
+<li><b>Problem reports</b>: when you press <i>Report an issue</i> or <i>Get help</i>, you see exactly what will be sent before you send it (see <a class="more" href="#support">Support</a>).</li>
+<li><b>Features that talk to other services directly</b> (see <a class="more" href="#optional">Optional features</a>).</li>
+</ul>
+
+<h2 id="collect">What we collect and why</h2>
+
+<h3>Your Riyeser account</h3>
+<p>When you create an account we keep your email address, your password (stored by our sign-in provider as a one-way hash; we never see it), the name you're shown as, and when you signed up and last signed in. If you turn on two-step sign-in, we keep the secret your authenticator app uses to make codes. We use this to sign you in and keep your account safe. <mark class="chk">[CHECK: our sign-in provider (Supabase Auth) also keeps a security log of sign-ins, which can include your internet address and browser. Confirm how long it is kept on our plan.]</mark></p>
+
+<h3>Your business on Riyeser</h3>
+<p>The business details you enter: business name, legal name, tax number, address, phone, email and country. Also who is in the business and their role (owner, admin, member), branches, extensions, job roles, requests to join (the name, email and note given), and a history of changes made by owners and admins. We use this to run your business's account and to show your details on invoices you receive from us.</p>
+<p>When you link a PC, we keep a random id for that PC, its Windows computer name, its version of Riyeser Central, when it was last seen and which Riyeser programs (and versions) are installed. This lets you manage your PCs, lets Riyeser Central fetch your licence, and lets our support team see what you're running when you ask for help.</p>
+
+<h3>Your plan, licence and billing</h3>
+<p>Which programs your business has, how many users and tills, free trial dates, and what's paid. Riyeser Central fetches a signed licence for your PC so the programs keep working offline for up to 30 days.</p>
+<p>Payments by card or PayPal balance are made with <b>PayPal</b>. You enter your card or PayPal details at PayPal, never with us. We receive PayPal's subscription and payment references and whether a payment worked. For bank transfers we keep the invoice and the reference you quote. We keep copies of the invoices and receipts we issue (including the business's details and contact person), refund requests and account credits. We need these to bill you and for tax and accounting records.</p>
+
+<h3>Riyeser Link: chat and files</h3>
+<p>The messages you send, edits, reactions and pins; chat names, topics and who's in each chat; how far you've read; your status (such as Available or Busy) and any status text; and the look you chose. Files you share (up to 25&nbsp;MB each) are kept in private storage that only the people in that chat can open, through short-lived links.</p>
+<p>Our support team has no way to read your chats or open your files from Riyeser's staff tools. <mark class="chk">[CHECK: the people who run the database could technically reach the data, as with any online service. Confirm the wording: e.g. "we don't look at it unless you ask us to or the law requires it".]</mark></p>
+
+<h3>Calls</h3>
+<p><b>Calls in Riyeser Link</b> (in the browser or the app) connect directly between the two devices where possible. When they can't, the sound and video pass through Riyeser's own relay servers. Either way the call is encrypted by the browser's standard calling technology (WebRTC), and <b>calls are never recorded or kept</b>. To start a call, small set-up messages pass through Riyeser online: who is calling whom, in which business, when, and technical connection details, which include the devices' network addresses. The app removes them when the call ends. <mark class="chk">[CHECK: set-up messages left behind (for example if a browser closes mid-call) aren't removed automatically yet. Consider a daily clean-up, then state a period here.]</mark> Your list of recent calls is kept in your own browser, not with us.</p>
+<p><b>Desk phones with Riyeser Link Office</b> are run by the Link Office program on your office PC. Every 5 minutes it tells Riyeser online how it's going, so owners and admins can manage phones from the website: the PC's name, version and network address(es), the PC's network card (MAC) address, the desk phones (make, model, MAC address, extension, the name, location and note you gave them, and their address on your office network), the extensions, how many calls are in progress and whether each extension is on a call. <b>It never sends numbers dialled, call lists, recordings or sound.</b> Desk phone passwords stay on your office PC. When an owner or admin presses <i>Show</i>, the password is encrypted for that browser tab only, and our copy is wiped as soon as it's read or after 5 minutes.</p>
+<p><b>The Riyeser relay</b> joins your sites and phones at home. Call sound between sites passes through it but is never looked at, logged or kept. Phones at home sign in with their own username, and we keep only a one-way digest of the password. The relay's log records which sites and phones connected, from what internet address, extensions and how calls ended, but not call sound, passwords or set-up details. <mark class="chk">[CHECK: (1) the relay logs have no automatic clean-up yet. Set one (e.g. 30 days) and state it here. (2) Confirm whether desk-phone sound between sites is encrypted on the internet, or say it is not.]</mark></p>
+
+<h3 id="support">Support</h3>
+<p>When you ask for help we keep your request: your name and email (if you're not signed in), the subject, the messages between you and us, and any rating or comment. Our team may add internal notes, including notes of phone calls with you.</p>
+<p>If you send a problem report from Riyeser Central or Riyeser Link, it includes which program and version, the other Riyeser programs on that PC, the Windows version, the error you typed, and the last lines (200 at most) of that program's technical log. You see it all before it's sent. Before anything is shown or sent, email addresses are masked, long numbers (such as bank, tax and card numbers) are replaced, and anything after words like &quot;password&quot; or &quot;token&quot; is removed. It never includes your invoices, payroll, customers, files, chat messages, folder paths or Windows user name.</p>
+<p>If an owner or admin presses <i>Let Riyeser help</i> on the Phones page, our support team can see and change the phone settings for one hour. Every change is recorded.</p>
+
+<h3>Emails we send</h3>
+<p>We send emails about your account (confirming your email address, resetting your password or two-step sign-in), replies to help requests, billing, refunds and free periods, and warnings before an unused free account is closed. We keep a copy of each email (the address, subject and text) so we can resend it and show what was sent. We don't send marketing emails. <mark class="chk">[CHECK: confirm no marketing emails, or add how to opt in and unsubscribe.]</mark></p>
+
+<h3 id="connections">Online connections (for your business's own customers)</h3>
+<p>A business can connect its own website to its Riyeser programs with the Riyeser API, webhooks or the booking widget. When a visitor to that website books, orders, makes an enquiry, signs up, accepts a quote or pays an invoice, what they type (for example their name, email, phone, address, notes, and whether they agreed to marketing) is sent to Riyeser online and held in the business's post box until the business's PC collects it and files it in the business's own records. The business also publishes its services, prices, stock levels and free booking times for its website to show.</p>
+<p>We also keep a short log of API requests (the route, the result and the time, and only a shortened internet address such as 203.0.113.0, never the request itself or the key), and the webhook messages sent to the business's own systems. API keys are kept only as a one-way hash.</p>
+<p><b>For this information, the business is in charge</b> (it is the &quot;controller&quot;). We carry it for the business, on its instructions (we are its &quot;processor&quot; or service provider). If you made a booking or order through a business's website, please contact that business about your information. The booking widget sets no cookies and stores nothing in the visitor's browser.</p>
+
+<h3>Our website</h3>
+<p><b>Visit counts.</b> On riyeser.com, each page view sends us a short note: the page, the website you came from (just its name), any campaign tags in the link, the kind of device (phone, tablet or desktop), the browser's name, its language, and a broad region worked out from your time zone (for example &quot;Fiji&quot; or &quot;Europe&quot;). To count visits rather than page views, your browser makes a random number that lasts only while the tab is open. <b>We don't use cookies for this and don't keep your internet address or full browser details.</b> Nothing is sent if your browser has Do Not Track or Global Privacy Control turned on. We use this to see which pages help people and where they came from.</p>
+<p><b>Download counts.</b> When you download a program from riyeser.com, we record the program, the release, a country (from the network or your time zone), the page the button was on, the browser's name, and a scrambled code made from your internet address and browser with a secret that changes every day. The code only lets us count one download per person per day; it can't be turned back into your address and can't link you from one day to the next. Then your download comes from GitHub, where our releases are published.</p>
+<p><b>Hosting.</b> The website is hosted by GitHub Pages, and each page asks GitHub for the newest release so the download buttons stay current. Like any web host, these services see your internet address when your browser connects. <mark class="chk">[CHECK: the site's security settings allow Cloudflare Web Analytics, which Cloudflare adds when the site runs through Cloudflare. Confirm whether riyeser.com is behind Cloudflare and Web Analytics is on (it is cookieless), and keep or remove this sentence and the Cloudflare row below.]</mark></p>
+
+<h3>Anonymous install counts from Riyeser Central</h3>
+<p>Riyeser Central sends a short note when it first runs on a PC, when a program is added, and when one updates. The note holds a random install id made on that PC, what happened, the Riyeser programs and versions, Central's version, the Windows version, and your business's country if the PC is linked to a business. It never includes a name, email, PC name, address or file. Once the PC is linked to your business, the install id is tied to your business so it isn't counted twice. You can turn this off in <b>Riyeser Central → Settings → Send anonymous usage counts</b>.</p>
+
+<h3 id="optional">Optional features that use other services</h3>
+<p>These only work when you set them up, and they send information straight from your PC to that service, under its own terms and privacy policy:</p>
+<ul>
+<li><b>AI sorting in Riyeser Documents</b>: if you add your own Anthropic (Claude) API key, the start of documents the built-in rules are unsure about (about the first 4,000 characters) is sent to Anthropic to suggest where to file them.</li>
+<li><b>Email in Riyeser Documents</b>: connects to your own mailbox to sort mail on your PC. Your mail isn't sent to us.</li>
+<li><b>Sending emails from Accounting</b>: uses your own email server details. Your emails go through your email provider, not us.</li>
+<li><b>Maps and address search in Riyeser Estimate</b>: the map pictures come from Esri, and an address you search for is sent to Esri to find it.</li>
+<li><b>Updates</b>: Riyeser Central checks GitHub for new versions and downloads them from there.</li>
+</ul>
+<p><mark class="chk">[CHECK: older licence keys are still checked with Lemon Squeezy (sending the key and the PC's name) if a PC has one. Confirm whether any were ever sold; if not, remove that code and this note.]</mark></p>
+
+<h2 id="use">How we use information</h2>
+<ul>
+<li>to provide Riyeser: sign-in, your business account, chat, files, calls, licences, online connections and updates;</li>
+<li>to bill you and keep tax and accounting records;</li>
+<li>to help you when you ask, and to fix problems;</li>
+<li>to keep Riyeser secure, stop misuse and keep the records the law requires;</li>
+<li>to understand, in totals, how our website and programs are used, so we can improve them;</li>
+<li>to tell you about your account, such as billing, security and a free account that's about to close.</li>
+</ul>
+<p>We don't sell personal information, show ads, or build profiles of people for marketing. We don't use your chats, files or records to train AI. <mark class="chk">[CHECK: confirm these promises.]</mark></p>
+<p><b>Legal bases (EU and UK).</b> We use your information to provide the service you signed up for (contract); for security, support, fixing problems and counting visits and downloads in totals (our legitimate interests, which we've kept small); to keep tax and billing records (legal obligation); and for optional features you choose to turn on (your choice).</p>
+
+<h2 id="share">Who we share it with</h2>
+<p>We use a few service providers to run Riyeser. They handle information only to provide their service to us.</p>
+<div class="tw" role="region" aria-label="Service providers" tabindex="0"><table>
+<thead><tr><th scope="col">Provider</th><th scope="col">What for</th><th scope="col">Where</th></tr></thead>
+<tbody>
+<tr><td>Supabase</td><td>Riyeser online: database, sign-in, file storage for Riyeser Link, and the functions for licences, payments, the API and download counts</td><td><mark class="ph">[Supabase region, e.g. Sydney, Australia]</mark></td></tr>
+<tr><td>Cloudflare (R2)</td><td>Encrypted nightly backups of the online database</td><td>Oceania (location hint) <mark class="chk">[CHECK]</mark></td></tr>
+<tr><td>Cloudflare (website)</td><td>Website delivery and cookieless Web Analytics <mark class="chk">[CHECK: only if used]</mark></td><td>Worldwide</td></tr>
+<tr><td>GitHub (Microsoft)</td><td>Website hosting, program downloads and update checks, and our scheduled jobs (backups, sending emails, webhooks)</td><td>United States</td></tr>
+<tr><td>PayPal</td><td>Card and PayPal payments</td><td><mark class="chk">[CHECK: PayPal entity and region for our account]</mark></td></tr>
+<tr><td>Resend</td><td>Sending our emails <mark class="chk">[CHECK: not set up yet. Confirm the provider before publishing, and who sends sign-in emails (Supabase's own mail or ours).]</mark></td><td>United States <mark class="chk">[CHECK]</mark></td></tr>
+<tr><td>Relay server host</td><td>Our backup relay server for calls and phones <mark class="chk">[CHECK: name the provider, e.g. DigitalOcean, Vultr or AWS Lightsail]</mark></td><td>Sydney, Australia <mark class="chk">[CHECK]</mark></td></tr>
+<tr><td>Esri</td><td>Maps and address search in Riyeser Estimate (only when you use them)</td><td>United States</td></tr>
+</tbody></table></div>
+<p>Our main relay may run on a computer we control at our own office. A business can also choose relays for its own use.</p>
+<p>We may also share information if the law requires it, to protect people's safety or our rights, or with a buyer if our business is sold (who would have to protect it in the same way). People in your business see what Riyeser Link shows them: for example, owners and admins see the people, PCs and phones in the business.</p>
+
+<h2 id="overseas">Information sent overseas</h2>
+<p>Our online database is in <mark class="ph">[Supabase region]</mark>. Our team works from Fiji and some of our providers are in the United States and other countries, so your information may be seen or stored outside your country, including outside Australia, the EU and the UK. We choose providers with strong security and, where the law requires, use the legal safeguards it provides for such transfers (such as standard contractual clauses). <mark class="chk">[CHECK: confirm the safeguards in each provider's data processing terms.]</mark></p>
+
+<h2 id="keep">How long we keep it</h2>
+<div class="tw" role="region" aria-label="How long we keep information" tabindex="0"><table>
+<thead><tr><th scope="col">Information</th><th scope="col">How long</th></tr></thead>
+<tbody>
+<tr><td>Website page views</td><td>13 months, then only daily totals (with no visit numbers) are kept, for 3 years</td></tr>
+<tr><td>Download records</td><td>3 years</td></tr>
+<tr><td>Install counts (adds and updates)</td><td>3 years. The first note for each install is kept as a running total. <mark class="chk">[CHECK: set a period for these too]</mark></td></tr>
+<tr><td>API request log and webhook deliveries</td><td>30 days</td></tr>
+<tr><td>Online connections post box</td><td>Removed 90 days after it's collected or turned down. Anything not collected within 90 days is marked failed and removed 90 days later.</td></tr>
+<tr><td>Desk phone password reveals</td><td>Wiped when read or after 5 minutes</td></tr>
+<tr><td>Chat messages and files</td><td>While your business's account is open. Deleting a message removes its text. <mark class="chk">[CHECK: shared files can't be deleted from the app yet. Add a way, or say files stay until the account is removed.]</mark></td></tr>
+<tr><td>Accounts and business details</td><td>While the account is in use. A free account that isn't used for 12 months is closed (we email 30 and 7 days before). Paid accounts aren't closed for this. Two years after closing, personal details (names, emails, messages, notes, addresses) are removed. Our owner approves that step; it isn't automatic. <mark class="chk">[CHECK: sign-in accounts are deleted in a separate manual step. State the timing.]</mark></td></tr>
+<tr><td>Invoices, receipts and payment records</td><td><mark class="chk">[CHECK: as long as tax law requires, e.g. 5 to 7 years. They're currently kept with no end date, and only the contact person's name is removed.]</mark></td></tr>
+<tr><td>Help requests, problem reports and copies of emails</td><td>Until the account's details are removed (above) <mark class="chk">[CHECK: set periods, e.g. 2 to 3 years after the request is closed]</mark></td></tr>
+<tr><td>Nightly backups of the online database</td><td>30 daily copies and 12 monthly copies, so up to about a year</td></tr>
+<tr><td>Relay logs</td><td><mark class="chk">[CHECK: no clean-up yet; set a period]</mark></td></tr>
+</tbody></table></div>
+<p>When you ask us to delete something, it is deleted from the live system, then disappears from the backups as they expire.</p>
+
+<h2 id="security">How we protect it</h2>
+<ul>
+<li>Everything between your browser or PC and Riyeser online is encrypted in transit (HTTPS/TLS).</li>
+<li>Database rules mean each person only sees their own business, and only the chats they're in.</li>
+<li>Two-step sign-in with an authenticator app. Owners and admins need it to use their admin powers, and our staff need it to use Riyeser's staff tools.</li>
+<li>Passwords, API keys and phone passwords are kept only as one-way hashes or digests. Licences are digitally signed so they can't be faked.</li>
+<li>Nightly backups are encrypted (AES-256) and kept with a different company from our database provider.</li>
+<li>Our staff tools have permissions per role, a history that can't be changed, and two people for refunds over a set amount. Support access to your phones lasts one hour and is recorded.</li>
+<li>Problem reports are scrubbed of emails, long numbers and passwords, on your PC and again when saved. API logs keep only a shortened internet address.</li>
+</ul>
+<p>No system is perfectly secure. If a data breach is likely to cause serious harm, we'll tell the people affected and the regulator, as the law requires.</p>
+
+<h2 id="rights">Your choices and rights</h2>
+<p>You can ask us to:</p>
+<ul>
+<li><b>see</b> the personal information we hold about you, and get a copy;</li>
+<li><b>correct</b> it (you can change most of it yourself in Riyeser Link and Riyeser Central);</li>
+<li><b>delete</b> it, or close your account;</li>
+<li>in the EU or UK, also <b>restrict</b> or <b>object</b> to how we use it, and receive it in a format you can move elsewhere.</li>
+</ul>
+<p>Email <mark class="ph">[privacy contact email]</mark>. We'll check it's you, reply within 30 days and won't charge you. Sometimes we must keep some information, for example invoices for tax law. If so, we'll tell you why. If your information came to us through a business's website (online connections), we'll pass your request to that business.</p>
+<p>You can also turn off anonymous install counts in Riyeser Central's Settings, turn on Do Not Track or Global Privacy Control in your browser so the website doesn't count your visits, and use Riyeser's programs without an account at all.</p>
+
+<h2 id="business">If your business uses Riyeser for its customers and staff</h2>
+<p>Your business is responsible for the personal information it keeps in Riyeser, such as customers, employees and payroll, and what its website collects through online connections. That includes telling people how you use their information and getting any consent you need. We carry online connections data only to provide the service to you, keep it confidential and secure, and help you answer requests from your customers. <mark class="chk">[CHECK: consider a separate Data Processing Agreement for business customers, especially in the EU or UK.]</mark></p>
+
+<h2 id="cookies">Cookies and browser storage</h2>
+<p>Our website and apps don't use tracking or advertising cookies. They do keep a few small things in your browser so they work:</p>
+<div class="tw" role="region" aria-label="What is kept in your browser" tabindex="0"><table>
+<thead><tr><th scope="col">Name</th><th scope="col">Where</th><th scope="col">What it's for</th><th scope="col">How long</th></tr></thead>
+<tbody>
+<tr><td><code>rv</code></td><td>riyeser.com (session storage)</td><td>A random number to count visits</td><td>Until you close the tab</td></tr>
+<tr><td><code>mbar-x</code></td><td>riyeser.com (session storage)</td><td>Remembers that you closed the &quot;Start free&quot; bar on phones</td><td>Until you close the tab</td></tr>
+<tr><td><code>riyeser.team.session</code></td><td>Riyeser Link (local storage)</td><td>Keeps you signed in</td><td>Until you sign out</td></tr>
+<tr><td><code>riyeser.team.last</code>, <code>riyeser.member.…</code></td><td>Riyeser Link (local storage)</td><td>The business you used last</td><td>Until you clear it</td></tr>
+<tr><td><code>riyeser.link.look</code>, <code>riyeser.link.ui.…</code></td><td>Riyeser Link (local storage)</td><td>Your theme and what you folded away</td><td>Until you clear it</td></tr>
+<tr><td><code>riyeser.link.calls.…</code></td><td>Riyeser Link (local storage)</td><td>Your recent calls on this device (the last 100)</td><td>Until you clear it</td></tr>
+<tr><td><code>riyeser.active.…</code></td><td>Riyeser Link (local storage)</td><td>When we last noted your account was in use (so it isn't closed as unused)</td><td>Until you clear it</td></tr>
+<tr><td><code>riyeser.link.testcall.…</code></td><td>Riyeser Link (local storage)</td><td>Whether you ticked the test call option</td><td>Until you clear it</td></tr>
+</tbody></table></div>
+<p>Riyeser's staff tools use similar storage for our own staff only. The booking widget on businesses' websites stores nothing. <mark class="chk">[CHECK: As Built's own storage isn't listed here. Add it if As Built is covered.]</mark></p>
+
+<h2 id="children">Children</h2>
+<p>Riyeser is for businesses and the people who work in them. It isn't meant for children under 16, and we don't knowingly collect their information. If you think a child has given us information, contact us and we'll delete it. <mark class="chk">[CHECK: the age (16 in many places, 18 for accounts?) and whether the terms say who may create an account.]</mark></p>
+
+<h2 id="changes">Changes to this policy</h2>
+<p>We'll update this page when what we do changes, and change the date at the top. If a change is significant, we'll tell account owners by email or in Riyeser before it takes effect.</p>
+
+<h2 id="contact">Questions and complaints</h2>
+<p>Contact us first at <mark class="ph">[privacy contact email]</mark> or <mark class="ph">[registered business address]</mark>. We'll reply within 30 days.</p>
+<p>If you're not happy with our answer, you can complain to the <b>Office of the Australian Information Commissioner</b> (OAIC) at oaic.gov.au or on 1300 363 992. In the EU you can contact your local data protection authority, and in the UK the Information Commissioner's Office (ico.org.uk). <mark class="chk">[CHECK: add Fiji or other regulators if needed.]</mark></p>

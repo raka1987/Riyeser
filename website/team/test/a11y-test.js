@@ -33,7 +33,7 @@ const CONTRAST = () => {
     check(!low.length, `M21 ${path}: small grey text at least 4.5:1 ${low.map(([t, c]) => `"${t}" ${c.toFixed(2)}`).join(', ')}`);
     await axe(pg, path); await pg.close();
   }
-  for (const path of ['/index.html', '/pricing.html', '/help.html', '/downloads.html']) {
+  for (const path of ['/index.html', '/pricing.html', '/help.html', '/downloads.html', '/privacy.html']) {
     const pg = await page(path);
     const jumps = await pg.$$eval('h1, h2, h3, h4, h5, h6', (hs) => { const out = []; let last = 0;
       for (const h of hs) { const n = Number(h.tagName[1]); if (last && n > last + 1) out.push(`${h.tagName} "${h.textContent.trim().slice(0, 25)}" after h${last}`); last = n; } return out; });

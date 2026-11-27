@@ -1240,3 +1240,15 @@ section.conn { padding: 0; scroll-margin-top: 76px; }
   .dlgo-card .btn.big { width: 100%; justify-content: center; }
   .dlgo-steps { grid-template-columns: 1fr; }
 }
+/* privacy policy: tables, and (while it's a draft) the owner's placeholders and items to check */
+.legal h3 { font-size: 17px; margin: 22px 0 6px; }
+.legal .tw { overflow-x: auto; margin: 10px 0 16px; border: 1px solid var(--line); border-radius: 12px; }
+.legal table { border-collapse: collapse; width: 100%; font-size: 15px; }
+.legal th, .legal td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.legal thead th { background: var(--soft); }
+.legal tbody tr:last-child td { border-bottom: 0; }
+.legal code { font-size: 13.5px; overflow-wrap: anywhere; }
+.legal mark { padding: 0 3px; border-radius: 4px; color: #1f2937; }
+.legal mark.ph { background: #fff1b8; }
+.legal mark.chk { background: #ffd9d2; }
+.legal .draftnote { border-left-color: #c2410c; margin-bottom: 22px; }
