@@ -80,10 +80,47 @@ function seedRoster(h) {
   } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
+// OWNER-BULKROSTER (2.4.0): the demo's shift templates (one per kind of shift the team works) instead of the general
+// ones, each person's usual week (Monday to Friday, their usual shift), and the demo roster's shifts linked to them.
+const TEMPLATES = [
+  ['Office', '08:30', '16:06', 'Office', '#4b5563'], ['Workshop early', '07:30', '15:06', 'Workshop', '#2563eb'], ['Workshop', '08:00', '15:36', 'Workshop', '#0e7490'],
+  ['Till', '09:00', '13:00', 'Till', '#b45309'], ['Cafe open', '07:00', '12:00', 'Cafe', '#be185d'], ['Cafe close', '12:00', '17:00', 'Cafe', '#7c3aed'],
+];
+function seedBulk(h) {
+  const { db, getSettings, setSetting } = h;
+  if (getSettings().demo_bulk_seeded === '1') return false;
+  try { db.prepare('SELECT 1 FROM roster_templates LIMIT 1').all(); } catch { return false; }   // rosterbulk.js not loaded
+  const at = new Date().toISOString();
+  db.exec('BEGIN');
+  try {
+    // the general templates Payroll starts with make way for the demo's own (if nothing uses them)
+    for (const n of ['Open', 'Day', 'Close', 'Half day']) {
+      const t = db.prepare('SELECT id FROM roster_templates WHERE name = ?').get(n);
+      if (t && !db.prepare('SELECT 1 FROM roster_shifts WHERE template_id = ? LIMIT 1').get(t.id) && !db.prepare('SELECT 1 FROM roster_patterns WHERE template_id = ? LIMIT 1').get(t.id)) db.prepare('DELETE FROM roster_templates WHERE id = ?').run(t.id);
+    }
+    const ins = db.prepare('INSERT INTO roster_templates(name, start, finish, break_min, role, colour, sort, created_at, updated_at) VALUES(?,?,?,0,?,?,?,?,?)');
+    TEMPLATES.forEach(([n, a, b, role, c], i) => { if (!db.prepare('SELECT 1 FROM roster_templates WHERE name = ?').get(n)) ins.run(n, a, b, role, c, i + 1, at, at); });
+    const tid = n => (db.prepare('SELECT id FROM roster_templates WHERE name = ?').get(n) || {}).id || null;
+    const pat = db.prepare('INSERT OR REPLACE INTO roster_patterns(user_id, dow, template_id, start, finish, break_min, role) VALUES(?,?,?,?,?,0,?)');
+    const usual = { alex: 'Office', jamie: 'Workshop early', robin: 'Workshop', casey: 'Till', morgan: 'Cafe open' };
+    for (const s of STAFF) {
+      const u = db.prepare('SELECT id FROM users WHERE username = ?').get(s.username), t = TEMPLATES.find(x => x[0] === usual[s.username]);
+      if (!u || !t) continue;
+      for (let d = 1; d <= 5; d++) pat.run(u.id, d, tid(t[0]), t[1], t[2], t[3]);
+    }
+    // the demo roster's shifts made from these
+    for (const [n, a, b, role] of TEMPLATES) db.prepare("UPDATE roster_shifts SET template_id = ? WHERE template_id IS NULL AND start = ? AND finish = ? AND COALESCE(role, '') = ?").run(tid(n), a, b, role);
+    setSetting('demo_bulk_seeded', '1');
+    db.exec('COMMIT');
+    return true;
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
 /** Fill an empty demo payroll: settings, a demo/demo admin login, 5 staff, two weeks of timesheets and one finished pay run. */
 function seed(h) {
   const r = seedPay(h);
   seedRoster(h);
+  seedBulk(h);
   return r;
 }
 function seedPay(h) {
@@ -131,4 +168,4 @@ function page(html) {
   return html.replace(/<body([^>]*)>/, `<body$1>\n  ${BANNER}`).replace('<div id="login-err"></div>', `${LOGIN_HINT}<div id="login-err"></div>`);
 }
 
-module.exports = { BUSINESS, DETAILS, STAFF, demoFile, readDemo, isOn, dataDir, stamp, seed, seedRoster, page, BANNER, LOGIN_HINT };
+module.exports = { BUSINESS, DETAILS, STAFF, TEMPLATES, demoFile, readDemo, isOn, dataDir, stamp, seed, seedRoster, seedBulk, page, BANNER, LOGIN_HINT };

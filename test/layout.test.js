@@ -118,3 +118,89 @@ test('Staff: a row\'s ⋯ menu opens, has its actions, works with the keyboard, 
   assert.equal(await p.locator('.rm-list:not([hidden])').count(), 0);
   await ctx.close();
 });
+
+// ------------------------------------------------------------------ OWNER-BULKROSTER (Payroll 2.4.0): the Roster's bulk tools
+// a week well after the demo's own roster, emptied first
+const emptyWeek = p => p.evaluate(async () => { const W = await api(`/api/staff/roster?week=${addDays(today(), 28)}`); await api('/api/staff/roster/bulk', { body: { action: 'clear', cells: [null, ...W.people.map(x => x.id)].flatMap(u => W.days.map(d => ({ user_id: u, date: d }))) } }).catch(() => {}); return renderRoster({ week: W.week_start }); });
+const rosterCount = async (p, weeks) => p.evaluate(async w => { const W = await api(`/api/staff/roster?week=${addDays(today(), 7 * w)}`); return W.people.reduce((t, x) => t + x.shifts.filter(s => !s.deleted).length, 0) + W.open.filter(s => !s.deleted).length; }, weeks);
+test('Roster: select many days (a name, a day heading, drag, keyboard), apply a shift template once, undo with Ctrl+Z', async t => {
+  if (!browser) return t.skip(why);
+  const { p, ctx } = await page(1366, 768, 1);
+  await p.goto(`${B}/staff#/roster`); await p.waitForSelector('.ro-grid[role=grid]');
+  await emptyWeek(p); await p.waitForTimeout(300);
+  assert.equal(await rosterCount(p, 4), 0);
+  const row = n => p.locator(`tbody tr[data-row]:nth-child(${n})`);
+  // a name: that person's week; Ctrl + a day heading: everyone that day as well
+  await row(2).locator('th.ro-p').click();
+  assert.equal(await p.locator('.ro-cell.sel').count(), 7);
+  await p.locator('thead th[data-col]').nth(2).click({ modifiers: ['Control'] });
+  const people = await p.locator('tbody tr[data-row]').count();
+  assert.equal(await p.locator('.ro-cell.sel').count(), 7 + people - 1);
+  assert.match(await p.locator('#ro-bulk .ro-bb-n').textContent(), new RegExp(`${7 + people - 1} days`));
+  // Esc: nothing; then drag across days from one + to another (2 people × 3 days)
+  await p.keyboard.press('Escape');
+  assert.equal(await p.locator('.ro-cell.sel').count(), 0);
+  const a = await row(2).locator('td[data-d]').nth(0).locator('.ro-add').boundingBox(), b = await row(3).locator('td[data-d]').nth(2).locator('.ro-add').boundingBox();
+  await p.mouse.move(a.x + 5, a.y + 5); await p.mouse.down(); await p.mouse.move(b.x + 5, b.y + 5, { steps: 6 }); await p.mouse.up();
+  assert.equal(await p.locator('.ro-cell.sel').count(), 6);
+  assert.match(await p.locator('#ro-bulk .ro-bb-n').textContent(), /6 days · 2 rows × 3 days/);
+  assert.equal(await p.evaluate(() => getSelection().toString()), '', 'no text highlighted while dragging');
+  // the keyboard: Shift+→ makes the block a day wider; Space adds one more day
+  await row(3).locator('td[data-d]').nth(2).focus();
+  await p.keyboard.press('Shift+ArrowRight');
+  assert.equal(await p.locator('.ro-cell.sel').count(), 8);
+  await p.keyboard.press('ArrowRight'); await p.keyboard.press('ArrowRight'); await p.keyboard.press(' ');
+  assert.equal(await p.locator('.ro-cell.sel').count(), 9);
+  // one click on a shift template puts it on all 9 days; the summary says so and has Undo
+  const t0 = await p.locator('#ro-bulk [data-bb-t]:not([hidden])').first();
+  await t0.click(); await p.waitForSelector('.ro-flash');
+  assert.match(await p.locator('.ro-flash').textContent(), /added 9 shifts/);
+  assert.equal(await rosterCount(p, 4), 9);
+  assert.equal(await p.locator('.ro-grid .ro-shift.tpl').count(), 9);
+  // Ctrl+Z: undone
+  await p.locator('h1, .topbar').first().click(); await p.keyboard.press('Control+z'); await p.waitForTimeout(600);
+  assert.equal(await rosterCount(p, 4), 0);
+  await ctx.close();
+});
+
+test('Roster on a phone: "Select" shows tick boxes; tick two people, apply a template, Undo from the summary', async t => {
+  if (!browser) return t.skip(why);
+  const { p, ctx } = await page(390, 844, 2);
+  await p.goto(`${B}/staff#/roster`); await p.waitForSelector('.ro-phone');
+  await emptyWeek(p); await p.waitForTimeout(300);
+  await p.click('#ro-selmode'); await p.waitForSelector('.ro-pck');
+  const ticks = p.locator('.ro-pck'); await ticks.nth(1).check(); await ticks.nth(2).check();
+  assert.match(await p.locator('#ro-bulk .ro-bb-n').textContent(), /2 days/);
+  const r = await p.evaluate(() => ({ side: document.documentElement.scrollWidth - document.documentElement.clientWidth }));
+  assert.ok(r.side <= 0, `the phone roster scrolls sideways by ${r.side}px`);
+  await p.locator('#ro-bulk [data-bb-t]').first().click(); await p.waitForSelector('.ro-flash');
+  assert.equal(await rosterCount(p, 4), 2);
+  await p.locator('.ro-flash [data-ro-undo]').click(); await p.waitForTimeout(600);
+  assert.equal(await rosterCount(p, 4), 0);
+  await ctx.close();
+});
+
+test('Staff: former staff are hidden by default, with "+1 former staff hidden" and Show / Hide former staff', async t => {
+  if (!browser) return t.skip(why);
+  const { p, ctx } = await page(1280, 720, 1.25);
+  await p.goto(`${B}/staff#/employees`); await p.waitForSelector('.lv-bar');
+  // someone who has left
+  await p.evaluate(async () => { const e = await api('/api/staff/employees', { body: { name: 'Lee Former', username: 'leeformer', password: 'formerpass1', role: 'staff', pay_type: 'hourly', pay_rate: 10 } }); await api(`/api/staff/employees/${e.id}`, { method: 'PUT', body: { active: false } }); });
+  await p.evaluate(() => renderEmployees()); await p.waitForSelector('[data-former]');
+  assert.equal(await p.locator('tr', { hasText: 'Lee Former' }).count(), 0);
+  assert.match(await p.locator('.lv-bar').textContent(), /\+1 former staff hidden/);
+  assert.equal(await p.locator('[data-lv-sel="status"]').inputValue(), 'current');
+  assert.equal(await p.locator('.lv-clear').isDisabled(), true, 'the default is not a filter to clear');
+  await p.click('[data-former]');
+  assert.equal(await p.locator('tr', { hasText: 'Lee Former' }).count(), 1);
+  assert.equal(await p.locator('[data-former]').textContent(), 'Hide former staff');
+  // remembered: still shown after coming back
+  await p.evaluate(() => renderEmployees()); await p.waitForSelector('.lv-bar');
+  assert.equal(await p.locator('tr', { hasText: 'Lee Former' }).count(), 1);
+  await p.click('[data-former]');
+  assert.equal(await p.locator('tr', { hasText: 'Lee Former' }).count(), 0);
+  // not on the roster or the time clock lists
+  await p.goto(`${B}/staff#/roster`); await p.waitForSelector('.ro-grid');
+  assert.equal(await p.locator('.ro-grid tr', { hasText: 'Lee Former' }).count(), 0);
+  await ctx.close();
+});

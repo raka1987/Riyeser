@@ -7,57 +7,72 @@
 //    plain text for WhatsApp / SMS). Changes after publishing show as "changed" / "new" / "removed" until published again.
 //  - Everyone else: the published roster, with their own shifts at the top.
 // Uses the page's helpers (common.js, staff.js: S, L, ME, view, today, money, cur, QE). The server checks every change.
-let RO = { week: '', mode: 'plan', day: '', flash: '' }, RO_LAST = null;
+let RO = { week: '', mode: 'plan', day: '', flash: '', sel: new Set(), anchor: null, focus: null, selMode: false }, RO_LAST = null, RO_W = null;
 const roMin = t => +t.slice(0, 2) * 60 + +t.slice(3, 5);
 const roSpan = (a, b) => { let m = roMin(b) - roMin(a); if (m <= 0) m += 1440; return m; };
 const roShort = t => fmtTime(t).replace(':00', '');                       // 9am, 5:30pm
 const roTimes = s => `${roShort(s.start)}–${roShort(s.finish)}`;
+// 2.4.0: on the grid, short enough for one line in a day column: 9a–5p, 8:30a–4:06p (the full times are in the tooltip)
+const roGridTimes = s => `${roShort(s.start).replace(/([ap])m$/, '$1')}–${roShort(s.finish).replace(/([ap])m$/, '$1')}`;
 const roDay = d => QE.dayLong(d);                                         // Mon 23 Nov
 const roRuleBreak = span => { let br = []; try { br = JSON.parse(S.payroll_breaks || '[]'); } catch { } const r = br.filter(x => span / 60 > +x.after_hours).sort((a, b) => b.minutes - a.minutes)[0]; return r ? Math.min(span, +r.minutes) : 0; };
 const roLeave = { annual: 'Annual leave', sick: 'Sick leave', other: 'Paid leave', unpaid: 'Unpaid leave' };
 const roWhen = iso => iso ? new Date(iso).toLocaleString('en-FJ', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
 
 async function renderRoster(state = {}) {
+  if (state.flash) state.flashAt = Date.now();
   Object.assign(RO, state);
   if (L('timesheets') < 1 || RO.mode === 'staff') return renderRosterStaff();
   const W = await api(`/api/staff/roster?week=${RO.week || today()}`);
-  RO.week = W.week_start;
+  if (RO.week !== W.week_start) { RO.sel = new Set(); RO.anchor = null; RO.focus = null; }   // 2.4.0: a new week starts with nothing selected
+  RO.week = W.week_start; RO_W = W;
   // OWNER-LISTS: the order of the people (first or last name, employee no., position, hours this week), kept per person
   // (sort only: everyone stays on the grid, so a shift can still be given to anyone)
   const plv = listOf('roster', { fields: { ...NAME_FIELDS(), employee_no: { label: 'Employee no.', type: 'text', then: 'name' }, position: { label: 'Position', type: 'text', then: 'name' }, hours: { label: 'Hours this week', type: 'num', first: 'desc', then: 'name' } },
   }, { sort: 'name', dir: 'asc' }, () => renderRoster());
   const everyone = W.people.length; W.people = plv.apply(W.people);
   if (!W.days.includes(RO.day)) RO.day = W.days.includes(W.today) ? W.today : W.days[0];
-  const ed = W.can_edit, flash = RO.flash; RO.flash = '';
+  // a summary or message stays for a minute on this week (another change, or another week, clears it)
+  if (RO.flash && (!RO.flashWeek || RO.flashWeek === W.week_start) && Date.now() - (RO.flashAt || 0) < 60000) RO.flashWeek = W.week_start; else { RO.flash = ''; RO.flashWeek = null; }
+  const ed = W.can_edit, flash = RO.flash;
+  // the selection: only cells still on the grid (someone may have left the week)
+  const onGrid = new Set([...(W.open.length || ed ? [''] : []), ...W.people.map(p => String(p.id))]);
+  RO.sel = new Set([...(RO.sel || [])].filter(k => onGrid.has(k.split('|')[0]) && W.days.includes(k.split('|')[1])));
   const live = list => list.filter(s => !s.deleted);
   const dayHours = d => [...W.people.flatMap(p => live(p.shifts)), ...live(W.open)].filter(s => s.date === d).reduce((t, s) => t + s.hours, 0);
   const dayPeople = d => W.people.filter(p => live(p.shifts).some(s => s.date === d)).length;
   const pend = W.pending.new + W.pending.changed + W.pending.removed;
-  const tip = s => [`${fmtTime(s.start)}–${fmtTime(s.finish)}`, `${s.hours.toFixed(2)} h paid${s.break_min ? ` (${s.break_min} min break)` : ''}`, s.role, s.note,
+  const tmpl = id => (W.templates || []).find(t => t.id === id);
+  const tip = s => [`${fmtTime(s.start)}–${fmtTime(s.finish)}`, `${s.hours.toFixed(2)} h paid${s.break_min ? ` (${s.break_min} min break)` : ''}`, tmpl(s.template_id) ? `Shift template: ${tmpl(s.template_id).name}` : '', s.role, s.note,
     s.state === 'new' ? 'New: not published yet' : s.state === 'changed' ? 'Changed since it was published: publish again to tell staff' : s.state === 'removed' ? 'Removed: staff still see it until you publish again' : '', ...(s.warnings || []).map(w => '⚠ ' + w)].filter(Boolean).join('\n');
-  const chip = s => `<div class="ro-shift${s.state ? ' st-' + s.state : ''}${(s.warnings || []).length && !s.deleted ? ' warn' : ''}${s.user_id ? '' : ' open'}" data-sid="${s.id}" ${ed && !s.deleted ? 'draggable="true"' : ''} tabindex="0" role="button" title="${esc(tip(s))}" aria-label="${esc(tip(s).replace(/\n/g, ', '))}">
-      <b>${roShort(s.start)}–<wbr>${roShort(s.finish)}</b>${s.role ? `<span class="ro-role">${esc(s.role)}</span>` : ''}${s.note ? `<span class="ro-note-c">${esc(s.note)}</span>` : ''}${s.state ? `<span class="ro-st">${s.state}</span>` : ''}${(s.warnings || []).length && !s.deleted ? '<span class="ro-w" aria-hidden="true">⚠</span>' : ''}</div>`;
-  const cell = (uid, d, shifts, leave) => `<td class="ro-cell${d === W.today ? ' today' : ''}${leave ? ' lv' : ''}" data-u="${uid || ''}" data-d="${d}">
-      ${leave ? `<div class="ro-leave">🌴 ${esc(roLeave[leave] || 'Leave')}</div>` : ''}${shifts.filter(s => s.date === d).map(chip).join('')}
-      ${ed ? `<button type="button" class="ro-add" data-add="${uid || ''}|${d}" aria-label="Add a shift on ${esc(roDay(d))}" title="Add a shift">+</button>` : ''}</td>`;
-  const who = p => `<div class="ro-who"><b>${esc(p.name)}</b>${p.position ? `<span class="small muted">${esc(p.position)}</span>` : ''}
+  const chip = s => { const t = tmpl(s.template_id);
+    return `<div class="ro-shift${s.state ? ' st-' + s.state : ''}${(s.warnings || []).length && !s.deleted ? ' warn' : ''}${s.user_id ? '' : ' open'}${t ? ' tpl' : ''}" data-sid="${s.id}" ${t ? `style="--tc:${esc(t.colour)}"` : ''} ${ed && !s.deleted && !RO.selMode ? 'draggable="true"' : ''} tabindex="0" role="button" title="${esc(tip(s))}" aria-label="${esc(tip(s).replace(/\n/g, ', '))}">
+      <b>${roGridTimes(s)}</b>${s.role ? `<span class="ro-role">${esc(s.role)}</span>` : ''}${s.note ? `<span class="ro-note-c">${esc(s.note)}</span>` : ''}${s.state ? `<span class="ro-st">${s.state}</span>` : ''}${(s.warnings || []).length && !s.deleted ? '<span class="ro-w" aria-hidden="true">⚠</span>' : ''}</div>`; };
+  const cell = (uid, d, shifts, leave, who) => { const k = `${uid || ''}|${d}`, on = RO.sel.has(k);
+    return `<td class="ro-cell${d === W.today ? ' today' : ''}${leave ? ' lv' : ''}${on ? ' sel' : ''}" data-u="${uid || ''}" data-d="${d}" data-k="${k}" role="gridcell" aria-selected="${on}" tabindex="${RO.focus === k ? 0 : -1}" aria-label="${esc(`${who}, ${roDay(d)}`)}">
+      ${ed && RO.selMode ? `<input type="checkbox" class="ro-ck" tabindex="-1" aria-hidden="true" ${on ? 'checked' : ''}>` : ''}${leave ? `<div class="ro-leave">🌴 ${esc(roLeave[leave] || 'Leave')}</div>` : ''}${shifts.filter(s => s.date === d).map(chip).join('')}
+      ${ed && !RO.selMode ? `<button type="button" class="ro-add" data-add="${uid || ''}|${d}" tabindex="-1" aria-label="Add a shift on ${esc(roDay(d))}" title="Add a shift">+</button>` : ''}</td>`; };
+  const usualText = p => (p.usual || []).length ? `Usual week: ${p.usual.map(x => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][x.dow]} ${tmpl(x.template_id) ? `${tmpl(x.template_id).name} ` : ''}${roTimes(x)}`).join(', ')}` : 'No usual week yet (Usual weeks…)';
+  const who = p => `<div class="ro-who"><b>${esc(p.name)}${p.former ? ' <span class="status cancelled ro-left" title="Former staff: has left">left</span>' : ''}</b>${p.position ? `<span class="small muted">${esc(p.position)}</span>` : ''}
       <span class="ro-tot"><b>${p.hours.toFixed(2)}</b> h${W.sees_pay ? (p.pay_type === 'hourly' ? ` · ${money(p.wages, cur())}` : p.hours ? ' · salary' : '') : ''}${p.warnings.length ? ` <span class="ro-w" title="${esc(p.warnings.join('\n'))}">⚠</span>` : ''}</span></div>`;
   const openRow = W.open.length || ed;
   const allWarn = [...W.people.flatMap(p => [...p.warnings.map(w => ({ n: p.name, w })), ...live(p.shifts).flatMap(s => s.warnings.map(w => ({ n: p.name, d: s.date, t: roTimes(s), w })))]),
     ...live(W.open).flatMap(s => s.warnings.map(w => ({ n: 'Open shift', d: s.date, t: roTimes(s), w })))];
+  const pick = (uid, d) => { const k = `${uid || ''}|${d}`; return ed && RO.selMode ? `<input type="checkbox" class="ro-pck" data-k="${k}" ${RO.sel.has(k) ? 'checked' : ''} aria-label="Select">` : ''; };
   // phone: one day at a time
   const phoneDay = d => {
     const openToday = W.open.filter(s => s.date === d);
-    return `${openToday.length || ed ? `<div class="ro-pcard open"><div class="ro-pc-h"><b>Open shifts</b><span class="small muted">nobody yet</span></div>
-        <div class="ro-pc-s">${openToday.map(chip).join('') || '<span class="small muted">None</span>'}</div>${ed ? `<button type="button" class="btn sm ghost ro-padd" data-add="|${d}">+ Open shift</button>` : ''}</div>` : ''}
-      ${W.people.map(p => { const sh = p.shifts.filter(s => s.date === d), lv = p.leave[d];
-        return `<div class="ro-pcard"><div class="ro-pc-h"><b>${esc(p.name)}</b><span class="small muted">week ${p.hours.toFixed(2)} h${W.sees_pay && p.pay_type === 'hourly' ? ` · ${money(p.wages, cur())}` : ''}${p.warnings.length ? ' ⚠' : ''}</span></div>
+    return `${openToday.length || ed ? `<div class="ro-pcard open${RO.sel.has(`|${d}`) ? ' sel' : ''}" data-k="|${d}">${pick(null, d)}<div class="ro-pc-h"><b>Open shifts</b><span class="small muted">nobody yet</span></div>
+        <div class="ro-pc-s">${openToday.map(chip).join('') || '<span class="small muted">None</span>'}</div>${ed && !RO.selMode ? `<button type="button" class="btn sm ghost ro-padd" data-add="|${d}">+ Open shift</button>` : ''}</div>` : ''}
+      ${W.people.map(p => { const sh = p.shifts.filter(s => s.date === d), lv = p.leave[d], k = `${p.id}|${d}`;
+        return `<div class="ro-pcard${RO.sel.has(k) ? ' sel' : ''}" data-k="${k}">${pick(p.id, d)}<div class="ro-pc-h"><b>${esc(p.name)}${p.former ? ' <span class="status cancelled ro-left">left</span>' : ''}</b><span class="small muted">week ${p.hours.toFixed(2)} h${W.sees_pay && p.pay_type === 'hourly' ? ` · ${money(p.wages, cur())}` : ''}${p.warnings.length ? ' ⚠' : ''}</span></div>
           <div class="ro-pc-s">${lv ? `<div class="ro-leave">🌴 ${esc(roLeave[lv] || 'Leave')}</div>` : ''}${sh.map(chip).join('') || (lv ? '' : '<span class="small muted">Off</span>')}</div>
-          ${ed ? `<button type="button" class="btn sm ghost ro-padd" data-add="${p.id}|${d}">+ Add</button>` : ''}</div>`; }).join('')}`;
+          ${ed && !RO.selMode ? `<button type="button" class="btn sm ghost ro-padd" data-add="${p.id}|${d}">+ Add</button>` : ''}</div>`; }).join('')}`;
   };
+  const more = rosterMoreMenu(W);
 
-  view().innerHTML = `<div class="ro-page">
-    ${flash ? `<div class="note ro-flash">${flash}</div>` : ''}
+  view().innerHTML = `<div class="ro-page${RO.selMode ? ' selmode' : ''}">
+    ${flash ? `<div class="note ro-flash" role="status">${flash}</div>` : ''}
     <div class="ro-top">
       <div class="ts-period ro-weeknav"><button type="button" class="btn sm ghost" id="ro-prev" aria-label="Previous week" title="Previous week">‹</button>
         <div class="ts-period-mid"><span class="ts-period-k">Roster for the week</span><b>${esc(W.label)}</b>${W.days.includes(W.today) ? '<span class="chip">this week</span>' : `<button type="button" class="chip gray ro-thisweek" id="ro-today">Go to this week</button>`}</div>
@@ -67,11 +82,13 @@ async function renderRoster(state = {}) {
           : pend ? `<b>${pend} change${pend === 1 ? '' : 's'} not published yet</b> (${[W.pending.new && `${W.pending.new} new`, W.pending.changed && `${W.pending.changed} changed`, W.pending.removed && `${W.pending.removed} removed`].filter(Boolean).join(', ')}). Staff still see the roster as it was published ${esc(roWhen(W.published.at))}.`
           : `<b>✓ Published</b> ${esc(roWhen(W.published.at))}${W.published.by ? ` by ${esc(W.published.by)}` : ''}. Staff see it on the time clock and on this page.`}</div>
     </div>
-    <div class="bar-tools ro-tools">
-      ${ed ? `<button type="button" class="btn coral" id="ro-publish">${W.published ? (pend ? '📣 Publish again' : '📣 Publish roster') : '📣 Publish roster'}</button>
-        <button type="button" class="btn sm ghost" id="ro-new">+ Add shift</button><button type="button" class="btn sm ghost" id="ro-copy">⧉ Copy last week</button>` : ''}
-      <button type="button" class="btn sm ghost" id="ro-print">🖨 Print or PDF</button><button type="button" class="btn sm ghost" id="ro-text">💬 WhatsApp / SMS text</button>
-      <button type="button" class="btn sm ghost" id="ro-staff">👀 What staff see</button></div>
+    <div class="ro-tools" role="toolbar" aria-label="Roster">
+      ${ed ? `<button type="button" class="btn sm coral" id="ro-publish">${W.published ? (pend ? '📣 Publish again' : '📣 Publish roster') : '📣 Publish roster'}</button>
+        <button type="button" class="btn sm ghost" id="ro-new">+ Add shift</button>
+        <button type="button" class="btn sm ghost" id="ro-fill" title="Put everyone's usual week on this week in one go">↻ Fill from usual weeks</button>
+        <button type="button" class="btn sm ghost${RO.selMode ? ' on' : ''}" id="ro-selmode" aria-pressed="${!!RO.selMode}" title="Tick days to change many at once (or drag across the grid, Shift / Ctrl + click)">☑ Select</button>`
+        : `<button type="button" class="btn sm ghost" id="ro-print">🖨 Print or PDF</button><button type="button" class="btn sm ghost" id="ro-text">💬 WhatsApp / SMS text</button><button type="button" class="btn sm ghost" id="ro-staff">👀 What staff see</button>`}
+      <span class="ro-tools-end">${ed && W.undo ? `<button type="button" class="btn sm ghost" data-ro-undo title="Undo: ${esc(W.undo.label)} (Ctrl+Z)">↶ Undo</button>` : ''}${more}</span></div>
     <div class="tiles ro-tiles">
       <div class="tile"><div class="k">Hours this week</div><div class="v">${W.totals.hours.toFixed(2)}</div><div class="s">${W.totals.shifts} shift${W.totals.shifts === 1 ? '' : 's'} · ${W.totals.people} ${W.totals.people === 1 ? 'person' : 'people'}</div></div>
       ${W.sees_pay ? `<div class="tile"><div class="k">Estimated wages</div><div class="v">${money(W.totals.wages, cur())}</div><div class="s">hourly staff, before tax${W.totals.salaried ? ` · ${W.totals.salaried} on salary` : ''}</div></div>` : ''}
@@ -79,27 +96,33 @@ async function renderRoster(state = {}) {
       <div class="tile"><div class="k">Warnings</div><div class="v${W.totals.warnings ? ' ro-wv' : ''}">${W.totals.warnings}</div><div class="s">${W.totals.warnings ? 'see the list below' : 'nothing to check'}</div></div></div>
     ${everyone > 1 ? plv.bar({ shown: W.people.length, total: everyone }) : ''}
     <div class="panel ro-gridpanel">
-      <div class="scroll ro-gridwrap"><table class="ro-grid"><thead><tr><th class="ro-p">Staff</th>${W.days.map(d => `<th class="${d === W.today ? 'today' : ''}">${QE.dayShort(d).split(' ')[0]} <span>${+d.slice(8)}</span></th>`).join('')}</tr></thead><tbody>
-        ${openRow ? `<tr class="ro-openrow"><th class="ro-p"><div class="ro-who"><b>Open shifts</b><span class="small muted">nobody yet</span></div></th>${W.days.map(d => cell(null, d, W.open, null)).join('')}</tr>` : ''}
-        ${W.people.map(p => `<tr><th class="ro-p">${who(p)}</th>${W.days.map(d => cell(p.id, d, p.shifts, p.leave[d])).join('')}</tr>`).join('') || `<tr><td colspan="8" class="empty">Nobody on the time clock yet. Add staff under Staff.</td></tr>`}
-      </tbody><tfoot><tr><th class="ro-p">Day total</th>${W.days.map(d => `<td><b>${dayHours(d).toFixed(2)}</b> h<span class="small muted"> · ${dayPeople(d)} ${dayPeople(d) === 1 ? 'person' : 'people'}</span></td>`).join('')}</tr></tfoot></table></div>
-      ${ed ? '<p class="small muted ro-hint">Click <b>+</b> to add a shift, click a shift to change it, or drag it to another day or person (hold <b>Ctrl</b> to copy instead of move).</p>' : ''}
+      <div class="scroll ro-gridwrap"><table class="ro-grid" ${ed ? 'role="grid" aria-multiselectable="true"' : ''} aria-label="Roster for ${esc(W.label)}"><thead><tr><th class="ro-p">${ed ? `<label class="ro-all" title="Select every day for everyone (Ctrl+A)"><input type="checkbox" id="ro-all" ${RO.sel.size && RO.sel.size === onGrid.size * 7 ? 'checked' : ''}> Staff</label>` : 'Staff'}</th>${W.days.map(d => `<th class="ro-dh${d === W.today ? ' today' : ''}" data-col="${d}" ${ed ? `title="Select ${esc(roDay(d))} for everyone (Ctrl: add to the selection)"` : ''}>${QE.dayShort(d).split(' ')[0]} <span>${+d.slice(8)}</span></th>`).join('')}</tr></thead><tbody>
+        ${openRow ? `<tr class="ro-openrow" data-row=""><th class="ro-p" ${ed ? 'title="Select the open shifts row (Ctrl: add to the selection)"' : ''}><div class="ro-who"><b>Open shifts</b><span class="small muted">nobody yet</span></div></th>${W.days.map(d => cell(null, d, W.open, null, 'Open shifts')).join('')}</tr>` : ''}
+        ${W.people.map(p => `<tr data-row="${p.id}" class="${p.former ? 'former' : ''}"><th class="ro-p" title="${esc(`${usualText(p)}${ed ? `\nClick to select ${p.name}'s week (Ctrl: add to the selection)` : ''}`)}">${who(p)}</th>${W.days.map(d => cell(p.id, d, p.shifts, p.leave[d], p.name)).join('')}</tr>`).join('') || `<tr><td colspan="8" class="empty">Nobody on the time clock yet. Add staff under Staff.</td></tr>`}
+      </tbody><tfoot><tr><th class="ro-p">Day total</th>${W.days.map(d => `<td><b>${dayHours(d).toFixed(2)}</b> h<span class="small muted ro-dp">${dayPeople(d)} ${dayPeople(d) === 1 ? 'person' : 'people'}</span></td>`).join('')}</tr></tfoot></table></div>
+      ${ed ? `<p class="small muted ro-hint">${RO.selMode ? 'Tick the days to change, then choose a shift below. Press <b>☑ Select</b> again to go back.' : 'Click <b>+</b> to add a shift, click a shift to change it, or drag it to another day or person (hold <b>Ctrl</b> to copy). <b>Select many:</b> drag across days, Shift + click, Ctrl + click, or click a name or a day heading, then choose a shift below. Arrow keys and Space work too.'}</p>` : ''}
     </div>
     <div class="ro-phone">
       <div class="ro-daytabs" role="tablist">${W.days.map(d => `<button type="button" role="tab" aria-selected="${d === RO.day}" class="ro-dt${d === RO.day ? ' on' : ''}${d === W.today ? ' today' : ''}" data-day="${d}"><span>${QE.dayShort(d).split(' ')[0]}</span><b>${+d.slice(8)}</b><small>${dayHours(d) ? dayHours(d).toFixed(1) + 'h' : '–'}</small></button>`).join('')}</div>
-      <h3 class="ro-dayh">${esc(roDay(RO.day))} <span class="small muted">${dayHours(RO.day).toFixed(2)} h · ${dayPeople(RO.day)} working</span></h3>
+      <h3 class="ro-dayh">${esc(roDay(RO.day))} <span class="small muted">${dayHours(RO.day).toFixed(2)} h · ${dayPeople(RO.day)} working</span>${ed && RO.selMode ? `<label class="ro-pall small"><input type="checkbox" id="ro-pall" ${W.people.every(p => RO.sel.has(`${p.id}|${RO.day}`)) && W.people.length ? 'checked' : ''}> Everyone</label>` : ''}</h3>
       <div class="ro-daylist">${phoneDay(RO.day)}</div>
     </div>
+    ${ed ? rosterBulkBar(W) : ''}
     ${W.hidden ? `<p class="small muted">${W.hidden} shift${W.hidden === 1 ? '' : 's'} for other teams this week aren't shown (you see your own team).</p>` : ''}
     ${allWarn.length ? `<div class="panel ro-warns"><h3>⚠ Things to check</h3><ul>${allWarn.map(x => `<li><b>${esc(x.n)}</b>${x.d ? `, ${esc(roDay(x.d))} ${esc(x.t)}` : ''}: ${esc(x.w)}</li>`).join('')}</ul>
       <p class="small muted" style="margin:6px 0 0">These are warnings only: the roster saves anyway. Leave is booked in Timesheets → Accruals.</p></div>` : ''}
     <details class="panel ro-help"><summary><b>How the roster works</b></summary>
       <ol class="small">
-        <li><b>Plan the week.</b> Click <b>+</b> on a day to add a shift: who, start and finish, the unpaid break, the role or area (e.g. Cafe, Till) and a note. <b>Copy last week</b> brings in last week's shifts. Click a shift to change it, or <b>Repeat</b> it on other days.</li>
+        <li><b>Plan the week.</b> Click <b>+</b> on a day to add a shift: who, start and finish, the unpaid break, the role or area (e.g. Cafe, Till) and a note. Click a shift to change it, or <b>Repeat</b> it on other days.</li>
+        <li><b>Shift templates</b> (More → Shift templates) are your standard shifts, e.g. "Open 7am–3pm, 30 min break". Each has a colour on the grid.</li>
+        <li><b>Usual weeks</b> (More → Usual weeks) are each person's standard days and shifts. <b>↻ Fill from usual weeks</b> puts them all on the week in one go, skipping leave already booked, people who have left, and days that already have a shift.</li>
+        <li><b>Many at once:</b> drag across days (or Shift / Ctrl + click, or click a name or a day heading), then pick a shift template, typed times, a role, or Clear. On a phone or tablet, press <b>☑ Select</b> and tick the days.</li>
+        <li><b>From a spreadsheet:</b> More → Import shifts from a file. Fill in the template in Excel, save it as CSV, check the preview, then save. <b>Copy last week</b> and <b>Copy to the next weeks</b> are under More too.</li>
+        <li><b>Undo</b> takes back the last bulk change (fill, apply to selected days, import or copy).</li>
         <li><b>Open shifts</b> have nobody yet. Give one to someone by clicking it and choosing who, or drag it onto their row.</li>
         <li><b>Warnings</b> show when one person has two shifts at the same time, a shift on a day they have leave booked, a shift over ${W.long_shift_hours} hours, or more than the normal ${W.normal_week_hours}-hour week.</li>
         <li><b>Hours and wages</b> are estimates: start to finish less the break, times the person's hourly rate. Payroll still pays from Timesheets.</li>
-        <li><b>Publish roster</b> when it's ready. Staff then see their shifts on the <b>Time clock</b> (after tapping their name) and here under <b>Roster</b>. Print it, or copy it for WhatsApp or a text message.</li>
+        <li><b>Publish roster</b> when it's ready. Everything above is a draft until then. Staff then see their shifts on the <b>Time clock</b> (after tapping their name) and here under <b>Roster</b>. Print it, or copy it for WhatsApp or a text message.</li>
         <li><b>Changes after publishing</b> are marked <span class="ro-st inl">changed</span>, <span class="ro-st inl">new</span> or <span class="ro-st inl">removed</span> until you publish again. Staff then see those shifts marked "changed".</li>
         <li><b>Into pay:</b> Timesheets show if someone clocked in early or late against the published roster. When you <b>Start next pay run</b>, you can fill hours from the roster for people who don't clock in.</li>
       </ol></details>
@@ -111,21 +134,24 @@ async function renderRoster(state = {}) {
   $('#ro-prev').onclick = () => go2({ week: addDays(W.week_start, -7), day: addDays(RO.day, -7) });
   $('#ro-next').onclick = () => go2({ week: addDays(W.week_start, 7), day: addDays(RO.day, 7) });
   if ($('#ro-today')) $('#ro-today').onclick = () => go2({ week: today(), day: today() });
-  $('#ro-staff').onclick = () => go2({ mode: 'staff' });
-  $('#ro-print').onclick = () => rosterShare(W.week_start, 'print');
-  $('#ro-text').onclick = () => rosterShare(W.week_start, 'text');
+  const page = $('.ro-page', view());
+  rosterMoreBind(W, page);
   $$('[data-day]').forEach(b => b.onclick = () => go2({ day: b.dataset.day }));
   const openShift = id => { const s = all().find(x => String(x.id) === String(id)); if (s) rosterEditor(W, { shift: s }); };
-  const page = $('.ro-page', view());
   page.addEventListener('click', e => {
+    if (e.target.closest('[data-ro-undo]')) return rosterUndo();
+    if (RO.selMode || e.ctrlKey || e.metaKey || e.shiftKey) return;                                 // selecting (rosterbulk.js)
     const a = e.target.closest('[data-add]'); if (a) { const [u, d] = a.dataset.add.split('|'); return rosterEditor(W, { user_id: u ? +u : null, date: d }); }
     const c = e.target.closest('.ro-shift'); if (c) openShift(c.dataset.sid);
   });
-  page.addEventListener('keydown', e => { const c = e.target.closest('.ro-shift'); if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openShift(c.dataset.sid); } });
+  page.addEventListener('keydown', e => { const c = e.target.closest('.ro-shift'); if (c && !RO.selMode && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); openShift(c.dataset.sid); } });
   if (!ed) return;
-  $('#ro-new').onclick = () => rosterEditor(W, { user_id: W.people[0] ? W.people[0].id : null, date: RO.day });
+  $('#ro-new').onclick = () => rosterEditor(W, { user_id: W.people.filter(p => !p.former)[0] ? W.people.filter(p => !p.former)[0].id : null, date: RO.day });
   $('#ro-publish').onclick = () => rosterPublish(W, pend);
-  $('#ro-copy').onclick = () => rosterCopyWeek(W);
+  $('#ro-fill').onclick = () => rosterFillModal(W);
+  $('#ro-selmode').onclick = () => go2({ selMode: !RO.selMode });
+  rosterSelectBind(W, page);
+  if (RO.selMode) return;
   // drag a shift to another day or person (Ctrl / Alt / ⌘: copy)
   const grid = $('.ro-grid');
   grid.addEventListener('dragstart', e => { const c = e.target.closest('.ro-shift'); if (!c) return; e.dataTransfer.setData('text/plain', c.dataset.sid); e.dataTransfer.effectAllowed = 'copyMove'; c.classList.add('dragging'); });
@@ -137,7 +163,7 @@ async function renderRoster(state = {}) {
     const uid = td.dataset.u ? +td.dataset.u : null, d = td.dataset.d, copy = e.ctrlKey || e.altKey || e.metaKey;
     if (!copy && s.date === d && (s.user_id || null) === uid) return;
     try {
-      const r = copy ? await api('/api/staff/roster/shifts', { body: { user_id: uid, date: d, start: s.start, finish: s.finish, break_min: s.break_min, role: s.role, note: s.note } })
+      const r = copy ? await api('/api/staff/roster/shifts', { body: { user_id: uid, date: d, start: s.start, finish: s.finish, break_min: s.break_min, role: s.role, note: s.note, template_id: s.template_id } })
         : await api(`/api/staff/roster/shifts/${s.id}`, { method: 'PUT', body: { user_id: uid, date: d } });
       toast(`${copy ? 'Copied' : 'Moved'} to ${roDay(d)}${r.warnings.length ? ` · ⚠ ${r.warnings.join('; ')}` : ''}`, r.warnings.length ? 7000 : 3000);
       renderRoster();
@@ -149,13 +175,14 @@ async function renderRoster(state = {}) {
 function rosterEditor(W, { shift = null, user_id = null, date }) {
   const s = shift, ed = W.can_edit;
   if (!ed && s) return toast(`${roTimes(s)}${s.role ? ' · ' + s.role : ''}${s.note ? ' · ' + s.note : ''}`, 5000);
-  const people = W.people, p0 = s ? s.user_id : user_id, last = RO_LAST || {};
-  const v = s ? { ...s } : { user_id: p0, date, start: last.start || W.normal_start, finish: last.finish || W.normal_finish, role: last.role || '', note: '' };
+  const people = W.people.filter(p => !p.former || (s && p.id === s.user_id)), p0 = s ? s.user_id : user_id, last = RO_LAST || {}, T = W.templates || [];
+  const v = s ? { ...s } : { user_id: p0, date, start: last.start || W.normal_start, finish: last.finish || W.normal_finish, role: last.role || '', note: '', template_id: last.template_id || null };
   if (!s) v.break_min = last.break_min != null && last.start === v.start && last.finish === v.finish ? last.break_min : roRuleBreak(roSpan(v.start, v.finish));
   const dayOpts = W.days.includes(v.date) ? W.days : [v.date, ...W.days];
   const m = openModal(`<h2 style="font-size:1.35rem">${s ? (s.deleted ? 'Removed shift' : 'Change shift') : 'Add a shift'}</h2>
     ${s && s.state ? `<p class="small" style="margin:-4px 0 10px"><span class="ro-st inl">${s.state}</span> ${s.state === 'removed' ? 'Staff still see this shift until you publish again.' : 'Not published yet: staff see the earlier version until you publish again.'}</p>` : ''}
     <form id="ro-f" class="ro-form" novalidate>
+      ${T.length ? `<div class="ro-full ro-tpick" role="group" aria-label="Shift template"><span class="small muted">Shift template</span><div class="ro-tbtns">${T.map(t => `<button type="button" class="ro-tbtn${t.id === v.template_id ? ' on' : ''}" data-tid="${t.id}" style="--tc:${esc(t.colour)}" aria-pressed="${t.id === v.template_id}" title="${esc(`${t.name}: ${fmtTime(t.start)}–${fmtTime(t.finish)}${t.break_min ? `, ${t.break_min} min break` : ''}${t.role ? `, ${t.role}` : ''}`)}"><i aria-hidden="true"></i>${esc(t.name)} <small>${esc(roTimes(t))}</small></button>`).join('')}</div></div>` : ''}
       <label class="ts-box ro-full"><span>Who</span><select name="user_id"><option value="">Open shift (nobody yet)</option>${people.map(p => `<option value="${p.id}" ${p.id === v.user_id ? 'selected' : ''}>${esc(p.name)}${p.position ? ' · ' + esc(p.position) : ''}</option>`).join('')}</select></label>
       <label class="ts-box ro-full"><span>Day</span><select name="date">${dayOpts.map(d => `<option value="${d}" ${d === v.date ? 'selected' : ''}>${esc(roDay(d))}</option>`).join('')}</select></label>
       <label class="ts-box"><span>Start</span><input type="time" name="start" value="${v.start}" required></label>
@@ -185,7 +212,16 @@ function rosterEditor(W, { shift = null, user_id = null, date }) {
   };
   const times = () => { if (!breakTouched) F.break_min.value = roRuleBreak(roSpan(F.start.value || '09:00', F.finish.value || '17:00')); liveText(); };
   F.start.oninput = F.finish.oninput = times; F.user_id.onchange = liveText; liveText();
-  const body = () => ({ user_id: F.user_id.value ? +F.user_id.value : null, date: F.date.value, start: F.start.value, finish: F.finish.value, break_min: +F.break_min.value || 0, role: F.role.value, note: F.note.value });
+  // 2.4.0: a shift template fills the times, break and role; typing other times unlinks it
+  let tid = v.template_id || null;
+  const markT = () => $$('.ro-tbtn', m.el).forEach(b => { const on = +b.dataset.tid === tid; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  $$('.ro-tbtn', m.el).forEach(b => b.onclick = () => {
+    const t = T.find(x => x.id === +b.dataset.tid); if (!t) return;
+    tid = t.id; F.start.value = t.start; F.finish.value = t.finish; F.break_min.value = t.break_min; breakTouched = true; if (t.role) F.role.value = t.role; markT(); liveText();
+  });
+  const unlink = () => { const t = T.find(x => x.id === tid); if (t && (F.start.value !== t.start || F.finish.value !== t.finish || +F.break_min.value !== t.break_min)) { tid = null; markT(); } };
+  F.start.addEventListener('input', unlink); F.finish.addEventListener('input', unlink); F.break_min.addEventListener('input', unlink);
+  const body = () => ({ user_id: F.user_id.value ? +F.user_id.value : null, date: F.date.value, start: F.start.value, finish: F.finish.value, break_min: +F.break_min.value || 0, role: F.role.value, note: F.note.value, template_id: tid });
   const fail = err => { $('.err', F).innerHTML = `<div class="error">${esc(err.message)}</div>`; };
   const done = (r, what) => { m.close(); toast(`${what}${r && r.warnings && r.warnings.length ? ` · ⚠ ${r.warnings.join('; ')}` : ''}`, r && r.warnings && r.warnings.length ? 7000 : 3000); renderRoster(); };
   F.onsubmit = async e => {
@@ -193,7 +229,7 @@ function rosterEditor(W, { shift = null, user_id = null, date }) {
     const b = body();
     try {
       const r = s ? await api(`/api/staff/roster/shifts/${s.id}`, { method: 'PUT', body: b }) : await api('/api/staff/roster/shifts', { body: b });
-      RO_LAST = { start: b.start, finish: b.finish, break_min: b.break_min, role: b.role };
+      RO_LAST = { start: b.start, finish: b.finish, break_min: b.break_min, role: b.role, template_id: b.template_id };
       done(r, s ? 'Shift saved' : 'Shift added');
     } catch (err) { fail(err); delete F.dataset.busy; }
   };
@@ -223,8 +259,7 @@ function rosterCopyWeek(W) {
     try {
       const r = await api('/api/staff/roster/copy-week', { body: { week: W.week_start, replace: b.dataset.cw === 'replace' } });
       m.close();
-      const sk = r.skipped.filter(x => x.why !== 'already on the roster');
-      renderRoster({ flash: `<b>✓ Copied ${r.added} shift${r.added === 1 ? '' : 's'} from ${esc(prev)}.</b>${r.removed ? ` ${r.removed} taken off first.` : ''}${sk.length ? ` Not copied: ${sk.map(x => `${esc(x.name)} ${esc(roDay(x.date))} (${esc(x.why)})`).join(', ')}.` : ''} Check it, then <b>Publish roster</b>.` });
+      rosterDone(r, `Copied from ${prev}`);
     } catch (err) { $('.err', m.el).innerHTML = `<div class="error" style="margin-top:10px">${esc(err.message)}</div>`; $$('[data-cw]', m.el).forEach(x => { x.disabled = false; }); }
   });
 }

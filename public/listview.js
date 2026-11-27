@@ -69,13 +69,23 @@
     if (state.sort && spec.fields[state.sort]) out = sortRows(out, spec.fields, state.sort, state.dir);
     return out;
   }
-  const isFiltered = (state, spec) => !!(state.q || state.year || state.period || Object.values(state.sel || {}).some(Boolean)) && !!spec;
+  // 2.4.0: a select at its default (Staff: "Current staff") isn't a filter to clear; choosing "All" is
+  const isFiltered = (state, spec, defaults = {}) => { const ds = (defaults && defaults.sel) || {}, sel = state.sel || {};
+    return !!(state.q || state.year || state.period || [...new Set([...Object.keys(sel), ...Object.keys(ds)])].some(k => String(sel[k] ?? ds[k] ?? '') !== String(ds[k] ?? ''))) && !!spec; };
   // ---- remembering (per list, per person signed in, on this computer)
   const storeKey = (list, uid) => `riyeser.payroll.list.${uid || 0}.${list}`;
-  function load(list, uid, defaults = {}, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
+  // 2.4.0: defaults.v is the list's version. A choice remembered by an older version goes through migrate(saved) once
+  // (default: its selects go back to the defaults, e.g. Staff's old "All" becomes "Current staff"); after that, whatever
+  // the person chooses is remembered as before.
+  function load(list, uid, defaults = {}, storage = (typeof localStorage !== 'undefined' ? localStorage : null), migrate = null) {
     let saved = null; try { saved = storage ? JSON.parse(storage.getItem(storeKey(list, uid)) || 'null') : null; } catch { saved = null; }
     const base = { sort: '', dir: 'asc', q: '', year: '', period: '', from: '', to: '', sel: {}, ...defaults };
     if (!saved || typeof saved !== 'object') return { ...base, sel: { ...(base.sel || {}) } };
+    if (defaults.v && (+saved.v || 0) < defaults.v) {
+      const old = { ...saved, sel: saved.sel && typeof saved.sel === 'object' ? { ...saved.sel } : {} };
+      try { saved = migrate ? migrate(old) || old : { ...old, sel: {} }; } catch { saved = { ...old, sel: {} }; }
+      saved.v = defaults.v; saved.migrated = true;
+    }
     return { ...base, ...saved, sel: { ...(base.sel || {}), ...(saved.sel && typeof saved.sel === 'object' ? saved.sel : {}) } };
   }
   function save(list, uid, state, storage = (typeof localStorage !== 'undefined' ? localStorage : null)) {
@@ -119,12 +129,14 @@
       <div class="lv-end">${sortOpts.length ? `<div class="lv-f lv-sortbox"><label class="lv-k" for="lv-sort-${h(c.id)}">Sort by</label><div class="lv-join"><select id="lv-sort-${h(c.id)}" data-lv-sortsel title="${h(sortLabel)}">${sortOpts.map(([k, x]) => opt(k, x.label, state.sort)).join('')}</select><button type="button" class="lv-dir" data-lv-dir aria-label="${state.dir === 'desc' ? 'Descending: press for ascending' : 'Ascending: press for descending'}" title="Reverse the order"><span aria-hidden="true">${state.dir === 'desc' ? '▼' : '▲'}</span></button></div></div>` : ''}
       ${extra}
       <div class="lv-foot"><span class="lv-count" aria-live="polite">${shown == null ? '' : shown === total ? `${total} shown` : `Showing <b>${shown}</b> of ${total}`}</span>
-        <button type="button" class="btn sm ghost lv-clear" data-lv-clear ${isFiltered(state, spec) ? '' : 'disabled'}>Clear filters</button></div></div></div>`;
+        <button type="button" class="btn sm ghost lv-clear" data-lv-clear ${isFiltered(state, spec, c.defaults) ? '' : 'disabled'}>Clear filters</button></div></div></div>`;
   }
-  // c = LV.list({ id, uid, spec, defaults, meta, onChange(c, { dates }) })
+  // c = LV.list({ id, uid, spec, defaults, meta, onChange(c, { dates }), migrate(saved) (2.4.0, with defaults.v), storage (tests) })
   function list(opts) {
     const c = { id: opts.id, uid: opts.uid, spec: opts.spec, meta: opts.meta || null, defaults: opts.defaults || {}, onChange: opts.onChange || (() => {}) };
-    c.state = load(c.id, c.uid, c.defaults);
+    const storage = opts.storage !== undefined ? opts.storage : (typeof localStorage !== 'undefined' ? localStorage : null);
+    c.state = load(c.id, c.uid, c.defaults, storage, opts.migrate);
+    if (c.state.migrated) { delete c.state.migrated; save(c.id, c.uid, c.state, storage); }
     const f = () => allowedFields(c.spec.fields, c.id, c.meta);
     if (!f()[c.state.sort]) { c.state.sort = c.defaults.sort && f()[c.defaults.sort] ? c.defaults.sort : ''; c.state.dir = c.defaults.dir || 'asc'; }
     for (const s of c.spec.selects || []) if (c.state.sel[s.key] && !s.options.some(([v]) => String(v) === String(c.state.sel[s.key]))) delete c.state.sel[s.key];
@@ -133,7 +145,7 @@
     c.range = () => rangeOf(c.state, c.meta);
     c.th = (label, key, o) => (f()[key] ? th(label, key, c.state, { ...(o || {}), list: c.id }) : `<th class="${[o && o.r ? 'r' : '', o && o.cls ? h(o.cls) : ''].filter(Boolean).join(' ')}">${label}</th>`);
     c.bar = o => bar(c, o);
-    c.save = () => save(c.id, c.uid, c.state);
+    c.save = () => save(c.id, c.uid, c.state, storage);
     c.set = (patch, dates = false) => { Object.assign(c.state, patch); c.save(); c.onChange(c, { dates }); };
     c.sortBy = key => { if (!f()[key]) return; const flip = c.state.sort === key; c.set({ sort: key, dir: flip ? (c.state.dir === 'desc' ? 'asc' : 'desc') : (f()[key].first || 'asc') }); };
     c.clear = () => { const keep = { sort: c.state.sort, dir: c.state.dir }; c.state = { ...load('__none__', 0, c.defaults, null), ...keep, sel: { ...(c.defaults.sel || {}) } }; c.save(); c.onChange(c, { dates: true, cleared: true }); };
