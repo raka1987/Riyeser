@@ -56,6 +56,8 @@ module.exports = {
   // Riyeser Central reads Accounting's books with sql.js (WebAssembly), kept outside the archive.
   // As Built carries its own copy of the app (built by package-win.js into build/services-web).
   ...(which === 'services' ? { extraResources: [{ from: 'build/services-web', to: 'services-web' }] } : {}),
+  // Riyeser Link Office can run the Riyeser relay on the head office PC: its files must be real files for that
+  ...(which === 'linkoffice' ? { asarUnpack: [...(base.asarUnpack || []), 'src/relay/**'] } : {}),
   ...(which === 'central' ? { asarUnpack: [...(base.asarUnpack || []), 'node_modules/sql.js/dist/**'] } : {}),
   copyright: 'Riyeser Group',
   publish: null,

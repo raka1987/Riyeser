@@ -18,14 +18,14 @@ const say = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
   const directory = new Directory(new Store(dir));
   for (const [ext, name] of cfg.people) directory.addPerson({ name, ext });
   const trunks = new Trunks();
-  const pbx = await new Pbx({ directory, host: cfg.host, port: 5060, bind: cfg.host, tcp: false, multicast: false, trunks, ringTimeout: 20000, log: (l, t) => say({ log: `${l} ${t}` }) }).start();
+  const pbx = await new Pbx({ directory, host: cfg.host, port: cfg.port || 5060, bind: cfg.host, tcp: false, multicast: false, trunks, ringTimeout: 20000, log: (l, t) => say({ log: `${l} ${t}` }) }).start();
   const link = new RelayLink({ getConfig: async () => ({ enabled: true, relays: cfg.relays, tokens: cfg.tokens, exp: Math.floor(Date.now() / 1000) + 3600 }), siteName: () => cfg.name,
     timing: cfg.timing, probe: true, callsInProgress: () => pbx.callsInProgress().length, log: (l, t) => say({ log: `${l} ${t}` }) });
   trunks.add(link); await link.start({ pbx });
   pbx.on('change', () => link.setExts([...pbx.bindings.keys()]));
   const phones = {};
   for (const p of cfg.phones) {
-    const u = await new SimUA({ ext: p.ext, password: directory.password(p.ext), server: { host: cfg.host, port: 5060 }, bind: p.bind, rtp: true, answerDelay: 80 }).start();
+    const u = await new SimUA({ ext: p.ext, password: directory.password(p.ext), server: { host: cfg.host, port: cfg.port || 5060 }, bind: p.bind, rtp: true, answerDelay: 80 }).start();
     const r = await u.register(); if (r.status !== 200) throw new Error(`${p.ext} didn't register (${r.status})`);
     phones[p.ext] = u;
   }

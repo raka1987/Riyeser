@@ -108,6 +108,12 @@
     },
     RELAY_UDP_BLOCKED: 'Calls to other sites connect, but there may be no sound: this network\'s firewall seems to block UDP to the relay. Allow outgoing UDP to the relay (ports 40000–49999) on the router or firewall.',
     RELAY_SITE_NAME: 'This site\'s name (what the other sites see)',
+    RELAY_HOST_TITLE: 'This PC as the relay (head office)',
+    RELAY_HOST_WHY: 'The head office\'s always-on PC can be the Riyeser relay for all your sites (a rented server can be the backup). It runs in the background from Windows start-up, opens its ports in Windows Firewall and asks the router to forward them. Windows asks for permission once. Then add the relay\'s DNS name and register it once in Riyeser online (the relay\'s README says how).',
+    RELAY_HOST_DOWN: 'The relay is installed on this PC but isn\'t answering. Running this again repairs it.',
+    RELAY_HOST_MORE: 'It runs as the Windows task "Riyeser Relay" (starts with Windows, restarts itself). Its settings and log are in C:\\ProgramData\\Riyeser Relay.',
+    RELAY_HOST_DONE: 'The relay is running on this PC. Next: its DNS name, the router (if it didn\'t forward the ports itself) and registering it once — see C:\\ProgramData\\Riyeser Relay.',
+    relayHostOn: (h) => `This PC runs the Riyeser relay ${h.relay} (${h.region}) · version ${h.version} · ${h.sites} site${h.sites === 1 ? '' : 's'} and ${h.phones} phone${h.phones === 1 ? '' : 's'} connected now${h.sync && h.sync.ok === false ? ' · not reaching Riyeser online' : ''}.`,
     udp: (u) => ({ ok: 'gets through', blocked: 'blocked by a firewall', checking: 'checking…', unknown: 'not checked' }[u] || '—'),
     duration: (s) => (!s ? '' : s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim()),
   };

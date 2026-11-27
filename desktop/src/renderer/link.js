@@ -182,7 +182,21 @@ function renderRelay() {
       ${row('Relays (in order)', (r.relays || []).map((x) => `${esc(x.id)} ${esc(x.region)}`).join(' → ') || '—')}
       ${row('Reachable through it', `${esc(r.remote || 0)} extension(s), ${esc(r.phones || 0)} phone(s) at home`)}
       ${row('Last problem', esc(r.error || 'none'))}</dl></details>
-    <div class="row"><button class="btn s" data-a="relayretry">Reconnect now</button><button class="btn s" data-a="web">Sites and the relay on the website</button></div>`;
+    <div class="row"><button class="btn s" data-a="relayretry">Reconnect now</button><button class="btn s" data-a="web">Sites and the relay on the website</button></div>
+    ${S.platform === 'win32' ? relayHostHtml() : ''}`;
+  if (S.platform === 'win32' && relayHost === undefined) { relayHost = null; bridge.call('link:relay-host-state').then((h) => { relayHost = h || { installed: false }; part('connect your branches', renderRelay, '#relay'); }).catch(() => { relayHost = { installed: false }; }); }
+}
+// ---------- the head office PC can run the Riyeser relay itself (install-relay.ps1, with Windows' permission prompt)
+let relayHost;
+function relayHostHtml() {
+  const h = relayHost;
+  if (h && h.health && h.health.ok) return `<details class="help" open><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p><b>${esc(T.relayHostOn(h.health))}</b></p><p class="muted small">${esc(T.RELAY_HOST_MORE)}</p></details>`;
+  return `<details class="help"><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p class="muted">${esc(T.RELAY_HOST_WHY)}</p>
+    ${h && h.installed ? `<div class="note warn">${esc(T.RELAY_HOST_DOWN)}</div>` : ''}
+    <form id="relayhost" class="row"><label style="flex:1 1 220px"><span class="muted small">Relay's name (DNS)</span><input id="rhdomain" value="relay.riyeser.com" autocomplete="off" spellcheck="false"></label>
+      <label style="flex:1 1 160px"><span class="muted small">Where</span><input id="rhregion" value="Head office" maxlength="60" autocomplete="off"></label>
+      <label style="flex:0 1 110px"><span class="muted small">Id</span><input id="rhid" value="suva1" maxlength="40" autocomplete="off" spellcheck="false"></label>
+      <button class="btn s">Run the relay on this PC…</button></form></details>`;
 }
 // ---------- Settings → This PC's address: the adapter, names, what phones are given, reserve it, fixed address
 function renderAddress() {
@@ -362,6 +376,12 @@ document.addEventListener('submit', async (e) => {
     const ext = $('#macwho').value; if (!ext) { toast('Choose who the phone is for.'); return; }
     const r = await safe(() => bridge.call('link:assign', $('#mac').value, ext));
     if (r) { $('#mac').value = ''; toast('Added. Turn the phone on (or restart it) and it sets itself up.'); load(); }
+  }
+  if (e.target.id === 'relayhost') {
+    toast('Windows will ask for permission…');
+    const r = await safe(() => bridge.call('link:relay-host', { domain: $('#rhdomain').value.trim(), region: $('#rhregion').value.trim(), id: $('#rhid').value.trim() }));
+    relayHost = undefined;
+    if (r) { toast(r.ok ? T.RELAY_HOST_DONE : `The relay wasn't set up: ${r.out || 'cancelled'}`); load(); }
   }
   if (e.target.id === 'sitename') {
     const n = await safe(() => bridge.call('link:site-name', $('#sitenamein').value));

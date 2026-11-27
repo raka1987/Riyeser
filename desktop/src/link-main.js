@@ -141,6 +141,15 @@ function registerIpc() {
   handle('link:replace', (oldMac, newMac, vendor) => service.replacePhone(oldMac, newMac, vendor));
   handle('link:ignore', (mac) => service.ignore(mac));
   handle('link:site-name', (name) => service.setSiteName(name));
+  // the head office PC can run the Riyeser relay itself (Settings → Connect your branches → This PC as the relay)
+  handle('link:relay-host-state', () => require('./link/windows').relayHostState());
+  handle('link:relay-host', async (o) => {
+    const w = require('./link/windows');
+    const relayDir = path.join(__dirname, 'relay').replace('app.asar', 'app.asar.unpacked');
+    const r = await w.runElevatedScript((result) => w.relayHostScript({ script: path.join(relayDir, 'deploy', 'windows', 'install-relay.ps1'), relayDir, ...(o || {}) }, result));
+    logLine('info', `Run the Riyeser relay on this PC: ${r.ok ? 'installed' : r.why || 'didn\'t finish'}.`);
+    return { ok: !!r.ok, out: String(r.out || r.why || '').replace(/select relay_register\([^)]*\);?/g, '[see REGISTER.sql]').slice(-2000) };
+  });
   handle('link:relay-retry', () => { if (service.relay) { service.relay.configAt = 0; service.relay.nudge(); } return service.status().relay; });
   handle('link:addPerson', (name, ext) => service.addPerson({ name, ext }));
   handle('link:removePerson', (id) => service.removePerson(id));

@@ -145,5 +145,25 @@ async function runElevatedScript(makeScript) {
   } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp folder */ } }
 }
 
-module.exports = { RULE, firewallCommands, firewallRuleExists, ruleState, addFirewallRule, parsePowercfg, sleepWarning, readSleep,
+/**
+ * Run the Riyeser relay on this PC (the head office's main relay), with the relay's own Windows installer
+ * (src/relay/deploy/windows/install-relay.ps1, unpacked from the app): a background task at boot, firewall rules,
+ * router port forwarding where the router allows it, and Node from this app (ELECTRON_RUN_AS_NODE).
+ */
+function relayHostScript({ script, relayDir, domain, region, id }, resultFile) {
+  const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
+  if (!/^[A-Za-z0-9.-]{3,253}$/.test(domain || '') || !/^[a-z0-9-]{2,40}$/.test(id || '') || /[\r\n"`$]/.test(region || '')) throw new Error('Check the relay\'s name, id and region.');
+  return [`$out = & ${q(script)} -LinkOffice -RelayDir ${q(relayDir)} -Domain ${q(domain)} -Region ${q(region)} -Id ${q(id)} *>&1 | Out-String`,
+    `@{ ok = ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null); out = $out } | ConvertTo-Json -Compress | Set-Content -Path ${q(resultFile)} -Encoding UTF8`].join('\r\n');
+}
+/** Is this PC running the relay? -> { installed, health } (health from http://127.0.0.1:8080/health) */
+async function relayHostState() {
+  if (process.platform !== 'win32') return { installed: false };
+  let installed = false;
+  try { await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', "if (Get-ScheduledTask -TaskName 'Riyeser Relay' -ErrorAction SilentlyContinue) { exit 0 } else { exit 3 }"]); installed = true; } catch { installed = false; }
+  const health = await new Promise((resolve) => { const r = require('http').get('http://127.0.0.1:8080/health', { timeout: 1500 }, (x) => { let b = ''; x.on('data', (c) => { b += c; }); x.on('end', () => { try { resolve(JSON.parse(b)); } catch { resolve(null); } }); }); r.on('error', () => resolve(null)); r.on('timeout', () => r.destroy()); });
+  return { installed, health };
+}
+
+module.exports = { relayHostScript, relayHostState, RULE, firewallCommands, firewallRuleExists, ruleState, addFirewallRule, parsePowercfg, sleepWarning, readSleep,
   PS_NETCONFIG, parseNetConfig, readNetConfig, prefixToMask, fixedAddressScript, dhcpScript, runElevatedScript };
