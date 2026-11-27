@@ -8,7 +8,9 @@
 //   - the error message or code, if the person types one
 //   - the last 200 lines (64 KB at most) of that program's technical log, if it has one Central can find
 //     (Riyeser Link Office: %APPDATA%\Riyeser Link Office\logs\link.log; Desk Assistant: its smart-review.log).
-//     Other programs don't keep a log Central can read yet, so none is sent for them.
+//     For Accounting, Invoices, POS and Bookings: the end of online-api.log (next to the company file), where the
+//     program notes what went wrong in online connections (with the OA-… reference it showed). For Riyeser Central:
+//     the problems in its online-connections activity trail. Other programs don't keep a log Central can read yet.
 // Never collected: invoices, payroll, customers, sales, bookings, files, chat messages, folder paths or the PC's user name.
 // Before anything is shown or sent, emails are masked (x***@domain), long numbers (bank, tax and card numbers) are
 // replaced, and anything after "password" (or "secret", "token", "api key") on a line is removed. Riyeser's database
@@ -63,9 +65,11 @@ function logFiles(product, env = process.env) {
   return [];
 }
 
-/** The program's recent log lines, or null when it has none. Reads only the end of a big file. */
-function readLog(product, { env = process.env, fsMod = fs } = {}) {
-  for (const { file, label } of logFiles(product, env)) {
+/** The program's recent log lines, or null when it has none. Reads only the end of a big file.
+ * extra: more places for this product ({file, label} or {text, label}), e.g. online-api.log next to the company file. */
+function readLog(product, { env = process.env, fsMod = fs, extra = [] } = {}) {
+  for (const x of extra || []) if (x && typeof x.text === 'string' && x.text.trim()) { const lines = tail(x.text); if (lines) return { lines, source: x.label }; }
+  for (const { file, label } of [...logFiles(product, env), ...(extra || []).filter((x) => x && x.file)]) {
     try {
       const st = fsMod.statSync(file);
       if (!st.isFile() || !st.size) continue;

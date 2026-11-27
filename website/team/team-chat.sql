@@ -7338,3 +7338,116 @@ insert into public.company_modules (workspace_id, module, status, trial_ends)
   select distinct d.workspace_id, 'estimate', 'trial', current_date + 90 from public.devices d
   where coalesce(d.programs, '[]'::jsonb) @> '[{"id": "estimate"}]'::jsonb
   on conflict (workspace_id, module) do nothing;
+
+-- ================================================================ Online connections: where it stands, and "Send a test"
+-- For Riyeser Central on a linked PC (and owners/admins): one cheap call that says whether online connections are set
+-- up at all (keys, webhooks, anything ever received), what's waiting, what's published and which PC brings items in.
+-- Central uses it to show "Not set up" (and not run its claim loop) until something exists, and to tick the
+-- "Connect your website" checklist from what really happened. Safe to run again.
+create or replace function public.api_status(ws uuid, device uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare k record; h record; i record; dev uuid;
+begin
+  if not (public.api_pc_ok(ws, device) or public.is_admin(ws)) then
+    raise exception 'Link this PC to the business first (Riyeser Central).';
+  end if;
+  select count(*) filter (where revoked_at is null) as active, count(*) filter (where revoked_at is null and kind = 'widget') as widget,
+         count(*) filter (where revoked_at is null and mode = 'test') as test, max(created_at) filter (where revoked_at is null) as first_at
+    into k from api_keys where workspace_id = ws;
+  select count(*) filter (where active) as active, count(*) filter (where failing_since is not null) as failing
+    into h from api_webhooks where workspace_id = ws;
+  select count(*) filter (where status = 'waiting') as waiting, count(*) filter (where status = 'taken') as taken,
+         count(*) filter (where status = 'failed') as failed, count(*) filter (where status = 'waiting' and mode = 'test') as test_waiting,
+         count(*) filter (where status = 'done' and mode = 'live') as done_total, count(*) filter (where mode = 'live') as live_total,
+         max(created_at) as last_in_at
+    into i from api_inbox where workspace_id = ws;
+  -- the PC that brings items in: whichever took one or published most recently
+  select x.d into dev from (
+      select taken_by as d, coalesce(taken_at, updated_at) as t from api_inbox where workspace_id = ws and taken_by is not null
+      union all select device_id, updated_at from api_published where workspace_id = ws and device_id is not null) x
+    order by x.t desc limit 1;
+  return json_build_object(
+    'set_up', k.active > 0 or h.active > 0 or i.live_total > 0,
+    'keys', json_build_object('active', k.active, 'widget', k.widget, 'test', k.test),
+    'webhooks', json_build_object('active', h.active, 'failing', h.failing),
+    'requests_24h', (select count(*) from api_requests where workspace_id = ws and at > now() - interval '24 hours'),
+    'last_request_at', (select max(at) from api_requests where workspace_id = ws),
+    'inbox', json_build_object('waiting', i.waiting, 'taken', i.taken, 'failed', i.failed, 'test_waiting', i.test_waiting,
+        'done_total', i.done_total, 'last_in_at', i.last_in_at),
+    'published', json_build_object(
+        'catalog_items', (select count(*) from api_catalog where workspace_id = ws),
+        'catalog_at', (select updated_at from api_published where workspace_id = ws and what = 'catalog'),
+        'stock_at', (select updated_at from api_published where workspace_id = ws and what = 'stock'),
+        'availability_at', (select updated_at from api_published where workspace_id = ws and what = 'availability')),
+    'sync_pc', case when dev is null then null else json_build_object('name', (select device_name from devices where id = dev),
+        'this_pc', dev is not distinct from device) end,
+    'allowed', json_build_object('any', api_gate(ws, 'prices:read') is null, 'bookings', api_gate(ws, 'bookings:write') is null,
+        'orders', api_gate(ws, 'orders:write') is null),
+    'checked_at', now());
+end $$;
+
+-- "Send a test": a test booking, enquiry or order request put in the post box exactly as a test key would send it
+-- (mode test, source "test"), with the same licence checks and test webhooks. A linked PC brings it in within a
+-- minute and files it as a test (every check runs, nothing is kept in the books). Up to 20 an hour per business.
+create or replace function public.api_send_test(ws uuid, device uuid, kind text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare g text; p jsonb; svc api_catalog; slot timestamptz; r api_inbox; item api_catalog;
+  who jsonb := jsonb_build_object('name', 'Test Customer (from Riyeser)', 'email', 'test@example.com');
+begin
+  if not (public.api_pc_ok(ws, device) or public.is_admin(ws)) then
+    raise exception 'Link this PC to the business first (Riyeser Central).';
+  end if;
+  if kind is null or kind not in ('booking', 'enquiry', 'order') then raise exception 'Choose a test booking, enquiry or order request.'; end if;
+  g := api_gate(ws, case kind when 'booking' then 'bookings:write' else 'enquiries:write' end);
+  if g is not null then raise exception '%', api_gate_message(g); end if;
+  if api_rate_hit('test:' || ws || ':' || to_char(now(), 'YYYYMMDDHH24'), interval '2 hours') > 20 then
+    raise exception 'That''s a lot of tests this hour. Wait a little and try again.';
+  end if;
+  if kind = 'booking' then
+    select * into svc from api_catalog c where c.workspace_id = ws and c.type = 'service' and c.active and c.duration_minutes is not null
+      order by c.sku limit 1;
+    if svc.sku is null then
+      raise exception 'There''s no service published yet. Add a service in Riyeser Bookings (Riyeser Central publishes it within a minute), or send a test enquiry.';
+    end if;
+    select starts_at into slot from api_open_times o where o.workspace_id = ws and o.starts_at > now() + interval '1 hour'
+      order by o.starts_at limit 1;
+    slot := coalesce(slot, date_trunc('hour', now()) + interval '1 day');
+    p := jsonb_build_object('service', svc.sku, 'start', to_char(slot at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.000"Z"'),
+      'end', to_char((slot + make_interval(mins => svc.duration_minutes)) at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.000"Z"'),
+      'party_size', 1, 'customer', who, 'notes', 'A test booking from Send a test. It is never added to your calendar.');
+  elsif kind = 'order' then
+    select * into item from api_catalog c where c.workspace_id = ws and c.type = 'product' and c.active order by c.sku limit 1;
+    p := jsonb_build_object('customer', who, 'subject', 'Test order request',
+      'message', 'A test order request from Send a test. Nothing is added to your books.',
+      'metadata', jsonb_build_object('order_sku', coalesce(item.sku, 'TEST-ITEM'), 'order_quantity', 1));
+    kind := 'enquiry';
+  else
+    p := jsonb_build_object('customer', who, 'subject', 'Test enquiry',
+      'message', 'A test enquiry from Send a test. Nothing is added to your books.');
+  end if;
+  insert into api_inbox (workspace_id, kind, mode, payload, key_id, source)
+    values (ws, api_send_test.kind, 'test', p, null, 'test') returning * into r;
+  perform api_queue_event(ws, 'test', case r.kind when 'booking' then 'booking.received' else 'enquiry.received' end,
+    jsonb_build_object('event_id', r.id, 'kind', r.kind, 'source', r.source, 'payload', r.payload));
+  return json_build_object('id', r.id, 'kind', r.kind, 'status', r.status, 'test', true, 'created_at', r.created_at);
+end $$;
+
+-- Where one post-box item is (for "Send a test": waiting → taken by a PC → done). Test items, or any for admins.
+create or replace function public.api_event_status(ws uuid, device uuid, event_id uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare e api_inbox;
+begin
+  if not (public.api_pc_ok(ws, device) or public.is_admin(ws)) then
+    raise exception 'Link this PC to the business first (Riyeser Central).';
+  end if;
+  select * into e from api_inbox i where i.id = event_id and i.workspace_id = ws and (i.mode = 'test' or public.is_admin(ws));
+  if e.id is null then raise exception 'That test isn''t in the post box (it may be more than 90 days old).'; end if;
+  return json_build_object('id', e.id, 'kind', e.kind, 'status', e.status, 'test', e.mode = 'test', 'result', e.result,
+    'error', case when public.is_admin(ws) then e.error end, 'taken_by_pc', (select device_name from devices d where d.id = e.taken_by),
+    'created_at', e.created_at, 'updated_at', e.updated_at);
+end $$;
+
+revoke all on function public.api_status(uuid, uuid), public.api_send_test(uuid, uuid, text), public.api_event_status(uuid, uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function public.api_status(uuid, uuid), public.api_send_test(uuid, uuid, text), public.api_event_status(uuid, uuid, uuid)
+  to authenticated;

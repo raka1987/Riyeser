@@ -99,6 +99,13 @@ async function fakeServer(page, opts = {}) {
       case 'api_webhook_deliveries_list': return json(st.deliveries);
       case 'api_webhook_rotate': return json({ ...hook(a.hook_id), secret: 'whsec_' + crypto.randomBytes(24).toString('hex') });
       case 'api_webhook_delete': st.hooks = st.hooks.filter((h) => h.id !== a.hook_id); return json(null);
+      case 'api_status': if (!opts.status) return fail('Could not find the function public.api_status', 'PGRST202', 404);
+        return json({ set_up: true, keys: { active: 1, widget: 1, test: 0 }, webhooks: { active: 1, failing: 0 }, requests_24h: 0, last_request_at: opts.status.request ? ago(5) : null,
+          inbox: { waiting: 1, taken: 0, failed: 1, test_waiting: 0, done_total: opts.status.done || 0 }, published: { catalog_items: 12, catalog_at: ago(30), stock_at: null, availability_at: ago(8) },
+          sync_pc: opts.status.pc ? { name: opts.status.pc, this_pc: false } : null, allowed: { any: true, bookings: true, orders: true }, checked_at: new Date().toISOString() });
+      case 'api_send_test': { st.args.api_send_test = a; st.test = { id: 'ev-test', polls: 0 }; return json({ id: 'ev-test', kind: a.kind === 'order' ? 'enquiry' : a.kind, status: 'waiting', test: true }); }
+      case 'api_event_status': { st.test.polls += 1; const s = st.test.polls < 2 ? 'taken' : 'done';
+        return json({ id: a.event_id, kind: 'enquiry', status: s, test: true, result: s === 'done' ? { state: 'received', message: 'Thanks <b>(test)</b>' } : null, taken_by_pc: 'FRONT-PC' }); }
       default: return fail('unknown ' + fn);
     }
   });
@@ -275,6 +282,32 @@ const noSideways = (pg) => pg.evaluate(() => document.documentElement.scrollWidt
     assert.ok(!(await p10b.$('#connPage')), 'no Connections without two-step sign-in'); assert.deepStrictEqual(s10b.calls, []);
     console.log('without two-step sign-in:', (await text(p10b, '.modal h3'))); assert.match(await text(p10b, '.modal'), /two-step|authenticator/i);
     console.log('staff and no two-step: ok');
+
+    // 12. "Connect your website": the checklist ticks from api_status; Send a test goes through api_send_test and shows it arriving
+    const [p12, s12] = await newPage({ status: { pc: 'FRONT-PC', request: false, done: 0 } });
+    await signIn(p12, BASE + '/link/?connections'); await p12.waitForSelector('#mgucode'); await p12.fill('#mgucode', '246810'); await p12.click('#mgugo');
+    await p12.waitForSelector('#cnguide');
+    const gticks = await p12.$$eval('#cnguide [data-check]', (x) => x.map((e) => `${e.dataset.check}:${e.classList.contains('on') ? 1 : 0}`));
+    console.log('guide checklist:', gticks.join(' '));
+    assert.deepStrictEqual(gticks, ['key:1', 'request:1', 'sync:1', 'item:1', 'publish:1']);   // requests_24h and done_7d from the overview count
+    assert.match(await text(p12, '#cnguide summary'), /Connect your website\s*All done ✓/);
+    assert.strictEqual(await p12.$eval('#cnguide', (d) => d.open), false, 'folded away once everything is ticked');
+    await p12.click('#cnguide summary');
+    for (const w of ['WordPress', 'Wix', 'Squarespace', 'Shopify', 'Plain HTML']) assert.ok((await text(p12, '#cnguide')).includes(w), w);
+    await p12.click('#cnguide input[name=cngpick][value=shop]');
+    assert.match(await text(p12, '#cng3'), /POST \/v1\/orders/); assert.strictEqual(await p12.$('#cnguide .cn-gwhere'), null);
+    assert.strictEqual(await p12.$eval('#cngkind', (e) => e.value), 'order');
+    await p12.selectOption('#cngkind', 'enquiry'); await p12.click('#cngsend');
+    await p12.waitForSelector('#cnguide .cn-gprog'); console.log('test sent:', await text(p12, '#cnguide .cn-gprog'));
+    assert.deepStrictEqual(s12.args.api_send_test, { ws: 'w1', device: null, kind: 'enquiry' });
+    await p12.waitForSelector('#cngok', { timeout: 15000 });
+    console.log('test arrived:', await text(p12, '#cngok')); assert.match(await text(p12, '#cngok'), /It arrived on FRONT-PC\. Thanks <b>\(test\)<\/b> Nothing was added to your books\./);
+    assert.strictEqual(await p12.$('#cngok b b'), null, 'what the PC said is shown as text');
+    await p12.screenshot({ path: out + '/conn-guide.png', fullPage: true });
+    const [p12b] = await newPage({ status: { pc: 'FRONT-PC' } }, { width: 390, height: 844 });
+    await signIn(p12b, BASE + '/link/?connections'); await p12b.waitForSelector('#mgucode'); await p12b.fill('#mgucode', '246810'); await p12b.click('#mgugo'); await p12b.waitForSelector('#cnguide');
+    assert.ok(await noSideways(p12b), 'guide: no sideways scrolling on a phone');
+    console.log('connect your website guide: ok');
   } catch (e) { failed = true; console.error('FAIL', e); }
   if (errs.length) { failed = true; console.error('page errors:', errs); }
   await b.close();

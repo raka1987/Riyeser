@@ -422,11 +422,29 @@ function registerIpc() {
     // started without a window; never in demo mode (the sync waits while demo mode is on)
     spawnFn: (exe, args) => { const env = { ...process.env }; delete env.RIYESER_DEMO; return spawn(exe, args, { stdio: 'ignore', cwd: path.dirname(exe), env, windowsHide: true }); } });
   onlineSync = createSync({ online: on, local: localApp, store, appData, readCompany: online.readCompany, isDemo: demoOn, pcName: os.hostname(),
-    notify: showOnlineNotification, onChange: (st) => send('online-sync', st) });
+    notify: showOnlineNotification, onChange: (st) => send('online-sync', st), trailFile: path.join(app.getPath('userData'), 'online-trail.json') });
   onlineSync.start(20 * 1000);
   handle('onlineSync:status', () => onlineSync.status());
   handle('onlineSync:setMode', async (mode) => { const st = onlineSync.setMode(String(mode || '')); onlineSync.tick(); return st; });
   handle('onlineSync:now', () => onlineSync.poke());
+  // "Connect your website" guide: Send a test (through the real post box) and where it is
+  handle('onlineSync:sendTest', (kind) => onlineSync.sendTest(String(kind || '')));
+  handle('onlineSync:testStatus', () => onlineSync.testStatus());
+  // the activity trail (90 days): the list, and a CSV saved where the person chooses
+  const trailQuery = (q) => ({ day: /^\d{4}-\d{2}-\d{2}$/.test(String((q || {}).day || '')) ? q.day : '', status: String((q || {}).status || '').slice(0, 20), type: String((q || {}).type || '').slice(0, 20) });
+  handle('onlineSync:trail', (q) => onlineSync.trail({ ...trailQuery(q), limit: 1000 }));
+  handle('onlineSync:exportTrail', async (q) => {
+    const r = await dialog.showSaveDialog(win, { title: 'Save the online activity', defaultPath: path.join(app.getPath('documents'), `Riyeser online activity ${new Date().toISOString().slice(0, 10)}.csv`), filters: [{ name: 'CSV (Excel)', extensions: ['csv'] }] });
+    if (r.canceled || !r.filePath) return null;
+    fs.writeFileSync(r.filePath, onlineSync.trailCsv(trailQuery(q)), 'utf8');
+    return r.filePath;
+  });
+  // the guide's links: only these three places
+  handle('onlineSync:open', (what) => {
+    const url = { connections: 'https://riyeser.com/link/?connections', developers: 'https://riyeser.com/developers/', help: 'https://riyeser.com/help/online.html' }[String(what)];
+    if (!url) throw new Error('Unknown page.');
+    return shell.openExternal(url).then(() => true);
+  });
   const companyState = async () => {
     const setup = store.get('company-setup', {}) || {};
     const s = on.session;
@@ -532,7 +550,10 @@ function registerIpc() {
     if (!on.canReport()) { prepared = null; return { signedIn: false, products: known }; }
     if (!diagnostics.PRODUCTS.some((p) => p.id === product)) return { signedIn: true, products: known, business: (online.readCompany(appData) || {}).name || '' };
     const programs = await installedVersions().catch(() => ({}));
-    const diag = diagnostics.build({ product, programs, centralVersion: app.getVersion(), log: diagnostics.readLog(product),
+    // online connections: the program's online-api.log (next to the company file), or Central's own online problems
+    const extra = ['accounting', 'invoices', 'pos', 'bookings'].includes(product) && localApp ? [{ file: localApp.logFile(), label: 'online connections log' }]
+      : product === 'central' && onlineSync ? [{ text: onlineSync.trail({ status: 'problems', limit: 60 }).rows.reverse().map((r) => `${new Date(r.at).toISOString()} ${r.ref || ''} ${r.what}${r.detail ? ` — ${r.detail}` : ''}`).join('\n'), label: 'Riyeser Central online connections activity' }] : [];
+    const diag = diagnostics.build({ product, programs, centralVersion: app.getVersion(), log: diagnostics.readLog(product, { extra }),
       osName: diagnostics.windowsName(typeof os.version === 'function' ? os.version() : '', os.release(), process.platform) });
     prepared = { token: crypto.randomUUID(), diag };
     return { signedIn: true, products: known, business: (online.readCompany(appData) || {}).name || '', token: prepared.token, diag, preview: diagnostics.preview(diag, progNames) };

@@ -871,3 +871,21 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 .mcard .copyrow input.mono { font-size: 13px; }
 @media (max-width: 760px) { .cn-pub b { display: block; min-width: 0; } .cn-tab { padding: 6px 11px; font-size: 13.5px; } #connPage .copyrow { flex-wrap: wrap; } #connPage .copyrow .btn { flex: 1 1 auto; } }
 .mcard .copyrow input { flex: 1; min-width: 0; } .cn-c { min-width: 0; overflow-wrap: anywhere; }
+/* Connections → "Connect your website": five steps and a checklist that ticks itself */
+.cn-guide > summary { display: flex; align-items: baseline; gap: 12px; cursor: pointer; list-style: none; } .cn-guide > summary::-webkit-details-marker { display: none; }
+.cn-guide > summary h2 { margin: 0; } .cn-guide > summary::after { content: '▾'; margin-left: auto; color: var(--muted); } .cn-guide:not([open]) > summary::after { content: '▸'; }
+.cn-gtop { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 20px; margin: 12px 0 14px; align-items: start; } .cn-gtop p { margin: 0; }
+.cn-gcheck { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 14px; }
+.cn-gcheck li { display: flex; gap: 8px; align-items: flex-start; color: var(--muted); } .cn-gcheck li.on { color: var(--ink); }
+.cn-gcheck .tk { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-size: 11px; line-height: 1; margin-top: 2px; }
+.cn-gcheck li.on .tk { background: #15803d; border-color: #15803d; color: #fff; }
+.cn-gsteps { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.cn-gstep { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; } .cn-gstep h3 { margin: 3px 0 6px; font-size: 15px; } .cn-gstep p { margin: 0 0 8px; }
+.cn-gn { width: 28px; height: 28px; border-radius: 50%; background: #e8f0fd; color: var(--brand); font-weight: 700; display: grid; place-items: center; font-size: 13px; }
+.cn-gstep.done .cn-gn { background: #dcfce7; color: #15803d; }
+.cn-gopts { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.cn-gwhere { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; font-size: 14px; } .cn-gwhere dt { font-weight: 600; } .cn-gwhere dd { margin: 0; color: var(--muted); }
+.cn-gtest { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; } .cn-gtest select { min-width: 180px; width: auto; }
+.cn-gprog { margin-top: 10px; padding: 9px 12px; border-radius: 10px; background: #f8fafc; border: 1px solid var(--line); font-size: 14px; }
+.cn-gprog.ok { background: #dcfce7; border-color: transparent; color: #14532d; } .cn-gprog.bad { background: #fef3c7; border-color: transparent; color: #78350f; }
+@media (max-width: 640px) { .cn-gtop { grid-template-columns: 1fr; } .cn-gwhere { grid-template-columns: 1fr; } }

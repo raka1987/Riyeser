@@ -43,7 +43,28 @@ function fakeCloud(clock) {
     api_publish_catalog: (a) => { published.catalog.push(a); return { saved: a.items.length, removed: 0, skipped: [] }; },
     api_publish_stock: (a) => { published.stock.push(a); return { saved: a.levels.length, removed: 0, skipped: [], changed: 0 }; },
     api_publish_availability: (a) => { published.availability.push(a); return { open_times_saved: (a.open_times || []).length }; },
+    // where things stand (api_status) and "Send a test": only once cloud.withStatus() (an older database has neither)
+    api_status: ({ device }) => {
+      if (!cfg.status) throw Object.assign(new Error('missing'), { missing: true });
+      const live = items.filter((i) => !i.test);
+      return { set_up: cfg.keys > 0 || live.length > 0, keys: { active: cfg.keys, widget: 0, test: 0 }, webhooks: { active: 0, failing: 0 },
+        requests_24h: cfg.requests, last_request_at: cfg.requests ? '2026-11-27T00:30:00Z' : null,
+        inbox: { waiting: items.filter((x) => x.status === 'waiting').length, taken: items.filter((x) => x.status === 'taken').length, failed: 0, test_waiting: 0, done_total: live.filter((x) => x.status === 'done').length },
+        published: { catalog_items: published.catalog.length ? 1 : 0, catalog_at: published.catalog.length ? '2026-11-27T01:00:00Z' : null, stock_at: null, availability_at: null },
+        sync_pc: cfg.syncPc ? { name: cfg.syncPc, this_pc: false } : (items.some((x) => x.taken_by) ? { name: 'Front desk', this_pc: items.some((x) => x.taken_by === device) } : null),
+        allowed: { any: true, bookings: true, orders: true }, checked_at: '2026-11-27T01:00:00Z' };
+    },
+    api_send_test: ({ kind }) => {
+      if (!cfg.status) throw Object.assign(new Error('missing'), { missing: true });
+      if (kind === 'booking' && !cfg.service) throw new Error('There\'s no service published yet. Add a service in Riyeser Bookings (Riyeser Central publishes it within a minute), or send a test enquiry.');
+      const it = add(kind === 'order' ? 'enquiry' : kind, kind === 'booking' ? { service: 'CUT', start: '2026-11-28T01:00:00.000Z', customer: { name: 'Test Customer (from Riyeser)' } }
+        : { customer: { name: 'Test Customer (from Riyeser)' }, message: 'A test', ...(kind === 'order' ? { metadata: { order_sku: 'TEST-ITEM' } } : {}) }, { test: true, source: 'test' });
+      return { id: it.id, kind: it.kind, status: 'waiting', test: true };
+    },
+    api_event_status: ({ event_id }) => { const it = items.find((x) => x.id === event_id); return { id: it.id, status: it.status, result: it.result || null, taken_by_pc: it.taken_by ? 'Front desk' : null }; },
   };
+  const cfg = { status: false, keys: 0, requests: 0, syncPc: '', service: true };
+  function add(kind, payload, extra = {}) { const it = { id: `ev-${items.length + 1}`, kind, payload, test: false, source: 'api', status: 'waiting', attempts: 0, available_at: 0, created: items.length, ...extra }; items.push(it); return it; }
   const fetchFn = async (url, opts = {}) => {
     if (down) throw new TypeError('fetch failed');
     const u = new URL(url); const body = opts.body ? JSON.parse(opts.body) : null;
@@ -53,12 +74,12 @@ function fakeCloud(clock) {
     const m = /^\/rest\/v1\/rpc\/(\w+)$/.exec(u.pathname);
     if (m && rpcs[m[1]]) {
       if (m[1].startsWith('api_') && !linked.has(body.device)) return err('Link this PC to the business first (Riyeser Central).');
-      try { return res(200, rpcs[m[1]](body)); } catch (e) { return err(e.message); }
+      try { return res(200, rpcs[m[1]](body)); } catch (e) { return e.missing ? res(404, { code: 'PGRST202', message: 'Could not find the function public.' + m[1] + ' in the schema cache' }) : err(e.message); }
     }
     return res(404, { message: 'not found' });
   };
   return { items, calls, fetchFn, linked, notified, published, kicks: () => kicks, setDown: (v) => { down = v; },
-    add: (kind, payload, extra = {}) => { const it = { id: `ev-${items.length + 1}`, kind, payload, test: false, source: 'api', status: 'waiting', attempts: 0, available_at: 0, created: items.length, ...extra }; items.push(it); return it; },
+    add, cfg, withStatus: (o = {}) => Object.assign(cfg, { status: true }, o),
     rpcCalls: (name) => calls.filter(([p]) => p === `/rest/v1/rpc/${name}`) };
 }
 
@@ -68,7 +89,7 @@ function fakeProgram(dir, { tokenValue = 'tok-123' } = {}) {
   const data = { catalog: { items: [{ sku: 'MUG-1', name: 'Mug', price: 11 }], skipped: [] }, stock: { levels: [{ sku: 'MUG-1', quantity: 10 }], enabled: true },
     availability: { settings: { timezone: 'Pacific/Fiji', slot_minutes: 15, min_notice_minutes: 60, days_ahead: 30 }, staff: [{ ref: 'S1', name: 'Ana', services: [], active: true }],
       open_times: [{ staff_ref: 'S1', start: '2026-12-01T21:00:00.000Z', end: '2026-12-02T05:00:00.000Z', capacity: 1 }], from_at: '2026-12-01T12:00:00.000Z', to_at: '2026-12-31T12:00:00.000Z', enabled: true } };
-  let flaky = 0; let failImport = false;
+  let flaky = 0; let failImport = false; const broken = {}; let testRequest = null;
   const file = (it) => {
     if (applied.has(it.id)) return { ...applied.get(it.id), replay: true };
     if (it.payload.flaky && flaky++ < 1) return { id: it.id, outcome: 'retry', reason: 'database is locked', result: null };
@@ -82,7 +103,9 @@ function fakeProgram(dir, { tokenValue = 'tok-123' } = {}) {
       const send = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
       if (req.headers['x-riyeser-token'] !== tokenValue) return send(401, { error: 'bad_token' });
       const body = raw ? JSON.parse(raw) : null; const p = req.url.replace('/online/api/', '');
-      if (p === 'status') return send(200, { ok: true, company: 'Online Co' });
+      if (p === 'status') return send(200, { ok: true, company: 'Online Co', test_request: testRequest });
+      if (broken[p] === 'html') { res.writeHead(500, { 'Content-Type': 'text/html' }); return res.end('<!doctype html><h1>Sorry, something went wrong</h1>'); }
+      if (broken[p]) return send(500, { error: 'internal', message: broken[p], ref: 'OA-1A2B3C', program: 'Riyeser POS', detail: 'ZoneInfoNotFoundError' });
       if (p === 'import') { if (failImport) { req.socket.destroy(); return null; } imports.push(body.items.map((i) => i.id)); return send(200, { results: body.items.map(file) }); }
       if (p in data) return send(200, data[p]);
       if (p === 'outbox') return send(200, { events: outbox.filter((e) => !e.sent) });
@@ -98,7 +121,7 @@ function fakeProgram(dir, { tokenValue = 'tok-123' } = {}) {
     r();
   }));
   return { server, listen, close: () => new Promise((r) => server.close(r)), applied, imports, outbox, reports, data, dbPath,
-    setFailImport: (v) => { failImport = v; } };
+    setFailImport: (v) => { failImport = v; }, broken, askTest: (r) => { testRequest = r; } };
 }
 
 function pc({ cloud, prog, clock, name = 'Front desk', mode = null, companyFile = true, demo = false }) {
@@ -303,4 +326,170 @@ test('local app: starts the program quietly when it isn\'t running, and closes o
   const wrong = new LocalApp({ dbPath: prog.dbPath, findExe: () => '/apps/x.exe' });   // no way to start it here
   fs.writeFileSync(discoveryFile(prog.dbPath), JSON.stringify({ port: prog.server.address().port, token: 'stale', pid: 1 }));
   await assert.rejects(wrong.ensure(), (e) => e.code === 'NOT_RUNNING');   // an old token: treated as not running
+});
+
+// ---------------------------------------------------------------- what the panel says, the guide's test, the trail
+test('online sync: nothing connected says "not set up" and stays quiet (no program started, nothing published, no error)', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  cloud.withStatus({ keys: 0 });
+  const a = pc({ cloud, prog, clock });
+  let spawned = 0; a.local.spawnFn = () => { spawned += 1; return null; };
+  await prog.close();   // the program isn't even open
+  let st = await a.sync.tick();
+  assert.equal(st.view, 'not_setup'); assert.equal(st.message, ''); assert.equal(st.failures, 0);
+  assert.equal(spawned, 0);
+  assert.equal(cloud.rpcCalls('api_inbox_claim').length, 0);
+  assert.equal(cloud.published.catalog.length + cloud.published.stock.length + cloud.published.availability.length, 0);
+  assert.deepEqual(st.checklist.map((c) => c.done), [false, false, false, false, false]);
+  clock.add(MIN); st = await a.sync.tick();
+  assert.equal(st.view, 'not_setup');
+  const lines = a.sync.trail().rows;
+  assert.equal(lines.filter((r) => /aren't set up/.test(r.what)).length, 1);   // said once, not every minute
+  // a key is made in Riyeser Link: from the next minute it's "connected, nothing new" (and it publishes)
+  await prog.listen();
+  cloud.cfg.keys = 1; cloud.cfg.requests = 0;
+  clock.add(MIN); st = await a.sync.tick();
+  assert.equal(st.view, 'waiting', st.message); assert.equal(cloud.published.catalog.length, 1);
+  assert.ok(a.sync.trail().rows.some((r) => r.type === 'setup' && r.what === 'Online connections set up'));
+  assert.equal(prog.reports.at(-1).state, 'waiting'); assert.equal(prog.reports.at(-1).cloud.keys_active, 1);
+  // something comes in: "working"
+  cloud.add('booking', { customer: { name: 'Mere' } });
+  clock.add(MIN); st = await a.sync.tick();
+  assert.equal(st.view, 'working'); assert.equal(st.receivedToday, 1);
+  assert.ok(st.checklist.find((c) => c.id === 'item').done);
+});
+
+test('online sync: an item waiting in the post box is brought in even before any key exists (e.g. a test)', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  cloud.withStatus({ keys: 0 });
+  cloud.add('enquiry', { customer: { name: 'Test' }, message: 'hi' }, { test: true, source: 'test' });
+  const a = pc({ cloud, prog, clock });
+  const st = await a.sync.tick();
+  assert.equal(cloud.items[0].status, 'done'); assert.notEqual(st.view, 'not_setup');
+});
+
+test('online sync: a program error is a real problem with its plain message, reference and fix; items still come in', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  cloud.withStatus({ keys: 1 });
+  prog.broken.availability = 'Riyeser POS couldn\'t publish your free booking times: this PC has no time-zone data for Pacific/Fiji.';
+  cloud.add('order', { customer: { name: 'Kim' } });
+  const a = pc({ cloud, prog, clock });
+  let st = await a.sync.tick();
+  assert.equal(cloud.items[0].status, 'done');                         // filing isn't held up by publishing
+  assert.equal(cloud.published.catalog.length, 1); assert.equal(cloud.published.availability.length, 0);
+  assert.equal(st.view, 'problem'); assert.equal(st.failures, 0);    // no back-off: tried again next minute
+  assert.match(st.message, /^Riyeser POS couldn't publish your free booking times: this PC has no time-zone data/);
+  assert.doesNotMatch(st.message, /answered 500/);
+  assert.equal(st.ref, 'OA-1A2B3C'); assert.equal(st.problemProduct, 'pos'); assert.match(st.fix, /time zones|UTC/);
+  assert.equal(prog.reports.at(-1).state, 'problem'); assert.equal(prog.reports.at(-1).ref, 'OA-1A2B3C');
+  const probs = a.sync.trail({ status: 'problems' }).rows;
+  assert.equal(probs.length, 1); assert.equal(probs[0].ref, 'OA-1A2B3C');
+  // fixed: back to fine, published now
+  delete prog.broken.availability;
+  clock.add(MIN); st = await a.sync.tick();
+  assert.equal(st.view, 'working'); assert.equal(cloud.published.availability.length, 1); assert.equal(st.message, '');
+  // the same problem again a minute later isn't written to the trail every minute
+  prog.broken.availability = 'Riyeser POS couldn\'t publish your free booking times: x.';
+  for (let i = 0; i < 3; i++) { clock.add(MIN); await a.sync.tick(); }
+  assert.equal(a.sync.trail({ status: 'error' }).rows.filter((r) => r.what.endsWith(': x.')).length, 1);
+});
+
+test('online sync: an older program\'s bare 500 says which program, what it was doing and to update it', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  prog.broken.outbox = 'html';
+  fs.writeFileSync(discoveryFile(prog.dbPath), JSON.stringify({ ...JSON.parse(fs.readFileSync(discoveryFile(prog.dbPath), 'utf8')), program: 'Riyeser POS' }));
+  const a = pc({ cloud, prog, clock });
+  const st = await a.sync.tick();
+  assert.equal(st.view, 'problem');
+  assert.equal(st.message, 'Riyeser POS had a problem when it tried to read the news for your website (it answered 500).');
+  assert.match(st.fix, /^Update Riyeser POS/);
+  assert.equal(st.problemProduct, 'pos');
+});
+
+test('online sync: off on this PC says which PC brings items in', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  cloud.withStatus({ keys: 1, syncPc: 'OFFICE-PC' });
+  const a = pc({ cloud, prog, clock, mode: 'off' });
+  const st = await a.sync.tick();
+  assert.equal(st.view, 'off'); assert.equal(st.syncPc, 'OFFICE-PC');
+  assert.equal(cloud.rpcCalls('api_inbox_claim').length, 0);
+  assert.equal(prog.reports.at(-1).state, 'off'); assert.equal(prog.reports.at(-1).cloud.sync_pc, 'OFFICE-PC');
+  const other = pc({ cloud, prog, clock, name: 'Laptop', companyFile: false });   // Automatic, no company file here
+  const o = await other.sync.tick();
+  assert.equal(o.view, 'off'); assert.equal(o.otherPc, true); assert.equal(o.syncPc, 'OFFICE-PC');
+});
+
+test('online sync: Send a test goes through the post box and shows it arriving on this PC', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  cloud.withStatus({ keys: 0 });
+  const timers = []; const a = pc({ cloud, prog, clock });
+  await a.sync.tick();
+  assert.equal(a.sync.status().view, 'not_setup');
+  let st = await a.sync.sendTest('enquiry');
+  assert.equal(st.test.step, 'sent'); assert.equal(cloud.items.length, 1); assert.ok(cloud.items[0].test);
+  st = await a.sync.tick();
+  assert.equal(st.test.step, 'arrived'); assert.equal(st.test.outcome, 'done'); assert.equal(cloud.items[0].status, 'done');
+  assert.equal(st.receivedToday, 0);                                  // a test isn't counted as received
+  assert.equal(a.notes.length, 0);                                    // and pops no notification
+  const tests = a.sync.trail({ type: 'test' }).rows;
+  assert.deepEqual(tests.map((r) => r.status), ['done', 'waiting']);
+  assert.match(tests[0].what, /^Test arrived: Filed as enquiry/); assert.match(tests[0].detail, /nothing was added to the books/);
+  await assert.rejects(a.sync.sendTest('refund'), /Choose a test/);
+  cloud.cfg.service = false;
+  await assert.rejects(a.sync.sendTest('booking'), /no service published yet/);
+  assert.equal(a.sync.trail({ type: 'test', status: 'error' }).rows.length, 1);
+  void timers;
+});
+
+test('online sync: "Send a test" asked for on the program\'s Online page is sent by Central and reported back', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  cloud.withStatus({ keys: 0 });
+  prog.askTest({ id: 'req-1', kind: 'booking', at: '2026-11-27T01:00:00+00:00' });
+  const a = pc({ cloud, prog, clock });
+  const st = await a.sync.tick();
+  assert.equal(cloud.items.length, 1); assert.equal(cloud.items[0].kind, 'booking'); assert.equal(cloud.items[0].status, 'done');
+  const rep = prog.reports.at(-1);
+  assert.deepEqual(rep.test_sent, { request_id: 'req-1', event_id: cloud.items[0].id });
+  assert.ok(rep.trail.some((l) => l.type === 'test' && /Test arrived/.test(l.what)));
+  clock.add(MIN); await a.sync.tick();
+  assert.equal(cloud.items.length, 1);                                // asked once, sent once
+  assert.equal(st.test.from, 'program');
+});
+
+test('online sync: on a database without api_status it works as before', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  const a = pc({ cloud, prog, clock });
+  const st = await a.sync.tick();
+  assert.equal(st.view, 'waiting'); assert.equal(st.cloudMissing, true); assert.equal(cloud.published.catalog.length, 1);
+  clock.add(MIN); await a.sync.tick();
+  assert.equal(cloud.rpcCalls('api_status').length, 1);              // not asked again for an hour
+});
+
+test('online trail: quiet runs merge, 90 days kept, trail lines reach the program, CSV export is safe', async (t) => {
+  const { clock, cloud, prog } = await setup(); t.after(prog.close);
+  cloud.withStatus({ keys: 1 });
+  const a = pc({ cloud, prog, clock });
+  for (let i = 0; i < 5; i++) { await a.sync.tick(); clock.add(MIN); }
+  const quiet = a.sync.trail({ type: 'run' }).rows.filter((r) => r.what === 'Checked: nothing new');
+  assert.equal(quiet.length, 1); assert.equal(quiet[0].n, 4);   // the first run published (not quiet)
+  cloud.add('booking', { customer: { name: '=cmd|calc' } });
+  await a.sync.tick();
+  const sentUids = new Set(prog.reports.flatMap((r) => r.trail || []).map((l) => l.uid));
+  assert.ok(a.sync.trail().rows.every((r) => sentUids.has(r.uid)));   // every line went to the program
+  const csv = a.sync.trailCsv({});
+  assert.match(csv, /^﻿When \(this PC\)/); assert.match(csv, /Filed as booking BK-1/); assert.match(csv, /'=cmd\|calc/);
+  // reopened later: lines kept; 91 days on: gone
+  const { Trail } = require('../src/central/online-trail');
+  const file = path.join(a.store.dir, 'online-trail.json');
+  assert.ok(new Trail({ file, now: clock.now }).rows.length > 3);
+  assert.equal(new Trail({ file, now: () => clock.now() + 91 * 86400e3 }).rows.length, 0);
+});
+
+test('local app: the program\'s JSON error keeps its plain message and reference', async (t) => {
+  const dir = tmp(); const prog = fakeProgram(dir); t.after(prog.close); await prog.listen();
+  prog.broken.catalog = 'Riyeser Accounting couldn\'t publish your prices: the company file is busy.';
+  const local = new LocalApp({ dbPath: prog.dbPath });
+  await assert.rejects(local.catalog(), (e) => e.message === prog.broken.catalog && e.ref === 'OA-1A2B3C' && e.status === 500 && e.plain && e.local);
+  assert.equal((await local.peek()).company, 'Online Co');
+  assert.equal(await new LocalApp({ dbPath: path.join(tmp(), 'company.db') }).peek(), null);
 });

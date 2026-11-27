@@ -461,6 +461,15 @@
           case 'api_webhook_delete': st.hooks = st.hooks.filter((h) => h.id !== a.hook_id); return null;
           case 'api_webhook_ping': { const h = hook(a.hook_id); (h.log = h.log || []).unshift({ id: 'dl' + Date.now(), event: 'ping', event_id: 'e' + Date.now(), status: 'delivered', attempts: 1, next_at: null, last_status: 200, last_error: null, created_at: now, delivered_at: now }); return { queued: 1 }; }
           case 'api_webhook_deliveries_list': { const h = hook(a.hook_id); return (h.log || []).concat([{ id: 'dl0', event: 'booking.received', event_id: 'ev-1', status: 'delivered', attempts: 1, last_status: 200, last_error: null, created_at: ago(2), delivered_at: ago(2) }]); }
+          case 'api_status': return { set_up: true, keys: { active: st.keys.filter((k) => k.status === 'active').length, widget: 1, test: 0 }, webhooks: { active: 1, failing: 0 }, requests_24h: 213, last_request_at: ago(3),
+            inbox: { waiting: st.inbox.filter((x) => x.status === 'waiting').length, taken: 0, failed: 1, test_waiting: 0, done_total: 2 },
+            published: { catalog_items: 42, catalog_at: ago(20), stock_at: ago(6), availability_at: ago(9) }, sync_pc: { name: 'Head office PC', this_pc: false }, allowed: { any: true, bookings: true, orders: true }, checked_at: now };
+          case 'api_send_test': { const e = { id: 'ev-t' + Date.now(), kind: a.kind === 'order' ? 'enquiry' : a.kind, test: true, status: 'waiting', source: 'test', key_name: null, attempts: 0, error: null, result: {},
+            customer_name: 'Test Customer (from Riyeser)', taken_by_pc: null, created_at: now, updated_at: now, at: Date.now() }; st.inbox.unshift(e);
+            return { id: e.id, kind: e.kind, status: 'waiting', test: true, created_at: now }; }
+          case 'api_event_status': { const e = st.inbox.find((x) => x.id === a.event_id); if (!e) throw new Error('That test isn\'t in the post box.');
+            if (e.test && e.status === 'waiting' && Date.now() - e.at > 4000) Object.assign(e, { status: 'done', taken_by_pc: 'Head office PC', result: { state: 'received', message: 'Thanks, we\'ll be in touch. (test)' } });
+            return { id: e.id, kind: e.kind, status: e.status, test: e.test, result: e.result, taken_by_pc: e.taken_by_pc, created_at: e.created_at, updated_at: now }; }
           default: throw new Error(`Could not find the function public.${fn}`);
         }
       };
@@ -3723,6 +3732,8 @@
     const c = S.cn; const ws = S.team.id; c.err = ''; c.off = false;
     try {
       [c.ov, c.keys, c.hooks] = await Promise.all([api.conn('api_overview', { ws }), api.conn('api_keys_list', { ws }), api.conn('api_webhooks_list', { ws })]);
+      // where things stand for the guide's checklist (an older database has no api_status: the checklist uses the overview)
+      c.status = await api.conn('api_status', { ws, device: null }).catch(() => null);
       if (c.tab === 'inbox') c.inbox = await api.conn('api_inbox_recent', { ws, status: c.box || null, max_rows: 100 });
       if (c.tab === 'log') { c.reqs = await api.conn('api_requests_list', { ws, key_id: c.reqKey || null, max_rows: 100, before_id: null }); c.more = (c.reqs || []).length >= 100; }
     } catch (e) { if (cnMissing(e)) c.off = true; else c.err = plainError(e); }
@@ -3769,9 +3780,7 @@
         ${stat('cnsf', o.inbox.failed, 'Failed', o.inbox.rejected_7d ? `${o.inbox.rejected_7d} rejected this week` : '', o.inbox.failed > 0)}
         ${stat('cnsr', o.requests_24h, 'Requests today', o.errors_24h ? `${o.errors_24h} refused or failed` : 'last 24 hours')}
         ${stat('cnsh', o.webhooks.active, 'Webhooks on', o.webhooks.failing ? `${o.webhooks.failing} failing` : '', o.webhooks.failing > 0)}</div>
-      ${none ? `<section class="lo-card cn-start"><h2>Get started</h2><ol class="cn-steps"><li><b>Make a key.</b> Choose what it's for: the booking widget, your online shop, or something your web developer builds. <button class="btn p sm" data-cnnew="widget">+ New key</button></li>
-        <li><b>Put it on your website.</b> Copy the booking widget into your website (<button class="linkbtn" data-tab="site">Add to your website</button>), or send the <a href="/developers/">developer docs</a> to your web developer.</li>
-        <li><b>Keep a PC running Riyeser.</b> Bookings, orders and enquiries wait in the post box until a PC linked to ${esc(S.team.name)} collects them and files them in Bookings, POS or Accounting.</li></ol></section>` : ''}
+      ${cnGuide(none)}
       <section class="lo-card"><h2>What your website can read</h2><p class="muted small">Your PCs publish a copy of these for your website. It's never your books: only what you choose to show.</p>
         <ul class="cn-pub">${pub('Products and services', `${p.catalog_items} items`, p.catalog_at, 'Not published yet. Riyeser POS or Bookings publishes them once Connections are on.')}
         ${pub('Stock levels', `${p.stock_items} items`, p.stock_at, 'Not published yet.')}${pub('Free booking times', `${p.open_times} open times, ${p.staff} staff`, p.availability_at, 'Not published yet. Riyeser Bookings publishes them from your calendar.')}</ul></section>
@@ -3779,6 +3788,51 @@
         <li>A PC running Riyeser Bookings collects it within a minute or two and puts it in your calendar as a request (or confirmed, if you've set that).</li><li>The customer's page shows "Booking request sent", then "confirmed" when you confirm it. Webhooks tell your other systems.</li></ol>
         <p class="muted small">Something sent with a <b>test</b> key shows in Riyeser as a test, never as a real booking or sale.</p></section>
       <section class="lo-card"><h2>For your web developer</h2><p>Send them this page: everything they need, with examples.</p><div class="copyrow"><input readonly id="cndevurl" value="https://riyeser.com/developers/" aria-label="Developer docs address"><button class="btn" data-copy="#cndevurl">Copy</button></div></section>`;
+  }
+  // "Connect your website": five steps, a checklist ticked from what really happened (api_status / api_overview),
+  // and Send a test (api_send_test: a test through the real post box; a linked PC files it as a test within a minute).
+  const CN_GUIDE = [['booking', 'A booking form', 'Customers pick a service and a free time. Needs Riyeser Bookings.'], ['enquiry', 'An enquiry form', 'Questions and quote requests from your website.'],
+    ['order', 'An order button', '“Order” buttons on your products: you confirm each one.'], ['shop', 'An online shop', 'Your shop sends paid orders and reads prices and stock.'],
+    ['developer', 'Something my developer builds', 'The full API: send them the developer docs.']];
+  const CN_BUILDERS = [['WordPress', 'Edit the page, add a <b>Custom HTML</b> block, paste, then <b>Update</b>.'], ['Wix', '<b>Add Elements → Embed Code → Embed HTML</b>, choose <b>Code</b>, paste, <b>Update</b>, publish.'],
+    ['Squarespace', 'Add a <b>Code</b> block, paste, untick <b>Display source</b>, <b>Save</b>.'], ['Shopify', '<b>Online Store → Themes → Customize</b>, add a <b>Custom Liquid</b> section, paste, <b>Save</b>.'],
+    ['Plain HTML', 'Paste it where the form should appear, before <code>&lt;/body&gt;</code>, and upload.']];
+  function cnChecklist() {
+    const o = S.cn.ov || {}; const s = S.cn.status || null; const p = (s && s.published) || o.published || {};
+    return [['key', 'A key made (API keys)', !!(o.keys && o.keys.active)], ['request', 'Your website has talked to Riyeser Online', !!((s && s.last_request_at) || o.requests_24h)],
+      ['sync', 'A PC brings items in (Riyeser Central on the PC with the company file)', !!(s && s.sync_pc)], ['item', 'The first item filed on that PC', !!((s && s.inbox && s.inbox.done_total) || (o.inbox && o.inbox.done_7d))],
+      ['publish', 'Prices and free times published for your website', !!(p.catalog_at || p.availability_at)]];
+  }
+  function cnGuide(open) {
+    const c = S.cn; const g = c.guide || (c.guide = { pick: 'booking', test: null });
+    const cl = cnChecklist(); const all = cl.every((x) => x[2]); const widget = ['booking', 'enquiry', 'order'].includes(g.pick);
+    const step = (n, title, body, ok) => `<li class="cn-gstep${ok ? ' done' : ''}" id="cng${n}"><span class="cn-gn" aria-hidden="true">${ok ? '✓' : n}</span><div><h3>${title}</h3>${body}</div></li>`;
+    const t = g.test; const kind = g.kind || (g.pick === 'booking' ? 'booking' : ['order', 'shop'].includes(g.pick) ? 'order' : 'enquiry');
+    const prog = !t ? '' : t.err ? `<div class="cn-gprog bad" role="alert"><b>The test couldn't be sent.</b> ${esc(t.err)}</div>`
+      : t.status === 'done' || t.status === 'rejected' ? `<div class="cn-gprog ok" id="cngok" role="status"><b>✓ It arrived on ${esc(t.pc || 'your PC')}.</b> ${esc((t.result && t.result.message) || 'Filed as a test.')} Nothing was added to your books.</div>`
+        : `<div class="cn-gprog" role="status"><b>Sent.</b> It's in your <button class="linkbtn" data-tab="inbox">post box</button>${t.status === 'taken' ? `; ${esc(t.pc || 'a PC')} is filing it now` : '; the sync PC brings it in within a minute'}…</div>`;
+    return `<details class="lo-card cn-guide" id="cnguide"${(g.open ?? (open || !all)) ? ' open' : ''}><summary><h2>Connect your website</h2><span class="muted small">${all ? 'All done ✓' : `${cl.filter((x) => x[2]).length} of ${cl.length} done`}</span></summary>
+      <div class="cn-gtop"><ul class="cn-gcheck" aria-label="Checklist">${cl.map(([id, l, ok]) => `<li class="${ok ? 'on' : ''}" data-check="${id}"><span class="tk" aria-hidden="true">${ok ? '✓' : ''}</span>${esc(l)}</li>`).join('')}</ul>
+        <p class="muted small">Your website sends to your Riyeser Online post box → Riyeser Central on your sync PC collects it every minute → it's filed in Bookings, POS or Accounting. Prices, stock and free times go back the other way. <a href="/help/online.html">How it works</a></p></div>
+      <ol class="cn-gsteps">
+        ${step(1, 'Choose what you want', `<div class="cn-opts cn-gopts" role="radiogroup" aria-label="What you want">${CN_GUIDE.map(([v, l, d]) => `<label class="opt"><input type="radio" name="cngpick" value="${v}"${g.pick === v ? ' checked' : ''}> <b>${l}</b><small>${d}</small></label>`).join('')}</div>`, false)}
+        ${step(2, 'Make the key', `<p>${widget ? 'A <b>Website booking widget</b> key, with your website\'s address.' : g.pick === 'shop' ? 'An <b>Online shop orders</b> key. It\'s secret: only for your shop\'s settings.' : 'A <b>Custom / developer</b> key with only what they need.'} Make a <b>Test</b> key first to try it safely.</p><button class="btn p sm" data-cnnew="${widget ? 'widget' : g.pick === 'shop' ? 'shop' : 'custom'}">+ New key</button>`, cl[0][2])}
+        ${step(3, widget ? 'Copy the code into your website' : 'Give the key to your shop or developer', widget
+          ? `<p><button class="linkbtn" data-tab="site">Add to your website</button> fills in your key and colours. Where to paste it:</p><dl class="cn-gwhere">${CN_BUILDERS.map(([n, h]) => `<dt>${n}</dt><dd>${h}</dd>`).join('')}</dl>`
+          : `<p>${g.pick === 'shop' ? 'Your shop\'s server sends paid orders to <code>POST /v1/orders</code> and reads <code>/v1/prices</code> and <code>/v1/stock</code>.' : 'Everything they need, with examples:'} <a href="/developers/">Developer docs</a></p>`, cl[1][2])}
+        ${step(4, 'Send a test', `<p>A test through your post box: it shows on your sync PC within a minute and <b>never touches your books</b>.</p><div class="row cn-gtest"><select id="cngkind" aria-label="What to send">${[['enquiry', 'A test enquiry'], ['booking', 'A test booking'], ['order', 'A test order request']].map(([v, l]) => `<option value="${v}"${kind === v ? ' selected' : ''}>${l}</option>`).join('')}</select><button class="btn sm" id="cngsend"${t && !t.err && !['done', 'rejected'].includes(t.status) ? ' disabled' : ''}>Send a test</button></div>${prog}`, t && t.status === 'done')}
+        ${step(5, 'Done', '<p>When every line is ticked, it\'s linked. Everything that comes in is in the <button class="linkbtn" data-tab="inbox">post box</button> here and in Riyeser Central\'s <b>Activity</b> on the sync PC.</p>', all)}
+      </ol></details>`;
+  }
+  async function cnSendTest() {
+    const c = S.cn; const g = c.guide; const sel = document.getElementById('cngkind'); g.kind = sel ? sel.value : 'enquiry';
+    try { const r = await api.conn('api_send_test', { ws: S.team.id, device: null, kind: g.kind }); g.test = { id: r.id, status: 'waiting' }; } catch (e) { g.test = { err: cnMissing(e) ? 'Riyeser is finishing an update for this: try again later.' : plainError(e) }; }
+    drawConn(true); clearInterval(cnSendTest.t); let n = 0;
+    if (g.test && g.test.id) cnSendTest.t = setInterval(async () => {
+      if (S.view !== 'connections' || ++n > 60) { clearInterval(cnSendTest.t); return; }
+      try { const e = await api.conn('api_event_status', { ws: S.team.id, device: null, event_id: g.test.id }); Object.assign(g.test, { status: e.status, pc: e.taken_by_pc, result: e.result });
+        if (['done', 'rejected', 'failed'].includes(e.status)) { clearInterval(cnSendTest.t); await cnLoad(); } drawConn(true); } catch { /* still on its way */ }
+    }, 3000);
   }
   function cnKeyRow(k) {
     const sc = k.kind === 'widget' ? 'Booking widget' : (k.scopes || []).map(cnScope).join(', ');
@@ -3864,6 +3918,9 @@
     $app.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { const i = $app.querySelector(b.dataset.copy); try { await navigator.clipboard.writeText(i.value); b.textContent = 'Copied'; } catch { i.select(); } });
     $app.querySelectorAll('[data-cnnew]').forEach((b) => b.onclick = () => cnNewKey(b.dataset.cnnew));
     on('#cnnewkey', () => cnNewKey()); on('#cnmkwk', () => cnNewKey('widget')); on('#cnaddhook', () => cnHookForm());
+    on('#cngsend', () => cnSendTest());
+    const gd = $app.querySelector('#cnguide'); if (gd) gd.ontoggle = () => { S.cn.guide.open = gd.open; };
+    $app.querySelectorAll('input[name=cngpick]').forEach((i) => i.onchange = () => { S.cn.guide.pick = i.value; S.cn.guide.kind = null; drawConn(true); });
     $app.querySelectorAll('[data-kmore]').forEach((b) => b.onclick = () => cnKeyMenu(b.dataset.kmore));
     $app.querySelectorAll('[data-box]').forEach((b) => b.onclick = async () => { S.cn.box = b.dataset.box; S.cn.inbox = null; drawConn(true); await cnLoad(); drawConn(true); });
     $app.querySelectorAll('[data-retry]').forEach((b) => b.onclick = async () => { b.disabled = true;

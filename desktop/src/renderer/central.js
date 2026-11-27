@@ -588,12 +588,13 @@ document.addEventListener('click', (e) => {
 // ---------- Get help → Report an issue: a small in-page dialog (never the browser's pop-ups) ----------
 // The person picks the program, says what happened and whether work is blocked, and sees exactly what technical details
 // will be sent (the log lines open underneath). Central makes those details once; Send sends them as shown.
-async function reportIssue() {
+async function reportIssue(opts = {}) {
   document.querySelectorAll('dialog.supdlg').forEach((x) => x.remove());
   const d = document.createElement('dialog'); d.className = 'licdlg supdlg'; d.setAttribute('aria-label', 'Report an issue');
   document.body.appendChild(d); d.addEventListener('close', () => d.remove());
   const head = '<h2 class="lichead">Report an issue <button class="x" data-sup="close" aria-label="Close">✕</button></h2>';
-  let st = await bridge.call('support:prepare', null);
+  // opened from a problem (e.g. Online connections): the program and the error are filled in, the log goes with it
+  let st = await bridge.call('support:prepare', opts.product || null);
   if (!st.signedIn) {
     d.innerHTML = `${head}<div class="supbody"><div class="supstate"><span class="big">🔑</span><div><b>Sign in with your Riyeser account first</b>
       So we know which business it's for and can reply to you. Use the same email and password as riyeser.com.</div></div>
@@ -601,7 +602,7 @@ async function reportIssue() {
     d.addEventListener('click', (e) => { if (e.target.closest('[data-sup=close]')) d.close(); });
     d.showModal(); return;
   }
-  const form = { product: '', what: '', blocked: null, error: '' };
+  const form = { product: opts.product || '', what: opts.what || '', blocked: null, error: opts.error || '' };
   const draw = (note = '') => {
     const pv = st.preview || [];
     d.innerHTML = `${head}<form class="supbody" id="supf">${note}
@@ -633,7 +634,7 @@ async function reportIssue() {
   };
   d.addEventListener('click', (e) => { if (e.target.closest('[data-sup=close]')) d.close();
     const o = e.target.closest('[data-sup=open]'); if (o) { safe(() => bridge.call('support:open', o.dataset.ref)); d.close(); } });
-  draw(); d.showModal(); d.querySelector('select').focus();
+  draw(); d.showModal(); (form.product ? d.querySelector('textarea') : d.querySelector('select')).focus();
 }
 window.RiyeserCentralReport = { reportIssue };
 

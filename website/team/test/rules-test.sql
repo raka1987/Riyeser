@@ -3656,6 +3656,89 @@ do $$ begin
   assert (select count(*) from public.api_requests) = 1, 'recent log kept';
 end $$;
 reset role;
+-- ===== Online connections: api_status (is it set up? which PC syncs?) and "Send a test" =====
+-- a linked PC (even a staff member's) sees where things stand; another business can't
+set role authenticated;
+select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d1 uuid := 'a9a9a9d1-0000-4000-8000-000000000001'; j json; begin
+  j := public.api_status(ws, d1);
+  assert (j ->> 'set_up')::boolean, 'keys exist: set up ' || j::text;
+  assert (j -> 'keys' ->> 'active')::int >= 1, 'active keys counted';
+  assert j -> 'published' ->> 'catalog_at' is not null and (j -> 'published' ->> 'catalog_items')::int >= 1, 'published seen';
+  assert j -> 'sync_pc' ->> 'name' = 'FRONT-DESK' and (j -> 'sync_pc' ->> 'this_pc')::boolean, 'the PC that syncs: ' || j::text;
+  assert j ->> 'last_request_at' is not null and j ->> 'checked_at' is not null, 'last request';
+  begin perform public.api_status(ws, 'a9a9a9d2-0000-4000-8000-000000000002'); raise exception 'someone else''s PC';
+  exception when others then assert sqlerrm like 'Link this PC to the business first%', sqlerrm; end;
+  -- a live item isn't readable by a PC through api_event_status (only tests are)
+  begin perform public.api_event_status(ws, d1, (select id from public.api_inbox where workspace_id = ws and mode = 'live' limit 1));
+    raise exception 'PC read a live item';
+  exception when others then null; end;
+end $$;
+select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+reset role;
+do $$ begin assert exists (select 1 from public.api_inbox where workspace_id = current_setting('api.ws')::uuid and mode = 'live'), 'has live items'; end $$;
+set role authenticated;
+-- owners/admins (two-step) can use it without a PC
+select pg_temp.as_user('a9a9a9a1-0000-4000-8000-000000000001');
+do $$ begin assert (public.api_status(current_setting('api.ws')::uuid, null) ->> 'set_up')::boolean, 'admin without a PC'; end $$;
+select pg_temp.as_user('a9a9a9a3-0000-4000-8000-000000000003');
+do $$ begin
+  begin perform public.api_status(current_setting('api.ws')::uuid, null); raise exception 'other business saw status';
+  exception when others then assert sqlerrm like 'Link this PC to the business first%', sqlerrm; end;
+  begin perform public.api_send_test(current_setting('api.ws')::uuid, null, 'enquiry'); raise exception 'other business sent a test';
+  exception when others then assert sqlerrm like 'Link this PC to the business first%', sqlerrm; end;
+end $$;
+-- a brand new business with nothing connected: not set up; a test goes through the post box, as a test
+select public.link_device(current_setting('api.ws_x')::uuid, 'a9a9a9d3-0000-4000-8000-000000000003', 'SHOP-PC', 'windows', '1.0');
+do $$ declare ws uuid := current_setting('api.ws_x')::uuid; d uuid := 'a9a9a9d3-0000-4000-8000-000000000003'; j json; t json; c json; e json; begin
+  j := public.api_status(ws, d);
+  assert not (j ->> 'set_up')::boolean and (j -> 'keys' ->> 'active')::int = 0 and j ->> 'sync_pc' is null
+     and (j -> 'inbox' ->> 'waiting')::int = 0 and j ->> 'last_request_at' is null, 'nothing connected: ' || j::text;
+  begin perform public.api_send_test(ws, d, 'booking'); raise exception 'test booking without a service';
+  exception when others then assert sqlerrm like 'There''s no service published yet%', sqlerrm; end;
+  begin perform public.api_send_test(ws, d, 'refund'); raise exception 'unknown kind';
+  exception when others then assert sqlerrm like 'Choose a test booking, enquiry or order request.%', sqlerrm; end;
+  t := public.api_send_test(ws, d, 'enquiry');
+  assert (t ->> 'test')::boolean and t ->> 'kind' = 'enquiry' and t ->> 'status' = 'waiting', 'test sent: ' || t::text;
+  j := public.api_status(ws, d);
+  assert not (j ->> 'set_up')::boolean, 'a test alone isn''t "set up"';
+  assert (j -> 'inbox' ->> 'waiting')::int = 1 and (j -> 'inbox' ->> 'test_waiting')::int = 1, 'the test waits';
+  c := public.api_inbox_claim(ws, d, null, 20);
+  assert json_array_length(c) = 1 and (c -> 0 ->> 'test')::boolean and c -> 0 ->> 'source' = 'test'
+     and c -> 0 #>> '{payload,customer,name}' like 'Test Customer%', 'claimed as a test: ' || c::text;
+  e := public.api_event_status(ws, d, (t ->> 'id')::uuid);
+  assert e ->> 'status' = 'taken' and e ->> 'taken_by_pc' = 'SHOP-PC' and e ->> 'error' is null, 'event status: ' || e::text;
+  perform public.api_inbox_done(ws, d, (t ->> 'id')::uuid, '{"state":"received","message":"Thanks (test)"}');
+  assert public.api_event_status(ws, d, (t ->> 'id')::uuid) ->> 'status' = 'done', 'done';
+  assert public.api_status(ws, d) -> 'sync_pc' ->> 'name' = 'SHOP-PC', 'the PC that took it';
+  t := public.api_send_test(ws, d, 'order');
+  assert t ->> 'kind' = 'enquiry', 'an order request is an enquiry with order_ metadata';
+end $$;
+reset role;
+do $$ begin
+  assert (select payload #>> '{metadata,order_sku}' from public.api_inbox where workspace_id = current_setting('api.ws_x')::uuid
+          and payload ->> 'subject' = 'Test order request') = 'TEST-ITEM', 'order request with a placeholder item';
+  assert (select count(*) from public.api_inbox where workspace_id = current_setting('api.ws_x')::uuid and (mode <> 'test' or key_id is not null)) = 0,
+    'tests are always test mode with no key';
+end $$;
+set role authenticated;
+-- a test booking in a business with a published service: one of its free times (or tomorrow), the service's length
+select pg_temp.as_user('a9a9a9a2-0000-4000-8000-000000000002');
+do $$ declare ws uuid := current_setting('api.ws')::uuid; d1 uuid := 'a9a9a9d1-0000-4000-8000-000000000001'; t json; i int; begin
+  t := public.api_send_test(ws, d1, 'booking');
+  assert t ->> 'kind' = 'booking', 'test booking: ' || t::text;
+  for i in 1..19 loop perform public.api_send_test(ws, d1, 'enquiry'); end loop;
+  begin perform public.api_send_test(ws, d1, 'enquiry'); raise exception '21 tests in an hour';
+  exception when others then assert sqlerrm like 'That''s a lot of tests%', sqlerrm; end;
+end $$;
+reset role;
+do $$ declare p jsonb; begin
+  select payload into p from public.api_inbox where workspace_id = current_setting('api.ws')::uuid and mode = 'test' and kind = 'booking'
+    and source = 'test' order by created_at desc limit 1;
+  assert p ->> 'service' = 'CUT' and (p ->> 'end')::timestamptz - (p ->> 'start')::timestamptz = interval '60 minutes'
+     and (p ->> 'start')::timestamptz > now(), 'test booking payload: ' || p::text;
+end $$;
+
 -- ===== Riyeser Estimate (module 'estimate'): its 90-day trial starts on first use, then US$20 a month (no bundle)
 reset role;
 do $$ declare w uuid; d uuid; s json; begin

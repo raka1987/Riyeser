@@ -158,3 +158,4 @@
   no cookies or storage. Uses ports 8093-8095.
 - `developers-test.js`: riyeser.com/developers/ (from `website/developers.mjs`): every page under the CSP, every endpoint with curl and
   JavaScript, the webhook signature known answer, the widget preview, help and footer links, the sitemap, 390px.
+- `online-help-test.js` (node, no browser): the "Online connections" help guide (diagram, five set-up steps, where to paste the code, checklist, Send a test, Activity, problems); after a build it checks help/online.html too. `connections-test.js` step 12 covers the "Connect your website" guide on Management → Connections (checklist from `api_status`, Send a test through `api_send_test` / `api_event_status`).

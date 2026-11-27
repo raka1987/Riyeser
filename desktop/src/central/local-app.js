@@ -13,6 +13,15 @@ const fs = require('fs');
 const path = require('path');
 
 const ORDER = ['accounting', 'accounting-basics', 'bookings', 'pos', 'invoices'];   // which program to start, first found
+// What each local API call does, for a plain message when an older program answers with an error page.
+const WHAT = { status: 'open the company file for online connections', import: 'file what came in from your website', catalog: 'publish your prices',
+  stock: 'publish your stock levels', availability: 'publish your free booking times', outbox: 'read the news for your website',
+  'outbox/done': 'note the news sent', 'sync-report': 'save what Riyeser Central did' };
+/** Support's product id for the program that answered ("Riyeser POS" -> pos), for Get help. */
+function productOf(name) {
+  const n = String(name || '');
+  return /POS/.test(n) ? 'pos' : /Bookings/.test(n) ? 'bookings' : /Invoices/.test(n) ? 'invoices' : /Estimate/.test(n) ? 'estimate' : 'accounting';
+}
 
 function discoveryFile(dbPath) { return path.join(path.dirname(dbPath), 'local-api.json'); }
 
@@ -50,11 +59,24 @@ class LocalApp {
     } catch { const e = new Error('not running'); e.code = 'NOT_RUNNING'; throw e; } finally { if (t) clearTimeout(t); }
     const text = await r.text(); let data = null; try { data = text ? JSON.parse(text) : null; } catch { data = null; }
     if (!r.ok) {
-      const e = new Error((data && data.message) || `The program answered ${r.status}.`);
-      e.status = r.status; e.code = (data && data.error) || `HTTP_${r.status}`; throw e;
+      // An older program answered a crash with a bare 500 (an HTML error page): say which program and what it was doing.
+      const prog = (data && data.program) || i.program || 'Riyeser Accounting';
+      const what = WHAT[pathname] || 'do that';
+      const msg = (data && data.message) || (r.status >= 500
+        ? `${String(prog).replace(/ \(serve\)$/, '')} had a problem when it tried to ${what} (it answered ${r.status}).`
+        : `${String(prog).replace(/ \(serve\)$/, '')} answered ${r.status} when asked to ${what}.`);
+      const e = new Error(msg);
+      e.status = r.status; e.code = (data && data.error) || `HTTP_${r.status}`;
+      e.ref = (data && data.ref) || ''; e.what = what; e.program = prog; e.local = true; e.plain = !!(data && data.message);
+      e.detail = (data && data.detail) || (data ? '' : String(text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200));
+      throw e;
     }
     return data;
   }
+  /** The program's status when one is already running (never starts one), or null. */
+  async peek() { if (!this.info()) return null; try { return await this.request('status', { timeoutMs: 4000 }); } catch { return null; } }
+  /** Where the running program keeps its online-connections log (online-api.log next to the company file). */
+  logFile() { const i = this.info(); return (i && i.log) || path.join(path.dirname(this.dbPath), 'online-api.log'); }
 
   /** {ok, ...status} when a program is answering (starting one if needed); throws with a plain message otherwise. */
   async ensure() {
@@ -88,4 +110,4 @@ class LocalApp {
   report(r) { return this.request('sync-report', { method: 'POST', body: r }).catch(() => null); }
 }
 
-module.exports = { LocalApp, discoveryFile, ORDER };
+module.exports = { LocalApp, discoveryFile, ORDER, WHAT, productOf };
