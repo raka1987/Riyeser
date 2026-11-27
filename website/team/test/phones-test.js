@@ -9,6 +9,11 @@
 //     new one on the same extension, keep the name and location). 8. Troubleshoot, and Report a phone issue (prefilled).
 //  9. Advanced setup (manual SIP) is for admins only. 10. Let Riyeser help. 11. All steps done: folded away.
 // 12. Riyeser Link paused: how to add it. 13. An older database: the steps, no errors. 14. Phone width: no sideways scrolling.
+// Link Office 1.2.1 (one control panel): 15. Overview (Needs attention, tiles; a number opens the filtered list). 16. Every phone
+// in one list: search, sort, filters, tick boxes, select all shown, the bar for many at once (Give to… per person or numbered in
+// order, Restart, Remove) with the office's summary. 17. Add several phones (paste or CSV, the preview, fix in place, add).
+// 18. Each phone's panel: Restart, Find this phone, Ignore, its settings (only what its maker supports), Save and restart.
+// 19. An older Riyeser Link Office: says to update it.
 // Run: build the site, serve website/public on 8090, then `node website/team/test/phones-test.js <shots>`. Exits 1 on any failure.
 const { chromium, devices } = require('playwright');
 const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090';   // LINK_BASE=http://127.0.0.1:8091 to use another port
@@ -75,8 +80,19 @@ async function fakeServer(page, opts = {}) {
         if (c.kind === 'add_phone') phones.push({ mac: c.data.mac, vendor: c.data.vendor === 'snom' ? 'Snom' : '', model: '', extension: c.data.extension, assigned: true, registered: false, last_registered: null, ip: null, provisioned_at: null });
         if (c.kind === 'unassign_phone') st.offices[0].phones = phones.filter((p) => p.mac !== c.data.mac);
         if (c.kind === 'name_phone') Object.assign(phones.find((p) => p.mac === c.data.mac), { name: c.data.name, location: c.data.branch, note: c.data.note });
+        if (c.kind === 'bulk_phones') {   // Link Office 1.2.1: many phones at once, with its summary back
+          const d = c.data; const n = (k) => `${k} phone${k === 1 ? '' : 's'}`;
+          if (d.action === 'give') { let e = Number(d.start) || 201; for (const m of d.macs) Object.assign(phones.find((p) => p.mac === m), { assigned: true, extension: (d.to || {})[m] || String(e++) }); c.result = { summary: `Gave out ${n(d.macs.length)}.`, done: d.macs.length }; }
+          if (d.action === 'add') { for (const r of d.rows) phones.push({ mac: r.macText.replace(/[^0-9a-f]/gi, '').toLowerCase(), vendor: '', model: '', extension: r.ext || null, assigned: !!r.ext, registered: false, last_registered: null, ip: null, name: r.name || '', location: r.location || '' });
+            c.result = { summary: `Added ${n(d.rows.length)}, 1 skipped: duplicates.`, added: d.rows.length, skipped: [{ mac: '001565aabbcc', why: 'duplicates' }] }; }
+          if (d.action === 'restart') c.result = { summary: `Restarted ${n(d.macs.length - 1)}, 1 skipped: not on the network now.` };
+          if (d.action === 'remove') { st.offices[0].phones = phones.filter((p) => !d.macs.includes(p.mac)); c.result = { summary: `Removed ${n(d.macs.length)}.` }; }
+        }
+        if (c.kind === 'phone_action' && c.data.action === 'ignore') Object.assign(phones.find((p) => p.mac === c.data.mac), { ignored: true });
+        if (c.kind === 'phone_action' && c.data.action === 'find' && !phones.find((p) => p.mac === c.data.mac).registered) { c.status = 'failed'; c.error = 'That phone isn\'t connected right now, so it can\'t ring.'; }
+        if (c.kind === 'phone_settings') { Object.assign(phones.find((p) => p.mac === c.data.mac), { settings: c.data.settings }); c.result = { applied: Object.keys(c.data.settings) }; }
       }
-      return json({ id: c.id, kind: c.kind, status: c.status, error: null, ready: !!c.sealed });
+      return json({ id: c.id, kind: c.kind, status: c.status, error: c.error || null, result: c.result || null, ready: !!c.sealed });
     }
     if (fn === 'link_reveal_take') { const c = st.commands.find((x) => x.id === body.command); const s = c.sealed || null; c.sealed = null; st.taken += 1; return json(s); }
     if (fn === 'link_support_allow') { st.support = { until: new Date(Date.now() + 3600e3).toISOString() }; return json(st.support); }
@@ -115,17 +131,32 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.strictEqual(await text(pg, '#loaddr'), '192.168.1.20'); assert.strictEqual(await text(pg, '#loport'), '5060'); assert.strictEqual(await text(pg, '#lostate'), 'Running');
     const warn = await text(pg, '.lo-warn'); assert.match(warn, /DHCP reservation/); assert.match(warn, /3C:52:82:1A:2B:3C/);
     const s2 = await steps(pg); console.log('steps:', s2);
+    // the control panel opens on Overview: what needs attention, and a tile for each part
+    const attn = await pg.evaluate(() => [...document.querySelectorAll('#loattn li')].map((x) => x.innerText.replace(/\s+/g, ' ').trim()));
+    console.log('needs attention:', attn);
+    assert.ok(attn.some((x) => /^1 new phone waiting to be given out\. Give out 1 new phone$/.test(x)) && attn.some((x) => /^1 phone offline: Accounts\. Show them$/.test(x)), 'new and offline phones');
+    assert.ok(attn.some((x) => /keeps changing/.test(x)), 'the address isn\'t stable');
+    assert.ok(attn.some((x) => /Update Riyeser Link Office on OFFICE-PC \(version 1\.1\.1\)/.test(x)), 'an older Link Office: update it');
+    const tiles = await pg.evaluate(() => [...document.querySelectorAll('.lo-tile h4')].map((x) => x.textContent));
+    assert.deepStrictEqual(tiles, ['☎ Phones', '🖥 Office PC', '👥 People', '↗ Calls', '🏢 Branches and relay', '🤝 Riyeser support']);
+    await pg.screenshot({ path: out + '/phones-overview.png', fullPage: true });
+    await pg.click('.lo-tile [data-lof="Offline"]'); await pg.waitForSelector('[data-lopane="phones"]:not([hidden])');
+    assert.deepStrictEqual((await rows(pg)).map((x) => x.st), ['Offline'], 'a tile number opens the filtered list');
+    await pg.selectOption('#lost', 'all');
     assert.deepStrictEqual(s2.map((x) => x[0]), ['✓', '✓', '✓', '·', '·'], 'installed, signed in, phones plugged in; one not given; no test call');
     const list = await rows(pg); console.log('desk phones:', list.map((x) => x.text));
-    assert.deepStrictEqual(list.map((x) => x.st), ['Online', 'Offline', 'Configuring', 'Waiting for phone'], 'all four statuses');
-    assert.match(list[0].text, /^☎ Reception Yealink T31P · 00:15:65:AA:BB:CC 101 Alex Sample Head office Online Now/);
-    assert.match(list[1].text, /Accounts .* 102 Bo Example Head office Offline \d+ h ago/);
-    assert.match(list[3].text, /Polycom VVX 250 .* 103 Cam Test — Waiting for phone Never/);
+    assert.deepStrictEqual(list.map((x) => x.st), ['New', 'Offline', 'Waiting for phone', 'Configuring', 'Online'], 'every phone, new ones first, then what needs a look');
+    assert.match(list[4].text, /^☎ Reception Head office 101 Alex Sample Yealink T31P 00:15:65:AA:BB:CC 192\.168\.1\.31 Online Now/);
+    assert.match(list[1].text, /^☎ Accounts Head office 102 Bo Example Grandstream GRP2601P .* Offline \d+ h ago/);
+    assert.match(list[2].text, /^☎ Polycom VVX 250 — 103 Cam Test Polycom VVX 250 00:04:F2:AA:BB:CC — Waiting for phone Never/);
+    assert.match(list[0].text, /^☎ New phone — — — Yealink T33G 00:15:65:DD:EE:FF 192\.168\.1\.44 New/);
     assert.ok(await pg.$('#loaddphone'), '+ Add desk phone above the list');
+    await pg.click('[data-lotab="ext"]');
     const exts = await pg.evaluate(() => [...document.querySelectorAll('table.lo-ext tbody tr')].map((r) => r.innerText.replace(/\s+/g, ' ').trim()));
     assert.ok(exts.some((x) => /^101 Alex Sample ● Yealink T31P 00:15:65:AA:BB:CC/.test(x))); assert.ok(exts.some((x) => /^100 Head office ring group · 3 people/.test(x)));
-    console.log('new phones found:', await text(pg, '.lo-found'));
+    await pg.click('[data-lotab="phones"]'); console.log('new phones found:', await text(pg, '.lo-found'));
     await pg.screenshot({ path: out + '/phones-page.png', fullPage: true });
+    await pg.click('[data-lotab="overview"]');
 
     // 2b. Link Office 1.2.0: the PC's address changed -> the notice, the new address, its names, the reservation link
     const pa = await b.newPage({ viewport: { width: 1280, height: 900 } }); pa.on('pageerror', (e) => errs.push('address: ' + e.message));
@@ -147,6 +178,8 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     await pn.close(); await pa.close();
 
     // 3. a new phone found -> Give to… -> sent, then done; step 4 ticks itself
+    await pg.click('[data-lotab="phones"]'); await pg.click('tr[data-mac="001565ddeeff"] td[data-l="Name"]'); await pg.waitForSelector('#lopanel [data-give="001565ddeeff"]');
+    await pg.screenshot({ path: out + '/phones-panel-new.png' });
     await pg.click('[data-give="001565ddeeff"]'); await pg.waitForSelector('[data-to="103"]');
     await pg.click('[data-to="103"]');
     await pg.waitForFunction(() => /Sending to Riyeser Link Office…/.test(document.querySelector('#gstat').textContent));
@@ -155,7 +188,8 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     await pg.waitForFunction(() => !document.querySelector('[data-give]'), null, { timeout: 5000 });
     assert.strictEqual((await steps(pg))[3][0], '✓', 'every phone given to someone');
 
-    // 4. set up a phone by hand -> Show
+    // 4. set up a phone by hand -> Show (Extensions)
+    await pg.click('#lopclose'); await pg.click('[data-lotab="ext"]');
     await pg.click('[data-hand="101"]'); await pg.waitForSelector('#show');
     assert.strictEqual(await text(pg, '#pw'), '••••••••••••••••');
     assert.ok(await pg.$('#hmenus'), 'Where do I type these on my phone?');
@@ -177,7 +211,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.deepStrictEqual(st.commands.find((c) => c.kind === 'set_dnd').data, { extension: '102', on: true });
 
     // 6. + Add desk phone, through to Online
-    await pg.click('#loaddphone'); await pg.waitForSelector('#wf input[name=name]');
+    await pg.click('[data-lotab="phones"]'); await pg.click('#loaddphone'); await pg.waitForSelector('#wf input[name=name]');
     await pg.screenshot({ path: out + '/wizard-1-name.png' });
     await pg.fill('#wf input[name=name]', 'Front counter'); await pg.click('#wf .btn.p');
     await pg.waitForSelector('#wf select[name=branch]'); await pg.selectOption('#wf select[name=branch]', 'Nadi branch'); await pg.click('#wf .btn.p');
@@ -209,10 +243,12 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     console.log('added: Front counter, Online');
 
     // 7. Replace phone: the Offline one (Accounts, 102)
-    await pg.click('[data-more="000b82112233"]'); await pg.waitForSelector('[data-m=replace]');
-    const menu = await pg.evaluate(() => [...document.querySelectorAll('[data-m]')].map((x) => x.textContent));
-    console.log('⋯ menu:', menu);
-    assert.deepStrictEqual(menu, ['View setup', 'Troubleshoot', 'Replace phone', 'Advanced setup (manual SIP)', 'Rename / move location', 'Remove from this person']);
+    await pg.click('[data-more="000b82112233"]'); await pg.waitForSelector('#lopanel [data-m=replace]');
+    const menu = await pg.evaluate(() => [...document.querySelectorAll('#lopanel .lo-pacts .btn')].map((x) => x.textContent));
+    console.log('phone panel:', menu);
+    assert.deepStrictEqual(menu, ['Restart', 'Re-send settings', 'View setup', 'Troubleshoot', 'Replace phone', 'Advanced setup (manual SIP)', 'Remove from this person', 'Remove']);
+    assert.match(await pg.evaluate(() => document.querySelector('#lopanel .lo-pkv').innerText.replace(/\s+/g, ' ')), /^Extension 102 Bo Example Location Head office IP address 192\.168\.1\.32 Last seen \d+ h ago Settings fetched/);
+    await pg.screenshot({ path: out + '/phones-panel.png' });
     await pg.click('[data-m=replace]'); await pg.waitForSelector('#rpf');
     const prev = await text(pg, '#rpprev'); console.log('preview:', prev);
     assert.match(prev, /^The old phone \(MAC 00:0B:82:11:22:33\) stops getting its settings now; it keeps working until it's restarted or reset\. To lock it out straight away, also make a new password\. The new phone keeps extension 102, the name Accounts and the location Head office\.$/);
@@ -225,10 +261,10 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.deepStrictEqual(sent, [['unassign_phone', { mac: '000b82112233' }], ['add_phone', { mac: '000b82445566', extension: '102' }],
       ['name_phone', { mac: '000b82445566', name: 'Accounts', branch: 'Head office', note: '' }]], 'old one off, new one on the same extension, same name and location');
     await pg.waitForSelector('#rplive .lo-live'); await pg.click('#cl');
-    await pg.waitForFunction(() => { const r = [...document.querySelectorAll('table.lo-dp tbody tr')]; return !r.some((x) => x.dataset.mac === '000b82112233') && r.some((x) => x.dataset.mac === '000b82445566' && /Accounts/.test(x.innerText) && /102 Bo Example/.test(x.innerText)); }, null, { timeout: 8000 });
+    await pg.waitForFunction(() => { const r = [...document.querySelectorAll('table.lo-dp tbody tr')]; return !r.some((x) => x.dataset.mac === '000b82112233') && r.some((x) => x.dataset.mac === '000b82445566' && /Accounts/.test(x.innerText) && /102\s+Bo Example/.test(x.innerText)); }, null, { timeout: 8000 });
 
     // 8. Troubleshoot, and Report a phone issue
-    await pg.click('[data-more="0004f2aabbcc"]'); await pg.click('[data-m=trouble]'); await pg.waitForSelector('.lo-check');
+    await pg.click('[data-more="0004f2aabbcc"]'); await pg.click('#lopanel [data-m=trouble]'); await pg.waitForSelector('.lo-check');
     const checks = await pg.evaluate(() => [...document.querySelectorAll('.lo-check li')].map((x) => x.querySelector('b').textContent));
     console.log('troubleshoot:', checks);
     assert.deepStrictEqual(checks, ['Power.', 'Network cable in the LAN port.', 'Same office network.', 'The office PC is on and online.', 'Restart the phone.']);
@@ -241,16 +277,94 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     assert.match(t.message, /Phone: Polycom VVX 250\nMAC: 00:04:F2:AA:BB:CC\nConnected: no \(Waiting for phone, last check-in Never\)/);
     await pg.click('#ghf #cl'); await pg.click('.modal #cl');
 
-    // Rename / move, and View setup
-    await pg.click('[data-more="0004f2aabbcc"]'); await pg.click('[data-m=rename]'); await pg.waitForSelector('#rnf');
-    await pg.fill('#rnf input[name=name]', 'Store room'); await pg.selectOption('#rnf select[name=branch]', 'Head office'); await pg.click('#rnf .btn.p');
-    await pg.waitForFunction(() => !document.querySelector('#rnf'), null, { timeout: 8000 });
+    // Name and location (in the panel), and View setup
+    await pg.fill('#lopname input[name=name]', 'Store room'); await pg.selectOption('#lopname select[name=branch]', 'Head office'); await pg.click('#lopname .btn');
+    await pg.waitForFunction(() => /Done/.test((document.getElementById('lopstat') || {}).textContent || ''), null, { timeout: 8000 });
     assert.deepStrictEqual(st.commands[st.commands.length - 1].data, { mac: '0004f2aabbcc', name: 'Store room', branch: 'Head office', note: '' });
-    await pg.click('[data-more="0004f2aabbcc"]'); await pg.click('[data-m=view]'); await pg.waitForSelector('#vlive .lo-live');
+    await pg.click('#lopanel [data-m=view]'); await pg.waitForSelector('#vlive .lo-live');
     await pg.screenshot({ path: out + '/view-setup.png' }); await pg.click('.modal #cl');
 
+    // 16. every phone in one list: search, filters, sort, tick boxes, select all shown, the bar for many at once
+    await pg.click('#lopclose');
+    st.offices[0].phones.push({ mac: '000b82aa0001', vendor: 'Grandstream', model: 'GRP2602P', extension: null, assigned: false, registered: false, ip: '192.168.1.51' },
+      { mac: '000b82aa0002', vendor: 'Grandstream', model: 'GRP2602P', extension: null, assigned: false, registered: false, ip: '192.168.1.52' },
+      { mac: 'c074ad000777', vendor: 'Grandstream', model: 'HT802', extension: null, assigned: false, ignored: true, registered: false, ip: '192.168.1.80' });
+    await pg.evaluate(() => window.RiyeserTeam && 0); await pg.click('[data-lotab="overview"]'); await pg.click('[data-lotab="phones"]');
+    await pg.waitForTimeout(100); await pg.evaluate(() => document.querySelector('#loq').dispatchEvent(new Event('input')));
+    await pg.waitForFunction(() => document.querySelectorAll('table.lo-dp tbody tr').length >= 7, null, { timeout: 25000 });   // the next refresh brings the new ones
+    const all = await rows(pg); console.log('all phones:', all.map((x) => `${x.st}`).join(', '));
+    assert.ok(all.some((x) => x.st === 'Ignored'), 'ignored phones are listed too');
+    await pg.fill('#loq', 'GRP2602P'); assert.deepStrictEqual((await rows(pg)).map((x) => x.mac).sort(), ['000b82aa0001', '000b82aa0002']);
+    await pg.fill('#loq', ''); await pg.selectOption('#lost', 'New'); assert.ok((await rows(pg)).every((x) => x.st === 'New'));
+    await pg.selectOption('#lost', 'all'); await pg.selectOption('#loas', 'yes'); assert.ok((await rows(pg)).every((x) => !/ New| Ignored/.test(x.st)));
+    await pg.selectOption('#loas', ''); await pg.click('th[data-sort="ip"]');
+    const ips = await pg.evaluate(() => [...document.querySelectorAll('table.lo-dp tbody td[data-l="IP"]')].map((x) => x.textContent).filter((x) => x !== '—'));
+    assert.deepStrictEqual(ips, [...ips].sort(), 'sorted by IP');
+    await pg.click('th[data-sort="status"]');
+    await pg.selectOption('#lost', 'New'); await pg.check('#loall');
+    assert.deepStrictEqual(await pg.evaluate(() => [document.querySelector('#lobulk b').textContent, ...[...document.querySelectorAll('#lobulk [data-bulk]')].map((x) => x.textContent)]),
+      ['2 phones selected', 'Give to…', 'Add as shared phones', 'Move location', 'Restart', 'Ignore', 'Remove', 'Clear'], 'only what fits new phones');
+    await pg.screenshot({ path: out + '/phones-bulkbar.png' });
+    await pg.click('[data-bulk="give"]'); await pg.waitForSelector('[data-gto="000b82aa0001"]');
+    await pg.screenshot({ path: out + '/phones-give.png' });
+    await pg.click('#gmgo'); assert.match(await text(pg, '#gmstat'), /Choose who each phone is for/);
+    await pg.selectOption('[data-gto="000b82aa0001"]', '101'); await pg.selectOption('[data-gto="000b82aa0002"]', '102'); await pg.click('#gmgo');
+    await pg.waitForFunction(() => /Gave out 2 phones\./.test((document.getElementById('gmstat') || {}).textContent || ''), null, { timeout: 8000 });
+    const give = st.commands.filter((c) => c.kind === 'bulk_phones').pop();
+    assert.deepStrictEqual(give.data, { action: 'give', macs: ['000b82aa0001', '000b82aa0002'], to: { '000b82aa0001': '101', '000b82aa0002': '102' } }, 'one change for both');
+    await pg.waitForFunction(() => !document.querySelector('.modal'), null, { timeout: 5000 });
+    // restart and remove many: the office's summary shows
+    await pg.selectOption('#lost', 'all'); await pg.check('[data-pick="000b82aa0001"]'); await pg.check('[data-pick="000b82aa0002"]');
+    await pg.click('[data-bulk="restart"]'); await pg.click('#askyes');
+    await pg.waitForFunction(() => /Restarted 1 phone, 1 skipped: not on the network now\./.test((document.getElementById('phmsg') || {}).textContent || ''), null, { timeout: 8000 });
+    assert.strictEqual(await text(pg, '#lobulk b'), '2 phones selected', 'still ticked after a restart');
+    await pg.click('[data-bulk="clear"]'); await pg.check('[data-pick="c074ad000777"]'); await pg.click('[data-bulk="remove"]'); await pg.click('#askyes');
+    await pg.waitForFunction(() => /Removed 1 phone\./.test((document.getElementById('phmsg') || {}).textContent || ''), null, { timeout: 8000 });
+    assert.deepStrictEqual(st.commands.filter((c) => c.kind === 'bulk_phones').pop().data, { action: 'remove', macs: ['c074ad000777'] }, 'only what was still ticked');
+    console.log('bulk give, restart, remove: ok');
+
+    // 17. Add several phones: paste, the preview, fix a row in place, add
+    await pg.click('#loaddmany'); await pg.waitForSelector('#amtext');
+    await pg.fill('#amtext', 'MAC,Model,Extension,Person,Phone name,Location\n00:15:65:12:34:56,Yealink T31P,,Bo Example,Bo desk,Head office\n000B82123457,,,,Kitchen,Nadi branch\n001565aabbcc,,,,,\n00:15:65:12:34:56,,,,,\nnot-a-mac,,,,,');
+    await pg.waitForFunction(() => document.querySelectorAll('table.lo-am tbody tr').length === 5);
+    assert.match(await text(pg, '#amsum'), /^2 phones to add · 2 skipped \(already added or twice in the list\) · 1 to fix$/);
+    const pv = await pg.evaluate(() => [...document.querySelectorAll('table.lo-am td.lo-chk')].map((x) => x.innerText.replace(/\s+/g, ' ').trim()));
+    console.log('preview:', pv);
+    assert.match(pv[0], /^OK Yealink · ext\. 102 \(Bo Example\)/); assert.match(pv[1], /^OK Grandstream/); assert.match(pv[2], /^Skip .*Already added \(extension 101\)/);
+    assert.match(pv[3], /Twice in this list/); assert.match(pv[4], /^Fix not-a-mac isn't a MAC address/);
+    await pg.fill('table.lo-am tr[data-i="4"] input[data-f="macText"]', '00-04-13-44-55-77'); await pg.press('table.lo-am tr[data-i="4"] input[data-f="macText"]', 'Tab');
+    await pg.waitForFunction(() => /^3 phones to add/.test(document.querySelector('#amsum').textContent));
+    await pg.check('[name=ammode][value=auto]');
+    await pg.screenshot({ path: out + '/phones-addmany.png' });
+    assert.match(await pg.getAttribute('#amtpl', 'href'), /^blob:/, 'the CSV template downloads');
+    await pg.click('#amgo');
+    await pg.waitForFunction(() => /Added 3 phones, 1 skipped: duplicates\./.test(document.querySelector('#amsum').textContent), null, { timeout: 8000 });
+    const add = st.commands.filter((c) => c.kind === 'bulk_phones').pop().data;
+    assert.deepStrictEqual([add.action, add.auto, add.rows.map((r) => r.macText)], ['add', true, ['00:15:65:12:34:56', '000B82123457', '00-04-13-44-55-77']], 'only the rows to add');
+    await pg.screenshot({ path: out + '/phones-addmany-done.png' });
+    await pg.click('.modal #cl');
+
+    // 18. each phone's panel: its settings (only what its maker supports), Save and restart, Find this phone, Ignore
+    await pg.click('[data-more="001565aabbcc"]'); await pg.waitForSelector('#lopsf');
+    const fields = await pg.evaluate(() => [...document.querySelectorAll('#lopsf label.f > span')].map((x) => x.textContent));
+    assert.deepStrictEqual(fields, ['Name on the line key', 'Name shown on calls', 'Time zone', 'Clock', 'Language', 'Ringtone', 'Ring volume', 'Do not disturb'], 'Yealink: everything');
+    await pg.selectOption('#lopsf [name=timeFormat]', '24'); await pg.selectOption('#lopsf [name=ringVolume]', '9'); await pg.fill('#lopsf [name=kv0]', '102'); await pg.fill('#lopsf [name=kl0]', 'Bo');
+    await pg.screenshot({ path: out + '/phones-panel-settings.png' });
+    await pg.click('#lopsf [value=restart]');
+    await pg.waitForFunction(() => /Done/.test((document.getElementById('lopstat') || {}).textContent || ''), null, { timeout: 15000 });
+    const sk = st.commands.filter((c) => c.kind === 'phone_settings' || c.kind === 'phone_action').slice(-2);
+    assert.deepStrictEqual(sk.map((c) => [c.kind, c.data]), [['phone_settings', { mac: '001565aabbcc', settings: { timeFormat: '24', ringVolume: '9', lineKeys: [{ value: '102', label: 'Bo' }] } }], ['phone_action', { mac: '001565aabbcc', action: 'restart' }]]);
+    await pg.click('#lopanel [data-pa="find"]');
+    await pg.waitForFunction(() => /Done|connected right now/.test((document.getElementById('lopstat') || {}).textContent || ''), null, { timeout: 8000 });
+    await pg.click('[data-more="0004f2aabbcc"]'); await pg.waitForSelector('#lopanel');
+    assert.ok(!(await pg.$('#lopanel [data-pa="find"]')), 'Find this phone only for a phone that is connected');
+    assert.deepStrictEqual(await pg.evaluate(() => [...document.querySelectorAll('#lopsf label.f > span')].map((x) => x.textContent)),
+      ['Name on the line key', 'Name shown on calls', 'Time zone', 'Clock', 'Language', 'Ringtone'], 'Polycom: only what its settings file carries');
+    st.offices[0].phones.filter((p) => !p.assigned).forEach((p, i) => Object.assign(p, { assigned: true, ignored: false, extension: String(201 + i) }));   // the office numbered them (auto)
+    console.log('phone panel settings: ok');
+
     // 9. Advanced setup (manual SIP): admins get it; a member can't open the Desk phones page at all (they get My phone)
-    await pg.click('[data-more="001565aabbcc"]'); await pg.click('[data-m=adv]'); await pg.waitForSelector('#show');
+    await pg.click('[data-more="001565aabbcc"]'); await pg.click('#lopanel [data-m=adv]'); await pg.waitForSelector('#show');
     assert.match(await text(pg, '.mcard h3'), /Advanced setup \(manual SIP\)/); await pg.click('.mcard #cl');
     const pm = await b.newPage({ viewport: { width: 1100, height: 800 } }); pm.on('pageerror', (e) => errs.push('member: ' + e.message));
     await fakeServer(pm, { member: true, offices: [office()] }); await signIn(pm, BASE + '/link/?phones'); await pm.waitForSelector('#myPhonePage');
@@ -259,7 +373,7 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     console.log('member ?phones -> My phone, no Advanced setup: ok');
 
     // 10. Let Riyeser help
-    await pg.waitForSelector('#losupon'); await pg.click('#losupon'); await pg.click('#askyes'); await pg.waitForSelector('#losupend');
+    await pg.click('[data-lotab="help"]'); await pg.waitForSelector('#losupon'); await pg.click('#losupon'); await pg.click('#askyes'); await pg.waitForSelector('#losupend');
     assert.match(await text(pg, '#losupport'), /^Riyeser support can see and change your phone set-up until \d{1,2}:\d\d(am|pm)\. Everything they do is in your 🕘 History\.$/);
     await pg.click('#losupend'); await pg.waitForSelector('#losupon');
     assert.ok(st.calls.includes('link_support_allow') && st.calls.includes('link_support_end'));
@@ -308,6 +422,8 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     const over = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth); console.log('phone overflow:', over);
     assert.strictEqual(over, 0);
     await ph.screenshot({ path: out + '/phones-phone.png', fullPage: true });
+    await ph.tap('[data-lotab="phones"]'); await ph.screenshot({ path: out + '/phones-phone-list.png', fullPage: true });
+    const over3 = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth); assert.strictEqual(over3, 0, 'the list at phone width');
     await ph.tap('#loaddphone'); await ph.fill('#wf input[name=name]', 'Front'); await ph.tap('#wf .btn.p'); await ph.tap('#wf .btn.p');
     await ph.check('#wf input[name=ext][value="101"]'); await ph.tap('#wf .btn.p'); await ph.waitForSelector('#wf input[name=mac]');
     const over2 = await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth); console.log('phone overflow (Add desk phone):', over2); assert.strictEqual(over2, 0);
@@ -316,7 +432,12 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     // the demo works too
     const pd = await b.newPage(); pd.on('pageerror', (e) => errs.push('demo: ' + e.message));
     await pd.goto(BASE + '/link/?demo&phones'); await unlock(pd, '123456'); await pd.waitForSelector('#loaddr'); console.log('demo ?phones:', await text(pd, '#loaddr'));
-    assert.deepStrictEqual((await rows(pd)).map((x) => x.st), ['Online', 'Online', 'Offline']);
+    await pd.click('[data-lotab="phones"]');
+    assert.deepStrictEqual((await rows(pd)).map((x) => x.st), ['New', 'New', 'Offline', 'Online', 'Online']);
+    // the demo gives out both new phones in order, with the office's summary
+    await pd.check('#loall'); await pd.click('[data-bulk="give"]'); await pd.check('[name=gm][value=auto]'); await pd.click('#gmgo');
+    await pd.waitForFunction(() => /Gave out 2 phones\./.test((document.getElementById('gmstat') || {}).textContent || ''), null, { timeout: 8000 });
+    console.log('demo bulk give: ok');
   } catch (e) { failed = true; console.error('FAILED:', e.message); }
   console.log('errors:', errs); await b.close();
   if (failed || errs.length) process.exit(1);
