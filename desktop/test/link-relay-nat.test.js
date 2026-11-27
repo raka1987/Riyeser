@@ -10,54 +10,22 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync, spawn } = require('child_process');
+const { spawn } = require('child_process');
 const tokens = require('../src/relay/lib/tokens');
 
 const SECRET = 'nat-e2e-relay-secret-0123456789abcdef0123456789';
 const WS_A = 'aaaaaaaa-0000-4000-8000-0000000000e1'; const WS_B = 'bbbbbbbb-0000-4000-8000-0000000000e2';
 const P = `ry${process.pid % 10000}`;
-const NS = ['inet', 'rly1', 'rly2', 'natA', 'siteA', 'natB', 'siteB', 'natC', 'siteC'].map((n) => `${P}${n}`);
+const N = require('./e2e/netns');
+let NET = null;
 const ns = (n) => `${P}${n}`;
-
-function canRun() {
-  if (process.platform !== 'linux' || (process.getuid && process.getuid() !== 0) || process.env.RIYESER_SKIP_NETNS) return 'needs Linux and root';
-  try { execSync('ip -V', { stdio: 'ignore' }); execSync('iptables -V', { stdio: 'ignore' }); } catch { return 'needs ip and iptables'; }
-  try { execSync(`ip netns add ${P}probe && ip netns del ${P}probe`, { stdio: 'ignore' }); } catch { return 'network namespaces are not allowed here'; }
-  return null;
-}
-const sh = (cmd) => execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
-const nsx = (n, cmd) => sh(`ip netns exec ${ns(n)} ${cmd}`);
-
+const nsx = (n, cmd) => NET.exec(n, cmd);
 function build() {
-  for (const n of NS) sh(`ip netns add ${n}`);
-  for (const n of NS) sh(`ip -n ${n} link set lo up`);
-  sh(`ip -n ${ns('inet')} link add br0 type bridge && ip -n ${ns('inet')} link set br0 up`);
-  // the "internet": 198.51.100.0/24 on one bridge
-  const pub = { rly1: '198.51.100.10', rly2: '198.51.100.20', natA: '198.51.100.101', natB: '198.51.100.102', natC: '198.51.100.104' };
-  for (const [n, ip] of Object.entries(pub)) {
-    sh(`ip link add ${P}${n}o type veth peer name ${P}${n}i`);
-    sh(`ip link set ${P}${n}o netns ${ns('inet')} && ip -n ${ns('inet')} link set ${P}${n}o master br0 up`);
-    sh(`ip link set ${P}${n}i netns ${ns(n)} && ip -n ${ns(n)} link set ${P}${n}i name eth0 && ip -n ${ns(n)} addr add ${ip}/24 dev eth0 && ip -n ${ns(n)} link set eth0 up`);
-  }
-  // each office: 192.168.1.0/24 behind its NAT router (the same subnet at every site, as is usual)
-  for (const s of ['A', 'B', 'C']) {
-    sh(`ip link add ${P}l${s}o type veth peer name ${P}l${s}i`);
-    sh(`ip link set ${P}l${s}o netns ${ns(`nat${s}`)} && ip -n ${ns(`nat${s}`)} link set ${P}l${s}o name lan0 && ip -n ${ns(`nat${s}`)} addr add 192.168.1.1/24 dev lan0 && ip -n ${ns(`nat${s}`)} link set lan0 up`);
-    sh(`ip link set ${P}l${s}i netns ${ns(`site${s}`)} && ip -n ${ns(`site${s}`)} link set ${P}l${s}i name eth0 && ip -n ${ns(`site${s}`)} link set eth0 up`);
-    for (const a of ['192.168.1.10', '192.168.1.21', '192.168.1.22']) sh(`ip -n ${ns(`site${s}`)} addr add ${a}/24 dev eth0`);
-    sh(`ip -n ${ns(`site${s}`)} route add default via 192.168.1.1`);
-    nsx(`nat${s}`, 'sysctl -qw net.ipv4.ip_forward=1');
-    let masq = '-j MASQUERADE --random-fully';
-    try { nsx(`nat${s}`, `iptables -t nat -A POSTROUTING -o eth0 ${masq}`); } catch { masq = '-j MASQUERADE --random'; nsx(`nat${s}`, `iptables -t nat -A POSTROUTING -o eth0 ${masq}`); }
-    // a strict NAT: nothing gets in unless it answers something that went out
-    nsx(`nat${s}`, 'iptables -P FORWARD DROP');
-    nsx(`nat${s}`, 'iptables -A FORWARD -i lan0 -o eth0 -j ACCEPT');
-    nsx(`nat${s}`, 'iptables -A FORWARD -i eth0 -o lan0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
-    nsx(`nat${s}`, 'iptables -A INPUT -i eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT');
-    nsx(`nat${s}`, 'iptables -A INPUT -i eth0 -j DROP');
-  }
+  NET = N.net(P, { hosts: { rly1: '198.51.100.10', rly2: '198.51.100.20' },
+    offices: { A: { wan: '198.51.100.101', lan: ['192.168.1.10', '192.168.1.21', '192.168.1.22'] }, B: { wan: '198.51.100.102', lan: ['192.168.1.10', '192.168.1.21'] }, C: { wan: '198.51.100.104', lan: ['192.168.1.10', '192.168.1.21'] } } });
 }
-function teardown() { for (const n of NS) { try { sh(`ip netns del ${n}`); } catch { /* gone */ } } }
+function teardown() { if (NET) NET.down(); }
+const canRun = () => N.canRun(P);
 
 /** A child process in a namespace that answers JSON lines. */
 function proc(name, nsName, script, cfg, logs) {
@@ -95,7 +63,7 @@ test('two sites behind separate NATs + the relay: calls with sound both ways, IP
   const logs = []; const evidence = [];
   const note = (s) => { evidence.push(s); t.diagnostic(s); };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-nat-'));
-  teardown(); build();
+  build();
   const plan = { ok: true, relays: [], businesses: [
     { ws: WS_A, enabled: true, offices: [{ office_id: 'lo-suva-nat00001', gen: 1, name: 'Suva' }, { office_id: 'lo-nadi-nat00002', gen: 1, name: 'Nadi' }], devices: [], groups: [{ ext: '100', members: ['101', '201'] }] },
     { ws: WS_B, enabled: true, offices: [{ office_id: 'lo-other-nat0003', gen: 1, name: 'Other' }], devices: [], groups: [] }] };
@@ -142,7 +110,6 @@ test('two sites behind separate NATs + the relay: calls with sound both ways, IP
 
     // 3. Nadi's public IP changes mid-day (198.51.100.102 → .103): it reconnects by itself; new calls work
     const before = (await nadi.ask('status')).relay.reconnects;
-    nsx('natB', 'sysctl -qw net.ipv4.conf.eth0.promote_secondaries=1');
     nsx('natB', 'ip addr add 198.51.100.103/24 dev eth0'); nsx('natB', 'ip addr del 198.51.100.102/24 dev eth0');
     const t0 = Date.now();
     await until(async () => { const s = (await nadi.ask('status')).relay; return s.reconnects > before && s.connected && s.relay === 'syd1'; }, 30000, 'Nadi reconnected from its new address');
