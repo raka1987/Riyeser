@@ -331,3 +331,6 @@ table.ot td:nth-child(2) { min-width: 260px; } table.ot td:nth-child(3) { min-wi
 .ot-st { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11.5px; font-weight: 600; background: var(--head); color: var(--muted); }
 .ot-st.done, .ot-st.ok { background: var(--ok-soft); color: var(--ok); } .ot-st.rejected, .ot-st.error { background: var(--bad-soft); color: var(--bad); } .ot-st.retry, .ot-st.waiting { background: var(--warn-soft); color: var(--warn); }
 @media (max-width: 720px) { .og-top { grid-template-columns: 1fr; } .og-where { grid-template-columns: 1fr; } }
+/* An install that didn't work: what happened, how to fix it, Try again / Get help (stays until it's tried again) */
+.insterr { flex: 1; min-width: 180px; font-size: 13px; line-height: 1.4; color: var(--text); border-left: 3px solid var(--bad); padding: 2px 0 2px 10px; }
+.insterr b { display: block; font-weight: 600; } .insterr .lbl { margin-top: 4px; } .insterr .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }

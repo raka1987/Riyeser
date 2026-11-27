@@ -5,6 +5,7 @@ const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, session, c
 const { execFile, spawn } = require('child_process');
 const updates = require('./central/updates');
 const installerCheck = require('./central/installer-check');
+const installRun = require('./central/install-run');
 const licence = require('./core/licence');
 const prices = require('./core/prices');
 const path = require('path');
@@ -235,36 +236,90 @@ async function verifyDownload(file, name, digest, latest) {
   if (!r.ok) { try { fs.rmSync(file, { force: true }); } catch { /* temp file */ } throw new Error(r.error); }
   return r;
 }
-/** Run a downloaded installer quietly and wait for it to finish. */
-function runInstaller(file, args, name) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(file, args, { windowsHide: true });
-    const t = setTimeout(() => { try { child.kill(); } catch { /* gone */ } reject(new Error(`${name} took too long to install.`)); }, 10 * 60 * 1000);
-    child.on('exit', (code) => { clearTimeout(t); code === 0 ? resolve() : reject(new Error(`${name} installer stopped (code ${code}).`)); });
-    child.on('error', (e) => { clearTimeout(t); reject(e); });
-  });
+// Central's install log (%APPDATA%\Riyeser Central\logs\install.log): one line per step that matters, sent with
+// "Report an issue" (diagnostics.js) so Riyeser Support sees the codes. Kept to the last ~200 KB.
+function installLog(entry) {
+  try {
+    const file = path.join(app.getPath('userData'), 'logs', 'install.log');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    try { if (fs.statSync(file).size > 400 * 1024) { const t = fs.readFileSync(file, 'utf8'); fs.writeFileSync(file, t.slice(-200 * 1024).replace(/^[^\n]*\n/, '')); } } catch { /* new log */ }
+    fs.appendFileSync(file, `${installRun.logEntry({ ...entry, at: Date.now() })}\n`);
+  } catch { /* the log is a nice extra */ }
+}
+/** An install that didn't work: an Error carrying the plain message, the fix and the reason for the tile. */
+function installError(f) { const e = new Error(f.fix ? `${f.message} ${f.fix}` : f.message); e.failure = f; return e; }
+/**
+ * Run a downloaded installer quietly and wait for it (install-run.js): programs that install for the whole PC go
+ * through the Windows permission prompt. Throws an installError with a plain message when it didn't work.
+ */
+async function runInstaller(file, args, name, { id, version, elevate = false } = {}) {
+  const r = await installRun.runInstaller({ file, args, elevate, spawn });
+  const f = installRun.installFailure(r, { name, args });
+  installLog({ id, version, file: path.basename(file), stage: f.ok ? 'ran' : 'failed', elevated: r.elevated, retried: r.retried, firstError: r.firstError,
+    code: r.code, startError: r.startError, reason: f.reason, ms: r.ms, detail: r.detail });
+  if (!f.ok) throw installError(f);
+  return r;
+}
+/** After the installer: is the program really on this PC? Looks a few times (the last registry writes can lag). */
+async function findAfterInstall(id) {
+  const p = PROGRAMS.find((x) => x.id === id);
+  for (let i = 0; i < 8; i++) {
+    if (p && locate(p)) return true;
+    const v = await installedVersions().catch(() => ({}));
+    if (id in v) return true;
+    await new Promise((ok) => setTimeout(ok, 1500));
+  }
+  return false;
 }
 
-/** Install a program that isn't on this PC yet, straight from the latest Riyeser release (no trip to the website). */
+/**
+ * Install a program that isn't on this PC yet, straight from the latest Riyeser release (no trip to the website).
+ * Tells the home screen each step (install-progress: downloading, checking, installing, verifying, installed, failed)
+ * and never just stops: a failure says what happened and how to fix it.
+ */
 async function installProgram(id) {
   const product = updates.PRODUCTS.find((x) => x.id === id && !x.self);
   if (!product) throw new Error('Unknown program');
-  if (process.platform !== 'win32') throw new Error('Programs install on Windows only.');
-  let r = await checkUpdates(false);
-  if (!r.latest || !r.latest.products[id]) r = await checkUpdates(true); // a newer release may have added it
-  const item = r.latest && r.latest.products[id];
-  if (!item) throw new Error(`${product.display} isn't in the latest release yet. Use “Download page” instead.`);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-install-'));
-  const file = path.join(dir, path.basename(new URL(item.url).pathname));
-  send('install-progress', { id, stage: 'downloading', pct: 0 });
-  await download(item.url, file, (pct) => send('install-progress', { id, stage: 'downloading', pct }));
-  await verifyDownload(file, item.name || path.basename(file), item.digest, r.latest);
-  send('install-progress', { id, stage: 'installing', pct: 1 });
-  await runInstaller(file, product.args, product.display);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp folder */ }
-  send('install-progress', { id, stage: 'done', pct: 1 });
-  programsReporter.soon();   // tell Riyeser it's installed now
-  return { id, version: item.version };
+  const progress = (x) => send('install-progress', { id, ...x });
+  let item = null; let dir = null;
+  try {
+    if (process.platform !== 'win32') throw installError({ reason: 'failed', message: 'Programs install on Windows only.' });
+    progress({ stage: 'downloading', pct: 0 });
+    let r = await checkUpdates(false);
+    if (!r.latest || !r.latest.products[id]) r = await checkUpdates(true); // a newer release may have added it
+    item = r.latest && r.latest.products[id];
+    if (!item) throw installError({ reason: 'not-in-release', message: `${product.display} isn't in the latest release yet.`, fix: 'Use “Download page” instead.' });
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-install-'));
+    const file = path.join(dir, path.basename(new URL(item.url).pathname));
+    installLog({ id, version: item.version, file: path.basename(file), stage: 'downloading', elevated: !!product.elevate });
+    try { await download(item.url, file, (pct) => progress({ stage: 'downloading', pct })); } catch (e) {
+      throw installError({ reason: 'download', message: `Couldn't download ${product.display}: ${e.message}`, fix: 'Check the internet connection and try again.' });
+    }
+    progress({ stage: 'checking' });
+    let how = null;
+    try { how = (await verifyDownload(file, item.name || path.basename(file), item.digest, r.latest)).how; } catch (e) {
+      // ENOENT/EPERM here: the antivirus took the file away (or locked it) as soon as it was saved
+      if (/ENOENT|EPERM|EBUSY/.test(String(e.code || e.message))) throw installError(installRun.installFailure({ startError: 'missing' }, { name: product.display }));
+      throw installError({ reason: 'check', message: e.message });
+    }
+    installLog({ id, version: item.version, stage: 'checked', how });
+    progress({ stage: 'installing', elevate: !!product.elevate });
+    await runInstaller(file, product.args, product.display, { id, version: item.version, elevate: !!product.elevate });
+    progress({ stage: 'verifying' });
+    const found = await findAfterInstall(id);
+    installLog({ id, version: item.version, stage: found ? 'installed' : 'failed', reason: found ? 'installed' : 'not-found', detected: found });
+    if (!found) throw installError(installRun.notFoundAfterInstall(product.display));
+    progress({ stage: 'installed', version: item.version });
+    programsReporter.soon();   // tell Riyeser it's installed now
+    return { id, version: item.version };
+  } catch (e) {
+    const f = e.failure || { reason: 'failed', message: e.message, fix: 'Try again. If it happens again, click Get help.' };
+    if (!e.failure) installLog({ id, version: item && item.version, stage: 'failed', reason: 'failed', detail: e.message });
+    progress({ stage: 'failed', reason: f.reason, message: f.message, fix: f.fix || '', code: f.code ?? null });
+    throw e;
+  } finally {
+    if (dir) { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp folder */ } }
+  }
 }
 
 async function installUpdates(ids) {
@@ -288,8 +343,8 @@ async function installUpdates(ids) {
       done.push(u.id);
       return { done, restarting: true };
     }
-    send('update-progress', { id: u.id, name: u.name, stage: 'installing', pct: 1 });
-    await runInstaller(file, u.args, u.name);
+    send('update-progress', { id: u.id, name: u.name, stage: 'installing', pct: 1, elevate: !!u.elevate });
+    await runInstaller(file, u.args, u.name, { id: u.id, version: u.to, elevate: !!u.elevate });
     done.push(u.id);
     programsReporter.soon();   // the new version, soon after it's installed
   }

@@ -230,37 +230,41 @@ jobs:
           New-Item -ItemType Directory -Force C:\riy\dl, C:\riy\out | Out-Null
           gh release download --repo raka1987/Riyeser --dir C:\riy\dl --pattern "Riyeser*-Setup.exe" --clobber
           Get-ChildItem C:\riy\dl | Format-Table Name, Length -AutoSize | Out-String | Write-Host
+          New-Item -ItemType Directory -Force C:\riy\app | Out-Null
           Copy-Item -Recurse src, scripts C:\riy\app\ -Force
           icacls C:\riy /grant "Everyone:(OI)(CI)F" /T /Q | Out-Null
-      - name: Standard user, the way Central 1.8.10 installs (reproduces the bug)
+      # The owner's PC: an administrator account with UAC on, so Central (like every normal program) runs with the
+      # limited "standard user" token until Windows asks for permission. runas /trustlevel:0x20000 starts the check with
+      # exactly that token here (this runner itself runs elevated, and allows elevation without a prompt).
+      - name: Limited token (UAC, like the owner's PC), the way Central 1.8.10 installs (reproduces the bug)
         shell: pwsh
         run: |
-          $pw = "Rq7!" + [guid]::NewGuid().ToString("N").Substring(0, 12)
-          net user riyuser $pw /add /y | Out-Null
-          "riyuser`n$pw" | Set-Content C:\riy\cred.txt
-          $node = (Get-Command node).Source
-          function As-User($mode, $only, $name) {
-            $cmd = "C:\riy\$name.cmd"
-            "@`"$node`" C:\riy\app\scripts\central-install-check.js --mode=$mode --dir=C:\riy\dl --out=C:\riy\out\$name.json $only > C:\riy\out\$name.log 2>&1" | Set-Content $cmd -Encoding ascii
-            schtasks /create /tn "riy-$name" /tr $cmd /sc once /st 23:59 /ru riyuser /rp $pw /rl LIMITED /f | Out-Null
-            schtasks /run /tn "riy-$name" | Out-Null
-            for ($i = 0; $i -lt 360 -and -not (Test-Path "C:\riy\out\$name.json"); $i++) { Start-Sleep -Seconds 5 }
+          function As-Limited($mode, $extra, $name, $minutes) {
+            $node = (Get-Command node).Source
+            "@`"$node`" C:\riy\app\scripts\central-install-check.js --mode=$mode --dir=C:\riy\dl --out=C:\riy\out\$name.json $extra > C:\riy\out\$name.log 2>&1" | Set-Content "C:\riy\$name.cmd" -Encoding ascii
+            runas /trustlevel:0x20000 "C:\riy\$name.cmd"
+            for ($i = 0; $i -lt ($minutes * 12) -and -not (Test-Path "C:\riy\out\$name.json"); $i++) { Start-Sleep -Seconds 5 }
             Get-Content "C:\riy\out\$name.log" -ErrorAction SilentlyContinue | Write-Host
-            if (-not (Test-Path "C:\riy\out\$name.json")) { schtasks /query /tn "riy-$name" /v /fo list | Write-Host; throw "The check didn't finish as riyuser" }
+            if (-not (Test-Path "C:\riy\out\$name.json")) { throw "The check didn't finish with the limited token" }
           }
-          As-User old "" "user-old"
-      - name: Standard user, with Central's new install (Link Office asks Windows for permission)
+          As-Limited old "" "limited-old" 25
+          $r = Get-Content C:\riy\out\limited-old.json -Raw | ConvertFrom-Json
+          Write-Host "Ran with administrator rights:" $r.admin
+          Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Link Office*" | ForEach-Object { Write-Host "Link Office got installed: $($_.DisplayName)" }
+      - name: Limited token, with Central's new install (Link Office through the Windows permission prompt)
         shell: pwsh
         run: |
-          $pw = (Get-Content C:\riy\cred.txt)[1]
           $node = (Get-Command node).Source
-          $name = "user-new"
+          $name = "limited-new"
           "@`"$node`" C:\riy\app\scripts\central-install-check.js --mode=new --dir=C:\riy\dl --out=C:\riy\out\$name.json --only=linkoffice > C:\riy\out\$name.log 2>&1" | Set-Content "C:\riy\$name.cmd" -Encoding ascii
-          schtasks /create /tn "riy-$name" /tr "C:\riy\$name.cmd" /sc once /st 23:59 /ru riyuser /rp $pw /rl LIMITED /f | Out-Null
-          schtasks /run /tn "riy-$name" | Out-Null
-          for ($i = 0; $i -lt 160 -and -not (Test-Path "C:\riy\out\$name.json"); $i++) { Start-Sleep -Seconds 5 }
+          runas /trustlevel:0x20000 "C:\riy\$name.cmd"
+          for ($i = 0; $i -lt 120 -and -not (Test-Path "C:\riy\out\$name.json"); $i++) { Start-Sleep -Seconds 5 }
           Get-Content "C:\riy\out\$name.log" -ErrorAction SilentlyContinue | Write-Host
-          if (-not (Test-Path "C:\riy\out\$name.json")) { Write-Warning "No answer within 13 minutes (nobody can answer a permission prompt on this runner)" }
+          if (-not (Test-Path "C:\riy\out\$name.json")) { throw "The check didn't finish with the limited token" }
+          $r = Get-Content C:\riy\out\$name.json -Raw | ConvertFrom-Json
+          $lo = $r.results | Where-Object id -eq linkoffice
+          if (-not ($lo.failure.ok -and $lo.detected -and $lo.elevated)) { throw "Link Office didn't install through the permission prompt: $($lo | ConvertTo-Json -Compress)" }
+          Write-Host "Link Office installed from the limited token through the permission prompt, listed in" $lo.where
       - name: Administrator, with Central's new install (every program)
         shell: pwsh
         run: |

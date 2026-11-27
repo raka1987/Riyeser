@@ -182,7 +182,7 @@ function renderCards() {
   }).join('') + want.map((p) => {
     const L = LOOK[p.id];
     return `<div class="pcard want"><span class="pi" style="color:${L.col}">${icon(L.ic, 30)}</span><b>${esc(L.nav || p.name)}</b><span class="ps">On your plan, not installed yet</span>
-      <div class="instrow" data-instrow="${esc(p.id)}">${installing === p.id ? instProgress() : `<button class="btn sm" data-install="${esc(p.id)}" title="Download and install it now">Install</button>`}</div></div>`;
+      <div class="instrow" data-instrow="${esc(p.id)}">${instRow(p.id, `<button class="btn sm" data-install="${esc(p.id)}" title="Download and install it now">Install</button>`)}</div></div>`;
   }).join('') + (missing ? `<button class="pcard add" data-view="apps"><span class="pi">${icon('plus', 30)}</span><b>Add a program</b><span class="ps">Install more Riyeser apps</span>${CHEV}</button>` : '');
 }
 function renderQuick() {
@@ -259,7 +259,7 @@ function renderApps() {
   const others = programs.filter((p) => p.status === 'missing' && !(p.id === 'accounting-basics' && has('accounting')))
     .map((p) => (p.id === 'accounting' && has('accounting-basics') ? { ...p, name: 'Upgrade to Accounting Plus' } : p));
   $('#apps').innerHTML = others.length ? others.map((p) => `<div class="panel appc">${logo(p, 44)}<div><b>${esc(p.name)}</b><p>${esc(p.desc)}</p>${(() => { const st = LUI.programStatus(p.id, lic); return st ? `<p class="lbl${st.alert ? ' bad' : ''}">${esc(st.text)}</p>` : ''; })()}
-      <div class="row instrow" data-instrow="${esc(p.id)}">${installing === p.id ? instProgress() : `<button class="btn" data-install="${esc(p.id)}" title="Download and install it now">Install</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-help="${esc(p.id)}">Learn more</button><button class="link" data-get="${esc(p.id)}" title="Its page on riyeser.com">Download page</button><button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`}</div></div></div>`).join('')
+      <div class="row instrow" data-instrow="${esc(p.id)}">${instRow(p.id, `<button class="btn" data-install="${esc(p.id)}" title="Download and install it now">Install</button>${p.online ? `<button class="btn s" data-open="${esc(p.id)}">Open online</button>` : ''}<button class="link" data-help="${esc(p.id)}">Learn more</button><button class="link" data-get="${esc(p.id)}" title="Its page on riyeser.com">Download page</button><button class="link" data-locate="${esc(p.id)}" title="Already installed somewhere else? Point me to it">Locate…</button>`)}</div></div></div>`).join('')
     : '<div class="lbl">You have every Riyeser program.</div>';
 }
 function setView(v) {
@@ -277,30 +277,64 @@ async function refresh() {
 
 // ---------- install a program from here (no trip to the website) ----------
 let installing = null;
-const instProgress = () => '<div style="flex:1;min-width:140px"><b class="instmsg" style="font-size:13px">Getting ready…</b><div class="prog"><i class="instbar"></i></div></div>';
+// Each install's last step (install-run.js in Central has the states): downloading -> checking -> installing (Windows may
+// ask for permission) -> verifying -> installed, or failed with what happened and how to fix it. A failure stays on the
+// tile (Try again, Get help, Download page) until it's tried again: never just back to a plain Install button.
+const instState = {};
+const STAGE_TEXT = {
+  downloading: (x) => `Downloading… ${Math.round((x.pct || 0) * 100)}%`,
+  checking: () => 'Checking the download…',
+  installing: (x) => (x.elevate ? 'Installing… Windows will ask for permission: choose Yes' : 'Installing…'),
+  verifying: () => 'Finishing…',
+  installed: () => 'Installed ✓',
+};
+const instText = (x) => (x && STAGE_TEXT[x.stage] ? STAGE_TEXT[x.stage](x) : 'Getting ready…');
+const instWidth = (x) => `${Math.round((x && x.stage === 'downloading' ? x.pct || 0 : x && x.stage !== 'idle' ? 1 : 0) * 100)}%`;
+const instProgress = (id) => { const x = instState[id];
+  return `<div style="flex:1;min-width:140px"><b class="instmsg" style="font-size:13px">${esc(instText(x))}</b><div class="prog"><i class="instbar" style="width:${instWidth(x)}"></i></div>${x && x.stage === 'installing' && x.elevate ? '<div class="lbl">It installs for everyone on this PC, so Windows checks first. The prompt may be behind this window: look on the taskbar.</div>' : ''}</div>`; };
+const instFailed = (id) => { const x = instState[id];
+  return `<div class="insterr" role="alert"><b>⚠ ${esc(x.message || 'Install failed.')}</b>${x.fix ? `<div class="lbl">${esc(x.fix)}</div>` : ''}
+    <div class="row"><button class="btn sm" data-install="${esc(id)}">Try again</button><button class="btn sm s" data-insthelp="${esc(id)}" title="Send Riyeser Support the details">Get help</button><button class="link" data-get="${esc(id)}">Download page</button></div></div>`; };
+/** The install area for a program: progress while it installs, the problem and its fix after a failure, else `buttons`. */
+const instRow = (id, buttons) => (installing === id ? instProgress(id) : instState[id] && instState[id].stage === 'failed' ? instFailed(id) : buttons);
+const drawInstRows = (id) => document.querySelectorAll(`[data-instrow="${id}"]`).forEach((row) => { row.innerHTML = instRow(id, row.innerHTML); });
+// Get help after a failed install: Report an issue, filled in, with Central's install log in the details.
+const SUPPORT_PRODUCT = { 'accounting-basics': 'accounting', accounting: 'accounting', team: 'link', services: 'other' };
+function installHelp(id) {
+  const x = instState[id] || {}; const p = programs.find((q) => q.id === id);
+  return reportIssue({ product: SUPPORT_PRODUCT[id] || id, what: `Installing ${p ? p.full : id} from Riyeser Central didn't work: ${x.message || ''}`.trim(),
+    error: x.code != null ? `code ${x.code}${x.reason ? ` (${x.reason})` : ''}` : x.reason || '' });
+}
 /** Install one program with its quiet installer. quiet: no toasts (the plan banner says how it went). true when installed. */
 async function installApp(id, { quiet = false, then = true } = {}) {
   if (installing) { if (!quiet) toast('One program is installing already. It won\'t be long.'); return false; }
   const p = programs.find((x) => x.id === id); installing = id;
-  document.querySelectorAll(`[data-instrow="${id}"]`).forEach((row) => { row.innerHTML = instProgress(); });
+  instState[id] = { stage: 'idle' };
+  document.querySelectorAll(`[data-instrow="${id}"]`).forEach((row) => { row.innerHTML = instProgress(id); });
   let ok = false;
   try {
     await bridge.call('central:install', id); ok = true;
     if (!quiet) toast(`${p ? p.full : 'The program'} is installed. It's on your home screen now.`);
-  } catch (e) { if (!quiet) toast(e.message); }
+  } catch (e) {
+    // the failed step normally arrives first (install-progress); this covers anything that didn't send one
+    if (!instState[id] || instState[id].stage !== 'failed') instState[id] = { stage: 'failed', message: e.message, reason: 'failed' };
+  }
   installing = null;
   if (then) await safe(refresh);
+  drawInstRows(id);   // the failure stays on the tile, wherever it's shown
   return ok;
 }
 bridge.on('install-progress', (x) => {
   if (x.id !== installing) return;
-  const text = x.stage === 'downloading' ? `Downloading… ${Math.round(x.pct * 100)}%` : x.stage === 'installing' ? 'Installing…' : 'Done';
-  const width = `${Math.round((x.stage === 'downloading' ? x.pct : 1) * 100)}%`;
+  instState[x.id] = { ...x };
+  const text = instText(x); const width = instWidth(x);
   document.querySelectorAll(`[data-instrow="${x.id}"]`).forEach((row) => {
+    if (x.stage === 'failed') { row.innerHTML = instFailed(x.id); return; }
+    if (x.stage === 'installing' && !row.querySelector('.lbl') && x.elevate) { row.innerHTML = instProgress(x.id); return; }
     const msg = row.querySelector('.instmsg'); const bar = row.querySelector('.instbar');
     if (msg) msg.textContent = text; if (bar) bar.style.width = width;
   });
-  if (planRun && planRun.id === x.id) { const bar = $('#planbar .instbar'); if (bar) bar.style.width = width; }
+  if (planRun && planRun.id === x.id) { const bar = $('#planbar .instbar'); if (bar) bar.style.width = width; const m = $('#planbar .lbl'); if (m && x.stage !== 'failed') m.textContent = text; }
 });
 
 // ---------- "Your plan includes Payroll and Bookings. [Install them]" (top of Get more apps) ----------
@@ -312,7 +346,7 @@ function renderPlanBar(failed) {
   if (planRun) return;   // drawn by installPlan while it runs
   if (failed && failed.length) {
     box.hidden = false;
-    box.innerHTML = `<span style="font-size:24px">⚠️</span><div class="grow"><b>Couldn't install ${esc(andList(failed))}.</b><div class="lbl">Check your internet and try again.</div></div><button class="go" data-cl="plan">Try again</button>`;
+    box.innerHTML = `<span style="font-size:24px">⚠️</span><div class="grow"><b>Couldn't install ${esc(andList(failed))}.</b><div class="lbl">${esc(failed.map((n) => { const p = programs.find((q) => q.name === n || q.full === n); const x = p && instState[p.id]; return x && x.message ? x.message : ''; }).filter(Boolean).join(' ') || 'Check your internet and try again.')}</div></div><button class="go" data-cl="plan">Try again</button>`;
     return;
   }
   box.hidden = !list.length;
@@ -326,12 +360,12 @@ async function installPlan() {
     planRun = { id: list[i].id, n: i + 1, of: list.length };
     box.hidden = false;
     box.innerHTML = `<span style="font-size:24px">⬇</span><div class="grow"><b>Installing ${esc(list[i].name)}… ${i + 1} of ${list.length}</b><div class="prog"><i class="instbar"></i></div><div class="lbl">You can keep using Central while it installs.</div></div>`;
-    if (!(await installApp(list[i].id, { quiet: true, then: false }))) failed.push(list[i].name);
+    if (!(await installApp(list[i].id, { quiet: true, then: false }))) failed.push(list[i].name);   // each tile keeps its reason
   }
   planRun = null;
   await safe(refresh);
   renderPlanBar(failed);
-  toast(failed.length ? `Couldn't install ${andList(failed)}. Check your internet and try again.` : `${andList(list.map((p) => p.name))} ${list.length === 1 ? 'is' : 'are'} installed.`);
+  toast(failed.length ? `Couldn't install ${andList(failed)}. The reason is on ${failed.length === 1 ? 'its tile' : 'their tiles'}.` : `${andList(list.map((p) => p.name))} ${list.length === 1 ? 'is' : 'are'} installed.`);
 }
 
 // ---------- "Getting started with Riyeser": a checklist that ticks itself from your real records ----------
@@ -344,7 +378,7 @@ function clAction(it) {
   if (a.kind === 'view') return `<button class="btn sm" data-view="${esc(a.view)}">${CL_BTN.company}</button>`;
   if (a.kind === 'team') return `<button class="btn sm" data-act="team">${CL_BTN.team}</button>`;
   if (a.kind === 'open') return `<button class="btn sm" data-open="${esc(a.id)}" data-page="${esc(a.page || '')}">Open ${esc(name)}</button>`;
-  if (a.kind === 'install') return `<span class="instrow" data-instrow="${esc(a.id)}">${installing === a.id ? instProgress() : `<button class="btn sm" data-install="${esc(a.id)}">Install ${esc(name || 'it')}</button>`}</span>`;
+  if (a.kind === 'install') return `<span class="instrow" data-instrow="${esc(a.id)}">${instRow(a.id, `<button class="btn sm" data-install="${esc(a.id)}">Install ${esc(name || 'it')}</button>`)}</span>`;
   return '';
 }
 function renderChecklist() {
@@ -529,7 +563,7 @@ async function checkForUpdates(force, quiet = true) {
 }
 bridge.on('update-progress', (p) => {
   const msg = $('#updmsg'); const bar = $('#updbar'); if (!msg) return;
-  msg.textContent = p.stage === 'downloading' ? `Downloading ${p.name}… ${Math.round(p.pct * 100)}%` : p.stage === 'installing' ? `Installing ${p.name}…` : `Restarting Riyeser Central…`;
+  msg.textContent = p.stage === 'downloading' ? `Downloading ${p.name}… ${Math.round(p.pct * 100)}%` : p.stage === 'installing' ? (p.elevate ? `Installing ${p.name}… Windows will ask for permission: choose Yes` : `Installing ${p.name}…`) : `Restarting Riyeser Central…`;
   bar.style.width = `${Math.round((p.stage === 'downloading' ? p.pct : 1) * 100)}%`;
 });
 $('#checkupd').addEventListener('click', () => checkForUpdates(true, false));
@@ -735,6 +769,8 @@ document.addEventListener('click', (e) => {
   if (get) { e.stopPropagation(); safe(() => bridge.call('central:get', get.dataset.get)); return; }
   const hb = e.target.closest('[data-help]');
   if (hb) { safe(() => bridge.call('central:help', hb.dataset.help)); return; }
+  const ih = e.target.closest('[data-insthelp]');
+  if (ih) { safe(() => installHelp(ih.dataset.insthelp)); return; }
   const ib = e.target.closest('[data-install]');
   if (ib) { installApp(ib.dataset.install); return; }
   const vw = e.target.closest('[data-view]');
