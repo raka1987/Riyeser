@@ -117,6 +117,21 @@
   const OFFER_KIND = { trial: 'Longer free trial', paid: 'Free time on a paid program', account: 'Whole account (all paid programs)' };
   const BSTAT = { active: ['Open', 'ok'], suspended: ['Suspended', 'warn'], closed: ['Closed', 'bad'] };
   const pill = (map, k, extra = '') => { const [l, c] = map[k] || [k, '']; return `<span class="pill${c ? ' ' + c : ''}">${esc(l)}${extra}</span>`; };
+  // Close as duplicate: what could make closing this account a mistake (the same list hq_dup_risks makes in the
+  // database, which checks it again). a = this account, k = the account being kept (optional).
+  function dupRisks(a, k) {
+    const r = []; const paid = (x) => Number(x.paid_invoices) > 0 || (x.paid_programs || []).length > 0; const n = Number(a.paid_invoices) || 0;
+    if (n > 0) r.push({ code: 'paid_invoices', text: `This account has ${n} paid invoice${n === 1 ? '' : 's'}.` });
+    if ((a.paid_programs || []).length) r.push({ code: 'paid_programs', text: 'This account is paying for programs right now.' });
+    if (a.last_activity && Date.now() - new Date(a.last_activity) < 14 * 864e5) r.push({ code: 'recent', text: 'Someone used this account in the last 14 days.' });
+    if (k) {
+      if ((a.owner_id || null) !== (k.owner_id || null)) r.push({ code: 'owner', text: 'The account you\'re keeping has a different owner.' });
+      if (paid(a) && !paid(k)) r.push({ code: 'backwards', text: 'This account has payments and the one you\'re keeping has none. You may be closing the wrong one.' });
+      if (Number(a.members) > Number(k.members) || Number(a.pcs) > Number(k.pcs)) r.push({ code: 'bigger', text: 'This account has more people or PCs than the one you\'re keeping.' });
+    }
+    return r;
+  }
+  const dupName = (t) => String(t || '').toLowerCase().replace(/\([^)]*\)/g, ' ').replace(/\b(pty|ltd|limited|inc|co|company|the|and|copy|new|test|old)\b|[0-9]+\s*$/g, ' ').replace(/[^a-z]/g, '');
   const creditText = (c) => Object.entries(c || {}).filter(([, v]) => Number(v)).map(([k, v]) => cur(v, k)).join(' + ');
 
   // ------------------------------------------------------------------ online
@@ -192,7 +207,9 @@
       reset2fa: (ws, person, how, reason, ticket) => rpc('hq_reset_2fa', { ws, person, identity_checked: how, ...fix(reason, ticket) }),
       changeOwner: (ws, person, reason, ticket) => rpc('hq_change_owner', { ws, new_owner: person, ...fix(reason, ticket) }),
       setBusinessStatus: (ws, st, reason, ticket) => rpc('hq_set_business_status', { ws, new_status: st, ...fix(reason, ticket) }),
-      closeDuplicate: (ws, dup, reason, ticket) => rpc('hq_close_duplicate', { ws, duplicate_of_ws: dup, ...fix(reason, ticket) }),
+      // Close as duplicate closes THIS account; the account kept (keep) is optional. The database re-checks everything.
+      dupCheck: (ws) => rpc('hq_dup_check', { ws }), dupSearch: (ws, q) => rpc('hq_dup_search', { ws, search: q }),
+      closeDuplicate: (ws, keep, reason, ticket, code, accept) => rpc('hq_close_duplicate', { ws, duplicate_of_ws: keep || null, ...fix(reason, ticket), confirm_code: code, accept_risks: !!accept }),
       // inactive accounts, emails
       inactive: () => rpc('hq_inactive_accounts'), removeAccounts: (ids, reason) => rpc('hq_remove_accounts', { ids, reason }),
       emails: () => rpc('hq_emails'), emailResend: (id) => rpc('hq_email_resend', { email_id: id }),
@@ -442,6 +459,15 @@
         next_follow_up: nextFu(c.id) ? nextFu(c.id).date : null }; }); }
     function nextFu(ws) { const n = (notes[ws] || []).map(noteRow).filter((x) => x.follow_up && !x.follow_up_done_at).sort((a, b) => a.follow_up.localeCompare(b.follow_up))[0];
       return n ? { id: n.id, date: n.follow_up, body: n.body.slice(0, 200), by: n.by, kind: n.kind } : null; }
+    function dupCard(c) { const L = demoLicence(c.id); const pays = bPays.filter((x) => x.workspace_id === c.id && x.status === 'completed');
+      const pp = Object.entries(L.modules).filter(([, v]) => (v.status === 'active' || v.status === 'cancelled') && v.active).map(([m]) => m);
+      if (c.calls_paid_until && new Date(c.calls_paid_until) > Date.now() && !pp.includes('calls')) pp.push('calls');
+      return { id: c.id, name: c.name, company_code: c.company_code, status: c.status, kind: c.kind, created_at: c.created_at, removal_state: c.removal_state || null, duplicate_of: c.duplicate_of || null,
+        owner_id: c.owner_email || null, owner_name: c.owner_name, owner_email: c.owner_email, members: c.people, pcs: c.pcs, paid_invoices: pays.length,
+        paid_total: pays.reduce((a, x) => a + Number(x.amount || 0), 0), paid_programs: pp, trial_programs: Object.values(L.modules).filter((v) => v.status === 'trial').length,
+        last_activity: [c.last_active_at, c.last_seen].filter(Boolean).sort().pop() || null }; }
+    const keepProblem = (ws, k) => (!k ? 'That business doesn\'t exist.' : k.id === ws ? 'That\'s this account. Choose the other one.' : k.removal_state ? 'That account\'s details were removed.'
+      : k.status === 'closed' ? 'That account is closed. Keep an open one.' : k.duplicate_of === ws ? 'That account is linked as a duplicate of this one.' : null);
     const rowOf = (f) => ({ ...f, decided_by_name: nameOf(f.decided_by) || f.decided_by_name, second_approver_name: nameOf(f.second_approver), waiting_second: !!(f.needs_second && !f.second_approver && ['approved', 'partly_approved'].includes(f.status)) });
     return {
       async session() { return { user: { email: 'riki@riyeser.test' } }; }, async signIn() {}, async signOut() { location.href = '/hq/'; },
@@ -628,11 +654,33 @@
       async changeOwner(ws, person, reason, ticket) { need('people.change_owner'); reasonOk(reason); const tr = ticketOk(ticket); const c = cos.find((x) => x.id === ws);
         c.people_list.forEach((p) => { if (p.role === 'owner') { p.role = 'admin'; p.job_role = 'manager'; } if (p.user_id === person) { p.role = 'owner'; p.job_role = 'owner'; c.owner_name = p.name; c.owner_email = p.email; } });
         log('people.change_owner', { workspace_id: ws, ticket: tr, reason }); },
-      async setBusinessStatus(ws, st, reason, ticket) { need('business.close'); reasonOk(reason); const tr = ticketOk(ticket); const c = cos.find((x) => x.id === ws); const was = c.status;
+      async setBusinessStatus(ws, st, reason, ticket) { need('business.close'); reasonOk(reason); const tr = ticketOk(ticket); const c = cos.find((x) => x.id === ws); const was = c.status; const wasDup = c.duplicate_of || null;
         Object.assign(c, { status: st, closed_at: st === 'active' ? null : now(), closed_reason: st === 'active' ? null : reason, duplicate_of: st === 'active' ? null : c.duplicate_of, last_active_at: st === 'active' ? now() : c.last_active_at });
         queue(c.owner_email, st === 'active' ? `${c.name} is open again on Riyeser` : `${c.name} has been ${st} on Riyeser`, st === 'active' ? 'business_reopened' : 'business_closed');
-        log(st === 'active' ? 'business.reopened' : st === 'suspended' ? 'business.suspended' : 'business.closed', { workspace_id: ws, ticket: tr, reason, was }); },
-      async closeDuplicate(ws, dup, reason, ticket) { await this.setBusinessStatus(ws, 'closed', reason, ticket); Object.assign(cos.find((x) => x.id === ws), { duplicate_of: dup, closed_reason: 'Duplicate: ' + reason }); log('business.duplicate', { workspace_id: ws, duplicate_of: dup }); },
+        log(st === 'active' ? 'business.reopened' : st === 'suspended' ? 'business.suspended' : 'business.closed', { workspace_id: ws, ticket: tr, reason, was, ...(st === 'active' && wasDup ? { was_duplicate_of: wasDup } : {}) }); },
+      async dupCheck(ws) { need('business.close'); const c = cos.find((x) => x.id === ws); if (!c) throw new Error('That business doesn\'t exist.');
+        const dig = (x) => String(x || '').replace(/\D/g, ''); const tax = (x) => String(x || '').replace(/[^A-Za-z0-9]/g, '').toLowerCase();
+        const nk = dupName(c.name); const ph = dig(c.owner_phone || c.phone);
+        const matches = cos.filter((o) => o.id !== ws && o.status !== 'closed' && !o.removal_state).map((o) => { const on = dupName(o.name);
+          const why = [o.owner_email && c.owner_email && o.owner_email.toLowerCase() === c.owner_email.toLowerCase() && 'Same owner email',
+            ph.length >= 6 && dig(o.owner_phone || o.phone) === ph && 'Same phone', tax(c.tax_number) && tax(o.tax_number) === tax(c.tax_number) && 'Same tax number',
+            nk.length >= 3 && (on === nk || (nk.length >= 5 && on.length >= 5 && (on.startsWith(nk) || nk.startsWith(on)))) && 'Similar name'].filter(Boolean);
+          const gap = Math.abs(new Date(o.created_at) - new Date(c.created_at)) / 864e5;
+          return { o, gap, why: why.length && gap < 14 ? [...why, gap < 1 ? 'Signed up the same day' : `Signed up ${Math.ceil(gap)} days apart`] : why, n: why.length }; })
+          .filter((x) => x.n).sort((x, y) => y.n - x.n || x.gap - y.gap).slice(0, 6).map((x) => ({ ...dupCard(x.o), why: x.why }));
+        return { this: dupCard(c), risks: dupRisks(dupCard(c)), matches }; },
+      async dupSearch(ws, q) { need('business.close'); q = String(q || '').trim().toLowerCase(); if (q.length < 2) return [];
+        return cos.filter((c) => c.id !== ws && [c.name, c.company_code, c.owner_email, c.tax_number].some((x) => String(x || '').toLowerCase().includes(q)))
+          .sort((x, y) => (x.status === 'closed') - (y.status === 'closed')).slice(0, 8).map((c) => ({ ...dupCard(c), problem: keepProblem(ws, c) })); },
+      async closeDuplicate(ws, keep, reason, ticket, code, accept) { need('business.close'); const c = cos.find((x) => x.id === ws); if (!c) throw new Error('That business doesn\'t exist.');
+        if (c.status === 'closed') throw new Error('This account is already closed.');
+        if (String(code || '').trim().toUpperCase() !== c.company_code.toUpperCase()) throw new Error(`Type this account's Company ID (${c.company_code}) to confirm.`);
+        const k = keep ? cos.find((x) => x.id === keep) : null; if (keep) { const pr = keepProblem(ws, k); if (pr) throw new Error(pr); }
+        const risks = dupRisks(dupCard(c), k && dupCard(k)); if (risks.length && !accept) throw new Error('Check the warnings first: ' + risks.map((x) => x.text).join(' '));
+        const before = { status: c.status, closed_reason: c.closed_reason || null, duplicate_of: c.duplicate_of || null };
+        await this.setBusinessStatus(ws, 'closed', reason, ticket); Object.assign(c, { duplicate_of: keep || null, closed_reason: 'Duplicate: ' + reason });
+        log('business.duplicate', { workspace_id: ws, duplicate_of: keep || null, ticket: ticket ? ticket.toUpperCase() : null, reason, before, after: { status: c.status, closed_reason: c.closed_reason, duplicate_of: c.duplicate_of }, risks_accepted: risks.map((x) => x.code), data_deleted: false });
+        return { closed: ws, duplicate_of: keep || null }; },
       // inactive accounts
       async inactive() { const a = cos.filter((c) => c.status === 'active' && hours(c.last_active_at) / 24 > 365 - 60 && demoMonthly(c.id) === 0);
         return { approaching: a.map((c) => ({ ...c, closes_at: new Date(new Date(c.last_active_at).getTime() + 365 * 864e5).toISOString() })),
@@ -1957,13 +2005,81 @@
         catch (err) { d.querySelector('#anerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
     });
   }
+  // 🔁 Close as duplicate. It closes THIS account (the one open on screen) and never asks which account to close.
+  // Nothing is moved or deleted, and ✅ Reopen undoes it. Linking it to the account being kept is optional: likely
+  // matches are offered (same owner email, phone, tax number, similar name), others only by searching; none is
+  // picked for you. Its Company ID must be typed, and every warning (payments, paid programs, recent use, a kept
+  // account with another owner or nothing paid) must be ticked. The database checks all of it again.
+  async function dupForm(id, done) {
+    let r; try { r = await api.dupCheck(id); } catch (e) {
+      if (!missing(e)) { flash(plain(e)); return; }
+      dlg(`<h3>🔁 Close as duplicate</h3><p class="muted small">This needs the latest <b>team-chat.sql</b>. Run it in Supabase (SQL Editor), then try again. Until then, use ⛔ Close or suspend.</p>
+        <div class="mfoot"><button type="button" class="btn" data-close>Close</button></div>`, () => {}); return; }
+    const a = r.this; const known = {}; let keep = null;
+    const progs = (x) => { const pp = [...new Set(x.paid_programs || [])]; return pp.length ? pp.map(modName).join(', ') : x.trial_programs ? 'Free trial' : 'Nothing paid'; };
+    const facts = (x) => `<dl class="dupkv"><dt>Company ID</dt><dd><span class="code">${esc(x.company_code || '')}</span></dd>
+      <dt>Owner</dt><dd>${x.owner_name ? `${esc(x.owner_name)}${x.owner_email ? ` <small>${esc(x.owner_email)}</small>` : ''}` : '<span class="muted">No owner</span>'}</dd>
+      <dt>Signed up</dt><dd>${day(x.created_at)}</dd><dt>Plan</dt><dd>${esc(progs(x))}</dd>
+      <dt>Paid invoices</dt><dd>${num(x.paid_invoices)}${Number(x.paid_invoices) ? ` · ${money(x.paid_total)}` : ''}</dd>
+      <dt>People · PCs</dt><dd>${num(x.members)} · ${num(x.pcs)}</dd><dt>Last activity</dt><dd>${x.last_activity ? ago(x.last_activity) : 'never'}</dd></dl>`;
+    const row = (x, why) => { known[x.id] = x; const bad = x.problem;
+      return `<label class="dupm${bad ? ' off' : ''}"><input type="radio" name="keep" value="${esc(x.id)}"${bad ? ' disabled' : ''}>
+        <span class="dupmb"><b>${esc(x.name)}</b> <span class="code">${esc(x.company_code || '')}</span>${x.status !== 'active' ? ` ${pill(BSTAT, x.status)}` : ''}
+          <small>${esc(x.owner_name || 'No owner')}${x.owner_email ? ` · ${esc(x.owner_email)}` : ''} · signed up ${day(x.created_at)} · ${esc(progs(x))}${Number(x.paid_invoices) ? ` · ${num(x.paid_invoices)} paid invoice${Number(x.paid_invoices) === 1 ? '' : 's'}` : ''}</small>
+          ${why && why.length ? `<span class="why">${why.map((w) => `<i>${esc(w)}</i>`).join('')}</span>` : ''}${bad ? `<small class="no">${esc(bad)}</small>` : ''}</span></label>`; };
+    const m = r.matches || [];
+    dlg(`<h3>🔁 Close this account as a duplicate</h3>
+      <p class="muted small">This closes <b>this account only</b>. Nothing is deleted or moved: its people, programs, invoices and history stay, and <b>✅ Reopen</b> undoes it. The owner is emailed.</p>
+      <form id="dupf" autocomplete="off">
+      <section class="dupthis" aria-label="The account being closed"><div class="duptag">Closing</div><h4>${esc(a.name)}</h4>${facts(a)}</section>
+      <fieldset class="dupkeep"><legend>Link to the account we're keeping <small>(optional)</small></legend>
+        <label class="dupm none"><input type="radio" name="keep" value="" checked><span class="dupmb"><b>Don't link it</b><small>Just close this account.</small></span></label>
+        ${m.length ? `<p class="duph">Possible matches</p><div id="dupMatches">${m.map((x) => row(x, x.why)).join('')}</div>` : '<p class="muted small" id="dupMatches">No likely matches (same owner email, phone, tax number or a similar name).</p>'}
+        <details class="dupfind" id="dupFind"><summary>Not listed? Search</summary>
+          <div class="search"><input type="search" id="dupQ" placeholder="Name, Company ID or email" aria-label="Search for the account to keep" enterkeyhint="search"><button type="button" class="btn sm" id="dupGo">Search</button></div>
+          <div id="dupRes"></div></details>
+      </fieldset>
+      <div id="dupRisks" aria-live="polite"></div>
+      <label class="f"><span>Reason <small class="muted">(required: it goes in the HQ history for good, so no personal details)</small></span><input name="reason" required minlength="4" maxlength="300"></label>
+      <label class="f"><span>Ticket number <small class="muted">(optional)</small></span><input name="ticket" placeholder="T-10234" maxlength="20"></label>
+      <label class="f"><span>To confirm, type this account's Company ID: <span class="code">${esc(a.company_code || '')}</span></span><input name="code" id="dupCode" required autocapitalize="characters" spellcheck="false" placeholder="${esc(a.company_code || '')}"></label>
+      <div id="fxerr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p bad" id="dupGoBtn" disabled>Close ${esc(a.company_code || 'this account')}</button></div></form>`, (d, close) => {
+      const f = d.querySelector('#dupf'); const btn = d.querySelector('#dupGoBtn'); let risks = [];
+      const sync = () => { const ok = String(f.code.value).trim().toUpperCase() === String(a.company_code || '').toUpperCase();
+        const acc = f.accept; btn.disabled = !ok || (risks.length > 0 && !(acc && acc.checked)); };
+      const showRisks = () => { const was = f.accept && f.accept.checked; risks = dupRisks(a, keep);
+        d.querySelector('#dupRisks').innerHTML = (keep ? `<p class="dupsel">Keeping <b>${esc(keep.name)}</b> <span class="code">${esc(keep.company_code || '')}</span></p>` : '')
+          + (risks.length ? `<div class="dupwarn"><b>⚠️ Check before closing</b><ul>${risks.map((x) => `<li${['backwards', 'owner'].includes(x.code) ? ' class="hi"' : ''}>${esc(x.text)}</li>`).join('')}</ul>
+            <label class="opt"><input type="checkbox" name="accept"${was ? ' checked' : ''}> I've checked these, and this is the account to close</label></div>` : '');
+        if (f.accept) f.accept.onchange = sync; sync(); };
+      f.addEventListener('change', (e) => { if (e.target.name === 'keep') { keep = e.target.value ? known[e.target.value] : null; showRisks(); } });
+      f.code.oninput = sync;
+      const find = async () => { const q = String(d.querySelector('#dupQ').value).trim(); const out = d.querySelector('#dupRes');
+        if (q.length < 2) { out.innerHTML = '<p class="muted small">Type at least 2 characters.</p>'; return; }
+        try { const rs = await api.dupSearch(id, q); out.innerHTML = rs.length ? rs.map((x) => row(x, null)).join('') : '<p class="muted small">Nothing found.</p>';
+          if (keep && !rs.some((x) => x.id === keep.id) && !m.some((x) => x.id === keep.id)) { keep = null; f.querySelector('input[name=keep][value=""]').checked = true; showRisks(); }
+        } catch (err) { out.innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+      d.querySelector('#dupGo').onclick = find; d.querySelector('#dupQ').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); find(); } };
+      showRisks();
+      f.onsubmit = async (e) => { e.preventDefault(); const fd = new FormData(f);
+        try { await api.closeDuplicate(id, keep ? keep.id : null, String(fd.get('reason')).trim(), String(fd.get('ticket') || '').trim(), String(fd.get('code')).trim(), !!fd.get('accept'));
+          close(); await done(); flash(`${a.name} is closed${keep ? ` and linked to ${keep.name}` : ''}. Reopen undoes it.`);
+        } catch (err) { d.querySelector('#fxerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } };
+    });
+  }
   // The fix-up tools (edit details, owner, close, duplicate, reopen, free period, two-step reset, make owner).
   function wireFixes(root) {
     const c = S.cp; const p = c.profile; const id = p.id || S.cpId; const L = c.licence; const reopen = () => reloadCompany();
     const inp = (name, label, val = '', extra = '') => `<label class="f"><span>${label}</span><input name="${name}" value="${esc(val || '')}" ${extra}></label>`;
-    const ownerForm = (person) => fixForm('👑 Change owner', 'The new owner gets every admin power. The old owner becomes an admin.',
-      `<label class="f"><span>New owner</span><select name="person">${c.people.filter((x) => x.role !== 'owner').map((x) => `<option value="${esc(x.user_id)}"${x.user_id === person ? ' selected' : ''}>${esc(x.name)} (${esc(x.email || '')})</option>`).join('')}</select></label>`,
-      async (f, reason, ticket) => { await api.changeOwner(id, String(f.get('person')), reason, ticket); await reopen(); flash('Owner changed.'); }, 'Make them the owner');
+    // Change owner: someone already in THIS business. Nobody is picked for you (unless you pressed Make owner on
+    // their row), and the form shows who the owner is now and who it will be before anything changes.
+    const ownerForm = (person) => { const cur = c.people.find((x) => x.role === 'owner'); const ppl = c.people.filter((x) => x.role !== 'owner');
+      const who = (x) => (x ? `<b>${esc(x.name)}</b>${x.email ? ` <small class="muted">${esc(x.email)}</small>` : ''}` : '<span class="muted">nobody yet</span>');
+      fixForm('👑 Change owner', 'The new owner gets every admin power. The old owner becomes an admin. Only people already in this business can be chosen.',
+        `<label class="f"><span>New owner</span><select name="person" id="ownSel" required><option value=""${person ? '' : ' selected'} disabled>Choose the new owner…</option>${ppl.map((x) => `<option value="${esc(x.user_id)}"${x.user_id === person ? ' selected' : ''}>${esc(x.name)} (${esc(x.email || '')})</option>`).join('')}</select></label>
+        <div class="ownchg" id="ownChg"><div><small class="lbl">Owner now</small>${who(cur)}</div><span aria-hidden="true">→</span><div><small class="lbl">New owner</small><span id="ownNew">${who(ppl.find((x) => x.user_id === person))}</span></div></div>`,
+        async (f, reason, ticket) => { if (!f.get('person')) throw new Error('Choose the new owner.'); await api.changeOwner(id, String(f.get('person')), reason, ticket); await reopen(); flash('Owner changed.'); }, 'Make them the owner');
+      const sel = document.querySelector('#ownSel'); if (sel) sel.onchange = () => { document.querySelector('#ownNew').innerHTML = who(ppl.find((x) => x.user_id === sel.value)); }; };
     const fixes = {
       edit: () => fixForm('✏️ Edit business details', 'Only change what the customer asked for. The customer\'s own change history will show "Riyeser".',
         `<div class="grid g2">${inp('name', 'Name', p.name, 'required maxlength="80"')}${inp('tax_number', 'ABN / TIN / Tax ID', p.tax_number, 'maxlength="40"')}${inp('phone', 'Phone', p.phone, 'maxlength="40"')}
@@ -1974,12 +2090,9 @@
       close: () => fixForm('⛔ Close or suspend', 'Nothing is deleted. Its people can\'t open it, and its programs\' online licence reads as not active. The books on their PCs are never touched. The owner is emailed.',
         '<label class="f"><span>Make it</span><select name="st"><option value="closed">Closed</option><option value="suspended">Suspended (for now)</option></select></label>',
         async (f, reason, ticket) => { await api.setBusinessStatus(id, String(f.get('st')), reason, ticket); await reopen(); }, 'Close it'),
-      reopen: () => fixForm('✅ Reopen', 'Its people can use it again straight away. The owner is emailed.', '',
+      reopen: () => fixForm('✅ Reopen', `Its people can use it again straight away. The owner is emailed.${p.duplicate_of ? ` The link to <b>${esc(p.duplicate_of_name || 'the other business')}</b> (closed as a duplicate) is removed.` : ''}`, '',
         async (f, reason, ticket) => { await api.setBusinessStatus(id, 'active', reason, ticket); await reopen(); }, 'Reopen'),
-      dup: async () => { const all = (await api.companies('', 'active')).filter((x) => x.id !== id);
-        fixForm('🔁 Close as duplicate', 'For a business that was signed up twice. It\'s closed (never deleted) and links to the one to keep.',
-          `<label class="f"><span>It duplicates</span><select name="dup">${all.map((x) => `<option value="${esc(x.id)}">${esc(x.name)} · ${esc(x.company_code || '')}</option>`).join('')}</select></label>`,
-          async (f, reason, ticket) => { await api.closeDuplicate(id, String(f.get('dup')), reason, ticket); await reopen(); }, 'Close as duplicate'); },
+      dup: () => dupForm(id, reopen),
       offer: async () => { const lim = S.limitDays || 31;
         dlg(`<h3>🎁 Give a free period</h3><p class="muted small">Up to <b>${lim} days</b> applies straight away. Longer waits for a supervisor (someone else with offers.approve). The customer is emailed when it applies; they never see the reason.</p>
           <form id="of"><label class="f"><span>What</span><select name="kind">${Object.entries(OFFER_KIND).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>

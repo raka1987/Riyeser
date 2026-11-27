@@ -30,8 +30,13 @@
   `team-chat.sql` yet (the new parts hide, nothing breaks). Phone widths too.
 - `rules-test.sql` also covers Riyeser HQ phase 1: support tickets (customers see only their own, never internal notes),
   escalations (by hand and by the 48-hour sweep), staff permissions, the locked HQ history, fix-up tools (2FA reset,
-  change owner, close/reopen, duplicates), inactive accounts (warnings, closing, never paid businesses, owner-approved
+  change owner, close/reopen, duplicates: `hq_close_duplicate` closes only the account given, never deletes, re-checks the
+  typed Company ID, the optional account kept (exists, not itself, not closed), the permission and two-step sign-in, needs
+  the warnings accepted, writes the before/after, and Reopen removes the link; `hq_dup_check` suggests likely matches), inactive accounts (warnings, closing, never paid businesses, owner-approved
   removal), refunds (two-person rule) and free periods (supervisor approval).
+- HQ: `../../hq/test-hq-dup.js` (🔁 Close as duplicate: nothing linked to start with, likely matches with why, search never
+  offers itself or a closed one, this account's facts, typing its Company ID, the warnings incl. "you may be closing the wrong
+  one", Reopen removes the link; 👑 Change owner starts empty; iPhone width).
 - HQ: `../../hq/test-hq.js` (every tab in demo mode) and `../../hq/test-hq-ops.js` (Support, fix-ups, refunds with a
   second approver, free periods and Approvals, permissions, Inactive accounts, Emails, History filters and CSV, phone
   widths, and the "run the latest team-chat.sql" message on an older database).
