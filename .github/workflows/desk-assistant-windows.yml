@@ -251,19 +251,32 @@ jobs:
           $r = Get-Content C:\riy\out\limited-old.json -Raw | ConvertFrom-Json
           Write-Host "Ran with administrator rights:" $r.admin
           Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Link Office*" | ForEach-Object { Write-Host "Link Office got installed: $($_.DisplayName)" }
-      - name: Limited token, with Central's new install (Link Office through the Windows permission prompt)
+      - name: Link Office in detail (what its installer does after it returns)
         shell: pwsh
         run: |
-          $node = (Get-Command node).Source
-          $name = "limited-new"
-          "@`"$node`" C:\riy\app\scripts\central-install-check.js --mode=new --dir=C:\riy\dl --out=C:\riy\out\$name.json --only=linkoffice > C:\riy\out\$name.log 2>&1" | Set-Content "C:\riy\$name.cmd" -Encoding ascii
-          runas /trustlevel:0x20000 "C:\riy\$name.cmd"
-          for ($i = 0; $i -lt 120 -and -not (Test-Path "C:\riy\out\$name.json"); $i++) { Start-Sleep -Seconds 5 }
-          Get-Content "C:\riy\out\$name.log" -ErrorAction SilentlyContinue | Write-Host
-          if (-not (Test-Path "C:\riy\out\$name.json")) { throw "The check didn't finish with the limited token" }
-          $r = Get-Content C:\riy\out\$name.json -Raw | ConvertFrom-Json
+          function Remove-LinkOffice {
+            $e = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue | Where-Object DisplayName -like "Riyeser Link Office*"
+            if ($e) { Write-Host "Uninstalling" $e.DisplayName; Start-Process cmd.exe -ArgumentList "/c $($e.QuietUninstallString)" -Wait; Start-Sleep -Seconds 5 }
+          }
+          function As-Limited($mode, $name) {
+            $node = (Get-Command node).Source
+            "@`"$node`" C:\riy\app\scripts\central-install-check.js --mode=$mode --only=linkoffice --wait=150 --dir=C:\riy\dl --out=C:\riy\out\$name.json > C:\riy\out\$name.log 2>&1" | Set-Content "C:\riy\$name.cmd" -Encoding ascii
+            runas /trustlevel:0x20000 "C:\riy\$name.cmd"
+            for ($i = 0; $i -lt 100 -and -not (Test-Path "C:\riy\out\$name.json"); $i++) { Start-Sleep -Seconds 5 }
+            Get-Content "C:\riy\out\$name.log" -ErrorAction SilentlyContinue | Write-Host
+          }
+          Remove-LinkOffice
+          Write-Host "--- limited token, started directly (Central 1.8.10)"
+          As-Limited old "lo-limited-old"
+          Remove-LinkOffice
+          Write-Host "--- administrator, started directly (Central 1.8.10)"
+          node scripts/central-install-check.js --mode=old --only=linkoffice --wait=150 --dir=C:\riy\dl --out=C:\riy\out\lo-admin-old.json
+          Remove-LinkOffice
+          Write-Host "--- limited token, through the permission prompt (new)"
+          As-Limited new "lo-limited-new"
+          $r = Get-Content C:\riy\out\lo-limited-new.json -Raw | ConvertFrom-Json
           $lo = $r.results | Where-Object id -eq linkoffice
-          if (-not ($lo.failure.ok -and $lo.detected -and $lo.elevated)) { throw "Link Office didn't install through the permission prompt: $($lo | ConvertTo-Json -Compress)" }
+          if (-not ($lo.failure.ok -and $lo.detected -and $lo.elevated)) { throw "Link Office didn't install through the permission prompt: $($lo | ConvertTo-Json -Compress -Depth 4)" }
           Write-Host "Link Office installed from the limited token through the permission prompt, listed in" $lo.where
       - name: Administrator, with Central's new install (every program)
         shell: pwsh

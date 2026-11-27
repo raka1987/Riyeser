@@ -16,6 +16,7 @@ const arg = (k, d = null) => { const a = process.argv.find((x) => x.startsWith(`
 const mode = arg('mode', 'new');
 const only = arg('only') ? arg('only').split(',') : null;
 const outFile = arg('out', path.join(os.tmpdir(), `central-install-${mode}.json`));
+const waitS = Number(arg('wait', '10'));   // how long to keep looking for the program after the installer returns
 const dir = arg('dir') || fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-install-check-'));
 
 const gh = (url, accept = 'application/vnd.github+json') => fetch(url, { headers: { 'User-Agent': 'Riyeser-Central-check', Accept: accept,
@@ -63,7 +64,18 @@ async function download(url, file) {
       row.failure = run.installFailure(r, { name: p.display, args: p.args });
       // Give the installer's last registry writes a moment, then read Windows' installed-apps list like Central.
       let reg = registry();
-      for (let i = 0; i < 10 && !(p.id in reg.central) && row.failure.ok; i++) { await new Promise((ok) => setTimeout(ok, 1000)); reg = registry(); }
+      const t0 = Date.now(); row.trace = [];
+      const snap = () => {
+        let procs = '';
+        try { procs = execFileSync('tasklist', ['/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/).filter((l) => /riyeser|setup|un_|nsis|au_/i.test(l)).map((l) => l.split('","')[0].replace(/^"/, '')).join(' '); } catch { /* none */ }
+        const pf = ['ProgramW6432', 'ProgramFiles', 'LOCALAPPDATA'].map((k) => process.env[k]).filter(Boolean)
+          .flatMap((root) => fs.existsSync(root) ? fs.readdirSync(root === process.env.LOCALAPPDATA ? path.join(root, 'Programs') : root).filter((d) => /riyeser/i.test(d)).map((d) => d) : []);
+        row.trace.push({ s: Math.round((Date.now() - t0) / 1000), listed: p.id in reg.central, procs, folders: [...new Set(pf)].join('|') });
+      };
+      snap();
+      for (let i = 0; i < waitS && !(p.id in reg.central) && row.failure.ok; i++) { await new Promise((ok) => setTimeout(ok, 1000)); reg = registry(); if (i % 10 === 9) snap(); }
+      snap();
+      if (waitS > 10) for (const t of row.trace) console.log(`  ${p.id} +${t.s}s listed=${t.listed} processes=[${t.procs}] folders=[${t.folders}]`);
       row.after = reg.central[p.id] ?? null;
       row.where = p.id in reg.user ? 'HKCU' : p.id in reg.machine ? 'HKLM' : p.id in reg.wow ? 'HKLM-WOW6432Node' : null;
       row.detected = p.id in reg.central;
