@@ -3238,6 +3238,13 @@ alter table public.link_office_phones add column if not exists name text check (
 alter table public.link_office_phones add column if not exists location text check (length(location) <= 60);
 alter table public.link_office_phones add column if not exists note text check (length(note) <= 60);
 alter table public.link_office_phones add column if not exists provisioned_at timestamptz;
+-- This PC's address (Link Office 1.2.0): the names phones and apps can use for the office PC (riyeser-office.local,
+-- answered by the PC itself; the router's own name for it, when it checks out), which one desk phones are given, and
+-- the last few address changes ({from, to, at}), so the Phones page can say "the PC's address changed".
+alter table public.link_offices add column if not exists mdns_name text check (length(mdns_name) <= 80);
+alter table public.link_offices add column if not exists router_name text check (length(router_name) <= 253);
+alter table public.link_offices add column if not exists phone_server text check (length(phone_server) <= 253);
+alter table public.link_offices add column if not exists address_changes jsonb not null default '[]';
 alter table public.link_office_commands drop constraint if exists link_office_commands_kind_check;
 alter table public.link_office_commands add constraint link_office_commands_kind_check
   check (kind in ('assign_phone', 'unassign_phone', 'add_phone', 'new_password', 'set_dnd', 'reveal_password', 'name_phone'));
@@ -3309,6 +3316,7 @@ create or replace function public.link_office_json(o link_offices) returns json
   language sql stable security definer set search_path = public as $$
   select json_build_object('office_id', o.office_id, 'pc_name', o.pc_name, 'version', o.version, 'state', o.state, 'addresses', o.addresses,
     'sip_port', o.sip_port, 'address_stable', o.address_stable, 'pc_mac', o.pc_mac, 'licence', o.licence, 'counts', o.counts,
+    'mdns_name', o.mdns_name, 'router_name', o.router_name, 'phone_server', o.phone_server, 'address_changes', o.address_changes,
     'extensions', o.extensions, 'first_seen', o.first_seen, 'last_seen', o.last_seen,
     'phones', (select coalesce(json_agg(json_build_object('mac', p.mac, 'vendor', p.vendor, 'model', p.model, 'extension', p.extension,
         'assigned', p.assigned, 'registered', p.registered, 'last_registered', p.last_registered, 'ip', p.ip,
@@ -3330,7 +3338,8 @@ begin
   if the_office is null or the_office !~ '^[A-Za-z0-9-]{8,64}$' then raise exception 'That isn''t a Riyeser Link Office id.'; end if;
   if length(p::text) > 300000 then raise exception 'That report is too big.'; end if;
   perform link_sweep();
-  insert into link_offices (workspace_id, office_id, pc_name, version, state, addresses, sip_port, address_stable, pc_mac, licence, counts, extensions, reported_by, last_seen)
+  insert into link_offices (workspace_id, office_id, pc_name, version, state, addresses, sip_port, address_stable, pc_mac, licence, counts, extensions, reported_by, last_seen,
+    mdns_name, router_name, phone_server, address_changes)
   values (ws, the_office, link_text(p -> 'pc_name', 80), link_text(p -> 'version', 40), link_text(p -> 'state', 40),
     array(select a from jsonb_array_elements_text(case when jsonb_typeof(p -> 'addresses') = 'array' then p -> 'addresses' else '[]' end) with ordinality x(a, i)
           where a ~ '^\d{1,3}(\.\d{1,3}){3}$' order by i limit 8),
@@ -3351,10 +3360,18 @@ begin
         'members', link_int(e -> 'members')) order by e ->> 'extension')
       from (select e from jsonb_array_elements(case when jsonb_typeof(p -> 'extensions') = 'array' then p -> 'extensions' else '[]' end) e
             where jsonb_typeof(e) = 'object' and e ->> 'extension' ~ '^[0-9]{2,4}$' limit 1000) x), '[]'::jsonb),
-    auth.uid(), now())
+    auth.uid(), now(),
+    -- names: letters, digits, dots and dashes only; the address changes: up to 5, each an IPv4 from and to and a time
+    case when link_text(p -> 'mdns_name', 80) ~ '^[A-Za-z0-9.-]+\.local$' then lower(link_text(p -> 'mdns_name', 80)) end,
+    case when link_text(p -> 'router_name', 253) ~ '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$' then lower(link_text(p -> 'router_name', 253)) end,
+    case when link_text(p -> 'phone_server', 253) ~ '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$' then lower(link_text(p -> 'phone_server', 253)) end,
+    coalesce((select jsonb_agg(jsonb_build_object('from', c ->> 'from', 'to', c ->> 'to', 'at', link_time(c -> 'at')) order by i)
+      from jsonb_array_elements(case when jsonb_typeof(p -> 'address_changes') = 'array' then p -> 'address_changes' else '[]' end) with ordinality x(c, i)
+      where jsonb_typeof(c) = 'object' and c ->> 'from' ~ '^\d{1,3}(\.\d{1,3}){3}$' and c ->> 'to' ~ '^\d{1,3}(\.\d{1,3}){3}$' and i <= 5), '[]'::jsonb))
   on conflict (workspace_id, office_id) do update set pc_name = excluded.pc_name, version = excluded.version, state = excluded.state,
     addresses = excluded.addresses, sip_port = excluded.sip_port, address_stable = excluded.address_stable, pc_mac = excluded.pc_mac,
-    licence = excluded.licence, counts = excluded.counts, extensions = excluded.extensions, reported_by = excluded.reported_by, last_seen = now();
+    licence = excluded.licence, counts = excluded.counts, extensions = excluded.extensions, reported_by = excluded.reported_by, last_seen = now(),
+    mdns_name = excluded.mdns_name, router_name = excluded.router_name, phone_server = excluded.phone_server, address_changes = excluded.address_changes;
   -- the phones list is a copy of what the office has now (the office keeps the real list)
   delete from link_office_phones where workspace_id = ws and office_id = the_office;
   insert into link_office_phones (workspace_id, office_id, mac, vendor, model, extension, assigned, registered, last_registered, ip, name, location, note, provisioned_at)
@@ -3594,6 +3611,7 @@ begin
     'first_group', grp,
     'office', case when o.office_id is null then null else json_build_object('office_id', o.office_id, 'pc_name', o.pc_name, 'state', o.state,
       'address', o.addresses[1], 'sip_port', coalesce(o.sip_port, 5060), 'last_seen', o.last_seen,
+      'phone_server', coalesce(o.phone_server, o.addresses[1]), 'mdns_name', o.mdns_name, 'router_name', o.router_name,
       'online', o.last_seen > now() - interval '12 minutes', 'licence', o.licence) end,
     'dnd', (select coalesce((e ->> 'dnd')::boolean, false) from jsonb_array_elements(coalesce(o.extensions, '[]'::jsonb)) e
             where e ->> 'extension' = ext and e ->> 'type' = 'person' limit 1),

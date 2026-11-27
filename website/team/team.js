@@ -3428,14 +3428,23 @@
     else {
       const [stText, stCls, stWhy] = officeState(o, now);
       const addr = (o.addresses || [])[0] || '';
+      // Link Office 1.2.0: the names the PC answers to, what desk phones are given, and its last address change
+      const named = o.phone_server && o.phone_server !== addr ? o.phone_server : '';
+      const moved = (o.address_changes || [])[0];
+      const movedNew = moved && moved.at && now - Date.parse(moved.at) < 7 * 86400000 && moved.to === addr ? moved : null;
+      const shortTo = (a, b) => { const x = String(a).split('.'); const y = String(b).split('.'); return x.length === 4 && y.length === 4 && x.slice(0, 3).join('.') === y.slice(0, 3).join('.') ? `.${y[3]}` : b; };
       const support = st.support && new Date(st.support.until) > Date.now() ? st.support : null;
       body = `${setupHtml(setupSteps(offices, now))}
       ${offices.length > 1 ? `<label class="lo-pick">Riyeser Link Office on <select id="lopick">${offices.map((x) => `<option value="${esc(x.office_id)}"${x === o ? ' selected' : ''}>${esc(x.pc_name || 'a PC')} · seen ${ago(x.last_seen)}</option>`).join('')}</select></label>` : ''}
       <section class="lo-card lo-top">
         <div class="lo-addr"><small>Server address to type into phones</small>
           <div class="lo-big"><code id="loaddr">${esc(addr || '—')}</code><span>port <b id="loport">${esc(o.sip_port || 5060)}</b></span><button class="btn sm" id="locopy">Copy</button></div>
+          ${named ? `<p class="lo-name" id="loname">Desk phones are given the name <code>${esc(named)}</code>, which follows the PC when its address changes.</p>` : ''}
+          ${o.mdns_name || o.router_name ? `<p class="muted small" id="lonames">The PC also answers to ${[o.mdns_name, o.router_name].filter(Boolean).map((n) => `<code>${esc(n)}</code>`).join(' and ')} on the office network (for computers and apps that look up names).</p>` : ''}
           <p class="muted small">Username: the person's extension. Password: <b>Set up a phone by hand</b> next to them. Yealink, Grandstream, Snom and Polycom desk phones set themselves up once you give them to someone.</p>
-          ${o.address_stable === false ? `<div class="lo-warn"><b>⚠️ This address isn't stable.</b> The office router has given the Riyeser Link Office PC a new address several times this month, so phones may lose touch. In the router's settings, add a <b>DHCP reservation</b> (also called a "static lease") so it always gives this PC ${esc(addr)}${o.pc_mac ? ` — the PC's MAC address is <code>${esc(o.pc_mac)}</code>` : ''}. Your IT person or internet provider can do this in a few minutes.</div>` : ''}
+          ${movedNew ? `<div class="lo-moved" id="lomoved" role="status"><b>ℹ️ The office PC's address changed from ${esc(moved.from)} to ${esc(shortTo(moved.from, moved.to))} — phones updated</b> (${esc(ago(moved.at))}). Riyeser Link Office moved by itself and asked the desk phones it set up to pick up the new address. Phones or apps typed in by hand need <code>${esc(named || addr)}</code> typed in.</div>` : ''}
+          ${o.address_stable === false ? `<div class="lo-warn"><b>⚠️ This address isn't stable.</b> The office router has given the Riyeser Link Office PC a new address several times this month, so phones may lose touch. In the router's settings, add a <b>DHCP reservation</b> (also called a "static lease") so it always gives this PC ${esc(addr)}${o.pc_mac ? ` — the PC's MAC address is <code>${esc(o.pc_mac)}</code>` : ''}. Your IT person or internet provider can do this in a few minutes. <a href="/help/link.html#stable-address">How to reserve it, router by router</a></div>`
+            : movedNew ? `<p class="muted small">To stop it changing, reserve the PC's address in your router${o.pc_mac ? ` (MAC address <code>${esc(o.pc_mac)}</code>)` : ''}: <a href="/help/link.html#stable-address">how to, router by router</a>.</p>` : ''}
         </div>
         <dl class="lo-kv"><dt>Riyeser Link Office</dt><dd><span class="pl ${stCls}" id="lostate">${esc(stText)}</span>${stWhy ? `<small>${esc(stWhy)}</small>` : ''}</dd>
           <dt>Last seen</dt><dd id="loseen">${ago(o.last_seen)}</dd><dt>PC</dt><dd>${esc(o.pc_name || '—')}</dd><dt>Version</dt><dd>${esc(o.version || '—')}</dd>
@@ -3509,7 +3518,7 @@
   // Set up a phone by hand: the details to type into any SIP phone or app. The password only on Show.
   function byHand(ext) {
     const o = S.lo.office; const x = o.extensions.find((e) => e.extension === ext) || { name: '' };
-    const addr = (o.addresses || [])[0] || ''; let pw = null; let busyShow = false;
+    const addr = o.phone_server || (o.addresses || [])[0] || ''; let pw = null; let busyShow = false;
     modal(`<h3>Set up a phone by hand <small class="lo-h3s">Advanced setup (manual SIP)</small></h3><p><b>${esc(ext)}</b> · ${esc(x.name)}. Type these into the phone's SIP account settings, or into a SIP app such as Linphone or Zoiper.</p>
       <dl class="lo-sip"><dt>Server address</dt><dd><code>${esc(addr)}</code><button class="btn sm" data-cp="${esc(addr)}">Copy</button></dd>
         <dt>Port</dt><dd><code>${esc(o.sip_port || 5060)}</code></dd>

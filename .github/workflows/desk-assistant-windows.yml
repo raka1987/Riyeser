@@ -9,12 +9,12 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "all, windows (build and check the installers) or central-install (installs every program from the latest release the way Central does)"
+        description: "all, windows (build and check the installers), central-install (installs every program from the latest release the way Central does) or link-ip (Link Office follows a new address on a real adapter)"
         default: all
 
 jobs:
   windows:
-    if: github.event_name != 'workflow_dispatch' || inputs.job != 'central-install'
+    if: github.event_name != 'workflow_dispatch' || inputs.job == 'all' || inputs.job == 'windows'
     runs-on: windows-latest
     defaults:
       run:
@@ -206,7 +206,7 @@ jobs:
   # 2) the same user with Central's new install-run.js (Link Office through the Windows permission prompt)
   # 3) as an administrator with install-run.js: every program installs and Central finds it
   central-install:
-    if: github.event_name != 'workflow_dispatch' || inputs.job != 'windows'
+    if: github.event_name != 'workflow_dispatch' || inputs.job == 'all' || inputs.job == 'central-install'
     runs-on: windows-latest
     defaults:
       run:
@@ -327,3 +327,24 @@ jobs:
         with:
           name: central-install-reports
           path: C:\riy\out\
+
+  # 3) Riyeser Link Office 1.2.0 on a real network adapter: a test address is added, then swapped for another (like a
+  #    router giving the PC a new address); Link Office must follow it by itself, move SIP, the desk phones' settings and
+  #    riyeser-office.local, ask the phone to restart, and tell the website. Only when asked (job: link-ip, or all).
+  link-ip:
+    if: github.event_name == 'workflow_dispatch' && (inputs.job == 'link-ip' || inputs.job == 'all')
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Link Office follows a new address
+        run: node scripts/link-ip-check.js "$env:RUNNER_TEMP\link-ip.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: link-ip
+          path: ${{ runner.temp }}/link-ip.json

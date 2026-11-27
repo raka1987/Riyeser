@@ -21,34 +21,56 @@ function inCidr(ip, cidr) {
 const PRIVATE = ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', '127.0.0.0/8'];
 const isPrivate = (ip) => PRIVATE.some((c) => inCidr(ip, c));
 
-// Adapters that aren't the office network (virtual machines, VPNs, WSL, Docker).
-const VIRTUAL = /vethernet|virtualbox|vmware|hyper-v|wsl|docker|loopback|tailscale|zerotier|vpn|tap-|tun|bluetooth|npcap/i;
+// Adapters that aren't the office network: virtual machines (Hyper-V, VirtualBox, VMware), WSL, Docker, VPNs and
+// tunnels, Bluetooth and capture drivers. Matched on the adapter's name and, on Windows, its description.
+const VIRTUAL = /vethernet|virtualbox|vboxnet|vmware|vmnet|hyper-v|wsl|docker|br-[0-9a-f]|virbr|veth|loopback|tailscale|zerotier|wireguard|nordlynx|openvpn|vpn|anyconnect|globalprotect|pangp|fortinet|forticlient|hamachi|radmin|tap-|\btap\d|\btun|utun|ppp|teredo|isatap|6to4|bluetooth|npcap|pseudo/i;
+const isVirtualName = (name, description = '') => VIRTUAL.test(String(name || '')) || VIRTUAL.test(String(description || ''));
 
-/** This PC's IPv4 addresses on real adapters: [{ name, address, netmask, cidr }], the most likely office one first. */
-function localAddresses(ifaces = os.networkInterfaces()) {
+/**
+ * This PC's IPv4 addresses on its adapters: [{ name, address, netmask, cidr, mac, virtual }], the most likely office one
+ * first. Loopback and link-local (169.254, "no DHCP answer") addresses are left out; so are public and CGNAT (100.64/10,
+ * e.g. Tailscale) addresses, which aren't an office network. hints: { describe: { name: description } } from Windows.
+ */
+function localAddresses(ifaces = os.networkInterfaces(), hints = {}) {
   const out = [];
+  const describe = hints.describe || {};
   for (const [name, list] of Object.entries(ifaces || {})) {
     for (const a of list || []) {
       if (a.internal || (a.family !== 'IPv4' && a.family !== 4)) continue;
-      if (!isPrivate(a.address) || a.address.startsWith('169.254.')) continue;
-      out.push({ name, address: a.address, netmask: a.netmask, cidr: a.cidr || null, mac: a.mac && a.mac !== '00:00:00:00:00:00' ? a.mac.toUpperCase() : '', virtual: VIRTUAL.test(name) });
+      if (!isPrivate(a.address) || a.address.startsWith('169.254.') || a.address.startsWith('127.')) continue;
+      out.push({ name, address: a.address, netmask: a.netmask, cidr: a.cidr || null, mac: a.mac && a.mac !== '00:00:00:00:00:00' ? a.mac.toUpperCase() : '', virtual: isVirtualName(name, describe[name]) });
     }
   }
-  const rank = (a) => (a.virtual ? 10 : 0) + (a.address.startsWith('192.168.') ? 0 : a.address.startsWith('10.') ? 1 : 2);
-  return out.sort((a, b) => rank(a) - rank(b));
+  const gw = new Set(hints.gateways || []);
+  // real adapters first; then the one with the router (default gateway); then 192.168 > 10 > 172.16 (Docker/WSL live there)
+  const rank = (a) => (a.virtual ? 100 : 0) + (gw.size && !gw.has(a.address) ? 10 : 0) + (a.address.startsWith('192.168.') ? 0 : a.address.startsWith('10.') ? 1 : 2);
+  return out.map((a, i) => ({ a, i })).sort((x, y) => rank(x.a) - rank(y.a) || x.i - y.i).map((x) => x.a);
 }
 /** The address phones should use to reach this PC, or 127.0.0.1 when there's no network. */
-const primaryAddress = (ifaces) => (localAddresses(ifaces)[0] || {}).address || '127.0.0.1';
+const primaryAddress = (ifaces, hints) => pickAdapter(ifaces, '', hints).address;
 /**
- * The adapter phones should use: the one the owner chose in settings (by adapter name, so it survives a new address),
- * else the most likely office one. -> { name, address, mac, chosen } (address 127.0.0.1 when there's no network)
+ * The adapter phones should use. In order:
+ *  1. the one the owner chose in settings (by adapter name, so it survives a new address), even a virtual one;
+ *  2. the address in use now, if it's still on this PC (a second address appearing, or a VPN connecting, doesn't move
+ *     the phones);
+ *  3. the adapter in use now (same name), with its new address;
+ *  4. the most likely office adapter (real, with the router, 192.168 first).
+ * Virtual adapters (Hyper-V, WSL, VPNs…) are never picked by themselves, unless one is the only way to the router.
+ * hints: { last: { name, address }, gateways: [address], describe: { name: description } }
+ * -> { name, address, mac, netmask, chosen } (address 127.0.0.1 when there's no office network)
  */
-function pickAdapter(ifaces, preferredName) {
-  const list = localAddresses(ifaces);
+function pickAdapter(ifaces, preferredName, hints = {}) {
+  const list = localAddresses(ifaces, hints);
+  const real = list.filter((a) => !a.virtual);
+  const last = hints.last || {};
   const chosen = preferredName && list.find((a) => a.name === preferredName);
-  const a = chosen || list[0];
-  return a ? { name: a.name, address: a.address, mac: a.mac, netmask: a.netmask, chosen: !!chosen } : { name: '', address: '127.0.0.1', mac: '', chosen: false };
+  const a = chosen || (last.address && real.find((x) => x.address === last.address)) || (last.name && real.find((x) => x.name === last.name)) || real[0]
+    // a Hyper-V "external" switch moves the real network card's address onto a vEthernet adapter: use it if it has the router
+    || list.find((x) => (hints.gateways || []).includes(x.address));
+  return a ? { name: a.name, address: a.address, mac: a.mac, netmask: a.netmask, chosen: !!chosen } : { name: '', address: '127.0.0.1', mac: '', netmask: '', chosen: false };
 }
+/** A short fingerprint of this PC's addresses, to notice when anything changes. */
+const addressSignature = (ifaces) => Object.entries(ifaces || {}).flatMap(([n, l]) => (l || []).filter((a) => !a.internal && (a.family === 'IPv4' || a.family === 4)).map((a) => `${n}=${a.address}/${a.netmask}`)).sort().join(',');
 
 /** Is this address on the same subnet as one of this PC's adapters? */
 function sameSubnet(ip, ifaces) {
@@ -60,4 +82,4 @@ function sameSubnet(ip, ifaces) {
   });
 }
 
-module.exports = { isPrivate, inCidr, localAddresses, primaryAddress, pickAdapter, sameSubnet, PRIVATE, v4 };
+module.exports = { isPrivate, inCidr, localAddresses, primaryAddress, pickAdapter, sameSubnet, addressSignature, isVirtualName, toInt, PRIVATE, v4 };

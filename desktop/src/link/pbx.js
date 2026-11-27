@@ -61,6 +61,9 @@ class Pbx extends EventEmitter {
     this.accepting = true; this.running = false;
     this.stats = { received: 0, malformed: 0, blockedDrops: 0 };
     this.warned = new Set();
+    this.oldHosts = [];          // this PC's earlier addresses (after a change): still "us" for calls set up before it
+    this.names = [];             // names phones may use for this PC (riyeser-office.local, the router's name for it)
+    this.pnpJoined = new Set();
   }
 
   log(level, text) { try { this.logFn(level, text); } catch { /* logging never stops calls */ } }
@@ -75,11 +78,7 @@ class Pbx extends EventEmitter {
     this.port = this.udp.address().port;
     if (this.multicast) {
       // Desk-phone plug-and-play: phones ask on 224.0.1.75:5060 when they start up.
-      const { localAddresses } = require('./netinfo');
-      let joined = false;
-      for (const a of localAddresses(this.ifaces)) { try { this.udp.addMembership(PNP_GROUP, a.address); joined = true; } catch { /* that adapter can't */ } }
-      if (!joined) { try { this.udp.addMembership(PNP_GROUP); joined = true; } catch { /* no multicast */ } }
-      if (!joined) this.log('warn', 'Plug-and-play for desk phones is unavailable on this network. Phones can still be set up by MAC address or by hand.');
+      if (!this.joinPnp()) this.log('warn', 'Plug-and-play for desk phones is unavailable on this network. Phones can still be set up by MAC address or by hand.');
     }
     if (this.useTcp) {
       this.tcp = net.createServer((sock) => this.onTcp(sock));
@@ -103,6 +102,46 @@ class Pbx extends EventEmitter {
     if (this.tcp) await new Promise((r) => this.tcp.close(() => r()));
     if (this.udp) await new Promise((r) => { try { this.udp.close(() => r()); } catch { r(); } });
     this.tcp = null; this.udp = null;
+  }
+  /** Listen for plug-and-play on every office adapter; after an address change, on the new ones. -> joined any? */
+  joinPnp() {
+    if (!this.udp || !this.multicast) return false;
+    const { localAddresses } = require('./netinfo');
+    const ifaces = typeof this.ifaces === 'function' ? this.ifaces() : this.ifaces;
+    const now = new Set(localAddresses(ifaces).map((a) => a.address));
+    for (const a of this.pnpJoined) if (a !== '*' && !now.has(a)) { try { this.udp.dropMembership(PNP_GROUP, a); } catch { /* already gone with the address */ } this.pnpJoined.delete(a); }
+    for (const a of now) if (!this.pnpJoined.has(a)) { try { this.udp.addMembership(PNP_GROUP, a); this.pnpJoined.add(a); } catch { /* that adapter can't */ } }
+    if (!this.pnpJoined.size) { try { this.udp.addMembership(PNP_GROUP); this.pnpJoined.add('*'); } catch { /* no multicast */ } }
+    try { if (this.host !== '127.0.0.1') this.udp.setMulticastInterface(this.host); } catch { /* the default one */ }
+    return this.pnpJoined.size > 0;
+  }
+  /**
+   * This PC's address changed. The sockets listen on every adapter (0.0.0.0), so they keep working: only what we
+   * write into messages (Via, Record-Route, Contact, plug-and-play answers) moves to the new address, and plug-and-play
+   * listens on the new adapter. Registrations are kept; the old address still counts as us for calls already set up.
+   */
+  setHost(host, ifaces) {
+    if (!host || host === this.host) return false;
+    const was = this.host;
+    if (ifaces !== undefined) this.ifaces = ifaces;
+    this.oldHosts = [was, ...this.oldHosts.filter((h) => h !== host && h !== was)].slice(0, 4);
+    this.host = host;
+    this.joinPnp();
+    this.warned.clear();
+    this.log('info', `Riyeser Link Office now answers on ${host}:${this.port} (was ${was}).`);
+    this.emit('change');
+    return true;
+  }
+  /** Names phones may be given for this PC instead of its address (they count as "us" in Route and Request-URIs). */
+  setNames(names) { this.names = [...new Set((names || []).filter(Boolean).map((n) => String(n).toLowerCase()))]; }
+  isOurHost(h) { return h === this.host || h === '127.0.0.1' || h === 'localhost' || this.oldHosts.includes(h) || this.names.includes(String(h || '').toLowerCase()) || (this.extraHosts || []).includes(h); }
+  /** Software on this PC (the Riyeser Link app) may still put this PC's old address in its messages: use the new one. */
+  fixLocal(msg, src) {
+    if (!this.oldHosts.length || src.proto === 'TRUNK') return 0;
+    if (!(src.address === this.host || src.address.startsWith('127.') || this.oldHosts.includes(src.address))) return 0;
+    let n = 0;
+    for (const old of this.oldHosts) n += sip.rewriteHost(msg, old, this.host);
+    return n;
   }
   /** Licence lapsed (false): calls in progress finish; new phones and new calls are refused. 'idle' fires when the last call ends. */
   setAccepting(on) {
@@ -172,7 +211,7 @@ class Pbx extends EventEmitter {
       this.logOnce(`malformed:${src.address}`, 'warn', `Ignored a message that isn't proper SIP from ${src.address}.`);
       return;
     }
-    try { if (msg.method) this.onRequest(msg, src); else this.onResponse(msg, src); }
+    try { this.fixLocal(msg, src); if (msg.method) this.onRequest(msg, src); else this.onResponse(msg, src); }
     catch (e) { this.log('error', `Couldn't handle a ${msg.method || msg.status} from ${src.address}: ${e.message}`); }
   }
   fail(ip, why) {
@@ -201,7 +240,7 @@ class Pbx extends EventEmitter {
   isUs(uri) {
     if (!uri || !uri.host) return false;
     const port = uri.port || 5060;
-    return port === this.port && (uri.host === this.host || uri.host === '127.0.0.1' || uri.host === 'localhost' || (this.extraHosts || []).includes(uri.host));
+    return port === this.port && this.isOurHost(uri.host);
   }
   /** Where to send a request for this URI: a registered phone's real address when the URI is its contact. */
   uriDest(u) {
@@ -477,7 +516,7 @@ class Pbx extends EventEmitter {
     const b = this.branches.get(via.params.branch);
     if (!b) {
       // A resent 200 OK after the call was set up: pass it on toward the caller.
-      if (res.status >= 200 && res.status < 300 && cseq.method === 'INVITE' && via.host === this.host && (via.port || 5060) === this.port && sip.getAll(res, 'via').length > 1) {
+      if (res.status >= 200 && res.status < 300 && cseq.method === 'INVITE' && this.isOurHost(via.host) && (via.port || 5060) === this.port && sip.getAll(res, 'via').length > 1) {
         sip.removeFirst(res, 'via');
         const next = sip.parseVia(sip.getHeader(res, 'via'));
         this.sendMsg(res, { proto: next.transport === 'TCP' ? 'TCP' : 'UDP', address: next.params.received || next.host, port: next.params.rport ? Number(next.params.rport) : (next.port || 5060) });
@@ -659,11 +698,15 @@ class Pbx extends EventEmitter {
     this.sendMsg(notify, { proto: src.proto, address: src.address, port: src.port });
   }
 
-  /** Ask a phone to fetch its settings again (SIP NOTIFY check-sync). Best effort: not every phone allows it. */
-  checkSync(address, port = 5060) {
+  /**
+   * Ask a phone to fetch its settings again (SIP NOTIFY check-sync). Best effort: not every phone allows it.
+   * event: the maker's own wording (see provision.js resyncEvent): 'check-sync;reboot=false' by default, or with
+   * reboot=true after this PC's address changed (a restart makes the phone ask plug-and-play for the new address).
+   */
+  checkSync(address, port = 5060, event = 'check-sync;reboot=false') {
     const n = { method: 'NOTIFY', uri: `sip:${address}:${port}`, headers: [], body: Buffer.alloc(0) };
     n.headers.push(['via', this.ourVia('UDP', sip.newBranch())], ['max-forwards', '70'], ['from', `<sip:${this.host}:${this.port}>;tag=${sip.newTag()}`],
-      ['to', `<sip:${address}:${port}>`], ['call-id', sip.newCallId(this.host)], ['cseq', '1 NOTIFY'], ['event', 'check-sync;reboot=false'],
+      ['to', `<sip:${address}:${port}>`], ['call-id', sip.newCallId(this.host)], ['cseq', '1 NOTIFY'], ['event', String(event || 'check-sync;reboot=false').replace(/[\r\n]/g, '')],
       ['subscription-state', 'terminated'], ['user-agent', AGENT]);
     this.sendMsg(n, { proto: 'UDP', address, port });
   }
@@ -685,9 +728,9 @@ class Pbx extends EventEmitter {
   snapshot() {
     const now = Date.now();
     const regs = [];
-    for (const map of this.bindings.values()) for (const b of map.values()) if (b.expiresAt > now) regs.push({ ext: b.ext, ip: b.ip, device: b.device, userAgent: b.userAgent, since: new Date(b.registeredAt).toISOString(), proto: b.source.proto });
+    for (const map of this.bindings.values()) for (const b of map.values()) if (b.expiresAt > now) regs.push({ ext: b.ext, ip: b.ip, device: b.device, userAgent: b.userAgent, since: new Date(b.registeredAt).toISOString(), proto: b.source.proto, port: b.source.port });
     const calls = this.callsInProgress().map((c) => ({ from: c.from, fromName: c.fromName, to: c.to, toName: c.toName, answeredBy: c.answeredBy, state: c.answeredAt ? 'talking' : 'ringing', start: c.start, answeredAt: c.answeredAt }));
-    return { running: this.running, accepting: this.accepting, host: this.host, port: this.port, tcp: !!this.tcp, registrations: regs, calls,
+    return { running: this.running, accepting: this.accepting, host: this.host, oldHosts: [...this.oldHosts], port: this.port, tcp: !!this.tcp, registrations: regs, calls,
       blocked: [...this.blocked.entries()].filter(([, u]) => u > now).map(([ip, until]) => ({ ip, until: new Date(until).toISOString() })), stats: { ...this.stats } };
   }
 }

@@ -1498,6 +1498,17 @@ do $$ begin
   assert (select coalesce(string_agg(to_jsonb(p)::text, ''), '') from public.link_office_phones p) not like '%NotStored%', 'nothing extra kept from a phone';
   assert (select counts ->> 'calls_in_progress' from public.link_offices) = '1', 'calls in progress: a count only';
 end $$;
+-- Link Office 1.2.0: the PC's names and its last address changes (each checked; anything else dropped)
+select pg_temp.as_user_password_only('c0c0c0c0-0000-4000-8000-000000000003'); set role authenticated;
+do $$ declare ws uuid := current_setting('test.ws_l')::uuid; o json; begin
+  perform public.link_office_report(ws, 'office-0001-abcd', '{"pc_name":"OFFICE-PC","version":"1.2.0","addresses":["192.168.1.20"],"sip_port":5060,"address_stable":false,"mdns_name":"Riyeser-Office.local","router_name":"office-pc.lan","phone_server":"-bad name; drop","address_changes":[{"from":"192.168.1.9","to":"192.168.1.20","at":"2026-11-27T01:00:00Z","source":"os","extra":"x"},{"from":"nope","to":"192.168.1.20"},{"from":"192.168.1.8","to":"192.168.1.9","at":"2026-11-20T01:00:00Z"}],"phones":[{"mac":"001565aabbcc","extension":"101","assigned":true,"registered":true,"ip":"192.168.1.31"},{"mac":"000b82112233","vendor":"grandstream","assigned":false}],"extensions":[{"extension":"101","name":"Pat","registered":1}],"counts":{"people":3,"calls_in_progress":1}}');
+  o := (public.link_status(ws) -> 'offices') -> 0;
+  assert o ->> 'mdns_name' = 'riyeser-office.local' and o ->> 'router_name' = 'office-pc.lan', format('names kept: %s', o);
+  assert o ->> 'phone_server' is null, 'a bad phone server name is dropped';
+  assert json_array_length(o -> 'address_changes') = 2 and (o -> 'address_changes' -> 0 ->> 'from') = '192.168.1.9'
+    and (o -> 'address_changes' -> 0) ->> 'source' is null, format('address changes: real ones only, listed fields only: %s', o -> 'address_changes');
+end $$;
+reset role;
 -- someone who isn't in the business can't report or read; a member without an admin role or linked PC can't report
 select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000004'); set role authenticated;
 do $$ begin

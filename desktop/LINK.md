@@ -139,7 +139,7 @@ So even the database, its backups, Riyeser staff and anyone watching the network
 Riyeser Link Office's installer adds **one** inbound Windows Firewall rule, named "Riyeser Link Office". The rule:
 
 - covers this program only (`Riyeser Link Office.exe`);
-- opens UDP 5060, and TCP 5060 and 5080;
+- opens UDP 5060 and 5353 (riyeser-office.local, from 1.2.0), and TCP 5060 and 5080;
 - accepts only office (private) addresses: 10/8, 172.16/12, 192.168/16 and 169.254/16;
 - applies to every network profile. Windows often calls an office network "Public", and phones would be blocked if the rule only covered "Private".
 
@@ -159,14 +159,76 @@ Set sleep to **Never** when plugged in, and don't use a laptop with its lid clos
 
 ### A stable address
 
-Phones keep this PC's network address. If the router gives the PC a new address, Riyeser Link Office notices (at start-up, and every minute while running). It then:
+Phones keep this PC's network address. See *When the PC's address changes (1.2.0)* below for what happens when the router gives it a new one. The short version: Riyeser Link Office follows it by itself within seconds, but the best fix is a **DHCP reservation** in the router.
 
-- moves to the new address;
-- sends settings with the new address;
-- asks each desk phone to fetch them again;
-- shows a yellow notice with "Show me how" steps and the PC's MAC address for a **DHCP reservation** / **Static lease** in the router.
+## When the PC's address changes (1.2.0)
 
-Three changes in 30 days mark the address as not stable. If the PC has several network adapters, Riyeser Link Office picks the office one, skipping virtual adapters such as Hyper-V, WSL, VPNs and Docker. The owner can choose another under **Advanced**.
+The router hands out addresses (DHCP) and can give the PC a new one, for example after the router restarts, the PC moves between Wi-Fi and a cable, or it joins another network. Before 1.2.0 the address was checked once a minute and the phone system restarted on the new one. Desk phones were asked to fetch their settings again, but from the *old* address, so they usually stayed lost until someone restarted them.
+
+**Noticing (`src/link/netwatch.js`).** The adapters are polled every 5 seconds (`os.networkInterfaces()`). On Windows a small PowerShell helper also listens for .NET's `NetworkChange.NetworkAddressChanged` and prints a line on every change; on Linux it's `ip -o monitor address`. Waking from sleep (`powerMonitor` `resume`) checks too. A change is acted on once it has settled for 2.5 seconds, because DHCP often gives a 169.254 address first. If the helper is missing or dies, polling carries on alone.
+
+**Which adapter (`src/link/netinfo.js` `pickAdapter`).** The order is:
+
+1. the adapter the owner chose (Settings → Advanced);
+2. the address in use now, if it's still on the PC, so a second address or a VPN connecting doesn't move the phones;
+3. the adapter in use now, with its new address;
+4. the most likely office adapter: a real one, with the router (from Windows' `Get-NetIPConfiguration`), and 192.168 before 10 before 172.16.
+
+Virtual adapters (Hyper-V, WSL, VirtualBox, VMware, Docker, VPNs and tunnels: OpenVPN/TAP, WireGuard, Tailscale, ZeroTier, AnyConnect, GlobalProtect, Fortinet; Teredo, Bluetooth, Npcap) are recognised by name *and* by Windows' adapter description. They're never picked by themselves, unless one is the only way to the router (a Hyper-V "external" switch). Loopback, link-local (169.254) and CGNAT (100.64/10) addresses are ignored. With no office network at all (cable out), it's not treated as a new address: the screen says the PC isn't connected, and it waits.
+
+**Moving (`PhoneService.checkNetwork`).** The SIP, settings and mDNS sockets listen on every adapter (0.0.0.0), so they stay up. Registrations are kept. Only what is written into messages and settings moves:
+
+- **SIP.** `Pbx.setHost` moves Via, Record-Route, Contact, the plug-and-play answer and check-sync to the new address. It re-joins the plug-and-play group (224.0.1.75) on the new adapter. The old address still counts as "us" (`isOurHost`), so the Route of a call set up before the change still matches. Software on this PC (the Riyeser Link app) that still sends the old address in Via, Contact, Record-Route, Route or its SDP (`c=`, `o=`, `a=rtcp`) has it rewritten (`sip.rewriteHost`, `Pbx.fixLocal`). Desk phones' messages are never rewritten. Sound (RTP) goes phone to phone and never through this PC, so there are no RTP addresses of our own to move.
+- **Settings and plug-and-play** (`Provisioner.setHost`) carry the new address.
+- **riyeser-office.local** answers with the new address and announces it.
+- **Desk phones** are asked to pick it up (below).
+- **The website** gets a heartbeat at once (`address-changed` → `LinkCloud.report('address')`).
+- **The log and the screen.** The change is logged ("changed from 192.168.1.20 to 192.168.1.35 (just now)"). A Windows notification by the clock and the status screen say **"Your PC's address changed from 192.168.1.20 to .35 — phones updated."** with **Reserve this PC's address in your router**.
+
+If the old address is still on the PC and calls are in progress, it waits until they end. If the old address is gone, those calls can't continue anyway, so it moves straight away. When listening on one address only (`bind`, used in tests), it restarts the phone system on the new one, as before.
+
+**Phones following automatically.** These are the approaches, in order:
+
+1. **Re-provision over the LAN, every time.** Each desk phone that's connected now (at the address and port it registers from), or that was set up here, gets a SIP `NOTIFY` in its maker's wording (`provision.js resyncEvent`):
+   - Yealink, Grandstream and Snom: `check-sync;reboot=true`;
+   - Polycom: `check-sync`, which always restarts with our settings (`voIpProt.SIP.specialEvent.checkSync.alwaysReboot`);
+   - Cisco/Linksys SPA typed in by hand: `reboot` (or `resync`).
+
+   Restarting matters. On start-up the phone asks plug-and-play who sets it up and is answered with the *new* address, even though its saved settings still have the old one. Yealink settings now say so explicitly (`static.auto_provision.pnp_enable = 1`, `power_on = 1`, `sip.notify_reboot_enable = 1`). The status screen shows how many phones were asked. A phone that only accepts NOTIFY from its own (old) server won't hear it. It picks the address up the next time it restarts, or immediately with a name (2).
+2. **A name instead of an address (`src/link/pcname.js`, `src/link/mdns.js`).**
+   - **riyeser-office.local** is answered by Riyeser Link Office itself, over mDNS (RFC 6762): A and ANY questions for that one name, announced on every change with the cache-flush bit. "Legacy unicast" questions sent straight to port 5353 are answered too, so a plain DNS lookup pointed at the PC works (`nslookup riyeser-office.local <PC> -port=5353`). If another computer already answers for the name, it becomes riyeser-office-2.local (kept in settings). Computers, phones' softphone apps and the Riyeser Link app can use it. Most desk phones can't look up `.local` names, so it isn't put into desk phones' settings by itself.
+   - **The router's own name.** Many routers put each device's name in their DNS (OFFICE-PC.lan, .home, .fritz.box…). Riyeser Link Office asks the network's DNS servers directly (not Windows' LLMNR/NetBIOS) for the PC's name with the network's DNS suffix and common router suffixes, and trusts a name only if it gives exactly this PC's address now. It checks again after every change. A name that checks out is written into desk phones' settings as the **backup server**: Yealink `sip_server.2`, Grandstream P2312, Polycom `reg.1.server.2`. Or, if the owner chooses **Give desk phones the name** in *Settings → This PC's address*, it's the main server and the settings address. The name follows the PC when the router gives it a new address.
+
+   A separate unicast DNS server on port 53 isn't included: phones would have to be pointed at the PC's address for it, which is the thing that changes.
+3. **DHCP option 66.** *This PC's address* shows the provisioning address (`http://<address>:5080/`) to put in the router's "option 66" / "TFTP server" / "provisioning server". Grandstream settings now allow option 66 to take over (P145). Combined with a reservation, new phones of any make find their settings.
+4. **Reserve this PC's address in your router (recommended).** This is a guided helper on the status screen and in *Settings → This PC's address*. It shows the PC's MAC address, the address to reserve and the router's address (**Open its page**), with steps for TP-Link, NETGEAR, ASUS, Linksys, D-Link, UniFi, FRITZ!Box, MikroTik, internet providers' modems and others. The website's Phones page and help (`help/link.html#stable-address`) link to the same steps.
+
+**Use a fixed address (optional, Windows).** *Settings → This PC's address → Use a fixed address* is only for routers that can't reserve. It comes with a warning: a fixed address on the PC can clash if the router gives it to another device. It runs once with Windows' permission prompt (`windows.js fixedAddressScript`):
+
+1. It refuses an address another device answers on.
+2. It sets the address with the current router and DNS servers (`netsh interface ipv4 set address … source=static`).
+3. It checks the router can still be reached. If not within ~20 seconds, it goes back to automatic (DHCP) by itself.
+
+**Undo** goes back to automatic (`dhcpScript`). Only adapters on DHCP with a router are offered. Nothing changes unless the owner chooses it.
+
+**Address history.** Each change (from, to, when, what noticed it) is kept in `phone-settings.json` (`hostChanges`, the last 10, and the last 30 days count). Three changes in 30 days mark the address as not stable.
+
+**The website.** The heartbeat adds:
+
+- `mdns_name`;
+- `router_name`;
+- `phone_server` (what desk phones are given);
+- `address_changes` (the last 5: from, to, at).
+
+These are stored in `link_offices` (new columns, `team-chat.sql`). The Phones page shows:
+
+- "ℹ️ The office PC's address changed from 192.168.1.20 to .35 — phones updated" for a week after a change;
+- the names the PC answers to, and "Desk phones are given the name …" when they are;
+- the reservation help link with the PC's MAC address.
+
+*Set up a phone by hand* shows the name when phones are given one.
+
+**The firewall rule** now also opens UDP 5353 (riyeser-office.local) for office addresses. A rule from before 1.2.0 shows **Update the firewall rule** on the status screen.
 
 ## Security
 
@@ -247,8 +309,11 @@ The same engine (`src/link/`), hosted by Riyeser, with the same extensions, ring
   - `service.js` — puts it all together.
   - `portable.js` — export and import.
   - `trunks.js` — the relay seam.
-  - `windows.js` — the firewall rule and sleep settings.
-  - `netinfo.js`
+  - `windows.js` — the firewall rule, sleep settings, the adapters' routers and DNS (read only), and the optional fixed address.
+  - `netinfo.js` — this PC's addresses and which adapter is the office one.
+  - `netwatch.js` — notices address changes (polling and Windows' own events).
+  - `mdns.js` — answers riyeser-office.local.
+  - `pcname.js` — the router's own name for this PC.
   - `simua.js` — a simulated phone.
   - `selftest.js`
 - `src/renderer/link.html`, `link.js`, `link.css`, `link-text.js` — the status screen (all wording is in `link-text.js`).

@@ -3,7 +3,7 @@
 // office network. It sits by the clock, starts with Windows and keeps the PC awake while it runs; closing the window
 // keeps it running (Quit from the tray icon). Internal calls only: no outside numbers and no emergency calls.
 // It works only while Riyeser Link is on (trial or paid); everything is kept on this PC, so it runs with no internet.
-const { app, BrowserWindow, Tray, Menu, shell, ipcMain, powerSaveBlocker, safeStorage, net, Notification, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, Tray, Menu, shell, ipcMain, powerSaveBlocker, powerMonitor, safeStorage, net, Notification, dialog, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -89,7 +89,9 @@ function makeService() {
   const fetchFn = (url, opts) => net.fetch(url, opts);
   const own = new Online({ store, fetchFn, appData, appVersion: app.getVersion(), deviceName: os.hostname(), platform: process.platform });
   const central = centralOnline({ appData, phoneStore: store, fetchFn });
-  service = new PhoneService({ store, appData, clients: () => [own, central], seal, unseal, log: logLine });
+  // mdns: answer riyeser-office.local on the office network; netConfig: routers and DNS suffixes from Windows (read only)
+  service = new PhoneService({ store, appData, clients: () => [own, central], seal, unseal, log: logLine, mdns: {}, hostname: os.hostname(),
+    netConfig: process.platform === 'win32' ? () => require('./link/windows').readNetConfig() : null });
   service.online = own;
   // The Phones page on riyeser.com/link: a heartbeat every 5 minutes, and changes from the website every 30 seconds.
   const { LinkCloud } = require('./link/cloud');
@@ -101,8 +103,15 @@ function makeService() {
     pending = setTimeout(() => { pending = null; if (win && !win.isDestroyed()) win.webContents.send('link:changed', true); updateTray(); }, 300);
   });
   service.prevFound = 0;
+  // the router gave this PC a new address: the phones have been moved to it; say so by the clock too
+  service.on('address-changed', (c) => {
+    if (!Notification.isSupported()) return;
+    new Notification({ title: NAME, body: `Your PC's address changed from ${c.from} to ${shortTo(c.from, c.to)} — phones updated.${c.unstable ? ' This keeps happening: reserve this PC\'s address in your router (Settings → This PC\'s address).' : ''}`, silent: true }).show();
+  });
   return service;
 }
+/** "192.168.1.20" -> "192.168.1.35" shows as ".35" when only the last part changed. */
+function shortTo(from, to) { const a = String(from).split('.'); const b = String(to).split('.'); return a.length === 4 && b.length === 4 && a.slice(0, 3).join('.') === b.slice(0, 3).join('.') ? `.${b[3]}` : to; }
 function updateTray() {
   if (!tray || !service) return;
   const s = service.status();
@@ -123,7 +132,7 @@ function handle(name, fn) {
 }
 function registerIpc() {
   handle('link:status', () => ({ ...service.status(), version: app.getVersion(), sleepNote, firewall, signedIn: !!service.online.session, startWithWindows: startsWithWindows(),
-    adapters: service.adapters(), cloud: cloud ? cloud.state : null }));
+    adapters: service.adapters(), cloud: cloud ? cloud.state : null, platform: process.platform }));
   handle('link:assign', (mac, ext, vendor) => service.assign(mac, ext, vendor));
   handle('link:unassign', (mac) => service.unassign(mac));
   handle('link:label', (mac, fields) => service.label(mac, fields || {}));
@@ -152,6 +161,38 @@ function registerIpc() {
   handle('link:recheck', async () => { await checkPc(); await service.sync().catch(() => null); return service.checkLicence(); });
   handle('link:firewall', async () => { firewall = await require('./link/windows').addFirewallRule(process.execPath, service.status().httpPort); return firewall; });
   handle('link:adapter', (name) => service.chooseAdapter(name));
+  handle('link:phoneAddress', (mode) => service.setPhoneAddress(mode));
+  handle('link:recheckAddress', async () => { await service.refreshNet(); await service.checkNetwork('check'); await service.refreshNames(); return service.names(); });
+  // the router's own page (http://<router>/), only for a private address, for "Reserve this PC's address"
+  handle('link:openRouter', (ip) => { if (!require('./link/netinfo').isPrivate(ip) || !/^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))) throw new Error('That isn\'t a router on the office network.'); return shell.openExternal(`http://${ip}/`).then(() => true); });
+  // "Use a fixed address" (optional): only when the owner chooses it, with Windows' permission prompt, a clear warning,
+  // a check that the router can still be reached (else it goes back to automatic by itself), and an undo
+  handle('link:fixedAddress', async (wanted) => {
+    const w = require('./link/windows'); const { inCidr, isPrivate } = require('./link/netinfo');
+    await service.refreshNet();
+    const info = service.adapterInfo();
+    if (!info || !info.gateway) throw new Error('Windows didn\'t say how this network adapter is set up, so Riyeser Link Office won\'t change it. Reserve the address in your router instead.');
+    if (!info.dhcp) throw new Error('This adapter already has a fixed address.');
+    const address = String(wanted || info.address).trim();
+    if (!isPrivate(address) || !inCidr(address, `${info.address}/${info.prefix}`) || address === info.gateway) throw new Error(`Choose an address on this network (${info.address}/${info.prefix}), not the router's.`);
+    const r0 = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Use a fixed address', 'Cancel'], defaultId: 1, cancelId: 1, title: NAME,
+      message: `Give this PC the fixed address ${address} on "${info.alias}"?`,
+      detail: 'A DHCP reservation in your router is better, and is what we recommend. A fixed address is set on this PC only, so the router doesn\'t know about it: if the router later gives the same address to another device, both stop working properly. Only do this if your router can\'t reserve addresses, and preferably with an address outside the range your router hands out.\n\nWindows asks for permission. If this PC can\'t reach the router afterwards, it goes back to automatic by itself within about 20 seconds. You can undo it any time under Settings → This PC\'s address.' });
+    if (r0.response !== 0) return null;
+    const r = await w.runElevatedScript((res) => w.fixedAddressScript({ alias: info.alias, address, prefix: info.prefix, gateway: info.gateway, dns: info.dns }, res));
+    if (r.ok) { service.setSettings({ fixedAddress: { alias: info.alias, address, prefix: info.prefix, gateway: info.gateway, at: new Date().toISOString(), was: 'dhcp' } }); service.log('info', `This PC now has the fixed address ${address} on ${info.alias} (was automatic, from the router). Undo under Settings.`); }
+    else service.log('warn', `The fixed address wasn't set: ${r.why === 'in-use' ? `another device already uses ${address}` : r.why === 'no-router' ? 'the router couldn\'t be reached with it, so it went back to automatic' : 'Windows\' permission wasn\'t given'}.`);
+    await service.refreshNet(); await service.checkNetwork('fixed address');
+    return r;
+  });
+  handle('link:undoFixed', async () => {
+    const w = require('./link/windows'); const f = service.settings().fixedAddress;
+    if (!f) return null;
+    const r = await w.runElevatedScript((res) => w.dhcpScript(f.alias, res));
+    if (r.ok) { service.setSettings({ fixedAddress: null }); service.log('info', `${f.alias} is back on automatic (the router gives this PC its address).`); }
+    await service.refreshNet(); await service.checkNetwork('fixed address');
+    return r;
+  });
   handle('link:dismissIp', () => service.dismissIpNotice());
   handle('link:startWithWindows', (on) => { startWithWindows(!!on); return startsWithWindows(); });
   handle('link:allowPublic', async (on) => { service.setSettings({ allowPublic: !!on }); if (service.pbx) { await service.stopPbx(); await service.checkLicence(); } return !!on; });
@@ -206,6 +247,8 @@ app.whenReady().then(async () => {
   createWindow();
   createTray();
   await service.start();
+  service.watch();   // address changes: checked every few seconds, and at once on Windows' own network-change events
+  powerMonitor.on('resume', () => { if (service.watcher) service.watcher.check('resume'); service.checkNetwork('resume').catch(() => null); });
   checkPc().then(() => { if (win && !win.isDestroyed()) win.webContents.send('link:changed', true); });
   setTimeout(() => service.sync().catch(() => null), 3000);
   cloud.start();   // with no internet it just waits; the phones never depend on it

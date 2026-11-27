@@ -33,15 +33,23 @@ const xml = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</
 const line = (s) => String(s == null ? '' : s).replace(/[\r\n]/g, ' ');
 
 // ---------- the settings files ----------
-/** a: { mac, ext, name, password, server, sipPort, provisionUrl } */
+// a.backup: a second address for the same PC (its name when phones use its address, or the other way round), so a
+// phone that loses touch with the first tries the second. After this PC's address changes, the name still works.
+/** a: { mac, ext, name, password, server, backup, sipPort, provisionUrl } */
 function yealinkConfig(a) {
   return ['#!version:1.0.0.1', '## Riyeser Link Office', 'account.1.enable = 1', `account.1.label = ${line(a.name)}`, `account.1.display_name = ${line(a.name)}`,
     `account.1.auth_name = ${a.ext}`, `account.1.user_name = ${a.ext}`, `account.1.password = ${line(a.password)}`,
     `account.1.sip_server.1.address = ${a.server}`, `account.1.sip_server.1.port = ${a.sipPort}`, 'account.1.sip_server.1.transport_type = 0',
-    'account.1.sip_server.1.expires = 600', `static.auto_provision.server.url = ${a.provisionUrl}`, ''].join('\n');
+    'account.1.sip_server.1.expires = 600',
+    ...(a.backup ? [`account.1.sip_server.2.address = ${line(a.backup)}`, `account.1.sip_server.2.port = ${a.sipPort}`, 'account.1.sip_server.2.transport_type = 0', 'account.1.sip_server.2.expires = 600'] : []),
+    `static.auto_provision.server.url = ${a.provisionUrl}`,
+    // on every start-up, ask the network who sets it up (plug-and-play), so a phone restarted after this PC's address
+    // changed finds the new one; and allow "check-sync" restarts from Riyeser Link Office
+    'static.auto_provision.pnp_enable = 1', 'static.auto_provision.power_on = 1', 'sip.notify_reboot_enable = 1', ''].join('\n');
 }
 function grandstreamConfig(a) {
-  const p = { P271: 1, P270: a.name, P47: `${a.server}:${a.sipPort}`, P35: a.ext, P36: a.ext, P34: a.password, P3: a.name, P32: 10, P237: a.provisionUrl, P212: 1 };
+  // P2312 secondary SIP server; P145 lets DHCP option 66 (a provisioning address from the router) take over
+  const p = { P271: 1, P270: a.name, P47: `${a.server}:${a.sipPort}`, ...(a.backup ? { P2312: `${a.backup}:${a.sipPort}` } : {}), P35: a.ext, P36: a.ext, P34: a.password, P3: a.name, P32: 10, P237: a.provisionUrl, P212: 1, P145: 1 };
   return `<?xml version="1.0" encoding="UTF-8" ?>\n<!-- Riyeser Link Office -->\n<gs_provision version="1">\n<mac>${a.mac}</mac>\n<config version="1">\n${
     Object.entries(p).map(([k, v]) => `<${k}>${xml(v)}</${k}>`).join('\n')}\n</config>\n</gs_provision>\n`;
 }
@@ -55,8 +63,21 @@ function polycomMaster(a) {
 }
 function polycomConfig(a) {
   const r = { 'reg.1.displayName': a.name, 'reg.1.label': a.name, 'reg.1.address': a.ext, 'reg.1.auth.userId': a.ext, 'reg.1.auth.password': a.password,
-    'reg.1.server.1.address': a.server, 'reg.1.server.1.port': a.sipPort, 'reg.1.server.1.transport': 'UDPOnly', 'reg.1.server.1.expires': 600 };
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<!-- Riyeser Link Office -->\n<polycomConfig>\n<reg ${Object.entries(r).map(([k, v]) => `${k}="${xml(v)}"`).join(' ')}/>\n</polycomConfig>\n`;
+    'reg.1.server.1.address': a.server, 'reg.1.server.1.port': a.sipPort, 'reg.1.server.1.transport': 'UDPOnly', 'reg.1.server.1.expires': 600,
+    ...(a.backup ? { 'reg.1.server.2.address': a.backup, 'reg.1.server.2.port': a.sipPort, 'reg.1.server.2.transport': 'UDPOnly', 'reg.1.server.2.expires': 600 } : {}) };
+  // check-sync from Riyeser Link Office restarts the phone, so it picks up a new address
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<!-- Riyeser Link Office -->\n<polycomConfig>\n<reg ${Object.entries(r).map(([k, v]) => `${k}="${xml(v)}"`).join(' ')}/>\n<voIpProt voIpProt.SIP.specialEvent.checkSync.alwaysReboot="1"/>\n</polycomConfig>\n`;
+}
+
+/**
+ * The SIP NOTIFY Event that asks this maker's phone to fetch its settings again. reboot: also restart, which is what's
+ * needed after this PC's address changed (on start-up the phone asks plug-and-play who sets it up, and finds the new
+ * address). Cisco/Linksys SPA phones (not set up by Riyeser Link Office, but often typed in by hand) use "resync".
+ */
+function resyncEvent(vendor, { reboot = false } = {}) {
+  if (vendor === 'cisco') return reboot ? 'reboot' : 'resync';
+  if (vendor === 'polycom') return 'check-sync';    // its settings say: always restart on check-sync
+  return `check-sync;reboot=${reboot ? 'true' : 'false'}`;   // Yealink, Grandstream, Snom
 }
 
 /** Which settings file a path asks for: { vendor, mac, kind } or null. */
@@ -79,10 +100,13 @@ function macInAgent(ua) {
 }
 
 class Provisioner extends EventEmitter {
-  /** opts: { store, directory, host, sipPort, httpPort = 5080, bind = '0.0.0.0', log, allowPublic } */
+  /**
+   * opts: { store, directory, host, sipPort, httpPort = 5080, bind = '0.0.0.0', log, allowPublic,
+   *         name: a name for this PC that the office network answers (or null), useName: give phones the name, not the address }
+   */
   constructor(opts = {}) {
     super();
-    Object.assign(this, { store: opts.store, directory: opts.directory, host: opts.host || '127.0.0.1', sipPort: opts.sipPort || 5060,
+    Object.assign(this, { store: opts.store, directory: opts.directory, host: opts.host || '127.0.0.1', sipPort: opts.sipPort || 5060, name: opts.name || null, useName: !!opts.useName,
       httpPort: opts.httpPort == null ? 5080 : opts.httpPort, bind: opts.bind || '0.0.0.0', logFn: opts.log || (() => {}), allowPublic: !!opts.allowPublic });
     this.refused = new Map(); this.blocked = new Map(); this.lastPnp = new Map();
   }
@@ -91,7 +115,11 @@ class Provisioner extends EventEmitter {
   save(d) { this.store.set('phone-devices', d); this.emit('change'); return d; }
   phones() { return this.data().phones; }
   found() { return this.data().found.filter((f) => !f.ignored); }
-  base() { return `http://${this.host}:${this.httpPort}`; }
+  /** The server address written into phones' settings, and the other one as their backup. */
+  servers() { return this.useName && this.name ? { server: this.name, backup: this.host } : { server: this.host, backup: this.name || null }; }
+  base(host = this.host) { return `http://${host}:${this.httpPort}`; }
+  /** This PC has a new address (and maybe name): settings and plug-and-play answers carry them from now on. */
+  setHost(host, { name, useName } = {}) { if (host) this.host = host; if (name !== undefined) this.name = name || null; if (useName !== undefined) this.useName = !!useName; this.emit('change'); }
   pnpUrl(vendor) {
     return { yealink: `${this.base()}/yealink/`, grandstream: `${this.base()}/grandstream`, snom: `${this.base()}/snom/{mac}.xml`, polycom: `${this.base()}/polycom/` }[vendor] || null;
   }
@@ -168,8 +196,10 @@ class Provisioner extends EventEmitter {
     const user = phone && this.directory.user(phone.ext);
     if (!user) return null;
     const vendor = r.vendor;
-    const provisionUrl = vendor === 'snom' ? `${this.base()}/snom/{mac}.xml` : vendor === 'grandstream' ? `${this.base()}/grandstream` : `${this.base()}/${vendor}/`;
-    const a = { mac: r.mac, ext: user.ext, name: user.name, password: user.password, server: this.host, sipPort: this.sipPort, provisionUrl };
+    const { server, backup } = this.servers();
+    const base = this.base(server);
+    const provisionUrl = vendor === 'snom' ? `${base}/snom/{mac}.xml` : vendor === 'grandstream' ? `${base}/grandstream` : `${base}/${vendor}/`;
+    const a = { mac: r.mac, ext: user.ext, name: user.name, password: user.password, server, backup, sipPort: this.sipPort, provisionUrl };
     if (vendor === 'yealink') return { type: 'text/plain; charset=utf-8', body: yealinkConfig(a), phone };
     if (vendor === 'grandstream') return { type: 'application/xml; charset=utf-8', body: grandstreamConfig(a), phone };
     if (vendor === 'snom') return { type: 'application/xml; charset=utf-8', body: snomConfig(a), phone };
@@ -215,4 +245,4 @@ class Provisioner extends EventEmitter {
   }
 }
 
-module.exports = { Provisioner, normaliseMac, prettyMac, vendorKey, route, macInAgent, yealinkConfig, grandstreamConfig, snomConfig, polycomConfig, polycomMaster, VENDORS };
+module.exports = { Provisioner, normaliseMac, prettyMac, vendorKey, route, resyncEvent, macInAgent, yealinkConfig, grandstreamConfig, snomConfig, polycomConfig, polycomMaster, VENDORS };

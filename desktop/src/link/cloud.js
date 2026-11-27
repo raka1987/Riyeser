@@ -1,7 +1,7 @@
 // Riyeser Link Office and Riyeser Link online: so the business's owners and admins (and, when they allow it, Riyeser
 // support) can see and manage the desk phones from the website, not only on this PC's screen.
-//   Heartbeat  every 5 minutes, and soon after something changes (a phone connects or is given to someone, the address
-//              changes): this PC's name and version, the address to type into phones, the licence, counts, the desk
+//   Heartbeat  every 5 minutes, soon after something changes (a phone connects or is given to someone), and at once
+//              when this PC's address changes: this PC's name and version, the address to type into phones, the licence, counts, the desk
 //              phones and the extensions (link_office_report).
 //   Changes    every 30 seconds: changes made on the website (give a phone to someone, add one by MAC address, take a
 //              phone off someone, a new password, Do not disturb, Show password). Each is done here, then marked done
@@ -59,6 +59,10 @@ function buildPayload(status, { officeId, pcName = '', version = '', adapters = 
     office_id: officeId, pc_name: String(pcName || '').slice(0, 80), version: String(version || '').slice(0, 40), state: status.state,
     addresses: [host, ...others].filter(Boolean), sip_port: status.sipPort || 5060, address_stable: status.addressStable !== false,
     pc_mac: (status.adapter && status.adapter.mac) || '',
+    // 1.2.0: the names phones can use for this PC, which one they're given, and the last few address changes
+    mdns_name: (status.names && status.names.mdns) || '', router_name: (status.names && status.names.router) || '',
+    phone_server: (status.names && status.names.server) || host,
+    address_changes: (status.addressChanges || []).slice(0, 5).map((c) => ({ from: c.from, to: c.to, at: c.at })),
     licence: { active: !!lic.active, state: lic.state || '', text: lic.text || lic.message || '' },
     counts: { people: (status.people || []).length, groups: (status.groups || []).length, phones_assigned: (status.phones || []).length,
       phones_connected: phones.filter((p) => p.registered).length, new_phones: (status.found || []).length,
@@ -217,6 +221,9 @@ class LinkCloud extends EventEmitter {
     every(() => this.poll(), POLL);
     this.onChange = () => this.changed();
     this.service.on('change', this.onChange);
+    // this PC's address changed: the website's "server address to type into phones" must follow at once
+    this.onAddress = () => { this.lastReportAt = 0; this.report('address').catch(() => null); };
+    this.service.on('address-changed', this.onAddress);
     const first = setTimeout(() => this.report('start').then(() => this.poll()).catch(() => null), 4000);
     if (first.unref) first.unref(); this.timers.push(first);
     return this;
@@ -225,6 +232,7 @@ class LinkCloud extends EventEmitter {
     for (const t of this.timers) { clearInterval(t); clearTimeout(t); }
     this.timers = []; clearTimeout(this.soon); this.soon = null;
     if (this.onChange) this.service.off('change', this.onChange);
+    if (this.onAddress) this.service.off('address-changed', this.onAddress);
   }
 }
 

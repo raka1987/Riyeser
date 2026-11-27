@@ -223,6 +223,9 @@ a { color: var(--blue); }
 .lo-big code { font: 800 34px/1.1 ui-monospace, Consolas, monospace; color: #0e7490; letter-spacing: .5px; user-select: all; overflow-wrap: anywhere; }
 .lo-big span { font-size: 17px; color: var(--ink); }
 .lo-warn { background: #fef3c7; color: #78350f; border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.45; margin-top: 8px; }
+.lo-moved { background: #e0f2fe; color: #0c4a6e; border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.45; margin-top: 8px; }
+.lo-moved code, .lo-name code { font-family: ui-monospace, Consolas, monospace; background: rgba(255,255,255,.6); padding: 0 4px; border-radius: 4px; }
+.lo-name { margin: 6px 0 0; font-size: 14px; overflow-wrap: anywhere; }
 .lo-warn code { font-family: ui-monospace, Consolas, monospace; background: #fff7d6; padding: 0 4px; border-radius: 4px; }
 .lo-kv { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 14px; align-content: start; }
 .lo-kv dt { color: var(--muted); } .lo-kv dd { margin: 0; color: var(--ink); min-width: 0; } .lo-kv dd small { display: block; color: var(--muted); margin-top: 2px; }

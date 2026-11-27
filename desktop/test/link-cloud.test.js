@@ -78,7 +78,7 @@ test('the heartbeat: address, licence, counts, phones and extensions, and never 
       const text = JSON.stringify(p);
       for (const pw of [t.svc.directory.password('101'), t.svc.directory.password('102')]) assert.ok(!text.includes(pw), 'no password');
       for (const bad of ['0412345678', 'talking', 'answered', 'inProgress', 'recent', 'logs', 'password', 'userAgent', 'start"']) assert.ok(!text.includes(bad), bad);
-      assert.deepStrictEqual(Object.keys(p).sort(), ['address_stable', 'addresses', 'counts', 'extensions', 'licence', 'office_id', 'pc_mac', 'pc_name', 'phones', 'sip_port', 'state', 'version']);
+      assert.deepStrictEqual(Object.keys(p).sort(), ['address_changes', 'address_stable', 'addresses', 'counts', 'extensions', 'licence', 'mdns_name', 'office_id', 'pc_mac', 'pc_name', 'phone_server', 'phones', 'router_name', 'sip_port', 'state', 'version']);
     } finally { await ua.stop(); await ub.stop(); }
   } finally { await t.close(); }
 });

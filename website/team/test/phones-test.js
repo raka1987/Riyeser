@@ -127,6 +127,25 @@ const kinds = (st) => st.commands.map((c) => c.kind);
     console.log('new phones found:', await text(pg, '.lo-found'));
     await pg.screenshot({ path: out + '/phones-page.png', fullPage: true });
 
+    // 2b. Link Office 1.2.0: the PC's address changed -> the notice, the new address, its names, the reservation link
+    const pa = await b.newPage({ viewport: { width: 1280, height: 900 } }); pa.on('pageerror', (e) => errs.push('address: ' + e.message));
+    await fakeServer(pa, { offices: [office({ version: '1.2.0', addresses: ['192.168.1.35'], address_stable: true, mdns_name: 'riyeser-office.local', router_name: 'office-pc.lan', phone_server: '192.168.1.35',
+      address_changes: [{ from: '192.168.1.20', to: '192.168.1.35', at: ago(3) }] })] });
+    await signIn(pa, BASE + '/link/?phones'); await unlock(pa); await pa.waitForSelector('#lomoved');
+    const moved = await text(pa, '#lomoved'); console.log('address changed:', moved);
+    assert.match(moved, /^ℹ️ The office PC's address changed from 192\.168\.1\.20 to \.35 — phones updated/);
+    assert.strictEqual(await text(pa, '#loaddr'), '192.168.1.35');
+    assert.match(await text(pa, '#lonames'), /riyeser-office\.local and office-pc\.lan/);
+    assert.ok(!(await pa.$('#loname')), 'phones are given the address, so no "given the name" line');
+    assert.ok(await pa.$('.lo-top a[href="/help/link.html#stable-address"]'), 'how to reserve it');
+    await pa.screenshot({ path: out + '/phones-address-changed.png', fullPage: false });
+    // given the router's name: the line says so, and Set up a phone by hand shows the name
+    const pn = await b.newPage({ viewport: { width: 1280, height: 900 } }); pn.on('pageerror', (e) => errs.push('name: ' + e.message));
+    await fakeServer(pn, { offices: [office({ version: '1.2.0', addresses: ['192.168.1.35'], address_stable: true, mdns_name: 'riyeser-office.local', router_name: 'office-pc.lan', phone_server: 'office-pc.lan', address_changes: [] })] });
+    await signIn(pn, BASE + '/link/?phones'); await unlock(pn); await pn.waitForSelector('#loname');
+    assert.match(await text(pn, '#loname'), /given the name office-pc\.lan/); assert.ok(!(await pn.$('#lomoved')), 'no change: no notice');
+    await pn.close(); await pa.close();
+
     // 3. a new phone found -> Give to… -> sent, then done; step 4 ticks itself
     await pg.click('[data-give="001565ddeeff"]'); await pg.waitForSelector('[data-to="103"]');
     await pg.click('[data-to="103"]');

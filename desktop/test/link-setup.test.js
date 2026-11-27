@@ -350,7 +350,7 @@ test('wording: status line, licence message, address notice, emergency note', ()
   const T = require('../src/renderer/link-text');
   assert.strictEqual(T.running('192.168.1.20'), 'Riyeser Link Office is running on this PC (192.168.1.20).');
   assert.strictEqual(T.NEEDS_PLUS, NEEDS_PLUS);
-  assert.strictEqual(T.ipChanged({ from: '192.168.1.20', to: '192.168.1.23' }), 'This PC\'s network address changed (was 192.168.1.20, now 192.168.1.23). Phones are being updated. To stop this happening, ask your router to always give this PC the same address. Look for \'DHCP reservation\' or \'Static lease\' in your router\'s settings.');
+  assert.strictEqual(T.ipChanged({ from: '192.168.1.20', to: '192.168.1.23' }), 'Your PC\'s address changed from 192.168.1.20 to .23 — phones updated.');
   assert.ok(T.ipSteps('AA:BB:CC:DD:EE:01', '192.168.1.23').some((s) => s.includes('AA:BB:CC:DD:EE:01')));
   assert.strictEqual(T.EMERGENCY, 'Internal calls only. These phones can\'t call emergency services — keep a mobile or normal phone line for that.');
   assert.strictEqual(T.counts({ phones: 1, onCalls: 0 }), '1 phone connected · no calls right now');

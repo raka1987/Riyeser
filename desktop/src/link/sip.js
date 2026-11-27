@@ -278,6 +278,36 @@ function authorize(challenge, { username, password, method, uri }) {
   return `Digest username="${username}", realm="${c.realm}", nonce="${c.nonce}", uri="${uri}", response="${resp}", algorithm=MD5${qop ? `, qop=auth, nc=${nc}, cnonce="${cnonce}"` : ''}${c.opaque ? `, opaque="${c.opaque}"` : ''}`;
 }
 
-module.exports = { parse, serialize, getHeader, getAll, setHeader, removeHeader, prependHeader, removeFirst, clone, parseParams, formatParams,
+// ---------- this PC's address changed ----------
+const ADDRESS_HEADERS = ['via', 'contact', 'record-route', 'route'];
+/**
+ * Swap one IPv4 address for another wherever it's this side's address in a message: the Via sent-by, Contact, Record-Route
+ * and Route URIs, and the SDP's connection (c=) and origin (o=) lines (where the sound goes). Used for messages from
+ * software on this PC (e.g. the Riyeser Link app) that still carry the address this PC had a moment ago. A received=
+ * parameter (where a message really came from) and the From/To identities are left alone. Returns how many it changed.
+ */
+function rewriteHost(msg, from, to) {
+  if (!from || !to || from === to) return 0;
+  const ip = String(from).replace(/\./g, '\\.');
+  const inUri = new RegExp(`(^|[@:/\\s<])${ip}(?=[:;>,\\s?]|$)`, 'g');
+  let n = 0;
+  for (const h of msg.headers) {
+    if (!ADDRESS_HEADERS.includes(h[0])) continue;
+    const was = h[1];
+    // never touch received=/maddr= values: those say where a message really came from
+    h[1] = was.replace(inUri, (m0, pre, off, all) => (/(received|maddr)=$/i.test(all.slice(0, off + pre.length)) ? m0 : `${pre}${to}`));
+    if (h[1] !== was) n++;
+  }
+  const type = String(getHeader(msg, 'content-type') || '').toLowerCase();
+  if (msg.body && msg.body.length && type.startsWith('application/sdp')) {
+    const body = msg.body.toString('utf8');
+    const sdpLine = new RegExp(`^((?:c=IN IP4|o=\\S+ \\S+ \\S+ IN IP4|a=rtcp:\\d+ IN IP4) )${ip}(?=\\/|\\s|$)`, 'gm');
+    const out = body.replace(sdpLine, (_m, pre) => { n++; return `${pre}${to}`; });
+    if (out !== body) msg.body = Buffer.from(out, 'utf8');
+  }
+  return n;
+}
+
+module.exports = { parse, serialize, rewriteHost, getHeader, getAll, setHeader, removeHeader, prependHeader, removeFirst, clone, parseParams, formatParams,
   parseUri, formatUri, userOf, parseNameAddr, formatNameAddr, parseVia, formatVia, parseCSeq, splitList, response, newBranch, newTag, newCallId,
   parseAuth, digestOk, digestResponse, authorize, md5, SipError, REASONS, MAX_SIZE };

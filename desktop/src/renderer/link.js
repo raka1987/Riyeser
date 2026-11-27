@@ -63,12 +63,12 @@ function renderState() {
 
 function renderNotices() {
   const out = [];
+  if (S.offline) out.push(`<div class="note warn"><b>${esc(T.IP_OFFLINE)}</b></div>`);
   if (S.ipChanged) {
-    out.push(`<div class="note warn"><b>${esc(T.ipChanged(S.ipChanged))}</b>${S.ipChanged.unstable ? `<div>${esc(T.IP_UNSTABLE)}</div>` : ''}
-      <details><summary>Show me how</summary><ol>${T.ipSteps(S.adapter.mac, S.host).map((s) => `<li>${esc(s)}</li>`).join('')}</ol>
-      ${S.adapter.mac ? `<div class="row">This PC's MAC address: <code>${esc(S.adapter.mac)}</code><button class="btn s sm" data-copy="${esc(S.adapter.mac)}">Copy</button></div>` : ''}</details>
-      ${S.ipChanged.unstable ? '' : '<div class="row"><button class="btn s sm" data-a="dismissip">OK</button></div>'}</div>`);
+    out.push(`<div class="note warn ipnote" id="ipnote"><b class="big">${esc(T.ipChanged(S.ipChanged))}</b><div>${esc(T.ipChangedMore(S.ipChanged))}</div>${S.ipChanged.unstable ? `<div><b>${esc(T.IP_UNSTABLE)}</b></div>` : ''}
+      <div class="row"><button class="btn sm" data-a="reserve">${esc(T.RESERVE_TITLE)}</button>${S.ipChanged.unstable ? '' : '<button class="btn s sm" data-a="dismissip">OK</button>'}</div></div>`);
   }
+  if (S.firewall === 'outdated') out.push(`<div class="note info">${esc(T.FIREWALL_OLD)}<div class="row"><button class="btn s sm" data-a="firewall">Update the firewall rule</button></div></div>`);
   if (S.firewall === false) out.push(`<div class="note warn"><b>${esc(T.FIREWALL)}</b><div class="row"><button class="btn" data-a="firewall">Allow phones through the firewall</button></div></div>`);
   if (S.sleepNote) out.push(`<div class="note warn">${esc(S.sleepNote)}</div>`);
   for (const b of S.blocked || []) out.push(`<div class="note warn">Blocked ${esc(b.ip)} until ${esc(when(b.until))} after too many wrong passwords. If that's one of your phones, check its password.</div>`);
@@ -82,7 +82,9 @@ function renderHero() {
   const live = S.state === 'running';
   $('#hero').innerHTML = `<div><small>${esc(T.SERVER_LABEL)}</small>
       <div class="addr"><code id="srv">${esc(S.host || '…')}</code><span class="port">${esc(T.port(S.sipPort))}</span><button class="btn s sm" data-copy="${esc(S.host || '')}">Copy</button></div>
+      ${S.names && S.names.useName ? `<div class="muted">Desk phones are given the name <code>${esc(S.names.server)}</code>, which follows this PC.</div>` : ''}
       <div class="muted">${esc(T.SERVER_HINT)}</div>
+      ${S.names ? `<div class="muted small">${esc(T.namesLine(S.names))}</div>` : ''}
       ${S.addressStable === false ? `<div class="note warn" style="margin:8px 0 0">${esc(T.NOT_STABLE)}</div>` : ''}
       <div class="muted cloudline">${esc(T.cloud(S.cloud))}${S.cloud && S.cloud.status === 'online' ? ' <button class="btn s sm" data-a="web">Open the Phones page on the website</button>' : ''}</div></div>
     <div class="acts"><button class="btn" data-a="hand">☎ Set up a phone by hand</button><button class="btn" data-a="addphone">+ Add a desk phone</button>
@@ -159,6 +161,45 @@ function renderAccount() {
     ${S.signedIn ? '' : `<form id="signin" class="row"><input id="em" type="email" placeholder="Riyeser account email" autocomplete="username"><input id="pw" type="password" placeholder="Password" autocomplete="current-password"><button class="btn">Sign in</button></form>
       <p class="muted">Already signed in on Riyeser Central? Riyeser Link Office uses that too when it can.</p>`}`;
 }
+// ---------- Settings → This PC's address: the adapter, names, what phones are given, reserve it, fixed address
+function renderAddress() {
+  const a = S.adapters.current; const n = S.names || {}; const f = S.fixedAddress;
+  const hist = (S.addressChanges || []).map((c) => `<li>${esc(when(c.at))}: ${esc(c.from)} → ${esc(c.to)}</li>`).join('');
+  $('#address').innerHTML = `<p class="muted">${esc(T.ADDR_WHY)}</p>
+    <dl class="kv"><dt>Address</dt><dd><code>${esc(S.host)}</code> ${S.addressStable === false ? '<span class="pill bad">not stable</span>' : '<span class="pill ok">stable</span>'}</dd>
+      <dt>Network adapter</dt><dd>${esc(a.name || '—')}${a.description ? ` <span class="muted">(${esc(a.description)})</span>` : ''}</dd>
+      <dt>MAC address</dt><dd>${a.mac ? `<code>${esc(a.mac)}</code> <button class="btn s sm" data-copy="${esc(a.mac)}">Copy</button>` : '—'}</dd>
+      <dt>Router</dt><dd>${a.gateway ? esc(a.gateway) : '—'}${a.dhcp === true ? ' · address from the router (automatic)' : a.dhcp === false ? ' · fixed address on this PC' : ''}</dd>
+      <dt>Names</dt><dd><code>${esc(n.mdns || '')}</code>${n.router ? ` · <code>${esc(n.router)}</code>` : ''}</dd></dl>
+    <fieldset class="mode"><legend>What desk phones are given</legend>
+      <label><input type="radio" name="pmode" value="address"${n.mode !== 'name' ? ' checked' : ''}> ${esc(T.MODE_ADDRESS)}</label>
+      ${n.router ? `<label><input type="radio" name="pmode" value="name"${n.mode === 'name' ? ' checked' : ''}> ${esc(T.modeName(n.router))}</label>` : `<p class="muted small">${esc(T.MODE_NONAME)}</p>`}
+    </fieldset>
+    <div class="row"><button class="btn" data-a="reserve">${esc(T.RESERVE_TITLE)}</button><button class="btn s" data-a="recheckaddr">Check the address now</button></div>
+    <p class="muted small">${esc(T.OPTION66)} <code>http://${esc(S.host)}:${esc(S.httpPort)}/</code></p>
+    ${hist ? `<p><b>Recent changes</b></p><ul class="hist">${hist}</ul>` : ''}
+    ${S.platform === 'win32' ? `<details class="help fixed"><summary>${esc(T.FIXED_TITLE)}</summary><p class="muted">${esc(T.FIXED_WHY)}</p>
+      ${f ? `<p>${esc(T.fixedOn(f))}</p><div class="row"><button class="btn s" data-a="undofixed">Undo: back to automatic</button></div>`
+        : a.dhcp === true ? `<form id="fixedform" class="row"><input id="fixedip" value="${esc(S.host)}" spellcheck="false" autocomplete="off" style="flex:0 1 200px"><button class="btn s">Use this fixed address…</button></form>`
+        : '<p class="muted">Not available for this adapter.</p>'}</details>` : ''}`;
+}
+/** The guided "Reserve this PC's address in your router" helper, in an in-page dialog. */
+function reserveHelper() {
+  const a = S.adapters.current; const d = document.createElement('dialog'); d.className = 'askform reserve';
+  const brand = (() => { try { return localStorage.getItem('link.router') || 'tplink'; } catch { return 'tplink'; } })();
+  const steps = (id) => { const r = T.ROUTERS.find((x) => x.id === id) || T.ROUTERS[0]; return `<ol>${r.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>`; };
+  d.innerHTML = `<form method="dialog"><h3>${esc(T.RESERVE_TITLE)}</h3><p>${esc(T.RESERVE_INTRO)}</p>
+    <div class="reservebox"><div><small>This PC's MAC address</small><b><code>${esc(a.mac || '—')}</code></b>${a.mac ? `<button type="button" class="btn s sm" data-copy="${esc(a.mac)}">Copy</button>` : ''}</div>
+      <div><small>Address to reserve</small><b><code>${esc(S.host)}</code></b><button type="button" class="btn s sm" data-copy="${esc(S.host)}">Copy</button></div>
+      ${a.gateway ? `<div><small>Your router</small><b><code>${esc(a.gateway)}</code></b><button type="button" class="btn s sm" data-router="${esc(a.gateway)}">Open its page</button></div>` : ''}</div>
+    <p><b>${esc(T.reserveWhat(a.mac, S.host))}</b></p>
+    <label><span>Your router</span><select id="rbrand">${T.ROUTERS.map((r) => `<option value="${esc(r.id)}"${r.id === brand ? ' selected' : ''}>${esc(r.name)}</option>`).join('')}</select></label>
+    <div id="rsteps">${steps(brand)}</div><p class="muted">${esc(T.RESERVE_AFTER)}</p>
+    <div class="row end"><button class="btn" value="ok">Done</button></div></form>`;
+  d.querySelector('#rbrand').onchange = (e) => { d.querySelector('#rsteps').innerHTML = steps(e.target.value); try { localStorage.setItem('link.router', e.target.value); } catch { /* fine */ } };
+  d.addEventListener('close', () => d.remove());
+  document.body.appendChild(d); d.showModal();
+}
 function renderAdvanced() {
   const a = S.adapters;
   $('#advanced').innerHTML = `<p><b>Network adapter phones use.</b> This PC: ${esc(a.current.address)}${a.current.mac ? ` · MAC ${esc(a.current.mac)}` : ''}</p>
@@ -178,7 +219,7 @@ function showTab(name) {
   for (const p of document.querySelectorAll('[data-pane]')) p.hidden = p.dataset.pane !== name;
   try { localStorage.setItem('link.tab', name); } catch { /* fine */ }
 }
-function render() { if (!S) return; renderState(); renderNotices(); renderSetup(); renderHero(); if (!$('#manualbox').hidden) renderHand(); renderFound(); if (!busy) renderPeople(); renderGroups(); renderPhones(); renderCalls(); renderAccount(); if (!document.querySelector('.adv').open) renderAdvanced(); }
+function render() { if (!S) return; renderState(); renderNotices(); renderSetup(); renderHero(); if (!$('#manualbox').hidden) renderHand(); renderFound(); if (!busy) renderPeople(); renderGroups(); renderPhones(); renderCalls(); renderAccount(); if (!document.activeElement || !document.activeElement.closest('#address')) renderAddress(); if (!document.querySelector('.adv').open) renderAdvanced(); }
 async function load() { const s = await safe(() => api.call('link:status')); if (s) { S = s; render(); } }
 let pending = null;
 api.on('link:changed', () => { clearTimeout(pending); pending = setTimeout(load, 150); });
@@ -191,6 +232,7 @@ document.addEventListener('click', async (e) => {
   const b = e.target.closest('button'); if (!b) return;
   const d = b.dataset;
   if (d.copy != null) { await safe(() => api.call('link:copy', d.copy)); toast('Copied.'); return; }
+  if (d.router) { await safe(() => api.call('link:openRouter', d.router)); return; }
   if (d.manual) { if (shown[d.manual]) delete shown[d.manual]; else shown[d.manual] = await safe(() => api.call('link:manual', d.manual)); renderPeople(); return; }
   if (d.manual2) { showTab('people'); if (!shown[d.manual2]) shown[d.manual2] = await safe(() => api.call('link:manual', d.manual2)); renderPeople();
     const r = document.querySelector(`[data-manual="${d.manual2}"]`); if (r) r.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
@@ -232,6 +274,9 @@ document.addEventListener('click', async (e) => {
     if (a === 'signout') await safe(() => api.call('link:signOut'));
     if (a === 'firewall') { const ok = await safe(() => api.call('link:firewall')); toast(ok ? 'Phones are allowed through the firewall.' : 'The firewall rule wasn\'t added. Try again and choose Yes when Windows asks.'); }
     if (a === 'dismissip') await safe(() => api.call('link:dismissIp'));
+    if (a === 'reserve') reserveHelper();
+    if (a === 'recheckaddr') { const n = await safe(() => api.call('link:recheckAddress')); if (n) toast(`Checked: this PC is ${S.host}${n.router ? ` (${n.router})` : ''}.`); }
+    if (a === 'undofixed') { const r = await safe(() => api.call('link:undoFixed')); if (r) toast(r.ok ? 'Back on automatic.' : 'Nothing was changed.'); }
     if (a === 'export') { const f = await safe(() => api.call('link:export')); if (f) toast('Settings saved. Keep the file safe: it holds the phones\' passwords.'); }
     if (a === 'import') { const r = await safe(() => api.call('link:import')); if (r) toast(`Imported ${r.people} people, ${r.groups} groups and ${r.phones} phones.`); }
     if (a === 'logs') await safe(() => api.call('link:openLogs'));
@@ -245,6 +290,7 @@ document.addEventListener('change', async (e) => {
   if (t.dataset.dnd) { await safe(() => api.call('link:dnd', t.dataset.dnd, t.checked)); load(); }
   if (t.id === 'manualwho') { hand = t.value ? { ext: t.value, details: await safe(() => api.call('link:manual', t.value)), reveal: false } : null; renderHand(); }
   if (t.id === 'adapter') { await safe(() => api.call('link:adapter', t.value)); load(); }
+  if (t.name === 'pmode') { const n = await safe(() => api.call('link:phoneAddress', t.value)); if (n) toast(n.useName ? `Desk phones now get ${n.server}. They pick it up as they restart.` : `Desk phones now get ${n.server}.`); load(); }
   if (t.id === 'sww') await safe(() => api.call('link:startWithWindows', t.checked));
   if (t.id === 'pub') await safe(() => api.call('link:allowPublic', t.checked));
 });
@@ -258,6 +304,11 @@ document.addEventListener('submit', async (e) => {
     const ext = $('#macwho').value; if (!ext) { toast('Choose who the phone is for.'); return; }
     const r = await safe(() => api.call('link:assign', $('#mac').value, ext));
     if (r) { $('#mac').value = ''; toast('Added. Turn the phone on (or restart it) and it sets itself up.'); load(); }
+  }
+  if (e.target.id === 'fixedform') {
+    const r = await safe(() => api.call('link:fixedAddress', $('#fixedip').value.trim()));
+    if (r) toast(r.ok ? `This PC now keeps ${r.address}.` : r.why === 'in-use' ? 'Another device already uses that address. Nothing was changed.' : r.why === 'no-router' ? 'The router couldn\'t be reached with that address, so it went back to automatic.' : 'Nothing was changed.');
+    load();
   }
   if (e.target.id === 'signin') {
     const r = await safe(() => api.call('link:signIn', $('#em').value, $('#pw').value));
