@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: "all, or only central-install (installs every program from the latest release the way Central does)"
+        description: "all, windows (build and check the installers) or central-install (installs every program from the latest release the way Central does)"
         default: all
 
 jobs:
@@ -206,6 +206,7 @@ jobs:
   # 2) the same user with Central's new install-run.js (Link Office through the Windows permission prompt)
   # 3) as an administrator with install-run.js: every program installs and Central finds it
   central-install:
+    if: github.event_name != 'workflow_dispatch' || inputs.job != 'windows'
     runs-on: windows-latest
     defaults:
       run:
@@ -302,7 +303,9 @@ jobs:
         run: |
           Start-Process -FilePath C:\riy\dl\RiyeserCentral-Setup.exe -ArgumentList "/S" -Wait
           Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          $central = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Central.exe" | Select-Object -First 1
+          $central = $null
+          for ($i = 0; $i -lt 60 -and -not $central; $i++) { $central = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Riyeser Central.exe" -ErrorAction SilentlyContinue | Select-Object -First 1; if (-not $central) { Start-Sleep -Seconds 2 } }
+          if (-not $central) { throw "The released Riyeser Central didn't install" }
           Start-Process -FilePath $central.FullName -ArgumentList "--self-test=C:\riy\out\central.json" -Wait
           $c = Get-Content C:\riy\out\central.json -Raw | ConvertFrom-Json
           $c.programs | Format-Table id, status, where -AutoSize | Out-String -Width 220 | Write-Host
