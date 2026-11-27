@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Online orders & bookings{% endblock %}
+{% block content %}
+{% include "online/_styles.html" %}
+<div class="head"><div><h1>Online orders &amp; bookings</h1><p class="sub">What your website sent, and what it became here. Newest first.</p></div>
+<div class="actions">{% if can('setup') %}<a class="btn" href="{{ url_for('online.settings') }}">Online connections settings</a>{% endif %}</div></div>
+{% include "online/_sync.html" %}
+<nav class="tabs ol-tabs" aria-label="Show">{% for k, l in tabs %}<a class="{{ 'on' if tab == k }}" href="{{ url_for('online.index', t=k) }}">{{ l }}{% if k == 'problems' and counts.failed %}<span class="n">{{ counts.failed }}</span>{% elif k == 'test' and tests %}<span class="n">{{ tests }}</span>{% endif %}</a>{% endfor %}</nav>
+{% if tab == 'test' %}<div class="ol-test">These came from a <b>test key</b>. They went through every check so your developer can see the answers, but <b>nothing was added</b>: no bookings, invoices, payments or stock changes.</div>{% endif %}
+<div class="tbl"><table id="ol-list"><tr><th class="ol-hide-sm">When</th><th>What</th><th>Customer</th><th class="ol-hide-sm">Details</th><th>Status</th><th>Became</th></tr>
+{% for r in rows %}{% set l = link(r) %}<tr>
+<td class="n ol-hide-sm">{{ r.filed_at[5:16] }}</td>
+<td><a href="{{ url_for('online.view', iid=r.id) }}"><b>{{ label(r) }}</b></a><div class="ol-show-sm muted small">{{ r.filed_at[5:16] }}</div>{% if r.test %} <span class="badge ol-test">Test</span>{% endif %}{% if r.source == 'widget' %} <span class="badge">Booking form</span>{% endif %}{% if r.order_request and not r.converted_id and not r.test and r.status == 'done' %} <span class="badge open">To confirm</span>{% endif %}{% if not r.seen_at and r.status == 'done' and not r.test and r.kind in news_kinds %} <span class="badge open">New</span>{% endif %}</td>
+<td>{{ r.customer_name or '' }}</td>
+<td class="ol-hide-sm">{{ summary(r) }}</td>
+<td><span class="badge ol-{{ r.status }}">{{ statuses.get(r.status, r.status) }}</span>{% if r.state and r.status == 'done' %} <span class="muted small">{{ r.state|replace('_', ' ') }}</span>{% endif %}
+{% if r.status != 'done' and r.reason %}<div class="ol-why">{{ r.reason }}</div>{% elif r.reason and r.status == 'done' and not r.test %}<div class="ol-why">{{ r.reason }}</div>{% endif %}</td>
+<td>{% if l %}<a href="{{ l }}">{{ r.reference or 'Open' }}</a>{% else %}<span class="muted">{{ r.reference or '' }}</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">Nothing here yet. When your website sends a booking, order, enquiry or payment, it shows here once Riyeser Central has brought it in.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

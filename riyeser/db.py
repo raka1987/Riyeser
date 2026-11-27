@@ -382,6 +382,8 @@ def migrate(db):
     _card_terminal_schema(db)  # POS card payments: terminal attempts, their history, split tenders
     from .listing import _ensure_prefs
     _ensure_prefs(db)  # each person's sort and filters on each list
+    from .online import ensure_schema as _online_schema
+    _online_schema(db)  # online connections: what came in from websites, news to send back, the settings
     db.commit()
 
 

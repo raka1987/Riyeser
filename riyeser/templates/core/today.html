@@ -33,6 +33,12 @@
 {% else %}<p class="td-empty">Every invoice is paid. Nothing to chase.</p>{% endif %}</div>
 {% endif %}
 
+{% if online_new is defined %}
+<div class="card td-card" id="td-online"><h3>New from your website <span class="cnt">{{ online_new|length }}</span><a href="{{ url_for('online.index') }}">All online →</a></h3>
+<ul class="td-list">{% for o in online_new %}<li><a class="row" href="{{ url_for('online.view', iid=o.id) }}"><div class="main"><b>{{ 'Order request' if o.order_request else {'booking': 'Online booking', 'order': 'Online order', 'enquiry': 'Enquiry', 'quote_accept': 'Quote accepted', 'invoice_payment': 'Payment'}.get(o.kind, 'Online') }}: {{ o.customer_name or '' }}</b><span>{{ o.reference or '' }}{% if o.state %} · {{ o.state|replace('_', ' ') }}{% endif %} · {{ o.filed_at[11:16] if o.filed_at[:10] == today else o.filed_at[:10] }}</span></div></a>
+<form method="post" action="{{ url_for('online.seen', iid=o.id) }}"><input type="hidden" name="back" value="{{ url_for('core.today') }}"><button class="btn sm" title="Hide it from Today">Seen</button></form></li>{% endfor %}</ul></div>
+{% endif %}
+
 {% if follow_ups is defined %}
 <div class="card td-card"><h3>Follow-ups due{% if follow_ups %} <span class="cnt">{{ follow_ups|length }}</span>{% endif %}</h3>
 {% if follow_ups %}<ul class="td-list">{% for n in follow_ups %}<li><a class="row" href="{{ url_for('contacts.view', cid=n.contact_id) }}#notes"><div class="main"><b>{{ n.cname }}</b><span>{% if n.follow_up_on < today %}<span class="neg" style="display:inline">was due {{ n.follow_up_on }}</span>{% else %}today{% endif %} · {{ n.note }}</span></div></a>

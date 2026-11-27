@@ -45,6 +45,9 @@ def create_app(test_config=None):
     def load_user():
         g.user = None
         g.company = None
+        if (request.endpoint or "").startswith("online_api."):  # Riyeser Central's local API: its own check
+            from .views.online import api_guard
+            return api_guard()
         if app.config["DEMO_MODE"]:
             if not demo_mode.demo_on():  # Central has left demo mode while this program was open
                 if request.endpoint != "static":
@@ -194,7 +197,9 @@ def create_app(test_config=None):
         return redirect(request.referrer or url_for("core.dashboard"))
 
     from .views import auth, core, contacts, documents, banking, inventory, payroll, reports, pos, links, help, companies
-    from .views import bookings, backups, email, expenses
+    from .views import bookings, backups, email, expenses, online
+    app.register_blueprint(online.bp)
+    app.register_blueprint(online.api)
     app.register_blueprint(expenses.bp)
     app.register_blueprint(auth.bp)
     app.register_blueprint(backups.bp)
@@ -279,7 +284,7 @@ def _separate_app_redirect(endpoint):
             return redirect(url_for("pos.register"))
         if endpoint.startswith("bookings."):
             return redirect(url_for("core.bookings_app"))
-        if endpoint.startswith(POS_APP_AREAS) or endpoint in ("static", "core.bookings_app", "core.today"):
+        if endpoint.startswith(POS_APP_AREAS + ("online.",)) or endpoint in ("static", "core.bookings_app", "core.today"):
             return None
         flash("That's part of Riyeser Accounting. Open it in Riyeser Accounting: it uses the same company file.",
               "error")
@@ -293,7 +298,7 @@ def _separate_app_redirect(endpoint):
 
 # Riyeser Invoices (free): quotes, invoices, customers, receiving payments and who owes you. Everything else is
 # Riyeser Accounting's, and opens there with the same company file.
-INVOICES_APP_ENDPOINTS = ("companies.", "help.", "auth.", "backups.", "email.")
+INVOICES_APP_ENDPOINTS = ("companies.", "help.", "auth.", "backups.", "email.", "online.")
 INVOICES_APP_EXACT = {"static", "core.company", "core.invoices_upgrade", "core.bookings_app", "documents.save_pdf",
                       "core.dashboard", "core.today"}   # Today is the home screen
 
@@ -319,7 +324,7 @@ def _invoices_app_redirect(endpoint):
 def _bookings_app_redirect(endpoint):
     from . import perms
     home = url_for("bookings.calendar")
-    if endpoint.startswith(("bookings.", "companies.", "help.", "auth.", "backups.", "email.")) or \
+    if endpoint.startswith(("bookings.", "companies.", "help.", "auth.", "backups.", "email.", "online.")) or \
             endpoint in ("static", "core.company", "core.dashboard", "core.today"):   # Today is the home screen
         return None
     if endpoint.startswith(("documents.", "contacts.")):

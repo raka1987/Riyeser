@@ -169,6 +169,10 @@ def area_of(endpoint, view_args, args, db):
             r = db.execute("SELECT kind FROM contacts WHERE id=?", (va["cid"],)).fetchone()
             return _kind_area(r["kind"]) if r else None
         return None
+    if endpoint == "online.settings":
+        return "setup"
+    if bp == "online":
+        return "sales"   # what came in from the website: bookings, orders, enquiries, payments
     if endpoint == "bookings.setup":
         return "setup" if request.method == "POST" else "bookings"
     if endpoint == "bookings.starters":

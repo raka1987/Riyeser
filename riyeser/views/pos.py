@@ -22,7 +22,7 @@ from ..terminals import ENTRY_MODES
 bp = Blueprint("pos", __name__, url_prefix="/pos")
 
 METHODS = {"cash": "Cash", "card": "Card / EFTPOS"}
-METHOD_LABELS = {**METHODS, "split": "Split payment"}
+METHOD_LABELS = {**METHODS, "split": "Split payment", "online": "Paid online"}
 WALK_IN = "Walk-in Customer"
 
 

@@ -1,0 +1,53 @@
+{% extends "base.html" %}{% block title %}Online connections{% endblock %}
+{% block content %}
+{% include "online/_styles.html" %}
+<div class="head"><div><h1>Online connections</h1><p class="sub">What happens to bookings, orders and payments from your website, and what your website can show.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('online.index') }}">Online orders &amp; bookings</a></div></div>
+<div class="card"><h3>How it works</h3><p class="muted">Your website sends bookings, orders, enquiries and payments to Riyeser Online. Riyeser Central, on the PC that holds this company file, brings them in here every minute and sends back your prices, stock and free times. Keys for your website are made in Riyeser Online: Management → Connections.</p>
+<div class="ol-stats"><div><b>{{ published['items']|length }}</b>items and services shown</div><div><b>{{ stock_n }}</b>stock levels</div><div><b>{{ staff }}</b>staff bookable</div><div><b>{{ windows }}</b>free times in the next {{ s.days_ahead }} days</div></div>
+{% if published.skipped %}<p class="flash warn" style="margin-top:12px">Not shown on your website: {% for x in published.skipped %}<b>{{ x.name }}</b> ({{ x.sku }}): {{ x.reason }}{{ '; ' if not loop.last }}{% endfor %}</p>{% endif %}
+</div>
+<form method="post" id="ol-settings">
+<div class="card ol-opts"><h3>Orders from your website</h3>
+{% for k, label, help in order_as %}<label class="opt"><input type="radio" name="order_as" value="{{ k }}" {{ 'checked' if s.order_as == k }}><span><b>{{ label }}</b><small>{{ help }}</small></span></label>{% endfor %}
+<div class="fields" style="margin-top:10px"><div><label for="order_prices">Prices</label><select id="order_prices" name="order_prices">
+<option value="website" {{ 'selected' if s.order_prices == 'website' }}>The price the customer saw on the website</option>
+<option value="riyeser" {{ 'selected' if s.order_prices == 'riyeser' }}>This company file's price</option></select></div>
+<div><label for="payment_account_id">Money paid online goes into</label><select id="payment_account_id" name="payment_account_id">{% for b in banks %}<option value="{{ b.id }}" {{ 'selected' if b.id == pay_default }}>{{ b.code }} {{ b.name }}</option>{% endfor %}</select></div></div>
+<p class="muted small">A fee the payment provider kept (when your website sends it) is recorded as Bank Fees from the same account.</p></div>
+
+<div class="card ol-opts"><h3>Bookings from your website</h3>
+<label class="opt"><input type="radio" name="booking_status" value="pending" {{ 'checked' if s.booking_status == 'pending' }}><span><b>I'll confirm each one</b><small>They go on the calendar as Booked. Confirm them from the Online list or Bookings, and the customer's website hears.</small></span></label>
+<label class="opt"><input type="radio" name="booking_status" value="confirmed" {{ 'checked' if s.booking_status == 'confirmed' }}><span><b>Confirm them straight away</b><small>Bookings from the booking form on your website still wait for you to confirm them.</small></span></label>
+<p class="muted small">A time that's no longer free, outside your hours, or for a service you don't offer online is turned down, and the customer is told why.</p></div>
+
+<div class="card ol-opts"><h3>Quotes accepted online</h3>
+<label class="opt"><input type="radio" name="quote_after" value="nothing" {{ 'checked' if s.quote_after == 'nothing' }}><span><b>Just mark it accepted</b><small>Make the invoice or job yourself when you're ready.</small></span></label>
+<label class="opt"><input type="radio" name="quote_after" value="invoice" {{ 'checked' if s.quote_after == 'invoice' }}><span><b>Make the invoice</b><small>With the quote's lines, straight away.</small></span></label>
+<label class="opt"><input type="radio" name="quote_after" value="job" {{ 'checked' if s.quote_after == 'job' }}><span><b>Make a Bookings job</b><small>Ready to give a time, invoiced at the quoted price.</small></span></label></div>
+
+<div class="card"><h3>What your website can show</h3>
+<div class="fields"><div><label for="publish_items">Products and prices</label><select id="publish_items" name="publish_items" onchange="olPick()">
+<option value="all" {{ 'selected' if s.publish_items == 'all' }}>Every item you sell</option><option value="chosen" {{ 'selected' if s.publish_items == 'chosen' }}>Only the ones I tick</option><option value="none" {{ 'selected' if s.publish_items == 'none' }}>None</option></select></div>
+<div><label for="publish_services">Bookable services</label><select id="publish_services" name="publish_services" onchange="olPick()">
+<option value="all" {{ 'selected' if s.publish_services == 'all' }}>Every service in Bookings</option><option value="chosen" {{ 'selected' if s.publish_services == 'chosen' }}>Only the ones I tick</option><option value="none" {{ 'selected' if s.publish_services == 'none' }}>None (no online bookings)</option></select></div></div>
+<div id="pick-items" class="ol-pick" {{ 'hidden' if s.publish_items != 'chosen' }}>{% for i in items %}<label><input type="checkbox" name="item" value="{{ i.id }}" {{ 'checked' if i.id in s.chosen_items }}>{{ i.name }} <span class="muted small">{{ i.sku }}</span></label>{% else %}<span class="muted">No items for sale yet.</span>{% endfor %}</div>
+<div id="pick-svcs" class="ol-pick" {{ 'hidden' if s.publish_services != 'chosen' }}>{% for v in svcs %}<label><input type="checkbox" name="service" value="{{ v.id }}" {{ 'checked' if v.id in s.chosen_services }}>{{ v.name }} <span class="muted small">{{ v.minutes }} min</span></label>{% else %}<span class="muted">No services in Bookings yet.</span>{% endfor %}</div>
+<label style="margin-top:10px;display:flex;gap:8px;align-items:center;font-weight:400"><input type="checkbox" name="publish_stock" value="1" {{ 'checked' if s.publish_stock }}> Show how many are in stock (stocked items only)</label>
+<p class="muted small">Cost prices are never sent. Prices include GST, as at the till.</p></div>
+
+<div class="card"><h3>Free times for online bookings</h3>
+<div class="fields"><div><label for="timezone">Time zone</label><select id="timezone" name="timezone">{% for z in timezones %}<option {{ 'selected' if z == s.timezone }}>{{ z }}</option>{% endfor %}</select></div>
+<div><label for="days_ahead">How far ahead (days)</label><input id="days_ahead" type="number" min="1" max="365" name="days_ahead" value="{{ s.days_ahead }}"></div>
+<div><label for="slot_minutes">Start times every (minutes)</label><input id="slot_minutes" type="number" min="5" max="240" step="5" name="slot_minutes" value="{{ s.slot_minutes }}"></div>
+<div><label for="min_notice_minutes">Least notice (minutes)</label><input id="min_notice_minutes" type="number" min="0" max="43200" step="15" name="min_notice_minutes" value="{{ s.min_notice_minutes }}"></div></div>
+<p class="muted small" style="margin-top:8px">Open hours: customers can book inside these, when the staff member (or table) has nothing else booked.</p>
+<div class="ol-days">{% for d in weekdays %}{% set h = s.hours[d].split('-') if s.hours[d] else ['', ''] %}<div class="ol-day"><label><input type="checkbox" name="open_{{ d }}" value="1" {{ 'checked' if s.hours[d] }}> {{ d|capitalize }}</label>
+<input type="time" name="from_{{ d }}" value="{{ h[0] or '09:00' }}" aria-label="{{ d|capitalize }} opens"><input type="time" name="to_{{ d }}" value="{{ h[1] or '17:00' }}" aria-label="{{ d|capitalize }} closes"></div>{% endfor %}</div></div>
+{% if can('setup', 2) %}<p><button class="btn pri">Save</button></p>{% else %}<p class="muted">Only someone with Setup access can change these.</p>{% endif %}
+</form>
+{% endblock %}
+{% block scripts %}<script>
+function olPick(){document.getElementById('pick-items').hidden=document.getElementById('publish_items').value!=='chosen';
+document.getElementById('pick-svcs').hidden=document.getElementById('publish_services').value!=='chosen'}
+</script>{% endblock %}
