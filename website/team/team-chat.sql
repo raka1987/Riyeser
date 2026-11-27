@@ -2478,17 +2478,149 @@ begin
            || 'will show their licence as not active. The books on your PCs are not touched.' || E'\n\n'
            || 'If you think this is a mistake, or you''d like it reopened, contact Riyeser Support.' end);
   perform hq_log(case when new_status = 'active' then 'business.reopened' when new_status = 'suspended' then 'business.suspended' else 'business.closed' end,
-    jsonb_build_object('workspace_id', ws, 'ticket', tr, 'reason', trim(reason), 'was', w.status));
+    jsonb_build_object('workspace_id', ws, 'ticket', tr, 'reason', trim(reason), 'was', w.status)
+      || case when new_status = 'active' and w.duplicate_of is not null then jsonb_build_object('was_duplicate_of', w.duplicate_of) else '{}'::jsonb end);
 end $$;
 
-create or replace function public.hq_close_duplicate(ws uuid, duplicate_of_ws uuid, reason text, ticket_ref text) returns void
-  language plpgsql security definer set search_path = public as $$
+-- Close as duplicate: closes THIS business (the one HQ has open). Nothing is moved or deleted: it's an ordinary close
+-- (hq_set_business_status) plus an optional link to the business being kept, and "Reopen" undoes both.
+-- Safety (the owner, Nov 2026): HQ never pre-picks another account. The link is optional and chosen from likely
+-- matches; the Company ID of the business being closed must be typed; and anything that suggests it's the wrong one
+-- (it has payments, paid programs, recent use; the kept one has a different owner or nothing paid) must be accepted.
+drop function if exists public.hq_close_duplicate(uuid, uuid, text, text);
+-- matching keys: digits of a phone; letters and digits of a tax number; a name without "(2)", "Pty Ltd", numbers, spaces
+create or replace function public.dup_digits(t text) returns text language sql immutable as $$
+  select nullif(regexp_replace(coalesce(t, ''), '\D', '', 'g'), '') $$;
+create or replace function public.dup_tax(t text) returns text language sql immutable as $$
+  select nullif(lower(regexp_replace(coalesce(t, ''), '[^A-Za-z0-9]', '', 'g')), '') $$;
+create or replace function public.dup_name(t text) returns text language sql immutable as $$
+  select nullif(regexp_replace(regexp_replace(regexp_replace(lower(coalesce(t, '')), '\([^)]*\)', ' ', 'g'),
+    '\m(pty|ltd|limited|inc|co|company|the|and|copy|new|test|old)\M|[0-9]+\s*$', ' ', 'g'), '[^a-z]', '', 'g'), '') $$;
+-- One business, for the Close as duplicate screen: who owns it, its plan and payments, how much it's used.
+create or replace function public.hq_dup_card(ws uuid) returns jsonb
+  language plpgsql stable security definer set search_path = public as $$
+declare w workspaces; r jsonb;
 begin
-  if ws = duplicate_of_ws then raise exception 'Choose a different business.'; end if;
-  if not exists (select 1 from workspaces where id = duplicate_of_ws) then raise exception 'Choose the business it duplicates.'; end if;
-  perform hq_set_business_status(ws, 'closed', reason, ticket_ref);
-  update workspaces set duplicate_of = duplicate_of_ws, closed_reason = left('Duplicate: ' || trim(reason), 300) where id = ws;
-  perform hq_log('business.duplicate', jsonb_build_object('workspace_id', ws, 'duplicate_of', duplicate_of_ws, 'ticket', upper(nullif(trim(coalesce(ticket_ref, '')), ''))));
+  select * into w from workspaces where id = ws;
+  if w.id is null then return null; end if;
+  select jsonb_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'status', w.status, 'kind', w.kind,
+    'created_at', w.created_at, 'removal_state', w.removal_state, 'duplicate_of', w.duplicate_of,
+    'owner_id', o.user_id, 'owner_name', o.display_name, 'owner_email', o.email,
+    'members', (select count(*) from members m where m.workspace_id = ws),
+    'pcs', (select count(*) from devices d where d.workspace_id = ws and public.pc_active(d)),
+    'paid_invoices', (select count(*) from billing_payments p where p.workspace_id = ws and p.status = 'completed'),
+    'paid_total', (select coalesce(sum(p.amount), 0) from billing_payments p where p.workspace_id = ws and p.status = 'completed'),
+    'paid_programs', (select coalesce(jsonb_agg(m.module order by m.module), '[]') from company_modules m where m.workspace_id = ws
+        and ((m.status = 'active' and (m.paid_until is null or m.paid_until >= current_date)) or (m.status = 'cancelled' and m.paid_until >= current_date)))
+      || case when w.calls_paid_until > now() then '["calls"]'::jsonb else '[]'::jsonb end,
+    'trial_programs', (select count(*) from company_modules m where m.workspace_id = ws and m.status = 'trial' and m.trial_ends >= current_date),
+    'last_activity', greatest(w.last_active_at, (select max(d.last_seen) from devices d where d.workspace_id = ws)))
+  into r
+  from (select null) x
+  left join lateral (select m.user_id, m.display_name, u.email::text as email from members m join auth.users u on u.id = m.user_id
+                     where m.workspace_id = ws and m.role = 'owner' order by m.joined_at limit 1) o on true;
+  return r;
+end $$;
+-- What could make closing this one a mistake. Each must be accepted before it closes (the screen shows the same list).
+create or replace function public.hq_dup_risks(ws uuid, keep_ws uuid) returns jsonb
+  language plpgsql stable security definer set search_path = public as $$
+declare a jsonb := hq_dup_card(ws); k jsonb := case when keep_ws is not null then hq_dup_card(keep_ws) end; r jsonb := '[]';
+begin
+  if (a ->> 'paid_invoices')::int > 0 then r := r || jsonb_build_object('code', 'paid_invoices',
+    'text', 'This account has ' || (a ->> 'paid_invoices') || ' paid invoice' || case when (a ->> 'paid_invoices')::int = 1 then '' else 's' end || '.'); end if;
+  if jsonb_array_length(a -> 'paid_programs') > 0 then r := r || jsonb_build_object('code', 'paid_programs',
+    'text', 'This account is paying for programs right now.'); end if;
+  if (a ->> 'last_activity')::timestamptz > now() - interval '14 days' then r := r || jsonb_build_object('code', 'recent',
+    'text', 'Someone used this account in the last 14 days.'); end if;
+  if k is not null then
+    if (a ->> 'owner_id') is distinct from (k ->> 'owner_id') then r := r || jsonb_build_object('code', 'owner',
+      'text', 'The account you''re keeping has a different owner.'); end if;
+    if ((a ->> 'paid_invoices')::int > 0 or jsonb_array_length(a -> 'paid_programs') > 0)
+       and (k ->> 'paid_invoices')::int = 0 and jsonb_array_length(k -> 'paid_programs') = 0 then
+      r := r || jsonb_build_object('code', 'backwards', 'text', 'This account has payments and the one you''re keeping has none. You may be closing the wrong one.'); end if;
+    if (a ->> 'members')::int > (k ->> 'members')::int or (a ->> 'pcs')::int > (k ->> 'pcs')::int then
+      r := r || jsonb_build_object('code', 'bigger', 'text', 'This account has more people or PCs than the one you''re keeping.'); end if;
+  end if;
+  return r;
+end $$;
+-- Is this business one HQ may link to as "the account we're keeping"? null = yes, else why not.
+create or replace function public.dup_keep_problem(ws uuid, k workspaces) returns text language sql stable as $$
+  select case when k.id is null then 'That business doesn''t exist.' when k.id = ws then 'That''s this account. Choose the other one.'
+    when k.removal_state is not null then 'That account''s details were removed.' when k.status = 'closed' then 'That account is closed. Keep an open one.'
+    when k.duplicate_of = ws then 'That account is linked as a duplicate of this one.' end $$;
+-- The screen: this account, what to watch out for, and likely matches (never a list of every business).
+create or replace function public.hq_dup_check(ws uuid) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare w workspaces; oe text; op text; nk text;
+begin
+  perform hq_need(array['business.close']);
+  select * into w from workspaces where id = ws;
+  if w.id is null then raise exception 'That business doesn''t exist.'; end if;
+  select lower(u.email::text), public.dup_digits(coalesce(nullif(u.raw_user_meta_data -> 'riyeser_signup' ->> 'phone', ''), w.phone)) into oe, op
+    from members m join auth.users u on u.id = m.user_id where m.workspace_id = ws and m.role = 'owner' order by m.joined_at limit 1;
+  op := coalesce(op, public.dup_digits(w.phone)); nk := public.dup_name(w.name);
+  return json_build_object('this', hq_dup_card(ws), 'risks', hq_dup_risks(ws, null),
+    'matches', (select coalesce(json_agg(y.c order by y.n desc, y.gap), '[]') from (
+      select hq_dup_card(x.id) || jsonb_build_object('why', to_jsonb(x.why || case when x.gap < 14 * 86400
+          then array['Signed up ' || case when x.gap < 86400 then 'the same day' else (ceil(x.gap / 86400))::int::text || ' days apart' end] else '{}' end)) as c,
+        array_length(x.why, 1) as n, x.gap
+      from (select o.id, abs(extract(epoch from o.created_at - w.created_at)) as gap,
+        array_remove(array[
+          case when oe is not null and exists (select 1 from members m join auth.users u on u.id = m.user_id
+            where m.workspace_id = o.id and m.role = 'owner' and lower(u.email::text) = oe) then 'Same owner email' end,
+          case when length(op) >= 6 and (public.dup_digits(o.phone) = op or exists (select 1 from members m join auth.users u on u.id = m.user_id
+            where m.workspace_id = o.id and m.role = 'owner' and public.dup_digits(u.raw_user_meta_data -> 'riyeser_signup' ->> 'phone') = op)) then 'Same phone' end,
+          case when public.dup_tax(w.tax_number) is not null and public.dup_tax(o.tax_number) = public.dup_tax(w.tax_number) then 'Same tax number' end,
+          case when length(nk) >= 3 and (public.dup_name(o.name) = nk
+            or (length(nk) >= 5 and length(public.dup_name(o.name)) >= 5 and (public.dup_name(o.name) like nk || '%' or nk like public.dup_name(o.name) || '%'))) then 'Similar name' end
+        ], null) as why
+      from workspaces o where o.id <> ws and o.status <> 'closed' and o.removal_state is null
+      ) x where array_length(x.why, 1) > 0 order by array_length(x.why, 1) desc, x.gap limit 6) y));
+end $$;
+-- Not among the matches? Find it by name, Company ID, owner email or tax number (2+ characters; 8 at most).
+create or replace function public.hq_dup_search(ws uuid, search text) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare q text := nullif(trim(coalesce(search, '')), '');
+begin
+  perform hq_need(array['business.close']);
+  if q is null or length(q) < 2 then return '[]'; end if;
+  return (select coalesce(json_agg(hq_dup_card(x.id) || jsonb_build_object('problem', public.dup_keep_problem(ws, x))), '[]') from (
+    select w.* from workspaces w where w.id <> ws and (w.name ilike '%' || q || '%' or w.company_code ilike '%' || q || '%' or w.tax_number ilike '%' || q || '%'
+      or exists (select 1 from members m join auth.users u on u.id = m.user_id where m.workspace_id = w.id and m.role = 'owner' and u.email::text ilike '%' || q || '%'))
+    order by (w.status = 'closed'), w.created_at desc limit 8) x);
+end $$;
+-- Close this business as a duplicate. duplicate_of_ws (the one being kept) is optional.
+create or replace function public.hq_close_duplicate(ws uuid, duplicate_of_ws uuid, reason text, ticket_ref text, confirm_code text, accept_risks boolean)
+  returns json language plpgsql security definer set search_path = public as $$
+declare w workspaces; k workspaces; pr text; risks jsonb; before jsonb; tr text := upper(nullif(trim(coalesce(ticket_ref, '')), ''));
+begin
+  perform hq_need(array['business.close']);   -- staff, signed in with two-step sign-in, with business.close
+  select * into w from workspaces where id = ws;
+  if w.id is null then raise exception 'That business doesn''t exist.'; end if;
+  if w.status = 'closed' then raise exception 'This account is already closed.'; end if;
+  if w.removal_state is not null then raise exception 'This account''s details were removed.'; end if;
+  if upper(trim(coalesce(confirm_code, ''))) is distinct from upper(w.company_code) then
+    raise exception 'Type this account''s Company ID (%) to confirm.', w.company_code; end if;
+  if duplicate_of_ws is not null then
+    select * into k from workspaces where id = duplicate_of_ws;
+    pr := public.dup_keep_problem(ws, k);
+    if pr is not null then raise exception '%', pr; end if;
+  end if;
+  risks := hq_dup_risks(ws, duplicate_of_ws);
+  if jsonb_array_length(risks) > 0 and not coalesce(accept_risks, false) then
+    raise exception 'Check the warnings first: %', (select string_agg(x ->> 'text', ' ') from jsonb_array_elements(risks) x); end if;
+  before := jsonb_build_object('status', w.status, 'closed_reason', w.closed_reason, 'duplicate_of', w.duplicate_of, 'closed_at', w.closed_at);
+  perform hq_set_business_status(ws, 'closed', reason, ticket_ref);   -- the reason, ticket and permission checks; emails the owner
+  update workspaces set duplicate_of = duplicate_of_ws, closed_reason = left('Duplicate: ' || trim(reason), 300) where id = ws returning * into w;
+  if tr ~ '^[0-9]+$' then tr := 'T-' || tr; end if;
+  -- the full before and after, and the facts it was decided on (counts and ids only: no names or emails)
+  perform hq_log('business.duplicate', jsonb_build_object('workspace_id', ws, 'duplicate_of', duplicate_of_ws, 'ticket', tr, 'reason', trim(reason),
+    'company_code', w.company_code, 'keep_company_code', k.company_code, 'before', before,
+    'after', jsonb_build_object('status', w.status, 'closed_reason', w.closed_reason, 'duplicate_of', w.duplicate_of, 'closed_at', w.closed_at),
+    'facts', (select jsonb_object_agg(key, value) from jsonb_each(hq_dup_card(ws)) where key in ('members', 'pcs', 'paid_invoices', 'paid_programs', 'last_activity', 'created_at')),
+    'risks_accepted', (select coalesce(jsonb_agg(x ->> 'code'), '[]') from jsonb_array_elements(risks) x),
+    'data_deleted', false));
+  return json_build_object('closed', ws, 'duplicate_of', duplicate_of_ws);
 end $$;
 
 -- ---------------------------------------------------------------- inactive accounts
@@ -3118,7 +3250,9 @@ revoke all on function public.touch_activity(), public.activity_on_sign_in(), pu
   public.ticket_move_level(support_tickets, int, text, uuid, uuid), public.hq_ticket_escalate(uuid, int, text, uuid),
   public.hq_saved_replies(), public.hq_save_reply(bigint, text, text), public.hq_retire_reply(bigint), public.hq_support_sweep(),
   public.hq_fix_start(text, text, text), public.hq_edit_business(uuid, jsonb, text, text), public.hq_reset_2fa(uuid, uuid, text, text, text),
-  public.hq_change_owner(uuid, uuid, text, text), public.hq_set_business_status(uuid, text, text, text), public.hq_close_duplicate(uuid, uuid, text, text),
+  public.hq_change_owner(uuid, uuid, text, text), public.hq_set_business_status(uuid, text, text, text), public.hq_close_duplicate(uuid, uuid, text, text, text, boolean),
+  public.hq_dup_card(uuid), public.hq_dup_risks(uuid, uuid), public.hq_dup_check(uuid), public.hq_dup_search(uuid, text),
+  public.dup_keep_problem(uuid, workspaces),
   public.inactivity_email(workspaces, int, int), public.hq_inactivity_sweep(), public.hq_inactive_accounts(), public.hq_remove_accounts(uuid[], text),
   public.credit_json(uuid), public.refund_reason_name(text), public.request_refund(uuid, text, text, text, numeric, text, text, text, uuid),
   public.my_refunds(uuid), public.hq_refund_create(uuid, text, text, text, numeric, text, text, text), public.refund_row_json(refund_requests),
@@ -3139,7 +3273,8 @@ grant execute on function public.hq_get_settings(), public.hq_set_setting(text, 
   public.hq_ticket_priority(uuid, text), public.hq_ticket_assign(uuid, uuid), public.hq_ticket_escalate(uuid, int, text, uuid),
   public.hq_saved_replies(), public.hq_save_reply(bigint, text, text), public.hq_retire_reply(bigint),
   public.hq_edit_business(uuid, jsonb, text, text), public.hq_reset_2fa(uuid, uuid, text, text, text), public.hq_change_owner(uuid, uuid, text, text),
-  public.hq_set_business_status(uuid, text, text, text), public.hq_close_duplicate(uuid, uuid, text, text), public.hq_inactive_accounts(),
+  public.hq_set_business_status(uuid, text, text, text), public.hq_close_duplicate(uuid, uuid, text, text, text, boolean),
+  public.hq_dup_check(uuid), public.hq_dup_search(uuid, text), public.hq_inactive_accounts(),
   public.hq_remove_accounts(uuid[], text), public.hq_refund_create(uuid, text, text, text, numeric, text, text, text), public.hq_refunds(text),
   public.hq_refund_review(uuid), public.hq_refund_decide(uuid, text, numeric, text), public.hq_refund_second(uuid, text),
   public.hq_refund_paid(uuid, text, text), public.hq_grant_offer(uuid, text, text[], int, text, text, text, text), public.hq_decide_offer(uuid, boolean, text),

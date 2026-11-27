@@ -582,3 +582,32 @@ main.wide { max-width: none; }
 }
 @media (max-width: 340px) { .tiles, .ccards { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 380px) { .mbar { gap: 8px; } .mbt { font-size: 15px; } .mnav { padding: 6px 10px; } }
+
+/* 🔁 Close as duplicate: this account's facts, optional link to the one kept (matches first, else search), warnings */
+.btn.p.bad { background: var(--bad); border-color: var(--bad); } .btn.p:disabled { opacity: .45; cursor: not-allowed; }
+.dupthis { border: 1px solid #fecaca; background: #fff7f7; border-radius: 12px; padding: 12px 14px; margin: 12px 0; }
+.dupthis h4 { margin: 2px 0 8px; color: var(--ink); font-size: 16px; overflow-wrap: anywhere; }
+.duptag { display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--bad); }
+.dupkv { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 4px 10px; margin: 0; font-size: 13.5px; }
+.dupkv dt { color: var(--muted); } .dupkv dd { margin: 0; overflow-wrap: anywhere; } .dupkv small { color: var(--muted); }
+.dupkeep { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; margin: 0 0 12px; min-width: 0; }
+.dupkeep legend { font-weight: 700; color: var(--ink); font-size: 14px; padding: 0 4px; } .dupkeep legend small { color: var(--muted); font-weight: 500; }
+.duph { margin: 10px 0 6px; font-size: 12px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.dupm { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 10px; margin-top: 6px; cursor: pointer; min-height: 44px; }
+.dupm input { margin-top: 3px; flex: none; width: 18px; height: 18px; } .dupm:has(input:checked) { border-color: var(--blue); background: var(--blue-l); }
+.dupm.off { cursor: not-allowed; opacity: .7; background: #f8fafc; }
+.dupmb { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: 14px; overflow-wrap: anywhere; } .dupmb small { color: var(--muted); font-size: 12.5px; }
+.dupmb small.no { color: var(--bad); font-weight: 600; }
+.why { display: flex; flex-wrap: wrap; gap: 4px; } .why i { font-style: normal; font-size: 11.5px; font-weight: 700; background: var(--ok-l); color: var(--ok); border-radius: 999px; padding: 1px 8px; }
+.dupfind { margin-top: 10px; } .dupfind summary { cursor: pointer; color: var(--blue); font-weight: 600; font-size: 13.5px; padding: 6px 0; }
+.dupfind .search { display: flex; gap: 6px; margin: 6px 0; } .dupfind .search input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid #cfd6e4; border-radius: 10px; }
+.dupsel { margin: 0 0 8px; font-size: 14px; overflow-wrap: anywhere; }
+.dupwarn { background: var(--warn-l); color: #78350f; border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 13.5px; }
+.dupwarn ul { margin: 6px 0 4px; padding-left: 18px; } .dupwarn li.hi { color: var(--bad); font-weight: 700; } .dupwarn .opt { font-weight: 600; }
+.ownchg { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: center; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 12px; font-size: 14px; overflow-wrap: anywhere; }
+.ownchg small.lbl { display: block; color: var(--muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+@media (max-width: 640px) {
+  .dupkv { grid-template-columns: 96px minmax(0, 1fr); }
+  .dupfind .search input, .dupm, #dupCode, .mcard .f input, .mcard .f select { font-size: 16px; }   /* iPhone: no zoom on focus */
+  .ownchg { grid-template-columns: 1fr; } .ownchg > span { display: none; }
+}

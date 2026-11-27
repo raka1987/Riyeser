@@ -814,9 +814,137 @@ end $$;
 select public.hq_set_business_status(:'ws_b', 'active', 'Reopened at the owner''s request', null);
 select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
 do $$ begin assert (select count(*) from public.workspaces) = 1, 'reopened: visible again'; end $$;
--- close as a duplicate
-select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
-select public.hq_close_duplicate((select id from public.hq_companies('Early bird 2') where name = 'Early bird 2'), (select id from public.hq_companies('Early bird 1') where name = 'Early bird 1'), 'Signed up twice', null);
+-- close as a duplicate: closes THIS account; linking to the one kept is optional; nothing is deleted; Reopen undoes it.
+-- Harbour Bakery (paid, used today) and Harbour Bakery (2) (signed up 2 days later, same owner, same tax number, unused);
+-- Other Shop (another owner, the same tax number); Harbour Bakery old (closed).
+reset role;
+insert into auth.users values ('abd00000-0000-4000-8000-000000000001', 'baker@dup.test'), ('abd00000-0000-4000-8000-000000000002', 'other@dup.test');
+insert into public.workspaces (id, name, company_code, created_at, last_active_at, tax_number, phone) values
+  ('abd10000-0000-4000-8000-000000000001', 'Harbour Bakery', 'RIY-DUPA-01', now() - interval '20 days', now(), '12-345-678', '679 330 1234'),
+  ('abd10000-0000-4000-8000-000000000002', 'Harbour Bakery (2)', 'RIY-DUPB-02', now() - interval '18 days', now() - interval '17 days', '12 345 678', null),
+  ('abd10000-0000-4000-8000-000000000003', 'Other Shop', 'RIY-DUPC-03', now() - interval '300 days', now() - interval '30 days', '12345678', null),
+  ('abd10000-0000-4000-8000-000000000004', 'Harbour Bakery old', 'RIY-DUPD-04', now() - interval '400 days', now() - interval '200 days', null, null);
+update public.workspaces set status = 'closed', closed_at = now() - interval '100 days', closed_reason = 'inactive' where id = 'abd10000-0000-4000-8000-000000000004';
+insert into public.members (workspace_id, user_id, display_name, role) values
+  ('abd10000-0000-4000-8000-000000000001', 'abd00000-0000-4000-8000-000000000001', 'Baker', 'owner'),
+  ('abd10000-0000-4000-8000-000000000002', 'abd00000-0000-4000-8000-000000000001', 'Baker', 'owner'),
+  ('abd10000-0000-4000-8000-000000000003', 'abd00000-0000-4000-8000-000000000002', 'Other', 'owner'),
+  ('abd10000-0000-4000-8000-000000000004', 'abd00000-0000-4000-8000-000000000001', 'Baker', 'owner');
+insert into public.company_modules (workspace_id, module, status, paid_until) values ('abd10000-0000-4000-8000-000000000001', 'basic', 'active', current_date + 300);
+insert into public.billing_orders (id, workspace_id, method, modules, people, billing, amount, status) values
+  ('abd20000-0000-4000-8000-000000000001', 'abd10000-0000-4000-8000-000000000001', 'bank', '{basic}', 1, 'yearly', 120, 'paid');
+insert into public.billing_payments (order_id, workspace_id, method, status, amount, at) values
+  ('abd20000-0000-4000-8000-000000000001', 'abd10000-0000-4000-8000-000000000001', 'bank', 'completed', 120, now() - interval '400 days');
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ declare a uuid := 'abd10000-0000-4000-8000-000000000001'; b uuid := 'abd10000-0000-4000-8000-000000000002';
+  c uuid := 'abd10000-0000-4000-8000-000000000003'; d uuid := 'abd10000-0000-4000-8000-000000000004'; r json; m json;
+begin
+  -- the screen: this account, its warnings, and likely matches (never every business; never itself; never a closed one)
+  r := public.hq_dup_check(b);
+  assert r -> 'this' ->> 'company_code' = 'RIY-DUPB-02' and r -> 'this' ->> 'owner_email' = 'baker@dup.test', 'this account and its owner';
+  assert json_array_length(r -> 'risks') = 0, 'nothing risky about closing the unused copy';
+  select x into m from json_array_elements(r -> 'matches') x where x ->> 'id' = a::text;
+  assert m is not null and (m -> 'why')::text like '%Same owner email%' and (m -> 'why')::text like '%Similar name%'
+    and (m -> 'why')::text like '%Same tax number%' and (m -> 'why')::text like '%Signed up 2 days apart%', 'Harbour Bakery suggested, with why: ' || coalesce((m -> 'why')::text, 'missing');
+  assert (select x ->> 'id' from json_array_elements(r -> 'matches') x limit 1) = a::text, 'the best match first';
+  assert exists (select 1 from json_array_elements(r -> 'matches') x where x ->> 'id' = c::text and (x -> 'why')::text = '["Same tax number"]'), 'same tax number, another owner';
+  assert not exists (select 1 from json_array_elements(r -> 'matches') x where x ->> 'id' in (b::text, d::text)), 'not itself, not a closed one';
+  assert json_array_length(r -> 'matches') <= 6, 'a handful, not a list of every business';
+  assert (public.hq_dup_check(a) -> 'risks')::text like '%paid_invoices%' and (public.hq_dup_check(a) -> 'risks')::text like '%paid_programs%'
+    and (public.hq_dup_check(a) -> 'risks')::text like '%recent%', 'the paid, busy one: three warnings';
+  -- search: only by what's typed, never itself; a closed one says why it can't be kept
+  assert json_array_length(public.hq_dup_search(b, '')) = 0 and json_array_length(public.hq_dup_search(b, 'h')) = 0, 'nothing until 2+ characters';
+  assert not exists (select 1 from json_array_elements(public.hq_dup_search(b, 'Harbour')) x where x ->> 'id' = b::text), 'search: not itself';
+  assert (select x ->> 'problem' from json_array_elements(public.hq_dup_search(b, 'RIY-DUPD')) x) like 'That account is closed%', 'search: a closed one says so';
+  assert (select x ->> 'id' from json_array_elements(public.hq_dup_search(b, 'other@dup')) x) = c::text, 'search by owner email';
+  -- the database re-checks everything
+  begin perform public.hq_close_duplicate(b, b, 'Signed up twice', null, 'RIY-DUPB-02', true); raise exception 'kept itself';
+  exception when others then assert sqlerrm like 'That''s this account%', sqlerrm; end;
+  begin perform public.hq_close_duplicate(b, d, 'Signed up twice', null, 'RIY-DUPB-02', true); raise exception 'kept a closed one';
+  exception when others then assert sqlerrm like 'That account is closed%', sqlerrm; end;
+  begin perform public.hq_close_duplicate(b, gen_random_uuid(), 'Signed up twice', null, 'RIY-DUPB-02', true); raise exception 'kept a missing one';
+  exception when others then assert sqlerrm like 'That business doesn''t exist%', sqlerrm; end;
+  begin perform public.hq_close_duplicate(b, a, 'Signed up twice', null, 'RIY-DUPA-01', true); raise exception 'closed with the other one''s Company ID';
+  exception when others then assert sqlerrm like 'Type this account''s Company ID (RIY-DUPB-02)%', sqlerrm; end;
+  begin perform public.hq_close_duplicate(b, a, 'Signed up twice', null, null, true); raise exception 'closed without typing the Company ID';
+  exception when others then assert sqlerrm like 'Type this account''s Company ID%', sqlerrm; end;
+  begin perform public.hq_close_duplicate(b, c, 'Signed up twice', null, 'RIY-DUPB-02', false); raise exception 'kept another owner''s account without a warning';
+  exception when others then assert sqlerrm like 'Check the warnings first%different owner%', sqlerrm; end;
+  begin perform public.hq_close_duplicate(a, b, 'Signed up twice', null, 'RIY-DUPA-01', false); raise exception 'closed the paid one without a warning';
+  exception when others then assert sqlerrm like 'Check the warnings first%paid invoice%wrong one%', sqlerrm; end;
+  begin perform public.hq_close_duplicate(b, a, '', null, 'RIY-DUPB-02', false); raise exception 'closed without a reason';
+  exception when others then assert sqlerrm like 'Give a reason%', sqlerrm; end;
+  assert public.hq_company(a) -> 'profile' ->> 'status' = 'active' and public.hq_company(b) -> 'profile' ->> 'status' = 'active', 'nothing closed by the refusals';
+end $$;
+-- support (no business.close) and an HQ owner signed in with a password only: refused
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ begin
+  begin perform public.hq_close_duplicate('abd10000-0000-4000-8000-000000000002', null, 'Signed up twice', null, 'RIY-DUPB-02', true); raise exception 'support closed a duplicate';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+  begin perform public.hq_dup_check('abd10000-0000-4000-8000-000000000002'); raise exception 'support saw the duplicate screen';
+  exception when others then assert sqlerrm like 'Your HQ role%', sqlerrm; end;
+end $$;
+select pg_temp.as_user_password_only('99999999-9999-9999-9999-999999999999');
+do $$ begin
+  begin perform public.hq_close_duplicate('abd10000-0000-4000-8000-000000000002', null, 'Signed up twice', null, 'RIY-DUPB-02', true); raise exception 'closed without two-step';
+  exception when others then assert sqlerrm like '%two-step%', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin
+  assert not has_function_privilege('authenticated', 'public.hq_dup_card(uuid)', 'execute') and not has_function_privilege('authenticated', 'public.hq_dup_risks(uuid, uuid)', 'execute'), 'helpers are not callable';
+  assert has_function_privilege('authenticated', 'public.hq_close_duplicate(uuid, uuid, text, text, text, boolean)', 'execute'), 'the tool is';
+  assert not exists (select 1 from pg_proc where proname = 'hq_close_duplicate' and pronargs = 4), 'the old unchecked version is gone';
+end $$;
+-- the right way round: close the unused copy (Company ID typed in lower case), linked to the one kept
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_close_duplicate('abd10000-0000-4000-8000-000000000002', 'abd10000-0000-4000-8000-000000000001', 'Signed up twice', null, ' riy-dupb-02 ', false);
+do $$ declare b uuid := 'abd10000-0000-4000-8000-000000000002'; p json := public.hq_company(b) -> 'profile'; begin
+  assert p ->> 'status' = 'closed' and p ->> 'duplicate_of_name' = 'Harbour Bakery' and p ->> 'closed_reason' = 'Duplicate: Signed up twice', 'closed and linked';
+  begin perform public.hq_close_duplicate(b, null, 'Again', null, 'RIY-DUPB-02', true); raise exception 'closed twice';
+  exception when others then assert sqlerrm like 'This account is already closed%', sqlerrm; end;
+  -- the kept one can't be closed as a duplicate of the one linked to it
+  begin perform public.hq_close_duplicate('abd10000-0000-4000-8000-000000000001', b, 'Backwards', null, 'RIY-DUPA-01', true); raise exception 'kept a closed duplicate';
+  exception when others then assert sqlerrm like 'That account is closed%', sqlerrm; end;
+end $$;
+reset role;
+do $$ declare b uuid := 'abd10000-0000-4000-8000-000000000002'; a jsonb; begin
+  -- nothing deleted or moved: the business, its people and the other business's payments are all still there
+  assert exists (select 1 from public.workspaces where id = b and name = 'Harbour Bakery (2)' and tax_number = '12 345 678'), 'the business row is kept as it was';
+  assert (select count(*) from public.members where workspace_id = b) = 1, 'its people are kept';
+  assert (select count(*) from public.billing_payments where workspace_id = 'abd10000-0000-4000-8000-000000000001') = 1, 'the kept one''s payments untouched';
+  select details into a from public.hq_audit where action = 'business.duplicate' and workspace_id = b order by at desc limit 1;
+  assert a -> 'before' ->> 'status' = 'active' and a -> 'after' ->> 'status' = 'closed' and a -> 'after' ->> 'duplicate_of' = 'abd10000-0000-4000-8000-000000000001'
+    and a ->> 'keep_company_code' = 'RIY-DUPA-01' and (a ->> 'data_deleted')::boolean = false and a -> 'risks_accepted' = '[]'::jsonb, 'HQ history: before and after';
+  assert a::text not like '%baker@dup.test%' and a::text not like '%Baker%', 'no names or emails in the history';
+  assert exists (select 1 from public.email_outbox where template = 'business_closed' and to_address = 'baker@dup.test'), 'the owner is told';
+end $$;
+-- Reopen undoes it: open again, the duplicate link and reason gone, and the history says which link was undone
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_set_business_status('abd10000-0000-4000-8000-000000000002', 'active', 'Closed the wrong one', null);
+do $$ declare p json := public.hq_company('abd10000-0000-4000-8000-000000000002') -> 'profile'; begin
+  assert p ->> 'status' = 'active' and p ->> 'duplicate_of' is null and p ->> 'closed_reason' is null and p ->> 'closed_at' is null, 'reopened: no link left';
+end $$;
+reset role;
+do $$ begin
+  assert (select details ->> 'was_duplicate_of' from public.hq_audit where action = 'business.reopened' and workspace_id = 'abd10000-0000-4000-8000-000000000002' order by at desc limit 1)
+    = 'abd10000-0000-4000-8000-000000000001', 'the reopen records the link it undid';
+end $$;
+-- linking is optional: close this account with no link (the paid one, so its warnings are accepted), then reopen
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_close_duplicate('abd10000-0000-4000-8000-000000000001', null, 'Owner asked', null, 'RIY-DUPA-01', true);
+reset role;
+do $$ declare a jsonb; begin
+  assert (select status = 'closed' and duplicate_of is null from public.workspaces where id = 'abd10000-0000-4000-8000-000000000001'), 'closed with no link';
+  select details into a from public.hq_audit where action = 'business.duplicate' and workspace_id = 'abd10000-0000-4000-8000-000000000001';
+  assert a -> 'risks_accepted' ?& array['paid_invoices', 'paid_programs', 'recent'] and (a -> 'facts' ->> 'paid_invoices')::int = 1, 'the accepted warnings are in the history';
+  assert (select count(*) from public.company_modules where workspace_id = 'abd10000-0000-4000-8000-000000000001') = 1, 'its programs are kept';
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+select public.hq_set_business_status('abd10000-0000-4000-8000-000000000001', 'active', 'Closed by mistake', null);
+-- (the earlier sample) Early bird 2 is a duplicate of Early bird 1
+reset role; select company_code as eb2_code from public.workspaces where name = 'Early bird 2' \gset
+set role authenticated;
+select public.hq_close_duplicate((select id from public.hq_companies('Early bird 2') where name = 'Early bird 2'), (select id from public.hq_companies('Early bird 1') where name = 'Early bird 1'), 'Signed up twice', null, :'eb2_code', true);
 do $$ begin
   assert (select (x ->> 'duplicate_of_name') from (select public.hq_company((select id from public.hq_companies('Early bird 2') where name = 'Early bird 2')) -> 'profile' as x) y) = 'Early bird 1', 'duplicate link';
 end $$;
