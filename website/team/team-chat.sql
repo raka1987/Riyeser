@@ -7676,3 +7676,334 @@ create or replace function public.unread_counts(ws uuid) returns table (channel_
   where c.workspace_id = ws and public.is_member(ws) and public.can_see_channel(c.id)
   group by c.id
 $$;
+
+-- ================================================================ Riyeser Link: ring groups with chosen members
+-- Calling a branch's number (or a group's own number, e.g. Sales 300) rings only the people and shared desk phones
+-- the owner or an admin chose for it, never everyone in the branch by itself. Each group has:
+--   * its members, in order: people (their Riyeser Link apps and desk phones ring together) and shared desk phones
+--     (an extension on Riyeser Link Office that isn't a person in Riyeser Link, such as Reception 150)
+--   * how it rings: everyone chosen at once ('all'), one after another ('order', ring_seconds each), or one after
+--     another starting with the next person each time ('rotate')
+--   * if nobody answers within timeout_seconds: end as a missed call, try another group, or ring one person
+--     (voicemail is coming with Riyeser Link Office voicemail)
+-- People on Busy / Do not disturb, At lunch, Unavailable or On a call are skipped (not rung). Riyeser Link has no
+-- business hours yet, so groups ring at any time.
+-- Upgrading: every branch that was there before gets a group with the people who were in the branch (so nothing
+-- changes on the day), marked needs_review so Management asks "Choose who answers each branch number" once.
+-- Branches made afterwards start with nobody chosen: their number goes to missed calls until someone is chosen.
+-- Riyeser Link Office reads the same groups (ring_groups_list) for the desk phones. Safe to run again.
+create table if not exists public.ring_groups (
+  id uuid primary key default gen_random_uuid(),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  branch_id uuid unique references public.branches(id) on delete cascade,   -- a branch's own number; null for extra groups
+  name text not null check (length(trim(name)) between 1 and 60),
+  extension int check (extension between 10 and 9999),
+  strategy text not null default 'all' check (strategy in ('all', 'order', 'rotate')),
+  ring_seconds int not null default 15 check (ring_seconds between 5 and 120),
+  timeout_seconds int not null default 30 check (timeout_seconds between 5 and 300),
+  fallback text not null default 'missed' check (fallback in ('missed', 'group', 'person')),
+  fallback_group uuid references public.ring_groups(id) on delete set null,
+  fallback_user uuid references auth.users(id) on delete set null,
+  needs_review boolean not null default false,
+  next_pos int not null default 0,          -- 'rotate': who goes first next time
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (fallback_group is null or fallback_group <> id)
+);
+create unique index if not exists ring_groups_extension on public.ring_groups (workspace_id, extension) where extension is not null;
+create index if not exists ring_groups_ws on public.ring_groups (workspace_id);
+create table if not exists public.ring_group_members (
+  id bigint generated always as identity primary key,
+  group_id uuid not null references public.ring_groups(id) on delete cascade,
+  position int not null default 0,
+  user_id uuid references auth.users(id) on delete cascade,
+  phone_ext text check (phone_ext ~ '^[0-9]{2,4}$'),
+  phone_name text check (length(phone_name) <= 60),
+  check ((user_id is null) <> (phone_ext is null))
+);
+create unique index if not exists ring_group_members_user on public.ring_group_members (group_id, user_id) where user_id is not null;
+create unique index if not exists ring_group_members_phone on public.ring_group_members (group_id, phone_ext) where phone_ext is not null;
+alter table public.ring_groups enable row level security;
+alter table public.ring_group_members enable row level security;
+drop policy if exists rg_read on public.ring_groups;
+create policy rg_read on public.ring_groups for select to authenticated using (public.is_member(workspace_id));
+drop policy if exists rgm_read on public.ring_group_members;
+create policy rgm_read on public.ring_group_members for select to authenticated
+  using (public.is_member((select workspace_id from public.ring_groups g where g.id = group_id)));
+-- read only: every change goes through ring_group_save / ring_group_delete / ring_groups_confirm (owners and admins)
+revoke all on public.ring_groups, public.ring_group_members from anon, authenticated;
+grant select on public.ring_groups, public.ring_group_members to authenticated;
+
+-- The upgrade (above): branches without a group get one with the people who are in the branch now.
+create or replace function public.ring_groups_upgrade() returns int
+  language plpgsql security definer set search_path = public as $$
+declare k int;
+begin
+  with g as (
+    insert into ring_groups (workspace_id, branch_id, name, extension, needs_review)
+      select b.workspace_id, b.id, b.name, b.extension, true from branches b
+      where not exists (select 1 from ring_groups x where x.branch_id = b.id)
+        and (b.extension is null or not exists (select 1 from ring_groups x where x.workspace_id = b.workspace_id and x.extension = b.extension))
+      returning id, branch_id, workspace_id)
+  insert into ring_group_members (group_id, user_id, position)
+    select g.id, bm.user_id, (row_number() over (partition by g.id order by m.extension nulls last, m.display_name) - 1)::int
+    from g join branch_members bm on bm.branch_id = g.branch_id
+           join members m on m.workspace_id = g.workspace_id and m.user_id = bm.user_id;
+  get diagnostics k = row_count;
+  return k;
+end $$;
+revoke all on function public.ring_groups_upgrade() from public, anon, authenticated;
+select public.ring_groups_upgrade();
+
+-- From now on a new branch gets its own group with nobody chosen; a branch's new name or number follows to its group.
+create or replace function public.ring_group_for_branch() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into ring_groups (workspace_id, branch_id, name, extension) values (new.workspace_id, new.id, new.name, new.extension)
+      on conflict (branch_id) do nothing;
+  elsif new.name is distinct from old.name or new.extension is distinct from old.extension then
+    update ring_groups set name = new.name, extension = new.extension, updated_at = now() where branch_id = new.id;
+  end if;
+  return null;
+end $$;
+drop trigger if exists ring_group_for_branch on public.branches;
+create trigger ring_group_for_branch after insert or update on public.branches for each row execute function public.ring_group_for_branch();
+
+-- Someone who leaves the business leaves its groups too.
+create or replace function public.ring_group_member_left() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  delete from ring_group_members rm using ring_groups g where rm.group_id = g.id and g.workspace_id = old.workspace_id and rm.user_id = old.user_id;
+  update ring_groups set fallback = 'missed', fallback_user = null where workspace_id = old.workspace_id and fallback_user = old.user_id;
+  return null;
+end $$;
+drop trigger if exists ring_group_member_left on public.members;
+create trigger ring_group_member_left after delete on public.members for each row execute function public.ring_group_member_left();
+
+-- Is this number free in the business? (people, branches and groups share one set of numbers)
+create or replace function public.number_free(ws uuid, n int, except_user uuid default null, except_group uuid default null) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select not exists (select 1 from members where workspace_id = ws and extension = n and user_id is distinct from except_user)
+     and not exists (select 1 from branches b where b.workspace_id = ws and b.extension = n
+                     and not exists (select 1 from ring_groups g where g.id = except_group and g.branch_id = b.id))
+     and not exists (select 1 from ring_groups where workspace_id = ws and extension = n and id is distinct from except_group)
+$$;
+revoke all on function public.number_free(uuid, int, uuid, uuid) from public, anon, authenticated;
+
+-- Extensions and new branches keep clear of the groups' numbers too.
+create or replace function public.next_extension(ws uuid, base int) returns int
+  language sql stable security definer set search_path = public as $$
+  select min(n) from generate_series(base + 1, base + 99) n where public.number_free(ws, n)
+$$;
+create or replace function public.give_extension(ws uuid, person uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare base int;
+begin
+  if not exists (select 1 from members where workspace_id = ws and user_id = person and extension is null) then return; end if;
+  select coalesce(min(extension), 100) into base from branches where workspace_id = ws and extension is not null and extension % 100 = 0;
+  update members set extension = coalesce(next_extension(ws, base),
+      (select min(n) from generate_series(100, 9999) n where n % 100 <> 0 and public.number_free(ws, n)))
+    where workspace_id = ws and user_id = person and extension is null;
+end $$;
+revoke all on function public.give_extension(uuid, uuid) from public, anon, authenticated;
+create or replace function public.set_extension(ws uuid, person uuid, ext int) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  if not is_admin(ws) then raise exception 'Only the team''s owner or an admin can change extensions'; end if;
+  if ext is not null and not number_free(ws, ext, person) then
+    raise exception 'Extension % is already used', ext;
+  end if;
+  update members set extension = ext where workspace_id = ws and user_id = person;
+end $$;
+create or replace function public.create_branch(ws uuid, branch_name text) returns uuid
+  language plpgsql security definer set search_path = public as $$
+declare b uuid; ext int;
+begin
+  if not is_admin(ws) then raise exception 'Only the team''s owner or an admin can add a branch'; end if;
+  select coalesce(max(extension), 0) + 100 into ext from branches where workspace_id = ws and extension % 100 = 0;
+  while ext <= 9900 and not number_free(ws, ext) loop ext := ext + 100; end loop;
+  if ext > 9900 then ext := null; end if;
+  insert into branches (workspace_id, name, code, extension) values (ws, trim(branch_name), make_branch_code(branch_name), ext)
+    returning id into b;
+  return b;
+end $$;
+
+-- Every group in a business, with its members in order (for Management, the Calls page and Riyeser Link Office).
+create or replace function public.ring_group_json(g ring_groups) returns json
+  language sql stable security definer set search_path = public as $$
+  select json_build_object('id', g.id, 'branch_id', g.branch_id, 'name', g.name, 'extension', g.extension, 'strategy', g.strategy,
+    'ring_seconds', g.ring_seconds, 'timeout_seconds', g.timeout_seconds, 'fallback', g.fallback,
+    'fallback_group', g.fallback_group, 'fallback_user', g.fallback_user, 'needs_review', g.needs_review, 'updated_at', g.updated_at,
+    'members', (select coalesce(json_agg(json_build_object('user_id', rm.user_id, 'phone_ext', rm.phone_ext,
+                  'name', coalesce(m.display_name, rm.phone_name, 'Desk phone ' || rm.phone_ext),
+                  'extension', coalesce(m.extension::text, rm.phone_ext)) order by rm.position, rm.id), '[]')
+                from ring_group_members rm left join members m on m.workspace_id = g.workspace_id and m.user_id = rm.user_id
+                where rm.group_id = g.id and (rm.user_id is null or m.user_id is not null)))
+$$;
+create or replace function public.ring_groups_list(ws uuid) returns json
+  language sql stable security definer set search_path = public as $$
+  select coalesce(json_agg(public.ring_group_json(g) order by g.extension nulls last, g.name), '[]')
+  from ring_groups g where g.workspace_id = ws and public.is_member(ws)
+$$;
+
+-- Owners and admins (two-step sign-in): make or change a group. grp null = a new group with its own number.
+-- info: { name, extension, strategy, ring_seconds, timeout_seconds, fallback, fallback_group, fallback_user }
+-- people: in ring order, [{ "user_id": … } | { "phone_ext": "150", "phone_name": "Reception" }]
+create or replace function public.ring_group_save(ws uuid, grp uuid, info jsonb, people jsonb) returns uuid
+  language plpgsql security definer set search_path = public as $$
+declare g ring_groups; nm text; ext int; st text; rs int; ts int; fb text; fg uuid; fu uuid; x jsonb; pos int := 0; u uuid; pe text;
+begin
+  if not is_admin(ws) then raise exception 'Only the owner or an admin (with two-step sign-in) can change ring groups.'; end if;
+  info := coalesce(info, '{}'::jsonb); people := coalesce(people, '[]'::jsonb);
+  if jsonb_typeof(people) <> 'array' then raise exception 'Choose who answers as a list.'; end if;
+  if jsonb_array_length(people) > 50 then raise exception 'A group can have up to 50 people and phones.'; end if;
+  if grp is not null then
+    select * into g from ring_groups where id = grp and workspace_id = ws;
+    if g.id is null then raise exception 'That ring group isn''t there any more.'; end if;
+  end if;
+  st := coalesce(nullif(info ->> 'strategy', ''), g.strategy, 'all');
+  if st not in ('all', 'order', 'rotate') then raise exception 'Choose Ring all at once, Ring in order or Rotate.'; end if;
+  rs := coalesce((info ->> 'ring_seconds')::int, g.ring_seconds, 15);
+  ts := coalesce((info ->> 'timeout_seconds')::int, g.timeout_seconds, 30);
+  if rs not between 5 and 120 then raise exception 'Ring each person for 5 to 120 seconds.'; end if;
+  if ts not between 5 and 300 then raise exception 'Choose 5 to 300 seconds before "If nobody answers".'; end if;
+  fb := coalesce(nullif(info ->> 'fallback', ''), 'missed');
+  if fb = 'voicemail' then raise exception 'Voicemail is coming with Riyeser Link Office voicemail. Choose another way for now.'; end if;
+  if fb not in ('missed', 'group', 'person') then raise exception 'Choose what happens if nobody answers.'; end if;
+  fg := case when fb = 'group' then nullif(info ->> 'fallback_group', '')::uuid end;
+  fu := case when fb = 'person' then nullif(info ->> 'fallback_user', '')::uuid end;
+  if fb = 'group' and (fg is null or fg = grp or not exists (select 1 from ring_groups where id = fg and workspace_id = ws)) then
+    raise exception 'Choose another group to try.'; end if;
+  if fb = 'person' and (fu is null or not exists (select 1 from members where workspace_id = ws and user_id = fu)) then
+    raise exception 'Choose the person to ring.'; end if;
+  if g.branch_id is null then   -- a group with its own number (a branch's group follows the branch)
+    nm := trim(coalesce(info ->> 'name', g.name, ''));
+    if length(nm) not between 1 and 60 or nm ~ '[<>]' then raise exception 'Give the group a name (up to 60 letters), e.g. Sales.'; end if;
+    if coalesce(info ->> 'extension', '') !~ '^[0-9]{3}$' or (info ->> 'extension')::int not between 100 and 899 then
+      raise exception 'Group numbers are 3 digits, 100 to 899, so desk phones can dial them too.'; end if;
+    ext := (info ->> 'extension')::int;
+    if not number_free(ws, ext, null, grp) then
+      raise exception '% is already used by a person, a branch or another group. Choose another number.', ext; end if;
+  end if;
+  if grp is null then
+    insert into ring_groups (workspace_id, name, extension, strategy, ring_seconds, timeout_seconds, fallback, fallback_group, fallback_user)
+      values (ws, nm, ext, st, rs, ts, fb, fg, fu) returning * into g;
+  else
+    update ring_groups set name = case when branch_id is null then nm else name end, extension = case when branch_id is null then ext else extension end,
+      strategy = st, ring_seconds = rs, timeout_seconds = ts, fallback = fb, fallback_group = fg, fallback_user = fu,
+      needs_review = false, updated_at = now() where id = grp returning * into g;
+  end if;
+  delete from ring_group_members where group_id = g.id;
+  for x in select * from jsonb_array_elements(people) loop
+    u := nullif(x ->> 'user_id', '')::uuid; pe := nullif(trim(coalesce(x ->> 'phone_ext', '')), '');
+    if u is not null then
+      if not exists (select 1 from members where workspace_id = ws and user_id = u) then raise exception 'Choose people from your business.'; end if;
+      insert into ring_group_members (group_id, user_id, position) values (g.id, u, pos) on conflict do nothing;
+    elsif pe is not null then
+      if pe !~ '^[0-9]{2,4}$' then raise exception 'A desk phone''s extension is 2 to 4 digits.'; end if;
+      if exists (select 1 from members where workspace_id = ws and extension = pe::int) then
+        raise exception 'Extension % belongs to a person: choose the person instead.', pe; end if;
+      if exists (select 1 from ring_groups where workspace_id = ws and extension = pe::int) then
+        raise exception '% is a group''s number, not a desk phone.', pe; end if;
+      insert into ring_group_members (group_id, phone_ext, phone_name, position)
+        values (g.id, pe, nullif(left(regexp_replace(trim(coalesce(x ->> 'phone_name', '')), '[<>]', '', 'g'), 60), ''), pos) on conflict do nothing;
+    else raise exception 'Choose people or desk phones.'; end if;
+    pos := pos + 1;
+  end loop;
+  insert into audit_log (workspace_id, action, details) values (ws, case when grp is null then 'ring_group.insert' else 'ring_group.update' end,
+    jsonb_build_object('name', g.name, 'extension', g.extension, 'strategy', st, 'members', pos, 'fallback', fb));
+  return g.id;
+end $$;
+
+-- Take away a group with its own number (a branch's group goes with the branch).
+create or replace function public.ring_group_delete(ws uuid, grp uuid) returns void
+  language plpgsql security definer set search_path = public as $$
+declare g ring_groups;
+begin
+  if not is_admin(ws) then raise exception 'Only the owner or an admin (with two-step sign-in) can change ring groups.'; end if;
+  select * into g from ring_groups where id = grp and workspace_id = ws;
+  if g.id is null then raise exception 'That ring group isn''t there any more.'; end if;
+  if g.branch_id is not null then raise exception 'This is a branch''s number. It goes when the branch goes; choose who answers it instead.'; end if;
+  update ring_groups set fallback = 'missed', fallback_group = null where workspace_id = ws and fallback_group = grp;
+  delete from ring_groups where id = grp;
+  insert into audit_log (workspace_id, action, details) values (ws, 'ring_group.delete', jsonb_build_object('name', g.name, 'extension', g.extension));
+end $$;
+
+-- "These are right": the upgrade's groups are confirmed as they are (the one-time notice goes away).
+create or replace function public.ring_groups_confirm(ws uuid) returns int
+  language plpgsql security definer set search_path = public as $$
+declare k int;
+begin
+  if not is_admin(ws) then raise exception 'Only the owner or an admin (with two-step sign-in) can change ring groups.'; end if;
+  update ring_groups set needs_review = false where workspace_id = ws and needs_review;
+  get diagnostics k = row_count;
+  if k > 0 then insert into audit_log (workspace_id, action, details) values (ws, 'ring_group.confirm', jsonb_build_object('groups', k)); end if;
+  return k;
+end $$;
+
+-- Why a person isn't rung right now: their chosen status, or a call they're on (null = ring them).
+create or replace function public.link_skip_reason(ws uuid, person uuid) returns text
+  language sql stable security definer set search_path = public as $$
+  select case
+    when not public.link_rings(ws, person) then (select p.manual from presence p where p.workspace_id = ws and p.user_id = person)
+    when exists (select 1 from presence p where p.workspace_id = ws and p.user_id = person and p.on_call and p.updated_at > now() - interval '3 minutes')
+      or public.link_desk_call(ws, person) then 'on_call'
+  end
+$$;
+
+-- Calling a group: who to ring, in what order, and what happens if nobody answers. Anyone in the business can ask
+-- (it's what their app needs to place the call); 'rotate' moves on by one each time it's asked.
+-- -> { id, name, extension, strategy, ring_seconds, timeout_seconds, fallback, fallback_group, fallback_user,
+--      ring: [user_id, …] (in order, without the caller), skipped: [{ user_id, why }], phones: [{ extension, name }] }
+create or replace function public.ring_group_plan(ws uuid, grp uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare g ring_groups; ids uuid[]; ring uuid[] := '{}'; skipped jsonb := '[]'; u uuid; why text; n int; start int := 0;
+begin
+  if not is_member(ws) then raise exception 'You''re not in that company.'; end if;
+  if not calls_allowed(ws) then raise exception 'Riyeser Link is paused, so calls are paused too.'; end if;
+  select * into g from ring_groups where id = grp and workspace_id = ws;
+  if g.id is null then raise exception 'That ring group isn''t there any more.'; end if;
+  select array_agg(rm.user_id order by rm.position, rm.id) into ids from ring_group_members rm
+    join members m on m.workspace_id = ws and m.user_id = rm.user_id where rm.group_id = g.id and rm.user_id <> auth.uid();
+  ids := coalesce(ids, '{}'); n := coalesce(array_length(ids, 1), 0);
+  if g.strategy = 'rotate' and n > 0 then
+    start := g.next_pos % n;
+    ids := ids[start + 1 : n] || ids[1 : start];
+    update ring_groups set next_pos = (start + 1) % n where id = g.id;
+  end if;
+  foreach u in array ids loop
+    why := link_skip_reason(ws, u);
+    if why is null then ring := ring || u; else skipped := skipped || jsonb_build_object('user_id', u, 'why', why); end if;
+  end loop;
+  return json_build_object('id', g.id, 'name', g.name, 'extension', g.extension, 'strategy', g.strategy, 'ring_seconds', g.ring_seconds,
+    'timeout_seconds', g.timeout_seconds, 'fallback', g.fallback, 'fallback_group', g.fallback_group, 'fallback_user', g.fallback_user,
+    'ring', to_json(ring), 'skipped', skipped,
+    'phones', (select coalesce(json_agg(json_build_object('extension', rm.phone_ext, 'name', rm.phone_name) order by rm.position), '[]')
+               from ring_group_members rm where rm.group_id = g.id and rm.phone_ext is not null));
+end $$;
+
+-- A group call only rings someone chosen for that group (or the person it falls back to).
+create or replace function public.link_group_rings(ws uuid, grp text, person uuid) returns boolean
+  language sql stable security definer set search_path = public as $$
+  select case when grp is null then true
+    when grp !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then false
+    else exists (select 1 from ring_groups g where g.id = grp::uuid and g.workspace_id = ws
+                 and (exists (select 1 from ring_group_members rm where rm.group_id = g.id and rm.user_id = person)
+                      or (g.fallback = 'person' and g.fallback_user = person))) end
+$$;
+
+revoke all on function public.ring_group_json(ring_groups), public.ring_groups_list(uuid), public.ring_group_save(uuid, uuid, jsonb, jsonb),
+  public.ring_group_delete(uuid, uuid), public.ring_groups_confirm(uuid), public.link_skip_reason(uuid, uuid),
+  public.ring_group_plan(uuid, uuid), public.link_group_rings(uuid, text, uuid) from public, anon;
+grant execute on function public.ring_groups_list(uuid), public.ring_group_save(uuid, uuid, jsonb, jsonb), public.ring_group_delete(uuid, uuid),
+  public.ring_groups_confirm(uuid), public.ring_group_plan(uuid, uuid), public.link_group_rings(uuid, text, uuid),
+  public.link_skip_reason(uuid, uuid) to authenticated;
+
+drop policy if exists cs_send on public.call_signals;
+create policy cs_send on public.call_signals for insert to authenticated
+  with check (from_user = auth.uid() and to_user <> auth.uid() and public.is_member(workspace_id)
+              and exists (select 1 from public.members m where m.workspace_id = call_signals.workspace_id and m.user_id = to_user)
+              and public.calls_allowed(workspace_id)
+              and (kind <> 'ring' or (public.link_rings(workspace_id, to_user)
+                                      and public.link_group_rings(workspace_id, payload ->> 'group', to_user))));
