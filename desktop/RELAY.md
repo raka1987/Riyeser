@@ -231,7 +231,7 @@ On a VPS the address is fixed. On the owner's own hardware it can change, so:
 two-step sign-in, 30 minutes, once) on the website (*Sites & relay → Add or move a relay PC*) or in Link Office's
 Advanced checks. On the new PC, *Settings → Connect your branches → This PC as the relay* claims it
 (`relay_enroll_claim`, no sign-in needed: the code is the permission) and gets **its own new key**, written to a file
-for `install-relay.ps1 -SecretFile … -NoDns` (deleted after reading). By default the relay has **no web name**
+for `install-relay.ps1 -RelayKeyFile … -NoDns` (deleted after reading). By default the relay has **no web name**
 (`<id>.relay.invalid`, `relay_servers.dns = false`): sites connect to the public address it reports, trusted by its
 certificate fingerprint (as before), and phones at home are given the address too. With *replaces*, the new relay
 takes the old one's place, priority and web name, and the old one is removed when the new one **first checks in**

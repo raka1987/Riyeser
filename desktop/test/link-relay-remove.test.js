@@ -65,7 +65,7 @@ test('This PC as the relay with a set-up code: its own key as a file, no web nam
   const base = { script: 'C:\\R\\install-relay.ps1', relayDir: 'C:\\R', domain: 'r1a2b3c4.relay.invalid', region: 'Suva head office', id: 'r1a2b3c4' };
   const key = 'ab'.repeat(32);
   const s = w.relayHostScript({ ...base, secretFile: 'C:\\t\\relay-key.txt', noDns: true, priority: 1 }, 'C:\\t\\result.json');
-  assert.match(s, / -SecretFile 'C:\\t\\relay-key\.txt' -NoDns -Priority 1 \*>&1/);
+  assert.match(s, / -RelayKeyFile 'C:\\t\\relay-key\.txt' -NoDns -Priority 1 \*>&1/);
   assert.ok(!s.includes(key)); assert.doesNotMatch(s, /Ddns/);
   const cf = w.relayHostScript({ ...base, domain: 'relay.riyeser.com', ddns: { provider: 'cloudflare', file: 'C:\\t\\ddns.txt' } }, 'r.json');
   assert.match(cf, / -DdnsProvider cloudflare -DdnsZone 'riyeser\.com' -DdnsTokenFile 'C:\\t\\ddns\.txt'/);
@@ -73,9 +73,14 @@ test('This PC as the relay with a set-up code: its own key as a file, no web nam
   assert.match(nc, / -DdnsProvider namecheap -DdnsPasswordFile 'C:\\t\\ddns\.txt'/);
   assert.throws(() => w.relayHostScript({ ...base, ddns: { provider: 'godaddy', file: 'x' } }, 'r.json'), /Cloudflare or Namecheap/);
   // the installer: the key file is read once and deleted; no REGISTER.sql (it's registered with the business already)
-  assert.match(PS1, /Remove-Item \$SecretFile -Force/); assert.match(PS1, /if \(\$Enrolled\) \{[\s\S]*?exit 0\s*\}\s*\$reg = Join-Path \$Data 'REGISTER\.sql'/);
+  assert.match(PS1, /Remove-Item \$RelayKeyFile -Force/); assert.match(PS1, /if \(\$Enrolled\) \{[\s\S]*?exit 0\s*\}\s*\$reg = Join-Path \$Data 'REGISTER\.sql'/);
   assert.match(PS1, /RELAY_DNS="\$\(if \(\$NoDns\) \{ '0' \} else \{ '1' \}\)"/);
   assert.match(PS1, /Remove-Item \$DdnsTokenFile -Force/);
+  // PowerShell names ignore case: no variable in the script may overwrite a parameter by accident ($secretFile did)
+  const paramBlock = PS1.slice(PS1.indexOf('param('), PS1.indexOf("$ErrorActionPreference = 'Stop'"));
+  const params = [...paramBlock.matchAll(/\$([A-Za-z]+)\s*=/g)].map((m) => m[1]).filter((p) => p !== 'PSScriptRoot');
+  const body = PS1.slice(PS1.indexOf("$ErrorActionPreference = 'Stop'"));
+  for (const p of params) for (const m of body.matchAll(new RegExp(`\\$${p}\\s*=[^=]`, 'gi'))) if (!m[0].startsWith(`$${p}`)) assert.fail(`the script assigns ${m[0].trim()}, which is the parameter -${p}`);
   // the DNS provider is found from the domain's nameservers; the help says what to make
   assert.equal(C.dnsHost(['beau.ns.cloudflare.com', 'kay.ns.cloudflare.com']), 'cloudflare');
   assert.equal(C.dnsHost(['dns1.registrar-servers.com']), 'namecheap');

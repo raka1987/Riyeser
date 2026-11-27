@@ -162,7 +162,7 @@ function relayHostScript({ script, relayDir, domain, region, id, ddnsPasswordFil
   if (d && !['namecheap', 'cloudflare'].includes(d.provider)) throw new Error('Choose Cloudflare or Namecheap for the web name.');
   const zone = d && d.provider === 'cloudflare' ? domain.split('.').slice(-2).join('.') : '';
   const dd = !d ? '' : d.provider === 'namecheap' ? ` -DdnsProvider namecheap -DdnsPasswordFile ${q(d.file)}` : ` -DdnsProvider cloudflare -DdnsZone ${q(zone)} -DdnsTokenFile ${q(d.file)}`;
-  const extra = `${secretFile ? ` -SecretFile ${q(secretFile)}` : ''}${noDns ? ' -NoDns' : ''}${priority ? ` -Priority ${Number(priority) | 0}` : ''}`;
+  const extra = `${secretFile ? ` -RelayKeyFile ${q(secretFile)}` : ''}${noDns ? ' -NoDns' : ''}${priority ? ` -Priority ${Number(priority) | 0}` : ''}`;
   return [`$out = & ${q(script)} -LinkOffice -RelayDir ${q(relayDir)} -Domain ${q(domain)} -Region ${q(region)} -Id ${q(id)}${dd}${extra} *>&1 | Out-String`,
     `@{ ok = ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null); out = $out } | ConvertTo-Json -Compress | Set-Content -Path ${q(resultFile)} -Encoding UTF8`].join('\r\n');
 }
