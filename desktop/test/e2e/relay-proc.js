@@ -1,5 +1,5 @@
 // The relay, as its own process (inside a network namespace in link-relay-nat.test.js). Config in argv[2] (JSON).
-// Commands on stdin (one JSON a line): { cmd: 'plan', plan } | { cmd: 'stats' }. Answers on stdout, one JSON a line.
+// Commands on stdin (one JSON a line): { cmd: 'plan', plan } | { cmd: 'stats' } | { cmd: 'outside' } (1.3.1: ports from outside). Answers on stdout, one JSON a line.
 const { createRelayServer } = require('../../src/relay/server');
 const cfg = JSON.parse(process.argv[2]);
 const say = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
@@ -20,6 +20,7 @@ cloud.start = async (onPlan) => { cloud.onPlan = onPlan; await onPlan(await clou
       const line = buf.slice(0, i); buf = buf.slice(i + 1);
       let m; try { m = JSON.parse(line); } catch { continue; }
       if (m.cmd === 'plan') { cloud.plan = m.plan; await cloud.onPlan(await cloud.sync()); say({ id: m.id, ok: true }); }
+      if (m.cmd === 'outside') say({ id: m.id, outside: await s.outsideCheck() });
       if (m.cmd === 'stats') say({ id: m.id, media: s.media.snapshot(), relay: s.relay.snapshot(), turn: s.turn ? s.turn.snapshot() : null });
     }
   });

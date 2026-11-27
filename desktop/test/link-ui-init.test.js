@@ -50,6 +50,7 @@ function boot(call) {
   Object.defineProperty(g, 'api', { value: Object.freeze({ call, on() {} }), configurable: false, enumerable: true, writable: false });
   vm.runInContext(fs.readFileSync(path.join(R, 'link-text.js'), 'utf8'), ctx, { filename: 'link-text.js' });
   vm.runInContext(fs.readFileSync(path.join(R, 'link-bulk.js'), 'utf8'), ctx, { filename: 'link-bulk.js' });
+  vm.runInContext(fs.readFileSync(path.join(R, 'link-relaycheck.js'), 'utf8'), ctx, { filename: 'link-relaycheck.js' });
   vm.runInContext(fs.readFileSync(path.join(R, 'link.js'), 'utf8'), ctx, { filename: 'link.js' });
   return { ...page, errors, ctx };
 }
@@ -146,8 +147,10 @@ test('Branches and relay: backup relay, not set up, and a problem with its fix (
 
   const none = boot(async (c) => (c === 'link:status' ? withRelay({ state: 'off', connected: false }) : true));
   await tick();
-  assert.match(none.byId.tiles.innerHTML, /tile off" id="relaytile"[\s\S]*<div class="big">Not set up/);
-  assert.match(none.byId.state.innerHTML, /relayline muted[^>]*>Branches and relay: not set up/);
+  // 1.3.1: one office with no branches: one calm line, no button promoting it
+  assert.match(none.byId.tiles.innerHTML, /tile off" id="relaytile"[\s\S]*<div class="big">Not used/);
+  assert.doesNotMatch(none.byId.tiles.innerHTML.match(/<section class="tile [a-z]+" id="relaytile">[\s\S]*?<\/section>/)[0], /<button/);
+  assert.match(none.byId.state.innerHTML, /relayline muted[^>]*>Branches: not used/);
   assert.doesNotMatch(none.byId.people.innerHTML, /sitetag/);   // one site: no site tags
   assert.doesNotMatch(none.byId.attn.innerHTML, /relay/i);
 
@@ -167,10 +170,10 @@ test('Branches and relay: backup relay, not set up, and a problem with its fix (
   for (const x of [backup, none, down, refused, udp]) assert.deepEqual(x.errors, []);
 });
 
-test('a status from before 1.3.0 (no relay): every section still draws, the tile says Not set up', async () => {
+test('a status from before 1.3.0 (no relay): every section still draws, the tile says Not used', async () => {
   const p = boot(async (c) => (c === 'link:status' ? STATUS : true));
   await tick();
-  assert.match(p.byId.tiles.innerHTML, /Branches and relay<\/h3><div class="big">Not set up/);
-  assert.match(p.byId.relay.innerHTML, /Link this PC to your business/);
+  assert.match(p.byId.tiles.innerHTML, /Branches and relay<\/h3><div class="big">Not used/);
+  assert.match(p.byId.relay.innerHTML, /Branches: not used/);
   assert.deepEqual(p.errors, []);
 });

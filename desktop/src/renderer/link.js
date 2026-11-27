@@ -227,7 +227,9 @@ function attention() {
   if (eg.length) add('warn', `Nobody is chosen to answer ${eg.slice(0, 3).map((g) => `${g.name} (${g.ext})`).join(', ')}${eg.length > 3 ? '…' : ''}, so calls to ${eg.length === 1 ? 'it' : 'them'} are missed.`, 'rings', 'Choose who answers');
   if ((S.skipped || []).length) add('info', `Not on the phones yet: ${S.skipped.map((x) => `${x.name} (${x.why})`).join('; ')}.`, 'sync', 'Bring in people again');
   if (S.cloud && S.cloud.status === 'offline') add('warn', T.cloud(S.cloud), 'report', 'Try now');
-  const rp = S.relay && T.relayTile(S.relay).problem; if (rp) add(rp.cls, rp.text, rp.act, rp.label);   // the Riyeser relay (1.3.0)
+  // the Riyeser relay: the checklist's first problem, linking straight to its step (1.3.1); quiet, never a pop-up
+  if (RC && !RC.unused && RC.summary.first) add(RC.summary.cls === 'bad' ? 'bad' : 'warn', RC.summary.text, `chk-${RC.summary.first}`, 'Show');
+  else { const rp = !RC && S.relay && T.relayTile(S.relay).problem; if (rp) add(rp.cls, rp.text, rp.act, rp.label); }
   if (!S.signedIn && S.source !== 'team') add('info', 'Sign in to bring in your team and see the phones on the website.', 'step-signin', 'Sign in');
   return a;
 }
@@ -268,9 +270,13 @@ function renderOverview() {
 }
 // Overview → Branches and relay (1.3.0): the Riyeser relay's real state (link-text.js relayTile)
 function relayTileHtml() {
-  const t = T.relayTile(S.relay);
-  return `<section class="tile ${t.cls}" id="relaytile"><h3>🏢 Branches and relay</h3><div class="big">${esc(t.big)}</div><p>${esc(t.text)}</p>
-    <div class="acts">${t.act && t.act !== 'relay' ? `<button class="btn sm" data-a="${esc(t.act)}">${esc(t.label)}</button>` : ''}<button class="btn s sm" data-a="relay">${S.relay && T.relaySetUp(S.relay) ? 'Details' : 'Connect your branches'}</button></div></section>`;
+  const t = T.relayTile(S.relay); const host = S.relayHost && S.relayHost.installed;
+  const sum = RC && !RC.unused ? RC.summary : null;
+  const cls = sum && sum.first ? (sum.cls === 'bad' ? 'bad' : 'warn') : host && t.cls === 'off' ? 'info' : t.cls;
+  const acts = sum && sum.first ? `<button class="btn sm" data-a="chk-${esc(sum.first)}">Show what needs attention</button>` : t.act && t.act !== 'relay' ? `<button class="btn sm" data-a="${esc(t.act)}">${esc(t.label)}</button>` : '';
+  const more = T.relaySetUp(S.relay) || host ? '<button class="btn s sm" data-a="relay">Details</button>' : '';
+  return `<section class="tile ${cls}" id="relaytile"><h3>🏢 Branches and relay</h3>${host ? `<p class="hosthere"><span class="pill ok">${esc(T.RELAY_IS_HERE)}</span></p>` : ''}<div class="big">${esc(t.big)}</div><p>${esc(sum && sum.first ? sum.text : t.text)}</p>
+    ${acts || more ? `<div class="acts">${acts}${more}</div>` : ''}</section>`;
 }
 /** Where an extension's phones are, with the relay set up (1.3.0): this site, or another site / at home. */
 function siteTag(ext) {
@@ -394,46 +400,174 @@ function renderHistory() {
   $('#history').innerHTML = h.length ? `<div class="tbox" style="max-height:320px"><table><thead><tr><th>When</th><th>Who</th><th>What</th></tr></thead><tbody>${h.map((x) => `<tr style="cursor:default"><td>${esc(when(x.at))}</td><td>${esc(x.by)}</td><td style="white-space:normal;min-width:260px">${esc(x.what)}</td></tr>`).join('')}</tbody></table></div>`
     : '<p class="muted">No changes yet.</p>';
 }
-// ---------- Settings → Connect your branches: the Riyeser relay's status and diagnostics
+// ---------- Settings → Connect your branches (1.3.1): a guided checklist that says exactly which part needs attention,
+// the relay PC's own card (This PC is the relay / Stop using it / This PC as the relay with a set-up code), and Advanced
+// checks for owners and admins. Results show quietly here and in the Overview; no pop-ups asking to fix things.
+const RCK = window.LinkRelayCheck;
+let RC = null; let rcAt = 0; let rcBusy = false; let rcSig = '';
+const RUI = { host: false, web: false, adv: false, details: null, code: null, out: '', ns: null, nsFor: '' };
+async function refreshChecks(force = false) {
+  if (rcBusy) return; rcBusy = true;
+  try { const l = await bridge.call('link:relay-checks', force); if (l && l.summary && Array.isArray(l.steps)) { RC = l; rcAt = Date.now(); } } catch { /* keep the last */ } finally { rcBusy = false; }
+  part('connect your branches', renderRelay, '#relay'); part('overview', renderOverview, '#tiles');
+}
+function maybeRefreshChecks() {
+  const r = S && S.relay; const sig = r ? [r.state, r.connected, r.udp, r.relay, r.test && r.test.at, (S.relayHost || {}).running].join('|') : '';
+  if (sig !== rcSig || Date.now() - rcAt > 60000) { rcSig = sig; refreshChecks(false); }
+}
+function chkRow(x, admin) {
+  const fixA = x.fix && ['reserve', 'web', 'relayretry'].includes(x.fix.act) ? `data-a="${esc(x.fix.act)}"` : x.fix ? `data-r="fix" data-act="${esc(x.fix.act)}"` : '';
+  return `<li class="chk-row ${esc(x.s)}${x.muted ? ' muted' : ''}" id="chk-${esc(x.k)}"><span class="chk-ic" title="${esc(T.CHK_STATE[x.s])}" aria-label="${esc(T.CHK_STATE[x.s])}">${esc(T.CHK_ICON[x.s])}</span>
+    <div class="grow"><b>${esc(x.title)}</b><span>${esc(x.t || '')}</span>${x.how && x.s !== 'ok' ? `<details class="how"><summary>How to fix</summary><ol>${x.how.map((h) => `<li>${esc(h)}</li>`).join('')}</ol></details>` : ''}</div>
+    <div class="chk-acts">${x.fix && x.s !== 'ok' && !x.muted ? `<button class="btn sm" ${fixA}>${esc(x.fix.label)}</button>` : ''}${admin && x.s !== 'ok' ? `<button class="btn s sm" data-r="mute" data-k="${esc(x.k)}" data-on="${x.muted ? '' : '1'}">${x.muted ? 'Show again' : 'Dismiss'}</button>` : ''}</div></li>`;
+}
 function renderRelay() {
   const r = S.relay || { state: 'local' };
-  const row = (k, v) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
-  const intro = r.connected ? T.relayLine(r) : T.relayTile(r).text;   // not set up, or the problem and its fix
+  const l = RC || (RCK ? RCK.build({ relay: r, cloud: S.cloud, host: S.relayHost && S.relayHost.installed ? { installed: true } : null }) : null);
+  const admin = l && l.admin;
   const sites = (r.sites || []).map((x) => `<li><span class="sitetag">${esc(x.name)}</span> <span class="muted">· ${esc(x.exts)} extension${x.exts === 1 ? '' : 's'} connected${x.via && x.via !== 'here' ? ` · through ${esc(x.via)}` : ''}</span></li>`).join('');
-  $('#relay').innerHTML = `<p class="muted">${esc(T.RELAY_WHY)}</p><p><b>${esc(intro)}</b></p>
-    ${r.connected && r.udp === 'blocked' ? `<div class="note warn">${esc(T.RELAY_UDP_BLOCKED)}</div>` : ''}
-    ${sites ? `<p><b>Other sites</b></p><ul class="sites">${sites}</ul>` : ''}
-    <form id="sitename" class="row"><label style="flex:1 1 260px"><span class="muted small">${esc(T.RELAY_SITE_NAME)}</span><input id="sitenamein" value="${esc(S.siteName || '')}" maxlength="40" autocomplete="off"></label><button class="btn s">Save</button></form>
-    <details class="help"><summary>Diagnostics</summary><dl class="kv">
-      ${row('State', esc(r.state || '—'))}${row('Relay', r.relay ? `${esc(r.relay)} (${esc(r.region || '')})${r.backup ? ' <span class="pill wait">backup</span>' : ''}` : '—')}
-      ${row('Round trip', r.rtt != null ? `${esc(r.rtt)} ms` : '—')}${row('Sound (UDP)', esc(T.udp(r.udp)))}
-      ${row('Connected since', r.since ? esc(when(r.since)) : '—')}${row('Reconnects', esc(r.reconnects || 0))}
-      ${row('Relays (in order)', (r.relays || []).map((x) => `${esc(x.id)} ${esc(x.region)}`).join(' → ') || '—')}
-      ${row('Reachable through it', `${esc(r.remote || 0)} extension(s), ${esc(r.phones || 0)} phone(s) at home`)}
-      ${row('Last problem', esc(r.error || 'none'))}</dl></details>
-    <div class="row"><button class="btn s" data-a="relayretry">Reconnect now</button><button class="btn s" data-a="web">Sites and the relay on the website</button></div>
-    ${S.platform === 'win32' ? relayHostHtml() : ''}`;
-  if (S.platform === 'win32' && relayHost === undefined) { relayHost = null; bridge.call('link:relay-host-state').then((h) => { relayHost = h || { installed: false }; part('connect your branches', renderRelay, '#relay'); }).catch(() => { relayHost = { installed: false }; }); }
-}
-// ---------- the head office PC can run the Riyeser relay itself (install-relay.ps1, with Windows' permission prompt)
-let relayHost;
-function relayHostHtml() {
-  const h = relayHost;
-  const ddnsField = `<label style="flex:1 1 260px"><span class="muted small">${esc(T.RELAY_DDNS_LABEL)}</span><input id="rhddns" type="password" autocomplete="off" spellcheck="false" maxlength="200"></label>`;
-  if (h && h.health && h.health.ok) {
-    const d = h.health.dns;
-    return `<details class="help" open><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p><b>${esc(T.relayHostOn(h.health))}</b></p>
-      <p${d && d.ok === false ? ' class="note warn"' : ''} id="rhdns">${esc(T.relayDns(d))}</p>
-      <form id="relaydns" class="row">${ddnsField}<button class="btn s">${esc(T.RELAY_DDNS_SAVE)}</button></form>
-      <p class="muted small">${esc(T.RELAY_DDNS_WHY)}</p><p class="muted small">${esc(T.RELAY_HOST_MORE)}</p></details>`;
+  let html = '';
+  if (!l || l.unused) {
+    html += `<p class="muted">${esc(T.RELAY_WHY)}</p><p class="chk-sum off" id="chksum"><b>${esc(T.relayLine(r) || 'Branches: not used')}</b></p>`;
+  } else {
+    const relaySteps = l.steps.filter((x) => x.group === 'relay'); const siteSteps = l.steps.filter((x) => x.group === 'site');
+    html += `<div class="chk-sum ${esc(l.summary.cls)}" id="chksum" role="status"><b class="grow">${esc(l.summary.text)}</b>${l.summary.first ? `<button class="btn s sm" data-r="goto" data-k="${esc(l.summary.first)}">Show</button>` : ''}<button class="btn s sm" data-r="recheck">Check again</button></div>
+      <div class="chk">${relaySteps.length ? `<h4>${esc(T.CHK_RELAY)}</h4><ol class="chk-list">${relaySteps.map((x) => chkRow(x, admin)).join('')}</ol>` : ''}
+      <h4>${esc(T.CHK_SITE)}${S.siteName ? ` · ${esc(S.siteName)}` : ''}</h4><ol class="chk-list">${siteSteps.map((x) => chkRow(x, admin)).join('')}</ol></div>
+      ${sites ? `<p><b>Other sites</b></p><ul class="sites">${sites}</ul>` : ''}`;
   }
-  return `<details class="help"><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p class="muted">${esc(T.RELAY_HOST_WHY)}</p>
-    ${h && h.installed ? `<div class="note warn">${esc(T.RELAY_HOST_DOWN)}</div>` : ''}
-    <form id="relayhost" class="row"><label style="flex:1 1 220px"><span class="muted small">Relay's name (DNS)</span><input id="rhdomain" value="relay.riyeser.com" autocomplete="off" spellcheck="false"></label>
-      <label style="flex:1 1 160px"><span class="muted small">Where</span><input id="rhregion" value="Head office" maxlength="60" autocomplete="off"></label>
-      <label style="flex:0 1 110px"><span class="muted small">Id</span><input id="rhid" value="suva1" maxlength="40" autocomplete="off" spellcheck="false"></label>
-      ${ddnsField}<button class="btn s">Run the relay on this PC…</button></form><p class="muted small">${esc(T.RELAY_DDNS_WHY)}</p></details>`;
+  html += `<form id="sitename" class="row"><label style="flex:1 1 260px"><span class="muted small">${esc(T.RELAY_SITE_NAME)}</span><input id="sitenamein" value="${esc(S.siteName || '')}" maxlength="40" autocomplete="off"></label><button class="btn s">Save</button></form>
+    <div class="row"><button class="btn s" data-a="relayretry">Reconnect now</button><button class="btn s" data-a="web">Sites and the relay on the website</button></div>
+    ${S.platform === 'win32' ? relayHostHtml(l) : ''}${advancedHtml(l)}`;
+  $('#relay').innerHTML = html;
 }
+function relayHostHtml(l) {
+  const h = (l && l.facts && l.facts.host) || (S.relayHost ? { installed: S.relayHost.installed, health: S.relayHost.running ? { relay: S.relayHost.relay, region: S.relayHost.region, removed: S.relayHost.removed } : null } : null);
+  if (h && h.installed) {
+    const hp = h.health || {};
+    return `<section class="hostcard${hp.removed ? ' warn' : ''}" id="hostcard"><h4>🏢 ${esc(T.RELAY_IS_HERE)}</h4><p>${esc(T.relayHereLine({ region: hp.region, removed: hp.removed }))}</p>
+      ${RUI.out ? `<p class="note" id="hostout">${esc(RUI.out)}</p>` : ''}
+      <div class="row"><button class="btn s" data-r="stop">${esc(T.STOP_TITLE)}…</button></div></section>`;
+  }
+  const others = ((S.relay || {}).relays || []).filter((x) => x.managed);
+  const adv = RUI.ns ? T.dnsAt(RUI.ns, RUI.nsFor) : '';
+  return `<details class="help" id="hostbox"${RUI.host ? ' open' : ''}><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p class="muted">${esc(T.RELAY_HOST_WHY)}</p>
+    ${RUI.out ? `<p class="note" id="hostout">${esc(RUI.out)}</p>` : ''}
+    <form id="relayhost" class="col">
+      <label><span class="muted small">${esc(T.HOST_CODE)}</span><input id="rhcode" placeholder="RLY-XXXX-XXXX-XXXX" maxlength="19" autocomplete="off" spellcheck="false"${l && l.admin ? ' data-optional="1"' : ''}></label>
+      <p class="muted small">${esc(T.HOST_CODE_WHY)}</p>
+      ${l && l.admin ? `<label class="chkline"><input type="checkbox" id="rhmake"> Make the code here (you're signed in as an admin)</label>
+        <div class="row"><label style="flex:1 1 200px"><span class="muted small">Where is this PC</span><input id="rhregion" value="Head office" maxlength="60" autocomplete="off"></label>
+        <label style="flex:1 1 200px"><span class="muted small">Take over from</span><select id="rhreplace"><option value="">Nothing: a new relay</option>${others.map((x) => `<option value="${esc(x.id)}">${esc(x.region || x.id)} (${esc(x.id)})</option>`).join('')}</select></label></div>` : ''}
+      <details class="help" id="hostweb"${RUI.web ? ' open' : ''}><summary>${esc(T.HOST_ADV)}</summary><p class="muted small">${esc(T.HOST_ADV_WHY)}</p>
+        <div class="row"><label style="flex:1 1 220px"><span class="muted small">Web name</span><input id="rhdomain" placeholder="relay.example.com" value="${esc(RUI.nsFor ? `relay.${RUI.nsFor}` : '')}" autocomplete="off" spellcheck="false"></label>
+        <label style="flex:0 1 160px"><span class="muted small">DNS is at</span><select id="rhprov"><option value="cloudflare"${RUI.ns !== 'namecheap' ? ' selected' : ''}>Cloudflare</option><option value="namecheap"${RUI.ns === 'namecheap' ? ' selected' : ''}>Namecheap</option></select></label></div>
+        <p class="muted small" id="rhns">${esc(adv)}</p>
+        <label><span class="muted small">Cloudflare API token, or Namecheap Dynamic DNS password (kept only in the relay's settings on this PC)</span><input id="rhsecret" type="password" autocomplete="off" spellcheck="false" maxlength="200"></label></details>
+      <div class="row"><button class="btn">Set up this PC as the relay…</button></div></form></details>`;
+}
+function advancedHtml(l) {
+  const a = l && l.admin; const steps = l && !l.unused ? l.steps : [];
+  const relays = (S.relay || {}).relays || [];
+  if (!a) {
+    return `<details class="help" id="advchk"${RUI.adv ? ' open' : ''}><summary>${esc(T.ADV_TITLE)}</summary><p class="muted small">${esc(T.ADV_LOCKED)}</p>
+      ${RUI.unlockCode ? `<form id="advcode" class="row"><label style="flex:0 1 200px"><span class="muted small">Two-step code</span><input id="advcodein" inputmode="numeric" maxlength="7" autocomplete="one-time-code"></label><button class="btn s">Unlock</button></form>`
+        : `<form id="advunlock" class="row"><label style="flex:1 1 220px"><span class="muted small">Riyeser account email</span><input id="advem" type="email" autocomplete="username"></label><label style="flex:1 1 180px"><span class="muted small">Password</span><input id="advpw" type="password" autocomplete="current-password"></label><button class="btn s">Next</button></form>`}</details>`;
+  }
+  return `<details class="help" id="advchk"${RUI.adv ? ' open' : ''}><summary>${esc(T.ADV_TITLE)}</summary>
+    <p class="muted small">Unlocked as ${esc(a.email)} · locks by itself at ${esc(when(new Date(a.until).toISOString()))}. <button class="btn s sm" data-r="lock">Lock now</button></p>
+    <div class="row"><select id="advstep" aria-label="Check">${steps.map((x) => `<option value="${esc(x.k)}">${esc(x.title)}</option>`).join('')}</select><button class="btn s sm" data-r="runstep">Run this check</button></div>
+    <div class="row wrap"><button class="btn s sm" data-r="fix" data-act="testcall">Test call (echo)</button>${l.facts && l.facts.host && l.facts.host.installed ? '<button class="btn s sm" data-r="fix" data-act="checkoutside">Test ports from outside</button><button class="btn s sm" data-r="fix" data-act="retryupnp">Retry automatic forwarding</button><button class="btn s sm" data-r="admin" data-act="reregister">Re-register</button>' : ''}
+      <button class="btn s sm" data-r="admin" data-act="resetpass">Reset this site's relay pass</button></div>
+    ${relays.length > 1 ? `<div class="row"><select id="advforce" aria-label="Relay">${relays.map((x) => `<option value="${esc(x.id)}">${esc(x.region || x.id)}</option>`).join('')}</select><button class="btn s sm" data-r="admin" data-act="force">Use this relay for now</button></div>` : ''}
+    <div class="row"><label style="flex:1 1 200px"><span class="muted small">Set-up code for another relay PC: where</span><input id="advregion" value="Head office" maxlength="60"></label>
+      <label style="flex:1 1 200px"><span class="muted small">Take over from</span><select id="advreplace"><option value="">Nothing: a new relay</option>${relays.filter((x) => x.managed).map((x) => `<option value="${esc(x.id)}">${esc(x.region || x.id)}</option>`).join('')}</select></label><button class="btn s sm" data-r="admin" data-act="code">Make a set-up code</button></div>
+    ${RUI.code ? `<p class="note" id="advcodeout">Set-up code: <b><code>${esc(RUI.code.code)}</code></b> — type it on the new PC within 30 minutes (it works once).</p>` : ''}
+    <div class="row"><button class="btn s sm" data-r="admin" data-act="details">Show the raw details</button>${RUI.details ? '<button class="btn s sm" data-r="copydetails">Copy for support</button>' : ''}</div>
+    ${RUI.details ? `<pre class="rawdetails" id="advraw">${esc(JSON.stringify(RUI.details, null, 2))}</pre>` : ''}</details>`;
+}
+/** Stop using this PC as the relay: the impact, then Move it to another PC, or Remove it. Owners and admins. */
+async function stopFlow() {
+  if (!RC || !RC.admin) { RUI.adv = true; renderRelay(); const d = $('#advchk'); if (d && d.scrollIntoView) d.scrollIntoView({ behavior: 'smooth', block: 'start' }); toast('Owners and admins only: unlock Advanced checks first.'); return; }
+  const hp = (RC.facts.host || {}).health || {};
+  const others = ((S.relay || {}).relays || []).filter((x) => x.id !== hp.relay && x.online !== false);
+  const d = document.createElement('dialog'); d.className = 'askform stopflow';
+  const draw = (mode) => {
+    d.innerHTML = `<h3>${esc(T.STOP_TITLE)}</h3><p class="${others.length ? '' : 'note warn'}">${esc(T.stopImpact(others))}</p>
+      <div class="choice"><label><input type="radio" name="how" value="move"${mode === 'move' ? ' checked' : ''}> <b>${esc(T.STOP_MOVE)}</b><span class="muted small">${esc(T.STOP_MOVE_WHY)}</span></label>
+      <label><input type="radio" name="how" value="remove"${mode === 'remove' ? ' checked' : ''}> <b>${esc(T.STOP_REMOVE)}</b><span class="muted small">${esc(T.STOP_REMOVE_WHY)}</span></label></div>
+      ${mode === 'move' ? `<ol class="steps">${T.stopMoveSteps(RUI.code && RUI.code.replaces === hp.relay ? RUI.code.code : null, hp.region).map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+        <div class="row end"><button class="btn s" value="close">Close</button><button class="btn" value="code">Make a set-up code for the new PC</button></div>`
+        : mode === 'remove' ? `<div class="row end"><button class="btn s" value="close">Cancel</button><button class="btn danger" value="remove">Remove the relay from this PC…</button></div>`
+          : '<div class="row end"><button class="btn s" value="close">Cancel</button></div>'}`;
+  };
+  draw(null);
+  d.addEventListener('change', (e) => { if (e.target.name === 'how') draw(e.target.value); });
+  d.addEventListener('click', async (e) => {
+    const b = e.target.closest('button[value]'); if (!b) return;
+    if (b.value === 'close') { d.close(); return; }
+    if (b.value === 'code') { b.disabled = true; const c = await safe(() => bridge.call('link:relay-admin', 'code', { region: hp.region || '', replaces: hp.relay })); if (c) RUI.code = c; draw('move'); return; }
+    if (b.value === 'remove') {
+      if (!(await askYes(others.length ? 'Remove the relay from this PC now? Windows will ask for permission.' : 'This is your only relay: your sites stop calling each other until another PC is set up. Remove it now? Windows will ask for permission.', 'Remove it', true))) return;
+      d.close(); toast('Windows will ask for permission…');
+      const p = await safe(() => bridge.call('link:relay-stop', {}));
+      if (p) { RUI.out = p.ok ? T.stopDone(p) : 'The relay wasn\'t removed (Windows didn\'t allow it, or it didn\'t finish). Nothing else was changed.'; refreshChecks(true); load(); }
+    }
+  });
+  d.addEventListener('close', () => d.remove());
+  document.body.appendChild(d); d.showModal();
+}
+document.addEventListener('toggle', (e) => { const id = e.target && e.target.id; if (id === 'hostbox') RUI.host = e.target.open; if (id === 'hostweb') RUI.web = e.target.open; if (id === 'advchk') RUI.adv = e.target.open; }, true);
+document.addEventListener('change', async (e) => {
+  if (e.target && e.target.id === 'rhdomain') { const v = e.target.value.trim().toLowerCase(); const dom = v.split('.').slice(-2).join('.'); if (/^[a-z0-9-]+\.[a-z]{2,}$/.test(dom)) { const ns = await safe(() => bridge.call('link:relay-ns', dom)); RUI.ns = ns; RUI.nsFor = dom; const p = $('#rhns'); if (p) p.textContent = T.dnsAt(ns, dom); const sel = $('#rhprov'); if (sel && (ns === 'cloudflare' || ns === 'namecheap')) sel.value = ns; } }
+});
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-r]'); if (!b) return;
+  const r = b.dataset.r;
+  if (r === 'goto') { showTab('settings'); const el = $(`#chk-${b.dataset.k}`); if (el) { el.classList.add('flash'); if (el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } return; }
+  if (r === 'recheck') { b.disabled = true; await refreshChecks(true); return; }
+  if (r === 'stop') { stopFlow(); return; }
+  if (r === 'lock') { await safe(() => bridge.call('link:relay-admin-lock')); RUI.details = null; RUI.code = null; refreshChecks(false); return; }
+  if (r === 'mute') { await safe(() => bridge.call('link:relay-mute', b.dataset.k, !!b.dataset.on)); refreshChecks(false); return; }
+  if (r === 'copydetails') { await safe(() => bridge.call('link:copy', JSON.stringify(RUI.details, null, 2))); toast('Copied. Paste it into your message to Riyeser support.'); return; }
+  if (r === 'runstep') { b.disabled = true; const st = await safe(() => bridge.call('link:relay-run', $('#advstep').value)); if (st) toast(`${st.title}: ${T.CHK_STATE[st.s]}. ${st.t}`); refreshChecks(false); return; }
+  b.disabled = true;
+  if (r === 'fix') {
+    const act = b.dataset.act;
+    if (act === 'relayhost') { RUI.host = true; renderRelay(); const hb = $('#hostbox'); if (hb && hb.scrollIntoView) hb.scrollIntoView({ behavior: 'smooth' }); return; }
+    if (act === 'relaystop') { stopFlow(); return; }
+    if (act === 'advanced') { RUI.adv = true; RUI.host = true; RUI.web = true; renderRelay(); return; }
+    if (act === 'keepawake') toast('Windows will ask for permission…');
+    await safe(() => bridge.call('link:relay-fix', act));
+    await refreshChecks(true); return;
+  }
+  if (r === 'admin') {
+    const act = b.dataset.act; let arg = {};
+    if (act === 'force') arg = { relay: $('#advforce').value };
+    if (act === 'code') arg = { region: $('#advregion').value.trim(), replaces: $('#advreplace').value || null };
+    const out = await safe(() => bridge.call('link:relay-admin', act, arg));
+    if (out && act === 'details') RUI.details = out;
+    if (out && act === 'code') RUI.code = out;
+    if (out && act === 'resetpass') toast('This site gets a new relay pass and reconnects.');
+    if (out && act === 'force') toast(`New calls use ${out}.`);
+    refreshChecks(false);
+  }
+});
+document.addEventListener('submit', async (e) => {
+  const f = e.target; if (!['relayhost', 'advunlock', 'advcode'].includes(f.id)) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (f.id === 'advunlock') { const r = await safe(() => bridge.call('link:relay-admin-unlock', $('#advem').value, $('#advpw').value)); $('#advpw').value = ''; if (r) { RUI.unlockCode = true; RUI.adv = true; renderRelay(); const c = $('#advcodein'); if (c) c.focus(); } return; }
+  if (f.id === 'advcode') { const r = await safe(() => bridge.call('link:relay-admin-code', $('#advcodein').value)); RUI.unlockCode = false; if (r) { RUI.adv = true; await refreshChecks(false); } else renderRelay(); return; }
+  const code = $('#rhcode').value.trim(); const make = $('#rhmake') && $('#rhmake').checked;
+  if (!code && !make) { toast(`${T.HOST_CODE}: type it first.`); return; }
+  const domain = ($('#rhdomain') && $('#rhdomain').value.trim()) || ''; const secret = ($('#rhsecret') && $('#rhsecret').value.trim()) || '';
+  if ($('#rhsecret')) $('#rhsecret').value = '';
+  const o = { code: make ? null : code, make: make ? { region: $('#rhregion').value.trim(), replaces: $('#rhreplace').value || null } : null,
+    advanced: domain && secret ? { domain, provider: $('#rhprov').value, secret } : null };
+  toast('Windows will ask for permission…');
+  const r = await safe(() => bridge.call('link:relay-host', o));
+  if (r) { RUI.out = r.ok ? `This PC is now the relay${r.replaces ? `, taking over from ${r.replaces} as soon as it checks in` : ''}. Your sites connect to it by themselves.` : `The relay wasn't set up: ${r.out || 'cancelled'}`; refreshChecks(true); load(); }
+}, true);
 // ---------- Settings → This PC's address: the adapter, names, what phones are given, reserve it, fixed address
 function renderAddress() {
   const a = S.adapters.current; const n = S.names || {}; const f = S.fixedAddress;
@@ -631,7 +765,7 @@ async function load() {
   let s = null; let err = null;
   try { s = await Promise.race([bridge.call('link:status'), new Promise((_, no) => setTimeout(() => no(new Error('The phone system didn\'t answer in time.')), 15000))]); } catch (e) { err = e.message || String(e); }
   clearTimeout(retry);
-  if (s) { loadFails = 0; S = s; render(); return; }
+  if (s) { loadFails = 0; S = s; render(); maybeRefreshChecks(); return; }
   loadFails++;
   if (!S) renderLoading(err); else if (loadFails > 1) toast(err);
   retry = setTimeout(load, Math.min(3000 * loadFails, 15000));
@@ -681,7 +815,7 @@ document.addEventListener('click', async (e) => {
   if (d.remove) { if (await askYes('Take this person off the phones? Their call history stays.', 'Take them off')) { await safe(() => bridge.call('link:removePerson', d.remove)); ui.pp.cur = null; load(); } return; }
   const a = d.a; if (!a) return;
   const filter = (st) => { showTab('phones'); Object.assign(ui.ph, { status: st, q: '', vendor: '', location: '', assigned: '' }); renderPhoneFilters(); renderPhones(); renderFound(); };
-  const local = /^(f-|close|sos|addmany|givenew|showoffline|phclear|calls|people|reload|reserve|setupopen|step-|hand|addphone)/.test(a);
+  const local = /^(f-|close|sos|addmany|givenew|showoffline|phclear|calls|people|reload|reserve|setupopen|step-|hand|addphone|chk-)/.test(a);
   b.disabled = true;
   try {
     if (a === 'reload') { renderLoading(); load(); return; }
@@ -700,6 +834,7 @@ document.addEventListener('click', async (e) => {
     if (a === 'team') await safe(() => bridge.call('link:openTeam'));
     if (a === 'web') await safe(() => bridge.call('link:openPhonesPage'));
     if (a === 'rings') await safe(() => bridge.call('link:openRingGroups'));
+    if (a.startsWith('chk-')) { showTab('settings'); const el = $(`#${a}`) || $('#relaypanel'); if (el) { el.classList.add('flash'); if (el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } return; }
     if (a === 'relay') { showTab('settings'); const rp = $('#relaypanel'); if (rp && rp.scrollIntoView) rp.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     if (a === 'relayretry') { await safe(() => bridge.call('link:relay-retry')); toast('Reconnecting to the Riyeser relay…'); }
     if (a === 'report') { const r = await safe(() => bridge.call('link:report')); if (r) toast(r.ok ? 'Sent to Riyeser Link.' : r.error); }
@@ -776,22 +911,6 @@ document.addEventListener('submit', async (e) => {
     const ext = $('#macwho').value; if (!ext) { toast('Choose who the phone is for.'); return; }
     const r = await safe(() => bridge.call('link:assign', $('#mac').value, ext));
     if (r) { $('#mac').value = ''; toast('Added. Turn the phone on (or restart it) and it sets itself up.'); load(); }
-  }
-  if (f.id === 'relayhost') {
-    toast('Windows will ask for permission…');
-    const ddnsPassword = $('#rhddns').value.trim(); $('#rhddns').value = '';
-    const r = await safe(() => bridge.call('link:relay-host', { domain: $('#rhdomain').value.trim(), region: $('#rhregion').value.trim(), id: $('#rhid').value.trim(), ddnsPassword }));
-    relayHost = undefined;
-    if (r) { toast(r.ok ? T.RELAY_HOST_DONE : `The relay wasn't set up: ${r.out || 'cancelled'}`); load(); }
-  }
-  if (f.id === 'relaydns') {
-    const h = (relayHost && relayHost.health) || {};
-    const ddnsPassword = $('#rhddns').value.trim(); $('#rhddns').value = '';
-    if (!ddnsPassword) { toast(T.RELAY_DDNS_LABEL.replace(' (optional)', '') + ': paste it first.'); return; }
-    toast('Windows will ask for permission…');
-    const r = await safe(() => bridge.call('link:relay-host', { domain: h.host || 'relay.riyeser.com', region: h.region || 'Head office', id: h.relay || 'suva1', ddnsPassword }));
-    relayHost = undefined;
-    if (r) { toast(r.ok ? T.RELAY_DDNS_SAVED : `The password wasn't saved: ${r.out || 'cancelled'}`); load(); }
   }
   if (f.id === 'sitename') {
     const n = await safe(() => bridge.call('link:site-name', $('#sitenamein').value));

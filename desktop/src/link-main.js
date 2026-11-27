@@ -99,6 +99,13 @@ function makeService() {
   cloud.on('change', () => service.emit('change'));
   // the Riyeser relay (1.3.0): other sites and phones at home, when the business has it switched on
   service.opts.relayConfig = () => cloud.relayConfig();
+  // 1.3.1: the guided checklist (Connect your branches), its fixes, Advanced checks for admins, and one notification
+  // when calls to the other sites stop working (never pop-ups asking to fix things)
+  const { RelayChecks, memoryStore } = require('./link/relaychecks');
+  service.relayChecks = new RelayChecks({ service, cloud, isWin: process.platform === 'win32', powerMonitor, sleepNote: () => sleepNote,
+    notify: (title, body) => { if (Notification.isSupported()) new Notification({ title, body, silent: false }).show(); },
+    makeOnline: () => new Online({ store: memoryStore(store), fetchFn, appData, appVersion: app.getVersion(), deviceName: os.hostname(), platform: process.platform }) });
+  service.relayChecks.watch();
   let pending = null;
   service.on('change', () => {   // tell the window, at most every 300 ms
     if (pending) return;
@@ -122,6 +129,12 @@ function updateTray() {
   service.prevFound = s.found.length;
 }
 
+function relayHostBrief() {
+  const rc = service && service.relayChecks; if (!rc) return null;
+  const h = rc.cache.host;
+  if (!h || Date.now() - (rc.cache.hostAt || 0) > 60000) rc.hostFacts().catch(() => null);
+  return h ? { installed: !!h.installed, running: !!h.health, relay: h.health && h.health.relay, region: h.health && h.health.region, removed: !!(h.health && h.health.removed) } : null;
+}
 async function checkPc() {
   const w = require('./link/windows');
   try { sleepNote = w.sleepWarning(await w.readSleep()); } catch { sleepNote = null; }
@@ -134,7 +147,9 @@ function handle(name, fn) {
 }
 function registerIpc() {
   handle('link:status', () => ({ ...service.status(), version: app.getVersion(), sleepNote, firewall, signedIn: !!service.online.session, startWithWindows: startsWithWindows(),
-    adapters: service.adapters(), cloud: cloud ? cloud.state : null, platform: process.platform }));
+    adapters: service.adapters(), cloud: cloud ? cloud.state : null, platform: process.platform,
+    // 1.3.1: "This PC is the relay" on the Overview (from the last check; refreshed in the background)
+    relayHost: relayHostBrief() }));
   handle('link:assign', (mac, ext, vendor) => service.assign(mac, ext, vendor));
   handle('link:unassign', (mac) => service.unassign(mac));
   handle('link:label', (mac, fields) => service.label(mac, fields || {}));
@@ -164,21 +179,75 @@ function registerIpc() {
   handle('link:site-name', (name) => service.setSiteName(name));
   // the head office PC can run the Riyeser relay itself (Settings → Connect your branches → This PC as the relay)
   handle('link:relay-host-state', () => require('./link/windows').relayHostState());
-  // o: { domain, region, id, ddnsPassword (optional: Namecheap Dynamic DNS, written only to the relay's relay.env) }
+  // 1.3.1 o: { code (set-up code from the website) | make: { region, replaces } (an unlocked admin makes the code here),
+  //            advanced: { domain, provider: 'cloudflare' | 'namecheap', secret } (optional: your own web name) }
+  // The code gives this relay its own new key (never copied from another PC); the key and any DNS token or password
+  // go to the installer as files in this run's own temp folder, which the installer reads and deletes.
+  // Before 1.3.1 (still accepted): { domain, region, id, ddnsPassword }.
   handle('link:relay-host', async (o) => {
     const w = require('./link/windows');
-    const fs = require('fs');
     const relayDir = path.join(__dirname, 'relay').replace('app.asar', 'app.asar.unpacked');
-    const { domain, region, id } = o || {};
-    const pw = o && o.ddnsPassword ? w.checkDdnsPassword(o.ddnsPassword) : '';
+    o = o || {};
+    let claim = null;
+    if (o.make) { const c = await service.relayChecks.adminRpc('link_relay_enroll_code', { region: o.make.region || '', replaces: o.make.replaces || null, host: (o.advanced && o.advanced.domain) || null }); o.code = c.code; }
+    if (o.code) claim = await cloud.claimRelayCode(o.code);
+    const adv = o.advanced && o.advanced.provider ? o.advanced : (o.ddnsPassword ? { provider: 'namecheap', secret: o.ddnsPassword } : null);
+    const secret = adv ? (adv.provider === 'namecheap' ? w.checkDdnsPassword(adv.secret) : String(adv.secret || '').trim()) : '';
+    if (adv && adv.provider === 'cloudflare' && !/^[A-Za-z0-9_-]{20,200}$/.test(secret)) throw new Error('That doesn\'t look like a Cloudflare API token. Make one on Cloudflare: My Profile → API Tokens → Create token → "Edit zone DNS", for your domain only.');
+    const domain = claim ? (claim.dns ? claim.host : claim.host) : (o.domain || (adv && adv.domain) || 'relay.riyeser.com');
+    const region = claim ? claim.region : o.region; const id = claim ? claim.relay_id : o.id;
     const r = await w.runElevatedScript((result) => {
-      let ddnsPasswordFile = '';
+      const dir = path.dirname(result); let ddns = null; let secretFile = '';
       // in this run's own temp folder (only this Windows user), deleted by the installer and again when the run ends
-      if (pw) { ddnsPasswordFile = path.join(path.dirname(result), 'ddns.txt'); fs.writeFileSync(ddnsPasswordFile, pw, { mode: 0o600 }); }
-      return w.relayHostScript({ script: path.join(relayDir, 'deploy', 'windows', 'install-relay.ps1'), relayDir, domain, region, id, ddnsPasswordFile }, result);
+      if (secret) { const f = path.join(dir, 'ddns.txt'); fs.writeFileSync(f, secret, { mode: 0o600 }); ddns = { provider: adv.provider, file: f }; }
+      if (claim) { secretFile = path.join(dir, 'relay-key.txt'); fs.writeFileSync(secretFile, claim.key, { mode: 0o600 }); }
+      return w.relayHostScript({ script: path.join(relayDir, 'deploy', 'windows', 'install-relay.ps1'), relayDir, domain, region, id, ddns, secretFile, noDns: claim ? !claim.dns : false, priority: claim && claim.priority }, result);
     });
-    logLine('info', `Run the Riyeser relay on this PC: ${r.ok ? 'installed' : r.why || 'didn\'t finish'}${pw ? ' (with Namecheap Dynamic DNS)' : ''}.`);
-    return { ok: !!r.ok, out: String(r.out || r.why || '').replace(/select relay_register\([^)]*\);?/g, '[see REGISTER.sql]').slice(-2000) };
+    if (claim) claim.key = null;
+    service.relayChecks.cache.host = null;
+    logLine('info', `Run the Riyeser relay on this PC: ${r.ok ? 'installed' : r.why || 'didn\'t finish'}${claim ? ` (relay ${id}${claim.replaces ? `, taking over from ${claim.replaces}` : ''})` : ''}${adv ? ` (with ${adv.provider} for the web name)` : ''}.`);
+    if (service.relay) { service.relay.configAt = 0; setTimeout(() => service.relay && service.relay.nudge(), 5000); }
+    return { ok: !!r.ok, relay: id, replaces: claim && claim.replaces, out: String(r.out || r.why || '').replace(/select relay_register\([^)]*\);?/g, '[see REGISTER.sql]').replace(/RESULT \{.*\}/g, '').slice(-2000) };
+  });
+  // 1.3.1: Stop using this PC as the relay (owners and admins: Advanced checks unlocked). keep: another PC has taken over
+  // already (or will), so don't remove it from Riyeser from here. Windows asks for permission.
+  handle('link:relay-stop', async (o) => {
+    service.relayChecks.requireAdmin();
+    const w = require('./link/windows');
+    const relayDir = path.join(__dirname, 'relay').replace('app.asar', 'app.asar.unpacked');
+    const r = await w.runElevatedScript((result) => w.relayUninstallScript({ script: path.join(relayDir, 'deploy', 'windows', 'install-relay.ps1'), relayDir, keepRegistration: !!(o && o.keep) }, result));
+    const p = w.parseUninstall(r);
+    service.relayChecks.cache.host = null;
+    logLine('info', `Stop using this PC as the relay: ${p.ok ? 'removed' : r.why || 'didn\'t finish'}${p.left ? ' (and from Riyeser)' : ''}${p.removedMappings ? `, ${p.removedMappings} router port forwards removed` : ''}${p.logsZip ? `, logs kept in ${p.logsZip}` : ''}.`);
+    if (service.relay) { service.relay.configAt = 0; service.relay.nudge(); }
+    return p;
+  });
+  handle('link:relay-checks', (force) => service.relayChecks.list({ force: !!force }));
+  handle('link:relay-run', (step) => service.relayChecks.run(String(step || '')));
+  handle('link:relay-fix', async (act) => {
+    const rc = service.relayChecks;
+    if (act === 'testcall') return rc.testCall();
+    if (act === 'retryupnp') return rc.retryUpnp();
+    if (act === 'reregister') return rc.reregister();
+    if (act === 'checkoutside') return rc.run('ports');
+    if (act === 'keepawake') { const w = require('./link/windows'); const r = await w.runElevatedScript((f) => w.keepAwakeScript(f)); await checkPc(); rc.cache.host = null; return r; }
+    throw new Error('Unknown fix.');
+  });
+  handle('link:relay-mute', (k, on) => service.relayChecks.mute(k, on !== false));
+  handle('link:relay-ns', (domain) => service.relayChecks.nameservers(String(domain || '').split('.').slice(-2).join('.')));
+  handle('link:relay-admin-unlock', (email, password) => service.relayChecks.unlock(email, password));
+  handle('link:relay-admin-code', (code) => service.relayChecks.unlockCode(code));
+  handle('link:relay-admin-lock', () => service.relayChecks.lock());
+  // Advanced checks (admins): raw details, a set-up code for another PC, force a relay, reset this site's pass, re-register
+  handle('link:relay-admin', async (action, a) => {
+    const rc = service.relayChecks; rc.requireAdmin();
+    if (action === 'details') return { ...(await rc.details()), log: ((await require('./link/windows').relayCheck().catch(() => null)) || {}).log || [] };
+    if (action === 'code') return rc.adminRpc('link_relay_enroll_code', { region: (a && a.region) || '', replaces: (a && a.replaces) || null, host: (a && a.host) || null });
+    if (action === 'force') return (await service.relay.force(String(a && a.relay))).relay;
+    if (action === 'resetpass') return rc.resetPass();
+    if (action === 'reregister') return rc.reregister();
+    if (action === 'remove') return rc.adminRpc('link_relay_manage', { relay_id: String(a && a.relay), action: 'remove', confirm: !!(a && a.confirm) });
+    throw new Error('Unknown action.');
   });
   handle('link:relay-retry', () => { if (service.relay) { service.relay.configAt = 0; service.relay.nudge(); } return service.status().relay; });
   handle('link:addPerson', (name, ext) => service.addPerson({ name, ext }));

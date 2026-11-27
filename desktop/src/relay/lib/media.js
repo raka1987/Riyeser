@@ -30,7 +30,13 @@ class Media extends EventEmitter {
   async start() {
     if (this.probePort !== false) {
       this.probe = dgram.createSocket('udp4');
-      this.probe.on('message', (m, r) => { if (m.length <= 64 && m.slice(0, 8).toString() === 'RYPROBE1') this.probe.send(Buffer.concat([Buffer.from('RYPROBE1'), m.slice(8), Buffer.from(` ${r.address}:${r.port}`)]), r.port, r.address); });
+      this.probe.on('message', (m, r) => {
+        const tag = m.length >= 8 ? m.slice(0, 8).toString() : '';
+        if (tag === 'RYPROBE1' && m.length <= 64) this.probe.send(Buffer.concat([Buffer.from('RYPROBE1'), m.slice(8), Buffer.from(` ${r.address}:${r.port}`)]), r.port, r.address);
+        // 1.1.0: Link Office's test call (echo): a call's worth of sound (20 ms packets, up to 64 a second from one
+        // address) comes straight back, so it can measure the round trip and loss, and hear its own tone
+        else if (tag === 'RYECHO1 ' && m.length <= 300 && this.echoAllowed(r.address)) { this.stats.echoed = (this.stats.echoed || 0) + 1; this.probe.send(m, r.port, r.address); }
+      });
       this.probe.on('error', (e) => this.log('warn', `UDP probe: ${e.message}`));
       await new Promise((res, rej) => { this.probe.once('error', rej); this.probe.bind(this.probePort, this.bind, () => { this.probe.off('error', rej); res(); }); });
       this.probePort = this.probe.address().port;
@@ -44,6 +50,12 @@ class Media extends EventEmitter {
     if (this.probe) await new Promise((r) => { try { this.probe.close(() => r()); } catch { r(); } });
   }
   setPublicIp(ip) { if (ip) this.publicIp = ip; }
+  /** The echo test's limit: 64 packets a second from one address (no use for flooding anyone). */
+  echoAllowed(ip) {
+    const now = Date.now(); this.echoes = this.echoes || new Map();
+    let e = this.echoes.get(ip); if (!e || now - e.at > 1000) { e = { at: now, n: 0 }; this.echoes.set(ip, e); if (this.echoes.size > 1000) this.echoes.clear(); }
+    return ++e.n <= 64;
+  }
 
   async openPair() {
     const span = this.max - this.min;

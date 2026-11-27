@@ -1161,3 +1161,40 @@ table.lo-am td.lo-chk { white-space: normal; min-width: 190px; max-width: 290px;
 .bp-links .copyrow input { padding: 9px 12px; border: 1px solid #cfd6e4; border-radius: 10px; font: inherit; font-size: 14.5px; background: #f8fafc; color: var(--ink); }
 .bp-tx textarea { field-sizing: content; min-height: 44px; }
 @media (max-width: 760px) { .bp-links .copyrow input { flex: 1 1 100%; } }
+/* 1.3.1: Sites & relay — your relays (change, remove, move), each site's checklist and Advanced checks. One column on a phone. */
+.lo-rlyman { margin: 12px 0 16px; }
+.lo-rlylist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.lo-rlycard { border: 1px solid var(--line, #e3e8f1); border-radius: 12px; padding: 12px; display: grid; gap: 6px; background: var(--panel, #fff); }
+.lo-rlycard.off { opacity: .85; }
+.lo-rlyhead { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.lo-rlyacts { display: flex; gap: 6px; flex-wrap: wrap; }
+.lo-chkh { margin: 16px 0 6px; }
+.lo-chksites { display: grid; gap: 8px; }
+.lo-chksite { border: 1px solid var(--line, #e3e8f1); border-left: 5px solid #15885f; border-radius: 12px; padding: 10px 12px; }
+.lo-chksite.c-warn { border-left-color: #b26b00; } .lo-chksite.c-bad { border-left-color: #c62f2f; }
+.lo-chksite summary { cursor: pointer; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.lo-chksum { color: var(--muted, #5d6a82); }
+.lo-rchk { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 6px; }
+.lo-rchk li { display: flex; gap: 10px; align-items: flex-start; }
+.lo-rchk li > div { display: flex; flex-direction: column; min-width: 0; } .lo-rchk li span:not(.ic) { color: var(--muted, #5d6a82); overflow-wrap: anywhere; }
+.lo-rchk .ic { flex: 0 0 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; background: #eef2f7; }
+.lo-rchk .c-ok .ic { background: #e6f5ee; color: #15885f; } .lo-rchk .c-warn .ic { background: #fff4d6; color: #8a5300; } .lo-rchk .c-fail .ic { background: #fdecec; color: #c62f2f; }
+.lo-adv h5 { margin: 10px 0 6px; }
+.lo-advbtns { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.lo-advsel { display: flex; flex-direction: column; gap: 2px; }
+.lo-advout { margin-top: 8px; display: grid; gap: 6px; }
+.lo-advcard { border-radius: 10px; padding: 10px 12px; background: #eef2f7; display: grid; gap: 4px; } .lo-advcard .btn { justify-self: start; }
+.lo-advcard.c-ok { background: #e6f5ee; } .lo-advcard.c-bad { background: #fdecec; } .lo-advcard.c-warn { background: #fff4d6; }
+.lo-raw { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; margin: 0; }
+.lo-codebox { display: grid; gap: 4px; padding: 12px; border-radius: 12px; background: #e3f4f8; margin: 10px 0; }
+.lo-codebox code { font-size: 22px; letter-spacing: .06em; font-weight: 700; overflow-wrap: anywhere; }
+:root[data-theme="dark"] .lo-rchk .ic, :root[data-theme="dark"] .lo-advcard { background: #1d2a3a; }
+:root[data-theme="dark"] .lo-advcard.c-ok, :root[data-theme="dark"] .lo-rchk .c-ok .ic { background: #14352b; }
+:root[data-theme="dark"] .lo-advcard.c-bad, :root[data-theme="dark"] .lo-rchk .c-fail .ic { background: #3a1d26; }
+:root[data-theme="dark"] .lo-advcard.c-warn, :root[data-theme="dark"] .lo-rchk .c-warn .ic { background: #3a2c14; }
+:root[data-theme="dark"] .lo-codebox { background: #133240; }
+@media (max-width: 640px) {
+  .lo-rlylist { grid-template-columns: 1fr; }
+  .lo-rlyacts .btn, .lo-advbtns .btn { flex: 1 1 100%; min-height: 44px; }
+  .lo-advbtns, .lo-advsel { width: 100%; } .lo-advsel select { width: 100%; min-height: 44px; }
+}

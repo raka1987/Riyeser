@@ -1,6 +1,8 @@
 // The relay's own dynamic DNS: when its public IP changes (own-hardware mode), it points its name (relay.riyeser.com)
 // at the new address itself, through the DNS provider's own API. No separate DDNS service.
-//   DDNS_PROVIDER=cloudflare   DDNS_TOKEN (an API token with Zone → DNS → Edit for that zone only), DDNS_ZONE (zone id)
+//   DDNS_PROVIDER=cloudflare   DDNS_TOKEN (an API token with Zone → DNS → Edit for that zone only), DDNS_ZONE (the zone
+//                              id, or since 1.1.0 the domain, e.g. riyeser.com). The record is kept "DNS only" (grey
+//                              cloud): Cloudflare's proxy can't carry SIP, TURN or call sound.
 //   DDNS_PROVIDER=digitalocean DDNS_TOKEN (a token with domain write), DDNS_ZONE (the domain, e.g. riyeser.com)
 //   DDNS_PROVIDER=namecheap    DDNS_HOST (relay, or relay2 for the backup), DDNS_DOMAIN (riyeser.com), DDNS_PASSWORD
 //                              (the Dynamic DNS password from Namecheap → Advanced DNS → Dynamic DNS; NOT the account
@@ -73,6 +75,15 @@ class Ddns {
     if (!r.ok) throw new Error(`${this.provider} said ${r.status}${j && j.errors && j.errors[0] ? `: ${j.errors[0].message}` : ''}`);
     return j;
   }
+  /** Cloudflare: DDNS_ZONE as given if it's a zone id, else (a domain, like riyeser.com) the id of the zone with that name. */
+  async zoneId() {
+    if (!String(this.zone).includes('.')) return this.zone;
+    if (this.zoneIdFound) return this.zoneIdFound;
+    const j = await this.call(`/zones?name=${encodeURIComponent(String(this.zone).toLowerCase())}`);
+    const z = j.result && j.result[0];
+    if (!z || !z.id) { const e = new Error(`Cloudflare has no zone ${this.zone} for this token (make the token with "Edit zone DNS" for ${this.zone})`); e.lasting = true; throw e; }
+    this.zoneIdFound = z.id; return z.id;
+  }
   async namecheap(ip) {
     const q = new URLSearchParams({ host: this.host, domain: this.domain, password: this.password, ip });
     let r;
@@ -100,10 +111,11 @@ class Ddns {
         return true;
       }
       if (this.provider === 'cloudflare') {
-        const z = encodeURIComponent(this.zone);
+        const z = encodeURIComponent(await this.zoneId());
         const found = await this.call(`/zones/${z}/dns_records?type=A&name=${encodeURIComponent(this.name)}`);
         const rec = found.result && found.result[0];
-        if (rec && rec.content === ip) { this.last = ip; this.state = { ok: true, at: new Date().toISOString(), error: null, name: this.name }; return false; }
+        if (rec && rec.content === ip && !rec.proxied) { this.last = ip; this.state = { ok: true, at: new Date().toISOString(), error: null, name: this.name }; return false; }
+        if (rec && rec.proxied) this.logFn('warn', `DNS: ${this.name} was proxied through Cloudflare (orange cloud); setting it to DNS only, as the relay's calls can't go through Cloudflare's proxy.`);
         const body = { type: 'A', name: this.name, content: ip, ttl: this.ttl, proxied: false };
         if (rec) await this.call(`/zones/${z}/dns_records/${rec.id}`, 'PUT', body); else await this.call(`/zones/${z}/dns_records`, 'POST', body);
       } else {

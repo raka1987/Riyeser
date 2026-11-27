@@ -4,7 +4,8 @@
 
     .\install-relay.ps1 -Domain relay.riyeser.com -Region "Suva head office" -Id suva1
     .\install-relay.ps1 -Backup -Domain relay2.riyeser.com -Region Sydney -Id syd1     (asks for the main relay's secret)
-    .\install-relay.ps1 -Uninstall
+    .\install-relay.ps1 -Uninstall        (removes it from this PC and from Riyeser: see "Uninstalling" below)
+    .\install-relay.ps1 -LinkOffice -RelayKeyFile <file> -Id r1a2b3c4 -NoDns   (Riyeser Link Office, with a set-up code)
     .\install-relay.ps1 -DdnsProvider namecheap -Domain relay.riyeser.com ...   (asks for the Namecheap Dynamic DNS password)
 
   It runs the relay with Node (node.exe on this PC), or, with -LinkOffice, with the copy of Node inside Riyeser Link
@@ -21,7 +22,17 @@
                              (which is deleted after reading; Riyeser Link Office uses this). It is written only to
                              relay.env, never shown or logged.
     -DdnsProvider cloudflare|digitalocean -DdnsZone <zone id | domain>   (asks for the API token, hidden)
-    Without -DdnsProvider, the dynamic DNS settings already in relay.env are kept.
+    Without -DdnsProvider, the dynamic DNS settings already in relay.env are kept. -DdnsTokenFile: the Cloudflare /
+    DigitalOcean token in a file (deleted after reading), as Riyeser Link Office passes it.
+
+  No web name (-NoDns, 1.3.1, the default from Riyeser Link Office): sites and phones connect to the address the relay
+  reports to Riyeser online and check its certificate, so no DNS or dynamic DNS is needed. -RelayKeyFile: the relay's own
+  key, from a set-up code made on the website (Riyeser Link Office claims it; the file is deleted after reading).
+
+  Uninstalling (-Uninstall): removes this relay from Riyeser (unless -KeepRegistration), stops and removes the task,
+  removes the router port forwarding it made (UPnP / NAT-PMP, from portmaps.json) and its firewall rules, zips its
+  logs into C:\ProgramData\Riyeser Relay Logs (for support), and deletes C:\ProgramData\Riyeser Relay with its key
+  and settings (-KeepSettings keeps them). The last line is RESULT {json} with what was done.
 #>
 [CmdletBinding()]
 param(
@@ -30,6 +41,8 @@ param(
   [string]$Node = '', [switch]$LinkOffice, [switch]$Backup, [int]$Priority = 0,
   [int]$HttpsPort = 443, [int]$MediaMin = 40002, [int]$MediaMax = 40201, [int]$TurnMin = 40202, [int]$TurnMax = 40301,
   [string]$CertFile = '', [string]$KeyFile = '', [switch]$NoPortMap, [switch]$Uninstall,
+  [switch]$KeepSettings, [switch]$KeepRegistration, [string]$LogsDir = (Join-Path $env:ProgramData 'Riyeser Relay Logs'),
+  [string]$RelayKeyFile = '', [switch]$NoDns, [string]$DdnsTokenFile = '', [string]$PublicIp = '',
   [ValidateSet('namecheap', 'cloudflare', 'digitalocean')][string]$DdnsProvider = '', [string]$DdnsHost = '', [string]$DdnsDomain = '',
   [string]$DdnsZone = '', [string]$DdnsPasswordFile = '',
   [string]$SupabaseUrl = 'https://goaugynxeatzqzifpoes.supabase.co', [string]$SupabaseKey = 'sb_publishable_-hYqz3gbSvsH-1rX_HLV4A_eSTp3XXL'
@@ -40,9 +53,44 @@ $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdenti
 if (-not $admin) { Write-Host 'Run this in PowerShell as administrator (right-click -> Run as administrator).'; exit 1 }
 
 if ($Uninstall) {
-  Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName $Task -Confirm:$false -ErrorAction SilentlyContinue
+  $res = [ordered]@{ ok = $true; left = $null; port_mappings = $null; task_removed = $false; firewall_removed = $false; logs_zip = $null; settings_removed = $false }
+  $envFile = Join-Path $Data 'relay.env'; $cfg = @{}
+  if (Test-Path $envFile) { foreach ($l in Get-Content $envFile) { if ($l -match '^([A-Z_]+)="(.*)"$') { $cfg[$Matches[1]] = $Matches[2] } } }
+  $nodeExe = $cfg.RELAY_NODE; $srv = $cfg.RELAY_SERVER
+  if (-not $nodeExe -or -not (Test-Path $nodeExe)) { $lo = Join-Path $env:ProgramFiles 'Riyeser Link Office\Riyeser Link Office.exe'; if (Test-Path $lo) { $nodeExe = $lo; $cfg.RELAY_AS_NODE = '1' } else { $c = Get-Command node -ErrorAction SilentlyContinue; if ($c) { $nodeExe = $c.Source; $cfg.RELAY_AS_NODE = '0' } } }
+  if (-not $srv -or -not (Test-Path $srv)) { $srv = Join-Path $RelayDir 'server.js' }
+  function Relay-Helper([string]$arg) {
+    if (-not $nodeExe -or -not (Test-Path $srv) -or -not (Test-Path $envFile)) { return $null }
+    $env:RELAY_ENV_FILE = $envFile; if ($cfg.RELAY_AS_NODE -eq '1') { $env:ELECTRON_RUN_AS_NODE = '1' }
+    try { $o = & $nodeExe $srv $arg 2>$null | Select-Object -Last 1; if ($o) { return ($o | ConvertFrom-Json) } } catch { } finally { Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue }
+    return $null
+  }
+  # 1. out of Riyeser first (signed with its own key): sites move to the next relay
+  if (-not $KeepRegistration) { $res.left = Relay-Helper '--leave' }
+  # 2. stop it (the task, and the relay itself if it's still running)
+  Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
+  Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine -match 'relay\\server\.js' -and $_.CommandLine -notmatch '--leave|--remove-port-mappings' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  # 3. the router port forwarding it made
+  $res.port_mappings = Relay-Helper '--remove-port-mappings'
+  # 4. the task and the firewall rules
+  Unregister-ScheduledTask -TaskName $Task -Confirm:$false -ErrorAction SilentlyContinue
+  $res.task_removed = -not (Get-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue)
   Get-NetFirewallRule -DisplayName "$Rule*" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-  Write-Host "The Riyeser relay is removed. Its settings and secret are kept in $Data (delete the folder to remove them too)."; exit 0
+  $res.firewall_removed = -not (Get-NetFirewallRule -DisplayName "$Rule*" -ErrorAction SilentlyContinue)
+  # 5. the logs, zipped for support (never the key or settings)
+  $logs = Join-Path $Data 'logs'
+  if ((Test-Path $logs) -and (Get-ChildItem $logs -File -ErrorAction SilentlyContinue)) {
+    New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
+    $zip = Join-Path $LogsDir ("relay-logs-{0}.zip" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    try { Compress-Archive -Path (Join-Path $logs '*') -DestinationPath $zip -Force; $res.logs_zip = $zip } catch { $res.logs_zip = $null }
+  }
+  # 6. the key, settings and certificate
+  if (-not $KeepSettings -and (Test-Path $Data)) { Remove-Item -Recurse -Force $Data -ErrorAction SilentlyContinue }
+  $res.settings_removed = $KeepSettings -or -not (Test-Path $Data)
+  $res.ok = $res.task_removed -and $res.firewall_removed -and $res.settings_removed
+  Write-Host ("The Riyeser relay is removed from this PC{0}.{1}" -f $(if ($res.left -and $res.left.left) { ' and from Riyeser' } else { '' }), $(if ($res.logs_zip) { " Its logs are in $($res.logs_zip)." } else { '' }))
+  Write-Host ('RESULT ' + ($res | ConvertTo-Json -Compress -Depth 4))
+  if ($res.ok) { exit 0 } else { exit 2 }
 }
 
 # ---- what runs it
@@ -63,6 +111,13 @@ New-Item -ItemType Directory -Force -Path $Data, (Join-Path $Data 'tls'), (Join-
 & icacls $Data /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 
 $secretFile = Join-Path $Data 'secret'
+if ($RelayKeyFile) {
+  # the relay's own key from a set-up code (Riyeser Link Office claimed it): replaces any key this PC had
+  $k = if (Test-Path $RelayKeyFile) { (Get-Content $RelayKeyFile -Raw).Trim() } else { '' }
+  Remove-Item $RelayKeyFile -Force -ErrorAction SilentlyContinue
+  if ($k -notmatch '^[0-9a-f]{64}$') { Write-Host 'The relay key from the set-up code is missing. Make a new set-up code on the website and try again.'; exit 1 }
+  [IO.File]::WriteAllText($secretFile, $k); $k = $null; $Enrolled = $true
+} else { $Enrolled = $false }
 if (-not (Test-Path $secretFile) -or (Get-Item $secretFile).Length -lt 32) {
   if ($Backup) {
     $s = Read-Host 'Paste the main relay''s secret (on the main relay: type the file C:\ProgramData\Riyeser Relay\secret, or sudo cat /etc/riyeser-relay/secret)' -AsSecureString
@@ -107,7 +162,8 @@ if (-not $DdnsProvider) {
   $dd.DDNS_PROVIDER = 'namecheap'; $dd.DDNS_HOST = $DdnsHost; $dd.DDNS_DOMAIN = $DdnsDomain; $dd.DDNS_NAME = $Domain; $dd.DDNS_PASSWORD = $pw; $pw = $null
 } else {
   if (-not $DdnsZone) { Write-Host "-DdnsProvider $DdnsProvider needs -DdnsZone (Cloudflare: the zone id; DigitalOcean: the domain)."; exit 1 }
-  $tok = (Read-Hidden "DNS API token for $DdnsProvider (hidden, kept only in relay.env)").Trim()
+  if ($DdnsTokenFile) { $tok = if (Test-Path $DdnsTokenFile) { (Get-Content $DdnsTokenFile -Raw).Trim() } else { '' }; Remove-Item $DdnsTokenFile -Force -ErrorAction SilentlyContinue }
+  else { $tok = (Read-Hidden "DNS API token for $DdnsProvider (hidden, kept only in relay.env)").Trim() }
   if ($tok -notmatch '^[^\s"$`\\]{8,500}$') { Write-Host 'That doesn''t look like an API token.'; exit 1 }
   $dd.DDNS_PROVIDER = $DdnsProvider; $dd.DDNS_ZONE = $DdnsZone; $dd.DDNS_NAME = $Domain; $dd.DDNS_TOKEN = $tok; $tok = $null
 }
@@ -136,6 +192,12 @@ TURNS_PORT="5349"
 TURN_MIN="$TurnMin"
 TURN_MAX="$TurnMax"
 PORT_MAP="$(if ($NoPortMap) { '0' } else { '1' })"
+PORT_MAP_FILE="$(Join-Path $Data 'portmaps.json')"
+RELAY_DNS="$(if ($NoDns) { '0' } else { '1' })"
+RELAY_PUBLIC_IP="$PublicIp"
+RELAY_NODE="$Node"
+RELAY_SERVER="$Server"
+RELAY_AS_NODE="$(if ($AsNode) { '1' } else { '0' })"
 METRICS_TOKEN="$((Get-Content $metricsFile -Raw).Trim())"
 DDNS_PROVIDER="$($dd.DDNS_PROVIDER)"
 DDNS_ZONE="$($dd.DDNS_ZONE)"
@@ -175,6 +237,13 @@ Write-Host "The Riyeser relay is running: $($h | ConvertTo-Json -Compress)"
 if ($h.dns) { foreach ($i in 1..20) { if ($null -ne $h.dns.ok) { break }; Start-Sleep -Seconds 1; try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/health' -TimeoutSec 2 } catch { } } }
 $dnsNote = "an A record $Domain -> the office's public address (or let the relay keep it up to date itself: run this again with -DdnsProvider namecheap, see relay/README.md)."
 if ($h.dns) { $dnsNote = if ($h.dns.ok -eq $false) { "the relay couldn't update $($h.dns.name): $($h.dns.error)" } else { "the relay keeps $($h.dns.name) pointing at this office itself ($($h.dns.provider)); see $Data\logs\relay.log (lines with DNS:)." } }
+if ($Enrolled) {
+  # set up with a code: it's registered with the business already; it shows as online once it has checked in
+  $synced = $false; foreach ($i in 1..20) { try { $h = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/health' -TimeoutSec 2; if ($h.sync -and $h.sync.ok) { $synced = $true; break } } catch { }; Start-Sleep -Seconds 1 }
+  Write-Host $(if ($synced) { "Registered with your business: relay $Id ($Region)." } else { "The relay is running; it registers with your business when it reaches Riyeser online ($Data\logs\relay.log)." })
+  Write-Host ('RESULT ' + (@{ ok = $true; relay = $Id; synced = $synced } | ConvertTo-Json -Compress))
+  exit 0
+}
 $reg = Join-Path $Data 'REGISTER.sql'
 $pr = if ($Priority) { $Priority } elseif ($Backup) { 2 } else { 1 }
 "select relay_register('$Id', '$Domain', '$Region', '$((Get-Content $secretFile -Raw).Trim())', $pr);" | Set-Content -Path $reg -Encoding ascii

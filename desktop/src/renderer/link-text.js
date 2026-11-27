@@ -106,7 +106,7 @@
     relayLine: (r) => {
       if (!r) return '';
       if (r.connected) return `${r.backup ? 'Using backup relay' : 'Connected to Riyeser relay'} · ${r.region || r.host}${r.rtt != null ? ` · ${r.rtt} ms` : ''}${r.sites && r.sites.length ? ` · ${r.sites.length} other site${r.sites.length === 1 ? '' : 's'}` : ''}`;
-      if (!T.relaySetUp(r)) return 'Branches and relay: not set up';
+      if (!T.relaySetUp(r)) return 'Branches: not used';
       if (r.state === 'refused') return `Other sites: the relay refused this office (${r.error || 'ask an admin'}). Calls in this office work as normal.`;
       if (r.state === 'starting' || (r.state === 'connecting' && !r.error)) return 'Connecting to the Riyeser relay…';
       return 'Other sites: not connected right now (no connection to the Riyeser relay). Calls in this office work as normal; it keeps trying.';
@@ -118,9 +118,8 @@
     relayTile: (r) => {
       const where = (x) => `${x.region || x.relay || x.host || ''}${x.rtt != null ? ` · ${x.rtt} ms` : ''}`;
       const others = (x) => (x.sites && x.sites.length ? `${x.sites.length} other site${x.sites.length === 1 ? '' : 's'}: ${x.sites.slice(0, 3).map((s) => s.name).join(', ')}${x.sites.length > 3 ? '…' : ''}` : 'No other sites connected yet');
-      if (!r || r.state === 'local') return { cls: 'off', big: 'Not set up', text: T.RELAY_LOCAL, act: 'relay', label: 'Connect your branches', problem: null };
-      if (r.state === 'off' && r.idle) return { cls: 'off', big: 'Not set up', text: 'Joins your other sites once the phone system is running here and the Riyeser relay is switched on for your business.', act: 'relay', label: 'Connect your branches', problem: null };
-      if (r.state === 'off' || r.state === 'no-config') return { cls: 'off', big: 'Not set up', text: r.state === 'no-config' && /no riyeser relay/i.test(r.error || '') ? 'Riyeser hasn\'t set up a relay for your business yet. Phones work on this office network.' : r.state === 'no-config' ? T.RELAY_LOCAL : T.RELAY_OFF, act: 'relay', label: 'Connect your branches', problem: null };
+      // 1.3.1: one office with no branches: one calm line, nothing to do and no promotion
+      if (!r || ['local', 'off', 'no-config'].includes(r.state)) return { cls: 'off', big: 'Not used', text: T.RELAY_UNUSED, act: null, label: '', problem: null };
       if (r.connected) {
         const udp = r.udp === 'blocked';
         const text = `${others(r)}${r.phones ? ` · ${r.phones} phone${r.phones === 1 ? '' : 's'} at home` : ''}.${r.backup && r.primary ? ` The main relay (${r.primary.region || r.primary.id}) isn't answering; it moves back by itself.` : ''}`;
@@ -141,10 +140,40 @@
       if (hereNow) return 'here';
       return (r.remoteExts || []).map(String).includes(String(ext)) ? 'remote' : '';
     },
+    RELAY_UNUSED: 'Only this office. If you open another branch, Connect your branches (in Settings) joins them into one phone system.',
+    // ---------- 1.3.1: the guided checklist, changing or removing the relay PC, Advanced checks
+    CHK_ICON: { ok: '✓', warn: '!', fail: '✗', todo: '·' },
+    CHK_STATE: { ok: 'OK', warn: 'Needs a look', fail: 'Needs attention', todo: 'Not yet' },
+    CHK_RELAY: 'On the relay PC (this PC)',
+    CHK_SITE: 'This site',
+    RELAY_IS_HERE: 'This PC is the relay',
+    relayHereLine: (h) => (h && h.removed ? 'This PC was the relay. It has been removed from your business; remove it from this PC too.' : `Your other sites call each other through this PC${h && h.region ? ` (${h.region})` : ''}. Keep it on, plugged in and awake. Don't wipe or replace it without moving the relay first.`),
+    STOP_TITLE: 'Stop using this PC as the relay',
+    stopImpact: (others) => (others.length ? `Your sites move to ${others[0].region || others[0].id} by themselves within seconds, so calls between sites keep working.`
+      : 'This is your business\'s only relay. Without it, your sites can\'t call each other and phones at home stop working, until another PC is set up as the relay. The relay is switched off for your business. Calls inside each office carry on.'),
+    STOP_MOVE: 'Move the relay to another PC',
+    STOP_MOVE_WHY: 'Best when you\'re replacing this PC. The new PC takes over the relay\'s place, priority and web name. Nothing is copied by hand: it gets its own new key from your business.',
+    stopMoveSteps: (code, region) => [
+      'On the new PC: install Riyeser Link Office, open it, and go to Settings → Connect your branches → This PC as the relay.',
+      code ? `Type this set-up code there: ${code} (it works once, for 30 minutes).` : 'Type the set-up code from the website there (Management → Desk phones → Sites & relay → Add or move a relay PC → Move this relay' + (region ? ` (${region})` : '') + ').',
+      'Press Set up this PC as the relay, and say yes when Windows asks for permission.',
+      'Once the new PC is running, your sites reconnect to it by themselves and this PC is removed from your business. Then come back here and remove the leftovers.'],
+    STOP_REMOVE: 'Remove it',
+    STOP_REMOVE_WHY: 'Removes the relay from this PC and from your business: stops and removes the service, its firewall rules and the router port forwarding it made, and deletes its key and settings. Its logs are kept, zipped, for Riyeser support.',
+    stopDone: (p) => `${p.left || p.gone ? 'Removed from this PC and from your business' : 'Removed from this PC'}.${p.removedMappings ? ` ${p.removedMappings} router port forward${p.removedMappings === 1 ? '' : 's'} removed.` : ''}${p.logsZip ? ` Logs kept in ${p.logsZip}.` : ''}${!p.left && !p.gone && p.leftWhy ? ` It couldn't be removed from your business (${p.leftWhy}): remove it on the website (Sites & relay).` : ''}`,
+    HOST_CODE: 'Set-up code from the website',
+    HOST_CODE_WHY: 'On the website: Riyeser Link → Management → Desk phones → Sites & relay → Add or move a relay PC (an owner or admin, with two-step sign-in). No web name, DNS or passwords needed: sites find this PC by itself.',
+    HOST_ADV: 'Advanced: use your own web name',
+    HOST_ADV_WHY: 'Only if you want a name like relay.example.com for the relay. Most offices don\'t need one.',
+    dnsAt: (h, domain) => (h === 'cloudflare' ? `${domain}'s DNS is at Cloudflare: use a Cloudflare API token (My Profile → API Tokens → Create token → "Edit zone DNS", zone ${domain} only). The record must be DNS only (grey cloud).`
+      : h === 'namecheap' ? `${domain}'s DNS is at Namecheap: use the Dynamic DNS password (Domain List → Manage → Advanced DNS → Dynamic DNS), not the account password.`
+        : h ? `${domain}'s DNS isn't at Cloudflare or Namecheap, so the relay can't update it itself. Point an A record at this office's address by hand.` : ''),
+    ADV_TITLE: 'Advanced checks (owners and admins)',
+    ADV_LOCKED: 'For owners and admins: run each check on its own, see the raw details, and change things by hand. Sign in with your Riyeser account and two-step code. It locks again after 15 minutes.',
     RELAY_UDP_BLOCKED: 'Calls to other sites connect, but there may be no sound: this network\'s firewall seems to block UDP to the relay. Allow outgoing UDP to the relay (ports 40000–49999) on the router or firewall.',
     RELAY_SITE_NAME: 'This site\'s name (what the other sites see)',
     RELAY_HOST_TITLE: 'This PC as the relay (head office)',
-    RELAY_HOST_WHY: 'The head office\'s always-on PC can be the Riyeser relay for all your sites (a rented server can be the backup). It runs in the background from Windows start-up, opens its ports in Windows Firewall and asks the router to forward them. Windows asks for permission once. Then register it once in Riyeser online (the relay\'s README says how).',
+    RELAY_HOST_WHY: 'The head office\'s always-on PC can be the Riyeser relay for all your sites. It runs in the background from Windows start-up, opens its ports in Windows Firewall and asks the router to forward them by itself. Windows asks for permission once.',
     RELAY_DDNS_LABEL: 'Namecheap Dynamic DNS password (optional)',
     RELAY_DDNS_WHY: 'So the relay\'s name keeps pointing at this office when its internet address changes. At Namecheap: Domain List → Manage riyeser.com → Advanced DNS → turn on Dynamic DNS and copy its password (not your Namecheap account password), and add an "A + Dynamic DNS Record" with host relay. Paste the password only here — never in chat or email. It is kept only in the relay\'s settings on this PC.',
     RELAY_DDNS_SAVE: 'Save the Dynamic DNS password…',

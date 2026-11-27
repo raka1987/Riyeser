@@ -142,6 +142,8 @@ function applyOne(service, cmd) {
         return { ok: true };
       }
       case 'phone_settings': { const r = service.phoneSettings(mac(), d.settings || {}); return { ok: true, result: { applied: Object.keys(r.settings), dropped: r.dropped } }; }
+      // 1.3.1: Sites & relay → Advanced checks on the website: a check, a test call or a fix (relaychecks.js)
+      case 'relay_check': return service.relayChecks ? service.relayChecks.command(d) : { ok: false, error: 'This Riyeser Link Office can\'t run relay checks yet. Update it in Riyeser Central.' };
       default: throw new Error('This Riyeser Link Office doesn\'t know how to do that yet. Update it in Riyeser Central.');
     }
     service.log('info', `From Riyeser Link: ${what}.`);
@@ -235,15 +237,34 @@ class LinkCloud extends EventEmitter {
       throw e;
     }
   }
+  /**
+   * 1.3.1: "This PC as the relay": a set-up code from the website (or made here by an unlocked admin) -> this relay's
+   * own new key, once. Needs no sign-in: the code is the permission (30 minutes, used once).
+   * -> { relay_id, host, dns, region, priority, replaces, key }
+   */
+  async claimRelayCode(code) {
+    const c = String(code || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!/^RLY-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(c)) throw new Error('Type the set-up code as it shows on the website, like RLY-AB12-CD34-EF56.');
+    const o = this.service.online;
+    const r = await o.call('/rest/v1/rpc/relay_enroll_claim', { method: 'POST', auth: false, body: { code: c } });
+    if (!r || !/^[0-9a-f]{64}$/.test(r.key || '') || !/^[a-z0-9-]{2,40}$/.test(r.relay_id || '')) throw new Error('Riyeser online didn\'t send this relay\'s key. Make a new set-up code and try again.');
+    return r;
+  }
   /** Tell the website how the relay connection is (state, which relay, round trip) — never calls or numbers. */
-  async relayReport() {
+  async relayReport(force = false) {
     const co = this.ready(); const st = this.service.status().relay;
     if (!co || !st || st.state === 'local') return false;
-    const sig = JSON.stringify([st.state, st.relay, st.backup, st.udp, st.error, st.sites && st.sites.length, Math.round((st.rtt || 0) / 25)]);
-    if (sig === this.lastRelaySig && this.now() - (this.lastRelayAt || 0) < HEARTBEAT - 1000) return false;
+    // 1.3.1: the guided checklist too (each step's key, state and short line), the last test call, and whether this PC is the relay
+    let list = null;
+    if (this.service.relayChecks) { try { list = await this.service.relayChecks.list(); } catch { list = null; } }
+    const checks = list && !list.unused ? require('../renderer/link-relaycheck').forReport(list) : undefined;
+    const t = st.test ? { rtt_ms: st.test.rtt_ms, loss: st.test.loss, ok: !!st.test.ok, at: st.test.at } : undefined;
+    const host = !!(list && list.facts && list.facts.host && list.facts.host.installed);
+    const sig = JSON.stringify([st.state, st.relay, st.backup, st.udp, st.error, st.sites && st.sites.length, Math.round((st.rtt || 0) / 25), checks && checks.map((c) => `${c.k}${c.s}`), t && t.at, host]);
+    if (!force && sig === this.lastRelaySig && this.now() - (this.lastRelayAt || 0) < HEARTBEAT - 1000) return false;
     try {
       await this.withClient((o) => o.rpc('link_relay_report', { ws: co.workspace_id, office_id: this.service.officeId(),
-        state: { state: st.state, relay: st.relay, region: st.region, rtt_ms: st.rtt, backup: st.backup, udp: st.udp, error: st.error, sites: (st.sites || []).length, since: st.since } }));
+        state: { state: st.state, relay: st.relay, region: st.region, rtt_ms: st.rtt, backup: st.backup, udp: st.udp, error: st.error, sites: (st.sites || []).length, since: st.since, checks, test: t, host } }));
       this.lastRelaySig = sig; this.lastRelayAt = this.now();
       return true;
     } catch { return false; }
@@ -258,7 +279,7 @@ class LinkCloud extends EventEmitter {
       const office = this.service.officeId();
       const list = await this.withClient((o) => o.rpc('link_office_pending', { ws: co.workspace_id, office_id: office }));
       for (const cmd of Array.isArray(list) ? list : []) {
-        const r = applyCommand(this.service, cmd);
+        const r = await applyCommand(this.service, cmd);
         const args = { command: cmd.id, ok: r.ok, error: r.ok ? null : r.error, sealed: r.sealed || null };
         if (r.result) {
           try { await this.withClient((o) => o.rpc('link_office_done', { ...args, result: r.result })); }

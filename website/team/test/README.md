@@ -201,3 +201,8 @@
   staff/test/where-from, then the GitHub file; straight to GitHub when the counter is down). `csp-test.js` and
   `a11y-test.js` include the hand-off page. The function itself: `deno test supabase/functions/download` (branch main).
   Riyeser Central's side: `desktop/test/usage-counts.test.js`.
+- `relay-remove-ui-test.js` (Link Office 1.3.1): Sites & relay — your relays (make main, stop using, Riyeser's can't be
+  removed), each site's checklist from its reports, Advanced checks run on a chosen site's Link Office (test call, one
+  check, raw details), Move to another PC (a set-up code), removing the last relay (a warning first, then switched off),
+  and a phone (one column, big buttons). `rules-test.sql` covers the database side (set-up codes, own keys, takeover,
+  removal and the changed cluster secret, last relay, `relay_leave`, `relay_check`). Screenshots go to the folder given.

@@ -328,6 +328,9 @@
       async linkRelayRevoke(ws, office, allow) { return ok(await sb.rpc('link_relay_revoke', { ws, office_id: office, allow: !!allow })); },
       async linkRelayDeviceAdd(ws, ext, label) { return ok(await sb.rpc('link_relay_device_add', { ws, extension: String(ext), label: label || '' })); },
       async linkRelayDeviceRemove(ws, id) { return ok(await sb.rpc('link_relay_device_remove', { ws, device: id })); },
+      // 1.3.1: change or remove the relay PC (two-step sign-in), and a set-up code for a new relay PC
+      async linkRelayManage(ws, relay, action, confirm) { return ok(await sb.rpc('link_relay_manage', { ws, relay_id: relay, action, confirm: !!confirm })); },
+      async linkRelayEnrollCode(ws, region, replaces, host) { return ok(await sb.rpc('link_relay_enroll_code', { ws, region: region || '', replaces: replaces || null, host: host || null })); },
       async linkRelayTurn(ws) { try { return ok(await sb.rpc('link_relay_turn', { ws })); } catch (e) { if (/PGRST202|Could not find the function|schema cache/i.test(e.message || '')) return null; throw e; } },
       // Management › Connections: the api_* functions (owners and admins with two-step sign-in). On a database without
       // them the error is PGRST202 and the page says Connections aren't set up yet.
@@ -498,7 +501,8 @@
       const VERB = { give: 'Gave out', shared: 'Added as shared', ignore: 'Ignored', unignore: 'Brought back', restart: 'Restarted', resync: 'Re-sent settings to', unassign: 'Took back', remove: 'Removed', location: 'Moved' };
       return out(VERB[act] || 'Changed', act === 'location' ? ` to ${data.location || 'no location'}` : '');
     };
-    const demoRelay = { enabled: false, admin: true, relays: [{ id: 'syd1', host: 'relay.riyeser.com', region: 'Sydney', online: true, priority: 1 }, { id: 'mel1', host: 'relay2.riyeser.com', region: 'Melbourne', online: true, priority: 2 }],
+    const demoRelay = { enabled: false, admin: true, api: 2, relays: [{ id: 'syd1', host: 'relay.riyeser.com', region: 'Sydney', online: true, priority: 1 }, { id: 'mel1', host: 'relay2.riyeser.com', region: 'Melbourne', online: true, priority: 2 }],
+      manage: [{ id: 'syd1', host: 'relay.riyeser.com', region: 'Sydney', online: true, priority: 1, managed: true, last_seen: new Date().toISOString(), version: '1.1.0' }, { id: 'mel1', host: 'relay2.riyeser.com', region: 'Melbourne', online: true, priority: 2, shared: true, last_seen: new Date().toISOString(), version: '1.1.0' }],
       offices: [{ office_id: 'lo-demo-suva', pc_name: 'SUVA-OFFICE', relay: { state: 'off' }, revoked: false }, { office_id: 'lo-demo-nadi', pc_name: 'NADI-BRANCH', relay: { state: 'off' }, revoked: false }], devices: [] };
     // Demo file storage and Riyeser Link. sessionStorage 'riyeser.demo.storage': 'nearly' = 85% of the 20 GB, 'full' = 1 MB
     // left, 'off' = Riyeser Link paused (its 90 days over, not paid: chat read-only).
@@ -824,6 +828,19 @@
         return { ...d, password: 'DemoOnlyPassw0rd1234', server: 'relay.riyeser.com', domain: 'relay.riyeser.com', port: 5061, transport: 'TLS', realm: 'riyeser-relay', prov_url: 'https://relay.riyeser.com/prov/demo-only-link', prov_expires: new Date(Date.now() + 900e3).toISOString() }; },
       async linkRelayDeviceRemove(_w, id) { demoRelay.devices = demoRelay.devices.filter((d) => d.id !== id); },
       async linkRelayTurn() { return { ice_servers: [], ttl: 0 }; },
+      async linkRelayManage(_w, id, action, confirm) {
+        const x = demoRelay.manage.find((r) => r.id === id); if (!x) throw new Error('That relay isn\'t one your business uses.');
+        const left = demoRelay.manage.filter((r) => !r.off && r.id !== id);
+        if ((action === 'off' || action === 'remove') && !left.length && demoRelay.enabled && !confirm) throw new Error('LAST_RELAY: This is your business\'s last relay. Without it your sites can\'t call each other and phones at home stop working, so the relay will be switched off for your business. Add another relay first, or confirm.');
+        if (action === 'remove' && !x.managed) throw new Error('This relay is Riyeser\'s, so it can\'t be removed from here. Switch it off for your business instead.');
+        if (action === 'main') { demoRelay.manage = [x, ...demoRelay.manage.filter((r) => r !== x)]; x.off = false; }
+        if (action === 'off') x.off = true; if (action === 'on') x.off = false;
+        if (action === 'remove') demoRelay.manage = demoRelay.manage.filter((r) => r !== x);
+        demoRelay.relays = demoRelay.manage.filter((r) => !r.off).map((r) => ({ ...r }));
+        if (!demoRelay.relays.length) demoRelay.enabled = false;
+        return JSON.parse(JSON.stringify(demoRelay));
+      },
+      async linkRelayEnrollCode(_w, region, replaces) { return { code: 'RLY-DEMO-ONLY-CODE', expires_at: new Date(Date.now() + 1800e3).toISOString(), relay_id: 'rdemo001', replaces: replaces || null }; },
       async requestRefund(_w, r) { const f = { id: 'f' + (refs.length + 1), ref: 'R-' + (1042 + refs.length), ...r, status: 'submitted', created_at: new Date().toISOString() }; refs.unshift(f); return { id: f.id, ref: f.ref }; },
       // the demo doesn't take payments (Billing hides)
       async myBilling() { return null; }, async paypalStatus() { return { ready: false }; },
@@ -3765,6 +3782,89 @@
     clearTimeout(phMsg.t); if (cls === 'ok' || cls === 'bad' || cls === 'warn') phMsg.t = setTimeout(() => { el.hidden = true; }, cls === 'ok' ? 3500 : 9000);
   }
 
+  // ---------- 1.3.1: change or remove the relay PC, and each site's checklist (from its reports) ----------
+  const CHK_T = { pc: 'This PC can be the relay', service: 'Relay service running', address: 'Address reserved in the router', ports: 'Router ports open from the internet',
+    name: 'Web name points here', secure: 'Secure connection', registered: 'Registered with your business', switched: 'Relay switched on', internet: 'Internet',
+    reach: 'Can reach the relay', auth: 'Signed in and allowed', sound: 'Sound can get through', exts: 'Extensions announced', test: 'Test call' };
+  const CHK_I = { ok: '✓', warn: '!', fail: '✗', todo: '·' };
+  function relayManageHtml(R) {
+    const card = (x, i) => {
+      const where = x.off ? '<span class="pl">Off for your business</span>' : i === 0 ? '<span class="pl ok">Main</span>' : `<span class="pl">Backup ${i}</span>`;
+      const seen = x.pending ? (x.replaces ? `Waiting for the new PC (takes over from ${esc(x.replaces)})` : 'Waiting for it to check in') : x.online ? 'Online now' : x.last_seen ? `Last seen ${esc(ago(x.last_seen))}` : 'Never seen';
+      return `<li class="lo-rlycard${x.online ? '' : ' off'}" data-rid="${esc(x.id)}"><div class="lo-rlyhead"><b>${esc(x.region || x.id)}</b>${where}${x.shared ? '<span class="pl">Riyeser\'s</span>' : x.managed ? '<span class="pl">Your PC</span>' : ''}</div>
+        <div class="muted small"><span class="pl ${x.online ? 'ok' : x.pending ? 'warn' : 'bad'}">${seen}</span> · ${esc(x.id)}${x.version ? ` · version ${esc(x.version)}` : ''}${x.dns ? ` · ${esc(x.host)}` : ''}</div>
+        <div class="lo-rlyacts">${!x.off && i > 0 ? `<button class="btn sm" data-rlyact="main" data-rid="${esc(x.id)}">Make it the main relay</button>` : ''}
+          ${x.off ? `<button class="btn sm" data-rlyact="on" data-rid="${esc(x.id)}">Use it again</button>` : `<button class="btn sm" data-rlyact="off" data-rid="${esc(x.id)}">Stop using it</button>`}
+          ${x.managed ? `<button class="btn sm" data-rlymove="${esc(x.id)}">Move to another PC</button><button class="btn sm danger" data-rlyact="remove" data-rid="${esc(x.id)}">Remove</button>` : ''}</div></li>`;
+    };
+    return `<div class="lo-rlyman" id="lorlyman"><div class="lo-dphead"><h4>Your relays</h4><button class="btn p" id="lorlyadd">+ Add or move a relay PC</button></div>
+      <ul class="lo-rlylist">${R.manage.map(card).join('') || '<li class="muted">No relay yet.</li>'}</ul>
+      <p class="muted small">Sites use the main relay and move to the next one by themselves. Removing a lost or broken PC cuts it off: its key stops working within 30 seconds.</p></div>`;
+  }
+  function siteChecksHtml(o, R) {
+    const r = o.relay || {}; const ch = Array.isArray(r.checks) ? r.checks : [];
+    const bad = [...ch.filter((c) => c.s === 'fail'), ...ch.filter((c) => c.s === 'warn')];   // what doesn't work first
+    const sum = !ch.length ? 'No checklist yet (update its Riyeser Link Office to 1.3.1).' : bad.length ? `${bad.length} thing${bad.length === 1 ? ' needs' : 's need'} attention: ${CHK_T[bad[0].k] || bad[0].k}` : 'All good';
+    const relays = (R.relays || []);
+    return `<details class="lo-chksite c-${bad.some((c) => c.s === 'fail') ? 'bad' : bad.length ? 'warn' : 'ok'}" data-office="${esc(o.office_id)}"${S.loui && S.loui.chkOpen === o.office_id ? ' open' : ''}>
+      <summary><b>${esc(o.pc_name || 'Riyeser Link Office')}</b>${r.host ? ' <span class="pl">The relay PC</span>' : ''}<span class="lo-chksum">${esc(sum)}</span></summary>
+      <ol class="lo-rchk">${ch.map((c) => `<li class="c-${esc(c.s)}"><span class="ic" aria-label="${esc(c.s)}">${CHK_I[c.s] || '·'}</span><div><b>${esc(CHK_T[c.k] || c.k)}</b><span>${esc(c.t || '')}</span></div></li>`).join('')}</ol>
+      ${r.test ? `<p class="muted small">Last test call: ${r.test.ok ? `sound both ways · ${esc(r.test.rtt_ms)} ms · ${esc(r.test.loss)}% lost` : 'didn\'t work'}${r.test.at ? ` (${esc(ago(r.test.at))})` : ''}</p>` : ''}
+      ${R.admin ? `<div class="lo-adv"><h5>Advanced checks</h5><div class="lo-advbtns">
+        <button class="btn" data-chk="run_all">Run all checks</button><button class="btn" data-chk="test_call">Test call</button>
+        <label class="lo-advsel"><span class="muted small">One check</span><select data-chkstep>${Object.entries(CHK_T).map(([k, t]) => `<option value="${esc(k)}">${esc(t)}</option>`).join('')}</select></label><button class="btn" data-chk="run_check">Run it</button>
+        ${r.host ? '<button class="btn" data-chk="retry_upnp">Retry automatic port forwarding</button><button class="btn" data-chk="reregister">Re-register the relay</button>' : ''}
+        <button class="btn" data-chk="reset_pass">Reset this site's relay pass</button>
+        ${relays.length > 1 ? `<label class="lo-advsel"><span class="muted small">Use relay</span><select data-chkrelay>${relays.map((x) => `<option value="${esc(x.id)}">${esc(x.region || x.id)}</option>`).join('')}</select></label><button class="btn" data-chk="force_relay">Use it for now</button>` : ''}
+        <button class="btn" data-chk="details">Raw details</button></div><div class="lo-advout" id="advout-${esc(o.office_id)}">${(S.loui && S.loui.advOut && S.loui.advOut[o.office_id]) || ''}</div></div>` : ''}</details>`;
+  }
+  /** A result from a site's Link Office, as a card (never raw HTML from it). */
+  function advResultHtml(kind, res) {
+    const x = res || {};
+    if (x.test) return `<div class="lo-advcard c-${x.test.ok ? 'ok' : 'bad'}"><b>Test call: ${x.test.ok ? 'sound both ways' : 'didn\'t work'}</b><span>${esc(x.test.ok ? `${x.test.rtt_ms} ms round trip · ${x.test.loss}% lost` : x.test.error || '')}</span></div>`;
+    if (x.step) return `<div class="lo-advcard c-${x.step.s === 'ok' ? 'ok' : x.step.s === 'todo' ? '' : 'bad'}"><b>${esc(CHK_T[x.step.k] || x.step.k)}: ${esc({ ok: 'OK', warn: 'needs a look', fail: 'needs attention', todo: 'not yet' }[x.step.s] || x.step.s)}</b><span>${esc(x.step.t || '')}</span></div>`;
+    if (x.summary) return `<div class="lo-advcard c-${x.summary.problems && x.summary.problems.length ? 'bad' : 'ok'}"><b>${esc(x.summary.text)}</b></div>`;
+    if (kind === 'details') return `<div class="lo-advcard c-none"><b>Raw details</b><pre class="lo-raw">${esc(JSON.stringify(x, null, 2))}</pre><button class="btn sm" data-copyraw="1">Copy for support</button></div>`;
+    return `<div class="lo-advcard c-${x.ok === false ? 'bad' : 'ok'}"><b>${x.ok === false ? esc(x.error || 'That didn\'t work.') : 'Done.'}</b></div>`;
+  }
+  async function relayManage(id, action) {
+    const t = S.team; if (needs2step()) return security();
+    const x = ((S.lo.relay || {}).manage || []).find((r) => r.id === id) || { id };
+    const name = x.region || id;
+    const q = { main: `Make ${name} the main relay? Sites move to it for new calls within a minute.`, off: `Stop using ${name} for your business? Sites move to the next relay by themselves.`,
+      on: `Use ${name} again?`, remove: `Remove ${name}? Use this when the PC is replaced, lost or broken. Its key stops working at once, and keys copied from it stop working on the other relays within 30 seconds. Sites move to the next relay by themselves.` }[action];
+    if (!(await ask(q, { yes: action === 'remove' ? 'Remove' : 'Yes', danger: action === 'remove' }))) return;
+    try { S.lo.relay = { ...S.lo.relay, ...(await api.linkRelayManage(t.id, id, action, false)) }; phMsg(action === 'remove' ? `${esc(name)} is removed.` : 'Saved.', 'ok'); }
+    catch (err) {
+      const m = String((err && err.message) || '');
+      if (/^LAST_RELAY:/.test(m) && await ask(m.replace(/^LAST_RELAY:\s*/, ''), { yes: action === 'remove' ? 'Remove and switch the relay off' : 'Stop and switch the relay off', danger: true, title: 'This is your last relay' })) {
+        try { S.lo.relay = { ...S.lo.relay, ...(await api.linkRelayManage(t.id, id, action, true)) }; phMsg('Done. The relay is switched off for your business until another relay PC is set up.', 'warn'); } catch (e2) { phMsg(esc(plainError(e2)), 'bad'); }
+      } else if (!/^LAST_RELAY:/.test(m)) phMsg(esc(plainError(err)), 'bad');
+    }
+    refreshPhones();
+  }
+  /** Add or move a relay PC: a one-time set-up code to type into Riyeser Link Office on the new PC. */
+  function relayCode(replaces) {
+    if (needs2step()) return security();
+    const mine = ((S.lo.relay || {}).manage || []).filter((x) => x.managed);
+    modal(`<h3>Add or move a relay PC</h3><p class="muted">On the new PC: install Riyeser Link Office and open Settings → Connect your branches → This PC as the relay. It needs no web name or DNS: sites find it by itself.</p>
+      <div class="lo-rpform"><label>Where is the new PC<input id="rcregion" maxlength="60" placeholder="e.g. Suva head office"></label>
+      <label>It takes over from<select id="rcrep"><option value="">Nothing: it's an extra relay</option>${mine.map((x) => `<option value="${esc(x.id)}"${x.id === replaces ? ' selected' : ''}>${esc(x.region || x.id)} (${esc(x.id)})</option>`).join('')}</select></label>
+      <details><summary>Advanced: use your own web name</summary><label>Web name<input id="rchost" placeholder="relay.example.com" autocomplete="off"></label><p class="muted small">Only if you want one. The new PC then keeps it pointing at itself (Cloudflare or Namecheap; it asks there).</p></details></div>
+      <div id="rcout"></div><div class="mfoot"><button class="btn" id="cl">Close</button><button class="btn p" id="rcgo">Make a set-up code</button></div>`, (d, close) => {
+      d.querySelector('#cl').onclick = () => { close(); refreshPhones(); };
+      d.querySelector('#rcgo').onclick = async () => {
+        const go = d.querySelector('#rcgo'); go.disabled = true;
+        try {
+          const c = await api.linkRelayEnrollCode(S.team.id, d.querySelector('#rcregion').value.trim(), d.querySelector('#rcrep').value || null, d.querySelector('#rchost').value.trim() || null);
+          d.querySelector('#rcout').innerHTML = `<div class="lo-codebox"><span class="muted small">Set-up code (works once, for 30 minutes)</span><code id="rccode">${esc(c.code)}</code></div>
+            <ol class="lo-steps"><li>On the new PC: Riyeser Link Office → Settings → Connect your branches → This PC as the relay.</li><li>Type this code, then press <b>Set up this PC as the relay</b> and say yes when Windows asks.</li>
+            <li>${c.replaces ? `Once it's running, it takes over from ${esc(c.replaces)} by itself, the old PC is removed, and your sites reconnect to the new one.` : 'Once it\'s running, it shows here and your sites can use it.'}</li></ol>`;
+          go.remove();
+        } catch (err) { d.querySelector('#rcout').innerHTML = `<p class="err">${esc(plainError(err))}</p>`; go.disabled = false; }
+      };
+    });
+  }
   async function refreshPhones() {
     if (!document.getElementById('phonesPage')) return;
     try { S.lo.status = await api.linkStatus(S.team.id); } catch { /* keep what we have */ }
@@ -3955,7 +4055,9 @@
       ${avail ? '' : '<p class="lo-warn" id="lorelaynone">The Riyeser relay isn\'t running yet. Riyeser is setting it up; this switches on once it is.</p>'}
       <label class="lo-relaysw"><span class="sw"><input type="checkbox" id="lorelayon"${R.enabled ? ' checked' : ''}${!avail || !R.admin ? ' disabled' : ''}><span></span></span> <b>Connect our sites through the Riyeser relay</b></label>
       ${avail ? `<p class="muted small" id="lorelays">Relays: ${relays.map((x, i) => `${esc(x.region || x.host)}${i === 0 ? ' (main)' : ' (backup)'} · ${x.online ? '<span class="pl ok">online</span>' : '<span class="pl bad">offline</span>'}`).join(' → ')}. If the main one stops, sites move to the backup by themselves within seconds.</p>` : ''}
+      ${R.admin && Array.isArray(R.manage) ? relayManageHtml(R) : ''}
       ${R.enabled ? `<div class="lo-tw"><table class="lo lo-sites"><thead><tr><th>Site</th><th>Relay</th><th>Last seen</th><th></th></tr></thead><tbody>${(R.offices || []).map(row).join('') || '<tr><td colspan="4" class="muted">No Riyeser Link Office has been in touch yet.</td></tr>'}</tbody></table></div>
+        ${(R.offices || []).some((o) => o.relay && Array.isArray(o.relay.checks)) ? `<h4 class="lo-chkh">Each site's checklist</h4><div class="lo-chksites">${(R.offices || []).map((o) => siteChecksHtml(o, R)).join('')}</div>` : ''}
         <div class="lo-dphead"><h4>Phones at home or at another site</h4><button class="btn p" id="lorelayadd">+ Set up a phone at home or another site</button></div>
         ${(R.devices || []).length ? `<div class="lo-tw"><table class="lo lo-rdev"><thead><tr><th>Phone</th><th>Extension</th><th>Status</th><th></th></tr></thead><tbody>${R.devices.map(dev).join('')}</tbody></table></div>` : '<p class="muted small">None yet. Any SIP phone or app that can use TLS works (Linphone, Zoiper, most desk phones); it connects straight to the relay.</p>'}` : ''}
       ${online.length || !avail ? '' : '<p class="lo-warn">The relays aren\'t answering right now. Calls inside each office still work.</p>'}</section>`;
@@ -3981,6 +4083,28 @@
       refreshPhones();
     });
     const add = $app.querySelector('#lorelayadd'); if (add) add.onclick = () => relayPhone();
+    // 1.3.1: relays, and each site's checklist with Advanced checks (sent to that site's Link Office; in the history)
+    $app.querySelectorAll('[data-rlyact]').forEach((b) => b.onclick = () => relayManage(b.dataset.rid, b.dataset.rlyact));
+    $app.querySelectorAll('[data-rlymove]').forEach((b) => b.onclick = () => relayCode(b.dataset.rlymove));
+    const radd = $app.querySelector('#lorlyadd'); if (radd) radd.onclick = () => relayCode(null);
+    $app.querySelectorAll('.lo-chksite').forEach((d) => d.addEventListener('toggle', () => { S.loui = S.loui || {}; if (d.open) S.loui.chkOpen = d.dataset.office; else if (S.loui.chkOpen === d.dataset.office) S.loui.chkOpen = null; }));
+    $app.querySelectorAll('[data-chk]').forEach((b) => b.onclick = async () => {
+      if (needs2step()) return security();
+      const box = b.closest('.lo-chksite'); const office = box.dataset.office; const out = box.querySelector('.lo-advout');
+      const action = b.dataset.chk; const data = { action };
+      if (action === 'run_check') data.step = box.querySelector('[data-chkstep]').value;
+      if (action === 'force_relay') data.relay = box.querySelector('[data-chkrelay]').value;
+      const show = (html, cls = '') => { out.innerHTML = `<div class="lo-advcard c-${cls || 'none'}">${html}</div>`; };
+      show(`<span class="spin sm"></span> Asking that site's Riyeser Link Office…`);
+      let id; try { id = await api.linkCommand(t.id, office, 'relay_check', data); } catch (err) { show(esc(plainError(err)), 'bad'); return; }
+      const r = await followCmd(id, show, { page: 'phonesPage' });
+      if (r && r.st) {
+        // kept for this visit, so the page refreshing every 20 seconds doesn't lose it
+        const html = advResultHtml(action, r.st.result); S.loui = S.loui || {}; S.loui.advOut = { ...(S.loui.advOut || {}), [office]: html }; S.loui.advRaw = r.st.result;
+        const now = document.getElementById(`advout-${office}`) || out; now.innerHTML = html;
+      }
+    });
+    $app.querySelectorAll('[data-copyraw]').forEach((b) => b.onclick = () => { if (navigator.clipboard) navigator.clipboard.writeText(JSON.stringify((S.loui || {}).advRaw || {}, null, 2)); phMsg('Copied. Paste it into your message to Riyeser support.', 'ok'); });
   }
   /** Lazily load the QR code maker (vendor/qrcode-1.4.4.js, MIT), only when one is needed. */
   function qrSvg(text) {

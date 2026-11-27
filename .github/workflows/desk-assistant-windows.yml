@@ -394,6 +394,10 @@ jobs:
   #    sites (the real phone engine, each in its own process) connect to it over wss with the certificate pinned, call
   #    each other with sound both ways (RTP counted), the relay's task is restarted, and they reconnect and call again.
   #    The relay and site tests on this PC (link-relay.test.js: failover, relay down, isolation) run first.
+  #    1.3.1: also the test call (tone through the relay's echo), the relay's ports tested from outside by a second relay,
+  #    and "move the relay to a new PC": uninstalled the way Link Office does it (checked: no task, no firewall rules, the
+  #    router port forwarding removed, no key or settings, logs zipped), installed again with a new id and key, and the
+  #    same two sites reconnect to it by themselves and call again with sound both ways.
   relay:
     if: github.event_name != 'workflow_dispatch' || inputs.job == 'all' || inputs.job == 'relay'
     runs-on: windows-latest
@@ -407,15 +411,18 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - name: Relay and Link Office relay tests (this PC)
-        run: node --test --test-timeout=120000 --test-force-exit test/link-relay.test.js
+        run: node --test --test-timeout=120000 --test-force-exit test/link-relay.test.js test/link-relay-remove.test.js
       - name: Install the relay as a Windows service
         run: |
           $node = (Get-Command node).Source
-          & ./src/relay/deploy/windows/install-relay.ps1 -Node $node -RelayDir (Resolve-Path src/relay).Path -Domain relay.riyeser.com -Region "Head office" -Id suva1 -NoPortMap -SupabaseUrl ""
+          & ./src/relay/deploy/windows/install-relay.ps1 -Node $node -RelayDir (Resolve-Path src/relay).Path -Domain relay.riyeser.com -Region "Head office" -Id suva1 -NoPortMap -PublicIp 127.0.0.1 -SupabaseUrl ""
           if ($LASTEXITCODE) { Get-Content "$env:ProgramData\Riyeser Relay\logs\relay.log" -ErrorAction SilentlyContinue; exit 1 }
           Get-ScheduledTask -TaskName "Riyeser Relay" | Format-List TaskName, State
           Get-NetFirewallRule -DisplayName "Riyeser Relay*" | Format-Table DisplayName, Enabled, Direction -AutoSize
-      - name: Two sites call each other through it (sound both ways), and again after the service restarts
+      - name: Two sites call each other through it (sound both ways), test call, ports from outside, service restart, move to a new PC
+        env:
+          RELAY_OUTSIDE: "1"
+          RELAY_MOVE: pwsh -NoProfile -File test/e2e/windows-relay-move.ps1
         run: |
           node test/e2e/windows-relay-check.js "$env:RUNNER_TEMP\relay-check.json"
           $ok = $LASTEXITCODE
@@ -431,3 +438,4 @@ jobs:
           path: |
             ${{ runner.temp }}/relay-check.json
             ${{ runner.temp }}/relay-service.log
+            ${{ runner.temp }}/natpmp-requests.log

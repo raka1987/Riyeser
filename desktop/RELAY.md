@@ -139,6 +139,16 @@ and gets back, for each business with the relay on: its offices (generation, rev
 extension, HA1 digest — never a password) and its ring groups. If Supabase can't be reached, the relay carries on with
 the last copy (tokens still expire on time).
 
+**1.3.1: one key per relay.** A relay set up with a set-up code (below) has **its own key** (`relay_servers.sync_key`,
+64 hex, made by the database) and never sees the cluster secret: it signs `relay_sync` / `relay_leave` with its key and
+gets the derived keys (office, device, peer, TURN — never the secret) back from `relay_sync` (`keys: {epoch, …}`).
+**Removing a relay** (`relay_drop`: website Remove, the PC uninstalling itself, or another PC taking over) deletes its
+row, so its key fails at once (`RELAY_REMOVED`), and **changes the cluster secret** (`relay_rotate`, epoch + 1): the
+relays that stay take the new keys at their next sync (≤ 30 s) and drop the removed one's peer connection; passes and
+peer logins made with keys copied from it stop working. A relay from before 1.3.1 keeps signing with the old secret
+(it becomes its own key); the secret isn't changed while any relay that has checked in is older than 1.1.0. A business
+left with no relay has the relay switched off (in its history).
+
 **Remote phones** (`link_relay_device_add`): a random username (`r` + 10 letters) and 20-letter password, shown
 **once** on the website with a QR code. Only `HA1 = MD5(user:riyeser-relay:password)` is stored (what SIP digest
 needs). Admins (two-step sign-in) can add one for anyone; members for their own extension. Removing it is immediate
@@ -215,6 +225,71 @@ On a VPS the address is fixed. On the owner's own hardware it can change, so:
   other sites can't be reached: no connection to the Riyeser relay)", and the screen says so.
 - The heartbeat adds `relay: {state, region, rtt_ms, since, error, udp}` (stored in `link_offices.relay`).
 
+## Link Office 1.3.1: change or remove the relay PC, and the guided checklist
+
+**Set up / move with a code, no DNS needed.** An owner or admin makes a one-time **set-up code** (`link_relay_enroll_code`,
+two-step sign-in, 30 minutes, once) on the website (*Sites & relay → Add or move a relay PC*) or in Link Office's
+Advanced checks. On the new PC, *Settings → Connect your branches → This PC as the relay* claims it
+(`relay_enroll_claim`, no sign-in needed: the code is the permission) and gets **its own new key**, written to a file
+for `install-relay.ps1 -RelayKeyFile … -NoDns` (deleted after reading). By default the relay has **no web name**
+(`<id>.relay.invalid`, `relay_servers.dns = false`): sites connect to the public address it reports, trusted by its
+certificate fingerprint (as before), and phones at home are given the address too. With *replaces*, the new relay
+takes the old one's place, priority and web name, and the old one is removed when the new one **first checks in**
+(so nothing breaks if the set-up doesn't finish). *Advanced: use your own web name* keeps the DNS options: Cloudflare
+(an "Edit zone DNS" token, `DDNS_ZONE` the domain; the record is kept DNS only, grey cloud) or Namecheap Dynamic DNS;
+Link Office looks up the domain's nameservers and preselects the provider.
+
+**Stop using this PC as the relay** (relay PC, *Settings → Connect your branches*; owners and admins after unlocking
+Advanced checks): the impact first (sites move to the next relay; with none, the relay is switched off for the
+business), then **Move the relay to another PC** (a set-up code and the steps) or **Remove it**:
+`install-relay.ps1 -Uninstall` with Windows' permission prompt — `relay_leave` (signed with its own key), the task
+stopped and removed, the relay process stopped, the router port forwarding it made removed (the relay notes each
+UPnP / NAT-PMP mapping in `portmaps.json`; `server.js --remove-port-mappings`), its firewall rules removed, its logs
+zipped into `C:\ProgramData\Riyeser Relay Logs`, and `C:\ProgramData\Riyeser Relay` (key, settings, certificate)
+deleted. The last line is `RESULT {json}`; Link Office shows what was done. **Uninstalling Link Office** from Windows'
+Apps does the same when this PC is the relay (`build/link/installer.nsh`, not on an update). The Overview says
+**"This PC is the relay"** so nobody wipes it by accident; a relay removed elsewhere says so and offers the clean-up.
+
+**On the website** (*Management → Desk phones → Sites & relay*, owners and admins with two-step sign-in, scoped to the
+business — `link_relay_manage`): each relay with main/backup, last seen and version; **Make it the main relay**,
+**Stop using it / Use it again** (for this business; `link_relay_settings.off`), **Move to another PC**, and
+**Remove** for relays the business looks after (`managed_by`; Riyeser's shared relays can only be switched off for the
+business). Removing or switching off the last relay needs a second confirmation (`LAST_RELAY`) and switches the relay
+off. `relay_register` / `relay_remove` stay for Riyeser's own use in the SQL editor.
+
+**The guided checklist** (`renderer/link-relaycheck.js`, facts from `link/relaychecks.js`): on the relay PC — this PC
+can be the relay (Windows, admin rights, disk, battery, sleep with a "Keep this PC awake" fix), relay service running,
+address reserved in the router, router ports open **from outside** (another relay of the cluster connects back to the
+listed public address on each port: `/check/outside`, peer messages `probe-me` / `probe-result`; automatic forwarding
+first, per-router steps only when that failed), web name (only with your own name: missing, proxied through
+Cloudflare, pointing elsewhere), secure connection (fingerprint), registered, switched on; on every site — internet,
+can reach the relay (name, TCP, TLS + pin: says which failed), signed in and allowed, sound (UDP), extensions
+announced, and a **test call**: a second of 1 kHz tone (G.711, 20 ms packets) through the relay's echo (`RYECHO1`
+on the probe port, ≤ 64 packets a second per address), checking the tone comes back clearly, with round trip, jitter
+and loss. A summary banner ("All good — 3 sites connected" / "1 thing needs attention: …"), and the Overview tile and
+Needs attention link straight to the failing step. Results show quietly: no pop-ups asking to fix things; one Windows
+notification only when calls to the other sites stop working (once). An office with no branches sees "Branches: not
+used" and nothing else. Admins can dismiss a step for good.
+
+**Advanced checks** (owners and admins: a Riyeser account with two-step sign-in, held in memory only, locked again after
+15 minutes without use): each step on its own, test call / echo, test ports from outside, retry automatic forwarding,
+re-register, reset this site's relay pass, use a chosen relay for now, raw details (public IP, ports, mappings, relays,
+pass expiry, last errors, the relay's log) with "Copy for support", set-up codes. The same from the website, also on a
+phone: each site's checklist (from `link_relay_report`'s `checks`, `test`, `host`) and **Advanced checks** sent to that
+site's Link Office as `link_command` kind `relay_check` (`run_check`, `run_all`, `test_call`, `echo_test`,
+`retry_upnp`, `reregister`, `reset_pass`, `force_relay`, `details`); results come back with `link_office_done` and show
+as cards within seconds, and every one is in the history.
+
+**A Riyeser-hosted relay (not built; the hooks):** businesses that don't want their own PC could choose "Use Riyeser's
+relay" with nothing to set up. Riyeser's own relays are rows with `workspace_id` null and `managed_by` null: every
+business already sees them in `relay_list`, isolation is per business in the relay (sites, routes, phones) and in
+`relay_sync`'s plan, and admins can make one their main relay or switch it off for themselves. What it would need:
+rented servers in each region (the Linux `setup.sh --letsencrypt` path, with a real web name and certificate, so TURN
+over TLS works in browsers), Riyeser registering them with the SQL editor's `relay_register` or a Riyeser-HQ-only
+version of the set-up code, capacity monitoring per relay (`/metrics`), a per-business usage limit or price (relay
+minutes / bandwidth) and its billing, and a "Use Riyeser's relay" switch in Sites & relay that sets the business's
+order to Riyeser's relays. Nothing in the code assumes a business has its own relay.
+
 ## Riyeser Link (website and app)
 
 - WebRTC calls ask `link_relay_turn(ws)` for TURN details (cached for half their life) and use only those; with
@@ -257,4 +332,17 @@ On a VPS the address is fixed. On the owner's own hardware it can change, so:
 - `desk-assistant-windows.yml`, job `relay`: the relay installed as a Windows service on the CI runner, two Link
   Office sites calling through it with sound both ways, the service restarted, calls again.
 - `website/team/test/relay-ui-test.js`: the Phones page section.
-- `website/team/test/rules-test.sql`: the relay RPCs (who can get tokens, revoke, devices, TURN, isolation).
+- `website/team/test/rules-test.sql`: the relay RPCs (who can get tokens, revoke, devices, TURN, isolation); 1.3.1: set-up
+  codes (owners/admins with two-step only, once, never another business's relay), own keys (never the cluster secret),
+  keys back from `relay_sync`, no web name (the address and pin), make main / switch off / remove (`link_relay_manage`,
+  aal2, Riyeser's relay can't be removed, another business can't touch them), moving to a new PC (takes over at its
+  first check-in, the old one refused with `RELAY_REMOVED`), the cluster secret changed on removal (and not while a
+  relay is too old), the last relay switched off with a warning first, `relay_leave`, the checklist in reports and
+  `relay_check` commands (only known fields, in the history).
+- 1.3.1: `desktop/test/link-relay-remove.test.js` (uninstall script and its order, the installer hook, the set-up code,
+  port mappings noted and removed, revocation within one sync and sites moving on, the move to a new PC, the test call,
+  the checklist's states, remote checks, Advanced checks' lock, Cloudflare DNS); `link-relay-nat.test.js` adds the test
+  call through a NAT and the ports tested from outside (one closed); `relay/test/remove.test.js`;
+  `website/team/test/relay-remove-ui-test.js`; `desktop/test/e2e/relay-checklist-shots.js` (pictures). The Windows CI
+  relay job installs, uninstalls (no task, firewall rules, port mappings or key left; logs zipped), installs again as
+  a "new PC" and the sites reconnect and call.

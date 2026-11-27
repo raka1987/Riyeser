@@ -27,18 +27,19 @@ function plan(over = {}) {
 function fakeCloud(p) {
   const c = { plan: p, state: { ok: true } };
   c.sync = async () => JSON.parse(JSON.stringify(c.plan));
-  c.start = async (onPlan) => { c.onPlan = onPlan; await onPlan(await c.sync()); };
+  c.start = async (onPlan, onRemoved) => { c.onPlan = onPlan; c.onRemoved = onRemoved; await onPlan(await c.sync()); };
+  c.removed = () => { c.state = { ok: false, removed: true, error: 'This relay has been removed from Riyeser (RELAY_REMOVED).' }; if (c.onRemoved) c.onRemoved(c.state.error); };   // 1.3.1
   c.push = async (np) => { if (np) c.plan = np; await c.onPlan(await c.sync()); };
   return c;
 }
 
 /** The relay. opts: { id, region, httpPort, peers, bind, publicIp, p } */
-async function relay({ id = 'syd1', region = 'Sydney', httpPort = 0, peers = [], bind = '127.0.0.1', publicIp = '127.0.0.1', p = plan(), log } = {}) {
+async function relay({ id = 'syd1', region = 'Sydney', httpPort = 0, peers = [], bind = '127.0.0.1', publicIp = '127.0.0.1', p = plan(), log, secret = SECRET, probePort = 0 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-relay-'));
   const b = base; base += 220;
   const cloud = fakeCloud(p);
-  const s = createRelayServer({ id, region, host: `${id}.relay.test`, secret: SECRET, httpPort, httpBind: bind, trustProxy: false, sipTlsPort: false, selfSigned: false, certDir: dir,
-    mediaMin: b, mediaMax: b + 199, probePort: 0, mediaBind: bind, publicIp, turn: { enabled: false }, ddns: {}, peers, cloud,
+  const s = createRelayServer({ id, region, host: `${id}.relay.test`, secret, httpPort, httpBind: bind, trustProxy: false, sipTlsPort: false, selfSigned: false, certDir: dir,
+    mediaMin: b, mediaMax: b + 199, probePort, mediaBind: bind, publicIp, turn: { enabled: false }, ddns: {}, peers, cloud,
     limiter: { perMinute: 1000, maxFails: 1000 }, log: log || (process.env.RELAY_LOG ? (l, t) => console.log(id, l, t) : () => {}) });
   await s.start();
   s.dir = dir; s.fakeCloud = cloud; s.url = `ws://${bind}:${s.ports.http}/link/v1`;

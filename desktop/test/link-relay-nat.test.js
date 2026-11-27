@@ -64,7 +64,8 @@ test('two sites behind separate NATs + the relay: calls with sound both ways, IP
   const note = (s) => { evidence.push(s); t.diagnostic(s); };
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-nat-'));
   build();
-  const plan = { ok: true, relays: [], businesses: [
+  // the other relays of the cluster as Riyeser online lists them (their public addresses: what a peer may test)
+  const plan = { ok: true, relays: [{ id: 'syd1', region: 'Suva head office', ip: '198.51.100.10' }, { id: 'mel1', region: 'Sydney', ip: '198.51.100.20' }], businesses: [
     { ws: WS_A, enabled: true, offices: [{ office_id: 'lo-suva-nat00001', gen: 1, name: 'Suva' }, { office_id: 'lo-nadi-nat00002', gen: 1, name: 'Nadi' }], devices: [], groups: [{ ext: '100', members: ['101', '201'] }] },
     { ws: WS_B, enabled: true, offices: [{ office_id: 'lo-other-nat0003', gen: 1, name: 'Other' }], devices: [], groups: [] }] };
   const k = tokens.keys(SECRET).office;
@@ -102,6 +103,21 @@ test('two sites behind separate NATs + the relay: calls with sound both ways, IP
     assert.equal(c1.rtp.lastPayload, '201'); assert.equal(b1.lastPayload, '101');
     assert.match(c1.rtp.from, /^198\.51\.100\.10:/, 'the sound comes from the relay'); assert.match(b1.from, /^198\.51\.100\.10:/);
     assert.equal((await suva.ask('hangup', { from: '101' })).status, 200);
+
+    // 1b. 1.3.1 checklist: the test call (a second of 1 kHz tone through the relay's echo, over Suva's NAT), and the
+    //     relay's ports tested from OUTSIDE (the backup relay connects back to the main relay's public address)
+    const echo = (await suva.ask('echo')).test;
+    note(`Test call (echo) from Suva: ${echo.received}/${echo.sent} back, ${echo.loss}% lost, ${echo.rtt_ms} ms, tone ${echo.tone ? 'clear' : 'not clear'}`);
+    assert.ok(echo.ok && echo.tone && echo.loss <= 5, JSON.stringify(echo));
+    let out1 = null;
+    await until(async () => { out1 = (await r1.ask('outside')).outside; return out1 && out1.results; }, 15000, 'the outside port test');
+    note(`Ports from outside (tested by ${out1.via}): ${out1.results.map((x) => `${x.port}/${x.proto} ${x.open ? 'open' : 'CLOSED'}`).join(', ')}`);
+    assert.equal(out1.ok, true, JSON.stringify(out1)); assert.equal(out1.via, 'mel1');
+    nsx('rly1', 'iptables -I INPUT -i eth0 -p udp --dport 3478 -j DROP');
+    const out2 = (await r1.ask('outside')).outside;
+    nsx('rly1', 'iptables -D INPUT -i eth0 -p udp --dport 3478 -j DROP');
+    note(`With 3478/UDP blocked at the main relay: ${out2.results.filter((x) => !x.open).map((x) => `${x.port}/${x.proto}`).join(', ')} closed`);
+    assert.equal(out2.ok, false); assert.deepEqual(out2.results.filter((x) => !x.open).map((x) => `${x.port}/${x.proto}`), ['3478/udp']);
 
     // 2. another business can't reach A's extensions (it has a "201" of its own on its directory)
     const c2 = await other.ask('call', { from: '301', to: '201', ms: 100 });
