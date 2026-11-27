@@ -73,7 +73,7 @@ async function download(url, file) {
         row.trace.push({ s: Math.round((Date.now() - t0) / 1000), listed: p.id in reg.central, procs, folders: [...new Set(pf)].join('|') });
       };
       snap();
-      for (let i = 0; i < waitS && !(p.id in reg.central) && row.failure.ok; i++) { await new Promise((ok) => setTimeout(ok, 1000)); reg = registry(); if (i % 10 === 9) snap(); }
+      for (let i = 0; Date.now() - t0 < waitS * 1000 && !(p.id in reg.central) && row.failure.ok; i++) { await new Promise((ok) => setTimeout(ok, 1000)); reg = registry(); if (i % 5 === 4) snap(); }
       snap();
       if (waitS > 10) for (const t of row.trace) console.log(`  ${p.id} +${t.s}s listed=${t.listed} processes=[${t.procs}] folders=[${t.folders}]`);
       row.after = reg.central[p.id] ?? null;

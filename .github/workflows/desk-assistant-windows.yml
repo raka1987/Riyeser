@@ -306,7 +306,9 @@ jobs:
           Start-Process -FilePath $central.FullName -ArgumentList "--self-test=C:\riy\out\central.json" -Wait
           $c = Get-Content C:\riy\out\central.json -Raw | ConvertFrom-Json
           $c.programs | Format-Table id, status, where -AutoSize | Out-String -Width 220 | Write-Host
-          $missing = @($c.programs | Where-Object { $_.status -ne "installed" })
+          Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Accounting*" | ForEach-Object { Write-Host "Listed:" $_.DisplayName }
+          # Accounting Plus replaces Accounting Basics when it installs over it (Central then shows only Plus)
+          $missing = @($c.programs | Where-Object { $_.status -ne "installed" -and -not ($_.id -eq "accounting-basics" -and ($c.programs | Where-Object id -eq "accounting").status -eq "installed") })
           if ($missing.Count) { throw "Riyeser Central doesn't find: $($missing.id -join ', ')" }
       - name: Summary
         if: always()
