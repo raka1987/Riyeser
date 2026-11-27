@@ -77,7 +77,7 @@ h2.sec { font-size: 13px; font-weight: 700; color: var(--muted); text-transform:
 .qa:hover { border-color: var(--accent); background: var(--panel-2); }
 .qa .qi { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; color: #fff; flex: none; }
 .qa > span:last-child { min-width: 0; } .qa b { display: block; font-size: 13.5px; } .qa small { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.c-acc { background: #1a5fd6; } .c-basics { background: #16a05a; } .c-inv { background: #0284c7; } .c-team { background: #a21caf; } .c-link { background: #0e7490; } .c-book { background: #e11d48; } .c-pos { background: #0f8f82; } .c-pay { background: #5b54d6; } .c-desk { background: #6a4be0; } .c-pdf { background: #d6423a; } .c-svc { background: #d98a0b; } .c-find { background: #13294b; }
+.c-acc { background: #1a5fd6; } .c-basics { background: #16a05a; } .c-inv { background: #0284c7; } .c-team { background: #a21caf; } .c-link { background: #0e7490; } .c-book { background: #e11d48; } .c-est { background: #ea580c; } .c-pos { background: #0f8f82; } .c-pay { background: #5b54d6; } .c-desk { background: #6a4be0; } .c-pdf { background: #d6423a; } .c-svc { background: #d98a0b; } .c-find { background: #13294b; }
 
 /* ---------- tables ---------- */
 .cols { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; align-items: start; }

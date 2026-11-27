@@ -47,7 +47,7 @@ function programSpec(id, opts) {
 function everythingSpec(opts, installed = null) {
   const p = parts(opts);
   const has = (id) => !installed || installed.includes(id);
-  const acc = !installed || ['accounting', 'accounting-basics', 'invoices', 'pos', 'bookings'].some((x) => installed.includes(x));
+  const acc = !installed || ['accounting', 'accounting-basics', 'invoices', 'pos', 'bookings', 'estimate'].some((x) => installed.includes(x));
   return { program: 'Everything', title: 'Riyeser backup', accepts: Object.values(NAMES),
     parts: [...p.central, ...(acc ? p.accounting : []), ...(has('payroll') ? p.payroll : []), ...(has('desk') ? p.desk : []),
       ...(has('pdf') ? p.pdf : []), ...(has('linkoffice') ? p.linkoffice : []), ...(has('services') ? p.services : [])] };

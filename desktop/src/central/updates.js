@@ -24,6 +24,8 @@ const PRODUCTS = [
   { id: 'linkoffice', display: 'Riyeser Link Office', asset: 'RiyeserLinkOffice-Setup.exe', args: ['/S'] },
   { id: 'invoices', display: 'Riyeser Invoices', asset: 'RiyeserInvoices-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'bookings', display: 'Riyeser Bookings', asset: 'RiyeserBookings-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
+  // Riyeser Estimate (measure and quote) installs next to Accounting, like Invoices and Bookings.
+  { id: 'estimate', display: 'Riyeser Estimate', asset: 'RiyeserEstimate-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
   { id: 'accounting', display: 'Riyeser Accounting Plus', alsoRe: /^Riyeser Accounting\s+\d/i, asset: 'RiyeserAccountingPlus-Setup.exe', oldAsset: 'RiyeserAccounting-Setup.exe', args: ['/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS'] },
 ];
 

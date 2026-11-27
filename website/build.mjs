@@ -54,6 +54,12 @@ const ALL_PROGRAMS = [
   { id: 'bookings', name: 'Riyeser Bookings', short: 'Bookings', icon: '📅', file: 'RiyeserBookings-Setup.exe',
     one: `Book and schedule trades jobs, appointments or restaurant tables, sign jobs off on site, then invoice them in one click. Free for 90 days, no card.`,
     pitch: 'Every job and appointment, on one calendar.' },
+  // Riyeser Estimate (licence module 'estimate'): free for 90 days from first use; the price after that is still to be
+  // announced, so it has no PRICE entry and shows "Price to be announced" wherever a price would be (tba).
+  { id: 'estimate', name: 'Riyeser Estimate', short: 'Estimate', icon: '📐', file: 'RiyeserEstimate-Setup.exe', tba: true,
+    one: 'Measure jobs on a plan, a photo or the map, and turn them into quotes. Free for 90 days, price to be announced.',
+    pitch: 'Measure the job, send the quote.',
+    note: 'Sizes measured on satellite imagery are estimates: check them on site. The imagery can be years old and roof pitch can\'t be seen from above.' },
   { id: 'payroll', name: 'Riyeser Payroll', short: 'Payroll', icon: '🕒', file: PAYROLL_WIN ? 'RiyeserPayroll-Setup.exe' : null,
     one: `Rosters, time clock, timesheets, pay runs, payslips and leave — and export every payslip as a PDF in one click. Free for 90 days, no card.`,
     pitch: 'Pay day without the paperwork.',
@@ -93,6 +99,7 @@ const CARD = {
   accounting: ['Full books, banking, BAS and payroll.', 'Full books and banking'],
   pos: ['A touch-friendly till for shops and cafes.', 'The till for shops and cafes'],
   bookings: ['Jobs, appointments, tables and on-site sign-off.', 'Jobs, appointments, on-site sign-off'],
+  estimate: ['Measure on a plan, a photo or the map, then quote.', 'Measure and quote'],
   payroll: ['Rosters, timesheets, pay runs and payslips.', 'Rosters and pay runs'],
   documents: ['Scan, file and find every office document.', 'Scan, file and find documents'],
   link: ['Chat, calls and desk phones for your team.', 'Chat, calls and phones'],
@@ -104,7 +111,7 @@ for (const p of ALL_PROGRAMS) [p.card, p.tag] = CARD[p.id];
 // Free programs first, then the paid ones, each group A to Z. Every list on the site (menus, finder, grids, downloads,
 // footer, pricing) uses this order. Riyeser Link Office sits right after Riyeser Link (it comes with it).
 const FREE_TOOLS = ['central', 'documents', 'invoices', 'pdf'];
-const ORDER = ['central', 'documents', 'invoices', 'pdf', 'accounting-basics', 'accounting', 'bookings', 'link', 'link-office', 'payroll', 'pos', 'services'];
+const ORDER = ['central', 'documents', 'invoices', 'pdf', 'accounting-basics', 'accounting', 'bookings', 'estimate', 'link', 'link-office', 'payroll', 'pos', 'services'];
 ALL_PROGRAMS.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 for (const p of ALL_PROGRAMS) p.free = FREE_TOOLS.includes(p.id);
 const FREE_HEAD = 'Free forever';
@@ -142,6 +149,13 @@ const buyBtns = (m, cls = '') => `<div class="buybtns${cls ? ' ' + cls : ''}" da
 // (riyeser/), Payroll on module/payroll, Central, PDF, Riyeser Documents and Link Office in desktop/, Riyeser Link in
 // website/team/. Only what the program does today; "coming soon" only where the site already says so.
 const INCLUDES = {
+  estimate: ['Six easy steps: customer, how to measure, measure, trade template, price, send', 'Type in sizes: rooms (walls less doors and windows), areas, lengths, counts, volumes and hours, from a tape or a laser measurer',
+    'Plans and photos: open a PDF or a picture, set the scale from one known size, then draw areas (with cut-outs), lengths and counts',
+    'The map: draw roofs with their pitch (ridges, hips, valleys, eaves and barges), fences with posts and gates, driveways and lawns',
+    'Metric or imperial (m², sq ft, roofing squares, cu yd), in your own currency, tax name and date format',
+    'Trade templates for roofing, fencing, decking, painting, flooring, tiling, plastering, concreting, paving, landscaping, cleaning, gutters, insulation, electrical and plumbing: waste, pack sizes and your rates',
+    'Your profit and margin on every estimate (only you see it), a supplier price list import, and Duplicate to reuse a past job',
+    'One click makes the quote, with a measurements page and your drawing; it opens in Riyeser Invoices, Bookings and Accounting to become an invoice or a job'],
   central: ['Every Riyeser program you have, one click away', 'Installs and updates Riyeser programs (Add a program)',
     'Money owed to you, overdue invoices and bills to pay, from Riyeser Accounting', 'Your last pay run, from Riyeser Payroll',
     'Recent activity, invoices to chase and shortcuts (open the till, new invoice, new booking, run payroll)',
@@ -649,7 +663,8 @@ const withName = (p) => prog(p.comesWith).name;
 const withHref = (p, up) => `${up}pricing.html#${p.comesWith}`;
 const withShort = (p) => `With ${withName(p)}`;
 /** A paid program's price, users included and extra-user price (all from PRICE). */
-const priceTag = (p) => `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(inclLine(MOD[p.id]))}`;
+const TBA = 'Price to be announced';
+const priceTag = (p) => (p.tba ? `<b>Free for 90 days</b> · ${TBA.toLowerCase()}` : `<b>${usd(PRICE[MOD[p.id]])}</b> a month · ${esc(inclLine(MOD[p.id]))}`);
 /** A section heading: optional eyebrow, the title and an optional one-line summary (the same on every section). */
 const shead = (title, sub = '', eyebrow = '') => `<div class="shead">${eyebrow ? `<span class="eyebrow">${esc(eyebrow)}</span>` : ''}<h2 class="h2">${esc(title)}</h2>${sub ? `<p class="sub">${esc(sub)}</p>` : ''}</div>`;
 const firstSentence = (t) => t.split(/(?<=\.)\s+/)[0];
@@ -661,6 +676,8 @@ const heroPrice = (p, up) => { const m = MOD[p.id];
   if (p.comesWith) { const w = MOD[p.comesWith]; return `<div class="hprice with"><div class="hp-main"><b>Comes with ${esc(withName(p))}</b></div>
     <div class="hp-sub">No separate price. The Windows program is free to download, and it switches on when your business has ${esc(withName(p))} (${usd(PRICE[w])} a month, free for 90 days).</div>
     <a class="hp-plus" href="${withHref(p, up)}"><b>${esc(withName(p))}</b>: chat, calls, desk phones and this office phone system, ${usd(PRICE[w])}/month ${ARR}</a>${buyBtns(w)}</div>`; }
+  if (p.tba) return `<div class="hprice"><div class="hp-main"><b>Free</b><span>for 90 days</span></div>
+    <div class="hp-sub">From the first time you use it, no card</div><div class="hp-sub">After that: ${TBA.toLowerCase()}</div></div>`;
   if (m) return `<div class="hprice"><div class="hp-main"><b>${usd(PRICE[m])}</b><span>/month per business</span></div>
     <div class="hp-sub">${esc(inclLine(m))}</div><div class="hp-sub">Or ${usd(PRICE[m] * 10)} a year: 2 months free</div><div class="hp-sub ok">Free for 90 days, no card</div>${buyBtns(m)}</div>`;
   const f = FREE_INFO[p.id] || {};
@@ -674,6 +691,7 @@ const RELATED = {
   accounting: [['pos', 'Till sales land as paid invoices'], ['bookings', 'Invoice a finished job in one click'], ['central', 'Money owed, on your home screen']],
   pos: [['accounting-basics', 'Every sale lands as a paid invoice'], ['bookings', 'Customers shared with the till'], ['central', 'Your home screen for every program']],
   bookings: [['invoices', 'Invoice a finished job in one click'], ['accounting-basics', 'Job invoices land in your books'], ['pos', 'Customers shared with the till']],
+  estimate: [['invoices', 'Its quotes become invoices in one click'], ['bookings', 'An accepted quote becomes a job'], ['central', 'Installs it and keeps it up to date']],
   payroll: [['accounting-basics', 'Pay runs brought into your books'], ['central', 'Your last pay run on your home screen']],
   documents: [['central', 'Search the office\'s documents from your home screen'], ['pdf', 'Open in Riyeser PDF: fill in, sign and edit a document']],
   link: [['link-office', 'Your office phone system: desk phones that ring each other'], ['central', 'Unread counts on your home screen'], ['invoices', 'Type INV-1047 and it stands out']],
@@ -682,8 +700,8 @@ const RELATED = {
 };
 /** A program card: icon, name, one line, then the price and "Learn more" pinned to the bottom (every card the same height). */
 const progCard = (p, up) => `<a class="card pcard2" href="${up}programs/${p.id}.html">${iconBox(p, up)}<h3>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}</h3><p>${esc(p.card || p.one)}</p>
-<div class="cfoot"><span class="cp">${p.comesWith ? `<b class="with">${esc(withShort(p))}</b>` : p.free ? '<b class="free">Free</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
-<small class="cq">${p.comesWith ? 'No separate price' : p.free ? 'No time limit, no card' : esc(inclOf(MOD[p.id])[0])}</small></div></a>`;
+<div class="cfoot"><span class="cp">${p.comesWith ? `<b class="with">${esc(withShort(p))}</b>` : p.free ? '<b class="free">Free</b>' : p.tba ? '<b>Free for 90 days</b>' : `<b>${usd(PRICE[MOD[p.id]])}</b> /month`}</span><span class="more">Learn more ${ARR}</span>
+<small class="cq">${p.comesWith ? 'No separate price' : p.free ? 'No time limit, no card' : p.tba ? TBA : esc(inclOf(MOD[p.id])[0])}</small></div></a>`;
 /** The last tile in each group, so the 3-column grid has no gaps: a quiet summary with a link to the prices. */
 const groupTile = (free, up) => free
   ? `<a class="card ptile" href="${up}pricing.html"><b>Free, for good</b><p>No time limit, no card and no user charges.</p><span class="more">See every price ${ARR}</span></a>`
@@ -743,7 +761,7 @@ location.replace(${JSON.stringify(SERVICES_APP)}+'/'+s+h)})()</script>` : ''}
 <header class="nav" id="nav"><div class="c">
   <a class="logo" href="${up}index.html"><img src="${up}assets/logo-r.png" alt="">Riyeser</a>
   <nav class="links">
-    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop progs">${grouped(PROGRAMS, (l) => `${l.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up, 'mi')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}<small>${esc(p.tag || '')}</small><em class="mprice${p.free ? ' free' : p.comesWith ? ' with' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : esc(priceShort(MOD[p.id]))}</em></span></a>`).join('')}${l[0].free ? '' : `<p class="mnote">${esc(USERS_NOTE)}</p>`}</div>`, (t) => `<div class="mcol"><div class="mgrp">${esc(t)}</div>`)}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
+    <div class="dd"><a href="${up}programs.html"${active === 'programs' ? ' class="on"' : ''}>Programs ${svg(LI.down)}</a><div class="menu-pop progs">${grouped(PROGRAMS, (l) => `${l.map((p) => `<a href="${up}programs/${p.id}.html">${appImg(p.id, up, 'mi')}<span>${esc(p.short === 'Central' ? 'Riyeser Central' : p.short)}<small>${esc(p.tag || '')}</small><em class="mprice${p.free ? ' free' : p.comesWith ? ' with' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : p.tba ? '90 days free · price TBA' : esc(priceShort(MOD[p.id]))}</em></span></a>`).join('')}${l[0].free ? '' : `<p class="mnote">${esc(USERS_NOTE)}</p>`}</div>`, (t) => `<div class="mcol"><div class="mgrp">${esc(t)}</div>`)}<a class="all" href="${up}programs.html">All programs ${ARR}</a></div></div>
     <div class="dd"><a href="${indLink(INDUSTRIES[0], up)}"${active === 'industries' ? ' class="on"' : ''}>Industries ${svg(LI.down)}</a><div class="menu-pop">${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}"><span class="li">${li(i.icon, '')}</span><span>${esc(i.name)}<small>${esc(i.short)}</small></span></a>`).join('')}</div></div>
     <a href="${up}pricing.html"${active === 'pricing' ? ' class="on"' : ''}>Pricing</a>
     <div class="dd"><a href="${up}help.html"${active === 'help' ? ' class="on"' : ''}>Help ${svg(LI.down)}</a><div class="menu-pop">${guidesFor({ EMAIL, SERVICES_APP, up }).map((g) => `<a href="${up}help/${g.id}.html"><img class="appicon i-${g.app}" src="${up}assets/apps/${g.app}.png" alt="" style="width:30px;height:30px;border-radius:8px">${esc(g.name)}</a>`).join('')}<a class="all" href="${up}help.html">Help Centre ${ARR}</a></div></div>
@@ -1061,6 +1079,7 @@ ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the 
     ['basic', 'Accounting Basics', 'accounting-basics', 'Invoices, quotes, customers, stock, money in and out, GST and profit &amp; loss.'],
     ['plus', 'Accounting Plus', 'accounting', 'Everything in Basics, plus bank reconciliation, statement import, payroll, BAS, journals, jobs and budgets. You pay for Plus <b>instead of</b> Basics, never both.'],
     ['bookings', 'Bookings', 'bookings', 'Jobs, appointments and table bookings on one calendar.'],
+    ['estimate', 'Riyeser Estimate', 'estimate', 'Measure jobs on a plan, a photo or the map, and turn them into quotes.'],
     ['calls', 'Riyeser Link', 'link', `Chat, calls between your people and branches, office desk phones with <a class="more" href="programs/link-office.html">Riyeser Link Office</a>, and ${STORAGE_GB.link} GB of space for files shared in chat (not hosting).`],
     ['link-office', 'Riyeser Link Office', 'link-office', 'Your business\'s phone lines: the office phone system, with desk phones, extensions and ring groups, answered on desk phones or in the Riyeser Link app.'],
     ['payroll', 'Payroll', 'payroll', 'Time clock, timesheets, pay runs, payslips and leave. Staff who only clock in or see their payslips are free.'],
@@ -1111,7 +1130,9 @@ ${bandHero({ title: 'Pricing', lead: `Start free. Pay only for the programs you 
     </tbody><tbody class="gh">
       <tr class="grp"><th colspan="2">${esc(PAID_HEAD)} <span class="gnote">${esc(USERS_NOTE)}</span> <span class="swipe" aria-hidden="true">Swipe for more →</span></th></tr></tbody>
     <tbody class="gcards">
-      ${ROWS.map(([m, n, id, d]) => m === 'link-office'
+      ${ROWS.map(([m, n, id, d]) => m === 'estimate'
+        ? `<tr id="estimate" data-row="estimate"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b>Free for 90 days</b><small>From the first time you use it. Price to be announced.</small></td></tr>`
+        : m === 'link-office'
         ? `<tr id="link-office" data-row="link-office"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b class="with">With Riyeser Link</b><small>No separate price: it comes with <a href="#link">Riyeser Link</a></small></td></tr>`
         : `<tr${m === 'calls' ? ' id="link"' : ''} data-row="${m}"><td><span class="pn">${appImg(id, up, 'ti')}<span><b>${n}</b><small>${d}</small>${inclDetails(id, n)}</span></span></td><td class="pr"><b>${usd(P[m])}</b> a month<small>${inclOf(m).join('<br>')}<br>Or ${usd(P[m] * 10)} a year (2 months free)</small>${buyBtns(m, 'row')}</td></tr>`).join('')}
     </tbody></table></div>

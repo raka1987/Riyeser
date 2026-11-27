@@ -38,7 +38,7 @@ const accountingHome = (env = process.env, home = os.homedir()) => env.RIYESER_H
 /** Every folder a fresh start puts away, in order. Central's own folder is last and marked `central` (done on restart). */
 function folders({ appData, env = process.env, home = os.homedir(), centralDir = path.join(appData, 'Riyeser Central') }) {
   return [
-    { id: 'accounting', name: 'Riyeser Accounting, Invoices, POS and Bookings', dir: accountingHome(env, home) },
+    { id: 'accounting', name: 'Riyeser Accounting, Invoices, POS, Bookings and Estimate', dir: accountingHome(env, home) },
     { id: 'payroll', name: 'Riyeser Payroll', dir: path.join(appData, 'Riyeser Payroll') },
     { id: 'payroll-old', name: 'Riyser (Payroll’s earlier name)', dir: path.join(appData, 'Riyser') },
     { id: 'desk', name: 'Riyeser Desk Assistant', dir: path.join(appData, 'Desk Assistant') },

@@ -99,6 +99,26 @@ export function helpGuides({ EMAIL, SERVICES_APP, up }) {
       ],
     },
     {
+      id: 'estimate', blurb: 'Measure jobs and turn them into quotes.', app: 'estimate', name: 'Riyeser Estimate', badge: ['trial', '90 days free'],
+      intro: 'Measure a job by typing in sizes, on a plan or photo, or on the map, then turn it into a quote with a trade template. It\'s its own app and opens the same company file as Riyeser Invoices, Bookings and Accounting, so the quote becomes an invoice or a job there. Free for 90 days from the first time you use it; the price after that is still to be announced.',
+      groups: [
+        { title: 'Getting started', items: [
+          ['open', 'Install Estimate and set your units', '<ol><li>Download <b>Riyeser Estimate</b> from the Downloads page, or click <b>Get more apps</b> in Riyeser Central.</li><li>Open it and go to <b>Settings</b>: metric or imperial, your currency, what your tax is called (GST, VAT, sales tax) and how dates look.</li><li>Open <b>Templates</b> and type your prices into the trades you do. Riyeser\'s templates come with waste, coverage and pack sizes, but no prices.</li></ol>'],
+          ['steps', 'Make an estimate in six steps', '<ol><li><b>Customer</b>: pick the customer or type a new one, and the job address.</li><li><b>How to measure</b>: on the map, on a plan or photo, or type in sizes.</li><li><b>Measure</b>: everything saves as you go; the totals add up the whole job.</li><li><b>Template</b>: pick one or more trades.</li><li><b>Price</b>: check the lines, change a rate, the waste or add a markup. Your profit shows here, only for you.</li><li><b>Send</b>: look at the PDF, then email or print it.</li></ol><p>Jump back to any step from the bar at the top.</p>'],
+        ] },
+        { title: 'Measuring', items: [
+          ['sizes', 'Type in sizes (rooms, areas, lengths, counts)', '<p>Pick what you\'re measuring and type the sizes. A <b>room</b> gives the floor, ceiling and walls less the doors and windows you list. Add a depth to an area for a volume. You can type units: <b>2400mm</b>, <b>3.6 m</b> or <b>12\' 6"</b>. A laser measurer that works as a Bluetooth keyboard types straight into the box.</p>'],
+          ['plan', 'Measure on a plan or photo', '<ol><li>Open a PDF plan or a photo.</li><li>Press <b>Set scale</b>, tap both ends of something you know the size of, and type its real length. Or pick the drawing scale (1:100) for a PDF printed at full size.</li><li>Draw areas (with cut-outs), lengths and counts. Undo and Redo work on points and whole measurements.</li></ol>'],
+          ['map', 'Measure on the map (roofs and fences)', '<p>Search the address, pick <b>Roof face</b>, tap the corners of one face and type its pitch (degrees, or rise over run like 6/12). Then say what each edge is: ridge, hip, valley, eave or rake. <b>Fence</b> works out posts from the spacing and gates. <b>Map sizes are estimates from satellite imagery: check them on site.</b> The map needs the internet; everything else works offline.</p>'],
+        ] },
+        { title: 'Quotes', items: [
+          ['quote', 'Make and update the quote', '<p>On step 5, press <b>Make the quote</b>. Measured again? Press <b>Update quote</b>: the measured lines change and lines you typed into the quote stay. An accepted quote never changes: <b>Duplicate</b> the estimate to quote again.</p>'],
+          ['yes', 'When the customer says yes', '<p>Open the quote, press <b>Mark accepted</b>, then make the invoice in Riyeser Invoices or Accounting, or a job in Riyeser Bookings. They open the same company file.</p>'],
+          ['trial', 'What happens after the free trial?', '<p>Estimate is free for 90 days from the first time you use it. If the trial ends before it\'s on your Riyeser plan, it becomes read-only: every estimate, plan and quote stays to view, print and send, and nothing is deleted.</p>'],
+        ] },
+      ],
+    },
+    {
       id: 'link', blurb: 'Chat, calls and desk phones: channels, direct messages, extensions.', app: 'link', name: 'Riyeser Link',
       intro: 'Chat and calls for your business (it used to be called Riyeser Team), online so everyone can use it on the PC (the Riyeser Link app, or Riyeser Link in Riyeser Central) or a phone (riyeser.com/link). Each business only sees its own team.',
       groups: [

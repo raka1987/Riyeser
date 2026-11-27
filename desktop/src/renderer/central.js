@@ -86,7 +86,7 @@ tick(); setInterval(tick, 60000);
 // ---------- the programs ----------
 // One order everywhere (sidebar, tiles, quick access, Get more apps, updates), the same as riyeser.com.
 // Free A to Z (Central first), then paid A to Z, with Riyeser Link Office right after Riyeser Link.
-const ORDER = ['central', 'desk', 'invoices', 'pdf', 'accounting-basics', 'accounting', 'bookings', 'team', 'linkoffice', 'payroll', 'pos', 'services'];
+const ORDER = ['central', 'desk', 'invoices', 'pdf', 'accounting-basics', 'accounting', 'bookings', 'estimate', 'team', 'linkoffice', 'payroll', 'pos', 'services'];
 const byOrder = (a, b) => ORDER.indexOf(a) - ORDER.indexOf(b);
 const LUI = window.RiyeserLicenceUi;
 const LOOK = {
@@ -94,6 +94,7 @@ const LOOK = {
   linkoffice: { ic: 'phone', c: 'c-link', nav: 'Link Office', col: '#0e7490', blurb: 'Your office phone system. Comes with Riyeser Link' },
   invoices: { ic: 'invoice', c: 'c-inv', nav: 'Invoices', col: '#0284c7', blurb: 'Send invoices and get paid' },
   bookings: { ic: 'calendar', c: 'c-book', nav: 'Bookings', col: '#e11d48', blurb: 'Jobs, appointments and tables' },
+  estimate: { ic: 'invoice', c: 'c-est', nav: 'Estimate', col: '#ea580c', blurb: 'Measure jobs and quote them' },
   'accounting-basics': { ic: 'book', c: 'c-basics', nav: 'Books', col: '#16a05a', blurb: 'View and manage your accounts' },
   accounting: { ic: 'book', c: 'c-acc', nav: 'Books', col: '#1a5fd6', blurb: 'View and manage your accounts' },
   pos: { ic: 'store', c: 'c-pos', nav: 'POS', col: '#0f8f82', blurb: 'Open the till and ring up sales' },
@@ -113,6 +114,7 @@ const QUICK = [
   { p: 'pos', ic: 'store', t: 'Open the till', s: 'Ring up a sale', page: 'pos' },
   { p: 'acc', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' },
   { p: 'bookings', ic: 'calendar', t: 'New booking', s: 'Jobs, appointments, tables' },
+  { p: 'estimate', ic: 'invoice', t: 'New estimate', s: 'Measure a job and quote it', page: 'estimate' },
   { p: 'invoices', ic: 'invoice', t: 'New invoice', s: 'Bill a customer', page: 'invoice' }, // free Invoices, when Accounting isn't installed
   { p: 'payroll', ic: 'people', t: 'Run payroll', s: 'Timesheets to payslips', page: 'payrun' },
   { p: 'desk', ic: 'folder', t: 'Documents Inbox', s: 'New scans and uploads to file' },
@@ -122,7 +124,7 @@ const QUICK = [
   { p: 'services', ic: 'hat', t: null, s: 'Projects, drawings and QA', page: 'projects' }, // titled with the program's name
 ];
 // Each program's own logo (the letter-and-dot set used on riyeser.com and the program icons).
-const LOGO = { team: 'team', linkoffice: 'link', invoices: 'invoices', bookings: 'bookings', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
+const LOGO = { team: 'team', linkoffice: 'link', invoices: 'invoices', bookings: 'bookings', estimate: 'estimate', 'accounting-basics': 'accounting-basics', accounting: 'accounting-plus', pos: 'pos', payroll: 'payroll', desk: 'desk-assistant', pdf: 'pdf', services: 'services' };
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 const quickFor = (q) => (q.p === 'acc' ? accId() : q.p === 'invoices' && hasAcc() ? null : has(q.p) ? q.p : null);
 

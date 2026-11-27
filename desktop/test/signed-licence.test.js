@@ -247,6 +247,7 @@ test('Central: before the licence function is switched on, it saves the unsigned
 test('the prices in the locked messages are riyeser.com\'s (website/prices.mjs)', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'website', 'prices.mjs'), 'utf8');
   for (const [id, text] of Object.entries(licence.MODULE_PRICES)) {
+    if (id === 'estimate') { assert.strictEqual(text, 'price to be announced'); assert.ok(!/\bestimate:\s*\d/.test(src), 'no price for Estimate yet'); continue; }
     const m = new RegExp(`\\b${id}:\\s*(\\d+)`).exec(src);
     assert.ok(m, `${id} in prices.mjs`); assert.strictEqual(text, `US$${m[1]}/month`, id);
   }

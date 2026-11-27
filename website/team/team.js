@@ -1117,9 +1117,10 @@
   // "4 people · 3 included in each program, then US$7 a month each" (PRICE_EXTRA_USER): users are charged per paid program.
   const peopleText = (lic) => `${lic.seats.used} ${lic.seats.used === 1 ? 'person' : 'people'} · ${lic.seats.included} included per program`;
   function planHtml(lic) {
-    return `<div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built']].map(([k, n]) => { const v = (lic.modules || {})[k] || {};
+    // Riyeser Estimate shows once the database sends it; its trial starts the first time it's used (no price yet).
+    return `<div class="plan">${[['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built'], ['estimate', 'Riyeser Estimate']].filter(([k]) => k !== 'estimate' || (lic.modules || {})[k]).map(([k, n]) => { const v = (lic.modules || {})[k] || {};
         const d = (x) => (x ? new Date(x).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
-        const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
+        const txt = v.status === 'active' ? `Paid${v.paid_until ? ' until ' + d(v.paid_until) : ''}` : v.status === 'trial' && v.starts_on_first_use && !v.trial_ends ? 'Free for 90 days from first use' : v.status === 'trial' ? `Free trial · ${v.days_left} day${v.days_left === 1 ? '' : 's'} left` : v.status === 'cancelled' ? (v.active ? 'Cancelled · works until ' + d(v.paid_until) : 'Cancelled') : 'Trial ended';
         return `<div><span>${n}</span><span class="pl ${v.status === 'active' ? 'ok' : v.active ? (v.days_left <= 14 ? 'warn' : '') : 'bad'}">${txt}</span></div>`; }).join('')}
         ${lic.seats ? `<div><span>People</span><span class="pl">${peopleText(lic)}${lic.early_bird ? ' · 🐣 early bird' : ''}</span></div>` : ''}</div>`;
   }

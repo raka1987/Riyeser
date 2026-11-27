@@ -23,6 +23,7 @@ const PRODUCTS = [
   { id: 'invoices', name: 'Invoices', apps: ['invoices'] },
   { id: 'pos', name: 'POS', apps: ['pos'] },
   { id: 'bookings', name: 'Bookings', apps: ['bookings'] },
+  { id: 'estimate', name: 'Estimate', apps: ['estimate'] },
   { id: 'payroll', name: 'Payroll', apps: ['payroll'] },
   { id: 'link', name: 'Riyeser Link', apps: ['team'] },
   { id: 'linkoffice', name: 'Riyeser Link Office', apps: ['linkoffice'] },

@@ -21,7 +21,8 @@ const PAID = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['boo
 // The bundles (the same as website/prices.mjs BUNDLES): one price for the programs together.
 const BUNDLES = [['Shop', ['basic', 'pos', 'calls'], 59], ['Office', ['basic', 'payroll', 'calls'], 59], ['Business', ['plus', 'bookings', 'calls', 'payroll', 'pos'], 99]];
 const usd = (n) => `US$${n % 1 ? n.toFixed(2) : n}`;
-const monthly = (id) => `${usd(PRICE[id])}/month`;
+// A program with no price yet (Riyeser Estimate: free for 90 days, the price after that is still to be announced).
+const monthly = (id) => (PRICE[id] == null ? 'price to be announced' : `${usd(PRICE[id])}/month`);
 
 /** Everything the licence window says about prices, in one paragraph. */
 function summary() {
