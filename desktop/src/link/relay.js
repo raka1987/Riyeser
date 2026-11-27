@@ -323,7 +323,7 @@ async function echoTest({ ip, port, packets = 50, every = 20, timeout = 1500, so
   for (let n = 0; n < packets; n++) {
     const h = Buffer.alloc(28); h.write('RYECHO1 ', 0); nonce.copy(h, 8); h.writeUInt32BE(n, 16); h.writeBigUInt64BE(BigInt(Date.now()), 20);
     try { s.send(Buffer.concat([h, tonePacket(n)]), port, ip); } catch { /* closed */ }
-    await new Promise((r) => setTimeout(r, every));
+    if (every) await new Promise((r) => setTimeout(r, every));   // 0: all at once (the flood test)
   }
   await new Promise((r) => setTimeout(r, timeout));
   try { s.close(); } catch { /* closed */ }
