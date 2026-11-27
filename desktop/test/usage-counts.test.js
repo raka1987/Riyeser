@@ -110,7 +110,7 @@ test('a local company (not online) sends no country and links nothing', async ()
 });
 
 test('Central wires it in: Settings switch, IPC, first-run check before anything is written', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'central-main.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'src', 'central-main.js'), 'utf8').replace(/\r\n/g, '\n');   // Windows checkouts use CRLF
   assert.match(main, /usageFirst = usageCounts\.hadCentralBefore\(store\)/);
   assert.ok(main.indexOf('usageCounts.hadCentralBefore(store)') < main.indexOf('registerIpc();\n  createWindow();'), 'checked before the app starts writing');
   assert.match(main, /handle\('central:usageSet'/); assert.match(main, /install_link/);
