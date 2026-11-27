@@ -15,7 +15,11 @@ function firewallCommands(exe, httpPort = 5080) {
     `netsh advfirewall firewall add rule name="${RULE}" ${common} protocol=TCP localport=5060,${httpPort} description="Desk phones on the office network (SIP and phone set-up)"`,
   ];
 }
-const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { windowsHide: true, timeout: 20000 }, (err, stdout) => resolve({ ok: !err, out: String(stdout || '') })));
+// stdin is closed straight away: PowerShell can otherwise sit waiting for input that never comes
+const run = (cmd, args) => new Promise((resolve) => {
+  const child = execFile(cmd, args, { windowsHide: true, timeout: 20000 }, (err, stdout) => resolve({ ok: !err, out: String(stdout || '') }));
+  try { child.stdin.end(); } catch { /* no stdin */ }
+});
 
 /** true / false, 'outdated' (from before 1.2.0: no UDP 5353 for finding this PC by name), or null when it can't be told (not Windows). */
 async function firewallRuleExists() {

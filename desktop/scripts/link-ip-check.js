@@ -28,7 +28,8 @@ const out = process.argv[2] || path.join(os.tmpdir(), 'link-ip-check.json');
 const A = '192.168.77.20'; const B = '192.168.77.35'; const C = '192.168.77.50';
 const report = { ok: false, steps: [], started: new Date().toISOString() };
 const step = (s) => { console.log(s); report.steps.push(s); };
-const ps = (cmd) => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { encoding: 'utf8', windowsHide: true });
+// stdin closed (PowerShell can wait on an open one), and never more than a minute
+const ps = (cmd) => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms, what) { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await wait(100); } throw new Error(`timed out: ${what}`); }
 const has = (ip) => Object.values(os.networkInterfaces()).flat().some((a) => a && a.address === ip);
@@ -39,9 +40,13 @@ const mdnsAsk = (port) => new Promise((resolve, reject) => {
   s.bind(0, '127.0.0.1', () => s.send(queryMessage('riyeser-office.local', { id: 7 }), port, '127.0.0.1'));
 });
 
+const finish = (code) => { report.finished = new Date().toISOString(); fs.writeFileSync(out, JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2)); process.exit(code); };
+// a watchdog: whatever happens, write what was found and stop within 6 minutes
+setTimeout(() => { report.error = report.error || `stopped after 6 minutes at: ${report.steps[report.steps.length - 1] || 'the start'}`; finish(1); }, 6 * 60000).unref();
 (async () => {
   let alias = null; let svc = null; let cloud = null; let phone = null; const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'link-ip-'));
   try {
+    step('reading the adapters');
     const rows = await win.readNetConfig();
     report.adapters = rows.map((r) => ({ alias: r.alias, description: r.description, address: r.address, prefix: r.prefix, gateway: r.gateway, dhcp: r.dhcp }));
     const main = rows.find((r) => r.gateway) || rows[0];
@@ -115,9 +120,6 @@ const mdnsAsk = (port) => new Promise((resolve, reject) => {
     try { if (cloud) cloud.stop(); if (svc) await svc.stop(); } catch { /* fine */ }
     if (alias) for (const ip of [A, B, C]) { try { ps(`Remove-NetIPAddress -InterfaceAlias '${alias}' -IPAddress ${ip} -Confirm:$false -ErrorAction SilentlyContinue`); } catch { /* not there */ } }
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* temp */ }
-    report.finished = new Date().toISOString();
-    fs.writeFileSync(out, JSON.stringify(report, null, 2));
-    console.log(JSON.stringify(report, null, 2));
-    process.exit(report.ok ? 0 : 1);
+    finish(report.ok ? 0 : 1);
   }
 })();
