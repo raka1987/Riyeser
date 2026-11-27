@@ -49,7 +49,7 @@ const mask = (key) => (key ? `${String(key).slice(0, 4)}…${String(key).slice(-
 // Riyeser Central fetches it (core/online.js refreshLicence) and keeps it here under "online", next to the older
 // fields, so each Riyeser program can unlock its own paid module. It stays good for OFFLINE_GRACE_DAYS offline.
 const MODULE_NAMES = { basic: 'Accounting Basics', plus: 'Accounting Plus', bookings: 'Bookings', calls: 'Riyeser Link', payroll: 'Payroll', pos: 'POS',
-  as_built: 'As Built' };   // calls: Riyeser Link (chat, calls, desk phones and Riyeser Link Office)
+  as_built: 'As Built', estimate: 'Riyeser Estimate' };   // estimate: its trial starts on first use; no price yet   // calls: Riyeser Link (chat, calls, desk phones and Riyeser Link Office)
 // What each paid program costs a month, for the "trial ended" messages: from the one price list (core/prices.js,
 // the same as riyeser.com's website/prices.mjs).
 const prices = require('./prices');
@@ -106,7 +106,9 @@ function onlinePlan(appData, now = Date.now(), d = read(appData)) {
     const m = { ...mods[id], active: live.active, status: live.active ? mods[id].status : (mods[id].active ? 'ended' : mods[id].status), days_left: live.daysLeft };
     const name = MODULE_NAMES[id];
     let text; let tone;
-    if (m.active && m.status === 'trial') {
+    if (m.active && m.status === 'trial' && mods[id].starts_on_first_use && !mods[id].trial_ends) {
+      text = 'free for 90 days from first use'; tone = 'trial';   // Riyeser Estimate before it's been used
+    } else if (m.active && m.status === 'trial') {
       const n = m.days_left != null ? m.days_left : null;
       text = n != null ? `free trial, ${n} day${n === 1 ? '' : 's'} left` : 'free trial'; tone = n != null && n <= 14 ? 'warn' : 'trial';
     } else if (m.active) { text = m.paid_until ? `paid until ${fmtDate(m.paid_until)}` : 'active'; tone = 'ok'; }

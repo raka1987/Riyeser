@@ -120,7 +120,9 @@ const noScroll = async (pg) => { const r = await pg.evaluate(() => [document.doc
   const web = await newPage(1300);
   await web.goto(`${BASE}/pricing.html`);
   const rows = await web.$$eval('tr[data-row]', (rs) => rs.map((r) => [r.dataset.row, [...r.querySelectorAll('.buybtns a')].map((a) => [a.textContent, a.getAttribute('href')])]));
-  check(rows.length >= 6 && rows.filter(([m]) => m !== 'link-office').every(([m, l]) => l.length === 2 && l[0][0] === 'Start free for 90 days' && l[0][1] === `/link/?signup&add=${m}` && l[1][0] === 'Buy now' && l[1][1] === `/link/?signup&add=${m}&buy=1`),
+  // Riyeser Estimate has no price yet (to be announced): its row has no buttons, so it can't be bought
+  check(rows.some(([m, l]) => m === 'estimate' && l.length === 0), 'Riyeser Estimate: free for 90 days, no Buy button (price to be announced)');
+  check(rows.length >= 6 && rows.filter(([m]) => m !== 'link-office' && m !== 'estimate').every(([m, l]) => l.length === 2 && l[0][0] === 'Start free for 90 days' && l[0][1] === `/link/?signup&add=${m}` && l[1][0] === 'Buy now' && l[1][1] === `/link/?signup&add=${m}&buy=1`),
     `pricing rows: Start free + Buy now on every paid program (${rows.map((r) => r[0]).join(', ')})`);
   const eds = await web.$$eval('#accounting .plan .buybtns', (x) => x.map((d) => d.dataset.buy));
   check(eds.join() === 'basic,plus', `pricing checklists: Basics and Plus cards have the buttons (${eds})`);

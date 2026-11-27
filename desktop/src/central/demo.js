@@ -34,7 +34,7 @@ const accountingHome = (env = process.env, home = os.homedir()) => env.RIYESER_H
  */
 function programFolders({ appData, env = process.env, home = os.homedir() }) {
   return [
-    { id: 'accounting', name: 'Riyeser Accounting (and POS, Invoices, Bookings)', dir: path.join(accountingHome(env, home), 'demo') },
+    { id: 'accounting', name: 'Riyeser Accounting (and POS, Invoices, Bookings, Estimate)', dir: path.join(accountingHome(env, home), 'demo') },
     { id: 'payroll', name: 'Riyeser Payroll', dir: path.join(appData, 'Riyeser Payroll', 'payroll', 'demo') },
   ];
 }

@@ -8,7 +8,8 @@
 (function (root) {
   // Central's program ids -> the plan's module ids. Programs not listed here are free.
   // Riyeser Link (team) and Riyeser Link Office are both the 'calls' module (Riyeser Link, a paid program).
-  const MODULE = { 'accounting-basics': 'basic', accounting: 'plus', bookings: 'bookings', team: 'calls', linkoffice: 'calls', payroll: 'payroll', pos: 'pos', services: 'as_built' };
+  const MODULE = { 'accounting-basics': 'basic', accounting: 'plus', bookings: 'bookings', team: 'calls', linkoffice: 'calls', payroll: 'payroll', pos: 'pos', services: 'as_built',
+    estimate: 'estimate' };   // Riyeser Estimate: 90 days free from first use, price to be announced
   const SIGN_IN_TITLE = 'Sign in to your Riyeser account to unlock your plan';
   const SIGN_IN_TEXT = 'Your plan comes with your Riyeser account: sign in once on this PC and every Riyeser program on it follows your plan. '
     + 'Paid on riyeser.com? Sign in with the same email.';

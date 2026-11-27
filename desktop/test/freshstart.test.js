@@ -86,7 +86,7 @@ test('fresh start: a folder in use stops it and the ones already moved are put b
   assert.equal(r.ok, false);
   assert.deepEqual(r.failed, { id: 'team', name: 'Riyeser Link', dir: path.join(p.appData, 'Riyeser Team'), error: 'EBUSY' });
   assert.deepEqual(r.notRolledBack, []);
-  assert.deepEqual(r.rolledBack, ['Riyeser PDF', 'Riyeser Desk Assistant', 'Riyser (Payroll’s earlier name)', 'Riyeser Payroll', 'Riyeser Accounting, Invoices, POS and Bookings']);
+  assert.deepEqual(r.rolledBack, ['Riyeser PDF', 'Riyeser Desk Assistant', 'Riyser (Payroll’s earlier name)', 'Riyeser Payroll', 'Riyeser Accounting, Invoices, POS, Bookings and Estimate']);
   for (const f of Object.keys(p.files)) assert.ok(fs.existsSync(f), f);   // everything back where it was
   assert.equal(fs.readdirSync(p.appData).some((n) => n.includes('before fresh start')), false);
   assert.equal(fs.existsSync(path.join(p.centralDir, fresh.MARKER)), false);   // no restart is set up
