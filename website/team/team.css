@@ -1014,3 +1014,10 @@ select.chtime { appearance: auto; cursor: pointer; padding: 4px 8px; font: inher
 }
 @media (max-width: 560px) { .rg-notice { flex-wrap: wrap; } .rg-nbtns { width: 100%; padding-left: 30px; } }
 .pk.rg-pk > .lk-chic { flex: none; } .rg-two .f { margin-bottom: 0; }
+/* Sites and the Riyeser relay (Phones page) */
+.lo-relay h3 { margin-top: 0; }
+.lo-relaysw { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.lo-relay .lo-sites small, .lo-relay .lo-rdev small { display: block; }
+.lo-qr { max-width: 220px; margin: 10px 0; } .lo-qr svg { width: 100%; height: auto; background: #fff; border-radius: 8px; }
+.lo-relaydet dl.lo-kv code { word-break: break-all; }
+.lo-rpform label { display: grid; gap: 4px; margin: 10px 0; font-weight: 600; } .lo-rpform select, .lo-rpform input { font-weight: 400; }
