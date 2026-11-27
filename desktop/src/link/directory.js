@@ -6,6 +6,7 @@
 // Riyeser, or are added here by hand. A sync only ever replaces the Team people; nothing is deleted otherwise.
 const crypto = require('crypto');
 const { validExt, EMERGENCY, MIN_EXT, MAX_EXT } = require('./dialplan');
+const { settings: ringSettings } = require('./ringgroups');
 
 // Easy to read and type on a phone keypad screen: no 0/O, 1/l/I.
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
@@ -17,14 +18,19 @@ function strongPassword(len = 16) {
 const clean = (v, n = 60) => String(v == null ? '' : v).replace(/[\u0000-\u001f<>"&]/g, '').trim().slice(0, n);
 
 /**
- * Riyeser Link's members and branches as people and ring groups.
- * members:  [{ user_id, display_name, extension }]   branches: [{ id, name, extension, branch_members: [{ user_id }] }]
- * -> { business, people: [{ id, name, ext, source: 'team', teamUserId }], groups: [{ id, name, ext, members: [ext] }], skipped: [{ name, why }] }
+ * Riyeser Link's members and ring groups as people and ring groups.
+ * members:  [{ user_id, display_name, extension }]
+ * ringGroups (ring_groups_list): [{ id, name, extension, strategy, ring_seconds, timeout_seconds, fallback, fallback_group, fallback_user,
+ *             members: [{ user_id } | { phone_ext }] }] - only the people and shared desk phones chosen for each number.
+ * branches: [{ id, name, extension, branch_members: [{ user_id }] }] - only from an online database without ring groups yet,
+ *           where a branch's number still rings everyone in it.
+ * -> { business, people: [{ id, name, ext, source: 'team', teamUserId }], groups: [{ id, name, ext, members: [ext], strategy, … }], skipped: [{ name, why }] }
  */
-function mapTeam({ members = [], branches = [], business = '' } = {}) {
+function mapTeam({ members = [], branches = [], ringGroups = null, business = '' } = {}) {
   const people = []; const groups = []; const skipped = []; const used = new Set();
   const byUser = new Map();
-  for (const b of Array.isArray(branches) ? branches : []) if (b && b.extension != null && validExt(String(b.extension))) used.add(String(b.extension));
+  const numbers = Array.isArray(ringGroups) ? ringGroups : Array.isArray(branches) ? branches : [];
+  for (const b of numbers) if (b && b.extension != null && validExt(String(b.extension))) used.add(String(b.extension));
   for (const m of Array.isArray(members) ? members : []) {
     if (!m || !m.user_id) continue;
     const name = clean(m.display_name) || 'Team member';
@@ -36,7 +42,20 @@ function mapTeam({ members = [], branches = [], business = '' } = {}) {
     const p = { id: `team:${m.user_id}`, name, ext, source: 'team', teamUserId: String(m.user_id) };
     people.push(p); byUser.set(String(m.user_id), p);
   }
-  for (const b of Array.isArray(branches) ? branches : []) {
+  if (Array.isArray(ringGroups)) {
+    const extOfGroup = new Map(ringGroups.filter((g) => g && g.extension != null).map((g) => [String(g.id), String(g.extension)]));
+    for (const g of ringGroups) {
+      if (!g || g.extension == null) continue;
+      const ext = String(g.extension);
+      if (!validExt(ext)) { skipped.push({ name: clean(g.name), why: `Group number ${ext} isn't between ${MIN_EXT} and ${MAX_EXT}` }); continue; }
+      const mem = (Array.isArray(g.members) ? g.members : []).map((x) => (x && x.user_id ? (byUser.get(String(x.user_id)) || {}).ext : x && x.phone_ext ? String(x.phone_ext) : null))
+        .filter((e) => e && validExt(e));
+      const fbExt = g.fallback === 'group' ? extOfGroup.get(String(g.fallback_group)) : g.fallback === 'person' ? (byUser.get(String(g.fallback_user)) || {}).ext : null;
+      groups.push({ id: `team:${g.id || ext}`, name: clean(g.name) || `Group ${ext}`, ext, members: [...new Set(mem)], source: 'team',
+        ...ringSettings({ strategy: g.strategy, ringSeconds: g.ring_seconds, timeoutSeconds: g.timeout_seconds, fallback: fbExt ? { type: g.fallback, ext: fbExt } : null }) });
+    }
+  }
+  for (const b of Array.isArray(ringGroups) ? [] : Array.isArray(branches) ? branches : []) {
     if (!b || b.extension == null) continue;
     const ext = String(b.extension);
     if (!validExt(ext)) { skipped.push({ name: clean(b.name), why: `Branch number ${ext} isn't between ${MIN_EXT} and ${MAX_EXT}` }); continue; }
@@ -118,13 +137,13 @@ class Directory {
     d.people = d.people.filter((x) => x.id !== id); this.save(d);
     return true;
   }
-  addGroup({ name, ext, members = [] } = {}) {
+  addGroup({ name, ext, members = [], ...how } = {}) {
     const n = clean(name); const e = String(ext || '').trim();
     if (!n) throw new Error('Type a name for the group.');
     if (!validExt(e)) throw new Error(`Group numbers are 3 digits, ${MIN_EXT} to ${MAX_EXT}.`);
     if (this.usedExts().has(e)) throw new Error(`${e} is already used.`);
     const d = this.data();
-    const g = { id: `local:${crypto.randomUUID()}`, name: n, ext: e, members: members.map(String).filter((m) => d.people.some((p) => p.ext === m)), source: 'local' };
+    const g = { id: `local:${crypto.randomUUID()}`, name: n, ext: e, members: members.map(String).filter((m) => d.people.some((p) => p.ext === m)), source: 'local', ...ringSettings(how) };
     d.groups.push(g); d.groups.sort((a, b) => a.ext.localeCompare(b.ext)); this.save(d);
     return g;
   }

@@ -5,6 +5,7 @@
 // The file holds the phones' passwords: keep it somewhere safe. Recent calls and logs aren't included.
 const FORMAT = 'riyeser-link-settings';
 const VERSION = 1;
+const { settings: ringSettings } = require('./ringgroups');
 
 /** Everything needed to carry on somewhere else. */
 function exportSettings({ directory, store, now = Date.now() }) {
@@ -14,7 +15,7 @@ function exportSettings({ directory, store, now = Date.now() }) {
   const people = d.people.map((p) => ({ name: p.name, ext: p.ext, source: p.source, ...(p.teamUserId ? { teamUserId: p.teamUserId } : {}), ...(p.hidden ? { hidden: true } : {}) }));
   return {
     format: FORMAT, version: VERSION, exportedAt: new Date(now).toISOString(), business: d.business || '', source: d.source || 'local',
-    people, groups: d.groups.map((g) => ({ name: g.name, ext: g.ext, members: [...g.members], source: g.source || 'local' })),
+    people, groups: d.groups.map((g) => ({ name: g.name, ext: g.ext, members: [...g.members], source: g.source || 'local', ...ringSettings(g) })),
     phones: (devices.phones || []).map((p) => ({ mac: p.mac, ext: p.ext, vendor: p.vendor || '', model: p.model || '' })),
     dnd: Object.keys(dnd).filter((k) => dnd[k]),
     passwords: Object.fromEntries(people.filter((p) => !p.hidden).map((p) => [p.ext, directory.password(p.ext)])),
@@ -33,7 +34,7 @@ function importSettings({ directory, store, data }) {
   const exts = new Set(people.map((p) => p.ext));
   const groups = (data.groups || []).filter((g) => g && validExt(String(g.ext)) && !exts.has(String(g.ext))).map((g) => ({
     id: `${g.source === 'team' ? 'team' : 'local'}:${String(g.ext)}`, name: s(g.name) || `Group ${g.ext}`, ext: String(g.ext),
-    members: (g.members || []).map(String).filter((m) => exts.has(m)), source: g.source === 'team' ? 'team' : 'local' }));
+    members: (g.members || []).map(String).filter((m) => exts.has(m)), source: g.source === 'team' ? 'team' : 'local', ...ringSettings(g) }));
   const before = directory.data();
   directory.save({ ...before, business: s(data.business, 120) || before.business, source: data.source === 'team' ? 'team' : before.source, people, groups });
   for (const [ext, pw] of Object.entries(data.passwords || {})) {
