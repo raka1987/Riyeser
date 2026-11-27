@@ -10,8 +10,9 @@
   <a class="{{ 'on' if method == 'manual' }}" href="{{ url_for('estimate.measure', tid=t.id, m='manual') }}">📏 Type in sizes</a>
   <a class="{{ 'on' if method == 'plan' }}" href="{{ url_for('estimate.measure', tid=t.id, m='plan') }}">📐 Plan or photo</a>
   <a class="{{ 'on' if method == 'map' }}" href="{{ url_for('estimate.measure', tid=t.id, m='map') }}">🛰️ Map</a>
+  <a class="{{ 'on' if method == 'scan' }}" href="{{ url_for('estimate.measure', tid=t.id, m='scan') }}">📱 Import a scan</a>
 </nav>
-<div class="tip" data-tip="measure-{{ method }}" hidden>{% if method == 'manual' %}Pick what you're measuring, then type the sizes. Plain numbers are in {{ 'feet' if sys_ == 'imperial' else 'metres' }}; you can also type units like <b>2400mm</b> or <b>12' 6"</b>. A laser measurer in keyboard mode can type straight into the boxes.{% elif method == 'plan' %}Open a PDF plan or a photo. Then <b>Set scale</b>: draw along a size you know (a door is about 820 mm / 2' 8") and type its real length, or pick the drawing scale (1:100). Then draw.{% else %}Search for the address, then pick a tool and tap the corners. Double-tap (or press <b>Finish</b>) to close a shape. Roof faces ask for the pitch: a satellite picture can't show it.{% endif %}<button type="button" aria-label="Got it" title="Got it">×</button></div>
+<div class="tip" data-tip="measure-{{ method }}" hidden>{% if method == 'manual' %}Pick what you're measuring, then type the sizes. Plain numbers are in {{ 'feet' if sys_ == 'imperial' else 'metres' }}; you can also type units like <b>2400mm</b> or <b>12' 6"</b>. A laser measurer in keyboard mode can type straight into the boxes.{% elif method == 'scan' %}Choose a scan or floor plan file exported from your scanning app. Check the rooms it finds (fix any size, add doors and windows), then press <b>Use these rooms</b>. Templates then price them like rooms you typed in.{% elif method == 'plan' %}Open a PDF plan or a photo. Then <b>Set scale</b>: draw along a size you know (a door is about 820 mm / 2' 8") and type its real length, or pick the drawing scale (1:100). Then draw.{% else %}Search for the address, then pick a tool and tap the corners. Double-tap (or press <b>Finish</b>) to close a shape. Roof faces ask for the pitch: a satellite picture can't show it.{% endif %}<button type="button" aria-label="Got it" title="Got it">×</button></div>
 <div class="mwrap">
 <div>
 {% if method == 'manual' %}
@@ -65,6 +66,30 @@
   {% include "estimate/_tools.html" %}
   <div class="stage" id="stage"><div class="hint" id="hint">Open a plan or photo to start.</div></div>
 </div>
+{% elif method == 'scan' %}
+<div class="panel" id="scanpanel">
+  {% if not read_only %}<div class="scan-pick">
+    <label class="btn pri big" style="margin:0">📂 Choose a scan or plan file<input type="file" id="scanfile" hidden></label>
+    <p class="small muted" style="margin:0">USDZ from iPhone RoomPlan apps · GLB, OBJ, DAE from Polycam, Canvas and other scanners · RoomPlan JSON · DXF floor plans · CSV room lists · PDF plans. Up to 100 MB. Read on this computer: nothing is sent anywhere. <a href="{{ url_for('estimate.help_page') }}#scans">How to export from your app</a> · <a href="{{ url_for('estimate.scan_sample') }}" download>Download a sample scan to try</a></p>
+  </div>{% endif %}
+  <div id="scanstatus" class="small" aria-live="polite"></div>
+  <div id="scanlist" class="scanlist">{% for s in scans %}<div class="scanrow" data-scan="{{ s.id }}"><b>{{ s.name }}</b> <span class="small muted">{{ s.format }}</span></div>{% endfor %}</div>
+  <div id="roomedit" hidden></div>
+</div>
+<section class="panel" id="view3d" aria-labelledby="h3d">
+  <h2 id="h3d" style="margin-top:0">3D mock-up</h2>
+  <div class="toolbar v3d-tools">
+    <label class="chk"><input type="checkbox" id="v_openings" checked> Doors and windows</label>
+    <label class="chk"><input type="checkbox" id="v_labels" checked> Sizes</label>
+    <label class="chk"><input type="checkbox" id="v_scan"> The scan itself</label>
+    <label class="chk">Walls <input type="color" id="v_wall" value="#e8e2d6" aria-label="Wall colour"></label>
+    <label class="chk">Floor <input type="color" id="v_floor" value="#b98a5a" aria-label="Floor colour"></label>
+    <button type="button" class="tool" id="v_roomcol">Room colours</button>
+    <button type="button" class="tool" id="v_reset">Reset view</button>
+  </div>
+  <div class="three-stage" id="three" role="img" aria-label="3D mock-up of the rooms. Drag to turn, pinch or scroll to zoom."><p class="hint" id="threehint">The rooms show here once they're added.</p></div>
+  <p class="small muted" style="margin:6px 0 0">Drag to turn, two fingers (or right-drag) to move, pinch or scroll to zoom. Pick wall and floor colours to show the customer.</p>
+</section>
 {% else %}
 <div class="panel" id="mappanel">
   <div class="map-warn" role="note"><b>Estimate from satellite imagery: verify on site.</b> The imagery may be several years old, trees and eaves hide edges, and roof pitch can't be seen from above.</div>
@@ -79,6 +104,10 @@
 {% for i in items %}<div class="mitem" data-id="{{ i.id }}"><span class="sw" style="background:{{ i.color }}"></span><div><b>{{ i.label }}</b> <span class="src">{{ i.source }}</span>{% if i.group %} · <span class="small">{{ i.group }}</span>{% endif %}<div class="q">{% for k, v in i.shown %}{{ k }}: {{ v }}{{ '; ' if not loop.last }}{% endfor %}</div></div><div>{% if not read_only %}<form method="post" class="inline" action="{{ url_for('estimate.item_delete', tid=t.id, iid=i.id) }}"><button class="btn sm danger" aria-label="Remove {{ i.label }}">Remove</button></form>{% endif %}</div></div>
 {% else %}<p class="muted" id="noitems">Nothing measured yet.</p>{% endfor %}
 </div>
+{% if floorplan %}<section id="floorplan" class="panel fp-panel" aria-labelledby="hfp"><h2 id="hfp" style="margin-top:0">Floor plan</h2>
+<div class="fp-wrap" id="fpwrap">{{ floorplan }}</div>
+<p class="small muted" style="margin:6px 0 0">Drawn from the room sizes. It's also on the quote's measurements page. <a href="{{ url_for('estimate.floorplan_svg', tid=t.id) }}" download="floor-plan.svg">Download (SVG)</a></p></section>
+{% else %}<section id="floorplan" class="panel fp-panel" hidden><h2 style="margin-top:0">Floor plan</h2><div class="fp-wrap" id="fpwrap"></div></section>{% endif %}
 <datalist id="groups">{% for g in ['power', 'light', 'data', 'fixture', 'pipe', 'trench', 'downpipe', 'tiles', 'walls', 'floor'] %}<option value="{{ g }}">{% endfor %}</datalist>
 </div>
 <aside class="mside" id="mside">
@@ -98,5 +127,7 @@
 <script src="{{ url_for('static', filename='measure/geometry.js') }}"></script>
 <script src="{{ url_for('static', filename='measure/measure.js') }}"></script>
 {% if method == 'plan' %}<script type="module" src="{{ url_for('static', filename='measure/plan.js') }}"></script>
-{% elif method == 'map' %}<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script><script src="{{ url_for('static', filename='measure/map.js') }}"></script>{% endif %}
+{% elif method == 'map' %}<script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}"></script><script src="{{ url_for('static', filename='measure/map.js') }}"></script>
+{% elif method == 'scan' %}<script type="importmap">{"imports": {"three": "{{ url_for('static', filename='vendor/three/three.module.min.js') }}", "three/addons/": "{{ url_for('static', filename='vendor/three/addons/') }}"}}</script>
+<script type="module" src="{{ url_for('static', filename='measure/scan.js') }}"></script>{% endif %}
 {% endblock %}

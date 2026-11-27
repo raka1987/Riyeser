@@ -4,7 +4,9 @@ A measurement ("item") has a kind and its data. item_quantities() turns one into
 takeoff_quantities() adds up a whole takeoff (sharing roof edges between faces so a hip is counted once).
 
 Kinds:
-  room      length, width, height, openings [{kind: door|window|other, width, height, count}]
+  room      length, width, height, openings [{kind: door|window|other, width, height, count}]; or, for a room of
+            any shape (an imported scan or plan): walls [{length, height?, open?, extra?}], outline [[x, y]...],
+            floor_area? (else the outline's area), height, openings (each may name its wall and offset)
   rect      length, width (depth -> volume)          circle    diameter (depth -> volume)
   triangle  base + height, or sides a, b, c          area      area typed in (depth -> volume)
   length    length (height -> face area, spacing -> count of posts/joists)
@@ -141,6 +143,34 @@ def room(length, width, height=0.0, openings=()):
             "skirting": max(0.0, perim - door_width), "doors": doors, "windows": windows}
 
 
+def room_of_walls(walls, height=0.0, openings=(), floor_area=None, outline=None):
+    """A room of any shape: each wall's length (and its own height, when it differs from the room's). Walls marked
+    open (a side with no wall) don't count; extra walls (standing inside the room) count for wall area only.
+    Floor = floor_area when given, else the outline's area."""
+    H = float(height or 0)
+    perim = gross = 0.0
+    for w in walls or ():
+        if w.get("open"):
+            continue
+        L = float(w.get("length") or 0)
+        h = float(w.get("height") or H)
+        gross += L * h
+        if not w.get("extra"):
+            perim += L
+    if floor_area not in (None, ""):
+        floor = float(floor_area)
+    else:
+        floor = ring_area([tuple(p) for p in outline or ()])
+    q = room(0, 0, 0, openings)
+    ops = sum(float(o.get("width") or 0) * float(o.get("height") or 0) * int(float(o.get("count") or 1))
+              for o in openings or ())
+    q.update(floor_area=floor, ceiling_area=floor, perimeter=perim, wall_area_gross=gross,
+             openings_area=min(ops, gross), wall_area=max(0.0, gross - ops),
+             skirting=max(0.0, perim - sum(float(o.get("width") or 0) * int(float(o.get("count") or 1))
+                                           for o in openings or () if o.get("kind") == "door")))
+    return q
+
+
 # ---------------------------------------------------------------- fences
 def fence_posts(segments, spacing, gates=0, closed=False):
     """Posts for a fence along these runs: each straight run needs ceil(run / spacing) bays, a post at every bay end
@@ -167,7 +197,9 @@ def item_quantities(kind, data):
     d = data or {}
     q = {}
     depth = _f(d, "depth")
-    if kind == "room":
+    if kind == "room" and d.get("walls"):
+        q.update(room_of_walls(d["walls"], _f(d, "height"), d.get("openings") or (), d.get("floor_area"), d.get("outline")))
+    elif kind == "room":
         q.update(room(_f(d, "length"), _f(d, "width"), _f(d, "height"), d.get("openings") or ()))
     elif kind in ("rect", "circle", "triangle", "area"):
         if kind == "rect":

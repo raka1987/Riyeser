@@ -37,7 +37,9 @@ def summary_rows(items, sys_):
         bits = [f"{G.QUANTITIES[k][0]}: {U.fmt(v, G.QUANTITIES[k][1], sys_)}" for k, v in q.items() if k in G.QUANTITIES and v]
         if "pitch_deg" in q and q.get("roof_area"):
             bits.append(f"pitch {q['pitch_deg']:.1f}°")
-        src = {"map": "Map (estimate)", "plan": "Plan", "laser": "Laser", "manual": "Measured"}.get(it["source"], it["source"])
+        src = {"map": "Map (estimate)", "plan": "Plan", "laser": "Laser", "manual": "Measured", "scan": "Scan"}.get(it["source"], it["source"])
+        if it["source"] == "scan" and (it["data"] or {}).get("estimated"):
+            src = "3D scan (estimate)"
         rows.append([it["label"] or it["kind"], src + (" · checked on site" if it["verified"] else ""), "; ".join(bits)])
     return rows
 
@@ -63,6 +65,10 @@ def add_page(pdf, db, doc_id, font):
         pdf.set_text_color(154, 52, 18)
         pdf.multi_cell(0, 5, "Sizes marked 'Map (estimate)' were measured on satellite imagery, which may be out of date. "
                              "They are estimates and will be checked on site.", new_x="LMARGIN", new_y="NEXT")
+    if any(i["source"] == "scan" and (i["data"] or {}).get("estimated") for i in items):
+        pdf.set_text_color(154, 52, 18)
+        pdf.multi_cell(0, 5, "Sizes marked '3D scan (estimate)' were estimated from a 3D scan's mesh. They are estimates "
+                             "and will be checked on site.", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
     pdf.table(["Measurement", "How", "Sizes"], summary_rows(items, sys_), [46, 34, 98], ["L", "L", "L"])
     tot = G.takeoff_quantities(items)
@@ -74,6 +80,13 @@ def add_page(pdf, db, doc_id, font):
         pdf.set_font(font, "", 9.5)
         pdf.multi_cell(0, 5, "; ".join(f"{G.QUANTITIES[k][0]}: {U.fmt(v, G.QUANTITIES[k][1], sys_)}"
                                        for k, v in tot.items() if k in G.QUANTITIES), new_x="LMARGIN", new_y="NEXT")
+    # the floor plan of the rooms (drawn from the sizes: lines and text, no pictures)
+    if any(it["kind"] == "room" for it in items):
+        from .floorplan import draw_pdf, layout
+        if layout(items, sys_)["rooms"]:
+            _heading(pdf, font, "Floor plan (drawn from the room sizes, not to an exact scale where a shape isn't known)"
+                     if any((it["data"] or {}).get("shape_known") is False for it in items) else "Floor plan (to scale)")
+            draw_pdf(pdf, font, items, sys_)
     # plan pages: the saved picture (the business's own plan with its lines), else the lines alone
     pages = {}
     for it in items:

@@ -74,5 +74,13 @@ from riyeser.measure.demo import sample_plan_png  # noqa: E402
 with open(os.path.join(work, "plan.png"), "wb") as f:
     f.write(sample_plan_png())
 print("PLAN", os.path.join(work, "plan.png"), flush=True)
+# sample scans for the Import a scan test: a RoomPlan-style room (GLB) and a raw mesh (OBJ), made by Riyeser
+from riyeser.measure.scan import sample  # noqa: E402
+with open(os.path.join(work, "bedroom-scan.glb"), "wb") as f:
+    f.write(sample.write_glb(sample.room_parts(4.2, 3.6, 2.4)))
+with open(os.path.join(work, "mesh-scan.obj"), "wb") as f:
+    f.write(sample.write_obj(sample.room_mesh()))
+print("SCAN", os.path.join(work, "bedroom-scan.glb"), flush=True)
+print("MESH", os.path.join(work, "mesh-scan.obj"), flush=True)
 print("READY", flush=True)
 app.run("127.0.0.1", APP_PORT, threaded=True, use_reloader=False)

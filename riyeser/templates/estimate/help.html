@@ -5,7 +5,7 @@
 <div class="help">
 <div class="card"><h2 id="start" style="margin-top:0">An estimate in six steps</h2><ol>
 <li><b>Customer</b>: pick the customer (or type a new one) and the job address.</li>
-<li><b>How to measure</b>: on the map, on a plan or photo, or type in sizes. You can switch any time.</li>
+<li><b>How to measure</b>: on the map, on a plan or photo, type in sizes, or import a scan from a room-scanning app. You can switch any time.</li>
 <li><b>Measure</b>: everything saves as you go. The totals panel (at the bottom on a phone) adds up the whole job. In the trade this is called a <i>takeoff</i>.</li>
 <li><b>Template</b>: pick a trade (roofing, fencing, painting, tiling and more). Templates you used lately come first.</li>
 <li><b>Price</b>: lines grouped into labour, materials and other. Change a rate, the waste or add a markup; your profit and margin show here for you only.</li>
@@ -29,6 +29,23 @@
 <li><b>Fence</b>: posts = each straight run ÷ post spacing, rounded up, plus one, plus a post for each gate (a rule of thumb: change it with extra corner posts).</li>
 <li><b>Map sizes are estimates from satellite imagery: check them on site.</b> The imagery may be years old, trees and eaves hide edges, and buildings can lean in the picture. The quote says so too.</li>
 <li>Imagery: Esri World Imagery (attribution on the map). Only your own lines are saved, never the imagery; the quote's measurements page draws your lines on a plain background.</li></ul></div>
+<div class="card"><h2 id="scans">Importing a scan</h2>
+<p>A room scan from your phone or tablet becomes rooms in the estimate: walls with their lengths and heights, doors and windows with their sizes, floor and ceiling areas and the perimeter for skirting. Check them, fix anything that's wrong, then press <b>Use these rooms</b>. Painting, flooring, tiling, plastering and skirting templates then price them like rooms you typed in. You also get a 3D mock-up to show the customer (pick a wall and floor colour) and a floor plan, which goes on the quote's measurements page.</p>
+<p>The file is read on this computer and kept with the estimate (up to 100 MB). Nothing is sent anywhere.</p>
+<h3>What each kind of file gives</h3><ul>
+<li><b>Full rooms</b> (walls, doors and windows with sizes): a <b>USDZ</b> from an iPhone or iPad app that uses Apple's RoomPlan, and RoomPlan <b>JSON</b> files.</li>
+<li><b>Rooms from a 2D plan</b>: a <b>DXF</b> floor plan (Polycam, Magicplan, CAD). A plan has no heights, so walls get a typical ceiling height and doors and windows typical heights: check them.</li>
+<li><b>A room list</b>: a <b>CSV</b> with room names and areas (Magicplan's statistics export). The rooms' shapes aren't known, so the floor plan shows a rectangle of the same size.</li>
+<li><b>Estimated from a 3D mesh</b>: <b>GLB</b>, <b>glTF</b>, <b>OBJ</b>, <b>DAE</b>, <b>STL</b> or a mesh <b>USDZ</b> (Polycam, Canvas, 3D Scanner and similar apps). Riyeser finds the floor, ceiling and walls by looking for large flat surfaces. Sizes are marked <i>estimated from a 3D mesh, check on site</i>, and doors and windows aren't found: add them by hand. Furniture against walls and gaps in the scan can throw the sizes out.</li>
+<li><b>PDF plans</b> open in <b>On a plan or photo</b>: set the scale from one known size and draw.</li>
+<li><b>Can't be read</b>: DWG (save it as DXF), FBX (export GLB or OBJ), point clouds (PLY, LAS, E57, XYZ), IFC, SketchUp and Revit files. Compressed GLB files (Draco) can't be read either: export without compression.</li></ul>
+<h3>How to export from your app</h3><ul>
+<li><b>iPhone or iPad apps that use RoomPlan</b> (they draw the room as clean boxes while you scan; they need a LiDAR iPhone Pro or iPad Pro): when the scan is done, choose <b>Export</b> or <b>Share</b> and pick <b>USDZ</b>. If the app offers a choice, pick the plain model (sometimes called parametric or room model), not the textured mesh. Save it to Files, AirDrop it to your computer, or open Riyeser on the phone and choose the file from Files.</li>
+<li><b>Polycam</b>: open the capture, tap <b>Export</b>, and choose <b>GLB</b> (or OBJ). For a captured room on a LiDAR device, the floor plan export gives a <b>DXF</b> (a paid Polycam plan), which comes in as rooms from a plan. Keep the mesh at medium detail or less for files under 100 MB.</li>
+<li><b>Magicplan</b>: open the project and choose <b>Export</b>. Pick <b>DXF</b> for the floor plan, <b>CSV</b> for the room statistics (areas and perimeters), or <b>USDZ</b> or <b>OBJ</b> for the 3D model. The DXF has no dimensions written on it; Riyeser measures the lines.</li>
+<li><b>Canvas</b> (now called Twindo): export the scan as <b>OBJ</b>; it comes in as an estimate from a mesh. Drawings from its paid Scan to CAD service come as DWG or PDF: save the DWG as DXF first, or open the PDF on a plan.</li>
+<li><b>Any CAD app</b>: save the floor plan as an ASCII <b>DXF</b>. Put room names inside the rooms, and doors and windows on layers named Doors and Windows, so they're found.</li></ul>
+<p>No scanner handy? <a href="{{ url_for('estimate.scan_sample') }}" download>Download a sample scan</a> (a bedroom with a door and a window) and import it.</p></div>
 <div class="card"><h2 id="templates">Templates and prices</h2><ul>
 <li>Each line: <i>quantity = measured amount in the line's unit × factor × (1 + waste %)</i>, rounded up to whole packs when there's a pack size, then × your rate. A line's minimum charge lifts a small line; the template's minimum charge tops up the whole quote.</li>
 <li>Riyeser's starting templates have no prices (every business is different). Their waste %, coverage and pack sizes are rules of thumb: check them.</li>

@@ -21,11 +21,11 @@ riyeser-accounting = "riyeser.desktop:main"
 riyeser = "riyeser.cli:main"
 
 [tool.setuptools]
-packages = ["riyeser", "riyeser.views", "riyeser.terminals"]
+packages = ["riyeser", "riyeser.views", "riyeser.terminals", "riyeser.measure", "riyeser.measure.scan"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-riyeser = ["schema.sql", "static/*", "templates/*.html", "templates/*/*.html", "fonts/*"]
+riyeser = ["schema.sql", "static/*", "static/*/*", "static/*/*/*", "static/*/*/*/*", "templates/*.html", "templates/*/*.html", "fonts/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

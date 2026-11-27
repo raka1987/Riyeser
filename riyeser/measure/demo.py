@@ -1,5 +1,5 @@
-"""Sample estimates for the demo company: a roof and a fence measured on the map, a painted room typed in, and a
-tiled bathroom drawn on a sample plan. Made-up prices (the shipped templates have none), in the demo's currency.
+"""Sample estimates for the demo company: a roof and a fence measured on the map, a painted room typed in, a
+tiled bathroom drawn on a sample plan, and a living room imported from a sample room scan. Made-up prices (the shipped templates have none), in the demo's currency.
 The map shapes sit over a public park precinct, labelled as samples; no real customer's property is used."""
 import io
 import json
@@ -102,6 +102,23 @@ def seed(db, customers):
                                                           "height": 2.1, "as": "wall"})], 1):
         db.execute("INSERT INTO takeoff_items (takeoff_id, kind, source, label, color, data, plan_id, page, sort)"
                    " VALUES (?,?, 'plan', ?,?,?,?,1,?)", (bath, kind, label, color, json.dumps(data), pid, n))
+    # a living room imported from a room scan (a sample Riyeser makes itself, RoomPlan-style), ready to price
+    try:
+        from .scan import read as read_scan
+        from .scan.sample import write_glb, room_parts
+        glb = write_glb(room_parts(5.2, 4.1, 2.55))
+        res = read_scan("Sample living room scan.glb", glb)
+        living = takeoff("Repaint the living room (sample scan)", c[1], "Sample house", "scan", "painting", [])
+        sid = db.execute("INSERT INTO takeoff_scans (takeoff_id, name, format, quality, size, data, preview, result)"
+                         " VALUES (?,?,?,?,?,?,?,?)", (living, "Sample living room scan.glb", res["format"], res["quality"],
+                                                       len(glb), glb, res["preview"],
+                                                       json.dumps({"rooms": res["rooms"], "notes": res["notes"]}))).lastrowid
+        for n, r in enumerate(res["rooms"], 1):
+            r = dict(r, name="Living room", scan_id=sid, scan_format=res["format"])
+            db.execute("INSERT INTO takeoff_items (takeoff_id, kind, source, label, color, data, sort) VALUES (?,?,?,?,?,?,?)",
+                       (living, "room", "scan", "Living room", "#0891b2", json.dumps(r), n))
+    except Exception:   # the demo still opens without the sample scan
+        pass
     # the roof and the room have quotes (one sent, one accepted), the others are drafts
     from .quote import make_quote
     from ..views.quotes import mark_accepted

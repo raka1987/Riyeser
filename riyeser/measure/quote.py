@@ -69,6 +69,8 @@ def notes_for(db, takeoff, items):
     if any(i["source"] == "map" for i in items):
         bits.append("Some sizes are estimates from satellite imagery, which may be out of date. They will be checked "
                     "on site before work starts.")
+    if any(i["source"] == "scan" and (i["data"] or {}).get("estimated") for i in items):
+        bits.append("Some room sizes were estimated from a 3D scan. They will be checked on site before work starts.")
     if takeoff["notes"]:
         bits.append(takeoff["notes"])
     return "\n".join(bits)
@@ -181,10 +183,25 @@ def duplicate(db, takeoff_id, title=None):
         db.execute("INSERT INTO takeoff_plan_pages (plan_id, page, scale, scale_note, width, height, snapshot)"
                    " SELECT ?, page, scale, scale_note, width, height, snapshot FROM takeoff_plan_pages WHERE plan_id=?",
                    (npid, p["id"]))
+    scan_map = {}
+    for sc in db.execute("SELECT * FROM takeoff_scans WHERE takeoff_id=?", (takeoff_id,)).fetchall():
+        scan_map[sc["id"]] = db.execute("INSERT INTO takeoff_scans (takeoff_id, name, format, quality, size, data, preview,"
+                                        " result) VALUES (?,?,?,?,?,?,?,?)", (nid, sc["name"], sc["format"], sc["quality"],
+                                                                             sc["size"], sc["data"], sc["preview"],
+                                                                             sc["result"])).lastrowid
     for i in db.execute("SELECT * FROM takeoff_items WHERE takeoff_id=? ORDER BY sort, id", (takeoff_id,)).fetchall():
+        data = i["data"]
+        if i["source"] == "scan":
+            try:
+                d = json.loads(data)
+                if d.get("scan_id") in scan_map:
+                    d["scan_id"] = scan_map[d["scan_id"]]
+                    data = json.dumps(d)
+            except ValueError:
+                pass
         db.execute("INSERT INTO takeoff_items (takeoff_id, kind, source, label, grp, color, data, plan_id, page, verified, sort)"
                    " VALUES (?,?,?,?,?,?,?,?,?,0,?)", (nid, i["kind"], i["source"], i["label"], i["grp"], i["color"],
-                                                       i["data"], plan_map.get(i["plan_id"]), i["page"], i["sort"]))
+                                                       data, plan_map.get(i["plan_id"]), i["page"], i["sort"]))
     audit(db, "estimate_duplicated", f"{t['title']} -> {nid}")
     return nid
 

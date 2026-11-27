@@ -7,7 +7,7 @@
   <button class="choice{{ ' on' if t.method == 'map' }}" name="method" value="map"><span class="em">🛰️</span><b>On the map</b><small>Roofs, fences, driveways and lawns, drawn on satellite imagery. Needs the internet. Check on site: imagery can be old.</small></button>
   <button class="choice{{ ' on' if t.method == 'plan' }}" name="method" value="plan"><span class="em">📐</span><b>On a plan or photo</b><small>Open a PDF plan or a photo, set the scale from one known size, then draw lengths, areas and counts.</small></button>
   <button class="choice{{ ' on' if t.method == 'manual' }}" name="method" value="manual"><span class="em">📏</span><b>Type in sizes</b><small>Rooms, areas, lengths, counts and hours from your tape or laser measurer. Works offline.</small></button>
-  <div class="choice soon" aria-disabled="true"><span class="em">📱</span><b>Import a scan</b><small>Coming later: room scans and Bluetooth laser measurers.</small></div>
+  <button class="choice{{ ' on' if t.method == 'scan' }}" name="method" value="scan"><span class="em">📱</span><b>Import a scan</b><small>A room scan from an iPhone (RoomPlan apps), Polycam, Magicplan or Canvas, or a DXF floor plan. Gives rooms with walls, doors and windows; mesh-only scans are estimates to check on site.</small></button>
 </div>
 </form>
 <div class="est-foot"><a class="btn" href="{{ url_for('estimate.customer', tid=t.id) }}">← Customer</a></div>

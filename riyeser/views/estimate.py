@@ -1,6 +1,6 @@
 """Riyeser Estimate: the Estimates list (home) and the six steps of an estimate.
 
-  1 Customer & job address   2 How to measure (map, plan or photo, type in sizes)   3 Measure
+  1 Customer & job address   2 How to measure (map, plan or photo, type in sizes, import a scan)   3 Measure
   4 Trade template           5 Review price (profit for you, quick changes)        6 Send (PDF, email, print)
 
 Every step saves as you go and you can jump back to any step. Measurements are saved one at a time (JSON from the
@@ -24,7 +24,7 @@ bp = Blueprint("estimate", __name__, url_prefix="/estimate")
 
 STEPS = [(1, "customer", "Customer"), (2, "how", "How to measure"), (3, "measure", "Measure"),
          (4, "template", "Template"), (5, "price", "Price"), (6, "send", "Send")]
-METHODS = {"map": "On the map", "plan": "On a plan or photo", "manual": "Type in sizes"}
+METHODS = {"map": "On the map", "plan": "On a plan or photo", "manual": "Type in sizes", "scan": "Import a scan"}
 KINDS = {"room": "Room", "rect": "Rectangle", "circle": "Circle", "triangle": "Triangle", "area": "Area",
          "length": "Length", "count": "Count", "volume": "Volume", "hours": "Hours", "shape": "Drawn area",
          "line": "Drawn length", "markers": "Counted points", "roof": "Roof face", "fence": "Fence"}
@@ -145,7 +145,8 @@ def _licence():
     st = _safe(ML.touch) or {}
     g.estimate_read_only = st.get("mode") == "expired"
     if g.estimate_read_only and request.method == "POST" and request.endpoint not in ("estimate.mark_sent",):
-        if request.is_json or request.path.endswith((".json", "/items", "/view")) or "/items/" in request.path:
+        if request.is_json or request.path.endswith((".json", "/items", "/view")) or "/items/" in request.path \
+                or "/scans" in request.path:
             return _api_error(ML.message(), 402)
         flash(ML.message(), "error")
         return redirect(request.referrer or url_for("estimate.index"))
@@ -305,10 +306,20 @@ def measure(tid):
            "plans": [dict(p) for p in plans], "pages": pages,
            "urls": {"items": url_for("estimate.items_api", tid=tid), "plans": url_for("estimate.plan_upload", tid=tid),
                     "view": url_for("estimate.save_view", tid=tid), "base": url_for("estimate.index"),
-                    "static": url_for("static", filename="")}}
+                    "static": url_for("static", filename=""), "scans": url_for("estimate.scan_upload", tid=tid),
+                    "model": url_for("estimate.model", tid=tid), "floorplan": url_for("estimate.floorplan_svg", tid=tid)}}
+    from markupsafe import Markup
+    from ..measure import floorplan
+    from .estimate_scan import scans_of
+    scans = scans_of(db, tid)
+    if method == "scan":
+        cfg["scans"] = scans
+        cfg["maxMB"] = 100
+    plan_svg = floorplan.svg(items, sys_, title=f"Floor plan: {t['title']}")
     return render_template("estimate/step_measure.html", t=t, step=3, method=method, sys_=sys_, cfg=cfg,
                            items=[item_view(i, sys_) for i in items], totals=totals_view(items, sys_),
-                           plans=plans, as_labels=G.AS_LABELS, colors=COLORS, edge_labels=G.EDGE_LABELS)
+                           plans=plans, as_labels=G.AS_LABELS, colors=COLORS, edge_labels=G.EDGE_LABELS,
+                           scans=scans, floorplan=Markup(plan_svg) if plan_svg else None)
 
 
 def _clean_data(kind, data, sys_):
@@ -701,6 +712,7 @@ def delete(tid):
     for p in db.execute("SELECT id FROM takeoff_plans WHERE takeoff_id=?", (tid,)).fetchall():
         db.execute("DELETE FROM takeoff_plan_pages WHERE plan_id=?", (p["id"],))
     db.execute("DELETE FROM takeoff_plans WHERE takeoff_id=?", (tid,))
+    db.execute("DELETE FROM takeoff_scans WHERE takeoff_id=?", (tid,))
     db.execute("DELETE FROM takeoffs WHERE id=?", (tid,))
     audit(db, "estimate_deleted", t["title"])
     flash(f"{t['title']} deleted. Its quote (if any) is kept.", "ok")
@@ -953,3 +965,6 @@ def estimate_for_document(db, doc_id):
 
 
 __all__ = ["bp", "register_filters", "money", "import_price_list", "estimate_for_document", "date"]
+
+
+from . import estimate_scan  # noqa: E402,F401  (Import a scan: its routes are on this blueprint)

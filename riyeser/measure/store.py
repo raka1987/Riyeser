@@ -34,7 +34,7 @@ def ensure(db):
         takeoff_id INTEGER NOT NULL REFERENCES takeoffs(id) ON DELETE CASCADE,
         kind TEXT NOT NULL,           -- room, rect, circle, triangle, area, length, count, volume, hours, shape, line,
                                       -- markers, roof, fence (riyeser/measure/geometry.py)
-        source TEXT NOT NULL DEFAULT 'manual',   -- manual, plan, map, laser (later: ar)
+        source TEXT NOT NULL DEFAULT 'manual',   -- manual, plan, map, laser, scan (later: ar)
         label TEXT,
         grp TEXT,                     -- group: colours a set of measurements and lets template lines pick them
         color TEXT,
@@ -58,6 +58,18 @@ def ensure(db):
         width REAL, height REAL,      -- the page's size in drawing units
         snapshot BLOB,                -- PNG of the page with the drawn lines (the business's own plan), for the PDF
         PRIMARY KEY (plan_id, page))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS takeoff_scans (
+        id INTEGER PRIMARY KEY,
+        takeoff_id INTEGER NOT NULL REFERENCES takeoffs(id) ON DELETE CASCADE,
+        name TEXT,                    -- the file's name
+        format TEXT,                  -- what it was read as: RoomPlan USDZ, GLB mesh, DXF floor plan ...
+        quality TEXT,                 -- rooms (full rooms), plan, list, mesh (estimated from a 3D mesh)
+        size INTEGER NOT NULL DEFAULT 0,
+        data BLOB NOT NULL,           -- the file itself, kept with the estimate (up to 100 MB)
+        preview BLOB,                 -- float32 triangles (Y up, metres) for the 3D view's "show the scan" layer
+        result TEXT,                  -- JSON: the rooms read from it (before editing) and notes
+        created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+    db.execute("CREATE INDEX IF NOT EXISTS takeoff_scans_takeoff ON takeoff_scans(takeoff_id)")
     db.execute("""CREATE TABLE IF NOT EXISTS measure_templates (
         id INTEGER PRIMARY KEY,
         name TEXT NOT NULL,
