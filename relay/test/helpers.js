@@ -31,17 +31,18 @@ function plan(over = {}) {
 function fakeCloud(p) {
   const c = { plan: p, state: { ok: true, at: new Date().toISOString() }, calls: 0 };
   c.sync = async () => { c.calls++; return JSON.parse(JSON.stringify(c.plan)); };
-  c.start = async (onPlan) => { c.onPlan = onPlan; await onPlan(await c.sync()); };
+  c.start = async (onPlan, onRemoved) => { c.onPlan = onPlan; c.onRemoved = onRemoved; await onPlan(await c.sync()); };
+  c.removed = () => { c.state = { ok: false, removed: true, error: 'This relay has been removed from Riyeser (RELAY_REMOVED).' }; if (c.onRemoved) c.onRemoved(c.state.error); };
   c.push = async (np) => { if (np) c.plan = np; await c.onPlan(await c.sync()); };
   return c;
 }
 
-async function makeRelay({ id = 'syd1', region = 'Sydney', p = plan(), peers = [], turn = true, limits, limiter = { perMinute: 1000, maxFails: 1000 }, ddns = {}, ddnsEvery } = {}) {
+async function makeRelay({ id = 'syd1', region = 'Sydney', p = plan(), peers = [], turn = true, limits, limiter = { perMinute: 1000, maxFails: 1000 }, ddns = {}, ddnsEvery, secret = SECRET, dns = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-relay-test-'));
   const base = portBase; portBase += 160;
   const cloud = fakeCloud(p);
   const s = createRelayServer({
-    id, region, host: `${id}.relay.test`, secret: SECRET, httpPort: 0, httpBind: '127.0.0.1', httpsPort: 0, httpsBind: '127.0.0.1', trustProxy: false,
+    id, region, host: `${id}.relay.test`, secret, dns, httpPort: 0, httpBind: '127.0.0.1', httpsPort: 0, httpsBind: '127.0.0.1', trustProxy: false,
     sipTlsPort: 0, sipBind: '127.0.0.1', selfSigned: true, certDir: dir, mediaMin: base, mediaMax: base + 99, probePort: 0, mediaBind: '127.0.0.1', publicIp: '127.0.0.1',
     turn: turn ? { enabled: true, port: 0, tlsPort: false, min: base + 100, max: base + 159, bind: '127.0.0.1', allowPrivatePeers: true } : { enabled: false },
     metricsToken: 'metrics-test-token', ddns, ddnsEvery, peers, cloud, limits, limiter, log: process.env.RELAY_LOG ? (l, t) => console.log(id, l, t) : () => {},

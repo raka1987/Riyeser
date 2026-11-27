@@ -2,7 +2,8 @@
 // signature made with the relay secret. It reports its version, public IP and counts (never call details) and gets
 // the plan back: for each business with the relay switched on, its offices (pass generation, revoked), remote phones
 // (username, extension, HA1 — never a password), ring groups; and the other relays of the cluster.
-// With no answer it carries on with the last plan.
+// With no answer it carries on with the last plan. 1.1.0: a relay set up with a set-up code signs with its own key and
+// gets the cluster's keys back from relay_sync (keys); relay_leave removes it from Riyeser when it's uninstalled.
 const { syncSig } = require('./tokens');
 
 class CloudSync {
@@ -23,12 +24,22 @@ class CloudSync {
     this.state = { ok: true, at: new Date().toISOString(), error: null, yourIp: j.your_ip || null };
     return j;
   }
-  /** Sync now and then every 30 s; onPlan(result) for each answer. */
-  start(onPlan) {
+  /** Remove this relay from Riyeser (uninstalling it). -> relay_drop's answer, or throws. */
+  async leave() {
+    const ts = Math.floor(Date.now() / 1000);
+    const r = await this.fetch(`${this.url}/rest/v1/rpc/relay_leave`, { method: 'POST', headers: { apikey: this.key, Authorization: `Bearer ${this.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relay: this.relayId, ts, sig: syncSig(this.secret, this.relayId, ts) }) });
+    const j = await r.json().catch(() => null);
+    if (!r.ok) throw new Error((j && (j.message || j.error)) || `Riyeser online said ${r.status}`);
+    return j;
+  }
+  /** Sync now and then every 30 s; onPlan(result) for each answer; onRemoved() when Riyeser says this relay was removed. */
+  start(onPlan, onRemoved) {
     const run = async () => {
       try { const j = await this.sync(); await onPlan(j); }
       catch (e) {
         const was = this.state.error; this.state = { ...this.state, ok: false, error: String(e.message).slice(0, 200) };
+        if (/RELAY_REMOVED/.test(e.message)) { this.state.removed = true; if (onRemoved) onRemoved(e.message); }
         if (was !== this.state.error) this.logFn('warn', `Riyeser online: ${this.state.error}. Carrying on with the last plan.`);
       }
     };
