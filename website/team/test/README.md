@@ -171,6 +171,14 @@
   (the in-page question), the post box (filters, Try again), the request log (per key, refused only, Show older), webhooks (https only,
   the secret once, Send test, Deliveries, turned off → Turn back on), Add to your website (snippet, live preview), plan messages, the
   database's refusal, an older database (PGRST202), staff (nothing at all), no two-step sign-in, and 390px.
+- `booking-page-test.js`: the hosted booking page (`website/book`, riyeser.com/book/<address>) against a pretend API (the
+  `/v1/pages/…` routes). It serves `website/public` itself on 18732 the way GitHub Pages does (a missing file gets `404.html`,
+  so the clean address works): the profile (name, colour, address, hours, services), service → who → day → time → details →
+  request (no key, no cookies, a UUID Idempotency-Key) → confirmed; the time gone (409), a refused field (422), a dropped
+  connection retried with the same key; unknown / switched off / paused / no Bookings licence; `/book/demo` and the owner's
+  `?preview`; phone width, dark, keyboard only, a pale brand colour still readable, no storage. Run `node website/build.mjs` first.
+  `connections-test.js` (13) covers the owner's side (Management → Connections → Booking page) and `rules-test.sql` the
+  database (`booking_page_*`, `api_page_auth`, `api_page_profile`, the hidden page key, limits).
 - `widget-test.js`: the booking widget (`website/widget/book.js`, served at `/widget/book.js`) on another website (8093) against a pretend
   API (8094) with real CORS, plus a website not on the key (8095): book a slot through to "confirmed", an idempotent retry after a cut-off
   answer (one booking), no free time, 409 slot gone, 402 plan, 422, 429, the enquiry form and the order button, dark, 390px, keyboard,

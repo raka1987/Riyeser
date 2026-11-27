@@ -44,6 +44,17 @@ const CONTRAST = () => {
     await pg.close();
   }
 
+  // ---- the hosted booking page (/book/): headings in order, every control named, contrast of the business's colour
+  { const pg = await page('/book/?b=demo'); await pg.waitForSelector('[data-svc]');
+    await pg.click('[data-svc=CUT]'); await pg.waitForSelector('.times [data-slot]'); await pg.click('.times [data-slot="0"]'); await pg.waitForSelector('#f-name');
+    const jumps = await pg.$$eval('h1, h2, h3, h4', (hs) => { const out = []; let last = 0; for (const h of hs) { const n = Number(h.tagName[1]); if (last && n > last + 1) out.push(h.tagName); last = n; } return out; });
+    check(!jumps.length && (await pg.$$('h1')).length === 1, `booking page: one h1, heading levels in order ${jumps.join(' ')}`);
+    const unnamed = await pg.$$eval('button, input, textarea, a', (x) => x.filter((e) => !(e.getAttribute('aria-label') || e.textContent.trim() || (e.labels && e.labels.length))).length);
+    check(!unnamed, 'booking page: every control has a name');
+    const low = await pg.$$eval('.step h2, .opt, .hint, .fine, .meta, .about dd a, #send, .step h2 .n', (els) => els.filter((e) => e.offsetParent && e.textContent.trim() && !e.disabled && !e.closest('.later')).map((e) => [e.textContent.trim().slice(0, 20), window.__contrast(e)]).filter(([, c]) => c < 4.5));
+    check(!low.length, `booking page: text at least 4.5:1 ${low.map(([t, c]) => `"${t}" ${c.toFixed(2)}`).join(', ')}`);
+    await axe(pg, '/book/?b=demo'); await pg.close(); }
+
   // ---- Riyeser Link
   { const pg = await page('/link/?demo');
     await pg.waitForSelector('#lkshell'); await pg.click('#infobtn'); await pg.waitForTimeout(300);   // the details (ⓘ): members with their status
