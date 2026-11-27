@@ -36,7 +36,7 @@ function fakeCloud(p) {
   return c;
 }
 
-async function makeRelay({ id = 'syd1', region = 'Sydney', p = plan(), peers = [], turn = true, limits, limiter = { perMinute: 1000, maxFails: 1000 } } = {}) {
+async function makeRelay({ id = 'syd1', region = 'Sydney', p = plan(), peers = [], turn = true, limits, limiter = { perMinute: 1000, maxFails: 1000 }, ddns = {}, ddnsEvery } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-relay-test-'));
   const base = portBase; portBase += 160;
   const cloud = fakeCloud(p);
@@ -44,7 +44,7 @@ async function makeRelay({ id = 'syd1', region = 'Sydney', p = plan(), peers = [
     id, region, host: `${id}.relay.test`, secret: SECRET, httpPort: 0, httpBind: '127.0.0.1', httpsPort: 0, httpsBind: '127.0.0.1', trustProxy: false,
     sipTlsPort: 0, sipBind: '127.0.0.1', selfSigned: true, certDir: dir, mediaMin: base, mediaMax: base + 99, probePort: 0, mediaBind: '127.0.0.1', publicIp: '127.0.0.1',
     turn: turn ? { enabled: true, port: 0, tlsPort: false, min: base + 100, max: base + 159, bind: '127.0.0.1', allowPrivatePeers: true } : { enabled: false },
-    metricsToken: 'metrics-test-token', ddns: {}, peers, cloud, limits, limiter, log: process.env.RELAY_LOG ? (l, t) => console.log(id, l, t) : () => {},
+    metricsToken: 'metrics-test-token', ddns, ddnsEvery, peers, cloud, limits, limiter, log: process.env.RELAY_LOG ? (l, t) => console.log(id, l, t) : () => {},
   });
   await s.start();
   s.dir = dir; s.fakeCloud = cloud;

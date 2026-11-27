@@ -514,10 +514,27 @@ come back when the main one answers again; calls inside each office never depend
 1. Linux: `sudo systemctl status riyeser-relay`, `journalctl -u riyeser-relay -n 100`, `sudo systemctl restart riyeser-relay`.
    Windows: Task Scheduler → *Riyeser Relay* → Run; log in `C:\ProgramData\Riyeser Relay\logs\relay.log`.
 2. Head office internet down: sites are already on the backup (Phones page shows "Using backup relay"). Nothing to do.
-3. Head office public address changed and the DNS record is stale: the relay updates it itself if `DDNS_*` is set;
-   otherwise update the A record by hand. Link Office also tries the address the relay last reported.
+3. Head office public address changed and the DNS record is stale: the relay updates it itself through Namecheap
+   Dynamic DNS (below) at start, on every change and every 30 minutes. Look for `DNS:` lines in its log, or `dns` in
+   `/health`. Otherwise update the A record by hand at Namecheap. Link Office also tries the address the relay last reported.
 4. A bad update: `update.sh` already rolled back if the new version didn't start; the failed copy is in
    `/opt/riyeser-relay/app.bad`. To go back by hand: `sudo mv /opt/riyeser-relay/app /opt/riyeser-relay/app.bad && sudo mv /opt/riyeser-relay/app.old /opt/riyeser-relay/app && sudo systemctl restart riyeser-relay`.
+
+**Dynamic DNS at Namecheap (owner, once; `riyeser.com` is at Namecheap).** So `relay.riyeser.com` follows the head
+office's public address by itself:
+1. Namecheap → **Domain List** → **Manage** next to `riyeser.com` → **Advanced DNS**.
+2. **Dynamic DNS** → switch it on → copy the **Dynamic DNS Password** (not the Namecheap account password).
+3. **Host Records** → **Add new record** → **A + Dynamic DNS Record**, host `relay`, value `127.0.0.1` for now (the
+   relay replaces it), TTL Automatic → ✓. Remove any plain A record for `relay`. Same for `relay2` if the backup
+   should update itself too.
+4. On the head office PC: Riyeser Link Office → *Settings → Connect your branches → This PC as the relay* → paste the
+   password into **Namecheap Dynamic DNS password** → *Run the relay on this PC…* (or *Save*). Never paste it into
+   chat, email or a ticket. (Linux relay: `sudo ./relay/deploy/setup.sh … --ddns-provider namecheap`, asked hidden.)
+5. Check: the same panel (or `/health` → `dns`) says the name points at the office, within a minute. "Namecheap
+   refused the Dynamic DNS password": copy it again (step 2). "No A + Dynamic DNS Record": step 3.
+The password lives only in `relay.env` on the relay machine (Administrators/SYSTEM, or root and the relay). If it may
+have leaked: get a new Dynamic DNS password at Namecheap (Advanced DNS → Dynamic DNS; Namecheap support can reset it
+if the page offers no way), then step 4 again.
 
 **A customer's site won't connect.** Phones page → *Sites and the Riyeser relay* shows each site's state and reason.
 "Update needed": Link Office older than 1.3.0. "Refused": the office was disconnected (Allow again) or the relay is

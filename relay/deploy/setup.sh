@@ -14,18 +14,23 @@
 #   --docker             run in Docker (images built here from Ubuntu's node; see docker-compose.yml) instead of systemd
 #   --supabase-url URL --supabase-key KEY   Riyeser online (default: Riyeser Link's project and publishable key)
 #   --ddns-provider cloudflare|digitalocean --ddns-zone ZONE   (the token is asked for, hidden, never on the command line)
+#   --ddns-provider namecheap [--ddns-host relay] [--ddns-domain riyeser.com]   Namecheap Dynamic DNS (host and domain
+#                        default to --domain: relay2.riyeser.com -> relay2 + riyeser.com). The Dynamic DNS password
+#                        (Namecheap → Advanced DNS → Dynamic DNS; not the account password) is asked for, hidden.
+#                        Run again without --ddns-provider and the DNS settings already in relay.env are kept.
 # Nothing outside is used at run time except DNS, and Let's Encrypt if you choose it. Safe to run again.
 set -euo pipefail
 DOMAIN=relay.riyeser.com; REGION=Sydney; ID=; HOME_MODE=0; LE=0; CERT=; KEY=; BACKUP=0; PRIMARY=; DOCKER=0
 SB_URL=https://goaugynxeatzqzifpoes.supabase.co; SB_KEY=sb_publishable_-hYqz3gbSvsH-1rX_HLV4A_eSTp3XXL
-DDNS_PROVIDER=; DDNS_ZONE=; PRIORITY=1
+DDNS_PROVIDER=; DDNS_ZONE=; DDNS_HOST=; DDNS_DOMAIN=; PRIORITY=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --domain) DOMAIN=$2; shift ;; --id) ID=$2; shift ;; --region) REGION=$2; shift ;; --home) HOME_MODE=1 ;;
     --letsencrypt) LE=1 ;; --cert) CERT=$2; shift ;; --key) KEY=$2; shift ;; --backup) BACKUP=1; PRIORITY=2 ;; --primary) PRIMARY=$2; shift ;;
     --docker) DOCKER=1 ;; --supabase-url) SB_URL=$2; shift ;; --supabase-key) SB_KEY=$2; shift ;;
     --ddns-provider) DDNS_PROVIDER=$2; shift ;; --ddns-zone) DDNS_ZONE=$2; shift ;; --priority) PRIORITY=$2; shift ;;
-    -h|--help) sed -n '2,22p' "$0"; exit 0 ;; *) echo "Unknown option: $1 (see --help)"; exit 2 ;;
+    --ddns-host) DDNS_HOST=$2; shift ;; --ddns-domain) DDNS_DOMAIN=$2; shift ;;
+    -h|--help) sed -n '2,26p' "$0"; exit 0 ;; *) echo "Unknown option: $1 (see --help)"; exit 2 ;;
   esac; shift
 done
 [ "$(id -u)" = 0 ] || { echo "Run as root: sudo $0 $*"; exit 1; }
@@ -33,6 +38,13 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 [ -f "$HERE/server.js" ] || { echo "Run this from the relay folder (it has server.js)."; exit 1; }
 [ -z "$ID" ] && ID=$(echo "$REGION" | tr 'A-Z' 'a-z' | tr -cd 'a-z' | cut -c1-3)1
 echo "$ID" | grep -Eq '^[a-z0-9-]{2,40}$' || { echo "--id must be 2-40 letters, numbers or dashes"; exit 2; }
+case "$DDNS_PROVIDER" in ''|cloudflare|digitalocean|namecheap) ;; *) echo "--ddns-provider must be cloudflare, digitalocean or namecheap"; exit 2 ;; esac
+if [ "$DDNS_PROVIDER" = namecheap ]; then
+  [ -z "$DDNS_DOMAIN" ] && DDNS_DOMAIN=$(echo "$DOMAIN" | awk -F. 'NF>=2{print $(NF-1)"."$NF}')
+  [ -z "$DDNS_HOST" ] && { case "$DOMAIN" in *".$DDNS_DOMAIN") DDNS_HOST=${DOMAIN%.$DDNS_DOMAIN} ;; *) DDNS_HOST=@ ;; esac; }
+  echo "$DDNS_HOST" | grep -Eq '^(@|\*|[A-Za-z0-9]([A-Za-z0-9.-]{0,61}[A-Za-z0-9])?)$' || { echo "--ddns-host must be a name like relay (or @)"; exit 2; }
+  echo "$DDNS_DOMAIN" | grep -Eq '^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' || { echo "--ddns-domain must be a domain like riyeser.com"; exit 2; }
+fi
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 
 say "1/7 Packages (from Ubuntu's own archive)"
@@ -68,8 +80,21 @@ fi
 chmod 640 "$SECRET_FILE"; chgrp riyeser-relay "$SECRET_FILE"
 TURN_SECRET=$(printf turn | openssl dgst -sha256 -hmac "$(cat "$SECRET_FILE")" -hex | awk '{print $NF}')
 METRICS=$( [ -s /etc/riyeser-relay/metrics-token ] && cat /etc/riyeser-relay/metrics-token || openssl rand -hex 16 | tee /etc/riyeser-relay/metrics-token ); chmod 600 /etc/riyeser-relay/metrics-token
-DDNS_TOKEN=
-if [ -n "$DDNS_PROVIDER" ]; then read -r -s -p "DNS API token for $DDNS_PROVIDER (hidden, kept in /etc/riyeser-relay/relay.env): " DDNS_TOKEN; echo; fi
+DDNS_TOKEN=; DDNS_PASSWORD=; ENVF=/etc/riyeser-relay/relay.env
+old() { [ -f "$ENVF" ] && sed -n "s/^$1=\"\(.*\)\"\$/\1/p" "$ENVF" | tail -1; true; }
+if [ "$DDNS_PROVIDER" = namecheap ]; then
+  echo "Namecheap Dynamic DNS for $DDNS_HOST.$DDNS_DOMAIN. The password is on Namecheap: Domain List → Manage $DDNS_DOMAIN →"
+  echo "Advanced DNS → Dynamic DNS (turn it on, copy the password). It is NOT your Namecheap account password."
+  read -r -s -p "Dynamic DNS password (hidden, kept only in $ENVF): " DDNS_PASSWORD || true; echo
+  [ -n "$DDNS_PASSWORD" ] || { echo "No Dynamic DNS password given."; exit 2; }
+  printf '%s' "$DDNS_PASSWORD" | grep -Eq '^[^[:space:]"$`\\]{8,200}$' || { echo "That doesn't look like a Dynamic DNS password (no spaces or quotes)."; exit 2; }
+elif [ -n "$DDNS_PROVIDER" ]; then read -r -s -p "DNS API token for $DDNS_PROVIDER (hidden, kept in $ENVF): " DDNS_TOKEN || true; echo
+else
+  # running again: keep the DNS settings already there
+  DDNS_PROVIDER=$(old DDNS_PROVIDER); DDNS_ZONE=$(old DDNS_ZONE); DDNS_TOKEN=$(old DDNS_TOKEN)
+  DDNS_HOST=$(old DDNS_HOST); DDNS_DOMAIN=$(old DDNS_DOMAIN); DDNS_PASSWORD=$(old DDNS_PASSWORD)
+  [ -n "$DDNS_PROVIDER" ] && echo "Keeping the dynamic DNS settings ($DDNS_PROVIDER) already in $ENVF."
+fi
 
 say "4/7 Certificate"
 TLS_CERT=; TLS_KEY=; HTTPS_PORT=443; SELF=1
@@ -107,7 +132,8 @@ if [ "$HOME_MODE" = 1 ]; then MEDIA="40002 40201"; TURNR="40202 40301"; PORTMAP=
 set -- $MEDIA; MMIN=$1; MMAX=$2; set -- $TURNR; TMIN=$1; TMAX=$2
 umask 027
 cat > /etc/riyeser-relay/relay.env <<EOC
-# Riyeser relay settings (made by setup.sh). Keep this file private: it points at the secret and holds the DNS token.
+# Riyeser relay settings (made by setup.sh). Keep this file private: it points at the secret and holds the DNS token
+# or Namecheap Dynamic DNS password (root and the relay only).
 RELAY_ID="$ID"
 RELAY_REGION="$REGION"
 RELAY_HOST="$DOMAIN"
@@ -135,8 +161,11 @@ DDNS_PROVIDER="$DDNS_PROVIDER"
 DDNS_ZONE="$DDNS_ZONE"
 DDNS_NAME="$DOMAIN"
 DDNS_TOKEN="$DDNS_TOKEN"
+DDNS_HOST="$DDNS_HOST"
+DDNS_DOMAIN="$DDNS_DOMAIN"
+DDNS_PASSWORD="$DDNS_PASSWORD"
 EOC
-chgrp riyeser-relay /etc/riyeser-relay/relay.env; chmod 640 /etc/riyeser-relay/relay.env
+chown root:riyeser-relay /etc/riyeser-relay/relay.env; chmod 640 /etc/riyeser-relay/relay.env
 
 say "6/7 Firewall (ufw)"
 ufw allow 22/tcp >/dev/null
@@ -159,12 +188,15 @@ IP=$(curl -fsS http://127.0.0.1:8080/health >/dev/null && node -e "const os=requ
 IPNOTE=; [ -n "$IP" ] && IPNOTE=" (this machine says $IP; on a home connection use the router's outside address)"
 PF=; [ "$HOME_MODE" = 1 ] && PF="Port forwarding: if the router didn't accept automatic forwarding (journalctl -u riyeser-relay | grep 'port forwarding'), forward these to this PC: TCP 443, 5061, 5349, 3478; UDP 3478, 40000, $MMIN-$MMAX, $TMIN-$TMAX.
      "
+DNSNOTE="an A record  $DOMAIN  →  this machine's public address$IPNOTE."
+[ "$DDNS_PROVIDER" = namecheap ] && DNSNOTE="Namecheap keeps $DDNS_HOST.$DDNS_DOMAIN pointing here (Advanced DNS needs an \"A + Dynamic DNS Record\" with host $DDNS_HOST). Check: journalctl -u riyeser-relay | grep DNS"
+[ -n "$DDNS_PROVIDER" ] && [ "$DDNS_PROVIDER" != namecheap ] && DNSNOTE="the relay keeps $DOMAIN pointing here through $DDNS_PROVIDER. Check: journalctl -u riyeser-relay | grep DNS"
 umask 077
 printf "select relay_register('%s', '%s', '%s', '%s', %s);\n" "$ID" "$DOMAIN" "$REGION" "$(cat "$SECRET_FILE")" "$PRIORITY" > /etc/riyeser-relay/REGISTER.sql
 cat <<EON
 
 Done. Three things left (see relay/README.md):
-  1. DNS: an A record  $DOMAIN  →  this machine's public address$IPNOTE.
+  1. DNS: ${DNSNOTE}
   2. Riyeser online (once per relay): open Supabase → SQL editor and run the line in
        sudo cat /etc/riyeser-relay/REGISTER.sql
      (it holds the secret: paste it only into the SQL editor, never into chat or email).
