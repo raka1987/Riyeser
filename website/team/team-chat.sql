@@ -8166,10 +8166,12 @@ begin
                   from link_offices o where o.workspace_id = w.id),
       'devices', (select coalesce(jsonb_agg(jsonb_build_object('user', d.username, 'ext', d.extension, 'ha1', d.ha1, 'label', d.label)), '[]')
                   from link_relay_devices d where d.workspace_id = w.id and d.removed_at is null),
-      'groups', (select coalesce(jsonb_agg(jsonb_build_object('ext', b.extension::text, 'members',
-                    (select coalesce(jsonb_agg(m.extension::text), '[]') from branch_members bm join members m on m.user_id = bm.user_id and m.workspace_id = w.id
-                     where bm.branch_id = b.id and m.extension is not null))), '[]')
-                 from branches b where b.workspace_id = w.id and b.extension is not null))), '[]')
+      -- ring groups with their chosen members only (people's extensions and shared desk phones), as ring_group_plan
+      'groups', (select coalesce(jsonb_agg(jsonb_build_object('ext', g.extension::text, 'members',
+                    (select coalesce(jsonb_agg(coalesce(m.extension::text, rm.phone_ext) order by rm.position, rm.id), '[]') from ring_group_members rm
+                     left join members m on m.user_id = rm.user_id and m.workspace_id = w.id
+                     where rm.group_id = g.id and coalesce(m.extension::text, rm.phone_ext) is not null))), '[]')
+                 from ring_groups g where g.workspace_id = w.id and g.extension is not null))), '[]')
     into plan
     from workspaces w join link_relay_settings s on s.workspace_id = w.id and s.enabled
     where w.status = 'active' and (r.workspace_id is null or r.workspace_id = w.id)
