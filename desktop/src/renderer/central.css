@@ -236,6 +236,9 @@ body.demo .app { height: calc(100vh - 40px); }
 .setbody { padding: 12px 22px 22px; }
 .setrow { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; } .setrow input { margin-top: 3px; width: 16px; height: 16px; }
 .setrow small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.setrow + .setrow { margin-top: 14px; }
+.setabout { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; }
+.setabout b { font-size: 13px; } .setabout p { margin: 4px 0 0; color: var(--muted); }
 
 /* narrow windows: the banner text shrinks (and is cut short) so "Leave demo mode" always shows in full */
 @media (max-width: 640px) { .demobar { gap: 8px; padding: 0 10px; font-size: 12px; } .demobar .demo-leave { padding: 3px 9px; font-size: 12px; } }

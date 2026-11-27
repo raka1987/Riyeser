@@ -178,3 +178,13 @@
 - `developers-test.js`: riyeser.com/developers/ (from `website/developers.mjs`): every page under the CSP, every endpoint with curl and
   JavaScript, the webhook signature known answer, the widget preview, help and footer links, the sitemap, 390px.
 - `online-help-test.js` (node, no browser): the "Online connections" help guide (diagram, five set-up steps, where to paste the code, checklist, Send a test, Activity, problems); after a build it checks help/online.html too. `connections-test.js` step 12 covers the "Connect your website" guide on Management → Connections (checklist from `api_status`, Send a test through `api_send_test` / `api_event_status`).
+- Real downloads and installs (HQ → Downloads): `rules-test.sql` covers `record_download` (the download function's
+  service role only; values tidied; 30 a visitor an hour), `track_install` (anonymous; new/existing once per PC, the same
+  update once, 50 notes a day), `install_link` (members only, once), `hq_real_downloads` (downloads.view; real = no
+  bots, tests or staff, one person once a day per program; hidden counts; per day, program, country, page, release) and
+  `hq_save_download_totals` (the daily job, owner only). `../../hq/test-hq-downloads.js`: the HQ page in demo mode
+  (tiles, hidden counts, 30/90 days, a program's chart, by country and page, the staff tick, the raw GitHub section
+  collapsed, an older database, a phone) and the website's `download/<program>.html` hand-off (asks the counter with
+  staff/test/where-from, then the GitHub file; straight to GitHub when the counter is down). `csp-test.js` and
+  `a11y-test.js` include the hand-off page. The function itself: `deno test supabase/functions/download` (branch main).
+  Riyeser Central's side: `desktop/test/usage-counts.test.js`.

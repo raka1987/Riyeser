@@ -22,6 +22,7 @@ const checklist = require('./central/checklist');
 const freshstart = require('./central/freshstart');
 const diagnostics = require('./central/diagnostics');
 const programReports = require('./central/program-reports');
+const usageCounts = require('./central/usage-counts');
 const { LocalApp } = require('./central/local-app');
 const { createSync } = require('./central/online-sync');
 const crypto = require('crypto');
@@ -196,6 +197,9 @@ function installedVersions() {
 }
 // The programs on this PC go to Riyeser soon after they change (not only at the daily check-in): see program-reports.js.
 let reportProgramsNow = async () => null;   // set up in registerIpc once the online helper exists
+// Anonymous usage counts (central/usage-counts.js; Settings → "Send anonymous usage counts"): new install, adds, updates.
+let usage = null; let usageFirst = 'new';
+const usageTick = () => (usage ? installedVersions().then((v) => usage.tick(v)).catch(() => null) : Promise.resolve(null));
 const programsReporter = programReports.createReporter({ report: () => reportProgramsNow() });
 async function checkUpdates(force) {
   const cached = store.get('updateCheck', null);
@@ -463,7 +467,15 @@ function registerIpc() {
   const on = new online.Online({ store, fetchFn: (u, o) => net.fetch(u, o), appData, appVersion: app.getVersion(), deviceName: os.hostname(),
     programsFn: () => installedVersions(), shareDevice: true });
   // ...and soon after the list changes (only when it's different from what this PC last sent)
+  usage = usageCounts.createUsageCounts({ store, config: () => on.config(), fetchFn: (u, o) => net.fetch(u, o), isDemo: demoOn, packaged: app.isPackaged,
+    appVersion: app.getVersion(), osVersion: process.platform === 'win32' ? `Windows ${os.release()}` : `${os.type()} ${os.release()}`,
+    readCompany: () => online.readCompany(appData), firstKind: usageFirst,
+    link: async (id, ws) => { if (!on.session) return false; await on.rpc('install_link', { install_id: id, ws }); return true; } });
+  setTimeout(usageTick, 45 * 1000); setInterval(usageTick, 6 * 3600 * 1000);
+  handle('central:usageGet', () => ({ on: usage.enabled() }));
+  handle('central:usageSet', (onOff) => { const v = usage.setEnabled(!!onOff); if (v) usageTick(); return { on: v }; });
   reportProgramsNow = () => {
+    usageTick();   // a program added or updated: counted too (only when it's new)
     const c = online.readCompany(appData);
     return c && c.mode === 'online' && c.workspace_id ? on.reportPrograms(c.workspace_id, { onlyIfChanged: true }) : null;
   };
@@ -768,6 +780,8 @@ app.whenReady().then(async () => {
     setTimeout(daily, 90 * 1000); setInterval(daily, 6 * 3600 * 1000);
   }
   store = new Store(path.join(app.getPath('userData'), 'data'));
+  // before anything is written on this start: a PC that had Central before usage counts is "existing", not "new"
+  try { usageFirst = usageCounts.hadCentralBefore(store) ? 'existing' : 'new'; } catch { /* new */ }
   // Used by the Windows build check: write what Central can see, then quit.
   const selfTest = process.argv.find((a) => a.startsWith('--self-test='));
   if (selfTest) {

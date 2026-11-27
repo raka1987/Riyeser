@@ -148,7 +148,7 @@
         try { return await rpc('hq_audit_search', { who: f.who || null, action_like: f.action || null, ws: f.ws || null, from_day: f.from || null, to_day: f.to || null, for_export: !!f.exp }); }
         catch (e) { if (!missing(e) || f.exp) throw e; return rpc('hq_history'); }
       },
-      downloadsDaily: (days) => rpc('hq_downloads', { days }),
+      downloadsDaily: (days) => rpc('hq_downloads', { days }), realDownloads: (days) => rpc('hq_real_downloads', { days }),
       licences: () => rpc('hq_licences'), companyLicence: (ws) => rpc('hq_company_licence', { ws }),
       licenceBusinesses: (mod, st) => rpc('hq_licence_businesses', { mod, st }),
       setModule: (ws, mod, status, trialEnd, paidTo) => rpc('hq_set_module', { ws, mod, new_status: status, trial_end: trialEnd || null, paid_to: paidTo || null }),
@@ -477,6 +477,25 @@
           && (!f.from || x.at.slice(0, 10) >= f.from) && (!f.to || x.at.slice(0, 10) <= f.to)).map((x) => ({ ...x, business: (cos.find((c) => c.id === x.workspace_id) || {}).name }));
         if (f.exp) log('audit.exported', { who: f.who || null, action: f.action || null }); return rows; },
       async downloadsDaily() { return daily; },
+      // Real downloads and installs, made up: a steady pattern growing over time, quieter at weekends
+      async realDownloads(days) { need('downloads.view'); const n = Math.min(365, Math.max(7, Number(days) || 30)); const rnd = (k) => ((k * 9301 + 49297) % 233280) / 233280;
+        const PR = [['central', 0.46], ['accounting-basics', 0.12], ['pos', 0.1], ['invoices', 0.09], ['payroll', 0.07], ['documents', 0.05], ['pdf', 0.04], ['bookings', 0.03], ['link-office', 0.02], ['estimate', 0.02]];
+        const end = Date.parse(iso(Date.now()) + 'T00:00:00Z'); const series = []; const ps = []; const per = {}; let real = 0; let inst = 0; let upd = 0;
+        for (let i = n - 1; i >= 0; i--) { const t = end - i * 864e5; const k = Math.floor(t / 864e5); const wd = new Date(t).getUTCDay(); const age = (Date.now() - t) / 864e5;
+          const tot = Math.max(0, Math.round((22 + (120 - age) * 0.08) * (wd === 0 ? 0.5 : wd === 6 ? 0.7 : 1) * (0.75 + rnd(k) * 0.5)));
+          let left = tot; PR.forEach(([id, f], j) => { const v = j === PR.length - 1 ? left : Math.min(left, Math.round(tot * f * (0.8 + rnd(k + j) * 0.4))); left -= v; if (v) { ps.push({ program: id, d: iso(t), real: v }); per[id] = (per[id] || 0) + v; } });
+          const ni = Math.round(tot * (0.62 + rnd(k + 3) * 0.12)); const nu = Math.round(6 + rnd(k + 5) * 10 + (k % 14 === 0 ? 40 : 0));
+          series.push({ d: iso(t), real: tot, installs: ni, updates: nu }); real += tot; inst += ni; upd += nu; }
+        const share = (list) => list.map(([k, f]) => ({ k, v: Math.round(real * f) }));
+        return { from: series[0].d, to: series[series.length - 1].d, days: n, real, raw: Math.round(real * 1.62),
+          hidden: { tests: Math.round(real * 0.21), staff: Math.round(real * 0.04), bots: Math.round(real * 0.26), repeats: Math.round(real * 0.11), install_tests: 14 },
+          installs: { new: inst, existing: 38, updates: upd, added: Math.round(inst * 0.7), linked: Math.round(inst * 0.41) }, series, program_series: ps,
+          programs: PR.map(([id]) => ({ program: id, real: per[id] || 0, raw: Math.round((per[id] || 0) * 1.6), installs: id === 'central' ? inst : Math.round((per[id] || 0) * 0.8), updates: Math.round(upd * (id === 'central' ? 0.4 : 0.6 * PR.find((x) => x[0] === id)[1])) })),
+          countries: share([['FJ', 0.49], ['AU', 0.17], ['NZ', 0.1], ['WS', 0.05], ['TO', 0.04], ['PG', 0.03], ['VU', 0.02], ['US', 0.02], ['IN', 0.02], ['', 0.06]]).map((x) => ({ country: x.k, real: x.v })),
+          referrers: share([['/downloads', 0.34], ['/', 0.22], ['/programs/central', 0.1], ['/programs/accounting-basics', 0.07], ['/programs/pos', 0.06], ['/pricing', 0.05], ['/help/start', 0.04], ['google.com', 0.05], ['facebook.com', 0.03], ['', 0.04]]).map((x) => ({ referrer: x.k, real: x.v })),
+          releases: [{ tag: 'riyeser-2026.11.27-60', real: Math.round(real * 0.38) }, { tag: 'riyeser-2026.11.24-58', real: Math.round(real * 0.33) }, { tag: 'riyeser-2026.11.18-55', real: Math.round(real * 0.29) }],
+          install_countries: [['Fiji', 0.31], ['Australia', 0.08], ['New Zealand', 0.05], ['', 0.56]].map(([country, f]) => ({ country, n: Math.round(inst * f) })),
+          central_versions: [{ version: '1.9.0', n: Math.round(inst * 0.7) }, { version: '1.8.4', n: Math.round(inst * 0.3) }] }; },
       async licences() { const list = cos.map((c) => ({ c, l: demoLicence(c.id) }));
         const ending = []; list.forEach(({ c, l }) => Object.entries(l.modules).forEach(([m, v]) => { if (v.days_left != null && v.days_left <= 14) ending.push({ id: c.id, name: c.name, company_code: c.company_code, module: m, status: v.status, days_left: v.days_left }); }));
         return { monthly_estimate: list.reduce((a, x) => a + demoMonthly(x.c.id), 0), paying_companies: list.filter((x) => demoMonthly(x.c.id) > 0).length,
@@ -2473,9 +2492,75 @@
     });
   }
 
-  // ------------------------------------------------------------------ downloads
+  // ------------------------------------------------------------------ downloads (downloads.view): real downloads and installs
+  // Real downloads come from riyeser.com's Download buttons (the "download" function: robots, tests and HQ staff left out,
+  // one person counted once a day per program); installs from Riyeser Central's anonymous counts. GitHub's own totals
+  // (which include our CI, update checks and robots) are kept in the collapsed "Raw GitHub counts" section.
+  const DL_STAFF_KEY = 'riyeser-hq-nocount';   // the website's download page reads it (build.mjs, STAFF_KEY)
+  const DL_PROG = { central: 'Riyeser Central', documents: 'Riyeser Documents', desk: 'Riyeser Documents', pdf: 'PDF', payroll: 'Payroll', services: 'As Built',
+    'accounting-basics': 'Accounting Basics', accounting: 'Accounting Plus', pos: 'POS', invoices: 'Invoices', bookings: 'Bookings', estimate: 'Estimate',
+    link: 'Riyeser Link', team: 'Riyeser Link', 'link-office': 'Link Office', linkoffice: 'Link Office' };
+  const dlProg = (id) => DL_PROG[id] || id;
+  const dlCountry = (() => { let dn = null; try { dn = new Intl.DisplayNames([navigator.language || 'en'], { type: 'region' }); } catch { /* old browser */ }
+    return (c) => (!c ? 'Not known' : (dn && /^[A-Z]{2}$/.test(c) ? dn.of(c) : c)); })();
+  const dlFrom = (r) => { if (!r) return 'Not known (direct link or no JavaScript)'; if (!r.startsWith('/')) return r;
+    const pg = pageName(r); if (pg) return `${pg} page`; const m = /^\/(programs|help|industries)\/(.+)$/.exec(r);
+    const t = m ? `${m[1] === 'programs' ? dlProg(m[2]) : m[2].replace(/-/g, ' ')} ${m[1] === 'help' ? 'guide' : 'page'}` : r; return t.charAt(0).toUpperCase() + t.slice(1); };
+  const staffNoCount = () => { try { return localStorage.getItem(DL_STAFF_KEY) === '1'; } catch { return false; } };
   async function downloads() {
-    const m = main('<h2>Downloads</h2><p class="sub">Installer downloads from riyeser.com and Riyeser Central (from GitHub releases).</p><div id="dl"><p class="muted">Loading…</p></div>');
+    S.dl = S.dl || { r: 30, p: '' }; const st = S.dl;
+    const m = main(`<h2>Downloads</h2><p class="sub">Real downloads from riyeser.com and installs reported by Riyeser Central. Robots, tests and Riyeser staff are left out, and one person downloading a program twice in a day counts once.</p>
+      <div class="trbar"><div class="chips" id="dlr">${[[30, 'Last 30 days'], [90, 'Last 90 days']].map(([k, l]) => `<button class="chip${st.r === k ? ' on' : ''}" data-dlr="${k}">${l}</button>`).join('')}</div>
+        <span class="muted small" id="dldates"></span>
+        <label class="dlstaff" title="Downloads you start from riyeser.com in this browser are marked staff and left out"><input type="checkbox" id="dlstaff"${staffNoCount() ? ' checked' : ''}> Don’t count downloads from this browser</label></div>
+      <div id="dl"><p class="muted">Loading…</p></div>
+      <details class="card dlraw" id="dlraw"><summary><b>Raw GitHub counts</b> <span class="muted small">(include tests and update checks)</span></summary><div id="dlrawb"><p class="muted small">Opening…</p></div></details>`);
+    m.querySelectorAll('[data-dlr]').forEach((b) => b.onclick = () => { st.r = Number(b.dataset.dlr); downloads(); });
+    m.querySelector('#dlstaff').onchange = (e) => { try { if (e.target.checked) localStorage.setItem(DL_STAFF_KEY, '1'); else localStorage.removeItem(DL_STAFF_KEY); } catch { /* private window */ }
+      flash(e.target.checked ? 'Downloads from this browser are now marked staff and left out.' : 'Downloads from this browser count again.'); };
+    m.querySelector('#dlraw').addEventListener('toggle', (e) => { if (e.target.open && !e.target.dataset.done) { e.target.dataset.done = '1'; rawGithub(m.querySelector('#dlrawb')); } });
+    let r = null;
+    try { r = await api.realDownloads(st.r); } catch (e) {
+      if (!missing(e)) throw e;
+      m.querySelector('#dl').innerHTML = '<div class="banner est">Real download counts need the latest team-chat.sql: run “Update the Riyeser Link database”, then “Deploy download counter” and “Publish website” (ops/RUNBOOK.md). GitHub’s raw counts are below.</div>';
+      return;
+    }
+    m.querySelector('#dldates').textContent = `${day(r.from)} to ${day(r.to)}`;
+    const H = r.hidden || {}; const I = r.installs || {};
+    const merge = (rows, key, val) => Object.values(rows.reduce((a, x) => { const k = key(x); const o = a[k] = a[k] || { k, v: 0 }; o.v += Number(val(x) || 0); return a; }, {})).sort((a, b) => b.v - a.v);
+    // programs: website ids and Central's ids for the same program are one row
+    const progs = Object.values((r.programs || []).reduce((a, x) => { const k = dlProg(x.program); const o = a[k] = a[k] || { name: k, ids: [], real: 0, raw: 0, installs: 0, updates: 0 };
+      o.ids.push(x.program); ['real', 'raw', 'installs', 'updates'].forEach((f) => { o[f] += Number(x[f] || 0); }); return a; }, {})).sort((a, b) => b.real - a.real || b.installs - a.installs);
+    const pick = progs.find((p) => p.name === st.p);
+    const seriesOf = () => { if (!pick) return (r.series || []).map((x) => ({ ...x, visits: Number(x.real) }));
+      const per = {}; (r.program_series || []).filter((x) => pick.ids.includes(x.program)).forEach((x) => { per[x.d] = (per[x.d] || 0) + Number(x.real); });
+      return (r.series || []).map((x) => ({ d: x.d, visits: per[x.d] || 0, real: per[x.d] || 0, prog: true })); };
+    const series = seriesOf(); const lbl = (x) => new Date(x.d + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    const box = (id, title, sub, body, cls = '') => `<div class="card trcard${cls ? ' ' + cls : ''}" id="${id}"><h3>${title}${sub ? ` <small>· ${sub}</small>` : ''}</h3>${body}</div>`;
+    const empty = !Number(r.raw) && !Number(I.new) && !Number(I.existing);
+    m.querySelector('#dl').innerHTML = `
+      ${empty ? '<div class="banner est">Nothing counted in these dates yet. Downloads count once the website is published with the download counter; installs once PCs run the new Riyeser Central.</div>' : ''}
+      <div class="tiles trtiles dltiles">${tile('Real downloads', num(r.real), 'one person, one program, once a day')}
+        ${tile('New installs', num(I.new), `${num(I.existing)} PC${Number(I.existing) === 1 ? '' : 's'} already had Central · ${num(I.linked)} linked to a business`)}
+        ${tile('Updates', num(I.updates), `${num(I.added)} program${Number(I.added) === 1 ? '' : 's'} added to a PC`)}
+        ${tile('Downloads per install', Number(I.new) ? (Number(r.real) / Number(I.new)).toFixed(1) : '—', 'real downloads ÷ new installs')}</div>
+      <p class="dlhidden small" id="dlhidden">Hidden: tests ${num(H.tests)}, staff ${num(H.staff)}, bots ${num(H.bots)} · repeat downloads ${num(H.repeats)} · test installs ${num(H.install_tests)} <span class="muted">(${num(r.raw)} clicks in all)</span></p>
+      ${box('dlChart', `Real downloads per day${pick ? ` · ${esc(pick.name)}` : ''}`, `${day(r.from)} to ${day(r.to)}`,
+        `<div class="chips dlprogs" id="dlp"><button class="chip${pick ? '' : ' on'}" data-dlp="">All programs</button>${progs.filter((p) => p.real).map((p) => `<button class="chip${pick && pick.name === p.name ? ' on' : ''}" data-dlp="${esc(p.name)}">${esc(p.name)} <b>${num(p.real)}</b></button>`).join('')}</div>${lineChart(series, lbl)}`, 'wide')}
+      <div class="grid g2 trg">
+        ${box('dlProgs', 'By program', 'in these dates', progs.length ? `<div class="scroll"><table class="tbl rtbl"><tr><th>Program</th><th class="n">Real downloads</th><th class="n">New installs</th><th class="n">Updates</th><th class="n">All clicks</th></tr>
+          ${progs.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td class="n">${num(p.real)}</td><td class="n">${num(p.installs)}</td><td class="n">${num(p.updates)}</td><td class="n muted">${num(p.raw)}</td></tr>`).join('')}</table></div>` : '<p class="muted small">Nothing yet.</p>')}
+        ${box('dlCountries', 'By country', 'real downloads', barList(merge(r.countries || [], (x) => dlCountry(x.country), (x) => x.real).slice(0, 10), (x) => x.k, (x) => x.v))}</div>
+      <div class="grid g3 trg dlg3">
+        ${box('dlFrom', 'Where the button was', 'real downloads', barList(merge(r.referrers || [], (x) => dlFrom(x.referrer), (x) => x.real).slice(0, 10), (x) => x.k, (x) => x.v))}
+        ${box('dlRel', 'By release', 'real downloads', barList((r.releases || []).slice(0, 8).map((x) => ({ k: x.tag ? x.tag.replace(/^riyeser-/, '') : 'Not known', v: Number(x.real) })), (x) => x.k, (x) => x.v))}
+        ${box('dlInst', 'New installs by country', 'from the linked business', barList(merge(r.install_countries || [], (x) => x.country || 'Not linked yet', (x) => x.n).slice(0, 8), (x) => x.k, (x) => x.v))}</div>
+      <p class="privacy trpriv"><b>How it’s counted:</b> each click on a riyeser.com Download button is one note: the program, the release, a country (from the network, or the browser’s time zone), the page the button was on, and a code made from the internet address and browser that changes every day, so a repeat download the same day counts once and nobody can be followed from day to day. No IP addresses or browser details are kept. Robots, our tests and CI, and browsers with “Don’t count downloads from this browser” ticked are counted separately and left out. Installs come from Riyeser Central (anonymous, and each PC can turn it off in Settings). Demo mode and our test PCs are left out.</p>`;
+    m.querySelectorAll('[data-dlp]').forEach((b) => b.onclick = () => { st.p = b.dataset.dlp; downloads(); });
+    wireLineChart(m.querySelector('#dlChart'), series, (x) => `<b>${esc(day(x.d))}</b><span>${num(x.real)} real downloads</span>${x.prog ? '' : `<span>${num(x.installs)} new installs · ${num(x.updates)} updates</span>`}`);
+  }
+  // GitHub's own totals: every installer download, including our CI runs, Central's update downloads and robots.
+  async function rawGithub(el) {
     let releases = [];
     try { for (let page = 1; page <= 3; page++) { const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}`); if (!r.ok) break;
         const batch = await r.json(); releases = releases.concat(batch); if (batch.length < 100) break; } } catch { /* offline: show what we have */ }
@@ -2485,15 +2570,16 @@
       byRelease.push({ tag: rel.tag_name, when: rel.published_at, total: tot }); }
     const prod = Object.entries(byProduct).map(([name, n]) => ({ name, n })).sort((a, b) => b.n - a.n);
     const total = prod.reduce((a, b) => a + b.n, 0);
-    // Daily trend from HQ's saved totals: downloads each day = today's total minus yesterday's.
+    // Daily trend from HQ's saved totals (hq-downloads.yml): downloads each day = today's total minus yesterday's.
     let trend = [];
     try { const rows = await api.downloadsDaily(60); const perDay = {}; rows.forEach((r) => { perDay[r.day] = (perDay[r.day] || 0) + Number(r.total); });
       const days = Object.keys(perDay).sort(); trend = days.slice(1).map((d, i) => ({ day: d, n: Math.max(0, perDay[d] - perDay[days[i]]) })); } catch { /* no saved totals yet */ }
-    m.querySelector('#dl').innerHTML = `<div class="tiles">${tile('All downloads', num(total), `${releases.length} releases`)}${tile('Riyeser Central', num(byProduct['Riyeser Central']), 'the first install')}
+    el.innerHTML = `<p class="muted small">Straight from GitHub: every download of an installer file, including our own build and test runs, Riyeser Central downloading updates, and robots. Use the numbers above for real downloads.</p>
+      <div class="tiles">${tile('All GitHub downloads', num(total), `${releases.length} releases`)}${tile('Riyeser Central', num(byProduct['Riyeser Central']), 'GitHub total')}
         ${tile('Latest release', esc(byRelease[0] ? byRelease[0].tag.replace('riyeser-', '') : '—'), byRelease[0] ? `${num(byRelease[0].total)} downloads · ${day(byRelease[0].when)}` : '')}${tile('Programs', num(prod.length), 'with downloads')}</div>
       <div class="grid g2"><div class="card"><h3>By program <small>· all time</small></h3>${barList(prod, (r) => r.name, (r) => r.n)}</div>
-        <div class="card"><h3>Downloads per day <small>· from HQ's daily counts</small></h3>${trend.length ? columnChart(trend.slice(-30), (r) => new Date(r.day).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }), (r) => r.n, 'downloads')
-          : '<p class="muted small">Starts once the daily download job is set up (see ops/RUNBOOK.md). Totals on the left are live.</p>'}</div></div>
+        <div class="card"><h3>GitHub downloads per day <small>· from HQ's daily counts</small></h3>${trend.length ? columnChart(trend.slice(-30), (r) => new Date(r.day).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }), (r) => r.n, 'downloads')
+          : '<p class="muted small">Starts the day after the daily “HQ download counts” job first runs.</p>'}</div></div>
       <div class="card scroll" style="margin-top:14px"><h3>By release</h3><table class="tbl"><tr><th>Release</th><th>Published</th><th class="n">Downloads</th></tr>
         ${byRelease.slice(0, 15).map((r) => `<tr><td class="code">${esc(r.tag)}</td><td>${day(r.when)}</td><td class="n">${num(r.total)}</td></tr>`).join('')}</table></div>`;
   }

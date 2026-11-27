@@ -4353,6 +4353,107 @@ set role anon;
 do $$ declare ts bigint := floor(extract(epoch from now())); begin
   assert jsonb_array_length(public.relay_sync('syd1', ts, encode(hmac(('syd1|' || ts)::text, 'test-relay-secret-0123456789abcdef0123456789', 'sha256'), 'hex'), '{}') -> 'businesses') = 0, 'switched off: not in the plan';
 end $$;
+
+select set_config('test.ws_a', :'ws_a', false);
+-- ===== Real downloads and installs: only the download function (service role) records a download, anyone may send an
+-- install note through track_install, only members link an install to their business, only HQ (downloads.view) reads them
+reset role; set role anon; select pg_temp.as_user('');
+do $$ begin
+  begin perform public.record_download('central', 'riyeser-1', 'FJ', '/', repeat('a', 32), 'Chrome', true, false, false, false); raise exception 'anon recorded a download';
+  exception when insufficient_privilege then null; end;
+  begin perform count(*) from public.download_events; raise exception 'anon read download_events';
+  exception when insufficient_privilege then null; end;
+  begin insert into public.install_events (install_id, kind) values (gen_random_uuid(), 'new'); raise exception 'anon inserted an install directly';
+  exception when insufficient_privilege then null; end;
+  begin perform public.hq_real_downloads(30); raise exception 'anon read the counts';
+  exception when insufficient_privilege then null; end;
+  begin perform public.hq_save_download_totals('{"a.exe": 1}'); raise exception 'anon saved totals';
+  exception when insufficient_privilege then null; end;
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000001', 'new', '', array['central', 'pos', 'POS', 'bad id!'], '1.9.0', 'Windows 11', 'Fiji', false) = 'ok', 'a new install';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000001', 'new', '', array['central'], '1.9.0', 'Windows 11', 'Fiji', false) = 'already', 'sent twice: counted once';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000001', 'existing', '', array['central'], '1.9.0', 'Windows 11', 'Fiji', false) = 'already', 'new, then existing: still once';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000001', 'update', 'pos@1.4.2', '{}', '1.9.0', 'Windows 11', null, false) = 'ok', 'an update';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000001', 'update', 'pos@1.4.2', '{}', '1.9.0', 'Windows 11', null, false) = 'already', 'the same update twice';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000001', 'add', 'invoices', '{}', '1.9.0', 'Windows 11', null, false) = 'ok', 'a program added';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000002', 'existing', '', array['central'], '1.8.0', 'Windows 10', null, false) = 'ok', 'a PC that had Central before counting began';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000003', 'new', '', array['central'], '1.9.0', 'Windows 11', null, true) = 'ok', 'a test install (demo or CI)';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000004', 'update', 'not a program', '{}') = 'ignored', 'a bad update detail is ignored';
+  assert public.track_install('0d0d0d0d-0000-4000-8000-000000000004', 'deleted', '', '{}') = 'ignored', 'an unknown kind is ignored';
+  assert public.track_install(null, 'new', '', '{}') = 'ignored', 'no install id';
+  begin perform public.install_link('0d0d0d0d-0000-4000-8000-000000000001', current_setting('test.ws_a')::uuid); raise exception 'anon linked an install';
+  exception when insufficient_privilege then null; end;
+end $$;
+do $$ begin for i in 1..60 loop perform public.track_install('0d0d0d0d-0000-4000-8000-000000000005', 'add', 'p' || i, '{}'); end loop; end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.install_events where install_id = '0d0d0d0d-0000-4000-8000-000000000005') = 50, 'at most 50 notes an install a day';
+  assert (select programs from public.install_events where install_id = '0d0d0d0d-0000-4000-8000-000000000001' and kind = 'new') = array['central', 'pos'], 'programs tidied';
+  assert (select country from public.install_events where install_id = '0d0d0d0d-0000-4000-8000-000000000001' and kind = 'new') = 'Fiji', 'the business''s country';
+  assert not exists (select 1 from information_schema.columns where table_name in ('download_events', 'install_events') and column_name ~ 'ip|agent|user|device|email'), 'no IP, browser details, user or device columns';
+end $$;
+delete from public.install_events where install_id = '0d0d0d0d-0000-4000-8000-000000000005';
+-- the download function's calls (as the service role)
+set role service_role;
+do $$ begin
+  assert public.record_download('central', 'riyeser-2026.11.27-60', 'fj', '/programs/central.html', repeat('a1', 16), 'Chrome', true, false, false, false) = 'ok', 'a download';
+  assert public.record_download('central', 'riyeser-2026.11.27-60', 'FJ', '/downloads', repeat('a1', 16), 'Chrome', true, false, false, false) = 'ok', 'the same person again (kept, counted once)';
+  assert public.record_download('pos', 'riyeser-2026.11.27-60', 'AU', 'www.Google.com', repeat('b2', 16), 'Safari', true, false, false, false) = 'ok', 'another person, from Google';
+  assert public.record_download('pos', 'riyeser-2026.11.27-60', 'XX', 'riyeser.com', repeat('c3', 16), 'Other', false, true, false, false) = 'ok', 'a robot';
+  assert public.record_download('pos', 'bad tag <x>', null, 'https://evil.test/a', repeat('d4', 16), 'Netscape', true, false, true, false) = 'ok', 'a test';
+  assert public.record_download('central', null, null, '/wp-admin', repeat('e5', 16), null, true, false, false, true) = 'ok', 'staff';
+  assert public.record_download('Not A Program!', null, null, null, repeat('f6', 16), null, true, false, false, false) = 'ignored', 'a bad program';
+  assert public.record_download('central', null, null, null, 'raw 1.2.3.4', null, true, false, false, false) = 'ignored', 'never a raw address';
+  for i in 1..40 loop perform public.record_download('central', null, null, null, repeat('99', 16), null, true, false, false, false); end loop;
+  begin perform public.hq_real_downloads(30); raise exception 'the service role read the counts';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%' or sqlstate = '42501', sqlerrm; end;
+end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.download_events where visitor = repeat('99', 16)) = 30, 'at most 30 a visitor an hour';
+  assert (select country || ' ' || referrer from public.download_events where visitor = repeat('a1', 16) order by id limit 1) = 'FJ /programs/central', 'country upper case, page tidied';
+  assert (select referrer from public.download_events where visitor = repeat('b2', 16)) = 'google.com', 'another website: its name only';
+  assert (select row(country, referrer, browser)::text from public.download_events where visitor = repeat('c3', 16)) = '(,,Other)', 'unknown country and our own site dropped';
+  assert (select row(release_tag, referrer, browser)::text from public.download_events where visitor = repeat('d4', 16)) = '(,,)', 'bad values dropped';
+end $$;
+-- linking: only a member of that business, and only installs not linked yet
+select pg_temp.as_user('33333333-3333-3333-3333-333333333333'); set role authenticated;
+do $$ begin begin perform public.install_link('0d0d0d0d-0000-4000-8000-000000000001', current_setting('test.ws_a')::uuid); raise exception 'another business linked an install';
+  exception when others then assert sqlerrm like 'You''re not in this business%', sqlerrm; end; end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin
+  assert public.install_link('0d0d0d0d-0000-4000-8000-000000000001', current_setting('test.ws_a')::uuid) = 3, 'the install''s notes are tied to the business';
+  assert public.install_link('0d0d0d0d-0000-4000-8000-000000000001', current_setting('test.ws_a')::uuid) = 0, 'once';
+  begin perform public.hq_real_downloads(30); raise exception 'a customer read the counts';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for%', sqlerrm; end;
+  begin perform count(*) from public.install_events; raise exception 'a customer read install_events';
+  exception when insufficient_privilege then null; end;
+end $$;
+-- HQ (support has downloads.view)
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+do $$ declare r json; p json; begin
+  r := public.hq_real_downloads(30);
+  assert (r ->> 'real')::int = 3, format('real: a1 once for central, b2 for pos, 99 once: %s', r ->> 'real');
+  assert (r ->> 'raw')::int = 36, format('raw: %s', r ->> 'raw');
+  assert (r -> 'hidden' ->> 'tests')::int = 1 and (r -> 'hidden' ->> 'staff')::int = 1 and (r -> 'hidden' ->> 'bots')::int = 1, format('hidden: %s', r -> 'hidden');
+  assert (r -> 'hidden' ->> 'repeats')::int = 30, format('repeats: %s', r -> 'hidden');
+  assert (r -> 'installs' ->> 'new')::int = 1 and (r -> 'installs' ->> 'existing')::int = 1 and (r -> 'installs' ->> 'updates')::int = 1
+    and (r -> 'installs' ->> 'added')::int = 1 and (r -> 'installs' ->> 'linked')::int = 1 and (r -> 'hidden' ->> 'install_tests')::int = 1, format('installs: %s', r -> 'installs');
+  assert json_array_length(r -> 'series') = 30 and ((r -> 'series' -> 29) ->> 'real')::int = 3, 'a day each, today has 3';
+  select x into p from json_array_elements(r -> 'programs') x where x ->> 'program' = 'pos';
+  assert (p ->> 'real')::int = 1 and (p ->> 'raw')::int = 3 and (p ->> 'installs')::int = 1 and (p ->> 'updates')::int = 1, format('pos: %s', p);
+  assert exists (select 1 from json_array_elements(r -> 'countries') x where x ->> 'country' = 'FJ' and (x ->> 'real')::int = 1), 'by country';
+  assert exists (select 1 from json_array_elements(r -> 'referrers') x where x ->> 'referrer' = 'google.com'), 'by page or website';
+  assert exists (select 1 from json_array_elements(r -> 'program_series') x where x ->> 'program' = 'central'), 'per program per day';
+  assert (public.hq_real_downloads(5000) ->> 'days')::int = 365 and (public.hq_real_downloads(1) ->> 'days')::int = 7, 'ranges kept to 7..365 days';
+  begin perform count(*) from public.download_events; raise exception 'HQ read the raw table';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+do $$ begin
+  assert public.hq_save_download_totals('{"RiyeserCentral-Setup.exe": 120, "bad": "x"}') = 1, 'the daily job saves GitHub totals (owner only)';
+  assert (select total from public.downloads_daily where asset = 'RiyeserCentral-Setup.exe' and day = current_date) = 120, 'saved';
+end $$;
+select 'real downloads ok' as downloads;
 reset role;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';

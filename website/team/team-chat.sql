@@ -8444,3 +8444,180 @@ revoke all on function public.link_relay_config(uuid), public.link_relay_set(uui
 grant execute on function public.link_relay_config(uuid), public.link_relay_set(uuid, boolean, text[]), public.link_relay_token(uuid, text),
   public.link_relay_report(uuid, text, jsonb), public.link_relay_revoke(uuid, text, boolean), public.link_relay_turn(uuid),
   public.link_relay_device_add(uuid, text, text), public.link_relay_device_remove(uuid, uuid), public.link_relay_status(uuid) to authenticated;
+
+
+-- ================================================================ Real downloads and installs (HQ → Downloads)
+-- GitHub's own download counts include our CI runs fetching every installer, our own PCs, Central's update checks and
+-- robots. These count what's real:
+--  * download_events: one row per click on a riyeser.com Download button. The website's buttons go to
+--    riyeser.com/download/<program>.html, which hands off to the "download" Edge Function (supabase/functions/download on
+--    main); it calls record_download (service role only) and sends the browser on to the GitHub file. Kept: when, the
+--    program, the release, a country (from the network or the browser's time zone), the page the button was on, and a
+--    salted hash of the internet address and browser that changes every day (so one person downloading twice in a day
+--    counts once, and nothing follows anyone from one day to the next). Never the address or browser details themselves.
+--    Flags: bot (robot browsers, no JavaScript and no browser), test (CI, our test header), staff (HQ's "Don't count
+--    downloads from this browser").
+--  * install_events: Riyeser Central sends one anonymous note when it first runs on a PC ("new"; "existing" for a PC that
+--    already had Central before counting began), when a program is added ("add") and when one updates ("update").
+--    A random install id made on the PC, the programs, Central's and Windows' versions and the business's country if the
+--    PC is linked. Demo mode, CI and developer copies are marked test. Central's Settings → "Send anonymous usage
+--    counts" turns it off. When the PC links to a business later, install_link ties the id to it (counted once already).
+-- Read only by HQ staff with downloads.view through hq_real_downloads().
+create table if not exists public.download_events (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  program text not null check (program ~ '^[a-z0-9-]{1,40}$'),
+  release_tag text check (length(release_tag) <= 80),
+  country text check (country ~ '^[A-Z]{2}$'),
+  referrer text check (length(referrer) <= 100),
+  visitor text not null check (visitor ~ '^[0-9a-f]{16,64}$'),
+  browser text check (length(browser) <= 20),
+  js boolean not null default false,
+  bot boolean not null default false,
+  test boolean not null default false,
+  staff boolean not null default false
+);
+create index if not exists download_events_at on public.download_events (at);
+create index if not exists download_events_visitor on public.download_events (visitor, at);
+create table if not exists public.install_events (
+  id bigint generated always as identity primary key,
+  at timestamptz not null default now(),
+  install_id uuid not null,
+  kind text not null check (kind in ('new', 'existing', 'add', 'update')),
+  detail text not null default '' check (length(detail) <= 80),      -- 'pos' (add) or 'pos@1.4.2' (update)
+  programs text[] not null default '{}',
+  central_version text check (length(central_version) <= 40),
+  os_version text check (length(os_version) <= 60),
+  country text check (length(country) <= 40),
+  test boolean not null default false,
+  workspace_id uuid,                                                -- no foreign key: the count outlives the business
+  linked_at timestamptz
+);
+create unique index if not exists install_events_once on public.install_events (install_id, kind, detail);
+create index if not exists install_events_at on public.install_events (at);
+alter table public.download_events enable row level security;
+alter table public.install_events enable row level security;
+revoke all on public.download_events, public.install_events from public, anon, authenticated;
+-- (no policies: writing goes through record_download / track_install / install_link, reading through hq_real_downloads)
+
+-- One download, from the "download" Edge Function (the service role). Values are tidied; anything odd is dropped.
+-- At most 30 a visitor an hour are kept (the download itself still happens). Returns 'ok', 'limited' or 'ignored'.
+create or replace function public.record_download(program text, release_tag text, country text, referrer text, visitor text,
+  browser text, js boolean, bot boolean, test boolean, staff boolean) returns text
+  language plpgsql security definer set search_path = public as $$
+declare p text := lower(left(coalesce(program, ''), 40)); v text := lower(left(coalesce(visitor, ''), 64));
+  ref text := lower(left(trim(coalesce(referrer, '')), 100));
+begin
+  if p !~ '^[a-z0-9-]{1,40}$' or v !~ '^[0-9a-f]{16,64}$' then return 'ignored'; end if;
+  if (select count(*) from (select 1 from download_events d where d.visitor = v and d.at > now() - interval '1 hour' limit 30) c) >= 30 then return 'limited'; end if;
+  -- a website page ('/programs/pos') or another website's name ('google.com'); nothing else
+  ref := case when ref ~ '^/' then site_visit_path(ref)
+              when ref ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' and ref !~ '(^|\.)riyeser\.com$' then regexp_replace(ref, '^www\.', '') end;
+  insert into download_events (program, release_tag, country, referrer, visitor, browser, js, bot, test, staff)
+  values (p, case when release_tag ~ '^[A-Za-z0-9._-]{1,80}$' then release_tag end, case when upper(country) ~ '^[A-Z]{2}$' and upper(country) not in ('XX', 'T1') then upper(country) end,
+    ref, v, case when browser in ('Chrome', 'Safari', 'Firefox', 'Edge', 'Opera', 'Samsung', 'Other') then browser end,
+    coalesce(js, false), coalesce(bot, false), coalesce(test, false), coalesce(staff, false));
+  return 'ok';
+end $$;
+
+-- One note from Riyeser Central (anonymous: the publishable key, no sign-in). The same note twice counts once.
+-- At most 50 notes an install id a day. Returns 'ok', 'already' or 'ignored'.
+create or replace function public.track_install(install_id uuid, kind text, detail text default '', programs text[] default '{}',
+  central_version text default null, os_version text default null, country text default null, test boolean default false) returns text
+  language plpgsql security definer set search_path = public as $$
+declare d text := lower(left(coalesce(detail, ''), 80)); n int;
+begin
+  if install_id is null or kind not in ('new', 'existing', 'add', 'update') then return 'ignored'; end if;
+  if kind in ('new', 'existing') then d := '';
+  elsif kind = 'add' and d !~ '^[a-z0-9-]{1,40}$' then return 'ignored';
+  elsif kind = 'update' and d !~ '^[a-z0-9-]{1,40}@[0-9][0-9a-z.+-]{0,30}$' then return 'ignored'; end if;
+  -- a PC is new once: a later "existing" from the same PC (or the other way round) isn't counted again
+  if kind in ('new', 'existing') and exists (select 1 from install_events e where e.install_id = track_install.install_id and e.kind in ('new', 'existing')) then return 'already'; end if;
+  if (select count(*) from (select 1 from install_events e where e.install_id = track_install.install_id and e.at > now() - interval '1 day' limit 50) c) >= 50 then return 'ignored'; end if;
+  insert into install_events (install_id, kind, detail, programs, central_version, os_version, country, test)
+  values (install_id, kind, d,
+    (coalesce((select array_agg(distinct lower(x) order by lower(x)) from unnest(coalesce(programs, '{}')) x where lower(x) ~ '^[a-z0-9-]{1,40}$'), '{}'::text[]))[1:40],
+    site_visit_text(central_version, 40), site_visit_text(os_version, 60), site_visit_text(country, 40), coalesce(test, false))
+  on conflict do nothing;
+  get diagnostics n = row_count;
+  return case when n = 1 then 'ok' else 'already' end;
+end $$;
+
+-- Central, signed in, once the PC is linked to a business: ties this install id's notes to it (not counted again).
+create or replace function public.install_link(install_id uuid, ws uuid) returns int
+  language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if not public.is_member(ws) then raise exception 'You''re not in this business.'; end if;
+  update install_events e set workspace_id = ws, linked_at = now() where e.install_id = install_link.install_id and e.workspace_id is null;
+  get diagnostics n = row_count;
+  return n;
+end $$;
+
+-- HQ → Downloads (downloads.view): the last 7 to 365 days (UTC). "Real" downloads leave out bots, tests and staff, and
+-- count one person (the daily hash) once a day per program.
+create or replace function public.hq_real_downloads(days int) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare n int := least(greatest(coalesce(days, 30), 7), 365); utc_today date := (now() at time zone 'UTC')::date; f date; r json;
+begin
+  perform hq_need(array['downloads.view']);
+  f := utc_today - (n - 1);
+  with ev as (select e.*, (e.at at time zone 'UTC')::date as d from download_events e where e.at >= f::timestamp at time zone 'UTC'),
+    real as (select distinct on (d, visitor, program) d, visitor, program, country, referrer, release_tag from ev
+             where not bot and not test and not staff order by d, visitor, program, at),
+    ins as (select i.*, (i.at at time zone 'UTC')::date as d from install_events i where i.at >= f::timestamp at time zone 'UTC'),
+    days as (select g::date as d from generate_series(f, utc_today, interval '1 day') g)
+  select json_build_object('from', f, 'to', utc_today, 'days', n,
+    'real', (select count(*) from real),
+    'raw', (select count(*) from ev),
+    'hidden', json_build_object('tests', (select count(*) from ev where test), 'staff', (select count(*) from ev where staff and not test),
+      'bots', (select count(*) from ev where bot and not test and not staff),
+      'repeats', (select count(*) from ev where not bot and not test and not staff) - (select count(*) from real),
+      'install_tests', (select count(*) from ins where test)),
+    'installs', json_build_object('new', (select count(*) from ins where kind = 'new' and not test), 'existing', (select count(*) from ins where kind = 'existing' and not test),
+      'updates', (select count(*) from ins where kind = 'update' and not test), 'added', (select count(*) from ins where kind = 'add' and not test),
+      'linked', (select count(distinct install_id) from install_events where workspace_id is not null and not test and kind in ('new', 'existing') and at >= f::timestamp at time zone 'UTC')),
+    'series', (select coalesce(json_agg(json_build_object('d', x.d, 'real', (select count(*) from real r where r.d = x.d),
+        'installs', (select count(*) from ins i where i.d = x.d and i.kind = 'new' and not i.test),
+        'updates', (select count(*) from ins i where i.d = x.d and i.kind = 'update' and not i.test)) order by x.d), '[]') from days x),
+    'programs', (select coalesce(json_agg(p order by p.real desc, p.program), '[]') from (
+        select k.program, (select count(*) from real r where r.program = k.program) as real, (select count(*) from ev where ev.program = k.program) as raw,
+          (select count(*) from ins where not test and ((kind = 'new' and k.program = any(programs)) or (kind = 'add' and detail = k.program))) as installs,
+          (select count(*) from ins where not test and kind = 'update' and split_part(detail, '@', 1) = k.program) as updates
+        from (select program from ev union select unnest(programs) from ins where kind = 'new' union select split_part(detail, '@', 1) from ins where kind in ('add', 'update')) k
+        where k.program <> '') p),
+    'program_series', (select coalesce(json_agg(json_build_object('program', program, 'd', d, 'real', c) order by program, d), '[]')
+        from (select program, d, count(*) as c from real group by 1, 2) s),
+    'countries', (select coalesce(json_agg(c order by c.real desc), '[]') from (select coalesce(country, '') as country, count(*) as real from real group by 1) c),
+    'referrers', (select coalesce(json_agg(c order by c.real desc), '[]') from (select coalesce(referrer, '') as referrer, count(*) as real from real group by 1 order by 2 desc limit 20) c),
+    'releases', (select coalesce(json_agg(c order by c.real desc), '[]') from (select coalesce(release_tag, '') as tag, count(*) as real from real group by 1 order by 2 desc limit 10) c),
+    'install_countries', (select coalesce(json_agg(c order by c.n desc), '[]') from (select coalesce(country, '') as country, count(*) as n from ins where kind = 'new' and not test group by 1) c),
+    'central_versions', (select coalesce(json_agg(c order by c.n desc), '[]') from (select coalesce(central_version, '') as version, count(distinct install_id) as n from ins where not test group by 1 order by 2 desc limit 8) c)
+  ) into r;
+  return r;
+end $$;
+
+-- The daily "HQ download counts" job (.github/workflows/hq-downloads.yml) saves GitHub's raw totals with the database
+-- connection (TEAM_DB_URL), so it needs no token. Only the database owner can run this.
+create or replace function public.hq_save_download_totals(totals jsonb) returns int
+  language plpgsql security definer set search_path = public as $$
+declare n int := 0; k text;
+begin
+  for k in select jsonb_object_keys(totals) loop
+    if coalesce(totals ->> k, '') !~ '^\d{1,15}$' then continue; end if;
+    insert into downloads_daily (day, asset, total) values (current_date, left(k, 120), (totals ->> k)::bigint)
+      on conflict (day, asset) do update set total = excluded.total;
+    n := n + 1;
+  end loop;
+  -- raw rows are kept 3 years
+  delete from download_events where at < now() - interval '3 years';
+  delete from install_events where at < now() - interval '3 years' and kind in ('add', 'update');
+  return n;
+end $$;
+
+revoke all on function public.record_download(text, text, text, text, text, text, boolean, boolean, boolean, boolean),
+  public.track_install(uuid, text, text, text[], text, text, text, boolean), public.install_link(uuid, uuid),
+  public.hq_real_downloads(int), public.hq_save_download_totals(jsonb) from public, anon, authenticated;
+grant execute on function public.record_download(text, text, text, text, text, text, boolean, boolean, boolean, boolean) to service_role;
+grant execute on function public.track_install(uuid, text, text, text[], text, text, text, boolean) to anon, authenticated;
+grant execute on function public.install_link(uuid, uuid), public.hq_real_downloads(int) to authenticated;

@@ -493,6 +493,17 @@ main.wide { max-width: none; }
 .fnote { margin: 16px 0 0; line-height: 1.5; }
 .pth { font-weight: 600; color: var(--ink); } .tbl td .pn { display: inline; color: var(--muted); margin-left: 4px; }
 .trpriv { max-width: 860px; line-height: 1.55; margin: 22px 0 4px; } .trpriv b { color: var(--ink); }
+/* Downloads: real downloads and installs */
+.dlstaff { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+.dlstaff input { width: 15px; height: 15px; margin: 0; accent-color: var(--blue); }
+.dltiles { margin-bottom: 8px; }
+.dlhidden { margin: 0 0 16px; color: var(--muted); }
+.dlprogs { margin: -2px 0 10px; } .dlprogs .chip { padding: 4px 10px; font-size: 12.5px; }
+.dlg3 { margin-top: 16px; }
+.dlraw { margin-top: 22px; padding: 0; } .dlraw > summary { cursor: pointer; padding: 14px 18px; list-style: none; display: flex; align-items: center; gap: 8px; color: var(--ink); }
+.dlraw > summary::-webkit-details-marker { display: none; } .dlraw > summary::before { content: '▸'; color: var(--muted); transition: transform .15s; } .dlraw[open] > summary::before { transform: rotate(90deg); }
+.dlraw > div { padding: 0 18px 18px; } .dlraw .tiles { margin-top: 10px; }
+@media (max-width: 900px) { .dlstaff { margin-left: 0; } }
 @media (max-width: 900px) {
   .trbar #trcsv { margin-left: 0; } .lc-x span:nth-child(even) { display: none; } .lc { grid-template-rows: 180px auto; } .lc-y { width: 34px; }
   .fnl li { grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; } .fnl .ft { grid-column: 1 / -1; grid-row: 2; } .fnl .fv small { display: none; }

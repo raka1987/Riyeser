@@ -44,6 +44,17 @@ const CONTRAST = () => {
     await pg.close();
   }
 
+  // ---- the download hand-off page (riyeser.com/download/<program>.html): the counter is refused and GitHub's file is a pretend one, so it stays put
+  { const pg = await b.newPage({ viewport: { width: 1280, height: 900 } }); pg.on('pageerror', (e) => errs.push('/download/pos.html: ' + e.message));
+    await pg.route('https://*.supabase.co/**', (r) => r.abort()); await pg.route('https://api.github.com/**', (r) => r.abort());
+    await pg.route('https://github.com/**', (r) => r.fulfill({ status: 200, contentType: 'application/octet-stream', headers: { 'content-disposition': 'attachment; filename=setup.exe' }, body: 'MZ' }));
+    await pg.addInitScript(CONTRAST);
+    await pg.goto(BASE + '/download/pos.html', { waitUntil: 'commit' }); await pg.waitForSelector('#dlgo'); await pg.waitForTimeout(600);
+    const low = await pg.$$eval('.dlgo-sub, .dlgo-alt, .dlgo-steps small, .dlgo-back, .dlgo-st', (els) => els.filter((e) => e.offsetParent && e.textContent.trim()).map((e) => [e.textContent.trim().slice(0, 30), window.__contrast(e)]).filter(([, c]) => c < 4.5));
+    check(!low.length, `download page: text at least 4.5:1 ${low.map(([t, c]) => `"${t}" ${c.toFixed(2)}`).join(', ')}`);
+    check(await pg.$eval('#dlst', (e) => e.getAttribute('role') === 'status' && e.getAttribute('aria-live') === 'polite'), 'download page: the "starting / started" line is announced');
+    await axe(pg, '/download/pos.html'); await pg.close(); }
+
   // ---- Riyeser Link
   { const pg = await page('/link/?demo');
     await pg.waitForSelector('#lkshell'); await pg.click('#infobtn'); await pg.waitForTimeout(300);   // the details (ⓘ): members with their status

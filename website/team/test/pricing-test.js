@@ -20,6 +20,8 @@ const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if
 const FREE = ['central', 'documents', 'invoices', 'pdf'];
 const PAID = ['accounting-basics', 'accounting', 'bookings', 'estimate', 'link', 'link-office', 'payroll', 'pos'];
 const LO_FILE = 'RiyeserLinkOffice-Setup.exe';
+// Download buttons go to the counting hand-off page, which starts the GitHub file (website/hq/test-hq-downloads.js)
+const LO_DL = 'download/link-office.html';
 
 (async () => {
   const b = await chromium.launch(); const errs = [];
@@ -111,21 +113,23 @@ const LO_FILE = 'RiyeserLinkOffice-Setup.exe';
   const after = (list) => list.indexOf('link-office') === list.indexOf('link') + 1;
   const lo = await pg.$eval('.dl:has(a[href$="programs/link-office.html"])', (d) => ({ t: d.textContent.replace(/\s+/g, ' '), dl: (d.querySelector('a.btn') || {}).href || '', w: (d.querySelector('.cprice a') || {}).href || '' }));
   check(dls.findIndex((t) => /Riyeser Link Office/.test(t)) === dls.findIndex((t) => /^Riyeser Link\b(?! Office)/.test(t)) + 1, 'Downloads: Link Office right after Riyeser Link');
-  check(lo.dl.endsWith(LO_FILE) && lo.w.endsWith('pricing.html#link') && lo.t.includes('Comes with Riyeser Link') && !/US\$|a month/.test(lo.t), `Downloads: Link Office downloads ${LO_FILE}, "Comes with Riyeser Link" (linked), no price`);
+  check(lo.dl.endsWith(LO_DL) && lo.w.endsWith('pricing.html#link') && lo.t.includes('Comes with Riyeser Link') && !/US\$|a month/.test(lo.t), `Downloads: Link Office downloads (${LO_DL}), "Comes with Riyeser Link" (linked), no price`);
   await pg.goto(`${BASE}/index.html`);
   check(after(await ids('.menu-pop.progs a:not(.all)')) && after(await ids('#find .frow a')) && after(await ids('#programs .grid a.card[href*="programs/"]')), 'menu, finder and home programs: Link Office right after Riyeser Link');
   const noPrice = async (sel) => { const t = await pg.$eval(sel, (a) => a.textContent.replace(/\s+/g, ' ')); return t.includes('With Riyeser Link') && !/US\$|\/mo|a month|\bFree\b/.test(t); };
   check(await noPrice('.menu-pop.progs a[href$="programs/link-office.html"]') && await noPrice('#find .frow a[href$="programs/link-office.html"]') && await noPrice('#programs a.card[href$="programs/link-office.html"]'), 'menu, finder and home card: "With Riyeser Link", never a price or "Free"');
   await pg.goto(`${BASE}/programs/link-office.html`);
   const lop = await pg.textContent('main');
-  check((await pg.$eval('.phero a.btn.p.big', (a) => a.href + ' ' + a.textContent)).match(/RiyeserLinkOffice-Setup\.exe\s+Download for Windows/) && lop.includes('Comes with Riyeser Link') && lop.includes('phone system') && !/Link Plus/.test(lop)
+  check((await pg.$eval('.phero a.btn.p.big', (a) => a.href + ' ' + a.textContent)).match(/download\/link-office\.html\s+Download for Windows/) && lop.includes('Comes with Riyeser Link') && lop.includes('phone system') && !/Link Plus/.test(lop)
     && await pg.$eval('.hprice a.hp-plus', (a) => a.href.endsWith('pricing.html#link')), 'Link Office page: Windows download, comes with Riyeser Link (linked), the office phone system');
   check(!/outside (phone )?numbers?/.test(lop) || lop.includes('Not yet'), 'Link Office page: no claim of outside calls');
   await pg.goto(`${BASE}/programs/link.html`);
   const lkp = await pg.textContent('main');
   check(lkp.includes('US$20') && lkp.includes('20 GB') && !/Link Plus|★/.test(lkp), 'Link page: US$20, 20 GB, no Link Plus');
   await pg.goto(`${BASE}/help/link-office.html`);
-  check((await pg.$eval('.hhead a.btn.p', (a) => a.href)).endsWith(LO_FILE), 'Link Office help page with a Download button');
+  check((await pg.$eval('.hhead a.btn.p', (a) => a.href)).endsWith(LO_DL), 'Link Office help page with a Download button');
+  await pg.goto(`${BASE}/${LO_DL}`, { waitUntil: 'commit' }); await pg.waitForSelector('#dlgo');
+  check((await pg.getAttribute('#dlgo', 'data-gh')).endsWith(LO_FILE), `the hand-off page gets ${LO_FILE}`);
   await pg.goto(`${BASE}/help/link.html#desk-phones`);
   check(await pg.$$eval('#desk-phones a', (as) => as.some((a) => a.href.endsWith('programs/link-office.html'))), 'help/link.html#desk-phones links to the Link Office download');
 

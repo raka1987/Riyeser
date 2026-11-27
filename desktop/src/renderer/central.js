@@ -427,6 +427,12 @@ document.addEventListener('click', (e) => {
 });
 // Settings (sidebar footer): show "Getting started" again.
 $('#setbtn').addEventListener('click', () => { $('#sethide').checked = !(cl && cl.hidden); $('#setdlg').showModal(); });
+// Settings: "Send anonymous usage counts" (central/usage-counts.js). On unless turned off.
+$('#setbtn').addEventListener('click', () => safe(async () => { const r = await bridge.call('central:usageGet'); $('#setusage').checked = !!r.on; }));
+$('#setusage').addEventListener('change', (e) => safe(async () => {
+  const r = await bridge.call('central:usageSet', e.target.checked); e.target.checked = !!r.on;
+  toast(r.on ? 'Thanks: anonymous usage counts are on.' : 'Anonymous usage counts are off. Nothing more is sent from this PC.');
+}));
 $('#sethide').addEventListener('change', (e) => safe(() => setChecklistHidden(!e.target.checked)));
 
 // Settings: "Fresh start on this PC". Every Riyeser folder on this PC is renamed away (never deleted), then Central

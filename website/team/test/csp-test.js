@@ -50,6 +50,18 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     await pg.click('.right .signin'); await pg.waitForSelector('#gf', { timeout: 8000 });
     check(pg.url().includes('/link/'), 'Sign in goes to Riyeser Link (its page has no meta policy: Supabase, PayPal and calls are set by config)');
     await pg.close(); }
+  // the download hand-off page: its inline script runs (by hash) and may ask the download counter (Supabase)
+  { const pg = await b.newPage({ viewport: { width: 1280, height: 900 } }); const asked = [];
+    pg.on('pageerror', (e) => errs.push('/download/central.html: ' + e.message));
+    await pg.addInitScript(() => { window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(e.violatedDirective + ' ' + (e.blockedURI || 'inline'))); });
+    await pg.route('https://*.supabase.co/functions/v1/download/**', (r) => { asked.push(r.request().url()); return r.abort(); });
+    await pg.route('https://github.com/raka1987/Riyeser/releases/**', (r) => r.fulfill({ status: 200, contentType: 'application/octet-stream', headers: { 'content-disposition': 'attachment; filename=setup.exe' }, body: 'MZ' }));
+    await pg.route('https://api.github.com/**', (r) => r.abort());
+    await pg.goto(BASE + '/download/central.html', { waitUntil: 'commit' }); await pg.waitForSelector('#dlgo'); await pg.waitForTimeout(800);
+    const r = await pg.evaluate(() => window.__csp);
+    check(!r.length && asked.some((u) => /\.supabase\.co\/functions\/v1\/download\/central\?/.test(u)) && /started/.test(await pg.textContent('#dlst')),
+      `/download/central.html: the hand-off script runs, asks the counter, nothing refused ${r.join(' | ')}`);
+    await pg.close(); }
   check(!errs.length, 'no page errors ' + errs.join(' | '));
   await b.close();
   console.log(failed ? `${failed} CSP CHECK(S) FAILED` : 'ALL CSP CHECKS PASSED'); process.exit(failed ? 1 : 0);

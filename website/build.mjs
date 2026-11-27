@@ -444,7 +444,7 @@ function demoSection(up) {
   <div class="shead"><span class="eyebrow">See it in action</span><h2 class="h2" id="demo-h">Watch each program do the work</h2><p class="sub">Real screens with a made-up sample business. Pick a program.</p></div>
   <div class="dm-tabs" role="tablist" aria-label="Programs">${DEMO.map((d, i) => `<button type="button" role="tab" id="dm-t-${d.id}" aria-controls="dm-p-${d.id}" aria-selected="${i === 0}" tabindex="${i ? -1 : 0}" data-id="${d.id}"><img src="${up}assets/apps/${d.prog}.png" alt="" width="28" height="28">${esc(d.label)}</button>`).join('')}</div>
   ${DEMO.map((d, i) => { const p = prog(d.prog); const shots = [...new Set(d.steps.map((s) => s[0]))]; const k0 = SHOT_DIM[d.frame || shots[0]];
-    const start = d.m ? `<a class="btn p" href="${BUY_LINK(d.m, false)}">Start free</a>` : `<a class="btn p" href="${dl(p)}">${WINLOGO} Download free</a>`;
+    const start = d.m ? `<a class="btn p" href="${BUY_LINK(d.m, false)}">Start free</a>` : `<a class="btn p" href="${dl(p, up)}">${WINLOGO} Download free</a>`;
     return `<div class="dm-panel" role="tabpanel" id="dm-p-${d.id}" aria-labelledby="dm-t-${d.id}" data-id="${d.id}">
     <div class="dm-stage">
       <div class="dm-shots${d.phone ? ' has-phone' : ''}">
@@ -515,7 +515,9 @@ const guidesFor = (o) => helpGuides(o).filter((g) => ASBUILT || g.id !== 'servic
 const PROGRAMS = ALL_PROGRAMS.filter((p) => ASBUILT || p.id !== 'services');
 const prog = (id) => ALL_PROGRAMS.find((p) => p.id === id);
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const dl = (p) => (p.file ? `${RELEASES}/${p.file}` : p.link ? p.link : `mailto:${EMAIL}?subject=${encodeURIComponent(`Early access: ${p.name}`)}`);
+// Download buttons go to riyeser.com/download/<program>.html, which counts the download (the "download" function, for
+// Riyeser HQ's real numbers) and hands off to the newest installer on GitHub (see the download pages below).
+const dl = (p, up = '') => (p.file ? `${up}download/${p.id}.html` : p.link ? p.link : `mailto:${EMAIL}?subject=${encodeURIComponent(`Early access: ${p.name}`)}`);
 const appImg = (id, up, cls = '') => `<img class="appicon i-${id}${cls ? ` ${cls}` : ''}" src="${up}assets/apps/${id}.png" alt="" width="80" height="80">`;
 const iconBox = (p, up = '') => `<div class="icon i-${p.id}"><img src="${up}assets/apps/${p.id}.png" alt="" width="80" height="80"></div>`;
 // Small inline icons for buttons (no emoji, so they look the same on every PC).
@@ -733,7 +735,7 @@ fetch('${url}/rest/v1/rpc/track_visit',{method:'POST',keepalive:true,headers:{ap
 b:/Edg\//.test(u)?'Edge':/SamsungBrowser/.test(u)?'Samsung':/Firefox|FxiOS/.test(u)?'Firefox':/Chrome|CriOS/.test(u)?'Chrome':/Safari/.test(u)?'Safari':'Other',l:n.language,
 g:a[0]=='Australia'?a[0]:a[0]=='Pacific'?Z[a[1]]||'Pacific':/^(Asia|Europe|Africa)$/.test(a[0])?a[0]:a[0]=='America'?'Americas':'Other'})}).catch(function(){})}catch(e){}})()</script>`; })();
 
-function page({ path, title, description, active, body }) {
+function page({ path, title, description, active, body, noindex = false }) {
   const depth = path.split('/').length - 1;
   const up = depth ? '../'.repeat(depth) : '';
     const html = `<!doctype html>
@@ -742,7 +744,7 @@ function page({ path, title, description, active, body }) {
 <meta charset="utf-8"><meta name="color-scheme" content="light">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
-<meta name="description" content="${esc(description)}">
+<meta name="description" content="${esc(description)}">${noindex ? '<meta name="robots" content="noindex">' : ''}
 <meta property="og:title" content="${esc(title)}"><meta property="og:description" content="${esc(description)}">
 <meta property="og:image" content="${SITE}/assets/central-home.webp"><meta property="og:url" content="${SITE}/${path === 'index.html' ? '' : path}">
 <link rel="canonical" href="${SITE}/${path === 'index.html' ? '' : path}">
@@ -957,7 +959,7 @@ for (const p of PROGRAMS.filter((x) => !x.custom)) {
     <div class="phead-who">${iconBox(p, up)}<div><span class="eyebrow">${esc(p.name)}</span>${badgeOf(p)}</div></div>
     <h1>${esc(p.pitch)}</h1><p class="lead">${esc(firstSentence(p.one))}</p>
     ${heroPrice(p, up)}
-    <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}${videoOf(p.id) ? videoBtn(videoOf(p.id), up, 'btn s big') : ''}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
+    <div class="ctas">${p.file ? `<a class="btn p big" href="${dl(p, up)}">${WINDL}</a>` : `<a class="btn p big" href="${dl(p, up)}">${p.link ? esc(p.linkLabel) : 'Get early access'}</a>`}${videoOf(p.id) ? videoBtn(videoOf(p.id), up, 'btn s big') : ''}<a class="tlink" href="${up}help/${p.id}.html">How to use it</a></div>
     ${p.file ? `<p class="fine">Windows 10 &amp; 11 · ${p.comesWith ? 'Sign in with your Riyeser account' : 'No account or card needed'}</p>` : ''}
   </div>
   ${p.shot ? winFrame(up, p.id, p.name, p.shot, `${p.name} screenshot`, ...(p.id === 'central' ? [1440, 900] : [])) : SHOTS[p.id] ? winFrame(up, p.comesWith || p.id, prog(p.comesWith || p.id).name, `shots/${SHOTS[p.id][0][0]}.webp`, SHOTS[p.id][0][3], SHOTS[p.id][0][1], SHOTS[p.id][0][2]) : `<div class="placeholder">${appImg(p.id, up)}</div>`}
@@ -1017,7 +1019,7 @@ if (ASBUILT) {
   <div class="phead-who" style="display:flex;align-items:center;gap:18px;margin-bottom:18px">${iconBox(p, up)}<span class="eyebrow" style="margin:0">As Built</span></div>
   <h1>Map every service while the building goes up</h1>
   <p class="lead">Cables, pipes and ducts marked on your drawings as they go in, linked end to end, with the inspections, test results and photos on each item. At handover, the as-builts are already done.</p>
-  <div class="ctas" style="justify-content:flex-start"><a class="btn p big" href="${SERVICES_APP}/?demo">${PLAY} Try it now, free</a>${SERVICES_WIN ? `<a class="btn s big" href="${RELEASES}/RiyeserServices-Setup.exe">${DL} Windows app</a>` : ''}<a class="btn s big" href="${SERVICES_APP}/">Sign in</a></div>
+  <div class="ctas" style="justify-content:flex-start"><a class="btn p big" href="${SERVICES_APP}/?demo">${PLAY} Try it now, free</a>${SERVICES_WIN ? `<a class="btn s big" href="${up}download/services.html">${DL} Windows app</a>` : ''}<a class="btn s big" href="${SERVICES_APP}/">Sign in</a></div>
   ${SERVICES_WIN ? '<p class="fine">Works in any web browser, on phones and tablets — or install the Windows app: it works on your PC with no account and no internet, and can sync to your online account.</p>' : ''}
   <p class="fine">No sign-up for the demo. Explore a marked-up resort with a guided tour.</p>
 </div>${winFrame(up, 'services', 'As Built', 'services-trace.webp', 'A water main route highlighted on a floor plan', 1500, 783)}</div></div>
@@ -1046,6 +1048,53 @@ page({
   body: () => `<div class="c legal" style="max-width:820px;padding:56px 24px 64px">${TERMS}</div>`,
 });
 
+// ---------- download hand-off pages: riyeser.com/download/<program>.html ----------
+// Counts the download honestly, then starts it. The page asks the "download" function (supabase/functions/download on
+// main) for the newest file: the function records one row (program, release, country, the page the button was on,
+// a salted daily hash for de-duplicating; never an IP address or browser details) and answers with the GitHub link.
+// If the function is slow, missing or down, the page goes straight to GitHub after 4 seconds: a download never waits on
+// counting. HQ staff who ticked "Don't count downloads from this browser" (HQ → Downloads) are marked staff; anything
+// off riyeser.com is marked test; automated browsers are marked bot. The plain button works without JavaScript too
+// (the function counts it and sends the browser on). Our CI downloads from GitHub directly, never through here.
+const DOWNLOAD_FN = SUPABASE_ORIGIN ? `${SUPABASE_ORIGIN}/functions/v1/download/` : '';
+const STAFF_KEY = 'riyeser-hq-nocount';   // HQ → Downloads sets it (hq.js)
+const handoff = (fn) => String.raw`<script>(function(){var b=document.getElementById('dlgo'),st=document.getElementById('dlst'),G=b.getAttribute('data-gh'),F=${JSON.stringify(fn)},h=location.hostname,done=0;
+function go(x){if(done)return;done=1;b.href=x;st.textContent='Your download has started. Check your browser’s downloads.';location.href=x}
+if(!F||!window.fetch){go(G);return}var q=['js=1'];
+try{var r=new URL(document.referrer);if(r.hostname===h){if(!/\/download\//.test(r.pathname))q.push('from='+encodeURIComponent(r.pathname.replace(/^\/software(?=\/)/,'')))}else if(/^https?:$/.test(r.protocol))q.push('from='+encodeURIComponent(r.hostname))}catch(e){}
+try{if(localStorage.getItem(${JSON.stringify(STAFF_KEY)})==='1')q.push('staff=1')}catch(e){}
+try{q.push('tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||''))}catch(e){}
+if(navigator.webdriver)q.push('wd=1');if(!/(^|\.)riyeser\.com$/.test(h))q.push('test=1');
+var t=setTimeout(function(){go(G)},4000);
+fetch(F+'&'+q.join('&')+'&mode=json',{credentials:'omit'}).then(function(r){return r.ok?r.json():null}).then(function(j){clearTimeout(t);
+go(j&&/^https:\/\/github\.com\/raka1987\/Riyeser\/releases\//.test(j.url)?j.url:G)}).catch(function(){clearTimeout(t);go(G)})})()</script>`;
+for (const p of PROGRAMS.filter((x) => x.file)) {
+  const gh = `${RELEASES}/${p.file}`;
+  const fn = DOWNLOAD_FN ? `${DOWNLOAD_FN}${p.id}?file=${p.file}` : '';
+  const nm = p.id === 'central' ? 'Riyeser Central' : p.name;
+  page({
+    path: `download/${p.id}.html`, title: `Downloading ${nm}`, active: 'downloads', noindex: true,
+    description: `${nm} for Windows 10 and 11: your download starts by itself.`,
+    body: (up) => `<section class="dlgo"><div class="c">
+  <div class="dlgo-card">
+    ${appImg(p.id, up, 'dlgo-ic')}
+    <h1 class="dlgo-h">Your download is starting</h1>
+    <p class="dlgo-sub"><b>${esc(nm)}</b> for Windows 10 &amp; 11 <span class="dlgo-file">${esc(p.file)}</span></p>
+    <p class="dlgo-st" id="dlst" role="status" aria-live="polite">Getting the newest version…</p>
+    <a class="btn p big" id="dlgo" href="${esc(fn || gh)}" data-gh="${esc(gh)}">${DL} Download ${esc(nm)}</a>
+    <p class="dlgo-alt">Didn’t start? Press the button. Or <a href="${esc(gh)}">get it straight from GitHub</a>, where every Riyeser release is published.</p>
+  </div>
+  <ol class="dlgo-steps">
+    <li><span class="n">1</span><div><b>Open the file</b><small>When it finishes, open ${esc(p.file)} from your browser’s downloads.</small></div></li>
+    <li><span class="n">2</span><div><b>Let it install</b><small>If Windows asks, choose <i>More info</i> and <i>Run anyway</i>. It installs in about a minute.</small></div></li>
+    <li><span class="n">3</span><div><b>Start using it</b><small>${p.id === 'central' ? 'Riyeser Central opens and helps you add the programs you need.' : `${esc(nm)} opens. Riyeser Central keeps it up to date.`}</small></div></li>
+  </ol>
+  <p class="dlgo-back"><a href="${up}programs/${p.id}.html">${esc(nm)}</a> · <a href="${up}downloads.html">All downloads</a> · <a href="${up}help/start.html">Getting started</a></p>
+</div></section>
+${handoff(fn)}`,
+  });
+}
+
 // ---------- downloads ----------
 page({
   path: 'downloads.html', title: 'Download Riyeser for Windows', active: 'downloads',
@@ -1055,7 +1104,7 @@ page({
   <div class="central-dl"><img src="${up}assets/logo-r.png" alt="">
     <div><h2>Riyeser Central</h2><p>The home screen and installer for Riyeser programs. It shows what else you can add and keeps everything up to date.</p></div>
     <span class="sep"></span>
-    <div class="act"><a class="btn p big" href="${dl(prog('central'))}">${WINDL}</a><small>${WINLOGO} Windows 10 &amp; 11</small></div>
+    <div class="act"><a class="btn p big" href="${dl(prog('central'), up)}">${WINDL}</a><small>${WINLOGO} Windows 10 &amp; 11</small></div>
   </div>
   <div class="steps3" style="margin-top:40px">
     <div class="step"><span class="n">1</span>${li('download')}<div><h3>Download</h3><p>Get Riyeser Central for Windows.</p></div></div><span class="to">${ARR}</span>
@@ -1065,7 +1114,7 @@ page({
 </section>
 <section class="c" style="padding-top:0">
   <h2 class="h2">Every program</h2><p class="sub">Or download a program on its own. Each one installs in one click and updates over the old version, so your information is kept.</p>
-  ${grouped(PROGRAMS.filter((p) => p.id !== 'central'), (l) => l.map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p>${p.comesWith ? `<p class="cprice">Comes with <a class="more" href="${withHref(p, up)}">${esc(withName(p))}</a>. No separate price: it switches on when your business has ${esc(withName(p))}.</p>` : p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}</div>${p.file ? `<a class="btn p" href="${dl(p)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join(''), (t) => `<h3 class="ghead">${esc(t)}</h3>`)}
+  ${grouped(PROGRAMS.filter((p) => p.id !== 'central'), (l) => l.map((p) => `<div class="dl">${iconBox(p, up)}<div><h3>${esc(p.name)} ${badgeOf(p)}</h3><p>${esc(p.one)} <a class="more" href="${up}programs/${p.id}.html">More</a></p>${p.comesWith ? `<p class="cprice">Comes with <a class="more" href="${withHref(p, up)}">${esc(withName(p))}</a>. No separate price: it switches on when your business has ${esc(withName(p))}.</p>` : p.free ? '' : `<p class="cprice">${priceTag(p)}</p>`}</div>${p.file ? `<a class="btn p" href="${dl(p, up)}">${WINLOGO} Download</a>` : `<a class="btn s" href="${dl(p, up)}">${p.link ? esc(p.linkLabel) : 'Early access'}</a>`}</div>`).join(''), (t) => `<h3 class="ghead">${esc(t)}</h3>`)}
   <div class="note" style="margin-top:26px"><b>Windows says “Windows protected your PC”?</b> Click <b>More info</b>, then <b>Run anyway</b>. We're getting our programs signed so this goes away. The <a class="more" href="${up}help/start.html">Getting started guide</a> covers installing, updates and your licence.</div>
 </section>
 ${ctaBlock(up, 'Need a hand getting started?', 'Our step-by-step guides use the same button names you see on screen.')}`,
@@ -1305,7 +1354,7 @@ ${searchScript(up)}
   <div>
     <div class="crumbs"><a href="${up}help.html">Help Centre</a> › ${esc(gName(g))}</div>
     <div class="hhead"><div class="icon i-${g.app}">${gIcon(g, up)}</div><div><h1>${esc(gName(g))}</h1><p>${esc(g.intro)}</p>
-      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'link' ? `<a class="btn p sm" href="/link/">Open Riyeser Link</a>`: g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
+      <div class="row">${p && p.file ? `<a class="btn p sm" href="${dl(p, up)}">${DL} Download</a><a class="btn s sm" href="${up}programs/${p.id}.html">About ${esc(p.short === 'Central' ? 'Central' : p.short)}</a>` : g.id === 'link' ? `<a class="btn p sm" href="/link/">Open Riyeser Link</a>`: g.id === 'services' ? `<a class="btn s sm" href="${SERVICES_APP}/help.html">${BOOK} Full As Built guide</a>` : `<a class="btn p sm" href="${up}downloads.html">${DL} Downloads</a>`}</div></div></div>
     ${searchBox(`Search the ${gName(g)} guide`)}
     ${g.groups.map((grp, i) => `<div class="hgroup" id="s${i + 1}"><h2><span class="num">${i + 1}</span>${esc(grp.title)}</h2><div class="faq">${grp.items.map(([id, q, a], j) => `<details id="${id}"${i === 0 && j === 0 ? ' open' : ''}><summary>${q}</summary>${a}</details>`).join('')}</div></div>`).join('')}
     <p class="hnone" id="hnone">Nothing in this guide matches that. Try the <a class="more" href="${up}help.html">Help Centre</a> search, or email <a class="more" href="mailto:${EMAIL}">${EMAIL}</a>.</p>

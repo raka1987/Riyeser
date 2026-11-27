@@ -1215,3 +1215,28 @@ section.conn { padding: 0; scroll-margin-top: 76px; }
   .cn-cta { padding: 22px 18px; gap: 18px; } .cn-btns { width: 100%; } .cn-btns .btn { flex: 1 1 100%; }
   .cn-teaser { align-items: flex-start; font-size: 14.5px; flex-wrap: wrap; padding: 12px 14px; } .cn-teaser > span:nth-child(2) { flex-basis: calc(100% - 54px); } .cn-teaser .more { margin-left: 54px; }
 }
+
+/* riyeser.com/download/<program>.html: the download hand-off (counts it, then starts it) */
+.dlgo { background: linear-gradient(180deg, var(--soft), var(--bg) 70%); padding: 56px 0 72px; }
+.dlgo .c { max-width: 800px; }
+.dlgo-card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow-sm); padding: 40px 40px 32px; text-align: center; }
+.dlgo-card img.dlgo-ic { width: 76px; height: 76px; border-radius: 20px; display: block; margin: 0 auto 18px; }
+.dlgo-h { font-size: 34px; letter-spacing: -.6px; color: var(--ink); margin: 0 0 8px; }
+.dlgo-sub { margin: 0 0 18px; color: var(--text); font-size: 17px; }
+.dlgo-file { display: inline-block; margin-left: 6px; padding: 2px 9px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); color: var(--muted); font-size: 13px; font-family: ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.dlgo-st { margin: 0 auto 22px; color: var(--blue-ink); font-weight: 600; font-size: 15.5px; min-height: 1.5em; }
+.dlgo-alt { margin: 18px 0 0; color: var(--muted); font-size: 14.5px; }
+.dlgo-alt a, .dlgo-back a { color: var(--blue-ink); }
+.dlgo-steps { list-style: none; margin: 28px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.dlgo-steps li { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.dlgo-steps .n { width: 30px; height: 30px; border-radius: 50%; background: var(--blue-soft); color: var(--blue-ink); font-weight: 800; display: grid; place-items: center; font-size: 14px; }
+.dlgo-steps b { display: block; color: var(--ink); font-size: 15.5px; margin-bottom: 2px; }
+.dlgo-steps small { color: var(--muted); font-size: 13.5px; line-height: 1.45; display: block; }
+.dlgo-back { text-align: center; margin: 26px 0 0; color: var(--muted); font-size: 14.5px; }
+@media (max-width: 720px) {
+  .dlgo { padding: 32px 0 48px; }
+  .dlgo-card { padding: 28px 18px 24px; }
+  .dlgo-h { font-size: 27px; }
+  .dlgo-card .btn.big { width: 100%; justify-content: center; }
+  .dlgo-steps { grid-template-columns: 1fr; }
+}
