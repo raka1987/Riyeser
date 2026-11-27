@@ -40,6 +40,12 @@ jobs:
       - name: Run team-chat.sql
         run: |
           echo "team-chat.sql from ${{ inputs.ref }} at $(git rev-parse --short HEAD), sha1 $(sha1sum website/team/team-chat.sql | cut -c1-12)"
-          DB_URL="$(python3 tools/.github/scripts/pooler-url.py)"; echo "::add-mask::$DB_URL"
+          CANDIDATES="$(python3 tools/.github/scripts/pooler-url.py)"
+          DB_URL=""
+          while IFS= read -r c; do
+            [ -z "$c" ] && continue; echo "::add-mask::$c"
+            if [ -z "$DB_URL" ] && PGCONNECT_TIMEOUT=8 psql "$c" -X -q -t -c "select 1" >/dev/null 2>&1; then DB_URL="$c"; fi
+          done <<< "$CANDIDATES"
+          [ -n "$DB_URL" ] || { echo "::error::Couldn't connect with TEAM_DB_URL. Check the password, or put the Session pooler line from Supabase → Connect into it."; exit 1; }
           psql "$DB_URL" -X -q -v ON_ERROR_STOP=1 --single-transaction -f website/team/team-chat.sql > /dev/null
           echo "Done: the Riyeser Link database is up to date."

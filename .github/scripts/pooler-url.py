@@ -29,8 +29,16 @@ req = urllib.request.Request(f"https://api.supabase.com/v1/projects/{ref}/config
 try:
     cfg = json.load(urllib.request.urlopen(req, timeout=30))
 except Exception as e:
-    sys.stderr.write(f"::error::Couldn't look up the Session pooler address ({e}). Put the Session pooler line from Supabase → Connect into TEAM_DB_URL instead.\n")
-    sys.exit(1)
+    # No permission to ask: print one candidate per line for the workflow to try (the right region connects,
+    # a wrong one answers "tenant not found" straight away).
+    sys.stderr.write(f"Couldn't ask Supabase for the pooler address ({e}); trying the regions instead.\n")
+    regions = ["ap-southeast-2", "ap-southeast-1", "us-east-1", "us-west-1", "eu-central-1", "eu-west-1", "eu-west-2",
+               "ap-northeast-1", "ap-northeast-2", "ap-south-1", "ca-central-1", "sa-east-1", "us-east-2", "us-west-2",
+               "eu-west-3", "eu-north-1", "eu-central-2"]
+    for pre in ("aws-0", "aws-1"):
+        for r in regions:
+            print(f"postgresql://postgres.{ref}:{urllib.parse.quote(pw, safe='')}@{pre}-{r}.pooler.supabase.com:5432{path or '/postgres'}")
+    sys.exit(0)
 cfg = cfg if isinstance(cfg, list) else [cfg]
 c = next((x for x in cfg if x.get("database_type", "PRIMARY") == "PRIMARY"), cfg[0])
 host = c.get("db_host")
