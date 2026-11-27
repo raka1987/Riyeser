@@ -1,4 +1,4 @@
-// OWNER-LISTS (Payroll 2.3.2): one way to sort and filter every list (Staff, Timesheets, Pay runs, Payslips, Leave,
+// OWNER-LISTS (Payroll 2.3.2, tidied in 2.3.3): one way to sort and filter every list (Staff, Timesheets, Pay runs, Payslips, Leave,
 // Audit trail, Time clock, Roster). Click a column heading to sort (again to reverse); the filter bar has Search, Year
 // (financial year from Settings, and calendar year), Period (this / last pay period, this month, this / last financial
 // year, custom dates), Status and more where the list has them, "Clear filters" and "Showing 5 of 12". The choice is
@@ -91,9 +91,9 @@
   const h = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const PERIODS = [['this_pay', 'This pay period'], ['last_pay', 'Last pay period'], ['this_week', 'This week (Mon–Sun)'], ['last_week', 'Last week'], ['this_month', 'This month'], ['last_month', 'Last month'], ['this_fy', 'This financial year'], ['last_fy', 'Last financial year'], ['custom', 'Custom dates…']];
   // a column heading that sorts: <th aria-sort><button>Name ▲</button></th>
-  function th(label, key, state, { r = false, title = '', list = '' } = {}) {
+  function th(label, key, state, { r = false, title = '', list = '', cls = '' } = {}) {
     const on = state && state.sort === key, dir = on ? state.dir : '';
-    return `<th class="${r ? 'r ' : ''}lv-th${on ? ' on' : ''}" aria-sort="${on ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}"><button type="button" class="lv-sort" data-lv-sort="${h(key)}" data-lv-of="${h(list)}" title="${h(title || `Sort by ${String(label).replace(/<[^>]*>/g, '')}`)}">${label}<span class="lv-arrow" aria-hidden="true">${on ? (dir === 'desc' ? '▼' : '▲') : '↕'}</span></button></th>`;
+    return `<th class="${r ? 'r ' : ''}${cls ? `${h(cls)} ` : ''}lv-th${on ? ' on' : ''}" aria-sort="${on ? (dir === 'desc' ? 'descending' : 'ascending') : 'none'}"><button type="button" class="lv-sort" data-lv-sort="${h(key)}" data-lv-of="${h(list)}" title="${h(title || `Sort by ${String(label).replace(/<[^>]*>/g, '')}`)}">${label}<span class="lv-arrow" aria-hidden="true">${on ? (dir === 'desc' ? '▼' : '▲') : '↕'}</span></button></th>`;
   }
   // the filter bar. opts: { dates: 'Pay date' (label: Year and Period filter these), datesRequired (Timesheets: no "All dates") }
   function bar(c, { shown, total, extra = '' } = {}) {
@@ -102,19 +102,24 @@
     const opt = (v, l, cur) => `<option value="${h(v)}" ${String(cur) === String(v) ? 'selected' : ''}>${h(l)}</option>`;
     const sortOpts = Object.entries(f).filter(([, x]) => x.label);
     const dl = spec.dateLabel || 'Dates';
+    // Payroll 2.3.3: one tidy row that wraps: Search grows, the selects size to their longest choice (never cut off), Sort by
+    // and its direction are one joined control, and the count + Clear filters sit at the end of the same row (Sort by and
+    // the count travel together, so a narrow window never leaves the count alone on a row).
+    const selT = (label, attrs, inner, cur) => `<label class="lv-f lv-sel"><span class="lv-k">${label}</span><select ${attrs} title="${h(cur)}">${inner}</select></label>`;
+    const curLabel = (pairs, v, dflt) => { const m = pairs.find(([k]) => String(k) === String(v)); return m ? m[1] : dflt; };
+    const sortLabel = curLabel(sortOpts.map(([k, x]) => [k, x.label]), state.sort, '');
     return `<div class="lv-bar no-print" data-lv="${h(c.id)}" role="search" aria-label="Sort and filter">
-      ${spec.search ? `<label class="lv-q"><span class="lv-k">Search</span><input type="search" data-lv-q value="${h(state.q)}" placeholder="${h(spec.placeholder || 'Name…')}" autocomplete="off"></label>` : ''}
-      ${spec.date && meta ? `<label><span class="lv-k">Year <small>(${h(dl.toLowerCase())})</small></span><select data-lv-year>${spec.datesRequired ? opt('', 'Choose…', state.year) : opt('', 'All years', state.year)}
+      ${spec.search ? `<label class="lv-f lv-q"><span class="lv-k">Search</span><input type="search" data-lv-q value="${h(state.q)}" placeholder="${h(spec.placeholder || 'Name…')}" autocomplete="off"></label>` : ''}
+      ${spec.date && meta ? `${selT(`Year <small>(${h(dl.toLowerCase())})</small>`, 'data-lv-year', `${spec.datesRequired ? opt('', 'Choose…', state.year) : opt('', 'All years', state.year)}
           ${fy.length ? `<optgroup label="Financial year (from ${h(meta.fy_start_label)})">${fy.map(y => opt(y.key, y.label, state.year)).join('')}</optgroup>` : ''}
-          ${cy.length ? `<optgroup label="Calendar year">${cy.map(y => opt(y.key, y.label, state.year)).join('')}</optgroup>` : ''}</select></label>
-        <label><span class="lv-k">Period</span><select data-lv-period>${opt('', spec.datesRequired ? 'Choose…' : 'Any time', state.period)}${PERIODS.filter(([k]) => k === 'custom' || (meta.periods || {})[k]).map(([k, l]) => opt(k, l, state.period)).join('')}</select></label>
-        ${state.period === 'custom' && !spec.datesRequired ? `<label><span class="lv-k">From</span><input type="date" data-lv-from value="${h(state.from)}"></label><label><span class="lv-k">To</span><input type="date" data-lv-to value="${h(state.to)}"></label>` : ''}` : ''}
-      ${(spec.selects || []).map(s => `<label><span class="lv-k">${h(s.label)}</span><select data-lv-sel="${h(s.key)}">${opt('', s.all || 'All', sel[s.key] || '')}${s.options.map(([v, l]) => opt(v, l, sel[s.key] || '')).join('')}</select></label>`).join('')}
-      ${sortOpts.length ? `<div class="lv-sortbox"><label><span class="lv-k">Sort by</span><select data-lv-sortsel>${sortOpts.map(([k, x]) => opt(k, x.label, state.sort)).join('')}</select></label>
-        <button type="button" class="btn sm ghost lv-dir" data-lv-dir aria-label="${state.dir === 'desc' ? 'Descending: press for ascending' : 'Ascending: press for descending'}" title="Reverse the order">${state.dir === 'desc' ? '▼' : '▲'}</button></div>` : ''}
+          ${cy.length ? `<optgroup label="Calendar year">${cy.map(y => opt(y.key, y.label, state.year)).join('')}</optgroup>` : ''}`, curLabel(years.map(y => [y.key, y.label]), state.year, spec.datesRequired ? 'Choose…' : 'All years'))}
+        ${selT('Period', 'data-lv-period', `${opt('', spec.datesRequired ? 'Choose…' : 'Any time', state.period)}${PERIODS.filter(([k]) => k === 'custom' || (meta.periods || {})[k]).map(([k, l]) => opt(k, l, state.period)).join('')}`, curLabel(PERIODS, state.period, spec.datesRequired ? 'Choose…' : 'Any time'))}
+        ${state.period === 'custom' && !spec.datesRequired ? `<label class="lv-f lv-date"><span class="lv-k">From</span><input type="date" data-lv-from value="${h(state.from)}"></label><label class="lv-f lv-date"><span class="lv-k">To</span><input type="date" data-lv-to value="${h(state.to)}"></label>` : ''}` : ''}
+      ${(spec.selects || []).map(s => selT(h(s.label), `data-lv-sel="${h(s.key)}"`, `${opt('', s.all || 'All', sel[s.key] || '')}${s.options.map(([v, l]) => opt(v, l, sel[s.key] || '')).join('')}`, curLabel(s.options, sel[s.key] || '', s.all || 'All'))).join('')}
+      <div class="lv-end">${sortOpts.length ? `<div class="lv-f lv-sortbox"><label class="lv-k" for="lv-sort-${h(c.id)}">Sort by</label><div class="lv-join"><select id="lv-sort-${h(c.id)}" data-lv-sortsel title="${h(sortLabel)}">${sortOpts.map(([k, x]) => opt(k, x.label, state.sort)).join('')}</select><button type="button" class="lv-dir" data-lv-dir aria-label="${state.dir === 'desc' ? 'Descending: press for ascending' : 'Ascending: press for descending'}" title="Reverse the order"><span aria-hidden="true">${state.dir === 'desc' ? '▼' : '▲'}</span></button></div></div>` : ''}
       ${extra}
       <div class="lv-foot"><span class="lv-count" aria-live="polite">${shown == null ? '' : shown === total ? `${total} shown` : `Showing <b>${shown}</b> of ${total}`}</span>
-        <button type="button" class="btn sm ghost lv-clear" data-lv-clear ${isFiltered(state, spec) ? '' : 'disabled'}>Clear filters</button></div></div>`;
+        <button type="button" class="btn sm ghost lv-clear" data-lv-clear ${isFiltered(state, spec) ? '' : 'disabled'}>Clear filters</button></div></div></div>`;
   }
   // c = LV.list({ id, uid, spec, defaults, meta, onChange(c, { dates }) })
   function list(opts) {
@@ -126,7 +131,7 @@
     if (c.state.year && c.meta && !(c.meta.years || []).some(y => y.key === c.state.year)) c.state.year = '';
     c.apply = rows => apply(rows, { ...c.spec, fields: f() }, c.state, c.meta);
     c.range = () => rangeOf(c.state, c.meta);
-    c.th = (label, key, o) => (f()[key] ? th(label, key, c.state, { ...(o || {}), list: c.id }) : `<th class="${o && o.r ? 'r' : ''}">${label}</th>`);
+    c.th = (label, key, o) => (f()[key] ? th(label, key, c.state, { ...(o || {}), list: c.id }) : `<th class="${[o && o.r ? 'r' : '', o && o.cls ? h(o.cls) : ''].filter(Boolean).join(' ')}">${label}</th>`);
     c.bar = o => bar(c, o);
     c.save = () => save(c.id, c.uid, c.state);
     c.set = (patch, dates = false) => { Object.assign(c.state, patch); c.save(); c.onChange(c, { dates }); };
