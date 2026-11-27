@@ -305,6 +305,9 @@
       async linkMyReveal(ws, key) { return ok(await sb.rpc('link_my_reveal', { ws, pub_key: key })); },
       async linkMyDnd(ws, on) { return ok(await sb.rpc('link_my_dnd', { ws, dnd_on: !!on })); },
       async linkSupport(ws, allow) { return ok(await sb.rpc(allow ? 'link_support_allow' : 'link_support_end', { ws })); },
+      // Management › Connections: the api_* functions (owners and admins with two-step sign-in). On a database without
+      // them the error is PGRST202 and the page says Connections aren't set up yet.
+      async conn(fn, args) { return ok(await sb.rpc(fn, args)); },
       async requestRefund(ws, r) { return ok(await sb.rpc('request_refund', { ws, for_what: r.for_what, period: r.period, invoice_ref: r.invoice_ref,
         amount: r.amount, currency: r.currency, reason_category: r.reason_category, explanation: r.explanation, ticket: null })); },
       onSignals(uid, fn) {
@@ -410,6 +413,58 @@
     const demoStore = (() => { let k = ''; try { k = sessionStorage.getItem('riyeser.demo.storage') || ''; } catch { /* private window */ }
       return k === 'full' ? { used: 20 * GB - 1048576, limit: 20 * GB, plus: true } : k === 'nearly' ? { used: 17 * GB, limit: 20 * GB, plus: true }
         : k === 'off' ? { used: 1.2 * GB, limit: 20 * GB, plus: false } : { used: 1.2 * GB, limit: 20 * GB, plus: true }; })();
+    // Management › Connections in the demo: sample keys, post box, request log and webhooks (this browser only)
+    const cn = (() => {
+      const hex = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, '0')).join('');
+      const key = (id, name, kind, mode, scopes, origins, used) => ({ id, name, kind, mode, scopes, prefix: `rk_${kind === 'widget' ? 'pub_' : ''}${mode}_${hex(4)}…`, allowed_origins: origins, allowed_ips: [],
+        created_at: ago(60 * 24 * 12), created_by_name: 'You', last_used_at: used, revoked_at: null, status: 'active', requests_24h: used ? 38 : 0 });
+      const st = { keys: [key('k1', 'Website booking form', 'widget', 'live', ['availability:read', 'bookings:write', 'enquiries:write'], ['https://www.sampleplumbing.test'], ago(4)),
+          key('k2', 'Online shop', 'secret', 'live', ['catalog:read', 'customers:write', 'orders:write', 'prices:read', 'stock:read'], [], ago(31))],
+        hooks: [{ id: 'h1', url: 'https://crm.sampleplumbing.test/hooks/riyeser', events: ['booking.received', 'enquiry.received'], mode: 'live', description: 'Our CRM', active: true, disabled_reason: null,
+          secret_hint: 'whsec_…3f9a', created_at: ago(60 * 24 * 9), last_success_at: ago(4), last_failure_at: null, failing_since: null, pending: 0 }],
+        inbox: [['booking', 'waiting', 'widget', 'k1', 'Mele Tui', 2, null], ['enquiry', 'done', 'widget', 'k1', 'Ravi Prasad', 50, { reference: 'EQ-311', state: 'received' }],
+          ['order', 'done', 'api', 'k2', 'Litia Naca', 180, { reference: 'S-2041', state: 'accepted', message: 'Ready for pick-up after 3 pm.' }],
+          ['booking', 'failed', 'widget', 'k1', 'Sam Lee', 600, null, 'Riyeser Bookings was closed on every PC for an hour.'],
+          ['booking', 'rejected', 'widget', 'k1', 'Ana Ruiz', 1500, { state: 'slot_taken', message: 'Sorry, that time was just taken.' }, 'The time was booked at the counter.']]
+          .map(([kind, status, source, kid, customer_name, m, result, error], i) => ({ id: `ev-${i + 1}`, kind, test: false, status, source, key_name: st0(kid), attempts: status === 'failed' ? 5 : 1, error: error || null,
+            result: result || {}, customer_name, taken_by_pc: status === 'done' ? 'Head office PC' : null, created_at: ago(m), updated_at: ago(Math.max(0, m - 1)) })),
+        reqs: [] };
+      function st0(kid) { return kid === 'k1' ? 'Website booking form' : 'Online shop'; }
+      [['GET', '/v1/availability', 200, null], ['GET', '/v1/availability/slots', 200, null], ['POST', '/v1/bookings', 202, null], ['POST', '/v1/bookings', 409, 'slot_not_available'], ['GET', '/v1/prices', 200, null], ['POST', '/v1/orders', 202, null], ['POST', '/v1/orders', 422, 'invalid_payload']]
+        .forEach(([method, path, status, code], i) => st.reqs.push({ id: 900 - i, key_id: /orders|prices/.test(path) ? 'k2' : 'k1', key_name: /orders|prices/.test(path) ? 'Online shop' : 'Website booking form', method, path, status, ms: 40 + i * 13, ip: '203.0.113.0', code, at: ago(i * 7 + 2) }));
+      const need = () => { if (!mfa.on) throw new Error('Only the business\'s owner or an admin, signed in with two-step sign-in, can manage online connections.'); if (!/^u-(me|sam)$/.test(AS)) throw new Error('Only the business\'s owner or an admin, signed in with two-step sign-in, can manage online connections.'); };
+      const find = (id) => { const k = st.keys.find((x) => x.id === id); if (!k) throw new Error('That key isn\'t there.'); return k; };
+      const hook = (id) => st.hooks.find((x) => x.id === id);
+      return (fn, a) => { need(); const now = new Date().toISOString();
+        switch (fn) {
+          case 'api_overview': { const box = (s) => st.inbox.filter((x) => x.status === s).length;
+            return { keys: { active: st.keys.filter((k) => k.status === 'active').length, revoked: st.keys.filter((k) => k.status !== 'active').length }, inbox: { waiting: box('waiting'), taken: box('taken'), failed: box('failed'), rejected_7d: box('rejected'), done_7d: box('done') },
+              published: { catalog_items: 42, stock_items: 40, open_times: 64, staff: 3, catalog_at: ago(20), stock_at: ago(6), availability_at: ago(9) }, webhooks: { active: st.hooks.filter((h) => h.active).length, failing: st.hooks.filter((h) => h.failing_since).length },
+              requests_24h: 213, errors_24h: 4, allowed: { any: true, bookings: true, orders: true } }; }
+          case 'api_keys_list': return st.keys.map((k) => ({ ...k }));
+          case 'api_key_create': { if (!String(a.key_name || '').trim()) throw new Error('Give the key a name (up to 60 letters), like "Website shop".');
+            if (a.key_kind === 'widget' && !(a.origins || []).length) throw new Error('Add the website address the widget is on (like https://www.example.com).');
+            const raw = `rk_${a.key_kind === 'widget' ? 'pub_' : ''}${a.key_mode}_${hex(24)}`;
+            const k = { ...key('k' + Date.now(), a.key_name.trim(), a.key_kind, a.key_mode, [...a.key_scopes].sort(), a.origins || [], null), allowed_ips: a.ips || [], created_at: now, prefix: raw.slice(0, raw.length - 40) + '…' };
+            st.keys.unshift(k); return { ...k, key: raw }; }
+          case 'api_key_rename': return Object.assign(find(a.key_id), { name: a.key_name });
+          case 'api_key_set_access': return Object.assign(find(a.key_id), { allowed_origins: a.origins, allowed_ips: a.ips });
+          case 'api_key_revoke': return Object.assign(find(a.key_id), { status: 'revoked', revoked_at: now });
+          case 'api_inbox_recent': return st.inbox.filter((x) => !a.status || x.status === a.status).map((x) => ({ ...x }));
+          case 'api_inbox_retry': { const e = st.inbox.find((x) => x.id === a.event_id); Object.assign(e, { status: 'waiting', attempts: 0, updated_at: now }); return { id: e.id, status: 'waiting' }; }
+          case 'api_requests_list': return st.reqs.filter((r) => !a.key_id || r.key_id === a.key_id).filter((r) => !a.before_id || r.id < a.before_id);
+          case 'api_webhooks_list': return st.hooks.map((h) => ({ ...h }));
+          case 'api_webhook_create': { const h = { id: 'h' + Date.now(), url: a.url, events: a.events, mode: a.hook_mode, description: a.description, active: true, disabled_reason: null, secret_hint: 'whsec_…' + hex(2), created_at: now, last_success_at: null, last_failure_at: null, failing_since: null, pending: 0 };
+            st.hooks.push(h); return { ...h, secret: 'whsec_' + hex(24) }; }
+          case 'api_webhook_update': { const h = hook(a.hook_id); if (a.url) h.url = a.url; if (a.events) h.events = a.events; if (a.active !== null && a.active !== undefined) { h.active = a.active; if (a.active) { h.failing_since = null; h.disabled_reason = null; } } return { ...h }; }
+          case 'api_webhook_rotate': return { ...hook(a.hook_id), secret: 'whsec_' + hex(24) };
+          case 'api_webhook_delete': st.hooks = st.hooks.filter((h) => h.id !== a.hook_id); return null;
+          case 'api_webhook_ping': { const h = hook(a.hook_id); (h.log = h.log || []).unshift({ id: 'dl' + Date.now(), event: 'ping', event_id: 'e' + Date.now(), status: 'delivered', attempts: 1, next_at: null, last_status: 200, last_error: null, created_at: now, delivered_at: now }); return { queued: 1 }; }
+          case 'api_webhook_deliveries_list': { const h = hook(a.hook_id); return (h.log || []).concat([{ id: 'dl0', event: 'booking.received', event_id: 'ev-1', status: 'delivered', attempts: 1, last_status: 200, last_error: null, created_at: ago(2), delivered_at: ago(2) }]); }
+          default: throw new Error(`Could not find the function public.${fn}`);
+        }
+      };
+    })();
     const reply = (ch, from, body, ms) => setTimeout(() => { const m = msg(ch, from, body, 0); m.created_at = new Date().toISOString(); msgs.push(m); listener && listener(m); }, ms);
     return {
       demo: true,
@@ -417,6 +472,7 @@
       onAuth() {},
       async signIn() { return { user: me }; }, async signUp() { return { user: me }; }, async resetPassword() {},
       async guestTicket() { return { ref: 'T-10250' }; },
+      async conn(fn, args) { return cn(fn, args || {}); },
       async setPassword() {}, async checkPassword(_e, pw) { if (pw === 'wrong-password') throw new Error('Your current password isn\'t right.'); },
       async signOut() { location.href = HERE; },
       async teams() { return [{ id: ws, ...company, invite_code: 'DEMO1234', role: AS === 'u-me' ? 'owner' : AS === 'u-sam' ? 'admin' : 'member', myName: 'You' }]; },
@@ -974,6 +1030,8 @@
     'link.new_password': 'made a new phone password', 'link.set_dnd': 'changed Do not disturb', 'link.reveal_password': 'looked at a phone password (Set up a phone by hand)',
     'link.reveal_own': 'looked at their own phone password (My phone)', 'link.set_dnd_own': 'changed their own Do not disturb', 'link.name_phone': 'named or moved a desk phone',
     'link.support_allowed': 'let Riyeser help with the phones for an hour', 'link.support_ended': 'ended Riyeser\'s help with the phones',
+    'api_key.create': 'made an API key (Connections)', 'api_key.rename': 'renamed an API key', 'api_key.access': 'changed where an API key works', 'api_key.revoke': 'revoked an API key',
+    'api_webhook.create': 'added a webhook', 'api_webhook.update': 'changed a webhook', 'api_webhook.rotate': 'made a new webhook secret', 'api_webhook.delete': 'deleted a webhook', 'api_inbox.retry': 'tried a post box item again',
     'support.reported': 'reported an issue to Riyeser', 'support.reopened': 'told Riyeser an issue is still happening', 'support.fixed': 'confirmed an issue is fixed',
   };
   function histLine(h) {
@@ -1113,6 +1171,7 @@
       await S.wsReady;
     } else { S.wsReady = null; await loadWorkspace(); await openChannel(first && first.id, false); }
     if (params.has('phones') && !S.phonesShown && isAdmin()) { S.phonesShown = true; mg(() => phonesPage(S.home ? 'home' : 'manage'))(); }
+    else if (params.has('connections') && !S.connShown && isAdmin()) { S.connShown = true; mg(() => connectionsPage(S.home ? 'home' : 'manage'))(); }
     else if ((params.has('myphone') || params.has('phones')) && !S.myShown) { S.myShown = true; S.phonesShown = true; myPhonePage(S.home ? 'home' : 'chat'); }
   }
 
@@ -1217,7 +1276,7 @@
     const t = S.team; const fresh = !(S.homeFor === t.id && S.homeReady);
     const ready = homeData(t);
     if (!fresh) await Promise.all([isOwner() && S.billing === undefined ? loadBilling() : null, loadHelp()]);
-    if (S.view === 'phones' || S.view === 'myphone') return;   // the Phones or My phone page opened meanwhile (?phones, ?myphone)
+    if (S.view === 'phones' || S.view === 'myphone' || S.view === 'connections') return;   // the Phones, My phone or Connections page opened meanwhile (?phones, ?myphone, ?connections)
     drawHome(true);
     if (fresh) { await ready; if (S.home && S.team === t && !S.view && $app.querySelector('.hmain')) drawHome(false); }
   }
@@ -1976,12 +2035,12 @@
     const IDLE = 15 * 60000; let last = 0; let fake = null; let timer = null;
     const now = () => fake || Date.now();
     const open = () => !!last && isAdmin() && now() - last < IDLE;
-    const inside = () => S.nav === 'manage' || S.view === 'phones' || !!document.querySelector('.modal[data-mgmt]');
+    const inside = () => S.nav === 'manage' || S.view === 'phones' || S.view === 'connections' || !!document.querySelector('.modal[data-mgmt]');
     function touch() { if (open() && inside()) last = now(); }
     function lock() {
       const was = !!last; last = 0;
       document.querySelectorAll('.modal[data-mgmt]').forEach((m) => m.remove());
-      if (S.view === 'phones') { clearInterval(S.loTimer); S.view = null; S.nav = 'manage'; if (S.home) { S.home = false; } render(); }
+      if (S.view === 'phones' || S.view === 'connections') { clearInterval(S.loTimer); S.view = null; S.cn = null; S.nav = 'manage'; if (S.home) { S.home = false; } render(); }
       else if (S.nav === 'manage' && document.getElementById('lkshell')) renderMain();
       if (was) renderTop();
     }
@@ -2609,6 +2668,7 @@
       ${tile('coinfo', 'building', 'Company', 'Business details, Company ID, linked PCs')}
       ${tile('mgbr', 'branch', 'Branches &amp; extensions', 'Branch join codes and who\'s in each')}
       ${tile('cophones', 'desk', 'Desk phones', 'Riyeser Link Office and every desk phone')}
+      ${tile('coconn', 'grid', 'Connections', 'Your website: API keys, booking widget, webhooks')}
       ${tile('cosec', 'shield', 'Security', 'Two-step sign-in and your password')}
       ${tile('cohist', 'clock', 'History', 'Who changed what, and when')}
       ${isOwner() ? tile('coplan', 'card', 'Billing &amp; plan', 'Your plan, payments and file storage') : ''}
@@ -2645,7 +2705,7 @@
         catch (x) { err.textContent = plainError(x); err.hidden = false; el.querySelector('#mgunlock').disabled = false; el.querySelector('#mgcode').select(); } };
     }
     const t = (id, fn) => on(id, () => (Mgmt.open() ? fn() : renderMain()));
-    t('#coppl', peopleAccess); t('#coreq', joinRequests); t('#coinfo', () => companyInfo(false)); t('#mgbr', manageBranches); t('#cophones', () => phonesPage('manage'));
+    t('#coppl', peopleAccess); t('#coreq', joinRequests); t('#coinfo', () => companyInfo(false)); t('#mgbr', manageBranches); t('#cophones', () => phonesPage('manage')); t('#coconn', () => connectionsPage('manage'));
     t('#cosec', security); t('#cohist', showHistory); t('#coplan', planBilling);
   }
   async function fillDevices(el) {
@@ -3618,6 +3678,329 @@
         liveStatus(d.querySelector('#rplive'), nm);
       };
     });
+  }
+
+  // ------------------------------------------------------------------ Management › Connections (owners and admins)
+  // The business's website or online shop: API keys, the post box, the request log, webhooks and the booking widget.
+  // Every call is an api_* function in team-chat.sql that checks "owner or admin with two-step sign-in" (aal2) itself;
+  // this page also sits behind Management's fresh code. Staff never see it. A database without the api_* part of
+  // team-chat.sql answers PGRST202: the page then says it isn't set up yet.
+  const CN = {
+    SCOPES: [['bookings:write', 'Send bookings', 'Booking requests go to Riyeser Bookings'], ['enquiries:write', 'Send enquiries', 'Questions and quote requests from a contact form'],
+      ['orders:write', 'Send orders', 'Online orders go to Riyeser POS (or Accounting, as invoices)'], ['customers:write', 'Add or update customers', 'For sign-up and newsletter forms'],
+      ['quotes:write', 'Accept quotes', 'Customers accept a quote online'], ['payments:write', 'Record invoice payments', 'Payments taken on your website'],
+      ['availability:read', 'See free booking times', 'Services, staff and open times you publish'], ['catalog:read', 'See products and services', 'Names, descriptions and categories'],
+      ['prices:read', 'See prices', 'Prices of active items'], ['stock:read', 'See stock levels', 'How many are in stock']],
+    WIDGET: ['availability:read', 'bookings:write', 'enquiries:write'],
+    PRESETS: [['widget', 'Website booking widget', 'For the booking form or enquiry form on your website. Safe to put in a web page: it can only see free times and send bookings and enquiries, only from the websites you list.'],
+      ['shop', 'Online shop orders', 'For your online shop\'s server: send orders and customers, read products, prices and stock. Keep it secret.'],
+      ['custom', 'Custom / developer', 'Choose exactly what it may do. For your web developer. Keep it secret.']],
+    SHOP: ['orders:write', 'customers:write', 'catalog:read', 'prices:read', 'stock:read'],
+    EVENTS: [['booking.received', 'A booking comes in'], ['booking.confirmed', 'A booking is confirmed'], ['booking.cancelled', 'A booking is cancelled'], ['order.received', 'An order comes in'],
+      ['order.ready', 'An order is ready'], ['order.completed', 'An order is completed'], ['enquiry.received', 'An enquiry comes in'], ['quote.accepted', 'A quote is accepted'],
+      ['payment.received', 'An invoice payment comes in'], ['stock.changed', 'Stock levels change']],
+    KINDS: { booking: 'Booking', order: 'Order', enquiry: 'Enquiry', customer: 'Customer', quote_accept: 'Quote accepted', invoice_payment: 'Invoice payment' },
+    BOX: [['', 'All'], ['waiting', 'Waiting'], ['taken', 'Being filed'], ['done', 'Done'], ['failed', 'Failed'], ['rejected', 'Rejected']],
+    TABS: [['overview', 'Overview'], ['keys', 'API keys'], ['inbox', 'Post box'], ['log', 'Request log'], ['hooks', 'Webhooks'], ['site', 'Add to your website']],
+    WIDGET_JS: 'https://riyeser.com/widget/book.js',
+  };
+  const cnMissing = (e) => /PGRST202|Could not find the function|schema cache/i.test(String((e && (e.message || e.code)) || '') + ' ' + String((e && e.code) || ''));
+  const cnScope = (s) => (CN.SCOPES.find((x) => x[0] === s) || [s, s])[1];
+  const cnWhen = (t) => (t ? new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—');
+  const cnPill = (st) => { const c = { active: 'ok', done: 'ok', delivered: 'ok', waiting: 'wait', pending: 'wait', taken: 'cfg', failed: 'bad', rejected: 'bad', revoked: '' }[st] ?? '';
+    const l = { taken: 'Being filed', active: 'Active', revoked: 'Revoked', waiting: 'Waiting', done: 'Done', failed: 'Failed', rejected: 'Rejected', pending: 'Waiting', delivered: 'Delivered' }[st] || st;
+    return `<span class="lo-pill ${c}" data-st="${esc(st)}">${esc(l)}</span>`; };
+  const lines = (s) => String(s || '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  async function connectionsPage(back, tab) {
+    if (!isAdmin()) return;
+    if (needs2step()) return security();
+    S.cnBack = back || S.cnBack || (S.home ? 'home' : 'manage'); S.view = 'connections'; S.home = false;
+    S.cn = { tab: tab || (S.cn && S.cn.tab) || 'overview', box: '', reqKey: '', reqSt: '', widgetKey: S.cn && S.cn.widgetKey, site: (S.cn && S.cn.site) || { type: 'booking', accent: '#2563eb', theme: 'auto', sku: '', name: '', price: '' } };
+    drawConn(); await cnLoad(); drawConn(true);
+  }
+  async function cnLoad() {
+    const c = S.cn; const ws = S.team.id; c.err = ''; c.off = false;
+    try {
+      [c.ov, c.keys, c.hooks] = await Promise.all([api.conn('api_overview', { ws }), api.conn('api_keys_list', { ws }), api.conn('api_webhooks_list', { ws })]);
+      if (c.tab === 'inbox') c.inbox = await api.conn('api_inbox_recent', { ws, status: c.box || null, max_rows: 100 });
+      if (c.tab === 'log') { c.reqs = await api.conn('api_requests_list', { ws, key_id: c.reqKey || null, max_rows: 100, before_id: null }); c.more = (c.reqs || []).length >= 100; }
+    } catch (e) { if (cnMissing(e)) c.off = true; else c.err = plainError(e); }
+  }
+  function cnMsg(html, cls) { phMsg(html, cls); }
+  function drawConn(loaded) {
+    const c = S.cn; const t = S.team;
+    tabIcon(false); document.title = 'Connections · Riyeser'; $app.className = 'acct home';
+    const keepY = document.getElementById('connPage') ? window.scrollY : 0;
+    let body;
+    if (!loaded && !c.ov && !c.off) body = '<p class="muted">Loading…</p>';
+    else if (c.off) body = `<div class="lo-card cn-off" id="cnoff"><h2>Connections aren't set up yet</h2><p>Riyeser is finishing an update for online connections (your website, booking widget and webhooks). It will be here soon: nothing needs doing on your side.</p><p class="muted small">If you look after the Riyeser database yourself: run the latest <code>team-chat.sql</code> in the Supabase SQL Editor.</p></div>`;
+    else if (c.err && !c.ov) body = `<div class="err" role="alert">${esc(c.err)}</div><button class="btn" id="cnretry">Try again</button>`;
+    else body = `${c.err ? `<div class="err" role="alert">${esc(c.err)}</div>` : ''}<div class="cn-tabs" role="tablist" aria-label="Connections">${CN.TABS.map(([id, l]) => `<button role="tab" class="cn-tab${c.tab === id ? ' on' : ''}" id="cnt-${id}" data-tab="${id}" aria-selected="${c.tab === id}" aria-controls="cnpanel">${l}${id === 'inbox' && c.ov && c.ov.inbox.failed ? ` <span class="badge" title="Failed">${c.ov.inbox.failed}</span>` : ''}</button>`).join('')}</div>
+      <section class="cn-panel" id="cnpanel" role="tabpanel" aria-labelledby="cnt-${c.tab}">${({ overview: cnOverview, keys: cnKeys, inbox: cnInbox, log: cnLog, hooks: cnHooks, site: cnSite })[c.tab]()}</section>`;
+    $app.innerHTML = `<header class="htop"><button class="btn sm" id="cnback">← ${backLabel(S.cnBack)}</button><b class="hbrand-t">Management › Connections</b><span class="hme">${esc(t.name)}</span></header>
+      <main class="hmain" id="connPage"><h1>Connections</h1><p class="muted lo-sub">Connect ${esc(t.name)}'s website or online shop: bookings, orders and enquiries come straight into Riyeser.</p>${body}
+        <p class="muted small hfoot"><a href="/help/link.html#connections">Help: Connections</a> · <a href="/developers/">Developer docs</a> (send this to your web developer)</p></main>`;
+    window.scrollTo(0, keepY);
+    cnWire();
+  }
+  function cnPlan(ov) {
+    const a = (ov && ov.allowed) || {}; const out = [];
+    const how = isOwner() ? '<button class="btn sm" data-cnplan>See your plan</button>' : '<span class="muted small">Ask the owner to add it.</span>';
+    if (a.any === false) out.push(`<div class="lo-warn cn-plan" data-plan="any"><b>Online connections need a Riyeser program on its free trial or paid.</b> Until then your website's requests are refused (plan_required). ${how}</div>`);
+    else {
+      if (a.bookings === false) out.push(`<div class="lo-warn cn-plan" data-plan="bookings"><b>Online bookings and free times need Riyeser Bookings</b> (on its free trial or paid). The booking widget says "not available" until then. ${how}</div>`);
+      if (a.orders === false) out.push(`<div class="lo-warn cn-plan" data-plan="orders"><b>Online orders and stock need Riyeser POS or Riyeser Accounting</b> (on its free trial or paid). ${how}</div>`);
+    }
+    return out.join('');
+  }
+  function cnHooksOff() {
+    const off = (S.cn.hooks || []).filter((h) => !h.active && h.disabled_reason);
+    return off.length ? `<div class="lo-warn cn-hookoff" id="cnhookoff"><b>⚠️ ${off.length === 1 ? 'A webhook was' : `${off.length} webhooks were`} turned off</b> after failing for 3 days: ${off.map((h) => `<code>${esc(h.url)}</code>`).join(', ')}. Fix the address, then turn it back on in <button class="linkbtn" data-tab="hooks">Webhooks</button>.</div>` : '';
+  }
+  function cnOverview() {
+    const o = S.cn.ov; const p = o.published || {};
+    const stat = (id, n, l, sub = '', bad = false) => `<div class="cn-stat${bad ? ' bad' : ''}" id="${id}"><b>${n}</b><span>${l}</span>${sub ? `<small>${sub}</small>` : ''}</div>`;
+    const pub = (l, n, at, none) => `<li><b>${l}</b> ${at ? `${n} · updated ${esc(ago(at))}` : `<span class="muted">${none}</span>`}</li>`;
+    const none = !(o.keys && o.keys.active);
+    return `${cnPlan(o)}${cnHooksOff()}
+      <div class="cn-stats">${stat('cnsk', o.keys.active, 'API keys in use', o.keys.revoked ? `${o.keys.revoked} revoked` : '')}
+        ${stat('cnsw', o.inbox.waiting + o.inbox.taken, 'In the post box', `${o.inbox.done_7d} done this week`)}
+        ${stat('cnsf', o.inbox.failed, 'Failed', o.inbox.rejected_7d ? `${o.inbox.rejected_7d} rejected this week` : '', o.inbox.failed > 0)}
+        ${stat('cnsr', o.requests_24h, 'Requests today', o.errors_24h ? `${o.errors_24h} refused or failed` : 'last 24 hours')}
+        ${stat('cnsh', o.webhooks.active, 'Webhooks on', o.webhooks.failing ? `${o.webhooks.failing} failing` : '', o.webhooks.failing > 0)}</div>
+      ${none ? `<section class="lo-card cn-start"><h2>Get started</h2><ol class="cn-steps"><li><b>Make a key.</b> Choose what it's for: the booking widget, your online shop, or something your web developer builds. <button class="btn p sm" data-cnnew="widget">+ New key</button></li>
+        <li><b>Put it on your website.</b> Copy the booking widget into your website (<button class="linkbtn" data-tab="site">Add to your website</button>), or send the <a href="/developers/">developer docs</a> to your web developer.</li>
+        <li><b>Keep a PC running Riyeser.</b> Bookings, orders and enquiries wait in the post box until a PC linked to ${esc(S.team.name)} collects them and files them in Bookings, POS or Accounting.</li></ol></section>` : ''}
+      <section class="lo-card"><h2>What your website can read</h2><p class="muted small">Your PCs publish a copy of these for your website. It's never your books: only what you choose to show.</p>
+        <ul class="cn-pub">${pub('Products and services', `${p.catalog_items} items`, p.catalog_at, 'Not published yet. Riyeser POS or Bookings publishes them once Connections are on.')}
+        ${pub('Stock levels', `${p.stock_items} items`, p.stock_at, 'Not published yet.')}${pub('Free booking times', `${p.open_times} open times, ${p.staff} staff`, p.availability_at, 'Not published yet. Riyeser Bookings publishes them from your calendar.')}</ul></section>
+      <section class="lo-card"><h2>When a booking comes in</h2><ol class="cn-steps"><li>Your website sends it to Riyeser. It waits in the <button class="linkbtn" data-tab="inbox">post box</button> and its time is held, so nobody else can book it.</li>
+        <li>A PC running Riyeser Bookings collects it within a minute or two and puts it in your calendar as a request (or confirmed, if you've set that).</li><li>The customer's page shows "Booking request sent", then "confirmed" when you confirm it. Webhooks tell your other systems.</li></ol>
+        <p class="muted small">Something sent with a <b>test</b> key shows in Riyeser as a test, never as a real booking or sale.</p></section>
+      <section class="lo-card"><h2>For your web developer</h2><p>Send them this page: everything they need, with examples.</p><div class="copyrow"><input readonly id="cndevurl" value="https://riyeser.com/developers/" aria-label="Developer docs address"><button class="btn" data-copy="#cndevurl">Copy</button></div></section>`;
+  }
+  function cnKeyRow(k) {
+    const sc = k.kind === 'widget' ? 'Booking widget' : (k.scopes || []).map(cnScope).join(', ');
+    return `<tr data-key="${esc(k.id)}"><td data-l="Name"><div class="cn-c"><b>${esc(k.name)}</b> ${k.mode === 'test' ? '<span class="lo-pill cfg">Test</span>' : '<span class="lo-pill">Live</span>'}<small class="cn-sub">${k.kind === 'widget' ? 'Widget key (public)' : 'Secret key'} · made by ${esc(k.created_by_name || 'someone')} ${esc(ago(k.created_at))}</small></div></td>
+      <td data-l="Key"><div class="cn-c"><code class="mono cn-prefix">${esc(k.prefix)}</code></div></td><td data-l="Can"><div class="cn-c"><span class="cn-scopes">${esc(sc)}</span>${(k.allowed_origins || []).length ? `<small class="cn-sub">Websites: ${esc(k.allowed_origins.join(', '))}</small>` : ''}${(k.allowed_ips || []).length ? `<small class="cn-sub">Addresses: ${esc(k.allowed_ips.join(', '))}</small>` : ''}</div></td>
+      <td data-l="Last used"><div class="cn-c">${k.last_used_at ? esc(ago(k.last_used_at)) : '<span class="muted">Never</span>'}<small class="cn-sub">${k.requests_24h || 0} today</small></div></td><td data-l="Status"><div class="cn-c">${cnPill(k.status)}</div></td>
+      <td class="lo-morec">${k.status === 'active' ? `<button class="btn sm lo-dots" data-kmore="${esc(k.id)}" aria-label="More for ${esc(k.name)}" title="Rename, websites, requests, revoke">⋯</button>` : ''}</td></tr>`;
+  }
+  function cnKeys() {
+    const ks = S.cn.keys || []; const act = ks.filter((k) => k.status === 'active'); const rev = ks.filter((k) => k.status !== 'active');
+    const head = '<thead><tr><th>Name</th><th>Key</th><th>What it can do</th><th>Last used</th><th>Status</th><th><span class="sr">More</span></th></tr></thead>';
+    return `${cnPlan(S.cn.ov)}<div class="lo-dphead"><h3 class="hsec">API keys <small>A key lets your website or shop talk to Riyeser. Up to 25.</small></h3><button class="btn p" id="cnnewkey">+ New key</button></div>
+      ${act.length ? `<div class="lo-tw"><table class="lo cn-keys">${head}<tbody>${act.map(cnKeyRow).join('')}</tbody></table></div>` : '<p class="muted" id="cnnokeys">No keys yet. Make one for your booking widget or online shop.</p>'}
+      ${rev.length ? `<details class="cn-rev"><summary>Revoked keys (${rev.length})</summary><div class="lo-tw"><table class="lo cn-keys">${head}<tbody>${rev.map(cnKeyRow).join('')}</tbody></table></div></details>` : ''}
+      <p class="muted small">Riyeser only keeps a fingerprint of each key, so a key is shown once, when it's made. Lost one? Revoke it and make a new one.</p>`;
+  }
+  function cnInbox() {
+    const rows = S.cn.inbox; const o = S.cn.ov.inbox;
+    return `<p class="muted">What your website sends waits here until a PC running Riyeser collects it and files it (a booking in Bookings, an order in POS or Accounting). Waiting: <b id="cnwaiting">${o.waiting}</b> · being filed: ${o.taken} · failed: <b>${o.failed}</b>.</p>
+      <div class="cn-chips" role="group" aria-label="Show">${CN.BOX.map(([v, l]) => `<button class="chip${S.cn.box === v ? ' on' : ''}" data-box="${v}" aria-pressed="${S.cn.box === v}">${l}</button>`).join('')}</div>
+      ${!rows ? '<p class="muted">Loading…</p>' : !rows.length ? '<p class="muted" id="cnboxempty">Nothing here.</p>' : `<div class="lo-tw"><table class="lo cn-box"><thead><tr><th>When</th><th>What</th><th>Customer</th><th>Status</th><th>Result</th><th></th></tr></thead><tbody>
+        ${rows.map((r) => `<tr data-ev="${esc(r.id)}"><td data-l="When"><div class="cn-c">${esc(cnWhen(r.created_at))}</div></td><td data-l="What"><div class="cn-c"><b>${esc(CN.KINDS[r.kind] || r.kind)}</b>${r.test ? ' <span class="lo-pill cfg">Test</span>' : ''}<small class="cn-sub">${r.source === 'widget' ? 'Booking widget' : 'API'}${r.key_name ? ` · ${esc(r.key_name)}` : ''}</small></div></td>
+          <td data-l="Customer"><div class="cn-c">${esc(r.customer_name || '—')}</div></td><td data-l="Status"><div class="cn-c">${cnPill(r.status)}${r.attempts > 1 ? `<small class="cn-sub">${r.attempts} tries</small>` : ''}</div></td>
+          <td data-l="Result"><div class="cn-c">${r.result && (r.result.reference || r.result.message) ? `${r.result.reference ? `<b>${esc(r.result.reference)}</b> ` : ''}${esc(r.result.message || '')}` : ''}${r.error ? `<small class="cn-sub cn-err">${esc(r.error)}</small>` : ''}${r.taken_by_pc ? `<small class="cn-sub">by ${esc(r.taken_by_pc)}</small>` : ''}</div></td>
+          <td class="lo-morec">${['failed', 'rejected'].includes(r.status) ? `<button class="btn sm" data-retry="${esc(r.id)}">Try again</button>` : ''}</td></tr>`).join('')}</tbody></table></div>`}`;
+  }
+  function cnLog() {
+    const c = S.cn; const rows = (c.reqs || []).filter((r) => !c.reqSt || (c.reqSt === 'ok' ? r.status < 400 : r.status >= 400));
+    return `<p class="muted">Every request from the last 30 days: when, which key, what was asked and Riyeser's answer. Internet addresses are shortened, and what was sent is never kept here.</p>
+      <div class="cn-filters"><label>Key <select id="cnrqkey"><option value="">All keys</option>${(c.keys || []).map((k) => `<option value="${esc(k.id)}"${c.reqKey === k.id ? ' selected' : ''}>${esc(k.name)}${k.status !== 'active' ? ' (revoked)' : ''}</option>`).join('')}</select></label>
+        <label>Answer <select id="cnrqst"><option value="">All</option><option value="ok"${c.reqSt === 'ok' ? ' selected' : ''}>Worked</option><option value="err"${c.reqSt === 'err' ? ' selected' : ''}>Refused or failed</option></select></label></div>
+      ${!c.reqs ? '<p class="muted">Loading…</p>' : !rows.length ? '<p class="muted" id="cnlogempty">No requests.</p>' : `<div class="lo-tw"><table class="lo cn-log"><thead><tr><th>Time</th><th>Key</th><th>Request</th><th>Answer</th><th>Took</th><th>From</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr><td data-l="Time"><div class="cn-c">${esc(cnWhen(r.at))}</div></td><td data-l="Key"><div class="cn-c">${esc(r.key_name || '—')}</div></td><td data-l="Request"><div class="cn-c"><code class="mono">${esc(r.method)} ${esc(r.path)}</code></div></td>
+          <td data-l="Answer"><div class="cn-c"><span class="lo-pill ${r.status < 300 ? 'ok' : r.status < 500 ? 'wait' : 'bad'}">${esc(r.status)}</span>${r.code ? ` <code class="mono">${esc(r.code)}</code>` : ''}</div></td><td data-l="Took"><div class="cn-c">${esc(r.ms)} ms</div></td><td data-l="From" class="mono"><div class="cn-c">${esc(r.ip || '—')}</div></td></tr>`).join('')}</tbody></table></div>`}
+      ${c.more ? '<button class="btn" id="cnolder">Show older</button>' : ''}`;
+  }
+  function cnHooks() {
+    const hs = S.cn.hooks || []; const ev = (e) => (CN.EVENTS.find((x) => x[0] === e) || [e, e])[1];
+    return `${cnHooksOff()}<div class="lo-dphead"><h3 class="hsec">Webhooks <small>Riyeser tells your other systems when something happens. Up to 10.</small></h3><button class="btn p" id="cnaddhook">+ Add endpoint</button></div>
+      ${hs.length ? hs.map((h) => `<section class="lo-card cn-hook" data-hook="${esc(h.id)}"><div class="cn-hookhead"><code class="mono cn-url">${esc(h.url)}</code>${h.mode === 'test' ? '<span class="lo-pill cfg">Test</span>' : '<span class="lo-pill">Live</span>'}
+          ${!h.active ? `<span class="lo-pill bad" data-st="off">Turned off</span>` : h.failing_since ? `<span class="lo-pill wait" data-st="failing">Failing since ${esc(ago(h.failing_since))}</span>` : '<span class="lo-pill ok" data-st="active">On</span>'}</div>
+        ${h.description ? `<p>${esc(h.description)}</p>` : ''}${!h.active && h.disabled_reason ? `<p class="cn-offnote" role="note">⚠️ ${esc(h.disabled_reason)} Nothing is sent to it until you turn it back on.</p>` : ''}
+        <p class="muted small">${(h.events || []).map(ev).join(' · ')}</p><p class="muted small">Secret ${esc(h.secret_hint || '')} · last delivered ${h.last_success_at ? esc(ago(h.last_success_at)) : 'never'}${h.last_failure_at ? ` · last failed ${esc(ago(h.last_failure_at))}` : ''}${h.pending ? ` · ${h.pending} waiting to send` : ''}</p>
+        <div class="row cn-hookbtns"><button class="btn sm" data-whping="${esc(h.id)}">Send test</button><button class="btn sm" data-whlog="${esc(h.id)}">Deliveries</button><button class="btn sm" data-whedit="${esc(h.id)}">Change</button>
+          <button class="btn sm" data-whon="${esc(h.id)}">${h.active ? 'Turn off' : 'Turn back on'}</button><button class="btn sm" data-whrot="${esc(h.id)}">New secret</button><button class="btn sm danger" data-whrm="${esc(h.id)}">Delete</button></div></section>`).join('')
+        : '<p class="muted" id="cnnohooks">No webhooks. Add one if another system (a CRM, your shop, a spreadsheet tool) should hear about bookings, orders and stock changes.</p>'}
+      <p class="muted small">Each delivery is signed with the endpoint's secret: see <a href="/developers/webhooks.html">checking the signature</a>.</p>`;
+  }
+  const cnSnippet = (key) => { const s = S.cn.site; const a = [`src="${CN.WIDGET_JS}"`, `data-key="${key || 'rk_pub_live_…'}"`];
+    if (s.type !== 'booking') a.push(`data-type="${s.type}"`);
+    if (s.type === 'order') { if (s.sku) a.push(`data-sku="${s.sku}"`); if (s.name) a.push(`data-name="${s.name}"`); if (s.price) a.push(`data-price="${s.price}"`, `data-currency="${s.currency || 'USD'}"`); }
+    if (s.accent && s.accent.toLowerCase() !== '#2563eb') a.push(`data-accent="${s.accent}"`); if (s.theme && s.theme !== 'auto') a.push(`data-theme="${s.theme}"`);
+    return `<script ${a.join(' ')} async></` + 'script>'; };
+  function cnSite() {
+    const c = S.cn; const s = c.site; const wk = (c.keys || []).filter((k) => k.kind === 'widget' && k.status === 'active');
+    const mine = c.widgetKey && wk.find((k) => c.widgetKey.startsWith(k.prefix.replace(/…$/, '')));
+    return `${cnPlan(c.ov)}<section class="lo-card"><h2>1. Your widget key</h2>
+      ${mine ? `<p id="cnwk">Using <b>${esc(mine.name)}</b> <code class="mono">${esc(mine.prefix)}</code>. It works on ${esc((mine.allowed_origins || []).join(', '))}.</p>`
+        : `<p>The snippet needs a widget key. ${wk.length ? `You have ${wk.length === 1 ? 'one' : wk.length}: ${wk.map((k) => `<code class="mono">${esc(k.prefix)}</code>`).join(', ')}. Riyeser can't show a key again, so paste it here, or make a new one.` : 'Make one: it only works on the websites you list.'}</p>
+        <div class="copyrow"><input id="cnwkin" placeholder="rk_pub_live_…" aria-label="Your widget key" autocomplete="off" spellcheck="false" value="${esc(c.widgetKey || '')}"><button class="btn p" id="cnmkwk">+ Make a widget key</button></div>`}</section>
+      <section class="lo-card"><h2>2. What to add</h2><div class="cn-opts" role="radiogroup" aria-label="What to add">${[['booking', 'Booking form', 'Customers choose a service, a time and book.'], ['enquiry', 'Enquiry form', 'Questions and quote requests.'], ['order', 'Order button', 'An "Order" button for one product: the order request comes to you to confirm.']]
+        .map(([v, l, d]) => `<label class="opt"><input type="radio" name="cnwtype" value="${v}"${s.type === v ? ' checked' : ''}> <b>${l}</b><small>${d}</small></label>`).join('')}</div>
+        ${s.type === 'order' ? `<div class="cn-grid"><label class="f"><span>Product code (SKU)</span><input id="cnwsku" value="${esc(s.sku)}" maxlength="64" placeholder="CAKE-CHOC"></label><label class="f"><span>Name shown</span><input id="cnwname" value="${esc(s.name)}" maxlength="80" placeholder="Chocolate cake"></label>
+          <label class="f"><span>Price (optional)</span><input id="cnwprice" value="${esc(s.price)}" inputmode="decimal" maxlength="12"></label></div>` : ''}
+        <div class="cn-grid"><label class="f"><span>Colour</span><input type="color" id="cnwacc" value="${esc(s.accent)}"></label><label class="f"><span>Light or dark</span><select id="cnwtheme">${[['auto', 'Match the visitor\'s device'], ['light', 'Light'], ['dark', 'Dark']].map(([v, l]) => `<option value="${v}"${s.theme === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div></section>
+      <section class="lo-card"><h2>3. Copy this into your website</h2><p class="muted small">Paste it where the form should show (in WordPress, Wix or Squarespace: an "HTML" or "Embed code" block).</p>
+        <textarea id="cnsnip" class="cn-snip mono" readonly rows="3" aria-label="Code to copy">${esc(cnSnippet(c.widgetKey))}</textarea><div class="row"><button class="btn p" data-copy="#cnsnip">Copy code</button><a class="btn" href="/developers/widget.html">Widget guide</a></div></section>
+      <section class="lo-card"><h2>Preview</h2><p class="muted small">How it looks on your website, with sample services and times. Nothing is sent from here.</p><div id="cnprev" class="cn-prev"></div></section>`;
+  }
+  function cnPreview() {
+    const box = document.getElementById('cnprev'); if (!box) return; const s = S.cn.site;
+    const go = () => { if (window.RiyeserWidget && document.getElementById('cnprev')) window.RiyeserWidget.mount(box, { demo: true, type: s.type, sku: s.sku || 'SAMPLE', name: s.name || 'Sample product', price: s.price, currency: 'USD', accent: s.accent, theme: s.theme }); };
+    if (window.RiyeserWidget) return go();
+    const sc = document.createElement('script'); sc.src = '/widget/book.js'; sc.onload = go; sc.onerror = () => { box.innerHTML = '<p class="muted">The preview couldn\'t load.</p>'; }; document.head.appendChild(sc);
+  }
+  async function cnTab(tab) { S.cn.tab = tab; if (tab === 'inbox') S.cn.inbox = null; if (tab === 'log') S.cn.reqs = null; drawConn(true); await cnLoad(); drawConn(true); const t = document.getElementById('cnt-' + tab); if (t) t.focus(); }
+  function cnWire() {
+    const on = (sel, fn) => { const el = $app.querySelector(sel); if (el) el.onclick = fn; };
+    on('#cnback', () => { S.view = null; goBack(S.cnBack); }); on('#cnretry', () => connectionsPage());
+    $app.querySelectorAll('[data-tab]').forEach((b) => b.onclick = () => cnTab(b.dataset.tab));
+    const tl = $app.querySelector('[role=tablist]'); if (tl) tl.onkeydown = (e) => { if (!['ArrowRight', 'ArrowLeft'].includes(e.key)) return; const i = CN.TABS.findIndex((x) => x[0] === S.cn.tab); const n = CN.TABS[(i + (e.key === 'ArrowRight' ? 1 : CN.TABS.length - 1)) % CN.TABS.length][0]; cnTab(n); };
+    $app.querySelectorAll('[data-cnplan]').forEach((b) => b.onclick = () => { S.view = null; planBilling(); });
+    $app.querySelectorAll('[data-copy]').forEach((b) => b.onclick = async () => { const i = $app.querySelector(b.dataset.copy); try { await navigator.clipboard.writeText(i.value); b.textContent = 'Copied'; } catch { i.select(); } });
+    $app.querySelectorAll('[data-cnnew]').forEach((b) => b.onclick = () => cnNewKey(b.dataset.cnnew));
+    on('#cnnewkey', () => cnNewKey()); on('#cnmkwk', () => cnNewKey('widget')); on('#cnaddhook', () => cnHookForm());
+    $app.querySelectorAll('[data-kmore]').forEach((b) => b.onclick = () => cnKeyMenu(b.dataset.kmore));
+    $app.querySelectorAll('[data-box]').forEach((b) => b.onclick = async () => { S.cn.box = b.dataset.box; S.cn.inbox = null; drawConn(true); await cnLoad(); drawConn(true); });
+    $app.querySelectorAll('[data-retry]').forEach((b) => b.onclick = async () => { b.disabled = true;
+      try { await api.conn('api_inbox_retry', { ws: S.team.id, event_id: b.dataset.retry }); cnMsg('Back in the post box: a PC will try it again.', 'ok'); } catch (e) { cnMsg(esc(plainError(e)), 'bad'); }
+      await cnLoad(); drawConn(true); });
+    const rk = $app.querySelector('#cnrqkey'); if (rk) rk.onchange = async () => { S.cn.reqKey = rk.value; S.cn.reqs = null; drawConn(true); await cnLoad(); drawConn(true); };
+    const rs = $app.querySelector('#cnrqst'); if (rs) rs.onchange = () => { S.cn.reqSt = rs.value; drawConn(true); };
+    on('#cnolder', async () => { const c = S.cn; const last = c.reqs[c.reqs.length - 1];
+      try { const more = await api.conn('api_requests_list', { ws: S.team.id, key_id: c.reqKey || null, max_rows: 100, before_id: last.id }); c.reqs = c.reqs.concat(more || []); c.more = (more || []).length >= 100; } catch (e) { cnMsg(esc(plainError(e)), 'bad'); }
+      drawConn(true); });
+    const hk = (attr, fn) => $app.querySelectorAll(`[data-${attr}]`).forEach((b) => b.onclick = () => fn((S.cn.hooks || []).find((h) => h.id === b.getAttribute(`data-${attr}`)), b));
+    hk('whping', async (h, b) => { b.disabled = true; try { await api.conn('api_webhook_ping', { ws: S.team.id, hook_id: h.id }); cnMsg('Test event on its way. It shows under Deliveries.', 'ok'); } catch (e) { cnMsg(esc(plainError(e)), 'bad'); } b.disabled = false; });
+    hk('whlog', (h) => cnDeliveries(h)); hk('whedit', (h) => cnHookForm(h));
+    hk('whon', async (h) => { try { await api.conn('api_webhook_update', { ws: S.team.id, hook_id: h.id, url: null, events: null, active: !h.active }); cnMsg(h.active ? 'Turned off.' : 'Turned back on.', 'ok'); } catch (e) { cnMsg(esc(plainError(e)), 'bad'); } await cnLoad(); drawConn(true); });
+    hk('whrot', async (h) => { if (!(await ask('Make a new secret? The old one stops working straight away: update your system with the new one.', { yes: 'Make a new secret' }))) return;
+      try { const r = await api.conn('api_webhook_rotate', { ws: S.team.id, hook_id: h.id }); cnSecretOnce(r); } catch (e) { cnMsg(esc(plainError(e)), 'bad'); } await cnLoad(); drawConn(true); });
+    hk('whrm', async (h) => { if (!(await ask(`Delete the webhook to ${h.url}? Nothing more is sent to it.`, { yes: 'Delete', danger: true }))) return;
+      try { await api.conn('api_webhook_delete', { ws: S.team.id, hook_id: h.id }); cnMsg('Webhook deleted.', 'ok'); } catch (e) { cnMsg(esc(plainError(e)), 'bad'); } await cnLoad(); drawConn(true); });
+    // Add to your website
+    const site = S.cn.site; const redraw = () => { const y = window.scrollY; drawConn(true); window.scrollTo(0, y); };
+    $app.querySelectorAll('input[name=cnwtype]').forEach((r) => r.onchange = () => { site.type = r.value; redraw(); });
+    const val = (id, k) => { const i = $app.querySelector(id); if (i) i.oninput = () => { site[k] = i.value.trim(); const sn = $app.querySelector('#cnsnip'); if (sn) sn.value = cnSnippet(S.cn.widgetKey); clearTimeout(cnWire.t); cnWire.t = setTimeout(cnPreview, 400); }; };
+    val('#cnwsku', 'sku'); val('#cnwname', 'name'); val('#cnwprice', 'price'); val('#cnwacc', 'accent');
+    const th = $app.querySelector('#cnwtheme'); if (th) th.onchange = () => { site.theme = th.value; redraw(); };
+    const wi = $app.querySelector('#cnwkin'); if (wi) wi.oninput = () => { const v = wi.value.trim(); S.cn.widgetKey = /^rk_pub_(live|test)_[0-9a-f]{8,}$/.test(v) ? v : ''; $app.querySelector('#cnsnip').value = cnSnippet(S.cn.widgetKey || ''); };
+    if (S.cn.tab === 'site') cnPreview();
+  }
+  // + New key: a plain-English choice first (the presets), then exactly what it may do
+  function cnNewKey(preset = 'widget') {
+    const scopeTicks = CN.SCOPES.map(([v, l, d]) => `<label class="pk cn-sc"><input type="checkbox" name="scope" value="${v}"><span>${l}<small>${d}</small></span></label>`).join('');
+    modal(`<h3>New API key</h3><form id="cnkf" novalidate><label class="f"><span>Name</span><input name="name" required maxlength="60" placeholder="e.g. Website booking form"></label>
+      <div class="f"><span>What is it for?</span>${CN.PRESETS.map(([v, l, d]) => `<label class="opt"><input type="radio" name="preset" value="${v}"${v === preset ? ' checked' : ''}> <b>${l}</b><small>${d}</small></label>`).join('')}</div>
+      <div class="f"><span>Live or test?</span><label class="opt"><input type="radio" name="mode" value="live" checked> <b>Live</b><small>Real bookings, orders and enquiries.</small></label>
+        <label class="opt"><input type="radio" name="mode" value="test"> <b>Test</b><small>For trying things out: what it sends shows in Riyeser as a test, never as a real booking or sale. Also works from http://localhost.</small></label></div>
+      <div class="f"><span>What it may do</span><div class="pick cn-scopes-pick">${scopeTicks}</div></div>
+      <label class="f" id="cnorow"><span>Websites it works on <small id="cnohint"></small></span><textarea name="origins" rows="2" placeholder="https://www.example.com" spellcheck="false"></textarea></label>
+      <label class="f" id="cniprow"><span>Only from these internet addresses <small>(optional; one per line, like 203.0.113.7 or 203.0.113.0/24. Empty: any)</small></span><textarea name="ips" rows="2" spellcheck="false"></textarea></label>
+      <p class="ferr" id="cnkerr" role="alert" hidden></p><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p" id="cnkgo">Make key</button></div></form>`, (d, close) => {
+      d.dataset.mgmt = '1'; d.querySelector('#cl').onclick = close; const f = d.querySelector('#cnkf');
+      const sync = (fromPreset) => {
+        const p = f.querySelector('input[name=preset]:checked').value; const w = p === 'widget';
+        f.querySelectorAll('input[name=scope]').forEach((x) => { if (fromPreset) x.checked = w ? CN.WIDGET.includes(x.value) : p === 'shop' ? CN.SHOP.includes(x.value) : false;
+          x.disabled = w && !CN.WIDGET.includes(x.value); if (x.disabled) x.checked = false; });
+        d.querySelector('#cniprow').hidden = w;
+        d.querySelector('#cnohint').textContent = w ? '(needed: one per line, like https://www.example.com or https://*.example.com)' : '(only if this key is used inside a web page; usually leave empty)';
+      };
+      f.querySelectorAll('input[name=preset]').forEach((r) => r.onchange = () => sync(true)); sync(true);
+      f.querySelector('input[name=name]').focus();
+      f.onsubmit = async (e) => { e.preventDefault(); const err = d.querySelector('#cnkerr'); err.hidden = true; const fd = new FormData(f);
+        const kind = fd.get('preset') === 'widget' ? 'widget' : 'secret'; const scopes = fd.getAll('scope');
+        const say = (m) => { err.textContent = m; err.hidden = false; };
+        if (!String(fd.get('name') || '').trim()) return say('Give the key a name, like "Website shop".');
+        if (!scopes.length) return say('Tick at least one thing the key may do.');
+        const origins = lines(fd.get('origins')); if (kind === 'widget' && !origins.length) return say('Add the website the widget is on, like https://www.example.com');
+        d.querySelector('#cnkgo').disabled = true;
+        try { const k = await api.conn('api_key_create', { ws: S.team.id, key_name: String(fd.get('name')).trim(), key_kind: kind, key_mode: fd.get('mode'), key_scopes: scopes, origins, ips: kind === 'widget' ? [] : lines(fd.get('ips')) });
+          close(); if (k.kind === 'widget') S.cn.widgetKey = k.key; cnKeyOnce(k); await cnLoad(); drawConn(true);
+        } catch (x) { say(cnMissing(x) ? 'Connections aren\'t set up yet. Riyeser is finishing an update: try again later.' : plainError(x)); d.querySelector('#cnkgo').disabled = false; }
+      };
+    });
+  }
+  // The key, once. It isn't kept anywhere on this page afterwards (a widget key is public, so it's kept for the snippet).
+  function cnKeyOnce(k) {
+    modal(`<h3>${ic('shield')} Copy your key now</h3><p><b>${esc(k.name)}</b> · ${k.kind === 'widget' ? 'widget key' : 'secret key'} · ${k.mode === 'test' ? 'test' : 'live'}</p>
+      <div class="copyrow"><input id="cnnewkey" class="mono" readonly value="${esc(k.key)}" aria-label="Your new key"><button class="btn p" id="cnkcopy">Copy</button></div>
+      <p class="lo-warn" role="note">⚠️ <b>You won't see this key again.</b> Riyeser only keeps a fingerprint of it. ${k.kind === 'widget' ? 'It goes in your website\'s code (it\'s safe to show: it only works on your websites).' : 'Keep it secret: put it in your server\'s settings, never in a web page, an email or a chat.'} Lost it? Revoke it and make a new one.</p>
+      <div class="mfoot">${k.kind === 'widget' ? '<button class="btn" id="cnksite">Add to your website</button>' : ''}<button class="btn p" id="cnkdone">I've copied it</button></div>`, (d, close) => {
+      d.dataset.mgmt = '1'; d.onclick = null;   // not closed by a stray click outside: only by "I've copied it"
+      const i = d.querySelector('#cnnewkey'); i.focus(); i.select();
+      d.querySelector('#cnkcopy').onclick = async () => { try { await navigator.clipboard.writeText(i.value); d.querySelector('#cnkcopy').textContent = 'Copied'; } catch { i.select(); } };
+      d.querySelector('#cnkdone').onclick = close; const s = d.querySelector('#cnksite'); if (s) s.onclick = () => { close(); cnTab('site'); };
+    });
+  }
+  function cnKeyMenu(id) {
+    const k = S.cn.keys.find((x) => x.id === id);
+    modal(`<h3>${esc(k.name)}</h3><p class="muted small"><code class="mono">${esc(k.prefix)}</code> · ${k.kind === 'widget' ? 'widget key' : 'secret key'} · ${k.mode}</p>
+      <div class="lo-acts cn-kacts"><button class="btn" data-m="rename">${ic('edit')} Rename</button><button class="btn" data-m="access">${ic('shield')} Websites and addresses</button>
+      <button class="btn" data-m="log">${ic('clock')} Request log</button><button class="btn danger" data-m="revoke">${ic('x')} Revoke</button></div><div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => {
+      d.dataset.mgmt = '1'; d.querySelector('#cl').onclick = close;
+      d.querySelectorAll('[data-m]').forEach((b) => b.onclick = async () => { close(); const m = b.dataset.m; const ws = S.team.id;
+        if (m === 'log') { S.cn.reqKey = k.id; return cnTab('log'); }
+        if (m === 'revoke') {
+          if (!(await ask(`Revoke "${k.name}"? Anything using it (${k.kind === 'widget' ? 'the booking widget on your website' : 'your website or shop'}) stops working straight away. This can't be undone.`, { yes: 'Revoke key', danger: true, title: 'Revoke this key?' }))) return;
+          try { await api.conn('api_key_revoke', { ws, key_id: k.id }); if (S.cn.widgetKey && S.cn.widgetKey.startsWith(k.prefix.replace(/…$/, ''))) S.cn.widgetKey = ''; cnMsg('Key revoked.', 'ok'); } catch (e) { cnMsg(esc(plainError(e)), 'bad'); }
+          await cnLoad(); return drawConn(true);
+        }
+        const ren = m === 'rename';
+        modal(`<h3>${ren ? 'Rename key' : 'Websites and addresses'}</h3><form id="cnkef">${ren ? `<label class="f"><span>Name</span><input name="name" maxlength="60" required value="${esc(k.name)}"></label>`
+          : `<label class="f"><span>Websites it works on <small>${k.kind === 'widget' ? '(at least one)' : '(only if it\'s used inside a web page)'}</small></span><textarea name="origins" rows="3" spellcheck="false">${esc((k.allowed_origins || []).join('\n'))}</textarea></label>
+            ${k.kind === 'widget' ? '' : `<label class="f"><span>Only from these internet addresses <small>(empty: any)</small></span><textarea name="ips" rows="3" spellcheck="false">${esc((k.allowed_ips || []).join('\n'))}</textarea></label>`}
+            <p class="muted small">What it may do can't be changed: make a new key for that.</p>`}
+          <p class="ferr" id="cnkeerr" role="alert" hidden></p><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Save</button></div></form>`, (dd, cl) => {
+          dd.dataset.mgmt = '1'; dd.querySelector('#cl').onclick = cl;
+          dd.querySelector('#cnkef').onsubmit = async (e) => { e.preventDefault(); const fd = new FormData(e.target);
+            try { if (ren) await api.conn('api_key_rename', { ws, key_id: k.id, key_name: String(fd.get('name') || '').trim() });
+              else await api.conn('api_key_set_access', { ws, key_id: k.id, origins: lines(fd.get('origins')), ips: k.kind === 'widget' ? [] : lines(fd.get('ips')) });
+              cl(); cnMsg('Saved.', 'ok'); await cnLoad(); drawConn(true);
+            } catch (x) { const er = dd.querySelector('#cnkeerr'); er.textContent = plainError(x); er.hidden = false; } };
+        });
+      });
+    });
+  }
+  function cnHookForm(h) {
+    modal(`<h3>${h ? 'Change webhook' : 'Add a webhook endpoint'}</h3><form id="cnhf" novalidate><label class="f"><span>Address (https)</span><input name="url" type="url" required maxlength="500" placeholder="https://example.com/riyeser-webhook" value="${esc(h ? h.url : '')}" spellcheck="false"></label>
+      ${h ? '' : `<label class="f"><span>What it's for (optional)</span><input name="description" maxlength="200" placeholder="e.g. Our CRM"></label>
+      <div class="f"><span>Live or test?</span><label class="opt"><input type="radio" name="mode" value="live" checked> <b>Live</b><small>What live keys send, and real news from your PCs.</small></label><label class="opt"><input type="radio" name="mode" value="test"> <b>Test</b><small>Only what test keys send.</small></label></div>`}
+      <div class="f"><span>Tell it when…</span><div class="pick">${CN.EVENTS.map(([v, l]) => `<label class="pk"><input type="checkbox" name="ev" value="${v}"${(h ? h.events || [] : ['booking.received', 'order.received', 'enquiry.received']).includes(v) ? ' checked' : ''}><span>${l}<small class="mono">${v}</small></span></label>`).join('')}</div></div>
+      <p class="ferr" id="cnherr" role="alert" hidden></p><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">${h ? 'Save' : 'Add endpoint'}</button></div></form>`, (d, close) => {
+      d.dataset.mgmt = '1'; d.querySelector('#cl').onclick = close;
+      d.querySelector('#cnhf').onsubmit = async (e) => { e.preventDefault(); const fd = new FormData(e.target); const err = d.querySelector('#cnherr'); const say = (m) => { err.textContent = m; err.hidden = false; };
+        const url = String(fd.get('url') || '').trim(); const events = fd.getAll('ev');
+        let u = null; try { u = new URL(url); } catch { /* not an address */ }
+        if (!u || u.protocol !== 'https:') return say('Use an address that starts with https:// (plain http isn\'t allowed).');
+        if (/^(localhost|.*\.local|.*\.internal|\d+\.\d+\.\d+\.\d+|\[.*\])$/i.test(u.hostname)) return say('Use a public address on the internet (not localhost, an internal name or a bare IP address).');
+        if (!events.length) return say('Tick at least one thing to be told about.');
+        try {
+          if (h) { await api.conn('api_webhook_update', { ws: S.team.id, hook_id: h.id, url, events, active: null }); close(); cnMsg('Saved.', 'ok'); }
+          else { const r = await api.conn('api_webhook_create', { ws: S.team.id, url, events, hook_mode: fd.get('mode'), description: String(fd.get('description') || '').trim() }); close(); cnSecretOnce(r); }
+          await cnLoad(); drawConn(true);
+        } catch (x) { say(plainError(x)); }
+      };
+    });
+  }
+  function cnSecretOnce(r) {
+    modal(`<h3>${ic('shield')} Copy the signing secret now</h3><p>For <code class="mono">${esc(r.url)}</code>. Your system uses it to check each delivery really came from Riyeser.</p>
+      <div class="copyrow"><input id="cnsecret" class="mono" readonly value="${esc(r.secret)}" aria-label="Signing secret"><button class="btn p" id="cnscopy">Copy</button></div>
+      <p class="lo-warn" role="note">⚠️ <b>You won't see this secret again.</b> Keep it secret. Lost it? Make a new secret.</p><div class="mfoot"><a class="btn" href="/developers/webhooks.html" target="_blank" rel="noopener">How to check it</a><button class="btn p" id="cnsdone">I've copied it</button></div>`, (d, close) => {
+      d.dataset.mgmt = '1'; d.onclick = null; const i = d.querySelector('#cnsecret'); i.select();
+      d.querySelector('#cnscopy').onclick = async () => { try { await navigator.clipboard.writeText(i.value); d.querySelector('#cnscopy').textContent = 'Copied'; } catch { i.select(); } };
+      d.querySelector('#cnsdone').onclick = close;
+    });
+  }
+  async function cnDeliveries(h) {
+    let rows = []; try { rows = await api.conn('api_webhook_deliveries_list', { ws: S.team.id, hook_id: h.id, max_rows: 50 }) || []; } catch (e) { return cnMsg(esc(plainError(e)), 'bad'); }
+    modal(`<h3>Deliveries</h3><p class="muted small"><code class="mono">${esc(h.url)}</code> · the last 30 days</p>${rows.length ? `<div class="lo-tw"><table class="lo cn-del"><thead><tr><th>When</th><th>Event</th><th>Status</th><th>Answer</th></tr></thead><tbody>
+      ${rows.map((x) => `<tr><td data-l="When"><div class="cn-c">${esc(cnWhen(x.created_at))}</div></td><td data-l="Event"><div class="cn-c"><code class="mono">${esc(x.event)}</code></div></td><td data-l="Status"><div class="cn-c">${cnPill(x.status)}${x.attempts > 1 ? `<small class="cn-sub">${x.attempts} tries${x.next_at && x.status === 'pending' ? `, next ${esc(cnWhen(x.next_at))}` : ''}</small>` : ''}</div></td>
+        <td data-l="Answer"><div class="cn-c">${x.last_status ? esc(x.last_status) : ''}${x.last_error ? ` <small class="cn-sub cn-err">${esc(x.last_error)}</small>` : ''}${x.delivered_at ? `<small class="cn-sub">delivered ${esc(cnWhen(x.delivered_at))}</small>` : ''}</div></td></tr>`).join('')}</tbody></table></div>` : '<p class="muted" id="cndelempty">Nothing sent yet. Press <b>Send test</b> to try it.</p>'}
+      <div class="mfoot"><button class="btn" id="cl">Close</button></div>`, (d, close) => { d.dataset.mgmt = '1'; d.querySelector('#cl').onclick = close; });
   }
 
   // ------------------------------------------------------------------ ☎ My phone (everyone): my extension, my desk phone, how to set it up

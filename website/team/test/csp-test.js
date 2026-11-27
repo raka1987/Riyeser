@@ -18,7 +18,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     pg.refused = async () => [...refused, ...(await pg.evaluate(() => window.__csp))];
     return pg;
   };
-  const pages = ['/index.html', '/pricing.html', '/programs.html', '/downloads.html', '/help.html', '/help/link.html', '/programs/payroll.html', '/programs/link-office.html', '/help/link-office.html', '/terms.html'];
+  const pages = ['/index.html', '/pricing.html', '/programs.html', '/downloads.html', '/help.html', '/help/link.html', '/programs/payroll.html', '/programs/link-office.html', '/help/link-office.html', '/terms.html', '/developers/', '/developers/api.html', '/developers/widget.html'];
   for (const path of pages) {
     const pg = await open(path);
     const meta = await pg.$eval('meta[http-equiv="Content-Security-Policy"]', (m) => m.content).catch(() => '');

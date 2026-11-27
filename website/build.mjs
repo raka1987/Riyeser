@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { helpGuides } from './help.mjs';
+import { developerPages, DEV_PAGES } from './developers.mjs';
 import { PRICE, STORAGE_GB, BUNDLES, separately, planPrice, usd } from './prices.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -769,7 +770,7 @@ document.querySelectorAll('.links > .dd > a').forEach(function(a){a.addEventList
     <div class="flinks">
       <div><h2 class="fh">Industries</h2>${INDUSTRIES.map((i) => `<a href="${indLink(i, up)}">${esc(i.name)}</a>`).join('')}</div>
       <div><h2 class="fh">Help</h2><a href="${up}help.html">Help Centre</a><a href="${up}help/start.html">Getting started</a><a href="${up}downloads.html">Downloads</a><a href="/link/?contact">Contact support</a><a class="fmail" href="mailto:${EMAIL}">${EMAIL}</a></div>
-      <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="/link/?signup">Create an account</a><a href="${up}terms.html">Terms of use</a></div>
+      <div><h2 class="fh">Riyeser</h2><a href="${up}pricing.html">Pricing</a><a href="/link/?signup">Create an account</a><a href="${up}developers/">Developers</a><a href="${up}terms.html">Terms of use</a></div>
     </div>
   </div>
   <div class="fbase"><span>© ${new Date().getFullYear()} Riyeser Group</span><span class="fwin"><span>For Windows 10 &amp; 11</span><span>Works offline</span><span>No account or card needed</span></span></div></div></footer>
@@ -1301,6 +1302,13 @@ document.getElementById('hnone').style.display=any?'none':'block'})})()</script>
   });
 }
 
+// ---------- developers: online connections (the API, webhooks and the booking widget), from developers.mjs ----------
+const API_BASE = `${SUPABASE_ORIGIN || 'https://goaugynxeatzqzifpoes.supabase.co'}/functions/v1/api`;
+for (const d of developerPages({ API: API_BASE, EMAIL, WIDGET_JS: `${SITE}/widget/book.js` })) page({ ...d, active: 'developers', body: () => d.body });
+// The booking widget (riyeser.com/widget/book.js): websites load it from here; it calls the API above.
+mkdirSync(join(OUT, 'widget'), { recursive: true });
+writeFileSync(join(OUT, 'widget', 'book.js'), readFileSync(join(ROOT, 'widget', 'book.js'), 'utf8').replace("'__RIYESER_API__'", JSON.stringify(API_BASE)));
+
 // ---------- old riyeser.com addresses keep working ----------
 const redirect = (path, to, label) => { const f = join(OUT, path); mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f, `<!doctype html><meta charset="utf-8"><title>${label} — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${to}"><p>Moved to <a href="${to}">${label}</a>.</p>`); };
@@ -1320,7 +1328,7 @@ cpSync(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true });
 const SUBFOLDER = BASE !== '/';
 if (!SUBFOLDER) writeFileSync(join(OUT, 'CNAME'), 'riyeser.com\n');
 if (!SUBFOLDER) writeFileSync(join(OUT, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${SITE}/sitemap.xml\n`);
-const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...guidesFor({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`)];
+const urls = ['', 'programs.html', 'downloads.html', 'pricing.html', 'help.html', 'terms.html', ...INDUSTRIES.map((i) => `industries/${i.id}.html`), ...PROGRAMS.map((p) => `programs/${p.id}.html`), ...guidesFor({ EMAIL, SERVICES_APP, up: '' }).map((g) => `help/${g.id}.html`), ...DEV_PAGES.map(([p]) => (p === 'index' ? 'developers/' : `developers/${p}.html`))];
 writeFileSync(join(OUT, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${SITE}/${u}</loc></url>`).join('\n')}\n</urlset>\n`);
 writeFileSync(join(OUT, '404.html'), `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page not found — Riyeser</title><link rel="stylesheet" href="${BASE}assets/site.css"><div class="c hero"><h1>That page isn't here</h1><p class="lead">It may have moved.</p><a class="btn p" href="${BASE}">Go to the home page</a></div>`);
 console.log('Built', urls.length, 'pages into', OUT);

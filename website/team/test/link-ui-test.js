@@ -231,7 +231,7 @@ async function contrast(pg, sel) {
     await pg.screenshot({ path: out + '/link-manage-locked.png' });
     await pg.fill('#mgcode', '000000'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgerr:not([hidden])'); assert.match(await text(pg, '#mgerr'), /isn't right/);
     await pg.fill('#mgcode', '123456'); await pg.click('#mgunlock'); await pg.waitForSelector('#mgopen');
-    assert.deepStrictEqual(await pg.$$eval('.lk-tile', (x) => x.map((y) => y.id)), ['coppl', 'coreq', 'coinfo', 'mgbr', 'cophones', 'cosec', 'cohist', 'coplan']);
+    assert.deepStrictEqual(await pg.$$eval('.lk-tile', (x) => x.map((y) => y.id)), ['coppl', 'coreq', 'coinfo', 'mgbr', 'cophones', 'coconn', 'cosec', 'cohist', 'coplan']);
     assert.match(await text(pg, '#coreq'), /1 waiting/);
     await pg.screenshot({ path: out + '/link-manage-open.png' });
     await pg.click('#coppl'); await pg.waitForSelector('details.brm');
@@ -288,7 +288,7 @@ async function contrast(pg, sel) {
     assert.ok(await jo.$('#comyphone') && await jo.$('#set-2fa') && await jo.$('#set-look') && await jo.$('#inv'), 'staff: My phone, two-step, appearance, invite');
     await jo.screenshot({ path: out + '/link-staff-settings.png' });
     await jo.evaluate(() => window.RiyeserTeam.setNav('manage')); assert.ok(!(await jo.$('#mglocked')) && !(await jo.$('#coppl')), 'Management can\'t even be opened by staff');
-    for (const id of ['#coppl', '#coreq', '#cophones', '#cobill', '#coplan', '#um-mgmt', '#mgcode', '.lk-udot']) assert.ok(!(await jo.$(id)), id + ' never shows for staff');
+    for (const id of ['#coppl', '#coreq', '#cophones', '#coconn', '#cobill', '#coplan', '#um-mgmt', '#mgcode', '.lk-udot']) assert.ok(!(await jo.$(id)), id + ' never shows for staff');
     assert.ok(!(await jo.evaluate(() => document.body.innerText)).match(/join request|Management/i), 'no admin words anywhere');
     console.log('staff see no Management or admin items: ok'); await jo.close();
     await ctx.close();
