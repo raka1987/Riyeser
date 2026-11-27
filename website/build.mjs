@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { helpGuides } from './help.mjs';
 import { developerPages, DEV_PAGES } from './developers.mjs';
+import { connectSection, connectTeaser } from './connect.mjs';
 import { PRICE, STORAGE_GB, BUNDLES, separately, planPrice, usd } from './prices.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -855,9 +856,12 @@ ${homeHero(up)}
 <section class="finder" id="find"><div class="c">
   <h2 class="h2">Find your program</h2>
   ${grouped(PROGRAMS, (l) => `<div class="frow">${l.map((p) => `<a href="${up}programs/${p.id}.html"${demoTabOf[p.id] ? ` data-demo="${demoTabOf[p.id]}"` : ''}><img src="${up}assets/apps/${p.id}.png" alt="" width="96" height="96" loading="lazy"><span class="fname">${esc(p.short === 'Central' ? 'Central' : p.short)}</span><span class="fmeta"><small class="fprice${p.comesWith ? ' with' : p.free ? ' free' : ''}">${p.comesWith ? esc(withShort(p)) : p.free ? 'Free' : `${usd(PRICE[MOD[p.id]])}<span class="pm"> a month</span><span class="pmo">/mo</span>`}</small></span></a>`).join('')}</div>${l[0].free ? '' : `<p class="fnote">${esc(USERS_NOTE)}</p>`}`, (t) => `<p class="ghead">${esc(t)}</p>`)}
+  ${connectTeaser()}
 </div></section>
 
 ${demoSection(up)}
+
+${connectSection(up)}
 
 <section class="c">
   <h2 class="h2">Built for your industry</h2>
