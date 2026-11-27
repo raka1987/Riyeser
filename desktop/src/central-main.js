@@ -20,6 +20,8 @@ const checklist = require('./central/checklist');
 const freshstart = require('./central/freshstart');
 const diagnostics = require('./central/diagnostics');
 const programReports = require('./central/program-reports');
+const { LocalApp } = require('./central/local-app');
+const { createSync } = require('./central/online-sync');
 const crypto = require('crypto');
 
 app.setName('Riyeser Central');
@@ -35,6 +37,17 @@ app.setName('Riyeser Central');
 if (!app.requestSingleInstanceLock()) { app.quit(); }
 
 let win = null; let store = null;
+let localApp = null; let onlineSync = null;   // online connections (set up in registerIpc)
+// A new online booking or order: a Windows notification; clicking it brings Central forward.
+function showOnlineNotification(n) {
+  try {
+    const { Notification } = require('electron');
+    if (!Notification.isSupported()) return;
+    const note = new Notification({ title: n.title, body: n.body || '' });
+    note.on('click', () => { if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); send('online-sync:open', n); } });
+    note.show();
+  } catch { /* a notification is a nice extra */ }
+}
 const deskData = () => path.join(app.getPath('appData'), 'Desk Assistant', 'data');
 const localPrograms = () => path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs');
 
@@ -296,6 +309,7 @@ function registerIpc() {
     const p = PROGRAMS.find((x) => x.id === id);
     if (!p) throw new Error('Unknown program');
     const exe = locate(p);
+    if (onlineSync && ['bookings', 'pos', 'accounting', 'accounting-basics', 'invoices'].includes(id)) setTimeout(() => onlineSync.tick(), 10 * 1000);
     if (p.url && !exe) { await shell.openExternal(p.url); return true; }
     if (!exe) throw new Error(`${p.full} isn't installed on this computer yet (or I can't find it). Use “Locate…” to point me to it.`);
     // Quick access: programs that can open on a given screen (e.g. Accounting's Shop counter) get --page=<name>.
@@ -396,6 +410,19 @@ function registerIpc() {
   };
   // device.json: this PC's id for the other Riyeser programs (a signed licence names the PC it's for)
   try { if (online.readCompany(appData)) on.deviceId(); } catch { /* tried again at the licence check */ }
+  // ---------- online connections: website orders and bookings in, prices, stock and free times out ----------
+  // Only on the business's sync PC (central/online-sync.js); the books are changed by the program that holds them,
+  // through its local API (central/local-app.js), never by Central.
+  localApp = new LocalApp({ dbPath: sources.accountingDbPath(), fetchFn: (u, o) => fetch(u, o),
+    findExe: (id) => { const p = PROGRAMS.find((x) => x.id === id); return p ? locate(p) : null; },
+    // started without a window; never in demo mode (the sync waits while demo mode is on)
+    spawnFn: (exe, args) => { const env = { ...process.env }; delete env.RIYESER_DEMO; return spawn(exe, args, { stdio: 'ignore', cwd: path.dirname(exe), env, windowsHide: true }); } });
+  onlineSync = createSync({ online: on, local: localApp, store, appData, readCompany: online.readCompany, isDemo: demoOn, pcName: os.hostname(),
+    notify: showOnlineNotification, onChange: (st) => send('online-sync', st) });
+  onlineSync.start(20 * 1000);
+  handle('onlineSync:status', () => onlineSync.status());
+  handle('onlineSync:setMode', async (mode) => { const st = onlineSync.setMode(String(mode || '')); onlineSync.tick(); return st; });
+  handle('onlineSync:now', () => onlineSync.poke());
   const companyState = async () => {
     const setup = store.get('company-setup', {}) || {};
     const s = on.session;
@@ -674,5 +701,5 @@ app.whenReady().then(async () => {
   registerIpc();
   createWindow();
 });
-app.on('before-quit', () => { quitting = true; });
+app.on('before-quit', () => { quitting = true; if (onlineSync) onlineSync.stop(); if (localApp) localApp.stop(); });
 app.on('window-all-closed', () => app.quit());
