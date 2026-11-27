@@ -2291,7 +2291,10 @@ select pg_temp.as_user('a7a7a7a3-0000-4000-8000-000000000003'); set role authent
 do $$ declare l json; a uuid := current_setting('lk.a')::uuid; begin
   l := public.company_licence(a);
   assert (l -> 'modules' -> 'calls' ->> 'status') is not null and (l -> 'seats') is not null, 'programs, dates and seats are there';
-  assert l::text !~* '"(monthly|price|prices|amount|estimate)"\s*:', format('no money in the licence: %s', l);
+  -- (the programs are keyed by their ids, and one program is Riyeser Estimate, id 'estimate': check money keys outside them)
+  assert (l::jsonb - 'modules')::text !~* '"(monthly|price|prices|amount|estimate)"\s*:', format('no money in the licence: %s', l);
+  assert not exists (select 1 from jsonb_each(l::jsonb -> 'modules') e where e.value::text ~* '"(monthly|price|prices|amount|estimate)"\s*:'),
+    format('no money in the licence''s programs: %s', l);
   begin perform public.company_monthly(a); raise exception 'a member read the monthly estimate';
   exception when insufficient_privilege then null; end;
   begin perform public.riyeser_people(a); raise exception 'a member read the people paid for';
@@ -2834,7 +2837,7 @@ set role authenticated;
 select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
 do $$ declare l json := public.hq_licences(); b json; begin
   assert (l ->> 'monthly_recurring')::numeric >= 46 and (l ->> 'recurring_count')::int >= 1, 'monthly recurring: the paid bank invoice still running (' || (l ->> 'monthly_recurring') || ')';
-  assert (select count(*) from json_array_elements(l -> 'modules') x where x ->> 'installed' is not null) = 7, 'installs counted for each program';
+  assert (select count(*) from json_array_elements(l -> 'modules') x where x ->> 'installed' is not null) = 8, 'installs counted for each program (with Riyeser Estimate)';
   b := public.hq_licence_businesses('plus', 'paid');
   assert exists (select 1 from json_array_elements(b) x where x ->> 'id' = current_setting('pay.a') and x ->> 'status' = 'active' and x ->> 'until' is not null), 'Pay Co is on Accounting Plus, paid';
   assert not exists (select 1 from json_array_elements(public.hq_licence_businesses('plus', 'trial')) x where x ->> 'id' = current_setting('pay.a')), 'and not on its trial';
@@ -3651,6 +3654,43 @@ do $$ begin
   assert not exists (select 1 from public.api_inbox where id = current_setting('api.ord')::uuid), 'old done one removed';
   assert (select status from public.api_inbox where payload ->> 'message' = 'old') = 'failed', 'never collected: failed';
   assert (select count(*) from public.api_requests) = 1, 'recent log kept';
+end $$;
+reset role;
+-- ===== Riyeser Estimate (module 'estimate'): its 90-day trial starts on first use, and it has no price yet
+reset role;
+do $$ declare w uuid; d uuid; s json; begin
+  select workspace_id, id into w, d from public.devices order by linked_at nulls last limit 1;
+  update public.workspaces set status = 'active' where id = w;
+  delete from public.company_modules where workspace_id = w and module = 'estimate';
+  s := public.module_state(w, 'estimate');
+  assert (s ->> 'status') = 'trial' and (s ->> 'active')::boolean and (s ->> 'trial_ends') is null
+    and (s ->> 'starts_on_first_use')::boolean and (s ->> 'days_left')::int = 90, format('not started yet: %s', s);
+  assert (public.licence_json(w) -> 'modules' -> 'estimate' ->> 'status') = 'trial', 'Riyeser Central gets Estimate';
+  assert public.module_label('estimate') = 'Riyeser Estimate', 'its name';
+  update public.devices set programs = '[{"id": "central", "version": "2.0.0"}]' where id = d;
+  assert not exists (select 1 from public.company_modules where workspace_id = w and module = 'estimate'), 'no trial without the program';
+  update public.devices set programs = '[{"id": "central", "version": "2.0.0"}, {"id": "estimate", "version": "2.11.0"}]' where id = d;
+  s := public.module_state(w, 'estimate');
+  assert (s ->> 'trial_ends')::date = current_date + 90 and (s ->> 'days_left')::int = 90, format('first use starts 90 days: %s', s);
+  update public.company_modules set trial_ends = current_date + 10 where workspace_id = w and module = 'estimate';
+  update public.devices set programs = programs where id = d;     -- reported again later: the trial isn't restarted
+  assert (public.module_state(w, 'estimate') ->> 'trial_ends')::date = current_date + 10, 'a running trial is never restarted';
+  update public.company_modules set trial_ends = current_date - 1 where workspace_id = w and module = 'estimate';
+  assert (public.module_state(w, 'estimate') ->> 'status') = 'ended', 'after the trial: ended (read-only on the PC)';
+  assert public.riyeser_price('estimate') = 0, 'no price yet: to be announced';
+  delete from public.company_modules where workspace_id = w and module = 'estimate';
+  perform set_config('test.est_ws', w::text, false);
+  assert not ('estimate' = any (public.billing_mods(array['estimate', 'basic']))), 'not billable yet';
+  begin insert into public.company_modules (workspace_id, module) values (w, 'nope'); raise exception 'unknown program allowed';
+  exception when check_violation then null; end;
+end $$;
+set role authenticated;
+select pg_temp.as_user('b1b1b1b1-0000-4000-8000-000000000006');
+do $$ begin
+  -- HQ Licences: a business that hasn't used Estimate yet isn't counted as on its trial
+  assert not exists (select 1 from json_array_elements(public.hq_licence_businesses('estimate', 'trial')) x
+                     where x ->> 'id' = current_setting('test.est_ws')), 'not started: not listed on trial';
+  assert exists (select 1 from json_array_elements(public.hq_licences() -> 'modules') x where x ->> 'module' = 'estimate'), 'Estimate has a row';
 end $$;
 reset role;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;

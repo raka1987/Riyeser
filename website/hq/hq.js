@@ -21,7 +21,8 @@
   const ROLES = [['owner', 'Owner'], ['finance', 'Finance'], ['support', 'Support'], ['senior', 'Senior support'], ['sales', 'Sales'], ['developer', 'Developer']];
   const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
   // The paid programs A to Z (as everywhere else). 'calls' is Riyeser Link (chat, calls, desk phones, Link Office).
-  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built']];
+  // Riyeser Estimate ('estimate'): free for 90 days from first use, price to be announced (no PRICE entry, never billed yet).
+  const MODULES = [['basic', 'Accounting Basics'], ['plus', 'Accounting Plus'], ['bookings', 'Bookings'], ['calls', 'Riyeser Link'], ['payroll', 'Payroll'], ['pos', 'POS'], ['as_built', 'As Built'], ['estimate', 'Riyeser Estimate']];
   const modName = (m) => (MODULES.find((x) => x[0] === m) || [m, m])[1];
   // List prices: US dollars a month per business (the same as riyeser_price() in team-chat.sql and website/prices.mjs).
   // Each paid program includes 3 users, then US$7 a month each for that program; Plus includes Basics (never both).
@@ -104,7 +105,7 @@
   const PRODUCT_APPS = { central: ['central'], accounting: ['accounting', 'accounting-basics'], invoices: ['invoices'], pos: ['pos'], bookings: ['bookings'], payroll: ['payroll'],
     link: ['team'], linkoffice: ['linkoffice'], pdf: ['pdf'], desk: ['desk'] };
   const APP_NAMES = { central: 'Central', accounting: 'Accounting Plus', 'accounting-basics': 'Accounting Basics', invoices: 'Invoices', pos: 'POS', bookings: 'Bookings', payroll: 'Payroll',
-    team: 'Riyeser Link', linkoffice: 'Link Office', pdf: 'PDF', desk: 'Documents', services: 'As Built' };
+    team: 'Riyeser Link', linkoffice: 'Link Office', pdf: 'PDF', desk: 'Documents', services: 'As Built', estimate: 'Estimate' };
   // "3:00 pm Fri" (this week) or "3:00 pm Fri 5 Dec"
   const dueText = (t) => { const d = new Date(t); const tm = d.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }).replace(/\s?([ap])\.?m\.?/i, ' $1m').toLowerCase();
     const wd = d.toLocaleDateString('en-AU', { weekday: 'short' }); const soon = Math.abs(d - Date.now()) < 6 * 864e5;
@@ -1446,9 +1447,9 @@
   // Free programs (Riyeser Link is a paid program since pricing v2: it's the 'calls' row in the paid list)
   const FREE_PROGRAMS = [['central', 'Riyeser Central'], ['invoices', 'Invoices'], ['pdf', 'PDF'], ['desk', 'Documents']];
   // Riyeser Central's name for each program (desktop/src/central/updates.js)
-  const MOD_APP = { basic: 'accounting-basics', plus: 'accounting', payroll: 'payroll', pos: 'pos', bookings: 'bookings', as_built: 'services', calls: 'team' };
+  const MOD_APP = { basic: 'accounting-basics', plus: 'accounting', payroll: 'payroll', pos: 'pos', bookings: 'bookings', as_built: 'services', calls: 'team', estimate: 'estimate' };
   const APP_NAME = { central: 'Central', 'accounting-basics': 'Accounting Basics', accounting: 'Accounting Plus', payroll: 'Payroll', pos: 'POS', bookings: 'Bookings',
-    services: 'As Built', team: 'Riyeser Link', linkoffice: 'Link Office', invoices: 'Invoices', pdf: 'PDF', desk: 'Documents' };
+    services: 'As Built', team: 'Riyeser Link', linkoffice: 'Link Office', invoices: 'Invoices', pdf: 'PDF', desk: 'Documents', estimate: 'Estimate' };
   const QWHY_PAID = [['payment', 'Payment received'], ['customer_asked', 'The customer asked'], ['non_payment', 'Not paid'], ['correction', 'Fixing a mistake'], ['other', 'Other']];
   const daysPill = (n) => (n == null ? '' : `<span class="pill ${n <= 7 ? 'bad' : n <= 30 ? 'warn' : 'ok'}">${n <= 0 ? 'today' : `${num(n)} day${n === 1 ? '' : 's'}`}</span>`);
   const daysSince = (t) => (t ? Math.floor((Date.now() - new Date(t)) / 864e5) : null);
@@ -1478,11 +1479,11 @@
     const out = []; const L = c.licence; const p = c.profile;
     if (p.status && p.status !== 'active') out.push(['bad', p.status === 'closed' ? 'Closed' : 'Suspended']);
     if (L && p.status === 'active') {
-      const trials = MODULES.map(([m]) => L.modules[m]).filter((v) => v.status === 'trial'); const paid = MODULES.some(([m]) => L.modules[m].status === 'active');
+      const trials = MODULES.map(([m]) => L.modules[m] || {}).filter((v) => v.status === 'trial' && !v.starts_on_first_use); const paid = MODULES.some(([m]) => (L.modules[m] || {}).status === 'active');
       const soon = trials.length ? Math.min(...trials.map((v) => v.days_left)) : null;
       if (soon != null && soon <= 14 && !paid) out.push([soon <= 3 ? 'bad' : 'warn', soon <= 0 ? 'Trial ends today' : `Trial ends in ${soon} day${soon === 1 ? '' : 's'}`]);
       else if (soon != null && soon <= 14) out.push(['warn', `A trial ends in ${soon} day${soon === 1 ? '' : 's'}`]);
-      if (MODULES.some(([m]) => L.modules[m].status === 'ended' && L.modules[m].paid_until)) out.push(['bad', 'Payment overdue']);
+      if (MODULES.some(([m]) => (L.modules[m] || {}).status === 'ended' && L.modules[m].paid_until)) out.push(['bad', 'Payment overdue']);
     }
     const last = (c.people || []).map((x) => x.last_sign_in).filter(Boolean).sort().pop() || p.last_active_at; const d = daysSince(last);
     if (d == null) out.push(['warn', 'Never signed in']); else if (d >= 30) out.push([d >= 90 ? 'bad' : 'warn', `No sign-in for ${d} days`]);
@@ -1505,7 +1506,7 @@
     const c = S.cp; const p = c.profile; const o = c.owner || {}; const id = p.id || S.cpId; const open = !p.status || p.status === 'active';
     const back = S.cpFrom && !/^#\/company\//.test(S.cpFrom) ? S.cpFrom : '#/companies';
     const backName = (TABS().find((x) => '#/' + x[0] === back) || [0, 'Companies'])[1];
-    const L = c.licence; const ren = L ? MODULES.map(([mm]) => L.modules[mm]).filter((v) => v.active).map((v) => (v.status === 'trial' ? v.trial_ends : v.paid_until)).filter(Boolean).sort()[0] : null;
+    const L = c.licence; const ren = L ? MODULES.map(([mm]) => L.modules[mm] || {}).filter((v) => v.active).map((v) => (v.status === 'trial' ? v.trial_ends : v.paid_until)).filter(Boolean).sort()[0] : null;
     const nf = c.next_follow_up;
     const menu = [can('customers.edit', 'support.assign', 'licences.manage') && !c.old && '<button data-menu="owner">👤 Set the Riyeser owner</button>',
       can('support.reply') && !c.old && '<button data-menu="message">✉️ Send customer reply</button>', can('customers.notes') && !c.old && '<button data-menu="call">📞 Log a call</button>',
@@ -1572,11 +1573,11 @@
         try { await api.setOwner(c.profile.id || S.cpId, String(new FormData(e.target).get('staff') || '') || null); close(); await reloadCompany(); flash('Riyeser owner saved.'); }
         catch (err) { d.querySelector('#soerr').innerHTML = `<div class="err">${esc(plain(err))}</div>`; } }; });
   }
-  const MOD_ICON = { basic: '📗', plus: '📒', payroll: '🧾', pos: '🛒', bookings: '📅', as_built: '🏗️', calls: '💬' };
+  const MOD_ICON = { basic: '📗', plus: '📒', payroll: '🧾', pos: '🛒', bookings: '📅', as_built: '🏗️', calls: '💬', estimate: '📐' };
   function enabledModules(c) {
     const L = c.licence; if (!L) return '';
     return `<div class="card" id="modsCard"><h3>Enabled modules</h3><div class="mods">${MODULES.filter(([m]) => showMod(c, m)).map(([m, n]) => { const v = L.modules[m]; const on = !!v.active;
-      return `<button class="mod${on ? ' on' : ''}" data-cpgo="programs"><span class="mic" aria-hidden="true">${MOD_ICON[m]}</span><span><b>${n}</b><small>${v.status === 'active' ? 'Paid' : v.status === 'trial' ? `Trial · ${v.days_left} days` : v.status === 'cancelled' && on ? 'Cancelled, still on' : 'Not active'}</small></span><span class="mck" aria-hidden="true">${on ? '✓' : '–'}</span></button>`; }).join('')}</div></div>`;
+      return `<button class="mod${on ? ' on' : ''}" data-cpgo="programs"><span class="mic" aria-hidden="true">${MOD_ICON[m]}</span><span><b>${n}</b><small>${v.status === 'active' ? 'Paid' : v.status === 'trial' && v.starts_on_first_use ? 'Trial starts on first use' : v.status === 'trial' ? `Trial · ${v.days_left} days` : v.status === 'cancelled' && on ? 'Cancelled, still on' : 'Not active'}</small></span><span class="mck" aria-hidden="true">${on ? '✓' : '–'}</span></button>`; }).join('')}</div></div>`;
   }
   // --- Overview: business details, the contact person, notes, quick actions, follow-ups
   function tabOverview(c) {
@@ -1627,7 +1628,8 @@
   // The PCs that don't count any more, in one quiet line: "Older PCs (not seen since 6 Nov 2026): Head office PC (linked again since)".
   const olderLine = (old) => (old.length ? `<p class="muted small oldpcs">Older PCs (not seen since ${day(old.map((d) => d.last_seen).filter(Boolean).sort().pop())}): ${old.map((d) => `${esc(d.name || 'A PC')}${d.retired_at ? ' <span class="nowrap">(linked again since)</span>' : ''}`).join(', ')}</p>` : '');
   // As Built is hidden on the website: only show it when this business has it paid or installed.
-  const showMod = (c, m) => { if (m !== 'as_built') return true; const v = c.licence.modules[m];
+  // A program the database doesn't send yet (team-chat.sql not run since it was added) isn't shown.
+  const showMod = (c, m) => { const v = c.licence.modules[m]; if (!v) return false; if (m !== 'as_built') return true;
     return ['active', 'cancelled'].includes(v.status) || !!v.paid_until || (c.pcs || []).some((d) => (d.programs || []).some((x) => x.id === MOD_APP[m])); };
   // The plan in plain words, from the payments data (never made up): PayPal subscription, bank invoices, or the trial.
   function planWords(c) {
@@ -1733,7 +1735,7 @@
     const c = S.cp; const L = c.licence; const lim = S.limitDays || 31; const td = today();
     const trials = MODULES.filter(([m]) => showMod(c, m) && L.modules[m].status === 'trial');
     dlg(`<h3>🎁 Add free time</h3><p class="muted small">Adds days to each chosen free trial. Up to <b>${lim} days</b> applies straight away; more waits for a supervisor in Approvals. The customer is emailed when it applies; they never see the reason.</p>
-      <form id="aft"><div class="pick">${trials.map(([m, n]) => `<label class="opt"><input type="checkbox" name="m" value="${m}" checked> ${n} <small class="muted">until ${day(L.modules[m].trial_ends)}</small></label>`).join('')}</div>
+      <form id="aft"><div class="pick">${trials.map(([m, n]) => `<label class="opt"><input type="checkbox" name="m" value="${m}" checked> ${n} <small class="muted">${L.modules[m].trial_ends ? `until ${day(L.modules[m].trial_ends)}` : 'starts on first use'}</small></label>`).join('')}</div>
       <div class="chips daychips" role="radiogroup" aria-label="How long">${[7, 30, 90].map((n) => `<label class="chip"><input type="radio" name="days" value="${n}"${n === 30 ? ' checked' : ''}> +${n} days</label>`).join('')}
         <label class="chip"><input type="radio" name="days" value="custom"> Other <input type="number" name="custom" min="1" max="1000" value="14" aria-label="Number of days"> days</label></div>
       <div class="impact" id="aftImpact"></div>
@@ -1962,7 +1964,7 @@
       offer: async () => { const lim = S.limitDays || 31;
         dlg(`<h3>🎁 Give a free period</h3><p class="muted small">Up to <b>${lim} days</b> applies straight away. Longer waits for a supervisor (someone else with offers.approve). The customer is emailed when it applies; they never see the reason.</p>
           <form id="of"><label class="f"><span>What</span><select name="kind">${Object.entries(OFFER_KIND).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
-          <div class="pick" id="ofmods">${MODULES.map(([m, n]) => `<label class="opt"><input type="checkbox" name="m" value="${m}"> ${n} <small class="muted">${L ? esc(L.modules[m].status) : ''}</small></label>`).join('')}</div>
+          <div class="pick" id="ofmods">${MODULES.filter(([m]) => !L || L.modules[m]).map(([m, n]) => `<label class="opt"><input type="checkbox" name="m" value="${m}"> ${n} <small class="muted">${L ? esc(L.modules[m].status) : ''}</small></label>`).join('')}</div>
           <div class="grid g2"><label class="f"><span>How long</span><input type="number" name="amount" min="1" max="1000" value="14" required></label>
           <label class="f"><span>&nbsp;</span><select name="unit"><option value="days">days</option><option value="months">months</option></select></label></div>
           <label class="f"><span>Reason</span><select name="why">${OFFER_WHY.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>

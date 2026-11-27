@@ -202,7 +202,7 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   await pg.goto(`${BASE}/hq/?demo#/company/w3`); await pg.waitForSelector('.cpage'); console.log('header line:', await text('.cpline'));
   check((await text('.cpline')).includes('Owner: Riki') && (await text('.cpline')).includes('Next renewal') && (await text('.cpline')).includes('Next follow-up'), 'header: Owner, Next renewal, Next follow-up');
   check((await text('#cptl')).includes('Add internal note') && (await text('#cptl')).includes('Send customer reply'), 'Customer timeline with Add internal note and Send customer reply');
-  check((await pg.$$('#modsCard .mod')).length === 6 && !(await text('#modsCard')).includes('As Built'), 'Enabled modules cards (As Built hidden: not paid or installed)');
+  check((await pg.$$('#modsCard .mod')).length === 7 && !(await text('#modsCard')).includes('As Built') && (await text('#modsCard')).includes('Riyeser Estimate'), 'Enabled modules cards (Riyeser Estimate shown; As Built hidden: not paid or installed)');
   await pg.click('#cpMore'); await pg.click('[data-menu=owner]'); await pg.selectOption('#sof [name=staff]', { label: 'Help Desk' }); await pg.click('#sof .btn.p'); await pg.waitForSelector('#sof', { state: 'detached' }); await pg.waitForTimeout(300);
   check((await text('#cpOwner')) === 'Help Desk', 'set the Riyeser owner from the ⋯ menu');
   await pg.selectOption('#demoAs', { label: 'Help Desk (Support)' }); await pg.waitForSelector('#main > *'); await tab('companies'); await pg.click('[data-view=mine]'); await pg.waitForTimeout(300);

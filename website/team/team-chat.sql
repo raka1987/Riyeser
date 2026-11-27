@@ -1275,6 +1275,12 @@ begin
     return json_build_object('status', 'closed', 'active', false, 'trial_ends', null, 'paid_until', null, 'days_left', null);
   end if;
   select * into m from company_modules where workspace_id = ws and module = mod;
+  -- Riyeser Estimate: its 90-day trial starts on first use (company_modules_first_use below), not when the company
+  -- joined. Until then it's a trial that hasn't started: the PC's own first-use trial counts.
+  if m.module is null and mod = 'estimate' then
+    return json_build_object('status', 'trial', 'active', true, 'trial_ends', null, 'paid_until', null, 'days_left', 90,
+                             'starts_on_first_use', true);
+  end if;
   if m.module is null or m.status = 'trial' then
     te := coalesce(m.trial_ends, joined + 90);
     act := te >= current_date; st := case when act then 'trial' else 'ended' end;
@@ -1294,7 +1300,7 @@ create or replace function public.licence_json(ws uuid) returns json
   language sql stable security definer set search_path = public as $$
   select json_build_object(
     'workspace_id', w.id, 'company_code', w.company_code, 'checked_at', now(), 'business_status', w.status,
-    'modules', (select json_object_agg(m, public.module_state(w.id, m)) from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m),
+    'modules', (select json_object_agg(m, public.module_state(w.id, m)) from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) m),
     'seats', json_build_object('included', 3, 'extra', coalesce(p.extra_users, 0), 'used', public.link_people(w.id),
       'users', p.users, 'tills', coalesce(p.tills, 1), 'accountant_free', true),
     'extra_companies', coalesce(p.extra_companies, 0), 'billing', coalesce(p.billing, 'monthly'), 'early_bird', coalesce(p.early_bird, false))
@@ -1534,12 +1540,13 @@ begin
     'early_bird_left', greatest(0, 100 - (select count(*) from company_plans where early_bird)),
     'modules', (select json_agg(json_build_object('module', m,
         'active_paid', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'active'),
-        'on_trial', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'trial'),
+        'on_trial', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') = 'trial'
+                     and (public.module_state(w.id, m) ->> 'starts_on_first_use') is null),   -- Estimate: only once it's been used
         'ended', (select count(*) from workspaces w where (public.module_state(w.id, m) ->> 'status') in ('ended', 'cancelled', 'closed')),
         -- businesses with it on at least one PC (Riyeser Central reports the programs on each PC)
         'installed', (select count(distinct d.workspace_id) from devices d where public.pc_active(d) and coalesce(d.programs, '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('id',
            case m when 'basic' then 'accounting-basics' when 'plus' then 'accounting' when 'as_built' then 'services' when 'calls' then 'team' else m end)))))
-      from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m),
+      from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) m),
     -- real money: what active PayPal subscriptions charge (at their next charge) and paid bank invoices still running,
     -- as a monthly figure (a year's price / 12)
     'monthly_recurring', (select coalesce(round(sum(case when x.billing = 'yearly' then x.amt / 12 else x.amt end), 2), 0) from (
@@ -1553,7 +1560,7 @@ begin
     'ending_soon', (select coalesce(json_agg(x order by x.days_left), '[]') from (
         select w.id, w.name, w.company_code, m as module, (public.module_state(w.id, m) ->> 'status') as status,
                (public.module_state(w.id, m) ->> 'days_left')::int as days_left
-        from workspaces w, unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) m
+        from workspaces w, unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) m
         where (public.module_state(w.id, m) ->> 'days_left')::int between 0 and 14) x)
   ) into r;
   return r;
@@ -1564,12 +1571,12 @@ create or replace function public.hq_licence_businesses(mod text, st text) retur
   language plpgsql stable security definer set search_path = public as $$
 begin
   perform hq_need(array['licences.view']);
-  if mod is null or mod <> all (array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) then raise exception 'Choose a program.'; end if;
+  if mod is null or mod <> all (array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) then raise exception 'Choose a program.'; end if;
   if st is null or st not in ('paid', 'trial', 'ended') then raise exception 'Choose paid, trial or ended.'; end if;
   return (select coalesce(json_agg(json_build_object('id', x.id, 'name', x.name, 'company_code', x.company_code, 'country', x.country,
       'status', x.s ->> 'status', 'until', coalesce(x.s ->> 'paid_until', x.s ->> 'trial_ends'), 'days_left', (x.s ->> 'days_left')::int) order by x.name), '[]')
     from (select w.id, w.name, w.company_code, w.country, public.module_state(w.id, mod) s from workspaces w) x
-    where case st when 'paid' then x.s ->> 'status' = 'active' when 'trial' then x.s ->> 'status' = 'trial'
+    where case st when 'paid' then x.s ->> 'status' = 'active' when 'trial' then x.s ->> 'status' = 'trial' and x.s ->> 'starts_on_first_use' is null
       else x.s ->> 'status' in ('ended', 'cancelled', 'closed') end);
 end $$;
 revoke all on function public.hq_licence_businesses(text, text) from public, anon;
@@ -2904,7 +2911,7 @@ create trigger no_delete before delete on public.offers for each row execute fun
 
 create or replace function public.module_label(m text) returns text language sql immutable as $$
   select case m when 'basic' then 'Accounting Basics' when 'plus' then 'Accounting Plus' when 'payroll' then 'Payroll' when 'pos' then 'POS'
-    when 'bookings' then 'Bookings' when 'as_built' then 'As Built' when 'calls' then 'Riyeser Link' else m end
+    when 'bookings' then 'Bookings' when 'as_built' then 'As Built' when 'calls' then 'Riyeser Link' when 'estimate' then 'Riyeser Estimate' else m end
 $$;
 
 -- Apply a free period now (uses the licence functions). Returns {module: {was, now}}.
@@ -2917,7 +2924,8 @@ begin
     if o.kind = 'trial' then
       if st ->> 'status' not in ('trial', 'ended') or exists (select 1 from company_modules c where c.workspace_id = o.workspace_id and c.module = m and c.status <> 'trial') then
         raise exception '% isn''t on a free trial. Add free time to its paid period instead.', module_label(m); end if;
-      base := greatest(coalesce((st ->> 'trial_ends')::date, current_date), current_date);
+      base := greatest(coalesce((st ->> 'trial_ends')::date,
+                                case when (st ->> 'starts_on_first_use')::boolean then current_date + 90 end, current_date), current_date);
       newd := case when o.length_unit = 'months' then (base + make_interval(months => o.length_amount))::date else base + o.length_amount end;
       perform licence_set_module(o.workspace_id, m, 'trial', newd, null);
     else
@@ -2957,7 +2965,7 @@ begin
       where (module_state(ws, m) ->> 'status') = 'active';
     if mods is null then raise exception 'This business has no paid programs. Extend a trial instead.'; end if;
   else
-    select array_agg(distinct m) into mods from unnest(coalesce(modules, '{}')) m where m in ('basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls');
+    select array_agg(distinct m) into mods from unnest(coalesce(modules, '{}')) m where m in ('basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls', 'estimate');
     if mods is null then raise exception 'Choose a program.'; end if;
   end if;
   d := case when length_unit = 'months' then ((current_date + make_interval(months => length_amount))::date - current_date) else length_amount end;
@@ -3986,7 +3994,7 @@ create or replace function public.hq_quick_licence(ws uuid, mod text, act text, 
 declare st json; s text; tr text; target date; base date; trialish boolean; res json; was jsonb;
 begin
   perform hq_need(array['offers.grant', 'licences.manage']);
-  if mod is null or mod not in ('basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls') then raise exception 'Choose a program.'; end if;
+  if mod is null or mod not in ('basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls', 'estimate') then raise exception 'Choose a program.'; end if;
   if act is null or act not in ('extend', 'unlock', 'paid_until', 'pause', 'cancel') then raise exception 'Choose what to do.'; end if;
   if not exists (select 1 from workspaces where id = ws) then raise exception 'That business doesn''t exist.'; end if;
   st := module_state(ws, mod); s := st ->> 'status';
@@ -7299,3 +7307,33 @@ do $$ begin
       public.api_sweep() to service_role;
   end if;
 end $$;
+
+-- ---------------------------------------------------------------- Riyeser Estimate (licence module 'estimate')
+-- Measure jobs on a plan, a photo or the map, and turn them into quotes. Free for 90 days from FIRST USE: the trial
+-- starts the first time Riyeser Central reports the program on one of the business's PCs (report_programs), and the
+-- program itself keeps its own first-use date on the PC until then. The price after the trial is still to be
+-- announced, so riyeser_price() and the billing lists don't include it yet (it can't be bought or billed).
+-- Safe to run again: only adds 'estimate' to the allowed programs and starts trials that haven't started.
+alter table public.company_modules drop constraint if exists company_modules_module_check;
+alter table public.company_modules add constraint company_modules_module_check
+  check (module in ('basic', 'plus', 'payroll', 'pos', 'bookings', 'as_built', 'calls', 'estimate'));
+
+create or replace function public.company_modules_first_use() returns trigger
+  language plpgsql security definer set search_path = public as $$
+begin
+  if coalesce(new.programs, '[]'::jsonb) @> '[{"id": "estimate"}]'::jsonb then
+    insert into company_modules (workspace_id, module, status, trial_ends)
+      values (new.workspace_id, 'estimate', 'trial', current_date + 90)
+      on conflict (workspace_id, module) do nothing;
+  end if;
+  return new;
+end $$;
+revoke all on function public.company_modules_first_use() from public, anon, authenticated;
+drop trigger if exists company_modules_first_use on public.devices;
+create trigger company_modules_first_use after insert or update of programs on public.devices
+  for each row execute function public.company_modules_first_use();
+-- PCs that already have Riyeser Estimate: start their business's trial today (never shortens one already running)
+insert into public.company_modules (workspace_id, module, status, trial_ends)
+  select distinct d.workspace_id, 'estimate', 'trial', current_date + 90 from public.devices d
+  where coalesce(d.programs, '[]'::jsonb) @> '[{"id": "estimate"}]'::jsonb
+  on conflict (workspace_id, module) do nothing;
