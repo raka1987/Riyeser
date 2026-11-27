@@ -1,9 +1,34 @@
-{# What Riyeser Central's sync loop last reported. #}
-<div class="card ol-sync" id="ol-sync">
-{% if not sync.at %}<span class="dot idle"></span><div><b>Not connected yet</b><div class="muted small">Riyeser Central on the PC that holds this company file brings in what your website sends. Turn it on in Central: Settings → Online connections.</div></div>
-{% else %}<span class="dot {{ 'ok' if sync.ok else 'err' }}"></span>
-<div><b>Online connections: {{ counts.today }} received today{% if sync.ok %}, last sync {{ ago }}{% else %}, a problem {{ ago }}{% endif %}</b>
-<div class="muted small">{% if sync.pc %}Synced by {{ sync.pc }}. {% endif %}{% if sync.last_publish %}Prices, stock and free times sent {{ sync.last_publish }}.{% endif %}{% if counts.failed %} <b>{{ counts.failed }} to try again.</b>{% endif %}</div></div>
-{% if not sync.ok and sync.error %}<p class="flash error fix">{{ sync.error }}{% if sync.fix %} {{ sync.fix }}{% endif %}</p>{% endif %}
+{# Where online connections stand, as Riyeser Central reported it (sv = online.sync_view(sync)). #}
+{% set c = sync.cloud or {} %}
+<div class="card ol-sync ol-{{ sv.tone }}" id="ol-sync" data-state="{{ sv.state }}">
+{% if sv.state == 'not_setup' %}
+<span class="dot idle"></span>
+<div class="ol-grow"><b>Online connections aren't set up</b>
+<div class="muted small">Connect your website or online shop so bookings and orders come in by themselves.</div></div>
+{% if request.endpoint != 'online.connect' %}<a class="btn pri" href="{{ url_for('online.connect') }}" id="ol-setup">Set up</a>{% endif %}
+{% elif sv.state == 'off' %}
+<span class="dot idle"></span>
+<div class="ol-grow"><b>Off on this PC</b>
+<div class="muted small">{{ c.sync_pc or 'Another PC' }} brings in what your website sends. Change it in Riyeser Central: Settings → Online connections.</div></div>
+{% elif sv.state == 'paused' %}
+<span class="dot idle"></span>
+<div class="ol-grow"><b>Paused: demo mode is on</b><div class="muted small">What your website sends waits in your online post box until you leave demo mode.</div></div>
+{% else %}
+<span class="dot {{ sv.tone }}"></span>
+<div class="ol-grow">
+{% if sv.stale %}<b>Riyeser Central hasn't checked in since {{ ago }}</b>
+<div class="muted small">Is {{ sync.pc or 'the sync PC' }} on, with Riyeser Central open? Nothing is lost: everything waits in your online post box.</div>
+{% elif sv.state == 'problem' %}<b>Online connections need a look</b>
+<div class="muted small">Last tried {{ ago }}{% if sync.pc %} on {{ sync.pc }}{% endif %}.</div>
+{% elif sv.state == 'offline' %}<b>No connection to Riyeser Online</b>
+<div class="muted small">Last tried {{ ago }}{% if sync.pc %} on {{ sync.pc }}{% endif %}. Nothing is lost: it comes in when the internet is back.</div>
+{% elif sv.state in ('waiting', 'working') and not counts.today and not sync.received_today %}<b>Connected · last checked {{ ago }} · nothing new</b>
+<div class="muted small">{% if sync.pc %}{{ sync.pc }} checks every minute. {% endif %}{% if sync.last_publish %}Prices, stock and free times sent {{ sync.last_publish }}.{% endif %}</div>
+{% else %}<b>{{ [counts.today, sync.received_today or 0]|max }} received today · last sync {{ ago }}</b>
+<div class="muted small">{% if sync.pc %}Synced by {{ sync.pc }}. {% endif %}{% if sync.last_publish %}Prices, stock and free times sent {{ sync.last_publish }}.{% endif %}{% if counts.failed %} <b>{{ counts.failed }} to try again.</b>{% endif %}</div>
+{% endif %}</div>
+<div class="actions"><a class="btn sm" href="{{ url_for('online.activity') }}">Activity</a>{% if (c.keys_active is none or not c.keys_active) and request.endpoint != 'online.connect' %}<a class="btn sm" href="{{ url_for('online.connect') }}">Set up guide</a>{% endif %}</div>
+{% if sv.state == 'problem' and sync.error %}<div class="ol-problem" role="alert"><b>{{ sync.error }}</b>{% if sync.fix %}<div>{{ sync.fix }}</div>{% endif %}
+<div class="small">{% if sync.ref %}Reference {{ sync.ref }} · {% endif %}<a href="{{ url_for('online.activity', st='problems') }}">Details</a> · <a href="{{ url_for('help.diagnostics_view') }}">Support diagnostics</a></div></div>{% endif %}
 {% endif %}
 </div>

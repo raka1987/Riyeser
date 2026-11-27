@@ -84,6 +84,8 @@ args = [
     "--hidden-import", "riyeser.views.companies",
     "--collect-submodules", "riyeser",
     "--collect-data", "fpdf",
+    "--collect-data", "tzdata",   # time zones for online free times (Windows has none of its own; zoneinfo reads these)
+    "--hidden-import", "tzdata",
     "--distpath", str(ROOT / "dist"),
     "--workpath", str(ROOT / "build"),
     "--specpath", str(ROOT / "build"),

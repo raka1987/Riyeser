@@ -37,7 +37,7 @@
 <p class="muted small">Cost prices are never sent. Prices include GST, as at the till.</p></div>
 
 <div class="card"><h3>Free times for online bookings</h3>
-<div class="fields"><div><label for="timezone">Time zone</label><select id="timezone" name="timezone">{% for z in timezones %}<option {{ 'selected' if z == s.timezone }}>{{ z }}</option>{% endfor %}</select></div>
+<div class="fields"><div><label for="timezone">Time zone</label><select id="timezone" name="timezone">{% for z in timezones %}<option {{ 'selected' if z == s.timezone }}>{{ z }}</option>{% endfor %}</select>{% if tz_fallback %}<div class="muted small" id="ol-tznote">This PC has no time-zone data, so standard time is used (no daylight saving). Update this program to get it.</div>{% endif %}</div>
 <div><label for="days_ahead">How far ahead (days)</label><input id="days_ahead" type="number" min="1" max="365" name="days_ahead" value="{{ s.days_ahead }}"></div>
 <div><label for="slot_minutes">Start times every (minutes)</label><input id="slot_minutes" type="number" min="5" max="240" step="5" name="slot_minutes" value="{{ s.slot_minutes }}"></div>
 <div><label for="min_notice_minutes">Least notice (minutes)</label><input id="min_notice_minutes" type="number" min="0" max="43200" step="15" name="min_notice_minutes" value="{{ s.min_notice_minutes }}"></div></div>

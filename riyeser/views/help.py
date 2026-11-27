@@ -66,8 +66,22 @@ def diagnostics(db):
         "frozen_desktop_build": bool(getattr(sys, "frozen", False)),
         "python": platform.python_version(), "os": f"{platform.system()} {platform.release()}",
         "checks": checks, "record_counts": counts, "recent_errors": errors, "recent_actions": recent,
+        "online": _online_diag(db),
         "note": "No customer, supplier, employee or bank details are included.",
     }
+
+
+def _online_diag(db):
+    """Online connections: the time zone (and whether this PC has time-zone data) and what Central last reported."""
+    try:
+        from .. import online as O
+        s = O.settings(db)
+        sync = O.sync_status(db)
+        return {"timezone": s["timezone"], "timezone_data_on_pc": not O.tz_fallback(s["timezone"]),
+                "last_sync_at": sync.get("at"), "last_sync_state": sync.get("state"), "last_error": sync.get("error"),
+                "last_error_ref": sync.get("ref")}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"[:200]}
 
 
 @bp.route("/diagnostics")

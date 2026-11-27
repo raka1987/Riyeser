@@ -1,0 +1,69 @@
+{% extends "base.html" %}{% block title %}Connect your website{% endblock %}
+{% block content %}
+{% include "online/_styles.html" %}
+<div class="head"><div><h1>Connect your website</h1><p class="sub">Five steps. Each one ticks itself when it's really done, so you can see it's linked rather than assume it.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('online.index') }}">Online orders &amp; bookings</a><a class="btn" href="{{ url_for('online.activity') }}">Activity</a></div></div>
+{% include "online/_sync.html" %}
+<div class="card og-how"><h3>How it works</h3>{% include "online/_flow.html" %}
+<p class="muted small">Nothing on your website can reach this PC or your books. It sends to your Riyeser Online post box; Riyeser Central on the business's sync PC collects it every minute and files it here. If every PC is off, it just waits.</p></div>
+<div class="card" id="og-checklist"><h3>Your checklist</h3><ul class="og-check">
+{% for id, text, on in checklist %}<li class="{{ 'on' if on }}" data-check="{{ id }}"><span class="tk" aria-hidden="true">{{ '✓' if on }}</span><span>{{ text }}{% if not on %}<span class="sr"> (not yet)</span>{% endif %}</span></li>{% endfor %}
+</ul>{% if sync.checked_at or sync.at %}<p class="muted small" style="margin:var(--sp-3) 0 0">Checked with Riyeser Online {{ ago }}.</p>{% else %}<p class="muted small" style="margin:var(--sp-3) 0 0">Riyeser Central ticks these once it's signed in on this PC.</p>{% endif %}</div>
+<div class="card"><ol class="og-steps">
+<li class="og-step" id="og-1"><h2>Choose what you want on your website</h2>
+<form class="og-choices" method="get" action="{{ url_for('online.connect') }}">{% for v, l, d in choices %}<label><input type="radio" name="what" value="{{ v }}" {{ 'checked' if pick == v }} onchange="this.form.submit()"><span><b>{{ l }}</b><small>{{ d }}</small></span></label>{% endfor %}<noscript><button class="btn sm">Show</button></noscript></form></li>
+<li class="og-step{{ ' done' if checklist[0][2] }}" id="og-2"><h2>Make the key in Riyeser Link</h2>
+<p>An owner or admin opens <b>Riyeser Link → Management → Connections</b> (it asks for your two-step code) and makes a key:
+{% if pick in ('booking', 'enquiry', 'order') %}<b>+ New key → Website booking widget</b>. List your website's address (like <code>https://www.yourbusiness.com</code>) so the key only works there.
+{% elif pick == 'shop' %}<b>+ New key → Online shop orders</b>. It's secret: give it only to your shop's settings or your developer, never in a web page.
+{% else %}<b>+ New key → Custom / developer</b>, with only what they need. Send them <a href="https://riyeser.com/developers/">riyeser.com/developers</a>.{% endif %}
+Make a <b>Test</b> key first if you want to try it without anything real coming in.</p>
+<p><a class="btn" href="https://riyeser.com/link/?connections" target="_blank" rel="noopener">Open Management → Connections</a></p></li>
+<li class="og-step{{ ' done' if checklist[1][2] }}" id="og-3"><h2>{% if pick in ('booking', 'enquiry', 'order') %}Copy the code into your website{% else %}Put the key in your shop or give it to your developer{% endif %}</h2>
+{% if pick in ('booking', 'enquiry', 'order') %}
+<p class="muted small">Connections → <b>Add to your website</b> fills in your key and colours. It looks like this:</p>
+<code class="og-snip">&lt;script src="https://riyeser.com/widget/book.js" data-key="rk_pub_live_…"{% if pick != 'booking' %} data-type="{{ pick }}"{% endif %} async&gt;&lt;/script&gt;</code>
+<dl class="og-where">{% for name, how in builders %}<dt>{{ name }}</dt><dd>{{ how|safe }}</dd>{% endfor %}</dl>
+{% elif pick == 'shop' %}<p>Your shop's server sends each paid order to <code>POST /v1/orders</code> and reads <code>/v1/prices</code> and <code>/v1/stock</code>. Your developer's guide: <a href="https://riyeser.com/developers/">riyeser.com/developers</a>.</p>
+{% else %}<p>Everything they need, with examples: <a href="https://riyeser.com/developers/">riyeser.com/developers</a>. Ask them to send with a <b>test</b> key first.</p>{% endif %}
+</li>
+<li class="og-step{{ ' done' if test.step == 'arrived' }}" id="test"><h2>Send a test</h2>
+<p>This sends a test {{ 'booking' if pick == 'booking' else 'order request' if pick in ('order', 'shop') else 'enquiry' }} through your Riyeser Online post box and shows it arriving here within a minute or two. Tests go through every check but <b>never touch your books</b>: they show under <a href="{{ url_for('online.index', t='test') }}">Test</a>.</p>
+<form class="og-test" method="post" action="{{ url_for('online.connect_test') }}" id="og-testf">
+<label class="sr" for="og-kind">What to send</label><select name="kind" id="og-kind"><option value="enquiry" {{ 'selected' if pick not in ('booking', 'order', 'shop') }}>A test enquiry</option><option value="booking" {{ 'selected' if pick == 'booking' }}>A test booking</option><option value="order" {{ 'selected' if pick in ('order', 'shop') }}>A test order request</option></select>
+<button class="btn pri" id="og-send">Send a test</button></form>
+<div class="og-prog{{ ' ok' if test.step == 'arrived' else ' err' if test.step == 'error' else '' }}" id="og-prog" {{ 'hidden' if test.step == 'none' }} role="status" aria-live="polite">
+{% if test.step == 'arrived' %}<b>✓ It arrived.</b> {{ (test.reference ~ ' · ') if test.reference }}{{ test.message or 'Filed as a test.' }} <a href="{{ url_for('online.index', t='test') }}">See it under Test</a>
+{% elif test.step == 'error' %}<b>The test couldn't be sent:</b> {{ test.error }}
+{% elif test.step == 'sent' %}<b>Sent.</b> It's in your post box; Riyeser Central brings it in within a minute…
+{% elif test.step == 'asked' %}<b>Waiting for Riyeser Central…</b> It sends the test within a minute. Keep this page open.{% endif %}</div>
+{% if sv.state in ('not_setup', 'off') and not sync.at %}<p class="muted small">Riyeser Central must be signed in on this PC to send it. On another PC? Use <b>Online connections → Set up → Send a test</b> in Riyeser Central there.</p>{% endif %}</li>
+<li class="og-step{{ ' done' if checklist|selectattr(2)|list|length == checklist|length }}" id="og-5"><h2>Done</h2>
+<p>When every line of the checklist is ticked, it's linked. From then on new bookings, orders and enquiries show in <a href="{{ url_for('online.index') }}">Online orders &amp; bookings</a> and on Today, and every sync is in <a href="{{ url_for('online.activity') }}">Activity</a>. Help: <a href="https://riyeser.com/help/online.html">How online connections work</a>.</p></li>
+</ol></div>
+{% endblock %}
+{% block scripts %}<script>
+(function () {
+  var f = document.getElementById('og-testf'), box = document.getElementById('og-prog'), btn = document.getElementById('og-send');
+  if (!f || !window.fetch) return;
+  var poll = null, tries = 0;
+  function show(p) {
+    box.hidden = false; box.className = 'og-prog' + (p.step === 'arrived' ? ' ok' : p.step === 'error' ? ' err' : '');
+    box.textContent = '';
+    var b = document.createElement('b');
+    b.textContent = p.step === 'arrived' ? '✓ It arrived. ' : p.step === 'error' ? 'The test couldn’t be sent: ' : p.step === 'sent' ? 'Sent. ' : 'Waiting for Riyeser Central… ';
+    box.appendChild(b);
+    box.appendChild(document.createTextNode(p.step === 'arrived' ? ((p.reference ? p.reference + ' · ' : '') + (p.message || 'Filed as a test.')) : p.step === 'error' ? (p.error || '') : p.step === 'sent' ? 'It’s in your post box; Riyeser Central brings it in within a minute…' : 'It sends the test within a minute. Keep this page open.'));
+    if (p.step === 'arrived' || p.step === 'error') { clearInterval(poll); poll = null; btn.disabled = false; if (p.step === 'arrived') setTimeout(function () { location.reload(); }, 2500); }
+  }
+  function check() { tries++; fetch('{{ url_for("online.connect_test_status") }}', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(show).catch(function () {});
+    if (tries > 60) { clearInterval(poll); poll = null; btn.disabled = false; box.className = 'og-prog err'; box.textContent = 'Nothing arrived in 5 minutes. Is Riyeser Central open and signed in on the sync PC? See Activity for what happened.'; } }
+  f.addEventListener('submit', function (e) {
+    e.preventDefault(); btn.disabled = true; tries = 0;
+    fetch(f.action, { method: 'POST', body: new FormData(f), credentials: 'same-origin', headers: { Accept: 'application/json' } })
+      .then(function (r) { return r.json(); }).then(function (p) { show(p); if (!poll) poll = setInterval(check, 5000); })
+      .catch(function () { f.submit(); });
+  });
+  {% if test.step in ('asked', 'sent') %}poll = setInterval(check, 5000);{% endif %}
+})();
+</script>{% endblock %}

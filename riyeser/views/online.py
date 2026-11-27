@@ -12,15 +12,25 @@ request with an Origin header is refused, so a website open in a browser can't r
     GET  /online/api/availability   {settings, staff, open_times, from_at, to_at, enabled}
     GET  /online/api/outbox         {events: [{id, event, event_id, data, test}]}   for api_notify
     POST /online/api/outbox/done    {sent: [ids], errors: {id: message}}
-    POST /online/api/sync-report    what Central's sync loop last did (shown on the Online list)
+    POST /online/api/sync-report    what Central's sync loop last did (shown on the Online list) and its activity
+                                    trail entries since the last report (kept 90 days: Online → Activity)
+
+Errors: never a bare 500. Anything that goes wrong answers JSON {error, message, what, reason, ref, log} with a
+plain message ("Riyeser POS couldn't publish your prices: ..."), a reference (OA-XXXXXX) that is also in the
+program's Support Diagnostics (Recent errors) and in online-api.log next to the company file, where Riyeser Central
+reads it for Get help.
 """
 import hmac
 import json
 import os
 import secrets
-from datetime import date
+import sqlite3
+import traceback
+from datetime import date, datetime, timedelta
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash, g, abort, jsonify, current_app
+from flask import (Blueprint, render_template, request, redirect, url_for, flash, g, abort, jsonify, current_app,
+                   Response)
+from werkzeug.exceptions import HTTPException
 
 from ..db import get_db
 from .. import online as O
@@ -60,13 +70,35 @@ def token(app=None):
     return app.config["ONLINE_TOKEN"]
 
 
+def log_file(app=None):
+    """online-api.log next to the company file: what went wrong in the local API (Central sends its end with Get help)."""
+    return os.path.join(os.path.dirname(local_api_file(app)), "online-api.log")
+
+
+def program_name(app=None):
+    app = app or current_app
+    if app.config.get("ONLINE_PROGRAM"):
+        return app.config["ONLINE_PROGRAM"]
+    try:
+        from ..db import EDITIONS, POS_APP, INVOICES_APP, BOOKINGS_APP, ESTIMATE_APP
+        from ..edition import app_edition, is_pos_app, is_invoices_app, is_bookings_app, is_estimate_app
+        ed = app_edition()
+        return (POS_APP["app"] if is_pos_app() else INVOICES_APP["app"] if is_invoices_app()
+                else BOOKINGS_APP["app"] if is_bookings_app() else ESTIMATE_APP["app"] if is_estimate_app()
+                else EDITIONS[ed]["app"] if ed else "Riyeser Accounting")
+    except Exception:
+        return "Riyeser Accounting"
+
+
 def write_local_api(app, port, program=None):
     """Tell Riyeser Central where this program's local API is (called once the server is up)."""
     from .. import __version__
     f = local_api_file(app)
+    if program:
+        app.config["ONLINE_PROGRAM"] = program.replace(" (serve)", "")
     info = {"port": int(port), "token": token(app), "pid": os.getpid(), "program": program or "Riyeser Accounting",
             "version": __version__, "company_file": app.config.get("NORMAL_DATABASE") or app.config["DATABASE"],
-            "demo": bool(app.config.get("DEMO_MODE"))}
+            "demo": bool(app.config.get("DEMO_MODE")), "log": log_file(app), "api": 2}
     os.makedirs(os.path.dirname(f), exist_ok=True)
     tmp = f + f".{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
@@ -90,8 +122,78 @@ def remove_local_api(app):
         pass
 
 
+# What each local API call does, for the plain message when it goes wrong ("... couldn't publish your prices: ...").
+WHAT = {"online_api.api_status": "open the company file for online connections",
+        "online_api.api_import": "file what came in from your website",
+        "online_api.api_catalog": "publish your prices", "online_api.api_stock": "publish your stock levels",
+        "online_api.api_availability": "publish your free booking times",
+        "online_api.api_outbox": "read the news for your website", "online_api.api_outbox_done": "note the news sent",
+        "online_api.api_sync_report": "save what Riyeser Central did"}
+
+
+def plain_reason(e):
+    """The error in words an owner can act on (the technical detail is in the log and Support Diagnostics)."""
+    name, text = type(e).__name__, str(e)
+    if name == "ZoneInfoNotFoundError" or "No time zone found" in text:
+        return "this PC has no time-zone data for " + text.split("key ")[-1].strip("'\" ")
+    if isinstance(e, sqlite3.OperationalError):
+        if "locked" in text or "busy" in text:
+            return "the company file is busy (another program is saving). It will be tried again in a minute"
+        if "no such table" in text or "no such column" in text:
+            return "the company file needs updating. Open the program once so it can bring it up to date"
+        if "readonly" in text or "unable to open" in text:
+            return "the company file can't be written to. Check the file isn't read-only or on a disconnected drive"
+        if "disk" in text:
+            return "the disk is full or not available"
+    if isinstance(e, PermissionError):
+        return "Windows didn't allow it to open a file it needs (check antivirus or folder permissions)"
+    return (text or name)[:200]
+
+
+def _write_log(ref, e):
+    try:
+        f = log_file()
+        if os.path.exists(f) and os.path.getsize(f) > 512 * 1024:
+            os.replace(f, f + ".1")
+        with open(f, "a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {ref} {request.method} {request.path}: {type(e).__name__}: {e}\n")
+            fh.write("".join(traceback.format_exception(type(e), e, e.__traceback__)[-6:]).rstrip() + "\n")
+    except OSError:
+        pass
+
+
+def api_error(e):
+    """Any error in the local API: a JSON answer with a plain message and a reference, never a bare 500."""
+    if isinstance(e, HTTPException):
+        return jsonify(error=f"http_{e.code}", message=f"{program_name()} doesn't know {request.path} "
+                       "(Riyeser Central may be newer than this program: update it)."), e.code
+    ref = "OA-" + secrets.token_hex(3).upper()
+    what = WHAT.get(request.endpoint or "", "do that")
+    reason = plain_reason(e)
+    message = f"{program_name()} couldn't {what}: {reason}."
+    current_app.logger.error("Online connections %s: %s", ref, "".join(traceback.format_exception(type(e), e, e.__traceback__)))
+    _write_log(ref, e)
+    try:
+        db = get_db()
+        db.rollback()
+        db.execute("INSERT INTO audit_log (user_id, action, details) VALUES (NULL,'error',?)",
+                   (f"Online connections {ref} {request.method} {request.path}: {type(e).__name__}: {e}"[:500],))
+        db.commit()
+    except Exception:
+        pass
+    return jsonify(error="internal", message=message, what=what, reason=reason, ref=ref, log=log_file(),
+                   detail=f"{type(e).__name__}: {e}"[:300]), 500
+
+
 def api_guard():
     """Called before every /online/api request (instead of the sign-in check)."""
+    try:
+        return _api_guard()
+    except Exception as e:  # e.g. an older company file that can't be brought up to date: JSON, not an error page
+        return api_error(e)
+
+
+def _api_guard():
     if request.remote_addr not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
         return jsonify(error="local_only"), 403
     if request.headers.get("Origin") or request.headers.get("Sec-Fetch-Site") not in (None, "none"):
@@ -109,8 +211,17 @@ def api_guard():
     if current_app.config["DATABASE"] not in done:
         dbmod.migrate(db)
         done.add(current_app.config["DATABASE"])
-    g.company = dict(db.execute("SELECT * FROM company WHERE id=1").fetchone())
+    row = db.execute("SELECT * FROM company WHERE id=1").fetchone()
+    if row is None:
+        return jsonify(error="no_company", message="The company file on this PC isn't set up yet. Open "
+                       f"{program_name()} and finish setting up the company."), 409
+    g.company = dict(row)
     return None
+
+
+@api.errorhandler(Exception)
+def _api_any_error(e):
+    return api_error(e)
 
 
 @api.route("/status")
@@ -119,6 +230,7 @@ def api_status():
     db = get_db()
     s = O.settings(db)
     return jsonify(ok=True, company=g.company["name"], version=__version__, demo=False, counts=O.counts(db),
+                   program=program_name(), api=2, test_request=O.test_request(db),
                    settings={k: s[k] for k in ("order_as", "booking_status", "publish_items", "publish_services",
                                                "publish_stock", "days_ahead", "timezone")})
 
@@ -164,10 +276,20 @@ def api_outbox_done():
 @api.route("/sync-report", methods=["POST"])
 def api_sync_report():
     d = request.get_json(silent=True) or {}
+    d = d if isinstance(d, dict) else {}
     db = get_db()
-    O.set_sync_status(db, d if isinstance(d, dict) else {})
+    O.set_sync_status(db, d)
+    O.add_trail(db, d.get("trail") or [])
+    if isinstance(d.get("test_sent"), dict):
+        O.test_sent(db, d["test_sent"])
     db.commit()
     return jsonify(ok=True)
+
+
+@api.route("/<path:rest>", methods=["GET", "POST"])
+def api_unknown(rest):
+    return jsonify(error="not_found", message=f"{program_name()} doesn't know /online/api/{rest[:60]} (Riyeser Central "
+                   "may be newer than this program: update it)."), 404
 
 
 # ---------------------------------------------------------------- screens
@@ -230,6 +352,7 @@ def index():
     sync = O.sync_status(db)
     return render_template("online/index.html", rows=rows, tab=tab, tabs=TABS, labels=O.KIND_LABELS,
                            statuses=STATUS_LABELS, counts=O.counts(db), sync=sync, ago=_ago(sync.get("at")),
+                           sv=O.sync_view(sync), agof=_ago,
                            link=record_link, summary=O.summarizer(db), news_kinds=O.NEWS_KINDS, label=O.label,
                            tests=db.execute("SELECT COUNT(*) FROM online_inbox WHERE test=1").fetchone()[0])
 
@@ -328,7 +451,8 @@ def settings():
     return render_template("online/settings.html", s=s, items=items, svcs=svcs, banks=banks, order_as=ORDER_AS,
                            weekdays=O.WEEKDAYS, timezones=TIMEZONES if s["timezone"] in TIMEZONES else [s["timezone"]] + TIMEZONES,
                            pay_default=O.payment_account(db, s), published=cat, windows=len(avail["open_times"]),
-                           staff=len(avail["staff"]), stock_n=len(O.stock(db, s)["levels"]))
+                           staff=len(avail["staff"]), stock_n=len(O.stock(db, s)["levels"]),
+                           tz_fallback=O.tz_fallback(s["timezone"]))
 
 
 @guarded
@@ -365,3 +489,122 @@ def _save():
         min_notice_minutes=num("min_notice_minutes", 0, 43200, 60), hours=hours))
     flash("Saved. Riyeser Central sends the changes to your website within a few minutes.", "ok")
     return redirect(url_for("online.settings"))
+
+
+# ---------------------------------------------------------------- "Connect your website" guide and the activity trail
+GUIDE_CHOICES = [
+    ("booking", "A booking form", "Customers pick a service and a free time on your website. Needs Riyeser Bookings."),
+    ("enquiry", "An enquiry form", "Questions and quote requests from your website, with a call-back reminder."),
+    ("order", "An order button", "\u201cOrder\u201d or \u201cRequest\u201d buttons on your products: you confirm each one."),
+    ("shop", "An online shop", "Your shop (Shopify, WooCommerce\u2026) sends paid orders; it reads prices and stock."),
+    ("developer", "Something my developer builds", "The full API: send them riyeser.com/developers."),
+]
+BUILDERS = [
+    ("WordPress", "Edit the page, add a <b>Custom HTML</b> block where the form should go, paste, then <b>Update</b>."),
+    ("Wix", "<b>Add Elements → Embed Code → Embed HTML</b>, choose <b>Code</b>, paste, then <b>Update</b> and publish."),
+    ("Squarespace", "Edit the page, add a <b>Code</b> block, paste, untick <b>Display source</b>, then <b>Save</b>."),
+    ("Shopify", "<b>Online Store → Themes → Customize</b>, add a <b>Custom Liquid</b> (or Custom HTML) section, paste, "
+                "<b>Save</b>."),
+    ("Plain HTML", "Paste it in your page where the form should appear, before <code>&lt;/body&gt;</code>, and upload."),
+]
+
+
+def guide_checklist(sync, db):
+    """The guide's checklist, ticked from what really happened (Riyeser Central reports the cloud side)."""
+    c = (sync or {}).get("cloud") or {}
+    got_here = db.execute("SELECT COUNT(*) FROM online_inbox").fetchone()[0]
+    return [
+        ("key", "A key made in Riyeser Link", bool(c.get("keys_active"))),
+        ("request", "Your website has talked to Riyeser Online", bool(c.get("last_request_at"))),
+        ("sync", "Riyeser Central on this PC brings items in", bool(sync.get("at")) and sync.get("state") != "off"),
+        ("item", "The first item arrived here", got_here > 0),
+        ("publish", "Prices and free times published", bool(c.get("catalog_at") or sync.get("last_publish"))),
+    ]
+
+
+@bp.route("/connect")
+def connect():
+    db = get_db()
+    sync = O.sync_status(db)
+    return render_template("online/connect.html", choices=GUIDE_CHOICES, builders=BUILDERS, sync=sync,
+                           sv=O.sync_view(sync), ago=_ago(sync.get("at")), checklist=guide_checklist(sync, db),
+                           test=O.test_progress(db), pick=request.args.get("what") or "booking", counts=O.counts(db))
+
+
+@bp.route("/connect/test", methods=["POST"])
+def connect_test():
+    db = get_db()
+    O.ask_for_test(db, request.form.get("kind"))
+    db.commit()
+    if request.headers.get("Accept", "").startswith("application/json"):
+        return jsonify(O.test_progress(db))
+    flash("Test asked for. Riyeser Central sends it within a minute and it shows below when it arrives.", "ok")
+    return redirect(url_for("online.connect") + "#test")
+
+
+@bp.route("/connect/test.json")
+def connect_test_status():
+    db = get_db()
+    return jsonify(O.test_progress(db))
+
+
+TRAIL_FILTERS = [("", "Everything"), ("problems", "Problems"), ("done", "Filed"), ("rejected", "Turned down"),
+                 ("retry", "Trying again"), ("ok", "Checks"), ("error", "Errors")]
+TRAIL_TYPES = [("", "All kinds"), ("item", "Items"), ("run", "Sync runs"), ("publish", "Publishing"),
+               ("test", "Tests"), ("problem", "Problems"), ("setup", "Setup")]
+TRAIL_STATUS_LABELS = {"ok": "OK", "done": "Filed", "rejected": "Turned down", "retry": "Trying again",
+                       "waiting": "Waiting", "error": "Problem", "info": "Note"}
+
+
+def _trail_args():
+    day = request.args.get("day") or ""
+    try:
+        day = date.fromisoformat(day).isoformat() if day else ""
+    except ValueError:
+        day = ""
+    st = request.args.get("st") if request.args.get("st") in dict(TRAIL_FILTERS) else ""
+    kind = request.args.get("kind") if request.args.get("kind") in dict(TRAIL_TYPES) else ""
+    return day, st, kind
+
+
+def _local(at):
+    try:
+        t = datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+        return t.astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return str(at)[:16]
+
+
+@bp.route("/activity")
+def activity():
+    db = get_db()
+    day, st, kind = _trail_args()
+    rows = O.trail(db, day or None, st or None, kind or None)
+    total = db.execute("SELECT COUNT(*) FROM online_trail").fetchone()[0]
+    return render_template("online/activity.html", rows=rows, day=day, st=st, kind=kind, filters=TRAIL_FILTERS,
+                           kinds=TRAIL_TYPES, labels=TRAIL_STATUS_LABELS, total=total, local=_local,
+                           filtered=bool(day or st or kind), sync=O.sync_status(db))
+
+
+def _cell(v):
+    """A spreadsheet cell that can't run as a formula (customer names come from the internet)."""
+    v = "" if v is None else str(v)
+    return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+
+
+@bp.route("/activity.csv")
+def activity_csv():
+    import csv
+    import io
+    db = get_db()
+    day, st, kind = _trail_args()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["When (this PC's time)", "When (UTC)", "Kind", "Status", "Source", "What happened", "Details",
+                "Reference", "PC", "Times"])
+    for r in O.trail(db, day or None, st or None, kind or None, limit=100000):
+        w.writerow([_local(r["at"]), r["at"], r["type"], TRAIL_STATUS_LABELS.get(r["status"], r["status"]),
+                    *(_cell(r[k]) for k in ("source", "what", "detail", "ref", "pc")), r["n"]])
+    name = f"online-activity-{day or date.today().isoformat()}.csv"
+    return Response("\ufeff" + buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})

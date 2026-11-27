@@ -103,6 +103,15 @@ def ensure_schema(db):
         marketing_consent INTEGER, tags TEXT,
         updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
     db.execute("CREATE TABLE IF NOT EXISTS online_settings (key TEXT PRIMARY KEY, value TEXT)")
+    # The activity trail (Online → Activity): every sync run that did something, every item, every publish and test,
+    # as Riyeser Central on the sync PC reported it. Kept 90 days.
+    db.execute("""CREATE TABLE IF NOT EXISTS online_trail (
+        id INTEGER PRIMARY KEY, at TEXT NOT NULL,       -- when (UTC, ISO)
+        type TEXT NOT NULL,                             -- run, item, publish, test, problem, setup
+        status TEXT NOT NULL,                           -- ok, done, rejected, retry, waiting, error, info
+        source TEXT, what TEXT NOT NULL, detail TEXT, ref TEXT, pc TEXT, n INTEGER NOT NULL DEFAULT 1,
+        uid TEXT UNIQUE)""")
+    db.execute("CREATE INDEX IF NOT EXISTS online_trail_at ON online_trail(at)")
 
 
 def _raw(db, key, default=None):
@@ -121,8 +130,12 @@ def _put(db, key, value):
 
 def default_timezone():
     from . import company_profile
-    c = (company_profile.read().get("country") or "").strip().lower()
-    return COUNTRY_TZ.get(c, "UTC")
+    try:
+        c = (company_profile.read().get("country") or "").strip().lower()
+    except Exception:
+        c = ""
+    tz = COUNTRY_TZ.get(c, "UTC")
+    return tz if tz_ok(tz) else "UTC"
 
 
 def default_hours(db):
@@ -180,11 +193,41 @@ def tz_ok(name):
         return False
 
 
+# Standard-time offsets (minutes) for the time zones on the settings list. Only used when this PC has no time-zone
+# database: Windows has none of its own, and Python's zoneinfo then needs the tzdata package (now bundled in the
+# builds). Without either, ZoneInfo("Pacific/Fiji") raised and every minute Riyeser Central's sync got a bare
+# "The program answered 500" while publishing free times. Daylight saving isn't followed in this fallback.
+FIXED_OFFSETS = {"Pacific/Fiji": 720, "Pacific/Auckland": 720, "Australia/Sydney": 600, "Australia/Melbourne": 600,
+                 "Australia/Brisbane": 600, "Australia/Adelaide": 570, "Australia/Darwin": 570, "Australia/Perth": 480,
+                 "Australia/Hobart": 600, "Pacific/Apia": 780, "Pacific/Tongatapu": 780, "Pacific/Efate": 660,
+                 "Pacific/Port_Moresby": 600, "Pacific/Guadalcanal": 660, "Pacific/Noumea": 660, "Pacific/Tarawa": 720,
+                 "Pacific/Honolulu": -600, "Asia/Singapore": 480, "Asia/Kolkata": 330, "Europe/London": 0,
+                 "America/New_York": -300, "America/Los_Angeles": -480}
+_TZ_CACHE = {}
+
+
 def _tz(name):
-    from zoneinfo import ZoneInfo
     if not name or name.upper() == "UTC":
         return timezone.utc
-    return ZoneInfo(name)
+    if name in _TZ_CACHE:
+        return _TZ_CACHE[name]
+    try:
+        from zoneinfo import ZoneInfo
+        z = ZoneInfo(name)
+    except Exception:
+        if name not in FIXED_OFFSETS:
+            raise ValueError(f"This PC doesn't know the time zone {name}.")
+        import logging
+        logging.getLogger("riyeser").warning("No time-zone data on this PC for %s: using standard time.", name)
+        z = timezone(timedelta(minutes=FIXED_OFFSETS[name]), name)
+    _TZ_CACHE[name] = z
+    return z
+
+
+def tz_fallback(name):
+    """True when this PC has no time-zone data for name and standard time is used instead (no daylight saving)."""
+    z = _tz(name) if tz_ok(name) else None
+    return z is not None and z is not timezone.utc and not hasattr(z, "key")
 
 
 def parse_hours(h):
@@ -206,10 +249,131 @@ def sync_status(db):
     return _raw(db, "sync_status", {}) or {}
 
 
+SYNC_STATES = ("not_setup", "waiting", "working", "problem", "off", "offline", "paused")
+CLOUD_KEYS = ("keys_active", "widget_keys", "test_keys", "webhooks_active", "webhooks_failing", "last_request_at",
+              "requests_24h", "done_total", "catalog_at", "stock_at", "availability_at", "catalog_items", "sync_pc")
+
+
 def set_sync_status(db, report):
+    old = sync_status(db)
+    if report.get("state") in ("off", "paused") and old.get("pc") and old.get("pc") != report.get("pc") \
+            and old.get("state") not in ("off", "paused") and not sync_view(old).get("stale"):
+        return  # a PC that doesn't sync doesn't overwrite what the sync PC (sharing this company file) said
     keep = {k: report.get(k) for k in ("at", "ok", "error", "fix", "pc", "received_today", "last_publish",
-                                       "waiting", "failed", "offline") if k in report}
+                                       "waiting", "failed", "offline", "ref", "checked_at") if k in report}
+    if report.get("state") in SYNC_STATES:
+        keep["state"] = report["state"]
+    if isinstance(report.get("cloud"), dict):
+        keep["cloud"] = {k: report["cloud"].get(k) for k in CLOUD_KEYS if k in report["cloud"]}
     _put(db, "sync_status", keep)
+
+
+def sync_view(sync, now=None):
+    """What the Online page's status box says: {state, tone, title, line, fix}. state is what Riyeser Central
+    reported (older Centrals: worked out from ok/error); not_setup when nothing has ever been reported."""
+    now = now or datetime.now(timezone.utc)
+    if not sync.get("at"):
+        return dict(state="not_setup", tone="idle")
+    st = sync.get("state") or ("problem" if sync.get("ok") is False and not sync.get("offline") else
+                               "offline" if sync.get("offline") else "working")
+    try:
+        at = datetime.fromisoformat(str(sync["at"]).replace("Z", "+00:00"))
+        at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        stale = (now - at) > timedelta(minutes=15) and st not in ("off", "not_setup", "paused")
+    except ValueError:
+        stale = False
+    tone = {"not_setup": "idle", "waiting": "ok", "working": "ok", "off": "idle", "paused": "idle",
+            "offline": "warn", "problem": "err"}[st]
+    return dict(state=st, tone="warn" if stale else tone, stale=stale)
+
+
+# ---------------------------------------------------------------- the activity trail
+TRAIL_TYPES = ("run", "item", "publish", "test", "problem", "setup")
+TRAIL_STATUS = ("ok", "done", "rejected", "retry", "waiting", "error", "info")
+TRAIL_DAYS = 90
+
+
+def add_trail(db, entries):
+    """Entries from Riyeser Central's sync-report. Each one once (uid); quiet runs come merged (n = how many)."""
+    for e in (entries or [])[:500]:
+        if not isinstance(e, dict) or e.get("type") not in TRAIL_TYPES:
+            continue
+        at = _utc(e.get("at"))
+        if not at:
+            continue
+        n = e.get("n") if isinstance(e.get("n"), int) and 0 < e.get("n") < 100000 else 1
+        db.execute("""INSERT INTO online_trail (at, type, status, source, what, detail, ref, pc, n, uid)
+                      VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(uid) DO UPDATE SET at=excluded.at, n=excluded.n,
+                      status=excluded.status, what=excluded.what, detail=excluded.detail""",
+                   (_iso_z(at), e["type"], e.get("status") if e.get("status") in TRAIL_STATUS else "info",
+                    _s(e.get("source"), 120) or None, _s(e.get("what"), 300) or "-", _s(e.get("detail"), 500) or None,
+                    _s(e.get("ref"), 64) or None, _s(e.get("pc"), 80) or None, n, _s(e.get("uid"), 80) or None))
+    db.execute("DELETE FROM online_trail WHERE at < ?", (_iso_z(datetime.now(timezone.utc) - timedelta(days=TRAIL_DAYS)),))
+
+
+def trail(db, day=None, status=None, kind=None, limit=500):
+    where, args = ["1=1"], []
+    if day:
+        where.append("substr(at,1,10)=?")
+        args.append(day)
+    if status == "problems":
+        where.append("status IN ('error','rejected','retry')")
+    elif status in TRAIL_STATUS:
+        where.append("status=?")
+        args.append(status)
+    if kind in TRAIL_TYPES:
+        where.append("type=?")
+        args.append(kind)
+    return db.execute(f"SELECT * FROM online_trail WHERE {' AND '.join(where)} ORDER BY at DESC, id DESC LIMIT ?",
+                      (*args, limit)).fetchall()
+
+
+# ---------------------------------------------------------------- "Send a test" from the Online page
+# The Online page can't reach Riyeser Online itself: it asks Riyeser Central (test_request in /online/api/status),
+# Central sends a test through the post box (api_send_test) and brings it in like any other item, as a test.
+def test_request(db):
+    r = _raw(db, "test_request")
+    if not isinstance(r, dict) or r.get("sent_at") or r.get("error"):
+        return None
+    try:
+        if datetime.now(timezone.utc) - datetime.fromisoformat(r["at"]) > timedelta(minutes=30):
+            return None
+    except (KeyError, ValueError, TypeError):
+        return None
+    return {k: r.get(k) for k in ("id", "kind", "at")}
+
+
+def ask_for_test(db, kind):
+    import secrets
+    kind = kind if kind in ("booking", "enquiry", "order") else "enquiry"
+    r = dict(id=secrets.token_hex(8), kind=kind, at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    _put(db, "test_request", r)
+    return r
+
+
+def test_sent(db, report):
+    r = _raw(db, "test_request")
+    if isinstance(r, dict) and r.get("id") == report.get("request_id"):
+        r.update(sent_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                 event_id=_s(report.get("event_id"), 64) or None, error=_s(report.get("error"), 300) or None)
+        _put(db, "test_request", r)
+
+
+def test_progress(db):
+    """Where the last "Send a test" is: asked → sent (in the post box) → arrived here (filed as a test)."""
+    r = _raw(db, "test_request")
+    if not isinstance(r, dict):
+        return dict(step="none")
+    out = dict(id=r.get("id"), kind=r.get("kind"), at=r.get("at"), error=r.get("error"))
+    if r.get("error"):
+        return dict(out, step="error")
+    if r.get("event_id"):
+        row = db.execute("SELECT id, status, reference, message, filed_at FROM online_inbox WHERE id=?",
+                         (r["event_id"],)).fetchone()
+        if row:
+            return dict(out, step="arrived", status=row["status"], reference=row["reference"], message=row["message"])
+        return dict(out, step="sent")
+    return dict(out, step="asked")
 
 
 # ---------------------------------------------------------------- small helpers
@@ -1154,7 +1318,10 @@ def availability(db, s=None, now=None):
     for b in db.execute("SELECT resource_id, starts_at, minutes FROM bookings WHERE resource_id IS NOT NULL AND status IN"
                         " ('booked','confirmed','started') AND starts_at >= ? AND starts_at < ?",
                         ((today - timedelta(days=1)).isoformat(), last)):
-        st = datetime.fromisoformat(b["starts_at"]).replace(tzinfo=tz)
+        try:
+            st = datetime.fromisoformat(str(b["starts_at"]).strip().replace("Z", "")).replace(tzinfo=tz)
+        except (TypeError, ValueError):
+            continue  # a booking with a time this can't read: it can't block a time it doesn't have
         busy.setdefault(b["resource_id"], []).append((st, st + timedelta(minutes=b["minutes"] or 0)))
     windows = []
     for n in range(days):

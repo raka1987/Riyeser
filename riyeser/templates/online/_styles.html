@@ -1,8 +1,45 @@
 <style>
-.ol-sync{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-.ol-sync .dot{width:10px;height:10px;border-radius:50%;background:#9aa4b2;flex:none}
-.ol-sync .dot.ok{background:#16a34a}.ol-sync .dot.err{background:#dc2626}.ol-sync .dot.idle{background:#d97706}
-.ol-sync b{font-size:15px}.ol-sync .fix{flex-basis:100%;margin:0}
+.ol-sync{display:flex;gap:var(--sp-3) var(--sp-4);align-items:center;flex-wrap:wrap}
+.ol-sync .ol-grow{flex:1 1 280px;min-width:0}
+.ol-sync .dot{width:10px;height:10px;border-radius:50%;background:#9aa4b2;flex:none;align-self:flex-start;margin-top:7px}
+.ol-sync .dot.ok{background:#16a34a}.ol-sync .dot.err{background:#dc2626}.ol-sync .dot.warn{background:#d97706}.ol-sync .dot.idle{background:#9aa4b2}
+.ol-sync b{font-size:var(--fs-md)}.ol-sync .actions{flex:0 0 auto}
+.ol-sync .ol-problem{flex-basis:100%;margin:0;padding:var(--sp-3) var(--sp-4);border-radius:var(--r-md);background:var(--err-bg);color:var(--err);border:1px solid #f3c3bd}
+.ol-sync .ol-problem b{font-size:var(--fs-base)}.ol-sync .ol-problem div{margin-top:var(--sp-1);color:var(--ink)}.ol-sync .ol-problem .small{color:var(--muted)}
+.ol-sync.ol-warn .ol-problem{background:#fff4e5;color:var(--warn);border-color:#f7d3a6}
+/* the "Connect your website" guide and the activity trail */
+.og-steps{counter-reset:og;list-style:none;margin:0;padding:0;display:grid;gap:var(--sp-4)}
+.og-step{position:relative;padding-left:44px}
+.og-step::before{counter-increment:og;content:counter(og);position:absolute;left:0;top:0;width:30px;height:30px;border-radius:50%;background:var(--brand-l);color:var(--brand);font-weight:700;display:grid;place-items:center}
+.og-step.done::before{content:"✓";background:var(--ok-bg);color:var(--ok)}
+.og-step h2{margin:3px 0 var(--sp-2);font-size:var(--fs-md)}
+.og-choices{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:var(--sp-2)}
+.og-choices label{display:flex;gap:var(--sp-2);align-items:flex-start;padding:var(--sp-3);border:1px solid var(--line);border-radius:var(--r-md);cursor:pointer;font-weight:400;background:#fff}
+.og-choices label:has(input:checked){border-color:var(--brand);background:var(--brand-l)}
+.og-choices input{width:auto!important;flex:none;margin:3px 0 0;min-height:0}
+.og-choices b{display:block}.og-choices small{display:block;color:var(--muted);line-height:1.4}
+.og-snip{display:block;white-space:pre;overflow:auto;font-size:12px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--sp-3);max-height:180px}
+.og-where{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:var(--sp-2) var(--sp-4);margin:var(--sp-3) 0 0}
+.og-where dt{font-weight:600}.og-where dd{margin:0;color:var(--ink-2)}
+.og-check{list-style:none;margin:0;padding:0;display:grid;gap:var(--sp-2)}
+.og-check li{display:flex;gap:var(--sp-2);align-items:flex-start}
+.og-check .tk{flex:none;width:20px;height:20px;border-radius:50%;border:2px solid var(--line-2);display:grid;place-items:center;font-size:12px;line-height:1;margin-top:1px}
+.og-check li.on .tk{background:var(--ok);border-color:var(--ok);color:#fff}
+.og-check li.on span:last-child{color:var(--ink)}.og-check li span:last-child{color:var(--muted)}
+.og-test{display:flex;gap:var(--sp-2);flex-wrap:wrap;align-items:center}
+.og-test select{width:auto;min-width:150px}
+.og-prog{margin-top:var(--sp-3);padding:var(--sp-3) var(--sp-4);border-radius:var(--r-md);background:var(--surface-2);border:1px solid var(--line)}
+.og-prog.ok{background:var(--ok-bg);border-color:#b7e1c4}.og-prog.err{background:var(--err-bg);border-color:#f3c3bd}
+.og-flow{width:100%;max-width:820px;height:auto;display:block;margin:var(--sp-2) auto}
+.og-how p{max-width:none}
+#og-checklist .og-check{grid-template-columns:repeat(auto-fill,minmax(320px,1fr));column-gap:var(--sp-5)}
+.ot-tbl{max-height:max(420px,calc(100vh - 260px))}
+.ot-tbl td{vertical-align:top}.ot-tbl td.w{white-space:nowrap}
+.ot-tbl td.ot-what{white-space:normal;max-width:none;min-width:280px;overflow:visible;text-overflow:clip}.ot-tbl td.ot-what b,.ot-tbl td.ot-what div{white-space:normal}
+.ot-st{display:inline-block;padding:1px 8px;border-radius:var(--pill-r);font-size:var(--fs-xs);font-weight:600;background:#eef1f4;color:var(--ink-2);white-space:nowrap}
+.ot-st.done,.ot-st.ok{background:var(--ok-bg);color:var(--ok)}.ot-st.rejected,.ot-st.error{background:var(--err-bg);color:var(--err)}.ot-st.retry,.ot-st.waiting{background:#fff4e5;color:var(--warn)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (max-width:700px){.og-where{grid-template-columns:1fr}.og-step{padding-left:38px}}
 .ol-test{background:#fef9c3;color:#713f12;border:1px dashed #facc15;padding:8px 12px;border-radius:8px;margin-bottom:12px}
 .badge.ol-done{background:var(--ok-bg);color:var(--ok)}.badge.ol-rejected{background:var(--err-bg);color:var(--err)}
 .badge.ol-failed{background:#fff4e5;color:var(--warn)}.badge.ol-test{background:#fef9c3;color:#713f12}

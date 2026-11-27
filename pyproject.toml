@@ -9,7 +9,8 @@ authors = [{name = "Riyeser Group"}]
 description = "Riyeser Accounting (a Riyeser Group module) - double-entry business accounting (sales, purchases, banking, inventory, payroll, GST/BAS, reports)"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["flask>=3.0", "waitress>=3.0", "pywebview>=5", "fpdf2>=2.7.5", "uharfbuzz>=0.39"]
+dependencies = ["flask>=3.0", "waitress>=3.0", "pywebview>=5", "fpdf2>=2.7.5", "uharfbuzz>=0.39",
+                "tzdata>=2024.1"]  # Windows has no time-zone database of its own (zoneinfo needs it: online free times)
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pypdf>=4"]

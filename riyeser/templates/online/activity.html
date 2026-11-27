@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Online activity{% endblock %}
+{% block content %}
+{% include "online/_styles.html" %}
+<div class="head"><div><h1>Online activity</h1><p class="sub">Every sync by Riyeser Central and everything that came in or went out: when, from where, and what happened. Kept 90 days.</p></div>
+<div class="actions"><a class="btn" href="{{ url_for('online.index') }}">Online orders &amp; bookings</a><a class="btn" href="{{ url_for('online.connect') }}">Connect your website</a><a class="btn" id="ot-csv" href="{{ url_for('online.activity_csv', day=day or None, st=st or None, kind=kind or None) }}">Export CSV</a></div></div>
+<form class="lbar" method="get" role="search" aria-label="Filter the activity">
+  <div class="lf lf-d"><label for="ot-day">Day</label><input id="ot-day" type="date" name="day" value="{{ day }}"></div>
+  <div class="lf"><label for="ot-st">Status</label><select id="ot-st" name="st" onchange="this.form.submit()">{% for v, l in filters %}<option value="{{ v }}" {{ 'selected' if st == v }}>{{ l }}</option>{% endfor %}</select></div>
+  <div class="lf"><label for="ot-kind">Kind</label><select id="ot-kind" name="kind" onchange="this.form.submit()">{% for v, l in kinds %}<option value="{{ v }}" {{ 'selected' if kind == v }}>{{ l }}</option>{% endfor %}</select></div>
+  <div class="lf-go"><button class="btn">Apply</button></div>
+  <div class="lend">{% if filtered %}<a class="btn lclear" href="{{ url_for('online.activity') }}">Clear filters</a>{% endif %}<div class="lcount" role="status"><b>{{ rows|length }}</b> of {{ total }} entries</div></div>
+</form>
+<div class="tbl ot-tbl"><table id="ot-list"><thead><tr><th>When</th><th>What happened</th><th>Source</th><th>Status</th><th>Reference</th></tr></thead><tbody>
+{% for r in rows %}<tr data-type="{{ r.type }}">
+<td class="w">{{ local(r.at) }}{% if r.n > 1 %}<div class="muted small">{{ r.n }} checks</div>{% endif %}</td>
+<td class="ot-what"><b>{{ r.what }}</b>{% if r.detail %}<div class="muted small">{{ r.detail }}</div>{% endif %}</td>
+<td>{{ r.source or '' }}{% if r.pc %}<div class="muted small">{{ r.pc }}</div>{% endif %}</td>
+<td class="w"><span class="ot-st {{ r.status }}">{{ labels.get(r.status, r.status) }}</span></td>
+<td class="w">{{ r.ref or '' }}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">{% if filtered %}Nothing matches these filters.{% elif sync.at %}Nothing recorded yet. Riyeser Central adds a line here after each sync that does something.{% else %}Nothing yet. Once Riyeser Central on the sync PC is signed in, every sync shows here. <a href="{{ url_for('online.connect') }}">Connect your website</a>{% endif %}</td></tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}
