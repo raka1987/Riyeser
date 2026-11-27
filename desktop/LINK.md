@@ -284,6 +284,23 @@ Calling a branch's number used to ring everyone in the branch. Now each number r
 - Riyeser Link: Management → Desk phones has a **Sites & relay** tab (the switch, relays, each site's status,
   phones at home with a QR code), a real **Branches and relay** tile and relay problems in Needs attention.
 
+## Changing or removing the relay PC, and the guided checklist (1.3.1)
+
+- **Settings → Connect your branches** is a live checklist (`renderer/link-relaycheck.js`, facts from
+  `link/relaychecks.js`): on the relay PC, this PC / service / address / router ports from outside / web name (only with
+  your own name) / certificate / registered / switched on; on every site, internet / reach the relay / allowed / sound /
+  extensions / a test call. A banner sums it up; the failing step is flagged with a one-click fix or how to fix it, and
+  the Overview tile and Needs attention link straight to it. Quiet: no pop-ups; one Windows notification only when
+  calls to other sites stop working. One office with no branches sees "Branches: not used".
+- **This PC as the relay** takes a set-up code from the website (no DNS); *Advanced: use your own web name* offers
+  Cloudflare or Namecheap (found from the domain's nameservers). The relay PC's Overview says **This PC is the relay**.
+- **Stop using this PC as the relay** (owners and admins): Move the relay to another PC (a set-up code and the steps)
+  or Remove it (the relay's uninstaller with Windows' permission prompt: out of Riyeser, task, firewall rules, router
+  port forwarding, key and settings; logs zipped). Uninstalling Link Office from Windows' Apps removes the relay too.
+- **Advanced checks** (an owner or admin's Riyeser account with two-step sign-in, locked after 15 minutes): each step
+  on its own, raw details with Copy for support, manual overrides, set-up codes. The website runs the same checks
+  remotely (`relay_check` changes). Details in `RELAY.md`.
+
 ## Security
 
 - **Office network only.** Phones can only connect, and settings can only be fetched, from private addresses. An advanced setting allows others (not recommended).

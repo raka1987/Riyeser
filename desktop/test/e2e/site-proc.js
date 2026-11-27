@@ -1,7 +1,8 @@
 // A Link Office site, as its own process (inside a network namespace behind its own NAT in link-relay-nat.test.js):
 // the real PBX and relay link, and simulated desk phones on the office network that send and count sound (RTP).
 // Config in argv[2] (JSON): { name, office, ws, host, phones: [{ ext, bind }], relays, tokens, timing }.
-// Commands on stdin: { cmd: 'status' } | { cmd: 'call', from, to, ms } | { cmd: 'hangup', from } — answers on stdout.
+// Commands on stdin: { cmd: 'status' } | { cmd: 'call', from, to, ms } | { cmd: 'hangup', from } | { cmd: 'echo' } (the test call)
+// | { cmd: 'config', relays, tokens } (1.3.1: what Riyeser online now says, e.g. after the relay moved) — answers on stdout.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -39,6 +40,8 @@ const say = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
       let m; try { m = JSON.parse(line); } catch { continue; }
       (async () => {
         if (m.cmd === 'status') return say({ id: m.id, relay: link.status(), regs: [...pbx.bindings.keys()] });
+        if (m.cmd === 'config') { cfg.relays = m.relays; cfg.tokens = m.tokens; link.configAt = 0; link.config = null; link.nudge(); return say({ id: m.id, ok: true }); }
+        if (m.cmd === 'echo') return say({ id: m.id, test: await link.testCall() });   // 1.3.1: the checklist's test call
         if (m.cmd === 'call') {
           const u = phones[m.from];
           const { call, final } = await u.dial(m.to);

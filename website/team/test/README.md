@@ -178,3 +178,8 @@
 - `developers-test.js`: riyeser.com/developers/ (from `website/developers.mjs`): every page under the CSP, every endpoint with curl and
   JavaScript, the webhook signature known answer, the widget preview, help and footer links, the sitemap, 390px.
 - `online-help-test.js` (node, no browser): the "Online connections" help guide (diagram, five set-up steps, where to paste the code, checklist, Send a test, Activity, problems); after a build it checks help/online.html too. `connections-test.js` step 12 covers the "Connect your website" guide on Management → Connections (checklist from `api_status`, Send a test through `api_send_test` / `api_event_status`).
+- `relay-remove-ui-test.js` (Link Office 1.3.1): Sites & relay — your relays (make main, stop using, Riyeser's can't be
+  removed), each site's checklist from its reports, Advanced checks run on a chosen site's Link Office (test call, one
+  check, raw details), Move to another PC (a set-up code), removing the last relay (a warning first, then switched off),
+  and a phone (one column, big buttons). `rules-test.sql` covers the database side (set-up codes, own keys, takeover,
+  removal and the changed cluster secret, last relay, `relay_leave`, `relay_check`). Screenshots go to the folder given.

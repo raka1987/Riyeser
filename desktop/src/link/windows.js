@@ -152,12 +152,64 @@ async function runElevatedScript(makeScript) {
  */
 // ddnsPasswordFile: a file (in this run's own temp folder) holding the Namecheap Dynamic DNS password; the installer
 // reads it into relay.env and deletes it. The password itself is never in the script, a command line or a log.
-function relayHostScript({ script, relayDir, domain, region, id, ddnsPasswordFile }, resultFile) {
+// 1.3.1: secretFile: the relay's own key from a set-up code (made on the website), in the same kind of file. noDns: no
+// web name (the default): sites use the address the relay reports. ddns: { provider: 'namecheap' | 'cloudflare', file }
+// (Advanced: your own web name). The installer's last line is RESULT {json}.
+function relayHostScript({ script, relayDir, domain, region, id, ddnsPasswordFile, secretFile, noDns, ddns, priority }, resultFile) {
   const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
   if (!/^[A-Za-z0-9.-]{3,253}$/.test(domain || '') || !/^[a-z0-9-]{2,40}$/.test(id || '') || /[\r\n"`$]/.test(region || '')) throw new Error('Check the relay\'s name, id and region.');
-  const ddns = ddnsPasswordFile ? ` -DdnsProvider namecheap -DdnsPasswordFile ${q(ddnsPasswordFile)}` : '';
-  return [`$out = & ${q(script)} -LinkOffice -RelayDir ${q(relayDir)} -Domain ${q(domain)} -Region ${q(region)} -Id ${q(id)}${ddns} *>&1 | Out-String`,
+  const d = ddns || (ddnsPasswordFile ? { provider: 'namecheap', file: ddnsPasswordFile } : null);
+  if (d && !['namecheap', 'cloudflare'].includes(d.provider)) throw new Error('Choose Cloudflare or Namecheap for the web name.');
+  const zone = d && d.provider === 'cloudflare' ? domain.split('.').slice(-2).join('.') : '';
+  const dd = !d ? '' : d.provider === 'namecheap' ? ` -DdnsProvider namecheap -DdnsPasswordFile ${q(d.file)}` : ` -DdnsProvider cloudflare -DdnsZone ${q(zone)} -DdnsTokenFile ${q(d.file)}`;
+  const extra = `${secretFile ? ` -SecretFile ${q(secretFile)}` : ''}${noDns ? ' -NoDns' : ''}${priority ? ` -Priority ${Number(priority) | 0}` : ''}`;
+  return [`$out = & ${q(script)} -LinkOffice -RelayDir ${q(relayDir)} -Domain ${q(domain)} -Region ${q(region)} -Id ${q(id)}${dd}${extra} *>&1 | Out-String`,
     `@{ ok = ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null); out = $out } | ConvertTo-Json -Compress | Set-Content -Path ${q(resultFile)} -Encoding UTF8`].join('\r\n');
+}
+/**
+ * 1.3.1: Stop using this PC as the relay. The relay's own uninstaller (install-relay.ps1 -Uninstall), run once with
+ * Windows' permission prompt: out of Riyeser (signed with its own key; keep: when another PC has taken over already),
+ * the task stopped and removed, the router port forwarding it made and its firewall rules removed, the logs zipped
+ * for support, and C:\ProgramData\Riyeser Relay (its key and settings) deleted. -> the script's text.
+ */
+function relayUninstallScript({ script, relayDir, keepRegistration = false }, resultFile) {
+  const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
+  if (!script || !relayDir) throw new Error('The relay\'s uninstaller is missing.');
+  return [`$out = & ${q(script)} -Uninstall -RelayDir ${q(relayDir)}${keepRegistration ? ' -KeepRegistration' : ''} *>&1 | Out-String`,
+    "$r = $null; $m = [regex]::Match($out, 'RESULT (\\{.*\\})'); if ($m.Success) { try { $r = $m.Groups[1].Value | ConvertFrom-Json } catch { } }",
+    `@{ ok = ($LASTEXITCODE -eq 0); out = $out; result = $r } | ConvertTo-Json -Compress -Depth 5 | Set-Content -Path ${q(resultFile)} -Encoding UTF8`].join('\r\n');
+}
+/** What the uninstaller's output says it did -> { ok, left, removedMappings, taskRemoved, firewallRemoved, logsZip, settingsRemoved } */
+function parseUninstall(r) {
+  const x = (r && r.result) || {}; const left = x.left || {};
+  return { ok: !!(r && r.ok), left: !!left.left, gone: !!left.gone, leftWhy: left.why || null, switchedOff: (left.switched_off || []).length,
+    removedMappings: (x.port_mappings && x.port_mappings.removed) || 0, taskRemoved: !!x.task_removed, firewallRemoved: !!x.firewall_removed,
+    logsZip: x.logs_zip || null, settingsRemoved: !!x.settings_removed };
+}
+/** "Keep this PC awake" (the relay PC): never sleep or hibernate while plugged in. Run with Windows' permission prompt. */
+function keepAwakeScript(resultFile) {
+  const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
+  return ['powercfg /change standby-timeout-ac 0', 'powercfg /change hibernate-timeout-ac 0',
+    `@{ ok = $true } | ConvertTo-Json -Compress | Set-Content -Path ${q(resultFile)} -Encoding UTF8`].join('\r\n');
+}
+/** Can this PC be the relay? { windows, admin, diskFreeGb, onBattery } — read only. */
+async function relayPcFacts({ powerMonitor } = {}) {
+  const os = require('os'); const fs = require('fs');
+  const rel = String(os.release()).split('.').map(Number);
+  let admin = null; let disk = null;
+  if (process.platform === 'win32') {
+    const g = await run('whoami', ['/groups']); admin = g.ok ? /S-1-5-32-544/.test(g.out) : null;
+    try { const st = fs.statfsSync(process.env.ProgramData || 'C:\\ProgramData'); disk = Math.round((st.bavail * st.bsize) / 1e8) / 10; } catch { disk = null; }
+  }
+  return { windows: process.platform === 'win32' ? (rel[0] >= 10 ? 'ok' : 'old') : 'not-windows', release: os.release(), admin, diskFreeGb: disk,
+    onBattery: powerMonitor && powerMonitor.isOnBatteryPower ? powerMonitor.isOnBatteryPower() : null };
+}
+/** The relay's own checks on this PC (http://127.0.0.1:8080/check, this PC only). method GET, or POST outside / portmap / sync. */
+function relayCheck(what = '', method = 'GET', timeout = 20000) {
+  return new Promise((resolve) => {
+    const r = require('http').request({ host: '127.0.0.1', port: 8080, path: `/check${what ? `/${what}` : ''}`, method, timeout }, (x) => { let b = ''; x.on('data', (c) => { b += c; }); x.on('end', () => { try { resolve(JSON.parse(b)); } catch { resolve(null); } }); });
+    r.on('error', () => resolve(null)); r.on('timeout', () => r.destroy()); r.end();
+  });
 }
 /** Is this PC running the relay? -> { installed, health } (health from http://127.0.0.1:8080/health) */
 async function relayHostState() {
@@ -175,5 +227,5 @@ function checkDdnsPassword(pw) {
   return p;
 }
 
-module.exports = { relayHostScript, relayHostState, checkDdnsPassword, RULE, firewallCommands, firewallRuleExists, ruleState, addFirewallRule, parsePowercfg, sleepWarning, readSleep,
+module.exports = { relayHostScript, relayUninstallScript, parseUninstall, keepAwakeScript, relayPcFacts, relayCheck, relayHostState, checkDdnsPassword, RULE, firewallCommands, firewallRuleExists, ruleState, addFirewallRule, parsePowercfg, sleepWarning, readSleep,
   PS_NETCONFIG, parseNetConfig, readNetConfig, prefixToMask, fixedAddressScript, dhcpScript, runElevatedScript };

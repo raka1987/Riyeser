@@ -1,6 +1,6 @@
 {
   "name": "riyeser-relay",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "The Riyeser relay: joins a business's Riyeser Link Office sites and remote phones (SIP federation, media relay, STUN/TURN). No dependencies.",
   "private": true,
   "main": "server.js",

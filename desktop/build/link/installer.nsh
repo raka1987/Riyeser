@@ -15,3 +15,19 @@
   nsExec::ExecToLog 'netsh advfirewall firewall delete rule name="Riyeser Link Office"'
   Pop $0
 !macroend
+
+!macro customUnInit
+  ; 1.3.1: if this PC is the Riyeser relay (it runs with this program's copy of Node), remove the relay too: out of
+  ; Riyeser, its task, firewall rules, router port forwarding and its key (logs zipped in C:\ProgramData\Riyeser Relay Logs).
+  ; Not on an update (the old uninstaller runs before the new version installs): the relay keeps running then.
+  ; In un.onInit, so it runs while the program's files (and the relay's uninstaller) are still there.
+  ${ifNot} ${isUpdated}
+    IfFileExists "$INSTDIR\resources\app.asar.unpacked\src\relay\deploy\windows\install-relay.ps1" 0 noRelay
+      nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -Command "if (Get-ScheduledTask -TaskName ''Riyeser Relay'' -ErrorAction SilentlyContinue) { exit 0 } else { exit 3 }"'
+      Pop $0
+      StrCmp $0 "0" 0 noRelay
+        nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\app.asar.unpacked\src\relay\deploy\windows\install-relay.ps1" -Uninstall -RelayDir "$INSTDIR\resources\app.asar.unpacked\src\relay"'
+        Pop $0
+    noRelay:
+  ${endIf}
+!macroend

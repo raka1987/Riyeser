@@ -61,7 +61,8 @@ class RelayLink extends EventEmitter {
       backup: !!(c && primary && c.id !== primary.id), primary: primary ? { id: primary.id, region: primary.region || '' } : null,
       sites: others.map((s) => ({ name: s.name || s.office, exts: s.exts, via: s.via })), remote: c && c.routes ? (c.routes.remote || []).length : 0, remoteExts: c && c.routes ? (c.routes.remote || []).map(String).slice(0, 2000) : [], phones: c && c.routes ? c.routes.phones || 0 : 0,
       udp: c ? c.udp || 'checking' : null, since: c ? new Date(c.since).toISOString() : null, error: this.error, reconnects: this.reconnects,
-      draining: [...this.conns.values()].filter((x) => x.draining).map((x) => x.id), relays: (this.config && this.config.relays || []).map((x) => ({ id: x.id, region: x.region || '', online: x.online })),
+      draining: [...this.conns.values()].filter((x) => x.draining).map((x) => x.id), relays: (this.config && this.config.relays || []).map((x) => ({ id: x.id, region: x.region || '', online: x.online, host: x.host || '', addr: x.addr || x.ip || '', dns: x.dns !== false, pin: x.pin || x.cert_sha256 || null, priority: x.priority, managed: !!x.managed, last_seen: x.last_seen || null })),
+      exp: this.config && this.config.exp ? Number(this.config.exp) : null, test: this.lastTest || null,
       detail: this.detail(),
     };
   }
@@ -107,7 +108,13 @@ class RelayLink extends EventEmitter {
   }
   announce(c) { if (c.ws && c.ws.open) c.ws.sendJson({ t: 'exts', exts: c.draining ? [] : this.exts, draining: !!c.draining, name: String(this.siteName() || '').slice(0, 60) }); }
   /** Something changed on this side (the PC's address, the network): check the connection now. */
-  nudge() { const c = this.activeConn(); if (c) this.ping(c); else { clearTimeout(this.retry); this.loop().catch(() => {}); } }
+  nudge() {
+    const c = this.activeConn(); if (c) { this.ping(c); return; }
+    // 1.3.1: waiting between tries: try again now (before, clearing the timer left the wait unfinished, so the link
+    // never tried again after a nudge during a wait)
+    clearTimeout(this.retry);
+    if (this.wake) { const w = this.wake; this.wake = null; w(); } else this.loop().catch(() => {});
+  }
 
   // ---------- connecting, failover, fail-back ----------
   set(state, error = null) { const was = `${this.state}|${this.error}`; this.state = state; this.error = error; if (was !== `${state}|${error}`) this.emit('change', this.status()); }
@@ -134,7 +141,9 @@ class RelayLink extends EventEmitter {
         for (const r of relays) {
           if (this.stopped) return;
           try { await this.open(r); ok = true; break; } catch (e) {
-            if (e.status === 401 && e.body && e.body.code === 'expired') this.configAt = 0;
+            // an expired pass, or one the relay no longer accepts (the relay keys were changed when a relay was removed)
+            if (e.status === 401 && e.body && ['expired', 'token'].includes(e.body.code)) this.configAt = 0;
+            if (e.status === 403 && e.body && e.body.code === 'removed') { this.configAt = 0; this.avoid = { id: r.id, at: Date.now() }; continue; }
             if (e.status === 403) refused = (e.body && e.body.error) || e.message;
             this.log('warn', `Couldn't connect to the relay ${r.region || r.host} (${e.code === 'PIN' ? 'its certificate isn\'t the one Riyeser online lists' : e.message}).`);
             this.error = e.code === 'PIN' ? 'the relay\'s certificate isn\'t the expected one' : String(e.message || e).slice(0, 200);
@@ -147,7 +156,7 @@ class RelayLink extends EventEmitter {
       }
     } finally { this.looping = false; }
   }
-  sleep(ms) { return new Promise((r) => { clearTimeout(this.retry); this.retry = setTimeout(r, ms); this.retry.unref && this.retry.unref(); }); }
+  sleep(ms) { return new Promise((r) => { clearTimeout(this.retry); const done = () => { if (this.wake === done) this.wake = null; r(); }; this.wake = done; this.retry = setTimeout(done, ms); this.retry.unref && this.retry.unref(); }); }
   /** Connect to one relay; it becomes the active one. */
   async open(r, { asActive = true } = {}) {
     const token = this.config.tokens && this.config.tokens[r.id];
@@ -218,7 +227,8 @@ class RelayLink extends EventEmitter {
     if (this.active === c.id) {
       this.active = null; this.reconnects++;
       this.log('warn', `Lost the connection to the relay ${c.relay.region || c.id}${c.byeReason ? ` (${c.byeReason})` : ''}. Calls inside this office carry on; reconnecting.`);
-      if (c.byeReason && /revoked|disconnected|switched the relay off|replaced/.test(c.byeReason)) { this.configAt = 0; this.error = c.byeReason; }
+      if (c.byeReason && /revoked|disconnected|switched the relay off|replaced|removed/.test(c.byeReason)) { this.configAt = 0; this.error = c.byeReason; }
+      if (c.byeReason && /removed/.test(c.byeReason)) this.avoid = { id: c.id, at: Date.now() };
       this.set('connecting', c.byeReason || 'connection lost');
       // a draining backup still connected? use it straight away while we look again
       const spare = [...this.conns.values()].find((x) => x.ws.open);
@@ -230,6 +240,7 @@ class RelayLink extends EventEmitter {
   /** While on a backup: is the main relay (or one before this) back? Then move new calls to it. */
   async failback() {
     const c = this.activeConn(); if (!c || this.stopped || this.failingBack || !this.config) return;
+    if (this.forced && this.forced.id === c.id && Date.now() < this.forced.until) return;   // an admin chose this relay for now
     const order = this.config.relays.map((r) => r.id); const at = order.indexOf(c.id);
     if (at <= 0) return;
     this.failingBack = true;
@@ -239,6 +250,23 @@ class RelayLink extends EventEmitter {
         try { const n = await this.open(r, { asActive: false }); this.makeActive(n); this.log('info', `The relay ${r.region || r.id} is back: new calls go through it.`); return; } catch { /* still down */ }
       }
     } finally { this.failingBack = false; }
+  }
+  /** The test call (1.3.1): echo through the relay this office uses now. */
+  async testCall() {
+    const c = this.activeConn();
+    if (!c) return { ok: false, error: 'Not connected to the relay right now.', at: new Date().toISOString() };
+    const r = await echoTest({ ip: (c.welcome && c.welcome.ip) || c.relay.ip, port: c.welcome && c.welcome.probe });
+    this.lastTest = { ...r, relay: c.id }; this.emit('change', this.status());
+    return this.lastTest;
+  }
+  /** Can this office reach each relay (name, connection, certificate)? */
+  async reach() { const cfg = this.config || {}; const out = {}; for (const r of cfg.relays || []) out[r.id] = await reachTest(r).catch((e) => ({ error: e.message })); return out; }
+  /** Use this relay for new calls (Advanced: force a relay), if it answers. */
+  async force(id) {
+    const r = (this.config && this.config.relays || []).find((x) => x.id === id);
+    if (!r) throw new Error('That relay isn\'t one of this business\'s.');
+    const c = this.conns.get(id) && this.conns.get(id).ws.open ? this.conns.get(id) : await this.open(r, { asActive: false });
+    this.makeActive(c); this.forced = { id, until: Date.now() + 30 * 60 * 1000 }; return this.status();
   }
   /** Can sound (UDP) get through to the relay? It echoes a probe on its probe port. */
   async probe(c) {
@@ -258,6 +286,82 @@ class RelayLink extends EventEmitter {
   }
 }
 
+// ---------- 1.3.1: the checklist's own checks ----------
+/** G.711 mu-law, for the test call's tone */
+function muEncode(x) {
+  const BIAS = 0x84; let sign = 0; let v = Math.round(x * 32635);
+  if (v < 0) { v = -v; sign = 0x80; } if (v > 32635) v = 32635; v += BIAS;
+  let exp = 7; for (let m = 0x4000; (v & m) === 0 && exp > 0; m >>= 1) exp--;
+  return ~(sign | (exp << 4) | ((v >> (exp + 3)) & 0x0f)) & 0xff;
+}
+function muDecode(u) { u = ~u & 0xff; const sign = u & 0x80; const exp = (u >> 4) & 7; const man = u & 0x0f; let v = ((man << 3) + 0x84) << exp; v -= 0x84; return (sign ? -v : v) / 32768; }
+/** How strong freq is in samples (8 kHz), 0..1 of the whole signal's energy (Goertzel). */
+function toneStrength(samples, freq, rate = 8000) {
+  const k = 2 * Math.cos((2 * Math.PI * freq) / rate); let s1 = 0; let s2 = 0; let energy = 0;
+  for (const x of samples) { const s0 = x + k * s1 - s2; s2 = s1; s1 = s0; energy += x * x; }
+  const power = s1 * s1 + s2 * s2 - k * s1 * s2;
+  return energy ? Math.min(1, (2 * power) / (samples.length * energy)) : 0;
+}
+/** A 1 kHz tone, 20 ms (160 samples) per packet, starting at packet n */
+const tonePacket = (n, freq = 1000) => Buffer.from(Array.from({ length: 160 }, (_, i) => muEncode(0.5 * Math.sin((2 * Math.PI * freq * (n * 160 + i)) / 8000))));
+
+/**
+ * The test call (echo): a second of call sound (50 packets of a 1 kHz tone, 20 ms each, like a real call) to the
+ * relay's sound port, which sends each packet straight back. -> { ok, sent, received, loss (%), rtt_ms, jitter_ms,
+ * tone (the tone came back clear), at, error }. Done on the same UDP path a call between sites uses.
+ */
+async function echoTest({ ip, port, packets = 50, every = 20, timeout = 1500, socket } = {}) {
+  if (!ip || !port) return { ok: false, error: 'The relay hasn\'t said where its sound port is yet (connect to it first).', at: new Date().toISOString() };
+  const s = socket || dgram.createSocket('udp4'); const nonce = crypto.randomBytes(8);
+  const back = new Map(); const rtts = [];
+  s.on('message', (m) => {
+    if (m.length !== 8 + 8 + 4 + 8 + 160 || m.slice(0, 8).toString() !== 'RYECHO1 ' || !m.slice(8, 16).equals(nonce)) return;
+    const seq = m.readUInt32BE(16); if (back.has(seq)) return;
+    back.set(seq, m.slice(28)); rtts.push(Date.now() - Number(m.readBigUInt64BE(20)));
+  });
+  await new Promise((r, j) => { s.once('error', j); s.bind(0, () => { s.off('error', j); r(); }); });
+  for (let n = 0; n < packets; n++) {
+    const h = Buffer.alloc(28); h.write('RYECHO1 ', 0); nonce.copy(h, 8); h.writeUInt32BE(n, 16); h.writeBigUInt64BE(BigInt(Date.now()), 20);
+    try { s.send(Buffer.concat([h, tonePacket(n)]), port, ip); } catch { /* closed */ }
+    await new Promise((r) => setTimeout(r, every));
+  }
+  await new Promise((r) => setTimeout(r, timeout));
+  try { s.close(); } catch { /* closed */ }
+  const samples = []; for (let n = 0; n < packets; n++) { const p = back.get(n); if (p) for (const b of p) samples.push(muDecode(b)); }
+  const received = back.size; const loss = Math.round(((packets - received) / packets) * 100);
+  const rtt = rtts.length ? Math.round(rtts.reduce((a, b) => a + b, 0) / rtts.length) : null;
+  const jitter = rtts.length > 1 ? Math.round(rtts.slice(1).reduce((a, x, i) => a + Math.abs(x - rtts[i]), 0) / (rtts.length - 1)) : 0;
+  const tone = samples.length >= 800 && toneStrength(samples, 1000) > 0.5;
+  return { ok: received > 0 && loss <= 5 && tone, sent: packets, received, loss, rtt_ms: rtt, jitter_ms: jitter, tone, at: new Date().toISOString(),
+    error: received === 0 ? 'No sound came back: UDP to the relay seems blocked by this office\'s firewall or router.' : loss > 5 ? `${loss}% of the sound was lost on the way.` : !tone ? 'Sound came back, but not clearly.' : null };
+}
+
+/**
+ * Can this office reach the relay? Step by step, to say exactly where it fails: the name (when it has one), a TCP
+ * connection, then TLS with the certificate Riyeser online lists. r: { url, host, ip, pin }.
+ * -> { dns: { ok, ip, error }, tcp: { ok, ms, error }, tls: { ok, fingerprint, pinned, error } }
+ */
+async function reachTest(r, { timeout = 4000 } = {}) {
+  const dns = require('dns').promises; const net = require('net'); const tls = require('tls');
+  let u; try { u = new URL(r.url); } catch { return { dns: { ok: false, error: 'no address for the relay' } }; }
+  const port = Number(u.port) || 443; const out = {};
+  let ip = u.hostname;
+  if (!net.isIP(ip)) {
+    try { ip = (await dns.lookup(u.hostname, { family: 4 })).address; out.dns = { ok: true, ip }; } catch (e) { out.dns = { ok: false, error: e.code === 'ENOTFOUND' ? `the name ${u.hostname} isn't found` : e.code || e.message }; if (!r.ip) return out; ip = r.ip; }
+  } else out.dns = { ok: true, ip, none: true };
+  const t0 = Date.now();
+  out.tcp = await new Promise((resolve) => { const s = net.connect({ host: ip, port, timeout }); const end = (v) => { s.destroy(); resolve(v); }; s.on('connect', () => end({ ok: true, ms: Date.now() - t0 })); s.on('timeout', () => end({ ok: false, error: 'no answer (blocked, or the relay\'s router doesn\'t forward the port)' })); s.on('error', (e) => end({ ok: false, error: e.code === 'ECONNREFUSED' ? 'refused (nothing listening there)' : e.code || e.message })); });
+  if (!out.tcp.ok) return out;
+  out.tls = await new Promise((resolve) => {
+    const s = tls.connect({ host: ip, port, servername: net.isIP(u.hostname) ? undefined : u.hostname, rejectUnauthorized: false, timeout });
+    const end = (v) => { s.destroy(); resolve(v); };
+    s.on('secureConnect', () => { const fp = s.getPeerCertificate() && s.getPeerCertificate().fingerprint256; const pin = r.pin && String(r.pin).toUpperCase();
+      end({ ok: !pin || fp === pin, fingerprint: fp || null, pinned: !!pin, error: pin && fp !== pin ? 'the relay\'s certificate isn\'t the one Riyeser online lists' : null }); });
+    s.on('timeout', () => end({ ok: false, error: 'no secure connection (timed out)' })); s.on('error', (e) => end({ ok: false, error: e.code || e.message }));
+  });
+  return out;
+}
+
 /** The caller of a call that came from the relay: the extension the relay vouches for. */
 function trunkCaller(req) {
   for (const h of ['p-asserted-identity', 'from']) {
@@ -266,4 +370,4 @@ function trunkCaller(req) {
   return null;
 }
 
-module.exports = { RelayLink, trunkCaller, backoff };
+module.exports = { RelayLink, trunkCaller, backoff, echoTest, reachTest, toneStrength, tonePacket, muEncode, muDecode };

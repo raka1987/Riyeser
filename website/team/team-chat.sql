@@ -3248,7 +3248,7 @@ alter table public.link_offices add column if not exists address_changes jsonb n
 alter table public.link_office_commands drop constraint if exists link_office_commands_kind_check;
 alter table public.link_office_commands add constraint link_office_commands_kind_check
   check (kind in ('assign_phone', 'unassign_phone', 'add_phone', 'new_password', 'set_dnd', 'reveal_password', 'name_phone',
-                  'bulk_phones', 'phone_action', 'phone_settings'));
+                  'bulk_phones', 'phone_action', 'phone_settings', 'relay_check'));
 -- Many phones at once and each phone's own page (Link Office 1.2.3): a list of up to 500 phones fits in one change, so
 -- "Add several phones" may be bigger than the other changes; what the office did comes back as a short summary (result:
 -- { summary, added|done, skipped: [{mac, why}], failed: [{mac, why}] }). Phones also report whether they're ignored, their
@@ -3580,6 +3580,18 @@ begin
     if mac is null then raise exception 'That isn''t a MAC address. It''s 12 letters and numbers, on a sticker under the phone (like 00:15:65:12:34:56).'; end if;
     if jsonb_typeof(d -> 'settings') <> 'object' then raise exception 'Choose the phone''s settings.'; end if;
     clean := jsonb_build_object('mac', mac, 'settings', public.link_phone_settings(d -> 'settings'));
+  elsif kind = 'relay_check' then
+    -- 1.3.1: Sites & relay → Advanced checks, from the website (also on a phone): run a step of the relay checklist on this
+    -- office's Link Office, a test call, or a fix. The result comes back with link_office_done (result).
+    if coalesce(d ->> 'action', '') not in ('run_check', 'run_all', 'test_call', 'echo_test', 'retry_upnp', 'reregister', 'reset_pass', 'force_relay', 'details') then
+      raise exception 'Riyeser Link Office doesn''t know how to do that.';
+    end if;
+    clean := jsonb_strip_nulls(jsonb_build_object('action', d ->> 'action',
+      'step', case when d ->> 'step' ~ '^[a-z][a-z0-9-]{0,19}$' then d ->> 'step' end,
+      'relay', case when d ->> 'relay' ~ '^[a-z0-9-]{2,40}$' then d ->> 'relay' end,
+      'to_office', case when d ->> 'to_office' ~ '^[A-Za-z0-9_-]{4,80}$' then d ->> 'to_office' end,
+      'extension', ext));
+    if clean ->> 'action' = 'run_check' and clean ->> 'step' is null then raise exception 'Choose a step to check.'; end if;
   elsif kind = 'new_password' then clean := jsonb_build_object('extension', ext);
   elsif kind = 'set_dnd' then
     if link_bool(d -> 'on') is null then raise exception 'Say whether Do not disturb is on or off.'; end if;
@@ -8179,6 +8191,43 @@ alter table public.link_offices add column if not exists relay_gen int not null 
 alter table public.link_offices add column if not exists relay_revoked_at timestamptz;
 alter table public.link_offices add column if not exists relay jsonb;            -- from Link Office: { state, relay, region, rtt_ms, backup, udp, error, at }
 alter table public.link_offices add column if not exists relay_seen jsonb;       -- from the relay itself: { relay, since, at }
+-- 1.3.1: changing or removing the relay PC. Each relay has its own key (sync_key: it signs relay_sync and relay_leave
+-- with it, and gets the keys it needs back from relay_sync), so no secret is ever copied from one PC to another and a
+-- lost PC is cut off by removing it (relay_drop: its key goes, and the cluster secret is changed, so the keys it held
+-- stop working on the other relays within one sync, 30 seconds). managed_by: the business whose owners and admins may
+-- remove it or move it to another PC (null: only Riyeser, in the SQL editor). dns: false for a relay with no web name
+-- (the default for a PC in an office): sites connect to the address it reports, checked by its certificate.
+alter table public.relay_servers add column if not exists sync_key text check (sync_key is null or length(sync_key) >= 32);
+alter table public.relay_servers add column if not exists managed_by uuid references public.workspaces(id) on delete set null;
+alter table public.relay_servers add column if not exists dns boolean not null default true;
+alter table public.relay_servers add column if not exists replaces text;      -- takes over from this relay when it first checks in
+alter table public.relay_cluster add column if not exists epoch int not null default 1;   -- bumped each time the secret is changed
+-- the business's own order of relays (relays: order only, since 1.3.1) and the relays it has switched off (off)
+alter table public.link_relay_settings add column if not exists off text[] not null default '{}';
+alter table public.link_relay_settings add column if not exists order_only boolean not null default false;
+alter table public.link_relay_settings alter column order_only set default true;
+-- before 1.3.1 a non-empty relays list also meant "only these": keep that as the relays switched off (once)
+update public.link_relay_settings s set off = coalesce((select array_agg(r.id order by r.id) from public.relay_servers r
+    where (r.workspace_id is null or r.workspace_id = s.workspace_id) and not r.id = any (s.relays)), '{}'), order_only = true
+  where not s.order_only and cardinality(s.relays) > 0;
+update public.link_relay_settings set order_only = true where not order_only;
+-- one-time set-up codes for a new relay PC (made on the website by an owner or admin, typed into Link Office on the PC)
+create table if not exists public.relay_enrollments (
+  code_hash text primary key check (code_hash ~ '^[0-9a-f]{64}$'),
+  workspace_id uuid not null references public.workspaces(id) on delete cascade,
+  relay_id text not null check (relay_id ~ '^[a-z0-9-]{2,40}$'),
+  host text not null check (host ~ '^[A-Za-z0-9.-]{3,253}$'),
+  region text not null default '' check (length(region) <= 60),
+  priority int not null default 1 check (priority between 1 and 99),
+  dns boolean not null default false,
+  replaces text,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '30 minutes',
+  used_at timestamptz
+);
+alter table public.relay_enrollments enable row level security;
+revoke all on public.relay_enrollments from anon, authenticated;
 
 alter table public.relay_cluster enable row level security;
 alter table public.relay_servers enable row level security;
@@ -8206,17 +8255,31 @@ create or replace function public.relay_turn_secret() returns text
   language sql stable security definer set search_path = public, extensions as $$ select encode(relay_key('turn'), 'hex') $$;
 -- The relays a business uses, in order: its own order if it set one, else main relay first. Only relays for every
 -- business, or its own. online: checked in during the last 2 minutes.
+-- addr: where to connect (its web name, or for a relay with no web name the address it last reported).
+create or replace function public.relay_addr(r public.relay_servers) returns text
+  language sql stable as $$ select case when r.dns then r.host else coalesce(r.public_ip, r.host) end $$;
 create or replace function public.relay_list(ws uuid) returns jsonb
   language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'host', r.host, 'port', r.port, 'region', r.region, 'priority', r.priority,
-      'url', 'wss://' || r.host || case when r.port = 443 then '' else ':' || r.port end || '/link/v1', 'ip', r.public_ip,
+      'url', 'wss://' || relay_addr(r) || case when r.port = 443 then '' else ':' || r.port end || '/link/v1', 'ip', r.public_ip, 'addr', relay_addr(r), 'dns', r.dns,
       'pin', case when r.self_signed then r.cert_sha256 end, 'cert_sha256', r.cert_sha256,
       'online', coalesce(r.last_seen > now() - interval '2 minutes', false), 'last_seen', r.last_seen,
       'sip_tls_port', coalesce((r.ports ->> 'sip_tls')::int, 5061), 'turn_port', (r.ports ->> 'turn')::int, 'turns_port', (r.ports ->> 'turns')::int,
-      'own', r.workspace_id is not null)
+      'own', r.workspace_id is not null, 'managed', r.managed_by is not distinct from ws)
     order by coalesce(array_position(s.relays, r.id), 1000), r.priority, r.id), '[]'::jsonb)
   from relay_servers r left join link_relay_settings s on s.workspace_id = ws
-  where (r.workspace_id is null or r.workspace_id = ws) and (s.relays is null or cardinality(s.relays) = 0 or r.id = any (s.relays))
+  where (r.workspace_id is null or r.workspace_id = ws) and not (r.id = any (coalesce(s.off, '{}')))
+$$;
+-- Owners and admins: every relay the business could use, also the ones it switched off, for Sites & relay.
+create or replace function public.relay_admin_list(ws uuid) returns jsonb
+  language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'host', r.host, 'addr', relay_addr(r), 'dns', r.dns, 'region', r.region, 'priority', r.priority,
+      'online', coalesce(r.last_seen > now() - interval '2 minutes', false), 'last_seen', r.last_seen, 'version', r.version,
+      'off', r.id = any (coalesce(s.off, '{}')), 'managed', r.managed_by is not distinct from ws and r.managed_by is not null,
+      'shared', r.workspace_id is null, 'pending', r.last_seen is null, 'replaces', r.replaces)
+    order by r.id = any (coalesce(s.off, '{}')), coalesce(array_position(s.relays, r.id), 1000), r.priority, r.id), '[]'::jsonb)
+  from relay_servers r left join link_relay_settings s on s.workspace_id = ws
+  where r.workspace_id is null or r.workspace_id = ws
 $$;
 create or replace function public.relay_enabled(ws uuid) returns boolean
   language sql stable security definer set search_path = public as $$
@@ -8224,7 +8287,7 @@ create or replace function public.relay_enabled(ws uuid) returns boolean
     and exists (select 1 from workspaces w where w.id = ws and w.status = 'active')
 $$;
 revoke all on function public.relay_b64u(bytea), public.relay_sign(bytea, jsonb), public.relay_key(text), public.relay_turn_secret(),
-  public.relay_list(uuid), public.relay_enabled(uuid) from public, anon, authenticated;
+  public.relay_list(uuid), public.relay_admin_list(uuid), public.relay_enabled(uuid) from public, anon, authenticated;
 
 -- ---------------------------------------------------------------- set up by Riyeser, in the Supabase SQL editor only
 -- After setup.sh on the relay machine:  select relay_register('syd1', 'relay.riyeser.com', 'Sydney', '<the secret it printed>');
@@ -8251,15 +8314,86 @@ revoke all on function public.relay_register(text, text, text, text, int, uuid, 
 -- ---------------------------------------------------------------- the relay calls this every 30 seconds
 -- sig = hex(HMAC-SHA256(secret, '<relay>|<ts>')), within 5 minutes. info: { version, public_ip, ip_how, ports, counts,
 -- cert: { sha256, self_signed }, offices: [{ ws, office, since }], phones: [username] }. Returns the plan.
+-- ---------------------------------------------------------------- 1.3.1: one key per relay, removing and moving relays
+-- Is this a relay of ours, signing with its own key (or, for a relay from before 1.3.1, the cluster secret)?
+create or replace function public.relay_check_sig(p_relay text, ts bigint, sig text) returns public.relay_servers
+  language plpgsql stable security definer set search_path = public, extensions as $$
+declare r relay_servers; k text;
+begin
+  select * into r from relay_servers where id = p_relay;
+  if r.id is null then raise exception 'This relay has been removed from Riyeser (RELAY_REMOVED). Its key no longer works.'; end if;
+  k := coalesce(r.sync_key, (select secret from relay_cluster where id = 1));
+  if k is null or abs(extract(epoch from now()) - ts) > 300
+     or coalesce(sig, '') <> encode(hmac(convert_to(p_relay || '|' || ts, 'utf8'), convert_to(k, 'utf8'), 'sha256'), 'hex') then
+    raise exception 'Not a relay of Riyeser''s (check RELAY_ID and the secret, and that the clock is right).';
+  end if;
+  return r;
+end $$;
+create or replace function public.relay_version_ok(v text, want int[] default array[1, 1, 0]) returns boolean
+  language sql immutable as $$
+  select coalesce(nullif(regexp_replace(coalesce(v, ''), '[^0-9.].*$', ''), '') is not null
+    and (select array_agg(coalesce(nullif(x, ''), '0')::int) from unnest(string_to_array(regexp_replace(v, '[^0-9.].*$', ''), '.')) x) >= want, false)
+$$;
+-- Change the cluster secret, so keys copied from a removed relay stop working. The relays that stay keep checking in
+-- (one from before 1.3.1 signs with the old secret: that becomes its own key) and get the new keys from relay_sync.
+-- Not done while a relay that has checked in is older than 1.1.0 (it couldn't take the new keys): -> false then.
+create or replace function public.relay_rotate() returns boolean
+  language plpgsql security definer set search_path = public, extensions as $$
+declare old text;
+begin
+  select secret into old from relay_cluster where id = 1 for update;
+  if old is null then return false; end if;
+  if exists (select 1 from relay_servers where last_seen is not null and not relay_version_ok(version)) then return false; end if;
+  update relay_servers set sync_key = old where sync_key is null;
+  update relay_cluster set secret = encode(gen_random_bytes(32), 'hex'), epoch = epoch + 1 where id = 1;
+  return true;
+end $$;
+-- Remove a relay: its row (so its key stops working at once), its place in each business's order, and the cluster
+-- secret is changed. A business left with no relay has it switched off (and that is in its history).
+-- -> { removed, rotated, switched_off: [workspace ids] }
+create or replace function public.relay_drop(p_id text, why text, by_relay text default null) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare r relay_servers; offs uuid[]; rotated boolean := false;
+begin
+  select * into r from relay_servers where id = p_id for update;
+  if r.id is null then return jsonb_build_object('removed', false); end if;
+  delete from relay_servers where id = p_id;
+  -- a relay PC taking over keeps the old one's place in every business's order
+  update link_relay_settings set relays = case when by_relay is not null then array_replace(relays, p_id, by_relay) else array_remove(relays, p_id) end,
+    off = array_remove(off, p_id) where p_id = any (relays) or p_id = any (off);
+  delete from relay_enrollments where replaces = p_id and used_at is null;
+  rotated := relay_rotate();
+  select coalesce(array_agg(s.workspace_id), '{}') into offs from link_relay_settings s where s.enabled and jsonb_array_length(relay_list(s.workspace_id)) = 0;
+  update link_relay_settings set enabled = false, updated_at = now() where workspace_id = any (offs);
+  insert into audit_log (workspace_id, action, details) select x, 'link.relay_off', jsonb_build_object('reason', 'the last relay was removed', 'relay', p_id) from unnest(offs) x;
+  return jsonb_build_object('removed', true, 'why', why, 'rotated', rotated, 'switched_off', to_jsonb(offs));
+end $$;
+revoke all on function public.relay_check_sig(text, bigint, text), public.relay_rotate(), public.relay_drop(text, text, text) from public, anon, authenticated;
+
+-- The relay PC itself, when it is uninstalled (install-relay.ps1 -Uninstall; Link Office: Stop using this PC as the
+-- relay): signed with its own key. Removes it, as relay_drop.
+create or replace function public.relay_leave(relay text, ts bigint, sig text) returns jsonb
+  language plpgsql security definer set search_path = public, extensions as $$
+declare r relay_servers; out jsonb;
+begin
+  r := relay_check_sig(relay_leave.relay, ts, sig);
+  out := relay_drop(r.id, 'left');
+  if r.managed_by is not null then insert into audit_log (workspace_id, action, details) values (r.managed_by, 'link.relay_removed', jsonb_build_object('relay', r.id, 'by', 'the relay PC (uninstalled)')); end if;
+  return out;
+end $$;
+revoke all on function public.relay_leave(text, bigint, text) from public;
+grant execute on function public.relay_leave(text, bigint, text) to anon, authenticated;
+
 create or replace function public.relay_sync(relay text, ts bigint, sig text, info jsonb) returns jsonb
   language plpgsql security definer set search_path = public, extensions as $$
-declare r relay_servers; sec text; seen text; ip text; plan jsonb;
+declare r relay_servers; seen text; ip text; plan jsonb; moved jsonb;
 begin
-  select * into r from relay_servers where id = relay_sync.relay;
-  select secret into sec from relay_cluster where id = 1;
-  if r.id is null or sec is null or abs(extract(epoch from now()) - ts) > 300
-     or coalesce(sig, '') <> encode(hmac(convert_to(relay_sync.relay || '|' || ts, 'utf8'), convert_to(sec, 'utf8'), 'sha256'), 'hex') then
-    raise exception 'Not a relay of Riyeser''s (check RELAY_ID and the secret, and that the clock is right).';
+  r := relay_check_sig(relay_sync.relay, ts, sig);
+  -- a new relay PC that takes over from an old one: the old one is removed once the new one has checked in
+  if r.replaces is not null then
+    moved := relay_drop(r.replaces, 'moved', r.id);
+    update relay_servers set replaces = null where id = r.id;
+    if r.managed_by is not null then insert into audit_log (workspace_id, action, details) values (r.managed_by, 'link.relay_moved', jsonb_build_object('from', r.replaces, 'to', r.id)); end if;
   end if;
   -- the address this call came from, as our own "what is my IP" (no outside service needed)
   begin seen := trim(split_part(coalesce(current_setting('request.headers', true)::json ->> 'x-forwarded-for', ''), ',', 1)); exception when others then seen := null; end;
@@ -8292,11 +8426,14 @@ begin
     into plan
     from workspaces w join link_relay_settings s on s.workspace_id = w.id and s.enabled
     where w.status = 'active' and (r.workspace_id is null or r.workspace_id = w.id)
-      and (cardinality(s.relays) = 0 or relay_sync.relay = any (s.relays));
-  return jsonb_build_object('ok', true, 'now', now(), 'your_ip', seen, 'businesses', plan,
+      and not relay_sync.relay = any (s.off);
+  return jsonb_strip_nulls(jsonb_build_object('ok', true, 'now', now(), 'your_ip', seen, 'businesses', plan,
     'relays', (select coalesce(jsonb_agg(jsonb_build_object('id', x.id, 'host', x.host, 'region', x.region, 'priority', x.priority, 'ip', x.public_ip,
-        'url', 'wss://' || x.host || case when x.port = 443 then '' else ':' || x.port end || '/relay/v1', 'pin', case when x.self_signed then x.cert_sha256 end)), '[]')
-      from relay_servers x where x.id <> relay_sync.relay));
+        'url', 'wss://' || relay_addr(x) || case when x.port = 443 then '' else ':' || x.port end || '/relay/v1', 'pin', case when x.self_signed then x.cert_sha256 end)), '[]')
+      from relay_servers x where x.id <> relay_sync.relay),
+    -- a relay with its own key gets the cluster's keys from here (never the secret itself); they change when a relay is removed
+    'keys', case when r.sync_key is not null then jsonb_build_object('epoch', (select epoch from relay_cluster where id = 1),
+        'office', encode(relay_key('office-token'), 'hex'), 'device', encode(relay_key('device-prov'), 'hex'), 'peer', encode(relay_key('peer'), 'hex'), 'turn', relay_turn_secret()) end));
 end $$;
 revoke all on function public.relay_sync(text, bigint, text, jsonb) from public;
 grant execute on function public.relay_sync(text, bigint, text, jsonb) to anon, authenticated;
@@ -8319,8 +8456,10 @@ begin
   if want is not null and exists (select 1 from unnest(want) x where not exists (select 1 from relay_servers r where r.id = x and (r.workspace_id is null or r.workspace_id = ws))) then
     raise exception 'Choose relays from the list.';
   end if;
-  insert into link_relay_settings as s (workspace_id, enabled, relays, updated_by, updated_at) values (ws, turn_on, coalesce(want, '{}'), auth.uid(), now())
-  on conflict (workspace_id) do update set enabled = turn_on, relays = coalesce(want, s.relays), updated_by = auth.uid(), updated_at = now();
+  -- relays given: these, in this order; the business's other relays are switched off for it
+  insert into link_relay_settings as s (workspace_id, enabled, relays, off, updated_by, updated_at) values (ws, turn_on, coalesce(want, '{}'),
+      case when want is null then '{}' else coalesce((select array_agg(r.id) from relay_servers r where (r.workspace_id is null or r.workspace_id = ws) and not r.id = any (want)), '{}') end, auth.uid(), now())
+  on conflict (workspace_id) do update set enabled = turn_on, relays = coalesce(want, s.relays), off = case when want is null then s.off else excluded.off end, updated_by = auth.uid(), updated_at = now();
   insert into audit_log (workspace_id, action, details) values (ws, case when turn_on then 'link.relay_on' else 'link.relay_off' end,
     jsonb_strip_nulls(jsonb_build_object('relays', want)));
   return link_relay_config(ws);
@@ -8349,7 +8488,15 @@ begin
   update link_offices o set relay = jsonb_strip_nulls(jsonb_build_object(
       'state', link_text(link_relay_report.state -> 'state', 20), 'relay', link_text(link_relay_report.state -> 'relay', 40), 'region', link_text(link_relay_report.state -> 'region', 60),
       'rtt_ms', link_int(link_relay_report.state -> 'rtt_ms'), 'backup', link_bool(link_relay_report.state -> 'backup'), 'udp', link_text(link_relay_report.state -> 'udp', 20),
-      'error', link_text(link_relay_report.state -> 'error', 200), 'sites', link_int(link_relay_report.state -> 'sites'), 'since', link_time(link_relay_report.state -> 'since'), 'at', now()))
+      'error', link_text(link_relay_report.state -> 'error', 200), 'sites', link_int(link_relay_report.state -> 'sites'), 'since', link_time(link_relay_report.state -> 'since'),
+      -- 1.3.1: the guided checklist (each step: key, ok / warn / fail / todo, a short note), the last test call, and
+      -- whether this PC is the relay. Only these shapes are kept.
+      'checks', (select jsonb_agg(jsonb_build_object('k', left(c ->> 'k', 20), 's', c ->> 's', 't', left(coalesce(c ->> 't', ''), 160)))
+                 from (select c from jsonb_array_elements(case when jsonb_typeof(link_relay_report.state -> 'checks') = 'array' then link_relay_report.state -> 'checks' else '[]' end) c limit 20) q
+                 where jsonb_typeof(c) = 'object' and coalesce(c ->> 'k', '') ~ '^[a-z][a-z0-9-]{0,19}$' and c ->> 's' in ('ok', 'warn', 'fail', 'todo')),
+      'test', case when jsonb_typeof(link_relay_report.state -> 'test') = 'object' then jsonb_strip_nulls(jsonb_build_object('rtt_ms', link_int(link_relay_report.state #> '{test,rtt_ms}'),
+                 'loss', link_int(link_relay_report.state #> '{test,loss}'), 'ok', link_bool(link_relay_report.state #> '{test,ok}'), 'at', link_time(link_relay_report.state #> '{test,at}'))) end,
+      'host', link_bool(link_relay_report.state -> 'host'), 'at', now()))
     where o.workspace_id = ws and o.office_id = link_relay_report.office_id;
 end $$;
 -- Owners and admins: disconnect an office from the relay (its passes stop working within 30 seconds), or allow it again.
@@ -8373,11 +8520,11 @@ begin
   pw := encode(hmac(convert_to(u, 'utf8'), convert_to(sec, 'utf8'), 'sha1'), 'base64');
   select coalesce(jsonb_agg(s), '[]') into servers from (
     select jsonb_build_object('urls', to_jsonb(array_remove(array[
-        'stun:' || (x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478'),
-        'turn:' || (x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=udp',
-        'turn:' || (x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=tcp',
-        case when x ->> 'ip' is not null then 'turn:' || (x ->> 'ip') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=udp' end,
-        case when x ->> 'turns_port' is not null and x ->> 'pin' is null then 'turns:' || (x ->> 'host') || ':' || (x ->> 'turns_port') || '?transport=tcp' end], null)),
+        'stun:' || coalesce(x ->> 'addr', x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478'),
+        'turn:' || coalesce(x ->> 'addr', x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=udp',
+        'turn:' || coalesce(x ->> 'addr', x ->> 'host') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=tcp',
+        case when x ->> 'ip' is not null and x ->> 'ip' is distinct from x ->> 'addr' then 'turn:' || (x ->> 'ip') || ':' || coalesce(x ->> 'turn_port', '3478') || '?transport=udp' end,
+        case when x ->> 'turns_port' is not null and x ->> 'pin' is null and coalesce((x ->> 'dns')::boolean, true) then 'turns:' || coalesce(x ->> 'addr', x ->> 'host') || ':' || (x ->> 'turns_port') || '?transport=tcp' end], null)),
       'username', u, 'credential', pw) s
     from jsonb_array_elements(relay_list(ws)) x where (x ->> 'turn_port') is not null) q;
   return jsonb_build_object('ice_servers', servers, 'ttl', 12 * 3600, 'expires_at', to_timestamp(exp));
@@ -8406,9 +8553,9 @@ begin
     values (ws, extension, coalesce(nullif(trim(label), ''), 'Phone at home'), u, md5(u || ':riyeser-relay:' || pw), auth.uid()) returning id into did;
   code := relay_sign(relay_key('device-prov'), jsonb_build_object('v', 1, 'u', u, 'n', encode(gen_random_bytes(8), 'hex'), 'exp', floor(extract(epoch from now() + interval '15 minutes'))::bigint));
   insert into audit_log (workspace_id, action, details) values (ws, 'link.relay_phone_added', jsonb_build_object('extension', extension, 'label', coalesce(nullif(trim(label), ''), 'Phone at home')));
-  return jsonb_build_object('id', did, 'extension', extension, 'username', u, 'password', pw, 'domain', first ->> 'host', 'server', first ->> 'host',
+  return jsonb_build_object('id', did, 'extension', extension, 'username', u, 'password', pw, 'domain', coalesce(first ->> 'addr', first ->> 'host'), 'server', coalesce(first ->> 'addr', first ->> 'host'),
     'port', coalesce((first ->> 'sip_tls_port')::int, 5061), 'transport', 'TLS', 'realm', 'riyeser-relay', 'backup', relay_list(ws) -> 1 ->> 'host',
-    'self_signed', first ->> 'pin' is not null, 'prov_url', 'https://' || (first ->> 'host') || case when (first ->> 'port') = '443' then '' else ':' || (first ->> 'port') end || '/prov/' || code,
+    'self_signed', first ->> 'pin' is not null, 'prov_url', 'https://' || coalesce(first ->> 'addr', first ->> 'host') || case when (first ->> 'port') = '443' then '' else ':' || (first ->> 'port') end || '/prov/' || code,
     'prov_expires', now() + interval '15 minutes');
 end $$;
 create or replace function public.link_relay_device_remove(ws uuid, device uuid) returns void
@@ -8432,6 +8579,7 @@ begin
   if not public.is_member(ws) then raise exception 'You''re not in this business.'; end if;
   select m.extension::text into mine from members m where m.workspace_id = ws and m.user_id = auth.uid();
   return jsonb_build_object('enabled', relay_enabled(ws), 'relays', relay_list(ws), 'admin', public.is_admin(ws),
+    'manage', case when public.is_admin(ws) then relay_admin_list(ws) end, 'api', 2,
     'offices', (select coalesce(jsonb_agg(jsonb_build_object('office_id', o.office_id, 'pc_name', o.pc_name, 'version', o.version, 'last_seen', o.last_seen,
         'relay', o.relay, 'relay_seen', o.relay_seen, 'revoked', o.relay_revoked_at is not null) order by o.pc_name), '[]') from link_offices o where o.workspace_id = ws),
     'devices', (select coalesce(jsonb_agg(jsonb_build_object('id', d.id, 'extension', d.extension, 'label', d.label, 'username', d.username, 'created_at', d.created_at,
@@ -8444,3 +8592,101 @@ revoke all on function public.link_relay_config(uuid), public.link_relay_set(uui
 grant execute on function public.link_relay_config(uuid), public.link_relay_set(uuid, boolean, text[]), public.link_relay_token(uuid, text),
   public.link_relay_report(uuid, text, jsonb), public.link_relay_revoke(uuid, text, boolean), public.link_relay_turn(uuid),
   public.link_relay_device_add(uuid, text, text), public.link_relay_device_remove(uuid, uuid), public.link_relay_status(uuid) to authenticated;
+
+-- ---------------------------------------------------------------- 1.3.1: Sites & relay — change or remove the relay PC
+-- Owners and admins (two-step sign-in), for their own business only:
+--   main    make this relay the first one the business's sites use (and, for one the business looks after, priority 1)
+--   off/on  stop or start using this relay for the business (sites move to the next one by themselves)
+--   remove  remove a relay the business looks after (managed_by): its key stops working at once, and keys copied from
+--           it stop working on the other relays within 30 seconds (relay_drop). For a dead or lost PC too.
+-- Switching off or removing the business's last relay needs confirm = true, and switches the relay off for it.
+create or replace function public.link_relay_manage(ws uuid, relay_id text, action text, confirm boolean default false) returns jsonb
+  language plpgsql security definer set search_path = public as $$
+declare r relay_servers; left_after int; ord text[]; out jsonb;
+begin
+  if not public.is_admin(ws) then raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can change the relays.'; end if;
+  select * into r from relay_servers x where x.id = link_relay_manage.relay_id and (x.workspace_id is null or x.workspace_id = ws);
+  if r.id is null then raise exception 'That relay isn''t one your business uses.'; end if;
+  if action not in ('main', 'off', 'on', 'remove') then raise exception 'Choose main, off, on or remove.'; end if;
+  insert into link_relay_settings (workspace_id, updated_by) values (ws, auth.uid()) on conflict (workspace_id) do nothing;
+  if action in ('off', 'remove') then
+    select count(*) into left_after from jsonb_array_elements(relay_list(ws)) x where x ->> 'id' <> r.id;
+    if left_after = 0 and relay_enabled(ws) and not coalesce(confirm, false) then
+      raise exception 'LAST_RELAY: This is your business''s last relay. Without it your sites can''t call each other and phones at home stop working, so the relay will be switched off for your business. Add another relay first, or confirm.';
+    end if;
+  end if;
+  if action = 'remove' and r.managed_by is distinct from ws and r.workspace_id is distinct from ws then
+    raise exception 'This relay is Riyeser''s, so it can''t be removed from here. Switch it off for your business instead.';
+  end if;
+  if action = 'main' then
+    select array_agg(x ->> 'id' order by n) into ord from jsonb_array_elements(relay_admin_list(ws)) with ordinality t(x, n) where x ->> 'id' <> r.id;
+    update link_relay_settings set relays = array[r.id] || coalesce(ord, '{}'), off = array_remove(off, r.id), updated_by = auth.uid(), updated_at = now() where workspace_id = ws;
+    if r.managed_by = ws then
+      update relay_servers set priority = greatest(priority, 2) where managed_by = ws and id <> r.id and priority = 1;
+      update relay_servers set priority = 1 where id = r.id;
+    end if;
+  elsif action = 'off' then
+    update link_relay_settings set off = array_append(array_remove(off, r.id), r.id), updated_by = auth.uid(), updated_at = now() where workspace_id = ws;
+  elsif action = 'on' then
+    update link_relay_settings set off = array_remove(off, r.id), updated_by = auth.uid(), updated_at = now() where workspace_id = ws;
+  else
+    out := relay_drop(r.id, 'removed');
+  end if;
+  if action = 'off' and jsonb_array_length(relay_list(ws)) = 0 and relay_enabled(ws) then
+    update link_relay_settings set enabled = false where workspace_id = ws;
+    insert into audit_log (workspace_id, action, details) values (ws, 'link.relay_off', jsonb_build_object('reason', 'the last relay was switched off', 'relay', r.id));
+  end if;
+  insert into audit_log (workspace_id, action, details) values (ws, 'link.relay_' || case action when 'main' then 'made_main' when 'off' then 'switched_off' when 'on' then 'switched_on' else 'removed' end,
+    jsonb_strip_nulls(jsonb_build_object('relay', r.id, 'region', r.region, 'rotated', out -> 'rotated')));
+  return link_relay_status(ws) || jsonb_build_object('result', coalesce(out, '{}'::jsonb));
+end $$;
+
+-- Owners and admins: a one-time set-up code (30 minutes) for a new relay PC, typed into Riyeser Link Office on that
+-- PC ("This PC as the relay"). With replaces: the new PC takes over that relay's place, priority and web name once it
+-- first checks in, and the old one is removed then. dns false (the default): no web name, sites use its address.
+-- -> { code, expires_at, relay_id }
+create or replace function public.link_relay_enroll_code(ws uuid, region text default '', replaces text default null, host text default null, priority int default null) returns jsonb
+  language plpgsql security definer set search_path = public, extensions as $$
+declare old relay_servers; code text; rid text; h text; pr int; use_dns boolean;
+begin
+  if not public.is_admin(ws) then raise exception 'Only the business''s owner or an admin, signed in with two-step sign-in, can set up a relay PC.'; end if;
+  if coalesce(region, '') ~ '[[:cntrl:]<>"`$]' or length(coalesce(region, '')) > 60 then raise exception 'Give the relay PC a short place name, like Suva head office.'; end if;
+  if replaces is not null then
+    select * into old from relay_servers x where x.id = link_relay_enroll_code.replaces and (x.managed_by = ws or x.workspace_id = ws);
+    if old.id is null then raise exception 'Choose one of your business''s own relays to move.'; end if;
+  end if;
+  if host is not null and host !~ '^[A-Za-z0-9]([A-Za-z0-9-]*\.)+[A-Za-z]{2,}$' then raise exception 'That web name doesn''t look right (like relay.example.com).'; end if;
+  if (select count(*) from relay_enrollments e where e.workspace_id = ws and e.created_at > now() - interval '1 hour') >= 10 then raise exception 'Too many set-up codes in the last hour. Use one of them, or wait a little.'; end if;
+  rid := 'r' || encode(gen_random_bytes(4), 'hex');
+  use_dns := coalesce(host, case when old.dns then old.host end) is not null;
+  h := lower(coalesce(host, case when old.dns then old.host end, rid || '.relay.invalid'));
+  pr := coalesce(priority, old.priority, case when exists (select 1 from relay_servers x where x.workspace_id is null or x.workspace_id = ws) then 2 else 1 end);
+  code := upper(substr(translate(encode(gen_random_bytes(10), 'base64'), '+/=01OIl', 'XYZ23456'), 1, 12));
+  code := 'RLY-' || substr(code, 1, 4) || '-' || substr(code, 5, 4) || '-' || substr(code, 9, 4);
+  insert into relay_enrollments (code_hash, workspace_id, relay_id, host, region, priority, dns, replaces, created_by)
+    values (encode(digest(code, 'sha256'), 'hex'), ws, rid, h, coalesce(nullif(trim(region), ''), old.region, 'Head office'), least(greatest(pr, 1), 99), use_dns, old.id, auth.uid());
+  insert into audit_log (workspace_id, action, details) values (ws, 'link.relay_code_made', jsonb_strip_nulls(jsonb_build_object('relay', rid, 'replaces', old.id)));
+  return jsonb_build_object('code', code, 'expires_at', now() + interval '30 minutes', 'relay_id', rid, 'replaces', old.id, 'host', case when use_dns then h end);
+end $$;
+
+-- Riyeser Link Office on the new relay PC: the set-up code -> this relay's own new key (once; never the cluster secret).
+-- The relay isn't used by any site until it has checked in (relay_sync) with that key.
+create or replace function public.relay_enroll_claim(code text) returns jsonb
+  language plpgsql security definer set search_path = public, extensions as $$
+declare e relay_enrollments; old relay_servers; k text := encode(gen_random_bytes(32), 'hex');
+begin
+  select * into e from relay_enrollments x where x.code_hash = encode(digest(upper(trim(coalesce(code, ''))), 'sha256'), 'hex') for update;
+  if e.code_hash is null or e.used_at is not null or e.expires_at < now() then
+    raise exception 'That set-up code isn''t right, or it has been used or is more than 30 minutes old. Make a new one on the website: Management → Desk phones → Sites & relay.';
+  end if;
+  update relay_enrollments set used_at = now() where code_hash = e.code_hash;
+  if not exists (select 1 from relay_cluster where id = 1) then insert into relay_cluster (id, secret) values (1, encode(gen_random_bytes(32), 'hex')); end if;
+  if e.replaces is not null then select * into old from relay_servers where id = e.replaces; end if;
+  insert into relay_servers (id, host, region, priority, workspace_id, managed_by, sync_key, dns, replaces, port)
+    values (e.relay_id, e.host, e.region, e.priority, case when old.id is not null then old.workspace_id else e.workspace_id end, e.workspace_id, k, e.dns, old.id, coalesce(old.port, 443));
+  insert into audit_log (workspace_id, action, details) values (e.workspace_id, 'link.relay_code_used', jsonb_strip_nulls(jsonb_build_object('relay', e.relay_id, 'replaces', old.id)));
+  return jsonb_strip_nulls(jsonb_build_object('relay_id', e.relay_id, 'host', e.host, 'dns', e.dns, 'region', e.region, 'priority', e.priority, 'replaces', old.id, 'key', k));
+end $$;
+revoke all on function public.link_relay_manage(uuid, text, text, boolean), public.link_relay_enroll_code(uuid, text, text, text, int), public.relay_enroll_claim(text) from public, anon;
+grant execute on function public.link_relay_manage(uuid, text, text, boolean), public.link_relay_enroll_code(uuid, text, text, text, int) to authenticated;
+grant execute on function public.relay_enroll_claim(text) to anon, authenticated;
