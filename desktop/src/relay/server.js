@@ -73,7 +73,9 @@ function config(env = process.env) {
     portMap: env.PORT_MAP === '1', portMapIp: env.PORT_MAP_IP || '',
     mediaMin: num(env.MEDIA_MIN, 40002), mediaMax: num(env.MEDIA_MAX, 49999), probePort: num(env.PROBE_PORT, 40000), mediaBind: env.MEDIA_BIND || '0.0.0.0',
     publicIp: env.RELAY_PUBLIC_IP || '', supabaseUrl: env.SUPABASE_URL || '', supabaseKey: env.SUPABASE_KEY || '', metricsToken: env.METRICS_TOKEN || '',
-    ddns: { provider: env.DDNS_PROVIDER || '', token: env.DDNS_TOKEN || '', zone: env.DDNS_ZONE || '', name: env.DDNS_NAME || env.RELAY_HOST || '' },
+    ddns: { provider: env.DDNS_PROVIDER || '', token: env.DDNS_TOKEN || '', zone: env.DDNS_ZONE || '', name: env.DDNS_NAME || env.RELAY_HOST || '',
+      host: env.DDNS_HOST || '', domain: env.DDNS_DOMAIN || '', password: env.DDNS_PASSWORD || '' },
+    ddnsEvery: num(env.DDNS_EVERY_MINUTES, 30) * 60 * 1000,
     peers: (env.RELAY_PEERS || '').split(',').map((s) => s.trim()).filter(Boolean).map((s) => { const [id, url] = s.split('='); return { id, url }; }),
   };
 }
@@ -190,8 +192,9 @@ function createRelayServer(cfg) {
     const url = new URL(req.url, 'http://relay');
     if (req.method === 'GET' && url.pathname === '/health') {
       const s = relay.snapshot();
-      return json(res, 200, { ok: true, relay: cfg.id, region: cfg.region, version: VERSION, cert_sha256: self.cert ? self.cert.fingerprint : null, uptime: Math.round((Date.now() - started) / 1000), sites: s.sites, phones: s.phones, peers: s.peers, calls: s.calls,
-        sync: cloud.state ? { ok: cloud.state.ok, at: cloud.state.at } : null });
+      return json(res, 200, { ok: true, relay: cfg.id, region: cfg.region, host: cfg.host, version: VERSION, cert_sha256: self.cert ? self.cert.fingerprint : null, uptime: Math.round((Date.now() - started) / 1000), sites: s.sites, phones: s.phones, peers: s.peers, calls: s.calls,
+        sync: cloud.state ? { ok: cloud.state.ok, at: cloud.state.at } : null,
+        dns: ddns.enabled ? { provider: ddns.provider, name: ddns.name, ok: ddns.state.ok, at: ddns.state.at, error: ddns.state.error } : null });
     }
     if (req.method === 'GET' && url.pathname === '/metrics') {
       const auth = String(req.headers.authorization || '');
@@ -352,7 +355,10 @@ function createRelayServer(cfg) {
     } else log('warn', 'No TLS certificate yet, so remote phones (SIP over TLS) are off. Sites and TURN are not affected.');
     await refreshIp();
     self.ipTimer = setInterval(() => refreshIp().catch(() => {}), 5 * 60 * 1000); self.ipTimer.unref();
-    self.ddnsTimer = setInterval(() => { if (self.ip.ip) { ddns.last = null; ddns.update(self.ip.ip).catch(() => {}); } }, 60 * 60 * 1000); self.ddnsTimer.unref();
+    // dynamic DNS: set at start (refreshIp above, once the address is known), on every public-address change, and
+    // every 30 minutes as a safety net (DDNS_EVERY_MINUTES)
+    if (cfg.ddns && cfg.ddns.provider && !ddns.enabled) log('warn', cfg.ddns.provider === 'namecheap' ? 'DNS: DDNS_PROVIDER is namecheap but DDNS_HOST, DDNS_DOMAIN or DDNS_PASSWORD is missing in relay.env, so the relay can\'t keep its DNS name up to date.' : `DNS: DDNS_PROVIDER "${cfg.ddns.provider}" isn't set up fully (it needs DDNS_ZONE and DDNS_TOKEN; or use cloudflare, digitalocean or namecheap).`);
+    self.ddnsTimer = setInterval(() => { if (self.ip.ip) ddns.update(self.ip.ip, { force: true }).catch(() => {}); }, cfg.ddnsEvery || 30 * 60 * 1000); self.ddnsTimer.unref();
     self.sweepTimer = setInterval(() => { limiter.sweep(); const now = Date.now(); for (const [n, exp] of self.usedCodes) if (exp < now) self.usedCodes.delete(n); }, 60000); self.sweepTimer.unref();
     // own hardware: ask the office router to forward our ports (NAT-PMP or UPnP), where it allows it
     if (cfg.portMap) {
@@ -371,6 +377,7 @@ function createRelayServer(cfg) {
   self.info = info;
   self.stop = async () => {
     for (const t of [self.ipTimer, self.ddnsTimer, self.sweepTimer, self.certTimer]) clearInterval(t);
+    ddns.stop();
     if (cloud.stop) cloud.stop();
     if (self.portMapper) await self.portMapper.stop().catch(() => {});
     for (const d of self.peerDialers.values()) d.stop();

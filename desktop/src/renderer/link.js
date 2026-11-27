@@ -190,13 +190,20 @@ function renderRelay() {
 let relayHost;
 function relayHostHtml() {
   const h = relayHost;
-  if (h && h.health && h.health.ok) return `<details class="help" open><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p><b>${esc(T.relayHostOn(h.health))}</b></p><p class="muted small">${esc(T.RELAY_HOST_MORE)}</p></details>`;
+  const ddnsField = `<label style="flex:1 1 260px"><span class="muted small">${esc(T.RELAY_DDNS_LABEL)}</span><input id="rhddns" type="password" autocomplete="off" spellcheck="false" maxlength="200"></label>`;
+  if (h && h.health && h.health.ok) {
+    const d = h.health.dns;
+    return `<details class="help" open><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p><b>${esc(T.relayHostOn(h.health))}</b></p>
+      <p${d && d.ok === false ? ' class="note warn"' : ''} id="rhdns">${esc(T.relayDns(d))}</p>
+      <form id="relaydns" class="row">${ddnsField}<button class="btn s">${esc(T.RELAY_DDNS_SAVE)}</button></form>
+      <p class="muted small">${esc(T.RELAY_DDNS_WHY)}</p><p class="muted small">${esc(T.RELAY_HOST_MORE)}</p></details>`;
+  }
   return `<details class="help"><summary>${esc(T.RELAY_HOST_TITLE)}</summary><p class="muted">${esc(T.RELAY_HOST_WHY)}</p>
     ${h && h.installed ? `<div class="note warn">${esc(T.RELAY_HOST_DOWN)}</div>` : ''}
     <form id="relayhost" class="row"><label style="flex:1 1 220px"><span class="muted small">Relay's name (DNS)</span><input id="rhdomain" value="relay.riyeser.com" autocomplete="off" spellcheck="false"></label>
       <label style="flex:1 1 160px"><span class="muted small">Where</span><input id="rhregion" value="Head office" maxlength="60" autocomplete="off"></label>
       <label style="flex:0 1 110px"><span class="muted small">Id</span><input id="rhid" value="suva1" maxlength="40" autocomplete="off" spellcheck="false"></label>
-      <button class="btn s">Run the relay on this PC…</button></form></details>`;
+      ${ddnsField}<button class="btn s">Run the relay on this PC…</button></form><p class="muted small">${esc(T.RELAY_DDNS_WHY)}</p></details>`;
 }
 // ---------- Settings → This PC's address: the adapter, names, what phones are given, reserve it, fixed address
 function renderAddress() {
@@ -379,9 +386,19 @@ document.addEventListener('submit', async (e) => {
   }
   if (e.target.id === 'relayhost') {
     toast('Windows will ask for permission…');
-    const r = await safe(() => bridge.call('link:relay-host', { domain: $('#rhdomain').value.trim(), region: $('#rhregion').value.trim(), id: $('#rhid').value.trim() }));
+    const ddnsPassword = $('#rhddns').value.trim(); $('#rhddns').value = '';
+    const r = await safe(() => bridge.call('link:relay-host', { domain: $('#rhdomain').value.trim(), region: $('#rhregion').value.trim(), id: $('#rhid').value.trim(), ddnsPassword }));
     relayHost = undefined;
     if (r) { toast(r.ok ? T.RELAY_HOST_DONE : `The relay wasn't set up: ${r.out || 'cancelled'}`); load(); }
+  }
+  if (e.target.id === 'relaydns') {
+    const h = (relayHost && relayHost.health) || {};
+    const ddnsPassword = $('#rhddns').value.trim(); $('#rhddns').value = '';
+    if (!ddnsPassword) { toast(T.RELAY_DDNS_LABEL.replace(' (optional)', '') + ': paste it first.'); return; }
+    toast('Windows will ask for permission…');
+    const r = await safe(() => bridge.call('link:relay-host', { domain: h.host || 'relay.riyeser.com', region: h.region || 'Head office', id: h.relay || 'suva1', ddnsPassword }));
+    relayHost = undefined;
+    if (r) { toast(r.ok ? T.RELAY_DDNS_SAVED : `The password wasn't saved: ${r.out || 'cancelled'}`); load(); }
   }
   if (e.target.id === 'sitename') {
     const n = await safe(() => bridge.call('link:site-name', $('#sitenamein').value));

@@ -150,10 +150,13 @@ async function runElevatedScript(makeScript) {
  * (src/relay/deploy/windows/install-relay.ps1, unpacked from the app): a background task at boot, firewall rules,
  * router port forwarding where the router allows it, and Node from this app (ELECTRON_RUN_AS_NODE).
  */
-function relayHostScript({ script, relayDir, domain, region, id }, resultFile) {
+// ddnsPasswordFile: a file (in this run's own temp folder) holding the Namecheap Dynamic DNS password; the installer
+// reads it into relay.env and deletes it. The password itself is never in the script, a command line or a log.
+function relayHostScript({ script, relayDir, domain, region, id, ddnsPasswordFile }, resultFile) {
   const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
   if (!/^[A-Za-z0-9.-]{3,253}$/.test(domain || '') || !/^[a-z0-9-]{2,40}$/.test(id || '') || /[\r\n"`$]/.test(region || '')) throw new Error('Check the relay\'s name, id and region.');
-  return [`$out = & ${q(script)} -LinkOffice -RelayDir ${q(relayDir)} -Domain ${q(domain)} -Region ${q(region)} -Id ${q(id)} *>&1 | Out-String`,
+  const ddns = ddnsPasswordFile ? ` -DdnsProvider namecheap -DdnsPasswordFile ${q(ddnsPasswordFile)}` : '';
+  return [`$out = & ${q(script)} -LinkOffice -RelayDir ${q(relayDir)} -Domain ${q(domain)} -Region ${q(region)} -Id ${q(id)}${ddns} *>&1 | Out-String`,
     `@{ ok = ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq $null); out = $out } | ConvertTo-Json -Compress | Set-Content -Path ${q(resultFile)} -Encoding UTF8`].join('\r\n');
 }
 /** Is this PC running the relay? -> { installed, health } (health from http://127.0.0.1:8080/health) */
@@ -165,5 +168,12 @@ async function relayHostState() {
   return { installed, health };
 }
 
-module.exports = { relayHostScript, relayHostState, RULE, firewallCommands, firewallRuleExists, ruleState, addFirewallRule, parsePowercfg, sleepWarning, readSleep,
+/** A Namecheap Dynamic DNS password as pasted (spaces around it trimmed) -> it, or throws a plain message. */
+function checkDdnsPassword(pw) {
+  const p = String(pw || '').trim();
+  if (!/^[^\s"`$\\]{8,200}$/.test(p)) throw new Error('That doesn\'t look like a Namecheap Dynamic DNS password. Copy it again from Namecheap: Domain List → Manage → Advanced DNS → Dynamic DNS (not your account password).');
+  return p;
+}
+
+module.exports = { relayHostScript, relayHostState, checkDdnsPassword, RULE, firewallCommands, firewallRuleExists, ruleState, addFirewallRule, parsePowercfg, sleepWarning, readSleep,
   PS_NETCONFIG, parseNetConfig, readNetConfig, prefixToMask, fixedAddressScript, dhcpScript, runElevatedScript };
