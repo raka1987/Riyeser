@@ -218,8 +218,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - name: Unit tests (install state machine and detection)
-        run: node --test test/central-install.test.js
+      - name: Unit tests (install state machine and detection, first run's install queue)
+        run: node --test test/central-install.test.js test/central-first-run.test.js
       - name: Windows permission settings on this runner
         shell: pwsh
         run: |
@@ -286,6 +286,26 @@ jobs:
           Get-Process -Name consent, powershell, node -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Remove-LinkOffice
           $global:LASTEXITCODE = 0
+      # Central's first run ("One installer"): a business's plan (Accounting Plus, Payroll, POS, Riyeser Link) installs one
+      # program after another from the release with central/first-run.js; the network drops after two programs, the rest
+      # pause and carry on when it's back; the whole-PC programs (Link Office, plus PDF here to make it two) install
+      # together through ONE permission prompt; then a second PC of the business set up as the Till skips what's there.
+      - name: First run, "One installer" (a business's plan end to end, network drop and resume, one permission prompt, a till PC)
+        shell: pwsh
+        run: |
+          $names = "Riyeser Documents*", "Riyeser Desk Assistant*", "Riyeser PDF*", "Riyeser Accounting Plus*", "Riyeser Link*", "Riyeser Team*", "Riyeser Payroll*", "Riyeser POS*"
+          foreach ($root in "HKCU:", "HKLM:") {
+            Get-ItemProperty "$root\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $d = $_.DisplayName; $d -and ($names | Where-Object { $d -like $_ }) } | ForEach-Object {
+              $u = if ($_.QuietUninstallString) { $_.QuietUninstallString } else { "$($_.UninstallString) /S" }
+              Write-Host "Removing $($_.DisplayName) first"; Start-Process cmd.exe -ArgumentList "/c $u" -Wait -WindowStyle Hidden
+            }
+          }
+          Start-Sleep -Seconds 20
+          Get-Process -Name "Riyeser*", "Un_A", "Au_" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          node scripts/central-firstrun-check.js --plan=plus,payroll,pos,calls --offline-after=2 --batch-extra=pdf --dir=C:\riy\dl --out=C:\riy\out\firstrun.json
+          $code = $LASTEXITCODE
+          Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          if ($code) { throw "Central's first run didn't install the plan end to end (see firstrun.json)" }
       - name: Administrator, with Central's new install (every program)
         shell: pwsh
         run: |

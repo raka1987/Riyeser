@@ -32,7 +32,8 @@ function writeCompany(appData, data) {
   fs.mkdirSync(path.dirname(f), { recursive: true });
   const clean = (v) => (v == null ? '' : String(v).trim().slice(0, 300));
   const out = { ...(readCompany(appData) || {}) };
-  for (const k of ['mode', 'company_code', 'workspace_id', ...PROFILE_KEYS.slice(1), 'name', 'kind', 'your_name', 'email_signed_in', 'linked_at']) {
+  // currency and logo (a picture file next to company.json): from Central's first run "Your business" step
+  for (const k of ['mode', 'company_code', 'workspace_id', ...PROFILE_KEYS.slice(1), 'name', 'kind', 'your_name', 'email_signed_in', 'linked_at', 'currency', 'logo']) {
     if (k in data) out[k] = k === 'mode' ? (data[k] === 'online' ? 'online' : 'local') : k === 'kind' ? (data[k] === 'personal' ? 'personal' : data[k] ? 'business' : '') : clean(data[k]);
   }
   if (!out.name) throw new Error('Enter the company name.');

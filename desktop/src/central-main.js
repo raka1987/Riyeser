@@ -23,6 +23,7 @@ const freshstart = require('./central/freshstart');
 const diagnostics = require('./central/diagnostics');
 const programReports = require('./central/program-reports');
 const usageCounts = require('./central/usage-counts');
+const firstRun = require('./central/first-run');
 const { LocalApp } = require('./central/local-app');
 const { createSync } = require('./central/online-sync');
 const crypto = require('crypto');
@@ -356,6 +357,77 @@ async function installUpdates(ids) {
   return { done, restarting: false };
 }
 
+// ---------- first run, "One installer": the plan's programs, one after another (first-run.js has the rules) ----------
+const offlineError = () => Object.assign(new Error(firstRun.OFFLINE.message), { offline: true, failure: { ...firstRun.OFFLINE } });
+/** The first-run install driver: the same download, check and quiet install as the Install button. */
+const firstRunDriver = {
+  isOnline: () => { try { return net.isOnline(); } catch { return true; } },
+  async fetch(it, onPct, onChecking) {
+    if (process.platform !== 'win32') throw installError({ reason: 'failed', message: 'Programs install on Windows only.' });
+    if (!firstRunDriver.isOnline()) throw offlineError();
+    let r = await checkUpdates(false);
+    if (!r.latest || !r.latest.products[it.id]) r = await checkUpdates(true);
+    const item = r.latest && r.latest.products[it.id];
+    if (!item) throw installError({ reason: 'not-in-release', message: `${it.name} isn't in the latest release yet.`, fix: 'Untick it with Choose programs instead, or try again later.' });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-firstrun-'));
+    const file = path.join(dir, path.basename(new URL(item.url).pathname));
+    installLog({ id: it.id, version: item.version, file: path.basename(file), stage: 'downloading', elevated: !!it.elevate, how: 'first-run' });
+    try { await download(item.url, file, onPct); } catch (e) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      if (firstRun.isOffline(e) || !firstRunDriver.isOnline()) throw offlineError();
+      throw installError({ reason: 'download', message: `Couldn't download ${it.name}: ${e.message}`, fix: 'Check the internet connection and click Try again.' });
+    }
+    onChecking();
+    try { await verifyDownload(file, item.name || path.basename(file), item.digest, r.latest); } catch (e) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      if (/ENOENT|EPERM|EBUSY/.test(String(e.code || e.message))) throw installError(installRun.installFailure({ startError: 'missing' }, { name: it.name }));
+      throw installError({ reason: 'check', message: e.message });
+    }
+    return { file, dir, version: item.version };
+  },
+  async install(it, got) {
+    const product = updates.PRODUCTS.find((x) => x.id === it.id);
+    await runInstaller(got.file, product.args, it.name, { id: it.id, version: got.version, elevate: false });
+  },
+  // Every whole-PC installer together: one Windows permission prompt (install-run.js runElevatedBatch).
+  async installBatch(list) {
+    const items = list.map(({ item, got }) => ({ id: item.id, file: got.file, args: updates.PRODUCTS.find((x) => x.id === item.id).args }));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-firstrun-batch-'));
+    try {
+      const { results } = await installRun.runElevatedBatch({ items, spawn, dir });
+      const out = {};
+      for (const { item, got } of list) {
+        const r = results[item.id]; const args = updates.PRODUCTS.find((x) => x.id === item.id).args;
+        const f = installRun.installFailure(r, { name: item.name, args });
+        installLog({ id: item.id, version: got.version, file: path.basename(got.file), stage: f.ok ? 'ran' : 'failed', elevated: true, code: r.code, startError: r.startError, reason: f.reason, detail: r.detail, how: `first-run batch of ${list.length}` });
+        out[item.id] = f.ok ? null : f;
+      }
+      return out;
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  },
+  verify: (it) => findAfterInstall(it.id),
+  cleanup: (got) => { if (got && got.dir) fs.rmSync(got.dir, { recursive: true, force: true }); },
+};
+let firstRunBusy = null;
+const firstRunState = () => store.get('first-run', null);
+let firstRunSaved = '';
+/** Saved when a program's step changes (not on every percent of a download); the window hears every change. */
+function saveFirstRun(run) {
+  const sig = (run.items || []).map((i) => `${i.id}:${i.stage}`).join(',') + run.step + run.finished;
+  if (sig !== firstRunSaved) { store.set('first-run', run); firstRunSaved = sig; }
+  send('firstrun-progress', { run, summary: firstRun.summary(run) });
+}
+/** Install what's left in the saved run (in the background; the window follows firstrun-progress). */
+function runFirstRun() {
+  if (firstRunBusy) return firstRunBusy;
+  const run = firstRunState();
+  if (!run || !run.items) return Promise.resolve(null);
+  firstRunBusy = firstRun.runQueue(run, firstRunDriver, { onChange: (r) => saveFirstRun(r) })
+    .then((s) => { if (s.installed.length) programsReporter.soon(); return s; })
+    .finally(() => { firstRunBusy = null; });
+  return firstRunBusy;
+}
+
 // ---------- IPC ----------
 function handle(name, fn) {
   ipcMain.handle(name, async (_e, ...args) => {
@@ -539,14 +611,16 @@ function registerIpc() {
     if (win && !win.isDestroyed()) win.webContents.send('licence-changed', true);
     return r;
   });
-  handle('company:create', (profile, yourName) => on.createCompany(profile || {}, yourName));
+  // first run: was this PC linked to a business that already exists (a second PC: "What is this PC for?") or a new one
+  const origin = (o) => (r) => { if (r) store.update('first-run-pc', {}, (x) => ({ ...(x || {}), origin: o })); return r; };
+  handle('company:create', async (profile, yourName) => origin('created')(await on.createCompany(profile || {}, yourName)));
   // After signing in with a Riyeser account: link to its business (one), let them pick (several), or the details form (none)
   const linked = (r) => { if (r && r.company && win && !win.isDestroyed()) win.webContents.send('licence-changed', true); return r; };
-  handle('company:afterSignIn', async () => linked(await on.afterSignIn()));
-  handle('company:link', async (ws) => linked({ status: 'linked', ...(await on.linkBusiness(String(ws || ''))) }));
-  handle('company:details', (f) => { const profile = online.detailsToProfile(f || {}); return on.createCompany(profile, String((f || {}).your_name || '').trim()); });
-  handle('company:join', (code, yourName, note) => on.requestJoin(code, yourName, note));
-  handle('company:checkJoin', () => on.checkJoin());
+  handle('company:afterSignIn', async () => { const r = linked(await on.afterSignIn()); if (r && r.status === 'linked') origin('joined')(r); return r; });
+  handle('company:link', async (ws) => origin('joined')(linked({ status: 'linked', ...(await on.linkBusiness(String(ws || ''))) })));
+  handle('company:details', async (f) => { const profile = online.detailsToProfile(f || {}); return origin('created')(await on.createCompany(profile, String((f || {}).your_name || '').trim())); });
+  handle('company:join', async (code, yourName, note) => { const r = await on.requestJoin(code, yourName, note); if (r && r.status === 'approved') origin('joined')(r); return r; });
+  handle('company:checkJoin', async () => { const r = await on.checkJoin(); if (r && r.status === 'approved') { origin('joined')(r); refreshOnlineLicence(true).catch(() => null); } return r; });
   handle('company:cancelJoin', () => { store.update('company-setup', {}, (o) => ({ ...(o || {}), pendingJoin: null })); return true; });
   handle('company:local', (profile, yourName) => on.setupLocal(profile || {}, yourName));
   handle('company:skip', () => { store.update('company-setup', {}, (o) => ({ ...(o || {}), skipped: true })); return true; });
@@ -598,6 +672,95 @@ function registerIpc() {
   // Hide or show the card. Kept on this PC, and with the Riyeser account when signed in (so riyeser.com can follow it).
   handle('central:checklistHide', (hidden) => checklist.setHidden(store, on, !!hidden));
   handle('central:checklistSkip', (id, skip) => checklist.setSkipped(store, id, skip !== false));
+  // ---------- first run, "One installer": sign in -> install your plan -> your business -> done ----------
+  const programIds = PROGRAMS.map((p) => p.id).filter((id) => updates.PRODUCTS.some((x) => x.id === id && !x.self));
+  const installedNow = () => programList().filter((p) => p.status === 'installed').map((p) => p.id);
+  const pcPrefs = () => store.get('first-run-pc', {}) || {};
+  const soon = (p, ms) => Promise.race([p, new Promise((ok) => setTimeout(() => ok(null), ms))]).catch(() => null);
+  const firstRunInfo = async () => {
+    const company = online.readCompany(appData);
+    const kind = company ? (company.kind || (company.mode === 'online' ? await soon(on.workspaceKind(), 4000) : null)) : null;
+    const pathKind = firstRun.pathFor({ company, kind });
+    let lic = licence.read(appData);
+    if (pathKind === 'plan' && !(lic.online && lic.online.modules)) { await soon(refreshOnlineLicence(true), 8000); lic = licence.read(appData); }
+    const pc = pcPrefs();
+    let role = pc.role;
+    if (!role) { try { role = ((on.prefs().pc_roles || {})[on.deviceId()]) || null; } catch { role = null; } }   // this PC, set up before
+    const plan = pathKind === 'plan' ? firstRun.planPrograms(lic).filter((id) => programIds.includes(id)) : [];
+    const run = firstRunState();
+    return { path: pathKind, kind, company: company ? { name: company.name, company_code: company.company_code || '', mode: company.mode, country: company.country || '',
+      currency: company.currency || '', tax_number: company.tax_number || '', logo: company.logo ? path.basename(company.logo) : '' } : null,
+      planKnown: !!(lic.online && lic.online.modules), plan, role: role || 'everything', roleChosen: !!role, secondPc: pc.origin === 'joined',
+      roles: firstRun.ROLES.map(({ id, title, sub }) => ({ id, title, sub, programs: firstRun.forRole(plan, id) })),
+      individual: firstRun.INDIVIDUAL.filter((id) => programIds.includes(id)), individualDefault: firstRun.INDIVIDUAL_DEFAULT,
+      programs: PROGRAMS.filter((p) => programIds.includes(p.id)).map((p) => ({ id: p.id, name: p.name, full: p.full, desc: p.desc, elevate: !!(updates.PRODUCTS.find((x) => x.id === p.id) || {}).elevate })),
+      installed: installedNow(), run, summary: run ? firstRun.summary(run) : null, online: firstRunDriver.isOnline(),
+      currencies: firstRun.CURRENCIES, countryCurrency: firstRun.COUNTRY_CURRENCY };
+  };
+  handle('firstrun:get', () => firstRunInfo());
+  // "What is this PC for?": kept on this PC, and with the Riyeser account for this PC (so setting it up again remembers)
+  handle('firstrun:role', async (role) => {
+    const r = firstRun.roleOf(String(role || '')).id;
+    store.update('first-run-pc', {}, (x) => ({ ...(x || {}), role: r }));
+    try { const prev = on.prefs().pc_roles || {}; await soon(on.savePrefs({ pc_roles: { ...prev, [on.deviceId()]: r } }), 5000); } catch { /* kept on this PC */ }
+    return r;
+  });
+  // Install these programs (the plan for this PC, or the ones ticked). What's already done is kept.
+  handle('firstrun:start', async (ids, opts = {}) => {
+    const info = await firstRunInfo();
+    const want = (Array.isArray(ids) ? ids : info.path === 'plan' ? firstRun.forRole(info.plan, info.role) : info.individualDefault).filter((id) => programIds.includes(id));
+    const names = Object.fromEntries(PROGRAMS.map((p) => [p.id, p.full]));
+    const old = firstRunState();
+    let run = old && old.items ? firstRun.choose(old, want, { installed: installedNow(), names }) : firstRun.newRun({ path: info.path, role: info.role, ids: want, installed: installedNow(), names });
+    run = { ...run, path: info.path, role: info.role, step: (opts && opts.step) || run.step || 'install' };
+    saveFirstRun(run);
+    runFirstRun();
+    return { run, summary: firstRun.summary(run) };
+  });
+  handle('firstrun:retry', (ids) => {
+    const old = firstRunState(); if (!old) return null;
+    const run = firstRun.retry(old, Array.isArray(ids) ? ids.map(String) : null);
+    saveFirstRun(run); runFirstRun();
+    return { run, summary: firstRun.summary(run) };
+  });
+  // Where the person is in the first run: install | business | done | background (Keep using Central) | closed
+  handle('firstrun:step', (stepName) => {
+    const s = String(stepName || '');
+    if (!['install', 'business', 'done', 'background', 'closed'].includes(s)) throw new Error('Unknown step');
+    const run = firstRunState() || { v: 1, items: [], ids: [], finished: true, startedAt: Date.now() };
+    saveFirstRun({ ...run, step: s });
+    return s;
+  });
+  // "Your business": name, country, currency, tax number, logo, saved in company.json for every Riyeser program
+  handle('firstrun:profile', (f) => {
+    const x = f || {};
+    const cur = firstRun.CURRENCIES.some(([c]) => c === x.currency) ? x.currency : firstRun.currencyFor(x.country);
+    const c = online.writeCompany(appData, { name: String(x.name || '').trim(), country: String(x.country || '').trim(), tax_number: String(x.tax_number || '').trim(), currency: cur });
+    if (win && !win.isDestroyed()) win.webContents.send('licence-changed', true);
+    return { name: c.name, country: c.country, currency: c.currency, tax_number: c.tax_number, logo: c.logo ? path.basename(c.logo) : '' };
+  });
+  handle('firstrun:logo', async () => {
+    const r = await dialog.showOpenDialog(win, { title: 'Choose your logo', properties: ['openFile'], filters: [{ name: 'Pictures', extensions: ['png', 'jpg', 'jpeg'] }] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const src = r.filePaths[0]; const size = fs.statSync(src).size;
+    if (size > 2 * 1024 * 1024) throw new Error('That picture is over 2 MB. Choose a smaller one (a PNG or JPG of your logo).');
+    const ext = /\.png$/i.test(src) ? '.png' : '.jpg';
+    const dest = path.join(appData, 'Riyeser', `logo${ext}`);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    online.writeCompany(appData, { logo: dest });
+    return { logo: path.basename(dest), dataUrl: `data:image/${ext === '.png' ? 'png' : 'jpeg'};base64,${fs.readFileSync(dest).toString('base64')}` };
+  });
+  // Back online: programs that were waiting for the internet carry on by themselves (checked every 2 minutes).
+  const resumeIfOnline = () => {
+    const run = firstRunState();
+    if (!run || run.finished || firstRunBusy || !firstRunDriver.isOnline() || demoOn()) return;
+    const s = firstRun.summary(run);
+    if (!s.paused.length && !s.waiting.length) return;
+    saveFirstRun(firstRun.retry(run, [...s.paused, ...s.waiting])); runFirstRun();
+  };
+  setTimeout(resumeIfOnline, 15 * 1000); setInterval(resumeIfOnline, 2 * 60 * 1000);
+  handle('firstrun:resume', () => { resumeIfOnline(); return true; });
   handle('central:updates', (force) => updateStatus(!!force));
   handle('central:installUpdates', (ids) => installUpdates(ids));
   handle('central:install', (id) => installProgram(id));

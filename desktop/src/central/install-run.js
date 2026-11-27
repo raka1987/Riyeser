@@ -153,6 +153,61 @@ function installFailure(result, { name = 'The program', args = NSIS_SILENT } = {
     fix: 'Try again. If it happens again, click Get help: Riyeser Support gets the details.' };
 }
 
+// ---------- several whole-PC installers, one Windows permission prompt (the first run's "Install your plan") ----------
+const BATCH_MARK = 'RIYESER-BATCH';
+/**
+ * The script that runs inside the one elevated PowerShell: each installer in turn, waiting for it, and one line per
+ * installer in resultFile ("RIYESER-BATCH <id> <exit code>", or "RIYESER-BATCH <id> ERR <win32 code>" when Windows
+ * wouldn't start it), then "RIYESER-BATCH DONE". items: [{ id, file, args }].
+ */
+function batchScript(items, resultFile) {
+  const line = (s) => `Add-Content -LiteralPath ${psq(resultFile)} -Value ${s} -Encoding ascii`;
+  const out = ['$ErrorActionPreference = "Stop"', `Set-Content -LiteralPath ${psq(resultFile)} -Value '' -Encoding ascii`];
+  for (const it of items || []) {
+    const id = String(it.id).replace(/[^a-z0-9-]/gi, '');
+    const argList = (it.args || NSIS_SILENT).map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ');
+    out.push('try {',
+      `  $p = Start-Process -FilePath ${psq(it.file)}${argList ? ` -ArgumentList ${psq(argList)}` : ''} -PassThru`,
+      '  $null = $p.Handle', '  $p.WaitForExit()',
+      `  ${line(`("${BATCH_MARK} ${id} " + [int]$p.ExitCode)`)}`,
+      '} catch {',
+      '  $e = $_.Exception; $n = 0',
+      '  while ($e) { if ($e -is [System.ComponentModel.Win32Exception]) { $n = $e.NativeErrorCode; break }; $e = $e.InnerException }',
+      `  ${line(`("${BATCH_MARK} ${id} ERR " + $n)`)}`,
+      '}');
+  }
+  out.push(line(`'${BATCH_MARK} DONE'`));
+  return out.join('\n');
+}
+
+/** resultFile's text -> { id: { code, startError } }; an installer with no line didn't run (the batch was stopped). */
+function parseBatch(text, ids) {
+  const got = {};
+  for (const m of String(text || '').matchAll(new RegExp(`^${BATCH_MARK} ([a-z0-9-]+) (ERR )?(-?\\d+)\\s*$`, 'gmi'))) {
+    got[m[1]] = m[2] ? { code: null, startError: Number(m[3]) || 'start' } : { code: Number(m[3]), startError: null };
+  }
+  return Object.fromEntries((ids || []).map((id) => [id, got[id] || { code: null, startError: 'start', detail: 'did not run' }]));
+}
+
+/**
+ * Run several whole-PC installers with ONE Windows permission prompt: one PowerShell started through "Run as
+ * administrator" runs them all in turn. Never throws: resolves { results: { id: { code, startError } }, prompt }.
+ * No on the prompt (1223) or a blocked start applies to every installer in the batch.
+ * fsx: { writeFileSync, readFileSync, rmSync } (fs in Central); dir: a temp folder for the script and results.
+ */
+async function runElevatedBatch({ items, spawn, dir, fsx = require('fs'), timeoutMs = 30 * 60 * 1000, now = Date.now }) {
+  const pathJoin = (a, b) => `${a.replace(/[\\/]+$/, '')}${a.includes('\\') ? '\\' : '/'}${b}`;
+  const script = pathJoin(dir, 'riyeser-batch.ps1'); const resultFile = pathJoin(dir, 'riyeser-batch.txt');
+  const ids = (items || []).map((i) => String(i.id));
+  fsx.writeFileSync(script, `﻿${batchScript(items, resultFile)}`, 'utf8');
+  const prompt = await runInstaller({ file: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script],
+    elevate: true, retryElevated: false, spawn, timeoutMs, now });
+  let text = ''; try { text = fsx.readFileSync(resultFile, 'utf8'); } catch { /* never ran */ }
+  try { fsx.rmSync(script, { force: true }); fsx.rmSync(resultFile, { force: true }); } catch { /* temp files */ }
+  if (prompt.startError) return { prompt, results: Object.fromEntries(ids.map((id) => [id, { code: null, startError: prompt.startError, detail: prompt.detail }])) };
+  return { prompt, results: parseBatch(text, ids) };
+}
+
 /** The installer said it worked but the program isn't on this PC: say so instead of going back to Install. */
 function notFoundAfterInstall(name) {
   return { ok: false, reason: 'not-found',
@@ -210,4 +265,4 @@ function logEntry(e) {
 }
 
 module.exports = { CODES, PS_MARK, PS_FAILED, elevatedScript, launchPlan, spawnErrorCode, runInstaller, installFailure, notFoundAfterInstall,
-  STAGES, step, stateText, logEntry, isInno };
+  BATCH_MARK, batchScript, parseBatch, runElevatedBatch, STAGES, step, stateText, logEntry, isInno };
