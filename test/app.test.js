@@ -122,19 +122,23 @@ test('time clock: any staff member clocks in/out on the office login with their 
   let open = (await call('GET', `/api/staff/timesheets?user_id=${sera.id}`, null, admin)).data.find(t => !t.clock_out);
   // Up to 3 hours earlier, but never before midnight in Fiji (Payroll's "one shift per day" counts Fiji days), so the
   // test gives the same answer at any time of day.
+  // clock_in is already the business's local time (Payroll's time zone), so read the hour straight off it.
   const startMs = Date.parse(open.clock_in + 'Z');
-  const fijiClock = new Intl.DateTimeFormat('en-GB', { timeZone: 'Pacific/Fiji', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(startMs)).split(':').map(Number);
-  const sinceMidnightH = fijiClock[0] + fijiClock[1] / 60;
+  const [hh, mm] = open.clock_in.slice(11, 16).split(':').map(Number);
+  const sinceMidnightH = hh + mm / 60;
   const backH = Math.max(0, Math.min(3, sinceMidnightH - 0.05));
   const earlier = new Date(startMs - backH * 36e5).toISOString().slice(0, 16);
   const put = await call('PUT', `/api/staff/timesheets/${open.id}`, { clock_in: earlier, clock_out: '', notes: 'time clock' }, admin); assert.equal(put.status, 200, JSON.stringify(put.data));
   const out = await call('POST', '/api/staff/timeclock/punch', { user_id: sera.id, pin: sera.clock_pin }, office);
-  assert.equal(out.data.on_shift, false); assert.ok(out.data.shift_hours >= backH - 0.1, `shift_hours ${out.data.shift_hours} < ${backH}`);
+  assert.equal(out.data.on_shift, false);
   const ts = (await call('GET', `/api/staff/timesheets?user_id=${sera.id}`, null, admin)).data;
-  assert.ok(ts.some(t => t.notes === 'time clock' && t.clock_out));
+  if (backH >= 0.1) {   // in the first few minutes after local midnight there's no earlier time today, so it's a double tap
+    assert.ok(out.data.shift_hours >= backH - 0.1, `shift_hours ${out.data.shift_hours} < ${backH}`);
+    assert.ok(ts.some(t => t.notes === 'time clock' && t.clock_out));
+  } else assert.equal(out.data.cancelled, true);
   // a manager can't add a shift that overlaps one already recorded
-  const day = ts[0].clock_in.slice(0, 10);
-  assert.equal((await call('POST', '/api/staff/timesheets', { user_id: sera.id, clock_in: earlier, clock_out: ts.find(t => t.notes === 'time clock').clock_out }, admin)).status, 400);
+  const done = ts.find(t => t.notes === 'time clock' && t.clock_out);
+  if (done) assert.equal((await call('POST', '/api/staff/timesheets', { user_id: sera.id, clock_in: earlier, clock_out: done.clock_out }, admin)).status, 400);
   // managers can change a PIN; duplicates and bad PINs are refused
   assert.equal((await call('PUT', `/api/staff/employees/${sera.id}`, { clock_pin: '12' }, admin)).status, 400);
   const other = emps.find(e => e.username === 'admin');
