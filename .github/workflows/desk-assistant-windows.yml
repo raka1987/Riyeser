@@ -334,6 +334,7 @@ jobs:
   link-ip:
     if: github.event_name == 'workflow_dispatch' && (inputs.job == 'link-ip' || inputs.job == 'all')
     runs-on: windows-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: desktop
@@ -342,9 +343,16 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
       - name: Link Office follows a new address
-        run: node scripts/link-ip-check.js "$env:RUNNER_TEMP\link-ip.json"
+        run: |
+          # bounded here too: whatever happens, the log is shown and the leftover helpers stopped
+          $o = "$env:RUNNER_TEMP\link-ip"
+          $p = Start-Process node -ArgumentList "scripts/link-ip-check.js", "$o.json" -NoNewWindow -PassThru -RedirectStandardOutput "$o.log" -RedirectStandardError "$o.err"
+          if (-not $p.WaitForExit(480000)) { Write-Host "Still running after 8 minutes: stopping it"; Stop-Process -Id $p.Id -Force }
+          Get-Content "$o.log", "$o.err" -ErrorAction SilentlyContinue
+          Get-CimInstance Win32_Process -Filter "Name = 'powershell.exe'" | Where-Object CommandLine -like "*RiyeserNet*" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+          if (-not (Test-Path "$o.json") -or -not (Get-Content "$o.json" -Raw | ConvertFrom-Json).ok) { exit 1 }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: link-ip
-          path: ${{ runner.temp }}/link-ip.json
+          path: ${{ runner.temp }}/link-ip.*
