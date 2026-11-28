@@ -42,6 +42,9 @@ for dest in "${dests[@]}"; do
   store_put "$work/counts.tsv.gpg" "$dest.counts.tsv.gpg"
   store_put "$work/manifest.txt" "$dest.manifest.txt"
 done
+# For HQ (ops/hq-jobs/record-run.sh): sizes and the fingerprint only.
+if [ -n "${RUN_DETAIL_FILE:-}" ]; then printf '{"day":"%s","bytes":%s,"tables_with_data":%s,"sha256":"%s","monthly":%s}\n' "$day" "$(stat -c %s "$work/db.dump.gpg")" "$tables" "$sha" \
+  "$([ ${#dests[@]} -gt 1 ] && echo true || echo false)" > "$RUN_DETAIL_FILE"; fi
 echo "Stored $NAME backup for $day ($(numfmt --to=iec "$size") before encryption, $tables tables with data) in: ${dests[*]}"
 
 # 5. Tidy: daily copies older than 30 days, monthly copies older than 12 months.

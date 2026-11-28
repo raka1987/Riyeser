@@ -37,5 +37,7 @@ while IFS=$'\t' read -r table want; do
 done < "$work/counts.tsv"
 # 5. The relationships hold (e.g. no messages pointing at missing chats): checks for this database, if any.
 if [ -f "$here/checks/$NAME.sql" ]; then "$PSQL" "$RESTORE_DB_URL" -v ON_ERROR_STOP=1 -q -f "$here/checks/$NAME.sql" || bad=$((bad + 1)); fi
+# For HQ (ops/hq-jobs/record-run.sh): which copy, how many tables, how many problems.
+if [ -n "${RUN_DETAIL_FILE:-}" ]; then printf '{"copy":"%s","tables":%s,"problems":%s}\n' "$src" "$n" "$bad" > "$RUN_DETAIL_FILE"; fi
 [ "$bad" -eq 0 ] || { echo "::error::Restore drill of $src FAILED ($bad problems)."; exit 1; }
 echo "Restore drill of $src passed: $n tables, every row count matches$( [ -f "$here/checks/$NAME.sql" ] && echo ', checks passed')."
