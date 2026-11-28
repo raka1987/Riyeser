@@ -4,7 +4,7 @@
 <div class="head"><div><h1>{{ c.name if c else 'New ' ~ kind }}</h1></div></div>
 <form method="post" class="card"><div class="fields">
 <div><label>Name</label><input name="name" value="{{ c.name if c }}" required></div>
-<div><label>ABN</label><input name="abn" value="{{ c.abn or '' if c }}"></div>
+<div><label>{{ tl.tax_id }}</label><input name="abn" value="{{ c.abn or '' if c }}"></div>
 <div><label>Contact person</label><input name="contact_person" value="{{ c.contact_person or '' if c }}"></div>
 <div><label>Email</label><input type="email" name="email" value="{{ c.email or '' if c }}"></div>
 <div><label>Phone</label><input name="phone" value="{{ c.phone or '' if c }}"></div>

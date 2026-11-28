@@ -31,8 +31,10 @@ def create_app(test_config=None):
         app.config["DATABASE"] = demo_mode.demo_db(app.config["DATABASE"])
         demo_mode.ensure_company(app)
 
-    app.jinja_env.filters["money"] = fmt_money
-    app.jinja_env.filters["money0"] = lambda c: fmt_money(c, blank_zero=True)
+    from . import countries as _countries
+    app.jinja_env.filters["money"] = _countries.request_money   # the company's currency (S30, APP-023)
+    app.jinja_env.filters["money0"] = lambda c: _countries.request_money(c, blank_zero=True)
+    app.jinja_env.filters["ddate"] = _countries.request_date     # a date in the company's date format
     app.jinja_env.filters["cents"] = cents_str
     app.jinja_env.globals["today"] = lambda: date.today().isoformat()
 
@@ -193,7 +195,7 @@ def create_app(test_config=None):
                     my_companies=mine, current_company=co.current_id() if g.get("user") else None,
                     over_allowance=g.get("over_allowance"), company_allowance=co.allowance() if g.get("user") else None,
                     can=lambda area, need=1: perms.can(area, need), lv=lambda area: perms.level(area),
-                    report_area=perms.report_area, prices=dbmod.PRICES)
+                    report_area=perms.report_area, prices=dbmod.PRICES, tl=_countries.request_labels())
 
     @app.errorhandler(403)
     def forbidden(_e):
@@ -281,6 +283,8 @@ def _separate_app_redirect(endpoint):
     """Keep each app to its own screens. Riyeser POS shows only the till (and products, customers, users, help);
     Accounting Basics and Plus send the till's screens to Riyeser POS. Both open the same company file."""
     from .edition import is_pos_app, is_accounting_app, is_invoices_app, is_bookings_app, is_estimate_app
+    if endpoint in ("core.country", "core.country_review"):
+        return None   # every app sets the business's country and tax (the same company file)
     if is_estimate_app():
         return _estimate_app_redirect(endpoint)
     if endpoint.startswith("estimate.") and \

@@ -8,6 +8,6 @@
 <div><label for="date_format">Dates</label><select id="date_format" name="date_format">{% for k, v in [('iso', '2026-11-27'), ('dmy', '27/11/2026'), ('mdy', '11/27/2026')] %}<option value="{{ k }}" {{ 'selected' if company.date_format == k }}>{{ v }}</option>{% endfor %}</select></div>
 <div><label for="map_provider">Map imagery</label><select id="map_provider" name="map_provider">{% for k, p in providers.items() %}<option value="{{ k }}" {{ 'selected' if company.map_provider == k }}>{{ p.name }}</option>{% endfor %}</select><small class="muted">More providers (Google, Nearmap) may come later.</small></div>
 </div>
-<p class="small muted">Tax rates are set on your tax codes (in Riyeser Invoices or Accounting, Setup → Tax codes). New estimates use the company's default tax code.</p>
+<p class="small muted">Tax rates are set on your tax codes (in Riyeser Invoices or Accounting, Setup → Tax codes). New estimates use the company's default tax code. <a href="{{ url_for('core.country') }}">Country &amp; tax settings</a> fill in the tax, currency, dates and time zone for your country.</p>
 {% if can('setup', 2) and not read_only %}<button class="btn pri">Save settings</button>{% endif %}</form>
 {% endblock %}

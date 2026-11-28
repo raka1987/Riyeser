@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Check country and tax settings{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Check the settings for {{ r.p.name }}</h1><p class="sub">Change anything that's different for your business, then press <b>Confirm these settings</b>. Nothing is saved until you do.</p></div>
+<div><a class="btn" href="{{ url_for('core.country') }}">← Choose another country</a></div></div>
+<form method="post" class="country-review">
+{% include "core/_country_fields.html" %}
+<div class="cr-go"><button class="btn pri">Confirm these settings</button> <a class="btn" href="{{ url_for('core.country') }}">Cancel</a>
+<p class="muted small">Past invoices, receipts and postings stay exactly as they are. Recorded as confirmed by {{ user.username }}.</p></div>
+</form>
+{% endblock %}

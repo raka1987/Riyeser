@@ -220,7 +220,8 @@ def claim_lines(db, x):
     rest (if any) GST free. Amounts include GST."""
     co = db.execute("SELECT gst_registered FROM company WHERE id=1").fetchone()
     tc = _gst_rate(db)
-    free = db.execute("SELECT id FROM tax_codes WHERE code=?", ("FRE" if co["gst_registered"] else "N-T",)).fetchone()
+    from ..countries import tax_code_id
+    free = {"id": tax_code_id(db, "free" if co["gst_registered"] else "none")}
     memo = " · ".join(v for v in (x["supplier"], x["note"]) if v) or "Expense claim"
     memo = f"{memo} (claim {x['id']}, {x['claimant']})"
     base = dict(account_id=x["account_id"], memo=memo, description=memo)

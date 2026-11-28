@@ -1,15 +1,16 @@
 {% extends "base.html" %}{% block title %}Tax Codes{% endblock %}
 {% from "_macros.html" import account_select %}
 {% block content %}
-<div class="head"><div><h1>Tax Codes</h1><p class="sub">Tax code "kind" drives where amounts land on the BAS report.</p></div></div>
-{% set kinds = {'gst':'GST (taxable)','capital':'Capital acquisition','gst_free':'GST free','export':'Export','input_taxed':'Input taxed','not_reportable':'Not reportable'} %}
-<div class="tbl"><table><tr><th>Code</th><th>Description</th><th class="n">Rate</th><th>Kind</th><th>Collected acct</th><th>Paid acct</th><th></th></tr>
+<div class="head"><div><h1>Tax Codes</h1><p class="sub">Tax code "kind" drives where amounts land on the {{ tl.report }} report. {{ tl.tax }} rates are a starting point — check with your accountant or tax office. Invoices and postings already saved keep the tax they were saved with. Untick <b>In use</b> to stop offering a code.</p></div></div>
+{% set kinds = {'gst': tl.tax ~ ' (taxable)','capital':'Capital acquisition','gst_free': tl.tax ~ ' free','export':'Export / zero-rated','input_taxed':'Input taxed / exempt','not_reportable':'Not reportable'} %}
+<div class="tbl"><table><tr><th>Code</th><th>Description</th><th class="n">Rate</th><th>Kind</th><th>Collected acct</th><th>Paid acct</th><th>In use</th><th></th></tr>
 {% for t in tax_codes %}<tr>
 <td><input form="t{{ t.id }}" name="code" value="{{ t.code }}" style="width:70px"></td><td><input form="t{{ t.id }}" name="name" value="{{ t.name }}"></td>
 <td><input form="t{{ t.id }}" name="rate" value="{{ t.rate }}" style="width:70px" class="right"></td>
 <td><select form="t{{ t.id }}" name="kind">{% for k, v in kinds.items() %}<option value="{{ k }}" {{ 'selected' if t.kind==k }}>{{ v }}</option>{% endfor %}</select></td>
 <td>{{ account_select('collected_account_id', accounts, t.collected_account_id, form='t' ~ t.id, label='Collected account for ' ~ t.code) }}</td>
 <td>{{ account_select('paid_account_id', accounts, t.paid_account_id, form='t' ~ t.id, label='Paid account for ' ~ t.code) }}</td>
+<td><input type="hidden" form="t{{ t.id }}" name="active_shown" value="1"><input type="checkbox" form="t{{ t.id }}" name="active" value="1" aria-label="{{ t.code }} in use" {{ 'checked' if t.active is not defined or t.active }}></td>
 <td><form id="t{{ t.id }}" method="post"><input type="hidden" name="id" value="{{ t.id }}"><button class="btn sm">Save</button></form></td></tr>{% endfor %}
 </table></div>
 <div class="card" style="margin-top:18px"><h3>New tax code</h3><form method="post" class="fields">

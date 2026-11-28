@@ -13,28 +13,57 @@ bp = Blueprint("auth", __name__)
 
 @bp.route("/setup", methods=["GET", "POST"])
 def setup_company():
+    """First run: create the company file. Step 1 (optional) picks the country; step 2 shows what it fills in, every
+    value editable, with the company name and admin password. Nothing is created until "Confirm these settings and
+    create company file". Without a country the file starts with Riyeser's Australian settings, as always."""
+    from .. import countries as C
     if os.path.exists(current_app.config["DATABASE"]):
         return redirect(url_for("auth.login"))
     if request.method == "POST":
-        name = request.form.get("name", "").strip() or "My Company Pty Ltd"
-        pw = request.form.get("password") or ""
+        f = request.form
+        name = f.get("name", "").strip() or "My Company Pty Ltd"
+        pw = f.get("password") or ""
+        cc = (f.get("country") or "").strip().upper()
+        back = url_for("auth.setup_company", country=cc) if cc else url_for("auth.setup_company")
         if len(pw) < MIN_PASSWORD:
             flash(f"Choose an admin password of at least {MIN_PASSWORD} characters.", "error")
-            return redirect(url_for("auth.setup_company"))
-        init_db(name, pw, request.form.get("edition"))
+            return redirect(back)
+        demo = f.get("start") == "demo" or f.get("demo")
+        codes = None
+        if cc:
+            try:
+                C.settings_from_form(f)       # checked before anything is created
+                codes = C.wanted_codes(f)
+            except ValueError as e:
+                flash(str(e), "error")
+                return redirect(back)
+        if cc and not demo:
+            seed = [(t["code"], t["name"], float(t["rate"]), t["kind"]) for t in codes]
+            if f.get("no_tax") == "1":
+                seed = []
+            init_db(name, pw, f.get("edition"), tax_codes=seed,
+                    tax_name="None" if f.get("no_tax") == "1" else (f.get("tax_name") or "").strip()[:20] or None)
+        else:
+            init_db(name, pw, f.get("edition"))   # the demo's practice data uses Riyeser's sample (Australian) codes
         from .. import company_profile
         prof = company_profile.read()
-        if prof and request.form.get("use_profile", "1") == "1":
+        if prof and f.get("use_profile", "1") == "1":
             company_profile.apply_to_new_file(get_db(), prof)
-        if request.form.get("start") == "demo" or request.form.get("demo"):
+        if demo:
             from ..demo import seed_demo
             seed_demo(get_db())
+        if cc:
+            C.confirm(get_db(), f, "admin")   # who confirmed it and when; codes not there yet are added
         from .. import archive
         archive.copy_head_into(current_app.config["DATABASE"], os.path.dirname(os.path.abspath(current_app.config["DATABASE"])))
         flash("Company file created. Sign in as 'admin'.", "ok")
         return redirect(url_for("auth.login"))
     from .. import company_profile
-    return render_template("auth/setup.html", profile=company_profile.read())
+    prof = company_profile.read()
+    cc = (request.args.get("country") or "").strip().upper()
+    r = C.review(None, cc) if cc else None
+    return render_template("auth/setup.html", profile=prof, r=r, C=C, countries=C.countries(), OTHER=C.OTHER,
+                           current=C.guess_country(prof.get("country")) if prof else None)
 
 
 MIN_PASSWORD = 8          # S37

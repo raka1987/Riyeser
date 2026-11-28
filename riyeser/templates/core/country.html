@@ -1,0 +1,20 @@
+{% extends "base.html" %}{% block title %}Country and tax{% endblock %}
+{% block content %}
+<div class="head"><div><h1>Country and tax</h1><p class="sub">Choose where the business is. We fill in its tax name, tax number label, rate and codes, currency, financial year, date format and time zone as a starting point. You check every value before anything is saved.</p></div></div>
+<div class="card"><h3>Now</h3>
+{% if current %}<p style="margin:0"><b>{{ current_name }}</b>{% if company.country_confirmed_at %} · confirmed by {{ company.country_confirmed_by }} on {{ company.country_confirmed_at[:10]|ddate }}{% endif %}</p>
+{% else %}<p style="margin:0">No country chosen yet: this company file uses Riyeser's Australian settings (GST, ABN, the BAS report).</p>{% endif %}
+<dl class="cset">
+<div><dt>Tax</dt><dd>{{ tl.tax if tl.has_tax else 'None' }}</dd></div>
+<div><dt>Tax number label</dt><dd>{{ tl.tax_id }}</dd></div>
+<div><dt>Tax report</dt><dd>{{ tl.report }}</dd></div>
+<div><dt>Currency</dt><dd>{{ company.currency or 'AUD' }} ({{ 123456|money }})</dd></div>
+<div><dt>Financial year starts</dt><dd>1 {{ ['January','February','March','April','May','June','July','August','September','October','November','December'][(company.fy_start_month or 7) - 1] }}</dd></div>
+<div><dt>Time zone</dt><dd>{{ company.timezone or 'Not set' }}</dd></div>
+</dl>
+<p class="muted small" style="margin:10px 0 0">Change any single value any time: tax codes under <a href="{{ url_for('core.tax_codes') }}">Tax codes</a>{% if not product.separate or product.key in ('basic','enterprise','invoices','bookings') %}, the rest under <a href="{{ url_for('core.company') }}">Company details</a>{% endif %}.</p></div>
+<form class="card" method="get" action="{{ url_for('core.country_review') }}"><h3>Choose a country</h3>
+{% include "core/_country_picker.html" %}
+<p class="muted small">Changing the country never changes invoices, receipts or postings already saved, and keeps the tax codes you already have.</p>
+<button class="btn pri">Next: check the settings</button></form>
+{% endblock %}

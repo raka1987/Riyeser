@@ -4,7 +4,7 @@
 {% include "_crm_styles.html" %}
 {% set side = 'sale' if c.kind=='customer' else 'purchase' %}
 {% macro by(full, name) %}{{ full or name or 'someone' }}{% endmacro %}
-<div class="head"><div><h1>{{ c.name }}</h1><p class="sub">{{ c.kind|title }}{% if c.contact_person %} · {{ c.contact_person }}{% endif %}{% if c.abn %} · ABN {{ c.abn }}{% endif %}{% if c.email %} · <a href="mailto:{{ c.email }}">{{ c.email }}</a>{% endif %}{% if c.phone %} · <a href="tel:{{ c.phone|replace(' ', '') }}">{{ c.phone }}</a>{% endif %}</p></div>
+<div class="head"><div><h1>{{ c.name }}</h1><p class="sub">{{ c.kind|title }}{% if c.contact_person %} · {{ c.contact_person }}{% endif %}{% if c.abn %} · {{ tl.tax_id }} {{ c.abn }}{% endif %}{% if c.email %} · <a href="mailto:{{ c.email }}">{{ c.email }}</a>{% endif %}{% if c.phone %} · <a href="tel:{{ c.phone|replace(' ', '') }}">{{ c.phone }}</a>{% endif %}</p></div>
 <div class="actions"><a class="btn" href="{{ url_for('contacts.edit', kind=c.kind, cid=c.id) }}">Edit</a>
 {% if not pos_here %}<a class="btn pri" href="{{ url_for('documents.edit', side=side, contact=c.id) }}">+ New {{ 'invoice' if side=='sale' else 'bill' }}</a>
 <a class="btn" href="{{ url_for('documents.pay', side=side, contact=c.id) }}">{{ 'Receive payment' if side=='sale' else 'Pay bills' }}</a>

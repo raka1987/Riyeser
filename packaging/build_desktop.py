@@ -66,6 +66,7 @@ args = [
     "--add-data", f"{PKG / 'templates'}{sep}riyeser/templates",
     "--add-data", f"{PKG / 'static'}{sep}riyeser/static",
     "--add-data", f"{PKG / 'schema.sql'}{sep}riyeser",
+    "--add-data", f"{PKG / 'countries.json'}{sep}riyeser",   # Country and tax presets (riyeser/countries.py)
     "--add-data", f"{PKG / 'fonts'}{sep}riyeser/fonts",   # the Unicode fonts embedded in PDFs (and their licences)
     "--hidden-import", "uharfbuzz",
     "--hidden-import", "riyeser.demo",

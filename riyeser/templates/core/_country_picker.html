@@ -1,0 +1,30 @@
+{# Searchable list of every country (ISO 3166) plus Other / set up myself. Works without JavaScript (a plain list);
+   with it, typing in the box narrows the list. #}
+<div class="cpick">
+<label for="cp-q">Find your country</label>
+<input id="cp-q" type="search" placeholder="Start typing, e.g. Fiji, New Zealand, Germany" autocomplete="off" aria-controls="cp-list">
+<label for="cp-list" class="sr-only">Country</label>
+<select id="cp-list" name="country" size="9" required>
+<option value="{{ OTHER }}"{{ ' selected' if current == OTHER }}>Other / set up myself (blank fields)</option>
+{% for cc, n in countries %}<option value="{{ cc }}"{{ ' selected' if current == cc }}>{{ n }}</option>{% endfor %}
+</select>
+<p id="cp-none" class="muted small" hidden>No country matches. Try another spelling, or choose Other / set up myself.</p>
+</div>
+<script>
+(function () {
+  var q = document.getElementById('cp-q'), list = document.getElementById('cp-list'), none = document.getElementById('cp-none');
+  var all = Array.prototype.slice.call(list.options);
+  function norm(s) { return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+  q.addEventListener('input', function () {
+    var v = norm(q.value.trim()), first = null, shown = 0;
+    all.forEach(function (o) {
+      var hit = !v || norm(o.text).indexOf(v) >= 0 || o.value.toLowerCase() === v || o.value === '{{ OTHER }}';
+      o.hidden = !hit; o.disabled = !hit;
+      if (hit) { shown++; if (!first && o.value !== '{{ OTHER }}') first = o; }
+    });
+    if (first && v) list.value = first.value;
+    none.hidden = shown > 1 || !v;
+  });
+  q.addEventListener('keydown', function (e) { if (e.key === 'ArrowDown') { e.preventDefault(); list.focus(); } });
+})();
+</script>

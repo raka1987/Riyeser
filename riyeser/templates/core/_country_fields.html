@@ -1,0 +1,33 @@
+{# The review screen's fields (Setup → Country and tax, and the first-run setup). r = countries.review(), C = countries.
+   Every value is editable; nothing is saved until the form is sent with "Confirm these settings". #}
+{% set p = r.p %}{% set blank = 'Not filled in — enter yours' %}
+<input type="hidden" name="country" value="{{ r.cc }}"><input type="hidden" name="add_standard" value="1">
+<input type="hidden" name="report_layout" value="{{ p.report_layout or 'generic' }}">
+<div class="flash warn cr-note" role="note"><b>Please check these settings.</b> {{ C.NOTE }}</div>
+{% if p.note %}<p class="cr-pnote"><b>About {{ p.name }}:</b> {{ p.note }}</p>{% endif %}
+<div class="card"><h3>Tax</h3><div class="fields">
+<div><label for="cr-tax">What the tax is called</label><input id="cr-tax" name="tax_name" value="{{ '' if p.tax_name == 'None' else (p.tax_name or '') }}" placeholder="{{ 'None' if p.tax_name == 'None' else 'GST, VAT, Sales tax…' }}" maxlength="20"><small class="muted">{{ 'This country has no VAT or GST listed.' if p.tax_name == 'None' else ('' if p.tax_name else blank) }}</small></div>
+<div><label for="cr-rate">Standard rate (%)</label><input id="cr-rate" name="standard_rate" inputmode="decimal" value="{{ '%g'|format(p.standard_rate) if p.standard_rate is not none else '' }}" placeholder="{{ 'e.g. 10' }}" maxlength="6"><small class="muted">{% if p.standard_rate is none and p.tax_name != 'None' %}{{ blank }}{% else %}{{ C.RATES_NOTE }}{% endif %}</small></div>
+<div><label for="cr-taxid">Tax number label</label><input id="cr-taxid" name="tax_id_label" value="{{ p.tax_id_label or '' }}" placeholder="ABN, TIN, VAT number…" maxlength="40"><small class="muted">{{ 'Printed before your number on invoices.' if p.tax_id_label else blank }}</small></div>
+<div><label for="cr-report">Tax report name</label><input id="cr-report" name="report_name" value="{{ p.report_name or '' }}" placeholder="GST return summary" maxlength="60"><small class="muted">{{ 'The title of the report under Reports.' if p.report_name else blank }}</small></div>
+<div><label for="cr-office">Tax paid to</label><input id="cr-office" name="tax_office" value="{{ p.tax_office or '' }}" placeholder="the tax office" maxlength="40"><small class="muted">{{ 'Shown on the report.' if p.tax_office else 'Optional' }}</small></div>
+<div><label for="cr-incl">New invoices show prices</label><select id="cr-incl" name="prices_include_tax"><option value="0" {{ 'selected' if not p.prices_include_tax }}>Excluding tax</option><option value="1" {{ 'selected' if p.prices_include_tax }}>Including tax</option></select><small class="muted">You can change it on each invoice.</small></div>
+<label class="check wide"><input type="checkbox" name="no_tax" value="1" {{ 'checked' if p.tax_name == 'None' }}> There's no VAT, GST or sales tax here (invoices say "Invoice", not "Tax Invoice")</label>
+</div></div>
+<div class="card"><h3>Money, dates and time</h3><div class="fields">
+<div><label for="cr-cur">Currency</label><input id="cr-cur" name="currency" value="{{ p.currency or '' }}" maxlength="3" style="text-transform:uppercase" placeholder="AUD, NZD, FJD…"><small class="muted">{{ ('For example ' ~ r.money_example) if r.money_example else 'Not filled in: your current currency stays' }}</small></div>
+<div><label for="cr-sym">Currency symbol</label><input id="cr-sym" name="currency_symbol" value="{{ p.currency_format.symbol if p.currency_format else '' }}" maxlength="8" placeholder="$"><small class="muted">Printed with every amount.</small></div>
+<div><label for="cr-pos">Symbol goes</label><select id="cr-pos" name="currency_position"><option value="before" {{ 'selected' if not p.currency_format or p.currency_format.position == 'before' }}>Before the amount ($10.00)</option><option value="after" {{ 'selected' if p.currency_format and p.currency_format.position == 'after' }}>After the amount (10,00 €)</option></select><small class="muted">&nbsp;</small></div>
+<div><label for="cr-fy">Financial year starts</label><select id="cr-fy" name="fy_start_month"><option value="">{{ 'Choose the month' if not p.fy_start_month else '' }}</option>{% for m in C.MONTHS %}<option value="{{ loop.index }}" {{ 'selected' if p.fy_start_month == loop.index }}>1 {{ m }}</option>{% endfor %}</select><small class="muted">{{ '' if p.fy_start_month else 'Not filled in: choose yours (your current one stays if you leave it)' }}</small></div>
+<div><label for="cr-date">Date format</label><select id="cr-date" name="date_format">{% for k, v in C.DATE_FORMATS.items() %}<option value="{{ k }}" {{ 'selected' if (p.date_format or 'iso') == k }}>{{ v }}</option>{% endfor %}</select><small class="muted">Used on invoices, quotes and PDFs.</small></div>
+<div><label for="cr-tz">Time zone</label><select id="cr-tz" name="timezone"{% if r.timezones|length > 1 and p.code != C.OTHER %} required{% endif %}>{% if not r.timezone %}<option value="">Choose your time zone</option>{% endif %}{% for z in r.timezones %}<option {{ 'selected' if z == r.timezone }}>{{ z }}</option>{% endfor %}</select><small class="muted">{{ 'Where the business is, for online bookings and the day\'s figures.' if r.timezones|length > 1 else '' }}</small></div>
+</div></div>
+<div class="card"><h3>Tax codes</h3>
+{% if r.codes %}<p class="muted" style="margin-top:0">Ticked codes are added if they aren't in the company file yet. Codes already there are kept exactly as they are. You can add, change or stop using codes any time under Tax codes.</p>
+<div class="tbl"><table><tr><th>Add</th><th>Code</th><th>Description</th><th class="n">Rate</th><th>In your file now</th></tr>
+{% for t in r.codes %}<tr><td><input type="checkbox" name="add_{{ t.code }}" value="1" aria-label="Add {{ t.code }}" {{ 'checked' if t.status == 'add' }}{{ ' disabled' if t.status != 'add' }}></td><td><b>{{ t.code }}</b></td><td>{{ t.name }}</td><td class="n">{{ '%g'|format(t.rate) }}%</td>
+<td class="wrap">{% if t.status == 'add' %}Not yet: will be added{% elif t.status == 'same' %}Already there{% else %}<b>Already there at {{ '%g'|format(t.yours.rate) }}%: kept as it is.</b> Change it under Tax codes if it should be {{ '%g'|format(t.rate) }}%.{% endif %}</td></tr>{% endfor %}</table></div>
+{% elif p.tax_name == 'None' %}<p class="muted" style="margin:0">No tax codes are added. A not-reportable code (N-T) is always kept for transfers and loans.</p>
+{% else %}<p class="muted" style="margin:0">No codes are filled in for this country. If you type a standard rate above, a code for it is added. Add any others under Tax codes.</p>{% endif %}
+</div>
+{% if p.source %}<p class="small muted cr-src">Where these come from (as of {{ C.data().as_of }}): {{ p.source }}</p>{% endif %}

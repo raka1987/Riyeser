@@ -1,12 +1,22 @@
 {% from "_macros.html" import flashes %}
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Create company file · {{ product.app }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
-<body class="{{ product.cls }}"><div class="login">
+<body class="{{ product.cls }}"><div class="login{{ ' login-wide' if r }}">
 <div class="brand" style="color:var(--ink);padding:0 0 10px"><div class="logo" style="color:#fff">{{ product.letter }}</div><div>{{ product.app }}<small>New company file</small></div></div>
-<p class="muted">Creates a company file with an Australian chart of accounts, GST tax codes and an <b>admin</b> user.</p>
 {{ flashes() }}
+{% if not r %}
+<form method="get" class="setup-step"><h2 class="setup-h">1. Where is your business?</h2>
+<p class="muted small" style="margin-top:0">We fill in the tax, currency, dates and time zone for your country as a starting point. You check them on the next step.</p>
+{% include "core/_country_picker.html" %}
+<button class="btn pri" style="margin-top:12px;width:100%;justify-content:center">Next: check the settings</button></form>
+<details class="setup-skip"><summary>Or skip: start with Australian settings</summary>
+<p class="muted">Creates a company file with an Australian chart of accounts, GST tax codes and an <b>admin</b> user. You can choose a country later under Setup → Country &amp; tax.</p>
+{% else %}
+<h2 class="setup-h">2. Check the settings for {{ r.p.name }}</h2>
+<p class="muted small" style="margin-top:0"><a href="{{ url_for('auth.setup_company') }}">← Choose another country</a></p>
+{% endif %}
 <form method="post">
-{% if profile %}<div class="flash ok" style="margin-bottom:12px">Filled in from your Riyeser company profile{% if profile.company_code %} ({{ profile.company_code }}){% endif %}: {{ profile.name }}{% if profile.tax_number %} · ABN {{ profile.tax_number }}{% endif %}. Change anything you need later under Setup.</div>
+{% if profile %}<div class="flash ok" style="margin-bottom:12px">Filled in from your Riyeser company profile{% if profile.company_code %} ({{ profile.company_code }}){% endif %}: {{ profile.name }}{% if profile.tax_number %} · {{ r.p.tax_id_label or 'Tax number' if r else 'ABN' }} {{ profile.tax_number }}{% endif %}. Change anything you need later under Setup.</div>
   <input type="hidden" name="use_profile" value="1">{% endif %}
   <label>Company name</label><input name="name" placeholder="My Company Pty Ltd" value="{{ profile.name if profile else '' }}" required>
   <label style="margin-top:12px">Admin password</label><input name="password" type="password" required minlength="8">
@@ -21,8 +31,12 @@
     <label class="pick"><input type="radio" name="start" value="blank" checked> <b>Start blank (recommended)</b><small>For your own company. Nothing is filled in: you add your own customers, products and invoices.</small></label>
     <label class="pick"><input type="radio" name="start" value="demo"> <b>Explore with demo data</b><small>Practice data: made-up customers and invoices to try things out. Not for your real books.</small></label>
   </div>
-  <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Create company file</button>
-</form>
+{% if r %}<div class="setup-review" style="margin-top:18px">{% include "core/_country_fields.html" %}</div>
+  <button class="btn pri" style="margin-top:6px;width:100%;justify-content:center">Confirm these settings and create company file</button>
+  <p class="muted small" style="margin:6px 0 0">Nothing is created until you press this. Every value can be changed later under Setup.</p>
+{% else %}
+  <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Create company file</button>{% endif %}
+</form>{% if not r %}</details>{% endif %}
 <form method="post" action="{{ url_for('backups.restore_upload') }}" enctype="multipart/form-data" style="margin-top:22px;border-top:1px solid var(--line);padding-top:14px">
   <label for="restore-file"><b>Or restore from a backup…</b></label>
   <p class="muted" style="font-size:12px;margin:4px 0 8px">Moved PC or reinstalled? Pick a Riyeser backup (.db) from anywhere, for example Documents\Riyeser\Accounting\Backups or a USB stick. You'll see what's in it before anything is restored.</p>

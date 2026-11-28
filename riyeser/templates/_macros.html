@@ -13,7 +13,7 @@
 
 {% macro tax_select(name, tax_codes, selected=None, blank=True, form=None, label=None) -%}
 <select name="{{ name }}"{% if form %} form="{{ form }}"{% endif %}{% if label %} aria-label="{{ label }}"{% endif %}>{% if blank %}<option value="">—</option>{% endif %}
-  {% for t in tax_codes %}<option value="{{ t.id }}" {{ 'selected' if selected == t.id }}>{{ t.code }}</option>{% endfor %}
+  {% for t in tax_codes if t.active is not defined or t.active or selected == t.id %}<option value="{{ t.id }}" {{ 'selected' if selected == t.id }}>{{ t.code }}</option>{% endfor %}
 </select>
 {%- endmacro %}
 

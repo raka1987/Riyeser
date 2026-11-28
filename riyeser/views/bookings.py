@@ -499,11 +499,10 @@ def item_price_inc(db, item):
 
 
 def _gst(db):
+    from ..countries import tax_code_id   # GST, VAT... whatever this file's standard code is called
     if not (g.get("company") or {}).get("gst_registered", 1):
-        r = db.execute("SELECT id FROM tax_codes WHERE code='FRE'").fetchone()
-        return r["id"] if r else None
-    r = db.execute("SELECT id FROM tax_codes WHERE code='GST'").fetchone()
-    return r["id"] if r else None
+        return tax_code_id(db, "free")
+    return tax_code_id(db, "standard")
 
 
 @bp.route("/<int:bid>/invoice", methods=["POST"])

@@ -15,7 +15,7 @@
 {% block content %}
 {% set st = doc.status if doc else preset_status %}
 <div class="head"><div><h1>{{ 'Edit' if doc else 'New' }} {{ ('Credit note' if side == 'sale' else 'Supplier credit') if kind == 'credit' else {'quote':'Quote','order':'Order','open':L.doc}[st] }}</h1>
-{% if kind == 'credit' %}<p class="sub">Enter what's credited as positive amounts. It reduces what {{ 'the customer owes' if side == 'sale' else 'you owe the supplier' }}, with GST, and can be used on {{ L.doc|lower }}s or refunded.</p>{% endif %}
+{% if kind == 'credit' %}<p class="sub">Enter what's credited as positive amounts. It reduces what {{ 'the customer owes' if side == 'sale' else 'you owe the supplier' }}, with {{ tl.tax }}, and can be used on {{ L.doc|lower }}s or refunded.</p>{% endif %}
 <p class="sub">{{ L.title }} · {{ doc.number if doc else 'number assigned on save' }}</p></div></div>
 {% if qoptions %}{% set cur = (qoptions|selectattr('on_quote')|first) %}<div class="flash warn">This quote has {{ qoptions|length }} options ({{ qoptions|map(attribute='name')|join(', ') }}). You're changing the lines of <b>{{ cur.name }}</b>, the option on the quote now; the other options keep theirs.</div>{% endif %}
 <form method="post" id="doc-form"><input type="hidden" name="kind" value="{{ kind }}">
@@ -29,14 +29,14 @@
 <p class="muted" style="margin:4px 0 0;font-size:12.5px">Leave empty for 30 days. After this date the quote shows as Expired.</p></div>{% endif %}
 <div><label for="doc-reference">{{ 'Customer PO' if side=='sale' else 'Supplier invoice #' }}</label><input id="doc-reference" name="reference" value="{{ doc.reference or '' if doc }}"></div>
 {% if kind != 'credit' %}<div><label for="doc-status">Save as</label><select id="doc-status" name="status">{% for k, v in [('open', L.doc ~ ' (post to ledger)'),('order','Order'),('quote','Quote')] %}<option value="{{ k }}" {{ 'selected' if st==k }}>{{ v }}</option>{% endfor %}</select></div>{% endif %}
-<label class="check"><input type="checkbox" name="tax_inclusive" id="tax_inclusive" value="1" {{ 'checked' if doc and doc.tax_inclusive }}> Prices include GST</label>
+<label class="check"><input type="checkbox" name="tax_inclusive" id="tax_inclusive" value="1" {{ 'checked' if (doc.tax_inclusive if doc else company.prices_include_tax) }}> Prices include {{ tl.tax }}</label>
 </div></div>
 <div class="card"><table class="lines" id="lines"><thead><tr><th style="width:110px">Item</th><th>Description</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Disc</th><th style="width:220px">Account</th><th>Tax</th><th>Job</th><th class="n">Amount</th><th></th></tr></thead>
 <tbody>{% if lines %}{% for l in lines %}{{ row(l, loop.index) }}{% endfor %}{% else %}{{ row(None, 1) }}{{ row(None, 2) }}{{ row(None, 3) }}{% endif %}</tbody></table>
 <template>{{ row() }}</template>
 <p><button type="button" class="btn sm" data-add-row="#lines">+ Add line</button></p>
 <div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap"><div style="flex:1;min-width:260px"><label for="doc-notes">Notes / terms (printed)</label><textarea id="doc-notes" name="notes" rows="3">{{ doc.notes or '' if doc }}</textarea></div>
-<table class="totals"><tr><td>Subtotal</td><td class="n" id="t-sub"></td></tr><tr><td>GST</td><td class="n" id="t-tax"></td></tr><tr><td>Total</td><td class="n" id="t-total"></td></tr></table></div></div>
+<table class="totals"><tr><td>Subtotal</td><td class="n" id="t-sub"></td></tr><tr><td>{{ tl.tax }}</td><td class="n" id="t-tax"></td></tr><tr><td>Total</td><td class="n" id="t-total"></td></tr></table></div></div>
 {% if side == 'sale' %}<p><label class="check"><input type="checkbox" name="sell_anyway" value="1"> Sell anyway if there isn't enough in stock</label></p>{% endif %}
 <p><label class="check"><input type="checkbox" name="amount_checked" value="1"> Amount checked (for an unusually large amount)</label></p>
 <button class="btn pri">Save</button> <a class="btn" href="{{ url_for('documents.index', side=side) }}">Cancel</a>

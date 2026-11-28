@@ -78,24 +78,17 @@ SYMBOLS = {"AUD": "$", "NZD": "$", "USD": "$", "CAD": "$", "FJD": "$", "SGD": "$
 
 
 def money(cents):
-    """Money in the company's currency ($1,234.50, €1,234.50, KSh 1,234.50)."""
-    c = (g.get("company") or {}).get("currency") or "AUD"
-    s = fmt_money(cents or 0)
-    sym = SYMBOLS.get(c, f"{c} ")
-    return s.replace("$", sym, 1)
+    """Money in the company's currency ($1,234.50, 1.234,50 €, KSh 1,234.50): riyeser/countries.py."""
+    from ..countries import request_money
+    return request_money(cents or 0)
 
 
 def show_date(v):
     """A date in the company's format: iso (2026-11-27), dmy (27/11/2026) or mdy (11/27/2026)."""
     if not v:
         return ""
-    v = str(v)[:10]
-    fmt = (g.get("company") or {}).get("date_format") or "iso"
-    try:
-        y, m, d = v.split("-")
-    except ValueError:
-        return v
-    return {"dmy": f"{d}/{m}/{y}", "mdy": f"{m}/{d}/{y}"}.get(fmt, v)
+    from ..countries import show_date as _show
+    return _show(str(v)[:10], g.get("company") or {})
 
 
 def _t(tid):

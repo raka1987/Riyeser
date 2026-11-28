@@ -5,10 +5,13 @@
 <form method="post">
 <div class="card"><h3>Company</h3><div class="fields">
 <div><label>Company name</label><input name="name" value="{{ company.name }}" required></div>
-<div><label>ABN</label><input name="abn" value="{{ company.abn or '' }}"></div>
+<div><label>{{ tl.tax_id }}</label><input name="abn" value="{{ company.abn or '' }}"></div>
 <div><label>Phone</label><input name="phone" value="{{ company.phone or '' }}"></div>
 <div><label>Email</label><input name="email" value="{{ company.email or '' }}"></div>
 <div class="wide"><label>Address</label><input name="address" value="{{ company.address or '' }}"></div></div></div>
+<div class="card"><h3>Country and tax</h3><p style="margin:0">{% if company.country %}<b>{{ country_name }}</b> · {% endif %}{{ tl.tax if tl.has_tax else 'No sales tax' }} · {{ tl.tax_id }} · {{ company.currency or 'AUD' }} · {{ tl.report }}{% if company.timezone %} · {{ company.timezone }}{% endif %}</p>
+<p class="muted" style="margin:6px 0 10px">{% if company.country_confirmed_at %}Confirmed by {{ company.country_confirmed_by }} on {{ company.country_confirmed_at[:10]|ddate }}. {% else %}No country chosen yet (Riyeser's Australian settings). {% endif %}Choose a country to fill in its tax, currency, dates and time zone; you check everything before it's saved.</p>
+<a class="btn" href="{{ url_for('core.country') }}">Change country or tax settings…</a></div>
 <div class="card"><h3>How customers pay you</h3><p class="muted">Printed as "How to pay" on invoices and statements.</p><div class="fields">
 <div><label for="bank_account_name">Account name</label><input id="bank_account_name" name="bank_account_name" value="{{ company.bank_account_name or '' }}"></div>
 <div><label for="bank_name">Bank</label><input id="bank_name" name="bank_name" value="{{ company.bank_name or '' }}"></div>
@@ -28,7 +31,7 @@
 <div><label>Financial year starts (month)</label><select name="fy_start_month">{% for m in range(1,13) %}<option value="{{ m }}" {{ 'selected' if company.fy_start_month==m }}>{{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1] }}</option>{% endfor %}</select></div>
 <div><label>Lock periods up to (inclusive)</label><input type="date" name="lock_date" value="{{ company.lock_date or '' }}"></div>
 <div><label>Default credit terms (days)</label><input type="number" name="default_terms_days" value="{{ company.default_terms_days }}"></div>
-<label class="check"><input type="checkbox" name="gst_registered" value="1" {{ 'checked' if company.gst_registered }}> Registered for GST</label>
+<label class="check"><input type="checkbox" name="gst_registered" value="1" {{ 'checked' if company.gst_registered }}> {{ tl.registered }}</label>
 <div><label>Invoice prefix</label><input name="invoice_prefix" value="{{ company.invoice_prefix }}"></div>
 <div><label>Next invoice no.</label><input type="number" name="next_invoice_no" value="{{ company.next_invoice_no }}"></div>
 <div><label>Bill prefix</label><input name="bill_prefix" value="{{ company.bill_prefix }}"></div>

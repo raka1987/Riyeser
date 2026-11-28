@@ -388,6 +388,8 @@ def migrate(db):
     _online_schema(db)  # online connections: what came in from websites, news to send back, the settings
     from .measure.store import ensure as _estimate_tables
     _estimate_tables(db)  # Riyeser Estimate: measurements, plans and trade templates
+    from .countries import ensure_schema as _country_settings
+    _country_settings(db)  # Country and tax settings (riyeser/countries.py); NULL country = Australian, as before
     db.commit()
 
 
@@ -518,17 +520,26 @@ ESTIMATE_APP = {"name": "Estimate", "title": "Estimate", "app": "Riyeser Estimat
 
 
 
-def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition=None):
+def init_db(company_name="My Company Pty Ltd", admin_password="admin", edition=None, tax_codes=None, tax_name=None):
+    """A new company file. tax_codes: [(code, name, rate, kind)] from the country the person confirmed (None:
+    Riyeser's Australian codes, as always); tax_name names the tax accounts (GST Collected, VAT Collected...)."""
+    from .countries import tax_code_id
     db = get_db()
     with current_app.open_resource("schema.sql") as f:
         db.executescript(f.read().decode("utf8"))
     db.execute("INSERT INTO company (id, name) VALUES (1, ?)", (company_name,))
-    for code, name, rate, kind in DEFAULT_TAX_CODES:
+    seed = list(tax_codes) if tax_codes is not None else list(DEFAULT_TAX_CODES)
+    if not any(c == "N-T" for c, *_ in seed):
+        seed.append(("N-T", "Not Reportable", 0.0, "not_reportable"))
+    for code, name, rate, kind in seed:
         db.execute("INSERT INTO tax_codes (code, name, rate, kind) VALUES (?,?,?,?)", (code, name, rate, kind))
     tc = {r["code"]: r["id"] for r in db.execute("SELECT id, code FROM tax_codes")}
+    role = {"GST": "standard", "CAP": "standard", "FRE": "free", "INP": "free"}
     for code, name, typ, is_bank, tax in DEFAULT_ACCOUNTS:
+        if tax_name and code in ("2-1310", "2-1330"):
+            name = name.replace("GST", tax_name if tax_name.lower() != "none" else "Tax")
         db.execute("INSERT INTO accounts (code, name, type, is_bank, tax_code_id) VALUES (?,?,?,?,?)",
-                   (code, name, typ, is_bank, tc[tax]))
+                   (code, name, typ, is_bank, tc[tax] if tax in tc else tax_code_id(db, role.get(tax, "none"))))
     acc = {r["code"]: r["id"] for r in db.execute("SELECT id, code FROM accounts")}
     for key, code in LINKED.items():
         db.execute("INSERT INTO linked_accounts (key, account_id) VALUES (?,?)", (key, acc[code]))

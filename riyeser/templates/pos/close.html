@@ -66,7 +66,7 @@ table.t td.r,table.t th.r{text-align:right}
           {% if tm and tm.tips %}<div><span>Tips added on the card machine</span><span class="n">{{ tm.tips|money }}</span></div>{% endif %}
           {% if tm and tm.cashout %}<div><span>Cash out on the card machine</span><span class="n">{{ tm.cashout|money }}</span></div>{% endif %}
           {% if tm and tm.surcharge %}<div><span>Card surcharges</span><span class="n">{{ tm.surcharge|money }}</span></div>{% endif %}
-          <div><span>Total sales inc GST</span><span class="n">{{ fig.total|money }}</span></div><div><span>GST collected</span><span class="n">{{ fig.gst|money }}</span></div></div>
+          <div><span>Total sales inc GST</span><span class="n">{{ fig.total|money }}</span></div><div><span>{{ tl.tax }} collected</span><span class="n">{{ fig.gst|money }}</span></div></div>
         {% if tm and (tm.schemes or tm.count) %}
         <div class="lbl" style="margin:16px 0 6px">Card terminal totals by card type</div>
         <div class="tscroll"><table class="t sch"><tr><th>Card</th><th class="r">Payments</th><th class="r">Charged</th><th class="r">Refunded</th><th class="r">Net</th></tr>

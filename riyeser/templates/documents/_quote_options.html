@@ -1,5 +1,5 @@
 {# A quote with options (Good / Better / Best): every option side by side (stacked on a phone); the customer chooses one. #}
-{% set taxn = company.tax_name or 'GST' %}
+{% set taxn = tl.tax %}
 <section class="card qopts" aria-labelledby="qopts-h">
 <h3 id="qopts-h">{{ qoptions|length }} options · the customer chooses one</h3>
 <p class="muted small qopts-sub">{% if qoptions|selectattr('chosen')|list %}The customer chose <b>{{ (qoptions|selectattr('chosen')|first).name }}</b>: its lines are on the quote, so the invoice and the job are for that option.{% else %}From {{ qoptions|map(attribute='total')|min|money }}. The quote's total is the recommended option's until the customer chooses.{% endif %}</p>

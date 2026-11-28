@@ -6,7 +6,7 @@ table{width:100%;border-collapse:collapse}td{padding:1px 0;vertical-align:top}td
 @media print{.np{display:none}@page{size:80mm auto;margin:0}}</style></head>
 <body onload="setTimeout(()=>window.print(),300)"><div class="r">
 <h1>{{ company.name }}</h1>
-<div class="c">{% if company.abn %}ABN {{ company.abn }}<br>{% endif %}<b>{{ 'Z-REPORT (TILL CLOSED)' if sh.status == 'closed' else 'X-READ (TILL STILL OPEN)' }}</b><br>
+<div class="c">{% if company.abn %}{{ tl.tax_id }} {{ company.abn }}<br>{% endif %}<b>{{ 'Z-REPORT (TILL CLOSED)' if sh.status == 'closed' else 'X-READ (TILL STILL OPEN)' }}</b><br>
 {{ sh.till_name }} · #{{ sh.id }}<br>Opened {{ sh.opened_at[:16] }} by {{ users.get(sh.opened_by, '') }}<br>
 {% if sh.status == 'closed' %}Closed {{ sh.closed_at[:16] }} by {{ users.get(sh.closed_by, '') }}{% else %}Printed {{ now[:16] }}{% endif %}</div><hr>
 <table>

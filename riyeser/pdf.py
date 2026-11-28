@@ -7,7 +7,16 @@ from pathlib import Path
 
 from fpdf import FPDF
 
-from .db import fmt_money
+import contextvars
+
+from . import countries as C
+
+_MONEY = contextvars.ContextVar("riyeser_pdf_money", default=None)
+
+
+def fmt_money(cents, blank_zero=False):
+    """Money in the currency and format of the company whose PDF is being made (set by _PDF)."""
+    return C.format_money(cents, _MONEY.get(), blank_zero)
 
 BRAND = (14, 107, 99)
 INK = (28, 36, 48)
@@ -55,6 +64,8 @@ class _PDF(FPDF):
         except ImportError:
             pass
         self.company = company
+        self.tl = C.labels(company)          # GST / VAT / Tax, ABN / TIN / VAT number (riyeser/countries.py)
+        _MONEY.set(C.money_format(company))
         self.set_auto_page_break(True, 18)
         self.set_margins(16, 16, 16)
         self.set_title(company["name"])
@@ -77,7 +88,7 @@ class _PDF(FPDF):
         self.cell(0, 6, _t(c["name"]), align="R", new_x="LMARGIN", new_y="NEXT")
         self.set_font(FONT, "", 9)
         self.set_text_color(*MUTED)
-        right = [c["address"] or "", f"ABN {c['abn']}" if c["abn"] else "", c["phone"] or "", c["email"] or ""]
+        right = [c["address"] or "", f"{self.tl['tax_id']} {c['abn']}" if c["abn"] else "", c["phone"] or "", c["email"] or ""]
         y = self.get_y()
         self.set_xy(16, y + 2)
         self.set_font(FONT, "B", 11)
@@ -105,7 +116,7 @@ class _PDF(FPDF):
         self.set_text_color(*INK)
         self.cell(0, 6, _t(name), new_x="LMARGIN", new_y="NEXT")
         self.set_font(FONT, "", 9.5)
-        for line in [address or "", f"ABN {abn}" if abn else ""]:
+        for line in [address or "", f"{self.tl['tax_id']} {abn}" if abn else ""]:
             if line:
                 self.multi_cell(90, 4.8, _t(line), new_x="LMARGIN", new_y="NEXT")
         self.ln(5)
@@ -171,13 +182,16 @@ DOC_TITLES = {("sale", "quote"): "Quote", ("sale", "order"): "Sales Order",
               ("purchase", "quote"): "Request for Quote", ("purchase", "order"): "Purchase Order"}
 
 
-def doc_title(doc):
+def doc_title(doc, company=None):
+    """Quote, Tax Invoice (Invoice where there's no sales tax), Adjustment Note (Credit Note outside Australia)..."""
+    tl = C.labels(company) if company is not None else None
     kind = doc["kind"] if "kind" in doc.keys() else "invoice"
     if kind == "credit":
-        return "Adjustment Note" if doc["side"] == "sale" else "Supplier Credit"
+        return (tl["credit"] if tl else "Adjustment Note") if doc["side"] == "sale" else "Supplier Credit"
     if kind == "payment_credit":
         return "Account Credit"
-    return DOC_TITLES.get((doc["side"], doc["status"]), "Tax Invoice" if doc["side"] == "sale" else "Bill")
+    return DOC_TITLES.get((doc["side"], doc["status"]),
+                          (tl["invoice"] if tl else "Tax Invoice") if doc["side"] == "sale" else "Bill")
 
 
 def document_pdf(db, doc_id) -> bytes:
@@ -186,12 +200,13 @@ def document_pdf(db, doc_id) -> bytes:
     lines = db.execute("SELECT * FROM document_lines WHERE document_id=? ORDER BY id", (doc_id,)).fetchall()
     pdf = _PDF(_company(db))
     pdf.add_page()
-    title = doc_title(doc) + (" (VOID)" if doc["status"] == "void" else "")
-    meta = [("Date", doc["date"])]
+    title = doc_title(doc, pdf.company) + (" (VOID)" if doc["status"] == "void" else "")
+    day = lambda v: C.show_date(v, pdf.company)   # the company's date format (ISO unless chosen)
+    meta = [("Date", day(doc["date"]))]
     if doc["due_date"] and doc["status"] not in ("quote",):
-        meta.append(("Due", doc["due_date"]))
+        meta.append(("Due", day(doc["due_date"])))
     if doc["status"] == "quote" and doc["valid_until"]:
-        meta.append(("Valid until", doc["valid_until"]))
+        meta.append(("Valid until", day(doc["valid_until"])))
     if doc["status"] == "quote" and doc["quote_status"] == "accepted":
         meta.append(("Accepted", (doc["quote_status_at"] or "")[:10]
                      + (f" by {doc['accepted_name']}" if doc["accepted_name"] else "")))
@@ -212,7 +227,7 @@ def document_pdf(db, doc_id) -> bytes:
              f"{l['discount_pct']:g}%" if l["discount_pct"] else "", fmt_money(l["tax_amount"]),
              fmt_money(l["net_amount"] + (l["tax_amount"] if incl else 0))] for l in lines]
     co = pdf.company
-    taxn = (co["tax_name"] if "tax_name" in co.keys() and co["tax_name"] else "GST")   # GST, VAT, sales tax (company setting)
+    taxn = pdf.tl["tax"]   # GST, VAT, Sales tax... (Country and tax settings; "Tax" where there's none)
     if opts:
         _options(pdf, opts, taxn, bool(doc["tax_inclusive"]))
         pdf.notes(doc["notes"])
@@ -439,14 +454,14 @@ def payslip_pdf(db, slip_id) -> bytes:
 def document_filename(db, doc_id):
     d = db.execute("SELECT d.*, c.name cname FROM documents d JOIN contacts c ON c.id=d.contact_id WHERE d.id=?",
                    (doc_id,)).fetchone()
-    return safe_name(f"{d['date']} {d['cname']} {doc_title(d)} {d['number']}") + ".pdf", d
+    return safe_name(f"{d['date']} {d['cname']} {doc_title(d, _company(db))} {d['number']}") + ".pdf", d
 
 
 def save_document_pdf(db, doc_id) -> Path:
     """Write the PDF into Documents\\Riyeser\\Accounting\\<Invoices|Quotes|Bills|...>\\<year>\\."""
     name, d = document_filename(db, doc_id)
     folder = {"Tax Invoice": "Invoices", "Quote": "Quotes", "Sales Order": "Sales Orders", "Bill": "Bills",
-              "Purchase Order": "Purchase Orders", "Request for Quote": "Quotes"}[doc_title(d)]
+              "Purchase Order": "Purchase Orders", "Request for Quote": "Quotes"}[doc_title(d)]   # Invoices either way
     out = docs_root() / "Accounting" / folder / d["date"][:4]
     out.mkdir(parents=True, exist_ok=True)
     path = out / name

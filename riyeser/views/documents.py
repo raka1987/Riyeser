@@ -332,7 +332,7 @@ def email(doc_id):
     db = get_db()
     doc = db.execute("SELECT d.*, c.name cname, c.email cemail FROM documents d JOIN contacts c ON c.id=d.contact_id"
                      " WHERE d.id=?", (doc_id,)).fetchone() or abort(404)
-    title = pdfmod.doc_title(doc)
+    title = pdfmod.doc_title(doc, g.company)
     to = (request.form.get("to") or doc["cemail"] or "").strip()
     if not to:
         raise ValueError(f"Add {doc['cname']}'s email address first (or type one in).")

@@ -285,7 +285,9 @@ def company():
         return _save_company()
     linked_rows = db.execute("SELECT l.key, l.account_id FROM linked_accounts l ORDER BY l.key").fetchall()
     from ..pdf import docs_root
-    return render_template("core/company.html", linked_rows=linked_rows, docs_root=docs_root(), **lookups(db))
+    from ..countries import name_of
+    return render_template("core/company.html", linked_rows=linked_rows, docs_root=docs_root(),
+                           country_name=name_of((g.company or {}).get("country")), **lookups(db))
 
 
 @admin_only
@@ -330,6 +332,38 @@ def _save_company():
     return redirect(url_for("core.company"))
 
 
+# ------------------------------------------------------------------ country and tax settings (riyeser/countries.py)
+@bp.route("/setup/country")
+def country():
+    """Pick the business's country (searchable list of every country, or Other / set up myself)."""
+    from .. import countries as C
+    co = g.company or {}
+    return render_template("core/country.html", countries=C.countries(), current=co.get("country"),
+                           current_name=C.name_of(co.get("country")), OTHER=C.OTHER)
+
+
+@bp.route("/setup/country/review", methods=["GET", "POST"])
+def country_review():
+    """What the chosen country fills in, every value editable. Nothing is saved until "Confirm these settings"."""
+    from .. import countries as C
+    if request.method == "POST":
+        return _confirm_country()
+    cc = (request.args.get("country") or "").strip().upper()
+    if not cc:
+        return redirect(url_for("core.country"))
+    return render_template("core/country_review.html", r=C.review(get_db(), cc), C=C)
+
+
+@admin_only
+@guarded
+def _confirm_country():
+    from .. import countries as C
+    added = C.confirm(get_db(), request.form, g.user["username"])
+    flash("Country and tax settings saved." + (f" Tax codes added: {', '.join(added)}." if added else "")
+          + " Past invoices and postings are unchanged.", "ok")
+    return redirect(url_for("core.country"))
+
+
 @bp.route("/setup/tax-codes", methods=["GET", "POST"])
 def tax_codes():
     db = get_db()
@@ -348,6 +382,8 @@ def _save_tax():
     if tid:
         db.execute("UPDATE tax_codes SET code=?, name=?, rate=?, kind=?, collected_account_id=?, paid_account_id=?"
                    " WHERE id=?", vals + (tid,))
+        if "active_shown" in f:   # untick "In use" to stop offering a code (what it was used on stays as it is)
+            db.execute("UPDATE tax_codes SET active=? WHERE id=?", (1 if f.get("active") else 0, tid))
     else:
         db.execute("INSERT INTO tax_codes (code, name, rate, kind, collected_account_id, paid_account_id)"
                    " VALUES (?,?,?,?,?,?)", vals)

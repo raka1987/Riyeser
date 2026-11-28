@@ -202,7 +202,8 @@ def area_of(endpoint, view_args, args, db):
     if endpoint in ("core.accounts", "core.save_account", "core.account_ledger", "core.journal_list", "core.journal_new",
                     "core.entry", "core.reverse"):
         return "accounts"
-    if endpoint in ("core.company", "core.tax_codes", "core.jobs", "core.budgets", "core.audit_log"):
+    if endpoint in ("core.company", "core.tax_codes", "core.jobs", "core.budgets", "core.audit_log", "core.country",
+                    "core.country_review"):
         return "setup"
     return None
 

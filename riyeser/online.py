@@ -128,7 +128,14 @@ def _put(db, key, value):
     db.execute("INSERT OR REPLACE INTO online_settings (key, value) VALUES (?,?)", (key, json.dumps(value)))
 
 
-def default_timezone():
+def default_timezone(db=None):
+    if db is not None:   # the time zone chosen under Country and tax settings comes first
+        try:
+            r = db.execute("SELECT timezone FROM company WHERE id=1").fetchone()
+            if r and r["timezone"] and tz_ok(r["timezone"]):
+                return r["timezone"]
+        except Exception:
+            pass
     from . import company_profile
     try:
         c = (company_profile.read().get("country") or "").strip().lower()
@@ -156,7 +163,7 @@ def settings(db):
         if s[k] not in opts:
             s[k] = DEFAULTS[k]
     if not s["timezone"] or not tz_ok(s["timezone"]):
-        s["timezone"] = default_timezone()
+        s["timezone"] = default_timezone(db)
     if not isinstance(s["hours"], dict):
         s["hours"] = default_hours(db)
     s["hours"] = {d: (s["hours"].get(d) or "") if parse_hours(s["hours"].get(d) or "") else "" for d in WEEKDAYS}
@@ -416,9 +423,8 @@ def _company(db):
 
 def _gst_code(db):
     c = _company(db)
-    code = "GST" if (c is None or c["gst_registered"]) else "FRE"
-    r = db.execute("SELECT id FROM tax_codes WHERE code=?", (code,)).fetchone()
-    return r["id"] if r else None
+    from .countries import tax_code_id   # GST, VAT... whatever this file's codes are called
+    return tax_code_id(db, "standard" if (c is None or c["gst_registered"]) else "free")
 
 
 def _rate(db, tax_code_id):
@@ -446,9 +452,9 @@ def _fees_account(db):
         db.execute("SELECT id FROM accounts WHERE type='expense' AND name LIKE '%Bank Fee%' ORDER BY code").fetchone()
     if r:
         return r["id"]
-    tc = db.execute("SELECT id FROM tax_codes WHERE code='FRE'").fetchone()
+    from .countries import tax_code_id
     return db.execute("INSERT INTO accounts (code, name, type, is_bank, tax_code_id) VALUES ('6-1100','Bank Fees',"
-                      "'expense',0,?)", (tc["id"] if tc else None,)).lastrowid
+                      "'expense',0,?)", (tax_code_id(db, "free"),)).lastrowid
 
 
 def _address(a):
@@ -809,8 +815,8 @@ def _order_lines(db, p, s):
             rate = l.get("tax_rate")
             tax = tax_default
             if isinstance(rate, (int, float)) and rate == 0:
-                r = db.execute("SELECT id FROM tax_codes WHERE code='FRE'").fetchone()
-                tax = r["id"] if r else tax_default
+                from .countries import tax_code_id
+                tax = tax_code_id(db, "free") or tax_default
             lines.append(dict(qty=float(qty), unit_price=web_price, tax_code_id=tax, account_id=_income_account(db),
                               description=f"{name} ({extra})" if extra else name))
             if sku:

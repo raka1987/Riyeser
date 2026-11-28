@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><title>Statement · {{ c.name }}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
 <body><div class="doc-print">
 <div class="hdr"><div><h1>Statement</h1><div class="muted">{{ st.start }} to {{ st.end }}</div></div>
-<div class="right"><b>{{ company.name }}</b><br>{{ company.address or '' }}<br>{% if company.abn %}ABN {{ company.abn }}{% endif %}</div></div>
+<div class="right"><b>{{ company.name }}</b><br>{{ company.address or '' }}<br>{% if company.abn %}{{ tl.tax_id }} {{ company.abn }}{% endif %}</div></div>
 <p><span class="muted">{{ st.label }}</span><br><b>{{ c.name }}</b><br>{{ c.address or '' }}</p>
 <form class="filters noprint"><div><label for="st-start">From</label><input id="st-start" type="date" name="start" value="{{ st.start }}"></div><div><label for="st-end">To</label><input id="st-end" type="date" name="end" value="{{ st.end }}"></div><div><button class="btn">Show</button></div></form>
 <table><tr><th>Date</th><th>Transaction</th><th>Reference</th><th class="n">Amount</th><th class="n">Balance</th></tr>

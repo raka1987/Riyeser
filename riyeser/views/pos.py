@@ -750,6 +750,9 @@ def _extras_account(db, key, code, name, kind, tax):
         aid = acct["id"]
     else:
         tc = db.execute("SELECT id FROM tax_codes WHERE code=?", (tax,)).fetchone()
+        if not tc:
+            from ..countries import tax_code_id   # a file whose codes aren't GST / N-T (VAT, ZER...)
+            tc = {"id": tax_code_id(db, "standard" if tax == "GST" else "none")}
         aid = db.execute("INSERT INTO accounts (code, name, type, is_bank, tax_code_id) VALUES (?,?,?,0,?)",
                          (code, name, kind, tc["id"] if tc else None)).lastrowid
     db.execute("INSERT INTO linked_accounts (key, account_id) VALUES (?,?)", (key, aid))

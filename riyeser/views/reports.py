@@ -36,10 +36,18 @@ BASIC_REPORTS = {"pnl", "gst", "aged_receivables", "sales_customer", "sales_item
 
 
 def _catalog():
+    cat = CATALOG
+    if g.company:
+        from ..countries import labels
+        tl = labels(g.company)
+        if tl["layout"] != "bas" or tl["report"] != "BAS / GST Summary":   # Country and tax settings (APP-023)
+            names = {"gst": tl["report"], "gst_detail": f"{tl['tax']} Detail by Tax Code"}
+            group = tl["report"] if tl["layout"] != "bas" else "GST / BAS"
+            cat = [(group if grp == "GST / BAS" else grp, [(k, names.get(k, t)) for k, t in items]) for grp, items in cat]
     if g.company and g.company["edition"] == "basic":
-        return [(grp, [(k, t) for k, t in items if k in BASIC_REPORTS]) for grp, items in CATALOG
+        return [(grp, [(k, t) for k, t in items if k in BASIC_REPORTS]) for grp, items in cat
                 if any(k in BASIC_REPORTS for k, _ in items)]
-    return CATALOG
+    return cat
 
 
 def R(cells, kind="row", link=None, indent=0):
@@ -264,6 +272,10 @@ def gst_figures(db, start, end):
 
 
 def rpt_gst(db, p):
+    from ..countries import labels
+    tl = labels(g.company or {})
+    if tl["layout"] != "bas":
+        return _tax_return_summary(db, p, tl)
     f = gst_figures(db, p["start"], p["end"])
     rows = [R(["GST on sales", ""], "header"),
             R(["G1  Total sales (including GST)", f["G1"]], indent=1),
@@ -280,6 +292,26 @@ def rpt_gst(db, p):
             R(["Net amount payable / (refundable) to ATO  (1A − 1B + W2)", f["A1"] - f["B1"] + f["W2"]], "grand")]
     return dict(columns=["BAS label", "Amount"], rows=rows, subtitle=f"{p['start']} to {p['end']} (accrual basis)",
                 filters=["start", "end"])
+
+
+def _tax_return_summary(db, p, tl):
+    """The GST / VAT return summary for a country other than Australia: sales and purchases with the tax on each,
+    and what's payable to (or refundable from) the tax office. Same figures as the BAS, without the BAS labels."""
+    f = gst_figures(db, p["start"], p["end"])
+    t = tl["tax"]
+    purchases = f["G10"] + f["G11"]
+    rows = [R([f"Sales", ""], "header"),
+            R([f"Total sales (including {t})", f["G1"]], indent=1),
+            R(["Zero-rated sales and exports", f["G2"]], indent=1),
+            R([f"Exempt and {t}-free sales", f["G3"]], indent=1),
+            R([f"{t} on sales", f["A1"]], "total"),
+            R(["Purchases", ""], "header"),
+            R([f"Total purchases (including {t})", purchases], indent=1),
+            R([f"{t} on purchases", f["B1"]], "total"),
+            R([f"Net {t} payable / (refundable) to {tl['office']}", f["A1"] - f["B1"]], "grand")]
+    return dict(columns=["Item", "Amount"], rows=rows, filters=["start", "end"],
+                subtitle=f"{p['start']} to {p['end']} (accrual basis). Check the figures with your accountant or "
+                         "tax office before you file.")
 
 
 def rpt_gst_detail(db, p):
