@@ -218,26 +218,32 @@ function check({ appData, ownDir = null, now = Date.now(), publicKey, write = tr
  * The local 90-day trial (a PC that has never had a trusted plan from Riyeser online). The first-run date is the
  * earlier of licence.json's trialStart and this program's own marker, so deleting one doesn't restart it, and the
  * clock can't be wound back to get days back. A PC that has never been online can't be fully protected.
- * -> { start, ends, daysLeft, active, linked }
+ * extra (trial-guard.js): { starts: [ms] from the registry, company files and Riyeser online's PC record (the earliest
+ * counts), latest: the latest time seen there, extraDays: a goodwill extension Riyeser online gave this PC }.
+ * -> { start, ends, daysLeft, active, linked, seen, clockBack }
  */
-function localTrial({ appData, ownDir = null, now = Date.now(), write = true, days = TRIAL_DAYS } = {}) {
+function localTrial({ appData, ownDir = null, now = Date.now(), write = true, days = TRIAL_DAYS, extra = null } = {}) {
   const lf = path.join(riyeserDir(appData), 'licence.json');
   const lic = readJson(lf) || {};
   const dirs = markerDirs(appData, ownDir);
   const before = readMarkers(dirs);
   const m = mergeMarkers(before);
   const fromFile = Date.parse(lic.trialStart);
-  const start = Math.min(...[Number.isFinite(fromFile) ? fromFile : null, m.firstRun, now].filter((x) => x != null));
+  const more = extra && Array.isArray(extra.starts) ? extra.starts.filter((x) => Number.isFinite(x)) : [];
+  const start = Math.min(...[Number.isFinite(fromFile) ? fromFile : null, m.firstRun, now, ...more].filter((x) => x != null));
   m.firstRun = start;
-  // the clock can't be wound back for more trial days: count from the latest time seen
-  const t = Math.max(now, m.clock ? m.clock.latest : 0);
+  // the clock can't be wound back for more trial days: count from the latest time seen (here, or in the registry)
+  const latestSeen = Math.max(m.clock ? m.clock.latest : 0, extra && Number.isFinite(extra.latest) ? extra.latest : 0);
+  const t = Math.max(now, latestSeen);
   if (!m.clock || m.clock.issued === '') m.clock = { issued: '', latest: t };
   if (write) {
     saveMarkers(dirs, before, m);
     if (!Number.isFinite(fromFile) || fromFile > start) { try { writeJson(lf, { ...lic, trialStart: new Date(start).toISOString() }); } catch { /* read-only: the markers keep it */ } }
   }
-  const ends = start + days * DAY;
-  return { start, ends, daysLeft: Math.max(0, Math.ceil((ends - t) / DAY)), active: t < ends, linked: m.linked };
+  const bonus = extra && Number.isInteger(extra.extraDays) && extra.extraDays > 0 ? Math.min(extra.extraDays, 365) : 0;
+  const ends = start + (days + bonus) * DAY;
+  return { start, ends, daysLeft: Math.max(0, Math.ceil((ends - t) / DAY)), active: t < ends, linked: m.linked, seen: t,
+    clockBack: now < latestSeen - CLOCK_SLACK_MS };
 }
 
 module.exports = { useKeyForTests, canonical, signedBytes, verifySignature, publicKeyObject, builtInKey, check, localTrial, moduleState, readDeviceId, writeDeviceId, deviceFile,

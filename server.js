@@ -57,6 +57,11 @@ const bad = msg => { throw new HttpError(400, msg); };
 const payLicence = require('./licence');
 app.locals.payrollLicence = payLicence.checker({ enforce: process.env.DESKTOP === '1' && !DEMO, ownDir: process.env.DATA_DIR || DATA_DIR });
 const licenceNow = () => app.locals.payrollLicence();
+// the free trial's stamp in the records file (trial-guard.js): once at start, then daily; never in demo mode
+if (process.env.DESKTOP === '1' && !DEMO) {
+  const stampTrial = () => payLicence.syncCompanyStamp(db, { ownDir: process.env.DATA_DIR || DATA_DIR });
+  stampTrial(); setInterval(stampTrial, 24 * 3600 * 1000).unref();
+}
 class LockedError extends HttpError { constructor(l) { super(402, l.message || payLicence.ENDED); this.locked = { home_url: l.homeUrl, price: l.price }; } }
 const needLicence = () => { const l = licenceNow(); if (!l.licensed) throw new LockedError(l); };
 const requireLicence = (req, res, next) => { try { needLicence(); next(); } catch (e) { next(e); } };

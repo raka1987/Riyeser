@@ -103,6 +103,8 @@ ipcMain.handle('riyser:openFile', async (e, file) => { if (!allowed(file)) retur
 ipcMain.handle('riyser:show', (e, file) => { if (allowed(file)) shell.showItemInFolder(file); });
 
 async function start() {
+  // the free trial's registry copy (HKCU\Software\Riyeser\Trial, trial-guard.js): Windows only, the app itself
+  try { require('./trial-guard').useWindowsDefaults(); } catch { /* the other places still count */ }
   const { server, app: web } = require('./server');
   const port = (await portFree(37421)) ? 37421 : 0;          // the same address each time if it's free
   await new Promise(ok => server.listen(port, '127.0.0.1', ok));  // only this computer can reach payroll

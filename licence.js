@@ -9,6 +9,7 @@
 const path = require('path');
 const os = require('os');
 const signed = require('./signed-licence');
+const guard = require('./trial-guard');
 
 const MODULE = 'payroll';
 const PRICE = 'US$25/month';   // keep in step with riyeser.com's price for Payroll (pricing v2: unchanged)
@@ -26,6 +27,37 @@ const REFRESH = (until) => `Open Riyeser Central and sign in to your Riyeser acc
 const REFRESH_LATE = 'Your plan couldn\'t be confirmed: open Riyeser Central and sign in to your Riyeser account to refresh it.';
 
 const appDataDir = (env = process.env) => env.APPDATA || path.join(os.homedir(), '.config');   // as Accounting and demo.js
+
+/**
+ * The shared free trial: the earliest date in licence.json, the markers and trial-guard.js's places (the registry, company
+ * files, Riyeser online's anonymous PC record), counted from the latest time seen; kept in all of them.
+ */
+function suiteTrial({ appData, ownDir, now, write = true }) {
+  const t = signed.localTrial({ appData, ownDir, now, write, extra: guard.extraFor(appData, 'suite') });
+  if (write) guard.record(appData, 'suite', { start: t.start, latest: t.seen, now });
+  return t;
+}
+
+/**
+ * Payroll's records file is open (the Windows program, not demo mode): an older trial stamp in it (records restored from
+ * an older install) is passed on to this PC, and the trial's start is stamped into it. Never throws.
+ */
+function syncCompanyStamp(db, { appData = appDataDir(), ownDir = null, now = Date.now(), demo = false } = {}) {
+  if (demo || !db) return null;
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS trial_stamp (program TEXT PRIMARY KEY, trial_start TEXT NOT NULL, stamped_at TEXT NOT NULL)');
+    const row = db.prepare('SELECT trial_start FROM trial_stamp WHERE program = ?').get('suite');
+    const stamp = row ? Date.parse(row.trial_start) : NaN;
+    if (Number.isFinite(stamp) && stamp >= guard.MIN_DATE) guard.record(appData, 'suite', { companyFile: stamp, now });
+    const t = suiteTrial({ appData, ownDir, now });
+    const start = guard.earliest([t.start, Number.isFinite(stamp) ? stamp : null]);
+    if (!(Number.isFinite(stamp) && stamp <= start)) {
+      db.prepare('INSERT INTO trial_stamp (program, trial_start, stamped_at) VALUES (?, ?, ?) ON CONFLICT(program) DO UPDATE SET trial_start = excluded.trial_start, stamped_at = excluded.stamped_at')
+        .run('suite', new Date(start).toISOString(), new Date(now).toISOString());
+    }
+    return start;
+  } catch { return null; }   // a read-only file: the other places still count
+}
 
 /**
  * Where Payroll's licence stands.
@@ -51,11 +83,11 @@ function status({ appData = appDataDir(), ownDir = null, now = Date.now(), publi
   if (ev.state === 'invalid') {
     if (ev.problem === 'unsigned') ev = { ...ev, message: REFRESH_LATE };
     // no licence: a PC that has had a real plan from Riyeser gets no new local trial
-    const t = signed.localTrial({ appData, ownDir, now });
+    const t = suiteTrial({ appData, ownDir, now });
     if (!t.linked && t.active) return out({ licensed: true, mode: 'trial', daysLeft: t.daysLeft, source: 'local', problem: ev.problem, message: ev.message });
     return out({ licensed: false, mode: 'ended', source: 'online', problem: ev.problem, message: `${ev.message} ${STILL} ${ADD}` });
   }
-  const t = signed.localTrial({ appData, ownDir, now });
+  const t = suiteTrial({ appData, ownDir, now });
   if (t.active) return out({ licensed: true, mode: 'trial', daysLeft: t.daysLeft, source: 'local', message: null });
   return out({ licensed: false, mode: 'ended', source: 'local', daysLeft: 0, message: ENDED });
 }
@@ -74,4 +106,4 @@ function checker({ enforce, appData = appDataDir(), ownDir = null, now = () => D
   };
 }
 
-module.exports = { status, checker, MODULE, PRICE, HOME_URL, ENDED, DAY, appDataDir };
+module.exports = { status, checker, MODULE, PRICE, HOME_URL, ENDED, DAY, appDataDir, suiteTrial, syncCompanyStamp };
