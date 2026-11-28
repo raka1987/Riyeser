@@ -7,6 +7,8 @@
 // supabase/functions api, licence, paypal, download), module/desk-assistant (desktop/ Central, Documents, PDF, Link Office;
 // website/team Riyeser Link; team-chat.sql billing and HQ) and module/payroll (Riyeser Payroll 2.4.0), and the latest
 // release riyeser-2026.11.27-60 on GitHub. `ev` is where that was checked: keep it when you change a row.
+// The POS 2.11.0 rows (variants, locations and transfers, tables, cash drawer, kitchen screen) are from main's branch
+// feat/pos-complete: publish them only together with that release.
 //
 // STATUS
 //   available  in the current release, for everyone with that program
@@ -67,9 +69,9 @@ export const FACTS = {
   payroll: { version: '2.4.0', runs: 'Windows 10 and 11 PCs (staff use the time clock on a shared PC)', net: 'Works offline. Emailing payslips needs the internet and your email settings.',
     account: 'Not needed for the 90-day trial. A free Riyeser account is needed to buy.', hw: 'A shared PC or tablet for the time clock.',
     countries: 'Built around Fiji\'s PAYE and FNPF: you enter the rates in Payroll rules. Australian (PAYG, super, Single Touch Payroll) and New Zealand (PAYE, KiwiSaver) payroll are not built in.' },
-  pos: { version: '2.10.1', runs: 'Windows 10 and 11 PCs (touch screens work)', net: 'Works offline. Online shop orders need the internet.',
+  pos: { version: '2.11.0', runs: 'Windows 10 and 11 PCs (touch screens work); the kitchen screen in any tablet or PC browser on the same network', net: 'Works offline. Online shop orders need the internet.',
     account: 'Not needed for the 90-day trial. A free Riyeser account is needed to buy.',
-    hw: 'Receipts print through Windows (80 mm layout); barcode scanners that type like a keyboard; your own EFTPOS machine, not linked. See the hardware page.',
+    hw: 'Receipts print through Windows (80 mm layout); barcode scanners that type like a keyboard; cash drawers that plug into an ESC/POS receipt printer (beta); your own EFTPOS machine, not linked. See the hardware page.',
     countries: 'Receipts use the company file\'s country settings: its tax name, tax number label and currency.' },
 };
 
@@ -181,7 +183,7 @@ export const FEATURES = [
   ['payroll', 'New Zealand payroll (PAYE, KiwiSaver, payday filing)', 'no', [], 'online', '—', 'module/payroll (no KiwiSaver)'],
   // POS
   ['pos', 'Retail setup: product tiles, barcode search, held sales', 'available', W, 'offline', 'POS', 'riyeser/templates/pos/front.html'],
-  ['pos', 'Restaurant setup: tables, kitchen dockets (printed) and takeaway', 'available', W, 'offline', 'POS', 'riyeser/templates/pos/front.html, docket.html'],
+  ['pos', 'Restaurant setup: tables, kitchen dockets (printed or on screen) and takeaway', 'available', W, 'offline', 'POS', 'riyeser/templates/pos/front.html, docket.html'],
   ['pos', 'Cash with change, card recorded with your own EFTPOS machine (not linked)', 'available', W, 'offline', 'POS', 'riyeser/terminals/manual.py'],
   ['pos', 'Practice card terminal on screen for training and demos (no money moves)', 'available', W, 'offline', 'POS', 'riyeser/terminals/practice.py'],
   ['pos', 'Linked card terminals (Windcave, Stripe Terminal)', 'planned', [], 'online', 'POS', 'riyeser/terminals/windcave.py, stripe_terminal.py ("coming soon", disabled)'],
@@ -189,11 +191,11 @@ export const FEATURES = [
   ['pos', 'Receipts and tax follow the company file\'s country settings (tax name, tax number label, currency)', 'available', W, 'offline', 'POS', 'riyeser/countries.py, countries.json (main, APP-023)'],
   ['pos', 'Every sale lands in your books with stock and GST updated', 'available', W, 'offline', 'POS', 'riyeser/views/pos.py'],
   ['pos', 'Split a payment between card and cash', 'available', W, 'offline', 'POS', 'riyeser/templates/pos/front.html; apps QA register'],
-  ['pos', 'Product variants (size or colour)', 'no', [], 'offline', '—', 'apps QA register'],
-  ['pos', 'Stock transfers between locations', 'no', [], 'offline', '—', 'apps QA register'],
-  ['pos', 'Moving an order to another table, or splitting a bill between guests', 'no', [], 'offline', '—', 'apps QA register'],
-  ['pos', 'Opening the cash drawer automatically', 'no', [], 'offline', '—', 'riyeser/templates/pos/front.html sends riyeser:open-drawer, nothing handles it'],
-  ['pos', 'Kitchen display screen', 'no', [], 'offline', '—', 'kitchen dockets print only (riyeser/templates/pos/docket.html)'],
+  ['pos', 'Product variants (size, colour and more): up to 3 options, each with its own SKU, barcode, price, cost and stock; quick picker at the till; CSV import and export', 'available', W, 'offline', 'POS', 'main feat/pos-complete: riyeser/views/variants.py, tests/test_pos_complete.py'],
+  ['pos', 'Stock locations and transfers (sent, in transit, received in parts), stocktake and reorder per location', 'available', W, 'offline', 'POS', 'main feat/pos-complete: riyeser/locations.py, riyeser/views/stock_locations.py'],
+  ['pos', 'Move an order or some items to another table, merge tables, and split the bill evenly, by item or by amount', 'available', W, 'offline', 'POS', 'main feat/pos-complete: riyeser/views/pos_tables.py'],
+  ['pos', 'Cash drawer opens by itself (drawers that plug into an ESC/POS receipt printer)', 'beta', W, 'offline', 'POS', 'main feat/pos-complete: riyeser/drawer.py (tested with a fake printer; no tested model list yet)'],
+  ['pos', 'Kitchen display screen on a tablet or PC on the same network (no prices shown), alongside printed dockets', 'available', ['win', 'web'], 'lan', 'POS', 'main feat/pos-complete: riyeser/views/kds.py, templates/pos/kds.html'],
 ];
 
 // ---------- Accounting Basics vs Plus (both columns from the code; nothing guessed) ----------
@@ -268,8 +270,8 @@ export const FAQ = {
   payroll: [['Which countries is it for?', 'It is built around Fiji\'s PAYE and FNPF, with the rates you enter in Payroll rules. Australian and New Zealand payroll (PAYG, super, STP, KiwiSaver) are not built in. Check every rate against the current rules before you pay staff.'],
     ['Is it the same as payroll in Accounting Plus?', 'No. Riyeser Payroll is its own program and its own price. Pay runs can be brought into Riyeser Accounting. It is not part of the Shop bundle; it is in the Office and Business bundles.']],
   pos: [['Does it connect to my EFTPOS machine?', 'Not yet. Today you key the amount into your own card machine and tap Approved or Declined on the till. A practice terminal is built in for training. Linked terminals (Windcave, Stripe) are planned.'],
-    ['Retail or restaurant?', 'Both, chosen in setup: retail has product tiles, barcodes and held sales; restaurant adds tables, kitchen dockets and takeaway.'],
-    ['Which hardware works?', 'Receipts print through Windows on an 80 mm layout, and barcode scanners that type like a keyboard can be used. We have not yet published a list of tested printers, scanners or cash drawers, and the cash drawer does not open by itself.']],
+    ['Retail or restaurant?', 'Both, chosen in setup: retail has product tiles, barcodes, product variants and held sales; restaurant adds tables (move, merge and split the bill), kitchen dockets, a kitchen screen and takeaway.'],
+    ['Which hardware works?', 'Receipts print through Windows on an 80 mm layout, and barcode scanners that type like a keyboard can be used. The cash drawer can open by itself if it plugs into an ESC/POS receipt printer (beta). We have not yet published a list of tested printers, scanners or cash drawers.']],
 };
 
 // ---------- hardware: what the code supports, and what has been tested on real devices ----------
@@ -277,11 +279,11 @@ export const FAQ = {
 export const HARDWARE = [
   ['Desk phones (SIP)', 'Automatic set-up for Yealink, Grandstream, Snom and Polycom on the office network; other SIP phones by hand', 'Riyeser Link Office', 'Not yet verified: no tested model list yet'],
   ['Phone apps (softphones)', 'Linphone and other SIP apps through the Riyeser relay (TLS)', 'Riyeser Link Office', 'Not yet verified'],
-  ['Receipt printers', 'Printed through Windows on an 80 mm receipt layout (no direct printer commands)', 'Riyeser POS', 'Not yet verified: no tested model list yet'],
+  ['Receipt printers', 'Printed through Windows on an 80 mm receipt layout, or sent straight to an ESC/POS printer installed in Windows (optional)', 'Riyeser POS', 'Not yet verified: no tested model list yet'],
   ['Kitchen printers', 'Kitchen dockets print through Windows on an 80 mm layout', 'Riyeser POS (restaurant)', 'Not yet verified'],
   ['Barcode scanners', 'Scanners that type like a keyboard into the till\'s search', 'Riyeser POS', 'Not yet verified'],
-  ['Cash drawers', 'Not supported: the drawer does not open by itself', 'Riyeser POS', '—'],
-  ['Kitchen display screens', 'Not supported (dockets print instead)', 'Riyeser POS', '—'],
+  ['Cash drawers', 'Beta: drawers that plug into an ESC/POS receipt printer open on cash sales, cash refunds and No sale. A drawer with its own USB cable is not supported', 'Riyeser POS', 'Not yet verified: no tested model list yet'],
+  ['Kitchen display screens', 'Any tablet or PC web browser on the same network as the till PC, paired with a code', 'Riyeser POS (restaurant)', 'Not yet verified model by model'],
   ['EFTPOS / card terminals', 'Your own machine, not linked: key in the amount, tap Approved or Declined. Linked Windcave and Stripe terminals are planned', 'Riyeser POS', 'No linked terminal yet'],
   ['Scanners and office printers', 'Windows\' own scan window, or scan-to-folder from HP, Canon, Brother, Ricoh, Kyocera and Epson printers (set-up steps)', 'Riyeser Documents', 'Not yet verified model by model'],
   ['Touch screens and tablets', 'Windows touch screens on the till; phone or tablet browser for on-site sign-off', 'Riyeser POS, Bookings', 'Not yet verified'],
