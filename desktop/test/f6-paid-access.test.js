@@ -4,8 +4,8 @@
 // Checked three ways: Central's own view (licence.onlinePlan), Riyeser Link Office (callsLicence), and Riyeser
 // Accounting's view of the same licence.json (riyeser/licence.py + signed_licence.py from main, run with Python).
 //
-// test/fixtures/accounting-main/riyeser holds byte-for-byte copies of main's riyeser/licence.py, signed_licence.py and
-// ed25519.py, so this runs in CI too. The last test checks the copies still match main when main is available.
+// test/fixtures/accounting-main/riyeser holds byte-for-byte copies of main's riyeser/licence.py, signed_licence.py,
+// ed25519.py and trial_guard.py, so this runs in CI too. The last test checks the copies still match main when main is available.
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs'); const os = require('os'); const path = require('path'); const crypto = require('crypto');
@@ -177,7 +177,7 @@ test('F6: offline after linking: licensed for the 30 days the signed licence all
 
 test('F6: the Accounting copies used here are main\'s riyeser/*.py byte for byte (when main is available)', (t) => {
   const root = path.join(__dirname, '..', '..');
-  for (const f of ['licence', 'signed_licence', 'ed25519']) {
+  for (const f of ['licence', 'signed_licence', 'ed25519', 'trial_guard']) {
     let mainCopy = null;
     for (const ref of ['origin/main', 'main']) {
       const r = spawnSync('git', ['show', `${ref}:riyeser/${f}.py`], { cwd: root, encoding: 'utf8' });
