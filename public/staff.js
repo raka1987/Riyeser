@@ -1248,7 +1248,7 @@ async function runModal(id) {
   drawSlips();
   $('#print-all', m.el).onclick = () => printHTML(payslips.map(p => payslipHTML(p, run)).join(''));
   if ($('#pdf-all', m.el)) $('#pdf-all', m.el).onclick = () => savePdf(`Payslips paid ${run.pay_date} (${run.period_start} to ${run.period_end})`, payslips.map(p => payslipHTML(p, run)).join(''));
-  if ($('#del-run', m.el)) $('#del-run', m.el).onclick = async () => { if (confirm('Void this pay run? It and its payslips are deleted, so these dates can be paid again.')) { await api(`/api/staff/payroll/runs/${id}`, { method: 'DELETE' }); m.close(); renderPayroll(); } };
+  if ($('#del-run', m.el)) $('#del-run', m.el).onclick = async () => { if (confirm(/^Final pay:/.test(run.note || '') ? 'Void this final pay? It and its payslip are deleted, the person is active again and the annual leave paid out goes back on their balance, so you can do the final pay again.' : 'Void this pay run? It and its payslips are deleted, so these dates can be paid again.')) { await api(`/api/staff/payroll/runs/${id}`, { method: 'DELETE' }); m.close(); renderPayroll(); } };
 }
 async function renderMyPayslips() {
   const rows = await api('/api/staff/payslips/mine');

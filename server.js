@@ -979,10 +979,27 @@ app.get('/api/staff/payroll/runs/:id', requireArea('payroll'), wrap((req, res) =
     .map(p => ({ ...p, ytd: ytdOf(p.user_id, run.period_end, null, run.id) }));
   res.json({ run, payslips, roster: rosterVsPaid(run.period_start, run.period_end, slipPeople(payslips), !!run.extra_reason) });
 }));
-app.delete('/api/staff/payroll/runs/:id', requireArea('payroll', 3), (req, res) => { const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(+req.params.id);
-  if (r) db.prepare('INSERT INTO payroll_runs_voided(run_id, period_start, period_end, pay_date, total_gross, total_net, total_fnpf_employer, employees, extra_reason, note, created_by, voided_by, voided_by_name, voided_at) VALUES(?,?,?,?,?,?,?,(SELECT COUNT(*) FROM payslips WHERE run_id = ?),?,?,?,?,?,?)')
-    .run(r.id, r.period_start, r.period_end, r.pay_date, r.total_gross, r.total_net, r.total_fnpf_employer, r.id, r.extra_reason || '', r.note || '', r.created_by, req.user.id, req.user.name, new Date().toISOString());
-  db.prepare('DELETE FROM payroll_runs WHERE id=?').run(+req.params.id); removePayrunFile(r); if (r) audit(req, 'Deleted a pay run', `Paid ${r.pay_date} (${r.period_start} to ${r.period_end})`); res.json({ ok: true }); });
+// Voiding a final pay (Finish employment) undoes the finishing too: the person is active again and the annual leave that
+// was paid out is back on their balance, so the final pay can be redone without losing that leave (QA: APP-PAY-08)
+app.delete('/api/staff/payroll/runs/:id', requireArea('payroll', 3), wrap((req, res) => {
+  const r = db.prepare('SELECT * FROM payroll_runs WHERE id = ?').get(+req.params.id);
+  if (!r) return res.json({ ok: true });
+  const finals = /^Final pay:/.test(r.note || '') ? db.prepare('SELECT DISTINCT user_id FROM payslips WHERE run_id = ?').all(r.id).map(x => x.user_id) : [];
+  db.exec('BEGIN');
+  try {
+    db.prepare('INSERT INTO payroll_runs_voided(run_id, period_start, period_end, pay_date, total_gross, total_net, total_fnpf_employer, employees, extra_reason, note, created_by, voided_by, voided_by_name, voided_at) VALUES(?,?,?,?,?,?,?,(SELECT COUNT(*) FROM payslips WHERE run_id = ?),?,?,?,?,?,?)')
+      .run(r.id, r.period_start, r.period_end, r.pay_date, r.total_gross, r.total_net, r.total_fnpf_employer, r.id, r.extra_reason || '', r.note || '', r.created_by, req.user.id, req.user.name, new Date().toISOString());
+    for (const uid of finals) {
+      db.prepare("DELETE FROM staff_leave WHERE user_id = ? AND paid_in_run = ? AND paid = 0 AND notes = 'Paid out on finishing'").run(uid, r.id);
+      db.prepare("UPDATE users SET active = 1, end_date = '' WHERE id = ? AND active = 0 AND end_date = ?").run(uid, r.period_end);
+    }
+    db.prepare('DELETE FROM payroll_runs WHERE id=?').run(r.id);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  removePayrunFile(r);
+  audit(req, 'Deleted a pay run', `Paid ${r.pay_date} (${r.period_start} to ${r.period_end})${finals.length ? ` · ${r.note} (voided: active again, leave paid out put back)` : ''}`);
+  res.json({ ok: true, ...(finals.length && { reinstated: finals.length }) });
+}));
 // Year to date (calendar / tax year of the period end): finalised payslips in that year up to this one (+ this draft),
 // and leave taken this year against the yearly entitlement
 function ytdOf(userId, periodEnd, draft = null, runId = null) {
