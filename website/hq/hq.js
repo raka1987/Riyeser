@@ -9,6 +9,11 @@
   const CFG = window.RIYESER_TEAM || {};
   const CONFIGURED = !!(CFG.supabaseUrl && CFG.supabaseKey);
   const DEMO = new URLSearchParams(location.search).has('demo') || !CONFIGURED;
+  // HQ V2 (a prototype of the new layout, Phase 0): only with ?v2=1 (remembered on this browser; ?v2=0 switches it off).
+  // Without it nothing below changes: hq-v2.js and hq-v2.css aren't even loaded.
+  const V2 = (() => { const q = new URLSearchParams(location.search).get('v2');
+    try { if (q === '1') localStorage.setItem('hq.v2', '1'); else if (q === '0') localStorage.removeItem('hq.v2'); return localStorage.getItem('hq.v2') === '1'; } catch { return q === '1'; } })();
+  const SELF = (document.currentScript && document.currentScript.src) || '';
   const REPO = 'raka1987/Riyeser';
   const $app = document.getElementById('app');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -956,6 +961,7 @@
       }
       await loadMe();
       if (!S.me || !S.me.active) return blocked('<h1>Not Riyeser HQ staff</h1><p>This account isn\'t on the Riyeser HQ team. Ask a Riyeser HQ owner to add you.</p>');
+      if (V2 && !window.RiyeserHQv2) await loadV2();
       shell();
     } catch (err) { blocked(`<div class="err">${esc(plain(err))}</div>`); }
   }
@@ -995,6 +1001,8 @@
       return `<div class="mmg"><div class="mmh">${icon} ${name}</div>${v.map((k) => item(k, label(k), '')).join('')}</div>`; }).join('');
   }
   function shell() {
+    // the V2 layout (only with ?v2=1); if it fails to start, the current layout below is used instead
+    if (V2 && window.RiyeserHQv2) { try { S.v2 = window.RiyeserHQv2.mount(v2ctx()); return; } catch (err) { S.v2 = null; console.error('HQ V2:', err); document.body.classList.remove('hqv2'); } }
     if (!TABS().some((x) => x[0] === S.tab)) S.tab = TABS()[0][0];
     const ini = initials(S.me.name);
     $app.innerHTML = `${DEMO ? `<div class="demo">Demo with sample data. Nothing here is real. <label>Acting as <select id="demoAs" aria-label="Demo staff member">${api.staffList().map((s) => `<option value="${s.user_id}"${s.display_name === S.me.name ? ' selected' : ''}>${esc(s.display_name)} (${esc(roleName(s.role))})</option>`).join('')}</select></label></div>` : ''}
@@ -1033,6 +1041,7 @@
   function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
   const showErr = (err) => { const m = document.getElementById('main'); if (m) m.innerHTML = missing(err) ? SWITCH_ON : `<div class="err">${esc(plain(err))}</div>`; };
   function route() {
+    if (S.v2) return S.v2.route();
     if (!document.getElementById('main')) return;
     const h = decodeURIComponent(location.hash.replace(/^#\/?/, ''));
     const mark = (k) => { const t = $app.querySelector('#mbarT'); if (t) t.textContent = (TABS().find((x) => x[0] === k) || [k, k])[1];
@@ -2935,6 +2944,19 @@
     csvFile('history', ['When (UTC)', 'Who', 'Action', 'What', 'Business', 'Ticket', 'Details'], rows.map((h) => [h.at, h.who, h.action, HIST_ACTS[h.action] || '',
       h.business || (S.companies.find((c) => c.id === (h.workspace_id || (h.details || {}).workspace_id)) || {}).name || '', h.ticket || (h.details || {}).ticket || '', JSON.stringify(h.details || {})]));
   }
+
+  // ------------------------------------------------------------------ HQ V2 (prototype, only with ?v2=1)
+  // Loads hq-v2.js and hq-v2.css next to this file (same version stamp). If they can't load, the current layout is used.
+  function loadV2() {
+    const url = (f) => { try { const u = new URL(f, SELF || location.href); u.search = SELF ? new URL(SELF).search : ''; return u.href; } catch { return f; } };
+    const css = document.createElement('link'); css.rel = 'stylesheet'; css.href = url('hq-v2.css'); document.head.appendChild(css);
+    return new Promise((ok) => { const js = document.createElement('script'); js.src = url('hq-v2.js'); js.onload = ok; js.onerror = ok; document.head.appendChild(js); });
+  }
+  // What the V2 layout may use: the same api, permissions and pages as the current HQ (nothing extra on the server).
+  const v2ctx = () => ({ api, S, can, DEMO, esc, num, money, day, ago, plain, missing, main, go, closePanel, badges, loadMe, roleName, initials, ROLES, PERMS, ROLE_PERMS,
+    MODULES, PRODUCTS, ghRun, whenFull, tabs: TABS, views: VIEWS(), companyPage, openCompany, permsOf,
+    signOut: async () => { await api.signOut(); S.v2 = null; gate(); },
+    remount: () => { S.v2 = null; shell(); } });
 
   window.RiyeserHQ = { state: S, demo: DEMO, openCompany };
   start();
