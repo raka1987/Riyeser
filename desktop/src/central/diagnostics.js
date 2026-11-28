@@ -15,7 +15,7 @@
 //     (%APPDATA%\Riyeser Central\logs\install.log: program, version, exit codes) are sent.
 // Never collected: invoices, payroll, customers, sales, bookings, files, chat messages, folder paths or the PC's user name.
 // Before anything is shown or sent, emails are masked (x***@domain), long numbers (bank, tax and card numbers) are
-// replaced, and anything after "password" (or "secret", "token", "api key") on a line is removed. Riyeser's database
+// replaced, folder paths are removed, and anything after "password" (or "secret", "token", "api key") on a line is removed. Riyeser's database
 // scrubs it again when it's saved. The person sees exactly what will be sent (preview) before sending it.
 const path = require('path');
 const fs = require('fs');
@@ -44,6 +44,9 @@ function scrub(text) {
   return String(text == null ? '' : text)
     .replace(/([A-Za-z0-9])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g, '$1***@$2')
     .replace(/\b(password|passwd|pwd|secret|token|api[_ -]?key)\b.*$/gim, '$1 [removed]')
+    // QA (DOC-SUP-02): folder paths (they hold the PC's user name and file names): C:\…, \\server\share\…, /Users/…, /home/…
+    .replace(/(?:\b[A-Za-z]:|\\\\[^\\\s]+)\\(?:[^\\\r\n"'<>|]*\\)*[^\\\s"'<>|]*/g, '[folder removed]')
+    .replace(/(?:\/(?:Users|home|mnt|media|Volumes))\/[^\s"'<>|]*/g, '[folder removed]')
     .replace(/\b\d{4}(?:[ -]\d{4}){3}\b/g, '[number removed]')
     .replace(/\b\d{2,3}(?:[ -]\d{3}){2,}\b/g, '[number removed]')
     .replace(/\d{7,}/g, '[number removed]');
