@@ -1,11 +1,43 @@
 // Update checks for Riyeser Central: compares the versions installed on this PC with the latest public release
 // (made by the "Publish Riyeser release" button) and installs newer ones in the background.
-const RELEASE_API = 'https://api.github.com/repos/raka1987/Riyeser/releases/latest';
+// Releases are published in the public downloads repository (docs/GOING-PRIVATE.md on main): the one place to change
+// its name. OLD_REPO is the code repository, where releases were published before: asked only when the downloads
+// repository has none yet (404 or an empty list), so Central works before and after the switch.
+const DOWNLOADS_REPO = 'raka1987/riyeser-downloads';
+const OLD_REPO = 'raka1987/Riyeser';
+const api = (repo) => `https://api.github.com/repos/${repo}/releases`;
+const RELEASE_API = `${api(DOWNLOADS_REPO)}/latest`;
 // Admin panel → Updates → channel: "Early access" also takes a release marked pre-release (the newest of the list).
-const RELEASES_API = 'https://api.github.com/repos/raka1987/Riyeser/releases?per_page=15';
+const RELEASES_API = `${api(DOWNLOADS_REPO)}?per_page=15`;
+const OLD_RELEASE_API = `${api(OLD_REPO)}/latest`;
+const OLD_RELEASES_API = `${api(OLD_REPO)}?per_page=15`;
 const CHANNELS = ['stable', 'early'];
-const ALLOWED_DOWNLOAD = /^https:\/\/(github\.com\/raka1987\/Riyeser\/releases\/download\/|objects\.githubusercontent\.com\/|release-assets\.githubusercontent\.com\/)/i;
+const esc = (t) => t.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+const ALLOWED_DOWNLOAD = new RegExp(`^https://(github\\.com/(${esc(DOWNLOADS_REPO)}|${esc(OLD_REPO)})/releases/download/|objects\\.githubusercontent\\.com/|release-assets\\.githubusercontent\\.com/)`, 'i');
 
+/** Where a channel's release is looked up, in order: the downloads repository, then the old code repository. */
+function releaseApis(channel = 'stable') {
+  return channel === 'early' ? [RELEASES_API, OLD_RELEASES_API] : [RELEASE_API, OLD_RELEASE_API];
+}
+
+/**
+ * The release a channel follows. get(url) answers like fetch ({ ok, status, json() }). The downloads repository first;
+ * the old code repository only when that has no release yet (404, or no release in the list). If neither answers,
+ * the first error is given. -> the release, or null when no release is published anywhere.
+ */
+async function findRelease(channel, get) {
+  let firstError = null;
+  for (const url of releaseApis(channel)) {
+    let res;
+    try { res = await get(url); } catch (e) { firstError = firstError || e; continue; }
+    if (res.status === 404) continue;
+    if (!res.ok) { firstError = firstError || new Error(`Couldn't check for updates (${res.status}). Try again later.`); continue; }
+    const release = channel === 'early' ? pickRelease(await res.json(), 'early') : await res.json();
+    if (release && release.tag_name) return release;
+  }
+  if (firstError) throw firstError;
+  return null;
+}
 // Each program: its name in Windows' installed-apps list, the release file, and how to install it silently.
 const PRODUCTS = [
   { id: 'central', display: 'Riyeser Central', also: ['Riyser Central'], asset: 'RiyeserCentral-Setup.exe', oldAsset: 'RiyserCentral-Setup.exe', args: ['/S', '--updated'], self: true },
@@ -154,5 +186,5 @@ function availableUpdates(installed, latest) {
       file: latest.products[p.id].name || p.asset, digest: latest.products[p.id].digest || null }));
 }
 
-module.exports = { RELEASE_API, RELEASES_API, CHANNELS, pickRelease, uninstallFromRegistry, PRODUCTS, newer, latestFromRelease, installedFromRegistry, availableUpdates, ALLOWED_DOWNLOAD,
+module.exports = { DOWNLOADS_REPO, OLD_REPO, RELEASE_API, RELEASES_API, OLD_RELEASE_API, OLD_RELEASES_API, releaseApis, findRelease, CHANNELS, pickRelease, uninstallFromRegistry, PRODUCTS, newer, latestFromRelease, installedFromRegistry, availableUpdates, ALLOWED_DOWNLOAD,
   versionInFileName, withFoundPrograms, findPortable };

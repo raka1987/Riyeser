@@ -61,7 +61,7 @@ const check = (ok, what) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (
     pg.on('pageerror', (e) => errs.push('/download/central.html: ' + e.message));
     await pg.addInitScript(() => { window.__csp = []; document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(e.violatedDirective + ' ' + (e.blockedURI || 'inline'))); });
     await pg.route('https://*.supabase.co/functions/v1/download/**', (r) => { asked.push(r.request().url()); return r.abort(); });
-    await pg.route('https://github.com/raka1987/Riyeser/releases/**', (r) => r.fulfill({ status: 200, contentType: 'application/octet-stream', headers: { 'content-disposition': 'attachment; filename=setup.exe' }, body: 'MZ' }));
+    await pg.route('https://github.com/raka1987/riyeser-downloads/releases/**', (r) => r.fulfill({ status: 200, contentType: 'application/octet-stream', headers: { 'content-disposition': 'attachment; filename=setup.exe' }, body: 'MZ' }));
     await pg.route('https://api.github.com/**', (r) => r.abort());
     await pg.goto(BASE + '/download/central.html', { waitUntil: 'commit' }); await pg.waitForSelector('#dlgo'); await pg.waitForTimeout(800);
     const r = await pg.evaluate(() => window.__csp);

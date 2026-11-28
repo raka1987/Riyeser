@@ -614,7 +614,7 @@ test('Riyeser Central update check: compares installed versions with the latest 
     tag_name: 'riyser-2026.11.22-1', name: 'Riyeser for Windows', published_at: '2026-11-22T11:20:00Z',
     body: '### In this release\n- Riyeser Central 1.2.0\n- Riyeser Desk Assistant 0.22.0\n- Riyeser PDF 0.23.0\n- Riyeser Accounting 1.0.0\n',
     assets: ['RiyeserCentral-Setup.exe', 'RiyeserDeskAssistant-Setup.exe', 'RiyeserPDF-Setup.exe', 'RiyeserAccounting-Setup.exe']
-      .map((n) => ({ name: n, size: 10, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/riyser-2026.11.22-1/${n}` })),
+      .map((n) => ({ name: n, size: 10, browser_download_url: `https://github.com/raka1987/riyeser-downloads/releases/download/riyser-2026.11.22-1/${n}` })),
   };
   const latest = u.latestFromRelease(release);
   assert.equal(latest.products.pdf.version, '0.23.0');
@@ -644,7 +644,7 @@ test('Riyeser Central offers Riyeser Payroll in place of the old "Riyser" hub', 
     + 'HKEY_CURRENT_USER\\x\\b\r\n    DisplayName    REG_SZ    Riyser Central 1.1.0\r\n    DisplayVersion    REG_SZ    1.1.0\r\n';
   const installed = u.installedFromRegistry(reg);
   assert.deepEqual(installed, { payroll: '1.2.0', central: '1.1.0' });
-  const rel = { tag_name: 't', body: '- Riyeser Payroll 2.1.1\n- Riyeser Central 1.3.2', assets: ['RiyeserPayroll-Setup.exe', 'RiyeserCentral-Setup.exe'].map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 })) };
+  const rel = { tag_name: 't', body: '- Riyeser Payroll 2.1.1\n- Riyeser Central 1.3.2', assets: ['RiyeserPayroll-Setup.exe', 'RiyeserCentral-Setup.exe'].map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/riyeser-downloads/releases/download/t/${n}`, size: 1 })) };
   assert.deepEqual(u.availableUpdates(installed, u.latestFromRelease(rel)).map((x) => `${x.id} ${x.from}->${x.to}`).sort(), ['central 1.1.0->1.3.2', 'payroll 1.2.0->2.1.1']);
 });
 
@@ -653,7 +653,7 @@ test('Riyeser Central: an old copy listed next to the new one does not keep aski
   const reg = 'HKEY_CURRENT_USER\\x\\a\r\n    DisplayName    REG_SZ    Riyeser Payroll 2.1.1\r\n    DisplayVersion    REG_SZ    2.1.1\r\n'
     + 'HKEY_CURRENT_USER\\x\\b\r\n    DisplayName    REG_SZ    Riyser 1.2.0\r\n    DisplayVersion    REG_SZ    1.2.0\r\n';
   assert.deepEqual(u.installedFromRegistry(reg), { payroll: '2.1.1' });
-  const rel = { tag_name: 't', body: '- Riyeser Payroll 2.1.1', assets: [{ name: 'RiyeserPayroll-Setup.exe', browser_download_url: 'https://github.com/raka1987/Riyeser/releases/download/t/RiyeserPayroll-Setup.exe', size: 1 }] };
+  const rel = { tag_name: 't', body: '- Riyeser Payroll 2.1.1', assets: [{ name: 'RiyeserPayroll-Setup.exe', browser_download_url: 'https://github.com/raka1987/riyeser-downloads/releases/download/t/RiyeserPayroll-Setup.exe', size: 1 }] };
   assert.equal(u.availableUpdates(u.installedFromRegistry(reg), u.latestFromRelease(rel)).length, 0);
 });
 
@@ -665,7 +665,7 @@ test('Riyeser Central: Accounting Basics and Accounting Plus are separate apps, 
   const old = u.installedFromRegistry(reg('Riyeser Accounting', '1.5.0'));
   assert.deepEqual(old, { accounting: '1.5.0' });
   const files = ['RiyeserAccountingBasics-Setup.exe', 'RiyeserAccountingPlus-Setup.exe', 'RiyeserAccounting-Setup.exe'];
-  const rel = { tag_name: 't', body: '- Riyeser Accounting Basics 2.0.1\n- Riyeser Accounting Plus 2.0.1', assets: files.map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 })) };
+  const rel = { tag_name: 't', body: '- Riyeser Accounting Basics 2.0.1\n- Riyeser Accounting Plus 2.0.1', assets: files.map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/riyeser-downloads/releases/download/t/${n}`, size: 1 })) };
   const latest = u.latestFromRelease(rel);
   assert.match(latest.products.accounting.url, /RiyeserAccountingPlus-Setup\.exe$/);
   assert.match(latest.products['accounting-basics'].url, /RiyeserAccountingBasics-Setup\.exe$/);
@@ -679,7 +679,7 @@ test('Riyeser Central: Riyeser POS is its own program, found and updated separat
   const both = u.installedFromRegistry(reg('Riyeser Accounting Basics', '2.3.0') + reg('Riyeser POS', '2.3.0'));
   assert.deepEqual(both, { 'accounting-basics': '2.3.0', pos: '2.3.0' });
   const files = ['RiyeserAccountingBasics-Setup.exe', 'RiyeserPOS-Setup.exe'];
-  const rel = { tag_name: 't', body: '- Riyeser Accounting Basics 2.3.0\n- Riyeser POS 2.3.1', assets: files.map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 })) };
+  const rel = { tag_name: 't', body: '- Riyeser Accounting Basics 2.3.0\n- Riyeser POS 2.3.1', assets: files.map((n) => ({ name: n, browser_download_url: `https://github.com/raka1987/riyeser-downloads/releases/download/t/${n}`, size: 1 })) };
   const latest = u.latestFromRelease(rel);
   assert.match(latest.products.pos.url, /RiyeserPOS-Setup\.exe$/);
   assert.deepEqual(u.availableUpdates(both, latest).map((x) => `${x.id} ${x.from}->${x.to}`), ['pos 2.3.0->2.3.1']);
@@ -695,7 +695,7 @@ test('Riyeser Central: Riyeser Link (formerly Riyeser Team) and Riyeser Link Off
   assert.deepEqual(u.installedFromRegistry(reg('Riyeser Link Office', '1.0.0')), { linkoffice: '1.0.0' });
   assert.deepEqual(u.installedFromRegistry(reg('Riyeser Link Office', '1.0.0') + reg('Riyeser Link', '1.1.0')), { linkoffice: '1.0.0', team: '1.1.0' });
   const files = ['RiyeserLink-Setup.exe', 'RiyeserTeam-Setup.exe', 'RiyeserLinkOffice-Setup.exe'];
-  const asset = (n) => ({ name: n, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/t/${n}`, size: 1 });
+  const asset = (n) => ({ name: n, browser_download_url: `https://github.com/raka1987/riyeser-downloads/releases/download/t/${n}`, size: 1 });
   const latest = u.latestFromRelease({ tag_name: 't', body: '- Riyeser Link Office 1.0.0\n- Riyeser Link 1.1.0', assets: files.map(asset) });
   assert.equal(latest.products.team.version, '1.1.0');
   assert.match(latest.products.team.url, /RiyeserLink-Setup\.exe$/);   // M3: the new name when the release has it

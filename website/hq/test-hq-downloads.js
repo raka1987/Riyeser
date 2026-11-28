@@ -11,13 +11,20 @@ const { chromium, devices } = require('playwright'); const path = require('path'
 const BASE = process.env.LINK_BASE || 'http://127.0.0.1:8090'; const out = process.argv[2];
 let bad = 0; const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) bad++; };
 const points = (pg) => pg.evaluate(() => document.querySelector('#dlChart .lc .ln').getAttribute('points').split(' ').length);
+// The public downloads repository's releases, and the code repository's (older ones, and a copy of the newest while
+// both get them): added together, one release per tag.
 const RELEASES = [{ tag_name: 'riyeser-2026.11.27-60', published_at: '2026-11-27T01:00:00Z',
-  assets: [{ name: 'RiyeserCentral-Setup.exe', download_count: 4210 }, { name: 'RiyeserPOS-Setup.exe', download_count: 880 }] }];
+  assets: [{ name: 'RiyeserCentral-Setup.exe', download_count: 4000 }, { name: 'RiyeserPOS-Setup.exe', download_count: 880 }] }];
+const OLD_RELEASES = [{ tag_name: 'riyeser-2026.11.27-60', published_at: '2026-11-27T01:00:00Z', assets: [{ name: 'RiyeserCentral-Setup.exe', download_count: 210 }] },
+  { tag_name: 'riyeser-2026.11.24-58', published_at: '2026-11-24T01:00:00Z', assets: [{ name: 'RiyeserCentral-Setup.exe', download_count: 100 }] }];
+const DL = 'https://github.com/raka1987/riyeser-downloads/releases';
 (async () => {
   const b = await chromium.launch(); const errs = [];
   const ctx = await b.newContext({ viewport: { width: 1440, height: 1000 } });
   let gh = 0;
-  await ctx.route('https://api.github.com/**', (r) => { gh++; r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(RELEASES) }); });
+  const ghAsked = [];
+  await ctx.route('https://api.github.com/**', (r) => { gh++; const u = r.request().url(); ghAsked.push(u);
+    r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(/\/repos\/raka1987\/riyeser-downloads\//.test(u) ? RELEASES : OLD_RELEASES) }); });
   const pg = await ctx.newPage(); pg.on('pageerror', (e) => errs.push(e.message));
   await pg.goto(BASE + '/hq/?demo#/downloads'); await pg.waitForSelector('#dlChart');
   const tiles = await pg.evaluate(() => [...document.querySelectorAll('.dltiles .tile')].map((t) => t.innerText));
@@ -31,7 +38,9 @@ const RELEASES = [{ tag_name: 'riyeser-2026.11.27-60', published_at: '2026-11-27
   check(gh === 0 && !(await pg.$eval('#dlraw', (d) => d.open)), 'raw GitHub counts collapsed (and not fetched) until opened');
   if (out) await pg.screenshot({ path: path.join(out, 'hq-downloads.png'), fullPage: true });
   await pg.click('#dlraw summary'); await pg.waitForSelector('#dlrawb .tiles');
-  check(/include tests and update checks/.test(await pg.textContent('#dlraw summary')) && /5,090/.test(await pg.textContent('#dlrawb')), 'opened: GitHub\'s totals');
+  check(/include tests and update checks/.test(await pg.textContent('#dlraw summary')) && /5,190/.test(await pg.textContent('#dlrawb')) && /2 releases/.test(await pg.textContent('#dlrawb'))
+    && /27-60[\s\S]*5,090/.test(await pg.textContent('#dlrawb')), 'opened: GitHub\'s totals (both repositories added together, one release per tag)');
+  check(ghAsked.some((u) => u.includes('/repos/raka1987/riyeser-downloads/releases')) && ghAsked.some((u) => u.includes('/repos/raka1987/Riyeser/releases')), 'raw counts: the downloads repository and the code repository');
   if (out) await pg.screenshot({ path: path.join(out, 'hq-downloads-raw.png'), fullPage: true });
   await pg.click('[data-dlp="POS"]'); await pg.waitForSelector('[data-dlp="POS"].on');
   check(/POS/.test(await pg.textContent('#dlChart h3')), 'chart for one program');
@@ -75,9 +84,9 @@ const RELEASES = [{ tag_name: 'riyeser-2026.11.27-60', published_at: '2026-11-27
   await sctx.route('https://*.supabase.co/functions/v1/download/**', (r) => { asked.push(r.request().url());
     if (answer === 'down') return r.abort();
     return r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
-      body: JSON.stringify({ url: 'https://github.com/raka1987/Riyeser/releases/download/riyeser-2026.11.27-60/RiyeserPOS-Setup.exe', tag: 'riyeser-2026.11.27-60' }) }); });
+      body: JSON.stringify({ url: `${DL}/download/riyeser-2026.11.27-60/RiyeserPOS-Setup.exe`, tag: 'riyeser-2026.11.27-60' }) }); });
   const went = [];
-  await sctx.route('https://github.com/raka1987/Riyeser/releases/**', (r) => { went.push(r.request().url()); r.fulfill({ status: 200, contentType: 'application/octet-stream', headers: { 'content-disposition': 'attachment; filename=setup.exe' }, body: 'MZ' }); });
+  await sctx.route(`${DL}/**`, (r) => { went.push(r.request().url()); r.fulfill({ status: 200, contentType: 'application/octet-stream', headers: { 'content-disposition': 'attachment; filename=setup.exe' }, body: 'MZ' }); });
   await site.goto(BASE + '/programs/pos.html'); await site.click('.phero a.btn.p.big');
   await site.waitForFunction(() => /started/.test((document.getElementById('dlst') || {}).textContent || ''));
   const q = new URL(asked[0]).searchParams;
@@ -90,7 +99,7 @@ const RELEASES = [{ tag_name: 'riyeser-2026.11.27-60', published_at: '2026-11-27
   const s2 = await sctx.newPage(); s2.on('pageerror', (e) => errs.push('site: ' + e.message));
   await s2.goto(BASE + '/download/central.html', { waitUntil: 'commit' }); await s2.waitForFunction(() => /started/.test((document.getElementById('dlst') || {}).textContent || ''));
   await s2.waitForTimeout(300);
-  check(went.some((u) => /releases\/latest\/download\/RiyeserCentral-Setup\.exe$/.test(u)), 'counter down: straight to GitHub');
+  check(went.some((u) => /\/raka1987\/riyeser-downloads\/releases\/latest\/download\/RiyeserCentral-Setup\.exe$/.test(u)), 'counter down: straight to GitHub (the downloads repository)');
   check(await s2.$eval('meta[name=robots]', (m) => m.content) === 'noindex', 'not for search engines');
   const sp = await (await b.newContext({ ...devices['iPhone 13'] })).newPage();
   await sp.route('https://*.supabase.co/**', (r) => r.abort()); await sp.route('https://api.github.com/**', (r) => r.abort());

@@ -1439,7 +1439,8 @@
   const timeOf = (d) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
   // ------------------------------------------------------------------ Riyeser home (the account's front page on the website)
-  const REL = 'https://github.com/raka1987/Riyeser/releases/latest/download/';
+  // Releases are in the public downloads repository (docs/GOING-PRIVATE.md on main): change its name here.
+  const REL = 'https://github.com/raka1987/riyeser-downloads/releases/latest/download/';
   const APPS = [
     ['central', 'Riyeser Central', 'Your home screen on the PC. Installs and updates everything.', 'RiyeserCentral-Setup.exe', 'free'],
     ['accounting-basics', 'Accounting Basics', 'Invoices, quotes, customers and stock.', 'RiyeserAccountingBasics-Setup.exe', 'basic'],

@@ -211,10 +211,8 @@ async function checkUpdates(force) {
   const cached = store.get('updateCheck', null);
   const channel = updateChannel();
   if (!force && cached && (cached.channel || 'stable') === channel && Date.now() - cached.at < 6 * 3600 * 1000) return { ...cached.result, installed: await installedVersions(), cached: true };
-  const res = await net.fetch(channel === 'early' ? updates.RELEASES_API : updates.RELEASE_API, { headers: { 'User-Agent': 'Riyeser-Central', Accept: 'application/vnd.github+json' } });
-  if (res.status === 404) return { latest: null, updates: [], note: 'No release published yet.' };
-  if (!res.ok) throw new Error(`Couldn't check for updates (${res.status}). Try again later.`);
-  const release = channel === 'early' ? updates.pickRelease(await res.json(), 'early') : await res.json();
+  // The downloads repository first, the old code repository while that has no release yet (updates.findRelease)
+  const release = await updates.findRelease(channel, (url) => net.fetch(url, { headers: { 'User-Agent': 'Riyeser-Central', Accept: 'application/vnd.github+json' } }));
   if (!release) return { latest: null, updates: [], note: 'No release published yet.' };
   let versionsJson = null;
   const vj = (release.assets || []).find((a) => a.name === 'versions.json');

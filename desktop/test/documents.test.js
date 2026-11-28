@@ -376,7 +376,7 @@ test('Riyeser Central sees an installed Desk Assistant as Riyeser Documents, and
   const reg = (name, ver) => `HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\x\n    DisplayName    REG_SZ    ${name}\n    DisplayVersion    REG_SZ    ${ver}\n`;
   assert.deepStrictEqual(updates.installedFromRegistry(reg('Riyeser Desk Assistant 0.25.0', '0.25.0')), { desk: '0.25.0' });
   assert.deepStrictEqual(updates.installedFromRegistry(reg('Riyeser Documents 1.0.0', '1.0.0')), { desk: '1.0.0' });
-  const asset = (name) => ({ name, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/v1/${name}`, size: 1 });
+  const asset = (name) => ({ name, browser_download_url: `https://github.com/raka1987/riyeser-downloads/releases/download/v1/${name}`, size: 1 });
   const both = updates.latestFromRelease({ assets: [asset('RiyeserDeskAssistant-Setup.exe'), asset('RiyeserDocuments-Setup.exe')], body: '' }, { desk: '1.0.0' });
   assert.strictEqual(both.products.desk.name, 'RiyeserDocuments-Setup.exe');
   const oldOnly = updates.latestFromRelease({ assets: [asset('RiyeserDeskAssistant-Setup.exe')], body: '- Riyeser Desk Assistant 0.25.0' });

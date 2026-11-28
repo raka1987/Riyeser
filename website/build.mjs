@@ -15,7 +15,15 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.OUT_DIR || join(ROOT, 'public');
 const SITE = process.env.SITE_URL || 'https://riyeser.com';
 // Installers are attached to the latest GitHub Release under these fixed names, so links never go stale.
-const RELEASES = 'https://github.com/raka1987/Riyeser/releases/latest/download';
+// Releases are published in the public downloads repository (docs/GOING-PRIVATE.md on main): the one place to change
+// its name. OLD_REPO is the code repository, where releases were published before: the pages below fall back to it
+// while the downloads repository has no release yet, so the site works before and after the switch.
+const DOWNLOADS_REPO = 'raka1987/riyeser-downloads';
+const OLD_REPO = 'raka1987/Riyeser';
+const RELEASES = `https://github.com/${DOWNLOADS_REPO}/releases/latest/download`;
+const GH_API = (repo) => `https://api.github.com/repos/${repo}/releases`;
+// A release file's address in either repository (for the download counter's answer)
+const GH_FILE_RE = `/^https:\\/\\/github\\.com\\/(${DOWNLOADS_REPO.replace(/[/.-]/g, '\\$&')}|${OLD_REPO.replace(/[/.-]/g, '\\$&')})\\/releases\\//i`;
 const EMAIL = 'info@riyeser.com';
 // Early bird: 50% off the first 12 months for the first 100 businesses. Set to false once 100 businesses have it.
 const EARLY_BIRD = true;
@@ -1009,9 +1017,11 @@ document.addEventListener('click',function(e){var x=e.target.closest&&e.target.c
 document.addEventListener('keydown',function(e){var x=e.target.closest&&e.target.closest('[data-href]');if(x&&(e.key==='Enter'||e.key===' ')){e.preventDefault();location.href=x.getAttribute('data-href')}});</script>
 <script>/* the Help Centre search button: open the first result, or go to the box */
 document.querySelectorAll('[data-gosearch]').forEach(function(b){b.addEventListener('click',function(){var a=document.querySelector('#hres a');if(a)location.href=a.href;else document.getElementById('hq').focus()})});</script>
-<script>/* Download buttons always point at the newest release file, whatever its exact name. */
+<script>/* Download buttons always point at the newest release file, whatever its exact name (the downloads repository's,
+   or the old code repository's while the downloads repository has no release yet). */
 (function(){var a=[].slice.call(document.querySelectorAll('a[href*="/releases/latest/download/"]'));if(!a.length||!window.fetch)return;
-fetch('https://api.github.com/repos/raka1987/Riyeser/releases/latest').then(function(r){return r.ok?r.json():null}).then(function(rel){if(!rel)return;
+var get=function(u){return fetch(u).then(function(r){return r.ok?r.json():(r.status===404?null:Promise.reject(r.status))})};
+get('${GH_API(DOWNLOADS_REPO)}/latest').then(function(rel){return rel||get('${GH_API(OLD_REPO)}/latest')}).then(function(rel){if(!rel)return;
 a.forEach(function(el){var want=el.href.split('/').pop().replace(/^Riye?ser/i,'').toLowerCase();
 var hit=(rel.assets||[]).filter(function(x){return x.name.replace(/^Riye?ser/i,'').toLowerCase()===want})[0];if(hit)el.href=hit.browser_download_url;});}).catch(function(){});})();</script>
 ${TRAFFIC}
@@ -1293,7 +1303,7 @@ try{q.push('tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().time
 if(navigator.webdriver)q.push('wd=1');if(!/(^|\.)riyeser\.com$/.test(h))q.push('test=1');
 var t=setTimeout(function(){go(G)},4000);
 fetch(F+'&'+q.join('&')+'&mode=json',{credentials:'omit'}).then(function(r){return r.ok?r.json():null}).then(function(j){clearTimeout(t);
-go(j&&/^https:\/\/github\.com\/raka1987\/Riyeser\/releases\//.test(j.url)?j.url:G)}).catch(function(){clearTimeout(t);go(G)})})()</script>`;
+go(j&&${GH_FILE_RE}.test(j.url)?j.url:G)}).catch(function(){clearTimeout(t);go(G)})})()</script>`;
 for (const p of PROGRAMS.filter((x) => x.file)) {
   const gh = `${RELEASES}/${p.file}`;
   const fn = DOWNLOAD_FN ? `${DOWNLOAD_FN}${p.id}?file=${p.file}` : '';
@@ -1653,9 +1663,10 @@ infoPage({
   <div class="ptable-wrap" tabindex="0" role="region" aria-label="Program versions" style="margin-top:16px"><table class="ptable stack"><thead><tr><th scope="col">Program</th><th scope="col">Version</th></tr></thead>
   <tbody>${PROGRAMS.filter((p) => FACTS[p.id]).map((p) => `<tr><th scope="row"><a class="more" href="${up}programs/${p.id}.html">${esc(p.name)}</a></th><td data-label="Version">${esc(FACTS[p.id].version)}</td></tr>`).join('')}</tbody></table></div>
   <div id="rel-live" hidden><h2 class="h2" style="margin-top:36px">Latest releases on GitHub</h2><ul class="rel-list" id="rel-list"></ul></div>
-  <p class="muted" style="margin-top:22px">Every release is published on <a class="more" href="https://github.com/raka1987/Riyeser/releases">GitHub</a>, where each installer is built and checked on Windows before it goes out. Detailed notes on what changed in each release aren't published yet; the <a class="more" href="${up}help.html">Help Centre</a> covers the newest features.</p>
+  <p class="muted" style="margin-top:22px">Every release is published on <a class="more" href="https://github.com/${DOWNLOADS_REPO}/releases">GitHub</a>, where each installer is built and checked on Windows before it goes out. Detailed notes on what changed in each release aren't published yet; the <a class="more" href="${up}help.html">Help Centre</a> covers the newest features.</p>
 </section>
-<script>(function(){if(!window.fetch)return;fetch('https://api.github.com/repos/raka1987/Riyeser/releases?per_page=8').then(function(r){return r.ok?r.json():null}).then(function(list){if(!list||!list.length)return;
+<script>(function(){if(!window.fetch)return;var get=function(u){return fetch(u).then(function(r){return r.ok?r.json():null})};
+get('${GH_API(DOWNLOADS_REPO)}?per_page=8').then(function(list){return list&&list.length?list:get('${GH_API(OLD_REPO)}?per_page=8')}).then(function(list){if(!list||!list.length)return;
 var ul=document.getElementById('rel-list');list.filter(function(r){return !r.draft&&r.published_at}).forEach(function(r){var li=document.createElement('li'),a=document.createElement('a');a.href=r.html_url;a.className='more';a.textContent=r.tag_name;li.appendChild(a);
 var s=document.createElement('span');try{s.textContent=' · '+new Date(r.published_at).toLocaleDateString('en-AU',{day:'numeric',month:'long',year:'numeric'})}catch(e){}li.appendChild(s);ul.appendChild(li)});document.getElementById('rel-live').hidden=!ul.children.length}).catch(function(){})})()</script>`,
 });

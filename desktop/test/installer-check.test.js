@@ -63,7 +63,7 @@ test('S58: before release signing (no key built in): GitHub\'s SHA-256 is checke
 });
 
 test('S58: the release\'s signed list and each file\'s GitHub digest reach the install step', () => {
-  const base = 'https://github.com/raka1987/Riyeser/releases/download/riyeser-1/';
+  const base = 'https://github.com/raka1987/riyeser-downloads/releases/download/riyeser-1/';
   const rel = { tag_name: 'riyeser-1', body: '- Riyeser PDF 0.25.0', assets: [
     { name: 'RiyeserPDF-Setup.exe', browser_download_url: `${base}RiyeserPDF-Setup.exe`, size: 10, digest: 'sha256:abc' },
     { name: 'installers.sig.json', browser_download_url: `${base}installers.sig.json`, size: 1 },

@@ -9,7 +9,12 @@
   const CFG = window.RIYESER_TEAM || {};
   const CONFIGURED = !!(CFG.supabaseUrl && CFG.supabaseKey);
   const DEMO = new URLSearchParams(location.search).has('demo') || !CONFIGURED;
+  // The code repository (GitHub jobs: backups, restore tests). Once it's private, GitHub only shows its jobs to
+  // signed-in members, so "System health" says they're not shown here and the GitHub jobs button still opens them.
   const REPO = 'raka1987/Riyeser';
+  // The public downloads repository, where releases are published (docs/GOING-PRIVATE.md on main): change its name here.
+  // Raw GitHub counts add up both: older releases (and copies during the switch) are in the code repository.
+  const DOWNLOADS_REPO = 'raka1987/riyeser-downloads';
   const $app = document.getElementById('app');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const num = (n) => Number(n || 0).toLocaleString();
@@ -1173,13 +1178,15 @@
     const hb = m.querySelector('#hoAdd'); if (hb) hb.onclick = addHandover;
     m.querySelectorAll('[data-hodone]').forEach((b) => b.onclick = async () => { try { await api.handoverDone(Number(b.dataset.hodone)); overview(); } catch (err) { alert(plain(err)); } });
   }
-  // Backups and restore tests: the last run of each GitHub job (public repo, no token). Rate limits only make it say "couldn't check".
+  // Backups and restore tests: the last run of each GitHub job (read without a token, so only while the code repository
+  // is public). Rate limits only make it say "couldn't check".
   async function ghRun(file) {
     const key = 'riyeser.hq.gh.' + file;
     try { const c = JSON.parse(sessionStorage.getItem(key) || 'null'); if (c && Date.now() - c.t < 10 * 60e3) return c.v; } catch { /* no storage */ }
     let v;
     try { const r = await fetch(`https://api.github.com/repos/${REPO}/actions/workflows/${file}/runs?per_page=1`, { headers: { Accept: 'application/vnd.github+json' } });
-      if (r.status === 404) v = { state: 'none' };
+      // 404: the job isn't there yet, or (once the code repository is private) GitHub won't show it without signing in
+      if (r.status === 404) v = { state: 'unknown', note: 'Not shown here (private repository, or not set up yet): see GitHub jobs' };
       else if (!r.ok) v = { state: 'unknown', note: r.status === 403 || r.status === 429 ? 'GitHub is busy (rate limit); try again later' : `GitHub said ${r.status}` };
       else { const run = ((await r.json()).workflow_runs || [])[0];
         v = !run ? { state: 'none' } : { state: run.status !== 'completed' ? 'running' : run.conclusion === 'success' ? 'ok' : 'failed', at: run.updated_at || run.run_started_at || run.created_at, url: run.html_url }; }
@@ -2680,9 +2687,16 @@
   }
   // GitHub's own totals: every installer download, including our CI runs, Central's update downloads and robots.
   async function rawGithub(el) {
-    let releases = [];
-    try { for (let page = 1; page <= 3; page++) { const r = await fetch(`https://api.github.com/repos/${REPO}/releases?per_page=100&page=${page}`); if (!r.ok) break;
-        const batch = await r.json(); releases = releases.concat(batch); if (batch.length < 100) break; } } catch { /* offline: show what we have */ }
+    // Both repositories (the code repository answers 404 once it's private: then only the downloads repository counts);
+    // a release in both (the same tag) is one release, its downloads added together.
+    const byTag = new Map();
+    for (const repo of [DOWNLOADS_REPO, REPO]) {
+      try { for (let page = 1; page <= 3; page++) { const r = await fetch(`https://api.github.com/repos/${repo}/releases?per_page=100&page=${page}`); if (!r.ok) break;
+          const batch = await r.json(); if (!Array.isArray(batch)) break;
+          for (const rel of batch) { const had = byTag.get(rel.tag_name); if (had) had.assets = (had.assets || []).concat(rel.assets || []); else byTag.set(rel.tag_name, { ...rel, assets: [...(rel.assets || [])] }); }
+          if (batch.length < 100) break; } } catch { /* offline: show what we have */ }
+    }
+    const releases = [...byTag.values()].sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')));
     const byProduct = {}; const byRelease = [];
     for (const rel of releases) { let tot = 0; for (const a of rel.assets || []) { if (!/\.exe$/i.test(a.name)) continue;
       const p = productOf(a.name); byProduct[p] = (byProduct[p] || 0) + a.download_count; tot += a.download_count; }

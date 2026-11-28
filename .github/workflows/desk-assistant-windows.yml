@@ -2,8 +2,16 @@ name: Riyeser Central + Documents + PDF + As Built + Link + Link Office (Windows
 
 # Builds the Windows installers for Riyeser Central, Riyeser Documents (formerly Desk Assistant), Riyeser PDF and the rest,
 # installs them on a clean Windows machine and checks they are registered.
+# When it runs (Windows minutes count twice on a private repository, so not on every push to every branch):
+#   - by hand: Actions → this workflow → Run workflow (pick one job, or all)
+#   - a push to module/desk-assistant, or a pull request into it, that changes desktop/ (or this file)
+#   - before a release: another workflow can call it (workflow_call), e.g. a check before "Publish Riyeser release"
+# A newer push to the same branch or pull request stops the older run.
 on:
   push:
+    branches: [module/desk-assistant]
+    paths: ["desktop/**", ".github/workflows/desk-assistant-windows.yml"]
+  pull_request:
     branches: [module/desk-assistant]
     paths: ["desktop/**", ".github/workflows/desk-assistant-windows.yml"]
   workflow_dispatch:
@@ -11,10 +19,23 @@ on:
       job:
         description: "all, windows (build and check the installers), central-install (installs every program from the latest release the way Central does), link-ip (Link Office follows a new address on a real adapter) or relay (the Riyeser relay as a Windows service, two sites calling through it)"
         default: all
+  workflow_call:
+    inputs:
+      job:
+        description: "all, windows, central-install, link-ip or relay (as above)"
+        type: string
+        default: all
+
+concurrency: { group: "desk-windows-${{ github.event.pull_request.number || github.ref }}", cancel-in-progress: true }
+
+env:
+  # Released installers come from the public downloads repository; the old code repository while that has none yet.
+  DOWNLOADS_REPO: raka1987/riyeser-downloads
+  OLD_REPO: raka1987/Riyeser
 
 jobs:
   windows:
-    if: github.event_name != 'workflow_dispatch' || inputs.job == 'all' || inputs.job == 'windows'
+    if: (github.event_name != 'workflow_dispatch' && !inputs.job) || inputs.job == 'all' || inputs.job == 'windows'
     runs-on: windows-latest
     defaults:
       run:
@@ -68,7 +89,14 @@ jobs:
           $tm = Get-ChildItem "dist-team\RiyeserTeam-Setup-*.exe" | Select-Object -First 1
           if (-not $lk -or -not $tm -or (Get-FileHash $lk.FullName).Hash -ne (Get-FileHash $tm.FullName).Hash) { throw "Expected RiyeserLink-Setup and the same file as RiyeserTeam-Setup in dist-team" }
           $old = "$env:RUNNER_TEMP\RiyeserTeam-old.exe"
-          Invoke-WebRequest "https://github.com/raka1987/Riyeser/releases/latest/download/RiyeserTeam-Setup.exe" -OutFile $old
+          # The latest released file: the downloads repository's, or the old code repository's while that has none yet
+          function Get-Released($file, $out) {
+            foreach ($repo in @($env:DOWNLOADS_REPO, $env:OLD_REPO)) {
+              try { Invoke-WebRequest "https://github.com/$repo/releases/latest/download/$file" -OutFile $out; Write-Host "Released $file from $repo"; return } catch { Write-Host "No $file in $repo yet ($($_.Exception.Message))" }
+            }
+            throw "Couldn't download the released $file"
+          }
+          Get-Released "RiyeserTeam-Setup.exe" $old
           Start-Process -FilePath $old -ArgumentList "/S" -Wait
           $oldEntry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object { $_.DisplayName -like "Riyeser Team*" -or $_.DisplayName -like "Riyeser Link [0-9]*" }
           if (-not $oldEntry) { throw "The released Riyeser Team didn't install" }
@@ -82,7 +110,7 @@ jobs:
           $dac = Get-ChildItem "dist\RiyeserDeskAssistant-Setup-*.exe" | Select-Object -First 1
           if (-not $doc -or -not $dac -or (Get-FileHash $doc.FullName).Hash -ne (Get-FileHash $dac.FullName).Hash) { throw "Expected RiyeserDocuments-Setup and the same file as RiyeserDeskAssistant-Setup in dist" }
           $oldDa = "$env:RUNNER_TEMP\RiyeserDeskAssistant-old.exe"
-          Invoke-WebRequest "https://github.com/raka1987/Riyeser/releases/latest/download/RiyeserDeskAssistant-Setup.exe" -OutFile $oldDa
+          Get-Released "RiyeserDeskAssistant-Setup.exe" $oldDa
           Start-Process -FilePath $oldDa -ArgumentList "/S" -Wait
           Get-Process -Name "Riyeser Desk Assistant" -ErrorAction SilentlyContinue | Stop-Process -Force
           $oldDaEntry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object { $_.DisplayName -like "Riyeser Desk Assistant*" -or $_.DisplayName -like "Riyeser Documents*" }
@@ -222,7 +250,7 @@ jobs:
   # 2) the same user with Central's new install-run.js (Link Office through the Windows permission prompt)
   # 3) as an administrator with install-run.js: every program installs and Central finds it
   central-install:
-    if: github.event_name != 'workflow_dispatch' || inputs.job == 'all' || inputs.job == 'central-install'
+    if: (github.event_name != 'workflow_dispatch' && !inputs.job) || inputs.job == 'all' || inputs.job == 'central-install'
     runs-on: windows-latest
     defaults:
       run:
@@ -245,7 +273,13 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force C:\riy\dl, C:\riy\out | Out-Null
-          gh release download --repo raka1987/Riyeser --dir C:\riy\dl --pattern "Riyeser*-Setup.exe" --clobber
+          # The downloads repository's latest release; the old code repository's while that has none yet
+          gh release download --repo $env:DOWNLOADS_REPO --dir C:\riy\dl --pattern "Riyeser*-Setup.exe" --clobber
+          if ($LASTEXITCODE -ne 0 -or -not (Get-ChildItem C:\riy\dl -Filter "Riyeser*-Setup.exe")) {
+            Write-Host "No release in $env:DOWNLOADS_REPO yet: using $env:OLD_REPO"
+            gh release download --repo $env:OLD_REPO --dir C:\riy\dl --pattern "Riyeser*-Setup.exe" --clobber
+            if ($LASTEXITCODE -ne 0) { throw "Couldn't download the latest release's installers" }
+          }
           Get-ChildItem C:\riy\dl | Format-Table Name, Length -AutoSize | Out-String | Write-Host
           New-Item -ItemType Directory -Force C:\riy\app | Out-Null
           Copy-Item -Recurse src, scripts C:\riy\app\ -Force
@@ -376,7 +410,7 @@ jobs:
   #    router giving the PC a new address); Link Office must follow it by itself, move SIP, the desk phones' settings and
   #    riyeser-office.local, ask the phone to restart, and tell the website. Only when asked (job: link-ip, or all).
   link-ip:
-    if: github.event_name == 'workflow_dispatch' && (inputs.job == 'link-ip' || inputs.job == 'all')
+    if: inputs.job == 'link-ip' || inputs.job == 'all'
     runs-on: windows-latest
     timeout-minutes: 15
     defaults:
@@ -423,7 +457,7 @@ jobs:
   #    router port forwarding removed, no key or settings, logs zipped), installed again with a new id and key, and the
   #    same two sites reconnect to it by themselves and call again with sound both ways.
   relay:
-    if: github.event_name != 'workflow_dispatch' || inputs.job == 'all' || inputs.job == 'relay'
+    if: (github.event_name != 'workflow_dispatch' && !inputs.job) || inputs.job == 'all' || inputs.job == 'relay'
     runs-on: windows-latest
     timeout-minutes: 20
     defaults:

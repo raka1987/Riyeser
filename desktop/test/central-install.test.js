@@ -180,7 +180,7 @@ const RELEASE = {
     '- Riyeser Estimate 2.10.1', '- Riyeser Invoices 2.10.1', '- Riyeser Payroll 2.3.3', '- Riyeser POS 2.10.1'].join('\n'),
   assets: ['RiyeserAccounting', 'RiyeserAccountingBasics', 'RiyeserAccountingPlus', 'RiyeserBookings', 'RiyeserCentral', 'RiyeserDeskAssistant',
     'RiyeserDocuments', 'RiyeserEstimate', 'RiyeserInvoices', 'RiyeserLink', 'RiyeserLinkOffice', 'RiyeserPayroll', 'RiyeserPDF', 'RiyeserPOS',
-    'RiyeserServices', 'RiyeserTeam'].map((n) => ({ name: `${n}-Setup.exe`, size: 1, browser_download_url: `https://github.com/raka1987/Riyeser/releases/download/riyeser-2026.11.27-55/${n}-Setup.exe` })),
+    'RiyeserServices', 'RiyeserTeam'].map((n) => ({ name: `${n}-Setup.exe`, size: 1, browser_download_url: `https://github.com/raka1987/riyeser-downloads/releases/download/riyeser-2026.11.27-55/${n}-Setup.exe` })),
 };
 
 test('every program has its own installer in the release, and every plan module maps to one of them', () => {
