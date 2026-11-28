@@ -49,7 +49,9 @@ const points = (pg) => pg.evaluate(() => document.querySelector('.lc .ln').getAt
   check(await ph.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 0, 'phone: no sideways scrolling');
   // the website's script, in the built pages
   const pub = path.join(__dirname, '..', 'public'); const read = (f) => fs.readFileSync(path.join(pub, f), 'utf8');
-  const tag = (read('pricing.html').match(/<script>\(function\(\)\{try\{var n=navigator[\s\S]*?<\/script>/) || [''])[0];
+  // The built pages are minified (website/minify.mjs), so the traffic script's wrapper and local names may be collapsed
+  // (e.g. `!function(){try{var e=navigator`); match either shape. Its behaviour, not its spelling, is what matters below.
+  const tag = (read('pricing.html').match(/<script>!?\(?function\(\)\{try\{var \w+=navigator[\s\S]*?<\/script>/) || [''])[0];
   check(tag && Buffer.byteLength(tag) < 1536 && /rpc\/track_visit/.test(tag) && !/cookie|localStorage/.test(tag) && /doNotTrack/.test(tag) && /globalPrivacyControl/.test(tag),
     `website traffic script: ${Buffer.byteLength(tag)} bytes, no cookies, respects Do Not Track and GPC`);
   check(!/track_visit/.test(read('hq/index.html')) && !/track_visit/.test(read('link/index.html')), 'not on HQ or the Riyeser Link app');

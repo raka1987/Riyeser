@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { minifyDir } from './minify.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const OUT = join(ROOT, 'public');
@@ -114,5 +115,10 @@ for (const f of websiteFiles.filter((f) => f.endsWith('.html') && f !== '404.htm
   mkdirSync(dirname(join(OUT, 'software', f)), { recursive: true });
   writeFileSync(join(OUT, 'software', f), `<!doctype html><meta charset="utf-8"><title>Moved — Riyeser</title><meta http-equiv="refresh" content="0; url=${to}"><link rel="canonical" href="${SITE}${to}"><script>location.replace(${JSON.stringify(to)}+location.search+location.hash)</script><p>Moved to <a href="${to}">${to}</a>.</p>`);
 }
+
+// Minify the parts added here (Riyeser HQ, Riyeser Link at /link/ and /team/, As Built at /app/ and the top-level
+// Services files): strip comments, minify the served scripts and styles. The software website (build.mjs above) was
+// already minified with its CSP applied, so skip those files - re-minifying could change a byte and break a hash.
+await minifyDir(OUT, new Set(websiteFiles.map((f) => join(OUT, f))));
 
 console.log('Combined site ready in', OUT, ASBUILT ? '(software website at /, As Built at /app/)' : '(software website at /; As Built left out)');
