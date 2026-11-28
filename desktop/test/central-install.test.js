@@ -158,6 +158,7 @@ const HKCU = [
   'HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\c0ffee00-riyeser-link',
   '    DisplayName    REG_SZ    Riyeser Link 1.1.2',
   '    DisplayVersion    REG_SZ    1.1.2',
+  '    Publisher    REG_SZ    Riyeser',   // new installers; the Link Office entry above is from before (Riyeser Group)
   ...[['Riyeser Accounting Basics', '2.10.1'], ['Riyeser Accounting Plus', '2.10.1'], ['Riyeser POS', '2.10.1'], ['Riyeser Invoices', '2.10.1'],
     ['Riyeser Bookings', '2.10.1'], ['Riyeser Estimate', '2.10.1']].flatMap(([n, v]) => [
     '', `HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${n}_is1`, `    DisplayName    REG_SZ    ${n}`, `    DisplayVersion    REG_SZ    ${v}`]),
@@ -170,6 +171,34 @@ test('detection: every program is found after its installer, Link Office from HK
   assert.deepEqual(v, { linkoffice: '1.1.5', team: '1.1.2', 'accounting-basics': '2.10.1', accounting: '2.10.1', pos: '2.10.1', invoices: '2.10.1',
     bookings: '2.10.1', estimate: '2.10.1', payroll: '2.3.3', desk: '1.0.0', pdf: '0.25.0', services: '1.2.1' });
   assert.deepEqual(u.installedFromRegistry(HKCU).linkoffice, undefined);   // only in HKLM
+});
+
+// The publisher was "Riyeser Group" before it became "Riyeser" (and the Inno Setup programs' Start menu folder with it).
+// Installs from before and after are both found, updated and uninstalled: detection goes by the listed name, never the
+// publisher, and Central looks for shortcuts in both Start menu folders.
+test('detection, update and uninstall work for programs listed by "Riyeser" and by the old "Riyeser Group"', () => {
+  const entry = (pub, key, name, ver) => [`HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${key}`,
+    `    DisplayName    REG_SZ    ${name}`, `    DisplayVersion    REG_SZ    ${ver}`, `    Publisher    REG_SZ    ${pub}`,
+    `    UninstallString    REG_SZ    "C:\\U\\${key}\\unins000.exe"`].join('\r\n');
+  for (const pub of ['Riyeser', 'Riyeser Group']) {
+    const reg = [entry(pub, 'pos_is1', 'Riyeser POS 2.10.1', '2.10.1'), entry(pub, 'guid-pay', 'Riyeser Payroll 2.3.3', '2.3.3')].join('\r\n\r\n');
+    assert.deepEqual(u.installedFromRegistry(reg), { pos: '2.10.1', payroll: '2.3.3' }, pub);
+    assert.equal(u.uninstallFromRegistry(reg, 'pos').command, '"C:\\U\\pos_is1\\unins000.exe"', pub);
+  }
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'central-main.js'), 'utf8');
+  assert.match(src, /'Start Menu', 'Programs', 'Riyeser'\)/);
+  assert.match(src, /'Start Menu', 'Programs', 'Riyeser Group'\)/);
+});
+
+test('new installers say "Riyeser"; app ids stay the same so they update the copies already installed', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.equal(pkg.author.name, 'Riyeser');   // electron-builder writes this as the Installed apps publisher
+  const cfg = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'builder.config.js'), 'utf8');
+  assert.match(cfg, /copyright: 'Riyeser',/);
+  assert.doesNotMatch(cfg, /menuCategory/);   // Start menu shortcuts go straight into Programs, no company folder
+  assert.deepEqual([...cfg.matchAll(/appId: '([^']+)'/g)].map((m) => m[1]),
+    ['com.deskassistant.app', 'com.deskassistant.pdf', 'com.riyeser.central', 'com.riyeser.services', 'com.riyeser.team', 'com.riyeser.linkoffice']);
+  for (const f of ['main.js', 'pdf-main.js']) assert.match(fs.readFileSync(path.join(__dirname, '..', 'src', f), 'utf8'), /publisher: 'Riyeser',/, f);
 });
 
 // The 27 November 2026 release (riyeser-2026.11.27-55): its files and "In this release" list.

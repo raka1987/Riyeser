@@ -133,6 +133,8 @@ jobs:
             $entry = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like $app.name
             if (-not $entry) { throw "Not listed in Installed apps: $($app.name)" }
             Write-Host "Listed as:" $entry.DisplayName "by" $entry.Publisher
+            # The publisher was "Riyeser Group" before it became "Riyeser" (the released copies above still say so)
+            if (@($entry.Publisher) -notcontains "Riyeser") { throw "$($app.name) should be listed by Riyeser, is: $($entry.Publisher)" }
           }
           # The update over the released Riyeser Team: one entry (now Riyeser Link), same program file, data kept
           $teamEntries = @(Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object { $_.DisplayName -like "Riyeser Team*" -or $_.DisplayName -like "Riyeser Link [0-9]*" })
@@ -173,6 +175,7 @@ jobs:
           $lentry = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Link Office*"
           if (-not $lentry) { throw "Not listed in Installed apps: Riyeser Link Office" }
           Write-Host "Listed as:" $lentry.DisplayName "by" $lentry.Publisher
+          if ($lentry.Publisher -ne "Riyeser") { throw "Riyeser Link Office should be listed by Riyeser, is: $($lentry.Publisher)" }
           $rule = cmd /c 'netsh advfirewall firewall show rule name="Riyeser Link Office" verbose' | Out-String
           if ($LASTEXITCODE -ne 0 -or $rule -notmatch "5060" -or $rule -notmatch [regex]::Escape($link)) { throw "Riyeser Link Office's firewall rule is missing: $rule" }
           Write-Host "Firewall rule added for" $link
@@ -375,6 +378,9 @@ jobs:
           $hkcu = reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /reg:64 | Out-String
           $hklm = reg query "HKLM\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /reg:64 | Out-String
           Set-Content -Path C:\riy\out\uninstall-reg.txt -Value ($hkcu + "`n" + $hklm) -Encoding utf8
+          # the publisher each released installer wrote ("Riyeser Group" before it became "Riyeser"): found either way
+          Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -like "Riyeser*" -or $_.DisplayName -like "As Built*" } | Format-Table DisplayName, Publisher -AutoSize | Out-String -Width 160 | Write-Host
           node -e "const u = require('./src/central/updates'); const fs = require('fs'); const t = fs.readFileSync('C:/riy/out/uninstall-reg.txt', 'utf8'); const listed = Object.keys(u.installedFromRegistry(t)).filter((id) => id !== 'central'); const miss = []; for (const id of listed) { const f = u.uninstallFromRegistry(t, id); console.log(id.padEnd(18), f ? f.command : '(none)'); if (!f) miss.push(id); } if (listed.length < 11) { console.error('Only ' + listed.length + ' programs are listed: ' + listed.join(', ')); process.exit(1); } if (miss.length) { console.error('No uninstaller found for ' + miss.join(', ')); process.exit(1); }"
       - name: The released Riyeser Central finds every program
         shell: pwsh

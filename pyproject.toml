@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "riyeser-accounting"
 version = "1.0.0"
-authors = [{name = "Riyeser Group"}]
-description = "Riyeser Accounting (a Riyeser Group module) - double-entry business accounting (sales, purchases, banking, inventory, payroll, GST/BAS, reports)"
+authors = [{name = "Riyeser"}]
+description = "Riyeser Accounting (a Riyeser module) - double-entry business accounting (sales, purchases, banking, inventory, payroll, GST/BAS, reports)"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["flask>=3.0", "waitress>=3.0", "pywebview>=5"]

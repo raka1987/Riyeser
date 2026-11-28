@@ -1,5 +1,5 @@
 // Builds ONE site for riyeser.com:
-//   /        the Riyeser Group software website (website/build.mjs) - what people see when they open riyeser.com
+//   /        the Riyeser software website (website/build.mjs) - what people see when they open riyeser.com
 //   /app/    the Riyeser Services app (website/services, copied from the old riyeser.com)
 //   /link/   Riyeser Link, the chat (website/team; it was called Riyeser Team)
 //   /team/   the same app again at its old address, so older desktop apps, invite links and sign-up emails keep working

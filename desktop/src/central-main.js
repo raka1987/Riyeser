@@ -1,4 +1,4 @@
-// Riyeser Central: the Riyeser Group home screen. Opens every Riyeser program and shows, like a PA would, what needs
+// Riyeser Central: the Riyeser home screen. Opens every Riyeser program and shows, like a PA would, what needs
 // attention today: meetings, to-dos, money owed and owing, and recent documents, plus one search for every file.
 // It only READS the other programs' data, so it can never damage their files.
 const { app, BrowserWindow, ipcMain, shell, dialog, nativeTheme, net, session, clipboard } = require('electron');
@@ -116,7 +116,8 @@ function launch(exe, args) {
 function shortcutDirs() {
   const appData = process.env.APPDATA || app.getPath('appData');
   const dirs = [app.getPath('desktop'), path.join(os.homedir(), 'Desktop'), process.env.PUBLIC && path.join(process.env.PUBLIC, 'Desktop'),
-    path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs'), path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Riyeser Group'),
+    path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs'), path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Riyeser'),
+    // the Start menu folder was "Riyeser Group" before it became "Riyeser": older installs still have shortcuts there
     path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Riyeser Group')];
   return [...new Set(dirs.filter(Boolean))];
 }
