@@ -87,7 +87,7 @@ const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
       const until = await pg.evaluate(() => window.RiyeserTeam.state.cprefs['c-jobs'].until);
       assert.ok(Math.abs(Date.parse(until) - Date.now() - 8 * 3600e3) < 60e3, 'muted for 8 hours: ' + until);
       assert.strictEqual(await total(), before - jobsUnread, 'muted chats leave the unread total (and the tab title)');
-      await pg.hover('[data-ch="c-jobs"]'); await pg.click('[data-cmenu="c-jobs"]'); assert.match(await text(pg, '#mmute'), /^Unmute ?Muted until \d/); await pg.click('#mmute');
+      await pg.hover('[data-ch="c-jobs"]'); await pg.click('[data-cmenu="c-jobs"]'); assert.match(await text(pg, '#mmute'), /^Unmute ?Muted until (tomorrow, )?\d/); await pg.click('#mmute');
       assert.strictEqual(await total(), before); assert.ok(!(await pg.$('[data-ch="c-jobs"].muted')));
       // a timed mute ends by itself
       await pg.hover('[data-ch="c-jobs"]'); await pg.click('[data-cmenu="c-jobs"]'); await pg.click('#mmute'); await pg.click('#mute-1h');
