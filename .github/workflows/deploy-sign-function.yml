@@ -1,0 +1,77 @@
+name: Deploy signing function
+
+# The "sign" Edge Function (supabase/functions/sign): the server for riyeser.com/sign/?t=…, the page where people sign a
+# PDF sent from Riyeser PDF ("Ask someone to sign"). It checks each emailed link (only its SHA-256 goes to the
+# database), shows the PDF only while its SHA-256 matches, records the signer's internet address, and when the last
+# person signs it stamps the fields into the PDF and adds the certificate of completion (pdf-lib).
+# Runs only when started by hand (Actions -> Deploy signing function -> Run workflow).
+#
+# Order: 1. "Update the Riyeser Link database" (team-chat.sql with the sign_* functions and the private sign-docs
+# bucket, branch module/desk-assistant), 2. this, 3. "Publish website" (riyeser.com/sign/), 4. a Riyeser PDF release.
+# Optional repository variable SIGN_TRUSTED_HOPS: how many proxies add themselves to X-Forwarded-For in front of the
+# function (default 1). Check it on staging first (register SEC-017): send a made-up X-Forwarded-For and see which
+# address the function records.
+#
+# GitHub secrets: SUPABASE_ACCESS_TOKEN (the same one the other functions use).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency: { group: deploy-sign-function, cancel-in-progress: false }
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      PROJECT_REF: goaugynxeatzqzifpoes   # public (it's in riyeser.com/link/config.js)
+    steps:
+      - name: Is it set up?
+        id: ready
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "Not set up yet: add the GitHub secret **SUPABASE_ACCESS_TOKEN**, then run this again." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "go=no" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=yes" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.ready.outputs.go == 'yes'
+      - uses: denoland/setup-deno@v2
+        if: steps.ready.outputs.go == 'yes'
+        with: { deno-version: v2.x }
+      - name: Test the signing function (a pretend database and storage)
+        if: steps.ready.outputs.go == 'yes'
+        run: deno test --allow-env --allow-read --allow-net supabase/functions/sign
+      - uses: supabase/setup-cli@v1
+        if: steps.ready.outputs.go == 'yes'
+        with: { version: latest }
+      - name: Trusted proxies (optional repository variable SIGN_TRUSTED_HOPS)
+        if: steps.ready.outputs.go == 'yes' && vars.SIGN_TRUSTED_HOPS != ''
+        env:
+          HOPS: ${{ vars.SIGN_TRUSTED_HOPS }}
+        run: |
+          set -euo pipefail
+          case "$HOPS" in [1-5]) ;; *) echo "SIGN_TRUSTED_HOPS must be 1 to 5."; exit 1;; esac
+          printf 'SIGN_TRUSTED_HOPS=%s\n' "$HOPS" | supabase secrets set --yes --env-file /dev/stdin --project-ref "$PROJECT_REF" > /dev/null
+      - name: Deploy the signing function
+        if: steps.ready.outputs.go == 'yes'
+        # --no-verify-jwt: signers have no Riyeser account; the function checks their link itself
+        run: supabase functions deploy sign --yes --project-ref "$PROJECT_REF" --no-verify-jwt
+      - name: Check it answers
+        if: steps.ready.outputs.go == 'yes'
+        run: |
+          set -euo pipefail
+          base="https://$PROJECT_REF.supabase.co/functions/v1/sign"
+          for i in $(seq 1 12); do
+            if curl -sf "$base/ping" -o "$RUNNER_TEMP/ping.json"; then break; fi
+            sleep 5
+          done
+          node -e "const p=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));if(!p.ok)process.exit(1);console.log('Signing function answers: version '+p.version)" "$RUNNER_TEMP/ping.json"
+          # a made-up link: the answer must be "unknown" (and nothing is recorded)
+          st=$(curl -s -X POST -H 'Content-Type: application/json' --data '{"t":"0000000000000000000000000000000000000000000000000000000000000000"}' "$base/open")
+          echo "A made-up link: $st"
+          case "$st" in *'"unknown"'*) ;; *) echo "::error::Unexpected answer for a made-up link"; exit 1;; esac
+          echo "### The signing function is live" >> "$GITHUB_STEP_SUMMARY"

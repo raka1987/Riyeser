@@ -8,6 +8,8 @@ name: HQ jobs
 #   every day    the inactive-accounts sweep: warning emails 30 and 7 days before a free account closes, closing after
 #                12 months unused, and marking accounts closed for 2 years "ready for removal" (removal is never automatic).
 #                Also website traffic: yesterday's daily totals are added and page views older than 13 months deleted.
+#   every hour   PDF signing requests (Riyeser PDF "Ask someone to sign"): requests past their end date expire (the
+#                sender is emailed) and links are taken out of sent emails of finished requests (sign_sweep).
 #   after each   queued emails are sent through Resend, once RESEND_API_KEY and EMAIL_FROM are added. Until then they
 #                stay queued and this says "email sending isn't set up yet" without failing.
 # Connects with the TEAM_DB_URL secret, like the nightly backups. Never prints email addresses or message text.
@@ -76,6 +78,13 @@ jobs:
           if [ "$have" != "t" ]; then echo "::notice::Website traffic isn't in the database yet: re-run website/team/team-chat.sql."; exit 0; fi
           r=$(psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -c 'select public.hq_traffic_sweep()')
           echo "Website traffic: $r"
+      - if: steps.db.outputs.ok == 'yes'
+        name: PDF signing requests (expire overdue requests, take links out of old emails)
+        run: |
+          have=$(psql "$DB_URL" -X -q -At -c "select to_regprocedure('public.sign_sweep()') is not null")
+          if [ "$have" != "t" ]; then echo "::notice::PDF signing isn't in the database yet: re-run website/team/team-chat.sql."; exit 0; fi
+          r=$(psql "$DB_URL" -X -q -At -v ON_ERROR_STOP=1 -c 'select public.sign_sweep()')
+          echo "PDF signing: $r"
       - if: steps.db.outputs.ok == 'yes'
         name: Send queued emails
         run: bash ops/hq-jobs/send-emails.sh
