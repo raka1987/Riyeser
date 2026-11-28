@@ -13,7 +13,7 @@ const ORDER = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const KEYS = { PAYPAL_CLIENT_ID: "test-client", PAYPAL_CLIENT_SECRET: "test-secret", PAYPAL_ENV: "sandbox", PAYPAL_WEBHOOK_ID: "WH-ID-1", PAYPAL_ALLOW_PRACTICE: "1" };
 
 /** A pretend PayPal: just enough of the REST API, remembering every call. */
-function fakePayPal(opts: { signatureOk?: boolean; cancelStatus?: number } = {}) {
+function fakePayPal(opts: { signatureOk?: boolean; cancelStatus?: number; live?: boolean } = {}) {
   const calls: { method: string; path: string; body: string; headers: Headers }[] = [];
   const subs = new Map<string, Record<string, unknown>>();
   let n = 0;
@@ -23,7 +23,7 @@ function fakePayPal(opts: { signatureOk?: boolean; cancelStatus?: number } = {})
     const headers = new Headers(init?.headers);
     calls.push({ method: init?.method ?? "GET", path: u.pathname, body, headers });
     const j = (status: number, b: unknown) => new Response(b === null ? null : JSON.stringify(b), { status, headers: { "Content-Type": "application/json" } });
-    assertEquals(u.origin, "https://api-m.sandbox.paypal.com", "sandbox keys go to PayPal's sandbox");
+    assertEquals(u.origin, opts.live ? "https://api-m.paypal.com" : "https://api-m.sandbox.paypal.com", opts.live ? "live keys go to live PayPal" : "sandbox keys go to PayPal's sandbox");
     if (u.pathname === "/v1/oauth2/token") {
       return headers.get("Authorization") === `Basic ${btoa("test-client:test-secret")}` ? j(200, { access_token: "A21-token", expires_in: 3600 }) : j(401, { error: "invalid_client" });
     }
@@ -31,9 +31,13 @@ function fakePayPal(opts: { signatureOk?: boolean; cancelStatus?: number } = {})
     if (u.pathname === "/v1/catalogs/products") return j(201, { id: "PROD-1" });
     if (u.pathname === "/v1/billing/plans") { n++; return j(201, { id: `P-PLAN${n}`, status: "ACTIVE" }); }
     if (u.pathname === "/v1/billing/subscriptions") {
+      // PayPal-Request-Id: the same request twice gives the same subscription (PayPal's idempotency)
+      const rid = headers.get("PayPal-Request-Id") ?? "";
+      const seen = [...subs.entries()].find(([, v]) => v.requestId === rid && rid);
+      if (seen) return j(200, { id: seen[0], status: "APPROVAL_PENDING", links: [{ rel: "approve", href: `https://www.${opts.live ? "" : "sandbox."}paypal.com/webapps/billing/subscriptions?ba_token=BA-${seen[0]}` }] });
       const b = JSON.parse(body); const id = `I-SUB${String(subs.size + 1).padStart(6, "0")}`;
-      subs.set(id, { ...b, status: "APPROVAL_PENDING" });
-      return j(201, { id, status: "APPROVAL_PENDING", links: [{ rel: "approve", href: `https://www.sandbox.paypal.com/webapps/billing/subscriptions?ba_token=BA-${id}` }, { rel: "self", href: "x" }] });
+      subs.set(id, { ...b, status: "APPROVAL_PENDING", requestId: rid });
+      return j(201, { id, status: "APPROVAL_PENDING", links: [{ rel: "approve", href: `https://www.${opts.live ? "" : "sandbox."}paypal.com/webapps/billing/subscriptions?ba_token=BA-${id}` }, { rel: "self", href: "x" }] });
     }
     const cm = /^\/v1\/billing\/subscriptions\/([^/]+)\/cancel$/.exec(u.pathname);
     if (cm) { if (opts.cancelStatus) return j(opts.cancelStatus, { name: "UNPROCESSABLE_ENTITY" }); subs.get(cm[1])!.status = "CANCELLED"; return j(204, null); }
@@ -48,9 +52,10 @@ function fakePayPal(opts: { signatureOk?: boolean; cancelStatus?: number } = {})
 }
 
 /** A pretend database: billing_start (as the owner), the service-role functions, and events applied once. */
-function fakeDb(opts: { owner?: boolean; early?: boolean; startsOn?: string; oldDb?: boolean } = {}) {
+function fakeDb(opts: { owner?: boolean; early?: boolean; startsOn?: string; oldDb?: boolean; cancelEnv?: string; buyNowDb?: boolean } = {}) {
   const st = { config: {} as Record<string, string>, created: [] as unknown[], events: new Map<string, string>(), applied: [] as string[],
-    cancelled: [] as string[], grace: null as string | null, status: "pending", asCalls: [] as string[], startArgs: [] as Record<string, unknown>[] };
+    cancelled: [] as string[], grace: null as string | null, status: "pending", asCalls: [] as string[], startArgs: [] as Record<string, unknown>[],
+    envNoted: [] as string[], practiceCancelled: 0 };
   const rpcAs = (req: Request): Rpc => async (name, args) => {
     st.asCalls.push(`${name}:${req.headers.get("Authorization")}`);
     if (opts.owner === false) return { ok: false, status: 400, body: { message: "Only the business owner can pay for Riyeser." } };
@@ -58,15 +63,19 @@ function fakeDb(opts: { owner?: boolean; early?: boolean; startsOn?: string; old
       assertEquals(args.pay_method, "paypal"); st.startArgs.push(args);
       // a database before pricing v2: no users or tills
       if (opts.oldDb && ("users" in args || "tills" in args)) return { ok: false, status: 404, body: { code: "PGRST202", message: "Could not find the function public.billing_start" } };
+      if (opts.buyNowDb === false && "buy_now" in args) return { ok: false, status: 404, body: { code: "PGRST202", message: "Could not find the function public.billing_start" } };
       const people = Number(args.people);
       const users = (args.users ?? {}) as Record<string, number>;
       const amount = (args.mods as string[]).reduce((a, m) => a + ({ plus: 39, payroll: 25, calls: 20 } as Record<string, number>)[m] + 7 * Math.max(0, (users[m] ?? people) - 3), 0) * (args.billing_period === "yearly" ? 10 : 1);
-      return { ok: true, status: 200, body: { id: ORDER, ref: "RI-10001", amount, first_amount: opts.early ? amount / 2 : null, early_bird: !!opts.early, early_cycles: opts.early ? (args.billing_period === "yearly" ? 1 : 12) : 0, module_names: [], starts_on: opts.startsOn ?? null } };
+      const today = new Date().toISOString().slice(0, 10);
+      return { ok: true, status: 200, body: { id: ORDER, ref: "RI-10001", amount, first_amount: opts.early ? amount / 2 : null, early_bird: !!opts.early, early_cycles: opts.early ? (args.billing_period === "yearly" ? 1 : 12) : 0, module_names: [], starts_on: args.buy_now ? today : opts.startsOn ?? null, buy_now: !!args.buy_now } };
     }
-    if (name === "billing_cancel_start") return { ok: true, status: 200, body: { order_id: ORDER, subscription_id: "I-SUB000001", env: "sandbox", paid_through: "2027-03-22" } };
+    if (name === "billing_cancel_start") return { ok: true, status: 200, body: { order_id: ORDER, subscription_id: "I-SUB000001", env: opts.cancelEnv ?? "sandbox", paid_through: "2027-03-22" } };
+    if (name === "billing_practice_cancel") { st.practiceCancelled++; return { ok: true, status: 200, body: { removed: ["RI-10001"], practice: true } }; }
     return { ok: false, status: 404, body: null };
   };
   const rpcService: Rpc = async (name, args) => {
+    if (name === "billing_paypal_env_now") { st.envNoted.push(String(args.env)); return { ok: true, status: 200, body: null }; }
     if (name === "billing_paypal_config") return { ok: true, status: 200, body: { ...st.config } };
     if (name === "billing_paypal_config_set") { st.config[String(args.k)] = String(args.v); return { ok: true, status: 200, body: null }; }
     if (name === "billing_paypal_created") { st.created.push(args); return { ok: true, status: 200, body: null }; }
@@ -285,4 +294,66 @@ Deno.test("subscribe (pricing v2): users per program and tills go to the databas
   forgetTokens(); const p3 = fakePayPal(); const plain = fakeDb();
   await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), { env: env(KEYS), fetch: p3.f, ...plain });
   assertEquals(Object.keys(plain.st.startArgs[0]).sort(), ["billing_period", "mods", "pay_method", "people", "ws"]);
+});
+
+// ---------------------------------------------------------------- PAYPAL-LIVE
+const LIVE = { ...KEYS, PAYPAL_ENV: "live", PAYPAL_ALLOW_PRACTICE: "" };
+Deno.test("PAYPAL-LIVE: the status check tells the database PayPal is live (once per running copy)", async () => {
+  forgetTokens(); const p = fakePayPal({ live: true }); const db = fakeDb();
+  const d = { env: env(LIVE), fetch: p.f, ...db };
+  const s = await (await handle(new Request("https://x/functions/v1/paypal/status"), d)).json();
+  assertEquals([s.ready, s.env], [true, "live"]);
+  await handle(new Request("https://x/functions/v1/paypal/status"), d);
+  assertEquals(db.st.envNoted, ["live"], "noted once");
+  assertEquals(p.calls.length, 0, "the status check never calls PayPal");
+});
+Deno.test("PAYPAL-LIVE: cancelling a practice (sandbox) subscription while live never calls PayPal: Riyeser's side only", async () => {
+  forgetTokens(); const p = fakePayPal({ live: true }); const db = fakeDb({ cancelEnv: "sandbox" });
+  const r = await handle(post("cancel", { ws: WS }, owner), { env: env(LIVE), fetch: p.f, ...db });
+  assertEquals(r.status, 200); const j = await r.json();
+  assertEquals([j.ok, j.practice], [true, true]);
+  assertEquals(p.calls.length, 0, "no call to PayPal's live API (no token, no cancel)");
+  assertEquals(db.st.practiceCancelled, 1); assertEquals(db.st.cancelled.length, 0, "not the real cancel (no 'cancelled' email)");
+  assert(db.st.asCalls.some((c) => c.startsWith("billing_practice_cancel:Bearer owner-session")), "as the owner, so the database checks two-step sign-in");
+});
+Deno.test("PAYPAL-LIVE: a live subscription while the function is in practice mode is refused, never cancelled on our side only", async () => {
+  forgetTokens(); const p = fakePayPal(); const db = fakeDb({ cancelEnv: "live" });
+  const r = await handle(post("cancel", { ws: WS }, owner), { env: env(KEYS), fetch: p.f, ...db });
+  assertEquals(r.status, 409); assertStringIncludes((await r.json()).error, "real PayPal subscription");
+  assertEquals(p.calls.length, 0); assertEquals(db.st.practiceCancelled + db.st.cancelled.length, 0);
+});
+Deno.test("PAYPAL-LIVE: a live subscription is cancelled at live PayPal", async () => {
+  forgetTokens(); const p = fakePayPal({ live: true }); const db = fakeDb({ cancelEnv: "live" });
+  p.subs.set("I-SUB000001", { status: "ACTIVE" });
+  const r = await handle(post("cancel", { ws: WS }, owner), { env: env(LIVE), fetch: p.f, ...db });
+  assertEquals(r.status, 200); assert(p.calls.some((c) => c.path === "/v1/billing/subscriptions/I-SUB000001/cancel"));
+  assertEquals(db.st.cancelled, [ORDER]);
+});
+Deno.test("PAYPAL-LIVE buy now: PayPal charges today (no start_time); the default still waits for the trial end", async () => {
+  forgetTokens(); const p = fakePayPal({ live: true }); const later = new Date(Date.now() + 40 * 864e5).toISOString().slice(0, 10);
+  const db = fakeDb({ startsOn: later });
+  const r = await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly", buy_now: true }, owner), { env: env(LIVE), fetch: p.f, ...db });
+  assertEquals(r.status, 200);
+  assertEquals(db.st.startArgs[0].buy_now, true, "the database is told (it ends the trial when PayPal confirms the first payment)");
+  assertEquals(JSON.parse(p.calls.filter((c) => c.path === "/v1/billing/subscriptions").pop()!.body).start_time, undefined, "buy now: start_time omitted, charged today");
+  assertEquals(db.st.envNoted, ["live"]);
+  forgetTokens(); const p2 = fakePayPal({ live: true }); const db2 = fakeDb({ startsOn: later });
+  await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), { env: env(LIVE), fetch: p2.f, ...db2 });
+  assertEquals("buy_now" in db2.st.startArgs[0], false);
+  assertEquals(JSON.parse(p2.calls.filter((c) => c.path === "/v1/billing/subscriptions").pop()!.body).start_time, `${later}T00:00:00Z`, "default: the first payment waits");
+});
+Deno.test("PAYPAL-LIVE buy now on a database that doesn't know it: refused plainly, never quietly delayed", async () => {
+  forgetTokens(); const p = fakePayPal({ live: true }); const db = fakeDb({ buyNowDb: false });
+  const r = await handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly", buy_now: true }, owner), { env: env(LIVE), fetch: p.f, ...db });
+  assertEquals(r.status, 503); assertStringIncludes((await r.json()).error, "Buy now isn't switched on yet");
+  assertEquals(p.calls.filter((c) => c.path === "/v1/billing/subscriptions").length, 0);
+});
+Deno.test("PAYPAL-LIVE a double click: the same order twice gives one PayPal subscription", async () => {
+  forgetTokens(); const p = fakePayPal({ live: true }); const db = fakeDb();
+  const d = { env: env(LIVE), fetch: p.f, ...db };
+  const [a, b] = await Promise.all([1, 2].map(() => handle(post("subscribe", { ws: WS, modules: ["plus"], people: 3, billing: "monthly" }, owner), d)));
+  const [ja, jb] = [await a.json(), await b.json()];
+  assertEquals(ja.approve_url, jb.approve_url, "the same approve link");
+  assertEquals(p.subs.size, 1, "one subscription at PayPal");
+  assert(p.calls.filter((c) => c.path === "/v1/billing/subscriptions").every((c) => c.headers.get("PayPal-Request-Id") === `riyeser-${ORDER}`));
 });
