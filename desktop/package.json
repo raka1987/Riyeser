@@ -3,13 +3,14 @@
   "private": true,
   "description": "Builds Riyeser Payroll as a Windows desktop program",
   "license": "UNLICENSED",
-  "copyright": "Copyright © 2026 Riyeser Group. All rights reserved.",
+  "copyright": "Copyright \u00a9 2026 Riyeser Group. All rights reserved.",
   "scripts": {
     "build": "node prepare.js && electron-builder --projectDir build/app --win nsis portable --x64",
     "start": "node prepare.js && electron build/app"
   },
   "devDependencies": {
     "electron": "45.3.4",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "terser": "5.51.2"
   }
 }
