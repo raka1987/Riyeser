@@ -4,6 +4,11 @@ body.staff { background: #f3f1ec; }
 .app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; background: linear-gradient(to right, var(--green-900) 240px, transparent 240px); }
 .side { background: var(--green-900); color: #d7e7de; display: flex; flex-direction: column; padding: 18px 14px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .side .brand { margin: 0 6px 18px; }
+/* the Riyeser wordmark (staff.html): letters in the text colour, the swoosh brand blue (lighter on the green menu) */
+.wm { display: block; width: auto; flex: none; } .wm-sw { fill: #0b5cff; }
+.login-wm { display: flex; justify-content: center; color: #0a1a4f; padding-top: 4px; } .login-wm .wm { height: 44px; }
+.side-brand { gap: 9px; align-items: center; } .side-brand .wm { height: 27px; } .side-brand .wm-sw { fill: #7fb0ff; }
+.side-brand span { font-size: 1rem; font-weight: 600; color: #d7e7de; padding: 2px 8px; border-radius: 6px; background: rgba(255,255,255,.1); line-height: 1.35; }
 .side nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
 .side nav .grp { font-size: .7rem; text-transform: uppercase; letter-spacing: .1em; color: #7fa594; margin: 14px 10px 4px; }
 .side nav a { color: #d7e7de; text-decoration: none; padding: 8px 10px; border-radius: 8px; font-size: .93rem; display: flex; justify-content: space-between; align-items: center; }
