@@ -5,7 +5,8 @@
 //   - no text is cut off (an element with its own text whose scrollWidth is wider than its box) or squeezed into a sliver;
 //   - cards side by side in one row are the same height (within 1 px);
 //   - row menus (⋯ / ▾) open fully inside the window and aren't hidden behind a scrolling box;
-//   - on the Overview, the count cards still fit with big figures (US$64,512.50) and long captions.
+//   - on the Overview, the count cards still fit with big figures (US$64,512.50) and long captions;
+//   - HQ team: the Roles tab, a role's checklist, a new role and a person's role and ticks (custom roles) pass the same checks.
 // Run: build the site, serve website/public on port 8090 (or set HQ_URL), then `node website/hq/test-hq-layout.js [screenshot folder]`.
 // LAYOUT_WIDTHS=1280,390 and LAYOUT_ONLY=overview,companies narrow it down. Exits 1 on failure.
 const { chromium } = require('playwright');
@@ -94,6 +95,19 @@ async function menus(pg) {
             const d = c.querySelector('.d'); if (d) d.textContent = '12 payments in the last 7 days, including 3 bank transfers'; }));
           (await pg.evaluate(audit)).forEach((x) => bad.push('with big figures: ' + x));
           bad.push(...(await pg.evaluate(() => [...document.querySelectorAll('.ccards .ccard .v')].filter((v) => v.scrollWidth > v.clientWidth + 1 || v.getBoundingClientRect().right > v.closest('.ccard').getBoundingClientRect().right).map((v) => 'figure cut off: ' + v.textContent))));
+        }
+        // HQ team: the custom roles views (Roles tab, a role's checklist, a person's role and ticks) get the same checks
+        if (!v2 && p === 'team' && await pg.$('[data-tt=roles]')) {
+          for (const [k, go] of [['roles', async () => { await pg.click('[data-tt=roles]'); await pg.waitForSelector('#roles'); }],
+            ['role', async () => { await pg.click('[data-roleopen=finance]'); await pg.waitForSelector('#rlf'); }],
+            ['new-role', async () => { await pg.click('#rlCancel'); await pg.waitForSelector('#roles'); await pg.click('#rlNew'); await pg.waitForSelector('#rlf'); }],
+            ['person', async () => { await pg.click('#rlCancel'); await pg.waitForSelector('#roles'); await pg.click('[data-tt=people]'); await pg.waitForSelector('#staff');
+              await pg.click('[data-access=s2]'); await pg.waitForSelector('[data-pa=s2]'); }]]) {
+            await go(); await pg.waitForTimeout(300); await pg.evaluate(() => window.scrollTo(0, 0)); checked++;
+            const rb = [...(await pg.evaluate(audit)), ...(await menus(pg))];
+            rb.forEach((x) => bad.push(`${k}: ${x}`));
+          }
+          await pg.click('#ttBack').catch(() => {}); await pg.waitForTimeout(200);
         }
         bad.forEach((x) => fails.push(`${v2 ? 'v2 ' : ''}${p} @${w}: ${x}`));
         if (shots && bad.length) await pg.screenshot({ path: `${shots}/layout-${v2 ? 'v2-' : ''}${p.replace(/\//g, '-')}-${w}.png`, fullPage: true });
