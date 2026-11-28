@@ -34,18 +34,43 @@ const BASE = (process.env.HQ_URL || 'http://127.0.0.1:8090').replace(/\/$/, '');
   await pg.evaluate(() => { location.hash = '#/pricing'; }); await pg.waitForTimeout(300);
   check(/Not built yet — planned in Phase 2/.test(await pg.innerText('#main')), 'Plans & pricing says not built yet, Phase 2');
   await pg.evaluate(() => { location.hash = '#/integrations'; }); await pg.waitForSelector('#il table');
-  const states = await pg.evaluate(() => [...document.querySelectorAll('#il tr')].slice(1).map((r) => r.cells[0].innerText + ': ' + r.cells[1].innerText));
+  const states = await pg.evaluate(() => [...document.querySelectorAll('#il tr')].slice(1).map((r) => r.cells[0].innerText + ': ' + r.cells[1].innerText + ' | ' + r.cells[4].innerText));
   console.log('integrations:', states);
-  check(states.filter((s) => /Nightly backups|Restore test|HQ jobs/.test(s)).every((s) => !/Healthy/.test(s)), 'unchecked GitHub jobs never show Healthy');
+  // backups and restore tests come from what the jobs recorded in the database (not GitHub); anything not checked is never Healthy
+  check(states.filter((s) => /Nightly backups|Restore test|HQ jobs/.test(s)).every((s) => /Recorded by the job/.test(s)), 'backup, restore and job rows come from the database record');
+  check(states.filter((s) => /Not monitored yet|Unknown/.test(s.split(' | ')[0])).every((s) => !/Healthy/.test(s.split(': ')[1])), 'unknown is never Healthy');
+  // test accounts: left out of the Overview figures by default, counted with the switch on
+  await pg.evaluate(() => { location.hash = '#/overview'; }); await pg.waitForSelector('#ovk .k2:not(.s-loading)');
+  const fp = async () => pg.evaluate(() => [...document.querySelectorAll('#ovk .k2')].find((k) => /Failed payments/.test(k.innerText)).querySelector('.k2v').innerText);
+  const before = await fp(); const leftOut = await pg.evaluate(() => /test accounts? left out/.test(document.getElementById('ovk').innerText));
+  await pg.check('#incl'); await pg.waitForTimeout(500); await pg.waitForSelector('#ovk .k2:not(.s-loading)'); const after = await fp();
+  console.log('failed payments without / with test accounts:', before, after);
+  check(leftOut && Number(after) === Number(before) + 1, 'a test account\'s failed payment is left out unless included');
+  await pg.uncheck('#incl'); await pg.waitForTimeout(400);
+  // the Test accounts page: mark a business, it shows in the list and the history
+  await pg.evaluate(() => { location.hash = '#/test-accounts'; }); await pg.waitForSelector('#tal table');
+  await pg.fill('#tak [name=q]', 'RIY-7K3M-Q2'); await pg.selectOption('#tak [name=kind]', 'test'); await pg.fill('#tak [name=reason]', 'Our own QA business'); await pg.click('#tak .btn2');
+  await pg.waitForTimeout(500); check(/Sample Plumbing/.test(await pg.innerText('#tal')), 'marking a test account lists it');
+  await pg.click('#tal [data-real][data-name="Sample Plumbing"]'); await pg.fill('#tak [name=reason]', 'A real customer after all'); await pg.click('#tak .btn2'); await pg.waitForTimeout(500);
+  check(!/Sample Plumbing/.test(await pg.innerText('#tal')), 'and back to a real customer');
   // search: a page name, then a customer
   await pg.fill('#q2', 'refund'); await pg.waitForSelector('#sr2:not([hidden])'); check(/Refunds/.test(await pg.innerText('#sr2')), 'search finds the Refunds page');
   await pg.fill('#q2', 'harbour'); await pg.press('#q2', 'Enter'); await pg.waitForTimeout(600);
   check(/#\/companies/.test(pg.url()), 'search Enter opens Customers');
-  // no access: Finance opening Settings
+  // no access: Finance opening Settings; Finance has no Integrations (ops.view) and no Test accounts
   await pg.selectOption('#demoAs2', 's3'); await pg.waitForTimeout(400);
+  check(!(await pg.$('#nav2 [data-k=integrations]')) && !(await pg.$('#nav2 [data-k=test-accounts]')), 'Finance: no Integrations or Test accounts in the menu');
   check(!(await pg.$('#nav2 [data-k=settings]')), 'Finance has no Settings in the menu');
   await pg.evaluate(() => { location.hash = '#/settings'; }); await pg.waitForTimeout(300);
   check(/You don’t have access to this page/.test(await pg.innerText('#main')), 'Finance sees the no-access state on Settings');
+  // Admin: the HQ team, settings and test accounts, but no billing or refunds
+  await pg.selectOption('#demoAs2', 's5'); await pg.waitForTimeout(400);
+  const adm = await pg.evaluate(() => [...document.querySelectorAll('#nav2 .ni2')].map((a) => a.dataset.k));
+  check(['team', 'settings', 'history', 'integrations', 'test-accounts'].every((k) => adm.includes(k)) && !['licences', 'payments', 'refunds', 'support'].some((k) => adm.includes(k)), 'Admin menu: ' + adm.join(','));
+  // staff emails: Support sees only its own
+  await pg.selectOption('#demoAs2', 's2'); await pg.waitForTimeout(400); await pg.evaluate(() => { location.hash = '#/team'; }); await pg.waitForTimeout(700);
+  const mails = await pg.evaluate(() => (document.getElementById('main').innerText.match(/[a-z]+@riyeser\.test/g) || []));
+  check(mails.length === 1 && mails[0] === 'help@riyeser.test', 'Support sees only its own email on HQ team: ' + mails.join(','));
   // phone: the menu slides in and closes
   await pg.close(); pg = await page(390); await pg.goto(BASE + '/hq/?demo&v2=1#/overview'); await pg.waitForSelector('#v2');
   await pg.click('#menuBtn'); await pg.waitForTimeout(300); check(await pg.evaluate(() => document.getElementById('v2').classList.contains('open')), 'phone menu opens');

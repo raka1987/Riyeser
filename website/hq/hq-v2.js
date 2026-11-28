@@ -31,7 +31,7 @@
     ['customers', 'Customers', '👥', [
       { k: 'companies', t: 'Customers', kind: 'old' },
       { k: 'signups', t: 'Signups & onboarding', kind: 'old' },
-      { k: 'health-scores', t: 'Customer health', kind: 'plan', perm: ['customers.view'], plan: plan(2, 'P1', 'A health score for each business that explains itself: activity, unfinished setup, failed renewals and open tickets. Missing information counts as neutral, never as bad, and a score never suspends anyone.', ['Activity reports from each program (not reported yet; only "last seen" and linked PCs today)', 'A way to mark test and demo accounts so they are left out (none today)'], [['signups', 'Signups & onboarding'], ['inactive', 'Retention']]) },
+      { k: 'health-scores', t: 'Customer health', kind: 'plan', perm: ['customers.view'], plan: plan(2, 'P1', 'A health score for each business that explains itself: activity, unfinished setup, failed renewals and open tickets. Missing information counts as neutral, never as bad, and a score never suspends anyone.', ['Activity reports from each program (not reported yet; only "last seen" and linked PCs today)', 'Test and demo accounts can now be marked, so they are left out (Administration → Test accounts)'], [['signups', 'Signups & onboarding'], ['inactive', 'Retention']]) },
       { k: 'inactive', t: 'Retention', kind: 'old' },
       { k: 'feedback', t: 'Feedback & requests', kind: 'plan', perm: ['customers.view'], plan: plan(3, 'P2', 'Feature requests and feedback, merged when they repeat, with votes and an owner. Customer names stay private.', ['A requests list linked to tickets (none today); support ratings 1–5 already exist'], [['support', 'Support desk']]) }]],
     ['sales', 'Sales & marketing', '📣', [
@@ -58,12 +58,12 @@
       { k: 'incidents', t: 'Incidents', kind: 'plan', perm: ['overview.view'], plan: plan(1, 'P0', 'When a service goes wrong: a timeline, who is on it, which customers are affected and the update on the public status page. Fixing the incident is separate from closing tickets.', ['An incidents list (none today)', 'A public status page (none today)'], [['integrations', 'Integrations'], ['health', 'System health']]) }]],
     ['operations', 'Operations', '🛠️', [
       { k: 'health', t: 'System health', kind: 'old' },
-      { k: 'integrations', t: 'Integrations', kind: 'v2', perm: ['overview.view'] },
-      { k: 'backups', t: 'Backups & recovery', kind: 'plan', perm: ['settings.manage', 'audit.view'], plan: plan(1, 'P0', 'Each service’s last backup, its last restore test, and how much data and time a recovery could cost. Restores are asked for, approved and practised in a separate place. HQ never browses or downloads the database.', ['Nightly encrypted backups and a monthly restore test already run (GitHub jobs; shown on System health)', 'Written recovery targets for each service (not written yet)', 'As Built photos and files aren’t backed up yet', 'Restore requests with approval (none today: a runbook only)'], [['health', 'System health'], ['integrations', 'Integrations']]) },
+      { k: 'integrations', t: 'Integrations', kind: 'v2', perm: ['ops.view'] },
+      { k: 'backups', t: 'Backups & recovery', kind: 'plan', perm: ['settings.manage', 'audit.view'], plan: plan(1, 'P0', 'Each service’s last backup, its last restore test, and how much data and time a recovery could cost. Restores are asked for, approved and practised in a separate place. HQ never browses or downloads the database.', ['Nightly encrypted backups and a monthly restore test already run, and record their results in the database (shown on Integrations)', 'Written recovery targets for each service (not written yet)', 'As Built photos and files aren’t backed up yet', 'Restore requests with approval (none today: a runbook only)'], [['health', 'System health'], ['integrations', 'Integrations']]) },
       { k: 'emails', t: 'Email delivery', kind: 'old' },
       { k: 'automation', t: 'Automation', kind: 'plan', perm: ['settings.manage'], plan: plan(2, 'P1', 'Rules such as "when a trial ends, remind the customer" that are drafted, tested on sample customers, approved and paused. Never twice for the same event.', ['Fixed rules already run hourly or daily (support sweep, inactivity warnings, website traffic)', 'A rule builder with run history (none today)'], []) },
       { k: 'usage', t: 'Usage limits & settings', kind: 'plan', perm: ['settings.manage'], plan: plan(2, 'P1', 'Storage, AI and phone allowances, product defaults and regional settings, each change previewed, approved and reversible. Limits are enforced by the server, with a warning first.', ['HQ settings and storage grants already exist', 'Usage counts per business for AI and phone lines (none today)'], [['settings', 'Settings']]) },
-      { k: 'sandbox', t: 'Sandbox & status', kind: 'plan', perm: ['overview.view'], plan: plan(1, 'P0', 'A separate test copy of Riyeser online with made-up businesses for trying releases, and a public status page with approved updates. Test accounts are left out of every business number.', ['A separate staging database (none: there is one live project)', 'A test-account flag (none today)', 'Owner to provide: a second Supabase project (cost) and a status page address'], [['integrations', 'Integrations']]) }]],
+      { k: 'sandbox', t: 'Sandbox & status', kind: 'plan', perm: ['overview.view'], plan: plan(1, 'P0', 'A separate test copy of Riyeser online with made-up businesses for trying releases, and a public status page with approved updates. Test accounts are left out of every business number.', ['A separate staging database (none: there is one live project)', 'Test accounts can be marked already (Administration → Test accounts)', 'Owner to provide: a second Supabase project (cost) and a status page address'], [['integrations', 'Integrations']]) }]],
     ['admin', 'Administration', '⚙️', [
       { k: 'team', t: 'HQ team', kind: 'old' },
       { k: 'security', t: 'Security & access', kind: 'v2', perm: ['overview.view'] },
@@ -71,6 +71,7 @@
       { k: 'history', t: 'Audit history', kind: 'old' },
       { k: 'approvals', t: 'Approvals', kind: 'old' },
       { k: 'settings', t: 'Settings', kind: 'old' },
+      { k: 'test-accounts', t: 'Test accounts', kind: 'v2', perm: ['test_accounts.manage'] },
       { k: 'states', t: 'Page states', kind: 'v2', perm: ['overview.view'], demoOnly: true }]],
   ];
   const PAGES = GROUPS.flatMap(([gk, gt, gi, items]) => items.map((p) => ({ ...p, group: gk, groupT: gt, icon: gi })));
@@ -78,7 +79,7 @@
   const visible = (p) => !(p.demoOnly && !X.DEMO);
   // Can this person open it? Old pages: exactly the current HQ's rule. Others: the permissions listed.
   const allowed = (p) => (p.kind === 'old' ? X.tabs().some((x) => x[0] === p.k) : X.can(...(p.perm || [])));
-  const VIEWS2 = { overview, queue, integrations, security, states };
+  const VIEWS2 = { overview, queue, integrations, security, states, 'test-accounts': testAccounts };
 
   // ------------------------------------------------------------------ small parts: KPI cards, states, page header
   // A KPI card always says where its number came from and how fresh it is. state: ok | loading | denied | error | unknown | stale | empty
@@ -105,7 +106,8 @@
   const pill2 = (cls, txt) => `<span class="pill2 ${cls}">${esc(txt)}</span>`;
   const soft = (p) => Promise.resolve(p).then((v) => ({ ok: true, v }), (e) => ({ ok: false, e, missing: X.missing(e) }));
   const roleSays = (perm) => ({ 'licences.view': 'billing and licences', 'support.view': 'support tickets', 'customers.view': 'customers', 'emails.view': 'the email outbox',
-    'reports.view': 'reports', 'audit.view': 'the HQ history', 'staff.manage': 'managing the HQ team', 'settings.manage': 'HQ settings', 'overview.view': 'the overview' }[perm] || perm);
+    'reports.view': 'reports', 'audit.view': 'the HQ history', 'staff.manage': 'managing the HQ team', 'settings.manage': 'HQ settings', 'overview.view': 'the overview',
+    'ops.view': 'integrations and backups', 'test_accounts.manage': 'marking test accounts' }[perm] || perm);
 
   // ------------------------------------------------------------------ the frame
   function mount(ctx) {
@@ -219,52 +221,61 @@
   }
 
   // ------------------------------------------------------------------ Overview: real KPIs, each with its source and freshness
+  // Test, demo and internal accounts are left out of the figures unless this is ticked (remembered on this browser).
+  const inclTest = () => store.get('hq.v2.inclTest') === '1';
+  const testSwitch = (id) => `<label class="sw2l"><input type="checkbox" id="${id}"${inclTest() ? ' checked' : ''}> Include test accounts</label>`;
+  const wireTestSwitch = (root, id, again) => { const b = root.querySelector('#' + id); if (b) b.onchange = () => { store.set('hq.v2.inclTest', b.checked ? '1' : null); again(); }; };
   async function overview() {
     const t0 = Date.now();
     const cards = (list) => `<div class="kg2">${list.map(kpi).join('')}</div>`;
     const L = (label) => ({ label, state: 'loading' });
-    main(`${head('Overview', 'Your business at a glance. Account information only: HQ never sees customers’ books, payroll, documents, sales or messages.', '<button class="btn2" id="refresh">↻ Refresh</button>')}
+    const m = main(`${head('Overview', 'Your business at a glance. Account information only: HQ never sees customers’ books, payroll, documents, sales or messages.', `${testSwitch('incl')}<button class="btn2" id="refresh">↻ Refresh</button>`)}
       <div id="ovk">${cards([L('New sign-ups this week'), L('Monthly recurring revenue'), L('Open support tickets'), L('Trials and renewals ending (7 days)'), L('Failed payments'), L('Payments received (7 days)')])}</div>
-      <div class="g2c wide"><section class="card2" id="ovq"><h2>Needs attention</h2>${skeletonRows()}</section><section class="card2" id="ovs"><h2>Service status</h2>${skeletonRows(3)}</section></div>
-      <section class="card2" id="ovw"><h2>New businesses per week</h2>${skeletonRows(2)}</section>`).querySelector('#refresh').onclick = overview;
-    const [wq, lic, pr, ov, att] = await Promise.all([soft(X.api.workQueue()), X.can('licences.view') ? soft(X.api.licences()) : null,
-      X.can('licences.view') && X.api.paymentsReceived ? soft(X.api.paymentsReceived(7)) : null, soft(X.api.overview()), soft(X.api.attention())]);
+      <div class="g2c wide"><section class="card2" id="ovq"><h2>Needs attention</h2>${skeletonRows()}</section>${X.can('ops.view') ? `<section class="card2" id="ovs"><h2>Service status</h2>${skeletonRows(3)}</section>` : ''}</div>
+      <section class="card2" id="ovw"><h2>New businesses per week</h2>${skeletonRows(2)}</section>`);
+    m.querySelector('#refresh').onclick = overview; wireTestSwitch(m, 'incl', overview);
+    const inc = inclTest();
+    const [k, wq, att] = await Promise.all([X.api.kpis ? soft(X.api.kpis(inc)) : { ok: false, missing: true, e: new Error('missing') }, soft(X.api.workQueue()), soft(X.api.attention())]);
     if (!document.getElementById('ovk')) return;
-    const at = loadedAt(t0); const live = `Live · ${at}`;
-    const c = (wq.ok && wq.v && wq.v.counts) || {};
-    const fromQ = (label, v, perm, source, detail, href) => (!wq.ok ? { label, state: 'error', error: X.plain(wq.e) } : v == null ? { label, state: 'denied', needs: roleSays(perm) }
-      : { label, value: X.num(v), source, fresh: live, detail, href });
+    const at = loadedAt(t0); const live = `Live · ${at}`; const K = k.ok ? k.v : null;
+    const scope = K ? (K.include_test ? ' (test accounts included)' : `${Number(K.test_accounts) ? ` · ${X.num(K.test_accounts)} test account${Number(K.test_accounts) === 1 ? '' : 's'} left out` : ''}`) : '';
+    // each figure: from hq_kpis; null = your role can't see it; an older database (no hq_kpis) says so
+    const fig = (label, v, perm, source, detail, href, fmt = X.num) => (!k.ok ? (k.missing ? { label, state: 'unknown', source: 'Needs the latest team-chat.sql (hq_kpis)' } : { label, state: 'error', error: X.plain(k.e) })
+      : v == null ? { label, state: 'denied', needs: roleSays(perm) } : { label, value: fmt(v), source: source + scope, fresh: live, detail, href });
     document.getElementById('ovk').innerHTML = cards([
-      fromQ('New sign-ups this week', c.new_signups, 'customers.view', 'Source: businesses registered since Monday', '', '#/signups'),
-      !X.can('licences.view') ? { label: 'Monthly recurring revenue', state: 'denied', needs: roleSays('licences.view') }
-        : !lic.ok ? { label: 'Monthly recurring revenue', state: 'error', error: X.plain(lic.e) }
-          : lic.v.monthly_recurring == null ? { label: 'Monthly recurring revenue', state: 'unknown', source: 'Payments aren’t connected on this database yet' }
-            : { label: 'Monthly recurring revenue', value: X.money(lic.v.monthly_recurring), detail: `US dollars · ${X.num(lic.v.recurring_count)} active subscription${Number(lic.v.recurring_count) === 1 ? '' : 's'} and paid invoices; yearly ÷ 12`, source: 'Source: PayPal subscriptions and paid bank invoices', fresh: live, href: '#/licences' },
-      fromQ('Open support tickets', c.open_complaints, 'support.view', 'Source: support tickets not resolved', '', '#/support'),
-      fromQ('Trials and renewals ending (7 days)', c.renewals_due, 'customers.view', 'Source: program licences (trial end or paid-until date)', '', '#/queue'),
-      fromQ('Failed payments', c.failed_payments, 'licences.view', 'Source: PayPal subscriptions in their grace period or stopped', '', '#/payments'),
-      !pr ? { label: 'Payments received (7 days)', state: 'denied', needs: roleSays('licences.view') } : !pr.ok ? { label: 'Payments received (7 days)', state: 'error', error: X.plain(pr.e) }
-        : { label: 'Payments received (7 days)', value: X.money(pr.v.total), detail: `${X.num(pr.v.count)} payment${Number(pr.v.count) === 1 ? '' : 's'} · US dollars`, source: 'Source: completed payments', fresh: live, href: '#/payments' }]);
+      fig('New sign-ups this week', K && K.new_signups_week, 'customers.view', 'Source: businesses registered since Monday', '', '#/signups'),
+      fig('Monthly recurring revenue', K && K.mrr, 'licences.view', 'Source: PayPal subscriptions and paid bank invoices',
+        K && K.recurring_count != null ? `US dollars · ${X.num(K.recurring_count)} active subscription${Number(K.recurring_count) === 1 ? '' : 's'} and paid invoices; yearly ÷ 12` : '', '#/licences', X.money),
+      fig('Open support tickets', K && K.open_tickets, 'support.view', 'Source: support tickets not resolved', '', '#/support'),
+      fig('Trials and renewals ending (7 days)', K && K.renewals_due_7d, 'customers.view', 'Source: program licences (trial end or paid-until date)', '', '#/queue'),
+      fig('Failed payments', K && K.failed_payments, 'licences.view', 'Source: PayPal subscriptions in their grace period or stopped', '', '#/payments'),
+      fig('Payments received (7 days)', K && K.payments_7d ? K.payments_7d.total : K && K.payments_7d, 'licences.view', 'Source: completed payments',
+        K && K.payments_7d ? `${X.num(K.payments_7d.count)} payment${Number(K.payments_7d.count) === 1 ? '' : 's'} · US dollars` : '', '#/payments', X.money)]);
     document.querySelectorAll('#ovk [data-retry]').forEach((b) => b.onclick = (e) => { e.preventDefault(); overview(); });
-    // Needs attention: the first items of the work queue
-    const q = (wq.ok && wq.v && wq.v.queue) || [];
+    // Needs attention: the first items of the work queue (test accounts' items left out unless included)
+    const q = ((wq.ok && wq.v && wq.v.queue) || []).filter((x) => inc || !x.account_kind || x.account_kind === 'customer');
     document.getElementById('ovq').innerHTML = `<h2>Needs attention <small>${wq.ok ? `${X.num(q.length)} item${q.length === 1 ? '' : 's'} · ${esc(at)}` : ''}</small></h2>
       ${!wq.ok ? stateBox(wq.missing ? 'unknown' : 'error', wq.missing ? 'Needs a database update' : 'Couldn’t load the work queue', esc(wq.missing ? 'Run the latest team-chat.sql to switch on the work queue.' : X.plain(wq.e)))
         : q.length ? `${queueTable(q.slice(0, 6), true)}<div class="row2 end2"><a class="btn2" href="#/queue">Open My work queue (${X.num(q.length)})</a></div>` : stateBox('empty', 'Nothing needs you right now', 'New items appear here as tickets, approvals, payments and renewals come in.')}`;
     wireQueue(document.getElementById('ovq'), q);
-    // Service status: a short version of Integrations
-    const svc = await services(att);
-    if (!document.getElementById('ovs')) return;
-    const n = (s) => svc.filter((x) => x.state === s).length;
-    document.getElementById('ovs').innerHTML = `<h2>Service status <small>${esc(loadedAt(Date.now()))}</small></h2>
-      <ul class="svl2">${svc.slice(0, 6).map((s) => `<li>${statePill(s.state)}<span><b>${esc(s.name)}</b><small>${esc(s.note)}</small></span></li>`).join('')}</ul>
-      <p class="mut2 sm2">${n('ok')} healthy · ${n('degraded') + n('failed')} need a look · ${n('unknown') + n('none')} unknown or not monitored. Unknown is never shown as healthy.</p>
-      <div class="row2 end2"><a class="btn2" href="#/integrations">All integrations</a></div>`;
+    // Service status: a short version of Integrations (ops.view)
+    if (document.getElementById('ovs')) {
+      const svc = await services(att);
+      if (document.getElementById('ovs')) {
+        const n = (...st) => svc.filter((x) => st.includes(x.state)).length;
+        document.getElementById('ovs').innerHTML = `<h2>Service status <small>${esc(loadedAt(Date.now()))}</small></h2>
+          <ul class="svl2">${svc.slice(0, 6).map((x) => `<li>${statePill(x.state)}<span><b>${esc(x.name)}</b><small>${esc(x.note)}</small></span></li>`).join('')}</ul>
+          <p class="mut2 sm2">${n('ok')} healthy · ${n('degraded', 'failed', 'stale')} need a look · ${n('unknown', 'none')} unknown or not monitored. Unknown is never shown as healthy.</p>
+          <div class="row2 end2"><a class="btn2" href="#/integrations">All integrations</a></div>`;
+      }
+    }
     // New businesses per week (a real chart: units, a legend, real values)
-    const wk = ov.ok && ov.v ? (ov.v.signups_by_week || []) : null;
-    document.getElementById('ovw').innerHTML = `<h2>New businesses per week <small>last 12 weeks · ${esc(at)}</small></h2>${!ov.ok ? stateBox('error', 'Couldn’t load', esc(X.plain(ov.e)))
-      : !wk.length ? stateBox('empty', 'No sign-ups in the last 12 weeks', 'The chart fills in as businesses register.') : bars(wk.map((w) => ({ l: new Date(w.week).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }), v: Number(w.companies) })), 'businesses registered')}
-      <p class="mut2 sm2">Source: businesses by the week they registered. Test and demo accounts can’t be left out yet: there is no test-account flag (planned, Phase 1).</p>`;
+    const wk = K ? K.signups_by_week : null;
+    if (!document.getElementById('ovw')) return;
+    document.getElementById('ovw').innerHTML = `<h2>New businesses per week <small>last 12 weeks · ${esc(at)}</small></h2>${!k.ok ? stateBox(k.missing ? 'unknown' : 'error', k.missing ? 'Needs a database update' : 'Couldn’t load', esc(k.missing ? 'Run the latest team-chat.sql to switch on these figures.' : X.plain(k.e)))
+      : wk == null ? stateBox('denied', 'No access', 'Your HQ role doesn’t include customers.') : !wk.length ? stateBox('empty', 'No sign-ups in the last 12 weeks', 'The chart fills in as businesses register.')
+        : bars(wk.map((w) => ({ l: new Date(w.week + (String(w.week).length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }), v: Number(w.companies) })), 'businesses registered')}
+      <p class="mut2 sm2">Source: businesses by the week they registered${esc(scope)}.</p>`;
   }
   function bars(rows, unit) {
     const max = Math.max(1, ...rows.map((r) => r.v));
@@ -296,14 +307,15 @@
   // ------------------------------------------------------------------ My work queue (hq_work_queue: the same list the current Overview shows)
   async function queue() {
     const t0 = Date.now(); const F = V.qf || 'all';
-    const m = main(`${head('My work queue', 'Everything waiting for you or your team, most urgent first: tickets, approvals, payments, follow-ups, renewals and stuck sign-ups.', '<button class="btn2" id="refresh">↻ Refresh</button>')}
+    const m = main(`${head('My work queue', 'Everything waiting for you or your team, most urgent first: tickets, approvals, payments, follow-ups, renewals and stuck sign-ups.', `${testSwitch('inclq')}<button class="btn2" id="refresh">↻ Refresh</button>`)}
       <div id="qk">${`<div class="kg2">${['Waiting in the queue', 'High priority', 'My open tickets', 'Follow-ups due'].map((l) => kpi({ label: l, state: 'loading' })).join('')}</div>`}</div><section class="card2" id="ql">${skeletonRows(6)}</section>`);
-    m.querySelector('#refresh').onclick = queue;
+    m.querySelector('#refresh').onclick = queue; wireTestSwitch(m, 'inclq', queue);
     const [wq, att] = await Promise.all([soft(X.api.workQueue()), soft(X.api.attention())]);
     if (!document.getElementById('ql')) return;
     if (!wq.ok) { document.getElementById('qk').innerHTML = ''; document.getElementById('ql').innerHTML = stateBox(wq.missing ? 'unknown' : 'error', wq.missing ? 'Needs a database update' : 'Couldn’t load the work queue', esc(wq.missing ? 'Run the latest team-chat.sql to switch on the work queue.' : X.plain(wq.e)), '<button class="btn2" id="again">Try again</button>');
       const a = document.getElementById('again'); if (a) a.onclick = queue; return; }
-    const all = wq.v.queue || []; const live = `Live · ${loadedAt(t0)}`; const a = att.ok ? att.v : {};
+    const inc = inclTest(); const raw = wq.v.queue || []; const all = raw.filter((x) => inc || !x.account_kind || x.account_kind === 'customer');
+    const live = `Live · ${loadedAt(t0)}${raw.length > all.length ? ` · ${raw.length - all.length} test-account item${raw.length - all.length === 1 ? '' : 's'} left out` : ''}`; const a = att.ok ? att.v : {};
     document.getElementById('qk').innerHTML = `<div class="kg2">${[
       kpi({ label: 'Waiting in the queue', value: X.num(all.length), source: 'Source: tickets, approvals, payments, notes, licences, sign-ups', fresh: live }),
       kpi({ label: 'High priority', value: X.num(all.filter((x) => PRIO[x.kind] === 'High').length), detail: 'complaints, overdue updates, failed payments', source: 'Source: the queue below', fresh: live }),
@@ -324,13 +336,22 @@
   const statePill = (s) => { const [l, c] = STATE[s] || [s, '']; return pill2(c, l); };
   async function services(att) {
     const out = [];
-    const gh = async (file, name, okWord, maxH) => { const v = await X.ghRun(file);
-      const age = v.at ? (Date.now() - new Date(v.at)) / 3600e3 : null;
+    // Backups, restore tests and HQ jobs: what the jobs recorded in the database (hq_ops_runs). Only if nothing is recorded
+    // yet (an older database, or before the jobs' next run) does HQ ask GitHub, and says so.
+    const runs = X.api.opsRuns ? await soft(X.api.opsRuns()) : null;
+    const rec = runs && runs.ok ? runs.v || [] : [];
+    const job = async (key, file, name, okWord, maxH) => {
+      const r = rec.find((x) => x.job === key);
+      if (r) { const when = r.finished_at || r.started_at; const age = (Date.now() - new Date(when)) / 3600e3;
+        const state = r.ok === false ? 'failed' : age > maxH ? 'stale' : 'ok';
+        return { name, state, note: state === 'failed' ? `Last run failed ${X.ago(when)}${r.last_ok_at ? ` · last good ${X.ago(r.last_ok_at)}` : ' · no good run recorded'}`
+          : `${state === 'stale' ? 'Last good run is old: ' : okWord + ': '}${X.ago(when)}`, last: when, url: r.run_url, source: 'Recorded by the job (database)' }; }
+      const v = await X.ghRun(file); const age = v.at ? (Date.now() - new Date(v.at)) / 3600e3 : null;
       const state = v.state === 'ok' ? (age != null && age > maxH ? 'stale' : 'ok') : v.state === 'failed' ? 'failed' : v.state === 'running' ? 'ok' : v.state === 'none' ? 'none' : 'unknown';
-      return { name, state, note: v.at ? `${state === 'stale' ? 'Last good run is old: ' : okWord + ': '}${X.ago(v.at)}` : (v.note || 'No runs yet'), last: v.at, source: `GitHub job ${file}`, url: v.url }; };
+      return { name, state, note: v.at ? `${state === 'stale' ? 'Last good run is old: ' : okWord + ': '}${X.ago(v.at)}` : (v.note || 'No runs yet'), last: v.at, source: `GitHub (${file}): nothing recorded in the database yet`, url: v.url }; };
     out.push({ name: 'HQ database and sign-in', state: X.DEMO ? 'unknown' : 'ok', note: X.DEMO ? 'Demo: not checked' : 'Answered when this page loaded', last: X.DEMO ? null : new Date().toISOString(), source: 'Supabase (this page’s own requests)' });
-    const [b, r, j] = await Promise.all([gh('backup.yml', 'Nightly backups', 'Last backup', 26), gh('restore-drill.yml', 'Restore test', 'Last restore test', 24 * 35), gh('hq-jobs.yml', 'HQ jobs (sweeps, email sending)', 'Last run', 2)]);
-    out.push(b, r, j);
+    out.push(...await Promise.all([job('backup', 'backup.yml', 'Nightly backups', 'Last backup', 26), job('restore_drill', 'restore-drill.yml', 'Restore test', 'Last restore test', 24 * 35),
+      job('hq_jobs', 'hq-jobs.yml', 'HQ jobs (sweeps, email sending)', 'Last run', 2)]));
     if (X.can('emails.view')) {
       const e = await soft(X.api.emails()); const c = e.ok ? e.v.counts || {} : {};
       out.push(!e.ok ? { name: 'Email delivery', state: 'unknown', note: 'Couldn’t read the outbox', source: 'email_outbox' }
@@ -369,8 +390,8 @@
   // ------------------------------------------------------------------ Security & access: what exists (roles, two-step sign-in, history) and what doesn't yet
   async function security() {
     const t0 = Date.now();
-    const m = main(`${head('Security & access', 'Who can use HQ, what each role can see, and the protections in place. Session sign-out, suspicious sign-in alerts and privacy requests are planned for Phase 1.')}
-      <div id="sk2"><div class="kg2">${['HQ staff', 'Two-step sign-in', 'Approvals waiting', 'Security alerts'].map((l) => kpi({ label: l, state: 'loading' })).join('')}</div></div>
+    const m = main(`${head('Security & access', 'Who can use HQ, what each role can see, and the protections in place. Signing someone out of every device, sign-in alerts and privacy requests are planned for Phase 1.')}
+      <div id="sk2"><div class="kg2">${['HQ staff', 'Two-step sign-in', 'HQ sessions', 'Approvals waiting', 'Security alerts'].map((l) => kpi({ label: l, state: 'loading' })).join('')}</div></div>
       <section class="card2" id="sr"><h2>Roles</h2>${skeletonRows(5)}</section>`);
     const [tm, att] = await Promise.all([soft(X.api.team()), soft(X.api.attention())]);
     if (!document.getElementById('sr')) return;
@@ -379,6 +400,7 @@
     document.getElementById('sk2').innerHTML = `<div class="kg2">${[
       !tm.ok ? kpi({ label: 'HQ staff', state: 'error', error: X.plain(tm.e) }) : kpi({ label: 'HQ staff', value: X.num(active.length), detail: `${X.num(staff.length - active.length)} switched off`, source: 'Source: HQ team list', fresh: live, href: '#/team' }),
       kpi({ label: 'Two-step sign-in', value: 'Required', detail: 'every HQ action checks it in the database', source: 'Source: database rule (hq_role needs two-step)', fresh: 'always on' }),
+      kpi({ label: 'HQ sessions', value: '30 min · 12 h', detail: 'signed out after 30 minutes without activity, and 12 hours after signing in', source: 'Source: database rule (hq_role / hq_touch)', fresh: 'always on' }),
       a.approvals == null ? kpi({ label: 'Approvals waiting', state: 'denied', needs: 'approving refunds or free periods' }) : kpi({ label: 'Approvals waiting', value: X.num(a.approvals), source: 'Source: refunds and free periods', fresh: live, href: '#/approvals' }),
       kpi({ label: 'Security alerts', state: 'unknown', source: 'Not monitored yet: no sign-in alert feed (Phase 1)' })].join('')}</div>`;
     const roles = X.ROLES.map(([r, name]) => ({ r, name, perms: r === 'owner' ? X.PERMS.map((p) => p[0]) : ((tm.ok && tm.v.roles && tm.v.roles[r]) || X.ROLE_PERMS[r] || []), people: active.filter((s) => s.role === r).length }));
@@ -387,11 +409,41 @@
     const cols = [['customers.view', 'Customers'], ['support.view', 'Tickets'], ['licences.view', 'Billing'], ['licences.manage', 'Change licences'], ['refunds.approve', 'Approve refunds'], ['support.diagnostics', 'Diagnostics'], ['audit.view', 'Audit history'], ['staff.manage', 'Manage staff']];
     document.getElementById('sr').innerHTML = `<h2>Roles and what they can open <small>${esc(live)}</small></h2><div class="tw2"><table class="tbl t2"><tr><th>Role</th><th>People</th>${cols.map(([, l]) => `<th class="c">${l}</th>`).join('')}</tr>
       ${roles.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td>${tm.ok ? X.num(x.people) : '—'}</td>${cols.map(([p]) => `<td class="c">${yes(has(x.perms, p))}</td>`).join('')}</tr>`).join('')}</table></div>
-      <p class="mut2 sm2">Role defaults; an HQ owner can tick extra permissions on or off for one person (HQ team). Only the Owner can change Riyeser’s bank details; only Finance and the Owner email invoices; no role can see or set a phone password.</p>`;
+      <p class="mut2 sm2">Role defaults; an HQ owner can tick extra permissions on or off for one person (HQ team). Only the Owner can change Riyeser’s bank details and make owners or admins; only Finance and the Owner email invoices; no role can see or set a phone password. Staff emails show only to whoever manages the HQ team.</p>`;
     m.insertAdjacentHTML('beforeend', `<div class="g2c"><section class="card2"><h2>In place today</h2><ul class="ul2">
-        <li>Two-step sign-in for everyone in HQ, checked by the database on every action.</li><li>Every action and every customer page or ticket opened is written to the HQ history, which nobody can change or delete.</li>
+        <li>Two-step sign-in for everyone in HQ, checked by the database on every action.</li><li>HQ signs you out after 30 minutes without activity, and 12 hours after signing in (the database refuses an older session too).</li><li>Every action and every customer page or ticket opened is written to the HQ history, which nobody can change or delete.</li>
         <li>HQ reads account information only: never customers’ books, payroll, documents, POS sales, private messages or call recordings.</li><li>Refunds over the set amount need a second person.</li></ul></section>
-      <section class="card2"><h2>Planned for Phase 1</h2>${stateBox('plan', 'Not built yet — planned in Phase 1', 'Sign a staff member out of every device; shorter HQ sessions with an idle time-out; alerts for unusual sign-ins; a quarterly access review; privacy requests with deadlines.')}</section></div>`);
+      <section class="card2"><h2>Planned for Phase 1</h2>${stateBox('plan', 'Not built yet — planned in Phase 1', 'Sign a staff member out of every device; alerts for unusual sign-ins; a quarterly access review; privacy requests with deadlines.')}</section></div>`);
+  }
+
+
+  // ------------------------------------------------------------------ Test accounts: Riyeser's own businesses, left out of the figures
+  const KINDS = [['test', 'Test'], ['demo', 'Demo'], ['internal', 'Internal'], ['customer', 'Customer (real)']];
+  async function testAccounts() {
+    const t0 = Date.now();
+    const m = main(`${head('Test accounts', 'Riyeser’s own test, demo and internal businesses. Overview and My work queue leave them out unless you tick “Include test accounts”. Every change is in the HQ history.')}
+      <section class="card2"><h2>Mark a business</h2><form id="tak" class="tak2"><label class="f2"><span>Company ID or name</span><input name="q" required placeholder="e.g. RIY-7K3M-Q2" autocomplete="off"></label>
+        <label class="f2"><span>It is</span><select name="kind">${KINDS.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
+        <label class="f2 grow2"><span>Why</span><input name="reason" required minlength="3" maxlength="200" placeholder="e.g. Our own QA business"></label><button class="btn2 p">Save</button></form><div id="takmsg"></div></section>
+      <section class="card2" id="tal">${skeletonRows(4)}</section>`);
+    m.querySelector('#tak').onsubmit = async (e) => { e.preventDefault(); const f = new FormData(e.target); const msg = m.querySelector('#takmsg');
+      const q = String(f.get('q') || '').trim(); const kind = String(f.get('kind')); const reason = String(f.get('reason') || '').trim();
+      try { const list = await X.api.companies(q, 'all'); const rows = Array.isArray(list) ? list : (list && list.rows) || [];
+        const hit = rows.find((c) => String(c.company_code || '').toLowerCase() === q.toLowerCase()) || (rows.length === 1 ? rows[0] : null);
+        if (!hit) { msg.innerHTML = stateBox('empty', rows.length ? 'More than one business matches' : 'No business matches', rows.length ? 'Type its Company ID (for example RIY-7K3M-Q2).' : 'Check the Company ID or name.'); return; }
+        await X.api.setAccountKind(hit.id, kind, reason); msg.innerHTML = ''; testAccounts(); }
+      catch (err) { msg.innerHTML = stateBox('error', 'Couldn’t save', esc(X.plain(err))); } };
+    const r = await soft(X.api.testAccounts()); const el = document.getElementById('tal'); if (!el) return;
+    if (!r.ok) { el.innerHTML = stateBox(r.missing ? 'unknown' : 'error', r.missing ? 'Needs a database update' : 'Couldn’t load', esc(r.missing ? 'Run the latest team-chat.sql to switch on test accounts.' : X.plain(r.e))); return; }
+    const list = r.v || [];
+    el.innerHTML = `<h2>Marked accounts <small>${X.num(list.length)} · Live · ${esc(loadedAt(t0))}</small></h2>${list.length ? `<div class="tw2"><table class="tbl t2"><tr><th>Business</th><th>Company ID</th><th>Kind</th><th>Since</th><th></th></tr>
+      ${list.map((c) => `<tr><td><button class="lnk" data-goco="${esc(c.id)}"><b>${esc(c.name)}</b></button><small>${esc(c.country || '')}</small></td><td class="nowrap">${esc(c.company_code || '')}</td>
+        <td>${pill2('unk', (KINDS.find((x) => x[0] === c.account_kind) || [0, c.account_kind])[1])}</td><td class="nowrap">${esc(X.day(c.created_at))}</td>
+        <td><button class="btn2 sm" data-real="${esc(c.id)}" data-code="${esc(c.company_code || '')}" data-name="${esc(c.name)}">Mark as a real customer</button></td></tr>`).join('')}</table></div>`
+      : stateBox('empty', 'No test accounts marked', 'Every business counts in the figures. Mark Riyeser’s own test businesses above.')}`;
+    // "Mark as a real customer" fills the form above (no pop-up): say why, then Save
+    el.querySelectorAll('[data-real]').forEach((b) => b.onclick = () => { const f = m.querySelector('#tak'); f.q.value = b.dataset.code || b.dataset.name; f.kind.value = 'customer';
+      f.reason.value = ''; f.reason.focus(); f.scrollIntoView({ block: 'nearest' }); });
   }
 
   // ------------------------------------------------------------------ Page states (demo only): how every page shows loading, empty, error, stale and no access

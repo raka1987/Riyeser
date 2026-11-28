@@ -28,7 +28,7 @@
     return m < 2 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : Math.round(m / 1440) === 1 ? '1 day ago' : `${Math.round(m / 1440)} days ago`; };
   const hours = (a, b = Date.now()) => (new Date(b) - new Date(a)) / 3600000;
   const dur = (h) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
-  const ROLES = [['owner', 'Owner'], ['finance', 'Finance'], ['support', 'Support'], ['senior', 'Senior support'], ['sales', 'Sales'], ['developer', 'Developer']];
+  const ROLES = [['owner', 'Owner'], ['admin', 'Admin'], ['finance', 'Finance'], ['support', 'Support'], ['senior', 'Senior support'], ['sales', 'Sales'], ['developer', 'Developer']];
   const roleName = (r) => (ROLES.find((x) => x[0] === r) || [r, r])[1];
   // The paid programs A to Z (as everywhere else). 'calls' is Riyeser Link (chat, calls, desk phones, Link Office).
   // Riyeser Estimate ('estimate'): free for 90 days from first use, then US$20 a month (not part of any bundle).
@@ -84,19 +84,23 @@
     ['refunds.approve', 'Approve refunds'], ['refunds.pay', 'Mark refunds paid'], ['offers.grant', 'Give free periods'], ['offers.approve', 'Approve free periods (supervisor)'],
     ['emails.view', 'See the email outbox'], ['emails.manage', 'Send held or failed emails again'], ['accounts.inactive', 'Approve removing inactive accounts'],
     ['staff.manage', 'Manage the HQ team'], ['audit.view', 'See the HQ history'], ['settings.manage', 'Change HQ settings'], ['reports.view', 'See reports'],
-    ['link.support', 'Riyeser Link phone support'], ['support.diagnostics', 'Look up diagnostic reports']];
+    ['link.support', 'Riyeser Link phone support'], ['support.diagnostics', 'Look up diagnostic reports'], ['ops.view', 'See integrations, backups and restore tests'],
+    ['test_accounts.manage', 'Mark test, demo and internal accounts']];
   const BASE = ['overview.view', 'downloads.view'];
   const ROLE_PERMS = {
     owner: PERMS.map((p) => p[0]),
-    finance: [...BASE, 'customers.view', 'customers.notes', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.level2', 'support.level3',
+    // Finance: money, and billing tickets at level 1 (owner's decision: not level 2/3 ticket work by default)
+    finance: [...BASE, 'customers.view', 'customers.notes', 'licences.view', 'licences.manage', 'support.view', 'support.reply',
       'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'reports.view'],
+    // Admin: the HQ team, settings, history and operations; no money, licences, refunds or bank details
+    admin: [...BASE, 'customers.view', 'customers.notes', 'emails.view', 'emails.manage', 'audit.view', 'staff.manage', 'settings.manage', 'ops.view', 'test_accounts.manage'],
     support: [...BASE, 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa', 'licences.view', 'support.view', 'support.reply', 'support.assign',
-      'support.saved_replies', 'support.escalate', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics'],
+      'support.saved_replies', 'support.escalate', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics', 'ops.view'],
     senior: [...BASE, 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa', 'people.change_owner', 'business.close', 'licences.view', 'support.view',
       'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view',
-      'support.diagnostics'],
+      'support.diagnostics', 'ops.view', 'test_accounts.manage'],
     sales: [...BASE, 'customers.view', 'customers.notes', 'licences.view', 'support.view', 'offers.grant'],
-    developer: [...BASE, 'support.diagnostics'],
+    developer: [...BASE, 'support.diagnostics', 'ops.view'],
   };
   const permsOf = (s) => (s.role === 'owner' ? ROLE_PERMS.owner : [...new Set([...(ROLE_PERMS[s.role] || []), ...(s.perms_add || [])])].filter((p) => !(s.perms_remove || []).includes(p)));
   const LEVELS = { 1: 'Support', 2: 'Senior', 3: 'Management' };
@@ -148,7 +152,7 @@
   function online() {
     const sb = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey, { auth: { persistSession: true, storageKey: 'riyeser.hq.session' } });
     const ok = ({ data, error }) => { if (error) throw error; return data; };
-    const rpc = async (f, a) => ok(await sb.rpc(f, a || {}));
+    const rpc = async (f, a) => { try { return ok(await sb.rpc(f, a || {})); } catch (e) { if (ENDED.test(plain(e))) sessionEnded(); throw e; } };
     const fix = (reason, ticket) => ({ reason, ticket_ref: ticket || null });
     return {
       async session() { return ok(await sb.auth.getSession()).session; },
@@ -255,6 +259,9 @@
       notePin: (id, pin) => rpc('hq_note_pin', { note_id: id, pin }), followUpDone: (id) => rpc('hq_follow_up_done', { note_id: id }),
       myFollowUps: () => rpc('hq_my_follow_ups'), reports: (from, to) => rpc('hq_reports', { from_day: from, to_day: to }), attention: () => rpc('hq_attention'),
       traffic: (from, to) => rpc('hq_traffic', { from_day: from, to_day: to }),
+      // HQ V2 first slice (each answers "missing" on a database without the latest team-chat.sql)
+      touch: () => rpc('hq_touch'), kpis: (includeTest) => rpc('hq_kpis', { include_test: !!includeTest }), opsRuns: () => rpc('hq_ops_runs'),
+      testAccounts: () => rpc('hq_test_accounts'), setAccountKind: (ws, kind, reason) => rpc('hq_set_account_kind', { ws, new_kind: kind, reason }),
       setOwner: (ws, staff) => rpc('hq_set_owner', { ws, staff: staff || null }), workQueue: () => rpc('hq_work_queue'), signups: (days) => rpc('hq_signups', { days }),
       handover: () => rpc('hq_handover'), handoverAdd: (note, shiftDay) => rpc('hq_handover_add', { note, shift_day: shiftDay || null }), handoverDone: (id) => rpc('hq_handover_done', { note_id: id }),
       // Riyeser Link Office (added separately): only used when the database has these functions
@@ -283,6 +290,8 @@
         created_at: t(age), people: 1 + (i % 6), branches: 1, pcs: i % 4, last_seen: i % 4 ? t(i % 50) : null, calls_paid_until: null, trial_days_left: 90 - age,
         owner_name: `Owner ${i}`, owner_email: `owner${i}@demo.test`, status: 'active', kind: i % 5 ? 'business' : 'personal', last_active_at: t((i * 3) % 75) });
     }
+    // Riyeser's own accounts in the demo: business figures leave them out unless asked (HQ V2)
+    Object.entries({ g12: 'test', g30: 'demo', g45: 'internal' }).forEach(([id, k]) => { const c = cos.find((x) => x.id === id); if (c) c.account_kind = k; });
     cos.forEach((c, i) => { c.owner_phone = c.owner_phone || `555 0${String(100 + i).padStart(3, '0')}`; c.hq_owner = ({ w1: 's2', w2: 's1', w3: 's1', w4: 's4' })[c.id] || (i % 3 === 0 ? 's2' : null);
       c.address = c.address || ({ Fiji: ['Suva', 'Nadi', 'Lautoka'][i % 3], Australia: 'Brisbane', 'New Zealand': 'Auckland', Samoa: 'Apia', Tonga: 'Nuku\'alofa' })[c.country] || ''; });
     let hn = 3; const handover = [{ id: 1, note: 'Northside Dental: call Priya back about the POS printer after 3 pm.', shift_date: new Date().toISOString().slice(0, 10), done: false, by: 'Help Desk', author: 's2', at: t(0.3) },
@@ -290,7 +299,10 @@
     const staff = [{ user_id: 's1', display_name: 'Riki', role: 'owner', active: true, email: 'riki@riyeser.test', added_at: t(30), perms_add: [], perms_remove: [] },
       { user_id: 's2', display_name: 'Help Desk', role: 'support', active: true, email: 'help@riyeser.test', added_at: t(5), perms_add: [], perms_remove: [] },
       { user_id: 's3', display_name: 'Finance Fi', role: 'finance', active: true, email: 'money@riyeser.test', added_at: t(4), perms_add: [], perms_remove: [] },
-      { user_id: 's4', display_name: 'Senior Sione', role: 'senior', active: true, email: 'senior@riyeser.test', added_at: t(3), perms_add: [], perms_remove: [] }];
+      { user_id: 's4', display_name: 'Senior Sione', role: 'senior', active: true, email: 'senior@riyeser.test', added_at: t(3), perms_add: [], perms_remove: [] },
+      { user_id: 's5', display_name: 'Admin Ana', role: 'admin', active: true, email: 'admin@riyeser.test', added_at: t(2), perms_add: [], perms_remove: [] }];
+    // staff emails: only for whoever manages the HQ team (and your own), as hq_team() in the database
+    const staffOut = () => { const all = permsOf(me()).includes('staff.manage'); return staff.map((s) => ({ ...s, email: all || s.user_id === actor ? s.email : null, perms: permsOf(s) })); };
     let actor = 's1';
     const me = () => staff.find((s) => s.user_id === actor); const nameOf = (id) => (staff.find((s) => s.user_id === id) || {}).display_name || null;
     const need = (p) => { if (!permsOf(me()).includes(p)) throw new Error('Your HQ role can\'t do that.'); };
@@ -503,8 +515,34 @@
             history: P.includes('audit.view') ? hist.filter((x) => x.workspace_id === ws) : null } }; },
       async setCallsPaid(ws, until) { cos.find((x) => x.id === ws).calls_paid_until = until + 'T23:59:59Z'; log('calls.paid_until', { workspace_id: ws, until }); },
       async addNote(ws, body) { return this.noteAdd(ws, { kind: 'note', body }); },
-      async staff() { return staff.map((s) => ({ ...s, perms: permsOf(s) })); },
-      async team() { return { all: PERMS.map((p) => p[0]), roles: ROLE_PERMS, staff: staff.map((s) => ({ ...s, perms: permsOf(s) })) }; },
+      async staff() { return staffOut(); },
+      async team() { return { all: PERMS.map((p) => p[0]), roles: ROLE_PERMS, staff: staffOut() }; },
+      // HQ V2 first slice: sessions aren't timed in the demo; test accounts; the overview figures; backup and restore-test records
+      async touch() { return { ok: true, timed: false, idle_minutes: 30, max_hours: 12 }; },
+      async testAccounts() { if (!['customers.view', 'test_accounts.manage'].some((x) => permsOf(me()).includes(x))) throw new Error('Your HQ role can\'t do that.');
+        return cos.filter((c) => c.account_kind && c.account_kind !== 'customer').map((c) => ({ id: c.id, name: c.name, company_code: c.company_code, country: c.country, account_kind: c.account_kind, created_at: c.created_at, status: c.status })); },
+      async setAccountKind(ws, kind, reason) { need('test_accounts.manage'); if (!['customer', 'test', 'demo', 'internal'].includes(kind)) throw new Error('Choose customer, test, demo or internal.');
+        if (String(reason || '').trim().length < 3) throw new Error('Say why (a few words).'); const c = cos.find((x) => x.id === ws); if (!c) throw new Error('There\'s no business with that id.');
+        const before = c.account_kind || 'customer'; if (before === kind) return; c.account_kind = kind; log('account.kind', { workspace_id: ws, before, after: kind, reason: reason.trim() }); },
+      async kpis(inc) { need('overview.view'); const P = permsOf(me()); const cv = P.includes('customers.view'); const sv = P.includes('support.view'); const lv = P.includes('licences.view');
+        const W = cos.filter((c) => inc || !c.account_kind || c.account_kind === 'customer'); const ids = new Set(W.map((c) => c.id));
+        const monday = new Date(); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+        const wk = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return iso(x); };
+        const weeks = {}; W.filter((c) => hours(c.created_at) / 24 <= 84).forEach((c) => { const k = wk(c.created_at); weeks[k] = (weeks[k] || 0) + 1; });
+        const ending = W.filter((c) => c.status === 'active' && Object.values(demoLicence(c.id).modules).some((v) => ['trial', 'active'].includes(v.status) && v.days_left != null && v.days_left <= 7)).length;
+        const rec = bOrders.filter((o) => ids.has(o.workspace_id) && ((o.method === 'paypal' && ['active', 'payment_failed'].includes(o.status)) || (o.method === 'bank' && o.status === 'paid')));
+        const amt = (o) => Number(o.first_amount != null ? o.first_amount : o.amount); const pays = bPays.filter((p) => ids.has(p.workspace_id) && p.status === 'completed' && hours(p.at) <= 168);
+        return { as_of: now(), include_test: !!inc, currency: 'USD', test_accounts: cv ? cos.filter((c) => c.account_kind && c.account_kind !== 'customer').length : null,
+          businesses: cv ? W.filter((c) => c.status === 'active').length : null, new_signups_week: cv ? W.filter((c) => new Date(c.created_at) >= monday).length : null,
+          signups_by_week: cv ? Object.entries(weeks).sort().map(([week, companies]) => ({ week, companies })) : null, renewals_due_7d: cv ? ending : null,
+          open_tickets: sv ? tickets.filter((x) => x.status !== 'done' && (!x.workspace_id || ids.has(x.workspace_id))).length : null,
+          failed_payments: lv ? bOrders.filter((o) => ids.has(o.workspace_id) && ['payment_failed', 'suspended'].includes(o.status)).length : null,
+          mrr: lv ? Math.round(rec.reduce((a, o) => a + (o.billing === 'yearly' ? amt(o) / 12 : amt(o)), 0) * 100) / 100 : null, recurring_count: lv ? rec.length : null,
+          payments_7d: lv ? { count: pays.length, total: pays.reduce((a, p) => a + Number(p.amount), 0) } : null }; },
+      async opsRuns() { need('ops.view'); return [
+        { job: 'backup', target: 'team', ok: true, started_at: h(5.2), finished_at: h(5), detail: { bytes: 48213337, fingerprint: 'demo' }, last_ok_at: h(5) },
+        { job: 'hq_jobs', target: 'team', ok: true, started_at: h(0.4), finished_at: h(0.38), detail: { emails_sent: 0, note: 'email sending isn\'t set up yet' }, last_ok_at: h(0.38) },
+        { job: 'restore_drill', target: 'team', ok: true, started_at: t(26.01), finished_at: t(26), detail: { rows_backup: 18233, rows_restored: 18233 }, last_ok_at: t(26) }]; },
       async addStaff(email, name, role) { need('staff.manage'); staff.push({ user_id: 's' + (staff.length + 1), display_name: name, role, active: true, email, added_at: now(), perms_add: [], perms_remove: [] }); log('staff.added', { email, role }); },
       async setStaff(id, role, active) { need('staff.manage'); Object.assign(staff.find((x) => x.user_id === id), { role, active }); log('staff.changed', { user_id: id, role, active }); },
       async setStaffPerms(id, on2, off) { need('staff.manage'); if (me().role !== 'owner') throw new Error('Only an HQ owner can tick permissions on or off.');
@@ -890,7 +928,7 @@
         handover.unshift(x); log('handover.added', { handover: x.id }); return x.id; },
       async handoverDone(id) { const x = handover.find((h) => h.id === id); if (!x || x.done) throw new Error('That handover note is already done.'); Object.assign(x, { done: true, done_by: me().display_name }); log('handover.done', { handover: id }); },
       async workQueue() { const P = permsOf(me()); const od = settings['support.overdue_hours']; const q = []; const co = (ws) => cos.find((c) => c.id === ws) || {};
-        const add = (prio, kind, ws, issue, detail, owner, action, ref, at) => q.push({ prio, kind, workspace_id: ws, business: co(ws).name, country: co(ws).country, address: co(ws).address, issue, detail, owner: owner || nameOf(co(ws).hq_owner) || 'Unassigned', action, ref, at });
+        const add = (prio, kind, ws, issue, detail, owner, action, ref, at) => q.push({ prio, kind, workspace_id: ws, business: co(ws).name, country: co(ws).country, address: co(ws).address, account_kind: co(ws).account_kind || 'customer', issue, detail, owner: owner || nameOf(co(ws).hq_owner) || 'Unassigned', action, ref, at });
         if (P.includes('support.view')) tickets.filter((x) => x.status !== 'done' && x.workspace_id && x.next_update_due && new Date(x.next_update_due) < new Date())
           .forEach((x) => add(1, 'update', x.workspace_id, 'Update overdue', `${x.ref} · ${x.subject} · was due ${dueText(x.next_update_due)}`, nameOf(x.next_update_owner) || nameOf(x.assignee) || 'Unassigned', 'Update', x.id, x.next_update_due));
         if (P.includes('support.view')) tickets.filter((x) => ['new', 'investigating', 'waiting_us'].includes(x.status) && x.workspace_id && (!x.assignee || x.assignee === actor || (!x.first_reply_at && hours(x.created_at) > od)))
@@ -966,9 +1004,39 @@
       }
       await loadMe();
       if (!S.me || !S.me.active) return blocked('<h1>Not Riyeser HQ staff</h1><p>This account isn\'t on the Riyeser HQ team. Ask a Riyeser HQ owner to add you.</p>');
+      if (!(await sessionStart())) return;
       if (V2 && !window.RiyeserHQv2) await loadV2();
       shell();
     } catch (err) { blocked(`<div class="err">${esc(plain(err))}</div>`); }
+  }
+
+  // ------------------------------------------------------------------ HQ sessions (owner's decision)
+  // An HQ session ends after 30 minutes without activity and 12 hours after signing in. The database enforces it
+  // (hq_role / hq_touch in team-chat.sql); here HQ tells the database you're active (at most once a minute while you use
+  // it) and signs you out on time, with a plain note on the sign-in screen. Demo mode isn't timed.
+  const ENDED = /HQ session has ended/;
+  const SESS = { idle: 30, max: 12, signedIn: 0, last: 0, sent: 0, timer: 0, on: false };
+  function sessionEnded(why) {
+    if (!SESS.on) return; SESS.on = false; clearInterval(SESS.timer);
+    const note = why === 'max' ? `You've been signed in for ${SESS.max} hours, so HQ signed you out. Sign in again to carry on.`
+      : `HQ signed you out after ${SESS.idle} minutes without activity. Sign in again to carry on.`;
+    closePanel(); S.v2 = null; document.body.classList.remove('hqv2');
+    Promise.resolve(api.signOut()).catch(() => {}).then(() => gate(`<div class="note">${esc(note)}</div>`));
+  }
+  async function sessionStart() {
+    if (DEMO || !api.touch) return true;
+    let r; try { r = await api.touch(); } catch (e) { if (missing(e)) return true; throw e; }   // an older database: not timed yet
+    SESS.idle = Number(r && r.idle_minutes) || 30; SESS.max = Number(r && r.max_hours) || 12;
+    if (r && r.ok === false) { SESS.on = true; sessionEnded(r.ended); return false; }
+    SESS.signedIn = r && r.signed_in_at ? Date.parse(r.signed_in_at) : Date.now(); SESS.last = SESS.sent = Date.now(); SESS.on = true;
+    if (!SESS.wired) { SESS.wired = true;
+      const active = () => { if (!SESS.on) return; SESS.last = Date.now();
+        if (Date.now() - SESS.sent > 60e3) { SESS.sent = Date.now(); api.touch().then((x) => { if (x && x.ok === false) sessionEnded(x.ended); }).catch(() => {}); } };
+      ['pointerdown', 'keydown', 'wheel', 'touchstart'].forEach((ev) => document.addEventListener(ev, active, { passive: true, capture: true })); }
+    clearInterval(SESS.timer);
+    SESS.timer = setInterval(() => { if (!SESS.on) return;
+      if (Date.now() - SESS.signedIn > SESS.max * 3600e3) sessionEnded('max'); else if (Date.now() - SESS.last > SESS.idle * 60e3) sessionEnded('idle'); }, 30e3);
+    return true;
   }
 
   // ------------------------------------------------------------------ the shell
@@ -1511,7 +1579,7 @@
   }
 
   function closePanel() { document.querySelectorAll('.modal').forEach((x) => x.remove()); }
-  const HIST_ACTS = { 'billing.bank_paid': 'marked a bank transfer paid', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'changed the billing entity (bank details)',
+  const HIST_ACTS = { 'account.kind': 'marked an account as test, demo, internal or customer', 'billing.bank_paid': 'marked a bank transfer paid', 'billing.doc_resent': 'sent an invoice or receipt again', 'billing.entity_changed': 'changed the billing entity (bank details)',
     'billing.entity_proposed': 'proposed a billing entity change (old two-person rule)', 'billing.entity_rejected': 'turned down a billing entity change (old two-person rule)',
     'billing.entity_replaced': 'replaced a waiting billing entity change (old two-person rule)', 'link.new_password': 'asked Link Office for a new phone password (nobody sees it)', 'customer.viewed': 'opened the company', 'company.viewed': 'opened the company', 'note.added': 'added a note', 'calls.paid_until': 'changed Riyeser Link paid-until',
     'licence.module': 'changed a licence', 'licence.plan': 'changed a plan', 'licence.storage': 'granted extra file storage', 'staff.added': 'added HQ staff', 'staff.changed': 'changed HQ staff', 'staff.permissions': 'changed HQ permissions',
@@ -2381,7 +2449,7 @@
     const rfb = tv.querySelector('#trf'); if (rfb) rfb.onclick = () => dlg(`<h3>↩️ Refund request for this customer</h3><p class="muted small">Entered on their behalf from ${esc(t.ref)}. It goes to the Refunds queue for approval; they're emailed that we've got it.</p>
       <form id="rq"><label class="f"><span>What it's for</span><input name="for_what" required maxlength="120" placeholder="e.g. Accounting Basics"></label>
       <div class="grid g2"><label class="f"><span>Period</span><input name="period" maxlength="80" placeholder="e.g. November 2026"></label><label class="f"><span>Invoice reference</span><input name="invoice_ref" maxlength="80"></label>
-      <label class="f"><span>Amount</span><input name="amount" type="number" min="0.01" step="0.01" required></label><label class="f"><span>Currency</span><select name="currency"><option selected>USD</option><option>FJD</option><option>AUD</option><option>NZD</option></select></label></div>
+      <label class="f"><span>Amount</span><input name="amount" type="number" min="0.01" step="0.01" required></label><label class="f"><span>Currency</span><select name="currency"><option selected>USD</option></select></label></div>
       <label class="f"><span>Reason</span><select name="reason_category">${Object.entries(RWHY).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
       <label class="f"><span>What the customer said</span><textarea name="explanation" rows="3" maxlength="2000"></textarea></label>
       <div id="rqerr"></div><div class="mfoot"><button type="button" class="btn" data-close>Cancel</button><button class="btn p">Enter request</button></div></form>`, (d, close) => {
@@ -2734,14 +2802,14 @@
     const defaults = (role) => (T && T.roles && T.roles[role]) || ROLE_PERMS[role] || [];
     const m = main(`<h2>HQ team</h2><p class="sub">Riyeser staff who can use HQ. Everyone needs two-step sign-in. Each role has default permissions; an HQ owner can tick extra ones on or off for a person.</p>
       <div class="card scroll"><table class="tbl" id="staff"><tr><th>Name</th><th>Role</th><th>Status</th><th>Added</th>${owner ? '<th></th>' : ''}</tr>
-      ${staff.map((s) => `<tr><td><b>${esc(s.display_name)}</b><small>${esc(s.email)}</small></td><td>${owner && s.display_name !== S.me.name ? `<select data-role="${s.user_id}" aria-label="Role for ${esc(s.display_name)}">${ROLES.map(([k, l]) => `<option value="${k}"${k === s.role ? ' selected' : ''}>${l}</option>`).join('')}</select>` : esc(roleName(s.role))}
+      ${staff.map((s) => `<tr><td><b>${esc(s.display_name)}</b><small>${esc(s.email)}</small></td><td>${owner && s.display_name !== S.me.name ? `<select data-role="${s.user_id}" aria-label="Role for ${esc(s.display_name)}">${ROLES.filter(([k]) => ownerRole || !['owner', 'admin'].includes(k) || k === s.role).map(([k, l]) => `<option value="${k}"${k === s.role ? ' selected' : ''}>${l}</option>`).join('')}</select>` : esc(roleName(s.role))}
           ${(s.perms_add || []).length || (s.perms_remove || []).length ? `<small>${(s.perms_add || []).length ? `+${s.perms_add.length} ticked on` : ''}${(s.perms_remove || []).length ? ` −${s.perms_remove.length} ticked off` : ''}</small>` : ''}</td>
         <td>${s.active ? '<span class="pill ok">Active</span>' : '<span class="pill">Switched off</span>'}</td><td>${day(s.added_at)}</td>
         ${owner ? `<td><div class="row">${s.display_name !== S.me.name ? `<button class="btn sm" data-toggle="${s.user_id}" data-active="${s.active}">${s.active ? 'Switch off' : 'Switch on'}</button>${T && ownerRole && s.role !== 'owner' ? `<button class="btn sm" data-perms="${s.user_id}">Permissions</button>` : ''}` : '<span class="muted small">you</span>'}</div></td>` : ''}</tr>
         <tr class="permrow" data-permrow="${s.user_id}" hidden><td colspan="5"></td></tr>`).join('')}</table></div>
       ${owner ? `<div class="card" style="margin-top:14px"><h3>Add someone to the HQ team</h3><p class="muted small">They need a Riyeser account first (riyeser.com/link), and must turn on two-step sign-in there.</p>
         <form id="as" class="grid g3"><label class="f"><span>Email</span><input type="email" name="email" required></label><label class="f"><span>Name</span><input name="name" required maxlength="60"></label>
-        <label class="f"><span>Role</span><select name="role">${ROLES.map(([k, l]) => `<option value="${k}"${k === 'support' ? ' selected' : ''}>${l}</option>`).join('')}</select></label><div><button class="btn p">Add</button></div></form></div>` : ''}
+        <label class="f"><span>Role</span><select name="role">${ROLES.filter(([k]) => ownerRole || !['owner', 'admin'].includes(k)).map(([k, l]) => `<option value="${k}"${k === 'support' ? ' selected' : ''}>${l}</option>`).join('')}</select></label><div><button class="btn p">Add</button></div></form></div>` : ''}
       <div class="card scroll" style="margin-top:14px"><h3>What each role can do <small>· the defaults</small></h3><table class="tbl small rolegrid"><tr><th>Permission</th>${ROLES.map(([, l]) => `<th>${l}</th>`).join('')}</tr>
         ${PERMS.map(([k, l]) => `<tr><td>${esc(l)}<small class="code">${k}</small></td>${ROLES.map(([r]) => `<td>${defaults(r).includes(k) ? '✓' : ''}</td>`).join('')}</tr>`).join('')}</table>
         <p class="muted small">Support levels: level 1 Support, level 2 Senior / technical (Senior support, or anyone with "Work level 2"), level 3 Management (Owner and Finance).</p></div>

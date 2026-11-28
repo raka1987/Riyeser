@@ -1,8 +1,8 @@
 /* Riyeser HQ V2 prototype (only loaded with ?v2=1; see hq-v2.js). Everything is scoped to body.hqv2 so the current HQ
-   never changes. Design tokens from the HQ V2 spec: navy #102344, primary #2563EB, background #F3F6FA, white panels,
-   12px radius, consistent spacing. The current pages that open inside this frame pick up the same tokens. */
+   never changes. Design tokens from the HQ V2 spec (navy #102344, background #F3F6FA, white panels,
+   12px radius, consistent spacing), with Riyeser's own brand blue #0b5cff as the primary (owner's decision, not the spec's blue). The current pages that open inside this frame pick up the same tokens. */
 body.hqv2 {
-  --v2-navy: #102344; --v2-navy-2: #1a3160; --v2-primary: #2563eb; --v2-primary-d: #1d4fd0; --v2-primary-l: #e8efff; --v2-bg: #f3f6fa; --v2-panel: #fff;
+  --v2-navy: #102344; --v2-navy-2: #1a3160; --v2-primary: #0b5cff; --v2-primary-d: #0b4ad1; --v2-primary-l: #dfeaff; --v2-bg: #f3f6fa; --v2-panel: #fff;
   --v2-ink: #0f1d3d; --v2-text: #2c3a5a; --v2-muted: #5f6b84; --v2-line: #e1e7f0; --v2-radius: 12px; --v2-gap: 16px;
   --v2-ok: #15803d; --v2-ok-l: #dcfce7; --v2-warn: #a15c07; --v2-warn-l: #fef3c7; --v2-bad: #b91c1c; --v2-bad-l: #fee2e2; --v2-unk: #475569; --v2-unk-l: #e9edf3;
   /* the current HQ's own variables, so its pages match inside the new frame */
@@ -20,7 +20,7 @@ body.hqv2 {
 .side2 { background: var(--v2-navy); color: #fff; position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; padding: 14px 10px 12px; scrollbar-width: thin; scrollbar-color: #2c4373 transparent; }
 .brand2 { display: flex; align-items: center; gap: 8px; padding: 4px 6px 14px; }
 .bl2 { display: inline-flex; align-items: center; gap: 9px; color: #fff; text-decoration: none; min-width: 0; }
-.wm2 { display: block; height: 28px; width: auto; flex: none; } .wm2-sw { fill: #2563eb; } .side2 .wm2-sw, .top2 .mlogo2 .wm2-sw { fill: #7fb0ff; }
+.wm2 { display: block; height: 28px; width: auto; flex: none; } .wm2-sw { fill: #0b5cff; } .side2 .wm2-sw, .top2 .mlogo2 .wm2-sw { fill: #7fb0ff; }
 .hq2 { font-weight: 800; font-size: 12px; letter-spacing: .5px; background: rgba(255,255,255,.16); color: #fff; border-radius: 6px; padding: 2px 7px; }
 .ib2 { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; border: 1px solid transparent; background: transparent; color: inherit; font-size: 16px; line-height: 1; }
 .side2 .ib2 { color: #c9d6f5; margin-left: auto; } .side2 .ib2:hover { background: rgba(255,255,255,.1); color: #fff; }
@@ -90,7 +90,7 @@ body.hqv2 {
 /* KPI cards: the source and freshness line is always there */
 .kg2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: var(--v2-gap); margin-bottom: var(--v2-gap); }
 .k2 { display: flex; flex-direction: column; background: var(--v2-panel); border: 1px solid var(--v2-line); border-radius: var(--v2-radius); padding: 16px 18px 14px; color: inherit; text-decoration: none; min-width: 0; }
-a.k2:hover { border-color: #9db8f5; box-shadow: 0 10px 26px -20px rgba(37,99,235,.7); }
+a.k2:hover { border-color: #9db8f5; box-shadow: 0 10px 26px -20px rgba(11,92,255,.7); }
 .k2l { font-size: 13.5px; font-weight: 600; color: var(--v2-muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .k2v { font-size: 30px; font-weight: 750; color: var(--v2-ink); margin: 6px 0 2px; line-height: 1.15; letter-spacing: -.3px; overflow-wrap: anywhere; }
 .k2d { font-size: 12.5px; color: var(--v2-muted); line-height: 1.4; }
@@ -116,9 +116,9 @@ a.k2:hover { border-color: #9db8f5; box-shadow: 0 10px 26px -20px rgba(37,99,235
 .st2-plan { border-color: #c9d8fb; background: #f5f8ff; } .st2-empty, .st2-loading { background: #fbfcfe; } .st2-unknown { background: #f8fafd; }
 .card2 .st2 { margin-bottom: 0; }
 /* status pills */
-.pill2 { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; background: var(--v2-primary-l); color: #1e40af; white-space: nowrap; }
+.pill2 { display: inline-flex; align-items: center; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; background: var(--v2-primary-l); color: #0b4ad1; white-space: nowrap; }
 .pill2.ok { background: var(--v2-ok-l); color: var(--v2-ok); } .pill2.warn { background: var(--v2-warn-l); color: var(--v2-warn); } .pill2.bad { background: var(--v2-bad-l); color: var(--v2-bad); }
-.pill2.unk { background: var(--v2-unk-l); color: var(--v2-unk); } .pill2.blue { background: var(--v2-primary-l); color: #1e40af; }
+.pill2.unk { background: var(--v2-unk-l); color: var(--v2-unk); } .pill2.blue { background: var(--v2-primary-l); color: #0b4ad1; }
 .ck2 { font-weight: 800; } .ck2.y { color: var(--v2-ok); } .ck2.n { color: #a3adc2; }
 /* tables scroll inside their own box */
 .tw2 { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
@@ -137,6 +137,14 @@ a.k2:hover { border-color: #9db8f5; box-shadow: 0 10px 26px -20px rgba(37,99,235
 .bl2x { position: absolute; bottom: 2px; font-size: 11.5px; color: var(--v2-muted); white-space: nowrap; }
 .lg2 { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--v2-muted); margin-top: 10px; } .sw2 { width: 12px; height: 12px; border-radius: 3px; background: var(--v2-primary); }
 
+/* "Include test accounts" switch, and the Test accounts form */
+.sw2l { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px; border: 1px solid #cfd8e6; border-radius: 10px; background: #fff; font-size: 14px; font-weight: 600; color: var(--v2-ink); }
+.sw2l input { width: 16px; height: 16px; accent-color: var(--v2-primary); }
+.tak2 { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.f2 { display: flex; flex-direction: column; gap: 5px; font-size: 13px; font-weight: 600; color: var(--v2-ink); min-width: 0; } .grow2 { flex: 1 1 240px; }
+.f2 input, .f2 select { height: 38px; border: 1px solid #cfd8e6; border-radius: 10px; padding: 0 10px; background: #fff; font-size: 14px; min-width: 0; }
+#takmsg .st2 { margin: 12px 0 0; }
+
 /* tablets and phones: the menu slides in from the left */
 @media (max-width: 1100px) { .g2c, .g2c.wide { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 1023px) {
@@ -147,7 +155,7 @@ a.k2:hover { border-color: #9db8f5; box-shadow: 0 10px 26px -20px rgba(37,99,235
   .v2.rail .ngh2 { justify-content: flex-start; padding: 8px 10px; } .v2.rail .brand2 { justify-content: flex-start; padding: 4px 6px 14px; }
   .railbtn { display: none !important; } .closebtn { display: inline-grid !important; }
   .menubtn, .mlogo2 { display: inline-flex; } .mlogo2 { align-items: center; gap: 7px; color: var(--v2-ink); text-decoration: none; flex: none; } .mlogo2 .wm2 { height: 22px; }
-  .mlogo2 .wm2-sw { fill: #2563eb !important; } .mlogo2 .hq2 { background: var(--v2-navy); }
+  .mlogo2 .wm2-sw { fill: #0b5cff !important; } .mlogo2 .hq2 { background: var(--v2-navy); }
   .top2 { padding: 10px 16px; flex-wrap: wrap; } .proto2 { padding: 8px 16px; }
   .search2 { order: 5; flex-basis: 100%; max-width: none; }
   .hqv2 #main { padding: 18px 16px; }
@@ -164,6 +172,3 @@ a.k2:hover { border-color: #9db8f5; box-shadow: 0 10px 26px -20px rgba(37,99,235
 }
 @media (max-width: 360px) { .kg2 { grid-template-columns: minmax(0, 1fr); } }
 @media print { .side2, .top2, .proto2 { display: none !important; } .v2 { display: block; } }
-/* The customer page's narrow "My follow-ups" card: the current HQ squeezes the note to one letter a line (its four-column
-   grid doesn't fit ~380px). Inside V2 it stacks instead; the fix for the current HQ is listed in the Phase 0 audit. */
-.hqv2 #myFollowUps .fu { grid-template-columns: minmax(0, 1fr) auto; } .hqv2 #myFollowUps .fu .small { grid-column: 1 / -1; }
