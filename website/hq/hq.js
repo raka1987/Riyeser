@@ -12,6 +12,11 @@
   const REPO = 'raka1987/Riyeser';
   const $app = document.getElementById('app');
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  // The Riyeser wordmark (assets/logo-wordmark.svg, the same paths, drawn inline): the letters take the text colour,
+  // the swoosh is brand blue (lighter on dark backgrounds, see .wm-sw in the CSS). wordmark(false) when a link around it carries the name.
+  const WM_SW = 'M2 29C62 15 172 8 266 11C178 15 78 23 7 41Z';
+  const WM_WORD = 'M-0.3 0H20L23.7 -22.8H33.2L40.3 0H61L52.1 -27.1C60 -31.3 65.2 -38.3 66.7 -47.4C69.2 -62.9 60 -72.8 42.6 -72.8H11.7ZM26.4 -38.5 29.3 -56.2H38.4C44.5 -56.2 47.8 -52.7 46.9 -47.4C46 -42 41.5 -38.5 35.4 -38.5ZM65 0H84.6L93.1 -51.6H73.6ZM84 -55.8C89.6 -55.8 94.7 -60 95.6 -65.3C96.5 -70.7 92.8 -74.9 87.2 -74.9C81.5 -74.9 76.5 -70.7 75.6 -65.3C74.7 -60 78.4 -55.8 84 -55.8ZM90.1 20.4H103.4C112.7 20.4 118.2 16.6 123.6 6.5L155 -51.6H134.1L123.8 -29.7C122.2 -26.4 120.7 -23 119.2 -19.6C118.9 -23 118.5 -26.4 118.1 -29.7L115.2 -51.6H95.7L106.9 0L106.5 0.8C104.7 4.3 104 5.6 100.4 5.6H92.6ZM176 1.2C191.1 1.2 200.6 -6.2 204.3 -17.6H186.5C185.5 -14.5 183 -12.5 177.6 -12.5C171.5 -12.5 169.8 -15.1 169.8 -19.6C192.2 -19.9 206.2 -21.8 206.2 -35.6C206.2 -47.4 196 -52.7 183.6 -52.7C166.7 -52.7 154.1 -42.7 151.3 -25.8C148.4 -8.1 158.4 1.2 176 1.2ZM171.2 -31.1C172.2 -35.4 174.5 -39 181.5 -39C185.9 -39 188.4 -37.6 188.4 -35.4C188.4 -33 185.7 -31.5 171.2 -31.1ZM231.1 1.3C247.3 1.3 259 -7.3 259 -18.6C259 -25.5 254.4 -29.4 244.5 -31.2L233.8 -33C231.4 -33.4 230.3 -34.3 230.3 -35.7C230.3 -38 233.1 -39.7 236.8 -39.7C240.7 -39.7 242.9 -37.7 242.6 -34.4H260.4C260.5 -35.3 260.6 -36.3 260.6 -37.1C260.6 -46.6 251.7 -52.6 237.4 -52.6C221.5 -52.6 210.5 -44.9 210.5 -33.6C210.5 -26.3 215.5 -21.5 224.9 -20L234.3 -18.4C237.5 -17.9 238.8 -17 238.8 -15.5C238.8 -13.3 235.8 -11.7 231.9 -11.7C227.8 -11.7 225.5 -13.5 225.6 -16.8H206.5V-16.4C206.5 -5.6 216.6 1.3 231.1 1.3ZM287.5 1.2C302.6 1.2 312.1 -6.2 315.9 -17.6H298C297.1 -14.5 294.5 -12.5 289.2 -12.5C283 -12.5 281.3 -15.1 281.3 -19.6C303.8 -19.9 317.7 -21.8 317.7 -35.6C317.7 -47.4 307.5 -52.7 295.1 -52.7C278.2 -52.7 265.6 -42.7 262.8 -25.8C259.9 -8.1 270 1.2 287.5 1.2ZM282.8 -31.1C283.7 -35.4 286 -39 293.1 -39C297.5 -39 300 -37.6 300 -35.4C300 -33 297.2 -31.5 282.8 -31.1ZM317.7 0H337.3L341.4 -24.7C342.5 -31.6 347.1 -35.9 353.2 -35.9H360.3L362.9 -51.6H358C350.9 -51.6 346.8 -49.1 343.8 -42.2H343.7L345.2 -51.6H326.3ZM369.8 0.9C374.9 0.9 379.6 -3 380.5 -8C381.5 -14.2 377.3 -19.4 371.2 -19.4C366.1 -19.4 361.4 -15.5 360.5 -10.5C359.5 -4.2 363.7 0.9 369.8 0.9Z';
+  const wordmark = (named = true) => `<svg class="wm" viewBox="-3 -78 388 121" ${named ? 'role="img" aria-label="Riyeser"' : 'aria-hidden="true"'} focusable="false"><path class="wm-sw" fill="#0b5cff" d="${WM_SW}"/><path fill="currentColor" d="${WM_WORD}"/></svg>`;
   const num = (n) => Number(n || 0).toLocaleString();
   const day = (t) => (t ? new Date(String(t).length === 10 ? t + 'T00:00:00' : t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '');
   const ago = (t) => { if (!t) return 'never'; const m = Math.round((Date.now() - new Date(t)) / 60000);
@@ -920,7 +925,7 @@
 
   // ------------------------------------------------------------------ sign-in
   function gate(note = '', step = 'password') {
-    $app.innerHTML = `<div class="gate"><form class="gcard" id="g"><div class="glogo"><img src="../assets/logo-r.png" alt="">Riyeser HQ</div>
+    $app.innerHTML = `<div class="gate"><form class="gcard" id="g"><div class="glogo">${wordmark()}<span class="glbl">HQ</span></div>
       <h1>${step === 'code' ? '🔐 Enter your code' : 'Staff sign in'}</h1>
       <p>${step === 'code' ? 'Type the 6 numbers from your authenticator app.' : 'For Riyeser staff. Use your Riyeser account; two-step sign-in is required.'}</p>${note}
       ${step === 'code' ? '<label class="f"><span>Code</span><input name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required></label>'
@@ -937,7 +942,7 @@
     };
   }
   function blocked(msg) {
-    $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo"><img src="../assets/logo-r.png" alt="">Riyeser HQ</div>${msg}
+    $app.innerHTML = `<div class="gate"><div class="gcard"><div class="glogo">${wordmark()}<span class="glbl">HQ</span></div>${msg}
       <button class="btn w" id="so" style="margin-top:8px">Sign out</button></div></div>`;
     $app.querySelector('#so').onclick = async () => { await api.signOut(); gate(); };
   }
@@ -998,9 +1003,9 @@
     if (!TABS().some((x) => x[0] === S.tab)) S.tab = TABS()[0][0];
     const ini = initials(S.me.name);
     $app.innerHTML = `${DEMO ? `<div class="demo">Demo with sample data. Nothing here is real. <label>Acting as <select id="demoAs" aria-label="Demo staff member">${api.staffList().map((s) => `<option value="${s.user_id}"${s.display_name === S.me.name ? ' selected' : ''}>${esc(s.display_name)} (${esc(roleName(s.role))})</option>`).join('')}</select></label></div>` : ''}
-      <div class="frame"><aside class="side"><div class="brand"><img src="../assets/logo-r.png" alt="">Riyeser HQ</div><nav class="snav" aria-label="HQ">${navHtml()}</nav>
+      <div class="frame"><aside class="side"><div class="brand" role="img" aria-label="Riyeser HQ">${wordmark(false)}<span class="glbl">HQ</span></div><nav class="snav" aria-label="HQ">${navHtml()}</nav>
         <p class="sfoot">Staff only · account information, never customers' messages or books</p></aside>
-      <header class="mbar"><img src="../assets/logo-r.png" alt="Riyeser HQ" class="mlogo"><span class="mbt" id="mbarT"></span>
+      <header class="mbar"><span class="mlogo" role="img" aria-label="Riyeser HQ">${wordmark(false)}</span><span class="mbt" id="mbarT"></span>
         <button type="button" id="mnav" class="mnav" aria-expanded="false" aria-controls="mmenu">Menu <span class="tb" data-mbadge></span></button>
         <button type="button" class="av mav2" id="mme" aria-label="${esc(S.me.name)}, open the menu">${esc(ini)}</button></header>
       <div class="mmenu" id="mmenu" hidden><nav class="mml" aria-label="HQ sections">${phoneMenuHtml()}</nav>

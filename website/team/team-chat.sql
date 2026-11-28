@@ -1720,7 +1720,7 @@ create or replace function public.email_esc(t text) returns text language sql im
 $$;
 create or replace function public.email_html(subj text, body text) returns text language sql immutable as $$
   select '<!doctype html><html><body style="margin:0;background:#f4f6fa;font-family:Segoe UI,Arial,sans-serif;color:#2c3a5a">'
-    || '<div style="max-width:560px;margin:0 auto;padding:24px 16px"><div style="font-weight:800;font-size:20px;color:#0f1d3d;margin-bottom:14px">Riyeser</div>'
+    || '<div style="max-width:560px;margin:0 auto;padding:24px 16px"><div style="margin-bottom:14px"><img src="https://riyeser.com/assets/logo-wordmark.png" width="115" height="36" alt="Riyeser" style="display:block;border:0;width:115px;height:36px;font-weight:800;font-size:20px;color:#0f1d3d"></div>'
     || '<div style="background:#fff;border:1px solid #e3e8f1;border-radius:12px;padding:20px 22px;line-height:1.55;font-size:15px">'
     || '<h1 style="font-size:18px;color:#0f1d3d;margin:0 0 12px">' || public.email_esc(subj) || '</h1>'
     || replace(public.email_esc(body), E'\n', '<br>')
