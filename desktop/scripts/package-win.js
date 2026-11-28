@@ -30,8 +30,8 @@ run('node', ['scripts/vendor.js']);
   } else { fs.rmSync(keyFile, { force: true }); console.log('No release public key: installers are checked against GitHub\'s SHA-256 only (release signing not switched on yet).'); }
 }
 // .ico files in the format Windows expects (BMP small sizes + PNG 256), if Python is available.
-for (const [src, out] of [['build/icon.png', 'build/icon.ico'], ['build/pdf/icon.png', 'build/pdf/icon.ico'], ['build/central/icon.png', 'build/central/icon.ico'], ['build/services/icon.png', 'build/services/icon.ico'], ['build/team/icon.png', 'build/team/icon.ico'], ['build/link/icon.png', 'build/link/icon.ico']]) {
-  try { run(process.platform === 'win32' ? 'python' : 'python3', ['scripts/make-ico.py', src, out]); } catch { console.warn('Python not found - using the existing .ico files'); }
+for (const [src, out, sizes] of [['build/icon.png', 'build/icon.ico'], ['build/pdf/icon.png', 'build/pdf/icon.ico'], ['build/central/icon.png', 'build/central/icon.ico', '16,20,24,32,40,48,64,96,128,256'], ['build/services/icon.png', 'build/services/icon.ico'], ['build/team/icon.png', 'build/team/icon.ico'], ['build/link/icon.png', 'build/link/icon.ico']]) {
+  try { run(process.platform === 'win32' ? 'python' : 'python3', ['scripts/make-ico.py', src, out, ...(sizes ? [sizes] : [])]); } catch { console.warn('Python not found - using the existing .ico files'); }
 }
 fs.copyFileSync(path.join(root, 'build/icon.ico'), path.join(root, 'src/renderer/icon.ico'));
 fs.copyFileSync(path.join(root, 'build/pdf/icon.ico'), path.join(root, 'src/renderer/icon-pdf.ico'));
