@@ -272,7 +272,9 @@ test('a newer release replaces the cached download; an update installed by hand 
   assert.deepEqual(fs.readdirSync(dir), []);
 });
 
-test('Central\'s company-file busy check reads an open till and unsent website news (read-only)', async () => {
+// needs the app's dependencies (sql.js); the Windows install job runs these tests without npm install
+const hasSqlJs = (() => { try { require.resolve('sql.js/dist/sql-wasm.js'); return true; } catch { return false; } })();
+test('Central\'s company-file busy check reads an open till and unsent website news (read-only)', { skip: !hasSqlJs && 'sql.js is not installed here' }, async () => {
   const sources = require('../src/central/sources');
   const initSql = require('sql.js/dist/sql-wasm.js');
   const SQL = await initSql({ locateFile: () => require.resolve('sql.js/dist/sql-wasm.wasm') });
