@@ -23,7 +23,7 @@ const gh = (url, accept = 'application/vnd.github+json') => fetch(url, { headers
   ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) } });
 
 function registry() {
-  const q = (key) => { try { return execFileSync('reg', ['query', key, '/s', '/reg:64'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, windowsHide: true }); } catch (e) { return e.stdout || ''; } };
+  const q = (key) => { try { return execFileSync('reg', ['query', key, '/s', '/reg:64'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); } catch (e) { return e.stdout || ''; } };
   const user = q('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall');
   const machine = q('HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall');
   const wow = q('HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall');
@@ -38,7 +38,10 @@ async function download(url, file) {
 }
 
 (async () => {
-  const release = await (await gh(updates.RELEASE_API)).json();
+  // the same lookup Central makes: the downloads repository, the old code repository while that has no release yet
+  const release = await updates.findRelease('stable', (url) => gh(url));
+  if (!release) throw new Error('No release with installers in either repository');
+  console.log(`Release from ${release.html_url || release.url || '?'}`);
   const vj = (release.assets || []).find((a) => a.name === 'versions.json');
   const versionsJson = vj ? await (await fetch(vj.browser_download_url)).json() : null;
   const latest = updates.latestFromRelease(release, versionsJson);

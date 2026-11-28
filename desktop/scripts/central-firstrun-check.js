@@ -24,7 +24,7 @@ const dir = arg('dir') || fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-firstru
 const gh = (url) => fetch(url, { headers: { 'User-Agent': 'Riyeser-Central-check', Accept: 'application/vnd.github+json',
   ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) } });
 function installed() {
-  const q = (key) => { try { return execFileSync('reg', ['query', key, '/s', '/reg:64'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, windowsHide: true }); } catch (e) { return e.stdout || ''; } };
+  const q = (key) => { try { return execFileSync('reg', ['query', key, '/s', '/reg:64'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }); } catch (e) { return e.stdout || ''; } };
   return { ...updates.installedFromRegistry(q('HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall')), ...updates.installedFromRegistry(q('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall')) };
 }
 // every Windows permission prompt Central would show = every elevated start (powershell -EncodedCommand ... -Verb RunAs)
@@ -38,7 +38,10 @@ const countingSpawn = (cmd, args, opts) => {
 };
 
 (async () => {
-  const release = await (await gh(updates.RELEASE_API)).json();
+  // the same lookup Central makes: the downloads repository, the old code repository while that has no release yet
+  const release = await updates.findRelease('stable', (url) => gh(url));
+  if (!release) throw new Error('No release with installers in either repository');
+  console.log(`Release from ${release.html_url || release.url || '?'}`);
   const vj = (release.assets || []).find((a) => a.name === 'versions.json');
   const latest = updates.latestFromRelease(release, vj ? await (await fetch(vj.browser_download_url)).json() : null);
   const lic = { online: { modules: Object.fromEntries(mods.map((m) => [m, { active: true, status: 'trial' }])) } };

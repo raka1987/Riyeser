@@ -96,8 +96,13 @@ test('an office whose connection drops (say its public IP changed) reconnects, a
     const p101 = await suva.ua('101'); const p201 = await nadi.ua('201');
     await H.until(() => suva.link.route('201'), 8000, 'routes');
     // what a NAT losing its mapping looks like from here: the connection just dies, no goodbye
+    const oldId = [...r.relay.conns.values()].find((x) => x.kind === 'site' && x.office === H.OFFICES.suva).id;
     const c = suva.link.activeConn(); c.ws.sock.destroy();
     await H.until(() => suva.link.status().reconnects >= 1 && suva.link.status().connected, 10000, 'reconnect');
+    // ready again = the relay has dropped the dead connection and has Suva's new one with its phones, and Nadi has
+    // been told (Nadi's route to 101 from before the drop doesn't count)
+    const suvaAtRelay = () => [...r.relay.conns.values()].filter((x) => x.kind === 'site' && x.office === H.OFFICES.suva);
+    await H.until(() => { const s = suvaAtRelay(); return s.length === 1 && s[0].id !== oldId && s[0].exts.has('101'); }, 8000, 'the relay to have Suva\'s new connection');
     await H.until(() => nadi.link.route('101'), 4000, 'Suva announced again');
     const { a, b } = await H.talk(p201, p101, '101', { ms: 400 });
     assert.ok(a.received > 5 && b.received > 5);

@@ -11,12 +11,29 @@ const { RelayLink } = require('../src/link/relay');
 const { SimUA } = require('../src/link/simua');
 const { createRelayServer } = require('../src/relay/server');
 const tokens = require('../src/relay/lib/tokens');
+const dgram = require('dgram');
 
 const SECRET = 'link-office-test-relay-secret-0123456789abcdef';
 const WS = 'aaaaaaaa-0000-4000-8000-00000000000a';
 const WS2 = 'bbbbbbbb-0000-4000-8000-00000000000b';
 const OFFICES = { suva: 'lo-suva-00000001', nadi: 'lo-nadi-00000002', other: 'lo-other-0000003' };
-let base = 43000 + (process.pid % 40) * 220;
+// Each relay gets 200 UDP ports for sound. They are taken from 20000-32699: below the ports Windows (49152 up) and
+// Linux (32768 up) hand out by themselves, where Windows can also reserve whole blocks (Hyper-V / WinNAT excluded
+// port ranges) that can't be bound at all. A relay whose range is unusable answers every call "503 relay busy"
+// ("No free media ports on the relay"): CI run 46114154487. Each range is checked before use; a taken one is skipped.
+const MEDIA_LO = 20000; const MEDIA_HI = 32700; const SPAN = 220;
+let base = MEDIA_LO + (process.pid % 50) * SPAN;
+const bindable = (port, bind) => new Promise((ok) => { const s = dgram.createSocket('udp4'); s.once('error', () => { s.close(); ok(false); }); s.bind(port, bind, () => s.close(() => ok(true))); });
+async function mediaRange(bind) {
+  for (let tries = 0; tries < (MEDIA_HI - MEDIA_LO) / SPAN; tries++) {
+    if (base + 200 > MEDIA_HI) base = MEDIA_LO;
+    const b = base; base += SPAN;
+    let free = true;
+    for (let p = b; p < b + 200 && free; p++) free = await bindable(p, bind);
+    if (free) return b;
+  }
+  throw new Error('no free range of 200 UDP ports for the test relay');
+}
 
 function plan(over = {}) {
   return { ok: true, relays: over.relays || [], businesses: over.businesses || [
@@ -36,7 +53,7 @@ function fakeCloud(p) {
 /** The relay. opts: { id, region, httpPort, peers, bind, publicIp, p } */
 async function relay({ id = 'syd1', region = 'Sydney', httpPort = 0, peers = [], bind = '127.0.0.1', publicIp = '127.0.0.1', p = plan(), log, secret = SECRET, probePort = 0 } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'riyeser-relay-'));
-  const b = base; base += 220;
+  const b = await mediaRange(bind);
   const cloud = fakeCloud(p);
   const s = createRelayServer({ id, region, host: `${id}.relay.test`, secret, httpPort, httpBind: bind, trustProxy: false, sipTlsPort: false, selfSigned: false, certDir: dir,
     mediaMin: b, mediaMax: b + 199, probePort, mediaBind: bind, publicIp, turn: { enabled: false }, ddns: {}, peers, cloud,
@@ -80,10 +97,15 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, timeout = 8000, what = 'it') { const end = Date.now() + timeout; while (Date.now() < end) { if (await fn()) return true; await wait(25); } throw new Error(`timed out waiting for ${what}`); }
 /** Place a call and check sound flows both ways for `ms`. -> { call, a: stats, b: stats } */
 async function talk(from, to, number, { ms = 600 } = {}) {
-  const inv = to.waitFor('invite', () => true, 8000);
-  const { call, final } = await from.dial(number);
-  if (final.status !== 200) throw Object.assign(new Error(`call to ${number}: ${final.status} ${final.reason}`), { final });
-  await inv;
+  // listen for the ring before dialling, and stop listening either way (no timer left behind if the call fails)
+  let rang = false; const onInvite = () => { rang = true; };
+  to.on('invite', onInvite);
+  let call; let final;
+  try {
+    ({ call, final } = await from.dial(number));
+    if (final.status !== 200) throw Object.assign(new Error(`call to ${number}: ${final.status} ${final.reason}`), { final });
+    await until(() => rang, 8000, `${to.ext} to ring`);
+  } finally { to.off('invite', onInvite); }
   const callee = [...to.calls.values()].pop();
   await wait(ms);
   const a = from.rtpStats(call.id); const b = to.rtpStats(callee.id);

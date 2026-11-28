@@ -22,8 +22,9 @@ function releaseApis(channel = 'stable') {
 
 /**
  * The release a channel follows. get(url) answers like fetch ({ ok, status, json() }). The downloads repository first;
- * the old code repository only when that has no release yet (404, or no release in the list). If neither answers,
- * the first error is given. -> the release, or null when no release is published anywhere.
+ * the old code repository only when that has no release yet (404, no release in the list, or a release with no
+ * installers in it, e.g. one made by hand before its files were uploaded). If neither answers, the first error is
+ * given. -> the release, or null when no release is published anywhere.
  */
 async function findRelease(channel, get) {
   let firstError = null;
@@ -33,7 +34,7 @@ async function findRelease(channel, get) {
     if (res.status === 404) continue;
     if (!res.ok) { firstError = firstError || new Error(`Couldn't check for updates (${res.status}). Try again later.`); continue; }
     const release = channel === 'early' ? pickRelease(await res.json(), 'early') : await res.json();
-    if (release && release.tag_name) return release;
+    if (release && release.tag_name && (release.assets || []).some((a) => /-Setup\.exe$/i.test(a.name || ''))) return release;
   }
   if (firstError) throw firstError;
   return null;
