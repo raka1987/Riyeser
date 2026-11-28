@@ -3,7 +3,7 @@
 {% set p = r.p %}{% set blank = 'Not filled in — enter yours' %}
 <input type="hidden" name="country" value="{{ r.cc }}"><input type="hidden" name="add_standard" value="1">
 <input type="hidden" name="report_layout" value="{{ p.report_layout or 'generic' }}">
-<div class="flash warn cr-note" role="note"><b>Please check these settings.</b> {{ C.NOTE }}</div>
+<div class="flash warn cr-note" role="note"><b>Starting point only.</b> {{ C.NOTE }}</div>
 {% if p.note %}<p class="cr-pnote"><b>About {{ p.name }}:</b> {{ p.note }}</p>{% endif %}
 <div class="card"><h3>Tax</h3><div class="fields">
 <div><label for="cr-tax">What the tax is called</label><input id="cr-tax" name="tax_name" value="{{ '' if p.tax_name == 'None' else (p.tax_name or '') }}" placeholder="{{ 'None' if p.tax_name == 'None' else 'GST, VAT, Sales tax…' }}" maxlength="20"><small class="muted">{{ 'This country has no VAT or GST listed.' if p.tax_name == 'None' else ('' if p.tax_name else blank) }}</small></div>

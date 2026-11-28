@@ -32,7 +32,7 @@
     <label class="pick"><input type="radio" name="start" value="demo"> <b>Explore with demo data</b><small>Practice data: made-up customers and invoices to try things out. Not for your real books.</small></label>
   </div>
 {% if r %}<div class="setup-review" style="margin-top:18px">{% include "core/_country_fields.html" %}</div>
-  <button class="btn pri" style="margin-top:6px;width:100%;justify-content:center">Confirm these settings and create company file</button>
+  <button class="btn pri" style="margin-top:6px;width:100%;justify-content:center;white-space:normal;height:auto;min-height:var(--ctl-h);text-align:center">Confirm these settings and create company file</button>
   <p class="muted small" style="margin:6px 0 0">Nothing is created until you press this. Every value can be changed later under Setup.</p>
 {% else %}
   <button class="btn pri" style="margin-top:18px;width:100%;justify-content:center">Create company file</button>{% endif %}
