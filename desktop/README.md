@@ -1,6 +1,6 @@
 # Riyeser Documents (formerly Riyeser Desk Assistant)
 
-*A Riyeser Group product, opened from Riyeser Central. This folder also builds Riyeser Central, Riyeser PDF, As Built,
+*A Riyeser product, opened from Riyeser Central. This folder also builds Riyeser Central, Riyeser PDF, As Built,
 Riyeser Link and Riyeser Link Office. Build every Windows installer with `npm ci` then `npm run dist:all`.*
 
 Riyeser Documents keeps the office's paperwork in one library: scans, photos and files, filed into department folders,

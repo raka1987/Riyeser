@@ -1,6 +1,6 @@
 # Riyeser Accounting
 
-*A Riyeser Group module.*
+*A Riyeser module.*
 
 Double-entry business accounting for Australian small and medium businesses. It runs in your browser and keeps everything in one local company file (SQLite). Riyeser is an original product, written from scratch.
 

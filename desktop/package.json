@@ -1,7 +1,7 @@
 {
   "name": "desk-assistant",
   "version": "0.26.0",
-  "description": "Riyeser Desk Assistant (Riyeser Group): sorts your files, tracks meetings and to-dos, and edits PDFs.",
+  "description": "Riyeser Desk Assistant: sorts your files, tracks meetings and to-dos, and edits PDFs.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -16,10 +16,10 @@
     "dist:all": "node scripts/package-win.js"
   },
   "author": {
-    "name": "Riyeser Group"
+    "name": "Riyeser"
   },
   "license": "UNLICENSED",
-  "copyright": "Copyright © 2026 Riyeser Group. All rights reserved.",
+  "copyright": "Copyright © 2026 Riyeser. All rights reserved.",
   "devDependencies": {
     "@cantoo/pdf-lib": "2.9.2",
     "@pdf-lib/fontkit": "1.1.1",

@@ -19,7 +19,7 @@ const HKCU = [
   '    QuietUninstallString    REG_SZ    "C:\\Users\\Owner\\AppData\\Local\\Programs\\riyeser-payroll\\Uninstall Riyeser Payroll.exe" /currentuser /S',
   '    DisplayVersion    REG_SZ    2.2.3',
   '    DisplayIcon    REG_SZ    C:\\Users\\Owner\\AppData\\Local\\Programs\\riyeser-payroll\\Riyeser Payroll.exe,0',
-  '    Publisher    REG_SZ    Riyeser Group',
+  '    Publisher    REG_SZ    Riyeser Group',   // installed before the publisher became "Riyeser": still found
   '    NoModify    REG_DWORD    0x1',
   '    NoRepair    REG_DWORD    0x1',
   '    EstimatedSize    REG_DWORD    0x4a1f2',

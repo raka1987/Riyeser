@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Riyeser Accounting{% endblock %} · Riyeser Group</title>
+<title>{% block title %}Riyeser Accounting{% endblock %} · Riyeser</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
@@ -13,7 +13,7 @@
 {%- endmacro %}
 <div class="layout">
   <aside class="side">
-    <div class="brand"><div class="logo">R</div><div>Riyeser Group<small>Accounting module</small></div></div>
+    <div class="brand"><div class="logo">R</div><div>Riyeser<small>Accounting module</small></div></div>
     <div class="nav-sec">{{ nav('core.dashboard', 'Dashboard') }}</div>
     <div class="nav-sec"><h4>Accounts</h4>
       {{ nav('core.accounts', 'Chart of Accounts') }}{{ nav('core.journal_new', 'General Journal') }}

@@ -144,7 +144,7 @@ function buildMenu() {
       ...(backups ? backups.menuItems() : []),
       { type: 'separator' },
       { role: 'reload' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'resetZoom' }, { role: 'togglefullscreen' }, { type: 'separator' },
-      { label: 'About', click: () => dialog.showMessageBox(win, { title: 'As Built', message: `As Built ${app.getVersion()}`, detail: `Riyeser Group · riyeser.com\nProjects on this PC are kept in:\n${app.getPath('userData')}` }) },
+      { label: 'About', click: () => dialog.showMessageBox(win, { title: 'As Built', message: `As Built ${app.getVersion()}`, detail: `Riyeser · riyeser.com\nProjects on this PC are kept in:\n${app.getPath('userData')}` }) },
       { role: 'quit' },
     ] },
     { role: 'editMenu' },

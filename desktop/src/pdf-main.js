@@ -4,7 +4,7 @@
 // files selected, every copy Windows starts hands its file to the first one, which gathers them into one job.
 const { app, ipcMain, nativeTheme } = require('electron');
 const { registerInstalledApp, runUninstall } = require('./uninstall');
-const APP_INFO = { id: 'DeskPDF', name: 'Riyeser PDF', publisher: 'Riyeser Group', pdfProgId: 'DeskPDF.PDF', description: 'View, edit, fill in and sign PDFs' };
+const APP_INFO = { id: 'DeskPDF', name: 'Riyeser PDF', publisher: 'Riyeser', pdfProgId: 'DeskPDF.PDF', description: 'View, edit, fill in and sign PDFs' };
 const path = require('path');
 const { Store } = require('./core/store');
 const { registerPdfIpc, createEditorWindow, sendTask, latestEditor } = require('./pdf-ipc');

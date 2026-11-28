@@ -1,5 +1,5 @@
 // electron-builder settings for the Windows installers, all built from this one code base.
-//   DESK_APP=central -> Riyeser Central (the Riyeser Group home screen)
+//   DESK_APP=central -> Riyeser Central (the Riyeser home screen)
 //   DESK_APP=pdf     -> Riyeser PDF
 //   DESK_APP=services -> As Built, formerly Riyeser Services (the riyeser.com/app/ app in its own window)
 //   DESK_APP=team    -> Riyeser Link, formerly Riyeser Team (chat and calls: riyeser.com/link in its own window)
@@ -17,7 +17,7 @@ const APPS = {
   // Riyeser PDF keeps the package version.
   assistant: { name: 'Riyeser Documents', appId: 'com.deskassistant.app', ico: 'build/icon.ico', out: 'dist', artifact: 'RiyeserDocuments',
     executableName: 'Riyeser Desk Assistant',
-    extraMetadata: { name: 'desk-assistant', version: '1.0.0', productName: 'Riyeser Documents', description: 'Riyeser Documents (Riyeser Group): scan, file and find the office\'s documents.' } },
+    extraMetadata: { name: 'desk-assistant', version: '1.0.0', productName: 'Riyeser Documents', description: 'Riyeser Documents: scan, file and find the office\'s documents.' } },
   // 0.26.0: its installer adds the "Riyeser PDF" right-click menu for PDFs and pictures (this Windows user only), and
   // the uninstaller removes it (build/pdf/installer.nsh)
   pdf: { name: 'Riyeser PDF', appId: 'com.deskassistant.pdf', ico: 'build/pdf/icon.ico', out: 'dist-pdf', artifact: 'RiyeserPDF',
@@ -62,7 +62,7 @@ module.exports = {
   // Riyeser Link Office can run the Riyeser relay on the head office PC: its files must be real files for that
   ...(which === 'linkoffice' ? { asarUnpack: [...(base.asarUnpack || []), 'src/relay/**'] } : {}),
   ...(which === 'central' ? { asarUnpack: [...(base.asarUnpack || []), 'node_modules/sql.js/dist/**'] } : {}),
-  copyright: 'Riyeser Group',
+  copyright: 'Riyeser',
   publish: null,
   win: { target: [{ target: 'nsis', arch: ['x64'] }], icon: a.ico, legalTrademarks: a.name },
   nsis: {
