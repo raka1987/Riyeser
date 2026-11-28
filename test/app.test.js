@@ -245,13 +245,15 @@ test('payroll rules: unpaid breaks come off paid hours; regular deductions on th
 });
 
 test('timesheet PIN: someone with timesheet access unlocks entering all staff timesheets for 15 minutes', async () => {
-  const sup = (await call('POST', '/api/staff/employees', { name: 'FOH Supervisor', username: 'fohsup', password: 'fohsup1234', role: 'staff', timesheet_admin: true, clock_pin: '7311' }, admin)).data;
-  const plain = (await call('POST', '/api/staff/employees', { name: 'Plain Staff', username: 'plainst', password: 'plainst123', role: 'staff', clock_pin: '7312' }, admin)).data;
+  // time-clock PINs are unique and other test staff get random ones, so pick two that are free
+  const mk = async (body) => { for (let i = 0; i < 50; i++) { const pin = String(7000 + Math.floor(Math.random() * 2999)); const r = await call('POST', '/api/staff/employees', { ...body, clock_pin: pin }, admin); if (r.status === 200) return { ...r.data, pin }; assert.match(r.data.error, /already used/); } throw new Error('no free PIN'); };
+  const sup = await mk({ name: 'FOH Supervisor', username: 'fohsup', password: 'fohsup1234', role: 'staff', timesheet_admin: true });
+  const plain = await mk({ name: 'Plain Staff', username: 'plainst', password: 'plainst123', role: 'staff' });
   const day = futureWeekday(40);
   // the logged-in staff account can't
   assert.equal((await call('POST', '/api/staff/timesheets', { user_id: plain.id, clock_in: `${day}T08:00`, clock_out: `${day}T12:00` }, staff)).status, 403);
-  assert.equal((await call('POST', '/api/staff/timesheets/unlock', { pin: '7312' }, staff)).status, 403); // no timesheet access
-  const un = await call('POST', '/api/staff/timesheets/unlock', { pin: '7311' }, staff);
+  assert.equal((await call('POST', '/api/staff/timesheets/unlock', { pin: plain.pin }, staff)).status, 403); // no timesheet access
+  const un = await call('POST', '/api/staff/timesheets/unlock', { pin: sup.pin }, staff);
   assert.equal(un.status, 200); assert.equal(un.data.name, 'FOH Supervisor');
   const r = await fetch(B + '/api/staff/timesheets', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: staff, 'X-TS-Unlock': un.data.token },
     body: JSON.stringify({ user_id: plain.id, clock_in: `${day}T08:00`, clock_out: `${day}T12:00` }) });
