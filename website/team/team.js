@@ -2012,7 +2012,7 @@
       <div class="rfrow"><label class="f"><span>Which period? <small class="opt">(e.g. November 2026)</small></span><input name="period" maxlength="80"></label>
       <label class="f"><span>Invoice or receipt number <small class="opt">(optional)</small></span><input name="invoice_ref" maxlength="80"></label></div>
       <div class="rfrow"><label class="f"><span>Amount</span><input name="amount" type="number" min="0.01" step="0.01" required inputmode="decimal"></label>
-      <label class="f"><span>Currency</span><select name="currency">${['USD', 'FJD', 'AUD', 'NZD'].map((c) => `<option${c === 'USD' ? ' selected' : ''}>${c}</option>`).join('')}</select></label></div>
+      <label class="f"><span>Currency</span><select name="currency"><option selected>USD</option></select></label></div>
       <label class="f"><span>Why?</span><select name="reason_category">${REFUND_WHY.map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></label>
       <label class="f"><span>Tell us a bit more</span><textarea name="explanation" rows="3" maxlength="2000" placeholder="What happened?"></textarea></label>
       <div id="rferr"></div><div class="mfoot"><button type="button" class="btn" id="cl">Cancel</button><button class="btn p">Send request</button></div></form>`, (d, close) => {

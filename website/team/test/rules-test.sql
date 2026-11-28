@@ -1034,18 +1034,18 @@ end $$;
 insert into auth.users values ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'vika@c.test');
 insert into public.members (workspace_id, user_id, display_name, role) values (:'ws_c', 'ffffffff-ffff-ffff-ffff-ffffffffffff', 'Vika', 'member');
 select pg_temp.as_user('ffffffff-ffff-ffff-ffff-ffffffffffff'); set role authenticated;
-do $$ begin begin perform public.request_refund(current_setting('test.ws_c')::uuid, 'Accounting Basics', 'November', null, 50, 'FJD', 'mistake', 'x', null);
+do $$ begin begin perform public.request_refund(current_setting('test.ws_c')::uuid, 'Accounting Basics', 'November', null, 50, 'USD', 'mistake', 'x', null);
   raise exception 'a member asked for a refund';
   exception when others then assert sqlerrm like 'Only the business''s owner can%', sqlerrm; end; end $$;
 -- an admin (Mere, with two-step sign-in) can't ask for one either
 select pg_temp.as_user('66666666-6666-6666-6666-666666666666');
 do $$ begin assert (select role from public.members where workspace_id = current_setting('test.ws_c')::uuid and user_id = auth.uid()) = 'admin', 'Mere is an admin';
-  begin perform public.request_refund(current_setting('test.ws_c')::uuid, 'Accounting Basics', 'November', null, 50, 'FJD', 'mistake', 'x', null);
+  begin perform public.request_refund(current_setting('test.ws_c')::uuid, 'Accounting Basics', 'November', null, 50, 'USD', 'mistake', 'x', null);
   raise exception 'an admin asked for a refund';
   exception when others then assert sqlerrm like 'Only the business''s owner can%', sqlerrm; end; end $$;
 select pg_temp.as_user('77777777-7777-7777-7777-777777777777');
-select (public.request_refund(:'ws_c', 'Accounting Basics', 'November 2026', 'INV-0042', 350, 'FJD', 'duplicate', 'We were charged twice this month.', null) ->> 'id') as rf \gset
-select (public.request_refund(:'ws_c', 'POS', 'October 2026', null, 50, 'FJD', 'didnt_work', 'The till never worked for us.', null) ->> 'id') as rf2 \gset
+select (public.request_refund(:'ws_c', 'Accounting Basics', 'November 2026', 'INV-0042', 350, 'USD', 'duplicate', 'We were charged twice this month.', null) ->> 'id') as rf \gset
+select (public.request_refund(:'ws_c', 'POS', 'October 2026', null, 50, 'USD', 'didnt_work', 'The till never worked for us.', null) ->> 'id') as rf2 \gset
 select set_config('test.rf', :'rf', false), set_config('test.rf2', :'rf2', false);
 do $$ begin
   assert json_array_length(public.my_refunds(current_setting('test.ws_c')::uuid)) = 2, 'owner sees the requests';
@@ -1090,7 +1090,7 @@ select public.hq_refund_decide(:'rf2', 'decline', null, 'POS was used every day 
 reset role;
 do $$ begin
   assert (select status from public.refund_requests where id = current_setting('test.rf')::uuid) = 'paid', 'paid';
-  assert (public.credit_json(current_setting('test.ws_c')::uuid) ->> 'FJD')::numeric = 350, 'credit on account';
+  assert (public.credit_json(current_setting('test.ws_c')::uuid) ->> 'USD')::numeric = 350, 'credit on account';
   assert exists (select 1 from pg_temp.audit('refund.approved') where true) and exists (select 1 from pg_temp.audit('refund.second_approved') where true)
      and exists (select 1 from pg_temp.audit('refund.paid') where true) and exists (select 1 from pg_temp.audit('refund.declined') where true), 'refund steps audited';
   assert exists (select 1 from public.email_outbox where template = 'refund_declined') and exists (select 1 from public.email_outbox where template = 'refund_paid')
@@ -5058,5 +5058,73 @@ do $$ begin
     = array['app_version', 'extra_days', 'first_seen', 'last_seen', 'pc_id', 'program', 'trial_start'], 'nothing else is kept (no names, emails or data)';
 end $$;
 
+-- ===== HQ V2 first slice: US dollars only for new refunds and credits; test accounts left out of HQ's figures
+-- (Riki is the HQ owner, signed in with two-step sign-in; tokens here have no session id, so the HQ session timer isn't used)
+reset role;
+-- an older refund in Fiji dollars (made before the rule): still there, can still be reviewed, approved and paid as credit
+alter table public.refund_requests disable trigger refund_requests_usd;
+insert into public.refund_requests (workspace_id, requested_by, for_what, period, amount, currency, reason_category, explanation)
+  select current_setting('test.ws_c')::uuid, '77777777-7777-7777-7777-777777777777', 'Payroll', 'August 2026', 40, 'FJD', 'mistake', 'Older refund in FJD'
+  returning id as old_rf \gset
+alter table public.refund_requests enable trigger refund_requests_usd;
+select set_config('test.old_rf', :'old_rf', false);
+select set_config('test.any_ticket', (select id::text from public.support_tickets order by created_at limit 1), false);
+select pg_temp.as_user('77777777-7777-7777-7777-777777777777'); set role authenticated;
+do $$ begin
+  -- the customer asks in another currency: refused, in plain words
+  begin perform public.request_refund(current_setting('test.ws_c')::uuid, 'POS', 'November 2026', null, 20, 'AUD', 'mistake', 'Wrong till', null);
+    raise exception 'an AUD refund was made';
+  exception when others then assert sqlerrm like 'Riyeser charges in US dollars%', sqlerrm; end;
+  -- and the older FJD one is still readable as it was
+  assert exists (select 1 from json_array_elements(public.my_refunds(current_setting('test.ws_c')::uuid)::json) x where x ->> 'currency' = 'FJD' and (x ->> 'amount')::numeric = 40),
+    'the older FJD refund is still shown';
+end $$;
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999');
+do $$ declare r json; begin
+  begin perform public.hq_refund_create(current_setting('test.any_ticket')::uuid, 'POS', 'November 2026', null, 20, 'NZD', 'mistake', 'x'); raise exception 'HQ made an NZD refund';
+  exception when others then assert sqlerrm like 'Riyeser charges in US dollars%', sqlerrm; end;
+  r := public.hq_refund_create(current_setting('test.any_ticket')::uuid, 'POS', 'November 2026', null, 20, 'USD', 'mistake', 'Charged twice');   -- US dollars: fine
+  perform public.hq_refund_review(current_setting('test.old_rf')::uuid);
+  perform public.hq_refund_decide(current_setting('test.old_rf')::uuid, 'approve', null, 'Older refund, paid as credit');
+  perform public.hq_refund_paid(current_setting('test.old_rf')::uuid, 'credit', null);
+end $$;
+reset role;
+do $$ begin
+  assert (select status from public.refund_requests where id = current_setting('test.old_rf')::uuid) = 'paid', 'the older FJD refund could still be paid';
+  assert exists (select 1 from public.account_credits where refund_id = current_setting('test.old_rf')::uuid and currency = 'FJD' and amount = 40), 'its credit keeps its own currency';
+  begin insert into public.account_credits (workspace_id, amount, currency, note) values (current_setting('test.ws_c')::uuid, 5, 'FJD', 'goodwill'); raise exception 'an FJD credit was added';
+  exception when others then assert sqlerrm like 'Riyeser charges in US dollars%', sqlerrm; end;
+  begin update public.refund_requests set currency = 'AUD' where id = current_setting('test.old_rf')::uuid; raise exception 'currency changed to AUD';
+  exception when others then assert sqlerrm like 'Riyeser charges in US dollars%', sqlerrm; end;
+end $$;
+-- test accounts: hq_kpis leaves them out unless asked; marking one is in the HQ history and needs test_accounts.manage
+select pg_temp.as_user('99999999-9999-9999-9999-999999999999'); set role authenticated;
+do $$ declare a json; b json; c json; ws uuid := current_setting('test.ws_c')::uuid; begin
+  a := public.hq_kpis(false);
+  assert (a ->> 'currency') = 'USD' and (a ->> 'test_accounts')::int = 0 and (a ->> 'businesses')::int >= 1 and a ->> 'mrr' is not null, 'kpis: ' || a::text;
+  begin perform public.hq_set_account_kind(ws, 'pretend', 'x x x'); raise exception 'odd kind';
+  exception when others then assert sqlerrm like 'Choose customer, test, demo or internal%', sqlerrm; end;
+  begin perform public.hq_set_account_kind(ws, 'test', ''); raise exception 'no reason';
+  exception when others then assert sqlerrm like 'Say why%', sqlerrm; end;
+  perform public.hq_set_account_kind(ws, 'test', 'Our own QA business');
+  perform public.hq_set_account_kind(ws, 'test', 'Our own QA business');   -- the same again writes nothing
+  b := public.hq_kpis(false); c := public.hq_kpis(true);
+  assert (b ->> 'test_accounts')::int = 1 and (b ->> 'businesses')::int = (a ->> 'businesses')::int - 1, 'a test account is left out: ' || b::text;
+  assert (c ->> 'businesses')::int = (a ->> 'businesses')::int and (c ->> 'include_test')::boolean, 'and counted with the switch on: ' || c::text;
+  assert (select count(*) from json_array_elements(public.hq_test_accounts()) x where (x ->> 'id')::uuid = ws) = 1, 'listed as a test account';
+  assert (select count(*) from json_array_elements(public.hq_work_queue() -> 'queue') x where x::jsonb ? 'account_kind') = json_array_length(public.hq_work_queue() -> 'queue'), 'queue items say their kind';
+  perform public.hq_set_account_kind(ws, 'customer', 'Back to a real customer');
+end $$;
+select pg_temp.as_user('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');   -- Help Desk (support): can't mark accounts; sees the figures it may see
+do $$ declare k json; begin
+  begin perform public.hq_set_account_kind(current_setting('test.ws_c')::uuid, 'test', 'not allowed'); raise exception 'support marked a test account';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end;
+  k := public.hq_kpis(false);
+  assert k ->> 'open_tickets' is not null and k ->> 'mrr' is not null, 'support: tickets, and money (it has licences.view): ' || k::text;
+end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.hq_audit where action = 'account.kind') = 2, 'each change of kind is in the HQ history once';
+end $$;
 select 'ALL CHAT DATABASE TESTS PASSED' as result;
 select tablename from pg_publication_tables where pubname = 'supabase_realtime';
