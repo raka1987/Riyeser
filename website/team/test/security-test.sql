@@ -9,6 +9,7 @@
 --      refused what it isn't allowed; without two-step sign-in nothing works
 --   4. secrets: API key hashes, webhook secrets, relay keys and phone digests are never readable or returned
 --   5. SEC-001 problem reports scrubbed of tokens, keys and user names; SEC-002 old call set-up messages removed
+--   7. custom HQ roles: the hard limits can never be given (even by hand or direct RPC), no privilege escalation, the last Owner
 create function pg_temp.as_user(u text) returns void language plpgsql as $$ begin
   perform set_config('request.jwt.claim.sub', u, false);
   perform set_config('request.jwt.claims', json_build_object('sub', u, 'aal', 'aal2')::text, false); end $$;
@@ -614,15 +615,16 @@ end $$;
 set role authenticated;
 select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000006');
 do $$ declare t json; begin
-  -- an admin can't make an owner or another admin, can't change an owner, and can't tick permissions (only the Owner can)
+  -- an admin can't make an owner or another admin, can't change an owner, and can't tick on a permission it doesn't have
   begin perform public.hq_add_staff('hq-sales@riyeser.test', 'Sal', 'admin'); raise exception 'admin made an admin';
   exception when others then assert sqlerrm like 'Only an HQ owner can make an owner or an admin.%', sqlerrm; end;
   begin perform public.hq_add_staff('hq-owner@riyeser.test', 'Own', 'support'); raise exception 'admin demoted the owner';
   exception when others then assert sqlerrm like 'Only an HQ owner can change an owner or an admin.%', sqlerrm; end;
   begin perform public.hq_set_staff('c0c0c0c0-0000-4000-8000-000000000005', 'support', true); raise exception 'admin changed the owner';
   exception when others then assert sqlerrm like 'Only an HQ owner can make or change%', sqlerrm; end;
+  -- (custom roles: an admin may tick permissions for people now, but never one it doesn't have itself)
   begin perform public.hq_set_staff_perms('c0c0c0c0-0000-4000-8000-000000000003', array['licences.manage'], '{}'); raise exception 'admin ticked a permission';
-  exception when others then assert sqlerrm like 'Only an HQ owner can tick%', sqlerrm; end;
+  exception when others then assert sqlerrm like 'You can only give permissions you have yourself (licences.manage)%', sqlerrm; end;
   begin perform public.hq_set_staff('c0c0c0c0-0000-4000-8000-000000000006', 'owner', true); raise exception 'admin made itself owner';
   exception when others then assert sqlerrm like 'You can''t change your own HQ access%', sqlerrm; end;
   -- ...but can run the rest of the team, and sees everyone's email (it manages the team)
@@ -692,5 +694,174 @@ select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000003');   -- sales: no o
 do $$ begin begin perform public.hq_ops_runs(); raise exception 'sales read job runs';
   exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end; end $$;
 reset role;
+
+-- ===== 7. Custom HQ roles: what can never be given, no privilege escalation, the last Owner, two-step sign-in
+-- (owner's request "give the option for admin to select roles"; owner's decision: a standard role, then tick or untick)
+-- the hard limits aren't permissions at all, and the database refuses them even when someone writes the tables by hand
+do $$ declare p text; begin
+  assert not exists (select 1 from unnest(public.hq_all_perms()) q where public.hq_is_never_perm(q)),
+    'no HQ permission is a password, secret, bank details, owner or two-step one';
+  foreach p in array public.hq_never_perms() || array['sip.password_view', 'billing.bank_edit', 'owner.promote', 'support.secrets', 'two_step.skip'] loop
+    assert public.hq_is_never_perm(p), 'never: ' || p;
+    begin insert into public.hq_role_permissions values ('support', p); raise exception 'stored % in a role', p;
+    exception when check_violation then null; end;
+    begin update public.hq_staff set perms_add = array[p] where user_id = 'c0c0c0c0-0000-4000-8000-000000000001'; raise exception 'stored % for a person', p;
+    exception when others then assert sqlerrm like 'That can never be given to anyone%', sqlerrm; end;
+  end loop;
+  begin insert into public.hq_role_permissions values ('support', 'made.up'); raise exception 'unknown permission stored';
+  exception when check_violation then null; end;
+  begin insert into public.hq_role_permissions values ('owner', 'overview.view'); raise exception 'ticks stored for the Owner role';
+  exception when check_violation then null; end;
+  begin delete from public.hq_roles where key = 'finance'; raise exception 'built-in role removed';
+  exception when others then assert sqlerrm like 'Built-in HQ roles can''t be removed%', sqlerrm; end;
+  begin update public.hq_roles set builtin = false where key = 'support'; raise exception 'built-in role made custom';
+  exception when others then assert sqlerrm like 'Built-in HQ roles stay built in%', sqlerrm; end;
+end $$;
+-- ...and nobody can give them through any HQ function, the Owner included (direct RPC calls)
+set role authenticated;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ declare p text; begin
+  foreach p in array array['passwords.view', 'sip_passwords.view', 'secrets.view', 'billing.bank_details', 'bank_details.manage',
+      'owner.make', 'staff.make_owner', 'two_step.bypass', 'mfa.bypass', 'link.sip_password'] loop
+    begin perform public.hq_role_save(null, 'Never ' || p, '', array['overview.view', p]); raise exception 'role with %', p;
+    exception when others then assert sqlerrm like 'That can never be given to anyone (' || p || ')%', sqlerrm; end;
+    begin perform public.hq_role_save('support', 'Support', '', array['overview.view', p]); raise exception 'support role with %', p;
+    exception when others then assert sqlerrm like 'That can never be given to anyone%', sqlerrm; end;
+    begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000001', 'support', array['overview.view', p]); raise exception 'person with %', p;
+    exception when others then assert sqlerrm like 'That can never be given to anyone%', sqlerrm; end;
+    begin perform public.hq_set_staff_perms('c0c0c0c0-0000-4000-8000-000000000001', array[p], null); raise exception 'extra %', p;
+    exception when others then assert sqlerrm like 'That can never be given to anyone%', sqlerrm; end;
+  end loop;
+  -- the Owner role always has everything and can't be changed (nobody locks every Owner out)
+  begin perform public.hq_role_save('owner', 'Owner', '', array['overview.view']); raise exception 'owner role changed';
+  exception when others then assert sqlerrm like 'The Owner role always has every permission%', sqlerrm; end;
+  -- a custom role with every permission there is, given to Sales: still no bank details, no making an Owner, no passwords
+  perform set_config('test.allrole', public.hq_role_save(null, 'Everything but Owner', 'Every permission HQ has', array(select json_array_elements_text(public.hq_team() -> 'all'))), false);
+  perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000003', current_setting('test.allrole'), null);
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000003');
+do $$ begin
+  assert (public.hq_me() ->> 'role_name') = 'Everything but Owner' and json_array_length(public.hq_me() -> 'perms') = json_array_length(public.hq_team() -> 'all'), 'every permission';
+  begin perform public.hq_set_billing_entity('{"name":"Riyeser","bank_account":"00-0000"}'); raise exception 'changed bank details';
+  exception when others then assert sqlerrm like '%Only the Riyeser HQ Owner%' or sqlerrm like 'Your HQ role can''t do that%', sqlerrm; end;
+  begin perform public.hq_add_staff('hq-dev@riyeser.test', 'Dev', 'owner'); raise exception 'made an owner';
+  exception when others then assert sqlerrm like 'Only an HQ owner can make an owner%', sqlerrm; end;
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', 'owner', null); raise exception 'made an owner (access)';
+  exception when others then assert sqlerrm like 'Only an HQ owner can make or change an owner%', sqlerrm; end;
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000005', 'support', null); raise exception 'changed the owner';
+  exception when others then assert sqlerrm like 'Only an HQ owner can make or change an owner%', sqlerrm; end;
+  begin perform public.link_command(current_setting('test.ws_a')::uuid, 'office-front-0001', 'reveal_password',
+      jsonb_build_object('extension', '101', 'key', jsonb_build_object('kty', 'RSA', 'n', repeat('D', 342), 'e', 'AQAB')));
+    raise exception 'saw a phone password';
+  exception when others then assert sqlerrm like 'Riyeser support can''t see phone passwords%', sqlerrm; end;
+  -- and can't change its own access, or its own role
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000003', 'sales', null); raise exception 'changed own access';
+  exception when others then assert sqlerrm like 'You can''t change your own HQ access%', sqlerrm; end;
+  begin perform public.hq_role_save(current_setting('test.allrole'), 'Everything but Owner', '', '{}'); raise exception 'changed own role';
+  exception when others then assert sqlerrm like 'You can''t change the role you have yourself%', sqlerrm; end;
+end $$;
+-- two-step sign-in can't be got around: the same person without it gets nothing at all
+select pg_temp.as_user_aal1('c0c0c0c0-0000-4000-8000-000000000003');
+do $$ begin
+  begin perform public.hq_team(); raise exception 'HQ without two-step sign-in';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.%', sqlerrm; end;
+  assert not (public.hq_me() ->> 'two_step')::boolean, 'hq_me says two-step sign-in is still needed';
+  begin perform public.hq_role_save(null, 'Sneaky', '', array['overview.view']); raise exception 'made a role without two-step sign-in';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.%', sqlerrm; end;
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', 'support', null); raise exception 'changed access without two-step sign-in';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.%', sqlerrm; end;
+end $$;
+-- no privilege escalation: an admin (staff.manage, no money) can't give anything it doesn't have, through any function
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000006');
+do $$ declare k text; begin
+  begin perform public.hq_role_save(null, 'Money helper', '', array['overview.view', 'licences.manage']); raise exception 'role beyond admin';
+  exception when others then assert sqlerrm like 'You can only give permissions you have yourself (licences.manage)%', sqlerrm; end;
+  begin perform public.hq_role_save('support', 'Support', '', array(select json_array_elements_text(public.hq_team() -> 'roles' -> 'support')) || array['refunds.approve']); raise exception 'support role beyond admin';
+  exception when others then assert sqlerrm like 'You can only give permissions you have yourself (refunds.approve)%', sqlerrm; end;
+  begin perform public.hq_role_save('admin', 'Admin', '', array['overview.view']); raise exception 'admin changed the Admin role';
+  exception when others then assert sqlerrm like 'Only the HQ Owner can change the Owner and Admin roles%', sqlerrm; end;
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', 'developer', array['overview.view', 'refunds.pay']); raise exception 'extra beyond admin';
+  exception when others then assert sqlerrm like 'You can only give permissions you have yourself (refunds.pay)%', sqlerrm; end;
+  begin perform public.hq_set_staff_perms('c0c0c0c0-0000-4000-8000-000000000002', array['audit.view', 'licences.view'], null); raise exception 'old extras beyond admin';
+  exception when others then assert sqlerrm like 'You can only give permissions you have yourself (licences.view)%', sqlerrm; end;
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', 'finance', null); raise exception 'gave finance';
+  exception when others then assert sqlerrm like 'You can only give permissions you have yourself%' or sqlerrm like 'Only the HQ Owner can give%', sqlerrm; end;
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', current_setting('test.allrole'), null); raise exception 'gave everything';
+  exception when others then assert sqlerrm like 'You can only give permissions you have yourself%' or sqlerrm like 'Only the HQ Owner can give%', sqlerrm; end;
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000006', 'admin', array['overview.view', 'licences.view']); raise exception 'admin raised itself';
+  exception when others then assert sqlerrm like 'You can''t change your own HQ access%', sqlerrm; end;
+  -- SEC-010: emailing invoices only from the Owner, never from an admin, even in a role it may otherwise change
+  begin perform public.hq_role_save(null, 'Mailer', '', array['overview.view', 'invoices.email']); raise exception 'admin gave invoices.email';
+  exception when others then assert sqlerrm like 'Only the HQ Owner can give "Email invoices and receipts"%', sqlerrm; end;
+  begin perform public.hq_set_staff_perms('c0c0c0c0-0000-4000-8000-000000000002', array['invoices.email'], null); raise exception 'admin ticked invoices.email';
+  exception when others then assert sqlerrm like 'Only the HQ Owner can give "Email invoices and receipts"%', sqlerrm; end;
+  -- ...what it has itself it may give: a role inside its own permissions, given to the developer; taking away is allowed
+  k := public.hq_role_save(null, 'Team helper', 'Looks after HQ history and emails', array['overview.view', 'audit.view', 'emails.view', 'ops.view']);
+  perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', k, array['overview.view', 'audit.view', 'ops.view']);
+  -- ...but it can't put them back to Developer: that has diagnostics, which the admin doesn't (the Owner does that below)
+  begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', 'developer', null); raise exception 'admin gave diagnostics';
+  exception when others then assert sqlerrm like 'You can only give permissions you have yourself (support.diagnostics)%', sqlerrm; end;
+  -- taking away from someone with more (Everything -> Sales) is allowed, and switching them off
+  perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000003', 'sales', null);
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ begin
+  -- the Owner may give emailing invoices in a custom role (SEC-010: "unless the Owner explicitly grants it")
+  perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000001', 'support', array(select json_array_elements_text(public.hq_team() -> 'roles' -> 'support')) || array['invoices.email']);
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ declare p jsonb := public.hq_me()::jsonb -> 'perms'; begin
+  assert p ? 'invoices.email' and not p ? 'licences.manage' and (public.hq_me() ->> 'customised')::boolean, 'support can email invoices because the Owner said so';
+  begin perform public.hq_billing_resend('RR-0', null, false); raise exception 'no such doc';
+  exception when others then assert sqlerrm like 'There''s no invoice or receipt with that number%', sqlerrm; end;   -- past the permission check
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000001', 'support', null); end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ begin assert not (public.hq_me()::jsonb -> 'perms') ? 'invoices.email', 'back to standard: no emailing invoices';
+  begin perform public.hq_billing_resend('RR-0', null, false); raise exception 'support emailed an invoice';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that%', sqlerrm; end; end $$;
+-- the last Owner keeps full access: not by hand, not through HQ
+reset role;
+do $$ begin
+  assert (select role from public.hq_staff where user_id = 'c0c0c0c0-0000-4000-8000-000000000003') = 'sales', 'sales again';
+  begin update public.hq_staff set active = false where user_id = 'c0c0c0c0-0000-4000-8000-000000000005'; raise exception 'last owner switched off';
+  exception when others then assert sqlerrm like 'At least one HQ Owner must keep full access%', sqlerrm; end;
+  begin update public.hq_staff set role = 'admin' where user_id = 'c0c0c0c0-0000-4000-8000-000000000005'; raise exception 'last owner demoted';
+  exception when others then assert sqlerrm like 'At least one HQ Owner must keep full access%', sqlerrm; end;
+  begin delete from public.hq_staff where user_id = 'c0c0c0c0-0000-4000-8000-000000000005'; raise exception 'last owner removed';
+  exception when others then assert sqlerrm like 'At least one HQ Owner must keep full access%', sqlerrm; end;
+  begin update public.hq_staff set perms_remove = array['staff.manage'] where user_id = 'c0c0c0c0-0000-4000-8000-000000000005';
+    assert 'staff.manage' = any(public.hq_staff_perms('c0c0c0c0-0000-4000-8000-000000000005')), 'an Owner''s ticks can''t be taken away';
+    update public.hq_staff set perms_remove = '{}' where user_id = 'c0c0c0c0-0000-4000-8000-000000000005'; end;
+end $$;
+set role authenticated;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ begin
+  perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', 'owner', null);   -- a second Owner
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000002');
+do $$ begin
+  perform public.hq_set_staff('c0c0c0c0-0000-4000-8000-000000000005', 'owner', false);       -- the other Owner may switch the first off
+end $$;
+reset role;
+do $$ begin
+  begin update public.hq_staff set role = 'developer' where user_id = 'c0c0c0c0-0000-4000-8000-000000000002'; raise exception 'now-last owner demoted';
+  exception when others then assert sqlerrm like 'At least one HQ Owner must keep full access%', sqlerrm; end;
+end $$;
+set role authenticated;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000002');
+do $$ begin perform public.hq_set_staff('c0c0c0c0-0000-4000-8000-000000000005', 'owner', true); end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ begin perform public.hq_set_staff_access('c0c0c0c0-0000-4000-8000-000000000002', 'developer', null); end $$;
+reset role;
+do $$ begin
+  assert (select count(*) from public.hq_staff where role = 'owner' and active) = 1, 'one Owner again';
+  -- every change above is in the HQ history with before and after
+  assert (select count(*) from public.hq_audit where action = 'staff.access' and details ? 'before' and details ? 'after'
+          and details -> 'before' ? 'perms' and details -> 'after' ? 'perms') >= 6, 'access changes with before and after';
+  assert exists (select 1 from public.hq_audit where action = 'role.created' and details ->> 'name' = 'Team helper' and actor = 'c0c0c0c0-0000-4000-8000-000000000006'), 'role created, by whom';
+  assert not exists (select 1 from public.hq_audit where action like 'role.%' and details::text like '%@%'), 'no email addresses in the role history';
+end $$;
 
 select 'ALL SECURITY TESTS PASSED' as result;

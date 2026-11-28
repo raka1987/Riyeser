@@ -92,9 +92,10 @@ const fs = require('fs');
   await pg.click('.banner [data-goco]'); await pg.waitForTimeout(400); console.log('link opens:', await pg.textContent('.cpage h2')); await pg.click('#cpBack');
 
   // --- HQ team: permissions for a person
-  await tab('team'); await pg.click('[data-perms=s2]'); await pg.waitForSelector('[data-pf=s2]');
-  await pg.check('[data-pf=s2] input[value="business.close"]'); await pg.uncheck('[data-pf=s2] input[value="people.reset_2fa"]'); await pg.click('[data-pf=s2] .btn.p'); await pg.waitForTimeout(300);
-  console.log('Help Desk role:', await pg.$eval('[data-role=s2]', (x) => x.value + ' · ' + x.parentElement.querySelector('small').textContent));
+  // (custom HQ roles: the person's page, their standard role and its ticks; tick or untick for them; test-hq-roles.js has the rest)
+  await tab('team'); await pg.click('[data-access=s2]'); await pg.waitForSelector('[data-pa=s2]');
+  await pg.check('[data-pa=s2] input[value="business.close"]'); await pg.uncheck('[data-pa=s2] input[value="people.reset_2fa"]'); await pg.click('#paSave'); await pg.waitForTimeout(300);
+  console.log('Help Desk role:', await pg.$eval('#paStatus', (x) => x.textContent.replace(/\s+/g, ' ').trim()));
   await as('Help Desk (Support)');
   console.log('Help Desk tabs:', await pg.evaluate(() => [...document.querySelectorAll('.snav .nv')].map((x) => x.textContent.replace(/\d+$/, '')).join(', ')));
   await tab('companies'); await pg.selectOption('#sf select', 'all'); await open('sample plumbing', 'w1');

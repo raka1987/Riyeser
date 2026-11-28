@@ -923,7 +923,30 @@ alter table public.hq_staff add column if not exists perms_add text[] not null d
 alter table public.hq_staff add column if not exists perms_remove text[] not null default '{}';
 alter table public.hq_staff drop constraint if exists hq_staff_role_check;
 -- 'admin' (HQ V2, owner's decision): runs the HQ team, settings, history and operations; no money, no bank details, never makes an owner.
-alter table public.hq_staff add constraint hq_staff_role_check check (role in ('owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer'));
+-- Custom HQ roles (owner's request: "give the option for admin to select roles instead of just predetermined ones, things may
+-- change"). The database is the source of truth: hq_roles holds every role (the seven built-in ones are seeded once from the
+-- shipped lists, hq_builtin_perms, and the Owner may change their ticks later), hq_role_permissions holds each role's ticks, and
+-- hq_staff.role is a role's key (a foreign key, added below once the built-in roles exist). See "Custom HQ roles" further down.
+create table if not exists public.hq_roles (
+  key text primary key check (key ~ '^[a-z][a-z0-9_]{1,39}$'),
+  name text not null check (length(trim(name)) between 1 and 40),
+  description text not null default '' check (length(description) <= 300),
+  builtin boolean not null default false,
+  sort int not null default 100,
+  created_by uuid,
+  created_at timestamptz not null default now(),
+  updated_by uuid,
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists hq_roles_name on public.hq_roles (lower(trim(name)));
+create table if not exists public.hq_role_permissions (
+  role_key text not null references public.hq_roles(key) on delete cascade,
+  perm text not null,
+  primary key (role_key, perm)
+);
+alter table public.hq_roles enable row level security;
+alter table public.hq_role_permissions enable row level security;
+revoke all on public.hq_roles, public.hq_role_permissions from anon, authenticated;
 create table if not exists public.hq_notes (
   id bigint generated always as identity primary key,
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
@@ -1009,9 +1032,27 @@ create or replace function public.hq_all_perms() returns text[] language sql imm
     'people.change_owner', 'business.close', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.assign',
     'support.saved_replies', 'support.escalate', 'support.level2', 'support.level3', 'refunds.view', 'refunds.request',
     'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'emails.manage', 'accounts.inactive',
-    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view', 'support.diagnostics', 'ops.view', 'test_accounts.manage', 'trials.view']
+    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view', 'support.diagnostics', 'ops.view', 'test_accounts.manage', 'trials.view',
+    -- SEC-010: emailing invoices and receipts is its own permission now (it used to come with licences.manage). Finance and the
+    -- Owner have it; anyone else only if the Owner gives it (in a role or to one person).
+    'invoices.email']
 $$;
-create or replace function public.hq_role_perms(r text) returns text[] language sql immutable as $$
+-- What can NEVER be given to anyone, in any role or per-person extra, by anyone (the database refuses it everywhere, see
+-- hq_check_perm_list and the constraints on hq_role_permissions and hq_staff): seeing any password, SIP password or secret
+-- (SEC-009); changing Riyeser's bank details (SEC-011: the Owner role only, hq_is_owner); making or changing an Owner (only an
+-- Owner, in hq_add_staff / hq_set_staff / hq_set_staff_access); getting past two-step sign-in (hq_role needs mfa_ok always).
+-- None of these is a permission at all; the names below (and anything that looks like them) are refused so nobody can add one.
+create or replace function public.hq_never_perms() returns text[] language sql immutable as $$
+  select array['passwords.view', 'sip_passwords.view', 'secrets.view', 'billing.bank_details', 'bank_details.manage',
+    'owner.make', 'staff.make_owner', 'two_step.bypass', 'mfa.bypass']
+$$;
+create or replace function public.hq_is_never_perm(p text) returns boolean language sql immutable as $$
+  select coalesce(p = any(public.hq_never_perms()) or p ~* '(password|passwd|secret|bank|bypass|make_owner|^owner[.]|two_step|mfa)', false)
+$$;
+-- Permissions only the HQ Owner can give (in a role or to one person): emailing invoices and receipts (SEC-010).
+create or replace function public.hq_owner_grant_perms() returns text[] language sql immutable as $$ select array['invoices.email'] $$;
+-- The role lists HQ had before custom roles (kept as they were: the seed for the built-in roles, and what the migration test compares).
+create or replace function public.hq_legacy_role_perms(r text) returns text[] language sql immutable as $$
   select case r
     when 'owner' then public.hq_all_perms()
     -- Finance: money, and billing tickets at level 1 (owner's decision: not level 2/3 ticket work by default)
@@ -1032,13 +1073,30 @@ create or replace function public.hq_role_perms(r text) returns text[] language 
     when 'developer' then array['overview.view', 'downloads.view', 'support.diagnostics', 'ops.view']
     else '{}'::text[] end
 $$;
--- What a staff member can do: their role's defaults, plus ticked extras, minus ticked-off ones. Owners can do everything.
+-- The shipped ticks of the seven built-in roles: what hq_roles is seeded with the first time, and "Back to the standard ticks".
+-- (These are exactly the lists HQ had before custom roles, plus invoices.email for Finance: SEC-010.)
+create or replace function public.hq_builtin_perms(r text) returns text[] language sql immutable as $$
+  select case when r = 'finance' then public.hq_legacy_role_perms(r) || array['invoices.email']
+              when r = 'owner' then public.hq_all_perms() else public.hq_legacy_role_perms(r) end
+$$;
+-- A role's ticks now come from the database (hq_role_permissions). The Owner role always has every permission (nothing is stored
+-- for it, so nobody can lock every Owner out).
+create or replace function public.hq_role_perms(r text) returns text[]
+  language sql stable security definer set search_path = public as $$
+  select case when r = 'owner' then public.hq_all_perms() else
+    array(select x.perm from hq_role_permissions x where x.role_key = r and x.perm = any(public.hq_all_perms()) and not public.hq_is_never_perm(x.perm) order by 1) end
+$$;
+-- What someone with this role and these per-person extras (padd) and removals (prem) can do. Never anything on hq_never_perms.
+create or replace function public.hq_perms_for(r text, padd text[], prem text[]) returns text[]
+  language sql stable security definer set search_path = public as $$
+  select case when r = 'owner' then public.hq_all_perms() else
+    array(select distinct p from unnest(public.hq_role_perms(r) || coalesce(padd, '{}')) p
+          where not (p = any(coalesce(prem, '{}'))) and p = any(public.hq_all_perms()) and not public.hq_is_never_perm(p) order by 1) end
+$$;
+-- What a staff member can do: their role's ticks, plus ticked extras, minus ticked-off ones. Owners can do everything.
 create or replace function public.hq_staff_perms(uid uuid) returns text[]
   language sql stable security definer set search_path = public as $$
-  select case when s.role = 'owner' then public.hq_all_perms() else
-    array(select distinct p from unnest(public.hq_role_perms(s.role) || s.perms_add) p
-          where not (p = any(s.perms_remove)) and p = any(public.hq_all_perms()) order by 1) end
-  from hq_staff s where s.user_id = uid and s.active
+  select public.hq_perms_for(s.role, s.perms_add, s.perms_remove) from hq_staff s where s.user_id = uid and s.active
 $$;
 create or replace function public.hq_perms() returns text[]
   language sql stable security definer set search_path = public as $$
@@ -1064,11 +1122,110 @@ create or replace function public.hq_log(act text, det jsonb) returns void
   values (act, det, case when det ->> 'workspace_id' ~ '^[0-9a-f-]{36}$' then (det ->> 'workspace_id')::uuid end, nullif(det ->> 'ticket', ''))
 $$;
 
+-- ---------------------------------------------------------------- Custom HQ roles: seeding, the database's own locks, checks
+-- The seven built-in roles, seeded once (safe to run again: a role that's already there keeps its ticks, so the Owner's
+-- changes stay). The first time, staff with licences.manage ticked on (or off) for them get invoices.email the same way, so
+-- everyone can still do exactly what they could before (SEC-010 split emailing invoices out of licences.manage).
+alter table public.hq_role_permissions drop constraint if exists hq_role_permissions_perm_check;
+delete from public.hq_role_permissions where not (perm = any(public.hq_all_perms())) or public.hq_is_never_perm(perm) or role_key = 'owner';
+alter table public.hq_role_permissions add constraint hq_role_permissions_perm_check
+  check (perm = any(public.hq_all_perms()) and not public.hq_is_never_perm(perm) and role_key <> 'owner');
+do $$ declare first boolean := not exists (select 1 from public.hq_roles where key = 'finance'); begin
+  with ins as (
+    insert into public.hq_roles (key, name, description, builtin, sort) values
+      ('owner', 'Owner', 'Everything, always, including Riyeser''s billing and bank details. Only an Owner makes another Owner.', true, 1),
+      ('admin', 'Admin', 'Runs the HQ team, settings, the HQ history and operations. No money, licences, refunds or bank details.', true, 2),
+      ('finance', 'Finance', 'Licences, invoices and payments, refunds and free periods, and emailing invoices and receipts.', true, 3),
+      ('support', 'Support', 'Level 1 help: tickets, customer details, diagnostics, two-step sign-in resets and Link phone help.', true, 4),
+      ('senior', 'Senior support', 'Everything Support does, plus level 2 tickets, owner changes, closing businesses and resending emails.', true, 5),
+      ('sales', 'Sales', 'Customer accounts and licence state, notes, and free periods within the limit.', true, 6),
+      ('developer', 'Developer', 'The overview, downloads, sanitised diagnostic reports and system operations. No customer list.', true, 7)
+    on conflict (key) do update set builtin = true
+    returning key, (xmax = 0) as inserted)
+  insert into public.hq_role_permissions (role_key, perm)
+    select ins.key, p from ins, unnest(public.hq_builtin_perms(ins.key)) p where ins.inserted and ins.key <> 'owner'
+    on conflict do nothing;
+  if first then
+    update public.hq_staff set perms_add = perms_add || array['invoices.email'] where 'licences.manage' = any(perms_add) and not 'invoices.email' = any(perms_add);
+    update public.hq_staff set perms_remove = perms_remove || array['invoices.email'] where 'licences.manage' = any(perms_remove) and not 'invoices.email' = any(perms_remove);
+  end if;
+end $$;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'hq_staff_role_fkey' and conrelid = 'public.hq_staff'::regclass) then
+    alter table public.hq_staff add constraint hq_staff_role_fkey foreign key (role) references public.hq_roles(key);
+  end if;
+end $$;
+-- The database's own locks (they hold even for someone running SQL by hand): built-in roles can't be removed or renamed away;
+-- per-person extras are only real permissions and never one that can't be given; at least one active Owner always stays.
+create or replace function public.hq_roles_guard() returns trigger language plpgsql as $$
+begin
+  if tg_op = 'DELETE' then
+    if old.builtin then raise exception 'Built-in HQ roles can''t be removed. You can change their ticks instead.'; end if;
+    return old;
+  end if;
+  if old.builtin and (new.key <> old.key or not new.builtin) then raise exception 'Built-in HQ roles stay built in.'; end if;
+  return new;
+end $$;
+drop trigger if exists hq_roles_guard on public.hq_roles;
+create trigger hq_roles_guard before update or delete on public.hq_roles for each row execute function public.hq_roles_guard();
+create or replace function public.hq_staff_guard() returns trigger language plpgsql as $$
+declare bad text;
+begin
+  if tg_op in ('INSERT', 'UPDATE') then
+    select p into bad from unnest(coalesce(new.perms_add, '{}') || coalesce(new.perms_remove, '{}')) p
+      where public.hq_is_never_perm(p) or not p = any(public.hq_all_perms()) limit 1;
+    if bad is not null and (tg_op = 'INSERT' or new.perms_add is distinct from old.perms_add or new.perms_remove is distinct from old.perms_remove) then
+      raise exception 'That can never be given to anyone, or isn''t an HQ permission: %', bad; end if;
+  end if;
+  if tg_op in ('UPDATE', 'DELETE') and old.role = 'owner' and old.active
+     and (tg_op = 'DELETE' or new.role <> 'owner' or not new.active)
+     and not exists (select 1 from public.hq_staff s where s.role = 'owner' and s.active and s.user_id <> old.user_id) then
+    raise exception 'At least one HQ Owner must keep full access. Make someone else an Owner first.';
+  end if;
+  return case when tg_op = 'DELETE' then old else new end;
+end $$;
+drop trigger if exists hq_staff_guard on public.hq_staff;
+create trigger hq_staff_guard before insert or update or delete on public.hq_staff for each row execute function public.hq_staff_guard();
+
+-- Refuses a list with anything that can't be given (hq_never_perms) or isn't an HQ permission.
+create or replace function public.hq_check_perm_list(perms text[]) returns void
+  language plpgsql stable security definer set search_path = public as $$
+declare bad text;
+begin
+  select p into bad from unnest(coalesce(perms, '{}')) p where public.hq_is_never_perm(p) limit 1;
+  if bad is not null then raise exception 'That can never be given to anyone (%). Nobody in HQ sees passwords or secrets, only the Owner changes Riyeser''s bank details, only an Owner makes an Owner, and two-step sign-in is always needed.', bad; end if;
+  select p into bad from unnest(coalesce(perms, '{}')) p where not p = any(public.hq_all_perms()) limit 1;
+  if bad is not null then raise exception 'Unknown permission: %', bad; end if;
+end $$;
+-- Before anyone's HQ access changes from old_perms to new_perms (and to role new_role). The Owner may do anything but change
+-- their own access. Anyone else (with staff.manage): not themselves, not an Owner or Admin, never give a permission they don't
+-- have themselves, and never an Owner-only one (SEC-010). Taking permissions away (or switching someone off) stays allowed.
+create or replace function public.hq_access_check(target uuid, new_role text, new_perms text[], old_perms text[]) returns void
+  language plpgsql stable security definer set search_path = public as $$
+declare mine text[] := coalesce(public.hq_perms(), '{}'); cur hq_staff; extra text[]; bad text;
+begin
+  if target = auth.uid() then raise exception 'You can''t change your own HQ access. Ask another owner.'; end if;
+  perform public.hq_check_perm_list(new_perms);
+  if public.hq_role() = 'owner' then return; end if;
+  select * into cur from hq_staff where user_id = target;
+  if new_role in ('owner', 'admin') or cur.role in ('owner', 'admin') then
+    raise exception 'Only an HQ owner can make or change an owner or an admin.'; end if;
+  extra := array(select unnest(coalesce(new_perms, '{}')) except select unnest(coalesce(old_perms, '{}')));
+  select string_agg(p, ', ' order by p) into bad from unnest(extra) p where p = any(public.hq_owner_grant_perms());
+  if bad is not null then raise exception 'Only the HQ Owner can give "Email invoices and receipts" (%, SEC-010).', bad; end if;
+  select string_agg(p, ', ' order by p) into bad from unnest(extra) p where not p = any(mine);
+  if bad is not null then raise exception 'You can only give permissions you have yourself (%).', bad; end if;
+end $$;
+revoke all on function public.hq_never_perms(), public.hq_is_never_perm(text), public.hq_owner_grant_perms(), public.hq_builtin_perms(text),
+  public.hq_legacy_role_perms(text), public.hq_perms_for(text, text[], text[]), public.hq_check_perm_list(text[]),
+  public.hq_access_check(uuid, text, text[], text[]), public.hq_roles_guard(), public.hq_staff_guard() from public, anon, authenticated;
+
 -- Who am I in HQ (also tells the website whether two-step sign-in is still needed)
 create or replace function public.hq_me() returns json
   language sql stable security definer set search_path = public as $$
   select json_build_object('role', s.role, 'name', s.display_name, 'active', s.active, 'two_step', public.mfa_ok(),
-    'perms', case when s.active then public.hq_staff_perms(s.user_id) end)
+    'perms', case when s.active then public.hq_staff_perms(s.user_id) end,
+    'role_name', (select r.name from hq_roles r where r.key = s.role), 'customised', cardinality(s.perms_add) + cardinality(s.perms_remove) > 0, 'id', s.user_id)
   from hq_staff s where s.user_id = auth.uid()
 $$;
 
@@ -1180,34 +1337,47 @@ begin
     from hq_staff s join auth.users u on u.id = s.user_id order by s.added_at;
 end $$;
 
--- Owners add staff (they need a Riyeser account first), change their role, or switch them off.
+-- Owners (and whoever has staff.manage) add staff (they need a Riyeser account first), change their role, or switch them off.
+-- Any role in hq_roles; hq_access_check stops anyone but the Owner giving what they don't have themselves.
 create or replace function public.hq_add_staff(staff_email text, staff_name text, staff_role text) returns void
   language plpgsql security definer set search_path = public as $$
-declare uid uuid;
+declare uid uuid; cur hq_staff;
 begin
   perform hq_need(array['staff.manage']);
-  if staff_role not in ('owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  if not exists (select 1 from hq_roles where key = staff_role) then raise exception 'Choose a role'; end if;
   if staff_role in ('owner', 'admin') and hq_role() <> 'owner' then raise exception 'Only an HQ owner can make an owner or an admin.'; end if;
   if hq_role() <> 'owner' and exists (select 1 from hq_staff s join auth.users u on u.id = s.user_id
       where lower(u.email::text) = lower(trim(staff_email)) and s.role in ('owner', 'admin')) then
     raise exception 'Only an HQ owner can change an owner or an admin.'; end if;
   select id into uid from auth.users where lower(email::text) = lower(trim(staff_email));
   if uid is null then raise exception 'No Riyeser account with that email yet. Ask them to create one at riyeser.com/link first.'; end if;
+  select * into cur from hq_staff where user_id = uid;
+  perform hq_access_check(uid, staff_role, hq_perms_for(staff_role, cur.perms_add, cur.perms_remove),
+    case when cur.active then hq_perms_for(cur.role, cur.perms_add, cur.perms_remove) else '{}' end);
   insert into hq_staff (user_id, display_name, role, added_by) values (uid, trim(staff_name), staff_role, auth.uid())
     on conflict (user_id) do update set display_name = excluded.display_name, role = excluded.role, active = true;
-  perform hq_log('staff.added', json_build_object('email', staff_email, 'role', staff_role)::jsonb);
+  perform hq_log('staff.added', jsonb_build_object('email', staff_email, 'role', staff_role, 'user_id', uid,
+    'before', case when cur.user_id is not null then jsonb_build_object('role', cur.role, 'active', cur.active) end,
+    'perms', to_jsonb(hq_staff_perms(uid))));
 end $$;
 
 create or replace function public.hq_set_staff(staff uuid, staff_role text, is_active boolean) returns void
   language plpgsql security definer set search_path = public as $$
+declare cur hq_staff;
 begin
   perform hq_need(array['staff.manage']);
   if staff = auth.uid() then raise exception 'You can''t change your own HQ access. Ask another owner.'; end if;
-  if staff_role not in ('owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  if not exists (select 1 from hq_roles where key = staff_role) then raise exception 'Choose a role'; end if;
   if hq_role() <> 'owner' and (staff_role in ('owner', 'admin') or (select role from hq_staff where user_id = staff) in ('owner', 'admin')) then
     raise exception 'Only an HQ owner can make or change an owner or an admin.'; end if;
+  select * into cur from hq_staff where user_id = staff;
+  if cur.user_id is null then raise exception 'That person isn''t on the HQ team.'; end if;
+  perform hq_access_check(staff, staff_role, case when is_active then hq_perms_for(staff_role, cur.perms_add, cur.perms_remove) else '{}' end,
+    case when cur.active then hq_perms_for(cur.role, cur.perms_add, cur.perms_remove) else '{}' end);
   update hq_staff set role = staff_role, active = is_active where user_id = staff;
-  perform hq_log('staff.changed', json_build_object('user_id', staff, 'role', staff_role, 'active', is_active)::jsonb);
+  perform hq_log('staff.changed', jsonb_build_object('user_id', staff, 'role', staff_role, 'active', is_active,
+    'before', jsonb_build_object('role', cur.role, 'active', cur.active, 'perms', to_jsonb(case when cur.active then hq_perms_for(cur.role, cur.perms_add, cur.perms_remove) else '{}' end)),
+    'after', jsonb_build_object('role', staff_role, 'active', is_active, 'perms', to_jsonb(coalesce(hq_staff_perms(staff), '{}')))));
 end $$;
 
 create or replace function public.hq_history() returns table (at timestamptz, who text, action text, details jsonb)
@@ -3305,31 +3475,150 @@ begin
   return r;
 end $$;
 
--- Staff and their permissions (the HQ team tab)
+-- Staff, roles and their permissions (the HQ team tab: People and Roles)
 create or replace function public.hq_team() returns json
   language plpgsql stable security definer set search_path = public as $$
 begin
   perform hq_need(array['overview.view']);
   return json_build_object('all', hq_all_perms(),
-    'roles', (select json_object_agg(r, hq_role_perms(r)) from unnest(array['owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer']) r),
+    'roles', (select json_object_agg(r.key, hq_role_perms(r.key)) from hq_roles r),
+    -- every role, built-in ones first: its ticks, the shipped ticks (built-in only), and how many people have it
+    'role_list', (select coalesce(json_agg(json_build_object('key', r.key, 'name', r.name, 'description', r.description, 'builtin', r.builtin,
+        'perms', hq_role_perms(r.key), 'standard', case when r.builtin then hq_builtin_perms(r.key) end,
+        'people', (select count(*) from hq_staff s where s.role = r.key), 'updated_at', r.updated_at) order by r.sort, lower(r.name)), '[]') from hq_roles r),
+    'owner_only', to_json(hq_owner_grant_perms()),
     -- staff emails only for whoever runs the HQ team (and your own)
-    'staff', (select coalesce(json_agg(json_build_object('user_id', s.user_id, 'display_name', s.display_name, 'role', s.role, 'active', s.active,
+    'staff', (select coalesce(json_agg(json_build_object('user_id', s.user_id, 'display_name', s.display_name, 'role', s.role,
+        'role_name', (select r.name from hq_roles r where r.key = s.role), 'active', s.active,
         'email', case when hq_can('staff.manage') or s.user_id = auth.uid() then u.email::text end, 'added_at', s.added_at, 'perms_add', s.perms_add, 'perms_remove', s.perms_remove,
         'perms', coalesce(hq_staff_perms(s.user_id), '{}')) order by s.added_at), '[]') from hq_staff s join auth.users u on u.id = s.user_id));
 end $$;
+-- Tick permissions on (perms_on) or off (perms_off) for one person, on top of their role (kept for older HQ pages; the HQ team
+-- page now uses hq_set_staff_access). Whoever has staff.manage, within hq_access_check.
 create or replace function public.hq_set_staff_perms(staff uuid, perms_on text[], perms_off text[]) returns void
   language plpgsql security definer set search_path = public as $$
-declare bad text;
+declare cur hq_staff; before text[]; after text[];
 begin
   perform hq_need(array['staff.manage']);
-  if hq_role() <> 'owner' then raise exception 'Only an HQ owner can tick permissions on or off.'; end if;
   if staff = auth.uid() then raise exception 'You can''t change your own HQ access. Ask another owner.'; end if;
-  select p into bad from unnest(coalesce(perms_on, '{}') || coalesce(perms_off, '{}')) p where not p = any(hq_all_perms()) limit 1;
-  if bad is not null then raise exception 'Unknown permission: %', bad; end if;
+  perform hq_check_perm_list(coalesce(perms_on, '{}') || coalesce(perms_off, '{}'));
+  select * into cur from hq_staff where user_id = staff;
+  if cur.user_id is null then raise exception 'That person isn''t on the HQ team.'; end if;
+  before := hq_perms_for(cur.role, cur.perms_add, cur.perms_remove); after := hq_perms_for(cur.role, perms_on, perms_off);
+  perform hq_access_check(staff, cur.role, after, before);
   update hq_staff set perms_add = coalesce(perms_on, '{}'), perms_remove = coalesce(perms_off, '{}') where user_id = staff;
-  if not found then raise exception 'That person isn''t on the HQ team.'; end if;
-  perform hq_log('staff.permissions', jsonb_build_object('user_id', staff, 'on', to_jsonb(coalesce(perms_on, '{}')), 'off', to_jsonb(coalesce(perms_off, '{}'))));
+  perform hq_log('staff.permissions', jsonb_build_object('user_id', staff, 'on', to_jsonb(coalesce(perms_on, '{}')), 'off', to_jsonb(coalesce(perms_off, '{}')),
+    'before', jsonb_build_object('role', cur.role, 'perms', to_jsonb(before)), 'after', jsonb_build_object('role', cur.role, 'perms', to_jsonb(after))));
 end $$;
+-- The HQ team page's main way in (owner's decision: "still have a standard selection but we can tick or untick as required"):
+-- pick a role for someone, then tick or untick for that person. perms = everything they should be able to do (null: the role's
+-- standard ticks, "Reset to standard"); the database keeps only the difference from the role, so later changes to the role
+-- reach them too. Everything is in the HQ history with before and after.
+create or replace function public.hq_set_staff_access(staff uuid, staff_role text, perms text[]) returns json
+  language plpgsql security definer set search_path = public as $$
+declare cur hq_staff; rp text[]; want text[]; padd text[] := '{}'; prem text[] := '{}'; before text[]; after text[];
+begin
+  perform hq_need(array['staff.manage']);
+  if staff = auth.uid() then raise exception 'You can''t change your own HQ access. Ask another owner.'; end if;
+  select * into cur from hq_staff where user_id = staff;
+  if cur.user_id is null then raise exception 'That person isn''t on the HQ team.'; end if;
+  if not exists (select 1 from hq_roles where key = staff_role) then raise exception 'Choose a role'; end if;
+  perform hq_check_perm_list(perms);
+  rp := hq_role_perms(staff_role);
+  if staff_role <> 'owner' then
+    want := coalesce(perms, rp);
+    padd := array(select unnest(want) except select unnest(rp) order by 1);
+    prem := array(select unnest(rp) except select unnest(want) order by 1);
+  end if;
+  before := hq_perms_for(cur.role, cur.perms_add, cur.perms_remove); after := hq_perms_for(staff_role, padd, prem);
+  perform hq_access_check(staff, staff_role, after, before);
+  update hq_staff set role = staff_role, perms_add = padd, perms_remove = prem where user_id = staff;
+  perform hq_log('staff.access', jsonb_build_object('user_id', staff,
+    'before', jsonb_build_object('role', cur.role, 'added', to_jsonb(cur.perms_add), 'removed', to_jsonb(cur.perms_remove), 'perms', to_jsonb(before)),
+    'after', jsonb_build_object('role', staff_role, 'added', to_jsonb(padd), 'removed', to_jsonb(prem), 'perms', to_jsonb(after))));
+  return json_build_object('role', staff_role, 'perms', after, 'perms_add', padd, 'perms_remove', prem);
+end $$;
+-- Create a role (role_key null) or change one: its name, description and ticks. The Owner role always has everything and
+-- can't be changed; only the Owner changes the Admin role; built-in roles keep their names (duplicate one to make another).
+-- Anyone but the Owner: not the role they have themselves, nothing they can't do themselves, nothing Owner-only (SEC-010).
+create or replace function public.hq_role_save(role_key text, role_name text, role_description text, perms text[]) returns text
+  language plpgsql security definer set search_path = public as $$
+declare r hq_roles; old text[] := '{}'; k text; nm text := trim(coalesce(role_name, '')); ds text := trim(coalesce(role_description, ''));
+  owner boolean; extra text[]; bad text;
+begin
+  perform hq_need(array['staff.manage']);
+  owner := hq_role() = 'owner';
+  perform hq_check_perm_list(perms);
+  perms := array(select distinct p from unnest(coalesce(perms, '{}')) p order by 1);
+  if nullif(trim(coalesce(role_key, '')), '') is not null then
+    select * into r from hq_roles x where x.key = role_key;
+    if r.key is null then raise exception 'That role isn''t there any more. Reload the page.'; end if;
+    if r.key = 'owner' then raise exception 'The Owner role always has every permission, so nobody is ever locked out. It can''t be changed.'; end if;
+    if r.key = 'admin' and not owner then raise exception 'Only the HQ Owner can change the Owner and Admin roles.'; end if;
+    if not owner and exists (select 1 from hq_staff s where s.user_id = auth.uid() and s.role = r.key) then
+      raise exception 'You can''t change the role you have yourself. Ask the HQ Owner.'; end if;
+    if r.builtin and nm <> r.name then raise exception 'Built-in roles keep their names. Duplicate it to make a new role.'; end if;
+    old := hq_role_perms(r.key);
+  end if;
+  if length(nm) not between 1 and 40 then raise exception 'Give the role a name (up to 40 letters).'; end if;
+  if length(ds) > 300 then raise exception 'Keep the description under 300 letters.'; end if;
+  if exists (select 1 from hq_roles x where lower(trim(x.name)) = lower(nm) and x.key is distinct from r.key) then
+    raise exception 'There''s already a role called %.', nm; end if;
+  if not owner then
+    extra := array(select unnest(perms) except select unnest(old));
+    select string_agg(p, ', ' order by p) into bad from unnest(extra) p where p = any(hq_owner_grant_perms());
+    if bad is not null then raise exception 'Only the HQ Owner can give "Email invoices and receipts" (%, SEC-010).', bad; end if;
+    select string_agg(p, ', ' order by p) into bad from unnest(extra) p where not p = any(coalesce(hq_perms(), '{}'));
+    if bad is not null then raise exception 'You can only give permissions you have yourself (%).', bad; end if;
+  end if;
+  if r.key is null then
+    k := 'c_' || substr(md5(gen_random_uuid()::text), 1, 12);
+    insert into hq_roles (key, name, description, builtin, sort, created_by, updated_by) values (k, nm, ds, false, 100, auth.uid(), auth.uid());
+    insert into hq_role_permissions (role_key, perm) select k, p from unnest(perms) p;
+    perform hq_log('role.created', jsonb_build_object('role', k, 'name', nm, 'after', jsonb_build_object('name', nm, 'description', ds, 'perms', to_jsonb(perms))));
+  else
+    k := r.key;
+    update hq_roles set name = nm, description = ds, updated_by = auth.uid(), updated_at = now() where key = k;
+    delete from hq_role_permissions x where x.role_key = k and not x.perm = any(perms);
+    insert into hq_role_permissions (role_key, perm) select k, p from unnest(perms) p on conflict do nothing;
+    perform hq_log('role.changed', jsonb_build_object('role', k, 'name', nm, 'people', (select count(*) from hq_staff s where s.role = k),
+      'before', jsonb_build_object('name', r.name, 'description', r.description, 'perms', to_jsonb(old)),
+      'after', jsonb_build_object('name', nm, 'description', ds, 'perms', to_jsonb(perms))));
+  end if;
+  return k;
+end $$;
+-- Remove a custom role. If people still have it, move_to says which role they move to (with that role's standard ticks; each
+-- move is checked like any other change, and in the HQ history). Built-in roles can't be removed.
+create or replace function public.hq_role_delete(role_key text, move_to text) returns int
+  language plpgsql security definer set search_path = public as $$
+declare r hq_roles; s hq_staff; n int := 0; before text[]; after text[];
+begin
+  perform hq_need(array['staff.manage']);
+  select * into r from hq_roles x where x.key = role_key;
+  if r.key is null then raise exception 'That role isn''t there any more. Reload the page.'; end if;
+  if r.builtin then raise exception 'Built-in HQ roles can''t be removed. You can change their ticks instead.'; end if;
+  if exists (select 1 from hq_staff x where x.role = r.key) then
+    if nullif(trim(coalesce(move_to, '')), '') is null then
+      raise exception 'Some people still have this role (%). Choose a role to move them to first.', (select count(*) from hq_staff x where x.role = r.key); end if;
+    if move_to = r.key or not exists (select 1 from hq_roles x where x.key = move_to) then raise exception 'Choose another role to move them to.'; end if;
+    for s in select * from hq_staff x where x.role = r.key order by x.added_at loop
+      before := hq_perms_for(s.role, s.perms_add, s.perms_remove); after := hq_perms_for(move_to, '{}', '{}');
+      perform hq_access_check(s.user_id, move_to, after, before);
+      update hq_staff set role = move_to, perms_add = '{}', perms_remove = '{}' where user_id = s.user_id;
+      perform hq_log('staff.access', jsonb_build_object('user_id', s.user_id, 'why', 'role.deleted',
+        'before', jsonb_build_object('role', s.role, 'added', to_jsonb(s.perms_add), 'removed', to_jsonb(s.perms_remove), 'perms', to_jsonb(before)),
+        'after', jsonb_build_object('role', move_to, 'added', '[]'::jsonb, 'removed', '[]'::jsonb, 'perms', to_jsonb(after))));
+      n := n + 1;
+    end loop;
+  end if;
+  perform hq_log('role.deleted', jsonb_build_object('role', r.key, 'name', r.name, 'moved_to', nullif(move_to, ''), 'moved', n,
+    'before', jsonb_build_object('name', r.name, 'description', r.description, 'perms', to_jsonb(hq_role_perms(r.key)))));
+  delete from hq_roles x where x.key = r.key;
+  return n;
+end $$;
+revoke all on function public.hq_set_staff_access(uuid, text, text[]), public.hq_role_save(text, text, text, text[]), public.hq_role_delete(text, text)
+  from public, anon, authenticated;
+grant execute on function public.hq_set_staff_access(uuid, text, text[]), public.hq_role_save(text, text, text, text[]), public.hq_role_delete(text, text) to authenticated;
 
 -- ---------------------------------------------------------------- who can call what
 revoke all on function public.touch_activity(), public.activity_on_sign_in(), public.has_two_step(uuid), public.my_closed_businesses(),
@@ -6265,15 +6554,15 @@ create or replace function public.hq_billing_entity_pending() returns json
 revoke all on function public.hq_billing_entity_decide(bigint, boolean), public.hq_billing_entity_pending() from public, anon, authenticated;
 grant execute on function public.hq_billing_entity_decide(bigint, boolean) to authenticated;
 
--- HQ: send an invoice or receipt again, to the business's billing emails (licences.manage: Finance and the Owner only,
--- SEC-010; Sales and Support can look but not send), or to another address
+-- HQ: send an invoice or receipt again, to the business's billing emails (invoices.email: Finance and the Owner, unless the
+-- Owner gives it to someone else, SEC-010; Sales and Support can look but not send), or to another address
 -- (a wrong email); update_contact also makes that the business's email (customers.edit or licences.manage). In the HQ history: who,
 -- which document, when, and where to (the address shortened; the full one is on the email itself, in Emails).
 create or replace function public.hq_billing_resend(doc_ref text, to_email text, update_contact boolean) returns json
   language plpgsql security definer set search_path = public as $$
 declare d billing_documents; addr text := lower(trim(coalesce(to_email, ''))); sent text[]; a text; m text[];
 begin
-  perform hq_need(array['licences.manage']);
+  perform hq_need(array['invoices.email']);   -- SEC-010: Finance and the Owner, or someone the Owner gave it to
   select * into d from billing_documents where ref = upper(trim(coalesce(doc_ref, '')));
   if d.id is null then raise exception 'There''s no invoice or receipt with that number.'; end if;
   if addr <> '' then

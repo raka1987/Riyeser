@@ -258,3 +258,18 @@
   HQ: `../../hq/test-hq-trial.js` (the panel at 1366 and 390, the verdict, read-only, the extension, roles, Licences counts).
   Desktop: `desktop/test/trial-guard.test.js` (new PC, new Windows user, reinstall, deleted AppData, restored company
   file, clock rolled back, paid programs, signed-in businesses, demo mode, Report an issue).
+- Custom HQ roles (owner's request "give the option for admin to select roles"; owner's decision: a standard role for each
+  person, then tick or untick for them). The database is the source of truth: `hq_roles` and `hq_role_permissions` (the seven
+  built-in roles seeded once from the shipped lists, `hq_builtin_perms`; running `team-chat.sql` again keeps the Owner's
+  changes), `hq_staff.role` a role key, `hq_can` = the role's ticks plus the person's extras minus their removals.
+  `rules-test.sql` (end) checks every built-in role against the lists HQ had before (frozen in the test; "Email invoices and
+  receipts", `invoices.email`, now its own permission, comes with `licences.manage` as before: SEC-010), creating, changing,
+  duplicating and removing roles (a role people still have needs somewhere to move them), per-person ticks stored as the
+  difference from the role, Reset to standard, and the HQ history (who, before and after). `security-test.sql` section 7: what
+  can never be given (passwords and secrets SEC-009, bank details SEC-011, making an Owner, getting past two-step sign-in), not
+  even by hand in the tables or by calling the functions directly; no privilege escalation (nobody but the Owner gives a
+  permission they don't have, nobody but the Owner gives `invoices.email`); the last Owner keeps full access; nothing without
+  two-step sign-in. `roles-migration-test.sh` loads `team-chat.sql` from before custom roles (commit `26cbd1ae`), adds staff
+  with every role and per-person ticks, then this `team-chat.sql` twice, and checks everyone can still do exactly the same
+  (`PSQL="psql -h … -U postgres" website/team/test/roles-migration-test.sh`; needs git). HQ: `../../hq/test-hq-roles.js`
+  (People and Roles at 1366 and 390, the Admin's limits).
