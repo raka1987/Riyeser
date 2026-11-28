@@ -1,5 +1,6 @@
 // Staff portal
 let ME = null, CAN = new Set(), S = {}, ON_SHIFT = null, LABELS = {}, AREAS = {}, LEVELS = [], PRESETS = {};
+let BR = null;   // Business details & branding (/api/staff/brand): logo, name, tax number, contacts for payslips
 let VIEW = 'dashboard';
 const rank = r => ({ staff: 1, manager: 2, admin: 3 })[r] || 0;
 // access by area: 0 Hidden · 1 View · 2 Add & edit · 3 Full (the server checks every request; this only tidies the screens)
@@ -1185,9 +1186,16 @@ async function drawPayRules() {
     catch (e) { toast(e.message); }
   };
 }
+// the business's letterhead on a payslip: logo (never stretched), name, legal name, tax number, address, contacts
+const LH_CSS = '<style>.lh{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;border-bottom:2px solid #102344;padding-bottom:10px;margin-bottom:12px}.lh-b{min-width:0;flex:1;overflow-wrap:anywhere}.lh img{display:block;max-width:200px;max-height:64px;width:auto;height:auto;object-fit:contain;margin-bottom:8px}.lh-n{font-weight:700;font-size:1.05rem}.lh-s{font-size:.8rem;color:#666;line-height:1.45}.lh h3{margin:0;color:#102344;font-size:1.4rem;white-space:nowrap}</style>';
+function letterheadHTML(title) {
+  const b = BR || { name: S.company_name, address_lines: S.address ? [S.address] : [], contact_lines: [] };
+  const small = [b.legal_name, b.tax_line, ...(b.address_lines || []), (b.contact_lines || []).join(' · ')].filter(Boolean);
+  return `<div class="lh"><div class="lh-b">${b.logo ? `<img src="${b.logo.uri}" alt="${esc(b.name)}">` : ''}<div class="lh-n">${esc(b.name)}</div><div class="lh-s">${small.map(esc).join('<br>')}</div></div><h3>${esc(title)}</h3></div>`;
+}
 function payslipHTML(p, run) {
   let ded = []; try { ded = typeof p.deduction_lines === 'string' ? JSON.parse(p.deduction_lines || '[]') : (p.deduction_lines || []); } catch { }
-  return `<div class="payslip"><div style="display:flex;gap:14px;align-items:center"><h3 style="margin:0">${esc(S.company_name)} — Payslip</h3></div><p class="small muted">${esc(S.address || '')}</p>
+  return `<div class="payslip">${LH_CSS}${letterheadHTML('Payslip')}
     <table><tr><td><b>${esc(p.employee_name)}</b><br><span class="small muted">${esc(p.position || '')}</span></td><td class="r small">${run.extra_reason ? `<b>Extra pay: ${esc(run.extra_reason)}</b><br>` : ''}Pay date: ${esc(run.pay_date || "not paid yet (draft)")}<br>Period: ${esc(run.period_start)} to ${esc(run.period_end)}<br>TIN: ${esc(p.tin || '—')} · FNPF: ${esc(p.fnpf_no || '—')}</td></tr></table>
     <table style="margin-top:10px">
       ${p.pay_type === 'hourly' && p.break_hours ? `<tr><td class="small muted">Hours worked ${p.worked_hours} − unpaid breaks ${p.break_hours}</td><td></td></tr>` : ''}
@@ -1486,7 +1494,8 @@ async function renderSettings() {
   const sect = (id, title, desc, body) => `<form class="panel" id="${id}"><h3>${title}</h3>${desc ? `<p class="small muted" style="margin-top:-4px">${desc}</p>` : ''}${body}${ro ? '' : '<div class="actions"><button class="btn sm">Save</button></div>'}</form>`;
   const dis = defs => ro ? defs.map(d => ({ ...d, dis: true })) : defs;
   view().innerHTML = `${ro ? '<div class="note">You can view these settings. Changing them needs Add & edit access to Setup.</div>' : ''}
-    ${sect('s-co', 'Company details', 'Shown on payslips, timesheets and emails.', fieldsHTML(dis([{ n: 'company_name', l: 'Company name' }, { n: 'phone', l: 'Phone' }, { n: 'address', l: 'Address', full: 1 }, { n: 'email', l: 'Email (replies to payslip emails go here)', full: 1 }]), S))}
+    ${sect('s-co', 'Business details &amp; branding', `Your logo and details on payslips, timesheets and emails.${BR && BR.from_central ? ' <b>Riyeser Central</b> has your business details: they are used where Central has them (change them in Central), and these fill any gaps.' : ''}`,
+      `<div class="lh-logo" id="s-logo"></div>` + fieldsHTML(dis([{ n: 'company_name', l: 'Business name (trading name)' }, { n: 'company_legal_name', l: 'Legal name (optional)' }, { n: 'company_tax_number', l: `${(BR && BR.tax_label) || 'Tax number'}` }, { n: 'company_tax_label', l: 'Tax number label', ph: (BR && BR.tax_label) || 'Tax number', help: 'e.g. TIN, ABN, IRD number, VAT no. Leave empty for your country\'s usual label.' }, { n: 'phone', l: 'Phone' }, { n: 'company_website', l: 'Website' }, { n: 'address', l: 'Address', full: 1 }, { n: 'email', l: 'Email (replies to payslip emails go here)', full: 1 }]), S))}
     ${sect('s-week', 'Normal working week', 'Everyone works a normal week of these hours. Hours over it are shown as extra on the Dashboard; the multi-shift grid starts with the normal day\'s times.',
       fieldsHTML(dis([{ n: 'normal_week_hours', l: 'Normal week (hours)', t: 'number', step: '0.5', min: 1 }, { n: 'normal_start', l: 'Normal day starts', t: 'time' }, { n: 'normal_finish', l: 'Normal day finishes', t: 'time' }]), S))}
     ${(() => { const [fm, fd] = (S.financial_year_start || '01-01').split('-').map(Number), MO = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -1507,12 +1516,28 @@ async function renderSettings() {
     ${isAdmin() ? '<div class="panel" id="s-archives"></div><div class="panel danger-zone" id="s-again"></div>' : ''}`;
   if (L('setup') >= 2) drawBackups();
   if (isAdmin()) drawStartAgain();
+  drawLogo(ro);
   if (ro) return;
   const save = async body => { try { S = await api('/api/staff/settings', { method: 'PUT', body }); toast('Settings saved'); await refreshMe(); } catch (e) { toast(e.message); } };
   $('#s-perms').onsubmit = e => { e.preventDefault(); save({ booking_permissions: JSON.stringify(Object.fromEntries(Object.keys(LABELS).map(a => [a, (formData(e.target)[a]) || 'admin']))) }); };
   ['#s-co', '#s-week', '#s-pay'].forEach(id => $(id).onsubmit = e => { e.preventDefault(); save(formData(e.target)); });
   $('#s-fy').onsubmit = e => { e.preventDefault(); const v = formData(e.target); save({ financial_year_start: `${String(v.fy_month).padStart(2, '0')}-${String(v.fy_day).padStart(2, '0')}` }); };
   drawEmailSettings();
+}
+
+// Settings: the logo (PNG or JPG, up to 2 MB; empty margins trimmed; kept in Payroll's database, so it's in backups)
+async function drawLogo(ro) {
+  const host = $('#s-logo'); if (!host) return;
+  BR = await api('/api/staff/brand').catch(() => BR);
+  const lg = BR && BR.logo;
+  host.innerHTML = `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><div style="width:220px;height:90px;border:1px dashed #cbd5e1;border-radius:8px;display:flex;align-items:center;justify-content:center;padding:8px;background:#fff">${lg ? `<img src="${lg.uri}" alt="Your logo" style="max-width:100%;max-height:100%;object-fit:contain">` : '<span class="small muted">No logo yet</span>'}</div>
+    <div style="min-width:0;flex:1 1 240px">${BR && BR.logo_from_central ? '<p class="small" style="margin:0 0 6px">This is the logo from <b>Riyeser Central</b>. Change it in Central.</p>' : ro ? '' : `<label class="small"><b>${lg ? 'Replace the logo' : 'Add your logo'}</b><br><input type="file" id="s-logo-file" accept=".png,.jpg,.jpeg,image/png,image/jpeg"></label>
+    <p class="small muted" style="margin:4px 0 0">A PNG or JPG, up to 2 MB. Empty margins are trimmed and it's never stretched.</p>${BR.own_logo ? '<button type="button" class="btn sm ghost danger" id="s-logo-rm" style="margin-top:6px">Remove logo</button>' : ''}`}</div></div>`;
+  const f = $('#s-logo-file', host);
+  if (f) f.onchange = () => { const file = f.files[0]; if (!file) return; if (file.size > 2 * 1024 * 1024) return toast('That picture is over 2 MB. Choose a smaller one.', 6000);
+    const rd = new FileReader(); rd.onload = async () => { try { await api('/api/staff/brand/logo', { method: 'PUT', body: { data: rd.result } }); toast('Logo saved'); drawLogo(ro); } catch (e) { toast(e.message, 7000); } }; rd.readAsDataURL(file); };
+  const rm = $('#s-logo-rm', host);
+  if (rm) rm.onclick = async () => { if (!confirm('Remove the logo from payslips and emails?')) return; await api('/api/staff/brand/logo', { method: 'DELETE' }); toast('Logo removed'); drawLogo(ro); };
 }
 
 async function renderAccount() {
@@ -1527,7 +1552,8 @@ async function renderAccount() {
 // ------------------------------------------------------------------ boot / auth / live
 async function refreshMe() {
   const me = await api('/api/auth/me');
-  ME = me.user; S = me.settings; ON_SHIFT = me.on_shift; CAN = new Set(me.can); LABELS = me.permission_labels; AREAS = me.areas || {}; LEVELS = me.levels || []; PRESETS = me.presets || {}; window.__loggedIn = !!ME;
+  ME = me.user; S = me.settings;
+  if (ME) BR = await api('/api/staff/brand').catch(() => null); ON_SHIFT = me.on_shift; CAN = new Set(me.can); LABELS = me.permission_labels; AREAS = me.areas || {}; LEVELS = me.levels || []; PRESETS = me.presets || {}; window.__loggedIn = !!ME;
   $('#me').innerHTML = `<b>${esc(ME.name)}</b><br><span style="opacity:.7">${esc(ME.position || '')} · ${esc(accessName({ ...ME, access: ME.perms }))}</span>`;
   $('#clock-btn').textContent = ON_SHIFT ? `Clock out (since ${fmtTime(ON_SHIFT.clock_in.slice(11))})` : 'Clock in';
   renderMenu();

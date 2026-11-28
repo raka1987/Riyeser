@@ -130,6 +130,8 @@ const DEFAULT_SETTINGS = {
   address: 'Fiji',
   phone: '',
   email: '',
+  // Business details & branding (brand.js): on payslips; Riyeser Central's details are used where it has them
+  company_legal_name: '', company_tax_number: '', company_tax_label: '', company_website: '',
   // ---- privileges: lowest level for each action (staff = Staff, manager = Admin, admin = Super admin)
   booking_permissions: JSON.stringify({ 'timeclock.use': 'staff' }),
   timezone: 'Pacific/Fiji',

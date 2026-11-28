@@ -12,7 +12,7 @@ app.disable('x-powered-by');
 // Behind a hosting proxy (Render sets RENDER=true), use the visitor's real IP so the login limits apply per person.
 if (process.env.RENDER || process.env.TRUST_PROXY) app.set('trust proxy', 1);
 const smallJson = express.json({ limit: '200kb' }), bigJson = express.json({ limit: '12mb' });
-app.use((req, res, next) => (['/api/staff/import/wages', '/api/staff/import/wages/preview', '/api/staff/bank/preview', '/api/staff/bank/save'].includes(req.path) ? bigJson : smallJson)(req, res, next));
+app.use((req, res, next) => (['/api/staff/import/wages', '/api/staff/import/wages/preview', '/api/staff/bank/preview', '/api/staff/bank/save', '/api/staff/brand/logo'].includes(req.path) ? bigJson : smallJson)(req, res, next));
 app.get('/', (req, res) => res.redirect('/staff'));
 // reading PDF bank statements in the browser: pdf.js, and Tesseract text recognition (OCR) for statements that are pictures
 {
@@ -1081,6 +1081,20 @@ app.get('/api/staff/payslips/mine', requireStaff, wrap((req, res) => {
   const r = listRange(req);   // ?year= / ?period= / ?from=&to= (pay date)
   res.json(db.prepare(`SELECT p.*, r.period_start, r.period_end, r.pay_date FROM payslips p JOIN payroll_runs r ON r.id=p.run_id WHERE p.user_id=? ${r ? 'AND r.pay_date BETWEEN ? AND ?' : ''} ORDER BY r.pay_date DESC`).all(req.user.id, ...(r ? [r.from, r.to] : [])));
 }));
+
+// ---------------------------------------------------------------- staff: business details & branding (brand.js)
+const BRAND = require('./brand');
+const brandNow = () => BRAND.brand(getSettings(), BRAND.ownLogo(db));
+app.locals.brandNow = brandNow;
+app.get('/api/staff/brand', requireStaff, (req, res) => res.json({ ...BRAND.forBrowser(brandNow()), own_logo: !!BRAND.ownLogo(db) }));
+app.put('/api/staff/brand/logo', requireArea('setup', 2), wrap((req, res) => {
+  const m = /^(?:data:[^;,]*;base64,)?([A-Za-z0-9+/=\s]+)$/.exec(String((req.body || {}).data || ''));
+  if (!m) bad('Choose a picture of your logo first.');
+  let logo; try { logo = BRAND.processLogo(Buffer.from(m[1], 'base64')); } catch (e) { if (e instanceof BRAND.LogoError) bad(e.message); throw e; }
+  BRAND.saveLogo(db, logo);
+  res.json(BRAND.forBrowser(brandNow()));
+}));
+app.delete('/api/staff/brand/logo', requireArea('setup', 2), wrap((req, res) => { BRAND.removeLogo(db); res.json(BRAND.forBrowser(brandNow())); }));
 
 // ---------------------------------------------------------------- staff: settings & exports
 app.get('/api/staff/settings', requireStaff, (req, res) => res.json(getSettings()));
