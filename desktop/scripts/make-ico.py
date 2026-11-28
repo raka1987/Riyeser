@@ -1,5 +1,5 @@
 """Build a Windows .ico the way Windows expects it: BMP images for the small sizes, PNG only for 256x256.
-Usage: python3 scripts/make-ico.py <source.png (1024px)> <out.ico>"""
+Usage: python3 scripts/make-ico.py <source.png (1024px)> <out.ico> [sizes, e.g. 16,20,24,32,40,48,64,96,128,256]"""
 import io, struct, sys
 from PIL import Image
 
@@ -14,10 +14,11 @@ def dib(img):
     header = struct.pack('<IiiHHIIiiII', 40, w, h * 2, 1, 32, 0, w * h * 4 + len(mask_row) * h, 0, 0, 0, 0)
     return header + b''.join(rows) + mask_row * h
 
-def main(src, out):
+def main(src, out, sizes=None):
+    sizes = [int(x) for x in sizes.split(',')] if sizes else SIZES
     big = Image.open(src).convert('RGBA')
     images = []
-    for s in SIZES:
+    for s in sizes:
         im = big.resize((s, s), Image.LANCZOS)
         if s == 256:
             buf = io.BytesIO(); im.save(buf, 'PNG', optimize=True); data = buf.getvalue()
@@ -33,4 +34,4 @@ def main(src, out):
     open(out, 'wb').write(head + entries + blobs)
     print(f'{out}: ' + ', '.join(f"{s}px {'PNG' if s == 256 else 'BMP'}" for s, _ in images))
 
-main(*sys.argv[1:3])
+main(*sys.argv[1:4])
