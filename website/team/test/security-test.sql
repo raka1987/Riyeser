@@ -222,15 +222,17 @@ do $$ declare bad text; begin
   select string_agg(p.proname, ', ') into bad from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname ~ '^hq_'
     and has_function_privilege('authenticated', p.oid, 'execute') and p.prorettype <> 'trigger'::regtype
     and p.prosrc !~ '(hq_need\(|hq_fix_start\(|hq_can\()'
-    and p.proname not in ('hq_me', 'hq_record_downloads', 'hq_set_calls_paid');
+    and p.proname not in ('hq_me', 'hq_record_downloads', 'hq_set_calls_paid',
+      'hq_touch');   -- reviewed (HQ V2): checks HQ staff and two-step sign-in itself, and only keeps your own session going
   assert bad is null, 'HQ functions without a role check: ' || bad;
 end $$;
 insert into auth.users (id, email) values ('c0c0c0c0-0000-4000-8000-000000000001', 'hq-support@riyeser.test'), ('c0c0c0c0-0000-4000-8000-000000000002', 'hq-dev@riyeser.test'),
   ('c0c0c0c0-0000-4000-8000-000000000003', 'hq-sales@riyeser.test'), ('c0c0c0c0-0000-4000-8000-000000000004', 'hq-finance@riyeser.test'),
-  ('c0c0c0c0-0000-4000-8000-000000000005', 'hq-owner@riyeser.test');
+  ('c0c0c0c0-0000-4000-8000-000000000005', 'hq-owner@riyeser.test'), ('c0c0c0c0-0000-4000-8000-000000000006', 'hq-admin@riyeser.test');
 insert into public.hq_staff (user_id, display_name, role) values ('c0c0c0c0-0000-4000-8000-000000000001', 'Sup', 'support'),
   ('c0c0c0c0-0000-4000-8000-000000000002', 'Dev', 'developer'), ('c0c0c0c0-0000-4000-8000-000000000003', 'Sal', 'sales'),
-  ('c0c0c0c0-0000-4000-8000-000000000004', 'Fin', 'finance'), ('c0c0c0c0-0000-4000-8000-000000000005', 'Own', 'owner');
+  ('c0c0c0c0-0000-4000-8000-000000000004', 'Fin', 'finance'), ('c0c0c0c0-0000-4000-8000-000000000005', 'Own', 'owner'),
+  ('c0c0c0c0-0000-4000-8000-000000000006', 'Adm', 'admin');
 truncate pg_temp.out;
 set statement_timeout = '10s';
 set role authenticated;
@@ -238,6 +240,7 @@ select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001'); select pg_temp.c
 select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000002'); select pg_temp.call_all('developer', '^hq_', false);
 select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000003'); select pg_temp.call_all('sales', '^hq_', false);
 select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000004'); select pg_temp.call_all('finance', '^hq_', false);
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000006'); select pg_temp.call_all('admin', '^hq_', false);
 select pg_temp.as_user_aal1('c0c0c0c0-0000-4000-8000-000000000005'); select pg_temp.call_all('owner without 2FA', '^hq_', false);
 select pg_temp.as_user('22222222-2222-2222-2222-222222222222'); select pg_temp.call_all('customer', '^hq_', false);
 -- the HQ owner (every permission) on everything that only looks, with A's ids: for the password/secret check below
@@ -267,6 +270,12 @@ do $$ declare bad text; begin
   -- finance: no diagnostics, account fix-ups, staff, or Riyeser's own bank details (only the HQ Owner: SEC-011)
   bad := pg_temp.refused('finance', array['hq_diagnostic', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_set_staff', 'hq_set_billing_entity']);
   assert bad is null, 'finance not refused: ' || bad;
+  -- admin (HQ V2): runs the team, settings and history, but no money, no licences or billing, no bank details (SEC-011),
+  -- no emailing invoices (SEC-010), no diagnostics or customer fix-ups, no removing accounts
+  bad := pg_temp.refused('admin', array['hq_licences', 'hq_billing', 'hq_company_billing', 'hq_payments_received', 'hq_refunds', 'hq_refund_decide',
+    'hq_refund_paid', 'hq_refund_second', 'hq_set_plan', 'hq_set_module', 'hq_quick_licence', 'hq_billing_mark_paid', 'hq_set_billing_entity',
+    'hq_billing_resend', 'hq_diagnostic', 'hq_reset_2fa', 'hq_change_owner', 'hq_edit_business', 'hq_grant_offer', 'hq_ticket_reply', 'hq_remove_accounts']);
+  assert bad is null, 'admin not refused: ' || bad;
   -- the HQ owner without two-step sign-in, and a customer: nothing at all (hq_me only says who you are)
   select string_agg(fn, ', ') into bad from pg_temp.out where who in ('owner without 2FA', 'customer') and fn not in ('hq_me')
     and (outcome = 'ran' or result not in ('Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.', 'Not allowed'));
@@ -420,5 +429,93 @@ do $$ begin
   assert not exists (select 1 from public.email_outbox where strpos(coalesce(body_text, '') || coalesce(subject, ''), current_setting('test.raw_key')) > 0
                      or strpos(coalesce(body_text, ''), current_setting('test.hook')::json ->> 'secret') > 0 or body_text like '%Typed-By-Support-1%'), 'no email holds a key, secret or password';
 end $$;
+
+-- ===== 6. HQ V2 first slice: the Admin role, staff emails, Finance's ticket levels, HQ sessions, job records
+do $$ begin
+  assert not ('support.level2' = any(public.hq_role_perms('finance'))) and not ('support.level3' = any(public.hq_role_perms('finance'))), 'finance: no level 2/3 tickets';
+  assert 'staff.manage' = any(public.hq_role_perms('admin')) and not ('licences.view' = any(public.hq_role_perms('admin')))
+     and not ('refunds.view' = any(public.hq_role_perms('admin'))) and not ('support.diagnostics' = any(public.hq_role_perms('admin'))), 'admin defaults';
+end $$;
+set role authenticated;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000006');
+do $$ declare t json; begin
+  -- an admin can't make an owner or another admin, can't change an owner, and can't tick permissions (only the Owner can)
+  begin perform public.hq_add_staff('hq-sales@riyeser.test', 'Sal', 'admin'); raise exception 'admin made an admin';
+  exception when others then assert sqlerrm like 'Only an HQ owner can make an owner or an admin.%', sqlerrm; end;
+  begin perform public.hq_add_staff('hq-owner@riyeser.test', 'Own', 'support'); raise exception 'admin demoted the owner';
+  exception when others then assert sqlerrm like 'Only an HQ owner can change an owner or an admin.%', sqlerrm; end;
+  begin perform public.hq_set_staff('c0c0c0c0-0000-4000-8000-000000000005', 'support', true); raise exception 'admin changed the owner';
+  exception when others then assert sqlerrm like 'Only an HQ owner can make or change%', sqlerrm; end;
+  begin perform public.hq_set_staff_perms('c0c0c0c0-0000-4000-8000-000000000003', array['licences.manage'], '{}'); raise exception 'admin ticked a permission';
+  exception when others then assert sqlerrm like 'Only an HQ owner can tick%', sqlerrm; end;
+  begin perform public.hq_set_staff('c0c0c0c0-0000-4000-8000-000000000006', 'owner', true); raise exception 'admin made itself owner';
+  exception when others then assert sqlerrm like 'You can''t change your own HQ access%', sqlerrm; end;
+  -- ...but can run the rest of the team, and sees everyone's email (it manages the team)
+  perform public.hq_set_staff('c0c0c0c0-0000-4000-8000-000000000003', 'sales', true);
+  t := public.hq_team();
+  assert (select count(*) from json_array_elements(t -> 'staff') x where x ->> 'email' is not null) = (select count(*) from json_array_elements(t -> 'staff')), 'admin sees staff emails';
+end $$;
+-- staff emails: only for whoever manages the team (and your own)
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ declare t json; begin
+  t := public.hq_team();
+  assert (select count(*) from json_array_elements(t -> 'staff') x where x ->> 'email' is not null) = 1
+     and (select x ->> 'email' from json_array_elements(t -> 'staff') x where x ->> 'email' is not null) = 'hq-support@riyeser.test', 'support sees only its own email';
+  assert (select count(*) from public.hq_staff_list() l where l.email is not null) = 1, 'staff list: only your own email';
+end $$;
+-- HQ sessions (owner's decision): 30 minutes without activity, or 12 hours after signing in, and the session has ended
+create function pg_temp.as_session(u text, sid text, signed_in timestamptz) returns void language plpgsql as $$ begin
+  perform set_config('request.jwt.claim.sub', u, false);
+  perform set_config('request.jwt.claims', json_build_object('sub', u, 'aal', 'aal2', 'session_id', sid,
+    'amr', json_build_array(json_build_object('method', 'totp', 'timestamp', extract(epoch from signed_in)::bigint),
+                            json_build_object('method', 'password', 'timestamp', extract(epoch from signed_in)::bigint - 20)))::text, false); end $$;
+-- signed in an hour ago and never used HQ since: already ended (30 minutes without activity)
+select pg_temp.as_session('c0c0c0c0-0000-4000-8000-000000000001', 'sess-unused', now() - interval '1 hour');
+do $$ begin assert public.hq_touch() ->> 'ended' = 'idle', 'unused for an hour'; end $$;
+select pg_temp.as_session('c0c0c0c0-0000-4000-8000-000000000001', 'sess-fresh', now() - interval '10 minutes');
+do $$ declare r json; begin
+  r := public.hq_touch(); assert (r ->> 'ok')::boolean and (r ->> 'timed')::boolean, 'a fresh session is kept going: ' || r::text;
+  perform public.hq_overview();                                         -- works
+end $$;
+reset role;
+update public.hq_sessions set last_seen_at = now() - interval '31 minutes' where session_id = 'sess-fresh';
+set role authenticated;
+do $$ declare r json; begin
+  begin perform public.hq_overview(); raise exception 'idle session still worked';
+  exception when others then assert sqlerrm like 'Your HQ session has ended%', sqlerrm; end;
+  r := public.hq_touch(); assert not (r ->> 'ok')::boolean and r ->> 'ended' = 'idle', 'an idle session isn''t brought back: ' || r::text;
+  begin perform public.hq_work_queue(); raise exception 'idle session read the work queue';
+  exception when others then assert sqlerrm like 'Your HQ session has ended%', sqlerrm; end;
+end $$;
+select pg_temp.as_session('c0c0c0c0-0000-4000-8000-000000000005', 'sess-old', now() - interval '12 hours 5 minutes');
+do $$ declare r json; begin
+  r := public.hq_touch(); assert not (r ->> 'ok')::boolean and r ->> 'ended' = 'max', '12 hours after signing in: ' || r::text;
+  begin perform public.hq_team(); raise exception '12-hour session still worked';
+  exception when others then assert sqlerrm like 'Your HQ session has ended%', sqlerrm; end;
+  begin perform public.hq_set_billing_entity('{"name":"Riyeser"}'); raise exception 'owner changed bank details after 12 hours';
+  exception when others then assert sqlerrm like 'Your HQ session has ended%' or sqlerrm like 'Your HQ role can''t do that%', sqlerrm; end;
+end $$;
+-- a customer (not HQ staff) gets nothing from hq_touch; the session rows can't be read by anyone signed in
+select pg_temp.as_session('22222222-2222-2222-2222-222222222222', 'sess-fresh', now());
+do $$ begin begin perform public.hq_touch(); raise exception 'customer touched';
+  exception when others then assert sqlerrm like 'Riyeser HQ is for Riyeser staff%', sqlerrm; end; end $$;
+do $$ begin begin perform 1 from public.hq_sessions; raise exception 'sessions readable'; exception when insufficient_privilege then null; end; end $$;
+-- backup and restore-test records: only the jobs (the database owner) write them; ops.view reads them
+do $$ begin begin perform public.ops_record_run('backup', 'team', true, now(), '{}', null); raise exception 'website recorded a backup';
+  exception when insufficient_privilege then null; end; end $$;
+reset role;
+select public.ops_record_run('backup', 'team', true, now() - interval '3 minutes', '{"bytes": 1234, "secret": "nope", "fingerprint": "ab12"}', 'https://github.com/x/y/actions/runs/1');
+select public.ops_record_run('restore_drill', 'team', false, now(), '{"rows_backup": 10, "rows_restored": 9}', null);
+set role authenticated;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000002');   -- developer: ops.view
+do $$ declare r json; begin
+  r := public.hq_ops_runs();
+  assert json_array_length(r) = 2 and r::text not like '%nope%' and r::text like '%fingerprint%', 'runs: latest per job, secrets dropped: ' || r::text;
+  assert (select (x ->> 'ok')::boolean from json_array_elements(r) x where x ->> 'job' = 'restore_drill') = false, 'a failed drill shows failed';
+end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000003');   -- sales: no ops.view
+do $$ begin begin perform public.hq_ops_runs(); raise exception 'sales read job runs';
+  exception when others then assert sqlerrm like 'Your HQ role can''t do that.%', sqlerrm; end; end $$;
+reset role;
 
 select 'ALL SECURITY TESTS PASSED' as result;

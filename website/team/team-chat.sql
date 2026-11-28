@@ -913,7 +913,7 @@ grant execute on function public.former_members(uuid) to authenticated;
 create table if not exists public.hq_staff (
   user_id uuid primary key references auth.users(id) on delete cascade,
   display_name text not null check (length(trim(display_name)) between 1 and 60),
-  role text not null check (role in ('owner', 'finance', 'support', 'senior', 'sales', 'developer')),
+  role text not null check (role in ('owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer')),
   active boolean not null default true,
   added_by uuid references auth.users(id) on delete set null,
   added_at timestamptz not null default now()
@@ -922,7 +922,8 @@ create table if not exists public.hq_staff (
 alter table public.hq_staff add column if not exists perms_add text[] not null default '{}';
 alter table public.hq_staff add column if not exists perms_remove text[] not null default '{}';
 alter table public.hq_staff drop constraint if exists hq_staff_role_check;
-alter table public.hq_staff add constraint hq_staff_role_check check (role in ('owner', 'finance', 'support', 'senior', 'sales', 'developer'));
+-- 'admin' (HQ V2, owner's decision): runs the HQ team, settings, history and operations; no money, no bank details, never makes an owner.
+alter table public.hq_staff add constraint hq_staff_role_check check (role in ('owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer'));
 create table if not exists public.hq_notes (
   id bigint generated always as identity primary key,
   workspace_id uuid not null references public.workspaces(id) on delete cascade,
@@ -965,10 +966,42 @@ alter table public.hq_settings enable row level security;
 revoke all on public.hq_staff, public.hq_notes, public.hq_audit, public.downloads_daily, public.hq_settings from anon, authenticated;
 -- (no policies: everything goes through the checked hq_ functions below)
 
--- Staff role for this session, only after two-step sign-in. null = not HQ staff.
+-- HQ staff sessions (owner's decision): an HQ session ends after 30 minutes without activity, and 12 hours after signing
+-- in, whatever the browser does. The sign-in time is the earliest time in the token's "amr" (password, code); activity is
+-- hq_touch(), which HQ calls while someone is using it. Tokens without a session id (none from Supabase today) aren't timed.
+-- Settings: hq.session_idle_minutes (30) and hq.session_max_hours (12).
+create table if not exists public.hq_sessions (
+  session_id text primary key check (length(session_id) <= 80),
+  user_id uuid not null,
+  signed_in_at timestamptz not null,
+  last_seen_at timestamptz not null default now()
+);
+create index if not exists hq_sessions_user on public.hq_sessions (user_id, last_seen_at desc);
+alter table public.hq_sessions enable row level security;
+revoke all on public.hq_sessions from anon, authenticated;
+-- why this token's HQ session can't be used: null = fine, 'idle' or 'max'
+create or replace function public.staff_session_ended() returns text
+  language plpgsql stable security definer set search_path = public as $$
+declare j jsonb := auth.jwt(); sid text := nullif(j ->> 'session_id', ''); signed timestamptz; seen timestamptz; s hq_sessions;
+  idle numeric := 30; mx numeric := 12;
+begin
+  if sid is null then return null; end if;
+  select coalesce((select value::numeric from hq_settings where key = 'hq.session_idle_minutes'), 30),
+         coalesce((select value::numeric from hq_settings where key = 'hq.session_max_hours'), 12) into idle, mx;
+  select * into s from hq_sessions where session_id = sid;
+  select to_timestamp(min((a ->> 'timestamp')::double precision)) into signed
+    from jsonb_array_elements(case when jsonb_typeof(j -> 'amr') = 'array' then j -> 'amr' else '[]'::jsonb end) a where a ? 'timestamp';
+  signed := coalesce(signed, s.signed_in_at, to_timestamp((j ->> 'iat')::double precision), now());
+  seen := coalesce(s.last_seen_at, signed);
+  if now() - signed > make_interval(secs => mx * 3600) then return 'max'; end if;
+  if now() - seen > make_interval(secs => idle * 60) then return 'idle'; end if;
+  return null;
+end $$;
+revoke all on function public.staff_session_ended() from public, anon, authenticated;
+-- Staff role for this session, only after two-step sign-in and while the HQ session lasts. null = not HQ staff.
 create or replace function public.hq_role() returns text
   language sql stable security definer set search_path = public as $$
-  select role from hq_staff where user_id = auth.uid() and active and public.mfa_ok()
+  select role from hq_staff where user_id = auth.uid() and active and public.mfa_ok() and public.staff_session_ended() is null
 $$;
 -- Permissions. Every HQ function checks one (or one of several) with hq_need; the website only hides buttons.
 create or replace function public.hq_all_perms() returns text[] language sql immutable as $$
@@ -976,23 +1009,27 @@ create or replace function public.hq_all_perms() returns text[] language sql imm
     'people.change_owner', 'business.close', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.assign',
     'support.saved_replies', 'support.escalate', 'support.level2', 'support.level3', 'refunds.view', 'refunds.request',
     'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'emails.manage', 'accounts.inactive',
-    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view', 'support.diagnostics']
+    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view', 'support.diagnostics', 'ops.view', 'test_accounts.manage']
 $$;
 create or replace function public.hq_role_perms(r text) returns text[] language sql immutable as $$
   select case r
     when 'owner' then public.hq_all_perms()
+    -- Finance: money, and billing tickets at level 1 (owner's decision: not level 2/3 ticket work by default)
     when 'finance' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'licences.manage',
-      'support.view', 'support.reply', 'support.level2', 'support.level3', 'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay',
+      'support.view', 'support.reply', 'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay',
       'offers.grant', 'offers.approve', 'emails.view', 'reports.view']
+    -- Admin: the HQ team, settings, history and operations. No licences, refunds, payments or bank details.
+    when 'admin' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'emails.view', 'emails.manage',
+      'audit.view', 'staff.manage', 'settings.manage', 'ops.view', 'test_accounts.manage']
     when 'support' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'refunds.view',
-      'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics']
+      'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics', 'ops.view']
     when 'senior' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'people.change_owner', 'business.close', 'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies',
       'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view',
-      'support.diagnostics']
+      'support.diagnostics', 'ops.view', 'test_accounts.manage']
     when 'sales' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'support.view', 'offers.grant']
-    when 'developer' then array['overview.view', 'downloads.view', 'support.diagnostics']
+    when 'developer' then array['overview.view', 'downloads.view', 'support.diagnostics', 'ops.view']
     else '{}'::text[] end
 $$;
 -- What a staff member can do: their role's defaults, plus ticked extras, minus ticked-off ones. Owners can do everything.
@@ -1014,7 +1051,10 @@ create or replace function public.hq_can(perm text) returns boolean
 create or replace function public.hq_need(roles text[]) returns void
   language plpgsql stable security definer set search_path = public as $$
 begin
-  if hq_role() is null then raise exception 'Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.'; end if;
+  if hq_role() is null then
+    if public.mfa_ok() and public.staff_session_ended() is not null and exists (select 1 from hq_staff where user_id = auth.uid() and active) then
+      raise exception 'Your HQ session has ended (30 minutes without activity, or 12 hours since you signed in). Sign in again.'; end if;
+    raise exception 'Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.'; end if;
   if not coalesce(hq_perms() && roles, false) then raise exception 'Your HQ role can''t do that.'; end if;
 end $$;
 -- Every HQ action is written here. Never put personal details in it: it is kept for good, even after an account is removed.
@@ -1135,7 +1175,9 @@ create or replace function public.hq_staff_list() returns table (user_id uuid, d
   language plpgsql stable security definer set search_path = public as $$
 begin
   perform hq_need(array['overview.view']);
-  return query select s.user_id, s.display_name, s.role, s.active, u.email::text, s.added_at from hq_staff s join auth.users u on u.id = s.user_id order by s.added_at;
+  -- staff emails only for whoever runs the HQ team (and your own)
+  return query select s.user_id, s.display_name, s.role, s.active, case when hq_can('staff.manage') or s.user_id = auth.uid() then u.email::text end, s.added_at
+    from hq_staff s join auth.users u on u.id = s.user_id order by s.added_at;
 end $$;
 
 -- Owners add staff (they need a Riyeser account first), change their role, or switch them off.
@@ -1144,8 +1186,11 @@ create or replace function public.hq_add_staff(staff_email text, staff_name text
 declare uid uuid;
 begin
   perform hq_need(array['staff.manage']);
-  if staff_role not in ('owner', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
-  if staff_role = 'owner' and hq_role() <> 'owner' then raise exception 'Only an HQ owner can make another owner.'; end if;
+  if staff_role not in ('owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  if staff_role in ('owner', 'admin') and hq_role() <> 'owner' then raise exception 'Only an HQ owner can make an owner or an admin.'; end if;
+  if hq_role() <> 'owner' and exists (select 1 from hq_staff s join auth.users u on u.id = s.user_id
+      where lower(u.email::text) = lower(trim(staff_email)) and s.role in ('owner', 'admin')) then
+    raise exception 'Only an HQ owner can change an owner or an admin.'; end if;
   select id into uid from auth.users where lower(email::text) = lower(trim(staff_email));
   if uid is null then raise exception 'No Riyeser account with that email yet. Ask them to create one at riyeser.com/link first.'; end if;
   insert into hq_staff (user_id, display_name, role, added_by) values (uid, trim(staff_name), staff_role, auth.uid())
@@ -1158,9 +1203,9 @@ create or replace function public.hq_set_staff(staff uuid, staff_role text, is_a
 begin
   perform hq_need(array['staff.manage']);
   if staff = auth.uid() then raise exception 'You can''t change your own HQ access. Ask another owner.'; end if;
-  if staff_role not in ('owner', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
-  if hq_role() <> 'owner' and (staff_role = 'owner' or (select role from hq_staff where user_id = staff) = 'owner') then
-    raise exception 'Only an HQ owner can change an owner.'; end if;
+  if staff_role not in ('owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer') then raise exception 'Choose a role'; end if;
+  if hq_role() <> 'owner' and (staff_role in ('owner', 'admin') or (select role from hq_staff where user_id = staff) in ('owner', 'admin')) then
+    raise exception 'Only an HQ owner can make or change an owner or an admin.'; end if;
   update hq_staff set role = staff_role, active = is_active where user_id = staff;
   perform hq_log('staff.changed', json_build_object('user_id', staff, 'role', staff_role, 'active', is_active)::jsonb);
 end $$;
@@ -3233,9 +3278,10 @@ create or replace function public.hq_team() returns json
 begin
   perform hq_need(array['overview.view']);
   return json_build_object('all', hq_all_perms(),
-    'roles', (select json_object_agg(r, hq_role_perms(r)) from unnest(array['owner', 'finance', 'support', 'senior', 'sales', 'developer']) r),
+    'roles', (select json_object_agg(r, hq_role_perms(r)) from unnest(array['owner', 'admin', 'finance', 'support', 'senior', 'sales', 'developer']) r),
+    -- staff emails only for whoever runs the HQ team (and your own)
     'staff', (select coalesce(json_agg(json_build_object('user_id', s.user_id, 'display_name', s.display_name, 'role', s.role, 'active', s.active,
-        'email', u.email::text, 'added_at', s.added_at, 'perms_add', s.perms_add, 'perms_remove', s.perms_remove,
+        'email', case when hq_can('staff.manage') or s.user_id = auth.uid() then u.email::text end, 'added_at', s.added_at, 'perms_add', s.perms_add, 'perms_remove', s.perms_remove,
         'perms', coalesce(hq_staff_perms(s.user_id), '{}')) order by s.added_at), '[]') from hq_staff s join auth.users u on u.id = s.user_id));
 end $$;
 create or replace function public.hq_set_staff_perms(staff uuid, perms_on text[], perms_off text[]) returns void
@@ -4601,6 +4647,12 @@ end $$;
 -- Each business can have one Riyeser staff member who looks after it ("Owner" on the customer page; "My customers").
 alter table public.workspaces add column if not exists hq_owner uuid references auth.users(id) on delete set null;
 create index if not exists workspaces_hq_owner on public.workspaces (hq_owner);
+-- What kind of account this is (HQ V2): 'customer', or Riyeser's own 'test', 'demo' or 'internal' accounts, which HQ's
+-- business figures leave out by default (hq_kpis). Set in HQ with hq_set_account_kind (test_accounts.manage).
+alter table public.workspaces add column if not exists account_kind text not null default 'customer';
+alter table public.workspaces drop constraint if exists workspaces_account_kind_check;
+alter table public.workspaces add constraint workspaces_account_kind_check check (account_kind in ('customer', 'test', 'demo', 'internal'));
+create index if not exists workspaces_kind on public.workspaces (account_kind) where account_kind <> 'customer';
 create or replace function public.hq_set_owner(ws uuid, staff uuid) returns void
   language plpgsql security definer set search_path = public as $$
 declare was uuid;
@@ -4730,6 +4782,7 @@ begin
       'renewals_due', (select count(*) from ending),
       'open_complaints', case when hq_can('support.view') then (select count(*) from support_tickets where status <> 'done') end),
     'queue', (select coalesce(json_agg(json_build_object('kind', q.kind, 'workspace_id', q.ws, 'business', w.name, 'country', w.country, 'address', w.address,
+        'account_kind', coalesce(w.account_kind, 'customer'),
         'issue', q.issue, 'detail', q.detail, 'owner', coalesce(q.owner, public.staff_name(w.hq_owner), 'Unassigned'), 'action', q.action, 'ref', q.ref, 'at', q.at) order by q.prio, q.at), '[]')
       from q left join workspaces w on w.id = q.ws)) into r;
   return r;
@@ -9391,3 +9444,139 @@ end $$;
 revoke all on function public.link_relay_manage(uuid, text, text, boolean), public.link_relay_enroll_code(uuid, text, text, text, int), public.relay_enroll_claim(text) from public, anon;
 grant execute on function public.link_relay_manage(uuid, text, text, boolean), public.link_relay_enroll_code(uuid, text, text, text, int) to authenticated;
 grant execute on function public.relay_enroll_claim(text) to anon, authenticated;
+
+-- ================================================================ Riyeser HQ V2, first slice
+-- HQ staff sessions: HQ calls this while someone is using it (at most about once a minute). It keeps the session going,
+-- or says it has ended (30 minutes without activity, 12 hours after signing in: staff_session_ended above). An ended
+-- session isn't brought back: sign in again.
+create or replace function public.hq_touch() returns json
+  language plpgsql security definer set search_path = public as $$
+declare j jsonb := auth.jwt(); sid text := nullif(j ->> 'session_id', ''); why text; signed timestamptz;
+  idle numeric := hq_setting_num('hq.session_idle_minutes', 30); mx numeric := hq_setting_num('hq.session_max_hours', 12);
+begin
+  if not (public.mfa_ok() and exists (select 1 from hq_staff where user_id = auth.uid() and active)) then
+    raise exception 'Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.'; end if;
+  why := public.staff_session_ended();
+  if why is not null then return json_build_object('ok', false, 'ended', why, 'idle_minutes', idle, 'max_hours', mx); end if;
+  if sid is null then return json_build_object('ok', true, 'timed', false, 'idle_minutes', idle, 'max_hours', mx); end if;
+  select to_timestamp(min((a ->> 'timestamp')::double precision)) into signed
+    from jsonb_array_elements(case when jsonb_typeof(j -> 'amr') = 'array' then j -> 'amr' else '[]'::jsonb end) a where a ? 'timestamp';
+  insert into hq_sessions (session_id, user_id, signed_in_at, last_seen_at) values (sid, auth.uid(), coalesce(signed, now()), now())
+    on conflict (session_id) do update set last_seen_at = now() where hq_sessions.user_id = auth.uid();
+  delete from hq_sessions where last_seen_at < now() - interval '2 days';
+  return (select json_build_object('ok', true, 'timed', true, 'idle_minutes', idle, 'max_hours', mx, 'signed_in_at', h.signed_in_at,
+    'ends_at', least(h.signed_in_at + make_interval(secs => mx * 3600), h.last_seen_at + make_interval(secs => idle * 60))) from hq_sessions h where h.session_id = sid);
+end $$;
+
+-- Test, demo and internal accounts (owner's decision: business figures leave them out by default, with a switch)
+create or replace function public.hq_set_account_kind(ws uuid, new_kind text, reason text) returns void
+  language plpgsql security definer set search_path = public as $$
+declare before text;
+begin
+  perform hq_need(array['test_accounts.manage']);
+  if new_kind not in ('customer', 'test', 'demo', 'internal') then raise exception 'Choose customer, test, demo or internal.'; end if;
+  if length(trim(coalesce(reason, ''))) < 3 then raise exception 'Say why (a few words).'; end if;
+  select account_kind into before from workspaces where id = ws;
+  if not found then raise exception 'There''s no business with that id.'; end if;
+  if before = new_kind then return; end if;                               -- the same again writes nothing
+  update workspaces set account_kind = new_kind where id = ws;
+  perform hq_log('account.kind', jsonb_build_object('workspace_id', ws, 'before', before, 'after', new_kind, 'reason', left(trim(reason), 200)));
+end $$;
+create or replace function public.hq_test_accounts() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['customers.view', 'test_accounts.manage']);
+  return (select coalesce(json_agg(json_build_object('id', w.id, 'name', w.name, 'company_code', w.company_code, 'country', w.country,
+      'account_kind', w.account_kind, 'created_at', w.created_at, 'status', w.status) order by w.name), '[]')
+    from workspaces w where w.account_kind <> 'customer');
+end $$;
+
+-- The HQ V2 overview figures. Each is null when your role can't see it. Test, demo and internal accounts are left out
+-- unless include_test. Money is US dollars (Riyeser only charges in USD).
+create or replace function public.hq_kpis(include_test boolean) returns json
+  language plpgsql stable security definer set search_path = public as $$
+declare inc boolean := coalesce(include_test, false); cv boolean; sv boolean; lv boolean;
+begin
+  perform hq_need(array['overview.view']);
+  cv := hq_can('customers.view'); sv := hq_can('support.view'); lv := hq_can('licences.view');
+  return (with w as (select * from workspaces x where inc or x.account_kind = 'customer'),
+    ending as (
+      select w.id from w cross join unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built']) mm(m)
+      left join company_modules c on c.workspace_id = w.id and c.module = mm.m
+      cross join lateral (select case when c.status = 'active' then c.paid_until else coalesce(c.trial_ends, w.created_at::date + 90) end as te) z
+      where w.status = 'active' and (c.module is null or c.status in ('trial', 'active')) and z.te between current_date and current_date + 7
+      group by w.id),
+    rec as (
+      select o.billing, case when o.method = 'paypal' and o.early_bird
+          and (select count(*) from billing_payments p where p.order_id = o.id and p.status = 'completed') < o.early_cycles then o.first_amount
+        when o.method = 'paypal' then o.amount else coalesce(o.first_amount, o.amount) end as amt
+      from billing_orders o join w on w.id = o.workspace_id
+      where (o.method = 'paypal' and o.status in ('active', 'payment_failed')) or (o.method = 'bank' and o.status = 'paid' and o.paid_through >= current_date))
+    select json_build_object('as_of', now(), 'include_test', inc, 'currency', 'USD',
+      'test_accounts', case when cv then (select count(*) from workspaces where account_kind <> 'customer') end,
+      'businesses', case when cv then (select count(*) from w where w.status = 'active') end,
+      'new_signups_week', case when cv then (select count(*) from w where w.created_at >= date_trunc('week', now())) end,
+      'signups_by_week', case when cv then (select coalesce(json_agg(x order by x.week), '[]') from (
+          select date_trunc('week', w.created_at)::date as week, count(*) as companies from w where w.created_at > now() - interval '12 weeks' group by 1) x) end,
+      'renewals_due_7d', case when cv then (select count(*) from ending) end,
+      'open_tickets', case when sv then (select count(*) from support_tickets t join w on w.id = t.workspace_id where t.status <> 'done') end,
+      'failed_payments', case when lv then (select count(*) from billing_orders o join w on w.id = o.workspace_id where o.status in ('payment_failed', 'suspended')) end,
+      'mrr', case when lv then (select coalesce(round(sum(case when rec.billing = 'yearly' then rec.amt / 12 else rec.amt end), 2), 0) from rec) end,
+      'recurring_count', case when lv then (select count(*) from rec) end,
+      'payments_7d', case when lv then (select json_build_object('count', count(*), 'total', coalesce(sum(p.amount), 0)) from billing_payments p join w on w.id = p.workspace_id
+          where p.status = 'completed' and p.currency = 'USD' and p.at > now() - interval '7 days') end));
+end $$;
+
+-- Backups and restore tests, recorded by the jobs themselves (GitHub Actions, as the database owner with TEAM_DB_URL),
+-- so HQ shows them without reading GitHub (which stops answering once the code repository is private). Never data or secrets.
+create table if not exists public.ops_job_runs (
+  id bigint generated always as identity primary key,
+  job text not null check (job in ('backup', 'restore_drill', 'hq_jobs', 'email_send')),
+  target text not null default 'team' check (length(target) <= 40),
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  ok boolean,
+  detail jsonb not null default '{}'::jsonb check (octet_length(detail::text) <= 2000),
+  run_url text check (run_url is null or run_url ~ '^https://github\.com/')
+);
+create index if not exists ops_job_runs_job on public.ops_job_runs (job, started_at desc);
+alter table public.ops_job_runs enable row level security;
+revoke all on public.ops_job_runs from anon, authenticated;
+-- Only the jobs (the database owner) can record a run: no one signed in to the website can.
+create or replace function public.ops_record_run(job text, target text, ok boolean, started timestamptz, detail jsonb, run_url text) returns void
+  language plpgsql security definer set search_path = public as $$
+begin
+  insert into ops_job_runs (job, target, ok, started_at, finished_at, detail, run_url)
+    values (job, coalesce(nullif(trim(target), ''), 'team'), ok, coalesce(started, now()), now(),
+            coalesce(detail, '{}'::jsonb) - 'password' - 'secret' - 'key' - 'token' - 'url', nullif(run_url, ''));
+  delete from ops_job_runs where started_at < now() - interval '400 days';
+end $$;
+revoke all on function public.ops_record_run(text, text, boolean, timestamptz, jsonb, text) from public, anon, authenticated;
+create or replace function public.hq_ops_runs() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['ops.view']);
+  return (select coalesce(json_agg(json_build_object('job', r.job, 'target', r.target, 'ok', r.ok, 'started_at', r.started_at, 'finished_at', r.finished_at,
+      'detail', r.detail, 'run_url', r.run_url, 'last_ok_at', (select max(x.finished_at) from ops_job_runs x where x.job = r.job and x.target = r.target and x.ok))
+      order by r.job, r.target), '[]')
+    from (select distinct on (job, target) * from ops_job_runs order by job, target, started_at desc) r);
+end $$;
+
+-- Riyeser charges in US dollars only (owner's decision): new refunds and credits are in USD. Older ones in FJD, AUD or
+-- NZD stay as they are and can still be read, reviewed and paid (paying an older one as credit keeps its currency).
+create or replace function public.usd_only() returns trigger language plpgsql as $$
+begin
+  if new.currency is distinct from 'USD' and (tg_op = 'INSERT' or new.currency is distinct from old.currency)
+     and not (tg_table_name = 'account_credits' and exists (select 1 from public.refund_requests r where r.id = (to_jsonb(new) ->> 'refund_id')::uuid and r.currency = new.currency)) then
+    raise exception 'Riyeser charges in US dollars, so refunds and credits are in US dollars (USD).'; end if;
+  return new;
+end $$;
+drop trigger if exists refund_requests_usd on public.refund_requests;
+create trigger refund_requests_usd before insert or update of currency on public.refund_requests for each row execute function public.usd_only();
+drop trigger if exists account_credits_usd on public.account_credits;
+create trigger account_credits_usd before insert or update of currency on public.account_credits for each row execute function public.usd_only();
+
+revoke all on function public.hq_touch(), public.hq_set_account_kind(uuid, text, text), public.hq_test_accounts(), public.hq_kpis(boolean),
+  public.hq_ops_runs(), public.usd_only() from public, anon;
+grant execute on function public.hq_touch(), public.hq_set_account_kind(uuid, text, text), public.hq_test_accounts(), public.hq_kpis(boolean),
+  public.hq_ops_runs() to authenticated;
