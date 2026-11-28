@@ -604,6 +604,7 @@ do $$ declare r json; begin
   r := public.pc_trial_seen(current_setting('test.pc1'), 'suite', '2026-11-01T00:00:00Z', null);
   assert (r ->> 'extra_days')::int = 14 and (r ->> 'trial_start')::timestamptz = '2026-08-01T00:00:00Z', 'the PC gets +14 days: ' || r::text;
 end $$;
+reset role;   -- (the trial guard checks above end as a signed-out visitor)
 -- ===== 6. HQ V2 first slice: the Admin role, staff emails, Finance's ticket levels, HQ sessions, job records
 do $$ begin
   assert not ('support.level2' = any(public.hq_role_perms('finance'))) and not ('support.level3' = any(public.hq_role_perms('finance'))), 'finance: no level 2/3 tickets';
