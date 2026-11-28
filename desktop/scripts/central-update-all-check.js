@@ -87,7 +87,7 @@ function cdp(wsUrl) {
   await sleep(800);
   const asked = await ev(`(() => { const b = document.querySelector('[data-upconfirm="now"]'); if (!b) return null; const t = b.closest('dialog').innerText; b.click(); return t; })()`).catch(() => null);
   if (asked) { note('answered Update now', { dialog: asked }); await screenshot('confirm'); }
-  let last = ''; let sameSince = Date.now(); let restarting = false;
+  let last = ''; let sameSince = Date.now(); let restarting = false; let retried = false;
   while (Date.now() - t0 < minutes * 60000) {
     await sleep(1000);
     if (c.closed()) { note('Central closed its window (restarting for its own update)'); restarting = true; break; }
@@ -97,7 +97,12 @@ function cdp(wsUrl) {
     // the percentage moves every second while downloading: record a change of step, not every percent
     const key = `${s.banner.replace(/\d+%/, '%')}|${s.toast}|${s.updError}`;
     if (key !== last) { note('window says', s); last = key; sameSince = Date.now(); await screenshot(String(s.banner.split('\n')[0] || 'banner').replace(/[^a-z0-9]+/gi, '-').slice(0, 40)); }
-    if (s.updating === false) { note('finished (the window is no longer updating)', s); break; }
+    if (s.updating === false) {
+      // --retry: when it says what didn't update (1.9.2), press its Try again once, as the person would
+      const retry = !retried && process.argv.includes('--retry') && await ev(`(() => { const b = document.querySelector('#updates [data-updretry]'); if (!b) return false; b.click(); return true; })()`).catch(() => false);
+      if (retry) { retried = true; note('pressed Try again', s); await sleep(800); await ev(`(() => { const b = document.querySelector('[data-upconfirm="now"]'); if (b) b.click(); return !!b; })()`).catch(() => null); last = ''; continue; }
+      note('finished (the window is no longer updating)', s); break;
+    }
     if (Date.now() - sameSince > 6 * 60000) { note('STUCK: the window has said the same for 6 minutes', s); await screenshot('stuck'); break; }
   }
   const final = report.timeline[report.timeline.length - 1];
