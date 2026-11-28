@@ -14,6 +14,7 @@ from datetime import date
 
 from flask import request, jsonify, g, url_for
 
+from ..countries import request_money
 from ..db import get_db, audit, write_txn, round_cents
 from ..ledger import save_document, PostingError, void_document
 from ..terminals import store as T
@@ -334,7 +335,7 @@ def split_bill(oid):
         doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
         total = doc["total"]
         if total <= 0:
-            raise PostingError("A $0 bill has nothing to split.")
+            raise PostingError(f"A {request_money(0)} bill has nothing to split.")
         dls = db.execute("SELECT * FROM document_lines WHERE document_id=? ORDER BY id", (doc_id,)).fetchall()
         labels = [str(x)[:30] for x in (d.get("labels") or [])]
         part_lines = None
@@ -353,12 +354,12 @@ def split_bill(oid):
         else:
             amounts = [int(a) for a in (d.get("guests") or [])]
             if len(amounts) < 2 or any(a <= 0 for a in amounts):
-                raise PostingError("Give at least two amounts, each more than $0.00.")
+                raise PostingError(f"Give at least two amounts, each more than {request_money(0)}.")
             if sum(amounts) != total:
-                raise PostingError(f"The amounts add up to ${sum(amounts) / 100:,.2f}, but the bill is "
-                                   f"${total / 100:,.2f}.")
+                raise PostingError(f"The amounts add up to {request_money(sum(amounts))}, but the bill is "
+                                   f"{request_money(total)}.")
         if any(a <= 0 for a in amounts):
-            raise PostingError("Every guest's part must be more than $0.00.")
+            raise PostingError(f"Every guest's part must be more than {request_money(0)}.")
         shift = open_shift(db, till) if till else None
         sid = db.execute("INSERT INTO pos_sales (document_id, method, tendered, change_given, user_id, till_id,"
                          " shift_id) VALUES (?,?,0,0,?,?,?)", (doc_id, "bill", g.user["id"], till,
@@ -409,7 +410,7 @@ def pay_part(bid):
         cash_t = next((t for t in tenders if t["method"] == "cash"), None)
         if cash_t and cash_t["change"] > BIG_CHANGE and not d.get("confirm_big"):
             db.rollback()
-            return jsonify(ok=False, error=f"Change of ${cash_t['change'] / 100:,.2f}? Check the cash tendered.",
+            return jsonify(ok=False, error=f"Change of {request_money(cash_t['change'])}? Check the cash tendered.",
                            confirm_key="confirm_big"), 409
         check_card_txns(db, tenders)
         doc = db.execute("SELECT contact_id FROM documents WHERE id=?", (s["document_id"],)).fetchone()

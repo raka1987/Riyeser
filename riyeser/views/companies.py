@@ -8,7 +8,7 @@ from werkzeug.security import check_password_hash
 
 from .. import companies as co
 from .. import perms
-from ..db import get_db, audit, close_db
+from ..db import get_db, audit, close_db, PRICES
 from ..ledger import fy_start
 
 bp = Blueprint("companies", __name__, url_prefix="/companies")
@@ -126,7 +126,7 @@ def add():
         abort(403)
     if not co.can_add_another():
         flash(f"Your plan includes {co.allowance()} compan{'y' if co.allowance() == 1 else 'ies'}. Extra companies are "
-              "US$10 a month each — add them in Riyeser Central (Licence), then come back here.", "error")
+              f"{PRICES['extra_company']} a month each — add them in Riyeser Central (Licence), then come back here.", "error")
         return redirect(url_for("companies.index"))
     f = request.form
     try:
@@ -150,7 +150,7 @@ def import_file():
         abort(403)
     if not co.can_add_another():
         flash(f"Your plan includes {co.allowance()} compan{'y' if co.allowance() == 1 else 'ies'}. Extra companies are "
-              "US$10 a month each — add them in Riyeser Central (Licence), then come back here.", "error")
+              f"{PRICES['extra_company']} a month each — add them in Riyeser Central (Licence), then come back here.", "error")
         return redirect(url_for("companies.index"))
     up = request.files.get("file")
     if not up or not up.filename:

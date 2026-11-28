@@ -11,6 +11,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, abort, g, current_app
 
+from ..countries import request_money
 from ..db import get_db, linked, round_cents, audit, to_cents, write_txn
 from ..ledger import tax_word
 from ..ledger import save_document, record_payment, void_payment, void_document, post_entry, stock_in, tax_code, \
@@ -864,7 +865,7 @@ def _tenders_from(data, total, provider):
         if m == "card":
             amt = int(t.get("amount") or 0)
             if amt <= 0:
-                raise PostingError("A card payment must be more than $0.00.")
+                raise PostingError(f"A card payment must be more than {request_money(0)}.")
             txn = opt_int(t.get("txn_id"))
             if provider != "none" and not txn:
                 raise PostingError("Card payments on this till go through the card machine. Tap Card to start one.")
@@ -882,7 +883,7 @@ def _tenders_from(data, total, provider):
     if cash:
         if cash["tendered"] < left:
             raise PostingError("Cash tendered is less than the total." if not cards else
-                               f"Cash tendered is less than the {left / 100:,.2f} still to pay.")
+                               f"Cash tendered is less than the {request_money(left)} still to pay.")
         cash.update(amount=left, change=cash["tendered"] - left)
         if left == 0 and cash["tendered"] == 0:
             cash = None
@@ -1073,14 +1074,14 @@ def sale():
         cash_t = next((t for t in tenders if t["method"] == "cash"), None)
         if cash_t and cash_t["change"] > BIG_CHANGE and not data.get("confirm_big"):
             db.rollback()
-            return jsonify(ok=False, error=f"Change of ${cash_t['change'] / 100:,.2f}? Check the cash tendered.",
+            return jsonify(ok=False, error=f"Change of {request_money(cash_t['change'])}? Check the cash tendered.",
                            confirm_key="confirm_big"), 409
         check_card_txns(db, tenders)
         if total == 0:  # M28: a free item (staff meal, giveaway) with a reason; nothing to pay
             why = str(data.get("reason") or "").strip()[:120]
             if not why:
                 db.rollback()
-                return jsonify(ok=False, error="A $0 sale needs a reason (for example staff meal or giveaway).",
+                return jsonify(ok=False, error=f"A {request_money(0)} sale needs a reason (for example staff meal or giveaway).",
                                reason_key="reason"), 409
             db.execute("UPDATE documents SET status='paid', notes=TRIM(COALESCE(notes,'') || ' Free: ' || ?) WHERE id=?",
                        (why, doc_id))

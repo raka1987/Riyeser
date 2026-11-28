@@ -140,3 +140,49 @@ def test_the_windows_build_bundles_time_zone_data_and_has_no_code_that_needs_doc
         text = f.read_text(encoding="utf-8")
         assert "__doc__" not in text and "__debug__" not in text, f
         assert not any(line.lstrip().startswith("assert ") for line in text.splitlines()), f
+
+
+# ---------------------------------------------------------------- POS 2.11.1 and business details & branding
+NEW_SCREENS = ("/pos/hardware", "/pos/hardware/start", "/pos/hardware/preview", "/pos/hardware/align",
+               "/pos/cashier/state", "/setup/branding/")
+
+
+@pytest.mark.parametrize("edition", ["source", "pos", "invoices"])
+def test_the_new_screens_are_in_the_smoke_test_and_open(tmp_path, monkeypatch, edition):
+    """Till PINs, Hardware (printers, print layout, drawer, scanner) and Business details & branding are among the
+    screens every run above opens, and each one opens for the admin (POS screens in the apps that have the till)."""
+    _keep_env(monkeypatch)
+    if edition != "source":
+        monkeypatch.setenv("RIYESER_APP_EDITION", edition)
+    app = create_app({"TESTING": True, "DATABASE": str(tmp_path / "co.db")})
+    listed = set(route_smoke.urls(app))
+    assert set(NEW_SCREENS) <= listed, set(NEW_SCREENS) - listed
+    c = route_smoke.make_company(app, "fresh-fj")
+    for url in NEW_SCREENS + ("/pos/hardware/preview?target=till:1", "/pos/hardware/align?target=till:1",
+                              "/pos/hardware/start?till=1&step=receipt", "/pos/hardware/preview?target=till:1&lay=1&paper=58"):
+        if url.startswith("/pos/") and edition == "invoices":
+            continue
+        r = c.get(url)
+        assert r.status_code == 200 or (r.status_code == 302 and edition == "invoices"), (url, r.status_code)
+        assert route_smoke.ERROR_PAGE not in r.get_data(as_text=True), url
+
+
+def test_every_pos_screen_opens_with_till_pins_on(tmp_path, monkeypatch):
+    """With a cashier who has a PIN, the till asks who's selling: every POS screen still opens (or shows the PIN
+    screen), for the admin and for the cashier, and nothing shows the error page."""
+    _keep_env(monkeypatch)
+    app, c = _pos_company(tmp_path, monkeypatch, "FJ")
+    r = c.post("/users/save", data={"username": "cash1", "password": "pw-synthetic1", "preset": "cashier",
+                                    "full_name": "Synthetic Cashier", "till_pin": "4821"}, follow_redirects=True)
+    assert r.status_code == 200
+    cashier = app.test_client()
+    assert cashier.post("/login", data={"username": "cash1", "password": "pw-synthetic1"}).status_code == 302
+    bad = []
+    for who, client in (("admin", c), ("cashier", cashier)):
+        for url in route_smoke.urls(app):
+            if not url.startswith(("/pos/", "/setup/branding")):
+                continue
+            r = client.get(url)
+            if r.status_code >= 500 or (r.mimetype == "text/html" and route_smoke.ERROR_PAGE in r.get_data(as_text=True)):
+                bad.append((who, url, r.status_code))
+    assert bad == []

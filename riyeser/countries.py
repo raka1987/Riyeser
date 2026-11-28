@@ -497,15 +497,36 @@ def _open_company():
 
 def request_money(cents, blank_zero=False):
     """The |money filter: the open company's currency and format (no company: $1,234.56, as before)."""
-    from flask import g, has_app_context
+    if _open_company() is None:
+        return format_money(cents, None, blank_zero)
+    return format_money(cents, request_money_format(), blank_zero)
+
+
+def request_money_format():
+    """The open company's money format (symbol, position, space, decimals, decimal, group)."""
+    from flask import g
     co = _open_company()
     if co is None:
-        return format_money(cents, None, blank_zero)
+        return dict(LEGACY_FORMAT)
     f = g.get("_money_fmt")
     if f is None:
-        f = money_format(co)
-        g._money_fmt = f
-    return format_money(cents, f, blank_zero)
+        f = g._money_fmt = money_format(co)
+    return f
+
+
+MONEY_JS = ("(f=>c=>{c=Math.round(+c||0);const s=c<0?'-':'';c=Math.abs(c);let b;"
+            "if(+f.decimals===0)b=Math.floor((c+50)/100).toLocaleString('en-US');"
+            "else b=Math.floor(c/100).toLocaleString('en-US')+'.'+String(c%100).padStart(2,'0');"
+            "b=b.replace(/[,.]/g,x=>x===','?f.group:f.decimal);const sp=f.space?' ':'';"
+            "return s+(f.position==='after'?b+sp+f.symbol:f.symbol+sp+b);})")
+
+
+def request_money_js():
+    """A JavaScript function (cents -> text) that formats money exactly like the |money filter, for screens that
+    show amounts as they change (the till, closing the till, refunds, approvals). Used as {{ money_js() }}."""
+    from markupsafe import Markup
+    f = {k: request_money_format().get(k, v) for k, v in LEGACY_FORMAT.items()}
+    return Markup(MONEY_JS + "(" + json.dumps(f, ensure_ascii=True).replace("<", "\\u003c") + ")")
 
 
 def request_labels():

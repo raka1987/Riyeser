@@ -29,7 +29,7 @@ p{margin:0;font-size:13px;color:#94a3b8}a{color:#93c5fd}
   <p>Open this page on a second tablet or window to act as the customer's card machine. <a href="{{ url_for('pos.register') }}">Back to the till</a></p>
 </div>
 <script>
-(function(){const $=s=>document.querySelector(s),BASE='{{ url_for('pos.register') }}',m=c=>'$'+(c/100).toLocaleString('en-AU',{minimumFractionDigits:2});
+(function(){const $=s=>document.querySelector(s),BASE='{{ url_for('pos.register') }}',m={{ money_js() }};
 let txn=null;
 async function poll(){try{const d=await (await fetch(BASE+'terminal/practice?poll=1&till='+$('#till').value)).json();txn=d.txn;}catch(e){}
   $('#scr').innerHTML=txn?`<small>${txn.kind==='refund'?'REFUND':'PURCHASE'}</small><b>${m(txn.amount)}</b><small>Present card</small>`:'<small>Riyeser practice</small><b>Ready</b><small>Waiting for the till</small>';

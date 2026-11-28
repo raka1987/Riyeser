@@ -85,13 +85,13 @@ table.t td.r,table.t th.r{text-align:right}.tscroll{overflow-x:auto}.bycash tabl
   <div id="rfLines"></div>
   <div class="lbl" style="margin:14px 0 8px">Pay back by</div>
   <div class="seg" id="rfMethod">{% for k, v in methods.items() %}<button data-m="{{ k }}">{{ v }}</button>{% endfor %}</div>
-  <div class="ttl" style="display:flex;justify-content:space-between;font-size:24px;font-weight:800;margin:16px 0 6px"><span>Refund</span><span class="n" id="rfTotal">$0.00</span></div>
+  <div class="ttl" style="display:flex;justify-content:space-between;font-size:24px;font-weight:800;margin:16px 0 6px"><span>Refund</span><span class="n" id="rfTotal">{{ 0|money }}</span></div>
   <p class="err" id="rfErr" style="color:var(--err);font-weight:600;min-height:1.2em"></p>
   <div style="display:flex;gap:10px"><button class="btn" data-rclose style="flex:1">Cancel</button><button class="btn go" id="rfGo" style="flex:1.4" disabled>Refund</button></div></div></div>
 <form method="post" id="voidForm" hidden><input name="approval_id"><input name="reason"></form>
 <script>
 (function(){
-const $=s=>document.querySelector(s), fmt=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2});
+const $=s=>document.querySelector(s), fmt={{ money_js() }};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const BASE='{{ url_for('pos.register') }}';
 let rf=null;

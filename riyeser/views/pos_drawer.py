@@ -170,7 +170,8 @@ def receipt_data(db, sid, part=None):
     from .. import pos_print as PP
     rs = PP.receipt_settings(db)
     name, head, foot = PP.receipt_brand(db, co, rs, tl)
-    return dict(company=name, header=head,
+    from ..countries import money_format
+    return dict(company=name, header=head, money_fmt=money_format(co),
                 number=s["number"], date=s["date"], label=label,
                 lines=[(l["qty"], l["description"], l["net_amount"] + l["tax_amount"]) for l in lines],
                 total=total, tax=0 if part or not tax_name else s["tax_total"], tax_name=tax_name,

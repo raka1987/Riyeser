@@ -38,10 +38,10 @@ table.t td.r,table.t th.r{text-align:right}
     <input type="hidden" name="till" value="{{ till }}"><input type="hidden" name="approval_id" id="approvalId">
     <div class="card pd">
       <h2>1 · Count the cash drawer</h2><p class="h">Tap + / − or type how many of each note and coin.</p>
-      <div class="denoms">{% for d in denoms %}<div class="dn"><b>{{ '$%d'|format(d // 100) if d >= 100 else '%dc'|format(d) }}</b>
+      <div class="denoms">{% for d in denoms %}<div class="dn"><b>{{ d|money_whole if d >= 100 else '%dc'|format(d) }}</b>
         <div class="stp"><button type="button" data-d="-1">−</button><input class="n" name="n{{ d }}" data-v="{{ d }}" inputmode="numeric" value="0" aria-label="How many {{ d }}"><button type="button" data-d="1">+</button></div>
-        <span class="sv n">$0.00</span></div>{% endfor %}</div>
-      <div class="rec" style="margin-top:12px"><div class="big"><span>Counted</span><span class="n" id="counted">$0.00</span></div></div>
+        <span class="sv n">{{ 0|money }}</span></div>{% endfor %}</div>
+      <div class="rec" style="margin-top:12px"><div class="big"><span>Counted</span><span class="n" id="counted">{{ 0|money }}</span></div></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:18px">
       <div class="card pd">
@@ -78,7 +78,7 @@ table.t td.r,table.t th.r{text-align:right}
         <div style="margin:12px 0"><label class="lbl" for="settle">Card machine settlement total (optional)</label>
           <input class="f" id="settle" name="card_settlement" inputmode="decimal" placeholder="e.g. {{ '%.2f'|format((fig.card_machine if fig.card_machine is defined else fig.card_net) / 100) }}" style="margin-top:6px"><div id="settleNote" style="font-size:13.5px;margin-top:6px"></div></div>
         <label class="chk"><input type="checkbox" name="bank_it" value="1" checked id="bankIt"> Record the takings going to the bank</label>
-        <div id="bankRow"><div class="rec"><div><span>Keep in the drawer (float)</span><span class="n">{{ fig.float|money }}</span></div><div><span>Takings to bank</span><span class="n" id="toBank">$0.00</span></div></div>
+        <div id="bankRow"><div class="rec"><div><span>Keep in the drawer (float)</span><span class="n">{{ fig.float|money }}</span></div><div><span>Takings to bank</span><span class="n" id="toBank">{{ 0|money }}</span></div></div>
           <select class="f" name="bank_id" style="margin-top:10px" aria-label="Bank account">{% for b in banks %}<option value="{{ b.id }}" {{ 'selected' if b.id == default_bank }}>{{ b.code }} {{ b.name }}</option>{% endfor %}</select></div>
         <p class="err" id="closeErr" style="color:var(--err);font-weight:600;min-height:1.2em"></p>
         <button type="button" class="btn go" id="closeGo" style="width:100%;min-height:64px;font-size:19px">Close till &amp; print Z-report</button>
@@ -109,11 +109,11 @@ document.addEventListener('tillchange',()=>{location.href=location.pathname+'?ti
 const form=document.getElementById('closeForm');if(!form)return;
 {% if shift %}
 const EXPECTED={{ fig.expected|tojson }}, FLOAT={{ fig.float|tojson }}, CARD={{ (fig.card_machine if fig.card_machine is defined else fig.card_net)|tojson }}, LIMIT={{ rules.close_limit|tojson }}, NEEDS={{ (rules.close and not self_ok)|tojson }}, SHIFT={{ shift.id|tojson }};
-const $=s=>document.querySelector(s), fmt=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2});
+const $=s=>document.querySelector(s), fmt={{ money_js() }};
 let counted=0,diff=0;
 function upd(){counted=0;document.querySelectorAll('.dn').forEach(r=>{const i=r.querySelector('input'),n=Math.max(0,parseInt(i.value)||0),v=n*+i.dataset.v;counted+=v;r.querySelector('.sv').textContent=fmt(v);});
   diff=counted-EXPECTED;$('#counted').textContent=fmt(counted);const e=$('#var');e.className='var '+(diff===0?'ok':'bad');
-  e.innerHTML=diff===0?'<span>Drawer balances ✓</span><span class="n">$0.00</span>':`<span>Drawer is ${diff<0?'short':'over'}</span><span class="n">${diff<0?'−':'+'}${fmt(Math.abs(diff))}</span>`;
+  e.innerHTML=diff===0?'<span>Drawer balances ✓</span><span class="n">'+fmt(0)+'</span>':`<span>Drawer is ${diff<0?'short':'over'}</span><span class="n">${diff<0?'−':'+'}${fmt(Math.abs(diff))}</span>`;
   $('#why').hidden=Math.abs(diff)<=LIMIT;$('#toBank').textContent=fmt(Math.max(0,counted-FLOAT));
   const st=$('#settle').value.trim(),sv=Math.round(parseFloat(st.replace(/[,$]/g,''))*100);
   $('#settleNote').innerHTML=!st||isNaN(sv)?'':sv===CARD?'<span class="badge ok">✓ Matches the till</span>':`<span class="badge warn">Card machine is ${sv>CARD?'over':'under'} by ${fmt(Math.abs(sv-CARD))}. Check for card refunds or missed sales.</span>`;}

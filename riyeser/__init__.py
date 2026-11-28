@@ -36,6 +36,9 @@ def create_app(test_config=None):
     app.jinja_env.filters["money0"] = lambda c: _countries.request_money(c, blank_zero=True)
     app.jinja_env.filters["ddate"] = _countries.request_date     # a date in the company's date format
     app.jinja_env.filters["cents"] = cents_str
+    app.jinja_env.globals["money_js"] = _countries.request_money_js   # the same format in screens' scripts
+    app.jinja_env.filters["money_whole"] = lambda c: _countries.format_money(c, dict(_countries.request_money_format(), decimals=0))
+    app.jinja_env.globals["money_symbol"] = lambda: _countries.request_money_format()["symbol"]
     app.jinja_env.globals["today"] = lambda: date.today().isoformat()
 
     TYPE_LABELS = {"asset": "Asset", "liability": "Liability", "equity": "Equity", "income": "Income",

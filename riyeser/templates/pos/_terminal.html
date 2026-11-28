@@ -65,7 +65,7 @@
 window.RiyeserTerminal=(function(){
   const CARD={{ card_payments|tojson }}, BASE='{{ url_for('pos.register') }}';
   const $=s=>document.querySelector(s), O=$('#tmO'), M=$('#tmM'), S=$('#tmS');
-  const money=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const money={{ money_js() }};
   const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const IC={card:'<svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 6h6M12 17h.01"/></svg>',
     ok:'<svg viewBox="0 0 24 24" style="stroke-width:2.6"><path d="M20 6 9 17l-5-5"/></svg>',

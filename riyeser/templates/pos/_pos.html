@@ -219,7 +219,7 @@ window.TillLock=(function(){
 /* Manager approval: returns a promise of {approval_id, reason} (approval_id is null when the user approves their own). */
 window.requestApproval=(function(){
   const SELF={{ self_ok|tojson }}, METHOD={{ rules.method|tojson }}, REASONS={{ reasons|tojson }}, URL='{{ url_for('pos.approve') }}';
-  const $=s=>document.querySelector(s), m=$('#mApprove'), money=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2});
+  const $=s=>document.querySelector(s), m=$('#mApprove'), money={{ money_js() }};
   let st=null;
   function pin(){if(!$('#apDots'))return;$('#apDots').innerHTML=Array.from({length:Math.max(4,st.pin.length)},(_,i)=>`<i class="${i<st.pin.length?'f':''}"></i>`).join('');}
   function ready(){$('#apGo').disabled=!st.reason||(!SELF&&!(st.pin.length>=4||($('#apCardIn')&&$('#apCardIn').value.trim().length>=4)));}

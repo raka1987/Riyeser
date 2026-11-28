@@ -364,7 +364,8 @@ def sample_receipt(co, rs, labels, db=None):
     """What the preview and a test print show."""
     name, head, foot = receipt_brand(db, co, rs, labels) if db is not None else (
         co["name"] if rs["show_name"] else "", header_lines(co, rs, labels), footer_lines(rs))
-    return dict(company=name, header=head,
+    from .countries import money_format
+    return dict(company=name, header=head, money_fmt=money_format(co),
                 number="TEST", date=datetime.now().strftime("%Y-%m-%d"), label="Test print",
                 lines=[(2, "Flat White", 910), (1, "Banana Bread", 650)], total=1560,
                 tax=142 if labels.get("has_tax") else 0, tax_name=labels.get("tax"),

@@ -32,7 +32,7 @@
   <div class="rule"><div><b>Discount over the limit</b><small>A discount on an item above this %.</small></div>
     <div class="inl lim"><input name="discount_limit" value="{{ rules.discount_limit }}" inputmode="numeric"> %</div><input class="sw" type="checkbox" name="discount" value="1" {{ 'checked' if rules.discount }} aria-label="Discount needs approval"></div>
   <div class="rule"><div><b>Close the till when the drawer is out</b><small>Counted cash differs from expected by more than this.</small></div>
-    <div class="inl lim">$ <input name="close_limit" value="{{ '%.2f'|format(rules.close_limit / 100) }}" inputmode="decimal"></div><input class="sw" type="checkbox" name="close" value="1" {{ 'checked' if rules.close }} aria-label="Close needs approval"></div>
+    <div class="inl lim">{{ money_symbol() }} <input name="close_limit" value="{{ '%.2f'|format(rules.close_limit / 100) }}" inputmode="decimal"></div><input class="sw" type="checkbox" name="close" value="1" {{ 'checked' if rules.close }} aria-label="Close needs approval"></div>
   <p class="muted" style="font-size:13px">Owners and managers (people with Full access to Sales) approve their own, but they still pick a reason and it is still logged.</p>
   {% if can_change %}<p class="actions" style="justify-content:flex-end;margin-bottom:0"><button class="btn pri">Save settings</button></p>{% endif %}
 </fieldset></form>

@@ -173,7 +173,7 @@ def backend(app=None):
 # ------------------------------------------------------------ ESC/POS receipt text
 def _enc(text):
     """ESC/POS printers' default code page is PC437: keep plain characters, swap the rest for close ones."""
-    swap = {"’": "'", "‘": "'", "“": '"', "”": '"', "–": "-", "—": "-", "•": "*", "…": "...", "×": "x", "·": "-"}
+    swap = {"’": "'", "‘": "'", "“": '"', "”": '"', "–": "-", "—": "-", "•": "*", "…": "...", "×": "x", "·": "-", "€": "EUR", "₹": "Rs"}
     out = "".join(swap.get(c, c) for c in str(text))
     return out.encode("cp437", "replace")
 
@@ -186,7 +186,11 @@ def _row(left, right, width=WIDTH):
     return left + " " * (width - len(left) - len(right)) + right + "\n"
 
 
-def money(cents):
+def money(cents, fmt=None):
+    """$1,234.56, or in the company's own money format when the receipt carries it (money_fmt)."""
+    if fmt:
+        from .countries import format_money
+        return format_money(cents, fmt)
     sign = "-" if cents < 0 else ""
     cents = abs(int(cents))
     return f"{sign}${cents // 100:,}.{cents % 100:02d}"
@@ -203,6 +207,7 @@ def receipt_bytes(r, kick=False, width=WIDTH):
     tax_name, tenders [(label, amount)], change, footer. kick: the drawer pulse first, so the drawer opens as the
     receipt starts printing."""
     b = bytearray()
+    fm = r.get("money_fmt")
     if kick:
         b += PULSE
     b += INIT + CENTRE + BOLD_ON + DOUBLE + _enc("\n".join(_wrap(r.get("company", ""), width // 2))) + b"\n" + NORMAL + BOLD_OFF
@@ -214,14 +219,14 @@ def receipt_bytes(r, kick=False, width=WIDTH):
         b += _enc(r["label"][:width] + "\n")
     b += _enc("-" * width + "\n")
     for qty, desc, amt in r.get("lines", []):
-        b += _enc(_row(f"{qty:g} x {desc}", money(amt), width))
-    b += _enc("-" * width + "\n") + BOLD_ON + _enc(_row("TOTAL", money(r.get("total", 0)), width)) + BOLD_OFF
+        b += _enc(_row(f"{qty:g} x {desc}", money(amt, fm), width))
+    b += _enc("-" * width + "\n") + BOLD_ON + _enc(_row("TOTAL", money(r.get("total", 0), fm), width)) + BOLD_OFF
     if r.get("tax"):
-        b += _enc(_row(f"Includes {r.get('tax_name') or 'GST'}", money(r["tax"]), width))
+        b += _enc(_row(f"Includes {r.get('tax_name') or 'GST'}", money(r["tax"], fm), width))
     for label, amt in r.get("tenders", []):
-        b += _enc(_row(label, money(amt), width))
+        b += _enc(_row(label, money(amt, fm), width))
     if r.get("change"):
-        b += _enc(_row("Change", money(r["change"]), width))
+        b += _enc(_row("Change", money(r["change"], fm), width))
     b += _enc("-" * width + "\n") + CENTRE
     for line in r.get("footer", ["Thank you!"]):
         b += _enc("\n".join(_wrap(line, width)) + "\n")

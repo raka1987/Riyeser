@@ -188,8 +188,8 @@ body{overflow:hidden;user-select:none}
         <button class="btn" id="nosale" hidden title="Open the cash drawer without a sale">No sale</button>
         <button class="btn danger" id="clear">Clear</button>
       </div>
-      <div class="gst"{% if not tl.has_tax %} style="display:none"{% endif %}><span>Includes {{ tl.word }}</span><span class="n" id="gst">$0.00</span></div>
-      <div class="ttl"><span>Total</span><span class="n" id="total">$0.00</span></div>
+      <div class="gst"{% if not tl.has_tax %} style="display:none"{% endif %}><span>Includes {{ tl.word }}</span><span class="n" id="gst">{{ 0|money }}</span></div>
+      <div class="ttl"><span>Total</span><span class="n" id="total">{{ 0|money }}</span></div>
       <button class="pay n" id="pay" disabled>Pay</button>
     </div>
   </aside>
@@ -201,8 +201,8 @@ body{overflow:hidden;user-select:none}
   <h2>Open <span id="openName">the till</span></h2>
   <p style="margin:0;color:var(--muted)">Count the float (the change you start with) and put it in the drawer.</p>
   {% if tl_lock and tl_lock.pins_on %}<div class="opener" id="openWho"><span id="openWhoTxt">Who's opening the till?</span><button type="button" class="btn sm" id="openPin">Enter PIN</button></div>{% endif %}
-  <div class="disp"><small>Float in drawer</small><span class="n" id="flt">$0.00</span></div>
-  <div class="quick" id="fq"><button data-flt="10000">$100</button><button data-flt="20000">$200</button><button data-flt="30000">$300</button><button data-flt="0">No float</button></div>
+  <div class="disp"><small>Float in drawer</small><span class="n" id="flt">{{ 0|money }}</span></div>
+  <div class="quick" id="fq">{% for c in (10000, 20000, 30000) %}<button data-flt="{{ c }}">{{ c|money_whole }}</button>{% endfor %}<button data-flt="0">No float</button></div>
   <div class="keys" id="fkeys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">&#9003;</button><button data-k="clear" class="kclr" aria-label="Clear (C)">C · Clear</button></div>
   <p class="err" id="openErr"></p>
   <button class="btn go big" id="openGo">Open till &amp; start selling</button>
@@ -213,7 +213,7 @@ body{overflow:hidden;user-select:none}
   <div class="card sumc">
     <button class="back" data-back><svg class="ic" viewBox="0 0 24 24" style="width:18px"><path d="M15 18l-6-6 6-6"/></svg>Back to sale</button>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h2 style="margin:0;font-size:26px">Payment</h2><span class="badge g" id="payTag"></span></div>
-    <div><div class="lbl">Amount due</div><div class="due n" id="due">$0.00</div></div>
+    <div><div class="lbl">Amount due</div><div class="due n" id="due">{{ 0|money }}</div></div>
     <div id="sumlines"></div>
     <div class="gst"{% if not tl.has_tax %} style="display:none"{% endif %}><span>Includes {{ tl.word }}</span><span class="n" id="dueGst"></span></div>
     <div class="paid" id="paidList"></div>
@@ -226,7 +226,7 @@ body{overflow:hidden;user-select:none}
     </div>
     <div id="cashArea" hidden>
       <div class="quick" id="quick"></div>
-      <div class="disp"><small>Cash received</small><span class="n" id="tend">$0.00</span></div>
+      <div class="disp"><small>Cash received</small><span class="n" id="tend">{{ 0|money }}</span></div>
       <div class="keys" id="keys"><button>1</button><button>2</button><button>3</button><button>4</button><button>5</button><button>6</button><button>7</button><button>8</button><button>9</button><button>00</button><button>0</button><button data-k="del" aria-label="Delete">⌫</button><button data-k="clear" class="kclr" aria-label="Clear (C)">C · Clear</button></div>
       <div class="chg short" id="chg"></div>
     </div>
@@ -318,7 +318,7 @@ const TILL_LOC={{ till_locs|tojson }}, DRAWERS={{ drawers|tojson }}, LOCS={{ loc
 const BYID={};ITEMS.forEach(i=>BYID[i.id]=i);const TILES=ITEMS.filter(i=>!i.parent);
 const U={open:'{{ url_for('pos.shift_open') }}',sale:'{{ url_for('pos.sale') }}',order:'{{ url_for('pos.save_order') }}',orders:'{{ url_for('pos.orders') }}',base:'{{ url_for('pos.register') }}',photo:'{{ url_for('pos.photo', iid=0) }}'.replace(/0$/,'')};
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const fmt=c=>(c<0?'-$':'$')+(Math.abs(c)/100).toLocaleString('en-AU',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt={{ money_js() }};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const initials=n=>n.split(/\s+/).filter(w=>/^[A-Za-z0-9]/.test(w)).slice(0,2).map(w=>w[0]).join('').toUpperCase();
 const otypes=$$('#otype button').map(b=>b.dataset.t);
@@ -598,7 +598,7 @@ $('#spGo').onclick=async()=>{if($('#spGo').disabled)return;const body={mode:spMo
   if(spMode==='even')body.guests=spN;
   else if(spMode==='items'){body.guests=Array.from({length:spN},(_,i)=>{const g={};cart.forEach(l=>{const q=(spAssign[l.uid]||[])[i]||0;if(q>0)g[l.uid]=q;});return g;});
     const miss=cart.filter(l=>Math.abs((spAssign[l.uid]||[]).reduce((a,b)=>a+b,0)-l.qty)>1e-6);if(miss.length){$('#spErr').textContent='Give every item to a guest first: '+miss.map(l=>l.name).join(', ')+'.';return;}}
-  else{body.guests=spAmts.slice(0,spN);if(body.guests.some(a=>a<=0)){$('#spErr').textContent='Each guest must pay more than $0.00.';return;}}
+  else{body.guests=spAmts.slice(0,spN);if(body.guests.some(a=>a<=0)){$('#spErr').textContent='Each guest must pay more than '+fmt(0)+'.';return;}}
   $('#spGo').disabled=true;let d=await post(U.base+'order/'+orderId+'/split',body);
   if(!d.ok&&d.confirm_key&&confirm(d.error)){body[d.confirm_key]=true;d=await post(U.base+'order/'+orderId+'/split',body);}
   $('#spGo').disabled=false;if(!d.ok){$('#spErr').textContent=d.error;return;}

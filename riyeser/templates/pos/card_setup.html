@@ -36,7 +36,7 @@
   <div class="cp-opts">{% for p in providers %}
     <label class="cp-o {{ 'soon' if not p.available }}"><input type="radio" name="provider_{{ t.id }}" value="{{ p.key }}" {{ 'checked' if p.key == cur }} {{ 'disabled' if not p.available }}>
       <span><b>{{ p.name }}{% if p.coming_soon %}<span class="cp-tag soon">Coming soon</span>{% endif %}</b><small>{{ p.blurb }}</small>{% if p.countries and p.coming_soon %}<small>Where: {{ p.countries }}</small>{% endif %}</span></label>{% endfor %}</div>
-  {% if can_change %}<div class="cp-test"><button type="button" class="btn" data-test="{{ t.id }}" data-name="{{ t.name }}" {{ 'disabled' if cur == 'none' }}>Test a $1.00 payment</button>
+  {% if can_change %}<div class="cp-test"><button type="button" class="btn" data-test="{{ t.id }}" data-name="{{ t.name }}" {{ 'disabled' if cur == 'none' }}>Test a {{ 100|money }} payment</button>
     <small class="muted">{% if cur == 'none' %}Choose a card machine and save first.{% else %}Uses {{ (providers|selectattr('key', 'equalto', cur)|first).name }}. Not added to sales or the books.{% endif %}</small></div>{% endif %}
 </div>{% endfor %}
 </div>
@@ -60,7 +60,7 @@
 <script>
 document.addEventListener('click',async e=>{const b=e.target.closest('[data-test]');if(!b)return;
   try{const x=await window.RiyeserTerminal.run({kind:'test',amount:100,till_id:b.dataset.test,till_name:b.dataset.name,doneLabel:'Done'});
-    alert('Test payment approved'+(x.card_last4?' on card ••'+x.card_last4:'')+'. The card machine works with this till.'+(x.provider==='manual'?' If you really charged $1.00, void it on your machine.':''));}
+    alert('Test payment approved'+(x.card_last4?' on card ••'+x.card_last4:'')+'. The card machine works with this till.'+(x.provider==='manual'?' If you really charged '+{{ (100|money)|tojson }}+', void it on your machine.':''));}
   catch(err){if(!err.txn)alert(err.message);}
   location.reload();});
 </script>
