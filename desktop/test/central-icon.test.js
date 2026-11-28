@@ -37,5 +37,5 @@ test('Central 1.9.2 uses build/central/icon.ico for the program, installer and u
   assert.match(cfg, /version: '1\.9\.2', productName: 'Riyeser Central'/);
   assert.match(cfg, /win: \{.*\bicon: a\.ico/); assert.match(cfg, /installerIcon: a\.ico/); assert.match(cfg, /uninstallerIcon: a\.ico/);
   const main = read('src/central-main.js').toString();
-  assert.strictEqual((main.match(/'icon-central\.ico' : 'icon-central\.png'/g) || []).length, 2, 'both Central windows');
+  assert.strictEqual((main.match(/'icon-central\.ico' : 'icon-central\.png'/g) || []).length, 3, 'every Central window: the main one, Riyeser Link and the "Updating Riyeser Central" splash (auto-update)');
 });
