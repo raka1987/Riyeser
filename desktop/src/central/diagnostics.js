@@ -4,6 +4,10 @@
 //   - which program it's about, and the version of it installed on this PC
 //   - Riyeser Central's version, and every Riyeser program installed on this PC with its version (updates.js)
 //   - the Windows version (e.g. "Windows 11 Pro (10.0.22631)")
+//   - the free trial's record on this PC (core/trial-guard.js report): the one-way PC code (an HMAC of the Windows
+//     MachineGuid, never the MachineGuid itself), for each trial its start, end and days left, the date each place holds
+//     (licence.json, marker, registry, company file, Riyeser online), the latest time seen, whether the clock was seen
+//     going backwards, and how many times Riyeser Central was installed. Dates and counts only: no names or paths.
 //   - when the report was made
 //   - the error message or code, if the person types one
 //   - the last 200 lines (64 KB at most) of that program's technical log, if it has one Central can find
@@ -121,7 +125,24 @@ function windowsName(version, release, platform = 'win32') {
  * The diagnostic details for one report: exactly what the preview shows and what's sent.
  * programs: {programId: version} installed on this PC; log: { lines, source } or null.
  */
-function build({ product, programs = {}, centralVersion = '', osName = '', now = new Date(), log = null }) {
+const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+const isoOrNull = (v) => (typeof v === 'string' && ISO.test(v) ? v : null);
+/** The trial record, only the fields support may see (licence data: dates, counts, the one-way PC code). */
+function cleanTrial(t) {
+  if (!t || typeof t !== 'object') return null;
+  const SRC = ['licence_json', 'marker', 'registry', 'company_file', 'online'];
+  return {
+    pc_id: typeof t.pc_id === 'string' && /^[0-9a-f]{64}$/.test(t.pc_id) ? t.pc_id : null,
+    latest_seen: isoOrNull(t.latest_seen), clock_back: t.clock_back === true, clock_back_at: isoOrNull(t.clock_back_at),
+    installs: Number.isInteger(t.installs) && t.installs >= 0 ? Math.min(t.installs, 9999) : null,
+    programs: (Array.isArray(t.programs) ? t.programs : []).filter((p) => p && ['suite', 'estimate'].includes(p.program)).slice(0, 4).map((p) => ({
+      program: p.program, start: isoOrNull(p.start), ends: isoOrNull(p.ends), days_left: Math.max(0, Math.min(999, Number(p.days_left) || 0)),
+      extra_days: Math.max(0, Math.min(365, Number(p.extra_days) || 0)),
+      sources: Object.fromEntries(SRC.map((k) => [k, isoOrNull(p.sources && p.sources[k])])),
+    })),
+  };
+}
+function build({ product, programs = {}, centralVersion = '', osName = '', now = new Date(), log = null, trial = null }) {
   const p = PRODUCTS.find((x) => x.id === product) || PRODUCTS.find((x) => x.id === 'other');
   const list = Object.entries(programs || {}).filter(([id]) => /^[a-z0-9-]{1,40}$/.test(id))
     .map(([id, version]) => ({ id, version: version == null ? null : String(version).slice(0, 40) })).sort((a, b) => a.id.localeCompare(b.id));
@@ -135,6 +156,7 @@ function build({ product, programs = {}, centralVersion = '', osName = '', now =
     reported_at: new Date(now).toISOString(),
     log_lines: log && log.lines ? log.lines : null,
     log_source: log && log.lines ? log.source : null,
+    ...(trial ? { trial: cleanTrial(trial) } : {}),
   };
 }
 
@@ -157,8 +179,9 @@ function preview(diag, names = {}) {
     ['Windows', diag.os || 'Not known'],
     ['When', diag.reported_at],
     ['Installed Riyeser programs', diag.programs.length ? diag.programs.map((x) => `${names[x.id] || x.id} ${x.version || '?'}`).join(', ') : 'None found'],
+    ...(diag.trial ? [['Free trial record', require('../core/trial-guard').previewLine(diag.trial)]] : []),
     ['Log lines', diag.log_lines ? `${diag.log_lines.split('\n').length} from the ${diag.log_source}` : 'None (this program has no log Central can read)'],
   ];
 }
 
-module.exports = { PRODUCTS, MAX_LINES, MAX_BYTES, scrub, tail, logFiles, readLog, windowsName, build, payload, preview };
+module.exports = { PRODUCTS, MAX_LINES, MAX_BYTES, scrub, tail, logFiles, readLog, windowsName, build, payload, preview, cleanTrial };

@@ -1568,6 +1568,7 @@ ${PROGRAMS.filter((p) => FACTS[p.id]).map((p) => `<section class="c blk reg-sec"
     ['Downloads', 'Which program and release, the country, and the page the button was on. No IP address or browser details', 'Riyeser\'s online database'],
     ['Website visits', 'The page, the site you came from, phone/tablet/desktop, browser, language and region. No cookies, and nothing is sent when your browser asks not to be tracked', 'Riyeser\'s online database'],
     ['Support requests', 'What you write to us, and any screenshot or details you choose to send', 'Riyeser\'s online database'],
+    ['Free trials', 'Only when online, with no account: an anonymous, one-way PC code (made from Windows\' own PC number, which never leaves the PC), which free trial, its start date, when the PC was first and last seen, and the program version. It keeps a free trial\'s date when Riyeser is reinstalled, and it can\'t identify a person. No names, emails or business data', 'Riyeser\'s online database'],
   ];
   const LOCAL = ['Accounting Basics and Plus, Invoices, Bookings, POS and Estimate: your company file, on your PC',
     'Riyeser Payroll: staff, pay rates, bank details, timesheets and payslips, on the PC that runs it', 'Riyeser Documents: your documents, in ordinary Windows folders on your PC or a shared network folder you choose',

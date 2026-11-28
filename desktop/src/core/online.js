@@ -220,6 +220,9 @@ class Online {
     return out;
   }
   rpc(name, args) { return this.call(`/rest/v1/rpc/${name}`, { method: 'POST', body: args || {} }); }
+  /** A call with no account (only the public key): the free trial's anonymous PC record (trial-guard.js) uses this, so it
+   *  is never tied to the person signed in. */
+  anonRpc(name, args) { return this.call(`/rest/v1/rpc/${name}`, { method: 'POST', auth: false, body: args || {} }); }
 
   // ---------- this PC ----------
   // The PC's id: made once by Riyeser Central and kept in its store; Central also writes it to device.json, where the

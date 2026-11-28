@@ -258,6 +258,38 @@ jobs:
           $leftover = Get-ChildItem "$env:LOCALAPPDATA\Programs\desk-assistant\resources" -Directory | Where-Object Name -in @("python", "accounting")
           if ($leftover) { throw "Accounting files are still bundled" }
 
+      - name: The free trial survives reinstalling (the registry key is kept on uninstall; installs are counted)
+        shell: pwsh
+        run: |
+          # Central's installer counted its install in HKCU\Software\Riyeser\Trial
+          $key = "HKCU:\Software\Riyeser\Trial"
+          $n1 = (Get-ItemProperty $key -ErrorAction SilentlyContinue).Installs
+          if (-not $n1 -or $n1 -lt 1) { throw "Central's installer didn't count its install (Installs = $n1)" }
+          # the trial, as Central's licence code keeps it (licence.json, markers, the registry)
+          $out = node scripts/trial-guard-check.js start; if ($LASTEXITCODE -ne 0) { throw "trial-guard-check start failed: $out" }
+          $start = ($out | Select-String '^TRIAL_START=(.+)$').Matches[0].Groups[1].Value
+          Write-Host "Trial start:" $start "· installs:" $n1
+          # uninstall Central (quietly, as Installed apps does)
+          Get-Process -Name "Riyeser Central" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $e = Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Central*" | Select-Object -First 1
+          if (-not $e) { throw "Riyeser Central isn't in Installed apps" }
+          $u = if ($e.QuietUninstallString) { $e.QuietUninstallString } else { "$($e.UninstallString) /S" }
+          Start-Process cmd.exe -ArgumentList "/c $u" -Wait
+          for ($i = 0; $i -lt 30 -and (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Central*"); $i++) { Start-Sleep -Seconds 2 }
+          if (Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Where-Object DisplayName -like "Riyeser Central*") { throw "Riyeser Central didn't uninstall" }
+          if (-not (Test-Path $key)) { throw "Uninstalling removed HKCU\Software\Riyeser\Trial" }
+          if ([DateTime]::Parse((Get-ItemProperty $key).suite).ToUniversalTime() -ne [DateTime]::Parse($start).ToUniversalTime()) { throw "The registry's trial date changed on uninstall" }
+          Write-Host "After uninstalling, the registry still has the trial date:" (Get-ItemProperty $key).suite
+          # the data folders wiped too (the worst case), then Central installed again
+          Remove-Item -Recurse -Force "$env:APPDATA\Riyeser", "$env:APPDATA\Riyeser Central" -ErrorAction SilentlyContinue
+          $setup = Get-ChildItem "dist-central\RiyeserCentral-Setup-*.exe" | Select-Object -First 1
+          Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
+          Get-Process -Name "Riyeser Central" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $n2 = (Get-ItemProperty $key).Installs
+          if ($n2 -ne $n1 + 1) { throw "The reinstall wasn't counted (was $n1, now $n2)" }
+          $out = node scripts/trial-guard-check.js check $start; if ($LASTEXITCODE -ne 0) { throw "The trial restarted after reinstalling: $out" }
+          Write-Host "Reinstalled with wiped data folders: same trial start ($start), installs $n2"
+
       - uses: actions/upload-artifact@v4
         with:
           name: Riyeser-Windows-installers

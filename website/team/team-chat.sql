@@ -976,17 +976,17 @@ create or replace function public.hq_all_perms() returns text[] language sql imm
     'people.change_owner', 'business.close', 'licences.view', 'licences.manage', 'support.view', 'support.reply', 'support.assign',
     'support.saved_replies', 'support.escalate', 'support.level2', 'support.level3', 'refunds.view', 'refunds.request',
     'refunds.approve', 'refunds.pay', 'offers.grant', 'offers.approve', 'emails.view', 'emails.manage', 'accounts.inactive',
-    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view', 'support.diagnostics']
+    'staff.manage', 'audit.view', 'settings.manage', 'link.support', 'reports.view', 'support.diagnostics', 'trials.view']
 $$;
 create or replace function public.hq_role_perms(r text) returns text[] language sql immutable as $$
   select case r
     when 'owner' then public.hq_all_perms()
     when 'finance' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'licences.view', 'licences.manage',
       'support.view', 'support.reply', 'support.level2', 'support.level3', 'support.escalate', 'refunds.view', 'refunds.approve', 'refunds.pay',
-      'offers.grant', 'offers.approve', 'emails.view', 'reports.view']
+      'offers.grant', 'offers.approve', 'emails.view', 'reports.view', 'trials.view']
     when 'support' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies', 'support.escalate', 'refunds.view',
-      'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics']
+      'refunds.request', 'offers.grant', 'emails.view', 'link.support', 'support.diagnostics', 'trials.view']
     when 'senior' then array['overview.view', 'downloads.view', 'customers.view', 'customers.notes', 'customers.edit', 'people.reset_2fa',
       'people.change_owner', 'business.close', 'licences.view', 'support.view', 'support.reply', 'support.assign', 'support.saved_replies',
       'support.escalate', 'support.level2', 'refunds.view', 'refunds.request', 'offers.grant', 'emails.view', 'emails.manage', 'link.support', 'reports.view',
@@ -1899,6 +1899,9 @@ create table if not exists public.support_diagnostics (
   created_at timestamptz not null default now()
 );
 create index if not exists support_diagnostics_ws on public.support_diagnostics (workspace_id, created_at desc);
+-- The free trial's record on that PC (Riyeser Central's core/trial-guard.js): licence data only, for the HQ ticket's
+-- "Trial history" (trials.view). The one-way PC code, dates and counts; never names, folder paths or business data.
+alter table public.support_diagnostics add column if not exists trial jsonb;
 alter table public.support_diagnostics enable row level security;
 revoke all on public.support_diagnostics from anon, authenticated;
 -- Customers insert and read only their own reports (Report an issue normally goes through support_report below).
@@ -1909,6 +1912,25 @@ create policy sd_read on public.support_diagnostics for select to authenticated 
 drop policy if exists sd_insert on public.support_diagnostics;
 create policy sd_insert on public.support_diagnostics for insert to authenticated
   with check (created_by = auth.uid() and public.is_member(workspace_id));
+-- The trial record, only the fields support may see: pc_id (64 hex: an HMAC, never the Windows MachineGuid), dates (ISO,
+-- after support_scrub), counts and true/false. Anything else in it is dropped.
+create or replace function public.support_trial_date(v text) returns text language sql immutable set search_path = public as $$
+  select case when public.support_scrub(v) ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$' then public.support_scrub(v) end
+$$;
+create or replace function public.support_trial_clean(t jsonb) returns jsonb language sql immutable set search_path = public as $$
+  select case when jsonb_typeof(t) = 'object' then jsonb_strip_nulls(jsonb_build_object(
+    'pc_id', case when t ->> 'pc_id' ~ '^[0-9a-f]{64}$' then t ->> 'pc_id' end,
+    'latest_seen', public.support_trial_date(t ->> 'latest_seen'), 'clock_back', coalesce((t ->> 'clock_back') = 'true', false),
+    'clock_back_at', public.support_trial_date(t ->> 'clock_back_at'),
+    'installs', case when t ->> 'installs' ~ '^[0-9]{1,4}$' then (t ->> 'installs')::int end,
+    'programs', (select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('program', e ->> 'program', 'start', public.support_trial_date(e ->> 'start'),
+        'ends', public.support_trial_date(e ->> 'ends'), 'days_left', case when e ->> 'days_left' ~ '^[0-9]{1,3}$' then (e ->> 'days_left')::int end,
+        'extra_days', case when e ->> 'extra_days' ~ '^[0-9]{1,3}$' then least((e ->> 'extra_days')::int, 365) end,
+        'sources', (select coalesce(jsonb_object_agg(k, public.support_trial_date(e -> 'sources' ->> k)), '{}') from unnest(array['licence_json', 'marker', 'registry', 'company_file', 'online']) k)))
+        order by e ->> 'program'), '[]')
+      from (select distinct on (x ->> 'program') x as e from jsonb_array_elements(case when jsonb_typeof(t -> 'programs') = 'array' then t -> 'programs' else '[]' end) x
+            where jsonb_typeof(x) = 'object' and x ->> 'program' in ('suite', 'estimate')) y))) end
+$$;
 -- Every report is tidied before it's saved: scrubbed, at most 200 log lines (64 KB), programs as [{id, version}].
 create or replace function public.support_diagnostics_clean() returns trigger language plpgsql as $$
 declare lines text[];
@@ -1925,6 +1947,7 @@ begin
   new.central_version := nullif(left(trim(coalesce(new.central_version, '')), 40), '');
   new.log_source := nullif(left(regexp_replace(coalesce(new.log_source, ''), '[\\/:]', ' ', 'g'), 80), '');
   if new.reported_at is null or new.reported_at > now() + interval '1 day' or new.reported_at < now() - interval '30 days' then new.reported_at := now(); end if;
+  new.trial := case when new.trial is null then null else public.support_trial_clean(new.trial) end;
   if coalesce(new.log_lines, '') = '' then new.log_lines := null;
   else
     lines := regexp_split_to_array(public.support_scrub(new.log_lines), E'\r?\n');
@@ -2205,6 +2228,8 @@ begin
     'diagnostic', case when t.diag_id is not null and hq_can('support.diagnostics') then
         (select support_diag_json(d) from support_diagnostics d where d.id = t.diag_id) end,
     'diag_hidden', t.diag_id is not null and not hq_can('support.diagnostics'),
+    -- the report has the PC's free-trial record: 'yes' (hq_ticket_trial shows it) or 'hidden' (needs trials.view)
+    'trial', (select case when d.trial is null then null when hq_can('trials.view') then 'yes' else 'hidden' end from support_diagnostics d where d.id = t.diag_id),
     'pcs', case when t.workspace_id is not null then (select coalesce(json_agg(json_build_object('name', d.device_name, 'platform', d.platform,
         'version', d.app_version, 'programs', coalesce(d.programs, '[]'::jsonb), 'programs_at', d.programs_at, 'last_seen', d.last_seen) order by d.last_seen desc), '[]')
         from devices d where d.workspace_id = t.workspace_id) end,
@@ -4825,9 +4850,10 @@ begin
   else
     begin ra := (p ->> 'reported_at')::timestamptz; exception when others then ra := null; end;
     insert into support_diagnostics (workspace_id, created_by, source, product, product_version, error_text, os, central_version, programs,
-        log_lines, log_source, reported_at)
+        log_lines, log_source, reported_at, trial)
       values (ws, uid, case when p ->> 'source' = 'central' then 'central' else 'web' end, prod, p ->> 'product_version', p ->> 'error_text',
-        p ->> 'os', p ->> 'central_version', coalesce(p -> 'programs', '[]'::jsonb), p ->> 'log_lines', p ->> 'log_source', ra)
+        p ->> 'os', p ->> 'central_version', coalesce(p -> 'programs', '[]'::jsonb), p ->> 'log_lines', p ->> 'log_source', ra,
+        case when jsonb_typeof(p -> 'trial') = 'object' then p -> 'trial' end)
       returning * into d;
   end if;
   subj := left(coalesce(nullif(trim(p ->> 'subject'), ''), product_label(prod) || ': ' || split_part(what, E'\n', 1)), 150);
@@ -10096,3 +10122,141 @@ do $$ begin
     execute 'create policy sign_docs_delete on storage.objects for delete to authenticated using (bucket_id = ''sign-docs'' and public.sign_file_delete_ok(name))';
   end if;
 end $$;
+-- ---------------------------------------------------------------- the free trial's anonymous PC record (trial guard)
+-- Keeps a PC's 90-day free trial when Riyeser is reinstalled or its data folders are wiped (desktop/src/core/trial-guard.js,
+-- riyeser/trial_guard.py). Riyeser Central sends, with no account, only a one-way PC code (pc_id: HMAC-SHA256 of the Windows
+-- MachineGuid with the app's fixed key, so the PC's own id never leaves it), the program ('suite': the trial every Riyeser
+-- program shares; 'estimate': Riyeser Estimate's first-use trial), the earliest trial start the PC knows and the app version.
+-- The earliest date for each (pc_id, program) is kept and returned; it is never moved later. No names, emails, business or
+-- other data. Nobody reads the table directly: only pc_trial_seen (that one PC's row), HQ's count per program, and the
+-- HQ ticket's Trial history (trials.view, only with the customer's own report). Signed-in businesses' trials are still
+-- decided by their signed licence (company_modules / module_state); this is only the PC-level local trial.
+create table if not exists public.pc_trials (
+  pc_id text not null check (pc_id ~ '^[0-9a-f]{64}$'),
+  program text not null check (program in ('suite', 'estimate')),
+  trial_start timestamptz not null,
+  first_seen timestamptz not null default now(),
+  last_seen timestamptz not null default now(),
+  app_version text check (length(app_version) <= 40),
+  extra_days int not null default 0 check (extra_days between 0 and 365),   -- a goodwill extension from HQ (hq_trial_extend)
+  primary key (pc_id, program)
+);
+create index if not exists pc_trials_program on public.pc_trials (program, trial_start);
+alter table public.pc_trials enable row level security;
+revoke all on public.pc_trials from public, anon, authenticated;
+-- (no policies: only the functions below)
+
+-- The caller's internet address for rate limits (SEC-017). The first X-Forwarded-For entry is whatever the caller wrote, so
+-- it's never used. Cloudflare (in front of Supabase) sets CF-Connecting-IP itself; failing that, the LAST X-Forwarded-For
+-- entry (added by the proxy nearest the database). null when neither is a real address: then only the per-PC and the
+-- overall limits apply. Check on staging with a spoofed X-Forwarded-For before relying on it for anything else.
+create or replace function public.request_client_ip() returns text
+  language plpgsql stable set search_path = public as $$
+declare h json; v text; a inet;
+begin
+  begin h := current_setting('request.headers', true)::json; exception when others then h := null; end;
+  if h is null then return null; end if;
+  v := nullif(trim(h ->> 'cf-connecting-ip'), '');
+  if v is null then v := nullif(trim(regexp_replace(coalesce(h ->> 'x-forwarded-for', ''), '^.*,', '')), ''); end if;
+  begin a := v::inet; exception when others then return null; end;
+  return host(a);
+end $$;
+
+-- Riyeser Central (no account): register this PC's trial for a program, or just look it up (trial_start null), and get the
+-- earliest date back. Limits: 20 calls an hour per PC, 300 an hour per internet address (/24), 5,000 a minute overall.
+create or replace function public.pc_trial_seen(pc text, program text, trial_start timestamptz, app_version text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare r pc_trials; s timestamptz; ip text := request_client_ip(); hr bigint := floor(extract(epoch from now()) / 3600);
+  mn bigint := floor(extract(epoch from now()) / 60); v text := left(nullif(trim(coalesce(app_version, '')), ''), 40);
+begin
+  if coalesce(pc, '') !~ '^[0-9a-f]{64}$' then raise exception 'That PC code isn''t right.'; end if;
+  if coalesce(pc_trial_seen.program, '') not in ('suite', 'estimate') then raise exception 'Unknown program.'; end if;
+  if api_rate_hit('pt:' || pc || ':' || hr, interval '2 hours') > 20
+     or (ip is not null and api_rate_hit('pti:' || api_ip_trunc(ip) || ':' || hr, interval '2 hours') > 300)
+     or api_rate_hit('pta:' || mn, interval '2 minutes') > 5000 then
+    raise exception 'Too many requests. Try again later.' using errcode = 'P0429';
+  end if;
+  -- a date from before Riyeser's trials, or in the future (a PC clock set wrong), isn't believed: now instead
+  s := case when pc_trial_seen.trial_start is null then null
+            when pc_trial_seen.trial_start < '2024-01-01'::timestamptz or pc_trial_seen.trial_start > now() + interval '1 day' then now()
+            else pc_trial_seen.trial_start end;
+  if s is null then
+    update pc_trials p set last_seen = now(), app_version = coalesce(v, p.app_version)
+      where p.pc_id = pc and p.program = pc_trial_seen.program returning * into r;
+    if r.pc_id is null then return json_build_object('program', pc_trial_seen.program, 'trial_start', null); end if;
+  else
+    insert into pc_trials as p (pc_id, program, trial_start, app_version) values (pc, pc_trial_seen.program, s, v)
+      on conflict on constraint pc_trials_pkey do update set trial_start = least(p.trial_start, excluded.trial_start), last_seen = now(),
+        app_version = coalesce(excluded.app_version, p.app_version)
+      returning * into r;
+  end if;
+  return json_build_object('program', r.program, 'trial_start', r.trial_start, 'first_seen', r.first_seen, 'last_seen', r.last_seen,
+    'extra_days', r.extra_days);
+end $$;
+revoke all on function public.pc_trial_seen(text, text, timestamptz, text), public.request_client_ip(), public.support_trial_clean(jsonb),
+  public.support_trial_date(text) from public;
+grant execute on function public.pc_trial_seen(text, text, timestamptz, text) to anon, authenticated;
+-- the diagnostic reports' tidy-up uses these two (like support_scrub), so the people who may save a report may run them
+grant execute on function public.support_trial_clean(jsonb), public.support_trial_date(text) to authenticated;
+
+-- HQ: how many PCs are on a free trial, per program (counts only, never a PC code).
+create or replace function public.hq_trial_pcs() returns json
+  language plpgsql stable security definer set search_path = public as $$
+begin
+  perform hq_need(array['licences.view']);
+  return (select coalesce(json_agg(json_build_object('program', x.program, 'pcs', x.pcs, 'on_trial', x.on_trial, 'seen_30d', x.seen_30d) order by x.program), '[]')
+    from (select p.program, count(*) as pcs, count(*) filter (where p.trial_start + make_interval(days => 90 + p.extra_days) > now()) as on_trial,
+            count(*) filter (where p.last_seen > now() - interval '30 days') as seen_30d from pc_trials p group by p.program) x);
+end $$;
+
+-- HQ ticket "Trial history": only with the ticket's own diagnostic report (sent by the customer with Report an issue, so they
+-- agreed to it), and only for roles that see trial records (trials.view: Owner, Finance, Support by default). Each look is
+-- in the HQ history. Read-only. -> the report's trial record, Riyeser online's record for that PC (first and last seen),
+-- and, for a signed-in business, the server licence's trial dates.
+create or replace function public.hq_ticket_trial(ticket uuid) returns json
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; d support_diagnostics; pc text;
+begin
+  perform hq_need(array['trials.view']);
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if t.diag_id is not null then select * into d from support_diagnostics where id = t.diag_id; end if;
+  if d.id is null or d.trial is null then raise exception 'This ticket has no diagnostic report with a free-trial record. Ask the customer to use Get help → Report an issue in Riyeser Central.'; end if;
+  pc := d.trial ->> 'pc_id';
+  perform hq_log('trial.viewed', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'diagnostic', d.ref));
+  return json_build_object('diag_ref', d.ref, 'reported_at', d.reported_at, 'report', d.trial,
+    'online', case when pc is not null then (select coalesce(json_agg(json_build_object('program', p.program, 'trial_start', p.trial_start,
+        'first_seen', p.first_seen, 'last_seen', p.last_seen, 'extra_days', p.extra_days) order by p.program), '[]') from pc_trials p where p.pc_id = pc) end,
+    'business', case when t.workspace_id is not null then (select json_object_agg(m, json_build_object('status', s ->> 'status', 'trial_ends', s ->> 'trial_ends',
+        'paid_until', s ->> 'paid_until', 'days_left', s -> 'days_left'))
+      from unnest(array['basic', 'plus', 'bookings', 'calls', 'payroll', 'pos', 'as_built', 'estimate']) m, lateral (select public.module_state(t.workspace_id, m)::jsonb as s) z) end,
+    'can_extend', hq_can('licences.manage'));
+end $$;
+
+-- HQ Owner / Finance (licences.manage): a goodwill extension of a PC's local free trial (e.g. +14 days), with a reason, from a
+-- ticket with the customer's report. The PC picks it up the next time it's online. Up to 90 days at a time, 365 in all.
+-- A signed-in business's trial is extended the existing way instead (Programs → Extend: hq_quick_licence).
+create or replace function public.hq_trial_extend(ticket uuid, program text, days int, reason text) returns json
+  language plpgsql security definer set search_path = public as $$
+declare t support_tickets; d support_diagnostics; pc text; r pc_trials; st timestamptz;
+begin
+  perform hq_need(array['licences.manage']);
+  if coalesce(hq_trial_extend.program, '') not in ('suite', 'estimate') then raise exception 'Choose a program.'; end if;
+  if days is null or days < 1 or days > 90 then raise exception 'Choose between 1 and 90 days.'; end if;
+  if length(trim(coalesce(reason, ''))) < 5 then raise exception 'Say why (a few words).'; end if;
+  select * into t from support_tickets where id = ticket;
+  if t.id is null then raise exception 'That ticket doesn''t exist.'; end if;
+  if t.diag_id is not null then select * into d from support_diagnostics where id = t.diag_id; end if;
+  pc := d.trial ->> 'pc_id';
+  if pc is null then raise exception 'This ticket has no report with a PC code, so there''s no PC trial to extend.'; end if;
+  select (e ->> 'start')::timestamptz into st from jsonb_array_elements(coalesce(d.trial -> 'programs', '[]')) e where e ->> 'program' = hq_trial_extend.program;
+  insert into pc_trials as p (pc_id, program, trial_start, extra_days) values (pc, hq_trial_extend.program, coalesce(st, now()), least(days, 365))
+    on conflict on constraint pc_trials_pkey do update set extra_days = least(p.extra_days + days, 365)
+    returning * into r;
+  perform hq_log('trial.extended', jsonb_build_object('ticket', t.ref, 'workspace_id', t.workspace_id, 'diagnostic', d.ref, 'program', r.program,
+    'days', days, 'extra_days', r.extra_days, 'reason', left(trim(reason), 500), 'pc', left(pc, 8)));
+  return json_build_object('program', r.program, 'trial_start', r.trial_start, 'extra_days', r.extra_days,
+    'trial_ends', r.trial_start + make_interval(days => 90 + r.extra_days));
+end $$;
+revoke all on function public.hq_trial_pcs(), public.hq_ticket_trial(uuid), public.hq_trial_extend(uuid, text, int, text) from public, anon;
+grant execute on function public.hq_trial_pcs(), public.hq_ticket_trial(uuid), public.hq_trial_extend(uuid, text, int, text) to authenticated;

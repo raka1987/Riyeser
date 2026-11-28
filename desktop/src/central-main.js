@@ -7,6 +7,7 @@ const updates = require('./central/updates');
 const installerCheck = require('./central/installer-check');
 const installRun = require('./central/install-run');
 const licence = require('./core/licence');
+const trialGuard = require('./core/trial-guard');
 const prices = require('./core/prices');
 const path = require('path');
 const fs = require('fs');
@@ -634,6 +635,17 @@ function registerIpc() {
   };
   setTimeout(() => refreshOnlineLicence(false), 5000);
   setInterval(() => refreshOnlineLicence(false), 6 * 3600 * 1000);
+  // The free trial's anonymous PC record (core/trial-guard.js): at most once every 20 hours, only when online, never in
+  // demo mode, no account (only a one-way PC code and the trial dates). Offline or refused: the dates on this PC stand.
+  const trialOnline = async () => {
+    if (demoOn() || !trialGuard.onlineDue(store.get('pc-trial-at', 0) || 0)) return null;
+    if (!(await on.ready().catch(() => false))) return null;
+    const r = await licence.syncTrialOnline(appData, (n, a) => on.anonRpc(n, a), { appVersion: app.getVersion() }).catch(() => null);
+    if (r && r.sent) { store.set('pc-trial-at', Date.now()); if (win && !win.isDestroyed()) win.webContents.send('licence-changed', true); }
+    return r;
+  };
+  setTimeout(trialOnline, 15000);
+  setInterval(trialOnline, 6 * 3600 * 1000);
   handle('company:get', () => companyState());
   handle('company:signIn', (email, password, create) => on.signIn(String(email || '').trim(), String(password || ''), !!create));
   handle('company:verifyCode', (code) => on.verifyCode(code));   // S11: two-step sign-in
@@ -820,7 +832,8 @@ function registerIpc() {
     // online connections: the program's online-api.log (next to the company file), or Central's own online problems
     const extra = ['accounting', 'invoices', 'pos', 'bookings'].includes(product) && localApp ? [{ file: localApp.logFile(), label: 'online connections log' }]
       : product === 'central' && onlineSync ? [{ text: onlineSync.trail({ status: 'problems', limit: 60 }).rows.reverse().map((r) => `${new Date(r.at).toISOString()} ${r.ref || ''} ${r.what}${r.detail ? ` — ${r.detail}` : ''}`).join('\n'), label: 'Riyeser Central online connections activity' }] : [];
-    const diag = diagnostics.build({ product, programs, centralVersion: app.getVersion(), log: diagnostics.readLog(product, { extra }),
+    let trial = null; try { trial = licence.trialReport(appData); } catch { /* left out */ }
+    const diag = diagnostics.build({ product, programs, centralVersion: app.getVersion(), log: diagnostics.readLog(product, { extra }), trial,
       osName: diagnostics.windowsName(typeof os.version === 'function' ? os.version() : '', os.release(), process.platform) });
     prepared = { token: crypto.randomUUID(), diag };
     return { signedIn: true, products: known, business: (online.readCompany(appData) || {}).name || '', token: prepared.token, diag, preview: diagnostics.preview(diag, progNames) };
@@ -1023,6 +1036,8 @@ app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(
 let backupResult = null;   // OWNER-BACKUP: what a restore on this start did (shown once the window is up)
 app.whenReady().then(async () => {
   nativeTheme.themeSource = 'system';
+  // the free trial's registry copy (HKCU\Software\Riyeser\Trial) and the one-way PC code: Windows only
+  try { trialGuard.useWindowsDefaults(); } catch { /* the other places still count */ }
   if (!process.argv.some((a) => a.startsWith('--self-test='))) {
     // a "Restore everything" asked for before the restart: done now, before Central (or anything) opens the data
     const B = require('./core/backup');

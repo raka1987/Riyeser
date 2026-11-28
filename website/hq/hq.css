@@ -617,3 +617,14 @@ main.wide { max-width: none; }
   .dupfind .search input, .dupm, #dupCode, .mcard .f input, .mcard .f select { font-size: 16px; }   /* iPhone: no zoom on focus */
   .ownchg { grid-template-columns: 1fr; } .ownchg > span { display: none; }
 }
+/* Trial history (a ticket's report: the PC's free-trial record) */
+.trow { border-top: 1px solid var(--line); padding: 10px 0 4px; min-width: 0; } .trow:first-of-type { border-top: 0; }
+.trow h4 { margin: 0 0 6px; font-size: 14px; } .trow .dkv { grid-template-columns: 122px minmax(0, 1fr); }
+.tverdict { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; font-size: 13.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.tverdict.ok { background: var(--ok-l); color: var(--ok); } .tverdict.warn { background: var(--warn-l); color: var(--warn); }
+.tsrc { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0 4px; table-layout: fixed; }
+.tsrc th, .tsrc td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.tsrc th { color: var(--muted); font-weight: 600; }
+.tbiz { margin: 4px 0; padding-left: 18px; }
+.trx { display: grid; gap: 8px; margin-top: 10px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px; min-width: 0; }
+.trx .row { display: flex; gap: 8px; flex-wrap: wrap; } .trx select, .trx input { max-width: 100%; min-width: 0; }
