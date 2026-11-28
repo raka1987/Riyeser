@@ -5,6 +5,14 @@ name: Publish Riyeser release
 # Builds Riyeser Central, Riyeser Documents (formerly Riyeser Desk Assistant), Riyeser PDF, As Built, Riyeser Link (formerly Riyeser Team) and Riyeser Link Office (branch module/desk-assistant) and Riyeser Accounting Basics and Plus
 # and Riyeser POS (main) and Riyeser Payroll (branch module/payroll) on Windows, installs each one to check it, then publishes a GitHub Release whose files keep the same names
 # every time, so the website's Download buttons (…/releases/latest/download/<name>) always give the newest version.
+#
+# Where the release goes (docs/GOING-PRIVATE.md):
+#   1. raka1987/riyeser-downloads (DOWNLOADS_REPO below): the PUBLIC downloads repository. It holds only releases and
+#      the built website, no source code. Needs the DOWNLOADS_TOKEN repository secret (a fine-grained token with
+#      "Contents: Read and write" on that one repository). Without it the run stops at the start, before any build.
+#   2. This (code) repository as well, while ALSO_CODE_REPO is on, so Riyeser Central 1.9.0 and older keep finding
+#      updates here until they've updated themselves. Turn it off with the repository variable ALSO_CODE_REPO = false
+#      (Settings → Secrets and variables → Actions → Variables), or untick "Also publish…" for one run.
 on:
   workflow_dispatch:
     inputs:
@@ -16,11 +24,45 @@ on:
         description: "Branch or commit for Central, Documents, PDF, As Built, Link and Link Office"
         required: false
         default: module/desk-assistant
+      also_code_repo:
+        description: "Also publish to this code repository (for older Riyeser Central installs; ignored when the ALSO_CODE_REPO variable is false)"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: write
 
+env:
+  # The public downloads repository (the one place to change its name in this workflow)
+  DOWNLOADS_REPO: raka1987/riyeser-downloads
+  # Publish to this code repository too: on unless the repository variable ALSO_CODE_REPO is "false" or the run's box is unticked
+  ALSO_CODE_REPO: ${{ (vars.ALSO_CODE_REPO != 'false' && inputs.also_code_repo != false) && 'true' || 'false' }}
+
 jobs:
+  downloads-repo:
+    name: Downloads repository access
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the DOWNLOADS_TOKEN secret can publish to the downloads repository
+        env: { GH_TOKEN: "${{ secrets.DOWNLOADS_TOKEN }}" }
+        run: |
+          # Checked first, so a missing token stops the run in seconds instead of after the 45-minute builds.
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The DOWNLOADS_TOKEN secret is missing. Add it under Settings → Secrets and variables → Actions (see docs/GOING-PRIVATE.md, steps 2 and 3), then run this again."
+            exit 1
+          fi
+          if ! gh api "repos/$DOWNLOADS_REPO" --jq .full_name >/dev/null 2>&1; then
+            echo "::error::DOWNLOADS_TOKEN can't see $DOWNLOADS_REPO. Check the repository exists and the token was made for it, with \"Contents: Read and write\" (docs/GOING-PRIVATE.md, steps 1 and 2)."
+            exit 1
+          fi
+          if [ "$(gh api "repos/$DOWNLOADS_REPO" --jq '.size')" = "0" ] && ! gh api "repos/$DOWNLOADS_REPO/commits?per_page=1" >/dev/null 2>&1; then
+            echo "::error::$DOWNLOADS_REPO is empty. GitHub can't add a release to an empty repository: add a README to it (docs/GOING-PRIVATE.md, step 1)."
+            exit 1
+          fi
+          echo "OK: releases will be published to $DOWNLOADS_REPO (and to this code repository too: $ALSO_CODE_REPO)."
+
+
   licence-key:
     name: Licence public key
     runs-on: ubuntu-latest
@@ -54,7 +96,7 @@ jobs:
     name: Central, Documents, PDF, As Built, Link, Link Office
     runs-on: windows-latest
     timeout-minutes: 45
-    needs: licence-key
+    needs: [licence-key, downloads-repo]
     # The licence public key, built into the program (empty until licence signing is switched on)
     env: { RIYESER_LICENCE_PUBLIC_KEY: "${{ needs.licence-key.outputs.key }}" }
     defaults: { run: { working-directory: desktop } }
@@ -118,7 +160,7 @@ jobs:
     name: Accounting Basics, Accounting Plus, POS, Invoices, Bookings and Estimate
     runs-on: windows-latest
     timeout-minutes: 45
-    needs: licence-key
+    needs: [licence-key, downloads-repo]
     # The licence public key, built into the program (empty until licence signing is switched on)
     # RIYESER_ESRI_KEY: Riyeser Estimate's map (ArcGIS Location Platform API key; optional, a repository secret)
     env: { RIYESER_LICENCE_PUBLIC_KEY: "${{ needs.licence-key.outputs.key }}", RIYESER_ESRI_KEY: "${{ secrets.RIYESER_ESRI_KEY }}" }
@@ -201,7 +243,7 @@ jobs:
     name: Payroll
     runs-on: windows-latest
     timeout-minutes: 45
-    needs: licence-key
+    needs: [licence-key, downloads-repo]
     # The licence public key, built into the program (empty until licence signing is switched on)
     env: { RIYESER_LICENCE_PUBLIC_KEY: "${{ needs.licence-key.outputs.key }}" }
     steps:
@@ -253,18 +295,24 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { path: out, merge-multiple: true }
       - name: Keep the previous installer of any program whose new build failed
-        env: { GH_TOKEN: "${{ github.token }}" }
+        env: { DL_TOKEN: "${{ secrets.DOWNLOADS_TOKEN }}", CODE_TOKEN: "${{ github.token }}" }
         run: |
+          # Looks in the downloads repository first, then in this code repository (older releases are only here).
           for f in RiyeserPayroll-Setup.exe; do
             [ -f "out/$f" ] && continue
-            tag=""
-            for t in $(gh release list -R "$GITHUB_REPOSITORY" -L 30 --json tagName -q '.[].tagName'); do
-              if gh release view "$t" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' | grep -qx "$f"; then tag="$t"; break; fi
+            found=""
+            for spot in "$DOWNLOADS_REPO DL_TOKEN" "$GITHUB_REPOSITORY CODE_TOKEN"; do
+              set -- $spot; repo="$1"; export GH_TOKEN="${!2}"
+              for t in $(gh release list -R "$repo" -L 30 --json tagName -q '.[].tagName' 2>/dev/null); do
+                if gh release view "$t" -R "$repo" --json assets -q '.assets[].name' | grep -qx "$f"; then
+                  gh release download "$t" -R "$repo" -p "$f" -D out
+                  gh release view "$t" -R "$repo" --json body -q .body | grep -E "^- Riyeser Payroll " | sed 's/^- //' > out/versions-payroll.txt || true
+                  echo "Kept $f from $repo $t (its new build didn't pass)"; found=1; break
+                fi
+              done
+              [ -n "$found" ] && break
             done
-            if [ -z "$tag" ]; then echo "No earlier $f to keep"; continue; fi
-            gh release download "$tag" -R "$GITHUB_REPOSITORY" -p "$f" -D out
-            gh release view "$tag" -R "$GITHUB_REPOSITORY" --json body -q .body | grep -E "^- Riyeser Payroll " | sed 's/^- //' > out/versions-payroll.txt || true
-            echo "Kept $f from $tag (its new build didn't pass)"
+            [ -n "$found" ] || echo "No earlier $f to keep"
           done
       - name: Release notes
         env: { NOTES: "${{ inputs.notes }}" }
@@ -284,7 +332,29 @@ jobs:
           echo "TITLE=Riyeser for Windows — $(date -u '+%-d %B %Y')" >> "$GITHUB_ENV"
           rm out/versions-*.txt
           ls -la out
-      - uses: softprops/action-gh-release@v2
+      - name: Publish to the downloads repository (${{ env.DOWNLOADS_REPO }})
+        env: { GH_TOKEN: "${{ secrets.DOWNLOADS_TOKEN }}" }
+        run: |
+          # The same tag, title, notes and file names as the code repository's copy below. (Payroll's file may be
+          # missing if its job failed; the others were checked above.)
+          files=()
+          for f in RiyeserCentral-Setup.exe RiyeserDocuments-Setup.exe RiyeserDeskAssistant-Setup.exe RiyeserPDF-Setup.exe \
+                   RiyeserServices-Setup.exe RiyeserTeam-Setup.exe RiyeserLink-Setup.exe RiyeserLinkOffice-Setup.exe versions.json \
+                   RiyeserAccountingBasics-Setup.exe RiyeserAccountingPlus-Setup.exe RiyeserAccounting-Setup.exe RiyeserPOS-Setup.exe \
+                   RiyeserInvoices-Setup.exe RiyeserBookings-Setup.exe RiyeserEstimate-Setup.exe RiyeserPayroll-Setup.exe; do
+            if [ -f "out/$f" ]; then files+=("out/$f"); else echo "Not in this release: $f"; fi
+          done
+          if gh release view "$TAG" -R "$DOWNLOADS_REPO" >/dev/null 2>&1; then
+            # A re-run of the same run: replace the files on the release that's already there
+            gh release upload "$TAG" -R "$DOWNLOADS_REPO" --clobber "${files[@]}"
+          else
+            gh release create "$TAG" -R "$DOWNLOADS_REPO" --title "$TITLE" --notes-file notes.md --latest "${files[@]}"
+          fi
+          echo "Published $TAG to https://github.com/$DOWNLOADS_REPO/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+      # The code repository's copy (transition: older Centrals look here). Still runs if the step above failed, so
+      # older installs aren't left without the update; the run then shows as failed so the downloads copy gets redone.
+      - if: ${{ !cancelled() && env.ALSO_CODE_REPO == 'true' }}
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           target_commitish: module/desk-assistant

@@ -26,9 +26,14 @@ export interface Opts {
   waitUntil?: (p: Promise<unknown>) => void;
 }
 
-export const VERSION = "2026-11-27";
-export const REPO = "raka1987/Riyeser";
-const LATEST = `https://github.com/${REPO}/releases/latest/download/`;
+export const VERSION = "2026-11-28";
+// Releases live in the public downloads repository (docs/GOING-PRIVATE.md): the one place to change its name here.
+export const REPO = "raka1987/riyeser-downloads";
+// The code repository, where releases were published before. Asked only while the downloads repository has no such
+// file yet (GitHub answers 404), so downloads work before and after the switch. Harmless once it's private (404 too).
+export const OLD_REPO = "raka1987/Riyeser";
+const latest = (repo: string) => `https://github.com/${repo}/releases/latest/download/`;
+const LATEST = latest(REPO);
 const SITE = "https://riyeser.com";
 
 // Each program's installer (the same names as website/build.mjs). The page also sends file=, which wins when it's one
@@ -120,20 +125,26 @@ export function flagsOf(req: Request, q: URLSearchParams): Flags {
 }
 
 // GitHub: the newest release's file and tag, from the "latest" link's redirect (no API, so no rate limit). Kept 10 minutes.
+// The downloads repository first; the old code repository only when the downloads repository says it has no such file.
 const cache = new Map<string, { at: number; url: string; tag: string | null }>();
 export function clearCache() { cache.clear(); recent.clear(); }
 export async function resolveAsset(file: string, f: typeof fetch, now: number): Promise<{ url: string; tag: string | null }> {
   const hit = cache.get(file);
   if (hit && now - hit.at < 10 * 60 * 1000) return hit;
-  const fallback = { url: LATEST + file, tag: null };
-  try {
-    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 2500);
-    const r = await f(LATEST + file, { method: "HEAD", redirect: "manual", signal: ctl.signal }).finally(() => clearTimeout(t));
-    const loc = r.headers.get("location") ?? "";
-    await r.body?.cancel();
-    const m = new RegExp(`^https://github\\.com/${REPO.replace("/", "\\/")}/releases/download/([A-Za-z0-9._-]{1,80})/${file.replace(/\./g, "\\.")}$`).exec(loc);
-    if (r.status >= 300 && r.status < 400 && m) { const v = { at: now, url: loc, tag: m[1] }; cache.set(file, v); return v; }
-  } catch { /* GitHub slow or down: the latest link still works */ }
+  let fallback = { url: LATEST + file, tag: null as string | null };
+  for (const repo of [REPO, OLD_REPO]) {
+    try {
+      const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 2500);
+      const r = await f(latest(repo) + file, { method: "HEAD", redirect: "manual", signal: ctl.signal }).finally(() => clearTimeout(t));
+      const loc = r.headers.get("location") ?? "";
+      await r.body?.cancel();
+      const m = new RegExp(`^https://github\\.com/${repo.replace("/", "\\/")}/releases/download/([A-Za-z0-9._-]{1,80})/${file.replace(/\./g, "\\.")}$`, "i").exec(loc);
+      if (r.status >= 300 && r.status < 400 && m) { const v = { at: now, url: loc, tag: m[1] }; cache.set(file, v); return v; }
+      if (r.status !== 404) break;                  // anything but "not here": don't guess, use the latest link
+      // not in the downloads repository (yet): the old one's link; in neither: back to the downloads repository's
+      fallback = { url: (repo === REPO ? latest(OLD_REPO) : LATEST) + file, tag: null };
+    } catch { break; /* GitHub slow or down: the latest link still works */ }
+  }
   return fallback;
 }
 

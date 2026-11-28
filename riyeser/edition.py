@@ -15,7 +15,9 @@ changes any data: Basics just doesn't show the Plus screens, and Accounting does
 """
 import os
 
-DOWNLOADS = "https://github.com/raka1987/Riyeser/releases/latest/download"
+# Releases are published in the public downloads repository (docs/GOING-PRIVATE.md): change its name here only.
+DOWNLOADS_REPO = "raka1987/riyeser-downloads"
+DOWNLOADS = f"https://github.com/{DOWNLOADS_REPO}/releases/latest/download"
 SETUP_FILES = {"basic": "RiyeserAccountingBasics-Setup.exe", "enterprise": "RiyeserAccountingPlus-Setup.exe",
                "pos": "RiyeserPOS-Setup.exe", "invoices": "RiyeserInvoices-Setup.exe",
                "bookings": "RiyeserBookings-Setup.exe", "estimate": "RiyeserEstimate-Setup.exe"}

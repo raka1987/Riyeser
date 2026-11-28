@@ -23,6 +23,7 @@ jobs:
       DB_URL: ${{ secrets.TEAM_DB_URL }}
       HQ_INGEST_TOKEN: ${{ secrets.HQ_INGEST_TOKEN }}
       GH_TOKEN: ${{ github.token }}
+      DOWNLOADS_REPO: raka1987/riyeser-downloads   # the public downloads repository (its releases are public)
     steps:
       - name: Set up yet?
         id: ready
@@ -33,8 +34,15 @@ jobs:
       - if: steps.ready.outputs.how != 'none'
         name: Count GitHub's downloads
         run: |
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[].assets[] | select(.name | endswith(".exe")) | [.name, .download_count] | @tsv' > counts.tsv
+          # Both places releases are published (docs/GOING-PRIVATE.md): the public downloads repository and this code
+          # repository (older releases, and copies while ALSO_CODE_REPO is on). Added together; either may have none yet.
+          : > counts.tsv
+          for repo in "$DOWNLOADS_REPO" "$GITHUB_REPOSITORY"; do
+            if gh api --paginate "repos/${repo}/releases?per_page=100" \
+                 --jq '.[].assets[] | select(.name | endswith(".exe")) | [.name, .download_count] | @tsv' > part.tsv 2>/dev/null; then
+              echo "$repo: $(wc -l < part.tsv) installer files"; cat part.tsv >> counts.tsv
+            else echo "::notice::No releases read from $repo (not there yet?)"; fi
+          done
           jq -Rn 'reduce (inputs | split("\t")) as $r ({}; .[$r[0]] += ($r[1] | tonumber))' < counts.tsv > totals.json
           jq -r 'to_entries | sort_by(-.value) | .[] | "\(.value)\t\(.key)"' totals.json
       - if: steps.ready.outputs.how == 'db'

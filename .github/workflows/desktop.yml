@@ -1,10 +1,23 @@
 name: Build desktop app
 
+# Runs only when something it builds or tests changes (it's 18 builds, on Windows, macOS and Linux: GitHub counts
+# Windows minutes twice and macOS minutes ten times on a private repository), on v* tags, and by hand
+# (Actions → Build desktop app → Run workflow). Pushes that change only docs, the website or other workflows skip it.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["v*"]          # (GitHub doesn't apply the paths filter below to tags: a v* tag always builds)
+    paths:
+      - "riyeser/**"
+      - "packaging/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "run.py"
+      - "supabase/functions/licence/**"
+      - ".github/workflows/desktop.yml"
   workflow_dispatch:
+
+concurrency: { group: "desktop-${{ github.ref }}", cancel-in-progress: true }
 
 jobs:
   test:

@@ -7,21 +7,24 @@
 //  - never blocks: the database failing or GitHub down still sends the browser on (to the "latest" link)
 //  - unknown programs are 404; file= only for our installer names (never another website); ping
 import { assert, assertEquals, assertFalse, assertMatch } from "jsr:@std/assert@1";
-import { BOT_RE, clearCache, countryOf, FILES, handle, programOf, referrerOf, type Rpc, visitorHash } from "./handler.ts";
+import { BOT_RE, clearCache, countryOf, FILES, handle, OLD_REPO, programOf, referrerOf, REPO, type Rpc, visitorHash } from "./handler.ts";
 
 const TAG = "riyeser-2026.11.27-60";
 const CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const NOW = Date.parse("2026-11-27T03:00:00Z");
 const fn = "https://x.supabase.co/functions/v1/download/";
 
-function world(o: { dbFails?: boolean; githubDown?: boolean } = {}) {
+function world(o: { dbFails?: boolean; githubDown?: boolean; notInDownloads?: boolean; inNeither?: boolean } = {}) {
   const calls: Record<string, unknown>[] = []; const later: Promise<unknown>[] = []; const gh: string[] = [];
   const rpc: Rpc = async (name, args) => { if (o.dbFails) throw new Error("db down"); assertEquals(name, "record_download"); calls.push(args); return { ok: true, status: 200, body: "ok" }; };
   const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     gh.push(String(url)); assertEquals(init?.method, "HEAD"); assertEquals(init?.redirect, "manual");
     if (o.githubDown) throw new Error("offline");
     const file = String(url).split("/").pop();
-    return new Response(null, { status: 302, headers: { location: `https://github.com/raka1987/Riyeser/releases/download/${TAG}/${file}` } });
+    // notInDownloads: the downloads repository has no release yet (before the first one there); inNeither: no such file anywhere
+    const repo = String(url).startsWith(`https://github.com/${REPO}/`) ? REPO : OLD_REPO;
+    if (o.inNeither || (o.notInDownloads && repo === REPO)) return new Response("Not Found", { status: 404 });
+    return new Response(null, { status: 302, headers: { location: `https://github.com/${repo}/releases/download/${TAG}/${file}` } });
   }) as typeof fetch;
   const opts = { rpc, env: (k: string) => ({ DOWNLOAD_SALT: "pepper-for-tests" } as Record<string, string>)[k], now: () => NOW, fetch: fetchFn, waitUntil: (p: Promise<unknown>) => { later.push(p); } };
   const get = async (path: string, headers: Record<string, string> = {}, method = "GET") => {
@@ -35,7 +38,7 @@ Deno.test("a click on riyeser.com: one row, then on to the newest file on GitHub
   clearCache(); const w = world();
   const r = await w.get("central?js=1&from=/programs/central.html&tz=Pacific/Fiji");
   assertEquals(r.status, 302);
-  assertEquals(r.headers.get("location"), `https://github.com/raka1987/Riyeser/releases/download/${TAG}/RiyeserCentral-Setup.exe`);
+  assertEquals(r.headers.get("location"), `https://github.com/raka1987/riyeser-downloads/releases/download/${TAG}/RiyeserCentral-Setup.exe`);
   assertEquals(r.headers.get("cache-control"), "no-store");
   assertEquals(w.calls.length, 1);
   const c = w.calls[0];
@@ -59,7 +62,7 @@ Deno.test("mode=json for riyeser.com's download page, with CORS for riyeser.com 
   clearCache(); const w = world();
   const r = await w.get("pos?js=1&mode=json", { origin: "https://riyeser.com" });
   assertEquals(r.status, 200);
-  assertEquals(await r.json(), { url: `https://github.com/raka1987/Riyeser/releases/download/${TAG}/RiyeserPOS-Setup.exe`, tag: TAG });
+  assertEquals(await r.json(), { url: `https://github.com/raka1987/riyeser-downloads/releases/download/${TAG}/RiyeserPOS-Setup.exe`, tag: TAG });
   assertEquals(r.headers.get("access-control-allow-origin"), "https://riyeser.com");
   const e = await w.get("pos?js=1&mode=json", { origin: "https://evil.example" });
   assertEquals(e.headers.get("access-control-allow-origin"), null); await e.body?.cancel();
@@ -106,8 +109,21 @@ Deno.test("never blocks: the database failing, or GitHub down, still sends the b
   assertMatch(r.headers.get("location") ?? "", /RiyeserCentral-Setup\.exe$/);
   clearCache(); const b = world({ githubDown: true });
   const s = await b.get("pdf?js=1"); assertEquals(s.status, 302);
-  assertEquals(s.headers.get("location"), "https://github.com/raka1987/Riyeser/releases/latest/download/RiyeserPDF-Setup.exe");
+  assertEquals(s.headers.get("location"), "https://github.com/raka1987/riyeser-downloads/releases/latest/download/RiyeserPDF-Setup.exe");
   assertEquals(b.calls[0].release_tag, null);
+});
+
+Deno.test("before the downloads repository has a release: on to the old code repository's file (and its tag)", async () => {
+  clearCache(); const w = world({ notInDownloads: true });
+  const r = await w.get("central?js=1");
+  assertEquals(r.status, 302);
+  assertEquals(r.headers.get("location"), `https://github.com/raka1987/Riyeser/releases/download/${TAG}/RiyeserCentral-Setup.exe`);
+  assertEquals(w.gh, ["https://github.com/raka1987/riyeser-downloads/releases/latest/download/RiyeserCentral-Setup.exe",
+    "https://github.com/raka1987/Riyeser/releases/latest/download/RiyeserCentral-Setup.exe"]);
+  assertEquals(w.calls[0].release_tag, TAG);
+  clearCache(); const n = world({ inNeither: true });
+  const s = await n.get("pdf?js=1"); assertEquals(s.status, 302);
+  assertEquals(s.headers.get("location"), "https://github.com/raka1987/riyeser-downloads/releases/latest/download/RiyeserPDF-Setup.exe");
 });
 
 Deno.test("GitHub is asked once per file every 10 minutes", async () => {

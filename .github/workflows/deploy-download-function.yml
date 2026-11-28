@@ -78,7 +78,13 @@ jobs:
           # marked test (the header and the CI browser name), so it never shows as a real download
           loc=$(curl -s -o /dev/null -w '%{redirect_url}' -H 'X-Riyeser-Test: 1' -A 'GitHub-Actions deploy check' "$base/central?test=1")
           echo "Central's download goes to: $loc"
-          case "$loc" in https://github.com/raka1987/Riyeser/releases/*RiyeserCentral-Setup.exe) ;; *) echo "::error::Unexpected download address"; exit 1;; esac
+          # The public downloads repository (docs/GOING-PRIVATE.md); the old code repository only until the downloads
+          # repository has its first release (the function falls back to it while that answers "not found").
+          case "$loc" in
+            https://github.com/raka1987/riyeser-downloads/releases/*RiyeserCentral-Setup.exe) ;;
+            https://github.com/raka1987/[Rr]iyeser/releases/*RiyeserCentral-Setup.exe) echo "::warning::Downloads still come from the old code repository: the downloads repository has no release yet (docs/GOING-PRIVATE.md, step 5).";;
+            *) echo "::error::Unexpected download address"; exit 1;;
+          esac
           {
             echo "### The download counter is live"
             echo

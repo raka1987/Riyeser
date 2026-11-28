@@ -1,7 +1,18 @@
 name: Publish website
 
 # Builds the Riyeser website (website/ on branch module/desk-assistant) and publishes it with GitHub Pages.
-# Actions → "Publish website" → Run workflow.  Pages must use "GitHub Actions" as its source (Settings → Pages).
+# Actions → "Publish website" → Run workflow.
+#
+# Two places it can go (input "target"):
+#   code-repo       (the default for now) GitHub Pages of this code repository, as before. Pages must use
+#                   "GitHub Actions" as its source here (Settings → Pages).
+#   downloads-repo  the gh-pages branch of the PUBLIC downloads repository raka1987/riyeser-downloads (DOWNLOADS_REPO
+#                   below), with a CNAME of riyeser.com. Only the built site goes there, never source code. Needs the
+#                   DOWNLOADS_TOKEN secret; that repository's Pages uses "Deploy from a branch: gh-pages / (root)".
+#                   This is the one to use before this code repository is made private (GitHub Pages of a private
+#                   repository needs a paid plan).
+# Switching over, step by step, with a way back: docs/GOING-PRIVATE.md, step 6. DNS doesn't change: both are GitHub
+# Pages, on the same GitHub Pages addresses behind Cloudflare; only the repository that claims riyeser.com changes.
 on:
   workflow_dispatch:
     inputs:
@@ -10,12 +21,21 @@ on:
         type: choice
         options: [website, combined]
         default: website
+      target:
+        description: "code-repo = this repository's GitHub Pages (as before); downloads-repo = the public riyeser-downloads repository's gh-pages branch (docs/GOING-PRIVATE.md, step 6)"
+        type: choice
+        options: [code-repo, downloads-repo]
+        default: code-repo
 
 permissions:
   contents: read
   actions: read
   pages: write
   id-token: write
+
+env:
+  # The public downloads repository (the one place to change its name in this workflow)
+  DOWNLOADS_REPO: raka1987/riyeser-downloads
 
 concurrency: { group: pages, cancel-in-progress: true }
 
@@ -30,17 +50,44 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version: "22" }
       - id: pages
+        if: inputs.target != 'downloads-repo'
         uses: actions/configure-pages@v5
       - name: Build
         run: |
           if [ "${{ inputs.layout }}" = "combined" ]; then node website/build-combined.mjs; else node website/build.mjs; fi
         env:
+          # downloads-repo: the Pages step above is skipped, so this is "/" (riyeser.com, its custom domain, at the top)
           SITE_BASE: "${{ steps.pages.outputs.base_path }}/"
-      - uses: actions/upload-pages-artifact@v4
+      - if: inputs.target != 'downloads-repo'
+        uses: actions/upload-pages-artifact@v4
         with: { path: website/public }
+      - name: Publish to the downloads repository's gh-pages branch
+        if: inputs.target == 'downloads-repo'
+        env: { DOWNLOADS_TOKEN: "${{ secrets.DOWNLOADS_TOKEN }}" }
+        run: |
+          if [ -z "$DOWNLOADS_TOKEN" ]; then
+            echo "::error::The DOWNLOADS_TOKEN secret is missing. Add it under Settings → Secrets and variables → Actions (docs/GOING-PRIVATE.md, steps 2 and 3), or publish with target code-repo."
+            exit 1
+          fi
+          cd website/public
+          printf 'riyeser.com\n' > CNAME          # GitHub Pages' custom domain for this site
+          touch .nojekyll                         # serve the files as they are (no Jekyll)
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Website from Riyeser module/desk-assistant (run ${GITHUB_RUN_NUMBER})"
+          # Only this built folder is pushed (a fresh one-commit branch each time), never the source code.
+          git push -q --force "https://x-access-token:${DOWNLOADS_TOKEN}@github.com/${DOWNLOADS_REPO}.git" gh-pages
+          {
+            echo "### Website pushed to $DOWNLOADS_REPO (gh-pages)"
+            echo
+            echo "GitHub Pages there publishes it in a minute or two. First time: Settings → Pages in $DOWNLOADS_REPO → Deploy from a branch → gh-pages / (root), custom domain riyeser.com (docs/GOING-PRIVATE.md, step 6)."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     needs: build
+    if: inputs.target != 'downloads-repo'
     runs-on: ubuntu-latest
     environment: { name: github-pages, url: "${{ steps.deploy.outputs.page_url }}" }
     steps:
