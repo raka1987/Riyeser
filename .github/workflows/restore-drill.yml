@@ -45,6 +45,7 @@ jobs:
       - name: Set up yet?
         id: ready
         run: |
+          echo "STARTED=$(date -u +%FT%TZ)" >> "$GITHUB_ENV"
           if [ "$HAS_DB" != "true" ] || [ -z "$BACKUP_PASSPHRASE" ] || [ -z "$R2_BUCKET" ]; then
             echo "::notice::Backups for '$NAME' aren't set up yet, so there's nothing to drill. See ops/RUNBOOK.md."
             echo "ok=no" >> "$GITHUB_OUTPUT"
@@ -61,7 +62,17 @@ jobs:
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
       - if: steps.ready.outputs.ok == 'yes'
         name: Restore and check ${{ matrix.db }}
+        env: { RUN_DETAIL_FILE: "${{ runner.temp }}/run-detail.json" }
         run: bash ops/backup/restore-drill.sh
+      - if: always() && steps.ready.outputs.ok == 'yes'
+        name: Record the result in HQ (Integrations)
+        env:
+          RECORD_DB_URL: ${{ secrets.TEAM_DB_URL }}
+          JOB: restore_drill
+          TARGET: ${{ matrix.db }}
+          OK: ${{ job.status }}
+          DETAIL_FILE: ${{ runner.temp }}/run-detail.json
+        run: bash ops/hq-jobs/record-run.sh
       - if: failure()
         name: Tell the owner
         run: |

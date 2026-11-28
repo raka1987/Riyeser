@@ -39,6 +39,7 @@ jobs:
       - name: Set up yet?
         id: ready
         run: |
+          echo "STARTED=$(date -u +%FT%TZ)" >> "$GITHUB_ENV"
           if [ -z "$DB_URL" ] || [ -z "$BACKUP_PASSPHRASE" ] || [ -z "$R2_BUCKET" ] || [ -z "$AWS_ACCESS_KEY_ID" ]; then
             echo "::notice::Backups for '$NAME' aren't set up yet. See ops/RUNBOOK.md (Setting up backups)."
             echo "ok=no" >> "$GITHUB_OUTPUT"
@@ -55,7 +56,17 @@ jobs:
           echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
       - if: steps.ready.outputs.ok == 'yes'
         name: Back up ${{ matrix.db }}
+        env: { RUN_DETAIL_FILE: "${{ runner.temp }}/run-detail.json" }
         run: bash ops/backup/backup.sh
+      - if: always() && steps.ready.outputs.ok == 'yes'
+        name: Record the result in HQ (Integrations)
+        env:
+          RECORD_DB_URL: ${{ secrets.TEAM_DB_URL }}
+          JOB: backup
+          TARGET: ${{ matrix.db }}
+          OK: ${{ job.status }}
+          DETAIL_FILE: ${{ runner.temp }}/run-detail.json
+        run: bash ops/hq-jobs/record-run.sh
       - if: failure()
         name: Tell the owner
         run: |

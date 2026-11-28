@@ -465,6 +465,14 @@ emails if email is set up. It uses the `TEAM_DB_URL` secret, the same one as the
 the latest `team-chat.sql` yet, it says so and stops without failing. When it fails, open the red step. A connection
 error usually means `TEAM_DB_URL` changed. Run it again by hand with **Run workflow**.
 
+## HQ sees backups and restore tests without GitHub
+
+Each backup, restore drill and HQ jobs run ends with **Record the result in HQ**: `ops/hq-jobs/record-run.sh` writes one row
+(job, database, passed or failed, when, sizes, row counts and the backup's fingerprint; never data or secrets) through
+`public.ops_record_run` with the same `TEAM_DB_URL` secret. HQ → Integrations reads it (`hq_ops_runs`), so it keeps working
+once the code repository is private. Before the database has the latest `team-chat.sql`, the step just says "not recorded"
+and never fails the job.
+
 ## When a backup fails
 
 GitHub emails the repository owner when a scheduled job fails. Open the failed run, then the step with the red cross.

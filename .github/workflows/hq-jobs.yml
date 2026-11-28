@@ -42,6 +42,7 @@ jobs:
       - name: Set up yet?
         id: ready
         run: |
+          echo "STARTED=$(date -u +%FT%TZ)" >> "$GITHUB_ENV"
           if [ -z "$DB_URL" ]; then
             echo "::notice::HQ jobs aren't set up yet: the TEAM_DB_URL secret is missing (ops/RUNBOOK.md, Setting up backups)."
             echo "ok=no" >> "$GITHUB_OUTPUT"
@@ -88,6 +89,14 @@ jobs:
       - if: steps.db.outputs.ok == 'yes'
         name: Send queued emails
         run: bash ops/hq-jobs/send-emails.sh
+      - if: always() && steps.db.outputs.ok == 'yes'
+        name: Record the result in HQ (Integrations)
+        env:
+          RECORD_DB_URL: ${{ secrets.TEAM_DB_URL }}
+          JOB: hq_jobs
+          TARGET: team
+          OK: ${{ job.status }}
+        run: bash ops/hq-jobs/record-run.sh
       - if: failure()
         name: Tell the owner
         run: |
