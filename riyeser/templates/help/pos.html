@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Help{% endblock %}
 {% block content %}
 <style>.help h2{scroll-margin-top:16px;margin-top:28px}.help li{margin:4px 0}.help .card{max-width:900px}</style>
-<div class="head"><div><h1>Riyeser POS help</h1><p class="sub">Version {{ version }} · a Riyeser Group program. Can't find the answer? Download <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a> and send it with your question.</p></div></div>
+<div class="head"><div><h1>Riyeser POS help</h1><p class="sub">Version {{ version }} · a Riyeser program. Can't find the answer? Download <a href="{{ url_for('help.diagnostics_view') }}">Support Diagnostics</a> and send it with your question.</p></div></div>
 <div class="help">
 <div class="card"><h2 id="start">Getting started</h2><ol>
 <li><b>Setup → POS setup</b>: choose <b>Retail</b> or <b>Restaurant</b>, turn on the features you want and name your tills.</li>

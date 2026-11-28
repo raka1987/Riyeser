@@ -58,7 +58,7 @@ def diagnostics(db):
     recent = [dict(at=r["at"], action=r["action"]) for r in
               db.execute("SELECT at, action FROM audit_log WHERE action<>'error' ORDER BY id DESC LIMIT 30")]
     return {
-        "product": "Riyeser Accounting", "publisher": "Riyeser Group", "version": __version__,
+        "product": "Riyeser Accounting", "publisher": "Riyeser", "version": __version__,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "edition": c["edition"], "pos_mode": c["pos_mode"], "gst_registered": bool(c["gst_registered"]),
         "fy_start_month": c["fy_start_month"], "lock_date": c["lock_date"],

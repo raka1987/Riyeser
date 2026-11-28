@@ -1,6 +1,6 @@
 # Riyeser Accounting
 
-*A Riyeser Group module.*
+*A Riyeser module.*
 
 Double-entry business accounting for Australian small and medium businesses. It runs in your browser and keeps everything in one local company file (SQLite). Riyeser is an original product, written from scratch.
 
@@ -32,7 +32,7 @@ To build a distributable wheel for your own install packages, run `pip wheel . -
 Riyeser also runs as a normal desktop app in its own window, with no Python needed. It keeps the company file in `~/.riyeser`.
 
 * **Windows installers:** `RiyeserAccountingBasics-Setup-<version>.exe`, `RiyeserAccountingPlus-Setup-<version>.exe` and `RiyeserPOS-Setup-<version>.exe` install it for your Windows user (no admin needed), with a
-  desktop icon, a Start menu entry under *Riyeser Group* and an *Installed apps* listing. It works completely offline:
+  desktop icon, a Start menu entry under *Riyeser* and an *Installed apps* listing. It works completely offline:
   it opens in its own window and everything stays on your PC. Uninstalling keeps your company file (`%USERPROFILE%\.riyeser`).
 * **Download:** after each push to `main`, GitHub Actions ("Build desktop app") builds
   `Riyeser Accounting.exe` (Windows), `Riyeser Accounting.app` (macOS, zipped) and `riyeser-accounting` (Linux).

@@ -83,11 +83,11 @@ AppId={{{#MyId}}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppPublisher=Riyeser Group
-AppCopyright=Riyeser Group
+AppPublisher=Riyeser
+AppCopyright=Riyeser
 DefaultDirName={localappdata}\Programs\{#AppName}
 UsePreviousAppDir=no
-DefaultGroupName=Riyeser Group
+DefaultGroupName=Riyeser
 DisableProgramGroupPage=yes
 DisableDirPage=yes
 PrivilegesRequired=lowest
@@ -110,13 +110,18 @@ Type: filesandordirs; Name: "{localappdata}\Programs\Riyeser Accounting"
 Type: files; Name: "{userdesktop}\Riyeser Accounting.lnk"
 Type: files; Name: "{userprograms}\Riyeser Group\Riyeser Accounting.lnk"
 #endif
+[InstallDelete]
+; The Start menu folder was called "Riyeser Group" before it became "Riyeser". Remove this program's old shortcut there,
+; and the old folder once it's empty (another Riyeser program's old shortcut keeps it until that program updates too).
+Type: files; Name: "{userprograms}\Riyeser Group\{#AppName}.lnk"
+Type: dirifempty; Name: "{userprograms}\Riyeser Group"
 
 [Files]
 Source: "..\dist\{#AppName}.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{userdesktop}\{#AppName}"; Filename: "{app}\{#AppName}.exe"
-Name: "{userprograms}\Riyeser Group\{#AppName}"; Filename: "{app}\{#AppName}.exe"
+Name: "{userprograms}\Riyeser\{#AppName}"; Filename: "{app}\{#AppName}.exe"
 
 [Run]
 Filename: "{app}\{#AppName}.exe"; Description: "Open {#AppName}"; Flags: nowait postinstall skipifsilent
