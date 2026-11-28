@@ -701,8 +701,11 @@ function registerIpc() {
     const soft = (p) => p.catch(() => ({ found: false }));
     const [acc, payroll] = await Promise.all([soft(checklist.accountingFacts(sources.accountingDbPath())), soft(checklist.payrollFacts(sources.payrollDbPath(appData)))]);
     const seats = lic.online && lic.online.seats;
-    return checklist.build({ company, lic, installed, known, names, acc, payroll, link: checklist.linkFacts(appData), kind: businessKind(company),
-      members: seats && seats.used != null ? Number(seats.used) : null, skipped: checklist.skippedIds(store), hidden: checklistHidden() });
+    // solo: "Just try it" on this PC (no business, or a personal one, and nobody signed in): no account steps
+    const kind = businessKind(company); const setup = store.get('company-setup', {}) || {};
+    const solo = !on.session && (company ? company.mode !== 'online' && kind === 'personal' : !!setup.skipped);
+    return checklist.build({ company, lic, installed, known, names, acc, payroll, link: checklist.linkFacts(appData), kind,
+      members: seats && seats.used != null ? Number(seats.used) : null, skipped: checklist.skippedIds(store), hidden: checklistHidden(), solo });
   });
   // Hide or show the card. Kept on this PC, and with the Riyeser account when signed in (so riyeser.com can follow it).
   handle('central:checklistHide', (hidden) => checklist.setHidden(store, on, !!hidden));
@@ -945,7 +948,7 @@ function registerIpc() {
   });
   // The Admin panel's links to Riyeser Link (people, join requests, phones and branches): only these places.
   handle('central:openWeb', (what) => {
-    const url = { people: 'https://riyeser.com/link/', requests: 'https://riyeser.com/link/?requests', phones: 'https://riyeser.com/link/?phones', requestsHelp: 'https://riyeser.com/link/?help' }[String(what)];
+    const url = { signup: 'https://riyeser.com/link/?signup', people: 'https://riyeser.com/link/', requests: 'https://riyeser.com/link/?requests', phones: 'https://riyeser.com/link/?phones', requestsHelp: 'https://riyeser.com/link/?help' }[String(what)];
     if (!url) throw new Error('Unknown page.');
     return shell.openExternal(url).then(() => true);
   });

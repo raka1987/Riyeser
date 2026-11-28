@@ -3,11 +3,20 @@
 (function (root) {
   const BUSINESS = 'Sample Trading Co';
   const TEXT = {
-    startTitle: 'How would you like to start?',
-    blankTitle: 'Start blank (recommended)',
-    blankSub: 'For your own business. Nothing is filled in.',
-    demoTitle: 'Explore with demo data',
-    demoSub: `Try every program with a made-up business, ${BUSINESS}. Your own records stay separate, and you can leave demo mode any time.`,
+    // The welcome screen, the first time Central opens (company.js showStart). Just try it needs no account.
+    startTitle: 'Welcome to Riyeser',
+    startSub: 'Start in a minute. You only need an account for things that work online, and Riyeser asks only then.',
+    tryTitle: 'Just try it — no account needed',
+    trySub: 'Start using the programs on this PC straight away. Free programs stay free; the others are free for 90 days.',
+    demoTitle: 'Look around with a sample business',
+    demoSub: `Try with sample data: every program filled in for a made-up business, ${BUSINESS}. Your own records stay separate, and you can leave demo mode any time.`,
+    signinTitle: 'I already use Riyeser — sign in',
+    signinSub: 'For businesses already using Riyeser. Use the same email as riyeser.com.',
+    joinTitle: 'Join with a code',
+    signupTitle: 'Create a free account',
+    blankTitle: 'Start with my own business',
+    offline: 'Signing in isn\'t available right now (it needs the internet). Just try it, and sign in later from Your account if you want to.',
+    laterTitle: 'Set up later',
     banner: `everything you see is practice data for ${BUSINESS}.`,
     leaveButton: 'Leave demo mode',
     tryButton: 'Try demo mode',
@@ -33,12 +42,21 @@
     return 'none';                                 // already set up (or chose "Set up later"): never asked again
   }
 
-  /** The first step of the set-up wizard. */
-  function startHtml() {
-    return `<h1>${TEXT.startTitle}</h1><p class="wsub">You can change your mind later.</p>
-    <button class="wbig wmain wprimary" data-w="blank"><span class="wi">📄</span><b>${TEXT.blankTitle}</b><small>${TEXT.blankSub}</small></button>
-    <div class="wsecond"><button class="wbig wsm" data-w="demo"><span class="wi">🧪</span><b>${TEXT.demoTitle}</b><small>${esc(TEXT.demoSub)}</small></button></div>
-    <p class="wfoot">New PC, or Windows reinstalled? <button class="wlink" data-w="restore">Restore everything from a backup…</button></p>`;
+  /**
+   * The welcome screen: every way to start, on one screen. Just try it is the big choice (no account, works offline);
+   * the sample business next to signing in; joining, creating an account and setting up a business on this PC are
+   * smaller links. online: signing in can work (else those are greyed, with a note); back: opened from inside Central.
+   */
+  function startHtml({ online = true, back = false } = {}) {
+    const off = online ? '' : ' disabled';
+    return `<h1>${TEXT.startTitle}</h1><p class="wsub">${esc(TEXT.startSub)}</p>
+    <button class="wbig wmain wprimary" data-w="try"><span class="wi">🚀</span><b>${esc(TEXT.tryTitle)}</b><small>${esc(TEXT.trySub)}</small></button>
+    <div class="wchoices two wsecond">
+      <button class="wbig wsm" data-w="demo"><span class="wi">🧪</span><b>${esc(TEXT.demoTitle)}</b><small>${esc(TEXT.demoSub)}</small></button>
+      <button class="wbig wsm" data-w="signin"${off}><span class="wi">🔑</span><b>${esc(TEXT.signinTitle)}</b><small>${esc(TEXT.signinSub)}</small></button>
+    </div>${online ? '' : `<p class="wnote">${esc(TEXT.offline)}</p>`}
+    <p class="wfoot wmore"><button class="wlink" data-w="join"${off}>${esc(TEXT.joinTitle)}</button><span aria-hidden="true">·</span><button class="wlink" data-w="signup"${off}>${esc(TEXT.signupTitle)}</button><span aria-hidden="true">·</span><button class="wlink" data-w="blank">${esc(TEXT.blankTitle)}</button></p>
+    <p class="wfoot wmore">${back ? '<button class="wlink" data-w="leave">Back</button><span aria-hidden="true">·</span>' : ''}<button class="wlink" data-w="later">${esc(TEXT.laterTitle)}</button><span aria-hidden="true">·</span><button class="wlink" data-w="restore">Restore everything from a backup…</button></p>`;
   }
 
   /** The yellow banner across Central while demo mode is on ('' when it's off). */

@@ -37,11 +37,13 @@ test('demo: the first-run wizard asks how to start; someone already set up is ne
   assert.equal(ui.firstScreen({ company: null, skipped: false }, { on: true }), 'none');     // exploring the demo
   assert.equal(ui.firstScreen({ company: null, pendingJoin: { company_name: 'X' } }, null), 'waiting');
   const html = ui.startHtml();
-  assert.match(html, /How would you like to start\?/);
-  assert.match(html, /Start blank \(recommended\)/);
-  assert.match(html, /Explore with demo data/);
+  assert.match(html, /Welcome to Riyeser/);
+  assert.match(html, /Just try it — no account needed/);
+  assert.match(html, /Start with my own business/);
+  assert.match(html, /Look around with a sample business/);
+  assert.match(html, /Try with sample data/);
   assert.match(html, /Sample Trading Co/);
-  assert.match(html, /data-w="blank"/); assert.match(html, /data-w="demo"/);
+  assert.match(html, /data-w="try"/); assert.match(html, /data-w="blank"/); assert.match(html, /data-w="demo"/);
 });
 
 test('demo: the yellow banner shows only while demo mode is on', () => {

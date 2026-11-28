@@ -1,9 +1,11 @@
 // Riyeser Central: the company this PC belongs to.
-// First run: a full-window wizard to set up a new company, join an existing one (an admin approves it, like a friend
-// request), or set this PC up on its own. Afterwards, the Company page shows the profile and Company ID.
+// First run: a full-window wizard. "Just try it" (the main choice) needs no account: an optional business name, pick
+// programs, done. Signing in, joining with a code (an admin approves it, like a friend request), creating an account or
+// setting up a business on this PC are smaller choices under it. Afterwards, the Company page shows the profile and
+// Company ID. An account is asked for only where something works online (needAccount, account-need.js).
 // The profile is saved in %APPDATA%\Riyeser\company.json, so every Riyeser program fills in the company details itself.
 /* global $, esc, bridge, toast, safe, setView, renderNav */
-const CO = { first: false, fromCompany: false, email: '', list: null, details: null, state: null, mode: null, screen: 'choice', create: false, poll: null, busy: false, err: '', note: '', last: null };
+const CO = { first: false, fromCompany: false, email: '', list: null, details: null, state: null, mode: null, screen: 'choice', create: false, poll: null, busy: false, err: '', note: '', last: null, after: null, tryName: null };
 const COUNTRIES = ['Fiji', 'Australia', 'New Zealand', 'Samoa', 'Tonga', 'Vanuatu', 'Papua New Guinea', 'Solomon Islands', 'Other'];
 const field = (n, label, v = '', extra = '') => `<label class="wf"><span>${label}</span><input name="${n}" value="${esc(v)}" ${extra}></label>`;
 const profileFields = (p = {}) => `<div class="wgrid">
@@ -33,28 +35,36 @@ function wiz(html) {
   const first = w.querySelector('input:not([type=hidden]), button.wbig'); if (first) first.focus();
 }
 function closeWizard() { $('#wizard').hidden = true; $('#wizard').innerHTML = ''; clearInterval(CO.poll); CO.poll = null; }
-const offlineNote = () => (CO.state && !CO.state.onlineReady
-  ? '<p class="wnote">Signing in with a Riyeser account is being switched on. Set up this PC without an account for now, and sign in later from <b>Your account</b>.</p>' : '');
 
-// The first step the first time: start blank (the normal set-up) or explore with demo data (Sample Trading Co).
-// Demo mode writes only demo.json: no company.json, so nothing is linked to a real online company.
+// "Welcome to Riyeser": one screen with every way to start (demo-ui.js has the words). Just try it is the big choice
+// and works offline; signing in, joining and creating an account are smaller, under it. No steps across the top here
+// (it's a choice, not a step). Demo mode writes only demo.json: no company.json, so nothing is linked online.
 function showStart() {
   CO.screen = 'start';
-  wiz(window.RiyeserDemo.startHtml());
+  const first = CO.first; CO.first = false;   // no steps across the top of the welcome screen
+  try { wiz(window.RiyeserDemo.startHtml({ online: !!(CO.state && CO.state.onlineReady), back: !first })); } finally { CO.first = first; }
 }
+// The set-up choices opened from inside Central (Company page, after demo mode, Back from a sign-in form): the same screen.
+function showChoice() { showStart(); CO.screen = 'choice'; }
 
-// "Start blank": sign in with the same Riyeser account as riyeser.com, and Central fills everything in from it.
-function showChoice() {
-  CO.screen = 'choice';
-  const on = CO.state.onlineReady;
-  wiz(`<h1>Set up Riyeser on this PC</h1><p class="wsub">Sign in once and every Riyeser program on this PC gets your business details, so you never type them again.</p>
-    <button class="wbig wmain" data-w="signin"${on ? '' : ' disabled'}><span class="wi">🔑</span><b>Sign in with your Riyeser account</b><small>Use the same email and password as riyeser.com.</small></button>
-    <p class="wfoot wtight">Don't have one? <button class="wlink" data-w="signup"${on ? '' : ' disabled'}>Create a free account</button></p>
-    <div class="wchoices two wsmallrow">
-      <button class="wbig wsm" data-w="join"${on ? '' : ' disabled'}><span class="wi">🤝</span><b>Join with a code</b><small>Someone's business already uses Riyeser. Enter its Company ID or branch code, and they approve you.</small></button>
-      <button class="wbig wsm" data-w="local"><span class="wi">💻</span><b>Set up this PC without an account</b><small>Type your business details on this PC only. You can sign in later.</small></button>
-    </div>${offlineNote()}
-    <p class="wfoot">${CO.first ? '<button class="wlink" data-w="start">Back</button> · ' : ''}<button class="wlink" data-w="later">Set up later</button></p>`);
+// "Just try it": no account. An optional business name (or skip it), then pick programs, then done. Everything here is
+// saved on this PC only, so it works offline. kind 'personal': someone trying it on their own sees no business set-up.
+function showTry() {
+  CO.screen = 'try';
+  const steps = FRun() ? FRun().steps(1, 'individual') : '';
+  const c = (CO.state && CO.state.company) || {};
+  wiz(`${steps}<h1>Let's get you started</h1><p class="wsub">Riyeser works on this PC straight away. No account needed.</p>
+    <form id="wf-try"><div class="wgrid wone">${field('name', 'Business name (optional)', CO.tryName != null ? CO.tryName : c.name || '', 'maxlength="120" autocomplete="organization"')}</div>
+      <p class="wtrynote">You can add the rest later.</p>
+      <div class="frbtns"><button type="button" class="btn s" data-w="start">Back</button><span class="grow"></span><button type="button" class="btn s" data-w="try-skip">Skip</button><button class="btn">Continue</button></div></form>`);
+  $('#wf-try').onsubmit = (e) => { e.preventDefault(); const f = formData(e.target); CO.tryName = f.name; run(() => tryStart(f.name)); };
+}
+async function tryStart(name) {
+  if (name) await bridge.call('company:local', { name, kind: 'personal' }, '');
+  else await bridge.call('company:skip');
+  await coLoad(); afterChange();
+  if (FRun()) return FRun().individual();   // pick your programs, done
+  closeWizard();
 }
 
 // next: 'signin' (then the account's business is found) or 'join' (then the code form)
@@ -250,6 +260,7 @@ function rerender() {
   if (s === 'local') return showLocal();
   if (s === 'waiting') return showWaiting(CO.state.pendingJoin && CO.state.pendingJoin.company_name);
   if (s === 'start') return showStart();
+  if (s === 'try') return showTry();
   if (s === 'forgot') return showForgot();
   return showChoice();
 }
@@ -276,21 +287,24 @@ document.addEventListener('click', (e) => {
   if (a === 'signup') { CO.create = true; CO.fromCompany = false; return showAccount('signin'); }
   if (a === 'pick') return run(async () => { const r = await bridge.call('company:link', b.dataset.ws); await coLoad(); if (CO.first && FRun()) return FRun().afterLinked(r); showWelcome(r); });
   if (a === 'local') return showLocal();
-  if (a === 'blank') return showChoice();
+  if (a === 'try') return showTry();
+  if (a === 'try-skip') { CO.tryName = ''; return run(() => tryStart('')); }
+  if (a === 'blank') return showLocal();   // "Start with my own business": its details, on this PC only
   if (a === 'start') return showStart();
+  if (a === 'leave') { closeWizard(); afterChange(); return; }   // Back, when the welcome screen was opened from inside Central
   // demo mode only after "Turn on demo mode?" is answered yes; Cancel stays on this step
   if (a === 'demo') return run(async () => { if (await window.RiyeserCentralDemo.startDemo()) { closeWizard(); CO.first = false; } });
   if (a === 'signup-form' || a === 'signin-form') { CO.create = a === 'signup-form'; return showAccount(CO.mode || 'signin'); }
   if (a === 'forgot') { const em = document.querySelector('#wf-acc [name=email]'); if (em && em.value.trim()) CO.email = em.value.trim(); return showForgot(); }
   // from the Company page's "You're signed out", Back goes back there (not to the set-up choices)
-  if (a === 'back') { if (CO.fromCompany) { closeWizard(); return; } return showChoice(); }
+  if (a === 'back') { if (CO.fromCompany) { CO.after = null; closeWizard(); return; } return showChoice(); }
   if (a === 'copy') { const t = ($('#wid') || $('#coid') || {}).textContent; safe(() => bridge.call('company:copy', t)).then(() => toast('Company ID copied')); return; }
   if (a === 'check') return checkJoin(false);
   if (a === 'cancel-join') return run(async () => { await bridge.call('company:cancelJoin'); await coLoad(); showJoinForm(); });
   // Set up later: on the first run, someone on their own just picks the programs they want (no business asked)
   if (a === 'later') { safe(() => bridge.call('company:skip')); if (CO.first && FRun() && CO.screen !== 'waiting') return FRun().individual(); closeWizard(); return; }
   if (a === 'restore') { if (window.RiyeserBackup) window.RiyeserBackup.restoreEverything(); return; }   // OWNER-BACKUP
-  if (a === 'done') { closeWizard(); afterChange(); return; }
+  if (a === 'done') { closeWizard(); afterChange(); const then = CO.after; CO.after = null; if (then) safe(then); return; }   // then what needed the account
   if (a === 'restart') { CO.fromCompany = false; coLoad().then(showChoice); return; }
   if (a === 'link' || a === 'co-signup') {
     CO.fromCompany = !!b.closest('#companyv'); CO.create = a === 'co-signup';
@@ -298,6 +312,59 @@ document.addEventListener('click', (e) => {
   }
   if (a === 'signout') { safe(signOut); }
 });
+
+// ---------------------------------------------------------------- "This needs a free Riyeser account"
+// Asked only at the points that work online, never when Central starts. Create account and Sign in use the same
+// sign-in and create-account screens as above (Back returns to Central); once that's done, what needed the account
+// carries on. Not now only closes the question: whatever was open stays open, nothing is lost.
+// Riyeser Link keeps its own sign-in, so for Link: Sign in opens Link (it asks there), Create account opens the
+// Link sign-up page (riyeser.com/link/?signup); either way the question isn't asked for Link again on this PC.
+const NEED_KEY = 'riyeser.accountNeed.link';
+const needRemembered = (what) => { if (what !== 'link') return false; try { return localStorage.getItem(NEED_KEY) === '1'; } catch { return false; } };
+const needRemember = (what) => { if (what !== 'link') return; try { localStorage.setItem(NEED_KEY, '1'); } catch { /* asked again next time */ } };
+/** Does this point need the question now? Not when signed in, in demo mode, or (Link) when it was answered before. */
+function accountNeeded(what) {
+  const N = window.RiyeserAccountNeed; if (!N) return false;
+  return N.needed({ signedIn: CO.state && CO.state.signedIn, demo: document.body.classList.contains('demo') }) && !needRemembered(what);
+}
+/**
+ * Ask for an account for one thing that works online. what: a key of RiyeserAccountNeed.WHY ('buy', 'link', 'online',
+ * 'people', 'sign') or the words after "so". then: what to do once there is an account (straight away when there is one).
+ * Resolves true when it went ahead now, false otherwise (Not now, or the sign-in screens are showing).
+ * Other parts of Central (e.g. Ask someone to sign) call it as window.RiyeserCompany.needAccount(what, { then }).
+ */
+async function needAccount(what, { then = null } = {}) {
+  if (!accountNeeded(what)) { if (then) await then(); return true; }
+  const answer = await window.RiyeserAccountNeed.ask(what);
+  if (answer === 'later') return false;
+  if (what === 'link') {
+    needRemember(what);
+    if (answer === 'create') { await bridge.call('central:openWeb', 'signup'); return false; }
+    if (then) await then(); return true;   // Sign in: Link asks for it itself
+  }
+  try { await coLoad(); } catch { /* use what we have */ }
+  if (!CO.state.onlineReady) { toast('Signing in isn\'t available right now. Check the internet, then try again.'); return false; }
+  document.querySelectorAll('dialog[open]').forEach((d) => d.close());   // the sign-in screens are drawn over the page
+  CO.first = false; CO.fromCompany = true; CO.create = answer === 'create'; CO.after = then;
+  showAccount('signin');
+  return false;
+}
+// The points in Central that need an account. The button's own click carries on unchanged when no account is needed.
+const NEED_AT = [['[data-lic="buy"]', 'buy'], ['[data-act="team"], [data-open="team"], [data-open="linkoffice"]', 'link'],
+  ['[data-os="guide"]', 'online'], ['[data-web="people"], [data-web="requests"]', 'people']];
+let needReplay = false;
+window.addEventListener('click', (e) => {
+  if (needReplay || !e.target || !e.target.closest) return;
+  const b = e.target.closest('[data-needs]') || e.target.closest(NEED_AT.map(([sel]) => sel).join(', '));
+  if (!b || b.disabled || b.closest('#wizard')) return;
+  const what = b.dataset.needs || (NEED_AT.find(([sel]) => b.matches(sel)) || [])[1];
+  if (!what || !accountNeeded(what)) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  // afterwards: the same click again (a copy of the button, so it works even if the screen was redrawn)
+  const again = () => { const c = b.cloneNode(true); c.hidden = true; c.removeAttribute('data-needs'); document.body.appendChild(c); needReplay = true;
+    try { c.click(); } finally { needReplay = false; c.remove(); } };
+  safe(() => needAccount(what, { then: again }));
+}, true);
 
 // ---------------------------------------------------------------- Company page and the "unlinked" note
 function renderCompany() {
@@ -358,4 +425,4 @@ async function offerSetup() { await coLoad(); if (!CO.state.company && !CO.state
   } catch { /* the rest of Central works without it */ }
   setInterval(async () => { try { await bridge.call('company:checkLinked'); await coLoad(); renderCoBar(); renderAcct(); } catch { /* offline */ } }, 24 * 3600 * 1000);
 })();
-window.RiyeserCompany = { renderCompany, showChoice, showStart, offerSetup, state: () => CO.state };
+window.RiyeserCompany = { renderCompany, showChoice, showStart, showTry, offerSetup, needAccount, accountNeeded, state: () => CO.state };
