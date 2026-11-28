@@ -90,7 +90,7 @@ function registerSignRequest({ handle, store, electron, openEditor, fetchFn }) {
   app.on('browser-window-created', (_e, w) => {
     w.webContents.on('did-finish-load', () => {
       if (!/editor\.html/.test(w.webContents.getURL())) return;
-      w.webContents.executeJavaScript("window.__signRequestLoaded || import('./sign-request.js').then((m) => m.init && m.init({})).catch(() => {})").catch(() => {});
+      w.webContents.executeJavaScript("window.__signRequestLoaded || window.__signMenuHook || import('./sign-request.js').then((m) => m.init && m.init({})).catch(() => {})").catch(() => {});
     });
   });
   return { client, check, watch };

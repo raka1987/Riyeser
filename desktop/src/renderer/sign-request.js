@@ -1,7 +1,8 @@
 // Riyeser PDF: "Ask someone to sign" and "Sent for signing" (the sender's side).
 // Loaded by the editor's Sign menu (or, while the editor has no hook for it, by src/sign-request-ipc.js). The hook can
-//   import('./sign-request.js') then call  init({ menu: true })  and show  menuItems()  ([{ id, label, run }]) itself;
-//   init() with no menu: true adds "Ask someone to sign" next to Sign and "Sent for signing" to the Tools menu.
+//   set window.__signMenuHook = true, import('./sign-request.js'), call  init({ menu: true })  and show  menuItems()
+//   ([{ id, label, run }]) itself. init() without menu: true adds "Ask someone to sign" next to Sign and "Sent for
+//   signing" to the Tools menu (and a later init({ menu: true }) takes those two away again).
 // Also on window.RiyeserSignRequest: { open(), openStatus(), menuItems() }.
 // Main-process side: src/sign-request-ipc.js (signreq:*). Database: sign_* in website/team/team-chat.sql.
 // Wording: "electronic signature with an audit trail"; no claim of meeting any particular law.
@@ -353,7 +354,11 @@ export function menuItems() {
   return [{ id: 'sign-request', label: '✉ Ask someone to sign…', run: open }, { id: 'sign-status', label: '📋 Sent for signing', run: openStatus }];
 }
 export function init(ctx = {}) {
-  if (!hasDom || window.__signRequestLoaded) return window.RiyeserSignRequest;
+  if (!hasDom) return undefined;
+  if (window.__signRequestLoaded) {   // already loaded; a Sign menu hook arriving later shows the entries itself
+    if (ctx.menu) { for (const sel of ['#sr-askbtn', '#sr-menuitem', '#sr-menuhead']) { const x = $(sel); if (x) x.remove(); } }
+    return window.RiyeserSignRequest;
+  }
   window.__signRequestLoaded = true;
   if (!$('link[href="sign-request.css"]')) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'sign-request.css'; document.head.appendChild(l); }
   window.RiyeserSignRequest = { open, openStatus, menuItems };
@@ -364,7 +369,7 @@ export function init(ctx = {}) {
     if (sign && !$('#sr-askbtn')) { const b = document.createElement('button'); b.id = 'sr-askbtn'; b.title = 'Send this PDF to people to sign, and follow it'; b.textContent = '✉ Ask someone to sign'; b.onclick = () => open(); sign.after(b); }
     const menu = $('#toolsmenu');
     if (menu && !$('#sr-menuitem')) {
-      const h = document.createElement('div'); h.className = 'mh'; h.textContent = 'Signing';
+      const h = document.createElement('div'); h.className = 'mh'; h.id = 'sr-menuhead'; h.textContent = 'Signing';
       const b1 = document.createElement('button'); b1.id = 'sr-menuitem'; b1.textContent = '📋 Sent for signing'; b1.onclick = () => { menu.hidden = true; openStatus(); };
       const help = [...menu.querySelectorAll('.mh')].find((x) => /Help/.test(x.textContent));
       menu.insertBefore(h, help || null); menu.insertBefore(b1, help || null);
