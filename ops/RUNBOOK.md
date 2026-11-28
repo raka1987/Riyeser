@@ -91,6 +91,23 @@ not even the database owner. History has filters (who, what, business, dates) an
 Real downloads leave out robots, tests (CI, `X-Riyeser-Test`) and HQ staff, and count one person once a day per program.
 On a PC used for testing, open HQ → Downloads and tick **Don't count downloads from this browser**.
 
+**PDF signing requests (Riyeser PDF → Ask someone to sign):**
+1. Run **Actions → Update the Riyeser Link database** (adds the `sign_*` tables and functions and the private
+   `sign-docs` Storage bucket with its rules: only the sender can upload or download; nobody at Riyeser HQ can).
+2. Run **Actions → Deploy signing function** (the `sign` Edge Function). Before relying on the recorded internet
+   addresses, check on staging which address it records when a request carries a made-up `X-Forwarded-For`
+   (register SEC-017); set the repository variable `SIGN_TRUSTED_HOPS` if there's more than one proxy in front.
+3. Run **Actions → Publish website** (riyeser.com/sign/, kept out of search engines).
+4. Email: signing emails go through the same outbox as every other Riyeser email, so they're only sent once
+   `RESEND_API_KEY` and `EMAIL_FROM` are set up (see Email sending). Until then requests can be made but nobody gets a link.
+   The hourly HQ job sends them, so a link can take up to an hour to arrive.
+5. Release Riyeser PDF with the Sign menu's "Ask someone to sign".
+Free requests a business can send each month: the HQ setting `sign.free_per_month` (default 10).
+Files are deleted when their keeping time is up (the sender chooses 30 days, 90 days, 1 year (default) or 2 years
+after the request finishes); the history of each request is kept. Legal validity of electronic signatures differs
+between countries and kinds of documents: the wording says "electronic signature with an audit trail" and makes no
+claim about any particular law (owner's legal review before go-live).
+
 **Daily GitHub totals (raw):** **Actions → HQ download counts** runs every day with the `TEAM_DB_URL` secret (nothing
 else to set up) and saves GitHub's totals for the "Raw GitHub counts" section. Without `TEAM_DB_URL` it falls back to
 the older token: `select public.hq_set_ingest_token('the token');` and the GitHub secret `HQ_INGEST_TOKEN`.

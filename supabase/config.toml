@@ -18,3 +18,8 @@ verify_jwt = false
 [functions.download]
 # A download is a plain link from riyeser.com, with no sign-in; it records with the service role itself.
 verify_jwt = false
+
+[functions.sign]
+# The public signing page riyeser.com/sign/?t=… : signers have no Riyeser account; their emailed link is checked here
+# (only its SHA-256 goes to the database), with the service role.
+verify_jwt = false
