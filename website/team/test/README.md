@@ -4,6 +4,17 @@
   only your own messages can be edited, wrong invite codes are refused, signed-out visitors see nothing).
   Run on an empty PostgreSQL 16 database: `supabase-stub.sql` (a stand-in for Supabase's sign-in), then
   `../team-chat.sql`, then `rules-test.sql`. It ends with `ALL CHAT DATABASE TESTS PASSED`.
+- `security-test.sql`: security and privacy (same set-up as `rules-test.sql`, on its own empty database; it ends with
+  `ALL SECURITY TESTS PASSED`). Row rules on every table, nothing for signed-out visitors, every SECURITY DEFINER function
+  pins its search_path, and a reviewed list of what signed-out visitors may run; another business (and someone in no
+  business) calls every function a signed-in person can run with business A's real ids and gets nothing back, and nothing
+  of A changes; staff and an owner without two-step sign-in get no admin powers; Riyeser HQ functions never read private
+  chat, files, call set-up, phone passwords or the online post box, every HQ function checks the role, each HQ role
+  (support, developer, sales, finance) is refused what it isn't allowed, and nothing works without two-step sign-in;
+  API key hashes, webhook secrets and relay keys are never readable; problem reports lose tokens, keys, passwords and
+  the Windows user name in folder paths (SEC-001); the daily sweep removes call set-up messages over a day old (SEC-002);
+  a staff member with a linked PC can't read, answer or report for another office's Riyeser Link Office or take its relay
+  pass, while owners/admins can for every office and an office whose reporter left the business can be taken over (SEC-004).
 - `demo-test.js` and `signin-test.js` (Playwright): build the site (`node website/build-combined.mjs`), serve
   `website/public` on port 8090, then run them with node. The tests use the main address, /link/;
   `oldaddress-test.js` checks the old address, /team/, still works (`?signup`, `?join=`, a sign-in link's `#...`).
