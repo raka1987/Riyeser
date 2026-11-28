@@ -54,6 +54,11 @@ select public.api_key_create(:'ws_a', 'Shop', 'secret', 'live', array['bookings:
 select (:'key_json'::json ->> 'id') as key_a, (:'key_json'::json ->> 'key') as raw_key_a \gset
 select public.api_webhook_create(:'ws_a', 'https://hooks.sample-plumbing.test/riyeser', array['booking.received'], 'live', 'Shop') as hook_json \gset
 select (public.support_report(:'ws_a', '{"what_happened":"A problem","blocked":false,"log_lines":"A-LOG-LINE"}') ->> 'id') as ticket_a \gset
+-- a PDF signing request in A (Riyeser PDF "Ask someone to sign"), sent, with its file in the private bucket
+select (public.sign_request_create(:'ws_a', 'SIGN-DOC Lease for flat 4', 'SIGN-NOTE please sign', false, null, null,
+  '[{"id":"s1","kind":"signature","signer":1,"page":1,"x":0.1,"y":0.7,"w":0.3,"h":0.06}]', '[{"name":"Pat Signer","email":"pat.signer@client.test"}]') ->> 'id') as sign_a \gset
+insert into storage.objects (bucket_id, name, metadata) values ('sign-docs', :'ws_a' || '/' || :'sign_a' || '/original.pdf', '{"size": 900}');
+select public.sign_request_send(:'sign_a', repeat('a', 64), 900, 1);
 select pg_temp.as_user('33333333-3333-3333-3333-333333333333');
 select public.create_team('Corner Cafe', 'Kim') as ws_b \gset
 reset role;
@@ -64,7 +69,7 @@ select set_config('test.ws_a', :'ws_a', false), set_config('test.ws_b', :'ws_b',
 -- chat, the key, the help request; A's business id for any other id) and harmless values for the rest.
 create table pg_temp.ids (k text primary key, v text);
 insert into pg_temp.ids values ('ws', :'ws_a'), ('person', '22222222-2222-2222-2222-222222222222'), ('channel', :'gen_a'), ('dm', :'dm_a'),
-  ('key', :'key_a'), ('ticket', :'ticket_a');
+  ('key', :'key_a'), ('ticket', :'ticket_a'), ('signreq', :'sign_a');
 create table pg_temp.out (who text, fn text, outcome text, result text);
 grant select on pg_temp.ids to authenticated; grant insert, select on pg_temp.out to authenticated;
 create function pg_temp.call_all(who text, name_re text, need_id boolean) returns void language plpgsql as $$
@@ -84,6 +89,7 @@ begin
         when ty = 'uuid' and nm ~ 'dm' then quote_literal(ids ->> 'dm') || '::uuid'
         when ty = 'uuid' and nm ~ 'key' then quote_literal(ids ->> 'key') || '::uuid'
         when ty = 'uuid' and nm ~ '(ticket|^t$)' then quote_literal(ids ->> 'ticket') || '::uuid'
+        when ty = 'uuid' and nm ~ '^req' then quote_literal(ids ->> 'signreq') || '::uuid'
         when ty = 'uuid' then quote_literal(ids ->> 'ws') || '::uuid'
         when ty = 'uuid[]' then 'array[' || quote_literal(ids ->> 'person') || '::uuid]'
         when ty in ('integer', 'bigint', 'smallint', 'numeric') then '1'
@@ -142,8 +148,12 @@ do $$ declare bad text; n int; begin
      and not (fn in ('calls_allowed', 'link_rings') and result in ('true', 'false'))
      and not (fn = 'link_storage_limit' and result ~ '^[0-9]+$');
   assert bad is null, 'another business got something back from A: ' || bad;
+  assert (select count(*) from pg_temp.out where fn ~ '^sign_request_' and outcome = 'refused' and result like 'That signing request isn''t yours%') >= 14
+     and (select count(*) from pg_temp.out where fn in ('sign_quota', 'sign_requests_mine', 'sign_request_create') and outcome = 'refused') = 6,
+    'every signing request function was tried on A''s request and refused';
   assert not exists (select 1 from pg_temp.out where result like '%PRIVATE-DM%' or result like '%Morning team%' or result like '%A-LOG-LINE%'
-                     or result like '%Sample Plumbing%' or result like '%' || current_setting('test.raw_key') || '%'), 'nothing of A in any answer';
+                     or result like '%Sample Plumbing%' or result like '%' || current_setting('test.raw_key') || '%'
+                     or result like '%SIGN-%' or result like '%pat.signer%'), 'nothing of A in any answer (signing requests included)';
 end $$;
 select pg_temp.check(pg_temp.digest(:'ws_a') = :'dig_a', 'nothing of A changed');
 -- and the tables themselves: B sees no row of A anywhere it is allowed to look
@@ -216,7 +226,7 @@ end $$;
 -- (deleting is allowed: hq_remove_accounts for the owner-approved removal of closed accounts, and the daily sweep)
 do $$ declare bad text; begin
   select string_agg(p.proname, ', ') into bad from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname ~ '^hq_' and p.proname <> 'hq_remove_accounts'
-    and p.prosrc ~* '((?<!delete )from|join)\s+(public\.)?(messages|channel_members|message_reactions|channel_pins|reads|call_signals|link_office_reveals|link_relay_devices|api_inbox|api_catalog|api_stock|api_staff|api_open_times|api_requests|storage\.objects)\M';
+    and p.prosrc ~* '((?<!delete )from|join)\s+(public\.)?(messages|channel_members|message_reactions|channel_pins|reads|call_signals|link_office_reveals|link_relay_devices|api_inbox|api_catalog|api_stock|api_staff|api_open_times|api_requests|storage\.objects|sign_requests|sign_signers|sign_events|email_outbox[^;]*body_text)\M';
   assert bad is null, 'HQ functions that read private customer data: ' || bad;
   -- every HQ function checks the HQ role itself
   select string_agg(p.proname, ', ') into bad from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname ~ '^hq_'
@@ -271,8 +281,11 @@ do $$ declare bad text; begin
   select string_agg(fn, ', ') into bad from pg_temp.out where who in ('owner without 2FA', 'customer') and fn not in ('hq_me')
     and (outcome = 'ran' or result not in ('Riyeser HQ is for Riyeser staff, signed in with two-step sign-in.', 'Not allowed'));
   assert bad is null, 'HQ worked without two-step sign-in or for a customer: ' || bad;
-  -- and no HQ answer, for any role, carries A's private chat or log of its own
+  -- and no HQ answer, for any role, carries A's private chat or log of its own, or anything of a document sent for signing
   assert not exists (select 1 from pg_temp.out where result like '%PRIVATE-DM%' or result like '%Morning team%'), 'HQ answers never include chat';
+  -- (HQ's Emails page shows each email's address and subject, as for every email; subjects never name the document)
+  assert not exists (select 1 from pg_temp.out where result like '%SIGN-DOC%' or result like '%SIGN-NOTE%' or result like '%sign-docs%' or result like '%sign/?t=%'),
+    'HQ answers never include a document sent for signing, its message, its file or a signing link';
 end $$;
 -- The owner's rule: support can trigger a reset but never sees, sets or receives any password or secret. No HQ answer (for
 -- any role, including the HQ owner looking at A's business, PCs, phones, billing, tickets and emails), and no HQ function's
@@ -420,5 +433,27 @@ do $$ begin
   assert not exists (select 1 from public.email_outbox where strpos(coalesce(body_text, '') || coalesce(subject, ''), current_setting('test.raw_key')) > 0
                      or strpos(coalesce(body_text, ''), current_setting('test.hook')::json ->> 'secret') > 0 or body_text like '%Typed-By-Support-1%'), 'no email holds a key, secret or password';
 end $$;
+
+-- ===== PDF signing requests: only the sender and the signers (their own links); never HQ, the business's admins or others
+do $$ declare bad text; begin
+  -- the bucket's rules name only the sign_ checks (nothing for HQ), and nobody signed in or out can run the page's functions
+  select string_agg(polname, ', ') into bad from pg_policy where polname like 'sign_docs%' and pg_get_expr(polqual, polrelid) || coalesce(pg_get_expr(polwithcheck, polrelid), '') ~ 'hq_';
+  assert bad is null, 'the sign-docs rules let HQ in: ' || bad;
+  select string_agg(p.proname, ', ') into bad from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname ~ '^sign_(pub|do)_'
+    and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'));
+  assert bad is null, 'the signing page''s functions are open to visitors or signed-in people: ' || bad;
+  assert not exists (select 1 from information_schema.role_table_grants where table_name in ('sign_requests', 'sign_signers', 'sign_events', 'sign_rate')
+    and grantee in ('anon', 'authenticated', 'PUBLIC')), 'nobody reads the signing tables directly';
+  assert (select token_hash from public.sign_signers where email = 'pat.signer@client.test') ~ '^[0-9a-f]{64}$', 'only the link''s SHA-256 is kept';
+end $$;
+-- HQ staff (every role, with two-step sign-in) can't read the file through the bucket either
+set role authenticated;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000005');
+do $$ begin assert (select count(*) from storage.objects where bucket_id = 'sign-docs') = 0, 'the HQ owner can''t read a document sent for signing'; end $$;
+select pg_temp.as_user('c0c0c0c0-0000-4000-8000-000000000001');
+do $$ begin assert (select count(*) from storage.objects where bucket_id = 'sign-docs') = 0, 'support can''t read a document sent for signing'; end $$;
+select pg_temp.as_user('11111111-1111-1111-1111-111111111111');
+do $$ begin assert (select count(*) from storage.objects where bucket_id = 'sign-docs') = 1, 'the sender can'; end $$;
+reset role;
 
 select 'ALL SECURITY TESTS PASSED' as result;
