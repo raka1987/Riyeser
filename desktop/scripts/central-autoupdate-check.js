@@ -30,6 +30,9 @@ const regVersions = () => {
   return updates.installedFromRegistry(q('HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall'));
 };
 const mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
+// NSIS keeps the files' own dates, so the same version installed again can leave them as they were: the creation time
+// (a fresh copy) is noted too, and the proof is the real installer's exit code 0 with the program still there.
+const stamp = (f) => { try { const st = fs.statSync(f); return `${st.birthtimeMs}/${st.mtimeMs}`; } catch { return ''; } };
 const sha = async (f) => `sha256:${await check.sha256File(f)}`;
 const quiet = async (file, args) => { const r = await run.runInstaller({ file, args, elevate: false, retryElevated: false, spawn }); return run.installFailure(r, { name: path.basename(file), args }); };
 
@@ -79,11 +82,12 @@ const quiet = async (file, args) => { const r = await run.runInstaller({ file, a
   try { execFileSync('taskkill', ['/IM', 'Riyeser PDF.exe', '/F', '/T'], { stdio: 'ignore' }); } catch { /* gone */ }
   for (let i = 0; i < 20; i++) { await wait(1000); const o = A.runningIds(await freshstart.runningImages(), [{ id: 'pdf', exes: ['Riyeser PDF.exe'] }]); if (o && !o.has('pdf')) break; }
   await wait(3000);
-  const before = mtime(PDF_EXE);
+  const before = stamp(PDF_EXE);
   const r2 = await au.tick();
-  for (let i = 0; i < 20 && mtime(PDF_EXE) === before; i++) await wait(1000);
+  for (let i = 0; i < 10 && !fs.existsSync(PDF_EXE); i++) await wait(1000);
   step('closed: installed quietly by itself', r2.installed.includes('pdf'), { installed: r2.installed });
-  step('the real installer rewrote Riyeser PDF', mtime(PDF_EXE) > before && fs.existsSync(PDF_EXE), { before, after: mtime(PDF_EXE) });
+  const ran = logs.filter((e) => e.id === 'pdf' && e.stage === 'installed');
+  step('the real installer finished (exit code 0) and Riyeser PDF is still there', ran.length === 1 && fs.existsSync(PDF_EXE) && regVersions().pdf, { before, after: stamp(PDF_EXE), freshCopy: stamp(PDF_EXE) !== before });
   const s2 = store.get(A.STATE, {});
   step('it\'s in Central\'s history and install log', s2.history[0] && s2.history[0].id === 'pdf' && logs.some((e) => e.stage === 'installed' && e.how === 'auto'), { history: s2.history[0] });
 
@@ -91,11 +95,11 @@ const quiet = async (file, args) => { const r = await run.runInstaller({ file, a
   const c = au.atStart({ appVersion: '1.0.0', newer: updates.newer });
   step('at the next start Central\'s update is ready to install', c && fs.existsSync(c.file) && (await check.checkInstaller({ file: c.file, name: c.name, digest: c.digest, publicKey: '' })).ok);
   const findCentral = () => { try { return fs.readdirSync(programs).map((d) => path.join(programs, d, 'Riyeser Central.exe')).find((f) => fs.existsSync(f)) || null; } catch { return null; } };
-  const was = findCentral(); const wasAt = was ? mtime(was) : 0;
+  const was = findCentral(); const wasAt = was ? stamp(was) : '';
   const f3 = await quiet(c.file, ['/S']);
   let central = null;
-  for (let i = 0; i < 60; i++) { central = findCentral(); if (central && mtime(central) > wasAt) break; await wait(1000); }
-  step('Riyeser Central installed itself quietly', f3.ok && central && mtime(central) > wasAt, { where: central, before: wasAt, after: central && mtime(central) });
+  for (let i = 0; i < 60 && !central; i++) { central = findCentral(); if (!central) await wait(1000); }
+  step('Riyeser Central installed itself quietly (exit code 0)', f3.ok && central && regVersions().central, { where: central, code: f3.code, freshCopy: !!central && stamp(central) !== wasAt });
   au.atStart({ appVersion: '99.0.0', newer: updates.newer });
   const s3 = store.get(A.STATE, {});
   step('the start after notes it in the history, and the cache is empty', s3.history[0] && s3.history[0].id === 'central' && !fs.readdirSync(path.join(work, 'updates')).length, { history: s3.history.map((h) => `${h.id} ${h.from} -> ${h.to}`) });
