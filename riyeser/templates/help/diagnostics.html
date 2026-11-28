@@ -15,4 +15,5 @@
 <tr><td>Open POS orders / tables</td><td class="n">{{ d.checks.open_pos_orders }}</td></tr></table></div>
 <div class="card"><h3>Records</h3><table>{% for k, v in d.record_counts.items() %}<tr><td>{{ k.replace('_',' ')|title }}</td><td class="n">{{ v }}</td></tr>{% endfor %}</table></div></div>
 <div class="card"><h3>Recent errors</h3>{% if d.recent_errors %}<table>{% for e in d.recent_errors %}<tr><td style="white-space:nowrap">{{ e.at }}</td><td>{{ e.details }}</td></tr>{% endfor %}</table>{% else %}<p class="muted">None recorded. 👍</p>{% endif %}</div>
+<div class="card"><h3>Error log</h3><p class="muted small">The details behind any "Sorry, something went wrong" page are kept in <code>{{ d.error_log.file }}</code>. Support may ask you for this file.</p>{% if d.error_log.last_lines %}<div class="tbl"><pre class="small" style="white-space:pre-wrap;margin:0">{{ d.error_log.last_lines[-30:]|join("\n") }}</pre></div>{% endif %}</div>
 {% endblock %}

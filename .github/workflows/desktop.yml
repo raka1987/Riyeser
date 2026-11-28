@@ -16,6 +16,11 @@ on:
       - "supabase/functions/licence/**"
       - ".github/workflows/desktop.yml"
   workflow_dispatch:
+    inputs:
+      systems:
+        description: 'Which systems to build on, as a JSON list (blank: Windows, macOS and Linux). E.g. ["windows-latest","ubuntu-latest"]'
+        required: false
+        default: ""
 
 concurrency: { group: "desktop-${{ github.ref }}", cancel-in-progress: true }
 
@@ -38,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        os: ${{ fromJSON(inputs.systems || '["windows-latest", "macos-latest", "ubuntu-latest"]') }}
         edition: [basics, plus, pos, invoices, bookings, estimate]
     runs-on: ${{ matrix.os }}
     env:
@@ -85,6 +90,16 @@ jobs:
             fi
             sleep 1
           done; exit 1
+      # Start the built program (optimised -OO build, its own empty data folders, Central's profile saying Fiji),
+      # set up a company, sign in and open every screen: no "Sorry, something went wrong" anywhere, Setup -> Online
+      # orders & bookings opens, and the build carries its own time-zone data (Windows has none).
+      - name: Every screen opens in the built program (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python packaging/smoke_packaged.py --exe "dist\$env:APP.exe" --edition ${{ matrix.edition }}
+      - name: Every screen opens in the built program (Linux)
+        if: runner.os == 'Linux'
+        run: python packaging/smoke_packaged.py --exe "./dist/$LINUX_APP" --edition ${{ matrix.edition }}
       - name: Windows installer
         if: runner.os == 'Windows'
         shell: pwsh

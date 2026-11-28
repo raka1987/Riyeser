@@ -253,12 +253,53 @@ def parse_hours(h):
 
 
 def sync_status(db):
-    return _raw(db, "sync_status", {}) or {}
+    """What Riyeser Central last reported, cleaned (an odd value from any Central version never breaks a page)."""
+    return _clean_sync(_raw(db, "sync_status", {}))
 
 
 SYNC_STATES = ("not_setup", "waiting", "working", "problem", "off", "offline", "paused")
 CLOUD_KEYS = ("keys_active", "widget_keys", "test_keys", "webhooks_active", "webhooks_failing", "last_request_at",
               "requests_24h", "done_total", "catalog_at", "stock_at", "availability_at", "catalog_items", "sync_pc")
+SYNC_INTS = ("received_today", "waiting", "failed")
+SYNC_BOOLS = ("ok", "offline")
+CLOUD_INTS = ("keys_active", "widget_keys", "test_keys", "webhooks_active", "webhooks_failing", "requests_24h",
+              "done_total", "catalog_items")
+
+
+def _as_int(v):
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        return max(int(float(v)), 0)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _as_text(v):
+    if v is None or isinstance(v, (dict, list)):
+        return None
+    return str(v)[:300]
+
+
+def _clean_sync(d):
+    """The sync report with every value the type the Online pages expect: numbers as numbers, words as short text."""
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for k, v in d.items():
+        if k == "cloud":
+            if isinstance(v, dict):
+                out[k] = {ck: (_as_int(cv) if ck in CLOUD_INTS else _as_text(cv)) for ck, cv in v.items() if ck in CLOUD_KEYS}
+        elif k in SYNC_INTS:
+            out[k] = _as_int(v)
+        elif k in SYNC_BOOLS:
+            out[k] = None if v is None else bool(v)
+        elif k == "state":
+            if v in SYNC_STATES:
+                out[k] = v
+        else:
+            out[k] = _as_text(v)
+    return out
 
 
 def set_sync_status(db, report):
@@ -272,7 +313,7 @@ def set_sync_status(db, report):
         keep["state"] = report["state"]
     if isinstance(report.get("cloud"), dict):
         keep["cloud"] = {k: report["cloud"].get(k) for k in CLOUD_KEYS if k in report["cloud"]}
-    _put(db, "sync_status", keep)
+    _put(db, "sync_status", _clean_sync(keep))
 
 
 def sync_view(sync, now=None):

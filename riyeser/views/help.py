@@ -64,11 +64,25 @@ def diagnostics(db):
         "fy_start_month": c["fy_start_month"], "lock_date": c["lock_date"],
         "company_file_size_kb": round(os.path.getsize(current_app.config["DATABASE"]) / 1024),
         "frozen_desktop_build": bool(getattr(sys, "frozen", False)),
-        "python": platform.python_version(), "os": f"{platform.system()} {platform.release()}",
+        "python": platform.python_version(), "python_optimize": sys.flags.optimize,
+        "os": f"{platform.system()} {platform.release()}",
         "checks": checks, "record_counts": counts, "recent_errors": errors, "recent_actions": recent,
+        "error_log": _error_log(),
         "online": _online_diag(db),
         "note": "No customer, supplier, employee or bank details are included.",
     }
+
+
+def _error_log():
+    """Where riyeser-errors.log is (the details behind "Sorry, something went wrong"), and its last entries."""
+    from .. import error_log_file
+    f = error_log_file(current_app)
+    try:
+        with open(f, encoding="utf-8", errors="replace") as fh:
+            tail = fh.read()[-6000:].splitlines()[-60:]
+    except OSError:
+        tail = []
+    return {"file": f, "last_lines": tail}
 
 
 def _online_diag(db):

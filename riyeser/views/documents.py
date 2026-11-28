@@ -94,6 +94,8 @@ def edit(side, doc_id=None):
     doc = lines = None
     if doc_id:
         doc = db.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+        if doc is None:
+            abort(404)   # no such document (deleted, another company file, or an old link): not an error page
         if doc["status"] not in ("quote", "order"):
             flash("Posted documents can't be edited. Void and re-enter instead.", "error")
             return redirect(url_for("documents.view", doc_id=doc_id))
