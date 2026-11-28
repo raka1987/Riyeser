@@ -130,7 +130,7 @@ class RelayLink extends EventEmitter {
     try {
       while (!this.stopped && !this.activeConn()) {
         let cfg;
-        try { cfg = await this.refreshConfig(this.failures > 0); } catch (e) { this.set('no-config', String(e.message || e).slice(0, 200)); await this.sleep(backoff(this.failures++)); continue; }
+        try { cfg = await this.refreshConfig(this.failures > 0); } catch (e) { this.set(e && e.refused ? 'refused' : 'no-config', String(e.message || e).replace(/\.$/, '').slice(0, 200)); await this.sleep(backoff(this.failures++)); continue; }
         if (!cfg || !cfg.enabled) { this.set('off'); await this.sleep(CONFIG_EVERY); this.configAt = 0; continue; }
         // the relay that just went away is tried last for a minute (fail-back brings us home once it answers)
         const avoid = this.avoid && Date.now() - this.avoid.at < 60000 ? this.avoid.id : null;

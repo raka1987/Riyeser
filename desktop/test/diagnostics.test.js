@@ -109,3 +109,21 @@ test('Central: Report an issue uses in-page dialogs, never confirm() or alert()'
   assert.match(part, /Sign in with your Riyeser account first/);
   assert.match(part, /Thanks — your request number is/);
 });
+
+test('SEC-001b: the preview on this PC removes what the database\'s support_scrub removes (tokens, keys, URL secrets, user names in paths)', () => {
+  const s = dg.scrub([
+    'GET https://x.example.co/rest/v1/rpc?key=abc123secret&page=2 failed',
+    'header Bearer abcdefghijkl12345 refused',
+    'oauth client_secret: shh-very-private',
+    'env SIP_PASSWORD=Hunter2! loaded',
+    'redirect access_token=zzzz1234&state=1',
+    'relay key rk_live_ABCdef123456 and sb_secret_XYZ987654321 used',
+    'Copy failed: C:\\Users\\jo.sample\\AppData\\Roaming\\Riyeser\\x.log',
+    'open https://user:pa55@host.example/x',
+    '10:00:06 version 2.8.1 on 2026-11-24 at 192.168.1.20 for jo.bloggs@sample.test',
+  ].join('\n'));
+  for (const bad of ['abc123secret', 'abcdefghijkl12345', 'shh-very-private', 'Hunter2', 'zzzz1234', 'rk_live_ABC', 'sb_secret_XYZ', 'jo.sample', 'pa55', 'AppData']) assert.ok(!s.includes(bad), `${bad} in:\n${s}`);
+  assert.match(s, /\[key removed\]/); assert.match(s, /\[folder removed\]/); assert.match(s, /\?key=\[removed\]&page=2/);
+  // as before: emails masked, versions, dates and office (LAN) addresses kept
+  assert.match(s, /version 2\.8\.1 on 2026-11-24 at 192\.168\.1\.20 for j\*\*\*@sample\.test/);
+});

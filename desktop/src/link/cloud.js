@@ -25,6 +25,11 @@ const VENDOR_KEYS = Object.keys(VENDORS);
 
 const missingFn = (e) => /Could not find the function|schema cache|PGRST202/i.test(String(e && e.message));
 const iso = (t) => new Date(t).toISOString();
+// SEC-004: Riyeser online only lets the business's owner or an admin, or the PC that reported last, act as its Link
+// Office. A refusal is said plainly (it isn't "can't reach"), and a refused relay pass isn't replaced by an old one.
+const isRefusal = (e) => !!e && (e.status === 403 || /owner or an admin|link this PC|isn't for this business|permission denied|not allowed/i.test(String(e.message)));
+const REFUSED = 'Your Riyeser account isn\'t allowed to run the phones for this business. Sign in to Riyeser Link Office as the business\'s owner or an admin.';
+const refusalText = (e) => { const m = String((e && e.message) || '').trim(); return !m || /permission denied|\(403\)/i.test(m) ? REFUSED : m; };
 
 /**
  * The heartbeat: what the website and Riyeser HQ may see. Built only from the listed parts of status(), so nothing
@@ -184,6 +189,7 @@ class LinkCloud extends EventEmitter {
   setState(s) { this.state = { ...this.state, ...s }; this.emit('change', this.state); }
   failed(e) {
     if (missingFn(e)) { this.notYetUntil = this.now() + NOT_YET; this.setState({ status: 'not-yet', error: 'Riyeser Link online isn\'t ready for this yet. It tries again by itself.' }); }
+    else if (isRefusal(e)) this.setState({ status: 'refused', error: refusalText(e) });
     else this.setState({ status: 'offline', error: String((e && e.message) || e) });
   }
   ready() {
@@ -231,6 +237,7 @@ class LinkCloud extends EventEmitter {
       return out;
     } catch (e) {
       if (/switched off|disconnected from the relay/i.test(String(e.message))) throw e;   // a real answer, not a network problem
+      if (isRefusal(e)) { const x = new Error(refusalText(e)); x.refused = true; throw x; }   // SEC-004: refused, so no old pass either
       const c = this.service.store.get('phone-relay', null);
       const unseal = this.service.directory && this.service.directory.unseal;
       if (c && c.enabled && Number(c.exp) * 1000 > this.now() + 60000) return { ...c, tokens: unseal ? Object.fromEntries(Object.entries(c.tokens || {}).map(([k, v]) => [k, unseal(v)])) : c.tokens, cached: true };
@@ -330,4 +337,4 @@ class LinkCloud extends EventEmitter {
   }
 }
 
-module.exports = { LinkCloud, buildPayload, applyCommand, sealFor, signature, HEARTBEAT, POLL };
+module.exports = { isRefusal, refusalText, LinkCloud, buildPayload, applyCommand, sealFor, signature, HEARTBEAT, POLL };

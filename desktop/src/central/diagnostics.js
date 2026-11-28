@@ -39,12 +39,24 @@ const PRODUCTS = [
 const MAX_LINES = 200;
 const MAX_BYTES = 64 * 1024;
 
-/** Mask personal details in technical text: emails, long digit runs, and anything after "password". */
+/**
+ * Mask personal details and secrets in technical text. The same patterns, in the same order, as the database's
+ * support_scrub() (website/team/team-chat.sql, SEC-001), so the preview on this PC matches what Support sees,
+ * plus folder paths taken out completely here (DOC-SUP-02).
+ */
 function scrub(text) {
   return String(text == null ? '' : text)
+    .replace(/([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/\s:@]+:[^/\s@]+@/g, '$1[removed]@')                    // user:password@ in URLs
+    .replace(/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g, '[removed]')                     // signed tokens (JWT)
+    .replace(/\b(rk_(pub_)?(live|test)_|whsec_|sb_(secret|publishable)_|sk_(live|test)_|pk_(live|test)_|ghp_|gho_|github_pat_|xox[abprs]-|AKIA)[A-Za-z0-9_-]+/g, '[key removed]')
+    .replace(/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 [removed]')
+    .replace(/([?&;](key|apikey|api_key|token|access_token|refresh_token|sig|signature|secret|password|pass|pwd|auth|code)=)[^&\s#"']+/gi, '$1[removed]')
+    .replace(/([A-Za-z]:[\\/]+(Users|Documents and Settings)[\\/]+)[^\\/\s"':;]+/gi, '$1[user]')
+    .replace(/(\/(home|Users)\/)[^/\s"':;]+/g, '$1[user]')
     .replace(/([A-Za-z0-9])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g, '$1***@$2')
-    .replace(/\b(password|passwd|pwd|secret|token|api[_ -]?key)\b.*$/gim, '$1 [removed]')
-    // QA (DOC-SUP-02): folder paths (they hold the PC's user name and file names): C:\…, \\server\share\…, /Users/…, /home/…
+    .replace(/\b([A-Za-z0-9_-]*(password|passwd|pwd|secret|token|api[_ -]?key|apikey|credentials?|authorization)[A-Za-z0-9_-]*)\b.*$/gim, '$1 [removed]')
+    .replace(/\b(pass|passcode|pin)\s*[=:]\s*\S+/gi, '$1=[removed]')
+    // DOC-SUP-02: whole folder paths go too (they hold file and folder names): C:\…, \\server\share\…, /Users/…, /home/…
     .replace(/(?:\b[A-Za-z]:|\\\\[^\\\s]+)\\(?:[^\\\r\n"'<>|]*\\)*[^\\\s"'<>|]*/g, '[folder removed]')
     .replace(/(?:\/(?:Users|home|mnt|media|Volumes))\/[^\s"'<>|]*/g, '[folder removed]')
     .replace(/\b\d{4}(?:[ -]\d{4}){3}\b/g, '[number removed]')

@@ -234,3 +234,38 @@ test('a change on this PC (a phone given to someone) is reported within seconds'
     await until(() => online.sent.filter((x) => x.name === 'link_office_report').length >= 2, 9000);
   } finally { cloud.stop(); await t.close(); }
 });
+
+test('SEC-004: refused by Riyeser online (not the owner/admin, or not the PC that reports) says so plainly; phones carry on', async () => {
+  const { isRefusal } = require('../src/link/cloud');
+  const T = require('../src/renderer/link-text');
+  const t = make();
+  const DB_MSG = 'Sign in to Riyeser Link Office as the business\'s owner or an admin, or link this PC to the business in Riyeser Central.';
+  const mk = (msg, status = 400) => ({ session: { access_token: 'x' }, rpc: async () => { const e = new Error(msg); e.status = status; throw e; } });
+  try {
+    await t.svc.start();
+    for (const [client, want] of [[mk(DB_MSG), DB_MSG], [mk('permission denied for function link_office_report', 403), /isn't allowed to run the phones for this business\. Sign in .* owner or an admin/],
+      [mk('That change isn\'t for this business.'), 'That change isn\'t for this business.']]) {
+      const cloud = new LinkCloud({ service: t.svc, clients: () => [client], appData: t.appData });
+      const r = await cloud.report('test');                     // link_office_report
+      assert.strictEqual(r.ok, false); assert.strictEqual(cloud.state.status, 'refused');
+      if (typeof want === 'string') assert.strictEqual(cloud.state.error, want); else assert.match(cloud.state.error, want);
+      assert.strictEqual(await cloud.poll(), 0);                // link_office_pending / done
+      assert.strictEqual(cloud.state.status, 'refused');
+      const line = T.cloud(cloud.state);
+      assert.match(line, /^This PC can't update the Phones page on riyeser\.com\/link: .+\. The phones here work as normal\.$/);
+      assert.doesNotMatch(line, /Can't reach|undefined|\.\./);
+      assert.strictEqual(await cloud.relayReport(true), false);  // link_relay_report: quietly not sent, never throws
+      cloud.stop();
+    }
+    // link_relay_token refused: a plain error marked refused, and an old saved pass is NOT used instead
+    t.svc.store.set('phone-relay', { enabled: true, relays: [{ id: 'r1', host: 'relay.example' }], tokens: { r1: 'old' }, exp: Math.floor(Date.now() / 1000) + 3600 });
+    const relayClient = { session: { access_token: 'x' }, rpc: async (name) => { if (name === 'link_relay_config') return { enabled: true, relays: [{ id: 'r1' }] }; const e = new Error(DB_MSG); e.status = 400; throw e; } };
+    const c3 = new LinkCloud({ service: t.svc, clients: () => [relayClient], appData: t.appData });
+    await assert.rejects(c3.relayConfig(), (e) => e.refused === true && e.message === DB_MSG);
+    assert.ok(isRefusal({ status: 403, message: '' })); assert.ok(!isRefusal(new Error('Can\'t reach Riyeser Online. Check the internet connection.')));
+    // the relay card shows it as refused with the reason (not "Not used")
+    const tile = T.relayTile({ state: 'refused', error: DB_MSG.replace(/\.$/, '') });
+    assert.strictEqual(tile.big, 'Refused by the relay'); assert.ok(tile.text.includes('owner or an admin'));
+    assert.strictEqual(t.svc.status().state, 'running', 'the phone system keeps running');
+  } finally { await t.close(); }
+});

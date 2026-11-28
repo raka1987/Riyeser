@@ -392,3 +392,13 @@ test('a nudge while the relay link is waiting between tries makes it try again n
   await H.until(() => link.state === 'no-config' && /something new/.test(link.error), 2000, 'asked again straight away');
   link.stopped = true; link.nudge(); clearTimeout(link.retry);
 });
+
+test('SEC-004: Riyeser online refusing this office a relay pass shows as refused with the reason (not "Not used"), and says what to do', async () => {
+  const msg = 'Sign in to Riyeser Link Office as the business\'s owner or an admin, or link this PC to the business in Riyeser Central.';
+  const link = new RelayLink({ getConfig: async () => { throw Object.assign(new Error(msg), { refused: true }); } });
+  link.stopped = false; link.loop().catch(() => {});
+  await H.until(() => link.state === 'refused', 2000, 'refused');
+  assert.equal(link.error, msg.replace(/\.$/, ''));
+  assert.match(link.status().detail, /^The relay refused this office: Sign in to Riyeser Link Office as the business's owner or an admin/);
+  link.stopped = true; link.nudge(); clearTimeout(link.retry);
+});

@@ -66,6 +66,7 @@
     cloud: (c) => (!c ? '' : c.status === 'online' ? `Your owners and admins can see these phones on riyeser.com/link (Phones)${c.at ? `, last sent ${new Date(c.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}.`
       : c.status === 'local' ? 'This PC isn\'t linked to a Riyeser Online business, so the phones only show here.'
       : c.status === 'not-yet' ? 'The Phones page on riyeser.com/link isn\'t switched on yet. Riyeser Link Office tries again by itself.'
+      : c.status === 'refused' ? `This PC can't update the Phones page on riyeser.com/link: ${String(c.error || 'Riyeser Link online refused it.').replace(/\.?$/, '.')} The phones here work as normal.`
       : c.status === 'offline' ? `Can't reach Riyeser Link online right now, so the website's Phones page waits. The phones here work as normal.${c.error ? ` (${c.error})` : ''}`
       : 'Connecting to Riyeser Link online…'),
     /** "Set up your office phones": the same 5 steps as the website's Phones page, ticked off from this PC's own state. */
