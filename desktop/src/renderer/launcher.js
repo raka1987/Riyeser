@@ -230,6 +230,11 @@
       out.push({ id: `install-${id}`, title: `${p ? p.full : id} didn't install`, detail: x.message || '', act: { label: 'Try again', attrs: `data-install="${id}"` } });
     }
     if (ctx.updError) out.push({ id: 'updates', title: 'Updates didn\'t finish', detail: ctx.updError, act: { label: 'Try again', attrs: 'data-adm-go="updates"' }, admin: true });
+    // an automatic update that didn't install twice (central/auto-update.js): one line each, with Try again
+    for (const f of ctx.autoFailed || []) {
+      const nm = f.id === 'central' ? 'Riyeser Central' : (ctx.names || {})[f.id] || f.name || f.id;
+      out.push({ id: `auto-${f.id}`, title: `${nm} didn't update to ${f.version}`, detail: f.error || 'It was tried twice.', act: { label: 'Try again', attrs: `data-autoretry="${f.id}"` }, admin: true });
+    }
     const b = ctx.backups;
     if (b && b.backups && b.backups.length && installed.size) {
       const last = new Date(b.backups[0].when).getTime();
@@ -252,7 +257,15 @@
     return out.slice(0, 8);
   }
 
-  const api = { ORDER, JOBS, byOrder, firstName, greeting, audience, planLine, payLine, onlineToday, liveLine, tiles, jobsFor, chips, attention, searchLocal };
+  /** The quiet line in Admin → Updates: "Updated PDF to 0.26.0 · 2 hours ago". last: { id, to, at }. */
+  function autoLine(last, name, now = Date.now()) {
+    if (!last) return '';
+    const m = Math.max(0, Math.round((now - last.at) / 60000)); const h = Math.round(m / 60); const dd = Math.round(h / 24);
+    const when = m < 1 ? 'just now' : m < 60 ? `${m} min ago` : h < 24 ? `${h} hour${h === 1 ? '' : 's'} ago` : dd === 1 ? 'yesterday'
+      : dd < 7 ? `${dd} days ago` : `on ${new Date(last.at).toLocaleDateString([], { day: 'numeric', month: 'short' })}`;
+    return `Updated ${name || last.id} to ${last.to} · ${when}`;
+  }
+  const api = { ORDER, JOBS, byOrder, autoLine, firstName, greeting, audience, planLine, payLine, onlineToday, liveLine, tiles, jobsFor, chips, attention, searchLocal };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.RiyeserLauncher = api;
 }(typeof window !== 'undefined' ? window : null));

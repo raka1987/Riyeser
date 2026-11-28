@@ -68,6 +68,25 @@ async function pendingPayments(dbPath = accountingDbPath(), { today = new Date()
   } finally { db.close(); }
 }
 
+/**
+ * Automatic updates wait while the company file says work isn't finished (central/auto-update.js):
+ * { found, tillOpen: a POS till shift still open, unsent: website news (online_outbox) not sent yet, from the last
+ * `days` days }. A table an older program doesn't have counts as nothing. Read-only, like everything here.
+ */
+async function companyBusy(dbPath = accountingDbPath(), { now = new Date(), days = 3 } = {}) {
+  if (!dbPath || !fs.existsSync(dbPath)) return { found: false, tillOpen: false, unsent: 0 };
+  const SQL = await sqlJs();
+  const db = new SQL.Database(new Uint8Array(fs.readFileSync(dbPath)));
+  try {
+    const one = (sql, params = []) => { try { const st = db.prepare(sql); st.bind(params); const v = st.step() ? Number(st.get()[0]) || 0 : 0; st.free(); return v; } catch { return 0; } };
+    const t = new Date(now.getTime() - days * 86400000);
+    const pad = (n) => String(n).padStart(2, '0');
+    const since = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:00`;   // local time, as the programs write it
+    return { found: true, tillOpen: one("SELECT COUNT(*) FROM pos_shifts WHERE status = 'open'") > 0,
+      unsent: one('SELECT COUNT(*) FROM online_outbox WHERE sent_at IS NULL AND tries < 20 AND created_at >= ?', [since]) };
+  } finally { db.close(); }
+}
+
 /** Where Riyeser Payroll keeps its records. */
 function payrollDbPath(appData) { return path.join(appData, 'Riyeser Payroll', 'payroll', 'payroll.db'); }
 
@@ -159,4 +178,4 @@ function recentDocuments({ recentDir, readLink, indexDocs = {}, limit = 15 } = {
   return out;
 }
 
-module.exports = { deskAssistant, accountingDbPath, pendingPayments, payrollDbPath, lastPayRun, nextPayRun, findCustomers, inboxCount, recentDocuments, readJson };
+module.exports = { deskAssistant, accountingDbPath, pendingPayments, companyBusy, payrollDbPath, lastPayRun, nextPayRun, findCustomers, inboxCount, recentDocuments, readJson };

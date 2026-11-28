@@ -454,3 +454,7 @@ table.ot td:nth-child(2) { min-width: 260px; } table.ot td:nth-child(3) { min-wi
 /* the first run's card is a little tighter, so the list and its buttons fit a 1280 screen at 125% */
 .wcard:has(.frsteps) { padding: 24px 32px; } .wcard:has(.frsteps) .wlogo { margin-bottom: 10px; } .wcard:has(.frsteps) h1 { font-size: 24px; } .wcard:has(.frsteps) .wsub { margin-bottom: 14px; }
 .grid:focus { outline: none; }
+/* Admin → Updates: "Install updates automatically", the last automatic update, why one is waiting */
+.autorow { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+.autolast { margin: 8px 2px 4px; }
+.tbl td .uwhy { display: block; color: var(--muted); font-size: 12px; white-space: normal; line-height: 1.35; }

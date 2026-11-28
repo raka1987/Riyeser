@@ -88,6 +88,7 @@ const LOGO = { team: 'team', linkoffice: 'link', invoices: 'invoices', bookings:
 const logo = (p, size = 22) => `<img class="logo-i" src="logos/${p.id === 'services' && /as built/i.test(p.name || '') ? 'as-built' : LOGO[p.id]}.png" alt="" style="width:${size}px;height:${size}px">`;
 let programs = []; let today = null; let upd = { updates: [] }; let updating = false; let view = 'home';
 let sync = null; let backups = null; let updError = ''; let demoMsg = '';
+let auto = null;   // the automatic updates (Admin → Updates → "Install updates automatically"): central:autoUpdate
 const has = (id) => programs.some((p) => p.id === id && p.status !== 'missing');
 const accId = () => (has('accounting') ? 'accounting' : has('accounting-basics') ? 'accounting-basics' : null); // Plus wins when both are there
 const hasAcc = () => !!accId();
@@ -98,7 +99,7 @@ const who = () => L9.audience({ company: coState().company, kind: coState().kind
 let tileList = [];
 const homeCtx = () => ({ programs, today: today || {}, lic, LUI, upd, cl, inst: instState, installing, unread, sync, names: NAMES(), audience: who() });
 function attentionItems() {
-  return L9.attention({ sync, lic, LUI, company: coState(), demoNote: demoMsg, inst: instState, programs, updError, backups, names: NAMES(),
+  return L9.attention({ sync, lic, LUI, company: coState(), demoNote: demoMsg, inst: instState, programs, updError, backups, names: NAMES(), autoFailed: auto && auto.attention,
     installedIds: programs.filter((p) => p.status !== 'missing').map((p) => p.id) });
 }
 function renderTop() {
@@ -565,6 +566,15 @@ document.addEventListener('click', (e) => {
 
 // ---------- updates (Admin panel → Updates; a tile's ⋯ → Update) ----------
 let versions = null;
+const progName = (id) => (id === 'central' ? 'Riyeser Central' : NAMES()[id] || id);
+/** Admin → Updates: the "Install updates automatically" setting and one quiet line about the last automatic update. */
+function autoHtml(au) {
+  const line = au.demo ? 'Demo mode is on, so nothing updates by itself.' : !au.on ? 'Off: updates wait for Update all.'
+    : au.last ? L9.autoLine(au.last, progName(au.last.id)) : 'Nothing updated by itself yet.';
+  return `<label class="setrow autorow"><input type="checkbox" id="admauto"${au.on ? ' checked' : ''}${au.demo ? ' disabled' : ''}><span><b>Install updates automatically</b>
+    <small>Each program updates quietly while it’s closed. Riyeser Central updates the next time it starts. Your information is kept, and nothing pops up.</small></span></label>
+    <p class="lbl autolast" id="admautolast">${esc(line)}</p>`;
+}
 function renderUpdates() {
   const box = $('#updates');
   const list = upd.updates || [];
@@ -572,7 +582,7 @@ function renderUpdates() {
   box.hidden = false;
   if (updating) return; // progress is drawn by the update-progress events
   box.innerHTML = `<div style="font-size:24px">⬆</div><div class="grow"><b>${list.length === 1 ? 'An update is ready' : `${list.length} updates are ready`}</b>
-    <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}</div></div>
+    <div class="lbl">${list.map((u) => `${esc(u.name)}${u.self ? ' (this app)' : ''} ${esc(u.from)} → ${esc(u.to)}`).join(' · ')}${auto && auto.on && !auto.demo ? '<br>These install by themselves while each program is closed.' : ''}</div></div>
     <button class="go" id="updall">Update ${list.length === 1 ? '' : 'all'}</button>`;
   $('#updall').addEventListener('click', () => safe(async () => {
     updating = true;
@@ -904,11 +914,16 @@ async function renderAdminSection(sec) {
     const ids = [...new Set(['central', ...Object.keys(v.installed), ...programs.filter((p) => p.status === 'installed').map((p) => p.id)])].filter((id) => id === 'central' || programs.some((p) => p.id === id)).sort(byOrder);
     if (!v.installed.central && appVersion) v.installed.central = appVersion;
     const nm = (id) => (id === 'central' ? 'Riyeser Central' : (programs.find((p) => p.id === id) || {}).full || id);
-    put('updates', `<table class="tbl wide"><tr><th>Program</th><th>On this PC</th><th>Latest</th><th></th></tr>${ids.map((id) => { const u = (upd.updates || []).find((x) => x.id === id);
-      return `<tr><td>${esc(nm(id))}</td><td>${esc(v.installed[id] || '—')}</td><td>${esc(v.latest[id] || '—')}</td><td>${u ? '<span class="warn">Update ready</span>' : v.latest[id] ? '<span class="ok">Up to date</span>' : ''}</td></tr>`; }).join('') || `<tr><td colspan="4" class="lbl">Versions show here once Central has checked.</td></tr>`}</table>
+    if (!auto) auto = await bridge.call('central:autoUpdate').catch(() => null);
+    const au = auto || { on: true, waiting: {} };
+    const waitWhy = (id) => (au.on && !au.demo && au.waiting && au.waiting[id]) || '';
+    put('updates', `${autoHtml(au)}<table class="tbl wide"><tr><th>Program</th><th>On this PC</th><th>Latest</th><th></th></tr>${ids.map((id) => { const u = (upd.updates || []).find((x) => x.id === id);
+      return `<tr><td>${esc(nm(id))}</td><td>${esc(v.installed[id] || '—')}</td><td>${esc(v.latest[id] || '—')}</td><td${u && waitWhy(id) ? ` title="${esc(waitWhy(id))}"` : ''}>${u ? `<span class="warn">Update ready</span>${waitWhy(id) ? `<small class="uwhy">${esc(waitWhy(id))}</small>` : ''}` : v.latest[id] ? '<span class="ok">Up to date</span>' : ''}</td></tr>`; }).join('') || `<tr><td colspan="4" class="lbl">Versions show here once Central has checked.</td></tr>`}</table>
       <div class="row"><button class="btn sm s" id="admcheck">Check now</button><label class="inl">Updates channel <select id="admchan"><option value="stable"${v.channel === 'stable' ? ' selected' : ''}>Stable (recommended)</option><option value="early"${v.channel === 'early' ? ' selected' : ''}>Early access</option></select></label></div>
       <p class="lbl">${v.note ? `${esc(v.note)} ` : v.release ? `Release: ${esc(v.release)}. ` : ''}Early access gets new versions a little sooner, before everyone else.</p>`);
     $('#admcheck').onclick = () => safe(async () => { versions = await bridge.call('central:versions', true); await checkForUpdates(false, false); renderAdminSection('updates'); });
+    const box = $('#admauto');
+    if (box) box.onchange = (e) => safe(async () => { auto = await bridge.call('central:setAutoUpdate', e.target.checked); toast(e.target.checked ? 'Updates install by themselves now.' : 'Automatic updates are off. Use Update all when you\'re ready.'); renderAdminSection('updates'); renderHome(); });
     $('#admchan').onchange = (e) => safe(async () => { await bridge.call('central:setChannel', e.target.value); versions = null; toast(e.target.value === 'early' ? 'Early access is on for this PC.' : 'Back on the stable channel.'); await checkForUpdates(true); renderAdminSection('updates'); });
   }
   if (sec === 'online') put('online', '<p class="lbl">Bookings, orders and payments from your website come in through one PC. <button class="lnk" data-os="guide">Connect your website</button> · <button class="lnk" data-os="trail">Activity</button></p>');
@@ -1003,6 +1018,8 @@ document.addEventListener('click', (e) => {
   if (ta) { safe(() => tileAction(ta.dataset.tact, ta.dataset.id)); return; }
   const ch = e.target.closest('[data-chip]');
   if (ch) { const c = L9.chips({ programs, today: today || {}, sync, cl }).find((x) => x.id === ch.dataset.chip); if (c && c.pop) openPop(c.pop, ch); else if (c && c.open) safe(() => bridge.call('central:open', c.open, null)); return; }
+  const ar = e.target.closest('[data-autoretry]');
+  if (ar) { closePop(); safe(async () => { toast('Trying again in the background…'); auto = await bridge.call('central:autoRetry', ar.dataset.autoretry); renderHome(); }); return; }
   const ag = e.target.closest('[data-adm-go]');
   if (ag) { if (ag.dataset.admGo === 'updates') updError = ''; openAdmin(ag.dataset.admGo); return; }
   const cp = e.target.closest('[data-copy]');
@@ -1062,6 +1079,8 @@ $('#q').addEventListener('keydown', (e) => {
 });
 $('#qclear').addEventListener('click', () => { $('#q').value = ''; Object.assign(finder, { q: '', type: null, year: null, kind: null }); safe(runSearch); $('#q').focus(); });
 if (bridge && bridge.on) bridge.on('online-sync', (s) => { sync = s; renderHome(); });
+// the automatic updates: quietly redrawn (an update went in, one is waiting, one needs a look)
+if (bridge && bridge.on) bridge.on('auto-update', (a) => { const had = auto && auto.last && auto.last.at; auto = a; renderHome(); if (adminOpen() && adm.sec === 'updates') renderAdminSection('updates'); if (a && a.last && a.last.at !== had) checkForUpdates(true); });
 
 let appVersion = '';
 (async () => {
@@ -1070,6 +1089,7 @@ let appVersion = '';
   $('#setver').textContent = `Riyeser Central ${appVersion}. Shows information from your other Riyeser programs and never changes it.`;
   await loadDemo();
   await safe(refresh);
+  auto = await bridge.call('central:autoUpdate').catch(() => null);
   checkForUpdates(false);
   loadLicence();
   setInterval(loadLicence, 6 * 3600 * 1000);

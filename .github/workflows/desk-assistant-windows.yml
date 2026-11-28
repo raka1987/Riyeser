@@ -333,8 +333,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "22" }
-      - name: Unit tests (install state machine and detection, first run's install queue)
-        run: node --test test/central-install.test.js test/central-first-run.test.js
+      - name: Unit tests (install state machine and detection, first run's install queue, automatic updates)
+        run: node --test test/central-install.test.js test/central-first-run.test.js test/central-auto-update.test.js
       - name: Windows permission settings on this runner
         shell: pwsh
         run: |
@@ -465,6 +465,16 @@ jobs:
           # Accounting Plus replaces Accounting Basics when it installs over it (Central then shows only Plus)
           $missing = @($c.programs | Where-Object { $_.status -ne "installed" -and -not ($_.id -eq "accounting-basics" -and ($c.programs | Where-Object id -eq "accounting").status -eq "installed") })
           if ($missing.Count) { throw "Riyeser Central doesn't find: $($missing.id -join ', ')" }
+      # Automatic updates with real installers: the released PDF and Central installed, a made-up newer release offered;
+      # PDF waits while it's open and installs by itself once it's closed; Central's own update goes in at its next start.
+      - name: Automatic updates (waits while a program is open, installs once it's closed, Central at its next start)
+        shell: pwsh
+        run: |
+          Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          node scripts/central-autoupdate-check.js --dir=C:\riy\dl --out=C:\riy\out\autoupdate.json
+          $code = $LASTEXITCODE
+          Get-Process -Name "Riyeser*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          if ($code) { throw "Automatic updates didn't behave (see autoupdate.json)" }
       - name: Summary
         if: always()
         shell: pwsh
